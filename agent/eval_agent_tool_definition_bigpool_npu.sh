@@ -26,6 +26,7 @@ MAX_EXAMPLES="${MAX_EXAMPLES:-0}"
 MAX_DOC_LENGTH="${MAX_DOC_LENGTH:-1024}"
 MAX_DOC_NUM="${MAX_DOC_NUM:-64}"
 MAX_TOOL_DEFINITION_TOKENS="${MAX_TOOL_DEFINITION_TOKENS:-32000}"
+MAX_BASELINE_INPUT_TOKENS="${MAX_BASELINE_INPUT_TOKENS:-40000}"
 TOOL_DOCUMENT_EVAL_MODE="${TOOL_DOCUMENT_EVAL_MODE:-full}"
 MAX_NEW_TOKENS="${MAX_NEW_TOKENS:-128}"
 NPU_ATTN_IMPL="${NPU_ATTN_IMPL:-eager}"
@@ -64,6 +65,7 @@ if [[ "${ARM}" == "full" ]]; then
     --max_tool_definition_tokens "${MAX_TOOL_DEFINITION_TOKENS}" \
     --tool_document_eval_mode "${TOOL_DOCUMENT_EVAL_MODE}" \
     --max_new_tokens "${MAX_NEW_TOKENS}" \
+    --max_baseline_input_tokens "${MAX_BASELINE_INPUT_TOKENS}" \
     --mode full \
     --system_attn_impl "${NPU_ATTN_IMPL}" \
     --gist_attn_impl "${NPU_ATTN_IMPL}" \
