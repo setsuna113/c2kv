@@ -36,7 +36,11 @@ case "${ARM}" in
   *) echo "unknown S4_ARM=${ARM}" >&2; exit 2 ;;
 esac
 
-OUTPUT_FILE="${OUTPUT_FILE:-./outputs/s4_arm${ARM}_${COMPARE_MODE}$([[ ${FORCE} == 1 ]] && echo _forced).jsonl}"
+FORCE_SUFFIX=""
+if [[ "${FORCE}" == "1" ]]; then
+  FORCE_SUFFIX="_forced"
+fi
+OUTPUT_FILE="${OUTPUT_FILE:-./outputs/s4_arm${ARM}_${COMPARE_MODE}${FORCE_SUFFIX}.jsonl}"
 mkdir -p "$(dirname "${OUTPUT_FILE}")"
 
 FORCE_ARGS=()
