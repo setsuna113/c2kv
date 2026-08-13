@@ -30,6 +30,9 @@ MAX_BASELINE_INPUT_TOKENS="${MAX_BASELINE_INPUT_TOKENS:-34000}"
 TOOL_DOCUMENT_EVAL_MODE="${TOOL_DOCUMENT_EVAL_MODE:-full}"
 MAX_NEW_TOKENS="${MAX_NEW_TOKENS:-128}"
 NPU_ATTN_IMPL="${NPU_ATTN_IMPL:-eager}"
+# 32k-context full prefills OOM with eager attention (fp32 q×kv softmax matrix);
+# the full arm therefore defaults to the NPU fusion attention kernel.
+FULL_ATTN_IMPL="${FULL_ATTN_IMPL:-npu_fusion_attention}"
 TOP_K="${TOP_K:-3}"
 RATIO="${RATIO:-4}"
 
@@ -67,9 +70,9 @@ if [[ "${ARM}" == "full" ]]; then
     --max_new_tokens "${MAX_NEW_TOKENS}" \
     --max_baseline_input_tokens "${MAX_BASELINE_INPUT_TOKENS}" \
     --mode full \
-    --system_attn_impl "${NPU_ATTN_IMPL}" \
-    --gist_attn_impl "${NPU_ATTN_IMPL}" \
-    --generate_attn_impl "${NPU_ATTN_IMPL}" \
+    --system_attn_impl "${FULL_ATTN_IMPL}" \
+    --gist_attn_impl "${FULL_ATTN_IMPL}" \
+    --generate_attn_impl "${FULL_ATTN_IMPL}" \
     --truncate_tool_definition False \
     --require_tool_call True
 elif [[ "${ARM}" == "topk_only" ]]; then
