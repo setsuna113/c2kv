@@ -5,6 +5,7 @@ import copy
 import gc
 import json
 import logging
+import random
 import re
 import sys
 import time
@@ -157,6 +158,16 @@ def _oom_row(example: CompressHistoryExample, mode: str, ratio: int) -> Dict[str
 
 def _has_tool_call(text: str) -> bool:
     return "<tool_call>" in (text or "") or "Action:" in (text or "")
+
+
+FORCE_ACTION_PREFIX_TEXT = "Action:\n<tool_call>\n"
+
+
+def _force_action_prefix_ids(tokenizer: Any, args: argparse.Namespace) -> List[int]:
+    """Token ids of the forced action prefix; empty unless --force_action_prefix is on."""
+    if not getattr(args, "force_action_prefix", False):
+        return []
+    return tokenizer.encode(FORCE_ACTION_PREFIX_TEXT, add_special_tokens=False)
 
 
 def _text_tokens(text: str) -> List[str]:
@@ -1103,6 +1114,57 @@ def _target_metrics(tokenizer: Any, target: str, prediction: str) -> Dict[str, A
 
 
 @torch.inference_mode()
+def _prefix_continuation_logp(
+    model: Any,
+    prefix: Dict[str, Any],
+    prompt_ids: List[int],
+    continuation_ids: List[int],
+    attn_impl: str,
+) -> Optional[float]:
+    """Teacher-forced log-prob of continuation_ids given a prefix KV cache and the
+    current-message prompt. Runs a single non-generative forward; used by the
+    --force_action_prefix diagnostic to score the forced prefix under different
+    KV conditions (compressed vs full)."""
+    if not continuation_ids:
+        return None
+    original_attn_impl = model.model.config._attn_implementation if hasattr(model, "model") else None
+    if original_attn_impl is not None:
+        model.model.config._attn_implementation = attn_impl
+    try:
+        # Deep-copy: Cache.update appends in place even with use_cache=False, and the
+        # prefix cache must stay pristine for the generation pass.
+        cache = copy.deepcopy(prefix["cache"])
+        cache_length = cache.get_seq_length()
+        ids = torch.tensor([prompt_ids + continuation_ids], dtype=torch.long, device=model.device)
+        attention_mask = torch.ones(1, cache_length + ids.shape[1], dtype=torch.long, device=model.device)
+        original_prefix_length = prefix["system_length"] + prefix["history_length"]
+        position_ids = torch.arange(
+            original_prefix_length,
+            original_prefix_length + ids.shape[1],
+            dtype=torch.long,
+            device=model.device,
+        ).unsqueeze(0)
+        forward_kwargs = {
+            "input_ids": ids,
+            "attention_mask": attention_mask,
+            "position_ids": position_ids,
+            "past_key_values": cache,
+            "use_cache": False,
+        }
+        if prefix.get("use_gist", False):
+            forward_kwargs["use_gist"] = True
+        logits = model(**forward_kwargs).logits[0]
+        start = len(prompt_ids) - 1
+        selected = logits[start : start + len(continuation_ids)].float()
+        logprobs = torch.log_softmax(selected, dim=-1)
+        target = torch.tensor(continuation_ids, dtype=torch.long, device=logprobs.device)
+        return float(logprobs.gather(-1, target.unsqueeze(-1)).sum().item())
+    finally:
+        if original_attn_impl is not None:
+            model.model.config._attn_implementation = original_attn_impl
+
+
+@torch.inference_mode()
 def _generate_with_prefix(
     model: Any,
     tokenizer: Any,
@@ -1114,7 +1176,9 @@ def _generate_with_prefix(
     prompt_ids = _chat_template_ids(tokenizer, current_messages, add_generation_prompt=True)
     if args.max_prompt_tokens and len(prompt_ids) > args.max_prompt_tokens:
         prompt_ids = prompt_ids[-args.max_prompt_tokens :]
-    prompt_input_ids = torch.tensor([prompt_ids], dtype=torch.long, device=model.device)
+    forced_ids = _force_action_prefix_ids(tokenizer, args)
+    gen_prompt_ids = prompt_ids + forced_ids
+    prompt_input_ids = torch.tensor([gen_prompt_ids], dtype=torch.long, device=model.device)
     cache_length = prefix["cache"].get_seq_length()
     mock_cache_ids = prompt_input_ids.new_zeros((1, cache_length))
     input_ids = torch.cat([mock_cache_ids, prompt_input_ids], dim=1)
@@ -1129,17 +1193,21 @@ def _generate_with_prefix(
         model,
         tokenizer,
         input_ids=input_ids,
-        max_new_tokens=args.max_new_tokens,
+        max_new_tokens=max(1, args.max_new_tokens - len(forced_ids)),
         attn_impl=args.generate_attn_impl,
         use_gist=prefix.get("use_gist", False),
         position_ids=position_ids,
         past_key_values=prefix["cache"],
     )
+    if forced_ids:
+        prediction = FORCE_ACTION_PREFIX_TEXT + prediction
     target = prefix.get("target_override", example.answer)
     metrics = _target_metrics(tokenizer, target, prediction)
     metrics["generated_tokens"] = generated_tokens
     metrics.update({
-        "prompt_tokens": len(prompt_ids),
+        "prompt_tokens": len(gen_prompt_ids),
+        "forced_action_prefix": bool(forced_ids),
+        "forced_prefix_tokens": len(forced_ids),
         "latency_sec": round(generate_sec, 4),
         "generate_sec": round(generate_sec, 4),
         "tbt_sec": round(tbt_sec, 6),
@@ -2415,6 +2483,34 @@ def _generate_one(
         "ttft_sec": round(ttft_sec, 4),
         "total_sec": round(time.perf_counter() - total_start, 4),
     })
+    row["arm"] = f"{mode}_forced" if getattr(args, "force_action_prefix", False) else mode
+    row["forced"] = bool(getattr(args, "force_action_prefix", False))
+    if getattr(args, "force_action_prefix", False):
+        forced_ids = _force_action_prefix_ids(tokenizer, args)
+        current_messages = prefix.get("current_messages") or _current_messages(example)
+        prompt_ids = _chat_template_ids(tokenizer, current_messages, add_generation_prompt=True)
+        if args.max_prompt_tokens and len(prompt_ids) > args.max_prompt_tokens:
+            prompt_ids = prompt_ids[-args.max_prompt_tokens :]
+        own_logp_key = "logp_prefix_c2kv" if prefix.get("use_gist", False) else "logp_prefix_full"
+        try:
+            row[own_logp_key] = _prefix_continuation_logp(
+                model, prefix, prompt_ids, forced_ids, args.generate_attn_impl
+            )
+        except RuntimeError:
+            row[own_logp_key] = None
+        if prefix.get("use_gist", False):
+            try:
+                full_prefix, _full_skip = _build_full_or_truncate_prefix(
+                    model, tokenizer, example, args, "full"
+                )
+                if full_prefix is not None:
+                    row["logp_prefix_full"] = _prefix_continuation_logp(
+                        model, full_prefix, prompt_ids, forced_ids, args.generate_attn_impl
+                    )
+            except RuntimeError:
+                row["logp_prefix_full"] = None
+        if row.get("logp_prefix_c2kv") is not None and row.get("logp_prefix_full") is not None:
+            row["delta_logp_prefix"] = row["logp_prefix_full"] - row["logp_prefix_c2kv"]
     for key in (
         "full_history_docs",
         "rest_history_docs",
@@ -2760,6 +2856,7 @@ def _load_examples(args: argparse.Namespace, tokenizer: Any) -> tuple[List[Compr
     )
     selection_skips: Counter[str] = Counter()
     examples = []
+    subsample_uniformly = args.sample_seed is not None and args.max_examples
     for example in source:
         if args.selection_filter == "c2kv":
             _, _, _, _, skip_reason = _build_history_chunks(tokenizer, example, args)
@@ -2767,8 +2864,10 @@ def _load_examples(args: argparse.Namespace, tokenizer: Any) -> tuple[List[Compr
                 selection_skips[skip_reason] += 1
                 continue
         examples.append(example)
-        if args.max_examples and len(examples) >= args.max_examples:
+        if not subsample_uniformly and args.max_examples and len(examples) >= args.max_examples:
             break
+    if subsample_uniformly and len(examples) > args.max_examples:
+        examples = random.Random(args.sample_seed).sample(examples, args.max_examples)
     return examples, dict(selection_skips)
 
 
@@ -3028,6 +3127,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--history_selection", choices=["head", "tail"], default="tail")
     parser.add_argument("--truncate_selection", choices=["head", "tail"], default="tail")
     parser.add_argument("--max_examples", type=int, default=100)
+    parser.add_argument(
+        "--sample_seed",
+        type=int,
+        default=None,
+        help="If set together with --max_examples, uniformly subsample that many examples "
+        "after loading (seeded) instead of taking the first N.",
+    )
     parser.add_argument("--max_source_examples", type=int)
     parser.add_argument("--selection_filter", choices=["c2kv", "none"], default="c2kv")
     parser.add_argument("--eval_ratio", type=float, default=0.1)
@@ -3079,6 +3185,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--raw_history_doc_debug_chars", type=int, default=2000)
     parser.add_argument("--min_target_tokens", type=int, default=0)
     parser.add_argument("--max_new_tokens", type=int, default=128)
+    parser.add_argument(
+        "--force_action_prefix",
+        action="store_true",
+        help="Diagnostic: start generation with a forced 'Action:\\n<tool_call>\\n' continuation "
+        "prefix and log teacher-forced prefix log-probs under compressed vs full KV.",
+    )
     parser.add_argument("--require_tool_call", type=lambda x: str(x).lower() == "true", default=False)
     parser.add_argument("--max_input_chars", type=int)
     parser.add_argument("--max_answer_chars", type=int)
