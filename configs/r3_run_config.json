@@ -1,0 +1,40 @@
+{
+  "description": "R3 discrimination (PR-F): frozen run configuration for every arm. All numbers in the PR trace to these settings + the frozen qid/config files.",
+  "frozen_qids": "configs/r3_s1_48_qids.json (48 qids, sha256-bound to outputs_lyc/r2_bigpool/s1_full_48.jsonl)",
+  "regime": {
+    "max_tool_definition_tokens": 97000,
+    "max_doc_num": 96,
+    "max_samples_per_session": 16,
+    "split": "eval/toolset_disjoint (configs/agent_tooldef_split_manifests.json, seed 42, eval_ratio 0.1)",
+    "max_new_tokens": 128,
+    "greedy": true
+  },
+  "t_a": {
+    "purpose": "S1 artifact discrimination: 4 prompts (2 from the 82k cluster, 2 from the 75-77k cluster; deterministic pick recorded in PR)",
+    "primary_path": "sglang (kvoffload-sglang-c2kv fork, c2kv components OFF, tool parser OFF), base model models/Qwen3-4B-Instruct-2507, attention-backend=ascend, dtype=bfloat16, mem-fraction-static=0.7, context-length=131072, temperature=0, max_new_tokens=128; input = exact S1 full-arm token ids (agent/r3_extract_prompts.py), raw text via /generate (agent/r3_sglang_rawtext.py)",
+    "secondary_path": "HF eager + chunked prefill (agent/r3_chunked_prefill_probe.py), same checkpoint-250 gist-class model object as the S1 full arm, chunk=128 after 2048/512 OOMed (fp32 eager softmax over ~82k KV)"
+  },
+  "t_b": {
+    "purpose": "32k truncation retest of the same 48 qids (length- vs sample-driven)",
+    "cmd": "agent/r3_bigpool_rerun.py --arm full --tool_token_cap 32000",
+    "kernel": "npu_fusion_attention (32k inside the verified regime)",
+    "cap_semantics": "chat-templated tool-document ids truncated at 32000 tokens (same token-level idiom as harness mode=truncate); doc_tokens_full recorded per row"
+  },
+  "t_e": {
+    "c2kv_arm": "agent/r3_bigpool_rerun.py --arm c2kv --ratio 4 --max_doc_length 512 --max_doc_num 160 (1024x96 OOMed at 76-82k pools -> pre-authorized halving; same 97k token budget, finer chunks, chunk count 147-157 > 96 widens the compressor OOD caveat)",
+    "trusted_full_arm": "same 48 qids through the T-A sglang base-model path (only because T-A overturned the S1 collapse)",
+    "fair_compare": "Wilson 95% bounds on call rate; c2kv tool_name acc vs prior arm 0.1875"
+  },
+  "t_c": {
+    "seeds": "agent/analyze_condition_readout.py --reps 20000 --seed {0,1,2,3,4} on outputs_lyc/r2_d1prime/d1prime_condition_readout.jsonl (session-cluster bootstrap)",
+    "length_replay": "agent/r3_d1prime_length_replay.py executed against the task/r2-d1prime module tree (read-only) for pipeline fidelity; donor map replayed with batch=1 seed=0 per readout.log; window cap 256"
+  },
+  "t_d": {
+    "rerun": "agent/analyze_trigger_signals.py (+S0.logp_prefix_full.pos diagnostic entry) on outputs_lyc/r2_logp/s4_logp_clean.jsonl + merged_{A,B,C,D}.jsonl, --bootstrap_reps 20000 --bootstrap_seed 0"
+  },
+  "env": {
+    "harness_runs": "python 3.11.15 venv (torch 2.9.0+cpu, torch_npu 2.9.0rc1, transformers 5.8.0), CANN 8.5.0",
+    "sglang_server": "fresh venv (torch 2.8.0+cpu, torch_npu 2.8.0, triton-ascend 3.2.0, sgl_kernel_npu 2026.6.1, setuptools<81 for pkg_resources), CANN 8.5.0 + nnal/atb",
+    "device_pinning": "T-B dev0, sglang dev1, T-E dev2, probe dev0 (sequential)"
+  }
+}
