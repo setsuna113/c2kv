@@ -163,7 +163,8 @@ def _mode_analysis(rows: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     }
 
 
-def probe_jsonl(path: Path) -> Dict[str, Any]:
+def probe_jsonl(path: Path, name: str = "") -> Dict[str, Any]:
+    fname = name or path.name
     rows, n_bad = _read_rows(path)
     n = len(rows)
     key_coverage = _coverage(rows)
@@ -174,7 +175,7 @@ def probe_jsonl(path: Path) -> Dict[str, Any]:
         probe_fields[field] = {**entry, "wilson95": [round(lo, 4), round(hi, 4)]}
     n_present = sum(1 for field in PROBE_FIELDS if probe_fields[field]["k"] > 0)
     return {
-        "file": path.name,
+        "file": fname,
         "rows": n,
         "n_bad_lines": n_bad,
         "key_coverage": key_coverage,
@@ -184,14 +185,15 @@ def probe_jsonl(path: Path) -> Dict[str, Any]:
     }
 
 
-def probe_summary(path: Path) -> Dict[str, Any]:
+def probe_summary(path: Path, name: str = "") -> Dict[str, Any]:
+    fname = name or path.name
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError) as error:
-        return {"file": path.name, "error": str(error), "top_level_keys": [], "args_dict_keys": {}}
+        return {"file": fname, "error": str(error), "top_level_keys": [], "args_dict_keys": {}}
     if not isinstance(data, dict):
         return {
-            "file": path.name,
+            "file": fname,
             "error": f"top-level JSON is {type(data).__name__}, not an object",
             "top_level_keys": [],
             "args_dict_keys": {},
@@ -199,7 +201,7 @@ def probe_summary(path: Path) -> Dict[str, Any]:
     args_dict_keys = {
         key: sorted(data[key]) for key in ARGS_DICT_KEYS if isinstance(data.get(key), dict)
     }
-    return {"file": path.name, "top_level_keys": sorted(data), "args_dict_keys": args_dict_keys}
+    return {"file": fname, "top_level_keys": sorted(data), "args_dict_keys": args_dict_keys}
 
 
 def _render_md(report: Dict[str, Any]) -> str:
@@ -326,15 +328,15 @@ def main() -> None:
 
     jsonl_paths = sorted(
         path
-        for path in archive_dir.iterdir()
+        for path in archive_dir.rglob("*")
         if path.is_file() and path.suffix == ".jsonl" and not path.name.endswith(".summary.json")
     )
     summary_paths = sorted(
-        path for path in archive_dir.iterdir() if path.is_file() and path.name.endswith(".summary.json")
+        path for path in archive_dir.rglob("*") if path.is_file() and path.name.endswith(".summary.json")
     )
 
-    jsonl_entries = [probe_jsonl(path) for path in jsonl_paths]
-    summary_entries = [probe_summary(path) for path in summary_paths]
+    jsonl_entries = [probe_jsonl(path, str(path.relative_to(archive_dir))) for path in jsonl_paths]
+    summary_entries = [probe_summary(path, str(path.relative_to(archive_dir))) for path in summary_paths]
 
     warnings: List[str] = []
     for entry in jsonl_entries:
