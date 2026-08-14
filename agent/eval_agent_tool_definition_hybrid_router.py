@@ -5,6 +5,7 @@ import copy
 import gc
 import json
 import logging
+import math
 import random
 import re
 import sys
@@ -394,6 +395,52 @@ def _rank_tools(tools: Sequence[Dict[str, Any]], query: str) -> List[int]:
         text_overlap = len(query_tokens & text_tokens)
         score = 4.0 * name_overlap + float(text_overlap)
         scored.append((-score, index))
+    scored.sort()
+    return [index for _, index in scored]
+
+
+def _bm25_field_scores(
+    docs_tokens: Sequence[List[str]],
+    query_tokens: Sequence[str],
+    k1: float = 1.5,
+    b: float = 0.75,
+) -> List[float]:
+    """Okapi BM25 scores of each field-doc against the query (CPU, no deps).
+
+    IDF is computed over the tool pool itself (one doc per tool), so a term
+    present in every tool gets zero weight; Robertson/Walker idf floored at 0.
+    """
+    n_docs = len(docs_tokens)
+    doc_freq: Counter = Counter()
+    for doc in docs_tokens:
+        for token in set(doc):
+            doc_freq[token] += 1
+    avgdl = sum(len(doc) for doc in docs_tokens) / max(1, n_docs)
+    scores: List[float] = []
+    for doc in docs_tokens:
+        term_freq = Counter(doc)
+        doc_len = len(doc) or 1
+        score = 0.0
+        for token in set(query_tokens):
+            tf = term_freq.get(token, 0)
+            if tf == 0:
+                continue
+            idf = max(0.0, math.log((n_docs - doc_freq[token] + 0.5) / (doc_freq[token] + 0.5)))
+            score += idf * tf * (k1 + 1.0) / (tf + k1 * (1.0 - b + b * doc_len / max(avgdl, 1e-9)))
+        scores.append(score)
+    return scores
+
+
+def _rank_tools_bm25(tools: Sequence[Dict[str, Any]], query: str) -> List[int]:
+    """BM25 ranking over the tool pool; name field weighted 4x like the lexical ranker."""
+    query_tokens = _tokens(query)
+    if not query_tokens:
+        return list(range(len(tools)))
+    name_scores = _bm25_field_scores([_tokens(_tool_name(tool)) for tool in tools], query_tokens)
+    text_scores = _bm25_field_scores([_tokens(_tool_search_text(tool)) for tool in tools], query_tokens)
+    scored = [
+        (-(4.0 * name_scores[index] + text_scores[index]), index) for index in range(len(tools))
+    ]
     scored.sort()
     return [index for _, index in scored]
 
@@ -1693,6 +1740,9 @@ def _generate_one_hybrid(
             seed_text=example.qid,
             seed=args.router_seed,
         )
+    elif args.router_strategy == "bm25":
+        final_ranked = _rank_tools_bm25(tools, query)
+        top_tools, rest_tools, top_tool_names = _split_ranked_tools(tools, final_ranked, top_k)
     elif args.router_strategy == "attention":
         attention_ranked, attention_tool_scores, attention_router_sec, _ = _rank_tools_by_attention(
             model,
@@ -2464,6 +2514,7 @@ def parse_args() -> argparse.Namespace:
         choices=[
             "lexical",
             "random",
+            "bm25",
             "attention",
             "lex_attention",
             "att_rerank",
