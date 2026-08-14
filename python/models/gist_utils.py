@@ -64,6 +64,7 @@ def _build_interleave_mask_vectorized(
     gist_residual_type: str = "none",
     gist_overlap: int = 0,
     mask_dtype: torch.dtype = torch.float32,
+    condition_len: Union[int, torch.Tensor] = 0,
 ) -> Tuple[torch.Tensor, torch.BoolTensor, torch.LongTensor]:
     device = input_ids.device
     batch_size, max_seqlen = input_ids.shape
@@ -71,19 +72,36 @@ def _build_interleave_mask_vectorized(
     total_len = max_seqlen + max_gist_num
 
     # --- per-sample sequence lengths (vectorized) ---
-    original_seqlens = attention_mask.sum(dim=1)  # (batch_size,)
-    seqlens = original_seqlens.clone()
+    original_seqlens = attention_mask.sum(dim=1)  # (batch_size,), turn-t + condition tokens
+    # D1' condition window: the LAST `condition_len` tokens of each sample's
+    # unpadded region are condition tokens (layout [turn-t][condition][pad]).
+    # They behave as ordinary tokens in the token-token causal block, but gist
+    # slot count / chunking / gist position_ids are computed from the turn-t
+    # length only, and every gist additionally attends to the full condition span.
+    # With condition_len == 0 every quantity below reduces to the original values.
+    if isinstance(condition_len, torch.Tensor):
+        condition_lens = condition_len.to(device=device, dtype=torch.long).reshape(-1)
+        if condition_lens.numel() == 1:
+            condition_lens = condition_lens.expand(batch_size)
+    else:
+        condition_lens = input_ids.new_full((batch_size,), int(condition_len), dtype=torch.long)
+    condition_lens = torch.minimum(condition_lens, original_seqlens)
+    token_seqlens = original_seqlens - condition_lens  # turn-t length only
+    seqlens = token_seqlens.clone()
 
     if gist_residual_type in ("mean", "embed-mean"):
         residual = seqlens % ratio
         needs_pad = (residual != 0) & (seqlens > 0)
         seqlens = torch.where(needs_pad, torch.clamp(seqlens + ratio - residual, max=max_seqlen), seqlens)
 
+    # total valid span per sample: (residual-padded) turn-t tokens + condition tokens
+    span_seqlens = torch.maximum(seqlens, token_seqlens + condition_lens)
+
     # padlen: left-padding offset per sample
     if padding_check_idx == 0:  # right-padded
         padlens = torch.zeros(batch_size, dtype=torch.long, device=device)
     else:  # left-padded
-        padlens = max_seqlen - seqlens
+        padlens = max_seqlen - span_seqlens
 
     gist_nums = ((seqlens + ratio - 1) // ratio).long()  # ceil division, (batch_size,)
     if padding_check_idx == 0:
@@ -101,9 +119,12 @@ def _build_interleave_mask_vectorized(
     col_idx = torch.arange(max_seqlen, device=device).unsqueeze(0)  # (1, max_seqlen)
     causal_base = row_idx >= col_idx  # (max_seqlen, max_seqlen) lower-triangular
 
-    # Per-sample valid token range: [padlen, padlen + seqlen)
+    # Per-sample valid token range: [padlen, padlen + span_seqlen) — covers both
+    # turn-t tokens and the trailing condition tokens (condition positions behave
+    # as ordinary tokens in the causal block: they attend turn t and earlier
+    # condition tokens).
     token_pos = torch.arange(max_seqlen, device=device).unsqueeze(0)  # (1, max_seqlen)
-    valid_row = (token_pos >= padlens.unsqueeze(1)) & (token_pos < (padlens + seqlens).unsqueeze(1))  # (B, max_seqlen)
+    valid_row = (token_pos >= padlens.unsqueeze(1)) & (token_pos < (padlens + span_seqlens).unsqueeze(1))  # (B, max_seqlen)
     valid_region = valid_row.unsqueeze(2) & valid_row.unsqueeze(1)  # (B, max_seqlen, max_seqlen)
     token_token_mask = causal_base.unsqueeze(0) & valid_region  # (B, max_seqlen, max_seqlen)
 
@@ -112,9 +133,10 @@ def _build_interleave_mask_vectorized(
     # padded_j = j + gist_pad, so local j = gist_idx - gist_pad
     local_j = gist_idx - gist_pads.unsqueeze(1)  # (B, max_gist_num), local chunk index
 
-    # chunk begin/end for each gist token
+    # chunk begin/end for each gist token — always within the turn-t region, so
+    # gist position_ids (= chunk_end - 1) never point at condition tokens.
     chunk_begin = local_j * ratio  # (B, max_gist_num)
-    chunk_end = torch.min((local_j + 1) * ratio, original_seqlens.unsqueeze(1))  # (B, max_gist_num)
+    chunk_end = torch.min((local_j + 1) * ratio, token_seqlens.unsqueeze(1))  # (B, max_gist_num)
 
     # gist_position_ids: end - 1 for valid gist tokens, 0 otherwise
     gist_position_ids = torch.where(gist_mask, (chunk_end - 1).long(), torch.zeros_like(local_j))
@@ -142,6 +164,19 @@ def _build_interleave_mask_vectorized(
     # (B, max_gist_num, max_seqlen)
 
     gist_to_token_mask = (sink_mask | chunk_mask) & gist_mask.unsqueeze(2)  # mask out invalid gist rows
+
+    # --- condition span: every valid gist additionally attends to the FULL
+    # condition window, i.e. the last condition_len token positions of the
+    # sample's unpadded region: [padlen + token_seqlen, padlen + token_seqlen + condition_len).
+    # No gist slots are allocated to condition positions (gist_nums above only
+    # counts the turn-t region).
+    if bool((condition_lens > 0).any()):
+        cond_begin_abs = (padlens + token_seqlens).unsqueeze(1)  # (B, 1)
+        cond_end_abs = cond_begin_abs + condition_lens.unsqueeze(1)  # (B, 1)
+        condition_span_mask = (
+            (token_pos_3d >= cond_begin_abs.unsqueeze(2)) & (token_pos_3d < cond_end_abs.unsqueeze(2))
+        )  # (B, 1, max_seqlen)
+        gist_to_token_mask = gist_to_token_mask | (condition_span_mask & gist_mask.unsqueeze(2))
 
     # --- gist-to-gist causal mask: (B, max_gist_num, max_gist_num) ---
     # gist j attends to gist [gist_pad, gist_pad + j + 1), i.e., all previous valid gists
@@ -401,6 +436,7 @@ def get_prepare_gist_input_func(config: GistConfigMixin, padding_side: str = "ri
             return _build_interleave_mask_vectorized(
                 input_ids, attention_mask, kwargs["ratio"],
                 padding_check_idx, padding_side, "none", gist_overlap, mask_dtype,
+                condition_len=kwargs.get("condition_len", 0),
             )
         return _prepare_gist_input_dynamic_interleave
     elif gist_type == 'pattern':
@@ -481,11 +517,43 @@ def _pad_gist_outputs(
     return tuple(padded_kv), gist_mask, pos_ids
 
 
+def _concat_condition_for_context_docs(
+    context_input_ids: torch.LongTensor,
+    row_condition_input_ids: torch.LongTensor,
+) -> Tuple[torch.LongTensor, Optional[torch.LongTensor]]:
+    """Append per-row condition tokens right after each doc's real tokens.
+
+    `context_input_ids` is (N, L) right-padded with -100; `row_condition_input_ids`
+    is the matching (N, C) condition window per doc row (D1': the same window for
+    every doc of one example), also right-padded with -100. Returns the merged
+    (N, L + max_cond) ids re-compacted to [doc tokens][condition tokens][-100 pad]
+    and the per-row condition lengths (N,). When no row carries any condition
+    token the input is returned unchanged with `None` lengths, so the downstream
+    path is identical to the unconditioned one.
+    """
+    condition_lens = (row_condition_input_ids != -100).sum(dim=1)
+    if condition_lens.numel() == 0 or int(condition_lens.max().item()) == 0:
+        return context_input_ids, None
+    max_cond = int(condition_lens.max().item())
+    num_rows, doc_width = context_input_ids.shape
+    merged = context_input_ids.new_full((num_rows, doc_width + max_cond), -100)
+    slot_pos = torch.arange(doc_width + max_cond, device=merged.device).unsqueeze(0)  # (1, W)
+    doc_lens = (context_input_ids != -100).sum(dim=1, keepdim=True)  # (N, 1)
+    # doc tokens keep their slots; condition tokens take the slots right after.
+    doc_slots = slot_pos < doc_lens
+    merged[doc_slots] = context_input_ids[context_input_ids != -100]
+    cond = row_condition_input_ids[:, :max_cond]
+    cond_slots = (slot_pos >= doc_lens) & (slot_pos < doc_lens + condition_lens.unsqueeze(1))
+    merged[cond_slots] = cond[cond != -100]
+    return merged, condition_lens
+
+
 def _generate_gist_for_context_docs(
     model: PreTrainedModel,
     input_ids: torch.LongTensor,
     gist_attn_mask: torch.Tensor,
     generate_gist_kwargs: dict,
+    condition_lens: Optional[torch.LongTensor] = None,
 ):
     microbatch = max(1, int(os.environ.get("C2KV_GIST_DOC_MICROBATCH", "1")))
     output_chunks = []
@@ -497,6 +565,10 @@ def _generate_gist_for_context_docs(
         end = min(start + microbatch, input_ids.shape[0])
         mb_input_ids = input_ids[start:end]
         mb_attn_mask = gist_attn_mask[start:end]
+        mb_kwargs = generate_gist_kwargs
+        if condition_lens is not None:
+            # per-sample condition lengths for this microbatch
+            mb_kwargs = {**generate_gist_kwargs, "condition_len": condition_lens[start:end]}
         active_len = int(mb_attn_mask.sum(dim=1).max().item())
         if 0 < active_len < mb_input_ids.shape[1]:
             mb_input_ids = mb_input_ids[:, :active_len]
@@ -504,7 +576,7 @@ def _generate_gist_for_context_docs(
         outputs, gist_mask, pos_ids = model.generate_gist(
             mb_input_ids,
             mb_attn_mask,
-            **generate_gist_kwargs,
+            **mb_kwargs,
         )
         max_gist_len = max(max_gist_len, gist_mask.shape[1])
         output_chunks.append(outputs.past_key_values)
@@ -552,6 +624,7 @@ def process_context_input_ids(
     position_ids: torch.LongTensor,
     reconstruct_kwargs: dict[str, ...] | None = None,
     past_attention_mask: Optional[torch.Tensor] = None,
+    condition_input_ids: Optional[torch.LongTensor] = None,
 ) -> Tuple[DynamicCache, torch.Tensor, Optional[torch.Tensor]]:
     assert position_ids is not None, "position_ids is required when context_input_ids is given"
     if past_key_values is None:
@@ -559,6 +632,13 @@ def process_context_input_ids(
     past_length = past_key_values.get_seq_length()
     # reshape context_input_ids and generate gist
     batch_size, chunk_num, seq_len = context_input_ids.shape
+    # D1' condition window: (batch_size, C) right-padded with -100; expanded to one
+    # row per doc below. When None (or all -100) the path is identical to today.
+    if condition_input_ids is not None:
+        condition_input_ids = condition_input_ids.to(context_input_ids.device)
+        row_conditions = condition_input_ids.repeat_interleave(chunk_num, dim=0)
+    else:
+        row_conditions = None
     valid_chunk_mask = (context_input_ids != -100).any(dim=2)
     if reconstruct_kwargs is None or not valid_chunk_mask.all():
         flat_context_input_ids = context_input_ids.reshape(batch_size * chunk_num, seq_len)
@@ -574,6 +654,11 @@ def process_context_input_ids(
             return past_key_values, attention_mask, None
 
         context_input_ids = flat_context_input_ids[valid_indices]
+        condition_lens = None
+        if row_conditions is not None:
+            context_input_ids, condition_lens = _concat_condition_for_context_docs(
+                context_input_ids, row_conditions[valid_indices]
+            )
         input_ids = context_input_ids.clone()
         gist_attn_mask = input_ids != -100
         input_ids[~gist_attn_mask] = model.gist_token_id
@@ -585,6 +670,7 @@ def process_context_input_ids(
             input_ids,
             gist_attn_mask,
             generate_gist_kwargs,
+            condition_lens,
         )
         if reconstruct_kwargs is not None and model.training:
             raise NotImplementedError("Reconstruction loss is not supported with padded empty context chunks.")
@@ -649,6 +735,11 @@ def process_context_input_ids(
         return past_key_values, attention_mask, None
 
     context_input_ids = context_input_ids.reshape(batch_size * chunk_num, seq_len)
+    condition_lens = None
+    if row_conditions is not None:
+        context_input_ids, condition_lens = _concat_condition_for_context_docs(
+            context_input_ids, row_conditions
+        )
     input_ids = context_input_ids.clone()
     gist_attn_mask = input_ids != -100
     input_ids[~gist_attn_mask] = model.gist_token_id
@@ -660,10 +751,13 @@ def process_context_input_ids(
         input_ids,
         gist_attn_mask,
         generate_gist_kwargs,
+        condition_lens,
     )
     # do reconstruction if reconstruct_kwargs is given
     reconstruct_loss = None
     if reconstruct_kwargs is not None and model.training:
+        if condition_lens is not None:
+            raise NotImplementedError("Reconstruction loss is not supported with condition windows.")
         reconstruct_loss = _get_reconstruction_loss(
             model=model, input_ids=input_ids, labels=context_input_ids,
             attention_mask=gist_attn_mask, gist_mask=gist_mask, position_ids=pos_ids,

@@ -295,6 +295,9 @@ class Qwen3Attention(nn.Module):
     ) -> Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
         input_shape = hidden_states.shape[:-1]
         gist_num = gist_mask.shape[1]
+        # Only the LAST gist_num hidden states are treated as gists. Any D1'
+        # condition tokens sit before the trailing gist block, so their K/V are
+        # used in attention below but never enter the returned gist key values.
         gist_hidden_states = hidden_states[:, -gist_num:]
         gist_hidden_shape = (input_shape[0], gist_num, -1, self.head_dim)
         hidden_states = hidden_states[:, :-gist_num]
@@ -593,6 +596,12 @@ class Qwen3Model(Qwen3PreTrainedModel):
                 gist_key_values.append(gist_layer_kv)
 
         hidden_states = self.norm(hidden_states)
+        # Structural D1' invariant: the returned cache holds exactly one K/V slot
+        # per gist position — turn-t and condition token K/V never leave the layer.
+        assert all(
+            gist_k.shape[2] == gist_mask.shape[1] and gist_v.shape[2] == gist_mask.shape[1]
+            for gist_k, gist_v in gist_key_values
+        ), "generate_gist must return gist-only key values"
         return BaseModelOutputWithPast(
             last_hidden_state=hidden_states,
             past_key_values=tuple(gist_key_values),
@@ -648,6 +657,10 @@ class Qwen3ForCausalLM(Qwen3PreTrainedModel, GenerationMixin):
         # Generate gist (only used in training)
         kwargs['use_gist'] = False if use_gist is None else use_gist
         past_attention_mask = kwargs.pop("past_attention_mask", None)
+        # D1' condition window: (batch_size, C) future-query token ids, -100 padded.
+        # Only meaningful together with context_input_ids; popped here so it never
+        # reaches the loss function or the base model kwargs. Default None = off.
+        condition_input_ids = kwargs.pop("condition_input_ids", None)
         reconstruct_loss = None
         if context_input_ids is not None:
             reconstruct_kwargs = None
@@ -655,7 +668,7 @@ class Qwen3ForCausalLM(Qwen3PreTrainedModel, GenerationMixin):
                 reconstruct_kwargs = {"lm_head": self.lm_head, "loss_function": self.loss_function}
             past_key_values, attention_mask, reconstruct_loss = process_context_input_ids(
                 self.model, context_input_ids, past_key_values, attention_mask, position_ids,
-                reconstruct_kwargs, past_attention_mask,
+                reconstruct_kwargs, past_attention_mask, condition_input_ids,
             )
             kwargs['use_gist'] = True
 
