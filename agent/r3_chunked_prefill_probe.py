@@ -120,14 +120,21 @@ def main() -> None:
         start = time.perf_counter()
         system_t = torch.tensor([system_ids], dtype=torch.long, device=model.device)
         cache, prefix_len, _ = H._prefill_system(model, system_t, "eager")
-        cache, prefix_len, prefill_sec = _prefill_in_chunks(model, doc_ids, cache, prefix_len, args.chunk, "eager")
+        cache, prefix_len, doc_prefill_sec = _prefill_in_chunks(model, doc_ids, cache, prefix_len, args.chunk, "eager")
+        # The prompt must ALSO be chunked: a single eager forward of the
+        # 1920-token prompt against an ~82k KV cache materializes a
+        # 1920 x 82k x 32-head fp32 matrix (~19 GiB) and OOMs. Prefill all but
+        # the last prompt token, then let generate continue from a 1-token
+        # input — identical greedy state, tiny eager workspace.
+        cache, prefix_len, prompt_prefill_sec = _prefill_in_chunks(
+            model, prompt_ids[:-1], cache, prefix_len, args.chunk, "eager"
+        )
+        prefill_sec = doc_prefill_sec + prompt_prefill_sec
 
-        prompt_t = torch.tensor([prompt_ids], dtype=torch.long, device=model.device)
-        mock = prompt_t.new_zeros((1, cache.get_seq_length()))
-        input_ids = torch.cat([mock, prompt_t], dim=1)
-        position_ids = torch.arange(
-            prefix_len, prefix_len + prompt_t.shape[1], dtype=torch.long, device=model.device
-        ).unsqueeze(0)
+        last_t = torch.tensor([[prompt_ids[-1]]], dtype=torch.long, device=model.device)
+        mock = last_t.new_zeros((1, cache.get_seq_length()))
+        input_ids = torch.cat([mock, last_t], dim=1)
+        position_ids = torch.arange(prefix_len, prefix_len + 1, dtype=torch.long, device=model.device).unsqueeze(0)
         prediction, latency, gen_tokens, _ = H._generate_from_input_ids(
             model, tokenizer, input_ids=input_ids, max_new_tokens=args.max_new_tokens,
             attn_impl="eager", use_gist=False, position_ids=position_ids, past_key_values=cache,
