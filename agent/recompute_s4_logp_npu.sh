@@ -77,13 +77,16 @@ PY
 }
 
 # Free HBM (MiB) on physical device $1, parsed from the `npu-smi info` table.
-# Each device has two rows (card row with the name, chip row with the usages);
-# the chip row carries "used / total" MB pairs. On 910B3 the rightmost/largest
-# pair is HBM-Usage (total 65536), so we take the pair with the largest total.
-# Prints the free MiB, or nothing (and returns 1) if parsing fails.
+# Each device has two rows: the card row ("| 3     910B3 ...") and the chip row
+# directly below it ("| 0  | bus-id | ... | used / total |") which carries the
+# usage pairs. Chip rows are numbered from 0 for EVERY card, so matching on
+# "^\| <dev> " alone only works for device 0 — anchor on the card row and take
+# the following line as well. On 910B3 the pair with the largest total is
+# HBM-Usage (total 65536). Prints the free MiB, or nothing (and returns 1) if
+# parsing fails.
 npu_hbm_free_mb() {
   local dev="$1" rows pairs pair used total best_total=0 best_used=0
-  rows="$(npu-smi info 2>/dev/null | grep -E "^\|[[:space:]]+${dev}[[:space:]]")" || return 1
+  rows="$(npu-smi info 2>/dev/null | grep -E -A1 "^\|[[:space:]]+${dev}[[:space:]]+910B3")" || return 1
   [[ -n "${rows}" ]] || return 1
   pairs="$(printf '%s\n' "${rows}" | grep -oE '[0-9]+[[:space:]]*/[[:space:]]*[0-9]+')" || return 1
   [[ -n "${pairs}" ]] || return 1
