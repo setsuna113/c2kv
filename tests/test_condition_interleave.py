@@ -65,6 +65,22 @@ def _build_model() -> Qwen3Model:
         attn_implementation="eager",
     )
     model = Qwen3Model(config)
+    # gen_gist_proj zero-initializes gist q/k/v by design (training-stable start);
+    # real runs then load trained weights or get init_gist_proj's copy of the main
+    # q/k/v projections on from_pretrained. A config-built fixture keeps the zeros,
+    # which would make gist KV identically zero for ANY correct wiring (k_norm(0)=0)
+    # and render T1/T4 unpassable. Mirror init_gist_proj here so the fixture matches
+    # the real initialized state; T2 bitwise/T3/T4 invariants are unaffected.
+    for layer in model.layers[: config.num_hidden_layers]:
+        attn = layer.self_attn
+        for name in ("q", "k", "v"):
+            gist_proj = getattr(attn, f"gist_{name}_proj", None)
+            if gist_proj is None:
+                continue
+            src_proj = getattr(attn, f"{name}_proj")
+            gist_proj.weight.data.copy_(src_proj.weight.data)
+            if gist_proj.bias is not None and src_proj.bias is not None:
+                gist_proj.bias.data.copy_(src_proj.bias.data)
     model.eval()
     return model
 
