@@ -2448,7 +2448,41 @@ def _generate_one(
             "skipped": True,
             "skip_reason": skip_reason,
         }
+    # Teacher-forced logp of the forced prefix must be scored BEFORE generation:
+    # _generate_with_prefix runs model.generate with use_cache=True, which appends
+    # prompt+generated KV to prefix["cache"] in place and would pollute the prefix
+    # that _prefix_continuation_logp scores against. (The deepcopy inside
+    # _prefix_continuation_logp only protects the cache from the scoring forward
+    # itself, not from an earlier generation pass.)
+    forced_logp: Dict[str, Any] = {}
+    if getattr(args, "force_action_prefix", False):
+        forced_ids = _force_action_prefix_ids(tokenizer, args)
+        current_messages = prefix.get("current_messages") or _current_messages(example)
+        prompt_ids = _chat_template_ids(tokenizer, current_messages, add_generation_prompt=True)
+        if args.max_prompt_tokens and len(prompt_ids) > args.max_prompt_tokens:
+            prompt_ids = prompt_ids[-args.max_prompt_tokens :]
+        own_logp_key = "logp_prefix_c2kv" if prefix.get("use_gist", False) else "logp_prefix_full"
+        try:
+            forced_logp[own_logp_key] = _prefix_continuation_logp(
+                model, prefix, prompt_ids, forced_ids, args.generate_attn_impl
+            )
+        except RuntimeError:
+            forced_logp[own_logp_key] = None
+        if prefix.get("use_gist", False):
+            try:
+                full_prefix, _full_skip = _build_full_or_truncate_prefix(
+                    model, tokenizer, example, args, "full"
+                )
+                if full_prefix is not None:
+                    forced_logp["logp_prefix_full"] = _prefix_continuation_logp(
+                        model, full_prefix, prompt_ids, forced_ids, args.generate_attn_impl
+                    )
+            except RuntimeError:
+                forced_logp["logp_prefix_full"] = None
+        if forced_logp.get("logp_prefix_c2kv") is not None and forced_logp.get("logp_prefix_full") is not None:
+            forced_logp["delta_logp_prefix"] = forced_logp["logp_prefix_full"] - forced_logp["logp_prefix_c2kv"]
     row = _generate_with_prefix(model, tokenizer, example, prefix, args)
+    row.update(forced_logp)
     ttft_sec = (
         prefix.get("system_prefill_sec", 0.0)
         + prefix.get("full_prefill_sec", 0.0)
@@ -2485,32 +2519,6 @@ def _generate_one(
     })
     row["arm"] = f"{mode}_forced" if getattr(args, "force_action_prefix", False) else mode
     row["forced"] = bool(getattr(args, "force_action_prefix", False))
-    if getattr(args, "force_action_prefix", False):
-        forced_ids = _force_action_prefix_ids(tokenizer, args)
-        current_messages = prefix.get("current_messages") or _current_messages(example)
-        prompt_ids = _chat_template_ids(tokenizer, current_messages, add_generation_prompt=True)
-        if args.max_prompt_tokens and len(prompt_ids) > args.max_prompt_tokens:
-            prompt_ids = prompt_ids[-args.max_prompt_tokens :]
-        own_logp_key = "logp_prefix_c2kv" if prefix.get("use_gist", False) else "logp_prefix_full"
-        try:
-            row[own_logp_key] = _prefix_continuation_logp(
-                model, prefix, prompt_ids, forced_ids, args.generate_attn_impl
-            )
-        except RuntimeError:
-            row[own_logp_key] = None
-        if prefix.get("use_gist", False):
-            try:
-                full_prefix, _full_skip = _build_full_or_truncate_prefix(
-                    model, tokenizer, example, args, "full"
-                )
-                if full_prefix is not None:
-                    row["logp_prefix_full"] = _prefix_continuation_logp(
-                        model, full_prefix, prompt_ids, forced_ids, args.generate_attn_impl
-                    )
-            except RuntimeError:
-                row["logp_prefix_full"] = None
-        if row.get("logp_prefix_c2kv") is not None and row.get("logp_prefix_full") is not None:
-            row["delta_logp_prefix"] = row["logp_prefix_full"] - row["logp_prefix_c2kv"]
     for key in (
         "full_history_docs",
         "rest_history_docs",
