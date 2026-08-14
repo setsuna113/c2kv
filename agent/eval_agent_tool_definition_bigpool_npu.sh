@@ -36,8 +36,16 @@ FULL_ATTN_IMPL="${FULL_ATTN_IMPL:-npu_fusion_attention}"
 TOP_K="${TOP_K:-3}"
 RATIO="${RATIO:-4}"
 
-ARM="${BIGPOOL_ARM:?set BIGPOOL_ARM to full or topk_only}"
-OUTPUT_FILE="${OUTPUT_FILE:-./outputs/bigpool_${ARM}$([[ ${ARM} == topk_only ]] && echo _k${TOP_K}).jsonl}"
+# R2 S1/S2 arms (default off): prior = topk_only with TOP_K=0 (no tool
+# documents retained — pure model-prior floor); topk_semantic = topk_only with
+# the CPU BM25 ranker. topk_only keeps its lexical default unchanged.
+ARM="${BIGPOOL_ARM:?set BIGPOOL_ARM to full, topk_only, topk_semantic, or prior}"
+ROUTER_STRATEGY="${ROUTER_STRATEGY:-lexical}"
+case "${ARM}" in
+  topk_semantic) ROUTER_STRATEGY=bm25 ;;
+  prior) TOP_K=0 ;;
+esac
+OUTPUT_FILE="${OUTPUT_FILE:-./outputs/bigpool_${ARM}$([[ ${ARM} != full ]] && echo _k${TOP_K}).jsonl}"
 mkdir -p "$(dirname "${OUTPUT_FILE}")"
 
 SPLIT_ARGS=(--split "${SPLIT}" --split_manifest_name "${SPLIT_NAME}")
@@ -75,7 +83,7 @@ if [[ "${ARM}" == "full" ]]; then
     --generate_attn_impl "${FULL_ATTN_IMPL}" \
     --truncate_tool_definition False \
     --require_tool_call True
-elif [[ "${ARM}" == "topk_only" ]]; then
+elif [[ "${ARM}" == "topk_only" || "${ARM}" == "topk_semantic" || "${ARM}" == "prior" ]]; then
   python agent/eval_agent_tool_definition_hybrid_router.py \
     --device_type npu \
     --model "${MODEL_PATH}" \
@@ -96,7 +104,7 @@ elif [[ "${ARM}" == "topk_only" ]]; then
     --max_new_tokens "${MAX_NEW_TOKENS}" \
     --hybrid_cases "${TOP_K}:${RATIO}" \
     --hybrid_mode topk_only \
-    --router_strategy lexical \
+    --router_strategy "${ROUTER_STRATEGY}" \
     --router_hit_filter all \
     --system_attn_impl "${NPU_ATTN_IMPL}" \
     --gist_attn_impl "${NPU_ATTN_IMPL}" \
