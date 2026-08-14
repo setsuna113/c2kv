@@ -1,0 +1,299 @@
+{
+ "description": "R3 discrimination: frozen S1 pilot qid set (round-2 task/r2-bigpool S1, 97k/96docs regime, pipeline-order first 48). Order = s1_full_48.jsonl row order.",
+ "source_archive": "outputs_lyc/r2_bigpool/s1_full_48.jsonl",
+ "source_sha256": "dd31825be7d5576fd08976eec41571bcb5c19dfddf383b8f5f08a340dccd0d3f",
+ "frozen_at_branch_base": "01f9b188faaf11c571983018592c220d531360e7",
+ "n": 48,
+ "qids": [
+  "a45d2c09567a_795c2422:0",
+  "a45d2c09567a_795c2422:1",
+  "a45d2c09567a_795c2422:2",
+  "a45d2c09567a_795c2422:3",
+  "a45d2c09567a_795c2422:4",
+  "a45d2c09567a_795c2422:5",
+  "a45d2c09567a_795c2422:6",
+  "a45d2c09567a_7c2c1bb8:0",
+  "a45d2c09567a_7c2c1bb8:1",
+  "a45d2c09567a_7c2c1bb8:2",
+  "a45d2c09567a_7c2c1bb8:3",
+  "a45d2c09567a_7c2c1bb8:4",
+  "a45d2c09567a_7c2c1bb8:5",
+  "a45d2c09567a_7c2c1bb8:6",
+  "a45d2c09567a_7c2c1bb8:7",
+  "a45d2c09567a_cfce19ea:0",
+  "a45d2c09567a_cfce19ea:2",
+  "a45d2c09567a_cfce19ea:3",
+  "a45d2c09567a_cfce19ea:4",
+  "a45d2c09567a_cfce19ea:5",
+  "a45d2c09567a_cfce19ea:6",
+  "a45d2c09567a_cfce19ea:7",
+  "a45d2c09567a_cfce19ea:8",
+  "a45d2c09567a_cfce19ea:9",
+  "a45d2c09567a_cfce19ea:10",
+  "a45d2c09567a_cfce19ea:11",
+  "a45d2c09567a_cfce19ea:13",
+  "a45d2c09567a_cfce19ea:14",
+  "b455f37f04c7_903ca285:0",
+  "b455f37f04c7_903ca285:1",
+  "b455f37f04c7_903ca285:3",
+  "b455f37f04c7_903ca285:4",
+  "b455f37f04c7_903ca285:5",
+  "b455f37f04c7_903ca285:6",
+  "b455f37f04c7_903ca285:8",
+  "b455f37f04c7_903ca285:9",
+  "b455f37f04c7_903ca285:10",
+  "b455f37f04c7_903ca285:11",
+  "b455f37f04c7_903ca285:12",
+  "b455f37f04c7_903ca285:13",
+  "b455f37f04c7_903ca285:14",
+  "0c890a5dde8c_012517c3:0",
+  "0c890a5dde8c_012517c3:1",
+  "0c890a5dde8c_012517c3:2",
+  "0c890a5dde8c_012517c3:3",
+  "0c890a5dde8c_012517c3:4",
+  "0c890a5dde8c_012517c3:5",
+  "0c890a5dde8c_012517c3:6"
+ ],
+ "per_qid": {
+  "a45d2c09567a_795c2422:0": {
+   "session_id": "a45d2c09567a_795c2422",
+   "doc_tokens": 75327,
+   "input_tokens": 75414
+  },
+  "a45d2c09567a_795c2422:1": {
+   "session_id": "a45d2c09567a_795c2422",
+   "doc_tokens": 75327,
+   "input_tokens": 75823
+  },
+  "a45d2c09567a_795c2422:2": {
+   "session_id": "a45d2c09567a_795c2422",
+   "doc_tokens": 75327,
+   "input_tokens": 76033
+  },
+  "a45d2c09567a_795c2422:3": {
+   "session_id": "a45d2c09567a_795c2422",
+   "doc_tokens": 75327,
+   "input_tokens": 77256
+  },
+  "a45d2c09567a_795c2422:4": {
+   "session_id": "a45d2c09567a_795c2422",
+   "doc_tokens": 75327,
+   "input_tokens": 77258
+  },
+  "a45d2c09567a_795c2422:5": {
+   "session_id": "a45d2c09567a_795c2422",
+   "doc_tokens": 75327,
+   "input_tokens": 77258
+  },
+  "a45d2c09567a_795c2422:6": {
+   "session_id": "a45d2c09567a_795c2422",
+   "doc_tokens": 75327,
+   "input_tokens": 77258
+  },
+  "a45d2c09567a_7c2c1bb8:0": {
+   "session_id": "a45d2c09567a_7c2c1bb8",
+   "doc_tokens": 75327,
+   "input_tokens": 75361
+  },
+  "a45d2c09567a_7c2c1bb8:1": {
+   "session_id": "a45d2c09567a_7c2c1bb8",
+   "doc_tokens": 75327,
+   "input_tokens": 75841
+  },
+  "a45d2c09567a_7c2c1bb8:2": {
+   "session_id": "a45d2c09567a_7c2c1bb8",
+   "doc_tokens": 75327,
+   "input_tokens": 76086
+  },
+  "a45d2c09567a_7c2c1bb8:3": {
+   "session_id": "a45d2c09567a_7c2c1bb8",
+   "doc_tokens": 75327,
+   "input_tokens": 76345
+  },
+  "a45d2c09567a_7c2c1bb8:4": {
+   "session_id": "a45d2c09567a_7c2c1bb8",
+   "doc_tokens": 75327,
+   "input_tokens": 77127
+  },
+  "a45d2c09567a_7c2c1bb8:5": {
+   "session_id": "a45d2c09567a_7c2c1bb8",
+   "doc_tokens": 75327,
+   "input_tokens": 77258
+  },
+  "a45d2c09567a_7c2c1bb8:6": {
+   "session_id": "a45d2c09567a_7c2c1bb8",
+   "doc_tokens": 75327,
+   "input_tokens": 77258
+  },
+  "a45d2c09567a_7c2c1bb8:7": {
+   "session_id": "a45d2c09567a_7c2c1bb8",
+   "doc_tokens": 75327,
+   "input_tokens": 77258
+  },
+  "a45d2c09567a_cfce19ea:0": {
+   "session_id": "a45d2c09567a_cfce19ea",
+   "doc_tokens": 75327,
+   "input_tokens": 75366
+  },
+  "a45d2c09567a_cfce19ea:2": {
+   "session_id": "a45d2c09567a_cfce19ea",
+   "doc_tokens": 75327,
+   "input_tokens": 75899
+  },
+  "a45d2c09567a_cfce19ea:3": {
+   "session_id": "a45d2c09567a_cfce19ea",
+   "doc_tokens": 75327,
+   "input_tokens": 76140
+  },
+  "a45d2c09567a_cfce19ea:4": {
+   "session_id": "a45d2c09567a_cfce19ea",
+   "doc_tokens": 75327,
+   "input_tokens": 76608
+  },
+  "a45d2c09567a_cfce19ea:5": {
+   "session_id": "a45d2c09567a_cfce19ea",
+   "doc_tokens": 75327,
+   "input_tokens": 76872
+  },
+  "a45d2c09567a_cfce19ea:6": {
+   "session_id": "a45d2c09567a_cfce19ea",
+   "doc_tokens": 75327,
+   "input_tokens": 77158
+  },
+  "a45d2c09567a_cfce19ea:7": {
+   "session_id": "a45d2c09567a_cfce19ea",
+   "doc_tokens": 75327,
+   "input_tokens": 77258
+  },
+  "a45d2c09567a_cfce19ea:8": {
+   "session_id": "a45d2c09567a_cfce19ea",
+   "doc_tokens": 75327,
+   "input_tokens": 77258
+  },
+  "a45d2c09567a_cfce19ea:9": {
+   "session_id": "a45d2c09567a_cfce19ea",
+   "doc_tokens": 75327,
+   "input_tokens": 77258
+  },
+  "a45d2c09567a_cfce19ea:10": {
+   "session_id": "a45d2c09567a_cfce19ea",
+   "doc_tokens": 75327,
+   "input_tokens": 77258
+  },
+  "a45d2c09567a_cfce19ea:11": {
+   "session_id": "a45d2c09567a_cfce19ea",
+   "doc_tokens": 75327,
+   "input_tokens": 77258
+  },
+  "a45d2c09567a_cfce19ea:13": {
+   "session_id": "a45d2c09567a_cfce19ea",
+   "doc_tokens": 75327,
+   "input_tokens": 77258
+  },
+  "a45d2c09567a_cfce19ea:14": {
+   "session_id": "a45d2c09567a_cfce19ea",
+   "doc_tokens": 75327,
+   "input_tokens": 77258
+  },
+  "b455f37f04c7_903ca285:0": {
+   "session_id": "b455f37f04c7_903ca285",
+   "doc_tokens": 75327,
+   "input_tokens": 75413
+  },
+  "b455f37f04c7_903ca285:1": {
+   "session_id": "b455f37f04c7_903ca285",
+   "doc_tokens": 75327,
+   "input_tokens": 75841
+  },
+  "b455f37f04c7_903ca285:3": {
+   "session_id": "b455f37f04c7_903ca285",
+   "doc_tokens": 75327,
+   "input_tokens": 76050
+  },
+  "b455f37f04c7_903ca285:4": {
+   "session_id": "b455f37f04c7_903ca285",
+   "doc_tokens": 75327,
+   "input_tokens": 76216
+  },
+  "b455f37f04c7_903ca285:5": {
+   "session_id": "b455f37f04c7_903ca285",
+   "doc_tokens": 75327,
+   "input_tokens": 76417
+  },
+  "b455f37f04c7_903ca285:6": {
+   "session_id": "b455f37f04c7_903ca285",
+   "doc_tokens": 75327,
+   "input_tokens": 76570
+  },
+  "b455f37f04c7_903ca285:8": {
+   "session_id": "b455f37f04c7_903ca285",
+   "doc_tokens": 75327,
+   "input_tokens": 76723
+  },
+  "b455f37f04c7_903ca285:9": {
+   "session_id": "b455f37f04c7_903ca285",
+   "doc_tokens": 75327,
+   "input_tokens": 76876
+  },
+  "b455f37f04c7_903ca285:10": {
+   "session_id": "b455f37f04c7_903ca285",
+   "doc_tokens": 75327,
+   "input_tokens": 77160
+  },
+  "b455f37f04c7_903ca285:11": {
+   "session_id": "b455f37f04c7_903ca285",
+   "doc_tokens": 75327,
+   "input_tokens": 77258
+  },
+  "b455f37f04c7_903ca285:12": {
+   "session_id": "b455f37f04c7_903ca285",
+   "doc_tokens": 75327,
+   "input_tokens": 77258
+  },
+  "b455f37f04c7_903ca285:13": {
+   "session_id": "b455f37f04c7_903ca285",
+   "doc_tokens": 75327,
+   "input_tokens": 77258
+  },
+  "b455f37f04c7_903ca285:14": {
+   "session_id": "b455f37f04c7_903ca285",
+   "doc_tokens": 75327,
+   "input_tokens": 77258
+  },
+  "0c890a5dde8c_012517c3:0": {
+   "session_id": "0c890a5dde8c_012517c3",
+   "doc_tokens": 80171,
+   "input_tokens": 80213
+  },
+  "0c890a5dde8c_012517c3:1": {
+   "session_id": "0c890a5dde8c_012517c3",
+   "doc_tokens": 80171,
+   "input_tokens": 80651
+  },
+  "0c890a5dde8c_012517c3:2": {
+   "session_id": "0c890a5dde8c_012517c3",
+   "doc_tokens": 80171,
+   "input_tokens": 80808
+  },
+  "0c890a5dde8c_012517c3:3": {
+   "session_id": "0c890a5dde8c_012517c3",
+   "doc_tokens": 80171,
+   "input_tokens": 81035
+  },
+  "0c890a5dde8c_012517c3:4": {
+   "session_id": "0c890a5dde8c_012517c3",
+   "doc_tokens": 80171,
+   "input_tokens": 82102
+  },
+  "0c890a5dde8c_012517c3:5": {
+   "session_id": "0c890a5dde8c_012517c3",
+   "doc_tokens": 80171,
+   "input_tokens": 82102
+  },
+  "0c890a5dde8c_012517c3:6": {
+   "session_id": "0c890a5dde8c_012517c3",
+   "doc_tokens": 80171,
+   "input_tokens": 82102
+  }
+ }
+}
