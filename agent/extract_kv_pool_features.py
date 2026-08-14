@@ -136,9 +136,9 @@ def _mirror_s4_eval_args(cli: argparse.Namespace) -> argparse.Namespace:
         base_model=cli.base_model_path or None,
         tokenizer=cli.tokenizer_path or None,
         override_ratio=cli.ratio,
-        system_attn_impl="eager",
-        gist_attn_impl="eager",
-        generate_attn_impl="eager",
+        system_attn_impl=cli.attn_impl,
+        gist_attn_impl=cli.attn_impl,
+        generate_attn_impl=cli.attn_impl,
         dtype="bf16",
         baseline_model_class="auto",
         untrained_c2kv=False,
@@ -520,6 +520,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dataset_path", default="./datasets/agent-llm-traces")
     parser.add_argument("--device", default="npu:0")
     parser.add_argument("--ratio", type=int, default=4)
+    parser.add_argument(
+        "--attn_impl",
+        default="eager",
+        help="Attention impl for system/gist/generate prefills (default eager; "
+        "npu_fusion_attention avoids the fp32 LxL softmax matrix OOM on long full-KV prefixes).",
+    )
     parser.add_argument("--max_examples", type=int, default=0, help="<=0 means all frozen examples.")
     parser.add_argument("--resume", action="store_true", help="Skip (qid, arm) pairs already in the index.")
     return parser.parse_args()
