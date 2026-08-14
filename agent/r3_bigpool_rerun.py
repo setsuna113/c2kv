@@ -96,7 +96,7 @@ def _run_args(args: argparse.Namespace) -> argparse.Namespace:
         mode=args.arm,
         max_system_length=256,
         max_doc_length=args.max_doc_length,
-        max_doc_num=96,
+        max_doc_num=args.max_doc_num,
         max_tool_definition_tokens=97000,
         truncate_tool_definition=False,
         tool_document_eval_mode="full",
@@ -219,6 +219,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--tool_token_cap", type=int, default=0)
     p.add_argument("--ratio", type=int, default=4)
     p.add_argument("--max_doc_length", type=int, default=1024)
+    p.add_argument("--max_doc_num", type=int, default=96)
     p.add_argument("--model", default="./checkpoints/qwen3-4b-agent-tooldef-npu/checkpoint-250")
     p.add_argument("--base_model", default="./models/Qwen3-4B-Instruct-2507")
     p.add_argument("--tokenizer", default="")
