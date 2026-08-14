@@ -151,12 +151,13 @@ def _scan_same_stem_jsonl(summary_path: Path) -> Optional[Dict[str, Any]]:
     }
 
 
-def register_summary(path: Path) -> Dict[str, Any]:
+def register_summary(path: Path, name: str = "") -> Dict[str, Any]:
+    fname = name or path.name
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError) as error:
         return {
-            "file": path.name,
+            "file": fname,
             "error": str(error),
             "modes": [],
             "threshold_fields": {},
@@ -164,7 +165,7 @@ def register_summary(path: Path) -> Dict[str, Any]:
         }
     if not isinstance(data, dict):
         return {
-            "file": path.name,
+            "file": fname,
             "error": f"top-level JSON is {type(data).__name__}, not an object",
             "modes": [],
             "threshold_fields": {},
@@ -190,7 +191,7 @@ def register_summary(path: Path) -> Dict[str, Any]:
         threshold_source = "unknown"
 
     entry: Dict[str, Any] = {
-        "file": path.name,
+        "file": fname,
         "modes": modes,
         "modes_from": modes_from,
         "args_dict_keys": {key: sorted(value) for key, value in args_dicts.items()},
@@ -267,10 +268,10 @@ def main() -> None:
 
     summary_paths = sorted(
         path
-        for path in archive_dir.iterdir()
+        for path in archive_dir.rglob("*")
         if path.is_file() and path.name.endswith(".summary.json")
     )
-    entries = [register_summary(path) for path in summary_paths]
+    entries = [register_summary(path, str(path.relative_to(archive_dir))) for path in summary_paths]
     counts = {"explicit": 0, "inferred": 0, "unknown": 0}
     for entry in entries:
         counts[entry.get("threshold_source", "unknown")] += 1

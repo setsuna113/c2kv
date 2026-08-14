@@ -1,23 +1,62 @@
 #!/usr/bin/env bash
 # Round-2 archive freeze: snapshot the round-1 agent-eval outputs read-only.
 #
-# Copies all files matching *agent*.jsonl and *.summary.json directly under
-# SRC_DIR (non-recursive, cp -p, source never modified) into DST_DIR, then
-# writes a manifest.tsv (relpath<TAB>sha256<TAB>bytes<TAB>mtime_iso) and
-# manifest.sha256 (sha256sum of manifest.tsv, verifiable with sha256sum -c)
-# into DST_DIR, and prints per-pattern counts.
+# Scope (matches round-1 PR#1 侦察b description): the top-level entries of
+# SRC_DIR named agent_* or ablation_* — the agent_history / agent_tooldef /
+# ablation_0724~0810 evaluation series — copied RECURSIVELY (per-mode
+# .parts/*.summary.json splits and run logs included; they are the input of the
+# mode×qid intersection gate and the T1/T2 pairing). Source is never modified.
 #
-# Refuses to write into an existing non-empty DST_DIR unless --force is given.
+# Two usage modes:
+#   bash agent/forensics_freeze_archive.sh SRC_DIR DST_DIR
+#       Full freeze: copy SRC_DIR/{agent_*,ablation_*} into DST_DIR (cp -a),
+#       then write the manifest. Requires read access to SRC_DIR.
+#   bash agent/forensics_freeze_archive.sh --manifest-only DST_DIR
+#       Manifest phase only, for a DST_DIR already populated by other means
+#       (on the NPU server the copy is executed once as root via
+#       `tar c agent_* ablation_* | tar x -C DST_DIR` because the source
+#       outputs/ is owned by another user; manifest then runs as the
+#       unprivileged analyst account).
 #
-# Usage: bash agent/forensics_freeze_archive.sh SRC_DIR DST_DIR [--force]
+# Manifest: manifest.tsv (relpath<TAB>sha256<TAB>bytes<TAB>mtime_iso) sorted by
+# relpath, plus manifest.sha256 (sha256sum of manifest.tsv). Both manifest
+# files are excluded from the hashed set. Full-freeze mode refuses to write
+# into an existing non-empty DST_DIR unless --force is given.
 set -euo pipefail
 
 usage() {
-  echo "usage: $0 SRC_DIR DST_DIR [--force]" >&2
+  echo "usage: $0 SRC_DIR DST_DIR [--force] | $0 --manifest-only DST_DIR" >&2
   exit 2
 }
 
+write_manifest() {
+  local dst_dir="$1"
+  local manifest="${dst_dir}/manifest.tsv"
+  : > "${manifest}"
+  local total_bytes=0 n_files=0
+  while IFS= read -r -d '' f; do
+    rel="${f#"${dst_dir}/"}"
+    sha="$(sha256sum "${f}" | awk '{print $1}')"
+    bytes="$(stat -c %s "${f}")"
+    mtime="$(date -u -d "@$(stat -c %Y "${f}")" +%Y-%m-%dT%H:%M:%SZ)"
+    printf '%s\t%s\t%s\t%s\n' "${rel}" "${sha}" "${bytes}" "${mtime}" >> "${manifest}"
+    total_bytes=$((total_bytes + bytes))
+    n_files=$((n_files + 1))
+  done < <(find "${dst_dir}" -type f ! -name 'manifest.tsv' ! -name 'manifest.sha256' -print0 | sort -z)
+  (cd "${dst_dir}" && sha256sum manifest.tsv > manifest.sha256)
+  echo "freeze: manifest ${manifest} (${n_files} files, ${total_bytes} bytes)"
+  echo "freeze: manifest sha256 $(cut -d' ' -f1 "${dst_dir}/manifest.sha256")"
+}
+
 [[ $# -ge 2 ]] || usage
+
+if [[ "$1" == "--manifest-only" ]]; then
+  DST_DIR="$2"
+  [[ -d "${DST_DIR}" ]] || { echo "error: DST_DIR not found: ${DST_DIR}" >&2; exit 1; }
+  write_manifest "${DST_DIR}"
+  exit 0
+fi
+
 SRC_DIR="$1"
 DST_DIR="$2"
 shift 2
@@ -40,35 +79,7 @@ if [[ -d "${DST_DIR}" ]] && [[ -n "$(ls -A "${DST_DIR}")" ]]; then
 fi
 mkdir -p "${DST_DIR}"
 
-# Copy phase: read-only w.r.t. the source (cp -p preserves mtime/perms).
-n_jsonl=0
-n_summary=0
-while IFS= read -r -d '' src; do
-  cp -p "${src}" "${DST_DIR}/"
-  case "$(basename "${src}")" in
-    *.summary.json) n_summary=$((n_summary + 1)) ;;
-    *) n_jsonl=$((n_jsonl + 1)) ;;
-  esac
-done < <(find "${SRC_DIR}" -maxdepth 1 -type f \
-  \( -name '*agent*.jsonl' -o -name '*.summary.json' \) -print0 | sort -z)
+# Copy phase: read-only w.r.t. the source (cp -a preserves mtime/perms).
+( cd "${SRC_DIR}" && cp -a agent_* ablation_* "${DST_DIR}/" )
 
-# Manifest phase: hash the copies (catches copy corruption), sorted by name.
-manifest="${DST_DIR}/manifest.tsv"
-: > "${manifest}"
-total_bytes=0
-while IFS= read -r -d '' dst; do
-  rel="$(basename "${dst}")"
-  sha="$(sha256sum "${dst}" | awk '{print $1}')"
-  bytes="$(stat -c %s "${dst}")"
-  mtime="$(date -u -d "@$(stat -c %Y "${dst}")" +%Y-%m-%dT%H:%M:%SZ)"
-  printf '%s\t%s\t%s\t%s\n' "${rel}" "${sha}" "${bytes}" "${mtime}" >> "${manifest}"
-  total_bytes=$((total_bytes + bytes))
-done < <(find "${DST_DIR}" -maxdepth 1 -type f \
-  \( -name '*agent*.jsonl' -o -name '*.summary.json' \) -print0 | sort -z)
-
-# Verify-with: (cd DST_DIR && sha256sum -c manifest.sha256 && awk-based row check).
-(cd "${DST_DIR}" && sha256sum manifest.tsv > manifest.sha256)
-
-echo "freeze: ${n_jsonl} *agent*.jsonl, ${n_summary} *.summary.json, ${total_bytes} bytes"
-echo "freeze: manifest ${manifest} ($((n_jsonl + n_summary)) entries)"
-echo "freeze: manifest sha256 $(cut -d' ' -f1 "${DST_DIR}/manifest.sha256")"
+write_manifest "${DST_DIR}"
