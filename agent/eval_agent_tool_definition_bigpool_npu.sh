@@ -39,13 +39,17 @@ RATIO="${RATIO:-4}"
 # R2 S1/S2 arms (default off): prior = topk_only with TOP_K=0 (no tool
 # documents retained — pure model-prior floor); topk_semantic = topk_only with
 # the CPU BM25 ranker. topk_only keeps its lexical default unchanged.
-ARM="${BIGPOOL_ARM:?set BIGPOOL_ARM to full, topk_only, topk_semantic, or prior}"
+ARM="${BIGPOOL_ARM:?set BIGPOOL_ARM to full, c2kv, topk_only, topk_semantic, or prior}"
 ROUTER_STRATEGY="${ROUTER_STRATEGY:-lexical}"
 case "${ARM}" in
   topk_semantic) ROUTER_STRATEGY=bm25 ;;
   prior) TOP_K=0 ;;
 esac
-OUTPUT_FILE="${OUTPUT_FILE:-./outputs/bigpool_${ARM}$([[ ${ARM} != full ]] && echo _k${TOP_K}).jsonl}"
+case "${ARM}" in
+  full|c2kv) SUFFIX="" ;;
+  *) SUFFIX="_k${TOP_K}" ;;
+esac
+OUTPUT_FILE="${OUTPUT_FILE:-./outputs/bigpool_${ARM}${SUFFIX}.jsonl}"
 mkdir -p "$(dirname "${OUTPUT_FILE}")"
 
 SPLIT_ARGS=(--split "${SPLIT}" --split_manifest_name "${SPLIT_NAME}")
@@ -81,6 +85,34 @@ if [[ "${ARM}" == "full" ]]; then
     --system_attn_impl "${FULL_ATTN_IMPL}" \
     --gist_attn_impl "${FULL_ATTN_IMPL}" \
     --generate_attn_impl "${FULL_ATTN_IMPL}" \
+    --truncate_tool_definition False \
+    --require_tool_call True
+elif [[ "${ARM}" == "c2kv" ]]; then
+  # R2 退化阶梯臂：c2kv 压缩（ratio 默认 4）在当前预算 cap 下评测。
+  python agent/eval_agent_tool_definition_c2kv.py \
+    --device_type npu \
+    --model "${MODEL_PATH}" \
+    --base_model "${BASE_MODEL}" \
+    --tokenizer "${TOKENIZER_PATH}" \
+    --dataset_path "${DATASET_PATH}" \
+    --output_file "${OUTPUT_FILE}" \
+    "${SPLIT_ARGS[@]}" \
+    --eval_ratio "${EVAL_RATIO}" \
+    --split_seed "${SPLIT_SEED}" \
+    --max_samples_per_session "${MAX_SAMPLES_PER_SESSION}" \
+    --min_target_tokens "${MIN_TARGET_TOKENS}" \
+    --max_examples "${MAX_EXAMPLES}" \
+    --max_doc_length "${MAX_DOC_LENGTH}" \
+    --max_doc_num "${MAX_DOC_NUM}" \
+    --max_tool_definition_tokens "${MAX_TOOL_DEFINITION_TOKENS}" \
+    --tool_document_eval_mode "${TOOL_DOCUMENT_EVAL_MODE}" \
+    --max_new_tokens "${MAX_NEW_TOKENS}" \
+    --max_baseline_input_tokens "${MAX_BASELINE_INPUT_TOKENS}" \
+    --mode c2kv \
+    --ratios "${RATIO}" \
+    --system_attn_impl "${NPU_ATTN_IMPL}" \
+    --gist_attn_impl "${NPU_ATTN_IMPL}" \
+    --generate_attn_impl "${NPU_ATTN_IMPL}" \
     --truncate_tool_definition False \
     --require_tool_call True
 elif [[ "${ARM}" == "topk_only" || "${ARM}" == "topk_semantic" || "${ARM}" == "prior" ]]; then
