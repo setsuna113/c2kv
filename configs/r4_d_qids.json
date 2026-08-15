@@ -1,0 +1,5459 @@
+{
+  "description": "R4 task D frozen sample set: union of valid qids across PR#1 merged_{A,B,C,D}.jsonl (sha256-bound). Order: sorted by qid.",
+  "source_archives": {
+    "A": {
+      "path": "C:\\Users\\jason\\r4_work\\merged_A.jsonl",
+      "sha256": "743247d1e7dfcb1fbb175e787bd3257666192d1c77e047df529e8f32da388b0a",
+      "rows": 475,
+      "valid_rows": 420
+    },
+    "B": {
+      "path": "C:\\Users\\jason\\r4_work\\merged_B.jsonl",
+      "sha256": "ef1478a5c2afeab91b12c8aa370e541d48461e937607bc01482f12226d7cd39d",
+      "rows": 475,
+      "valid_rows": 445
+    },
+    "C": {
+      "path": "C:\\Users\\jason\\r4_work\\merged_C.jsonl",
+      "sha256": "a47c42234a5e48cfddb2ce6e2dfdf1b4ad775a419fc830b318c4703f04a09645",
+      "rows": 475,
+      "valid_rows": 475
+    },
+    "D": {
+      "path": "C:\\Users\\jason\\r4_work\\merged_D.jsonl",
+      "sha256": "ac1fdc3a295a64716935b3f4809fceba62674dac31b21271d179b31776e5df84",
+      "rows": 611,
+      "valid_rows": 500
+    }
+  },
+  "regime": {
+    "doc_tokens_min": 34,
+    "doc_tokens_median": 2313,
+    "doc_tokens_max": 9271,
+    "note": "doc_tokens == kept_history_tokens in the PR#1 archives (history regime, not a 32k tool pool)"
+  },
+  "selection": {
+    "pr1_config": "subset_disjoint, eval_ratio=0.1, split_seed=42, max_samples_per_session=4, include_tools=True, greedy, max_new_tokens=128, enable_thinking=False, checkpoint-2678, ratio=4, eager",
+    "union_n": 594,
+    "frozen_n": 594,
+    "subset_rule": {
+      "applied": false,
+      "rule": "estimated 5.5 GPU-h <= 35.0 h -> full union"
+    },
+    "latency_estimate": {
+      "proxy": "arm-B (c2kv free) latency_sec per qid, arm median for qids missing in B",
+      "est_h_total_3_arms": 5.49,
+      "margin": 1.25
+    }
+  },
+  "n": 594,
+  "n_sessions": 178,
+  "qids": [
+    "0175e835a074_a9e56e60:12",
+    "0175e835a074_a9e56e60:25",
+    "0175e835a074_a9e56e60:5",
+    "0380f9026ebe_2bf17776:1",
+    "0380f9026ebe_2bf17776:2",
+    "0380f9026ebe_2bf17776:3",
+    "0380f9026ebe_2bf17776:4",
+    "0380f9026ebe_4ecc8c76:3",
+    "0380f9026ebe_4ecc8c76:4",
+    "0380f9026ebe_4ecc8c76:5",
+    "0380f9026ebe_4ecc8c76:7",
+    "0380f9026ebe_613068a5:1",
+    "0380f9026ebe_613068a5:4",
+    "0380f9026ebe_613068a5:5",
+    "0380f9026ebe_613068a5:6",
+    "0380f9026ebe_d2dc4e9d:1",
+    "0380f9026ebe_d2dc4e9d:2",
+    "0380f9026ebe_d2dc4e9d:4",
+    "0380f9026ebe_d2dc4e9d:6",
+    "0380f9026ebe_e63bc625:1",
+    "0380f9026ebe_e63bc625:2",
+    "0380f9026ebe_e63bc625:3",
+    "0380f9026ebe_e63bc625:5",
+    "066de3655406_584db4fb:17",
+    "066de3655406_584db4fb:20",
+    "066de3655406_584db4fb:23",
+    "066de3655406_755996d0:12",
+    "066de3655406_755996d0:20",
+    "066de3655406_755996d0:21",
+    "066de3655406_99aad0a5:12",
+    "066de3655406_99aad0a5:15",
+    "066de3655406_99aad0a5:22",
+    "066de3655406_99aad0a5:27",
+    "066de3655406_cdd90af7:11",
+    "066de3655406_cdd90af7:2",
+    "066de3655406_cdd90af7:8",
+    "066de3655406_cdd90af7:9",
+    "066de3655406_f33766e1:2",
+    "0b5e2a9b0887_577cf2bf:2",
+    "0b5e2a9b0887_577cf2bf:3",
+    "0b5e2a9b0887_577cf2bf:4",
+    "0b5e2a9b0887_577cf2bf:5",
+    "0b5e2a9b0887_9c17571a:3",
+    "0b5e2a9b0887_9e73e78e:1",
+    "0b5e2a9b0887_9e73e78e:5",
+    "0b5e2a9b0887_9e73e78e:7",
+    "0b5e2a9b0887_9e73e78e:8",
+    "0b5e2a9b0887_c4af7c4f:1",
+    "0b5e2a9b0887_c4af7c4f:3",
+    "0b5e2a9b0887_c4af7c4f:4",
+    "0b5e2a9b0887_c4af7c4f:5",
+    "0b5e2a9b0887_ca4c522b:1",
+    "0b5e2a9b0887_ca4c522b:5",
+    "0b5e2a9b0887_f0c4dd75:1",
+    "0b5e2a9b0887_f0c4dd75:3",
+    "0b5e2a9b0887_f0c4dd75:4",
+    "0b5e2a9b0887_f0c4dd75:5",
+    "10d642ac9c10_a23dcd0b:1",
+    "10d642ac9c10_a23dcd0b:2",
+    "10d642ac9c10_a23dcd0b:5",
+    "10d642ac9c10_a23dcd0b:7",
+    "140646846ae7_6bfabab3:24",
+    "140646846ae7_6bfabab3:26",
+    "140646846ae7_6bfabab3:38",
+    "140646846ae7_9826bf77:15",
+    "140646846ae7_9826bf77:38",
+    "140646846ae7_9826bf77:44",
+    "15bb4bab2031_134203cb:11",
+    "15bb4bab2031_134203cb:14",
+    "15bb4bab2031_134203cb:19",
+    "15bb4bab2031_134203cb:20",
+    "15bb4bab2031_bdb6d1f1:1",
+    "15bb4bab2031_bdb6d1f1:3",
+    "15bb4bab2031_bdb6d1f1:4",
+    "15bb4bab2031_bdb6d1f1:5",
+    "15bb4bab2031_cf799474:12",
+    "15bb4bab2031_cf799474:13",
+    "15bb4bab2031_cf799474:4",
+    "18b5978679fb_53a7d72c:17",
+    "18b5978679fb_53a7d72c:19",
+    "18b5978679fb_cb958b0c:3",
+    "18b5978679fb_cb958b0c:5",
+    "18b5978679fb_cb958b0c:7",
+    "18b5978679fb_cb958b0c:8",
+    "18b5978679fb_f3d8f2ff:14",
+    "18b5978679fb_f3d8f2ff:19",
+    "18b5978679fb_f3d8f2ff:2",
+    "18b5978679fb_fb678903:13",
+    "18b5978679fb_fb678903:14",
+    "18b5978679fb_fb678903:17",
+    "18b5978679fb_fb678903:26",
+    "18efd0e196b7_cd7c42d3:10",
+    "18efd0e196b7_cd7c42d3:12",
+    "18efd0e196b7_cd7c42d3:2",
+    "18efd0e196b7_cd7c42d3:9",
+    "18efd0e196b7_d42c66de:11",
+    "18efd0e196b7_d42c66de:3",
+    "18efd0e196b7_d42c66de:7",
+    "18efd0e196b7_d42c66de:8",
+    "24347bbedbb0_12ea82b1:0",
+    "24347bbedbb0_12ea82b1:3",
+    "24347bbedbb0_5fd5646a:26",
+    "24347bbedbb0_5fd5646a:27",
+    "24347bbedbb0_5fd5646a:29",
+    "24347bbedbb0_5fd5646a:4",
+    "24347bbedbb0_c3e0424a:0",
+    "24347bbedbb0_c3e0424a:2",
+    "24347bbedbb0_c3e0424a:3",
+    "24347bbedbb0_c3e0424a:5",
+    "24347bbedbb0_ddf2f922:0",
+    "24347bbedbb0_ddf2f922:2",
+    "24347bbedbb0_ddf2f922:3",
+    "247b0c0650d3_3343dec1:1",
+    "247b0c0650d3_3343dec1:2",
+    "247b0c0650d3_3343dec1:3",
+    "247b0c0650d3_5126fda3:2",
+    "247b0c0650d3_5126fda3:4",
+    "247b0c0650d3_5d2c710a:1",
+    "247b0c0650d3_5d2c710a:2",
+    "247b0c0650d3_5d2c710a:3",
+    "247b0c0650d3_5d2c710a:4",
+    "247b0c0650d3_65a4bc25:1",
+    "247b0c0650d3_65a4bc25:2",
+    "247b0c0650d3_65a4bc25:3",
+    "247b0c0650d3_65a4bc25:4",
+    "247b0c0650d3_74734c48:1",
+    "247b0c0650d3_74734c48:3",
+    "247b0c0650d3_74734c48:4",
+    "247b0c0650d3_74734c48:6",
+    "247b0c0650d3_bc2988af:3",
+    "247b0c0650d3_bc2988af:4",
+    "247b0c0650d3_bc2988af:7",
+    "247b0c0650d3_bc2988af:9",
+    "247b0c0650d3_bff9f7bd:2",
+    "247b0c0650d3_bff9f7bd:4",
+    "247b0c0650d3_bff9f7bd:5",
+    "266b7f5a8aa9_4868c229:1",
+    "266b7f5a8aa9_4868c229:3",
+    "266b7f5a8aa9_4868c229:5",
+    "266b7f5a8aa9_4868c229:6",
+    "266b7f5a8aa9_c6d66a2f:1",
+    "266b7f5a8aa9_c6d66a2f:2",
+    "266b7f5a8aa9_c6d66a2f:3",
+    "2a21e94e0687_29595dd0:10",
+    "2a21e94e0687_29595dd0:15",
+    "2a21e94e0687_29595dd0:2",
+    "2a21e94e0687_29595dd0:5",
+    "2a21e94e0687_76685f3e:12",
+    "2a21e94e0687_76685f3e:15",
+    "2a21e94e0687_76685f3e:22",
+    "2a21e94e0687_76685f3e:4",
+    "2a21e94e0687_a94c3f31:1",
+    "2a21e94e0687_a94c3f31:16",
+    "2a21e94e0687_a94c3f31:17",
+    "2a21e94e0687_a94c3f31:20",
+    "2a21e94e0687_caa66301:4",
+    "2a21e94e0687_caa66301:7",
+    "2a21e94e0687_d4ac22a2:13",
+    "2a21e94e0687_d4ac22a2:2",
+    "2a21e94e0687_d4ac22a2:6",
+    "2d5e2043dcf4_3a44bf13:2",
+    "2d5e2043dcf4_3a44bf13:3",
+    "2d5e2043dcf4_cb3ec441:1",
+    "2d5e2043dcf4_cb3ec441:2",
+    "2d5e2043dcf4_cb3ec441:6",
+    "2d5e2043dcf4_cb3ec441:8",
+    "30ed3250babd_1dda5b8f:14",
+    "30ed3250babd_1dda5b8f:16",
+    "30ed3250babd_1dda5b8f:18",
+    "30ed3250babd_23dd68d0:28",
+    "30ed3250babd_23dd68d0:37",
+    "30ed3250babd_23dd68d0:5",
+    "30ed3250babd_2b0175dc:14",
+    "30ed3250babd_2b0175dc:40",
+    "30ed3250babd_2b0175dc:41",
+    "30ed3250babd_2b0175dc:45",
+    "30ed3250babd_39c02a90:1",
+    "30ed3250babd_39c02a90:3",
+    "30ed3250babd_39c02a90:4",
+    "30ed3250babd_39c02a90:5",
+    "30ed3250babd_4fa229f5:21",
+    "30ed3250babd_4fa229f5:25",
+    "30ed3250babd_4fa229f5:7",
+    "30ed3250babd_4fa229f5:8",
+    "30ed3250babd_6690bb14:13",
+    "30ed3250babd_6690bb14:34",
+    "30ed3250babd_75abe95e:6",
+    "30ed3250babd_75abe95e:9",
+    "30ed3250babd_78a45eac:20",
+    "30ed3250babd_78a45eac:22",
+    "30ed3250babd_78a45eac:27",
+    "30ed3250babd_78a45eac:5",
+    "30ed3250babd_7a6b0586:18",
+    "30ed3250babd_7a6b0586:30",
+    "30ed3250babd_7a6b0586:32",
+    "30ed3250babd_dc51a5fc:21",
+    "30ed3250babd_dc51a5fc:52",
+    "30ed3250babd_dc51a5fc:9",
+    "30ed3250babd_de7fa846:12",
+    "30ed3250babd_de7fa846:13",
+    "30ed3250babd_de7fa846:2",
+    "30ed3250babd_de7fa846:6",
+    "379733137f5d_05ec7d21:1",
+    "379733137f5d_05ec7d21:4",
+    "379733137f5d_05ec7d21:6",
+    "379733137f5d_0ff66e22:24",
+    "379733137f5d_0ff66e22:27",
+    "379733137f5d_0ff66e22:6",
+    "379733137f5d_14205a5d:1",
+    "379733137f5d_14205a5d:10",
+    "379733137f5d_14205a5d:2",
+    "379733137f5d_14205a5d:6",
+    "379733137f5d_18ea62d8:1",
+    "379733137f5d_18ea62d8:2",
+    "379733137f5d_18ea62d8:3",
+    "379733137f5d_18ea62d8:4",
+    "379733137f5d_6b1183f2:12",
+    "379733137f5d_6b1183f2:7",
+    "379733137f5d_6b1183f2:9",
+    "379733137f5d_c92384a5:1",
+    "379733137f5d_c92384a5:4",
+    "379733137f5d_c92384a5:5",
+    "379733137f5d_c95cd078:4",
+    "379733137f5d_c95cd078:5",
+    "379733137f5d_c95cd078:6",
+    "379733137f5d_c95cd078:9",
+    "379733137f5d_e508b5f1:12",
+    "379733137f5d_e508b5f1:14",
+    "379733137f5d_e508b5f1:29",
+    "379733137f5d_e81d8f92:2",
+    "379733137f5d_e81d8f92:4",
+    "379733137f5d_e81d8f92:5",
+    "379733137f5d_fceae509:2",
+    "379733137f5d_fceae509:3",
+    "379733137f5d_fceae509:5",
+    "454d983d1286_a47ae76b:2",
+    "454d983d1286_a47ae76b:4",
+    "454d983d1286_a47ae76b:5",
+    "454d983d1286_a47ae76b:8",
+    "454d983d1286_e2a08535:1",
+    "454d983d1286_e2a08535:3",
+    "454d983d1286_e2a08535:4",
+    "454d983d1286_e2a08535:5",
+    "45eff42acfad_28b1a2b7:7",
+    "45eff42acfad_28b1a2b7:8",
+    "45eff42acfad_3db0b212:1",
+    "45eff42acfad_3db0b212:10",
+    "45eff42acfad_3db0b212:6",
+    "45eff42acfad_afe4d840:2",
+    "45eff42acfad_afe4d840:3",
+    "45eff42acfad_afe4d840:5",
+    "4d47860a4332_2f7c65b1:1",
+    "4d47860a4332_2f7c65b1:3",
+    "4d47860a4332_2f7c65b1:4",
+    "4d47860a4332_2f7c65b1:7",
+    "4d47860a4332_415baf78:1",
+    "4d47860a4332_415baf78:3",
+    "4d47860a4332_415baf78:4",
+    "4d47860a4332_415baf78:6",
+    "4d47860a4332_4670f354:1",
+    "4d47860a4332_4670f354:2",
+    "4d47860a4332_4670f354:3",
+    "4d47860a4332_64b54747:2",
+    "4d47860a4332_8fd3da28:1",
+    "56a7d0bde064_482bab1b:13",
+    "56a7d0bde064_482bab1b:16",
+    "56a7d0bde064_482bab1b:5",
+    "56a7d0bde064_482bab1b:9",
+    "56c19f19c4f2_15a5314f:13",
+    "56c19f19c4f2_15a5314f:20",
+    "56c19f19c4f2_15a5314f:26",
+    "56c19f19c4f2_15a5314f:4",
+    "56c19f19c4f2_27842b9e:11",
+    "56c19f19c4f2_27842b9e:12",
+    "56c19f19c4f2_27842b9e:2",
+    "56c19f19c4f2_27842b9e:9",
+    "56c19f19c4f2_2b790de2:11",
+    "56c19f19c4f2_2b790de2:16",
+    "56c19f19c4f2_2b790de2:17",
+    "56c19f19c4f2_2b790de2:5",
+    "56c19f19c4f2_2d1988ca:1",
+    "56c19f19c4f2_2d1988ca:4",
+    "56c19f19c4f2_2d1988ca:6",
+    "56c19f19c4f2_2d1988ca:7",
+    "56c19f19c4f2_2e387182:2",
+    "56c19f19c4f2_2e387182:6",
+    "56c19f19c4f2_2e387182:7",
+    "56c19f19c4f2_2e387182:9",
+    "56c19f19c4f2_35262586:1",
+    "56c19f19c4f2_35262586:2",
+    "56c19f19c4f2_35262586:4",
+    "56c19f19c4f2_568319e1:1",
+    "56c19f19c4f2_568319e1:2",
+    "56c19f19c4f2_568319e1:3",
+    "56c19f19c4f2_568319e1:4",
+    "56c19f19c4f2_c9193d26:16",
+    "56c19f19c4f2_c9193d26:17",
+    "56c19f19c4f2_c9193d26:20",
+    "56c19f19c4f2_c9193d26:4",
+    "56fecc41f358_4da0408d:3",
+    "56fecc41f358_4da0408d:5",
+    "56fecc41f358_7884700e:16",
+    "56fecc41f358_7884700e:45",
+    "56fecc41f358_7884700e:48",
+    "56fecc41f358_97857673:1",
+    "56fecc41f358_97857673:25",
+    "56fecc41f358_97857673:28",
+    "56fecc41f358_dd2d916d:14",
+    "56fecc41f358_dd2d916d:31",
+    "56fecc41f358_dd2d916d:9",
+    "58c261317e07_088690cf:1",
+    "58c261317e07_088690cf:2",
+    "58c261317e07_088690cf:3",
+    "5b9274b3192a_06442621:1",
+    "5b9274b3192a_06442621:3",
+    "5b9274b3192a_06442621:5",
+    "5b9274b3192a_06442621:6",
+    "5b9274b3192a_4a07d0d6:4",
+    "5b9274b3192a_4a07d0d6:7",
+    "5b9274b3192a_4a07d0d6:8",
+    "5b9274b3192a_4a07d0d6:9",
+    "5b9274b3192a_5294f42f:1",
+    "5b9274b3192a_5294f42f:3",
+    "5b9274b3192a_5294f42f:4",
+    "5b9274b3192a_5294f42f:6",
+    "5b9274b3192a_5416ec7c:13",
+    "5b9274b3192a_5416ec7c:16",
+    "5b9274b3192a_5416ec7c:3",
+    "5b9274b3192a_5416ec7c:4",
+    "5b9274b3192a_626dda11:1",
+    "5b9274b3192a_626dda11:10",
+    "5b9274b3192a_626dda11:2",
+    "5b9274b3192a_626dda11:9",
+    "5b9274b3192a_6fc159f3:1",
+    "5b9274b3192a_6fc159f3:11",
+    "5b9274b3192a_6fc159f3:7",
+    "5b9274b3192a_851b502d:11",
+    "5b9274b3192a_851b502d:2",
+    "5b9274b3192a_bc0debeb:14",
+    "5b9274b3192a_bc0debeb:15",
+    "5b9274b3192a_bc0debeb:7",
+    "5b9274b3192a_e2393751:1",
+    "5b9274b3192a_e2393751:10",
+    "5b9274b3192a_e2393751:12",
+    "5b9274b3192a_e2393751:6",
+    "5b9274b3192a_ed755656:3",
+    "5b9274b3192a_ed755656:4",
+    "5b9274b3192a_ed755656:6",
+    "5b9274b3192a_f8203839:1",
+    "5b9274b3192a_f8203839:4",
+    "5b9274b3192a_f8203839:6",
+    "5b9274b3192a_f8203839:9",
+    "6222edc957a9_17201d85:12",
+    "6222edc957a9_17201d85:3",
+    "6222edc957a9_17201d85:5",
+    "6222edc957a9_17201d85:6",
+    "6222edc957a9_5bea2ac5:1",
+    "6222edc957a9_5bea2ac5:3",
+    "6222edc957a9_5bea2ac5:8",
+    "638d222a8bb4_62dac91e:0",
+    "638d222a8bb4_62dac91e:2",
+    "638d222a8bb4_62dac91e:3",
+    "638d222a8bb4_62dac91e:9",
+    "6b79d31ff461_c33b3f1b:1",
+    "6b79d31ff461_c33b3f1b:12",
+    "6b79d31ff461_c33b3f1b:2",
+    "6b79d31ff461_d810da55:10",
+    "6b79d31ff461_d810da55:4",
+    "6b79d31ff461_d810da55:9",
+    "6b79d31ff461_ee0a2a70:5",
+    "6b79d31ff461_ee0a2a70:7",
+    "6b79d31ff461_ee0a2a70:8",
+    "6b79d31ff461_ee0a2a70:9",
+    "75037d12258b_89667df4:1",
+    "75037d12258b_89667df4:2",
+    "756b4931c8e8_0df7bbda:4",
+    "756b4931c8e8_0df7bbda:5",
+    "756b4931c8e8_0df7bbda:6",
+    "756b4931c8e8_0df7bbda:7",
+    "756b4931c8e8_86b0feee:1",
+    "756b4931c8e8_86b0feee:3",
+    "756b4931c8e8_f605c508:4",
+    "756b4931c8e8_f605c508:6",
+    "756b4931c8e8_f605c508:7",
+    "7c39d2802396_912b19fc:10",
+    "7c39d2802396_912b19fc:13",
+    "7c39d2802396_912b19fc:15",
+    "7c39d2802396_912b19fc:17",
+    "7fa0750e35c4_059328b3:1",
+    "7fa0750e35c4_059328b3:2",
+    "7fa0750e35c4_059328b3:3",
+    "7fa0750e35c4_5580f9af:2",
+    "7fa0750e35c4_5580f9af:6",
+    "7fa0750e35c4_5580f9af:7",
+    "7fa0750e35c4_5580f9af:9",
+    "7fa0750e35c4_5b689ff5:2",
+    "7fa0750e35c4_5b689ff5:3",
+    "7fa0750e35c4_63d4b2fa:1",
+    "7fa0750e35c4_63d4b2fa:5",
+    "7fa0750e35c4_63d4b2fa:6",
+    "7fa0750e35c4_63d4b2fa:8",
+    "7fa0750e35c4_b2dad9e8:1",
+    "7fa0750e35c4_b2dad9e8:3",
+    "7fa0750e35c4_b2dad9e8:4",
+    "7fa0750e35c4_b2dad9e8:5",
+    "7fa0750e35c4_d1a16024:1",
+    "7fa0750e35c4_d1a16024:2",
+    "7fa0750e35c4_d1a16024:3",
+    "7fa0750e35c4_f786e343:1",
+    "7fa0750e35c4_f786e343:2",
+    "7fa0750e35c4_f786e343:3",
+    "7fa0750e35c4_f786e343:4",
+    "8956eab31b56_33fe9c3d:14",
+    "8956eab31b56_33fe9c3d:16",
+    "8956eab31b56_33fe9c3d:19",
+    "8956eab31b56_33fe9c3d:5",
+    "8a39d132904f_754eee88:1",
+    "8a39d132904f_754eee88:3",
+    "8d558bd01979_6e8f50b8:19",
+    "8d558bd01979_6e8f50b8:34",
+    "8d558bd01979_6e8f50b8:38",
+    "8d558bd01979_6e8f50b8:41",
+    "8d558bd01979_a4d9b034:17",
+    "8d558bd01979_a4d9b034:24",
+    "8d558bd01979_a4d9b034:7",
+    "938435e2d019_0bba69a7:5",
+    "938435e2d019_0bba69a7:7",
+    "938435e2d019_0bba69a7:8",
+    "938435e2d019_3496ec59:1",
+    "938435e2d019_be495def:1",
+    "938435e2d019_be495def:2",
+    "9f000393d262_3dd3a1ea:10",
+    "9f000393d262_3dd3a1ea:4",
+    "9f000393d262_3dd3a1ea:7",
+    "a238cac93253_50d67417:21",
+    "a238cac93253_50d67417:25",
+    "a238cac93253_50d67417:29",
+    "a238cac93253_d6eb1f26:12",
+    "a238cac93253_d6eb1f26:14",
+    "a238cac93253_d6eb1f26:16",
+    "a238cac93253_d6eb1f26:30",
+    "ab2f8ca80599_3c0a75ce:11",
+    "ab2f8ca80599_3c0a75ce:15",
+    "ab2f8ca80599_3c0a75ce:8",
+    "ab2f8ca80599_3c0a75ce:9",
+    "ab2f8ca80599_8df7cf0b:1",
+    "ab2f8ca80599_8df7cf0b:11",
+    "ab2f8ca80599_8df7cf0b:2",
+    "ab2f8ca80599_8df7cf0b:8",
+    "ab2f8ca80599_8ec4eb8d:16",
+    "ab2f8ca80599_8ec4eb8d:2",
+    "ab2f8ca80599_8ec4eb8d:5",
+    "ab2f8ca80599_a378da8b:1",
+    "ab2f8ca80599_a378da8b:2",
+    "ab2f8ca80599_a378da8b:6",
+    "ac0f039f4468_0e7a17fd:15",
+    "ac0f039f4468_0e7a17fd:20",
+    "ac0f039f4468_0e7a17fd:23",
+    "ac0f039f4468_0e7a17fd:43",
+    "ac0f039f4468_24474fd2:2",
+    "ac0f039f4468_24474fd2:4",
+    "ac0f039f4468_24474fd2:5",
+    "ac0f039f4468_24474fd2:7",
+    "ac0f039f4468_32cc3b6a:1",
+    "ac0f039f4468_66e4da95:15",
+    "ac0f039f4468_66e4da95:30",
+    "ac0f039f4468_66e4da95:33",
+    "ac0f039f4468_66e4da95:4",
+    "ac0f039f4468_841dd6f7:1",
+    "ac0f039f4468_841dd6f7:12",
+    "ac0f039f4468_841dd6f7:14",
+    "ac0f039f4468_97768847:2",
+    "ac0f039f4468_97768847:3",
+    "ac0f039f4468_97768847:5",
+    "ac0f039f4468_cde1344c:15",
+    "ac0f039f4468_cde1344c:17",
+    "ac0f039f4468_cde1344c:29",
+    "ac0f039f4468_cde1344c:9",
+    "ac0f039f4468_cf4baf5a:1",
+    "ac0f039f4468_cf4baf5a:2",
+    "ac0f039f4468_cf4baf5a:3",
+    "ac0f039f4468_cf4baf5a:4",
+    "ac0f039f4468_fd65390c:1",
+    "ac0f039f4468_fd65390c:3",
+    "ac0f039f4468_fd65390c:7",
+    "bd7cb52ec7f8_03762b35:1",
+    "bd7cb52ec7f8_03762b35:2",
+    "bd7cb52ec7f8_03762b35:5",
+    "bd7cb52ec7f8_0f4f1a0c:2",
+    "bd7cb52ec7f8_0f4f1a0c:3",
+    "bd7cb52ec7f8_0f4f1a0c:4",
+    "bd7cb52ec7f8_0f4f1a0c:5",
+    "bd7cb52ec7f8_5047588b:2",
+    "bd7cb52ec7f8_5047588b:3",
+    "bd7cb52ec7f8_5047588b:4",
+    "bd7cb52ec7f8_5047588b:5",
+    "bd7cb52ec7f8_c385f774:1",
+    "bd7cb52ec7f8_c385f774:2",
+    "bd7cb52ec7f8_c385f774:3",
+    "bd7cb52ec7f8_c385f774:4",
+    "bd7cb52ec7f8_e40dca56:1",
+    "bd7cb52ec7f8_e40dca56:3",
+    "bd7cb52ec7f8_e40dca56:4",
+    "c0d1d84c7898_87da46b2:3",
+    "c0d1d84c7898_87da46b2:8",
+    "c0d1d84c7898_87da46b2:9",
+    "c0d1d84c7898_9fad246c:14",
+    "c0d1d84c7898_9fad246c:5",
+    "c0d1d84c7898_abe62f9d:21",
+    "c0d1d84c7898_abe62f9d:31",
+    "c0d1d84c7898_c75da2fd:15",
+    "c0d1d84c7898_c75da2fd:22",
+    "c0d1d84c7898_c75da2fd:37",
+    "c0d1d84c7898_c75da2fd:74",
+    "c0d1d84c7898_cf9a5a39:30",
+    "c0d1d84c7898_cf9a5a39:4",
+    "c0d1d84c7898_cf9a5a39:41",
+    "c0d1d84c7898_cf9a5a39:44",
+    "d090830da26c_279d52cd:17",
+    "d090830da26c_279d52cd:21",
+    "d090830da26c_279d52cd:35",
+    "d090830da26c_279d52cd:9",
+    "d090830da26c_7f6aba00:18",
+    "d090830da26c_7f6aba00:5",
+    "d090830da26c_7f6aba00:7",
+    "d090830da26c_a61f0025:2",
+    "d090830da26c_a61f0025:8",
+    "d090830da26c_a61f0025:9",
+    "d090830da26c_de61deba:18",
+    "d090830da26c_de61deba:5",
+    "d090830da26c_e0237641:1",
+    "d090830da26c_e0237641:10",
+    "d090830da26c_e0237641:15",
+    "d090830da26c_e0237641:21",
+    "d090830da26c_e15cf773:11",
+    "d090830da26c_e15cf773:16",
+    "d090830da26c_e15cf773:3",
+    "d090830da26c_e15cf773:7",
+    "d090830da26c_e71252ae:19",
+    "d090830da26c_e71252ae:29",
+    "d090830da26c_e71252ae:37",
+    "d090830da26c_e71252ae:43",
+    "d090830da26c_fbd39b21:12",
+    "d090830da26c_fbd39b21:13",
+    "d090830da26c_fbd39b21:8",
+    "d3d3e0d1a8f8_20b42b16:4",
+    "d3d3e0d1a8f8_20b42b16:5",
+    "d3d3e0d1a8f8_20b42b16:6",
+    "d3d3e0d1a8f8_20b42b16:7",
+    "d5c4f35bed6a_70236830:1",
+    "d5c4f35bed6a_70236830:2",
+    "d5c4f35bed6a_70236830:3",
+    "d5c4f35bed6a_70236830:4",
+    "d5c4f35bed6a_c4ca6b42:1",
+    "d5c4f35bed6a_c4ca6b42:2",
+    "d5c4f35bed6a_fccfdfd8:1",
+    "d5c4f35bed6a_fccfdfd8:3",
+    "d5c4f35bed6a_fccfdfd8:5",
+    "d9ccf53fe748_18eb7164:2",
+    "d9ccf53fe748_18eb7164:4",
+    "d9ccf53fe748_18eb7164:5",
+    "d9ccf53fe748_18eb7164:6",
+    "d9ccf53fe748_351f4a95:1",
+    "d9ccf53fe748_351f4a95:38",
+    "d9ccf53fe748_351f4a95:41",
+    "d9ccf53fe748_958d7c0b:1",
+    "d9ccf53fe748_958d7c0b:2",
+    "d9ccf53fe748_958d7c0b:3",
+    "d9ccf53fe748_958d7c0b:5",
+    "d9ccf53fe748_b4b16cfc:33",
+    "d9ccf53fe748_b4b16cfc:4",
+    "d9ccf53fe748_fd5138a6:1",
+    "d9ccf53fe748_fd5138a6:3",
+    "d9ccf53fe748_fd5138a6:4",
+    "d9ccf53fe748_fd5138a6:5",
+    "e416e0e39ffd_8999303e:2",
+    "e416e0e39ffd_8999303e:4",
+    "e416e0e39ffd_8999303e:6",
+    "e416e0e39ffd_e13aa6a4:1",
+    "e416e0e39ffd_e13aa6a4:4",
+    "e416e0e39ffd_e13aa6a4:5",
+    "e416e0e39ffd_e13aa6a4:7",
+    "e416e0e39ffd_e845efed:1",
+    "e416e0e39ffd_e845efed:2",
+    "e416e0e39ffd_e845efed:3",
+    "e416e0e39ffd_e845efed:4",
+    "e920f13c2421_21493c96:1",
+    "e920f13c2421_21493c96:3",
+    "e920f13c2421_21493c96:5",
+    "e920f13c2421_21493c96:6",
+    "fe34eb314a84_5be21a75:5",
+    "fe34eb314a84_5be21a75:6",
+    "fe34eb314a84_5be21a75:8",
+    "fe34eb314a84_5be21a75:9"
+  ],
+  "per_qid": {
+    "0175e835a074_a9e56e60:12": {
+      "session_id": "0175e835a074_a9e56e60",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "0175e835a074_a9e56e60:25": {
+      "session_id": "0175e835a074_a9e56e60",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C"
+      ]
+    },
+    "0175e835a074_a9e56e60:5": {
+      "session_id": "0175e835a074_a9e56e60",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C"
+      ]
+    },
+    "0380f9026ebe_2bf17776:1": {
+      "session_id": "0380f9026ebe_2bf17776",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "0380f9026ebe_2bf17776:2": {
+      "session_id": "0380f9026ebe_2bf17776",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "0380f9026ebe_2bf17776:3": {
+      "session_id": "0380f9026ebe_2bf17776",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "0380f9026ebe_2bf17776:4": {
+      "session_id": "0380f9026ebe_2bf17776",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "0380f9026ebe_4ecc8c76:3": {
+      "session_id": "0380f9026ebe_4ecc8c76",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "0380f9026ebe_4ecc8c76:4": {
+      "session_id": "0380f9026ebe_4ecc8c76",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "0380f9026ebe_4ecc8c76:5": {
+      "session_id": "0380f9026ebe_4ecc8c76",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "0380f9026ebe_4ecc8c76:7": {
+      "session_id": "0380f9026ebe_4ecc8c76",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "0380f9026ebe_613068a5:1": {
+      "session_id": "0380f9026ebe_613068a5",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "0380f9026ebe_613068a5:4": {
+      "session_id": "0380f9026ebe_613068a5",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "0380f9026ebe_613068a5:5": {
+      "session_id": "0380f9026ebe_613068a5",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "0380f9026ebe_613068a5:6": {
+      "session_id": "0380f9026ebe_613068a5",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "0380f9026ebe_d2dc4e9d:1": {
+      "session_id": "0380f9026ebe_d2dc4e9d",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "0380f9026ebe_d2dc4e9d:2": {
+      "session_id": "0380f9026ebe_d2dc4e9d",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "0380f9026ebe_d2dc4e9d:4": {
+      "session_id": "0380f9026ebe_d2dc4e9d",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "0380f9026ebe_d2dc4e9d:6": {
+      "session_id": "0380f9026ebe_d2dc4e9d",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "0380f9026ebe_e63bc625:1": {
+      "session_id": "0380f9026ebe_e63bc625",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "0380f9026ebe_e63bc625:2": {
+      "session_id": "0380f9026ebe_e63bc625",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "0380f9026ebe_e63bc625:3": {
+      "session_id": "0380f9026ebe_e63bc625",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "0380f9026ebe_e63bc625:5": {
+      "session_id": "0380f9026ebe_e63bc625",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "066de3655406_584db4fb:17": {
+      "session_id": "066de3655406_584db4fb",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "066de3655406_584db4fb:20": {
+      "session_id": "066de3655406_584db4fb",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "066de3655406_584db4fb:23": {
+      "session_id": "066de3655406_584db4fb",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "066de3655406_755996d0:12": {
+      "session_id": "066de3655406_755996d0",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "066de3655406_755996d0:20": {
+      "session_id": "066de3655406_755996d0",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "066de3655406_755996d0:21": {
+      "session_id": "066de3655406_755996d0",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "066de3655406_99aad0a5:12": {
+      "session_id": "066de3655406_99aad0a5",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "066de3655406_99aad0a5:15": {
+      "session_id": "066de3655406_99aad0a5",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "066de3655406_99aad0a5:22": {
+      "session_id": "066de3655406_99aad0a5",
+      "pr1_arms": [
+        "A",
+        "C",
+        "D"
+      ]
+    },
+    "066de3655406_99aad0a5:27": {
+      "session_id": "066de3655406_99aad0a5",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "066de3655406_cdd90af7:11": {
+      "session_id": "066de3655406_cdd90af7",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "066de3655406_cdd90af7:2": {
+      "session_id": "066de3655406_cdd90af7",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "066de3655406_cdd90af7:8": {
+      "session_id": "066de3655406_cdd90af7",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "066de3655406_cdd90af7:9": {
+      "session_id": "066de3655406_cdd90af7",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "066de3655406_f33766e1:2": {
+      "session_id": "066de3655406_f33766e1",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "0b5e2a9b0887_577cf2bf:2": {
+      "session_id": "0b5e2a9b0887_577cf2bf",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "0b5e2a9b0887_577cf2bf:3": {
+      "session_id": "0b5e2a9b0887_577cf2bf",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "0b5e2a9b0887_577cf2bf:4": {
+      "session_id": "0b5e2a9b0887_577cf2bf",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "0b5e2a9b0887_577cf2bf:5": {
+      "session_id": "0b5e2a9b0887_577cf2bf",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "0b5e2a9b0887_9c17571a:3": {
+      "session_id": "0b5e2a9b0887_9c17571a",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "0b5e2a9b0887_9e73e78e:1": {
+      "session_id": "0b5e2a9b0887_9e73e78e",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "0b5e2a9b0887_9e73e78e:5": {
+      "session_id": "0b5e2a9b0887_9e73e78e",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "0b5e2a9b0887_9e73e78e:7": {
+      "session_id": "0b5e2a9b0887_9e73e78e",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "0b5e2a9b0887_9e73e78e:8": {
+      "session_id": "0b5e2a9b0887_9e73e78e",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "0b5e2a9b0887_c4af7c4f:1": {
+      "session_id": "0b5e2a9b0887_c4af7c4f",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "0b5e2a9b0887_c4af7c4f:3": {
+      "session_id": "0b5e2a9b0887_c4af7c4f",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "0b5e2a9b0887_c4af7c4f:4": {
+      "session_id": "0b5e2a9b0887_c4af7c4f",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "0b5e2a9b0887_c4af7c4f:5": {
+      "session_id": "0b5e2a9b0887_c4af7c4f",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "0b5e2a9b0887_ca4c522b:1": {
+      "session_id": "0b5e2a9b0887_ca4c522b",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "0b5e2a9b0887_ca4c522b:5": {
+      "session_id": "0b5e2a9b0887_ca4c522b",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "0b5e2a9b0887_f0c4dd75:1": {
+      "session_id": "0b5e2a9b0887_f0c4dd75",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "0b5e2a9b0887_f0c4dd75:3": {
+      "session_id": "0b5e2a9b0887_f0c4dd75",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "0b5e2a9b0887_f0c4dd75:4": {
+      "session_id": "0b5e2a9b0887_f0c4dd75",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "0b5e2a9b0887_f0c4dd75:5": {
+      "session_id": "0b5e2a9b0887_f0c4dd75",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "10d642ac9c10_a23dcd0b:1": {
+      "session_id": "10d642ac9c10_a23dcd0b",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "10d642ac9c10_a23dcd0b:2": {
+      "session_id": "10d642ac9c10_a23dcd0b",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "10d642ac9c10_a23dcd0b:5": {
+      "session_id": "10d642ac9c10_a23dcd0b",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "10d642ac9c10_a23dcd0b:7": {
+      "session_id": "10d642ac9c10_a23dcd0b",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "140646846ae7_6bfabab3:24": {
+      "session_id": "140646846ae7_6bfabab3",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C"
+      ]
+    },
+    "140646846ae7_6bfabab3:26": {
+      "session_id": "140646846ae7_6bfabab3",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "140646846ae7_6bfabab3:38": {
+      "session_id": "140646846ae7_6bfabab3",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "140646846ae7_9826bf77:15": {
+      "session_id": "140646846ae7_9826bf77",
+      "pr1_arms": [
+        "A",
+        "C"
+      ]
+    },
+    "140646846ae7_9826bf77:38": {
+      "session_id": "140646846ae7_9826bf77",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C"
+      ]
+    },
+    "140646846ae7_9826bf77:44": {
+      "session_id": "140646846ae7_9826bf77",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "15bb4bab2031_134203cb:11": {
+      "session_id": "15bb4bab2031_134203cb",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "15bb4bab2031_134203cb:14": {
+      "session_id": "15bb4bab2031_134203cb",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "15bb4bab2031_134203cb:19": {
+      "session_id": "15bb4bab2031_134203cb",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "15bb4bab2031_134203cb:20": {
+      "session_id": "15bb4bab2031_134203cb",
+      "pr1_arms": [
+        "A",
+        "C"
+      ]
+    },
+    "15bb4bab2031_bdb6d1f1:1": {
+      "session_id": "15bb4bab2031_bdb6d1f1",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "15bb4bab2031_bdb6d1f1:3": {
+      "session_id": "15bb4bab2031_bdb6d1f1",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "15bb4bab2031_bdb6d1f1:4": {
+      "session_id": "15bb4bab2031_bdb6d1f1",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "15bb4bab2031_bdb6d1f1:5": {
+      "session_id": "15bb4bab2031_bdb6d1f1",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "15bb4bab2031_cf799474:12": {
+      "session_id": "15bb4bab2031_cf799474",
+      "pr1_arms": [
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "15bb4bab2031_cf799474:13": {
+      "session_id": "15bb4bab2031_cf799474",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "15bb4bab2031_cf799474:4": {
+      "session_id": "15bb4bab2031_cf799474",
+      "pr1_arms": [
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "18b5978679fb_53a7d72c:17": {
+      "session_id": "18b5978679fb_53a7d72c",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "18b5978679fb_53a7d72c:19": {
+      "session_id": "18b5978679fb_53a7d72c",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "18b5978679fb_cb958b0c:3": {
+      "session_id": "18b5978679fb_cb958b0c",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "18b5978679fb_cb958b0c:5": {
+      "session_id": "18b5978679fb_cb958b0c",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "18b5978679fb_cb958b0c:7": {
+      "session_id": "18b5978679fb_cb958b0c",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "18b5978679fb_cb958b0c:8": {
+      "session_id": "18b5978679fb_cb958b0c",
+      "pr1_arms": [
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "18b5978679fb_f3d8f2ff:14": {
+      "session_id": "18b5978679fb_f3d8f2ff",
+      "pr1_arms": [
+        "B",
+        "C"
+      ]
+    },
+    "18b5978679fb_f3d8f2ff:19": {
+      "session_id": "18b5978679fb_f3d8f2ff",
+      "pr1_arms": [
+        "B",
+        "C"
+      ]
+    },
+    "18b5978679fb_f3d8f2ff:2": {
+      "session_id": "18b5978679fb_f3d8f2ff",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C"
+      ]
+    },
+    "18b5978679fb_fb678903:13": {
+      "session_id": "18b5978679fb_fb678903",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "18b5978679fb_fb678903:14": {
+      "session_id": "18b5978679fb_fb678903",
+      "pr1_arms": [
+        "B",
+        "C"
+      ]
+    },
+    "18b5978679fb_fb678903:17": {
+      "session_id": "18b5978679fb_fb678903",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "18b5978679fb_fb678903:26": {
+      "session_id": "18b5978679fb_fb678903",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "18efd0e196b7_cd7c42d3:10": {
+      "session_id": "18efd0e196b7_cd7c42d3",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "18efd0e196b7_cd7c42d3:12": {
+      "session_id": "18efd0e196b7_cd7c42d3",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "18efd0e196b7_cd7c42d3:2": {
+      "session_id": "18efd0e196b7_cd7c42d3",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "18efd0e196b7_cd7c42d3:9": {
+      "session_id": "18efd0e196b7_cd7c42d3",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "18efd0e196b7_d42c66de:11": {
+      "session_id": "18efd0e196b7_d42c66de",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "18efd0e196b7_d42c66de:3": {
+      "session_id": "18efd0e196b7_d42c66de",
+      "pr1_arms": [
+        "A",
+        "C",
+        "D"
+      ]
+    },
+    "18efd0e196b7_d42c66de:7": {
+      "session_id": "18efd0e196b7_d42c66de",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "18efd0e196b7_d42c66de:8": {
+      "session_id": "18efd0e196b7_d42c66de",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "24347bbedbb0_12ea82b1:0": {
+      "session_id": "24347bbedbb0_12ea82b1",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C"
+      ]
+    },
+    "24347bbedbb0_12ea82b1:3": {
+      "session_id": "24347bbedbb0_12ea82b1",
+      "pr1_arms": [
+        "A",
+        "C",
+        "D"
+      ]
+    },
+    "24347bbedbb0_5fd5646a:26": {
+      "session_id": "24347bbedbb0_5fd5646a",
+      "pr1_arms": [
+        "B",
+        "C"
+      ]
+    },
+    "24347bbedbb0_5fd5646a:27": {
+      "session_id": "24347bbedbb0_5fd5646a",
+      "pr1_arms": [
+        "A",
+        "C",
+        "D"
+      ]
+    },
+    "24347bbedbb0_5fd5646a:29": {
+      "session_id": "24347bbedbb0_5fd5646a",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "24347bbedbb0_5fd5646a:4": {
+      "session_id": "24347bbedbb0_5fd5646a",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C"
+      ]
+    },
+    "24347bbedbb0_c3e0424a:0": {
+      "session_id": "24347bbedbb0_c3e0424a",
+      "pr1_arms": [
+        "B",
+        "C"
+      ]
+    },
+    "24347bbedbb0_c3e0424a:2": {
+      "session_id": "24347bbedbb0_c3e0424a",
+      "pr1_arms": [
+        "B",
+        "C"
+      ]
+    },
+    "24347bbedbb0_c3e0424a:3": {
+      "session_id": "24347bbedbb0_c3e0424a",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "24347bbedbb0_c3e0424a:5": {
+      "session_id": "24347bbedbb0_c3e0424a",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "24347bbedbb0_ddf2f922:0": {
+      "session_id": "24347bbedbb0_ddf2f922",
+      "pr1_arms": [
+        "B",
+        "C"
+      ]
+    },
+    "24347bbedbb0_ddf2f922:2": {
+      "session_id": "24347bbedbb0_ddf2f922",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C"
+      ]
+    },
+    "24347bbedbb0_ddf2f922:3": {
+      "session_id": "24347bbedbb0_ddf2f922",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C"
+      ]
+    },
+    "247b0c0650d3_3343dec1:1": {
+      "session_id": "247b0c0650d3_3343dec1",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "247b0c0650d3_3343dec1:2": {
+      "session_id": "247b0c0650d3_3343dec1",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "247b0c0650d3_3343dec1:3": {
+      "session_id": "247b0c0650d3_3343dec1",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "247b0c0650d3_5126fda3:2": {
+      "session_id": "247b0c0650d3_5126fda3",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "247b0c0650d3_5126fda3:4": {
+      "session_id": "247b0c0650d3_5126fda3",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "247b0c0650d3_5d2c710a:1": {
+      "session_id": "247b0c0650d3_5d2c710a",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "247b0c0650d3_5d2c710a:2": {
+      "session_id": "247b0c0650d3_5d2c710a",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "247b0c0650d3_5d2c710a:3": {
+      "session_id": "247b0c0650d3_5d2c710a",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "247b0c0650d3_5d2c710a:4": {
+      "session_id": "247b0c0650d3_5d2c710a",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "247b0c0650d3_65a4bc25:1": {
+      "session_id": "247b0c0650d3_65a4bc25",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "247b0c0650d3_65a4bc25:2": {
+      "session_id": "247b0c0650d3_65a4bc25",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "247b0c0650d3_65a4bc25:3": {
+      "session_id": "247b0c0650d3_65a4bc25",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "247b0c0650d3_65a4bc25:4": {
+      "session_id": "247b0c0650d3_65a4bc25",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "247b0c0650d3_74734c48:1": {
+      "session_id": "247b0c0650d3_74734c48",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "247b0c0650d3_74734c48:3": {
+      "session_id": "247b0c0650d3_74734c48",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "247b0c0650d3_74734c48:4": {
+      "session_id": "247b0c0650d3_74734c48",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "247b0c0650d3_74734c48:6": {
+      "session_id": "247b0c0650d3_74734c48",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "247b0c0650d3_bc2988af:3": {
+      "session_id": "247b0c0650d3_bc2988af",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "247b0c0650d3_bc2988af:4": {
+      "session_id": "247b0c0650d3_bc2988af",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "247b0c0650d3_bc2988af:7": {
+      "session_id": "247b0c0650d3_bc2988af",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "247b0c0650d3_bc2988af:9": {
+      "session_id": "247b0c0650d3_bc2988af",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "247b0c0650d3_bff9f7bd:2": {
+      "session_id": "247b0c0650d3_bff9f7bd",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "247b0c0650d3_bff9f7bd:4": {
+      "session_id": "247b0c0650d3_bff9f7bd",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "247b0c0650d3_bff9f7bd:5": {
+      "session_id": "247b0c0650d3_bff9f7bd",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "266b7f5a8aa9_4868c229:1": {
+      "session_id": "266b7f5a8aa9_4868c229",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "266b7f5a8aa9_4868c229:3": {
+      "session_id": "266b7f5a8aa9_4868c229",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "266b7f5a8aa9_4868c229:5": {
+      "session_id": "266b7f5a8aa9_4868c229",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "266b7f5a8aa9_4868c229:6": {
+      "session_id": "266b7f5a8aa9_4868c229",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "266b7f5a8aa9_c6d66a2f:1": {
+      "session_id": "266b7f5a8aa9_c6d66a2f",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "266b7f5a8aa9_c6d66a2f:2": {
+      "session_id": "266b7f5a8aa9_c6d66a2f",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "266b7f5a8aa9_c6d66a2f:3": {
+      "session_id": "266b7f5a8aa9_c6d66a2f",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "2a21e94e0687_29595dd0:10": {
+      "session_id": "2a21e94e0687_29595dd0",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "2a21e94e0687_29595dd0:15": {
+      "session_id": "2a21e94e0687_29595dd0",
+      "pr1_arms": [
+        "A",
+        "C",
+        "D"
+      ]
+    },
+    "2a21e94e0687_29595dd0:2": {
+      "session_id": "2a21e94e0687_29595dd0",
+      "pr1_arms": [
+        "A",
+        "C",
+        "D"
+      ]
+    },
+    "2a21e94e0687_29595dd0:5": {
+      "session_id": "2a21e94e0687_29595dd0",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "2a21e94e0687_76685f3e:12": {
+      "session_id": "2a21e94e0687_76685f3e",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "2a21e94e0687_76685f3e:15": {
+      "session_id": "2a21e94e0687_76685f3e",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C"
+      ]
+    },
+    "2a21e94e0687_76685f3e:22": {
+      "session_id": "2a21e94e0687_76685f3e",
+      "pr1_arms": [
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "2a21e94e0687_76685f3e:4": {
+      "session_id": "2a21e94e0687_76685f3e",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "2a21e94e0687_a94c3f31:1": {
+      "session_id": "2a21e94e0687_a94c3f31",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "2a21e94e0687_a94c3f31:16": {
+      "session_id": "2a21e94e0687_a94c3f31",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "2a21e94e0687_a94c3f31:17": {
+      "session_id": "2a21e94e0687_a94c3f31",
+      "pr1_arms": [
+        "A",
+        "C",
+        "D"
+      ]
+    },
+    "2a21e94e0687_a94c3f31:20": {
+      "session_id": "2a21e94e0687_a94c3f31",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "2a21e94e0687_caa66301:4": {
+      "session_id": "2a21e94e0687_caa66301",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "2a21e94e0687_caa66301:7": {
+      "session_id": "2a21e94e0687_caa66301",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "2a21e94e0687_d4ac22a2:13": {
+      "session_id": "2a21e94e0687_d4ac22a2",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "2a21e94e0687_d4ac22a2:2": {
+      "session_id": "2a21e94e0687_d4ac22a2",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "2a21e94e0687_d4ac22a2:6": {
+      "session_id": "2a21e94e0687_d4ac22a2",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "2d5e2043dcf4_3a44bf13:2": {
+      "session_id": "2d5e2043dcf4_3a44bf13",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "2d5e2043dcf4_3a44bf13:3": {
+      "session_id": "2d5e2043dcf4_3a44bf13",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "2d5e2043dcf4_cb3ec441:1": {
+      "session_id": "2d5e2043dcf4_cb3ec441",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "2d5e2043dcf4_cb3ec441:2": {
+      "session_id": "2d5e2043dcf4_cb3ec441",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "2d5e2043dcf4_cb3ec441:6": {
+      "session_id": "2d5e2043dcf4_cb3ec441",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "2d5e2043dcf4_cb3ec441:8": {
+      "session_id": "2d5e2043dcf4_cb3ec441",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "30ed3250babd_1dda5b8f:14": {
+      "session_id": "30ed3250babd_1dda5b8f",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "30ed3250babd_1dda5b8f:16": {
+      "session_id": "30ed3250babd_1dda5b8f",
+      "pr1_arms": [
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "30ed3250babd_1dda5b8f:18": {
+      "session_id": "30ed3250babd_1dda5b8f",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C"
+      ]
+    },
+    "30ed3250babd_23dd68d0:28": {
+      "session_id": "30ed3250babd_23dd68d0",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C"
+      ]
+    },
+    "30ed3250babd_23dd68d0:37": {
+      "session_id": "30ed3250babd_23dd68d0",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "30ed3250babd_23dd68d0:5": {
+      "session_id": "30ed3250babd_23dd68d0",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "30ed3250babd_2b0175dc:14": {
+      "session_id": "30ed3250babd_2b0175dc",
+      "pr1_arms": [
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "30ed3250babd_2b0175dc:40": {
+      "session_id": "30ed3250babd_2b0175dc",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C"
+      ]
+    },
+    "30ed3250babd_2b0175dc:41": {
+      "session_id": "30ed3250babd_2b0175dc",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "30ed3250babd_2b0175dc:45": {
+      "session_id": "30ed3250babd_2b0175dc",
+      "pr1_arms": [
+        "A",
+        "C",
+        "D"
+      ]
+    },
+    "30ed3250babd_39c02a90:1": {
+      "session_id": "30ed3250babd_39c02a90",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "30ed3250babd_39c02a90:3": {
+      "session_id": "30ed3250babd_39c02a90",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "30ed3250babd_39c02a90:4": {
+      "session_id": "30ed3250babd_39c02a90",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "30ed3250babd_39c02a90:5": {
+      "session_id": "30ed3250babd_39c02a90",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "30ed3250babd_4fa229f5:21": {
+      "session_id": "30ed3250babd_4fa229f5",
+      "pr1_arms": [
+        "A",
+        "C",
+        "D"
+      ]
+    },
+    "30ed3250babd_4fa229f5:25": {
+      "session_id": "30ed3250babd_4fa229f5",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "30ed3250babd_4fa229f5:7": {
+      "session_id": "30ed3250babd_4fa229f5",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "30ed3250babd_4fa229f5:8": {
+      "session_id": "30ed3250babd_4fa229f5",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C"
+      ]
+    },
+    "30ed3250babd_6690bb14:13": {
+      "session_id": "30ed3250babd_6690bb14",
+      "pr1_arms": [
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "30ed3250babd_6690bb14:34": {
+      "session_id": "30ed3250babd_6690bb14",
+      "pr1_arms": [
+        "A",
+        "C",
+        "D"
+      ]
+    },
+    "30ed3250babd_75abe95e:6": {
+      "session_id": "30ed3250babd_75abe95e",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "30ed3250babd_75abe95e:9": {
+      "session_id": "30ed3250babd_75abe95e",
+      "pr1_arms": [
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "30ed3250babd_78a45eac:20": {
+      "session_id": "30ed3250babd_78a45eac",
+      "pr1_arms": [
+        "B",
+        "C"
+      ]
+    },
+    "30ed3250babd_78a45eac:22": {
+      "session_id": "30ed3250babd_78a45eac",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "30ed3250babd_78a45eac:27": {
+      "session_id": "30ed3250babd_78a45eac",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "30ed3250babd_78a45eac:5": {
+      "session_id": "30ed3250babd_78a45eac",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C"
+      ]
+    },
+    "30ed3250babd_7a6b0586:18": {
+      "session_id": "30ed3250babd_7a6b0586",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C"
+      ]
+    },
+    "30ed3250babd_7a6b0586:30": {
+      "session_id": "30ed3250babd_7a6b0586",
+      "pr1_arms": [
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "30ed3250babd_7a6b0586:32": {
+      "session_id": "30ed3250babd_7a6b0586",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C"
+      ]
+    },
+    "30ed3250babd_dc51a5fc:21": {
+      "session_id": "30ed3250babd_dc51a5fc",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C"
+      ]
+    },
+    "30ed3250babd_dc51a5fc:52": {
+      "session_id": "30ed3250babd_dc51a5fc",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "30ed3250babd_dc51a5fc:9": {
+      "session_id": "30ed3250babd_dc51a5fc",
+      "pr1_arms": [
+        "A",
+        "C",
+        "D"
+      ]
+    },
+    "30ed3250babd_de7fa846:12": {
+      "session_id": "30ed3250babd_de7fa846",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "30ed3250babd_de7fa846:13": {
+      "session_id": "30ed3250babd_de7fa846",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C"
+      ]
+    },
+    "30ed3250babd_de7fa846:2": {
+      "session_id": "30ed3250babd_de7fa846",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "30ed3250babd_de7fa846:6": {
+      "session_id": "30ed3250babd_de7fa846",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "379733137f5d_05ec7d21:1": {
+      "session_id": "379733137f5d_05ec7d21",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "379733137f5d_05ec7d21:4": {
+      "session_id": "379733137f5d_05ec7d21",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "379733137f5d_05ec7d21:6": {
+      "session_id": "379733137f5d_05ec7d21",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "379733137f5d_0ff66e22:24": {
+      "session_id": "379733137f5d_0ff66e22",
+      "pr1_arms": [
+        "B",
+        "C"
+      ]
+    },
+    "379733137f5d_0ff66e22:27": {
+      "session_id": "379733137f5d_0ff66e22",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C"
+      ]
+    },
+    "379733137f5d_0ff66e22:6": {
+      "session_id": "379733137f5d_0ff66e22",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "379733137f5d_14205a5d:1": {
+      "session_id": "379733137f5d_14205a5d",
+      "pr1_arms": [
+        "A",
+        "C",
+        "D"
+      ]
+    },
+    "379733137f5d_14205a5d:10": {
+      "session_id": "379733137f5d_14205a5d",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "379733137f5d_14205a5d:2": {
+      "session_id": "379733137f5d_14205a5d",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C"
+      ]
+    },
+    "379733137f5d_14205a5d:6": {
+      "session_id": "379733137f5d_14205a5d",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "379733137f5d_18ea62d8:1": {
+      "session_id": "379733137f5d_18ea62d8",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "379733137f5d_18ea62d8:2": {
+      "session_id": "379733137f5d_18ea62d8",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "379733137f5d_18ea62d8:3": {
+      "session_id": "379733137f5d_18ea62d8",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "379733137f5d_18ea62d8:4": {
+      "session_id": "379733137f5d_18ea62d8",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "379733137f5d_6b1183f2:12": {
+      "session_id": "379733137f5d_6b1183f2",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "379733137f5d_6b1183f2:7": {
+      "session_id": "379733137f5d_6b1183f2",
+      "pr1_arms": [
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "379733137f5d_6b1183f2:9": {
+      "session_id": "379733137f5d_6b1183f2",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "379733137f5d_c92384a5:1": {
+      "session_id": "379733137f5d_c92384a5",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "379733137f5d_c92384a5:4": {
+      "session_id": "379733137f5d_c92384a5",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "379733137f5d_c92384a5:5": {
+      "session_id": "379733137f5d_c92384a5",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "379733137f5d_c95cd078:4": {
+      "session_id": "379733137f5d_c95cd078",
+      "pr1_arms": [
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "379733137f5d_c95cd078:5": {
+      "session_id": "379733137f5d_c95cd078",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "379733137f5d_c95cd078:6": {
+      "session_id": "379733137f5d_c95cd078",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "379733137f5d_c95cd078:9": {
+      "session_id": "379733137f5d_c95cd078",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "379733137f5d_e508b5f1:12": {
+      "session_id": "379733137f5d_e508b5f1",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "379733137f5d_e508b5f1:14": {
+      "session_id": "379733137f5d_e508b5f1",
+      "pr1_arms": [
+        "A",
+        "C",
+        "D"
+      ]
+    },
+    "379733137f5d_e508b5f1:29": {
+      "session_id": "379733137f5d_e508b5f1",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C"
+      ]
+    },
+    "379733137f5d_e81d8f92:2": {
+      "session_id": "379733137f5d_e81d8f92",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "379733137f5d_e81d8f92:4": {
+      "session_id": "379733137f5d_e81d8f92",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "379733137f5d_e81d8f92:5": {
+      "session_id": "379733137f5d_e81d8f92",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "379733137f5d_fceae509:2": {
+      "session_id": "379733137f5d_fceae509",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "379733137f5d_fceae509:3": {
+      "session_id": "379733137f5d_fceae509",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "379733137f5d_fceae509:5": {
+      "session_id": "379733137f5d_fceae509",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "454d983d1286_a47ae76b:2": {
+      "session_id": "454d983d1286_a47ae76b",
+      "pr1_arms": [
+        "A",
+        "C"
+      ]
+    },
+    "454d983d1286_a47ae76b:4": {
+      "session_id": "454d983d1286_a47ae76b",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C"
+      ]
+    },
+    "454d983d1286_a47ae76b:5": {
+      "session_id": "454d983d1286_a47ae76b",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "454d983d1286_a47ae76b:8": {
+      "session_id": "454d983d1286_a47ae76b",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "454d983d1286_e2a08535:1": {
+      "session_id": "454d983d1286_e2a08535",
+      "pr1_arms": [
+        "A",
+        "C"
+      ]
+    },
+    "454d983d1286_e2a08535:3": {
+      "session_id": "454d983d1286_e2a08535",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "454d983d1286_e2a08535:4": {
+      "session_id": "454d983d1286_e2a08535",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "454d983d1286_e2a08535:5": {
+      "session_id": "454d983d1286_e2a08535",
+      "pr1_arms": [
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "45eff42acfad_28b1a2b7:7": {
+      "session_id": "45eff42acfad_28b1a2b7",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C"
+      ]
+    },
+    "45eff42acfad_28b1a2b7:8": {
+      "session_id": "45eff42acfad_28b1a2b7",
+      "pr1_arms": [
+        "B",
+        "C"
+      ]
+    },
+    "45eff42acfad_3db0b212:1": {
+      "session_id": "45eff42acfad_3db0b212",
+      "pr1_arms": [
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "45eff42acfad_3db0b212:10": {
+      "session_id": "45eff42acfad_3db0b212",
+      "pr1_arms": [
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "45eff42acfad_3db0b212:6": {
+      "session_id": "45eff42acfad_3db0b212",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C"
+      ]
+    },
+    "45eff42acfad_afe4d840:2": {
+      "session_id": "45eff42acfad_afe4d840",
+      "pr1_arms": [
+        "B",
+        "C"
+      ]
+    },
+    "45eff42acfad_afe4d840:3": {
+      "session_id": "45eff42acfad_afe4d840",
+      "pr1_arms": [
+        "B",
+        "C"
+      ]
+    },
+    "45eff42acfad_afe4d840:5": {
+      "session_id": "45eff42acfad_afe4d840",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "4d47860a4332_2f7c65b1:1": {
+      "session_id": "4d47860a4332_2f7c65b1",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "4d47860a4332_2f7c65b1:3": {
+      "session_id": "4d47860a4332_2f7c65b1",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "4d47860a4332_2f7c65b1:4": {
+      "session_id": "4d47860a4332_2f7c65b1",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "4d47860a4332_2f7c65b1:7": {
+      "session_id": "4d47860a4332_2f7c65b1",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "4d47860a4332_415baf78:1": {
+      "session_id": "4d47860a4332_415baf78",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "4d47860a4332_415baf78:3": {
+      "session_id": "4d47860a4332_415baf78",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "4d47860a4332_415baf78:4": {
+      "session_id": "4d47860a4332_415baf78",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "4d47860a4332_415baf78:6": {
+      "session_id": "4d47860a4332_415baf78",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "4d47860a4332_4670f354:1": {
+      "session_id": "4d47860a4332_4670f354",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "4d47860a4332_4670f354:2": {
+      "session_id": "4d47860a4332_4670f354",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "4d47860a4332_4670f354:3": {
+      "session_id": "4d47860a4332_4670f354",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "4d47860a4332_64b54747:2": {
+      "session_id": "4d47860a4332_64b54747",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "4d47860a4332_8fd3da28:1": {
+      "session_id": "4d47860a4332_8fd3da28",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "56a7d0bde064_482bab1b:13": {
+      "session_id": "56a7d0bde064_482bab1b",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "56a7d0bde064_482bab1b:16": {
+      "session_id": "56a7d0bde064_482bab1b",
+      "pr1_arms": [
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "56a7d0bde064_482bab1b:5": {
+      "session_id": "56a7d0bde064_482bab1b",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "56a7d0bde064_482bab1b:9": {
+      "session_id": "56a7d0bde064_482bab1b",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "56c19f19c4f2_15a5314f:13": {
+      "session_id": "56c19f19c4f2_15a5314f",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "56c19f19c4f2_15a5314f:20": {
+      "session_id": "56c19f19c4f2_15a5314f",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C"
+      ]
+    },
+    "56c19f19c4f2_15a5314f:26": {
+      "session_id": "56c19f19c4f2_15a5314f",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "56c19f19c4f2_15a5314f:4": {
+      "session_id": "56c19f19c4f2_15a5314f",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "56c19f19c4f2_27842b9e:11": {
+      "session_id": "56c19f19c4f2_27842b9e",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "56c19f19c4f2_27842b9e:12": {
+      "session_id": "56c19f19c4f2_27842b9e",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "56c19f19c4f2_27842b9e:2": {
+      "session_id": "56c19f19c4f2_27842b9e",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "56c19f19c4f2_27842b9e:9": {
+      "session_id": "56c19f19c4f2_27842b9e",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "56c19f19c4f2_2b790de2:11": {
+      "session_id": "56c19f19c4f2_2b790de2",
+      "pr1_arms": [
+        "A",
+        "C"
+      ]
+    },
+    "56c19f19c4f2_2b790de2:16": {
+      "session_id": "56c19f19c4f2_2b790de2",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "56c19f19c4f2_2b790de2:17": {
+      "session_id": "56c19f19c4f2_2b790de2",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "56c19f19c4f2_2b790de2:5": {
+      "session_id": "56c19f19c4f2_2b790de2",
+      "pr1_arms": [
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "56c19f19c4f2_2d1988ca:1": {
+      "session_id": "56c19f19c4f2_2d1988ca",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "56c19f19c4f2_2d1988ca:4": {
+      "session_id": "56c19f19c4f2_2d1988ca",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "56c19f19c4f2_2d1988ca:6": {
+      "session_id": "56c19f19c4f2_2d1988ca",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "56c19f19c4f2_2d1988ca:7": {
+      "session_id": "56c19f19c4f2_2d1988ca",
+      "pr1_arms": [
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "56c19f19c4f2_2e387182:2": {
+      "session_id": "56c19f19c4f2_2e387182",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "56c19f19c4f2_2e387182:6": {
+      "session_id": "56c19f19c4f2_2e387182",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "56c19f19c4f2_2e387182:7": {
+      "session_id": "56c19f19c4f2_2e387182",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C"
+      ]
+    },
+    "56c19f19c4f2_2e387182:9": {
+      "session_id": "56c19f19c4f2_2e387182",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C"
+      ]
+    },
+    "56c19f19c4f2_35262586:1": {
+      "session_id": "56c19f19c4f2_35262586",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "56c19f19c4f2_35262586:2": {
+      "session_id": "56c19f19c4f2_35262586",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "56c19f19c4f2_35262586:4": {
+      "session_id": "56c19f19c4f2_35262586",
+      "pr1_arms": [
+        "B",
+        "C"
+      ]
+    },
+    "56c19f19c4f2_568319e1:1": {
+      "session_id": "56c19f19c4f2_568319e1",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "56c19f19c4f2_568319e1:2": {
+      "session_id": "56c19f19c4f2_568319e1",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "56c19f19c4f2_568319e1:3": {
+      "session_id": "56c19f19c4f2_568319e1",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "56c19f19c4f2_568319e1:4": {
+      "session_id": "56c19f19c4f2_568319e1",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "56c19f19c4f2_c9193d26:16": {
+      "session_id": "56c19f19c4f2_c9193d26",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C"
+      ]
+    },
+    "56c19f19c4f2_c9193d26:17": {
+      "session_id": "56c19f19c4f2_c9193d26",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C"
+      ]
+    },
+    "56c19f19c4f2_c9193d26:20": {
+      "session_id": "56c19f19c4f2_c9193d26",
+      "pr1_arms": [
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "56c19f19c4f2_c9193d26:4": {
+      "session_id": "56c19f19c4f2_c9193d26",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "56fecc41f358_4da0408d:3": {
+      "session_id": "56fecc41f358_4da0408d",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "56fecc41f358_4da0408d:5": {
+      "session_id": "56fecc41f358_4da0408d",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "56fecc41f358_7884700e:16": {
+      "session_id": "56fecc41f358_7884700e",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C"
+      ]
+    },
+    "56fecc41f358_7884700e:45": {
+      "session_id": "56fecc41f358_7884700e",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "56fecc41f358_7884700e:48": {
+      "session_id": "56fecc41f358_7884700e",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "56fecc41f358_97857673:1": {
+      "session_id": "56fecc41f358_97857673",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "56fecc41f358_97857673:25": {
+      "session_id": "56fecc41f358_97857673",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "56fecc41f358_97857673:28": {
+      "session_id": "56fecc41f358_97857673",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C"
+      ]
+    },
+    "56fecc41f358_dd2d916d:14": {
+      "session_id": "56fecc41f358_dd2d916d",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C"
+      ]
+    },
+    "56fecc41f358_dd2d916d:31": {
+      "session_id": "56fecc41f358_dd2d916d",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "56fecc41f358_dd2d916d:9": {
+      "session_id": "56fecc41f358_dd2d916d",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "58c261317e07_088690cf:1": {
+      "session_id": "58c261317e07_088690cf",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "58c261317e07_088690cf:2": {
+      "session_id": "58c261317e07_088690cf",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "58c261317e07_088690cf:3": {
+      "session_id": "58c261317e07_088690cf",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "5b9274b3192a_06442621:1": {
+      "session_id": "5b9274b3192a_06442621",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C"
+      ]
+    },
+    "5b9274b3192a_06442621:3": {
+      "session_id": "5b9274b3192a_06442621",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "5b9274b3192a_06442621:5": {
+      "session_id": "5b9274b3192a_06442621",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "5b9274b3192a_06442621:6": {
+      "session_id": "5b9274b3192a_06442621",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C"
+      ]
+    },
+    "5b9274b3192a_4a07d0d6:4": {
+      "session_id": "5b9274b3192a_4a07d0d6",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "5b9274b3192a_4a07d0d6:7": {
+      "session_id": "5b9274b3192a_4a07d0d6",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "5b9274b3192a_4a07d0d6:8": {
+      "session_id": "5b9274b3192a_4a07d0d6",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C"
+      ]
+    },
+    "5b9274b3192a_4a07d0d6:9": {
+      "session_id": "5b9274b3192a_4a07d0d6",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "5b9274b3192a_5294f42f:1": {
+      "session_id": "5b9274b3192a_5294f42f",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "5b9274b3192a_5294f42f:3": {
+      "session_id": "5b9274b3192a_5294f42f",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "5b9274b3192a_5294f42f:4": {
+      "session_id": "5b9274b3192a_5294f42f",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "5b9274b3192a_5294f42f:6": {
+      "session_id": "5b9274b3192a_5294f42f",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "5b9274b3192a_5416ec7c:13": {
+      "session_id": "5b9274b3192a_5416ec7c",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C"
+      ]
+    },
+    "5b9274b3192a_5416ec7c:16": {
+      "session_id": "5b9274b3192a_5416ec7c",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C"
+      ]
+    },
+    "5b9274b3192a_5416ec7c:3": {
+      "session_id": "5b9274b3192a_5416ec7c",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "5b9274b3192a_5416ec7c:4": {
+      "session_id": "5b9274b3192a_5416ec7c",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "5b9274b3192a_626dda11:1": {
+      "session_id": "5b9274b3192a_626dda11",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "5b9274b3192a_626dda11:10": {
+      "session_id": "5b9274b3192a_626dda11",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "5b9274b3192a_626dda11:2": {
+      "session_id": "5b9274b3192a_626dda11",
+      "pr1_arms": [
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "5b9274b3192a_626dda11:9": {
+      "session_id": "5b9274b3192a_626dda11",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "5b9274b3192a_6fc159f3:1": {
+      "session_id": "5b9274b3192a_6fc159f3",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "5b9274b3192a_6fc159f3:11": {
+      "session_id": "5b9274b3192a_6fc159f3",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C"
+      ]
+    },
+    "5b9274b3192a_6fc159f3:7": {
+      "session_id": "5b9274b3192a_6fc159f3",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C"
+      ]
+    },
+    "5b9274b3192a_851b502d:11": {
+      "session_id": "5b9274b3192a_851b502d",
+      "pr1_arms": [
+        "A",
+        "C",
+        "D"
+      ]
+    },
+    "5b9274b3192a_851b502d:2": {
+      "session_id": "5b9274b3192a_851b502d",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "5b9274b3192a_bc0debeb:14": {
+      "session_id": "5b9274b3192a_bc0debeb",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "5b9274b3192a_bc0debeb:15": {
+      "session_id": "5b9274b3192a_bc0debeb",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C"
+      ]
+    },
+    "5b9274b3192a_bc0debeb:7": {
+      "session_id": "5b9274b3192a_bc0debeb",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C"
+      ]
+    },
+    "5b9274b3192a_e2393751:1": {
+      "session_id": "5b9274b3192a_e2393751",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "5b9274b3192a_e2393751:10": {
+      "session_id": "5b9274b3192a_e2393751",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "5b9274b3192a_e2393751:12": {
+      "session_id": "5b9274b3192a_e2393751",
+      "pr1_arms": [
+        "B",
+        "C"
+      ]
+    },
+    "5b9274b3192a_e2393751:6": {
+      "session_id": "5b9274b3192a_e2393751",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "5b9274b3192a_ed755656:3": {
+      "session_id": "5b9274b3192a_ed755656",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "5b9274b3192a_ed755656:4": {
+      "session_id": "5b9274b3192a_ed755656",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "5b9274b3192a_ed755656:6": {
+      "session_id": "5b9274b3192a_ed755656",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "5b9274b3192a_f8203839:1": {
+      "session_id": "5b9274b3192a_f8203839",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "5b9274b3192a_f8203839:4": {
+      "session_id": "5b9274b3192a_f8203839",
+      "pr1_arms": [
+        "A",
+        "C",
+        "D"
+      ]
+    },
+    "5b9274b3192a_f8203839:6": {
+      "session_id": "5b9274b3192a_f8203839",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C"
+      ]
+    },
+    "5b9274b3192a_f8203839:9": {
+      "session_id": "5b9274b3192a_f8203839",
+      "pr1_arms": [
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "6222edc957a9_17201d85:12": {
+      "session_id": "6222edc957a9_17201d85",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "6222edc957a9_17201d85:3": {
+      "session_id": "6222edc957a9_17201d85",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "6222edc957a9_17201d85:5": {
+      "session_id": "6222edc957a9_17201d85",
+      "pr1_arms": [
+        "B",
+        "C"
+      ]
+    },
+    "6222edc957a9_17201d85:6": {
+      "session_id": "6222edc957a9_17201d85",
+      "pr1_arms": [
+        "B",
+        "C"
+      ]
+    },
+    "6222edc957a9_5bea2ac5:1": {
+      "session_id": "6222edc957a9_5bea2ac5",
+      "pr1_arms": [
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "6222edc957a9_5bea2ac5:3": {
+      "session_id": "6222edc957a9_5bea2ac5",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "6222edc957a9_5bea2ac5:8": {
+      "session_id": "6222edc957a9_5bea2ac5",
+      "pr1_arms": [
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "638d222a8bb4_62dac91e:0": {
+      "session_id": "638d222a8bb4_62dac91e",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "638d222a8bb4_62dac91e:2": {
+      "session_id": "638d222a8bb4_62dac91e",
+      "pr1_arms": [
+        "A",
+        "C"
+      ]
+    },
+    "638d222a8bb4_62dac91e:3": {
+      "session_id": "638d222a8bb4_62dac91e",
+      "pr1_arms": [
+        "A",
+        "C",
+        "D"
+      ]
+    },
+    "638d222a8bb4_62dac91e:9": {
+      "session_id": "638d222a8bb4_62dac91e",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C"
+      ]
+    },
+    "6b79d31ff461_c33b3f1b:1": {
+      "session_id": "6b79d31ff461_c33b3f1b",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "6b79d31ff461_c33b3f1b:12": {
+      "session_id": "6b79d31ff461_c33b3f1b",
+      "pr1_arms": [
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "6b79d31ff461_c33b3f1b:2": {
+      "session_id": "6b79d31ff461_c33b3f1b",
+      "pr1_arms": [
+        "A",
+        "C"
+      ]
+    },
+    "6b79d31ff461_d810da55:10": {
+      "session_id": "6b79d31ff461_d810da55",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "6b79d31ff461_d810da55:4": {
+      "session_id": "6b79d31ff461_d810da55",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "6b79d31ff461_d810da55:9": {
+      "session_id": "6b79d31ff461_d810da55",
+      "pr1_arms": [
+        "A",
+        "C"
+      ]
+    },
+    "6b79d31ff461_ee0a2a70:5": {
+      "session_id": "6b79d31ff461_ee0a2a70",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C"
+      ]
+    },
+    "6b79d31ff461_ee0a2a70:7": {
+      "session_id": "6b79d31ff461_ee0a2a70",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "6b79d31ff461_ee0a2a70:8": {
+      "session_id": "6b79d31ff461_ee0a2a70",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C"
+      ]
+    },
+    "6b79d31ff461_ee0a2a70:9": {
+      "session_id": "6b79d31ff461_ee0a2a70",
+      "pr1_arms": [
+        "B",
+        "C"
+      ]
+    },
+    "75037d12258b_89667df4:1": {
+      "session_id": "75037d12258b_89667df4",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "75037d12258b_89667df4:2": {
+      "session_id": "75037d12258b_89667df4",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "756b4931c8e8_0df7bbda:4": {
+      "session_id": "756b4931c8e8_0df7bbda",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "756b4931c8e8_0df7bbda:5": {
+      "session_id": "756b4931c8e8_0df7bbda",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "756b4931c8e8_0df7bbda:6": {
+      "session_id": "756b4931c8e8_0df7bbda",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "756b4931c8e8_0df7bbda:7": {
+      "session_id": "756b4931c8e8_0df7bbda",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "756b4931c8e8_86b0feee:1": {
+      "session_id": "756b4931c8e8_86b0feee",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "756b4931c8e8_86b0feee:3": {
+      "session_id": "756b4931c8e8_86b0feee",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "756b4931c8e8_f605c508:4": {
+      "session_id": "756b4931c8e8_f605c508",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "756b4931c8e8_f605c508:6": {
+      "session_id": "756b4931c8e8_f605c508",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "756b4931c8e8_f605c508:7": {
+      "session_id": "756b4931c8e8_f605c508",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "7c39d2802396_912b19fc:10": {
+      "session_id": "7c39d2802396_912b19fc",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "7c39d2802396_912b19fc:13": {
+      "session_id": "7c39d2802396_912b19fc",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "7c39d2802396_912b19fc:15": {
+      "session_id": "7c39d2802396_912b19fc",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "7c39d2802396_912b19fc:17": {
+      "session_id": "7c39d2802396_912b19fc",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "7fa0750e35c4_059328b3:1": {
+      "session_id": "7fa0750e35c4_059328b3",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "7fa0750e35c4_059328b3:2": {
+      "session_id": "7fa0750e35c4_059328b3",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "7fa0750e35c4_059328b3:3": {
+      "session_id": "7fa0750e35c4_059328b3",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "7fa0750e35c4_5580f9af:2": {
+      "session_id": "7fa0750e35c4_5580f9af",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "7fa0750e35c4_5580f9af:6": {
+      "session_id": "7fa0750e35c4_5580f9af",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "7fa0750e35c4_5580f9af:7": {
+      "session_id": "7fa0750e35c4_5580f9af",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "7fa0750e35c4_5580f9af:9": {
+      "session_id": "7fa0750e35c4_5580f9af",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "7fa0750e35c4_5b689ff5:2": {
+      "session_id": "7fa0750e35c4_5b689ff5",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "7fa0750e35c4_5b689ff5:3": {
+      "session_id": "7fa0750e35c4_5b689ff5",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "7fa0750e35c4_63d4b2fa:1": {
+      "session_id": "7fa0750e35c4_63d4b2fa",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "7fa0750e35c4_63d4b2fa:5": {
+      "session_id": "7fa0750e35c4_63d4b2fa",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "7fa0750e35c4_63d4b2fa:6": {
+      "session_id": "7fa0750e35c4_63d4b2fa",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "7fa0750e35c4_63d4b2fa:8": {
+      "session_id": "7fa0750e35c4_63d4b2fa",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "7fa0750e35c4_b2dad9e8:1": {
+      "session_id": "7fa0750e35c4_b2dad9e8",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "7fa0750e35c4_b2dad9e8:3": {
+      "session_id": "7fa0750e35c4_b2dad9e8",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "7fa0750e35c4_b2dad9e8:4": {
+      "session_id": "7fa0750e35c4_b2dad9e8",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "7fa0750e35c4_b2dad9e8:5": {
+      "session_id": "7fa0750e35c4_b2dad9e8",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "7fa0750e35c4_d1a16024:1": {
+      "session_id": "7fa0750e35c4_d1a16024",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "7fa0750e35c4_d1a16024:2": {
+      "session_id": "7fa0750e35c4_d1a16024",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "7fa0750e35c4_d1a16024:3": {
+      "session_id": "7fa0750e35c4_d1a16024",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "7fa0750e35c4_f786e343:1": {
+      "session_id": "7fa0750e35c4_f786e343",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "7fa0750e35c4_f786e343:2": {
+      "session_id": "7fa0750e35c4_f786e343",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "7fa0750e35c4_f786e343:3": {
+      "session_id": "7fa0750e35c4_f786e343",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "7fa0750e35c4_f786e343:4": {
+      "session_id": "7fa0750e35c4_f786e343",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "8956eab31b56_33fe9c3d:14": {
+      "session_id": "8956eab31b56_33fe9c3d",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "8956eab31b56_33fe9c3d:16": {
+      "session_id": "8956eab31b56_33fe9c3d",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "8956eab31b56_33fe9c3d:19": {
+      "session_id": "8956eab31b56_33fe9c3d",
+      "pr1_arms": [
+        "A",
+        "C",
+        "D"
+      ]
+    },
+    "8956eab31b56_33fe9c3d:5": {
+      "session_id": "8956eab31b56_33fe9c3d",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "8a39d132904f_754eee88:1": {
+      "session_id": "8a39d132904f_754eee88",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "8a39d132904f_754eee88:3": {
+      "session_id": "8a39d132904f_754eee88",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "8d558bd01979_6e8f50b8:19": {
+      "session_id": "8d558bd01979_6e8f50b8",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "8d558bd01979_6e8f50b8:34": {
+      "session_id": "8d558bd01979_6e8f50b8",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "8d558bd01979_6e8f50b8:38": {
+      "session_id": "8d558bd01979_6e8f50b8",
+      "pr1_arms": [
+        "B",
+        "C"
+      ]
+    },
+    "8d558bd01979_6e8f50b8:41": {
+      "session_id": "8d558bd01979_6e8f50b8",
+      "pr1_arms": [
+        "B",
+        "C"
+      ]
+    },
+    "8d558bd01979_a4d9b034:17": {
+      "session_id": "8d558bd01979_a4d9b034",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "8d558bd01979_a4d9b034:24": {
+      "session_id": "8d558bd01979_a4d9b034",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C"
+      ]
+    },
+    "8d558bd01979_a4d9b034:7": {
+      "session_id": "8d558bd01979_a4d9b034",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "938435e2d019_0bba69a7:5": {
+      "session_id": "938435e2d019_0bba69a7",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "938435e2d019_0bba69a7:7": {
+      "session_id": "938435e2d019_0bba69a7",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "938435e2d019_0bba69a7:8": {
+      "session_id": "938435e2d019_0bba69a7",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "938435e2d019_3496ec59:1": {
+      "session_id": "938435e2d019_3496ec59",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "938435e2d019_be495def:1": {
+      "session_id": "938435e2d019_be495def",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "938435e2d019_be495def:2": {
+      "session_id": "938435e2d019_be495def",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "9f000393d262_3dd3a1ea:10": {
+      "session_id": "9f000393d262_3dd3a1ea",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "9f000393d262_3dd3a1ea:4": {
+      "session_id": "9f000393d262_3dd3a1ea",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "9f000393d262_3dd3a1ea:7": {
+      "session_id": "9f000393d262_3dd3a1ea",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "a238cac93253_50d67417:21": {
+      "session_id": "a238cac93253_50d67417",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "a238cac93253_50d67417:25": {
+      "session_id": "a238cac93253_50d67417",
+      "pr1_arms": [
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "a238cac93253_50d67417:29": {
+      "session_id": "a238cac93253_50d67417",
+      "pr1_arms": [
+        "B",
+        "C"
+      ]
+    },
+    "a238cac93253_d6eb1f26:12": {
+      "session_id": "a238cac93253_d6eb1f26",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "a238cac93253_d6eb1f26:14": {
+      "session_id": "a238cac93253_d6eb1f26",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "a238cac93253_d6eb1f26:16": {
+      "session_id": "a238cac93253_d6eb1f26",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C"
+      ]
+    },
+    "a238cac93253_d6eb1f26:30": {
+      "session_id": "a238cac93253_d6eb1f26",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "ab2f8ca80599_3c0a75ce:11": {
+      "session_id": "ab2f8ca80599_3c0a75ce",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C"
+      ]
+    },
+    "ab2f8ca80599_3c0a75ce:15": {
+      "session_id": "ab2f8ca80599_3c0a75ce",
+      "pr1_arms": [
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "ab2f8ca80599_3c0a75ce:8": {
+      "session_id": "ab2f8ca80599_3c0a75ce",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "ab2f8ca80599_3c0a75ce:9": {
+      "session_id": "ab2f8ca80599_3c0a75ce",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "ab2f8ca80599_8df7cf0b:1": {
+      "session_id": "ab2f8ca80599_8df7cf0b",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "ab2f8ca80599_8df7cf0b:11": {
+      "session_id": "ab2f8ca80599_8df7cf0b",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "ab2f8ca80599_8df7cf0b:2": {
+      "session_id": "ab2f8ca80599_8df7cf0b",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "ab2f8ca80599_8df7cf0b:8": {
+      "session_id": "ab2f8ca80599_8df7cf0b",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "ab2f8ca80599_8ec4eb8d:16": {
+      "session_id": "ab2f8ca80599_8ec4eb8d",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "ab2f8ca80599_8ec4eb8d:2": {
+      "session_id": "ab2f8ca80599_8ec4eb8d",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "ab2f8ca80599_8ec4eb8d:5": {
+      "session_id": "ab2f8ca80599_8ec4eb8d",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "ab2f8ca80599_a378da8b:1": {
+      "session_id": "ab2f8ca80599_a378da8b",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "ab2f8ca80599_a378da8b:2": {
+      "session_id": "ab2f8ca80599_a378da8b",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "ab2f8ca80599_a378da8b:6": {
+      "session_id": "ab2f8ca80599_a378da8b",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "ac0f039f4468_0e7a17fd:15": {
+      "session_id": "ac0f039f4468_0e7a17fd",
+      "pr1_arms": [
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "ac0f039f4468_0e7a17fd:20": {
+      "session_id": "ac0f039f4468_0e7a17fd",
+      "pr1_arms": [
+        "B",
+        "C"
+      ]
+    },
+    "ac0f039f4468_0e7a17fd:23": {
+      "session_id": "ac0f039f4468_0e7a17fd",
+      "pr1_arms": [
+        "A",
+        "C",
+        "D"
+      ]
+    },
+    "ac0f039f4468_0e7a17fd:43": {
+      "session_id": "ac0f039f4468_0e7a17fd",
+      "pr1_arms": [
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "ac0f039f4468_24474fd2:2": {
+      "session_id": "ac0f039f4468_24474fd2",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "ac0f039f4468_24474fd2:4": {
+      "session_id": "ac0f039f4468_24474fd2",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "ac0f039f4468_24474fd2:5": {
+      "session_id": "ac0f039f4468_24474fd2",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C"
+      ]
+    },
+    "ac0f039f4468_24474fd2:7": {
+      "session_id": "ac0f039f4468_24474fd2",
+      "pr1_arms": [
+        "B",
+        "C"
+      ]
+    },
+    "ac0f039f4468_32cc3b6a:1": {
+      "session_id": "ac0f039f4468_32cc3b6a",
+      "pr1_arms": [
+        "A",
+        "C",
+        "D"
+      ]
+    },
+    "ac0f039f4468_66e4da95:15": {
+      "session_id": "ac0f039f4468_66e4da95",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "ac0f039f4468_66e4da95:30": {
+      "session_id": "ac0f039f4468_66e4da95",
+      "pr1_arms": [
+        "A",
+        "C"
+      ]
+    },
+    "ac0f039f4468_66e4da95:33": {
+      "session_id": "ac0f039f4468_66e4da95",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "ac0f039f4468_66e4da95:4": {
+      "session_id": "ac0f039f4468_66e4da95",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "ac0f039f4468_841dd6f7:1": {
+      "session_id": "ac0f039f4468_841dd6f7",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "ac0f039f4468_841dd6f7:12": {
+      "session_id": "ac0f039f4468_841dd6f7",
+      "pr1_arms": [
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "ac0f039f4468_841dd6f7:14": {
+      "session_id": "ac0f039f4468_841dd6f7",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "ac0f039f4468_97768847:2": {
+      "session_id": "ac0f039f4468_97768847",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "ac0f039f4468_97768847:3": {
+      "session_id": "ac0f039f4468_97768847",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "ac0f039f4468_97768847:5": {
+      "session_id": "ac0f039f4468_97768847",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "ac0f039f4468_cde1344c:15": {
+      "session_id": "ac0f039f4468_cde1344c",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "ac0f039f4468_cde1344c:17": {
+      "session_id": "ac0f039f4468_cde1344c",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "ac0f039f4468_cde1344c:29": {
+      "session_id": "ac0f039f4468_cde1344c",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "ac0f039f4468_cde1344c:9": {
+      "session_id": "ac0f039f4468_cde1344c",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "ac0f039f4468_cf4baf5a:1": {
+      "session_id": "ac0f039f4468_cf4baf5a",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "ac0f039f4468_cf4baf5a:2": {
+      "session_id": "ac0f039f4468_cf4baf5a",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "ac0f039f4468_cf4baf5a:3": {
+      "session_id": "ac0f039f4468_cf4baf5a",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "ac0f039f4468_cf4baf5a:4": {
+      "session_id": "ac0f039f4468_cf4baf5a",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C"
+      ]
+    },
+    "ac0f039f4468_fd65390c:1": {
+      "session_id": "ac0f039f4468_fd65390c",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "ac0f039f4468_fd65390c:3": {
+      "session_id": "ac0f039f4468_fd65390c",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "ac0f039f4468_fd65390c:7": {
+      "session_id": "ac0f039f4468_fd65390c",
+      "pr1_arms": [
+        "B",
+        "C"
+      ]
+    },
+    "bd7cb52ec7f8_03762b35:1": {
+      "session_id": "bd7cb52ec7f8_03762b35",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "bd7cb52ec7f8_03762b35:2": {
+      "session_id": "bd7cb52ec7f8_03762b35",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "bd7cb52ec7f8_03762b35:5": {
+      "session_id": "bd7cb52ec7f8_03762b35",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "bd7cb52ec7f8_0f4f1a0c:2": {
+      "session_id": "bd7cb52ec7f8_0f4f1a0c",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "bd7cb52ec7f8_0f4f1a0c:3": {
+      "session_id": "bd7cb52ec7f8_0f4f1a0c",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "bd7cb52ec7f8_0f4f1a0c:4": {
+      "session_id": "bd7cb52ec7f8_0f4f1a0c",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "bd7cb52ec7f8_0f4f1a0c:5": {
+      "session_id": "bd7cb52ec7f8_0f4f1a0c",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "bd7cb52ec7f8_5047588b:2": {
+      "session_id": "bd7cb52ec7f8_5047588b",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "bd7cb52ec7f8_5047588b:3": {
+      "session_id": "bd7cb52ec7f8_5047588b",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "bd7cb52ec7f8_5047588b:4": {
+      "session_id": "bd7cb52ec7f8_5047588b",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "bd7cb52ec7f8_5047588b:5": {
+      "session_id": "bd7cb52ec7f8_5047588b",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "bd7cb52ec7f8_c385f774:1": {
+      "session_id": "bd7cb52ec7f8_c385f774",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "bd7cb52ec7f8_c385f774:2": {
+      "session_id": "bd7cb52ec7f8_c385f774",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "bd7cb52ec7f8_c385f774:3": {
+      "session_id": "bd7cb52ec7f8_c385f774",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "bd7cb52ec7f8_c385f774:4": {
+      "session_id": "bd7cb52ec7f8_c385f774",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "bd7cb52ec7f8_e40dca56:1": {
+      "session_id": "bd7cb52ec7f8_e40dca56",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "bd7cb52ec7f8_e40dca56:3": {
+      "session_id": "bd7cb52ec7f8_e40dca56",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "bd7cb52ec7f8_e40dca56:4": {
+      "session_id": "bd7cb52ec7f8_e40dca56",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "c0d1d84c7898_87da46b2:3": {
+      "session_id": "c0d1d84c7898_87da46b2",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "c0d1d84c7898_87da46b2:8": {
+      "session_id": "c0d1d84c7898_87da46b2",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "c0d1d84c7898_87da46b2:9": {
+      "session_id": "c0d1d84c7898_87da46b2",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "c0d1d84c7898_9fad246c:14": {
+      "session_id": "c0d1d84c7898_9fad246c",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "c0d1d84c7898_9fad246c:5": {
+      "session_id": "c0d1d84c7898_9fad246c",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "c0d1d84c7898_abe62f9d:21": {
+      "session_id": "c0d1d84c7898_abe62f9d",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "c0d1d84c7898_abe62f9d:31": {
+      "session_id": "c0d1d84c7898_abe62f9d",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "c0d1d84c7898_c75da2fd:15": {
+      "session_id": "c0d1d84c7898_c75da2fd",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "c0d1d84c7898_c75da2fd:22": {
+      "session_id": "c0d1d84c7898_c75da2fd",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "c0d1d84c7898_c75da2fd:37": {
+      "session_id": "c0d1d84c7898_c75da2fd",
+      "pr1_arms": [
+        "B",
+        "C"
+      ]
+    },
+    "c0d1d84c7898_c75da2fd:74": {
+      "session_id": "c0d1d84c7898_c75da2fd",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "c0d1d84c7898_cf9a5a39:30": {
+      "session_id": "c0d1d84c7898_cf9a5a39",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "c0d1d84c7898_cf9a5a39:4": {
+      "session_id": "c0d1d84c7898_cf9a5a39",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "c0d1d84c7898_cf9a5a39:41": {
+      "session_id": "c0d1d84c7898_cf9a5a39",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "c0d1d84c7898_cf9a5a39:44": {
+      "session_id": "c0d1d84c7898_cf9a5a39",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "d090830da26c_279d52cd:17": {
+      "session_id": "d090830da26c_279d52cd",
+      "pr1_arms": [
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "d090830da26c_279d52cd:21": {
+      "session_id": "d090830da26c_279d52cd",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C"
+      ]
+    },
+    "d090830da26c_279d52cd:35": {
+      "session_id": "d090830da26c_279d52cd",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C"
+      ]
+    },
+    "d090830da26c_279d52cd:9": {
+      "session_id": "d090830da26c_279d52cd",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "d090830da26c_7f6aba00:18": {
+      "session_id": "d090830da26c_7f6aba00",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "d090830da26c_7f6aba00:5": {
+      "session_id": "d090830da26c_7f6aba00",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C"
+      ]
+    },
+    "d090830da26c_7f6aba00:7": {
+      "session_id": "d090830da26c_7f6aba00",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "d090830da26c_a61f0025:2": {
+      "session_id": "d090830da26c_a61f0025",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "d090830da26c_a61f0025:8": {
+      "session_id": "d090830da26c_a61f0025",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "d090830da26c_a61f0025:9": {
+      "session_id": "d090830da26c_a61f0025",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "d090830da26c_de61deba:18": {
+      "session_id": "d090830da26c_de61deba",
+      "pr1_arms": [
+        "A",
+        "C",
+        "D"
+      ]
+    },
+    "d090830da26c_de61deba:5": {
+      "session_id": "d090830da26c_de61deba",
+      "pr1_arms": [
+        "A",
+        "C",
+        "D"
+      ]
+    },
+    "d090830da26c_e0237641:1": {
+      "session_id": "d090830da26c_e0237641",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "d090830da26c_e0237641:10": {
+      "session_id": "d090830da26c_e0237641",
+      "pr1_arms": [
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "d090830da26c_e0237641:15": {
+      "session_id": "d090830da26c_e0237641",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C"
+      ]
+    },
+    "d090830da26c_e0237641:21": {
+      "session_id": "d090830da26c_e0237641",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "d090830da26c_e15cf773:11": {
+      "session_id": "d090830da26c_e15cf773",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "d090830da26c_e15cf773:16": {
+      "session_id": "d090830da26c_e15cf773",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "d090830da26c_e15cf773:3": {
+      "session_id": "d090830da26c_e15cf773",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "d090830da26c_e15cf773:7": {
+      "session_id": "d090830da26c_e15cf773",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "d090830da26c_e71252ae:19": {
+      "session_id": "d090830da26c_e71252ae",
+      "pr1_arms": [
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "d090830da26c_e71252ae:29": {
+      "session_id": "d090830da26c_e71252ae",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C"
+      ]
+    },
+    "d090830da26c_e71252ae:37": {
+      "session_id": "d090830da26c_e71252ae",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C"
+      ]
+    },
+    "d090830da26c_e71252ae:43": {
+      "session_id": "d090830da26c_e71252ae",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C"
+      ]
+    },
+    "d090830da26c_fbd39b21:12": {
+      "session_id": "d090830da26c_fbd39b21",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C"
+      ]
+    },
+    "d090830da26c_fbd39b21:13": {
+      "session_id": "d090830da26c_fbd39b21",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "d090830da26c_fbd39b21:8": {
+      "session_id": "d090830da26c_fbd39b21",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "d3d3e0d1a8f8_20b42b16:4": {
+      "session_id": "d3d3e0d1a8f8_20b42b16",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "d3d3e0d1a8f8_20b42b16:5": {
+      "session_id": "d3d3e0d1a8f8_20b42b16",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "d3d3e0d1a8f8_20b42b16:6": {
+      "session_id": "d3d3e0d1a8f8_20b42b16",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "d3d3e0d1a8f8_20b42b16:7": {
+      "session_id": "d3d3e0d1a8f8_20b42b16",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "d5c4f35bed6a_70236830:1": {
+      "session_id": "d5c4f35bed6a_70236830",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "d5c4f35bed6a_70236830:2": {
+      "session_id": "d5c4f35bed6a_70236830",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "d5c4f35bed6a_70236830:3": {
+      "session_id": "d5c4f35bed6a_70236830",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "d5c4f35bed6a_70236830:4": {
+      "session_id": "d5c4f35bed6a_70236830",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "d5c4f35bed6a_c4ca6b42:1": {
+      "session_id": "d5c4f35bed6a_c4ca6b42",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "d5c4f35bed6a_c4ca6b42:2": {
+      "session_id": "d5c4f35bed6a_c4ca6b42",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "d5c4f35bed6a_fccfdfd8:1": {
+      "session_id": "d5c4f35bed6a_fccfdfd8",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "d5c4f35bed6a_fccfdfd8:3": {
+      "session_id": "d5c4f35bed6a_fccfdfd8",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "d5c4f35bed6a_fccfdfd8:5": {
+      "session_id": "d5c4f35bed6a_fccfdfd8",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "d9ccf53fe748_18eb7164:2": {
+      "session_id": "d9ccf53fe748_18eb7164",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "d9ccf53fe748_18eb7164:4": {
+      "session_id": "d9ccf53fe748_18eb7164",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "d9ccf53fe748_18eb7164:5": {
+      "session_id": "d9ccf53fe748_18eb7164",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "d9ccf53fe748_18eb7164:6": {
+      "session_id": "d9ccf53fe748_18eb7164",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "d9ccf53fe748_351f4a95:1": {
+      "session_id": "d9ccf53fe748_351f4a95",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "d9ccf53fe748_351f4a95:38": {
+      "session_id": "d9ccf53fe748_351f4a95",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "d9ccf53fe748_351f4a95:41": {
+      "session_id": "d9ccf53fe748_351f4a95",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "d9ccf53fe748_958d7c0b:1": {
+      "session_id": "d9ccf53fe748_958d7c0b",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "d9ccf53fe748_958d7c0b:2": {
+      "session_id": "d9ccf53fe748_958d7c0b",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "d9ccf53fe748_958d7c0b:3": {
+      "session_id": "d9ccf53fe748_958d7c0b",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "d9ccf53fe748_958d7c0b:5": {
+      "session_id": "d9ccf53fe748_958d7c0b",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "d9ccf53fe748_b4b16cfc:33": {
+      "session_id": "d9ccf53fe748_b4b16cfc",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "d9ccf53fe748_b4b16cfc:4": {
+      "session_id": "d9ccf53fe748_b4b16cfc",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "d9ccf53fe748_fd5138a6:1": {
+      "session_id": "d9ccf53fe748_fd5138a6",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "d9ccf53fe748_fd5138a6:3": {
+      "session_id": "d9ccf53fe748_fd5138a6",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "d9ccf53fe748_fd5138a6:4": {
+      "session_id": "d9ccf53fe748_fd5138a6",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "d9ccf53fe748_fd5138a6:5": {
+      "session_id": "d9ccf53fe748_fd5138a6",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "e416e0e39ffd_8999303e:2": {
+      "session_id": "e416e0e39ffd_8999303e",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "e416e0e39ffd_8999303e:4": {
+      "session_id": "e416e0e39ffd_8999303e",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "e416e0e39ffd_8999303e:6": {
+      "session_id": "e416e0e39ffd_8999303e",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "e416e0e39ffd_e13aa6a4:1": {
+      "session_id": "e416e0e39ffd_e13aa6a4",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "e416e0e39ffd_e13aa6a4:4": {
+      "session_id": "e416e0e39ffd_e13aa6a4",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "e416e0e39ffd_e13aa6a4:5": {
+      "session_id": "e416e0e39ffd_e13aa6a4",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "e416e0e39ffd_e13aa6a4:7": {
+      "session_id": "e416e0e39ffd_e13aa6a4",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "e416e0e39ffd_e845efed:1": {
+      "session_id": "e416e0e39ffd_e845efed",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "e416e0e39ffd_e845efed:2": {
+      "session_id": "e416e0e39ffd_e845efed",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "e416e0e39ffd_e845efed:3": {
+      "session_id": "e416e0e39ffd_e845efed",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "e416e0e39ffd_e845efed:4": {
+      "session_id": "e416e0e39ffd_e845efed",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "e920f13c2421_21493c96:1": {
+      "session_id": "e920f13c2421_21493c96",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "e920f13c2421_21493c96:3": {
+      "session_id": "e920f13c2421_21493c96",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "e920f13c2421_21493c96:5": {
+      "session_id": "e920f13c2421_21493c96",
+      "pr1_arms": [
+        "D"
+      ]
+    },
+    "e920f13c2421_21493c96:6": {
+      "session_id": "e920f13c2421_21493c96",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "fe34eb314a84_5be21a75:5": {
+      "session_id": "fe34eb314a84_5be21a75",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C"
+      ]
+    },
+    "fe34eb314a84_5be21a75:6": {
+      "session_id": "fe34eb314a84_5be21a75",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C"
+      ]
+    },
+    "fe34eb314a84_5be21a75:8": {
+      "session_id": "fe34eb314a84_5be21a75",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    },
+    "fe34eb314a84_5be21a75:9": {
+      "session_id": "fe34eb314a84_5be21a75",
+      "pr1_arms": [
+        "A",
+        "B",
+        "C",
+        "D"
+      ]
+    }
+  }
+}
