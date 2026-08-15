@@ -1,0 +1,1354 @@
+{
+  "layer": "paired76",
+  "rows_a": "/home/liuyancheng/c2kv/outputs_lyc/r4_closure/main395_c2kv.jsonl",
+  "n_rows": 395,
+  "n_tool_target": 395,
+  "n_failures": 380,
+  "counts": {
+    "NO_CALL": 96,
+    "PROTOCOL_BROKEN": 206,
+    "WRONG_TOOL": 40,
+    "WRONG_ARGS": 10,
+    "CORRECT": 15,
+    "OTHER": 28
+  },
+  "control_class_share_of_failures": 0.6737,
+  "wrong_tool_subtypes": {
+    "in_pool": 36,
+    "out_of_pool": 4
+  },
+  "overtrigger_non_tool_targets": {
+    "n": 0,
+    "called": 0
+  },
+  "per_qid": {
+    "a45d2c09567a_795c2422:0": {
+      "category": "NO_CALL"
+    },
+    "a45d2c09567a_795c2422:1": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "a45d2c09567a_795c2422:2": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "a45d2c09567a_795c2422:3": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "a45d2c09567a_795c2422:4": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "a45d2c09567a_795c2422:5": {
+      "category": "NO_CALL"
+    },
+    "a45d2c09567a_795c2422:6": {
+      "category": "WRONG_TOOL",
+      "pred_name": "finish",
+      "in_pool": true
+    },
+    "a45d2c09567a_7c2c1bb8:0": {
+      "category": "NO_CALL"
+    },
+    "a45d2c09567a_7c2c1bb8:1": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "a45d2c09567a_7c2c1bb8:2": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "a45d2c09567a_7c2c1bb8:3": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "a45d2c09567a_7c2c1bb8:4": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "a45d2c09567a_7c2c1bb8:5": {
+      "category": "NO_CALL"
+    },
+    "a45d2c09567a_7c2c1bb8:6": {
+      "category": "NO_CALL"
+    },
+    "a45d2c09567a_7c2c1bb8:7": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "a45d2c09567a_cfce19ea:0": {
+      "category": "NO_CALL"
+    },
+    "a45d2c09567a_cfce19ea:2": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "a45d2c09567a_cfce19ea:3": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "a45d2c09567a_cfce19ea:4": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "a45d2c09567a_cfce19ea:5": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "a45d2c09567a_cfce19ea:6": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "a45d2c09567a_cfce19ea:7": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "a45d2c09567a_cfce19ea:8": {
+      "category": "NO_CALL"
+    },
+    "a45d2c09567a_cfce19ea:9": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "a45d2c09567a_cfce19ea:10": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "a45d2c09567a_cfce19ea:11": {
+      "category": "NO_CALL"
+    },
+    "a45d2c09567a_cfce19ea:13": {
+      "category": "NO_CALL"
+    },
+    "a45d2c09567a_cfce19ea:14": {
+      "category": "NO_CALL"
+    },
+    "b455f37f04c7_903ca285:0": {
+      "category": "NO_CALL"
+    },
+    "b455f37f04c7_903ca285:1": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "b455f37f04c7_903ca285:3": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "b455f37f04c7_903ca285:4": {
+      "category": "WRONG_TOOL",
+      "pred_name": "phone__search_contacts",
+      "in_pool": true
+    },
+    "b455f37f04c7_903ca285:5": {
+      "category": "WRONG_ARGS",
+      "note": "key-set mismatch"
+    },
+    "b455f37f04c7_903ca285:6": {
+      "category": "WRONG_ARGS",
+      "note": "key-set mismatch"
+    },
+    "b455f37f04c7_903ca285:8": {
+      "category": "CORRECT"
+    },
+    "b455f37f04c7_903ca285:9": {
+      "category": "WRONG_TOOL",
+      "pred_name": "phone__search_contacts",
+      "in_pool": true
+    },
+    "b455f37f04c7_903ca285:10": {
+      "category": "WRONG_TOOL",
+      "pred_name": "phone__show_contact_relationships",
+      "in_pool": true
+    },
+    "b455f37f04c7_903ca285:11": {
+      "category": "WRONG_TOOL",
+      "pred_name": "phone__show_contact_relationships",
+      "in_pool": true
+    },
+    "b455f37f04c7_903ca285:12": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "b455f37f04c7_903ca285:13": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "b455f37f04c7_903ca285:14": {
+      "category": "NO_CALL"
+    },
+    "0c890a5dde8c_012517c3:0": {
+      "category": "NO_CALL"
+    },
+    "0c890a5dde8c_012517c3:1": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "0c890a5dde8c_012517c3:2": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "0c890a5dde8c_012517c3:3": {
+      "category": "WRONG_TOOL",
+      "pred_name": "spotify__show_profile",
+      "in_pool": true
+    },
+    "0c890a5dde8c_012517c3:4": {
+      "category": "NO_CALL"
+    },
+    "0c890a5dde8c_012517c3:5": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "0c890a5dde8c_012517c3:6": {
+      "category": "NO_CALL"
+    },
+    "0c890a5dde8c_012517c3:7": {
+      "category": "NO_CALL"
+    },
+    "0c890a5dde8c_012517c3:8": {
+      "category": "NO_CALL"
+    },
+    "0c890a5dde8c_328484ff:0": {
+      "category": "NO_CALL"
+    },
+    "0c890a5dde8c_328484ff:1": {
+      "category": "NO_CALL"
+    },
+    "0c890a5dde8c_328484ff:10": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "0c890a5dde8c_328484ff:11": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "0c890a5dde8c_328484ff:12": {
+      "category": "NO_CALL"
+    },
+    "0c890a5dde8c_328484ff:13": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "0c890a5dde8c_328484ff:2": {
+      "category": "WRONG_TOOL",
+      "pred_name": "supervisor__show_profile",
+      "in_pool": true
+    },
+    "0c890a5dde8c_328484ff:3": {
+      "category": "WRONG_TOOL",
+      "pred_name": "venmo__show_profile",
+      "in_pool": true
+    },
+    "0c890a5dde8c_328484ff:4": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "0c890a5dde8c_328484ff:5": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "0c890a5dde8c_328484ff:6": {
+      "category": "NO_CALL"
+    },
+    "0c890a5dde8c_328484ff:7": {
+      "category": "NO_CALL"
+    },
+    "0c890a5dde8c_328484ff:8": {
+      "category": "NO_CALL"
+    },
+    "0c890a5dde8c_328484ff:9": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "0c890a5dde8c_3382a8ce:0": {
+      "category": "NO_CALL"
+    },
+    "0c890a5dde8c_3382a8ce:1": {
+      "category": "NO_CALL"
+    },
+    "0c890a5dde8c_3382a8ce:2": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "0c890a5dde8c_3382a8ce:3": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "0c890a5dde8c_3382a8ce:4": {
+      "category": "NO_CALL"
+    },
+    "0c890a5dde8c_42680439:0": {
+      "category": "NO_CALL"
+    },
+    "0c890a5dde8c_42680439:1": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "0c890a5dde8c_42680439:2": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "0c890a5dde8c_42680439:3": {
+      "category": "WRONG_TOOL",
+      "pred_name": "venmo__show_profile",
+      "in_pool": true
+    },
+    "0c890a5dde8c_42680439:4": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "0c890a5dde8c_42680439:5": {
+      "category": "NO_CALL"
+    },
+    "0c890a5dde8c_42680439:6": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "0c890a5dde8c_42680439:7": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "0c890a5dde8c_42680439:8": {
+      "category": "NO_CALL"
+    },
+    "0c890a5dde8c_44648a56:0": {
+      "category": "NO_CALL"
+    },
+    "0c890a5dde8c_44648a56:1": {
+      "category": "NO_CALL"
+    },
+    "0c890a5dde8c_44648a56:2": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "0c890a5dde8c_44648a56:3": {
+      "category": "WRONG_TOOL",
+      "pred_name": "venmo__show_profile",
+      "in_pool": true
+    },
+    "0c890a5dde8c_44648a56:4": {
+      "category": "NO_CALL"
+    },
+    "0c890a5dde8c_44648a56:5": {
+      "category": "NO_CALL"
+    },
+    "0c890a5dde8c_44648a56:6": {
+      "category": "NO_CALL"
+    },
+    "0c890a5dde8c_44648a56:7": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "0c890a5dde8c_45468b2c:0": {
+      "category": "NO_CALL"
+    },
+    "0c890a5dde8c_45468b2c:1": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "0c890a5dde8c_45468b2c:10": {
+      "category": "NO_CALL"
+    },
+    "0c890a5dde8c_45468b2c:2": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "0c890a5dde8c_45468b2c:3": {
+      "category": "WRONG_TOOL",
+      "pred_name": "spotify__show_profile",
+      "in_pool": true
+    },
+    "0c890a5dde8c_45468b2c:4": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "0c890a5dde8c_45468b2c:5": {
+      "category": "NO_CALL"
+    },
+    "0c890a5dde8c_45468b2c:6": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "0c890a5dde8c_45468b2c:7": {
+      "category": "NO_CALL"
+    },
+    "0c890a5dde8c_45468b2c:8": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "0c890a5dde8c_45468b2c:9": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "0c890a5dde8c_aa600ba4:0": {
+      "category": "NO_CALL"
+    },
+    "0c890a5dde8c_aa600ba4:1": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "0c890a5dde8c_aa600ba4:10": {
+      "category": "NO_CALL"
+    },
+    "0c890a5dde8c_aa600ba4:2": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "0c890a5dde8c_aa600ba4:3": {
+      "category": "WRONG_TOOL",
+      "pred_name": "spotify__show_profile",
+      "in_pool": true
+    },
+    "0c890a5dde8c_aa600ba4:4": {
+      "category": "NO_CALL"
+    },
+    "0c890a5dde8c_aa600ba4:5": {
+      "category": "NO_CALL"
+    },
+    "0c890a5dde8c_aa600ba4:6": {
+      "category": "NO_CALL"
+    },
+    "0c890a5dde8c_aa600ba4:7": {
+      "category": "NO_CALL"
+    },
+    "0c890a5dde8c_aa600ba4:8": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "0c890a5dde8c_aa600ba4:9": {
+      "category": "NO_CALL"
+    },
+    "0c890a5dde8c_bc16285b:0": {
+      "category": "NO_CALL"
+    },
+    "0c890a5dde8c_bc16285b:1": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "0c890a5dde8c_bc16285b:2": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "0c890a5dde8c_bc16285b:3": {
+      "category": "WRONG_TOOL",
+      "pred_name": "spotify__show_profile",
+      "in_pool": true
+    },
+    "0c890a5dde8c_bc16285b:4": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "0c890a5dde8c_bc16285b:5": {
+      "category": "NO_CALL"
+    },
+    "0c890a5dde8c_bc16285b:6": {
+      "category": "NO_CALL"
+    },
+    "0c890a5dde8c_bc16285b:7": {
+      "category": "NO_CALL"
+    },
+    "0c890a5dde8c_c9161e06:0": {
+      "category": "NO_CALL"
+    },
+    "0c890a5dde8c_c9161e06:1": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "0c890a5dde8c_c9161e06:2": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "0c890a5dde8c_c9161e06:3": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "0c890a5dde8c_c9161e06:4": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "0c890a5dde8c_c9161e06:5": {
+      "category": "NO_CALL"
+    },
+    "0c890a5dde8c_c9161e06:6": {
+      "category": "NO_CALL"
+    },
+    "cfc3d70e7f3c_044eacbb:0": {
+      "category": "NO_CALL"
+    },
+    "cfc3d70e7f3c_044eacbb:1": {
+      "category": "NO_CALL"
+    },
+    "cfc3d70e7f3c_044eacbb:11": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_044eacbb:12": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_044eacbb:13": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_044eacbb:14": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_044eacbb:15": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_044eacbb:16": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_044eacbb:2": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_044eacbb:3": {
+      "category": "WRONG_TOOL",
+      "pred_name": "venmo__login",
+      "in_pool": true
+    },
+    "cfc3d70e7f3c_044eacbb:4": {
+      "category": "WRONG_TOOL",
+      "pred_name": "phone__show_account_passwords",
+      "in_pool": false
+    },
+    "cfc3d70e7f3c_044eacbb:5": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_044eacbb:6": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_044eacbb:7": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_044eacbb:8": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_044eacbb:9": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_0510d456:0": {
+      "category": "NO_CALL"
+    },
+    "cfc3d70e7f3c_0510d456:1": {
+      "category": "NO_CALL"
+    },
+    "cfc3d70e7f3c_0510d456:11": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_0510d456:12": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_0510d456:13": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_0510d456:16": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_0510d456:17": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_0510d456:18": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_0510d456:19": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_0510d456:2": {
+      "category": "WRONG_TOOL",
+      "pred_name": "splitwise__login",
+      "in_pool": true
+    },
+    "cfc3d70e7f3c_0510d456:3": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_0510d456:4": {
+      "category": "WRONG_TOOL",
+      "pred_name": "phone__show_contact_relationships",
+      "in_pool": true
+    },
+    "cfc3d70e7f3c_0510d456:5": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_0510d456:6": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_0510d456:8": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_0510d456:9": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_15b71eb0:0": {
+      "category": "NO_CALL"
+    },
+    "cfc3d70e7f3c_15b71eb0:10": {
+      "category": "OTHER",
+      "note": "args unparseable"
+    },
+    "cfc3d70e7f3c_15b71eb0:11": {
+      "category": "OTHER",
+      "note": "args unparseable"
+    },
+    "cfc3d70e7f3c_15b71eb0:12": {
+      "category": "OTHER",
+      "note": "args unparseable"
+    },
+    "cfc3d70e7f3c_15b71eb0:14": {
+      "category": "OTHER",
+      "note": "args unparseable"
+    },
+    "cfc3d70e7f3c_15b71eb0:15": {
+      "category": "OTHER",
+      "note": "args unparseable"
+    },
+    "cfc3d70e7f3c_15b71eb0:16": {
+      "category": "OTHER",
+      "note": "args unparseable"
+    },
+    "cfc3d70e7f3c_15b71eb0:18": {
+      "category": "OTHER",
+      "note": "args unparseable"
+    },
+    "cfc3d70e7f3c_15b71eb0:19": {
+      "category": "OTHER",
+      "note": "args unparseable"
+    },
+    "cfc3d70e7f3c_15b71eb0:2": {
+      "category": "WRONG_TOOL",
+      "pred_name": "venmo__show_account_passwords",
+      "in_pool": false
+    },
+    "cfc3d70e7f3c_15b71eb0:20": {
+      "category": "OTHER",
+      "note": "args unparseable"
+    },
+    "cfc3d70e7f3c_15b71eb0:21": {
+      "category": "OTHER",
+      "note": "args unparseable"
+    },
+    "cfc3d70e7f3c_15b71eb0:4": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_15b71eb0:5": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_15b71eb0:8": {
+      "category": "OTHER",
+      "note": "args unparseable"
+    },
+    "cfc3d70e7f3c_15b71eb0:9": {
+      "category": "OTHER",
+      "note": "args unparseable"
+    },
+    "cfc3d70e7f3c_1899bb8b:1": {
+      "category": "NO_CALL"
+    },
+    "cfc3d70e7f3c_1899bb8b:10": {
+      "category": "WRONG_TOOL",
+      "pred_name": "venmo__show_payment_cards",
+      "in_pool": true
+    },
+    "cfc3d70e7f3c_1899bb8b:14": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_1899bb8b:15": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_1899bb8b:16": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_1899bb8b:17": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_1899bb8b:18": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_1899bb8b:19": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_1899bb8b:2": {
+      "category": "WRONG_TOOL",
+      "pred_name": "todoist__login",
+      "in_pool": true
+    },
+    "cfc3d70e7f3c_1899bb8b:20": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_1899bb8b:21": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_1899bb8b:24": {
+      "category": "OTHER",
+      "note": "args unparseable"
+    },
+    "cfc3d70e7f3c_1899bb8b:25": {
+      "category": "OTHER",
+      "note": "args unparseable"
+    },
+    "cfc3d70e7f3c_1899bb8b:26": {
+      "category": "OTHER",
+      "note": "args unparseable"
+    },
+    "cfc3d70e7f3c_1899bb8b:27": {
+      "category": "OTHER",
+      "note": "args unparseable"
+    },
+    "cfc3d70e7f3c_1899bb8b:3": {
+      "category": "NO_CALL"
+    },
+    "cfc3d70e7f3c_1a5f08b9:0": {
+      "category": "NO_CALL"
+    },
+    "cfc3d70e7f3c_1a5f08b9:1": {
+      "category": "NO_CALL"
+    },
+    "cfc3d70e7f3c_1a5f08b9:2": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_1a5f08b9:3": {
+      "category": "WRONG_TOOL",
+      "pred_name": "venmo__login",
+      "in_pool": true
+    },
+    "cfc3d70e7f3c_1a5f08b9:4": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_1a5f08b9:5": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_1a5f08b9:6": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_1a5f08b9:7": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_1a5f08b9:8": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_286c7c09:1": {
+      "category": "NO_CALL"
+    },
+    "cfc3d70e7f3c_286c7c09:10": {
+      "category": "OTHER",
+      "note": "args unparseable"
+    },
+    "cfc3d70e7f3c_286c7c09:11": {
+      "category": "OTHER",
+      "note": "args unparseable"
+    },
+    "cfc3d70e7f3c_286c7c09:12": {
+      "category": "OTHER",
+      "note": "args unparseable"
+    },
+    "cfc3d70e7f3c_286c7c09:17": {
+      "category": "OTHER",
+      "note": "args unparseable"
+    },
+    "cfc3d70e7f3c_286c7c09:18": {
+      "category": "OTHER",
+      "note": "args unparseable"
+    },
+    "cfc3d70e7f3c_286c7c09:2": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_286c7c09:20": {
+      "category": "OTHER",
+      "note": "args unparseable"
+    },
+    "cfc3d70e7f3c_286c7c09:24": {
+      "category": "OTHER",
+      "note": "args unparseable"
+    },
+    "cfc3d70e7f3c_286c7c09:26": {
+      "category": "OTHER",
+      "note": "args unparseable"
+    },
+    "cfc3d70e7f3c_286c7c09:27": {
+      "category": "OTHER",
+      "note": "args unparseable"
+    },
+    "cfc3d70e7f3c_286c7c09:3": {
+      "category": "WRONG_TOOL",
+      "pred_name": "file_system__login",
+      "in_pool": true
+    },
+    "cfc3d70e7f3c_286c7c09:5": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_286c7c09:7": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_286c7c09:8": {
+      "category": "OTHER",
+      "note": "args unparseable"
+    },
+    "cfc3d70e7f3c_286c7c09:9": {
+      "category": "OTHER",
+      "note": "args unparseable"
+    },
+    "cfc3d70e7f3c_6418d65c:1": {
+      "category": "NO_CALL"
+    },
+    "cfc3d70e7f3c_6418d65c:10": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_6418d65c:11": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_6418d65c:13": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_6418d65c:15": {
+      "category": "NO_CALL"
+    },
+    "cfc3d70e7f3c_6418d65c:17": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_6418d65c:18": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_6418d65c:19": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_6418d65c:2": {
+      "category": "WRONG_TOOL",
+      "pred_name": "venmo__show_account_passwords",
+      "in_pool": false
+    },
+    "cfc3d70e7f3c_6418d65c:20": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_6418d65c:21": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_6418d65c:22": {
+      "category": "NO_CALL"
+    },
+    "cfc3d70e7f3c_6418d65c:23": {
+      "category": "NO_CALL"
+    },
+    "cfc3d70e7f3c_6418d65c:25": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_6418d65c:4": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_6418d65c:9": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_79ccaa70:0": {
+      "category": "NO_CALL"
+    },
+    "cfc3d70e7f3c_79ccaa70:1": {
+      "category": "NO_CALL"
+    },
+    "cfc3d70e7f3c_79ccaa70:2": {
+      "category": "WRONG_TOOL",
+      "pred_name": "splitwise__login",
+      "in_pool": true
+    },
+    "cfc3d70e7f3c_79ccaa70:3": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_79ccaa70:4": {
+      "category": "NO_CALL"
+    },
+    "cfc3d70e7f3c_79ccaa70:5": {
+      "category": "NO_CALL"
+    },
+    "cfc3d70e7f3c_79ccaa70:6": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_79ccaa70:7": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_79ccaa70:8": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_7c2b1b7c:0": {
+      "category": "NO_CALL"
+    },
+    "cfc3d70e7f3c_7c2b1b7c:1": {
+      "category": "NO_CALL"
+    },
+    "cfc3d70e7f3c_7c2b1b7c:12": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_7c2b1b7c:13": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_7c2b1b7c:14": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_7c2b1b7c:15": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_7c2b1b7c:17": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_7c2b1b7c:18": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_7c2b1b7c:19": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_7c2b1b7c:2": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_7c2b1b7c:20": {
+      "category": "NO_CALL"
+    },
+    "cfc3d70e7f3c_7c2b1b7c:3": {
+      "category": "WRONG_TOOL",
+      "pred_name": "simple_note__login",
+      "in_pool": true
+    },
+    "cfc3d70e7f3c_7c2b1b7c:4": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_7c2b1b7c:5": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_7c2b1b7c:7": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_7c2b1b7c:9": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_7c4e425a:0": {
+      "category": "NO_CALL"
+    },
+    "cfc3d70e7f3c_7c4e425a:1": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_7c4e425a:10": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_7c4e425a:11": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_7c4e425a:2": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_7c4e425a:3": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_7c4e425a:4": {
+      "category": "WRONG_TOOL",
+      "pred_name": "phone__login",
+      "in_pool": true
+    },
+    "cfc3d70e7f3c_7c4e425a:5": {
+      "category": "NO_CALL"
+    },
+    "cfc3d70e7f3c_7c4e425a:6": {
+      "category": "NO_CALL"
+    },
+    "cfc3d70e7f3c_7c4e425a:7": {
+      "category": "NO_CALL"
+    },
+    "cfc3d70e7f3c_7c4e425a:8": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_7c4e425a:9": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_7db65d88:0": {
+      "category": "NO_CALL"
+    },
+    "cfc3d70e7f3c_7db65d88:1": {
+      "category": "NO_CALL"
+    },
+    "cfc3d70e7f3c_7db65d88:2": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_7db65d88:3": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_7db65d88:4": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_7db65d88:5": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_7db65d88:6": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_7db65d88:7": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_864566aa:0": {
+      "category": "NO_CALL"
+    },
+    "cfc3d70e7f3c_864566aa:1": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_864566aa:10": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_864566aa:11": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_864566aa:2": {
+      "category": "WRONG_TOOL",
+      "pred_name": "venmo__login",
+      "in_pool": true
+    },
+    "cfc3d70e7f3c_864566aa:3": {
+      "category": "WRONG_TOOL",
+      "pred_name": "venmo__login",
+      "in_pool": true
+    },
+    "cfc3d70e7f3c_864566aa:4": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_864566aa:5": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_864566aa:6": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_864566aa:7": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_864566aa:8": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_864566aa:9": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_876b78e7:0": {
+      "category": "NO_CALL"
+    },
+    "cfc3d70e7f3c_876b78e7:1": {
+      "category": "NO_CALL"
+    },
+    "cfc3d70e7f3c_876b78e7:2": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_876b78e7:3": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_876b78e7:4": {
+      "category": "NO_CALL"
+    },
+    "cfc3d70e7f3c_876b78e7:5": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_876b78e7:6": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_876b78e7:7": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_ba5fb247:1": {
+      "category": "NO_CALL"
+    },
+    "cfc3d70e7f3c_ba5fb247:10": {
+      "category": "CORRECT"
+    },
+    "cfc3d70e7f3c_ba5fb247:11": {
+      "category": "CORRECT"
+    },
+    "cfc3d70e7f3c_ba5fb247:12": {
+      "category": "CORRECT"
+    },
+    "cfc3d70e7f3c_ba5fb247:13": {
+      "category": "CORRECT"
+    },
+    "cfc3d70e7f3c_ba5fb247:14": {
+      "category": "CORRECT"
+    },
+    "cfc3d70e7f3c_ba5fb247:17": {
+      "category": "CORRECT"
+    },
+    "cfc3d70e7f3c_ba5fb247:19": {
+      "category": "CORRECT"
+    },
+    "cfc3d70e7f3c_ba5fb247:2": {
+      "category": "WRONG_TOOL",
+      "pred_name": "phone__login",
+      "in_pool": true
+    },
+    "cfc3d70e7f3c_ba5fb247:20": {
+      "category": "CORRECT"
+    },
+    "cfc3d70e7f3c_ba5fb247:3": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_ba5fb247:4": {
+      "category": "WRONG_TOOL",
+      "pred_name": "phone__show_alarms",
+      "in_pool": true
+    },
+    "cfc3d70e7f3c_ba5fb247:6": {
+      "category": "CORRECT"
+    },
+    "cfc3d70e7f3c_ba5fb247:7": {
+      "category": "CORRECT"
+    },
+    "cfc3d70e7f3c_ba5fb247:8": {
+      "category": "CORRECT"
+    },
+    "cfc3d70e7f3c_ba5fb247:9": {
+      "category": "WRONG_ARGS",
+      "value_match_rate": 0.0
+    },
+    "cfc3d70e7f3c_d150ef61:1": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_d150ef61:10": {
+      "category": "WRONG_ARGS",
+      "value_match_rate": 0.0
+    },
+    "cfc3d70e7f3c_d150ef61:11": {
+      "category": "WRONG_ARGS",
+      "value_match_rate": 0.0
+    },
+    "cfc3d70e7f3c_d150ef61:12": {
+      "category": "WRONG_ARGS",
+      "value_match_rate": 0.0
+    },
+    "cfc3d70e7f3c_d150ef61:13": {
+      "category": "WRONG_ARGS",
+      "value_match_rate": 0.0
+    },
+    "cfc3d70e7f3c_d150ef61:17": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_d150ef61:18": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_d150ef61:20": {
+      "category": "WRONG_TOOL",
+      "pred_name": "spotify__show_song",
+      "in_pool": true
+    },
+    "cfc3d70e7f3c_d150ef61:21": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_d150ef61:25": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_d150ef61:27": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_d150ef61:3": {
+      "category": "WRONG_TOOL",
+      "pred_name": "file_system__login",
+      "in_pool": true
+    },
+    "cfc3d70e7f3c_d150ef61:4": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_d150ef61:5": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_d150ef61:6": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_d150ef61:7": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_e497c59c:0": {
+      "category": "NO_CALL"
+    },
+    "cfc3d70e7f3c_e497c59c:1": {
+      "category": "NO_CALL"
+    },
+    "cfc3d70e7f3c_e497c59c:10": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_e497c59c:11": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_e497c59c:12": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_e497c59c:13": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_e497c59c:14": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_e497c59c:15": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_e497c59c:16": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_e497c59c:17": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_e497c59c:20": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_e497c59c:22": {
+      "category": "WRONG_TOOL",
+      "pred_name": "venmo__show_transactions",
+      "in_pool": true
+    },
+    "cfc3d70e7f3c_e497c59c:6": {
+      "category": "WRONG_ARGS",
+      "value_match_rate": 0.5
+    },
+    "cfc3d70e7f3c_e497c59c:7": {
+      "category": "WRONG_TOOL",
+      "pred_name": "phone__search_contacts",
+      "in_pool": true
+    },
+    "cfc3d70e7f3c_e497c59c:8": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_e497c59c:9": {
+      "category": "WRONG_TOOL",
+      "pred_name": "phone__search_contacts",
+      "in_pool": true
+    },
+    "cfc3d70e7f3c_eb3c3e78:0": {
+      "category": "NO_CALL"
+    },
+    "cfc3d70e7f3c_eb3c3e78:1": {
+      "category": "NO_CALL"
+    },
+    "cfc3d70e7f3c_eb3c3e78:10": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_eb3c3e78:11": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_eb3c3e78:12": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_eb3c3e78:13": {
+      "category": "OTHER",
+      "note": "args unparseable"
+    },
+    "cfc3d70e7f3c_eb3c3e78:2": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_eb3c3e78:3": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_eb3c3e78:4": {
+      "category": "WRONG_TOOL",
+      "pred_name": "phone__login",
+      "in_pool": true
+    },
+    "cfc3d70e7f3c_eb3c3e78:5": {
+      "category": "WRONG_TOOL",
+      "pred_name": "venmo__show_account_passwords",
+      "in_pool": false
+    },
+    "cfc3d70e7f3c_eb3c3e78:6": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_eb3c3e78:7": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_eb3c3e78:8": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_eb3c3e78:9": {
+      "category": "WRONG_TOOL",
+      "pred_name": "venmo__login",
+      "in_pool": true
+    },
+    "cfc3d70e7f3c_eb3f9b09:0": {
+      "category": "NO_CALL"
+    },
+    "cfc3d70e7f3c_eb3f9b09:1": {
+      "category": "NO_CALL"
+    },
+    "cfc3d70e7f3c_eb3f9b09:10": {
+      "category": "WRONG_ARGS",
+      "value_match_rate": 0.0
+    },
+    "cfc3d70e7f3c_eb3f9b09:11": {
+      "category": "WRONG_TOOL",
+      "pred_name": "spotify__show_song",
+      "in_pool": true
+    },
+    "cfc3d70e7f3c_eb3f9b09:12": {
+      "category": "WRONG_TOOL",
+      "pred_name": "spotify__show_song",
+      "in_pool": true
+    },
+    "cfc3d70e7f3c_eb3f9b09:2": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_eb3f9b09:3": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_eb3f9b09:4": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_eb3f9b09:5": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_eb3f9b09:6": {
+      "category": "CORRECT"
+    },
+    "cfc3d70e7f3c_eb3f9b09:7": {
+      "category": "CORRECT"
+    },
+    "cfc3d70e7f3c_eb3f9b09:8": {
+      "category": "CORRECT"
+    },
+    "cfc3d70e7f3c_eb3f9b09:9": {
+      "category": "WRONG_ARGS",
+      "value_match_rate": 0.0
+    },
+    "cfc3d70e7f3c_fbba462d:0": {
+      "category": "NO_CALL"
+    },
+    "cfc3d70e7f3c_fbba462d:12": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_fbba462d:14": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_fbba462d:16": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_fbba462d:18": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_fbba462d:19": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_fbba462d:22": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_fbba462d:24": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_fbba462d:26": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_fbba462d:29": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_fbba462d:3": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_fbba462d:32": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_fbba462d:34": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_fbba462d:4": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_fbba462d:7": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_fbba462d:8": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_fbbdbea5:0": {
+      "category": "NO_CALL"
+    },
+    "cfc3d70e7f3c_fbbdbea5:1": {
+      "category": "NO_CALL"
+    },
+    "cfc3d70e7f3c_fbbdbea5:10": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_fbbdbea5:2": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_fbbdbea5:3": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_fbbdbea5:4": {
+      "category": "NO_CALL"
+    },
+    "cfc3d70e7f3c_fbbdbea5:5": {
+      "category": "NO_CALL"
+    },
+    "cfc3d70e7f3c_fbbdbea5:6": {
+      "category": "NO_CALL"
+    },
+    "cfc3d70e7f3c_fbbdbea5:7": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_fbbdbea5:8": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "cfc3d70e7f3c_fbbdbea5:9": {
+      "category": "PROTOCOL_BROKEN"
+    }
+  },
+  "paired": {
+    "rows_b": "/home/liuyancheng/c2kv/outputs_lyc/r4_closure/main395_full.jsonl",
+    "n_paired": 395,
+    "excess_failure_cell": 8,
+    "excess_cell_counts": {
+      "PROTOCOL_BROKEN": 7,
+      "WRONG_ARGS": 1
+    },
+    "excess_control_share": 1.0
+  },
+  "boundary_76k": {
+    "heuristic": "target name token position +/- 200 tokens; chunk=512 over doc_ids",
+    "crosses": {
+      "n": 238,
+      "error_rate": 0.8025
+    },
+    "within": {
+      "n": 157,
+      "error_rate": 0.5669
+    },
+    "UNANNOTATABLE": {
+      "n": 0,
+      "error_rate": null
+    }
+  }
+}
