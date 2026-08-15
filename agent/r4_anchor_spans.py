@@ -15,11 +15,12 @@ Char spans are mapped to token indices via fast-tokenizer offset mapping,
 asserted against the harness doc ids (per-doc fallback: token-subsequence
 envelope + fully-structural-token scan, recorded as fallback_docs).
 
-random (frozen): per qid, same span-count and same length MULTISET as typed,
-positions uniform over NON-CONTROL tokens of the same doc when room allows
-(else the qid-level non-control pool), seed 20260815 (per-qid subseed
-sha256("20260815:"+qid)). Budget equality is by construction (identical
-length multiset) and is reported globally.
+random (frozen): per qid, same span-count target and same length MULTISET as
+typed; same-doc non-control placement with 32 retries, then qid-level
+non-control placement, splitting a span only when no doc can host it whole
+(splits keep the token total exact). Seed 20260815 (per-qid subseed
+sha256("20260815:"+qid)). Budget equality is by construction and is reported
+globally.
 
 CPU only. Usage (NPU server, repo root):
   python agent/r4_anchor_spans.py --out configs/r4_anchor_spans.json
@@ -179,22 +180,56 @@ def _random_spans_for_qid(
     control = {
         d: {i for s, e in spans for i in range(s, e)} for d, spans in typed_by_doc.items()
     }
+
+    def _free_positions(d: int, used: Dict[int, List[List[int]]]) -> List[int]:
+        blocked = set(control.get(d, set()))
+        for s, e in used.get(d, []):
+            blocked.update(range(s, e))
+        return [i for i in range(doc_lens[d]) if i not in blocked]
+
     result: Dict[int, List[List[int]]] = {}
+    remainder: List[int] = []
+    # Pass 1: same-doc placement, up to 32 tries per span.
     for d, spans in sorted(typed_by_doc.items()):
-        doc_len = doc_lens[d]
-        blocked = control.get(d, set())
-        free = [i for i in range(doc_len) if i not in blocked]
-        chosen: List[List[int]] = []
         for s, e in spans:
             length = e - s
-            candidates = [st for st in free if st + length <= doc_len and all((st + k) not in blocked for k in range(length)) and all(not (st < ce and st + length > cs) for cs, ce in chosen)]
-            if not candidates:
-                continue
-            st = rng.choice(candidates)
-            chosen.append([st, st + length])
-        if chosen:
-            result[d] = _merge_spans(chosen, doc_len)
-    return result
+            placed = False
+            for _ in range(32):
+                free = _free_positions(d, result)
+                cands = [st for st in free if st + length <= doc_lens[d] and all((st + k) in set(free) for k in range(length))]
+                if not cands:
+                    break
+                st = rng.choice(cands)
+                result.setdefault(d, []).append([st, st + length])
+                placed = True
+                break
+            if not placed:
+                remainder.append((d, length))
+    # Pass 2: qid-level placement of unplaced lengths (whole spans, any doc
+    # with room); split only when no doc can host the whole span.
+    all_docs = sorted({d for d in range(len(doc_lens))})
+    for d0, length in remainder:
+        done = False
+        for d in sorted(all_docs, key=lambda x: -doc_lens[x]):
+            free = _free_positions(d, result)
+            cands = [st for st in free if st + length <= doc_lens[d] and all((st + k) in set(free) for k in range(length))]
+            if cands:
+                st = rng.choice(cands)
+                result.setdefault(d, []).append([st, st + length])
+                done = True
+                break
+        if not done:
+            # Split into two halves and place greedily wherever they fit.
+            left = length // 2
+            for piece in ([left, length - left] if left else [length]):
+                for d in sorted(all_docs, key=lambda x: -doc_lens[x]):
+                    free = _free_positions(d, result)
+                    cands = [st for st in free if st + piece <= doc_lens[d] and all((st + k) in set(free) for k in range(piece))]
+                    if cands:
+                        st = rng.choice(cands)
+                        result.setdefault(d, []).append([st, st + piece])
+                        break
+    return {d: _merge_spans(spans, doc_lens[d]) for d, spans in result.items() if spans}
 
 
 def main() -> None:
