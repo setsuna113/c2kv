@@ -1,0 +1,46 @@
+{
+  "description": "R4 closure (PR: task/r4-closure): frozen run configuration for every arm. All numbers in the PR trace to these settings + the frozen qid/config files. Prereg: configs/r4_prereg.md.",
+  "frozen_qids": {
+    "s1_48": "configs/r3_s1_48_qids.json (48 qids, sha256-bound to outputs_lyc/r2_bigpool/s1_full_48.jsonl)",
+    "task_d": "configs/r4_d_qids.json (594 qids, union of PR#1 merged_{A..D} valid rows, per-archive sha256)",
+    "task_f_ext": "configs/r4_qids_ext.json (or NOT-AVAILABLE)"
+  },
+  "task_a_full_76k": {
+    "purpose": "P0 same-weights fair comparison: checkpoint-250 full-pool (no compression) over the frozen 48",
+    "script": "agent/r4_full_arm_76k.py",
+    "path": "HF eager + chunked prefill (chunk=512, see configs/r4_erratum.md E1) + single-token decode handoff; gist-class model object (baseline_model_class=gist, mode=full semantics), checkpoint checkpoints/qwen3-4b-agent-tooldef-npu/checkpoint-250",
+    "input": "frozen input_ids rebuilt by the r3_extract_prompts assembly; machine-asserted by agent/r4_assert_inputs.py before the run",
+    "gen": "greedy, max_new_tokens=128, enable_thinking=False",
+    "oom_ladder": "512 -> 256 (recorded); two consecutive OOMs -> stop and report"
+  },
+  "task_d_anchor_32k": {
+    "purpose": "P1 typed vs random precise-anchor discrimination at equal physical KV budget",
+    "regime": "PR#1 history regime (see configs/r4_erratum.md E4): checkpoint-2678, ratio=4, subset_disjoint eval split, greedy, max_new_tokens=128, enable_thinking=False, fully eager (HF, no fusion kernel)",
+    "arms": {
+      "plain": "c2kv@4 as-is (in-stack baseline; delta vs PR#1 arm-B record is report-only, not pooled)",
+      "typed": "c2kv@4 + control-token raw-KV anchors (span definition in configs/r4_prereg.md; spans in configs/r4_anchor_spans.json)",
+      "random": "c2kv@4 + equal-budget random raw-KV anchors (non-control positions, seed 20260815)"
+    },
+    "budget_gate": "|typed_raw_tokens - random_raw_tokens| / typed <= 2% (equal by construction); per-arm physical KV recorded per row; violators rerun",
+    "fallback_ladder": "L1: span-level injection infeasible (~1 day cap) -> chunk-level variant (control-density >= threshold chunks kept raw; random arm keeps equal count of random chunks); L2: chunk-level also infeasible -> V4=BLOCKED + technical report, no ad-hoc redesign"
+  },
+  "task_e_prior_76k": {
+    "purpose": "P2 76k prior-noise floor (report-only)",
+    "script": "agent/r4_prior_pool.py",
+    "setup": "48 qids, checkpoint-250, task-A path; tool pool swapped to other sessions' pools (length-aligned to original doc_tokens +/-5%, target tool absent, seed 20260815)"
+  },
+  "task_f_ext": {
+    "purpose": "P3 76k sample expansion (conditional)",
+    "enumeration": "agent/r4_enumerate_70k.py, universe = S1_DATA_KW eval split, pool doc_tokens >= 70000, frozen-48 excluded; list frozen in configs/r4_qids_ext.json BEFORE any GPU run",
+    "arms_if_available": "c2kv@4 per r3 T-E config (512x160) + full per task-A path; merged into V1 primary set (original 48 reported separately as secondary)"
+  },
+  "stats": {
+    "pairing": "by qid; McNemar exact (b/c cells reported); session-cluster bootstrap 20000 reps seed 0 for 95% CI",
+    "predicate": "(\"<tool_call>\" in text) or (\"Action:\" in text); tool-name scoring reuses r3_aggregate_te.py / harness _extract_tool_name",
+    "pooling_rule": "no cross-checkpoint pooling; no cross-regime juxtaposition as conclusions"
+  },
+  "env": {
+    "harness_runs": "NPU server, ~/envs/c2kv (torch 2.9.0+cpu, torch_npu 2.9.0rc1, transformers 5.8.0), CANN 8.5.0, source /usr/local/Ascend/ascend-toolkit/set_env.sh",
+    "device_policy": "npu-smi info window gate (>=20-28 GB free) before occupying; multiple idle cards may run arms in parallel; exact-PID cleanup only"
+  }
+}
