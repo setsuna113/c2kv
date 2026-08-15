@@ -1,0 +1,2062 @@
+{
+  "layer": "plain32",
+  "rows_a": "/home/liuyancheng/c2kv/outputs_lyc/r4_closure/d_plain/r4_d_plain.jsonl",
+  "n_rows": 594,
+  "n_tool_target": 353,
+  "n_failures": 352,
+  "counts": {
+    "NO_CALL": 340,
+    "NON_TOOL_TARGET": 241,
+    "OTHER": 11,
+    "WRONG_TOOL": 1,
+    "CORRECT": 1
+  },
+  "control_class_share_of_failures": 0.0028,
+  "wrong_tool_subtypes": {
+    "in_pool": 1,
+    "out_of_pool": 0
+  },
+  "overtrigger_non_tool_targets": {
+    "n": 241,
+    "called": 4
+  },
+  "per_qid": {
+    "0175e835a074_a9e56e60:12": {
+      "category": "NO_CALL"
+    },
+    "0175e835a074_a9e56e60:25": {
+      "category": "NO_CALL"
+    },
+    "0175e835a074_a9e56e60:5": {
+      "category": "NO_CALL"
+    },
+    "0380f9026ebe_2bf17776:1": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "0380f9026ebe_2bf17776:2": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "0380f9026ebe_2bf17776:3": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "0380f9026ebe_2bf17776:4": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "0380f9026ebe_4ecc8c76:3": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "0380f9026ebe_4ecc8c76:4": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "0380f9026ebe_4ecc8c76:5": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "0380f9026ebe_4ecc8c76:7": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "0380f9026ebe_613068a5:1": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "0380f9026ebe_613068a5:4": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "0380f9026ebe_613068a5:5": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "0380f9026ebe_613068a5:6": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "0380f9026ebe_d2dc4e9d:1": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "0380f9026ebe_d2dc4e9d:2": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "0380f9026ebe_d2dc4e9d:4": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "0380f9026ebe_d2dc4e9d:6": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "0380f9026ebe_e63bc625:1": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "0380f9026ebe_e63bc625:2": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "0380f9026ebe_e63bc625:3": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "0380f9026ebe_e63bc625:5": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "066de3655406_584db4fb:17": {
+      "category": "OTHER",
+      "note": "args unparseable"
+    },
+    "066de3655406_584db4fb:20": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "066de3655406_584db4fb:23": {
+      "category": "OTHER",
+      "note": "args unparseable"
+    },
+    "066de3655406_755996d0:12": {
+      "category": "NO_CALL"
+    },
+    "066de3655406_755996d0:20": {
+      "category": "NO_CALL"
+    },
+    "066de3655406_755996d0:21": {
+      "category": "NO_CALL"
+    },
+    "066de3655406_99aad0a5:12": {
+      "category": "NO_CALL"
+    },
+    "066de3655406_99aad0a5:15": {
+      "category": "OTHER",
+      "note": "args unparseable"
+    },
+    "066de3655406_99aad0a5:22": {
+      "category": "NO_CALL"
+    },
+    "066de3655406_99aad0a5:27": {
+      "category": "OTHER",
+      "note": "args unparseable"
+    },
+    "066de3655406_cdd90af7:11": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "066de3655406_cdd90af7:2": {
+      "category": "NO_CALL"
+    },
+    "066de3655406_cdd90af7:8": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "066de3655406_cdd90af7:9": {
+      "category": "OTHER",
+      "note": "args unparseable"
+    },
+    "066de3655406_f33766e1:2": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "0b5e2a9b0887_577cf2bf:2": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "0b5e2a9b0887_577cf2bf:3": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "0b5e2a9b0887_577cf2bf:4": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "0b5e2a9b0887_577cf2bf:5": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "0b5e2a9b0887_9c17571a:3": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "0b5e2a9b0887_9e73e78e:1": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "0b5e2a9b0887_9e73e78e:5": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "0b5e2a9b0887_9e73e78e:7": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "0b5e2a9b0887_9e73e78e:8": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "0b5e2a9b0887_c4af7c4f:1": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "0b5e2a9b0887_c4af7c4f:3": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "0b5e2a9b0887_c4af7c4f:4": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "0b5e2a9b0887_c4af7c4f:5": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "0b5e2a9b0887_ca4c522b:1": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "0b5e2a9b0887_ca4c522b:5": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "0b5e2a9b0887_f0c4dd75:1": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "0b5e2a9b0887_f0c4dd75:3": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "0b5e2a9b0887_f0c4dd75:4": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "0b5e2a9b0887_f0c4dd75:5": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "10d642ac9c10_a23dcd0b:1": {
+      "category": "NO_CALL"
+    },
+    "10d642ac9c10_a23dcd0b:2": {
+      "category": "NO_CALL"
+    },
+    "10d642ac9c10_a23dcd0b:5": {
+      "category": "NO_CALL"
+    },
+    "10d642ac9c10_a23dcd0b:7": {
+      "category": "NO_CALL"
+    },
+    "140646846ae7_6bfabab3:24": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "140646846ae7_6bfabab3:26": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "140646846ae7_6bfabab3:38": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "140646846ae7_9826bf77:15": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "140646846ae7_9826bf77:38": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "140646846ae7_9826bf77:44": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "15bb4bab2031_134203cb:11": {
+      "category": "NO_CALL"
+    },
+    "15bb4bab2031_134203cb:14": {
+      "category": "NO_CALL"
+    },
+    "15bb4bab2031_134203cb:19": {
+      "category": "NO_CALL"
+    },
+    "15bb4bab2031_134203cb:20": {
+      "category": "NO_CALL"
+    },
+    "15bb4bab2031_bdb6d1f1:1": {
+      "category": "NO_CALL"
+    },
+    "15bb4bab2031_bdb6d1f1:3": {
+      "category": "NO_CALL"
+    },
+    "15bb4bab2031_bdb6d1f1:4": {
+      "category": "NO_CALL"
+    },
+    "15bb4bab2031_bdb6d1f1:5": {
+      "category": "NO_CALL"
+    },
+    "15bb4bab2031_cf799474:12": {
+      "category": "NO_CALL"
+    },
+    "15bb4bab2031_cf799474:13": {
+      "category": "NO_CALL"
+    },
+    "15bb4bab2031_cf799474:4": {
+      "category": "NO_CALL"
+    },
+    "18b5978679fb_53a7d72c:17": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "18b5978679fb_53a7d72c:19": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "18b5978679fb_cb958b0c:3": {
+      "category": "NO_CALL"
+    },
+    "18b5978679fb_cb958b0c:5": {
+      "category": "NO_CALL"
+    },
+    "18b5978679fb_cb958b0c:7": {
+      "category": "NO_CALL"
+    },
+    "18b5978679fb_cb958b0c:8": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "18b5978679fb_f3d8f2ff:14": {
+      "category": "NO_CALL"
+    },
+    "18b5978679fb_f3d8f2ff:19": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "18b5978679fb_f3d8f2ff:2": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "18b5978679fb_fb678903:13": {
+      "category": "NO_CALL"
+    },
+    "18b5978679fb_fb678903:14": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "18b5978679fb_fb678903:17": {
+      "category": "NO_CALL"
+    },
+    "18b5978679fb_fb678903:26": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "18efd0e196b7_cd7c42d3:10": {
+      "category": "OTHER",
+      "note": "args unparseable"
+    },
+    "18efd0e196b7_cd7c42d3:12": {
+      "category": "OTHER",
+      "note": "args unparseable"
+    },
+    "18efd0e196b7_cd7c42d3:2": {
+      "category": "OTHER",
+      "note": "args unparseable"
+    },
+    "18efd0e196b7_cd7c42d3:9": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "18efd0e196b7_d42c66de:11": {
+      "category": "NO_CALL"
+    },
+    "18efd0e196b7_d42c66de:3": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "18efd0e196b7_d42c66de:7": {
+      "category": "WRONG_TOOL",
+      "pred_name": "check_network_mode_preference",
+      "in_pool": true
+    },
+    "18efd0e196b7_d42c66de:8": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "24347bbedbb0_12ea82b1:0": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "24347bbedbb0_12ea82b1:3": {
+      "category": "NO_CALL"
+    },
+    "24347bbedbb0_5fd5646a:26": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "24347bbedbb0_5fd5646a:27": {
+      "category": "NO_CALL"
+    },
+    "24347bbedbb0_5fd5646a:29": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "24347bbedbb0_5fd5646a:4": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "24347bbedbb0_c3e0424a:0": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "24347bbedbb0_c3e0424a:2": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "24347bbedbb0_c3e0424a:3": {
+      "category": "NO_CALL"
+    },
+    "24347bbedbb0_c3e0424a:5": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "24347bbedbb0_ddf2f922:0": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "24347bbedbb0_ddf2f922:2": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "24347bbedbb0_ddf2f922:3": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "247b0c0650d3_3343dec1:1": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "247b0c0650d3_3343dec1:2": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "247b0c0650d3_3343dec1:3": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "247b0c0650d3_5126fda3:2": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "247b0c0650d3_5126fda3:4": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "247b0c0650d3_5d2c710a:1": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "247b0c0650d3_5d2c710a:2": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "247b0c0650d3_5d2c710a:3": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "247b0c0650d3_5d2c710a:4": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "247b0c0650d3_65a4bc25:1": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "247b0c0650d3_65a4bc25:2": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "247b0c0650d3_65a4bc25:3": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "247b0c0650d3_65a4bc25:4": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "247b0c0650d3_74734c48:1": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "247b0c0650d3_74734c48:3": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "247b0c0650d3_74734c48:4": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "247b0c0650d3_74734c48:6": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "247b0c0650d3_bc2988af:3": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "247b0c0650d3_bc2988af:4": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "247b0c0650d3_bc2988af:7": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "247b0c0650d3_bc2988af:9": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "247b0c0650d3_bff9f7bd:2": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "247b0c0650d3_bff9f7bd:4": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "247b0c0650d3_bff9f7bd:5": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "266b7f5a8aa9_4868c229:1": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "266b7f5a8aa9_4868c229:3": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "266b7f5a8aa9_4868c229:5": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "266b7f5a8aa9_4868c229:6": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "266b7f5a8aa9_c6d66a2f:1": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "266b7f5a8aa9_c6d66a2f:2": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "266b7f5a8aa9_c6d66a2f:3": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "2a21e94e0687_29595dd0:10": {
+      "category": "NO_CALL"
+    },
+    "2a21e94e0687_29595dd0:15": {
+      "category": "NO_CALL"
+    },
+    "2a21e94e0687_29595dd0:2": {
+      "category": "NO_CALL"
+    },
+    "2a21e94e0687_29595dd0:5": {
+      "category": "NO_CALL"
+    },
+    "2a21e94e0687_76685f3e:12": {
+      "category": "NO_CALL"
+    },
+    "2a21e94e0687_76685f3e:15": {
+      "category": "NO_CALL"
+    },
+    "2a21e94e0687_76685f3e:22": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "2a21e94e0687_76685f3e:4": {
+      "category": "NO_CALL"
+    },
+    "2a21e94e0687_a94c3f31:1": {
+      "category": "NO_CALL"
+    },
+    "2a21e94e0687_a94c3f31:16": {
+      "category": "NO_CALL"
+    },
+    "2a21e94e0687_a94c3f31:17": {
+      "category": "NO_CALL"
+    },
+    "2a21e94e0687_a94c3f31:20": {
+      "category": "NO_CALL"
+    },
+    "2a21e94e0687_caa66301:4": {
+      "category": "NO_CALL"
+    },
+    "2a21e94e0687_caa66301:7": {
+      "category": "NO_CALL"
+    },
+    "2a21e94e0687_d4ac22a2:13": {
+      "category": "NO_CALL"
+    },
+    "2a21e94e0687_d4ac22a2:2": {
+      "category": "NO_CALL"
+    },
+    "2a21e94e0687_d4ac22a2:6": {
+      "category": "NO_CALL"
+    },
+    "2d5e2043dcf4_3a44bf13:2": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "2d5e2043dcf4_3a44bf13:3": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "2d5e2043dcf4_cb3ec441:1": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "2d5e2043dcf4_cb3ec441:2": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "2d5e2043dcf4_cb3ec441:6": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "2d5e2043dcf4_cb3ec441:8": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "30ed3250babd_1dda5b8f:14": {
+      "category": "NO_CALL"
+    },
+    "30ed3250babd_1dda5b8f:16": {
+      "category": "NO_CALL"
+    },
+    "30ed3250babd_1dda5b8f:18": {
+      "category": "NO_CALL"
+    },
+    "30ed3250babd_23dd68d0:28": {
+      "category": "NO_CALL"
+    },
+    "30ed3250babd_23dd68d0:37": {
+      "category": "NO_CALL"
+    },
+    "30ed3250babd_23dd68d0:5": {
+      "category": "NO_CALL"
+    },
+    "30ed3250babd_2b0175dc:14": {
+      "category": "NO_CALL"
+    },
+    "30ed3250babd_2b0175dc:40": {
+      "category": "NO_CALL"
+    },
+    "30ed3250babd_2b0175dc:41": {
+      "category": "NO_CALL"
+    },
+    "30ed3250babd_2b0175dc:45": {
+      "category": "NO_CALL"
+    },
+    "30ed3250babd_39c02a90:1": {
+      "category": "NO_CALL"
+    },
+    "30ed3250babd_39c02a90:3": {
+      "category": "NO_CALL"
+    },
+    "30ed3250babd_39c02a90:4": {
+      "category": "NO_CALL"
+    },
+    "30ed3250babd_39c02a90:5": {
+      "category": "NO_CALL"
+    },
+    "30ed3250babd_4fa229f5:21": {
+      "category": "NO_CALL"
+    },
+    "30ed3250babd_4fa229f5:25": {
+      "category": "NO_CALL"
+    },
+    "30ed3250babd_4fa229f5:7": {
+      "category": "NO_CALL"
+    },
+    "30ed3250babd_4fa229f5:8": {
+      "category": "NO_CALL"
+    },
+    "30ed3250babd_6690bb14:13": {
+      "category": "NO_CALL"
+    },
+    "30ed3250babd_6690bb14:34": {
+      "category": "NO_CALL"
+    },
+    "30ed3250babd_75abe95e:6": {
+      "category": "NO_CALL"
+    },
+    "30ed3250babd_75abe95e:9": {
+      "category": "NO_CALL"
+    },
+    "30ed3250babd_78a45eac:20": {
+      "category": "NO_CALL"
+    },
+    "30ed3250babd_78a45eac:22": {
+      "category": "NO_CALL"
+    },
+    "30ed3250babd_78a45eac:27": {
+      "category": "NO_CALL"
+    },
+    "30ed3250babd_78a45eac:5": {
+      "category": "NO_CALL"
+    },
+    "30ed3250babd_7a6b0586:18": {
+      "category": "NO_CALL"
+    },
+    "30ed3250babd_7a6b0586:30": {
+      "category": "NO_CALL"
+    },
+    "30ed3250babd_7a6b0586:32": {
+      "category": "NO_CALL"
+    },
+    "30ed3250babd_dc51a5fc:21": {
+      "category": "NO_CALL"
+    },
+    "30ed3250babd_dc51a5fc:52": {
+      "category": "NO_CALL"
+    },
+    "30ed3250babd_dc51a5fc:9": {
+      "category": "NO_CALL"
+    },
+    "30ed3250babd_de7fa846:12": {
+      "category": "NO_CALL"
+    },
+    "30ed3250babd_de7fa846:13": {
+      "category": "NO_CALL"
+    },
+    "30ed3250babd_de7fa846:2": {
+      "category": "NO_CALL"
+    },
+    "30ed3250babd_de7fa846:6": {
+      "category": "NO_CALL"
+    },
+    "379733137f5d_05ec7d21:1": {
+      "category": "NO_CALL"
+    },
+    "379733137f5d_05ec7d21:4": {
+      "category": "NO_CALL"
+    },
+    "379733137f5d_05ec7d21:6": {
+      "category": "NO_CALL"
+    },
+    "379733137f5d_0ff66e22:24": {
+      "category": "NO_CALL"
+    },
+    "379733137f5d_0ff66e22:27": {
+      "category": "NO_CALL"
+    },
+    "379733137f5d_0ff66e22:6": {
+      "category": "NO_CALL"
+    },
+    "379733137f5d_14205a5d:1": {
+      "category": "NO_CALL"
+    },
+    "379733137f5d_14205a5d:10": {
+      "category": "NO_CALL"
+    },
+    "379733137f5d_14205a5d:2": {
+      "category": "NO_CALL"
+    },
+    "379733137f5d_14205a5d:6": {
+      "category": "NO_CALL"
+    },
+    "379733137f5d_18ea62d8:1": {
+      "category": "NO_CALL"
+    },
+    "379733137f5d_18ea62d8:2": {
+      "category": "NO_CALL"
+    },
+    "379733137f5d_18ea62d8:3": {
+      "category": "NO_CALL"
+    },
+    "379733137f5d_18ea62d8:4": {
+      "category": "NO_CALL"
+    },
+    "379733137f5d_6b1183f2:12": {
+      "category": "NO_CALL"
+    },
+    "379733137f5d_6b1183f2:7": {
+      "category": "NO_CALL"
+    },
+    "379733137f5d_6b1183f2:9": {
+      "category": "NO_CALL"
+    },
+    "379733137f5d_c92384a5:1": {
+      "category": "NO_CALL"
+    },
+    "379733137f5d_c92384a5:4": {
+      "category": "NO_CALL"
+    },
+    "379733137f5d_c92384a5:5": {
+      "category": "NO_CALL"
+    },
+    "379733137f5d_c95cd078:4": {
+      "category": "NO_CALL"
+    },
+    "379733137f5d_c95cd078:5": {
+      "category": "NO_CALL"
+    },
+    "379733137f5d_c95cd078:6": {
+      "category": "NO_CALL"
+    },
+    "379733137f5d_c95cd078:9": {
+      "category": "NO_CALL"
+    },
+    "379733137f5d_e508b5f1:12": {
+      "category": "NO_CALL"
+    },
+    "379733137f5d_e508b5f1:14": {
+      "category": "NO_CALL"
+    },
+    "379733137f5d_e508b5f1:29": {
+      "category": "NO_CALL"
+    },
+    "379733137f5d_e81d8f92:2": {
+      "category": "NO_CALL"
+    },
+    "379733137f5d_e81d8f92:4": {
+      "category": "NO_CALL"
+    },
+    "379733137f5d_e81d8f92:5": {
+      "category": "NO_CALL"
+    },
+    "379733137f5d_fceae509:2": {
+      "category": "NO_CALL"
+    },
+    "379733137f5d_fceae509:3": {
+      "category": "NO_CALL"
+    },
+    "379733137f5d_fceae509:5": {
+      "category": "NO_CALL"
+    },
+    "454d983d1286_a47ae76b:2": {
+      "category": "NO_CALL"
+    },
+    "454d983d1286_a47ae76b:4": {
+      "category": "NO_CALL"
+    },
+    "454d983d1286_a47ae76b:5": {
+      "category": "NO_CALL"
+    },
+    "454d983d1286_a47ae76b:8": {
+      "category": "NO_CALL"
+    },
+    "454d983d1286_e2a08535:1": {
+      "category": "NO_CALL"
+    },
+    "454d983d1286_e2a08535:3": {
+      "category": "NO_CALL"
+    },
+    "454d983d1286_e2a08535:4": {
+      "category": "NO_CALL"
+    },
+    "454d983d1286_e2a08535:5": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "45eff42acfad_28b1a2b7:7": {
+      "category": "NO_CALL"
+    },
+    "45eff42acfad_28b1a2b7:8": {
+      "category": "NO_CALL"
+    },
+    "45eff42acfad_3db0b212:1": {
+      "category": "NO_CALL"
+    },
+    "45eff42acfad_3db0b212:10": {
+      "category": "NO_CALL"
+    },
+    "45eff42acfad_3db0b212:6": {
+      "category": "NO_CALL"
+    },
+    "45eff42acfad_afe4d840:2": {
+      "category": "NO_CALL"
+    },
+    "45eff42acfad_afe4d840:3": {
+      "category": "NO_CALL"
+    },
+    "45eff42acfad_afe4d840:5": {
+      "category": "NO_CALL"
+    },
+    "4d47860a4332_2f7c65b1:1": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "4d47860a4332_2f7c65b1:3": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "4d47860a4332_2f7c65b1:4": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "4d47860a4332_2f7c65b1:7": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "4d47860a4332_415baf78:1": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "4d47860a4332_415baf78:3": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "4d47860a4332_415baf78:4": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "4d47860a4332_415baf78:6": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "4d47860a4332_4670f354:1": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "4d47860a4332_4670f354:2": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "4d47860a4332_4670f354:3": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "4d47860a4332_64b54747:2": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "4d47860a4332_8fd3da28:1": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "56a7d0bde064_482bab1b:13": {
+      "category": "NO_CALL"
+    },
+    "56a7d0bde064_482bab1b:16": {
+      "category": "NO_CALL"
+    },
+    "56a7d0bde064_482bab1b:5": {
+      "category": "NO_CALL"
+    },
+    "56a7d0bde064_482bab1b:9": {
+      "category": "NO_CALL"
+    },
+    "56c19f19c4f2_15a5314f:13": {
+      "category": "NO_CALL"
+    },
+    "56c19f19c4f2_15a5314f:20": {
+      "category": "NO_CALL"
+    },
+    "56c19f19c4f2_15a5314f:26": {
+      "category": "NO_CALL"
+    },
+    "56c19f19c4f2_15a5314f:4": {
+      "category": "NO_CALL"
+    },
+    "56c19f19c4f2_27842b9e:11": {
+      "category": "NO_CALL"
+    },
+    "56c19f19c4f2_27842b9e:12": {
+      "category": "NO_CALL"
+    },
+    "56c19f19c4f2_27842b9e:2": {
+      "category": "NO_CALL"
+    },
+    "56c19f19c4f2_27842b9e:9": {
+      "category": "NO_CALL"
+    },
+    "56c19f19c4f2_2b790de2:11": {
+      "category": "NO_CALL"
+    },
+    "56c19f19c4f2_2b790de2:16": {
+      "category": "NO_CALL"
+    },
+    "56c19f19c4f2_2b790de2:17": {
+      "category": "NO_CALL"
+    },
+    "56c19f19c4f2_2b790de2:5": {
+      "category": "NO_CALL"
+    },
+    "56c19f19c4f2_2d1988ca:1": {
+      "category": "NO_CALL"
+    },
+    "56c19f19c4f2_2d1988ca:4": {
+      "category": "NO_CALL"
+    },
+    "56c19f19c4f2_2d1988ca:6": {
+      "category": "NO_CALL"
+    },
+    "56c19f19c4f2_2d1988ca:7": {
+      "category": "NO_CALL"
+    },
+    "56c19f19c4f2_2e387182:2": {
+      "category": "NO_CALL"
+    },
+    "56c19f19c4f2_2e387182:6": {
+      "category": "NO_CALL"
+    },
+    "56c19f19c4f2_2e387182:7": {
+      "category": "NO_CALL"
+    },
+    "56c19f19c4f2_2e387182:9": {
+      "category": "NO_CALL"
+    },
+    "56c19f19c4f2_35262586:1": {
+      "category": "NO_CALL"
+    },
+    "56c19f19c4f2_35262586:2": {
+      "category": "NO_CALL"
+    },
+    "56c19f19c4f2_35262586:4": {
+      "category": "NO_CALL"
+    },
+    "56c19f19c4f2_568319e1:1": {
+      "category": "NO_CALL"
+    },
+    "56c19f19c4f2_568319e1:2": {
+      "category": "NO_CALL"
+    },
+    "56c19f19c4f2_568319e1:3": {
+      "category": "NO_CALL"
+    },
+    "56c19f19c4f2_568319e1:4": {
+      "category": "NO_CALL"
+    },
+    "56c19f19c4f2_c9193d26:16": {
+      "category": "NO_CALL"
+    },
+    "56c19f19c4f2_c9193d26:17": {
+      "category": "NO_CALL"
+    },
+    "56c19f19c4f2_c9193d26:20": {
+      "category": "NO_CALL"
+    },
+    "56c19f19c4f2_c9193d26:4": {
+      "category": "NO_CALL"
+    },
+    "56fecc41f358_4da0408d:3": {
+      "category": "NO_CALL"
+    },
+    "56fecc41f358_4da0408d:5": {
+      "category": "NO_CALL"
+    },
+    "56fecc41f358_7884700e:16": {
+      "category": "NO_CALL"
+    },
+    "56fecc41f358_7884700e:45": {
+      "category": "NO_CALL"
+    },
+    "56fecc41f358_7884700e:48": {
+      "category": "NO_CALL"
+    },
+    "56fecc41f358_97857673:1": {
+      "category": "NO_CALL"
+    },
+    "56fecc41f358_97857673:25": {
+      "category": "NO_CALL"
+    },
+    "56fecc41f358_97857673:28": {
+      "category": "NO_CALL"
+    },
+    "56fecc41f358_dd2d916d:14": {
+      "category": "NO_CALL"
+    },
+    "56fecc41f358_dd2d916d:31": {
+      "category": "NO_CALL"
+    },
+    "56fecc41f358_dd2d916d:9": {
+      "category": "NO_CALL"
+    },
+    "58c261317e07_088690cf:1": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "58c261317e07_088690cf:2": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "58c261317e07_088690cf:3": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "5b9274b3192a_06442621:1": {
+      "category": "NO_CALL"
+    },
+    "5b9274b3192a_06442621:3": {
+      "category": "NO_CALL"
+    },
+    "5b9274b3192a_06442621:5": {
+      "category": "NO_CALL"
+    },
+    "5b9274b3192a_06442621:6": {
+      "category": "NO_CALL"
+    },
+    "5b9274b3192a_4a07d0d6:4": {
+      "category": "NO_CALL"
+    },
+    "5b9274b3192a_4a07d0d6:7": {
+      "category": "NO_CALL"
+    },
+    "5b9274b3192a_4a07d0d6:8": {
+      "category": "NO_CALL"
+    },
+    "5b9274b3192a_4a07d0d6:9": {
+      "category": "NO_CALL"
+    },
+    "5b9274b3192a_5294f42f:1": {
+      "category": "NO_CALL"
+    },
+    "5b9274b3192a_5294f42f:3": {
+      "category": "NO_CALL"
+    },
+    "5b9274b3192a_5294f42f:4": {
+      "category": "NO_CALL"
+    },
+    "5b9274b3192a_5294f42f:6": {
+      "category": "NO_CALL"
+    },
+    "5b9274b3192a_5416ec7c:13": {
+      "category": "NO_CALL"
+    },
+    "5b9274b3192a_5416ec7c:16": {
+      "category": "NO_CALL"
+    },
+    "5b9274b3192a_5416ec7c:3": {
+      "category": "NO_CALL"
+    },
+    "5b9274b3192a_5416ec7c:4": {
+      "category": "NO_CALL"
+    },
+    "5b9274b3192a_626dda11:1": {
+      "category": "NO_CALL"
+    },
+    "5b9274b3192a_626dda11:10": {
+      "category": "NO_CALL"
+    },
+    "5b9274b3192a_626dda11:2": {
+      "category": "NO_CALL"
+    },
+    "5b9274b3192a_626dda11:9": {
+      "category": "NO_CALL"
+    },
+    "5b9274b3192a_6fc159f3:1": {
+      "category": "NO_CALL"
+    },
+    "5b9274b3192a_6fc159f3:11": {
+      "category": "NO_CALL"
+    },
+    "5b9274b3192a_6fc159f3:7": {
+      "category": "NO_CALL"
+    },
+    "5b9274b3192a_851b502d:11": {
+      "category": "NO_CALL"
+    },
+    "5b9274b3192a_851b502d:2": {
+      "category": "NO_CALL"
+    },
+    "5b9274b3192a_bc0debeb:14": {
+      "category": "NO_CALL"
+    },
+    "5b9274b3192a_bc0debeb:15": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "5b9274b3192a_bc0debeb:7": {
+      "category": "NO_CALL"
+    },
+    "5b9274b3192a_e2393751:1": {
+      "category": "NO_CALL"
+    },
+    "5b9274b3192a_e2393751:10": {
+      "category": "NO_CALL"
+    },
+    "5b9274b3192a_e2393751:12": {
+      "category": "NO_CALL"
+    },
+    "5b9274b3192a_e2393751:6": {
+      "category": "NO_CALL"
+    },
+    "5b9274b3192a_ed755656:3": {
+      "category": "NO_CALL"
+    },
+    "5b9274b3192a_ed755656:4": {
+      "category": "NO_CALL"
+    },
+    "5b9274b3192a_ed755656:6": {
+      "category": "NO_CALL"
+    },
+    "5b9274b3192a_f8203839:1": {
+      "category": "NO_CALL"
+    },
+    "5b9274b3192a_f8203839:4": {
+      "category": "NO_CALL"
+    },
+    "5b9274b3192a_f8203839:6": {
+      "category": "NO_CALL"
+    },
+    "5b9274b3192a_f8203839:9": {
+      "category": "NO_CALL"
+    },
+    "6222edc957a9_17201d85:12": {
+      "category": "NO_CALL"
+    },
+    "6222edc957a9_17201d85:3": {
+      "category": "NO_CALL"
+    },
+    "6222edc957a9_17201d85:5": {
+      "category": "NO_CALL"
+    },
+    "6222edc957a9_17201d85:6": {
+      "category": "NO_CALL"
+    },
+    "6222edc957a9_5bea2ac5:1": {
+      "category": "NO_CALL"
+    },
+    "6222edc957a9_5bea2ac5:3": {
+      "category": "NO_CALL"
+    },
+    "6222edc957a9_5bea2ac5:8": {
+      "category": "NO_CALL"
+    },
+    "638d222a8bb4_62dac91e:0": {
+      "category": "CORRECT"
+    },
+    "638d222a8bb4_62dac91e:2": {
+      "category": "NO_CALL"
+    },
+    "638d222a8bb4_62dac91e:3": {
+      "category": "NO_CALL"
+    },
+    "638d222a8bb4_62dac91e:9": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "6b79d31ff461_c33b3f1b:1": {
+      "category": "NO_CALL"
+    },
+    "6b79d31ff461_c33b3f1b:12": {
+      "category": "NO_CALL"
+    },
+    "6b79d31ff461_c33b3f1b:2": {
+      "category": "NO_CALL"
+    },
+    "6b79d31ff461_d810da55:10": {
+      "category": "NO_CALL"
+    },
+    "6b79d31ff461_d810da55:4": {
+      "category": "NO_CALL"
+    },
+    "6b79d31ff461_d810da55:9": {
+      "category": "NO_CALL"
+    },
+    "6b79d31ff461_ee0a2a70:5": {
+      "category": "NO_CALL"
+    },
+    "6b79d31ff461_ee0a2a70:7": {
+      "category": "NO_CALL"
+    },
+    "6b79d31ff461_ee0a2a70:8": {
+      "category": "NO_CALL"
+    },
+    "6b79d31ff461_ee0a2a70:9": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "75037d12258b_89667df4:1": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "75037d12258b_89667df4:2": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "756b4931c8e8_0df7bbda:4": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "756b4931c8e8_0df7bbda:5": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "756b4931c8e8_0df7bbda:6": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "756b4931c8e8_0df7bbda:7": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "756b4931c8e8_86b0feee:1": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "756b4931c8e8_86b0feee:3": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "756b4931c8e8_f605c508:4": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "756b4931c8e8_f605c508:6": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "756b4931c8e8_f605c508:7": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "7c39d2802396_912b19fc:10": {
+      "category": "NO_CALL"
+    },
+    "7c39d2802396_912b19fc:13": {
+      "category": "NO_CALL"
+    },
+    "7c39d2802396_912b19fc:15": {
+      "category": "NO_CALL"
+    },
+    "7c39d2802396_912b19fc:17": {
+      "category": "NO_CALL"
+    },
+    "7fa0750e35c4_059328b3:1": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "7fa0750e35c4_059328b3:2": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "7fa0750e35c4_059328b3:3": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "7fa0750e35c4_5580f9af:2": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "7fa0750e35c4_5580f9af:6": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "7fa0750e35c4_5580f9af:7": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "7fa0750e35c4_5580f9af:9": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "7fa0750e35c4_5b689ff5:2": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "7fa0750e35c4_5b689ff5:3": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "7fa0750e35c4_63d4b2fa:1": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "7fa0750e35c4_63d4b2fa:5": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "7fa0750e35c4_63d4b2fa:6": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "7fa0750e35c4_63d4b2fa:8": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "7fa0750e35c4_b2dad9e8:1": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "7fa0750e35c4_b2dad9e8:3": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "7fa0750e35c4_b2dad9e8:4": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "7fa0750e35c4_b2dad9e8:5": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "7fa0750e35c4_d1a16024:1": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "7fa0750e35c4_d1a16024:2": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "7fa0750e35c4_d1a16024:3": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "7fa0750e35c4_f786e343:1": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "7fa0750e35c4_f786e343:2": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "7fa0750e35c4_f786e343:3": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "7fa0750e35c4_f786e343:4": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "8956eab31b56_33fe9c3d:14": {
+      "category": "NO_CALL"
+    },
+    "8956eab31b56_33fe9c3d:16": {
+      "category": "NO_CALL"
+    },
+    "8956eab31b56_33fe9c3d:19": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "8956eab31b56_33fe9c3d:5": {
+      "category": "NO_CALL"
+    },
+    "8a39d132904f_754eee88:1": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "8a39d132904f_754eee88:3": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "8d558bd01979_6e8f50b8:19": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "8d558bd01979_6e8f50b8:34": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "8d558bd01979_6e8f50b8:38": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "8d558bd01979_6e8f50b8:41": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "8d558bd01979_a4d9b034:17": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "8d558bd01979_a4d9b034:24": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "8d558bd01979_a4d9b034:7": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "938435e2d019_0bba69a7:5": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "938435e2d019_0bba69a7:7": {
+      "category": "NO_CALL"
+    },
+    "938435e2d019_0bba69a7:8": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "938435e2d019_3496ec59:1": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "938435e2d019_be495def:1": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "938435e2d019_be495def:2": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "9f000393d262_3dd3a1ea:10": {
+      "category": "NO_CALL"
+    },
+    "9f000393d262_3dd3a1ea:4": {
+      "category": "NO_CALL"
+    },
+    "9f000393d262_3dd3a1ea:7": {
+      "category": "NO_CALL"
+    },
+    "a238cac93253_50d67417:21": {
+      "category": "NO_CALL"
+    },
+    "a238cac93253_50d67417:25": {
+      "category": "NO_CALL"
+    },
+    "a238cac93253_50d67417:29": {
+      "category": "NO_CALL"
+    },
+    "a238cac93253_d6eb1f26:12": {
+      "category": "NO_CALL"
+    },
+    "a238cac93253_d6eb1f26:14": {
+      "category": "NO_CALL"
+    },
+    "a238cac93253_d6eb1f26:16": {
+      "category": "NO_CALL"
+    },
+    "a238cac93253_d6eb1f26:30": {
+      "category": "NO_CALL"
+    },
+    "ab2f8ca80599_3c0a75ce:11": {
+      "category": "NO_CALL"
+    },
+    "ab2f8ca80599_3c0a75ce:15": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "ab2f8ca80599_3c0a75ce:8": {
+      "category": "NO_CALL"
+    },
+    "ab2f8ca80599_3c0a75ce:9": {
+      "category": "NO_CALL"
+    },
+    "ab2f8ca80599_8df7cf0b:1": {
+      "category": "NO_CALL"
+    },
+    "ab2f8ca80599_8df7cf0b:11": {
+      "category": "NO_CALL"
+    },
+    "ab2f8ca80599_8df7cf0b:2": {
+      "category": "NO_CALL"
+    },
+    "ab2f8ca80599_8df7cf0b:8": {
+      "category": "NO_CALL"
+    },
+    "ab2f8ca80599_8ec4eb8d:16": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "ab2f8ca80599_8ec4eb8d:2": {
+      "category": "NO_CALL"
+    },
+    "ab2f8ca80599_8ec4eb8d:5": {
+      "category": "NO_CALL"
+    },
+    "ab2f8ca80599_a378da8b:1": {
+      "category": "NO_CALL"
+    },
+    "ab2f8ca80599_a378da8b:2": {
+      "category": "NO_CALL"
+    },
+    "ab2f8ca80599_a378da8b:6": {
+      "category": "NO_CALL"
+    },
+    "ac0f039f4468_0e7a17fd:15": {
+      "category": "NO_CALL"
+    },
+    "ac0f039f4468_0e7a17fd:20": {
+      "category": "NO_CALL"
+    },
+    "ac0f039f4468_0e7a17fd:23": {
+      "category": "NO_CALL"
+    },
+    "ac0f039f4468_0e7a17fd:43": {
+      "category": "NO_CALL"
+    },
+    "ac0f039f4468_24474fd2:2": {
+      "category": "NO_CALL"
+    },
+    "ac0f039f4468_24474fd2:4": {
+      "category": "NO_CALL"
+    },
+    "ac0f039f4468_24474fd2:5": {
+      "category": "NO_CALL"
+    },
+    "ac0f039f4468_24474fd2:7": {
+      "category": "NO_CALL"
+    },
+    "ac0f039f4468_32cc3b6a:1": {
+      "category": "NO_CALL"
+    },
+    "ac0f039f4468_66e4da95:15": {
+      "category": "NO_CALL"
+    },
+    "ac0f039f4468_66e4da95:30": {
+      "category": "NO_CALL"
+    },
+    "ac0f039f4468_66e4da95:33": {
+      "category": "NO_CALL"
+    },
+    "ac0f039f4468_66e4da95:4": {
+      "category": "NO_CALL"
+    },
+    "ac0f039f4468_841dd6f7:1": {
+      "category": "NO_CALL"
+    },
+    "ac0f039f4468_841dd6f7:12": {
+      "category": "NO_CALL"
+    },
+    "ac0f039f4468_841dd6f7:14": {
+      "category": "NO_CALL"
+    },
+    "ac0f039f4468_97768847:2": {
+      "category": "NO_CALL"
+    },
+    "ac0f039f4468_97768847:3": {
+      "category": "NO_CALL"
+    },
+    "ac0f039f4468_97768847:5": {
+      "category": "NO_CALL"
+    },
+    "ac0f039f4468_cde1344c:15": {
+      "category": "NO_CALL"
+    },
+    "ac0f039f4468_cde1344c:17": {
+      "category": "NO_CALL"
+    },
+    "ac0f039f4468_cde1344c:29": {
+      "category": "NO_CALL"
+    },
+    "ac0f039f4468_cde1344c:9": {
+      "category": "NO_CALL"
+    },
+    "ac0f039f4468_cf4baf5a:1": {
+      "category": "NO_CALL"
+    },
+    "ac0f039f4468_cf4baf5a:2": {
+      "category": "NO_CALL"
+    },
+    "ac0f039f4468_cf4baf5a:3": {
+      "category": "NO_CALL"
+    },
+    "ac0f039f4468_cf4baf5a:4": {
+      "category": "NO_CALL"
+    },
+    "ac0f039f4468_fd65390c:1": {
+      "category": "NO_CALL"
+    },
+    "ac0f039f4468_fd65390c:3": {
+      "category": "NO_CALL"
+    },
+    "ac0f039f4468_fd65390c:7": {
+      "category": "NO_CALL"
+    },
+    "bd7cb52ec7f8_03762b35:1": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "bd7cb52ec7f8_03762b35:2": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "bd7cb52ec7f8_03762b35:5": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "bd7cb52ec7f8_0f4f1a0c:2": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "bd7cb52ec7f8_0f4f1a0c:3": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "bd7cb52ec7f8_0f4f1a0c:4": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "bd7cb52ec7f8_0f4f1a0c:5": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "bd7cb52ec7f8_5047588b:2": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "bd7cb52ec7f8_5047588b:3": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "bd7cb52ec7f8_5047588b:4": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "bd7cb52ec7f8_5047588b:5": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "bd7cb52ec7f8_c385f774:1": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "bd7cb52ec7f8_c385f774:2": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "bd7cb52ec7f8_c385f774:3": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "bd7cb52ec7f8_c385f774:4": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "bd7cb52ec7f8_e40dca56:1": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "bd7cb52ec7f8_e40dca56:3": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "bd7cb52ec7f8_e40dca56:4": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "c0d1d84c7898_87da46b2:3": {
+      "category": "NO_CALL"
+    },
+    "c0d1d84c7898_87da46b2:8": {
+      "category": "NO_CALL"
+    },
+    "c0d1d84c7898_87da46b2:9": {
+      "category": "NO_CALL"
+    },
+    "c0d1d84c7898_9fad246c:14": {
+      "category": "NO_CALL"
+    },
+    "c0d1d84c7898_9fad246c:5": {
+      "category": "NO_CALL"
+    },
+    "c0d1d84c7898_abe62f9d:21": {
+      "category": "NO_CALL"
+    },
+    "c0d1d84c7898_abe62f9d:31": {
+      "category": "NO_CALL"
+    },
+    "c0d1d84c7898_c75da2fd:15": {
+      "category": "NO_CALL"
+    },
+    "c0d1d84c7898_c75da2fd:22": {
+      "category": "NO_CALL"
+    },
+    "c0d1d84c7898_c75da2fd:37": {
+      "category": "NO_CALL"
+    },
+    "c0d1d84c7898_c75da2fd:74": {
+      "category": "NO_CALL"
+    },
+    "c0d1d84c7898_cf9a5a39:30": {
+      "category": "NO_CALL"
+    },
+    "c0d1d84c7898_cf9a5a39:4": {
+      "category": "NO_CALL"
+    },
+    "c0d1d84c7898_cf9a5a39:41": {
+      "category": "NO_CALL"
+    },
+    "c0d1d84c7898_cf9a5a39:44": {
+      "category": "NO_CALL"
+    },
+    "d090830da26c_279d52cd:17": {
+      "category": "NO_CALL"
+    },
+    "d090830da26c_279d52cd:21": {
+      "category": "NO_CALL"
+    },
+    "d090830da26c_279d52cd:35": {
+      "category": "NO_CALL"
+    },
+    "d090830da26c_279d52cd:9": {
+      "category": "NO_CALL"
+    },
+    "d090830da26c_7f6aba00:18": {
+      "category": "NO_CALL"
+    },
+    "d090830da26c_7f6aba00:5": {
+      "category": "NO_CALL"
+    },
+    "d090830da26c_7f6aba00:7": {
+      "category": "NO_CALL"
+    },
+    "d090830da26c_a61f0025:2": {
+      "category": "NO_CALL"
+    },
+    "d090830da26c_a61f0025:8": {
+      "category": "NO_CALL"
+    },
+    "d090830da26c_a61f0025:9": {
+      "category": "NO_CALL"
+    },
+    "d090830da26c_de61deba:18": {
+      "category": "NO_CALL"
+    },
+    "d090830da26c_de61deba:5": {
+      "category": "NO_CALL"
+    },
+    "d090830da26c_e0237641:1": {
+      "category": "NO_CALL"
+    },
+    "d090830da26c_e0237641:10": {
+      "category": "NO_CALL"
+    },
+    "d090830da26c_e0237641:15": {
+      "category": "NO_CALL"
+    },
+    "d090830da26c_e0237641:21": {
+      "category": "NO_CALL"
+    },
+    "d090830da26c_e15cf773:11": {
+      "category": "NO_CALL"
+    },
+    "d090830da26c_e15cf773:16": {
+      "category": "NO_CALL"
+    },
+    "d090830da26c_e15cf773:3": {
+      "category": "NO_CALL"
+    },
+    "d090830da26c_e15cf773:7": {
+      "category": "NO_CALL"
+    },
+    "d090830da26c_e71252ae:19": {
+      "category": "NO_CALL"
+    },
+    "d090830da26c_e71252ae:29": {
+      "category": "NO_CALL"
+    },
+    "d090830da26c_e71252ae:37": {
+      "category": "NO_CALL"
+    },
+    "d090830da26c_e71252ae:43": {
+      "category": "NO_CALL"
+    },
+    "d090830da26c_fbd39b21:12": {
+      "category": "NO_CALL"
+    },
+    "d090830da26c_fbd39b21:13": {
+      "category": "NO_CALL"
+    },
+    "d090830da26c_fbd39b21:8": {
+      "category": "NO_CALL"
+    },
+    "d3d3e0d1a8f8_20b42b16:4": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "d3d3e0d1a8f8_20b42b16:5": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "d3d3e0d1a8f8_20b42b16:6": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "d3d3e0d1a8f8_20b42b16:7": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "d5c4f35bed6a_70236830:1": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "d5c4f35bed6a_70236830:2": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "d5c4f35bed6a_70236830:3": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "d5c4f35bed6a_70236830:4": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "d5c4f35bed6a_c4ca6b42:1": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "d5c4f35bed6a_c4ca6b42:2": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "d5c4f35bed6a_fccfdfd8:1": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "d5c4f35bed6a_fccfdfd8:3": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "d5c4f35bed6a_fccfdfd8:5": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "d9ccf53fe748_18eb7164:2": {
+      "category": "NO_CALL"
+    },
+    "d9ccf53fe748_18eb7164:4": {
+      "category": "OTHER",
+      "note": "args unparseable"
+    },
+    "d9ccf53fe748_18eb7164:5": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "d9ccf53fe748_18eb7164:6": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "d9ccf53fe748_351f4a95:1": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "d9ccf53fe748_351f4a95:38": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "d9ccf53fe748_351f4a95:41": {
+      "category": "NO_CALL"
+    },
+    "d9ccf53fe748_958d7c0b:1": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "d9ccf53fe748_958d7c0b:2": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "d9ccf53fe748_958d7c0b:3": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "d9ccf53fe748_958d7c0b:5": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "d9ccf53fe748_b4b16cfc:33": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "d9ccf53fe748_b4b16cfc:4": {
+      "category": "OTHER",
+      "note": "args unparseable"
+    },
+    "d9ccf53fe748_fd5138a6:1": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "d9ccf53fe748_fd5138a6:3": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "d9ccf53fe748_fd5138a6:4": {
+      "category": "OTHER",
+      "note": "args unparseable"
+    },
+    "d9ccf53fe748_fd5138a6:5": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "e416e0e39ffd_8999303e:2": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "e416e0e39ffd_8999303e:4": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "e416e0e39ffd_8999303e:6": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "e416e0e39ffd_e13aa6a4:1": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "e416e0e39ffd_e13aa6a4:4": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "e416e0e39ffd_e13aa6a4:5": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "e416e0e39ffd_e13aa6a4:7": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "e416e0e39ffd_e845efed:1": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "e416e0e39ffd_e845efed:2": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "e416e0e39ffd_e845efed:3": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "e416e0e39ffd_e845efed:4": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "e920f13c2421_21493c96:1": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "e920f13c2421_21493c96:3": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "e920f13c2421_21493c96:5": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "e920f13c2421_21493c96:6": {
+      "category": "NON_TOOL_TARGET",
+      "called": false
+    },
+    "fe34eb314a84_5be21a75:5": {
+      "category": "NON_TOOL_TARGET",
+      "called": true
+    },
+    "fe34eb314a84_5be21a75:6": {
+      "category": "NON_TOOL_TARGET",
+      "called": true
+    },
+    "fe34eb314a84_5be21a75:8": {
+      "category": "NON_TOOL_TARGET",
+      "called": true
+    },
+    "fe34eb314a84_5be21a75:9": {
+      "category": "NON_TOOL_TARGET",
+      "called": true
+    }
+  },
+  "boundary_32k": "UNANNOTATABLE (compressed content is history, not the tool schema)"
+}

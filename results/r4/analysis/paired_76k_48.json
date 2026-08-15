@@ -1,0 +1,489 @@
+{
+  "inputs": {
+    "full_arm": "/home/liuyancheng/c2kv/outputs_lyc/r4_closure/full_76k/r4_full_76k.jsonl",
+    "c2kv_arm": "/home/liuyancheng/c2kv/outputs_lyc/r3_discrimination/t_e/t_e_c2kv_r4.jsonl"
+  },
+  "n_paired": 48,
+  "n_sessions": 5,
+  "session_counts": {
+    "a45d2c09567a_795c2422": 7,
+    "a45d2c09567a_7c2c1bb8": 8,
+    "a45d2c09567a_cfce19ea": 13,
+    "b455f37f04c7_903ca285": 13,
+    "0c890a5dde8c_012517c3": 7
+  },
+  "cluster_note": "session-cluster bootstrap over 5 clusters (76k regime); interpret CI with this limitation",
+  "bootstrap": {
+    "reps": 20000,
+    "seed": 0,
+    "method": "session-cluster percentile"
+  },
+  "primary": {
+    "metric": "tool_name_correct",
+    "n": 48,
+    "full_acc": 0.3333,
+    "c2kv_acc": 0.2083,
+    "b_full_wins": 9,
+    "c_c2kv_wins": 3,
+    "mcnemar_exact_p": 0.145996,
+    "diff_point": 0.125,
+    "cluster_bootstrap_95ci": [
+      0.05,
+      0.2432
+    ]
+  },
+  "secondary": {
+    "metric": "call_rate",
+    "n": 48,
+    "full_acc": 0.5625,
+    "c2kv_acc": 0.6875,
+    "b_full_wins": 0,
+    "c_c2kv_wins": 6,
+    "mcnemar_exact_p": 0.03125,
+    "diff_point": -0.125,
+    "cluster_bootstrap_95ci": [
+      -0.1525,
+      -0.0682
+    ]
+  },
+  "exploratory_args": {
+    "n_name_correct_pairs_with_parseable_args": 0,
+    "key_set_exact_match_rate": null,
+    "value_match_rate_mean": null,
+    "note": "report-only; not part of any verdict"
+  },
+  "per_qid": {
+    "a45d2c09567a_795c2422:0": {
+      "session_id": "a45d2c09567a_795c2422",
+      "target_tool_name": "supervisor__show_account_passwords",
+      "full_pred_tool_name": null,
+      "full_correct": false,
+      "c2kv_correct": false,
+      "full_call": false,
+      "c2kv_call": false
+    },
+    "a45d2c09567a_795c2422:1": {
+      "session_id": "a45d2c09567a_795c2422",
+      "target_tool_name": "venmo__login",
+      "full_pred_tool_name": "venmo__show_received_payment_requests",
+      "full_correct": false,
+      "c2kv_correct": false,
+      "full_call": true,
+      "c2kv_call": true
+    },
+    "a45d2c09567a_795c2422:2": {
+      "session_id": "a45d2c09567a_795c2422",
+      "target_tool_name": "venmo__show_received_payment_requests",
+      "full_pred_tool_name": "venmo__show_received_payment_requests",
+      "full_correct": true,
+      "c2kv_correct": false,
+      "full_call": true,
+      "c2kv_call": true
+    },
+    "a45d2c09567a_795c2422:3": {
+      "session_id": "a45d2c09567a_795c2422",
+      "target_tool_name": "venmo__deny_payment_request",
+      "full_pred_tool_name": "venmo__deny_payment_request",
+      "full_correct": true,
+      "c2kv_correct": false,
+      "full_call": true,
+      "c2kv_call": true
+    },
+    "a45d2c09567a_795c2422:4": {
+      "session_id": "a45d2c09567a_795c2422",
+      "target_tool_name": "venmo__create_transaction",
+      "full_pred_tool_name": "venmo__create_payment_request",
+      "full_correct": false,
+      "c2kv_correct": false,
+      "full_call": true,
+      "c2kv_call": true
+    },
+    "a45d2c09567a_795c2422:5": {
+      "session_id": "a45d2c09567a_795c2422",
+      "target_tool_name": "finish",
+      "full_pred_tool_name": null,
+      "full_correct": false,
+      "c2kv_correct": false,
+      "full_call": false,
+      "c2kv_call": false
+    },
+    "a45d2c09567a_795c2422:6": {
+      "session_id": "a45d2c09567a_795c2422",
+      "target_tool_name": "venmo__logout",
+      "full_pred_tool_name": null,
+      "full_correct": false,
+      "c2kv_correct": false,
+      "full_call": false,
+      "c2kv_call": true
+    },
+    "a45d2c09567a_7c2c1bb8:0": {
+      "session_id": "a45d2c09567a_7c2c1bb8",
+      "target_tool_name": "supervisor__show_account_passwords",
+      "full_pred_tool_name": null,
+      "full_correct": false,
+      "c2kv_correct": false,
+      "full_call": false,
+      "c2kv_call": false
+    },
+    "a45d2c09567a_7c2c1bb8:1": {
+      "session_id": "a45d2c09567a_7c2c1bb8",
+      "target_tool_name": "spotify__login",
+      "full_pred_tool_name": "spotify__login",
+      "full_correct": true,
+      "c2kv_correct": false,
+      "full_call": true,
+      "c2kv_call": true
+    },
+    "a45d2c09567a_7c2c1bb8:2": {
+      "session_id": "a45d2c09567a_7c2c1bb8",
+      "target_tool_name": "spotify__show_following_artists",
+      "full_pred_tool_name": "spotify__show_following_artists",
+      "full_correct": true,
+      "c2kv_correct": false,
+      "full_call": true,
+      "c2kv_call": true
+    },
+    "a45d2c09567a_7c2c1bb8:3": {
+      "session_id": "a45d2c09567a_7c2c1bb8",
+      "target_tool_name": "spotify__show_following_artists",
+      "full_pred_tool_name": "spotify__show_following_artists",
+      "full_correct": true,
+      "c2kv_correct": true,
+      "full_call": true,
+      "c2kv_call": true
+    },
+    "a45d2c09567a_7c2c1bb8:4": {
+      "session_id": "a45d2c09567a_7c2c1bb8",
+      "target_tool_name": "spotify__show_following_artists",
+      "full_pred_tool_name": "spotify__show_following_artists",
+      "full_correct": true,
+      "c2kv_correct": true,
+      "full_call": true,
+      "c2kv_call": true
+    },
+    "a45d2c09567a_7c2c1bb8:5": {
+      "session_id": "a45d2c09567a_7c2c1bb8",
+      "target_tool_name": "spotify__show_following_artists",
+      "full_pred_tool_name": null,
+      "full_correct": false,
+      "c2kv_correct": false,
+      "full_call": false,
+      "c2kv_call": false
+    },
+    "a45d2c09567a_7c2c1bb8:6": {
+      "session_id": "a45d2c09567a_7c2c1bb8",
+      "target_tool_name": "spotify__show_following_artists",
+      "full_pred_tool_name": null,
+      "full_correct": false,
+      "c2kv_correct": false,
+      "full_call": false,
+      "c2kv_call": false
+    },
+    "a45d2c09567a_7c2c1bb8:7": {
+      "session_id": "a45d2c09567a_7c2c1bb8",
+      "target_tool_name": "finish",
+      "full_pred_tool_name": "spotify__show_following_artists",
+      "full_correct": false,
+      "c2kv_correct": false,
+      "full_call": true,
+      "c2kv_call": true
+    },
+    "a45d2c09567a_cfce19ea:0": {
+      "session_id": "a45d2c09567a_cfce19ea",
+      "target_tool_name": "supervisor__show_account_passwords",
+      "full_pred_tool_name": null,
+      "full_correct": false,
+      "c2kv_correct": false,
+      "full_call": false,
+      "c2kv_call": false
+    },
+    "a45d2c09567a_cfce19ea:2": {
+      "session_id": "a45d2c09567a_cfce19ea",
+      "target_tool_name": "venmo__login",
+      "full_pred_tool_name": "venmo__login",
+      "full_correct": true,
+      "c2kv_correct": false,
+      "full_call": true,
+      "c2kv_call": true
+    },
+    "a45d2c09567a_cfce19ea:3": {
+      "session_id": "a45d2c09567a_cfce19ea",
+      "target_tool_name": "venmo__search_friends",
+      "full_pred_tool_name": "venmo__search_friends",
+      "full_correct": true,
+      "c2kv_correct": false,
+      "full_call": true,
+      "c2kv_call": true
+    },
+    "a45d2c09567a_cfce19ea:4": {
+      "session_id": "a45d2c09567a_cfce19ea",
+      "target_tool_name": "venmo__search_friends",
+      "full_pred_tool_name": null,
+      "full_correct": false,
+      "c2kv_correct": true,
+      "full_call": false,
+      "c2kv_call": true
+    },
+    "a45d2c09567a_cfce19ea:5": {
+      "session_id": "a45d2c09567a_cfce19ea",
+      "target_tool_name": "venmo__search_friends",
+      "full_pred_tool_name": null,
+      "full_correct": false,
+      "c2kv_correct": false,
+      "full_call": true,
+      "c2kv_call": true
+    },
+    "a45d2c09567a_cfce19ea:6": {
+      "session_id": "a45d2c09567a_cfce19ea",
+      "target_tool_name": "venmo__search_friends",
+      "full_pred_tool_name": "venmo__search_friends",
+      "full_correct": true,
+      "c2kv_correct": false,
+      "full_call": true,
+      "c2kv_call": true
+    },
+    "a45d2c09567a_cfce19ea:7": {
+      "session_id": "a45d2c09567a_cfce19ea",
+      "target_tool_name": "venmo__search_friends",
+      "full_pred_tool_name": "venmo__search_friends",
+      "full_correct": true,
+      "c2kv_correct": true,
+      "full_call": true,
+      "c2kv_call": true
+    },
+    "a45d2c09567a_cfce19ea:8": {
+      "session_id": "a45d2c09567a_cfce19ea",
+      "target_tool_name": "venmo__search_friends",
+      "full_pred_tool_name": null,
+      "full_correct": false,
+      "c2kv_correct": false,
+      "full_call": false,
+      "c2kv_call": false
+    },
+    "a45d2c09567a_cfce19ea:9": {
+      "session_id": "a45d2c09567a_cfce19ea",
+      "target_tool_name": "venmo__search_friends",
+      "full_pred_tool_name": "venmo__search_friends",
+      "full_correct": true,
+      "c2kv_correct": true,
+      "full_call": true,
+      "c2kv_call": true
+    },
+    "a45d2c09567a_cfce19ea:10": {
+      "session_id": "a45d2c09567a_cfce19ea",
+      "target_tool_name": "venmo__search_friends",
+      "full_pred_tool_name": null,
+      "full_correct": false,
+      "c2kv_correct": true,
+      "full_call": false,
+      "c2kv_call": true
+    },
+    "a45d2c09567a_cfce19ea:11": {
+      "session_id": "a45d2c09567a_cfce19ea",
+      "target_tool_name": "venmo__search_friends",
+      "full_pred_tool_name": null,
+      "full_correct": false,
+      "c2kv_correct": false,
+      "full_call": false,
+      "c2kv_call": false
+    },
+    "a45d2c09567a_cfce19ea:13": {
+      "session_id": "a45d2c09567a_cfce19ea",
+      "target_tool_name": "finish",
+      "full_pred_tool_name": null,
+      "full_correct": false,
+      "c2kv_correct": false,
+      "full_call": false,
+      "c2kv_call": false
+    },
+    "a45d2c09567a_cfce19ea:14": {
+      "session_id": "a45d2c09567a_cfce19ea",
+      "target_tool_name": "venmo__logout",
+      "full_pred_tool_name": null,
+      "full_correct": false,
+      "c2kv_correct": false,
+      "full_call": false,
+      "c2kv_call": false
+    },
+    "b455f37f04c7_903ca285:0": {
+      "session_id": "b455f37f04c7_903ca285",
+      "target_tool_name": "supervisor__show_account_passwords",
+      "full_pred_tool_name": null,
+      "full_correct": false,
+      "c2kv_correct": false,
+      "full_call": false,
+      "c2kv_call": false
+    },
+    "b455f37f04c7_903ca285:1": {
+      "session_id": "b455f37f04c7_903ca285",
+      "target_tool_name": "venmo__login",
+      "full_pred_tool_name": "venmo__show_received_payment_requests",
+      "full_correct": false,
+      "c2kv_correct": false,
+      "full_call": true,
+      "c2kv_call": true
+    },
+    "b455f37f04c7_903ca285:3": {
+      "session_id": "b455f37f04c7_903ca285",
+      "target_tool_name": "phone__search_contacts",
+      "full_pred_tool_name": "venmo__show_received_payment_requests",
+      "full_correct": false,
+      "c2kv_correct": false,
+      "full_call": true,
+      "c2kv_call": true
+    },
+    "b455f37f04c7_903ca285:4": {
+      "session_id": "b455f37f04c7_903ca285",
+      "target_tool_name": "phone__login",
+      "full_pred_tool_name": "venmo__show_received_payment_requests",
+      "full_correct": false,
+      "c2kv_correct": false,
+      "full_call": true,
+      "c2kv_call": true
+    },
+    "b455f37f04c7_903ca285:5": {
+      "session_id": "b455f37f04c7_903ca285",
+      "target_tool_name": "phone__search_contacts",
+      "full_pred_tool_name": "phone__search_contacts",
+      "full_correct": true,
+      "c2kv_correct": true,
+      "full_call": true,
+      "c2kv_call": true
+    },
+    "b455f37f04c7_903ca285:6": {
+      "session_id": "b455f37f04c7_903ca285",
+      "target_tool_name": "phone__search_contacts",
+      "full_pred_tool_name": "phone__search_contacts",
+      "full_correct": true,
+      "c2kv_correct": true,
+      "full_call": true,
+      "c2kv_call": true
+    },
+    "b455f37f04c7_903ca285:8": {
+      "session_id": "b455f37f04c7_903ca285",
+      "target_tool_name": "phone__search_contacts",
+      "full_pred_tool_name": "phone__search_contacts",
+      "full_correct": true,
+      "c2kv_correct": true,
+      "full_call": true,
+      "c2kv_call": true
+    },
+    "b455f37f04c7_903ca285:9": {
+      "session_id": "b455f37f04c7_903ca285",
+      "target_tool_name": "phone__show_contact_relationships",
+      "full_pred_tool_name": "venmo__show_received_payment_requests",
+      "full_correct": false,
+      "c2kv_correct": false,
+      "full_call": true,
+      "c2kv_call": true
+    },
+    "b455f37f04c7_903ca285:10": {
+      "session_id": "b455f37f04c7_903ca285",
+      "target_tool_name": "phone__search_contacts",
+      "full_pred_tool_name": "venmo__show_received_payment_requests",
+      "full_correct": false,
+      "c2kv_correct": false,
+      "full_call": true,
+      "c2kv_call": true
+    },
+    "b455f37f04c7_903ca285:11": {
+      "session_id": "b455f37f04c7_903ca285",
+      "target_tool_name": "venmo__show_received_payment_requests",
+      "full_pred_tool_name": null,
+      "full_correct": false,
+      "c2kv_correct": false,
+      "full_call": false,
+      "c2kv_call": true
+    },
+    "b455f37f04c7_903ca285:12": {
+      "session_id": "b455f37f04c7_903ca285",
+      "target_tool_name": "venmo__deny_payment_request",
+      "full_pred_tool_name": null,
+      "full_correct": false,
+      "c2kv_correct": false,
+      "full_call": false,
+      "c2kv_call": true
+    },
+    "b455f37f04c7_903ca285:13": {
+      "session_id": "b455f37f04c7_903ca285",
+      "target_tool_name": "venmo__create_transaction",
+      "full_pred_tool_name": "venmo__create_payment_request",
+      "full_correct": false,
+      "c2kv_correct": false,
+      "full_call": true,
+      "c2kv_call": true
+    },
+    "b455f37f04c7_903ca285:14": {
+      "session_id": "b455f37f04c7_903ca285",
+      "target_tool_name": "finish",
+      "full_pred_tool_name": null,
+      "full_correct": false,
+      "c2kv_correct": false,
+      "full_call": false,
+      "c2kv_call": false
+    },
+    "0c890a5dde8c_012517c3:0": {
+      "session_id": "0c890a5dde8c_012517c3",
+      "target_tool_name": "supervisor__show_account_passwords",
+      "full_pred_tool_name": null,
+      "full_correct": false,
+      "c2kv_correct": false,
+      "full_call": false,
+      "c2kv_call": false
+    },
+    "0c890a5dde8c_012517c3:1": {
+      "session_id": "0c890a5dde8c_012517c3",
+      "target_tool_name": "supervisor__show_profile",
+      "full_pred_tool_name": "spotify__login",
+      "full_correct": false,
+      "c2kv_correct": false,
+      "full_call": true,
+      "c2kv_call": true
+    },
+    "0c890a5dde8c_012517c3:2": {
+      "session_id": "0c890a5dde8c_012517c3",
+      "target_tool_name": "spotify__login",
+      "full_pred_tool_name": "spotify__login",
+      "full_correct": true,
+      "c2kv_correct": false,
+      "full_call": true,
+      "c2kv_call": true
+    },
+    "0c890a5dde8c_012517c3:3": {
+      "session_id": "0c890a5dde8c_012517c3",
+      "target_tool_name": "spotify__show_liked_songs",
+      "full_pred_tool_name": "spotify__show_liked_songs",
+      "full_correct": true,
+      "c2kv_correct": false,
+      "full_call": true,
+      "c2kv_call": true
+    },
+    "0c890a5dde8c_012517c3:4": {
+      "session_id": "0c890a5dde8c_012517c3",
+      "target_tool_name": "spotify__show_liked_songs",
+      "full_pred_tool_name": null,
+      "full_correct": false,
+      "c2kv_correct": false,
+      "full_call": false,
+      "c2kv_call": false
+    },
+    "0c890a5dde8c_012517c3:5": {
+      "session_id": "0c890a5dde8c_012517c3",
+      "target_tool_name": "spotify__show_liked_songs",
+      "full_pred_tool_name": null,
+      "full_correct": false,
+      "c2kv_correct": true,
+      "full_call": false,
+      "c2kv_call": true
+    },
+    "0c890a5dde8c_012517c3:6": {
+      "session_id": "0c890a5dde8c_012517c3",
+      "target_tool_name": "spotify__remove_song_from_queue",
+      "full_pred_tool_name": null,
+      "full_correct": false,
+      "c2kv_correct": false,
+      "full_call": false,
+      "c2kv_call": false
+    }
+  }
+}
