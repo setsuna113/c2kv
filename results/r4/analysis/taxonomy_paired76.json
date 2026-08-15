@@ -1,0 +1,207 @@
+{
+  "layer": "paired76",
+  "rows_a": "/home/user/c2kv/outputs_lyc/r3_discrimination/t_e/t_e_c2kv_r4.jsonl",
+  "n_rows": 48,
+  "n_tool_target": 48,
+  "n_failures": 47,
+  "counts": {
+    "NO_CALL": 15,
+    "PROTOCOL_BROKEN": 24,
+    "WRONG_TOOL": 6,
+    "WRONG_ARGS": 2,
+    "CORRECT": 1
+  },
+  "control_class_share_of_failures": 0.6809,
+  "wrong_tool_subtypes": {
+    "in_pool": 6,
+    "out_of_pool": 0
+  },
+  "overtrigger_non_tool_targets": {
+    "n": 0,
+    "called": 0
+  },
+  "per_qid": {
+    "a45d2c09567a_795c2422:0": {
+      "category": "NO_CALL"
+    },
+    "a45d2c09567a_795c2422:1": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "a45d2c09567a_795c2422:2": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "a45d2c09567a_795c2422:3": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "a45d2c09567a_795c2422:4": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "a45d2c09567a_795c2422:5": {
+      "category": "NO_CALL"
+    },
+    "a45d2c09567a_795c2422:6": {
+      "category": "WRONG_TOOL",
+      "pred_name": "finish",
+      "in_pool": true
+    },
+    "a45d2c09567a_7c2c1bb8:0": {
+      "category": "NO_CALL"
+    },
+    "a45d2c09567a_7c2c1bb8:1": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "a45d2c09567a_7c2c1bb8:2": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "a45d2c09567a_7c2c1bb8:3": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "a45d2c09567a_7c2c1bb8:4": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "a45d2c09567a_7c2c1bb8:5": {
+      "category": "NO_CALL"
+    },
+    "a45d2c09567a_7c2c1bb8:6": {
+      "category": "NO_CALL"
+    },
+    "a45d2c09567a_7c2c1bb8:7": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "a45d2c09567a_cfce19ea:0": {
+      "category": "NO_CALL"
+    },
+    "a45d2c09567a_cfce19ea:2": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "a45d2c09567a_cfce19ea:3": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "a45d2c09567a_cfce19ea:4": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "a45d2c09567a_cfce19ea:5": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "a45d2c09567a_cfce19ea:6": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "a45d2c09567a_cfce19ea:7": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "a45d2c09567a_cfce19ea:8": {
+      "category": "NO_CALL"
+    },
+    "a45d2c09567a_cfce19ea:9": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "a45d2c09567a_cfce19ea:10": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "a45d2c09567a_cfce19ea:11": {
+      "category": "NO_CALL"
+    },
+    "a45d2c09567a_cfce19ea:13": {
+      "category": "NO_CALL"
+    },
+    "a45d2c09567a_cfce19ea:14": {
+      "category": "NO_CALL"
+    },
+    "b455f37f04c7_903ca285:0": {
+      "category": "NO_CALL"
+    },
+    "b455f37f04c7_903ca285:1": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "b455f37f04c7_903ca285:3": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "b455f37f04c7_903ca285:4": {
+      "category": "WRONG_TOOL",
+      "pred_name": "phone__search_contacts",
+      "in_pool": true
+    },
+    "b455f37f04c7_903ca285:5": {
+      "category": "WRONG_ARGS",
+      "note": "key-set mismatch"
+    },
+    "b455f37f04c7_903ca285:6": {
+      "category": "WRONG_ARGS",
+      "note": "key-set mismatch"
+    },
+    "b455f37f04c7_903ca285:8": {
+      "category": "CORRECT"
+    },
+    "b455f37f04c7_903ca285:9": {
+      "category": "WRONG_TOOL",
+      "pred_name": "phone__search_contacts",
+      "in_pool": true
+    },
+    "b455f37f04c7_903ca285:10": {
+      "category": "WRONG_TOOL",
+      "pred_name": "phone__show_contact_relationships",
+      "in_pool": true
+    },
+    "b455f37f04c7_903ca285:11": {
+      "category": "WRONG_TOOL",
+      "pred_name": "phone__show_contact_relationships",
+      "in_pool": true
+    },
+    "b455f37f04c7_903ca285:12": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "b455f37f04c7_903ca285:13": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "b455f37f04c7_903ca285:14": {
+      "category": "NO_CALL"
+    },
+    "0c890a5dde8c_012517c3:0": {
+      "category": "NO_CALL"
+    },
+    "0c890a5dde8c_012517c3:1": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "0c890a5dde8c_012517c3:2": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "0c890a5dde8c_012517c3:3": {
+      "category": "WRONG_TOOL",
+      "pred_name": "spotify__show_profile",
+      "in_pool": true
+    },
+    "0c890a5dde8c_012517c3:4": {
+      "category": "NO_CALL"
+    },
+    "0c890a5dde8c_012517c3:5": {
+      "category": "PROTOCOL_BROKEN"
+    },
+    "0c890a5dde8c_012517c3:6": {
+      "category": "NO_CALL"
+    }
+  },
+  "paired": {
+    "rows_b": "/home/user/c2kv/outputs_lyc/r4_closure/full_76k/r4_full_76k.jsonl",
+    "n_paired": 48,
+    "excess_failure_cell": 1,
+    "excess_cell_counts": {
+      "PROTOCOL_BROKEN": 1
+    },
+    "excess_control_share": 1.0
+  },
+  "boundary_76k": {
+    "heuristic": "target name token position +/- 200 tokens; chunk=512 over doc_ids",
+    "crosses": {
+      "n": 25,
+      "error_rate": 0.88
+    },
+    "within": {
+      "n": 23,
+      "error_rate": 0.6957
+    },
+    "UNANNOTATABLE": {
+      "n": 0,
+      "error_rate": null
+    }
+  }
+}

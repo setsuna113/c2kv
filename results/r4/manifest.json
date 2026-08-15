@@ -1,0 +1,23 @@
+{
+  "analysis/a3_closure.json": "af08887afbffd394b2cfa035f0a757402ed59a5fd58dfa83c258afa452589504",
+  "analysis/input_assertions.json": "6f63e4d29455c5e11efaf14d2f20ffdf1f6b37b910b50479f33832e7f3b6a35f",
+  "analysis/paired_76k_48.json": "622b7bc657e2592d3febd2498b4f16eed3066be2023f13ca31898148f300cf5b",
+  "analysis/paired_typed_vs_plain.json": "e7fad1522e6f99c2e8124929aa89cbf946b2fea15ee05d1c4153cf5a9365769e",
+  "analysis/paired_v4_typed_vs_random.json": "7dfa998ebc1a1809a7d0c297650cb3db8cb39dd7ecc267e537714d6423ca24c3",
+  "analysis/taxonomy_paired76.json": "85a0f4f5b4d8f44bb1a34b9c0d687aa6783c36db1f15ae17a6baf29c2c3d9af6",
+  "analysis/taxonomy_plain32.json": "fe6c4496e3e48ecdcdb19d7ba48a0186f50e39fa2db152ccac3129578af65958",
+  "analysis/v2_manual_review.txt": "4d421fe25ef7af9a0aa0cd784aa2aa750de447f80e37f8be45d859ec7afad37f",
+  "d_plain/r4_d_plain.jsonl": "cd32971a8afe4cabbf8b6c76575d59f4b64d99766c9cc0f02a4c6307ac1a0941",
+  "d_random/r4_d_random.jsonl": "6acd7af996d79aaf8b781ae3e14366a32c6fb797652b3d60408d224afe7fbfed",
+  "d_typed/r4_d_typed.jsonl": "f3b4ad95d34ec730a36b441bb6b0f1352fa2d5f010ad1a537eec673e02cd11b4",
+  "f_ext_c2kv/f_ext_c2kv.jsonl": "266e4e301ef5664233e85aa8828c53b288fef6754f42fb8e984329a413460d8c",
+  "full_76k/r4_full_76k.jsonl": "2ece2842c5da228505c7b8efd101b210eb1d48cca3d41a7fee5bc706046c93c4",
+  "prior_76k/r4_prior_76k.jsonl": "48d4dd744566752467aa57c8c49f79c8ec405406206d9d5a0738d488fe37f119",
+  "r3_recovered/t_a_generations_48.jsonl": "1a96452f7abc89df922ee8f39ba2aa818336c4864a97a2646976d717b863777e",
+  "r3_recovered/t_e_c2kv_r4.jsonl": "d353fab422a3a2c42a4939481879f2f59bca19d04f3a8c72b8604acb10f2fac9",
+  "_server_only": {
+    "outputs_lyc/r4_closure/prior_76k/prior_prompts.jsonl": "adfd2b2cb7170ab3eae5eb130ddba83f1d7e86cd5ac0cbeb573f4a8b060f7c46",
+    "outputs_lyc/r4_closure/f_ext_prompts/t_a_prompts.jsonl": "01340c00865ded1d307d53ddcec10e48ab8658b29f47c901016295c63d566ffe",
+    "outputs_lyc/r4_closure/r4_anchor_spans.json": "(committed copy at configs/r4_anchor_spans.json)"
+  }
+}
