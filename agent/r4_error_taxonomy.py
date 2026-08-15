@@ -134,6 +134,16 @@ def _load_rows(path: str) -> Dict[str, Any]:
     return rows
 
 
+def _backfill_targets(rows: Dict[str, Any], source_path: str) -> None:
+    """Fill missing target_tool_name/target from a reference arm (same qids)."""
+    ref = _load_rows(source_path)
+    for q, row in rows.items():
+        if row.get("target_tool_name") is None and q in ref:
+            row["target_tool_name"] = ref[q].get("target_tool_name")
+            if not row.get("target"):
+                row["target"] = ref[q].get("target")
+
+
 def _tooldef_pools() -> Dict[str, Any]:
     """qid -> (tool_definition text, doc_ids) under the r3 S1 config."""
     import eval_agent_tool_definition_c2kv as H
@@ -226,11 +236,14 @@ def main() -> None:
     p.add_argument("--layer", choices=["paired76", "plain32"], required=True)
     p.add_argument("--rows_a", required=True, help="c2kv-side (paired76) or plain arm (plain32)")
     p.add_argument("--rows_b", help="full arm (paired76 only)")
+    p.add_argument("--target_source", help="reference arm jsonl to backfill missing target fields")
     p.add_argument("--out", required=True)
     args = p.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", datefmt="%H:%M:%S")
 
     rows_a = _load_rows(args.rows_a)
+    if args.target_source:
+        _backfill_targets(rows_a, args.target_source)
     if args.layer == "plain32":
         pools = _history_pools()
     else:
@@ -270,6 +283,8 @@ def main() -> None:
         if not args.rows_b:
             raise SystemExit("paired76 needs --rows_b")
         rows_b = _load_rows(args.rows_b)
+        if args.target_source:
+            _backfill_targets(rows_b, args.target_source)
         discordant = [
             q for q in rows_a
             if q in rows_b and cls_a[q]["category"] != "CORRECT"
