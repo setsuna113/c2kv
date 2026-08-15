@@ -1,4 +1,9 @@
-"""R4 A2: paired test — new same-weights full arm (76k) vs r3 T-E c2kv arm.
+"""R4 A2/V4: paired test between two arms sharing a frozen qid set.
+
+A2 = new same-weights full arm (76k) vs r3 T-E c2kv arm; V4 = task-D typed
+vs random arm (both carry prediction/target_tool_name fields; the --full_arm
+side is scored from its text via _extract_tool_name, the --c2kv_arm side
+uses its harness-scored tool_name_match).
 
 Primary metric: tool_name correct (exact McNemar, b/c cells reported).
 Secondary: call rate. CI: session-cluster bootstrap (20000 reps, seed 0;
@@ -36,6 +41,10 @@ import eval_agent_tool_definition_c2kv as H  # noqa: E402
 logger = logging.getLogger("r4_paired")
 
 TOOL_CALL_JSON_RE = re.compile(r"<tool_call>\s*(\{.*?\})\s*</tool_call>", re.DOTALL)
+
+
+def _row_text(row: Dict[str, Any]) -> str:
+    return row.get("text", row.get("prediction", ""))
 
 
 def _load_by_qid(path: str) -> Dict[str, Any]:
@@ -135,10 +144,16 @@ def main() -> None:
     sessions: List[str] = []
     per_qid: Dict[str, Any] = {}
     for q in qids:
-        target = c2kv[q].get("target_tool_name")
-        full_pred = H._extract_tool_name(full[q].get("text", ""))
+        target = c2kv[q].get("target_tool_name") or full[q].get("target_tool_name")
+        full_pred = H._extract_tool_name(_row_text(full[q]))
         f_ok = target is not None and full_pred == target
-        c_ok = bool(c2kv[q].get("tool_name_match"))
+        # Symmetric scoring: both arms re-scored from text via _extract_tool_name.
+        # The harness-side tool_name_match is kept as a cross-check.
+        c2kv_pred = H._extract_tool_name(_row_text(c2kv[q]))
+        c_ok = target is not None and c2kv_pred == target
+        harness_c = bool(c2kv[q].get("tool_name_match"))
+        if harness_c != c_ok:
+            logger.warning("qid=%s: harness tool_name_match=%s != re-scored %s", q, harness_c, c_ok)
         name_pairs.append((f_ok, c_ok))
         call_pairs.append((bool(full[q].get("has_tool_call")), bool(c2kv[q].get("has_tool_call"))))
         sid = c2kv[q].get("session_id") or q.rsplit(":", 1)[0]
@@ -185,7 +200,7 @@ def main() -> None:
     for q in qids:
         if not (per_qid[q]["full_correct"] and per_qid[q]["c2kv_correct"]):
             continue
-        pred_call = _parse_call(full[q].get("text", ""))
+        pred_call = _parse_call(_row_text(full[q]))
         tgt_call = _parse_call(c2kv[q].get("target", ""))
         if pred_call is None or tgt_call is None:
             continue
