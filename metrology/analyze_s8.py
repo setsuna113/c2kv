@@ -513,9 +513,10 @@ def _cap_c_by_category(sample: dict) -> dict:
 def _c2kv_m3(full_rows: list, c2kv_rows: list) -> dict:
     """C2KV 描述性（INTERNAL-ONLY）：89 配对行上两臂 acc（protocol 列 =
     primary_success；语义列 = semantic_correct），税 = full − c2kv，符号如实报。"""
-    f = {str(r.get("id")): r for r in full_rows
+    # closeout scored 行的主键是 qid（无 id 字段），兼容两者
+    f = {str(r.get("qid") or r.get("id")): r for r in full_rows
          if isinstance(r.get("scoring"), dict)}
-    c = {str(r.get("id")): r for r in c2kv_rows
+    c = {str(r.get("qid") or r.get("id")): r for r in c2kv_rows
          if isinstance(r.get("scoring"), dict)}
     pairs = sorted(set(f) & set(c))
     out = {
