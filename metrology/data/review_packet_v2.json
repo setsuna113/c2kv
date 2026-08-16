@@ -1,0 +1,2611 @@
+{
+  "seed": 20260816,
+  "n_requested": 30,
+  "n_selected": 30,
+  "population_n": 839,
+  "n_strata": 9,
+  "selection_rule": "最大余数法按层比例分配",
+  "allocation": {
+    "base|1024": 4,
+    "base|128": 4,
+    "base|default": 4,
+    "snapkv|1024": 4,
+    "snapkv|128": 4,
+    "snapkv|default": 4,
+    "streamingllm|1024": 2,
+    "streamingllm|128": 2,
+    "streamingllm|default": 2
+  },
+  "cases": [
+    {
+      "case_no": 1,
+      "id": "multi_turn_miss_func_76",
+      "category": "multi_turn_miss_func",
+      "condition": "base",
+      "cap_tier": "1024",
+      "prose": {
+        "version": 2,
+        "name_hit": true,
+        "name": "startEngine",
+        "name_pos": 35,
+        "missing_names": [],
+        "coverage_ok": true,
+        "param_keys": [
+          "ignitionMode",
+          "pedalPosition",
+          "username",
+          "password",
+          "content"
+        ],
+        "param_hit": true,
+        "gold_no_params": false,
+        "correct": true
+      },
+      "gold_calls": [
+        [],
+        [
+          {
+            "func": "lockDoors",
+            "param_keys": [
+              "unlock",
+              "door"
+            ]
+          },
+          {
+            "func": "pressBrakePedal",
+            "param_keys": [
+              "pedalPosition"
+            ]
+          },
+          {
+            "func": "startEngine",
+            "param_keys": [
+              "ignitionMode"
+            ]
+          }
+        ],
+        [
+          {
+            "func": "post_tweet",
+            "param_keys": [
+              "content",
+              "tags",
+              "mentions"
+            ]
+          }
+        ]
+      ],
+      "text": "[displayCarStatus(option=\"doors\"), startEngine(ignitionMode=\"START\")]\n[]\n[lockDoors(unlock=False, door=[\"driver\", \"passenger\", \"rear_left\", \"rear_right\"]), startEngine(ignitionMode=\"START\")]\n[pressBrakePedal(pedalPosition=1.0), startEngine(ignitionMode=\"START\")]\n[]\n[authenticate_twitter(username=\"your_username\", password=\"your_password\"), post_tweet(content=\"Tire pressure is perfect!\", tags=[\"#CarCare\", \"#TireHealth\"], mentions=[\"mike53\"])]\n[]",
+      "prose_v1_frozen": {
+        "name_hit": true,
+        "name": "displayCarStatus",
+        "name_pos": 1,
+        "param_keys": [
+          "option",
+          "ignitionMode",
+          "pedalPosition",
+          "username",
+          "password",
+          "content"
+        ],
+        "param_hit": true,
+        "gold_no_params": false,
+        "correct": true
+      }
+    },
+    {
+      "case_no": 2,
+      "id": "multi_turn_miss_func_175",
+      "category": "multi_turn_miss_func",
+      "condition": "base",
+      "cap_tier": "1024",
+      "prose": {
+        "version": 2,
+        "name_hit": true,
+        "name": "get_flight_cost",
+        "name_pos": 1,
+        "missing_names": [],
+        "coverage_ok": true,
+        "param_keys": [
+          "travel_from",
+          "travel_to",
+          "travel_date",
+          "travel_class",
+          "access_token",
+          "card_id",
+          "booking_id",
+          "content",
+          "tweet_id",
+          "username",
+          "password"
+        ],
+        "param_hit": true,
+        "gold_no_params": false,
+        "correct": true
+      },
+      "gold_calls": [
+        [
+          {
+            "func": "get_flight_cost",
+            "param_keys": [
+              "travel_from",
+              "travel_to",
+              "travel_date",
+              "travel_class"
+            ]
+          },
+          {
+            "func": "book_flight",
+            "param_keys": [
+              "access_token",
+              "card_id",
+              "travel_date",
+              "travel_from",
+              "travel_to",
+              "travel_class"
+            ]
+          },
+          {
+            "func": "retrieve_invoice",
+            "param_keys": [
+              "access_token",
+              "booking_id"
+            ]
+          }
+        ],
+        [],
+        [
+          {
+            "func": "authenticate_twitter",
+            "param_keys": [
+              "username",
+              "password"
+            ]
+          },
+          {
+            "func": "post_tweet",
+            "param_keys": [
+              "content",
+              "tags"
+            ]
+          },
+          {
+            "func": "retweet",
+            "param_keys": [
+              "tweet_id"
+            ]
+          }
+        ]
+      ],
+      "text": "[get_flight_cost(travel_from=\"SFO\", travel_to=\"LAX\", travel_date=\"2026-11-25\", travel_class=\"business\"), book_flight(access_token=\"1293\", card_id=\"card_3487\", travel_date=\"2026-11-25\", travel_from=\"SFO\", travel_to=\"LAX\", travel_class=\"business\"), retrieve_invoice(access_token=\"1293\", booking_id=\"booking_1234\")]\n[retrieve_invoice(access_token=\"1293\", booking_id=\"3426812\")]\n[]\n[posting_get_login_status(), post_tweet(content=\"Loved my flight journey!\", tags=[\"#TravelDiaries\"]), retweet(tweet_id=123456)]\n[]\n[authenticate_twitter(username=\"john\", password=\"john1234\"), post_tweet(content=\"Loved my flight journey!\", tags=[\"#TravelDiaries\"]), retweet(tweet_id=123456)]\n[retweet(tweet_id=10)]\n[]",
+      "prose_v1_frozen": {
+        "name_hit": true,
+        "name": "get_flight_cost",
+        "name_pos": 1,
+        "param_keys": [
+          "travel_from",
+          "travel_to",
+          "travel_date",
+          "travel_class",
+          "access_token",
+          "card_id",
+          "booking_id",
+          "content",
+          "tweet_id",
+          "username",
+          "password"
+        ],
+        "param_hit": true,
+        "gold_no_params": false,
+        "correct": true
+      }
+    },
+    {
+      "case_no": 3,
+      "id": "multi_turn_long_context_94",
+      "category": "multi_turn_long_context",
+      "condition": "base",
+      "cap_tier": "1024",
+      "prose": {
+        "version": 2,
+        "name_hit": true,
+        "name": "estimate_drive_feasibility_by_mileage",
+        "name_pos": 1,
+        "missing_names": [],
+        "coverage_ok": true,
+        "param_keys": [
+          "distance",
+          "fuelAmount",
+          "destination",
+          "ignitionMode",
+          "pedalPosition"
+        ],
+        "param_hit": true,
+        "gold_no_params": false,
+        "correct": true
+      },
+      "gold_calls": [
+        [
+          {
+            "func": "estimate_drive_feasibility_by_mileage",
+            "param_keys": [
+              "distance"
+            ]
+          },
+          {
+            "func": "fillFuelTank",
+            "param_keys": [
+              "fuelAmount"
+            ]
+          }
+        ],
+        [
+          {
+            "func": "check_tire_pressure",
+            "param_keys": []
+          },
+          {
+            "func": "find_nearest_tire_shop",
+            "param_keys": []
+          },
+          {
+            "func": "set_navigation",
+            "param_keys": [
+              "destination"
+            ]
+          }
+        ],
+        [
+          {
+            "func": "pressBrakePedal",
+            "param_keys": [
+              "pedalPosition"
+            ]
+          },
+          {
+            "func": "startEngine",
+            "param_keys": [
+              "ignitionMode"
+            ]
+          }
+        ]
+      ],
+      "text": "[estimate_drive_feasibility_by_mileage(distance=300), fillFuelTank(fuelAmount=30)]\n[]\n[check_tire_pressure(), find_nearest_tire_shop(), set_navigation(destination=\"nearest tire shop\")]\n[]\n[startEngine(ignitionMode=\"START\")]\n[pressBrakePedal(pedalPosition=1.0), startEngine(ignitionMode=\"START\")]\n[]",
+      "prose_v1_frozen": {
+        "name_hit": true,
+        "name": "estimate_drive_feasibility_by_mileage",
+        "name_pos": 1,
+        "param_keys": [
+          "distance",
+          "fuelAmount",
+          "destination",
+          "ignitionMode",
+          "pedalPosition"
+        ],
+        "param_hit": true,
+        "gold_no_params": false,
+        "correct": true
+      }
+    },
+    {
+      "case_no": 4,
+      "id": "multi_turn_miss_param_187",
+      "category": "multi_turn_miss_param",
+      "condition": "base",
+      "cap_tier": "1024",
+      "prose": {
+        "version": 2,
+        "name_hit": true,
+        "name": "purchase_insurance",
+        "name_pos": 1,
+        "missing_names": [],
+        "coverage_ok": true,
+        "param_keys": [
+          "access_token",
+          "insurance_type",
+          "insurance_cost",
+          "booking_id",
+          "card_id",
+          "insurance_id",
+          "message",
+          "title",
+          "description",
+          "priority",
+          "username",
+          "password"
+        ],
+        "param_hit": true,
+        "gold_no_params": false,
+        "correct": true
+      },
+      "gold_calls": [
+        [
+          {
+            "func": "purchase_insurance",
+            "param_keys": [
+              "access_token",
+              "insurance_type",
+              "booking_id",
+              "insurance_cost",
+              "card_id"
+            ]
+          }
+        ],
+        [
+          {
+            "func": "retrieve_invoice",
+            "param_keys": [
+              "access_token",
+              "booking_id"
+            ]
+          }
+        ],
+        [
+          {
+            "func": "contact_customer_support",
+            "param_keys": [
+              "booking_id",
+              "message"
+            ]
+          }
+        ],
+        [],
+        [
+          {
+            "func": "ticket_login",
+            "param_keys": [
+              "username",
+              "password"
+            ]
+          },
+          {
+            "func": "create_ticket",
+            "param_keys": [
+              "priority",
+              "title",
+              "description"
+            ]
+          }
+        ]
+      ],
+      "text": "[purchase_insurance(access_token=\"token_abc123\", insurance_type=\"comprehensive\", insurance_cost=1500, booking_id=\"insurance_12345\", card_id=\"card_4893\")]\n[]\n[retrieve_invoice(access_token=\"token_abc123\", insurance_id=\"255316027\")]\n[]\n[contact_customer_support(booking_id=\"insurance_12345\", message=\"There are discrepancies in my travel-related costs that need to be addressed.\")])\n[create_ticket(title=\"Discrepancy in Travel Costs\", description=\"The reply I received from customer support was less than satisfactory.\", priority=5)]\n[ticket_login(username=\"mthompson\", password=\"password\"), create_ticket(title=\"Discrepancy in Travel Costs\", description=\"The reply I received from customer support was less than satisfactory.\", priority=5)]\n[]\n[ticket_login(username=\"mthompson\", password=\"SecurePass123\"), create_ticket(title=\"Discrepancy in Travel Costs\", description=\"The reply I received from customer support was less than satisfactory.\", priority=5)]\n[]",
+      "prose_v1_frozen": {
+        "name_hit": true,
+        "name": "purchase_insurance",
+        "name_pos": 1,
+        "param_keys": [
+          "access_token",
+          "insurance_type",
+          "insurance_cost",
+          "booking_id",
+          "card_id",
+          "insurance_id",
+          "message",
+          "title",
+          "description",
+          "priority",
+          "username",
+          "password"
+        ],
+        "param_hit": true,
+        "gold_no_params": false,
+        "correct": true
+      }
+    },
+    {
+      "case_no": 5,
+      "id": "parallel_129",
+      "category": "parallel",
+      "condition": "base",
+      "cap_tier": "128",
+      "prose": {
+        "version": 2,
+        "name_hit": true,
+        "name": "create_histogram",
+        "name_pos": 1,
+        "missing_names": [],
+        "coverage_ok": true,
+        "param_keys": [
+          "bins"
+        ],
+        "param_hit": true,
+        "gold_no_params": false,
+        "correct": true
+      },
+      "gold_calls": [
+        {
+          "func": "create_histogram",
+          "param_keys": [
+            "bins",
+            "data"
+          ]
+        },
+        {
+          "func": "create_histogram",
+          "param_keys": [
+            "bins",
+            "data"
+          ]
+        }
+      ],
+      "text": "[create_histogram(data=[12, 15, 11, 14, 18, 19, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26], bins=5), create_histogram(data=[32, 35, 31, 34, 38, 39, 33, 34, 35, ",
+      "prose_v1_frozen": {
+        "name_hit": true,
+        "name": "create_histogram",
+        "name_pos": 1,
+        "param_keys": [
+          "bins"
+        ],
+        "param_hit": true,
+        "gold_no_params": false,
+        "correct": true
+      }
+    },
+    {
+      "case_no": 6,
+      "id": "multi_turn_miss_func_175",
+      "category": "multi_turn_miss_func",
+      "condition": "base",
+      "cap_tier": "128",
+      "prose": {
+        "version": 2,
+        "name_hit": true,
+        "name": "get_flight_cost",
+        "name_pos": 1,
+        "missing_names": [],
+        "coverage_ok": true,
+        "param_keys": [
+          "travel_from",
+          "travel_to",
+          "travel_date",
+          "travel_class",
+          "access_token",
+          "card_id",
+          "booking_id",
+          "content",
+          "tweet_id",
+          "username",
+          "password"
+        ],
+        "param_hit": true,
+        "gold_no_params": false,
+        "correct": true
+      },
+      "gold_calls": [
+        [
+          {
+            "func": "get_flight_cost",
+            "param_keys": [
+              "travel_from",
+              "travel_to",
+              "travel_date",
+              "travel_class"
+            ]
+          },
+          {
+            "func": "book_flight",
+            "param_keys": [
+              "access_token",
+              "card_id",
+              "travel_date",
+              "travel_from",
+              "travel_to",
+              "travel_class"
+            ]
+          },
+          {
+            "func": "retrieve_invoice",
+            "param_keys": [
+              "access_token",
+              "booking_id"
+            ]
+          }
+        ],
+        [],
+        [
+          {
+            "func": "authenticate_twitter",
+            "param_keys": [
+              "username",
+              "password"
+            ]
+          },
+          {
+            "func": "post_tweet",
+            "param_keys": [
+              "content",
+              "tags"
+            ]
+          },
+          {
+            "func": "retweet",
+            "param_keys": [
+              "tweet_id"
+            ]
+          }
+        ]
+      ],
+      "text": "[get_flight_cost(travel_from=\"SFO\", travel_to=\"LAX\", travel_date=\"2026-11-25\", travel_class=\"business\"), book_flight(access_token=\"1293\", card_id=\"card_3487\", travel_date=\"2026-11-25\", travel_from=\"SFO\", travel_to=\"LAX\", travel_class=\"business\"), retrieve_invoice(access_token=\"1293\", booking_id=\"booking_1234\")]\n[retrieve_invoice(access_token=\"1293\", booking_id=\"3426812\")]\n[]\n[posting_get_login_status(), post_tweet(content=\"Loved my flight journey!\", tags=[\"#TravelDiaries\"]), retweet(tweet_id=123456)]\n[]\n[authenticate_twitter(username=\"john\", password=\"john1234\"), post_tweet(content=\"Loved my flight journey!\", tags=[\"#TravelDiaries\"]), retweet(tweet_id=123456)]\n[retweet(tweet_id=10)]\n[]",
+      "prose_v1_frozen": {
+        "name_hit": true,
+        "name": "get_flight_cost",
+        "name_pos": 1,
+        "param_keys": [
+          "travel_from",
+          "travel_to",
+          "travel_date",
+          "travel_class",
+          "access_token",
+          "card_id",
+          "booking_id",
+          "content",
+          "tweet_id",
+          "username",
+          "password"
+        ],
+        "param_hit": true,
+        "gold_no_params": false,
+        "correct": true
+      }
+    },
+    {
+      "case_no": 7,
+      "id": "multi_turn_long_context_187",
+      "category": "multi_turn_long_context",
+      "condition": "base",
+      "cap_tier": "128",
+      "prose": {
+        "version": 2,
+        "name_hit": true,
+        "name": "purchase_insurance",
+        "name_pos": 1,
+        "missing_names": [],
+        "coverage_ok": true,
+        "param_keys": [
+          "access_token",
+          "insurance_type",
+          "insurance_cost",
+          "booking_id",
+          "card_id",
+          "insurance_id",
+          "message",
+          "username",
+          "password",
+          "title",
+          "description",
+          "priority"
+        ],
+        "param_hit": true,
+        "gold_no_params": false,
+        "correct": true
+      },
+      "gold_calls": [
+        [
+          {
+            "func": "purchase_insurance",
+            "param_keys": [
+              "access_token",
+              "insurance_type",
+              "booking_id",
+              "insurance_cost",
+              "card_id"
+            ]
+          }
+        ],
+        [
+          {
+            "func": "retrieve_invoice",
+            "param_keys": [
+              "access_token",
+              "booking_id"
+            ]
+          }
+        ],
+        [
+          {
+            "func": "contact_customer_support",
+            "param_keys": [
+              "booking_id",
+              "message"
+            ]
+          }
+        ],
+        [
+          {
+            "func": "ticket_login",
+            "param_keys": [
+              "username",
+              "password"
+            ]
+          },
+          {
+            "func": "create_ticket",
+            "param_keys": [
+              "priority",
+              "title",
+              "description"
+            ]
+          }
+        ]
+      ],
+      "text": "[purchase_insurance(access_token=\"token_abc123\", insurance_type=\"comprehensive\", insurance_cost=1500, booking_id=\"insurance_12345\", card_id=\"card_4893\")]\n[]\n[retrieve_invoice(access_token=\"token_abc123\", insurance_id=\"255316027\")]\n[]\n[contact_customer_support(booking_id=\"insurance_12345\", message=\"There are discrepancies in my travel-related costs that need to be addressed.\")])\n[ticket_login(username=\"mthompson\", password=\"SecurePass123\"), create_ticket(title=\"Discrepancy in Travel Costs\", description=\"The reply I received from customer support was less than satisfactory.\", priority=5)]\n[]",
+      "prose_v1_frozen": {
+        "name_hit": true,
+        "name": "purchase_insurance",
+        "name_pos": 1,
+        "param_keys": [
+          "access_token",
+          "insurance_type",
+          "insurance_cost",
+          "booking_id",
+          "card_id",
+          "insurance_id",
+          "message",
+          "username",
+          "password",
+          "title",
+          "description",
+          "priority"
+        ],
+        "param_hit": true,
+        "gold_no_params": false,
+        "correct": true
+      }
+    },
+    {
+      "case_no": 8,
+      "id": "multi_turn_base_109",
+      "category": "multi_turn_base",
+      "condition": "base",
+      "cap_tier": "128",
+      "prose": {
+        "version": 2,
+        "name_hit": true,
+        "name": "get_available_stocks",
+        "name_pos": 1,
+        "missing_names": [],
+        "coverage_ok": true,
+        "param_keys": [
+          "sector",
+          "symbol",
+          "order_type",
+          "price",
+          "amount",
+          "order_id",
+          "username",
+          "password",
+          "content"
+        ],
+        "param_hit": true,
+        "gold_no_params": false,
+        "correct": true
+      },
+      "gold_calls": [
+        [
+          {
+            "func": "get_available_stocks",
+            "param_keys": [
+              "sector"
+            ]
+          }
+        ],
+        [
+          {
+            "func": "get_stock_info",
+            "param_keys": [
+              "symbol"
+            ]
+          }
+        ],
+        [
+          {
+            "func": "place_order",
+            "param_keys": [
+              "order_type",
+              "symbol",
+              "price",
+              "amount"
+            ]
+          }
+        ],
+        [
+          {
+            "func": "get_order_details",
+            "param_keys": [
+              "order_id"
+            ]
+          }
+        ],
+        [
+          {
+            "func": "cancel_order",
+            "param_keys": [
+              "order_id"
+            ]
+          }
+        ],
+        [
+          {
+            "func": "get_account_info",
+            "param_keys": []
+          }
+        ],
+        [
+          {
+            "func": "post_tweet",
+            "param_keys": [
+              "content"
+            ]
+          }
+        ]
+      ],
+      "text": "[get_available_stocks(sector=\"Technology\")]\n[]\n[get_stock_info(symbol=\"MSFT\")]\n[]\n[place_order(order_type=\"Buy\", symbol=\"MSFT\", price=310.23, amount=100)]\n[]\n[get_order_details(order_id=12446)]\n[]\n[cancel_order(order_id=12446)]\n[]\n[get_account_info()]\n[]\n[authenticate_twitter(username=\"investor_user\", password=\"secure_password\"), post_tweet(content=\"Just made a move in the tech sector! I initiated and then canceled a 100-share buy order for $MSFT. Always staying sharp with my investment decisions!\")]\n[]",
+      "prose_v1_frozen": {
+        "name_hit": true,
+        "name": "get_available_stocks",
+        "name_pos": 1,
+        "param_keys": [
+          "sector",
+          "symbol",
+          "order_type",
+          "price",
+          "amount",
+          "order_id",
+          "username",
+          "password",
+          "content"
+        ],
+        "param_hit": true,
+        "gold_no_params": false,
+        "correct": true
+      }
+    },
+    {
+      "case_no": 9,
+      "id": "multi_turn_miss_param_175",
+      "category": "multi_turn_miss_param",
+      "condition": "base",
+      "cap_tier": "default",
+      "prose": {
+        "version": 2,
+        "name_hit": true,
+        "name": "get_flight_cost",
+        "name_pos": 1,
+        "missing_names": [],
+        "coverage_ok": true,
+        "param_keys": [
+          "travel_from",
+          "travel_to",
+          "travel_date",
+          "travel_class",
+          "access_token",
+          "card_id",
+          "booking_id",
+          "content",
+          "tweet_id",
+          "username",
+          "password"
+        ],
+        "param_hit": true,
+        "gold_no_params": false,
+        "correct": true
+      },
+      "gold_calls": [
+        [
+          {
+            "func": "get_flight_cost",
+            "param_keys": [
+              "travel_from",
+              "travel_to",
+              "travel_date",
+              "travel_class"
+            ]
+          },
+          {
+            "func": "book_flight",
+            "param_keys": [
+              "access_token",
+              "card_id",
+              "travel_date",
+              "travel_from",
+              "travel_to",
+              "travel_class"
+            ]
+          },
+          {
+            "func": "retrieve_invoice",
+            "param_keys": [
+              "access_token",
+              "booking_id"
+            ]
+          }
+        ],
+        [],
+        [
+          {
+            "func": "authenticate_twitter",
+            "param_keys": [
+              "username",
+              "password"
+            ]
+          },
+          {
+            "func": "post_tweet",
+            "param_keys": [
+              "content",
+              "tags"
+            ]
+          },
+          {
+            "func": "retweet",
+            "param_keys": [
+              "tweet_id"
+            ]
+          }
+        ]
+      ],
+      "text": "[get_flight_cost(travel_from=\"SFO\", travel_to=\"LAX\", travel_date=\"2026-11-25\", travel_class=\"business\"), book_flight(access_token=\"1293\", card_id=\"card_3487\", travel_date=\"2026-11-25\", travel_from=\"SFO\", travel_to=\"LAX\", travel_class=\"business\"), retrieve_invoice(access_token=\"1293\", booking_id=\"booking_1234\")]\n[retrieve_invoice(access_token=\"1293\", booking_id=\"3426812\")]\n[]\n[post_tweet(content=\"Loved my flight journey!\", tags=[\"#TravelDiaries\"]), retweet(tweet_id=123456)]\n[authenticate_twitter(username=\"robert_trenton\", password=\"secure_password\"), post_tweet(content=\"Loved my flight journey!\", tags=[\"#TravelDiaries\"]), retweet(tweet_id=123456)]\n[authenticate_twitter(username=\"robert_trenton\", password=\"secure_password\")]\n[]\n[authenticate_twitter(username=\"john\", password=\"john1234\")]\n[post_tweet(content=\"Loved my flight journey!\", tags=[\"#TravelDiaries\"]), retweet(tweet_id=123456)]\n[retweet(tweet_id=10)]\n[]",
+      "prose_v1_frozen": {
+        "name_hit": true,
+        "name": "get_flight_cost",
+        "name_pos": 1,
+        "param_keys": [
+          "travel_from",
+          "travel_to",
+          "travel_date",
+          "travel_class",
+          "access_token",
+          "card_id",
+          "booking_id",
+          "content",
+          "tweet_id",
+          "username",
+          "password"
+        ],
+        "param_hit": true,
+        "gold_no_params": false,
+        "correct": true
+      }
+    },
+    {
+      "case_no": 10,
+      "id": "multi_turn_miss_func_112",
+      "category": "multi_turn_miss_func",
+      "condition": "base",
+      "cap_tier": "default",
+      "prose": {
+        "version": 2,
+        "name_hit": true,
+        "name": "get_stock_info",
+        "name_pos": 51,
+        "missing_names": [],
+        "coverage_ok": true,
+        "param_keys": [
+          "symbol",
+          "order_id"
+        ],
+        "param_hit": true,
+        "gold_no_params": false,
+        "correct": true
+      },
+      "gold_calls": [
+        [],
+        [
+          {
+            "func": "get_available_stocks",
+            "param_keys": [
+              "sector"
+            ]
+          }
+        ],
+        [
+          {
+            "func": "get_stock_info",
+            "param_keys": [
+              "symbol"
+            ]
+          }
+        ],
+        [
+          {
+            "func": "cancel_order",
+            "param_keys": [
+              "order_id"
+            ]
+          }
+        ],
+        [
+          {
+            "func": "get_account_info",
+            "param_keys": []
+          }
+        ]
+      ],
+      "text": "[]\n[get_available_stocks(sector=\"Technology\")]\n[]\n[get_stock_info(symbol=\"NVDA\")]\n[]\n[get_order_history(), cancel_order(order_id=12345)]\n[]\n[get_account_info()]\n[]",
+      "prose_v1_frozen": {
+        "name_hit": true,
+        "name": "get_stock_info",
+        "name_pos": 51,
+        "param_keys": [
+          "symbol",
+          "order_id"
+        ],
+        "param_hit": true,
+        "gold_no_params": false,
+        "correct": true
+      }
+    },
+    {
+      "case_no": 11,
+      "id": "multi_turn_miss_param_157",
+      "category": "multi_turn_miss_param",
+      "condition": "base",
+      "cap_tier": "default",
+      "prose": {
+        "version": 2,
+        "name_hit": true,
+        "name": "list_all_airports",
+        "name_pos": 1,
+        "missing_names": [],
+        "coverage_ok": true,
+        "param_keys": [
+          "location",
+          "travel_from",
+          "travel_to",
+          "travel_date",
+          "travel_class"
+        ],
+        "param_hit": true,
+        "gold_no_params": false,
+        "correct": true
+      },
+      "gold_calls": [
+        [
+          {
+            "func": "list_all_airports",
+            "param_keys": []
+          }
+        ],
+        [
+          {
+            "func": "get_nearest_airport_by_city",
+            "param_keys": [
+              "location"
+            ]
+          }
+        ],
+        [],
+        [
+          {
+            "func": "get_flight_cost",
+            "param_keys": [
+              "travel_from",
+              "travel_to",
+              "travel_date",
+              "travel_class"
+            ]
+          }
+        ]
+      ],
+      "text": "[list_all_airports()]\n[]\n[get_nearest_airport_by_city(location=\"Crescent Hollow\")]\n[]\n[]\n[get_flight_cost(travel_from=\"CRH\", travel_to=\"Pinehaven\", travel_date=\"2026-03-03\", travel_class=\"business\")]\n[]",
+      "prose_v1_frozen": {
+        "name_hit": true,
+        "name": "list_all_airports",
+        "name_pos": 1,
+        "param_keys": [
+          "location",
+          "travel_from",
+          "travel_to",
+          "travel_date",
+          "travel_class"
+        ],
+        "param_hit": true,
+        "gold_no_params": false,
+        "correct": true
+      }
+    },
+    {
+      "case_no": 12,
+      "id": "multi_turn_miss_param_58",
+      "category": "multi_turn_miss_param",
+      "condition": "base",
+      "cap_tier": "default",
+      "prose": {
+        "version": 2,
+        "name_hit": true,
+        "name": "estimate_distance",
+        "name_pos": 1,
+        "missing_names": [],
+        "coverage_ok": true,
+        "param_keys": [
+          "cityA",
+          "cityB",
+          "city",
+          "distance",
+          "gallon",
+          "fuelAmount",
+          "ignitionMode",
+          "pedalPosition",
+          "username",
+          "password",
+          "content"
+        ],
+        "param_hit": true,
+        "gold_no_params": false,
+        "correct": true
+      },
+      "gold_calls": [
+        [],
+        [
+          {
+            "func": "get_zipcode_based_on_city",
+            "param_keys": []
+          },
+          {
+            "func": "get_zipcode_based_on_city",
+            "param_keys": []
+          },
+          {
+            "func": "estimate_distance",
+            "param_keys": [
+              "cityA",
+              "cityB"
+            ]
+          }
+        ],
+        [
+          {
+            "func": "gallon_to_liter",
+            "param_keys": [
+              "gallon"
+            ]
+          },
+          {
+            "func": "fillFuelTank",
+            "param_keys": [
+              "fuelAmount"
+            ]
+          }
+        ],
+        [
+          {
+            "func": "lockDoors",
+            "param_keys": [
+              "unlock",
+              "door"
+            ]
+          },
+          {
+            "func": "pressBrakePedal",
+            "param_keys": [
+              "pedalPosition"
+            ]
+          },
+          {
+            "func": "startEngine",
+            "param_keys": [
+              "ignitionMode"
+            ]
+          }
+        ],
+        [
+          {
+            "func": "post_tweet",
+            "param_keys": [
+              "content"
+            ]
+          }
+        ]
+      ],
+      "text": "[estimate_distance(cityA=\"10001\", cityB=\"10002\")]\n[get_zipcode_based_on_city(city=\"New York\")]\n[get_zipcode_based_on_city(city=\"Los Angeles\")]\n[estimate_distance(cityA=\"00000\", cityB=\"00000\")]\n[]\n[get_zipcode_based_on_city(city=\"Rivermist\")]\n[get_zipcode_based_on_city(city=\"San Francisco\")]\n[estimate_distance(cityA=\"83214\", cityB=\"94016\")]\n[estimate_drive_feasibility_by_mileage(distance=980.0)]\n[]\n[gallon_to_liter(gallon=30)]\n[fillFuelTank(fuelAmount=30)]\n[]\n[startEngine(ignitionMode=\"START\")]\n[lockDoors(unlock=False, door=[\"driver\", \"passenger\", \"rear_left\", \"rear_right\"])]\n[startEngine(ignitionMode=\"START\")]\n[pressBrakePedal(pedalPosition=1.0)]\n[startEngine(ignitionMode=\"START\")]\n[]\n[posting_get_login_status()], [authenticate_twitter(username=\"user123\", password=\"pass123\")], [post_tweet(content=\"Excited for the trip!\")]",
+      "prose_v1_frozen": {
+        "name_hit": true,
+        "name": "estimate_distance",
+        "name_pos": 1,
+        "param_keys": [
+          "cityA",
+          "cityB",
+          "city",
+          "distance",
+          "gallon",
+          "fuelAmount",
+          "ignitionMode",
+          "pedalPosition",
+          "username",
+          "password",
+          "content"
+        ],
+        "param_hit": true,
+        "gold_no_params": false,
+        "correct": true
+      }
+    },
+    {
+      "case_no": 13,
+      "id": "multi_turn_miss_func_120",
+      "category": "multi_turn_miss_func",
+      "condition": "snapkv",
+      "cap_tier": "1024",
+      "prose": {
+        "version": 2,
+        "name_hit": true,
+        "name": "get_stock_info",
+        "name_pos": 21,
+        "missing_names": [],
+        "coverage_ok": true,
+        "param_keys": [
+          "symbol",
+          "order_type",
+          "price",
+          "amount",
+          "order_id"
+        ],
+        "param_hit": true,
+        "gold_no_params": false,
+        "correct": true
+      },
+      "gold_calls": [
+        [
+          {
+            "func": "get_stock_info",
+            "param_keys": [
+              "symbol"
+            ]
+          },
+          {
+            "func": "place_order",
+            "param_keys": [
+              "order_type",
+              "symbol",
+              "price",
+              "amount"
+            ]
+          }
+        ],
+        [],
+        [
+          {
+            "func": "get_order_details",
+            "param_keys": [
+              "order_id"
+            ]
+          }
+        ],
+        [
+          {
+            "func": "cancel_order",
+            "param_keys": [
+              "order_id"
+            ]
+          }
+        ]
+      ],
+      "text": "[get_current_time(), get_stock_info(symbol=\"AAPL\"), place_order(order_type=\"Buy\", symbol=\"AAPL\", price=175.5, amount=100)]\n[]\n[get_stock_info(symbol=\"AAPL\"), get_order_history()]\n[]\n[get_order_details(order_id=12446)]\n[]\n[cancel_order(order_id=12446)]\n[]",
+      "prose_v1_frozen": {
+        "name_hit": true,
+        "name": "get_current_time",
+        "name_pos": 1,
+        "param_keys": [
+          "symbol",
+          "order_type",
+          "price",
+          "amount",
+          "order_id"
+        ],
+        "param_hit": true,
+        "gold_no_params": false,
+        "correct": true
+      }
+    },
+    {
+      "case_no": 14,
+      "id": "multi_turn_base_187",
+      "category": "multi_turn_base",
+      "condition": "snapkv",
+      "cap_tier": "1024",
+      "prose": {
+        "version": 2,
+        "name_hit": true,
+        "name": "purchase_insurance",
+        "name_pos": 1,
+        "missing_names": [],
+        "coverage_ok": true,
+        "param_keys": [
+          "access_token",
+          "insurance_type",
+          "insurance_cost",
+          "booking_id",
+          "card_id",
+          "insurance_id",
+          "message",
+          "username",
+          "password",
+          "title",
+          "description",
+          "priority"
+        ],
+        "param_hit": true,
+        "gold_no_params": false,
+        "correct": true
+      },
+      "gold_calls": [
+        [
+          {
+            "func": "purchase_insurance",
+            "param_keys": [
+              "access_token",
+              "insurance_type",
+              "booking_id",
+              "insurance_cost",
+              "card_id"
+            ]
+          }
+        ],
+        [
+          {
+            "func": "retrieve_invoice",
+            "param_keys": [
+              "access_token",
+              "booking_id"
+            ]
+          }
+        ],
+        [
+          {
+            "func": "contact_customer_support",
+            "param_keys": [
+              "booking_id",
+              "message"
+            ]
+          }
+        ],
+        [
+          {
+            "func": "ticket_login",
+            "param_keys": [
+              "username",
+              "password"
+            ]
+          },
+          {
+            "func": "create_ticket",
+            "param_keys": [
+              "priority",
+              "title",
+              "description"
+            ]
+          }
+        ]
+      ],
+      "text": "[purchase_insurance(access_token=\"token_abc123\", insurance_type=\"comprehensive\", insurance_cost=1500, booking_id=\"insurance_12345\", card_id=\"card_4893\")]\n[]\n[retrieve_invoice(access_token=\"token_abc123\", insurance_id=\"255316027\")]\n[]\n[contact_customer_support(booking_id=\"insurance_12345\", message=\"There are discrepancies in my travel-related costs that need to be addressed.\")])\n[ticket_login(username=\"mthompson\", password=\"SecurePass123\"), create_ticket(title=\"Discrepancy in Travel Costs\", description=\"The reply I received from customer support was less than satisfactory.\", priority=5)]\n[]",
+      "prose_v1_frozen": {
+        "name_hit": true,
+        "name": "purchase_insurance",
+        "name_pos": 1,
+        "param_keys": [
+          "access_token",
+          "insurance_type",
+          "insurance_cost",
+          "booking_id",
+          "card_id",
+          "insurance_id",
+          "message",
+          "username",
+          "password",
+          "title",
+          "description",
+          "priority"
+        ],
+        "param_hit": true,
+        "gold_no_params": false,
+        "correct": true
+      }
+    },
+    {
+      "case_no": 15,
+      "id": "multi_turn_miss_param_11",
+      "category": "multi_turn_miss_param",
+      "condition": "snapkv",
+      "cap_tier": "1024",
+      "prose": {
+        "version": 2,
+        "name_hit": true,
+        "name": "ls",
+        "name_pos": 1,
+        "missing_names": [],
+        "coverage_ok": true,
+        "param_keys": [
+          "content"
+        ],
+        "param_hit": true,
+        "gold_no_params": false,
+        "correct": true
+      },
+      "gold_calls": [
+        [],
+        [
+          {
+            "func": "ls",
+            "param_keys": [
+              "a"
+            ]
+          }
+        ],
+        [
+          {
+            "func": "post_tweet",
+            "param_keys": [
+              "content",
+              "tags"
+            ]
+          }
+        ]
+      ],
+      "text": "[ls(a=True)]\n[]\n[cd(temp), ls(a=True)]\n[]\n[post_tweet(content=\"file1.txt, file2.txt #fileshowcase\")]\n[]",
+      "prose_v1_frozen": {
+        "name_hit": true,
+        "name": "ls",
+        "name_pos": 1,
+        "param_keys": [
+          "content"
+        ],
+        "param_hit": true,
+        "gold_no_params": false,
+        "correct": true
+      }
+    },
+    {
+      "case_no": 16,
+      "id": "multi_turn_miss_param_47",
+      "category": "multi_turn_miss_param",
+      "condition": "snapkv",
+      "cap_tier": "1024",
+      "prose": {
+        "version": 2,
+        "name_hit": true,
+        "name": "find",
+        "name_pos": 1,
+        "missing_names": [],
+        "coverage_ok": true,
+        "param_keys": [
+          "path",
+          "name",
+          "file_name",
+          "mode",
+          "is",
+          "Scores",
+          "Sum",
+          "92",
+          "scores",
+          "Average"
+        ],
+        "param_hit": true,
+        "gold_no_params": false,
+        "correct": true
+      },
+      "gold_calls": [
+        [
+          {
+            "func": "find",
+            "param_keys": [
+              "path"
+            ]
+          }
+        ],
+        [
+          {
+            "func": "cat",
+            "param_keys": [
+              "file_name"
+            ]
+          },
+          {
+            "func": "mean",
+            "param_keys": [
+              "numbers"
+            ]
+          }
+        ],
+        [],
+        [
+          {
+            "func": "standard_deviation",
+            "param_keys": [
+              "numbers"
+            ]
+          }
+        ]
+      ],
+      "text": "[find(path=\".\", name=\"student_record\")]\nThe student record is named \"student_record.txt\" and located in the current directory.\n[cat(file_name=\"student_record.txt\")]\n[wc(file_name=\"student_record.txt\", mode=\"w\")]\nThe file content is: \"John: 100 Jane: 95 Alice: 85 Bob: 90 Tom: 88 Olivia: 92\".  \nThere are 12 words in total.  \n\nTo calculate the average score:  \nScores: 100, 95, 85, 90, 88, 92  \nSum = 100 + 95 + 85 + 90 + 88 + 92 = 550  \nNumber of scores = 6  \nAverage = 550 / 6 ≈ 91.67  \n\nThe average score is approximately 91.67.\nI can calculate various metrics such as mean, standard deviation, maximum, minimum, or percentage based on numerical data. Could you please specify which metric you'd like and provide the relevant data or list of numbers?\n[standard_deviation(numbers=[100, 95, 85, 90, 88, 92])]\nThe standard deviation of the scores [100, 95, 85, 90, 88, 92] is approximately 4.85.",
+      "prose_v1_frozen": {
+        "name_hit": true,
+        "name": "find",
+        "name_pos": 1,
+        "param_keys": [
+          "path",
+          "name",
+          "file_name",
+          "mode",
+          "is",
+          "Scores",
+          "Sum",
+          "92",
+          "scores",
+          "Average"
+        ],
+        "param_hit": true,
+        "gold_no_params": false,
+        "correct": true
+      }
+    },
+    {
+      "case_no": 17,
+      "id": "multi_turn_long_context_60",
+      "category": "multi_turn_long_context",
+      "condition": "snapkv",
+      "cap_tier": "128",
+      "prose": {
+        "version": 2,
+        "name_hit": true,
+        "name": "startEngine",
+        "name_pos": 30,
+        "missing_names": [],
+        "coverage_ok": true,
+        "param_keys": [
+          "ignitionMode",
+          "fuelAmount",
+          "pedalPosition",
+          "title",
+          "priority",
+          "ticket_id"
+        ],
+        "param_hit": true,
+        "gold_no_params": false,
+        "correct": true
+      },
+      "gold_calls": [
+        [
+          {
+            "func": "lockDoors",
+            "param_keys": [
+              "unlock",
+              "door"
+            ]
+          },
+          {
+            "func": "pressBrakePedal",
+            "param_keys": [
+              "pedalPosition"
+            ]
+          },
+          {
+            "func": "startEngine",
+            "param_keys": [
+              "ignitionMode"
+            ]
+          }
+        ],
+        [
+          {
+            "func": "check_tire_pressure",
+            "param_keys": []
+          }
+        ],
+        [
+          {
+            "func": "create_ticket",
+            "param_keys": [
+              "title",
+              "description",
+              "priority"
+            ]
+          }
+        ],
+        [
+          {
+            "func": "get_ticket",
+            "param_keys": [
+              "ticket_id"
+            ]
+          }
+        ],
+        [
+          {
+            "func": "close_ticket",
+            "param_keys": [
+              "ticket_id"
+            ]
+          }
+        ]
+      ],
+      "text": "[fillFuelTank(fuelAmount=50), startEngine(ignitionMode=\"START\")]\n[lockDoors(unlock=False, door=[\"driver\", \"passenger\", \"rear_left\", \"rear_right\"])]\n[fillFuelTank(fuelAmount=50), startEngine(ignitionMode=\"START\")]\n[pressBrakePedal(pedalPosition=1.0), fillFuelTank(fuelAmount=50), startEngine(ignitionMode=\"START\")]\n[]\n[check_tire_pressure()]\n[]\n[create_ticket(title=\"Tire Pressure Issue\", priority=5)]\n[]\n[get_ticket(ticket_id=2)]\n[]\n[close_ticket(ticket_id=2)]\n[]",
+      "prose_v1_frozen": {
+        "name_hit": true,
+        "name": "fillFuelTank",
+        "name_pos": 1,
+        "param_keys": [
+          "fuelAmount",
+          "ignitionMode",
+          "pedalPosition",
+          "title",
+          "priority",
+          "ticket_id"
+        ],
+        "param_hit": true,
+        "gold_no_params": false,
+        "correct": true
+      }
+    },
+    {
+      "case_no": 18,
+      "id": "multi_turn_miss_func_16",
+      "category": "multi_turn_miss_func",
+      "condition": "snapkv",
+      "cap_tier": "128",
+      "prose": {
+        "version": 2,
+        "name_hit": true,
+        "name": "cd",
+        "name_pos": 1,
+        "missing_names": [],
+        "coverage_ok": true,
+        "param_keys": [
+          "folder",
+          "file_name",
+          "source",
+          "destination",
+          "name",
+          "path",
+          "dir_name"
+        ],
+        "param_hit": true,
+        "gold_no_params": false,
+        "correct": true
+      },
+      "gold_calls": [
+        [],
+        [
+          {
+            "func": "cd",
+            "param_keys": [
+              "folder"
+            ]
+          },
+          {
+            "func": "cp",
+            "param_keys": [
+              "source",
+              "destination"
+            ]
+          },
+          {
+            "func": "cd",
+            "param_keys": [
+              "folder"
+            ]
+          },
+          {
+            "func": "mv",
+            "param_keys": [
+              "source",
+              "destination"
+            ]
+          }
+        ],
+        [
+          {
+            "func": "sort",
+            "param_keys": [
+              "file_name"
+            ]
+          }
+        ],
+        [
+          {
+            "func": "wc",
+            "param_keys": [
+              "file_name",
+              "mode"
+            ]
+          }
+        ]
+      ],
+      "text": "[cd(folder=\"research\"), ls(), touch(file_name=\"2024_research_backup.txt\"), mv(source=\"research_notes.txt\", destination=\"2024_research_backup.txt\")]\n[cd(folder=\"research\"), ls(), touch(file_name=\"2024_research_backup.txt\"), mv(source=\"research_notes.txt\", destination=\"2024_research_backup.txt\")]\n[cd(folder=\"research\"), find(name=\"research_notes.txt\"), mv(source=\"research_notes.txt\", destination=\"archives/2024_research_backup.txt\")]\n[cd(folder=\"research\"), find(path=\".\", name=\"research_notes.txt\"), mkdir(dir_name=\"archives\"), mv(source=\"research_notes.txt\", destination=\"archives/2024_research_backup.txt\")]\n[mkdir(dir_name=\"research\"), cd(folder=\"research\"), find(name=\"research_notes.txt\"), mkdir(dir_name=\"archives\"), mv(source=\"research_notes.txt\", destination=\"archives/2024_research_backup.txt\")]\n[touch(file_name=\"research_notes.txt\"), cd(folder=\"research\"), find(name=\"research_notes.txt\"), mkdir(dir_name=\"archives\"), mv(source=\"research_notes.txt\", destination=\"archives/2024_research_backup.txt\")]\n[touch(file_name=\"research_notes.txt\"), mkdir(dir_name=\"research\"), cd(folder=\"research\"), find(name=\"research_notes.txt\"), mkdir(dir_name=\"archives\"), mv(source=\"research_notes.txt\", destination=\"archives/2024_research_backup.txt\")]\n[touch(file_name=\"research_notes.txt\"), mkdir(dir_name=\"research\"), cd(folder=\"research\"), mkdir(dir_name=\"archives\"), mv(source=\"research_notes.txt\", destination=\"archives/2024_research_backup.txt\")]\n[touch(file_name=\"research_notes.txt\"), mkdir(dir_name=\"research\"), cd(folder=\"research\"), mkdir(dir_name=\"archives\"), cat(file_name=\"research_notes.txt\")]\n[touch(file_name=\"research_notes.txt\"), mkdir(dir_name=\"research\"), cd(folder=\"research\"), mkdir(dir_name=\"archives\"), cat(file_name=\"research_notes.txt\")]\n[touch(file_name=\"research_notes.txt\"), cd(folder=\"research\"), mkdir(dir_name=\"archives\"), cat(file_name=\"research_notes.txt\")]\n[touch(file_name=\"research_notes.txt\"), mkdir(dir_name=\"research\"), cd(folder=\"research\"), mkdir(dir_name=\"archives\"), cat(file_name=\"research_notes.txt\")]\n[touch(file_name=\"research_notes.txt\"), cd(folder=\"research\"), mkdir(dir_name=\"archives\"), cat(file_name=\"research_notes.txt\")]\n[touch(file_name=\"research_notes.txt\"), mkdir(dir_name=\"research\"), cd(folder=\"research\"), mkdir(dir_name=\"archives\"), cat(file_name=\"research_notes.txt\")]\n[]\n[touch(file_name=\"research_notes.txt\"), cd(folder=\"research\"), mkdir(dir_name=\"archives\"), cp(source=\"research_notes.txt\", destination=\"archives/2024_research_backup.txt\")]\n[touch(file_name=\"research_notes.txt\"), mkdir(dir_name=\"research\"), cd(folder=\"research\"), mkdir(dir_name=\"archives\"), cp(source=\"research_notes.txt\", destination=\"archives/2024_research_backup.txt\")]\n[echo(content=\"This is some research notes.\", file_name=\"research_notes.txt\"), mkdir(dir_name=\"research\"), cd(folder=\"research\"), mkdir(dir_name=\"archives\"), cp(source=\"research_notes.txt\", destination=\"archives/2024_research_backup.txt\")]\n[echo(content=\"This is some research notes.\", file_name=\"research_notes.txt\"), mkdir(dir_name=\"research\"), cd(folder=\"research\"), mkdir(dir_name=\"archives\"), cp(source=\"research_notes.txt\", destination=\"archives/2024_research_backup.txt\")]\n[echo(content=\"This is some research notes.\", file_name=\"research_notes.txt\"), cd(folder=\"research\"), mkdir(dir_name=\"archives\"), cp(source=\"research_notes.txt\", destination=\"archives/2024_research_backup.txt\")]\n[echo(content=\"This is some research notes.\", file_name=\"research_notes.txt\"), mkdir(dir_name=\"research\"), cd(folder=\"research\"), mkdir(dir_name=\"archives\"), cp(source=\"research_notes.txt\", destination=\"archives/2024_research_backup.txt\")]\n[]\n[cd(folder=\"research\"), sort(file_name=\"archives/2024_research_backup.txt\")]\n[touch(file_name=\"research_notes.txt\"), mkdir(dir_name=\"research\"), cd(folder=\"research\"), mkdir(dir_name=\"archives\"), cp(source=\"research_notes.txt\", destination=\"archives/2024_research_backup.txt\"), sort(file_name=\"archives/2024_research_backup.txt\")]\n[echo(content=\"This is some research notes.\", file_name=\"research_notes.txt\"), mkdir(dir_name=\"research\"), cd(folder=\"research\"), mkdir(dir_name=\"archives\"), cp(source=\"research_notes.txt\", destination=\"archives/2024_research_backup.txt\"), sort(file_name=\"archives/2024_research_backup.txt\")]\n[]\n[wc(file_name=\"archives/2024_research_backup.txt\", mode=\"l\")]\n[]",
+      "prose_v1_frozen": {
+        "name_hit": true,
+        "name": "cd",
+        "name_pos": 1,
+        "param_keys": [
+          "folder",
+          "file_name",
+          "source",
+          "destination",
+          "name",
+          "path",
+          "dir_name"
+        ],
+        "param_hit": true,
+        "gold_no_params": false,
+        "correct": true
+      }
+    },
+    {
+      "case_no": 19,
+      "id": "parallel_multiple_151",
+      "category": "parallel_multiple",
+      "condition": "snapkv",
+      "cap_tier": "128",
+      "prose": {
+        "version": 2,
+        "name_hit": true,
+        "name": "book_hotel",
+        "name_pos": 1,
+        "missing_names": [],
+        "coverage_ok": true,
+        "param_keys": [
+          "hotel_name",
+          "location",
+          "room_type",
+          "start_date",
+          "duration",
+          "view",
+          "amount",
+          "from_currency",
+          "to_currency",
+          "store_location",
+          "distance_in_light_years",
+          "speed_of_light"
+        ],
+        "param_hit": true,
+        "gold_no_params": false,
+        "correct": true
+      },
+      "gold_calls": [
+        {
+          "func": "book_hotel",
+          "param_keys": [
+            "hotel_name",
+            "location",
+            "room_type",
+            "start_date",
+            "stay_duration",
+            "view"
+          ]
+        },
+        {
+          "func": "latest_exchange_rate",
+          "param_keys": [
+            "amount",
+            "source_currency",
+            "target_currency"
+          ]
+        },
+        {
+          "func": "safeway.order",
+          "param_keys": [
+            "items",
+            "location",
+            "quantity"
+          ]
+        },
+        {
+          "func": "light_travel_time",
+          "param_keys": [
+            "distance_in_light_years",
+            "speed_of_light"
+          ]
+        }
+      ],
+      "text": "[book_hotel(hotel_name=\"Hotel Le Bristol Paris\", location=\"Paris, France\", room_type=\"suite\", start_date=\"2022-04-01\", duration=10, view=\"city view\"), latest_exchange_rate(amount=1000, from_currency=\"USD\", to_currency=\"EUR\"), safeway.order(store_location=\"Safeway near Paris\", items=[\"2 bottles of water\", \"3 apples\", \"1 loaf of bread\"], quantities=[2, 3, 1]), light_travel_time(distance_in_light_years=4.24, speed_of_light=2997",
+      "prose_v1_frozen": {
+        "name_hit": true,
+        "name": "book_hotel",
+        "name_pos": 1,
+        "param_keys": [
+          "hotel_name",
+          "location",
+          "room_type",
+          "start_date",
+          "duration",
+          "view",
+          "amount",
+          "from_currency",
+          "to_currency",
+          "store_location",
+          "distance_in_light_years",
+          "speed_of_light"
+        ],
+        "param_hit": true,
+        "gold_no_params": false,
+        "correct": true
+      }
+    },
+    {
+      "case_no": 20,
+      "id": "multi_turn_long_context_194",
+      "category": "multi_turn_long_context",
+      "condition": "snapkv",
+      "cap_tier": "128",
+      "prose": {
+        "version": 2,
+        "name_hit": true,
+        "name": "list_all_airports",
+        "name_pos": 1,
+        "missing_names": [],
+        "coverage_ok": true,
+        "param_keys": [
+          "travel_from",
+          "travel_to",
+          "travel_date",
+          "travel_class",
+          "access_token",
+          "card_id",
+          "insurance_type",
+          "insurance_cost",
+          "booking_id",
+          "message"
+        ],
+        "param_hit": true,
+        "gold_no_params": false,
+        "correct": true
+      },
+      "gold_calls": [
+        [
+          {
+            "func": "list_all_airports",
+            "param_keys": []
+          },
+          {
+            "func": "get_flight_cost",
+            "param_keys": [
+              "travel_from",
+              "travel_to",
+              "travel_date",
+              "travel_class"
+            ]
+          }
+        ],
+        [
+          {
+            "func": "book_flight",
+            "param_keys": [
+              "access_token",
+              "card_id",
+              "travel_date",
+              "travel_from",
+              "travel_to",
+              "travel_class"
+            ]
+          }
+        ],
+        [
+          {
+            "func": "purchase_insurance",
+            "param_keys": [
+              "access_token",
+              "insurance_type",
+              "booking_id",
+              "insurance_cost",
+              "card_id"
+            ]
+          }
+        ],
+        [
+          {
+            "func": "retrieve_invoice",
+            "param_keys": [
+              "access_token",
+              "booking_id"
+            ]
+          }
+        ],
+        [
+          {
+            "func": "contact_customer_support",
+            "param_keys": [
+              "booking_id",
+              "message"
+            ]
+          }
+        ],
+        [
+          {
+            "func": "cancel_booking",
+            "param_keys": [
+              "access_token",
+              "booking_id"
+            ]
+          }
+        ]
+      ],
+      "text": "[list_all_airports(), get_flight_cost(travel_from=\"LAX\", travel_to=\"JFK\", travel_date=\"2026-10-31\", travel_class=\"business\")]\nThe estimated total payable amount for a business class ticket from the first airport (RMS) to the last airport (SFO) on the last day of October 2026 is $1000.00.\n[book_flight(access_token=\"abc123xyz\", card_id=\"main1234\", travel_date=\"2026-10-31\", travel_from=\"RMS\", travel_to=\"SFO\", travel_class=\"business\")]\nNo available route was found for the specified airports (RMS to SFO) on the given date for a business class ticket. The booking could not be completed.\n[purchase_insurance(access_token=\"abc123xyz\", insurance_type=\"comprehensive\", insurance_cost=769.0, booking_id=\"1234\", card_id=\"main1234\")]\nThe booking was not found, so the travel insurance could not be purchased.\n[retrieve_invoice(access_token=\"abc123xyz\", booking_id=\"1234\")]\nThe booking was not found, so a detailed bill could not be retrieved.\n[contact_customer_support(booking_id=\"1234\", message=\"I have an urgent matter regarding my booking. Please assist me with the issue.\")]\nThe booking was not found, so customer support could not be contacted.\n[cancel_booking(access_token=\"abc123xyz\", booking_id=\"1234\")]\nThe booking was not found, so it could not be cancelled.",
+      "prose_v1_frozen": {
+        "name_hit": true,
+        "name": "list_all_airports",
+        "name_pos": 1,
+        "param_keys": [
+          "travel_from",
+          "travel_to",
+          "travel_date",
+          "travel_class",
+          "access_token",
+          "card_id",
+          "insurance_type",
+          "insurance_cost",
+          "booking_id",
+          "message"
+        ],
+        "param_hit": true,
+        "gold_no_params": false,
+        "correct": true
+      }
+    },
+    {
+      "case_no": 21,
+      "id": "parallel_95",
+      "category": "parallel",
+      "condition": "snapkv",
+      "cap_tier": "default",
+      "prose": {
+        "version": 2,
+        "name_hit": true,
+        "name": "calculate_magnetic_field",
+        "name_pos": 1,
+        "missing_names": [],
+        "coverage_ok": true,
+        "param_keys": [
+          "current",
+          "radius",
+          "permeability"
+        ],
+        "param_hit": true,
+        "gold_no_params": false,
+        "correct": true
+      },
+      "gold_calls": [
+        {
+          "func": "calculate_magnetic_field",
+          "param_keys": [
+            "current",
+            "permeability",
+            "radius"
+          ]
+        },
+        {
+          "func": "calculate_magnetic_field",
+          "param_keys": [
+            "current",
+            "permeability",
+            "radius"
+          ]
+        }
+      ],
+      "text": "[calculate_magnetic_field(current=10, radius=0.5, permeability=4*pi*1e-7), calculate_magnetic_field(current=15, radius=0.5, permeability=4*pi*1e-7)]",
+      "prose_v1_frozen": {
+        "name_hit": true,
+        "name": "calculate_magnetic_field",
+        "name_pos": 1,
+        "param_keys": [
+          "current",
+          "radius",
+          "permeability"
+        ],
+        "param_hit": true,
+        "gold_no_params": false,
+        "correct": true
+      }
+    },
+    {
+      "case_no": 22,
+      "id": "multi_turn_miss_param_194",
+      "category": "multi_turn_miss_param",
+      "condition": "snapkv",
+      "cap_tier": "default",
+      "prose": {
+        "version": 2,
+        "name_hit": true,
+        "name": "list_all_airports",
+        "name_pos": 1,
+        "missing_names": [],
+        "coverage_ok": true,
+        "param_keys": [
+          "travel_from",
+          "travel_to",
+          "travel_date",
+          "travel_class",
+          "insurance_cost",
+          "ID",
+          "Date",
+          "support"
+        ],
+        "param_hit": true,
+        "gold_no_params": false,
+        "correct": true
+      },
+      "gold_calls": [
+        [
+          {
+            "func": "list_all_airports",
+            "param_keys": []
+          },
+          {
+            "func": "get_flight_cost",
+            "param_keys": [
+              "travel_from",
+              "travel_to",
+              "travel_date",
+              "travel_class"
+            ]
+          }
+        ],
+        [
+          {
+            "func": "book_flight",
+            "param_keys": [
+              "access_token",
+              "card_id",
+              "travel_date",
+              "travel_from",
+              "travel_to",
+              "travel_class"
+            ]
+          }
+        ],
+        [],
+        [
+          {
+            "func": "purchase_insurance",
+            "param_keys": [
+              "access_token",
+              "insurance_type",
+              "booking_id",
+              "insurance_cost",
+              "card_id"
+            ]
+          }
+        ],
+        [
+          {
+            "func": "retrieve_invoice",
+            "param_keys": [
+              "access_token",
+              "booking_id"
+            ]
+          }
+        ],
+        [
+          {
+            "func": "contact_customer_support",
+            "param_keys": [
+              "booking_id",
+              "message"
+            ]
+          }
+        ],
+        [
+          {
+            "func": "cancel_booking",
+            "param_keys": [
+              "access_token",
+              "booking_id"
+            ]
+          }
+        ]
+      ],
+      "text": "[list_all_airports(), get_flight_cost(travel_from=\"LAX\", travel_to=\"JFK\", travel_date=\"2026-10-31\", travel_class=\"business\")]\n1200.0\n[book_flight(access_token='abc123xyz', card_id='main1234', travel_date='2026-10-31', travel_from='LAX', travel_to='JFK', travel_class='business')]\nThe flight has been successfully booked with booking ID 3426812.\n[purchase_insurance(access_token='abc123xyz', insurance_type='comprehensive', insurance_cost=120.0, booking_id='3426812', card_id='main1234')]\nThe comprehensive travel insurance policy has been successfully purchased with insurance ID 498276044.\n[purchase_insurance(access_token='abc123xyz', insurance_type='comprehensive', insurance_cost=769.0, booking_id='3426812', card_id='main1234')]\nThe comprehensive travel insurance policy with a cost of $769.0 has been successfully purchased with insurance ID 304283040.\n[retrieve_invoice(access_token='abc123xyz', booking_id='3426812')]\nThe detailed bill for the reservation is as follows:  \n- Booking ID: 3426812  \n- Travel Date: 2026-10-31  \n- Departure: LAX  \n- Destination: JFK  \n- Class: Business  \n- Travel Cost: $1200.00  \n- Transaction ID: 45451592\n[contact_customer_support(booking_id='3426812', message='I have an urgent query regarding my booking.')]\nYour message has been received by customer support: \"Thank you for contacting customer support. Your message has been received and we will get back to you shortly.\"\n[cancel_booking(access_token='abc123xyz', booking_id='3426812')]\nThe booking has been successfully cancelled, and a refund will be processed to your card.",
+      "prose_v1_frozen": {
+        "name_hit": true,
+        "name": "list_all_airports",
+        "name_pos": 1,
+        "param_keys": [
+          "travel_from",
+          "travel_to",
+          "travel_date",
+          "travel_class",
+          "insurance_cost",
+          "ID",
+          "Date",
+          "support"
+        ],
+        "param_hit": true,
+        "gold_no_params": false,
+        "correct": true
+      }
+    },
+    {
+      "case_no": 23,
+      "id": "multi_turn_miss_func_154",
+      "category": "multi_turn_miss_func",
+      "condition": "snapkv",
+      "cap_tier": "default",
+      "prose": {
+        "version": 2,
+        "name_hit": true,
+        "name": "get_flight_cost",
+        "name_pos": 462,
+        "missing_names": [],
+        "coverage_ok": true,
+        "param_keys": [
+          "travel_from",
+          "travel_to",
+          "travel_date",
+          "travel_class",
+          "access_token",
+          "budget_limit",
+          "card_id",
+          "ID",
+          "USR002",
+          "USR003",
+          "USR004"
+        ],
+        "param_hit": true,
+        "gold_no_params": false,
+        "correct": true
+      },
+      "gold_calls": [
+        [],
+        [
+          {
+            "func": "verify_traveler_information",
+            "param_keys": [
+              "first_name",
+              "last_name",
+              "date_of_birth",
+              "passport_number"
+            ]
+          }
+        ],
+        [
+          {
+            "func": "get_flight_cost",
+            "param_keys": [
+              "travel_from",
+              "travel_to",
+              "travel_date",
+              "travel_class"
+            ]
+          }
+        ],
+        [
+          {
+            "func": "set_budget_limit",
+            "param_keys": [
+              "access_token",
+              "budget_limit"
+            ]
+          }
+        ],
+        [
+          {
+            "func": "book_flight",
+            "param_keys": [
+              "access_token",
+              "card_id",
+              "travel_date",
+              "travel_from",
+              "travel_to",
+              "travel_class"
+            ]
+          }
+        ],
+        [
+          {
+            "func": "view_messages_sent",
+            "param_keys": []
+          }
+        ]
+      ],
+      "text": "None of the provided functions can be used to verify personal details or travel documents based on birthdate, passport number, or name.\n[verify_traveler_information(first_name=\"Michael\", last_name=\"Smith\", date_of_birth=\"1962-02-14\", passport_number=\"P87654321\")]\nThe verification failed because the passport must be issued by the United States. Please ensure your passport meets this requirement and try again.\n[get_nearest_airport_by_city(location=\"Chicago\"), get_flight_cost(travel_from=\"ORD\", travel_to=\"LAX\", travel_date=\"2026-08-10\", travel_class=\"economy\")]\nThe nearest airport to Chicago is ORD (O'Hare International Airport). The estimated cost for an economy-class flight from ORD to LAX on August 10th, 2026, is $180.00.\n[set_budget_limit(access_token=\"token_ABC123XYZ\", budget_limit=1500.0)]\nA budget of $1500.00 has been successfully set for your trip.\n[book_flight(access_token=\"token_ABC123XYZ\", card_id=\"card1\", travel_date=\"2026-08-10\", travel_from=\"ORD\", travel_to=\"LAX\", travel_class=\"economy\")]\nThe flight has been successfully booked! Here are the details:  \n- Booking ID: 3426812  \n- Transaction ID: 45451592  \n- Travel Date: August 10th, 2026  \n- Route: ORD to LAX  \n- Class: Economy  \nThe booking is within your budget, and payment has been processed using your saved card.\n[view_messages_sent()]\nThe recent messages sent by you include:  \n- To USR002: \"My name is Alice. I want to connect.\"  \n- To USR003: \"Could you upload the file?\"  \n- To USR004: \"Could you upload the file?\"  \n\nNo specific messages related to your trip were found in the provided data.",
+      "prose_v1_frozen": {
+        "name_hit": true,
+        "name": "get_nearest_airport_by_city",
+        "name_pos": 413,
+        "param_keys": [
+          "location",
+          "travel_from",
+          "travel_to",
+          "travel_date",
+          "travel_class",
+          "access_token",
+          "budget_limit",
+          "card_id",
+          "ID",
+          "USR002",
+          "USR003",
+          "USR004"
+        ],
+        "param_hit": true,
+        "gold_no_params": false,
+        "correct": true
+      }
+    },
+    {
+      "case_no": 24,
+      "id": "multi_turn_miss_func_120",
+      "category": "multi_turn_miss_func",
+      "condition": "snapkv",
+      "cap_tier": "default",
+      "prose": {
+        "version": 2,
+        "name_hit": true,
+        "name": "get_stock_info",
+        "name_pos": 21,
+        "missing_names": [],
+        "coverage_ok": true,
+        "param_keys": [
+          "symbol",
+          "order_type",
+          "price",
+          "amount",
+          "order_id"
+        ],
+        "param_hit": true,
+        "gold_no_params": false,
+        "correct": true
+      },
+      "gold_calls": [
+        [
+          {
+            "func": "get_stock_info",
+            "param_keys": [
+              "symbol"
+            ]
+          },
+          {
+            "func": "place_order",
+            "param_keys": [
+              "order_type",
+              "symbol",
+              "price",
+              "amount"
+            ]
+          }
+        ],
+        [],
+        [
+          {
+            "func": "get_order_details",
+            "param_keys": [
+              "order_id"
+            ]
+          }
+        ],
+        [
+          {
+            "func": "cancel_order",
+            "param_keys": [
+              "order_id"
+            ]
+          }
+        ]
+      ],
+      "text": "[get_current_time(), get_stock_info(symbol=\"AAPL\"), place_order(order_type=\"Buy\", symbol=\"AAPL\", price=175.5, amount=100)]\n[]\n[get_stock_info(symbol=\"AAPL\"), get_order_history()]\n[]\n[get_order_details(order_id=12446)]\n[]\n[cancel_order(order_id=12446)]\n[]",
+      "prose_v1_frozen": {
+        "name_hit": true,
+        "name": "get_current_time",
+        "name_pos": 1,
+        "param_keys": [
+          "symbol",
+          "order_type",
+          "price",
+          "amount",
+          "order_id"
+        ],
+        "param_hit": true,
+        "gold_no_params": false,
+        "correct": true
+      }
+    },
+    {
+      "case_no": 25,
+      "id": "multi_turn_long_context_50",
+      "category": "multi_turn_long_context",
+      "condition": "streamingllm",
+      "cap_tier": "1024",
+      "prose": {
+        "version": 2,
+        "name_hit": true,
+        "name": "lockDoors",
+        "name_pos": 1,
+        "missing_names": [],
+        "coverage_ok": true,
+        "param_keys": [
+          "mode"
+        ],
+        "param_hit": true,
+        "gold_no_params": false,
+        "correct": true
+      },
+      "gold_calls": [
+        [
+          {
+            "func": "lockDoors",
+            "param_keys": [
+              "unlock",
+              "door"
+            ]
+          },
+          {
+            "func": "setHeadlights",
+            "param_keys": [
+              "mode"
+            ]
+          }
+        ]
+      ],
+      "text": "[lockDoors(unlock=True, door=[\"driver\", \"passenger\", \"rear_left\", \"rear_right\"])]\n[setHeadlights(mode=\"on\")]",
+      "prose_v1_frozen": {
+        "name_hit": true,
+        "name": "lockDoors",
+        "name_pos": 1,
+        "param_keys": [
+          "mode"
+        ],
+        "param_hit": true,
+        "gold_no_params": false,
+        "correct": true
+      }
+    },
+    {
+      "case_no": 26,
+      "id": "multi_turn_base_16",
+      "category": "multi_turn_base",
+      "condition": "streamingllm",
+      "cap_tier": "1024",
+      "prose": {
+        "version": 2,
+        "name_hit": true,
+        "name": "cp",
+        "name_pos": 99,
+        "missing_names": [],
+        "coverage_ok": true,
+        "param_keys": [
+          "source",
+          "destination",
+          "file_name",
+          "path",
+          "mode"
+        ],
+        "param_hit": true,
+        "gold_no_params": false,
+        "correct": true
+      },
+      "gold_calls": [
+        [
+          {
+            "func": "cd",
+            "param_keys": [
+              "folder"
+            ]
+          },
+          {
+            "func": "cp",
+            "param_keys": [
+              "source",
+              "destination"
+            ]
+          },
+          {
+            "func": "cd",
+            "param_keys": [
+              "folder"
+            ]
+          },
+          {
+            "func": "mv",
+            "param_keys": [
+              "source",
+              "destination"
+            ]
+          }
+        ],
+        [
+          {
+            "func": "sort",
+            "param_keys": [
+              "file_name"
+            ]
+          }
+        ],
+        [
+          {
+            "func": "wc",
+            "param_keys": [
+              "file_name",
+              "mode"
+            ]
+          }
+        ]
+      ],
+      "text": "[pwd]()  \n[ls()]  \n[mkdir(dir_name=\"archives\")]  \n[touch(file_name=\"2024_research_backup.txt\")]  \n[cp(source=\"research_notes.txt\", destination=\"2024_research_backup.txt\")]  \n[mv(source=\"2024_research_backup.txt\", destination=\"archives/2024_research_backup.txt\")]\n[sort(file_name=\"2024_research_backup.txt\")]\n[ls()]\n[pwd()]\n[cd(path=\"research\")]  \n[ls()]\n[sort(file_name=\"2024_research_backup.txt\")]  \n[wc(file_name=\"2024_research_backup.txt\", mode=\"l\")]",
+      "prose_v1_frozen": {
+        "name_hit": true,
+        "name": "pwd",
+        "name_pos": 1,
+        "param_keys": [
+          "dir_name",
+          "file_name",
+          "source",
+          "destination",
+          "path",
+          "mode"
+        ],
+        "param_hit": true,
+        "gold_no_params": false,
+        "correct": true
+      }
+    },
+    {
+      "case_no": 27,
+      "id": "multi_turn_miss_func_112",
+      "category": "multi_turn_miss_func",
+      "condition": "streamingllm",
+      "cap_tier": "128",
+      "prose": {
+        "version": 2,
+        "name_hit": true,
+        "name": "get_stock_info",
+        "name_pos": 51,
+        "missing_names": [],
+        "coverage_ok": true,
+        "param_keys": [
+          "stock_symbol",
+          "stock",
+          "symbol",
+          "order_id"
+        ],
+        "param_hit": true,
+        "gold_no_params": false,
+        "correct": true
+      },
+      "gold_calls": [
+        [],
+        [
+          {
+            "func": "get_available_stocks",
+            "param_keys": [
+              "sector"
+            ]
+          }
+        ],
+        [
+          {
+            "func": "get_stock_info",
+            "param_keys": [
+              "symbol"
+            ]
+          }
+        ],
+        [
+          {
+            "func": "cancel_order",
+            "param_keys": [
+              "order_id"
+            ]
+          }
+        ],
+        [
+          {
+            "func": "get_account_info",
+            "param_keys": []
+          }
+        ]
+      ],
+      "text": "[]\n[get_available_stocks(sector=\"Technology\")]\n[]\n[get_stock_info(stock_symbol=\"NVDA\")]\n[get_stock_info(stock=\"NVDA\")]\n[get_stock_info(stock=\"NVDA\")]\n[get_stock_info(symbol=\"NVDA\")]\n[]\n[get_order_history(), cancel_order(order_id=\"most_recent_order_id\")]\n[get_order_history(), cancel_order(order_id=12446)]\n[]\n[get_account_details()]\n[get_account_info()]\n[]",
+      "prose_v1_frozen": {
+        "name_hit": true,
+        "name": "get_stock_info",
+        "name_pos": 51,
+        "param_keys": [
+          "stock_symbol",
+          "stock",
+          "symbol",
+          "order_id"
+        ],
+        "param_hit": true,
+        "gold_no_params": false,
+        "correct": true
+      }
+    },
+    {
+      "case_no": 28,
+      "id": "multi_turn_long_context_157",
+      "category": "multi_turn_long_context",
+      "condition": "streamingllm",
+      "cap_tier": "128",
+      "prose": {
+        "version": 2,
+        "name_hit": true,
+        "name": "list_all_airports",
+        "name_pos": 1,
+        "missing_names": [],
+        "coverage_ok": true,
+        "param_keys": [
+          "location",
+          "travel_from",
+          "travel_to",
+          "travel_date",
+          "travel_class"
+        ],
+        "param_hit": true,
+        "gold_no_params": false,
+        "correct": true
+      },
+      "gold_calls": [
+        [
+          {
+            "func": "list_all_airports",
+            "param_keys": []
+          }
+        ],
+        [
+          {
+            "func": "get_nearest_airport_by_city",
+            "param_keys": [
+              "location"
+            ]
+          }
+        ],
+        [
+          {
+            "func": "get_flight_cost",
+            "param_keys": [
+              "travel_from",
+              "travel_to",
+              "travel_date",
+              "travel_class"
+            ]
+          }
+        ]
+      ],
+      "text": "[list_all_airports]\n[get_nearest_airport_by_city, {\"location\": \"Crescent Hollow\"}]\n[get_flight_cost, {\"travel_from\": \"Crescent Hollow\", \"travel_to\": \"Pinehaven\", \"travel_date\": \"2026-03-03\", \"travel_class\": \"business\"}]",
+      "prose_v1_frozen": {
+        "name_hit": true,
+        "name": "list_all_airports",
+        "name_pos": 1,
+        "param_keys": [
+          "location",
+          "travel_from",
+          "travel_to",
+          "travel_date",
+          "travel_class"
+        ],
+        "param_hit": true,
+        "gold_no_params": false,
+        "correct": true
+      }
+    },
+    {
+      "case_no": 29,
+      "id": "multi_turn_miss_func_50",
+      "category": "multi_turn_miss_func",
+      "condition": "streamingllm",
+      "cap_tier": "default",
+      "prose": {
+        "version": 2,
+        "name_hit": true,
+        "name": "setHeadlights",
+        "name_pos": 235,
+        "missing_names": [],
+        "coverage_ok": true,
+        "param_keys": [
+          "mode",
+          "unlock"
+        ],
+        "param_hit": true,
+        "gold_no_params": false,
+        "correct": true
+      },
+      "gold_calls": [
+        [],
+        [
+          {
+            "func": "lockDoors",
+            "param_keys": [
+              "unlock",
+              "door"
+            ]
+          },
+          {
+            "func": "setHeadlights",
+            "param_keys": [
+              "mode"
+            ]
+          }
+        ]
+      ],
+      "text": "[None of the provided functions can unlock car doors. The functions available for doors are limited to locking or unlocking via a specific command, but no such function is listed. Additionally, the headlights can be toggled using the \"setHeadlights\" function.] \n\nHowever, since the user requested to switch on the headlights, here is the appropriate action:\n\n```json\n{\"setHeadlights\": {\"mode\": \"on\"}}\n```\n[{\"lockDoors\": {\"unlock\": true, \"door\": [\"driver\", \"passenger\", \"rear_left\", \"rear_right\"]}}]",
+      "prose_v1_frozen": {
+        "name_hit": true,
+        "name": "setHeadlights",
+        "name_pos": 235,
+        "param_keys": [
+          "mode",
+          "unlock"
+        ],
+        "param_hit": true,
+        "gold_no_params": false,
+        "correct": true
+      }
+    },
+    {
+      "case_no": 30,
+      "id": "multi_turn_long_context_37",
+      "category": "multi_turn_long_context",
+      "condition": "streamingllm",
+      "cap_tier": "default",
+      "prose": {
+        "version": 2,
+        "name_hit": true,
+        "name": "wc",
+        "name_pos": 86,
+        "missing_names": [],
+        "coverage_ok": true,
+        "param_keys": [
+          "file_name",
+          "mode",
+          "name",
+          "pattern",
+          "lines",
+          "string"
+        ],
+        "param_hit": true,
+        "gold_no_params": false,
+        "correct": true
+      },
+      "gold_calls": [
+        [
+          {
+            "func": "wc",
+            "param_keys": [
+              "file_name",
+              "mode"
+            ]
+          }
+        ],
+        [
+          {
+            "func": "grep",
+            "param_keys": [
+              "file_name",
+              "pattern"
+            ]
+          }
+        ],
+        [
+          {
+            "func": "touch",
+            "param_keys": [
+              "file_name"
+            ]
+          },
+          {
+            "func": "echo",
+            "param_keys": [
+              "content",
+              "file_name"
+            ]
+          }
+        ]
+      ],
+      "text": "[{\"name\":\"cd\",\"arguments\":{\"directory\":\"temp\"}},{\"name\":\"ls\",\"arguments\":{}},{\"name\":\"wc\",\"arguments\":{\"file_name\":\"$file\",\"mode\":\"l\"}}]\n[{\"name\":\"grep\",\"arguments\":{\"pattern\":\"server error\",\"file_name\":\"dev_summary.txt\"}}]\n[{\"name\":\"wc\",\"arguments\":{\"file_name\":\"dev_summary.txt\",\"mode\":\"l\"}},{\"name\":\"tail\",\"arguments\":{\"file_name\":\"dev_summary.txt\",\"lines\":2}},{\"name\":\"touch\",\"arguments\":{\"file_name\":\"$line_count.txt\"}},{\"name\":\"echo\",\"arguments\":{\"string\":\"$second_sentence\"}}]",
+      "prose_v1_frozen": {
+        "name_hit": true,
+        "name": "cd",
+        "name_pos": 10,
+        "param_keys": [
+          "directory",
+          "name",
+          "file_name",
+          "mode",
+          "pattern",
+          "lines",
+          "string"
+        ],
+        "param_hit": true,
+        "gold_no_params": false,
+        "correct": true
+      }
+    }
+  ]
+}
