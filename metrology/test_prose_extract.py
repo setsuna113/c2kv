@@ -13,7 +13,11 @@
 - build_gold_param_keys 并集语义。
 """
 
-from metrology.prose_extract import build_gold_param_keys, extract_semantic
+from metrology.prose_extract import (
+    build_gold_param_keys,
+    extract_semantic,
+    extract_semantic_v2,
+)
 
 
 def test_name_hit_with_param_hit():
@@ -154,3 +158,125 @@ def test_build_gold_param_keys_union():
 def test_build_gold_param_keys_empty():
     assert build_gold_param_keys([]) == set()
     assert build_gold_param_keys([{"f1": {}}]) == set()
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# v2（勘误修订：金标函数名词典 + 全覆盖）单元测试
+# ══════════════════════════════════════════════════════════════════════════
+
+def test_v2_terminal_gold_name_missing_incorrect():
+    # (a) 终端金标名缺失：词典 {cd, sort} 全覆盖要求，文本只调用 cd，sort 缺失
+    text = 'cd(folder="document")'
+    r = extract_semantic_v2(text, {"cd", "sort"}, {"folder"})
+    assert r["version"] == 2
+    assert r["name_hit"] is True
+    assert r["name"] == "cd"
+    assert r["missing_names"] == ["sort"]
+    assert r["coverage_ok"] is False
+    assert r["param_hit"] is True
+    assert r["correct"] is False
+
+
+def test_v2_missed_function_exempted_full_coverage_correct():
+    # (b) missed_function 豁免后剩余全覆盖：词典 = 金标名 − 豁免集 → correct
+    gold_names = {"cd", "mkdir", "sort"}
+    missed = {"sort"}
+    text = 'cd(folder="document") and mkdir(dir_name="temp")'
+    r = extract_semantic_v2(text, gold_names - missed, {"folder", "dir_name"})
+    assert r["missing_names"] == []
+    assert r["coverage_ok"] is True
+    assert r["param_hit"] is True
+    assert r["correct"] is True
+
+
+def test_v2_wrong_name_substitution_incorrect():
+    # (c) 错名替代：金标 post_tweet，文本只有 tweet / comment → incorrect
+    text = "tweet(content='hi') then comment(status='x')"
+    r = extract_semantic_v2(text, {"post_tweet"}, {"content"})
+    assert r["name_hit"] is False
+    assert r["missing_names"] == ["post_tweet"]
+    assert r["coverage_ok"] is False
+    assert r["correct"] is False
+
+
+def test_v2_class_prefixed_name_matches_plain_segment():
+    # (d) 带类前缀名：TradingBot.post_tweet 在文本里以 post_tweet(...) 出现 → 命中
+    text = 'post_tweet(content="hello")'
+    r = extract_semantic_v2(text, {"TradingBot.post_tweet"}, {"content"})
+    assert r["name_hit"] is True
+    assert r["name"] == "TradingBot.post_tweet"
+    assert r["missing_names"] == []
+    assert r["coverage_ok"] is True
+    assert r["correct"] is True
+
+
+def test_v2_class_prefixed_name_matches_full_path_in_text():
+    # (d) 文本里写全前缀路径也算命中（最后一段词边界命中 + 调用形态）
+    text = 'TradingBot.post_tweet(content="x")'
+    r = extract_semantic_v2(text, {"TradingBot.post_tweet"}, {"content"})
+    assert r["name_hit"] is True
+    assert r["name"] == "TradingBot.post_tweet"
+    assert r["coverage_ok"] is True
+    assert r["correct"] is True
+
+
+def test_v2_name_mentioned_but_not_call_form():
+    # 名字出现但无调用形态（无 ( / [ / { / :）→ 覆盖失败
+    text = "the function post_tweet is not needed here"
+    r = extract_semantic_v2(text, {"post_tweet"}, set())
+    assert r["name_hit"] is True
+    assert r["missing_names"] == ["post_tweet"]
+    assert r["coverage_ok"] is False
+    assert r["correct"] is False
+
+
+def test_v1_regression_same_input_unchanged():
+    # (e) v1 冻结回归：同输入 v1 输出与冻结版逐字一致（键序与取值全同）
+    text = 'estimate_distance(cityA="SF", cityB="Rivermist")'
+    r = extract_semantic(text, {"estimate_distance"}, {"cityA", "cityB"})
+    assert r == {
+        "name_hit": True,
+        "name": "estimate_distance",
+        "name_pos": 0,
+        "param_keys": ["cityA", "cityB"],
+        "param_hit": True,
+        "gold_no_params": False,
+        "correct": True,
+    }
+    assert "version" not in r
+
+
+def test_v1_no_coverage_requirement_regression():
+    # (e) v1 不做全覆盖：词典 {cd, sort} 只命中 cd 仍 correct（金标无参数）；
+    # 同输入 v2 判 incorrect——锁定 v1/v2 行为差异
+    text = "cd(folder='a')"
+    assert extract_semantic(text, {"cd", "sort"}, set())["correct"] is True
+    assert extract_semantic_v2(text, {"cd", "sort"}, set())["correct"] is False
+
+
+def test_v2_parallel_full_coverage_correct():
+    # (f) 非 multi_turn（parallel 类，无 missed_function）：全覆盖 → correct
+    text = 'spotify.play(artist="Taylor Swift")'
+    r = extract_semantic_v2(text, {"spotify.play"}, {"artist"})
+    assert r["missing_names"] == []
+    assert r["coverage_ok"] is True
+    assert r["param_hit"] is True
+    assert r["correct"] is True
+
+
+def test_v2_parallel_missing_one_incorrect():
+    # (f) 非 multi_turn：词典 {spotify.play, spotify.pause} 缺一名 → incorrect
+    text = 'spotify.play(artist="Taylor Swift")'
+    r = extract_semantic_v2(text, {"spotify.play", "spotify.pause"}, {"artist"})
+    assert r["missing_names"] == ["spotify.pause"]
+    assert r["coverage_ok"] is False
+    assert r["correct"] is False
+
+
+def test_v2_empty_dict_all_exempted():
+    # 词典全被豁免（空词典）：覆盖空真；金标无参数 → correct（保守口径边界）
+    r = extract_semantic_v2("anything", set(), set())
+    assert r["version"] == 2
+    assert r["coverage_ok"] is True
+    assert r["missing_names"] == []
+    assert r["correct"] is True
