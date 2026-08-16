@@ -1,0 +1,113 @@
+{
+  "task": "S3.1 R5 L1 严格主口径：48 子集与 347 子集分表（不合并）",
+  "produced_by": "agent/r5_reanalysis.py",
+  "differences_vs_r4": {
+    "protocol_validity": "r4 原口径仅按文本级 _extract_tool_name 判工具名正确；严格口径增加协议门：谓词命中 AND 存在闭合 <tool_call> 块 AND 块内 JSON 合法且含 name 键，成功须同时满足协议有效与 name==target_tool_name。",
+    "call_rate": "r4 原口径调用率读行内 has_tool_call 字段；严格口径调用率 = 协议有效率（strict valid 率）。两列均报，并附谓词命中率。",
+    "censored": "新增 censored@128 列：full 臂 completion_tokens>=128，c2kv 臂 generated_tokens>=128。",
+    "action_only": "新增 action_only 单列披露：仅命中 Action: 且文本内无 <tool_call> 标记的行（按 r5_prereg §1.1 计协议无效）。",
+    "stratification": "新增 clipped（c2kv prompt_tokens==1920）×池（doc_tokens 75327/80171）×finish（target_tool_name=='finish'）分层；池仅 2 种序列化，明写不可做池级推断。",
+    "bug_fixes": "本表未应用任何评分 bug 修正；严格解析器与评分器同源，天然消除r4 口径中解析器与主评分器矛盾的场景（r5_prereg §1.5 另表处理）。",
+    "exclusions": "0 行剔除：395 = 48（configs/r3_s1_48_qids.json）+ 347（configs/r4_qids_ext.json），双臂 qid 完全配对。",
+    "subsetting": "r4 阶段 48 子集有独立表（paired_76k_48.json），347 子集未出过配对表；本表两子集均按严格口径重算并附 r4 原口径对照。"
+  },
+  "note": "48 子集 session 数少（session 聚类 bootstrap 集群数有限），CI 解读需注明该限制；两子集行级明细见 v1_main395_strict.json 的 per_qid。",
+  "subset_48": {
+    "qid_config": "configs\\r3_s1_48_qids.json",
+    "n": 48,
+    "n_sessions": 5,
+    "composition": {
+      "n_clipped": 20,
+      "n_pool_75327": 41,
+      "n_pool_80171": 7,
+      "n_finish": 4
+    },
+    "strict_primary": {
+      "metric": "protocol_valid_task_success",
+      "n": 48,
+      "n_sessions": 5,
+      "full_acc": 0.0833,
+      "c2kv_acc": 0.0625,
+      "b_full_wins": 4,
+      "c_c2kv_wins": 3,
+      "mcnemar_exact_p": 1.0,
+      "diff_point": 0.0208,
+      "cluster_bootstrap_95ci": [
+        -0.1296,
+        0.1389
+      ]
+    },
+    "strict_call_rate": {
+      "full": 0.1667,
+      "c2kv": 0.1875
+    },
+    "r4_field_call_rate": {
+      "full": 0.5625,
+      "c2kv": 0.6875
+    },
+    "action_only_counts": {
+      "full": 0,
+      "c2kv": 7
+    },
+    "censored_at_128": {
+      "full_pct": 0.7292,
+      "c2kv_pct": 0.5625
+    },
+    "r4_original_metric": {
+      "full_acc": 0.3333,
+      "c2kv_acc": 0.2083,
+      "b_full_wins": 9,
+      "c_c2kv_wins": 3,
+      "mcnemar_exact_p": 0.145996
+    }
+  },
+  "subset_347": {
+    "qid_config": "configs\\r4_qids_ext.json",
+    "n": 347,
+    "n_sessions": 29,
+    "composition": {
+      "n_clipped": 228,
+      "n_pool_75327": 0,
+      "n_pool_80171": 347,
+      "n_finish": 75
+    },
+    "strict_primary": {
+      "metric": "protocol_valid_task_success",
+      "n": 347,
+      "n_sessions": 29,
+      "full_acc": 0.0403,
+      "c2kv_acc": 0.1441,
+      "b_full_wins": 13,
+      "c_c2kv_wins": 49,
+      "mcnemar_exact_p": 5e-06,
+      "diff_point": -0.1037,
+      "cluster_bootstrap_95ci": [
+        -0.2143,
+        -0.0028
+      ]
+    },
+    "strict_call_rate": {
+      "full": 0.1182,
+      "c2kv": 0.2421
+    },
+    "r4_field_call_rate": {
+      "full": 0.3285,
+      "c2kv": 0.7666
+    },
+    "action_only_counts": {
+      "full": 1,
+      "c2kv": 7
+    },
+    "censored_at_128": {
+      "full_pct": 0.4986,
+      "c2kv_pct": 0.562
+    },
+    "r4_original_metric": {
+      "full_acc": 0.1671,
+      "c2kv_acc": 0.3026,
+      "b_full_wins": 44,
+      "c_c2kv_wins": 91,
+      "mcnemar_exact_p": 6.4e-05
+    }
+  }
+}
