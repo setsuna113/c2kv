@@ -42,3 +42,8 @@ PR#1 四臂档案（merged_{A,B,C,D}.jsonl）实测为 history 压缩 regime：d
 ## E5. r3 归档缺 source_sha256（本包补代码断言）
 
 r3 的冻结 input_ids 归档（`t_a_prompts.jsonl` 及 48 例版）只记 n_tokens，未记 source_sha256；sha256 绑定存在于 `configs/r3_s1_48_qids.json`（source_sha256=dd31825b…，指向 `outputs_lyc/r2_bigpool/s1_full_48.jsonl`）。本轮由 `agent/r4_assert_inputs.py` 补逐 qid 机器断言（n_tokens + 源文件 sha256 + 与归档逐 token 一致）。
+
+## E6. 记录矛盾修正（report-only）
+
+1. commit 56179dd（以及同内容本地 commit 8ae75bf）的 message 中 395/34 sessions 系笔误——主分析集 395 行实际覆盖 33 个不同 session（48 集与 347 扩充集之间有 1 个 session 0c890a5dde8c_012517c3 重叠）。commit message 本身不可改，记此勘误。
+2. results/r4/analysis/paired_v4_typed_vs_random.json 的 inputs 字段键名误标：full_arm 键实际指向 typed 臂文件（outputs_lyc/r4_closure/d_typed/r4_d_typed.jsonl），c2kv_arm 键实际指向 random 臂文件（.../d_random/r4_d_random.jsonl）。该 json 属已归档物证，不改动，记此勘误。
