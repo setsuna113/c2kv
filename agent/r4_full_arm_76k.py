@@ -45,8 +45,20 @@ def _is_oom(exc: BaseException) -> bool:
 
 
 @torch.inference_mode()
-def _run_one(model: Any, tokenizer: Any, row: Dict[str, Any], chunk: int, max_new_tokens: int) -> Dict[str, Any]:
-    """One qid through the probe path. Mirrors r3_chunked_prefill_probe exactly."""
+def _run_one(
+    model: Any,
+    tokenizer: Any,
+    row: Dict[str, Any],
+    chunk: int,
+    max_new_tokens: int,
+    capture: bool = False,
+) -> Dict[str, Any]:
+    """One qid through the probe path. Mirrors r3_chunked_prefill_probe exactly.
+
+    capture=False（默认）时行为与 R4 逐字节等价；capture=True 时把 capture
+    透传给 H._generate_from_input_ids（logit 埋点，第 5 元素），并把埋点
+    dict 放进返回 dict 的 ``capture`` 键。
+    """
     ids: List[int] = list(row["input_ids"])
     n_sys = int(row["system_tokens"])
     start = time.perf_counter()
@@ -73,15 +85,22 @@ def _run_one(model: Any, tokenizer: Any, row: Dict[str, Any], chunk: int, max_ne
     mock = last_t.new_zeros((1, cache.get_seq_length()))
     input_ids = torch.cat([mock, last_t], dim=1)
     position_ids = torch.arange(prefix_len, prefix_len + 1, dtype=torch.long, device=model.device).unsqueeze(0)
-    prediction, gen_sec, gen_tokens, _ = H._generate_from_input_ids(
-        model, tokenizer, input_ids=input_ids, max_new_tokens=max_new_tokens,
-        attn_impl="eager", use_gist=False, position_ids=position_ids, past_key_values=cache,
-    )
+    if capture:
+        prediction, gen_sec, gen_tokens, _, capture_data = H._generate_from_input_ids(
+            model, tokenizer, input_ids=input_ids, max_new_tokens=max_new_tokens,
+            attn_impl="eager", use_gist=False, position_ids=position_ids, past_key_values=cache,
+            capture=True,
+        )
+    else:
+        prediction, gen_sec, gen_tokens, _ = H._generate_from_input_ids(
+            model, tokenizer, input_ids=input_ids, max_new_tokens=max_new_tokens,
+            attn_impl="eager", use_gist=False, position_ids=position_ids, past_key_values=cache,
+        )
     wall = time.perf_counter() - start
     del cache
     if hasattr(torch, "npu") and torch.npu.is_available():
         torch.npu.empty_cache()
-    return {
+    result = {
         "qid": row["qid"],
         "n_tokens": len(ids),
         "text": prediction,
@@ -93,6 +112,9 @@ def _run_one(model: Any, tokenizer: Any, row: Dict[str, Any], chunk: int, max_ne
         "chunk": chunk,
         "has_tool_call": ("<tool_call>" in prediction or "Action:" in prediction),
     }
+    if capture:
+        result["capture"] = capture_data
+    return result
 
 
 def _load_done(path: Path) -> set:

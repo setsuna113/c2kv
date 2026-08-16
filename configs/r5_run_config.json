@@ -1,0 +1,75 @@
+{
+  "description": "R5 S6.2 closeout 双臂冻结运行配置：89 冻结 qid（configs/r5_closeout_qids.json，seed=20260816）在 full / c2kv 双臂各全埋点新跑一次。零训练、纯推理；生成参数与 r4 逐项一致，与 r4 的差异仅两点：max_new_tokens 128→256、full 臂 F4 off-by-one 修复路径。本文件与 configs/r5_prereg.md §三 绑定；埋点 schema 冻结，S8 引用。",
+  "frozen_sample": {
+    "file": "configs/r5_closeout_qids.json",
+    "seed": 20260816,
+    "n_qids": 89,
+    "cells": "四格 {未截断,截断}×{75327池,80171池}，每格配额 24；75327 两格取全、80171 两格均匀随机抽样（seed=20260816），格内 finish 目标 ≤6"
+  },
+  "arms": {
+    "full": {
+      "script": "agent/r5_closeout_full.py",
+      "purpose": "修复版 full 臂（F4 off-by-one 已修：prefill 覆盖 [0, n-1)，末 token 仅由 decode handoff 编码一次）",
+      "prompts": [
+        "outputs_lyc/r3_discrimination/t_e/full_trusted/t_a_prompts.jsonl（48 集，行含 qid/input_ids/system_tokens）",
+        "outputs_lyc/r4_closure/f_ext_prompts/t_a_prompts.jsonl（ext 集，行含 qid/input_ids/system_tokens）"
+      ],
+      "targets": [
+        "outputs_lyc/r5_closeout/r4_rows/t_e_c2kv_r4.jsonl",
+        "outputs_lyc/r5_closeout/r4_rows/f_ext_c2kv.jsonl"
+      ],
+      "model": {
+        "path": "./checkpoints/qwen3-4b-agent-tooldef-npu/checkpoint-250",
+        "weights_sha256": "见 results/r5/provenance/ckpt250_sha256.txt（运行前由 manifest 补全绑定，占位）"
+      },
+      "path": "HF eager + chunked prefill chunk=512 + 单 token decode handoff；gist-class 模型对象（baseline_model_class=gist, mode=full 语义）",
+      "gen": "greedy do_sample=False、bf16、eager、enable_thinking=False、max_new_tokens=256（r4 为 128）",
+      "oom_ladder": "prefill chunk 512→256 一档（预授权）；降级行记 oom_fallback=true；连续 2 OOM 停车"
+    },
+    "c2kv": {
+      "script": "agent/r5_closeout_c2kv.py",
+      "purpose": "r3 T-E 配置原样沿用的 c2kv 臂（配置冻结）",
+      "regime": "512×160 chunk（max_doc_length=1024 × max_doc_num=96）、max_tool_definition_tokens=97000、max_prompt_tokens=1920、ratio=4、bf16、全 eager、greedy do_sample=False、enable_thinking=False、ckpt-250、max_new_tokens=256（r4 为 128）",
+      "model": {
+        "path": "./checkpoints/qwen3-4b-agent-tooldef-npu/checkpoint-250",
+        "weights_sha256": "见 results/r5/provenance/ckpt250_sha256.txt（运行前由 manifest 补全绑定，占位）"
+      },
+      "oom_policy": "512×160 配置冻结不降级：捕获 OOM 即写 {qid, skipped:true, skip_reason:oom_r5} 行并 SystemExit 停下报告"
+    }
+  },
+  "capture_schema": {
+    "note": "埋点字段清单（冻结，S8 引用；两 runner 输出逐字段与本清单一致）",
+    "full_arm_row": [
+      "qid", "n_tokens", "text", "finish_reason", "completion_tokens",
+      "prefill_sec", "generate_sec", "wall_sec", "chunk", "has_tool_call",
+      "attn_impl_runtime", "model", "runner=r5_closeout_full", "max_new_tokens=256",
+      "capture={generated_ids, steps:[{step,token_id,chosen_logprob,eos_logprob}], stop_reason(eos/length/other), stop_pos}",
+      "target", "target_tool_name", "target_tokens",
+      "strata={clipped, clipped_source, pool_doc_tokens, pool_doc_tokens_source, is_finish, is_finish_source}",
+      "seed=null（greedy 无采样种子，固定记 null）", "oom_fallback（仅降级行）"
+    ],
+    "c2kv_arm_row": [
+      "harness _generate_one 原字段（qid/session_id/mode/ratio/skipped/num_tools/doc_tokens/doc_chunks/gist_tokens/actual_compression_ratio/prompt_tokens/target_tokens/generated_tokens/latency_sec/system_prefill_sec/tool_compress_sec/full_prefill_sec/blend_sec/generate_sec/ttft_sec/tbt_sec/total_sec/target_tool_name/prediction_tool_name/tool_name_match/has_tool_call/exact_match/prediction/target）",
+      "capture={generated_ids, steps:[{step,token_id,chosen_logprob,eos_logprob}], stop_reason(eos/length/other), stop_pos}",
+      "position_offset_correction", "prompt_position_start", "prompt_position_end",
+      "runner=r5_closeout_c2kv", "max_new_tokens=256",
+      "strata={clipped, clipped_source, pool_doc_tokens, pool_doc_tokens_source, is_finish, is_finish_source}",
+      "seed=null（greedy 无采样种子，固定记 null）",
+      "oom_r5 行={qid, session_id, skipped:true, skip_reason:oom_r5, runner, max_new_tokens, strata, seed}"
+    ],
+    "strata_sources": {
+      "clipped": "full 臂=targets map 里 r4 c2kv 行 prompt_tokens==1920（注明来源，非本臂行内推导）；c2kv 臂=本行 prompt_tokens==1920（harness 输出）",
+      "pool_doc_tokens": "full 臂=targets map 里 r4 c2kv 行 doc_tokens；c2kv 臂=本行 doc_tokens（harness 输出）",
+      "is_finish": "两臂均来自 configs/r5_closeout_qids.json cell 元数据"
+    }
+  },
+  "differences_vs_r4": [
+    "1. max_new_tokens 128→256（双臂统一；其余生成参数与 r4 逐项一致）",
+    "2. full 臂走 F4 修复路径（chunked prefill 覆盖 [0, n-1)，末 token 仅 decode handoff 编码一次；r4 原跑有 off-by-one 双编码）"
+  ],
+  "env": {
+    "harness_runs": "NPU 服务器，~/envs/c2kv（torch 2.9.0+cpu、torch_npu 2.9.0rc1、transformers 5.8.0），CANN 8.5.0，source /usr/local/Ascend/ascend-toolkit/set_env.sh",
+    "device_policy": "npu-smi info 窗口门控（>=20-28 GB 空闲）再占用；精确 PID 清理",
+    "repro_note": "greedy 解码无随机性；seed 字段逐行记 null 并在此注明（冻结样本抽样 seed=20260816 在 qids 文件内，与解码无关）"
+  }
+}
