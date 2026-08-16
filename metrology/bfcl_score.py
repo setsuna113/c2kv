@@ -16,13 +16,17 @@ M1/M2/M3 统计提供逐行标记：
 - protocol_valid / n_protocol_invalid_steps / step_protocol_valid：协议面
   （操作化决定 2/3）：multi_turn 逐 step 看行内存储的 decoded_calls（列表且非空
   响应）；单轮看行内存储的 decoded_ast（非异常字符串且函数调用格式）。
-- prose：规则式散文抽取器（metrology/prose_extract.py，prereg §5 冻结规则；
-  文本源与词典/金标键按操作化决定 1/8/9/10）。
-- semantic_correct = native_valid OR prose.correct；split_row = semantic_correct
-  AND (NOT protocol_valid)（操作化决定 5）。
+- prose：规则式散文抽取器 v2（metrology/prose_extract.py extract_semantic_v2，
+  勘误修订：金标函数名词典 + 全覆盖，词典 = possible_answer gold calls 去重函数名
+  减去 missed_function 豁免集）；prose_v1_frozen 为冻结 v1 结果原样保留
+  （可用函数词典，extract_semantic）。
+- semantic_correct = native_valid OR prose(v2).correct；split_row = semantic_correct
+  AND (NOT protocol_valid)（操作化决定 5）；semantic_correct_v1 / split_row_v1 为
+  v1 参照列（同式代入 prose_v1_frozen.correct）。
 - censored：任一步 stop_reason == "length"（操作化决定 6）。
 - runner_error：行内 error 非 null → 按操作化决定 7 全判 False（native 除外，
   native 仍走原生 runner 取 verdict）。
+- summary json：除每格统计外注明 extractor version=2 与勘误（erratum）一句。
 
 原生评分的 decode_execute / decode_ast / is_empty_execute_response /
 is_function_calling_format_output / multi_turn_checker / ast_checker / 各 file
@@ -59,7 +63,11 @@ from metrology.bfcl_hf_runner import (
     _inject_bfcl_syspath,
     _patch_load_file_utf8,
 )
-from metrology.prose_extract import build_gold_param_keys, extract_semantic
+from metrology.prose_extract import (
+    build_gold_param_keys,
+    extract_semantic,
+    extract_semantic_v2,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -67,10 +75,17 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 # 的组成部分（multi_turn_utils 的 globals 键），保持一致即可。
 MODEL_NAME = "Qwen/Qwen3-4B-Instruct-2507"
 
-# scored 行 prose 子对象的键序（prose_extract.extract_semantic 返回键序）
+# scored 行 prose 子对象的键序（prose_extract.extract_semantic 返回键序，
+# prose_v1_frozen 用）
 _PROSE_KEYS = [
     "name_hit", "name", "name_pos", "param_keys", "param_hit",
     "gold_no_params", "correct",
+]
+
+# scored 行 prose 子对象的键序（prose_extract.extract_semantic_v2 返回键序）
+_PROSE_V2_KEYS = [
+    "version", "name_hit", "name", "name_pos", "missing_names", "coverage_ok",
+    "param_keys", "param_hit", "gold_no_params", "correct",
 ]
 
 # runner error 行的 prose 全 False（操作化决定 7）
@@ -78,6 +93,18 @@ _PROSE_ALL_FALSE = {
     "name_hit": False, "name": None, "name_pos": None, "param_keys": [],
     "param_hit": False, "gold_no_params": False, "correct": False,
 }
+
+# runner error 行的 prose v2 全 False（操作化决定 7）
+_PROSE_V2_ALL_FALSE = {
+    "version": 2, "name_hit": False, "name": None, "name_pos": None,
+    "missing_names": [], "coverage_ok": False, "param_keys": [],
+    "param_hit": False, "gold_no_params": False, "correct": False,
+}
+
+# summary json 的勘误注明（extractor version=2 + erratum 一句）
+_EXTRACTOR_ERRATUM = (
+    "v2: gold-name dictionary + full coverage, erratum after 17/30 review"
+)
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -308,6 +335,36 @@ def _load_data(categories: set) -> tuple[dict, dict]:
     return prompt_by_id, answer_by_id
 
 
+def _load_missed_functions(bfcl_data_dir: str, categories: set) -> dict:
+    """missed_function 豁免集（勘误修订）：读 bfcl_data_dir 下 BFCL_v4_*.json
+    原始 prompt 文件（不经过 load_dataset_entry，避开 populate 对
+    missed_function 字段的原地改写）。
+
+    missed_function = {轮次字符串: [函数名]}，拉平为集合；无该字段的样本
+    （非 multi_turn 类）豁免集为空。返回 {id: 豁免函数名集合}。"""
+    missed: dict = {}
+    for cat in sorted(categories):
+        p = Path(bfcl_data_dir) / f"BFCL_v4_{cat}.json"
+        if not p.exists():
+            continue
+        with open(p, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                row = json.loads(line)
+                mf = row.get("missed_function") or {}
+                if not mf:
+                    continue
+                names: set = set()
+                for values in mf.values():
+                    if isinstance(values, list):
+                        names.update(str(v) for v in values)
+                if names:
+                    missed[str(row["id"])] = names
+    return missed
+
+
 def _call_str_param_keys(call_str: str) -> set:
     r"""从 multi_turn 金标调用串（python 语法，如
     "estimate_distance(cityA='94016', cityB='83214')"）取最外层调用的关键字参数
@@ -331,8 +388,43 @@ def _multi_turn_gold_param_keys(ground_truth: list) -> set:
     return keys
 
 
-def _entry_context(prompt_entry: dict, answer_item: dict) -> dict:
-    """每样本一次性算好：is_multi、函数名词典（决策 9）、金标参数键集合（决策 8）。
+def _call_str_name(call_str: str) -> str | None:
+    """multi_turn 金标调用串 → 最外层调用函数名（含类前缀完整路径，如
+    "TradingBot.post_tweet"）。解析失败退化正则（金标串应为良构 python）。"""
+    try:
+        node = py_ast.parse(call_str, mode="eval").body
+        if isinstance(node, py_ast.Call):
+            return py_ast.unparse(node.func)
+    except Exception:  # noqa: BLE001 金标串理论上恒可解析，兜底仅作防御
+        pass
+    m = re.match(r"\s*([\w.]+)\s*\(", call_str)
+    return m.group(1) if m else None
+
+
+def _gold_names(ground_truth: list, is_multi: bool) -> set:
+    """金标函数名集合（v2 词典来源，与 v1 参数键同源 possible_answer）：
+    multi_turn 各轮 gold 调用串去重函数名（含类前缀）；单轮类取 gold call 的
+    键名。"""
+    names: set = set()
+    if is_multi:
+        for turn_calls in ground_truth:
+            for call_str in turn_calls:
+                name = _call_str_name(str(call_str))
+                if name:
+                    names.add(name)
+    else:
+        for call in ground_truth:
+            for fname in call.keys():
+                if fname:
+                    names.add(fname)
+    return names
+
+
+def _entry_context(prompt_entry: dict, answer_item: dict,
+                   missed_names: set) -> dict:
+    """每样本一次性算好：is_multi、v1 函数名词典（决策 9）、v2 金标函数名词典
+    （勘误修订：possible_answer gold calls 去重函数名 − missed_function 豁免集）、
+    金标参数键集合（决策 8）。
 
     multi_turn 词典：load_dataset_entry 内部已应用
     populate_test_cases_with_predefined_functions（utils.py:437，与推理期注入同一
@@ -347,9 +439,11 @@ def _entry_context(prompt_entry: dict, answer_item: dict) -> dict:
         gold_param_keys = _multi_turn_gold_param_keys(answer_item["ground_truth"])
     else:
         gold_param_keys = build_gold_param_keys(answer_item["ground_truth"])
+    v2_name_dict = _gold_names(answer_item["ground_truth"], is_multi) - missed_names
     return {
         "is_multi": is_multi,
         "name_dict": name_dict,
+        "v2_name_dict": v2_name_dict,
         "gold_param_keys": gold_param_keys,
         "ground_truth": answer_item["ground_truth"],
     }
@@ -453,16 +547,25 @@ def _protocol(row: dict, is_multi: bool) -> tuple[bool, int, list]:
     return all(step_valid), n_invalid, step_valid
 
 
-def _prose(row: dict, is_multi: bool, name_dict: set, gold_param_keys: set) -> dict:
-    """散文抽取（操作化决定 1）：multi_turn 文本 = 所有 step 的 parsed_text 按序
+def _prose_text(row: dict, is_multi: bool) -> str:
+    """散文文本（操作化决定 1）：multi_turn = 所有 step 的 parsed_text 按序
     "\n" 拼接；单轮 = 唯一 step 的 parsed_text。"""
     if is_multi:
-        text = "\n".join(
+        return "\n".join(
             s["parsed_text"] for t in row["turns"] for s in t["steps"]
         )
-    else:
-        text = row["turns"][0]["steps"][0]["parsed_text"]
-    return extract_semantic(text, name_dict, gold_param_keys)
+    return row["turns"][0]["steps"][0]["parsed_text"]
+
+
+def _prose_pair(row: dict, is_multi: bool, ctx: dict) -> tuple[dict, dict]:
+    """散文抽取双轨：返回 (v1 冻结结果, v2 结果)。
+
+    v1 词典 = 可用函数集合（冻结参照）；v2 词典 = 金标函数名集合（豁免后）。
+    两者共用同一文本与金标参数键集合。"""
+    text = _prose_text(row, is_multi)
+    v1 = extract_semantic(text, ctx["name_dict"], ctx["gold_param_keys"])
+    v2 = extract_semantic_v2(text, ctx["v2_name_dict"], ctx["gold_param_keys"])
+    return v1, v2
 
 
 def _cleanup_multi_turn_instances(model_name_underline: str, entry_id: str):
@@ -483,7 +586,8 @@ def _cleanup_multi_turn_instances(model_name_underline: str, entry_id: str):
 
 
 def _score_row(row: dict, prompt_by_id: dict, answer_by_id: dict,
-               ctx_cache: dict, native_verdict: tuple) -> dict:
+               ctx_cache: dict, native_verdict: tuple,
+               missed_by_id: dict) -> dict:
     """把一行推理结果评成一行 scored 记录（键序按任务书）。
 
     native_valid / native_error_type 取原生 file runner 的逐行 verdict（按
@@ -507,9 +611,12 @@ def _score_row(row: dict, prompt_by_id: dict, answer_by_id: dict,
             "protocol_valid": False,
             "n_protocol_invalid_steps": 0,
             "step_protocol_valid": [],
-            "prose": dict(_PROSE_ALL_FALSE),
+            "prose": dict(_PROSE_V2_ALL_FALSE),
+            "prose_v1_frozen": dict(_PROSE_ALL_FALSE),
             "semantic_correct": False,
+            "semantic_correct_v1": False,
             "split_row": False,
+            "split_row_v1": False,
             "censored": False,
             "runner_error": True,
         }
@@ -518,7 +625,11 @@ def _score_row(row: dict, prompt_by_id: dict, answer_by_id: dict,
     if entry_id not in ctx_cache:
         prompt_entry = prompt_by_id[entry_id]
         answer_item = answer_by_id[entry_id]
-        ctx_cache[entry_id] = (prompt_entry, _entry_context(prompt_entry, answer_item))
+        ctx_cache[entry_id] = (
+            prompt_entry,
+            _entry_context(prompt_entry, answer_item,
+                           missed_by_id.get(entry_id, set())),
+        )
     prompt_entry, ctx = ctx_cache[entry_id]
     is_multi = ctx["is_multi"]
 
@@ -532,10 +643,12 @@ def _score_row(row: dict, prompt_by_id: dict, answer_by_id: dict,
     protocol_valid, n_protocol_invalid_steps, step_protocol_valid = _protocol(
         row, is_multi
     )
-    prose = _prose(row, is_multi, ctx["name_dict"], ctx["gold_param_keys"])
+    prose_v1, prose_v2 = _prose_pair(row, is_multi, ctx)
 
-    semantic_correct = bool(native_valid or prose["correct"])
+    semantic_correct = bool(native_valid or prose_v2["correct"])
+    semantic_correct_v1 = bool(native_valid or prose_v1["correct"])
     split_row = bool(semantic_correct and not protocol_valid)
+    split_row_v1 = bool(semantic_correct_v1 and not protocol_valid)
 
     return {
         "id": entry_id,
@@ -549,9 +662,12 @@ def _score_row(row: dict, prompt_by_id: dict, answer_by_id: dict,
         "protocol_valid": bool(protocol_valid),
         "n_protocol_invalid_steps": int(n_protocol_invalid_steps),
         "step_protocol_valid": step_protocol_valid,
-        "prose": {k: prose[k] for k in _PROSE_KEYS},
+        "prose": {k: prose_v2[k] for k in _PROSE_V2_KEYS},
+        "prose_v1_frozen": {k: prose_v1[k] for k in _PROSE_KEYS},
         "semantic_correct": semantic_correct,
+        "semantic_correct_v1": semantic_correct_v1,
         "split_row": split_row,
+        "split_row_v1": split_row_v1,
         "censored": censored,
         "runner_error": False,
     }
@@ -629,9 +745,14 @@ def _write_summary_out(summary: dict, summary_out: Path):
     nested: dict = {}
     for (condition, cap_tier), cell in summary.items():
         nested.setdefault(condition, {})[cap_tier] = cell
+    payload = {
+        "extractor_version": 2,
+        "erratum": _EXTRACTOR_ERRATUM,
+    }
+    payload.update(nested)
     summary_out.parent.mkdir(parents=True, exist_ok=True)
     with open(summary_out, "w", encoding="utf-8") as f:
-        json.dump(nested, f, ensure_ascii=False, indent=2)
+        json.dump(payload, f, ensure_ascii=False, indent=2)
 
 
 def run(args):
@@ -648,6 +769,8 @@ def run(args):
 
     categories = {row["category"] for row, _ in rows if row.get("category")}
     prompt_by_id, answer_by_id = _load_data(categories)
+    missed_by_id = _load_missed_functions(args.bfcl_data_dir, categories)
+    print(f"[data] missed_function 豁免集: {len(missed_by_id)} 个样本")
     missing_prompt = {r["id"] for r, _ in rows if r["id"] not in prompt_by_id}
     missing_answer = {r["id"] for r, _ in rows if r["id"] not in answer_by_id}
     if missing_prompt:
@@ -686,7 +809,7 @@ def run(args):
     for row, src in rows:
         key = (str(row.get("condition")), str(row.get("cap_tier")), row["category"])
         scored = _score_row(row, prompt_by_id, answer_by_id, ctx_cache,
-                            verdicts[key][row["id"]])
+                            verdicts[key][row["id"]], missed_by_id)
         scored_rows.append(scored)
         print(
             f"[score] {src} {row['id']} condition={row.get('condition')} "

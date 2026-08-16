@@ -9,9 +9,11 @@ seed = 20260816。分配规则（任务书冻结）：
 - 总体不足 30 时全取并如实报 n。
 
 输出 --out review_packet.json：每例 {case_no, id, category, condition, cap_tier,
-prose, gold_calls, text}。
+prose, prose_v1_frozen（行内存在时）, gold_calls, text}。
 
-- prose：scored 行内 prose 子对象（名字/参数键/命中细节）；
+- prose：scored 行内 prose 子对象（v2：金标函数名词典 + 全覆盖判定细节）；
+- prose_v1_frozen：若 scored 行内存在该参照字段则一并放入 case（键名
+  prose_v1_frozen）；
 - text：从 --runs_dir 原始行重建（与 chunk A 同规则：multi_turn 拼接全部 step 的
   parsed_text（"\\n" 连接），单轮取 parsed_text）；--runs_dir 缺省或取不到时记
   MISSING-TEXT（抽样仍可做）；
@@ -243,7 +245,7 @@ def select_cases(scored_rows: list, runs_rows: dict = None,
             gold = "MISSING-GOLD"
             if gold_by_id is not None and entry_id in gold_by_id:
                 gold = gold_by_id[entry_id]
-            cases.append({
+            case = {
                 "case_no": len(cases) + 1,
                 "id": entry_id,
                 "category": r.get("category"),
@@ -252,7 +254,10 @@ def select_cases(scored_rows: list, runs_rows: dict = None,
                 "prose": r.get("prose") or {},
                 "gold_calls": gold,
                 "text": text,
-            })
+            }
+            if "prose_v1_frozen" in r:
+                case["prose_v1_frozen"] = r.get("prose_v1_frozen") or {}
+            cases.append(case)
 
     return {
         "seed": seed,
