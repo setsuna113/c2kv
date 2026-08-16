@@ -26,6 +26,8 @@ NPU 服务器上 user 副本 `kvoffload-sglang-c2kv/python/sglang/srt/mem_cache/
 
 ## 并发投影（不同 prompt，pool 条目不共享）
 
+本表投影基于『不同 prompt、pool 条目不共享』假设。
+
 | 并发 | pool 侧驻留 | 请求侧驻留 | 合计双份驻留 |
 |---:|---:|---:|---:|
 | 1 | 2.61 GiB | 2.61 GiB | 5.22 GiB |
@@ -33,6 +35,8 @@ NPU 服务器上 user 副本 `kvoffload-sglang-c2kv/python/sglang/srt/mem_cache/
 | 4 | 10.45 GiB | 10.45 GiB | 20.89 GiB |
 | 8 | 20.89 GiB | 20.89 GiB | 41.78 GiB |
 
-参照系：910B3 单卡 64 GB HBM，模型权重 ~8 GB（bf16 4B 参数），`--mem-fraction-static 0.7` → KV 池预算 ~44.8 GB。8 并发时仅注入双份驻留就达 ~41.8 GiB，逼近池预算上限——**注入路径的双份驻留是 76k 体制下并发扩展的一阶约束**。76k 不压缩 full 臂的单请求 KV（82k token）为 82k×36×4096 B ≈ 11.3 GiB 作对照。
+本评测（R4 76k 体制）实际情形为 8 并发共享同一工具池，正确投影 = 1×2.61 GiB（共享 pool 侧驻留）+ 8×2.61 GiB（请求侧驻留）≈ 23.5 GiB（而非表内假设下的 41.78 GiB）。
+
+参照系：910B3 单卡 64 GB HBM，模型权重 ~8 GB（bf16 4B 参数），`--mem-fraction-static 0.7` → KV 池预算 ~44.8 GB。8 并发时仅注入双份驻留就达 ~41.8 GiB（不共享假设下；共享单池情形 ≈23.5 GiB，见上段），逼近池预算上限——**注入路径的双份驻留是 76k 体制下并发扩展的一阶约束**。76k 不压缩 full 臂的单请求 KV（82k token）为 82k×36×4096 B ≈ 11.3 GiB 作对照。
 
 纯记录，未启动 sglang；数字为解析式计算，来源如上。
