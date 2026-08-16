@@ -36,9 +36,14 @@ ROW_KEYS = [
     "id", "category", "condition", "cap_tier", "n_turns", "n_steps",
     "native_valid", "native_error_type", "protocol_valid",
     "n_protocol_invalid_steps", "step_protocol_valid", "prose",
-    "semantic_correct", "split_row", "censored", "runner_error",
+    "prose_v1_frozen", "semantic_correct", "semantic_correct_v1",
+    "split_row", "split_row_v1", "censored", "runner_error",
 ]
-PROSE_KEYS = [
+PROSE_V2_KEYS = [
+    "version", "name_hit", "name", "name_pos", "missing_names", "coverage_ok",
+    "param_keys", "param_hit", "gold_no_params", "correct",
+]
+PROSE_V1_KEYS = [
     "name_hit", "name", "name_pos", "param_keys", "param_hit",
     "gold_no_params", "correct",
 ]
@@ -123,22 +128,41 @@ def test_cli_scoring_on_unique_cells(tmp_path):
             1 for x in r["step_protocol_valid"] if not x
         )
         prose = r["prose"]
-        assert list(prose.keys()) == PROSE_KEYS
+        assert list(prose.keys()) == PROSE_V2_KEYS
+        assert prose["version"] == 2
         assert isinstance(prose["name_hit"], bool)
         assert prose["name"] is None or isinstance(prose["name"], str)
         assert prose["name_pos"] is None or isinstance(prose["name_pos"], int)
+        assert isinstance(prose["missing_names"], list)
+        assert all(isinstance(k, str) for k in prose["missing_names"])
+        assert isinstance(prose["coverage_ok"], bool)
         assert isinstance(prose["param_keys"], list)
         assert all(isinstance(k, str) for k in prose["param_keys"])
         assert isinstance(prose["param_hit"], bool)
         assert isinstance(prose["gold_no_params"], bool)
         assert isinstance(prose["correct"], bool)
+        assert prose["coverage_ok"] == (len(prose["missing_names"]) == 0)
+        prose_v1 = r["prose_v1_frozen"]
+        assert list(prose_v1.keys()) == PROSE_V1_KEYS
+        assert isinstance(prose_v1["name_hit"], bool)
+        assert prose_v1["name"] is None or isinstance(prose_v1["name"], str)
+        assert prose_v1["name_pos"] is None or isinstance(prose_v1["name_pos"], int)
+        assert isinstance(prose_v1["param_keys"], list)
+        assert all(isinstance(k, str) for k in prose_v1["param_keys"])
+        assert isinstance(prose_v1["param_hit"], bool)
+        assert isinstance(prose_v1["gold_no_params"], bool)
+        assert isinstance(prose_v1["correct"], bool)
         assert isinstance(r["semantic_correct"], bool)
+        assert isinstance(r["semantic_correct_v1"], bool)
         assert isinstance(r["split_row"], bool)
+        assert isinstance(r["split_row_v1"], bool)
         assert isinstance(r["censored"], bool) and isinstance(r["runner_error"], bool)
         assert r["runner_error"] is False
-        # 派生关系（决策 5）与输出内部一致性
+        # 派生关系（决策 5 + v2 勘误参照列）与输出内部一致性
         assert r["semantic_correct"] == (r["native_valid"] or prose["correct"])
+        assert r["semantic_correct_v1"] == (r["native_valid"] or prose_v1["correct"])
         assert r["split_row"] == (r["semantic_correct"] and not r["protocol_valid"])
+        assert r["split_row_v1"] == (r["semantic_correct_v1"] and not r["protocol_valid"])
         assert r["protocol_valid"] == all(r["step_protocol_valid"])
         # 放宽断言（操作化修订）：不要求 protocol_valid 全 True、也不与行内存储
         # 重算值精确比对；只要求 step_protocol_valid 长度 == n_steps 且类型正确。
@@ -163,10 +187,17 @@ def test_cli_scoring_on_unique_cells(tmp_path):
     dcs = [s["decoded_calls"] for t in row["turns"] for s in t["steps"]]
     assert all(isinstance(x, str) for x in dcs) and len(dcs) == 4
 
-    # summary_out：3 个 condition × cap_tier=128 各一格
+    # summary_out：extractor version=2 + erratum 注记，3 个 condition × cap_tier=128
     summary = json.loads(summary_out.read_text(encoding="utf-8"))
-    assert set(summary.keys()) == {"base", "snapkv", "streamingllm"}
-    for cond, cells in summary.items():
+    assert summary["extractor_version"] == 2
+    assert summary["erratum"] == (
+        "v2: gold-name dictionary + full coverage, erratum after 17/30 review"
+    )
+    assert set(summary.keys()) == {
+        "extractor_version", "erratum", "base", "snapkv", "streamingllm",
+    }
+    for cond in ("base", "snapkv", "streamingllm"):
+        cells = summary[cond]
         assert set(cells.keys()) == {"128"}
         cell = cells["128"]
         assert cell["n"] == 1
