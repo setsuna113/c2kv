@@ -54,9 +54,15 @@ def _run_one(model: Any, tokenizer: Any, row: Dict[str, Any], chunk: int, max_ne
     cache, prefix_len, sys_sec = H._prefill_system(model, system_t, "eager")
     past_sec = sys_sec
     rest = ids[n_sys:]
-    # Chunk-prefill everything except the final token (see probe comments).
+    # Chunk-prefill the tokens strictly before the final token, i.e.
+    # rest[0 : len(rest)-1] (positions [0, n-1) of the full prompt). Each
+    # piece is clipped to end one short of the prompt so the final token is
+    # encoded exactly once, by the decode handoff below (F4 off-by-one fix:
+    # the old slice could reach len(rest) and double-encode the last token).
     for st in range(0, len(rest) - 1, chunk):
-        piece = rest[st : st + chunk]
+        piece = rest[st : min(st + chunk, len(rest) - 1)]
+        if not piece:
+            break
         piece_t = torch.tensor([piece], dtype=torch.long, device=model.device)
         cache, _, elapsed = H._prefill_tokens_with_cache(
             model, piece_t, past_key_values=cache, past_length=prefix_len, attn_impl="eager"
