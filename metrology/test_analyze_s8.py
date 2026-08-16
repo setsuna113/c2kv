@@ -310,6 +310,29 @@ def test_m3_c2kv_descriptive_paired_rows():
     assert c2["tax_full_minus_c2kv"]["protocol"]["sign"] == "+"
 
 
+def test_m3_c2kv_pairs_on_qid_real_schema():
+    """真实 closeout scored 行主键是 qid（无 id 字段）；配对须落到 qid 上，
+    否则全行塌缩成单个 "None" 键（本次实跑 n_pairs=1/89 的 bug）。"""
+    def row(qid, primary_success, semantic_correct):
+        return {"qid": qid,
+                "scoring": {"protocol_valid": True,
+                            "semantic_correct": semantic_correct,
+                            "primary_success": primary_success,
+                            "censored_at_cap": False},
+                "strata": {"clipped": False, "pool_doc_tokens": 80171,
+                           "is_finish": False}}
+
+    full = [row(f"q{i:02d}", i < 6, i < 5) for i in range(10)]
+    c2kv = [row(f"q{i:02d}", i < 4, i < 3) for i in range(10)]
+    m3 = a8.compute_m3([], _m3_sample(), closeout_full=full, closeout_c2kv=c2kv)
+    c2 = m3["c2kv"]
+    assert c2["n_pairs"] == 10
+    assert c2["full"]["acc_protocol"] == pytest.approx(0.6)
+    assert c2["c2kv"]["acc_protocol"] == pytest.approx(0.4)
+    assert c2["tax_full_minus_c2kv"]["protocol"]["value"] == pytest.approx(0.2)
+    assert c2["tax_full_minus_c2kv"]["semantic"]["sign"] == "+"
+
+
 def test_m3_c2kv_missing_path():
     sample = _m3_sample()
     m3 = a8.compute_m3([], sample)

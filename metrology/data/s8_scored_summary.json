@@ -1,0 +1,71 @@
+{
+  "base": {
+    "1024": {
+      "n": 360,
+      "native_valid_n": 147,
+      "protocol_invalid_n": 228,
+      "split_n": 193,
+      "censored_n": 0
+    },
+    "128": {
+      "n": 360,
+      "native_valid_n": 145,
+      "protocol_invalid_n": 230,
+      "split_n": 197,
+      "censored_n": 8
+    },
+    "default": {
+      "n": 360,
+      "native_valid_n": 147,
+      "protocol_invalid_n": 228,
+      "split_n": 193,
+      "censored_n": 0
+    }
+  },
+  "snapkv": {
+    "1024": {
+      "n": 360,
+      "native_valid_n": 104,
+      "protocol_invalid_n": 229,
+      "split_n": 193,
+      "censored_n": 0
+    },
+    "128": {
+      "n": 360,
+      "native_valid_n": 104,
+      "protocol_invalid_n": 232,
+      "split_n": 200,
+      "censored_n": 11
+    },
+    "default": {
+      "n": 360,
+      "native_valid_n": 104,
+      "protocol_invalid_n": 229,
+      "split_n": 193,
+      "censored_n": 0
+    }
+  },
+  "streamingllm": {
+    "1024": {
+      "n": 360,
+      "native_valid_n": 38,
+      "protocol_invalid_n": 296,
+      "split_n": 199,
+      "censored_n": 4
+    },
+    "128": {
+      "n": 360,
+      "native_valid_n": 37,
+      "protocol_invalid_n": 297,
+      "split_n": 199,
+      "censored_n": 35
+    },
+    "default": {
+      "n": 360,
+      "native_valid_n": 38,
+      "protocol_invalid_n": 296,
+      "split_n": 198,
+      "censored_n": 2
+    }
+  }
+}
