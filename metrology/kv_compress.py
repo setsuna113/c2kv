@@ -26,9 +26,13 @@ past_key_values 做位置子集裁切，再进 decode。
 对照表
 ──────────────────────────────────────────────────────────────
 1) 注意力来源：官方 SnapKV 在 prefill 当层重算观察窗 QK（snapkv_utils.py:45-54，
-   window×window 补因果 mask）；本实现直接用同一 prefill 的 output_attentions 概率
-   （eager 前向已做因果 softmax）。两者数学等价（官方 softmax 走 fp32 后回 cast；
-   本实现取 eager 返回的 bf16 概率，仅末位精度差）。
+   window×window 补因果 mask）；本实现的 snapkv_select 消费 eager softmax 概率的
+   观察窗行（attentions 张量形态 (1,H,W,L)，W=全量 prefill 时为 L、double-pass
+   时为 obs_window，行级独立故两者对应行数学等价）。runner 侧采用 double-pass
+   获取（全量 prefill 不物化注意力 + 末 obs_window token 携 cache 二次前向切片，
+   见 bfcl_hf_runner._hf_generate_compressed docstring；L≈9.4k 时全量物化
+   (1,32,L,L) fp32 × 36 层超 64GB HBM）。官方 softmax 走 fp32 后回 cast；本实现
+   取 eager 返回的 bf16 概率，仅末位精度差。
 2) 平滑：官方代码默认 avgpool（snapkv_utils.py:24,56-57），论文与本次任务口径
    maxpool；本实现固定 maxpool（kernel 需为奇数以保持序列长度）。
 3) GQA：官方在 repeat_kv 之后的 per-query-head 上独立 topk，压缩后的重复 KV 直接
@@ -87,7 +91,8 @@ def snapkv_select(
 ) -> List[List[List[int]]]:
     """按官方 SnapKV 规则为每层每 kv head 选出保留位置。
 
-    attentions_per_layer: 每层 prefill 注意力概率张量（(1, H, L, L)，batch=1）。
+    attentions_per_layer: 每层注意力概率张量（(1, H, W, L)，batch=1；W=L 为全量
+    prefill 行，W=obs_window 为 double-pass 观察窗行，两者对应行数学等价）。
     步骤与官方 snapkv_utils.py:55-69 对齐：观察窗注意力列和（:55）→ 1D maxpool 平滑
     （:59，官方 maxpool 分支；本实现固定 maxpool）→ topk 前缀位置（:62）→ 保留观察
     窗全量（:66-69）。GQA 时先按 kv head 组内列和合并再 topk（对照表第 3 条偏差）。
@@ -124,8 +129,8 @@ def snapkv_select(
     prefix_len = prompt_len - obs_window
     out = []
     for attn in attentions_per_layer:
-        _check_attn_tensor(attn, prompt_len)
-        a = attn[0]  # (H, L, L)
+        _check_attn_tensor(attn, prompt_len, obs_window)
+        a = attn[0]  # (H, W, L)，W ∈ [obs_window, L]（全量行或观察窗行）
         n_kv_heads = _n_kv_heads(attn, groups)
         if n_keep_prefix <= 0:
             # budget <= obs_window：仅保留末尾 budget 位（前缀 topk 无意义）
@@ -331,12 +336,17 @@ def _select_seq(x: torch.Tensor, sel) -> torch.Tensor:
     return torch.stack(pieces, dim=seq_dim - 1)
 
 
-def _check_attn_tensor(attn: torch.Tensor, prompt_len: int):
+def _check_attn_tensor(attn: torch.Tensor, prompt_len: int, obs_window: int):
     if attn.dim() != 4 or attn.shape[0] != 1:
-        raise ValueError(f"注意力张量须为 (1, H, L, L)，got shape={tuple(attn.shape)}")
-    if attn.shape[-1] != prompt_len or attn.shape[-2] != prompt_len:
+        raise ValueError(f"注意力张量须为 (1, H, W, L)，got shape={tuple(attn.shape)}")
+    if attn.shape[-1] != prompt_len:
         raise ValueError(
-            f"注意力张量序列维 {attn.shape[-1]} != prompt_len {prompt_len}"
+            f"注意力张量键维 {attn.shape[-1]} != prompt_len {prompt_len}"
+        )
+    if not (obs_window <= attn.shape[-2] <= prompt_len):
+        raise ValueError(
+            f"注意力张量查询维 {attn.shape[-2]} 须在 [{obs_window}, {prompt_len}] "
+            "（全量 prefill 行或观察窗行）"
         )
 
 

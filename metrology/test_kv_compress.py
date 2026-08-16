@@ -555,6 +555,51 @@ def test_micro_model_eos_stop():
     assert got2 == gen_list
 
 
+def test_micro_model_double_pass_attention_matches_full():
+    """double-pass 注意力获取（runner 侧路线，S8.3 起）：末 obs_window 个 token 携
+    cache 二次前向（output_attentions=True + 4D 因果加性 mask 掩掉未来 prompt 键
+    与重复列）切出原 prompt 键列，与全量 prefill 物化注意力的对应观察窗行数值一致；
+    两种来源喂 snapkv_select 选择集一致；二次前向追加进 cache 的 obs 个位置可裁回
+    [0, L)。无 mask 时观察窗查询会看到「未来」prompt 键（softmax 分母膨胀），本测试
+    的逐值断言正是针对该陷阱。"""
+    model = _tiny_qwen3()
+    torch.manual_seed(SEED)
+    ids = torch.randint(0, 1000, (1, 40))
+    L, obs = 40, 16
+    with torch.no_grad():
+        full_out = model(input_ids=ids, use_cache=True, output_attentions=True,
+                         return_dict=True)
+        pre = model(input_ids=ids, use_cache=True, output_attentions=False,
+                    return_dict=True)
+    pkv = pre.past_key_values
+    obs_pos = torch.arange(L - obs, L, dtype=torch.long).unsqueeze(0)
+    dtype = next(model.parameters()).dtype
+    obs_mask = torch.full((1, 1, obs, L + obs), torch.finfo(dtype).min, dtype=dtype)
+    for i in range(obs):
+        obs_mask[0, 0, i, : L - obs + i + 1] = 0.0
+    with torch.no_grad():
+        obs_out = model(input_ids=ids[:, -obs:], attention_mask=obs_mask,
+                        position_ids=obs_pos, past_key_values=pkv,
+                        use_cache=True, output_attentions=True, return_dict=True)
+    # 注意力观察窗行数值一致（含窗口列：mask 后与全量 prefill 的因果可见性相同）
+    for li in range(2):
+        fa = full_out.attentions[li][0, :, -obs:, :]          # (H, obs, L)
+        da = obs_out.attentions[li][0, :, :, :L]              # (H, obs, L)
+        assert torch.allclose(fa, da, atol=1e-5, rtol=1e-4), (
+            f"layer {li} max abs diff {(fa - da).abs().max()}"
+        )
+    # 两种注意力来源的选择集一致
+    kw = dict(obs_window=obs, kernel=7, num_key_value_groups=2)
+    sel_full = snapkv_select(list(full_out.attentions), L, 24, **kw)
+    sel_dp = snapkv_select([a[..., :L] for a in obs_out.attentions], L, 24, **kw)
+    assert sel_full == sel_dp
+    # 二次前向把 obs 个重复位置追加进了 cache：裁回 [0, L)
+    pkv = apply_selection(pkv, list(range(L)))
+    for li in range(2):
+        k, _ = layer_kv_tensors(pkv, li)
+        assert k.shape[-2] == L
+
+
 # ══════════════════════════════════════════════════════════════════════════
 # 直接运行入口（python metrology/test_kv_compress.py）
 # ══════════════════════════════════════════════════════════════════════════
@@ -580,6 +625,7 @@ def main():
         test_micro_model_identity_compression_matches_uncompressed,
         test_micro_model_compression_runs_and_reports_kept,
         test_micro_model_eos_stop,
+        test_micro_model_double_pass_attention_matches_full,
     ]
     failed = 0
     for t in tests:
