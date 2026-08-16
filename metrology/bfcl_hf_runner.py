@@ -10,10 +10,15 @@ hook 点接入。
 
 S8.2 起：condition=snapkv / streamingllm 已实现（训练无关的 KV 压缩）。接入方式 =
 S8.1 预留的 hook 点（_HFQwenPromptingHandler._query_prompting 内）：完整 prompt 先
-eager prefill（output_attentions=True 取注意力），按 metrology/kv_compress.py 的方法
-规则（官方 SnapKV / StreamingLLM 逻辑的等价重实现；官方步骤对照与已知偏差清单见
-kv_compress.py 模块 docstring）选出保留位置、对 past_key_values 做位置子集裁切，再进
-greedy decode 循环（显式 position_ids 延续原始绝对位置，与官方 SnapKV 语义一致）。
+eager prefill（不物化全量注意力；冻结 360 样本 prompt 中位 ~6k、最长 9355 token，
+(1,32,L,L) 概率 × 36 层在 64GB HBM 不可行），SnapKV 所需观察窗注意力由「末
+obs_window 个 token 携 cache 二次前向（output_attentions=True）+ 切原 prompt 列」
+获得（double-pass；与全量物化后切片数学等价，单测
+test_micro_model_double_pass_attention_matches_full；随后把二次前向追加进 cache 的
+obs 个位置裁回 [0, prompt_len)）；再按 metrology/kv_compress.py 的方法规则（官方
+SnapKV / StreamingLLM 逻辑的等价重实现；对照与已知偏差见 kv_compress.py 模块
+docstring）选出保留位置、对 past_key_values 做位置子集裁切，再进 greedy decode 循环
+（显式 position_ids 延续原始绝对位置，与官方 SnapKV 语义一致）。
 base 仍走 model.generate 原路径（零手术，输出与 S8.1 逐字节一致；--kv_budget 对 base
 无效）。h2o / kvzip 仍为预留（未实现即报错）。预算：--kv_budget 或默认 prompt_len 的
 50%，逐行记录 compression_meta。
@@ -645,20 +650,30 @@ def _define_handler_class():
                                     prompt_len: int):
             """压缩条件的生成路径（仅 snapkv / streamingllm 进入；base 不调用）。
 
-            prefill(output_attentions=True) → metrology.kv_compress.compress_pkv
-            位置选择 + KV 裁切 → greedy decode 循环。
+            prefill（不物化全量注意力）→ [snapkv] 观察窗二次前向取注意力 →
+            metrology.kv_compress.compress_pkv 位置选择 + KV 裁切 → greedy decode 循环。
 
             - 预算：--kv_budget，或默认 prompt_len 的 50%（逐行记录）。
             - 位置语义：decode 每步显式 position_ids = prompt_len + step（原始绝对
               位置延续，与官方 SnapKV 的 kv_seq_len 记账一致；对照表第 4 条）；
               attention_mask=None（无 padding，mask 由 cache 长度推断）。
-            - 内存注意：prefill 需物化每层注意力 (1,H,L,L)（long_context 长 prompt
-              下占用显著）；裁切完成后即释放，decode 期无该开销。
+            - 注意力获取（double-pass）：全量 prefill 用 output_attentions=False
+              （冻结 360 样本 prompt 中位 ~6k、最长 9355 token；每层 (1,32,L,L)
+              fp32 softmax × 36 层物化在 64GB HBM 上不可行）。SnapKV 所需仅为
+              观察窗行：prefill 后以末 obs_window 个 token 携 cache 二次前向
+              （output_attentions=True，4D 因果加性 mask 逐行掩掉相对查询位置
+              的「未来」prompt 键与重复列——裸二次前向的 cache 含全量 prompt，
+              不加 mask 会让观察窗查询的 softmax 分母膨胀、topk 排名可能翻转），
+              切出原 prompt 键列即得同一 eager softmax 的对应行（等价性单测
+              test_micro_model_double_pass_attention_matches_full）；二次前向
+              追加进 cache 的 obs 个位置随即裁回 [0, prompt_len)。
             返回 (generated, compression_meta)。
             """
             import torch
 
-            from metrology.kv_compress import compress_pkv, layer_kv_tensors
+            from metrology.kv_compress import (
+                apply_selection, compress_pkv, layer_kv_tensors,
+            )
 
             device = self._hf_device
             budget = (
@@ -675,14 +690,17 @@ def _define_handler_class():
                     input_ids=input_ids,
                     attention_mask=inputs.get("attention_mask"),
                     use_cache=True,
-                    output_attentions=True,
+                    output_attentions=False,
+                    logits_to_keep=1,
                     return_dict=True,
                 )
-            attentions = list(prefill_out.attentions)  # 每层 (1, H, L, L)
             pkv = prefill_out.past_key_values
+            next_id = prefill_out.logits[:, -1].argmax(dim=-1, keepdim=True)
+            del prefill_out
 
+            n_layers = len(pkv)
             # 守卫：手术假定各层 cache 长度 == prompt_len（滑动窗口层布局不支持）
-            for li in range(len(attentions)):
+            for li in range(n_layers):
                 k_li, _ = layer_kv_tensors(pkv, li)
                 if int(k_li.shape[-2]) != prompt_len:
                     raise NotImplementedError(
@@ -690,34 +708,85 @@ def _define_handler_class():
                         f"{prompt_len}；滑动窗口 cache 布局不支持该手术路径"
                     )
 
-            n_heads = int(attentions[0].shape[1])
-            if self._condition == "snapkv":
-                k0, _ = layer_kv_tensors(pkv, 0)
-                groups = max(1, n_heads // int(k0.shape[1]))
+            need_surgery = budget < prompt_len
+            obs_ok = int(self._obs_window) < prompt_len
+            if need_surgery and self._condition == "snapkv" and obs_ok:
+                # 观察窗二次前向（double-pass，见 docstring）。必须带 4D 因果加性
+                # mask：cache 内已含全量 prompt，裸二次前向会让观察窗查询看到
+                # 相对自身位置的「未来」prompt 键，softmax 分母随之膨胀（列值被
+                # 按行缩放，topk 排名可能翻转）。逐行掩掉 [p+1..L) 与全部重复列
+                # [L..L+obs) 后，行 i 可见键恰为 [0..p]，与全量 prefill 的对应
+                # 观察窗行逐值等价（单测
+                # test_micro_model_double_pass_attention_matches_full 断言）。
+                obs = int(self._obs_window)
+                obs_ids = input_ids[:, -obs:]
+                obs_pos = torch.arange(
+                    prompt_len - obs, prompt_len, dtype=torch.long, device=device
+                ).unsqueeze(0)
+                dtype = next(self._hf_model.parameters()).dtype
+                kv_len = prompt_len + obs
+                obs_mask = torch.full(
+                    (1, 1, obs, kv_len), torch.finfo(dtype).min,
+                    dtype=dtype, device=device,
+                )
+                for i in range(obs):
+                    p_abs = prompt_len - obs + i
+                    obs_mask[0, 0, i, : p_abs + 1] = 0.0
+                with torch.no_grad():
+                    obs_out = self._hf_model(
+                        input_ids=obs_ids,
+                        attention_mask=obs_mask,
+                        position_ids=obs_pos,
+                        past_key_values=pkv,
+                        use_cache=True,
+                        output_attentions=True,
+                        return_dict=True,
+                    )
+                # (1,H,obs,L+obs) → 仅保留原 prompt 键列 [0, L)
+                attentions = [a[..., :prompt_len] for a in obs_out.attentions]
+                del obs_out
+                # 二次前向把 obs 个重复 token 追加进了 cache：裁回 [0, L)
+                pkv = apply_selection(pkv, list(range(prompt_len)))
+                for li in range(n_layers):
+                    k_li, _ = layer_kv_tensors(pkv, li)
+                    assert int(k_li.shape[-2]) == prompt_len, "cache 裁回失败"
+                cfg = getattr(self._hf_model, "config", None)
+                h_q = int(getattr(cfg, "num_attention_heads"))
+                h_kv = int(getattr(cfg, "num_key_value_heads"))
+                groups = max(1, h_q // h_kv)
+                pkv, kept_tokens = compress_pkv(
+                    pkv,
+                    "snapkv",
+                    budget,
+                    attentions=attentions,
+                    obs_window=self._obs_window,
+                    kernel=self._kv_kernel,
+                    n_sink=self._n_sink,
+                    num_key_value_groups=groups,
+                    prompt_len=prompt_len,
+                )
+                del attentions
+            elif need_surgery and self._condition == "streamingllm":
+                pkv, kept_tokens = compress_pkv(
+                    pkv,
+                    "streamingllm",
+                    budget,
+                    n_sink=self._n_sink,
+                    prompt_len=prompt_len,
+                )
             else:
-                groups = 1
-
-            pkv, kept_tokens = compress_pkv(
-                pkv,
-                self._condition,
-                budget,
-                attentions=attentions,
-                obs_window=self._obs_window,
-                kernel=self._kv_kernel,
-                n_sink=self._n_sink,
-                num_key_value_groups=groups,
-                prompt_len=prompt_len,
-            )
+                # budget >= prompt_len（恒等零手术），或 snapkv 观察窗覆盖全
+                # prompt（obs_window >= prompt_len，无前缀可压缩，恒等）
+                kept_tokens = prompt_len
             assert kept_tokens <= prompt_len, "压缩后保留数不应超过 prompt 长度"
-            # 恒等边界（budget >= prompt_len）：选择集 = 全量、零手术（对照 compress_pkv 语义）
-            assert (kept_tokens == prompt_len) == (budget >= prompt_len)
-            del attentions  # 释放 prefill 注意力物化内存
+            is_identity = kept_tokens == prompt_len
+            assert is_identity == (
+                (not need_surgery)
+                or (self._condition == "snapkv" and not obs_ok)
+            ), "恒等边界与 budget/obs_window 口径不一致"
 
             eos_ids = set(self._eos_token_ids or [])
             max_new_tokens = int(gen_kwargs["max_new_tokens"])
-
-            next_id = prefill_out.logits[:, -1].argmax(dim=-1, keepdim=True)
-            del prefill_out
 
             gen_ids = []
             past = pkv
