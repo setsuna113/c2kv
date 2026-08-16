@@ -1,0 +1,2690 @@
+{
+  "task": "S3.3 R5 finish 语义评分（单列，不入主口径；76k 主分析集 finish 金标 79 行 × 双臂 + d_* 三臂分表）",
+  "produced_by": "agent/r5_finish_semantics.py",
+  "inputs": {
+    "full_arm": [
+      "results\\r4\\full_76k\\r4_full_76k.jsonl",
+      "results\\r4\\f_ext_full\\r4_f_full_part0.jsonl",
+      "results\\r4\\f_ext_full\\r4_f_full_part1.jsonl"
+    ],
+    "c2kv_arm": [
+      "results\\r4\\r3_recovered\\t_e_c2kv_r4.jsonl",
+      "results\\r4\\f_ext_c2kv\\f_ext_c2kv.jsonl"
+    ],
+    "qids_48": "configs\\r3_s1_48_qids.json",
+    "qids_347": "configs\\r4_qids_ext.json",
+    "d_arms": [
+      "results/r4/d_plain/r4_d_plain.jsonl",
+      "results/r4/d_typed/r4_d_typed.jsonl",
+      "results/r4/d_random/r4_d_random.jsonl"
+    ]
+  },
+  "differences_vs_r4": {
+    "finish_semantics": "r4 未做过 finish 语义评分（r4 只报整体 text_token_f1/rouge_l_f1 与 non_tool 细分，无 finish 行 answer 参数语义列）；本表为 R5 新增单列口径，不入主口径。",
+    "d_arms_harness_fields": "d_* 行内既有 harness 计算的 text_token_f1/rouge_l_f1 字段不用于本表；本表按 §1.2 口径用 stdlib 自实现重算（金标串 = finish 调用 arguments.answer 参数，而非整行 target 文本）。",
+    "answer_missing": "76k finish 79 行中 59 行金标 finish 调用无 answer 参数（54 行 arguments={}、5 行仅 status 键）：按空串评分（F1=0.0），逐行 answer_status 单列披露，不静默丢弃；汇总另报 answer 存在子集（n=20）过线率作参照。",
+    "checkpoint_separation": "d_* 三臂为 32k checkpoint-2678（594×3，见 r5_prereg §1.5），76k 为 checkpoint-250；不同 checkpoint 分表不并表。"
+  },
+  "metric_definition": {
+    "scope": "target_tool_name=='finish' 的行：金标 finish 调用 arguments.answer 参数串 vs 生成文本（full 臂行 text 字段 / c2kv 与 d_* 臂行 prediction 字段，按 qid 配对）",
+    "tokenization": "全小写后 regex \\w+ 切分，重复词保留（multiset）",
+    "token_f1": "bag-of-words 口径：交集 = 两个 Counter 逐词取 min 之和；P=交集/|pred|，R=交集/|gold|，F1=2PR/(P+R)",
+    "rouge_l_f1": "同分词后整段文本作单一序列求 LCS（不按句子切分）；stdlib 两行 DP 自实现，O(|g|·|p|) 时间 O(min) 空间；R=LCS/|gold|，P=LCS/|pred|，F1=2PR/(P+R)（beta=1）",
+    "pass_line": "ROUGE-L F1 >= 0.5（按未舍入浮点判定）",
+    "empty_convention": "gold 与 pred 均空 → F1=1.0；恰一方为空 → F1=0.0；answer 缺失行按空 gold 串评分（F1=0.0）",
+    "strict_ok": "复用 agent/r5_reanalysis.py strict_protocol_valid：谓词命中 AND 闭合块 JSON 合法含 name 键 AND name=='finish'",
+    "censored": "full 臂 completion_tokens>=128；c2kv/d_* 臂 generated_tokens>=128（复用 R5R.CENSORED_AT）"
+  },
+  "main_76k": {
+    "n_finish_rows": 79,
+    "summary": {
+      "pass_line_rouge_l_ge_0_5": {
+        "note": "判对线：ROUGE-L F1 >= 0.5（未舍入浮点判定）；分母 = 76k 集全部 79 行 finish 金标行",
+        "full": {
+          "n_pass": 12,
+          "rate_of_79": 0.1519
+        },
+        "c2kv": {
+          "n_pass": 12,
+          "rate_of_79": 0.1519
+        }
+      },
+      "answer_present_subset_n20": {
+        "note": "79 行中 59 行金标 finish 调用无 answer 参数（按空串评 F1=0.0）；本小节为参照口径，主过线率以上面 pass_line_rouge_l_ge_0_5（分母 79）为准",
+        "full": {
+          "n_pass": 12,
+          "rate_of_20": 0.6
+        },
+        "c2kv": {
+          "n_pass": 12,
+          "rate_of_20": 0.6
+        }
+      },
+      "s8_anchor": {
+        "definition": "full 臂 finish 行中：严格主口径判错（strict_ok==False）且 ROUGE-L F1>=0.5 的行（后续 S8 的引用锚点，单独显著标注）",
+        "n": 12,
+        "pct_of_79": 0.1519,
+        "qids": [
+          "a45d2c09567a_795c2422:5",
+          "cfc3d70e7f3c_ba5fb247:10",
+          "cfc3d70e7f3c_ba5fb247:11",
+          "cfc3d70e7f3c_ba5fb247:12",
+          "cfc3d70e7f3c_ba5fb247:13",
+          "cfc3d70e7f3c_ba5fb247:14",
+          "cfc3d70e7f3c_ba5fb247:17",
+          "cfc3d70e7f3c_ba5fb247:19",
+          "cfc3d70e7f3c_ba5fb247:20",
+          "cfc3d70e7f3c_ba5fb247:7",
+          "cfc3d70e7f3c_ba5fb247:8",
+          "cfc3d70e7f3c_eb3f9b09:12"
+        ]
+      },
+      "c2kv_analog_cross": {
+        "definition": "c2kv 臂同交叉量（仅信息参照，非 S8 锚点）",
+        "n": 1,
+        "pct_of_79": 0.0127,
+        "qids": [
+          "a45d2c09567a_795c2422:5"
+        ]
+      },
+      "answer_parse_disclosure": {
+        "n_parsed": 20,
+        "n_answer_missing": 59,
+        "n_parse_error": 0,
+        "note": "answer_missing：金标 finish 调用 arguments 无 answer 参数（54 行 arguments={}、5 行仅 status 键），按空串评分，逐行 answer_status 披露，不静默丢弃。"
+      },
+      "n_sessions": 32,
+      "n_clipped": 78
+    },
+    "rows": [
+      {
+        "qid": "a45d2c09567a_795c2422:5",
+        "session_id": "a45d2c09567a_795c2422",
+        "clipped": true,
+        "pool_doc_tokens": 75327,
+        "answer_status": "parsed",
+        "answer_detail": null,
+        "gold_answer": "Successfully denied the $600 payment request and sent corrected amount of $540 to Kathryn Maldonado with note: \"The rent decreased by 10% this month.\"",
+        "full": {
+          "token_f1": 0.625,
+          "rouge_l_f1": 0.5937,
+          "pass_line": true,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        },
+        "c2kv": {
+          "token_f1": 0.7636,
+          "rouge_l_f1": 0.7273,
+          "pass_line": true,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        }
+      },
+      {
+        "qid": "a45d2c09567a_7c2c1bb8:7",
+        "session_id": "a45d2c09567a_7c2c1bb8",
+        "clipped": true,
+        "pool_doc_tokens": 75327,
+        "answer_status": "parsed",
+        "answer_detail": null,
+        "gold_answer": "Eliana Harper",
+        "full": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": true
+        },
+        "c2kv": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": true
+        }
+      },
+      {
+        "qid": "a45d2c09567a_cfce19ea:13",
+        "session_id": "a45d2c09567a_cfce19ea",
+        "clipped": true,
+        "pool_doc_tokens": 75327,
+        "answer_status": "parsed",
+        "answer_detail": null,
+        "gold_answer": "5",
+        "full": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": true
+        },
+        "c2kv": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": true
+        }
+      },
+      {
+        "qid": "b455f37f04c7_903ca285:14",
+        "session_id": "b455f37f04c7_903ca285",
+        "clipped": true,
+        "pool_doc_tokens": 75327,
+        "answer_status": "answer_missing",
+        "answer_detail": "arguments 无 answer 键（键: status）",
+        "gold_answer": null,
+        "full": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        },
+        "c2kv": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        }
+      },
+      {
+        "qid": "0c890a5dde8c_012517c3:8",
+        "session_id": "0c890a5dde8c_012517c3",
+        "clipped": true,
+        "pool_doc_tokens": 80171,
+        "answer_status": "answer_missing",
+        "answer_detail": "arguments={}（无 answer 参数）",
+        "gold_answer": null,
+        "full": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": true,
+          "strict_name": "finish",
+          "strict_ok": true,
+          "censored_at_128": false
+        },
+        "c2kv": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        }
+      },
+      {
+        "qid": "0c890a5dde8c_328484ff:13",
+        "session_id": "0c890a5dde8c_328484ff",
+        "clipped": true,
+        "pool_doc_tokens": 80171,
+        "answer_status": "answer_missing",
+        "answer_detail": "arguments={}（无 answer 参数）",
+        "gold_answer": null,
+        "full": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        },
+        "c2kv": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": true
+        }
+      },
+      {
+        "qid": "0c890a5dde8c_3382a8ce:4",
+        "session_id": "0c890a5dde8c_3382a8ce",
+        "clipped": true,
+        "pool_doc_tokens": 80171,
+        "answer_status": "answer_missing",
+        "answer_detail": "arguments={}（无 answer 参数）",
+        "gold_answer": null,
+        "full": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": true
+        },
+        "c2kv": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": true
+        }
+      },
+      {
+        "qid": "0c890a5dde8c_42680439:8",
+        "session_id": "0c890a5dde8c_42680439",
+        "clipped": true,
+        "pool_doc_tokens": 80171,
+        "answer_status": "answer_missing",
+        "answer_detail": "arguments 无 answer 键（键: status）",
+        "gold_answer": null,
+        "full": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        },
+        "c2kv": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        }
+      },
+      {
+        "qid": "0c890a5dde8c_44648a56:7",
+        "session_id": "0c890a5dde8c_44648a56",
+        "clipped": true,
+        "pool_doc_tokens": 80171,
+        "answer_status": "answer_missing",
+        "answer_detail": "arguments 无 answer 键（键: status）",
+        "gold_answer": null,
+        "full": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": true
+        },
+        "c2kv": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": true
+        }
+      },
+      {
+        "qid": "0c890a5dde8c_45468b2c:10",
+        "session_id": "0c890a5dde8c_45468b2c",
+        "clipped": true,
+        "pool_doc_tokens": 80171,
+        "answer_status": "answer_missing",
+        "answer_detail": "arguments={}（无 answer 参数）",
+        "gold_answer": null,
+        "full": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        },
+        "c2kv": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        }
+      },
+      {
+        "qid": "0c890a5dde8c_aa600ba4:10",
+        "session_id": "0c890a5dde8c_aa600ba4",
+        "clipped": true,
+        "pool_doc_tokens": 80171,
+        "answer_status": "answer_missing",
+        "answer_detail": "arguments 无 answer 键（键: status）",
+        "gold_answer": null,
+        "full": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        },
+        "c2kv": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        }
+      },
+      {
+        "qid": "0c890a5dde8c_bc16285b:7",
+        "session_id": "0c890a5dde8c_bc16285b",
+        "clipped": true,
+        "pool_doc_tokens": 80171,
+        "answer_status": "answer_missing",
+        "answer_detail": "arguments={}（无 answer 参数）",
+        "gold_answer": null,
+        "full": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        },
+        "c2kv": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        }
+      },
+      {
+        "qid": "0c890a5dde8c_c9161e06:6",
+        "session_id": "0c890a5dde8c_c9161e06",
+        "clipped": true,
+        "pool_doc_tokens": 80171,
+        "answer_status": "answer_missing",
+        "answer_detail": "arguments 无 answer 键（键: status）",
+        "gold_answer": null,
+        "full": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        },
+        "c2kv": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        }
+      },
+      {
+        "qid": "cfc3d70e7f3c_044eacbb:16",
+        "session_id": "cfc3d70e7f3c_044eacbb",
+        "clipped": true,
+        "pool_doc_tokens": 80171,
+        "answer_status": "answer_missing",
+        "answer_detail": "arguments={}（无 answer 参数）",
+        "gold_answer": null,
+        "full": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        },
+        "c2kv": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": true
+        }
+      },
+      {
+        "qid": "cfc3d70e7f3c_0510d456:19",
+        "session_id": "cfc3d70e7f3c_0510d456",
+        "clipped": true,
+        "pool_doc_tokens": 80171,
+        "answer_status": "answer_missing",
+        "answer_detail": "arguments={}（无 answer 参数）",
+        "gold_answer": null,
+        "full": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": true
+        },
+        "c2kv": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": true
+        }
+      },
+      {
+        "qid": "cfc3d70e7f3c_15b71eb0:10",
+        "session_id": "cfc3d70e7f3c_15b71eb0",
+        "clipped": true,
+        "pool_doc_tokens": 80171,
+        "answer_status": "answer_missing",
+        "answer_detail": "arguments={}（无 answer 参数）",
+        "gold_answer": null,
+        "full": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        },
+        "c2kv": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": true,
+          "strict_name": "finish",
+          "strict_ok": true,
+          "censored_at_128": false
+        }
+      },
+      {
+        "qid": "cfc3d70e7f3c_15b71eb0:11",
+        "session_id": "cfc3d70e7f3c_15b71eb0",
+        "clipped": true,
+        "pool_doc_tokens": 80171,
+        "answer_status": "answer_missing",
+        "answer_detail": "arguments={}（无 answer 参数）",
+        "gold_answer": null,
+        "full": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        },
+        "c2kv": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": true,
+          "strict_name": "finish",
+          "strict_ok": true,
+          "censored_at_128": false
+        }
+      },
+      {
+        "qid": "cfc3d70e7f3c_15b71eb0:12",
+        "session_id": "cfc3d70e7f3c_15b71eb0",
+        "clipped": true,
+        "pool_doc_tokens": 80171,
+        "answer_status": "answer_missing",
+        "answer_detail": "arguments={}（无 answer 参数）",
+        "gold_answer": null,
+        "full": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        },
+        "c2kv": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": true,
+          "strict_name": "finish",
+          "strict_ok": true,
+          "censored_at_128": false
+        }
+      },
+      {
+        "qid": "cfc3d70e7f3c_15b71eb0:14",
+        "session_id": "cfc3d70e7f3c_15b71eb0",
+        "clipped": true,
+        "pool_doc_tokens": 80171,
+        "answer_status": "answer_missing",
+        "answer_detail": "arguments={}（无 answer 参数）",
+        "gold_answer": null,
+        "full": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        },
+        "c2kv": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": true,
+          "strict_name": "finish",
+          "strict_ok": true,
+          "censored_at_128": false
+        }
+      },
+      {
+        "qid": "cfc3d70e7f3c_15b71eb0:15",
+        "session_id": "cfc3d70e7f3c_15b71eb0",
+        "clipped": true,
+        "pool_doc_tokens": 80171,
+        "answer_status": "answer_missing",
+        "answer_detail": "arguments={}（无 answer 参数）",
+        "gold_answer": null,
+        "full": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        },
+        "c2kv": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": true,
+          "strict_name": "finish",
+          "strict_ok": true,
+          "censored_at_128": false
+        }
+      },
+      {
+        "qid": "cfc3d70e7f3c_15b71eb0:16",
+        "session_id": "cfc3d70e7f3c_15b71eb0",
+        "clipped": true,
+        "pool_doc_tokens": 80171,
+        "answer_status": "answer_missing",
+        "answer_detail": "arguments={}（无 answer 参数）",
+        "gold_answer": null,
+        "full": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        },
+        "c2kv": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": true,
+          "strict_name": "finish",
+          "strict_ok": true,
+          "censored_at_128": false
+        }
+      },
+      {
+        "qid": "cfc3d70e7f3c_15b71eb0:18",
+        "session_id": "cfc3d70e7f3c_15b71eb0",
+        "clipped": true,
+        "pool_doc_tokens": 80171,
+        "answer_status": "answer_missing",
+        "answer_detail": "arguments={}（无 answer 参数）",
+        "gold_answer": null,
+        "full": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        },
+        "c2kv": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": true,
+          "strict_name": "finish",
+          "strict_ok": true,
+          "censored_at_128": false
+        }
+      },
+      {
+        "qid": "cfc3d70e7f3c_15b71eb0:19",
+        "session_id": "cfc3d70e7f3c_15b71eb0",
+        "clipped": true,
+        "pool_doc_tokens": 80171,
+        "answer_status": "answer_missing",
+        "answer_detail": "arguments={}（无 answer 参数）",
+        "gold_answer": null,
+        "full": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        },
+        "c2kv": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": true,
+          "strict_name": "finish",
+          "strict_ok": true,
+          "censored_at_128": false
+        }
+      },
+      {
+        "qid": "cfc3d70e7f3c_15b71eb0:20",
+        "session_id": "cfc3d70e7f3c_15b71eb0",
+        "clipped": true,
+        "pool_doc_tokens": 80171,
+        "answer_status": "answer_missing",
+        "answer_detail": "arguments={}（无 answer 参数）",
+        "gold_answer": null,
+        "full": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        },
+        "c2kv": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": true,
+          "strict_name": "finish",
+          "strict_ok": true,
+          "censored_at_128": false
+        }
+      },
+      {
+        "qid": "cfc3d70e7f3c_15b71eb0:21",
+        "session_id": "cfc3d70e7f3c_15b71eb0",
+        "clipped": true,
+        "pool_doc_tokens": 80171,
+        "answer_status": "answer_missing",
+        "answer_detail": "arguments={}（无 answer 参数）",
+        "gold_answer": null,
+        "full": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        },
+        "c2kv": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": true,
+          "strict_name": "finish",
+          "strict_ok": true,
+          "censored_at_128": false
+        }
+      },
+      {
+        "qid": "cfc3d70e7f3c_15b71eb0:4",
+        "session_id": "cfc3d70e7f3c_15b71eb0",
+        "clipped": true,
+        "pool_doc_tokens": 80171,
+        "answer_status": "answer_missing",
+        "answer_detail": "arguments={}（无 answer 参数）",
+        "gold_answer": null,
+        "full": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": true
+        },
+        "c2kv": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": true
+        }
+      },
+      {
+        "qid": "cfc3d70e7f3c_15b71eb0:5",
+        "session_id": "cfc3d70e7f3c_15b71eb0",
+        "clipped": true,
+        "pool_doc_tokens": 80171,
+        "answer_status": "answer_missing",
+        "answer_detail": "arguments={}（无 answer 参数）",
+        "gold_answer": null,
+        "full": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        },
+        "c2kv": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": true
+        }
+      },
+      {
+        "qid": "cfc3d70e7f3c_15b71eb0:8",
+        "session_id": "cfc3d70e7f3c_15b71eb0",
+        "clipped": true,
+        "pool_doc_tokens": 80171,
+        "answer_status": "answer_missing",
+        "answer_detail": "arguments={}（无 answer 参数）",
+        "gold_answer": null,
+        "full": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        },
+        "c2kv": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": true,
+          "strict_name": "finish",
+          "strict_ok": true,
+          "censored_at_128": false
+        }
+      },
+      {
+        "qid": "cfc3d70e7f3c_15b71eb0:9",
+        "session_id": "cfc3d70e7f3c_15b71eb0",
+        "clipped": true,
+        "pool_doc_tokens": 80171,
+        "answer_status": "answer_missing",
+        "answer_detail": "arguments={}（无 answer 参数）",
+        "gold_answer": null,
+        "full": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        },
+        "c2kv": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": true,
+          "strict_name": "finish",
+          "strict_ok": true,
+          "censored_at_128": false
+        }
+      },
+      {
+        "qid": "cfc3d70e7f3c_1899bb8b:19",
+        "session_id": "cfc3d70e7f3c_1899bb8b",
+        "clipped": true,
+        "pool_doc_tokens": 80171,
+        "answer_status": "answer_missing",
+        "answer_detail": "arguments={}（无 answer 参数）",
+        "gold_answer": null,
+        "full": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        },
+        "c2kv": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": true
+        }
+      },
+      {
+        "qid": "cfc3d70e7f3c_1899bb8b:20",
+        "session_id": "cfc3d70e7f3c_1899bb8b",
+        "clipped": true,
+        "pool_doc_tokens": 80171,
+        "answer_status": "answer_missing",
+        "answer_detail": "arguments={}（无 answer 参数）",
+        "gold_answer": null,
+        "full": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        },
+        "c2kv": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": true
+        }
+      },
+      {
+        "qid": "cfc3d70e7f3c_1899bb8b:21",
+        "session_id": "cfc3d70e7f3c_1899bb8b",
+        "clipped": true,
+        "pool_doc_tokens": 80171,
+        "answer_status": "answer_missing",
+        "answer_detail": "arguments={}（无 answer 参数）",
+        "gold_answer": null,
+        "full": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        },
+        "c2kv": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": true
+        }
+      },
+      {
+        "qid": "cfc3d70e7f3c_1899bb8b:24",
+        "session_id": "cfc3d70e7f3c_1899bb8b",
+        "clipped": true,
+        "pool_doc_tokens": 80171,
+        "answer_status": "answer_missing",
+        "answer_detail": "arguments={}（无 answer 参数）",
+        "gold_answer": null,
+        "full": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        },
+        "c2kv": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": true,
+          "strict_name": "finish",
+          "strict_ok": true,
+          "censored_at_128": false
+        }
+      },
+      {
+        "qid": "cfc3d70e7f3c_1899bb8b:25",
+        "session_id": "cfc3d70e7f3c_1899bb8b",
+        "clipped": true,
+        "pool_doc_tokens": 80171,
+        "answer_status": "answer_missing",
+        "answer_detail": "arguments={}（无 answer 参数）",
+        "gold_answer": null,
+        "full": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        },
+        "c2kv": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": true,
+          "strict_name": "finish",
+          "strict_ok": true,
+          "censored_at_128": false
+        }
+      },
+      {
+        "qid": "cfc3d70e7f3c_1899bb8b:26",
+        "session_id": "cfc3d70e7f3c_1899bb8b",
+        "clipped": true,
+        "pool_doc_tokens": 80171,
+        "answer_status": "answer_missing",
+        "answer_detail": "arguments={}（无 answer 参数）",
+        "gold_answer": null,
+        "full": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        },
+        "c2kv": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": true,
+          "strict_name": "finish",
+          "strict_ok": true,
+          "censored_at_128": false
+        }
+      },
+      {
+        "qid": "cfc3d70e7f3c_1899bb8b:27",
+        "session_id": "cfc3d70e7f3c_1899bb8b",
+        "clipped": true,
+        "pool_doc_tokens": 80171,
+        "answer_status": "answer_missing",
+        "answer_detail": "arguments={}（无 answer 参数）",
+        "gold_answer": null,
+        "full": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        },
+        "c2kv": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": true,
+          "strict_name": "finish",
+          "strict_ok": true,
+          "censored_at_128": false
+        }
+      },
+      {
+        "qid": "cfc3d70e7f3c_1a5f08b9:8",
+        "session_id": "cfc3d70e7f3c_1a5f08b9",
+        "clipped": true,
+        "pool_doc_tokens": 80171,
+        "answer_status": "parsed",
+        "answer_detail": "answer 非字符串（type=int），已 str()",
+        "gold_answer": "9",
+        "full": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": true
+        },
+        "c2kv": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": true
+        }
+      },
+      {
+        "qid": "cfc3d70e7f3c_286c7c09:10",
+        "session_id": "cfc3d70e7f3c_286c7c09",
+        "clipped": true,
+        "pool_doc_tokens": 80171,
+        "answer_status": "answer_missing",
+        "answer_detail": "arguments={}（无 answer 参数）",
+        "gold_answer": null,
+        "full": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        },
+        "c2kv": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": true,
+          "strict_name": "finish",
+          "strict_ok": true,
+          "censored_at_128": false
+        }
+      },
+      {
+        "qid": "cfc3d70e7f3c_286c7c09:11",
+        "session_id": "cfc3d70e7f3c_286c7c09",
+        "clipped": true,
+        "pool_doc_tokens": 80171,
+        "answer_status": "answer_missing",
+        "answer_detail": "arguments={}（无 answer 参数）",
+        "gold_answer": null,
+        "full": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        },
+        "c2kv": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": true,
+          "strict_name": "finish",
+          "strict_ok": true,
+          "censored_at_128": false
+        }
+      },
+      {
+        "qid": "cfc3d70e7f3c_286c7c09:12",
+        "session_id": "cfc3d70e7f3c_286c7c09",
+        "clipped": true,
+        "pool_doc_tokens": 80171,
+        "answer_status": "answer_missing",
+        "answer_detail": "arguments={}（无 answer 参数）",
+        "gold_answer": null,
+        "full": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        },
+        "c2kv": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": true,
+          "strict_name": "finish",
+          "strict_ok": true,
+          "censored_at_128": false
+        }
+      },
+      {
+        "qid": "cfc3d70e7f3c_286c7c09:17",
+        "session_id": "cfc3d70e7f3c_286c7c09",
+        "clipped": true,
+        "pool_doc_tokens": 80171,
+        "answer_status": "answer_missing",
+        "answer_detail": "arguments={}（无 answer 参数）",
+        "gold_answer": null,
+        "full": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        },
+        "c2kv": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": true,
+          "strict_name": "finish",
+          "strict_ok": true,
+          "censored_at_128": false
+        }
+      },
+      {
+        "qid": "cfc3d70e7f3c_286c7c09:18",
+        "session_id": "cfc3d70e7f3c_286c7c09",
+        "clipped": true,
+        "pool_doc_tokens": 80171,
+        "answer_status": "answer_missing",
+        "answer_detail": "arguments={}（无 answer 参数）",
+        "gold_answer": null,
+        "full": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        },
+        "c2kv": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": true,
+          "strict_name": "finish",
+          "strict_ok": true,
+          "censored_at_128": false
+        }
+      },
+      {
+        "qid": "cfc3d70e7f3c_286c7c09:20",
+        "session_id": "cfc3d70e7f3c_286c7c09",
+        "clipped": true,
+        "pool_doc_tokens": 80171,
+        "answer_status": "answer_missing",
+        "answer_detail": "arguments={}（无 answer 参数）",
+        "gold_answer": null,
+        "full": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        },
+        "c2kv": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": true,
+          "strict_name": "finish",
+          "strict_ok": true,
+          "censored_at_128": false
+        }
+      },
+      {
+        "qid": "cfc3d70e7f3c_286c7c09:24",
+        "session_id": "cfc3d70e7f3c_286c7c09",
+        "clipped": true,
+        "pool_doc_tokens": 80171,
+        "answer_status": "answer_missing",
+        "answer_detail": "arguments={}（无 answer 参数）",
+        "gold_answer": null,
+        "full": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        },
+        "c2kv": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": true,
+          "strict_name": "finish",
+          "strict_ok": true,
+          "censored_at_128": false
+        }
+      },
+      {
+        "qid": "cfc3d70e7f3c_286c7c09:26",
+        "session_id": "cfc3d70e7f3c_286c7c09",
+        "clipped": true,
+        "pool_doc_tokens": 80171,
+        "answer_status": "answer_missing",
+        "answer_detail": "arguments={}（无 answer 参数）",
+        "gold_answer": null,
+        "full": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        },
+        "c2kv": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": true,
+          "strict_name": "finish",
+          "strict_ok": true,
+          "censored_at_128": false
+        }
+      },
+      {
+        "qid": "cfc3d70e7f3c_286c7c09:27",
+        "session_id": "cfc3d70e7f3c_286c7c09",
+        "clipped": true,
+        "pool_doc_tokens": 80171,
+        "answer_status": "answer_missing",
+        "answer_detail": "arguments={}（无 answer 参数）",
+        "gold_answer": null,
+        "full": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": true
+        },
+        "c2kv": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": true,
+          "strict_name": "finish",
+          "strict_ok": true,
+          "censored_at_128": false
+        }
+      },
+      {
+        "qid": "cfc3d70e7f3c_286c7c09:5",
+        "session_id": "cfc3d70e7f3c_286c7c09",
+        "clipped": true,
+        "pool_doc_tokens": 80171,
+        "answer_status": "answer_missing",
+        "answer_detail": "arguments={}（无 answer 参数）",
+        "gold_answer": null,
+        "full": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        },
+        "c2kv": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": true
+        }
+      },
+      {
+        "qid": "cfc3d70e7f3c_286c7c09:7",
+        "session_id": "cfc3d70e7f3c_286c7c09",
+        "clipped": true,
+        "pool_doc_tokens": 80171,
+        "answer_status": "answer_missing",
+        "answer_detail": "arguments={}（无 answer 参数）",
+        "gold_answer": null,
+        "full": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        },
+        "c2kv": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": true
+        }
+      },
+      {
+        "qid": "cfc3d70e7f3c_286c7c09:8",
+        "session_id": "cfc3d70e7f3c_286c7c09",
+        "clipped": true,
+        "pool_doc_tokens": 80171,
+        "answer_status": "answer_missing",
+        "answer_detail": "arguments={}（无 answer 参数）",
+        "gold_answer": null,
+        "full": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        },
+        "c2kv": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": true,
+          "strict_name": "finish",
+          "strict_ok": true,
+          "censored_at_128": false
+        }
+      },
+      {
+        "qid": "cfc3d70e7f3c_286c7c09:9",
+        "session_id": "cfc3d70e7f3c_286c7c09",
+        "clipped": true,
+        "pool_doc_tokens": 80171,
+        "answer_status": "answer_missing",
+        "answer_detail": "arguments={}（无 answer 参数）",
+        "gold_answer": null,
+        "full": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        },
+        "c2kv": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": true,
+          "strict_name": "finish",
+          "strict_ok": true,
+          "censored_at_128": false
+        }
+      },
+      {
+        "qid": "cfc3d70e7f3c_6418d65c:25",
+        "session_id": "cfc3d70e7f3c_6418d65c",
+        "clipped": true,
+        "pool_doc_tokens": 80171,
+        "answer_status": "parsed",
+        "answer_detail": null,
+        "gold_answer": "89",
+        "full": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": true
+        },
+        "c2kv": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": true
+        }
+      },
+      {
+        "qid": "cfc3d70e7f3c_79ccaa70:8",
+        "session_id": "cfc3d70e7f3c_79ccaa70",
+        "clipped": true,
+        "pool_doc_tokens": 80171,
+        "answer_status": "answer_missing",
+        "answer_detail": "arguments={}（无 answer 参数）",
+        "gold_answer": null,
+        "full": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        },
+        "c2kv": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": true
+        }
+      },
+      {
+        "qid": "cfc3d70e7f3c_7c4e425a:11",
+        "session_id": "cfc3d70e7f3c_7c4e425a",
+        "clipped": true,
+        "pool_doc_tokens": 80171,
+        "answer_status": "answer_missing",
+        "answer_detail": "arguments={}（无 answer 参数）",
+        "gold_answer": null,
+        "full": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        },
+        "c2kv": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": true
+        }
+      },
+      {
+        "qid": "cfc3d70e7f3c_7db65d88:7",
+        "session_id": "cfc3d70e7f3c_7db65d88",
+        "clipped": true,
+        "pool_doc_tokens": 80171,
+        "answer_status": "answer_missing",
+        "answer_detail": "arguments={}（无 answer 参数）",
+        "gold_answer": null,
+        "full": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        },
+        "c2kv": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": true
+        }
+      },
+      {
+        "qid": "cfc3d70e7f3c_864566aa:11",
+        "session_id": "cfc3d70e7f3c_864566aa",
+        "clipped": true,
+        "pool_doc_tokens": 80171,
+        "answer_status": "answer_missing",
+        "answer_detail": "arguments={}（无 answer 参数）",
+        "gold_answer": null,
+        "full": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        },
+        "c2kv": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": true
+        }
+      },
+      {
+        "qid": "cfc3d70e7f3c_876b78e7:7",
+        "session_id": "cfc3d70e7f3c_876b78e7",
+        "clipped": true,
+        "pool_doc_tokens": 80171,
+        "answer_status": "answer_missing",
+        "answer_detail": "arguments={}（无 answer 参数）",
+        "gold_answer": null,
+        "full": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        },
+        "c2kv": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": true
+        }
+      },
+      {
+        "qid": "cfc3d70e7f3c_ba5fb247:10",
+        "session_id": "cfc3d70e7f3c_ba5fb247",
+        "clipped": true,
+        "pool_doc_tokens": 80171,
+        "answer_status": "parsed",
+        "answer_detail": null,
+        "gold_answer": "The weekday wake up alarm has been updated to snooze for 20 minutes.",
+        "full": {
+          "token_f1": 1.0,
+          "rouge_l_f1": 1.0,
+          "pass_line": true,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        },
+        "c2kv": {
+          "token_f1": 0.7879,
+          "rouge_l_f1": 0.7879,
+          "pass_line": true,
+          "strict_valid": true,
+          "strict_name": "finish",
+          "strict_ok": true,
+          "censored_at_128": false
+        }
+      },
+      {
+        "qid": "cfc3d70e7f3c_ba5fb247:11",
+        "session_id": "cfc3d70e7f3c_ba5fb247",
+        "clipped": true,
+        "pool_doc_tokens": 80171,
+        "answer_status": "parsed",
+        "answer_detail": null,
+        "gold_answer": "The weekday wake up alarm has been updated to snooze for 20 minutes.",
+        "full": {
+          "token_f1": 1.0,
+          "rouge_l_f1": 1.0,
+          "pass_line": true,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        },
+        "c2kv": {
+          "token_f1": 0.7879,
+          "rouge_l_f1": 0.7879,
+          "pass_line": true,
+          "strict_valid": true,
+          "strict_name": "finish",
+          "strict_ok": true,
+          "censored_at_128": false
+        }
+      },
+      {
+        "qid": "cfc3d70e7f3c_ba5fb247:12",
+        "session_id": "cfc3d70e7f3c_ba5fb247",
+        "clipped": true,
+        "pool_doc_tokens": 80171,
+        "answer_status": "parsed",
+        "answer_detail": null,
+        "gold_answer": "The weekday wake up alarm has been updated to snooze for 20 minutes.",
+        "full": {
+          "token_f1": 1.0,
+          "rouge_l_f1": 1.0,
+          "pass_line": true,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        },
+        "c2kv": {
+          "token_f1": 0.7879,
+          "rouge_l_f1": 0.7879,
+          "pass_line": true,
+          "strict_valid": true,
+          "strict_name": "finish",
+          "strict_ok": true,
+          "censored_at_128": false
+        }
+      },
+      {
+        "qid": "cfc3d70e7f3c_ba5fb247:13",
+        "session_id": "cfc3d70e7f3c_ba5fb247",
+        "clipped": true,
+        "pool_doc_tokens": 80171,
+        "answer_status": "parsed",
+        "answer_detail": null,
+        "gold_answer": "The weekday wake up alarm has been updated to snooze for 20 minutes.",
+        "full": {
+          "token_f1": 1.0,
+          "rouge_l_f1": 1.0,
+          "pass_line": true,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        },
+        "c2kv": {
+          "token_f1": 0.7879,
+          "rouge_l_f1": 0.7879,
+          "pass_line": true,
+          "strict_valid": true,
+          "strict_name": "finish",
+          "strict_ok": true,
+          "censored_at_128": false
+        }
+      },
+      {
+        "qid": "cfc3d70e7f3c_ba5fb247:14",
+        "session_id": "cfc3d70e7f3c_ba5fb247",
+        "clipped": true,
+        "pool_doc_tokens": 80171,
+        "answer_status": "parsed",
+        "answer_detail": null,
+        "gold_answer": "The weekday wake up alarm has been updated to snooze for 20 minutes.",
+        "full": {
+          "token_f1": 1.0,
+          "rouge_l_f1": 1.0,
+          "pass_line": true,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        },
+        "c2kv": {
+          "token_f1": 0.7879,
+          "rouge_l_f1": 0.7879,
+          "pass_line": true,
+          "strict_valid": true,
+          "strict_name": "finish",
+          "strict_ok": true,
+          "censored_at_128": false
+        }
+      },
+      {
+        "qid": "cfc3d70e7f3c_ba5fb247:17",
+        "session_id": "cfc3d70e7f3c_ba5fb247",
+        "clipped": true,
+        "pool_doc_tokens": 80171,
+        "answer_status": "parsed",
+        "answer_detail": null,
+        "gold_answer": "The weekday wake up alarm has been updated to snooze for 20 minutes.",
+        "full": {
+          "token_f1": 0.963,
+          "rouge_l_f1": 0.963,
+          "pass_line": true,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        },
+        "c2kv": {
+          "token_f1": 0.7879,
+          "rouge_l_f1": 0.7879,
+          "pass_line": true,
+          "strict_valid": true,
+          "strict_name": "finish",
+          "strict_ok": true,
+          "censored_at_128": false
+        }
+      },
+      {
+        "qid": "cfc3d70e7f3c_ba5fb247:19",
+        "session_id": "cfc3d70e7f3c_ba5fb247",
+        "clipped": true,
+        "pool_doc_tokens": 80171,
+        "answer_status": "parsed",
+        "answer_detail": null,
+        "gold_answer": "The weekday wake up alarm has been updated to snooze for 20 minutes.",
+        "full": {
+          "token_f1": 0.963,
+          "rouge_l_f1": 0.963,
+          "pass_line": true,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        },
+        "c2kv": {
+          "token_f1": 0.7879,
+          "rouge_l_f1": 0.7879,
+          "pass_line": true,
+          "strict_valid": true,
+          "strict_name": "finish",
+          "strict_ok": true,
+          "censored_at_128": false
+        }
+      },
+      {
+        "qid": "cfc3d70e7f3c_ba5fb247:20",
+        "session_id": "cfc3d70e7f3c_ba5fb247",
+        "clipped": true,
+        "pool_doc_tokens": 80171,
+        "answer_status": "parsed",
+        "answer_detail": null,
+        "gold_answer": "The weekday wake up alarm has been updated to snooze for 20 minutes.",
+        "full": {
+          "token_f1": 0.963,
+          "rouge_l_f1": 0.963,
+          "pass_line": true,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        },
+        "c2kv": {
+          "token_f1": 0.7879,
+          "rouge_l_f1": 0.7879,
+          "pass_line": true,
+          "strict_valid": true,
+          "strict_name": "finish",
+          "strict_ok": true,
+          "censored_at_128": false
+        }
+      },
+      {
+        "qid": "cfc3d70e7f3c_ba5fb247:4",
+        "session_id": "cfc3d70e7f3c_ba5fb247",
+        "clipped": false,
+        "pool_doc_tokens": 80171,
+        "answer_status": "parsed",
+        "answer_detail": null,
+        "gold_answer": "Alarm snooze time has been set to 20 minutes for the weekday wake up alarm.",
+        "full": {
+          "token_f1": 0.4828,
+          "rouge_l_f1": 0.2759,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        },
+        "c2kv": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": true,
+          "strict_name": "phone__show_alarms",
+          "strict_ok": false,
+          "censored_at_128": false
+        }
+      },
+      {
+        "qid": "cfc3d70e7f3c_ba5fb247:6",
+        "session_id": "cfc3d70e7f3c_ba5fb247",
+        "clipped": true,
+        "pool_doc_tokens": 80171,
+        "answer_status": "parsed",
+        "answer_detail": null,
+        "gold_answer": "Alarm snooze time has been set to 20 minutes for the weekday wake up alarm.",
+        "full": {
+          "token_f1": 0.4118,
+          "rouge_l_f1": 0.2353,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        },
+        "c2kv": {
+          "token_f1": 0.8108,
+          "rouge_l_f1": 0.8108,
+          "pass_line": true,
+          "strict_valid": true,
+          "strict_name": "finish",
+          "strict_ok": true,
+          "censored_at_128": false
+        }
+      },
+      {
+        "qid": "cfc3d70e7f3c_ba5fb247:7",
+        "session_id": "cfc3d70e7f3c_ba5fb247",
+        "clipped": true,
+        "pool_doc_tokens": 80171,
+        "answer_status": "parsed",
+        "answer_detail": null,
+        "gold_answer": "Alarm snooze time has been set to 20 minutes for the weekday wake up alarm.",
+        "full": {
+          "token_f1": 0.8387,
+          "rouge_l_f1": 0.5161,
+          "pass_line": true,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        },
+        "c2kv": {
+          "token_f1": 0.8108,
+          "rouge_l_f1": 0.8108,
+          "pass_line": true,
+          "strict_valid": true,
+          "strict_name": "finish",
+          "strict_ok": true,
+          "censored_at_128": false
+        }
+      },
+      {
+        "qid": "cfc3d70e7f3c_ba5fb247:8",
+        "session_id": "cfc3d70e7f3c_ba5fb247",
+        "clipped": true,
+        "pool_doc_tokens": 80171,
+        "answer_status": "parsed",
+        "answer_detail": null,
+        "gold_answer": "Alarm snooze time has been set to 20 minutes for the weekday wake up alarm.",
+        "full": {
+          "token_f1": 0.8387,
+          "rouge_l_f1": 0.5161,
+          "pass_line": true,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        },
+        "c2kv": {
+          "token_f1": 0.8108,
+          "rouge_l_f1": 0.8108,
+          "pass_line": true,
+          "strict_valid": true,
+          "strict_name": "finish",
+          "strict_ok": true,
+          "censored_at_128": false
+        }
+      },
+      {
+        "qid": "cfc3d70e7f3c_ba5fb247:9",
+        "session_id": "cfc3d70e7f3c_ba5fb247",
+        "clipped": true,
+        "pool_doc_tokens": 80171,
+        "answer_status": "parsed",
+        "answer_detail": null,
+        "gold_answer": "The weekday wake up alarm has been updated to snooze for 20 minutes.",
+        "full": {
+          "token_f1": 0.8571,
+          "rouge_l_f1": 0.4286,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        },
+        "c2kv": {
+          "token_f1": 0.6857,
+          "rouge_l_f1": 0.3429,
+          "pass_line": false,
+          "strict_valid": true,
+          "strict_name": "finish",
+          "strict_ok": true,
+          "censored_at_128": false
+        }
+      },
+      {
+        "qid": "cfc3d70e7f3c_d150ef61:27",
+        "session_id": "cfc3d70e7f3c_d150ef61",
+        "clipped": true,
+        "pool_doc_tokens": 80171,
+        "answer_status": "answer_missing",
+        "answer_detail": "arguments={}（无 answer 参数）",
+        "gold_answer": null,
+        "full": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        },
+        "c2kv": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": true
+        }
+      },
+      {
+        "qid": "cfc3d70e7f3c_e497c59c:20",
+        "session_id": "cfc3d70e7f3c_e497c59c",
+        "clipped": true,
+        "pool_doc_tokens": 80171,
+        "answer_status": "answer_missing",
+        "answer_detail": "arguments={}（无 answer 参数）",
+        "gold_answer": null,
+        "full": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        },
+        "c2kv": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": true
+        }
+      },
+      {
+        "qid": "cfc3d70e7f3c_e497c59c:22",
+        "session_id": "cfc3d70e7f3c_e497c59c",
+        "clipped": true,
+        "pool_doc_tokens": 80171,
+        "answer_status": "answer_missing",
+        "answer_detail": "arguments={}（无 answer 参数）",
+        "gold_answer": null,
+        "full": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        },
+        "c2kv": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": true,
+          "strict_name": "venmo__show_transactions",
+          "strict_ok": false,
+          "censored_at_128": true
+        }
+      },
+      {
+        "qid": "cfc3d70e7f3c_eb3c3e78:10",
+        "session_id": "cfc3d70e7f3c_eb3c3e78",
+        "clipped": true,
+        "pool_doc_tokens": 80171,
+        "answer_status": "answer_missing",
+        "answer_detail": "arguments={}（无 answer 参数）",
+        "gold_answer": null,
+        "full": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        },
+        "c2kv": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": true
+        }
+      },
+      {
+        "qid": "cfc3d70e7f3c_eb3c3e78:11",
+        "session_id": "cfc3d70e7f3c_eb3c3e78",
+        "clipped": true,
+        "pool_doc_tokens": 80171,
+        "answer_status": "answer_missing",
+        "answer_detail": "arguments={}（无 answer 参数）",
+        "gold_answer": null,
+        "full": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        },
+        "c2kv": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": true
+        }
+      },
+      {
+        "qid": "cfc3d70e7f3c_eb3c3e78:12",
+        "session_id": "cfc3d70e7f3c_eb3c3e78",
+        "clipped": true,
+        "pool_doc_tokens": 80171,
+        "answer_status": "answer_missing",
+        "answer_detail": "arguments={}（无 answer 参数）",
+        "gold_answer": null,
+        "full": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        },
+        "c2kv": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": true
+        }
+      },
+      {
+        "qid": "cfc3d70e7f3c_eb3c3e78:13",
+        "session_id": "cfc3d70e7f3c_eb3c3e78",
+        "clipped": true,
+        "pool_doc_tokens": 80171,
+        "answer_status": "answer_missing",
+        "answer_detail": "arguments={}（无 answer 参数）",
+        "gold_answer": null,
+        "full": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        },
+        "c2kv": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": true,
+          "strict_name": "finish",
+          "strict_ok": true,
+          "censored_at_128": false
+        }
+      },
+      {
+        "qid": "cfc3d70e7f3c_eb3f9b09:12",
+        "session_id": "cfc3d70e7f3c_eb3f9b09",
+        "clipped": true,
+        "pool_doc_tokens": 80171,
+        "answer_status": "parsed",
+        "answer_detail": null,
+        "gold_answer": "Song 'Shadows in the Twilight' (released in 2020) is now playing.",
+        "full": {
+          "token_f1": 0.6957,
+          "rouge_l_f1": 0.6957,
+          "pass_line": true,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        },
+        "c2kv": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": true,
+          "strict_name": "spotify__show_song",
+          "strict_ok": false,
+          "censored_at_128": false
+        }
+      },
+      {
+        "qid": "cfc3d70e7f3c_fbba462d:34",
+        "session_id": "cfc3d70e7f3c_fbba462d",
+        "clipped": true,
+        "pool_doc_tokens": 80171,
+        "answer_status": "parsed",
+        "answer_detail": null,
+        "gold_answer": "I am unable to complete the task due to technical issues with the Todoist API tools provided in this environment. The `todoist__show_tasks` function fails to validate optional arguments correctly, making it impossible to list tasks without applying specific filters that would exclude the relevant items. As a result, I cannot access your \"Today\" or \"Inbox\" tasks to perform the requested deletions and moves.\n\nI was able to retrieve your schedule from SimpleNote, which indicates you have **8 hours** of work scheduled for Monday (Morning: 2h, Afternoon: 1h, Evening: 5h).\n\nPlease manage your Todoist tasks manually for tonight.",
+        "full": {
+          "token_f1": 0.2932,
+          "rouge_l_f1": 0.1257,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": true
+        },
+        "c2kv": {
+          "token_f1": 0.0187,
+          "rouge_l_f1": 0.0187,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": true
+        }
+      },
+      {
+        "qid": "cfc3d70e7f3c_fbbdbea5:10",
+        "session_id": "cfc3d70e7f3c_fbbdbea5",
+        "clipped": true,
+        "pool_doc_tokens": 80171,
+        "answer_status": "answer_missing",
+        "answer_detail": "arguments={}（无 answer 参数）",
+        "gold_answer": null,
+        "full": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        },
+        "c2kv": {
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": true
+        }
+      }
+    ]
+  },
+  "d_arms_32k": {
+    "note": "32k 集（checkpoint-2678，594×3），与 76k（checkpoint-250）不同 checkpoint，分表不并表",
+    "d_plain": {
+      "n_finish_rows": 7,
+      "answer_parse_disclosure": {
+        "answer_missing": 6,
+        "parsed": 1
+      },
+      "pass_line_rouge_l_ge_0_5": {
+        "n_pass": 0,
+        "rate": 0.0
+      },
+      "rows": [
+        {
+          "qid": "10d642ac9c10_a23dcd0b:7",
+          "session_id": "10d642ac9c10_a23dcd0b",
+          "answer_status": "answer_missing",
+          "answer_detail": "arguments={}（无 answer 参数）",
+          "gold_answer": null,
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        },
+        {
+          "qid": "379733137f5d_18ea62d8:4",
+          "session_id": "379733137f5d_18ea62d8",
+          "answer_status": "answer_missing",
+          "answer_detail": "arguments={}（无 answer 参数）",
+          "gold_answer": null,
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        },
+        {
+          "qid": "379733137f5d_c92384a5:5",
+          "session_id": "379733137f5d_c92384a5",
+          "answer_status": "answer_missing",
+          "answer_detail": "arguments={}（无 answer 参数）",
+          "gold_answer": null,
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        },
+        {
+          "qid": "379733137f5d_c95cd078:9",
+          "session_id": "379733137f5d_c95cd078",
+          "answer_status": "answer_missing",
+          "answer_detail": "arguments={}（无 answer 参数）",
+          "gold_answer": null,
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        },
+        {
+          "qid": "379733137f5d_e81d8f92:5",
+          "session_id": "379733137f5d_e81d8f92",
+          "answer_status": "parsed",
+          "answer_detail": null,
+          "gold_answer": "Dylan Stone",
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": true
+        },
+        {
+          "qid": "56c19f19c4f2_35262586:4",
+          "session_id": "56c19f19c4f2_35262586",
+          "answer_status": "answer_missing",
+          "answer_detail": "arguments={}（无 answer 参数）",
+          "gold_answer": null,
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        },
+        {
+          "qid": "7c39d2802396_912b19fc:15",
+          "session_id": "7c39d2802396_912b19fc",
+          "answer_status": "answer_missing",
+          "answer_detail": "arguments 无 answer 键（键: command,summary）",
+          "gold_answer": null,
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": true
+        }
+      ]
+    },
+    "d_typed": {
+      "n_finish_rows": 7,
+      "answer_parse_disclosure": {
+        "answer_missing": 6,
+        "parsed": 1
+      },
+      "pass_line_rouge_l_ge_0_5": {
+        "n_pass": 0,
+        "rate": 0.0
+      },
+      "rows": [
+        {
+          "qid": "10d642ac9c10_a23dcd0b:7",
+          "session_id": "10d642ac9c10_a23dcd0b",
+          "answer_status": "answer_missing",
+          "answer_detail": "arguments={}（无 answer 参数）",
+          "gold_answer": null,
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        },
+        {
+          "qid": "379733137f5d_18ea62d8:4",
+          "session_id": "379733137f5d_18ea62d8",
+          "answer_status": "answer_missing",
+          "answer_detail": "arguments={}（无 answer 参数）",
+          "gold_answer": null,
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": true
+        },
+        {
+          "qid": "379733137f5d_c92384a5:5",
+          "session_id": "379733137f5d_c92384a5",
+          "answer_status": "answer_missing",
+          "answer_detail": "arguments={}（无 answer 参数）",
+          "gold_answer": null,
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        },
+        {
+          "qid": "379733137f5d_c95cd078:9",
+          "session_id": "379733137f5d_c95cd078",
+          "answer_status": "answer_missing",
+          "answer_detail": "arguments={}（无 answer 参数）",
+          "gold_answer": null,
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": true
+        },
+        {
+          "qid": "379733137f5d_e81d8f92:5",
+          "session_id": "379733137f5d_e81d8f92",
+          "answer_status": "parsed",
+          "answer_detail": null,
+          "gold_answer": "Dylan Stone",
+          "token_f1": 0.08,
+          "rouge_l_f1": 0.08,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": true
+        },
+        {
+          "qid": "56c19f19c4f2_35262586:4",
+          "session_id": "56c19f19c4f2_35262586",
+          "answer_status": "answer_missing",
+          "answer_detail": "arguments={}（无 answer 参数）",
+          "gold_answer": null,
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        },
+        {
+          "qid": "7c39d2802396_912b19fc:15",
+          "session_id": "7c39d2802396_912b19fc",
+          "answer_status": "answer_missing",
+          "answer_detail": "arguments 无 answer 键（键: command,summary）",
+          "gold_answer": null,
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": true
+        }
+      ]
+    },
+    "d_random": {
+      "n_finish_rows": 7,
+      "answer_parse_disclosure": {
+        "answer_missing": 6,
+        "parsed": 1
+      },
+      "pass_line_rouge_l_ge_0_5": {
+        "n_pass": 0,
+        "rate": 0.0
+      },
+      "rows": [
+        {
+          "qid": "10d642ac9c10_a23dcd0b:7",
+          "session_id": "10d642ac9c10_a23dcd0b",
+          "answer_status": "answer_missing",
+          "answer_detail": "arguments={}（无 answer 参数）",
+          "gold_answer": null,
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        },
+        {
+          "qid": "379733137f5d_18ea62d8:4",
+          "session_id": "379733137f5d_18ea62d8",
+          "answer_status": "answer_missing",
+          "answer_detail": "arguments={}（无 answer 参数）",
+          "gold_answer": null,
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        },
+        {
+          "qid": "379733137f5d_c92384a5:5",
+          "session_id": "379733137f5d_c92384a5",
+          "answer_status": "answer_missing",
+          "answer_detail": "arguments={}（无 answer 参数）",
+          "gold_answer": null,
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        },
+        {
+          "qid": "379733137f5d_c95cd078:9",
+          "session_id": "379733137f5d_c95cd078",
+          "answer_status": "answer_missing",
+          "answer_detail": "arguments={}（无 answer 参数）",
+          "gold_answer": null,
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        },
+        {
+          "qid": "379733137f5d_e81d8f92:5",
+          "session_id": "379733137f5d_e81d8f92",
+          "answer_status": "parsed",
+          "answer_detail": null,
+          "gold_answer": "Dylan Stone",
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": true
+        },
+        {
+          "qid": "56c19f19c4f2_35262586:4",
+          "session_id": "56c19f19c4f2_35262586",
+          "answer_status": "answer_missing",
+          "answer_detail": "arguments={}（无 answer 参数）",
+          "gold_answer": null,
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": false
+        },
+        {
+          "qid": "7c39d2802396_912b19fc:15",
+          "session_id": "7c39d2802396_912b19fc",
+          "answer_status": "answer_missing",
+          "answer_detail": "arguments 无 answer 键（键: command,summary）",
+          "gold_answer": null,
+          "token_f1": 0.0,
+          "rouge_l_f1": 0.0,
+          "pass_line": false,
+          "strict_valid": false,
+          "strict_name": null,
+          "strict_ok": false,
+          "censored_at_128": true
+        }
+      ]
+    }
+  },
+  "manual_review": {
+    "seed": 20260816,
+    "sampling": "random.Random(seed).sample（10 例，总体 = 79 finish 行 × 2 臂 = 158 单元）",
+    "note": "manual_judgement 字段留空待复核人填；answer_status 为 answer_missing 的例无金标 answer（gold_answer_first_200_chars 为空串）。",
+    "examples": [
+      {
+        "qid": "cfc3d70e7f3c_eb3c3e78:12",
+        "arm": "c2kv",
+        "token_f1": 0.0,
+        "rouge_l_f1": 0.0,
+        "pass_line": false,
+        "answer_status": "answer_missing",
+        "gold_answer_first_200_chars": "",
+        "generated_text_first_200_chars": "Action:\n<tool_call>\n{\"name\":\"venmo__show_user_profile\",\"arguments\":{\"access_token\":\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ2ZW5tbytjaGVsc2VhLWJ1cmNoQGdtYWlsLmNvbSIsImV4cCI6MTY4NDQxMjc0MX0.Se8",
+        "manual_judgement": "复核一致：金标无 answer 可比；生成为他工具调用，判负合理"
+      },
+      {
+        "qid": "cfc3d70e7f3c_ba5fb247:14",
+        "arm": "full",
+        "token_f1": 1.0,
+        "rouge_l_f1": 1.0,
+        "pass_line": true,
+        "answer_status": "parsed",
+        "gold_answer_first_200_chars": "The weekday wake up alarm has been updated to snooze for 20 minutes.",
+        "generated_text_first_200_chars": "The weekday wake up alarm has been updated to snooze for 20 minutes.",
+        "manual_judgement": "复核一致：生成与金标 answer 逐字一致，判对正确"
+      },
+      {
+        "qid": "cfc3d70e7f3c_286c7c09:26",
+        "arm": "c2kv",
+        "token_f1": 0.0,
+        "rouge_l_f1": 0.0,
+        "pass_line": false,
+        "answer_status": "answer_missing",
+        "gold_answer_first_200_chars": "",
+        "generated_text_first_200_chars": "Action:\n<tool_call>\n{\"name\":\"finish\",\"arguments\":{}}\n</tool_call>",
+        "manual_judgement": "复核一致：金标无 answer；生成 finish 空参，无语义内容，判负合理"
+      },
+      {
+        "qid": "cfc3d70e7f3c_ba5fb247:13",
+        "arm": "c2kv",
+        "token_f1": 0.7879,
+        "rouge_l_f1": 0.7879,
+        "pass_line": true,
+        "answer_status": "parsed",
+        "gold_answer_first_200_chars": "The weekday wake up alarm has been updated to snooze for 20 minutes.",
+        "generated_text_first_200_chars": "Action:\n<tool_call>\n{\"name\":\"finish\",\"arguments\":{\"answer\":\"The weekday wake up alarm has been updated to snooze for 20 minutes.\"}}\n</tool_call>",
+        "manual_judgement": "复核一致：生成 finish 调用的 answer 与金标逐字一致（包裹结构稀释分数），判对正确"
+      },
+      {
+        "qid": "cfc3d70e7f3c_1a5f08b9:8",
+        "arm": "c2kv",
+        "token_f1": 0.0,
+        "rouge_l_f1": 0.0,
+        "pass_line": false,
+        "answer_status": "parsed",
+        "gold_answer_first_200_chars": "9",
+        "generated_text_first_200_chars": "Action:\n<tool_call>\n{\"name\":\"venmo__search_friends\",\"arguments\":{\"user_email\":\"morgan-harrison@gmail.com\",\"page_index\":5,\"access_token\":\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ2ZW5tbyttb3JnYW",
+        "manual_judgement": "复核一致：金标 answer='9'，生成未传达该值（他工具调用），判负合理"
+      },
+      {
+        "qid": "a45d2c09567a_7c2c1bb8:7",
+        "arm": "full",
+        "token_f1": 0.0,
+        "rouge_l_f1": 0.0,
+        "pass_line": false,
+        "answer_status": "parsed",
+        "gold_answer_first_200_chars": "Eliana Harper",
+        "generated_text_first_200_chars": "I see that I made a mistake in the sorting request. The valid attributes for sorting are \"followed_at\", \"name\", and \"created_at\", not \"follower_count\". \n\nLet me check the artists again by their name t",
+        "manual_judgement": "复核一致：金标 answer='Eliana Harper'，生成散文未含该名，判负合理"
+      },
+      {
+        "qid": "cfc3d70e7f3c_286c7c09:7",
+        "arm": "c2kv",
+        "token_f1": 0.0,
+        "rouge_l_f1": 0.0,
+        "pass_line": false,
+        "answer_status": "answer_missing",
+        "gold_answer_first_200_chars": "",
+        "generated_text_first_200_chars": "Action:\n<tool_call>\n{\"name\":\"file_system__delete_file\",\"arguments\":{\"access_token\":\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJmaWxlX3N5c3RlbStkYXYubWFydEBnbWFpbC5jb20iLCJleHAiOjE2ODQ0MTIwOTh9.Ly",
+        "manual_judgement": "复核一致：金标无 answer；生成他工具调用，判负合理"
+      },
+      {
+        "qid": "cfc3d70e7f3c_79ccaa70:8",
+        "arm": "full",
+        "token_f1": 0.0,
+        "rouge_l_f1": 0.0,
+        "pass_line": false,
+        "answer_status": "answer_missing",
+        "gold_answer_first_200_chars": "",
+        "generated_text_first_200_chars": "I have denied the housing payment request from Kathryn Maldonado, updated my Venmo balance to $8,233.00, and sent her $540 as a transaction for the reduced rent. All actions have been completed succes",
+        "manual_judgement": "复核一致：金标无 answer；生成散文总结，按口径判负"
+      },
+      {
+        "qid": "cfc3d70e7f3c_15b71eb0:14",
+        "arm": "c2kv",
+        "token_f1": 0.0,
+        "rouge_l_f1": 0.0,
+        "pass_line": false,
+        "answer_status": "answer_missing",
+        "gold_answer_first_200_chars": "",
+        "generated_text_first_200_chars": "Action:\n<tool_call>\n{\"name\":\"finish\",\"arguments\":{}}\n</tool_call>",
+        "manual_judgement": "复核一致：金标无 answer；生成 finish 空参，判负合理"
+      },
+      {
+        "qid": "cfc3d70e7f3c_286c7c09:27",
+        "arm": "c2kv",
+        "token_f1": 0.0,
+        "rouge_l_f1": 0.0,
+        "pass_line": false,
+        "answer_status": "answer_missing",
+        "gold_answer_first_200_chars": "",
+        "generated_text_first_200_chars": "Action:\n<tool_call>\n{\"name\":\"finish\",\"arguments\":{}}\n</tool_call>",
+        "manual_judgement": "复核一致：金标无 answer；生成 finish 空参，判负合理"
+      }
+    ],
+    "reviewer": "foreman（人工逐例）",
+    "agreement": "10/10 自动过线判定与人工语义判断一致（0 不一致）"
+  }
+}
