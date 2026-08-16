@@ -8,6 +8,16 @@ R5 冻结 360 样本清单（configs/r5_metrology_sample.json），逐行落盘�
 KVzip 择一，见 prereg §4）在后续 chunk 通过 _HFQwenPromptingHandler._hf_generate 内的
 hook 点接入。
 
+S8.2 起：condition=snapkv / streamingllm 已实现（训练无关的 KV 压缩）。接入方式 =
+S8.1 预留的 hook 点（_HFQwenPromptingHandler._query_prompting 内）：完整 prompt 先
+eager prefill（output_attentions=True 取注意力），按 metrology/kv_compress.py 的方法
+规则（官方 SnapKV / StreamingLLM 逻辑的等价重实现；官方步骤对照与已知偏差清单见
+kv_compress.py 模块 docstring）选出保留位置、对 past_key_values 做位置子集裁切，再进
+greedy decode 循环（显式 position_ids 延续原始绝对位置，与官方 SnapKV 语义一致）。
+base 仍走 model.generate 原路径（零手术，输出与 S8.1 逐字节一致；--kv_budget 对 base
+无效）。h2o / kvzip 仍为预留（未实现即报错）。预算：--kv_budget 或默认 prompt_len 的
+50%，逐行记录 compression_meta。
+
 ══ 路径判断（prompting vs FC）：结论 = prompting ══
 
 证据 1（官方注册表）：BFCL v4 constants/model_config.py:1672-1683 将
@@ -65,6 +75,8 @@ MathAPI 需要 mpmath（轻量纯 python，BFCL 自身依赖），dryrun 会自�
                     BFCL 循环 decode 输入一致), gen_tokens,
                    stop_reason(eos/length/other), decoded_calls(执行串列表或异常类名),
                    decode_error_message, actual_cap, wall_sec,
+                   (仅压缩条件附 compression_meta{method, budget, kept_tokens,
+                    obs_window, n_sink})，
                    (仅单轮类附 decoded_ast / decode_ast_error)}]}],
  actual_cap_per_turn, model, max_context_length, seed: null, wall_sec,
  bfcl_result(与 BFCL 生成器 _llm_response_generation.py:214-218 同形，可直接
@@ -96,6 +108,11 @@ FROZEN_IDS_DEFAULT = REPO_ROOT / "configs" / "r5_metrology_sample.json"
 
 CONDITION_CHOICES = ["base", "snapkv", "h2o", "streamingllm", "kvzip"]
 CAP_TIER_CHOICES = ["default", "128", "1024"]
+
+# 压缩条件固定口径（与 metrology/kv_compress.py 默认一致；S8.2 任务书）
+KV_OBS_WINDOW = 16   # SnapKV 观察窗（官方默认 32，本 sprint 口径 16，见对照表第 9 条）
+KV_KERNEL = 7        # SnapKV maxpool 核（必须奇数）
+KV_N_SINK = 4        # StreamingLLM sink 前缀长度
 
 # 子类不得覆盖的基类 @final 方法（行号：base_handler.py / base_oss_handler.py）。
 # 仅作显式守卫；本 runner 不复制这些方法，语义全部复用基类。
@@ -454,7 +471,8 @@ def _build_manifest(args, bfcl_dir: Path, data_dir: Path, output_path: Path) -> 
 
 def _build_handler(handler_cls, model_path: str, tokenizer, model, device: str,
                    cap_tier: str, condition: str,
-                   max_context_length: int | None):
+                   max_context_length: int | None,
+                   kv_budget: int | None):
     """构造 handler：直接调 handler_cls.__init__（即 QwenHandler.__init__，本 runner
     不 override __init__，规避 EnforceOverrides 严格模式），再把本地 HF 状态挂到实例上。
 
@@ -486,6 +504,10 @@ def _build_handler(handler_cls, model_path: str, tokenizer, model, device: str,
     handler._hf_device = device
     handler._cap_tier = cap_tier
     handler._condition = condition
+    handler._kv_budget = kv_budget        # None → 每查询 budget = prompt_len 的 50%
+    handler._obs_window = KV_OBS_WINDOW   # 仅 snapkv
+    handler._kv_kernel = KV_KERNEL        # 仅 snapkv
+    handler._n_sink = KV_N_SINK           # 仅 streamingllm
     handler._query_history = []  # 每次 _query_prompting 追加一条（调用序 == 基类循环步序）
     return handler
 
@@ -563,21 +585,23 @@ def _define_handler_class():
             if self._pad_token_id is not None:
                 gen_kwargs["pad_token_id"] = self._pad_token_id
 
-            # ══ 预留 hook 点（压缩条件，后续 chunk）══
-            # condition != base（snapkv / h2o / streamingllm / kvzip 择一，prereg §4）时，
-            # 在此按 self._condition 给 self._hf_model 挂前向/注意力 hook
-            # （training-free 的 KV/上下文压缩，官方仓库逻辑的 eager 等价重实现）。
-            # 只改注意力前向路径；generate 参数与下方记录逻辑保持不变，保证三条件可比。
-            if self._condition != "base":
-                raise NotImplementedError(
-                    f"condition={self._condition} 未实现（本 chunk 仅 base）；"
-                    "后续 chunk 在 _query_prompting 的 hook 点接入"
-                )
-
+            # ══ S8.2：压缩条件接入点（S8.1 预留 hook 点）══
+            # base：model.generate 原样（零手术，输出与 S8.1 逐字节一致；
+            #       --kv_budget 对 base 无效）。
+            # snapkv / streamingllm：prefill(output_attentions=True) →
+            #   metrology.kv_compress 位置选择 + past_key_values 裁切 →
+            #   greedy decode 循环（位置语义与官方 SnapKV 对齐，对照表见
+            #   metrology/kv_compress.py 模块 docstring）。
+            compression_meta = None
             with torch.no_grad():
-                outputs = self._hf_model.generate(**inputs, **gen_kwargs)
+                if self._condition == "base":
+                    outputs = self._hf_model.generate(**inputs, **gen_kwargs)
+                    generated = outputs[0][prompt_len:]
+                else:
+                    generated, compression_meta = self._hf_generate_compressed(
+                        inputs, gen_kwargs, prompt_len
+                    )
 
-            generated = outputs[0][prompt_len:]
             gen_tokens = int(generated.shape[-1])
 
             eos_ids = set(self._eos_token_ids or [])
@@ -593,15 +617,16 @@ def _define_handler_class():
             raw_text = self.tokenizer.decode(generated, skip_special_tokens=True)
 
             elapsed = time.time() - start_time
-            self._query_history.append(
-                {
-                    "raw_text": raw_text,
-                    "gen_tokens": gen_tokens,
-                    "stop_reason": stop_reason,
-                    "actual_cap": max_tokens,
-                    "wall_sec": round(elapsed, 4),
-                }
-            )
+            query_entry = {
+                "raw_text": raw_text,
+                "gen_tokens": gen_tokens,
+                "stop_reason": stop_reason,
+                "actual_cap": max_tokens,
+                "wall_sec": round(elapsed, 4),
+            }
+            if compression_meta is not None:
+                query_entry["compression_meta"] = compression_meta
+            self._query_history.append(query_entry)
 
             # 伪 api_response：满足 qwen.py:181-197 的 _parse_query_response_prompting
             api_response = types.SimpleNamespace(
@@ -615,6 +640,118 @@ def _define_handler_class():
 
         # 等价 @override 装饰器（见 _define_handler_class 说明）
         _query_prompting.__override__ = True
+
+        def _hf_generate_compressed(self, inputs: dict, gen_kwargs: dict,
+                                    prompt_len: int):
+            """压缩条件的生成路径（仅 snapkv / streamingllm 进入；base 不调用）。
+
+            prefill(output_attentions=True) → metrology.kv_compress.compress_pkv
+            位置选择 + KV 裁切 → greedy decode 循环。
+
+            - 预算：--kv_budget，或默认 prompt_len 的 50%（逐行记录）。
+            - 位置语义：decode 每步显式 position_ids = prompt_len + step（原始绝对
+              位置延续，与官方 SnapKV 的 kv_seq_len 记账一致；对照表第 4 条）；
+              attention_mask=None（无 padding，mask 由 cache 长度推断）。
+            - 内存注意：prefill 需物化每层注意力 (1,H,L,L)（long_context 长 prompt
+              下占用显著）；裁切完成后即释放，decode 期无该开销。
+            返回 (generated, compression_meta)。
+            """
+            import torch
+
+            from metrology.kv_compress import compress_pkv, layer_kv_tensors
+
+            device = self._hf_device
+            budget = (
+                int(self._kv_budget)
+                if self._kv_budget is not None
+                else max(1, prompt_len // 2)
+            )
+            input_ids = inputs["input_ids"]
+            if int(input_ids.shape[0]) != 1:
+                raise ValueError("压缩路径仅支持 batch=1（BFCL 单样本）")
+
+            with torch.no_grad():
+                prefill_out = self._hf_model(
+                    input_ids=input_ids,
+                    attention_mask=inputs.get("attention_mask"),
+                    use_cache=True,
+                    output_attentions=True,
+                    return_dict=True,
+                )
+            attentions = list(prefill_out.attentions)  # 每层 (1, H, L, L)
+            pkv = prefill_out.past_key_values
+
+            # 守卫：手术假定各层 cache 长度 == prompt_len（滑动窗口层布局不支持）
+            for li in range(len(attentions)):
+                k_li, _ = layer_kv_tensors(pkv, li)
+                if int(k_li.shape[-2]) != prompt_len:
+                    raise NotImplementedError(
+                        f"层 {li} 的 cache 长度 {int(k_li.shape[-2])} != prompt_len "
+                        f"{prompt_len}；滑动窗口 cache 布局不支持该手术路径"
+                    )
+
+            n_heads = int(attentions[0].shape[1])
+            if self._condition == "snapkv":
+                k0, _ = layer_kv_tensors(pkv, 0)
+                groups = max(1, n_heads // int(k0.shape[1]))
+            else:
+                groups = 1
+
+            pkv, kept_tokens = compress_pkv(
+                pkv,
+                self._condition,
+                budget,
+                attentions=attentions,
+                obs_window=self._obs_window,
+                kernel=self._kv_kernel,
+                n_sink=self._n_sink,
+                num_key_value_groups=groups,
+                prompt_len=prompt_len,
+            )
+            assert kept_tokens <= prompt_len, "压缩后保留数不应超过 prompt 长度"
+            # 恒等边界（budget >= prompt_len）：选择集 = 全量、零手术（对照 compress_pkv 语义）
+            assert (kept_tokens == prompt_len) == (budget >= prompt_len)
+            del attentions  # 释放 prefill 注意力物化内存
+
+            eos_ids = set(self._eos_token_ids or [])
+            max_new_tokens = int(gen_kwargs["max_new_tokens"])
+
+            next_id = prefill_out.logits[:, -1].argmax(dim=-1, keepdim=True)
+            del prefill_out
+
+            gen_ids = []
+            past = pkv
+            pos = prompt_len
+            with torch.no_grad():
+                while len(gen_ids) < max_new_tokens:
+                    gen_ids.append(int(next_id[0, 0].item()))
+                    if next_id[0, 0].item() in eos_ids:
+                        break
+                    step_out = self._hf_model(
+                        input_ids=next_id,
+                        attention_mask=None,
+                        position_ids=torch.tensor(
+                            [[pos]], dtype=torch.long, device=device
+                        ),
+                        past_key_values=past,
+                        use_cache=True,
+                        return_dict=True,
+                    )
+                    past = step_out.past_key_values
+                    next_id = step_out.logits[:, -1].argmax(dim=-1, keepdim=True)
+                    pos += 1
+
+            generated = torch.tensor(gen_ids, dtype=torch.long, device=device)
+            meta = {
+                "method": self._condition,
+                "budget": budget,
+                "kept_tokens": kept_tokens,
+                "obs_window": (
+                    self._obs_window if self._condition == "snapkv" else None
+                ),
+                "n_sink": self._n_sink if self._condition == "streamingllm" else None,
+            }
+            return generated, meta
 
         def reset_query_history(self):
             self._query_history = []
@@ -692,19 +829,20 @@ def _run_one_entry(handler, entry: dict, cap_tier: str, condition: str,
                 q = history[idx]
                 idx += 1
                 calls, err_name, err_msg = _safe_decode_execute(handler, parsed_text)
-                steps.append(
-                    {
-                        "step_index": step_idx,
-                        "raw_text": q["raw_text"],
-                        "parsed_text": parsed_text,
-                        "gen_tokens": q["gen_tokens"],
-                        "stop_reason": q["stop_reason"],
-                        "decoded_calls": calls if calls is not None else err_name,
-                        "decode_error_message": err_msg,
-                        "actual_cap": q["actual_cap"],
-                        "wall_sec": q["wall_sec"],
-                    }
-                )
+                step = {
+                    "step_index": step_idx,
+                    "raw_text": q["raw_text"],
+                    "parsed_text": parsed_text,
+                    "gen_tokens": q["gen_tokens"],
+                    "stop_reason": q["stop_reason"],
+                    "decoded_calls": calls if calls is not None else err_name,
+                    "decode_error_message": err_msg,
+                    "actual_cap": q["actual_cap"],
+                    "wall_sec": q["wall_sec"],
+                }
+                if q.get("compression_meta") is not None:
+                    step["compression_meta"] = q["compression_meta"]
+                steps.append(step)
                 caps.append(q["actual_cap"])
             turns.append(
                 {
@@ -722,21 +860,22 @@ def _run_one_entry(handler, entry: dict, cap_tier: str, condition: str,
         assert len(history) == 1
         calls, err_name, err_msg = _safe_decode_execute(handler, parsed_text)
         ast_calls, ast_err_name, ast_err_msg = _safe_decode_ast(handler, parsed_text)
-        steps = [
-            {
-                "step_index": 0,
-                "raw_text": q["raw_text"],
-                "parsed_text": parsed_text,
-                "gen_tokens": q["gen_tokens"],
-                "stop_reason": q["stop_reason"],
-                "decoded_calls": calls if calls is not None else err_name,
-                "decode_error_message": err_msg,
-                "decoded_ast": ast_calls if ast_calls is not None else ast_err_name,
-                "decode_ast_error": ast_err_msg,
-                "actual_cap": q["actual_cap"],
-                "wall_sec": q["wall_sec"],
-            }
-        ]
+        step = {
+            "step_index": 0,
+            "raw_text": q["raw_text"],
+            "parsed_text": parsed_text,
+            "gen_tokens": q["gen_tokens"],
+            "stop_reason": q["stop_reason"],
+            "decoded_calls": calls if calls is not None else err_name,
+            "decode_error_message": err_msg,
+            "decoded_ast": ast_calls if ast_calls is not None else ast_err_name,
+            "decode_ast_error": ast_err_msg,
+            "actual_cap": q["actual_cap"],
+            "wall_sec": q["wall_sec"],
+        }
+        if q.get("compression_meta") is not None:
+            step["compression_meta"] = q["compression_meta"]
+        steps = [step]
         turns = [
             {
                 "turn_index": 0,
@@ -955,6 +1094,7 @@ def run_inference(args, output_path: Path):
         cap_tier=args.cap_tier,
         condition=args.condition,
         max_context_length=args.max_context_length,
+        kv_budget=args.kv_budget,
     )
     handler_cls_ok = type(handler) is handler_cls
     print(f"[run] handler 实例类型 {type(handler).__name__}（子类化路径: {handler_cls_ok}）")
@@ -1008,7 +1148,7 @@ def run_inference(args, output_path: Path):
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="python -m metrology.bfcl_hf_runner",
-        description="BFCL v4 冻结样本本地 HF 推理 runner（S8.1，condition=base）",
+        description="BFCL v4 冻结样本本地 HF 推理 runner（S8.2：base / snapkv / streamingllm）",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     p.add_argument(
@@ -1029,7 +1169,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--condition", default="base", choices=CONDITION_CHOICES,
-        help="压缩条件；本 chunk 只实现 base，其余为后续 chunk 预留（snapkv/h2o/streamingllm/kvzip）",
+        help="压缩条件：base（无压缩对照，generate 原样）/ snapkv / streamingllm（S8.2 已实现，"
+             "prefill 后 KV 手术）；h2o / kvzip 为后续 chunk 预留",
+    )
+    p.add_argument(
+        "--kv_budget", type=int, default=None,
+        help="压缩条件的 KV 预算（prefill 后保留 token 数）；默认=prompt_len 的 50%。"
+             "仅 snapkv/streamingllm 生效（base 忽略）；实际保留数逐行记入 compression_meta",
     )
     p.add_argument(
         "--limit", type=int, default=None,
@@ -1071,10 +1217,10 @@ def main(argv=None):
         pass
     args = build_parser().parse_args(argv)
 
-    if args.condition != "base":
+    if args.condition in ("h2o", "kvzip"):
         raise SystemExit(
-            f"condition={args.condition} 未实现：本 chunk 只实现 base；"
-            "压缩条件在后续 chunk 经 _HFQwenPromptingHandler._query_prompting 的 hook 点接入"
+            f"condition={args.condition} 未实现：S8.2 实现 snapkv / streamingllm；"
+            "h2o / kvzip 在后续 chunk 经 _query_prompting 的 hook 点接入"
         )
     if not args.dryrun and not args.model:
         raise SystemExit("非 dryrun 模式必须提供 --model")
@@ -1082,7 +1228,10 @@ def main(argv=None):
     output_path = Path(args.output) if args.output else (
         REPO_ROOT / "metrology" / "outputs" / f"bfcl_run_{args.condition}_{args.cap_tier}.jsonl"
     )
-    print(f"[runner] condition={args.condition}  cap_tier={args.cap_tier}  "
+    kv_note = ""
+    if args.condition != "base":
+        kv_note = f"  kv_budget={args.kv_budget if args.kv_budget is not None else '50%'}"
+    print(f"[runner] condition={args.condition}  cap_tier={args.cap_tier}{kv_note}  "
           f"output={output_path}")
 
     if args.dryrun:
@@ -1093,3 +1242,21 @@ def main(argv=None):
 
 if __name__ == "__main__":
     main()
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# epilog：服务器侧冒烟建议（S8.2 交付说明）
+# ══════════════════════════════════════════════════════════════════════════
+# 前置：source /usr/local/Ascend/ascend-toolkit/set_env.sh；用 ~/envs/c2kv/bin/python；
+# 单测（纯 CPU、不占卡）：
+#   ~/envs/c2kv/bin/python -m pytest metrology/test_kv_compress.py -v
+# 冒烟（各 1 条样本、cap 128；NPU 空闲门限 ≥20G 时发车，窗口门控脚本参照
+#   ~/s4_cover2.sh 用法；结果落 ~/c2kv/outputs_lyc/ 另命名避免与既有归档混淆）：
+#   source /usr/local/Ascend/ascend-toolkit/set_env.sh
+#   ~/envs/c2kv/bin/python -m metrology.bfcl_hf_runner \
+#     --bfcl_pkg_path <bfcl_eval 包路径> --model ~/c2kv/models/Qwen3-4B-Instruct-2507 \
+#     --cap_tier 128 --limit 1 --output ~/c2kv/outputs_lyc/smoke_s8_2_base.jsonl
+#   （同命令分别以 --condition snapkv / --condition streamingllm [--kv_budget N] 重跑；
+#     核对三行 compression_meta{method,budget,kept_tokens,obs_window,n_sink} 与
+#     base 行无该字段；建议每条冒烟选 <2k token 的 multi_turn_base 样本，
+#     先看 prefill 注意力物化（每层 (1,H,L,L) bf16）在本卡的峰值显存再放量）。
