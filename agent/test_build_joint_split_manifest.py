@@ -385,6 +385,13 @@ def test_first_user_instruction_extraction():
               [{"role": "assistant", "content": "ok"}])
     ]
     assert bjsm._first_user_instruction(parts_span) == "hello\nworld"
+    # OpenTelemetry gen_ai shape: content is None, text lives under parts[].content.
+    otel_span = [
+        _span("span-1", "2026-01-01T00:00:01",
+              [{"role": "user", "parts": [{"type": "text", "content": "Context: task instruction here"}]}],
+              [{"role": "assistant", "content": "ok"}])
+    ]
+    assert bjsm._first_user_instruction(otel_span) == "Context: task instruction here"
     assert bjsm._first_user_instruction([]) is None
     assert bjsm._normalize_text("  A  B\nC ") == "a b c"
 

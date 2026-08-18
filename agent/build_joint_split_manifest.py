@@ -172,6 +172,9 @@ def _message_text(message: Any) -> str:
     if not isinstance(message, dict):
         return ""
     content = message.get("content")
+    if content is None:
+        # OpenTelemetry gen_ai shape: {"role": ..., "parts": [{"type": "text", "content": ...}]}
+        content = message.get("parts")
     if isinstance(content, str):
         return content
     if isinstance(content, list):
