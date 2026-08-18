@@ -391,8 +391,14 @@ def _iter_agent_rows(data_files: Sequence[Path]) -> Iterator[Dict[str, Any]]:
         pf = pq.ParquetFile(data_file)
         available = set(pf.schema_arrow.names)
         columns = [column for column in wanted if column in available]
-        for batch in pf.iter_batches(batch_size=256, columns=columns):
-            yield from batch.to_pylist()
+        try:
+            for batch in pf.iter_batches(batch_size=256, columns=columns):
+                yield from batch.to_pylist()
+        except Exception:
+            # Native-nested parquets (e.g. agent-llm-traces-v2 spans) raise
+            # ArrowNotImplementedError on chunked nested conversion; fall back
+            # to a whole-file read with the same column projection.
+            yield from pq.read_table(data_file, columns=columns).to_pylist()
 
 
 def _iter_agent_jsonl_rows(data_files: Sequence[Path]) -> Iterator[Dict[str, Any]]:
