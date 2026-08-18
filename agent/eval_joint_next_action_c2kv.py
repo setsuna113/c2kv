@@ -27,7 +27,11 @@ params), ``c2kv_untrained`` (base-init gist params), ``full`` (all documents
 in the plain prompt, no compression), ``truncate`` (plain prompt documents
 head-truncated to ``ceil(doc_tokens / ratio)``, the unified eval's truncate
 semantics).  Baseline modes load ``--base_model`` when given (history-eval
-convention); with the frozen-base training recipe
+convention) with the gist config injected by ``_load_baseline_model`` — the
+base model's config.json has no gist fields, so the custom model class
+asserts without injection (modeling_qwen3.py:461); this mirrors the
+``untrained_c2kv`` branch of the shared ``_load_model``, the only prior-eval
+path that loads the plain base model.  With the frozen-base training recipe
 (``train_agent_tool_definition_c2kv.py`` ``param.requires_grad_("gist" in
 name)``) the checkpoint's base weights equal the base model's, and full /
 truncate generate with ``use_gist=False`` so gist params are never touched —
@@ -110,13 +114,16 @@ if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python" / "inference"))
     sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from models import blend_gist_key_values  # noqa: E402
+from models import blend_gist_key_values, get_model_class  # noqa: E402
 from eval_agent_tool_definition_c2kv import (  # noqa: E402
     _build_tool_cache,
     _generate_from_input_ids,
+    _gist_compatible_config,
     _load_model,
+    _load_safe_attn_impl,
     _prefill_system,
     _prefill_tokens_with_cache,
+    _set_model_attn_impl,
     _setup_device,
     _sync_device,
 )
@@ -270,6 +277,55 @@ def _prediction_metrics(tokenizer: Any, target: str, prediction: str) -> Dict[st
         "argument_value_f1": round(arg_value_f1, 4),
     })
     return metrics
+
+
+# ---------------------------------------------------------------------------
+# Baseline model loading (full / truncate / c2kv_untrained).
+# ---------------------------------------------------------------------------
+
+
+def _load_baseline_model(args: argparse.Namespace, tokenizer: Any, device: str) -> Any:
+    """Load the BASE model for full/truncate/c2kv_untrained, gist config injected.
+
+    The plain base model's config.json carries no gist fields, so the repo's
+    custom Qwen3 class asserts ``config.gist_token_id is not None``
+    (modeling_qwen3.py:461) when instantiated without config injection.
+    Training injects the gist fields in
+    ``model_utils.get_model_and_tokenizer`` (model_utils.py:151-201: all
+    ``gist*`` ModelArgs + ``gist_token_id = tokenizer.eos_token_id``); the
+    eval-side equivalent is ``_gist_compatible_config`` — the
+    ``untrained_c2kv`` branch of ``_load_model`` is the ONLY prior-eval path
+    that loads the plain base model.  Prior evals never hit this for
+    full/truncate: the history eval uses ``baseline_model_class="auto"``
+    (plain ``AutoModelForCausalLM``) and the tooldef/unified evals load the
+    checkpoint (whose config.json has gist fields).  This driver switches
+    baselines to ``--base_model`` (history-eval convention), so it must
+    inject — this function mirrors the proven ``untrained_c2kv`` branch for
+    all baseline modes.  Values follow the training recipe
+    (dynamic-interleave, qkv, embed-mean, overlap 64, gist_token_id=eos);
+    for full/truncate the gist params are inert anyway (generation uses
+    ``use_gist=False``).
+    """
+
+    model_path = args.base_model or args.model
+    config_class, model_class = get_model_class(model_path, "qkv")
+    config = _gist_compatible_config(config_class, model_path, tokenizer)
+    model = model_class.from_pretrained(
+        model_path,
+        config=config,
+        trust_remote_code=True,
+        local_files_only=True,
+        device_map={"": device} if device != "cpu" else None,
+        dtype=(
+            torch.bfloat16 if args.dtype == "bf16"
+            else torch.float16 if args.dtype == "fp16"
+            else torch.float32
+        ),
+        attn_implementation=_load_safe_attn_impl(args.generate_attn_impl),
+    )
+    _set_model_attn_impl(model, args.generate_attn_impl)
+    model.eval()
+    return model
 
 
 # ---------------------------------------------------------------------------
@@ -883,16 +939,23 @@ def evaluate(args: argparse.Namespace) -> Dict[str, Any]:
                 raise ValueError(f"Unsupported mode {mode!r}; choose from {sorted(C2KV_MODES | BASELINE_MODES)}")
             run_ratios = [1] if mode == "full" else ratios
             model_args = copy.copy(args)
-            model_args.untrained_c2kv = mode == "c2kv_untrained"
             model_args.mode = "c2kv" if mode == "c2kv_untrained" else mode
             model_args.row_mode = mode
-            if mode in BASELINE_MODES and args.base_model:
-                # History-eval convention: baselines run on the base model.
-                # Output-equivalent to the joint checkpoint's (frozen) base
-                # weights, and full/truncate never touch gist params.
-                model_args.model = args.base_model
-            logger.info("Loading model for mode=%s model=%s", mode, model_args.model)
-            model = _load_model(model_args, tokenizer, device)
+            if mode == "c2kv":
+                # Trained joint checkpoint: its config.json carries the gist
+                # fields, so the shared _load_model path works as-is.
+                logger.info("Loading model for mode=%s model=%s", mode, model_args.model)
+                model = _load_model(model_args, tokenizer, device)
+            else:
+                # Baseline modes run on the base model (history-eval
+                # convention); its config.json has NO gist fields, so the
+                # custom class needs the gist config injected — see
+                # _load_baseline_model.  Output-equivalent to the joint
+                # checkpoint's (frozen) base weights for full/truncate.
+                if mode == "c2kv_untrained" and not args.base_model:
+                    raise ValueError("--base_model is required for c2kv_untrained baseline")
+                logger.info("Loading base model for mode=%s model=%s", mode, model_args.base_model or model_args.model)
+                model = _load_baseline_model(model_args, tokenizer, device)
             for condition in conditions:
                 for ratio in run_ratios:
                     run_args = copy.copy(model_args)
@@ -1074,7 +1137,6 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--gist_attn_impl", default="eager")
     parser.add_argument("--generate_attn_impl", default="eager")
     parser.add_argument("--dtype", choices=["bf16", "fp16", "fp32"], default="bf16")
-    parser.add_argument("--baseline_model_class", choices=["gist", "auto"], default="gist")
     parser.add_argument("--untrained_c2kv", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
     if args.merge_only:
