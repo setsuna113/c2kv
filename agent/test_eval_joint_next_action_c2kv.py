@@ -338,6 +338,9 @@ def test_parse_args_defaults():
     assert args.max_doc_length == 1024
     assert args.max_doc_num == 24
     assert args.max_system_length == 512
+    assert args.require_tool_call is True  # matches joint training (gate-eval default)
+    assert args.min_doc_num == 2  # matches JointDataset default
+    assert args.max_tool_definition_tokens == 32000
     assert args.separate is False
     assert args.separate_generator == "tool"
     assert args.merge_only is False
@@ -403,6 +406,11 @@ class _FakeConfigClass:
 
 
 class _FakeModel:
+    def __init__(self):
+        from types import SimpleNamespace
+
+        self.model = SimpleNamespace(layers=[])
+
     def eval(self):
         return self
 
@@ -501,3 +509,275 @@ def test_evaluate_c2kv_untrained_requires_base_model(monkeypatch, tmp_path):
     with pytest.raises(ValueError, match="base_model"):
         module.evaluate(args)
     assert calls == []
+
+
+# ---------------------------------------------------------------------------
+# g. NLL equivalence: trainer-style forward vs. the eval c2kv flow.
+#
+# Regression test for the NPU symptom "eval_loss 0.038 but c2kv generation
+# scores zero": teacher-forced NLL of the answer must be the SAME whether the
+# context grid is consumed exactly as GistMultiDocTrainer.compute_loss does
+# (system KV -> process_context_input_ids -> prompt forward) or as the eval
+# driver does (system prefill -> _build_tool_cache/blend -> prefix-KV forward
+# with generation position bookkeeping).
+# ---------------------------------------------------------------------------
+
+
+def _tiny_gist_model(tokenizer):
+    import torch
+
+    from models.qwen3 import Qwen3Config, Qwen3ForCausalLM
+
+    cfg = Qwen3Config(
+        vocab_size=1024,
+        hidden_size=32,
+        intermediate_size=64,
+        num_hidden_layers=2,
+        num_attention_heads=4,
+        num_key_value_heads=2,
+        max_position_embeddings=2048,
+        rope_theta=10000.0,
+        rms_norm_eps=1e-6,
+        gist_type="dynamic-interleave",
+        gist_param="qkv",
+        gist_residual_type="embed-mean",
+        gist_overlap=8,
+        gist_token_id=tokenizer.eos_token_id,  # training convention: gist_token_id=eos
+        pad_token_id=tokenizer.pad_token_id,
+        attn_implementation="eager",
+    )
+    torch.manual_seed(0)
+    model = Qwen3ForCausalLM(cfg)
+    model.eval()
+    return model
+
+
+_NLL_EXAMPLE = JointExample(
+    qid="nll:0",
+    session_id="nll",
+    tool_documents=[
+        "<TOOL>\n<NAME> get_weather\n<DESCRIPTION> Fetch the current weather for one city.\n</TOOL>",
+        "<TOOL>\n<NAME> search_files\n<DESCRIPTION> Search files under one directory path.\n</TOOL>",
+    ],
+    history_documents=[
+        "Previous turn\n[User query]\nList the files in /tmp please.\n[Assistant output]\n"
+        'Action:\n<tool_call>\n{"name":"search_files","arguments":{"path":"/tmp"}}\n</tool_call>',
+        "Previous turn\n[User query]\nfound a.txt and b.txt under /tmp",
+    ],
+    current_messages=[{"role": "user", "content": "What is the weather in Paris right now?"}],
+    answer='Action:\n<tool_call>\n{"name":"get_weather","arguments":{"city":"Paris"}}\n</tool_call>',
+    system_prompt="You are a careful data agent.",
+    subset="test",
+)
+
+
+def _trainer_style_answer_nll(
+    model,
+    tokenizer,
+    example,
+    *,
+    max_doc_length,
+    max_doc_num,
+    max_system_length,
+):
+    """Faithful batch-1 replica of GistMultiDocTrainer.compute_loss (trainer.py:219-349)."""
+    import torch
+
+    from train.train_data_joint import JointDataset
+
+    features, reason = JointDataset.preprocess_example(
+        example,
+        tokenizer=tokenizer,
+        max_length=512,
+        max_doc_length=max_doc_length,
+        min_doc_num=1,
+        max_doc_num=max_doc_num,
+        max_system_length=max_system_length,
+        doc_mode="joint",
+    )
+    assert features is not None, reason
+
+    # trainer._build_system_kv (batch=1: left-pad to uniform width is a no-op)
+    system_ids = [token for token in features["system_input_ids"] if token != -100]
+    system_tensor = torch.tensor([system_ids], dtype=torch.long)
+    system_mask = torch.ones_like(system_tensor)
+    with torch.inference_mode():
+        system_out = model(
+            system_tensor, attention_mask=system_mask, use_cache=True, logits_to_keep=1
+        )
+    system_kv = system_out.past_key_values
+    past_length = len(system_ids)
+
+    # compute_loss: reshape flat grid, trim batch-local doc padding
+    context_grid = torch.tensor(features["context_input_ids"], dtype=torch.long).reshape(
+        1, -1, max_doc_length
+    )
+    doc_lengths = (context_grid != -100).sum(dim=2)
+    max_active = int(doc_lengths.max().item())
+    if 0 < max_active < max_doc_length:
+        context_grid = context_grid[:, :, :max_active]
+    context_valid = int((context_grid != -100).sum().item())
+
+    # compute_loss: trim input_ids/labels/attention_mask to active length
+    real_len = sum(features["attention_mask"])
+    input_ids = torch.tensor([features["input_ids"][:real_len]], dtype=torch.long)
+    labels = torch.tensor([features["labels"][:real_len]], dtype=torch.long)
+    attention_mask = torch.ones_like(input_ids)
+    input_length = input_ids.shape[1]
+    position_ids = (
+        torch.arange(input_length, dtype=torch.long).unsqueeze(0) + past_length + context_valid
+    )
+    with torch.inference_mode():
+        out = model(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            position_ids=position_ids,
+            past_key_values=system_kv,
+            context_input_ids=context_grid,
+            past_attention_mask=system_mask,
+            labels=labels,
+            use_cache=True,
+        )
+    return float(out.loss), past_length, context_valid
+
+
+def _eval_flow_answer_nll(model, tokenizer, example, args):
+    """Teacher-forced NLL through the eval driver's prefix + generation bookkeeping."""
+    import torch
+
+    import eval_joint_next_action_c2kv as module
+    from train.train_data_multiturn import _chat_template_ids
+
+    prefix, skip_reason = module._build_c2kv_prefix(model, tokenizer, example, args)
+    assert prefix is not None, skip_reason
+    prompt_ids = _chat_template_ids(tokenizer, example.current_messages, add_generation_prompt=True)
+    answer_ids = tokenizer.encode(example.answer, add_special_tokens=False) + [tokenizer.eos_token_id]
+    full_ids = prompt_ids + answer_ids
+    input_ids = torch.tensor([full_ids], dtype=torch.long)
+    labels = torch.tensor([[-100] * len(prompt_ids) + answer_ids], dtype=torch.long)
+    original_prefix_length = prefix["system_length"] + prefix["doc_length"]
+    position_ids = torch.arange(
+        original_prefix_length, original_prefix_length + len(full_ids), dtype=torch.long
+    ).unsqueeze(0)
+    attention_mask = torch.ones((1, prefix["cache_length"] + len(full_ids)), dtype=torch.long)
+    with torch.inference_mode():
+        out = model(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            position_ids=position_ids,
+            past_key_values=prefix["cache"],
+            labels=labels,
+            use_gist=True,  # generation-time convention (prefix was gist-compressed)
+            use_cache=True,
+        )
+    return float(out.loss), prefix["system_length"], prefix["doc_length"]
+
+
+def test_nll_equivalence_trainer_vs_eval_c2kv(monkeypatch):
+    import torch  # noqa: F401
+
+    import eval_joint_next_action_c2kv as module
+
+    # Pin the training-side dynamic ratio to the eval override (8).
+    monkeypatch.setenv("C2KV_GIST_TRAIN_RATIOS", "8")
+    tokenizer = _WhitespaceSelfTestTokenizer()
+    model = _tiny_gist_model(tokenizer)
+    max_doc_length = 64
+    max_doc_num = 8
+    max_system_length = 128
+
+    trainer_nll, past_length, context_valid = _trainer_style_answer_nll(
+        model,
+        tokenizer,
+        _NLL_EXAMPLE,
+        max_doc_length=max_doc_length,
+        max_doc_num=max_doc_num,
+        max_system_length=max_system_length,
+    )
+
+    args = parse_args(["--model", "tiny", "--ratios", "8"])
+    args.condition = "joint"
+    args.row_mode = "c2kv"
+    args.max_doc_length = max_doc_length
+    args.max_doc_num = max_doc_num
+    args.max_tool_chunks = None
+    args.max_system_length = max_system_length
+    args.max_tool_definition_tokens = 100000
+    args.min_doc_num = 1
+    args.override_ratio = 8
+    args.system_attn_impl = "eager"
+    args.gist_attn_impl = "eager"
+    args.generate_attn_impl = "eager"
+
+    eval_nll, system_length, doc_length = _eval_flow_answer_nll(
+        model, tokenizer, _NLL_EXAMPLE, args
+    )
+
+    # Same logical layout on both paths before comparing losses.
+    assert system_length == past_length
+    assert doc_length == context_valid
+    assert eval_nll == pytest.approx(trainer_nll, rel=1e-3)
+
+
+# ---------------------------------------------------------------------------
+# h. current-message normalization + gist-init diagnostic.
+# ---------------------------------------------------------------------------
+
+
+def test_current_prompt_ids_matches_joint_dataset_normalization():
+    """Current turn with a tool-role message: the eval prompt must be built
+    exactly like JointDataset.preprocess_example builds it (tool -> user,
+    empty content dropped unless assistant)."""
+    from eval_joint_next_action_c2kv import _current_prompt_ids
+    from train.train_data_multiturn import _chat_template_ids, _normal_chat_message
+
+    tokenizer = _WhitespaceSelfTestTokenizer()
+    example = JointExample(
+        qid="s:0",
+        session_id="s",
+        tool_documents=["tool doc words"],
+        history_documents=["hist doc words"],
+        current_messages=[
+            {"role": "user", "content": "call the tool"},
+            {"role": "tool", "content": "tool result text"},
+            {"role": "user", "content": ""},  # dropped by the training-side filter
+        ],
+        answer='Action:\n<tool_call>\n{"name":"t","arguments":{}}\n</tool_call>',
+        system_prompt="sys",
+        subset="test",
+    )
+    expected_current = [
+        _normal_chat_message(message)
+        for message in example.current_messages
+        if message.get("content") or message.get("role") == "assistant"
+    ]
+    expected = _chat_template_ids(tokenizer, expected_current, add_generation_prompt=True)
+    assert _current_prompt_ids(tokenizer, example) == expected
+    decoded = tokenizer.decode(expected)
+    assert "tool result text" in decoded
+    # tail truncation
+    truncated = _current_prompt_ids(tokenizer, example, max_prompt_tokens=3)
+    assert truncated == expected[-3:]
+
+
+def test_gist_params_at_init_fraction():
+    import torch
+
+    import eval_joint_next_action_c2kv as module
+
+    tokenizer = _WhitespaceSelfTestTokenizer()
+    model = _tiny_gist_model(tokenizer)
+    # Constructor zero-inits gist projections (gen_gist_proj), so they differ
+    # from the random base projections: fraction 0 ("trained/distinct").
+    assert module._gist_params_at_init_fraction(model) == 0.0
+    # Simulate the init_gist_proj copy (missing checkpoint keys -> base copy).
+    with torch.no_grad():
+        for layer in model.model.layers:
+            layer.self_attn.gist_q_proj.weight.copy_(layer.self_attn.q_proj.weight)
+            layer.self_attn.gist_k_proj.weight.copy_(layer.self_attn.k_proj.weight)
+            layer.self_attn.gist_v_proj.weight.copy_(layer.self_attn.v_proj.weight)
+    assert module._gist_params_at_init_fraction(model) == 1.0
+    # One layer drifting away (training) drops the fraction below 1.
+    with torch.no_grad():
+        model.model.layers[0].self_attn.gist_q_proj.weight.add_(1e-3)
+    assert module._gist_params_at_init_fraction(model) == 0.5
