@@ -383,3 +383,121 @@ def test_parse_args_merge_only_requires_input_files():
     args = parse_args(["--merge_only", "--input_files", "a.jsonl", "b.jsonl"])
     assert args.merge_only is True
     assert args.input_files == ["a.jsonl", "b.jsonl"]
+
+
+# ---------------------------------------------------------------------------
+# f. baseline model loading: gist config injection (base config.json carries
+#    no gist fields; modeling_qwen3.py:461 asserts without them).
+# ---------------------------------------------------------------------------
+
+
+class _FakeConfigClass:
+    captured: dict = {}
+
+    @staticmethod
+    def from_pretrained(path, **kwargs):
+        from types import SimpleNamespace
+
+        _FakeConfigClass.captured = {"path": path, "kwargs": kwargs}
+        return SimpleNamespace(**kwargs)
+
+
+class _FakeModel:
+    def eval(self):
+        return self
+
+
+class _FakeModelClass:
+    captured: dict = {}
+
+    @staticmethod
+    def from_pretrained(path, config=None, **kwargs):
+        _FakeModelClass.captured = {"path": path, "config": config, "kwargs": kwargs}
+        return _FakeModel()
+
+
+def test_load_baseline_model_injects_gist_config(monkeypatch):
+    import eval_joint_next_action_c2kv as module
+
+    monkeypatch.setattr(
+        module, "get_model_class", lambda path, kind: (_FakeConfigClass, _FakeModelClass)
+    )
+    tokenizer = _WhitespaceSelfTestTokenizer()
+    args = parse_args(["--model", "ckpt", "--base_model", "base", "--compare_modes", "full"])
+    module._load_baseline_model(args, tokenizer, "cpu")
+
+    # The model loads from --base_model, not --model.
+    assert _FakeModelClass.captured["path"] == "base"
+    config = _FakeModelClass.captured["config"]
+    # The config handed to the custom class carries the gist fields from the
+    # training-recipe defaults (mirrors _gist_compatible_config /
+    # model_utils.get_model_and_tokenizer injection).
+    assert config.gist_token_id == tokenizer.eos_token_id
+    assert config.gist_type == "dynamic-interleave"
+    assert config.gist_param == "qkv"
+    assert config.gist_residual_type == "embed-mean"
+    assert config.gist_overlap == 64
+
+
+def test_load_baseline_model_falls_back_to_model_path(monkeypatch):
+    import eval_joint_next_action_c2kv as module
+
+    monkeypatch.setattr(
+        module, "get_model_class", lambda path, kind: (_FakeConfigClass, _FakeModelClass)
+    )
+    tokenizer = _WhitespaceSelfTestTokenizer()
+    args = parse_args(["--model", "ckpt", "--compare_modes", "full"])
+    module._load_baseline_model(args, tokenizer, "cpu")
+    assert _FakeModelClass.captured["path"] == "ckpt"
+    assert _FakeModelClass.captured["config"].gist_token_id == tokenizer.eos_token_id
+
+
+def _patch_evaluate_boundary(monkeypatch, calls):
+    import eval_joint_next_action_c2kv as module
+
+    monkeypatch.setattr(module, "_setup_device", lambda device_type: "cpu")
+    monkeypatch.setattr(module, "_load_tokenizer", lambda args: _WhitespaceSelfTestTokenizer())
+    monkeypatch.setattr(module, "_load_examples", lambda args: [])
+
+    def _fake_load_model(args, tokenizer, device):
+        calls.append(("_load_model", args.model, args.mode))
+        return _FakeModel()
+
+    def _fake_load_baseline(args, tokenizer, device):
+        calls.append(("_load_baseline_model", args.base_model or args.model, args.mode))
+        return _FakeModel()
+
+    monkeypatch.setattr(module, "_load_model", _fake_load_model)
+    monkeypatch.setattr(module, "_load_baseline_model", _fake_load_baseline)
+    return module
+
+
+def test_evaluate_routes_baseline_modes_to_injected_loader(monkeypatch, tmp_path):
+    calls = []
+    module = _patch_evaluate_boundary(monkeypatch, calls)
+    args = parse_args([
+        "--model", "ckpt",
+        "--base_model", "base",
+        "--compare_modes", "c2kv,full,truncate,c2kv_untrained",
+        "--output_file", str(tmp_path / "out.jsonl"),
+    ])
+    module.evaluate(args)
+    assert calls == [
+        ("_load_model", "ckpt", "c2kv"),
+        ("_load_baseline_model", "base", "full"),
+        ("_load_baseline_model", "base", "truncate"),
+        ("_load_baseline_model", "base", "c2kv"),
+    ]
+
+
+def test_evaluate_c2kv_untrained_requires_base_model(monkeypatch, tmp_path):
+    calls = []
+    module = _patch_evaluate_boundary(monkeypatch, calls)
+    args = parse_args([
+        "--model", "ckpt",
+        "--compare_modes", "c2kv_untrained",
+        "--output_file", str(tmp_path / "out.jsonl"),
+    ])
+    with pytest.raises(ValueError, match="base_model"):
+        module.evaluate(args)
+    assert calls == []
