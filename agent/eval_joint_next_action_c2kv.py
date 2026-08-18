@@ -145,6 +145,7 @@ from train.train_data_joint import (  # noqa: E402
 from train.train_data_multiturn import (  # noqa: E402
     _chat_template_ids,
     _fit_reused_history,
+    _normal_chat_message,
     _pad,
 )
 
@@ -255,6 +256,28 @@ def _flat_doc_ids(tool_chunks: Sequence[List[int]], history_chunks: Sequence[Lis
     return [token for chunk in [*tool_chunks, *history_chunks] for token in chunk]
 
 
+def _current_prompt_ids(
+    tokenizer: Any,
+    example: JointExample,
+    max_prompt_tokens: Optional[int] = None,
+) -> List[int]:
+    """Current-turn prompt ids, normalized exactly as JointDataset does
+    (train_data_joint.py: messages with empty content dropped unless
+    assistant, ``tool`` role mapped to ``user``, non-string content JSON
+    dumped), then tail-truncated to ``max_prompt_tokens``.
+    """
+
+    current = [
+        _normal_chat_message(message)
+        for message in example.current_messages
+        if message.get("content") or message.get("role") == "assistant"
+    ]
+    prompt_ids = _chat_template_ids(tokenizer, current, add_generation_prompt=True)
+    if max_prompt_tokens and len(prompt_ids) > max_prompt_tokens:
+        prompt_ids = prompt_ids[-max_prompt_tokens:]
+    return prompt_ids
+
+
 # ---------------------------------------------------------------------------
 # Metrics: history-eval bundle + unified-eval argument F1.
 # ---------------------------------------------------------------------------
@@ -326,6 +349,51 @@ def _load_baseline_model(args: argparse.Namespace, tokenizer: Any, device: str) 
     _set_model_attn_impl(model, args.generate_attn_impl)
     model.eval()
     return model
+
+
+def _gist_params_at_init_fraction(model: Any) -> float:
+    """Fraction of layers whose gist projections EXACTLY equal the base ones.
+
+    ``init_gist_proj``/``init_gist_embed`` (gist_utils.py:819-868) copy base
+    q/k/v (and the eos embedding) into the gist params for every key MISSING
+    from the loaded checkpoint.  A loaded model whose gist params all exactly
+    equal the base projections is therefore running with UNTRAINED gist
+    params — either the checkpoint never trained them or (silently) they did
+    not load.  The c2kv arm then degenerates to c2kv_untrained: scores
+    collapse to base-model fallback text while full/truncate (which never
+    touch gist params) stay fine.  A trained checkpoint has drifted away from
+    the copies, so the fraction is < 1 (typically 0).
+    """
+
+    equal_layers = 0
+    total_layers = 0
+    for layer in model.model.layers:
+        attn = layer.self_attn
+        total_layers += 1
+        if (
+            torch.equal(attn.gist_q_proj.weight, attn.q_proj.weight)
+            and torch.equal(attn.gist_k_proj.weight, attn.k_proj.weight)
+            and torch.equal(attn.gist_v_proj.weight, attn.v_proj.weight)
+        ):
+            equal_layers += 1
+    return equal_layers / total_layers if total_layers else 0.0
+
+
+def _log_gist_init_check(model: Any, model_path: str, mode: str) -> float:
+    fraction = _gist_params_at_init_fraction(model)
+    if fraction > 0:
+        logger.warning(
+            "GIST PARAMS AT INIT (== base projections) in %.0f%% of layers for model=%s mode=%s. "
+            "If this checkpoint was trained, its gist weights did NOT load (or it is an early/at-init "
+            "checkpoint): c2kv degenerates to untrained-compressor behavior. Check transformers "
+            "'missing keys' load warnings and the checkpoint's safetensors for gist_* tensors.",
+            fraction * 100,
+            model_path,
+            mode,
+        )
+    else:
+        logger.info("gist params differ from base projections (trained) for model=%s mode=%s", model_path, mode)
+    return fraction
 
 
 # ---------------------------------------------------------------------------
@@ -612,11 +680,7 @@ def _build_baseline_prefix(
     else:
         kept_tokens = doc_tokens
 
-    prompt_ids = _chat_template_ids(
-        tokenizer, example.current_messages, add_generation_prompt=True
-    )
-    if args.max_prompt_tokens and len(prompt_ids) > args.max_prompt_tokens:
-        prompt_ids = prompt_ids[-args.max_prompt_tokens :]
+    prompt_ids = _current_prompt_ids(tokenizer, example, args.max_prompt_tokens)
     total_len = len(system_ids) + len(doc_ids) + len(prompt_ids)
     if args.max_baseline_input_tokens and total_len > args.max_baseline_input_tokens:
         return None, f"baseline_input_tokens>{args.max_baseline_input_tokens}"
@@ -670,11 +734,7 @@ def _generate_with_prefix(
     prefix: Dict[str, Any],
     args: argparse.Namespace,
 ) -> Dict[str, Any]:
-    prompt_ids = _chat_template_ids(
-        tokenizer, example.current_messages, add_generation_prompt=True
-    )
-    if args.max_prompt_tokens and len(prompt_ids) > args.max_prompt_tokens:
-        prompt_ids = prompt_ids[-args.max_prompt_tokens :]
+    prompt_ids = _current_prompt_ids(tokenizer, example, args.max_prompt_tokens)
     prompt_input_ids = torch.tensor([prompt_ids], dtype=torch.long, device=model.device)
     mock_cache_ids = prompt_input_ids.new_zeros((1, prefix["cache_length"]))
     input_ids = torch.cat([mock_cache_ids, prompt_input_ids], dim=1)
@@ -894,6 +954,7 @@ def evaluate(args: argparse.Namespace) -> Dict[str, Any]:
     logger.info("Loaded %d joint %s examples", len(examples), args.split)
     ratios = [int(item) for item in _parse_csv(args.ratios, str(args.override_ratio))]
     rows: List[Dict[str, Any]] = []
+    gist_init_fractions: Dict[str, float] = {}
 
     if args.separate:
         if not args.checkpoint_tool or not args.checkpoint_history:
@@ -908,6 +969,7 @@ def evaluate(args: argparse.Namespace) -> Dict[str, Any]:
             model_args.untrained_c2kv = False
             logger.info("Loading %s checkpoint %s", name, checkpoint)
             models[name] = _load_model(model_args, tokenizer, device)
+            gist_init_fractions[f"separate_{name}"] = _log_gist_init_check(models[name], checkpoint, SEPARATE_MODE)
         models["generator"] = models[args.separate_generator]
         for ratio in ratios:
             run_args = copy.copy(args)
@@ -946,6 +1008,7 @@ def evaluate(args: argparse.Namespace) -> Dict[str, Any]:
                 # fields, so the shared _load_model path works as-is.
                 logger.info("Loading model for mode=%s model=%s", mode, model_args.model)
                 model = _load_model(model_args, tokenizer, device)
+                gist_init_fractions[mode] = _log_gist_init_check(model, model_args.model, mode)
             else:
                 # Baseline modes run on the base model (history-eval
                 # convention); its config.json has NO gist fields, so the
@@ -989,6 +1052,7 @@ def evaluate(args: argparse.Namespace) -> Dict[str, Any]:
         "checkpoint_tool": args.checkpoint_tool if args.separate else None,
         "checkpoint_history": args.checkpoint_history if args.separate else None,
         "separate_generator": args.separate_generator if args.separate else None,
+        "gist_init_fractions": gist_init_fractions,
         "conditions": conditions,
         "modes": modes,
         "ratios": ratios,
@@ -1109,7 +1173,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--split_manifest_file")
     parser.add_argument("--split_manifest_name", default="subset_disjoint")
     parser.add_argument("--max_samples_per_session", type=int, default=4)
-    parser.add_argument("--require_tool_call", type=lambda x: str(x).lower() == "true", default=False)
+    parser.add_argument("--require_tool_call", type=lambda x: str(x).lower() == "true", default=True)
     parser.add_argument("--max_input_chars", type=int)
     parser.add_argument("--max_answer_chars", type=int)
     parser.add_argument("--prefix_history_doc_num", type=int)
@@ -1124,7 +1188,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--max_doc_length", type=int, default=1024)
     parser.add_argument("--max_doc_num", type=int, default=24)
     parser.add_argument("--max_tool_chunks", type=int, default=None)
-    parser.add_argument("--min_doc_num", type=int, default=1)
+    parser.add_argument("--min_doc_num", type=int, default=2)
     parser.add_argument("--max_tool_definition_tokens", type=int, default=32000)
     parser.add_argument("--max_system_length", type=int, default=512)
     parser.add_argument("--max_prompt_tokens", type=int, default=1920)
