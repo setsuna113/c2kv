@@ -812,6 +812,9 @@ def _load_examples(args: argparse.Namespace) -> List[JointExample]:
         minified_json_prob=args.minified_json_prob,
         shuffle_tools=args.shuffle_tools,
         truncate_description_chars=args.truncate_description_chars,
+        max_tools_per_sample=args.max_tools_per_sample,
+        same_namespace_negative_tools=args.same_namespace_negative_tools,
+        random_negative_tools=args.random_negative_tools,
     )
     examples = list(source)
     if args.max_examples is not None and args.max_examples > 0:
@@ -1052,11 +1055,14 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--minified_json_prob", type=float, default=0.2)
     parser.add_argument("--shuffle_tools", type=lambda x: str(x).lower() == "true", default=True)
     parser.add_argument("--truncate_description_chars", type=int, default=600)
+    parser.add_argument("--max_tools_per_sample", type=int, default=32)
+    parser.add_argument("--same_namespace_negative_tools", type=int, default=8)
+    parser.add_argument("--random_negative_tools", type=int, default=24)
     parser.add_argument("--max_doc_length", type=int, default=1024)
     parser.add_argument("--max_doc_num", type=int, default=24)
     parser.add_argument("--max_tool_chunks", type=int, default=None)
     parser.add_argument("--min_doc_num", type=int, default=1)
-    parser.add_argument("--max_tool_definition_tokens", type=int, default=10000)
+    parser.add_argument("--max_tool_definition_tokens", type=int, default=32000)
     parser.add_argument("--max_system_length", type=int, default=512)
     parser.add_argument("--max_prompt_tokens", type=int, default=1920)
     parser.add_argument("--max_baseline_input_tokens", type=int, default=16000)

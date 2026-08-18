@@ -217,7 +217,7 @@ def scan_joint_examples(
     history_selection: str = "tail",
     doc_mode: str = "joint",
     max_tool_chunks: Optional[int] = None,
-    max_tool_definition_tokens: int = 10000,
+    max_tool_definition_tokens: int = 32000,
     split_oversized_history_docs: bool = True,
     epochs: int = 1,
     max_examples: Optional[int] = None,
@@ -643,7 +643,7 @@ def main(argv: Optional[Sequence[str]] = None) -> Dict[str, Any]:
     joint.add_argument("--history_selection", default="tail", choices=["tail", "head"])
     joint.add_argument("--doc_mode", default="joint", choices=["joint", "tool_only", "history_only"])
     joint.add_argument("--max_tool_chunks", type=int, default=None)
-    joint.add_argument("--max_tool_definition_tokens", type=int, default=10000)
+    joint.add_argument("--max_tool_definition_tokens", type=int, default=32000)
     joint.add_argument("--no_split_oversized_history_docs", action="store_true")
     # Accounting args.
     joint.add_argument("--tokenizer", required=True, help="local HF tokenizer path ('fake' = offline smoke)")
