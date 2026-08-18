@@ -53,11 +53,14 @@ class JointDataArgs:
     max_tool_chunks: Optional[int] = None  # None -> JointDataset default: 2/3 of max_doc_num
     max_length: int = 2048
     max_system_length: int = 512
-    max_tool_definition_tokens: int = 10000
+    max_tool_definition_tokens: int = 32000
     min_target_tokens: int = 32
     require_tool_call: bool = True
     history_selection: str = "tail"
     doc_mode: str = "joint"  # joint | tool_only | history_only | alternate
+    max_tools_per_sample: int = 32
+    same_namespace_negative_tools: int = 8
+    random_negative_tools: int = 24
     example_order_file: Optional[str] = None
     max_source_tokens: Optional[int] = None
     device_type: str = "auto"
@@ -102,6 +105,9 @@ def _load_joint_examples(data_args: JointDataArgs, split: str) -> List[JointExam
         split_manifest_name=data_args.split_manifest_name,
         max_samples_per_session=data_args.max_samples_per_session,
         require_tool_call=data_args.require_tool_call,
+        max_tools_per_sample=data_args.max_tools_per_sample,
+        same_namespace_negative_tools=data_args.same_namespace_negative_tools,
+        random_negative_tools=data_args.random_negative_tools,
     )
     return list(source)
 

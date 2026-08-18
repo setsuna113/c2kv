@@ -70,6 +70,7 @@ from .train_data_multiturn import (
     HistorySelection,
     Message,
     _agent_history_turn_docs,
+    _agent_message_parts,
     _agent_system_prompt,
     _chat_template_ids,
     _find_agent_jsonl_files,
@@ -237,6 +238,93 @@ def _render_tool_documents(
     return docs
 
 
+def _first_tool_call_name(output_messages: Any) -> Optional[str]:
+    """Name of the first tool call in a span's output messages.
+
+    Handles the same shapes as ``train_data_multiturn._render_agent_tool_calls``:
+    ``tool_calls``/``toolCalls``/``function_call`` keys or gen_ai ``parts``.
+    """
+    messages = _json_loads(output_messages, [])
+    if isinstance(messages, dict):
+        messages = [messages]
+    if not isinstance(messages, list):
+        return None
+    for message in messages:
+        if not isinstance(message, dict):
+            continue
+        calls = (
+            message.get("tool_calls")
+            or message.get("toolCalls")
+            or message.get("function_call")
+            or _agent_message_parts(message)
+        )
+        calls = _json_loads(calls, [])
+        if isinstance(calls, dict):
+            calls = [calls]
+        if not isinstance(calls, list):
+            continue
+        for call in calls:
+            if not isinstance(call, dict):
+                continue
+            if call.get("type") not in (None, "tool_call", "function_call") and "function" not in call:
+                continue
+            function = call.get("function") if isinstance(call.get("function"), dict) else {}
+            name = (
+                function.get("name")
+                or call.get("name")
+                or call.get("tool_name")
+                or call.get("function_name")
+                or ""
+            )
+            if name:
+                return str(name)
+    return None
+
+
+def _select_tools(
+    tools: Sequence[Dict[str, Any]],
+    target_tool: Optional[str],
+    rng: random.Random,
+    *,
+    max_tools_per_sample: int = 32,
+    same_namespace_negative_tools: int = 8,
+    random_negative_tools: int = 24,
+) -> List[Dict[str, Any]]:
+    """Target-inclusive bounded tool pool (unified path's policy, scalar knobs).
+
+    Sessions like AppWorld ship far more tool schemas than fit the document
+    budget, so each example compresses a bounded pool: the target tool plus
+    same-namespace and random negatives, mirroring
+    ``train_unified_next_action_c2kv._select_tools``.  If the target tool is
+    not identified in the definitions, the leading tools in declared order
+    are kept (deterministic) rather than a random subset.
+    """
+    if not max_tools_per_sample or len(tools) <= max_tools_per_sample:
+        return list(tools)
+    target = [tool for tool in tools if _tool_name(tool) == target_tool]
+    if not target:
+        return list(tools[:max_tools_per_sample])
+    target_namespace = _namespace(target_tool or "")
+    same_namespace = [
+        tool for tool in tools
+        if _tool_name(tool) != target_tool and _namespace(_tool_name(tool)) == target_namespace
+    ]
+    others = [
+        tool for tool in tools
+        if _tool_name(tool) != target_tool and _namespace(_tool_name(tool)) != target_namespace
+    ]
+    rng.shuffle(same_namespace)
+    rng.shuffle(others)
+    selected = target[:1]
+    selected.extend(same_namespace[:same_namespace_negative_tools])
+    remaining = max(0, max_tools_per_sample - len(selected))
+    selected.extend(others[: min(random_negative_tools, remaining)])
+    remaining = max(0, max_tools_per_sample - len(selected))
+    if remaining:
+        selected.extend((same_namespace[same_namespace_negative_tools:] + others[random_negative_tools:])[:remaining])
+    return selected[:max_tools_per_sample]
+
+
 class AgentLLMTracesJointSource(AgentLLMTracesCompressHistorySource):
     """True-joint source for agent-llm-traces.
 
@@ -244,9 +332,14 @@ class AgentLLMTracesJointSource(AgentLLMTracesCompressHistorySource):
     read identically: same parquet/jsonl discovery, same span sorting by
     (start_time, span_id), same history/current split at the last user message,
     same ``max_samples_per_session`` sub-sampling, same split-manifest args.
-    The only parsing addition is that tool definitions (first span of the
-    session carrying ``gen_ai.tool.definitions``) are rendered into per-tool
-    documents with the unified path's variant policy, once per session.
+    The parsing addition is that tool definitions (first span of the session
+    carrying ``gen_ai.tool.definitions``) are rendered into per-tool documents
+    with the unified path's variant policy.  Rendering is PER EXAMPLE: the
+    compressed pool is the target-inclusive bounded subset from
+    ``_select_tools`` (default 32 tools), because full session toolsets
+    (e.g. AppWorld) exceed any reasonable document budget; spans seen before
+    the session's first tool definitions, and sessions without tool
+    definitions at all, produce no examples.
     """
 
     def __init__(
@@ -268,6 +361,9 @@ class AgentLLMTracesJointSource(AgentLLMTracesCompressHistorySource):
         minified_json_prob: float = 0.2,
         shuffle_tools: bool = True,
         truncate_description_chars: int = 600,
+        max_tools_per_sample: int = 32,
+        same_namespace_negative_tools: int = 8,
+        random_negative_tools: int = 24,
     ) -> None:
         # Set joint knobs BEFORE super().__init__(): the parent constructor
         # calls self._load_records(), which dispatches to the overridden
@@ -276,6 +372,9 @@ class AgentLLMTracesJointSource(AgentLLMTracesCompressHistorySource):
         self.minified_json_prob = minified_json_prob
         self.shuffle_tools = shuffle_tools
         self.truncate_description_chars = truncate_description_chars
+        self.max_tools_per_sample = max_tools_per_sample
+        self.same_namespace_negative_tools = same_namespace_negative_tools
+        self.random_negative_tools = random_negative_tools
         super().__init__(
             path=path,
             split=split,
@@ -390,23 +489,14 @@ class AgentLLMTracesJointSource(AgentLLMTracesCompressHistorySource):
     ) -> List[JointExample]:
         examples: List[JointExample] = []
         tools: List[Dict[str, Any]] = []
-        tool_documents: List[str] = []
         for span_index, span in enumerate(spans):
             attributes = _span_attributes(span)
             if not tools:
                 tools = _tool_list_from_agent_value(attributes.get("gen_ai.tool.definitions"))
-                if tools:
-                    # One rendering per session: every example of the session
-                    # shares the same tool documents (deterministic seed).
-                    rng = random.Random(f"{self.split_seed}:{session_id}:tool_documents")
-                    tool_documents = _render_tool_documents(
-                        tools,
-                        rng,
-                        canonical_format_prob=self.canonical_format_prob,
-                        minified_json_prob=self.minified_json_prob,
-                        shuffle_tools=self.shuffle_tools,
-                        truncate_description_chars=self.truncate_description_chars,
-                    )
+            if not tools:
+                # No tool definitions seen yet (or none in the session): the
+                # joint task needs both document types, so skip these spans.
+                continue
             raw_input_messages = _json_loads(attributes.get("gen_ai.input.messages"), [])
             output_messages = attributes.get("gen_ai.output.messages")
             if not raw_input_messages or output_messages is None:
@@ -438,6 +528,26 @@ class AgentLLMTracesJointSource(AgentLLMTracesCompressHistorySource):
                 continue
             if not history_docs or not current_messages or not answer:
                 continue
+            # Per-example tool pool: target-inclusive bounded subset so large
+            # session toolsets (e.g. AppWorld) stay within the doc budget.
+            target_tool = _first_tool_call_name(output_messages)
+            rng = random.Random(f"{self.split_seed}:{session_id}:{span_index}:tools")
+            selected_tools = _select_tools(
+                tools,
+                target_tool,
+                rng,
+                max_tools_per_sample=self.max_tools_per_sample,
+                same_namespace_negative_tools=self.same_namespace_negative_tools,
+                random_negative_tools=self.random_negative_tools,
+            )
+            tool_documents = _render_tool_documents(
+                selected_tools,
+                rng,
+                canonical_format_prob=self.canonical_format_prob,
+                minified_json_prob=self.minified_json_prob,
+                shuffle_tools=self.shuffle_tools,
+                truncate_description_chars=self.truncate_description_chars,
+            )
             examples.append(
                 JointExample(
                     qid=f"{session_id}:{span_index}",
@@ -483,7 +593,7 @@ class JointDataset:
         history_selection: HistorySelection = "tail",
         doc_mode: DocMode = "joint",
         max_tool_chunks: Optional[int] = None,
-        max_tool_definition_tokens: int = 10000,
+        max_tool_definition_tokens: int = 32000,
         split_oversized_history_docs: bool = True,
     ) -> None:
         if doc_mode not in ("joint", "tool_only", "history_only"):
@@ -541,7 +651,7 @@ class JointDataset:
         history_selection: HistorySelection = "tail",
         doc_mode: DocMode = "joint",
         max_tool_chunks: Optional[int] = None,
-        max_tool_definition_tokens: int = 10000,
+        max_tool_definition_tokens: int = 32000,
         split_oversized_history_docs: bool = True,
     ) -> tuple[Optional[Dict[str, Any]], str]:
         if doc_mode not in ("joint", "tool_only", "history_only"):

@@ -28,6 +28,7 @@ Run from the repo root (local venv has torch/transformers/datasets/pytest):
 from __future__ import annotations
 
 import json
+import random
 import sys
 from pathlib import Path
 
@@ -38,6 +39,7 @@ _PYTHON_DIR = Path(__file__).resolve().parents[1]
 if str(_PYTHON_DIR) not in sys.path:
     sys.path.insert(0, str(_PYTHON_DIR))
 
+import train.train_data_joint as tdj  # noqa: E402
 from train.train_data_joint import (  # noqa: E402
     AgentLLMTracesJointSource,
     JointDataset,
@@ -238,7 +240,7 @@ def test_source_parses_synthetic_spans(synthetic_dataset):
     assert len(second.history_documents) == 4  # all turns before the final user message
     assert second.current_messages == [{"role": "user", "content": "Thanks, summarize the results."}]
     assert second.answer == "Summary: found a.txt and b.txt; Paris is rainy."
-    assert second.tool_documents == first.tool_documents  # one rendering per session
+    assert second.tool_documents == first.tool_documents  # same pool + deterministic rendering
 
     third = examples[2]
     assert third.subset == "files-bench"
@@ -498,3 +500,102 @@ def test_min_doc_num_drops_example(tokenizer):
     row, reason = _features(tokenizer, example, reason_ok=False, min_doc_num=2)
     assert row is None
     assert reason == "doc_num<2"
+
+
+# ---------------------------------------------------------------------------
+# Tool-pool selection (per-example bounded pool).
+# ---------------------------------------------------------------------------
+
+
+def _named_tools(names):
+    return [
+        {
+            "type": "function",
+            "function": {
+                "name": name,
+                "description": f"desc {name}",
+                "parameters": {"type": "object", "properties": {}},
+            },
+        }
+        for name in names
+    ]
+
+
+def test_first_tool_call_name_schemas():
+    # OpenAI tool_calls shape.
+    out = json.dumps([
+        {"role": "assistant", "content": None,
+         "tool_calls": [_tool_call("c1", "get_weather", {"city": "Paris"})]}
+    ])
+    assert tdj._first_tool_call_name(out) == "get_weather"
+    # gen_ai parts shape.
+    out = json.dumps([
+        {"role": "assistant",
+         "parts": [{"type": "tool_call", "name": "search_files", "arguments": {"path": "/tmp"}}]}
+    ])
+    assert tdj._first_tool_call_name(out) == "search_files"
+    # No tool call anywhere.
+    assert tdj._first_tool_call_name(json.dumps([{"role": "assistant", "content": "text"}])) is None
+
+
+def test_select_tools_target_included_capped_deterministic():
+    tools = _named_tools([f"ns{i % 10}.tool_{i}" for i in range(100)])
+    selected = tdj._select_tools(tools, "ns0.tool_0", random.Random(0), max_tools_per_sample=32)
+    assert len(selected) == 32
+    assert any(tdj._tool_name(tool) == "ns0.tool_0" for tool in selected)
+    again = tdj._select_tools(tools, "ns0.tool_0", random.Random(0), max_tools_per_sample=32)
+    assert [tdj._tool_name(t) for t in selected] == [tdj._tool_name(t) for t in again]
+    # Pool under the cap: everything kept in declared order.
+    small = tools[:10]
+    assert [tdj._tool_name(t) for t in tdj._select_tools(small, "ns0.tool_0", random.Random(1), max_tools_per_sample=32)] == [
+        tdj._tool_name(t) for t in small
+    ]
+
+
+def test_select_tools_unknown_target_keeps_declared_order():
+    tools = _named_tools([f"ns{i % 10}.tool_{i}" for i in range(100)])
+    fallback = tdj._select_tools(tools, "missing.tool", random.Random(2), max_tools_per_sample=32)
+    assert [tdj._tool_name(t) for t in fallback] == [tdj._tool_name(t) for t in tools[:32]]
+
+
+def test_session_examples_bounded_pool_and_no_tool_skip(synthetic_dataset):
+    source = _joint_source(synthetic_dataset)
+    big_tools = _named_tools([f"ns{i % 5}.tool_{i}" for i in range(40)])
+    spans = [
+        _span(
+            "span-1",
+            "2026-01-01T00:00:01",
+            [
+                {"role": "system", "content": "s"},
+                {"role": "user", "content": "u1"},
+                {"role": "assistant", "content": None,
+                 "tool_calls": [_tool_call("c1", "ns0.tool_0", {})]},
+                {"role": "tool", "content": "obs"},
+                {"role": "user", "content": "u2"},
+            ],
+            [{"role": "assistant", "content": None,
+              "tool_calls": [_tool_call("c2", "ns3.tool_33", {})]}],
+            tools=big_tools,
+        )
+    ]
+    examples = source._session_examples("big", spans, "bench")
+    assert len(examples) == 1
+    assert len(examples[0].tool_documents) == 32
+    # Target sits beyond the leading 32 declared tools: target-inclusive
+    # selection must pull it in (declared-order fallback would drop it).
+    assert any("<NAME> ns3.tool_33" in doc for doc in examples[0].tool_documents)
+
+    # Session without any tool definitions yields no joint examples.
+    no_tool_spans = [
+        _span(
+            "span-1",
+            "2026-01-01T00:00:01",
+            [
+                {"role": "user", "content": "u1"},
+                {"role": "assistant", "content": "a1"},
+                {"role": "user", "content": "u2"},
+            ],
+            [{"role": "assistant", "content": "a2"}],
+        )
+    ]
+    assert source._session_examples("none", no_tool_spans, "bench") == []
