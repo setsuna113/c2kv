@@ -252,6 +252,36 @@ def test_unit_strategies_and_formats(tmp_path):
     assert [unit["text"] for unit in raw_units] == ["raw document body"]
 
 
+def test_parts_style_messages_extracted(tmp_path):
+    # Real agent-llm-traces (v1 and v2) messages carry text under parts[].content.
+    spans = [
+        {
+            "span_id": "span-1",
+            "start_time": "2026-01-01T00:00:01",
+            "status": "ok",
+            "attributes": {
+                "gen_ai.input.messages": json.dumps([
+                    {"role": "user", "parts": [{"type": "text", "content": "otel instruction text"}]}
+                ]),
+                "gen_ai.output.messages": json.dumps([
+                    {"role": "assistant", "parts": [{"type": "text", "content": "otel reply text"}]}
+                ]),
+            },
+        }
+    ]
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    parquet_path = tmp_path / "otel.parquet"
+    pq.write_table(
+        pa.table({"session_id": ["sess-1"], "spans": [json.dumps(spans)]}),
+        parquet_path,
+    )
+    units = dcd._load_units([f"traces={parquet_path}"], "messages", "train")
+    texts = sorted(unit["text"] for unit in units)
+    assert texts == ["otel instruction text", "otel reply text"]
+
+
 def test_bfcl_dir_extraction(corpora):
     units = dcd._load_bfcl_units(corpora["bfcl_dir"])
     assert [unit["dataset"] for unit in units] == ["bfcl"] * 3
