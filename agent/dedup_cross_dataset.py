@@ -218,11 +218,16 @@ def _iter_records(path: Path) -> Iterator[Dict[str, Any]]:
     if path.suffix == ".parquet":
         import pyarrow.parquet as pq
 
-        pf = pq.ParquetFile(path)
-        for batch in pf.iter_batches(batch_size=512):
-            for row in batch.to_pylist():
-                if isinstance(row, dict):
-                    yield row
+        # Whole-file read: ParquetFile.iter_batches raises
+        # ArrowNotImplementedError ("Nested data conversions not implemented
+        # for chunked array outputs") on nested columns (e.g. traces-v2 spans).
+        try:
+            table = pq.read_table(path)
+        except Exception:
+            table = pq.ParquetFile(path).read()
+        for row in table.to_pylist():
+            if isinstance(row, dict):
+                yield row
         return
     with path.open("r", encoding="utf-8") as f:
         for line in f:
