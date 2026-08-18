@@ -23,6 +23,17 @@ base 仍走 model.generate 原路径（零手术，输出与 S8.1 逐字节一�
 无效）。h2o / kvzip 仍为预留（未实现即报错）。预算：--kv_budget 或默认 prompt_len 的
 50%，逐行记录 compression_meta。
 
+S9 起：condition=c2kv 已实现（C2KV gist 压缩检查点的评测臂）。接入方式 = 同一
+hook 点：_query_prompting 内 condition=="c2kv" 分支转调
+metrology/c2kv_gist.hf_generate_c2kv——把工具文档（"Tool definition:\n" 块）
+和/或历史轮（"Previous turn\n..." 块）按 --c2kv_doc_mode {joint,tool_only,
+history_only} 压缩成 gist KV 前缀（ratio=--c2kv_ratio，默认 8），再用普通
+prompt 后缀生成；doc 构建/位置记账逐值镜像 agent/eval_joint_next_action_c2kv.py
+（详见 c2kv_gist.py 模块 docstring）。模型加载：--c2kv_checkpoint 给训练 ckpt
+（config.json 已携 gist 字段）；缺省 = 基座 + gist 配置注入 + 未训练 gist 参数
+（untrained 对照臂）。cap 口径不变（按完整未压缩 prompt token 数计算）。
+逐行记录 rows["c2kv_meta"] 与逐步 compression_meta（method="c2kv" 等字段）。
+
 ══ 路径判断（prompting vs FC）：结论 = prompting ══
 
 证据 1（官方注册表）：BFCL v4 constants/model_config.py:1672-1683 将
@@ -81,9 +92,13 @@ MathAPI 需要 mpmath（轻量纯 python，BFCL 自身依赖），dryrun 会自�
                    stop_reason(eos/length/other), decoded_calls(执行串列表或异常类名),
                    decode_error_message, actual_cap, wall_sec,
                    (仅压缩条件附 compression_meta{method, budget, kept_tokens,
-                    obs_window, n_sink})，
+                    obs_window, n_sink}；c2kv 附 method="c2kv" 及 doc_mode/ratio/
+                    doc_tokens/gist_tokens/tool_doc_chunks/history_doc_chunks/
+                    actual_compression_ratio/degenerate 等扩展键)，
                    (仅单轮类附 decoded_ast / decode_ast_error)}]}],
  actual_cap_per_turn, model, max_context_length, seed: null, wall_sec,
+ (仅 c2kv 附 c2kv_meta{checkpoint, trained, ratio, doc_mode, max_doc_length,
+                      max_doc_num}),
  bfcl_result(与 BFCL 生成器 _llm_response_generation.py:214-218 同形，可直接
              handler.write() 落成 BFCL 原生结果文件), snapshot_manifest_sha256, error}
 multi_turn 的 raw_text 完整保留原始文本（下游双列评分要用）；first_divergence_turn
@@ -111,7 +126,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FROZEN_IDS_DEFAULT = REPO_ROOT / "configs" / "r5_metrology_sample.json"
 
-CONDITION_CHOICES = ["base", "snapkv", "h2o", "streamingllm", "kvzip"]
+CONDITION_CHOICES = ["base", "snapkv", "h2o", "streamingllm", "kvzip", "c2kv"]
 CAP_TIER_CHOICES = ["default", "128", "1024"]
 
 # 压缩条件固定口径（与 metrology/kv_compress.py 默认一致；S8.2 任务书）
@@ -477,7 +492,8 @@ def _build_manifest(args, bfcl_dir: Path, data_dir: Path, output_path: Path) -> 
 def _build_handler(handler_cls, model_path: str, tokenizer, model, device: str,
                    cap_tier: str, condition: str,
                    max_context_length: int | None,
-                   kv_budget: int | None):
+                   kv_budget: int | None,
+                   c2kv_settings: dict | None = None):
     """构造 handler：直接调 handler_cls.__init__（即 QwenHandler.__init__，本 runner
     不 override __init__，规避 EnforceOverrides 严格模式），再把本地 HF 状态挂到实例上。
 
@@ -513,6 +529,10 @@ def _build_handler(handler_cls, model_path: str, tokenizer, model, device: str,
     handler._obs_window = KV_OBS_WINDOW   # 仅 snapkv
     handler._kv_kernel = KV_KERNEL        # 仅 snapkv
     handler._n_sink = KV_N_SINK           # 仅 streamingllm
+    # 仅 c2kv：{doc_mode, ratio, max_doc_length, max_doc_num, max_tool_chunks}；
+    # _c2kv_bare_system 由 _run_one_entry 逐样本挂载（裸 system，防工具文档泄漏）
+    handler._c2kv_settings = c2kv_settings or {}
+    handler._c2kv_bare_system = None
     handler._query_history = []  # 每次 _query_prompting 追加一条（调用序 == 基类循环步序）
     return handler
 
@@ -602,6 +622,13 @@ def _define_handler_class():
                 if self._condition == "base":
                     outputs = self._hf_model.generate(**inputs, **gen_kwargs)
                     generated = outputs[0][prompt_len:]
+                elif self._condition == "c2kv":
+                    # S9：c2kv gist 压缩（doc 构建与位置记账见
+                    # metrology/c2kv_gist.py）；inputs 全量 prefill 不执行，
+                    # prompt_len 仅用于伪 api_response 的 input_token 语义
+                    generated, compression_meta = self._hf_generate_c2kv(
+                        message, function, max_tokens
+                    )
                 else:
                     generated, compression_meta = self._hf_generate_compressed(
                         inputs, gen_kwargs, prompt_len
@@ -822,6 +849,14 @@ def _define_handler_class():
             }
             return generated, meta
 
+        def _hf_generate_c2kv(self, message: list, function: list,
+                              max_tokens: int):
+            """c2kv 条件的薄 hook：全部逻辑在 metrology/c2kv_gist.py（惰性
+            import；非 c2kv 条件不触发 train/models 依赖链）。"""
+            from metrology.c2kv_gist import hf_generate_c2kv
+
+            return hf_generate_c2kv(self, message, function, max_tokens)
+
         def reset_query_history(self):
             self._query_history = []
 
@@ -867,6 +902,14 @@ def _run_one_entry(handler, entry: dict, cap_tier: str, condition: str,
     entry_copy = deepcopy(entry)  # 循环会原地改 question[0]（system prompt 注入）
     t0 = time.time()
     try:
+        if condition == "c2kv":
+            # 裸 system（functions=[] 重算，防工具文档泄漏）；须在 handler.inference
+            # 前计算（_pre_query_processing_prompting 会原地改 question[0]）
+            from metrology.c2kv_gist import compute_bare_system_content
+
+            handler._c2kv_bare_system = compute_bare_system_content(
+                entry_copy["question"][0], entry_id
+            )
         result, metadata = handler.inference(
             entry_copy, include_input_log=False, exclude_state_log=True
         )
@@ -1054,12 +1097,19 @@ def _load_model(args):
 
     print(f"[model] 加载 {args.model} (bf16, eager, device={args.device}) ...")
     tokenizer = AutoTokenizer.from_pretrained(args.model, trust_remote_code=True)
-    model = AutoModelForCausalLM.from_pretrained(
-        args.model,
-        torch_dtype=torch.bfloat16,
-        attn_implementation="eager",
-        trust_remote_code=True,
-    )
+    if args.condition == "c2kv":
+        # S9：仓库自定义 Qwen3 gist 类；--c2kv_checkpoint 训练 ckpt，缺省
+        # 基座 + gist 配置注入（未训练 gist 参数 = untrained 对照臂）
+        from metrology.c2kv_gist import load_c2kv_model_weights
+
+        model = load_c2kv_model_weights(args, tokenizer)
+    else:
+        model = AutoModelForCausalLM.from_pretrained(
+            args.model,
+            torch_dtype=torch.bfloat16,
+            attn_implementation="eager",
+            trust_remote_code=True,
+        )
     model.eval()
     device = _resolve_device(args.device)
     if device.startswith("npu"):
@@ -1154,6 +1204,15 @@ def run_inference(args, output_path: Path):
 
     tokenizer, model, device = _load_model(args)
     handler_cls = _define_handler_class()
+    c2kv_settings = None
+    if args.condition == "c2kv":
+        c2kv_settings = {
+            "doc_mode": args.c2kv_doc_mode,
+            "ratio": args.c2kv_ratio,
+            "max_doc_length": args.c2kv_max_doc_length,
+            "max_doc_num": args.c2kv_max_doc_num,
+            "max_tool_chunks": None,  # 缺省 = 2/3 max_doc_num（joint 驱动口径）
+        }
     handler = _build_handler(
         handler_cls=handler_cls,
         model_path=args.model,
@@ -1164,6 +1223,7 @@ def run_inference(args, output_path: Path):
         condition=args.condition,
         max_context_length=args.max_context_length,
         kv_budget=args.kv_budget,
+        c2kv_settings=c2kv_settings,
     )
     handler_cls_ok = type(handler) is handler_cls
     print(f"[run] handler 实例类型 {type(handler).__name__}（子类化路径: {handler_cls_ok}）")
@@ -1203,6 +1263,12 @@ def run_inference(args, output_path: Path):
                 args.model, manifest_sha, handler.max_context_length,
             )
             _cleanup_multi_turn_instances(model_name_underline, it["id"])
+        if args.condition == "c2kv":
+            # 行级 c2kv 元数据（覆盖成功/推理异常/data_missing 三种行；
+            # 模板对齐 snapkv kv_budget 的逐行记录口径）
+            from metrology.c2kv_gist import c2kv_row_meta
+
+            row["c2kv_meta"] = c2kv_row_meta(args)
         _append_row(output_path, row)
         print(
             f"[run] {i}/{len(to_run)} {it['id']}  "
@@ -1217,7 +1283,7 @@ def run_inference(args, output_path: Path):
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="python -m metrology.bfcl_hf_runner",
-        description="BFCL v4 冻结样本本地 HF 推理 runner（S8.2：base / snapkv / streamingllm）",
+        description="BFCL v4 冻结样本本地 HF 推理 runner（S8.2：base / snapkv / streamingllm；S9：c2kv）",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     p.add_argument(
@@ -1239,12 +1305,38 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--condition", default="base", choices=CONDITION_CHOICES,
         help="压缩条件：base（无压缩对照，generate 原样）/ snapkv / streamingllm（S8.2 已实现，"
-             "prefill 后 KV 手术）；h2o / kvzip 为后续 chunk 预留",
+             "prefill 后 KV 手术）/ c2kv（S9：C2KV gist 压缩检查点评测臂，见 "
+             "metrology/c2kv_gist.py）；h2o / kvzip 为后续 chunk 预留",
     )
     p.add_argument(
         "--kv_budget", type=int, default=None,
         help="压缩条件的 KV 预算（prefill 后保留 token 数）；默认=prompt_len 的 50%。"
-             "仅 snapkv/streamingllm 生效（base 忽略）；实际保留数逐行记入 compression_meta",
+             "仅 snapkv/streamingllm 生效（base/c2kv 忽略）；实际保留数逐行记入 compression_meta",
+    )
+    p.add_argument(
+        "--c2kv_checkpoint", default=None,
+        help="仅 c2kv：训练好的 c2kv 检查点目录（config.json 携 gist_type/"
+             "gist_token_id 等字段）。缺省 None = 用 --model 基座 + gist 配置注入 +"
+             " 未训练 gist 参数（untrained 对照臂）",
+    )
+    p.add_argument(
+        "--c2kv_ratio", type=int, default=8,
+        help="仅 c2kv：gist 压缩比（dynamic-interleave 的 ratio override，同 "
+             "agent/eval_joint_next_action_c2kv.py 的 --override_ratio）",
+    )
+    p.add_argument(
+        "--c2kv_doc_mode", default="joint",
+        choices=["joint", "tool_only", "history_only"],
+        help="仅 c2kv：哪些文档类被 gist 压缩——joint=工具文档+历史轮 / "
+             "tool_only=仅工具文档（历史留原文）/ history_only=仅历史轮（工具留原 system）",
+    )
+    p.add_argument(
+        "--c2kv_max_doc_length", type=int, default=1024,
+        help="仅 c2kv：单文档块最大 token 数（joint 驱动 --max_doc_length 口径）",
+    )
+    p.add_argument(
+        "--c2kv_max_doc_num", type=int, default=24,
+        help="仅 c2kv：文档块总槽位（工具块上限缺省 2/3，历史块取余下槽位尾偏选择）",
     )
     p.add_argument(
         "--limit", type=int, default=None,
@@ -1291,15 +1383,33 @@ def main(argv=None):
             f"condition={args.condition} 未实现：S8.2 实现 snapkv / streamingllm；"
             "h2o / kvzip 在后续 chunk 经 _query_prompting 的 hook 点接入"
         )
+    if args.condition == "c2kv":
+        if args.c2kv_checkpoint is not None and not Path(args.c2kv_checkpoint).exists():
+            raise SystemExit(f"--c2kv_checkpoint 不存在: {args.c2kv_checkpoint}")
+        if args.c2kv_ratio < 1:
+            raise SystemExit(f"--c2kv_ratio 必须 >= 1: {args.c2kv_ratio}")
     if not args.dryrun and not args.model:
         raise SystemExit("非 dryrun 模式必须提供 --model")
 
-    output_path = Path(args.output) if args.output else (
-        REPO_ROOT / "metrology" / "outputs" / f"bfcl_run_{args.condition}_{args.cap_tier}.jsonl"
-    )
+    if args.output:
+        output_path = Path(args.output)
+    elif args.condition == "c2kv":
+        # 臂名入文件名：防不同 doc_mode/ratio 的 resume 键 (id, cap_tier, condition) 撞车
+        output_path = REPO_ROOT / "metrology" / "outputs" / (
+            f"bfcl_run_c2kv-{args.c2kv_doc_mode}-r{args.c2kv_ratio}_{args.cap_tier}.jsonl"
+        )
+    else:
+        output_path = REPO_ROOT / "metrology" / "outputs" / (
+            f"bfcl_run_{args.condition}_{args.cap_tier}.jsonl"
+        )
     kv_note = ""
-    if args.condition != "base":
+    if args.condition in ("snapkv", "streamingllm", "h2o", "kvzip"):
         kv_note = f"  kv_budget={args.kv_budget if args.kv_budget is not None else '50%'}"
+    elif args.condition == "c2kv":
+        kv_note = (
+            f"  c2kv_doc_mode={args.c2kv_doc_mode}  c2kv_ratio={args.c2kv_ratio}"
+            f"  c2kv_checkpoint={args.c2kv_checkpoint or '(基座+注入,未训练)'}"
+        )
     print(f"[runner] condition={args.condition}  cap_tier={args.cap_tier}{kv_note}  "
           f"output={output_path}")
 
@@ -1329,3 +1439,11 @@ if __name__ == "__main__":
 #     核对三行 compression_meta{method,budget,kept_tokens,obs_window,n_sink} 与
 #     base 行无该字段；建议每条冒烟选 <2k token 的 multi_turn_base 样本，
 #     先看 prefill 注意力物化（每层 (1,H,L,L) bf16）在本卡的峰值显存再放量）。
+# S9 c2kv 冒烟（训练 ckpt；untrained 对照臂去掉 --c2kv_checkpoint 即可）：
+#   ~/envs/c2kv/bin/python -m metrology.bfcl_hf_runner \
+#     --bfcl_pkg_path <bfcl_eval 包路径> --model ~/c2kv/models/Qwen3-4B-Instruct-2507 \
+#     --condition c2kv --c2kv_checkpoint ~/c2kv/outputs_lyc/g_joint/<ckpt> \
+#     --c2kv_doc_mode joint --c2kv_ratio 8 \
+#     --cap_tier 128 --limit 1 --output ~/c2kv/outputs_lyc/smoke_s9_c2kv.jsonl
+#   （核对行内 c2kv_meta{checkpoint,trained,ratio,doc_mode,...} 与逐步
+#     compression_meta{method="c2kv",gist_tokens,doc_tokens,...}）
