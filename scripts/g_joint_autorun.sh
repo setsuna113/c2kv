@@ -27,8 +27,23 @@ cd "$WT" || exit 1
 log() { echo "[$(date '+%F %T')] $*" | tee -a "$STATUS"; }
 fail() { echo "[$(date '+%F %T')] FAIL: $*" | tee -a "$STATUS"; echo "$*" > "$G/autorun_FAILED"; exit 1; }
 
-free_mb() {  # $1 = chip id -> free HBM in MB
-  npu-smi info 2>/dev/null | sed -n "/^| $1 .*910B3/,+1p" | tail -1 | awk -F'/' '{gsub(/[^0-9]/,"",$1); print 65536 - $1}' | tail -1
+free_mb() {  # $1 = chip id -> free HBM in MB (empty when unparseable)
+  # Same parsing as scripts/joint_gated_run.sh: the line after the chip line
+  # carries `<used> / 65536` in the HBM column; take the LAST such token.
+  npu-smi info 2>/dev/null | awk -v chip="$1" '
+    $2 == chip && $3 ~ /^910B3/ { pending = 1; next }
+    pending {
+      line = $0; used = ""
+      while (match(line, /[0-9]+[ \t]*\/[ \t]*65536/)) {
+        tok = substr(line, RSTART, RLENGTH)
+        sub(/[ \t]*\/[ \t]*65536/, "", tok)
+        used = tok
+        line = substr(line, RSTART + RLENGTH)
+      }
+      if (used != "") print 65536 - used
+      exit
+    }
+  '
 }
 
 wait_chip() {  # $1 = preferred chip, $2 = min free MB, $3 = max seconds -> echoes chip
