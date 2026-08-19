@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Compare lexical, attention, and conservative Full-KV attention rerank routing.
-# Defaults use cards 4,5,6,7 and eager attention for eval stability.
+# Compare BM25, lexical, attention, and conservative Full-KV attention rerank routing.
+# Defaults use cards 1-7 and eager attention for eval stability.
 
 export MODEL_PATH="${MODEL_PATH:-./checkpoints/qwen3-4b-agent-tooldef-npu}"
 export BASE_MODEL="${BASE_MODEL:-./models/Qwen3-4B-Instruct-2507}"
@@ -21,14 +21,15 @@ export MIN_NUM_TOOLS="${MIN_NUM_TOOLS:-4}"
 export SPLIT_MANIFEST_FILE="${SPLIT_MANIFEST_FILE:-}"
 export SPLIT_NAME="${SPLIT_NAME:-toolset_disjoint}"
 
+export TOOL_DOCUMENT_EVAL_MODE="${TOOL_DOCUMENT_EVAL_MODE:-per_tool}"
 export MAX_DOC_LENGTH="${MAX_DOC_LENGTH:-1024}"
-export MAX_DOC_NUM="${MAX_DOC_NUM:-10}"
+export MAX_DOC_NUM="${MAX_DOC_NUM:-64}"
 export MAX_TOOL_DEFINITION_TOKENS="${MAX_TOOL_DEFINITION_TOKENS:-10000}"
 export MAX_PROMPT_TOKENS="${MAX_PROMPT_TOKENS:-4096}"
 export MAX_BASELINE_INPUT_TOKENS="${MAX_BASELINE_INPUT_TOKENS:-0}"
 export MAX_HYBRID_DECODE_TOKENS="${MAX_HYBRID_DECODE_TOKENS:-0}"
 export MAX_NEW_TOKENS="${MAX_NEW_TOKENS:-128}"
-export NPU_ATTN_IMPL="${NPU_ATTN_IMPL:-eager}"
+export NPU_ATTN_IMPL="${NPU_ATTN_IMPL:-npu_fusion_attention}"
 export PYTORCH_NPU_ALLOC_CONF="${PYTORCH_NPU_ALLOC_CONF:-max_split_size_mb:512}"
 
 export ATTENTION_ROUTER_LAYERS="${ATTENTION_ROUTER_LAYERS:-32}"
@@ -45,9 +46,10 @@ export DEBUG_HYBRID_TOKENS="${DEBUG_HYBRID_TOKENS:-True}"
 export DUMP_HYBRID_DEFINITIONS="${DUMP_HYBRID_DEFINITIONS:-False}"
 export DEBUG_DEFINITION_CHARS="${DEBUG_DEFINITION_CHARS:-4000}"
 
-BASELINE_DEVICES="${BASELINE_DEVICES:-4,5}"
-LEXICAL_DEVICE="${LEXICAL_DEVICE:-6}"
-ATTENTION_DEVICE="${ATTENTION_DEVICE:-7}"
+BASELINE_DEVICES="${BASELINE_DEVICES:-1,2}"
+BM25_DEVICE="${BM25_DEVICE:-3}"
+LEXICAL_DEVICE="${LEXICAL_DEVICE:-4}"
+ATTENTION_DEVICE="${ATTENTION_DEVICE:-5}"
 FULLKV_ATTENTION_DEVICE="${FULLKV_ATTENTION_DEVICE:-6}"
 ATT_RERANK_DEVICE="${ATT_RERANK_DEVICE:-7}"
 
@@ -56,6 +58,7 @@ RUN_DIR="${RUN_DIR:-${OUTPUT_STEM}.runs}"
 mkdir -p "${RUN_DIR}"
 
 BASELINE_OUTPUT="${RUN_DIR}/full_c2kv.jsonl"
+BM25_OUTPUT="${RUN_DIR}/bm25_hybrid.jsonl"
 LEXICAL_OUTPUT="${RUN_DIR}/c2kv_hybrid.jsonl"
 ATTENTION_OUTPUT="${RUN_DIR}/att_hybrid.jsonl"
 FULLKV_ATTENTION_OUTPUT="${RUN_DIR}/att_fullkv_hybrid.jsonl"
@@ -69,7 +72,12 @@ echo "OUTPUT_FILE=${OUTPUT_FILE}"
 echo "SPLIT=${SPLIT}"
 echo "HYBRID_CASES=${HYBRID_CASES}"
 echo "MIN_NUM_TOOLS=${MIN_NUM_TOOLS}"
+echo "TOOL_DOCUMENT_EVAL_MODE=${TOOL_DOCUMENT_EVAL_MODE}"
+echo "MAX_DOC_LENGTH=${MAX_DOC_LENGTH}"
+echo "MAX_DOC_NUM=${MAX_DOC_NUM}"
+echo "MAX_TOOL_DEFINITION_TOKENS=${MAX_TOOL_DEFINITION_TOKENS}"
 echo "BASELINE_DEVICES=${BASELINE_DEVICES}"
+echo "BM25_DEVICE=${BM25_DEVICE}"
 echo "LEXICAL_DEVICE=${LEXICAL_DEVICE}"
 echo "ATTENTION_DEVICE=${ATTENTION_DEVICE}"
 echo "FULLKV_ATTENTION_DEVICE=${FULLKV_ATTENTION_DEVICE}"
@@ -93,6 +101,19 @@ echo "[launch] Full + C2KV on ${BASELINE_DEVICES}"
   export PARALLEL_EVAL=True
   bash agent/eval_agent_tool_definition_reuse_baselines_npu.sh
 ) > "${RUN_DIR}/full_c2kv.log" 2>&1 &
+PIDS+=("$!")
+
+echo "[launch] BM25 hybrid on ${BM25_DEVICE}"
+(
+  export ASCEND_RT_VISIBLE_DEVICES="${BM25_DEVICE}"
+  export OUTPUT_FILE="${BM25_OUTPUT}"
+  export TMP_DIR="${RUN_DIR}/bm25_hybrid.parts"
+  export HYBRID_MODES="hybrid"
+  export ROUTER_STRATEGIES="bm25"
+  export TOP_SCHEMA_MODE="full"
+  export PARALLEL_EVAL=True
+  bash agent/eval_agent_tool_definition_hybrid_router_npu.sh
+) > "${RUN_DIR}/bm25_hybrid.log" 2>&1 &
 PIDS+=("$!")
 
 echo "[launch] Lexical hybrid on ${LEXICAL_DEVICE}"
@@ -121,12 +142,6 @@ echo "[launch] C2KV attention hybrid on ${ATTENTION_DEVICE}"
   bash agent/eval_agent_tool_definition_hybrid_router_npu.sh
 ) > "${RUN_DIR}/att_hybrid.log" 2>&1 &
 PIDS+=("$!")
-
-for pid in "${PIDS[@]}"; do
-  wait "${pid}"
-done
-
-PIDS=()
 
 echo "[launch] FullKV attention hybrid on ${FULLKV_ATTENTION_DEVICE}"
 (
@@ -167,10 +182,11 @@ python agent/merge_agent_tool_definition_reuse_baselines_eval.py \
   --reuse_model "${BASE_MODEL}" \
   --dataset_path "${DATASET_PATH}" \
   --split "${SPLIT}" \
-  --modes "full,c2kv,c2kv_hybrid,att_hybrid_${ATTENTION_ROUTER_SCORE_MODE},att_fullkv_hybrid_${ATTENTION_ROUTER_SCORE_MODE},hybrid_fullkv_att_rerank_${ATTENTION_ROUTER_SCORE_MODE}" \
+  --modes "full,c2kv,bm25_hybrid,c2kv_hybrid,att_hybrid_${ATTENTION_ROUTER_SCORE_MODE},att_fullkv_hybrid_${ATTENTION_ROUTER_SCORE_MODE},hybrid_fullkv_att_rerank_${ATTENTION_ROUTER_SCORE_MODE}" \
   --ratios "1,4" \
   --input_files \
     "${BASELINE_OUTPUT}" \
+    "${BM25_OUTPUT}" \
     "${LEXICAL_OUTPUT}" \
     "${ATTENTION_OUTPUT}" \
     "${FULLKV_ATTENTION_OUTPUT}" \
@@ -179,4 +195,7 @@ python agent/merge_agent_tool_definition_reuse_baselines_eval.py \
 echo "Done."
 echo "Merged rows: ${OUTPUT_FILE}"
 echo "Summary: ${OUTPUT_STEM}.summary.json"
+echo "Common rows: ${OUTPUT_STEM}.common.jsonl"
+echo "Common summary: ${OUTPUT_STEM}.common.summary.json"
+echo "Common report: ${OUTPUT_STEM}.common.report.md"
 echo "Logs are under ${RUN_DIR}/"

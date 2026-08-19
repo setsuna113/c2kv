@@ -175,4 +175,7 @@ python agent/merge_agent_tool_definition_reuse_baselines_eval.py \
 echo "Done."
 echo "Merged rows: ${OUTPUT_FILE}"
 echo "Summary: ${OUTPUT_STEM}.summary.json"
+echo "Common rows: ${OUTPUT_STEM}.common.jsonl"
+echo "Common summary: ${OUTPUT_STEM}.common.summary.json"
+echo "Common report: ${OUTPUT_STEM}.common.report.md"
 echo "Logs are under ${RUN_DIR}/"

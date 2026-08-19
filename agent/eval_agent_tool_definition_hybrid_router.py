@@ -56,6 +56,26 @@ def _jsonl_write(path: str, rows: List[Dict[str, Any]]) -> None:
             f.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 
+def _is_oom_error(error: RuntimeError) -> bool:
+    message = str(error).lower()
+    return "out of memory" in message or "oom" in message
+
+
+def _oom_row(example: Any, args: argparse.Namespace, top_k: int, ratio: int) -> Dict[str, Any]:
+    return {
+        "qid": getattr(example, "qid", None),
+        "session_id": getattr(example, "session_id", None),
+        "mode": "hybrid",
+        "hybrid_mode": getattr(args, "hybrid_mode", "hybrid"),
+        "router_strategy": getattr(args, "router_strategy", None),
+        "top_schema_mode": getattr(args, "top_schema_mode", None),
+        "top_k": top_k,
+        "ratio": ratio,
+        "skipped": True,
+        "skip_reason": "oom",
+    }
+
+
 def _json_loads(value: Any, default: Any) -> Any:
     if value is None or value == "":
         return default
@@ -1100,7 +1120,7 @@ def _rank_tools_by_attention(
             tools,
             system_cache,
             system_length,
-            args.attention_router_attn_impl,
+            args.generate_attn_impl,
         )
         blend_sec = 0.0
         tool_key_tokens = tool_length
@@ -2473,7 +2493,22 @@ def evaluate(args: argparse.Namespace) -> Dict[str, Any]:
     for top_k, ratio in cases:
         desc = f"hybrid_top{top_k}_c2kv{ratio}x"
         for example in tqdm(examples, desc=desc):
-            rows.append(_generate_one_hybrid(model, tokenizer, example, args, top_k, ratio))
+            try:
+                row = _generate_one_hybrid(model, tokenizer, example, args, top_k, ratio)
+            except RuntimeError as error:
+                if not _is_oom_error(error):
+                    raise
+                logger.warning(
+                    "Skipping sample after OOM: router_strategy=%s top_k=%s ratio=%s qid=%s",
+                    args.router_strategy,
+                    top_k,
+                    ratio,
+                    getattr(example, "qid", None),
+                )
+                row = _oom_row(example, args, top_k, ratio)
+                _clear_device_cache(device)
+            rows.append(row)
+            _clear_device_cache(device)
 
     summaries = _summarize_rows(rows)
     summary = {

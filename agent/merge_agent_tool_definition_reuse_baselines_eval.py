@@ -689,6 +689,71 @@ def _compact_common_subset(payload: Dict[str, Any], include_keys: bool) -> Dict[
     return compact
 
 
+def _fmt_value(value: Any, digits: int = 4, suffix: str = "") -> str:
+    if value is None:
+        return "-"
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)):
+        return f"{float(value):.{digits}f}{suffix}"
+    return str(value)
+
+
+def _common_report_markdown(summary: Dict[str, Any]) -> str:
+    subset = summary.get("common_subset", {})
+    fairness = summary.get("common_subset_fairness_check", {})
+    lines = [
+        "# Agent Tool-Definition Common-Subset Report",
+        "",
+        f"Model: `{summary.get('model')}`",
+        f"Dataset: `{summary.get('dataset_path')}`",
+        f"Split: `{summary.get('split')}`",
+        f"Tool document mode: `{summary.get('tool_document_eval_mode')}`",
+        f"Common samples: `{subset.get('num_common_samples', 0)}`",
+        f"Fair common subset: `{fairness.get('is_fair_common_subset', False)}`",
+        "",
+        "| Method | Ratio | Valid | Exact | Tool Name | Type Acc | Text F1 | Rouge-L | Router Hit | Compression | Weighted Compression | Avg Total s | Avg Router s |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+    ]
+    for row in summary.get("common_subset_results", []):
+        lines.append(
+            "| "
+            + " | ".join(
+                [
+                    str(row.get("mode")),
+                    str(row.get("ratio")),
+                    str(row.get("num_valid")),
+                    _fmt_value(row.get("exact_match")),
+                    _fmt_value(row.get("tool_name_accuracy")),
+                    _fmt_value(row.get("response_type_accuracy")),
+                    _fmt_value(row.get("avg_text_token_f1")),
+                    _fmt_value(row.get("avg_rouge_l_f1")),
+                    _fmt_value(row.get("router_hit_rate")),
+                    _fmt_value(row.get("avg_actual_compression_ratio"), 2, "x"),
+                    _fmt_value(row.get("token_weighted_actual_compression_ratio"), 2, "x"),
+                    _fmt_value(row.get("avg_total_sec"), 2),
+                    _fmt_value(row.get("avg_attention_router_sec"), 2),
+                ]
+            )
+            + " |"
+        )
+    lines.extend(
+        [
+            "",
+            "## Valid Samples By Group",
+            "",
+        ]
+    )
+    for group, count in sorted((subset.get("valid_samples_by_group") or {}).items()):
+        lines.append(f"- `{group}`: {count}")
+    missing = subset.get("missing_valid_samples_by_group") or {}
+    if missing:
+        lines.extend(["", "## Missing From Fixed Common Subset", ""])
+        for group, count in sorted(missing.items()):
+            lines.append(f"- `{group}`: {count}")
+    return "\n".join(lines) + "\n"
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Merge agent tool-definition reuse baseline eval shards.")
     parser.add_argument("--output_file", required=True)
@@ -750,6 +815,12 @@ def main() -> None:
         common_subset,
         args.include_common_sample_keys,
     )
+    common_rows = _dedupe_common_rows(rows, set(common_subset.get("common_sample_keys", [])))
+    common_fairness_check = _common_fairness_check(common_subset_results, common_subset)
+    common_output_path = output_path.with_suffix(".common.jsonl")
+    common_summary_path = output_path.with_suffix(".common.summary.json")
+    common_report_path = output_path.with_suffix(".common.report.md")
+    _write_jsonl(common_output_path, common_rows)
     summary = {
         "model": args.model,
         "base_model": args.base_model,
@@ -788,8 +859,38 @@ def main() -> None:
         "results": _summarize_rows(rows),
         "common_subset": common_subset_for_output,
         "common_subset_results": common_subset_results,
-        "common_subset_fairness_check": _common_fairness_check(common_subset_results, common_subset),
+        "common_subset_fairness_check": common_fairness_check,
+        "common_subset_artifacts": {
+            "jsonl": str(common_output_path),
+            "summary_json": str(common_summary_path),
+            "report_md": str(common_report_path),
+        },
     }
+    common_summary = {
+        **{key: summary[key] for key in (
+            "model",
+            "base_model",
+            "reuse_model",
+            "dataset_path",
+            "split",
+            "tool_document_eval_mode",
+            "modes",
+            "ratios",
+        )},
+        "source_output_file": str(output_path),
+        "num_rows": len(common_rows),
+        "common_subset": common_subset,
+        "common_subset_results": common_subset_results,
+        "common_subset_fairness_check": common_fairness_check,
+    }
+    common_summary_path.write_text(
+        json.dumps(common_summary, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    common_report_path.write_text(
+        _common_report_markdown(common_summary),
+        encoding="utf-8",
+    )
     output_path.with_suffix(".summary.json").write_text(
         json.dumps(summary, ensure_ascii=False, indent=2),
         encoding="utf-8",
