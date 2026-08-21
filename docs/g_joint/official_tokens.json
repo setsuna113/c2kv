@@ -1,0 +1,86 @@
+{
+  "assumptions": [
+    "mdoc paths are resolved with train_mdoc._candidate_roots/_source_path under --data_root (cleaned layout) and loaded with datasets.load_from_disk, exactly like MultiDocDataset.",
+    "mdoc num_samples selects the FIRST N samples per source (MultiDocDataset semantics); the default 32768 is the 2**15 per-source budget; the official script leaves --train_source_sizes unset (all samples after the first 512 eval-reserved ones) \u2014 pass --mdoc_num_samples all to replicate that exactly.",
+    "mdoc rows are produced by MultiDocDataset._preprocess_mdoc_sample verbatim (max_length=1024, max_doc_length=1024, max_doc_num=10, max_system_length=256; hotpotqa/wikimqa use the identity extractor, incl. the QA_QUERY_PROMPTS question prefix and the empty-doc strip, longmagpie uses extract_docs=None) and dropped when no label is supervised, like MultiDocDataset's final filter; the official shuffle (seed 2948) is order-only and does not change token sums, so it is not reproduced.",
+    "agent rows use OpenSWETracesCompressHistorySource (resolved_only=True, recent_message_num=4, max_samples_per_trace=8) + CompressHistoryDataset.preprocess_example (max_doc_num=10, max_doc_length=1024, max_system_length=8192, max_length=16384, min_doc_num=2, tail selection); the FIRST --agent_num_samples (default 130000) expanded records are scanned, like CompressHistoryDataset.__init__.",
+    "agent expansion (_expand_openswe_batch) uses the UNSEEDED global random module in the official code; this scan seeds random.seed(--split_seed) so --num_proc 1 is deterministic; official trainer runs vary slightly for the same reason.",
+    "U_src hashes whitespace-normalized raw document text (sha1) and counts tokenizer.encode(text, add_special_tokens=False) once per unique document, pool-level (documents dropped by grid budget caps or preprocessing filters are still counted); U_src is epoch-invariant. Agent-stage compressible source = history-message contents only; the system prompt + first user request stay uncompressed and are excluded.",
+    "P_src counts context_input_ids != -100 per emitted row, INCLUDING the chat-template wrapper tokens around each compressed document; T_tgt counts labels != -100 (answer + EOS). The official recipe trains 1 epoch per stage, so P_official = stages.total.P_src.",
+    "U_src is pool-level and epoch-invariant: unique compressible documents (sha1 over whitespace-normalized raw text) counted once each with tokenizer.encode(text, add_special_tokens=False); documents later dropped by grid budget caps or preprocessing filters are still counted.",
+    "P_src counts context_input_ids != -100 over emitted rows (real preprocessing, including the chat-template wrapper around each compressed document); --epochs multiplies P_src only.",
+    "T_tgt counts labels != -100 over emitted rows (answer + EOS), per epoch."
+  ],
+  "data_root": "/home/liuyancheng/c2kv/datasets/qa",
+  "mode": "official",
+  "stages": {
+    "agent": {
+      "P_src": 370960606,
+      "P_src_per_epoch": 370960606,
+      "T_tgt": 36449888,
+      "U_src": 471234342,
+      "dropped_invalid": 1366,
+      "expanded_records": 521952,
+      "path": "/home/liuyancheng/c2kv/datasets/open-swe-traces",
+      "samples": 128634,
+      "selected_records": 130000,
+      "source": "open_swe",
+      "unique_docs": 1195079
+    },
+    "mdoc": {
+      "num_samples_per_source": 32768,
+      "per_source": {
+        "hotpotqa": {
+          "P_src": 49057075,
+          "P_src_per_epoch": 49057075,
+          "T_tgt": 163733,
+          "U_src": 43425593,
+          "dropped_no_supervision": 0,
+          "path": "/home/liuyancheng/c2kv/datasets/qa/hotpotqa_train_cleaned",
+          "samples": 32768,
+          "selected_samples": 32768,
+          "unique_docs": 309675
+        },
+        "longmagpie": {
+          "P_src": 82739212,
+          "P_src_per_epoch": 82739212,
+          "T_tgt": 21774456,
+          "U_src": 171773066,
+          "dropped_no_supervision": 0,
+          "path": "/home/liuyancheng/c2kv/datasets/qa/longmagpie_cleaned",
+          "samples": 32768,
+          "selected_samples": 32768,
+          "unique_docs": 227351
+        },
+        "wikimqa": {
+          "P_src": 32722351,
+          "P_src_per_epoch": 32722351,
+          "T_tgt": 148612,
+          "U_src": 19728658,
+          "dropped_no_supervision": 0,
+          "path": "/home/liuyancheng/c2kv/datasets/qa/wikimqa_train_cleaned",
+          "samples": 32768,
+          "selected_samples": 32768,
+          "unique_docs": 174272
+        }
+      },
+      "total": {
+        "P_src": 164518638,
+        "P_src_per_epoch": 164518638,
+        "T_tgt": 22086801,
+        "U_src": 234907433,
+        "samples": 98304,
+        "unique_docs": 711063
+      }
+    },
+    "total": {
+      "P_src": 535479244,
+      "P_src_per_epoch": 535479244,
+      "T_tgt": 58536689,
+      "U_src": 706141775,
+      "samples": 226938,
+      "unique_docs": 1906142
+    }
+  },
+  "tokenizer": "/home/liuyancheng/c2kv/models/Qwen3-4B-Instruct-2507"
+}
