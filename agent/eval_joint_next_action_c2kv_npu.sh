@@ -90,6 +90,13 @@ fi
 if [[ -n "${MAX_TOOL_CHUNKS}" ]]; then
   OPTIONAL_ARGS+=(--max_tool_chunks "${MAX_TOOL_CHUNKS}")
 fi
+# Pre-fix doc budgets, for diffing against the pre-fix small arms only.
+# Value semantics (not mere presence): false/0/no keep the fixed budgets.
+case "${LEGACY_MODE_CAPS:-}" in
+  1|true|True|yes) OPTIONAL_ARGS+=(--legacy_mode_caps) ;;
+  ""|0|false|False|no) ;;
+  *) echo "Unrecognized LEGACY_MODE_CAPS=${LEGACY_MODE_CAPS} (use true/false)" >&2; exit 1 ;;
+esac
 if [[ -n "${MAX_INPUT_CHARS}" ]]; then
   OPTIONAL_ARGS+=(--max_input_chars "${MAX_INPUT_CHARS}")
 fi

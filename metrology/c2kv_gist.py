@@ -258,10 +258,14 @@ def chunk_doc_texts(
     """doc 文本 → chat-template 包裹的 token 块（joint 预算分配）。
 
     镜像 agent/eval_joint_next_action_c2kv.py:_condition_doc_chunks 的 joint
-    分支（:207-245）：工具文档逐条 _chat_template_ids 包裹后按 max_doc_length
-    切片、上限 min(max_tool_chunks, max_doc_num)；历史文档取余下槽位，
+    分支（per-side caps 语义）：工具文档逐条 _chat_template_ids 包裹后按
+    max_doc_length 切片、上限 min(max_tool_chunks, max_doc_num)；历史文档取
+    **常量** max_doc_num - tool_cap 槽位（不回收工具侧空槽，与
+    train_data_joint._history_chunk_budget(per_side_caps=True) 一致），
     _fit_reused_history（超长切分 + 尾偏 tail 选择）后逐条包裹。
-    不实现 max_tool_definition_tokens 的 skip（见模块 docstring）。
+    不实现 max_tool_definition_tokens 的 skip，也不做 target-doc 保留
+    （BFCL 每条目工具数少，tool_cap 截断在生产参数下不触发；若未来
+    工具池扩大需与 train_data_joint.build_tool_chunks 同步）。
     """
     imp = _lazy_train_imports()
     if max_tool_chunks is None:
@@ -280,7 +284,9 @@ def chunk_doc_texts(
     tool_chunks = tool_chunks[:tool_cap]
 
     history_chunks: list[list[int]] = []
-    history_budget = max_doc_num - len(tool_chunks)
+    # Constant per-side budget (fixed caps): spare tool slots are NOT recycled
+    # into history, matching the re-trained arms' presented budgets.
+    history_budget = max_doc_num - tool_cap
     raw_history = [
         {"role": "user", "content": text}
         for text in history_doc_texts

@@ -17,10 +17,17 @@ subset is C2KV-compressed (the same doc-side construction as
 ``JointDataset.preprocess_example``):
 
 - ``joint``: tool chunks (up to ``max_tool_chunks``) + history chunks
-  (remaining ``max_doc_num`` slots, tail-biased);
-- ``tool_only``: tool chunks get all ``max_doc_num`` slots; history turns are
-  NOT shown at all (absent, mirroring the tooldef-path setting);
-- ``history_only``: history chunks get all slots; tool schemas are absent.
+  (``max_doc_num - max_tool_chunks`` slots, tail-biased);
+- ``tool_only``: tool chunks with the SAME ``max_tool_chunks`` cap as joint;
+  history turns are NOT shown at all (absent);
+- ``history_only``: history chunks with the same per-side budget as joint;
+  tool schemas are absent.
+
+Per-side budgets are constant across conditions (the G-Q3 fairness
+constraint) and budget truncation always keeps the target tool's schema in
+the grid; ``--legacy_mode_caps`` reproduces the pre-fix behavior (single-side
+conditions got all ``max_doc_num`` slots, plain head-truncation could drop
+the target schema) for diffing old runs.
 
 Modes (per condition) mirror the existing evals: ``c2kv`` (checkpoint gist
 params), ``c2kv_untrained`` (base-init gist params), ``full`` (all documents
@@ -141,6 +148,8 @@ from train.train_data_joint import (  # noqa: E402
     JointExample,
     TOOL_DOC_PREFIX,
     _default_max_tool_chunks,
+    _history_chunk_budget,
+    build_tool_chunks,
 )
 from train.train_data_multiturn import (  # noqa: E402
     _chat_template_ids,
@@ -188,16 +197,18 @@ def _condition_doc_chunks(
     max_tool_definition_tokens: int,
     history_selection: str,
     split_oversized_history_docs: bool,
-) -> Tuple[Optional[List[List[int]]], Optional[List[List[int]]], Optional[str]]:
+    per_side_caps: bool = True,
+) -> Tuple[Optional[List[List[int]]], Optional[List[List[int]]], Optional[str], Dict[str, Any]]:
     """Build (tool_chunks, history_chunks) id lists for one condition.
 
     Each chunk is a chat-template-wrapped document of at most
-    ``max_doc_length`` tokens (NOT padded).  Returns ``(None, None, reason)``
-    when the tool side exceeds ``max_tool_definition_tokens`` (the training
-    skip).  Budget allocation is exactly ``JointDataset.preprocess_example``:
-    joint caps tools at ``min(max_tool_chunks, max_doc_num)`` and gives
-    history the remaining slots; tool_only/history_only give their side all
-    ``max_doc_num`` slots and drop the other side entirely.
+    ``max_doc_length`` tokens (NOT padded).  Returns ``(None, None, reason,
+    meta)`` when the tool side exceeds ``max_tool_definition_tokens`` (the
+    training skip).  The tool side delegates to
+    ``train_data_joint.build_tool_chunks`` and the history budget to
+    ``train_data_joint._history_chunk_budget`` — the SAME code the trainer
+    runs — so train and eval cannot drift.  ``meta`` carries the builder's
+    ``target_known``/``target_in_grid`` flags for per-row logging.
     """
 
     if condition not in CONDITIONS:
@@ -205,27 +216,24 @@ def _condition_doc_chunks(
     if max_tool_chunks is None:
         max_tool_chunks = _default_max_tool_chunks(max_doc_num)
 
-    tool_chunks: List[List[int]] = []
-    if condition != "history_only":
-        tool_cap = max_doc_num if condition == "tool_only" else min(max_tool_chunks, max_doc_num)
-        doc_id_groups = [
-            _chat_template_ids(tokenizer, [{"role": "user", "content": TOOL_DOC_PREFIX + document}])
-            for document in example.tool_documents
-            if document.strip()
-        ]
-        doc_tokens = sum(len(doc_ids) for doc_ids in doc_id_groups)
-        if doc_tokens > max_tool_definition_tokens:
-            return None, None, f"tool_definition_tokens>{max_tool_definition_tokens}"
-        for doc_ids in doc_id_groups:
-            tool_chunks.extend(
-                doc_ids[start : start + max_doc_length]
-                for start in range(0, len(doc_ids), max_doc_length)
-            )
-        tool_chunks = tool_chunks[:tool_cap]
+    tool_chunks, skip_reason, tool_meta = build_tool_chunks(
+        tokenizer,
+        example,
+        condition,
+        max_doc_length=max_doc_length,
+        max_doc_num=max_doc_num,
+        max_tool_chunks=max_tool_chunks,
+        max_tool_definition_tokens=max_tool_definition_tokens,
+        per_side_caps=per_side_caps,
+    )
+    if skip_reason is not None:
+        return None, None, skip_reason, tool_meta
 
     history_chunks: List[List[int]] = []
     if condition != "tool_only":
-        history_budget = max_doc_num if condition == "history_only" else max_doc_num - len(tool_chunks)
+        history_budget = _history_chunk_budget(
+            condition, max_doc_num, max_tool_chunks, len(tool_chunks), per_side_caps
+        )
         raw_history = [
             {"role": "user", "content": text}
             for text in example.history_documents
@@ -244,7 +252,7 @@ def _condition_doc_chunks(
                 _chat_template_ids(tokenizer, [message], max_length=max_doc_length)
                 for message in fitted
             ]
-    return tool_chunks, history_chunks, None
+    return tool_chunks, history_chunks, None, tool_meta
 
 
 def _doc_grid(chunks: Sequence[List[int]], max_doc_length: int) -> torch.Tensor:
@@ -408,7 +416,7 @@ def _build_c2kv_prefix(
     example: JointExample,
     args: argparse.Namespace,
 ) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
-    tool_chunks, history_chunks, skip_reason = _condition_doc_chunks(
+    tool_chunks, history_chunks, skip_reason, tool_meta = _condition_doc_chunks(
         tokenizer,
         example,
         args.condition,
@@ -418,6 +426,7 @@ def _build_c2kv_prefix(
         max_tool_definition_tokens=args.max_tool_definition_tokens,
         history_selection=args.history_selection,
         split_oversized_history_docs=args.split_oversized_history_docs,
+        per_side_caps=not args.legacy_mode_caps,
     )
     if skip_reason is not None:
         return None, skip_reason
@@ -455,6 +464,9 @@ def _build_c2kv_prefix(
         "doc_chunks": len(chunks),
         "tool_doc_chunks": len(tool_chunks),
         "history_doc_chunks": len(history_chunks),
+        "target_known": tool_meta.get("target_known"),
+        "target_in_grid": tool_meta.get("target_in_grid"),
+        "target_truncated_to_cap": tool_meta.get("target_truncated_to_cap"),
         "gist_tokens": gist_tokens,
         "compressed_tokens": gist_tokens,
         "actual_compression_ratio": actual_ratio,
@@ -544,7 +556,7 @@ def _build_separate_prefix(
     answer-side forward.
     """
 
-    tool_chunks, history_chunks, skip_reason = _condition_doc_chunks(
+    tool_chunks, history_chunks, skip_reason, tool_meta = _condition_doc_chunks(
         tokenizer,
         example,
         "joint",
@@ -554,6 +566,7 @@ def _build_separate_prefix(
         max_tool_definition_tokens=args.max_tool_definition_tokens,
         history_selection=args.history_selection,
         split_oversized_history_docs=args.split_oversized_history_docs,
+        per_side_caps=not args.legacy_mode_caps,
     )
     if skip_reason is not None:
         return None, skip_reason
@@ -625,6 +638,9 @@ def _build_separate_prefix(
         "doc_chunks": len(chunks),
         "tool_doc_chunks": len(tool_chunks),
         "history_doc_chunks": len(history_chunks),
+        "target_known": tool_meta.get("target_known"),
+        "target_in_grid": tool_meta.get("target_in_grid"),
+        "target_truncated_to_cap": tool_meta.get("target_truncated_to_cap"),
         "gist_tokens": gist_tokens,
         "compressed_tokens": gist_tokens,
         "actual_compression_ratio": doc_tokens / gist_tokens if gist_tokens else 0.0,
@@ -649,7 +665,7 @@ def _build_baseline_prefix(
     truncation, NOT the history eval's tail-biased one.
     """
 
-    tool_chunks, history_chunks, skip_reason = _condition_doc_chunks(
+    tool_chunks, history_chunks, skip_reason, tool_meta = _condition_doc_chunks(
         tokenizer,
         example,
         args.condition,
@@ -659,6 +675,7 @@ def _build_baseline_prefix(
         max_tool_definition_tokens=args.max_tool_definition_tokens,
         history_selection=args.history_selection,
         split_oversized_history_docs=args.split_oversized_history_docs,
+        per_side_caps=not args.legacy_mode_caps,
     )
     if skip_reason is not None:
         return None, skip_reason
@@ -711,6 +728,9 @@ def _build_baseline_prefix(
         "doc_chunks": len(chunks),
         "tool_doc_chunks": len(tool_chunks),
         "history_doc_chunks": len(history_chunks),
+        "target_known": tool_meta.get("target_known"),
+        "target_in_grid": tool_meta.get("target_in_grid"),
+        "target_truncated_to_cap": tool_meta.get("target_truncated_to_cap"),
         "gist_tokens": 0,
         "compressed_tokens": kept_tokens,
         "actual_compression_ratio": doc_tokens / kept_tokens if kept_tokens else 0.0,
@@ -768,6 +788,9 @@ def _generate_with_prefix(
         "doc_chunks": prefix["doc_chunks"],
         "tool_doc_chunks": prefix["tool_doc_chunks"],
         "history_doc_chunks": prefix["history_doc_chunks"],
+        "target_known": prefix.get("target_known"),
+        "target_in_grid": prefix.get("target_in_grid"),
+        "target_truncated_to_cap": prefix.get("target_truncated_to_cap"),
         "gist_tokens": prefix["gist_tokens"],
         "compressed_tokens": prefix["compressed_tokens"],
         "prompt_tokens": len(prompt_ids),
@@ -1060,6 +1083,7 @@ def evaluate(args: argparse.Namespace) -> Dict[str, Any]:
         "max_doc_length": args.max_doc_length,
         "max_doc_num": args.max_doc_num,
         "max_tool_chunks": args.max_tool_chunks,
+        "legacy_mode_caps": args.legacy_mode_caps,
         "min_doc_num": args.min_doc_num,
         "max_tool_definition_tokens": args.max_tool_definition_tokens,
         "max_system_length": args.max_system_length,
@@ -1114,8 +1138,39 @@ def _common_valid_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 def merge_shards(args: argparse.Namespace) -> Dict[str, Any]:
     rows: List[Dict[str, Any]] = []
+    gist_init_fractions: Dict[str, float] = {}
+    shard_cap_modes: List[Any] = []
     for input_file in args.input_files:
         rows.extend(_read_jsonl(Path(input_file)))
+        # Aggregate the shard summaries' gist-init diagnostics (worst case per
+        # key) so the gate-1 pick guard sees them on the MERGED summary too —
+        # without this the guard was dead code on the parallel-shard path.
+        shard_summary_path = Path(input_file).with_suffix(".summary.json")
+        if shard_summary_path.exists():
+            try:
+                shard_summary = json.loads(shard_summary_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                logger.warning("Unreadable shard summary skipped: %s", shard_summary_path)
+                shard_summary = {}
+            for key, value in (shard_summary.get("gist_init_fractions") or {}).items():
+                if isinstance(value, (int, float)):
+                    previous = gist_init_fractions.get(key)
+                    gist_init_fractions[key] = (
+                        float(value) if previous is None else max(previous, float(value))
+                    )
+            if "legacy_mode_caps" in shard_summary:
+                shard_cap_modes.append(bool(shard_summary["legacy_mode_caps"]))
+    # The doc-budget regime must be visible on the merged summary: legacy and
+    # fixed caps produce non-comparable numbers, and mixing shards from both
+    # regimes in one merge is almost certainly an ops mistake.
+    cap_modes = sorted(set(shard_cap_modes))
+    if len(cap_modes) > 1:
+        logger.warning(
+            "MERGING SHARDS FROM DIFFERENT DOC-BUDGET REGIMES (legacy_mode_caps=%s) — "
+            "the merged numbers are not internally comparable",
+            cap_modes,
+        )
+    merged_legacy_mode_caps: Any = cap_modes[0] if len(cap_modes) == 1 else (cap_modes or None)
     if args.output_file:
         _jsonl_write(args.output_file, rows)
     common_rows = _common_valid_rows(rows)
@@ -1129,6 +1184,8 @@ def merge_shards(args: argparse.Namespace) -> Dict[str, Any]:
         "checkpoint_history": args.checkpoint_history if args.separate else None,
         "separate_generator": args.separate_generator if args.separate else None,
         "num_rows": len(rows),
+        "legacy_mode_caps": merged_legacy_mode_caps,
+        "gist_init_fractions": gist_init_fractions,
         "results": _summarize(rows),
         "common_num_qids": len({row.get("qid") for row in common_rows}),
         "common_results": _summarize(common_rows),
@@ -1188,6 +1245,12 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--max_doc_length", type=int, default=1024)
     parser.add_argument("--max_doc_num", type=int, default=24)
     parser.add_argument("--max_tool_chunks", type=int, default=None)
+    parser.add_argument(
+        "--legacy_mode_caps",
+        action="store_true",
+        help="Reproduce the pre-fix doc budgets (single-side conditions get all max_doc_num "
+        "slots; plain head-truncation may drop the target tool schema). For diffing old runs only.",
+    )
     parser.add_argument("--min_doc_num", type=int, default=2)
     parser.add_argument("--max_tool_definition_tokens", type=int, default=32000)
     parser.add_argument("--max_system_length", type=int, default=512)

@@ -148,10 +148,15 @@ log "stage 3 done: $NQ qids in order file"
 # ---------------------------------------------------------------- stage 4
 BUDGET=32000000
 if [[ -f "$G/official_tokens.json" ]]; then
-  P_OFF=$("$PY" -c "import json;d=json.load(open('$G/official_tokens.json'));print(int(d.get('total',{}).get('P_src',0)))" 2>/dev/null || echo 0)
+  # P_official lives at stages.total.P_src (see token_accounting P_SRC_NOTE);
+  # a present-but-unreadable file must FAIL, not silently fall back to the
+  # default budget — the 0.0625P/0.25P/1.0P ladder depends on this value.
+  P_OFF=$("$PY" -c "import json;d=json.load(open('$G/official_tokens.json'));print(int(((d.get('stages') or {}).get('total') or {}).get('P_src',0)))" 2>/dev/null || echo 0)
   if [[ "$P_OFF" -gt 0 ]]; then
     BUDGET=$(( P_OFF / 16 ))
     log "P_official=$P_OFF -> small budget=$BUDGET"
+  else
+    fail "official_tokens.json exists but stages.total.P_src is missing/zero - fix the scan output instead of silently using the default budget"
   fi
 else
   log "official_tokens.json absent -> default small budget=32000000"

@@ -69,6 +69,13 @@ def _example(tool_docs=3, history_docs=3, doc_words=6):
 
 
 def _chunks(tokenizer, example, condition, **overrides):
+    tool_chunks, history_chunks, reason, _meta = _chunks_with_meta(
+        tokenizer, example, condition, **overrides
+    )
+    return tool_chunks, history_chunks, reason
+
+
+def _chunks_with_meta(tokenizer, example, condition, **overrides):
     kwargs = dict(
         max_doc_length=16,
         max_doc_num=4,
@@ -124,27 +131,38 @@ def test_joint_condition_has_both_sides_tool_first():
     assert decoded.index("tool0word0") < decoded.index("hist0word0")
 
 
-def test_tool_only_drops_history_and_gives_tools_all_slots():
+def test_tool_only_drops_history_and_shares_the_joint_tool_cap():
     tokenizer = _WhitespaceSelfTestTokenizer()
-    # 6 tool docs of ~8 tokens each -> more than the joint tool cap of
-    # min(2*4//3, 4) = 2 chunks but within the tool_only cap of 4 chunks.
+    # 6 tool docs of ~8 tokens each -> more than the shared tool cap of
+    # min(2*4//3, 4) = 2 chunks.  Per-side caps: tool_only gets the SAME cap
+    # as joint (the G-Q3 fairness constraint), not all max_doc_num slots.
     example = _example(tool_docs=6, history_docs=2, doc_words=6)
     joint_tools, joint_history, _ = _chunks(tokenizer, example, "joint", max_doc_length=16)
     only_tools, only_history, _ = _chunks(tokenizer, example, "tool_only", max_doc_length=16)
     assert only_history == []
-    assert len(joint_tools) == 2  # joint cap: min(_default_max_tool_chunks(4)=2, 4)
-    assert len(only_tools) > len(joint_tools)  # tool_only cap: all 4 slots
-    assert joint_history  # joint still fits history in the remaining slots
+    assert len(joint_tools) == 2  # shared cap: min(_default_max_tool_chunks(4)=2, 4)
+    assert len(only_tools) == len(joint_tools)
+    assert joint_history  # joint fills its constant history budget
+    # The legacy flag reproduces the pre-fix uplift (all 4 slots).
+    legacy_tools, _, _ = _chunks(
+        tokenizer, example, "tool_only", max_doc_length=16, per_side_caps=False
+    )
+    assert len(legacy_tools) > len(joint_tools)
 
 
-def test_history_only_drops_tools_and_gives_history_all_slots():
+def test_history_only_drops_tools_and_shares_the_joint_history_budget():
     tokenizer = _WhitespaceSelfTestTokenizer()
     example = _example(tool_docs=2, history_docs=6, doc_words=6)
     joint_tools, joint_history, _ = _chunks(tokenizer, example, "joint", max_doc_length=16)
     only_tools, only_history, _ = _chunks(tokenizer, example, "history_only", max_doc_length=16)
     assert only_tools == []
-    assert len(only_history) > len(joint_history)
+    assert len(only_history) == len(joint_history)  # constant per-side budget
     assert joint_tools
+    legacy_tools, legacy_history, _ = _chunks(
+        tokenizer, example, "history_only", max_doc_length=16, per_side_caps=False
+    )
+    assert legacy_tools == []
+    assert len(legacy_history) > len(only_history)  # legacy: all max_doc_num slots
 
 
 def test_tool_token_cap_skip():
@@ -781,3 +799,82 @@ def test_gist_params_at_init_fraction():
     with torch.no_grad():
         model.model.layers[0].self_attn.gist_q_proj.weight.add_(1e-3)
     assert module._gist_params_at_init_fraction(model) == 0.5
+
+
+# ---------------------------------------------------------------------------
+# Per-side caps: target meta propagation + merged gist_init aggregation.
+# ---------------------------------------------------------------------------
+
+
+def test_condition_doc_chunks_reports_target_meta():
+    tokenizer = _WhitespaceSelfTestTokenizer()
+    base = _example(tool_docs=6, history_docs=2, doc_words=6)
+    # Target the LAST tool doc: under the shared cap of 2 the pre-fix
+    # head-truncation would drop it; the fixed truncation must keep it.
+    targeted = JointExample(
+        qid=base.qid,
+        session_id=base.session_id,
+        tool_documents=base.tool_documents,
+        history_documents=base.history_documents,
+        current_messages=base.current_messages,
+        answer=base.answer,
+        system_prompt=base.system_prompt,
+        subset=base.subset,
+        target_tool="tool5",
+        target_tool_doc_index=5,
+    )
+    tool_chunks, _, reason, meta = _chunks_with_meta(
+        tokenizer, targeted, "joint", max_doc_length=16
+    )
+    assert reason is None
+    assert meta["target_known"] is True and meta["target_in_grid"] is True
+    decoded = tokenizer.decode([token for chunk in tool_chunks for token in chunk])
+    assert "tool5word0" in decoded
+    _, _, _, legacy_meta = _chunks_with_meta(
+        tokenizer, targeted, "joint", max_doc_length=16, per_side_caps=False
+    )
+    assert legacy_meta["target_in_grid"] is False
+    # history_only never reports target flags (no tool side).
+    _, _, _, history_meta = _chunks_with_meta(tokenizer, targeted, "history_only")
+    assert history_meta["target_in_grid"] is None
+
+
+def test_merge_shards_aggregates_gist_init_fractions(tmp_path):
+    import json as _json
+    from types import SimpleNamespace
+
+    from eval_joint_next_action_c2kv import merge_shards
+
+    shard_rows = [
+        {"qid": "q0", "condition": "joint", "mode": "c2kv", "ratio": 8, "skipped": False},
+        {"qid": "q1", "condition": "joint", "mode": "c2kv", "ratio": 8, "skipped": False},
+    ]
+    shard_files = []
+    for index, fractions in enumerate(({"joint": 0.1}, {"joint": 0.7, "separate_tool": 0.2})):
+        shard = tmp_path / f"part{index}.jsonl"
+        shard.write_text(
+            "\n".join(_json.dumps(row) for row in shard_rows[index : index + 1]) + "\n",
+            encoding="utf-8",
+        )
+        shard.with_suffix(".summary.json").write_text(
+            _json.dumps({"gist_init_fractions": fractions}), encoding="utf-8"
+        )
+        shard_files.append(str(shard))
+    args = SimpleNamespace(
+        input_files=shard_files,
+        output_file=str(tmp_path / "merged.jsonl"),
+        model="m",
+        base_model=None,
+        dataset_path="d",
+        split="eval",
+        separate=False,
+        checkpoint_tool=None,
+        checkpoint_history=None,
+        separate_generator=None,
+    )
+    summary = merge_shards(args)
+    # Max per key: the pick guard must see the worst shard.
+    assert summary["gist_init_fractions"] == {"joint": 0.7, "separate_tool": 0.2}
+    merged_summary_path = (tmp_path / "merged.jsonl").with_suffix(".summary.json")
+    persisted = _json.loads(merged_summary_path.read_text(encoding="utf-8"))
+    assert persisted["gist_init_fractions"] == {"joint": 0.7, "separate_tool": 0.2}

@@ -51,6 +51,10 @@ class JointDataArgs:
     max_doc_length: int = 1024
     max_doc_num: int = 24
     max_tool_chunks: Optional[int] = None  # None -> JointDataset default: 2/3 of max_doc_num
+    # Reproduce the pre-fix doc budgets (single-side modes got all max_doc_num
+    # slots; plain head-truncation could drop the target tool schema).  Only
+    # for diffing against the pre-fix small arms — new runs keep the default.
+    legacy_mode_caps: bool = False
     max_length: int = 2048
     max_system_length: int = 512
     max_tool_definition_tokens: int = 32000
@@ -224,6 +228,7 @@ def _dump_train_manifest(
     path.parent.mkdir(parents=True, exist_ok=True)
     manifest = {
         "doc_mode": data_args.doc_mode,
+        "legacy_mode_caps": data_args.legacy_mode_caps,
         "split_seed": data_args.split_seed,
         "example_order_file": data_args.example_order_file,
         "max_source_tokens": data_args.max_source_tokens,
@@ -304,6 +309,7 @@ def main() -> None:
         max_tool_chunks=data_args.max_tool_chunks,
         max_tool_definition_tokens=data_args.max_tool_definition_tokens,
         min_target_tokens=data_args.min_target_tokens,
+        per_side_caps=not data_args.legacy_mode_caps,
     )
     interleaved_train_len: Optional[int] = None
     if data_args.doc_mode == "alternate":
