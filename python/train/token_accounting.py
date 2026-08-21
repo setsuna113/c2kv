@@ -219,6 +219,8 @@ def scan_joint_examples(
     max_tool_chunks: Optional[int] = None,
     max_tool_definition_tokens: int = 32000,
     split_oversized_history_docs: bool = True,
+    per_side_caps: bool = True,
+    min_target_tokens: Optional[int] = None,
     epochs: int = 1,
     max_examples: Optional[int] = None,
 ) -> Dict[str, Any]:
@@ -255,7 +257,17 @@ def scan_joint_examples(
             max_tool_chunks=max_tool_chunks,
             max_tool_definition_tokens=max_tool_definition_tokens,
             split_oversized_history_docs=split_oversized_history_docs,
+            per_side_caps=per_side_caps,
         )
+        if row is not None and min_target_tokens is not None:
+            # Mirror MinTargetJointDataset: the trainer drops rows whose
+            # supervised answer fell below the reserved floor, so an
+            # "as-trained" P_src scan must drop them too.
+            answer_token_count = len(tokenizer.encode(example.answer, add_special_tokens=False)) + 1
+            reserved = min(answer_token_count, max(1, min_target_tokens))
+            supervised = sum(1 for value in row["labels"] if value != -100)
+            if supervised < reserved:
+                row, reason = None, f"target_tokens<{reserved}"
         if row is None:
             skipped[reason] += 1
             continue
@@ -598,6 +610,7 @@ def run_joint(args: argparse.Namespace, tokenizer) -> Dict[str, Any]:
         max_tool_chunks=args.max_tool_chunks,
         max_tool_definition_tokens=args.max_tool_definition_tokens,
         split_oversized_history_docs=not args.no_split_oversized_history_docs,
+        per_side_caps=not args.legacy_mode_caps,
         epochs=args.epochs,
         max_examples=args.max_examples,
     )
@@ -645,6 +658,11 @@ def main(argv: Optional[Sequence[str]] = None) -> Dict[str, Any]:
     joint.add_argument("--max_tool_chunks", type=int, default=None)
     joint.add_argument("--max_tool_definition_tokens", type=int, default=32000)
     joint.add_argument("--no_split_oversized_history_docs", action="store_true")
+    joint.add_argument(
+        "--legacy_mode_caps",
+        action="store_true",
+        help="Measure with the pre-fix doc budgets (as the pre-fix small arms trained).",
+    )
     # Accounting args.
     joint.add_argument("--tokenizer", required=True, help="local HF tokenizer path ('fake' = offline smoke)")
     joint.add_argument("--max_examples", type=int, default=None)

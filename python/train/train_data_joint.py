@@ -118,6 +118,11 @@ class JointExample:
     answer: str
     system_prompt: str = DEFAULT_SYSTEM_PROMPT
     subset: str = "unknown"
+    # Which entry of ``tool_documents`` renders the target tool's schema
+    # (post-shuffle), so budget truncation can keep it in the grid.  ``None``
+    # when the target tool was not identified in the definitions.
+    target_tool: Optional[str] = None
+    target_tool_doc_index: Optional[int] = None
 
 
 # ---------------------------------------------------------------------------
@@ -164,7 +169,10 @@ def _schema_obj(tool: Dict[str, Any]) -> Dict[str, Any]:
 def _parameter_signature(tool: Dict[str, Any]) -> List[Dict[str, Any]]:
     schema = _schema_obj(tool)
     properties = schema.get("properties") if isinstance(schema.get("properties"), dict) else {}
-    required = set(str(item) for item in schema.get("required", []) if isinstance(schema.get("required"), list))
+    # Real-world schemas ship ``"required": null``; ``.get`` with a default
+    # does not cover an explicit null, so guard the type before iterating.
+    required_raw = schema.get("required")
+    required = set(str(item) for item in required_raw) if isinstance(required_raw, list) else set()
     rows = []
     for name, value in properties.items():
         value = value if isinstance(value, dict) else {}
@@ -221,10 +229,25 @@ def _render_tool_documents(
     minified_json_prob: float = 0.2,
     shuffle_tools: bool = True,
     truncate_description_chars: int = 600,
-) -> List[str]:
+    target_tool: Optional[str] = None,
+) -> tuple[List[str], Optional[int]]:
+    """Render per-tool documents; also report the target tool's post-shuffle index.
+
+    Returns ``(docs, target_index)`` where ``target_index`` is the position of
+    the document rendering ``target_tool`` after the shuffle (``None`` when
+    ``target_tool`` is not given or not present).  The index — not a text
+    match — is what budget truncation uses to keep the target schema in the
+    context grid, so it stays correct across all three render variants.
+    """
     tools = list(tools)
     if shuffle_tools:
         rng.shuffle(tools)
+    target_index: Optional[int] = None
+    if target_tool:
+        for index, tool in enumerate(tools):
+            if _tool_name(tool) == target_tool:
+                target_index = index
+                break
     p = rng.random()
     if p < canonical_format_prob:
         docs = [_canonical_tool_doc(tool, truncate_description_chars) for tool in tools]
@@ -235,7 +258,7 @@ def _render_tool_documents(
             json.dumps(_shuffle_json_keys(tool, rng), ensure_ascii=False, separators=(",", ":"))
             for tool in tools
         ]
-    return docs
+    return docs, target_index
 
 
 def _first_tool_call_name(output_messages: Any) -> Optional[str]:
@@ -540,13 +563,14 @@ class AgentLLMTracesJointSource(AgentLLMTracesCompressHistorySource):
                 same_namespace_negative_tools=self.same_namespace_negative_tools,
                 random_negative_tools=self.random_negative_tools,
             )
-            tool_documents = _render_tool_documents(
+            tool_documents, target_doc_index = _render_tool_documents(
                 selected_tools,
                 rng,
                 canonical_format_prob=self.canonical_format_prob,
                 minified_json_prob=self.minified_json_prob,
                 shuffle_tools=self.shuffle_tools,
                 truncate_description_chars=self.truncate_description_chars,
+                target_tool=target_tool,
             )
             examples.append(
                 JointExample(
@@ -558,6 +582,8 @@ class AgentLLMTracesJointSource(AgentLLMTracesCompressHistorySource):
                     answer=answer,
                     system_prompt=system_prompt,
                     subset=subset,
+                    target_tool=target_tool,
+                    target_tool_doc_index=target_doc_index,
                 )
             )
         return examples
@@ -565,6 +591,137 @@ class AgentLLMTracesJointSource(AgentLLMTracesCompressHistorySource):
 
 def _default_max_tool_chunks(max_doc_num: int) -> int:
     return max(1, (2 * max_doc_num) // 3)
+
+
+def _history_chunk_budget(
+    doc_mode: str,
+    max_doc_num: int,
+    max_tool_chunks: int,
+    num_tool_chunks: int,
+    per_side_caps: bool,
+) -> int:
+    """History-side slot budget for one example.
+
+    ``per_side_caps=True``: a CONSTANT ``max_doc_num - min(max_tool_chunks,
+    max_doc_num)`` in every doc mode, so the history-side presented budget is
+    identical across ``joint``/``history_only`` (and across the J-arms that
+    train them) — the G-Q3 fairness constraint.  Spare tool slots are NOT
+    recycled into history.
+
+    ``per_side_caps=False`` (legacy, pre-fix behavior): ``history_only`` gets
+    all ``max_doc_num`` slots and ``joint`` gets ``max_doc_num -
+    num_tool_chunks`` (spare tool slots recycled).
+    """
+    if per_side_caps:
+        return max(0, max_doc_num - min(max_tool_chunks, max_doc_num))
+    return max_doc_num if doc_mode == "history_only" else max(0, max_doc_num - num_tool_chunks)
+
+
+def build_tool_chunks(
+    tokenizer,
+    example: JointExample,
+    doc_mode: str,
+    *,
+    max_doc_length: int,
+    max_doc_num: int,
+    max_tool_chunks: Optional[int],
+    max_tool_definition_tokens: int,
+    per_side_caps: bool = True,
+) -> tuple[Optional[List[List[int]]], Optional[str], Dict[str, Any]]:
+    """Chat-template, chunk and budget-truncate one example's tool documents.
+
+    Shared by ``JointDataset.preprocess_example`` (training) and the eval
+    driver's ``_condition_doc_chunks`` so the two sides cannot drift.
+
+    Cap semantics — ``per_side_caps=True`` (default): the tool side gets
+    ``min(max_tool_chunks, max_doc_num)`` slots in BOTH ``joint`` and
+    ``tool_only`` modes, so the tool-side presented budget is identical
+    across doc modes and J-arms.  ``per_side_caps=False`` reproduces the
+    pre-fix behavior (``tool_only`` gets all ``max_doc_num`` slots).
+
+    Truncation keeps the target tool's schema: when
+    ``example.target_tool_doc_index`` is known and the chunk list exceeds the
+    cap, every chunk of the target document is selected first and the
+    remaining slots fill with the other chunks in original order (relative
+    order preserved, so no position shortcut is introduced).  The pre-fix
+    behavior — a plain head-truncate after the render-time shuffle — dropped
+    the target schema from roughly half the saturated joint examples.
+
+    Returns ``(tool_chunks, skip_reason, meta)``.  ``meta`` reports
+    ``target_known`` / ``target_in_grid`` (``None`` when the target document
+    is unknown) / ``num_chunks_before_cap`` / ``tool_cap``.
+    """
+    if max_tool_chunks is None:
+        max_tool_chunks = _default_max_tool_chunks(max_doc_num)
+    meta: Dict[str, Any] = {
+        "target_known": example.target_tool_doc_index is not None,
+        "target_in_grid": None,
+        "target_truncated_to_cap": False,
+        "num_chunks_before_cap": 0,
+        "tool_cap": 0,
+    }
+    if doc_mode == "history_only":
+        return [], None, meta
+    if per_side_caps:
+        tool_cap = min(max_tool_chunks, max_doc_num)
+    else:
+        tool_cap = max_doc_num if doc_mode == "tool_only" else min(max_tool_chunks, max_doc_num)
+    meta["tool_cap"] = tool_cap
+
+    doc_id_groups: List[List[int]] = []
+    doc_source_indices: List[int] = []
+    for source_index, document in enumerate(example.tool_documents):
+        if not document.strip():
+            continue
+        doc_id_groups.append(
+            _chat_template_ids(
+                tokenizer,
+                [{"role": "user", "content": TOOL_DOC_PREFIX + document}],
+            )
+        )
+        doc_source_indices.append(source_index)
+    doc_tokens = sum(len(doc_ids) for doc_ids in doc_id_groups)
+    if doc_tokens > max_tool_definition_tokens:
+        return None, f"tool_definition_tokens>{max_tool_definition_tokens}", meta
+
+    flat: List[tuple[int, List[int]]] = []
+    for doc_ids, source_index in zip(doc_id_groups, doc_source_indices):
+        for start in range(0, len(doc_ids), max_doc_length):
+            flat.append((source_index, doc_ids[start : start + max_doc_length]))
+    meta["num_chunks_before_cap"] = len(flat)
+
+    target_index = example.target_tool_doc_index
+    target_positions = (
+        [position for position, (source_index, _) in enumerate(flat) if source_index == target_index]
+        if target_index is not None
+        else []
+    )
+    if len(flat) <= tool_cap:
+        keep = set(range(len(flat)))
+    elif target_index is None or not per_side_caps:
+        # Legacy mode reproduces the pre-fix behavior bit-for-bit (plain
+        # head-truncation, target retention included) so old runs can be
+        # measured/diffed; target-unknown examples have nothing to retain.
+        keep = set(range(tool_cap))
+    else:
+        keep = set(target_positions[:tool_cap])
+        for position in range(len(flat)):
+            if len(keep) >= tool_cap:
+                break
+            keep.add(position)
+    if target_index is not None and tool_cap > 0:
+        # target_in_grid=True means the target schema is FULLY present.  A
+        # target document that alone chunks into more than tool_cap pieces is
+        # retained up to the whole cap and flagged target_truncated_to_cap —
+        # a data condition (schema larger than the entire tool budget), not a
+        # retention failure; the constructor invariant must not fire on it.
+        kept_target = [position for position in target_positions if position in keep]
+        meta["target_in_grid"] = bool(target_positions) and len(kept_target) == len(target_positions)
+        meta["target_truncated_to_cap"] = (
+            bool(kept_target) and not meta["target_in_grid"] and len(kept_target) >= tool_cap
+        )
+    tool_chunks = [flat[position][1] for position in sorted(keep)]
+    return tool_chunks, None, meta
 
 
 class JointDataset:
@@ -595,6 +752,7 @@ class JointDataset:
         max_tool_chunks: Optional[int] = None,
         max_tool_definition_tokens: int = 32000,
         split_oversized_history_docs: bool = True,
+        per_side_caps: bool = True,
     ) -> None:
         if doc_mode not in ("joint", "tool_only", "history_only"):
             raise ValueError(f"Unsupported doc_mode: {doc_mode!r}")
@@ -604,9 +762,14 @@ class JointDataset:
         self.max_system_length = max_system_length
         self.max_length = max_length
         self.doc_mode = doc_mode
+        self.per_side_caps = per_side_caps
         self.data: List[Dict[str, Any]] = []
         skipped_by_reason: Counter[str] = Counter()
+        target_known = 0
+        target_in_grid = 0
+        target_truncated = 0
         for example in examples:
+            meta: Dict[str, Any] = {}
             row, reason = self.preprocess_example(
                 example,
                 tokenizer=tokenizer,
@@ -620,17 +783,46 @@ class JointDataset:
                 max_tool_chunks=max_tool_chunks,
                 max_tool_definition_tokens=max_tool_definition_tokens,
                 split_oversized_history_docs=split_oversized_history_docs,
+                per_side_caps=per_side_caps,
+                meta_out=meta,
             )
             if row is None:
                 skipped_by_reason[reason] += 1
-            else:
-                self.data.append(row)
+                continue
+            self.data.append(row)
+            if doc_mode != "history_only" and meta.get("target_known") and meta.get("tool_cap", 0) > 0:
+                target_known += 1
+                if meta.get("target_in_grid"):
+                    target_in_grid += 1
+                elif meta.get("target_truncated_to_cap"):
+                    target_truncated += 1
+        self.target_stats = {
+            "target_known": target_known,
+            "target_in_grid": target_in_grid,
+            "target_truncated_to_cap": target_truncated,
+        }
+        # With per_side_caps the target-preserving truncation makes this an
+        # invariant: a target-known row may be fully present or (when the
+        # schema alone exceeds the whole tool budget) retained up to the cap —
+        # but never silently ABSENT.  A violation means the retention logic
+        # regressed.
+        if per_side_caps and doc_mode != "history_only" and target_in_grid + target_truncated < target_known:
+            raise AssertionError(
+                f"target tool schema missing from the context grid for "
+                f"{target_known - target_in_grid - target_truncated}/{target_known} examples "
+                f"(doc_mode={doc_mode})"
+            )
         logger.info(
-            "Built %d joint samples (%s); skipped %d by reason=%s",
+            "Built %d joint samples (%s, per_side_caps=%s); skipped %d by reason=%s; "
+            "target schema fully in grid for %d/%d target-known rows (%d truncated to the full cap)",
             len(self.data),
             doc_mode,
+            per_side_caps,
             sum(skipped_by_reason.values()),
             dict(skipped_by_reason),
+            target_in_grid,
+            target_known,
+            target_truncated,
         )
 
     def __len__(self) -> int:
@@ -653,38 +845,36 @@ class JointDataset:
         max_tool_chunks: Optional[int] = None,
         max_tool_definition_tokens: int = 32000,
         split_oversized_history_docs: bool = True,
+        per_side_caps: bool = True,
+        meta_out: Optional[Dict[str, Any]] = None,
     ) -> tuple[Optional[Dict[str, Any]], str]:
         if doc_mode not in ("joint", "tool_only", "history_only"):
             raise ValueError(f"Unsupported doc_mode: {doc_mode!r}")
         if max_tool_chunks is None:
             max_tool_chunks = _default_max_tool_chunks(max_doc_num)
 
-        # ---- tool chunks (first in the grid) ------------------------------
-        tool_chunks: List[List[int]] = []
-        if doc_mode != "history_only":
-            tool_cap = max_doc_num if doc_mode == "tool_only" else min(max_tool_chunks, max_doc_num)
-            doc_id_groups = [
-                _chat_template_ids(
-                    tokenizer,
-                    [{"role": "user", "content": TOOL_DOC_PREFIX + document}],
-                )
-                for document in example.tool_documents
-                if document.strip()
-            ]
-            doc_tokens = sum(len(doc_ids) for doc_ids in doc_id_groups)
-            if doc_tokens > max_tool_definition_tokens:
-                return None, f"tool_definition_tokens>{max_tool_definition_tokens}"
-            for doc_ids in doc_id_groups:
-                tool_chunks.extend(
-                    doc_ids[start : start + max_doc_length]
-                    for start in range(0, len(doc_ids), max_doc_length)
-                )
-            tool_chunks = tool_chunks[:tool_cap]
+        # ---- tool chunks (first in the grid; shared with the eval driver) --
+        tool_chunks, tool_skip_reason, tool_meta = build_tool_chunks(
+            tokenizer,
+            example,
+            doc_mode,
+            max_doc_length=max_doc_length,
+            max_doc_num=max_doc_num,
+            max_tool_chunks=max_tool_chunks,
+            max_tool_definition_tokens=max_tool_definition_tokens,
+            per_side_caps=per_side_caps,
+        )
+        if meta_out is not None:
+            meta_out.update(tool_meta)
+        if tool_skip_reason is not None:
+            return None, tool_skip_reason
 
-        # ---- history chunks (remaining slots, chronological) --------------
+        # ---- history chunks (chronological) -------------------------------
         history: List[Message] = []
         if doc_mode != "tool_only":
-            history_budget = max_doc_num if doc_mode == "history_only" else max_doc_num - len(tool_chunks)
+            history_budget = _history_chunk_budget(
+                doc_mode, max_doc_num, max_tool_chunks, len(tool_chunks), per_side_caps
+            )
             raw_history = [
                 {"role": "user", "content": text}
                 for text in example.history_documents
@@ -706,6 +896,8 @@ class JointDataset:
             if message.get("content") or message.get("role") == "assistant"
         ]
         doc_count = len(tool_chunks) + len(history)
+        if meta_out is not None:
+            meta_out.update(num_tool_chunks=len(tool_chunks), num_history_docs=len(history))
         if doc_count < min_doc_num:
             return None, f"doc_num<{min_doc_num}"
         if not current:
@@ -871,6 +1063,26 @@ def assert_no_leakage(example: JointExample, features: Dict[str, Any], tokenizer
         raise AssertionError("padded positions must stay masked (-100)")
 
 
+def assert_target_tool_in_grid(example: JointExample, features: Dict[str, Any], tokenizer) -> None:
+    """Assert the target tool's schema document survived into the context grid.
+
+    Only meaningful for doc modes that include tool documents (``joint`` /
+    ``tool_only``); callers must not run it for ``history_only``.  No-op when
+    the target document is unknown (``target_tool_doc_index is None``) or too
+    short to probe.
+    """
+    if example.target_tool_doc_index is None:
+        return
+    probe = _leak_probe(example.tool_documents[example.target_tool_doc_index])
+    if not probe:
+        return
+    context_text = _normalize_ws(_decode_real_ids(tokenizer, features["context_input_ids"]))
+    if probe not in context_text:
+        raise AssertionError(
+            f"target tool document missing from context_input_ids: {probe!r}"
+        )
+
+
 # ---------------------------------------------------------------------------
 # --self_test CLI (offline smoke check; also reused by the unit tests).
 # ---------------------------------------------------------------------------
@@ -975,8 +1187,43 @@ def _self_test_examples() -> List[JointExample]:
             answer="Action:\n<tool_call>\n{\"name\":\"get_weather\",\"arguments\":{\"city\":\"Paris\"}}\n</tool_call>",
             system_prompt="You are a careful data agent.",
             subset="self-test",
+            target_tool="get_weather",
+            target_tool_doc_index=0,
         )
     ]
+
+
+def _truncation_stress_example(num_tools: int = 12, target_index: int = 10) -> JointExample:
+    """Synthetic saturated example: many tool docs, target near the tail.
+
+    Under the pre-fix head-truncation the target document is dropped whenever
+    ``target_index >= tool_cap``; the target-preserving truncation must keep
+    it regardless of position.
+    """
+    tool_documents = [
+        f"<TOOL>\n<NAMESPACE> ns{index}\n<NAME> tool_{index}\n"
+        f"<DESCRIPTION> Synthetic distractor tool number {index} used only by the truncation stress self-test.\n"
+        f'<PARAMETERS>\n<PARAM name="arg{index}" type="string" required="true">\n</PARAMETERS>\n</TOOL>'
+        for index in range(num_tools)
+    ]
+    return JointExample(
+        qid="self-test:truncation",
+        session_id="self-test",
+        tool_documents=tool_documents,
+        history_documents=[
+            "Previous turn\n[User query]\nPlease continue the synthetic stress task from before.",
+            "Previous turn\n[User query]\nSecond synthetic history turn with enough words to probe.",
+        ],
+        current_messages=[{"role": "user", "content": f"Call tool_{target_index} now please."}],
+        answer=(
+            "Action:\n<tool_call>\n"
+            f"{{\"name\":\"tool_{target_index}\",\"arguments\":{{\"arg{target_index}\":\"x\"}}}}\n</tool_call>"
+        ),
+        system_prompt="You are a careful data agent.",
+        subset="self-test",
+        target_tool=f"tool_{target_index}",
+        target_tool_doc_index=target_index,
+    )
 
 
 def _run_self_test(tokenizer) -> None:
@@ -994,6 +1241,7 @@ def _run_self_test(tokenizer) -> None:
         if features is None:
             raise RuntimeError(f"self-test example was dropped: {reason}")
         assert_no_leakage(example, features, tokenizer)
+        assert_target_tool_in_grid(example, features, tokenizer)
 
         # Negative control: inject the tool documents into the system prefix
         # (the leak mode of the history path) and require detection.
@@ -1014,6 +1262,45 @@ def _run_self_test(tokenizer) -> None:
             pass
         else:
             raise RuntimeError("negative control failed: injected tool text was not detected")
+
+    # Truncation stress: a saturated tool pool with the target near the tail.
+    # Positive control: per-side caps + target-preserving truncation keep the
+    # target schema in the grid.  Negative control: the legacy head-truncation
+    # drops it and assert_target_tool_in_grid must detect that.
+    stress = _truncation_stress_example(num_tools=12, target_index=10)
+    stress_kwargs = dict(
+        tokenizer=tokenizer,
+        max_length=512,
+        max_doc_length=256,
+        min_doc_num=2,
+        max_doc_num=8,
+        max_system_length=max_system_length,
+    )
+    for doc_mode in ("joint", "tool_only"):
+        meta: Dict[str, Any] = {}
+        features, reason = JointDataset.preprocess_example(
+            stress, doc_mode=doc_mode, per_side_caps=True, meta_out=meta, **stress_kwargs
+        )
+        if features is None:
+            raise RuntimeError(f"truncation stress example was dropped ({doc_mode}): {reason}")
+        assert_no_leakage(stress, features, tokenizer)
+        assert_target_tool_in_grid(stress, features, tokenizer)
+        if meta.get("target_in_grid") is not True:
+            raise RuntimeError(f"truncation stress: meta reports target_in_grid={meta.get('target_in_grid')!r}")
+    legacy_features, reason = JointDataset.preprocess_example(
+        stress, doc_mode="joint", per_side_caps=False, **stress_kwargs
+    )
+    if legacy_features is None:
+        raise RuntimeError(f"legacy truncation stress example was dropped: {reason}")
+    try:
+        assert_target_tool_in_grid(stress, legacy_features, tokenizer)
+    except AssertionError:
+        pass
+    else:
+        raise RuntimeError(
+            "negative control failed: legacy head-truncation kept the tail target "
+            "(or assert_target_tool_in_grid stopped detecting the drop)"
+        )
 
 
 def main() -> None:

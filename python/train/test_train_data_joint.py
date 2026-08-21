@@ -45,7 +45,13 @@ from train.train_data_joint import (  # noqa: E402
     JointDataset,
     JointExample,
     _WhitespaceSelfTestTokenizer,
+    _history_chunk_budget,
+    _parameter_signature,
+    _render_tool_documents,
+    _truncation_stress_example,
     assert_no_leakage,
+    assert_target_tool_in_grid,
+    build_tool_chunks,
 )
 from train.train_data_multiturn import _chat_template_ids, _pad  # noqa: E402
 
@@ -391,7 +397,11 @@ def test_assert_no_leakage_fails_when_tools_in_prompt(tokenizer):
 
 def test_history_order_in_context_grid(tokenizer):
     example = _example(history_documents=_history_docs(4))
-    features, _ = _features(tokenizer, example, doc_mode="history_only", max_doc_num=4)
+    # max_tool_chunks=0: give history the whole grid (per-side budgets no
+    # longer recycle unused tool slots, so reserve none for tools).
+    features, _ = _features(
+        tokenizer, example, doc_mode="history_only", max_doc_num=4, max_tool_chunks=0
+    )
     context_text = _context_text(tokenizer, features)
     positions = [context_text.find(f"{marker} question") for marker in _HISTORY_MARKERS[:4]]
     assert all(position >= 0 for position in positions)
@@ -444,6 +454,7 @@ def test_tail_biased_history_truncation(tokenizer):
         example,
         doc_mode="history_only",
         max_doc_num=3,
+        max_tool_chunks=0,
         min_doc_num=1,
     )
     context_text = _context_text(tokenizer, features)
@@ -599,3 +610,183 @@ def test_session_examples_bounded_pool_and_no_tool_skip(synthetic_dataset):
         )
     ]
     assert source._session_examples("none", no_tool_spans, "bench") == []
+
+
+# ---------------------------------------------------------------------------
+# Per-side caps + target-preserving truncation (the cap fix).
+# ---------------------------------------------------------------------------
+
+
+def test_parameter_signature_required_null():
+    sig = _parameter_signature({
+        "function": {
+            "name": "t",
+            "parameters": {"properties": {"a": {"type": "string"}}, "required": None},
+        }
+    })
+    assert sig and sig[0]["required"] is False
+
+
+def test_render_tool_documents_reports_target_index_across_variants():
+    tools = [
+        {"type": "function", "function": {"name": f"tool_{i}", "parameters": {"properties": {}}}}
+        for i in range(8)
+    ]
+    seen_variants = set()
+    for seed in range(60):
+        docs, target_index = _render_tool_documents(tools, random.Random(seed), target_tool="tool_5")
+        assert target_index is not None
+        assert "tool_5" in docs[target_index]
+        seen_variants.add("canonical" if docs[target_index].startswith("<TOOL>") else "json")
+    assert seen_variants == {"canonical", "json"}
+    _, missing = _render_tool_documents(tools, random.Random(0), target_tool="absent_tool")
+    assert missing is None
+
+
+def test_build_tool_chunks_keeps_tail_target(tokenizer):
+    stress = _truncation_stress_example(num_tools=12, target_index=10)
+    chunks, skip, meta = build_tool_chunks(
+        tokenizer, stress, "joint",
+        max_doc_length=256, max_doc_num=8, max_tool_chunks=None,
+        max_tool_definition_tokens=32000, per_side_caps=True,
+    )
+    assert skip is None
+    assert meta["tool_cap"] == 5 and len(chunks) == 5
+    assert meta["target_known"] and meta["target_in_grid"] is True
+    decoded = [tokenizer.decode(chunk) for chunk in chunks]
+    assert any("tool_10" in text for text in decoded)
+    kept_ids = [int(text.split("tool_")[1].split()[0].strip(">")) for text in decoded if "tool_" in text]
+    assert kept_ids == sorted(kept_ids)  # original relative order preserved
+
+
+def test_build_tool_chunks_per_side_caps_align_tool_only_with_joint(tokenizer):
+    stress = _truncation_stress_example(num_tools=12, target_index=10)
+    _, _, meta_joint = build_tool_chunks(
+        tokenizer, stress, "joint",
+        max_doc_length=256, max_doc_num=8, max_tool_chunks=None,
+        max_tool_definition_tokens=32000, per_side_caps=True,
+    )
+    _, _, meta_tool_only = build_tool_chunks(
+        tokenizer, stress, "tool_only",
+        max_doc_length=256, max_doc_num=8, max_tool_chunks=None,
+        max_tool_definition_tokens=32000, per_side_caps=True,
+    )
+    assert meta_joint["tool_cap"] == meta_tool_only["tool_cap"] == 5
+
+
+def test_build_tool_chunks_legacy_reproduces_prefix_behavior(tokenizer):
+    stress = _truncation_stress_example(num_tools=12, target_index=10)
+    _, _, meta_tool_only = build_tool_chunks(
+        tokenizer, stress, "tool_only",
+        max_doc_length=256, max_doc_num=8, max_tool_chunks=None,
+        max_tool_definition_tokens=32000, per_side_caps=False,
+    )
+    assert meta_tool_only["tool_cap"] == 8  # legacy: all max_doc_num slots
+    chunks, _, meta_joint = build_tool_chunks(
+        tokenizer, stress, "joint",
+        max_doc_length=256, max_doc_num=8, max_tool_chunks=None,
+        max_tool_definition_tokens=32000, per_side_caps=False,
+    )
+    # Legacy head-truncation drops the tail target (the pre-fix bug, kept
+    # reproducible for diffing old runs) and meta must report the drop.
+    assert meta_joint["target_in_grid"] is False
+    decoded = " ".join(tokenizer.decode(chunk) for chunk in chunks)
+    assert "tool_10" not in decoded
+
+
+def test_history_budget_constant_across_modes_under_per_side_caps():
+    for mode in ("joint", "history_only"):
+        assert _history_chunk_budget(mode, 24, 16, 3, per_side_caps=True) == 8
+    # Legacy recycled spare tool slots / gave history_only the whole grid.
+    assert _history_chunk_budget("joint", 24, 16, 3, per_side_caps=False) == 21
+    assert _history_chunk_budget("history_only", 24, 16, 0, per_side_caps=False) == 24
+
+
+def test_assert_target_tool_in_grid_detects_legacy_drop(tokenizer):
+    stress = _truncation_stress_example(num_tools=12, target_index=10)
+    kwargs = dict(
+        tokenizer=tokenizer, max_length=512, max_doc_length=256, min_doc_num=2,
+        max_doc_num=8, max_system_length=512, doc_mode="joint",
+    )
+    fixed, _ = JointDataset.preprocess_example(stress, per_side_caps=True, **kwargs)
+    assert_target_tool_in_grid(stress, fixed, tokenizer)  # must pass
+    legacy, _ = JointDataset.preprocess_example(stress, per_side_caps=False, **kwargs)
+    with pytest.raises(AssertionError, match="target tool document"):
+        assert_target_tool_in_grid(stress, legacy, tokenizer)
+
+
+def test_joint_dataset_target_stats_and_invariant(tokenizer):
+    stress = _truncation_stress_example(num_tools=12, target_index=10)
+    kwargs = dict(
+        max_length=512, max_doc_length=256, min_doc_num=2,
+        max_doc_num=8, max_system_length=512, doc_mode="joint",
+    )
+    dataset = JointDataset([stress], tokenizer, per_side_caps=True, **kwargs)
+    assert dataset.target_stats == {
+        "target_known": 1, "target_in_grid": 1, "target_truncated_to_cap": 0,
+    }
+    legacy = JointDataset([stress], tokenizer, per_side_caps=False, **kwargs)
+    assert legacy.target_stats == {
+        "target_known": 1, "target_in_grid": 0, "target_truncated_to_cap": 0,
+    }
+
+
+def test_oversized_target_doc_truncated_to_cap_not_fatal(tokenizer):
+    # Target schema alone chunks into more than tool_cap pieces: retention
+    # keeps the cap-filling prefix, flags it, and the constructor invariant
+    # must NOT fire — this is a data condition, not a retention regression.
+    big_target = JointExample(
+        qid="s:big",
+        session_id="s",
+        tool_documents=[" ".join(f"w{i}" for i in range(200))],
+        history_documents=[
+            "Previous turn synthetic filler one with enough words to probe cleanly.",
+            "Previous turn synthetic filler two with enough words to probe cleanly.",
+        ],
+        current_messages=[{"role": "user", "content": "call the big tool now"}],
+        answer='Action:\n<tool_call>\n{"name":"big","arguments":{}}\n</tool_call>',
+        target_tool="big",
+        target_tool_doc_index=0,
+    )
+    chunks, skip, meta = build_tool_chunks(
+        tokenizer, big_target, "joint",
+        max_doc_length=16, max_doc_num=8, max_tool_chunks=None,
+        max_tool_definition_tokens=32000, per_side_caps=True,
+    )
+    assert skip is None
+    assert len(chunks) == meta["tool_cap"] == 5  # cap-filling prefix of the target
+    assert meta["target_in_grid"] is False
+    assert meta["target_truncated_to_cap"] is True
+    dataset = JointDataset(
+        [big_target], tokenizer, max_length=512, max_doc_length=16, min_doc_num=1,
+        max_doc_num=8, max_system_length=512, doc_mode="joint", per_side_caps=True,
+    )  # must not raise
+    assert dataset.target_stats == {
+        "target_known": 1, "target_in_grid": 0, "target_truncated_to_cap": 1,
+    }
+
+
+def test_zero_tool_cap_is_config_not_retention_failure(tokenizer):
+    stress = _truncation_stress_example(num_tools=4, target_index=3)
+    dataset = JointDataset(
+        [stress], tokenizer, max_length=512, max_doc_length=256, min_doc_num=1,
+        max_doc_num=8, max_tool_chunks=0, max_system_length=512,
+        doc_mode="joint", per_side_caps=True,
+    )  # must not raise: tool side deliberately absent, nothing to retain
+    assert dataset.target_stats == {
+        "target_known": 0, "target_in_grid": 0, "target_truncated_to_cap": 0,
+    }
+
+
+def test_source_examples_carry_target_doc_index(synthetic_dataset):
+    source = _joint_source(synthetic_dataset)
+    indexed = 0
+    for example in source.records:
+        if example.target_tool_doc_index is None:
+            # Legitimate: no tool call in the target, or the called name is
+            # not among the session's definitions (e.g. delete_file).
+            continue
+        indexed += 1
+        assert example.target_tool
+        assert example.target_tool in example.tool_documents[example.target_tool_doc_index]
+    assert indexed > 0  # the get_weather example must carry its index
