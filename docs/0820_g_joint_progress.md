@@ -80,3 +80,38 @@
 5. 清理中间 checkpoint → commit → PR。
 
 原始产物（summary json / 日志 / manifest）在 NPU 服务器 `~/c2kv/outputs_lyc/g_joint/`，不入库。
+
+---
+
+# 2026-08-21 追记：capfix 接入 + Gate-2 一判
+
+## 9. cap-fix（commit `9a1dffc`，刘言成 patch，已合入本分支）
+
+发现并实现：旧 builder 的 budget 截断是 shuffle 后纯头部截断 → 饱和样本里目标工具的 schema 约有一半被丢掉；且单边 doc_mode（tool_only/history_only）独占全部 24 个槽位 → J-separate 基线实际呈现预算是 joint 的 **1.691×**（实测，`docs/g_joint/psrc_as_trained.json`）。修复后默认 per-side caps（tool≤16 / history 恒 8、不回收空槽）+ target-doc 保留截断，`LEGACY_MODE_CAPS=true` 可逐位复现旧行为；fixed regime 实测 `sep_combined_over_joint=0.994 ≈ 1.0`。真实 eval 数据 target 覆盖率：fixed **100%**（2015/2015），legacy joint 条件只剩 **74.5%**（25.5% 的目标 schema 被截掉）。
+
+全套 pytest 服务器 204 绿（含 torch/metrology；2 处 bfcl 测试为环境符号链接问题已接，1 处 patch 自带测试少字段已修 `617b2600`）。
+
+**口径警示**：名义预算（估算器）≠ 呈现预算。名义 32M 实际呈现 joint 12.9M。P_official 实测 **535.5M**（`docs/g_joint/official_tokens.json`，假设 512M 偏差 +4.6%）。medium 目标 0.25P=134M 呈现值：v2 训练池单 epoch 封顶 ~100M（23,652 qid × ~4.2k tok），**必须多数据集池或 ~1.3 epoch**。
+
+## 10. Gate-2 一判：buggy 四臂 × fixed-eval（joint 条件，common-qid n=108，c2kv@8×，appworld-only，单 seed）
+
+| 臂 | tool_acc | argF1 | textF1 |
+|---|---|---|---|
+| J-joint（buggy） | **0.500** | 0.091 | 0.410 |
+| J-alternate（buggy） | 0.491 | 0.103 | 0.400 |
+| J-sep_hist（buggy，半边） | 0.454 | 0.079 | 0.405 |
+| J-sep_tool（buggy，半边） | 0.380 | 0.052 | 0.314 |
+| J-separate（拼接） | 待定（评测进程在结果写盘前遭 Ascend 运行时 double-free 崩溃，已重跑） | | |
+
+**判读（预注册规则）**：joint − alternate = +0.9pp < 3pp 噪声地板 → **平 → `inconclusive`**。不下"联合监督无用"结论，等 fixed 四臂表（08-24 晚）终判。注意 buggy 表里 separate 系臂还带着 1.691× 预算优势。
+
+同 checkpoint buggy-eval vs fixed-eval（joint 条件）：joint 0.486→0.500，alternate 0.440→0.491，sep_tool 0.358→0.380，sep_hist 0.450→0.454——fixed eval 全面微升（alternate +5.1pp 最大），量化了 target 截断的伤害。
+
+首个 fixed 训练臂预览（gate3_fixed_sep_hist，fixed-eval）：history_only 0.380 / joint 0.417 / tool_only 0.139——比 buggy sep_hist（fixed-eval 0.504/0.492/0.131）低，符合预期：fixed 后 sep 臂预算公平化（P_src 5.8M vs legacy 11.7M），单半边变弱是公平的代价，终判看 fixed 四臂整表。
+
+## 11. 当前在跑（08-21 深夜）
+
+- fixed 四臂重训（32M 名义，fixed 语义，同 order file）：sep_hist ✅、sep_tool ✅、joint 95%（~1h）、alternate 78%（~6h）
+- 评测：gate2fix_separate ×2（重跑）、gate3_fixed_sep_tool、gate3_fixed_sep_hist ✅、其余 gate3 随训完随挂
+- 决策点：08-23 中午冻结 `G8-small-v2`（joint-fixed + 评测通过 + psrc≈1.0 ✓已具备）；08-24 晚 fixed 四臂终表 → Gate-3 终判
+
