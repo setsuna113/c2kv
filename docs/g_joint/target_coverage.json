@@ -1,0 +1,17 @@
+{
+  "split": "eval",
+  "num_source_examples": 2051,
+  "per_side_caps": true,
+  "joint": {
+    "built": 2051,
+    "target_known": 2015,
+    "target_in_grid": 2015,
+    "target_truncated_to_cap": 0
+  },
+  "tool_only": {
+    "built": 1773,
+    "target_known": 1739,
+    "target_in_grid": 1739,
+    "target_truncated_to_cap": 0
+  }
+}

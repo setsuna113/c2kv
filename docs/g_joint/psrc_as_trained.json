@@ -1,0 +1,148 @@
+{
+  "arms": {
+    "joint": {
+      "P_src": 12879499,
+      "T_tgt": 611864,
+      "doc_mode": "joint",
+      "manifest_legacy_mode_caps": null,
+      "num_examples": 2991
+    },
+    "sep_hist": {
+      "P_src": 11692953,
+      "T_tgt": 602495,
+      "doc_mode": "history_only",
+      "manifest_legacy_mode_caps": null,
+      "num_examples": 2991
+    },
+    "sep_tool": {
+      "P_src": 10086373,
+      "T_tgt": 607799,
+      "doc_mode": "tool_only",
+      "manifest_legacy_mode_caps": null,
+      "num_examples": 2991
+    }
+  },
+  "detail": {
+    "joint": {
+      "P_src": 12879499,
+      "T_tgt": 611864,
+      "doc_mode": "joint",
+      "manifest_legacy_mode_caps": null,
+      "num_examples": 2991,
+      "scan": {
+        "doc_mode": "joint",
+        "epochs": 1,
+        "examples_scanned": 2991,
+        "notes": [
+          "U_src is pool-level and epoch-invariant: unique compressible documents (sha1 over whitespace-normalized raw text) counted once each with tokenizer.encode(text, add_special_tokens=False); documents later dropped by grid budget caps or preprocessing filters are still counted.",
+          "P_src counts context_input_ids != -100 over emitted rows (real preprocessing, including the chat-template wrapper around each compressed document); --epochs multiplies P_src only.",
+          "T_tgt counts labels != -100 over emitted rows (answer + EOS), per epoch."
+        ],
+        "per_subset": {
+          "appworld": {
+            "P_src": 12879499,
+            "P_src_per_epoch": 12879499,
+            "T_tgt": 611864,
+            "U_src": 10320334,
+            "samples": 2923,
+            "unique_docs": 34689
+          }
+        },
+        "skipped_rows": {
+          "target_tokens<24": 1,
+          "target_tokens<32": 67
+        },
+        "total": {
+          "P_src": 12879499,
+          "P_src_per_epoch": 12879499,
+          "T_tgt": 611864,
+          "U_src": 10320334,
+          "samples": 2923,
+          "unique_docs": 34689
+        }
+      }
+    },
+    "sep_hist": {
+      "P_src": 11692953,
+      "T_tgt": 602495,
+      "doc_mode": "history_only",
+      "manifest_legacy_mode_caps": null,
+      "num_examples": 2991,
+      "scan": {
+        "doc_mode": "history_only",
+        "epochs": 1,
+        "examples_scanned": 2991,
+        "notes": [
+          "U_src is pool-level and epoch-invariant: unique compressible documents (sha1 over whitespace-normalized raw text) counted once each with tokenizer.encode(text, add_special_tokens=False); documents later dropped by grid budget caps or preprocessing filters are still counted.",
+          "P_src counts context_input_ids != -100 over emitted rows (real preprocessing, including the chat-template wrapper around each compressed document); --epochs multiplies P_src only.",
+          "T_tgt counts labels != -100 over emitted rows (answer + EOS), per epoch."
+        ],
+        "per_subset": {
+          "appworld": {
+            "P_src": 11692953,
+            "P_src_per_epoch": 11692953,
+            "T_tgt": 602495,
+            "U_src": 10320334,
+            "samples": 2734,
+            "unique_docs": 34689
+          }
+        },
+        "skipped_rows": {
+          "doc_num<2": 189,
+          "target_tokens<24": 1,
+          "target_tokens<32": 67
+        },
+        "total": {
+          "P_src": 11692953,
+          "P_src_per_epoch": 11692953,
+          "T_tgt": 602495,
+          "U_src": 10320334,
+          "samples": 2734,
+          "unique_docs": 34689
+        }
+      }
+    },
+    "sep_tool": {
+      "P_src": 10086373,
+      "T_tgt": 607799,
+      "doc_mode": "tool_only",
+      "manifest_legacy_mode_caps": null,
+      "num_examples": 2991,
+      "scan": {
+        "doc_mode": "tool_only",
+        "epochs": 1,
+        "examples_scanned": 2991,
+        "notes": [
+          "U_src is pool-level and epoch-invariant: unique compressible documents (sha1 over whitespace-normalized raw text) counted once each with tokenizer.encode(text, add_special_tokens=False); documents later dropped by grid budget caps or preprocessing filters are still counted.",
+          "P_src counts context_input_ids != -100 over emitted rows (real preprocessing, including the chat-template wrapper around each compressed document); --epochs multiplies P_src only.",
+          "T_tgt counts labels != -100 over emitted rows (answer + EOS), per epoch."
+        ],
+        "per_subset": {
+          "appworld": {
+            "P_src": 10086373,
+            "P_src_per_epoch": 10086373,
+            "T_tgt": 607799,
+            "U_src": 10320334,
+            "samples": 2890,
+            "unique_docs": 34689
+          }
+        },
+        "skipped_rows": {
+          "doc_num<2": 33,
+          "target_tokens<24": 1,
+          "target_tokens<32": 67
+        },
+        "total": {
+          "P_src": 10086373,
+          "P_src_per_epoch": 10086373,
+          "T_tgt": 607799,
+          "U_src": 10320334,
+          "samples": 2890,
+          "unique_docs": 34689
+        }
+      }
+    }
+  },
+  "legacy_mode_caps": true,
+  "sep_combined_over_joint": 1.691
+}
