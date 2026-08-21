@@ -845,9 +845,15 @@ def test_merge_shards_aggregates_gist_init_fractions(tmp_path):
 
     from eval_joint_next_action_c2kv import merge_shards
 
+    # merge_shards re-summarizes the merged rows via _summarize, which
+    # hard-indexes the metric booleans — the minimal rows must carry them.
     shard_rows = [
-        {"qid": "q0", "condition": "joint", "mode": "c2kv", "ratio": 8, "skipped": False},
-        {"qid": "q1", "condition": "joint", "mode": "c2kv", "ratio": 8, "skipped": False},
+        {"qid": "q0", "condition": "joint", "mode": "c2kv", "ratio": 8, "skipped": False,
+         "exact_match": False, "tool_name_match": False, "has_tool_call": False,
+         "response_type_match": False},
+        {"qid": "q1", "condition": "joint", "mode": "c2kv", "ratio": 8, "skipped": False,
+         "exact_match": False, "tool_name_match": False, "has_tool_call": False,
+         "response_type_match": False},
     ]
     shard_files = []
     for index, fractions in enumerate(({"joint": 0.1}, {"joint": 0.7, "separate_tool": 0.2})):
