@@ -13,9 +13,16 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-import torch
-from transformers.configuration_utils import PretrainedConfig
-from transformers.masking_utils import ALL_MASK_ATTENTION_FUNCTIONS, create_causal_mask
+import pytest
+
+pytest.importorskip("torch")  # torch-free collection guard (Windows dev box has no torch)
+
+import torch  # noqa: E402
+from transformers.configuration_utils import PretrainedConfig  # noqa: E402
+from transformers.masking_utils import (  # noqa: E402
+    ALL_MASK_ATTENTION_FUNCTIONS,
+    create_causal_mask,
+)
 
 _PYTHON_DIR = Path(__file__).resolve().parents[1]
 if str(_PYTHON_DIR) not in sys.path:
