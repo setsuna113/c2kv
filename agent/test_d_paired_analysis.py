@@ -301,6 +301,22 @@ def test_kv_bytes_per_token_infers_head_dim():
     assert A.kv_bytes_per_token(config) == 2 * 2 * 2 * 8 * 2
 
 
+def test_gpu_seconds_include_the_full_arm_prefill():
+    """full_prefill_sec is E-full's dominant cost (the whole-history prefill);
+    the intervention arms carry it as 0.0, so only the full arm moves."""
+    qids = ["s0:1"]
+    none = _arm([_row("s0:1", LEGAL % "wrong_tool", full_prefill_sec=0.0)])
+    full = _arm([_row("s0:1", LEGAL % "get_weather", full_prefill_sec=30.0)])
+    report = A.analyze({"none": none, "full": full}, _manifest(qids, 10), reps=50)
+    # 1.0 + 2.0 + 0.5 + 4.0 + 30.0
+    assert report["per_arm"]["full"]["cost"]["gpu_sec_mean"] == pytest.approx(37.5)
+    assert report["per_arm"]["none"]["cost"]["gpu_sec_mean"] == pytest.approx(7.5)
+    pareto = {entry["arm"]: entry for entry in report["pareto"]}
+    assert pareto["full"]["gpu_sec_mean"] == pytest.approx(37.5)
+    # The markdown states the full-prefill term so a reader can audit the sum.
+    assert "full prefill" in A.render_markdown(report)
+
+
 def test_cost_axes_sum_the_declared_seconds_fields():
     qids = ["s0:1"]
     none = _arm([_row("s0:1", LEGAL % "wrong_tool")])
@@ -380,6 +396,129 @@ def test_cli_identity_check_exit_codes(tmp_path, capsys):
 def test_cli_requires_arms_outside_identity_mode():
     with pytest.raises(SystemExit, match="--arm"):
         A.main(["--manifest", "x.json"])
+
+
+# --- manifest sha binding ----------------------------------------------------
+
+
+def test_rows_binding_tolerates_absent_sha_and_rejects_mismatch():
+    good = {"s0:1": dict(_row("s0:1", LEGAL % "x"), bundle_manifest_sha256="a" * 64)}
+    battery = {"s0:1": _row("s0:1", LEGAL % "x")}  # battery-reuse rows lack the field
+    A.assert_rows_bind_to_manifest({"corr": good, "full": battery}, "a" * 64)
+    stale = {"s0:1": dict(_row("s0:1", LEGAL % "x"), bundle_manifest_sha256="b" * 64)}
+    with pytest.raises(SystemExit, match="different frozen trigger-set generation"):
+        A.assert_rows_bind_to_manifest({"corr": stale}, "a" * 64)
+
+
+def test_main_fatals_on_manifest_generation_mismatch(tmp_path):
+    qids = ["s0:1"]
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(json.dumps(_manifest(qids, 10)), encoding="utf-8")
+    manifest_sha = A.sha256_text_file(manifest_path)
+    ok_rows = [dict(_row("s0:1", LEGAL % "wrong_tool"), bundle_manifest_sha256=manifest_sha)]
+    stale_rows = [dict(_row("s0:1", LEGAL % "get_weather"), bundle_manifest_sha256="f" * 64)]
+    none_path = _write(tmp_path / "none.jsonl", ok_rows)
+    stale_path = _write(tmp_path / "corr.jsonl", stale_rows)
+    argv = [
+        "--arm", f"none={none_path}",
+        "--arm", f"corr={stale_path}",
+        "--manifest", str(manifest_path),
+        "--out_prefix", str(tmp_path / "out" / "d_paired"),
+        "--reps", "50",
+    ]
+    with pytest.raises(SystemExit, match="FATAL"):
+        A.main(argv)
+    # Same rows re-stamped with the right sha analyze cleanly.
+    fixed_path = _write(
+        tmp_path / "corr_ok.jsonl",
+        [dict(row, bundle_manifest_sha256=manifest_sha) for row in stale_rows],
+    )
+    argv[3] = f"corr={fixed_path}"
+    assert A.main(argv) == 0
+
+
+# --- no_downstream split ------------------------------------------------------
+
+
+def test_no_downstream_split_reports_the_two_cells_apart():
+    qids = ["s0:1", "s0:2", "s0:3"]
+    none = _arm([_row(q, LEGAL % "wrong_tool") for q in qids])
+    corr_re = _arm(
+        [
+            _row("s0:1", LEGAL % "get_weather"),   # T==1, rescued
+            _row("s0:2", LEGAL % "get_weather"),   # T>1, rescued
+            _row("s0:3", LEGAL % "wrong_tool"),    # T>1, not rescued
+        ]
+    )
+    report = A.analyze(
+        {"none": none, "corr_re": corr_re},
+        _manifest(qids, 30),
+        reps=50,
+        no_downstream_qids={"s0:1"},
+    )
+    split = report["no_downstream_split"]
+    assert split["available"] is True
+    assert split["n_no_downstream"] == 1
+    assert split["no_downstream_qids"] == ["s0:1"]
+    assert split["per_arm"]["corr_re"] == {"n_scored": 1, "n_rescued": 1}
+    markdown = A.render_markdown(report)
+    assert "No-downstream split (T==1" in markdown
+    assert "corr_re 1/1" in markdown
+
+
+def test_no_downstream_split_marked_unavailable_without_a_source():
+    qids = ["s0:1"]
+    none = _arm([_row(q, LEGAL % "wrong_tool") for q in qids])
+    report = A.analyze({"none": none}, _manifest(qids, 10), reps=50)
+    assert report["no_downstream_split"]["available"] is False
+    assert "unavailable" in A.render_markdown(report)
+
+
+def test_load_no_downstream_qids_from_bundles_and_plan(tmp_path):
+    assert A.load_no_downstream_qids(None, None) is None
+    bundles = _write(
+        tmp_path / "bundles.jsonl",
+        [
+            {"qid": "s0:1", "no_downstream": True},
+            {"qid": "s0:2", "no_downstream": False},
+            {"qid": "s0:3", "no_downstream": None},
+        ],
+    )
+    plan_path = tmp_path / "plan.json"
+    plan_path.write_text(
+        json.dumps({"per_qid": {"s0:4": {"no_downstream": True}, "s0:5": {"no_downstream": False}}}),
+        encoding="utf-8",
+    )
+    assert A.load_no_downstream_qids(bundles, None) == {"s0:1"}
+    assert A.load_no_downstream_qids(None, str(plan_path)) == {"s0:4"}
+    assert A.load_no_downstream_qids(bundles, str(plan_path)) == {"s0:1", "s0:4"}
+    # Sources given but nothing is T==1: an EMPTY set, not None.
+    empty = _write(tmp_path / "empty.jsonl", [{"qid": "s0:9", "no_downstream": False}])
+    assert A.load_no_downstream_qids(empty, None) == set()
+
+
+# --- harness divergence counter ----------------------------------------------
+
+
+def test_harness_divergence_is_counted_not_just_warned():
+    qids = ["s0:1", "s0:2"]
+    none = _arm([_row(q, LEGAL % "wrong_tool") for q in qids])
+    # The harness field lies on one row: re-score says correct, field says not.
+    arm = _arm(
+        [
+            _row("s0:1", LEGAL % "get_weather", tool_name_match=False),
+            _row("s0:2", LEGAL % "wrong_tool"),
+        ]
+    )
+    report = A.analyze({"none": none, "corr": arm}, _manifest(qids, 20), reps=50)
+    divergence = report["per_arm"]["corr"]["harness_divergence"]
+    assert divergence["n_metric_disagreements"] == 1
+    assert divergence["n_call_disagreements"] == 0
+    assert report["per_arm"]["none"]["harness_divergence"]["n_metric_disagreements"] == 0
+    assert report["n_harness_metric_disagreements"] == 1
+    markdown = A.render_markdown(report)
+    assert "Harness-score divergence:" in markdown
+    assert "1 row(s)" in markdown and "corr 1" in markdown
 
 
 # --- h. markdown report -----------------------------------------------------

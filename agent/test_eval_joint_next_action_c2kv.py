@@ -883,6 +883,61 @@ def test_merge_shards_aggregates_gist_init_fractions(tmp_path):
     merged_summary_path = (tmp_path / "merged.jsonl").with_suffix(".summary.json")
     persisted = _json.loads(merged_summary_path.read_text(encoding="utf-8"))
     assert persisted["gist_init_fractions"] == {"joint": 0.7, "separate_tool": 0.2}
+    # No manifest info in any shard summary -> null passthrough, zero missing.
+    assert persisted["qid_manifest"] is None
+    assert persisted["qid_manifest_missing"] == 0
+
+
+def test_merge_shards_passes_through_qid_manifest(tmp_path, caplog):
+    """b_prereg.md §2 gates paired tables on qid_manifest_missing == 0; the
+    count and the manifest path must survive --merge_only onto the merged
+    summary (missing = sum over shards, path = first non-null)."""
+    import json as _json
+    import logging as _logging
+    from types import SimpleNamespace
+
+    from eval_joint_next_action_c2kv import merge_shards
+
+    shard_files = []
+    manifests = ["configs/bdf_pilot/b_eval200_qids.json", "configs/other_manifest.json"]
+    for index, (manifest, missing) in enumerate(zip(manifests, (2, 1))):
+        shard = tmp_path / f"part{index}.jsonl"
+        shard.write_text(
+            _json.dumps({
+                "qid": f"q{index}", "condition": "joint", "mode": "c2kv",
+                "ratio": 8, "skipped": False,
+            }) + "\n",
+            encoding="utf-8",
+        )
+        shard.with_suffix(".summary.json").write_text(
+            _json.dumps({"qid_manifest": manifest, "qid_manifest_missing": missing}),
+            encoding="utf-8",
+        )
+        shard_files.append(str(shard))
+    args = SimpleNamespace(
+        input_files=shard_files,
+        output_file=str(tmp_path / "merged.jsonl"),
+        model="m",
+        base_model=None,
+        dataset_path="d",
+        split="eval",
+        separate=False,
+        checkpoint_tool=None,
+        checkpoint_history=None,
+        separate_generator=None,
+    )
+    with caplog.at_level(_logging.WARNING):
+        summary = merge_shards(args)
+    assert summary["qid_manifest"] == manifests[0]  # first non-null
+    assert summary["qid_manifest_missing"] == 3     # sum over shards
+    log_text = caplog.text
+    assert "DIFFERENT QID MANIFESTS" in log_text
+    assert "INCOMPLETE" in log_text
+    persisted = _json.loads(
+        (tmp_path / "merged.jsonl").with_suffix(".summary.json").read_text(encoding="utf-8")
+    )
+    assert persisted["qid_manifest"] == manifests[0]
+    assert persisted["qid_manifest_missing"] == 3
 
 
 # ---------------------------------------------------------------------------
@@ -992,6 +1047,60 @@ def test_delay_meta_raw_ids():
     decoded = tokenizer.decode(delay_meta["raw_history_ids"])
     assert "hello world" in decoded
     assert "b.txt" not in decoded
+
+
+def test_wrap_truncation_helper_flags_ceiling_hits_only():
+    """A wrap truncated by max_length is counted; an exact fit is not."""
+    from eval_joint_next_action_c2kv import _wrap_history_message_ids
+
+    tokenizer = _WhitespaceSelfTestTokenizer()
+    short = {"role": "user", "content": "a b c"}
+    ids, truncated = _wrap_history_message_ids(tokenizer, short, 64)
+    assert truncated is False
+    assert len(ids) < 64
+
+    long = {"role": "user", "content": " ".join(f"w{i}" for i in range(200))}
+    ids, truncated = _wrap_history_message_ids(tokenizer, long, 16)
+    assert truncated is True
+    # _chat_template_ids grants max_length+1 for a bos it then strips; the
+    # whitespace tokenizer emits no bos, so the ceiling lands at 17 here.
+    assert len(ids) <= 17
+
+    # Exact fit at the ceiling: same length, but nothing was cut -> no count.
+    exact_len = len(_wrap_history_message_ids(tokenizer, short, 64)[0])
+    ids, truncated = _wrap_history_message_ids(tokenizer, short, exact_len)
+    assert len(ids) == exact_len
+    assert truncated is False
+
+
+def test_wrap_truncated_docs_zero_on_normal_paths_and_forwarded():
+    from eval_joint_next_action_c2kv import _chunk_meta_fields
+
+    tokenizer = _WhitespaceSelfTestTokenizer()
+    example = _agent_history_example()
+    kwargs = dict(
+        max_doc_length=256,
+        max_doc_num=8,
+        max_tool_chunks=4,
+        max_tool_definition_tokens=10000,
+        history_selection="tail",
+        split_oversized_history_docs=True,
+    )
+    for policy in ("agent-turn", "structural", "fixed-1024"):
+        _, _, reason, meta = _condition_doc_chunks(
+            tokenizer, example, "joint", chunk_policy=policy, **kwargs
+        )
+        assert reason is None
+        assert meta["wrap_truncated_docs"] == 0, policy
+    _, _, _, delay_meta = _condition_doc_chunks(
+        tokenizer, example, "joint", chunk_policy="agent-turn",
+        delay_recent_turns=1, **kwargs
+    )
+    assert delay_meta["wrap_truncated_docs"] == 0
+    # The counter reaches the per-row output through _chunk_meta_fields.
+    assert _chunk_meta_fields(delay_meta)["wrap_truncated_docs"] == 0
+    assert _chunk_meta_fields({"wrap_truncated_docs": 3})["wrap_truncated_docs"] == 3
+    assert _chunk_meta_fields({})["wrap_truncated_docs"] == 0
 
 
 def test_parse_args_new_flags(tmp_path):

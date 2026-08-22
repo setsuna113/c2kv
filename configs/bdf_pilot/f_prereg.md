@@ -1,7 +1,8 @@
 # F 线预注册：speculative compaction timing-fork pilot（configs/bdf_pilot/f_prereg.md）
 
 本文件在任何 F 线生成之前冻结。driver（`agent/f_timing_fork.py`）把本文件的 sha256 盖进每一行输出，
-analyzer（`agent/analyze_f_fork.py`）把下面的判读卡与停止条件白名单原样写进报告。运行后不得修订；
+analyzer（`agent/analyze_f_fork.py`）把下面的判读卡与停止条件白名单逐条写进报告（英文内容等价渲染、
+条目一一对应；§7 显存条款与 §9 的 oracle-union 句式、脚注模板保持逐字）。运行后不得修订；
 偏差只能以 erratum 形式追加记录。
 
 本 pilot 是**离线单决策**测量，不是系统实现，也不产出任何在线策略。
@@ -109,17 +110,29 @@ R1 的理由：keep-compressed 是 null policy（「已排定的 compaction」�
 - **次指标**：严格 action key（`pred_action_key == gold_action_key`，即 name + 排序后 arguments 全等）、
   `argument_value_f1`。
 - 派生臂的合成规则：**二值指标取 union（OR），连续指标取 max**。
-- **Δ_oracle(timing) = F5 − max(在场单臂)**。
+- **Δ_oracle(timing) = F5 − max(在场单臂)**，主口径 **basis = [F0, F2]**（greedy pass 的单臂；F1 属
+  sampled pass，温度域不混）。当 F1 rows 在场时，analyzer **并列**输出
+  `delta_oracle_timing_incl_F1 = F5 − max(F0, F1, F2)`（26 号 §3 的首轮判读公式，basis = [F0, F1, F2]，
+  F1 的率取自 sampled pass 自己的 qid 集），两个变体各带 basis 标注，不事后择优。
 - **unconditional gap = F2 − F0** 单独一行报，**不并入 selective 部分**：它是「每次都 defer」的收益，
   与 check 驱动的选择无关。
 
 ## 5. 统计
 
 - **配对**：同 qid 配对；只有两支（或该臂所需全部 rollout）齐备的 qid 进入该臂。
-- **噪声地板**：F4 硬币重抽 200 个 seed 的成功率分布，报 95% 带。落在带内的差异不解读为排序。
+- **噪声地板**：F4 硬币重抽 200 个 seed，在**同一配对 qid 集**上报两个分布：
+  - `noise_floor_delta` —— 每 seed 的 **(硬币成功率 − max(F0, F2) 成功率)** 差值分布，报 95% 带
+    （`band95`）。**判读卡①与停止条件②用这个带**：它与 Δ_oracle(timing) 同为「对 max(F0,F2) 的
+    率差」量纲，直接可比。
+  - `noise_floor_absolute` —— 硬币绝对成功率分布（原「噪声地板」，改名保留，仅作描述）。
+  Δ_oracle(timing) 落在 `noise_floor_delta.band95` 内的差异不解读为 headroom，也不解读为排序。
+- **F4 硬币 seed 冻结为 `coin_seed = 0`**（与 launcher pass-1 的 `GEN_SEED` 默认值一致，行为不变）；
+  analyzer 把实际使用的 `coin_seed` 写进 `analysis.json` 顶层，手动重跑 analyzer 也可回溯。
 - **CI**：session 聚类 bootstrap，**cluster = `session_id`，B = 2000，seed = 20260822**，percentile 法。
   预声明的对比：F3−F0、F3−F4、F3s−F1、F5−max(single)、F2−F0。单簇输入退化为点区间，如实标注。
-- **每格 n 如实报**；不合格例逐条写 skip 行并在 analyzer 里按 reason 汇总。
+- **每格 n 如实报**；不合格例逐条写 skip 行并在 analyzer 里按 reason 汇总。resume 会对同一不合格例
+  重发 skip 行，analyzer 因此按 **(qid, skip_reason) 去重**后汇总（逐 example 一条），原始行数
+  （`*_raw`）并列报出。
 - **MDE**：`MDE_pp = 100 * (z_0.975 + z_0.80) * sqrt(p_discordant / n_pairs)`，
   `p_discordant` 取主指标上两支的不一致率 `(compress_now_only + defer_only) / n`。
   **细于 MDE 的差异不解读为排序。**
@@ -131,6 +144,8 @@ R1 的理由：keep-compressed 是 null policy（「已排定的 compaction」�
 2. **GPU-ms 台账**：每臂消耗的分支的 `system_prefill + tool_compress + full_prefill + blend + generate`
    秒和，prefill 分量分列；另出 **prefill-deduplicated** 一列（同一 (qid, branch) 的 prefill 只算一次），
    因为同分支多 rollout 在真实实现里共享一次 prefill。附 **success / GPU-sec**。
+   **分母一致**：success 与 GPU-sec 都在同一 qid 集（paired-complete 集，`n_ledger`）上计算；
+   某臂准入但配对池排除的 qid 计入 `n_excluded_unpaired`，两列都不贡献。
 
 **branch B 的 decode 更贵**（raw 前缀更长）：这是**要报告的归因点**，离线**不做等化**，不额外买生成来抹平。
 
@@ -152,7 +167,9 @@ batching / paged KV / 融合算子相差可达 2 倍量级。因此成本结论�
 
 ## 8. 四问判读卡（写进报告，不写进任何 kill 逻辑）
 
-1. **headroom 存在吗**（对 sham / 噪声地板）→ `arm_table.delta_oracle_timing` 对 `noise_floor.band95`。
+1. **headroom 存在吗**（对 sham / 噪声地板）→ `arm_table.delta_oracle_timing` 对
+   `noise_floor_delta.band95`（两者同为「对 max(F0,F2) 的率差」量纲；绝对率带 `noise_floor_absolute`
+   仅作描述，不用于本判读）。
 2. **优于简单基线吗** → `cis["F3g-F4"]`（硬币）与 `cis["F3g-F0"]`（null policy）。
 3. **成本合理吗** → `cost_tables.rollout_ledger` / `gpu_ms_ledger` / `bytes_table`，按 §6 的 factor-2 弹性读。
 4. **哪类失败最受益** → `four_cell_table` + `both_match_gold_block`（后者带 future-info caveat）。
@@ -176,7 +193,7 @@ batching / paged KV / 融合算子相差可达 2 倍量级。因此成本结论�
 ## 10. 停止条件白名单（五条，穷尽）
 
 1. implementation-invalid（位置不变式或 greedy repeat 自检失败）；
-2. 无 headroom（Δ_oracle 落在 F4 硬币地板带内）；
+2. 无 headroom（Δ_oracle(timing) 落在 F4 硬币的 `noise_floor_delta.band95` 内）；
 3. 被简单基线支配；
 4. 成本不可接受；
 5. 优先级。
@@ -195,3 +212,41 @@ skip 行（eligibility 未过、OOM）在下次 resume 时重试。
 **resume 粒度是「一个 pass」而不是「一条 rollout」**：位置不变式与双分支显存台账都需要同一 example 的两支
 同时在手，因此只要某个 pass 有 rollout 未完成，整个 pass 重跑；重复行在分析期由
 `index_rows_by_qid` 按 last-write-wins 折叠，不影响任何计数。
+
+**锚点缺失即 FATAL**：`--prereg_file` 是唯一「只被 hash、不被读取」的冻结锚点，driver 在任何设备/模型
+工作之前校验它存在且非空（`f_fork_common.require_anchor_file`），缺失或空文件直接 `SystemExit`，
+不允许 `prereg_sha256=null` 的行产生。qid/split manifest 合法未提供时照跑，但 driver 打 WARNING
+（unpinned，对应 sha 盖 null）。
+
+**多文件合并分析**：analyzer 的 `--input_file` 接受多个 jsonl（greedy_core + sampled 两个 pass 各一个
+文件），按 `(qid, arm_pass, branch, rollout_index)` 合并出同时含全部臂的单一报告；跨文件同 key 而内容
+不同的重复行 → FATAL 并报出该 key。文件内重复行仍是 resume 语义，last-write-wins。
+
+---
+
+## Changelog — 2026-08-22 pre-first-run amendments
+
+本轮修订全部发生在**任何 F 线生成之前**（the numbers do not exist yet），依据序言的 erratum 条款逐条记录。
+未改动任何冻结阈值（L_min、E1–E4、R1/R1b、B=2000、bootstrap seed=20260822、MDE 公式、factor-2 弹性均原样）。
+
+1. **§5 / §8① / §10② 噪声地板量纲修正**：原判据把配对差 `delta_oracle_timing`（F5 − max(F0,F2)，率差）
+   与 F4 硬币的**绝对成功率**带 `noise_floor.band95` 直接相比，量纲不一致（判据行为随基线率翻转，按字面
+   不可执行——prereg 与代码复制了同一处错误）。改为 `noise_floor_delta`：同一配对 qid 集上 200 个 coin seed
+   的 per-seed (硬币成功率 − max(F0,F2) 成功率) 差值分布的 95% 带；绝对带改名 `noise_floor_absolute` 保留。
+2. **§5 F4 硬币 seed 钉死**：`coin_seed = 0` 冻结（与 launcher pass-1 `GEN_SEED` 默认一致，行为不变）；
+   analyzer 把 `coin_seed` 写进 `analysis.json` 顶层。原文本对 F4 自身的 coin seed 无一处指定，
+   它曾是全套冻结产物中唯一既未预注册又不落盘的自由参数。
+3. **§4 Δ_oracle basis 标注**：主口径 basis = [F0, F2]（greedy 单臂）；F1 rows 在场时并列输出
+   `delta_oracle_timing_incl_F1 = F5 − max(F0, F1, F2)`（26 号 §3 首轮判读公式），两变体各带 basis 标注。
+   消解 26 号手册与本文件之间的公式 drift，不事后择优。
+4. **序言逐字条款收窄**：判读卡与停止条件白名单在报告中为**英文内容等价渲染**（条目一一对应），
+   §7 显存条款与 §9 oracle-union 句式、脚注模板保持逐字；analyzer 的显存条款引号字符已改回与本文件
+   逐字一致（双引号）。
+5. **§5 skip 汇总去重**：resume 会对同一不合格例重发 skip 行；analyzer 按 (qid, skip_reason) 去重汇总
+   （逐 example 一条），原始行数并列报出。原实现按行计数会在 k 次 resume 后虚高 k 倍。
+6. **§6 台账分母一致**：success 与 GPU-sec 在同一 paired-complete qid 集（`n_ledger`）上计算，
+   被排除 qid 计入 `n_excluded_unpaired`。原实现在残档上 success 数全臂 qid 而成本只累配对池，
+   `success_per_gpu_sec` 偏高。
+7. **§11 新增三条可追溯性条款**：`--prereg_file` 缺失/空文件 FATAL（原实现静默盖 null 照跑）；
+   unpinned manifest 打 WARNING；analyzer 支持多输入文件合并（greedy_core + sampled 单报告），
+   跨文件冲突重复行 FATAL。

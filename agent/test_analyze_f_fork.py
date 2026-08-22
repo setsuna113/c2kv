@@ -124,7 +124,7 @@ SAMPLED_PLAN = [
 ]
 
 
-def _write_rows(tmp_path, *, with_sampled=True, with_ineligible=True):
+def _greedy_rows():
     rows = []
     for qid, session, a_check, a_tool, b_check, b_tool in GREEDY_PLAN:
         rows.append(
@@ -139,22 +139,30 @@ def _write_rows(tmp_path, *, with_sampled=True, with_ineligible=True):
                 check=b_check, tool=b_tool, pred=GOLD if b_tool else '{"name":"wrong_b"}',
             )
         )
-    if with_sampled:
-        for qid, session, a_s0, a_s1, b_s0 in SAMPLED_PLAN:
-            for branch, rollout, (check, tool) in (
-                (BRANCH_COMPRESS_NOW, 0, a_s0),
-                (BRANCH_COMPRESS_NOW, 1, a_s1),
-                (BRANCH_DEFER, 0, b_s0),
-            ):
-                rows.append(
-                    _branch_row(
-                        qid, session, "sampled", branch, rollout,
-                        check=check, tool=tool,
-                        pred=GOLD if tool else '{"name":"wrong_s"}',
-                    )
+    return rows
+
+
+def _sampled_rows():
+    rows = []
+    for qid, session, a_s0, a_s1, b_s0 in SAMPLED_PLAN:
+        for branch, rollout, (check, tool) in (
+            (BRANCH_COMPRESS_NOW, 0, a_s0),
+            (BRANCH_COMPRESS_NOW, 1, a_s1),
+            (BRANCH_DEFER, 0, b_s0),
+        ):
+            rows.append(
+                _branch_row(
+                    qid, session, "sampled", branch, rollout,
+                    check=check, tool=tool,
+                    pred=GOLD if tool else '{"name":"wrong_s"}',
                 )
-    if with_ineligible:
-        rows.append({
+            )
+    return rows
+
+
+def _skip_rows():
+    return [
+        {
             "qid": "q9",
             "session_id": "s3",
             "arm_pass": "greedy_core",
@@ -162,8 +170,8 @@ def _write_rows(tmp_path, *, with_sampled=True, with_ineligible=True):
             "rollout_index": 0,
             "skipped": True,
             "skip_reason": "last_chunk_tokens<64",
-        })
-        rows.append({
+        },
+        {
             "qid": "q8",
             "session_id": "s3",
             "arm_pass": "greedy_core",
@@ -171,12 +179,24 @@ def _write_rows(tmp_path, *, with_sampled=True, with_ineligible=True):
             "rollout_index": 0,
             "skipped": True,
             "skip_reason": "history_chunks<2",
-        })
-    path = tmp_path / "f_fork.jsonl"
+        },
+    ]
+
+
+def _write_jsonl(path, rows):
     with path.open("w", encoding="utf-8") as handle:
         for row in rows:
             handle.write(json.dumps(row, ensure_ascii=False) + "\n")
     return path
+
+
+def _write_rows(tmp_path, *, with_sampled=True, with_ineligible=True):
+    rows = _greedy_rows()
+    if with_sampled:
+        rows.extend(_sampled_rows())
+    if with_ineligible:
+        rows.extend(_skip_rows())
+    return _write_jsonl(tmp_path / "f_fork.jsonl", rows)
 
 
 @pytest.fixture()
@@ -204,12 +224,14 @@ def test_report_carries_every_required_block(report):
         "n_paired_greedy",
         "n_paired_sampled",
         "n_sessions",
+        "coin_seed",
         "skips",
         "arm_table",
         "four_cell_table",
         "disagreement",
         "both_match_gold_block",
-        "noise_floor",
+        "noise_floor_delta",
+        "noise_floor_absolute",
         "cis",
         "cost_tables",
         "tie_rule_sensitivity",
@@ -228,6 +250,33 @@ def test_report_carries_every_required_block(report):
         "history_chunks<2": 1,
         "last_chunk_tokens<64": 1,
     }
+
+
+def test_skip_table_dedupes_resume_reemitted_rows(tmp_path):
+    """The driver re-emits every eligibility skip on each resume.
+
+    Three interrupted resumes leave three identical skip rows per ineligible
+    example; the table must count each (qid, skip_reason) once and report the
+    raw row count alongside so the inflation stays visible.
+    """
+
+    rows = _greedy_rows() + _skip_rows() * 3
+    skips = AF.skip_table(rows)
+    assert skips["num_skipped"] == 2
+    assert skips["skip_reasons"] == {
+        "history_chunks<2": 1,
+        "last_chunk_tokens<64": 1,
+    }
+    assert skips["num_skipped_rows_raw"] == 6
+    assert skips["skip_reasons_raw_rows"] == {
+        "history_chunks<2": 3,
+        "last_chunk_tokens<64": 3,
+    }
+    # Same qid skipped for two DIFFERENT reasons stays two entries.
+    two_reasons = dict(_skip_rows()[0])
+    two_reasons["skip_reason"] = "target_has_tool_call=false"
+    skips = AF.skip_table(_skip_rows() + [two_reasons])
+    assert skips["num_skipped"] == 3
 
 
 # ---------------------------------------------------------------------------
@@ -253,6 +302,23 @@ def test_delta_oracle_and_unconditional_gap(report):
     # the selective story.
     assert table["unconditional_gap_F2_minus_F0"] == 0.0
     assert "not part of the selective" in table["unconditional_gap_note"]
+
+
+def test_delta_oracle_carries_basis_labels_and_the_incl_f1_variant(report, tmp_path):
+    table = report["arm_table"]
+    assert table["delta_oracle_timing_basis"] == "basis: [F0,F2]"
+    # F1 = 1.0 on its two sampled qids, F5 = 1.0 -> 26号's variant is 0 here.
+    assert table["best_single_arm_incl_F1"] == "F1"
+    assert table["delta_oracle_timing_incl_F1"] == pytest.approx(0.0)
+    assert table["delta_oracle_timing_incl_F1_basis"] == "basis: [F0,F1,F2]"
+    assert "sampled-pass arm" in table["delta_oracle_basis_note"]
+    # Greedy-only run: no F1, so the inclusive variant must be absent, not 0.
+    greedy_only = AF.build_report(
+        AF.load_rows(_write_rows(tmp_path, with_sampled=False)),
+        coin_seed=0, bootstrap_b=100, noise_seeds=20,
+    )
+    assert greedy_only["arm_table"]["delta_oracle_timing_incl_F1"] is None
+    assert greedy_only["arm_table"]["delta_oracle_timing_incl_F1_basis"] is None
 
 
 def test_four_cell_disagreement_and_both_match_gold(report):
@@ -335,6 +401,50 @@ def test_gpu_ms_ledger_dedups_shared_prefills_for_multi_rollout_arms(report):
     assert gpu["F3g"]["gpu_ms_prefill_dedup"] == gpu["F3g"]["gpu_ms_prefill"]
 
 
+def test_gpu_ledger_success_and_cost_share_the_paired_denominator(tmp_path):
+    """Ragged (interrupted) archive: F0 admits a qid the paired pool excludes.
+
+    Its success must NOT be counted while its cost never accrues — both ledger
+    columns run over the paired-complete set, and the exclusion is reported.
+    """
+
+    ragged = _branch_row(
+        "q7", "s2", "greedy_core", BRANCH_COMPRESS_NOW, 0,
+        check=True, tool=True, pred=GOLD,
+    )  # no B_greedy row for q7 -> unpaired
+    rows = _greedy_rows() + [ragged]
+    report = AF.build_report(rows, coin_seed=0, bootstrap_b=100, noise_seeds=20)
+    gpu = report["cost_tables"]["gpu_ms_ledger"]
+    assert report["arm_table"]["arms"]["F0"]["n"] == 6  # arm still admits q7
+    assert gpu["F0"]["n"] == 6
+    assert gpu["F0"]["n_ledger"] == 5
+    assert gpu["F0"]["n_excluded_unpaired"] == 1
+    # 3 paired successes (q0,q2,q4) — q7's success is excluded with its cost.
+    assert gpu["F0"]["successes"] == 3
+    assert gpu["F0"]["gpu_ms_total"] == pytest.approx(
+        1000 * 5 * (A_PREFILL_SEC + A_DECODE_SEC), abs=0.1
+    )
+    assert gpu["F0"]["success_per_gpu_sec"] == pytest.approx(
+        3 / (5 * (A_PREFILL_SEC + A_DECODE_SEC)), abs=1e-3
+    )
+    assert gpu["F0"]["gpu_ms_per_decision"] == pytest.approx(
+        1000 * (A_PREFILL_SEC + A_DECODE_SEC), abs=0.05
+    )
+    assert "same" in report["cost_tables"]["ledger_denominator_note"].lower() or (
+        "paired-complete" in report["cost_tables"]["ledger_denominator_note"]
+    )
+    # The exclusion is called out in the rendered markdown as well.
+    markdown = AF.render_markdown(report)
+    assert "excluded as unpaired" in markdown
+
+
+def test_gpu_ledger_has_no_exclusions_on_a_complete_run(report):
+    gpu = report["cost_tables"]["gpu_ms_ledger"]
+    for arm, block in gpu.items():
+        assert block["n_excluded_unpaired"] == 0, arm
+        assert block["n_ledger"] == block["n"], arm
+
+
 def test_bytes_table_reports_measured_logical_and_the_honesty_clause(report):
     table = report["cost_tables"]["bytes_table"]
     assert table["per_branch"][BRANCH_COMPRESS_NOW]["avg_cache_tokens"] == 900.0
@@ -375,6 +485,26 @@ def test_oracle_union_phrase_is_the_fixed_sentence(report):
     assert report["arm_table"]["oracle_union_phrase"] == AF.ORACLE_UNION_PHRASE
     assert "不构成选择机制" in AF.ORACLE_UNION_PHRASE
     assert "draft-verify" in AF.ORACLE_UNION_PHRASE
+
+
+def test_memory_honesty_clause_matches_the_prereg_blockquote_verbatim():
+    """f_prereg.md §7 says 逐字 — quote characters included."""
+
+    prereg = (_REPO_ROOT / "configs" / "bdf_pilot" / "f_prereg.md").read_text(
+        encoding="utf-8"
+    )
+    quote_lines = []
+    in_block = False
+    for line in prereg.splitlines():
+        if line.startswith("> Inside the speculation window"):
+            in_block = True
+        if in_block:
+            if not line.startswith(">"):
+                break
+            quote_lines.append(line.lstrip("> ").rstrip())
+    clause = " ".join(quote_lines)
+    assert clause == AF.MEMORY_HONESTY_CLAUSE
+    assert '"compression frees memory' in AF.MEMORY_HONESTY_CLAUSE
 
 
 def test_footnote_matches_the_shared_spec_wording(report):
@@ -421,12 +551,54 @@ def test_sampled_arms_use_only_their_own_qids(report):
 
 
 def test_noise_floor_band_brackets_the_coin(report):
-    floor = report["noise_floor"]
+    floor = report["noise_floor_absolute"]
     assert floor["n"] == 5
     assert floor["seeds"] == 50
     assert 0.0 <= floor["band95"][0] <= floor["mean"] <= floor["band95"][1] <= 1.0
     # Every qid has exactly one right branch, so any coin scores k/5.
     assert floor["min"] >= 0.0 and floor["max"] <= 1.0
+
+
+def test_noise_floor_delta_is_the_absolute_band_shifted_by_the_best_single(report):
+    """判读卡① dimension fix: the floor must be a DIFFERENCE distribution.
+
+    The baseline max(F0,F2) is constant across coin seeds, so on this fixture
+    the delta band is exactly the absolute band shifted down by the best
+    single-arm rate (0.6 here) — which is what makes it comparable to
+    delta_oracle_timing, itself a difference against the same baseline.
+    """
+
+    delta_floor = report["noise_floor_delta"]
+    abs_floor = report["noise_floor_absolute"]
+    assert delta_floor["n"] == 5
+    assert delta_floor["seeds"] == 50
+    assert delta_floor["best_single_arm"] in ("F0", "F2")
+    assert delta_floor["best_single_rate"] == pytest.approx(0.6)
+    for index in (0, 1):
+        assert delta_floor["band95"][index] == pytest.approx(
+            abs_floor["band95"][index] - 0.6, abs=1e-3
+        )
+    assert delta_floor["mean"] == pytest.approx(abs_floor["mean"] - 0.6, abs=1e-3)
+    # A coin can never beat the union, so the delta floor tops out below
+    # delta_oracle_timing's own ceiling (F5 - best = 0.4 on this fixture).
+    assert delta_floor["max"] <= report["arm_table"]["delta_oracle_timing"] + 1e-9
+
+
+def test_reading_card_and_whitelist_compare_against_the_delta_floor(report):
+    assert any("noise_floor_delta.band95" in item for item in report["reading_card"])
+    assert not any(
+        "noise_floor.band95" in item for item in report["reading_card"]
+    ), "the reading card must not point at the absolute band any more"
+    whitelist = report["stopping_condition_whitelist"]
+    assert any("noise_floor_delta.band95" in item for item in whitelist)
+
+
+def test_coin_seed_is_stamped_into_the_report(tmp_path):
+    path = _write_rows(tmp_path)
+    rows = AF.load_rows(path)
+    for seed in (0, 7):
+        rep = AF.build_report(rows, coin_seed=seed, bootstrap_b=100, noise_seeds=20)
+        assert rep["coin_seed"] == seed
 
 
 def test_cis_cover_the_preregistered_contrasts_and_cluster_on_session(report):
@@ -458,7 +630,8 @@ def test_main_writes_json_and_markdown(tmp_path):
     assert json_path.exists() and md_path.exists()
     payload = json.loads(json_path.read_text(encoding="utf-8"))
     assert payload["n_paired_greedy"] == 5
-    assert payload["input_file"] == str(path)
+    assert payload["input_files"] == [str(path)]
+    assert payload["coin_seed"] == 0  # the frozen default, f_prereg.md §5
     markdown = md_path.read_text(encoding="utf-8")
     assert "| F0 |" in markdown and "| F5 |" in markdown
     assert "Four-cell" in markdown
@@ -466,6 +639,59 @@ def test_main_writes_json_and_markdown(tmp_path):
     assert AF.ORACLE_UNION_PHRASE in markdown
     assert payload["footnote"] in markdown
     assert "Tie-rule sensitivity (R1 vs R1b)" in markdown
+    assert "basis: [F0,F2]" in markdown
+    assert "Delta floor (coin − max(F0,F2)" in markdown
+
+
+def test_main_merges_the_two_pass_files_into_one_report(tmp_path):
+    """Runbook flow: greedy_core and sampled land in separate jsonl files.
+
+    The merged report must carry BOTH the greedy arms (F0/F2/F5, Δ_oracle)
+    and the sampled arms (F1/F3s) — a single-file analysis of either pass
+    cannot serve reading-card ① and F3s−F1 at the same time.
+    """
+
+    greedy_path = _write_jsonl(tmp_path / "greedy_core.jsonl", _greedy_rows() + _skip_rows())
+    sampled_path = _write_jsonl(tmp_path / "sampled.jsonl", _sampled_rows())
+    report = AF.main([
+        "--input_file", str(greedy_path), str(sampled_path),
+        "--output_prefix", str(tmp_path / "merged"),
+        "--bootstrap_b", "100",
+        "--noise_seeds", "20",
+    ])
+    assert report["n_paired_greedy"] == 5
+    assert report["n_paired_sampled"] == 2
+    arms = report["arm_table"]["arms"]
+    for arm in ("F0", "F2", "F5", "F3g", "F4", "F1", "F3s"):
+        assert arm in arms, arm
+    assert report["arm_table"]["delta_oracle_timing"] == pytest.approx(0.4)
+    assert "F3s-F1" in report["cis"]
+    assert report["input_files"] == [str(greedy_path), str(sampled_path)]
+    payload = json.loads((tmp_path / "merged.analysis.json").read_text(encoding="utf-8"))
+    assert payload["n_paired_sampled"] == 2
+
+
+def test_merge_fatals_on_a_conflicting_cross_file_duplicate(tmp_path):
+    greedy_path = _write_jsonl(tmp_path / "greedy_core.jsonl", _greedy_rows())
+    conflicting = _branch_row(
+        "q0", "s0", "greedy_core", BRANCH_COMPRESS_NOW, 0,
+        check=False, tool=False, pred='{"name":"drifted"}',
+    )
+    other_path = _write_jsonl(tmp_path / "rerun.jsonl", [conflicting])
+    with pytest.raises(SystemExit, match=r"q0.*greedy_core"):
+        AF.merge_input_rows([greedy_path, other_path])
+
+
+def test_merge_accepts_the_same_file_twice_and_within_file_resume_duplicates(tmp_path):
+    rows = _greedy_rows()
+    # Within one file, a duplicated key is the documented resume semantics
+    # (last-write-wins), even when the content differs.
+    resumed = dict(rows[0])
+    resumed["generate_sec"] = rows[0]["generate_sec"] + 0.01
+    path = _write_jsonl(tmp_path / "greedy_core.jsonl", rows + [resumed])
+    merged = AF.merge_input_rows([path, path])
+    report = AF.build_report(merged, coin_seed=0, bootstrap_b=100, noise_seeds=20)
+    assert report["n_paired_greedy"] == 5
 
 
 def test_every_results_section_carries_the_footnote(report):

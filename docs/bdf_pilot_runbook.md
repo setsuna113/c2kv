@@ -51,9 +51,11 @@ running anything.
 
 ## 2. Frozen state
 
-Every run binds its inputs by sha256 and stamps them into each output row, so
-a row can always be traced back to the exact frozen inputs. Freeze before you
-run; do not edit a frozen file and re-run on top of it.
+D and F bind their inputs by sha256 and stamp them into each output row, so
+those rows can always be traced back to the exact frozen inputs. B rows carry
+no sha stamps: B provenance (manifest sha256, eval commit sha, checkpoint) is
+registered by hand in `configs/bdf_pilot/b_prereg.md` §2 before the run.
+Freeze before you run; do not edit a frozen file and re-run on top of it.
 
 | Artifact | Produced by | Consumed by |
 |---|---|---|
@@ -94,8 +96,14 @@ OUTPUT_DIR=./outputs/b_pilot \
 bash agent/run_b_pilot_npu.sh
 ```
 
-Outputs `<arm>.jsonl` + `<arm>.summary.json` per arm, a shared `ref.jsonl`, and
+Outputs `<arm>.jsonl` + `<arm>.summary.json` per arm, a shared `reference.jsonl`, and
 `analysis.{json,md}`.
+
+The analyzer also receives `QID_MANIFEST`: if any arm fails to cover the
+frozen manifest, `analysis.md` is stamped with an INCOMPLETE COMMON-QID SET
+banner and that round enters no paired table. The 判据8 bytes-matched paired
+contrast (P-delay vs the reference on guard-passing rows only) is emitted as
+its own section of the analysis.
 
 **Budget declaration.** Arms are only comparable at equal gist budget. The
 analyzer reports each arm's mean `gist_tokens` against `P-fixed` and marks any
@@ -123,6 +131,15 @@ worse".
 Five arms on the same set of failure points. Triggers come from paired rows
 where the full cache is right and the compressed cache is wrong.
 
+**Battery prerequisite.** Those paired rows are the pinned checkpoint's OWN
+history-harness battery. For a freshly frozen checkpoint no such battery
+exists yet: run `eval_agent_history_c2kv.py` twice over the frozen eval slice
+first — mode `full` (ratio 1) and mode `c2kv` (ratio 8), both at the history
+convention 768/16 — and those two row files become `BATTERY_FULL_ROWS` /
+`BATTERY_NONE_ROWS` below and the extractor's `--full_rows` /
+`--compressed_rows`. Joint-harness rows (1024/24) are NOT a substitute; the
+recipe guard rejects them.
+
 | Arm | Intervention |
 |---|---|
 | `none` | none (defines the failure set) |
@@ -136,18 +153,31 @@ where the full cache is right and the compressed cache is wrong.
 python agent/extract_cw_triggers.py \
   --full_rows <full-arm rows> --compressed_rows <c2kv-arm rows> \
   --batch batch-TF --ckpt_path <pinned checkpoint> --ratio 8 \
-  --max_doc_length 768 \
+  --max_doc_length 768 --max_doc_num 16 \
+  --model_sha <checkpoint sha256> --eval_code_sha <eval code commit sha> \
+  --chunk_policy pilot_v1 \
   --out_bundles results/d/bundles_batch_tf.jsonl \
   --out_manifest configs/bdf_pilot/d_cw_manifest.json --bind_docs
 
 # 2. freeze the sham plan
 python agent/d_sham_plan.py \
   --manifest configs/bdf_pilot/d_cw_manifest.json \
+  --doc_table results/d/d_doc_ids.json \
+  --corpus configs/bdf_pilot/d_neutral_corpus.txt \
+  --tokenizer ./models/Qwen3-4B-Instruct-2507 \
   --out configs/bdf_pilot/d_sham_plan.json
 
-# 3. smoke (identity sentinels), then the arms
-PHASE=smoke MODEL_PATH=<pinned> bash agent/run_d_pilot_npu.sh
-PHASE=arms  MODEL_PATH=<pinned> bash agent/run_d_pilot_npu.sh
+# 3. smoke (identity sentinels), then the arms. Smoke FATALs if
+#    BATTERY_FULL_ROWS is unset (the full-arm sentinel cannot run;
+#    ALLOW_MISSING_FULL_SENTINEL=1 overrides), writes smoke/smoke.ok on
+#    success, and PHASE=arms refuses to start without that marker
+#    (SKIP_SMOKE_CHECK=1 overrides). SPLIT_MANIFEST_FILE passes a frozen
+#    split manifest through to the harness, mirroring the B runner.
+PHASE=smoke MODEL_PATH=<pinned> \
+  BATTERY_FULL_ROWS=<battery full-arm jsonl> bash agent/run_d_pilot_npu.sh
+PHASE=arms  MODEL_PATH=<pinned> \
+  BATTERY_NONE_ROWS=<battery c2kv-arm jsonl> \
+  BATTERY_FULL_ROWS=<battery full-arm jsonl> bash agent/run_d_pilot_npu.sh
 ```
 
 **Grid consistency is enforced, not assumed.** The manifest records the doc
@@ -161,9 +191,12 @@ Do not "align" them.
 
 **Reading the result.** The comparison that matters is `corr_re` vs `sham`, not
 vs `none` — sham absorbs the effect of the intervention machinery itself and of
-the extra bytes. Report both levels of the denominator separately (what
-fraction of failures are in the repairable subset × what fraction of that
-subset gets repaired); never just the product. A "repair" that produces
+the extra bytes. Report both levels of the denominator separately (L1 = n_C2W /
+n_base_paired — the trigger rate over ALL paired qids, successes included — ×
+L2 = rescued / n_C2W, the repair rate within the triggers); never just the
+product. The failures-only ratio n_C2W/(n_C2W+n_W2W) is a different number;
+the manifest's transition census provides it if a table note wants both
+readings. A "repair" that produces
 incoherent output is not a repair: the coherence triple (protocol-legal parse
 rate, repetition degeneration, output-length drift) gates every rescue count.
 
@@ -184,14 +217,27 @@ at analysis time from those two outputs at zero extra compute.
 | `F5` | either branch correct (ceiling) |
 
 ```bash
-# pass 1: greedy core -- no dependency on the sampling switch
+# pass 1: greedy core -- no dependency on the sampling switch.
+# Leave GEN_SEED at its default 0: it doubles as the F4 coin seed, frozen
+# in configs/bdf_pilot/f_prereg.md §5.
 MODEL_PATH=<pinned> QID_MANIFEST=<eval manifest> MAX_EXAMPLES=200 \
 ARM_SET=greedy_core OUTPUT_FILE=./outputs/f_pilot/greedy_core.jsonl \
 bash agent/run_f_pilot_npu.sh
 
-# pass 2: sampled arms (adds F1 and the sampled F3)
+# pass 2: sampled arms (adds F1 and the sampled F3).  VAR=x prefixes are
+# single-command scoped -- repeat the SAME pins as pass 1 or the run falls
+# back to the default checkpoint and loader-order examples.
+MODEL_PATH=<pinned> QID_MANIFEST=<eval manifest> MAX_EXAMPLES=200 \
 ARM_SET=sampled TEMPERATURE=0.7 TOP_P=0.95 GEN_SEED=20260822 \
 OUTPUT_FILE=./outputs/f_pilot/sampled.jsonl bash agent/run_f_pilot_npu.sh
+
+# merged report: both pass files into ONE analysis -- reading card ① and
+# F3s-F1 must live in the same report.  coin_seed 0 = the frozen F4 coin
+# seed.
+python agent/analyze_f_fork.py \
+  --input_file ./outputs/f_pilot/greedy_core.jsonl \
+               ./outputs/f_pilot/sampled.jsonl \
+  --output_prefix ./outputs/f_pilot/f_merged --coin_seed 0
 ```
 
 **Memory honesty.** Inside the speculation window both branches are alive, so

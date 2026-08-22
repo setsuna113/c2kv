@@ -225,6 +225,82 @@ def test_inconsistent_doc_table_is_fatal(corpus):
         P.build_plan(table, ["s:1"], ids, decode)
 
 
+# --- f2. main() exit codes for missing / degenerate coverage -----------------
+
+
+def _run_main(tmp_path, monkeypatch, corpus, doc_lens_by_qid, cw_qids, extra_argv=()):
+    """Drive P.main with a whitespace-tokenizer stub over the real corpus."""
+    import json
+
+    text, _, _ = corpus
+    words = text.split()
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(json.dumps({"cw_qids": list(cw_qids)}), encoding="utf-8")
+    doc_table_path = tmp_path / "d_doc_ids.json"
+    doc_table_path.write_text(
+        json.dumps(
+            {
+                "per_qid": {
+                    qid: {
+                        "session_id": qid.rsplit(":", 1)[0],
+                        "n_docs": len(lens),
+                        "doc_lens": list(lens),
+                    }
+                    for qid, lens in doc_lens_by_qid.items()
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    class _Tok:
+        def __call__(self, value, add_special_tokens=False):
+            return {"input_ids": list(range(len(value.split())))}
+
+        def decode(self, ids, skip_special_tokens=False):
+            return " ".join(words[i] for i in ids)
+
+    monkeypatch.setattr(P, "_load_tokenizer", lambda path: _Tok())
+    return P.main(
+        [
+            "--doc_table", str(doc_table_path),
+            "--manifest", str(manifest_path),
+            "--corpus", str(CORPUS_PATH),
+            "--tokenizer", "unused",
+            "--out", str(tmp_path / "d_sham_plan.json"),
+            *extra_argv,
+        ]
+    )
+
+
+def test_missing_qid_is_fatal_by_default(tmp_path, monkeypatch, corpus):
+    """d_prereg.md §8-4: a missing qid is FATAL, never a skip."""
+    table = {"s:1": [10, 10, 10]}
+    assert _run_main(tmp_path, monkeypatch, corpus, table, ["s:1", "s:404"]) == 1
+
+
+def test_degenerate_qid_is_fatal_by_default(tmp_path, monkeypatch, corpus):
+    table = {"s:1": [10, 10, 10], "s:2": [0, 0, 0]}
+    assert _run_main(tmp_path, monkeypatch, corpus, table, ["s:1", "s:2"]) == 1
+
+
+def test_allow_missing_downgrades_to_warning(tmp_path, monkeypatch, corpus):
+    import json
+
+    table = {"s:1": [10, 10, 10]}
+    assert (
+        _run_main(tmp_path, monkeypatch, corpus, table, ["s:1", "s:404"], ["--allow_missing"]) == 0
+    )
+    # The gap is still recorded in the plan; only the exit code is downgraded.
+    plan = json.loads((tmp_path / "d_sham_plan.json").read_text(encoding="utf-8"))
+    assert plan["missing_qids"] == ["s:404"]
+
+
+def test_full_coverage_exits_zero(tmp_path, monkeypatch, corpus):
+    table = {"s:1": [10, 10, 10], "s:2": [7, 8]}
+    assert _run_main(tmp_path, monkeypatch, corpus, table, ["s:1", "s:2"]) == 0
+
+
 # --- g. the sha convention the driver asserts on -----------------------------
 
 

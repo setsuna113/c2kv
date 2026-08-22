@@ -131,11 +131,14 @@ def _assert_recipe_matches_run(manifest: Dict[str, Any], args: argparse.Namespac
     run, the numbers still look like numbers.  The extractor records the grid it
     used precisely so this can be checked, so check it.
 
-    Two ways the grid can silently differ:
+    Three ways the grid can silently differ:
 
     * ``max_doc_length`` -- the history harness convention is 768 while the
       joint harness uses 1024; a manifest frozen under one and a run launched
       under the other chunk the same history differently.
+    * ``max_doc_num`` -- the row budget (768/16 vs the joint 1024/24); a
+      different row count selects a different tail of the history, so k* would
+      point at a different document.
     * harness dialect -- the extractor parses both joint-battery and
       history-harness rows, but D intervenes with the history harness only.
       Joint-dialect triggers describe contexts this driver cannot reproduce.
@@ -150,6 +153,16 @@ def _assert_recipe_matches_run(manifest: Dict[str, Any], args: argparse.Namespac
             "The intervention would land on a different grid than the one whose "
             "failure defined the trigger. Re-run with the recorded value, or "
             "re-extract the triggers at the budget you intend to run."
+        )
+
+    recorded_num = recipe.get("max_doc_num")
+    if recorded_num is not None and int(recorded_num) != int(args.max_doc_num):
+        raise SystemExit(
+            "FATAL: doc-grid mismatch — the trigger manifest was frozen with "
+            f"max_doc_num={recorded_num}, this run passes {args.max_doc_num}. "
+            "A different row budget selects a different history tail, so k* "
+            "would no longer name the document whose failure defined the "
+            "trigger. Re-run with the recorded value, or re-extract."
         )
 
     # args.ratio is the pilot's compression ratio; the `full` arm overrides it to

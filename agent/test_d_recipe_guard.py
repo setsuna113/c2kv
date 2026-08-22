@@ -44,13 +44,13 @@ def _guard():
 
 
 def _args(**over):
-    base = dict(max_doc_length=768, ratio=8, arm="corr")
+    base = dict(max_doc_length=768, max_doc_num=16, ratio=8, arm="corr")
     base.update(over)
     return argparse.Namespace(**base)
 
 
 def _manifest(**over):
-    recipe = {"max_doc_length": 768, "ratio": 8}
+    recipe = {"max_doc_length": 768, "max_doc_num": 16, "ratio": 8}
     recipe.update(over.pop("recipe", {}))
     man = {"kv_recipe": recipe, "source_dialects": {"history": 40}}
     man.update(over)
@@ -74,6 +74,23 @@ def test_ratio_mismatch_is_fatal():
     with pytest.raises(SystemExit) as exc:
         _guard()(_manifest(), _args(ratio=4))
     assert "ratio mismatch" in str(exc.value)
+
+
+def test_doc_num_mismatch_is_fatal():
+    """768/16 vs the joint 1024/24 convention: the row budget selects the
+    history tail, so k* would name a different document."""
+    with pytest.raises(SystemExit) as exc:
+        _guard()(_manifest(), _args(max_doc_num=24))
+    msg = str(exc.value)
+    assert "max_doc_num" in msg
+    assert "16" in msg and "24" in msg
+
+
+def test_recipe_without_doc_num_skips_that_check():
+    """Manifests frozen before max_doc_num entered the recipe stay runnable."""
+    man = _manifest()
+    del man["kv_recipe"]["max_doc_num"]
+    _guard()(man, _args(max_doc_num=24))
 
 
 def test_joint_dialect_triggers_are_refused():

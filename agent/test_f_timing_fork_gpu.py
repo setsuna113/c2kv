@@ -502,6 +502,23 @@ def test_qid_manifest_fixes_the_order_and_fails_loudly_on_a_missing_qid(
         FT._select_examples(examples, _args(tmp_path, qid_manifest=str(manifest)))
 
 
+def test_evaluate_fatals_before_any_device_work_on_a_missing_prereg_file(
+    harness, tmp_path, monkeypatch
+):
+    """The prereg is hashed but never read: a bad path must abort, not stamp
+    prereg_sha256=null.  The guard runs before _setup_device is ever reached."""
+
+    FT = harness["FT"]
+
+    def _boom(device_type):  # pragma: no cover - must not be reached
+        raise AssertionError("device setup ran before the prereg anchor check")
+
+    monkeypatch.setattr(FT, "_setup_device", _boom)
+    args = _args(tmp_path, prereg_file=str(tmp_path / "missing_prereg.md"))
+    with pytest.raises(SystemExit, match="--prereg_file does not exist"):
+        FT.evaluate(args)
+
+
 def test_sampled_arm_set_refuses_without_the_sampling_switch(
     harness, tmp_path, monkeypatch
 ):

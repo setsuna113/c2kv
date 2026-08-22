@@ -206,6 +206,27 @@ def _jsonl_write(path: str, rows: List[Dict[str, Any]]) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _wrap_history_message_ids(
+    tokenizer: Any, message: Dict[str, Any], max_doc_length: int
+) -> Tuple[List[int], bool]:
+    """Chat-template-wrap one kept/delayed history message; flag a ceiling hit.
+
+    The chunk policies size their windows so the wrap fits under
+    ``max_doc_length`` (fixed-N keeps an 8-token re-encode margin), but that
+    margin is a heuristic: BPE decode->re-encode drift beyond it would make
+    ``_chat_template_ids`` truncate SILENTLY, breaking the frozen-content
+    identity the B arms rest on.  A candidate hit (wrapped length at the
+    ceiling) is confirmed against an unbounded second encode — normally there
+    are zero candidates, so the extra encode costs nothing.
+    """
+
+    ids = _chat_template_ids(tokenizer, [message], max_length=max_doc_length)
+    truncated = len(ids) >= max_doc_length and len(
+        _chat_template_ids(tokenizer, [message])
+    ) > len(ids)
+    return ids, truncated
+
+
 def _condition_doc_chunks(
     tokenizer: Any,
     example: JointExample,
@@ -266,6 +287,7 @@ def _condition_doc_chunks(
         "structural_fallback_docs": 0,
         "structural_partial_docs": 0,
         "delayed_docs": 0,
+        "wrap_truncated_docs": 0,
     })
     if skip_reason is not None:
         return None, None, skip_reason, meta
@@ -288,15 +310,17 @@ def _condition_doc_chunks(
         # leaves this off — it is a second full encode of the history text.
         need_content_tokens=True,
     )
-    history_chunks: List[List[int]] = [
-        _chat_template_ids(tokenizer, [message], max_length=max_doc_length)
-        for message in kept
-    ]
+    wrap_truncated_docs = 0
+    history_chunks: List[List[int]] = []
+    for message in kept:
+        ids, truncated = _wrap_history_message_ids(tokenizer, message, max_doc_length)
+        wrap_truncated_docs += int(truncated)
+        history_chunks.append(ids)
     raw_history_ids: List[int] = []
     for message in delayed:
-        raw_history_ids.extend(
-            _chat_template_ids(tokenizer, [message], max_length=max_doc_length)
-        )
+        ids, truncated = _wrap_history_message_ids(tokenizer, message, max_doc_length)
+        wrap_truncated_docs += int(truncated)
+        raw_history_ids.extend(ids)
     meta.update(history_meta)
     meta.update({
         "raw_history_ids": raw_history_ids,
@@ -304,6 +328,7 @@ def _condition_doc_chunks(
         "history_content_tokens": history_meta.get("content_tokens", 0),
         "history_wrapped_tokens": sum(len(chunk) for chunk in history_chunks)
         + len(raw_history_ids),
+        "wrap_truncated_docs": wrap_truncated_docs,
     })
     return tool_chunks, history_chunks, None, meta
 
@@ -325,6 +350,10 @@ def _chunk_meta_fields(meta: Dict[str, Any]) -> Dict[str, Any]:
         "delay_recent_turns": meta.get("delay_recent_turns", 0),
         "structural_fallback_docs": meta.get("structural_fallback_docs", 0),
         "structural_partial_docs": meta.get("structural_partial_docs", 0),
+        # Re-encode drift visibility: history docs whose chat-template wrap hit
+        # the max_doc_length ceiling (0 normally — any non-zero value means the
+        # policy's window margin was insufficient and content was cut).
+        "wrap_truncated_docs": meta.get("wrap_truncated_docs", 0),
     }
 
 
@@ -1349,6 +1378,8 @@ def merge_shards(args: argparse.Namespace) -> Dict[str, Any]:
     gist_init_fractions: Dict[str, float] = {}
     shard_cap_modes: List[Any] = []
     shard_chunk_policies: List[Any] = []
+    shard_qid_manifests: List[str] = []
+    qid_manifest_missing_total = 0
     for input_file in args.input_files:
         rows.extend(_read_jsonl(Path(input_file)))
         # Aggregate the shard summaries' gist-init diagnostics (worst case per
@@ -1371,6 +1402,11 @@ def merge_shards(args: argparse.Namespace) -> Dict[str, Any]:
                 shard_cap_modes.append(bool(shard_summary["legacy_mode_caps"]))
             if "chunk_policy" in shard_summary:
                 shard_chunk_policies.append(str(shard_summary["chunk_policy"]))
+            if shard_summary.get("qid_manifest") is not None:
+                shard_qid_manifests.append(str(shard_summary["qid_manifest"]))
+            missing = shard_summary.get("qid_manifest_missing")
+            if isinstance(missing, (int, float)) and not isinstance(missing, bool):
+                qid_manifest_missing_total += int(missing)
     # The doc-budget regime must be visible on the merged summary: legacy and
     # fixed caps produce non-comparable numbers, and mixing shards from both
     # regimes in one merge is almost certainly an ops mistake.
@@ -1394,6 +1430,25 @@ def merge_shards(args: argparse.Namespace) -> Dict[str, Any]:
     merged_chunk_policy: Any = (
         chunk_policies[0] if len(chunk_policies) == 1 else (chunk_policies or None)
     )
+    # The frozen-set bookkeeping must survive the merge: b_prereg.md §2 gates
+    # every paired table on qid_manifest_missing == 0, and the merged summary
+    # is the artefact the B run script prints and the operator reads — losing
+    # the count here made the gate invisible on the parallel-shard path.
+    distinct_manifests = sorted(set(shard_qid_manifests))
+    if len(distinct_manifests) > 1:
+        logger.warning(
+            "MERGING SHARDS RUN AGAINST DIFFERENT QID MANIFESTS (%s) — "
+            "the frozen paired set is not well-defined for this merge",
+            distinct_manifests,
+        )
+    merged_qid_manifest = shard_qid_manifests[0] if shard_qid_manifests else None
+    if qid_manifest_missing_total > 0:
+        logger.warning(
+            "qid_manifest_missing=%d across the merged shards — the frozen paired "
+            "set is INCOMPLETE and this round must not enter any paired table "
+            "(b_prereg.md §2)",
+            qid_manifest_missing_total,
+        )
     if args.output_file:
         _jsonl_write(args.output_file, rows)
     common_rows = _common_valid_rows(rows)
@@ -1409,6 +1464,8 @@ def merge_shards(args: argparse.Namespace) -> Dict[str, Any]:
         "num_rows": len(rows),
         "legacy_mode_caps": merged_legacy_mode_caps,
         "chunk_policy": merged_chunk_policy,
+        "qid_manifest": merged_qid_manifest,
+        "qid_manifest_missing": qid_manifest_missing_total,
         "gist_init_fractions": gist_init_fractions,
         "results": _summarize(rows),
         "common_num_qids": len({row.get("qid") for row in common_rows}),

@@ -23,6 +23,17 @@ What it computes (24号 B.4.2 / B.4.5 / B.4.8):
   raw_recent_tokens) x kv_bytes_per_token, with the bytes-matched column
   skipping (and separately counting) rows whose raw recent turn exceeds
   0.5x the reference arm's gist budget (审查裁定 4-5).
+- **bytes-matched delayed-arm contrast** (判据8): the delay arm's paired
+  Δ vs the reference arm computed ONLY on rows passing the same 0.5x guard
+  (n_used / n_excluded reported) — the 判据8 verdict quantity.
+- **qid-manifest completeness** (``--qid_manifest``): every arm's row qid
+  set is checked against the frozen manifest; any gap stamps an INCOMPLETE
+  COMMON-QID SET banner on the markdown (tables still produced, b_prereg §2).
+- **missing-metric exclusion** (prereg §8.1): rows without the
+  ``tool_name_match`` key are EXCLUDED from every paired table and counted
+  per arm, never folded in as "wrong".
+- **VOID annotation**: contrasts involving a 判据1-VOID arm carry
+  ``void_involved`` in the json and ``[VOID]`` in the markdown row.
 
 Nothing here kills anything: the four-question reading card and the stopping
 whitelist live in the prereg, and every verdict string this file writes is
@@ -186,6 +197,67 @@ def _common_qids(arms: Dict[str, Dict[str, Dict[str, Any]]]) -> List[str]:
     return [qid for qid in arms[names[0]] if qid in common]
 
 
+def _load_qid_manifest(path: str) -> List[str]:
+    """Frozen qid list: a JSON list, a JSON object with ``qids``, or one per line.
+
+    Torch-free port of eval_joint_next_action_c2kv._load_qid_manifest (that
+    module imports torch at top level and cannot be imported here).
+    """
+    text = Path(path).read_text(encoding="utf-8")
+    stripped = text.lstrip()
+    if stripped.startswith("[") or stripped.startswith("{"):
+        payload = json.loads(text)
+        if isinstance(payload, dict):
+            payload = payload.get("qids")
+        if not isinstance(payload, list):
+            raise ValueError(f"{path}: expected a JSON list of qids (or a 'qids' key)")
+        return [str(item) for item in payload]
+    return [line.strip() for line in text.splitlines() if line.strip()]
+
+
+def _split_missing_metric(
+    rows: Dict[str, Dict[str, Any]]
+) -> Tuple[Dict[str, Dict[str, Any]], int]:
+    """Drop rows without the primary metric key; return (kept, n_dropped).
+
+    prereg §8.1: a row missing ``tool_name_match`` must NOT enter any paired
+    table — folding it in as "wrong" (bool(row.get(...))) would silently
+    deflate that arm.  Excluding it here shrinks the common-qid set instead,
+    which the manifest check then reports loudly.
+    """
+    kept = {qid: row for qid, row in rows.items() if "tool_name_match" in row}
+    return kept, len(rows) - len(kept)
+
+
+def _manifest_check(
+    arms: Dict[str, Dict[str, Dict[str, Any]]],
+    full: Optional[Dict[str, Dict[str, Any]]],
+    manifest_qids: Sequence[str],
+    manifest_path: Optional[str],
+) -> Dict[str, Any]:
+    """Frozen-set completeness: does every arm cover every manifest qid?
+
+    b_prereg.md §2: an incomplete common-qid set means the round must not
+    enter any paired table.  Tables are still produced (the artefacts stay
+    retrievable) — the caller stamps the INCOMPLETE banner instead.
+    """
+    manifest = list(dict.fromkeys(str(qid) for qid in manifest_qids))
+    missing_per_arm = {
+        name: sum(1 for qid in manifest if qid not in rows) for name, rows in arms.items()
+    }
+    missing_full = (
+        sum(1 for qid in manifest if qid not in full) if full is not None else None
+    )
+    incomplete = any(count > 0 for count in missing_per_arm.values()) or bool(missing_full)
+    return {
+        "manifest_path": manifest_path,
+        "n_manifest_qids": len(manifest),
+        "missing_per_arm": missing_per_arm,
+        "missing_full": missing_full,
+        "incomplete_common_qid_set": incomplete,
+    }
+
+
 def _session_of(row: Dict[str, Any], qid: str) -> str:
     return str(row.get("session_id") or qid.rsplit(":", 1)[0])
 
@@ -307,12 +379,22 @@ def _poststratify(
     qids: Sequence[str],
     reference_rows: Dict[str, Dict[str, Any]],
     num_buckets: int = 10,
+    reps: int = BOOTSTRAP_REPS,
+    seed: int = BOOTSTRAP_SEED,
 ) -> Dict[str, Any]:
     """Presented-token decile post-stratification of the paired accuracy diff.
 
     Buckets are cut on the REFERENCE arm's presented tokens (so every arm is
     binned identically), the diff is taken inside each bucket, and the buckets
     are recombined with the reference arm's bucket shares as weights.
+
+    The 95% CI resamples sessions with the same RNG discipline as
+    ``cluster_bootstrap_diff`` (same reps/seed conventions) and recomputes the
+    bucket-weighted diff per replicate: bucket ASSIGNMENT and the reference
+    shares stay fixed (they define the estimand), per-bucket means are
+    resampled; weights of buckets left empty by a replicate are renormalized
+    over the buckets present.  判据5 reads this CI whenever post-stratification
+    is triggered — the unstratified CI does not correct the confound.
     """
 
     presented = {qid: _presented_tokens(reference_rows[qid]) for qid in qids}
@@ -323,10 +405,12 @@ def _poststratify(
     total = len(qids)
     rows = []
     weighted = 0.0
+    fixed_weights: Dict[int, float] = {}
     for bucket in sorted(buckets):
         members = buckets[bucket]
         diff = _mean([float(_correct(arm_a[qid])) - float(_correct(arm_b[qid])) for qid in members])
         weight = len(members) / total if total else 0.0
+        fixed_weights[bucket] = weight
         weighted += weight * diff
         rows.append({
             "bucket": bucket,
@@ -336,10 +420,43 @@ def _poststratify(
             "presented_tokens_max": max(presented[qid] for qid in members),
             "diff_pp": round(diff * 100, 2),
         })
+
+    by_session: Dict[str, List[str]] = defaultdict(list)
+    for qid in qids:
+        by_session[_session_of(arm_a[qid], qid)].append(qid)
+    groups = list(by_session.values())
+    rng = random.Random(seed)
+    replicates: List[float] = []
+    for _ in range(reps):
+        sample = [groups[rng.randrange(len(groups))] for _ in groups]
+        bucket_sum: Dict[int, float] = defaultdict(float)
+        bucket_n: Dict[int, int] = defaultdict(int)
+        for cluster in sample:
+            for qid in cluster:
+                bucket = assignment[qid]
+                bucket_sum[bucket] += float(_correct(arm_a[qid])) - float(_correct(arm_b[qid]))
+                bucket_n[bucket] += 1
+        present_weight = sum(fixed_weights[bucket] for bucket in bucket_n)
+        if not present_weight:
+            replicates.append(0.0)
+            continue
+        replicates.append(sum(
+            (fixed_weights[bucket] / present_weight) * (bucket_sum[bucket] / bucket_n[bucket])
+            for bucket in bucket_n
+        ))
+    replicates.sort()
+    low = replicates[int(0.025 * reps)] if replicates else 0.0
+    high = replicates[int(0.975 * reps)] if replicates else 0.0
     return {
         "num_buckets": num_buckets,
         "buckets": rows,
         "weighted_diff_pp": round(weighted * 100, 2),
+        "weighted_diff_95ci_pp": [round(low * 100, 2), round(high * 100, 2)],
+        "bootstrap": {
+            "reps": reps,
+            "seed": seed,
+            "method": "session-cluster percentile, fixed reference-decile weights",
+        },
     }
 
 
@@ -478,6 +595,63 @@ def _delay_accounting(
     }
 
 
+def _bytes_matched_contrasts(
+    arms: Dict[str, Dict[str, Dict[str, Any]]],
+    qids: Sequence[str],
+    reference: str,
+    reps: int = BOOTSTRAP_REPS,
+    seed: int = BOOTSTRAP_SEED,
+) -> List[Dict[str, Any]]:
+    """判据8 verdict quantity: delay-arm paired Δ vs the reference arm on ONLY
+    the rows passing the 0.5x raw-bytes guard.
+
+    One block per arm with any ``raw_recent_tokens > 0`` (the delay arms), each
+    reusing ``_paired_contrast`` — same McNemar cells, same session-cluster
+    bootstrap, MDE recomputed at the reduced n.  Rows are excluded by EXACTLY
+    the ``_delay_accounting`` guard (raw recent turn > 0.5x the reference
+    arm's same-qid gist budget, 审查裁定 4-5) and the exclusions are counted:
+    an elastic win must never be presented as an equal-budget win.
+    """
+
+    blocks: List[Dict[str, Any]] = []
+    for name, rows in arms.items():
+        if name == reference:
+            continue
+        if not any(int(rows[qid].get("raw_recent_tokens", 0)) > 0 for qid in qids):
+            continue
+        used: List[str] = []
+        excluded = 0
+        for qid in qids:
+            row = rows[qid]
+            gist = int(row.get("gist_tokens", 0))
+            raw = int(row.get("raw_recent_tokens", 0))
+            budget = int(arms[reference][qid].get("gist_tokens", 0)) or gist
+            if raw > DELAY_BUDGET_GUARD * budget:
+                excluded += 1
+                continue
+            used.append(qid)
+        if not used:
+            blocks.append({
+                "contrast": f"{name} vs {reference}",
+                "arm_a": name,
+                "arm_b": reference,
+                "scope": "bytes-matched",
+                "n_used": 0,
+                "n_excluded_budget_guard": excluded,
+                "note": (
+                    "every common qid failed the 0.5x guard — "
+                    "no bytes-matched contrast is computable"
+                ),
+            })
+            continue
+        block = _paired_contrast(name, rows, reference, arms[reference], used, reps, seed)
+        block["scope"] = "bytes-matched"
+        block["n_used"] = len(used)
+        block["n_excluded_budget_guard"] = excluded
+        blocks.append(block)
+    return blocks
+
+
 # ---------------------------------------------------------------------------
 # Report assembly.
 # ---------------------------------------------------------------------------
@@ -492,7 +666,25 @@ def _footnote(n: int) -> str:
 
 def _markdown(report: Dict[str, Any]) -> str:
     footnote = report["footnote"]
-    lines: List[str] = ["# Experiment B pilot — paired analysis", ""]
+    lines: List[str] = []
+    manifest_check = report.get("qid_manifest_check")
+    if manifest_check and manifest_check["incomplete_common_qid_set"]:
+        missing = ", ".join(
+            f"{arm}: {count}"
+            for arm, count in manifest_check["missing_per_arm"].items()
+            if count
+        )
+        if manifest_check.get("missing_full"):
+            missing += f", full: {manifest_check['missing_full']}"
+        lines.append(
+            "> **!!! INCOMPLETE COMMON-QID SET !!!** — the frozen qid manifest "
+            f"(`{manifest_check['manifest_path']}`, n={manifest_check['n_manifest_qids']}) "
+            f"is not fully covered (missing rows — {missing}). b_prereg.md §2: this "
+            "round MUST NOT enter any paired table or ranking; every table below is "
+            "descriptive only, pending a re-run on the complete frozen set."
+        )
+        lines.append("")
+    lines += ["# Experiment B pilot — paired analysis", ""]
     lines.append(f"Common qids: **{report['n_common_qids']}** across arms "
                  f"{', '.join(report['arms'])}.")
     lines.append("")
@@ -500,6 +692,22 @@ def _markdown(report: Dict[str, Any]) -> str:
                  "② 优于简单基线吗 ③ 成本合理吗 ④ 哪类失败最受益）与停止条件白名单见 "
                  "`configs/bdf_pilot/b_prereg.md`；本文件只出描述性数字。")
     lines.append("")
+    missing_metric = report.get("missing_metric_rows")
+    if missing_metric and missing_metric["any_missing"]:
+        counts = ", ".join(
+            f"{arm}={count}"
+            for arm, count in missing_metric["per_arm"].items()
+            if count
+        )
+        if missing_metric.get("full"):
+            counts += f", full={missing_metric['full']}"
+        lines.append(
+            "**WARNING (prereg §8.1)**: rows lacking the `tool_name_match` key were "
+            f"EXCLUDED from every paired table (counted per arm: {counts}). A missing "
+            "metric key usually means mixed-commit shards — find the source before "
+            "interpreting anything here."
+        )
+        lines.append("")
 
     lines.append("## Gist declaration (判据1, >5% = VOID)")
     lines.append("")
@@ -538,34 +746,50 @@ def _markdown(report: Dict[str, Any]) -> str:
     header = "| contrast | family | n | acc a | acc b | Δpp | 95% CI (pp) | b/c | McNemar p | Holm p | MDE |"
     divider = "|---|---|---:|---:|---:|---:|---|---|---:|---:|---:|"
     if poststratified:
-        header = header[:-1] + " post-strat Δpp |"
-        divider = divider[:-1] + "---:|"
+        header = header[:-1] + " post-strat Δpp [95% CI] |"
+        divider = divider[:-1] + "---|"
     lines.append(header)
     lines.append(divider)
     for block in report["contrasts"]:
         ci = block["cluster_bootstrap_95ci_pp"]
         holm = report["holm_exploratory"].get(block["contrast"], "—")
+        void_flag = " [VOID]" if block.get("void_involved") else ""
         row = (
-            f"| {block['contrast']} | {block['family']} | {block['n']} | {block['acc_a']} "
+            f"| {block['contrast']}{void_flag} | {block['family']} | {block['n']} | {block['acc_a']} "
             f"| {block['acc_b']} | {block['diff_pp']:+.2f} | [{ci[0]:+.2f}, {ci[1]:+.2f}] "
             f"| {block['b_a_wins']}/{block['c_b_wins']} | {block['mcnemar_exact_p']} "
             f"| {holm} | {block['mde_pp']} |"
         )
         if poststratified:
-            row += f" {block['poststratified']['weighted_diff_pp']:+.2f} |"
+            ps = block["poststratified"]
+            ps_ci = ps["weighted_diff_95ci_pp"]
+            row += (
+                f" {ps['weighted_diff_pp']:+.2f} "
+                f"[{ps_ci[0]:+.2f}, {ps_ci[1]:+.2f}] |"
+            )
         lines.append(row)
     lines.append("")
     lines.append(
         "Primary contrasts (24号 判据5): P-struct vs P-fixed, P-struct vs P-turn, "
         "P-turn vs P-fixed. Everything else is exploratory and carries Holm-adjusted p."
     )
+    if any(block.get("void_involved") for block in report["contrasts"]):
+        lines.append("")
+        lines.append(
+            "**[VOID]**: the contrast involves a 判据1-VOID arm — its numbers enter "
+            "NO ranking until per-row gist budget allocation is implemented and the "
+            "arm is re-run; the row is kept for diagnostics only."
+        )
     if poststratified:
         lines.append("")
         lines.append(
             "Presented tokens differ by more than 2% between arms, so the last column "
             "recombines the paired diff over presented-token deciles cut on the "
             f"**{report['reference_arm']}** arm and weighted by its bucket shares "
-            "(24号 B.4.2 / 审查裁定 4-6). Per-bucket n and ranges are in the JSON."
+            "(24号 B.4.2 / 审查裁定 4-6), with a 95% session-cluster bootstrap CI "
+            "(fixed decile assignment and reference weights, per-bucket means "
+            "resampled) — 判据5 reads THIS CI when the trigger is on. Per-bucket n "
+            "and ranges are in the JSON."
         )
     lines.append("")
     lines.append(f"_{footnote}_")
@@ -604,6 +828,44 @@ def _markdown(report: Dict[str, Any]) -> str:
     lines.append("")
     lines.append(f"_{footnote}_")
     lines.append("")
+
+    if report.get("delay_bytes_matched"):
+        lines.append("## Bytes-matched delayed-arm contrast (判据8)")
+        lines.append("")
+        lines.append(
+            "| contrast | n used | n excluded (0.5x guard) | acc arm | acc ref "
+            "| Δpp | 95% CI (pp) | b/c | McNemar p | MDE |"
+        )
+        lines.append("|---|---:|---:|---:|---:|---:|---|---|---:|---:|")
+        for block in report["delay_bytes_matched"]:
+            void_flag = " [VOID]" if block.get("void_involved") else ""
+            if not block["n_used"]:
+                lines.append(
+                    f"| {block['contrast']}{void_flag} | 0 "
+                    f"| {block['n_excluded_budget_guard']} | — | — | — | — | — | — | — |"
+                )
+                continue
+            ci = block["cluster_bootstrap_95ci_pp"]
+            lines.append(
+                f"| {block['contrast']}{void_flag} | {block['n_used']} "
+                f"| {block['n_excluded_budget_guard']} | {block['acc_a']} "
+                f"| {block['acc_b']} | {block['diff_pp']:+.2f} "
+                f"| [{ci[0]:+.2f}, {ci[1]:+.2f}] "
+                f"| {block['b_a_wins']}/{block['c_b_wins']} "
+                f"| {block['mcnemar_exact_p']} | {block['mde_pp']} |"
+            )
+        lines.append("")
+        lines.append(
+            "_bytes-matched scope: rows whose raw recent turn exceeds 0.5x the "
+            "reference arm's same-qid gist budget are EXCLUDED and counted "
+            "(审查裁定 4-5). 判据8 is judged HERE — Δ ≥ MDE in this column, never "
+            "in the elastic one. MDE is recomputed at the reduced n._"
+        )
+        lines.append("")
+        for block in report["delay_bytes_matched"]:
+            if block["n_used"]:
+                lines.append(f"_{_footnote(block['n_used'])}_")
+                lines.append("")
     return "\n".join(lines)
 
 
@@ -614,7 +876,27 @@ def build_report(
     kv_bytes_per_token: int = DEFAULT_KV_BYTES_PER_TOKEN,
     reps: int = BOOTSTRAP_REPS,
     seed: int = BOOTSTRAP_SEED,
+    manifest_qids: Optional[Sequence[str]] = None,
+    manifest_path: Optional[str] = None,
 ) -> Dict[str, Any]:
+    # prereg §8.1: rows without the primary metric key never enter a paired
+    # table — exclude them BEFORE the common-qid intersection and count them.
+    full_given = full is not None
+    missing_metric: Dict[str, int] = {}
+    filtered: Dict[str, Dict[str, Dict[str, Any]]] = {}
+    for name, rows in arms.items():
+        filtered[name], missing_metric[name] = _split_missing_metric(rows)
+    arms = filtered
+    full_missing = 0
+    if full_given:
+        full, full_missing = _split_missing_metric(full)
+
+    manifest_check = (
+        _manifest_check(arms, full if full_given else None, manifest_qids, manifest_path)
+        if manifest_qids is not None
+        else None
+    )
+
     qids = _common_qids(arms)
     if not qids:
         raise SystemExit("FATAL: no qid is valid in every arm — nothing to pair")
@@ -622,6 +904,7 @@ def build_report(
 
     gist = _gist_declaration_table(arms, qids, reference)
     presented = _presented_token_check(arms, qids, reference)
+    void_arms = {entry["arm"] for entry in gist["arms"] if entry["verdict"] == "VOID"}
 
     contrasts: List[Dict[str, Any]] = []
     exploratory_p: Dict[str, float] = {}
@@ -634,13 +917,24 @@ def build_report(
                 first, arms[first], second, arms[second], qids, reps, seed
             )
             block["family"] = "primary" if (forward or reverse) else "exploratory"
+            # 判据1: a VOID arm's numbers enter no ranking — every contrast row
+            # touching one is flagged here AND in the markdown, not just in the
+            # gist table the reader may not cross-check.
+            block["void_involved"] = first in void_arms or second in void_arms
             if presented["poststratification_triggered"]:
                 block["poststratified"] = _poststratify(
-                    arms[first], arms[second], qids, arms[reference]
+                    arms[first], arms[second], qids, arms[reference],
+                    reps=reps, seed=seed,
                 )
             if block["family"] == "exploratory":
                 exploratory_p[block["contrast"]] = block["mcnemar_exact_p"]
             contrasts.append(block)
+
+    delay_bytes_matched = _bytes_matched_contrasts(arms, qids, reference, reps, seed)
+    for block in delay_bytes_matched:
+        block["void_involved"] = (
+            block["arm_a"] in void_arms or block["arm_b"] in void_arms
+        )
 
     r_agent: Dict[str, Any] = {}
     transitions: Dict[str, Any] = {}
@@ -664,8 +958,16 @@ def build_report(
         },
         "gist_declaration": gist,
         "presented_tokens": presented,
+        "qid_manifest_check": manifest_check,
+        "missing_metric_rows": {
+            "metric": "tool_name_match",
+            "per_arm": missing_metric,
+            "full": full_missing if full_given else None,
+            "any_missing": any(missing_metric.values()) or full_missing > 0,
+        },
         "contrasts": contrasts,
         "holm_exploratory": _holm(exploratory_p) if exploratory_p else {},
+        "delay_bytes_matched": delay_bytes_matched,
         "r_agent": r_agent,
         "transitions": transitions,
         "delay_accounting": _delay_accounting(arms, qids, reference, kv_bytes_per_token),
@@ -709,6 +1011,12 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     )
     parser.add_argument("--out_prefix", required=True)
     parser.add_argument(
+        "--qid_manifest",
+        help="Frozen eval-200 qid manifest; every arm's rows are checked against it "
+        "and any gap stamps an INCOMPLETE COMMON-QID SET banner on the report "
+        "(b_prereg.md §2).",
+    )
+    parser.add_argument(
         "--reference_arm",
         default="P-fixed",
         help="Gist-declaration and presented-token reference (24号 B.4.2: P3 = fixed-1024).",
@@ -738,6 +1046,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     full = _load_arm(args.full, full_mode) if args.full else None
     if args.full and not full:
         raise SystemExit(f"FATAL: no mode={full_mode!r} rows in {args.full}")
+    manifest_qids = _load_qid_manifest(args.qid_manifest) if args.qid_manifest else None
 
     report = build_report(
         arms,
@@ -746,6 +1055,8 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         kv_bytes_per_token=args.kv_bytes_per_token,
         reps=args.reps,
         seed=args.seed,
+        manifest_qids=manifest_qids,
+        manifest_path=args.qid_manifest,
     )
     out = Path(args.out_prefix)
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -769,6 +1080,24 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             "判据1: that arm is void until per-row budget allocation is implemented",
             GIST_DECLARATION_TOLERANCE * 100,
             report["reference_arm"],
+        )
+    manifest_check = report.get("qid_manifest_check")
+    if manifest_check and manifest_check["incomplete_common_qid_set"]:
+        logger.warning(
+            "INCOMPLETE COMMON-QID SET: manifest %s (n=%d) is not fully covered "
+            "(missing per arm: %s, full: %s) — b_prereg.md §2: this round must not "
+            "enter any paired table; the report carries the banner",
+            manifest_check["manifest_path"],
+            manifest_check["n_manifest_qids"],
+            manifest_check["missing_per_arm"],
+            manifest_check["missing_full"],
+        )
+    if report["missing_metric_rows"]["any_missing"]:
+        logger.warning(
+            "rows lacking tool_name_match were EXCLUDED from every paired table "
+            "(prereg §8.1): per_arm=%s full=%s — mixed-commit shards are the usual cause",
+            report["missing_metric_rows"]["per_arm"],
+            report["missing_metric_rows"]["full"],
         )
     print(json.dumps({key: report[key] for key in ("arms", "n_common_qids", "footnote")},
                      ensure_ascii=False, indent=2))

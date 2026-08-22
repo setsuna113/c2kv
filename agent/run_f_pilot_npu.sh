@@ -36,7 +36,8 @@
 #   ARM_SET                greedy_core|sampled|both (greedy_core)
 #   TEMPERATURE            sampled-pass T          (0.7)
 #   TOP_P                  sampled-pass top_p      (0.95)
-#   GEN_SEED               per-rollout seed base + F4 coin seed (0)
+#   GEN_SEED               per-rollout seed base + F4 coin seed (0; the pass-1
+#                          coin seed is FROZEN at 0 in f_prereg.md §5)
 #   L_MIN                  E3 lower bound on last-chunk tokens (64)
 #   ASSERT_GREEDY_REPEAT   rerun branch-A greedy for the first N examples and
 #                          require byte-identical text (2)
@@ -113,6 +114,9 @@ MAX_EXAMPLES="${MAX_EXAMPLES:-200}"
 ARM_SET="${ARM_SET:-greedy_core}"
 TEMPERATURE="${TEMPERATURE:-0.7}"
 TOP_P="${TOP_P:-0.95}"
+# GEN_SEED doubles as the analyzer's --coin_seed below.  coin_seed = 0 is the
+# FROZEN F4 coin seed of the greedy pass (configs/bdf_pilot/f_prereg.md §5,
+# pinned to match this default) -- do not change GEN_SEED for pass 1.
 GEN_SEED="${GEN_SEED:-0}"
 L_MIN="${L_MIN:-64}"
 RATIO="${RATIO:-8}"

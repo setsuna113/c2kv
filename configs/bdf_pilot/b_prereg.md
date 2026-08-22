@@ -29,6 +29,20 @@ P-turn 臂因此字节不变（in-distribution 参照零回归），跨臂内容
 
 臂→flag 的**唯一定义处**是 `agent/run_b_pilot_npu.sh` 的 `arm_flags()`，脚本启动时逐条 echo。
 
+**P-struct 超长原子块处置（显式 supersede 24 号 B.4.3 P6 的字面「pair 内禁断」）**：单个
+`(tool_call, observation)` 原子块 wrap 后超过 1024 token doc 预算时，「pair 内禁断」与
+「装进单个 doc」不可同时满足；实现回落为 `_split_message_to_fit` 按语义单元在块内切分
+（可能断进 observation 内部），逐行计入 `structural_fallback_docs`。配套计数语义：冻结期
+已被切成多 part 的超长 turn shard 不重切、整体 pass-through（`structural_partial_docs`）；
+不足两个语义单元的 doc 原样通过（`structural_passthrough_docs`）；真正按原子块重打包的
+doc 计 `structural_repacked_docs`。内容字节流不变（内容集冻结不受影响）；判读时 P-struct
+的描述表须带 fallback 行占比。
+
+**P-fixed 有效窗口**：fixed-N 的实际切窗 = N − chat-template wrapper 开销 −
+8 token 再编码 margin（`chunk_policy.FIXED_WINDOW_MARGIN`；BPE decode→re-encode 不保长），
+即**内容守恒优先于名义窗宽**。wrap 期任何顶到 `max_doc_length` 上限且确有内容被截的 doc
+逐行计入 `wrap_truncated_docs`（正常恒为 0，非 0 即 margin 不足、须查 re-encode 漂移）。
+
 未列入本轮的 24 号臂：`fixed-256` / `fixed-512` 已实现（`--chunk_policy fixed-256|fixed-512`）
 但不在 Stage-1 主扫内；`natural-paragraph` 不实现（24 号 B.2 依 arXiv 2410.13070 的负结论删臂）；
 sink-decoy prefix 因子（+D）不在本轮。
@@ -267,3 +281,43 @@ checkpoint 自带的 `generation_config`，而 run summary 记的是 `"temperatu
 `TEMPERATURE=0.7` / `TOP_P=0.95` 默认值（与 `run_f_pilot_npu.sh` 同值），且**仅在
 `DO_SAMPLE` 为真时**下发这两个 flag —— greedy 跑的 summary 仍如实记 `temperature: null`。
 本轮 §2 约定的 decode 仍是 greedy，此项只影响将来启用采样的跑法。
+
+---
+
+## Changelog — 2026-08-22 pre-first-run amendments
+
+首跑之前、定稿冻结之前的修订（审计 findings 处置）。**判据编号、全部阈值与臂表均未改动**；
+以下为分析/记账机制补齐与文字对齐，逐条附一行理由：
+
+1. **判据8 判定量落地**（analyzer 新增）：`analyze_b_pilot.py` 增算 bytes-matched 口径的
+   delay 臂 vs 参照臂配对 contrast——只用通过 0.5× raw-bytes 守卫的行（守卫定义与
+   `_delay_accounting` 完全一致），报 `n_used` / `n_excluded_budget_guard`，复用同一
+   McNemar + session-cluster bootstrap，MDE 按缩减后 n 重算；写入
+   `analysis.json` 的 `delay_bytes_matched` 与 md 的「Bytes-matched delayed-arm
+   contrast (判据8)」节。理由：判据8 的判定量此前不在任何产物中，预注册判据无法机器判读。
+2. **共同 qid 集完整性自动执行**（§2 硬规则的执行点）：`--merge_only` 合并 summary 透传
+   `qid_manifest`（取首个非空，路径不一致打 WARNING）与 `qid_manifest_missing`
+   （各 shard 求和）；`analyze_b_pilot.py` 新增 `--qid_manifest`，任一臂（含 full 参照）未
+   覆盖 manifest 即在 analysis.md 顶部盖「INCOMPLETE COMMON-QID SET」横幅并写
+   `qid_manifest_check.incomplete_common_qid_set` 布尔（表仍产出，仅描述性）；
+   `run_b_pilot_npu.sh` 向 analyzer 下发 `QID_MANIFEST`。理由：§2 的「missing>0 不得进
+   配对表」此前无任何自动执行点，且合并 summary 会丢该计数。
+3. **§8.1 语义在 analyzer 侧执行**：缺 `tool_name_match` 键的行从所有配对表**剔除**
+   （不再被 `bool(row.get(...))` 折叠为答错），逐臂计入 `missing_metric_rows` 并在 md 加
+   WARNING 行。理由：analyzer 直读行文件绕过了 summary 的 `missing_metric_fields` 防线。
+4. **post-stratification 增配 CI**（判据5 的混杂修正口径判读量）：`_poststratify` 对桶加权
+   差做 session-cluster bootstrap（同 reps/seed 纪律；十分位划分与参照臂桶份额固定、桶内
+   均值重采样、空桶权重在场桶间 renormalize），`weighted_diff_95ci_pp` 进 json 与 md。
+   理由：§7 首跑预读已写明触发是预期主路径，而此前修正口径只有点估计、无 CI 可判。
+5. **VOID 臂标注进 contrast 表**：涉及判据1-VOID 臂的 contrast 行在 json 加
+   `void_involved: true`、md 行尾加 `[VOID]` 并附图例（数字保留，仅作诊断）。理由：
+   「不进任何排序」此前只靠读表人交叉核对 gist 表。
+6. **wrap 截断计数器**：eval 侧 kept/delayed 消息的 chat-template wrap 若顶到
+   `max_doc_length` 上限且经无上限二次 encode 确认确有内容被截，逐行计入新字段
+   `wrap_truncated_docs`（正常恒 0；候选为 0 时二次 encode 零成本）。理由：fixed 窗口的
+   8-token margin 是启发值，re-encode 漂移超限此前静默丢内容、无任何可见信号。
+7. **§1 文字对齐实现**：新增「P-struct 超长原子块处置」（显式 supersede 24 号 B.4.3 P6
+   字面的「pair 内禁断」，并申报 `structural_fallback_docs` /
+   `structural_partial_docs` / `structural_passthrough_docs` / `structural_repacked_docs`
+   计数语义）与「P-fixed 有效窗口」两段。理由：单条消息 > 1024 token 时 P6 字面自相矛盾、
+   prereg 此前对该情形沉默；fixed-1024 的名义窗宽与实现不符。

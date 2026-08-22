@@ -527,3 +527,32 @@ def test_load_done_keys_retries_skipped_rows(tmp_path):
 
 def test_load_done_keys_on_missing_file(tmp_path):
     assert load_done_keys(tmp_path / "nope.jsonl") == set()
+
+
+# ---------------------------------------------------------------------------
+# j. frozen-anchor guard
+# ---------------------------------------------------------------------------
+
+
+def test_require_anchor_file_returns_the_path_for_a_real_file(tmp_path):
+    target = tmp_path / "prereg.md"
+    target.write_text("# frozen prereg\n", encoding="utf-8")
+    assert FC.require_anchor_file(target) == target
+
+
+def test_require_anchor_file_fatals_on_a_missing_file(tmp_path):
+    # The prereg is the only frozen anchor that is hashed but never read; a
+    # missing file must abort instead of stamping prereg_sha256=null.
+    with pytest.raises(SystemExit, match="does not exist"):
+        FC.require_anchor_file(tmp_path / "nope.md", label="--prereg_file")
+
+
+def test_require_anchor_file_fatals_on_empty_and_whitespace_files(tmp_path):
+    empty = tmp_path / "empty.md"
+    empty.write_text("", encoding="utf-8")
+    with pytest.raises(SystemExit, match="empty"):
+        FC.require_anchor_file(empty)
+    blank = tmp_path / "blank.md"
+    blank.write_text(" \n\t\n", encoding="utf-8")
+    with pytest.raises(SystemExit, match="empty"):
+        FC.require_anchor_file(blank)
