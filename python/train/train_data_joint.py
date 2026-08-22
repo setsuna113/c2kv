@@ -45,6 +45,18 @@ selected tail-biased (first doc + most recent) via ``_select_history``.
 history; ``doc_mode="history_only"`` does the opposite — both for the
 J-alternate training arm and per-condition evals.
 
+Per-side caps regime (``per_side_caps=True``, the default since the cap fix):
+the tool side gets ``min(max_tool_chunks, max_doc_num)`` slots and the history
+side a CONSTANT ``max_doc_num - min(max_tool_chunks, max_doc_num)`` in every
+doc mode, so both presented budgets are identical across the J-arms (the G-Q3
+fairness constraint); spare tool slots are NOT recycled.  Regime
+``per_side_caps_v2_empty_tool_reclaim`` refines this for examples with NO
+non-empty tool documents (the QA family): they reserve no tool slots at all
+(``tool_cap=0``) and history gets the full ``max_doc_num`` grid.  Examples
+WITH tool documents are bit-for-bit identical to v1; the legacy regime
+(``per_side_caps=False``) is untouched byte-for-byte.  The regime string
+recorded in manifests/summaries comes from ``cap_regime_name``.
+
 Self-checks
 -----------
 ``assert_no_leakage`` is NOT run per-sample in production; it is called from
@@ -62,7 +74,7 @@ import random
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional, Sequence
+from typing import Any, Dict, List, Literal, Optional, Sequence, Tuple
 
 from .train_data import DEFAULT_SYSTEM_PROMPT
 from .train_data_multiturn import (
@@ -75,7 +87,7 @@ from .train_data_multiturn import (
     _chat_template_ids,
     _find_agent_jsonl_files,
     _find_agent_parquet_files,
-    _fit_reused_history,
+    _fit_reused_history_with_indices,
     _iter_agent_jsonl_rows,
     _iter_agent_rows,
     _json_loads,
@@ -123,6 +135,59 @@ class JointExample:
     # when the target tool was not identified in the definitions.
     target_tool: Optional[str] = None
     target_tool_doc_index: Optional[int] = None
+    # Indices into ``history_documents`` of the GOLD (supporting-fact)
+    # documents, when the source corpus labels them (HotpotQA / 2Wiki QA
+    # rows).  ``None`` when unlabelled.  Used only for the retention audit
+    # counters — never for training decisions.
+    gold_history_doc_indices: Optional[Tuple[int, ...]] = None
+
+
+# Mixture-family prefixes on qids (``toucan:`` / ``openswe:`` / ``qa:``);
+# agent-llm-traces qids are bare ``session_id:span_index``.  Defined here (not
+# in the multisource module) so JointDataset can attribute skip counters per
+# family without an import cycle; re-exported by train_data_joint_multisource.
+FAMILY_PREFIXES = ("toucan", "openswe", "qa")
+
+
+def qid_source_family(qid: str) -> str:
+    """Mixture family of an example qid (bare qids count as ``traces``)."""
+    for prefix in FAMILY_PREFIXES:
+        if qid.startswith(prefix + ":"):
+            return prefix
+    return "traces"
+
+
+# Doc-budget regime names recorded in trainer manifests / eval summaries.
+# ``per_side_caps`` (v1, the first fixed regime) and v2 differ ONLY for
+# tool-less examples; both record legacy_mode_caps=False, so the boolean alone
+# cannot tell them apart when merging shards — the string can.
+CAP_REGIME_LEGACY = "legacy_mode_caps"
+CAP_REGIME_V1 = "per_side_caps"
+CAP_REGIME_V2_EMPTY_TOOL_RECLAIM = "per_side_caps_v2_empty_tool_reclaim"
+
+
+def cap_regime_name(legacy_mode_caps: bool) -> str:
+    """The regime THIS code produces: legacy, or v2 (empty-tool reclaim)."""
+    return CAP_REGIME_LEGACY if legacy_mode_caps else CAP_REGIME_V2_EMPTY_TOOL_RECLAIM
+
+
+def regime_from_record(legacy_mode_caps: Any, cap_regime: Any) -> str:
+    """Normalize a manifest/summary's regime fields to a comparable string.
+
+    Records written before the regime string existed carry only the
+    ``legacy_mode_caps`` boolean; map those to v1 (they predate the v2
+    reclaim).  Missing entirely -> "unknown".
+    """
+    if isinstance(cap_regime, str) and cap_regime:
+        return cap_regime
+    if legacy_mode_caps is None:
+        return "unknown"
+    return CAP_REGIME_LEGACY if bool(legacy_mode_caps) else CAP_REGIME_V1
+
+
+def _has_tool_documents(example: JointExample) -> bool:
+    """True when the example carries at least one non-empty tool document."""
+    return any(str(doc).strip() for doc in example.tool_documents)
 
 
 # ---------------------------------------------------------------------------
@@ -599,6 +664,7 @@ def _history_chunk_budget(
     max_tool_chunks: int,
     num_tool_chunks: int,
     per_side_caps: bool,
+    has_tool_documents: bool = True,
 ) -> int:
     """History-side slot budget for one example.
 
@@ -606,13 +672,19 @@ def _history_chunk_budget(
     max_doc_num)`` in every doc mode, so the history-side presented budget is
     identical across ``joint``/``history_only`` (and across the J-arms that
     train them) — the G-Q3 fairness constraint.  Spare tool slots are NOT
-    recycled into history.
+    recycled into history — EXCEPT (v2 empty-tool reclaim) when the example
+    has no non-empty tool documents at all (the QA family): then there is no
+    tool side to stay fair against, ``tool_cap`` is 0, and history gets the
+    full ``max_doc_num`` grid.  Tool-bearing examples are bit-for-bit
+    identical to v1.
 
     ``per_side_caps=False`` (legacy, pre-fix behavior): ``history_only`` gets
     all ``max_doc_num`` slots and ``joint`` gets ``max_doc_num -
     num_tool_chunks`` (spare tool slots recycled).
     """
     if per_side_caps:
+        if not has_tool_documents:
+            return max_doc_num
         return max(0, max_doc_num - min(max_tool_chunks, max_doc_num))
     return max_doc_num if doc_mode == "history_only" else max(0, max_doc_num - num_tool_chunks)
 
@@ -639,6 +711,13 @@ def build_tool_chunks(
     across doc modes and J-arms.  ``per_side_caps=False`` reproduces the
     pre-fix behavior (``tool_only`` gets all ``max_doc_num`` slots).
 
+    v2 empty-tool reclaim (``per_side_caps=True`` only): an example with NO
+    non-empty tool documents (the QA family) gets ``tool_cap = 0`` — reserving
+    dead tool slots would starve its history side (the P0-1 audit finding).
+    Tool-bearing examples are bit-for-bit identical to v1, so the eval
+    driver (``_condition_doc_chunks``), whose appworld examples always carry
+    tool schemas, is unaffected by the change.
+
     Truncation keeps the target tool's schema: when
     ``example.target_tool_doc_index`` is known and the chunk list exceeds the
     cap, every chunk of the target document is selected first and the
@@ -664,6 +743,9 @@ def build_tool_chunks(
         return [], None, meta
     if per_side_caps:
         tool_cap = min(max_tool_chunks, max_doc_num)
+        if not _has_tool_documents(example):
+            # v2 empty-tool reclaim: no tool side -> reserve no tool slots.
+            tool_cap = 0
     else:
         tool_cap = max_doc_num if doc_mode == "tool_only" else min(max_tool_chunks, max_doc_num)
     meta["tool_cap"] = tool_cap
@@ -765,9 +847,17 @@ class JointDataset:
         self.per_side_caps = per_side_caps
         self.data: List[Dict[str, Any]] = []
         skipped_by_reason: Counter[str] = Counter()
+        skipped_by_family_reason: Counter[str] = Counter()
         target_known = 0
         target_in_grid = 0
         target_truncated = 0
+        # QA retention audit (P0-1): source history docs / gold docs that
+        # survived the grid budget, summed over emitted QA rows.
+        qa_history_kept = 0
+        qa_history_total = 0
+        qa_gold_kept = 0
+        qa_gold_total = 0
+        qa_truncated_by_subset: Counter[str] = Counter()
         for example in examples:
             meta: Dict[str, Any] = {}
             row, reason = self.preprocess_example(
@@ -788,6 +878,7 @@ class JointDataset:
             )
             if row is None:
                 skipped_by_reason[reason] += 1
+                skipped_by_family_reason[f"{qid_source_family(example.qid)}:{reason}"] += 1
                 continue
             self.data.append(row)
             if doc_mode != "history_only" and meta.get("target_known") and meta.get("tool_cap", 0) > 0:
@@ -796,10 +887,31 @@ class JointDataset:
                     target_in_grid += 1
                 elif meta.get("target_truncated_to_cap"):
                     target_truncated += 1
+            if doc_mode != "tool_only" and qid_source_family(example.qid) == "qa":
+                kept_sources = set(meta.get("history_kept_source_indices") or [])
+                total_docs = int(meta.get("history_docs_total") or 0)
+                qa_history_kept += len(kept_sources)
+                qa_history_total += total_docs
+                if len(kept_sources) < total_docs:
+                    qa_truncated_by_subset[str(example.subset)] += 1
+                gold = example.gold_history_doc_indices
+                if gold:
+                    qa_gold_total += len(gold)
+                    qa_gold_kept += sum(1 for index in gold if index in kept_sources)
         self.target_stats = {
             "target_known": target_known,
             "target_in_grid": target_in_grid,
             "target_truncated_to_cap": target_truncated,
+        }
+        self.skipped_by_reason = dict(skipped_by_reason)
+        # Per-family skip breakdown (P1-7): makes the alternate arm's
+        # tool_only-pass QA skips (``qa:doc_num<2``) explicit instead of an
+        # inflated aggregate skip count.
+        self.skipped_by_family_reason = dict(skipped_by_family_reason)
+        self.qa_retention_stats = {
+            "qa_history_doc_retention": {"kept": qa_history_kept, "total": qa_history_total},
+            "qa_gold_doc_retention": {"kept": qa_gold_kept, "total": qa_gold_total},
+            "qa_history_truncated_examples_by_subset": dict(qa_truncated_by_subset),
         }
         # With per_side_caps the target-preserving truncation makes this an
         # invariant: a target-known row may be fully present or (when the
@@ -814,7 +926,8 @@ class JointDataset:
             )
         logger.info(
             "Built %d joint samples (%s, per_side_caps=%s); skipped %d by reason=%s; "
-            "target schema fully in grid for %d/%d target-known rows (%d truncated to the full cap)",
+            "target schema fully in grid for %d/%d target-known rows (%d truncated to the full cap); "
+            "qa retention=%s",
             len(self.data),
             doc_mode,
             per_side_caps,
@@ -823,6 +936,7 @@ class JointDataset:
             target_in_grid,
             target_known,
             target_truncated,
+            self.qa_retention_stats,
         )
 
     def __len__(self) -> int:
@@ -871,17 +985,25 @@ class JointDataset:
 
         # ---- history chunks (chronological) -------------------------------
         history: List[Message] = []
+        history_kept_source_indices: List[int] = []
+        num_raw_history_docs = 0
         if doc_mode != "tool_only":
             history_budget = _history_chunk_budget(
-                doc_mode, max_doc_num, max_tool_chunks, len(tool_chunks), per_side_caps
+                doc_mode,
+                max_doc_num,
+                max_tool_chunks,
+                len(tool_chunks),
+                per_side_caps,
+                has_tool_documents=_has_tool_documents(example),
             )
             raw_history = [
                 {"role": "user", "content": text}
                 for text in example.history_documents
                 if text and text.strip()
             ]
+            num_raw_history_docs = len(raw_history)
             if history_budget > 0 and raw_history:
-                history = _fit_reused_history(
+                history, history_kept_source_indices = _fit_reused_history_with_indices(
                     tokenizer,
                     raw_history,
                     max_doc_length=max_doc_length,
@@ -897,7 +1019,16 @@ class JointDataset:
         ]
         doc_count = len(tool_chunks) + len(history)
         if meta_out is not None:
-            meta_out.update(num_tool_chunks=len(tool_chunks), num_history_docs=len(history))
+            meta_out.update(
+                num_tool_chunks=len(tool_chunks),
+                num_history_docs=len(history),
+                # History retention audit (P0-1): how many of the example's
+                # non-empty source history documents survived the budget (a
+                # split doc counts once).  Used by JointDataset's
+                # qa_history/qa_gold retention counters.
+                history_docs_total=num_raw_history_docs,
+                history_kept_source_indices=sorted(set(history_kept_source_indices)),
+            )
         if doc_count < min_doc_num:
             return None, f"doc_num<{min_doc_num}"
         if not current:

@@ -23,6 +23,7 @@ from train.train_data_joint import (  # noqa: E402
     AgentLLMTracesJointSource,
     JointDataset,
     JointExample,
+    cap_regime_name,
 )
 from train.train_data_joint_multisource import (  # noqa: E402
     OpenSWEJointSource,
@@ -280,12 +281,14 @@ def _dump_train_manifest(
     eval_examples: Sequence[JointExample],
     interleaved_train_len: Optional[int],
     achieved_source_tokens: Optional[int],
+    train_datasets: Optional[Dict[str, Any]] = None,
 ) -> str:
     path = Path(output_dir) / "train_manifest_used.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     manifest = {
         "doc_mode": data_args.doc_mode,
         "legacy_mode_caps": data_args.legacy_mode_caps,
+        "cap_regime": cap_regime_name(data_args.legacy_mode_caps),
         "split_seed": data_args.split_seed,
         "example_order_file": data_args.example_order_file,
         "max_source_tokens": data_args.max_source_tokens,
@@ -302,6 +305,21 @@ def _dump_train_manifest(
         "num_eval_examples": len(eval_examples),
         "eval_qids": [example.qid for example in eval_examples],
     }
+    if train_datasets:
+        # Per-pass skip counters broken down by qid family (P1-7): the
+        # alternate arm's tool_only pass skips every QA example
+        # (``qa:doc_num<2`` — QA has no tool side), an intended asymmetry that
+        # must be visible per family, not drowned in the aggregate count.
+        manifest["train_skip_counts_by_family"] = {
+            name: dataset.skipped_by_family_reason for name, dataset in train_datasets.items()
+        }
+        # QA history/gold-doc retention counters (P0-1), from the passes that
+        # render history at all (tool_only passes have no history side).
+        manifest["qa_retention"] = {
+            name: dataset.qa_retention_stats
+            for name, dataset in train_datasets.items()
+            if name != "tool_only"
+        }
     path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     logger.info("Wrote effective train manifest to %s", path)
     return str(path)
@@ -384,6 +402,7 @@ def main() -> None:
         per_side_caps=not data_args.legacy_mode_caps,
     )
     interleaved_train_len: Optional[int] = None
+    train_pass_datasets: Dict[str, Any] = {}
     if data_args.doc_mode == "alternate":
         # Same examples rendered twice — tool documents only / history
         # documents only — then interleaved so the shared extractor sees
@@ -398,9 +417,11 @@ def main() -> None:
             )
         train_dataset: Any = _interleave_rows(tool_dataset.data, history_dataset.data, data_args.split_seed)
         interleaved_train_len = len(train_dataset)
+        train_pass_datasets = {"tool_only": tool_dataset, "history_only": history_dataset}
         eval_dataset = MinTargetJointDataset(eval_examples, doc_mode="joint", **dataset_kwargs)
     else:
         train_dataset = MinTargetJointDataset(train_examples, doc_mode=data_args.doc_mode, **dataset_kwargs)
+        train_pass_datasets = {data_args.doc_mode: train_dataset}
         eval_dataset = MinTargetJointDataset(eval_examples, doc_mode=data_args.doc_mode, **dataset_kwargs)
 
     if len(train_dataset) == 0:
@@ -414,6 +435,7 @@ def main() -> None:
             eval_examples,
             interleaved_train_len,
             achieved_source_tokens,
+            train_pass_datasets,
         )
 
     trainer = GistMultiDocTrainer(

@@ -161,7 +161,9 @@
 | J-joint | 0.555 | 0.126 | **0.432** |
 | J-sep_tool（半边） | 0.508 | 0.098 | 0.341 |
 | J-sep_hist（半边） | 0.461 | 0.094 | 0.395 |
-| J-separate（拼接，fixed） | 0.523（genTool）/ 0.484（genHist） | 0.172 / 0.187 | 0.361 / 0.419 |
+| J-separate（拼接，fixed） | 0.523（genTool）/ 0.484（genHist） | 0.099 / 0.098[^argf1] | 0.361 / 0.419 |
+
+[^argf1]: argF1 列口径为 argument_value_f1（与其余四行一致）。本行初版误填 argument_name_f1（0.172/0.187）；同口径值见 docs/g_joint/gate3_fixed_separate_genTool.summary.json（argument_value_f1=0.09895859）与 gate3_fixed_separate_genHist.summary.json（0.09765625）。
 
 三条件单项核查（无牺牲检查）：fixed_joint 三条件 0.343/0.407/0.500 均衡；fixed_sep_tool tool_only 0.481 最强 tool 专家；fixed_sep_hist 偏弱（公平预算代价）。
 
@@ -189,8 +191,8 @@
 
 - separate fixed 行补齐（卡 1/2 重跑成功；卡 6/7 的 segfault/aicpu timeout 标 infra-flaky）：**genTool 0.523 / genHist 0.484**。
 - 终序：alternate 0.578 > joint 0.555 > separate(genTool) 0.523 > sep_tool 0.508 > separate(genHist) 0.484 > sep_hist 0.461。
-- 判读：严格式 joint≤alternate≤separate **不成立**（separate < joint）→ 非 dominated；joint − separate = +3.2pp 恰在噪声地板上沿，"共享参数 > 双 extractor 拼接"方向两个 regime 一致；"同时拼接监督 > 交替监督"未显现。**维持 inconclusive（偏"small 尺度无 joint 溢价"），medium 复验臂确认，不直接 extend large。**
-- LR 复核收口：1e-4 只有 **0.266**（c2kv@8×，n=128），明显差于 5e-5 的 0.342 → **medium 锁定 LR=5e-5**。
+- 判读：严格式 joint≤alternate≤separate **不成立**（separate < joint）→ 非 dominated；joint − separate = **+3.1pp（4/128；未取整 0.5546875−0.5234375，初版"+3.2pp"是四舍五入后相减的口径误差）** 恰在噪声地板上沿，"共享参数 > 双 extractor 拼接"方向两个 regime 一致；"同时拼接监督 > 交替监督"未显现。**维持 inconclusive（偏"small 尺度无 joint 溢价"），medium 复验臂确认，不直接 extend large。**
+- LR 复核收口：1e-4 只有 **0.266**（c2kv@8×，n=128，docs/g_joint/lrcal3_1e-4_eval.summary.json 背书），明显差于 5e-5 的 0.342（注：5e-5 对照为 Gate-1 产物，未入库，无 raw summary 背书）→ **medium 锁定 LR=5e-5**。
 
 ## 19. P_src 实测（fixed 四臂，measure_arm_psrc，docs/g_joint/psrc_fixed_arms.json）
 
@@ -225,3 +227,36 @@
 
 - Open-SWE tools 列覆盖抽查（4 子集 × 首 shard 前 25 行，resolved=1 共 30 行）：**30/30 实际调用的工具全部在 tools 列内**——§21 末条的 fixture 缺口是我自己的截断 artifact，真实数据无此问题。
 - 训练消费顺序核实：`GistMultiDocTrainer` 不 override sampler → HF 默认 RandomSampler 每 epoch 随机置换。因此 order 文件的机制是**成员资格 + 预算截断点**，small 臂的"appworld 前置"是成员资格偏斜（32M 前缀全是 appworld），非训练序列问题。medium planner 的配额抽样保证池子构成比例正确，token-deficit 交错保证审计窗口内局部配比可核查；RandomSampler 处理逐 epoch 序列。
+
+## 24.（2026-08-22 晚–23）启动门修复入库 + 训测同源审计结论 + BDF pilot 并行上线
+
+### 24.1 medium 启动门修复（外部审计 P0/P1/P2 全闭环）
+
+- 8 commits（`adeab73..9c26028`）：per-side caps v2（tool-less/QA 例回收空槽 + gold 保留率计数；traces 例逐位不变，LEGACY 不动）；planner 分层池扫描（per-subset cap + 种子化文件序，QA/openswe 尾部子集不再零概率）；budget shrink 整体重归一化（qa 20% 护栏不再被 realized 配比冲破）；`measure_arm_psrc` 多源化；longmagpie qid 改 `qa:longmagpie:<shard>:<row>`（dedup removal 对齐生效）；alternate 臂 QA pass 不对称显式入 plan/manifest；ARM LAUNCH TABLE + 四臂 presented parity 2% 守护；provenance/ETA 单位/Toucan pin/removal-before-cap/2wiki 真实行。
+- 验证：本地全量 180 绿（含 torch 套件）；**服务器全量 pytest 285/285 绿**（gjoint worktree，修复后 HEAD=9c260285）。
+- §15/§18 引用修正已入库：J-separate argF1 同口径 0.099/0.098（原填 name_f1）；joint−separate=**+3.1pp（4/128）**；5e-5=0.342 注记"Gate-1 产物未入库"。
+
+### 24.2 训测同源审计（dedup 深挖，全文见 `docs/g_joint/dedup_audit_summary.json`）
+
+- **表面**：pass A removal=378,760（v1×v2eval exact 308,513 为大头）。
+- **逐层证伪样板**：65% 是 12 字符 `(no content)`；其余为 system-reminder/Django 测试输出/τ² 转接语等 harness 模板（双侧 DF 高）；near-dup 样本全是差一位 call-id/returncode 的短模板（J≥0.98）；v1 消息按 span 全前缀重发导致重复计数。被判官逐条复核确认。
+- **split 完整性**：`train_ids ∩ eval_ids = ∅`；任务指纹（task 定义消息 hash）跨 split **零碰撞**（774 eval → 277 distinct task，重复运行留在 eval 侧）。注：session_id 前缀是 run_id（每 run 29–87 sessions），不是 task id——初版 run-prefix 排除法作废。
+- **真问题（任务级残留重叠）**：排除 **427 个 train 侧 session**（16 byte-identical 任务文本 / 231 单 eval session J≥0.95 近重复 / 188 低 J 含任务文本）→ `final_train_exclusion.json`（planner 消费 `removal_traces_final.json`）。
+- **不惩罚**：跨任务共享的 appworld API 文档/browsecomp 语料/SWE harness 输出（488 exact + 121 near sessions）——benchmark 公共环境材料，eval 时本就可视，保留并记录在案。
+- pass B（qa raw × v2eval raw + BFCL）：**removal=0**（新旧 qid 方案两遍一致）。
+- **池影响**：v1 traces 池 1,364 → **937 sessions**（§20 的"由构造保证零泄漏"被本条细化取代：构造只保证 session 级，任务级排除以本条为准）。toucan×v2eval 39 + toucan×bfcl 1 + openswe×2 按原样保守移除。
+- §21 预算注记：937 sessions 的 v1 池估计 ~31M estimated tokens（原假设 ~45M），d_single 的 shrink factor 会比预期更深；planner 正式跑后更新精确值。
+
+### 24.3 BDF pilot 并行状态（branch task/bdf-pilot @ f84dc74，checkpoint 钉死 G8-small-v2=$G/fixed_joint，sha256 669502d3…）
+
+- 部署门：522 passed / 2 failed（服务器同样缺 bfcl_eval 包——从 gjoint worktree 补 `.foreman/ref/bfcl_pkg` 后 49/49 绿，4 个 torch 文件全部 PASSED 非 SKIPPED）。
+- **D**（卡 0）：电池 full/c2kv 各 200 例完成（history harness 768/16，默认导出切片——口径偏离见下）；trigger 提取冻结：n_base_paired=196，transitions C->C 22 / **C->W 20** / W->C 41 / W->W 113；sham plan 等字节 6467/6467；smoke/arms 进行中。
+  - 偏离记录：D 电池最初误用 taskproxy manifest + require_tool_call=True，被 extractor 的 FATAL 守门拦下（其 `_harness_namespace` 复现 harness 默认参数）→ 改用默认导出切片（eval_ratio=0.1, seed=42）重跑，三件套口径自此一致。
+- **B**（卡 1）：参照臂（full+truncate）+ P-fixed + P-turn 完成，P-struct/P-delay 收尾中；实测 joint harness ~16-17s/例/臂。
+- **F**：B 完成后接（greedy_core GEN_SEED=0 → sampled GEN_SEED=20260822 → 合并报告）。
+- eval200 临时清单：eval 侧 loader 前 200 example qid（200/200 appworld，含 Gate-3 的 128 条），已声明为临时。
+
+### 24.4 边界状态
+
+- **medium 四臂未启动**（卡 2-5 空置），等刘言成显式批准；planner 正式跑进行中（分层扫描 + 全 removal 接线），产出即入库并补 §25（realized 配比、shrink factor、臂表、ETA）。
+- 卡 7 seed-2 复训同样待批准。

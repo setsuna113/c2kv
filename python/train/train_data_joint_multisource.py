@@ -39,6 +39,9 @@ real dumped rows):
   document instead of dropping the row).
 - LongMagpie user content is one long document with the question appended as
   the trailing sentence(s) ending in ``?`` — see ``split_longmagpie_question``.
+  Its qid is ``qa:longmagpie:<shard_stem>:<row_in_shard>`` (file-local row
+  number, skipped rows counted): stable under shard-set changes (P1-6) and
+  exactly equal to the dedup removal ids (P1-5).
 
 Memory / determinism contract:
 
@@ -80,10 +83,12 @@ from typing import Any, Dict, FrozenSet, Iterator, List, Optional, Sequence, Tup
 
 from .train_data import DEFAULT_SYSTEM_PROMPT
 from .train_data_joint import (
+    FAMILY_PREFIXES,
     JointExample,
     _first_tool_call_name,
     _render_tool_documents,
     _select_tools,
+    qid_source_family,
 )
 from .train_data_multiturn import (
     Message,
@@ -98,22 +103,27 @@ logger = logging.getLogger(__name__)
 
 
 TOUCAN_SUBSET = "toucan:multi-turn"
-FAMILY_PREFIXES = ("toucan", "openswe", "qa")
 
+# FAMILY_PREFIXES / qid_source_family are defined in train_data_joint (so the
+# dataset builder can attribute skip counters per family without an import
+# cycle) and re-exported here: existing import sites
+# (agent/build_joint_medium_plan.py, agent/train_joint_next_action_c2kv.py)
+# keep working.
 
-def qid_source_family(qid: str) -> str:
-    """Mixture family of an example qid.
-
-    New-source qids carry an explicit family prefix (``toucan:`` /
-    ``openswe:`` / ``qa:``); agent-llm-traces qids are bare
-    ``session_id:span_index`` and count as ``traces``.  Shared by the
-    trainer's manifest source counts and the mixture planner's ratio
-    accounting so the two can never drift.
-    """
-    for prefix in FAMILY_PREFIXES:
-        if qid.startswith(prefix + ":"):
-            return prefix
-    return "traces"
+__all__ = [
+    "FAMILY_PREFIXES",
+    "qid_source_family",
+    "TOUCAN_SUBSET",
+    "ToucanJointSource",
+    "OpenSWEJointSource",
+    "QADocsJointSource",
+    "toucan_row_to_examples",
+    "openswe_row_to_examples",
+    "hotpotqa_row_to_example",
+    "wiki2_row_to_example",
+    "longmagpie_row_to_example",
+    "split_longmagpie_question",
+]
 
 
 def _validate_split(split: str) -> None:
@@ -541,13 +551,28 @@ def _qa_joint_example(
     documents: Sequence[Any],
     question: Any,
     answer: Any,
+    gold_history_doc_indices: Optional[Sequence[int]] = None,
 ) -> Optional[JointExample]:
-    history_documents = [str(doc) for doc in documents if str(doc).strip()]
+    """Build the single QA JointExample for one row.
+
+    ``gold_history_doc_indices`` (optional) indexes the ``documents`` argument
+    as PASSED; empty/whitespace documents are dropped from the example, so the
+    gold indices are remapped through that filter (a gold label on a dropped
+    empty document vanishes rather than pointing at the wrong doc).
+    """
+    doc_texts = [str(doc) for doc in documents]
+    kept = [index for index, text in enumerate(doc_texts) if text.strip()]
+    history_documents = [doc_texts[index] for index in kept]
     question_text = str(question or "").strip()
     answer_text = str(answer or "").strip()
     row_id = str(row_id).strip()
     if not row_id or not history_documents or not question_text or not answer_text:
         return None
+    remap = {old: new for new, old in enumerate(kept)}
+    gold: Optional[List[int]] = None
+    if gold_history_doc_indices:
+        remapped = sorted({remap[index] for index in gold_history_doc_indices if index in remap})
+        gold = remapped or None
     qid = f"qa:{family}:{row_id}"
     return JointExample(
         qid=qid,
@@ -560,7 +585,51 @@ def _qa_joint_example(
         subset=f"qa:{family}",
         target_tool=None,
         target_tool_doc_index=None,
+        gold_history_doc_indices=tuple(gold) if gold else None,
     )
+
+
+def _supporting_fact_titles(supporting_facts: Any) -> List[str]:
+    """Gold document titles from a supporting_facts payload.
+
+    Handles the HotpotQA-cleaned dict shape ``{"title": [...], "sent_id":
+    [...]}`` and the 2Wiki/raw list-of-pairs shape ``[[title, sent_id],
+    ...]``; either may be a JSON-encoded string.  Unparseable payloads yield
+    no titles (the example is kept, just unlabelled).
+    """
+    parsed = _json_loads(supporting_facts, supporting_facts)
+    titles: List[str] = []
+    if isinstance(parsed, dict):
+        raw_titles = parsed.get("title")
+        if isinstance(raw_titles, list):
+            titles = [str(title) for title in raw_titles]
+    elif isinstance(parsed, list):
+        for pair in parsed:
+            if isinstance(pair, (list, tuple)) and pair:
+                titles.append(str(pair[0]))
+    return [title for title in titles if title.strip()]
+
+
+def _hotpotqa_gold_doc_indices(row: Dict[str, Any], documents: Sequence[Any]) -> List[int]:
+    """Gold doc indices for a cleaned HotpotQA row (supporting_facts titles).
+
+    Cleaned documents carry the title in a ``Document N (title: T)`` prefix;
+    titles may themselves contain parentheses, so matching is by the exact
+    ``(title: T)`` marker substring inside the document head rather than a
+    regex parse of the prefix.
+    """
+    titles = _supporting_fact_titles(row.get("supporting_facts"))
+    if not titles:
+        return []
+    indices: List[int] = []
+    for index, doc in enumerate(documents):
+        text = str(doc)
+        for title in titles:
+            marker = f"(title: {title})"
+            if marker in text[: 40 + len(marker)]:
+                indices.append(index)
+                break
+    return indices
 
 
 def hotpotqa_row_to_example(row: Dict[str, Any], row_index: int = 0) -> Optional[JointExample]:
@@ -569,13 +638,19 @@ def hotpotqa_row_to_example(row: Dict[str, Any], row_index: int = 0) -> Optional
     if not isinstance(documents, list):
         documents = [documents]
     row_id = str(row.get("_id") or row.get("id") or row_index)
-    return _qa_joint_example("hotpotqa", row_id, documents, row.get("question"), row.get("answer"))
+    gold = _hotpotqa_gold_doc_indices(row, documents)
+    return _qa_joint_example(
+        "hotpotqa", row_id, documents, row.get("question"), row.get("answer"),
+        gold_history_doc_indices=gold,
+    )
 
 
 def wiki2_row_to_example(row: Dict[str, Any], row_index: int = 0) -> Optional[JointExample]:
     """2Wiki row: ``context`` ``[[title, [sentence, ...]], ...]`` -> one doc per entry."""
     context = _json_loads(row.get("context"), row.get("context"))
+    gold_titles = set(_supporting_fact_titles(row.get("supporting_facts")))
     documents: List[str] = []
+    doc_titles: List[Optional[str]] = []  # parallel to documents (None = untitled)
     if isinstance(context, list):
         for entry in context:
             if isinstance(entry, (list, tuple)) and len(entry) == 2:
@@ -585,15 +660,22 @@ def wiki2_row_to_example(row: Dict[str, Any], row_index: int = 0) -> Optional[Jo
                     documents.append(str(title) + "\n" + " ".join(str(s) for s in sentences))
                 else:
                     documents.append(str(title) + "\n" + str(sentences))
+                doc_titles.append(str(title))
             elif entry is not None:
                 documents.append(str(entry))
+                doc_titles.append(None)
     elif isinstance(context, str) and context.strip():
         # Serialized-but-unparseable context (e.g. truncated exports): keep
         # the raw text as one document rather than dropping the row.  Real
         # 2Wiki parquet yields the native list and never takes this branch.
         documents = [context]
+        doc_titles = [None]
+    gold = [index for index, title in enumerate(doc_titles) if title is not None and title in gold_titles]
     row_id = str(row.get("_id") or row.get("id") or row_index)
-    return _qa_joint_example("2wiki", row_id, documents, row.get("question"), row.get("answer"))
+    return _qa_joint_example(
+        "2wiki", row_id, documents, row.get("question"), row.get("answer"),
+        gold_history_doc_indices=gold,
+    )
 
 
 # Trailing run of question sentences: segments without sentence-ending
@@ -623,8 +705,18 @@ def split_longmagpie_question(text: str) -> Optional[Tuple[str, str]]:
     return context, question
 
 
-def longmagpie_row_to_example(row: Dict[str, Any], row_index: int = 0) -> Optional[JointExample]:
-    """LongMagpie row: the ``?``-suffixed trailing sentence(s) become the question."""
+def longmagpie_row_to_example(
+    row: Dict[str, Any], row_index: int = 0, shard: Optional[str] = None
+) -> Optional[JointExample]:
+    """LongMagpie row: the ``?``-suffixed trailing sentence(s) become the question.
+
+    ``shard`` (parquet file stem) + ``row_index`` (row number WITHIN that
+    shard, counting every row including ones the split rule skips) form the
+    qid: ``qa:longmagpie:<shard>:<row_in_shard>``.  The previous global row
+    index shifted every qid whenever the shard set/order changed (P1-6) and
+    never matched the dedup removal ids (P1-5).  ``shard=None`` keeps the bare
+    index for direct/ad-hoc calls; the source always passes the shard.
+    """
     messages = _json_loads(row.get("messages"), [])
     if not isinstance(messages, list):
         return None
@@ -636,7 +728,8 @@ def longmagpie_row_to_example(row: Dict[str, Any], row_index: int = 0) -> Option
     if split is None:
         return None
     context, question = split
-    return _qa_joint_example("longmagpie", str(row_index), [context], question, assistant.get("content"))
+    row_id = f"{shard}:{row_index}" if shard is not None else str(row_index)
+    return _qa_joint_example("longmagpie", row_id, [context], question, assistant.get("content"))
 
 
 # ---------------------------------------------------------------------------
@@ -703,6 +796,22 @@ def _iter_jsonl_rows(path: Path) -> Iterator[Dict[str, Any]]:
                     yield row
 
 
+def _apply_file_order_seed(files: Sequence[Path], file_order_seed: Optional[str]) -> List[Path]:
+    """Seeded shuffle of the scan's FILE order (row order inside a file is
+    unchanged); the default (None) keeps the sorted on-disk order.
+
+    The mixture planner passes ``f"{order_seed}:scan:{family}:{subset}"`` so a
+    cap-truncated pool scan is a seeded-random file prefix rather than the
+    alphabetical head (P0-2).  qids must therefore never encode cross-file
+    positions — longmagpie qids carry the shard stem for exactly this reason.
+    """
+    if file_order_seed is None:
+        return list(files)
+    files = list(files)
+    random.Random(file_order_seed).shuffle(files)
+    return files
+
+
 class _StreamedJointSource:
     """Shared lazy-iteration surface for the multi-source joint sources.
 
@@ -764,6 +873,8 @@ class ToucanJointSource(_StreamedJointSource):
     Streams ``SFT/*.parquet`` with a pushed-down ``subset_name == "multi-turn"
     `` filter (pyarrow.dataset).  Conversion itself lives in
     ``toucan_row_to_examples``; this class is only IO + the common knobs.
+    ``file_order_seed`` (planner pool scans only) seeded-shuffles the parquet
+    file list before the dataset scan (P0-2 stratified pool scanning).
     """
 
     def __init__(
@@ -782,6 +893,7 @@ class ToucanJointSource(_StreamedJointSource):
         max_tools_per_sample: int = 32,
         same_namespace_negative_tools: int = 8,
         random_negative_tools: int = 24,
+        file_order_seed: Optional[str] = None,
     ) -> None:
         _validate_split(split)
         self.path = Path(path)
@@ -797,6 +909,7 @@ class ToucanJointSource(_StreamedJointSource):
         self.max_tools_per_sample = max_tools_per_sample
         self.same_namespace_negative_tools = same_namespace_negative_tools
         self.random_negative_tools = random_negative_tools
+        self.file_order_seed = file_order_seed
         self._cache = None
 
     def _iter_rows(self) -> Iterator[Dict[str, Any]]:
@@ -805,12 +918,17 @@ class ToucanJointSource(_StreamedJointSource):
         files = _find_parquet_files(self.path, subdirs=("SFT",))
         if not files:
             raise FileNotFoundError(f"No parquet files found under {self.path} (or its SFT/ subdirectory)")
+        files = _apply_file_order_seed(files, self.file_order_seed)
         dataset = pds.dataset([str(file) for file in files], format="parquet")
         wanted = [name for name in ("uuid", "subset_name", "tools", "messages") if name in dataset.schema.names]
         for batch in dataset.to_batches(
             filter=pds.field("subset_name") == "multi-turn",
             columns=wanted or None,
             batch_size=256,
+            # Single-threaded: the (possibly file_order_seed-shuffled) file
+            # list order must be the actual scan order, so a cap-truncated
+            # planner scan is deterministic (P0-2/P2).
+            use_threads=False,
         ):
             for row in batch.to_pylist():
                 if isinstance(row, dict):
@@ -872,6 +990,7 @@ class OpenSWEJointSource(_StreamedJointSource):
         max_tools_per_sample: int = 32,
         same_namespace_negative_tools: int = 8,
         random_negative_tools: int = 24,
+        file_order_seed: Optional[str] = None,
     ) -> None:
         _validate_split(split)
         self.path = Path(path)
@@ -887,13 +1006,14 @@ class OpenSWEJointSource(_StreamedJointSource):
         self.max_tools_per_sample = max_tools_per_sample
         self.same_namespace_negative_tools = same_namespace_negative_tools
         self.random_negative_tools = random_negative_tools
+        self.file_order_seed = file_order_seed
         self._cache = None
 
     def _iter_rows(self) -> Iterator[Tuple[Dict[str, Any], str]]:
         files = _find_openswe_parquet_files(self.path)
         if not files:
             raise FileNotFoundError(f"No parquet files found under {self.path} (or data/*/)")
-        for file in files:
+        for file in _apply_file_order_seed(files, self.file_order_seed):
             subset = f"openswe:{file.parent.name}"
             for row in _iter_parquet_rows(file):
                 yield row, subset
@@ -944,6 +1064,10 @@ class QADocsJointSource(_StreamedJointSource):
     design (the knob filters the agentic sources only).
     ``max_samples_per_session`` is likewise a no-op here (one example per row,
     so a conversation never exceeds a positive cap).
+    ``file_order_seed`` (planner pool scans only) shuffles the per-family FILE
+    order; qids are file-position-independent (longmagpie qids embed the shard
+    stem), so shuffling changes pool composition under a cap, never qid
+    resolution.
     """
 
     def __init__(
@@ -957,6 +1081,7 @@ class QADocsJointSource(_StreamedJointSource):
         split_seed: int = 42,
         max_samples_per_session: Optional[int] = None,
         require_tool_call: bool = True,
+        file_order_seed: Optional[str] = None,
     ) -> None:
         _validate_split(split)
         if not any([hotpotqa_path, wiki2_path, longmagpie_path]):
@@ -972,30 +1097,44 @@ class QADocsJointSource(_StreamedJointSource):
         self.split_seed = split_seed
         self.max_samples_per_session = max_samples_per_session
         self.require_tool_call = require_tool_call
+        self.file_order_seed = file_order_seed
         self._cache = None
 
     def _iter_family(self, family: str) -> Iterator[JointExample]:
-        if family == "hotpotqa":
-            rows = _iter_jsonl_rows(Path(self.hotpotqa_path))
-            converter = hotpotqa_row_to_example
-        elif family == "2wiki":
-            files = _find_parquet_files(Path(self.wiki2_path), subdirs=())
-            if not files:
-                raise FileNotFoundError(f"No parquet files found under {self.wiki2_path}")
-            rows = (row for file in files for row in _iter_parquet_rows(file))
-            converter = wiki2_row_to_example
-        else:
+        if family == "longmagpie":
+            # Per-file iteration: the qid embeds the shard stem and the row
+            # number WITHIN the shard (P1-6), so adding/renaming/reordering
+            # shards never shifts other rows' qids (the old global row index
+            # did) and dedup removal ids match the qids exactly (P1-5).
             files = _find_parquet_files(Path(self.longmagpie_path))
             if not files:
                 raise FileNotFoundError(f"No parquet files found under {self.longmagpie_path}")
+            for file in _apply_file_order_seed(files, self.file_order_seed):
+                for row_in_shard, row in enumerate(_iter_parquet_rows(file)):
+                    self.stats["longmagpie_rows"] += 1
+                    example = longmagpie_row_to_example(row, row_in_shard, shard=file.stem)
+                    if example is None:
+                        # The dominant cause is a user message without a
+                        # trailing "?" question suffix (counted, per the split
+                        # rule).  Skipped rows still consume row_in_shard.
+                        self.stats["longmagpie_skipped"] += 1
+                        continue
+                    yield example
+            return
+        if family == "hotpotqa":
+            rows = _iter_jsonl_rows(Path(self.hotpotqa_path))
+            converter = hotpotqa_row_to_example
+        else:
+            files = _find_parquet_files(Path(self.wiki2_path), subdirs=())
+            if not files:
+                raise FileNotFoundError(f"No parquet files found under {self.wiki2_path}")
+            files = _apply_file_order_seed(files, self.file_order_seed)
             rows = (row for file in files for row in _iter_parquet_rows(file))
-            converter = longmagpie_row_to_example
+            converter = wiki2_row_to_example
         for row_index, row in enumerate(rows):
             self.stats[f"{family}_rows"] += 1
             example = converter(row, row_index)
             if example is None:
-                # For longmagpie the dominant cause is a user message without a
-                # trailing "?" question suffix (counted, per the split rule).
                 self.stats[f"{family}_skipped"] += 1
                 continue
             yield example

@@ -391,17 +391,19 @@ def test_longmagpie_row_mapping_and_skip(fixtures):
             {"role": "assistant", "content": "The main claim is X."},
         ]
     }
-    example = longmagpie_row_to_example(row, 7)
+    example = longmagpie_row_to_example(row, 7, shard="train-00001-of-00042")
     assert example is not None
-    assert example.qid == "qa:longmagpie:7"
-    assert example.session_id == "qa:longmagpie:7"
+    assert example.qid == "qa:longmagpie:train-00001-of-00042:7"
+    assert example.session_id == example.qid
     assert example.subset == "qa:longmagpie"
     assert example.history_documents == ["A long document body. It has two sentences."]
     assert example.current_messages == [{"role": "user", "content": "What is the main claim?"}]
     assert example.answer == "The main claim is X."
     assert example.tool_documents == []
+    # shard=None keeps the bare index for direct/ad-hoc calls.
+    assert longmagpie_row_to_example(row, 7).qid == "qa:longmagpie:7"
     # Fixture row: truncated content ends without "?" -> skipped.
-    assert longmagpie_row_to_example(fixtures["longmagpie"][0], 0) is None
+    assert longmagpie_row_to_example(fixtures["longmagpie"][0], 0, shard="s") is None
 
 
 def test_qid_source_family_mapping():
@@ -527,8 +529,8 @@ def test_qa_source_counts_and_stats(tmp_path, fixtures):
     assert qids[:2] == [f"qa:hotpotqa:{row['_id']}" for row in fixtures["hotpotqa"]]
     assert qids[2] == f"qa:2wiki:{fixtures['wiki2'][0]['_id']}"
     # The truncated fixture longmagpie row is skipped (counted); the synthetic
-    # one with a "?" suffix is kept with its global row index.
-    assert qids[3] == "qa:longmagpie:1"
+    # one with a "?" suffix is kept with its shard-local row number (P1-6).
+    assert qids[3] == "qa:longmagpie:shard-0:1"
     assert source.stats["longmagpie_rows"] == 2
     assert source.stats["longmagpie_skipped"] == 1
     assert all(qid_source_family(qid) == "qa" for qid in qids)
@@ -594,3 +596,171 @@ def test_all_fixture_examples_preprocess_without_leakage(fixtures, tokenizer):
         row, reason = JointDataset.preprocess_example(example, **config)
         assert row is not None, f"{example.qid} unexpectedly skipped: {reason}"
         assert_no_leakage(example, row, tokenizer)
+
+
+# ---------------------------------------------------------------------------
+# P0-1: gold (supporting-facts) history-doc indices on QA examples.
+# ---------------------------------------------------------------------------
+
+
+def test_hotpotqa_gold_indices_from_supporting_facts(fixtures):
+    first = hotpotqa_row_to_example(fixtures["hotpotqa"][0], 0)
+    # supporting_facts titles "Arthur's Magazine" / "First for Women" are
+    # documents 6/8 (1-based) -> indices 5/7.
+    assert first.gold_history_doc_indices == (5, 7)
+    second = hotpotqa_row_to_example(fixtures["hotpotqa"][1], 1)
+    # "Oberoi family" / "The Oberoi Group" -> documents 2/7 -> indices 1/6.
+    assert second.gold_history_doc_indices == (1, 6)
+    # Parens inside a document title ("Radio City (Indian radio station)")
+    # must not produce a false gold match or crash the marker search.
+    assert 0 not in first.gold_history_doc_indices
+
+
+def test_wiki2_gold_indices_from_supporting_facts():
+    row = {
+        "_id": "w1",
+        "question": "Which film came first?",
+        "answer": "Move",
+        "context": [
+            ["Move (1970 film)", ["Move is a 1970 film."]],
+            ["Méditerranée (1963 film)", ["Méditerranée is a 1963 French film."]],
+            ["Stuart Rosenberg", ["Stuart Rosenberg was an American director."]],
+        ],
+        "supporting_facts": '[["Move (1970 film)", 0], ["Méditerranée (1963 film)", 0]]',
+    }
+    example = wiki2_row_to_example(row)
+    assert example is not None
+    assert example.gold_history_doc_indices == (0, 1)
+    # supporting_facts as a native list (not a JSON string) works too.
+    row["supporting_facts"] = [["Stuart Rosenberg", 0]]
+    assert wiki2_row_to_example(row).gold_history_doc_indices == (2,)
+
+
+def test_qa_gold_indices_remap_across_empty_doc_filter():
+    example = tdm._qa_joint_example(
+        "hotpotqa",
+        "row-1",
+        ["doc zero text", "   ", "doc two text", "doc three text"],
+        "question?",
+        "answer",
+        gold_history_doc_indices=[0, 2, 3],
+    )
+    # The whitespace-only doc at index 1 is dropped; gold 2/3 shift to 1/2.
+    assert example.history_documents == ["doc zero text", "doc two text", "doc three text"]
+    assert example.gold_history_doc_indices == (0, 1, 2)
+    # A gold label landing entirely on dropped empty docs vanishes.
+    example = tdm._qa_joint_example(
+        "hotpotqa", "row-2", ["ok text", "  "], "q?", "a", gold_history_doc_indices=[1]
+    )
+    assert example.gold_history_doc_indices is None
+
+
+def test_non_hotpotqa_examples_carry_no_gold_labels(fixtures):
+    assert toucan_row_to_examples(fixtures["toucan"][1])[0].gold_history_doc_indices is None
+    assert openswe_row_to_examples(fixtures["openswe"][0], subset="openswe:test")[
+        0
+    ].gold_history_doc_indices is None
+    longmagpie = longmagpie_row_to_example(
+        {
+            "messages": [
+                {"role": "user", "content": "A long document body. It has two sentences.What is the main claim?"},
+                {"role": "assistant", "content": "The main claim is X."},
+            ]
+        },
+        0,
+    )
+    assert longmagpie.gold_history_doc_indices is None
+    # The 2wiki unparseable-context fallback keeps the raw text as one
+    # untitled document: titles cannot be attributed -> no gold labels.
+    assert wiki2_row_to_example(fixtures["wiki2"][0]).gold_history_doc_indices is None
+
+
+# ---------------------------------------------------------------------------
+# P1-6: longmagpie qids are shard-local (stable under shard-set changes).
+# ---------------------------------------------------------------------------
+
+
+def _lm_row(text="Document body here. More body.What is the point?"):
+    return {
+        "messages": [
+            {"role": "user", "content": text},
+            {"role": "assistant", "content": "The point is Y."},
+        ]
+    }
+
+
+def test_longmagpie_qids_stable_across_shard_set_changes(tmp_path):
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    lm_dir = tmp_path / "longmagpie" / "data"
+    lm_dir.mkdir(parents=True)
+    pq.write_table(pa.table({"messages": [_lm_row()["messages"], _lm_row()["messages"]]}), lm_dir / "shard-b.parquet")
+    source = QADocsJointSource(longmagpie_path=str(tmp_path / "longmagpie"))
+    before = [example.qid for example in source]
+    assert before == ["qa:longmagpie:shard-b:0", "qa:longmagpie:shard-b:1"]
+
+    # Adding an alphabetically-earlier shard must not shift shard-b's qids
+    # (the old global row index would renumber them all).
+    pq.write_table(pa.table({"messages": [_lm_row()["messages"]]}), lm_dir / "shard-a.parquet")
+    after = [example.qid for example in QADocsJointSource(longmagpie_path=str(tmp_path / "longmagpie"))]
+    assert after == [
+        "qa:longmagpie:shard-a:0",
+        "qa:longmagpie:shard-b:0",
+        "qa:longmagpie:shard-b:1",
+    ]
+
+    # A seeded file-order shuffle changes iteration order but never the qid
+    # attached to a row (P0-2 pool-scan fairness relies on this).
+    shuffled = [
+        example.qid
+        for example in QADocsJointSource(
+            longmagpie_path=str(tmp_path / "longmagpie"), file_order_seed="42:scan:qa:longmagpie"
+        )
+    ]
+    assert sorted(shuffled) == sorted(after)
+
+
+# ---------------------------------------------------------------------------
+# P2: the 2wiki native-list branch verified against a REAL-format row
+# (complete train.parquet first row; the older "wiki2" fixture row stays
+# truncated on purpose to cover the unparseable-context fallback).
+# ---------------------------------------------------------------------------
+
+
+def test_wiki2_real_row_native_branch(fixtures):
+    row = fixtures["wiki2_real"][0]
+    example = wiki2_row_to_example(row)
+    assert example is not None
+    assert example.qid == "qa:2wiki:13f5ad2c088c11ebbd6fac1f6bf848b6"
+    # context parses to 10 [[title, [sentences]]] entries -> 10 documents,
+    # title line + joined sentences each.
+    assert len(example.history_documents) == 10
+    assert example.history_documents[0].startswith(
+        "Stuart Rosenberg\nStuart Rosenberg (August 11, 1927"
+    )
+    assert example.history_documents[1].startswith("Méditerranée (1963 film)\nMéditerranée is a 1963 French")
+    assert example.history_documents[2].startswith("Move (1970 film)\nMove is a 1970 American comedy film")
+    assert example.answer == "no"
+    # supporting_facts titles -> gold indices: Stuart Rosenberg (0),
+    # Méditerranée (1963 film) (1), Move (1970 film) (2), Jean-Daniel Pollet (8).
+    assert example.gold_history_doc_indices == (0, 1, 2, 8)
+
+
+def test_wiki2_real_row_through_source_parquet(tmp_path, fixtures):
+    """Real on-disk shape: context as a STRING column in parquet, read back
+    through QADocsJointSource (the planner/trainer IO path)."""
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    row = fixtures["wiki2_real"][0]
+    wiki2_dir = tmp_path / "wiki2"
+    wiki2_dir.mkdir()
+    pq.write_table(
+        pa.table({key: [row[key]] for key in row}),
+        wiki2_dir / "train.parquet",
+    )
+    examples = list(QADocsJointSource(wiki2_path=str(wiki2_dir)))
+    assert len(examples) == 1
+    assert len(examples[0].history_documents) == 10
+    assert examples[0].gold_history_doc_indices == (0, 1, 2, 8)

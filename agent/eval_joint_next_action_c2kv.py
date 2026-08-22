@@ -148,8 +148,11 @@ from train.train_data_joint import (  # noqa: E402
     JointExample,
     TOOL_DOC_PREFIX,
     _default_max_tool_chunks,
+    _has_tool_documents,
     _history_chunk_budget,
     build_tool_chunks,
+    cap_regime_name,
+    regime_from_record,
 )
 from train.train_data_multiturn import (  # noqa: E402
     _chat_template_ids,
@@ -232,7 +235,12 @@ def _condition_doc_chunks(
     history_chunks: List[List[int]] = []
     if condition != "tool_only":
         history_budget = _history_chunk_budget(
-            condition, max_doc_num, max_tool_chunks, len(tool_chunks), per_side_caps
+            condition,
+            max_doc_num,
+            max_tool_chunks,
+            len(tool_chunks),
+            per_side_caps,
+            has_tool_documents=_has_tool_documents(example),
         )
         raw_history = [
             {"role": "user", "content": text}
@@ -1084,6 +1092,7 @@ def evaluate(args: argparse.Namespace) -> Dict[str, Any]:
         "max_doc_num": args.max_doc_num,
         "max_tool_chunks": args.max_tool_chunks,
         "legacy_mode_caps": args.legacy_mode_caps,
+        "cap_regime": cap_regime_name(args.legacy_mode_caps),
         "min_doc_num": args.min_doc_num,
         "max_tool_definition_tokens": args.max_tool_definition_tokens,
         "max_system_length": args.max_system_length,
@@ -1140,6 +1149,7 @@ def merge_shards(args: argparse.Namespace) -> Dict[str, Any]:
     rows: List[Dict[str, Any]] = []
     gist_init_fractions: Dict[str, float] = {}
     shard_cap_modes: List[Any] = []
+    shard_cap_regimes: List[str] = []
     for input_file in args.input_files:
         rows.extend(_read_jsonl(Path(input_file)))
         # Aggregate the shard summaries' gist-init diagnostics (worst case per
@@ -1158,8 +1168,17 @@ def merge_shards(args: argparse.Namespace) -> Dict[str, Any]:
                     gist_init_fractions[key] = (
                         float(value) if previous is None else max(previous, float(value))
                     )
-            if "legacy_mode_caps" in shard_summary:
-                shard_cap_modes.append(bool(shard_summary["legacy_mode_caps"]))
+            if "legacy_mode_caps" in shard_summary or "cap_regime" in shard_summary:
+                shard_cap_modes.append(bool(shard_summary.get("legacy_mode_caps")))
+                # Normalized regime string: pre-string summaries map to
+                # legacy/per_side_caps(v1) via the boolean, so a v1 shard and
+                # a v2 (empty-tool-reclaim) shard are told apart here even
+                # though both carry legacy_mode_caps=False.
+                shard_cap_regimes.append(
+                    regime_from_record(
+                        shard_summary.get("legacy_mode_caps"), shard_summary.get("cap_regime")
+                    )
+                )
     # The doc-budget regime must be visible on the merged summary: legacy and
     # fixed caps produce non-comparable numbers, and mixing shards from both
     # regimes in one merge is almost certainly an ops mistake.
@@ -1170,7 +1189,15 @@ def merge_shards(args: argparse.Namespace) -> Dict[str, Any]:
             "the merged numbers are not internally comparable",
             cap_modes,
         )
+    cap_regimes = sorted(set(shard_cap_regimes))
+    if len(cap_regimes) > 1:
+        logger.warning(
+            "MERGING SHARDS FROM DIFFERENT DOC-BUDGET REGIMES (cap_regime=%s) — "
+            "the merged numbers are not internally comparable",
+            cap_regimes,
+        )
     merged_legacy_mode_caps: Any = cap_modes[0] if len(cap_modes) == 1 else (cap_modes or None)
+    merged_cap_regime: Any = cap_regimes[0] if len(cap_regimes) == 1 else (cap_regimes or None)
     if args.output_file:
         _jsonl_write(args.output_file, rows)
     common_rows = _common_valid_rows(rows)
@@ -1185,6 +1212,7 @@ def merge_shards(args: argparse.Namespace) -> Dict[str, Any]:
         "separate_generator": args.separate_generator if args.separate else None,
         "num_rows": len(rows),
         "legacy_mode_caps": merged_legacy_mode_caps,
+        "cap_regime": merged_cap_regime,
         "gist_init_fractions": gist_init_fractions,
         "results": _summarize(rows),
         "common_num_qids": len({row.get("qid") for row in common_rows}),

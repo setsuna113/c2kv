@@ -15,16 +15,31 @@ Why this exists (pre-registered constraints, docs/0820_g_joint_progress.md):
 - Determinism: sources are seeded, pool scans stop at deterministic token
   caps, quota sampling and interleaving derive from ``--order_seed``; same
   inputs -> same outputs (plan JSONs carry no wall-clock fields).
+- Stratified pool scan (P0-2): each family is scanned subset-by-subset
+  (``_family_subsources``: qa = hotpotqa/2wiki/longmagpie, openswe = one
+  stratum per trajectory-config dir, toucan/traces = single stratum) with
+  per-subset token caps (default equal weights; ``--subset_weights
+  family:subset=w`` overrides).  A subset that exhausts below its cap hands
+  the remaining budget to later siblings (sequential water-filling), and
+  within a subset the parquet/jsonl FILE order is shuffled with
+  ``random.Random(f"{order_seed}:scan:{family}:{subset}")`` (row order inside
+  a file is unchanged) — so a cap-truncated scan is a seeded-random file
+  prefix of every subset rather than the alphabetical head of the first one.
+  Plan JSONs record both the sampled examples' per-subset breakdown
+  (``families.<family>.subsets``) and the scan itself (``pool_scan``).
 
 Outputs per recipe (and per ``<recipe>_repeat`` variant when
 ``--repeat_unique_tokens`` is given):
 
 - ``<out_dir>/<recipe>.order.json`` — bare JSON list of qids;
 - ``<out_dir>/<recipe>.plan.json`` — audit trail: shares, per-family
-  examples/estimated tokens/realized share, removals applied, oversample
-  shortfalls (pool too small to fill a quota — also logged as warnings),
-  repeat-variant ``recommended_epochs``, optional ``epochs_override`` audit
-  record, seeds.
+  examples/estimated tokens/realized share + per-subset breakdown, removals
+  applied, ``budget_shrink_factor`` (P1-3: a short family pool shrinks ALL
+  family quotas proportionally, logged loudly), repeat-variant
+  ``recommended_epochs``, optional ``epochs_override`` audit record, the
+  explicit alternate-pass asymmetry (``alternate_pass_counts``, P1-7), the
+  fixed-arm launch table with the epochs x budget parity guard
+  (``arm_launch_table``, P1-8), seeds.
 
 Token-estimate cache: ``<out_dir>/tokencache_<family>.jsonl``, one JSON object
 per line ``{"qid", "stamp", "estimated_tokens"}``.  An entry is reused only
@@ -83,8 +98,12 @@ logger = logging.getLogger(__name__)
 
 
 FAMILIES = ("traces", "toucan", "openswe", "qa")
-# ETA calibration unit: the small-arm runs measured wall-clock per 32M
-# presented (estimated) source tokens; supplied via --small_arm_hours.
+# ETA calibration unit: the small-arm runs measured wall-clock hours per 32M
+# ESTIMATED source tokens (the estimator's nominal unit — the SAME unit the
+# budget/quota math uses; presented source tokens are ~0.392x that).  The
+# calibration is supplied via --small_arm_hours (joint mode) /
+# --small_arm_hours_alternate; mixing presented/estimated units here would
+# overestimate runtimes ~2.5x.
 _TOKENS_PER_ETA_UNIT = 32_000_000
 _ESTIMATE_VERSION = "estimate-v1"
 
@@ -165,6 +184,11 @@ class PoolEntry:
     qid: str
     session_id: str
     estimated_tokens: int
+    # Scan stratum inside the family ("hotpotqa"/"2wiki"/"longmagpie" for qa,
+    # the trajectory-config dir for openswe, the family name otherwise) — the
+    # unit the stratified pool scan splits caps over (P0-2).  "" for synthetic
+    # pools in tests.
+    subset: str = ""
 
 
 class WhitespaceTokenizer:
@@ -285,8 +309,12 @@ def _removal_match_keys(qid: str, session_id: str) -> Set[str]:
     Entries may be full qids or session ids, with or without the family
     prefix: a Toucan removal carries the bare ``uuid`` (dedup ``record_id``),
     matching ``toucan:<uuid>`` sessions and ``toucan:<uuid>:u<i>`` qids; an
-    Open-SWE removal carries the bare ``trajectory_id``; a QA removal carries
-    the bare ``_id`` / row index.  Traces qids/session ids are bare already.
+    Open-SWE removal carries the bare ``trajectory_id``.  QA extraction units
+    (agent/extract_medium_dedup_units.py) carry the FULL qid as their ``_id``
+    (``qa:<subset>:<row_id>``; longmagpie row ids are
+    ``<shard_stem>:<row_in_shard>``), so removal matches pool qids exactly;
+    the stripped forms below keep older removal lists working.  Traces
+    qids/session ids are bare already.
     """
     keys = {qid, session_id}
     for value in (qid, session_id):
@@ -414,11 +442,23 @@ def _fill_recipe(
             pool, quota, random.Random(f"{order_seed}:{recipe.name}:{family}:{seed_suffix}")
         )
         total += realized
+        # Per-subset attribution of the SAMPLED examples (P0-2 audit): which
+        # strata actually filled the family quota, and with what share.
+        subset_breakdown: Dict[str, Dict[str, Any]] = {}
+        for entry in taken:
+            sub = subset_breakdown.setdefault(
+                entry.subset or "unknown", {"examples": 0, "estimated_tokens": 0}
+            )
+            sub["examples"] += 1
+            sub["estimated_tokens"] += entry.estimated_tokens
+        for sub in subset_breakdown.values():
+            sub["share_within_family"] = sub["estimated_tokens"] / realized if realized else 0.0
         reports[family] = {
             "share": share,
             "quota_estimated_tokens": int(math.ceil(quota)),
             "examples": len(taken),
             "estimated_tokens": realized,
+            "subsets": subset_breakdown,
             "pool_examples": len(pool),
             "pool_estimated_tokens": sum(entry.estimated_tokens for entry in pool),
             "shortfall_estimated_tokens": shortfall,
@@ -428,6 +468,29 @@ def _fill_recipe(
     for report in reports.values():
         report["realized_share"] = (report["estimated_tokens"] / total) if total else 0.0
     return interleave_families(family_examples, recipe.shares), reports, total
+
+
+def _alternate_pass_counts(recipe: RecipeSpec) -> Dict[str, Dict[str, int]]:
+    """Supervised passes per family under the alternate doc_mode (P1-7).
+
+    QA examples carry no tool documents, so their tool_only pass renders zero
+    documents and is dropped (``qa:doc_num<2``): QA families contribute ONE
+    supervised pass per epoch where tool-bearing families contribute TWO.  The
+    asymmetry is intended; it must be explicit in the plan, not hidden inside
+    an inflated aggregate skip count.
+    """
+    return {
+        family: {"tool_only": 0 if family == "qa" else 1, "history_only": 1}
+        for family, _ in recipe.shares
+    }
+
+
+_ALTERNATE_PASS_COUNTS_NOTE = (
+    "alternate arm renders every example twice (tool_only + history_only passes); "
+    "qa examples have no tool side, so their tool_only pass is always skipped "
+    "(qa:doc_num<2 in the trainer manifest's train_skip_counts_by_family) and qa "
+    "contributes one supervised pass per epoch where tool-bearing families contribute two."
+)
 
 
 def plan_recipes(
@@ -440,7 +503,10 @@ def plan_recipes(
     removal_identifiers: FrozenSet[str] = frozenset(),
     removal_file_counts: Optional[Dict[str, int]] = None,
     small_arm_hours: Optional[float] = None,
+    small_arm_hours_alternate: Optional[float] = None,
     epochs_overrides: Optional[Dict[str, int]] = None,
+    scan_removals: Optional[Dict[str, int]] = None,
+    provenance: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Dict[str, Any]]:
     """Fill per-recipe family quotas and interleave into frozen orders.
 
@@ -450,7 +516,14 @@ def plan_recipes(
     {...}}}``, including ``<recipe>_repeat`` variants when
     ``repeat_unique_tokens`` is set.  ``epochs_overrides`` (per recipe name)
     is a pure audit record: written into the plan and scales the reported
-    ``presented_estimated_tokens``, nothing else.
+    ``presented_estimated_tokens``, nothing else — and it applies to BOTH the
+    base and the repeat variant of the named recipe (the P1-8 arm launch
+    table consumes it for both).
+
+    ``scan_removals``: per-family removal counts already applied DURING the
+    pool scan (P2: filtering before the cap preserves the oversample
+    headroom); the in-plan ``apply_removals`` pass stays as a zero-hit safety
+    net.  ``provenance`` is copied verbatim into every plan json.
     """
     if budget_estimated_tokens <= 0:
         raise ValueError(f"--budget_estimated_tokens must be positive, got {budget_estimated_tokens}")
@@ -461,12 +534,44 @@ def plan_recipes(
         filtered_pools[family] = kept
         removal_counts[family] = removed
     removals_report = {
-        "by_family": removal_counts,
+        "by_family": scan_removals if scan_removals is not None else removal_counts,
         "identifiers": len(removal_identifiers),
         "by_file": removal_file_counts or {},
+        "applied_at": "scan" if scan_removals is not None else "plan",
     }
+    plan_stage_residual = sum(removal_counts.values())
+    if scan_removals is not None and plan_stage_residual:
+        # Scan-stage filtering should leave nothing for the plan stage; a
+        # residual means the pool and the scan disagree — surface it loudly.
+        removals_report["plan_stage_residual"] = plan_stage_residual
+        logger.warning("plan-stage removal residual after scan-stage filtering: %d", plan_stage_residual)
+    # P1-3: a family whose (filtered) pool is smaller than its quota must
+    # shrink EVERY family's quota proportionally — otherwise the realized
+    # shares skew past the prereg guardrails (e.g. traces-v1 at ~45M against
+    # an 80M quota left d_single's qa realized share at ~31%, breaking the
+    # 20% ratio).  The shrink factor is per recipe and per variant (base and
+    # repeat pools differ), recorded in the plan and logged loudly.
+    available_tokens = {
+        family: sum(entry.estimated_tokens for entry in pool)
+        for family, pool in filtered_pools.items()
+    }
+
+    def _budget_shrink_factor(recipe: RecipeSpec, token_scale: float) -> float:
+        factor = 1.0
+        for family, share in recipe.shares:
+            quota = share * token_scale
+            if quota > 0:
+                factor = min(factor, available_tokens.get(family, 0.0) / quota)
+        return min(1.0, factor)
     eta_info = (
-        {"small_arm_hours": small_arm_hours, "tokens_per_unit": _TOKENS_PER_ETA_UNIT}
+        {
+            "small_arm_hours": small_arm_hours,
+            "small_arm_hours_alternate": (
+                small_arm_hours_alternate if small_arm_hours_alternate is not None else small_arm_hours
+            ),
+            "tokens_per_unit": _TOKENS_PER_ETA_UNIT,
+            "unit": "hours per 32M ESTIMATED source tokens (estimator 口径; presented is ~0.392x)",
+        }
         if small_arm_hours is not None
         else None
     )
@@ -479,8 +584,25 @@ def plan_recipes(
                 f"recipe {recipe.name!r} needs families with no configured source path: {missing}"
             )
         epochs_override = epochs_overrides.get(recipe.name)
+        base_shrink = _budget_shrink_factor(recipe, budget_estimated_tokens)
+        if base_shrink <= 0.0:
+            raise ValueError(
+                f"recipe {recipe.name!r}: a family pool is empty after removals "
+                f"(available estimated tokens: "
+                f"{ {family: int(available_tokens.get(family, 0)) for family, _ in recipe.shares} })"
+            )
+        effective_budget = budget_estimated_tokens * base_shrink
+        if base_shrink < 1.0:
+            logger.warning(
+                "BUDGET SHRINK recipe=%s variant=base: pools bind the budget at factor %.4f "
+                "(%d -> %d estimated tokens); all family quotas scaled together",
+                recipe.name,
+                base_shrink,
+                budget_estimated_tokens,
+                int(math.ceil(effective_budget)),
+            )
         order, family_reports, total_tokens = _fill_recipe(
-            recipe, filtered_pools, budget_estimated_tokens, order_seed, seed_suffix="sample"
+            recipe, filtered_pools, effective_budget, order_seed, seed_suffix="sample"
         )
         if len(order) != len(set(order)):
             raise RuntimeError(f"recipe {recipe.name}: duplicate qids in the planned order")
@@ -491,13 +613,20 @@ def plan_recipes(
                 "variant": "base",
                 "shares": dict(recipe.shares),
                 "budget_estimated_tokens": budget_estimated_tokens,
+                "budget_shrink_factor": base_shrink,
+                "effective_budget_estimated_tokens": int(math.ceil(effective_budget)),
                 "families": family_reports,
                 "total_estimated_tokens": total_tokens,
                 "epochs_override": epochs_override,
+                "epochs_override_scope": "base_and_repeat_variants",
                 "presented_estimated_tokens": total_tokens * (epochs_override or 1),
                 "order_examples": len(order),
+                "order_sha1": hashlib.sha1(json.dumps(order).encode("utf-8")).hexdigest(),
                 "interleave": "token_deficit",
+                "alternate_pass_counts": _alternate_pass_counts(recipe),
+                "alternate_pass_counts_note": _ALTERNATE_PASS_COUNTS_NOTE,
                 "removals": removals_report,
+                "provenance": provenance,
                 "seeds": {"order_seed": order_seed},
                 "eta": eta_info,
             },
@@ -507,8 +636,19 @@ def plan_recipes(
             # estimated tokens (seeded sample, shares preserved); the order
             # file contains each qid ONCE — repetition happens at train time
             # via ``recommended_epochs``, never via duplicate qids.
+            repeat_shrink = _budget_shrink_factor(recipe, repeat_unique_tokens)
+            effective_repeat = repeat_unique_tokens * repeat_shrink
+            if repeat_shrink < 1.0:
+                logger.warning(
+                    "BUDGET SHRINK recipe=%s variant=repeat: pools bind the unique pool at "
+                    "factor %.4f (%d -> %d estimated tokens); all family quotas scaled together",
+                    recipe.name,
+                    repeat_shrink,
+                    repeat_unique_tokens,
+                    int(math.ceil(effective_repeat)),
+                )
             rep_order, rep_reports, rep_total = _fill_recipe(
-                recipe, filtered_pools, repeat_unique_tokens, order_seed, seed_suffix="repeat"
+                recipe, filtered_pools, effective_repeat, order_seed, seed_suffix="repeat"
             )
             if len(rep_order) != len(set(rep_order)):
                 raise RuntimeError(f"recipe {recipe.name}_repeat: duplicate qids in the planned order")
@@ -521,44 +661,188 @@ def plan_recipes(
                     "variant": "repeat",
                     "shares": dict(recipe.shares),
                     "repeat_unique_tokens": repeat_unique_tokens,
+                    "budget_shrink_factor": repeat_shrink,
+                    "effective_repeat_unique_tokens": int(math.ceil(effective_repeat)),
                     "budget_estimated_tokens": budget_estimated_tokens,
                     "families": rep_reports,
                     "unique_pool_estimated_tokens": rep_total,
                     "recommended_epochs": recommended_epochs,
                     "epochs_override": epochs_override,
+                    "epochs_override_scope": "base_and_repeat_variants",
                     "presented_estimated_tokens": rep_total * effective_epochs,
                     "order_examples": len(rep_order),
+                    "order_sha1": hashlib.sha1(json.dumps(rep_order).encode("utf-8")).hexdigest(),
                     "order_note": "each qid appears once; repetition is achieved at train time via epochs",
                     "interleave": "token_deficit",
+                    "alternate_pass_counts": _alternate_pass_counts(recipe),
+                    "alternate_pass_counts_note": _ALTERNATE_PASS_COUNTS_NOTE,
                     "removals": removals_report,
+                    "provenance": provenance,
                     "seeds": {"order_seed": order_seed},
                     "eta": eta_info,
                 },
             }
+    # P1-8: the fixed medium arms' epochs x budget parity is computed and
+    # guarded HERE (before any output is written), not by the operator.
+    arm_table = build_arm_launch_table(results)
+    if arm_table is not None:
+        for result in results.values():
+            result["plan"]["arm_launch_table"] = arm_table
     return results
 
 
 # ---------------------------------------------------------------------------
-# Source scanning (lazy heavy imports; bounded by per-family token caps).
+# P1-8: medium arm launch table + epochs x budget parity guard.
+# ---------------------------------------------------------------------------
+
+# Small-arm measured presented/estimated coefficient (progress doc sec.19):
+# presented source tokens ≈ 0.392 x estimated source tokens for BOTH the joint
+# and the alternate doc mode under per-side caps (the alternate arm's two
+# passes sum to about the joint arm's single grid), so one coefficient
+# suffices for cross-arm parity arithmetic.
+PRESENTED_PER_ESTIMATED = 0.392
+PARITY_SLACK = 1.02  # arms must agree within 2% of presented tokens
+
+# Fixed medium launch mapping: (arm name, plan key, doc_mode).  The two
+# d_single arms intentionally share ONE order file (the Gate-3 re-check pair).
+MEDIUM_ARM_TABLE = (
+    ("med_dsingle_alt", "d_single", "alternate"),
+    ("med_dsingle_joint", "d_single", "joint"),
+    ("med_dmulti_alt", "d_multi", "alternate"),
+    ("med_dmulti_repeat_alt", "d_multi_repeat", "alternate"),
+)
+MEDIUM_ARM_CARDS = (2, 3, 4, 5)  # suggested NPU card per arm, in table order
+
+
+def build_arm_launch_table(results: Dict[str, Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Cross-arm epochs x budget parity table for the fixed medium arms.
+
+    Per arm: unique pool estimated tokens U (the order file's realized total),
+    the effective epochs (``--epochs_override`` else ``recommended_epochs``
+    for the repeat variant else 1), and the planned presented tokens
+    ``U x epochs x PRESENTED_PER_ESTIMATED``.
+
+    Parity: let the floor be the smallest planned presented total.  Every arm
+    must land within PARITY_SLACK of the floor (max <= floor x 1.02); a
+    violation raises loudly with per-arm level-up suggestions instead of
+    shipping a silently unbalanced 4-arm launch (the pre-guard arithmetic was
+    hand-computed per arm: budget=50M + epochs=2 etc.).  The suggested
+    NUM_TRAIN_EPOCHS column is the smallest integer with
+    ``U x epochs x 0.392 >= max_arm_total x 1.02`` — level UP to the strongest
+    arm with 2% headroom (crossing-example granularity + 0.392 noise).
+
+    MAX_SOURCE_TOKENS = U: the trainer truncates the frozen order at the full
+    unique pool, so per-epoch presented is 0.392 x U for every arm.
+
+    Returns None when none of the fixed recipes was planned (e.g. unit tests
+    with toy recipe names), so exploratory runs are unaffected.
+    """
+    rows: List[Dict[str, Any]] = []
+    for position, (arm_name, plan_key, doc_mode) in enumerate(MEDIUM_ARM_TABLE):
+        if plan_key not in results:
+            continue
+        plan = results[plan_key]["plan"]
+        if plan["variant"] == "repeat":
+            unique_est = plan["unique_pool_estimated_tokens"]
+            planned_epochs = plan["recommended_epochs"]
+        else:
+            unique_est = plan["total_estimated_tokens"]
+            planned_epochs = 1
+        epochs = plan["epochs_override"] if plan["epochs_override"] is not None else planned_epochs
+        presented = unique_est * epochs * PRESENTED_PER_ESTIMATED
+        rows.append({
+            "arm": arm_name,
+            "plan_key": plan_key,
+            "variant": plan["variant"],
+            "doc_mode": doc_mode,
+            "order_file": f"{plan_key}.order.json",
+            "unique_est_tokens": unique_est,
+            "effective_epochs": epochs,
+            "max_source_tokens": unique_est,
+            "presented_est_tokens": presented,
+            "suggested_card": MEDIUM_ARM_CARDS[position],
+        })
+    if not rows:
+        return None
+    floor = min(row["presented_est_tokens"] for row in rows)
+    top = max(row["presented_est_tokens"] for row in rows)
+    for row in rows:
+        row["suggested_num_train_epochs"] = max(
+            1, math.ceil(top * PARITY_SLACK / (row["unique_est_tokens"] * PRESENTED_PER_ESTIMATED) - 1e-9)
+        )
+    parity_ok = top <= floor * PARITY_SLACK
+    table = {
+        "presented_per_estimated": PRESENTED_PER_ESTIMATED,
+        "parity_slack": PARITY_SLACK,
+        "parity_floor_presented_est": floor,
+        "parity_max_presented_est": top,
+        "parity_ok": parity_ok,
+        "arms": rows,
+        "skipped_arms": [
+            arm_name for arm_name, plan_key, _ in MEDIUM_ARM_TABLE if plan_key not in results
+        ],
+        "notes": [
+            "presented = unique_est x epochs x 0.392 (small-arm measured presented/estimated "
+            "coefficient, identical for joint and alternate under per-side caps)",
+            "med_dsingle_alt and med_dsingle_joint share d_single.order.json (Gate-3 re-check pair)",
+            "suggested_num_train_epochs levels every arm up to the strongest arm's presented "
+            "total with 2% headroom",
+        ],
+    }
+    if not parity_ok:
+        rendered = "\n".join(
+            f"  {row['arm']}: U={row['unique_est_tokens']:,} epochs={row['effective_epochs']} "
+            f"presented~{row['presented_est_tokens'] / 1e6:.2f}M "
+            f"(suggested epochs={row['suggested_num_train_epochs']})"
+            for row in rows
+        )
+        raise RuntimeError(
+            "ARM PARITY GUARD FAILED: the fixed medium arms disagree on presented tokens by more "
+            f"than {int((PARITY_SLACK - 1) * 100)}% (floor={floor / 1e6:.2f}M, max={top / 1e6:.2f}M). "
+            "Adjust --epochs_override per the suggestions and re-run the planner:\n" + rendered
+        )
+    return table
+
+
+# ---------------------------------------------------------------------------
+# Source scanning (lazy heavy imports; stratified per subset, bounded by
+# per-subset token caps).
 # ---------------------------------------------------------------------------
 
 
-def _family_source(family: str, args: argparse.Namespace):
-    """Instantiate the source for one family with trainer-matching knobs."""
+def _family_subsources(family: str, args: argparse.Namespace) -> List[Tuple[str, Any]]:
+    """Instantiate the per-subset sources of one family (trainer-matching knobs).
+
+    P0-2: scanning a family subset-by-subset (with per-subset caps) guarantees
+    every subset reaches the pool — the old single-stream scan truncated at
+    ``quota x oversample`` in source iteration order, so the tail subsets
+    (longmagpie after hotpotqa/2wiki; alphabetically-late Open-SWE configs)
+    had ZERO sampling probability whenever the cap hit early.
+
+    Each subset source gets ``file_order_seed = f"{order_seed}:scan:{family}:
+    {subset}"``: within a subset the parquet/jsonl FILE order is shuffled
+    (row order inside a file is unchanged), so a cap-truncated subset pool is
+    a seeded-random file prefix, not the alphabetical head.
+    """
     if family == "traces":
         if not args.traces_path:
             raise ValueError("a recipe needs the traces family but --traces_path is not set")
         from train.train_data_joint import AgentLLMTracesJointSource
 
-        return AgentLLMTracesJointSource(
-            path=args.traces_path,
-            split="train",
-            split_seed=args.split_seed,
-            split_manifest_file=args.split_manifest_file,
-            split_manifest_name=args.split_manifest_name,
-            max_samples_per_session=4,  # JointDataArgs default: MUST match the trainer run
-            require_tool_call=True,  # JointDataArgs default
-        )
+        return [
+            (
+                "traces",
+                AgentLLMTracesJointSource(
+                    path=args.traces_path,
+                    split="train",
+                    split_seed=args.split_seed,
+                    split_manifest_file=args.split_manifest_file,
+                    split_manifest_name=args.split_manifest_name,
+                    max_samples_per_session=4,  # JointDataArgs default: MUST match the trainer run
+                    require_tool_call=True,  # JointDataArgs default
+                ),
+            )
+        ]
     from train.train_data_joint_multisource import (
         OpenSWEJointSource,
         QADocsJointSource,
@@ -570,47 +854,87 @@ def _family_source(family: str, args: argparse.Namespace):
         split_seed=args.split_seed,
         require_tool_call=True,  # JointDataArgs default
     )
+
+    def _seed(subset: str) -> str:
+        return f"{args.order_seed}:scan:{family}:{subset}"
+
     if family == "toucan":
         if not args.toucan_path:
             raise ValueError("a recipe needs the toucan family but --toucan_path is not set")
-        return ToucanJointSource(args.toucan_path, **common)
+        return [("toucan", ToucanJointSource(args.toucan_path, file_order_seed=_seed("toucan"), **common))]
     if family == "openswe":
         if not args.openswe_path:
             raise ValueError("a recipe needs the openswe family but --openswe_path is not set")
-        return OpenSWEJointSource(args.openswe_path, **common)
+        # One subset per trajectory-config dir (data/<config>/*.parquet); the
+        # config dir name is both the stratum name and the examples' subset
+        # suffix (``openswe:<config>``).  A layout without config subdirs
+        # degenerates to a single subset over the whole root.
+        root = Path(args.openswe_path)
+        if root.is_file():
+            return [("all", OpenSWEJointSource(str(root), file_order_seed=_seed("all"), **common))]
+        data_root = root / "data" if (root / "data").is_dir() else root
+        config_dirs = sorted(
+            d for d in data_root.iterdir() if d.is_dir() and list(d.glob("*.parquet"))
+        )
+        if not config_dirs:
+            return [("all", OpenSWEJointSource(str(root), file_order_seed=_seed("all"), **common))]
+        return [
+            (d.name, OpenSWEJointSource(str(d), file_order_seed=_seed(d.name), **common))
+            for d in config_dirs
+        ]
     if family == "qa":
         if not any([args.qa_hotpotqa_path, args.qa_2wiki_path, args.qa_longmagpie_path]):
             raise ValueError("a recipe needs the qa family but no --qa_* path is set")
-        return QADocsJointSource(
-            hotpotqa_path=args.qa_hotpotqa_path,
-            wiki2_path=args.qa_2wiki_path,
-            longmagpie_path=args.qa_longmagpie_path,
-            **common,
-        )
+        subs: List[Tuple[str, Any]] = []
+        for subset, path in (
+            ("hotpotqa", args.qa_hotpotqa_path),
+            ("2wiki", args.qa_2wiki_path),
+            ("longmagpie", args.qa_longmagpie_path),
+        ):
+            if not path:
+                continue
+            kwargs: Dict[str, Any] = {
+                "hotpotqa_path": None,
+                "wiki2_path": None,
+                "longmagpie_path": None,
+                "file_order_seed": _seed(subset),
+            }
+            kwargs[{"hotpotqa": "hotpotqa_path", "2wiki": "wiki2_path", "longmagpie": "longmagpie_path"}[subset]] = path
+            subs.append((subset, QADocsJointSource(**kwargs, **common)))
+        return subs
     raise ValueError(f"unknown family: {family!r}")
 
 
-def scan_family_pool(
-    family: str,
-    args: argparse.Namespace,
+def _scan_subset_prefix(
+    source: Any,
     tokenizer,
     stamp: str,
     cache: Dict[Tuple[str, str], int],
     token_cap: Optional[float],
-) -> List[PoolEntry]:
-    """Stream one family's source into a pool of estimated-token entries.
+    seen: Set[str],
+    family: str,
+    subset: str,
+    removal_identifiers: FrozenSet[str] = frozenset(),
+) -> Tuple[List[PoolEntry], int, int, int]:
+    """Stream one subset source into pool entries, stopping at ``token_cap``.
 
-    Stops once the cumulative estimate reaches ``token_cap`` (the crossing
-    example is included), so quota-filling scans stay bounded in memory/time;
-    ``token_cap=None`` scans the whole source.  Estimates are cached by
-    (qid, stamp) and the cache dict is updated in place.
+    The crossing example is included; ``token_cap=None`` scans the whole
+    source.  Removal-listed examples are dropped BEFORE estimation and cap
+    accounting (P2: filtering after the cap would let removed rows eat the
+    oversample headroom and shrink the pool below ``quota x oversample``).
+    Estimates are cached by (qid, stamp) and ``cache`` is updated in place.
+    Returns (entries, total_estimated_tokens, cache_hits, removed_count).
     """
-    source = _family_source(family, args)
-    pool: List[PoolEntry] = []
-    seen: Set[str] = set()
+    entries: List[PoolEntry] = []
     total = 0
     cache_hits = 0
+    removed = 0
     for example in source:
+        if removal_identifiers and (
+            _removal_match_keys(example.qid, example.session_id) & removal_identifiers
+        ):
+            removed += 1
+            continue
         key = (example.qid, stamp)
         estimated = cache.get(key)
         if estimated is None:
@@ -621,30 +945,140 @@ def scan_family_pool(
         if example.qid in seen:
             raise RuntimeError(f"duplicate qid from the {family} source: {example.qid}")
         seen.add(example.qid)
-        pool.append(
+        entries.append(
             PoolEntry(
                 qid=example.qid,
                 session_id=example.session_id,
                 estimated_tokens=estimated,
+                subset=subset,
             )
         )
         total += estimated
         if token_cap is not None and total >= token_cap:
             break
-    logger.info(
-        "family=%s: scanned %d examples (%d estimated tokens, cap=%s, cache_hits=%d)",
-        family,
-        len(pool),
-        total,
-        int(token_cap) if token_cap is not None else "none",
-        cache_hits,
-    )
-    return pool
+    return entries, total, cache_hits, removed
+
+
+def scan_family_pool(
+    family: str,
+    args: argparse.Namespace,
+    tokenizer,
+    stamp: str,
+    cache: Dict[Tuple[str, str], int],
+    token_cap: Optional[float],
+    subset_weights: Optional[Dict[str, float]] = None,
+    removal_identifiers: FrozenSet[str] = frozenset(),
+) -> Tuple[List[PoolEntry], Dict[str, Any]]:
+    """Stratified scan of one family's pool (P0-2).
+
+    The family cap is split over the subsets by weight (default: equal;
+    ``--subset_weights family:subset=w`` overrides) and each subset is scanned
+    up to its cap.  A subset that EXHAUSTS below its cap hands the unused
+    budget to its not-yet-scanned siblings (sequential water-filling in
+    declared subset order), so a small subset can never starve the family cap
+    nor inflate its own share.  Removal-listed examples are filtered DURING
+    the scan (before cap accounting; P2).  Returns the concatenated pool
+    (subset scan order; quota sampling shuffles anyway) and a per-subset
+    audit report including removal counts.
+    """
+    subsources = _family_subsources(family, args)
+    weights: Dict[str, float] = {}
+    for name, _ in subsources:
+        key = f"{family}:{name}"
+        weight = (subset_weights or {}).get(key, 1.0)
+        if weight <= 0:
+            raise ValueError(f"--subset_weights entry {key} must be > 0, got {weight}")
+        weights[name] = weight
+    pool: List[PoolEntry] = []
+    seen: Set[str] = set()
+    subsets_report: Dict[str, Any] = {}
+    remaining_cap = token_cap
+    remaining_weight = sum(weights.values())
+    for name, source in subsources:
+        sub_cap: Optional[float] = None
+        if remaining_cap is not None:
+            sub_cap = remaining_cap * weights[name] / remaining_weight if remaining_weight else 0.0
+        entries, sub_total, cache_hits, removed = _scan_subset_prefix(
+            source, tokenizer, stamp, cache, sub_cap, seen, family, name, removal_identifiers
+        )
+        pool.extend(entries)
+        subsets_report[name] = {
+            "examples": len(entries),
+            "estimated_tokens": sub_total,
+            "cap_estimated_tokens": int(math.ceil(sub_cap)) if sub_cap is not None else None,
+            "weight": weights[name],
+            "exhausted": sub_cap is None or sub_total < sub_cap,
+            "cache_hits": cache_hits,
+            "removed": removed,
+        }
+        logger.info(
+            "family=%s subset=%s: scanned %d examples (%d estimated tokens, cap=%s, "
+            "cache_hits=%d, removed=%d)",
+            family,
+            name,
+            len(entries),
+            sub_total,
+            int(sub_cap) if sub_cap is not None else "none",
+            cache_hits,
+            removed,
+        )
+        if remaining_cap is not None:
+            remaining_cap -= sub_total
+            remaining_weight -= weights[name]
+            if remaining_cap <= 0:
+                break
+    report = {
+        "subsets": subsets_report,
+        "cap_estimated_tokens": int(token_cap) if token_cap is not None else None,
+        "removed_total": sum(sub["removed"] for sub in subsets_report.values()),
+    }
+    return pool, report
+
+
+def _parse_subset_weights(specs: Optional[Sequence[str]]) -> Dict[str, float]:
+    """Parse repeatable ``--subset_weights family:subset=w`` (w > 0)."""
+    weights: Dict[str, float] = {}
+    for spec in specs or []:
+        key, sep, value = spec.partition("=")
+        family, sep2, subset = key.partition(":")
+        if not sep or not sep2 or not family.strip() or not subset.strip():
+            raise ValueError(f"--subset_weights must be family:subset=weight, got: {spec!r}")
+        if family.strip() not in FAMILIES:
+            raise ValueError(f"--subset_weights unknown family in {spec!r} (choose from {FAMILIES})")
+        weight = float(value)
+        if weight <= 0:
+            raise ValueError(f"--subset_weights weight must be > 0, got: {spec!r}")
+        weights[f"{family.strip()}:{subset.strip()}"] = weight
+    return weights
 
 
 # ---------------------------------------------------------------------------
 # Output writing + ETA.
 # ---------------------------------------------------------------------------
+
+
+def _arm_table_lines(table: Dict[str, Any]) -> List[str]:
+    """Render the P1-8 arm launch table for stdout."""
+    lines = [
+        "ARM LAUNCH TABLE (P1-8 parity: presented = unique_est x epochs x "
+        f"{PRESENTED_PER_ESTIMATED}; arms must agree within "
+        f"{int((table['parity_slack'] - 1) * 100)}%)",
+        "  arm                  plan_key       variant  doc_mode   unique_est_M  epochs  presented_M  suggested_epochs  max_source_tokens  card",
+    ]
+    for row in table["arms"]:
+        lines.append(
+            f"  {row['arm']:<20}  {row['plan_key']:<14} {row['variant']:<8} {row['doc_mode']:<10}"
+            f" {row['unique_est_tokens'] / 1e6:>12.2f} {row['effective_epochs']:>6}"
+            f" {row['presented_est_tokens'] / 1e6:>11.2f} {row['suggested_num_train_epochs']:>16}"
+            f" {row['max_source_tokens']:>17} {row['suggested_card']:>5}"
+        )
+    if table["skipped_arms"]:
+        lines.append(f"  (not planned in this run: {', '.join(table['skipped_arms'])})")
+    lines.append(
+        f"  parity: floor={table['parity_floor_presented_est'] / 1e6:.2f}M "
+        f"max={table['parity_max_presented_est'] / 1e6:.2f}M ok={table['parity_ok']}"
+    )
+    return lines
 
 
 def write_outputs(results: Dict[str, Dict[str, Any]], out_dir: Path) -> List[str]:
@@ -704,12 +1138,21 @@ def main() -> None:
     parser.add_argument("--budget_estimated_tokens", type=int, required=True, help="N: per-recipe total estimated source tokens")
     parser.add_argument("--oversample_factor", type=float, default=1.25, help="scan cap = quota x this factor")
     parser.add_argument("--repeat_unique_tokens", type=int, default=None, help="M: also emit <recipe>_repeat variants with ~M unique tokens per family pool")
-    parser.add_argument("--epochs_override", action="append", default=None, metavar="name=n", help="repeatable audit record: recipe name -> train epochs (integer >= 1); scales presented_estimated_tokens in the plan jsons")
-    parser.add_argument("--removal_files", nargs="*", default=[], help="dedup removal lists (dicts with removal_list, or bare JSON string lists)")
+    parser.add_argument("--epochs_override", action="append", default=None, metavar="name=n", help="repeatable audit record: recipe name -> train epochs (integer >= 1); scales presented_estimated_tokens in the plan jsons; applies to BOTH the base and the repeat variant of the named recipe")
+    parser.add_argument("--removal_files", nargs="*", default=[], help="dedup removal lists (dicts with removal_list, or bare JSON string lists); applied DURING the pool scan (before cap accounting, P2)")
+    parser.add_argument(
+        "--subset_weights",
+        action="append",
+        default=None,
+        metavar="family:subset=w",
+        help="repeatable per-stratum scan-cap weight override (P0-2; default: equal weights "
+        "across a family's subsets, e.g. qa splits its cap evenly over hotpotqa/2wiki/longmagpie)",
+    )
     parser.add_argument("--order_seed", type=int, default=42)
     parser.add_argument("--out_dir", required=True)
     parser.add_argument("--tokenizer", default=None, help="local HF tokenizer path; default: whitespace fake")
-    parser.add_argument("--small_arm_hours", type=float, default=None, help="measured wall-clock hours per 32M presented tokens on the small arm (enables the ETA line)")
+    parser.add_argument("--small_arm_hours", type=float, default=None, help="measured wall-clock hours per 32M ESTIMATED source tokens (estimator 口径 — the SAME unit the budget/quota math uses; presented tokens are ~0.392x) on the small JOINT-mode arm (enables the ETA line)")
+    parser.add_argument("--small_arm_hours_alternate", type=float, default=None, help="same unit as --small_arm_hours but measured on an ALTERNATE-mode arm; default: reuse --small_arm_hours (the two modes have different throughputs — joint 0.556M vs alternate 0.453M presented/h on the small arms)")
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -756,14 +1199,53 @@ def main() -> None:
             caps[family] = max(caps.get(family, 0.0), cap * args.oversample_factor)
 
     pools: Dict[str, List[PoolEntry]] = {}
+    pool_scan_reports: Dict[str, Any] = {}
+    subset_weights = _parse_subset_weights(args.subset_weights)
+    if subset_weights:
+        # Fail fast (before the expensive scans): every weight key must name a
+        # family:subset stratum that some recipe actually scans.
+        valid_keys = sorted(
+            f"{family}:{name}"
+            for family in sorted(caps)
+            for name, _ in _family_subsources(family, args)
+        )
+        unknown = sorted(key for key in subset_weights if key not in set(valid_keys))
+        if unknown:
+            raise ValueError(
+                f"--subset_weights entries matched no scanned family:subset: {unknown} "
+                f"(scanned: {valid_keys})"
+            )
     for family in sorted(caps):
         cache_path = out_dir / f"tokencache_{family}.jsonl"
         cache = _load_token_cache(cache_path)
         cache_size = len(cache)
-        pools[family] = scan_family_pool(family, args, tokenizer, stamp, cache, caps[family])
+        pool, scan_report = scan_family_pool(
+            family,
+            args,
+            tokenizer,
+            stamp,
+            cache,
+            caps[family],
+            subset_weights=subset_weights,
+            removal_identifiers=removal_identifiers,
+        )
+        pools[family] = pool
+        pool_scan_reports[family] = scan_report
         if len(cache) != cache_size:
             _write_token_cache(cache_path, cache)
 
+    tokenizer_tag = str(getattr(tokenizer, "name_or_path", tokenizer.__class__.__name__))
+    provenance = {
+        "tokenizer": tokenizer_tag,
+        "estimate_stamp": stamp,
+        "split_seed": args.split_seed,
+        "oversample_factor": args.oversample_factor,
+        "family_scan_caps_estimated_tokens": {
+            family: int(math.ceil(cap)) for family, cap in sorted(caps.items())
+        },
+        "subset_weights": subset_weights,
+        "repeat_unique_tokens": args.repeat_unique_tokens,
+    }
     results = plan_recipes(
         pools,
         recipes,
@@ -773,9 +1255,47 @@ def main() -> None:
         removal_identifiers=removal_identifiers,
         removal_file_counts=removal_file_counts,
         small_arm_hours=args.small_arm_hours,
+        small_arm_hours_alternate=args.small_arm_hours_alternate,
         epochs_overrides=epochs_overrides,
+        scan_removals={
+            family: report["removed_total"] for family, report in pool_scan_reports.items()
+        },
+        provenance=provenance,
     )
+    # P0-2 audit: how each recipe family's pool was scanned (per-subset caps,
+    # weights, exhaustion) — the same scan underlies every recipe/variant.
+    for result in results.values():
+        result["plan"]["pool_scan"] = {
+            family: pool_scan_reports[family]
+            for family in pool_scan_reports
+            if family in result["plan"]["families"]
+        }
     write_outputs(results, out_dir)
+
+    arm_table = results[next(iter(results))]["plan"].get("arm_launch_table") if results else None
+    if arm_table is not None:
+        for line in _arm_table_lines(arm_table):
+            print(line)
+        if args.small_arm_hours is not None:
+            # Per-mode calibrations: joint and alternate arms have different
+            # throughputs, so a single hours number would misestimate one side.
+            hours_by_mode = {
+                "joint": args.small_arm_hours,
+                "alternate": (
+                    args.small_arm_hours_alternate
+                    if args.small_arm_hours_alternate is not None
+                    else args.small_arm_hours
+                ),
+            }
+            for row in arm_table["arms"]:
+                consumed = row["unique_est_tokens"] * row["effective_epochs"]
+                hours = consumed / _TOKENS_PER_ETA_UNIT * hours_by_mode[row["doc_mode"]]
+                finish = datetime.now() + timedelta(hours=hours)
+                print(
+                    f"  ETA {row['arm']}: ~{hours:.1f}h "
+                    f"({row['doc_mode']}-mode calibration; {consumed / 1e6:.1f}M estimated) "
+                    f"-> {finish:%Y-%m-%d %H:%M}"
+                )
 
     for name, result in results.items():
         plan = result["plan"]

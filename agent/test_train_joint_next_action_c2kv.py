@@ -254,3 +254,56 @@ def test_dump_train_manifest_records_order_and_counts(tmp_path):
     assert manifest["train_source_counts"] == {"traces": 3, "toucan": 1}
     assert manifest["interleaved_train_len"] == 6
     assert manifest["eval_qids"] == ["e:0"]
+    # Regime string is always recorded (v2 = empty-tool reclaim by default).
+    assert manifest["cap_regime"] == "per_side_caps_v2_empty_tool_reclaim"
+    assert manifest["legacy_mode_caps"] is False
+    legacy_args = JointDataArgs(doc_mode="joint", legacy_mode_caps=True)
+    legacy_path = _dump_train_manifest(
+        legacy_args, str(tmp_path / "legacy"), train_examples, eval_examples, None, None
+    )
+    assert json.loads(Path(legacy_path).read_text())["cap_regime"] == "legacy_mode_caps"
+
+
+def test_dump_train_manifest_skip_and_retention_breakdowns(tmp_path):
+    # P1-7/P0-1 manifest audit: per-pass per-family skip counts and the QA
+    # retention counters from the history-bearing passes.
+    from train.train_data_joint import JointDataset, _WhitespaceSelfTestTokenizer
+
+    qa_example = JointExample(
+        qid="qa:hotpotqa:h1",
+        session_id="qa:hotpotqa:h1",
+        tool_documents=[],
+        history_documents=["Document 1 (title: A) some words here", "Document 2 (title: B) more words"],
+        current_messages=[{"role": "user", "content": "question?"}],
+        answer="yes",
+        subset="qa:hotpotqa",
+        gold_history_doc_indices=(1,),
+    )
+    tokenizer = _WhitespaceSelfTestTokenizer()
+    kwargs = dict(
+        tokenizer=tokenizer, max_length=256, max_doc_length=128, min_doc_num=2,
+        max_doc_num=4, max_system_length=128,
+    )
+    tool_pass = JointDataset([qa_example], doc_mode="tool_only", **kwargs)
+    history_pass = JointDataset([qa_example], doc_mode="history_only", **kwargs)
+    path = _dump_train_manifest(
+        JointDataArgs(doc_mode="alternate"),
+        str(tmp_path),
+        [qa_example],
+        [],
+        interleaved_train_len=1,
+        achieved_source_tokens=None,
+        train_datasets={"tool_only": tool_pass, "history_only": history_pass},
+    )
+    manifest = json.loads(Path(path).read_text(encoding="utf-8"))
+    # The tool_only pass drops the QA example, attributed per family (P1-7).
+    assert manifest["train_skip_counts_by_family"]["tool_only"] == {"qa:doc_num<2": 1}
+    assert manifest["train_skip_counts_by_family"]["history_only"] == {}
+    # Retention recorded from the history-bearing pass only.
+    assert manifest["qa_retention"] == {
+        "history_only": {
+            "qa_history_doc_retention": {"kept": 2, "total": 2},
+            "qa_gold_doc_retention": {"kept": 1, "total": 1},
+            "qa_history_truncated_examples_by_subset": {},
+        }
+    }

@@ -790,3 +790,136 @@ def test_source_examples_carry_target_doc_index(synthetic_dataset):
         assert example.target_tool
         assert example.target_tool in example.tool_documents[example.target_tool_doc_index]
     assert indexed > 0  # the get_weather example must carry its index
+
+
+# ---------------------------------------------------------------------------
+# P0-1: v2 empty-tool reclaim (the QA family reserves no tool slots) and the
+# QA history/gold retention audit counters.
+# ---------------------------------------------------------------------------
+
+
+def _qa_style_example(qid="qa:hotpotqa:x", num_docs=6, gold=None, subset="qa:hotpotqa"):
+    """Tool-less QA-style example: documents carry the HotpotQA title prefix."""
+    return JointExample(
+        qid=qid,
+        session_id=qid,
+        tool_documents=[],
+        history_documents=[
+            f"Document {index + 1} (title: Title {index}) " + " ".join(f"w{index}-{j}" for j in range(20))
+            for index in range(num_docs)
+        ],
+        current_messages=[{"role": "user", "content": "Which title answers the question?"}],
+        answer="Title 3",
+        subset=subset,
+        gold_history_doc_indices=gold,
+    )
+
+
+def test_empty_tool_example_reclaims_full_history_grid(tokenizer):
+    # Budget helpers: a tool-less example reserves no tool side (v2); the
+    # tool-bearing default keeps the v1 constant; legacy is untouched.
+    assert _history_chunk_budget("joint", 24, 16, 0, per_side_caps=True, has_tool_documents=False) == 24
+    assert _history_chunk_budget("history_only", 24, 16, 0, per_side_caps=True, has_tool_documents=False) == 24
+    assert _history_chunk_budget("joint", 24, 16, 0, per_side_caps=True) == 8  # v1 constant, default
+    assert _history_chunk_budget("joint", 24, 16, 0, per_side_caps=False) == 24  # legacy recycled already
+    assert _history_chunk_budget("history_only", 24, 16, 0, per_side_caps=False) == 24
+
+    example = _qa_style_example(num_docs=10)
+    chunks, skip, meta = build_tool_chunks(
+        tokenizer, example, "joint",
+        max_doc_length=256, max_doc_num=8, max_tool_chunks=None,
+        max_tool_definition_tokens=32000, per_side_caps=True,
+    )
+    assert skip is None and chunks == [] and meta["tool_cap"] == 0
+    # tool_only over a tool-less example keeps producing 0 chunks (the
+    # alternate-arm skip, recorded per family — see the skip test below).
+    chunks, skip, meta = build_tool_chunks(
+        tokenizer, example, "tool_only",
+        max_doc_length=256, max_doc_num=8, max_tool_chunks=None,
+        max_tool_definition_tokens=32000, per_side_caps=True,
+    )
+    assert skip is None and chunks == [] and meta["tool_cap"] == 0
+
+    # End to end: 10 documents all fit the reclaimed 12-slot grid (under v1
+    # the history side would have been capped at 12 - 8 = 4 slots).
+    meta_out: dict = {}
+    row, reason = JointDataset.preprocess_example(
+        example, tokenizer=tokenizer, max_length=512, max_doc_length=256, min_doc_num=2,
+        max_doc_num=12, max_system_length=512, doc_mode="joint", per_side_caps=True,
+        meta_out=meta_out,
+    )
+    assert row is not None, reason
+    assert meta_out["tool_cap"] == 0
+    assert meta_out["history_docs_total"] == 10
+    assert meta_out["history_kept_source_indices"] == list(range(10))
+    assert_no_leakage(example, row, tokenizer)  # every document present, in order
+
+
+def test_tool_bearing_example_unaffected_by_empty_tool_reclaim(tokenizer):
+    # The v2 reclaim must not touch examples WITH tools: caps, budgets and the
+    # emitted row stay exactly at the v1 values.
+    stress = _truncation_stress_example(num_tools=12, target_index=10)
+    assert _history_chunk_budget("joint", 24, 16, 3, per_side_caps=True, has_tool_documents=True) == 8
+    chunks, skip, meta = build_tool_chunks(
+        tokenizer, stress, "joint",
+        max_doc_length=256, max_doc_num=8, max_tool_chunks=None,
+        max_tool_definition_tokens=32000, per_side_caps=True,
+    )
+    assert skip is None and meta["tool_cap"] == 5 and len(chunks) == 5
+    meta_out: dict = {}
+    row, reason = JointDataset.preprocess_example(
+        stress, tokenizer=tokenizer, max_length=512, max_doc_length=256, min_doc_num=2,
+        max_doc_num=8, max_system_length=512, doc_mode="joint", per_side_caps=True,
+        meta_out=meta_out,
+    )
+    assert row is not None, reason
+    # v1 split: 5 tool chunks + min(2 history docs, 8-5=3 slots) = 2 history docs.
+    assert meta_out["num_tool_chunks"] == 5
+    assert meta_out["num_history_docs"] == 2
+    assert meta_out["history_kept_source_indices"] == [0, 1]
+    assert_no_leakage(stress, row, tokenizer)
+    assert_target_tool_in_grid(stress, row, tokenizer)
+
+
+def test_qa_retention_counters_track_grid_survivors(tokenizer):
+    example = _qa_style_example(qid="qa:hotpotqa:g", num_docs=10, gold=(3, 7))
+    full = JointDataset(
+        [example], tokenizer, max_length=512, max_doc_length=256, min_doc_num=2,
+        max_doc_num=12, max_system_length=512, doc_mode="joint",
+    )
+    assert full.qa_retention_stats == {
+        "qa_history_doc_retention": {"kept": 10, "total": 10},
+        "qa_gold_doc_retention": {"kept": 2, "total": 2},
+        "qa_history_truncated_examples_by_subset": {},
+    }
+    assert full.skipped_by_family_reason == {}
+
+    # Tight grid (4 slots): tail selection keeps source docs {0, 7, 8, 9} —
+    # gold doc 7 survives, gold doc 3 is cut and the counter must show it.
+    tight = JointDataset(
+        [example], tokenizer, max_length=512, max_doc_length=256, min_doc_num=2,
+        max_doc_num=4, max_system_length=512, doc_mode="joint",
+    )
+    assert tight.qa_retention_stats["qa_history_doc_retention"] == {"kept": 4, "total": 10}
+    assert tight.qa_retention_stats["qa_gold_doc_retention"] == {"kept": 1, "total": 2}
+    assert tight.qa_retention_stats["qa_history_truncated_examples_by_subset"] == {"qa:hotpotqa": 1}
+
+
+def test_tool_only_pass_skips_tool_less_qa_counted_by_family(tokenizer):
+    # P1-7 visibility: the alternate arm's tool_only pass renders no documents
+    # for QA examples and skips them; the skip must be attributable per family.
+    example = _qa_style_example(num_docs=4)
+    dataset = JointDataset(
+        [example], tokenizer, max_length=512, max_doc_length=256, min_doc_num=2,
+        max_doc_num=8, max_system_length=512, doc_mode="tool_only",
+    )
+    assert len(dataset) == 0
+    assert dataset.skipped_by_reason == {"doc_num<2": 1}
+    assert dataset.skipped_by_family_reason == {"qa:doc_num<2": 1}
+    # The joint pass over the same example keeps every document.
+    joint = JointDataset(
+        [example], tokenizer, max_length=512, max_doc_length=256, min_doc_num=2,
+        max_doc_num=8, max_system_length=512, doc_mode="joint",
+    )
+    assert len(joint) == 1
+    assert joint.qa_retention_stats["qa_history_doc_retention"] == {"kept": 4, "total": 4}
