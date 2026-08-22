@@ -45,6 +45,23 @@ selected tail-biased (first doc + most recent) via ``_select_history``.
 history; ``doc_mode="history_only"`` does the opposite — both for the
 J-alternate training arm and per-condition evals.
 
+History chunking policy
+-----------------------
+``build_history_chunks`` is the single history-side entry point, shared with
+``agent/eval_joint_next_action_c2kv.py``'s ``_condition_doc_chunks``.  With
+its defaults (``chunk_policy="agent-turn"``, ``delay_recent_turns=0``) it
+short-circuits to the ``_fit_reused_history`` call this module has always
+made, bit for bit.  Other policies (``python/train/chunk_policy.py``) re-cut
+the SAME frozen doc texts, and ``delay_recent_turns`` moves the last k turns
+out of the context grid into the plain prompt — the ``full_history_doc_num``
+semantics of ``train_data_multiturn.py:1210-1224``, ported here.  Because
+``structural`` can emit more docs than the slot budget, a row whose total doc
+count exceeds ``max_doc_num`` is skipped (``doc_num>N``) rather than silently
+reshaping the fixed training grid.  ``content_tokens`` accounting is opt-in
+(``need_content_tokens``): it costs a full extra encode of the history text,
+so the trainer leaves it off (``None`` = not measured) and only the eval
+driver, which needs it for the presented-token check, turns it on.
+
 Self-checks
 -----------
 ``assert_no_leakage`` is NOT run per-sample in production; it is called from
@@ -64,27 +81,39 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional, Sequence
 
+from .chunk_policy import (
+    FROZEN_JOIN,
+    apply_policy,
+    fit_history_with_provenance,
+    parse_chunk_policy,
+    split_delayed,
+)
 from .train_data import DEFAULT_SYSTEM_PROMPT
 from .train_data_multiturn import (
     AgentLLMTracesCompressHistorySource,
     HistorySelection,
     Message,
     _agent_history_turn_docs,
+    _agent_history_turn_units,
     _agent_message_parts,
     _agent_system_prompt,
     _chat_template_ids,
     _find_agent_jsonl_files,
     _find_agent_parquet_files,
     _fit_reused_history,
+    _flatten_turn_units,
     _iter_agent_jsonl_rows,
     _iter_agent_rows,
     _json_loads,
+    _message_token_length,
     _normal_agent_message,
     _normal_chat_message,
     _pad,
     _render_agent_output_messages,
+    _select_history,
     _sort_agent_spans,
     _span_attributes,
+    _split_message_to_fit,
     _tool_list_from_agent_value,
     _toolathlon_row_to_agent_session,
 )
@@ -123,6 +152,11 @@ class JointExample:
     # when the target tool was not identified in the definitions.
     target_tool: Optional[str] = None
     target_tool_doc_index: Optional[int] = None
+    # Role-preserving twin of ``history_documents``: one unit list per turn
+    # (``_agent_history_turn_units``), same order and same length.  ``None``
+    # on records built before the B-line chunking work; the ``structural``
+    # policy degrades to a pass-through when it is missing.
+    history_units: Optional[List[List[Dict[str, str]]]] = None
 
 
 # ---------------------------------------------------------------------------
@@ -539,12 +573,16 @@ class AgentLLMTracesJointSource(AgentLLMTracesCompressHistorySource):
             if last_user_index is None:
                 continue
             history_docs = _agent_history_turn_docs(messages[:last_user_index])
+            # Same traversal, same turn boundaries: units[i] renders back to
+            # history_docs[i]["content"] (locked by test_chunk_policy.py).
+            history_units = _agent_history_turn_units(messages[:last_user_index])
             if self.prefix_history_doc_num is not None:
                 if len(history_docs) < self.prefix_history_doc_num:
                     continue
                 if self.prefix_history_exact and len(history_docs) != self.prefix_history_doc_num:
                     continue
                 history_docs = history_docs[-self.prefix_history_doc_num :]
+                history_units = history_units[-self.prefix_history_doc_num :]
             current_messages = messages[last_user_index:]
             answer, has_tool_call = _render_agent_output_messages(output_messages, self.max_answer_chars)
             if self.require_tool_call and not has_tool_call:
@@ -584,6 +622,7 @@ class AgentLLMTracesJointSource(AgentLLMTracesCompressHistorySource):
                     subset=subset,
                     target_tool=target_tool,
                     target_tool_doc_index=target_doc_index,
+                    history_units=[list(units) for units in history_units],
                 )
             )
         return examples
@@ -724,6 +763,188 @@ def build_tool_chunks(
     return tool_chunks, None, meta
 
 
+# ---------------------------------------------------------------------------
+# History-side chunking (shared by the trainer and the eval driver).
+# ---------------------------------------------------------------------------
+
+
+def _encode_fn(tokenizer, text: str) -> List[int]:
+    return tokenizer.encode(text, add_special_tokens=False)
+
+
+def _decode_fn(tokenizer, ids: Sequence[int]) -> str:
+    return tokenizer.decode(list(ids), skip_special_tokens=True)
+
+
+def _history_pairs(example: JointExample) -> tuple[List[Message], List[List[Dict[str, str]]]]:
+    """Non-empty history docs and their unit lists, filtered in lockstep.
+
+    ``history_units`` must stay index-aligned with the raw history messages
+    (``FrozenDoc.turn_index`` indexes both), so the empty-document filter has
+    to drop the same positions from both lists.
+    """
+
+    units_source = example.history_units or []
+    raw_history: List[Message] = []
+    history_units: List[List[Dict[str, str]]] = []
+    for index, text in enumerate(example.history_documents):
+        if not text or not text.strip():
+            continue
+        raw_history.append({"role": "user", "content": text})
+        history_units.append(list(units_source[index]) if index < len(units_source) else [])
+    return raw_history, history_units
+
+
+def build_history_chunks(
+    tokenizer,
+    example: JointExample,
+    doc_mode: str,
+    *,
+    max_doc_length: int,
+    max_doc_num: int,
+    max_tool_chunks: Optional[int],
+    num_tool_chunks: int,
+    per_side_caps: bool,
+    history_selection: HistorySelection,
+    split_oversized_history_docs: bool,
+    chunk_policy: str = "agent-turn",
+    delay_recent_turns: int = 0,
+    need_content_tokens: bool = False,
+) -> tuple[List[Message], List[Message], Dict[str, Any]]:
+    """Chunk one example's history side under ``chunk_policy``.
+
+    Shared by ``JointDataset.preprocess_example`` (training) and the eval
+    driver's ``_condition_doc_chunks`` so the two sides cannot drift — the
+    same constraint ``build_tool_chunks`` already satisfies for the tool side.
+
+    Returns ``(kept_messages, delayed_messages, meta)``.  ``kept_messages`` go
+    into the compressed context grid; ``delayed_messages`` are the last
+    ``delay_recent_turns`` turns' docs, which the caller prepends to the plain
+    prompt (the ``full_history_doc_num`` semantics of
+    ``train_data_multiturn.py:1210-1224``, ported to the joint path).
+
+    Fast path: ``chunk_policy == "agent-turn" and delay_recent_turns == 0``
+    short-circuits to today's ``_fit_reused_history`` call, so the default
+    pipeline is bit-identical to what it produced before this module existed.
+
+    ``need_content_tokens`` is opt-in: measuring ``content_tokens`` costs one
+    extra encode of the whole selected history (up to ~24k tokens per example),
+    which would roughly DOUBLE the history-side tokenization cost of every
+    dataset build.  The trainer only ever logged the number, so it passes
+    False and gets ``content_tokens = policy_content_tokens = None`` ("not
+    measured", deliberately not 0).  The eval driver needs it for the
+    presented-token / gist-declaration checks and passes True.
+    """
+
+    if max_tool_chunks is None:
+        max_tool_chunks = _default_max_tool_chunks(max_doc_num)
+    _unmeasured = 0 if need_content_tokens else None
+    meta: Dict[str, Any] = {
+        "chunk_policy": chunk_policy,
+        "delay_recent_turns": delay_recent_turns,
+        "content_tokens": _unmeasured,
+        "policy_content_tokens": _unmeasured,
+        "history_chunk_count": 0,
+        "structural_fallback_docs": 0,
+        "structural_partial_docs": 0,
+        "delayed_docs": 0,
+    }
+    kind, chunk_size = parse_chunk_policy(chunk_policy)
+    if delay_recent_turns < 0:
+        raise ValueError(f"delay_recent_turns must be non-negative, got {delay_recent_turns}")
+    if kind == "fixed" and delay_recent_turns > 0:
+        raise ValueError(
+            f"chunk_policy={chunk_policy!r} destroys turn boundaries; "
+            "--delay_recent_turns > 0 is only defined for agent-turn/structural"
+        )
+    if doc_mode == "tool_only":
+        return [], [], meta
+
+    history_budget = _history_chunk_budget(
+        doc_mode, max_doc_num, max_tool_chunks, num_tool_chunks, per_side_caps
+    )
+    raw_history, history_units = _history_pairs(example)
+    if history_budget <= 0 or not raw_history:
+        return [], [], meta
+
+    if kind == "agent-turn" and delay_recent_turns == 0:
+        history = _fit_reused_history(
+            tokenizer,
+            raw_history,
+            max_doc_length=max_doc_length,
+            max_doc_num=history_budget,
+            policy=history_selection,
+            split_oversized_history_docs=split_oversized_history_docs,
+        )
+        # Same measure as chunk_policy._content_tokens (same join, same texts),
+        # so ``content_tokens`` is comparable between the fast path and every
+        # other arm.  Skipped unless the caller asked for it: this is the hot
+        # path (every trainer dataset build runs it) and the encode is a full
+        # second pass over the history text.
+        content_tokens = None
+        if need_content_tokens:
+            content_tokens = (
+                len(
+                    _encode_fn(
+                        tokenizer,
+                        FROZEN_JOIN.join(message["content"] for message in history),
+                    )
+                )
+                if history
+                else 0
+            )
+        meta.update(
+            content_tokens=content_tokens,
+            policy_content_tokens=content_tokens,
+            history_chunk_count=len(history),
+        )
+        return history, [], meta
+
+    frozen_docs = fit_history_with_provenance(
+        tokenizer,
+        raw_history,
+        max_doc_length=max_doc_length,
+        max_doc_num=history_budget,
+        policy=history_selection,
+        split_oversized_history_docs=split_oversized_history_docs,
+        split_fn=_split_message_to_fit,
+        select_fn=_select_history,
+        token_len_fn=_message_token_length,
+    )
+    policy_docs, policy_meta = apply_policy(
+        tokenizer,
+        frozen_docs,
+        history_units,
+        kind,
+        chunk_size,
+        max_doc_length,
+        _encode_fn,
+        _decode_fn,
+        token_len_fn=_message_token_length,
+        flatten_fn=_flatten_turn_units,
+        split_fn=_split_message_to_fit,
+        need_content_tokens=need_content_tokens,
+    )
+    kept, delayed = split_delayed(
+        policy_docs,
+        frozen_docs,
+        delay_recent_turns,
+        doc_turn_indices=policy_meta["doc_turn_indices"],
+    )
+    meta.update(
+        content_tokens=policy_meta["content_tokens"],
+        policy_content_tokens=policy_meta["policy_content_tokens"],
+        history_chunk_count=len(kept),
+        structural_fallback_docs=policy_meta["structural_fallback_docs"],
+        structural_partial_docs=policy_meta["structural_partial_docs"],
+        structural_repacked_docs=policy_meta["structural_repacked_docs"],
+        structural_passthrough_docs=policy_meta["structural_passthrough_docs"],
+        fixed_window_tokens=policy_meta["fixed_window_tokens"],
+        delayed_docs=len(delayed),
+    )
+    return kept, delayed, meta
+
+
 class JointDataset:
     """Convert JointExample records into GistMultiDocTrainer format.
 
@@ -753,6 +974,8 @@ class JointDataset:
         max_tool_definition_tokens: int = 32000,
         split_oversized_history_docs: bool = True,
         per_side_caps: bool = True,
+        chunk_policy: str = "agent-turn",
+        delay_recent_turns: int = 0,
     ) -> None:
         if doc_mode not in ("joint", "tool_only", "history_only"):
             raise ValueError(f"Unsupported doc_mode: {doc_mode!r}")
@@ -763,6 +986,8 @@ class JointDataset:
         self.max_length = max_length
         self.doc_mode = doc_mode
         self.per_side_caps = per_side_caps
+        self.chunk_policy = chunk_policy
+        self.delay_recent_turns = delay_recent_turns
         self.data: List[Dict[str, Any]] = []
         skipped_by_reason: Counter[str] = Counter()
         target_known = 0
@@ -784,6 +1009,8 @@ class JointDataset:
                 max_tool_definition_tokens=max_tool_definition_tokens,
                 split_oversized_history_docs=split_oversized_history_docs,
                 per_side_caps=per_side_caps,
+                chunk_policy=chunk_policy,
+                delay_recent_turns=delay_recent_turns,
                 meta_out=meta,
             )
             if row is None:
@@ -846,6 +1073,8 @@ class JointDataset:
         max_tool_definition_tokens: int = 32000,
         split_oversized_history_docs: bool = True,
         per_side_caps: bool = True,
+        chunk_policy: str = "agent-turn",
+        delay_recent_turns: int = 0,
         meta_out: Optional[Dict[str, Any]] = None,
     ) -> tuple[Optional[Dict[str, Any]], str]:
         if doc_mode not in ("joint", "tool_only", "history_only"):
@@ -870,25 +1099,26 @@ class JointDataset:
             return None, tool_skip_reason
 
         # ---- history chunks (chronological) -------------------------------
-        history: List[Message] = []
-        if doc_mode != "tool_only":
-            history_budget = _history_chunk_budget(
-                doc_mode, max_doc_num, max_tool_chunks, len(tool_chunks), per_side_caps
-            )
-            raw_history = [
-                {"role": "user", "content": text}
-                for text in example.history_documents
-                if text and text.strip()
-            ]
-            if history_budget > 0 and raw_history:
-                history = _fit_reused_history(
-                    tokenizer,
-                    raw_history,
-                    max_doc_length=max_doc_length,
-                    max_doc_num=history_budget,
-                    policy=history_selection,
-                    split_oversized_history_docs=split_oversized_history_docs,
-                )
+        history, delayed_history, history_meta = build_history_chunks(
+            tokenizer,
+            example,
+            doc_mode,
+            max_doc_length=max_doc_length,
+            max_doc_num=max_doc_num,
+            max_tool_chunks=max_tool_chunks,
+            num_tool_chunks=len(tool_chunks),
+            per_side_caps=per_side_caps,
+            history_selection=history_selection,
+            split_oversized_history_docs=split_oversized_history_docs,
+            chunk_policy=chunk_policy,
+            delay_recent_turns=delay_recent_turns,
+            # Training never reads content_tokens (it was log-only bookkeeping),
+            # and measuring it doubles the history-side tokenization cost of the
+            # whole dataset build.  The eval driver asks for it explicitly.
+            need_content_tokens=False,
+        )
+        if meta_out is not None:
+            meta_out.update(history_meta)
 
         current = [
             _normal_chat_message(message)
@@ -900,6 +1130,14 @@ class JointDataset:
             meta_out.update(num_tool_chunks=len(tool_chunks), num_history_docs=len(history))
         if doc_count < min_doc_num:
             return None, f"doc_num<{min_doc_num}"
+        if doc_count > max_doc_num:
+            # Only reachable off the default policy: ``structural`` turns one
+            # frozen doc into one doc per atomic block, so the doc count is no
+            # longer bounded by the slot budget.  The training grid is a fixed
+            # ``max_doc_num * max_doc_length`` block, so the row is skipped
+            # rather than silently reshaped.  (The eval driver has no fixed
+            # grid and keeps every chunk.)
+            return None, f"doc_num>{max_doc_num}"
         if not current:
             return None, "empty_current"
         if not example.answer:
@@ -929,11 +1167,21 @@ class JointDataset:
         context_input_ids.extend([-100] * (max_doc_length * empty_docs))
 
         # ---- ordinary prompt (current turn) + supervised answer -----------
+        # Delayed docs (the last ``delay_recent_turns`` turns) are NOT
+        # compressed: they are prepended raw to the prompt, exactly as
+        # ``full_history_doc_num`` does on the history path
+        # (train_data_multiturn.py:1210-1224).
+        delayed_ids: List[int] = []
+        for message in delayed_history:
+            delayed_ids.extend(
+                _chat_template_ids(tokenizer, [message], max_length=max_doc_length)
+            )
         prompt_ids = _chat_template_ids(
             tokenizer,
             current,
             add_generation_prompt=True,
         )
+        prompt_ids = delayed_ids + prompt_ids
         answer_ids = tokenizer.encode(example.answer, add_special_tokens=False)
         if not answer_ids:
             return None, "empty_answer_ids"

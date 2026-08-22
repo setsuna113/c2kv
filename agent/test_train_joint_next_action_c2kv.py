@@ -30,6 +30,11 @@ from pathlib import Path
 
 import pytest
 
+# The entry pulls python/models (torch) at import time, so the whole module is
+# torch-gated: without this the file ERRORs at collection on a torch-free box
+# instead of skipping.
+pytest.importorskip("torch")
+
 # Make python/ and agent/ importable when pytest is invoked from the repo root
 # (the entry imports gist_args at module top, before its own sys.path fix).
 _REPO_ROOT = Path(__file__).resolve().parents[1]
