@@ -95,15 +95,18 @@
 
 ## 10. Gate-2 一判：buggy 四臂 × fixed-eval（joint 条件，common-qid n=108，c2kv@8×，appworld-only，单 seed）
 
+**严格全交集版（6 路 common qid n=128，joint 条件）**——这才是判读口径：
+
 | 臂 | tool_acc | argF1 | textF1 |
 |---|---|---|---|
-| J-joint（buggy） | **0.500** | 0.091 | 0.410 |
-| J-alternate（buggy） | 0.491 | 0.103 | 0.400 |
-| J-sep_hist（buggy，半边） | 0.454 | 0.079 | 0.405 |
-| J-sep_tool（buggy，半边） | 0.380 | 0.052 | 0.314 |
-| J-separate（拼接） | 待定（评测进程在结果写盘前遭 Ascend 运行时 double-free 崩溃，已重跑） | | |
+| J-alternate（buggy） | **0.539** | 0.154 | 0.418 |
+| J-joint（buggy） | 0.531 | 0.139 | 0.431 |
+| J-separate（genTool / genHist） | 0.508 / 0.500 | 0.102 / 0.106 | 0.354 / 0.432 |
+| J-sep_hist（半边） | 0.492 | 0.105 | 0.419 |
+| J-sep_tool（半边） | 0.422 | 0.091 | 0.344 |
 
-**判读（预注册规则）**：joint − alternate = +0.9pp < 3pp 噪声地板 → **平 → `inconclusive`**。不下"联合监督无用"结论，等 fixed 四臂表（08-24 晚）终判。注意 buggy 表里 separate 系臂还带着 1.691× 预算优势。
+**判读（预注册规则）**：joint 0.531 vs alternate 0.539，Δ=−0.8pp，|Δ|<3pp → **平 → `inconclusive`**，等 fixed 四臂表终判（不许下"无用"结论）。严格单调触发式 joint≤alternate≤separate 不成立（separate 两变体均低于 joint/alternate）。
+附带观察：separate 带着 1.691× 预算优势仍输 joint/alternate 约 3pp → "共享参数 > 双 extractor 拼接"（J-alternate > J-separate 一腿）有弱-中等迹象；history 半边（0.492）显著强于 tool 半边（0.422），下一动作预测的主要信号来自历史。
 
 同 checkpoint buggy-eval vs fixed-eval（joint 条件）：joint 0.486→0.500，alternate 0.440→0.491，sep_tool 0.358→0.380，sep_hist 0.450→0.454——fixed eval 全面微升（alternate +5.1pp 最大），量化了 target 截断的伤害。
 
