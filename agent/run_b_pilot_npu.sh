@@ -313,6 +313,12 @@ if (( ${#REF_SHARDS[@]} > 0 )); then
 fi
 
 # --- 4. paired analysis -----------------------------------------------------
+# The analyzer re-checks the frozen qid set itself: any arm not covering the
+# manifest stamps an INCOMPLETE COMMON-QID SET banner on analysis.md
+# (b_prereg.md §2 — such a round enters no paired table).
+if [[ -n "${QID_MANIFEST}" ]]; then
+  ANALYZE_ARGS+=(--qid_manifest "${QID_MANIFEST}")
+fi
 python agent/analyze_b_pilot.py \
   "${ANALYZE_ARGS[@]}" \
   --out_prefix "${OUTPUT_DIR}/${NAME}" \

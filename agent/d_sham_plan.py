@@ -214,6 +214,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--tokenizer", required=True)
     parser.add_argument("--out", default="./configs/bdf_pilot/d_sham_plan.json")
     parser.add_argument("--seed", type=int, default=SEED)
+    parser.add_argument(
+        "--allow_missing",
+        action="store_true",
+        help="Downgrade missing/degenerate frozen qids from FATAL to a warning. "
+        "Diagnostics only — a plan built this way must not feed the sham arm "
+        "(d_prereg.md §8-4: a missing qid is FATAL, never a skip).",
+    )
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", datefmt="%H:%M:%S")
 
@@ -258,12 +265,28 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         plan["budget"]["gate_passed"],
         plan["neutrality"]["gate_passed"],
     )
-    if plan["missing_qids"]:
-        logger.warning("%d frozen qids absent from the doc table", len(plan["missing_qids"]))
+    failed = False
+    if plan["missing_qids"] or plan["degenerate_qids"]:
+        coverage = "%d frozen qids absent from the doc table, %d degenerate (no usable span)" % (
+            len(plan["missing_qids"]),
+            len(plan["degenerate_qids"]),
+        )
+        if args.allow_missing:
+            logger.warning(
+                "%s — continuing under --allow_missing (diagnostics only; this plan "
+                "must not feed the sham arm)",
+                coverage,
+            )
+        else:
+            # d_prereg.md §8-4: a missing qid is FATAL, never a skip — the plan
+            # file is still written for inspection, but the exit code refuses it.
+            logger.error("FATAL: %s (d_prereg.md §8-4). Rebuild the doc table, or pass "
+                         "--allow_missing for a diagnostic plan.", coverage)
+            failed = True
     if not (plan["budget"]["gate_passed"] and plan["neutrality"]["gate_passed"]):
         logger.error("plan gates FAILED — do not run the sham arm with this plan")
-        return 1
-    return 0
+        failed = True
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":

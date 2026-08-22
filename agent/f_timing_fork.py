@@ -119,6 +119,7 @@ from f_fork_common import (  # noqa: E402
     fork_eligibility,
     kv_bytes_per_token,
     load_done_keys,
+    require_anchor_file,
 )
 
 
@@ -842,6 +843,11 @@ def _select_examples(examples: Sequence[Any], args: argparse.Namespace) -> List[
 
 
 def evaluate(args: argparse.Namespace) -> Dict[str, Any]:
+    # The prereg is hashed into every row but never otherwise read, so a bad
+    # path would silently stamp prereg_sha256=null and the run would still
+    # complete looking frozen.  Refuse before any device or model work.
+    if args.prereg_file:
+        require_anchor_file(args.prereg_file, label="--prereg_file")
     passes = _passes_for(args.arm_set)
     if ARM_PASS_SAMPLED in passes and not _sampling_supported():
         raise SystemExit(
@@ -859,6 +865,19 @@ def evaluate(args: argparse.Namespace) -> Dict[str, Any]:
 
     examples = _load_and_select_examples(args)
     logger.info("Loaded %d joint %s examples", len(examples), args.split)
+
+    # Unpinned manifests are legal (their sha stamps become null) but violate
+    # the runbook's pinning discipline for a real pilot run — say so loudly.
+    if not args.qid_manifest:
+        logger.warning(
+            "qid manifest UNPINNED (--qid_manifest not set): examples follow "
+            "loader order and qid_manifest_sha256 stamps null"
+        )
+    if not args.split_manifest_file:
+        logger.warning(
+            "split manifest UNPINNED (--split_manifest_file not set): ratio/seed "
+            "split and split_manifest_sha256 stamps null"
+        )
 
     stamps = {
         "model_path": args.model,

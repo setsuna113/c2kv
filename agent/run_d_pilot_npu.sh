@@ -31,6 +31,12 @@
 #   SHAM_PLAN              frozen sham plan              (./configs/bdf_pilot/d_sham_plan.json)
 #   BATTERY_NONE_ROWS      battery compressed rows       ()
 #   BATTERY_FULL_ROWS      battery full rows             ()
+#                          (required for PHASE=smoke: the full-arm identity
+#                          sentinel cannot run without it and the smoke phase
+#                          refuses to pass silently — see ALLOW_MISSING_FULL_SENTINEL)
+#   ALLOW_MISSING_FULL_SENTINEL  1 -> smoke may run without BATTERY_FULL_ROWS ()
+#   SKIP_SMOKE_CHECK       1 -> PHASE=arms may start without smoke.ok ()
+#   SPLIT_MANIFEST_FILE    frozen split manifest json    () = derive split in-process
 #   RATIO                  compression ratio             (8)
 #   ARMS                   comma list for PHASE=arms     (sham,corr,corr_re)
 #   VERIFY_QIDS            re-verified none/full qids    (5)
@@ -67,6 +73,9 @@ BUNDLES="${BUNDLES:-./results/d/bundles_batch_tf.jsonl}"
 SHAM_PLAN="${SHAM_PLAN:-./configs/bdf_pilot/d_sham_plan.json}"
 BATTERY_NONE_ROWS="${BATTERY_NONE_ROWS:-}"
 BATTERY_FULL_ROWS="${BATTERY_FULL_ROWS:-}"
+ALLOW_MISSING_FULL_SENTINEL="${ALLOW_MISSING_FULL_SENTINEL:-}"
+SKIP_SMOKE_CHECK="${SKIP_SMOKE_CHECK:-}"
+SPLIT_MANIFEST_FILE="${SPLIT_MANIFEST_FILE:-}"
 RATIO="${RATIO:-8}"
 ARMS="${ARMS:-sham,corr,corr_re}"
 VERIFY_QIDS="${VERIFY_QIDS:-5}"
@@ -109,6 +118,11 @@ COMMON_ARGS=(
   --max_doc_num "${MAX_DOC_NUM}"
   --max_new_tokens "${MAX_NEW_TOKENS}"
 )
+# Frozen split manifest passthrough (mirrors run_b_pilot_npu.sh); empty keeps
+# the in-process split derivation.
+if [[ -n "${SPLIT_MANIFEST_FILE}" ]]; then
+  COMMON_ARGS+=(--split_manifest_file "${SPLIT_MANIFEST_FILE}")
+fi
 
 echo "ASCEND_RT_VISIBLE_DEVICES=${ASCEND_RT_VISIBLE_DEVICES}"
 echo "PHASE=${PHASE}"
@@ -122,6 +136,7 @@ echo "BUNDLES=${BUNDLES}"
 echo "SHAM_PLAN=${SHAM_PLAN}"
 echo "BATTERY_NONE_ROWS=${BATTERY_NONE_ROWS}"
 echo "BATTERY_FULL_ROWS=${BATTERY_FULL_ROWS}"
+echo "SPLIT_MANIFEST_FILE=${SPLIT_MANIFEST_FILE}"
 echo "RATIO=${RATIO}"
 echo "ARMS=${ARMS}"
 echo "VERIFY_QIDS=${VERIFY_QIDS}"
@@ -149,6 +164,18 @@ sentinel() {
 }
 
 if [[ "${PHASE}" == "smoke" ]]; then
+  # d_prereg.md §8: nothing else runs until the sentinels pass.  Without
+  # BATTERY_FULL_ROWS the full-arm identity sentinel (sentinel 2) silently
+  # never runs and a "passing" smoke proves less than it claims — so an unset
+  # value is fatal, not a soft skip.
+  if [[ -z "${BATTERY_FULL_ROWS}" && "${ALLOW_MISSING_FULL_SENTINEL}" != "1" ]]; then
+    echo "FATAL: BATTERY_FULL_ROWS is unset, so the full-arm identity sentinel" >&2
+    echo "  (re-run full == battery full rows, d_prereg.md sentinel 2) cannot run" >&2
+    echo "  and the smoke phase would exit 0 without it. Point BATTERY_FULL_ROWS" >&2
+    echo "  at the battery full-arm jsonl, or set ALLOW_MISSING_FULL_SENTINEL=1" >&2
+    echo "  to accept a smoke result that does not cover the rollback arm." >&2
+    exit 1
+  fi
   SMOKE_DIR="${OUT_DIR}/smoke"
   mkdir -p "${SMOKE_DIR}"
   for arm in none sham corr corr_re corr_all sham_mech full; do
@@ -166,19 +193,43 @@ if [[ "${PHASE}" == "smoke" ]]; then
   if [[ -n "${BATTERY_FULL_ROWS}" ]]; then
     sentinel "${SMOKE_DIR}/d_full.jsonl" "${BATTERY_FULL_ROWS}" "prediction"
   else
-    echo "BATTERY_FULL_ROWS unset — full-arm sentinel NOT run" >&2
+    echo "BATTERY_FULL_ROWS unset — full-arm sentinel NOT run (ALLOW_MISSING_FULL_SENTINEL=1)" >&2
   fi
   echo "Smoke rows:"
   for arm in none sham corr corr_re corr_all sham_mech full; do
     echo "==== ${SMOKE_DIR}/d_${arm}.jsonl ===="
     cat "${SMOKE_DIR}/d_${arm}.jsonl"
   done
+  # Reached only when every arm and sentinel above succeeded (set -e).  The
+  # arms phase refuses to start without this marker.
+  MANIFEST_SHA="$(python -c 'import sys; from pathlib import Path; from extract_cw_triggers import sha256_text_file; print(sha256_text_file(Path(sys.argv[1])))' "${MANIFEST}")"
+  {
+    echo "model=${MODEL_PATH}"
+    echo "manifest=${MANIFEST}"
+    echo "manifest_sha256=${MANIFEST_SHA}"
+    echo "full_sentinel=$([[ -n "${BATTERY_FULL_ROWS}" ]] && echo run || echo skipped)"
+  } > "${SMOKE_DIR}/smoke.ok"
+  echo "[smoke] PASS — wrote ${SMOKE_DIR}/smoke.ok"
   exit 0
 fi
 
 if [[ "${PHASE}" != "arms" ]]; then
   echo "Unrecognized PHASE=${PHASE} (use smoke/arms)" >&2
   exit 1
+fi
+
+# d_prereg.md §8: nothing else runs until the smoke sentinels pass.
+SMOKE_OK="${OUT_DIR}/smoke/smoke.ok"
+if [[ ! -f "${SMOKE_OK}" && "${SKIP_SMOKE_CHECK}" != "1" ]]; then
+  echo "FATAL: ${SMOKE_OK} not found — the smoke phase has not passed for this" >&2
+  echo "  OUT_DIR. Run PHASE=smoke first (d_prereg.md §8: nothing else runs" >&2
+  echo "  until the sentinels pass), or set SKIP_SMOKE_CHECK=1 to override" >&2
+  echo "  deliberately." >&2
+  exit 1
+fi
+if [[ -f "${SMOKE_OK}" ]]; then
+  echo "[arms] smoke marker:"
+  cat "${SMOKE_OK}"
 fi
 
 IFS=',' read -ra _arms <<< "${ARMS}"

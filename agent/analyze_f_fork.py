@@ -1,6 +1,8 @@
 """Analyzer for the F pilot timing-fork rows — torch-free.
 
-Reads the jsonl written by ``agent/f_timing_fork.py`` and derives every arm
+Reads the jsonl written by ``agent/f_timing_fork.py`` — one file, or several
+(the greedy_core and sampled pass files merged into a single report; a
+conflicting cross-file duplicate rollout is FATAL) — and derives every arm
 from the recorded rollouts (``f_fork_common.derive_arms``): no arm here costs
 an extra generation.  Emits ``<stem>.analysis.json`` and a markdown companion.
 
@@ -22,7 +24,7 @@ import json
 import math
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Set, Tuple
 
 import sys
 
@@ -69,16 +71,19 @@ ORACLE_UNION_PHRASE = (
     "不构成选择机制"
 )
 
+# Verbatim per f_prereg.md §7, inner quote characters included.
 MEMORY_HONESTY_CLAUSE = (
     "Inside the speculation window both branches are resident: the fork segment "
     "costs gist(x_T) + raw(x_T) = 1.125x raw(x_T) at ratio 8, so the window uses "
     "MORE memory than a full-only prefix, never less. Any saving materialises "
-    "only after the commit. No claim of the form 'compression frees memory, so we "
-    "can afford more branches' is made."
+    "only after the commit. No claim of the form \"compression frees memory, so we "
+    "can afford more branches\" is made."
 )
 
 READING_CARD = [
-    "① headroom exists? -> arm_table.delta_oracle_timing vs noise_floor",
+    "① headroom exists? -> arm_table.delta_oracle_timing vs noise_floor_delta.band95 "
+    "(both are paired differences against max(F0,F2); noise_floor_absolute is "
+    "descriptive only)",
     "② beats the simple baseline? -> cis['F3g-F4'] and cis['F3g-F0']",
     "③ cost acceptable? -> cost_tables.rollout_ledger / gpu_ms_ledger / bytes_table",
     "④ which failure class benefits? -> four_cell_table + both_match_gold_block",
@@ -86,7 +91,7 @@ READING_CARD = [
 
 STOPPING_WHITELIST = [
     "implementation-invalid (position invariant or greedy repeat check fails)",
-    "no headroom above the F4 coin floor",
+    "no headroom (delta_oracle_timing inside the F4 coin noise_floor_delta.band95)",
     "dominated by a simple baseline",
     "cost unacceptable",
     "priority",
@@ -114,6 +119,49 @@ def load_rows(path: Any) -> List[Dict[str, Any]]:
                 continue
             rows.append(json.loads(line))
     return rows
+
+
+def _row_key(row: Mapping[str, Any]) -> Tuple[Any, Any, Any, int]:
+    """Rollout identity: ``(qid, arm_pass, branch, rollout_index)``."""
+
+    try:
+        rollout = int(row.get("rollout_index") or 0)
+    except (TypeError, ValueError):
+        rollout = 0
+    return (row.get("qid"), row.get("arm_pass"), row.get("branch"), rollout)
+
+
+def merge_input_rows(paths: Sequence[Any]) -> List[Dict[str, Any]]:
+    """Concatenate the rows of several driver files into one merged run.
+
+    The runbook writes the greedy_core and sampled passes to separate jsonl
+    files; the merged report needs both in hand (Δ_oracle and F3s-F1 live in
+    the same reading card).  WITHIN one file, duplicate keys are the documented
+    resume semantics and collapse last-write-wins first.  ACROSS files, two
+    different post-collapse rows claiming the same (qid, arm_pass, branch,
+    rollout_index) would let the argument order silently pick the winner —
+    FATAL with the offending key instead.  Identical cross-file duplicates
+    (the same file listed twice) are harmless.
+    """
+
+    merged: List[Dict[str, Any]] = []
+    last_by_key: Dict[Tuple[Any, Any, Any, int], Tuple[Any, Dict[str, Any]]] = {}
+    for path in paths:
+        file_rows = load_rows(path)
+        file_last: Dict[Tuple[Any, Any, Any, int], Dict[str, Any]] = {}
+        for row in file_rows:
+            file_last[_row_key(row)] = row
+        for key, row in file_last.items():
+            previous = last_by_key.get(key)
+            if previous is not None and previous[1] != row:
+                raise SystemExit(
+                    "FATAL: conflicting duplicate rollout across input files for "
+                    f"(qid, arm_pass, branch, rollout_index)={key}: "
+                    f"{previous[0]} vs {path}"
+                )
+            last_by_key[key] = (path, row)
+        merged.extend(file_rows)
+    return merged
 
 
 def pair_by_qid(
@@ -184,6 +232,22 @@ def arm_table(
             delta_oracle = round(
                 table["F5"][PRIMARY_METRIC] - (table[best_single][PRIMARY_METRIC] or 0.0), 4
             )
+    # 26号's first-read formula is F5 − max(F0,F1,F2).  F1 lives in the sampled
+    # pass (different temperature domain and its own qid set), so the greedy
+    # basis stays primary and the F1-inclusive variant is emitted ALONGSIDE
+    # when F1 rows exist, each labelled with its basis.
+    delta_oracle_incl_f1 = None
+    best_single_incl_f1 = None
+    singles_incl_f1 = [arm for arm in ("F0", "F1", "F2") if arm in table]
+    if "F5" in table and "F1" in table and table["F5"][PRIMARY_METRIC] is not None:
+        best_single_incl_f1 = max(
+            singles_incl_f1, key=lambda arm: table[arm][PRIMARY_METRIC] or 0.0
+        )
+        delta_oracle_incl_f1 = round(
+            table["F5"][PRIMARY_METRIC]
+            - (table[best_single_incl_f1][PRIMARY_METRIC] or 0.0),
+            4,
+        )
     unconditional_gap = None
     if "F0" in table and "F2" in table:
         unconditional_gap = round(
@@ -195,6 +259,18 @@ def arm_table(
         "arms": table,
         "best_single_arm": best_single,
         "delta_oracle_timing": delta_oracle,
+        "delta_oracle_timing_basis": "basis: [F0,F2]",
+        "delta_oracle_timing_incl_F1": delta_oracle_incl_f1,
+        "delta_oracle_timing_incl_F1_basis": (
+            "basis: [F0,F1,F2]" if delta_oracle_incl_f1 is not None else None
+        ),
+        "best_single_arm_incl_F1": best_single_incl_f1,
+        "delta_oracle_basis_note": (
+            "delta_oracle_timing uses the greedy single arms only (F1 is a "
+            "sampled-pass arm scored on its own qid set); "
+            "delta_oracle_timing_incl_F1 is 26号's F5 - max(F0,F1,F2) first-read "
+            "variant, present only when F1 rows exist."
+        ),
         "oracle_union_phrase": ORACLE_UNION_PHRASE,
         "unconditional_gap_F2_minus_F0": unconditional_gap,
         "unconditional_gap_note": (
@@ -279,6 +355,71 @@ def noise_floor(
         ],
         "min": round(rates[0], 4),
         "max": round(rates[-1], 4),
+    }
+
+
+def noise_floor_delta(
+    rows_by_qid: Mapping[str, Mapping[str, Mapping[str, Any]]],
+    *,
+    metric: str = PRIMARY_METRIC,
+    slots: Sequence[str] = GREEDY_SLOTS,
+    seeds: int = 200,
+    base_seed: int = BOOTSTRAP_SEED,
+) -> Dict[str, Any]:
+    """Per-seed (coin rate − best single-arm rate) over the SAME paired qids.
+
+    ``delta_oracle_timing`` is a DIFFERENCE of rates (F5 − max(F0,F2)); the
+    coin's absolute success-rate band lives on another scale entirely, so
+    comparing the two flips behaviour with the baseline rate.  This block is
+    the dimensionally consistent floor the reading card compares against: the
+    baseline max(F0,F2) is computed on the same paired qid set, and the band
+    is over the per-seed coin-minus-baseline differences.
+    """
+
+    qids = [
+        qid for qid, slot_rows in sorted(rows_by_qid.items())
+        if all(slot in slot_rows for slot in slots)
+    ]
+    if not qids:
+        return {
+            "metric": metric,
+            "n": 0,
+            "seeds": seeds,
+            "band95": [None, None],
+            "mean": None,
+            "best_single_arm": None,
+            "best_single_rate": None,
+        }
+    # Single-arm rates on the paired set: slots[0] plays F0, slots[1] plays F2.
+    single_rates = {
+        arm: sum(1 for qid in qids if rows_by_qid[qid][slot].get(metric)) / len(qids)
+        for arm, slot in (("F0", slots[0]), ("F2", slots[1]))
+    }
+    best_arm = max(single_rates, key=lambda arm: single_rates[arm])
+    best_rate = single_rates[best_arm]
+    deltas: List[float] = []
+    for offset in range(seeds):
+        seed = base_seed + offset
+        hits = 0
+        for qid in qids:
+            slot = slots[0] if f4_coin(qid, seed) == BRANCH_COMPRESS_NOW else slots[1]
+            hits += 1 if rows_by_qid[qid][slot].get(metric) else 0
+        deltas.append(hits / len(qids) - best_rate)
+    deltas.sort()
+    return {
+        "metric": metric,
+        "n": len(qids),
+        "seeds": seeds,
+        "base_seed": base_seed,
+        "best_single_arm": best_arm,
+        "best_single_rate": round(best_rate, 4),
+        "mean": round(sum(deltas) / len(deltas), 4),
+        "band95": [
+            round(deltas[int(0.025 * seeds)], 4),
+            round(deltas[min(seeds - 1, int(0.975 * seeds))], 4),
+        ],
+        "min": round(deltas[0], 4),
+        "max": round(deltas[-1], 4),
     }
 
 
@@ -388,6 +529,14 @@ def cost_tables(
         rule, slots = _arm_slot_plan(arm)
         pool = sampled_rows_by_qid if any(slot.endswith(("_s0", "_s1")) for slot in slots) else rows_by_qid
         n = len(per_qid)
+        # Ledger denominator: success rates and GPU-sec must be computed over
+        # the SAME qid set.  On a ragged (interrupted) archive a single-slot
+        # arm like F0 can admit qids the paired pool excludes — counting their
+        # successes while never accruing their cost would inflate
+        # success_per_gpu_sec.  Both ledger columns therefore run over
+        # per_qid ∩ pool, and the excluded qids are counted out loud.
+        ledger_qids = [qid for qid in per_qid if qid in pool]
+        n_excluded = n - len(ledger_qids)
         rollouts_policy = 1 if rule in ("single", "coin") else len(slots)
         rollout_ledger[arm] = {
             "n": n,
@@ -407,10 +556,8 @@ def cost_tables(
         prefill_dedup_sec = 0.0
         decode_sec = 0.0
         components = {field: 0.0 for field in PREFILL_FIELDS}
-        for qid in per_qid:
-            slot_rows = pool.get(qid)
-            if not slot_rows:
-                continue
+        for qid in ledger_qids:
+            slot_rows = pool[qid]
             seen_branches = set()
             for slot in slots:
                 row = slot_rows.get(slot)
@@ -426,14 +573,18 @@ def cost_tables(
                     prefill_dedup_sec += row_prefill
                 decode_sec += float(row.get(DECODE_FIELD) or 0.0)
         total_sec = prefill_sec + decode_sec
-        successes = sum(1 for values in per_qid.values() if values.get(metric))
+        successes = sum(1 for qid in ledger_qids if per_qid[qid].get(metric))
         gpu_ledger[arm] = {
             "n": n,
+            "n_ledger": len(ledger_qids),
+            "n_excluded_unpaired": n_excluded,
             "gpu_ms_total": round(1000.0 * total_sec, 1),
             "gpu_ms_prefill": round(1000.0 * prefill_sec, 1),
             "gpu_ms_prefill_dedup": round(1000.0 * prefill_dedup_sec, 1),
             "gpu_ms_decode": round(1000.0 * decode_sec, 1),
-            "gpu_ms_per_decision": round(1000.0 * total_sec / n, 1) if n else None,
+            "gpu_ms_per_decision": (
+                round(1000.0 * total_sec / len(ledger_qids), 1) if ledger_qids else None
+            ),
             "components_ms": {
                 field: round(1000.0 * value, 1) for field, value in components.items()
             },
@@ -488,6 +639,11 @@ def cost_tables(
         "rollout_ledger": rollout_ledger,
         "gpu_ms_ledger": gpu_ledger,
         "bytes_table": bytes_table,
+        "ledger_denominator_note": (
+            "successes and GPU-sec are both computed over the paired-complete "
+            "qid set (n_ledger); qids an arm admits but the pool excludes are "
+            "counted in n_excluded_unpaired and contribute to neither column."
+        ),
         "branch_b_decode_note": (
             "branch defer decodes against a longer raw prefix; the pilot reports "
             "the asymmetry rather than equalising it."
@@ -538,14 +694,36 @@ def tie_rule_sensitivity(
 
 
 def skip_table(rows: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
-    counts: Dict[str, int] = defaultdict(int)
+    """Skip accounting, deduplicated by (qid, skip_reason).
+
+    The driver re-emits every eligibility-skip row on each resume (only
+    non-skipped rows count as done), so after k interrupted resumes the raw
+    row count is inflated k-fold.  The example-level truth is the unique
+    (qid, skip_reason) count; the raw row count is reported alongside so the
+    inflation itself stays visible.
+    """
+
+    raw_counts: Dict[str, int] = defaultdict(int)
+    unique: Set[Tuple[Any, str]] = set()
     for row in rows:
         if row.get("skipped"):
-            counts[str(row.get("skip_reason") or "unknown")] += 1
+            reason = str(row.get("skip_reason") or "unknown")
+            raw_counts[reason] += 1
+            unique.add((row.get("qid"), reason))
+    dedup_counts: Dict[str, int] = defaultdict(int)
+    for _qid, reason in unique:
+        dedup_counts[reason] += 1
     return {
         "num_rows": len(rows),
-        "num_skipped": sum(counts.values()),
-        "skip_reasons": dict(sorted(counts.items())),
+        "num_skipped": len(unique),
+        "num_skipped_rows_raw": sum(raw_counts.values()),
+        "skip_reasons": dict(sorted(dedup_counts.items())),
+        "skip_reasons_raw_rows": dict(sorted(raw_counts.items())),
+        "dedup_note": (
+            "skip rows are re-emitted on every resume; num_skipped and "
+            "skip_reasons are deduplicated by (qid, skip_reason), the *_raw "
+            "fields count rows as written."
+        ),
     }
 
 
@@ -576,12 +754,20 @@ def build_report(
         "n_paired_greedy": len(greedy),
         "n_paired_sampled": len(sampled),
         "n_sessions": len({_session_of(slot_rows) for slot_rows in greedy.values()}),
+        # The F4 coin seed is frozen in f_prereg.md §5; stamping it here keeps
+        # a manually re-run analysis traceable without the launcher log.
+        "coin_seed": derived["coin_seed"],
         "skips": skip_table(rows),
         "arm_table": table,
         "four_cell_table": cells,
         "disagreement": disagreement(greedy),
         "both_match_gold_block": both_match_gold_block(greedy),
-        "noise_floor": noise_floor(greedy, seeds=noise_seeds, base_seed=bootstrap_seed),
+        "noise_floor_delta": noise_floor_delta(
+            greedy, seeds=noise_seeds, base_seed=bootstrap_seed
+        ),
+        "noise_floor_absolute": noise_floor(
+            greedy, seeds=noise_seeds, base_seed=bootstrap_seed
+        ),
         "cis": cis(derived, greedy, sampled, b=bootstrap_b, seed=bootstrap_seed),
         "cost_tables": cost_tables(derived, greedy, sampled),
         "tie_rule_sensitivity": tie_rule_sensitivity(derived),
@@ -656,9 +842,20 @@ def render_markdown(report: Mapping[str, Any]) -> str:
     lines.append("")
     lines.append(
         f"Δ_oracle(timing) = F5 − {report['arm_table']['best_single_arm']} = "
-        f"{_fmt(report['arm_table']['delta_oracle_timing'])}. "
+        f"{_fmt(report['arm_table']['delta_oracle_timing'])} "
+        f"({report['arm_table']['delta_oracle_timing_basis']}). "
         f"Oracle union: {ORACLE_UNION_PHRASE}"
     )
+    if report["arm_table"].get("delta_oracle_timing_incl_F1") is not None:
+        lines.append("")
+        lines.append(
+            f"Δ_oracle(timing, incl. F1) = F5 − "
+            f"{report['arm_table']['best_single_arm_incl_F1']} = "
+            f"{_fmt(report['arm_table']['delta_oracle_timing_incl_F1'])} "
+            f"({report['arm_table']['delta_oracle_timing_incl_F1_basis']}; "
+            "26号 first-read variant — F1 is scored on the sampled pass's own "
+            "qid set)."
+        )
     lines.append("")
     lines.append(
         f"Unconditional gap F2 − F0 = "
@@ -697,11 +894,21 @@ def render_markdown(report: Mapping[str, Any]) -> str:
 
     lines.append("## Noise floor (F4 coin, reseeded)")
     lines.append("")
-    floor = report["noise_floor"]
+    delta_floor = report["noise_floor_delta"]
     lines.append(
-        f"mean={_fmt(floor['mean'])}, 95% band={_fmt(floor['band95'][0])}–{_fmt(floor['band95'][1])} "
-        f"over {floor['seeds']} coin seeds, n={floor['n']}. "
-        "A contrast inside this band is not a ranking."
+        f"Delta floor (coin − max(F0,F2), best={delta_floor['best_single_arm']} "
+        f"at {_fmt(delta_floor['best_single_rate'])}): mean={_fmt(delta_floor['mean'])}, "
+        f"95% band={_fmt(delta_floor['band95'][0])}–{_fmt(delta_floor['band95'][1])} "
+        f"over {delta_floor['seeds']} coin seeds, n={delta_floor['n']}. "
+        "Compare arm_table.delta_oracle_timing against THIS band; a "
+        "delta_oracle_timing inside it is not headroom."
+    )
+    lines.append("")
+    floor = report["noise_floor_absolute"]
+    lines.append(
+        f"Absolute coin rate (descriptive only): mean={_fmt(floor['mean'])}, "
+        f"95% band={_fmt(floor['band95'][0])}–{_fmt(floor['band95'][1])} "
+        f"over {floor['seeds']} coin seeds, n={floor['n']}."
     )
     lines.append("")
     lines.append(f"_{footnote}_")
@@ -736,6 +943,17 @@ def render_markdown(report: Mapping[str, Any]) -> str:
             f"{_fmt(gpu.get('success_per_gpu_sec'))} |"
         )
     lines.append("")
+    excluded = {
+        arm: block["n_excluded_unpaired"]
+        for arm, block in report["cost_tables"]["gpu_ms_ledger"].items()
+        if block.get("n_excluded_unpaired")
+    }
+    if excluded:
+        lines.append(
+            "Ledger denominator is the paired-complete qid set; qids excluded "
+            f"as unpaired: {excluded}."
+        )
+        lines.append("")
     lines.append(report["cost_tables"]["bytes_table"]["memory_honesty_clause"])
     lines.append("")
     lines.append(f"_{footnote}_")
@@ -770,15 +988,26 @@ def render_markdown(report: Mapping[str, Any]) -> str:
 
 def main(argv: Optional[Sequence[str]] = None) -> Dict[str, Any]:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--input_file", required=True, help="f_timing_fork.py jsonl")
-    parser.add_argument("--output_prefix", help="Defaults to the input file stem.")
-    parser.add_argument("--coin_seed", type=int, default=0, help="F4 coin seed (== --gen_seed).")
+    parser.add_argument(
+        "--input_file",
+        required=True,
+        nargs="+",
+        help="f_timing_fork.py jsonl(s); pass BOTH pass files (greedy_core + "
+        "sampled) to get one merged report with every arm in it.",
+    )
+    parser.add_argument("--output_prefix", help="Defaults to the first input file's stem.")
+    parser.add_argument(
+        "--coin_seed",
+        type=int,
+        default=0,
+        help="F4 coin seed; 0 is the frozen pilot seed (f_prereg.md §5).",
+    )
     parser.add_argument("--bootstrap_b", type=int, default=BOOTSTRAP_B)
     parser.add_argument("--bootstrap_seed", type=int, default=BOOTSTRAP_SEED)
     parser.add_argument("--noise_seeds", type=int, default=200)
     args = parser.parse_args(argv)
 
-    rows = load_rows(args.input_file)
+    rows = merge_input_rows(args.input_file)
     report = build_report(
         rows,
         coin_seed=args.coin_seed,
@@ -786,8 +1015,12 @@ def main(argv: Optional[Sequence[str]] = None) -> Dict[str, Any]:
         bootstrap_seed=args.bootstrap_seed,
         noise_seeds=args.noise_seeds,
     )
-    report["input_file"] = str(args.input_file)
-    stem = Path(args.output_prefix) if args.output_prefix else Path(args.input_file).with_suffix("")
+    report["input_files"] = [str(path) for path in args.input_file]
+    stem = (
+        Path(args.output_prefix)
+        if args.output_prefix
+        else Path(args.input_file[0]).with_suffix("")
+    )
     stem.parent.mkdir(parents=True, exist_ok=True)
     json_path = stem.with_suffix(".analysis.json")
     md_path = stem.with_suffix(".analysis.md")

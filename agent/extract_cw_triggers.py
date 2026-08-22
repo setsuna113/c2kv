@@ -52,6 +52,10 @@ RULE_VERSION = "d_cw_v1"
 S_METRICS = ("tool_name_match",)
 TRANSITIONS = ("C->C", "C->W", "W->C", "W->W")
 TRIGGER_SOURCES = ("oracle", "L1", "silent")  # enum kept for later phases
+# What the harness stamps into rows of each arm (eval_agent_history_c2kv
+# forces run_ratios=[1] for mode "full"); used to cross-check the CLI claims.
+FULL_ROW_MODES = frozenset({"full"})
+COMPRESSED_ROW_MODES = frozenset({"c2kv"})
 
 # Local copies of the harness scorers (agent/eval_agent_tool_definition_c2kv.py
 # ::_extract_tool_name and agent/eval_agent_history_c2kv.py::_has_tool_call).
@@ -169,6 +173,40 @@ def _load_rows_by_qid(
     return rows, stats
 
 
+def _assert_rows_match_claims(
+    rows: Dict[str, Dict[str, Any]],
+    label: str,
+    expected_modes: frozenset,
+    expected_ratio: int,
+) -> None:
+    """Anchor the frozen recipe in what the battery actually ran.
+
+    The kv_recipe is typed by the operator, but the harness writes ``mode``
+    and ``ratio`` into every row (and forces ratio 1 for mode "full").  A
+    recipe frozen from a mistyped --ratio would later be ENFORCED by
+    d_kv_intervene's guard — the guard's direction inverts — so a
+    contradiction between the CLI claim and the rows is fatal here, before
+    anything is frozen.  Rows without the fields (pre-recipe dialects) skip
+    the check.
+    """
+    for qid, row in rows.items():
+        mode = row.get("mode")
+        if mode is not None and mode not in expected_modes:
+            raise SystemExit(
+                f"FATAL: {label} row {qid} carries mode={mode!r}, expected "
+                f"{sorted(expected_modes)}. The rows handed to --{label}_rows are "
+                "not the arm the recipe claims; fix the inputs, not the recipe."
+            )
+        ratio = row.get("ratio")
+        if ratio is not None and int(ratio) != int(expected_ratio):
+            raise SystemExit(
+                f"FATAL: {label} row {qid} carries ratio={ratio}, but the recipe "
+                f"would freeze ratio={expected_ratio}. A wrong frozen ratio is later "
+                "enforced by the intervention driver's guard, so it must match the "
+                "rows here."
+            )
+
+
 def _score(row: Dict[str, Any], s_metric: str = "tool_name_match") -> Dict[str, Any]:
     """Re-score one row locally and cross-check the harness fields."""
     if s_metric not in S_METRICS:
@@ -206,6 +244,26 @@ def _transition(full_correct: bool, compressed_correct: bool) -> str:
     return f"{'C' if full_correct else 'W'}->{'C' if compressed_correct else 'W'}"
 
 
+def _target_args(row: Dict[str, Any]) -> Any:
+    """Arguments of the target call: the row field when present, otherwise
+    parsed out of the target text (same candidate order as extract_tool_name)."""
+    if row.get("target_args") is not None:
+        return row["target_args"]
+    text = row.get("target", "") or ""
+    blocks = _TOOL_CALL_BLOCK_RE.findall(text)
+    for candidate in blocks or [text]:
+        try:
+            value = json.loads(candidate)
+        except Exception:
+            continue
+        if isinstance(value, dict):
+            function = value.get("function") if isinstance(value.get("function"), dict) else {}
+            arguments = value.get("arguments", function.get("arguments"))
+            if arguments is not None:
+                return arguments
+    return None
+
+
 def _turn_count(row: Dict[str, Any]) -> Optional[int]:
     """History document count. Joint rows split tool/history chunks."""
     for key in ("history_doc_chunks", "doc_chunks"):
@@ -233,11 +291,17 @@ def _bundle_row(
 ) -> Dict[str, Any]:
     """One rebuildable trigger record. No KV on disk — only the recipe."""
     turn = _turn_count(compressed_row)
+    target_args = _target_args(compressed_row)
+    if target_args is None:
+        target_args = _target_args(full_row)
     return {
         "bundle_id": f"{args.batch}:{qid}",
         "batch": args.batch,
         "qid": qid,
         "session_id": compressed_row.get("session_id") or (qid.rsplit(":", 1)[0] if ":" in qid else None),
+        # doc 24 D.3.4 shared-schema name; "subset" is the harness's own field
+        # and is kept alongside for row-level provenance.
+        "benchmark": compressed_row.get("benchmark") or compressed_row.get("subset"),
         "subset": compressed_row.get("subset"),
         "turn": turn,
         "step_index_t": _step_index(qid, compressed_row),
@@ -252,6 +316,11 @@ def _bundle_row(
         "full_has_tool_call": full_score["has_tool_call"],
         "compressed_has_tool_call": compressed_score["has_tool_call"],
         "target_tool_name": compressed_score["target_tool_name"] or full_score["target_tool_name"],
+        "target_args": target_args,
+        # Raw prediction texts, verbatim: line C replays the failure from the
+        # bundle alone and must not need the battery row files for that.
+        "full_output": _row_text(full_row),
+        "compressed_output": _row_text(compressed_row),
         "full_pred_tool_name": full_score["pred_tool_name"],
         "compressed_pred_tool_name": compressed_score["pred_tool_name"],
         "harness_metric_agrees": full_score["harness_metric_agrees"] and compressed_score["harness_metric_agrees"],
@@ -263,6 +332,9 @@ def _bundle_row(
         "n_docs": None,
         "doc_lens": None,
         "doc_ids_sha256": "fingerprint_pending",
+        # doc 24 D.3.4 shared-schema name for the per-qid doc-ids table both
+        # assemblies rebuild from (same file kv_recipe.doc_ids_table points at).
+        "docs_path": args.out_doc_table,
         "kv_recipe": {
             "ckpt_path": args.ckpt_path,
             "model_sha": args.model_sha,
@@ -274,6 +346,7 @@ def _bundle_row(
             "dataset_path": args.dataset_path,
             "tokenizer": args.tokenizer,
             "max_doc_length": args.max_doc_length,
+            "max_doc_num": args.max_doc_num,
             "doc_ids_table": args.out_doc_table,
         },
         "source": {
@@ -298,6 +371,7 @@ def _harness_namespace(args: argparse.Namespace) -> Any:
         "--include_tools", "True",
         "--max_examples", "0",
         "--max_doc_length", str(args.max_doc_length),
+        "--max_doc_num", str(args.max_doc_num),
     ]
     saved = sys.argv
     try:
@@ -391,6 +465,7 @@ def _freeze_manifest(
     n_base_paired: int,
     bundles_path: Path,
     bound: bool,
+    divergence: Optional[Dict[str, int]] = None,
 ) -> Dict[str, Any]:
     return {
         "description": (
@@ -414,6 +489,7 @@ def _freeze_manifest(
             # on a grid that is not the one whose failure defined the trigger.
             # d_kv_intervene refuses to start on a mismatch.
             "max_doc_length": args.max_doc_length,
+            "max_doc_num": args.max_doc_num,
         },
         # Which harness dialect the paired rows came from.  D intervenes with the
         # history harness, so joint-battery rows are not interchangeable here even
@@ -433,6 +509,9 @@ def _freeze_manifest(
         },
         "n_base_paired": n_base_paired,
         "transitions": {key: int(census.get(key, 0)) for key in TRANSITIONS},
+        # Harness-vs-local rescore disagreements over ALL paired rows (both
+        # arms), machine-readable per prereg §3 "warned about and counted".
+        "harness_divergence": dict(divergence or {}),
         "n_cw": len(cw_qids),
         "cw_qids": list(cw_qids),
         "bundles_file": str(bundles_path.as_posix()),
@@ -465,6 +544,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--tokenizer", default="./models/Qwen3-4B-Instruct-2507")
     parser.add_argument("--base_model", default=None)
     parser.add_argument("--max_doc_length", type=int, default=768)
+    parser.add_argument("--max_doc_num", type=int, default=16)
     return parser.parse_args(argv)
 
 
@@ -473,6 +553,8 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
     compressed, compressed_stats = _load_rows_by_qid(
         args.compressed_rows, args.compressed_condition, "compressed"
     )
+    _assert_rows_match_claims(full, "full", FULL_ROW_MODES, 1)
+    _assert_rows_match_claims(compressed, "compressed", COMPRESSED_ROW_MODES, args.ratio)
     paired = sorted(set(full) & set(compressed))
     only_full = sorted(set(full) - set(compressed))
     only_compressed = sorted(set(compressed) - set(full))
@@ -484,9 +566,17 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
 
     census: Counter = Counter()
     bundles: List[Dict[str, Any]] = []
+    # prereg §3: disagreements with the harness fields are warned about AND
+    # counted — the count is frozen into the manifest, not left in the log.
+    divergence = {"n_metric_disagreements": 0, "n_call_disagreements": 0}
     for qid in paired:
         full_score = _score(full[qid], args.s_metric)
         compressed_score = _score(compressed[qid], args.s_metric)
+        for score in (full_score, compressed_score):
+            if not score["harness_metric_agrees"]:
+                divergence["n_metric_disagreements"] += 1
+            if not score["harness_call_agrees"]:
+                divergence["n_call_disagreements"] += 1
         transition = _transition(full_score["correct"], compressed_score["correct"])
         census[transition] += 1
         if transition != "C->W":
@@ -516,6 +606,7 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
         len(paired),
         bundles_path,
         bound,
+        divergence,
     )
     manifest_path = Path(args.out_manifest)
     manifest_path.parent.mkdir(parents=True, exist_ok=True)

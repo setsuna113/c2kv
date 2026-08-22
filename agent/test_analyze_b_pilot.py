@@ -16,7 +16,16 @@ e. post-stratification: bucket weights are the reference arm's shares and the
 f. R_agent = P(S_arm=1|S_full=1) plus the absolute rate, and the C→C/C→W/
    W→C/W→W transition counts;
 g. delay accounting: bytes-matched skips exactly the rows above the 0.5x
-   guard and counts them.
+   guard and counts them;
+h. bytes-matched delayed-arm contrast (判据8): guard-passing rows only, with
+   n_used / n_excluded, and a synthetic case where the guard flips the verdict;
+i. qid-manifest completeness: the INCOMPLETE COMMON-QID SET banner fires
+   exactly when an arm misses a manifest qid;
+j. missing-metric exclusion (prereg §8.1): rows without tool_name_match are
+   excluded and counted, never folded in as wrong;
+k. post-stratification CI: session-cluster bootstrap over the bucket-weighted
+   diff, deterministic given seed;
+l. VOID annotation on contrasts involving a 判据1-VOID arm.
 
 Run from the repo root (no torch needed):
   python -m pytest agent/test_analyze_b_pilot.py -v
@@ -37,6 +46,7 @@ for _sub in ("python", "agent"):
         sys.path.insert(0, _path)
 
 from analyze_b_pilot import (  # noqa: E402
+    _bytes_matched_contrasts,
     _cluster_bootstrap,
     _common_qids,
     _decile_buckets,
@@ -45,6 +55,8 @@ from analyze_b_pilot import (  # noqa: E402
     _gist_declaration_table,
     _holm,
     _load_arm,
+    _load_qid_manifest,
+    _markdown,
     _mcnemar_exact,
     _mde_pp,
     _paired_contrast,
@@ -431,3 +443,267 @@ def test_missing_reference_arm_is_fatal():
     _, arms = _synthetic_arms()
     with pytest.raises(SystemExit, match="reference arm"):
         build_report(arms, None, "P-nope", reps=50)
+
+
+# ---------------------------------------------------------------------------
+# h. bytes-matched delayed-arm contrast (判据8)
+# ---------------------------------------------------------------------------
+
+
+def _guard_flip_arms():
+    """Guarded rows carry the delay arm's wins; kept rows carry its losses.
+
+    Reference gist budget is 100, so the 0.5x guard cuts at raw > 50: the
+    four raw=60 rows (delay correct, reference wrong) are excluded from the
+    bytes-matched scope and the four raw=40 rows (delay wrong, reference
+    correct) remain — full-set Δ = 0pp, bytes-matched Δ = −100pp.
+    """
+    qids = [f"s{index // 2}:{index}" for index in range(8)]
+    reference = {}
+    delay = {}
+    for index, qid in enumerate(qids):
+        guarded = index >= 4
+        reference[qid] = _row(qid, correct=not guarded, gist=100)
+        delay[qid] = _row(qid, correct=guarded, gist=80, raw=60 if guarded else 40)
+    return qids, {"P-fixed": reference, "P-delay": delay}
+
+
+def test_bytes_matched_contrast_guard_flips_the_verdict():
+    qids, arms = _guard_flip_arms()
+    blocks = _bytes_matched_contrasts(arms, qids, "P-fixed", reps=200, seed=0)
+    assert len(blocks) == 1
+    block = blocks[0]
+    assert block["arm_a"] == "P-delay" and block["arm_b"] == "P-fixed"
+    assert block["scope"] == "bytes-matched"
+    assert block["n_used"] == 4 and block["n_excluded_budget_guard"] == 4
+    assert block["n"] == 4
+    assert block["diff_pp"] == pytest.approx(-100.0)
+    # On the FULL common-qid set the same contrast reads as a wash: without
+    # the guard the elastic wins would mask the equal-budget losses.
+    full_block = _paired_contrast(
+        "P-delay", arms["P-delay"], "P-fixed", arms["P-fixed"], qids, reps=200, seed=0
+    )
+    assert full_block["diff_pp"] == pytest.approx(0.0)
+
+
+def test_bytes_matched_contrast_in_report_and_markdown():
+    qids, arms = _guard_flip_arms()
+    report = build_report(arms, None, "P-fixed", reps=200, seed=0)
+    assert len(report["delay_bytes_matched"]) == 1
+    assert report["delay_bytes_matched"][0]["n_used"] == 4
+    markdown = _markdown(report)
+    assert "判据8" in markdown
+    assert "bytes-matched" in markdown
+    # The section footnote is recomputed at the reduced n.
+    assert _footnote(4) in markdown
+
+
+def test_bytes_matched_contrast_skips_non_delay_arms_and_survives_all_excluded():
+    qids, arms = _synthetic_arms()
+    # No raw_recent_tokens anywhere except P-delay -> exactly one block.
+    blocks = _bytes_matched_contrasts(arms, qids, "P-fixed", reps=200, seed=0)
+    assert [block["arm_a"] for block in blocks] == ["P-delay"]
+    # raw=30 <= 0.5*100 for every row: nothing excluded.
+    assert blocks[0]["n_used"] == len(qids)
+    assert blocks[0]["n_excluded_budget_guard"] == 0
+
+    # Every row over the guard -> a stub block, no crash, markdown renders.
+    for qid in qids:
+        arms["P-delay"][qid]["raw_recent_tokens"] = 60
+    report = build_report(arms, None, "P-fixed", reps=200, seed=0)
+    stub = report["delay_bytes_matched"][0]
+    assert stub["n_used"] == 0
+    assert stub["n_excluded_budget_guard"] == len(qids)
+    assert "no bytes-matched contrast" in stub["note"]
+    assert "判据8" in _markdown(report)
+
+
+# ---------------------------------------------------------------------------
+# i. qid-manifest completeness banner
+# ---------------------------------------------------------------------------
+
+
+def test_load_qid_manifest_formats(tmp_path):
+    as_list = tmp_path / "list.json"
+    as_list.write_text('["a:0", "b:1"]', encoding="utf-8")
+    assert _load_qid_manifest(str(as_list)) == ["a:0", "b:1"]
+    as_dict = tmp_path / "dict.json"
+    as_dict.write_text('{"qids": ["a:0"]}', encoding="utf-8")
+    assert _load_qid_manifest(str(as_dict)) == ["a:0"]
+    as_lines = tmp_path / "lines.txt"
+    as_lines.write_text("a:0\nb:1\n\n", encoding="utf-8")
+    assert _load_qid_manifest(str(as_lines)) == ["a:0", "b:1"]
+    bad = tmp_path / "bad.json"
+    bad.write_text('{"nope": 1}', encoding="utf-8")
+    with pytest.raises(ValueError, match="expected a JSON list"):
+        _load_qid_manifest(str(bad))
+
+
+def test_qid_manifest_incomplete_banner():
+    qids, arms = _synthetic_arms()
+    report = build_report(
+        arms, None, "P-fixed", reps=200, seed=0,
+        manifest_qids=qids + ["s9:99"], manifest_path="m.json",
+    )
+    check = report["qid_manifest_check"]
+    assert check["incomplete_common_qid_set"] is True
+    assert check["missing_per_arm"] == {name: 1 for name in arms}
+    assert check["missing_full"] is None
+    markdown = _markdown(report)
+    # The banner is stamped ABOVE the title, and the tables still exist.
+    assert markdown.index("INCOMPLETE COMMON-QID SET") < markdown.index("# Experiment B pilot")
+    assert "## Paired contrasts" in markdown
+
+    complete = build_report(
+        arms, None, "P-fixed", reps=200, seed=0,
+        manifest_qids=qids, manifest_path="m.json",
+    )
+    assert complete["qid_manifest_check"]["incomplete_common_qid_set"] is False
+    assert "INCOMPLETE COMMON-QID SET" not in _markdown(complete)
+
+
+def test_qid_manifest_checks_the_full_arm_too():
+    qids, arms = _synthetic_arms()
+    full = {qid: _row(qid, correct=True) for qid in qids[1:]}  # one qid short
+    report = build_report(
+        arms, full, "P-fixed", reps=200, seed=0,
+        manifest_qids=qids, manifest_path="m.json",
+    )
+    check = report["qid_manifest_check"]
+    assert check["missing_per_arm"] == {name: 0 for name in arms}
+    assert check["missing_full"] == 1
+    assert check["incomplete_common_qid_set"] is True
+
+
+def test_cli_qid_manifest_flag(tmp_path, capsys):
+    qids, arms = _synthetic_arms()
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps(qids + ["s9:99"]), encoding="utf-8")
+    argv = [
+        "--out_prefix", str(tmp_path / "b_pilot"), "--reps", "200",
+        "--qid_manifest", str(manifest),
+    ]
+    for name, rows in arms.items():
+        argv.extend(["--arm", f"{name}={_write_arm(tmp_path, name, rows)}"])
+    main(argv)
+    markdown = (tmp_path / "b_pilot.analysis.md").read_text(encoding="utf-8")
+    assert "INCOMPLETE COMMON-QID SET" in markdown
+    report = json.loads((tmp_path / "b_pilot.analysis.json").read_text(encoding="utf-8"))
+    assert report["qid_manifest_check"]["incomplete_common_qid_set"] is True
+    capsys.readouterr()
+
+
+# ---------------------------------------------------------------------------
+# j. missing-metric exclusion (prereg §8.1)
+# ---------------------------------------------------------------------------
+
+
+def test_missing_metric_rows_are_excluded_not_folded():
+    qids, arms = _synthetic_arms()
+    dropped = qids[0]
+    del arms["P-turn"][dropped]["tool_name_match"]
+    report = build_report(arms, None, "P-fixed", reps=200, seed=0)
+    # Excluded from the paired tables, NOT counted as a wrong answer.
+    assert report["n_common_qids"] == len(qids) - 1
+    assert dropped not in report["qids"]
+    counts = report["missing_metric_rows"]
+    assert counts["per_arm"]["P-turn"] == 1
+    assert counts["per_arm"]["P-fixed"] == 0
+    assert counts["any_missing"] is True
+    markdown = _markdown(report)
+    assert "WARNING (prereg §8.1)" in markdown and "P-turn=1" in markdown
+
+
+def test_missing_metric_in_full_arm_leaves_conditioning():
+    qids, arms = _synthetic_arms()
+    full = {qid: _row(qid, correct=True) for qid in qids}
+    del full[qids[0]]["tool_name_match"]
+    report = build_report(arms, full, "P-fixed", reps=200, seed=0)
+    assert report["missing_metric_rows"]["full"] == 1
+    # The keyless full row cannot certify S_full=1: it drops out of R_agent.
+    assert report["r_agent"]["P-fixed"]["n_full_correct"] == len(qids) - 1
+
+
+def test_no_missing_metric_reports_clean():
+    _, arms = _synthetic_arms()
+    report = build_report(arms, None, "P-fixed", reps=200, seed=0)
+    assert report["missing_metric_rows"]["any_missing"] is False
+    assert "WARNING (prereg §8.1)" not in _markdown(report)
+
+
+# ---------------------------------------------------------------------------
+# k. post-stratification CI
+# ---------------------------------------------------------------------------
+
+
+def test_poststratify_ci_deterministic_and_degenerate():
+    qids = [f"s{index // 2}:{index}" for index in range(8)]
+    presented = {qid: 10 * (index + 1) for index, qid in enumerate(qids)}
+    reference = {qid: _row(qid, correct=True, presented=presented[qid]) for qid in qids}
+    arm_a = {qid: _row(qid, correct=True) for qid in qids}
+    arm_b = {qid: _row(qid, correct=False) for qid in qids}
+    result = _poststratify(arm_a, arm_b, qids, reference, num_buckets=2, reps=200, seed=0)
+    # Constant per-row diff: every replicate's weighted diff is exactly 100pp.
+    assert result["weighted_diff_pp"] == pytest.approx(100.0)
+    assert result["weighted_diff_95ci_pp"] == [100.0, 100.0]
+    assert result["bootstrap"] == {
+        "reps": 200,
+        "seed": 0,
+        "method": "session-cluster percentile, fixed reference-decile weights",
+    }
+    again = _poststratify(arm_a, arm_b, qids, reference, num_buckets=2, reps=200, seed=0)
+    assert again == result
+
+    # Mixed case: the CI brackets the point estimate.
+    for qid in qids[:4]:
+        arm_a[qid] = _row(qid, correct=False)
+        arm_b[qid] = _row(qid, correct=False)
+    mixed = _poststratify(arm_a, arm_b, qids, reference, num_buckets=2, reps=200, seed=0)
+    low, high = mixed["weighted_diff_95ci_pp"]
+    assert low <= mixed["weighted_diff_pp"] <= high
+    assert low < high
+
+
+def test_poststratified_ci_lands_in_report_and_markdown():
+    qids, arms = _synthetic_arms()
+    for qid in qids:
+        arms["P-struct"][qid]["history_wrapped_tokens"] = 2000
+    report = build_report(arms, None, "P-fixed", reps=200, seed=0)
+    assert report["presented_tokens"]["poststratification_triggered"] is True
+    for block in report["contrasts"]:
+        poststratified = block["poststratified"]
+        assert "weighted_diff_95ci_pp" in poststratified
+        low, high = poststratified["weighted_diff_95ci_pp"]
+        assert low <= high
+        assert poststratified["bootstrap"]["reps"] == 200
+    assert "post-strat Δpp [95% CI]" in _markdown(report)
+
+
+# ---------------------------------------------------------------------------
+# l. VOID annotation on contrasts
+# ---------------------------------------------------------------------------
+
+
+def test_void_arm_annotated_in_contrasts():
+    qids, arms = _synthetic_arms()
+    for qid in qids:
+        arms["P-struct"][qid]["gist_tokens"] = 110  # +10% vs P-fixed -> VOID
+    report = build_report(arms, None, "P-fixed", reps=200, seed=0)
+    assert report["gist_declaration"]["any_void"] is True
+    flags = {block["contrast"]: block["void_involved"] for block in report["contrasts"]}
+    assert flags["P-struct vs P-fixed"] is True
+    assert flags["P-struct vs P-turn"] is True
+    assert flags["P-turn vs P-fixed"] is False
+    markdown = _markdown(report)
+    assert "P-struct vs P-fixed [VOID]" in markdown
+    assert "P-turn vs P-fixed [VOID]" not in markdown
+    assert "**[VOID]**" in markdown  # the legend line rides with the flag
+    # The delay arm is EXEMPT, not VOID: its bytes-matched block stays clean.
+    assert report["delay_bytes_matched"][0]["void_involved"] is False
+
+
+def test_contrasts_carry_no_void_flag_by_default():
+    _, arms = _synthetic_arms()
+    report = build_report(arms, None, "P-fixed", reps=200, seed=0)
+    assert not any(block["void_involved"] for block in report["contrasts"])
+    assert "[VOID]" not in _markdown(report)

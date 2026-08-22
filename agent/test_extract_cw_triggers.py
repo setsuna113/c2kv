@@ -211,6 +211,169 @@ def test_unpaired_qids_are_excluded(tmp_path):
     assert manifest["cw_qids"] == ["s:1"]
 
 
+# --- shared D.3.4 bundle schema ----------------------------------------------
+
+
+def test_bundle_carries_the_shared_schema_fields(tmp_path):
+    """doc 24 D.3.4: the bundle is shared with line C, which replays the
+    failure from the bundle alone — benchmark, the two raw outputs, the target
+    arguments and the docs path must all be present."""
+    full = [_row("s:1", "get_weather")]
+    compressed = [_row("s:1", "wrong_tool")]
+    args = _args(
+        tmp_path,
+        _write(tmp_path / "full.jsonl", full),
+        _write(tmp_path / "comp.jsonl", compressed),
+    )
+    X.run(args)
+    bundle = json.loads(Path(args.out_bundles).read_text(encoding="utf-8").strip())
+    for key in ("benchmark", "full_output", "compressed_output", "target_args", "docs_path"):
+        assert key in bundle, key
+    assert bundle["full_output"] == CALL % "get_weather"
+    assert bundle["compressed_output"] == CALL % "wrong_tool"
+    assert bundle["target_args"] == {"a": 1}
+    assert bundle["docs_path"] == str(tmp_path / "d_doc_ids.json")
+    # benchmark falls back to the harness subset field when rows carry one.
+    full2 = [_row("s:2", "get_weather")]
+    comp2 = [dict(_row("s:2", "wrong_tool"), subset="appworld")]
+    args2 = _args(
+        tmp_path,
+        _write(tmp_path / "full2.jsonl", full2),
+        _write(tmp_path / "comp2.jsonl", comp2),
+    )
+    X.run(args2)
+    bundle2 = json.loads(Path(args2.out_bundles).read_text(encoding="utf-8").strip())
+    assert bundle2["benchmark"] == "appworld"
+
+
+def test_target_args_prefers_row_field_over_parsed_text():
+    row = _row("s:1", "wrong_tool")
+    assert X._target_args(row) == {"a": 1}  # parsed from the target text
+    assert X._target_args(dict(row, target_args={"b": 2})) == {"b": 2}
+    assert X._target_args({"target": "no call here"}) is None
+
+
+def test_kv_recipe_records_max_doc_num(tmp_path):
+    """768/16: the guard in d_kv_intervene checks both numbers, so the recipe
+    must freeze both."""
+    full = [_row("s:1", "get_weather")]
+    compressed = [_row("s:1", "wrong_tool")]
+    args = _args(
+        tmp_path,
+        _write(tmp_path / "full.jsonl", full),
+        _write(tmp_path / "comp.jsonl", compressed),
+    )
+    manifest = X.run(args)
+    assert manifest["kv_recipe"]["max_doc_num"] == 16
+    bundle = json.loads(Path(args.out_bundles).read_text(encoding="utf-8").strip())
+    assert bundle["kv_recipe"]["max_doc_num"] == 16
+    args24 = _args(
+        tmp_path,
+        _write(tmp_path / "full.jsonl", full),
+        _write(tmp_path / "comp.jsonl", compressed),
+        max_doc_num=24,
+    )
+    assert X.run(args24)["kv_recipe"]["max_doc_num"] == 24
+
+
+# --- rows-vs-CLI cross-check -------------------------------------------------
+
+
+def test_row_mode_contradicting_the_arm_is_fatal(tmp_path):
+    """A c2kv row handed to --full_rows means the recipe would freeze a lie."""
+    full = [dict(_row("s:1", "get_weather"), mode="c2kv", ratio=8)]
+    compressed = [dict(_row("s:1", "wrong_tool"), mode="c2kv", ratio=8)]
+    args = _args(
+        tmp_path,
+        _write(tmp_path / "full.jsonl", full),
+        _write(tmp_path / "comp.jsonl", compressed),
+    )
+    with pytest.raises(SystemExit, match="mode='c2kv'"):
+        X.run(args)
+
+
+def test_row_ratio_contradicting_the_cli_is_fatal(tmp_path):
+    """The battery ran ratio 4 but --ratio froze 8: the guard downstream would
+    then ENFORCE the wrong geometry, so the freeze must refuse."""
+    full = [dict(_row("s:1", "get_weather"), mode="full", ratio=1)]
+    compressed = [dict(_row("s:1", "wrong_tool"), mode="c2kv", ratio=4)]
+    args = _args(
+        tmp_path,
+        _write(tmp_path / "full.jsonl", full),
+        _write(tmp_path / "comp.jsonl", compressed),
+    )
+    with pytest.raises(SystemExit, match="ratio=4"):
+        X.run(args)
+
+
+def test_full_rows_must_carry_ratio_one(tmp_path):
+    full = [dict(_row("s:1", "get_weather"), mode="full", ratio=8)]
+    compressed = [dict(_row("s:1", "wrong_tool"), mode="c2kv", ratio=8)]
+    args = _args(
+        tmp_path,
+        _write(tmp_path / "full.jsonl", full),
+        _write(tmp_path / "comp.jsonl", compressed),
+    )
+    with pytest.raises(SystemExit, match="ratio=8"):
+        X.run(args)
+
+
+def test_matching_row_stamps_pass(tmp_path):
+    full = [dict(_row("s:1", "get_weather"), mode="full", ratio=1)]
+    compressed = [dict(_row("s:1", "wrong_tool"), mode="c2kv", ratio=8)]
+    args = _args(
+        tmp_path,
+        _write(tmp_path / "full.jsonl", full),
+        _write(tmp_path / "comp.jsonl", compressed),
+    )
+    manifest = X.run(args)
+    assert manifest["cw_qids"] == ["s:1"]
+
+
+def test_rows_without_mode_ratio_stamps_skip_the_check(tmp_path):
+    # Synthetic/pre-recipe rows carry neither field; the check must not invent one.
+    full = [_row("s:1", "get_weather")]
+    compressed = [_row("s:1", "wrong_tool")]
+    args = _args(
+        tmp_path,
+        _write(tmp_path / "full.jsonl", full),
+        _write(tmp_path / "comp.jsonl", compressed),
+    )
+    assert X.run(args)["cw_qids"] == ["s:1"]
+
+
+# --- harness divergence census ------------------------------------------------
+
+
+def test_manifest_counts_harness_divergence(tmp_path):
+    """prereg §3: 'warned about and counted' — the count must be frozen into
+    the manifest, not left in the log stream."""
+    full = [_row("s:1", "get_weather"), _row("s:2", "get_weather")]
+    compressed = [
+        _row("s:1", "wrong_tool", harness_match=True),  # field lies about the metric
+        dict(_row("s:2", "wrong_tool"), has_tool_call=False),  # field lies about the call
+    ]
+    args = _args(
+        tmp_path,
+        _write(tmp_path / "full.jsonl", full),
+        _write(tmp_path / "comp.jsonl", compressed),
+    )
+    manifest = X.run(args)
+    assert manifest["harness_divergence"] == {
+        "n_metric_disagreements": 1,
+        "n_call_disagreements": 1,
+    }
+    clean = _args(
+        tmp_path,
+        _write(tmp_path / "full.jsonl", full),
+        _write(tmp_path / "comp.jsonl", [_row("s:1", "wrong_tool"), _row("s:2", "wrong_tool")]),
+    )
+    assert X.run(clean)["harness_divergence"] == {
+        "n_metric_disagreements": 0,
+        "n_call_disagreements": 0,
+    }
+
+
 # --- d. dialects ------------------------------------------------------------
 
 
@@ -316,6 +479,26 @@ def _r4_arm_files(arm):
     return sorted(str(p) for p in (root / "results" / "r4" / arm).glob("*.jsonl"))
 
 
+def _strip_arm_stamps(paths, out_dir, tag):
+    """The r4 arms are c2kv-vs-c2kv_anchor rows, not the full/c2kv pair the
+    production mode/ratio cross-check expects — drop the stamps so this test
+    stays the schema/flow exercise it declares itself to be."""
+    out = []
+    out_dir.mkdir(parents=True, exist_ok=True)
+    for index, path in enumerate(paths):
+        dst = out_dir / f"{tag}_{index}.jsonl"
+        with open(path, "r", encoding="utf-8") as src, dst.open("w", encoding="utf-8") as sink:
+            for line in src:
+                if not line.strip():
+                    continue
+                row = json.loads(line)
+                row.pop("mode", None)
+                row.pop("ratio", None)
+                sink.write(json.dumps(row, ensure_ascii=False) + "\n")
+        out.append(str(dst))
+    return out
+
+
 @pytest.mark.skipif(_audit_dir() is None, reason="r4 audit rows not present on this machine")
 def test_integration_on_real_r4_rows(tmp_path):
     """Schema/flow only. The numbers in these files are void by decision;
@@ -324,6 +507,8 @@ def test_integration_on_real_r4_rows(tmp_path):
     typed = _r4_arm_files("d_typed")
     if not plain or not typed:
         pytest.skip("d_plain / d_typed row files missing")
+    plain = _strip_arm_stamps(plain, tmp_path / "rows", "plain")
+    typed = _strip_arm_stamps(typed, tmp_path / "rows", "typed")
     argv = [
         "--full_rows", *plain,
         "--compressed_rows", *typed,
@@ -350,6 +535,8 @@ def test_integration_on_real_r4_rows(tmp_path):
         "bundle_id", "qid", "turn", "step_index_t", "t_star", "trigger_source",
         "transition", "no_downstream", "doc_ids_sha256", "kv_recipe", "source",
         "target_known", "target_in_grid",
+        # doc 24 D.3.4 shared-schema fields (line C reads these).
+        "benchmark", "full_output", "compressed_output", "target_args", "docs_path",
     }
     for line in lines:
         bundle = json.loads(line)

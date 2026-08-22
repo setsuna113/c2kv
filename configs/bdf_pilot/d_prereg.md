@@ -34,9 +34,12 @@ equal **by construction**; the plan gate is `abs_delta_frac == 0`, not r4's
 general expository prose about aeolian landforms. Zero benchmark entities,
 zero harness vocabulary, no JSON or angle-bracket structure. The sha256 of
 this file is recorded in `configs/bdf_pilot/d_sham_plan.json` and re-verified
-by the driver at launch. Per-qid start offset is
-`sha256("<seed>:<qid>") mod corpus_tokens` with seed `20260815`; the span is
-taken from the corpus token ring.
+by the driver at launch. Per-qid start offset is the **first 64 bits** of
+`sha256("<seed>:<qid>")` taken as an integer, `mod corpus_tokens`, with seed
+`20260815` (exactly `d_sham_plan.py::corpus_offset`); the span is taken from
+the corpus token ring. The per-qid `sham_token_ids` are frozen verbatim in the
+plan, so the offset formula is documentation of how they were drawn, not a
+recomputation path.
 
 **Declared asymmetry** — the E-corr slice carries the full left context of
 the session; the E-sham slice carries the context of an unrelated essay. That
@@ -130,12 +133,15 @@ Reported per arm, never folded into S:
   model config (`layers × 2 × kv_heads × head_dim × dtype_bytes`). The
   144 KiB/token figure for Qwen3-4B is used only as a cross-check and a
   mismatch is warned about, never silently accepted.
-* **GPU-sec** — `system_prefill_sec + tool_compress_sec + blend_sec +
-  d_corr_slice_prefill_sec + d_recompute_prefill_sec + generate_sec`.
-  `d_corr_slice_prefill_sec` is the injection-side prefill for **every** arm:
-  the docs 0..k* pass for the corr arms and the standalone neutral-span pass
-  for E-sham. **Note:** `ttft_sec` in the raw rows does *not* include the two
-  `d_*` seconds fields, so it understates the intervention arms; the
+* **GPU-sec** — `system_prefill_sec + full_prefill_sec + tool_compress_sec +
+  blend_sec + d_corr_slice_prefill_sec + d_recompute_prefill_sec +
+  generate_sec`. `full_prefill_sec` is the whole-history prefill that only the
+  E-full arm pays (the harness writes 0.0 for every c2kv-path arm) — without
+  it the rollback upper bound would be costed as system prefill + generate
+  only. `d_corr_slice_prefill_sec` is the injection-side prefill for **every**
+  arm: the docs 0..k* pass for the corr arms and the standalone neutral-span
+  pass for E-sham. **Note:** `ttft_sec` in the raw rows does *not* include the
+  two `d_*` seconds fields, so it understates the intervention arms; the
   analyzer's explicit sum is the cost of record.
 * The corr arms reuse the already-computed system prefix for the raw slice
   instead of paying for a second system forward, so `system_prefill_sec` is
@@ -178,11 +184,19 @@ adaptive compression ratio, or verifier. Internal criteria are numbered
 
 ## 12. W&B tagging
 
-Every arm run is tagged `bdf-pilot`, `line-d`, `arm-<arm>`,
-`manifest-<first 8 of manifest sha256>`, and `mechanism-only`. The manifest
-and sham-plan shas are also written into every emitted row
-(`bundle_manifest_sha256`, `sham_plan_sha256`) so a row is traceable without
-the run metadata.
+The NPU server runs offline (`HF_HUB_OFFLINE=1`) and returns jsonl rows and a
+summary only; **no W&B call happens on the server**. Tags are applied at
+**local W&B ingestion**: when the returned artifacts are uploaded from the
+local machine, each arm's run is tagged `bdf-pilot`, `line-d`, `arm-<arm>`,
+`manifest-<first 8 of manifest sha256>`, and `mechanism-only`. Per D.3.5
+truth-source discipline, a number that has not been ingested into W&B under
+these tags does not enter any table.
+
+Row-level traceability does not depend on that upload: the manifest and
+sham-plan shas are written into every emitted row (`bundle_manifest_sha256`,
+`sham_plan_sha256`), and `d_paired_analysis.py` refuses to analyze rows whose
+embedded `bundle_manifest_sha256` disagrees with the manifest under analysis
+(battery-reuse rows, which never carried the field, are exempt).
 
 ## 13. Frozen artifacts
 
@@ -193,3 +207,32 @@ the run metadata.
 | C→W manifest | `configs/bdf_pilot/d_cw_manifest.json` |
 | trigger bundles | `results/d/bundles_batch_tf.jsonl` |
 | doc-length side table | `results/d/d_doc_ids.json` |
+
+## Changelog — 2026-08-22 pre-first-run amendments
+
+No arm has run and no number exists yet (runbook §0: the numbers do not
+exist); these amendments precede the first launch and freeze with the rest of
+the file. No threshold, gate, arm definition, or statistical rule changed.
+
+1. **§7 GPU-sec: added `full_prefill_sec` to the frozen sum.** The formula was
+   written for the intervention arms but the analyzer applies it to all five;
+   without this term the E-full (rollback upper bound) cost collapses to
+   system prefill + generate, distorting the Pareto cost axis it anchors. The
+   field is identically 0.0 in every c2kv-path arm, so no other arm's cost
+   changes. (`d_paired_analysis.py::_gpu_seconds` updated in the same commit.)
+2. **§2 sham corpus offset: wording aligned to the implementation.**
+   `d_sham_plan.py::corpus_offset` uses the first 64 bits of the digest, not
+   the full 256-bit integer, so the literal formula was imprecise.
+   Reproducibility is unaffected: the per-qid `sham_token_ids` are frozen in
+   the plan itself. The code is not changed — changing it would break the
+   regenerability of any plan already drawn under this rule.
+3. **§12 W&B tagging: restated as a local-ingestion mechanism.** The original
+   text read as if the server-side arm runs carried the tags; the server is
+   offline and returns jsonl/summary artifacts only. The tags are applied when
+   those artifacts are ingested into W&B locally. Row-level shas (already
+   implemented) are unchanged.
+4. **§12: recorded the analyzer-side closure of the sha loop.**
+   `d_paired_analysis.py` now FATALs when a row's embedded
+   `bundle_manifest_sha256` disagrees with the manifest being analyzed
+   (battery-reuse rows without the field are exempt). Mechanism note only; no
+   metric definition touched.

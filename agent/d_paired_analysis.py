@@ -26,8 +26,15 @@ torch-free.  Usage (repo root):
       --arm corr_re=results/d/d_corr_re.jsonl \
       --arm full=results/d/d_full.jsonl \
       --manifest configs/bdf_pilot/d_cw_manifest.json \
+      --bundles results/d/bundles_batch_tf.jsonl \
+      --sham_plan configs/bdf_pilot/d_sham_plan.json \
       --model_config ./models/Qwen3-4B-Instruct-2507/config.json \
       --out_prefix results/d/d_paired
+
+--bundles / --sham_plan are optional and feed only the T==1 (no_downstream)
+split; without them the report marks the split unavailable.  Rows that embed a
+``bundle_manifest_sha256`` different from the --manifest under analysis are
+FATAL (battery-reuse rows without the field are exempt).
 """
 from __future__ import annotations
 
@@ -47,7 +54,7 @@ if __package__ in {None, ""}:
         if _path not in sys.path:
             sys.path.insert(0, _path)
 
-from extract_cw_triggers import _row_text, _score  # noqa: E402
+from extract_cw_triggers import _row_text, _score, sha256_text_file  # noqa: E402
 from paired_stats import cluster_bootstrap_diff, mcnemar_exact  # noqa: E402
 
 logger = logging.getLogger("d_paired_analysis")
@@ -87,6 +94,60 @@ def _load_arm(path: str) -> Dict[str, Dict[str, Any]]:
                 raise SystemExit(f"FATAL: duplicate qid {qid} in {path}")
             rows[qid] = row
     return rows
+
+
+def assert_rows_bind_to_manifest(
+    arms: Dict[str, Dict[str, Dict[str, Any]]], manifest_sha: str
+) -> None:
+    """Close the traceability loop the driver opened.
+
+    d_kv_intervene writes ``bundle_manifest_sha256`` into every row exactly so
+    that a row can be tied to the frozen inputs; analyzing rows from another
+    manifest generation would otherwise only surface as an n_missing /
+    n_on_trigger_set drift.  Battery-reuse rows (none/full taken from the
+    battery run) never carried the field and are exempt — only a PRESENT,
+    DIFFERENT sha is fatal.
+    """
+    for arm, rows in arms.items():
+        for qid, row in rows.items():
+            recorded = row.get("bundle_manifest_sha256")
+            if recorded is not None and recorded != manifest_sha:
+                raise SystemExit(
+                    f"FATAL: arm {arm!r} row {qid} was produced against manifest "
+                    f"{recorded}, but the --manifest under analysis hashes to "
+                    f"{manifest_sha}. These rows belong to a different frozen "
+                    "trigger-set generation; re-run the arm or pass the matching manifest."
+                )
+
+
+def load_no_downstream_qids(
+    bundles_path: Optional[str] = None, plan_path: Optional[str] = None
+) -> Optional[set]:
+    """T==1 qids (nothing downstream of k*) from the frozen artifacts.
+
+    Arm rows do not carry the flag, so the split has to be read from the
+    trigger bundles and/or the sham plan.  Returns None when neither source is
+    given (split unavailable), an empty set when sources are given but no qid
+    is T==1 — the two cases render differently.
+    """
+    if not (bundles_path or plan_path):
+        return None
+    qids: set = set()
+    if bundles_path:
+        with open(bundles_path, "r", encoding="utf-8") as handle:
+            for line in handle:
+                line = line.strip()
+                if not line:
+                    continue
+                bundle = json.loads(line)
+                if bundle.get("no_downstream"):
+                    qids.add(str(bundle["qid"]))
+    if plan_path:
+        plan = json.loads(Path(plan_path).read_text(encoding="utf-8"))
+        for qid, entry in plan.get("per_qid", {}).items():
+            if entry.get("no_downstream"):
+                qids.add(str(qid))
+    return qids
 
 
 def protocol_legal(text: str) -> bool:
@@ -208,10 +269,14 @@ def _appended_tokens(row: Dict[str, Any]) -> int:
 
 
 def _gpu_seconds(row: Dict[str, Any]) -> float:
+    # full_prefill_sec is the whole-history prefill that only the E-full arm
+    # pays (the harness writes 0.0 for every c2kv-path arm); without it the
+    # rollback upper bound is costed as system prefill + generate only.
     return sum(
         float(row.get(key) or 0.0)
         for key in (
             "system_prefill_sec",
+            "full_prefill_sec",
             "tool_compress_sec",
             "blend_sec",
             "d_corr_slice_prefill_sec",
@@ -373,6 +438,39 @@ def render_markdown(report: Dict[str, Any]) -> str:
         foot,
     )
 
+    # T==1 split and harness divergence: labelled lines, not tables — they
+    # qualify the table above rather than stand alone.
+    split = report.get("no_downstream_split") or {}
+    if split.get("available"):
+        per_arm_split = ", ".join(
+            f"{arm} {split['per_arm'][arm]['n_rescued']}/{split['per_arm'][arm]['n_scored']}"
+            for arm in arms
+            if arm in split.get("per_arm", {})
+        )
+        lines.append(
+            f"**No-downstream split (T==1 — corr_re degenerates to corr by construction):** "
+            f"{split['n_no_downstream']} of {report['n_cw_triggers']} trigger qids; "
+            f"rescued/scored on that subset: {per_arm_split or '—'}."
+        )
+    else:
+        lines.append(
+            "**No-downstream split (T==1 — corr_re degenerates to corr by construction):** "
+            "unavailable — pass --bundles and/or --sham_plan to report the two cells apart."
+        )
+    lines.append("")
+    n_div = report.get("n_harness_metric_disagreements", 0)
+    div_detail = ", ".join(
+        f"{arm} {per_arm[arm]['harness_divergence']['n_metric_disagreements']}"
+        for arm in arms
+        if per_arm[arm].get("harness_divergence", {}).get("n_metric_disagreements")
+    )
+    lines.append(
+        f"**Harness-score divergence:** {n_div} row(s) where the harness metric field "
+        "disagrees with the local re-score (warned and counted, never silently corrected)"
+        + (f" — {div_detail}." if div_detail else ".")
+    )
+    lines.append("")
+
     # 2. Coherence triple -----------------------------------------------------
     lines.append("## Coherence triple")
     lines.append("")
@@ -466,8 +564,9 @@ def render_markdown(report: Dict[str, Any]) -> str:
         f"Bytes = appended tokens × {report['kv_bytes_per_token']} B/token derived from "
         f"the model config (144 KiB/token cross-check: "
         f"{'matches' if check.get('matches') else 'DOES NOT match — see the JSON'}). "
-        "GPU-sec sums system prefill + tool compress + blend + corr slice + recompute "
-        "+ generate. Costs are means over the arm's scored rows, so an arm with "
+        "GPU-sec sums system prefill + full prefill (E-full only) + tool compress + "
+        "blend + corr slice + recompute + generate. Costs are means over the arm's "
+        "scored rows, so an arm with "
         "missing rows is cheap for the wrong reason — read them next to `n scored`.",
         foot,
     )
@@ -484,6 +583,7 @@ def analyze(
     s_metric: str = "tool_name_match",
     bytes_per_token: int = REFERENCE_KV_BYTES_PER_TOKEN,
     mde_pp: str = "17-25",
+    no_downstream_qids: Optional[set] = None,
 ) -> Dict[str, Any]:
     cw_qids: List[str] = [str(q) for q in manifest.get("cw_qids", [])]
     n_base_paired = int(manifest.get("n_base_paired") or 0)
@@ -508,10 +608,16 @@ def analyze(
         appended: List[float] = []
         gpu_secs: List[float] = []
         illegal_flips = 0
+        n_metric_disagreements = 0
+        n_call_disagreements = 0
         for qid in present:
             row = rows[qid]
             text = _row_text(row)
             score = _score(row, s_metric)
+            if not score["harness_metric_agrees"]:
+                n_metric_disagreements += 1
+            if not score["harness_call_agrees"]:
+                n_call_disagreements += 1
             legal = protocol_legal(text)
             correct[qid] = score["correct"]
             rescued[qid] = bool(score["correct"] and legal)
@@ -537,6 +643,12 @@ def analyze(
             "n_missing_from_trigger_set": len(cw_qids) - n,
             "n_rescued": n_rescued,
             "n_correct_but_illegal": illegal_flips,
+            # prereg §3: harness/local score disagreements are "warned about and
+            # counted" — this is the machine-readable count, not just the log line.
+            "harness_divergence": {
+                "n_metric_disagreements": n_metric_disagreements,
+                "n_call_disagreements": n_call_disagreements,
+            },
             "two_level_denominator": {
                 "note": "report both factors and the product; never the product alone",
                 "L1_trigger_rate": round(len(cw_qids) / n_base_paired, 4) if n_base_paired else None,
@@ -611,6 +723,31 @@ def analyze(
         for arm in per_arm
     ]
 
+    # On a T==1 qid nothing lives downstream of k*, so corr_re degenerates to
+    # corr by construction; mixing those rows into the corr_re-vs-corr reading
+    # dilutes the truth-table row that separates the two arms.  The two cells
+    # are reported apart, as the sham-plan comment promises.
+    if no_downstream_qids is None:
+        no_downstream_split: Dict[str, Any] = {
+            "available": False,
+            "note": "no --bundles / --sham_plan given; T==1 split unavailable",
+        }
+    else:
+        nd_qids = [q for q in cw_qids if q in no_downstream_qids]
+        no_downstream_split = {
+            "available": True,
+            "note": "T==1: corr_re degenerates to corr on these rows by construction",
+            "n_no_downstream": len(nd_qids),
+            "no_downstream_qids": nd_qids,
+            "per_arm": {
+                arm: {
+                    "n_scored": sum(1 for q in nd_qids if q in outcomes[arm]),
+                    "n_rescued": sum(1 for q in nd_qids if outcomes[arm].get(q)),
+                }
+                for arm in arms
+            },
+        }
+
     return {
         "rule_version": manifest.get("rule_version"),
         "batch": manifest.get("batch"),
@@ -633,6 +770,10 @@ def analyze(
             "matches": bytes_per_token == REFERENCE_KV_BYTES_PER_TOKEN,
         },
         "transition_matrices": transition_matrices,
+        "no_downstream_split": no_downstream_split,
+        "n_harness_metric_disagreements": sum(
+            per_arm[arm]["harness_divergence"]["n_metric_disagreements"] for arm in per_arm
+        ),
         "per_arm": per_arm,
         "primary_contrast": primary,
         "secondary_contrasts": contrasts,
@@ -698,6 +839,16 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--manifest")
     parser.add_argument("--out_prefix")
     parser.add_argument(
+        "--bundles",
+        default=None,
+        help="Trigger bundles jsonl; source of the T==1 (no_downstream) split.",
+    )
+    parser.add_argument(
+        "--sham_plan",
+        default=None,
+        help="Frozen sham plan json; alternative source of the T==1 split.",
+    )
+    parser.add_argument(
         "--identity_check",
         nargs=2,
         metavar=("LEFT", "RIGHT"),
@@ -725,6 +876,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         raise SystemExit("--arm, --manifest and --out_prefix are required outside --identity_check")
     arms = {name: _load_arm(path) for name, path in args.arm}
     manifest = json.loads(Path(args.manifest).read_text(encoding="utf-8"))
+    assert_rows_bind_to_manifest(arms, sha256_text_file(Path(args.manifest)))
 
     bytes_per_token = args.kv_bytes_per_token
     if bytes_per_token is None and args.model_config:
@@ -748,6 +900,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         s_metric=args.s_metric,
         bytes_per_token=bytes_per_token,
         mde_pp=args.mde_pp,
+        no_downstream_qids=load_no_downstream_qids(args.bundles, args.sham_plan),
     )
     report["inputs"] = {name: path for name, path in args.arm}
     report["manifest"] = args.manifest

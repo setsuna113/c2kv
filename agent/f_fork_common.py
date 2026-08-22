@@ -81,6 +81,29 @@ BOOTSTRAP_B = 2000
 
 
 # ---------------------------------------------------------------------------
+# Frozen-anchor guard.
+# ---------------------------------------------------------------------------
+
+
+def require_anchor_file(path: Any, *, label: str = "--prereg_file") -> Path:
+    """FATAL when a frozen anchor file is missing or blank.
+
+    The prereg file is the only frozen anchor that is hashed but never read:
+    a wrong path (e.g. launching from a non-repo cwd with the relative
+    default) would stamp ``prereg_sha256=null`` into every row while the run
+    completes looking frozen.  An empty or whitespace-only file hashes fine
+    but anchors nothing.  Both are refused before any device work.
+    """
+
+    target = Path(path)
+    if not target.is_file():
+        raise SystemExit(f"FATAL: {label} does not exist: {target}")
+    if not target.read_text(encoding="utf-8").strip():
+        raise SystemExit(f"FATAL: {label} is empty or whitespace-only: {target}")
+    return target
+
+
+# ---------------------------------------------------------------------------
 # Memory arithmetic.
 # ---------------------------------------------------------------------------
 
