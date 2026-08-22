@@ -149,4 +149,34 @@
 - lrcal3_1e-4（卡 0，8M LR 上沿复核，~6h）
 - Gate-3 终判：四臂+separate 齐后按预注册规则给 extend 建议
 
+---
+
+# 2026-08-22 中午：Gate-3 终判（fixed 四臂，separate 行待补）
+
+## 15. fixed 四臂严格共同 qid 表（n=128，joint 条件，c2kv@8×，regime=fixed 训练+fixed 评测，appworld-only，单 seed）
+
+| 臂 | tool_acc | argF1 | textF1 |
+|---|---|---|---|
+| J-alternate | **0.578** | 0.124 | 0.415 |
+| J-joint | 0.555 | 0.126 | **0.432** |
+| J-sep_tool（半边） | 0.508 | 0.098 | 0.341 |
+| J-sep_hist（半边） | 0.461 | 0.094 | 0.395 |
+| J-separate（拼接，fixed） | 待定（两路评测先后 segfault/aicpu timeout，换卡重跑中） | | |
+
+三条件单项核查（无牺牲检查）：fixed_joint 三条件 0.343/0.407/0.500 均衡；fixed_sep_tool tool_only 0.481 最强 tool 专家；fixed_sep_hist 偏弱（公平预算代价）。
+
+## 16. Gate-3 判读（预注册）
+
+- joint − alternate = **−2.3pp**（buggy 表 −0.8pp），两个 regime 同向但都在 ±3pp 噪声地板内 → 严格单调式 joint≤alternate≤separate 的判定取决于 pending 的 separate 行；当前状态 **`inconclusive`（偏向"joint 无 small 尺度溢价"）**。
+- 两个 regime 一致的方向性：alternate ≥ joint > separate —— "共享参数 > 双 extractor 拼接"成立迹象稳（separate 即使在 buggy 表带 1.691× 预算优势也输）；"同时拼接监督 > 交替监督"未显现。
+- **按预注册走 medium 复验**：medium 加一个 joint-vs-alternate 验证臂（0.25P 预算下放大赛道差异）；**不直接 extend large**。G-Q3 在 small 尺度下：联合监督未见独立增益，参数共享有正迁移。
+- small 尺度结论边界：appworld-only、单 seed、n=128、8× 单比例——medium 的多子集交错 + 多数据集池会改变数据分布，复验有实质信息量。
+
+## 17. medium 计划确认（~08-25 启动）
+
+- 预算口径：0.25 × P_official(535.5M) = **133.9M 呈现 P_src**。v2 单 epoch 封顶 ~100M 呈现 → D-single 需 ~1.3 epoch；D-multi 池（traces+Toucan+Open-SWE）天然覆盖。
+- 臂：D-single、D-multi（alternate 训练方式——当前胜者，固定 8×）+ joint-vs-alternate 复验臂 + medium-small-repeat vs medium-large-pool 对照（G-Q1）。
+- 前置：multi-dataset loader、跨子集交错 order、BFCL removal 接线（Phase 4，进行中）。
+- LR：5e-5 为主，1e-4 复核在评（lrcal3_1e-4 训完，评测中）。
+
 
