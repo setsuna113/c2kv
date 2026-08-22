@@ -11,10 +11,13 @@ Coverage:
 a. ``parse_recipe``: parsing, declared order, share-sum validation;
 b. ratio realization: per-family realized shares track the recipe within
    crossing-example granularity;
-c. ``interleave_families``: declared-order round-robin, shorter families stop;
+c. ``interleave_families``: token-deficit weighted scheduling (declared
+   order breaks ties; equal sizes degenerate to round-robin), sliding-window
+   token shares track the global recipe shares (anti front-loading);
 d. removal lists: bare-list and dedup-dict shapes, session-id AND qid entries,
    family-prefix-stripped matching (uuid / trajectory_id / qa row id);
 e. repeat variants: qid uniqueness, ``recommended_epochs`` math;
+   ``--epochs_override`` audit recording on base and repeat variants;
 f. order files pass ``_apply_example_order_file`` (unique, all loadable);
 g. determinism: identical plans across runs; token-cache roundtrip + stamp
    invalidation; shortfall reporting on undersized pools.
@@ -115,13 +118,85 @@ def test_ratio_realization_within_tolerance():
     assert {qid for qid in results["r"]["order"] if qid in traces_qids} <= traces_qids
 
 
-def test_interleave_families_declared_order_round_robin():
-    order = interleave_families([
-        ("qa", ["q0", "q1"]),
-        ("traces", ["t0", "t1", "t2"]),
-        ("toucan", ["c0"]),
-    ])
-    assert order == ["q0", "t0", "c0", "q1", "t1", "t2"]
+def test_interleave_families_equal_sizes_rotate_in_declared_order():
+    # Equal sizes + equal shares degenerate to the old round-robin: the
+    # deficit is always tied after each pair of steps, declared order breaks
+    # ties, and the longer family's leftover tail trails in order.
+    order = interleave_families(
+        [
+            ("qa", [("q0", 100), ("q1", 100)]),
+            ("traces", [("t0", 100), ("t1", 100), ("t2", 100)]),
+        ],
+        (("qa", 0.5), ("traces", 0.5)),
+    )
+    assert order == ["q0", "t0", "q1", "t1", "t2"]
+
+
+def test_interleave_families_spaces_out_large_examples():
+    # 10x size spread at equal shares: after each 100-token traces example the
+    # qa side must emit ~100 tokens (10 examples) before the next traces one —
+    # a 1:1 round-robin would instead drain qa by position 50 and leave the
+    # tail 100% traces (subset front-loading).
+    order = interleave_families(
+        [
+            ("qa", [(f"q{i}", 10) for i in range(50)]),
+            ("traces", [(f"t{i}", 100) for i in range(5)]),
+        ],
+        (("qa", 0.5), ("traces", 0.5)),
+    )
+    assert order[0] == "q0"  # first-step deficit tie -> declared order leads
+    traces_positions = [index for index, qid in enumerate(order) if qid.startswith("t")]
+    assert traces_positions == [1, 12, 23, 34, 45]
+    assert len(order) == 55 and len(set(order)) == 55
+
+
+def test_interleave_token_weighted_windows_track_global_shares():
+    # The anti-front-loading acceptance test: three families at shares
+    # 0.5/0.3/0.2 with a 15x example-size spread (55/340/23 tokens, sizes
+    # chosen so quotas are filled by the crossing rule, not exact division).
+    # Slicing the frozen order into 10 equal-token windows, each window's
+    # per-family token share must track the realized global share to ±5pp.
+    sizes = {"traces": 55, "toucan": 340, "qa": 23}
+    pools = {
+        family: [
+            PoolEntry(qid=f"{family}:id-{i}", session_id=f"{family}:id-{i}", estimated_tokens=sizes[family])
+            for i in range(count)
+        ]
+        for family, count in (("traces", 2000), ("toucan", 200), ("qa", 2000))
+    }
+    recipes = [parse_recipe("r=traces:0.5,toucan:0.3,qa:0.2")]
+    results = plan_recipes(pools, recipes, budget_estimated_tokens=100000, order_seed=42)
+    plan = results["r"]["plan"]
+    order = results["r"]["order"]
+    realized = {family: plan["families"][family]["realized_share"] for family in sizes}
+    tokens_of = {entry.qid: entry.estimated_tokens for pool in pools.values() for entry in pool}
+    family_of = {entry.qid: family for family, pool in pools.items() for entry in pool}
+
+    total = sum(tokens_of[qid] for qid in order)
+    target = total / 10
+    windows = []
+    current, current_tokens = {}, 0
+    for qid in order:
+        tokens = tokens_of[qid]
+        if current_tokens > 0 and current_tokens + tokens > target and len(windows) < 9:
+            windows.append((current, current_tokens))
+            current, current_tokens = {}, 0
+        family = family_of[qid]
+        current[family] = current.get(family, 0) + tokens
+        current_tokens += tokens
+    windows.append((current, current_tokens))
+    assert len(windows) == 10
+    for index, (window, window_tokens) in enumerate(windows):
+        for family, share in realized.items():
+            local = window.get(family, 0) / window_tokens
+            # Edge windows carry the scheduler's startup transient and the
+            # token-count rounding remainder, so they are allowed 10pp; the
+            # pre-registered anti-front-loading invariant is the ±5pp band on
+            # the interior windows.
+            tolerance = 0.05 if 0 < index < len(windows) - 1 else 0.10
+            assert abs(local - share) <= tolerance, (
+                f"window {index}: family {family} local share {local:.3f} vs global {share:.3f}"
+            )
 
 
 def test_interleave_inside_plan_respects_recipe_family_order():
@@ -298,6 +373,56 @@ def test_repeat_variant_short_pool_epochs_use_realized_total():
 
 
 # ---------------------------------------------------------------------------
+# --epochs_override (pure audit record on both variants).
+# ---------------------------------------------------------------------------
+
+
+def test_parse_epochs_override_validation():
+    assert bjmp.parse_epochs_override("d_multi=3") == ("d_multi", 3)
+    for bad in ("d_multi=0", "d_multi=-1", "d_multi=1.5", "d_multi", "=2", "d_multi=x"):
+        with pytest.raises(ValueError, match="epochs_override"):
+            bjmp.parse_epochs_override(bad)
+    with pytest.raises(ValueError, match="unknown recipe"):
+        bjmp._parse_epochs_overrides(["nope=2"], {"d_single", "d_multi"})
+    assert bjmp._parse_epochs_overrides(None, {"d_single"}) == {}
+    assert bjmp._parse_epochs_overrides(["d_single=2", "d_multi=3"], {"d_single", "d_multi"}) == {
+        "d_single": 2,
+        "d_multi": 3,
+    }
+
+
+def test_epochs_override_scales_presented_tokens_on_both_variants():
+    pools = {"qa": _pool("qa", 50), "traces": _pool("traces", 100)}
+    recipes = [parse_recipe("r=qa:0.2,traces:0.8")]
+    base_kwargs = dict(
+        budget_estimated_tokens=5000,
+        order_seed=42,
+        repeat_unique_tokens=2000,
+    )
+    plain = plan_recipes(pools, recipes, **base_kwargs)
+    # Without an override: base presents exactly the realized total; the key
+    # is always present (None) for a stable plan schema.
+    assert plain["r"]["plan"]["epochs_override"] is None
+    assert plain["r"]["plan"]["presented_estimated_tokens"] == 5000
+    assert plain["r_repeat"]["plan"]["epochs_override"] is None
+    assert plain["r_repeat"]["plan"]["presented_estimated_tokens"] == 2000 * 3
+
+    overridden = plan_recipes(pools, recipes, epochs_overrides={"r": 2}, **base_kwargs)
+    base = overridden["r"]["plan"]
+    assert base["epochs_override"] == 2
+    assert base["presented_estimated_tokens"] == 5000 * 2
+    repeat = overridden["r_repeat"]["plan"]
+    # Repeat semantics preserved: recommended_epochs is still the computed
+    # value; presented uses the override when given.
+    assert repeat["recommended_epochs"] == 3
+    assert repeat["epochs_override"] == 2
+    assert repeat["presented_estimated_tokens"] == 2000 * 2
+    # The override never touches the order itself.
+    assert overridden["r"]["order"] == plain["r"]["order"]
+    assert overridden["r_repeat"]["order"] == plain["r_repeat"]["order"]
+
+
+# ---------------------------------------------------------------------------
 # Order files pass the trainer's validation; ETA fields; token cache.
 # ---------------------------------------------------------------------------
 
@@ -350,7 +475,8 @@ def test_eta_fields_recorded_only_with_small_arm_hours():
     assert without["r"]["plan"]["eta"] is None
     line = bjmp._eta_line("r", 64_000_000, 10.0)
     assert line.startswith("r: 预计完成 = ")
-    assert "presented≈64.0M" in line and "32M ≈ 10.0h" in line
+    assert "estimated≈64.0M" in line and "32M estimated ≈ 10.0h" in line
+    assert "presented" not in line  # estimator 口径 only, no mixed wording
 
 
 def test_token_cache_roundtrip_and_stamp_invalidation(tmp_path):

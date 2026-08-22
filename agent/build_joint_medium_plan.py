@@ -23,7 +23,8 @@ Outputs per recipe (and per ``<recipe>_repeat`` variant when
 - ``<out_dir>/<recipe>.plan.json`` — audit trail: shares, per-family
   examples/estimated tokens/realized share, removals applied, oversample
   shortfalls (pool too small to fill a quota — also logged as warnings),
-  repeat-variant ``recommended_epochs``, seeds.
+  repeat-variant ``recommended_epochs``, optional ``epochs_override`` audit
+  record, seeds.
 
 Token-estimate cache: ``<out_dir>/tokencache_<family>.jsonl``, one JSON object
 per line ``{"qid", "stamp", "estimated_tokens"}``.  An entry is reused only
@@ -124,6 +125,32 @@ def parse_recipe(spec: str) -> RecipeSpec:
     if abs(total - 1.0) > 1e-6:
         raise ValueError(f"--recipe {name.strip()} shares must sum to 1.0 (±1e-6), got {total}")
     return RecipeSpec(name=name.strip(), shares=tuple(shares))
+
+
+def parse_epochs_override(spec: str) -> Tuple[str, int]:
+    """Parse one ``--epochs_override name=n`` value (n an integer >= 1)."""
+    name, sep, value = spec.partition("=")
+    if not sep or not name.strip():
+        raise ValueError(f"--epochs_override must be name=epochs, got: {spec!r}")
+    try:
+        epochs = int(value)
+    except ValueError:
+        raise ValueError(f"--epochs_override must be name=integer>=1, got: {spec!r}") from None
+    if epochs < 1:
+        raise ValueError(f"--epochs_override must be an integer >= 1, got: {spec!r}")
+    return name.strip(), epochs
+
+
+def _parse_epochs_overrides(specs: Optional[Sequence[str]], valid_names: Set[str]) -> Dict[str, int]:
+    overrides: Dict[str, int] = {}
+    for spec in specs or []:
+        name, epochs = parse_epochs_override(spec)
+        if name not in valid_names:
+            raise ValueError(
+                f"--epochs_override references unknown recipe {name!r} (recipes: {sorted(valid_names)})"
+            )
+        overrides[name] = epochs
+    return overrides
 
 
 # ---------------------------------------------------------------------------
@@ -290,7 +317,7 @@ def apply_removals(
 
 
 # ---------------------------------------------------------------------------
-# Quota sampling and round-robin interleave (the pure planning core).
+# Quota sampling and token-deficit weighted interleave (the pure planning core).
 # ---------------------------------------------------------------------------
 
 
@@ -320,19 +347,53 @@ def _sample_to_quota(
     return taken, total, shortfall
 
 
-def interleave_families(family_qids: Sequence[Tuple[str, List[str]]]) -> List[str]:
-    """Round-robin in the recipe's declared family order.
+def interleave_families(
+    family_examples: Sequence[Tuple[str, List[Tuple[str, int]]]],
+    shares: Sequence[Tuple[str, float]],
+) -> List[str]:
+    """Token-deficit weighted interleave in the recipe's declared family order.
 
-    One example per family per round until all are placed; shorter families
-    simply stop contributing rounds.
+    Recipe ratios are defined on estimated source TOKENS, while per-family
+    mean example sizes differ by orders of magnitude (Open-SWE actions are
+    huge, QA docs small).  A 1:1 example round-robin would exhaust the
+    small-share families in the head of the sequence — the subset
+    front-loading artifact the pre-registration forbids (the small arms hit it
+    with appworld).  Instead, each step emits the next example of the
+    non-exhausted family with the largest token deficit
+    ``share * global_emitted_tokens - family_emitted_tokens``; at the first
+    step all deficits are 0, so the first non-exhausted family in declared
+    order leads, and deficits ties break by declared order.  Within a family
+    the ``_sample_to_quota`` order is kept unchanged.  Exhausted families drop
+    out and the remaining shares renormalize automatically, so the local token
+    mix of any sliding window approximates the global shares.
     """
+    share_of = dict(shares)
+    # [family, examples, share, cursor, emitted_tokens] — mutable per-family state.
+    state = [
+        [family, examples, share_of.get(family, 0.0), 0, 0]
+        for family, examples in family_examples
+    ]
     out: List[str] = []
-    depth = max((len(qids) for _, qids in family_qids), default=0)
-    for index in range(depth):
-        for _, qids in family_qids:
-            if index < len(qids):
-                out.append(qids[index])
-    return out
+    global_tokens = 0
+    while True:
+        best = None
+        best_deficit = None
+        for entry in state:
+            _, examples, share, cursor, emitted = entry
+            if cursor >= len(examples) or share <= 0:
+                continue
+            deficit = share * global_tokens - emitted
+            if best is None or deficit > best_deficit:
+                best = entry
+                best_deficit = deficit
+        if best is None:
+            return out
+        _, examples, _, cursor, emitted = best
+        qid, tokens = examples[cursor]
+        out.append(qid)
+        best[3] = cursor + 1
+        best[4] = emitted + tokens
+        global_tokens += tokens
 
 
 def _fill_recipe(
@@ -343,7 +404,7 @@ def _fill_recipe(
     seed_suffix: str,
 ) -> Tuple[List[str], Dict[str, Any], int]:
     """Sample each recipe family to ``share * token_scale`` and interleave."""
-    family_qids: List[Tuple[str, List[str]]] = []
+    family_examples: List[Tuple[str, List[Tuple[str, int]]]] = []
     reports: Dict[str, Any] = {}
     total = 0
     for family, share in recipe.shares:
@@ -363,10 +424,10 @@ def _fill_recipe(
             "shortfall_estimated_tokens": shortfall,
             "realized_share": None,  # filled in below
         }
-        family_qids.append((family, [entry.qid for entry in taken]))
+        family_examples.append((family, [(entry.qid, entry.estimated_tokens) for entry in taken]))
     for report in reports.values():
         report["realized_share"] = (report["estimated_tokens"] / total) if total else 0.0
-    return interleave_families(family_qids), reports, total
+    return interleave_families(family_examples, recipe.shares), reports, total
 
 
 def plan_recipes(
@@ -379,6 +440,7 @@ def plan_recipes(
     removal_identifiers: FrozenSet[str] = frozenset(),
     removal_file_counts: Optional[Dict[str, int]] = None,
     small_arm_hours: Optional[float] = None,
+    epochs_overrides: Optional[Dict[str, int]] = None,
 ) -> Dict[str, Dict[str, Any]]:
     """Fill per-recipe family quotas and interleave into frozen orders.
 
@@ -386,7 +448,9 @@ def plan_recipes(
     tokenizer, no wall clock (deterministic for fixed inputs; the ETA line is
     printed by ``main`` only).  Returns ``{name: {"order": [...], "plan":
     {...}}}``, including ``<recipe>_repeat`` variants when
-    ``repeat_unique_tokens`` is set.
+    ``repeat_unique_tokens`` is set.  ``epochs_overrides`` (per recipe name)
+    is a pure audit record: written into the plan and scales the reported
+    ``presented_estimated_tokens``, nothing else.
     """
     if budget_estimated_tokens <= 0:
         raise ValueError(f"--budget_estimated_tokens must be positive, got {budget_estimated_tokens}")
@@ -406,6 +470,7 @@ def plan_recipes(
         if small_arm_hours is not None
         else None
     )
+    epochs_overrides = epochs_overrides or {}
     results: Dict[str, Dict[str, Any]] = {}
     for recipe in recipes:
         missing = [family for family, _ in recipe.shares if family not in filtered_pools]
@@ -413,6 +478,7 @@ def plan_recipes(
             raise ValueError(
                 f"recipe {recipe.name!r} needs families with no configured source path: {missing}"
             )
+        epochs_override = epochs_overrides.get(recipe.name)
         order, family_reports, total_tokens = _fill_recipe(
             recipe, filtered_pools, budget_estimated_tokens, order_seed, seed_suffix="sample"
         )
@@ -427,7 +493,10 @@ def plan_recipes(
                 "budget_estimated_tokens": budget_estimated_tokens,
                 "families": family_reports,
                 "total_estimated_tokens": total_tokens,
+                "epochs_override": epochs_override,
+                "presented_estimated_tokens": total_tokens * (epochs_override or 1),
                 "order_examples": len(order),
+                "interleave": "token_deficit",
                 "removals": removals_report,
                 "seeds": {"order_seed": order_seed},
                 "eta": eta_info,
@@ -444,6 +513,7 @@ def plan_recipes(
             if len(rep_order) != len(set(rep_order)):
                 raise RuntimeError(f"recipe {recipe.name}_repeat: duplicate qids in the planned order")
             recommended_epochs = math.ceil(budget_estimated_tokens / rep_total) if rep_total > 0 else 0
+            effective_epochs = epochs_override if epochs_override is not None else recommended_epochs
             results[f"{recipe.name}_repeat"] = {
                 "order": rep_order,
                 "plan": {
@@ -455,9 +525,11 @@ def plan_recipes(
                     "families": rep_reports,
                     "unique_pool_estimated_tokens": rep_total,
                     "recommended_epochs": recommended_epochs,
-                    "presented_estimated_tokens": rep_total * recommended_epochs,
+                    "epochs_override": epochs_override,
+                    "presented_estimated_tokens": rep_total * effective_epochs,
                     "order_examples": len(rep_order),
                     "order_note": "each qid appears once; repetition is achieved at train time via epochs",
+                    "interleave": "token_deficit",
                     "removals": removals_report,
                     "seeds": {"order_seed": order_seed},
                     "eta": eta_info,
@@ -599,10 +671,13 @@ def _eta_line(name: str, presented_tokens: int, small_arm_hours: float) -> str:
     finish = datetime.now() + timedelta(
         hours=(presented_tokens / _TOKENS_PER_ETA_UNIT) * small_arm_hours
     )
+    # Both numbers are ESTIMATED source tokens (the same estimator the
+    # trainer's --max_source_tokens uses); the small-arm calibration is
+    # measured against that same nominal unit.  Say so explicitly.
     return (
         f"{name}: 预计完成 = {finish:%Y-%m-%d %H:%M} "
-        f"(presented≈{presented_tokens / 1e6:.1f}M estimated tokens; "
-        f"calibration 32M ≈ {small_arm_hours}h from the small arm)"
+        f"(estimated≈{presented_tokens / 1e6:.1f}M tokens, estimator 口径; "
+        f"32M estimated ≈ {small_arm_hours}h from the small arm)"
     )
 
 
@@ -629,6 +704,7 @@ def main() -> None:
     parser.add_argument("--budget_estimated_tokens", type=int, required=True, help="N: per-recipe total estimated source tokens")
     parser.add_argument("--oversample_factor", type=float, default=1.25, help="scan cap = quota x this factor")
     parser.add_argument("--repeat_unique_tokens", type=int, default=None, help="M: also emit <recipe>_repeat variants with ~M unique tokens per family pool")
+    parser.add_argument("--epochs_override", action="append", default=None, metavar="name=n", help="repeatable audit record: recipe name -> train epochs (integer >= 1); scales presented_estimated_tokens in the plan jsons")
     parser.add_argument("--removal_files", nargs="*", default=[], help="dedup removal lists (dicts with removal_list, or bare JSON string lists)")
     parser.add_argument("--order_seed", type=int, default=42)
     parser.add_argument("--out_dir", required=True)
@@ -646,6 +722,7 @@ def main() -> None:
     names = [recipe.name for recipe in recipes]
     if len(names) != len(set(names)):
         raise ValueError(f"duplicate --recipe names: {sorted(names)}")
+    epochs_overrides = _parse_epochs_overrides(args.epochs_override, set(names))
     if not any([
         args.traces_path,
         args.toucan_path,
@@ -696,6 +773,7 @@ def main() -> None:
         removal_identifiers=removal_identifiers,
         removal_file_counts=removal_file_counts,
         small_arm_hours=args.small_arm_hours,
+        epochs_overrides=epochs_overrides,
     )
     write_outputs(results, out_dir)
 
@@ -713,10 +791,14 @@ def main() -> None:
                     report["share"],
                 )
         presented = plan.get("presented_estimated_tokens", plan.get("total_estimated_tokens", 0))
+        epochs_note = ""
+        if plan.get("epochs_override") is not None:
+            epochs_note = f", epochs_override={plan['epochs_override']}"
+        elif plan["variant"] == "repeat":
+            epochs_note = f", recommended_epochs={plan['recommended_epochs']}"
         print(
             f"{name}: {plan['order_examples']} examples, "
-            f"presented≈{presented / 1e6:.1f}M estimated tokens"
-            + (f", recommended_epochs={plan['recommended_epochs']}" if plan["variant"] == "repeat" else "")
+            f"estimated≈{presented / 1e6:.1f}M tokens (estimator 口径)" + epochs_note
         )
         if args.small_arm_hours is not None:
             print(_eta_line(name, presented, args.small_arm_hours))

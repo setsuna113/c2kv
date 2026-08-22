@@ -161,7 +161,7 @@
 | J-joint | 0.555 | 0.126 | **0.432** |
 | J-sep_tool（半边） | 0.508 | 0.098 | 0.341 |
 | J-sep_hist（半边） | 0.461 | 0.094 | 0.395 |
-| J-separate（拼接，fixed） | 待定（两路评测先后 segfault/aicpu timeout，换卡重跑中） | | |
+| J-separate（拼接，fixed） | 0.523（genTool）/ 0.484（genHist） | 0.172 / 0.187 | 0.361 / 0.419 |
 
 三条件单项核查（无牺牲检查）：fixed_joint 三条件 0.343/0.407/0.500 均衡；fixed_sep_tool tool_only 0.481 最强 tool 专家；fixed_sep_hist 偏弱（公平预算代价）。
 
@@ -180,3 +180,43 @@
 - LR：5e-5 为主，1e-4 复核在评（lrcal3_1e-4 训完，评测中）。
 
 
+
+---
+
+# 2026-08-22 晚：Gate-3 收口 + medium 预算重标定（降级，预注册时间公式）+ license 回退触发
+
+## 18. Gate-3 终态（separate 行补齐，判读落定）
+
+- separate fixed 行补齐（卡 1/2 重跑成功；卡 6/7 的 segfault/aicpu timeout 标 infra-flaky）：**genTool 0.523 / genHist 0.484**。
+- 终序：alternate 0.578 > joint 0.555 > separate(genTool) 0.523 > sep_tool 0.508 > separate(genHist) 0.484 > sep_hist 0.461。
+- 判读：严格式 joint≤alternate≤separate **不成立**（separate < joint）→ 非 dominated；joint − separate = +3.2pp 恰在噪声地板上沿，"共享参数 > 双 extractor 拼接"方向两个 regime 一致；"同时拼接监督 > 交替监督"未显现。**维持 inconclusive（偏"small 尺度无 joint 溢价"），medium 复验臂确认，不直接 extend large。**
+- LR 复核收口：1e-4 只有 **0.266**（c2kv@8×，n=128），明显差于 5e-5 的 0.342 → **medium 锁定 LR=5e-5**。
+
+## 19. P_src 实测（fixed 四臂，measure_arm_psrc，docs/g_joint/psrc_fixed_arms.json）
+
+- joint：P_src=12.62M，T_tgt=612K，22.7h → **0.556M 呈现/h/卡**。
+- alternate：P_src=12.54M，T_tgt=1.21M（双侧监督 2×），~50h → **0.251M 呈现/h/卡**（alternate 每呈现 token 贵 2.2×）。
+- **alternate_over_joint = 0.994**（fixed regime 公平性实测确认，capfix 达成设计目标）。
+
+## 20. traces-v2 license：确认无声明 → 预注册回退触发
+
+- HF cardData 实测（hf-mirror API，2026-08-22）：v2 无 license 字段、无 license tag；v1 = CDLA-permissive-2.0。按任务书：**medium 的 traces 家族改用 v1（1,781 sessions），Toucan 扩规模**。正式 G8 发布前仍需 v2 license 澄清。
+- 影响：v1 池按 session 数估计 ~45M estimated tokens（planner 实测后更新），小于 D-single 的 80M 配额 → D-single 需 epochs≈2 补满（planner 报告实际值）；v1⊂v2 已证，split manifest（taskproxy_disjoint_v2）的 train/eval 划分对 v1 依然有效（eval 侧零泄漏由构造保证：只取 manifest train_ids ∩ v1）。
+
+## 21. medium 预算降级（预注册时间公式，记录式降级，不静默超期）
+
+- 实测吞吐下 0.25P（133.9M 呈现）：joint ≈ 10 天/卡、**alternate ≈ 22 天/卡** → 远超 08-29±1 交付窗口。
+- **降级为每臂 100M estimated ≈ 39M 呈现 ≈ 0.073P**（estimator 口径，与 trainer `--max_source_tokens` 一致）：alternate ~6.5 天（08-23 早启动 → 08-29 晚完成），joint ~2.9 天。
+- 臂（全部 fixed regime、8×、LR=5e-5、同一 order/清单机制，交错按 token-deficit 加权——禁止子集前置复现）：
+  1. `med_dsingle_alt`：D-single（qa 20% + traces-v1 80%），alternate，epochs 按池子实测定（预计 2）
+  2. `med_dsingle_joint`：**同一 order file**，joint —— Gate-3 复验对（P_src 匹配）
+  3. `med_dmulti_alt`：D-multi（qa 20% + v1 50% + Toucan multi-turn 25% + Open-SWE resolved-only 5%），alternate，1 epoch
+  4. `med_dmulti_repeat_alt`：D-multi 同配比、unique 池截 25M estimated、4 epochs —— G-Q1 对照（P_src 与臂 3 匹配，U_src ~4× 差）
+- QA 家族经 JointExample 化走 joint grid（history_documents=QA 文档），非 legacy mdoc 类——记录为有意选择：统一 order/预算/审计基建，QA 仅占 20% 护栏份额。
+- Open-SWE fixture 抽查发现 tools 列可能不含实际调用的工具（target_tool_doc_index=None 降级为普通截断）——服务器实跑前抽查真实 shards 确认普遍性，若普遍则该家族的 tool 侧贡献弱（仅 5% 份额，记录即可）。
+
+## 22. Phase 4 基建状态（commit 7da08aa + 待提交交错修复）
+
+- 已入库：multisource loaders（Toucan/Open-SWE/QA → JointExample，answer 面复用 `_render_agent_output_messages` 字节级一致）、trainer 接线（keep_qids 预过滤、train_source_counts）、mixture planner、dedup flatteners 扩展（trajectory/JSON-string 列）、34+21 项测试（本地 stub harness 全绿）。
+- 在跑：新 dedup pass（train = v1+toucan+openswe+qa，eval = BFCL + v2-eval sessions，messages + raw 双通道）；服务器 pytest 待修复合入后跑。
+- 下一步：dedup removal → planner 构建 4 臂 order/plan（含 realized 配比、时间公式 ETA）→ **08-23 早启动 medium 4 臂**（卡 1-4），卡 0 + 5-7 跑 eval/validation。
