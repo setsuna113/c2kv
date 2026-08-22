@@ -118,3 +118,35 @@
 - 评测：gate2fix_separate ×2（重跑）、gate3_fixed_sep_tool、gate3_fixed_sep_hist ✅、其余 gate3 随训完随挂
 - 决策点：08-23 中午冻结 `G8-small-v2`（joint-fixed + 评测通过 + psrc≈1.0 ✓已具备）；08-24 晚 fixed 四臂终表 → Gate-3 终判
 
+---
+
+# 2026-08-22 追记二：fixed 三臂先行表 + G8-small-v2 冻结
+
+## 12. fixed 训练臂先行表（fixed ckpt × fixed-eval，三条件，common n=108，c2kv@8×）
+
+| 臂 | tool_only | history_only | joint |
+|---|---|---|---|
+| fixed_joint | 0.343 | 0.407 | **0.500** |
+| fixed_sep_tool | **0.481** | 0.333 | 0.454 |
+| fixed_sep_hist | 0.139 | 0.380 | 0.417 |
+
+对照 buggy（fixed-eval）：fixed_sep_tool 成为真正的 tool 专家（tool_only 0.352→**0.481**，+12.9pp，target 保留的直接效果）；fixed_sep_hist 弱化（0.504→0.380，预算公平化 11.7M→5.8M 的代价）；fixed_joint 与 buggy-joint 持平（joint 条件 0.500=0.500），三条件最均衡。
+
+## 13. ✅ 冻结 `G8-small-v2` = `fixed_joint`（08-22 07:37 UTC+1，机制-pilot 口径）
+
+预注册冻结条件全部满足：
+
+- fixed_joint 评测通过：joint 条件 c2kv 0.500，与 buggy-joint 持平（无超噪声退化）；
+- fixed regime `sep_combined_over_joint = 0.994 ≈ 1.0`（实测，`docs/g_joint/psrc_fixed_preview.json`）；
+- 全套 pytest 204 绿；target 覆盖率 fixed 100%。
+
+定位：B/C/D 机制 pilot 的**临时供货件**，非正式 G8（正式 = G8-medium，medium 阶段产出）。注意口径：32M 名义 ≈ 12.6M 呈现 P_src，appworld-only，单 seed。
+
+## 14. 在跑（08-22 早晨）
+
+- gate3_fixed_alternate（卡 5，fixed_alternate 已训完 ✅）→ fixed 四臂终表今天补齐（比预计提前一天）
+- gate3_fixed_separate_genTool/genHist（卡 6/7，fixed ckpt 的 separate 行）
+- lrcal3_1e-4（卡 0，8M LR 上沿复核，~6h）
+- Gate-3 终判：四臂+separate 齐后按预注册规则给 extend 建议
+
+
