@@ -1,0 +1,131 @@
+Sand dunes are among the most restless landforms on the surface of the earth. They form wherever a
+supply of loose grains, a wind strong enough to move them, and a place for the grains to settle all
+occur together. None of these three conditions is unusual on its own. What is unusual is the way they
+combine to produce shapes that repeat themselves across enormous distances with a regularity that
+looks almost deliberate. A traveller crossing a great sand sea will pass ridge after ridge of nearly
+the same height, spaced at nearly the same interval, curving in nearly the same direction. The
+pattern is not designed. It emerges from the simple physics of grains bouncing along the ground.
+
+The movement of sand by wind begins with a process known as saltation. When the wind blows over a bed
+of dry grains, it exerts a drag on the topmost layer. Below a certain speed nothing happens, because
+the weight of each grain and the friction between neighbouring grains hold the bed together. Above
+that threshold the most exposed grains begin to roll, and a few of them lift briefly into the moving
+air. Once a grain is airborne it is carried forward and downward in a long flat arc. It strikes the
+bed again with far more energy than the wind alone could have given it, and that impact throws other
+grains into the air. Within a short distance the number of grains in flight grows rapidly until the
+moving cloud of sand itself slows the wind near the ground, and the whole system settles into a
+balance.
+
+This balance explains a great deal about the shapes that follow. Because the grains travel in low
+hops rather than in suspension, most of the sand stays within a knee height of the ground even in a
+strong gale. Fine dust behaves differently. Particles smaller than a certain size are lifted high and
+carried away for hundreds of leagues, which is why the air above a desert can be hazy while the sand
+itself barely leaves the ground. The sorting is remarkably sharp. A handful of sand taken from the
+crest of a dune will contain grains of a narrow range of sizes, while the material at the foot of a
+nearby rock slope may contain everything from silt to pebbles.
+
+Once sand is in motion, any obstacle that slows the wind will cause deposition. A tuft of grass, a
+low stone, even a slight hollow in the ground can be enough. Sand gathers in the sheltered pocket
+behind the obstacle, and the growing mound becomes an obstacle in its own right, which encourages
+further gathering. This is the essential feedback that turns a scatter of grains into a landform. The
+mound grows until its windward face has a gentle slope, up which grains are driven, and its leeward
+face becomes steep, because grains falling over the crest pile up until the slope can hold no more.
+
+The angle at which a pile of dry grains finally gives way is termed the angle of repose. For most
+desert sand it lies a little above thirty degrees from the horizontal. When the leeward face reaches
+that angle, further deposition triggers a small avalanche, and a thin tongue of sand slides down to
+the base. These avalanches are the mechanism by which a dune moves. Grains are lifted up the shallow
+windward slope, tipped over the crest, and buried at the foot of the steep face, where they remain
+until the whole dune has passed over them and they are exposed on the windward side once more. In
+this way the dune travels forward while the individual grains within it merely circulate.
+
+The rate of travel depends chiefly on size. A small dune has less sand to move and therefore advances
+quickly. A very large one may creep forward only a few paces in a year. Because small dunes overtake
+large ones, and because a small dune that runs into a large one is usually absorbed, the size
+distribution in a mature sand sea tends toward larger and fewer forms over long periods. This is one
+of several ways in which dune fields behave like a slow fluid, with mergers, collisions and even
+something resembling waves passing through them.
+
+Not all dunes have the same shape, and the differences are informative. Where sand is scarce and the
+wind blows steadily from one direction, isolated crescent shaped dunes appear, with two horns
+pointing downwind. The horns form because the thinner edges of the dune move faster than the thick
+middle. Where sand is plentiful under the same steady wind, the crescents join at their horns into
+long transverse ridges lying across the wind. Where the wind blows from two directions that differ by
+a wide angle, the ridges align with the resultant of the two, producing long parallel ridges that can
+run for many leagues almost without a break. Where winds arrive from several directions in turn, the
+result is a star shaped mound with arms radiating from a central peak, and such a dune tends to grow
+upward rather than travel.
+
+The largest forms of all are sometimes termed draa, and they carry smaller dunes on their flanks in
+the way that ocean swells carry ripples. The hierarchy is not accidental. Each scale of form responds
+to a different scale of the wind, and each takes a different length of time to adjust. A ripple on
+the surface of a dune reorganises itself within minutes of a change in wind direction. The dune
+beneath it takes years. The great ridge beneath the dune may preserve the memory of a wind pattern
+that has not existed for many centuries, which is why some of these features are described as relict.
+
+Ripples deserve a paragraph of their own, because they are produced by a subtly different mechanism.
+They are not miniature dunes. A dune grows where the wind slows, but a ripple grows because of the
+geometry of the impacts made by saltating grains. A grain arriving at a shallow angle is more likely
+to strike the upwind side of a small bump than the sheltered downwind side, so the upwind side loses
+grains faster and the crest migrates. The spacing of ripples turns out to be related to the typical
+length of a saltation hop, which in turn depends on wind speed and grain size. On a coarse bed the
+ripples are widely spaced and their crests are lined with the largest grains, which are too heavy to
+be thrown far and so accumulate where they are pushed.
+
+Water plays a larger part in desert landscapes than the popular picture suggests. Rain is rare, but
+when it falls it often falls hard, and with little vegetation to slow it the runoff is immediate. Dry
+channels that have held nothing for years can fill within an hour, carry a great load of sediment for
+a day, and be dry again by the following week. Much of the loose material that the wind later
+redistributes was originally delivered by such floods and left in broad fans where the channels
+emerged from the hills. In this sense the wind is a sorting and rearranging force working on a supply
+that water provided.
+
+Moisture also affects the sand directly. Even a trace of water between grains creates a thin bridge
+that holds them together and raises the wind speed needed to set them moving. A damp surface can be
+almost immobile in a wind that would strip a dry one bare. Dew, morning fog and shallow ground water
+therefore act as brakes on dune movement, and their seasonal rhythm can produce a corresponding
+rhythm in the rate of advance. Where the water table lies close enough to the surface, dunes may
+stall entirely and become fixed, at which point plants can take hold and lock them in place for
+centuries.
+
+Vegetation is the other great stabiliser. A plant slows the wind near the ground, traps grains among
+its stems and roots, and grows upward as sand accumulates around it. The result is a mound anchored
+by the plant, which behaves quite differently from a free dune. If the plant dies, whether through
+drought, grazing or fire, the mound can be breached and a bowl shaped hollow opens on the windward
+side. Sand blows out of the hollow and piles into a long arm downwind. Such hollows and arms are common on
+coasts and can reactivate a whole dune field that had appeared settled for generations.
+
+Coastal dunes differ from desert ones in their supply rather than their physics. The beach delivers a
+continuous ribbon of fresh sand, replenished by waves and currents, and the wind carries it inland
+whenever the surface dries between tides. Because the supply is concentrated along a line, coastal
+dunes usually form a belt parallel to the shore, with the youngest and lowest ridge nearest the water
+and progressively older ridges behind it. Counting the ridges and dating the soils that have formed
+on them gives a record of how the shoreline has shifted, and such records have proved valuable for
+understanding changes in sea level over the past several thousand years.
+
+Dunes are also found where no desert and no coast exists. Beyond the margins of former ice sheets,
+strong winds blowing off the ice worked on the bare ground left behind by melting, building ridges
+that are now buried under forest and farmland. They can be recognised from the air by their gentle
+curved outlines, and from the ground by the sandy soil that overlies heavier material. Elsewhere,
+along the banks of large rivers, sand exposed at low water is picked up and heaped into small fields
+of dunes that vanish again during the next flood.
+
+The study of all these forms has practical worth. Roads, canals and settlements built at the edge of
+a sand sea must contend with dunes that continue to advance regardless of what is placed in their
+way. The remedies fall into a few families. One may fix the sand with plantings, or with a surface
+coating, or with a grid of low fences that break the wind. One may divert the sand by shaping the
+ground so that the wind accelerates and carries the grains past the vulnerable place. One may simply
+remove the sand as it arrives, which is expensive but sometimes the only option where a dune is very
+large. Choosing between these depends on knowing how much sand passes a given line each year, and
+that amount can be estimated from wind records with reasonable confidence.
+
+Finally, dunes are excellent recorders. The layers preserved inside an ancient dune, now turned to
+stone, tilt at the angle of the leeward face that produced them, and the direction of that tilt
+reveals the direction of a wind that blew long before any living thing walked the earth. Whole
+mountains of such stone stand in several parts of the world, their cross bedded layers curving and
+truncating one another in a pattern that any observer of a modern dune field would recognise at once.
+The grains are the same, the slopes are the same, and the rules that arranged them have not changed.
+That continuity is perhaps the most satisfying thing about the subject. A person who understands why
+a small ridge of sand behaves as it does on a windy afternoon has, in a real sense, understood a
+process that has been shaping landscapes for a very long time and will go on shaping them long after
+the present arrangement of ridges has been swept into some new and equally regular pattern.
