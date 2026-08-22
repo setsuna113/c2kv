@@ -337,3 +337,155 @@ def test_shingle_bottom_k_cap_keeps_near_dup_detection():
     sig_a = hasher.signature(shingles_a)
     sig_b = hasher.signature(dcd._shingle_hashes(long_b, 5, 512))
     assert dcd._estimate_jaccard(sig_a, sig_b, 128) >= 0.8
+
+
+# ---------------------------------------------------------------------------
+# Medium-phase corpus shapes: Toucan (JSON-string columns) and Open-SWE
+# (``trajectory`` key, tools as a list of JSON strings).
+# ---------------------------------------------------------------------------
+
+
+_TOUCAN_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "weather-mcp-server-get_alerts",
+            "description": "Get weather alerts for a US state.",
+            "parameters": {"type": "object", "properties": {"state": {"type": "string"}}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "mcp服务-query_weather",
+            "description": "查询天气",
+            "parameters": {"type": "object", "properties": {"city": {"type": "string"}}},
+        },
+    },
+]
+
+
+def _toucan_record():
+    messages = [
+        {"role": "user", "content": "What is the weather in Denver right now?"},
+        {"role": "assistant", "content": "I'll get the current conditions in Denver right now."},
+        {"role": "tool_call", "content": "{'name': 'mcp服务-query_weather', 'arguments': '{\"city\": \"Denver\"}'}"},
+        {"role": "tool_response", "content": "🌍 Denver, US 温度: 16.56°C"},
+        {"role": "user", "content": "Are there any active weather alerts in Colorado?"},
+    ]
+    return {
+        "uuid": "toucan-uuid-1",
+        "subset_name": "multi-turn",
+        # Toucan parquet stores both columns as JSON-encoded strings.
+        "messages": json.dumps(messages, ensure_ascii=False),
+        "tools": json.dumps(_TOUCAN_TOOLS, ensure_ascii=False),
+    }
+
+
+def test_toucan_json_string_columns_flatten(tmp_path):
+    path = tmp_path / "toucan.jsonl"
+    _write_jsonl(path, [_toucan_record()])
+
+    message_units = dcd._load_units([f"toucan={path}"], "messages", "train")
+    texts = [unit["text"] for unit in message_units]
+    assert "What is the weather in Denver right now?" in texts
+    assert "I'll get the current conditions in Denver right now." in texts
+    # tool_call content is kept as its raw dict-literal text unit.
+    assert any("mcp服务-query_weather" in text and "arguments" in text for text in texts)
+    assert "🌍 Denver, US 温度: 16.56°C" in texts
+    # record_id comes from the uuid column (unchanged existing behavior).
+    assert {unit["record_id"] for unit in message_units} == {"toucan-uuid-1"}
+
+    tool_units = dcd._load_units([f"toucan={path}"], "tools", "train")
+    names = sorted(json.loads(unit["text"])["function"]["name"] for unit in tool_units)
+    assert names == ["mcp服务-query_weather", "weather-mcp-server-get_alerts"]
+
+
+def _openswe_record():
+    trajectory = [
+        {"role": "system", "content": "You are OpenHands agent.", "tool_calls": None},
+        {"role": "user", "content": "Fix the attrs make_class issue please.", "tool_calls": None},
+        {
+            "role": "assistant",
+            "content": "",
+            "reasoning_content": "Let me explore the repository structure first.",
+            "tool_calls": [
+                {
+                    "id": "call-1",
+                    "type": "function",
+                    "function": {"name": "str_replace_editor", "arguments": "{\"command\": \"view\", \"path\": \"/workspace\"}"},
+                }
+            ],
+        },
+        {"role": "tool", "content": "Here's the files and directories up to 2 levels deep", "tool_calls": None},
+    ]
+    return {
+        "instance_id": "python-attrs__attrs-770",
+        "trajectory_id": "traj-open-1",
+        "resolved": 1,
+        "trajectory": trajectory,
+        # Open-SWE's tools column is a list of JSON strings.
+        "tools": [json.dumps(tool, ensure_ascii=False) for tool in _TOUCAN_TOOLS],
+    }
+
+
+def test_openswe_trajectory_and_string_tool_list(tmp_path):
+    record = _openswe_record()
+    path = tmp_path / "openswe.jsonl"
+    _write_jsonl(path, [record])
+
+    message_units = dcd._load_units([f"openswe={path}"], "messages", "train")
+    texts = [unit["text"] for unit in message_units]
+    assert "You are OpenHands agent." in texts
+    assert "Fix the attrs make_class issue please." in texts
+    assert "Here's the files and directories up to 2 levels deep" in texts
+    # record_id prefers trajectory_id (matches the planner's openswe sessions).
+    assert {unit["record_id"] for unit in message_units} == {"traj-open-1"}
+
+    tool_units = dcd._load_units([f"openswe={path}"], "tools", "train")
+    assert len(tool_units) == 2
+    assert {unit["record_id"] for unit in tool_units} == {"traj-open-1"}
+    names = sorted(json.loads(unit["text"])["function"]["name"] for unit in tool_units)
+    assert names == ["mcp服务-query_weather", "weather-mcp-server-get_alerts"]
+
+    # A JSON-serialized trajectory string flattens identically (some exports
+    # store the column as a string instead of a native list).
+    stringified = dict(record, trajectory=json.dumps(record["trajectory"], ensure_ascii=False))
+    path2 = tmp_path / "openswe_str.jsonl"
+    _write_jsonl(path2, [stringified])
+    texts2 = [unit["text"] for unit in dcd._load_units([f"openswe={path2}"], "messages", "train")]
+    assert texts2 == texts
+
+
+def test_existing_shapes_regression_native_lists_unchanged(tmp_path):
+    # Records with NATIVE list messages/tools must flatten exactly as before
+    # the JSON-string extensions were added.
+    record = {
+        "id": "rec-native",
+        "messages": [
+            {"role": "user", "content": "native user text"},
+            {"role": "assistant", "content": "native assistant text"},
+        ],
+        "tools": _TOUCAN_TOOLS,
+    }
+    path = tmp_path / "native.jsonl"
+    _write_jsonl(path, [record])
+    texts = [unit["text"] for unit in dcd._load_units([f"n={path}"], "messages", "train")]
+    assert texts == ["native user text", "native assistant text"]
+    tool_texts = [unit["text"] for unit in dcd._load_units([f"n={path}"], "tools", "train")]
+    assert tool_texts == [
+        json.dumps(tool, ensure_ascii=False, sort_keys=True) for tool in _TOUCAN_TOOLS
+    ]
+    # Precedence is unchanged: messages wins over trajectory when both exist.
+    both = dict(record, trajectory=[{"role": "user", "content": "trajectory text"}])
+    _write_jsonl(path, [both])
+    texts = [unit["text"] for unit in dcd._load_units([f"n={path}"], "messages", "train")]
+    assert texts == ["native user text", "native assistant text"]
+
+
+def test_record_id_priority_including_new_keys():
+    assert dcd._record_id({"session_id": "s", "trajectory_id": "t"}, "src", 0) == "s"
+    assert dcd._record_id({"trajectory_id": "t", "instance_id": "i", "_id": "h"}, "src", 0) == "t"
+    assert dcd._record_id({"instance_id": "i", "_id": "h"}, "src", 0) == "i"
+    assert dcd._record_id({"_id": "h"}, "src", 0) == "h"
+    assert dcd._record_id({}, "src", 3) == "src-3"

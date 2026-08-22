@@ -9,11 +9,14 @@ where each glob yields jsonl/parquet files; records are flattened to units
 with a global ``--unit`` strategy:
 
   * ``messages``: each message content of ``messages`` / ``conversations``
-    (OpenAI or ShareGPT style), or of the ``gen_ai.input.messages`` /
-    ``gen_ai.output.messages`` span attributes (agent-llm-traces parquet);
+    (OpenAI or ShareGPT style, native or JSON-encoded string columns such as
+    Toucan's), of Open-SWE's ``trajectory`` (same role/content structure), or
+    of the ``gen_ai.input.messages`` / ``gen_ai.output.messages`` span
+    attributes (agent-llm-traces parquet);
   * ``tools``: each tool schema of ``tools`` / ``functions`` /
-    ``gen_ai.tool.definitions`` (direct or inside spans), serialized as
-    canonical JSON;
+    ``gen_ai.tool.definitions`` (direct or inside spans; a list of
+    JSON-encoded strings, e.g. Open-SWE's column, is parsed item-wise),
+    serialized as canonical JSON;
   * ``raw``: the record's ``text``/``content``/``question``/``instruction``
     string field, else the whole record as canonical JSON.
 
@@ -134,7 +137,11 @@ def _message_texts(value: Any) -> List[str]:
 
 
 def _record_message_texts(record: Dict[str, Any]) -> List[str]:
-    for key in ("messages", "conversations"):
+    # ``trajectory`` covers NVIDIA Open-SWE-Traces rows (same role/content
+    # message structure once parsed); ``messages``/``conversations`` may be
+    # native lists or JSON-encoded strings (Toucan parquet string columns) —
+    # ``_message_texts`` already ``_json_loads``s its input.
+    for key in ("messages", "conversations", "trajectory"):
         texts = _message_texts(record.get(key))
         if texts:
             return texts
@@ -159,7 +166,14 @@ def _as_tool_list(value: Any) -> List[Dict[str, Any]]:
             parsed = [parsed]
     if not isinstance(parsed, list):
         return []
-    return [item for item in parsed if isinstance(item, dict)]
+    tools = []
+    for item in parsed:
+        # Open-SWE's ``tools`` column is a list of JSON strings; dict items
+        # (every existing corpus) pass through ``_json_loads`` unchanged.
+        item = _json_loads(item, item)
+        if isinstance(item, dict):
+            tools.append(item)
+    return tools
 
 
 def _record_tool_texts(record: Dict[str, Any]) -> List[str]:
@@ -197,7 +211,12 @@ def _record_units(record: Dict[str, Any], unit: str) -> List[str]:
 
 
 def _record_id(record: Dict[str, Any], source_name: str, index: int) -> str:
-    for key in ("id", "session_id", "trace_id", "qid", "uuid"):
+    # The trailing keys cover the medium-phase corpora so removal-list
+    # record_ids can be matched back to planner session ids: Open-SWE
+    # (``trajectory_id``/``instance_id``) and HotpotQA/2Wiki (``_id``).
+    # Existing corpora carry one of the first five keys, so their record ids
+    # are unchanged.
+    for key in ("id", "session_id", "trace_id", "qid", "uuid", "trajectory_id", "instance_id", "_id"):
         value = record.get(key)
         if value not in (None, ""):
             return str(value)

@@ -234,6 +234,7 @@ def test_dump_train_manifest_records_order_and_counts(tmp_path):
         _example("s:0", subset="a"),
         _example("s:1", subset="a"),
         _example("s:2", subset="b"),
+        _example("toucan:uuid-1:u2", subset="toucan:multi-turn"),
     ]
     eval_examples = [_example("e:0", subset="b")]
     path = _dump_train_manifest(
@@ -247,7 +248,9 @@ def test_dump_train_manifest_records_order_and_counts(tmp_path):
     manifest = json.loads(Path(path).read_text(encoding="utf-8"))
     assert path == str(tmp_path / "train_manifest_used.json")
     assert manifest["doc_mode"] == "alternate"
-    assert manifest["train_qids"] == ["s:0", "s:1", "s:2"]
-    assert manifest["train_subset_counts"] == {"a": 2, "b": 1}
+    assert manifest["train_qids"] == ["s:0", "s:1", "s:2", "toucan:uuid-1:u2"]
+    assert manifest["train_subset_counts"] == {"a": 2, "b": 1, "toucan:multi-turn": 1}
+    # qid-family source counts: bare session:span qids count as "traces".
+    assert manifest["train_source_counts"] == {"traces": 3, "toucan": 1}
     assert manifest["interleaved_train_len"] == 6
     assert manifest["eval_qids"] == ["e:0"]

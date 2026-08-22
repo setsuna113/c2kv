@@ -7,7 +7,7 @@ import sys
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, FrozenSet, List, Optional, Sequence, Tuple
 
 from transformers import DataCollatorWithPadding, HfArgumentParser
 
@@ -23,6 +23,12 @@ from train.train_data_joint import (  # noqa: E402
     AgentLLMTracesJointSource,
     JointDataset,
     JointExample,
+)
+from train.train_data_joint_multisource import (  # noqa: E402
+    OpenSWEJointSource,
+    QADocsJointSource,
+    ToucanJointSource,
+    qid_source_family,
 )
 from train_agent_tool_definition_c2kv import _setup_device  # noqa: E402
 
@@ -67,6 +73,13 @@ class JointDataArgs:
     random_negative_tools: int = 24
     example_order_file: Optional[str] = None
     max_source_tokens: Optional[int] = None
+    # G-medium multi-source mixture (train split only; eval stays traces-only).
+    toucan_path: Optional[str] = None
+    openswe_path: Optional[str] = None
+    qa_hotpotqa_path: Optional[str] = None
+    qa_2wiki_path: Optional[str] = None
+    qa_longmagpie_path: Optional[str] = None
+    multisource_max_records: Optional[int] = None  # smoke-test cap applied per extra source
     device_type: str = "auto"
     npu_attn_impl: str = "npu_fusion_attention"
 
@@ -114,6 +127,50 @@ def _load_joint_examples(data_args: JointDataArgs, split: str) -> List[JointExam
         random_negative_tools=data_args.random_negative_tools,
     )
     return list(source)
+
+
+def _load_multisource_examples(
+    data_args: JointDataArgs,
+    keep_qids: Optional[FrozenSet[str]] = None,
+) -> List[JointExample]:
+    """Load the G-medium extra sources (Toucan / Open-SWE / QA docs), train split.
+
+    Disabled sources (path None) contribute nothing; with all paths None this
+    is a no-op and the run behaves exactly as the single-source trainer.
+    ``keep_qids`` (the ``--example_order_file`` qid set) prefilters during the
+    source scans as a memory guard; the post-load ``_apply_example_order_file``
+    call stays the authoritative filter/reorder.  ``max_samples_per_session``
+    is deliberately NOT forwarded: the extra sources default to no subsampling
+    and the mixture planner builds its pools with the same defaults, so the
+    two sides cannot diverge (traces keeps its own subsampling above).
+    """
+    examples: List[JointExample] = []
+    common: Dict[str, Any] = dict(
+        split="train",
+        keep_qids=keep_qids,
+        max_records=data_args.multisource_max_records,
+        split_seed=data_args.split_seed,
+        require_tool_call=data_args.require_tool_call,
+    )
+    tool_knobs: Dict[str, Any] = dict(
+        max_tools_per_sample=data_args.max_tools_per_sample,
+        same_namespace_negative_tools=data_args.same_namespace_negative_tools,
+        random_negative_tools=data_args.random_negative_tools,
+    )
+    if data_args.toucan_path:
+        examples.extend(list(ToucanJointSource(data_args.toucan_path, **common, **tool_knobs)))
+    if data_args.openswe_path:
+        examples.extend(list(OpenSWEJointSource(data_args.openswe_path, **common, **tool_knobs)))
+    if any([data_args.qa_hotpotqa_path, data_args.qa_2wiki_path, data_args.qa_longmagpie_path]):
+        examples.extend(list(
+            QADocsJointSource(
+                hotpotqa_path=data_args.qa_hotpotqa_path,
+                wiki2_path=data_args.qa_2wiki_path,
+                longmagpie_path=data_args.qa_longmagpie_path,
+                **common,
+            )
+        ))
+    return examples
 
 
 def _apply_example_order_file(
@@ -236,6 +293,11 @@ def _dump_train_manifest(
         "num_train_examples": len(train_examples),
         "train_qids": [example.qid for example in train_examples],
         "train_subset_counts": dict(Counter(example.subset for example in train_examples)),
+        # Mixture audit: qid-family counts (traces qids are bare
+        # ``session_id:span_index`` and count as "traces").
+        "train_source_counts": dict(
+            Counter(qid_source_family(example.qid) for example in train_examples)
+        ),
         "interleaved_train_len": interleaved_train_len,
         "num_eval_examples": len(eval_examples),
         "eval_qids": [example.qid for example in eval_examples],
@@ -280,6 +342,16 @@ def main() -> None:
     # I/O, but avoids distributed startup deadlocks.
     train_examples = _load_joint_examples(data_args, "train")
     eval_examples = _load_joint_examples(data_args, "eval")
+
+    order_qids: Optional[FrozenSet[str]] = None
+    if data_args.example_order_file:
+        # Pre-read the frozen qid list as a scan-time prefilter for the extra
+        # sources (a memory guard only); _apply_example_order_file below
+        # re-reads the file and stays the authoritative filter/reorder.
+        raw_order_qids = json.loads(Path(data_args.example_order_file).read_text(encoding="utf-8"))
+        if isinstance(raw_order_qids, list):
+            order_qids = frozenset(str(qid) for qid in raw_order_qids)
+    train_examples.extend(_load_multisource_examples(data_args, keep_qids=order_qids))
 
     if data_args.example_order_file:
         train_examples = _apply_example_order_file(train_examples, data_args.example_order_file)
