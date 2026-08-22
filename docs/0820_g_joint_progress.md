@@ -220,3 +220,8 @@
 - 已入库：multisource loaders（Toucan/Open-SWE/QA → JointExample，answer 面复用 `_render_agent_output_messages` 字节级一致）、trainer 接线（keep_qids 预过滤、train_source_counts）、mixture planner、dedup flatteners 扩展（trajectory/JSON-string 列）、34+21 项测试（本地 stub harness 全绿）。
 - 在跑：新 dedup pass（train = v1+toucan+openswe+qa，eval = BFCL + v2-eval sessions，messages + raw 双通道）；服务器 pytest 待修复合入后跑。
 - 下一步：dedup removal → planner 构建 4 臂 order/plan（含 realized 配比、时间公式 ETA）→ **08-23 早启动 medium 4 臂**（卡 1-4），卡 0 + 5-7 跑 eval/validation。
+
+## 23. 两个补充实测（08-22 深夜）
+
+- Open-SWE tools 列覆盖抽查（4 子集 × 首 shard 前 25 行，resolved=1 共 30 行）：**30/30 实际调用的工具全部在 tools 列内**——§21 末条的 fixture 缺口是我自己的截断 artifact，真实数据无此问题。
+- 训练消费顺序核实：`GistMultiDocTrainer` 不 override sampler → HF 默认 RandomSampler 每 epoch 随机置换。因此 order 文件的机制是**成员资格 + 预算截断点**，small 臂的"appworld 前置"是成员资格偏斜（32M 前缀全是 appworld），非训练序列问题。medium planner 的配额抽样保证池子构成比例正确，token-deficit 交错保证审计窗口内局部配比可核查；RandomSampler 处理逐 epoch 序列。
