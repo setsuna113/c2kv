@@ -28,6 +28,11 @@ from pathlib import Path
 
 import pytest
 
+# The eval driver imports torch at module top, so the whole file is
+# torch-gated: without this it ERRORs at collection on a torch-free box
+# instead of skipping.
+pytest.importorskip("torch")
+
 # Make python/, python/inference/ and agent/ importable when pytest is invoked
 # from the repo root (imported entries insert these themselves, but only after
 # their own top-level torch/transformers imports resolve).
@@ -878,3 +883,217 @@ def test_merge_shards_aggregates_gist_init_fractions(tmp_path):
     merged_summary_path = (tmp_path / "merged.jsonl").with_suffix(".summary.json")
     persisted = _json.loads(merged_summary_path.read_text(encoding="utf-8"))
     assert persisted["gist_init_fractions"] == {"joint": 0.7, "separate_tool": 0.2}
+
+
+# ---------------------------------------------------------------------------
+# Experiment B: chunking policy / delayed compression / frozen qid manifest.
+# ---------------------------------------------------------------------------
+
+
+def _agent_history_example():
+    """A JointExample whose history carries unit provenance (action+observation)."""
+    from train.train_data_multiturn import (
+        _agent_history_turn_docs,
+        _agent_history_turn_units,
+    )
+
+    messages = [
+        {"role": "user", "content": "list the files in /tmp"},
+        {
+            "role": "assistant",
+            "content": 'Action:\n<tool_call>\n{"name":"ls","arguments":{"path":"/tmp"}}\n</tool_call>',
+        },
+        {"role": "tool", "content": "a.txt b.txt"},
+        {"role": "assistant", "content": "there are two files"},
+        {"role": "user", "content": "now read a.txt"},
+        {
+            "role": "assistant",
+            "content": 'Action:\n<tool_call>\n{"name":"read","arguments":{"path":"/tmp/a.txt"}}\n</tool_call>',
+        },
+        {"role": "tool", "content": "hello world"},
+    ]
+    return JointExample(
+        qid="s0:0",
+        session_id="s0",
+        tool_documents=["<TOOL> ls </TOOL>", "<TOOL> read </TOOL>"],
+        history_documents=[doc["content"] for doc in _agent_history_turn_docs(messages)],
+        current_messages=[{"role": "user", "content": "and b.txt?"}],
+        answer='Action:\n<tool_call>\n{"name":"read","arguments":{"path":"/tmp/b.txt"}}\n</tool_call>',
+        system_prompt="You are a test agent.",
+        subset="test",
+        history_units=_agent_history_turn_units(messages),
+    )
+
+
+def test_condition_doc_chunks_policy_meta():
+    tokenizer = _WhitespaceSelfTestTokenizer()
+    example = _agent_history_example()
+    kwargs = dict(
+        max_doc_length=256,
+        max_doc_num=8,
+        max_tool_chunks=4,
+        max_tool_definition_tokens=10000,
+        history_selection="tail",
+        split_oversized_history_docs=True,
+    )
+    _, turn_chunks, reason, turn_meta = _condition_doc_chunks(
+        tokenizer, example, "joint", chunk_policy="agent-turn", **kwargs
+    )
+    assert reason is None
+    assert turn_meta["chunk_policy"] == "agent-turn"
+    assert turn_meta["raw_recent_tokens"] == 0
+    assert turn_meta["history_content_tokens"] > 0
+    assert turn_meta["history_wrapped_tokens"] == sum(len(c) for c in turn_chunks)
+
+    _, struct_chunks, reason, struct_meta = _condition_doc_chunks(
+        tokenizer, example, "joint", chunk_policy="structural", **kwargs
+    )
+    assert reason is None
+    # Same frozen content, more (smaller) chunks: that IS the P6 arm.
+    assert struct_meta["history_content_tokens"] == turn_meta["history_content_tokens"]
+    assert len(struct_chunks) > len(turn_chunks)
+    assert struct_meta["structural_partial_docs"] == 0
+
+    _, fixed_chunks, reason, fixed_meta = _condition_doc_chunks(
+        tokenizer, example, "joint", chunk_policy="fixed-1024", **kwargs
+    )
+    assert reason is None
+    assert fixed_meta["history_content_tokens"] == turn_meta["history_content_tokens"]
+    assert len(fixed_chunks) >= 1
+
+
+def test_delay_meta_raw_ids():
+    tokenizer = _WhitespaceSelfTestTokenizer()
+    example = _agent_history_example()
+    kwargs = dict(
+        max_doc_length=256,
+        max_doc_num=8,
+        max_tool_chunks=4,
+        max_tool_definition_tokens=10000,
+        history_selection="tail",
+        split_oversized_history_docs=True,
+        chunk_policy="agent-turn",
+    )
+    _, base_chunks, _, base_meta = _condition_doc_chunks(
+        tokenizer, example, "joint", delay_recent_turns=0, **kwargs
+    )
+    _, delay_chunks, _, delay_meta = _condition_doc_chunks(
+        tokenizer, example, "joint", delay_recent_turns=1, **kwargs
+    )
+    # One turn left the compressed grid and reappeared as raw prompt ids.
+    assert len(delay_chunks) == len(base_chunks) - 1
+    assert delay_meta["delayed_docs"] == 1
+    assert delay_meta["raw_recent_tokens"] == len(delay_meta["raw_history_ids"]) > 0
+    assert delay_meta["raw_history_ids"] == base_chunks[-1]
+    # Presented tokens are conserved: grid + raw == the agent-turn grid.
+    assert delay_meta["history_wrapped_tokens"] == base_meta["history_wrapped_tokens"]
+    # The delayed doc really is the LAST turn (its observation text is there,
+    # and the first turn's observation is not).
+    decoded = tokenizer.decode(delay_meta["raw_history_ids"])
+    assert "hello world" in decoded
+    assert "b.txt" not in decoded
+
+
+def test_parse_args_new_flags(tmp_path):
+    args = parse_args(["--model", "ckpt"])
+    assert args.chunk_policy == "agent-turn"
+    assert args.delay_recent_turns == 0
+    assert args.qid_manifest is None
+    assert args.do_sample is False
+    assert args.temperature is None and args.top_p is None
+    assert args.gen_seed == 0
+
+    manifest = tmp_path / "eval200.json"
+    manifest.write_text('["a:0", "b:1"]', encoding="utf-8")
+    args = parse_args([
+        "--model", "ckpt",
+        "--chunk_policy", "structural",
+        "--delay_recent_turns", "1",
+        "--qid_manifest", str(manifest),
+        "--do_sample", "true",
+        "--temperature", "0.7",
+        "--top_p", "0.9",
+        "--gen_seed", "3",
+    ])
+    assert args.chunk_policy == "structural"
+    assert args.delay_recent_turns == 1
+    assert args.do_sample is True
+    assert (args.temperature, args.top_p, args.gen_seed) == (0.7, 0.9, 3)
+
+    with pytest.raises(SystemExit):
+        parse_args(["--model", "ckpt", "--chunk_policy", "fixed-512", "--delay_recent_turns", "1"])
+    with pytest.raises(SystemExit):
+        parse_args(["--model", "ckpt", "--chunk_policy", "natural-paragraph"])
+
+
+def test_do_sample_requires_an_explicit_temperature():
+    """Untraceable sampling must not be launchable.
+
+    Without --temperature, transformers falls back to the checkpoint's
+    generation_config while the run summary records temperature=null, so the
+    decode configuration cannot be recovered from the artefacts.
+    """
+
+    with pytest.raises(SystemExit):
+        parse_args(["--model", "ckpt", "--do_sample", "true"])
+    with pytest.raises(SystemExit):
+        parse_args(["--model", "ckpt", "--do_sample", "true", "--top_p", "0.9"])
+    # Explicit temperature is enough; top_p may legitimately stay at the
+    # library default of 1.0 (no nucleus truncation).
+    args = parse_args(["--model", "ckpt", "--do_sample", "true", "--temperature", "0.7"])
+    assert args.do_sample is True and args.temperature == 0.7
+    # Greedy runs are unaffected.
+    assert parse_args(["--model", "ckpt"]).temperature is None
+
+
+def test_qid_manifest_filter(tmp_path, monkeypatch):
+    from eval_joint_next_action_c2kv import _filter_by_manifest, _load_qid_manifest
+
+    def _stub(qid):
+        return JointExample(
+            qid=qid,
+            session_id=qid.split(":", 1)[0],
+            tool_documents=["t"],
+            history_documents=["h"],
+            current_messages=[{"role": "user", "content": "q"}],
+            answer="a",
+        )
+
+    examples = [_stub("b:1"), _stub("a:0"), _stub("c:2")]
+
+    json_manifest = tmp_path / "m.json"
+    json_manifest.write_text('["a:0", "c:2", "missing:9"]', encoding="utf-8")
+    kept, missing = _filter_by_manifest(examples, str(json_manifest))
+    # Manifest order, not source order.
+    assert [example.qid for example in kept] == ["a:0", "c:2"]
+    assert missing == ["missing:9"]
+
+    lines_manifest = tmp_path / "m.txt"
+    lines_manifest.write_text("c:2\nb:1\n\n", encoding="utf-8")
+    kept, missing = _filter_by_manifest(examples, str(lines_manifest))
+    assert [example.qid for example in kept] == ["c:2", "b:1"]
+    assert missing == []
+
+    dict_manifest = tmp_path / "m2.json"
+    dict_manifest.write_text('{"qids": ["b:1"], "sha256": "deadbeef"}', encoding="utf-8")
+    assert _load_qid_manifest(str(dict_manifest)) == ["b:1"]
+
+    # evaluate() records the shortfall on the run summary: a shrunken frozen
+    # set must never pass silently.
+    module = _patch_evaluate_boundary(monkeypatch, [])
+    monkeypatch.setattr(module, "_load_examples", lambda args: list(examples))
+    monkeypatch.setattr(module, "_generate_one", lambda *a, **k: {"skipped": True})
+    args = parse_args([
+        "--model", "ckpt",
+        "--qid_manifest", str(json_manifest),
+        "--compare_modes", "c2kv",
+        "--output_file", str(tmp_path / "out.jsonl"),
+    ])
+    summary = module.evaluate(args)
+    assert summary["qid_manifest"] == str(json_manifest)
+    assert summary["qid_manifest_missing"] == 1
+    assert summary["num_examples"] == 2
+    assert summary["chunk_policy"] == "agent-turn"
+    assert summary["delay_recent_turns"] == 0
+    assert summary["do_sample"] is False
+
