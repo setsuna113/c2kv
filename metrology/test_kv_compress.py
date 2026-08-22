@@ -31,8 +31,11 @@ import sys
 from pathlib import Path
 
 import pytest
-import torch
-import torch.nn.functional as F
+
+pytest.importorskip("torch")  # torch-free collection guard (Windows dev box has no torch)
+
+import torch  # noqa: E402
+import torch.nn.functional as F  # noqa: E402
 
 # 直接运行（python metrology/test_kv_compress.py）时把仓库根加入 sys.path
 _REPO_ROOT = Path(__file__).resolve().parents[1]
