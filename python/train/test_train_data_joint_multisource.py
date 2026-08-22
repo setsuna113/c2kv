@@ -172,8 +172,10 @@ def test_toucan_require_tool_call_false_keeps_text_turns(fixtures):
     ]
     messages = _toucan_messages(row)
     # Text-only turns: the plain assistant text is the answer, no Action block.
-    assert examples[1].answer == messages[11]["content"]
-    assert examples[2].answer == messages[13]["content"]
+    # `_render_agent_output_messages` right-strips text answers (same behavior
+    # as the traces path that shares the renderer), so compare after rstrip.
+    assert examples[1].answer == messages[11]["content"].rstrip()
+    assert examples[2].answer == messages[13]["content"].rstrip()
     assert examples[1].target_tool is None and examples[1].target_tool_doc_index is None
 
 
