@@ -1,0 +1,1086 @@
+/usr/local/Ascend/ascend-toolkit/set_env.sh: line 48: LD_LIBRARY_PATH: unbound variable
+/usr/local/Ascend/ascend-toolkit/set_env.sh: line 48: PYTHONPATH: unbound variable
+/usr/local/Ascend/ascend-toolkit/set_env.sh: line 31: CMAKE_PREFIX_PATH: unbound variable
+ASCEND_RT_VISIBLE_DEVICES=1
+NAME=b_pilot
+MODEL_PATH=/home/user/c2kv/outputs_lyc/g_joint/fixed_joint
+BASE_MODEL=/home/user/c2kv/models/Qwen3-4B-Instruct-2507
+TOKENIZER_PATH=/home/user/c2kv/models/Qwen3-4B-Instruct-2507
+DATASET_PATH=/home/user/c2kv/datasets/agent-llm-traces-v2
+SPLIT=eval
+SPLIT_MANIFEST_FILE=/home/user/c2kv/outputs_lyc/g_joint/taskproxy_disjoint_v2.json
+QID_MANIFEST=configs/bdf_pilot/b_eval200_qids.json
+OUTPUT_DIR=/home/user/c2kv/outputs_lyc/g_joint/bdf/b_pilot
+TMP_DIR=/home/user/c2kv/outputs_lyc/g_joint/bdf/b_pilot/parts
+SPLIT_SEED=42 EVAL_RATIO=0.1 MAX_SAMPLES_PER_SESSION=4
+MAX_TOOL_DEFINITION_TOKENS=32000
+ARMS=P-fixed,P-turn,P-struct,P-delay
+RATIOS=8
+RUN_REF=True
+MAX_EXAMPLES=0
+MAX_DOC_LENGTH=1024
+MAX_DOC_NUM=24
+MAX_TOOL_CHUNKS=16
+HISTORY_SELECTION=tail
+DO_SAMPLE=False TEMPERATURE=0.7 TOP_P=0.95 GEN_SEED=0
+PARALLEL_EVAL=True
+--- arm -> flag map ---
+  P-fixed: --chunk_policy fixed-1024
+  P-turn: --chunk_policy agent-turn
+  P-struct: --chunk_policy structural
+  P-delay: --chunk_policy agent-turn --delay_recent_turns 1
+-----------------------
+[launch] case=reference_r8 device=1 output=/home/user/c2kv/outputs_lyc/g_joint/bdf/b_pilot/parts/reference_r8.jsonl
+[launch] case=P-fixed_r8 device=1 output=/home/user/c2kv/outputs_lyc/g_joint/bdf/b_pilot/parts/P-fixed_r8.jsonl
+[launch] case=P-turn_r8 device=1 output=/home/user/c2kv/outputs_lyc/g_joint/bdf/b_pilot/parts/P-turn_r8.jsonl
+[launch] case=P-struct_r8 device=1 output=/home/user/c2kv/outputs_lyc/g_joint/bdf/b_pilot/parts/P-struct_r8.jsonl
+[launch] case=P-delay_r8 device=1 output=/home/user/c2kv/outputs_lyc/g_joint/bdf/b_pilot/parts/P-delay_r8.jsonl
+/home/user/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/user/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0/aarch64-linux/ascend_ops_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/user/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/user/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0/aarch64-linux/ascend_ops_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+08/23/2026 07:54:53 - INFO - __main__ - Wrote merged predictions to /home/user/c2kv/outputs_lyc/g_joint/bdf/b_pilot/P-fixed.jsonl
+08/23/2026 07:54:53 - INFO - __main__ - Wrote merged summary to /home/user/c2kv/outputs_lyc/g_joint/bdf/b_pilot/P-fixed.summary.json
+{
+  "model": "/home/user/c2kv/outputs_lyc/g_joint/fixed_joint",
+  "base_model": "/home/user/c2kv/models/Qwen3-4B-Instruct-2507",
+  "dataset_path": "/home/user/c2kv/datasets/agent-llm-traces-v2",
+  "split": "eval",
+  "separate": false,
+  "checkpoint_tool": null,
+  "checkpoint_history": null,
+  "separate_generator": null,
+  "num_rows": 200,
+  "legacy_mode_caps": false,
+  "chunk_policy": "fixed-1024",
+  "qid_manifest": "configs/bdf_pilot/b_eval200_qids.json",
+  "qid_manifest_missing": 0,
+  "gist_init_fractions": {
+    "c2kv": 0.0
+  },
+  "results": [
+    {
+      "condition": "joint",
+      "mode": "c2kv",
+      "ratio": 8,
+      "num_examples": 200,
+      "num_valid": 200,
+      "num_skipped": 0,
+      "skip_reasons": {},
+      "exact_match": 0.005,
+      "tool_name_accuracy": 0.61,
+      "tool_call_rate": 0.99,
+      "response_type_accuracy": 0.965,
+      "argument_name_f1": 0.1922225,
+      "argument_value_f1": 0.113334,
+      "avg_text_token_f1": 0.4503259999999999,
+      "avg_rouge_l_f1": 0.4265634999999999,
+      "avg_doc_tokens": 4826.565,
+      "avg_doc_chunks": 18.115,
+      "avg_gist_tokens": 610.47,
+      "avg_compressed_tokens": 610.47,
+      "avg_prompt_tokens": 314.375,
+      "avg_raw_recent_tokens": 0.0,
+      "avg_history_wrapped_tokens": 2163.82,
+      "avg_history_content_tokens": 2150.67,
+      "avg_generated_tokens": 109.275,
+      "avg_actual_compression_ratio": 7.879288500000007,
+      "token_weighted_actual_compression_ratio": 7.906309892378004,
+      "avg_system_prefill_sec": 0.10315449999999998,
+      "avg_tool_compress_sec": 2.67748,
+      "avg_full_prefill_sec": 0.0,
+      "avg_blend_sec": 0.05518699999999999,
+      "avg_ttft_sec": 2.835823000000002,
+      "avg_generate_sec": 12.701256999999996,
+      "avg_tbt_sec": 0.116021885,
+      "token_weighted_tbt_sec": 0.11623204758636464,
+      "avg_total_sec": 15.537075500000007,
+      "missing_metric_fields": {}
+    }
+  ],
+  "common_num_qids": 200,
+  "common_results": [
+    {
+      "condition": "joint",
+      "mode": "c2kv",
+      "ratio": 8,
+      "num_examples": 200,
+      "num_valid": 200,
+      "num_skipped": 0,
+      "skip_reasons": {},
+      "exact_match": 0.005,
+      "tool_name_accuracy": 0.61,
+      "tool_call_rate": 0.99,
+      "response_type_accuracy": 0.965,
+      "argument_name_f1": 0.1922225,
+      "argument_value_f1": 0.113334,
+      "avg_text_token_f1": 0.4503259999999999,
+      "avg_rouge_l_f1": 0.4265634999999999,
+      "avg_doc_tokens": 4826.565,
+      "avg_doc_chunks": 18.115,
+      "avg_gist_tokens": 610.47,
+      "avg_compressed_tokens": 610.47,
+      "avg_prompt_tokens": 314.375,
+      "avg_raw_recent_tokens": 0.0,
+      "avg_history_wrapped_tokens": 2163.82,
+      "avg_history_content_tokens": 2150.67,
+      "avg_generated_tokens": 109.275,
+      "avg_actual_compression_ratio": 7.879288500000007,
+      "token_weighted_actual_compression_ratio": 7.906309892378004,
+      "avg_system_prefill_sec": 0.10315449999999998,
+      "avg_tool_compress_sec": 2.67748,
+      "avg_full_prefill_sec": 0.0,
+      "avg_blend_sec": 0.05518699999999999,
+      "avg_ttft_sec": 2.835823000000002,
+      "avg_generate_sec": 12.701256999999996,
+      "avg_tbt_sec": 0.116021885,
+      "token_weighted_tbt_sec": 0.11623204758636464,
+      "avg_total_sec": 15.537075500000007,
+      "missing_metric_fields": {}
+    }
+  ]
+}
+/home/user/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/user/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0/aarch64-linux/ascend_ops_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/user/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/user/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0/aarch64-linux/ascend_ops_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+08/23/2026 07:55:06 - INFO - __main__ - Wrote merged predictions to /home/user/c2kv/outputs_lyc/g_joint/bdf/b_pilot/P-turn.jsonl
+08/23/2026 07:55:06 - INFO - __main__ - Wrote merged summary to /home/user/c2kv/outputs_lyc/g_joint/bdf/b_pilot/P-turn.summary.json
+{
+  "model": "/home/user/c2kv/outputs_lyc/g_joint/fixed_joint",
+  "base_model": "/home/user/c2kv/models/Qwen3-4B-Instruct-2507",
+  "dataset_path": "/home/user/c2kv/datasets/agent-llm-traces-v2",
+  "split": "eval",
+  "separate": false,
+  "checkpoint_tool": null,
+  "checkpoint_history": null,
+  "separate_generator": null,
+  "num_rows": 200,
+  "legacy_mode_caps": false,
+  "chunk_policy": "agent-turn",
+  "qid_manifest": "configs/bdf_pilot/b_eval200_qids.json",
+  "qid_manifest_missing": 0,
+  "gist_init_fractions": {
+    "c2kv": 0.0
+  },
+  "results": [
+    {
+      "condition": "joint",
+      "mode": "c2kv",
+      "ratio": 8,
+      "num_examples": 200,
+      "num_valid": 200,
+      "num_skipped": 0,
+      "skip_reasons": {},
+      "exact_match": 0.005,
+      "tool_name_accuracy": 0.555,
+      "tool_call_rate": 0.965,
+      "response_type_accuracy": 0.94,
+      "argument_name_f1": 0.1733335,
+      "argument_value_f1": 0.11083349999999999,
+      "avg_text_token_f1": 0.44305449999999985,
+      "avg_rouge_l_f1": 0.42032099999999967,
+      "avg_doc_tokens": 4838.85,
+      "avg_doc_chunks": 21.485,
+      "avg_gist_tokens": 614.28,
+      "avg_compressed_tokens": 614.28,
+      "avg_prompt_tokens": 314.375,
+      "avg_raw_recent_tokens": 0.0,
+      "avg_history_wrapped_tokens": 2176.105,
+      "avg_history_content_tokens": 2150.67,
+      "avg_generated_tokens": 111.22,
+      "avg_actual_compression_ratio": 7.848140500000002,
+      "token_weighted_actual_compression_ratio": 7.877270951357687,
+      "avg_system_prefill_sec": 0.10286049999999998,
+      "avg_tool_compress_sec": 3.1746625,
+      "avg_full_prefill_sec": 0.0,
+      "avg_blend_sec": 0.05660150000000001,
+      "avg_ttft_sec": 3.3341290000000017,
+      "avg_generate_sec": 12.968058000000001,
+      "avg_tbt_sec": 0.11657790499999997,
+      "token_weighted_tbt_sec": 0.1165982557094048,
+      "avg_total_sec": 16.302188499999996,
+      "missing_metric_fields": {}
+    }
+  ],
+  "common_num_qids": 200,
+  "common_results": [
+    {
+      "condition": "joint",
+      "mode": "c2kv",
+      "ratio": 8,
+      "num_examples": 200,
+      "num_valid": 200,
+      "num_skipped": 0,
+      "skip_reasons": {},
+      "exact_match": 0.005,
+      "tool_name_accuracy": 0.555,
+      "tool_call_rate": 0.965,
+      "response_type_accuracy": 0.94,
+      "argument_name_f1": 0.1733335,
+      "argument_value_f1": 0.11083349999999999,
+      "avg_text_token_f1": 0.44305449999999985,
+      "avg_rouge_l_f1": 0.42032099999999967,
+      "avg_doc_tokens": 4838.85,
+      "avg_doc_chunks": 21.485,
+      "avg_gist_tokens": 614.28,
+      "avg_compressed_tokens": 614.28,
+      "avg_prompt_tokens": 314.375,
+      "avg_raw_recent_tokens": 0.0,
+      "avg_history_wrapped_tokens": 2176.105,
+      "avg_history_content_tokens": 2150.67,
+      "avg_generated_tokens": 111.22,
+      "avg_actual_compression_ratio": 7.848140500000002,
+      "token_weighted_actual_compression_ratio": 7.877270951357687,
+      "avg_system_prefill_sec": 0.10286049999999998,
+      "avg_tool_compress_sec": 3.1746625,
+      "avg_full_prefill_sec": 0.0,
+      "avg_blend_sec": 0.05660150000000001,
+      "avg_ttft_sec": 3.3341290000000017,
+      "avg_generate_sec": 12.968058000000001,
+      "avg_tbt_sec": 0.11657790499999997,
+      "token_weighted_tbt_sec": 0.1165982557094048,
+      "avg_total_sec": 16.302188499999996,
+      "missing_metric_fields": {}
+    }
+  ]
+}
+/home/user/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/user/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0/aarch64-linux/ascend_ops_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/user/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/user/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0/aarch64-linux/ascend_ops_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+08/23/2026 07:55:19 - INFO - __main__ - Wrote merged predictions to /home/user/c2kv/outputs_lyc/g_joint/bdf/b_pilot/P-struct.jsonl
+08/23/2026 07:55:19 - INFO - __main__ - Wrote merged summary to /home/user/c2kv/outputs_lyc/g_joint/bdf/b_pilot/P-struct.summary.json
+{
+  "model": "/home/user/c2kv/outputs_lyc/g_joint/fixed_joint",
+  "base_model": "/home/user/c2kv/models/Qwen3-4B-Instruct-2507",
+  "dataset_path": "/home/user/c2kv/datasets/agent-llm-traces-v2",
+  "split": "eval",
+  "separate": false,
+  "checkpoint_tool": null,
+  "checkpoint_history": null,
+  "separate_generator": null,
+  "num_rows": 200,
+  "legacy_mode_caps": false,
+  "chunk_policy": "structural",
+  "qid_manifest": "configs/bdf_pilot/b_eval200_qids.json",
+  "qid_manifest_missing": 0,
+  "gist_init_fractions": {
+    "c2kv": 0.0
+  },
+  "results": [
+    {
+      "condition": "joint",
+      "mode": "c2kv",
+      "ratio": 8,
+      "num_examples": 200,
+      "num_valid": 200,
+      "num_skipped": 0,
+      "skip_reasons": {},
+      "exact_match": 0.0,
+      "tool_name_accuracy": 0.52,
+      "tool_call_rate": 0.985,
+      "response_type_accuracy": 0.96,
+      "argument_name_f1": 0.16319050000000002,
+      "argument_value_f1": 0.10226199999999999,
+      "avg_text_token_f1": 0.4139410000000003,
+      "avg_rouge_l_f1": 0.38979600000000014,
+      "avg_doc_tokens": 4874.985,
+      "avg_doc_chunks": 26.005,
+      "avg_gist_tokens": 620.59,
+      "avg_compressed_tokens": 620.59,
+      "avg_prompt_tokens": 314.375,
+      "avg_raw_recent_tokens": 0.0,
+      "avg_history_wrapped_tokens": 2212.24,
+      "avg_history_content_tokens": 2150.67,
+      "avg_generated_tokens": 112.475,
+      "avg_actual_compression_ratio": 7.8236634999999985,
+      "token_weighted_actual_compression_ratio": 7.855403728709776,
+      "avg_system_prefill_sec": 0.10180850000000007,
+      "avg_tool_compress_sec": 3.8458720000000004,
+      "avg_full_prefill_sec": 0.0,
+      "avg_blend_sec": 0.06220850000000005,
+      "avg_ttft_sec": 4.009881999999999,
+      "avg_generate_sec": 12.917278999999997,
+      "avg_tbt_sec": 0.11476655499999999,
+      "token_weighted_tbt_sec": 0.11484577906201375,
+      "avg_total_sec": 16.927163500000002,
+      "missing_metric_fields": {}
+    }
+  ],
+  "common_num_qids": 200,
+  "common_results": [
+    {
+      "condition": "joint",
+      "mode": "c2kv",
+      "ratio": 8,
+      "num_examples": 200,
+      "num_valid": 200,
+      "num_skipped": 0,
+      "skip_reasons": {},
+      "exact_match": 0.0,
+      "tool_name_accuracy": 0.52,
+      "tool_call_rate": 0.985,
+      "response_type_accuracy": 0.96,
+      "argument_name_f1": 0.16319050000000002,
+      "argument_value_f1": 0.10226199999999999,
+      "avg_text_token_f1": 0.4139410000000003,
+      "avg_rouge_l_f1": 0.38979600000000014,
+      "avg_doc_tokens": 4874.985,
+      "avg_doc_chunks": 26.005,
+      "avg_gist_tokens": 620.59,
+      "avg_compressed_tokens": 620.59,
+      "avg_prompt_tokens": 314.375,
+      "avg_raw_recent_tokens": 0.0,
+      "avg_history_wrapped_tokens": 2212.24,
+      "avg_history_content_tokens": 2150.67,
+      "avg_generated_tokens": 112.475,
+      "avg_actual_compression_ratio": 7.8236634999999985,
+      "token_weighted_actual_compression_ratio": 7.855403728709776,
+      "avg_system_prefill_sec": 0.10180850000000007,
+      "avg_tool_compress_sec": 3.8458720000000004,
+      "avg_full_prefill_sec": 0.0,
+      "avg_blend_sec": 0.06220850000000005,
+      "avg_ttft_sec": 4.009881999999999,
+      "avg_generate_sec": 12.917278999999997,
+      "avg_tbt_sec": 0.11476655499999999,
+      "token_weighted_tbt_sec": 0.11484577906201375,
+      "avg_total_sec": 16.927163500000002,
+      "missing_metric_fields": {}
+    }
+  ]
+}
+/home/user/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/user/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0/aarch64-linux/ascend_ops_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/user/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/user/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0/aarch64-linux/ascend_ops_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+08/23/2026 07:55:32 - INFO - __main__ - Wrote merged predictions to /home/user/c2kv/outputs_lyc/g_joint/bdf/b_pilot/P-delay.jsonl
+08/23/2026 07:55:32 - INFO - __main__ - Wrote merged summary to /home/user/c2kv/outputs_lyc/g_joint/bdf/b_pilot/P-delay.summary.json
+{
+  "model": "/home/user/c2kv/outputs_lyc/g_joint/fixed_joint",
+  "base_model": "/home/user/c2kv/models/Qwen3-4B-Instruct-2507",
+  "dataset_path": "/home/user/c2kv/datasets/agent-llm-traces-v2",
+  "split": "eval",
+  "separate": false,
+  "checkpoint_tool": null,
+  "checkpoint_history": null,
+  "separate_generator": null,
+  "num_rows": 200,
+  "legacy_mode_caps": false,
+  "chunk_policy": "agent-turn",
+  "qid_manifest": "configs/bdf_pilot/b_eval200_qids.json",
+  "qid_manifest_missing": 0,
+  "gist_init_fractions": {
+    "c2kv": 0.0
+  },
+  "results": [
+    {
+      "condition": "joint",
+      "mode": "c2kv",
+      "ratio": 8,
+      "num_examples": 200,
+      "num_valid": 200,
+      "num_skipped": 0,
+      "skip_reasons": {},
+      "exact_match": 0.005,
+      "tool_name_accuracy": 0.56,
+      "tool_call_rate": 0.97,
+      "response_type_accuracy": 0.945,
+      "argument_name_f1": 0.181667,
+      "argument_value_f1": 0.1283335,
+      "avg_text_token_f1": 0.47050549999999974,
+      "avg_rouge_l_f1": 0.4423709999999999,
+      "avg_doc_tokens": 4318.37,
+      "avg_doc_chunks": 20.105,
+      "avg_gist_tokens": 548.58,
+      "avg_compressed_tokens": 548.58,
+      "avg_prompt_tokens": 314.375,
+      "avg_raw_recent_tokens": 520.48,
+      "avg_history_wrapped_tokens": 2176.105,
+      "avg_history_content_tokens": 2150.67,
+      "avg_generated_tokens": 109.74,
+      "avg_actual_compression_ratio": 7.8312495,
+      "token_weighted_actual_compression_ratio": 7.871905647307594,
+      "avg_system_prefill_sec": 0.09952100000000001,
+      "avg_tool_compress_sec": 2.9687790000000005,
+      "avg_full_prefill_sec": 0.0,
+      "avg_blend_sec": 0.053656000000000016,
+      "avg_ttft_sec": 3.1219535,
+      "avg_generate_sec": 12.217165500000004,
+      "avg_tbt_sec": 0.11156166999999999,
+      "token_weighted_tbt_sec": 0.11132828048113726,
+      "avg_total_sec": 15.3391215,
+      "missing_metric_fields": {}
+    }
+  ],
+  "common_num_qids": 200,
+  "common_results": [
+    {
+      "condition": "joint",
+      "mode": "c2kv",
+      "ratio": 8,
+      "num_examples": 200,
+      "num_valid": 200,
+      "num_skipped": 0,
+      "skip_reasons": {},
+      "exact_match": 0.005,
+      "tool_name_accuracy": 0.56,
+      "tool_call_rate": 0.97,
+      "response_type_accuracy": 0.945,
+      "argument_name_f1": 0.181667,
+      "argument_value_f1": 0.1283335,
+      "avg_text_token_f1": 0.47050549999999974,
+      "avg_rouge_l_f1": 0.4423709999999999,
+      "avg_doc_tokens": 4318.37,
+      "avg_doc_chunks": 20.105,
+      "avg_gist_tokens": 548.58,
+      "avg_compressed_tokens": 548.58,
+      "avg_prompt_tokens": 314.375,
+      "avg_raw_recent_tokens": 520.48,
+      "avg_history_wrapped_tokens": 2176.105,
+      "avg_history_content_tokens": 2150.67,
+      "avg_generated_tokens": 109.74,
+      "avg_actual_compression_ratio": 7.8312495,
+      "token_weighted_actual_compression_ratio": 7.871905647307594,
+      "avg_system_prefill_sec": 0.09952100000000001,
+      "avg_tool_compress_sec": 2.9687790000000005,
+      "avg_full_prefill_sec": 0.0,
+      "avg_blend_sec": 0.053656000000000016,
+      "avg_ttft_sec": 3.1219535,
+      "avg_generate_sec": 12.217165500000004,
+      "avg_tbt_sec": 0.11156166999999999,
+      "token_weighted_tbt_sec": 0.11132828048113726,
+      "avg_total_sec": 15.3391215,
+      "missing_metric_fields": {}
+    }
+  ]
+}
+/home/user/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/user/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0/aarch64-linux/ascend_ops_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/user/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/user/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0/aarch64-linux/ascend_ops_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+08/23/2026 07:55:44 - INFO - __main__ - Wrote merged predictions to /home/user/c2kv/outputs_lyc/g_joint/bdf/b_pilot/reference.jsonl
+08/23/2026 07:55:44 - INFO - __main__ - Wrote merged summary to /home/user/c2kv/outputs_lyc/g_joint/bdf/b_pilot/reference.summary.json
+{
+  "model": "/home/user/c2kv/outputs_lyc/g_joint/fixed_joint",
+  "base_model": "/home/user/c2kv/models/Qwen3-4B-Instruct-2507",
+  "dataset_path": "/home/user/c2kv/datasets/agent-llm-traces-v2",
+  "split": "eval",
+  "separate": false,
+  "checkpoint_tool": null,
+  "checkpoint_history": null,
+  "separate_generator": null,
+  "num_rows": 400,
+  "legacy_mode_caps": false,
+  "chunk_policy": "agent-turn",
+  "qid_manifest": "configs/bdf_pilot/b_eval200_qids.json",
+  "qid_manifest_missing": 0,
+  "gist_init_fractions": {},
+  "results": [
+    {
+      "condition": "joint",
+      "mode": "full",
+      "ratio": 1,
+      "num_examples": 200,
+      "num_valid": 199,
+      "num_skipped": 1,
+      "skip_reasons": {
+        "oom": 1
+      },
+      "exact_match": 0.0,
+      "tool_name_accuracy": 0.507537688442211,
+      "tool_call_rate": 0.6984924623115578,
+      "response_type_accuracy": 0.7035175879396985,
+      "argument_name_f1": 0.13423165829145728,
+      "argument_value_f1": 0.10687185929648242,
+      "avg_text_token_f1": 0.3371356783919598,
+      "avg_rouge_l_f1": 0.29419798994974866,
+      "avg_doc_tokens": 4793.206030150754,
+      "avg_doc_chunks": 21.472361809045225,
+      "avg_gist_tokens": 0.0,
+      "avg_compressed_tokens": 4793.206030150754,
+      "avg_prompt_tokens": 308.34170854271355,
+      "avg_raw_recent_tokens": 0.0,
+      "avg_history_wrapped_tokens": 2161.738693467337,
+      "avg_history_content_tokens": 2136.35175879397,
+      "avg_generated_tokens": 110.46231155778895,
+      "avg_actual_compression_ratio": 1.0,
+      "token_weighted_actual_compression_ratio": 1.0,
+      "avg_system_prefill_sec": 0.10102713567839196,
+      "avg_tool_compress_sec": 0.0,
+      "avg_full_prefill_sec": 6.168230150753766,
+      "avg_blend_sec": 0.0,
+      "avg_ttft_sec": 6.269258291457282,
+      "avg_generate_sec": 13.537165829145733,
+      "avg_tbt_sec": 0.12305380904522607,
+      "token_weighted_tbt_sec": 0.12255008643435543,
+      "avg_total_sec": 19.80642211055276,
+      "missing_metric_fields": {}
+    },
+    {
+      "condition": "joint",
+      "mode": "truncate",
+      "ratio": 8,
+      "num_examples": 200,
+      "num_valid": 200,
+      "num_skipped": 0,
+      "skip_reasons": {},
+      "exact_match": 0.0,
+      "tool_name_accuracy": 0.0,
+      "tool_call_rate": 0.0,
+      "response_type_accuracy": 0.025,
+      "argument_name_f1": 0.0,
+      "argument_value_f1": 0.0,
+      "avg_text_token_f1": 0.08461199999999995,
+      "avg_rouge_l_f1": 0.0630575,
+      "avg_doc_tokens": 4838.85,
+      "avg_doc_chunks": 21.485,
+      "avg_gist_tokens": 0.0,
+      "avg_compressed_tokens": 605.3,
+      "avg_prompt_tokens": 314.375,
+      "avg_raw_recent_tokens": 0.0,
+      "avg_history_wrapped_tokens": 2176.105,
+      "avg_history_content_tokens": 2150.67,
+      "avg_generated_tokens": 108.825,
+      "avg_actual_compression_ratio": 7.991768999999998,
+      "token_weighted_actual_compression_ratio": 7.994135139600198,
+      "avg_system_prefill_sec": 0.09494400000000004,
+      "avg_tool_compress_sec": 0.0,
+      "avg_full_prefill_sec": 0.26371100000000003,
+      "avg_blend_sec": 0.0,
+      "avg_ttft_sec": 0.35865050000000026,
+      "avg_generate_sec": 12.8260155,
+      "avg_tbt_sec": 0.11811434000000007,
+      "token_weighted_tbt_sec": 0.11785909028256376,
+      "avg_total_sec": 13.184664500000002,
+      "missing_metric_fields": {}
+    }
+  ],
+  "common_num_qids": 199,
+  "common_results": [
+    {
+      "condition": "joint",
+      "mode": "full",
+      "ratio": 1,
+      "num_examples": 199,
+      "num_valid": 199,
+      "num_skipped": 0,
+      "skip_reasons": {},
+      "exact_match": 0.0,
+      "tool_name_accuracy": 0.507537688442211,
+      "tool_call_rate": 0.6984924623115578,
+      "response_type_accuracy": 0.7035175879396985,
+      "argument_name_f1": 0.13423165829145728,
+      "argument_value_f1": 0.10687185929648242,
+      "avg_text_token_f1": 0.3371356783919598,
+      "avg_rouge_l_f1": 0.29419798994974866,
+      "avg_doc_tokens": 4793.206030150754,
+      "avg_doc_chunks": 21.472361809045225,
+      "avg_gist_tokens": 0.0,
+      "avg_compressed_tokens": 4793.206030150754,
+      "avg_prompt_tokens": 308.34170854271355,
+      "avg_raw_recent_tokens": 0.0,
+      "avg_history_wrapped_tokens": 2161.738693467337,
+      "avg_history_content_tokens": 2136.35175879397,
+      "avg_generated_tokens": 110.46231155778895,
+      "avg_actual_compression_ratio": 1.0,
+      "token_weighted_actual_compression_ratio": 1.0,
+      "avg_system_prefill_sec": 0.10102713567839196,
+      "avg_tool_compress_sec": 0.0,
+      "avg_full_prefill_sec": 6.168230150753766,
+      "avg_blend_sec": 0.0,
+      "avg_ttft_sec": 6.269258291457282,
+      "avg_generate_sec": 13.537165829145733,
+      "avg_tbt_sec": 0.12305380904522607,
+      "token_weighted_tbt_sec": 0.12255008643435543,
+      "avg_total_sec": 19.80642211055276,
+      "missing_metric_fields": {}
+    },
+    {
+      "condition": "joint",
+      "mode": "truncate",
+      "ratio": 8,
+      "num_examples": 199,
+      "num_valid": 199,
+      "num_skipped": 0,
+      "skip_reasons": {},
+      "exact_match": 0.0,
+      "tool_name_accuracy": 0.0,
+      "tool_call_rate": 0.0,
+      "response_type_accuracy": 0.02512562814070352,
+      "argument_name_f1": 0.0,
+      "argument_value_f1": 0.0,
+      "avg_text_token_f1": 0.08473718592964818,
+      "avg_rouge_l_f1": 0.06314924623115578,
+      "avg_doc_tokens": 4793.206030150754,
+      "avg_doc_chunks": 21.472361809045225,
+      "avg_gist_tokens": 0.0,
+      "avg_compressed_tokens": 599.5929648241206,
+      "avg_prompt_tokens": 308.34170854271355,
+      "avg_raw_recent_tokens": 0.0,
+      "avg_history_wrapped_tokens": 2161.738693467337,
+      "avg_history_content_tokens": 2136.35175879397,
+      "avg_generated_tokens": 108.7286432160804,
+      "avg_actual_compression_ratio": 7.991744723618089,
+      "token_weighted_actual_compression_ratio": 7.994099849981981,
+      "avg_system_prefill_sec": 0.09495527638190959,
+      "avg_tool_compress_sec": 0.0,
+      "avg_full_prefill_sec": 0.2633738693467337,
+      "avg_blend_sec": 0.0,
+      "avg_ttft_sec": 0.35832462311557806,
+      "avg_generate_sec": 12.8133783919598,
+      "avg_tbt_sec": 0.11810561809045234,
+      "token_weighted_tbt_sec": 0.11784731247400287,
+      "avg_total_sec": 13.171701507537689,
+      "missing_metric_fields": {}
+    }
+  ]
+}
+07:55:47 INFO arm P-fixed: 200 non-skipped rows from /home/user/c2kv/outputs_lyc/g_joint/bdf/b_pilot/P-fixed.jsonl
+07:55:47 INFO arm P-turn: 200 non-skipped rows from /home/user/c2kv/outputs_lyc/g_joint/bdf/b_pilot/P-turn.jsonl
+07:55:47 INFO arm P-struct: 200 non-skipped rows from /home/user/c2kv/outputs_lyc/g_joint/bdf/b_pilot/P-struct.jsonl
+07:55:47 INFO arm P-delay: 200 non-skipped rows from /home/user/c2kv/outputs_lyc/g_joint/bdf/b_pilot/P-delay.jsonl
+07:56:22 INFO Wrote /home/user/c2kv/outputs_lyc/g_joint/bdf/b_pilot/b_pilot.analysis.json and /home/user/c2kv/outputs_lyc/g_joint/bdf/b_pilot/b_pilot.analysis.md
+07:56:22 INFO wandb_tag_map arm=P-fixed chunk_policy=fixed-1024 delay_recent_turns=0
+07:56:22 INFO wandb_tag_map arm=P-turn chunk_policy=agent-turn delay_recent_turns=0
+07:56:22 INFO wandb_tag_map arm=P-struct chunk_policy=structural delay_recent_turns=0
+07:56:22 INFO wandb_tag_map arm=P-delay chunk_policy=agent-turn delay_recent_turns=1
+07:56:22 WARNING INCOMPLETE COMMON-QID SET: manifest configs/bdf_pilot/b_eval200_qids.json (n=200) is not fully covered (missing per arm: {'P-fixed': 0, 'P-turn': 0, 'P-struct': 0, 'P-delay': 0}, full: 1) — b_prereg.md §2: this round must not enter any paired table; the report carries the banner
+{
+  "arms": [
+    "P-fixed",
+    "P-turn",
+    "P-struct",
+    "P-delay"
+  ],
+  "n_common_qids": 200,
+  "footnote": "200-example teacher-forced next-action eval, single seed, single checkpoint — preliminary, n=1. Training pool appworld-dominated. Paired MDE ≈ 8.9pp; no claim below MDE is a ranking."
+}
+=== gist declaration (判据1: >5% off P-fixed = VOID) ===
+  P-fixed    mean_gist=   610.47 raw_recent=     0.00 dev=  +0.00%  OK
+  P-turn     mean_gist=   614.28 raw_recent=     0.00 dev=  +0.62%  OK
+  P-struct   mean_gist=   620.59 raw_recent=     0.00 dev=  +1.66%  OK
+  P-delay    mean_gist=   548.58 raw_recent=   520.48 dev= -10.14%  EXEMPT (delayed arm: raw recent turn is a separate cost column)
+200-example teacher-forced next-action eval, single seed, single checkpoint — preliminary, n=1. Training pool appworld-dominated. Paired MDE ≈ 8.9pp; no claim below MDE is a ranking.
+=== results ===
+rows:     /home/user/c2kv/outputs_lyc/g_joint/bdf/b_pilot/<arm>.jsonl
+analysis: /home/user/c2kv/outputs_lyc/g_joint/bdf/b_pilot/b_pilot.analysis.json
+          /home/user/c2kv/outputs_lyc/g_joint/bdf/b_pilot/b_pilot.analysis.md
+Per-arm summaries:
+==== /home/user/c2kv/outputs_lyc/g_joint/bdf/b_pilot/P-fixed.summary.json ====
+{
+  "model": "/home/user/c2kv/outputs_lyc/g_joint/fixed_joint",
+  "base_model": "/home/user/c2kv/models/Qwen3-4B-Instruct-2507",
+  "dataset_path": "/home/user/c2kv/datasets/agent-llm-traces-v2",
+  "split": "eval",
+  "separate": false,
+  "checkpoint_tool": null,
+  "checkpoint_history": null,
+  "separate_generator": null,
+  "num_rows": 200,
+  "legacy_mode_caps": false,
+  "chunk_policy": "fixed-1024",
+  "qid_manifest": "configs/bdf_pilot/b_eval200_qids.json",
+  "qid_manifest_missing": 0,
+  "gist_init_fractions": {
+    "c2kv": 0.0
+  },
+  "results": [
+    {
+      "condition": "joint",
+      "mode": "c2kv",
+      "ratio": 8,
+      "num_examples": 200,
+      "num_valid": 200,
+      "num_skipped": 0,
+      "skip_reasons": {},
+      "exact_match": 0.005,
+      "tool_name_accuracy": 0.61,
+      "tool_call_rate": 0.99,
+      "response_type_accuracy": 0.965,
+      "argument_name_f1": 0.1922225,
+      "argument_value_f1": 0.113334,
+      "avg_text_token_f1": 0.4503259999999999,
+      "avg_rouge_l_f1": 0.4265634999999999,
+      "avg_doc_tokens": 4826.565,
+      "avg_doc_chunks": 18.115,
+      "avg_gist_tokens": 610.47,
+      "avg_compressed_tokens": 610.47,
+      "avg_prompt_tokens": 314.375,
+      "avg_raw_recent_tokens": 0.0,
+      "avg_history_wrapped_tokens": 2163.82,
+      "avg_history_content_tokens": 2150.67,
+      "avg_generated_tokens": 109.275,
+      "avg_actual_compression_ratio": 7.879288500000007,
+      "token_weighted_actual_compression_ratio": 7.906309892378004,
+      "avg_system_prefill_sec": 0.10315449999999998,
+      "avg_tool_compress_sec": 2.67748,
+      "avg_full_prefill_sec": 0.0,
+      "avg_blend_sec": 0.05518699999999999,
+      "avg_ttft_sec": 2.835823000000002,
+      "avg_generate_sec": 12.701256999999996,
+      "avg_tbt_sec": 0.116021885,
+      "token_weighted_tbt_sec": 0.11623204758636464,
+      "avg_total_sec": 15.537075500000007,
+      "missing_metric_fields": {}
+    }
+  ],
+  "common_num_qids": 200,
+  "common_results": [
+    {
+      "condition": "joint",
+      "mode": "c2kv",
+      "ratio": 8,
+      "num_examples": 200,
+      "num_valid": 200,
+      "num_skipped": 0,
+      "skip_reasons": {},
+      "exact_match": 0.005,
+      "tool_name_accuracy": 0.61,
+      "tool_call_rate": 0.99,
+      "response_type_accuracy": 0.965,
+      "argument_name_f1": 0.1922225,
+      "argument_value_f1": 0.113334,
+      "avg_text_token_f1": 0.4503259999999999,
+      "avg_rouge_l_f1": 0.4265634999999999,
+      "avg_doc_tokens": 4826.565,
+      "avg_doc_chunks": 18.115,
+      "avg_gist_tokens": 610.47,
+      "avg_compressed_tokens": 610.47,
+      "avg_prompt_tokens": 314.375,
+      "avg_raw_recent_tokens": 0.0,
+      "avg_history_wrapped_tokens": 2163.82,
+      "avg_history_content_tokens": 2150.67,
+      "avg_generated_tokens": 109.275,
+      "avg_actual_compression_ratio": 7.879288500000007,
+      "token_weighted_actual_compression_ratio": 7.906309892378004,
+      "avg_system_prefill_sec": 0.10315449999999998,
+      "avg_tool_compress_sec": 2.67748,
+      "avg_full_prefill_sec": 0.0,
+      "avg_blend_sec": 0.05518699999999999,
+      "avg_ttft_sec": 2.835823000000002,
+      "avg_generate_sec": 12.701256999999996,
+      "avg_tbt_sec": 0.116021885,
+      "token_weighted_tbt_sec": 0.11623204758636464,
+      "avg_total_sec": 15.537075500000007,
+      "missing_metric_fields": {}
+    }
+  ]
+}==== /home/user/c2kv/outputs_lyc/g_joint/bdf/b_pilot/P-turn.summary.json ====
+{
+  "model": "/home/user/c2kv/outputs_lyc/g_joint/fixed_joint",
+  "base_model": "/home/user/c2kv/models/Qwen3-4B-Instruct-2507",
+  "dataset_path": "/home/user/c2kv/datasets/agent-llm-traces-v2",
+  "split": "eval",
+  "separate": false,
+  "checkpoint_tool": null,
+  "checkpoint_history": null,
+  "separate_generator": null,
+  "num_rows": 200,
+  "legacy_mode_caps": false,
+  "chunk_policy": "agent-turn",
+  "qid_manifest": "configs/bdf_pilot/b_eval200_qids.json",
+  "qid_manifest_missing": 0,
+  "gist_init_fractions": {
+    "c2kv": 0.0
+  },
+  "results": [
+    {
+      "condition": "joint",
+      "mode": "c2kv",
+      "ratio": 8,
+      "num_examples": 200,
+      "num_valid": 200,
+      "num_skipped": 0,
+      "skip_reasons": {},
+      "exact_match": 0.005,
+      "tool_name_accuracy": 0.555,
+      "tool_call_rate": 0.965,
+      "response_type_accuracy": 0.94,
+      "argument_name_f1": 0.1733335,
+      "argument_value_f1": 0.11083349999999999,
+      "avg_text_token_f1": 0.44305449999999985,
+      "avg_rouge_l_f1": 0.42032099999999967,
+      "avg_doc_tokens": 4838.85,
+      "avg_doc_chunks": 21.485,
+      "avg_gist_tokens": 614.28,
+      "avg_compressed_tokens": 614.28,
+      "avg_prompt_tokens": 314.375,
+      "avg_raw_recent_tokens": 0.0,
+      "avg_history_wrapped_tokens": 2176.105,
+      "avg_history_content_tokens": 2150.67,
+      "avg_generated_tokens": 111.22,
+      "avg_actual_compression_ratio": 7.848140500000002,
+      "token_weighted_actual_compression_ratio": 7.877270951357687,
+      "avg_system_prefill_sec": 0.10286049999999998,
+      "avg_tool_compress_sec": 3.1746625,
+      "avg_full_prefill_sec": 0.0,
+      "avg_blend_sec": 0.05660150000000001,
+      "avg_ttft_sec": 3.3341290000000017,
+      "avg_generate_sec": 12.968058000000001,
+      "avg_tbt_sec": 0.11657790499999997,
+      "token_weighted_tbt_sec": 0.1165982557094048,
+      "avg_total_sec": 16.302188499999996,
+      "missing_metric_fields": {}
+    }
+  ],
+  "common_num_qids": 200,
+  "common_results": [
+    {
+      "condition": "joint",
+      "mode": "c2kv",
+      "ratio": 8,
+      "num_examples": 200,
+      "num_valid": 200,
+      "num_skipped": 0,
+      "skip_reasons": {},
+      "exact_match": 0.005,
+      "tool_name_accuracy": 0.555,
+      "tool_call_rate": 0.965,
+      "response_type_accuracy": 0.94,
+      "argument_name_f1": 0.1733335,
+      "argument_value_f1": 0.11083349999999999,
+      "avg_text_token_f1": 0.44305449999999985,
+      "avg_rouge_l_f1": 0.42032099999999967,
+      "avg_doc_tokens": 4838.85,
+      "avg_doc_chunks": 21.485,
+      "avg_gist_tokens": 614.28,
+      "avg_compressed_tokens": 614.28,
+      "avg_prompt_tokens": 314.375,
+      "avg_raw_recent_tokens": 0.0,
+      "avg_history_wrapped_tokens": 2176.105,
+      "avg_history_content_tokens": 2150.67,
+      "avg_generated_tokens": 111.22,
+      "avg_actual_compression_ratio": 7.848140500000002,
+      "token_weighted_actual_compression_ratio": 7.877270951357687,
+      "avg_system_prefill_sec": 0.10286049999999998,
+      "avg_tool_compress_sec": 3.1746625,
+      "avg_full_prefill_sec": 0.0,
+      "avg_blend_sec": 0.05660150000000001,
+      "avg_ttft_sec": 3.3341290000000017,
+      "avg_generate_sec": 12.968058000000001,
+      "avg_tbt_sec": 0.11657790499999997,
+      "token_weighted_tbt_sec": 0.1165982557094048,
+      "avg_total_sec": 16.302188499999996,
+      "missing_metric_fields": {}
+    }
+  ]
+}==== /home/user/c2kv/outputs_lyc/g_joint/bdf/b_pilot/P-struct.summary.json ====
+{
+  "model": "/home/user/c2kv/outputs_lyc/g_joint/fixed_joint",
+  "base_model": "/home/user/c2kv/models/Qwen3-4B-Instruct-2507",
+  "dataset_path": "/home/user/c2kv/datasets/agent-llm-traces-v2",
+  "split": "eval",
+  "separate": false,
+  "checkpoint_tool": null,
+  "checkpoint_history": null,
+  "separate_generator": null,
+  "num_rows": 200,
+  "legacy_mode_caps": false,
+  "chunk_policy": "structural",
+  "qid_manifest": "configs/bdf_pilot/b_eval200_qids.json",
+  "qid_manifest_missing": 0,
+  "gist_init_fractions": {
+    "c2kv": 0.0
+  },
+  "results": [
+    {
+      "condition": "joint",
+      "mode": "c2kv",
+      "ratio": 8,
+      "num_examples": 200,
+      "num_valid": 200,
+      "num_skipped": 0,
+      "skip_reasons": {},
+      "exact_match": 0.0,
+      "tool_name_accuracy": 0.52,
+      "tool_call_rate": 0.985,
+      "response_type_accuracy": 0.96,
+      "argument_name_f1": 0.16319050000000002,
+      "argument_value_f1": 0.10226199999999999,
+      "avg_text_token_f1": 0.4139410000000003,
+      "avg_rouge_l_f1": 0.38979600000000014,
+      "avg_doc_tokens": 4874.985,
+      "avg_doc_chunks": 26.005,
+      "avg_gist_tokens": 620.59,
+      "avg_compressed_tokens": 620.59,
+      "avg_prompt_tokens": 314.375,
+      "avg_raw_recent_tokens": 0.0,
+      "avg_history_wrapped_tokens": 2212.24,
+      "avg_history_content_tokens": 2150.67,
+      "avg_generated_tokens": 112.475,
+      "avg_actual_compression_ratio": 7.8236634999999985,
+      "token_weighted_actual_compression_ratio": 7.855403728709776,
+      "avg_system_prefill_sec": 0.10180850000000007,
+      "avg_tool_compress_sec": 3.8458720000000004,
+      "avg_full_prefill_sec": 0.0,
+      "avg_blend_sec": 0.06220850000000005,
+      "avg_ttft_sec": 4.009881999999999,
+      "avg_generate_sec": 12.917278999999997,
+      "avg_tbt_sec": 0.11476655499999999,
+      "token_weighted_tbt_sec": 0.11484577906201375,
+      "avg_total_sec": 16.927163500000002,
+      "missing_metric_fields": {}
+    }
+  ],
+  "common_num_qids": 200,
+  "common_results": [
+    {
+      "condition": "joint",
+      "mode": "c2kv",
+      "ratio": 8,
+      "num_examples": 200,
+      "num_valid": 200,
+      "num_skipped": 0,
+      "skip_reasons": {},
+      "exact_match": 0.0,
+      "tool_name_accuracy": 0.52,
+      "tool_call_rate": 0.985,
+      "response_type_accuracy": 0.96,
+      "argument_name_f1": 0.16319050000000002,
+      "argument_value_f1": 0.10226199999999999,
+      "avg_text_token_f1": 0.4139410000000003,
+      "avg_rouge_l_f1": 0.38979600000000014,
+      "avg_doc_tokens": 4874.985,
+      "avg_doc_chunks": 26.005,
+      "avg_gist_tokens": 620.59,
+      "avg_compressed_tokens": 620.59,
+      "avg_prompt_tokens": 314.375,
+      "avg_raw_recent_tokens": 0.0,
+      "avg_history_wrapped_tokens": 2212.24,
+      "avg_history_content_tokens": 2150.67,
+      "avg_generated_tokens": 112.475,
+      "avg_actual_compression_ratio": 7.8236634999999985,
+      "token_weighted_actual_compression_ratio": 7.855403728709776,
+      "avg_system_prefill_sec": 0.10180850000000007,
+      "avg_tool_compress_sec": 3.8458720000000004,
+      "avg_full_prefill_sec": 0.0,
+      "avg_blend_sec": 0.06220850000000005,
+      "avg_ttft_sec": 4.009881999999999,
+      "avg_generate_sec": 12.917278999999997,
+      "avg_tbt_sec": 0.11476655499999999,
+      "token_weighted_tbt_sec": 0.11484577906201375,
+      "avg_total_sec": 16.927163500000002,
+      "missing_metric_fields": {}
+    }
+  ]
+}==== /home/user/c2kv/outputs_lyc/g_joint/bdf/b_pilot/P-delay.summary.json ====
+{
+  "model": "/home/user/c2kv/outputs_lyc/g_joint/fixed_joint",
+  "base_model": "/home/user/c2kv/models/Qwen3-4B-Instruct-2507",
+  "dataset_path": "/home/user/c2kv/datasets/agent-llm-traces-v2",
+  "split": "eval",
+  "separate": false,
+  "checkpoint_tool": null,
+  "checkpoint_history": null,
+  "separate_generator": null,
+  "num_rows": 200,
+  "legacy_mode_caps": false,
+  "chunk_policy": "agent-turn",
+  "qid_manifest": "configs/bdf_pilot/b_eval200_qids.json",
+  "qid_manifest_missing": 0,
+  "gist_init_fractions": {
+    "c2kv": 0.0
+  },
+  "results": [
+    {
+      "condition": "joint",
+      "mode": "c2kv",
+      "ratio": 8,
+      "num_examples": 200,
+      "num_valid": 200,
+      "num_skipped": 0,
+      "skip_reasons": {},
+      "exact_match": 0.005,
+      "tool_name_accuracy": 0.56,
+      "tool_call_rate": 0.97,
+      "response_type_accuracy": 0.945,
+      "argument_name_f1": 0.181667,
+      "argument_value_f1": 0.1283335,
+      "avg_text_token_f1": 0.47050549999999974,
+      "avg_rouge_l_f1": 0.4423709999999999,
+      "avg_doc_tokens": 4318.37,
+      "avg_doc_chunks": 20.105,
+      "avg_gist_tokens": 548.58,
+      "avg_compressed_tokens": 548.58,
+      "avg_prompt_tokens": 314.375,
+      "avg_raw_recent_tokens": 520.48,
+      "avg_history_wrapped_tokens": 2176.105,
+      "avg_history_content_tokens": 2150.67,
+      "avg_generated_tokens": 109.74,
+      "avg_actual_compression_ratio": 7.8312495,
+      "token_weighted_actual_compression_ratio": 7.871905647307594,
+      "avg_system_prefill_sec": 0.09952100000000001,
+      "avg_tool_compress_sec": 2.9687790000000005,
+      "avg_full_prefill_sec": 0.0,
+      "avg_blend_sec": 0.053656000000000016,
+      "avg_ttft_sec": 3.1219535,
+      "avg_generate_sec": 12.217165500000004,
+      "avg_tbt_sec": 0.11156166999999999,
+      "token_weighted_tbt_sec": 0.11132828048113726,
+      "avg_total_sec": 15.3391215,
+      "missing_metric_fields": {}
+    }
+  ],
+  "common_num_qids": 200,
+  "common_results": [
+    {
+      "condition": "joint",
+      "mode": "c2kv",
+      "ratio": 8,
+      "num_examples": 200,
+      "num_valid": 200,
+      "num_skipped": 0,
+      "skip_reasons": {},
+      "exact_match": 0.005,
+      "tool_name_accuracy": 0.56,
+      "tool_call_rate": 0.97,
+      "response_type_accuracy": 0.945,
+      "argument_name_f1": 0.181667,
+      "argument_value_f1": 0.1283335,
+      "avg_text_token_f1": 0.47050549999999974,
+      "avg_rouge_l_f1": 0.4423709999999999,
+      "avg_doc_tokens": 4318.37,
+      "avg_doc_chunks": 20.105,
+      "avg_gist_tokens": 548.58,
+      "avg_compressed_tokens": 548.58,
+      "avg_prompt_tokens": 314.375,
+      "avg_raw_recent_tokens": 520.48,
+      "avg_history_wrapped_tokens": 2176.105,
+      "avg_history_content_tokens": 2150.67,
+      "avg_generated_tokens": 109.74,
+      "avg_actual_compression_ratio": 7.8312495,
+      "token_weighted_actual_compression_ratio": 7.871905647307594,
+      "avg_system_prefill_sec": 0.09952100000000001,
+      "avg_tool_compress_sec": 2.9687790000000005,
+      "avg_full_prefill_sec": 0.0,
+      "avg_blend_sec": 0.053656000000000016,
+      "avg_ttft_sec": 3.1219535,
+      "avg_generate_sec": 12.217165500000004,
+      "avg_tbt_sec": 0.11156166999999999,
+      "token_weighted_tbt_sec": 0.11132828048113726,
+      "avg_total_sec": 15.3391215,
+      "missing_metric_fields": {}
+    }
+  ]
+}

@@ -1,0 +1,213 @@
+ASCEND_RT_VISIBLE_DEVICES=0
+PHASE=smoke
+MODEL_PATH=/home/user/c2kv/outputs_lyc/g_joint/fixed_joint
+BASE_MODEL=/home/user/c2kv/models/Qwen3-4B-Instruct-2507
+TOKENIZER_PATH=/home/user/c2kv/models/Qwen3-4B-Instruct-2507
+DATASET_PATH=/home/user/c2kv/datasets/agent-llm-traces-v2
+OUT_DIR=/home/user/c2kv/outputs_lyc/g_joint/bdf/d_pilot_r2
+MANIFEST=configs/bdf_pilot/d_cw_manifest_r2.json
+BUNDLES=results/d/bundles_batch_tf_r2.jsonl
+SHAM_PLAN=configs/bdf_pilot/d_sham_plan_r2.json
+BATTERY_NONE_ROWS=
+BATTERY_FULL_ROWS=/home/user/c2kv/outputs_lyc/g_joint/bdf/d_r2/battery_full.jsonl
+SPLIT_MANIFEST_FILE=
+RATIO=8
+ARMS=sham,corr,corr_re
+VERIFY_QIDS=5
+RUN_CORR_ALL=
+RESUME=True
+[smoke] arm=none
+/home/user/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/user/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0/aarch64-linux/ascend_ops_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/user/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/user/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0/aarch64-linux/ascend_ops_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+08/23/2026 14:00:41 - INFO - d_kv_intervene - arm=none mode=c2kv qids=1 manifest_sha=b9739bdb35407161… plan_sha=none
+08/23/2026 14:00:41 - INFO - eval_agent_history_c2kv - Loading tokenizer from /home/user/c2kv/models/Qwen3-4B-Instruct-2507 use_fast=True
+08/23/2026 14:17:11 - INFO - d_kv_intervene - source: 3586 examples, selection_skips={}
+08/23/2026 14:17:13 - INFO - d_kv_intervene - Loading model /home/user/c2kv/outputs_lyc/g_joint/fixed_joint (mode=c2kv, attn=eager)
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+Loading weights:   0%|          | 0/507 [00:00<?, ?it/s]Loading weights:  16%|█▌        | 80/507 [00:00<00:00, 799.62it/s]Loading weights:  32%|███▏      | 160/507 [00:00<00:00, 619.42it/s]Loading weights:  48%|████▊     | 242/507 [00:00<00:00, 693.52it/s]Loading weights:  63%|██████▎   | 321/507 [00:00<00:00, 721.45it/s]Loading weights:  78%|███████▊  | 396/507 [00:00<00:00, 729.37it/s]Loading weights:  94%|█████████▍| 478/507 [00:00<00:00, 673.28it/s]Loading weights: 100%|██████████| 507/507 [00:00<00:00, 709.26it/s]
+08/23/2026 14:17:15 - INFO - d_kv_intervene - runtime attn impl=eager
+08/23/2026 14:17:32 - INFO - d_kv_intervene - [1/1] qid=0c890a5dde8c_12dc86e7:8 tool_name_match=False corr_tokens=None sham_tokens=None recompute=None cache_tokens=4331 wall=16.4s
+08/23/2026 14:17:33 - INFO - d_kv_intervene - Done. wrote 1 rows -> /home/user/c2kv/outputs_lyc/g_joint/bdf/d_pilot_r2/smoke/d_none.jsonl
+[smoke] arm=sham
+/home/user/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/user/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0/aarch64-linux/ascend_ops_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/user/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/user/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0/aarch64-linux/ascend_ops_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+08/23/2026 14:17:54 - INFO - d_kv_intervene - arm=sham mode=d_sham_neutral qids=1 manifest_sha=b9739bdb35407161… plan_sha=3abf1a5ac7ecbf33
+08/23/2026 14:17:54 - INFO - eval_agent_history_c2kv - Loading tokenizer from /home/user/c2kv/models/Qwen3-4B-Instruct-2507 use_fast=True
+08/23/2026 14:34:30 - INFO - d_kv_intervene - source: 3586 examples, selection_skips={}
+08/23/2026 14:34:32 - INFO - d_kv_intervene - Loading model /home/user/c2kv/outputs_lyc/g_joint/fixed_joint (mode=c2kv, attn=eager)
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+Loading weights:   0%|          | 0/507 [00:00<?, ?it/s]Loading weights:  14%|█▎        | 69/507 [00:00<00:00, 682.09it/s]Loading weights:  28%|██▊       | 144/507 [00:00<00:00, 709.96it/s]Loading weights:  42%|████▏     | 215/507 [00:00<00:00, 608.75it/s]Loading weights:  59%|█████▉    | 298/507 [00:00<00:00, 681.21it/s]Loading weights:  73%|███████▎  | 370/507 [00:00<00:00, 688.79it/s]Loading weights:  89%|████████▉ | 452/507 [00:00<00:00, 728.71it/s]Loading weights: 100%|██████████| 507/507 [00:00<00:00, 697.49it/s]
+08/23/2026 14:34:35 - INFO - d_kv_intervene - runtime attn impl=eager
+08/23/2026 14:34:53 - INFO - d_kv_intervene - [1/1] qid=0c890a5dde8c_12dc86e7:8 tool_name_match=False corr_tokens=0 sham_tokens=203 recompute=0 cache_tokens=4534 wall=18.3s
+08/23/2026 14:34:55 - INFO - d_kv_intervene - Done. wrote 1 rows -> /home/user/c2kv/outputs_lyc/g_joint/bdf/d_pilot_r2/smoke/d_sham.jsonl
+[smoke] arm=corr
+/home/user/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/user/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0/aarch64-linux/ascend_ops_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/user/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/user/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0/aarch64-linux/ascend_ops_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+08/23/2026 14:35:17 - INFO - d_kv_intervene - arm=corr mode=d_corr qids=1 manifest_sha=b9739bdb35407161… plan_sha=3abf1a5ac7ecbf33
+08/23/2026 14:35:17 - INFO - eval_agent_history_c2kv - Loading tokenizer from /home/user/c2kv/models/Qwen3-4B-Instruct-2507 use_fast=True
+08/23/2026 14:52:07 - INFO - d_kv_intervene - source: 3586 examples, selection_skips={}
+08/23/2026 14:52:08 - INFO - d_kv_intervene - Loading model /home/user/c2kv/outputs_lyc/g_joint/fixed_joint (mode=c2kv, attn=eager)
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+Loading weights:   0%|          | 0/507 [00:00<?, ?it/s]Loading weights:  15%|█▍        | 74/507 [00:00<00:00, 713.70it/s]Loading weights:  29%|██▉       | 146/507 [00:00<00:00, 586.51it/s]Loading weights:  45%|████▌     | 229/507 [00:00<00:00, 683.72it/s]Loading weights:  62%|██████▏   | 312/507 [00:00<00:00, 726.70it/s]Loading weights:  78%|███████▊  | 396/507 [00:00<00:00, 763.94it/s]Loading weights:  94%|█████████▍| 478/507 [00:00<00:00, 706.92it/s]Loading weights: 100%|██████████| 507/507 [00:00<00:00, 723.22it/s]
+08/23/2026 14:52:11 - INFO - d_kv_intervene - runtime attn impl=eager
+08/23/2026 14:52:20 - INFO - d_kv_intervene - [1/1] qid=0c890a5dde8c_12dc86e7:8 tool_name_match=False corr_tokens=203 sham_tokens=0 recompute=0 cache_tokens=4534 wall=9.3s
+08/23/2026 14:52:20 - INFO - d_kv_intervene - Done. wrote 1 rows -> /home/user/c2kv/outputs_lyc/g_joint/bdf/d_pilot_r2/smoke/d_corr.jsonl
+[smoke] arm=corr_re
+/home/user/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/user/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0/aarch64-linux/ascend_ops_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/user/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/user/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0/aarch64-linux/ascend_ops_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+08/23/2026 14:52:43 - INFO - d_kv_intervene - arm=corr_re mode=d_corr_recompute qids=1 manifest_sha=b9739bdb35407161… plan_sha=3abf1a5ac7ecbf33
+08/23/2026 14:52:43 - INFO - eval_agent_history_c2kv - Loading tokenizer from /home/user/c2kv/models/Qwen3-4B-Instruct-2507 use_fast=True
+08/23/2026 15:09:31 - INFO - d_kv_intervene - source: 3586 examples, selection_skips={}
+08/23/2026 15:09:33 - INFO - d_kv_intervene - Loading model /home/user/c2kv/outputs_lyc/g_joint/fixed_joint (mode=c2kv, attn=eager)
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+Loading weights:   0%|          | 0/507 [00:00<?, ?it/s]Loading weights:  16%|█▌        | 79/507 [00:00<00:00, 789.78it/s]Loading weights:  31%|███       | 158/507 [00:00<00:00, 610.47it/s]Loading weights:  48%|████▊     | 242/507 [00:00<00:00, 688.01it/s]Loading weights:  63%|██████▎   | 320/507 [00:00<00:00, 720.36it/s]Loading weights:  79%|███████▊  | 398/507 [00:00<00:00, 739.66it/s]Loading weights:  94%|█████████▍| 478/507 [00:00<00:00, 688.15it/s]Loading weights: 100%|██████████| 507/507 [00:00<00:00, 715.25it/s]
+08/23/2026 15:09:35 - INFO - d_kv_intervene - runtime attn impl=eager
+08/23/2026 15:09:55 - INFO - d_kv_intervene - [1/1] qid=0c890a5dde8c_12dc86e7:8 tool_name_match=True corr_tokens=203 sham_tokens=0 recompute=1083 cache_tokens=5481 wall=19.8s
+08/23/2026 15:09:56 - INFO - d_kv_intervene - Done. wrote 1 rows -> /home/user/c2kv/outputs_lyc/g_joint/bdf/d_pilot_r2/smoke/d_corr_re.jsonl
+[smoke] arm=corr_all
+/home/user/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/user/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0/aarch64-linux/ascend_ops_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/user/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/user/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0/aarch64-linux/ascend_ops_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+08/23/2026 15:10:21 - INFO - d_kv_intervene - arm=corr_all mode=d_corr_all qids=1 manifest_sha=b9739bdb35407161… plan_sha=3abf1a5ac7ecbf33
+08/23/2026 15:10:21 - INFO - eval_agent_history_c2kv - Loading tokenizer from /home/user/c2kv/models/Qwen3-4B-Instruct-2507 use_fast=True
+08/23/2026 15:27:29 - INFO - d_kv_intervene - source: 3586 examples, selection_skips={}
+08/23/2026 15:27:32 - INFO - d_kv_intervene - Loading model /home/user/c2kv/outputs_lyc/g_joint/fixed_joint (mode=c2kv, attn=eager)
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+Loading weights:   0%|          | 0/507 [00:00<?, ?it/s]Loading weights:  17%|█▋        | 85/507 [00:00<00:00, 847.82it/s]Loading weights:  34%|███▎      | 170/507 [00:00<00:00, 629.96it/s]Loading weights:  48%|████▊     | 243/507 [00:00<00:00, 666.91it/s]Loading weights:  63%|██████▎   | 321/507 [00:00<00:00, 702.77it/s]Loading weights:  81%|████████  | 410/507 [00:00<00:00, 757.13it/s]Loading weights:  96%|█████████▋| 488/507 [00:00<00:00, 691.74it/s]Loading weights: 100%|██████████| 507/507 [00:00<00:00, 714.50it/s]
+08/23/2026 15:27:34 - INFO - d_kv_intervene - runtime attn impl=eager
+08/23/2026 15:27:52 - INFO - d_kv_intervene - [1/1] qid=0c890a5dde8c_12dc86e7:8 tool_name_match=True corr_tokens=1861 sham_tokens=0 recompute=0 cache_tokens=6192 wall=18.2s
+08/23/2026 15:27:53 - INFO - d_kv_intervene - Done. wrote 1 rows -> /home/user/c2kv/outputs_lyc/g_joint/bdf/d_pilot_r2/smoke/d_corr_all.jsonl
+[smoke] arm=sham_mech
+/home/user/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/user/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0/aarch64-linux/ascend_ops_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/user/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/user/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0/aarch64-linux/ascend_ops_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+08/23/2026 15:28:17 - INFO - d_kv_intervene - arm=sham_mech mode=d_sham_mech qids=1 manifest_sha=b9739bdb35407161… plan_sha=3abf1a5ac7ecbf33
+08/23/2026 15:28:17 - INFO - eval_agent_history_c2kv - Loading tokenizer from /home/user/c2kv/models/Qwen3-4B-Instruct-2507 use_fast=True
+08/23/2026 15:44:57 - INFO - d_kv_intervene - source: 3586 examples, selection_skips={}
+08/23/2026 15:44:58 - INFO - d_kv_intervene - Loading model /home/user/c2kv/outputs_lyc/g_joint/fixed_joint (mode=c2kv, attn=eager)
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+Loading weights:   0%|          | 0/507 [00:00<?, ?it/s]Loading weights:  16%|█▋        | 83/507 [00:00<00:00, 822.66it/s]Loading weights:  33%|███▎      | 166/507 [00:00<00:00, 645.03it/s]Loading weights:  48%|████▊     | 242/507 [00:00<00:00, 678.98it/s]Loading weights:  63%|██████▎   | 320/507 [00:00<00:00, 714.12it/s]Loading weights:  78%|███████▊  | 396/507 [00:00<00:00, 724.15it/s]Loading weights:  94%|█████████▍| 478/507 [00:00<00:00, 677.25it/s]Loading weights: 100%|██████████| 507/507 [00:00<00:00, 709.36it/s]
+08/23/2026 15:45:01 - INFO - d_kv_intervene - runtime attn impl=eager
+08/23/2026 15:45:19 - INFO - d_kv_intervene - [1/1] qid=0c890a5dde8c_12dc86e7:8 tool_name_match=False corr_tokens=0 sham_tokens=0 recompute=0 cache_tokens=4331 wall=18.6s
+08/23/2026 15:45:20 - INFO - d_kv_intervene - Done. wrote 1 rows -> /home/user/c2kv/outputs_lyc/g_joint/bdf/d_pilot_r2/smoke/d_sham_mech.jsonl
+[smoke] arm=full
+/home/user/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/user/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0/aarch64-linux/ascend_ops_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/user/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/user/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0/aarch64-linux/ascend_ops_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+08/23/2026 15:45:41 - INFO - d_kv_intervene - arm=full mode=full qids=1 manifest_sha=b9739bdb35407161… plan_sha=none
+08/23/2026 15:45:41 - INFO - eval_agent_history_c2kv - Loading tokenizer from /home/user/c2kv/models/Qwen3-4B-Instruct-2507 use_fast=True
+08/23/2026 16:02:39 - INFO - d_kv_intervene - source: 3586 examples, selection_skips={}
+08/23/2026 16:02:42 - INFO - d_kv_intervene - Loading model /home/user/c2kv/models/Qwen3-4B-Instruct-2507 (mode=full, attn=eager)
+Loading weights:   0%|          | 0/398 [00:00<?, ?it/s]Loading weights:   0%|          | 1/398 [00:00<00:43,  9.20it/s]Loading weights:  24%|██▍       | 97/398 [00:00<00:00, 545.93it/s]Loading weights:  40%|███▉      | 158/398 [00:00<00:00, 571.93it/s]Loading weights:  55%|█████▍    | 217/398 [00:00<00:00, 564.21it/s]Loading weights:  70%|██████▉   | 278/398 [00:00<00:00, 577.22it/s]Loading weights:  86%|████████▋ | 344/398 [00:00<00:00, 599.79it/s]Loading weights: 100%|██████████| 398/398 [00:00<00:00, 562.52it/s]
+08/23/2026 16:02:44 - INFO - d_kv_intervene - runtime attn impl=eager
+08/23/2026 16:02:57 - INFO - d_kv_intervene - [1/1] qid=0c890a5dde8c_12dc86e7:8 tool_name_match=True corr_tokens=None sham_tokens=None recompute=None cache_tokens=5957 wall=12.8s
+08/23/2026 16:02:58 - INFO - d_kv_intervene - Done. wrote 1 rows -> /home/user/c2kv/outputs_lyc/g_joint/bdf/d_pilot_r2/smoke/d_full.jsonl
+[sentinel] /home/user/c2kv/outputs_lyc/g_joint/bdf/d_pilot_r2/smoke/d_sham_mech.jsonl == /home/user/c2kv/outputs_lyc/g_joint/bdf/d_pilot_r2/smoke/d_none.jsonl on prediction,cache_tokens,gist_tokens
+{
+  "left": "/home/user/c2kv/outputs_lyc/g_joint/bdf/d_pilot_r2/smoke/d_sham_mech.jsonl",
+  "right": "/home/user/c2kv/outputs_lyc/g_joint/bdf/d_pilot_r2/smoke/d_none.jsonl",
+  "fields": [
+    "prediction",
+    "cache_tokens",
+    "gist_tokens"
+  ],
+  "n_compared": 1,
+  "n_only_left": 0,
+  "n_only_right": 0,
+  "n_mismatches": 0,
+  "mismatches": [],
+  "passed": true
+}
+[sentinel] /home/user/c2kv/outputs_lyc/g_joint/bdf/d_pilot_r2/smoke/d_full.jsonl == /home/user/c2kv/outputs_lyc/g_joint/bdf/d_r2/battery_full.jsonl on prediction
+{
+  "left": "/home/user/c2kv/outputs_lyc/g_joint/bdf/d_pilot_r2/smoke/d_full.jsonl",
+  "right": "/home/user/c2kv/outputs_lyc/g_joint/bdf/d_r2/battery_full.jsonl",
+  "fields": [
+    "prediction"
+  ],
+  "n_compared": 1,
+  "n_only_left": 0,
+  "n_only_right": 899,
+  "n_mismatches": 0,
+  "mismatches": [],
+  "passed": true
+}
+Smoke rows:
+==== /home/user/c2kv/outputs_lyc/g_joint/bdf/d_pilot_r2/smoke/d_none.jsonl ====
+{"target_tokens": 149, "generated_tokens": 128, "target_has_tool_call": true, "target_tool_name": "spotify__show_playlist_library", "prediction_tool_name": "spotify__show_playlist", "tool_name_match": false, "has_tool_call": true, "response_type_match": true, "exact_match": false, "text_token_f1": 0.1695, "rouge_l_f1": 0.1695, "non_tool_exact_match": false, "non_tool_text_token_f1": null, "non_tool_rouge_l_f1": null, "prediction": "Action:\n<tool_call>\n{\"name\":\"spotify__show_playlist\",\"arguments\":{\"playlist_id\":255}}\n</tool_call>\n<tool_call>\n{\"name\":\"spotify__show_playlist\",\"arguments\":{\"playlist_id\":256}}\n</tool_call>\n<tool_call>\n{\"name\":\"spotify__show_playlist\",\"arguments\":{\"playlist_id\":257}}\n</tool_call>\n<tool_call>\n{\"name\":\"spotify__show_playlist\",\"arguments\":{\"playlist_id\":258}}\n</tool_call>\n<tool_call>\n{\"name\":\"spotify__show_playlist\",\"arguments\":{\"playlist_id\":259}}\n</tool_call>\n<tool_call>\n{\"name\":\"spotify__show_playlist\",\"arguments\":{\"playlist_id\":260}}\n</tool_call>", "target": "Action:\n<tool_call>\n{\"name\":\"spotify__show_playlist_library\",\"arguments\":{\"access_token\":\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJzcG90aWZ5K2phY2stbWFsZG9uYWRvQGdtYWlsLmNvbSIsImV4cCI6MTY4NDQxMjA5OH0.I4PzSrs_njPl81oJIw4ELTrU-49-zeCw16TJg5mkemw\",\"page_index\":0,\"page_limit\":20}}\n</tool_call>", "prompt_tokens": 89, "latency_sec": 11.9004, "generate_sec": 11.9004, "tbt_sec": 0.092972, "qid": "0c890a5dde8c_12dc86e7:8", "session_id": "0c890a5dde8c_12dc86e7", "mode": "c2kv", "ratio": 8, "hybrid_top_k": null, "history_selection": "tail", "skipped": false, "doc_tokens": 1861, "doc_chunks": 6, "history_turns": 6, "decision_step": 7, "kept_history_tokens": 1861, "gist_tokens": 235, "compressed_history_tokens": 235, "cache_tokens": 4331, "input_tokens": 4420, "actual_compression_ratio": 7.9191, "system_prefill_sec": 2.0029, "full_prefill_sec": 0.0, "tool_compress_sec": 1.9119, "blend_sec": 0.0998, "ttft_sec": 4.0147, "total_sec": 16.4215, "d_arm": "none", "d_mode": "c2kv", "bundle_manifest_sha256": "b9739bdb35407161930f95714f9253672ef0f092b21fcbee3e05e4a70ddfbd11", "sham_plan_sha256": null, "attn_impl_runtime": "eager", "wall_sec": 16.422}
+==== /home/user/c2kv/outputs_lyc/g_joint/bdf/d_pilot_r2/smoke/d_sham.jsonl ====
+{"target_tokens": 149, "generated_tokens": 128, "target_has_tool_call": true, "target_tool_name": "spotify__show_playlist_library", "prediction_tool_name": "spotify__show_playlist", "tool_name_match": false, "has_tool_call": true, "response_type_match": true, "exact_match": false, "text_token_f1": 0.1695, "rouge_l_f1": 0.1695, "non_tool_exact_match": false, "non_tool_text_token_f1": null, "non_tool_rouge_l_f1": null, "prediction": "Action:\n<tool_call>\n{\"name\":\"spotify__show_playlist\",\"arguments\":{\"playlist_id\":255}}\n</tool_call>\n<tool_call>\n{\"name\":\"spotify__show_playlist\",\"arguments\":{\"playlist_id\":256}}\n</tool_call>\n<tool_call>\n{\"name\":\"spotify__show_playlist\",\"arguments\":{\"playlist_id\":257}}\n</tool_call>\n<tool_call>\n{\"name\":\"spotify__show_playlist\",\"arguments\":{\"playlist_id\":258}}\n</tool_call>\n<tool_call>\n{\"name\":\"spotify__show_playlist\",\"arguments\":{\"playlist_id\":259}}\n</tool_call>\n<tool_call>\n{\"name\":\"spotify__show_playlist\",\"arguments\":{\"playlist_id\":260}}\n</tool_call>", "target": "Action:\n<tool_call>\n{\"name\":\"spotify__show_playlist_library\",\"arguments\":{\"access_token\":\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJzcG90aWZ5K2phY2stbWFsZG9uYWRvQGdtYWlsLmNvbSIsImV4cCI6MTY4NDQxMjA5OH0.I4PzSrs_njPl81oJIw4ELTrU-49-zeCw16TJg5mkemw\",\"page_index\":0,\"page_limit\":20}}\n</tool_call>", "prompt_tokens": 89, "latency_sec": 12.5508, "generate_sec": 12.5508, "tbt_sec": 0.098053, "qid": "0c890a5dde8c_12dc86e7:8", "session_id": "0c890a5dde8c_12dc86e7", "mode": "d_sham_neutral", "ratio": 8, "hybrid_top_k": null, "history_selection": "tail", "skipped": false, "doc_tokens": 1861, "doc_chunks": 6, "history_turns": 6, "decision_step": 7, "kept_history_tokens": 1861, "gist_tokens": 235, "compressed_history_tokens": 438, "cache_tokens": 4534, "input_tokens": 4623, "actual_compression_ratio": 7.9191, "system_prefill_sec": 2.014, "full_prefill_sec": 0.0, "tool_compress_sec": 1.9249, "blend_sec": 0.1224, "ttft_sec": 4.0613, "total_sec": 18.3369, "d_corr_doc_index": 2, "d_corr_span_tokens": 0, "d_sham_tokens": 203, "d_recompute_tokens": 0, "d_recompute_docs": 0, "d_dropped_gist_tokens": 0, "d_corr_slice_prefill_sec": 0.1044, "d_recompute_prefill_sec": 0.0, "d_gist_input_tokens": 1861, "d_arm": "sham", "d_mode": "d_sham_neutral", "bundle_manifest_sha256": "b9739bdb35407161930f95714f9253672ef0f092b21fcbee3e05e4a70ddfbd11", "sham_plan_sha256": "3abf1a5ac7ecbf3339806db9a2e9092dc528bb68739afb0c64c401d83aec3c5d", "attn_impl_runtime": "eager", "wall_sec": 18.337}
+==== /home/user/c2kv/outputs_lyc/g_joint/bdf/d_pilot_r2/smoke/d_corr.jsonl ====
+{"target_tokens": 149, "generated_tokens": 33, "target_has_tool_call": true, "target_tool_name": "spotify__show_playlist_library", "prediction_tool_name": "spotify__login", "tool_name_match": false, "has_tool_call": true, "response_type_match": true, "exact_match": false, "text_token_f1": 0.3333, "rouge_l_f1": 0.3333, "non_tool_exact_match": false, "non_tool_text_token_f1": null, "non_tool_rouge_l_f1": null, "prediction": "Action:\n<tool_call>\n{\"name\":\"spotify__login\",\"arguments\":{\"username\":\"jack-maldonado@gmail.com\",\"password\":\"QC=[j6U\"}}\n</tool_call>", "target": "Action:\n<tool_call>\n{\"name\":\"spotify__show_playlist_library\",\"arguments\":{\"access_token\":\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJzcG90aWZ5K2phY2stbWFsZG9uYWRvQGdtYWlsLmNvbSIsImV4cCI6MTY4NDQxMjA5OH0.I4PzSrs_njPl81oJIw4ELTrU-49-zeCw16TJg5mkemw\",\"page_index\":0,\"page_limit\":20}}\n</tool_call>", "prompt_tokens": 89, "latency_sec": 2.9482, "generate_sec": 2.9482, "tbt_sec": 0.089341, "qid": "0c890a5dde8c_12dc86e7:8", "session_id": "0c890a5dde8c_12dc86e7", "mode": "d_corr", "ratio": 8, "hybrid_top_k": null, "history_selection": "tail", "skipped": false, "doc_tokens": 1861, "doc_chunks": 6, "history_turns": 6, "decision_step": 7, "kept_history_tokens": 1861, "gist_tokens": 235, "compressed_history_tokens": 438, "cache_tokens": 4534, "input_tokens": 4623, "actual_compression_ratio": 7.9191, "system_prefill_sec": 2.0064, "full_prefill_sec": 0.0, "tool_compress_sec": 1.9296, "blend_sec": 0.1065, "ttft_sec": 4.0424, "total_sec": 9.255, "d_corr_doc_index": 2, "d_corr_span_tokens": 203, "d_sham_tokens": 0, "d_recompute_tokens": 0, "d_recompute_docs": 0, "d_dropped_gist_tokens": 0, "d_corr_slice_prefill_sec": 0.4172, "d_recompute_prefill_sec": 0.0, "d_gist_input_tokens": 1861, "d_arm": "corr", "d_mode": "d_corr", "bundle_manifest_sha256": "b9739bdb35407161930f95714f9253672ef0f092b21fcbee3e05e4a70ddfbd11", "sham_plan_sha256": "3abf1a5ac7ecbf3339806db9a2e9092dc528bb68739afb0c64c401d83aec3c5d", "attn_impl_runtime": "eager", "wall_sec": 9.255}
+==== /home/user/c2kv/outputs_lyc/g_joint/bdf/d_pilot_r2/smoke/d_corr_re.jsonl ====
+{"target_tokens": 149, "generated_tokens": 128, "target_has_tool_call": true, "target_tool_name": "spotify__show_playlist_library", "prediction_tool_name": "spotify__show_playlist_library", "tool_name_match": true, "has_tool_call": true, "response_type_match": true, "exact_match": false, "text_token_f1": 0.8276, "rouge_l_f1": 0.6207, "non_tool_exact_match": false, "non_tool_text_token_f1": null, "non_tool_rouge_l_f1": null, "prediction": "Action:\n<tool_call>\n{\"name\":\"spotify__show_playlist_library\",\"arguments\":{\"page_index\":0,\"page_limit\":20,\"access_token\":\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJzcG90aWZ5K2phY2stbWFsZG9uYWRvQGdtYWlsLmNvbSIsImV4cCI6MTY4NDQxMjA5OH0.I4PzSrs_njPl81oJIw4", "target": "Action:\n<tool_call>\n{\"name\":\"spotify__show_playlist_library\",\"arguments\":{\"access_token\":\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJzcG90aWZ5K2phY2stbWFsZG9uYWRvQGdtYWlsLmNvbSIsImV4cCI6MTY4NDQxMjA5OH0.I4PzSrs_njPl81oJIw4ELTrU-49-zeCw16TJg5mkemw\",\"page_index\":0,\"page_limit\":20}}\n</tool_call>", "prompt_tokens": 89, "latency_sec": 11.5303, "generate_sec": 11.5303, "tbt_sec": 0.09008, "qid": "0c890a5dde8c_12dc86e7:8", "session_id": "0c890a5dde8c_12dc86e7", "mode": "d_corr_recompute", "ratio": 8, "hybrid_top_k": null, "history_selection": "tail", "skipped": false, "doc_tokens": 1861, "doc_chunks": 6, "history_turns": 6, "decision_step": 7, "kept_history_tokens": 1861, "gist_tokens": 99, "compressed_history_tokens": 1385, "cache_tokens": 5481, "input_tokens": 5570, "actual_compression_ratio": 7.8586, "system_prefill_sec": 2.0123, "full_prefill_sec": 0.0, "tool_compress_sec": 1.9254, "blend_sec": 0.1192, "ttft_sec": 4.057, "total_sec": 19.8116, "d_corr_doc_index": 2, "d_corr_span_tokens": 203, "d_sham_tokens": 0, "d_recompute_tokens": 1083, "d_recompute_docs": 3, "d_dropped_gist_tokens": 136, "d_corr_slice_prefill_sec": 0.4204, "d_recompute_prefill_sec": 0.5389, "d_gist_input_tokens": 778, "d_arm": "corr_re", "d_mode": "d_corr_recompute", "bundle_manifest_sha256": "b9739bdb35407161930f95714f9253672ef0f092b21fcbee3e05e4a70ddfbd11", "sham_plan_sha256": "3abf1a5ac7ecbf3339806db9a2e9092dc528bb68739afb0c64c401d83aec3c5d", "attn_impl_runtime": "eager", "wall_sec": 19.812}
+==== /home/user/c2kv/outputs_lyc/g_joint/bdf/d_pilot_r2/smoke/d_corr_all.jsonl ====
+{"target_tokens": 149, "generated_tokens": 128, "target_has_tool_call": true, "target_tool_name": "spotify__show_playlist_library", "prediction_tool_name": "spotify__show_playlist_library", "tool_name_match": true, "has_tool_call": true, "response_type_match": true, "exact_match": false, "text_token_f1": 0.8276, "rouge_l_f1": 0.6207, "non_tool_exact_match": false, "non_tool_text_token_f1": null, "non_tool_rouge_l_f1": null, "prediction": "Action:\n<tool_call>\n{\"name\":\"spotify__show_playlist_library\",\"arguments\":{\"page_index\":0,\"page_limit\":20,\"access_token\":\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJzcG90aWZ5K2phY2stbWFsZG9uYWRvQGdtYWlsLmNvbSIsImV4cCI6MTY4NDQxMjA5OH0.I4PzSrs_njPl81oJIw4", "target": "Action:\n<tool_call>\n{\"name\":\"spotify__show_playlist_library\",\"arguments\":{\"access_token\":\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJzcG90aWZ5K2phY2stbWFsZG9uYWRvQGdtYWlsLmNvbSIsImV4cCI6MTY4NDQxMjA5OH0.I4PzSrs_njPl81oJIw4ELTrU-49-zeCw16TJg5mkemw\",\"page_index\":0,\"page_limit\":20}}\n</tool_call>", "prompt_tokens": 89, "latency_sec": 10.9964, "generate_sec": 10.9964, "tbt_sec": 0.08591, "qid": "0c890a5dde8c_12dc86e7:8", "session_id": "0c890a5dde8c_12dc86e7", "mode": "d_corr_all", "ratio": 8, "hybrid_top_k": null, "history_selection": "tail", "skipped": false, "doc_tokens": 1861, "doc_chunks": 6, "history_turns": 6, "decision_step": 7, "kept_history_tokens": 1861, "gist_tokens": 235, "compressed_history_tokens": 2096, "cache_tokens": 6192, "input_tokens": 6281, "actual_compression_ratio": 7.9191, "system_prefill_sec": 1.9864, "full_prefill_sec": 0.0, "tool_compress_sec": 1.9243, "blend_sec": 0.1079, "ttft_sec": 4.0186, "total_sec": 18.1515, "d_corr_doc_index": null, "d_corr_span_tokens": 1861, "d_sham_tokens": 0, "d_recompute_tokens": 0, "d_recompute_docs": 0, "d_dropped_gist_tokens": 0, "d_corr_slice_prefill_sec": 1.0623, "d_recompute_prefill_sec": 0.0, "d_gist_input_tokens": 1861, "d_arm": "corr_all", "d_mode": "d_corr_all", "bundle_manifest_sha256": "b9739bdb35407161930f95714f9253672ef0f092b21fcbee3e05e4a70ddfbd11", "sham_plan_sha256": "3abf1a5ac7ecbf3339806db9a2e9092dc528bb68739afb0c64c401d83aec3c5d", "attn_impl_runtime": "eager", "wall_sec": 18.152}
+==== /home/user/c2kv/outputs_lyc/g_joint/bdf/d_pilot_r2/smoke/d_sham_mech.jsonl ====
+{"target_tokens": 149, "generated_tokens": 128, "target_has_tool_call": true, "target_tool_name": "spotify__show_playlist_library", "prediction_tool_name": "spotify__show_playlist", "tool_name_match": false, "has_tool_call": true, "response_type_match": true, "exact_match": false, "text_token_f1": 0.1695, "rouge_l_f1": 0.1695, "non_tool_exact_match": false, "non_tool_text_token_f1": null, "non_tool_rouge_l_f1": null, "prediction": "Action:\n<tool_call>\n{\"name\":\"spotify__show_playlist\",\"arguments\":{\"playlist_id\":255}}\n</tool_call>\n<tool_call>\n{\"name\":\"spotify__show_playlist\",\"arguments\":{\"playlist_id\":256}}\n</tool_call>\n<tool_call>\n{\"name\":\"spotify__show_playlist\",\"arguments\":{\"playlist_id\":257}}\n</tool_call>\n<tool_call>\n{\"name\":\"spotify__show_playlist\",\"arguments\":{\"playlist_id\":258}}\n</tool_call>\n<tool_call>\n{\"name\":\"spotify__show_playlist\",\"arguments\":{\"playlist_id\":259}}\n</tool_call>\n<tool_call>\n{\"name\":\"spotify__show_playlist\",\"arguments\":{\"playlist_id\":260}}\n</tool_call>", "target": "Action:\n<tool_call>\n{\"name\":\"spotify__show_playlist_library\",\"arguments\":{\"access_token\":\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJzcG90aWZ5K2phY2stbWFsZG9uYWRvQGdtYWlsLmNvbSIsImV4cCI6MTY4NDQxMjA5OH0.I4PzSrs_njPl81oJIw4ELTrU-49-zeCw16TJg5mkemw\",\"page_index\":0,\"page_limit\":20}}\n</tool_call>", "prompt_tokens": 89, "latency_sec": 12.008, "generate_sec": 12.008, "tbt_sec": 0.093812, "qid": "0c890a5dde8c_12dc86e7:8", "session_id": "0c890a5dde8c_12dc86e7", "mode": "d_sham_mech", "ratio": 8, "hybrid_top_k": null, "history_selection": "tail", "skipped": false, "doc_tokens": 1861, "doc_chunks": 6, "history_turns": 6, "decision_step": 7, "kept_history_tokens": 1861, "gist_tokens": 235, "compressed_history_tokens": 235, "cache_tokens": 4331, "input_tokens": 4420, "actual_compression_ratio": 7.9191, "system_prefill_sec": 1.9984, "full_prefill_sec": 0.0, "tool_compress_sec": 1.9228, "blend_sec": 0.1038, "ttft_sec": 4.025, "total_sec": 18.6357, "d_corr_doc_index": 2, "d_corr_span_tokens": 0, "d_sham_tokens": 0, "d_recompute_tokens": 0, "d_recompute_docs": 0, "d_dropped_gist_tokens": 0, "d_corr_slice_prefill_sec": 0.4202, "d_recompute_prefill_sec": 0.0, "d_gist_input_tokens": 1861, "d_arm": "sham_mech", "d_mode": "d_sham_mech", "bundle_manifest_sha256": "b9739bdb35407161930f95714f9253672ef0f092b21fcbee3e05e4a70ddfbd11", "sham_plan_sha256": "3abf1a5ac7ecbf3339806db9a2e9092dc528bb68739afb0c64c401d83aec3c5d", "attn_impl_runtime": "eager", "wall_sec": 18.636}
+==== /home/user/c2kv/outputs_lyc/g_joint/bdf/d_pilot_r2/smoke/d_full.jsonl ====
+{"target_tokens": 149, "generated_tokens": 128, "target_has_tool_call": true, "target_tool_name": "spotify__show_playlist_library", "prediction_tool_name": "spotify__show_playlist_library", "tool_name_match": true, "has_tool_call": true, "response_type_match": true, "exact_match": false, "text_token_f1": 0.2985, "rouge_l_f1": 0.2388, "non_tool_exact_match": false, "non_tool_text_token_f1": null, "non_tool_rouge_l_f1": null, "prediction": "I need to fix the error in the Spotify playlist library request. The issue is that the `page_limit` value is too high (50) and should be less than or equal to 20. I'll adjust the request and try again.\n\n<tool_call>\n{\"name\":\"spotify__show_playlist_library\",\"arguments\":{\"page_index\":0,\"page_limit\":20,\"access_token\":\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJzcG90aWZ5K2phY2stbWFsZG", "target": "Action:\n<tool_call>\n{\"name\":\"spotify__show_playlist_library\",\"arguments\":{\"access_token\":\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJzcG90aWZ5K2phY2stbWFsZG9uYWRvQGdtYWlsLmNvbSIsImV4cCI6MTY4NDQxMjA5OH0.I4PzSrs_njPl81oJIw4ELTrU-49-zeCw16TJg5mkemw\",\"page_index\":0,\"page_limit\":20}}\n</tool_call>", "prompt_tokens": 89, "latency_sec": 10.0436, "generate_sec": 10.0436, "tbt_sec": 0.078465, "qid": "0c890a5dde8c_12dc86e7:8", "session_id": "0c890a5dde8c_12dc86e7", "mode": "full", "ratio": 1, "hybrid_top_k": null, "history_selection": "tail", "skipped": false, "doc_tokens": 1861, "doc_chunks": 6, "history_turns": 6, "decision_step": 7, "kept_history_tokens": 1861, "gist_tokens": 0, "compressed_history_tokens": 1861, "cache_tokens": 5957, "input_tokens": 6046, "actual_compression_ratio": 1.0, "system_prefill_sec": 1.3731, "full_prefill_sec": 0.7272, "tool_compress_sec": 0.0, "blend_sec": 0.0, "ttft_sec": 2.1002, "total_sec": 12.7648, "d_arm": "full", "d_mode": "full", "bundle_manifest_sha256": "b9739bdb35407161930f95714f9253672ef0f092b21fcbee3e05e4a70ddfbd11", "sham_plan_sha256": null, "attn_impl_runtime": "eager", "wall_sec": 12.765}
+[smoke] PASS — wrote /home/user/c2kv/outputs_lyc/g_joint/bdf/d_pilot_r2/smoke/smoke.ok

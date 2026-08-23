@@ -1,0 +1,25 @@
+{
+  "output_file": "/home/user/c2kv/outputs_lyc/g_joint/bdf/f_pilot/sampled.jsonl",
+  "arm_set": "sampled",
+  "passes": [
+    "sampled"
+  ],
+  "num_examples": 200,
+  "num_eligible": 174,
+  "num_ineligible": 26,
+  "num_rows_written": 548,
+  "num_rows_skipped": 26,
+  "sampling_supported": true,
+  "model_path": "/home/user/c2kv/outputs_lyc/g_joint/fixed_joint",
+  "base_model": "/home/user/c2kv/models/Qwen3-4B-Instruct-2507",
+  "model_config_sha256": "bf41c75c0efb907837c6e188caf6a5102ce0a7fbebd0727c10dd10a57b4c9ac6",
+  "prereg_sha256": "69161b6f574e5cb763ab4a601f26a026f35c68381ac93c012557d288c2d71d78",
+  "split_manifest_sha256": "2d33b901793b85ce27a9d0a737cb344ebc39cf0773b7da0ae54cba62e97d2d14",
+  "qid_manifest_sha256": "d58659054fe771a45f4f6aad50282fcc36edb232f1a0872cd9fe0753f8eaf994",
+  "git_short_sha": "f84dc74",
+  "override_ratio": 8,
+  "l_min": 64,
+  "gen_seed": 20260822,
+  "temperature": 0.7,
+  "top_p": 0.95
+}
