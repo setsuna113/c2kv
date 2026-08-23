@@ -260,3 +260,33 @@
 
 - **medium 四臂未启动**（卡 2-5 空置），等刘言成显式批准；planner 正式跑进行中（分层扫描 + 全 removal 接线），产出即入库并补 §25（realized 配比、shrink factor、臂表、ETA）。
 - 卡 7 seed-2 复训同样待批准。
+
+## 25.（2026-08-23 09:30）medium 方案 B 两臂已启动 + planner v4 全绿
+
+### 25.1 决策落地（刘言成 08-23 指令）
+- 只跑 **joint-mode 两臂**：`med_dsingle_joint`（卡2）、`med_dmulti_joint`（卡3）。alternate/repeat 臂本轮不跑（Q3 复验有意推迟）。
+- 预算公式：`budget = floor(实测 v1 池 est / 0.8)` = floor(42,510,075/0.8) = **53,137,593**——两 recipe 的 traces 配额均不超池，shrink=1.000 不触发，parity 自然通过（guard 代码未动）。
+- 池量出处：planner v4 实测 post-removal v1 池 42.51M est（scan 期移除 1,482 个 traces 例）；**removal 文件命中数恰为 427**（`removal_traces_final.json`，与审计 exclusion 一致）；toucan/openswe 侧 103 identifiers 命中 22 例；qa 0。
+- 0.392 presented/estimated 系数标注：标定于 **v1-regime、traces-only 的 small 臂**（joint 12.62M 呈现/32.2M est、alternate 12.54M/27.7h；fixed per-side caps）——对 medium 的 QA/长文档家族该系数可能偏移，训练后 `measure_arm_psrc.py` 实测复核。
+
+### 25.2 planner v4 产出（入库 docs/g_joint/medium_plan/）
+| recipe | 例数 | total est | realized 配比 | shrink |
+|---|---:|---:|---|---|
+| d_single | 8,908 | 53.1M | qa 0.200 / traces 0.800 | 1.000 |
+| d_multi | 13,041 | 53.1M | qa 0.200 / traces 0.500 / toucan 0.250 / openswe 0.050 | 1.000 |
+- 臂表（full-pool parity，floor=41.66M/max=41.67M presented）：两臂 U=53.1M、epochs=2、MAX_SOURCE_TOKENS=U（53,137,647 / 53,149,845）。
+- ETA（small 臂实测校准 22.7h/32M est）：**~75.4h/臂 → 08-26 晚**（比指令估计的 55h 保守；不阻 08-29）。
+- 启动审计：两臂均 SEED=42、LR=5e-5、DOC_MODE=joint、git e3c8802+01e00ee（服务器 01e00ee）；命令/env 在 `$G/med_dsingle_joint.log` / `med_dmulti_joint.log` 头部。
+- 诚实记录：planner 的截断 parity regime（`--presented_target_est`，本次未用）初版误假设 mid-epoch 截停——trainer 实际只在 epoch 循环前对冻结顺序一次性前缀截取（`_take_within_source_token_budget`），语义已修正为 per-epoch take × epochs 并有测试；本次两臂为全池 epochs=2，天然 parity，无需截断。
+
+### 25.3 并行任务图（8 卡全占用，2026-08-23 09:30）
+| 卡 | 任务 | ETA |
+|---|---|---|
+| 0 | D-r1 arms 收尾（corr_re/corr_all）→ paired analysis | ~1h |
+| 1 | F pass1 greedy_core（104/200→）→ pass2 sampled | ~2h + ~3h |
+| 2 | **med_dsingle_joint** | ~75h |
+| 3 | **med_dmulti_joint** | ~75h |
+| 4/5 | D-r2 扩展电池 n=900（full/c2kv，768/16 同口径） | ~5h |
+| 6 | B OOM 缺行第 3 试（分配器调优） | ~15min |
+| 7 | fixed_joint seed-2 复训（同 config 同 order，SEED=43） | ~23h + 电池 4.5h |
+- D-r2 冻结件全部 `_r2` 后缀，不覆盖 r1；判据/prereg 未动。

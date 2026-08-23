@@ -85,6 +85,10 @@ RESUME_FROM_CHECKPOINT="${RESUME_FROM_CHECKPOINT:-}"
 DATALOADER_NUM_WORKERS="${DATALOADER_NUM_WORKERS:-4}"
 DATALOADER_PREFETCH_FACTOR="${DATALOADER_PREFETCH_FACTOR:-4}"
 DATASET_SHUFFLE_SEED="${DATASET_SHUFFLE_SEED:-2948}"
+# HF TrainingArguments seed (sampler/训练随机流): default 42 matches every arm
+# to date; set SEED=43 for the G8-small-v2 seed-2 replication (nothing else
+# in the launch env may change for that arm).
+SEED="${SEED:-42}"
 
 ASCEND_RT_VISIBLE_DEVICES="${ASCEND_RT_VISIBLE_DEVICES:-0}"
 export ASCEND_RT_VISIBLE_DEVICES
@@ -217,6 +221,7 @@ echo "MAX_SYSTEM_LENGTH=${MAX_SYSTEM_LENGTH}"
 echo "MAX_TOOL_DEFINITION_TOKENS=${MAX_TOOL_DEFINITION_TOKENS}"
 echo "MIN_TARGET_TOKENS=${MIN_TARGET_TOKENS}"
 echo "LR=${LR}"
+echo "SEED=${SEED} (HF TrainingArguments seed; 42 = every arm to date)"
 echo "NUM_TRAIN_EPOCHS=${NUM_TRAIN_EPOCHS}"
 echo "WARMUP_STEPS=${WARMUP_STEPS}"
 echo "PER_DEVICE_BS=${PER_DEVICE_BS}"
@@ -275,4 +280,5 @@ echo "LOGGING_STEPS=${LOGGING_STEPS}"
   --save_steps "${SAVE_STEPS}" \
   "${DATALOADER_ARGS[@]}" \
   --bf16 True \
-  --dataset_shuffle_seed "${DATASET_SHUFFLE_SEED}"
+  --dataset_shuffle_seed "${DATASET_SHUFFLE_SEED}" \
+  --seed "${SEED}"

@@ -507,6 +507,7 @@ def plan_recipes(
     epochs_overrides: Optional[Dict[str, int]] = None,
     scan_removals: Optional[Dict[str, int]] = None,
     provenance: Optional[Dict[str, Any]] = None,
+    presented_target_est: Optional[int] = None,
 ) -> Dict[str, Dict[str, Any]]:
     """Fill per-recipe family quotas and interleave into frozen orders.
 
@@ -653,7 +654,10 @@ def plan_recipes(
             if len(rep_order) != len(set(rep_order)):
                 raise RuntimeError(f"recipe {recipe.name}_repeat: duplicate qids in the planned order")
             recommended_epochs = math.ceil(budget_estimated_tokens / rep_total) if rep_total > 0 else 0
-            effective_epochs = epochs_override if epochs_override is not None else recommended_epochs
+            # Variant-specific override key "<recipe>_repeat" wins over the
+            # shared recipe key (which still covers base AND repeat).
+            repeat_epochs_override = epochs_overrides.get(f"{recipe.name}_repeat", epochs_override)
+            effective_epochs = repeat_epochs_override if repeat_epochs_override is not None else recommended_epochs
             results[f"{recipe.name}_repeat"] = {
                 "order": rep_order,
                 "plan": {
@@ -667,8 +671,9 @@ def plan_recipes(
                     "families": rep_reports,
                     "unique_pool_estimated_tokens": rep_total,
                     "recommended_epochs": recommended_epochs,
-                    "epochs_override": epochs_override,
+                    "epochs_override": repeat_epochs_override,
                     "epochs_override_scope": "base_and_repeat_variants",
+                    "epochs_override_repeat_key": f"{recipe.name}_repeat",
                     "presented_estimated_tokens": rep_total * effective_epochs,
                     "order_examples": len(rep_order),
                     "order_sha1": hashlib.sha1(json.dumps(rep_order).encode("utf-8")).hexdigest(),
@@ -684,7 +689,7 @@ def plan_recipes(
             }
     # P1-8: the fixed medium arms' epochs x budget parity is computed and
     # guarded HERE (before any output is written), not by the operator.
-    arm_table = build_arm_launch_table(results)
+    arm_table = build_arm_launch_table(results, presented_target_est=presented_target_est)
     if arm_table is not None:
         for result in results.values():
             result["plan"]["arm_launch_table"] = arm_table
@@ -714,7 +719,10 @@ MEDIUM_ARM_TABLE = (
 MEDIUM_ARM_CARDS = (2, 3, 4, 5)  # suggested NPU card per arm, in table order
 
 
-def build_arm_launch_table(results: Dict[str, Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+def build_arm_launch_table(
+    results: Dict[str, Dict[str, Any]],
+    presented_target_est: Optional[int] = None,
+) -> Optional[Dict[str, Any]]:
     """Cross-arm epochs x budget parity table for the fixed medium arms.
 
     Per arm: unique pool estimated tokens U (the order file's realized total),
@@ -722,17 +730,22 @@ def build_arm_launch_table(results: Dict[str, Dict[str, Any]]) -> Optional[Dict[
     for the repeat variant else 1), and the planned presented tokens
     ``U x epochs x PRESENTED_PER_ESTIMATED``.
 
-    Parity: let the floor be the smallest planned presented total.  Every arm
-    must land within PARITY_SLACK of the floor (max <= floor x 1.02); a
-    violation raises loudly with per-arm level-up suggestions instead of
-    shipping a silently unbalanced 4-arm launch (the pre-guard arithmetic was
-    hand-computed per arm: budget=50M + epochs=2 etc.).  The suggested
-    NUM_TRAIN_EPOCHS column is the smallest integer with
-    ``U x epochs x 0.392 >= max_arm_total x 1.02`` — level UP to the strongest
-    arm with 2% headroom (crossing-example granularity + 0.392 noise).
+    Two parity regimes:
 
-    MAX_SOURCE_TOKENS = U: the trainer truncates the frozen order at the full
-    unique pool, so per-epoch presented is 0.392 x U for every arm.
+    * ``presented_target_est=None`` (default): full-pool epochs.  Every arm's
+      ``U x epochs x 0.392`` must agree within PARITY_SLACK (max <= floor x
+      1.02); a violation raises loudly with per-arm level-up suggestions.
+      MAX_SOURCE_TOKENS = U (per-epoch budget = the full unique pool).
+      NOTE: with realistic U spreads (e.g. 53M/85M/25M) integer epochs cannot
+      reach 2% — use the target regime below in that case.
+
+    * ``presented_target_est=P*`` (truncation parity — the pre-registered
+      medium semantics, "same total training tokens" per arm): the trainer
+      truncates the frozen order at P* estimated source tokens, so presented
+      parity is EXACT by construction.  The guard instead asserts CAPACITY:
+      every arm must reach P* with 2% headroom, ``U x epochs >= P* x 1.02``,
+      with epochs from ``--epochs_override`` or the per-arm suggestion
+      ``ceil(P* x 1.02 / U)``.  MAX_SOURCE_TOKENS = P*.
 
     Returns None when none of the fixed recipes was planned (e.g. unit tests
     with toy recipe names), so exploratory runs are unaffected.
@@ -766,6 +779,80 @@ def build_arm_launch_table(results: Dict[str, Dict[str, Any]]) -> Optional[Dict[
         return None
     floor = min(row["presented_est_tokens"] for row in rows)
     top = max(row["presented_est_tokens"] for row in rows)
+    if presented_target_est is not None:
+        # Truncation parity, trainer-true semantics: the trainer prefix-takes
+        # the frozen order up to MAX_SOURCE_TOKENS ONCE (before the epoch
+        # loop, ``_take_within_source_token_budget``) and repeats that prefix
+        # every epoch — there is NO mid-epoch stop.  Parity therefore means
+        # per-epoch take x epochs, not "truncate the whole run at P*":
+        #   per_epoch_take = ceil(P* / effective_epochs)   (must be <= U)
+        #   presented_est  = per_epoch_take x effective_epochs
+        #     (~P* up to crossing-example granularity at the take, < one
+        #     example per epoch — far inside the 2% slack)
+        target = presented_target_est
+        for row in rows:
+            epochs = row["effective_epochs"]
+            take = math.ceil(target / epochs)
+            row["max_source_tokens"] = take
+            row["presented_est_tokens"] = float(take * epochs)
+            # Suggested epochs: the SMALLEST count whose per-epoch take fits
+            # the unique pool (take <= U).
+            row["suggested_num_train_epochs"] = max(
+                1, math.ceil(target / row["unique_est_tokens"] - 1e-9)
+            )
+        infeasible = [
+            row for row in rows if row["max_source_tokens"] > row["unique_est_tokens"]
+        ]
+        if infeasible:
+            rendered = "\n".join(
+                f"  {row['arm']}: U={row['unique_est_tokens']:,} epochs={row['effective_epochs']} "
+                f"needs per-epoch take {row['max_source_tokens']:,} > U "
+                f"(suggested epochs={row['suggested_num_train_epochs']})"
+                for row in infeasible
+            )
+            raise RuntimeError(
+                "ARM CAPACITY GUARD FAILED: per-epoch take exceeds the unique pool "
+                f"(presented target {target:,} estimated tokens). Re-run with "
+                "--epochs_override per the suggestions ('<recipe>_repeat' keys the "
+                "repeat variant) or lower --presented_target_est:\n" + rendered
+            )
+        tight = [
+            row["arm"]
+            for row in rows
+            if row["unique_est_tokens"] * row["effective_epochs"] < target * PARITY_SLACK
+        ]
+        if tight:
+            logger.warning(
+                "ARM CAPACITY tight (<2%% headroom over target %d): %s — capacity "
+                "== target, exact by take arithmetic but with zero estimator margin",
+                target,
+                tight,
+            )
+        realized_floor = min(row["presented_est_tokens"] for row in rows)
+        realized_top = max(row["presented_est_tokens"] for row in rows)
+        table = {
+            "presented_per_estimated": PRESENTED_PER_ESTIMATED,
+            "parity_slack": PARITY_SLACK,
+            "parity_mode": "truncation",
+            "presented_target_est_tokens": target,
+            "parity_floor_presented_est": realized_floor,
+            "parity_max_presented_est": realized_top,
+            "parity_ok": True,
+            "capacity_tight_arms": tight,
+            "arms": rows,
+            "skipped_arms": [
+                arm_name for arm_name, plan_key, _ in MEDIUM_ARM_TABLE if plan_key not in results
+            ],
+            "notes": [
+                "per-epoch take = ceil(target / epochs); MAX_SOURCE_TOKENS = take; the trainer "
+                "prefix-takes the frozen order ONCE and repeats it every epoch, so presented "
+                "parity across arms is take x epochs (~target within one example per epoch)",
+                "med_dsingle_alt and med_dsingle_joint share d_single.order.json (Gate-3 re-check pair)",
+                "capacity guard (hard): per-epoch take <= unique pool per arm; "
+                "capacity_tight_arms lists arms with <2% headroom over the target",
+            ],
+        }
+        return table
     for row in rows:
         row["suggested_num_train_epochs"] = max(
             1, math.ceil(top * PARITY_SLACK / (row["unique_est_tokens"] * PRESENTED_PER_ESTIMATED) - 1e-9)
@@ -1139,6 +1226,7 @@ def main() -> None:
     parser.add_argument("--oversample_factor", type=float, default=1.25, help="scan cap = quota x this factor")
     parser.add_argument("--repeat_unique_tokens", type=int, default=None, help="M: also emit <recipe>_repeat variants with ~M unique tokens per family pool")
     parser.add_argument("--epochs_override", action="append", default=None, metavar="name=n", help="repeatable audit record: recipe name -> train epochs (integer >= 1); scales presented_estimated_tokens in the plan jsons; applies to BOTH the base and the repeat variant of the named recipe")
+    parser.add_argument("--presented_target_est", type=int, default=None, help="medium arm parity target: MAX_SOURCE_TOKENS per arm (estimated source tokens, trainer truncates the frozen order mid-epoch if needed); epochs then only need to supply target x 1.02 capacity per arm (the pre-registered 'same total training tokens' semantics). Default None keeps the full-pool-epochs parity guard")
     parser.add_argument("--removal_files", nargs="*", default=[], help="dedup removal lists (dicts with removal_list, or bare JSON string lists); applied DURING the pool scan (before cap accounting, P2)")
     parser.add_argument(
         "--subset_weights",
@@ -1261,6 +1349,7 @@ def main() -> None:
             family: report["removed_total"] for family, report in pool_scan_reports.items()
         },
         provenance=provenance,
+        presented_target_est=args.presented_target_est,
     )
     # P0-2 audit: how each recipe family's pool was scanned (per-subset caps,
     # weights, exhaustion) — the same scan underlies every recipe/variant.

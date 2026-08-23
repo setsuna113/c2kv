@@ -846,6 +846,71 @@ def test_arm_launch_table_partial_runs_and_toy_recipes():
     assert "arm_launch_table" not in toy["r"]["plan"]
 
 
+def test_arm_launch_table_truncation_parity_target():
+    """presented_target_est: per-epoch take = ceil(P*/epochs) with
+    MAX_SOURCE_TOKENS = take -> presented = take x epochs across arms; the
+    guard requires take <= U per arm (no mid-epoch stop exists)."""
+    pools = _medium_pools()
+    recipes = [
+        parse_recipe("d_single=qa:0.2,traces:0.8"),
+        parse_recipe("d_multi=qa:0.2,traces:0.5,toucan:0.25,openswe:0.05"),
+    ]
+    # target 9000 with default epochs (1/1/1, repeat recommended 5):
+    # takes 9000/9000/9000/1800 all fit (U 10000/10000/10000/2000).
+    results = plan_recipes(
+        pools, recipes, budget_estimated_tokens=10000, order_seed=42,
+        repeat_unique_tokens=2000, presented_target_est=9000,
+    )
+    table = results["d_single"]["plan"]["arm_launch_table"]
+    assert table["parity_ok"] is True
+    assert table["parity_mode"] == "truncation"
+    assert table["presented_target_est_tokens"] == 9000
+    rows = {row["arm"]: row for row in table["arms"]}
+    for row in rows.values():
+        assert row["presented_est_tokens"] == 9000.0
+    assert rows["med_dsingle_alt"]["max_source_tokens"] == 9000
+    assert rows["med_dmulti_repeat_alt"]["max_source_tokens"] == 1800
+    # suggested epochs = smallest count whose take fits the pool.
+    assert rows["med_dsingle_alt"]["suggested_num_train_epochs"] == 1
+    assert rows["med_dmulti_repeat_alt"]["suggested_num_train_epochs"] == 5
+    assert table["capacity_tight_arms"] == []
+
+
+def test_arm_launch_table_truncation_capacity_guard_fires_and_rescues():
+    pools = _medium_pools()
+    recipes = [
+        parse_recipe("d_single=qa:0.2,traces:0.8"),
+        parse_recipe("d_multi=qa:0.2,traces:0.5,toucan:0.25,openswe:0.05"),
+    ]
+    # target 12000 with defaults: base arms need take 12000 > U=10000 -> fail.
+    with pytest.raises(RuntimeError, match="ARM CAPACITY GUARD FAILED"):
+        plan_recipes(
+            pools, recipes, budget_estimated_tokens=10000, order_seed=42,
+            repeat_unique_tokens=2000, presented_target_est=12000,
+        )
+    # Base-key epochs alone cannot rescue the repeat variant (shared key
+    # covers it: 2000-pool x 2 epochs -> take 6000 > 2000, still fails).
+    with pytest.raises(RuntimeError, match="ARM CAPACITY GUARD FAILED"):
+        plan_recipes(
+            pools, recipes, budget_estimated_tokens=10000, order_seed=42,
+            repeat_unique_tokens=2000, presented_target_est=12000,
+            epochs_overrides={"d_single": 2, "d_multi": 2},
+        )
+    # Variant-specific key rescues: repeat at 6 epochs -> take 2000 <= U.
+    results = plan_recipes(
+        pools, recipes, budget_estimated_tokens=10000, order_seed=42,
+        repeat_unique_tokens=2000, presented_target_est=12000,
+        epochs_overrides={"d_single": 2, "d_multi": 2, "d_multi_repeat": 6},
+    )
+    table = results["d_single"]["plan"]["arm_launch_table"]
+    assert table["parity_ok"] is True
+    rows = {row["arm"]: row for row in table["arms"]}
+    assert rows["med_dmulti_repeat_alt"]["effective_epochs"] == 6
+    assert rows["med_dmulti_repeat_alt"]["max_source_tokens"] == 2000
+    assert rows["med_dmulti_repeat_alt"]["presented_est_tokens"] == 12000.0
+    assert rows["med_dsingle_alt"]["max_source_tokens"] == 6000
+
+
 # ---------------------------------------------------------------------------
 # P2: provenance block, order hash, removal-before-cap, epochs_override scope.
 # ---------------------------------------------------------------------------
