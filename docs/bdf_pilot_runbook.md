@@ -200,6 +200,133 @@ readings. A "repair" that produces
 incoherent output is not a repair: the coherence triple (protocol-legal parse
 rate, repetition degeneration, output-length drift) gates every rescue count.
 
+### 4a. D — downstream persistence (exploratory, prereg addendum 2026-08-23)
+
+Reuses the frozen r2 state. Runs execute in the `task/bdf-pilot` worktree
+(`~/c2kv-bdf`, the checkout that holds the r2 manifest/bundles and the
+frozen `results/bdf_pilot/d_r2/` rows — the main checkout does not), write
+to a server OUT_DIR (r2 convention), and are ingested into
+`results/bdf_pilot/d_r2/` only after all sentinels and the analyzer pass.
+Requires the addendum committed first. Never point `--output_file` at an
+r1/r2 artifact.
+
+Pre-launch checklist: (1) addendum committed; (2) `pytest
+agent/test_d_downstream_driver.py agent/test_d_downstream_analysis.py
+agent/test_d_kv_intervene_torch.py -k downstream` green on the server; (3)
+the server gate green — a pytest command, not prose:
+
+```bash
+C2KV_REAL_TOKENIZER_DIR=/home/user/c2kv/models/Qwen3-4B-Instruct-2507 \
+C2KV_SERVED_MODEL_DIR=/home/user/c2kv/outputs_lyc/g_joint/fixed_joint \
+python -m pytest agent/test_d_downstream_server_gate.py -v
+```
+
+It covers the real-tokenizer block-prologue property PLUS the absolute
+no-injected-system-header check (a header common to both templating calls
+would pass the in-loop relative assert), and the post-generation
+cache-length −1 tripwire on the served stack (transformers 5.8.0 pin) with
+a K=1 continuation pass. Both tests skip when the env vars are unset, so
+"green" here means green WITH them set.
+
+```bash
+cd ~/c2kv-bdf
+set -euo pipefail
+# NPU env (mirrors run_d_pilot_npu.sh:52-63)
+[[ -f /usr/local/Ascend/ascend-toolkit/set_env.sh ]] && source /usr/local/Ascend/ascend-toolkit/set_env.sh
+export PYTHONPATH="$(pwd)/python:$(pwd)/python/inference:$(pwd)/agent:${PYTHONPATH:-}"
+export HF_HUB_OFFLINE=1 TOKENIZERS_PARALLELISM=false
+export PYTORCH_NPU_ALLOC_CONF="${PYTORCH_NPU_ALLOC_CONF:-max_split_size_mb:128}"
+export ASCEND_RT_VISIBLE_DEVICES="${ASCEND_RT_VISIBLE_DEVICES:-0}"
+
+OUT_DIR=/home/user/c2kv/outputs_lyc/g_joint/bdf/d_downstream_r2
+mkdir -p "${OUT_DIR}/smoke" results/bdf_pilot/logs
+FROZEN="--manifest configs/bdf_pilot/d_cw_manifest_r2.json \
+  --bundles results/d/bundles_batch_tf_r2.jsonl \
+  --sham_plan configs/bdf_pilot/d_sham_plan_r2.json \
+  --model /home/user/c2kv/outputs_lyc/g_joint/fixed_joint \
+  --base_model /home/user/c2kv/models/Qwen3-4B-Instruct-2507 \
+  --tokenizer /home/user/c2kv/models/Qwen3-4B-Instruct-2507 \
+  --dataset_path /home/user/c2kv/datasets/agent-llm-traces-v2 \
+  --device_type npu --attn_impl eager --ratio 8"
+
+# 1. smoke: 2 frozen qids (pick ones with a later sampled span in
+#    battery_full.jsonl), K=1, all three arms, resume off; then the three
+#    offset-0 identity sentinels; smoke.ok is written ONLY if everything
+#    above it succeeded (set -e + && chain), and the full run below refuses
+#    to start without it (driver gate, SKIP_DOWNSTREAM_SMOKE_CHECK=1 to
+#    override deliberately).
+for ARM in none sham corr_re; do
+  python agent/d_kv_intervene.py --arm $ARM --downstream_turns 1 \
+    --qids <qid1>,<qid2> --resume False $FROZEN \
+    --output_file "${OUT_DIR}/smoke/d_downstream_$ARM.jsonl" \
+    2>&1 | tee -a results/bdf_pilot/logs/d_r2_downstream_smoke.log
+done
+python agent/d_downstream_analysis.py --offset0_identity \
+    "${OUT_DIR}/smoke/d_downstream_none.jsonl" results/bdf_pilot/d_r2/battery_c2kv.jsonl \
+    --expect_n 2 \
+  && python agent/d_downstream_analysis.py --offset0_identity \
+    "${OUT_DIR}/smoke/d_downstream_sham.jsonl" results/bdf_pilot/d_r2/d_sham.jsonl \
+    --expect_n 2 \
+  && python agent/d_downstream_analysis.py --offset0_identity \
+    "${OUT_DIR}/smoke/d_downstream_corr_re.jsonl" results/bdf_pilot/d_r2/d_corr_re.jsonl \
+    --expect_n 2 \
+  && {
+    echo "code_sha=$(git rev-parse HEAD)"
+    echo "manifest_sha256=$(python -c 'import sys; from pathlib import Path; from extract_cw_triggers import sha256_text_file; print(sha256_text_file(Path(sys.argv[1])))' configs/bdf_pilot/d_cw_manifest_r2.json)"
+    echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  } > "${OUT_DIR}/smoke/smoke.ok" \
+  && echo "[downstream smoke] PASS — wrote ${OUT_DIR}/smoke/smoke.ok"
+
+# 2. full run, K=3, resume on (last-group semantics: skipped/OOM groups
+#    retried on re-invocation, completed retries stay done)
+for ARM in none sham corr_re; do
+  python agent/d_kv_intervene.py --arm $ARM --downstream_turns 3 \
+    --resume True --downstream_smoke_ok "${OUT_DIR}/smoke/smoke.ok" $FROZEN \
+    --output_file "${OUT_DIR}/d_downstream_$ARM.jsonl" \
+    2>&1 | tee -a results/bdf_pilot/logs/d_r2_downstream_arms.log
+done
+
+# 3. re-run the three offset-0 identity checks on the full files — same
+#    three commands, ${OUT_DIR}/d_downstream_*.jsonl on the left, but with
+#    --expect_n set to the FULL frozen trigger count (derived from the
+#    manifest, never retyped): the sentinel otherwise compares only qids
+#    present in the file, so silently lost/skipped t* rows would still pass.
+EXPECT_N=$(python -c 'import json; print(len(json.load(open("configs/bdf_pilot/d_cw_manifest_r2.json"))["cw_qids"]))')
+python agent/d_downstream_analysis.py --offset0_identity \
+    "${OUT_DIR}/d_downstream_none.jsonl" results/bdf_pilot/d_r2/battery_c2kv.jsonl \
+    --expect_n "${EXPECT_N}" \
+  && python agent/d_downstream_analysis.py --offset0_identity \
+    "${OUT_DIR}/d_downstream_sham.jsonl" results/bdf_pilot/d_r2/d_sham.jsonl \
+    --expect_n "${EXPECT_N}" \
+  && python agent/d_downstream_analysis.py --offset0_identity \
+    "${OUT_DIR}/d_downstream_corr_re.jsonl" results/bdf_pilot/d_r2/d_corr_re.jsonl \
+    --expect_n "${EXPECT_N}"
+python agent/d_downstream_analysis.py \
+  --arm none="${OUT_DIR}/d_downstream_none.jsonl" \
+  --arm sham="${OUT_DIR}/d_downstream_sham.jsonl" \
+  --arm corr_re="${OUT_DIR}/d_downstream_corr_re.jsonl" \
+  --manifest configs/bdf_pilot/d_cw_manifest_r2.json \
+  --bundles results/d/bundles_batch_tf_r2.jsonl \
+  --out_prefix "${OUT_DIR}/d_downstream_report"
+
+# 4. ingestion (only after 3 passes): copy the three arm jsonls,
+#    d_downstream_report.{json,md}, and the smoke dir into
+#    results/bdf_pilot/d_r2/ (new names only — never overwrite an existing
+#    file), then W&B-ingest under the §12 tags plus d-downstream.
+cp -n "${OUT_DIR}"/d_downstream_{none,sham,corr_re}.jsonl \
+      "${OUT_DIR}"/d_downstream_report.{json,md} results/bdf_pilot/d_r2/
+mkdir -p results/bdf_pilot/d_r2/d_downstream_smoke \
+  && cp -n "${OUT_DIR}"/smoke/* results/bdf_pilot/d_r2/d_downstream_smoke/
+```
+
+The comparison that matters at t*+1 is corr_re vs none, with sham vs none
+alongside as the nonspecific control — exploratory; the registered primary
+contrast (corr_re − sham at t*) is untouched. A PAIR-BASE MISMATCH banner
+in the report means an arm-asymmetric skip (e.g. OOM) shifted a contrast's
+base — read the symmetric-difference listing before reading any ΔS.
+Numbers enter tables only after W&B ingestion under the §12 tags plus
+`d-downstream`.
+
 ---
 
 ## 5. F — speculative compaction

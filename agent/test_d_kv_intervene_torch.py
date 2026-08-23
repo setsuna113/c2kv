@@ -668,3 +668,323 @@ def test_d_intervene_modes_are_wired_into_dispatch():
         "d_sham_mech",
     }
     assert isinstance(HH.D_INTERVENE, dict)
+
+
+# ---------------------------------------------------------------------------
+# j. downstream persistence (exploratory addendum 2026-08-23)
+# ---------------------------------------------------------------------------
+
+
+def _driver():
+    import d_kv_intervene as D  # noqa: PLC0415
+
+    return D
+
+
+def _downstream_args(downstream_turns=1, cap=100000):
+    import argparse  # noqa: PLC0415
+
+    return argparse.Namespace(
+        downstream_turns=downstream_turns,
+        downstream_max_cache_tokens=cap,
+        max_prompt_tokens=64,
+        max_new_tokens=4,
+        device_type="cpu",
+    )
+
+
+def _downstream_session():
+    """Three decision points of one session; each later span's snapshot
+    extends the earlier one exactly, the way real trace snapshots do."""
+    from train.train_data_multiturn import CompressHistoryExample  # noqa: PLC0415
+
+    history = []
+    for index, text in enumerate([
+        "the wind moved sand across the wide flat plain",
+        "grains hopped forward and struck the bed again",
+        "a small mound grew behind the sheltering stone",
+        "the leeward slope reached its resting angle",
+        "an avalanche carried grains down to the base",
+    ]):
+        history.append({"role": "user" if index % 2 == 0 else "assistant", "content": text})
+
+    conv0 = [
+        {"role": "user", "content": "tell me about the dune field"},
+        {"role": "assistant", "content": "sand collects where the wind slows"},
+        {"role": "user", "content": "which way does the ridge travel"},
+    ]
+    conv1 = conv0 + [
+        {"role": "assistant", "content": "downwind along the resultant direction"},
+        {"role": "user", "content": "ripples formed on the windward face"},
+    ]
+    conv2 = conv1 + [
+        {"role": "assistant", "content": "small wavelengths ride the larger form"},
+        {"role": "user", "content": "how tall can the mound grow"},
+    ]
+
+    def _mk(qid, conv, answer):
+        return CompressHistoryExample(
+            qid=qid,
+            history_messages=[dict(m) for m in history],
+            current_messages=[dict(conv[-1])],
+            answer=answer,
+            system_prompt="you describe landforms",
+            tools=[],
+            original_messages=[dict(m) for m in conv],
+        )
+
+    return (
+        _mk("dune:5", conv0, "downwind along the resultant direction"),
+        _mk("dune:7", conv1, "small wavelengths ride the larger form"),
+        _mk("dune:9", conv2, "until saturation balances the supply"),
+    )
+
+
+def test_downstream_continuation_position_invariant(stack):
+    """Pinned constraint: blocks prefill at true absolute logical positions
+    (mask sized from physical slots), and logical − physical stays the
+    build-time constant along the whole continuation."""
+    HH = _harness()
+    D = _driver()
+    model, tokenizer, args, _ = stack
+    prev, mid, last = _downstream_session()
+
+    prefix, skip = HH._build_c2kv_prefix(model, tokenizer, prev, args)
+    assert skip is None, skip
+    pos_gap0 = prefix["system_length"] + prefix["history_length"] - prefix["cache_length"]
+    assert pos_gap0 > 0, "the fixture must compress (slots fewer than positions)"
+
+    seen = []
+
+    class _Spy:
+        def __init__(self, inner):
+            object.__setattr__(self, "_inner", inner)
+
+        def __getattr__(self, item):
+            return getattr(object.__getattribute__(self, "_inner"), item)
+
+        def __call__(self, **kwargs):
+            seen.append(
+                {
+                    "mask_width": kwargs["attention_mask"].shape[-1],
+                    "positions": kwargs["position_ids"][0].tolist(),
+                }
+            )
+            return object.__getattribute__(self, "_inner")(**kwargs)
+
+    row0 = {"doc_tokens": prefix["doc_tokens"], "gist_tokens": prefix["gist_tokens"]}
+    rows = D._downstream_rows(
+        _Spy(model), tokenizer, prefix, prev, [mid, last], args, _downstream_args(2), "c2kv", row0
+    )
+    assert [row["d_turn_offset"] for row in rows] == [1, 2]
+    assert all(not row.get("skipped") for row in rows)
+    assert len(seen) == 2, "one block prefill per continuation turn"
+    for record, row, scored_example in zip(seen, rows, (mid, last)):
+        block_len = row["d_ds_block_tokens"]
+        start = row["d_ds_logical_tokens"] - block_len
+        assert record["positions"] == list(range(start, start + block_len))
+        # mask width = physical slots before the append + the block itself
+        assert record["mask_width"] == row["d_ds_cache_tokens"]
+        assert row["d_ds_pos_gap"] == pos_gap0
+        assert row["d_ds_logical_tokens"] - row["d_ds_cache_tokens"] == pos_gap0
+        # the REAL _generate_with_prefix scored against later[j-1].answer
+        assert row["target"] == scored_example.answer
+
+
+def test_downstream_crop_restores_pregen_cache(stack):
+    """The post-generate tripwire formula holds on CPU transformers, and
+    cropping back to the build length evicts prompt + generated wholesale."""
+    HH = _harness()
+    D = _driver()
+    model, tokenizer, args, example = stack
+
+    prefix, skip = HH._build_c2kv_prefix(model, tokenizer, example, args)
+    assert skip is None, skip
+    expected_phys = prefix["cache"].get_seq_length()
+    snapshot = _StubCache([
+        _StubLayer(layer.keys.clone(), layer.values.clone())
+        for layer in prefix["cache"].layers
+    ])
+
+    metrics = HH._generate_with_prefix(model, tokenizer, example, prefix, args, "c2kv")
+    # HF generate never forwards the last sampled token.
+    assert prefix["cache"].get_seq_length() == (
+        expected_phys + metrics["prompt_tokens"] + metrics["generated_tokens"] - 1
+    )
+    D._crop_cache(prefix["cache"], expected_phys)
+    _assert_cache_equal(prefix["cache"], snapshot, "cropped cache vs pre-generation clone")
+
+
+def test_downstream_teacher_forces_gold_not_prediction(stack, monkeypatch):
+    """Blocks are pure functions of the two frozen examples: two runs whose
+    model output differs produce identical block ids and identical
+    post-append caches, and the block carries the gold assistant text."""
+    HH = _harness()
+    D = _driver()
+    model, tokenizer, args, _ = stack
+    prev, mid, _last = _downstream_session()
+
+    def _fake_gen(prediction):
+        def fake(model_, tokenizer_, *, input_ids, max_new_tokens, attn_impl,
+                 use_gist=False, position_ids=None, past_key_values=None,
+                 do_sample=False, temperature=None, top_p=None):
+            prompt_len = input_ids.shape[1] - past_key_values.get_seq_length()
+            generated_tokens = 2
+            grow = prompt_len + generated_tokens - 1  # generate's cache contract
+            for layer in past_key_values.layers:
+                shape = list(layer.keys.shape)
+                shape[-2] = grow
+                layer.keys = torch.cat(
+                    [layer.keys, torch.zeros(shape, dtype=layer.keys.dtype)], dim=-2
+                )
+                layer.values = torch.cat(
+                    [layer.values, torch.zeros(shape, dtype=layer.values.dtype)], dim=-2
+                )
+            return prediction, 0.0, generated_tokens, 0.0
+        return fake
+
+    def _run(prediction):
+        prefix, skip = HH._build_c2kv_prefix(model, tokenizer, prev, args)
+        assert skip is None, skip
+        monkeypatch.setattr(HH, "_generate_from_input_ids", _fake_gen(prediction))
+        rows = D._downstream_rows(
+            model, tokenizer, prefix, prev, [mid], args, _downstream_args(1), "c2kv", {}
+        )
+        return rows, prefix
+
+    rows_a, prefix_a = _run("alpha alpha alpha")
+    rows_b, prefix_b = _run("beta")
+    assert rows_a[0]["prediction"] == "alpha alpha alpha"
+    assert rows_b[0]["prediction"] == "beta"
+    assert rows_a[0]["d_ds_block_tokens"] == rows_b[0]["d_ds_block_tokens"]
+    phys = rows_a[0]["d_ds_cache_tokens"]
+    assert rows_b[0]["d_ds_cache_tokens"] == phys
+    for layer_a, layer_b in zip(prefix_a["cache"].layers, prefix_b["cache"].layers):
+        assert torch.equal(layer_a.keys[..., :phys, :], layer_b.keys[..., :phys, :])
+        assert torch.equal(layer_a.values[..., :phys, :], layer_b.values[..., :phys, :])
+
+    block, skip = D._continuation_block(prev, mid)
+    assert skip is None
+    decoded = tokenizer.decode(HH._chat_template_ids(tokenizer, block), skip_special_tokens=False)
+    assert "downwind along the resultant direction" in decoded
+
+
+def test_downstream_stale_target_override_dropped(stack):
+    """A target_override left on the prefix by any builder must never reach
+    the continuation scoring: _downstream_rows pops it, so every t*+j row
+    scores against later[j-1].answer through the real _generate_with_prefix
+    fallback."""
+    HH = _harness()
+    D = _driver()
+    model, tokenizer, args, _ = stack
+    prev, mid, _last = _downstream_session()
+
+    prefix, skip = HH._build_c2kv_prefix(model, tokenizer, prev, args)
+    assert skip is None, skip
+    prefix["target_override"] = "stale override from t*"
+    rows = D._downstream_rows(
+        model, tokenizer, prefix, prev, [mid], args, _downstream_args(1), "c2kv", {}
+    )
+    assert [row["d_turn_offset"] for row in rows] == [1]
+    assert not rows[0].get("skipped")
+    assert rows[0]["target"] == mid.answer
+    assert rows[0]["target"] != "stale override from t*"
+    assert "target_override" not in prefix
+
+
+def test_crop_cache_fallback_slices_stub_cache():
+    """The per-layer slice fallback (live only when a cache ships no crop —
+    the branch that becomes production on a transformers bump) must slice
+    exactly like the hand slice, keys and values both."""
+    D = _driver()
+    torch.manual_seed(3)
+    keys = torch.randn(1, 2, 9, 8)
+    values = torch.randn(1, 2, 9, 8)
+    cache = _StubCache([_StubLayer(keys.clone(), values.clone())])
+    assert not callable(getattr(cache, "crop", None)), "fixture must lack crop"
+    D._crop_cache(cache, 6)
+    expected = _StubCache(
+        [_StubLayer(keys[..., :6, :].clone(), values[..., :6, :].clone())]
+    )
+    _assert_cache_equal(cache, expected, "fallback crop vs hand slice")
+    assert cache.get_seq_length() == 6
+
+
+def test_generate_one_return_state_default_inert(stack):
+    HH = _harness()
+    model, tokenizer, args, example = stack
+
+    plain = HH._generate_one(model, tokenizer, example, args, "c2kv")
+    assert isinstance(plain, dict)
+
+    row, prefix = HH._generate_one(model, tokenizer, example, args, "c2kv", return_state=True)
+    assert prefix is not None and "cache" in prefix
+
+    def _stable(item):
+        # wall-clock fields differ between two live invocations by construction
+        return {key: value for key, value in item.items() if not key.endswith("_sec")}
+
+    assert _stable(row) == _stable(plain)
+
+    # skip path returns (row, None)
+    from train.train_data_multiturn import CompressHistoryExample  # noqa: PLC0415
+
+    empty = CompressHistoryExample(
+        qid="dune:0",
+        history_messages=[],
+        current_messages=[{"role": "user", "content": "anything"}],
+        answer="x",
+        system_prompt="s",
+        tools=[],
+    )
+    skipped, none_prefix = HH._generate_one(model, tokenizer, empty, args, "c2kv", return_state=True)
+    assert skipped["skipped"] is True
+    assert none_prefix is None
+
+
+def test_continuation_block_prologue_guard(stack):
+    """Templating a mid-conversation block must yield ids prefixed by the ids
+    of its first message alone; a template that injects a system header trips
+    the hard assert (implementation-invalid, not a counted skip)."""
+    HH = _harness()
+    D = _driver()
+    model, tokenizer, args, _ = stack
+    prev, mid, _last = _downstream_session()
+
+    block, skip = D._continuation_block(prev, mid)
+    assert skip is None and block
+    ids_full = HH._chat_template_ids(tokenizer, block)
+    ids_first = HH._chat_template_ids(tokenizer, block[:1])
+    assert ids_full[: len(ids_first)] == ids_first
+
+    class _PrologueInjectingTokenizer:
+        """Chat template that prepends a header to multi-message fragments —
+        the failure mode the in-loop assert exists to catch."""
+
+        def __init__(self, inner):
+            object.__setattr__(self, "_inner", inner)
+
+        def __getattr__(self, item):
+            return getattr(object.__getattribute__(self, "_inner"), item)
+
+        def apply_chat_template(self, messages, **kwargs):
+            inner = object.__getattribute__(self, "_inner")
+            ids = inner.apply_chat_template(messages, **kwargs)
+            if len(list(messages)) > 1:
+                return inner.encode("<|im_start|>system injected <|im_end|>") + ids
+            return ids
+
+    prefix, skip = HH._build_c2kv_prefix(model, tokenizer, prev, args)
+    assert skip is None, skip
+    with pytest.raises(AssertionError, match="prologue"):
+        D._downstream_rows(
+            model,
+            _PrologueInjectingTokenizer(tokenizer),
+            prefix,
+            prev,
+            [mid],
+            args,
+            _downstream_args(1),
+            "c2kv",
+            {},
+        )
