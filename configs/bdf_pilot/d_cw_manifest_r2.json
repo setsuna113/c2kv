@@ -1,0 +1,172 @@
+{
+  "description": "Frozen C->W trigger manifest for the task-D pilot. n_base_paired is the level-1 denominator (qids scoreable in BOTH arms).",
+  "rule_version": "d_cw_v1",
+  "batch": "batch-TF-r2",
+  "s_metric": "tool_name_match",
+  "trigger_source": "oracle",
+  "kv_recipe": {
+    "ckpt_path": "/home/liuyancheng/c2kv/outputs_lyc/g_joint/fixed_joint",
+    "model_sha": "669502d350350342d51e85bd01d934e377566bafc78d0567ad158ea465e1ca7b",
+    "eval_code_sha": "f84dc74f54ed5b79b733564c792bd28d2454c28b",
+    "ratio": 8,
+    "chunk_policy": "pilot_v1",
+    "seed": 20260815,
+    "decode": "greedy",
+    "max_doc_length": 768,
+    "max_doc_num": 16
+  },
+  "source_dialects": {
+    "history": 1800
+  },
+  "sources": {
+    "full_rows": [
+      {
+        "path": "/home/liuyancheng/c2kv/outputs_lyc/g_joint/bdf/d_r2/battery_full.jsonl",
+        "sha256": "849347b460358eea116f8a27724d9449a6409a2ad8586582a1ea7c5647895028"
+      }
+    ],
+    "compressed_rows": [
+      {
+        "path": "/home/liuyancheng/c2kv/outputs_lyc/g_joint/bdf/d_r2/battery_c2kv.jsonl",
+        "sha256": "c52563099458bd4028309252e0abc32943d8781a67da40e8387ddec8cd25e26c"
+      }
+    ],
+    "full_condition": null,
+    "compressed_condition": null,
+    "full_load": {
+      "files": [
+        "/home/liuyancheng/c2kv/outputs_lyc/g_joint/bdf/d_r2/battery_full.jsonl"
+      ],
+      "condition": null,
+      "n_rows": 900,
+      "n_skipped": 0,
+      "n_condition_filtered": 0,
+      "dialects": {
+        "history": 900
+      }
+    },
+    "compressed_load": {
+      "files": [
+        "/home/liuyancheng/c2kv/outputs_lyc/g_joint/bdf/d_r2/battery_c2kv.jsonl"
+      ],
+      "condition": null,
+      "n_rows": 900,
+      "n_skipped": 0,
+      "n_condition_filtered": 0,
+      "dialects": {
+        "history": 900
+      }
+    }
+  },
+  "n_base_paired": 900,
+  "transitions": {
+    "C->C": 68,
+    "C->W": 93,
+    "W->C": 120,
+    "W->W": 619
+  },
+  "harness_divergence": {
+    "n_metric_disagreements": 0,
+    "n_call_disagreements": 0
+  },
+  "n_cw": 93,
+  "cw_qids": [
+    "0c890a5dde8c_12dc86e7:8",
+    "0c890a5dde8c_c4d290c5:4",
+    "0c890a5dde8c_ebac8eab:16",
+    "10d642ac9c10_085f0768:8",
+    "10d642ac9c10_4f13ce12:12",
+    "10d642ac9c10_535ae546:7",
+    "10d642ac9c10_89206737:3",
+    "10d642ac9c10_ba73f52d:11",
+    "15bb4bab2031_3bc535d7:29",
+    "15bb4bab2031_a3ac2dd4:6",
+    "1861edacc01c_8413bbcc:23",
+    "1861edacc01c_c9c8ce14:11",
+    "1861edacc01c_c9c8ce14:17",
+    "18b5978679fb_8419955d:5",
+    "18b5978679fb_b62a7b4f:39",
+    "1bafd96e8923_3560d7f9:2",
+    "1bafd96e8923_de668d42:3",
+    "1bafd96e8923_f0f2747b:16",
+    "1bafd96e8923_f0f2747b:17",
+    "24347bbedbb0_e293a74a:55",
+    "24347bbedbb0_f0695cdf:11",
+    "2a21e94e0687_0f5ba78c:12",
+    "2a21e94e0687_0f5ba78c:15",
+    "2a21e94e0687_3bdda2e7:8",
+    "2a21e94e0687_b734292f:10",
+    "2a21e94e0687_d3ce1db1:9",
+    "2b035779e4f9_b27d0d58:2",
+    "33b8f9e350cf_05148b9c:9",
+    "33b8f9e350cf_25815bf6:2",
+    "33b8f9e350cf_25815bf6:6",
+    "33b8f9e350cf_b13d2558:4",
+    "33b8f9e350cf_b5b26346:10",
+    "33b8f9e350cf_b5b26346:9",
+    "33b8f9e350cf_e387ca3b:29",
+    "379733137f5d_05583758:4",
+    "379733137f5d_0bbbfc38:7",
+    "379733137f5d_0f729ba3:2",
+    "379733137f5d_18f7e5cb:4",
+    "379733137f5d_ece17a61:3",
+    "39f6781fd774_0700d34f:1",
+    "39f6781fd774_0f76017d:4",
+    "39f6781fd774_0f76017d:6",
+    "39f6781fd774_2140ef43:4",
+    "39f6781fd774_21434cf8:1",
+    "39f6781fd774_21434cf8:7",
+    "39f6781fd774_48ec7fe3:1",
+    "39f6781fd774_48ec7fe3:2",
+    "39f6781fd774_559fb693:10",
+    "39f6781fd774_559fb693:15",
+    "39f6781fd774_75c29c1d:1",
+    "39f6781fd774_79248acd:1",
+    "39f6781fd774_79248acd:10",
+    "39f6781fd774_871064a0:2",
+    "39f6781fd774_a3032232:1",
+    "39f6781fd774_b09911cf:1",
+    "4fad8197a4ef_97f84dd8:10",
+    "4fad8197a4ef_97f84dd8:38",
+    "56c19f19c4f2_c240d17d:3",
+    "8eafd208fd5d_002d69b6:1",
+    "8eafd208fd5d_002d69b6:11",
+    "8eafd208fd5d_0eb5b36a:29",
+    "8eafd208fd5d_0eb5b36a:5",
+    "8eafd208fd5d_479c93c0:6",
+    "8eafd208fd5d_9fa29cd8:5",
+    "8eafd208fd5d_fb52e1ce:10",
+    "8eafd208fd5d_fb52e1ce:27",
+    "8eafd208fd5d_fb52e1ce:32",
+    "8eafd208fd5d_fb52e1ce:9",
+    "a45d2c09567a_344ed9b0:5",
+    "a45d2c09567a_344ed9b0:6",
+    "a45d2c09567a_42e3637f:2",
+    "a45d2c09567a_9ad55a9e:3",
+    "a45d2c09567a_c794536b:7",
+    "a45d2c09567a_c794536b:8",
+    "a45d2c09567a_f2b8f831:14",
+    "a45d2c09567a_f2b8f831:6",
+    "ac0f039f4468_0e7a17fd:1",
+    "b455f37f04c7_08958bbb:1",
+    "b455f37f04c7_0ee66cf1:7",
+    "b455f37f04c7_263e5d47:1",
+    "b455f37f04c7_263e5d47:4",
+    "b455f37f04c7_714ea5fe:37",
+    "c351b7150104_20ab4895:1",
+    "c351b7150104_2ae20927:1",
+    "c351b7150104_3e5e7863:2",
+    "c351b7150104_5ffa4738:1",
+    "c351b7150104_7443b665:1",
+    "c351b7150104_bc4b9c45:1",
+    "c351b7150104_fbfdc6d0:1",
+    "cfc3d70e7f3c_790b34c5:5",
+    "ebba346cd20a_0e3e5e0b:15",
+    "ebba346cd20a_0e3e5e0b:4",
+    "ebba346cd20a_274cb65a:1"
+  ],
+  "bundles_file": "results/d/bundles_batch_tf_r2.jsonl",
+  "bundles_sha256": "ae234abec4bdb62047ab1b3a6e1ff32ba79a6ddc3b550806cfb738519940caf9",
+  "doc_binding": "bound",
+  "doc_ids_table": "results/d/d_doc_ids_r2.json"
+}

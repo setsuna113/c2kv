@@ -1,0 +1,269 @@
+ASCEND_RT_VISIBLE_DEVICES=0
+PHASE=arms
+MODEL_PATH=/home/liuyancheng/c2kv/outputs_lyc/g_joint/fixed_joint
+BASE_MODEL=/home/liuyancheng/c2kv/models/Qwen3-4B-Instruct-2507
+TOKENIZER_PATH=/home/liuyancheng/c2kv/models/Qwen3-4B-Instruct-2507
+DATASET_PATH=/home/liuyancheng/c2kv/datasets/agent-llm-traces-v2
+OUT_DIR=/home/liuyancheng/c2kv/outputs_lyc/g_joint/bdf/d_pilot
+MANIFEST=./configs/bdf_pilot/d_cw_manifest.json
+BUNDLES=./results/d/bundles_batch_tf.jsonl
+SHAM_PLAN=./configs/bdf_pilot/d_sham_plan.json
+BATTERY_NONE_ROWS=/home/liuyancheng/c2kv/outputs_lyc/g_joint/bdf_d_battery_c2kv.jsonl
+BATTERY_FULL_ROWS=/home/liuyancheng/c2kv/outputs_lyc/g_joint/bdf_d_battery_full.jsonl
+SPLIT_MANIFEST_FILE=
+RATIO=8
+ARMS=sham,corr,corr_re
+VERIFY_QIDS=5
+RUN_CORR_ALL=1
+RESUME=True
+[arms] smoke marker:
+model=/home/liuyancheng/c2kv/outputs_lyc/g_joint/fixed_joint
+manifest=./configs/bdf_pilot/d_cw_manifest.json
+manifest_sha256=c91c6e35184221dacf37353ba87fc944ec704f753c98acfcdc54ab49472a46b1
+full_sentinel=run
+[run] arm=sham -> /home/liuyancheng/c2kv/outputs_lyc/g_joint/bdf/d_pilot/d_sham.jsonl
+/home/liuyancheng/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/liuyancheng/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0/aarch64-linux/ascend_ops_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/liuyancheng/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/liuyancheng/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0/aarch64-linux/ascend_ops_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+08/23/2026 08:04:10 - INFO - d_kv_intervene - arm=sham mode=d_sham_neutral qids=20 manifest_sha=c91c6e35184221da… plan_sha=388677659bcb8c72
+08/23/2026 08:04:10 - INFO - eval_agent_history_c2kv - Loading tokenizer from /home/liuyancheng/c2kv/models/Qwen3-4B-Instruct-2507 use_fast=True
+08/23/2026 08:21:22 - INFO - d_kv_intervene - source: 3586 examples, selection_skips={}
+08/23/2026 08:21:24 - INFO - d_kv_intervene - Loading model /home/liuyancheng/c2kv/outputs_lyc/g_joint/fixed_joint (mode=c2kv, attn=eager)
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+Loading weights:   0%|          | 0/507 [00:00<?, ?it/s]Loading weights:  15%|█▍        | 76/507 [00:00<00:00, 754.17it/s]Loading weights:  30%|██▉       | 152/507 [00:00<00:00, 602.28it/s]Loading weights:  45%|████▍     | 228/507 [00:00<00:00, 657.18it/s]Loading weights:  59%|█████▉    | 298/507 [00:00<00:00, 666.44it/s]Loading weights:  73%|███████▎  | 368/507 [00:00<00:00, 677.10it/s]Loading weights:  89%|████████▉ | 452/507 [00:00<00:00, 720.73it/s]Loading weights: 100%|██████████| 507/507 [00:00<00:00, 690.90it/s]
+08/23/2026 08:21:26 - INFO - d_kv_intervene - runtime attn impl=eager
+08/23/2026 08:21:44 - INFO - d_kv_intervene - [1/20] qid=0c890a5dde8c_12dc86e7:8 tool_name_match=False corr_tokens=0 sham_tokens=203 recompute=0 cache_tokens=4534 wall=18.0s
+08/23/2026 08:22:02 - INFO - d_kv_intervene - [2/20] qid=0c890a5dde8c_c4d290c5:4 tool_name_match=False corr_tokens=0 sham_tokens=486 recompute=0 cache_tokens=4725 wall=16.6s
+08/23/2026 08:22:15 - INFO - d_kv_intervene - [3/20] qid=0c890a5dde8c_ebac8eab:16 tool_name_match=False corr_tokens=0 sham_tokens=221 recompute=0 cache_tokens=4951 wall=12.4s
+08/23/2026 08:22:35 - INFO - d_kv_intervene - [4/20] qid=2a21e94e0687_0f5ba78c:12 tool_name_match=False corr_tokens=0 sham_tokens=386 recompute=0 cache_tokens=5290 wall=19.6s
+08/23/2026 08:22:58 - INFO - d_kv_intervene - [5/20] qid=2a21e94e0687_0f5ba78c:15 tool_name_match=False corr_tokens=0 sham_tokens=148 recompute=0 cache_tokens=5051 wall=21.9s
+08/23/2026 08:23:08 - INFO - d_kv_intervene - [6/20] qid=2a21e94e0687_b734292f:10 tool_name_match=False corr_tokens=0 sham_tokens=144 recompute=0 cache_tokens=4552 wall=9.3s
+08/23/2026 08:23:26 - INFO - d_kv_intervene - [7/20] qid=2a21e94e0687_d3ce1db1:9 tool_name_match=False corr_tokens=0 sham_tokens=273 recompute=0 cache_tokens=4754 wall=17.3s
+08/23/2026 08:23:45 - INFO - d_kv_intervene - [8/20] qid=a45d2c09567a_344ed9b0:5 tool_name_match=False corr_tokens=0 sham_tokens=246 recompute=0 cache_tokens=4549 wall=18.0s
+08/23/2026 08:23:58 - INFO - d_kv_intervene - [9/20] qid=a45d2c09567a_344ed9b0:6 tool_name_match=False corr_tokens=0 sham_tokens=246 recompute=0 cache_tokens=4581 wall=11.8s
+08/23/2026 08:24:21 - INFO - d_kv_intervene - [10/20] qid=a45d2c09567a_42e3637f:2 tool_name_match=False corr_tokens=0 sham_tokens=92 recompute=0 cache_tokens=4266 wall=21.8s
+08/23/2026 08:24:31 - INFO - d_kv_intervene - [11/20] qid=a45d2c09567a_9ad55a9e:3 tool_name_match=False corr_tokens=0 sham_tokens=522 recompute=0 cache_tokens=4756 wall=8.5s
+08/23/2026 08:24:43 - INFO - d_kv_intervene - [12/20] qid=a45d2c09567a_c794536b:7 tool_name_match=False corr_tokens=0 sham_tokens=757 recompute=0 cache_tokens=5601 wall=10.4s
+08/23/2026 08:25:05 - INFO - d_kv_intervene - [13/20] qid=a45d2c09567a_c794536b:8 tool_name_match=False corr_tokens=0 sham_tokens=180 recompute=0 cache_tokens=5051 wall=21.4s
+08/23/2026 08:25:26 - INFO - d_kv_intervene - [14/20] qid=a45d2c09567a_f2b8f831:14 tool_name_match=False corr_tokens=0 sham_tokens=315 recompute=0 cache_tokens=5095 wall=20.8s
+08/23/2026 08:25:47 - INFO - d_kv_intervene - [15/20] qid=a45d2c09567a_f2b8f831:6 tool_name_match=True corr_tokens=0 sham_tokens=757 recompute=0 cache_tokens=5436 wall=20.6s
+08/23/2026 08:26:06 - INFO - d_kv_intervene - [16/20] qid=b455f37f04c7_08958bbb:1 tool_name_match=True corr_tokens=0 sham_tokens=140 recompute=0 cache_tokens=4254 wall=17.7s
+08/23/2026 08:26:25 - INFO - d_kv_intervene - [17/20] qid=b455f37f04c7_0ee66cf1:7 tool_name_match=False corr_tokens=0 sham_tokens=107 recompute=0 cache_tokens=4427 wall=18.1s
+08/23/2026 08:26:45 - INFO - d_kv_intervene - [18/20] qid=b455f37f04c7_263e5d47:1 tool_name_match=False corr_tokens=0 sham_tokens=143 recompute=0 cache_tokens=4263 wall=19.5s
+08/23/2026 08:26:56 - INFO - d_kv_intervene - [19/20] qid=b455f37f04c7_263e5d47:4 tool_name_match=False corr_tokens=0 sham_tokens=339 recompute=0 cache_tokens=4992 wall=10.1s
+08/23/2026 08:27:17 - INFO - d_kv_intervene - [20/20] qid=b455f37f04c7_714ea5fe:37 tool_name_match=True corr_tokens=0 sham_tokens=762 recompute=0 cache_tokens=3204 wall=19.5s
+08/23/2026 08:27:17 - INFO - d_kv_intervene - Done. wrote 20 rows -> /home/liuyancheng/c2kv/outputs_lyc/g_joint/bdf/d_pilot/d_sham.jsonl
+[run] arm=corr -> /home/liuyancheng/c2kv/outputs_lyc/g_joint/bdf/d_pilot/d_corr.jsonl
+/home/liuyancheng/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/liuyancheng/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0/aarch64-linux/ascend_ops_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/liuyancheng/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/liuyancheng/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0/aarch64-linux/ascend_ops_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+08/23/2026 08:27:40 - INFO - d_kv_intervene - arm=corr mode=d_corr qids=20 manifest_sha=c91c6e35184221da… plan_sha=388677659bcb8c72
+08/23/2026 08:27:40 - INFO - eval_agent_history_c2kv - Loading tokenizer from /home/liuyancheng/c2kv/models/Qwen3-4B-Instruct-2507 use_fast=True
+08/23/2026 08:44:15 - INFO - d_kv_intervene - source: 3586 examples, selection_skips={}
+08/23/2026 08:44:16 - INFO - d_kv_intervene - Loading model /home/liuyancheng/c2kv/outputs_lyc/g_joint/fixed_joint (mode=c2kv, attn=eager)
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+Loading weights:   0%|          | 0/507 [00:00<?, ?it/s]Loading weights:  15%|█▍        | 74/507 [00:00<00:00, 731.73it/s]Loading weights:  29%|██▉       | 148/507 [00:00<00:00, 593.93it/s]Loading weights:  45%|████▍     | 228/507 [00:00<00:00, 668.30it/s]Loading weights:  61%|██████    | 309/507 [00:00<00:00, 717.10it/s]Loading weights:  76%|███████▌  | 383/507 [00:00<00:00, 719.05it/s]Loading weights:  92%|█████████▏| 466/507 [00:00<00:00, 751.78it/s]Loading weights: 100%|██████████| 507/507 [00:00<00:00, 705.58it/s]
+08/23/2026 08:44:18 - INFO - d_kv_intervene - runtime attn impl=eager
+08/23/2026 08:44:28 - INFO - d_kv_intervene - [1/20] qid=0c890a5dde8c_12dc86e7:8 tool_name_match=False corr_tokens=203 sham_tokens=0 recompute=0 cache_tokens=4534 wall=9.7s
+08/23/2026 08:44:37 - INFO - d_kv_intervene - [2/20] qid=0c890a5dde8c_c4d290c5:4 tool_name_match=False corr_tokens=486 sham_tokens=0 recompute=0 cache_tokens=4725 wall=8.1s
+08/23/2026 08:44:56 - INFO - d_kv_intervene - [3/20] qid=0c890a5dde8c_ebac8eab:16 tool_name_match=True corr_tokens=221 sham_tokens=0 recompute=0 cache_tokens=4951 wall=18.4s
+08/23/2026 08:45:17 - INFO - d_kv_intervene - [4/20] qid=2a21e94e0687_0f5ba78c:12 tool_name_match=False corr_tokens=386 sham_tokens=0 recompute=0 cache_tokens=5290 wall=20.1s
+08/23/2026 08:45:41 - INFO - d_kv_intervene - [5/20] qid=2a21e94e0687_0f5ba78c:15 tool_name_match=False corr_tokens=148 sham_tokens=0 recompute=0 cache_tokens=5051 wall=23.4s
+08/23/2026 08:45:53 - INFO - d_kv_intervene - [6/20] qid=2a21e94e0687_b734292f:10 tool_name_match=False corr_tokens=144 sham_tokens=0 recompute=0 cache_tokens=4552 wall=11.5s
+08/23/2026 08:46:15 - INFO - d_kv_intervene - [7/20] qid=2a21e94e0687_d3ce1db1:9 tool_name_match=False corr_tokens=273 sham_tokens=0 recompute=0 cache_tokens=4754 wall=21.9s
+08/23/2026 08:46:37 - INFO - d_kv_intervene - [8/20] qid=a45d2c09567a_344ed9b0:5 tool_name_match=False corr_tokens=246 sham_tokens=0 recompute=0 cache_tokens=4549 wall=20.5s
+08/23/2026 08:46:59 - INFO - d_kv_intervene - [9/20] qid=a45d2c09567a_344ed9b0:6 tool_name_match=False corr_tokens=246 sham_tokens=0 recompute=0 cache_tokens=4581 wall=21.9s
+08/23/2026 08:47:10 - INFO - d_kv_intervene - [10/20] qid=a45d2c09567a_42e3637f:2 tool_name_match=True corr_tokens=92 sham_tokens=0 recompute=0 cache_tokens=4266 wall=10.4s
+08/23/2026 08:47:21 - INFO - d_kv_intervene - [11/20] qid=a45d2c09567a_9ad55a9e:3 tool_name_match=False corr_tokens=522 sham_tokens=0 recompute=0 cache_tokens=4756 wall=10.1s
+08/23/2026 08:47:44 - INFO - d_kv_intervene - [12/20] qid=a45d2c09567a_c794536b:7 tool_name_match=False corr_tokens=757 sham_tokens=0 recompute=0 cache_tokens=5601 wall=22.6s
+08/23/2026 08:48:06 - INFO - d_kv_intervene - [13/20] qid=a45d2c09567a_c794536b:8 tool_name_match=False corr_tokens=180 sham_tokens=0 recompute=0 cache_tokens=5051 wall=21.9s
+08/23/2026 08:48:31 - INFO - d_kv_intervene - [14/20] qid=a45d2c09567a_f2b8f831:14 tool_name_match=False corr_tokens=315 sham_tokens=0 recompute=0 cache_tokens=5095 wall=23.7s
+08/23/2026 08:48:55 - INFO - d_kv_intervene - [15/20] qid=a45d2c09567a_f2b8f831:6 tool_name_match=False corr_tokens=757 sham_tokens=0 recompute=0 cache_tokens=5436 wall=23.1s
+08/23/2026 08:49:08 - INFO - d_kv_intervene - [16/20] qid=b455f37f04c7_08958bbb:1 tool_name_match=True corr_tokens=140 sham_tokens=0 recompute=0 cache_tokens=4254 wall=12.4s
+08/23/2026 08:49:28 - INFO - d_kv_intervene - [17/20] qid=b455f37f04c7_0ee66cf1:7 tool_name_match=False corr_tokens=107 sham_tokens=0 recompute=0 cache_tokens=4427 wall=19.6s
+08/23/2026 08:49:41 - INFO - d_kv_intervene - [18/20] qid=b455f37f04c7_263e5d47:1 tool_name_match=True corr_tokens=143 sham_tokens=0 recompute=0 cache_tokens=4263 wall=12.1s
+08/23/2026 08:49:54 - INFO - d_kv_intervene - [19/20] qid=b455f37f04c7_263e5d47:4 tool_name_match=False corr_tokens=339 sham_tokens=0 recompute=0 cache_tokens=4992 wall=11.6s
+08/23/2026 08:50:15 - INFO - d_kv_intervene - [20/20] qid=b455f37f04c7_714ea5fe:37 tool_name_match=True corr_tokens=762 sham_tokens=0 recompute=0 cache_tokens=3204 wall=21.1s
+08/23/2026 08:50:16 - INFO - d_kv_intervene - Done. wrote 20 rows -> /home/liuyancheng/c2kv/outputs_lyc/g_joint/bdf/d_pilot/d_corr.jsonl
+[run] arm=corr_re -> /home/liuyancheng/c2kv/outputs_lyc/g_joint/bdf/d_pilot/d_corr_re.jsonl
+/home/liuyancheng/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/liuyancheng/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0/aarch64-linux/ascend_ops_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/liuyancheng/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/liuyancheng/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0/aarch64-linux/ascend_ops_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+08/23/2026 08:50:38 - INFO - d_kv_intervene - arm=corr_re mode=d_corr_recompute qids=20 manifest_sha=c91c6e35184221da… plan_sha=388677659bcb8c72
+08/23/2026 08:50:38 - INFO - eval_agent_history_c2kv - Loading tokenizer from /home/liuyancheng/c2kv/models/Qwen3-4B-Instruct-2507 use_fast=True
+08/23/2026 09:07:06 - INFO - d_kv_intervene - source: 3586 examples, selection_skips={}
+08/23/2026 09:07:08 - INFO - d_kv_intervene - Loading model /home/liuyancheng/c2kv/outputs_lyc/g_joint/fixed_joint (mode=c2kv, attn=eager)
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+Loading weights:   0%|          | 0/507 [00:00<?, ?it/s]Loading weights:  16%|█▌        | 82/507 [00:00<00:00, 815.94it/s]Loading weights:  32%|███▏      | 164/507 [00:00<00:00, 633.26it/s]Loading weights:  48%|████▊     | 242/507 [00:00<00:00, 686.13it/s]Loading weights:  62%|██████▏   | 313/507 [00:00<00:00, 688.87it/s]Loading weights:  76%|███████▌  | 384/507 [00:00<00:00, 695.39it/s]Loading weights:  92%|█████████▏| 467/507 [00:00<00:00, 738.51it/s]Loading weights: 100%|██████████| 507/507 [00:00<00:00, 704.26it/s]
+08/23/2026 09:07:10 - INFO - d_kv_intervene - runtime attn impl=eager
+08/23/2026 09:07:29 - INFO - d_kv_intervene - [1/20] qid=0c890a5dde8c_12dc86e7:8 tool_name_match=True corr_tokens=203 sham_tokens=0 recompute=1083 cache_tokens=5481 wall=19.0s
+08/23/2026 09:07:47 - INFO - d_kv_intervene - [2/20] qid=0c890a5dde8c_c4d290c5:4 tool_name_match=True corr_tokens=486 sham_tokens=0 recompute=566 cache_tokens=5220 wall=17.1s
+08/23/2026 09:08:10 - INFO - d_kv_intervene - [3/20] qid=0c890a5dde8c_ebac8eab:16 tool_name_match=True corr_tokens=221 sham_tokens=0 recompute=2479 cache_tokens=7116 wall=22.0s
+08/23/2026 09:08:36 - INFO - d_kv_intervene - [4/20] qid=2a21e94e0687_0f5ba78c:12 tool_name_match=True corr_tokens=386 sham_tokens=0 recompute=3088 cache_tokens=7990 wall=26.0s
+08/23/2026 09:09:03 - INFO - d_kv_intervene - [5/20] qid=2a21e94e0687_0f5ba78c:15 tool_name_match=True corr_tokens=148 sham_tokens=0 recompute=3124 cache_tokens=7782 wall=25.6s
+08/23/2026 09:09:15 - INFO - d_kv_intervene - [6/20] qid=2a21e94e0687_b734292f:10 tool_name_match=False corr_tokens=144 sham_tokens=0 recompute=1163 cache_tokens=5569 wall=11.7s
+08/23/2026 09:09:38 - INFO - d_kv_intervene - [7/20] qid=2a21e94e0687_d3ce1db1:9 tool_name_match=False corr_tokens=273 sham_tokens=0 recompute=1051 cache_tokens=5672 wall=22.8s
+08/23/2026 09:09:59 - INFO - d_kv_intervene - [8/20] qid=a45d2c09567a_344ed9b0:5 tool_name_match=True corr_tokens=246 sham_tokens=0 recompute=665 cache_tokens=5130 wall=19.8s
+08/23/2026 09:10:22 - INFO - d_kv_intervene - [9/20] qid=a45d2c09567a_344ed9b0:6 tool_name_match=False corr_tokens=246 sham_tokens=0 recompute=921 cache_tokens=5386 wall=22.6s
+08/23/2026 09:10:35 - INFO - d_kv_intervene - [10/20] qid=a45d2c09567a_42e3637f:2 tool_name_match=True corr_tokens=92 sham_tokens=0 recompute=521 cache_tokens=4721 wall=12.2s
+08/23/2026 09:10:55 - INFO - d_kv_intervene - [11/20] qid=a45d2c09567a_9ad55a9e:3 tool_name_match=True corr_tokens=522 sham_tokens=0 recompute=429 cache_tokens=5131 wall=20.0s
+08/23/2026 09:11:21 - INFO - d_kv_intervene - [12/20] qid=a45d2c09567a_c794536b:7 tool_name_match=True corr_tokens=757 sham_tokens=0 recompute=2926 cache_tokens=8158 wall=25.0s
+08/23/2026 09:11:47 - INFO - d_kv_intervene - [13/20] qid=a45d2c09567a_c794536b:8 tool_name_match=True corr_tokens=180 sham_tokens=0 recompute=3183 cache_tokens=7833 wall=25.2s
+08/23/2026 09:12:13 - INFO - d_kv_intervene - [14/20] qid=a45d2c09567a_f2b8f831:14 tool_name_match=True corr_tokens=315 sham_tokens=0 recompute=1952 cache_tokens=6800 wall=25.0s
+08/23/2026 09:12:37 - INFO - d_kv_intervene - [15/20] qid=a45d2c09567a_f2b8f831:6 tool_name_match=True corr_tokens=757 sham_tokens=0 recompute=2269 cache_tokens=7420 wall=23.6s
+08/23/2026 09:12:49 - INFO - d_kv_intervene - [16/20] qid=b455f37f04c7_08958bbb:1 tool_name_match=True corr_tokens=140 sham_tokens=0 recompute=0 cache_tokens=4254 wall=11.7s
+08/23/2026 09:13:13 - INFO - d_kv_intervene - [17/20] qid=b455f37f04c7_0ee66cf1:7 tool_name_match=False corr_tokens=107 sham_tokens=0 recompute=901 cache_tokens=5213 wall=22.8s
+08/23/2026 09:13:25 - INFO - d_kv_intervene - [18/20] qid=b455f37f04c7_263e5d47:1 tool_name_match=True corr_tokens=143 sham_tokens=0 recompute=48 cache_tokens=4305 wall=12.0s
+08/23/2026 09:13:39 - INFO - d_kv_intervene - [19/20] qid=b455f37f04c7_263e5d47:4 tool_name_match=False corr_tokens=339 sham_tokens=0 recompute=2635 cache_tokens=7294 wall=12.9s
+08/23/2026 09:14:02 - INFO - d_kv_intervene - [20/20] qid=b455f37f04c7_714ea5fe:37 tool_name_match=True corr_tokens=762 sham_tokens=0 recompute=3503 cache_tokens=6267 wall=23.2s
+08/23/2026 09:14:03 - INFO - d_kv_intervene - Done. wrote 20 rows -> /home/liuyancheng/c2kv/outputs_lyc/g_joint/bdf/d_pilot/d_corr_re.jsonl
+[run] arm=corr_all -> /home/liuyancheng/c2kv/outputs_lyc/g_joint/bdf/d_pilot/d_corr_all.jsonl
+/home/liuyancheng/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/liuyancheng/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0/aarch64-linux/ascend_ops_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/liuyancheng/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/liuyancheng/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0/aarch64-linux/ascend_ops_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+08/23/2026 09:14:26 - INFO - d_kv_intervene - arm=corr_all mode=d_corr_all qids=20 manifest_sha=c91c6e35184221da… plan_sha=388677659bcb8c72
+08/23/2026 09:14:26 - INFO - eval_agent_history_c2kv - Loading tokenizer from /home/liuyancheng/c2kv/models/Qwen3-4B-Instruct-2507 use_fast=True
+08/23/2026 09:31:00 - INFO - d_kv_intervene - source: 3586 examples, selection_skips={}
+08/23/2026 09:31:01 - INFO - d_kv_intervene - Loading model /home/liuyancheng/c2kv/outputs_lyc/g_joint/fixed_joint (mode=c2kv, attn=eager)
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+Loading weights:   0%|          | 0/507 [00:00<?, ?it/s]Loading weights:  15%|█▍        | 76/507 [00:00<00:00, 759.71it/s]Loading weights:  30%|██▉       | 152/507 [00:00<00:00, 617.51it/s]Loading weights:  45%|████▍     | 228/507 [00:00<00:00, 669.52it/s]Loading weights:  59%|█████▉    | 299/507 [00:00<00:00, 670.36it/s]Loading weights:  75%|███████▌  | 382/507 [00:00<00:00, 715.56it/s]Loading weights:  92%|█████████▏| 466/507 [00:00<00:00, 751.04it/s]Loading weights: 100%|██████████| 507/507 [00:00<00:00, 707.14it/s]
+08/23/2026 09:31:04 - INFO - d_kv_intervene - runtime attn impl=eager
+08/23/2026 09:31:22 - INFO - d_kv_intervene - [1/20] qid=0c890a5dde8c_12dc86e7:8 tool_name_match=True corr_tokens=1861 sham_tokens=0 recompute=0 cache_tokens=6192 wall=18.0s
+08/23/2026 09:31:38 - INFO - d_kv_intervene - [2/20] qid=0c890a5dde8c_c4d290c5:4 tool_name_match=True corr_tokens=1139 sham_tokens=0 recompute=0 cache_tokens=5378 wall=16.3s
+08/23/2026 09:32:01 - INFO - d_kv_intervene - [3/20] qid=0c890a5dde8c_ebac8eab:16 tool_name_match=True corr_tokens=5014 sham_tokens=0 recompute=0 cache_tokens=9744 wall=21.6s
+08/23/2026 09:32:28 - INFO - d_kv_intervene - [4/20] qid=2a21e94e0687_0f5ba78c:12 tool_name_match=True corr_tokens=6419 sham_tokens=0 recompute=0 cache_tokens=11323 wall=26.3s
+08/23/2026 09:32:54 - INFO - d_kv_intervene - [5/20] qid=2a21e94e0687_0f5ba78c:15 tool_name_match=True corr_tokens=6414 sham_tokens=0 recompute=0 cache_tokens=11317 wall=25.7s
+08/23/2026 09:33:07 - INFO - d_kv_intervene - [6/20] qid=2a21e94e0687_b734292f:10 tool_name_match=True corr_tokens=2479 sham_tokens=0 recompute=0 cache_tokens=6887 wall=12.9s
+08/23/2026 09:33:30 - INFO - d_kv_intervene - [7/20] qid=2a21e94e0687_d3ce1db1:9 tool_name_match=False corr_tokens=3043 sham_tokens=0 recompute=0 cache_tokens=7524 wall=22.2s
+08/23/2026 09:33:51 - INFO - d_kv_intervene - [8/20] qid=a45d2c09567a_344ed9b0:5 tool_name_match=True corr_tokens=1642 sham_tokens=0 recompute=0 cache_tokens=5945 wall=20.7s
+08/23/2026 09:34:14 - INFO - d_kv_intervene - [9/20] qid=a45d2c09567a_344ed9b0:6 tool_name_match=True corr_tokens=1898 sham_tokens=0 recompute=0 cache_tokens=6233 wall=21.8s
+08/23/2026 09:34:25 - INFO - d_kv_intervene - [10/20] qid=a45d2c09567a_42e3637f:2 tool_name_match=True corr_tokens=613 sham_tokens=0 recompute=0 cache_tokens=4787 wall=10.4s
+08/23/2026 09:34:44 - INFO - d_kv_intervene - [11/20] qid=a45d2c09567a_9ad55a9e:3 tool_name_match=True corr_tokens=1089 sham_tokens=0 recompute=0 cache_tokens=5323 wall=18.2s
+08/23/2026 09:35:09 - INFO - d_kv_intervene - [12/20] qid=a45d2c09567a_c794536b:7 tool_name_match=True corr_tokens=5937 sham_tokens=0 recompute=0 cache_tokens=10781 wall=24.4s
+08/23/2026 09:35:34 - INFO - d_kv_intervene - [13/20] qid=a45d2c09567a_c794536b:8 tool_name_match=True corr_tokens=6150 sham_tokens=0 recompute=0 cache_tokens=11021 wall=24.4s
+08/23/2026 09:35:59 - INFO - d_kv_intervene - [14/20] qid=a45d2c09567a_f2b8f831:14 tool_name_match=True corr_tokens=5432 sham_tokens=0 recompute=0 cache_tokens=10212 wall=24.7s
+08/23/2026 09:36:23 - INFO - d_kv_intervene - [15/20] qid=a45d2c09567a_f2b8f831:6 tool_name_match=False corr_tokens=4637 sham_tokens=0 recompute=0 cache_tokens=9316 wall=23.1s
+08/23/2026 09:36:35 - INFO - d_kv_intervene - [16/20] qid=b455f37f04c7_08958bbb:1 tool_name_match=True corr_tokens=140 sham_tokens=0 recompute=0 cache_tokens=4254 wall=11.3s
+08/23/2026 09:36:57 - INFO - d_kv_intervene - [17/20] qid=b455f37f04c7_0ee66cf1:7 tool_name_match=True corr_tokens=1757 sham_tokens=0 recompute=0 cache_tokens=6077 wall=21.7s
+08/23/2026 09:37:09 - INFO - d_kv_intervene - [18/20] qid=b455f37f04c7_263e5d47:1 tool_name_match=True corr_tokens=191 sham_tokens=0 recompute=0 cache_tokens=4311 wall=11.5s
+08/23/2026 09:37:33 - INFO - d_kv_intervene - [19/20] qid=b455f37f04c7_263e5d47:4 tool_name_match=True corr_tokens=4408 sham_tokens=0 recompute=0 cache_tokens=9061 wall=23.2s
+08/23/2026 09:37:57 - INFO - d_kv_intervene - [20/20] qid=b455f37f04c7_714ea5fe:37 tool_name_match=True corr_tokens=6513 sham_tokens=0 recompute=0 cache_tokens=8955 wall=22.9s
+08/23/2026 09:37:57 - INFO - d_kv_intervene - Done. wrote 20 rows -> /home/liuyancheng/c2kv/outputs_lyc/g_joint/bdf/d_pilot/d_corr_all.jsonl
+[verify] arm=none (5 qids)
+/home/liuyancheng/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/liuyancheng/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0/aarch64-linux/ascend_ops_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/liuyancheng/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/liuyancheng/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0/aarch64-linux/ascend_ops_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+08/23/2026 09:38:20 - INFO - d_kv_intervene - arm=none mode=c2kv qids=5 manifest_sha=c91c6e35184221da… plan_sha=none
+08/23/2026 09:38:20 - INFO - eval_agent_history_c2kv - Loading tokenizer from /home/liuyancheng/c2kv/models/Qwen3-4B-Instruct-2507 use_fast=True
+08/23/2026 09:55:12 - INFO - d_kv_intervene - source: 3586 examples, selection_skips={}
+08/23/2026 09:55:14 - INFO - d_kv_intervene - Loading model /home/liuyancheng/c2kv/outputs_lyc/g_joint/fixed_joint (mode=c2kv, attn=eager)
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+Loading weights:   0%|          | 0/507 [00:00<?, ?it/s]Loading weights:  15%|█▍        | 76/507 [00:00<00:00, 753.62it/s]Loading weights:  30%|██▉       | 152/507 [00:00<00:00, 612.33it/s]Loading weights:  45%|████▍     | 228/507 [00:00<00:00, 669.66it/s]Loading weights:  61%|██████    | 310/507 [00:00<00:00, 723.53it/s]Loading weights:  77%|███████▋  | 391/507 [00:00<00:00, 752.38it/s]Loading weights:  94%|█████████▍| 477/507 [00:00<00:00, 787.17it/s]Loading weights: 100%|██████████| 507/507 [00:00<00:00, 720.24it/s]
+08/23/2026 09:55:16 - INFO - d_kv_intervene - runtime attn impl=eager
+08/23/2026 09:55:33 - INFO - d_kv_intervene - [1/5] qid=0c890a5dde8c_12dc86e7:8 tool_name_match=False corr_tokens=None sham_tokens=None recompute=None cache_tokens=4331 wall=17.0s
+08/23/2026 09:55:49 - INFO - d_kv_intervene - [2/5] qid=0c890a5dde8c_c4d290c5:4 tool_name_match=False corr_tokens=None sham_tokens=None recompute=None cache_tokens=4239 wall=15.5s
+08/23/2026 09:55:55 - INFO - d_kv_intervene - [3/5] qid=0c890a5dde8c_ebac8eab:16 tool_name_match=False corr_tokens=None sham_tokens=None recompute=None cache_tokens=4730 wall=5.6s
+08/23/2026 09:56:13 - INFO - d_kv_intervene - [4/5] qid=2a21e94e0687_0f5ba78c:12 tool_name_match=False corr_tokens=None sham_tokens=None recompute=None cache_tokens=4904 wall=16.5s
+08/23/2026 09:56:33 - INFO - d_kv_intervene - [5/5] qid=2a21e94e0687_0f5ba78c:15 tool_name_match=False corr_tokens=None sham_tokens=None recompute=None cache_tokens=4903 wall=19.8s
+08/23/2026 09:56:34 - INFO - d_kv_intervene - Done. wrote 5 rows -> /home/liuyancheng/c2kv/outputs_lyc/g_joint/bdf/d_pilot/verify/d_none.jsonl
+[verify] arm=full (5 qids)
+/home/liuyancheng/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/liuyancheng/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0/aarch64-linux/ascend_ops_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/liuyancheng/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/liuyancheng/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0/aarch64-linux/ascend_ops_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+08/23/2026 09:56:56 - INFO - d_kv_intervene - arm=full mode=full qids=5 manifest_sha=c91c6e35184221da… plan_sha=none
+08/23/2026 09:56:56 - INFO - eval_agent_history_c2kv - Loading tokenizer from /home/liuyancheng/c2kv/models/Qwen3-4B-Instruct-2507 use_fast=True
+08/23/2026 10:14:05 - INFO - d_kv_intervene - source: 3586 examples, selection_skips={}
+08/23/2026 10:14:07 - INFO - d_kv_intervene - Loading model /home/liuyancheng/c2kv/models/Qwen3-4B-Instruct-2507 (mode=full, attn=eager)
+Loading weights:   0%|          | 0/398 [00:00<?, ?it/s]Loading weights:   7%|▋         | 27/398 [00:00<00:01, 269.79it/s]Loading weights:  23%|██▎       | 91/398 [00:00<00:00, 481.08it/s]Loading weights:  39%|███▉      | 157/398 [00:00<00:00, 555.76it/s]Loading weights:  56%|█████▌    | 223/398 [00:00<00:00, 580.84it/s]Loading weights:  73%|███████▎  | 292/398 [00:00<00:00, 619.05it/s]Loading weights:  89%|████████▉ | 355/398 [00:00<00:00, 605.19it/s]Loading weights: 100%|██████████| 398/398 [00:00<00:00, 574.61it/s]
+08/23/2026 10:14:09 - INFO - d_kv_intervene - runtime attn impl=eager
+08/23/2026 10:14:23 - INFO - d_kv_intervene - [1/5] qid=0c890a5dde8c_12dc86e7:8 tool_name_match=True corr_tokens=None sham_tokens=None recompute=None cache_tokens=5957 wall=13.3s
+08/23/2026 10:14:35 - INFO - d_kv_intervene - [2/5] qid=0c890a5dde8c_c4d290c5:4 tool_name_match=True corr_tokens=None sham_tokens=None recompute=None cache_tokens=5235 wall=11.7s
+08/23/2026 10:14:50 - INFO - d_kv_intervene - [3/5] qid=0c890a5dde8c_ebac8eab:16 tool_name_match=True corr_tokens=None sham_tokens=None recompute=None cache_tokens=9110 wall=13.7s
+08/23/2026 10:15:07 - INFO - d_kv_intervene - [4/5] qid=2a21e94e0687_0f5ba78c:12 tool_name_match=True corr_tokens=None sham_tokens=None recompute=None cache_tokens=10515 wall=16.5s
+08/23/2026 10:15:26 - INFO - d_kv_intervene - [5/5] qid=2a21e94e0687_0f5ba78c:15 tool_name_match=True corr_tokens=None sham_tokens=None recompute=None cache_tokens=10510 wall=17.4s
+08/23/2026 10:15:27 - INFO - d_kv_intervene - Done. wrote 5 rows -> /home/liuyancheng/c2kv/outputs_lyc/g_joint/bdf/d_pilot/verify/d_full.jsonl
+[sentinel] /home/liuyancheng/c2kv/outputs_lyc/g_joint/bdf/d_pilot/verify/d_none.jsonl == /home/liuyancheng/c2kv/outputs_lyc/g_joint/bdf_d_battery_c2kv.jsonl on prediction
+{
+  "left": "/home/liuyancheng/c2kv/outputs_lyc/g_joint/bdf/d_pilot/verify/d_none.jsonl",
+  "right": "/home/liuyancheng/c2kv/outputs_lyc/g_joint/bdf_d_battery_c2kv.jsonl",
+  "fields": [
+    "prediction"
+  ],
+  "n_compared": 5,
+  "n_only_left": 0,
+  "n_only_right": 191,
+  "n_mismatches": 0,
+  "mismatches": [],
+  "passed": true
+}
+[sentinel] /home/liuyancheng/c2kv/outputs_lyc/g_joint/bdf/d_pilot/verify/d_full.jsonl == /home/liuyancheng/c2kv/outputs_lyc/g_joint/bdf_d_battery_full.jsonl on prediction
+{
+  "left": "/home/liuyancheng/c2kv/outputs_lyc/g_joint/bdf/d_pilot/verify/d_full.jsonl",
+  "right": "/home/liuyancheng/c2kv/outputs_lyc/g_joint/bdf_d_battery_full.jsonl",
+  "fields": [
+    "prediction"
+  ],
+  "n_compared": 5,
+  "n_only_left": 0,
+  "n_only_right": 195,
+  "n_mismatches": 0,
+  "mismatches": [],
+  "passed": true
+}
+Arm row counts:
+==== /home/liuyancheng/c2kv/outputs_lyc/g_joint/bdf/d_pilot/d_sham.jsonl ====
+20 /home/liuyancheng/c2kv/outputs_lyc/g_joint/bdf/d_pilot/d_sham.jsonl
+==== /home/liuyancheng/c2kv/outputs_lyc/g_joint/bdf/d_pilot/d_corr.jsonl ====
+20 /home/liuyancheng/c2kv/outputs_lyc/g_joint/bdf/d_pilot/d_corr.jsonl
+==== /home/liuyancheng/c2kv/outputs_lyc/g_joint/bdf/d_pilot/d_corr_re.jsonl ====
+20 /home/liuyancheng/c2kv/outputs_lyc/g_joint/bdf/d_pilot/d_corr_re.jsonl
