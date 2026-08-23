@@ -682,7 +682,16 @@ def wiki2_row_to_example(row: Dict[str, Any], row_index: int = 0) -> Optional[Jo
 # punctuation, each closed by ``?`` (plus optional closing quotes/brackets).
 # The boundary after e.g. "...repaired.Can you summarize ...?" is found even
 # without whitespace because "." is in the excluded class.
-_LONGMAGPIE_QUESTION_RE = re.compile(r"((?:[^.!?]*\?[\"'”’)\]]*\s*)+)$")
+#
+# Implementation note: the natural formulation ``((?:SEG)+)$`` backtracks
+# catastrophically on long inputs whose tail does NOT tile cleanly (the outer
+# ``+`` retries every split point over 100KB+ strings — this made the medium
+# pool scan burn hours inside a single longmagpie shard).  A segment match is
+# unambiguous at any position (``[^.!?]*`` cannot cross a ``?``), so the
+# language is the same whether anchored-and-backtracked or tiled greedily:
+# ``finditer`` produces THE unique segmentation in linear time, and the
+# answer is the maximal contiguous trailing chain.
+_LONGMAGPIE_SEGMENT_RE = re.compile(r"[^.!?]*\?[\"'”’)\]]*\s*")
 
 
 def split_longmagpie_question(text: str) -> Optional[Tuple[str, str]]:
@@ -695,11 +704,16 @@ def split_longmagpie_question(text: str) -> Optional[Tuple[str, str]]:
     body = (text or "").strip()
     if not body:
         return None
-    match = _LONGMAGPIE_QUESTION_RE.search(body)
-    if match is None:
+    end = len(body)
+    start = end
+    for match in reversed(list(_LONGMAGPIE_SEGMENT_RE.finditer(body))):
+        if match.end() != start:
+            break
+        start = match.start()
+    if start == end:
         return None
-    question = match.group(1).strip()
-    context = body[: match.start()].rstrip()
+    question = body[start:end].strip()
+    context = body[:start].rstrip()
     if not context or not question:
         return None
     return context, question

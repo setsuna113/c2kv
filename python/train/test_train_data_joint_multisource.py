@@ -29,7 +29,10 @@ Run from the repo root (local venv has torch/transformers/datasets/pytest):
 from __future__ import annotations
 
 import json
+import random
+import re
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -380,6 +383,55 @@ def test_longmagpie_question_split_rule():
     assert split_longmagpie_question("") is None
     # A document that is ONLY a question has no context left -> None.
     assert split_longmagpie_question("What is this?") is None
+
+
+def test_longmagpie_split_matches_legacy_regex_and_scales():
+    """The linear-time tiling must be language-equivalent to the retired
+    backtracking formulation ``((?:[^.!?]*?CLOSERS\\s*)+)$``, and must not
+    blow up on 100KB+ inputs with no clean question suffix (the medium pool
+    scan burned hours inside that backtracking).
+    """
+    legacy = re.compile(r"((?:[^.!?]*\?[\"'”’)\]]*\s*)+)$")
+
+    def legacy_split(text):
+        body = (text or "").strip()
+        if not body:
+            return None
+        m = legacy.search(body)
+        if m is None:
+            return None
+        q, c = m.group(1).strip(), body[: m.start()].rstrip()
+        return (c, q) if c and q else None
+
+    cases = [
+        "The study fed spiders graphene. Silk was collected before and after the treatment."
+        "No incorporation was repaired.Can you summarize the key findings of the study?",
+        "Some background text here. What happened first? Why did it matter?",
+        "All statements. No question at the end.",
+        "",
+        "What is this?",
+        'Quoted ending: "She asked: where is it?" plus more. Final question here?  ',
+        "nested? questions? inside? Only the last run counts. Really?",
+        "No terminal question but many? mid-string? questions? and a statement at end.",
+        "Ends with a bang! Not a question",
+        "Trailing spaces after a question?   \n\t",
+        "()? weird empty segments?",
+        "A? B? C? and no context before them",  # whole string is a question run
+    ]
+    rng = random.Random(20260823)
+    alphabet = ["a", "b", ".", "!", "?", '"', "”", ")", " ", "\n"]
+    for _ in range(400):
+        cases.append("".join(rng.choice(alphabet) for _ in range(rng.randrange(0, 120))))
+    for case in cases:
+        assert split_longmagpie_question(case) == legacy_split(case), case[:80]
+
+    # Adversarial scale: 500KB with no valid trailing run must return fast.
+    big_no_match = ("Sentence one is here. " * 1000) + "no question mark at the end"
+    big_match = ("Long context sentence. " * 8000) + "What happened? Why?"
+    for big in (big_no_match, big_match):
+        t0 = time.perf_counter()
+        split_longmagpie_question(big)
+        assert time.perf_counter() - t0 < 2.0
 
 
 def test_longmagpie_row_mapping_and_skip(fixtures):
