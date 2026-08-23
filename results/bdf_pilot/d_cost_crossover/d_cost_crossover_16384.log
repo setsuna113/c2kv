@@ -1,0 +1,90 @@
+/home/user/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/user/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0/aarch64-linux/ascend_ops_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/user/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/user/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0/aarch64-linux/ascend_ops_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+08/24/2026 03:47:32 - INFO - eval_agent_history_c2kv - Loading tokenizer from /home/user/c2kv/models/Qwen3-4B-Instruct-2507 use_fast=True
+08/24/2026 03:50:46 - INFO - bench_d_cost_crossover - source: 19586 examples, selection_skips={}
+08/24/2026 03:50:46 - INFO - bench_d_cost_crossover - Loading model /home/user/c2kv/outputs_lyc/g_joint/fixed_joint (mode=c2kv, attn=eager)
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+Loading weights:   0%|          | 0/507 [00:00<?, ?it/s]Loading weights:  14%|█▍        | 72/507 [00:00<00:00, 719.10it/s]Loading weights:  28%|██▊       | 144/507 [00:00<00:00, 693.25it/s]Loading weights:  42%|████▏     | 214/507 [00:00<00:00, 589.79it/s]Loading weights:  59%|█████▉    | 298/507 [00:00<00:00, 651.86it/s]Loading weights:  72%|███████▏  | 365/507 [00:00<00:00, 648.82it/s]Loading weights:  86%|████████▋ | 438/507 [00:00<00:00, 668.70it/s]Loading weights: 100%|██████████| 507/507 [00:00<00:00, 668.30it/s]
+08/24/2026 03:51:05 - INFO - bench_d_cost_crossover - length=16384: 20/20 contexts (packed_768)
+Traceback (most recent call last):
+  File "/home/user/c2kv-bdf/agent/bench_d_cost_crossover.py", line 627, in <module>
+    evaluate(parse_args())
+  File "/home/user/c2kv-bdf/agent/bench_d_cost_crossover.py", line 578, in evaluate
+    run_bench(
+  File "/home/user/c2kv-bdf/agent/bench_d_cost_crossover.py", line 456, in run_bench
+    _measure_full(model, context, system_cache, system_length, hargs)
+  File "/home/user/c2kv-bdf/agent/bench_d_cost_crossover.py", line 219, in _measure_full
+    _, _, elapsed = HH._prefill_tokens_with_cache(
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/envs/c2kv/lib/python3.11/site-packages/torch/utils/_contextlib.py", line 120, in decorate_context
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/c2kv-bdf/agent/eval_agent_tool_definition_c2kv.py", line 274, in _prefill_tokens_with_cache
+    outputs = model(
+              ^^^^^^
+  File "/home/user/envs/c2kv/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1775, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/envs/c2kv/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1786, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/envs/c2kv/lib/python3.11/site-packages/transformers/utils/generic.py", line 900, in wrapper
+    output = func(self, *args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/c2kv-bdf/python/models/qwen3/modeling_qwen3.py", line 662, in forward
+    outputs: BaseModelOutputWithPast = self.model(
+                                       ^^^^^^^^^^^
+  File "/home/user/envs/c2kv/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1775, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/envs/c2kv/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1786, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/envs/c2kv/lib/python3.11/site-packages/transformers/utils/generic.py", line 976, in wrapper
+    output = func(self, *args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/envs/c2kv/lib/python3.11/site-packages/transformers/utils/output_capturing.py", line 248, in wrapper
+    outputs = func(self, *args, **kwargs)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/c2kv-bdf/python/models/qwen3/modeling_qwen3.py", line 517, in forward
+    hidden_states = decoder_layer(
+                    ^^^^^^^^^^^^^^
+  File "/home/user/envs/c2kv/lib/python3.11/site-packages/transformers/modeling_layers.py", line 93, in __call__
+    return super().__call__(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/envs/c2kv/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1775, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/envs/c2kv/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1786, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/c2kv-bdf/python/models/qwen3/modeling_qwen3.py", line 377, in forward
+    hidden_states, _ = self.self_attn(
+                       ^^^^^^^^^^^^^^^
+  File "/home/user/envs/c2kv/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1775, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/envs/c2kv/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1786, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/c2kv-bdf/python/models/qwen3/modeling_qwen3.py", line 271, in forward
+    attn_output, attn_weights = attention_interface(
+                                ^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/c2kv-bdf/python/models/qwen3/modeling_qwen3.py", line 181, in eager_attention_forward
+    attn_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32).to(query.dtype)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/envs/c2kv/lib/python3.11/site-packages/torch/nn/functional.py", line 2135, in softmax
+    ret = input.softmax(dim, dtype=dtype)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+RuntimeError: NPU out of memory. Tried to allocate 37.17 GiB (NPU 0; 60.96 GiB total capacity; 29.19 GiB already allocated; 29.19 GiB current active; 30.64 GiB free; 29.81 GiB reserved in total by PyTorch) If reserved memory is >> allocated memory try setting max_split_size_mb to avoid fragmentation.
+[ERROR] 2026-08-24-03:51:36 (PID:3506656, Device:0, RankID:-1) ERR99999 UNKNOWN applicaiton exception

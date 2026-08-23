@@ -2732,16 +2732,10 @@ def _generate_one(
     example: CompressHistoryExample,
     args: argparse.Namespace,
     mode: str,
-    *,
-    return_state: bool = False,
-) -> Any:
-    # return_state=True hands (row, prefix) to callers that continue on the
-    # live cache (the task-D downstream driver); (row, None) on skip.  The
-    # default path is unchanged.
+) -> Dict[str, Any]:
     total_start = time.perf_counter()
     if mode in FULL_PROMPT_MODES:
-        row = _generate_full_prompt(model, tokenizer, example, args, mode)
-        return (row, None) if return_state else row
+        return _generate_full_prompt(model, tokenizer, example, args, mode)
     if mode == "history_full":
         prefix, skip_reason = _build_full_or_truncate_prefix(model, tokenizer, example, args, "full")
     elif mode == "history_all_c2kv4":
@@ -2850,7 +2844,7 @@ def _generate_one(
     else:
         raise ValueError(f"Unknown mode: {mode}")
     if prefix is None:
-        row = {
+        return {
             "qid": example.qid,
             "session_id": example.qid.rsplit(":", 1)[0] if ":" in example.qid else None,
             "mode": mode,
@@ -2858,7 +2852,6 @@ def _generate_one(
             "skipped": True,
             "skip_reason": skip_reason,
         }
-        return (row, None) if return_state else row
     row = _generate_with_prefix(model, tokenizer, example, prefix, args, mode)
     ttft_sec = (
         prefix.get("system_prefill_sec", 0.0)
@@ -2972,7 +2965,7 @@ def _generate_one(
     ):
         if key in prefix:
             row[key] = prefix[key]
-    return (row, prefix) if return_state else row
+    return row
 
 
 def _summarize_rows(args: argparse.Namespace, rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
