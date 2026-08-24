@@ -1,0 +1,4 @@
+model=/home/user/c2kv/outputs_lyc/g_joint/fixed_joint
+manifest=./configs/bdf_pilot/d_cw_manifest.json
+manifest_sha256=c91c6e35184221dacf37353ba87fc944ec704f753c98acfcdc54ab49472a46b1
+full_sentinel=run

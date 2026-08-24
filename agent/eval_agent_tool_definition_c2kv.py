@@ -348,6 +348,10 @@ def _generate_from_input_ids(
     position_ids: Optional[torch.Tensor] = None,
     past_key_values: Any = None,
     capture: bool = False,
+    *,
+    do_sample: bool = False,
+    temperature: Optional[float] = None,
+    top_p: Optional[float] = None,
 ) -> tuple[str, float, int, float] | tuple[str, float, int, float, Dict[str, Any]]:
     """单臂一次生成的公共路径（c2kv / baseline / full 臂共用）。
 
@@ -363,6 +367,11 @@ def _generate_from_input_ids(
                    length（generated_tokens>=max_new_tokens）/ other；
       stop_pos: 停止步索引（eos 命中步或最后一步）。
     每步 scores 张量用完即丢弃，不在 GPU 累积。
+
+Greedy by default.  ``do_sample=True`` enables sampling; ``temperature``
+    and ``top_p`` are injected ONLY then, so the default kwargs dict is
+    byte-identical to what this function has always built (every existing eval
+    calls it without the sampling arguments).  Seeding is the caller's job.
     """
     original_attn_impl = model.model.config._attn_implementation if hasattr(model, "model") else None
     if original_attn_impl is not None:
@@ -372,7 +381,7 @@ def _generate_from_input_ids(
         "input_ids": input_ids,
         "attention_mask": attention_mask,
         "max_new_tokens": max_new_tokens,
-        "do_sample": False,
+        "do_sample": do_sample,
         "pad_token_id": tokenizer.pad_token_id,
         "eos_token_id": tokenizer.eos_token_id,
         "use_cache": True,
@@ -380,6 +389,11 @@ def _generate_from_input_ids(
     if capture:
         generate_kwargs["output_scores"] = True
         generate_kwargs["return_dict_in_generate"] = True
+    if do_sample:
+        if temperature is not None:
+            generate_kwargs["temperature"] = temperature
+        if top_p is not None:
+            generate_kwargs["top_p"] = top_p
     if position_ids is not None:
         generate_kwargs["position_ids"] = position_ids
     if past_key_values is not None:

@@ -5,6 +5,29 @@ from typing import Any
 
 import torch
 
+# ---------------------------------------------------------------------------
+# transformers>=5 mask registry fix (CRITICAL).
+#
+# transformers 5.x builds the causal mask via ALL_MASK_ATTENTION_FUNCTIONS.
+# An unregistered attention implementation makes `create_causal_mask` return
+# None, which silently turns the teacher-forced training/eval forward into
+# FULL BIDIRECTIONAL attention (answer positions attend to future answer
+# tokens -> label leakage: train/eval losses collapse to ~0 while causal
+# ability is unchanged).  Every c2kv checkpoint trained through
+# GistMultiDocTrainer with --attn_impl npu_fusion_attention was affected.
+# Registering the eager mask factory restores a proper additive causal mask;
+# `_to_npu_attention_mask` below converts it to torch_npu's bool-drop
+# convention.  Verified empirically: pre-registration -> None, post ->
+# [B,1,Q,KV] upper-triangular -inf float mask.
+# ---------------------------------------------------------------------------
+try:
+    from transformers.masking_utils import ALL_MASK_ATTENTION_FUNCTIONS, eager_mask
+
+    if "npu_fusion_attention" not in ALL_MASK_ATTENTION_FUNCTIONS._global_mapping:
+        ALL_MASK_ATTENTION_FUNCTIONS.register("npu_fusion_attention", eager_mask)
+except Exception:  # pragma: no cover - transformers without the mask registry
+    pass
+
 
 def _to_npu_attention_mask(attention_mask: torch.Tensor | None) -> torch.Tensor | None:
     if attention_mask is None:

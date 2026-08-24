@@ -405,8 +405,14 @@ def _iter_agent_rows(data_files: Sequence[Path]) -> Iterator[Dict[str, Any]]:
         pf = pq.ParquetFile(data_file)
         available = set(pf.schema_arrow.names)
         columns = [column for column in wanted if column in available]
-        for batch in pf.iter_batches(batch_size=256, columns=columns):
-            yield from batch.to_pylist()
+        try:
+            for batch in pf.iter_batches(batch_size=256, columns=columns):
+                yield from batch.to_pylist()
+        except Exception:
+            # Native-nested parquets (e.g. agent-llm-traces-v2 spans) raise
+            # ArrowNotImplementedError on chunked nested conversion; fall back
+            # to a whole-file read with the same column projection.
+            yield from pq.read_table(data_file, columns=columns).to_pylist()
 
 
 def _iter_agent_jsonl_rows(data_files: Sequence[Path]) -> Iterator[Dict[str, Any]]:
@@ -668,6 +674,70 @@ def _agent_history_turn_docs(messages: Sequence[Message]) -> List[Message]:
             outputs.append(f"[{role}]\n{content}")
     flush()
     return docs
+
+
+def _agent_history_turn_units(messages: Sequence[Message]) -> List[List[Dict[str, str]]]:
+    """Role-preserving twin of ``_agent_history_turn_docs``.
+
+    Same traversal, same turn boundaries and the same skip rule (:651-653),
+    but each turn is returned as its list of units instead of one rendered
+    string, so a chunking policy can re-cut a turn at message boundaries.
+    ``kind`` is ``"user"`` / ``"assistant"`` / the raw role for every other
+    role (tool, observation, ...), which is what ``chunk_policy._pair_units``
+    keys on.  ``_flatten_turn_units`` renders a unit list back to exactly the
+    string ``_agent_history_turn_docs`` would have produced.
+    """
+
+    turns: List[List[Dict[str, str]]] = []
+    current: List[Dict[str, str]] = []
+
+    def flush() -> None:
+        nonlocal current
+        if not current:
+            return
+        turns.append(current)
+        current = []
+
+    for message in messages:
+        role = message.get("role", "user")
+        content = str(message.get("content") or "").strip()
+        if not content and role != "assistant":
+            continue
+        if role == "user":
+            flush()
+            current = [{"kind": "user", "role": role, "text": content}]
+        elif role == "assistant":
+            current.append({"kind": "assistant", "role": role, "text": content})
+        else:
+            current.append({"kind": role, "role": role, "text": content})
+    flush()
+    return turns
+
+
+def _flatten_turn_units(units: Sequence[Dict[str, str]]) -> str:
+    """Render turn units exactly as ``_agent_history_turn_docs.flush()`` does.
+
+    Pure function (no tokenizer, no torch): ``chunk_policy.apply_policy``
+    injects it to render structural sub-blocks of a turn.
+    """
+
+    current_user: Optional[str] = None
+    outputs: List[str] = []
+    for unit in units:
+        kind = unit.get("kind")
+        text = str(unit.get("text") or "")
+        if kind == "user":
+            current_user = text
+        elif kind == "assistant":
+            outputs.append(text)
+        else:
+            outputs.append(f"[{unit.get('role')}]\n{text}")
+    parts = ["Previous turn"]
+    if current_user:
+        parts.extend(["[User query]", current_user.strip()])
+    if outputs:
+        parts.extend(["[Assistant output]", "\n\n".join(item.strip() for item in outputs if item.strip())])
+    return "\n".join(parts).strip()
 
 
 class AgentLLMTracesCompressHistorySource(CompressHistorySource):

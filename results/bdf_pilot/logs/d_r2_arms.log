@@ -1,0 +1,561 @@
+ASCEND_RT_VISIBLE_DEVICES=0
+PHASE=arms
+MODEL_PATH=/home/user/c2kv/outputs_lyc/g_joint/fixed_joint
+BASE_MODEL=/home/user/c2kv/models/Qwen3-4B-Instruct-2507
+TOKENIZER_PATH=/home/user/c2kv/models/Qwen3-4B-Instruct-2507
+DATASET_PATH=/home/user/c2kv/datasets/agent-llm-traces-v2
+OUT_DIR=/home/user/c2kv/outputs_lyc/g_joint/bdf/d_pilot_r2
+MANIFEST=configs/bdf_pilot/d_cw_manifest_r2.json
+BUNDLES=results/d/bundles_batch_tf_r2.jsonl
+SHAM_PLAN=configs/bdf_pilot/d_sham_plan_r2.json
+BATTERY_NONE_ROWS=/home/user/c2kv/outputs_lyc/g_joint/bdf/d_r2/battery_c2kv.jsonl
+BATTERY_FULL_ROWS=/home/user/c2kv/outputs_lyc/g_joint/bdf/d_r2/battery_full.jsonl
+SPLIT_MANIFEST_FILE=
+RATIO=8
+ARMS=sham,corr,corr_re
+VERIFY_QIDS=5
+RUN_CORR_ALL=1
+RESUME=True
+[arms] smoke marker:
+model=/home/user/c2kv/outputs_lyc/g_joint/fixed_joint
+manifest=configs/bdf_pilot/d_cw_manifest_r2.json
+manifest_sha256=b9739bdb35407161930f95714f9253672ef0f092b21fcbee3e05e4a70ddfbd11
+full_sentinel=run
+[run] arm=sham -> /home/user/c2kv/outputs_lyc/g_joint/bdf/d_pilot_r2/d_sham.jsonl
+/home/user/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/user/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0/aarch64-linux/ascend_ops_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/user/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/user/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0/aarch64-linux/ascend_ops_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+08/23/2026 16:04:53 - INFO - d_kv_intervene - arm=sham mode=d_sham_neutral qids=93 manifest_sha=b9739bdb35407161… plan_sha=3abf1a5ac7ecbf33
+08/23/2026 16:04:53 - INFO - eval_agent_history_c2kv - Loading tokenizer from /home/user/c2kv/models/Qwen3-4B-Instruct-2507 use_fast=True
+08/23/2026 16:21:44 - INFO - d_kv_intervene - source: 3586 examples, selection_skips={}
+08/23/2026 16:21:46 - INFO - d_kv_intervene - Loading model /home/user/c2kv/outputs_lyc/g_joint/fixed_joint (mode=c2kv, attn=eager)
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+Loading weights:   0%|          | 0/507 [00:00<?, ?it/s]Loading weights:  15%|█▍        | 74/507 [00:00<00:00, 734.40it/s]Loading weights:  29%|██▉       | 148/507 [00:00<00:00, 589.87it/s]Loading weights:  46%|████▌     | 233/507 [00:00<00:00, 693.89it/s]Loading weights:  61%|██████    | 310/507 [00:00<00:00, 721.25it/s]Loading weights:  76%|███████▌  | 384/507 [00:00<00:00, 722.33it/s]Loading weights:  91%|█████████ | 461/507 [00:00<00:00, 731.43it/s]Loading weights: 100%|██████████| 507/507 [00:00<00:00, 702.45it/s]
+08/23/2026 16:21:48 - INFO - d_kv_intervene - runtime attn impl=eager
+08/23/2026 16:22:07 - INFO - d_kv_intervene - [1/93] qid=0c890a5dde8c_12dc86e7:8 tool_name_match=False corr_tokens=0 sham_tokens=203 recompute=0 cache_tokens=4534 wall=18.1s
+08/23/2026 16:22:24 - INFO - d_kv_intervene - [2/93] qid=0c890a5dde8c_c4d290c5:4 tool_name_match=False corr_tokens=0 sham_tokens=486 recompute=0 cache_tokens=4725 wall=16.3s
+08/23/2026 16:22:37 - INFO - d_kv_intervene - [3/93] qid=0c890a5dde8c_ebac8eab:16 tool_name_match=False corr_tokens=0 sham_tokens=221 recompute=0 cache_tokens=4951 wall=12.0s
+08/23/2026 16:22:55 - INFO - d_kv_intervene - [4/93] qid=10d642ac9c10_085f0768:8 tool_name_match=False corr_tokens=0 sham_tokens=232 recompute=0 cache_tokens=4663 wall=17.0s
+08/23/2026 16:23:03 - INFO - d_kv_intervene - [5/93] qid=10d642ac9c10_4f13ce12:12 tool_name_match=False corr_tokens=0 sham_tokens=225 recompute=0 cache_tokens=4744 wall=7.7s
+08/23/2026 16:23:21 - INFO - d_kv_intervene - [6/93] qid=10d642ac9c10_535ae546:7 tool_name_match=False corr_tokens=0 sham_tokens=250 recompute=0 cache_tokens=4615 wall=16.7s
+08/23/2026 16:23:38 - INFO - d_kv_intervene - [7/93] qid=10d642ac9c10_89206737:3 tool_name_match=False corr_tokens=0 sham_tokens=346 recompute=0 cache_tokens=4585 wall=16.7s
+08/23/2026 16:23:59 - INFO - d_kv_intervene - [8/93] qid=10d642ac9c10_ba73f52d:11 tool_name_match=False corr_tokens=0 sham_tokens=757 recompute=0 cache_tokens=5558 wall=20.1s
+08/23/2026 16:24:12 - INFO - d_kv_intervene - [9/93] qid=15bb4bab2031_3bc535d7:29 tool_name_match=False corr_tokens=0 sham_tokens=42 recompute=0 cache_tokens=5033 wall=11.2s
+08/23/2026 16:24:24 - INFO - d_kv_intervene - [10/93] qid=15bb4bab2031_a3ac2dd4:6 tool_name_match=False corr_tokens=0 sham_tokens=632 recompute=0 cache_tokens=5146 wall=11.3s
+08/23/2026 16:24:33 - INFO - d_kv_intervene - [11/93] qid=1861edacc01c_8413bbcc:23 tool_name_match=False corr_tokens=0 sham_tokens=357 recompute=0 cache_tokens=4980 wall=8.6s
+08/23/2026 16:24:53 - INFO - d_kv_intervene - [12/93] qid=1861edacc01c_c9c8ce14:11 tool_name_match=False corr_tokens=0 sham_tokens=12 recompute=0 cache_tokens=4839 wall=19.5s
+08/23/2026 16:25:12 - INFO - d_kv_intervene - [13/93] qid=1861edacc01c_c9c8ce14:17 tool_name_match=False corr_tokens=0 sham_tokens=72 recompute=0 cache_tokens=4781 wall=18.0s
+08/23/2026 16:25:32 - INFO - d_kv_intervene - [14/93] qid=18b5978679fb_8419955d:5 tool_name_match=False corr_tokens=0 sham_tokens=757 recompute=0 cache_tokens=5023 wall=19.4s
+08/23/2026 16:25:52 - INFO - d_kv_intervene - [15/93] qid=18b5978679fb_b62a7b4f:39 tool_name_match=False corr_tokens=0 sham_tokens=757 recompute=0 cache_tokens=5615 wall=19.7s
+08/23/2026 16:26:06 - INFO - d_kv_intervene - [16/93] qid=1bafd96e8923_3560d7f9:2 tool_name_match=False corr_tokens=0 sham_tokens=757 recompute=0 cache_tokens=1720 wall=13.7s
+08/23/2026 16:26:21 - INFO - d_kv_intervene - [17/93] qid=1bafd96e8923_de668d42:3 tool_name_match=True corr_tokens=0 sham_tokens=226 recompute=0 cache_tokens=1430 wall=14.5s
+08/23/2026 16:26:41 - INFO - d_kv_intervene - [18/93] qid=1bafd96e8923_f0f2747b:16 tool_name_match=True corr_tokens=0 sham_tokens=291 recompute=0 cache_tokens=1358 wall=18.4s
+08/23/2026 16:27:00 - INFO - d_kv_intervene - [19/93] qid=1bafd96e8923_f0f2747b:17 tool_name_match=True corr_tokens=0 sham_tokens=291 recompute=0 cache_tokens=1301 wall=18.6s
+08/23/2026 16:27:18 - INFO - d_kv_intervene - [20/93] qid=24347bbedbb0_e293a74a:55 tool_name_match=False corr_tokens=0 sham_tokens=277 recompute=0 cache_tokens=4976 wall=17.8s
+08/23/2026 16:27:25 - INFO - d_kv_intervene - [21/93] qid=24347bbedbb0_f0695cdf:11 tool_name_match=False corr_tokens=0 sham_tokens=12 recompute=0 cache_tokens=4421 wall=6.4s
+08/23/2026 16:27:46 - INFO - d_kv_intervene - [22/93] qid=2a21e94e0687_0f5ba78c:12 tool_name_match=False corr_tokens=0 sham_tokens=386 recompute=0 cache_tokens=5290 wall=20.3s
+08/23/2026 16:28:07 - INFO - d_kv_intervene - [23/93] qid=2a21e94e0687_0f5ba78c:15 tool_name_match=False corr_tokens=0 sham_tokens=148 recompute=0 cache_tokens=5051 wall=20.1s
+08/23/2026 16:28:27 - INFO - d_kv_intervene - [24/93] qid=2a21e94e0687_3bdda2e7:8 tool_name_match=False corr_tokens=0 sham_tokens=311 recompute=0 cache_tokens=4848 wall=19.1s
+08/23/2026 16:28:36 - INFO - d_kv_intervene - [25/93] qid=2a21e94e0687_b734292f:10 tool_name_match=False corr_tokens=0 sham_tokens=144 recompute=0 cache_tokens=4552 wall=8.8s
+08/23/2026 16:28:53 - INFO - d_kv_intervene - [26/93] qid=2a21e94e0687_d3ce1db1:9 tool_name_match=False corr_tokens=0 sham_tokens=273 recompute=0 cache_tokens=4754 wall=16.2s
+08/23/2026 16:29:13 - INFO - d_kv_intervene - [27/93] qid=2b035779e4f9_b27d0d58:2 tool_name_match=False corr_tokens=0 sham_tokens=53 recompute=0 cache_tokens=4233 wall=18.9s
+08/23/2026 16:29:33 - INFO - d_kv_intervene - [28/93] qid=33b8f9e350cf_05148b9c:9 tool_name_match=False corr_tokens=0 sham_tokens=34 recompute=0 cache_tokens=1205 wall=19.4s
+08/23/2026 16:29:52 - INFO - d_kv_intervene - [29/93] qid=33b8f9e350cf_25815bf6:2 tool_name_match=False corr_tokens=0 sham_tokens=746 recompute=0 cache_tokens=1677 wall=18.9s
+08/23/2026 16:30:11 - INFO - d_kv_intervene - [30/93] qid=33b8f9e350cf_25815bf6:6 tool_name_match=False corr_tokens=0 sham_tokens=578 recompute=0 cache_tokens=1903 wall=18.6s
+08/23/2026 16:30:31 - INFO - d_kv_intervene - [31/93] qid=33b8f9e350cf_b13d2558:4 tool_name_match=False corr_tokens=0 sham_tokens=33 recompute=0 cache_tokens=1430 wall=18.6s
+08/23/2026 16:30:40 - INFO - d_kv_intervene - [32/93] qid=33b8f9e350cf_b5b26346:10 tool_name_match=True corr_tokens=0 sham_tokens=99 recompute=0 cache_tokens=1486 wall=8.8s
+08/23/2026 16:31:00 - INFO - d_kv_intervene - [33/93] qid=33b8f9e350cf_b5b26346:9 tool_name_match=False corr_tokens=0 sham_tokens=36 recompute=0 cache_tokens=1422 wall=19.0s
+08/23/2026 16:31:12 - INFO - d_kv_intervene - [34/93] qid=33b8f9e350cf_e387ca3b:29 tool_name_match=False corr_tokens=0 sham_tokens=38 recompute=0 cache_tokens=1413 wall=11.2s
+08/23/2026 16:31:32 - INFO - d_kv_intervene - [35/93] qid=379733137f5d_05583758:4 tool_name_match=False corr_tokens=0 sham_tokens=12 recompute=0 cache_tokens=4416 wall=19.5s
+08/23/2026 16:31:50 - INFO - d_kv_intervene - [36/93] qid=379733137f5d_0bbbfc38:7 tool_name_match=False corr_tokens=0 sham_tokens=520 recompute=0 cache_tokens=4946 wall=17.6s
+08/23/2026 16:32:07 - INFO - d_kv_intervene - [37/93] qid=379733137f5d_0f729ba3:2 tool_name_match=False corr_tokens=0 sham_tokens=305 recompute=0 cache_tokens=4552 wall=16.7s
+08/23/2026 16:32:24 - INFO - d_kv_intervene - [38/93] qid=379733137f5d_18f7e5cb:4 tool_name_match=False corr_tokens=0 sham_tokens=334 recompute=0 cache_tokens=4605 wall=16.1s
+08/23/2026 16:32:44 - INFO - d_kv_intervene - [39/93] qid=379733137f5d_ece17a61:3 tool_name_match=False corr_tokens=0 sham_tokens=105 recompute=0 cache_tokens=4325 wall=19.4s
+08/23/2026 16:33:03 - INFO - d_kv_intervene - [40/93] qid=39f6781fd774_0700d34f:1 tool_name_match=False corr_tokens=0 sham_tokens=413 recompute=0 cache_tokens=752 wall=18.2s
+08/23/2026 16:33:10 - INFO - d_kv_intervene - [41/93] qid=39f6781fd774_0f76017d:4 tool_name_match=False corr_tokens=0 sham_tokens=42 recompute=0 cache_tokens=1216 wall=6.0s
+08/23/2026 16:33:16 - INFO - d_kv_intervene - [42/93] qid=39f6781fd774_0f76017d:6 tool_name_match=True corr_tokens=0 sham_tokens=12 recompute=0 cache_tokens=1152 wall=5.8s
+08/23/2026 16:33:23 - INFO - d_kv_intervene - [43/93] qid=39f6781fd774_2140ef43:4 tool_name_match=False corr_tokens=0 sham_tokens=12 recompute=0 cache_tokens=1007 wall=6.0s
+08/23/2026 16:33:29 - INFO - d_kv_intervene - [44/93] qid=39f6781fd774_21434cf8:1 tool_name_match=False corr_tokens=0 sham_tokens=327 recompute=0 cache_tokens=655 wall=5.6s
+08/23/2026 16:33:36 - INFO - d_kv_intervene - [45/93] qid=39f6781fd774_21434cf8:7 tool_name_match=False corr_tokens=0 sham_tokens=385 recompute=0 cache_tokens=1417 wall=6.0s
+08/23/2026 16:33:49 - INFO - d_kv_intervene - [46/93] qid=39f6781fd774_48ec7fe3:1 tool_name_match=True corr_tokens=0 sham_tokens=440 recompute=0 cache_tokens=782 wall=12.3s
+08/23/2026 16:34:08 - INFO - d_kv_intervene - [47/93] qid=39f6781fd774_48ec7fe3:2 tool_name_match=False corr_tokens=0 sham_tokens=671 recompute=0 cache_tokens=1429 wall=18.5s
+08/23/2026 16:34:15 - INFO - d_kv_intervene - [48/93] qid=39f6781fd774_559fb693:10 tool_name_match=False corr_tokens=0 sham_tokens=39 recompute=0 cache_tokens=1252 wall=6.5s
+08/23/2026 16:34:22 - INFO - d_kv_intervene - [49/93] qid=39f6781fd774_559fb693:15 tool_name_match=False corr_tokens=0 sham_tokens=36 recompute=0 cache_tokens=1263 wall=6.7s
+08/23/2026 16:34:38 - INFO - d_kv_intervene - [50/93] qid=39f6781fd774_75c29c1d:1 tool_name_match=True corr_tokens=0 sham_tokens=388 recompute=0 cache_tokens=724 wall=14.9s
+08/23/2026 16:34:49 - INFO - d_kv_intervene - [51/93] qid=39f6781fd774_79248acd:1 tool_name_match=True corr_tokens=0 sham_tokens=408 recompute=0 cache_tokens=746 wall=10.3s
+08/23/2026 16:34:55 - INFO - d_kv_intervene - [52/93] qid=39f6781fd774_79248acd:10 tool_name_match=False corr_tokens=0 sham_tokens=12 recompute=0 cache_tokens=1066 wall=6.3s
+08/23/2026 16:35:02 - INFO - d_kv_intervene - [53/93] qid=39f6781fd774_871064a0:2 tool_name_match=False corr_tokens=0 sham_tokens=757 recompute=0 cache_tokens=1518 wall=6.0s
+08/23/2026 16:35:08 - INFO - d_kv_intervene - [54/93] qid=39f6781fd774_a3032232:1 tool_name_match=False corr_tokens=0 sham_tokens=393 recompute=0 cache_tokens=730 wall=5.6s
+08/23/2026 16:35:24 - INFO - d_kv_intervene - [55/93] qid=39f6781fd774_b09911cf:1 tool_name_match=True corr_tokens=0 sham_tokens=338 recompute=0 cache_tokens=668 wall=15.2s
+08/23/2026 16:35:31 - INFO - d_kv_intervene - [56/93] qid=4fad8197a4ef_97f84dd8:10 tool_name_match=False corr_tokens=0 sham_tokens=210 recompute=0 cache_tokens=1356 wall=6.5s
+08/23/2026 16:35:40 - INFO - d_kv_intervene - [57/93] qid=4fad8197a4ef_97f84dd8:38 tool_name_match=False corr_tokens=0 sham_tokens=12 recompute=0 cache_tokens=1164 wall=7.9s
+08/23/2026 16:35:49 - INFO - d_kv_intervene - [58/93] qid=56c19f19c4f2_c240d17d:3 tool_name_match=False corr_tokens=0 sham_tokens=748 recompute=0 cache_tokens=5069 wall=8.6s
+08/23/2026 16:36:09 - INFO - d_kv_intervene - [59/93] qid=8eafd208fd5d_002d69b6:1 tool_name_match=False corr_tokens=0 sham_tokens=482 recompute=0 cache_tokens=4639 wall=19.7s
+08/23/2026 16:36:23 - INFO - d_kv_intervene - [60/93] qid=8eafd208fd5d_002d69b6:11 tool_name_match=False corr_tokens=0 sham_tokens=47 recompute=0 cache_tokens=5071 wall=12.6s
+08/23/2026 16:36:38 - INFO - d_kv_intervene - [61/93] qid=8eafd208fd5d_0eb5b36a:29 tool_name_match=False corr_tokens=0 sham_tokens=378 recompute=0 cache_tokens=5446 wall=14.3s
+08/23/2026 16:36:58 - INFO - d_kv_intervene - [62/93] qid=8eafd208fd5d_0eb5b36a:5 tool_name_match=False corr_tokens=0 sham_tokens=674 recompute=0 cache_tokens=5621 wall=20.2s
+08/23/2026 16:37:14 - INFO - d_kv_intervene - [63/93] qid=8eafd208fd5d_479c93c0:6 tool_name_match=False corr_tokens=0 sham_tokens=37 recompute=0 cache_tokens=5002 wall=14.8s
+08/23/2026 16:37:27 - INFO - d_kv_intervene - [64/93] qid=8eafd208fd5d_9fa29cd8:5 tool_name_match=False corr_tokens=0 sham_tokens=39 recompute=0 cache_tokens=4895 wall=12.1s
+08/23/2026 16:37:39 - INFO - d_kv_intervene - [65/93] qid=8eafd208fd5d_fb52e1ce:10 tool_name_match=False corr_tokens=0 sham_tokens=360 recompute=0 cache_tokens=5346 wall=11.4s
+08/23/2026 16:37:52 - INFO - d_kv_intervene - [66/93] qid=8eafd208fd5d_fb52e1ce:27 tool_name_match=False corr_tokens=0 sham_tokens=97 recompute=0 cache_tokens=5023 wall=12.9s
+08/23/2026 16:38:08 - INFO - d_kv_intervene - [67/93] qid=8eafd208fd5d_fb52e1ce:32 tool_name_match=False corr_tokens=0 sham_tokens=212 recompute=0 cache_tokens=5201 wall=14.7s
+08/23/2026 16:38:28 - INFO - d_kv_intervene - [68/93] qid=8eafd208fd5d_fb52e1ce:9 tool_name_match=False corr_tokens=0 sham_tokens=266 recompute=0 cache_tokens=5272 wall=20.3s
+08/23/2026 16:38:45 - INFO - d_kv_intervene - [69/93] qid=a45d2c09567a_344ed9b0:5 tool_name_match=False corr_tokens=0 sham_tokens=246 recompute=0 cache_tokens=4549 wall=15.7s
+08/23/2026 16:38:56 - INFO - d_kv_intervene - [70/93] qid=a45d2c09567a_344ed9b0:6 tool_name_match=False corr_tokens=0 sham_tokens=246 recompute=0 cache_tokens=4581 wall=10.3s
+08/23/2026 16:39:16 - INFO - d_kv_intervene - [71/93] qid=a45d2c09567a_42e3637f:2 tool_name_match=False corr_tokens=0 sham_tokens=92 recompute=0 cache_tokens=4266 wall=19.8s
+08/23/2026 16:39:24 - INFO - d_kv_intervene - [72/93] qid=a45d2c09567a_9ad55a9e:3 tool_name_match=False corr_tokens=0 sham_tokens=522 recompute=0 cache_tokens=4756 wall=7.4s
+08/23/2026 16:39:35 - INFO - d_kv_intervene - [73/93] qid=a45d2c09567a_c794536b:7 tool_name_match=False corr_tokens=0 sham_tokens=757 recompute=0 cache_tokens=5601 wall=9.9s
+08/23/2026 16:39:55 - INFO - d_kv_intervene - [74/93] qid=a45d2c09567a_c794536b:8 tool_name_match=False corr_tokens=0 sham_tokens=180 recompute=0 cache_tokens=5051 wall=19.4s
+08/23/2026 16:40:16 - INFO - d_kv_intervene - [75/93] qid=a45d2c09567a_f2b8f831:14 tool_name_match=False corr_tokens=0 sham_tokens=315 recompute=0 cache_tokens=5095 wall=20.2s
+08/23/2026 16:40:36 - INFO - d_kv_intervene - [76/93] qid=a45d2c09567a_f2b8f831:6 tool_name_match=True corr_tokens=0 sham_tokens=757 recompute=0 cache_tokens=5436 wall=19.5s
+08/23/2026 16:40:56 - INFO - d_kv_intervene - [77/93] qid=ac0f039f4468_0e7a17fd:1 tool_name_match=False corr_tokens=0 sham_tokens=435 recompute=0 cache_tokens=4586 wall=20.1s
+08/23/2026 16:41:13 - INFO - d_kv_intervene - [78/93] qid=b455f37f04c7_08958bbb:1 tool_name_match=True corr_tokens=0 sham_tokens=140 recompute=0 cache_tokens=4254 wall=16.3s
+08/23/2026 16:41:31 - INFO - d_kv_intervene - [79/93] qid=b455f37f04c7_0ee66cf1:7 tool_name_match=False corr_tokens=0 sham_tokens=107 recompute=0 cache_tokens=4427 wall=17.4s
+08/23/2026 16:41:48 - INFO - d_kv_intervene - [80/93] qid=b455f37f04c7_263e5d47:1 tool_name_match=False corr_tokens=0 sham_tokens=143 recompute=0 cache_tokens=4263 wall=16.2s
+08/23/2026 16:41:58 - INFO - d_kv_intervene - [81/93] qid=b455f37f04c7_263e5d47:4 tool_name_match=False corr_tokens=0 sham_tokens=339 recompute=0 cache_tokens=4992 wall=9.0s
+08/23/2026 16:42:17 - INFO - d_kv_intervene - [82/93] qid=b455f37f04c7_714ea5fe:37 tool_name_match=True corr_tokens=0 sham_tokens=762 recompute=0 cache_tokens=3204 wall=18.6s
+08/23/2026 16:42:30 - INFO - d_kv_intervene - [83/93] qid=c351b7150104_20ab4895:1 tool_name_match=False corr_tokens=0 sham_tokens=539 recompute=0 cache_tokens=4703 wall=12.0s
+08/23/2026 16:42:42 - INFO - d_kv_intervene - [84/93] qid=c351b7150104_2ae20927:1 tool_name_match=False corr_tokens=0 sham_tokens=402 recompute=0 cache_tokens=4549 wall=11.3s
+08/23/2026 16:42:54 - INFO - d_kv_intervene - [85/93] qid=c351b7150104_3e5e7863:2 tool_name_match=False corr_tokens=0 sham_tokens=621 recompute=0 cache_tokens=5198 wall=11.9s
+08/23/2026 16:43:06 - INFO - d_kv_intervene - [86/93] qid=c351b7150104_5ffa4738:1 tool_name_match=False corr_tokens=0 sham_tokens=495 recompute=0 cache_tokens=4653 wall=10.9s
+08/23/2026 16:43:17 - INFO - d_kv_intervene - [87/93] qid=c351b7150104_7443b665:1 tool_name_match=False corr_tokens=0 sham_tokens=572 recompute=0 cache_tokens=4740 wall=10.4s
+08/23/2026 16:43:37 - INFO - d_kv_intervene - [88/93] qid=c351b7150104_bc4b9c45:1 tool_name_match=False corr_tokens=0 sham_tokens=468 recompute=0 cache_tokens=4623 wall=19.9s
+08/23/2026 16:43:58 - INFO - d_kv_intervene - [89/93] qid=c351b7150104_fbfdc6d0:1 tool_name_match=False corr_tokens=0 sham_tokens=494 recompute=0 cache_tokens=4652 wall=20.4s
+08/23/2026 16:44:06 - INFO - d_kv_intervene - [90/93] qid=cfc3d70e7f3c_790b34c5:5 tool_name_match=False corr_tokens=0 sham_tokens=12 recompute=0 cache_tokens=4386 wall=7.4s
+08/23/2026 16:44:16 - INFO - d_kv_intervene - [91/93] qid=ebba346cd20a_0e3e5e0b:15 tool_name_match=False corr_tokens=0 sham_tokens=673 recompute=0 cache_tokens=5657 wall=9.3s
+08/23/2026 16:44:29 - INFO - d_kv_intervene - [92/93] qid=ebba346cd20a_0e3e5e0b:4 tool_name_match=False corr_tokens=0 sham_tokens=285 recompute=0 cache_tokens=5351 wall=12.5s
+08/23/2026 16:44:35 - INFO - d_kv_intervene - [93/93] qid=ebba346cd20a_274cb65a:1 tool_name_match=False corr_tokens=0 sham_tokens=607 recompute=0 cache_tokens=4779 wall=5.1s
+08/23/2026 16:44:36 - INFO - d_kv_intervene - Done. wrote 93 rows -> /home/user/c2kv/outputs_lyc/g_joint/bdf/d_pilot_r2/d_sham.jsonl
+[run] arm=corr -> /home/user/c2kv/outputs_lyc/g_joint/bdf/d_pilot_r2/d_corr.jsonl
+/home/user/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/user/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0/aarch64-linux/ascend_ops_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/user/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/user/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0/aarch64-linux/ascend_ops_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+08/23/2026 16:45:00 - INFO - d_kv_intervene - arm=corr mode=d_corr qids=93 manifest_sha=b9739bdb35407161… plan_sha=3abf1a5ac7ecbf33
+08/23/2026 16:45:00 - INFO - eval_agent_history_c2kv - Loading tokenizer from /home/user/c2kv/models/Qwen3-4B-Instruct-2507 use_fast=True
+08/23/2026 17:01:56 - INFO - d_kv_intervene - source: 3586 examples, selection_skips={}
+08/23/2026 17:01:58 - INFO - d_kv_intervene - Loading model /home/user/c2kv/outputs_lyc/g_joint/fixed_joint (mode=c2kv, attn=eager)
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+Loading weights:   0%|          | 0/507 [00:00<?, ?it/s]Loading weights:  17%|█▋        | 85/507 [00:00<00:00, 847.54it/s]Loading weights:  34%|███▎      | 170/507 [00:00<00:00, 679.59it/s]Loading weights:  48%|████▊     | 244/507 [00:00<00:00, 703.69it/s]Loading weights:  64%|██████▎   | 323/507 [00:00<00:00, 734.49it/s]Loading weights:  80%|███████▉  | 405/507 [00:00<00:00, 757.06it/s]Loading weights:  95%|█████████▌| 482/507 [00:00<00:00, 676.09it/s]Loading weights: 100%|██████████| 507/507 [00:00<00:00, 726.37it/s]
+08/23/2026 17:02:00 - INFO - d_kv_intervene - runtime attn impl=eager
+08/23/2026 17:02:11 - INFO - d_kv_intervene - [1/93] qid=0c890a5dde8c_12dc86e7:8 tool_name_match=False corr_tokens=203 sham_tokens=0 recompute=0 cache_tokens=4534 wall=10.9s
+08/23/2026 17:02:21 - INFO - d_kv_intervene - [2/93] qid=0c890a5dde8c_c4d290c5:4 tool_name_match=False corr_tokens=486 sham_tokens=0 recompute=0 cache_tokens=4725 wall=9.0s
+08/23/2026 17:02:42 - INFO - d_kv_intervene - [3/93] qid=0c890a5dde8c_ebac8eab:16 tool_name_match=True corr_tokens=221 sham_tokens=0 recompute=0 cache_tokens=4951 wall=19.4s
+08/23/2026 17:02:52 - INFO - d_kv_intervene - [4/93] qid=10d642ac9c10_085f0768:8 tool_name_match=False corr_tokens=232 sham_tokens=0 recompute=0 cache_tokens=4663 wall=9.5s
+08/23/2026 17:03:13 - INFO - d_kv_intervene - [5/93] qid=10d642ac9c10_4f13ce12:12 tool_name_match=False corr_tokens=225 sham_tokens=0 recompute=0 cache_tokens=4744 wall=19.7s
+08/23/2026 17:03:33 - INFO - d_kv_intervene - [6/93] qid=10d642ac9c10_535ae546:7 tool_name_match=True corr_tokens=250 sham_tokens=0 recompute=0 cache_tokens=4615 wall=19.2s
+08/23/2026 17:03:44 - INFO - d_kv_intervene - [7/93] qid=10d642ac9c10_89206737:3 tool_name_match=False corr_tokens=346 sham_tokens=0 recompute=0 cache_tokens=4585 wall=10.7s
+08/23/2026 17:04:00 - INFO - d_kv_intervene - [8/93] qid=10d642ac9c10_ba73f52d:11 tool_name_match=False corr_tokens=757 sham_tokens=0 recompute=0 cache_tokens=5558 wall=15.8s
+08/23/2026 17:04:15 - INFO - d_kv_intervene - [9/93] qid=15bb4bab2031_3bc535d7:29 tool_name_match=False corr_tokens=42 sham_tokens=0 recompute=0 cache_tokens=5033 wall=14.0s
+08/23/2026 17:04:29 - INFO - d_kv_intervene - [10/93] qid=15bb4bab2031_a3ac2dd4:6 tool_name_match=False corr_tokens=632 sham_tokens=0 recompute=0 cache_tokens=5146 wall=12.8s
+08/23/2026 17:04:40 - INFO - d_kv_intervene - [11/93] qid=1861edacc01c_8413bbcc:23 tool_name_match=False corr_tokens=357 sham_tokens=0 recompute=0 cache_tokens=4980 wall=10.4s
+08/23/2026 17:05:00 - INFO - d_kv_intervene - [12/93] qid=1861edacc01c_c9c8ce14:11 tool_name_match=False corr_tokens=12 sham_tokens=0 recompute=0 cache_tokens=4839 wall=20.1s
+08/23/2026 17:05:22 - INFO - d_kv_intervene - [13/93] qid=1861edacc01c_c9c8ce14:17 tool_name_match=False corr_tokens=72 sham_tokens=0 recompute=0 cache_tokens=4781 wall=21.3s
+08/23/2026 17:05:44 - INFO - d_kv_intervene - [14/93] qid=18b5978679fb_8419955d:5 tool_name_match=True corr_tokens=757 sham_tokens=0 recompute=0 cache_tokens=5023 wall=21.4s
+08/23/2026 17:06:10 - INFO - d_kv_intervene - [15/93] qid=18b5978679fb_b62a7b4f:39 tool_name_match=False corr_tokens=757 sham_tokens=0 recompute=0 cache_tokens=5615 wall=24.8s
+08/23/2026 17:06:18 - INFO - d_kv_intervene - [16/93] qid=1bafd96e8923_3560d7f9:2 tool_name_match=True corr_tokens=757 sham_tokens=0 recompute=0 cache_tokens=1720 wall=7.3s
+08/23/2026 17:06:35 - INFO - d_kv_intervene - [17/93] qid=1bafd96e8923_de668d42:3 tool_name_match=True corr_tokens=226 sham_tokens=0 recompute=0 cache_tokens=1430 wall=16.1s
+08/23/2026 17:06:57 - INFO - d_kv_intervene - [18/93] qid=1bafd96e8923_f0f2747b:16 tool_name_match=True corr_tokens=291 sham_tokens=0 recompute=0 cache_tokens=1358 wall=21.0s
+08/23/2026 17:07:20 - INFO - d_kv_intervene - [19/93] qid=1bafd96e8923_f0f2747b:17 tool_name_match=True corr_tokens=291 sham_tokens=0 recompute=0 cache_tokens=1301 wall=21.9s
+08/23/2026 17:07:40 - INFO - d_kv_intervene - [20/93] qid=24347bbedbb0_e293a74a:55 tool_name_match=False corr_tokens=277 sham_tokens=0 recompute=0 cache_tokens=4976 wall=19.3s
+08/23/2026 17:07:48 - INFO - d_kv_intervene - [21/93] qid=24347bbedbb0_f0695cdf:11 tool_name_match=False corr_tokens=12 sham_tokens=0 recompute=0 cache_tokens=4421 wall=7.2s
+08/23/2026 17:08:12 - INFO - d_kv_intervene - [22/93] qid=2a21e94e0687_0f5ba78c:12 tool_name_match=False corr_tokens=386 sham_tokens=0 recompute=0 cache_tokens=5290 wall=23.4s
+08/23/2026 17:08:37 - INFO - d_kv_intervene - [23/93] qid=2a21e94e0687_0f5ba78c:15 tool_name_match=False corr_tokens=148 sham_tokens=0 recompute=0 cache_tokens=5051 wall=23.9s
+08/23/2026 17:08:49 - INFO - d_kv_intervene - [24/93] qid=2a21e94e0687_3bdda2e7:8 tool_name_match=False corr_tokens=311 sham_tokens=0 recompute=0 cache_tokens=4848 wall=11.7s
+08/23/2026 17:09:01 - INFO - d_kv_intervene - [25/93] qid=2a21e94e0687_b734292f:10 tool_name_match=False corr_tokens=144 sham_tokens=0 recompute=0 cache_tokens=4552 wall=11.4s
+08/23/2026 17:09:21 - INFO - d_kv_intervene - [26/93] qid=2a21e94e0687_d3ce1db1:9 tool_name_match=False corr_tokens=273 sham_tokens=0 recompute=0 cache_tokens=4754 wall=19.2s
+08/23/2026 17:09:35 - INFO - d_kv_intervene - [27/93] qid=2b035779e4f9_b27d0d58:2 tool_name_match=True corr_tokens=53 sham_tokens=0 recompute=0 cache_tokens=4233 wall=13.6s
+08/23/2026 17:09:57 - INFO - d_kv_intervene - [28/93] qid=33b8f9e350cf_05148b9c:9 tool_name_match=False corr_tokens=34 sham_tokens=0 recompute=0 cache_tokens=1205 wall=21.4s
+08/23/2026 17:10:21 - INFO - d_kv_intervene - [29/93] qid=33b8f9e350cf_25815bf6:2 tool_name_match=False corr_tokens=746 sham_tokens=0 recompute=0 cache_tokens=1677 wall=22.7s
+08/23/2026 17:10:46 - INFO - d_kv_intervene - [30/93] qid=33b8f9e350cf_25815bf6:6 tool_name_match=False corr_tokens=578 sham_tokens=0 recompute=0 cache_tokens=1903 wall=24.6s
+08/23/2026 17:11:11 - INFO - d_kv_intervene - [31/93] qid=33b8f9e350cf_b13d2558:4 tool_name_match=False corr_tokens=33 sham_tokens=0 recompute=0 cache_tokens=1430 wall=23.5s
+08/23/2026 17:11:36 - INFO - d_kv_intervene - [32/93] qid=33b8f9e350cf_b5b26346:10 tool_name_match=True corr_tokens=99 sham_tokens=0 recompute=0 cache_tokens=1486 wall=22.9s
+08/23/2026 17:11:58 - INFO - d_kv_intervene - [33/93] qid=33b8f9e350cf_b5b26346:9 tool_name_match=False corr_tokens=36 sham_tokens=0 recompute=0 cache_tokens=1422 wall=21.2s
+08/23/2026 17:12:12 - INFO - d_kv_intervene - [34/93] qid=33b8f9e350cf_e387ca3b:29 tool_name_match=False corr_tokens=38 sham_tokens=0 recompute=0 cache_tokens=1413 wall=13.6s
+08/23/2026 17:12:34 - INFO - d_kv_intervene - [35/93] qid=379733137f5d_05583758:4 tool_name_match=False corr_tokens=12 sham_tokens=0 recompute=0 cache_tokens=4416 wall=21.3s
+08/23/2026 17:12:44 - INFO - d_kv_intervene - [36/93] qid=379733137f5d_0bbbfc38:7 tool_name_match=False corr_tokens=520 sham_tokens=0 recompute=0 cache_tokens=4946 wall=9.4s
+08/23/2026 17:12:54 - INFO - d_kv_intervene - [37/93] qid=379733137f5d_0f729ba3:2 tool_name_match=False corr_tokens=305 sham_tokens=0 recompute=0 cache_tokens=4552 wall=9.0s
+08/23/2026 17:13:04 - INFO - d_kv_intervene - [38/93] qid=379733137f5d_18f7e5cb:4 tool_name_match=False corr_tokens=334 sham_tokens=0 recompute=0 cache_tokens=4605 wall=9.1s
+08/23/2026 17:13:14 - INFO - d_kv_intervene - [39/93] qid=379733137f5d_ece17a61:3 tool_name_match=False corr_tokens=105 sham_tokens=0 recompute=0 cache_tokens=4325 wall=9.5s
+08/23/2026 17:13:22 - INFO - d_kv_intervene - [40/93] qid=39f6781fd774_0700d34f:1 tool_name_match=True corr_tokens=413 sham_tokens=0 recompute=0 cache_tokens=752 wall=6.9s
+08/23/2026 17:13:32 - INFO - d_kv_intervene - [41/93] qid=39f6781fd774_0f76017d:4 tool_name_match=False corr_tokens=42 sham_tokens=0 recompute=0 cache_tokens=1216 wall=9.3s
+08/23/2026 17:13:42 - INFO - d_kv_intervene - [42/93] qid=39f6781fd774_0f76017d:6 tool_name_match=False corr_tokens=12 sham_tokens=0 recompute=0 cache_tokens=1152 wall=9.3s
+08/23/2026 17:13:51 - INFO - d_kv_intervene - [43/93] qid=39f6781fd774_2140ef43:4 tool_name_match=False corr_tokens=12 sham_tokens=0 recompute=0 cache_tokens=1007 wall=9.2s
+08/23/2026 17:13:59 - INFO - d_kv_intervene - [44/93] qid=39f6781fd774_21434cf8:1 tool_name_match=True corr_tokens=327 sham_tokens=0 recompute=0 cache_tokens=655 wall=7.4s
+08/23/2026 17:14:09 - INFO - d_kv_intervene - [45/93] qid=39f6781fd774_21434cf8:7 tool_name_match=False corr_tokens=385 sham_tokens=0 recompute=0 cache_tokens=1417 wall=8.8s
+08/23/2026 17:14:22 - INFO - d_kv_intervene - [46/93] qid=39f6781fd774_48ec7fe3:1 tool_name_match=True corr_tokens=440 sham_tokens=0 recompute=0 cache_tokens=782 wall=12.2s
+08/23/2026 17:14:42 - INFO - d_kv_intervene - [47/93] qid=39f6781fd774_48ec7fe3:2 tool_name_match=False corr_tokens=671 sham_tokens=0 recompute=0 cache_tokens=1429 wall=20.2s
+08/23/2026 17:14:52 - INFO - d_kv_intervene - [48/93] qid=39f6781fd774_559fb693:10 tool_name_match=False corr_tokens=39 sham_tokens=0 recompute=0 cache_tokens=1252 wall=8.7s
+08/23/2026 17:15:02 - INFO - d_kv_intervene - [49/93] qid=39f6781fd774_559fb693:15 tool_name_match=False corr_tokens=36 sham_tokens=0 recompute=0 cache_tokens=1263 wall=9.1s
+08/23/2026 17:15:09 - INFO - d_kv_intervene - [50/93] qid=39f6781fd774_75c29c1d:1 tool_name_match=True corr_tokens=388 sham_tokens=0 recompute=0 cache_tokens=724 wall=7.2s
+08/23/2026 17:15:18 - INFO - d_kv_intervene - [51/93] qid=39f6781fd774_79248acd:1 tool_name_match=True corr_tokens=408 sham_tokens=0 recompute=0 cache_tokens=746 wall=8.5s
+08/23/2026 17:15:28 - INFO - d_kv_intervene - [52/93] qid=39f6781fd774_79248acd:10 tool_name_match=False corr_tokens=12 sham_tokens=0 recompute=0 cache_tokens=1066 wall=8.5s
+08/23/2026 17:15:36 - INFO - d_kv_intervene - [53/93] qid=39f6781fd774_871064a0:2 tool_name_match=False corr_tokens=757 sham_tokens=0 recompute=0 cache_tokens=1518 wall=7.7s
+08/23/2026 17:15:42 - INFO - d_kv_intervene - [54/93] qid=39f6781fd774_a3032232:1 tool_name_match=False corr_tokens=393 sham_tokens=0 recompute=0 cache_tokens=730 wall=6.0s
+08/23/2026 17:15:50 - INFO - d_kv_intervene - [55/93] qid=39f6781fd774_b09911cf:1 tool_name_match=True corr_tokens=338 sham_tokens=0 recompute=0 cache_tokens=668 wall=6.9s
+08/23/2026 17:15:59 - INFO - d_kv_intervene - [56/93] qid=4fad8197a4ef_97f84dd8:10 tool_name_match=False corr_tokens=210 sham_tokens=0 recompute=0 cache_tokens=1356 wall=8.8s
+08/23/2026 17:16:11 - INFO - d_kv_intervene - [57/93] qid=4fad8197a4ef_97f84dd8:38 tool_name_match=False corr_tokens=12 sham_tokens=0 recompute=0 cache_tokens=1164 wall=10.5s
+08/23/2026 17:16:20 - INFO - d_kv_intervene - [58/93] qid=56c19f19c4f2_c240d17d:3 tool_name_match=False corr_tokens=748 sham_tokens=0 recompute=0 cache_tokens=5069 wall=9.3s
+08/23/2026 17:16:39 - INFO - d_kv_intervene - [59/93] qid=8eafd208fd5d_002d69b6:1 tool_name_match=True corr_tokens=482 sham_tokens=0 recompute=0 cache_tokens=4639 wall=17.6s
+08/23/2026 17:16:53 - INFO - d_kv_intervene - [60/93] qid=8eafd208fd5d_002d69b6:11 tool_name_match=True corr_tokens=47 sham_tokens=0 recompute=0 cache_tokens=5071 wall=13.4s
+08/23/2026 17:17:11 - INFO - d_kv_intervene - [61/93] qid=8eafd208fd5d_0eb5b36a:29 tool_name_match=False corr_tokens=378 sham_tokens=0 recompute=0 cache_tokens=5446 wall=18.1s
+08/23/2026 17:17:35 - INFO - d_kv_intervene - [62/93] qid=8eafd208fd5d_0eb5b36a:5 tool_name_match=False corr_tokens=674 sham_tokens=0 recompute=0 cache_tokens=5621 wall=23.1s
+08/23/2026 17:17:52 - INFO - d_kv_intervene - [63/93] qid=8eafd208fd5d_479c93c0:6 tool_name_match=False corr_tokens=37 sham_tokens=0 recompute=0 cache_tokens=5002 wall=16.5s
+08/23/2026 17:18:16 - INFO - d_kv_intervene - [64/93] qid=8eafd208fd5d_9fa29cd8:5 tool_name_match=False corr_tokens=39 sham_tokens=0 recompute=0 cache_tokens=4895 wall=23.1s
+08/23/2026 17:18:33 - INFO - d_kv_intervene - [65/93] qid=8eafd208fd5d_fb52e1ce:10 tool_name_match=False corr_tokens=360 sham_tokens=0 recompute=0 cache_tokens=5346 wall=15.8s
+08/23/2026 17:18:51 - INFO - d_kv_intervene - [66/93] qid=8eafd208fd5d_fb52e1ce:27 tool_name_match=True corr_tokens=97 sham_tokens=0 recompute=0 cache_tokens=5023 wall=18.0s
+08/23/2026 17:19:10 - INFO - d_kv_intervene - [67/93] qid=8eafd208fd5d_fb52e1ce:32 tool_name_match=True corr_tokens=212 sham_tokens=0 recompute=0 cache_tokens=5201 wall=18.1s
+08/23/2026 17:19:28 - INFO - d_kv_intervene - [68/93] qid=8eafd208fd5d_fb52e1ce:9 tool_name_match=False corr_tokens=266 sham_tokens=0 recompute=0 cache_tokens=5272 wall=16.9s
+08/23/2026 17:19:48 - INFO - d_kv_intervene - [69/93] qid=a45d2c09567a_344ed9b0:5 tool_name_match=False corr_tokens=246 sham_tokens=0 recompute=0 cache_tokens=4549 wall=19.2s
+08/23/2026 17:20:09 - INFO - d_kv_intervene - [70/93] qid=a45d2c09567a_344ed9b0:6 tool_name_match=False corr_tokens=246 sham_tokens=0 recompute=0 cache_tokens=4581 wall=21.1s
+08/23/2026 17:20:20 - INFO - d_kv_intervene - [71/93] qid=a45d2c09567a_42e3637f:2 tool_name_match=True corr_tokens=92 sham_tokens=0 recompute=0 cache_tokens=4266 wall=10.2s
+08/23/2026 17:20:31 - INFO - d_kv_intervene - [72/93] qid=a45d2c09567a_9ad55a9e:3 tool_name_match=False corr_tokens=522 sham_tokens=0 recompute=0 cache_tokens=4756 wall=9.7s
+08/23/2026 17:20:53 - INFO - d_kv_intervene - [73/93] qid=a45d2c09567a_c794536b:7 tool_name_match=False corr_tokens=757 sham_tokens=0 recompute=0 cache_tokens=5601 wall=21.8s
+08/23/2026 17:21:15 - INFO - d_kv_intervene - [74/93] qid=a45d2c09567a_c794536b:8 tool_name_match=False corr_tokens=180 sham_tokens=0 recompute=0 cache_tokens=5051 wall=20.9s
+08/23/2026 17:21:38 - INFO - d_kv_intervene - [75/93] qid=a45d2c09567a_f2b8f831:14 tool_name_match=False corr_tokens=315 sham_tokens=0 recompute=0 cache_tokens=5095 wall=23.1s
+08/23/2026 17:22:00 - INFO - d_kv_intervene - [76/93] qid=a45d2c09567a_f2b8f831:6 tool_name_match=False corr_tokens=757 sham_tokens=0 recompute=0 cache_tokens=5436 wall=21.6s
+08/23/2026 17:22:11 - INFO - d_kv_intervene - [77/93] qid=ac0f039f4468_0e7a17fd:1 tool_name_match=True corr_tokens=435 sham_tokens=0 recompute=0 cache_tokens=4586 wall=9.5s
+08/23/2026 17:22:22 - INFO - d_kv_intervene - [78/93] qid=b455f37f04c7_08958bbb:1 tool_name_match=True corr_tokens=140 sham_tokens=0 recompute=0 cache_tokens=4254 wall=11.0s
+08/23/2026 17:22:41 - INFO - d_kv_intervene - [79/93] qid=b455f37f04c7_0ee66cf1:7 tool_name_match=False corr_tokens=107 sham_tokens=0 recompute=0 cache_tokens=4427 wall=18.3s
+08/23/2026 17:22:52 - INFO - d_kv_intervene - [80/93] qid=b455f37f04c7_263e5d47:1 tool_name_match=True corr_tokens=143 sham_tokens=0 recompute=0 cache_tokens=4263 wall=10.8s
+08/23/2026 17:23:04 - INFO - d_kv_intervene - [81/93] qid=b455f37f04c7_263e5d47:4 tool_name_match=False corr_tokens=339 sham_tokens=0 recompute=0 cache_tokens=4992 wall=11.1s
+08/23/2026 17:23:25 - INFO - d_kv_intervene - [82/93] qid=b455f37f04c7_714ea5fe:37 tool_name_match=True corr_tokens=762 sham_tokens=0 recompute=0 cache_tokens=3204 wall=20.4s
+08/23/2026 17:23:41 - INFO - d_kv_intervene - [83/93] qid=c351b7150104_20ab4895:1 tool_name_match=True corr_tokens=539 sham_tokens=0 recompute=0 cache_tokens=4703 wall=15.0s
+08/23/2026 17:23:50 - INFO - d_kv_intervene - [84/93] qid=c351b7150104_2ae20927:1 tool_name_match=True corr_tokens=402 sham_tokens=0 recompute=0 cache_tokens=4549 wall=8.6s
+08/23/2026 17:24:02 - INFO - d_kv_intervene - [85/93] qid=c351b7150104_3e5e7863:2 tool_name_match=False corr_tokens=621 sham_tokens=0 recompute=0 cache_tokens=5198 wall=11.3s
+08/23/2026 17:24:20 - INFO - d_kv_intervene - [86/93] qid=c351b7150104_5ffa4738:1 tool_name_match=True corr_tokens=495 sham_tokens=0 recompute=0 cache_tokens=4653 wall=17.1s
+08/23/2026 17:24:30 - INFO - d_kv_intervene - [87/93] qid=c351b7150104_7443b665:1 tool_name_match=True corr_tokens=572 sham_tokens=0 recompute=0 cache_tokens=4740 wall=9.1s
+08/23/2026 17:24:41 - INFO - d_kv_intervene - [88/93] qid=c351b7150104_bc4b9c45:1 tool_name_match=True corr_tokens=468 sham_tokens=0 recompute=0 cache_tokens=4623 wall=10.6s
+08/23/2026 17:24:56 - INFO - d_kv_intervene - [89/93] qid=c351b7150104_fbfdc6d0:1 tool_name_match=True corr_tokens=494 sham_tokens=0 recompute=0 cache_tokens=4652 wall=14.5s
+08/23/2026 17:25:05 - INFO - d_kv_intervene - [90/93] qid=cfc3d70e7f3c_790b34c5:5 tool_name_match=False corr_tokens=12 sham_tokens=0 recompute=0 cache_tokens=4386 wall=8.6s
+08/23/2026 17:25:21 - INFO - d_kv_intervene - [91/93] qid=ebba346cd20a_0e3e5e0b:15 tool_name_match=False corr_tokens=673 sham_tokens=0 recompute=0 cache_tokens=5657 wall=15.4s
+08/23/2026 17:25:36 - INFO - d_kv_intervene - [92/93] qid=ebba346cd20a_0e3e5e0b:4 tool_name_match=False corr_tokens=285 sham_tokens=0 recompute=0 cache_tokens=5351 wall=13.8s
+08/23/2026 17:25:57 - INFO - d_kv_intervene - [93/93] qid=ebba346cd20a_274cb65a:1 tool_name_match=False corr_tokens=607 sham_tokens=0 recompute=0 cache_tokens=4779 wall=20.5s
+08/23/2026 17:25:57 - INFO - d_kv_intervene - Done. wrote 93 rows -> /home/user/c2kv/outputs_lyc/g_joint/bdf/d_pilot_r2/d_corr.jsonl
+[run] arm=corr_re -> /home/user/c2kv/outputs_lyc/g_joint/bdf/d_pilot_r2/d_corr_re.jsonl
+/home/user/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/user/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0/aarch64-linux/ascend_ops_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/user/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/user/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0/aarch64-linux/ascend_ops_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+08/23/2026 17:26:21 - INFO - d_kv_intervene - arm=corr_re mode=d_corr_recompute qids=93 manifest_sha=b9739bdb35407161… plan_sha=3abf1a5ac7ecbf33
+08/23/2026 17:26:21 - INFO - eval_agent_history_c2kv - Loading tokenizer from /home/user/c2kv/models/Qwen3-4B-Instruct-2507 use_fast=True
+08/23/2026 17:43:19 - INFO - d_kv_intervene - source: 3586 examples, selection_skips={}
+08/23/2026 17:43:21 - INFO - d_kv_intervene - Loading model /home/user/c2kv/outputs_lyc/g_joint/fixed_joint (mode=c2kv, attn=eager)
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+Loading weights:   0%|          | 0/507 [00:00<?, ?it/s]Loading weights:  14%|█▎        | 69/507 [00:00<00:00, 671.88it/s]Loading weights:  29%|██▊       | 145/507 [00:00<00:00, 572.80it/s]Loading weights:  45%|████▌     | 229/507 [00:00<00:00, 676.23it/s]Loading weights:  62%|██████▏   | 312/507 [00:00<00:00, 719.36it/s]Loading weights:  78%|███████▊  | 396/507 [00:00<00:00, 753.00it/s]Loading weights:  94%|█████████▍| 478/507 [00:00<00:00, 698.27it/s]Loading weights: 100%|██████████| 507/507 [00:00<00:00, 713.25it/s]
+08/23/2026 17:43:23 - INFO - d_kv_intervene - runtime attn impl=eager
+08/23/2026 17:43:42 - INFO - d_kv_intervene - [1/93] qid=0c890a5dde8c_12dc86e7:8 tool_name_match=True corr_tokens=203 sham_tokens=0 recompute=1083 cache_tokens=5481 wall=18.9s
+08/23/2026 17:43:59 - INFO - d_kv_intervene - [2/93] qid=0c890a5dde8c_c4d290c5:4 tool_name_match=True corr_tokens=486 sham_tokens=0 recompute=566 cache_tokens=5220 wall=16.6s
+08/23/2026 17:44:21 - INFO - d_kv_intervene - [3/93] qid=0c890a5dde8c_ebac8eab:16 tool_name_match=True corr_tokens=221 sham_tokens=0 recompute=2479 cache_tokens=7116 wall=21.1s
+08/23/2026 17:44:44 - INFO - d_kv_intervene - [4/93] qid=10d642ac9c10_085f0768:8 tool_name_match=True corr_tokens=232 sham_tokens=0 recompute=1427 cache_tokens=5910 wall=22.1s
+08/23/2026 17:45:08 - INFO - d_kv_intervene - [5/93] qid=10d642ac9c10_4f13ce12:12 tool_name_match=True corr_tokens=225 sham_tokens=0 recompute=1373 cache_tokens=5943 wall=23.0s
+08/23/2026 17:45:27 - INFO - d_kv_intervene - [6/93] qid=10d642ac9c10_535ae546:7 tool_name_match=True corr_tokens=250 sham_tokens=0 recompute=699 cache_tokens=5225 wall=18.7s
+08/23/2026 17:45:49 - INFO - d_kv_intervene - [7/93] qid=10d642ac9c10_89206737:3 tool_name_match=True corr_tokens=346 sham_tokens=0 recompute=335 cache_tokens=4878 wall=20.6s
+08/23/2026 17:46:18 - INFO - d_kv_intervene - [8/93] qid=10d642ac9c10_ba73f52d:11 tool_name_match=True corr_tokens=757 sham_tokens=0 recompute=2872 cache_tokens=8068 wall=28.2s
+08/23/2026 17:46:40 - INFO - d_kv_intervene - [9/93] qid=15bb4bab2031_3bc535d7:29 tool_name_match=True corr_tokens=42 sham_tokens=0 recompute=3722 cache_tokens=8287 wall=21.0s
+08/23/2026 17:47:03 - INFO - d_kv_intervene - [10/93] qid=15bb4bab2031_a3ac2dd4:6 tool_name_match=False corr_tokens=632 sham_tokens=0 recompute=905 cache_tokens=5936 wall=22.7s
+08/23/2026 17:47:28 - INFO - d_kv_intervene - [11/93] qid=1861edacc01c_8413bbcc:23 tool_name_match=True corr_tokens=357 sham_tokens=0 recompute=1791 cache_tokens=6544 wall=23.8s
+08/23/2026 17:47:42 - INFO - d_kv_intervene - [12/93] qid=1861edacc01c_c9c8ce14:11 tool_name_match=False corr_tokens=12 sham_tokens=0 recompute=3778 cache_tokens=8142 wall=13.3s
+08/23/2026 17:48:06 - INFO - d_kv_intervene - [13/93] qid=1861edacc01c_c9c8ce14:17 tool_name_match=False corr_tokens=72 sham_tokens=0 recompute=1242 cache_tokens=5865 wall=23.9s
+08/23/2026 17:48:27 - INFO - d_kv_intervene - [14/93] qid=18b5978679fb_8419955d:5 tool_name_match=True corr_tokens=757 sham_tokens=0 recompute=119 cache_tokens=5126 wall=19.8s
+08/23/2026 17:48:42 - INFO - d_kv_intervene - [15/93] qid=18b5978679fb_b62a7b4f:39 tool_name_match=False corr_tokens=757 sham_tokens=0 recompute=2478 cache_tokens=7781 wall=14.7s
+08/23/2026 17:49:04 - INFO - d_kv_intervene - [16/93] qid=1bafd96e8923_3560d7f9:2 tool_name_match=False corr_tokens=757 sham_tokens=0 recompute=1427 cache_tokens=2967 wall=20.8s
+08/23/2026 17:49:14 - INFO - d_kv_intervene - [17/93] qid=1bafd96e8923_de668d42:3 tool_name_match=True corr_tokens=226 sham_tokens=0 recompute=2211 cache_tokens=3362 wall=10.0s
+08/23/2026 17:49:38 - INFO - d_kv_intervene - [18/93] qid=1bafd96e8923_f0f2747b:16 tool_name_match=True corr_tokens=291 sham_tokens=0 recompute=1728 cache_tokens=2866 wall=22.9s
+08/23/2026 17:50:02 - INFO - d_kv_intervene - [19/93] qid=1bafd96e8923_f0f2747b:17 tool_name_match=True corr_tokens=291 sham_tokens=0 recompute=1689 cache_tokens=2775 wall=22.9s
+08/23/2026 17:50:27 - INFO - d_kv_intervene - [20/93] qid=24347bbedbb0_e293a74a:55 tool_name_match=True corr_tokens=277 sham_tokens=0 recompute=2272 cache_tokens=6961 wall=24.2s
+08/23/2026 17:50:46 - INFO - d_kv_intervene - [21/93] qid=24347bbedbb0_f0695cdf:11 tool_name_match=True corr_tokens=12 sham_tokens=0 recompute=1275 cache_tokens=5534 wall=18.5s
+08/23/2026 17:51:12 - INFO - d_kv_intervene - [22/93] qid=2a21e94e0687_0f5ba78c:12 tool_name_match=True corr_tokens=386 sham_tokens=0 recompute=3088 cache_tokens=7990 wall=24.9s
+08/23/2026 17:51:37 - INFO - d_kv_intervene - [23/93] qid=2a21e94e0687_0f5ba78c:15 tool_name_match=True corr_tokens=148 sham_tokens=0 recompute=3124 cache_tokens=7782 wall=24.7s
+08/23/2026 17:52:00 - INFO - d_kv_intervene - [24/93] qid=2a21e94e0687_3bdda2e7:8 tool_name_match=True corr_tokens=311 sham_tokens=0 recompute=1554 cache_tokens=6207 wall=22.5s
+08/23/2026 17:52:13 - INFO - d_kv_intervene - [25/93] qid=2a21e94e0687_b734292f:10 tool_name_match=False corr_tokens=144 sham_tokens=0 recompute=1163 cache_tokens=5569 wall=11.8s
+08/23/2026 17:52:37 - INFO - d_kv_intervene - [26/93] qid=2a21e94e0687_d3ce1db1:9 tool_name_match=False corr_tokens=273 sham_tokens=0 recompute=1051 cache_tokens=5672 wall=23.4s
+08/23/2026 17:52:47 - INFO - d_kv_intervene - [27/93] qid=2b035779e4f9_b27d0d58:2 tool_name_match=False corr_tokens=53 sham_tokens=0 recompute=76 cache_tokens=4299 wall=9.5s
+08/23/2026 17:53:02 - INFO - d_kv_intervene - [28/93] qid=33b8f9e350cf_05148b9c:9 tool_name_match=True corr_tokens=34 sham_tokens=0 recompute=3312 cache_tokens=4100 wall=14.4s
+08/23/2026 17:53:24 - INFO - d_kv_intervene - [29/93] qid=33b8f9e350cf_25815bf6:2 tool_name_match=False corr_tokens=746 sham_tokens=0 recompute=1784 cache_tokens=3236 wall=20.9s
+08/23/2026 17:53:43 - INFO - d_kv_intervene - [30/93] qid=33b8f9e350cf_25815bf6:6 tool_name_match=True corr_tokens=578 sham_tokens=0 recompute=3003 cache_tokens=4527 wall=18.7s
+08/23/2026 17:53:58 - INFO - d_kv_intervene - [31/93] qid=33b8f9e350cf_b13d2558:4 tool_name_match=True corr_tokens=33 sham_tokens=0 recompute=3665 cache_tokens=4634 wall=14.5s
+08/23/2026 17:54:23 - INFO - d_kv_intervene - [32/93] qid=33b8f9e350cf_b5b26346:10 tool_name_match=False corr_tokens=99 sham_tokens=0 recompute=3353 cache_tokens=4416 wall=24.0s
+08/23/2026 17:54:44 - INFO - d_kv_intervene - [33/93] qid=33b8f9e350cf_b5b26346:9 tool_name_match=True corr_tokens=36 sham_tokens=0 recompute=3405 cache_tokens=4398 wall=21.0s
+08/23/2026 17:55:00 - INFO - d_kv_intervene - [34/93] qid=33b8f9e350cf_e387ca3b:29 tool_name_match=False corr_tokens=38 sham_tokens=0 recompute=3223 cache_tokens=4231 wall=15.3s
+08/23/2026 17:55:20 - INFO - d_kv_intervene - [35/93] qid=379733137f5d_05583758:4 tool_name_match=True corr_tokens=12 sham_tokens=0 recompute=1248 cache_tokens=5506 wall=18.8s
+08/23/2026 17:55:37 - INFO - d_kv_intervene - [36/93] qid=379733137f5d_0bbbfc38:7 tool_name_match=False corr_tokens=520 sham_tokens=0 recompute=817 cache_tokens=5660 wall=16.8s
+08/23/2026 17:55:58 - INFO - d_kv_intervene - [37/93] qid=379733137f5d_0f729ba3:2 tool_name_match=True corr_tokens=305 sham_tokens=0 recompute=333 cache_tokens=4842 wall=20.3s
+08/23/2026 17:56:18 - INFO - d_kv_intervene - [38/93] qid=379733137f5d_18f7e5cb:4 tool_name_match=True corr_tokens=334 sham_tokens=0 recompute=583 cache_tokens=5114 wall=19.3s
+08/23/2026 17:56:27 - INFO - d_kv_intervene - [39/93] qid=379733137f5d_ece17a61:3 tool_name_match=False corr_tokens=105 sham_tokens=0 recompute=337 cache_tokens=4619 wall=7.8s
+08/23/2026 17:56:34 - INFO - d_kv_intervene - [40/93] qid=39f6781fd774_0700d34f:1 tool_name_match=True corr_tokens=413 sham_tokens=0 recompute=0 cache_tokens=752 wall=6.9s
+08/23/2026 17:56:45 - INFO - d_kv_intervene - [41/93] qid=39f6781fd774_0f76017d:4 tool_name_match=False corr_tokens=42 sham_tokens=0 recompute=3209 cache_tokens=4021 wall=10.2s
+08/23/2026 17:56:59 - INFO - d_kv_intervene - [42/93] qid=39f6781fd774_0f76017d:6 tool_name_match=True corr_tokens=12 sham_tokens=0 recompute=3489 cache_tokens=4201 wall=13.9s
+08/23/2026 17:57:10 - INFO - d_kv_intervene - [43/93] qid=39f6781fd774_2140ef43:4 tool_name_match=False corr_tokens=12 sham_tokens=0 recompute=3382 cache_tokens=3963 wall=10.3s
+08/23/2026 17:57:17 - INFO - d_kv_intervene - [44/93] qid=39f6781fd774_21434cf8:1 tool_name_match=True corr_tokens=327 sham_tokens=0 recompute=0 cache_tokens=655 wall=6.5s
+08/23/2026 17:57:29 - INFO - d_kv_intervene - [45/93] qid=39f6781fd774_21434cf8:7 tool_name_match=False corr_tokens=385 sham_tokens=0 recompute=2325 cache_tokens=3448 wall=10.7s
+08/23/2026 17:57:41 - INFO - d_kv_intervene - [46/93] qid=39f6781fd774_48ec7fe3:1 tool_name_match=True corr_tokens=440 sham_tokens=0 recompute=0 cache_tokens=782 wall=12.0s
+08/23/2026 17:57:51 - INFO - d_kv_intervene - [47/93] qid=39f6781fd774_48ec7fe3:2 tool_name_match=False corr_tokens=671 sham_tokens=0 recompute=1258 cache_tokens=2528 wall=8.6s
+08/23/2026 17:58:02 - INFO - d_kv_intervene - [48/93] qid=39f6781fd774_559fb693:10 tool_name_match=False corr_tokens=39 sham_tokens=0 recompute=3360 cache_tokens=4188 wall=11.2s
+08/23/2026 17:58:15 - INFO - d_kv_intervene - [49/93] qid=39f6781fd774_559fb693:15 tool_name_match=False corr_tokens=36 sham_tokens=0 recompute=3377 cache_tokens=4213 wall=11.5s
+08/23/2026 17:58:23 - INFO - d_kv_intervene - [50/93] qid=39f6781fd774_75c29c1d:1 tool_name_match=True corr_tokens=388 sham_tokens=0 recompute=0 cache_tokens=724 wall=7.3s
+08/23/2026 17:58:32 - INFO - d_kv_intervene - [51/93] qid=39f6781fd774_79248acd:1 tool_name_match=True corr_tokens=408 sham_tokens=0 recompute=0 cache_tokens=746 wall=8.8s
+08/23/2026 17:58:43 - INFO - d_kv_intervene - [52/93] qid=39f6781fd774_79248acd:10 tool_name_match=False corr_tokens=12 sham_tokens=0 recompute=3408 cache_tokens=4044 wall=10.0s
+08/23/2026 17:58:52 - INFO - d_kv_intervene - [53/93] qid=39f6781fd774_871064a0:2 tool_name_match=False corr_tokens=757 sham_tokens=0 recompute=1049 cache_tokens=2434 wall=9.0s
+08/23/2026 17:58:59 - INFO - d_kv_intervene - [54/93] qid=39f6781fd774_a3032232:1 tool_name_match=False corr_tokens=393 sham_tokens=0 recompute=0 cache_tokens=730 wall=6.0s
+08/23/2026 17:59:07 - INFO - d_kv_intervene - [55/93] qid=39f6781fd774_b09911cf:1 tool_name_match=True corr_tokens=338 sham_tokens=0 recompute=0 cache_tokens=668 wall=7.0s
+08/23/2026 17:59:28 - INFO - d_kv_intervene - [56/93] qid=4fad8197a4ef_97f84dd8:10 tool_name_match=False corr_tokens=210 sham_tokens=0 recompute=3111 cache_tokens=4075 wall=21.3s
+08/23/2026 17:59:42 - INFO - d_kv_intervene - [57/93] qid=4fad8197a4ef_97f84dd8:38 tool_name_match=False corr_tokens=12 sham_tokens=0 recompute=3551 cache_tokens=4267 wall=12.6s
+08/23/2026 18:00:03 - INFO - d_kv_intervene - [58/93] qid=56c19f19c4f2_c240d17d:3 tool_name_match=True corr_tokens=748 sham_tokens=0 recompute=585 cache_tokens=5580 wall=21.0s
+08/23/2026 18:00:22 - INFO - d_kv_intervene - [59/93] qid=8eafd208fd5d_002d69b6:1 tool_name_match=True corr_tokens=482 sham_tokens=0 recompute=0 cache_tokens=4639 wall=17.7s
+08/23/2026 18:00:40 - INFO - d_kv_intervene - [60/93] qid=8eafd208fd5d_002d69b6:11 tool_name_match=True corr_tokens=47 sham_tokens=0 recompute=3441 cache_tokens=8078 wall=17.8s
+08/23/2026 18:01:02 - INFO - d_kv_intervene - [61/93] qid=8eafd208fd5d_0eb5b36a:29 tool_name_match=True corr_tokens=378 sham_tokens=0 recompute=3656 cache_tokens=8641 wall=21.1s
+08/23/2026 18:01:28 - INFO - d_kv_intervene - [62/93] qid=8eafd208fd5d_0eb5b36a:5 tool_name_match=True corr_tokens=674 sham_tokens=0 recompute=3233 cache_tokens=8446 wall=25.0s
+08/23/2026 18:01:47 - INFO - d_kv_intervene - [63/93] qid=8eafd208fd5d_479c93c0:6 tool_name_match=True corr_tokens=37 sham_tokens=0 recompute=3449 cache_tokens=8016 wall=18.6s
+08/23/2026 18:02:02 - INFO - d_kv_intervene - [64/93] qid=8eafd208fd5d_9fa29cd8:5 tool_name_match=True corr_tokens=39 sham_tokens=0 recompute=3374 cache_tokens=7844 wall=14.5s
+08/23/2026 18:02:22 - INFO - d_kv_intervene - [65/93] qid=8eafd208fd5d_fb52e1ce:10 tool_name_match=True corr_tokens=360 sham_tokens=0 recompute=3330 cache_tokens=8256 wall=18.7s
+08/23/2026 18:02:43 - INFO - d_kv_intervene - [66/93] qid=8eafd208fd5d_fb52e1ce:27 tool_name_match=True corr_tokens=97 sham_tokens=0 recompute=3372 cache_tokens=7970 wall=21.1s
+08/23/2026 18:03:04 - INFO - d_kv_intervene - [67/93] qid=8eafd208fd5d_fb52e1ce:32 tool_name_match=True corr_tokens=212 sham_tokens=0 recompute=3253 cache_tokens=8044 wall=19.9s
+08/23/2026 18:03:23 - INFO - d_kv_intervene - [68/93] qid=8eafd208fd5d_fb52e1ce:9 tool_name_match=True corr_tokens=266 sham_tokens=0 recompute=3238 cache_tokens=8101 wall=18.2s
+08/23/2026 18:03:43 - INFO - d_kv_intervene - [69/93] qid=a45d2c09567a_344ed9b0:5 tool_name_match=True corr_tokens=246 sham_tokens=0 recompute=665 cache_tokens=5130 wall=19.4s
+08/23/2026 18:04:05 - INFO - d_kv_intervene - [70/93] qid=a45d2c09567a_344ed9b0:6 tool_name_match=False corr_tokens=246 sham_tokens=0 recompute=921 cache_tokens=5386 wall=21.6s
+08/23/2026 18:04:18 - INFO - d_kv_intervene - [71/93] qid=a45d2c09567a_42e3637f:2 tool_name_match=True corr_tokens=92 sham_tokens=0 recompute=521 cache_tokens=4721 wall=12.2s
+08/23/2026 18:04:38 - INFO - d_kv_intervene - [72/93] qid=a45d2c09567a_9ad55a9e:3 tool_name_match=True corr_tokens=522 sham_tokens=0 recompute=429 cache_tokens=5131 wall=19.5s
+08/23/2026 18:05:03 - INFO - d_kv_intervene - [73/93] qid=a45d2c09567a_c794536b:7 tool_name_match=True corr_tokens=757 sham_tokens=0 recompute=2926 cache_tokens=8158 wall=24.6s
+08/23/2026 18:05:29 - INFO - d_kv_intervene - [74/93] qid=a45d2c09567a_c794536b:8 tool_name_match=True corr_tokens=180 sham_tokens=0 recompute=3183 cache_tokens=7833 wall=24.8s
+08/23/2026 18:05:54 - INFO - d_kv_intervene - [75/93] qid=a45d2c09567a_f2b8f831:14 tool_name_match=True corr_tokens=315 sham_tokens=0 recompute=1952 cache_tokens=6800 wall=24.2s
+08/23/2026 18:06:18 - INFO - d_kv_intervene - [76/93] qid=a45d2c09567a_f2b8f831:6 tool_name_match=True corr_tokens=757 sham_tokens=0 recompute=2269 cache_tokens=7420 wall=23.8s
+08/23/2026 18:06:28 - INFO - d_kv_intervene - [77/93] qid=ac0f039f4468_0e7a17fd:1 tool_name_match=True corr_tokens=435 sham_tokens=0 recompute=0 cache_tokens=4586 wall=9.6s
+08/23/2026 18:06:41 - INFO - d_kv_intervene - [78/93] qid=b455f37f04c7_08958bbb:1 tool_name_match=True corr_tokens=140 sham_tokens=0 recompute=0 cache_tokens=4254 wall=11.8s
+08/23/2026 18:07:08 - INFO - d_kv_intervene - [79/93] qid=b455f37f04c7_0ee66cf1:7 tool_name_match=False corr_tokens=107 sham_tokens=0 recompute=901 cache_tokens=5213 wall=26.1s
+08/23/2026 18:07:21 - INFO - d_kv_intervene - [80/93] qid=b455f37f04c7_263e5d47:1 tool_name_match=True corr_tokens=143 sham_tokens=0 recompute=48 cache_tokens=4305 wall=11.6s
+08/23/2026 18:07:34 - INFO - d_kv_intervene - [81/93] qid=b455f37f04c7_263e5d47:4 tool_name_match=False corr_tokens=339 sham_tokens=0 recompute=2635 cache_tokens=7294 wall=12.6s
+08/23/2026 18:07:57 - INFO - d_kv_intervene - [82/93] qid=b455f37f04c7_714ea5fe:37 tool_name_match=True corr_tokens=762 sham_tokens=0 recompute=3503 cache_tokens=6267 wall=22.9s
+08/23/2026 18:08:13 - INFO - d_kv_intervene - [83/93] qid=c351b7150104_20ab4895:1 tool_name_match=True corr_tokens=539 sham_tokens=0 recompute=0 cache_tokens=4703 wall=14.9s
+08/23/2026 18:08:22 - INFO - d_kv_intervene - [84/93] qid=c351b7150104_2ae20927:1 tool_name_match=True corr_tokens=402 sham_tokens=0 recompute=0 cache_tokens=4549 wall=8.6s
+08/23/2026 18:08:31 - INFO - d_kv_intervene - [85/93] qid=c351b7150104_3e5e7863:2 tool_name_match=False corr_tokens=621 sham_tokens=0 recompute=1568 cache_tokens=6568 wall=8.1s
+08/23/2026 18:08:48 - INFO - d_kv_intervene - [86/93] qid=c351b7150104_5ffa4738:1 tool_name_match=True corr_tokens=495 sham_tokens=0 recompute=0 cache_tokens=4653 wall=16.8s
+08/23/2026 18:08:58 - INFO - d_kv_intervene - [87/93] qid=c351b7150104_7443b665:1 tool_name_match=True corr_tokens=572 sham_tokens=0 recompute=0 cache_tokens=4740 wall=9.0s
+08/23/2026 18:09:09 - INFO - d_kv_intervene - [88/93] qid=c351b7150104_bc4b9c45:1 tool_name_match=True corr_tokens=468 sham_tokens=0 recompute=0 cache_tokens=4623 wall=10.4s
+08/23/2026 18:09:24 - INFO - d_kv_intervene - [89/93] qid=c351b7150104_fbfdc6d0:1 tool_name_match=True corr_tokens=494 sham_tokens=0 recompute=0 cache_tokens=4652 wall=14.6s
+08/23/2026 18:09:44 - INFO - d_kv_intervene - [90/93] qid=cfc3d70e7f3c_790b34c5:5 tool_name_match=True corr_tokens=12 sham_tokens=0 recompute=1221 cache_tokens=5453 wall=18.8s
+08/23/2026 18:09:59 - INFO - d_kv_intervene - [91/93] qid=ebba346cd20a_0e3e5e0b:15 tool_name_match=True corr_tokens=673 sham_tokens=0 recompute=3298 cache_tokens=8539 wall=14.8s
+08/23/2026 18:10:17 - INFO - d_kv_intervene - [92/93] qid=ebba346cd20a_0e3e5e0b:4 tool_name_match=True corr_tokens=285 sham_tokens=0 recompute=3404 cache_tokens=8326 wall=17.0s
+08/23/2026 18:10:38 - INFO - d_kv_intervene - [93/93] qid=ebba346cd20a_274cb65a:1 tool_name_match=False corr_tokens=607 sham_tokens=0 recompute=0 cache_tokens=4779 wall=20.7s
+08/23/2026 18:10:39 - INFO - d_kv_intervene - Done. wrote 93 rows -> /home/user/c2kv/outputs_lyc/g_joint/bdf/d_pilot_r2/d_corr_re.jsonl
+[run] arm=corr_all -> /home/user/c2kv/outputs_lyc/g_joint/bdf/d_pilot_r2/d_corr_all.jsonl
+/home/user/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/user/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0/aarch64-linux/ascend_ops_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/user/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/user/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0/aarch64-linux/ascend_ops_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+08/23/2026 18:11:03 - INFO - d_kv_intervene - arm=corr_all mode=d_corr_all qids=93 manifest_sha=b9739bdb35407161… plan_sha=3abf1a5ac7ecbf33
+08/23/2026 18:11:03 - INFO - eval_agent_history_c2kv - Loading tokenizer from /home/user/c2kv/models/Qwen3-4B-Instruct-2507 use_fast=True
+08/23/2026 18:28:15 - INFO - d_kv_intervene - source: 3586 examples, selection_skips={}
+08/23/2026 18:28:17 - INFO - d_kv_intervene - Loading model /home/user/c2kv/outputs_lyc/g_joint/fixed_joint (mode=c2kv, attn=eager)
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+Loading weights:   0%|          | 0/507 [00:00<?, ?it/s]Loading weights:  15%|█▍        | 74/507 [00:00<00:00, 727.07it/s]Loading weights:  29%|██▉       | 147/507 [00:00<00:00, 588.90it/s]Loading weights:  45%|████▌     | 229/507 [00:00<00:00, 678.99it/s]Loading weights:  61%|██████    | 307/507 [00:00<00:00, 714.64it/s]Loading weights:  77%|███████▋  | 388/507 [00:00<00:00, 746.69it/s]Loading weights:  92%|█████████▏| 467/507 [00:00<00:00, 757.89it/s]Loading weights: 100%|██████████| 507/507 [00:00<00:00, 713.69it/s]
+08/23/2026 18:28:19 - INFO - d_kv_intervene - runtime attn impl=eager
+08/23/2026 18:28:39 - INFO - d_kv_intervene - [1/93] qid=0c890a5dde8c_12dc86e7:8 tool_name_match=True corr_tokens=1861 sham_tokens=0 recompute=0 cache_tokens=6192 wall=19.5s
+08/23/2026 18:28:58 - INFO - d_kv_intervene - [2/93] qid=0c890a5dde8c_c4d290c5:4 tool_name_match=True corr_tokens=1139 sham_tokens=0 recompute=0 cache_tokens=5378 wall=18.5s
+08/23/2026 18:29:23 - INFO - d_kv_intervene - [3/93] qid=0c890a5dde8c_ebac8eab:16 tool_name_match=True corr_tokens=5014 sham_tokens=0 recompute=0 cache_tokens=9744 wall=23.5s
+08/23/2026 18:29:47 - INFO - d_kv_intervene - [4/93] qid=10d642ac9c10_085f0768:8 tool_name_match=True corr_tokens=2658 sham_tokens=0 recompute=0 cache_tokens=7089 wall=23.7s
+08/23/2026 18:30:11 - INFO - d_kv_intervene - [5/93] qid=10d642ac9c10_4f13ce12:12 tool_name_match=True corr_tokens=3338 sham_tokens=0 recompute=0 cache_tokens=7857 wall=23.4s
+08/23/2026 18:30:34 - INFO - d_kv_intervene - [6/93] qid=10d642ac9c10_535ae546:7 tool_name_match=True corr_tokens=2123 sham_tokens=0 recompute=0 cache_tokens=6488 wall=22.2s
+08/23/2026 18:30:54 - INFO - d_kv_intervene - [7/93] qid=10d642ac9c10_89206737:3 tool_name_match=True corr_tokens=1132 sham_tokens=0 recompute=0 cache_tokens=5371 wall=19.2s
+08/23/2026 18:32:02 - INFO - d_kv_intervene - [8/93] qid=10d642ac9c10_ba73f52d:11 tool_name_match=True corr_tokens=5588 sham_tokens=0 recompute=0 cache_tokens=10389 wall=66.7s
+08/23/2026 18:32:23 - INFO - d_kv_intervene - [9/93] qid=15bb4bab2031_3bc535d7:29 tool_name_match=True corr_tokens=7102 sham_tokens=0 recompute=0 cache_tokens=12093 wall=19.4s
+08/23/2026 18:32:37 - INFO - d_kv_intervene - [10/93] qid=15bb4bab2031_a3ac2dd4:6 tool_name_match=True corr_tokens=3322 sham_tokens=0 recompute=0 cache_tokens=7836 wall=13.3s
+08/23/2026 18:33:03 - INFO - d_kv_intervene - [11/93] qid=1861edacc01c_8413bbcc:23 tool_name_match=True corr_tokens=4171 sham_tokens=0 recompute=0 cache_tokens=8794 wall=24.6s
+08/23/2026 18:33:29 - INFO - d_kv_intervene - [12/93] qid=1861edacc01c_c9c8ce14:11 tool_name_match=True corr_tokens=5802 sham_tokens=0 recompute=0 cache_tokens=10629 wall=26.0s
+08/23/2026 18:33:55 - INFO - d_kv_intervene - [13/93] qid=1861edacc01c_c9c8ce14:17 tool_name_match=True corr_tokens=4859 sham_tokens=0 recompute=0 cache_tokens=9568 wall=24.2s
+08/23/2026 18:34:17 - INFO - d_kv_intervene - [14/93] qid=18b5978679fb_8419955d:5 tool_name_match=True corr_tokens=1337 sham_tokens=0 recompute=0 cache_tokens=5603 wall=21.8s
+08/23/2026 18:34:47 - INFO - d_kv_intervene - [15/93] qid=18b5978679fb_b62a7b4f:39 tool_name_match=False corr_tokens=6046 sham_tokens=0 recompute=0 cache_tokens=10904 wall=29.2s
+08/23/2026 18:35:07 - INFO - d_kv_intervene - [16/93] qid=1bafd96e8923_3560d7f9:2 tool_name_match=False corr_tokens=3798 sham_tokens=0 recompute=0 cache_tokens=4761 wall=19.0s
+08/23/2026 18:35:18 - INFO - d_kv_intervene - [17/93] qid=1bafd96e8923_de668d42:3 tool_name_match=True corr_tokens=5832 sham_tokens=0 recompute=0 cache_tokens=7036 wall=10.3s
+08/23/2026 18:35:42 - INFO - d_kv_intervene - [18/93] qid=1bafd96e8923_f0f2747b:16 tool_name_match=True corr_tokens=4729 sham_tokens=0 recompute=0 cache_tokens=5796 wall=23.8s
+08/23/2026 18:36:06 - INFO - d_kv_intervene - [19/93] qid=1bafd96e8923_f0f2747b:17 tool_name_match=True corr_tokens=4272 sham_tokens=0 recompute=0 cache_tokens=5282 wall=23.4s
+08/23/2026 18:36:32 - INFO - d_kv_intervene - [20/93] qid=24347bbedbb0_e293a74a:55 tool_name_match=True corr_tokens=4773 sham_tokens=0 recompute=0 cache_tokens=9472 wall=24.7s
+08/23/2026 18:36:56 - INFO - d_kv_intervene - [21/93] qid=24347bbedbb0_f0695cdf:11 tool_name_match=True corr_tokens=2469 sham_tokens=0 recompute=0 cache_tokens=6878 wall=23.4s
+08/23/2026 18:37:24 - INFO - d_kv_intervene - [22/93] qid=2a21e94e0687_0f5ba78c:12 tool_name_match=True corr_tokens=6419 sham_tokens=0 recompute=0 cache_tokens=11323 wall=27.0s
+08/23/2026 18:37:50 - INFO - d_kv_intervene - [23/93] qid=2a21e94e0687_0f5ba78c:15 tool_name_match=True corr_tokens=6414 sham_tokens=0 recompute=0 cache_tokens=11317 wall=26.2s
+08/23/2026 18:38:15 - INFO - d_kv_intervene - [24/93] qid=2a21e94e0687_3bdda2e7:8 tool_name_match=True corr_tokens=3511 sham_tokens=0 recompute=0 cache_tokens=8048 wall=24.0s
+08/23/2026 18:38:29 - INFO - d_kv_intervene - [25/93] qid=2a21e94e0687_b734292f:10 tool_name_match=True corr_tokens=2479 sham_tokens=0 recompute=0 cache_tokens=6887 wall=13.3s
+08/23/2026 18:38:53 - INFO - d_kv_intervene - [26/93] qid=2a21e94e0687_d3ce1db1:9 tool_name_match=False corr_tokens=3043 sham_tokens=0 recompute=0 cache_tokens=7524 wall=23.3s
+08/23/2026 18:39:08 - INFO - d_kv_intervene - [27/93] qid=2b035779e4f9_b27d0d58:2 tool_name_match=True corr_tokens=659 sham_tokens=0 recompute=0 cache_tokens=4839 wall=14.1s
+08/23/2026 18:39:27 - INFO - d_kv_intervene - [28/93] qid=33b8f9e350cf_05148b9c:9 tool_name_match=True corr_tokens=5555 sham_tokens=0 recompute=0 cache_tokens=6726 wall=18.3s
+08/23/2026 18:39:51 - INFO - d_kv_intervene - [29/93] qid=33b8f9e350cf_25815bf6:2 tool_name_match=False corr_tokens=3659 sham_tokens=0 recompute=0 cache_tokens=4590 wall=22.6s
+08/23/2026 18:40:09 - INFO - d_kv_intervene - [30/93] qid=33b8f9e350cf_25815bf6:6 tool_name_match=True corr_tokens=6793 sham_tokens=0 recompute=0 cache_tokens=8118 wall=17.7s
+08/23/2026 18:40:26 - INFO - d_kv_intervene - [31/93] qid=33b8f9e350cf_b13d2558:4 tool_name_match=True corr_tokens=7369 sham_tokens=0 recompute=0 cache_tokens=8766 wall=16.7s
+08/23/2026 18:40:49 - INFO - d_kv_intervene - [32/93] qid=33b8f9e350cf_b5b26346:10 tool_name_match=True corr_tokens=7287 sham_tokens=0 recompute=0 cache_tokens=8674 wall=21.8s
+08/23/2026 18:41:15 - INFO - d_kv_intervene - [33/93] qid=33b8f9e350cf_b5b26346:9 tool_name_match=True corr_tokens=7282 sham_tokens=0 recompute=0 cache_tokens=8668 wall=25.6s
+08/23/2026 18:41:41 - INFO - d_kv_intervene - [34/93] qid=33b8f9e350cf_e387ca3b:29 tool_name_match=True corr_tokens=7206 sham_tokens=0 recompute=0 cache_tokens=8581 wall=25.6s
+08/23/2026 18:42:05 - INFO - d_kv_intervene - [35/93] qid=379733137f5d_05583758:4 tool_name_match=True corr_tokens=2431 sham_tokens=0 recompute=0 cache_tokens=6835 wall=23.1s
+08/23/2026 18:42:22 - INFO - d_kv_intervene - [36/93] qid=379733137f5d_0bbbfc38:7 tool_name_match=True corr_tokens=2619 sham_tokens=0 recompute=0 cache_tokens=7045 wall=15.9s
+08/23/2026 18:42:44 - INFO - d_kv_intervene - [37/93] qid=379733137f5d_0f729ba3:2 tool_name_match=True corr_tokens=1184 sham_tokens=0 recompute=0 cache_tokens=5431 wall=21.6s
+08/23/2026 18:43:06 - INFO - d_kv_intervene - [38/93] qid=379733137f5d_18f7e5cb:4 tool_name_match=True corr_tokens=1382 sham_tokens=0 recompute=0 cache_tokens=5653 wall=21.8s
+08/23/2026 18:43:28 - INFO - d_kv_intervene - [39/93] qid=379733137f5d_ece17a61:3 tool_name_match=True corr_tokens=973 sham_tokens=0 recompute=0 cache_tokens=5193 wall=20.8s
+08/23/2026 18:43:38 - INFO - d_kv_intervene - [40/93] qid=39f6781fd774_0700d34f:1 tool_name_match=True corr_tokens=413 sham_tokens=0 recompute=0 cache_tokens=752 wall=8.8s
+08/23/2026 18:44:03 - INFO - d_kv_intervene - [41/93] qid=39f6781fd774_0f76017d:4 tool_name_match=False corr_tokens=7044 sham_tokens=0 recompute=0 cache_tokens=8218 wall=23.9s
+08/23/2026 18:44:29 - INFO - d_kv_intervene - [42/93] qid=39f6781fd774_0f76017d:6 tool_name_match=False corr_tokens=6772 sham_tokens=0 recompute=0 cache_tokens=7912 wall=25.6s
+08/23/2026 18:44:54 - INFO - d_kv_intervene - [43/93] qid=39f6781fd774_2140ef43:4 tool_name_match=False corr_tokens=5610 sham_tokens=0 recompute=0 cache_tokens=6605 wall=24.3s
+08/23/2026 18:45:02 - INFO - d_kv_intervene - [44/93] qid=39f6781fd774_21434cf8:1 tool_name_match=True corr_tokens=327 sham_tokens=0 recompute=0 cache_tokens=655 wall=6.8s
+08/23/2026 18:45:27 - INFO - d_kv_intervene - [45/93] qid=39f6781fd774_21434cf8:7 tool_name_match=False corr_tokens=5907 sham_tokens=0 recompute=0 cache_tokens=6939 wall=24.5s
+08/23/2026 18:45:40 - INFO - d_kv_intervene - [46/93] qid=39f6781fd774_48ec7fe3:1 tool_name_match=True corr_tokens=440 sham_tokens=0 recompute=0 cache_tokens=782 wall=12.7s
+08/23/2026 18:45:50 - INFO - d_kv_intervene - [47/93] qid=39f6781fd774_48ec7fe3:2 tool_name_match=False corr_tokens=3735 sham_tokens=0 recompute=0 cache_tokens=4493 wall=8.9s
+08/23/2026 18:46:16 - INFO - d_kv_intervene - [48/93] qid=39f6781fd774_559fb693:10 tool_name_match=False corr_tokens=7357 sham_tokens=0 recompute=0 cache_tokens=8570 wall=26.0s
+08/23/2026 18:46:43 - INFO - d_kv_intervene - [49/93] qid=39f6781fd774_559fb693:15 tool_name_match=False corr_tokens=7451 sham_tokens=0 recompute=0 cache_tokens=8678 wall=26.5s
+08/23/2026 18:46:52 - INFO - d_kv_intervene - [50/93] qid=39f6781fd774_75c29c1d:1 tool_name_match=True corr_tokens=388 sham_tokens=0 recompute=0 cache_tokens=724 wall=7.6s
+08/23/2026 18:47:01 - INFO - d_kv_intervene - [51/93] qid=39f6781fd774_79248acd:1 tool_name_match=True corr_tokens=408 sham_tokens=0 recompute=0 cache_tokens=746 wall=9.1s
+08/23/2026 18:47:27 - INFO - d_kv_intervene - [52/93] qid=39f6781fd774_79248acd:10 tool_name_match=False corr_tokens=6088 sham_tokens=0 recompute=0 cache_tokens=7142 wall=25.1s
+08/23/2026 18:47:39 - INFO - d_kv_intervene - [53/93] qid=39f6781fd774_871064a0:2 tool_name_match=True corr_tokens=3756 sham_tokens=0 recompute=0 cache_tokens=4517 wall=11.6s
+08/23/2026 18:47:46 - INFO - d_kv_intervene - [54/93] qid=39f6781fd774_a3032232:1 tool_name_match=False corr_tokens=393 sham_tokens=0 recompute=0 cache_tokens=730 wall=6.2s
+08/23/2026 18:47:54 - INFO - d_kv_intervene - [55/93] qid=39f6781fd774_b09911cf:1 tool_name_match=True corr_tokens=338 sham_tokens=0 recompute=0 cache_tokens=668 wall=7.3s
+08/23/2026 18:48:20 - INFO - d_kv_intervene - [56/93] qid=4fad8197a4ef_97f84dd8:10 tool_name_match=False corr_tokens=6817 sham_tokens=0 recompute=0 cache_tokens=7963 wall=25.7s
+08/23/2026 18:48:47 - INFO - d_kv_intervene - [57/93] qid=4fad8197a4ef_97f84dd8:38 tool_name_match=False corr_tokens=6855 sham_tokens=0 recompute=0 cache_tokens=8007 wall=26.0s
+08/23/2026 18:49:10 - INFO - d_kv_intervene - [58/93] qid=56c19f19c4f2_c240d17d:3 tool_name_match=True corr_tokens=1782 sham_tokens=0 recompute=0 cache_tokens=6103 wall=22.2s
+08/23/2026 18:49:29 - INFO - d_kv_intervene - [59/93] qid=8eafd208fd5d_002d69b6:1 tool_name_match=True corr_tokens=482 sham_tokens=0 recompute=0 cache_tokens=4639 wall=18.2s
+08/23/2026 18:49:50 - INFO - d_kv_intervene - [60/93] qid=8eafd208fd5d_002d69b6:11 tool_name_match=True corr_tokens=7367 sham_tokens=0 recompute=0 cache_tokens=12391 wall=20.1s
+08/23/2026 18:50:21 - INFO - d_kv_intervene - [61/93] qid=8eafd208fd5d_0eb5b36a:29 tool_name_match=False corr_tokens=7706 sham_tokens=0 recompute=0 cache_tokens=12774 wall=30.1s
+08/23/2026 18:50:45 - INFO - d_kv_intervene - [62/93] qid=8eafd208fd5d_0eb5b36a:5 tool_name_match=True corr_tokens=6738 sham_tokens=0 recompute=0 cache_tokens=11685 wall=22.5s
+08/23/2026 18:51:13 - INFO - d_kv_intervene - [63/93] qid=8eafd208fd5d_479c93c0:6 tool_name_match=False corr_tokens=6895 sham_tokens=0 recompute=0 cache_tokens=11860 wall=28.0s
+08/23/2026 18:51:33 - INFO - d_kv_intervene - [64/93] qid=8eafd208fd5d_9fa29cd8:5 tool_name_match=True corr_tokens=6045 sham_tokens=0 recompute=0 cache_tokens=10901 wall=18.6s
+08/23/2026 18:51:57 - INFO - d_kv_intervene - [65/93] qid=8eafd208fd5d_fb52e1ce:10 tool_name_match=True corr_tokens=7053 sham_tokens=0 recompute=0 cache_tokens=12039 wall=23.3s
+08/23/2026 18:52:20 - INFO - d_kv_intervene - [66/93] qid=8eafd208fd5d_fb52e1ce:27 tool_name_match=True corr_tokens=6588 sham_tokens=0 recompute=0 cache_tokens=11514 wall=22.1s
+08/23/2026 18:52:45 - INFO - d_kv_intervene - [67/93] qid=8eafd208fd5d_fb52e1ce:32 tool_name_match=True corr_tokens=7091 sham_tokens=0 recompute=0 cache_tokens=12080 wall=23.9s
+08/23/2026 18:53:09 - INFO - d_kv_intervene - [68/93] qid=8eafd208fd5d_fb52e1ce:9 tool_name_match=True corr_tokens=7208 sham_tokens=0 recompute=0 cache_tokens=12214 wall=22.6s
+08/23/2026 18:53:31 - INFO - d_kv_intervene - [69/93] qid=a45d2c09567a_344ed9b0:5 tool_name_match=True corr_tokens=1642 sham_tokens=0 recompute=0 cache_tokens=5945 wall=21.9s
+08/23/2026 18:53:55 - INFO - d_kv_intervene - [70/93] qid=a45d2c09567a_344ed9b0:6 tool_name_match=True corr_tokens=1898 sham_tokens=0 recompute=0 cache_tokens=6233 wall=23.2s
+08/23/2026 18:54:07 - INFO - d_kv_intervene - [71/93] qid=a45d2c09567a_42e3637f:2 tool_name_match=True corr_tokens=613 sham_tokens=0 recompute=0 cache_tokens=4787 wall=11.1s
+08/23/2026 18:54:27 - INFO - d_kv_intervene - [72/93] qid=a45d2c09567a_9ad55a9e:3 tool_name_match=True corr_tokens=1089 sham_tokens=0 recompute=0 cache_tokens=5323 wall=19.4s
+08/23/2026 18:54:53 - INFO - d_kv_intervene - [73/93] qid=a45d2c09567a_c794536b:7 tool_name_match=True corr_tokens=5937 sham_tokens=0 recompute=0 cache_tokens=10781 wall=25.8s
+08/23/2026 18:55:20 - INFO - d_kv_intervene - [74/93] qid=a45d2c09567a_c794536b:8 tool_name_match=True corr_tokens=6150 sham_tokens=0 recompute=0 cache_tokens=11021 wall=25.7s
+08/23/2026 18:55:46 - INFO - d_kv_intervene - [75/93] qid=a45d2c09567a_f2b8f831:14 tool_name_match=True corr_tokens=5432 sham_tokens=0 recompute=0 cache_tokens=10212 wall=25.9s
+08/23/2026 18:56:11 - INFO - d_kv_intervene - [76/93] qid=a45d2c09567a_f2b8f831:6 tool_name_match=False corr_tokens=4637 sham_tokens=0 recompute=0 cache_tokens=9316 wall=24.2s
+08/23/2026 18:56:24 - INFO - d_kv_intervene - [77/93] qid=ac0f039f4468_0e7a17fd:1 tool_name_match=True corr_tokens=435 sham_tokens=0 recompute=0 cache_tokens=4586 wall=11.7s
+08/23/2026 18:56:39 - INFO - d_kv_intervene - [78/93] qid=b455f37f04c7_08958bbb:1 tool_name_match=True corr_tokens=140 sham_tokens=0 recompute=0 cache_tokens=4254 wall=13.7s
+08/23/2026 18:57:04 - INFO - d_kv_intervene - [79/93] qid=b455f37f04c7_0ee66cf1:7 tool_name_match=True corr_tokens=1757 sham_tokens=0 recompute=0 cache_tokens=6077 wall=23.4s
+08/23/2026 18:57:18 - INFO - d_kv_intervene - [80/93] qid=b455f37f04c7_263e5d47:1 tool_name_match=True corr_tokens=191 sham_tokens=0 recompute=0 cache_tokens=4311 wall=12.6s
+08/23/2026 18:57:44 - INFO - d_kv_intervene - [81/93] qid=b455f37f04c7_263e5d47:4 tool_name_match=True corr_tokens=4408 sham_tokens=0 recompute=0 cache_tokens=9061 wall=24.5s
+08/23/2026 18:58:09 - INFO - d_kv_intervene - [82/93] qid=b455f37f04c7_714ea5fe:37 tool_name_match=True corr_tokens=6513 sham_tokens=0 recompute=0 cache_tokens=8955 wall=24.6s
+08/23/2026 18:58:23 - INFO - d_kv_intervene - [83/93] qid=c351b7150104_20ab4895:1 tool_name_match=True corr_tokens=539 sham_tokens=0 recompute=0 cache_tokens=4703 wall=13.9s
+08/23/2026 18:58:33 - INFO - d_kv_intervene - [84/93] qid=c351b7150104_2ae20927:1 tool_name_match=True corr_tokens=402 sham_tokens=0 recompute=0 cache_tokens=4549 wall=8.7s
+08/23/2026 18:58:47 - INFO - d_kv_intervene - [85/93] qid=c351b7150104_3e5e7863:2 tool_name_match=True corr_tokens=3825 sham_tokens=0 recompute=0 cache_tokens=8402 wall=13.5s
+08/23/2026 18:59:05 - INFO - d_kv_intervene - [86/93] qid=c351b7150104_5ffa4738:1 tool_name_match=True corr_tokens=495 sham_tokens=0 recompute=0 cache_tokens=4653 wall=17.1s
+08/23/2026 18:59:13 - INFO - d_kv_intervene - [87/93] qid=c351b7150104_7443b665:1 tool_name_match=True corr_tokens=572 sham_tokens=0 recompute=0 cache_tokens=4740 wall=8.4s
+08/23/2026 18:59:25 - INFO - d_kv_intervene - [88/93] qid=c351b7150104_bc4b9c45:1 tool_name_match=True corr_tokens=468 sham_tokens=0 recompute=0 cache_tokens=4623 wall=10.6s
+08/23/2026 18:59:40 - INFO - d_kv_intervene - [89/93] qid=c351b7150104_fbfdc6d0:1 tool_name_match=True corr_tokens=494 sham_tokens=0 recompute=0 cache_tokens=4652 wall=15.0s
+08/23/2026 19:00:03 - INFO - d_kv_intervene - [90/93] qid=cfc3d70e7f3c_790b34c5:5 tool_name_match=True corr_tokens=2196 sham_tokens=0 recompute=0 cache_tokens=6570 wall=22.4s
+08/23/2026 19:00:20 - INFO - d_kv_intervene - [91/93] qid=ebba346cd20a_0e3e5e0b:15 tool_name_match=True corr_tokens=7041 sham_tokens=0 recompute=0 cache_tokens=12025 wall=15.8s
+08/23/2026 19:00:39 - INFO - d_kv_intervene - [92/93] qid=ebba346cd20a_0e3e5e0b:4 tool_name_match=True corr_tokens=7712 sham_tokens=0 recompute=0 cache_tokens=12778 wall=18.3s
+08/23/2026 19:00:58 - INFO - d_kv_intervene - [93/93] qid=ebba346cd20a_274cb65a:1 tool_name_match=False corr_tokens=607 sham_tokens=0 recompute=0 cache_tokens=4779 wall=18.0s
+08/23/2026 19:00:59 - INFO - d_kv_intervene - Done. wrote 93 rows -> /home/user/c2kv/outputs_lyc/g_joint/bdf/d_pilot_r2/d_corr_all.jsonl
+[verify] arm=none (5 qids)
+/home/user/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/user/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0/aarch64-linux/ascend_ops_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/user/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/user/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0/aarch64-linux/ascend_ops_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+08/23/2026 19:01:24 - INFO - d_kv_intervene - arm=none mode=c2kv qids=5 manifest_sha=b9739bdb35407161… plan_sha=none
+08/23/2026 19:01:24 - INFO - eval_agent_history_c2kv - Loading tokenizer from /home/user/c2kv/models/Qwen3-4B-Instruct-2507 use_fast=True
+08/23/2026 19:18:10 - INFO - d_kv_intervene - source: 3586 examples, selection_skips={}
+08/23/2026 19:18:12 - INFO - d_kv_intervene - Loading model /home/user/c2kv/outputs_lyc/g_joint/fixed_joint (mode=c2kv, attn=eager)
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+Loading weights:   0%|          | 0/507 [00:00<?, ?it/s]Loading weights:  16%|█▋        | 83/507 [00:00<00:00, 823.89it/s]Loading weights:  33%|███▎      | 166/507 [00:00<00:00, 658.77it/s]Loading weights:  48%|████▊     | 242/507 [00:00<00:00, 694.73it/s]Loading weights:  64%|██████▎   | 323/507 [00:00<00:00, 728.58it/s]Loading weights:  79%|███████▊  | 398/507 [00:00<00:00, 733.67it/s]Loading weights:  94%|█████████▍| 478/507 [00:00<00:00, 680.28it/s]Loading weights: 100%|██████████| 507/507 [00:00<00:00, 719.15it/s]
+08/23/2026 19:18:14 - INFO - d_kv_intervene - runtime attn impl=eager
+08/23/2026 19:18:31 - INFO - d_kv_intervene - [1/5] qid=0c890a5dde8c_12dc86e7:8 tool_name_match=False corr_tokens=None sham_tokens=None recompute=None cache_tokens=4331 wall=16.7s
+08/23/2026 19:18:47 - INFO - d_kv_intervene - [2/5] qid=0c890a5dde8c_c4d290c5:4 tool_name_match=False corr_tokens=None sham_tokens=None recompute=None cache_tokens=4239 wall=15.7s
+08/23/2026 19:18:54 - INFO - d_kv_intervene - [3/5] qid=0c890a5dde8c_ebac8eab:16 tool_name_match=False corr_tokens=None sham_tokens=None recompute=None cache_tokens=4730 wall=5.6s
+08/23/2026 19:19:10 - INFO - d_kv_intervene - [4/5] qid=10d642ac9c10_085f0768:8 tool_name_match=False corr_tokens=None sham_tokens=None recompute=None cache_tokens=4431 wall=15.2s
+08/23/2026 19:19:17 - INFO - d_kv_intervene - [5/5] qid=10d642ac9c10_4f13ce12:12 tool_name_match=False corr_tokens=None sham_tokens=None recompute=None cache_tokens=4519 wall=6.8s
+08/23/2026 19:19:18 - INFO - d_kv_intervene - Done. wrote 5 rows -> /home/user/c2kv/outputs_lyc/g_joint/bdf/d_pilot_r2/verify/d_none.jsonl
+[verify] arm=full (5 qids)
+/home/user/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/user/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0/aarch64-linux/ascend_ops_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/user/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/user/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0/aarch64-linux/ascend_ops_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+08/23/2026 19:19:40 - INFO - d_kv_intervene - arm=full mode=full qids=5 manifest_sha=b9739bdb35407161… plan_sha=none
+08/23/2026 19:19:40 - INFO - eval_agent_history_c2kv - Loading tokenizer from /home/user/c2kv/models/Qwen3-4B-Instruct-2507 use_fast=True
+08/23/2026 19:36:29 - INFO - d_kv_intervene - source: 3586 examples, selection_skips={}
+08/23/2026 19:36:31 - INFO - d_kv_intervene - Loading model /home/user/c2kv/models/Qwen3-4B-Instruct-2507 (mode=full, attn=eager)
+Loading weights:   0%|          | 0/398 [00:00<?, ?it/s]Loading weights:  12%|█▏        | 48/398 [00:00<00:00, 473.54it/s]Loading weights:  28%|██▊       | 113/398 [00:00<00:00, 552.68it/s]Loading weights:  45%|████▌     | 180/398 [00:00<00:00, 597.89it/s]Loading weights:  62%|██████▏   | 246/398 [00:00<00:00, 619.38it/s]Loading weights:  80%|████████  | 319/398 [00:00<00:00, 653.12it/s]Loading weights:  97%|█████████▋| 385/398 [00:00<00:00, 652.12it/s]Loading weights: 100%|██████████| 398/398 [00:00<00:00, 595.48it/s]
+08/23/2026 19:36:33 - INFO - d_kv_intervene - runtime attn impl=eager
+08/23/2026 19:36:47 - INFO - d_kv_intervene - [1/5] qid=0c890a5dde8c_12dc86e7:8 tool_name_match=True corr_tokens=None sham_tokens=None recompute=None cache_tokens=5957 wall=13.2s
+08/23/2026 19:36:59 - INFO - d_kv_intervene - [2/5] qid=0c890a5dde8c_c4d290c5:4 tool_name_match=True corr_tokens=None sham_tokens=None recompute=None cache_tokens=5235 wall=12.1s
+08/23/2026 19:37:14 - INFO - d_kv_intervene - [3/5] qid=0c890a5dde8c_ebac8eab:16 tool_name_match=True corr_tokens=None sham_tokens=None recompute=None cache_tokens=9110 wall=13.8s
+08/23/2026 19:37:28 - INFO - d_kv_intervene - [4/5] qid=10d642ac9c10_085f0768:8 tool_name_match=True corr_tokens=None sham_tokens=None recompute=None cache_tokens=6754 wall=13.5s
+08/23/2026 19:37:44 - INFO - d_kv_intervene - [5/5] qid=10d642ac9c10_4f13ce12:12 tool_name_match=True corr_tokens=None sham_tokens=None recompute=None cache_tokens=7434 wall=15.4s
+08/23/2026 19:37:45 - INFO - d_kv_intervene - Done. wrote 5 rows -> /home/user/c2kv/outputs_lyc/g_joint/bdf/d_pilot_r2/verify/d_full.jsonl
+[sentinel] /home/user/c2kv/outputs_lyc/g_joint/bdf/d_pilot_r2/verify/d_none.jsonl == /home/user/c2kv/outputs_lyc/g_joint/bdf/d_r2/battery_c2kv.jsonl on prediction
+{
+  "left": "/home/user/c2kv/outputs_lyc/g_joint/bdf/d_pilot_r2/verify/d_none.jsonl",
+  "right": "/home/user/c2kv/outputs_lyc/g_joint/bdf/d_r2/battery_c2kv.jsonl",
+  "fields": [
+    "prediction"
+  ],
+  "n_compared": 5,
+  "n_only_left": 0,
+  "n_only_right": 895,
+  "n_mismatches": 0,
+  "mismatches": [],
+  "passed": true
+}
+[sentinel] /home/user/c2kv/outputs_lyc/g_joint/bdf/d_pilot_r2/verify/d_full.jsonl == /home/user/c2kv/outputs_lyc/g_joint/bdf/d_r2/battery_full.jsonl on prediction
+{
+  "left": "/home/user/c2kv/outputs_lyc/g_joint/bdf/d_pilot_r2/verify/d_full.jsonl",
+  "right": "/home/user/c2kv/outputs_lyc/g_joint/bdf/d_r2/battery_full.jsonl",
+  "fields": [
+    "prediction"
+  ],
+  "n_compared": 5,
+  "n_only_left": 0,
+  "n_only_right": 895,
+  "n_mismatches": 0,
+  "mismatches": [],
+  "passed": true
+}
+Arm row counts:
+==== /home/user/c2kv/outputs_lyc/g_joint/bdf/d_pilot_r2/d_sham.jsonl ====
+93 /home/user/c2kv/outputs_lyc/g_joint/bdf/d_pilot_r2/d_sham.jsonl
+==== /home/user/c2kv/outputs_lyc/g_joint/bdf/d_pilot_r2/d_corr.jsonl ====
+93 /home/user/c2kv/outputs_lyc/g_joint/bdf/d_pilot_r2/d_corr.jsonl
+==== /home/user/c2kv/outputs_lyc/g_joint/bdf/d_pilot_r2/d_corr_re.jsonl ====
+93 /home/user/c2kv/outputs_lyc/g_joint/bdf/d_pilot_r2/d_corr_re.jsonl
