@@ -51,7 +51,7 @@ python d_sham_plan.py \
 
 `--s_metric` 按 BFCL 的判定方式选择（可选值见 `--help`）；plan 自带 budget/neutrality 两道门，门不过会拒绝产出可用计划。
 
-**Step 3 — 跑臂（活代码，无需自行移植）。** 五个臂已作为 `c2kv_d_*` 条件直接实现在本仓库的 BFCL runner 里（`metrology/d_repair_arms.py`，分支 `npu-fusion-attention`，与 `c2kv` 条件共用同一 gist 生成栈；`kv_repair_arms.py` 保留为 AppWorld 侧的语义出处对照）：
+**Step 3 — 跑臂（活代码，无需自行移植）。** 五个臂已作为 `c2kv_d_*` 条件直接实现在本仓库的 BFCL runner 里（本分支即含 `metrology/d_repair_arms.py` 与 runner 接线，与 `c2kv` 条件共用同一 gist 生成栈；`kv_repair_arms.py` 保留为 AppWorld 侧的语义出处对照）：
 
 ```bash
 python -m metrology.bfcl_hf_runner \
