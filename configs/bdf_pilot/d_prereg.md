@@ -236,3 +236,83 @@ the file. No threshold, gate, arm definition, or statistical rule changed.
    `bundle_manifest_sha256` disagrees with the manifest being analyzed
    (battery-reuse rows without the field are exempt). Mechanism note only; no
    metric definition touched.
+
+## Addendum — Downstream persistence extension (exploratory), 2026-08-23
+
+Status: pre-first-run. No downstream row exists yet; this section freezes
+before the first `--downstream_turns > 0` launch. It is strictly additive:
+no threshold, gate, arm definition, or statistical rule above changes, and
+no r1/r2 artifact is regenerated or overwritten.
+
+1. **Question.** Does the effect of a KV repair at decision point t* persist
+   to later decision points of the same session when everything between
+   decision points is supplied teacher-forced (gold), never from the
+   model's own output?
+2. **Mechanics.** `d_kv_intervene.py --downstream_turns K` (K <= 3). After
+   the registered generation+scoring at t*, the t* prompt and generated
+   tokens are cropped from the live cache (library crop primitive, with a
+   physical-length assert as tripwire); the recorded conversation from the
+   t* prompt through the material before the next decision point's
+   last-user anchor — the t* gold assistant action plus all inter-turn
+   tool/observation messages, normalized by the harness's own
+   `_normal_agent_message` pipeline — is chat-templated (no truncation, a
+   prologue-injection assert guards the template) and appended raw via
+   `_prefill_tokens_with_cache_maybe_gist` (use_gist=False, logical
+   positions; no RoPE rotation on this path); decision point t*+1 is then
+   presented exactly as the harness presents it (`_current_messages`) and
+   scored against its own harness example (`answer` of the next valid
+   span). Repeat up to K = min(3, later valid spans). Model output is
+   never fed back.
+3. **Arms.** none / sham / corr_re only, on the frozen r2 state
+   (`d_cw_manifest_r2.json`, `bundles_batch_tf_r2.jsonl`,
+   `d_sham_plan_r2.json`). corr, full, corr_all, sham_mech are refused by
+   the driver when K > 0.
+4. **Subsequent decision point** = the next span of the trigger's session
+   surviving the harness span filters and selection_filter, in span-index
+   order (session enumeration with per-session sampling disabled). Span
+   exhaustion ⇒ a counted skip `d_ds_no_subsequent_turn` at EVERY
+   unreached offset up to K, so per-offset denominators are read off the
+   rows, never inferred. The bundle `no_downstream` flag (post-fit doc
+   count T==1) is NOT the skip criterion; it stays a reporting split only.
+5. **Readout (exploratory).** Paired ΔS at t*+1, corr_re vs none, with
+   sham vs none alongside as the nonspecific-perturbation control; t*+2
+   and t*+3 exploratory. Pairing by trigger qid; exact McNemar b/c;
+   session-cluster bootstrap, 20000 reps, seed 0. The analyzer checks that
+   the two contrasts share an identical pair base per offset and flags any
+   asymmetric loss (e.g. one-arm OOM) prominently in the report. The
+   registered primary contrast (§5: corr_re − sham at t*) is unchanged;
+   nothing here produces a direction verdict or triggers 判据 K1–K2. n
+   shrinks with offset; the §5 MDE (≈17–25 pp at n=93) is a lower bound on
+   the downstream MDE.
+6. **Sentinels (before any number is read).** (a) `--downstream_turns 0`
+   is the identical code path to the current driver, certified by a
+   frozen-clock byte-identity regression test (live rows differ only in
+   wall-clock fields by construction); (b) offset-0 rows of each
+   downstream arm identity-checked against the r2 rows of that arm
+   (battery_c2kv for none; d_sham / d_corr_re otherwise) on prediction,
+   cache_tokens, gist_tokens — the downstream smoke marker is written only
+   after all three pass, and the driver refuses a full K>0 run without it;
+   (c) the position invariant (logical − physical constant along the
+   continuation) and the post-generation cache-length tripwire assert
+   in-run. A sentinel failure invalidates the implementation, not the
+   hypothesis.
+7. **Outputs and traceability.** Runs write to a server OUT_DIR and are
+   ingested into `results/bdf_pilot/d_r2/` only after the sentinels and
+   analyzer pass — new files only, `d_downstream_` prefix:
+   `d_downstream_{none,sham,corr_re}.jsonl`; report
+   `d_downstream_report.{json,md}` from `agent/d_downstream_analysis.py`.
+   Rows carry `d_turn_offset` (0 = t*), the scored span qid, block token
+   counts, the frozen shas, the launch `--downstream_turns`, and
+   `d_code_sha` (git HEAD of the launch commit) so every downstream row is
+   traceable to the code that produced it. Counted skip reasons:
+   `d_ds_no_subsequent_turn`, `d_ds_prefix_mismatch`,
+   `d_ds_conv_reconstruction_mismatch`, `d_ds_cache_over_budget`, `oom`.
+   W&B ingestion under the §12 tags plus `d-downstream`; the §12
+   truth-source rule applies unchanged.
+8. **Budget.** A continuation is admitted only if the physical cache after
+   the append, plus the prompt (1536) and decode (128) budgets, fits in
+   28672 physical KV slots (driver default, overridable per launch);
+   over-budget continuations are counted skips
+   (`d_ds_cache_over_budget`), never silent truncations. There is
+   deliberately no separate per-block token cap — one budget knob, one
+   skip reason.
