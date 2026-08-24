@@ -1,0 +1,1594 @@
+{
+ "label": "exploratory, post-hoc, single seed, n=174 -- requires fresh-slice confirmation",
+ "question": "can any online-computable per-decision rule beat always-defer (F2) by more than the coin band?",
+ "metric": "tool_name_match",
+ "n_paired_greedy": 174,
+ "n_paired_sampled": 174,
+ "pairing_drops": {
+  "greedy_core": {
+   "pass": "greedy_core",
+   "rows_total": 374,
+   "rows_branch_none_skipped": 26,
+   "rows_nonzero_rollout_excluded": 0,
+   "qids_paired": 174,
+   "qids_unpaired_dropped": 0,
+   "unpaired_qids": []
+  },
+  "sampled": {
+   "pass": "sampled",
+   "rows_total": 548,
+   "rows_branch_none_skipped": 26,
+   "rows_nonzero_rollout_excluded": 174,
+   "qids_paired": 174,
+   "qids_unpaired_dropped": 0,
+   "unpaired_qids": []
+  }
+ },
+ "coin_band_vs_maxF0F2": {
+  "source": "results/bdf_pilot/f/f_merged.analysis.json :: noise_floor_delta.band95",
+  "band95": [
+   -0.0287,
+   0.0345
+  ],
+  "upper_edge": 0.0345,
+  "seeds": 200,
+  "best_single_arm": "F2"
+ },
+ "baselines": {
+  "greedy_F0_always_compress": 0.5517,
+  "greedy_F2_always_defer": 0.5575,
+  "greedy_F5_oracle_union_frozen": 0.6437,
+  "sampled_As0_always_compress": 0.5115,
+  "sampled_Bs0_always_defer": 0.5862,
+  "frozen_reference": {
+   "F0": 0.5517,
+   "F2": 0.5575
+  }
+ },
+ "split": {
+  "seed": 0,
+  "n_half1": 87,
+  "n_half2": 87,
+  "F2_half1": 0.4598,
+  "F2_half2": 0.6552,
+  "note": "halves are reporting-only; nothing was fitted"
+ },
+ "multiple_comparisons": {
+  "total_rules_evaluated": 80,
+  "note": "post-hoc sweep over 80 rules on one n=174 slice; the coin band is calibrated for a SINGLE comparison, so the best-of-80 delta is optimistically biased and any 'winner' here is a hypothesis, not a result"
+ },
+ "oracle_arms_excluded": [
+  "F1_union",
+  "F3s_union",
+  "F5"
+ ],
+ "winners_clearing_band_and_sign_stable": [
+  "cmp_min_n_chars",
+  "cmp_min_n_chars@dis",
+  "combo_has_tc_then_min_n_chars",
+  "combo_not_degenerate_then_min_n_chars",
+  "combo_parse_ok_then_min_n_chars"
+ ],
+ "results": [
+  {
+   "rule": "cmp_min_n_chars",
+   "desc": "pick branch with min n_chars (tie/missing->defer)",
+   "greedy": {
+    "acc": 0.5977,
+    "n_pick_compress": 88,
+    "delta_vs_F2": 0.0402,
+    "delta_vs_F0": 0.046,
+    "delta_vs_F2_half1": 0.069,
+    "delta_vs_F2_half2": 0.0115,
+    "clears_band_upper": true,
+    "sign_kept_both_halves": true
+   },
+   "sampled": {
+    "acc": 0.5747,
+    "n_pick_compress": 93,
+    "delta_vs_Bs0": -0.0115
+   }
+  },
+  {
+   "rule": "cmp_min_n_chars@dis",
+   "desc": "disagreement-only: min n_chars (agree->forced/defer)",
+   "greedy": {
+    "acc": 0.5977,
+    "n_pick_compress": 40,
+    "delta_vs_F2": 0.0402,
+    "delta_vs_F0": 0.046,
+    "delta_vs_F2_half1": 0.069,
+    "delta_vs_F2_half2": 0.0115,
+    "clears_band_upper": true,
+    "sign_kept_both_halves": true
+   },
+   "sampled": {
+    "acc": 0.5747,
+    "n_pick_compress": 43,
+    "delta_vs_Bs0": -0.0115
+   }
+  },
+  {
+   "rule": "combo_has_tc_then_min_n_chars",
+   "desc": "gate on has_tc; if not decisive pick min n_chars (tie->defer)",
+   "greedy": {
+    "acc": 0.5977,
+    "n_pick_compress": 89,
+    "delta_vs_F2": 0.0402,
+    "delta_vs_F0": 0.046,
+    "delta_vs_F2_half1": 0.069,
+    "delta_vs_F2_half2": 0.0115,
+    "clears_band_upper": true,
+    "sign_kept_both_halves": true
+   },
+   "sampled": {
+    "acc": 0.5862,
+    "n_pick_compress": 90,
+    "delta_vs_Bs0": 0.0
+   }
+  },
+  {
+   "rule": "combo_not_degenerate_then_min_n_chars",
+   "desc": "gate on not_degenerate; if not decisive pick min n_chars (tie->defer)",
+   "greedy": {
+    "acc": 0.5977,
+    "n_pick_compress": 87,
+    "delta_vs_F2": 0.0402,
+    "delta_vs_F0": 0.046,
+    "delta_vs_F2_half1": 0.069,
+    "delta_vs_F2_half2": 0.0115,
+    "clears_band_upper": true,
+    "sign_kept_both_halves": true
+   },
+   "sampled": {
+    "acc": 0.5747,
+    "n_pick_compress": 93,
+    "delta_vs_Bs0": -0.0115
+   }
+  },
+  {
+   "rule": "combo_parse_ok_then_min_n_chars",
+   "desc": "gate on parse_ok; if not decisive pick min n_chars (tie->defer)",
+   "greedy": {
+    "acc": 0.5977,
+    "n_pick_compress": 89,
+    "delta_vs_F2": 0.0402,
+    "delta_vs_F0": 0.046,
+    "delta_vs_F2_half1": 0.069,
+    "delta_vs_F2_half2": 0.0115,
+    "clears_band_upper": true,
+    "sign_kept_both_halves": true
+   },
+   "sampled": {
+    "acc": 0.5862,
+    "n_pick_compress": 90,
+    "delta_vs_Bs0": 0.0
+   }
+  },
+  {
+   "rule": "combo_has_tc_then_min_n_tokens",
+   "desc": "gate on has_tc; if not decisive pick min n_tokens (tie->defer)",
+   "greedy": {
+    "acc": 0.592,
+    "n_pick_compress": 17,
+    "delta_vs_F2": 0.0345,
+    "delta_vs_F0": 0.0402,
+    "delta_vs_F2_half1": 0.0345,
+    "delta_vs_F2_half2": 0.0345,
+    "clears_band_upper": false,
+    "sign_kept_both_halves": true
+   },
+   "sampled": {
+    "acc": 0.5862,
+    "n_pick_compress": 19,
+    "delta_vs_Bs0": 0.0
+   }
+  },
+  {
+   "rule": "combo_parse_ok_then_min_n_tokens",
+   "desc": "gate on parse_ok; if not decisive pick min n_tokens (tie->defer)",
+   "greedy": {
+    "acc": 0.592,
+    "n_pick_compress": 17,
+    "delta_vs_F2": 0.0345,
+    "delta_vs_F0": 0.0402,
+    "delta_vs_F2_half1": 0.0345,
+    "delta_vs_F2_half2": 0.0345,
+    "clears_band_upper": false,
+    "sign_kept_both_halves": true
+   },
+   "sampled": {
+    "acc": 0.5862,
+    "n_pick_compress": 19,
+    "delta_vs_Bs0": 0.0
+   }
+  },
+  {
+   "rule": "combo_not_degenerate_then_min_n_tokens",
+   "desc": "gate on not_degenerate; if not decisive pick min n_tokens (tie->defer)",
+   "greedy": {
+    "acc": 0.5862,
+    "n_pick_compress": 15,
+    "delta_vs_F2": 0.0287,
+    "delta_vs_F0": 0.0345,
+    "delta_vs_F2_half1": 0.023,
+    "delta_vs_F2_half2": 0.0345,
+    "clears_band_upper": false,
+    "sign_kept_both_halves": true
+   },
+   "sampled": {
+    "acc": 0.5805,
+    "n_pick_compress": 18,
+    "delta_vs_Bs0": -0.0057
+   }
+  },
+  {
+   "rule": "cmp_max_ttr",
+   "desc": "pick branch with max ttr (tie/missing->defer)",
+   "greedy": {
+    "acc": 0.5805,
+    "n_pick_compress": 37,
+    "delta_vs_F2": 0.023,
+    "delta_vs_F0": 0.0287,
+    "delta_vs_F2_half1": 0.0115,
+    "delta_vs_F2_half2": 0.0345,
+    "clears_band_upper": false,
+    "sign_kept_both_halves": true
+   },
+   "sampled": {
+    "acc": 0.5862,
+    "n_pick_compress": 48,
+    "delta_vs_Bs0": 0.0
+   }
+  },
+  {
+   "rule": "cmp_max_ttr@dis",
+   "desc": "disagreement-only: max ttr (agree->forced/defer)",
+   "greedy": {
+    "acc": 0.5805,
+    "n_pick_compress": 20,
+    "delta_vs_F2": 0.023,
+    "delta_vs_F0": 0.0287,
+    "delta_vs_F2_half1": 0.0115,
+    "delta_vs_F2_half2": 0.0345,
+    "clears_band_upper": false,
+    "sign_kept_both_halves": true
+   },
+   "sampled": {
+    "acc": 0.5862,
+    "n_pick_compress": 25,
+    "delta_vs_Bs0": 0.0
+   }
+  },
+  {
+   "rule": "cmp_min_n_tokens",
+   "desc": "pick branch with min n_tokens (tie/missing->defer)",
+   "greedy": {
+    "acc": 0.5805,
+    "n_pick_compress": 12,
+    "delta_vs_F2": 0.023,
+    "delta_vs_F0": 0.0287,
+    "delta_vs_F2_half1": 0.023,
+    "delta_vs_F2_half2": 0.023,
+    "clears_band_upper": false,
+    "sign_kept_both_halves": true
+   },
+   "sampled": {
+    "acc": 0.5805,
+    "n_pick_compress": 16,
+    "delta_vs_Bs0": -0.0057
+   }
+  },
+  {
+   "rule": "cmp_min_n_tokens@dis",
+   "desc": "disagreement-only: min n_tokens (agree->forced/defer)",
+   "greedy": {
+    "acc": 0.5805,
+    "n_pick_compress": 9,
+    "delta_vs_F2": 0.023,
+    "delta_vs_F0": 0.0287,
+    "delta_vs_F2_half1": 0.023,
+    "delta_vs_F2_half2": 0.023,
+    "clears_band_upper": false,
+    "sign_kept_both_halves": true
+   },
+   "sampled": {
+    "acc": 0.5805,
+    "n_pick_compress": 8,
+    "delta_vs_Bs0": -0.0057
+   }
+  },
+  {
+   "rule": "combo_has_tc_then_max_ttr",
+   "desc": "gate on has_tc; if not decisive pick max ttr (tie->defer)",
+   "greedy": {
+    "acc": 0.5805,
+    "n_pick_compress": 38,
+    "delta_vs_F2": 0.023,
+    "delta_vs_F0": 0.0287,
+    "delta_vs_F2_half1": 0.0115,
+    "delta_vs_F2_half2": 0.0345,
+    "clears_band_upper": false,
+    "sign_kept_both_halves": true
+   },
+   "sampled": {
+    "acc": 0.5977,
+    "n_pick_compress": 45,
+    "delta_vs_Bs0": 0.0115
+   }
+  },
+  {
+   "rule": "combo_not_degenerate_then_max_ttr",
+   "desc": "gate on not_degenerate; if not decisive pick max ttr (tie->defer)",
+   "greedy": {
+    "acc": 0.5805,
+    "n_pick_compress": 37,
+    "delta_vs_F2": 0.023,
+    "delta_vs_F0": 0.0287,
+    "delta_vs_F2_half1": 0.0115,
+    "delta_vs_F2_half2": 0.0345,
+    "clears_band_upper": false,
+    "sign_kept_both_halves": true
+   },
+   "sampled": {
+    "acc": 0.5805,
+    "n_pick_compress": 49,
+    "delta_vs_Bs0": -0.0057
+   }
+  },
+  {
+   "rule": "combo_parse_ok_then_max_ttr",
+   "desc": "gate on parse_ok; if not decisive pick max ttr (tie->defer)",
+   "greedy": {
+    "acc": 0.5805,
+    "n_pick_compress": 38,
+    "delta_vs_F2": 0.023,
+    "delta_vs_F0": 0.0287,
+    "delta_vs_F2_half1": 0.0115,
+    "delta_vs_F2_half2": 0.0345,
+    "clears_band_upper": false,
+    "sign_kept_both_halves": true
+   },
+   "sampled": {
+    "acc": 0.5977,
+    "n_pick_compress": 45,
+    "delta_vs_Bs0": 0.0115
+   }
+  },
+  {
+   "rule": "cmp_min_generate_sec",
+   "desc": "pick branch with min generate_sec (tie/missing->defer)",
+   "greedy": {
+    "acc": 0.5747,
+    "n_pick_compress": 103,
+    "delta_vs_F2": 0.0172,
+    "delta_vs_F0": 0.023,
+    "delta_vs_F2_half1": 0.0345,
+    "delta_vs_F2_half2": 0.0,
+    "clears_band_upper": false,
+    "sign_kept_both_halves": false
+   },
+   "sampled": {
+    "acc": 0.546,
+    "n_pick_compress": 104,
+    "delta_vs_Bs0": -0.0402
+   }
+  },
+  {
+   "rule": "cmp_min_generate_sec@dis",
+   "desc": "disagreement-only: min generate_sec (agree->forced/defer)",
+   "greedy": {
+    "acc": 0.5747,
+    "n_pick_compress": 40,
+    "delta_vs_F2": 0.0172,
+    "delta_vs_F0": 0.023,
+    "delta_vs_F2_half1": 0.0345,
+    "delta_vs_F2_half2": 0.0,
+    "clears_band_upper": false,
+    "sign_kept_both_halves": false
+   },
+   "sampled": {
+    "acc": 0.546,
+    "n_pick_compress": 49,
+    "delta_vs_Bs0": -0.0402
+   }
+  },
+  {
+   "rule": "gate_name_wellformed_else_defer",
+   "desc": "pick the branch where tool name looks like a real identifier (if exactly one); else defer",
+   "greedy": {
+    "acc": 0.5747,
+    "n_pick_compress": 8,
+    "delta_vs_F2": 0.0172,
+    "delta_vs_F0": 0.023,
+    "delta_vs_F2_half1": 0.023,
+    "delta_vs_F2_half2": 0.0115,
+    "clears_band_upper": false,
+    "sign_kept_both_halves": true
+   },
+   "sampled": {
+    "acc": 0.5977,
+    "n_pick_compress": 5,
+    "delta_vs_Bs0": 0.0115
+   }
+  },
+  {
+   "rule": "gate_name_wellformed_else_defer@dis",
+   "desc": "disagreement-only: branch where tool name looks like a real identifier; else defer",
+   "greedy": {
+    "acc": 0.5747,
+    "n_pick_compress": 8,
+    "delta_vs_F2": 0.0172,
+    "delta_vs_F0": 0.023,
+    "delta_vs_F2_half1": 0.023,
+    "delta_vs_F2_half2": 0.0115,
+    "clears_band_upper": false,
+    "sign_kept_both_halves": true
+   },
+   "sampled": {
+    "acc": 0.5977,
+    "n_pick_compress": 5,
+    "delta_vs_Bs0": 0.0115
+   }
+  },
+  {
+   "rule": "cmp_max_tbt_sec",
+   "desc": "pick branch with max tbt_sec (tie/missing->defer)",
+   "greedy": {
+    "acc": 0.569,
+    "n_pick_compress": 72,
+    "delta_vs_F2": 0.0115,
+    "delta_vs_F0": 0.0172,
+    "delta_vs_F2_half1": 0.0115,
+    "delta_vs_F2_half2": 0.0115,
+    "clears_band_upper": false,
+    "sign_kept_both_halves": true
+   },
+   "sampled": {
+    "acc": 0.569,
+    "n_pick_compress": 64,
+    "delta_vs_Bs0": -0.0172
+   }
+  },
+  {
+   "rule": "cmp_max_tbt_sec@dis",
+   "desc": "disagreement-only: max tbt_sec (agree->forced/defer)",
+   "greedy": {
+    "acc": 0.569,
+    "n_pick_compress": 27,
+    "delta_vs_F2": 0.0115,
+    "delta_vs_F0": 0.0172,
+    "delta_vs_F2_half1": 0.0115,
+    "delta_vs_F2_half2": 0.0115,
+    "clears_band_upper": false,
+    "sign_kept_both_halves": true
+   },
+   "sampled": {
+    "acc": 0.569,
+    "n_pick_compress": 27,
+    "delta_vs_Bs0": -0.0172
+   }
+  },
+  {
+   "rule": "combo_has_tc_then_min_rep3",
+   "desc": "gate on has_tc; if not decisive pick min rep3 (tie->defer)",
+   "greedy": {
+    "acc": 0.569,
+    "n_pick_compress": 13,
+    "delta_vs_F2": 0.0115,
+    "delta_vs_F0": 0.0172,
+    "delta_vs_F2_half1": 0.0115,
+    "delta_vs_F2_half2": 0.0115,
+    "clears_band_upper": false,
+    "sign_kept_both_halves": true
+   },
+   "sampled": {
+    "acc": 0.5977,
+    "n_pick_compress": 10,
+    "delta_vs_Bs0": 0.0115
+   }
+  },
+  {
+   "rule": "combo_parse_ok_then_min_rep3",
+   "desc": "gate on parse_ok; if not decisive pick min rep3 (tie->defer)",
+   "greedy": {
+    "acc": 0.569,
+    "n_pick_compress": 13,
+    "delta_vs_F2": 0.0115,
+    "delta_vs_F0": 0.0172,
+    "delta_vs_F2_half1": 0.0115,
+    "delta_vs_F2_half2": 0.0115,
+    "clears_band_upper": false,
+    "sign_kept_both_halves": true
+   },
+   "sampled": {
+    "acc": 0.5977,
+    "n_pick_compress": 10,
+    "delta_vs_Bs0": 0.0115
+   }
+  },
+  {
+   "rule": "gate_has_tc_else_defer",
+   "desc": "pick the branch where has a tool_call (if exactly one); else defer",
+   "greedy": {
+    "acc": 0.569,
+    "n_pick_compress": 6,
+    "delta_vs_F2": 0.0115,
+    "delta_vs_F0": 0.0172,
+    "delta_vs_F2_half1": 0.0115,
+    "delta_vs_F2_half2": 0.0115,
+    "clears_band_upper": false,
+    "sign_kept_both_halves": true
+   },
+   "sampled": {
+    "acc": 0.592,
+    "n_pick_compress": 3,
+    "delta_vs_Bs0": 0.0057
+   }
+  },
+  {
+   "rule": "gate_has_tc_else_defer@dis",
+   "desc": "disagreement-only: branch where has a tool_call; else defer",
+   "greedy": {
+    "acc": 0.569,
+    "n_pick_compress": 6,
+    "delta_vs_F2": 0.0115,
+    "delta_vs_F0": 0.0172,
+    "delta_vs_F2_half1": 0.0115,
+    "delta_vs_F2_half2": 0.0115,
+    "clears_band_upper": false,
+    "sign_kept_both_halves": true
+   },
+   "sampled": {
+    "acc": 0.592,
+    "n_pick_compress": 3,
+    "delta_vs_Bs0": 0.0057
+   }
+  },
+  {
+   "rule": "gate_parse_ok_else_defer",
+   "desc": "pick the branch where tool_call parses (if exactly one); else defer",
+   "greedy": {
+    "acc": 0.569,
+    "n_pick_compress": 6,
+    "delta_vs_F2": 0.0115,
+    "delta_vs_F0": 0.0172,
+    "delta_vs_F2_half1": 0.0115,
+    "delta_vs_F2_half2": 0.0115,
+    "clears_band_upper": false,
+    "sign_kept_both_halves": true
+   },
+   "sampled": {
+    "acc": 0.592,
+    "n_pick_compress": 3,
+    "delta_vs_Bs0": 0.0057
+   }
+  },
+  {
+   "rule": "gate_parse_ok_else_defer@dis",
+   "desc": "disagreement-only: branch where tool_call parses; else defer",
+   "greedy": {
+    "acc": 0.569,
+    "n_pick_compress": 6,
+    "delta_vs_F2": 0.0115,
+    "delta_vs_F0": 0.0172,
+    "delta_vs_F2_half1": 0.0115,
+    "delta_vs_F2_half2": 0.0115,
+    "clears_band_upper": false,
+    "sign_kept_both_halves": true
+   },
+   "sampled": {
+    "acc": 0.592,
+    "n_pick_compress": 3,
+    "delta_vs_Bs0": 0.0057
+   }
+  },
+  {
+   "rule": "cmp_max_name_len",
+   "desc": "pick branch with max name_len (tie/missing->defer)",
+   "greedy": {
+    "acc": 0.5632,
+    "n_pick_compress": 29,
+    "delta_vs_F2": 0.0057,
+    "delta_vs_F0": 0.0115,
+    "delta_vs_F2_half1": 0.0,
+    "delta_vs_F2_half2": 0.0115,
+    "clears_band_upper": false,
+    "sign_kept_both_halves": false
+   },
+   "sampled": {
+    "acc": 0.569,
+    "n_pick_compress": 31,
+    "delta_vs_Bs0": -0.0172
+   }
+  },
+  {
+   "rule": "cmp_max_name_len@dis",
+   "desc": "disagreement-only: max name_len (agree->forced/defer)",
+   "greedy": {
+    "acc": 0.5632,
+    "n_pick_compress": 29,
+    "delta_vs_F2": 0.0057,
+    "delta_vs_F0": 0.0115,
+    "delta_vs_F2_half1": 0.0,
+    "delta_vs_F2_half2": 0.0115,
+    "clears_band_upper": false,
+    "sign_kept_both_halves": false
+   },
+   "sampled": {
+    "acc": 0.569,
+    "n_pick_compress": 31,
+    "delta_vs_Bs0": -0.0172
+   }
+  },
+  {
+   "rule": "cmp_min_rep3",
+   "desc": "pick branch with min rep3 (tie/missing->defer)",
+   "greedy": {
+    "acc": 0.5632,
+    "n_pick_compress": 11,
+    "delta_vs_F2": 0.0057,
+    "delta_vs_F0": 0.0115,
+    "delta_vs_F2_half1": 0.0,
+    "delta_vs_F2_half2": 0.0115,
+    "clears_band_upper": false,
+    "sign_kept_both_halves": false
+   },
+   "sampled": {
+    "acc": 0.592,
+    "n_pick_compress": 11,
+    "delta_vs_Bs0": 0.0057
+   }
+  },
+  {
+   "rule": "cmp_min_rep3@dis",
+   "desc": "disagreement-only: min rep3 (agree->forced/defer)",
+   "greedy": {
+    "acc": 0.5632,
+    "n_pick_compress": 8,
+    "delta_vs_F2": 0.0057,
+    "delta_vs_F0": 0.0115,
+    "delta_vs_F2_half1": 0.0,
+    "delta_vs_F2_half2": 0.0115,
+    "clears_band_upper": false,
+    "sign_kept_both_halves": false
+   },
+   "sampled": {
+    "acc": 0.592,
+    "n_pick_compress": 6,
+    "delta_vs_Bs0": 0.0057
+   }
+  },
+  {
+   "rule": "combo_not_degenerate_then_min_rep3",
+   "desc": "gate on not_degenerate; if not decisive pick min rep3 (tie->defer)",
+   "greedy": {
+    "acc": 0.5632,
+    "n_pick_compress": 11,
+    "delta_vs_F2": 0.0057,
+    "delta_vs_F0": 0.0115,
+    "delta_vs_F2_half1": 0.0,
+    "delta_vs_F2_half2": 0.0115,
+    "clears_band_upper": false,
+    "sign_kept_both_halves": false
+   },
+   "sampled": {
+    "acc": 0.5862,
+    "n_pick_compress": 12,
+    "delta_vs_Bs0": 0.0
+   }
+  },
+  {
+   "rule": "gate_has_tc_else_compress",
+   "desc": "pick the branch where has a tool_call (if exactly one); else compress",
+   "greedy": {
+    "acc": 0.5632,
+    "n_pick_compress": 170,
+    "delta_vs_F2": 0.0057,
+    "delta_vs_F0": 0.0115,
+    "delta_vs_F2_half1": 0.0,
+    "delta_vs_F2_half2": 0.0115,
+    "clears_band_upper": false,
+    "sign_kept_both_halves": false
+   },
+   "sampled": {
+    "acc": 0.5517,
+    "n_pick_compress": 163,
+    "delta_vs_Bs0": -0.0345
+   }
+  },
+  {
+   "rule": "gate_has_tc_else_compress@dis",
+   "desc": "disagreement-only: branch where has a tool_call; else compress",
+   "greedy": {
+    "acc": 0.5632,
+    "n_pick_compress": 63,
+    "delta_vs_F2": 0.0057,
+    "delta_vs_F0": 0.0115,
+    "delta_vs_F2_half1": 0.0,
+    "delta_vs_F2_half2": 0.0115,
+    "clears_band_upper": false,
+    "sign_kept_both_halves": false
+   },
+   "sampled": {
+    "acc": 0.5517,
+    "n_pick_compress": 73,
+    "delta_vs_Bs0": -0.0345
+   }
+  },
+  {
+   "rule": "gate_not_degenerate_else_defer",
+   "desc": "pick the branch where no >=3x repeated trigram/line (if exactly one); else defer",
+   "greedy": {
+    "acc": 0.5632,
+    "n_pick_compress": 4,
+    "delta_vs_F2": 0.0057,
+    "delta_vs_F0": 0.0115,
+    "delta_vs_F2_half1": 0.0,
+    "delta_vs_F2_half2": 0.0115,
+    "clears_band_upper": false,
+    "sign_kept_both_halves": false
+   },
+   "sampled": {
+    "acc": 0.5805,
+    "n_pick_compress": 3,
+    "delta_vs_Bs0": -0.0057
+   }
+  },
+  {
+   "rule": "gate_not_degenerate_else_defer@dis",
+   "desc": "disagreement-only: branch where no >=3x repeated trigram/line; else defer",
+   "greedy": {
+    "acc": 0.5632,
+    "n_pick_compress": 4,
+    "delta_vs_F2": 0.0057,
+    "delta_vs_F0": 0.0115,
+    "delta_vs_F2_half1": 0.0,
+    "delta_vs_F2_half2": 0.0115,
+    "clears_band_upper": false,
+    "sign_kept_both_halves": false
+   },
+   "sampled": {
+    "acc": 0.5805,
+    "n_pick_compress": 3,
+    "delta_vs_Bs0": -0.0057
+   }
+  },
+  {
+   "rule": "gate_parse_ok_else_compress",
+   "desc": "pick the branch where tool_call parses (if exactly one); else compress",
+   "greedy": {
+    "acc": 0.5632,
+    "n_pick_compress": 170,
+    "delta_vs_F2": 0.0057,
+    "delta_vs_F0": 0.0115,
+    "delta_vs_F2_half1": 0.0,
+    "delta_vs_F2_half2": 0.0115,
+    "clears_band_upper": false,
+    "sign_kept_both_halves": false
+   },
+   "sampled": {
+    "acc": 0.5517,
+    "n_pick_compress": 162,
+    "delta_vs_Bs0": -0.0345
+   }
+  },
+  {
+   "rule": "gate_parse_ok_else_compress@dis",
+   "desc": "disagreement-only: branch where tool_call parses; else compress",
+   "greedy": {
+    "acc": 0.5632,
+    "n_pick_compress": 63,
+    "delta_vs_F2": 0.0057,
+    "delta_vs_F0": 0.0115,
+    "delta_vs_F2_half1": 0.0,
+    "delta_vs_F2_half2": 0.0115,
+    "clears_band_upper": false,
+    "sign_kept_both_halves": false
+   },
+   "sampled": {
+    "acc": 0.5517,
+    "n_pick_compress": 72,
+    "delta_vs_Bs0": -0.0345
+   }
+  },
+  {
+   "rule": "cmp_max_line_rep",
+   "desc": "pick branch with max line_rep (tie/missing->defer)",
+   "greedy": {
+    "acc": 0.5575,
+    "n_pick_compress": 1,
+    "delta_vs_F2": 0.0,
+    "delta_vs_F0": 0.0057,
+    "delta_vs_F2_half1": 0.0,
+    "delta_vs_F2_half2": 0.0,
+    "clears_band_upper": false,
+    "sign_kept_both_halves": false
+   },
+   "sampled": {
+    "acc": 0.5862,
+    "n_pick_compress": 1,
+    "delta_vs_Bs0": 0.0
+   }
+  },
+  {
+   "rule": "cmp_max_line_rep@dis",
+   "desc": "disagreement-only: max line_rep (agree->forced/defer)",
+   "greedy": {
+    "acc": 0.5575,
+    "n_pick_compress": 0,
+    "delta_vs_F2": 0.0,
+    "delta_vs_F0": 0.0057,
+    "delta_vs_F2_half1": 0.0,
+    "delta_vs_F2_half2": 0.0,
+    "clears_band_upper": false,
+    "sign_kept_both_halves": false
+   },
+   "sampled": {
+    "acc": 0.5862,
+    "n_pick_compress": 1,
+    "delta_vs_Bs0": 0.0
+   }
+  },
+  {
+   "rule": "cmp_max_n_args",
+   "desc": "pick branch with max n_args (tie/missing->defer)",
+   "greedy": {
+    "acc": 0.5575,
+    "n_pick_compress": 5,
+    "delta_vs_F2": 0.0,
+    "delta_vs_F0": 0.0057,
+    "delta_vs_F2_half1": 0.0,
+    "delta_vs_F2_half2": 0.0,
+    "clears_band_upper": false,
+    "sign_kept_both_halves": false
+   },
+   "sampled": {
+    "acc": 0.5575,
+    "n_pick_compress": 9,
+    "delta_vs_Bs0": -0.0287
+   }
+  },
+  {
+   "rule": "cmp_max_n_args@dis",
+   "desc": "disagreement-only: max n_args (agree->forced/defer)",
+   "greedy": {
+    "acc": 0.5575,
+    "n_pick_compress": 3,
+    "delta_vs_F2": 0.0,
+    "delta_vs_F0": 0.0057,
+    "delta_vs_F2_half1": 0.0,
+    "delta_vs_F2_half2": 0.0,
+    "clears_band_upper": false,
+    "sign_kept_both_halves": false
+   },
+   "sampled": {
+    "acc": 0.5575,
+    "n_pick_compress": 8,
+    "delta_vs_Bs0": -0.0287
+   }
+  },
+  {
+   "rule": "cmp_min_line_rep",
+   "desc": "pick branch with min line_rep (tie/missing->defer)",
+   "greedy": {
+    "acc": 0.5575,
+    "n_pick_compress": 0,
+    "delta_vs_F2": 0.0,
+    "delta_vs_F0": 0.0057,
+    "delta_vs_F2_half1": 0.0,
+    "delta_vs_F2_half2": 0.0,
+    "clears_band_upper": false,
+    "sign_kept_both_halves": false
+   },
+   "sampled": {
+    "acc": 0.5805,
+    "n_pick_compress": 1,
+    "delta_vs_Bs0": -0.0057
+   }
+  },
+  {
+   "rule": "cmp_min_line_rep@dis",
+   "desc": "disagreement-only: min line_rep (agree->forced/defer)",
+   "greedy": {
+    "acc": 0.5575,
+    "n_pick_compress": 0,
+    "delta_vs_F2": 0.0,
+    "delta_vs_F0": 0.0057,
+    "delta_vs_F2_half1": 0.0,
+    "delta_vs_F2_half2": 0.0,
+    "clears_band_upper": false,
+    "sign_kept_both_halves": false
+   },
+   "sampled": {
+    "acc": 0.5805,
+    "n_pick_compress": 1,
+    "delta_vs_Bs0": -0.0057
+   }
+  },
+  {
+   "rule": "cmp_min_name_len",
+   "desc": "pick branch with min name_len (tie/missing->defer)",
+   "greedy": {
+    "acc": 0.5575,
+    "n_pick_compress": 27,
+    "delta_vs_F2": 0.0,
+    "delta_vs_F0": 0.0057,
+    "delta_vs_F2_half1": 0.0115,
+    "delta_vs_F2_half2": -0.0115,
+    "clears_band_upper": false,
+    "sign_kept_both_halves": false
+   },
+   "sampled": {
+    "acc": 0.523,
+    "n_pick_compress": 47,
+    "delta_vs_Bs0": -0.0632
+   }
+  },
+  {
+   "rule": "cmp_min_name_len@dis",
+   "desc": "disagreement-only: min name_len (agree->forced/defer)",
+   "greedy": {
+    "acc": 0.5575,
+    "n_pick_compress": 27,
+    "delta_vs_F2": 0.0,
+    "delta_vs_F0": 0.0057,
+    "delta_vs_F2_half1": 0.0115,
+    "delta_vs_F2_half2": -0.0115,
+    "clears_band_upper": false,
+    "sign_kept_both_halves": false
+   },
+   "sampled": {
+    "acc": 0.523,
+    "n_pick_compress": 47,
+    "delta_vs_Bs0": -0.0632
+   }
+  },
+  {
+   "rule": "cmp_min_ttft_sec",
+   "desc": "pick branch with min ttft_sec (tie/missing->defer)",
+   "greedy": {
+    "acc": 0.5575,
+    "n_pick_compress": 165,
+    "delta_vs_F2": 0.0,
+    "delta_vs_F0": 0.0057,
+    "delta_vs_F2_half1": 0.0,
+    "delta_vs_F2_half2": 0.0,
+    "clears_band_upper": false,
+    "sign_kept_both_halves": false
+   },
+   "sampled": {
+    "acc": 0.523,
+    "n_pick_compress": 165,
+    "delta_vs_Bs0": -0.0632
+   }
+  },
+  {
+   "rule": "cmp_min_ttft_sec@dis",
+   "desc": "disagreement-only: min ttft_sec (agree->forced/defer)",
+   "greedy": {
+    "acc": 0.5575,
+    "n_pick_compress": 64,
+    "delta_vs_F2": 0.0,
+    "delta_vs_F0": 0.0057,
+    "delta_vs_F2_half1": 0.0,
+    "delta_vs_F2_half2": 0.0,
+    "clears_band_upper": false,
+    "sign_kept_both_halves": false
+   },
+   "sampled": {
+    "acc": 0.523,
+    "n_pick_compress": 80,
+    "delta_vs_Bs0": -0.0632
+   }
+  },
+  {
+   "rule": "const_defer",
+   "desc": "always defer (== F2 baseline)",
+   "greedy": {
+    "acc": 0.5575,
+    "n_pick_compress": 0,
+    "delta_vs_F2": 0.0,
+    "delta_vs_F0": 0.0057,
+    "delta_vs_F2_half1": 0.0,
+    "delta_vs_F2_half2": 0.0,
+    "clears_band_upper": false,
+    "sign_kept_both_halves": false
+   },
+   "sampled": {
+    "acc": 0.5862,
+    "n_pick_compress": 0,
+    "delta_vs_Bs0": 0.0
+   }
+  },
+  {
+   "rule": "gate_nonempty_args_else_compress",
+   "desc": "pick the branch where parsed call with nonempty arguments (if exactly one); else compress",
+   "greedy": {
+    "acc": 0.5575,
+    "n_pick_compress": 168,
+    "delta_vs_F2": 0.0,
+    "delta_vs_F0": 0.0057,
+    "delta_vs_F2_half1": 0.023,
+    "delta_vs_F2_half2": -0.023,
+    "clears_band_upper": false,
+    "sign_kept_both_halves": false
+   },
+   "sampled": {
+    "acc": 0.5287,
+    "n_pick_compress": 164,
+    "delta_vs_Bs0": -0.0575
+   }
+  },
+  {
+   "rule": "gate_nonempty_args_else_compress@dis",
+   "desc": "disagreement-only: branch where parsed call with nonempty arguments; else compress",
+   "greedy": {
+    "acc": 0.5575,
+    "n_pick_compress": 61,
+    "delta_vs_F2": 0.0,
+    "delta_vs_F0": 0.0057,
+    "delta_vs_F2_half1": 0.023,
+    "delta_vs_F2_half2": -0.023,
+    "clears_band_upper": false,
+    "sign_kept_both_halves": false
+   },
+   "sampled": {
+    "acc": 0.5287,
+    "n_pick_compress": 74,
+    "delta_vs_Bs0": -0.0575
+   }
+  },
+  {
+   "rule": "gate_nonempty_args_else_defer",
+   "desc": "pick the branch where parsed call with nonempty arguments (if exactly one); else defer",
+   "greedy": {
+    "acc": 0.5575,
+    "n_pick_compress": 5,
+    "delta_vs_F2": 0.0,
+    "delta_vs_F0": 0.0057,
+    "delta_vs_F2_half1": 0.0,
+    "delta_vs_F2_half2": 0.0,
+    "clears_band_upper": false,
+    "sign_kept_both_halves": false
+   },
+   "sampled": {
+    "acc": 0.5575,
+    "n_pick_compress": 9,
+    "delta_vs_Bs0": -0.0287
+   }
+  },
+  {
+   "rule": "gate_nonempty_args_else_defer@dis",
+   "desc": "disagreement-only: branch where parsed call with nonempty arguments; else defer",
+   "greedy": {
+    "acc": 0.5575,
+    "n_pick_compress": 4,
+    "delta_vs_F2": 0.0,
+    "delta_vs_F0": 0.0057,
+    "delta_vs_F2_half1": 0.0,
+    "delta_vs_F2_half2": 0.0,
+    "clears_band_upper": false,
+    "sign_kept_both_halves": false
+   },
+   "sampled": {
+    "acc": 0.5575,
+    "n_pick_compress": 8,
+    "delta_vs_Bs0": -0.0287
+   }
+  },
+  {
+   "rule": "gate_not_degenerate_else_compress",
+   "desc": "pick the branch where no >=3x repeated trigram/line (if exactly one); else compress",
+   "greedy": {
+    "acc": 0.5575,
+    "n_pick_compress": 172,
+    "delta_vs_F2": 0.0,
+    "delta_vs_F0": 0.0057,
+    "delta_vs_F2_half1": 0.0,
+    "delta_vs_F2_half2": 0.0,
+    "clears_band_upper": false,
+    "sign_kept_both_halves": false
+   },
+   "sampled": {
+    "acc": 0.5287,
+    "n_pick_compress": 166,
+    "delta_vs_Bs0": -0.0575
+   }
+  },
+  {
+   "rule": "gate_not_degenerate_else_compress@dis",
+   "desc": "disagreement-only: branch where no >=3x repeated trigram/line; else compress",
+   "greedy": {
+    "acc": 0.5575,
+    "n_pick_compress": 65,
+    "delta_vs_F2": 0.0,
+    "delta_vs_F0": 0.0057,
+    "delta_vs_F2_half1": 0.0,
+    "delta_vs_F2_half2": 0.0,
+    "clears_band_upper": false,
+    "sign_kept_both_halves": false
+   },
+   "sampled": {
+    "acc": 0.5287,
+    "n_pick_compress": 77,
+    "delta_vs_Bs0": -0.0575
+   }
+  },
+  {
+   "rule": "cmp_max_ttft_sec",
+   "desc": "pick branch with max ttft_sec (tie/missing->defer)",
+   "greedy": {
+    "acc": 0.5517,
+    "n_pick_compress": 9,
+    "delta_vs_F2": -0.0057,
+    "delta_vs_F0": 0.0,
+    "delta_vs_F2_half1": 0.0,
+    "delta_vs_F2_half2": -0.0115,
+    "clears_band_upper": false,
+    "sign_kept_both_halves": false
+   },
+   "sampled": {
+    "acc": 0.5747,
+    "n_pick_compress": 9,
+    "delta_vs_Bs0": -0.0115
+   }
+  },
+  {
+   "rule": "cmp_max_ttft_sec@dis",
+   "desc": "disagreement-only: max ttft_sec (agree->forced/defer)",
+   "greedy": {
+    "acc": 0.5517,
+    "n_pick_compress": 3,
+    "delta_vs_F2": -0.0057,
+    "delta_vs_F0": 0.0,
+    "delta_vs_F2_half1": 0.0,
+    "delta_vs_F2_half2": -0.0115,
+    "clears_band_upper": false,
+    "sign_kept_both_halves": false
+   },
+   "sampled": {
+    "acc": 0.5747,
+    "n_pick_compress": 4,
+    "delta_vs_Bs0": -0.0115
+   }
+  },
+  {
+   "rule": "cmp_min_n_args",
+   "desc": "pick branch with min n_args (tie/missing->defer)",
+   "greedy": {
+    "acc": 0.5517,
+    "n_pick_compress": 6,
+    "delta_vs_F2": -0.0057,
+    "delta_vs_F0": 0.0,
+    "delta_vs_F2_half1": -0.023,
+    "delta_vs_F2_half2": 0.0115,
+    "clears_band_upper": false,
+    "sign_kept_both_halves": false
+   },
+   "sampled": {
+    "acc": 0.5747,
+    "n_pick_compress": 9,
+    "delta_vs_Bs0": -0.0115
+   }
+  },
+  {
+   "rule": "cmp_min_n_args@dis",
+   "desc": "disagreement-only: min n_args (agree->forced/defer)",
+   "greedy": {
+    "acc": 0.5517,
+    "n_pick_compress": 6,
+    "delta_vs_F2": -0.0057,
+    "delta_vs_F0": 0.0,
+    "delta_vs_F2_half1": -0.023,
+    "delta_vs_F2_half2": 0.0115,
+    "clears_band_upper": false,
+    "sign_kept_both_halves": false
+   },
+   "sampled": {
+    "acc": 0.5747,
+    "n_pick_compress": 7,
+    "delta_vs_Bs0": -0.0115
+   }
+  },
+  {
+   "rule": "combo_has_tc_then_max_n_tokens",
+   "desc": "gate on has_tc; if not decisive pick max n_tokens (tie->defer)",
+   "greedy": {
+    "acc": 0.5517,
+    "n_pick_compress": 22,
+    "delta_vs_F2": -0.0057,
+    "delta_vs_F0": 0.0,
+    "delta_vs_F2_half1": -0.023,
+    "delta_vs_F2_half2": 0.0115,
+    "clears_band_upper": false,
+    "sign_kept_both_halves": false
+   },
+   "sampled": {
+    "acc": 0.5517,
+    "n_pick_compress": 22,
+    "delta_vs_Bs0": -0.0345
+   }
+  },
+  {
+   "rule": "combo_has_tc_then_min_tbt_sec",
+   "desc": "gate on has_tc; if not decisive pick min tbt_sec (tie->defer)",
+   "greedy": {
+    "acc": 0.5517,
+    "n_pick_compress": 100,
+    "delta_vs_F2": -0.0057,
+    "delta_vs_F0": 0.0,
+    "delta_vs_F2_half1": -0.0115,
+    "delta_vs_F2_half2": 0.0,
+    "clears_band_upper": false,
+    "sign_kept_both_halves": false
+   },
+   "sampled": {
+    "acc": 0.5575,
+    "n_pick_compress": 103,
+    "delta_vs_Bs0": -0.0287
+   }
+  },
+  {
+   "rule": "combo_parse_ok_then_max_n_tokens",
+   "desc": "gate on parse_ok; if not decisive pick max n_tokens (tie->defer)",
+   "greedy": {
+    "acc": 0.5517,
+    "n_pick_compress": 22,
+    "delta_vs_F2": -0.0057,
+    "delta_vs_F0": 0.0,
+    "delta_vs_F2_half1": -0.023,
+    "delta_vs_F2_half2": 0.0115,
+    "clears_band_upper": false,
+    "sign_kept_both_halves": false
+   },
+   "sampled": {
+    "acc": 0.5517,
+    "n_pick_compress": 21,
+    "delta_vs_Bs0": -0.0345
+   }
+  },
+  {
+   "rule": "combo_parse_ok_then_min_tbt_sec",
+   "desc": "gate on parse_ok; if not decisive pick min tbt_sec (tie->defer)",
+   "greedy": {
+    "acc": 0.5517,
+    "n_pick_compress": 100,
+    "delta_vs_F2": -0.0057,
+    "delta_vs_F0": 0.0,
+    "delta_vs_F2_half1": -0.0115,
+    "delta_vs_F2_half2": 0.0,
+    "clears_band_upper": false,
+    "sign_kept_both_halves": false
+   },
+   "sampled": {
+    "acc": 0.5575,
+    "n_pick_compress": 102,
+    "delta_vs_Bs0": -0.0287
+   }
+  },
+  {
+   "rule": "const_compress",
+   "desc": "always compress_now (== F0 baseline)",
+   "greedy": {
+    "acc": 0.5517,
+    "n_pick_compress": 174,
+    "delta_vs_F2": -0.0057,
+    "delta_vs_F0": 0.0,
+    "delta_vs_F2_half1": 0.0,
+    "delta_vs_F2_half2": -0.0115,
+    "clears_band_upper": false,
+    "sign_kept_both_halves": false
+   },
+   "sampled": {
+    "acc": 0.5115,
+    "n_pick_compress": 174,
+    "delta_vs_Bs0": -0.0747
+   }
+  },
+  {
+   "rule": "gate_name_wellformed_else_compress",
+   "desc": "pick the branch where tool name looks like a real identifier (if exactly one); else compress",
+   "greedy": {
+    "acc": 0.5517,
+    "n_pick_compress": 167,
+    "delta_vs_F2": -0.0057,
+    "delta_vs_F0": 0.0,
+    "delta_vs_F2_half1": -0.0115,
+    "delta_vs_F2_half2": 0.0,
+    "clears_band_upper": false,
+    "sign_kept_both_halves": false
+   },
+   "sampled": {
+    "acc": 0.5402,
+    "n_pick_compress": 160,
+    "delta_vs_Bs0": -0.046
+   }
+  },
+  {
+   "rule": "gate_name_wellformed_else_compress@dis",
+   "desc": "disagreement-only: branch where tool name looks like a real identifier; else compress",
+   "greedy": {
+    "acc": 0.5517,
+    "n_pick_compress": 60,
+    "delta_vs_F2": -0.0057,
+    "delta_vs_F0": 0.0,
+    "delta_vs_F2_half1": -0.0115,
+    "delta_vs_F2_half2": 0.0,
+    "clears_band_upper": false,
+    "sign_kept_both_halves": false
+   },
+   "sampled": {
+    "acc": 0.5402,
+    "n_pick_compress": 70,
+    "delta_vs_Bs0": -0.046
+   }
+  },
+  {
+   "rule": "combo_not_degenerate_then_max_n_tokens",
+   "desc": "gate on not_degenerate; if not decisive pick max n_tokens (tie->defer)",
+   "greedy": {
+    "acc": 0.546,
+    "n_pick_compress": 20,
+    "delta_vs_F2": -0.0115,
+    "delta_vs_F0": -0.0057,
+    "delta_vs_F2_half1": -0.0345,
+    "delta_vs_F2_half2": 0.0115,
+    "clears_band_upper": false,
+    "sign_kept_both_halves": false
+   },
+   "sampled": {
+    "acc": 0.5345,
+    "n_pick_compress": 23,
+    "delta_vs_Bs0": -0.0517
+   }
+  },
+  {
+   "rule": "combo_not_degenerate_then_min_tbt_sec",
+   "desc": "gate on not_degenerate; if not decisive pick min tbt_sec (tie->defer)",
+   "greedy": {
+    "acc": 0.546,
+    "n_pick_compress": 102,
+    "delta_vs_F2": -0.0115,
+    "delta_vs_F0": -0.0057,
+    "delta_vs_F2_half1": -0.0115,
+    "delta_vs_F2_half2": -0.0115,
+    "clears_band_upper": false,
+    "sign_kept_both_halves": false
+   },
+   "sampled": {
+    "acc": 0.5402,
+    "n_pick_compress": 107,
+    "delta_vs_Bs0": -0.046
+   }
+  },
+  {
+   "rule": "cmp_max_n_tokens",
+   "desc": "pick branch with max n_tokens (tie/missing->defer)",
+   "greedy": {
+    "acc": 0.5402,
+    "n_pick_compress": 16,
+    "delta_vs_F2": -0.0172,
+    "delta_vs_F0": -0.0115,
+    "delta_vs_F2_half1": -0.0345,
+    "delta_vs_F2_half2": 0.0,
+    "clears_band_upper": false,
+    "sign_kept_both_halves": false
+   },
+   "sampled": {
+    "acc": 0.5402,
+    "n_pick_compress": 21,
+    "delta_vs_Bs0": -0.046
+   }
+  },
+  {
+   "rule": "cmp_max_n_tokens@dis",
+   "desc": "disagreement-only: max n_tokens (agree->forced/defer)",
+   "greedy": {
+    "acc": 0.5402,
+    "n_pick_compress": 12,
+    "delta_vs_F2": -0.0172,
+    "delta_vs_F0": -0.0115,
+    "delta_vs_F2_half1": -0.0345,
+    "delta_vs_F2_half2": 0.0,
+    "clears_band_upper": false,
+    "sign_kept_both_halves": false
+   },
+   "sampled": {
+    "acc": 0.5402,
+    "n_pick_compress": 18,
+    "delta_vs_Bs0": -0.046
+   }
+  },
+  {
+   "rule": "cmp_min_tbt_sec",
+   "desc": "pick branch with min tbt_sec (tie/missing->defer)",
+   "greedy": {
+    "acc": 0.5402,
+    "n_pick_compress": 102,
+    "delta_vs_F2": -0.0172,
+    "delta_vs_F0": -0.0115,
+    "delta_vs_F2_half1": -0.0115,
+    "delta_vs_F2_half2": -0.023,
+    "clears_band_upper": false,
+    "sign_kept_both_halves": false
+   },
+   "sampled": {
+    "acc": 0.5287,
+    "n_pick_compress": 110,
+    "delta_vs_Bs0": -0.0575
+   }
+  },
+  {
+   "rule": "cmp_min_tbt_sec@dis",
+   "desc": "disagreement-only: min tbt_sec (agree->forced/defer)",
+   "greedy": {
+    "acc": 0.5402,
+    "n_pick_compress": 40,
+    "delta_vs_F2": -0.0172,
+    "delta_vs_F0": -0.0115,
+    "delta_vs_F2_half1": -0.0115,
+    "delta_vs_F2_half2": -0.023,
+    "clears_band_upper": false,
+    "sign_kept_both_halves": false
+   },
+   "sampled": {
+    "acc": 0.5287,
+    "n_pick_compress": 57,
+    "delta_vs_Bs0": -0.0575
+   }
+  },
+  {
+   "rule": "cmp_min_ttr",
+   "desc": "pick branch with min ttr (tie/missing->defer)",
+   "greedy": {
+    "acc": 0.5402,
+    "n_pick_compress": 46,
+    "delta_vs_F2": -0.0172,
+    "delta_vs_F0": -0.0115,
+    "delta_vs_F2_half1": 0.0,
+    "delta_vs_F2_half2": -0.0345,
+    "clears_band_upper": false,
+    "sign_kept_both_halves": false
+   },
+   "sampled": {
+    "acc": 0.5632,
+    "n_pick_compress": 50,
+    "delta_vs_Bs0": -0.023
+   }
+  },
+  {
+   "rule": "cmp_min_ttr@dis",
+   "desc": "disagreement-only: min ttr (agree->forced/defer)",
+   "greedy": {
+    "acc": 0.5402,
+    "n_pick_compress": 23,
+    "delta_vs_F2": -0.0172,
+    "delta_vs_F0": -0.0115,
+    "delta_vs_F2_half1": 0.0,
+    "delta_vs_F2_half2": -0.0345,
+    "clears_band_upper": false,
+    "sign_kept_both_halves": false
+   },
+   "sampled": {
+    "acc": 0.5632,
+    "n_pick_compress": 31,
+    "delta_vs_Bs0": -0.023
+   }
+  },
+  {
+   "rule": "cmp_max_generate_sec",
+   "desc": "pick branch with max generate_sec (tie/missing->defer)",
+   "greedy": {
+    "acc": 0.5345,
+    "n_pick_compress": 71,
+    "delta_vs_F2": -0.023,
+    "delta_vs_F0": -0.0172,
+    "delta_vs_F2_half1": -0.0345,
+    "delta_vs_F2_half2": -0.0115,
+    "clears_band_upper": false,
+    "sign_kept_both_halves": false
+   },
+   "sampled": {
+    "acc": 0.5517,
+    "n_pick_compress": 70,
+    "delta_vs_Bs0": -0.0345
+   }
+  },
+  {
+   "rule": "cmp_max_generate_sec@dis",
+   "desc": "disagreement-only: max generate_sec (agree->forced/defer)",
+   "greedy": {
+    "acc": 0.5345,
+    "n_pick_compress": 27,
+    "delta_vs_F2": -0.023,
+    "delta_vs_F0": -0.0172,
+    "delta_vs_F2_half1": -0.0345,
+    "delta_vs_F2_half2": -0.0115,
+    "clears_band_upper": false,
+    "sign_kept_both_halves": false
+   },
+   "sampled": {
+    "acc": 0.5517,
+    "n_pick_compress": 35,
+    "delta_vs_Bs0": -0.0345
+   }
+  },
+  {
+   "rule": "cmp_max_rep3",
+   "desc": "pick branch with max rep3 (tie/missing->defer)",
+   "greedy": {
+    "acc": 0.5345,
+    "n_pick_compress": 14,
+    "delta_vs_F2": -0.023,
+    "delta_vs_F0": -0.0172,
+    "delta_vs_F2_half1": -0.0115,
+    "delta_vs_F2_half2": -0.0345,
+    "clears_band_upper": false,
+    "sign_kept_both_halves": false
+   },
+   "sampled": {
+    "acc": 0.5632,
+    "n_pick_compress": 20,
+    "delta_vs_Bs0": -0.023
+   }
+  },
+  {
+   "rule": "cmp_max_rep3@dis",
+   "desc": "disagreement-only: max rep3 (agree->forced/defer)",
+   "greedy": {
+    "acc": 0.5345,
+    "n_pick_compress": 9,
+    "delta_vs_F2": -0.023,
+    "delta_vs_F0": -0.0172,
+    "delta_vs_F2_half1": -0.0115,
+    "delta_vs_F2_half2": -0.0345,
+    "clears_band_upper": false,
+    "sign_kept_both_halves": false
+   },
+   "sampled": {
+    "acc": 0.5632,
+    "n_pick_compress": 13,
+    "delta_vs_Bs0": -0.023
+   }
+  },
+  {
+   "rule": "cmp_max_n_chars",
+   "desc": "pick branch with max n_chars (tie/missing->defer)",
+   "greedy": {
+    "acc": 0.5115,
+    "n_pick_compress": 62,
+    "delta_vs_F2": -0.046,
+    "delta_vs_F0": -0.0402,
+    "delta_vs_F2_half1": -0.069,
+    "delta_vs_F2_half2": -0.023,
+    "clears_band_upper": false,
+    "sign_kept_both_halves": false
+   },
+   "sampled": {
+    "acc": 0.523,
+    "n_pick_compress": 71,
+    "delta_vs_Bs0": -0.0632
+   }
+  },
+  {
+   "rule": "cmp_max_n_chars@dis",
+   "desc": "disagreement-only: max n_chars (agree->forced/defer)",
+   "greedy": {
+    "acc": 0.5115,
+    "n_pick_compress": 25,
+    "delta_vs_F2": -0.046,
+    "delta_vs_F0": -0.0402,
+    "delta_vs_F2_half1": -0.069,
+    "delta_vs_F2_half2": -0.023,
+    "clears_band_upper": false,
+    "sign_kept_both_halves": false
+   },
+   "sampled": {
+    "acc": 0.523,
+    "n_pick_compress": 41,
+    "delta_vs_Bs0": -0.0632
+   }
+  }
+ ]
+}
