@@ -50,11 +50,11 @@ except ImportError as error:  # pragma: no cover - depends on the host env
 
 # Pre-registered verdict block (printed verbatim by the report).
 PREREGISTERED_VERDICT_BLOCK = (
-    "CI 全在改善侧=信号可读，续训；覆 0=训至预算上限（双卡窗 ≤5）再判一次；CI 全在恶化侧=判死"
+    "CI 全在改善侧=信号可读，续训；覆 0=训至预算上限（双卡窗 ≤5）再判一次；CI 全在恶化侧=判负"
 )
 CLAUSE_IMPROVEMENT = "CI 全在改善侧=信号可读，续训"
 CLAUSE_COVERS_ZERO = "覆 0=训至预算上限（双卡窗 ≤5）再判一次"
-CLAUSE_HARM = "CI 全在恶化侧=判死"
+CLAUSE_HARM = "CI 全在恶化侧=判负"
 
 # diff name -> (minuend row key, subtrahend row key, role)
 DIFFS: Sequence[Tuple[str, str, str, str]] = (

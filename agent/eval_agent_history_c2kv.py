@@ -1586,6 +1586,134 @@ def _build_c2kv_prefix(
     }, None
 
 
+# --- R4 (task D): typed/random raw-KV anchors at original positions ---------
+# Per-qid span table injected by the r4 driver before generation:
+#   {qid: {doc_index: [[start, end), ...]}} — indices into the TRUNCATED
+# per-doc ids (the same construction _build_history_chunks compresses).
+R4_ANCHOR_SPANS: Dict[str, Dict[str, List[List[int]]]] = {}
+
+
+@torch.inference_mode()
+def _append_span_cache(
+    model: Any,
+    prefix_cache: Any,
+    doc_cache: Any,
+    doc_logical_start: int,
+    span_indices: List[int],
+) -> Any:
+    """Append selected token K/V of a standalone-prefilled doc to prefix_cache.
+
+    The standalone doc forward uses the regular K/V projections with
+    chunk-local context — identical to the raw-token K/V generate_gist
+    computes and discards (raw tokens never attend to gist tokens). Keys are
+    rotated to absolute positions first (same primitive as
+    _append_independent_cache), then the span slice is concatenated.
+    """
+    rope_theta, rope_type = _model_rope_params(model)
+    index = torch.tensor(span_indices, dtype=torch.long, device=doc_cache.layers[0].keys.device)
+    for prefix_layer, doc_layer in zip(prefix_cache.layers, doc_cache.layers):
+        rotated = rotate_k_cache_rope(doc_layer.keys[0], doc_logical_start, rope_theta, rope_type)
+        prefix_layer.keys = torch.cat(
+            [prefix_layer.keys, rotated.index_select(1, index).unsqueeze(0)], dim=-2
+        )
+        prefix_layer.values = torch.cat(
+            [prefix_layer.values, doc_layer.values[0].index_select(1, index).unsqueeze(0)], dim=-2
+        )
+    return prefix_cache
+
+
+@torch.inference_mode()
+def _build_c2kv_anchor_prefix(
+    model: Any,
+    tokenizer: Any,
+    example: CompressHistoryExample,
+    args: argparse.Namespace,
+    anchor_spans: Optional[Dict[str, List[List[int]]]],
+) -> tuple[Optional[Dict[str, Any]], Optional[str]]:
+    """c2kv@4 with raw-KV anchors kept at their original positions (double
+    coverage): gist compression runs unchanged; anchor span KV is appended
+    per layer with absolute-position RoPE. Decode-time position correction
+    is unchanged because spans keep their original positions."""
+    context_input_ids, doc_tokens, doc_chunks, history, skip_reason = _build_history_chunks(
+        tokenizer, example, args
+    )
+    if context_input_ids is None:
+        return None, skip_reason
+    system_ids = _chat_template_ids(
+        tokenizer,
+        [{"role": "system", "content": example.system_prompt}],
+        tools=example.tools or None,
+        keep_bos=True,
+        max_length=args.max_system_length,
+    )
+    system_input_ids = torch.tensor([system_ids], dtype=torch.long, device=model.device)
+    system_cache, system_length, system_prefill_sec = _prefill_system(
+        model, system_input_ids, args.system_attn_impl
+    )
+    (
+        history_cache,
+        history_length,
+        gist_tokens,
+        actual_ratio,
+        compress_sec,
+        blend_sec,
+    ) = _build_tool_cache(
+        model,
+        context_input_ids,
+        system_cache,
+        system_length,
+        args.gist_attn_impl,
+        args.override_ratio,
+    )
+    anchor_tokens = 0
+    anchor_docs = 0
+    anchor_prefill_sec = 0.0
+    if anchor_spans:
+        doc_ids = [
+            _chat_template_ids(tokenizer, [message], max_length=args.max_doc_length)
+            for message in history
+        ]
+        offsets: List[int] = []
+        offset = system_length
+        for ids in doc_ids:
+            offsets.append(offset)
+            offset += len(ids)
+        for doc_key, spans in sorted(anchor_spans.items(), key=lambda kv: int(kv[0])):
+            doc_index = int(doc_key)
+            if doc_index >= len(doc_ids):
+                continue
+            ids = doc_ids[doc_index]
+            index = sorted({i for s, e in spans for i in range(int(s), min(int(e), len(ids)))})
+            if not index:
+                continue
+            doc_input_ids = torch.tensor([ids], dtype=torch.long, device=model.device)
+            doc_cache, _, elapsed = _prefill_ids_no_past(model, doc_input_ids, args.gist_attn_impl)
+            anchor_prefill_sec += elapsed
+            history_cache = _append_span_cache(model, history_cache, doc_cache, offsets[doc_index], index)
+            anchor_tokens += len(index)
+            anchor_docs += 1
+            del doc_cache
+            _clear_device_cache(args.device_type)
+    return {
+        "cache": history_cache,
+        "system_length": system_length,
+        "history_length": history_length,
+        "cache_length": history_cache.get_seq_length(),
+        "doc_tokens": doc_tokens,
+        "doc_chunks": doc_chunks,
+        "kept_history_tokens": doc_tokens,
+        "gist_tokens": gist_tokens,
+        "anchor_tokens": anchor_tokens,
+        "anchor_docs": anchor_docs,
+        "actual_compression_ratio": actual_ratio,
+        "system_prefill_sec": system_prefill_sec,
+        "full_prefill_sec": anchor_prefill_sec,
+        "tool_compress_sec": compress_sec,
+        "blend_sec": blend_sec,
+        "use_gist": True,
+    }, None
+
+
 @torch.inference_mode()
 def _build_each_turn_independent_c2kv_prefix(
     model: Any,
@@ -2374,6 +2502,10 @@ def _generate_one(
         "raw_prefix_next_hybrid",
     }:
         prefix, skip_reason = _build_raw_first15_hybrid_prefix(model, tokenizer, example, args, mode)
+    elif mode == "c2kv_anchor":
+        prefix, skip_reason = _build_c2kv_anchor_prefix(
+            model, tokenizer, example, args, R4_ANCHOR_SPANS.get(example.qid, {})
+        )
     elif mode in C2KV_MODES:
         prefix, skip_reason = _build_c2kv_prefix(model, tokenizer, example, args)
     elif mode in TURN_ABLATION_MODES:
@@ -2566,6 +2698,8 @@ def _generate_one(
         "ablation_turn_original_tokens",
         "full_restore_added_kv_tokens",
         "fixed_recent_full_tokens",
+        "anchor_tokens",
+        "anchor_docs",
         "raw_history_source",
         "raw_history_window",
         "raw_history_docs",

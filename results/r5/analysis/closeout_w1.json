@@ -1,0 +1,353 @@
+{
+  "task": "S6.3 R5 closeout W1 裁定分析（事后评分 + W1 裁定）",
+  "produced_by": "agent/r5_closeout_analyze.py",
+  "n_pairs": 89,
+  "n_sessions": 31,
+  "missing": {
+    "n": 0,
+    "list": []
+  },
+  "bootstrap": {
+    "reps": 10000,
+    "seed": 0,
+    "method": "session-cluster percentile"
+  },
+  "primary_stratum": {
+    "definition": "主终点=协议有效任务成功（protocol_valid AND name_em 工具名 EM，非 finish 语义线）；主分析层=未截断×非 finish（clipped=False 且 is_finish=False）。",
+    "qids": [
+      "a45d2c09567a_795c2422:0",
+      "a45d2c09567a_795c2422:1",
+      "a45d2c09567a_795c2422:2",
+      "a45d2c09567a_795c2422:3",
+      "a45d2c09567a_7c2c1bb8:0",
+      "a45d2c09567a_7c2c1bb8:1",
+      "a45d2c09567a_7c2c1bb8:2",
+      "a45d2c09567a_7c2c1bb8:3",
+      "a45d2c09567a_7c2c1bb8:4",
+      "a45d2c09567a_cfce19ea:0",
+      "a45d2c09567a_cfce19ea:2",
+      "a45d2c09567a_cfce19ea:3",
+      "a45d2c09567a_cfce19ea:4",
+      "a45d2c09567a_cfce19ea:5",
+      "a45d2c09567a_cfce19ea:6",
+      "b455f37f04c7_903ca285:0",
+      "b455f37f04c7_903ca285:1",
+      "b455f37f04c7_903ca285:10",
+      "b455f37f04c7_903ca285:3",
+      "b455f37f04c7_903ca285:4",
+      "b455f37f04c7_903ca285:5",
+      "b455f37f04c7_903ca285:6",
+      "b455f37f04c7_903ca285:8",
+      "b455f37f04c7_903ca285:9",
+      "0c890a5dde8c_012517c3:0",
+      "0c890a5dde8c_328484ff:2",
+      "0c890a5dde8c_3382a8ce:2",
+      "0c890a5dde8c_44648a56:1",
+      "0c890a5dde8c_45468b2c:0",
+      "0c890a5dde8c_aa600ba4:3",
+      "0c890a5dde8c_bc16285b:1",
+      "cfc3d70e7f3c_044eacbb:0",
+      "cfc3d70e7f3c_044eacbb:4",
+      "cfc3d70e7f3c_0510d456:4",
+      "cfc3d70e7f3c_15b71eb0:0",
+      "cfc3d70e7f3c_1a5f08b9:3",
+      "cfc3d70e7f3c_1a5f08b9:4",
+      "cfc3d70e7f3c_7c2b1b7c:1",
+      "cfc3d70e7f3c_7c4e425a:1",
+      "cfc3d70e7f3c_7db65d88:3",
+      "cfc3d70e7f3c_864566aa:1",
+      "cfc3d70e7f3c_864566aa:3",
+      "cfc3d70e7f3c_ba5fb247:1",
+      "cfc3d70e7f3c_eb3c3e78:0",
+      "cfc3d70e7f3c_eb3c3e78:2",
+      "cfc3d70e7f3c_eb3f9b09:0",
+      "cfc3d70e7f3c_eb3f9b09:3"
+    ],
+    "metric": "primary_success",
+    "n": 47,
+    "n_sessions": 22,
+    "full_acc": 0.3404,
+    "c2kv_acc": 0.1915,
+    "diff": 0.1489,
+    "mcnemar": {
+      "b": 12,
+      "c": 5,
+      "p": 0.1434631348
+    },
+    "cluster_ci": [
+      -0.0732,
+      0.3654
+    ],
+    "censored_at_cap": {
+      "cap": 256,
+      "full_n": 5,
+      "c2kv_n": 5,
+      "any_arm_n": 10,
+      "note": "触顶判定：capture.generated_ids 长度 >= 行内 max_new_tokens（S6 冻结 256）；触顶行生成被截断，成功/调用判定可能受影响。"
+    },
+    "verdict": "未决（功效限定），按关闭处理、措辞留余地；加注：点估差量级大但未达显著，不据此翻转"
+  },
+  "secondary": {
+    "censored_stratum": {
+      "definition": "截断层（clipped=True，prompt 历史截断行；r5_prereg §1.4 口径）",
+      "qids": [
+        "a45d2c09567a_795c2422:4",
+        "a45d2c09567a_795c2422:5",
+        "a45d2c09567a_795c2422:6",
+        "a45d2c09567a_7c2c1bb8:5",
+        "a45d2c09567a_7c2c1bb8:6",
+        "a45d2c09567a_7c2c1bb8:7",
+        "a45d2c09567a_cfce19ea:10",
+        "a45d2c09567a_cfce19ea:11",
+        "a45d2c09567a_cfce19ea:13",
+        "a45d2c09567a_cfce19ea:14",
+        "a45d2c09567a_cfce19ea:7",
+        "a45d2c09567a_cfce19ea:8",
+        "a45d2c09567a_cfce19ea:9",
+        "b455f37f04c7_903ca285:11",
+        "b455f37f04c7_903ca285:12",
+        "b455f37f04c7_903ca285:13",
+        "b455f37f04c7_903ca285:14",
+        "0c890a5dde8c_328484ff:8",
+        "0c890a5dde8c_42680439:4",
+        "0c890a5dde8c_45468b2c:7",
+        "0c890a5dde8c_aa600ba4:8",
+        "cfc3d70e7f3c_044eacbb:8",
+        "cfc3d70e7f3c_0510d456:8",
+        "cfc3d70e7f3c_1899bb8b:16",
+        "cfc3d70e7f3c_1899bb8b:19",
+        "cfc3d70e7f3c_1899bb8b:27",
+        "cfc3d70e7f3c_286c7c09:7",
+        "cfc3d70e7f3c_6418d65c:10",
+        "cfc3d70e7f3c_6418d65c:15",
+        "cfc3d70e7f3c_6418d65c:9",
+        "cfc3d70e7f3c_79ccaa70:7",
+        "cfc3d70e7f3c_7c4e425a:11",
+        "cfc3d70e7f3c_864566aa:11",
+        "cfc3d70e7f3c_864566aa:6",
+        "cfc3d70e7f3c_876b78e7:4",
+        "cfc3d70e7f3c_876b78e7:7",
+        "cfc3d70e7f3c_d150ef61:18",
+        "cfc3d70e7f3c_e497c59c:14",
+        "cfc3d70e7f3c_e497c59c:8",
+        "cfc3d70e7f3c_eb3c3e78:6",
+        "cfc3d70e7f3c_fbba462d:8"
+      ],
+      "metric": "primary_success",
+      "n": 41,
+      "n_sessions": 21,
+      "full_acc": 0.2683,
+      "c2kv_acc": 0.2195,
+      "diff": 0.0488,
+      "mcnemar": {
+        "b": 4,
+        "c": 2,
+        "p": 0.6875
+      },
+      "cluster_ci": [
+        0.0,
+        0.1042
+      ],
+      "censored_at_cap": {
+        "cap": 256,
+        "full_n": 4,
+        "c2kv_n": 2,
+        "any_arm_n": 6,
+        "note": "触顶判定：capture.generated_ids 长度 >= 行内 max_new_tokens（S6 冻结 256）；触顶行生成被截断，成功/调用判定可能受影响。"
+      },
+      "verdict_note": "次要终点，不改判"
+    },
+    "finish_semantic": {
+      "definition": "finish 语义线（单列，不入主口径）：金标 finish 调用 arguments.answer vs 生成文本，判对线 ROUGE-L F1>=0.5（r5_prereg §1.2）",
+      "n_finish_pairs": 11,
+      "qids": [
+        "cfc3d70e7f3c_ba5fb247:4",
+        "a45d2c09567a_795c2422:5",
+        "a45d2c09567a_7c2c1bb8:7",
+        "a45d2c09567a_cfce19ea:13",
+        "b455f37f04c7_903ca285:14",
+        "cfc3d70e7f3c_1899bb8b:19",
+        "cfc3d70e7f3c_1899bb8b:27",
+        "cfc3d70e7f3c_286c7c09:7",
+        "cfc3d70e7f3c_7c4e425a:11",
+        "cfc3d70e7f3c_864566aa:11",
+        "cfc3d70e7f3c_876b78e7:7"
+      ],
+      "full": {
+        "n_pass": 1,
+        "n_judged": 4,
+        "rate": 0.25,
+        "n_unjudged": 7,
+        "unjudged_answer_status": {
+          "answer_missing": 7
+        }
+      },
+      "c2kv": {
+        "n_pass": 1,
+        "n_judged": 4,
+        "rate": 0.25,
+        "n_unjudged": 7,
+        "unjudged_answer_status": {
+          "answer_missing": 7
+        }
+      },
+      "verdict_note": "次要终点，不改判",
+      "mcnemar_on_judged_pairs": {
+        "metric": "finish_semantic_pass",
+        "n": 4,
+        "n_sessions": 4,
+        "full_acc": 0.25,
+        "c2kv_acc": 0.25,
+        "diff": 0.0,
+        "mcnemar": {
+          "b": 0,
+          "c": 0,
+          "p": 1.0
+        },
+        "cluster_ci": [
+          0.0,
+          0.0
+        ]
+      }
+    },
+    "call_rate": {
+      "definition": "调用率=协议有效率（strict_protocol_parse.protocol_valid），口径同 r5_reanalysis strict_call_rate；附行内 has_tool_call 字段率（r4 原口径对照）",
+      "strict_call_rate": {
+        "full": 0.6629,
+        "c2kv": 0.6067
+      },
+      "r4_field_call_rate": {
+        "full": 0.6854,
+        "c2kv": 0.7303
+      },
+      "censored_at_cap": {
+        "cap": 256,
+        "full_n": 9,
+        "c2kv_n": 7,
+        "any_arm_n": 16,
+        "note": "触顶判定：capture.generated_ids 长度 >= 行内 max_new_tokens（S6 冻结 256）；触顶行生成被截断，成功/调用判定可能受影响。"
+      },
+      "censoring_note": "调用率带 censoring 注记：cap 触顶行生成被截断，调用可能未完整生成；触顶行数双列披露（见 censored_at_cap）。",
+      "verdict_note": "次要终点，不改判"
+    },
+    "all_rows": {
+      "definition": "全部配对样本合并（89 行，含 finish 与截断层）",
+      "metric": "primary_success",
+      "n": 89,
+      "n_sessions": 31,
+      "full_acc": 0.3034,
+      "c2kv_acc": 0.2022,
+      "diff": 0.1011,
+      "mcnemar": {
+        "b": 16,
+        "c": 7,
+        "p": 0.0931396484
+      },
+      "cluster_ci": [
+        -0.0339,
+        0.2222
+      ],
+      "censored_at_cap": {
+        "cap": 256,
+        "full_n": 9,
+        "c2kv_n": 7,
+        "any_arm_n": 16,
+        "note": "触顶判定：capture.generated_ids 长度 >= 行内 max_new_tokens（S6 冻结 256）；触顶行生成被截断，成功/调用判定可能受影响。"
+      },
+      "verdict_note": "次要终点，不改判"
+    },
+    "censored_at_cap_stratum_descriptive": {
+      "definition": "描述性敏感层：任一臂 cap 触顶（censored_at_cap）的配对行；仅披露，不参与裁定",
+      "qids": [
+        "a45d2c09567a_795c2422:0",
+        "a45d2c09567a_795c2422:2",
+        "a45d2c09567a_cfce19ea:0",
+        "b455f37f04c7_903ca285:0",
+        "b455f37f04c7_903ca285:1",
+        "b455f37f04c7_903ca285:3",
+        "0c890a5dde8c_44648a56:1",
+        "0c890a5dde8c_45468b2c:0",
+        "0c890a5dde8c_bc16285b:1",
+        "cfc3d70e7f3c_044eacbb:0",
+        "a45d2c09567a_7c2c1bb8:5",
+        "a45d2c09567a_cfce19ea:10",
+        "b455f37f04c7_903ca285:11",
+        "0c890a5dde8c_45468b2c:7",
+        "cfc3d70e7f3c_6418d65c:10",
+        "cfc3d70e7f3c_876b78e7:4"
+      ],
+      "metric": "primary_success",
+      "n": 16,
+      "n_sessions": 10,
+      "full_acc": 0.1875,
+      "c2kv_acc": 0.0625,
+      "diff": 0.125,
+      "mcnemar": {
+        "b": 3,
+        "c": 1,
+        "p": 0.625
+      },
+      "cluster_ci": [
+        -0.125,
+        0.3571
+      ],
+      "verdict_note": "描述性敏感层，不改判"
+    }
+  },
+  "prereg_quote": {
+    "source": "configs/r5_prereg.md（判据逐字引用，先于计算读取）",
+    "w1_verbatim": [
+      "**W1（S6 主判据）**：主终点＝协议有效任务成功（§5.1 严格口径解析成功且工具名正确）；主分析层＝未截断×非 finish；配对 exact McNemar + session 聚类 bootstrap（B≥10000）。**判据中 p 指 exact McNemar p；判 (a)/(c) 须同时满足 session 聚类 bootstrap 95%CI 不跨零，任一不满足则落 (b)。** (a) full>c2kv 且 p<0.05 → 「质量税确认：大池 4× 无质量税设计点关闭，不再追加大实验」；(b) p≥0.05 → 「未决（功效限定），按关闭处理、措辞留余地」，若同时 |点估差|≥0.10 加注「点估差量级大但未达显著，不据此翻转」；(c) c2kv>full 且 p<0.05 → 「意外结果，冻结结论待复核」。次要终点（同表，不改判）：截断层、finish 语义线、调用率（带 censoring 注记）、全部样本合并。"
+    ],
+    "s1_1_strict_protocol_verbatim": [
+      "### 1.1 严格主口径（strict protocol-valid）",
+      "",
+      "一行计「协议有效」当且仅当：",
+      "- 调用判定谓词命中（全局统一，不得改）：`(\"<tool_call>\" in text) or (\"Action:\" in text)`；",
+      "- AND 从 `<tool_call>...</tool_call>` **闭合块**中解析出合法 JSON 且含 `\"name\"` 键（`arguments` 允许为空 dict `{}`）。",
+      "",
+      "仅命中 `Action:` 而无闭合可解析 `<tool_call>` JSON 的行计**协议无效**（本数据集金标为 `<tool_call>` 格式）；此类行数 >0 时单列披露。",
+      "",
+      "工具名判分复用 `agent/r3_aggregate_te.py` 与 harness `_extract_tool_name`（`agent/eval_agent_tool_definition_c2kv.py:105`）。",
+      ""
+    ],
+    "s1_2_finish_semantic_verbatim": [
+      "### 1.2 finish 语义评分（单列，不入主口径）",
+      "",
+      "金标为 finish 调用的行：取金标 finish 调用的 `answer` 参数串 vs 生成文本，报 token-F1 与 ROUGE-L F1；判对线 = ROUGE-L F1 ≥ 0.5。附 10 例人工复核记录。",
+      ""
+    ]
+  },
+  "notes": [
+    "双列评分（protocol_valid / semantic_correct）永不合并；primary_success=protocol_valid AND name_em（工具名 EM）为合成主终点。",
+    "finish 行 name_em 用 R5R._extract_tool_name 对 prediction 与 target_tool_name 直接比对补算（name_em_primary），仅进主终点；finish 语义线（ROUGE-L>=0.5）只进次要终点。",
+    "主分析层=未截断×非 finish；clipped 口径同 r5_prereg §1.4（c2kv 臂 prompt_tokens==1920，行内 strata 记录；取值优先级：c2kv strata > full strata > 冻结 qid cell 元数据）。",
+    "池仅 2 种序列化（75327/80171），不可做池级推断；聚类推断只按 session（r5_prereg §1.4）。",
+    "MISSING 行（runner 未产出或 skipped）不进入配对，逐 qid 单列披露。",
+    "次要终点同表不改判：截断层、finish 语义线、调用率（带 censoring 注记）、全部样本合并。",
+    "统计：配对 McNemar exact（b/c 单元格列出）+ session 聚类 bootstrap（B=10000, seed=0），复用 agent/r5_reanalysis.py 实现；session 数明写；不合并不同 checkpoint/regime。",
+    "所有数字带 N 与出处。"
+  ],
+  "inputs": {
+    "full_arm": {
+      "path": "C:\\Users\\jason\\c2kv-r4\\outputs_lyc_r5\\r5_closeout_full_merged.jsonl",
+      "sha256": "39bb7e59c961cd5692029a1089581a5fab0bfc6905e9f0ab1c09d173f633f223"
+    },
+    "c2kv_arm": {
+      "path": "C:\\Users\\jason\\c2kv-r4\\outputs_lyc_r5\\r5_closeout_c2kv.jsonl",
+      "sha256": "6d5b2d6d543729575781574c8e2f8bb4e490d1fda46003846450db7660ef7990"
+    },
+    "qids_file": {
+      "path": "C:\\Users\\jason\\c2kv-r4\\configs\\r5_closeout_qids.json",
+      "sha256": "a736ae092c19b30386c7375cb0b53807590354116cf492602cfdff0505013f62"
+    },
+    "prereg": {
+      "path": "C:\\Users\\jason\\c2kv-r4\\configs\\r5_prereg.md",
+      "sha256": "018b9ef0e82a43035865b8ed071138d393065891076f051a5622f3e03b1e735a"
+    }
+  },
+  "extraneous_qids": {
+    "full": [],
+    "c2kv": []
+  }
+}

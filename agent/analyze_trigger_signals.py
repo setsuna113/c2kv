@@ -496,6 +496,16 @@ def _build_signals(
             "orient": -1.0,
             "orientation_note": "same convention as S1: lower full-KV logp = generically harder sample",
         },
+        # R3 T-D: explicit positive-orientation readout of the same signal.
+        # family=diagnostic keeps it OUT of the best-of-S0 pool and the
+        # ΔAUROC pairing (report-only), so round-2 verdict numbers are
+        # byte-comparable.
+        "S0.logp_prefix_full.pos": {
+            "family": "diagnostic",
+            "values": raw["S0.logp_prefix_full"],
+            "orient": 1.0,
+            "orientation_note": "positive orientation diagnostic: higher full-KV logp predicting action change",
+        },
         "S0.a_made_call": {
             "family": "control_s0",
             "values": raw["S0.a_made_call"],

@@ -347,7 +347,23 @@ def _generate_from_input_ids(
     use_gist: bool = False,
     position_ids: Optional[torch.Tensor] = None,
     past_key_values: Any = None,
-) -> tuple[str, float, int, float]:
+    capture: bool = False,
+) -> tuple[str, float, int, float] | tuple[str, float, int, float, Dict[str, Any]]:
+    """单臂一次生成的公共路径（c2kv / baseline / full 臂共用）。
+
+    capture=False 时与 R4 路径逐字节等价：generate kwargs 不变，返回 4 元组
+    (prediction, latency, generated_tokens, tbt_sec)。
+
+    capture=True 时额外向 generate 传 ``output_scores=True, return_dict_in_generate=True``
+    （transformers 5.x 这两个 kwargs 覆盖 generation_config，与既有 use_gist 传递方式一致），
+    返回 5 元组，第 5 元素为 logit 埋点 dict：
+      generated_ids: 逐 token id（去掉 prompt 部分）；
+      steps: 每步 {step, token_id, chosen_logprob, eos_logprob}（log_softmax 后取值）；
+      stop_reason: eos（末 token==eos 且 generated_tokens<max_new_tokens）/
+                   length（generated_tokens>=max_new_tokens）/ other；
+      stop_pos: 停止步索引（eos 命中步或最后一步）。
+    每步 scores 张量用完即丢弃，不在 GPU 累积。
+    """
     original_attn_impl = model.model.config._attn_implementation if hasattr(model, "model") else None
     if original_attn_impl is not None:
         model.model.config._attn_implementation = attn_impl
@@ -361,6 +377,9 @@ def _generate_from_input_ids(
         "eos_token_id": tokenizer.eos_token_id,
         "use_cache": True,
     }
+    if capture:
+        generate_kwargs["output_scores"] = True
+        generate_kwargs["return_dict_in_generate"] = True
     if position_ids is not None:
         generate_kwargs["position_ids"] = position_ids
     if past_key_values is not None:
@@ -369,18 +388,59 @@ def _generate_from_input_ids(
         generate_kwargs["use_gist"] = True
     _sync_device(input_ids.device)
     start = time.perf_counter()
-    generated = model.generate(**generate_kwargs)
+    generated_out = model.generate(**generate_kwargs)
     _sync_device(input_ids.device)
     latency = time.perf_counter() - start
     if original_attn_impl is not None:
         model.model.config._attn_implementation = original_attn_impl
+    # capture=True 时 return_dict_in_generate=True，generate 返回
+    # GenerateDecoderOnlyOutput（.sequences/.scores）而非裸张量；capture=False
+    # 时仍返回裸张量。统一取 sequences，保证两臂 decode 切片完全一致。
+    sequences = generated_out.sequences if capture else generated_out
     prediction = tokenizer.decode(
-        generated[0, input_ids.shape[1] :],
+        sequences[0, input_ids.shape[1] :],
         skip_special_tokens=True,
     ).strip()
-    generated_tokens = int(generated.shape[1] - input_ids.shape[1])
+    generated_tokens = int(sequences.shape[1] - input_ids.shape[1])
     tbt_sec = latency / generated_tokens if generated_tokens > 0 else 0.0
-    return prediction, latency, generated_tokens, tbt_sec
+    if not capture:
+        return prediction, latency, generated_tokens, tbt_sec
+
+    # ---- logit 埋点（capture=True；与上面同一 generated 序列切片） ----
+    eos_id = int(tokenizer.eos_token_id)
+    generated_ids: List[int] = sequences[0, input_ids.shape[1] :].tolist()
+    steps: List[Dict[str, Any]] = []
+    scores = generated_out.scores
+    for step, score_t in enumerate(scores):
+        logprobs = torch.log_softmax(score_t, dim=-1)[0]
+        token_id = generated_ids[step]
+        chosen_logprob = float(logprobs[token_id].item())
+        eos_logprob = float(logprobs[eos_id].item())
+        steps.append(
+            {
+                "step": step,
+                "token_id": token_id,
+                "chosen_logprob": chosen_logprob,
+                "eos_logprob": eos_logprob,
+            }
+        )
+        del logprobs, score_t
+    del scores
+    del generated_out
+    if generated_tokens >= max_new_tokens:
+        stop_reason = "length"
+    elif generated_ids and generated_ids[-1] == eos_id:
+        stop_reason = "eos"
+    else:
+        stop_reason = "other"
+    stop_pos = len(steps) - 1 if steps else None
+    capture_data: Dict[str, Any] = {
+        "generated_ids": generated_ids,
+        "steps": steps,
+        "stop_reason": stop_reason,
+        "stop_pos": stop_pos,
+    }
+    return prediction, latency, generated_tokens, tbt_sec, capture_data
 
 
 @torch.inference_mode()
@@ -390,7 +450,16 @@ def _generate_one(
     example: Any,
     args: argparse.Namespace,
     device: str,
+    capture: bool = False,
 ) -> Dict[str, Any]:
+    """c2kv 臂单行评测。
+
+    capture=False（默认）时行为与 R4 逐字节等价；capture=True 时额外把
+    ``capture`` 透传给 _generate_from_input_ids 做 logit 埋点，返回 dict 追加
+    ``capture``（第 5 元素）、``position_offset_correction``
+    （= original_prefix_length - cache_length，即 position_ids 起点与物理前缀长的差值）、
+    ``prompt_position_start/end``（position_ids 首末值）。其余字段不变。
+    """
     total_start = time.perf_counter()
     if args.mode in ("truncate", "full"):
         return _generate_one_baseline(model, tokenizer, example, args)
@@ -490,27 +559,41 @@ def _generate_one(
             query_position_end,
         )
 
-    prediction, latency, generated_tokens, tbt_sec = _generate_from_input_ids(
-        model,
-        tokenizer,
-        input_ids=input_ids,
-        max_new_tokens=args.max_new_tokens,
-        attn_impl=args.generate_attn_impl,
-        use_gist=True,
-        position_ids=position_ids,
-        past_key_values=tool_cache,
-    )
+    if capture:
+        prediction, latency, generated_tokens, tbt_sec, capture_data = _generate_from_input_ids(
+            model,
+            tokenizer,
+            input_ids=input_ids,
+            max_new_tokens=args.max_new_tokens,
+            attn_impl=args.generate_attn_impl,
+            use_gist=True,
+            position_ids=position_ids,
+            past_key_values=tool_cache,
+            capture=True,
+        )
+    else:
+        prediction, latency, generated_tokens, tbt_sec = _generate_from_input_ids(
+            model,
+            tokenizer,
+            input_ids=input_ids,
+            max_new_tokens=args.max_new_tokens,
+            attn_impl=args.generate_attn_impl,
+            use_gist=True,
+            position_ids=position_ids,
+            past_key_values=tool_cache,
+        )
     target = example.answer.strip()
     target_tool = _extract_tool_name(target)
     pred_tool = _extract_tool_name(prediction)
     total_sec = time.perf_counter() - total_start
     ttft_sec = system_prefill_sec + tool_compress_sec + blend_sec
-    return {
+    result = {
         "qid": example.qid,
         "session_id": example.session_id,
         "mode": args.mode,
         "ratio": args.override_ratio,
         "skipped": False,
+        "num_tools": len(_as_tool_list(example.tool_definition)),
         "doc_tokens": doc_tokens,
         "doc_chunks": doc_chunks,
         "gist_tokens": gist_tokens,
@@ -535,6 +618,12 @@ def _generate_one(
         "prediction": prediction,
         "target": target,
     }
+    if capture:
+        result["capture"] = capture_data
+        result["position_offset_correction"] = original_prefix_length - cache_length
+        result["prompt_position_start"] = int(position_ids[0, 0].item()) if prompt_length else None
+        result["prompt_position_end"] = int(position_ids[0, -1].item()) if prompt_length else None
+    return result
 
 
 @torch.inference_mode()
@@ -625,6 +714,7 @@ def _generate_one_baseline(
         "mode": args.mode,
         "ratio": args.override_ratio,
         "skipped": False,
+        "num_tools": len(_as_tool_list(example.tool_definition)),
         "doc_tokens": doc_tokens,
         "kept_tool_tokens": kept_tool_tokens,
         "actual_compression_ratio": round(doc_tokens / kept_tool_tokens, 4) if kept_tool_tokens else 0.0,

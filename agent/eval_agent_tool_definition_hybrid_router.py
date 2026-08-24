@@ -419,41 +419,49 @@ def _rank_tools(tools: Sequence[Dict[str, Any]], query: str) -> List[int]:
     return [index for _, index in scored]
 
 
-def _rank_tools_bm25(tools: Sequence[Dict[str, Any]], query: str) -> List[int]:
-    query_terms = _tokens(query)
-    tool_terms = [_tokens(_tool_search_text(tool)) for tool in tools]
-    if not query_terms or not tool_terms:
-        return list(range(len(tools)))
+def _bm25_field_scores(
+    docs_tokens: Sequence[List[str]],
+    query_tokens: Sequence[str],
+    k1: float = 1.5,
+    b: float = 0.75,
+) -> List[float]:
+    """Okapi BM25 scores of each field-doc against the query (CPU, no deps).
 
-    doc_freq: Dict[str, int] = {}
-    for terms in tool_terms:
-        for term in set(terms):
-            doc_freq[term] = doc_freq.get(term, 0) + 1
-
-    num_docs = len(tool_terms)
-    avg_len = sum(len(terms) for terms in tool_terms) / max(1, num_docs)
-    k1 = 1.5
-    b = 0.75
-    scored: List[tuple[float, int]] = []
-    for index, terms in enumerate(tool_terms):
-        if not terms:
-            scored.append((0.0, index))
-            continue
-        counts: Dict[str, int] = {}
-        for term in terms:
-            counts[term] = counts.get(term, 0) + 1
-        doc_len = len(terms)
+    IDF is computed over the tool pool itself (one doc per tool), so a term
+    present in every tool gets zero weight; Robertson/Walker idf floored at 0.
+    """
+    n_docs = len(docs_tokens)
+    doc_freq: Counter = Counter()
+    for doc in docs_tokens:
+        for token in set(doc):
+            doc_freq[token] += 1
+    avgdl = sum(len(doc) for doc in docs_tokens) / max(1, n_docs)
+    scores: List[float] = []
+    for doc in docs_tokens:
+        term_freq = Counter(doc)
+        doc_len = len(doc) or 1
         score = 0.0
-        for term in query_terms:
-            tf = counts.get(term, 0)
-            if tf <= 0:
+        for token in set(query_tokens):
+            tf = term_freq.get(token, 0)
+            if tf == 0:
                 continue
-            df = doc_freq.get(term, 0)
-            idf = math.log(1.0 + (num_docs - df + 0.5) / (df + 0.5))
-            denom = tf + k1 * (1.0 - b + b * doc_len / max(avg_len, 1e-6))
-            score += idf * (tf * (k1 + 1.0)) / max(denom, 1e-6)
-        scored.append((score, index))
-    scored.sort(key=lambda item: (-item[0], item[1]))
+            idf = max(0.0, math.log((n_docs - doc_freq[token] + 0.5) / (doc_freq[token] + 0.5)))
+            score += idf * tf * (k1 + 1.0) / (tf + k1 * (1.0 - b + b * doc_len / max(avgdl, 1e-9)))
+        scores.append(score)
+    return scores
+
+
+def _rank_tools_bm25(tools: Sequence[Dict[str, Any]], query: str) -> List[int]:
+    """BM25 ranking over the tool pool; name field weighted 4x like the lexical ranker."""
+    query_tokens = _tokens(query)
+    if not query_tokens:
+        return list(range(len(tools)))
+    name_scores = _bm25_field_scores([_tokens(_tool_name(tool)) for tool in tools], query_tokens)
+    text_scores = _bm25_field_scores([_tokens(_tool_search_text(tool)) for tool in tools], query_tokens)
+    scored = [
+        (-(4.0 * name_scores[index] + text_scores[index]), index) for index in range(len(tools))
+    ]
+    scored.sort()
     return [index for _, index in scored]
 
 
@@ -2554,6 +2562,7 @@ def parse_args() -> argparse.Namespace:
             "lexical",
             "bm25",
             "random",
+            "bm25",
             "attention",
             "lex_attention",
             "att_rerank",
