@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import random
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -15,6 +16,16 @@ from .train_data import DEFAULT_SYSTEM_PROMPT, GistDataset
 
 Message = Dict[str, Any]
 HistorySelection = Literal["tail", "head"]
+
+
+def _condition_window_tokens() -> int:
+    """D1' condition-window token budget; 0 (default) disables the feature."""
+    return max(0, int(os.environ.get("C2KV_CONDITION_WINDOW_TOKENS", "0") or 0))
+
+
+def _condition_dropout() -> float:
+    """Per-example probability of dropping the condition window (default 0.0)."""
+    return min(1.0, max(0.0, float(os.environ.get("C2KV_CONDITION_DROPOUT", "0") or 0.0)))
 
 
 def _json_dumps(value: Any) -> str:
@@ -62,6 +73,9 @@ class CompressHistoryExample:
     system_prompt: str = DEFAULT_SYSTEM_PROMPT
     tools: List[Dict[str, Any]] = field(default_factory=list)
     original_messages: List[Message] = field(default_factory=list)
+    # D1' "future-query residual": raw user/query text of the NEXT turn after the
+    # compressed history (never assistant text or tool output). Empty = unconditioned.
+    condition_text: str = ""
 
 
 class CompressHistorySource(ABC):
@@ -820,11 +834,20 @@ class AgentLLMTracesCompressHistorySource(CompressHistorySource):
             if self.max_input_chars is not None and len(str(raw_input_messages)) > self.max_input_chars:
                 continue
             system_prompt = _agent_system_prompt(_json_loads(raw_input_messages, []))
-            messages = [
-                item
-                for item in (_normal_agent_message(message) for message in _json_loads(raw_input_messages, []))
-                if item is not None and item.get("role") != "system"
-            ]
+            messages = []
+            message_raw_roles: List[str] = []
+            for raw_message in _json_loads(raw_input_messages, []):
+                item = _normal_agent_message(raw_message)
+                if item is None or item.get("role") == "system":
+                    continue
+                messages.append(item)
+                # `_normal_agent_message` maps role "tool" -> "user"; keep the raw
+                # role so the D1' condition window can exclude tool outputs.
+                message_raw_roles.append(
+                    str(raw_message.get("role") or raw_message.get("type") or "user")
+                    if isinstance(raw_message, dict)
+                    else "user"
+                )
             last_user_index = next(
                 (index for index in range(len(messages) - 1, -1, -1) if messages[index].get("role") == "user"),
                 None,
@@ -844,6 +867,17 @@ class AgentLLMTracesCompressHistorySource(CompressHistorySource):
                 continue
             if not history_docs or not current_messages or not answer:
                 continue
+            # D1' turn mapping: every history doc of this example is compressed;
+            # the "next turn" after the LAST compressed turn is exactly this
+            # example's current turn, so the condition window for the whole
+            # example is its own current-turn user message (the t+1 query for the
+            # last compressed turn t). Hygiene: only genuine user/query text is
+            # used — when the current turn is led by a tool result (raw role
+            # "tool", normalized to "user") the example stays unconditioned;
+            # assistant answers and tool outputs never enter the window.
+            condition_text = ""
+            if _condition_window_tokens() > 0 and message_raw_roles[last_user_index] == "user":
+                condition_text = str(messages[last_user_index].get("content") or "").strip()
             examples.append(
                 CompressHistoryExample(
                     qid=f"{session_id}:{span_index}",
@@ -857,6 +891,7 @@ class AgentLLMTracesCompressHistorySource(CompressHistorySource):
                         for message in _json_loads(raw_input_messages, [])
                         if isinstance(message, dict)
                     ],
+                    condition_text=condition_text,
                 )
             )
         return examples
@@ -1046,6 +1081,7 @@ def _preprocess_record(
         history_messages=_json_loads(record.get("history_messages"), []),
         current_messages=_json_loads(record.get("current_messages"), []),
         answer=record.get("answer") or "",
+        condition_text=str(record.get("condition_text") or ""),
     )
     result = CompressHistoryDataset.preprocess_example(
         example,
@@ -1060,7 +1096,10 @@ def _preprocess_record(
         split_oversized_history_docs=split_oversized_history_docs,
     )
     if result is None:
-        return dict(_INVALID_SAMPLE_MARKER)
+        marker = dict(_INVALID_SAMPLE_MARKER)
+        if _condition_window_tokens() > 0:
+            marker["condition_input_ids"] = []
+        return marker
     return result
 
 
@@ -1233,7 +1272,7 @@ class CompressHistoryDataset(GistDataset):
         input_ids = input_ids + [tokenizer.pad_token_id] * pad_length
         labels = labels + [-100] * pad_length
 
-        return {
+        result = {
             "system_input_ids": system_input_ids,
             "context_input_ids": context_input_ids,
             "input_ids": input_ids,
@@ -1241,6 +1280,29 @@ class CompressHistoryDataset(GistDataset):
             "attention_mask": attention_mask,
             "dynamic": 0,
         }
+        condition_window = _condition_window_tokens()
+        if condition_window > 0:
+            # D1' condition window: one shared future-query window per example,
+            # appended to EVERY compressed history doc at gist time
+            # ([doc tokens][condition tokens][gist slots]).
+            condition_text = example.condition_text or ""
+            if condition_text and _condition_dropout() > 0.0:
+                # Per-example seeded RNG: reproducible across dataloader workers
+                # and resumptions (random.Random(str) seeds via sha512).
+                cond_rng = random.Random(f"c2kv-condition-dropout::{example.qid}")
+                if cond_rng.random() < _condition_dropout():
+                    condition_text = ""
+            condition_ids: List[int] = []
+            if condition_text:
+                # Raw token ids WITHOUT any chat-template wrapper: the window is a
+                # mid-sequence hint appended to doc tokens, not a chat turn — role
+                # markers/im_end would never appear at this position at inference
+                # time and would only burn the token budget.
+                condition_ids = tokenizer.encode(condition_text, add_special_tokens=False)[:condition_window]
+            # fixed-width (-100 padded) so the collator never re-pads it; an empty
+            # (dropped-out) condition is an all -100 row, i.e. unconditioned.
+            result["condition_input_ids"] = _pad(condition_ids, condition_window, -100)
+        return result
 
 
 def load_compress_history_source(source_type: str, path: str) -> CompressHistorySource:
