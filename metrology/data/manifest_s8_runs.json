@@ -1,0 +1,64 @@
+{
+  "purpose": "S8.3 BFCL 九格原始运行 jsonl 清单（108MB，不入 git；衍生评分数据 metrology/data/s8_scored.jsonl 已入库）",
+  "produced": "2026-08-16, NPU 服务器 HF eager 路径, Qwen3-4B-Instruct-2507",
+  "server_path": "/c/Users/jason/c2kv-r4/outputs_lyc/r5_metrology/",
+  "snapshot_manifest_sha256": "ef5f252af9c71dac3bd89f8ec1a486ed3589e239d340e49bcef2a02248c34c4e",
+  "n_files": 9,
+  "total_rows": 3240,
+  "files": [
+    {
+      "file": "bfcl_run_base_1024.jsonl",
+      "sha256": "3f4d560cc8c3c5e5ffea8c6e4081888ee68e9c77af8e50ce1abbb7d18df35092",
+      "rows": 360,
+      "bytes": 12235718
+    },
+    {
+      "file": "bfcl_run_base_128.jsonl",
+      "sha256": "b46352fbaa76297078d834d636f2966d89c23871bca3345df78956de54e49175",
+      "rows": 360,
+      "bytes": 12354547
+    },
+    {
+      "file": "bfcl_run_base_default.jsonl",
+      "sha256": "8ae00d4a29a80e07d18f64a83b8d90f761457cc45dddac82db161be4d18c97e8",
+      "rows": 360,
+      "bytes": 12236747
+    },
+    {
+      "file": "bfcl_run_snapkv_1024.jsonl",
+      "sha256": "d5344fa5d683e5d08a50c372f4cc86587bae7a626d775d06188a3e4434c1d254",
+      "rows": 360,
+      "bytes": 12372939
+    },
+    {
+      "file": "bfcl_run_snapkv_128.jsonl",
+      "sha256": "60dda929257d56e90e70d457e410aec9c7d085e3daa6e4be67a9fb0629ce421a",
+      "rows": 360,
+      "bytes": 12585699
+    },
+    {
+      "file": "bfcl_run_snapkv_default.jsonl",
+      "sha256": "3d6ba2f5cf76b5f139453410c5833f5b57362d2cc34e07a86e7e7b282ba67870",
+      "rows": 360,
+      "bytes": 12374091
+    },
+    {
+      "file": "bfcl_run_streamingllm_1024.jsonl",
+      "sha256": "532827ec1cd45ff2bc4ccbaf3c62c6170e06276ed6f3d922ede36287998f0b33",
+      "rows": 360,
+      "bytes": 12790152
+    },
+    {
+      "file": "bfcl_run_streamingllm_128.jsonl",
+      "sha256": "0bf03691ddee64b33a6b686e5c21188ef880ec30c340edab92e80c21ac9872ea",
+      "rows": 360,
+      "bytes": 12642938
+    },
+    {
+      "file": "bfcl_run_streamingllm_default.jsonl",
+      "sha256": "9932a433dd8c83f4503b771b23145d6a2373cd6cbe9d0448843d26e7c973adb7",
+      "rows": 360,
+      "bytes": 12735684
+    }
+  ]
+}
