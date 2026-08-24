@@ -25,7 +25,7 @@ C2KV gist 压缩后 KV cache 的 in-place 修复实验核心。设计一句话�
 
 | 文件 | 说明 |
 |---|---|
-| `kv_repair_arms.py` | 臂构造参考实现（292 行，从 `agent/eval_agent_history_c2kv.py` 原样提取 + 接口契约头） |
+| `kv_repair_arms.py` | 臂构造**参考实现**（292 行，从 `agent/eval_agent_history_c2kv.py` 原样提取 + 接口契约头）；活代码见下方 Step 3 |
 | `extract_cw_triggers.py` | C→W trigger 提取（纯 stdlib，零三方依赖） |
 | `d_sham_plan.py` | sham/corr 修复计划生成（纯 stdlib） |
 | `d_neutral_corpus.txt` | sham 臂中性语料（sha256 绑定进 plan） |
@@ -51,9 +51,25 @@ python d_sham_plan.py \
 
 `--s_metric` 按 BFCL 的判定方式选择（可选值见 `--help`）；plan 自带 budget/neutrality 两道门，门不过会拒绝产出可用计划。
 
-**Step 3 — 接臂。** 把 `kv_repair_arms.py` 的 `_build_d_intervene_prefix` 挂到 runner 的 prefix 构造分流处，运行前把 `d_sham_plan.json` 注入 `D_INTERVENE`。宿主侧需要提供的接口（现成 harness 里都有对应物）已列在该文件头部契约里。
+**Step 3 — 跑臂（活代码，无需自行移植）。** 五个臂已作为 `c2kv_d_*` 条件直接实现在本仓库的 BFCL runner 里（`metrology/d_repair_arms.py`，分支 `npu-fusion-attention`，与 `c2kv` 条件共用同一 gist 生成栈；`kv_repair_arms.py` 保留为 AppWorld 侧的语义出处对照）：
 
-**接入后先跑守卫臂**：`d_sham_mech` 的输出必须与 `c2kv` 基线臂逐 token 一致。不一致 = 手术管线有机械损伤，先修管线，再谈任何修复率数字。
+```bash
+python -m metrology.bfcl_hf_runner \
+    --bfcl_pkg_path <bfcl_eval 包路径> --model <Qwen3-4B-Instruct-2507> \
+    --condition c2kv_d_corr --c2kv_checkpoint <c2kv ckpt> \
+    --c2kv_doc_mode joint --c2kv_ratio 8 \
+    --d_plan d_sham_plan.json \
+    --cap_tier default --output d_corr.jsonl
+```
+
+- condition 与臂名 1:1：`c2kv_d_corr` / `c2kv_d_corr_recompute` / `c2kv_d_corr_all` / `c2kv_d_sham_neutral`（必需 `--d_plan`）/ `c2kv_d_sham_mech`（守卫）。
+- `--d_plan` 的 JSON 与 AppWorld per-qid plan 同形 `{qid: {k_star, span_len, sham_token_ids}}`；`d_sham_plan.py` 的产物可直接喂入（BFCL 侧 qid = entry id）。corr 系臂不需要 payload，提供时只做 k* 交叉校验。
+- 一处有意的语义差异：k* 取**合并网格（工具文档 + 历史文档）中点**，AppWorld 只数历史文档——BFCL 的压缩网格本来就含工具块，中点是"被压缩文档序列正中间那份"的自然类比（`d_repair_arms.py` docstring 有完整说明）。
+- 臂前提不满足（plan 缺失 / k* 不符 / sham 长度不符）会落 error 行而非静默退化，对齐 AppWorld 的 fatal skip。
+
+**接入后先跑守卫臂**：`c2kv_d_sham_mech` 的输出必须与 `c2kv` 基线臂逐 token 一致。不一致 = 手术管线有机械损伤，先修管线，再谈任何修复率数字。
+
+若要迁回自己的 harness 而非直接用 runner，`kv_repair_arms.py` 头部的接口契约仍是移植清单（宿主侧需要提供的接口现成 harness 里都有对应物）。
 
 ## 权重获取
 
