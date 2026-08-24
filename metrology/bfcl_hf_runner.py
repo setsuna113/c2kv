@@ -126,7 +126,14 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FROZEN_IDS_DEFAULT = REPO_ROOT / "configs" / "r5_metrology_sample.json"
 
-CONDITION_CHOICES = ["base", "snapkv", "h2o", "streamingllm", "kvzip", "c2kv"]
+# D 实验（KV repair）臂：condition 与 AppWorld 臂名 1:1（"c2kv_" + 臂名），
+# 实现见 metrology/d_repair_arms.py（模块层 torch-free，可安全顶层 import）
+from metrology.d_repair_arms import D_ARM_CONDITIONS  # noqa: E402
+
+CONDITION_CHOICES = [
+    "base", "snapkv", "h2o", "streamingllm", "kvzip", "c2kv",
+    *D_ARM_CONDITIONS,
+]
 CAP_TIER_CHOICES = ["default", "128", "1024"]
 
 # 压缩条件固定口径（与 metrology/kv_compress.py 默认一致；S8.2 任务书）
@@ -493,7 +500,8 @@ def _build_handler(handler_cls, model_path: str, tokenizer, model, device: str,
                    cap_tier: str, condition: str,
                    max_context_length: int | None,
                    kv_budget: int | None,
-                   c2kv_settings: dict | None = None):
+                   c2kv_settings: dict | None = None,
+                   d_plan: dict | None = None):
     """构造 handler：直接调 handler_cls.__init__（即 QwenHandler.__init__，本 runner
     不 override __init__，规避 EnforceOverrides 严格模式），再把本地 HF 状态挂到实例上。
 
@@ -533,6 +541,9 @@ def _build_handler(handler_cls, model_path: str, tokenizer, model, device: str,
     # _c2kv_bare_system 由 _run_one_entry 逐样本挂载（裸 system，防工具文档泄漏）
     handler._c2kv_settings = c2kv_settings or {}
     handler._c2kv_bare_system = None
+    # 仅 c2kv_d_*：--d_plan 全表；_d_plan_entry 由 _run_one_entry 逐样本挂载
+    handler._d_plan = d_plan or {}
+    handler._d_plan_entry = None
     handler._query_history = []  # 每次 _query_prompting 追加一条（调用序 == 基类循环步序）
     return handler
 
@@ -627,6 +638,12 @@ def _define_handler_class():
                     # metrology/c2kv_gist.py）；inputs 全量 prefill 不执行，
                     # prompt_len 仅用于伪 api_response 的 input_token 语义
                     generated, compression_meta = self._hf_generate_c2kv(
+                        message, function, max_tokens
+                    )
+                elif self._condition in D_ARM_CONDITIONS:
+                    # D 实验 KV repair 臂（metrology/d_repair_arms.py）：
+                    # c2kv 前缀 + gist/后缀之间的 cache 手术
+                    generated, compression_meta = self._hf_generate_c2kv_arm(
                         message, function, max_tokens
                     )
                 else:
@@ -857,6 +874,15 @@ def _define_handler_class():
 
             return hf_generate_c2kv(self, message, function, max_tokens)
 
+        def _hf_generate_c2kv_arm(self, message: list, function: list,
+                                  max_tokens: int):
+            """c2kv_d_* 条件的薄 hook：全部逻辑在 metrology/d_repair_arms.py。
+            臂名从 condition 推出；per-entry plan 在 _d_plan_entry（_run_one_entry
+            逐样本挂载）。"""
+            from metrology.d_repair_arms import hf_generate_c2kv_arm
+
+            return hf_generate_c2kv_arm(self, message, function, max_tokens)
+
         def reset_query_history(self):
             self._query_history = []
 
@@ -902,7 +928,7 @@ def _run_one_entry(handler, entry: dict, cap_tier: str, condition: str,
     entry_copy = deepcopy(entry)  # 循环会原地改 question[0]（system prompt 注入）
     t0 = time.time()
     try:
-        if condition == "c2kv":
+        if condition == "c2kv" or condition in D_ARM_CONDITIONS:
             # 裸 system（functions=[] 重算，防工具文档泄漏）；须在 handler.inference
             # 前计算（_pre_query_processing_prompting 会原地改 question[0]）
             from metrology.c2kv_gist import compute_bare_system_content
@@ -910,6 +936,10 @@ def _run_one_entry(handler, entry: dict, cap_tier: str, condition: str,
             handler._c2kv_bare_system = compute_bare_system_content(
                 entry_copy["question"][0], entry_id
             )
+        if condition in D_ARM_CONDITIONS:
+            # D 臂 per-entry plan（无条目 = {}：corr 系臂不需要 payload，
+            # sham 臂缺 sham_token_ids 时 fatal d_sham_plan_missing）
+            handler._d_plan_entry = handler._d_plan.get(entry_id)
         result, metadata = handler.inference(
             entry_copy, include_input_log=False, exclude_state_log=True
         )
@@ -1097,9 +1127,10 @@ def _load_model(args):
 
     print(f"[model] 加载 {args.model} (bf16, eager, device={args.device}) ...")
     tokenizer = AutoTokenizer.from_pretrained(args.model, trust_remote_code=True)
-    if args.condition == "c2kv":
+    if args.condition == "c2kv" or args.condition in D_ARM_CONDITIONS:
         # S9：仓库自定义 Qwen3 gist 类；--c2kv_checkpoint 训练 ckpt，缺省
-        # 基座 + gist 配置注入（未训练 gist 参数 = untrained 对照臂）
+        # 基座 + gist 配置注入（未训练 gist 参数 = untrained 对照臂）。
+        # c2kv_d_* 臂在同一模型类上跑（修复手术发生在 cache 层）
         from metrology.c2kv_gist import load_c2kv_model_weights
 
         model = load_c2kv_model_weights(args, tokenizer)
@@ -1205,7 +1236,7 @@ def run_inference(args, output_path: Path):
     tokenizer, model, device = _load_model(args)
     handler_cls = _define_handler_class()
     c2kv_settings = None
-    if args.condition == "c2kv":
+    if args.condition == "c2kv" or args.condition in D_ARM_CONDITIONS:
         c2kv_settings = {
             "doc_mode": args.c2kv_doc_mode,
             "ratio": args.c2kv_ratio,
@@ -1213,6 +1244,12 @@ def run_inference(args, output_path: Path):
             "max_doc_num": args.c2kv_max_doc_num,
             "max_tool_chunks": None,  # 缺省 = 2/3 max_doc_num（joint 驱动口径）
         }
+    d_plan = None
+    if args.condition in D_ARM_CONDITIONS and args.d_plan:
+        from metrology.d_repair_arms import load_d_plan
+
+        d_plan = load_d_plan(args.d_plan)
+        print(f"[run] d_plan 载入 {len(d_plan)} 条（{args.d_plan}）")
     handler = _build_handler(
         handler_cls=handler_cls,
         model_path=args.model,
@@ -1224,6 +1261,7 @@ def run_inference(args, output_path: Path):
         max_context_length=args.max_context_length,
         kv_budget=args.kv_budget,
         c2kv_settings=c2kv_settings,
+        d_plan=d_plan,
     )
     handler_cls_ok = type(handler) is handler_cls
     print(f"[run] handler 实例类型 {type(handler).__name__}（子类化路径: {handler_cls_ok}）")
@@ -1263,12 +1301,15 @@ def run_inference(args, output_path: Path):
                 args.model, manifest_sha, handler.max_context_length,
             )
             _cleanup_multi_turn_instances(model_name_underline, it["id"])
-        if args.condition == "c2kv":
+        if args.condition == "c2kv" or args.condition in D_ARM_CONDITIONS:
             # 行级 c2kv 元数据（覆盖成功/推理异常/data_missing 三种行；
-            # 模板对齐 snapkv kv_budget 的逐行记录口径）
+            # 模板对齐 snapkv kv_budget 的逐行记录口径）；c2kv_d_* 臂附 d_arm
             from metrology.c2kv_gist import c2kv_row_meta
 
             row["c2kv_meta"] = c2kv_row_meta(args)
+            if args.condition in D_ARM_CONDITIONS:
+                row["c2kv_meta"]["d_arm"] = args.condition[len("c2kv_"):]
+                row["c2kv_meta"]["d_plan"] = args.d_plan
         _append_row(output_path, row)
         print(
             f"[run] {i}/{len(to_run)} {it['id']}  "
@@ -1339,6 +1380,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="仅 c2kv：文档块总槽位（工具块上限缺省 2/3，历史块取余下槽位尾偏选择）",
     )
     p.add_argument(
+        "--d_plan", default=None,
+        help="仅 c2kv_d_* 臂：per-entry 干预计划 JSON "
+             "{entry_id: {k_star, span_len, sham_token_ids}}。"
+             "c2kv_d_sham_neutral 必需（sham token 来源）；其余臂可选"
+             "（提供时做 k* 交叉校验，不符即 fatal 落 error 行）",
+    )
+    p.add_argument(
         "--limit", type=int, default=None,
         help="调试参数：本次最多新跑的样本数（resume 过滤后）",
     )
@@ -1383,20 +1431,29 @@ def main(argv=None):
             f"condition={args.condition} 未实现：S8.2 实现 snapkv / streamingllm；"
             "h2o / kvzip 在后续 chunk 经 _query_prompting 的 hook 点接入"
         )
-    if args.condition == "c2kv":
+    if args.condition == "c2kv" or args.condition in D_ARM_CONDITIONS:
         if args.c2kv_checkpoint is not None and not Path(args.c2kv_checkpoint).exists():
             raise SystemExit(f"--c2kv_checkpoint 不存在: {args.c2kv_checkpoint}")
         if args.c2kv_ratio < 1:
             raise SystemExit(f"--c2kv_ratio 必须 >= 1: {args.c2kv_ratio}")
+    if args.condition in D_ARM_CONDITIONS:
+        if args.condition == "c2kv_d_sham_neutral" and not args.d_plan:
+            raise SystemExit(
+                "condition=c2kv_d_sham_neutral 必须提供 --d_plan"
+                "（sham_token_ids 来源；格式见 metrology/d_repair_arms.py docstring）"
+            )
+        if args.d_plan and not Path(args.d_plan).exists():
+            raise SystemExit(f"--d_plan 不存在: {args.d_plan}")
     if not args.dryrun and not args.model:
         raise SystemExit("非 dryrun 模式必须提供 --model")
 
     if args.output:
         output_path = Path(args.output)
-    elif args.condition == "c2kv":
-        # 臂名入文件名：防不同 doc_mode/ratio 的 resume 键 (id, cap_tier, condition) 撞车
+    elif args.condition == "c2kv" or args.condition in D_ARM_CONDITIONS:
+        # 臂名入文件名：防不同 doc_mode/ratio 的 resume 键 (id, cap_tier, condition) 撞车；
+        # c2kv_d_* 的 condition 本身已含臂名（c2kv_d_corr 等）
         output_path = REPO_ROOT / "metrology" / "outputs" / (
-            f"bfcl_run_c2kv-{args.c2kv_doc_mode}-r{args.c2kv_ratio}_{args.cap_tier}.jsonl"
+            f"bfcl_run_{args.condition}-{args.c2kv_doc_mode}-r{args.c2kv_ratio}_{args.cap_tier}.jsonl"
         )
     else:
         output_path = REPO_ROOT / "metrology" / "outputs" / (
@@ -1405,11 +1462,13 @@ def main(argv=None):
     kv_note = ""
     if args.condition in ("snapkv", "streamingllm", "h2o", "kvzip"):
         kv_note = f"  kv_budget={args.kv_budget if args.kv_budget is not None else '50%'}"
-    elif args.condition == "c2kv":
+    elif args.condition == "c2kv" or args.condition in D_ARM_CONDITIONS:
         kv_note = (
             f"  c2kv_doc_mode={args.c2kv_doc_mode}  c2kv_ratio={args.c2kv_ratio}"
             f"  c2kv_checkpoint={args.c2kv_checkpoint or '(基座+注入,未训练)'}"
         )
+        if args.condition in D_ARM_CONDITIONS:
+            kv_note += f"  d_plan={args.d_plan or '(无)'}"
     print(f"[runner] condition={args.condition}  cap_tier={args.cap_tier}{kv_note}  "
           f"output={output_path}")
 
