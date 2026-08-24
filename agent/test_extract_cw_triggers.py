@@ -171,6 +171,45 @@ def test_all_four_transition_cells(tmp_path):
     assert "cache" not in bundle and "kv" not in bundle
 
 
+def test_transitions_knob_selects_harm_stratum(tmp_path):
+    full = [
+        _row("s:1", "get_weather"),   # C -> C
+        _row("s:2", "get_weather"),   # C -> W
+        _row("s:3", "wrong_tool"),    # W -> C
+        _row("s:4", "wrong_tool"),    # W -> W
+    ]
+    compressed = [
+        _row("s:1", "get_weather"),
+        _row("s:2", "wrong_tool"),
+        _row("s:3", "get_weather"),
+        _row("s:4", "other_tool"),
+    ]
+    args = _args(
+        tmp_path,
+        _write(tmp_path / "full.jsonl", full),
+        _write(tmp_path / "comp.jsonl", compressed),
+        transitions="C->C,W->C",
+    )
+    manifest = X.run(args)
+    # harm-check stratum = rows where the compressed (none) arm was correct
+    assert manifest["cw_qids"] == ["s:1", "s:3"]
+    assert manifest["transitions_emitted"] == "C->C,W->C"
+    assert "NOT the prereg" in manifest["description"]
+    # the census still counts all four cells regardless of the selection
+    assert manifest["transitions"] == {"C->C": 1, "C->W": 1, "W->C": 1, "W->W": 1}
+
+
+def test_transitions_knob_rejects_bad_value(tmp_path):
+    args = _args(
+        tmp_path,
+        _write(tmp_path / "full.jsonl", [_row("s:1", "get_weather")]),
+        _write(tmp_path / "comp.jsonl", [_row("s:1", "get_weather")]),
+        transitions="C->C,bogus",
+    )
+    with pytest.raises(SystemExit):
+        X.run(args)
+
+
 def test_no_downstream_flag_for_single_doc(tmp_path):
     full = [_row("s:1", "get_weather", history_doc_chunks=1)]
     compressed = [_row("s:1", "wrong_tool", history_doc_chunks=1)]
