@@ -375,7 +375,7 @@ phase_calibrate() {
     kill_train || true
     wait "${tpid}" 2>/dev/null || true
     if [[ ${wrc} -eq 3 ]] \
-      || tail -200 "${LOGS}/train.log" | grep -qE "illegal memory access|AcceleratorError|CUDA error:|CheckpointError|recompile_limit"; then
+      || tail -200 "${LOGS}/train.log" | grep -qE "illegal memory access|AcceleratorError|CUDA error:|CheckpointError|recompile_limit|FloatingPointError"; then
       bump_fallback
       echo "stall/CUDA-signature crash -> fallback_level=$(fallback_level) (1=plain DDP 2=+sdpa 3=+eager)"
     fi
@@ -471,7 +471,7 @@ phase_train() {
       return 0
     fi
     if [[ ${stalled} -eq 1 ]] \
-      || { [[ ${trc} -ne 0 ]] && tail -200 "${LOGS}/train.log" | grep -qE "illegal memory access|AcceleratorError|CUDA error:|CheckpointError|recompile_limit"; }; then
+      || { [[ ${trc} -ne 0 ]] && tail -200 "${LOGS}/train.log" | grep -qE "illegal memory access|AcceleratorError|CUDA error:|CheckpointError|recompile_limit|FloatingPointError"; }; then
       bump_fallback
       echo "stall/CUDA-signature crash -> fallback_level=$(fallback_level) (1=plain DDP 2=+sdpa 3=+eager)"
     fi
