@@ -27,9 +27,10 @@
 #   CHECKPOINT_TOKEN_GRAN    checkpoint 间隔（presented tokens，默认 16M）
 #   EVAL_MAX_CKPTS           最多评几个 milestone（默认 6，均匀抽取含最终档）
 #   MAX_CRASH_RETRIES        训练崩溃/停滞自动恢复上限（默认 5）
-#   STALL_MIN                停滞看门狗窗口（分钟, 默认 25）：日志连续无写入且进程
-#                            还在 -> 杀掉重试并升级 fallback 档位
-#                            (1=ATTN_IMPL=sdpa 免编译; 2=再降 USE_DEEPSPEED=0)
+#   STALL_MIN                停滞看门狗窗口（分钟, 默认 35——必须大于大数据集的
+#                            静默建样本窗口（大池实测 ~22-25min), 否则误杀健康启动):
+#                            日志连续无写入且进程还在 -> 杀掉重试并升级 fallback 档位
+#                            (1=plain DDP; 2=+sdpa; 3=+eager)
 #   EXPECT_GPUS              期望卡数（默认 2；不足只警告，便于单卡 smoke）
 #   SMOKE=1                  本机端到端冒烟：极小剂量 + 单卡 + 评测截断
 set -euo pipefail
@@ -264,7 +265,7 @@ latest_ckpt() { ls -d "${OUTPUT_DIR}"/checkpoint-* 2>/dev/null | sort -t- -k2 -n
 # 每次停滞升级 fallback 档位: 1=USE_DEEPSPEED=0(plain DDP——ZeRO-3 下
 # generate_gist 调用次数随 rank 批内容漂移, 集合通信计数错位会 NCCL 超时挂死,
 # 2026-08-26 已实锤), 2=再降 ATTN_IMPL=sdpa(免编译兜底)。
-STALL_MIN="${STALL_MIN:-25}"
+STALL_MIN="${STALL_MIN:-35}"
 
 fallback_level() { cat "${STATUS}/attn_fallback_level" 2>/dev/null || echo 0; }
 bump_fallback() { local l; l=$(fallback_level); echo $((l + 1)) > "${STATUS}/attn_fallback_level"; }
