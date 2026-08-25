@@ -512,19 +512,38 @@ PY
 }
 
 # ---- main ------------------------------------------------------------------
-# 无人值守：在交互终端直接运行时，自动 nohup 脱离会话到后台（幂等，重跑=续跑）。
-# 已在 nohup/管道/cron 中（stdin/stdout 非 TTY）则原地运行；FG=1 强制前台。
-if [[ "${FG:-0}" != "1" && -z "${G_H200_DETACHED:-}" && -t 0 && -t 1 ]]; then
-  mkdir -p "${LOGS}"
-  export G_H200_DETACHED=1
-  nohup bash "${BASH_SOURCE[0]}" >> "${LOGS}/console.log" 2>&1 &
-  echo "已在后台启动 (pid $!), 会话断开不影响运行。"
-  echo "  跟踪: tail -f ${LOGS}/console.log"
-  echo "  状态: ls ${STATUS}/ ; 失败摘要: cat ${STATUS}/*.fail"
-  echo "  停止: pkill -f start_h200.sh; pkill -f train_joint_next_action_c2kv.py"
-  echo "  续跑: 再执行一次同一命令即可（已完成阶段自动跳过）"
-  exit 0
+# 单实例锁（mkdir 原子, gpfs 上比 flock 可靠）+ 自快照：先把自己拷成仓库根
+# 下的快照（!.gitignore 的 /.* 覆盖）再 exec/nohup——快照的 BASH_SOURCE 目录
+# 仍是仓库根, REPO_ROOT 推导不变; 之后对 start_h200.sh 的任何编辑都不影响
+# 在跑的实例（bash 边读边执行, 文件被改写会从旧字节偏移错位 → 假语法错误。
+# 2026-08-26 踩过这个坑）。快照名带 pid, 不同实例互不覆盖。
+mkdir -p "${STATUS}" "${LOGS}"
+LOCKDIR="${STATUS}/.lock"
+if [[ -z "${G_H200_SNAPSHOT_PATH:-}" ]]; then
+  if ! mkdir "${LOCKDIR}" 2>/dev/null; then
+    echo "已有实例在跑（${LOCKDIR}，host=$(cat "${LOCKDIR}"/host 2>/dev/null) pid=$(cat "${LOCKDIR}"/pid 2>/dev/null)）。确认没在跑后删掉该目录重试。" >&2
+    exit 2
+  fi
+  hostname > "${LOCKDIR}/host"; echo $$ > "${LOCKDIR}/pid"
+  SNAP="${REPO_ROOT}/.start_h200.snapshot.$$.sh"
+  cp "${BASH_SOURCE[0]}" "${SNAP}"
+  export G_H200_SNAPSHOT_PATH="${SNAP}"
+  # 无人值守：在交互终端直接运行时，自动 nohup 脱离会话到后台（幂等，重跑=续跑）。
+  # 已在 nohup/管道/cron 中（stdin/stdout 非 TTY）则原地运行；FG=1 强制前台。
+  if [[ "${FG:-0}" != "1" && -t 0 && -t 1 ]]; then
+    nohup bash "${SNAP}" >> "${LOGS}/console.log" 2>&1 &
+    echo "已在后台启动 (pid $!), 会话断开不影响运行。"
+    echo "  跟踪: tail -f ${LOGS}/console.log"
+    echo "  状态: ls ${STATUS}/ ; 失败摘要: cat ${STATUS}/*.fail"
+    echo "  停止: pkill -f start_h200.snapshot; pkill -f train_joint_next_action_c2kv.py"
+    echo "  续跑: 再执行一次同一命令即可（已完成阶段自动跳过）"
+    exit 0
+  fi
+  exec bash "${SNAP}"
 fi
+# 快照进程：锁由父进程建好，这里登记自己的 pid，退出时连快照一起清理。
+echo $$ > "${LOCKDIR}/pid"
+trap 'rm -rf "${LOCKDIR}"; rm -f "${G_H200_SNAPSHOT_PATH}"' EXIT
 
 log "=== g_h200 pipeline start (target=${TARGET_PRESENTED_TOKENS} presented, wall_cap=${WALL_CAP_HOURS}h, SMOKE=${SMOKE:-0}) ==="
 run_phase recon phase_recon
