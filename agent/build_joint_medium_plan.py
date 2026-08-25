@@ -17,11 +17,14 @@ Why this exists (pre-registered constraints, docs/0820_g_joint_progress.md):
   inputs -> same outputs (plan JSONs carry no wall-clock fields).
 - Stratified pool scan (P0-2): each family is scanned subset-by-subset
   (``_family_subsources``: qa = hotpotqa/2wiki/longmagpie, openswe = one
-  stratum per trajectory-config dir, toucan/traces = single stratum) with
-  per-subset token caps (default equal weights; ``--subset_weights
-  family:subset=w`` overrides).  A subset that exhausts below its cap hands
-  the remaining budget to later siblings (sequential water-filling), and
-  within a subset the parquet/jsonl FILE order is shuffled with
+  stratum per trajectory-config dir, toucan = single stratum, traces = single
+  stratum unless ``--split_traces_subsets``/``--traces_subset_map`` splits it
+  into appworld/tau2 substrata plus an ``other`` catch-all — see the
+  g_h200_main example below) with per-subset token caps (default equal
+  weights; ``--subset_weights family:subset=w`` overrides).  A subset that
+  exhausts below its cap hands the remaining budget to later siblings
+  (sequential water-filling), and within a subset the parquet/jsonl FILE
+  order is shuffled with
   ``random.Random(f"{order_seed}:scan:{family}:{subset}")`` (row order inside
   a file is unchanged) — so a cap-truncated scan is a seeded-random file
   prefix of every subset rather than the alphabetical head of the first one.
@@ -70,6 +73,41 @@ Usage:
       --removal_files outputs/cross_dataset_dedup.json \
       --order_seed 42 --out_dir outputs/joint_medium_plan \
       --tokenizer ~/c2kv/models/Qwen3-4B-Instruct-2507 --small_arm_hours 12.5
+
+H200 main arm — g_h200_main = 60% toucan + 30% tau2 traces + 10% AppWorld
+traces (qa/openswe excluded).  The traces family quota (0.4) is split 75/25
+over the tau2/appworld substrata via --subset_weights (0.4 x 0.75 = 0.30,
+0.4 x 0.25 = 0.10 overall); the pool composition follows the scan-cap weights
+modulo exhaustion, exactly like the qa substrata.
+
+Step 1 (前置扫描, dry-run — no planning; confirm the real benchmark/subset
+strings on the server data and warm the traces token cache):
+
+  python agent/build_joint_medium_plan.py \
+      --traces_path ~/c2kv/datasets/agent-llm-traces \
+      --split_manifest_file outputs/agent_taskproxy_split_manifest.json \
+      --removal_files outputs/cross_dataset_dedup.json \
+      --tokenizer ~/c2kv/models/Qwen3-4B-Instruct-2507 \
+      --out_dir outputs/joint_h200_plan --list_traces_subsets
+
+Step 2 (plan; default classification *appworld* -> appworld, airline/retail/
+telecom -> tau2, anything else kept under its raw name in "other"):
+
+  python agent/build_joint_medium_plan.py \
+      --traces_path ~/c2kv/datasets/agent-llm-traces \
+      --toucan_path ~/c2kv/datasets/toucan \
+      --split_manifest_file outputs/agent_taskproxy_split_manifest.json \
+      --recipe g_h200_main=toucan:0.6,traces:0.4 \
+      --split_traces_subsets \
+      --subset_weights traces:tau2=0.75 --subset_weights traces:appworld=0.25 \
+      --budget_estimated_tokens <N> --oversample_factor 1.25 \
+      --removal_files outputs/cross_dataset_dedup.json \
+      --order_seed 42 --out_dir outputs/joint_h200_plan \
+      --tokenizer ~/c2kv/models/Qwen3-4B-Instruct-2507
+
+If step 1 shows tau2 values other than airline/retail/telecom, pin the table
+explicitly (implies --split_traces_subsets; REPLACES the default map):
+  --traces_subset_map appworld=appworld,tau2=airline:retail:telecom
 """
 
 from __future__ import annotations
@@ -81,10 +119,11 @@ import logging
 import math
 import random
 import sys
+from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, FrozenSet, List, Optional, Sequence, Set, Tuple
+from typing import TYPE_CHECKING, Any, Callable, Dict, FrozenSet, List, Optional, Sequence, Set, Tuple
 
 if __package__ in {None, ""}:
     # Allow running as `python agent/build_joint_medium_plan.py` from anywhere.
@@ -897,6 +936,157 @@ def build_arm_launch_table(
 # ---------------------------------------------------------------------------
 
 
+# Traces substrata (OPT-IN split for the H200 main arm): the traces pool mixes
+# AppWorld and tau2-bench sessions in one parquet pool; the trainer threads the
+# parquet ``benchmark``/``subset`` column onto ``JointExample.subset``
+# (train_data_joint.py), which is what the classification below consumes.
+# Default table: anything containing "appworld" -> appworld; airline/retail/
+# telecom (incl. tau2_*/tau_* prefixed variants, via substring match) -> tau2.
+# ``--traces_subset_map`` REPLACES this table; unmatched values keep their RAW
+# subset name as their own stratum (never silently dropped).
+_TRACES_DEFAULT_SUBSET_MAP: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
+    ("appworld", ("appworld",)),
+    ("tau2", ("airline", "retail", "telecom")),
+)
+# Catch-all scan stratum for unmapped subsets (reserved name).  It is scanned
+# FIRST so an empty catch-all hands its cap to the declared strata through
+# sequential water-filling (a trailing empty stratum would strand the budget).
+_TRACES_OTHER_SUBSET = "other"
+
+
+def _classify_traces_subset(raw_subset: str, subset_map=None) -> str:
+    """Map a traces pool ``benchmark``/``subset`` value to its scan stratum.
+
+    Case-insensitive SUBSTRING match against the map's patterns in declared
+    order; ``subset_map=None`` applies ``_TRACES_DEFAULT_SUBSET_MAP``.
+    Unmatched values return their raw name (""/None -> "unknown").
+    """
+    raw = str(raw_subset or "unknown")
+    lowered = raw.lower()
+    for stratum, patterns in (subset_map or _TRACES_DEFAULT_SUBSET_MAP):
+        if any(pattern.lower() in lowered for pattern in patterns):
+            return stratum
+    return raw
+
+
+def _parse_traces_subset_map(specs: Optional[Sequence[str]]):
+    """Parse repeatable ``--traces_subset_map stratum=subset[:subset...][,...]``.
+
+    Returns an ordered tuple of (stratum, patterns) or None when no override
+    was given (the default table then applies).  "other" is reserved for the
+    catch-all stratum.
+    """
+    if not specs:
+        return None
+    mapping: List[Tuple[str, Tuple[str, ...]]] = []
+    seen: Set[str] = set()
+    for spec in specs:
+        for entry in spec.split(","):
+            stratum, sep, value = entry.partition("=")
+            if not sep or not stratum.strip() or not value.strip():
+                raise ValueError(
+                    f"--traces_subset_map must be stratum=subset[:subset...], got: {entry!r}"
+                )
+            stratum = stratum.strip()
+            patterns = tuple(part.strip() for part in value.split(":") if part.strip())
+            if not patterns:
+                raise ValueError(f"--traces_subset_map stratum needs >= 1 subset, got: {entry!r}")
+            if stratum == _TRACES_OTHER_SUBSET:
+                raise ValueError(
+                    f"--traces_subset_map stratum name {_TRACES_OTHER_SUBSET!r} is reserved "
+                    "(it is the catch-all scan stratum)"
+                )
+            if stratum in seen:
+                raise ValueError(f"--traces_subset_map stratum repeated: {stratum!r}")
+            seen.add(stratum)
+            mapping.append((stratum, patterns))
+    return tuple(mapping)
+
+
+def _traces_source_kwargs(args: argparse.Namespace) -> Dict[str, Any]:
+    """Trainer-matching knobs for the traces source (shared by every mode)."""
+    return dict(
+        path=args.traces_path,
+        split="train",
+        split_seed=args.split_seed,
+        split_manifest_file=args.split_manifest_file,
+        split_manifest_name=args.split_manifest_name,
+        max_samples_per_session=4,  # JointDataArgs default: MUST match the trainer run
+        require_tool_call=True,  # JointDataArgs default
+    )
+
+
+class _LazyTracesBase:
+    """Construct ``AgentLLMTracesJointSource`` on FIRST iteration, not before.
+
+    The traces source loads its whole pool eagerly at construction, and the
+    ``--subset_weights`` fail-fast validation instantiates
+    ``_family_subsources`` once ahead of the real scan — a lazy holder keeps
+    that validation pass free and guarantees the pool loads at most once per
+    scan, shared by all stratum views.
+    """
+
+    def __init__(self, source_kwargs: Dict[str, Any]) -> None:
+        self._source_kwargs = source_kwargs
+        self._source = None
+
+    def __iter__(self):
+        if self._source is None:
+            from train.train_data_joint import AgentLLMTracesJointSource
+
+            self._source = AgentLLMTracesJointSource(**self._source_kwargs)
+        return iter(self._source)
+
+
+class _TracesSubsetView:
+    """Filtered view over a SHARED traces base source (split mode).
+
+    Iterating a view is an in-memory filter on the trainer-threaded
+    ``JointExample.subset`` (the parquet ``benchmark``/``subset`` column): it
+    yields exactly the examples classifying to its stratum.  The catch-all
+    ``other`` view yields the unmapped examples and tallies their raw subset
+    values in ``unknown_subsets`` for the loud scan-report warning.
+    ``subset_classifier`` is consumed by ``_scan_subset_prefix`` so pool
+    entries are tagged with their classified stratum — for ``other`` that is
+    the RAW subset value (unknown subsets surface as their own strata in the
+    per-subset audit, never silently dropped).
+    """
+
+    def __init__(self, base: Any, subset_map, stratum: str) -> None:
+        self._base = base
+        self._stratum = stratum
+        self._known = frozenset(name for name, _ in (subset_map or _TRACES_DEFAULT_SUBSET_MAP))
+        self.subset_classifier: Callable[[str], str] = (
+            lambda raw: _classify_traces_subset(raw, subset_map)
+        )
+        self.unknown_subsets: Counter = Counter()
+
+    def __iter__(self):
+        for example in self._base:
+            classified = self.subset_classifier(getattr(example, "subset", "unknown"))
+            if self._stratum == _TRACES_OTHER_SUBSET:
+                if classified in self._known:
+                    continue
+                self.unknown_subsets[classified] += 1
+            elif classified != self._stratum:
+                continue
+            yield example
+
+
+def _traces_split_subsources(base: Any, subset_map) -> List[Tuple[str, Any]]:
+    """One filtered view per stratum over ONE shared traces base source.
+
+    Declared strata follow the map's order (default: appworld, tau2); the
+    catch-all ``other`` goes FIRST so an empty one redistributes its cap to
+    the declared strata (sequential water-filling only flows forward).
+    """
+    declared = [name for name, _ in (subset_map or _TRACES_DEFAULT_SUBSET_MAP)]
+    return [
+        (_TRACES_OTHER_SUBSET, _TracesSubsetView(base, subset_map, _TRACES_OTHER_SUBSET)),
+        *[(name, _TracesSubsetView(base, subset_map, name)) for name in declared],
+    ]
+
+
 def _family_subsources(family: str, args: argparse.Namespace) -> List[Tuple[str, Any]]:
     """Instantiate the per-subset sources of one family (trainer-matching knobs).
 
@@ -914,22 +1104,17 @@ def _family_subsources(family: str, args: argparse.Namespace) -> List[Tuple[str,
     if family == "traces":
         if not args.traces_path:
             raise ValueError("a recipe needs the traces family but --traces_path is not set")
-        from train.train_data_joint import AgentLLMTracesJointSource
+        subset_map = _parse_traces_subset_map(getattr(args, "traces_subset_map", None))
+        if not getattr(args, "split_traces_subsets", False) and subset_map is None:
+            # Legacy single-stratum scan: identical knobs to pre-split runs, so
+            # invocations without split options are bit-identical.
+            from train.train_data_joint import AgentLLMTracesJointSource
 
-        return [
-            (
-                "traces",
-                AgentLLMTracesJointSource(
-                    path=args.traces_path,
-                    split="train",
-                    split_seed=args.split_seed,
-                    split_manifest_file=args.split_manifest_file,
-                    split_manifest_name=args.split_manifest_name,
-                    max_samples_per_session=4,  # JointDataArgs default: MUST match the trainer run
-                    require_tool_call=True,  # JointDataArgs default
-                ),
-            )
-        ]
+            return [("traces", AgentLLMTracesJointSource(**_traces_source_kwargs(args)))]
+        # Opt-in split (g_h200_main): appworld/tau2 (+ an "other" catch-all)
+        # become independently weightable scan strata, addressable as
+        # ``--subset_weights traces:appworld=w / traces:tau2=w / traces:other=w``.
+        return _traces_split_subsources(_LazyTracesBase(_traces_source_kwargs(args)), subset_map)
     from train.train_data_joint_multisource import (
         OpenSWEJointSource,
         QADocsJointSource,
@@ -1002,6 +1187,7 @@ def _scan_subset_prefix(
     family: str,
     subset: str,
     removal_identifiers: FrozenSet[str] = frozenset(),
+    subset_classifier: Optional[Callable[[str], str]] = None,
 ) -> Tuple[List[PoolEntry], int, int, int]:
     """Stream one subset source into pool entries, stopping at ``token_cap``.
 
@@ -1010,6 +1196,10 @@ def _scan_subset_prefix(
     accounting (P2: filtering after the cap would let removed rows eat the
     oversample headroom and shrink the pool below ``quota x oversample``).
     Estimates are cached by (qid, stamp) and ``cache`` is updated in place.
+    ``subset_classifier`` (traces split only): maps the example's own
+    trainer-threaded ``subset`` field to its pool stratum instead of tagging
+    every entry with the scan stratum name — the ``other`` catch-all thus
+    records each unknown subset under its raw name.
     Returns (entries, total_estimated_tokens, cache_hits, removed_count).
     """
     entries: List[PoolEntry] = []
@@ -1037,7 +1227,11 @@ def _scan_subset_prefix(
                 qid=example.qid,
                 session_id=example.session_id,
                 estimated_tokens=estimated,
-                subset=subset,
+                subset=(
+                    subset_classifier(str(getattr(example, "subset", "unknown") or "unknown"))
+                    if subset_classifier is not None
+                    else subset
+                ),
             )
         )
         total += estimated
@@ -1086,7 +1280,16 @@ def scan_family_pool(
         if remaining_cap is not None:
             sub_cap = remaining_cap * weights[name] / remaining_weight if remaining_weight else 0.0
         entries, sub_total, cache_hits, removed = _scan_subset_prefix(
-            source, tokenizer, stamp, cache, sub_cap, seen, family, name, removal_identifiers
+            source,
+            tokenizer,
+            stamp,
+            cache,
+            sub_cap,
+            seen,
+            family,
+            name,
+            removal_identifiers,
+            subset_classifier=getattr(source, "subset_classifier", None),
         )
         pool.extend(entries)
         subsets_report[name] = {
@@ -1098,6 +1301,22 @@ def scan_family_pool(
             "cache_hits": cache_hits,
             "removed": removed,
         }
+        unknown_subsets = getattr(source, "unknown_subsets", None)
+        if unknown_subsets:
+            # Traces split catch-all: unmapped subsets are KEPT (under their
+            # raw names on the pool entries) — surface them loudly so the
+            # operator can pin them with --traces_subset_map.
+            subsets_report[name]["unknown_subsets"] = dict(unknown_subsets)
+            logger.warning(
+                "family=%s subset=%s: %d examples carry UNMAPPED raw subset names %s — kept "
+                "under their raw names in the %r catch-all stratum; re-run with "
+                "--traces_subset_map to weight them explicitly",
+                family,
+                name,
+                sum(unknown_subsets.values()),
+                sorted(unknown_subsets),
+                name,
+            )
         logger.info(
             "family=%s subset=%s: scanned %d examples (%d estimated tokens, cap=%s, "
             "cache_hits=%d, removed=%d)",
@@ -1137,6 +1356,53 @@ def _parse_subset_weights(specs: Optional[Sequence[str]]) -> Dict[str, float]:
             raise ValueError(f"--subset_weights weight must be > 0, got: {spec!r}")
         weights[f"{family.strip()}:{subset.strip()}"] = weight
     return weights
+
+
+def _list_traces_subsets(
+    source: Any,
+    tokenizer,
+    stamp: str,
+    cache: Dict[Tuple[str, str], int],
+    removal_identifiers: FrozenSet[str] = frozenset(),
+    subset_map=None,
+) -> List[Dict[str, Any]]:
+    """Inventory of the traces pool's raw ``benchmark``/``subset`` values.
+
+    The ``--list_traces_subsets`` dry-run core: iterate the SAME source the
+    planning scan uses (same knobs, same removal filtering, no cap — every
+    record is counted) through the SAME token cache, so the pass also warms
+    ``tokencache_traces.jsonl`` for the planning run.  Each row reports the
+    raw subset value, its record/estimated-token counts, and the stratum it
+    lands in under the active map.  Sorted by estimated tokens desc.
+    """
+    entries, _, _, _ = _scan_subset_prefix(
+        source,
+        tokenizer,
+        stamp,
+        cache,
+        None,
+        set(),
+        "traces",
+        "",
+        removal_identifiers,
+        subset_classifier=lambda raw: raw,
+    )
+    tally: Dict[str, Dict[str, Any]] = {}
+    for entry in entries:
+        row = tally.setdefault(entry.subset, {"examples": 0, "estimated_tokens": 0})
+        row["examples"] += 1
+        row["estimated_tokens"] += entry.estimated_tokens
+    return [
+        {
+            "subset": name,
+            "stratum": _classify_traces_subset(name, subset_map),
+            "examples": row["examples"],
+            "estimated_tokens": row["estimated_tokens"],
+        }
+        for name, row in sorted(
+            tally.items(), key=lambda item: (-item[1]["estimated_tokens"], item[0])
+        )
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -1218,11 +1484,11 @@ def main() -> None:
     parser.add_argument(
         "--recipe",
         action="append",
-        required=True,
+        default=None,
         metavar="name=family:share,...",
-        help=f"repeatable; families from {FAMILIES}; shares sum to 1.0",
+        help=f"repeatable; families from {FAMILIES}; shares sum to 1.0 (required unless --list_traces_subsets)",
     )
-    parser.add_argument("--budget_estimated_tokens", type=int, required=True, help="N: per-recipe total estimated source tokens")
+    parser.add_argument("--budget_estimated_tokens", type=int, default=None, help="N: per-recipe total estimated source tokens (required unless --list_traces_subsets)")
     parser.add_argument("--oversample_factor", type=float, default=1.25, help="scan cap = quota x this factor")
     parser.add_argument("--repeat_unique_tokens", type=int, default=None, help="M: also emit <recipe>_repeat variants with ~M unique tokens per family pool")
     parser.add_argument("--epochs_override", action="append", default=None, metavar="name=n", help="repeatable audit record: recipe name -> train epochs (integer >= 1); scales presented_estimated_tokens in the plan jsons; applies to BOTH the base and the repeat variant of the named recipe")
@@ -1234,7 +1500,37 @@ def main() -> None:
         default=None,
         metavar="family:subset=w",
         help="repeatable per-stratum scan-cap weight override (P0-2; default: equal weights "
-        "across a family's subsets, e.g. qa splits its cap evenly over hotpotqa/2wiki/longmagpie)",
+        "across a family's subsets, e.g. qa splits its cap evenly over hotpotqa/2wiki/longmagpie; "
+        "with --split_traces_subsets the traces strata are traces:appworld / traces:tau2 / "
+        "traces:other)",
+    )
+    parser.add_argument(
+        "--split_traces_subsets",
+        action="store_true",
+        help="scan the traces pool as independently-weightable substrata instead of one stratum: "
+        "the parquet benchmark/subset column is classified *appworld* -> appworld, "
+        "airline/retail/telecom (incl. tau2_*/tau_* variants) -> tau2, anything else keeps its "
+        "raw name inside the 'other' catch-all stratum (scanned first, so an empty catch-all "
+        "hands its cap to the declared strata). Default off: without split options the traces "
+        "scan is the legacy single stratum, bit-identical to pre-split runs",
+    )
+    parser.add_argument(
+        "--traces_subset_map",
+        action="append",
+        default=None,
+        metavar="stratum=subset[:subset...][,...]",
+        help="repeatable explicit classification table for the traces split (case-insensitive "
+        "substring match in declared order); REPLACES the default table and implies "
+        "--split_traces_subsets. Run --list_traces_subsets first to see the raw values, e.g. "
+        "--traces_subset_map appworld=appworld,tau2=airline:retail:telecom",
+    )
+    parser.add_argument(
+        "--list_traces_subsets",
+        action="store_true",
+        help="dry-run (no --recipe/--budget_estimated_tokens needed): scan the traces pool with "
+        "the same source knobs and removal lists as planning, print the observed "
+        "benchmark/subset values with record/estimated-token counts and their stratum under the "
+        "active map, then exit; warms tokencache_traces.jsonl for the planning run",
     )
     parser.add_argument("--order_seed", type=int, default=42)
     parser.add_argument("--out_dir", required=True)
@@ -1249,6 +1545,56 @@ def main() -> None:
         datefmt="%m/%d/%Y %H:%M:%S",
     )
 
+    if args.list_traces_subsets:
+        # Dry-run inventory (前置扫描): confirm the real benchmark/subset
+        # strings before pinning a --traces_subset_map.  No planning.
+        if not args.traces_path:
+            raise ValueError("--list_traces_subsets requires --traces_path")
+        tokenizer = _load_tokenizer(args.tokenizer)
+        stamp = _cache_stamp(
+            str(getattr(tokenizer, "name_or_path", tokenizer.__class__.__name__)),
+            args.split_seed,
+        )
+        removal_identifiers, _ = load_removal_identifiers(args.removal_files)
+        out_dir = Path(args.out_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        cache_path = out_dir / "tokencache_traces.jsonl"
+        cache = _load_token_cache(cache_path)
+        cache_size = len(cache)
+        from train.train_data_joint import AgentLLMTracesJointSource  # lazy heavy import
+
+        subset_map = _parse_traces_subset_map(args.traces_subset_map)
+        rows = _list_traces_subsets(
+            AgentLLMTracesJointSource(**_traces_source_kwargs(args)),
+            tokenizer,
+            stamp,
+            cache,
+            removal_identifiers,
+            subset_map,
+        )
+        if len(cache) != cache_size:
+            _write_token_cache(cache_path, cache)
+        print(
+            "TRACES SUBSETS (train split, removal lists applied; stratum = classification "
+            "under the active map):"
+        )
+        print(f"  {'subset':<24} {'stratum':<24} {'examples':>9} {'estimated_tokens':>17}")
+        total_examples = 0
+        total_tokens = 0
+        for row in rows:
+            total_examples += row["examples"]
+            total_tokens += row["estimated_tokens"]
+            print(
+                f"  {row['subset']:<24} {row['stratum']:<24} "
+                f"{row['examples']:>9} {row['estimated_tokens']:>17}"
+            )
+        print(f"  {'TOTAL':<24} {'':<24} {total_examples:>9} {total_tokens:>17}")
+        return
+
+    if not args.recipe:
+        raise ValueError("--recipe is required (unless --list_traces_subsets)")
+    if args.budget_estimated_tokens is None:
+        raise ValueError("--budget_estimated_tokens is required (unless --list_traces_subsets)")
     recipes = [parse_recipe(spec) for spec in args.recipe]
     names = [recipe.name for recipe in recipes]
     if len(names) != len(set(names)):

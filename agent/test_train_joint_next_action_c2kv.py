@@ -16,7 +16,9 @@ d. ``MinTargetJointDataset``: the tool-definition path's min_target_tokens
    reservation floor — rows whose answer was truncated below the reserved
    floor are dropped, fully-fitting answers are always kept (whitespace
    tokenizer from train.train_data_joint, mirroring test_train_data_joint.py);
-e. ``_dump_train_manifest``: effective train qid order + per-subset counts.
+e. ``_dump_train_manifest``: effective train qid order + per-subset counts,
+   plus the ``action_type_counts`` / ``tool_call_target_truncated_skips``
+   audit fields.
 
 Run from the repo root (local venv has torch/transformers/datasets/pytest):
   pytest agent/test_train_joint_next_action_c2kv.py -v
@@ -24,11 +26,17 @@ Run from the repo root (local venv has torch/transformers/datasets/pytest):
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import sys
 from pathlib import Path
 
 import pytest
+
+# The entry pulls python/models (torch) at import time, so the whole module is
+# torch-gated: without this the file ERRORs at collection on a torch-free box
+# instead of skipping.
+pytest.importorskip("torch")
 
 # Make python/ and agent/ importable when pytest is invoked from the repo root
 # (the entry imports gist_args at module top, before its own sys.path fix).
@@ -215,7 +223,12 @@ def test_min_target_tokens_keeps_fully_fitting_answer(tokenizer):
 def test_min_target_tokens_drops_answer_truncated_below_floor(tokenizer):
     # Tiny max_length + long current turn: the prompt eats the sequence
     # budget and the answer is truncated to a single supervised token.
-    example = _example("s:0", tool_words=8, history_words=20, current_words=60)
+    # Plain-text answer: a tool-call answer now hits the
+    # tool_call_target_truncated integrity guard before this floor instead.
+    example = dataclasses.replace(
+        _example("s:0", tool_words=8, history_words=20, current_words=60),
+        answer=" ".join(f"word{i}" for i in range(30)),
+    )
     config = dict(max_length=24, min_target_tokens=3)
     dataset = _dataset(tokenizer, [example], **config)
     assert len(dataset) == 0
@@ -307,3 +320,47 @@ def test_dump_train_manifest_skip_and_retention_breakdowns(tmp_path):
             "qa_history_truncated_examples_by_subset": {},
         }
     }
+
+
+def test_dump_train_manifest_action_type_and_truncation_audit(tmp_path):
+    # Global action-type counts come from the extraction-time tag on each
+    # example; the truncation skip is aggregated per pass like the other
+    # skip counters.
+    from train.train_data_joint import JointDataset
+
+    examples = [
+        dataclasses.replace(_example("s:0"), action_type="tool_call"),
+        dataclasses.replace(_example("s:1"), action_type="tool_call"),
+        _example("s:2"),  # default action_type="other"
+    ]
+    path = _dump_train_manifest(
+        JointDataArgs(doc_mode="joint"), str(tmp_path), examples, [], None, None
+    )
+    manifest = json.loads(Path(path).read_text(encoding="utf-8"))
+    assert manifest["action_type_counts"] == {"tool_call": 2, "other": 1}
+    assert "tool_call_target_truncated_skips" not in manifest  # no datasets passed
+
+    # A tool-call answer that cannot fit the sequence budget is dropped, not
+    # truncated, and the skip surfaces per pass.
+    big = _example("s:big", current_words=60)
+    dataset = JointDataset(
+        [big],
+        tokenizer=_WhitespaceSelfTestTokenizer(),
+        max_length=24,
+        max_doc_length=64,
+        min_doc_num=2,
+        max_doc_num=6,
+        max_system_length=96,
+    )
+    assert dataset.skipped_by_reason == {"tool_call_target_truncated": 1}
+    path = _dump_train_manifest(
+        JointDataArgs(doc_mode="joint"),
+        str(tmp_path / "audit"),
+        [_example("s:0")],
+        [],
+        None,
+        None,
+        train_datasets={"joint": dataset},
+    )
+    manifest = json.loads(Path(path).read_text(encoding="utf-8"))
+    assert manifest["tool_call_target_truncated_skips"] == {"joint": 1}

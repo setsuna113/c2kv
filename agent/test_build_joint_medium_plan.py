@@ -20,9 +20,14 @@ e. repeat variants: qid uniqueness, ``recommended_epochs`` math;
    ``--epochs_override`` audit recording on base and repeat variants;
 f. order files pass ``_apply_example_order_file`` (unique, all loadable);
 g. determinism: identical plans across runs; token-cache roundtrip + stamp
-   invalidation; shortfall reporting on undersized pools.
+   invalidation; shortfall reporting on undersized pools;
+h. traces substrata split (opt-in): classification defaults + override table,
+   filtered views share one base source, weighted scan caps realize the 75/25
+   tau2/appworld split, unknown subsets surface (never dropped), legacy
+   no-split path untouched, ``--list_traces_subsets`` dry-run core.
 
-Run from the repo root (local venv has torch/transformers/datasets/pytest):
+Run from the repo root (local venv has torch/transformers/datasets/pytest;
+without them the trainer-stack tests skip and the pure planning tests run):
   pytest agent/test_build_joint_medium_plan.py -v
 """
 
@@ -55,8 +60,24 @@ from build_joint_medium_plan import (  # noqa: E402
     plan_recipes,
     write_outputs,
 )
-from train.train_data_joint import JointExample  # noqa: E402
-from train_joint_next_action_c2kv import _apply_example_order_file  # noqa: E402
+
+# The trainer-side imports need torch/datasets/transformers (server venv).  In
+# a CPU-only local env the pure planning tests below still run; the tests that
+# touch real sources or trainer validation are skipped instead of breaking
+# collection.
+try:
+    from train.train_data_joint import JointExample  # noqa: E402
+    from train_joint_next_action_c2kv import _apply_example_order_file  # noqa: E402
+
+    _HAVE_TRAIN_STACK = True
+except ImportError:
+    JointExample = None
+    _apply_example_order_file = None
+    _HAVE_TRAIN_STACK = False
+
+requires_train_stack = pytest.mark.skipif(
+    not _HAVE_TRAIN_STACK, reason="needs torch/datasets/transformers (server venv)"
+)
 
 
 # ---------------------------------------------------------------------------
@@ -463,6 +484,7 @@ def _joint_stub(qid):
     )
 
 
+@requires_train_stack
 def test_order_files_pass_trainer_validation(tmp_path):
     pools = {"qa": _pool("qa", 12), "traces": _pool("traces", 20), "toucan": _pool("toucan", 8)}
     recipes = [parse_recipe("r=qa:0.2,traces:0.5,toucan:0.3")]
@@ -604,6 +626,7 @@ def _scan_args(tmp_path, **overrides):
     return args
 
 
+@requires_train_stack
 def test_stratified_scan_tail_subsets_represented_under_cap(tmp_path):
     args = _scan_args(tmp_path)
     cache: dict = {}
@@ -643,6 +666,7 @@ def test_stratified_scan_tail_subsets_represented_under_cap(tmp_path):
     assert all(sub["share_within_family"] > 0 for sub in sampled.values())
 
 
+@requires_train_stack
 def test_stratified_scan_subset_weights_and_validation(tmp_path):
     args = _scan_args(tmp_path)
     # qa:hotpotqa=3 (weights 3:1:1): hotpotqa cap 360 -> 8 rows (400 used);
@@ -668,6 +692,7 @@ def test_stratified_scan_subset_weights_and_validation(tmp_path):
     }
 
 
+@requires_train_stack
 def test_stratified_scan_subset_shortfall_redistributes_to_siblings(tmp_path):
     args = _scan_args(tmp_path)
     # Shrink longmagpie (the LAST subset) to a single 2-row shard: its unused
@@ -694,6 +719,7 @@ def test_stratified_scan_subset_shortfall_redistributes_to_siblings(tmp_path):
     assert total == 200 + 140 + 76 < 600
 
 
+@requires_train_stack
 def test_family_subsources_openswe_configs(tmp_path):
     import pyarrow as pa
     import pyarrow.parquet as pq
@@ -951,6 +977,7 @@ def test_plan_provenance_order_hash_and_override_scope():
     assert plain["r"]["plan"]["provenance"] is None
 
 
+@requires_train_stack
 def test_removal_during_scan_preserves_cap_headroom(tmp_path):
     # P2: removal filtering happens DURING the scan, before cap accounting —
     # removed rows must not eat the oversample headroom.
@@ -971,6 +998,7 @@ def test_removal_during_scan_preserves_cap_headroom(tmp_path):
     assert report["subsets"]["hotpotqa"]["examples"] == 4
 
 
+@requires_train_stack
 def test_scan_stage_removals_reported_in_plan(tmp_path):
     args = _scan_args(tmp_path)
     removal = frozenset({"hp-1"})  # one hotpotqa row, by bare _id
@@ -994,3 +1022,304 @@ def test_scan_stage_removals_reported_in_plan(tmp_path):
     # net (no residual field recorded).
     assert "plan_stage_residual" not in plan["removals"]
     assert not any(entry.qid == "qa:hotpotqa:hp-1" for entry in pool)
+
+
+# ---------------------------------------------------------------------------
+# Traces substrata split (appworld / tau2 / other) + --list_traces_subsets.
+# All CPU-only: stub example records (duck-typed JointExample), no parquet IO.
+# ---------------------------------------------------------------------------
+
+
+def _traces_stub_examples(subset_counts, tokens=100):
+    """Duck-typed JointExample stand-ins: only the fields the scan touches.
+
+    ``subset_counts``: ordered (raw_subset, count) pairs; qids mirror the real
+    traces source (``<session>:<span>``).  Each stub estimates to exactly
+    ``tokens`` whitespace words.
+    """
+    import types
+
+    examples = []
+    index = 0
+    for subset, count in subset_counts:
+        for _ in range(count):
+            examples.append(types.SimpleNamespace(
+                qid=f"sess-{index // 3}:{index}",
+                session_id=f"sess-{index // 3}",
+                subset=subset,
+                tool_documents=[" ".join(["w"] * (tokens // 2))],
+                history_documents=[" ".join(["h"] * (tokens - tokens // 2))],
+            ))
+            index += 1
+    return examples
+
+
+def test_classify_traces_subset_defaults_and_raw_fallback():
+    classify = bjmp._classify_traces_subset
+    assert classify("appworld") == "appworld"
+    assert classify("AppWorld") == "appworld"
+    assert classify("appworld_v2") == "appworld"
+    for name in ("airline", "retail", "telecom", "tau2_airline", "tau_retail", "TAU2_TELECOM"):
+        assert classify(name) == "tau2"  # substring match covers tau2_*/tau_* variants
+    # Unknown values keep their raw name (never silently dropped).
+    assert classify("mysterybench") == "mysterybench"
+    assert classify("") == "unknown"
+    assert classify(None) == "unknown"
+
+
+def test_classify_traces_subset_override_replaces_default_table():
+    table = bjmp._parse_traces_subset_map(["appworld=appworld,tau2=airline:retail:telecom"])
+    classify = bjmp._classify_traces_subset
+    assert classify("tau2_airline", table) == "tau2"
+    assert classify("AppWorld", table) == "appworld"
+    assert classify("mysterybench", table) == "mysterybench"
+    # Declared order wins on overlapping patterns.
+    overlap = bjmp._parse_traces_subset_map(["first=air", "second=airline"])
+    assert classify("airline", overlap) == "first"
+
+
+def test_parse_traces_subset_map_validation():
+    assert bjmp._parse_traces_subset_map(None) is None
+    assert bjmp._parse_traces_subset_map([]) is None
+    assert bjmp._parse_traces_subset_map(["appworld=appworld,tau2=airline:retail:telecom"]) == (
+        ("appworld", ("appworld",)),
+        ("tau2", ("airline", "retail", "telecom")),
+    )
+    # Repeatable form accumulates in declared order.
+    assert bjmp._parse_traces_subset_map(["tau2=airline", "appworld=appworld"]) == (
+        ("tau2", ("airline",)),
+        ("appworld", ("appworld",)),
+    )
+    for bad in ("noequals", "tau2=", "=airline", "tau2=airline,,appworld=x"):
+        with pytest.raises(ValueError, match="traces_subset_map"):
+            bjmp._parse_traces_subset_map([bad])
+    with pytest.raises(ValueError, match="reserved"):
+        bjmp._parse_traces_subset_map(["other=x"])
+    with pytest.raises(ValueError, match="repeated"):
+        bjmp._parse_traces_subset_map(["tau2=a", "tau2=b"])
+
+
+def test_traces_split_subsources_views_partition_the_pool():
+    examples = _traces_stub_examples([
+        ("appworld", 40),
+        ("airline", 60),
+        ("retail", 40),
+        ("telecom", 20),
+        ("mysterybench", 10),
+    ])
+    subs = bjmp._traces_split_subsources(examples, None)  # a plain list acts as the base
+    # "other" first: an empty catch-all hands its cap to the declared strata.
+    assert [name for name, _ in subs] == ["other", "appworld", "tau2"]
+    view_qids = {name: [e.qid for e in view] for name, view in subs}
+    assert len(view_qids["appworld"]) == 40
+    assert len(view_qids["tau2"]) == 120  # airline + retail + telecom
+    assert len(view_qids["other"]) == 10
+    # The strata partition the pool: disjoint, and their union is the input.
+    all_qids = [e.qid for e in examples]
+    assert sum(len(qids) for qids in view_qids.values()) == len(all_qids)
+    assert set(view_qids["appworld"]) | set(view_qids["tau2"]) | set(view_qids["other"]) == set(all_qids)
+    # The catch-all tallies the unmapped raw values for the loud warning.
+    other_view = subs[0][1]
+    assert dict(other_view.unknown_subsets) == {"mysterybench": 10}
+    # Every view carries the classifier so pool entries get accurate strata.
+    assert other_view.subset_classifier("tau2_airline") == "tau2"
+    assert other_view.subset_classifier("mysterybench") == "mysterybench"
+    # An override map redefines the views' strata.
+    table = bjmp._parse_traces_subset_map(["tau2=tau2_airline", "appworld=appworld"])
+    subs = bjmp._traces_split_subsources(examples, table)
+    assert [name for name, _ in subs] == ["other", "tau2", "appworld"]
+
+
+def test_family_subsources_traces_split_is_lazy_and_map_implies_split():
+    base = dict(
+        traces_path="/nonexistent",
+        split_seed=42,
+        split_manifest_file=None,
+        split_manifest_name="subset_disjoint",
+    )
+    # Split via the flag: stratum names are known WITHOUT loading the pool
+    # (the base source constructs on first iteration only).
+    args = argparse.Namespace(**base, split_traces_subsets=True, traces_subset_map=None)
+    subs = bjmp._family_subsources("traces", args)
+    assert [name for name, _ in subs] == ["other", "appworld", "tau2"]
+    # Split via the override map alone (implies the flag); declared order follows the map.
+    args = argparse.Namespace(
+        **base, split_traces_subsets=False, traces_subset_map=["tau2=airline:retail:telecom", "appworld=appworld"]
+    )
+    subs = bjmp._family_subsources("traces", args)
+    assert [name for name, _ in subs] == ["other", "tau2", "appworld"]
+
+
+def test_family_subsources_traces_legacy_single_stratum(monkeypatch):
+    # Backward compat: no split options -> one "traces" stratum with the exact
+    # pre-split constructor knobs (bit-identical scan).  The real source class
+    # is stubbed via sys.modules so this stays CPU-only.
+    import types
+
+    calls = []
+
+    class _FakeTracesSource:
+        def __init__(self, **kwargs):
+            calls.append(kwargs)
+
+    monkeypatch.setitem(
+        sys.modules,
+        "train.train_data_joint",
+        types.SimpleNamespace(AgentLLMTracesJointSource=_FakeTracesSource),
+    )
+    args = argparse.Namespace(
+        traces_path="/x",
+        split_seed=42,
+        split_manifest_file=None,
+        split_manifest_name="subset_disjoint",
+        # Old invocations predate the split flags entirely: the Namespace
+        # carries no such attributes (getattr defaults apply).
+    )
+    subs = bjmp._family_subsources("traces", args)
+    assert [name for name, _ in subs] == ["traces"]
+    assert len(calls) == 1
+    assert calls[0] == dict(
+        path="/x",
+        split="train",
+        split_seed=42,
+        split_manifest_file=None,
+        split_manifest_name="subset_disjoint",
+        max_samples_per_session=4,
+        require_tool_call=True,
+    )
+
+
+def _scan_split_traces_pool(monkeypatch, subset_counts, token_cap, subset_weights):
+    examples = _traces_stub_examples(subset_counts)
+    monkeypatch.setattr(
+        bjmp,
+        "_family_subsources",
+        lambda family, args: bjmp._traces_split_subsources(examples, None),
+    )
+    return bjmp.scan_family_pool(
+        "traces",
+        argparse.Namespace(),
+        bjmp.WhitespaceTokenizer(),
+        "stamp",
+        {},
+        token_cap=token_cap,
+        subset_weights=subset_weights,
+    )
+
+
+def test_traces_split_scan_cap_weights_and_unknown_stratum(monkeypatch, caplog):
+    # 40 appworld + 120 tau2 + 10 mysterybench, 100 tokens each; family cap
+    # 8000 with weights tau2=0.75 / appworld=0.25 (other defaults to 1.0).
+    pool, report = _scan_split_traces_pool(
+        monkeypatch,
+        [("appworld", 40), ("airline", 60), ("retail", 40), ("telecom", 20), ("mysterybench", 10)],
+        token_cap=8000,
+        subset_weights={"traces:tau2": 0.75, "traces:appworld": 0.25},
+    )
+    # Water-filling: other (weight 1.0) gets cap 4000, exhausts at 1000; the
+    # leftover lifts appworld to 1750 -> 18 entries with the crossing example;
+    # tau2 gets the remaining 5200.
+    assert report["subsets"]["other"]["examples"] == 10
+    assert report["subsets"]["other"]["exhausted"] is True
+    assert report["subsets"]["other"]["unknown_subsets"] == {"mysterybench": 10}
+    assert report["subsets"]["appworld"]["cap_estimated_tokens"] == 1750
+    assert report["subsets"]["appworld"]["examples"] == 18
+    assert report["subsets"]["tau2"]["cap_estimated_tokens"] == 5200
+    assert report["subsets"]["tau2"]["examples"] == 52
+    # Pool entries carry classified strata; the unknown subset surfaces under
+    # its RAW name (never dropped, never bucketed under a generic label).
+    assert {entry.subset for entry in pool} == {"appworld", "tau2", "mysterybench"}
+    tokens_of = {}
+    for entry in pool:
+        tokens_of[entry.subset] = tokens_of.get(entry.subset, 0) + entry.estimated_tokens
+    assert tokens_of == {"appworld": 1800, "tau2": 5200, "mysterybench": 1000}
+    # 75/25 within the declared strata, up to crossing-example granularity.
+    assert tokens_of["tau2"] / (tokens_of["tau2"] + tokens_of["appworld"]) == pytest.approx(
+        0.75, abs=0.01
+    )
+    assert any("UNMAPPED" in record.message for record in caplog.records)
+
+
+def test_g_h200_main_recipe_realizes_75_25_within_traces(monkeypatch):
+    # Full plan over a split-scanned traces pool (appworld/tau2 only):
+    # recipe toucan:0.6,traces:0.4 + weights 75/25 -> overall 60/30/10.
+    pool, report = _scan_split_traces_pool(
+        monkeypatch,
+        [("appworld", 40), ("airline", 60), ("retail", 40), ("telecom", 20)],
+        token_cap=16000,
+        subset_weights={"traces:tau2": 0.75, "traces:appworld": 0.25},
+    )
+    assert report["subsets"]["other"]["examples"] == 0
+    assert sum(entry.estimated_tokens for entry in pool) == 16000  # whole pool fits the cap
+    pools = {"traces": pool, "toucan": _pool("toucan", 300)}  # 30000 tokens
+    recipes = [parse_recipe("g_h200_main=toucan:0.6,traces:0.4")]
+    results = plan_recipes(pools, recipes, budget_estimated_tokens=40000, order_seed=42)
+    plan = results["g_h200_main"]["plan"]
+    # qa/openswe excluded entirely.
+    assert set(plan["families"]) == {"toucan", "traces"}
+    assert plan["families"]["toucan"]["realized_share"] == pytest.approx(0.6, abs=0.01)
+    assert plan["families"]["traces"]["realized_share"] == pytest.approx(0.4, abs=0.01)
+    # The traces quota is filled 75/25 by the tau2/appworld substrata (the
+    # quota equals the pool size here, so the split is exact).
+    subsets = plan["families"]["traces"]["subsets"]
+    assert subsets["tau2"]["share_within_family"] == pytest.approx(0.75, abs=0.01)
+    assert subsets["appworld"]["share_within_family"] == pytest.approx(0.25, abs=0.01)
+    # Toy recipe name: no fixed-arm table.
+    assert "arm_launch_table" not in plan
+
+
+def test_list_traces_subsets_tallies_classifies_and_warms_cache():
+    examples = _traces_stub_examples([
+        ("appworld", 40),
+        ("airline", 60),
+        ("retail", 40),
+        ("telecom", 20),
+        ("mysterybench", 10),
+    ])
+    cache = {}
+    rows = bjmp._list_traces_subsets(examples, bjmp.WhitespaceTokenizer(), "stamp", cache)
+    by_name = {row["subset"]: row for row in rows}
+    assert by_name["appworld"] == {
+        "subset": "appworld", "stratum": "appworld", "examples": 40, "estimated_tokens": 4000,
+    }
+    assert by_name["airline"]["stratum"] == "tau2"
+    assert by_name["airline"]["examples"] == 60
+    assert by_name["retail"]["stratum"] == "tau2"
+    assert by_name["telecom"]["stratum"] == "tau2"
+    # Unknown values are listed with their raw name as the stratum.
+    assert by_name["mysterybench"]["stratum"] == "mysterybench"
+    # Sorted by estimated tokens desc, name asc on ties:
+    # airline 6000 > appworld/retail 4000 (tie -> appworld first) > telecom 2000.
+    assert [row["subset"] for row in rows] == [
+        "airline", "appworld", "retail", "telecom", "mysterybench",
+    ]
+    # No cap: every record counted; one cache entry per example (warmed).
+    assert sum(row["examples"] for row in rows) == len(examples)
+    assert len(cache) == len(examples)
+    # The override map drives the reported stratum column.
+    table = bjmp._parse_traces_subset_map(["tau2=tau2_airline", "appworld=appworld"])
+    rows = bjmp._list_traces_subsets(
+        _traces_stub_examples([("tau2_airline", 2), ("appworld", 1)]),
+        bjmp.WhitespaceTokenizer(), "stamp", {}, frozenset(), table,
+    )
+    assert {row["subset"]: row["stratum"] for row in rows} == {
+        "tau2_airline": "tau2",
+        "appworld": "appworld",
+    }
+    # Removal lists apply, same as the planning scan.
+    rows = bjmp._list_traces_subsets(
+        _traces_stub_examples([("appworld", 6)]),  # sessions sess-0, sess-1
+        bjmp.WhitespaceTokenizer(), "stamp", {}, frozenset({"sess-0"}),
+    )
+    assert rows[0]["examples"] == 3
+
+
+def test_scan_subset_prefix_default_tags_scan_stratum():
+    # Legacy tagging without the classifier: every entry gets the scan stratum
+    # name regardless of the record's own subset field.
+    source = _traces_stub_examples([("airline", 3)])
+    entries, total, _, _ = bjmp._scan_subset_prefix(
+        source, bjmp.WhitespaceTokenizer(), "stamp", {}, None, set(), "traces", "traces"
+    )
+    assert {entry.subset for entry in entries} == {"traces"}
+    assert total == 300

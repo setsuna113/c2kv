@@ -19,7 +19,9 @@ c. leakage self-checks: pass on clean input, FAIL when tool text is injected
 d. chronological history order in the flat context grid;
 e. doc_mode subsets (joint / tool_only / history_only);
 f. label masking boundaries (prompt -100, answer+EOS supervised);
-g. tail-biased history truncation and tool/history budget allocation.
+g. tail-biased history truncation and tool/history budget allocation;
+h. H200 arm: position-stratified + action-balanced per-session sampling,
+   ``action_type`` tagging, ``<think>`` stripping, tool-call target integrity.
 
 Run from the repo root (local venv has torch/transformers/datasets/pytest):
   pytest python/train/test_train_data_joint.py -v
@@ -30,6 +32,7 @@ from __future__ import annotations
 import json
 import random
 import sys
+from collections import Counter
 from pathlib import Path
 
 import pytest
@@ -923,3 +926,233 @@ def test_tool_only_pass_skips_tool_less_qa_counted_by_family(tokenizer):
     )
     assert len(joint) == 1
     assert joint.qa_retention_stats["qa_history_doc_retention"] == {"kept": 4, "total": 4}
+
+
+# ---------------------------------------------------------------------------
+# H200 arm: position-stratified + action-balanced per-session sampling,
+# action_type tagging, <think> stripping, tool-call target integrity.
+# ---------------------------------------------------------------------------
+
+
+def _decision_session_spans(num_spans, tool_call_mask=None):
+    """One session with num_spans decision points (span ``i`` targets action ``i``).
+
+    The conversation opens with one full exchange so even the first span has
+    non-empty history.  ``tool_call_mask[i]`` falsy -> target ``i`` is a
+    plain-text answer (no tool call); default is all tool calls.
+    """
+    conversation = [
+        {"role": "system", "content": "You are a test agent."},
+        {"role": "user", "content": "initial request"},
+        {"role": "assistant", "content": None,
+         "tool_calls": [_tool_call("c-init", "search_files", {"path": "/tmp"})]},
+        {"role": "tool", "content": "initial observation"},
+    ]
+    spans = []
+    for index in range(num_spans):
+        user = {"role": "user", "content": f"request number {index}"}
+        if tool_call_mask is None or tool_call_mask[index]:
+            output = [{
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [_tool_call(f"c{index}", "get_weather", {"city": f"city{index}"})],
+            }]
+        else:
+            output = [{"role": "assistant", "content": f"plain answer number {index}"}]
+        spans.append(_span(
+            f"span-{index}",
+            f"2026-01-01T00:{index // 60:02d}:{index % 60:02d}",
+            conversation + [user],
+            output,
+            tools=_TOOLS if index == 0 else None,
+        ))
+        conversation = conversation + [user, *output, {"role": "tool", "content": f"observation {index}"}]
+    return spans
+
+
+def _write_traces_dataset(tmp_path, sessions):
+    """Write ``[(session_id, spans)]`` rows as one parquet shard + a train-all manifest."""
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    data_dir = tmp_path / "agent-llm-traces"
+    data_dir.mkdir()
+    rows = [
+        {"benchmark": "strat-bench", "session_id": session_id, "spans": json.dumps(spans)}
+        for session_id, spans in sessions
+    ]
+    table = pa.table({key: [row[key] for row in rows] for key in rows[0]})
+    pq.write_table(table, data_dir / "shard.parquet")
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(
+        json.dumps({
+            "train_session_ids": [session_id for session_id, _ in sessions],
+            "eval_session_ids": [],
+        }),
+        encoding="utf-8",
+    )
+    return str(data_dir), str(manifest)
+
+
+def _span_index(qid):
+    return int(qid.rsplit(":", 1)[1])
+
+
+def test_stratified_pick_position_quotas_and_determinism(tmp_path):
+    dataset = _write_traces_dataset(tmp_path, [("sess-strat", _decision_session_spans(7))])
+
+    def build():
+        source = _joint_source(dataset, max_samples_per_session=4, require_tool_call=False)
+        return [example.qid for example in source]
+
+    qids = build()
+    assert qids == build()  # identical across two constructions with the same seed
+    indices = [_span_index(qid) for qid in qids]
+    assert indices == sorted(indices)  # picks returned in chronological order
+    # 7 candidates -> thirds [0,1] / [2,3] / [4,5,6] with quota 1/1/2.
+    assert len(indices) == 4
+    assert sum(index in (0, 1) for index in indices) == 1
+    assert sum(index in (2, 3) for index in indices) == 1
+    assert sum(index in (4, 5, 6) for index in indices) == 2
+
+
+def test_stratified_pick_backfills_short_bucket(tmp_path):
+    # 6 candidates, k=5: buckets [0,1]/[2,3]/[4,5], quotas 1/1/3 — the late
+    # bucket is one short and is backfilled from the middle bucket (late ->
+    # middle -> early).
+    dataset = _write_traces_dataset(tmp_path, [("sess-backfill", _decision_session_spans(6))])
+    source = _joint_source(dataset, max_samples_per_session=5, require_tool_call=False)
+    indices = sorted(_span_index(example.qid) for example in source)
+    assert len(indices) == 5
+    assert indices[1:] == [2, 3, 4, 5]  # middle + late buckets fully taken
+    assert indices[0] in (0, 1)
+
+
+def test_stratified_pick_action_balance_hits_target(tmp_path):
+    # Alternating tool/plain targets: every position bucket holds both pools,
+    # so the per-session tool_call target round(4 * 0.75) = 3 is met exactly.
+    mask = [True, False] * 4  # 8 candidates, half tool_call
+    dataset = _write_traces_dataset(tmp_path, [("sess-mix", _decision_session_spans(8, mask))])
+    source = _joint_source(
+        dataset, max_samples_per_session=4, require_tool_call=False, action_tool_call_frac=0.75,
+    )
+    examples = list(source)
+    assert len(examples) == 4
+    assert Counter(example.action_type for example in examples) == {"tool_call": 3, "other": 1}
+    # Position quotas still hold: buckets [0,1]/[2,3]/[4..7] -> 1/1/2.
+    indices = sorted(_span_index(example.qid) for example in examples)
+    assert sum(index in (0, 1) for index in indices) == 1
+    assert sum(index in (2, 3) for index in indices) == 1
+    assert sum(index in (4, 5, 6, 7) for index in indices) == 2
+
+
+def test_stratified_pick_action_balance_pool_short_fallback(tmp_path):
+    # No "other" candidates at all: the tool pool fills every bucket quota.
+    dataset = _write_traces_dataset(tmp_path, [("sess-alltool", _decision_session_spans(7))])
+    source = _joint_source(dataset, max_samples_per_session=4, require_tool_call=False)
+    examples = list(source)
+    assert len(examples) == 4
+    assert all(example.action_type == "tool_call" for example in examples)
+
+
+def test_require_tool_call_keeps_legacy_uniform_pick(tmp_path):
+    # Regression: require_tool_call=True must stay bit-identical to the
+    # pre-change behavior — tool-call-only candidates, uniform random pick
+    # with the same seeded rng (split_seed + 0 for the train split).
+    spans = _decision_session_spans(7)
+    dataset = _write_traces_dataset(tmp_path, [("sess-legacy", spans)])
+    source = _joint_source(dataset, max_samples_per_session=4, require_tool_call=True)
+    candidates = source._session_examples("sess-legacy", spans, "strat-bench")
+    assert len(candidates) == 7  # every target carries a tool call
+    expected = [example.qid for example in random.Random(42).sample(candidates, 4)]
+    assert [example.qid for example in source] == expected
+
+
+def test_session_examples_tag_action_type(tmp_path):
+    mask = [True, False]
+    dataset = _write_traces_dataset(tmp_path, [("sess-tags", _decision_session_spans(2, mask))])
+    source = _joint_source(dataset)
+    examples = list(source)
+    assert len(examples) == 2  # under the per-session cap: both kept
+    assert [example.action_type for example in examples] == ["tool_call", "other"]
+
+
+def test_strip_think_blocks_helper():
+    assert tdj._strip_think_blocks("<think>secret\nreasoning</think>\nFinal answer.") == "Final answer."
+    assert tdj._strip_think_blocks("Answer. <think>tail cut by the char cap") == "Answer."
+    assert tdj._strip_think_blocks("No think here.") == "No think here."
+    # The tool-call target surface is never touched.
+    action = 'Action:\n<tool_call>\n{"name":"t","arguments":{}}\n</tool_call>'
+    assert tdj._strip_think_blocks(action) == action
+
+
+def _think_session_spans(output_content):
+    conversation = [
+        {"role": "system", "content": "You are a test agent."},
+        {"role": "user", "content": "initial request"},
+        {"role": "assistant", "content": None,
+         "tool_calls": [_tool_call("c-init", "search_files", {"path": "/tmp"})]},
+        {"role": "tool", "content": "initial observation"},
+        {"role": "user", "content": "follow-up request"},
+    ]
+    return [
+        _span(
+            "span-0",
+            "2026-01-01T00:00:00",
+            conversation,
+            [{"role": "assistant", "content": output_content}],
+            tools=_TOOLS,
+        )
+    ]
+
+
+def test_session_examples_strip_inline_think_from_answer(tmp_path):
+    spans = _think_session_spans("<think>hidden reasoning</think>Visible answer.")
+    dataset = _write_traces_dataset(tmp_path, [("sess-think", spans)])
+    examples = list(_joint_source(dataset))
+    assert len(examples) == 1
+    assert examples[0].answer == "Visible answer."
+    assert examples[0].action_type == "other"
+
+
+def test_session_examples_drop_think_only_answer(tmp_path):
+    spans = _think_session_spans("<think>only reasoning, no visible answer</think>")
+    dataset = _write_traces_dataset(tmp_path, [("sess-thinkonly", spans)])
+    assert list(_joint_source(dataset)) == []
+
+
+def test_tool_call_answer_over_budget_dropped_not_truncated(tokenizer):
+    # Long current turn: after maximal prompt truncation the answer budget is
+    # a single token, so the tool-call target can never fit — drop, don't
+    # train on a partial tool call.
+    example = _example(
+        current_messages=[{"role": "user", "content": " ".join(f"filler{i}" for i in range(60))}]
+    )
+    row, reason = _features(tokenizer, example, reason_ok=False, max_length=24)
+    assert row is None
+    assert reason == "tool_call_target_truncated"
+    dataset = JointDataset([example], tokenizer=tokenizer, **_config(max_length=24))
+    assert len(dataset) == 0
+    assert dataset.skipped_by_reason == {"tool_call_target_truncated": 1}
+    assert dataset.skipped_by_family_reason == {"traces:tool_call_target_truncated": 1}
+
+
+def test_tool_call_answer_within_budget_kept_intact(tokenizer):
+    example = _example()
+    features, reason = _features(tokenizer, example)
+    assert reason == "ok"
+    expected = tokenizer.encode(example.answer, add_special_tokens=False) + [tokenizer.eos_token_id]
+    real_length = sum(features["attention_mask"])
+    assert features["input_ids"][real_length - len(expected):real_length] == expected
+    assert features["labels"][real_length - len(expected):real_length] == expected
+
+
+def test_plain_answer_over_budget_still_truncated(tokenizer):
+    answer = " ".join(f"word{i}" for i in range(200))  # no tool-call markers
+    example = _example(answer=answer)
+    row, reason = _features(tokenizer, example)
+    assert reason == "ok"
+    supervised = [value for value in row["labels"] if value != -100]
+    full = tokenizer.encode(answer, add_special_tokens=False) + [tokenizer.eos_token_id]
+    assert len(supervised) < len(full)  # hard-truncated to the budget
+    assert supervised == full[: len(supervised)]

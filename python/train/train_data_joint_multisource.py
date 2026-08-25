@@ -88,6 +88,7 @@ from .train_data_joint import (
     _first_tool_call_name,
     _render_tool_documents,
     _select_tools,
+    _strip_think_blocks,
     qid_source_family,
 )
 from .train_data_multiturn import (
@@ -388,6 +389,9 @@ def toucan_row_to_examples(
         answer, has_tool_call = _render_agent_output_messages(output_messages, None)
         if not answer or (require_tool_call and not has_tool_call):
             continue
+        answer = _strip_think_blocks(answer)  # same residue policy as the traces source
+        if not answer:
+            continue
         history_documents = _history_documents(_toucan_history_messages(messages[:index]))
         if not history_documents:
             continue
@@ -417,6 +421,7 @@ def toucan_row_to_examples(
                 subset=TOUCAN_SUBSET,
                 target_tool=target_tool,
                 target_tool_doc_index=target_doc_index,
+                action_type="tool_call" if has_tool_call else "other",
             )
         )
     return examples
@@ -506,6 +511,9 @@ def openswe_row_to_examples(
         answer, has_tool_call = _render_agent_output_messages([output_message], None)
         if not answer or (require_tool_call and not has_tool_call):
             continue
+        answer = _strip_think_blocks(answer)  # same residue policy as the traces source
+        if not answer:
+            continue
         target_tool = _first_tool_call_name([output_message])
         rng = random.Random(f"{split_seed}:{session_id}:a{k}:tools")
         tool_documents, target_doc_index = _render_example_tool_documents(
@@ -532,6 +540,7 @@ def openswe_row_to_examples(
                 subset=subset,
                 target_tool=target_tool,
                 target_tool_doc_index=target_doc_index,
+                action_type="tool_call" if has_tool_call else "other",
             )
         )
     return examples

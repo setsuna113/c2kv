@@ -29,7 +29,11 @@ surface ``Action:\n<tool_call>\n{"name":...,"arguments":...}\n</tool_call>``
 (same payload keys, same minified JSON), so next-action supervision is
 consistent with ``train_unified_next_action_c2kv.py``; spans without tool calls
 fall back to the assistant text (history-path behavior).  ``require_tool_call``
-restricts to tool-call targets when set.
+restricts to tool-call targets when set.  Inline ``<think>...</think>``
+residue is stripped from the rendered answer (``_strip_think_blocks``), and a
+tool-call answer that still does not fit the sequence budget after maximal
+prompt truncation is dropped (``tool_call_target_truncated``) rather than
+trained on as a partial action.
 
 Document-budget allocation
 --------------------------
@@ -71,6 +75,7 @@ import argparse
 import json
 import logging
 import random
+import re
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
@@ -140,6 +145,12 @@ class JointExample:
     # rows).  ``None`` when unlabelled.  Used only for the retention audit
     # counters — never for training decisions.
     gold_history_doc_indices: Optional[Tuple[int, ...]] = None
+    # ``"tool_call"`` when the rendered answer carries a tool call (the
+    # ``_render_agent_output_messages`` predicate at the extraction point),
+    # else ``"other"`` (clarification / no-call / final response).  Drives
+    # action-balanced per-session sampling and the manifest's
+    # ``action_type_counts`` audit; never a training decision.
+    action_type: str = "other"
 
 
 # Mixture-family prefixes on qids (``toucan:`` / ``openswe:`` / ``qa:``);
@@ -413,13 +424,109 @@ def _select_tools(
     return selected[:max_tools_per_sample]
 
 
+_THINK_BLOCK_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
+
+
+def _strip_think_blocks(answer: str) -> str:
+    """Remove inline ``<think>...</think>`` residue from a rendered answer.
+
+    Raw traces can carry the model's reasoning inline in the assistant
+    ``content`` string (Hermes-style ``<think>`` segments, docs/datastes.md)
+    instead of a dedicated ``reasoning_content`` key, and no extraction
+    helper strips them.  Reasoning is deliberately supervised only via the
+    ``Thought:`` rendering of the dedicated keys, so inline segments are
+    dropped here.  An unclosed trailing ``<think>`` (``max_answer_chars`` can
+    cut a block in half) is stripped to the end as well.
+    """
+    stripped = _THINK_BLOCK_RE.sub("", answer)
+    if "<think>" in stripped:
+        stripped = stripped.split("<think>", 1)[0]
+    return stripped.strip()
+
+
+def _answer_has_tool_call(answer: str) -> bool:
+    """The marker half of the ``_render_agent_output_messages`` tool-call
+    predicate, applied to an already-rendered answer string."""
+    marker_text = answer.lower()
+    return any(
+        marker in marker_text
+        for marker in ("<tool_call>", "action:", "function_call", "tool call")
+    )
+
+
+def _stratified_pick(
+    examples: Sequence[JointExample],
+    k: int,
+    rng: random.Random,
+    action_tool_call_frac: float = 0.75,
+) -> List[JointExample]:
+    """Position-stratified, action-balanced down-sampling of one session.
+
+    ``examples`` are in chronological decision-point order (the order
+    ``_session_examples`` yields them).  The index range is split into
+    early/middle/late thirds with quotas ``k // 3`` / ``k // 3`` / remainder
+    (1/1/2 for the default ``k=4``): late decision points carry the longest
+    histories and keep the largest share.  Within each bucket the seeded rng
+    picks the members, preferring action types so the session's tool_call
+    share approaches ``action_tool_call_frac``: per-session targets are
+    ``round(k * frac)`` tool-call picks and the rest ``other``, consumed
+    bucket by bucket; a bucket short on the preferred pool backfills from its
+    other pool, and a bucket short overall is topped up after the pass in
+    late -> middle -> early order.  Deterministic given the caller's rng —
+    every DDP rank rebuilds the same example list independently.  Returns the
+    picks in chronological order.
+    """
+    if len(examples) <= k:
+        return list(examples)
+    third = len(examples) // 3
+    buckets = [examples[:third], examples[third : 2 * third], examples[2 * third :]]
+    quotas = (k // 3, k // 3, k - 2 * (k // 3))
+    tool_target = max(0, min(k, int(round(k * action_tool_call_frac))))
+    other_target = k - tool_target
+    picked: List[JointExample] = []
+    for bucket, quota in zip(buckets, quotas):
+        take = min(quota, len(bucket))
+        tool_pool = [example for example in bucket if example.action_type == "tool_call"]
+        other_pool = [example for example in bucket if example.action_type != "tool_call"]
+        n_tool = min(take, tool_target, len(tool_pool))
+        n_other = min(take - n_tool, other_target, len(other_pool))
+        short = take - n_tool - n_other
+        if short:
+            # Pool short on the preferred action: fill the bucket quota from
+            # whichever pool still has members.
+            extra_tool = min(short, len(tool_pool) - n_tool)
+            n_tool += extra_tool
+            n_other += min(short - extra_tool, len(other_pool) - n_other)
+        chosen = rng.sample(tool_pool, n_tool) + rng.sample(other_pool, n_other)
+        chosen_tool = sum(1 for example in chosen if example.action_type == "tool_call")
+        tool_target -= chosen_tool
+        other_target -= len(chosen) - chosen_tool
+        picked.extend(chosen)
+    if len(picked) < k:
+        # Bucket short overall: backfill late -> middle -> early.
+        chosen_ids = {id(example) for example in picked}
+        for bucket in reversed(buckets):
+            pool = [example for example in bucket if id(example) not in chosen_ids]
+            extra = rng.sample(pool, min(k - len(picked), len(pool)))
+            picked.extend(extra)
+            chosen_ids.update(id(example) for example in extra)
+            if len(picked) >= k:
+                break
+    position = {id(example): index for index, example in enumerate(examples)}
+    return sorted(picked, key=lambda example: position[id(example)])
+
+
 class AgentLLMTracesJointSource(AgentLLMTracesCompressHistorySource):
     """True-joint source for agent-llm-traces.
 
     Subclasses the history-path source so sessions/spans/tool definitions are
     read identically: same parquet/jsonl discovery, same span sorting by
     (start_time, span_id), same history/current split at the last user message,
-    same ``max_samples_per_session`` sub-sampling, same split-manifest args.
+    same split-manifest args.  Per-session ``max_samples_per_session``
+    sub-sampling is the parent's seeded uniform pick when
+    ``require_tool_call=True`` (bit-identical to the existing arms); with
+    ``require_tool_call=False`` it is position-stratified and action-balanced
+    (``_stratified_pick``, target tool-call share ``action_tool_call_frac``).
     The parsing addition is that tool definitions (first span of the session
     carrying ``gen_ai.tool.definitions``) are rendered into per-tool documents
     with the unified path's variant policy.  Rendering is PER EXAMPLE: the
@@ -452,6 +559,7 @@ class AgentLLMTracesJointSource(AgentLLMTracesCompressHistorySource):
         max_tools_per_sample: int = 32,
         same_namespace_negative_tools: int = 8,
         random_negative_tools: int = 24,
+        action_tool_call_frac: float = 0.75,
     ) -> None:
         # Set joint knobs BEFORE super().__init__(): the parent constructor
         # calls self._load_records(), which dispatches to the overridden
@@ -463,6 +571,10 @@ class AgentLLMTracesJointSource(AgentLLMTracesCompressHistorySource):
         self.max_tools_per_sample = max_tools_per_sample
         self.same_namespace_negative_tools = same_namespace_negative_tools
         self.random_negative_tools = random_negative_tools
+        # Target tool-call share for the per-session down-sampling; consulted
+        # only when require_tool_call=False (True keeps the legacy uniform
+        # pick, so existing arms are bit-identical).
+        self.action_tool_call_frac = action_tool_call_frac
         super().__init__(
             path=path,
             split=split,
@@ -520,7 +632,17 @@ class AgentLLMTracesJointSource(AgentLLMTracesCompressHistorySource):
                 continue
             examples = self._session_examples(session["session_id"], session["spans"], session["subset"])
             if self.max_samples_per_session and len(examples) > self.max_samples_per_session:
-                examples = rng.sample(examples, self.max_samples_per_session)
+                if self.require_tool_call:
+                    # Legacy uniform pick: bit-identical to the pre-change
+                    # behavior the existing require_tool_call=True arms ran on.
+                    examples = rng.sample(examples, self.max_samples_per_session)
+                else:
+                    examples = _stratified_pick(
+                        examples,
+                        self.max_samples_per_session,
+                        rng,
+                        action_tool_call_frac=self.action_tool_call_frac,
+                    )
             records.extend(examples)
             if self.max_records is not None and len(records) >= self.max_records:
                 return records[: self.max_records]
@@ -563,7 +685,17 @@ class AgentLLMTracesJointSource(AgentLLMTracesCompressHistorySource):
                 continue
             examples = self._session_examples(session_id, spans, subset)
             if self.max_samples_per_session and len(examples) > self.max_samples_per_session:
-                examples = rng.sample(examples, self.max_samples_per_session)
+                if self.require_tool_call:
+                    # Legacy uniform pick: bit-identical to the pre-change
+                    # behavior the existing require_tool_call=True arms ran on.
+                    examples = rng.sample(examples, self.max_samples_per_session)
+                else:
+                    examples = _stratified_pick(
+                        examples,
+                        self.max_samples_per_session,
+                        rng,
+                        action_tool_call_frac=self.action_tool_call_frac,
+                    )
             records.extend(examples)
             if self.max_records is not None and len(records) >= self.max_records:
                 return records[: self.max_records]
@@ -614,6 +746,11 @@ class AgentLLMTracesJointSource(AgentLLMTracesCompressHistorySource):
             answer, has_tool_call = _render_agent_output_messages(output_messages, self.max_answer_chars)
             if self.require_tool_call and not has_tool_call:
                 continue
+            # Inline <think> residue (reasoning embedded in the content
+            # string, not a dedicated reasoning key) is training-surface
+            # noise; strip it AFTER the require_tool_call filter so that
+            # filter's predicate stays bit-identical.
+            answer = _strip_think_blocks(answer)
             if not history_docs or not current_messages or not answer:
                 continue
             # Per-example tool pool: target-inclusive bounded subset so large
@@ -649,6 +786,7 @@ class AgentLLMTracesJointSource(AgentLLMTracesCompressHistorySource):
                     subset=subset,
                     target_tool=target_tool,
                     target_tool_doc_index=target_doc_index,
+                    action_type="tool_call" if has_tool_call else "other",
                 )
             )
         return examples
@@ -1072,6 +1210,12 @@ class JointDataset:
         if len(prompt_ids) >= max_length:
             prompt_ids = prompt_ids[-(max_length - 1):]
         answer_budget = max_length - len(prompt_ids)
+        if _answer_has_tool_call(example.answer) and len(answer_ids) > answer_budget:
+            # A truncated tool-call JSON is a broken supervision target: drop
+            # the example (counted as tool_call_target_truncated) instead of
+            # training on a partial action.  Non-tool-call answers keep the
+            # plain budget truncation below.
+            return None, "tool_call_target_truncated"
         answer_ids = answer_ids[:answer_budget]
         if not answer_ids:
             return None, "empty_answer_budget"

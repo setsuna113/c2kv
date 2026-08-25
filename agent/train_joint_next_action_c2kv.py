@@ -67,6 +67,10 @@ class JointDataArgs:
     max_tool_definition_tokens: int = 32000
     min_target_tokens: int = 32
     require_tool_call: bool = True
+    # Target share of tool-call targets in the per-session down-sampling when
+    # require_tool_call=False (position-stratified, action-balanced pick).
+    # Ignored when require_tool_call=True, which keeps the legacy uniform pick.
+    action_tool_call_frac: float = 0.75
     history_selection: str = "tail"
     doc_mode: str = "joint"  # joint | tool_only | history_only | alternate
     max_tools_per_sample: int = 32
@@ -123,6 +127,7 @@ def _load_joint_examples(data_args: JointDataArgs, split: str) -> List[JointExam
         split_manifest_name=data_args.split_manifest_name,
         max_samples_per_session=data_args.max_samples_per_session,
         require_tool_call=data_args.require_tool_call,
+        action_tool_call_frac=data_args.action_tool_call_frac,
         max_tools_per_sample=data_args.max_tools_per_sample,
         same_namespace_negative_tools=data_args.same_namespace_negative_tools,
         random_negative_tools=data_args.random_negative_tools,
@@ -301,6 +306,10 @@ def _dump_train_manifest(
         "train_source_counts": dict(
             Counter(qid_source_family(example.qid) for example in train_examples)
         ),
+        # Action-type audit over the effective train set: tool_call vs other
+        # (clarification / no-call / final response) targets, from the
+        # extraction-time tag on each JointExample.
+        "action_type_counts": dict(Counter(example.action_type for example in train_examples)),
         "interleaved_train_len": interleaved_train_len,
         "num_eval_examples": len(eval_examples),
         "eval_qids": [example.qid for example in eval_examples],
@@ -312,6 +321,12 @@ def _dump_train_manifest(
         # must be visible per family, not drowned in the aggregate count.
         manifest["train_skip_counts_by_family"] = {
             name: dataset.skipped_by_family_reason for name, dataset in train_datasets.items()
+        }
+        # Tool-call target-integrity drops (over-budget tool-call answers are
+        # never truncated), aggregated per pass like the other skip counters.
+        manifest["tool_call_target_truncated_skips"] = {
+            name: dataset.skipped_by_reason.get("tool_call_target_truncated", 0)
+            for name, dataset in train_datasets.items()
         }
         # QA history/gold-doc retention counters (P0-1), from the passes that
         # render history at all (tool_only passes have no history side).
