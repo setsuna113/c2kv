@@ -1,3 +1,5 @@
+import os
+
 import torch
 import itertools
 from gist_args import ModelArgs
@@ -201,7 +203,12 @@ class GistMultiDocTrainer(TrainerDistillMixin, Trainer):
     def _system_attn_impl(self) -> str:
         attn_impl = getattr(self.model_args, "attn_impl", None)
         if attn_impl in (None, "flex_attention"):
-            return "flash_attention_2"
+            # flash_attention_2 needs the optional flash-attn binary; its
+            # prebuilt wheels require glibc>=2.32, unavailable on the offline
+            # CUDA image family here (2.31).  sdpa is the same causal math in
+            # pure torch; set C2KV_SYSTEM_ATTN_IMPL=flash_attention_2 on hosts
+            # where flash-attn is properly installed.
+            return os.environ.get("C2KV_SYSTEM_ATTN_IMPL", "sdpa")
         return attn_impl
 
     def _gist_attn_impl(self) -> str:
@@ -323,7 +330,9 @@ class GistMultiDocTrainer(TrainerDistillMixin, Trainer):
         loss = _as_scalar_loss(loss)
         label_token_count = int((inputs["labels"] != -100).sum().detach().cpu().item())
         self.log_data.setdefault("label_tokens", []).append(
-            inputs["labels"].new_tensor(float(label_token_count)).detach()
+            # labels are Long: force float32 so TrainerDistillMixin.log can
+            # mean() the stack (torch raises on Long mean).
+            inputs["labels"].new_tensor(float(label_token_count), dtype=torch.float32).detach()
         )
         if not torch.isfinite(loss):
             raise FloatingPointError(

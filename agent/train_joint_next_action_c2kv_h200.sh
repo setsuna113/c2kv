@@ -8,8 +8,8 @@
 #
 # Env knobs (all optional unless marked REQUIRED):
 #   MODEL_PATH             HF model dir (./models/Qwen3-4B-Instruct-2507).
-#                          Init gate: warm start = G8-small-v2 ckpt dir;
-#                          fresh init = the Qwen3-4B-Instruct-2507 base dir.
+#                          2026-08-25 裁定：init gate 取消（G8-small-v2 拿不到），
+#                          主臂用 base dir 新鲜 gist init 直接跑。
 #   DATASET_PATH           traces parquet dir      (./datasets/agent-llm-traces)
 #   TOUCAN_PATH            toucan source dir       (empty = disabled)
 #   EXAMPLE_ORDER_FILE     planner output file     (REQUIRED for this arm)
@@ -33,6 +33,11 @@
 #                          set SAVE_STEPS so a checkpoint lands every ≈16M
 #                          presented source tokens.
 #   EVAL_STEPS / LOGGING_STEPS / RESUME_FROM_CHECKPOINT / SEED
+#   ATTN_IMPL              default flex_attention (H200 sm_90 228KB smem 放得下;
+#                          若 inductor kernel 超 smem 上限, 如 sm_89 的 4090,
+#                          设 ATTN_IMPL=eager 兜底). 另: system 前缀 pass 的
+#                          attn impl 由 C2KV_SYSTEM_ATTN_IMPL 控制(默认 sdpa,
+#                          因为 flash-attn 预编译 wheel 要 glibc>=2.32)
 #   REQUIRE_TOOL_CALL      default False; ACTION_TOOL_CALL_FRAC default 0.75
 #   USE_DEEPSPEED          1 -> torchrun + configs/ds_config_h200.json (1);
 #                          0 -> plain torchrun DDP fallback

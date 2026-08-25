@@ -678,11 +678,6 @@ def test_stratified_scan_subset_weights_and_validation(tmp_path):
     caps = {name: sub["cap_estimated_tokens"] for name, sub in report["subsets"].items()}
     assert caps == {"hotpotqa": 360, "2wiki": 100, "longmagpie": 88}
     assert report["subsets"]["hotpotqa"]["examples"] == 8
-    with pytest.raises(ValueError, match="> 0"):
-        bjmp.scan_family_pool(
-            "qa", args, bjmp.WhitespaceTokenizer(), "stamp", {},
-            token_cap=600, subset_weights={"qa:hotpotqa": 0.0},
-        )
     for bad in ("hotpotqa=2", "qa:=2", "mystery:x=2", "qa:x=-1"):
         with pytest.raises(ValueError, match="subset_weights"):
             bjmp._parse_subset_weights([bad])
@@ -690,6 +685,33 @@ def test_stratified_scan_subset_weights_and_validation(tmp_path):
         "qa:hotpotqa": 2.0,
         "openswe:cfg": 0.5,
     }
+    # Zero is a valid weight: the stratum is skipped entirely (not scanned,
+    # no cap share) — e.g. traces:other=0 for the g_h200_main pool.
+    assert bjmp._parse_subset_weights(["traces:other=0"]) == {"traces:other": 0.0}
+
+
+@requires_train_stack
+def test_stratified_scan_zero_weight_skips_stratum(tmp_path):
+    args = _scan_args(tmp_path)
+    # hotpotqa skipped: the 600 cap splits over 2wiki/longmagpie (1:1 -> 300
+    # each); 2wiki exhausts at 140, the leftover lifts longmagpie to 460.
+    pool, report = bjmp.scan_family_pool(
+        "qa", args, bjmp.WhitespaceTokenizer(), "stamp", {},
+        token_cap=600, subset_weights={"qa:hotpotqa": 0.0},
+    )
+    assert report["skipped_zero_weight"] == ["hotpotqa"]
+    assert set(report["subsets"]) == {"2wiki", "longmagpie"}
+    assert all(entry.subset != "hotpotqa" for entry in pool)
+    assert report["subsets"]["2wiki"]["cap_estimated_tokens"] == 300
+    assert report["subsets"]["2wiki"]["exhausted"] is True
+    assert report["subsets"]["longmagpie"]["cap_estimated_tokens"] == 460
+    # Skipping EVERY stratum of a family that still has a cap is an error.
+    with pytest.raises(ValueError, match="every stratum"):
+        bjmp.scan_family_pool(
+            "qa", args, bjmp.WhitespaceTokenizer(), "stamp", {},
+            token_cap=600,
+            subset_weights={"qa:hotpotqa": 0.0, "qa:2wiki": 0.0, "qa:longmagpie": 0.0},
+        )
 
 
 @requires_train_stack
@@ -1186,7 +1208,53 @@ def test_family_subsources_traces_legacy_single_stratum(monkeypatch):
         split_manifest_name="subset_disjoint",
         max_samples_per_session=4,
         require_tool_call=True,
+        action_tool_call_frac=0.75,
     )
+
+
+def test_traces_source_kwargs_match_trainer_run():
+    # G-H200 main arm runs REQUIRE_TOOL_CALL=False / ACTION_TOOL_CALL_FRAC=0.75:
+    # the scan knobs must follow the trainer or the order file and the loaded
+    # pool diverge.  Namespaces without the new attrs get the JointDataArgs
+    # defaults (legacy arms stay bit-identical).
+    args = argparse.Namespace(
+        traces_path="/x",
+        split_seed=42,
+        split_manifest_file=None,
+        split_manifest_name="subset_disjoint",
+        require_tool_call=False,
+        action_tool_call_frac=0.8,
+    )
+    kwargs = bjmp._traces_source_kwargs(args)
+    assert kwargs["require_tool_call"] is False
+    assert kwargs["action_tool_call_frac"] == 0.8
+
+
+def test_multisource_common_follows_require_tool_call(monkeypatch):
+    import types
+
+    calls = []
+
+    class _FakeQASource:
+        def __init__(self, **kwargs):
+            calls.append(kwargs)
+
+    monkeypatch.setitem(
+        sys.modules,
+        "train.train_data_joint_multisource",
+        types.SimpleNamespace(
+            QADocsJointSource=_FakeQASource,
+            OpenSWEJointSource=None,
+            ToucanJointSource=None,
+        ),
+    )
+    args = argparse.Namespace(
+        qa_hotpotqa_path="/hp", qa_2wiki_path=None, qa_longmagpie_path=None,
+        split_seed=42, order_seed=42, require_tool_call=False,
+    )
+    subs = bjmp._family_subsources("qa", args)
+    assert [name for name, _ in subs] == ["hotpotqa"]
+    assert calls[0]["require_tool_call"] is False
 
 
 def _scan_split_traces_pool(monkeypatch, subset_counts, token_cap, subset_weights):

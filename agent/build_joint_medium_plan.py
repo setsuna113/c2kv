@@ -78,7 +78,10 @@ H200 main arm — g_h200_main = 60% toucan + 30% tau2 traces + 10% AppWorld
 traces (qa/openswe excluded).  The traces family quota (0.4) is split 75/25
 over the tau2/appworld substrata via --subset_weights (0.4 x 0.75 = 0.30,
 0.4 x 0.25 = 0.10 overall); the pool composition follows the scan-cap weights
-modulo exhaustion, exactly like the qa substrata.
+modulo exhaustion, exactly like the qa substrata.  The arm trains with
+REQUIRE_TOOL_CALL=False, so the scan MUST run with --no-require_tool_call
+(pool parity), and the swebench/browsecompplus catch-all is excluded with
+traces:other=0 (a zero weight skips the stratum entirely).
 
 Step 1 (前置扫描, dry-run — no planning; confirm the real benchmark/subset
 strings on the server data and warm the traces token cache):
@@ -86,7 +89,9 @@ strings on the server data and warm the traces token cache):
   python agent/build_joint_medium_plan.py \
       --traces_path ~/c2kv/datasets/agent-llm-traces \
       --split_manifest_file outputs/agent_taskproxy_split_manifest.json \
+      --split_manifest_name taskproxy_disjoint \
       --removal_files outputs/cross_dataset_dedup.json \
+      --no-require_tool_call \
       --tokenizer ~/c2kv/models/Qwen3-4B-Instruct-2507 \
       --out_dir outputs/joint_h200_plan --list_traces_subsets
 
@@ -99,7 +104,10 @@ telecom -> tau2, anything else kept under its raw name in "other"):
       --split_manifest_file outputs/agent_taskproxy_split_manifest.json \
       --recipe g_h200_main=toucan:0.6,traces:0.4 \
       --split_traces_subsets \
+      --split_manifest_name taskproxy_disjoint \
       --subset_weights traces:tau2=0.75 --subset_weights traces:appworld=0.25 \
+      --subset_weights traces:other=0 \
+      --no-require_tool_call \
       --budget_estimated_tokens <N> --oversample_factor 1.25 \
       --removal_files outputs/cross_dataset_dedup.json \
       --order_seed 42 --out_dir outputs/joint_h200_plan \
@@ -1012,7 +1020,14 @@ def _traces_source_kwargs(args: argparse.Namespace) -> Dict[str, Any]:
         split_manifest_file=args.split_manifest_file,
         split_manifest_name=args.split_manifest_name,
         max_samples_per_session=4,  # JointDataArgs default: MUST match the trainer run
-        require_tool_call=True,  # JointDataArgs default
+        # MUST match the trainer run's REQUIRE_TOOL_CALL / ACTION_TOOL_CALL_FRAC
+        # (G-H200 main arm: False / 0.75): the planner pool has to equal the
+        # trainer pool, otherwise --example_order_file membership filtering
+        # silently drops every non-tool-call target (or hard-errors on
+        # missing qids when the per-session picks diverge).  getattr with the
+        # JointDataArgs defaults keeps fabricated/test namespaces valid.
+        require_tool_call=getattr(args, "require_tool_call", True),
+        action_tool_call_frac=getattr(args, "action_tool_call_frac", 0.75),
     )
 
 
@@ -1124,7 +1139,10 @@ def _family_subsources(family: str, args: argparse.Namespace) -> List[Tuple[str,
     common: Dict[str, Any] = dict(
         split="train",
         split_seed=args.split_seed,
-        require_tool_call=True,  # JointDataArgs default
+        # MUST match the trainer run (see _traces_source_kwargs): with
+        # require_tool_call=False the pools carry clarification/no-call/final
+        # targets too, and the order file must list them.
+        require_tool_call=getattr(args, "require_tool_call", True),
     )
 
     def _seed(subset: str) -> str:
@@ -1264,12 +1282,29 @@ def scan_family_pool(
     """
     subsources = _family_subsources(family, args)
     weights: Dict[str, float] = {}
+    skipped_zero: List[str] = []
     for name, _ in subsources:
         key = f"{family}:{name}"
         weight = (subset_weights or {}).get(key, 1.0)
-        if weight <= 0:
-            raise ValueError(f"--subset_weights entry {key} must be > 0, got {weight}")
+        if weight < 0:
+            raise ValueError(f"--subset_weights entry {key} must be >= 0, got {weight}")
+        if weight == 0:
+            # Explicit opt-out (e.g. traces:other=0 keeps swebench/browsecompplus
+            # out of the g_h200_main pool): the stratum is not scanned at all
+            # and takes no share of the family cap.
+            skipped_zero.append(name)
+            continue
         weights[name] = weight
+    if skipped_zero:
+        subsources = [(name, source) for name, source in subsources if name in weights]
+        logger.warning(
+            "family=%s: strata SKIPPED via zero --subset_weights: %s", family, skipped_zero
+        )
+        if not subsources and token_cap:
+            raise ValueError(
+                f"family={family}: every stratum was skipped by zero --subset_weights "
+                f"but the family cap is {token_cap}"
+            )
     pool: List[PoolEntry] = []
     seen: Set[str] = set()
     subsets_report: Dict[str, Any] = {}
@@ -1337,12 +1372,13 @@ def scan_family_pool(
         "subsets": subsets_report,
         "cap_estimated_tokens": int(token_cap) if token_cap is not None else None,
         "removed_total": sum(sub["removed"] for sub in subsets_report.values()),
+        "skipped_zero_weight": skipped_zero,
     }
     return pool, report
 
 
 def _parse_subset_weights(specs: Optional[Sequence[str]]) -> Dict[str, float]:
-    """Parse repeatable ``--subset_weights family:subset=w`` (w > 0)."""
+    """Parse repeatable ``--subset_weights family:subset=w`` (w >= 0; 0 skips the stratum)."""
     weights: Dict[str, float] = {}
     for spec in specs or []:
         key, sep, value = spec.partition("=")
@@ -1352,8 +1388,8 @@ def _parse_subset_weights(specs: Optional[Sequence[str]]) -> Dict[str, float]:
         if family.strip() not in FAMILIES:
             raise ValueError(f"--subset_weights unknown family in {spec!r} (choose from {FAMILIES})")
         weight = float(value)
-        if weight <= 0:
-            raise ValueError(f"--subset_weights weight must be > 0, got: {spec!r}")
+        if weight < 0:
+            raise ValueError(f"--subset_weights weight must be >= 0 (0 skips the stratum), got: {spec!r}")
         weights[f"{family.strip()}:{subset.strip()}"] = weight
     return weights
 
@@ -1482,6 +1518,23 @@ def main() -> None:
     parser.add_argument("--split_manifest_name", default="subset_disjoint", help="passed through to the traces source")
     parser.add_argument("--split_seed", type=int, default=42, help="data-split/rendering seed for all sources (JointDataArgs default)")
     parser.add_argument(
+        "--require_tool_call",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="pool-scan knob that MUST match the trainer run's REQUIRE_TOOL_CALL "
+        "(default True keeps the legacy bit-identical pools). The G-H200 main arm trains "
+        "with REQUIRE_TOOL_CALL=False: scan with --no-require_tool_call so "
+        "clarification/no-call/final targets also reach the order file",
+    )
+    parser.add_argument(
+        "--action_tool_call_frac",
+        type=float,
+        default=0.75,
+        help="target tool-call share of the per-session stratified pick in the traces "
+        "source when --no-require_tool_call (JointDataArgs default 0.75; ignored when "
+        "--require_tool_call is on)",
+    )
+    parser.add_argument(
         "--recipe",
         action="append",
         default=None,
@@ -1502,7 +1555,8 @@ def main() -> None:
         help="repeatable per-stratum scan-cap weight override (P0-2; default: equal weights "
         "across a family's subsets, e.g. qa splits its cap evenly over hotpotqa/2wiki/longmagpie; "
         "with --split_traces_subsets the traces strata are traces:appworld / traces:tau2 / "
-        "traces:other)",
+        "traces:other). w=0 skips the stratum entirely (e.g. traces:other=0 keeps "
+        "swebench/browsecompplus out of the g_h200_main pool)",
     )
     parser.add_argument(
         "--split_traces_subsets",
