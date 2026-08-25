@@ -39,6 +39,14 @@ cd "${REPO_ROOT}"
 export PYTHONPATH="${REPO_ROOT}/python:${REPO_ROOT}/agent:${PYTHONPATH:-}"
 export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 HF_DATASETS_OFFLINE=1 TOKENIZERS_PARALLELISM=false OMP_NUM_THREADS=16
 
+# H200 吞吐默认值（141GB 显存远够用, 利用率从 ~20% 拉起来; 平台低利用率会杀任务）:
+# - C2KV_GIST_DOC_MICROBATCH=16: 文档压缩从逐篇小前向改为 16 篇一批
+#   (逐篇是 NPU 64GB 时代的保守默认; 数值等价性 2026-08-26 4090 对照验证)
+# - PER_DEVICE_BS=2 + GRAD_ACCUM=2: effective batch 仍为 8 (2卡 x 2 x 2)
+export C2KV_GIST_DOC_MICROBATCH="${C2KV_GIST_DOC_MICROBATCH:-16}"
+export PER_DEVICE_BS="${PER_DEVICE_BS:-2}"
+export GRAD_ACCUM="${GRAD_ACCUM:-2}"
+
 PY="${PY_BIN:-${REPO_ROOT}/.venv/bin/python}"
 export PATH="$(dirname "${PY}"):${PATH}"
 
@@ -391,7 +399,9 @@ n_ex = manifest["num_train_examples"]
 est_pool = manifest.get("achieved_source_tokens") or 0
 p_pool = p_prefix * n_ex / max(1, n_prefix)
 rho = (p_pool / est_pool) if est_pool else None
-steps_per_epoch = math.ceil(n_ex / 8)          # effective batch 8（2卡 x bs1 x accum4）
+n_gpus = max(1, len([x for x in "${CUDA_VISIBLE_DEVICES:-0,1}".split(",") if x.strip() != ""]))
+eff_batch = n_gpus * int("${PER_DEVICE_BS}") * int("${GRAD_ACCUM}")
+steps_per_epoch = math.ceil(n_ex / eff_batch)   # 2卡 x bs2 x accum2 = 8（默认）
 presented_per_step = p_pool / steps_per_epoch
 save_steps = max(1, int(${CHECKPOINT_TOKEN_GRAN} // max(1, presented_per_step)))
 epochs = max(1, round(${TARGET_PRESENTED_TOKENS} / max(1, p_pool)))
