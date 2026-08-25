@@ -277,7 +277,7 @@ launch_train() {  # launch_train <save_steps> <epochs> <resume>  (logs append to
   local lvl; lvl=$(fallback_level)
   local extra=()
   if (( lvl >= 1 )); then extra+=(USE_DEEPSPEED=0); fi
-  if (( lvl >= 2 )); then extra+=(ATTN_IMPL=sdpa); fi
+  if (( lvl >= 3 )); then extra+=(ATTN_IMPL=eager); elif (( lvl >= 2 )); then extra+=(ATTN_IMPL=sdpa); fi
   if ((${#extra[@]})); then echo "[launch_train] fallback level ${lvl}: ${extra[*]}"; fi
   touch "${LOGS}/train.log"  # 停滞计时从本次启动起算
   # 每次启动用随机 master port：上一次的 torchrun 刚被杀时 rdzv 端口会
@@ -351,9 +351,10 @@ phase_calibrate() {
     tail -20 "${LOGS}/train.log" || true
     kill_train || true
     wait "${tpid}" 2>/dev/null || true
-    if [[ ${wrc} -eq 3 ]]; then
+    if [[ ${wrc} -eq 3 ]] \
+      || tail -200 "${LOGS}/train.log" | grep -qE "illegal memory access|AcceleratorError|CUDA error:"; then
       bump_fallback
-      echo "stall -> fallback_level=$(fallback_level) (1=plain DDP 2=+sdpa)"
+      echo "stall/CUDA-signature crash -> fallback_level=$(fallback_level) (1=plain DDP 2=+sdpa 3=+eager)"
     fi
     attempt=$((attempt + 1))
     if (( attempt > 3 )); then
@@ -443,9 +444,10 @@ phase_train() {
       prune_old_checkpoints
       return 0
     fi
-    if [[ ${stalled} -eq 1 ]]; then
+    if [[ ${stalled} -eq 1 ]] \
+      || { [[ ${trc} -ne 0 ]] && tail -200 "${LOGS}/train.log" | grep -qE "illegal memory access|AcceleratorError|CUDA error:"; }; then
       bump_fallback
-      echo "stall -> fallback_level=$(fallback_level) (1=plain DDP 2=+sdpa)"
+      echo "stall/CUDA-signature crash -> fallback_level=$(fallback_level) (1=plain DDP 2=+sdpa 3=+eager)"
     fi
     attempt=$((attempt + 1))
     prune_old_checkpoints
