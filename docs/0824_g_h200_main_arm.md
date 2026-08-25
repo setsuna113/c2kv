@@ -73,10 +73,12 @@ python agent/build_joint_medium_plan.py \
 # 5. 主训练：先 100–200 step 校准（sec/step、presented tokens/s、peak HBM、
 #    tool_call_target_truncated 丢弃率）→ 回填 SAVE_STEPS 使每 ≈16M presented 存一档
 #    → 正式跑，目标 256M presented（≈10 epoch），保底 96M。
-#    注：若要用 Toucan 大池（toucan:0.85/traces:0.15，traces 绝对量不变，池子
-#    ≈70M presented/epoch），改用 g_h200_bigpool order file：
+#    注：吞吐修复后小池 256M 只跑 ~20h，吃不满 144 GPUh。正式推荐改用
+#    Toucan 大池（toucan:0.85/traces:0.15，traces 绝对量不变，池子
+#    ≈70M presented/epoch，33,460 实例）+ 500M presented 目标（≈7 epoch，
+#    ~50-60h 主训练）：
 #    ORDER_FILE=outputs/joint_h200_plan/g_h200_bigpool.order.json \
-#    G_H200_EXPECT_SHARES=toucan:0.85,traces:0.15 TARGET_PRESENTED_TOKENS=355000000 \
+#    G_H200_EXPECT_SHARES=toucan:0.85,traces:0.15 TARGET_PRESENTED_TOKENS=500000000 \
 #      bash start_h200.sh
 CUDA_VISIBLE_DEVICES=0,1 EXAMPLE_ORDER_FILE=outputs/joint_h200_plan/g_h200_main.order.json \
   MAX_SOURCE_TOKENS=<折算值> SAVE_STEPS=<校准值> bash agent/train_joint_next_action_c2kv_h200.sh
