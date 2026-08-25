@@ -16,7 +16,7 @@
 | 压缩 | `DOC_MODE=joint`，固定 8×（`C2KV_GIST_TRAIN_RATIOS=8`） |
 | 优化 | LR 5e-5，cosine，weight decay 0.1，warmup_ratio 0.04，BF16 |
 | Batch | per-device 1 × grad-accum 4 × 2 卡 = effective 8（microbatch 2 放得下则 2×2，eff-8 不变） |
-| 硬件 | 2×H200（141GB），torchrun + **ZeRO-3 无 CPU offload**（`configs/ds_config_h200.json`；ZeRO-2 在 gist 双 pass backward 下触发 "parameter already reduced"，本仓库历史可用配置均为 ZeRO-3；plain DDP 留作 `USE_DEEPSPEED=0` 兜底） |
+| 硬件 | 2×H200（141GB），torchrun **plain DDP**（`USE_DEEPSPEED=0`；ZeRO-3 在 gist 双 pass 之外还有 per-rank generate_gist 调用计数漂移导致的 NCCL 计数错位挂死——2026-08-26 实锤，见 §5；ZeRO-2 双重 reduce 也不行。`configs/ds_config_h200.json` 留作后续修复后的备选） |
 | 预算 | **144 GPUh = 72h wall**（2026-08-25 上调）；目标 96M–128M **presented** source tokens（不以 epoch 为停止条件） |
 
 ## 2. 与 v3 手册的关系
@@ -106,4 +106,5 @@ CKPT=<档> BFCL_PKG_PATH=<pkg> BFCL_DATA_DIR=<dir> bash agent/eval_bfcl_dev_c2kv
 - **需服务器验证**（本机无 GPU/真数据）：launcher 端到端 smoke + 校准；`--list_traces_subsets` 确认真 τ² 子集命名；`--action_tool_call_frac` 在完整依赖下的 argparse 联通；dev 评测管线跑通一个 checkpoint。
 - **2026-08-25 集群侧验证**（yancheng 开发容器，RTX 4090 + cu128 代理 venv）：`--list_traces_subsets` 确认真子集命名（tau2_airline/retail/telecom 命中默认 map）；planner 真 tokenizer 全量跑出 60/40 realized（8,811 examples / 42.8M est，budget shrink 0.3565）；planner↔trainer 池一致性实测通过（`--no-require_tool_call` 下 order file 8,811 qid 全命中，无 unknown-qid 报错；`action_type_counts` = tool_call 3,292 / other 5,519——Toucan 全 decision-point 保留，traces 侧 0.75 目标占比经分层采样落在 91%，全局 tool_call 实例占比 37%，靠 loss 结构而非计数平衡，若要更高占比需给 Toucan 加 text-turn 子采样——留作后续 arm 旋钮）；4090 上 flex_attention 的 inductor kernel 需要 128KB smem 超过 sm_89 上限（101KB），H200(sm_90, 228KB)放得下；若 H200 侧仍触发，fallback `ATTN_IMPL=eager`（H200 141GB 上 eager 也能跑，只是慢）。
 - **2026-08-25 端到端冒烟通过**：`start_h200.sh`（SMOKE=1 缩小配置，单 4090）全状态机 recon→plan→calibrate→train→eval→select 29 分钟 exit=0：校准 5 步落档→实测 ρ/回填 run_config→断点续跑到 26 步→milestone 瘦身（旧档 8.6G / 最新档 23G 完整可 resume）→BFCL dev 双分片评测出分→FINAL_SUMMARY 选档；幂等重跑全 skip、断档重跑只补未完阶段。生产侧（H200）默认全量配置 + flex_attention + ZeRO-3。
+- **2026-08-26 H200 首跑事故与根因**：生产首挂在校准第 0 步 ~30 分钟后被 NCCL 看门狗 SIGABRT(`ALLGATHER_BASE 194M 元素超时`)。根因：ZeRO-3 逐执行 all-gather 参数，而 `process_context_input_ids` 会丢掉全空 doc 槽位、`_generate_gist_for_context_docs` 按有效文档数逐篇压缩——**两个 rank 的 microbatch 有效文档数不同 → generate_gist 调用次数不同 → 集合通信计数错位 → NCCL 超时挂死**。该 joint trainer 此前从未跑过多卡 ZeRO(NPU 各臂均为单卡）。对策：本臂改用 **plain DDP**(USE_DEEPSPEED=0,DDP 容忍 per-rank 变长计算图；4B 冻结 base + gist-only 梯队在 141GB 上绰绰有余）;`start_h200.sh` 加了停滞看门狗（日志 25 分钟无进展→杀掉重试）+ 降级阶梯（lvl1=plain DDP, lvl2=再降 sdpa)，生产状态目录已预置 `attn_fallback_level=1`（直接 DDP 起跑）。ZeRO-3 的正确修复（各 rank 以 all-reduce 对齐有效文档数、按最大值补齐哑迭代并丢弃其输出）留给作者线评估，本臂不依赖。
 - 唯一已知本机失败：`test_token_accounting.py::test_official_missing_mdoc_data_message`（需 torch，主基线上同样失败，与本分支无关）——2026-08-25 全量 venv 下 314 passed（含 torch），未复现该失败。

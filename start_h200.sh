@@ -25,7 +25,10 @@
 #   CALIB_STEPS              校准步数（默认 150）
 #   CHECKPOINT_TOKEN_GRAN    checkpoint 间隔（presented tokens，默认 16M）
 #   EVAL_MAX_CKPTS           最多评几个 milestone（默认 6，均匀抽取含最终档）
-#   MAX_CRASH_RETRIES        训练崩溃自动恢复上限（默认 5）
+#   MAX_CRASH_RETRIES        训练崩溃/停滞自动恢复上限（默认 5）
+#   STALL_MIN                停滞看门狗窗口（分钟, 默认 25）：日志连续无写入且进程
+#                            还在 -> 杀掉重试并升级 fallback 档位
+#                            (1=ATTN_IMPL=sdpa 免编译; 2=再降 USE_DEEPSPEED=0)
 #   EXPECT_GPUS              期望卡数（默认 2；不足只警告，便于单卡 smoke）
 #   SMOKE=1                  本机端到端冒烟：极小剂量 + 单卡 + 评测截断
 set -euo pipefail
@@ -244,8 +247,40 @@ PY
 # ---- helpers for calibrate/train ------------------------------------------
 latest_ckpt() { ls -d "${OUTPUT_DIR}"/checkpoint-* 2>/dev/null | sort -t- -k2 -n | tail -1 || true; }
 
+# 停滞看门狗 + 自动降级（无人值守必须能自愈"挂着不崩"）：
+# 训练日志 STALL_MIN 分钟没有任何新写入且进程还在 -> 判停滞, 杀掉重试;
+# 每次停滞升级 fallback 档位: 1=USE_DEEPSPEED=0(plain DDP——ZeRO-3 下
+# generate_gist 调用次数随 rank 批内容漂移, 集合通信计数错位会 NCCL 超时挂死,
+# 2026-08-26 已实锤), 2=再降 ATTN_IMPL=sdpa(免编译兜底)。
+STALL_MIN="${STALL_MIN:-25}"
+
+fallback_level() { cat "${STATUS}/attn_fallback_level" 2>/dev/null || echo 0; }
+bump_fallback() { local l; l=$(fallback_level); echo $((l + 1)) > "${STATUS}/attn_fallback_level"; }
+
+stall_detected() {
+  local last now
+  last=$(stat -c '%Y' "${LOGS}/train.log" 2>/dev/null || echo 0)
+  now=$(date +%s)
+  if [[ ${last} -gt 0 && $((now - last)) -ge $((STALL_MIN * 60)) ]] \
+    && pgrep -f "train_joint_next_action_c2kv.py" > /dev/null; then
+    return 0
+  fi
+  return 1
+}
+
 launch_train() {  # launch_train <save_steps> <epochs> <resume>  (logs append to train.log)
   local save_steps="$1" epochs="$2" resume="$3"
+  local lvl; lvl=$(fallback_level)
+  local extra=()
+  if (( lvl >= 1 )); then extra+=(USE_DEEPSPEED=0); fi
+  if (( lvl >= 2 )); then extra+=(ATTN_IMPL=sdpa); fi
+  if ((${#extra[@]})); then echo "[launch_train] fallback level ${lvl}: ${extra[*]}"; fi
+  touch "${LOGS}/train.log"  # 停滞计时从本次启动起算
+  # 每次启动用随机 master port：上一次的 torchrun 刚被杀时 rdzv 端口会
+  # EADDRINUSE（TIME_WAIT），撞车已在 2026-08-26 冒烟中实测复现。
+  local master_port=$((29600 + RANDOM % 700))
+  env ${extra[@]+"${extra[@]}"} \
+  MASTER_PORT="${master_port}" \
   MODEL_PATH="${MODEL_DIR}" \
   DATASET_PATH="${TRACES_DIR}" \
   TOUCAN_PATH="${TOUCAN_DIR}" \
@@ -259,7 +294,7 @@ launch_train() {  # launch_train <save_steps> <epochs> <resume>  (logs append to
   bash agent/train_joint_next_action_c2kv_h200.sh >> "${LOGS}/train.log" 2>&1
 }
 
-wait_for_checkpoint() {  # wait_for_checkpoint <step> <timeout_min>; 0=到了 1=超时 2=训练进程消失
+wait_for_checkpoint() {  # wait_for_checkpoint <step> <timeout_min>; 0=到了 1=超时 2=训练进程消失 3=停滞
   # seen 门闩：训练进程必须先被观测到一次（torchrun worker 启动要几十秒，
   # 起手就 pgrep 会误判为消失）；见过之后再消失才算真崩溃。
   local step="$1" timeout="$2" waited=0 seen=0
@@ -271,6 +306,9 @@ wait_for_checkpoint() {  # wait_for_checkpoint <step> <timeout_min>; 0=到了 1=
       seen=1
     elif [[ ${seen} -eq 1 ]]; then
       return 2
+    fi
+    if [[ ${seen} -eq 1 ]] && stall_detected; then
+      return 3
     fi
     waited=$((waited + 1))
     if [[ ${waited} -ge $((timeout * 6)) ]]; then return 1; fi
@@ -293,20 +331,32 @@ kill_train() {  # 带重试地杀干净整个训练进程树（孤儿进程会�
 # ---- phase: calibrate ------------------------------------------------------
 phase_calibrate() {
   if [[ -f "${RUN_CONFIG}" ]]; then echo "run_config exists, reuse:"; cat "${RUN_CONFIG}"; return 0; fi
-  local prov_epochs=2
-  echo "calibration launch: ${CALIB_STEPS} steps (provisional epochs=${prov_epochs})"
-  launch_train "${CALIB_STEPS}" "${prov_epochs}" "" &
-  local tpid=$!
-  local wrc=0
-  wait_for_checkpoint "${CALIB_STEPS}" "${CALIB_TIMEOUT_MIN}" || wrc=$?
-  if [[ ${wrc} -ne 0 ]]; then
-    echo "calibration did not reach checkpoint-${CALIB_STEPS} (rc=${wrc}); tail of train.log:"
+  local prov_epochs=2 attempt=0
+  while true; do
+    echo "calibration launch: ${CALIB_STEPS} steps (provisional epochs=${prov_epochs}, fallback_level=$(fallback_level), attempt=${attempt})"
+    launch_train "${CALIB_STEPS}" "${prov_epochs}" "" &
+    local tpid=$!
+    local wrc=0
+    wait_for_checkpoint "${CALIB_STEPS}" "${CALIB_TIMEOUT_MIN}" || wrc=$?
+    if [[ ${wrc} -eq 0 ]]; then
+      kill_train || true
+      wait "${tpid}" 2>/dev/null || true
+      break
+    fi
+    echo "calibrate attempt ${attempt} did not reach checkpoint-${CALIB_STEPS} (rc=${wrc}); tail of train.log:"
     tail -20 "${LOGS}/train.log" || true
     kill_train || true
-    return 1
-  fi
-  kill_train || true
-  wait "${tpid}" 2>/dev/null || true
+    wait "${tpid}" 2>/dev/null || true
+    if [[ ${wrc} -eq 3 ]]; then
+      bump_fallback
+      echo "stall -> fallback_level=$(fallback_level) (1=plain DDP 2=+sdpa)"
+    fi
+    attempt=$((attempt + 1))
+    if (( attempt > 3 )); then
+      echo "calibrate failed after ${attempt} attempts"; return 1
+    fi
+    echo "retrying calibrate in 30s (fallback_level=$(fallback_level))"; sleep 30
+  done
 
   # 实测：manifest 给出 estimated 口径；measure_arm_psrc 重放真实预处理给
   # presented 口径。为控制 CPU 时间，只在 order 前 1500 个 qid 的截断 manifest
@@ -362,14 +412,36 @@ phase_train() {
   save_steps=$("${PY}" -c "import json; print(json.load(open('${RUN_CONFIG}'))['save_steps'])")
   epochs=$("${PY}" -c "import json; print(json.load(open('${RUN_CONFIG}'))['epochs'])")
   echo "final knobs: save_steps=${save_steps} epochs=${epochs}"
-  local attempt=0 resume
+  local attempt=0 resume tpid trc stalled
   while true; do
     resume="$(latest_ckpt)"
-    echo "train attempt ${attempt} resume=${resume:-<scratch>}"
-    if launch_train "${save_steps}" "${epochs}" "${resume}"; then
+    echo "train attempt ${attempt} resume=${resume:-<scratch>} fallback_level=$(fallback_level)"
+    launch_train "${save_steps}" "${epochs}" "${resume}" &
+    tpid=$!
+    # 运行监控: 正常等退出; 日志 STALL_MIN 分钟无新写入且进程还在 = 停滞 -> 杀掉降级重试
+    trc=0; stalled=0
+    while true; do
+      if ! kill -0 "${tpid}" 2>/dev/null; then
+        wait "${tpid}" || trc=$?
+        break
+      fi
+      if stall_detected; then
+        echo "STALL: train.log ${STALL_MIN}min 无进展且进程还在, 杀掉重试"
+        kill_train || true
+        wait "${tpid}" 2>/dev/null || true
+        stalled=1
+        break
+      fi
+      sleep 60
+    done
+    if [[ ${stalled} -eq 0 && ${trc} -eq 0 ]]; then
       echo "trainer exited 0"
       prune_old_checkpoints
       return 0
+    fi
+    if [[ ${stalled} -eq 1 ]]; then
+      bump_fallback
+      echo "stall -> fallback_level=$(fallback_level) (1=plain DDP 2=+sdpa)"
     fi
     attempt=$((attempt + 1))
     prune_old_checkpoints
@@ -380,7 +452,7 @@ phase_train() {
       return 0
     fi
     if (( attempt > MAX_CRASH_RETRIES )); then
-      echo "too many crashes (${attempt})"; tail -20 "${LOGS}/train.log" || true; return 1
+      echo "too many crashes/stalls (${attempt})"; tail -20 "${LOGS}/train.log" || true; return 1
     fi
     local gu_free
     gu_free=$(df --output=avail -BG "${GU_BASE}" | tail -1 | tr -dc '0-9')
@@ -388,7 +460,7 @@ phase_train() {
       echo "GU disk nearly full (${gu_free}G); stop training, keep milestones for eval"
       return 0
     fi
-    echo "crash; resume in 60s (attempt ${attempt}/${MAX_CRASH_RETRIES})"; sleep 60
+    echo "crash/stall; resume in 60s (attempt ${attempt}/${MAX_CRASH_RETRIES})"; sleep 60
   done
 }
 

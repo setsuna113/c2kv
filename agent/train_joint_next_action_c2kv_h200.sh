@@ -209,12 +209,12 @@ else
 fi
 
 if [[ "${USE_DEEPSPEED}" == "1" ]]; then
-  LAUNCHER=(torchrun --nproc_per_node "${NPROC_PER_NODE}")
+  LAUNCHER=(torchrun --nproc_per_node "${NPROC_PER_NODE}" --master_port "${MASTER_PORT:-29600}")
   DEEPSPEED_ARGS=(--deepspeed ./configs/ds_config_h200.json)
 else
   # Plain torchrun DDP fallback (no deepspeed); GPU set still chosen via
   # CUDA_VISIBLE_DEVICES.
-  LAUNCHER=(torchrun --nproc_per_node "${NPROC_PER_NODE}")
+  LAUNCHER=(torchrun --nproc_per_node "${NPROC_PER_NODE}" --master_port "${MASTER_PORT:-29600}")
   DEEPSPEED_ARGS=()
 fi
 
