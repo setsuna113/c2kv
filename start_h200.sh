@@ -19,7 +19,8 @@
 #   select     按 BFCL dev 分数选最佳 checkpoint，写 results/g_h200/FINAL_SUMMARY.md
 #
 # 关键旋钮（env 覆盖）：
-#   TARGET_PRESENTED_TOKENS  默认 128000000（144 GPUh 口径；保底 MIN_PRESENTED_TOKENS=96M）
+#   TARGET_PRESENTED_TOKENS  默认 256000000（144 GPUh 口径 ≈10 epoch；保底 MIN_PRESENTED_TOKENS=96M）
+#   G_H200_EXPECT_SHARES     plan 断言的配比（默认 toucan:0.6,traces:0.4；换大池 order file 时同步改）
 #   WALL_CAP_HOURS           默认 70（144 GPUh / 2 卡，留 buffer）
 #   PLAN_BUDGET_EST          planner 扫描预算（estimated tokens，默认 120M；pool 不足自动 shrink）
 #   CALIB_STEPS              校准步数（默认 150）
@@ -42,7 +43,7 @@ PY="${PY_BIN:-${REPO_ROOT}/.venv/bin/python}"
 export PATH="$(dirname "${PY}"):${PATH}"
 
 # ---- knobs ----------------------------------------------------------------
-TARGET_PRESENTED_TOKENS="${TARGET_PRESENTED_TOKENS:-128000000}"
+TARGET_PRESENTED_TOKENS="${TARGET_PRESENTED_TOKENS:-256000000}"
 MIN_PRESENTED_TOKENS="${MIN_PRESENTED_TOKENS:-96000000}"
 WALL_CAP_HOURS="${WALL_CAP_HOURS:-70}"
 PLAN_BUDGET_EST="${PLAN_BUDGET_EST:-120000000}"
@@ -231,10 +232,13 @@ import json
 p = json.load(open("${PLAN_JSON}"))
 fam = {k: v["realized_share"] for k, v in p["families"].items()}
 tr = p["families"]["traces"].get("subsets", {})
-print("realized shares:", fam)
+expect = dict((k, float(v)) for k, v in
+              (kv.split(":") for kv in "${G_H200_EXPECT_SHARES:-toucan:0.6,traces:0.4}".split(",")))
+print("realized shares:", fam, "expect:", expect)
 print("traces subsets:", {k: v.get("examples") for k, v in tr.items()})
-assert abs(fam.get("toucan", 0) - 0.6) < 0.05, fam
-assert abs(fam.get("traces", 0) - 0.4) < 0.05, fam
+for k, want in expect.items():
+    assert abs(fam.get(k, 0) - want) < 0.05, (fam, expect)
+assert set(fam) == set(expect), fam
 assert "qa" not in fam and "openswe" not in fam, fam
 for k in tr:
     assert k in ("appworld", "tau2"), f"unexpected traces stratum leaked: {k}"

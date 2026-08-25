@@ -17,7 +17,7 @@
 | 优化 | LR 5e-5，cosine，weight decay 0.1，warmup_ratio 0.04，BF16 |
 | Batch | per-device 1 × grad-accum 4 × 2 卡 = effective 8（microbatch 2 放得下则 2×2，eff-8 不变） |
 | 硬件 | 2×H200（141GB），torchrun **plain DDP**（`USE_DEEPSPEED=0`；ZeRO-3 在 gist 双 pass 之外还有 per-rank generate_gist 调用计数漂移导致的 NCCL 计数错位挂死——2026-08-26 实锤，见 §5；ZeRO-2 双重 reduce 也不行。`configs/ds_config_h200.json` 留作后续修复后的备选） |
-| 预算 | **144 GPUh = 72h wall**（2026-08-25 上调）；目标 96M–128M **presented** source tokens（不以 epoch 为停止条件） |
+| 预算 | **144 GPUh = 72h wall**（2026-08-25 上调）；目标 96M–256M **presented** source tokens（不以 epoch 为停止条件；2026-08-26 实测 ρ=0.62、池子 26.6M presented/epoch，默认剂量 256M ≈10 epoch；更粗的 Toucan 大池备选 `g_h200_bigpool` 见 §3 注） |
 
 ## 2. 与 v3 手册的关系
 
@@ -72,7 +72,12 @@ python agent/build_joint_medium_plan.py \
 
 # 5. 主训练：先 100–200 step 校准（sec/step、presented tokens/s、peak HBM、
 #    tool_call_target_truncated 丢弃率）→ 回填 SAVE_STEPS 使每 ≈16M presented 存一档
-#    → 正式跑，目标 128M presented，保底 96M。
+#    → 正式跑，目标 256M presented（≈10 epoch），保底 96M。
+#    注：若要用 Toucan 大池（toucan:0.85/traces:0.15，traces 绝对量不变，池子
+#    ≈70M presented/epoch），改用 g_h200_bigpool order file：
+#    ORDER_FILE=outputs/joint_h200_plan/g_h200_bigpool.order.json \
+#    G_H200_EXPECT_SHARES=toucan:0.85,traces:0.15 TARGET_PRESENTED_TOKENS=355000000 \
+#      bash start_h200.sh
 CUDA_VISIBLE_DEVICES=0,1 EXAMPLE_ORDER_FILE=outputs/joint_h200_plan/g_h200_main.order.json \
   MAX_SOURCE_TOKENS=<折算值> SAVE_STEPS=<校准值> bash agent/train_joint_next_action_c2kv_h200.sh
 
