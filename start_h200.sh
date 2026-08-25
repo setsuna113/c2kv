@@ -265,10 +265,24 @@ latest_ckpt() { ls -d "${OUTPUT_DIR}"/checkpoint-* 2>/dev/null | sort -t- -k2 -n
 # 每次停滞升级 fallback 档位: 1=USE_DEEPSPEED=0(plain DDP——ZeRO-3 下
 # generate_gist 调用次数随 rank 批内容漂移, 集合通信计数错位会 NCCL 超时挂死,
 # 2026-08-26 已实锤), 2=再降 ATTN_IMPL=sdpa(免编译兜底)。
+# 带错误签名的崩溃同样升级：illegal memory access/AcceleratorError/CUDA error:
+# 之外还有 CheckpointError|recompile_limit——flex_attention 在变长数据上撞
+# dynamo recompile_limit=8 后退化为 unfused 实现, 梯度 checkpoint 重算时
+# 张量元数据与 forward 保存的不一致 -> CheckpointError, 确定性必现
+# (2026-08-26 step~156 两次复现), 只能切 sdpa 根治, 重试 flex 无意义。
 STALL_MIN="${STALL_MIN:-35}"
 
 fallback_level() { cat "${STATUS}/attn_fallback_level" 2>/dev/null || echo 0; }
 bump_fallback() { local l; l=$(fallback_level); echo $((l + 1)) > "${STATUS}/attn_fallback_level"; }
+
+# 把失败的真实原因带进 console.log：无人值守时用户只 tail 这个文件，
+# train 阶段崩溃不能只在 train.log 里留 traceback（2026-08-26 两次
+# flex CheckpointError 崩溃时 console 只有一句 "crash/stall"，被误判成挂起）。
+dump_train_tail() {
+  echo "---- tail of train.log ----"
+  tail -c 20000 "${LOGS}/train.log" 2>/dev/null | tr '\r' '\n' | grep -v '^[[:space:]]*$' | tail -30 || true
+  echo "---- end tail ----"
+}
 
 stall_detected() {
   local last now
@@ -361,7 +375,7 @@ phase_calibrate() {
     kill_train || true
     wait "${tpid}" 2>/dev/null || true
     if [[ ${wrc} -eq 3 ]] \
-      || tail -200 "${LOGS}/train.log" | grep -qE "illegal memory access|AcceleratorError|CUDA error:"; then
+      || tail -200 "${LOGS}/train.log" | grep -qE "illegal memory access|AcceleratorError|CUDA error:|CheckpointError|recompile_limit"; then
       bump_fallback
       echo "stall/CUDA-signature crash -> fallback_level=$(fallback_level) (1=plain DDP 2=+sdpa 3=+eager)"
     fi
@@ -445,6 +459,7 @@ phase_train() {
         echo "STALL: train.log ${STALL_MIN}min 无进展且进程还在, 杀掉重试"
         kill_train || true
         wait "${tpid}" 2>/dev/null || true
+        dump_train_tail
         stalled=1
         break
       fi
@@ -456,7 +471,7 @@ phase_train() {
       return 0
     fi
     if [[ ${stalled} -eq 1 ]] \
-      || { [[ ${trc} -ne 0 ]] && tail -200 "${LOGS}/train.log" | grep -qE "illegal memory access|AcceleratorError|CUDA error:"; }; then
+      || { [[ ${trc} -ne 0 ]] && tail -200 "${LOGS}/train.log" | grep -qE "illegal memory access|AcceleratorError|CUDA error:|CheckpointError|recompile_limit"; }; then
       bump_fallback
       echo "stall/CUDA-signature crash -> fallback_level=$(fallback_level) (1=plain DDP 2=+sdpa 3=+eager)"
     fi
@@ -477,6 +492,8 @@ phase_train() {
       echo "GU disk nearly full (${gu_free}G); stop training, keep milestones for eval"
       return 0
     fi
+    # 非停滞崩溃：把真实 traceback 带进 console.log 再睡 60s 重启
+    [[ ${stalled} -eq 0 ]] && dump_train_tail || true
     echo "crash/stall; resume in 60s (attempt ${attempt}/${MAX_CRASH_RETRIES})"; sleep 60
   done
 }
