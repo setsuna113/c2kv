@@ -317,7 +317,11 @@ PY
 }
 
 # ---- helpers for calibrate/train ------------------------------------------
-latest_ckpt() { ls -d "${OUTPUT_DIR}"/checkpoint-* 2>/dev/null | sort -t- -k2 -n | tail -1 || true; }
+# 2026-08-27 实锤: sort -t- -k2 -n 对含 '-' 的完整路径排序会退化成字典序
+# (字段 2 是路径前缀 "user/yanjunchi..." 而非步数), 字典序最大值是
+# checkpoint-900 → resume 错锚到 900 而非 3450。改用 sort -V(版本序,
+# 按内嵌数字段比较)。
+latest_ckpt() { ls -d "${OUTPUT_DIR}"/checkpoint-* 2>/dev/null | sort -V | tail -1 || true; }
 
 # 停滞看门狗 + 自动降级（无人值守必须能自愈"挂着不崩"）：
 # 训练日志 STALL_MIN 分钟没有任何新写入且进程还在 -> 判停滞, 杀掉重试;
@@ -585,7 +589,7 @@ PY
 phase_eval() {
   prune_old_checkpoints || true
   local ckpts=()
-  mapfile -t ckpts < <(ls -d "${OUTPUT_DIR}"/checkpoint-* 2>/dev/null | sort -t- -k2 -n || true)
+  mapfile -t ckpts < <(ls -d "${OUTPUT_DIR}"/checkpoint-* 2>/dev/null | sort -V || true)
   [[ ${#ckpts[@]} -gt 0 ]] || { echo "no checkpoints to evaluate"; return 1; }
   # 均匀抽取至多 EVAL_MAX_CKPTS 个（含最终档）
   "${PY}" - "${EVAL_MAX_CKPTS}" "${ckpts[@]}" > "${STATUS}/eval_list.txt" <<'PY'
