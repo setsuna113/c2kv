@@ -32,6 +32,9 @@
 #                            日志连续无写入且进程还在 -> 杀掉重试并升级 fallback 档位
 #                            (1=plain DDP; 2=+sdpa; 3=+eager)
 #   EXPECT_GPUS              期望卡数（默认 2；不足只警告，便于单卡 smoke）
+#   RETAIN_CKPTS             磁盘紧张时整档保留的 checkpoint 数（默认 EVAL_MAX_CKPTS+2）：
+#                            最新档 + 均匀抽取（与 eval 同一公式），其余整档删除
+#   PRUNE_MIN_FREE_GB        GU 可用低于此值才触发整档保留裁剪（默认 400）
 #   SMOKE=1                  本机端到端冒烟：极小剂量 + 单卡 + 评测截断
 set -euo pipefail
 
@@ -39,6 +42,12 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "${REPO_ROOT}"
 export PYTHONPATH="${REPO_ROOT}/python:${REPO_ROOT}/agent:${PYTHONPATH:-}"
 export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 HF_DATASETS_OFFLINE=1 TOKENIZERS_PARALLELISM=false OMP_NUM_THREADS=16
+# 2026-08-26 step-3581 OOM: 115.5GB 已分配之外还有 21.4GB reserved-but-unallocated
+# (碎片), 139.8GB 被打满; expandable_segments 让保留段可复用, 是 pytorch 对该
+# OOM 形态的官方建议。对 train/eval 均生效, 显存够用时无副作用。
+# torch>=2.9 改名 PYTORCH_ALLOC_CONF(旧名 deprecated 告警), 两个都设以兼容。
+export PYTORCH_ALLOC_CONF="${PYTORCH_ALLOC_CONF:-expandable_segments:True}"
+export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-${PYTORCH_ALLOC_CONF}}"
 
 # H200 吞吐默认值（141GB 显存远够用, 利用率从 ~20% 拉起来; 平台低利用率会杀任务）:
 # - C2KV_GIST_DOC_MICROBATCH=16: 文档压缩从逐篇小前向改为 16 篇一批
@@ -62,15 +71,21 @@ CHECKPOINT_TOKEN_GRAN="${CHECKPOINT_TOKEN_GRAN:-16000000}"
 EVAL_MAX_CKPTS="${EVAL_MAX_CKPTS:-6}"
 MAX_CRASH_RETRIES="${MAX_CRASH_RETRIES:-5}"
 EXPECT_GPUS="${EXPECT_GPUS:-2}"
+RETAIN_CKPTS="${RETAIN_CKPTS:-$((EVAL_MAX_CKPTS + 2))}"
+PRUNE_MIN_FREE_GB="${PRUNE_MIN_FREE_GB:-400}"
 if [[ "${SMOKE:-0}" == "1" ]]; then
   TARGET_PRESENTED_TOKENS=400000; MIN_PRESENTED_TOKENS=100000
   PLAN_BUDGET_EST=2000000; CALIB_STEPS=5; CALIB_TIMEOUT_MIN=90
   CHECKPOINT_TOKEN_GRAN=100000; EVAL_MAX_CKPTS=1; EXPECT_GPUS=1
   EVAL_LIMIT="${EVAL_LIMIT:-2}"
   # 4090 级小显存卡冒烟：eager + 缩短 gist 网格（生产 H200 用 launcher 默认全量配置）;
-  # MAX_TRAIN_EXAMPLES=64 截断训练集, 让全状态机在 ~30 分钟内跑完
+  # MAX_TRAIN_EXAMPLES=64 截断训练集, 让全状态机在 ~30 分钟内跑完。
+  # PER_DEVICE_BS 强制 1: 吞吐修复把生产默认提到 2 后, 48GB 卡 eager+bs2
+  # 在 step ~4 确定性 OOM(2026-08-27 冒烟实测 44.3GB 已分配); 冒烟只验证
+  # 状态机, 不需要生产的 microbatch。
   export ATTN_IMPL="${ATTN_IMPL:-eager}" MAX_DOC_NUM=4 MAX_DOC_LENGTH=256 \
     MAX_LENGTH=1024 MAX_TOOL_DEFINITION_TOKENS=2000 MAX_TRAIN_EXAMPLES=64 \
+    PER_DEVICE_BS=1 GRAD_ACCUM=1 \
     CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}"
 fi
 
@@ -81,6 +96,9 @@ RESULTS="${RESULTS_DIR:-${GU_BASE}/results/g_h200}"
 if [[ "${SMOKE:-0}" == "1" ]]; then
   STATUS="${STATUS_DIR:-${REPO_ROOT}/outputs/g_h200_smoke_status}"
   RESULTS="${RESULTS_DIR:-${GU_BASE}/results/g_h200_smoke}"
+  # 冒烟绝不写生产 checkpoint 目录: latest_ckpt/resume/prune_old_checkpoints
+  # 都按 OUTPUT_DIR 扫描, 共用生产目录会误续跑/误删生产档。
+  OUTPUT_DIR="${OUTPUT_DIR:-${GU_BASE}/checkpoints/smoke-qwen3-4b-joint-c2kv-h200}"
 fi
 LOGS="${STATUS}/logs"
 mkdir -p "${LOGS}" "${RESULTS}"
@@ -175,30 +193,71 @@ PY
   [[ -d "${BFCL_DATA}/possible_answer" && -d "${BFCL_DATA}/multi_turn_func_doc" ]] || { echo "bfcl_data incomplete"; return 1; }
   [[ -f "${DEV_MANIFEST}" ]] || { echo "dev manifest missing: ${DEV_MANIFEST}"; return 1; }
   mkdir -p "${GU_BASE}" "${OUTPUT_DIR}"
-  local avail_repo avail_gu
+  # 续跑前先回收磁盘(优化器状态 + 磁盘紧张时整档保留裁剪), 再量可用空间
+  prune_old_checkpoints || true
+  local avail_repo avail_gu need_gu
   avail_repo=$(df --output=avail -BG "${REPO_ROOT}" | tail -1 | tr -dc '0-9')
   avail_gu=$(df --output=avail -BG "${OUTPUT_DIR}" | tail -1 | tr -dc '0-9')
   [[ "${avail_repo}" -ge 20 ]] || { echo "repo disk low: ${avail_repo}G free (<20G)"; return 1; }
-  [[ "${avail_gu}" -ge 150 ]] || { echo "checkpoint disk low: ${avail_gu}G free (<150G, checkpoints won't fit)"; return 1; }
+  # 全新跑需要 150G; 续跑(已有 checkpoint)时保留集界定了占用, 只需在飞档余量
+  need_gu=150
+  [[ -n "$(latest_ckpt)" ]] && need_gu=30
+  [[ "${avail_gu}" -ge "${need_gu}" ]] || { echo "checkpoint disk low: ${avail_gu}G free (<${need_gu}G, checkpoints won't fit)"; return 1; }
   echo "recon ok: gpus=${ngpu} repo_free=${avail_repo}G ckpt_free=${avail_gu}G"
 }
 
-# 磁盘卫生：ZeRO-3 每档含 global_step*/（≈14G optimizer+model states）+
-# model.safetensors（≈8.6G）。评测只需后者；resume 只用最新档。
-# 非最新 checkpoint 删掉 global_step*（保留 model.safetensors/config/tokenizer）。
+# 磁盘卫生:
+# 1) 非最新档删优化器状态: ZeRO-3 的 global_step*/(≈14G) 与 plain-DDP 的
+#    optimizer.pt/scheduler.pt/rng_state*(≈2.3G)。评测只需
+#    model.safetensors/config/tokenizer; resume 只用最新档。
+# 2) GU 可用空间 < PRUNE_MIN_FREE_GB 时触发整档保留裁剪: 保留 = 最新档 +
+#    均匀抽取的 RETAIN_CKPTS-1 个(与 phase_eval 同一选取公式), 其余整档
+#    删除。2026-08-26 实锤必要: resume 会继承旧档 trainer_state.json 的
+#    save_steps(transformers v5 保存节奏走 state.save_steps 而非
+#    args.save_steps), calibrate 档的 150 覆盖 train 的 815, checkpoint
+#    以 150 步一档膨胀, 23 档就把 GU 配额吃到只剩 12G。
 prune_old_checkpoints() {
-  local latest
+  local latest d
   latest="$(latest_ckpt)"
-  local d
   for d in "${OUTPUT_DIR}"/checkpoint-*; do
-    [[ -d "${d}" ]] || continue
-    if [[ "${d%/}" != "${latest%/}" && -d "${d}" ]]; then
-      if ls -d "${d}"/global_step* >/dev/null 2>&1; then
-        rm -rf "${d}"/global_step*
-        echo "pruned optimizer states: ${d}"
-      fi
+    [[ -d "${d}" && "${d%/}" != "${latest%/}" ]] || continue
+    [[ -f "${d}/trainer_state.json" ]] || continue  # 写入中的档不碰
+    if ls -d "${d}"/global_step* >/dev/null 2>&1; then
+      rm -rf "${d}"/global_step*
+      echo "pruned optimizer states: ${d}"
     fi
+    rm -f "${d}"/optimizer.pt "${d}"/scheduler.pt "${d}"/rng_state*.pth
   done
+  local free
+  free=$(df --output=avail -BG "${GU_BASE}" | tail -1 | tr -dc '0-9')
+  if [[ -n "${free}" && "${free}" -lt "${PRUNE_MIN_FREE_GB}" ]]; then
+    local victims
+    victims="$("${PY}" - "${OUTPUT_DIR}" "${RETAIN_CKPTS}" <<'PY'
+import glob, os, sys
+out, k = sys.argv[1], int(sys.argv[2])
+def step_of(p):
+    try:
+        return int(p.rsplit("-", 1)[1])
+    except (ValueError, IndexError):
+        return None
+ckpts = [c for c in glob.glob(os.path.join(out, "checkpoint-*")) if step_of(c) is not None]
+ckpts = sorted((c for c in ckpts if os.path.isfile(os.path.join(c, "trainer_state.json"))),
+               key=step_of)
+if len(ckpts) > k and k >= 2:
+    idx = sorted({round(i * (len(ckpts) - 1) / (k - 1)) for i in range(k)})
+    keep = {ckpts[i] for i in idx} | {ckpts[-1]}
+    for c in ckpts:
+        if c not in keep:
+            print(c)
+PY
+)"
+    while IFS= read -r victim; do
+      [[ -n "${victim}" && -d "${victim}" && "${victim%/}" != "${latest%/}" ]] || continue
+      case "${victim}" in "${OUTPUT_DIR}"/checkpoint-*) ;; *) continue ;; esac
+      rm -rf "${victim}"
+      echo "disk-pressure prune: removed ${victim} (kept ${RETAIN_CKPTS} evenly-spaced + latest)"
+    done <<< "${victims}"
+  fi
 }
 
 # ---- phase: plan -----------------------------------------------------------
@@ -442,9 +501,26 @@ phase_train() {
   save_steps=$("${PY}" -c "import json; print(json.load(open('${RUN_CONFIG}'))['save_steps'])")
   epochs=$("${PY}" -c "import json; print(json.load(open('${RUN_CONFIG}'))['epochs'])")
   echo "final knobs: save_steps=${save_steps} epochs=${epochs}"
-  local attempt=0 resume tpid trc stalled
+  local attempt=0 resume tpid trc stalled last_prune=0
   while true; do
     resume="$(latest_ckpt)"
+    # transformers v5: 保存节奏走 TrainerState.save_steps 而非 args.save_steps
+    # (DefaultFlowCallback.on_step_end), resume 会从旧档 trainer_state.json
+    # 继承旧 cadence(2026-08-26 实锤: calibrate 档的 150 覆盖了 train 的 815,
+    # checkpoint 以 150 步一档膨胀, 23 档吃满 GU 配额)。启动前把 resume 档的
+    # save_steps 改成本轮配置值。
+    if [[ -n "${resume}" && -f "${resume}/trainer_state.json" ]]; then
+      "${PY}" - "${resume}/trainer_state.json" "${save_steps}" <<'PY'
+import json, sys
+p, want = sys.argv[1], int(sys.argv[2])
+s = json.load(open(p))
+if int(s.get("save_steps") or 0) != want:
+    s["save_steps"] = want
+    with open(p, "w") as f:
+        json.dump(s, f, indent=1)
+    print(f"patched resume state save_steps -> {want} ({p})")
+PY
+    fi
     echo "train attempt ${attempt} resume=${resume:-<scratch>} fallback_level=$(fallback_level)"
     launch_train "${save_steps}" "${epochs}" "${resume}" &
     tpid=$!
@@ -463,11 +539,18 @@ phase_train() {
         stalled=1
         break
       fi
+      # 定期磁盘回收: checkpoint 膨胀是 GB/h 量级, 不能只在崩溃后才 prune
+      local now_ts
+      now_ts=$(date +%s)
+      if (( now_ts - last_prune >= 900 )); then
+        prune_old_checkpoints || true
+        last_prune=${now_ts}
+      fi
       sleep 60
     done
     if [[ ${stalled} -eq 0 && ${trc} -eq 0 ]]; then
       echo "trainer exited 0"
-      prune_old_checkpoints
+      prune_old_checkpoints || true
       return 0
     fi
     if [[ ${stalled} -eq 1 ]] \
@@ -476,11 +559,11 @@ phase_train() {
       echo "stall/CUDA-signature crash -> fallback_level=$(fallback_level) (1=plain DDP 2=+sdpa 3=+eager)"
     fi
     attempt=$((attempt + 1))
-    prune_old_checkpoints
+    prune_old_checkpoints || true
     local elapsed_h=$(( ($(date +%s) - START_TS) / 3600 ))
     if (( elapsed_h >= WALL_CAP_HOURS )); then
       echo "wall cap ${WALL_CAP_HOURS}h reached; stop training (milestones will be evaluated)"
-      prune_old_checkpoints
+      prune_old_checkpoints || true
       return 0
     fi
     if (( attempt > MAX_CRASH_RETRIES )); then
@@ -500,7 +583,7 @@ phase_train() {
 
 # ---- phase: eval -----------------------------------------------------------
 phase_eval() {
-  prune_old_checkpoints
+  prune_old_checkpoints || true
   local ckpts=()
   mapfile -t ckpts < <(ls -d "${OUTPUT_DIR}"/checkpoint-* 2>/dev/null | sort -t- -k2 -n || true)
   [[ ${#ckpts[@]} -gt 0 ]] || { echo "no checkpoints to evaluate"; return 1; }
