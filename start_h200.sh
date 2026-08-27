@@ -321,7 +321,19 @@ PY
 # (字段 2 是路径前缀 "user/yanjunchi..." 而非步数), 字典序最大值是
 # checkpoint-900 → resume 错锚到 900 而非 3450。改用 sort -V(版本序,
 # 按内嵌数字段比较)。
-latest_ckpt() { ls -d "${OUTPUT_DIR}"/checkpoint-* 2>/dev/null | sort -V | tail -1 || true; }
+# 2026-08-28 实锤②: 只看目录名会选中"存档写到一半被杀"的残档, resume
+# 直接崩 → 崩溃循环。完整档判定 = trainer_state.json + 优化器状态
+# (plain-DDP 的 optimizer.pt 或 ZeRO 的 global_step*/): 只有前者说明
+# 存档在优化器落盘前被杀(2026-08-28 冒烟: wait_for_checkpoint 看到
+# trainer_state 后 15s 即 kill, ZeRO 档来不及写 global_step*)。
+latest_ckpt() {
+  local d
+  for d in $(ls -d "${OUTPUT_DIR}"/checkpoint-* 2>/dev/null | sort -V); do
+    [[ -f "${d}/trainer_state.json" ]] || continue
+    [[ -f "${d}/optimizer.pt" ]] || compgen -G "${d}/global_step*" > /dev/null || continue
+    printf '%s\n' "${d}"
+  done | tail -1
+}
 
 # 停滞看门狗 + 自动降级（无人值守必须能自愈"挂着不崩"）：
 # 训练日志 STALL_MIN 分钟没有任何新写入且进程还在 -> 判停滞, 杀掉重试;
@@ -389,7 +401,11 @@ wait_for_checkpoint() {  # wait_for_checkpoint <step> <timeout_min>; 0=到了 1=
   # 起手就 pgrep 会误判为消失）；见过之后再消失才算真崩溃。
   local step="$1" timeout="$2" waited=0 seen=0
   while true; do
-    if [[ -f "${OUTPUT_DIR}/checkpoint-${step}/trainer_state.json" ]]; then
+    # 完整档 = trainer_state.json + 优化器状态(optimizer.pt 或 global_step*);
+    # trainer_state 先落盘, 只看它会在优化器写完前就 kill 训练(2026-08-28 冒烟实锤)
+    if [[ -f "${OUTPUT_DIR}/checkpoint-${step}/trainer_state.json" ]] \
+      && { [[ -f "${OUTPUT_DIR}/checkpoint-${step}/optimizer.pt" ]] \
+           || compgen -G "${OUTPUT_DIR}/checkpoint-${step}/global_step*" > /dev/null; }; then
       sleep 15; return 0
     fi
     if pgrep -f "train_joint_next_action_c2kv.py" > /dev/null; then
@@ -589,7 +605,7 @@ PY
 phase_eval() {
   prune_old_checkpoints || true
   local ckpts=()
-  mapfile -t ckpts < <(ls -d "${OUTPUT_DIR}"/checkpoint-* 2>/dev/null | sort -V || true)
+  mapfile -t ckpts < <(for d in $(ls -d "${OUTPUT_DIR}"/checkpoint-* 2>/dev/null | sort -V); do [[ -f "${d}/trainer_state.json" ]] && printf '%s\n' "${d}"; done)
   [[ ${#ckpts[@]} -gt 0 ]] || { echo "no checkpoints to evaluate"; return 1; }
   # 均匀抽取至多 EVAL_MAX_CKPTS 个（含最终档）
   "${PY}" - "${EVAL_MAX_CKPTS}" "${ckpts[@]}" > "${STATUS}/eval_list.txt" <<'PY'
