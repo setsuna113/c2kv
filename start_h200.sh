@@ -207,9 +207,10 @@ PY
 }
 
 # 磁盘卫生:
-# 1) 非最新档删优化器状态: ZeRO-3 的 global_step*/(≈14G) 与 plain-DDP 的
+# 1) 非保护档删优化器状态: ZeRO-3 的 global_step*/(≈14G) 与 plain-DDP 的
 #    optimizer.pt/scheduler.pt/rng_state*(≈2.3G)。评测只需
-#    model.safetensors/config/tokenizer; resume 只用最新档。
+#    model.safetensors/config/tokenizer; 最新两个完整档保留优化器
+#    (最新档 resume 用, 次新档兜底)。
 # 2) GU 可用空间 < PRUNE_MIN_FREE_GB 时触发整档保留裁剪: 保留 = 最新档 +
 #    均匀抽取的 RETAIN_CKPTS-1 个(与 phase_eval 同一选取公式), 其余整档
 #    删除。2026-08-26 实锤必要: resume 会继承旧档 trainer_state.json 的
@@ -219,14 +220,25 @@ PY
 prune_old_checkpoints() {
   local latest d
   latest="$(latest_ckpt)"
+  # 优化器状态保护最新两个完整档: 最新档 resume 用, 次新档兜底
+  # (最新档损坏/被外部清理时还能续)。
+  local protect
+  protect="$(for d in $(ls -d "${OUTPUT_DIR}"/checkpoint-* 2>/dev/null | sort -V); do
+    [[ -f "${d}/trainer_state.json" && -f "${d}/model.safetensors" ]] || continue
+    printf '%s\n' "${d}"
+  done | tail -2)"
   for d in "${OUTPUT_DIR}"/checkpoint-*; do
-    [[ -d "${d}" && "${d%/}" != "${latest%/}" ]] || continue
+    [[ -d "${d}" ]] || continue
     [[ -f "${d}/trainer_state.json" ]] || continue  # 写入中的档不碰
+    if grep -qxF "${d%/}" <<< "${protect}"; then continue; fi
     if ls -d "${d}"/global_step* >/dev/null 2>&1; then
       rm -rf "${d}"/global_step*
-      echo "pruned optimizer states: ${d}"
+      echo "pruned optimizer states (ZeRO): ${d}"
     fi
-    rm -f "${d}"/optimizer.pt "${d}"/scheduler.pt "${d}"/rng_state*.pth
+    if [[ -f "${d}/optimizer.pt" ]]; then
+      rm -f "${d}"/optimizer.pt "${d}"/scheduler.pt "${d}"/rng_state*.pth
+      echo "pruned optimizer states (DDP): ${d}"
+    fi
   done
   local free
   free=$(df --output=avail -BG "${GU_BASE}" | tail -1 | tr -dc '0-9')
@@ -321,16 +333,16 @@ PY
 # (字段 2 是路径前缀 "user/yanjunchi..." 而非步数), 字典序最大值是
 # checkpoint-900 → resume 错锚到 900 而非 3450。改用 sort -V(版本序,
 # 按内嵌数字段比较)。
-# 2026-08-28 实锤②: 只看目录名会选中"存档写到一半被杀"的残档, resume
-# 直接崩 → 崩溃循环。完整档判定 = trainer_state.json + 优化器状态
-# (plain-DDP 的 optimizer.pt 或 ZeRO 的 global_step*/): 只有前者说明
-# 存档在优化器落盘前被杀(2026-08-28 冒烟: wait_for_checkpoint 看到
-# trainer_state 后 15s 即 kill, ZeRO 档来不及写 global_step*)。
+# 2026-08-28 实锤②: 只看目录名会选中"存档写到一半被杀"的残档(无
+# trainer_state.json), resume 直接 FileNotFoundError 崩 → 崩溃循环。
+# 完整档判定 = trainer_state.json + model.safetensors。注意**不要求**
+# optimizer.pt: 磁盘卫生会清掉旧档的优化器状态, HF resume 缺优化器只是
+# 告警(Adam moments 重置, 权重/scheduler 照常), 要求它反而会把可续跑的
+# 档全部判废、退化成 resume=<scratch> 从头训练(2026-08-28 实锤③)。
 latest_ckpt() {
   local d
   for d in $(ls -d "${OUTPUT_DIR}"/checkpoint-* 2>/dev/null | sort -V); do
-    [[ -f "${d}/trainer_state.json" ]] || continue
-    [[ -f "${d}/optimizer.pt" ]] || compgen -G "${d}/global_step*" > /dev/null || continue
+    [[ -f "${d}/trainer_state.json" && -f "${d}/model.safetensors" ]] || continue
     printf '%s\n' "${d}"
   done | tail -1
 }
@@ -347,7 +359,18 @@ latest_ckpt() {
 # (2026-08-26 step~156 两次复现), 只能切 sdpa 根治, 重试 flex 无意义。
 STALL_MIN="${STALL_MIN:-35}"
 
-fallback_level() { cat "${STATUS}/attn_fallback_level" 2>/dev/null || echo 0; }
+fallback_level() {
+  local l
+  l=$(cat "${STATUS}/attn_fallback_level" 2>/dev/null || echo 0)
+  # 文件被手工写坏(如粘贴串行)时按 0 处理并大声告警, 不能让
+  # 算术比较把 launch_train 崩掉(2026-08-28 实锤: 内容是
+  # "2 cd /path" 时 (( lvl >= 1 )) 报 unbound variable 死循环)
+  if ! [[ "${l}" =~ ^[0-9]+$ ]]; then
+    echo "WARNING: attn_fallback_level 内容非法(${l}), 按 0 处理" >&2
+    l=0
+  fi
+  echo "${l}"
+}
 bump_fallback() { local l; l=$(fallback_level); echo $((l + 1)) > "${STATUS}/attn_fallback_level"; }
 
 # 把失败的真实原因带进 console.log：无人值守时用户只 tail 这个文件，
@@ -524,6 +547,15 @@ phase_train() {
   local attempt=0 resume tpid trc stalled last_prune=0
   while true; do
     resume="$(latest_ckpt)"
+    if [[ -z "${resume}" ]] && ls -d "${OUTPUT_DIR}"/checkpoint-* >/dev/null 2>&1 \
+      && [[ "${ALLOW_SCRATCH_RESTART:-0}" != "1" ]]; then
+      # 有 checkpoint 目录但无一完整可续跑(缺 trainer_state/model):
+      # 静默从头训练会烧光整个预算(2026-08-28 差点发生)。人工确认无救后
+      # 显式 ALLOW_SCRATCH_RESTART=1 重开。
+      echo "FATAL: ${OUTPUT_DIR} 下存在 checkpoint 但无一完整可续跑;" >&2
+      echo "       拒绝静默从头训练。确认后 ALLOW_SCRATCH_RESTART=1 重跑。" >&2
+      return 1
+    fi
     # transformers v5: 保存节奏走 TrainerState.save_steps 而非 args.save_steps
     # (DefaultFlowCallback.on_step_end), resume 会从旧档 trainer_state.json
     # 继承旧 cadence(2026-08-26 实锤: calibrate 档的 150 覆盖了 train 的 815,
