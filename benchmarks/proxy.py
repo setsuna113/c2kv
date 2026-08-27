@@ -146,6 +146,8 @@ def _assemble(messages: List[Dict[str, Any]], arm: Arm, timeout: int):
         compressed = dict(message)
         compressed["content"] = content
         compressed["c2kv_key_hash"] = record["key_hash"]
+        # lets the server re-extract on cache miss (e.g. after a restart)
+        compressed["c2kv_ratio"] = arm.ratio
         out.append(compressed)
     return out, gist_tokens, original_tokens, n_gist
 

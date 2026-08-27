@@ -142,6 +142,42 @@ class C2KVServer:
         self._xgr_tokenizer_info = None
         self._xgr_compiler = None
         self._grammar_cache: Dict[str, Any] = {}
+        # L1 prefix cache: system+tools prefill output, reused verbatim by
+        # every request with the same system prompt/tool pool (benchmarks
+        # resend the same ~1.5k-token tool schema on every turn).  Stored
+        # tensors are never mutated downstream — layer.keys rebinding via
+        # torch.cat allocates fresh tensors — so sharing storages is safe.
+        self._system_cache_store: Dict[str, Tuple[Any, int, float]] = {}
+
+    def _prefill_system_cached(self, system_ids: List[int], tools):
+        key = hashlib.sha256(
+            json.dumps([system_ids, tools or []], ensure_ascii=False)
+            .encode()
+        ).hexdigest()
+        hit = self._system_cache_store.get(key)
+        if hit is not None:
+            return self._clone_layers(hit[0]), hit[1], 0.0
+        cache, added = self._prefill_append(None, system_ids, 0, use_gist=False)
+        if len(self._system_cache_store) < 32:
+            self._system_cache_store[key] = (cache, added, 0.0)
+            return self._clone_layers(cache), added, 0.0
+        return cache, added, 0.0
+
+    @staticmethod
+    def _clone_layers(cache):
+        """Fresh layer objects sharing the same tensors.
+
+        Callers rebind layer.keys/values via torch.cat (which allocates new
+        tensors), so sharing storages is safe, but the layer objects
+        themselves must not be shared or a cached state would be corrupted
+        by the first request that extends it.
+        """
+        from transformers.cache_utils import DynamicCache
+
+        clone = DynamicCache()
+        for layer in cache.layers:
+            clone.update(layer.keys, layer.values, layer_idx=len(clone.layers))
+        return clone
 
     def _compiled_tool_grammar(self, tools: List[Dict[str, Any]]):
         """xgrammar structural tag for the tool pool (cached by tool set).
@@ -270,7 +306,7 @@ class C2KVServer:
                         json.dumps(content, ensure_ascii=False) if content else ""
                     )
             # 1. system prefill (tools render inside the system block, as in
-            # the harness's _prefill_system)
+            # the harness's _prefill_system); cached across requests
             cache = None
             logical = 0
             if system_text or tools:
@@ -279,15 +315,28 @@ class C2KVServer:
                     [{"role": "system", "content": system_text}],
                     tools=tools, keep_bos=True,
                 )
-                cache, added = self._prefill_append(cache, system_ids, 0, use_gist=False)
+                cache, added, _ = self._prefill_system_cached(system_ids, tools)
                 logical += added
 
             # 2. body[:-1]: gist refs and raw messages interleaved
             follows_gist = False
+            reextracted = 0
             for message in body[:-1]:
                 key_hash = message.get("c2kv_key_hash")
                 if key_hash:
                     entry = self.entries.get(key_hash)
+                    if entry is None and message.get("content"):
+                        # The server may have restarted since the proxy
+                        # extracted this block (gist pool is in-memory);
+                        # re-extract from the verbatim content instead of
+                        # failing the request.
+                        result = self.extract(
+                            str(message.get("content")),
+                            str(message.get("role") or "user"),
+                            int(message.get("c2kv_ratio") or 8),
+                        )
+                        entry = self.entries.get(result["key_hash"]) or self.entries.get(key_hash)
+                        reextracted += 1
                     if entry is None:
                         return {"error": f"C2KV cache miss: {key_hash}"}
                     cache = self._append_gist(cache, entry, logical)
@@ -306,6 +355,13 @@ class C2KVServer:
             if last.get("c2kv_key_hash"):
                 key_hash = last["c2kv_key_hash"]
                 entry = self.entries.get(key_hash)
+                if entry is None and last.get("content"):
+                    self.extract(
+                        str(last.get("content")),
+                        str(last.get("role") or "user"),
+                        int(last.get("c2kv_ratio") or 8),
+                    )
+                    entry = self.entries.get(key_hash)
                 if entry is None:
                     return {"error": f"C2KV cache miss: {key_hash}"}
                 cache = self._append_gist(cache, entry, logical)
@@ -363,6 +419,7 @@ class C2KVServer:
             "content": text,
             "tool_calls": tool_calls,
             "constrained": bool(constrain and tools),
+            "reextracted": reextracted,
             "generated_tokens": int(new_tokens.shape[0]),
             "prompt_tokens": len(prompt_ids),
             "cache_tokens": cache_len,
