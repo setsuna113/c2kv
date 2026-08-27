@@ -184,6 +184,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
         assemble_sec = time.perf_counter() - start
         out_payload = dict(payload)
         out_payload["messages"] = messages
+        if ARM.constrain_tools:
+            out_payload["constrain_tools"] = True
         data = _http_json(UPSTREAM, self.path, out_payload, 600)
         total_sec = time.perf_counter() - start
         # Cost columns ride along on the response object.

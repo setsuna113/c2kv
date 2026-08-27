@@ -30,6 +30,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import threading
 import time
 from dataclasses import dataclass, field
@@ -56,6 +57,53 @@ app = Flask(__name__)
 
 GIST_IMPL = "npu_fusion_attention"  # downgraded to eager automatically off-NPU
 MAX_DOC_LENGTH = 768
+
+TOOL_CALL_RE = re.compile(
+    r"<tool_call>\s*(\{.*?\})\s*</tool_call>", re.DOTALL
+)
+
+
+def cfg_vocab_size(model) -> int:
+    size = getattr(model.config, "vocab_size", None)
+    if size is None:
+        size = len(model.get_input_embeddings().weight)
+    return int(size)
+
+
+def _parse_tool_calls(raw_text: str):
+    """Qwen-style <tool_call> blocks -> OpenAI tool_calls objects.
+
+    Mirrors SGLang's qwen25 tool-call parser: matched blocks become
+    tool_calls, surrounding text stays as content; unmatched blocks are left
+    verbatim in content so protocol violations stay visible to the scorer.
+    """
+    calls = []
+    spans = []
+    for match in TOOL_CALL_RE.finditer(raw_text):
+        try:
+            obj = json.loads(match.group(1))
+            name = obj.get("name")
+            arguments = obj.get("arguments", {})
+            if isinstance(arguments, str):
+                arguments = json.loads(arguments) if arguments.strip() else {}
+        except json.JSONDecodeError:
+            continue
+        calls.append({
+            "id": f"call_{len(calls)}",
+            "type": "function",
+            "function": {"name": name, "arguments": json.dumps(arguments)},
+        })
+        spans.append(match.span())
+    if not spans:
+        return raw_text, []
+    pieces = []
+    cursor = 0
+    for start, end in spans:
+        pieces.append(raw_text[cursor:start])
+        cursor = end
+    pieces.append(raw_text[cursor:])
+    content = "".join(pieces).strip()
+    return content, calls
 
 
 @dataclass
@@ -89,6 +137,34 @@ class C2KVServer:
         self.dynamic_ratio = getattr(cfg, "gist_type", "") == "dynamic-interleave"
         self.rope_theta = getattr(cfg, "rope_theta", 1000000.0)
         self.rope_type = getattr(getattr(cfg, "rope_scaling", None), "rope_type", None)
+        # H1 constrained decoding (xgrammar structural tag, qwen_3 dialect)
+        self._xgr_tokenizer_info = None
+        self._xgr_compiler = None
+        self._grammar_cache: Dict[str, Any] = {}
+
+    def _compiled_tool_grammar(self, tools: List[Dict[str, Any]]):
+        """xgrammar structural tag for the tool pool (cached by tool set).
+
+        get_model_structural_tag("qwen_3", ...) constrains
+        <tool_call>{"name": ..., "arguments": <schema>}</tool_call> while
+        leaving surrounding text free — the XGrammar-2 recipe (H1).
+        """
+        import xgrammar as xgr
+
+        if self._xgr_compiler is None:
+            self._xgr_tokenizer_info = xgr.TokenizerInfo.from_huggingface(
+                self.tokenizer, vocab_size=cfg_vocab_size(self.model)
+            )
+            self._xgr_compiler = xgr.GrammarCompiler(self._xgr_tokenizer_info)
+        key = hashlib.sha256(
+            json.dumps(tools, sort_keys=True).encode()
+        ).hexdigest()
+        if key not in self._grammar_cache:
+            tag = xgr.get_model_structural_tag(
+                "qwen_3", tools=tools, reasoning=False
+            )
+            self._grammar_cache[key] = self._xgr_compiler.compile_structural_tag(tag)
+        return self._grammar_cache[key]
 
     def _set_impl(self, impl: str):
         self.model.config._attn_implementation = impl
@@ -156,7 +232,8 @@ class C2KVServer:
 
     # ---------------- chat ----------------
     def chat(self, messages: List[Dict[str, Any]], max_new_tokens: int,
-             temperature: float, tools: Optional[List[Dict[str, Any]]] = None):
+             temperature: float, tools: Optional[List[Dict[str, Any]]] = None,
+             constrain: bool = False):
         t0 = time.perf_counter()
         system_messages = [m for m in messages if m.get("role") == "system"]
         body = [m for m in messages if m.get("role") != "system"]
@@ -165,6 +242,32 @@ class C2KVServer:
         system_text = "\n".join(m.get("content") or "" for m in system_messages)
 
         with self.lock, torch.inference_mode():
+            # normalize OpenAI-style assistant tool_calls history into the
+            # Qwen <tool_call> text form the chat template understands
+            for message in body:
+                if message.get("role") == "assistant" and message.get("tool_calls"):
+                    blocks = []
+                    for call in message["tool_calls"]:
+                        function = call.get("function") or {}
+                        try:
+                            arguments = json.loads(function.get("arguments") or "{}")
+                        except json.JSONDecodeError:
+                            arguments = function.get("arguments") or {}
+                        blocks.append(
+                            "<tool_call>\n"
+                            + json.dumps(
+                                {"name": function.get("name"), "arguments": arguments},
+                                ensure_ascii=False,
+                            )
+                            + "\n</tool_call>"
+                        )
+                    message["content"] = (message.get("content") or "") + "\n".join(blocks)
+                    message.pop("tool_calls", None)
+                content = message.get("content")
+                if not isinstance(content, str):
+                    message["content"] = (
+                        json.dumps(content, ensure_ascii=False) if content else ""
+                    )
             # 1. system prefill (tools render inside the system block, as in
             # the harness's _prefill_system)
             cache = None
@@ -218,7 +321,7 @@ class C2KVServer:
             prompt_input_ids = torch.tensor(
                 [prompt_ids], dtype=torch.long, device=self.device
             )
-            cache_len = cache.get_seq_length()
+            cache_len = cache.get_seq_length() if cache is not None else 0
             mock = prompt_input_ids.new_zeros((1, cache_len))
             input_ids = torch.cat([mock, prompt_input_ids], dim=1)
             position_ids = torch.arange(
@@ -226,8 +329,15 @@ class C2KVServer:
                 dtype=torch.long, device=self.device,
             ).unsqueeze(0)
             self._set_impl(GIST_IMPL)
+            logits_processor = None
+            if constrain and tools:
+                from xgrammar.contrib import hf as xgr_hf
+
+                logits_processor = [
+                    xgr_hf.LogitsProcessor(self._compiled_tool_grammar(tools))
+                ]
             t_gen = time.perf_counter()
-            outputs = self.model.generate(
+            gen_kwargs: Dict[str, Any] = dict(
                 input_ids=input_ids,
                 attention_mask=torch.ones_like(input_ids),
                 position_ids=position_ids,
@@ -238,11 +348,20 @@ class C2KVServer:
                 pad_token_id=self.tokenizer.eos_token_id,
                 use_gist=follows_gist,
             )
+            if logits_processor is not None:
+                gen_kwargs["logits_processor"] = logits_processor
+            outputs = self.model.generate(**gen_kwargs)
             generate_sec = time.perf_counter() - t_gen
             new_tokens = outputs[0][input_ids.shape[1]:]
-            text = self.tokenizer.decode(new_tokens, skip_special_tokens=True)
+            raw_text = self.tokenizer.decode(new_tokens, skip_special_tokens=False)
+            content, tool_calls = _parse_tool_calls(raw_text)
+            text = content if content else self.tokenizer.decode(
+                new_tokens, skip_special_tokens=True
+            )
         return {
             "content": text,
+            "tool_calls": tool_calls,
+            "constrained": bool(constrain and tools),
             "generated_tokens": int(new_tokens.shape[0]),
             "prompt_tokens": len(prompt_ids),
             "cache_tokens": cache_len,
@@ -250,6 +369,7 @@ class C2KVServer:
             "generate_sec": round(generate_sec, 4),
             "wall_sec": round(time.perf_counter() - t0, 4),
         }
+
 
     def _prefill_append(self, cache, token_ids: List[int], logical_start: int,
                         use_gist: bool) -> Tuple[Any, int]:
@@ -332,6 +452,7 @@ def chat_completions():
                                or data.get("max_tokens") or 256),
             temperature=float(data.get("temperature") or 0.0),
             tools=data.get("tools"),
+            constrain=bool(data.get("constrain_tools")),
         )
     except Exception as error:  # noqa: BLE001
         import traceback
@@ -340,21 +461,27 @@ def chat_completions():
                         "message": f"{error}\n{traceback.format_exc()}"}), 500
     if "error" in result:
         return jsonify({"object": "error", "message": result["error"]}), 400
+    message: Dict[str, Any] = {"role": "assistant", "content": result["content"] or None}
+    finish_reason = "stop"
+    if result.get("tool_calls"):
+        message["tool_calls"] = result["tool_calls"]
+        finish_reason = "tool_calls"
     return jsonify({
         "id": "c2kv-hf",
         "object": "chat.completion",
         "model": data.get("model") or "c2kv-agent",
         "choices": [{
             "index": 0,
-            "message": {"role": "assistant", "content": result["content"]},
-            "finish_reason": "stop",
+            "message": message,
+            "finish_reason": finish_reason,
         }],
         "usage": {
             "prompt_tokens": result["prompt_tokens"],
             "completion_tokens": result["generated_tokens"],
             "total_tokens": result["prompt_tokens"] + result["generated_tokens"],
         },
-        "c2kv": {k: v for k, v in result.items() if k != "content"},
+        "c2kv": {k: v for k, v in result.items()
+                 if k not in ("content", "tool_calls")},
     })
 
 
