@@ -1,0 +1,107 @@
+{
+  "note": "finish_reason normalized: 'length' iff completion hit the 128-token cap. T-A field is the sglang meta_info; T-E/R4 derived from completion_tokens.",
+  "arms": {
+    "t_a_trusted_sglang_base": {
+      "file": "/home/liuyancheng/c2kv/outputs_lyc/r3_discrimination/t_e/full_trusted/t_a_generations.jsonl",
+      "rows_total": 48,
+      "rows_valid": 48,
+      "rows_skipped": 0,
+      "unique_qids": 48,
+      "duplicate_qids": 0,
+      "finish_reason": {
+        "length": 31,
+        "stop": 17
+      },
+      "completion_tokens": {
+        "min": 28,
+        "max": 128,
+        "at_cap_128": 31,
+        "hist": {
+          "28": 1,
+          "29": 2,
+          "32": 1,
+          "48": 1,
+          "55": 2,
+          "56": 1,
+          "57": 1,
+          "58": 1,
+          "68": 2,
+          "89": 1,
+          "98": 1,
+          "116": 1,
+          "119": 1,
+          "127": 1,
+          "128": 31
+        }
+      }
+    },
+    "t_e_c2kv_checkpoint250": {
+      "file": "/home/liuyancheng/c2kv/outputs_lyc/r3_discrimination/t_e/t_e_c2kv_r4.jsonl",
+      "rows_total": 48,
+      "rows_valid": 48,
+      "rows_skipped": 0,
+      "unique_qids": 48,
+      "duplicate_qids": 0,
+      "finish_reason": {
+        "stop": 21,
+        "length": 27
+      },
+      "completion_tokens": {
+        "min": 8,
+        "max": 128,
+        "at_cap_128": 27,
+        "hist": {
+          "8": 1,
+          "18": 1,
+          "19": 1,
+          "24": 1,
+          "34": 1,
+          "41": 1,
+          "43": 1,
+          "50": 2,
+          "54": 1,
+          "59": 2,
+          "75": 1,
+          "91": 1,
+          "101": 1,
+          "108": 1,
+          "122": 2,
+          "124": 1,
+          "127": 2,
+          "128": 27
+        }
+      }
+    },
+    "r4_full_checkpoint250": {
+      "file": "/home/liuyancheng/c2kv/outputs_lyc/r4_closure/full_76k/r4_full_76k.jsonl",
+      "rows_total": 48,
+      "rows_valid": 48,
+      "rows_skipped": 0,
+      "unique_qids": 48,
+      "duplicate_qids": 0,
+      "finish_reason": {
+        "length": 35,
+        "stop": 13
+      },
+      "completion_tokens": {
+        "min": 29,
+        "max": 128,
+        "at_cap_128": 35,
+        "hist": {
+          "29": 1,
+          "48": 1,
+          "51": 1,
+          "55": 1,
+          "59": 2,
+          "62": 1,
+          "68": 2,
+          "74": 1,
+          "77": 1,
+          "78": 1,
+          "89": 1,
+          "128": 35
+        }
+      }
+    }
+  }
+}
