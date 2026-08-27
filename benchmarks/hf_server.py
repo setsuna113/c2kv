@@ -117,11 +117,12 @@ class GistEntry:
 
 
 class C2KVServer:
-    def __init__(self, model_path: str, device: str):
+    def __init__(self, model_path: str, device: str,
+                 tokenizer_path: Optional[str] = None):
         self.device = device
         self.tokenizer = __import__("transformers").AutoTokenizer.from_pretrained(
-            model_path, trust_remote_code=True, local_files_only=True,
-            padding_side="right",
+            tokenizer_path or model_path, trust_remote_code=True,
+            local_files_only=True, padding_side="right",
         )
         config_class, model_class = get_model_class(model_path, "qkv")
         self.model = model_class.from_pretrained(
@@ -489,10 +490,14 @@ def main(argv=None):
     global SERVER
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model-path", required=True)
+    parser.add_argument("--tokenizer", default=None,
+                        help="defaults to --model-path; pass the BASE model "
+                        "dir when the checkpoint's tokenizer_config carries "
+                        "extra_special_tokens as a list")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=34000)
     args = parser.parse_args(argv)
-    SERVER = C2KVServer(args.model_path, "npu")
+    SERVER = C2KVServer(args.model_path, "npu", tokenizer_path=args.tokenizer)
     app.run(host=args.host, port=args.port, threaded=False, debug=False)
 
 
