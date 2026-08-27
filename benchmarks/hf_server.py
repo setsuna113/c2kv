@@ -103,10 +103,7 @@ class C2KVServer:
         )
         input_ids = tokenized["input_ids"].to(self.device)
         attention_mask = tokenized["attention_mask"].to(self.device)
-        # one row grid: (1, 1, L)
-        if input_ids.dim() == 2:
-            input_ids = input_ids.unsqueeze(1)
-            attention_mask = attention_mask.unsqueeze(1)
+        # repo's HF generate_gist expects (batch, seqlen)
         L = input_ids.shape[-1]
         if L > MAX_DOC_LENGTH:  # chunk into <=768-token docs, cat gists after
             chunks = []
@@ -280,10 +277,11 @@ class C2KVServer:
         keys = []
         values = []
         for i, layer in enumerate(entry.keys):
-            k = layer
+            # rotate_k_cache_rope expects (heads, seq, dim); stored keys are
+            # (1, heads, seq, dim)
             k = rotate_k_cache_rope(
-                k, logical_start, self.rope_theta, self.rope_type
-            )
+                layer[0], logical_start, self.rope_theta, self.rope_type
+            ).unsqueeze(0)
             keys.append(k)
             values.append(entry.values[i])
         if cache is None:
@@ -317,8 +315,11 @@ def extract():
         )
         return jsonify(result)
     except Exception as error:  # noqa: BLE001
-        return jsonify({"success": False, "error": str(error), "key_hash": "",
-                        "gist_len": 0, "original_seq_len": 0})
+        import traceback
+
+        return jsonify({"success": False,
+                        "error": f"{error}\n{traceback.format_exc()}",
+                        "key_hash": "", "gist_len": 0, "original_seq_len": 0})
 
 
 @app.route("/v1/chat/completions", methods=["POST"])
@@ -333,7 +334,10 @@ def chat_completions():
             tools=data.get("tools"),
         )
     except Exception as error:  # noqa: BLE001
-        return jsonify({"object": "error", "message": str(error)}), 500
+        import traceback
+
+        return jsonify({"object": "error",
+                        "message": f"{error}\n{traceback.format_exc()}"}), 500
     if "error" in result:
         return jsonify({"object": "error", "message": result["error"]}), 400
     return jsonify({

@@ -57,10 +57,11 @@ REQUEST_LOG_PATH = ""
 _log_lock = threading.Lock()
 
 
-def _http_json(url: str, payload: Dict[str, Any], timeout: int) -> Dict[str, Any]:
+def _http_json(base_url: str, path: str, payload: Dict[str, Any], timeout: int) -> Dict[str, Any]:
     body = json.dumps(payload).encode("utf-8")
     req = urlrequest.Request(
-        url, data=body, headers={"Content-Type": "application/json"}, method="POST"
+        f"{base_url.rstrip('/')}{path}", data=body,
+        headers={"Content-Type": "application/json"}, method="POST",
     )
     with urlrequest.urlopen(req, timeout=timeout) as resp:
         return json.loads(resp.read().decode("utf-8"))
