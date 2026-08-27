@@ -1706,6 +1706,11 @@ D_INTERVENE_MODES = {
     "d_corr_recompute",
     "d_corr_all",
     "d_sham_mech",
+    # Transfer-manual A1/A2 exploratory arms (2026-08-28):
+    "d_re_only",     # A1: corr_re without the R_k append — isolates the
+                     # downstream-recompute contribution from the erratum.
+    "d_corr_text",   # A2: erratum as TEXT — doc k* prefilled verbatim after
+                     # the gist prefix instead of KV transplantation.
 }
 
 
@@ -1830,7 +1835,7 @@ def _build_d_intervene_prefix(
     # would silently return an unrotated cache (rope_reposition.py:48).
     assert doc_logical_start > 0, "doc k* must start after the system prefix"
 
-    if mode == "d_corr_recompute":
+    if mode in ("d_corr_recompute", "d_re_only"):
         grid = _grid_from_doc_ids(doc_ids[: k_star + 1], args.max_doc_length, args.max_doc_num)
     else:
         grid = context_input_ids
@@ -1874,6 +1879,12 @@ def _build_d_intervene_prefix(
         d_sham_tokens = len(sham_ids)
         del sham_cache
         _clear_device_cache(args.device_type)
+    elif mode in ("d_re_only", "d_corr_text"):
+        # A1 d_re_only: no raw span at all — the only intervention vs. plain
+        #   c2kv-on-docs-0..k* is the downstream recompute (below).
+        # A2 d_corr_text: the erratum is prefilled as TEXT after the gist
+        #   prefix (below), so no KV slice is transplanted here either.
+        pass
     else:
         if mode == "d_corr_all":
             corr_docs = list(range(n_docs))
@@ -1912,7 +1923,23 @@ def _build_d_intervene_prefix(
         del span_kv
         _clear_device_cache(args.device_type)
 
-    if mode == "d_corr_recompute":
+    if mode == "d_corr_text":
+        # A2: doc k* text prefilled verbatim AFTER the full-grid gist prefix,
+        # positions continuing at the end of the (raw-counted) history —
+        # the layout matches d_corr's erratum slot, but the erratum is text
+        # conditioned on the gist prefix rather than transplanted KV that was
+        # prefilled against the ORIGINAL raw context.
+        text_input_ids = torch.tensor([doc_ids[k_star]], dtype=torch.long, device=model.device)
+        prefix_cache, added, corr_slice_sec = _prefill_tokens_with_cache(
+            model,
+            text_input_ids,
+            past_key_values=prefix_cache,
+            past_length=system_length + doc_tokens,
+            attn_impl=args.generate_attn_impl,
+        )
+        d_corr_span_tokens = added
+
+    if mode in ("d_corr_recompute", "d_re_only"):
         for doc_index in range(k_star + 1, n_docs):
             doc_input_ids = torch.tensor([doc_ids[doc_index]], dtype=torch.long, device=model.device)
             prefix_cache, added, elapsed = _prefill_tokens_with_cache_maybe_gist(

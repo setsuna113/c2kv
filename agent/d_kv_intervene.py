@@ -66,9 +66,13 @@ ARM_MODES = {
     "full": "full",
     "corr_all": "d_corr_all",
     "sham_mech": "d_sham_mech",
+    # Transfer-manual A1/A2 exploratory arms (2026-08-28)
+    "re_only": "d_re_only",
+    "corr_text": "d_corr_text",
 }
 PLAN_REQUIRED_ARMS = {"sham"}
 PLAN_USING_ARMS = {"sham", "corr", "corr_re", "corr_all", "sham_mech"}
+# d_re_only and d_corr_text read no plan payload and are not prereg arms.
 DOWNSTREAM_ARMS = {"none", "sham", "corr_re"}
 DOWNSTREAM_MAX_TURNS = 3
 # Structural offset-0 fields the continuation rows re-carry so per-row cost
