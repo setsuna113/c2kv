@@ -1700,6 +1700,10 @@ def _build_c2kv_anchor_prefix(
 # from the model itself.
 D_INTERVENE: Dict[str, Dict[str, Any]] = {}
 
+# K1: erratum block-selection policy, overridable by the driver (median is
+# the prereg default; see _build_d_intervene_prefix).
+CORR_K_POLICY = "median"
+
 D_INTERVENE_MODES = {
     "d_sham_neutral",
     "d_corr",
@@ -1808,10 +1812,25 @@ def _build_d_intervene_prefix(
     n_docs = len(doc_ids)
     if n_docs == 0:
         return None, "d_no_history_docs"
-    k_star = (n_docs - 1) // 2
+    # K1 (transfer manual): which history block the erratum targets.
+    # median keeps the prereg default; last tests recency; offset:<j> pins a
+    # block explicitly (for oracle sweeps driven from outside).
+    policy = str(CORR_K_POLICY)
+    if policy == "median":
+        k_star = (n_docs - 1) // 2
+    elif policy == "last":
+        k_star = n_docs - 1
+    elif policy.startswith("offset:"):
+        k_star = int(policy.split(":", 1)[1])
+        if not 0 <= k_star < n_docs:
+            return None, f"d_k_policy_offset_oob:{k_star}/{n_docs}"
+    else:
+        return None, f"d_k_policy_unknown:{policy}"
     plan = plan or {}
     planned_k = plan.get("k_star")
-    if planned_k is not None and int(planned_k) != k_star:
+    # The frozen plans pin k*=median; alternative K1 policies deliberately
+    # target a different block, so the pin only guards the prereg default.
+    if policy == "median" and planned_k is not None and int(planned_k) != k_star:
         return None, f"d_plan_k_star_mismatch:{int(planned_k)}!={k_star}"
 
     system_ids = _chat_template_ids(

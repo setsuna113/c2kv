@@ -644,6 +644,9 @@ def evaluate(args: argparse.Namespace) -> None:
             spans.sort(key=lambda item: item[0])
 
     HH.D_INTERVENE = _intervene_table(frozen["plan"], qids)
+    HH.CORR_K_POLICY = args.corr_k_policy
+    if args.corr_k_policy != "median":
+        logger.info("K1 corr_k_policy=%s (plan k* pin bypassed)", args.corr_k_policy)
     if args.arm in PLAN_REQUIRED_ARMS:
         without_payload = [q for q in qids if not HH.D_INTERVENE.get(q, {}).get("sham_token_ids")]
         if without_payload:
@@ -753,6 +756,11 @@ def evaluate(args: argparse.Namespace) -> None:
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--arm", choices=sorted(ARM_MODES), required=True)
+    parser.add_argument(
+        "--corr_k_policy",
+        default="median",
+        help="K1 erratum block selection: median (prereg default), last, or offset:<j>",
+    )
     parser.add_argument("--manifest", default="./configs/bdf_pilot/d_cw_manifest.json")
     parser.add_argument("--bundles", default="./results/d/bundles_batch_tf.jsonl")
     parser.add_argument("--sham_plan", default="./configs/bdf_pilot/d_sham_plan.json")
