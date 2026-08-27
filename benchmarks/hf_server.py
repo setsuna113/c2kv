@@ -1,0 +1,369 @@
+"""OpenAI-compatible C2KV server on the HF/transformers path.
+
+Motivation: the SGLang fork's c2kv serving path does not run on this NPU
+software stack (torch 2.8 + current CANN); this server implements the same
+protocol (`/v1/chat/completions` + `/v1/c2kv/extract` + `c2kv_key_hash`)
+directly on the repo's HF primitives — the exact machinery that produced the
+D-experiment results (`agent/eval_agent_history_c2kv.py`,
+`python/inference/expr_c2kv.py`), so arm semantics are identical to the
+teacher-forced line and repair arms can later reuse the same KV operations.
+
+Layout rules (mirroring benchmarks/proxy.py + the history harness):
+  * system message: raw prefill (position 0..)
+  * message with `c2kv_key_hash`: gist KV layer-catted at the current cache
+    end; logical positions advance by the ORIGINAL token count (RoPE for the
+    gist keys was already applied at extract time with prefix_length=0 and is
+    re-rotated here by the logical start — see rotate_k_cache_rope).
+  * plain message: sequential raw prefill with continuing position_ids.
+  * generation: mock zero tokens occupy the cache slots; positions continue
+    from the logical length; `use_gist` is True iff the turn directly follows
+    gist blocks (harness c2kv-mode behavior), else False.
+
+Single model instance behind a lock; run one request at a time
+(Flask `threaded=False`).
+
+Usage (c2kv env on the NPU server):
+  python benchmarks/hf_server.py --model-path <ckpt> --host 127.0.0.1 --port 34000
+"""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import threading
+import time
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+
+import torch
+from flask import Flask, jsonify, request
+
+REPO = Path(__file__).resolve().parents[1]
+import sys
+
+sys.path.insert(0, str(REPO / "python"))
+sys.path.insert(0, str(REPO / "python" / "inference"))
+sys.path.insert(0, str(REPO / "agent"))
+
+from models import get_model_class  # noqa: E402
+from models.gist_utils import blend_gist_key_values  # noqa: E402
+from train.train_data_multiturn import _chat_template_ids  # noqa: E402
+from inference.reuse_pipeline import tokenize_for_reuse  # noqa: E402
+from inference.rope_reposition import rotate_k_cache_rope  # noqa: E402
+
+app = Flask(__name__)
+
+GIST_IMPL = "npu_fusion_attention"  # downgraded to eager automatically off-NPU
+MAX_DOC_LENGTH = 768
+
+
+@dataclass
+class GistEntry:
+    keys: List[torch.Tensor]   # per-layer (1, heads, gist_len, head_dim)
+    values: List[torch.Tensor]
+    gist_len: int
+    original_len: int
+    role: str
+    ratio: int
+
+
+class C2KVServer:
+    def __init__(self, model_path: str, device: str):
+        self.device = device
+        self.tokenizer = __import__("transformers").AutoTokenizer.from_pretrained(
+            model_path, trust_remote_code=True, local_files_only=True,
+            padding_side="right",
+        )
+        config_class, model_class = get_model_class(model_path, "qkv")
+        self.model = model_class.from_pretrained(
+            model_path, trust_remote_code=True, local_files_only=True,
+            device_map={"": device}, dtype=torch.bfloat16,
+            attn_implementation="eager",
+        )
+        self.model.eval()
+        self._set_impl(GIST_IMPL)
+        self.entries: Dict[str, GistEntry] = {}
+        self.lock = threading.Lock()
+        cfg = self.model.config
+        self.dynamic_ratio = getattr(cfg, "gist_type", "") == "dynamic-interleave"
+        self.rope_theta = getattr(cfg, "rope_theta", 1000000.0)
+        self.rope_type = getattr(getattr(cfg, "rope_scaling", None), "rope_type", None)
+
+    def _set_impl(self, impl: str):
+        self.model.config._attn_implementation = impl
+        inner = getattr(self.model, "model", None)
+        if inner is not None and hasattr(inner, "config"):
+            inner.config._attn_implementation = impl
+
+    # ---------------- extract ----------------
+    def extract(self, text: str, role: str, ratio: int) -> Dict[str, Any]:
+        tokenized = tokenize_for_reuse(
+            self.tokenizer, [text], keep_bos=False, role=role
+        )
+        input_ids = tokenized["input_ids"].to(self.device)
+        attention_mask = tokenized["attention_mask"].to(self.device)
+        # one row grid: (1, 1, L)
+        if input_ids.dim() == 2:
+            input_ids = input_ids.unsqueeze(1)
+            attention_mask = attention_mask.unsqueeze(1)
+        L = input_ids.shape[-1]
+        if L > MAX_DOC_LENGTH:  # chunk into <=768-token docs, cat gists after
+            chunks = []
+            for start in range(0, L, MAX_DOC_LENGTH):
+                chunks.append(self._extract_grid(
+                    input_ids[..., start:start + MAX_DOC_LENGTH],
+                    attention_mask[..., start:start + MAX_DOC_LENGTH], ratio,
+                ))
+            keys = [torch.cat([c["keys"][i] for c in chunks], dim=-2)
+                    for i in range(len(chunks[0]["keys"]))]
+            values = [torch.cat([c["values"][i] for c in chunks], dim=-2)
+                      for i in range(len(chunks[0]["values"]))]
+            gist_len = sum(c["gist_len"] for c in chunks)
+            original_len = sum(c["original_len"] for c in chunks)
+        else:
+            out = self._extract_grid(input_ids, attention_mask, ratio)
+            keys, values, gist_len, original_len = (
+                out["keys"], out["values"], out["gist_len"], out["original_len"])
+        key_hash = hashlib.sha256(
+            f"{role}\x00{ratio}\x00{text}".encode("utf-8")
+        ).hexdigest()
+        self.entries[key_hash] = GistEntry(
+            keys=keys, values=values, gist_len=gist_len,
+            original_len=original_len, role=role, ratio=ratio,
+        )
+        return {
+            "key_hash": key_hash, "gist_len": gist_len,
+            "original_seq_len": original_len, "success": True, "error": None,
+        }
+
+    def _extract_grid(self, input_ids, attention_mask, ratio: int) -> Dict[str, Any]:
+        original = self.model
+        with torch.inference_mode():
+            outputs, gist_mask, pos_ids = original.model.generate_gist(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                **({"ratio": ratio} if self.dynamic_ratio else {}),
+            )
+            gist_len = int(gist_mask.shape[-1])
+            pos_ids = pos_ids[:, -gist_len:]
+            gist_cache, _ = blend_gist_key_values(
+                original.config, [outputs.past_key_values], [gist_mask],
+                [pos_ids], original.model.rotary_emb, prefix_length=0,
+            )
+        keys = [layer.keys for layer in gist_cache.layers]
+        values = [layer.values for layer in gist_cache.layers]
+        original_len = int(input_ids.shape[-1])
+        return {"keys": keys, "values": values,
+                "gist_len": gist_len, "original_len": original_len}
+
+    # ---------------- chat ----------------
+    def chat(self, messages: List[Dict[str, Any]], max_new_tokens: int,
+             temperature: float, tools: Optional[List[Dict[str, Any]]] = None):
+        t0 = time.perf_counter()
+        system_messages = [m for m in messages if m.get("role") == "system"]
+        body = [m for m in messages if m.get("role") != "system"]
+        if not body:
+            return {"error": "no non-system messages"}
+        system_text = "\n".join(m.get("content") or "" for m in system_messages)
+
+        with self.lock, torch.inference_mode():
+            # 1. system prefill (tools render inside the system block, as in
+            # the harness's _prefill_system)
+            cache = None
+            logical = 0
+            if system_text or tools:
+                system_ids = _chat_template_ids(
+                    self.tokenizer,
+                    [{"role": "system", "content": system_text}],
+                    tools=tools, keep_bos=True,
+                )
+                cache, added = self._prefill_append(cache, system_ids, 0, use_gist=False)
+                logical += added
+
+            # 2. body[:-1]: gist refs and raw messages interleaved
+            follows_gist = False
+            for message in body[:-1]:
+                key_hash = message.get("c2kv_key_hash")
+                if key_hash:
+                    entry = self.entries.get(key_hash)
+                    if entry is None:
+                        return {"error": f"C2KV cache miss: {key_hash}"}
+                    cache = self._append_gist(cache, entry, logical)
+                    logical += entry.original_len
+                    follows_gist = True
+                    continue
+                ids = _chat_template_ids(self.tokenizer, [message])
+                cache, added = self._prefill_append(cache, ids, logical, use_gist=False)
+                logical += added
+                follows_gist = False
+
+            # 3. final message + generation (harness _generate_with_prefix
+            # shape: mock zeros occupy the cache slots, positions continue
+            # from the logical length)
+            last = body[-1]
+            if last.get("c2kv_key_hash"):
+                key_hash = last["c2kv_key_hash"]
+                entry = self.entries.get(key_hash)
+                if entry is None:
+                    return {"error": f"C2KV cache miss: {key_hash}"}
+                cache = self._append_gist(cache, entry, logical)
+                logical += entry.original_len
+                prompt_ids = _chat_template_ids(
+                    self.tokenizer, [{"role": "user", "content": ""}],
+                    add_generation_prompt=True,
+                )
+                follows_gist = True
+            else:
+                prompt_ids = _chat_template_ids(
+                    self.tokenizer, [last], add_generation_prompt=True
+                )
+            prompt_input_ids = torch.tensor(
+                [prompt_ids], dtype=torch.long, device=self.device
+            )
+            cache_len = cache.get_seq_length()
+            mock = prompt_input_ids.new_zeros((1, cache_len))
+            input_ids = torch.cat([mock, prompt_input_ids], dim=1)
+            position_ids = torch.arange(
+                logical, logical + prompt_input_ids.shape[1],
+                dtype=torch.long, device=self.device,
+            ).unsqueeze(0)
+            self._set_impl(GIST_IMPL)
+            t_gen = time.perf_counter()
+            outputs = self.model.generate(
+                input_ids=input_ids,
+                attention_mask=torch.ones_like(input_ids),
+                position_ids=position_ids,
+                past_key_values=cache,
+                max_new_tokens=max_new_tokens,
+                do_sample=temperature > 0,
+                temperature=max(temperature, 1e-4),
+                pad_token_id=self.tokenizer.eos_token_id,
+                use_gist=follows_gist,
+            )
+            generate_sec = time.perf_counter() - t_gen
+            new_tokens = outputs[0][input_ids.shape[1]:]
+            text = self.tokenizer.decode(new_tokens, skip_special_tokens=True)
+        return {
+            "content": text,
+            "generated_tokens": int(new_tokens.shape[0]),
+            "prompt_tokens": len(prompt_ids),
+            "cache_tokens": cache_len,
+            "logical_tokens": logical,
+            "generate_sec": round(generate_sec, 4),
+            "wall_sec": round(time.perf_counter() - t0, 4),
+        }
+
+    def _prefill_append(self, cache, token_ids: List[int], logical_start: int,
+                        use_gist: bool) -> Tuple[Any, int]:
+        input_ids = torch.tensor([token_ids], dtype=torch.long, device=self.device)
+        past_length = 0 if cache is None else cache.get_seq_length()
+        attention_mask = torch.ones(
+            1, past_length + input_ids.shape[1], device=self.device,
+            dtype=torch.long,
+        )
+        position_ids = torch.arange(
+            logical_start, logical_start + input_ids.shape[1], device=self.device
+        ).unsqueeze(0)
+        outputs = self.model(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            position_ids=position_ids,
+            past_key_values=cache,
+            use_cache=True,
+            use_gist=use_gist,
+            logits_to_keep=1,
+        )
+        return outputs.past_key_values, input_ids.shape[1]
+
+    def _append_gist(self, cache, entry: GistEntry, logical_start: int):
+        keys = []
+        values = []
+        for i, layer in enumerate(entry.keys):
+            k = layer
+            k = rotate_k_cache_rope(
+                k, logical_start, self.rope_theta, self.rope_type
+            )
+            keys.append(k)
+            values.append(entry.values[i])
+        if cache is None:
+            from transformers.cache_utils import DynamicCache
+
+            merged = DynamicCache()
+            for k, v in zip(keys, values):
+                merged.update(k, v, layer_idx=len(merged.layers))
+            return merged
+        for i, layer in enumerate(cache.layers):
+            layer.keys = torch.cat([layer.keys, keys[i]], dim=-2)
+            layer.values = torch.cat([layer.values, values[i]], dim=-2)
+        return cache
+
+
+SERVER: Optional[C2KVServer] = None
+
+
+@app.route("/health", methods=["GET"])
+def health():
+    return jsonify({"status": "ok"})
+
+
+@app.route("/v1/c2kv/extract", methods=["POST"])
+def extract():
+    data = request.get_json(force=True)
+    try:
+        result = SERVER.extract(
+            str(data.get("text") or ""), str(data.get("role") or "user"),
+            int(data.get("compression_ratio") or 8),
+        )
+        return jsonify(result)
+    except Exception as error:  # noqa: BLE001
+        return jsonify({"success": False, "error": str(error), "key_hash": "",
+                        "gist_len": 0, "original_seq_len": 0})
+
+
+@app.route("/v1/chat/completions", methods=["POST"])
+def chat_completions():
+    data = request.get_json(force=True)
+    try:
+        result = SERVER.chat(
+            messages=data.get("messages") or [],
+            max_new_tokens=int(data.get("max_completion_tokens")
+                               or data.get("max_tokens") or 256),
+            temperature=float(data.get("temperature") or 0.0),
+            tools=data.get("tools"),
+        )
+    except Exception as error:  # noqa: BLE001
+        return jsonify({"object": "error", "message": str(error)}), 500
+    if "error" in result:
+        return jsonify({"object": "error", "message": result["error"]}), 400
+    return jsonify({
+        "id": "c2kv-hf",
+        "object": "chat.completion",
+        "model": data.get("model") or "c2kv-agent",
+        "choices": [{
+            "index": 0,
+            "message": {"role": "assistant", "content": result["content"]},
+            "finish_reason": "stop",
+        }],
+        "usage": {
+            "prompt_tokens": result["prompt_tokens"],
+            "completion_tokens": result["generated_tokens"],
+            "total_tokens": result["prompt_tokens"] + result["generated_tokens"],
+        },
+        "c2kv": {k: v for k, v in result.items() if k != "content"},
+    })
+
+
+def main(argv=None):
+    global SERVER
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--model-path", required=True)
+    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--port", type=int, default=34000)
+    args = parser.parse_args(argv)
+    SERVER = C2KVServer(args.model_path, "npu")
+    app.run(host=args.host, port=args.port, threaded=False, debug=False)
+
+
+if __name__ == "__main__":
+    main()
