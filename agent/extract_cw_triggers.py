@@ -467,11 +467,17 @@ def _freeze_manifest(
     bound: bool,
     divergence: Optional[Dict[str, int]] = None,
 ) -> Dict[str, Any]:
+    transitions = getattr(args, "transitions", "C->W")
+    is_prereg_trigger = transitions == "C->W"
     return {
         "description": (
             "Frozen C->W trigger manifest for the task-D pilot. n_base_paired is the "
             "level-1 denominator (qids scoreable in BOTH arms)."
+            if is_prereg_trigger
+            else f"Exploratory addendum set (transitions={transitions}); NOT the prereg "
+            "trigger manifest. n_base_paired counts qids scoreable in BOTH battery arms."
         ),
+        "transitions_emitted": transitions,
         "rule_version": RULE_VERSION,
         "batch": args.batch,
         "s_metric": args.s_metric,
@@ -539,6 +545,17 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--chunk_policy", required=True)
     parser.add_argument("--seed", type=int, default=20260815)
     parser.add_argument("--decode", default="greedy")
+    parser.add_argument(
+        "--transitions",
+        default="C->W",
+        help=(
+            "Comma-separated transition cells to emit bundles for, drawn from "
+            + ",".join(TRANSITIONS)
+            + ". Default 'C->W' is the frozen prereg trigger rule; any other value "
+            "produces an exploratory addendum set (e.g. 'C->C,W->C' for the "
+            "harm-check stratum) and must write to new, non-overlapping output files."
+        ),
+    )
     parser.add_argument("--bind_docs", action="store_true")
     parser.add_argument("--dataset_path", default="./datasets/agent-llm-traces")
     parser.add_argument("--tokenizer", default="./models/Qwen3-4B-Instruct-2507")
@@ -549,6 +566,12 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
 
 
 def run(args: argparse.Namespace) -> Dict[str, Any]:
+    allowed_transitions = {t.strip() for t in args.transitions.split(",") if t.strip()}
+    invalid = allowed_transitions - set(TRANSITIONS)
+    if not allowed_transitions or invalid:
+        raise SystemExit(
+            f"--transitions must be a comma-separated subset of {TRANSITIONS}; got {args.transitions!r}"
+        )
     full, full_stats = _load_rows_by_qid(args.full_rows, args.full_condition, "full")
     compressed, compressed_stats = _load_rows_by_qid(
         args.compressed_rows, args.compressed_condition, "compressed"
@@ -579,7 +602,7 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
                 divergence["n_call_disagreements"] += 1
         transition = _transition(full_score["correct"], compressed_score["correct"])
         census[transition] += 1
-        if transition != "C->W":
+        if transition not in allowed_transitions:
             continue
         bundles.append(
             _bundle_row(qid, full[qid], compressed[qid], full_score, compressed_score, args)

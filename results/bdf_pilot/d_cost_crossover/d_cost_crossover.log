@@ -1,0 +1,154 @@
+/home/liuyancheng/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/liuyancheng/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0/aarch64-linux/ascend_ops_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/liuyancheng/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/liuyancheng/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0/aarch64-linux/ascend_ops_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+08/24/2026 01:35:00 - INFO - eval_agent_history_c2kv - Loading tokenizer from /home/liuyancheng/c2kv/models/Qwen3-4B-Instruct-2507 use_fast=True
+08/24/2026 01:38:04 - INFO - bench_d_cost_crossover - source: 19586 examples, selection_skips={}
+08/24/2026 01:38:04 - INFO - bench_d_cost_crossover - Loading model /home/liuyancheng/c2kv/outputs_lyc/g_joint/fixed_joint (mode=c2kv, attn=eager)
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+Loading weights:   0%|          | 0/507 [00:00<?, ?it/s]Loading weights:  26%|██▌       | 130/507 [00:00<00:00, 1246.61it/s]Loading weights:  50%|█████     | 256/507 [00:00<00:00, 1236.80it/s]Loading weights:  75%|███████▌  | 382/507 [00:00<00:00, 1222.76it/s]Loading weights: 100%|██████████| 507/507 [00:00<00:00, 1241.48it/s]
+08/24/2026 01:38:07 - INFO - bench_d_cost_crossover - length=2048: 20/20 contexts (harness_fit)
+08/24/2026 01:38:25 - INFO - bench_d_cost_crossover - length=2048 [1/20] qid=02775202aead_d542d6c2:0 full=0.802s marginal=0.872s
+08/24/2026 01:38:36 - INFO - bench_d_cost_crossover - length=2048 [2/20] qid=02775202aead_d542d6c2:1 full=0.803s marginal=0.760s
+08/24/2026 01:38:48 - INFO - bench_d_cost_crossover - length=2048 [3/20] qid=02775202aead_d542d6c2:10 full=0.803s marginal=0.856s
+08/24/2026 01:39:00 - INFO - bench_d_cost_crossover - length=2048 [4/20] qid=02775202aead_d542d6c2:11 full=0.802s marginal=0.873s
+08/24/2026 01:39:12 - INFO - bench_d_cost_crossover - length=2048 [5/20] qid=02775202aead_d542d6c2:13 full=0.804s marginal=0.785s
+08/24/2026 01:39:23 - INFO - bench_d_cost_crossover - length=2048 [6/20] qid=02775202aead_d542d6c2:14 full=0.802s marginal=0.786s
+08/24/2026 01:39:36 - INFO - bench_d_cost_crossover - length=2048 [7/20] qid=02775202aead_d542d6c2:15 full=0.804s marginal=0.873s
+08/24/2026 01:39:48 - INFO - bench_d_cost_crossover - length=2048 [8/20] qid=02775202aead_d542d6c2:16 full=0.801s marginal=0.923s
+08/24/2026 01:40:00 - INFO - bench_d_cost_crossover - length=2048 [9/20] qid=02775202aead_d542d6c2:3 full=0.803s marginal=0.831s
+08/24/2026 01:40:12 - INFO - bench_d_cost_crossover - length=2048 [10/20] qid=02775202aead_d542d6c2:4 full=0.804s marginal=0.889s
+08/24/2026 01:40:25 - INFO - bench_d_cost_crossover - length=2048 [11/20] qid=02775202aead_d542d6c2:5 full=0.802s marginal=0.896s
+08/24/2026 01:40:37 - INFO - bench_d_cost_crossover - length=2048 [12/20] qid=02775202aead_d542d6c2:8 full=0.803s marginal=0.874s
+08/24/2026 01:40:49 - INFO - bench_d_cost_crossover - length=2048 [13/20] qid=02775202aead_d6a0d05c:1 full=0.804s marginal=0.742s
+08/24/2026 01:41:00 - INFO - bench_d_cost_crossover - length=2048 [14/20] qid=02775202aead_d6a0d05c:10 full=0.803s marginal=0.727s
+08/24/2026 01:41:11 - INFO - bench_d_cost_crossover - length=2048 [15/20] qid=02775202aead_d6a0d05c:11 full=0.802s marginal=0.734s
+08/24/2026 01:41:23 - INFO - bench_d_cost_crossover - length=2048 [16/20] qid=02775202aead_d6a0d05c:13 full=0.801s marginal=0.727s
+08/24/2026 01:41:34 - INFO - bench_d_cost_crossover - length=2048 [17/20] qid=02775202aead_d6a0d05c:14 full=0.803s marginal=0.711s
+08/24/2026 01:41:46 - INFO - bench_d_cost_crossover - length=2048 [18/20] qid=02775202aead_d6a0d05c:15 full=0.802s marginal=0.730s
+08/24/2026 01:41:57 - INFO - bench_d_cost_crossover - length=2048 [19/20] qid=02775202aead_d6a0d05c:17 full=0.803s marginal=0.733s
+08/24/2026 01:42:09 - INFO - bench_d_cost_crossover - length=2048 [20/20] qid=02775202aead_d6a0d05c:2 full=0.802s marginal=0.737s
+08/24/2026 01:42:14 - INFO - bench_d_cost_crossover - length=4096: 20/20 contexts (harness_fit)
+08/24/2026 01:42:41 - INFO - bench_d_cost_crossover - length=4096 [1/20] qid=02775202aead_d542d6c2:1 full=2.026s marginal=1.762s
+08/24/2026 01:43:00 - INFO - bench_d_cost_crossover - length=4096 [2/20] qid=02775202aead_d542d6c2:10 full=2.031s marginal=1.659s
+08/24/2026 01:43:17 - INFO - bench_d_cost_crossover - length=4096 [3/20] qid=02775202aead_d542d6c2:11 full=2.030s marginal=1.660s
+08/24/2026 01:43:36 - INFO - bench_d_cost_crossover - length=4096 [4/20] qid=02775202aead_d542d6c2:13 full=2.027s marginal=1.721s
+08/24/2026 01:43:54 - INFO - bench_d_cost_crossover - length=4096 [5/20] qid=02775202aead_d542d6c2:14 full=2.030s marginal=1.829s
+08/24/2026 01:44:13 - INFO - bench_d_cost_crossover - length=4096 [6/20] qid=02775202aead_d542d6c2:16 full=2.032s marginal=1.752s
+08/24/2026 01:44:31 - INFO - bench_d_cost_crossover - length=4096 [7/20] qid=02775202aead_d542d6c2:3 full=2.030s marginal=1.741s
+08/24/2026 01:44:49 - INFO - bench_d_cost_crossover - length=4096 [8/20] qid=02775202aead_d542d6c2:4 full=2.032s marginal=1.675s
+08/24/2026 01:45:07 - INFO - bench_d_cost_crossover - length=4096 [9/20] qid=02775202aead_d542d6c2:5 full=2.031s marginal=1.646s
+08/24/2026 01:45:25 - INFO - bench_d_cost_crossover - length=4096 [10/20] qid=02775202aead_d542d6c2:8 full=2.028s marginal=1.662s
+08/24/2026 01:45:43 - INFO - bench_d_cost_crossover - length=4096 [11/20] qid=02775202aead_d6a0d05c:1 full=2.030s marginal=1.638s
+08/24/2026 01:46:01 - INFO - bench_d_cost_crossover - length=4096 [12/20] qid=02775202aead_d6a0d05c:13 full=2.031s marginal=1.633s
+08/24/2026 01:46:19 - INFO - bench_d_cost_crossover - length=4096 [13/20] qid=02775202aead_d6a0d05c:14 full=2.030s marginal=1.534s
+08/24/2026 01:46:37 - INFO - bench_d_cost_crossover - length=4096 [14/20] qid=02775202aead_d6a0d05c:4 full=2.028s marginal=1.629s
+08/24/2026 01:46:55 - INFO - bench_d_cost_crossover - length=4096 [15/20] qid=02775202aead_d6a0d05c:7 full=2.031s marginal=1.599s
+08/24/2026 01:47:13 - INFO - bench_d_cost_crossover - length=4096 [16/20] qid=02775202aead_d6ab2710:6 full=2.031s marginal=1.586s
+08/24/2026 01:47:30 - INFO - bench_d_cost_crossover - length=4096 [17/20] qid=02775202aead_d6ab2710:8 full=2.030s marginal=1.583s
+08/24/2026 01:47:52 - INFO - bench_d_cost_crossover - length=4096 [18/20] qid=0380f9026ebe_12ace5f5:8 full=2.293s marginal=2.263s
+08/24/2026 01:48:13 - INFO - bench_d_cost_crossover - length=4096 [19/20] qid=0380f9026ebe_12ace5f5:9 full=2.293s marginal=2.240s
+08/24/2026 01:48:34 - INFO - bench_d_cost_crossover - length=4096 [20/20] qid=0380f9026ebe_1f6c1035:8 full=2.292s marginal=2.223s
+08/24/2026 01:49:33 - INFO - bench_d_cost_crossover - length=8192: 20/20 contexts (harness_fit)
+08/24/2026 01:50:27 - INFO - bench_d_cost_crossover - length=8192 [1/20] qid=0af085f1f0e5_4c549a8a:0 full=5.572s marginal=3.499s
+08/24/2026 01:51:02 - INFO - bench_d_cost_crossover - length=8192 [2/20] qid=0af085f1f0e5_4c549a8a:1 full=5.563s marginal=3.858s
+08/24/2026 01:51:36 - INFO - bench_d_cost_crossover - length=8192 [3/20] qid=0af085f1f0e5_4c549a8a:2 full=5.564s marginal=3.612s
+08/24/2026 01:52:09 - INFO - bench_d_cost_crossover - length=8192 [4/20] qid=0af085f1f0e5_4c549a8a:3 full=5.572s marginal=3.218s
+08/24/2026 01:52:45 - INFO - bench_d_cost_crossover - length=8192 [5/20] qid=0af085f1f0e5_4c549a8a:4 full=5.580s marginal=3.898s
+08/24/2026 01:53:18 - INFO - bench_d_cost_crossover - length=8192 [6/20] qid=0af085f1f0e5_4c549a8a:5 full=5.579s marginal=3.313s
+08/24/2026 01:53:53 - INFO - bench_d_cost_crossover - length=8192 [7/20] qid=0af085f1f0e5_64235234:4 full=5.568s marginal=3.827s
+08/24/2026 01:54:27 - INFO - bench_d_cost_crossover - length=8192 [8/20] qid=0af085f1f0e5_64235234:5 full=5.576s marginal=3.433s
+08/24/2026 01:55:02 - INFO - bench_d_cost_crossover - length=8192 [9/20] qid=0af085f1f0e5_64235234:6 full=5.565s marginal=3.463s
+08/24/2026 01:55:36 - INFO - bench_d_cost_crossover - length=8192 [10/20] qid=0af085f1f0e5_64235234:7 full=5.582s marginal=3.528s
+08/24/2026 01:56:11 - INFO - bench_d_cost_crossover - length=8192 [11/20] qid=0af085f1f0e5_64235234:8 full=5.572s marginal=4.101s
+08/24/2026 01:56:46 - INFO - bench_d_cost_crossover - length=8192 [12/20] qid=0af085f1f0e5_64235234:9 full=5.578s marginal=3.839s
+08/24/2026 01:57:22 - INFO - bench_d_cost_crossover - length=8192 [13/20] qid=0af085f1f0e5_8ef065f5:0 full=5.586s marginal=3.934s
+08/24/2026 01:57:57 - INFO - bench_d_cost_crossover - length=8192 [14/20] qid=0af085f1f0e5_8f4aff67:1 full=5.587s marginal=3.803s
+08/24/2026 01:58:32 - INFO - bench_d_cost_crossover - length=8192 [15/20] qid=0af085f1f0e5_8f4aff67:2 full=5.579s marginal=3.870s
+08/24/2026 01:59:07 - INFO - bench_d_cost_crossover - length=8192 [16/20] qid=0af085f1f0e5_b7cf8f2a:10 full=5.584s marginal=3.714s
+08/24/2026 01:59:42 - INFO - bench_d_cost_crossover - length=8192 [17/20] qid=0af085f1f0e5_b7cf8f2a:11 full=5.572s marginal=3.683s
+08/24/2026 02:00:17 - INFO - bench_d_cost_crossover - length=8192 [18/20] qid=0af085f1f0e5_b7cf8f2a:12 full=5.578s marginal=3.838s
+08/24/2026 02:00:51 - INFO - bench_d_cost_crossover - length=8192 [19/20] qid=0af085f1f0e5_b7cf8f2a:13 full=5.569s marginal=3.621s
+08/24/2026 02:01:26 - INFO - bench_d_cost_crossover - length=8192 [20/20] qid=0af085f1f0e5_b7cf8f2a:14 full=5.566s marginal=3.574s
+08/24/2026 03:30:54 - INFO - bench_d_cost_crossover - length=12288: 0/20 contexts (none)
+08/24/2026 03:31:03 - INFO - bench_d_cost_crossover - length=16384: 20/20 contexts (packed_768)
+Traceback (most recent call last):
+  File "/home/liuyancheng/c2kv-bdf/agent/bench_d_cost_crossover.py", line 627, in <module>
+    evaluate(parse_args())
+  File "/home/liuyancheng/c2kv-bdf/agent/bench_d_cost_crossover.py", line 578, in evaluate
+    run_bench(
+  File "/home/liuyancheng/c2kv-bdf/agent/bench_d_cost_crossover.py", line 456, in run_bench
+    _measure_full(model, context, system_cache, system_length, hargs)
+  File "/home/liuyancheng/c2kv-bdf/agent/bench_d_cost_crossover.py", line 219, in _measure_full
+    _, _, elapsed = HH._prefill_tokens_with_cache(
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/liuyancheng/envs/c2kv/lib/python3.11/site-packages/torch/utils/_contextlib.py", line 120, in decorate_context
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/home/liuyancheng/c2kv-bdf/agent/eval_agent_tool_definition_c2kv.py", line 274, in _prefill_tokens_with_cache
+    outputs = model(
+              ^^^^^^
+  File "/home/liuyancheng/envs/c2kv/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1775, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/liuyancheng/envs/c2kv/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1786, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/liuyancheng/envs/c2kv/lib/python3.11/site-packages/transformers/utils/generic.py", line 900, in wrapper
+    output = func(self, *args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/liuyancheng/c2kv-bdf/python/models/qwen3/modeling_qwen3.py", line 662, in forward
+    outputs: BaseModelOutputWithPast = self.model(
+                                       ^^^^^^^^^^^
+  File "/home/liuyancheng/envs/c2kv/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1775, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/liuyancheng/envs/c2kv/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1786, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/liuyancheng/envs/c2kv/lib/python3.11/site-packages/transformers/utils/generic.py", line 976, in wrapper
+    output = func(self, *args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/liuyancheng/envs/c2kv/lib/python3.11/site-packages/transformers/utils/output_capturing.py", line 248, in wrapper
+    outputs = func(self, *args, **kwargs)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/liuyancheng/c2kv-bdf/python/models/qwen3/modeling_qwen3.py", line 517, in forward
+    hidden_states = decoder_layer(
+                    ^^^^^^^^^^^^^^
+  File "/home/liuyancheng/envs/c2kv/lib/python3.11/site-packages/transformers/modeling_layers.py", line 93, in __call__
+    return super().__call__(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/liuyancheng/envs/c2kv/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1775, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/liuyancheng/envs/c2kv/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1786, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/liuyancheng/c2kv-bdf/python/models/qwen3/modeling_qwen3.py", line 377, in forward
+    hidden_states, _ = self.self_attn(
+                       ^^^^^^^^^^^^^^^
+  File "/home/liuyancheng/envs/c2kv/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1775, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/liuyancheng/envs/c2kv/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1786, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/liuyancheng/c2kv-bdf/python/models/qwen3/modeling_qwen3.py", line 271, in forward
+    attn_output, attn_weights = attention_interface(
+                                ^^^^^^^^^^^^^^^^^^^^
+  File "/home/liuyancheng/c2kv-bdf/python/models/qwen3/modeling_qwen3.py", line 181, in eager_attention_forward
+    attn_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32).to(query.dtype)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/liuyancheng/envs/c2kv/lib/python3.11/site-packages/torch/nn/functional.py", line 2135, in softmax
+    ret = input.softmax(dim, dtype=dtype)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+RuntimeError: NPU out of memory. Tried to allocate 37.17 GiB (NPU 0; 60.96 GiB total capacity; 29.09 GiB already allocated; 29.09 GiB current active; 30.68 GiB free; 29.85 GiB reserved in total by PyTorch) If reserved memory is >> allocated memory try setting max_split_size_mb to avoid fragmentation.
+[ERROR] 2026-08-24-03:31:28 (PID:3393445, Device:0, RankID:-1) ERR99999 UNKNOWN applicaiton exception
