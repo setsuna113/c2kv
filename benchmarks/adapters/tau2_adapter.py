@@ -70,32 +70,56 @@ def run(
     return collect(out_dir)
 
 
-def collect(out_dir: Path) -> Dict[str, Any]:
-    """Parse trajectories into unified rows.  Rewritten on first live run —
-    field names are pinned after inspecting one real trajectory file."""
+def collect(results_path: Path, domain: str = "airline") -> Dict[str, Any]:
+    """Parse a tau2 results.json into unified rows.
+
+    Verified against real trajectory files: simulations[i].messages carry
+    role/content/tool_calls (litellm already parsed our server's tool_calls),
+    reward_info.reward is the official semantic score.  Protocol columns are
+    recomputed with the shared checker against the domain tool pool.
+    """
+    import sys as _sys
+
+    _sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from metrics import protocol_columns_for_turn  # noqa: E402
+
+    tools: List[Dict[str, Any]] = []
+    try:
+        import tau2.registry as registry
+
+        env = registry.get_env_constructor(domain)()
+        tools = [
+            tool.openai_schema for tool in env.tools.get_tools().values()
+        ]
+    except Exception:  # noqa: BLE001 - protocol column degrades without pool
+        tools = []
+
+    data = json.loads(results_path.read_text(encoding="utf-8"))
     rows: List[Dict[str, Any]] = []
-    traj_dir = out_dir / "trajectories"
-    for path in sorted(traj_dir.glob("*.json*")):
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            continue
-        reward = data.get("reward")
-        task_id = data.get("task_id") or path.stem
-        tools = _task_tools(data)
+    for sim in data.get("simulations") or []:
         turns = [
             protocol_columns_for_turn(m, tools)
-            for m in data.get("messages") or []
+            for m in sim.get("messages") or []
             if m.get("role") == "assistant"
         ]
+        first_violations = [
+            t["first_violation"] for t in turns if t["first_violation"]
+        ]
+        reward_info = sim.get("reward_info") or {}
         rows.append(
             {
-                "task_id": task_id,
-                "semantic_score": float(reward) if reward is not None else None,
+                "task_id": str(sim.get("task_id")),
+                "semantic_score": reward_info.get("reward"),
                 "protocol_legal": all(t["protocol_legal"] for t in turns) if turns else None,
                 "n_turns": len(turns),
+                "n_tool_calls": sum(t["n_tool_calls"] for t in turns),
+                "n_illegal_turns": len(first_violations),
+                "first_violation": first_violations[0] if first_violations else None,
+                "termination": sim.get("termination_reason"),
             }
         )
+    from metrics import aggregate  # noqa: E402
+
     return aggregate(rows, cluster_key="task_id")
 
 
