@@ -1715,6 +1715,10 @@ D_INTERVENE_MODES = {
                      # downstream-recompute contribution from the erratum.
     "d_corr_text",   # A2: erratum as TEXT — doc k* prefilled verbatim after
                      # the gist prefix instead of KV transplantation.
+    # Transfer-manual B1 placement 2x2 (2026-08-29):
+    "d_drop_g",      # append + drop G_k*:  S -> G0..G4(-k*) -> R_k -> Q
+    "d_splice_keep", # in-place + keep G_k*: S -> G0..G_k R_k G_{k+1}.. -> Q
+    "d_splice_rep",  # in-place + replace:  S -> G0..G_{k*-1} R_k G_{k+1}.. -> Q
 }
 
 
@@ -1762,6 +1766,52 @@ def _gist_tokens_for_lengths(
                 seqlen = min(seqlen + ratio - residual, grid_width)
         total += (seqlen + ratio - 1) // ratio
     return total
+
+
+@torch.inference_mode()
+def _extract_gists_at_prefix(
+    model: Any,
+    grid: torch.Tensor,
+    prefix_length: int,
+    attn_impl: str,
+    override_ratio: int,
+) -> tuple[Any, int]:
+    """Gist-only cache for a doc grid, RoPE-blended at ``prefix_length``.
+
+    Mirrors _build_tool_cache's extraction but skips the system-cat and the
+    system-length coupling: the returned DynamicCache contains ONLY the gist
+    layers, with key positions assigned as if the docs started at
+    ``prefix_length`` logical tokens.  Used by the B1 splice arms, which
+    interleave raw KV between two gist groups at their true offsets.
+    """
+    from models import blend_gist_key_values
+
+    device = model.device
+    grid = grid.to(device)
+    valid_mask = grid != -100
+    input_ids = grid.clone()
+    input_ids[~valid_mask] = model.model.gist_token_id
+    original_attn_impl = model.model.config._attn_implementation
+    model.model.config._attn_implementation = attn_impl
+    gist_kwargs = {}
+    if getattr(model.config, "gist_type", None) == "dynamic-interleave":
+        gist_kwargs["ratio"] = override_ratio
+    outputs, gist_mask, pos_ids = model.model.generate_gist(
+        input_ids=input_ids,
+        attention_mask=valid_mask,
+        **gist_kwargs,
+    )
+    model.model.config._attn_implementation = original_attn_impl
+    gist_cache, _ = blend_gist_key_values(
+        model.config,
+        [outputs.past_key_values],
+        [gist_mask],
+        [pos_ids],
+        model.model.rotary_emb,
+        prefix_length,
+    )
+    gist_tokens = gist_cache.get_seq_length()
+    return gist_cache, gist_tokens
 
 
 @torch.inference_mode()
@@ -1854,8 +1904,98 @@ def _build_d_intervene_prefix(
     # would silently return an unrotated cache (rope_reposition.py:48).
     assert doc_logical_start > 0, "doc k* must start after the system prefix"
 
+    if mode in ("d_splice_keep", "d_splice_rep"):
+        # B1 in-place placement: cache order follows conversation order.
+        #   splice_keep: S -> G0..G_k* -> R_k* -> G_{k*+1}.. -> Q  (double coverage in place)
+        #   splice_rep:  S -> G0..G_{k*-1} -> R_k* -> G_{k*+1}.. -> Q (Leyline-style replace)
+        # Left gists blend from system_length (their true c2kv positions);
+        # the raw span keeps its ORIGINAL absolute positions (sequential
+        # prefill, unrotated append); right gists blend at offsets[k*+1] so
+        # downstream gists land exactly where plain c2kv puts them.
+        left_docs = doc_ids[: k_star + 1] if mode == "d_splice_keep" else doc_ids[:k_star]
+        right_docs = doc_ids[k_star + 1:]
+        splice_t0 = time.perf_counter()
+        left_grid = _grid_from_doc_ids(left_docs, args.max_doc_length, args.max_doc_num)
+        left_cache, left_gist = _extract_gists_at_prefix(
+            model, left_grid, system_length, args.gist_attn_impl, args.override_ratio
+        )
+        # system layers cat onto the gist cache's layers in place
+        for system_layer, gist_layer in zip(system_cache.layers, left_cache.layers):
+            gist_layer.keys = torch.cat([system_layer.keys, gist_layer.keys], dim=-2)
+            gist_layer.values = torch.cat([system_layer.values, gist_layer.values], dim=-2)
+        prefix_cache = left_cache
+        # Fresh system prefill for the raw span (the primary system_cache is
+        # already consumed by the assembly above; one extra ~0.5s forward).
+        raw_cache, _, extra_sys_sec = _prefill_system(
+            model, system_input_ids, args.generate_attn_impl
+        )
+        logical_length = system_length
+        for doc_index in range(k_star + 1):
+            doc_input_ids = torch.tensor([doc_ids[doc_index]], dtype=torch.long, device=model.device)
+            raw_cache, added, elapsed = _prefill_tokens_with_cache(
+                model, doc_input_ids, past_key_values=raw_cache,
+                past_length=logical_length, attn_impl=args.generate_attn_impl,
+            )
+            logical_length += added
+        span_kv = [
+            (
+                layer.keys[..., doc_logical_start: doc_logical_start + len(doc_ids[k_star]), :].clone(),
+                layer.values[..., doc_logical_start: doc_logical_start + len(doc_ids[k_star]), :].clone(),
+            )
+            for layer in raw_cache.layers
+        ]
+        del raw_cache
+        _clear_device_cache(args.device_type)
+        for layer, (keys, values) in zip(prefix_cache.layers, span_kv):
+            layer.keys = torch.cat([layer.keys, keys], dim=-2)
+            layer.values = torch.cat([layer.values, values], dim=-2)
+        right_gist = 0
+        if right_docs:
+            right_grid = _grid_from_doc_ids(right_docs, args.max_doc_length, args.max_doc_num)
+            right_cache, right_gist = _extract_gists_at_prefix(
+                model, right_grid, offsets[k_star + 1], args.gist_attn_impl, args.override_ratio
+            )
+            for layer, right_layer in zip(prefix_cache.layers, right_cache.layers):
+                layer.keys = torch.cat([layer.keys, right_layer.keys], dim=-2)
+                layer.values = torch.cat([layer.values, right_layer.values], dim=-2)
+            del right_cache
+            _clear_device_cache(args.device_type)
+        splice_sec = time.perf_counter() - splice_t0
+        gist_tokens = left_gist + right_gist
+        return {
+            "cache": prefix_cache,
+            "system_length": system_length,
+            "history_length": doc_tokens,
+            "cache_length": prefix_cache.get_seq_length(),
+            "doc_tokens": doc_tokens,
+            "doc_chunks": doc_chunks,
+            "kept_history_tokens": doc_tokens,
+            "gist_tokens": gist_tokens,
+            "actual_compression_ratio": float(doc_tokens / gist_tokens) if gist_tokens else 0.0,
+            "system_prefill_sec": system_prefill_sec + extra_sys_sec,
+            "full_prefill_sec": 0.0,
+            "tool_compress_sec": 0.0,
+            "blend_sec": 0.0,
+            "use_gist": True,
+            "d_corr_doc_index": k_star,
+            "d_corr_span_tokens": len(doc_ids[k_star]),
+            "d_sham_tokens": 0,
+            "d_recompute_tokens": 0,
+            "d_recompute_docs": 0,
+            "d_dropped_gist_tokens": 0 if mode == "d_splice_rep" else None,
+            "d_corr_slice_prefill_sec": round(splice_sec, 4),
+            "d_recompute_prefill_sec": 0.0,
+            "d_splice_in_place": True,
+        }
+
     if mode in ("d_corr_recompute", "d_re_only"):
         grid = _grid_from_doc_ids(doc_ids[: k_star + 1], args.max_doc_length, args.max_doc_num)
+    elif mode == "d_drop_g":
+        # B1 append + drop G_k*: the grid omits doc k*, the raw span still
+        # lands at the end (existing append machinery below).
+        grid = _grid_from_doc_ids(
+            doc_ids[:k_star] + doc_ids[k_star + 1:], args.max_doc_length, args.max_doc_num
+        )
     else:
         grid = context_input_ids
     (

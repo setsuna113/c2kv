@@ -69,6 +69,10 @@ ARM_MODES = {
     # Transfer-manual A1/A2 exploratory arms (2026-08-28)
     "re_only": "d_re_only",
     "corr_text": "d_corr_text",
+    # Transfer-manual B1 placement 2x2 (2026-08-29)
+    "drop_g": "d_drop_g",
+    "splice_keep": "d_splice_keep",
+    "splice_rep": "d_splice_rep",
 }
 PLAN_REQUIRED_ARMS = {"sham"}
 PLAN_USING_ARMS = {"sham", "corr", "corr_re", "corr_all", "sham_mech"}
