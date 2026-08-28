@@ -63,19 +63,28 @@ TOOL_CALL_RE = re.compile(
 )
 
 
-def _normalize_tool_schema(value: Any) -> Any:
-    """BFCL-style schema repair before grammar compilation.
+def _normalize_tool_schema(value: Any, defs: Dict[str, Any] = None,
+                           seen: frozenset = frozenset()) -> Any:
+    """Schema repair before grammar compilation.
 
-    gorilla_file_system and friends declare "type": "dict" / "any" and bare
-    {"type": "list"} without item schemas — not valid JSON Schema and
-    rejected by xgrammar's converter.  Map to the closest valid form and
-    strip unsupported keywords; repair is applied to the grammar input only,
-    never to the tool definition the model sees.
+    Benchmark tool schemas use loose types ("type": "dict"/"any"/...,
+    {"type": "list"} without items) and $ref/$defs indirection, neither of
+    which xgrammar's JSON-schema converter accepts.  Repair applies to the
+    grammar input only, never to the tool definition the model sees:
+    $refs are inlined (cycle-guarded), then types are mapped and
+    unsupported keywords stripped.
     """
     if isinstance(value, dict):
+        if "$ref" in value and defs is not None:
+            name = str(value["$ref"]).split("/")[-1]
+            if name in defs and name not in seen:
+                return _normalize_tool_schema(
+                    defs[name], defs, seen | {name}
+                )
+            return {"type": "object"}
         out = {}
         for key, item in value.items():
-            if key in ("$schema", "$id", "$defs"):
+            if key in ("$schema", "$id", "$defs", "$ref"):
                 continue
             if key == "type":
                 if isinstance(item, str):
@@ -103,11 +112,16 @@ def _normalize_tool_schema(value: Any) -> Any:
                     if not mapped:
                         continue
                     item = mapped
-            out[key] = _normalize_tool_schema(item)
+            out[key] = _normalize_tool_schema(item, defs, seen)
         return out
     if isinstance(value, list):
-        return [_normalize_tool_schema(v) for v in value]
+        return [_normalize_tool_schema(v, defs, seen) for v in value]
     return value
+
+
+def _inline_refs(schema: Dict[str, Any]) -> Dict[str, Any]:
+    defs = schema.get("$defs") or schema.get("definitions") or {}
+    return _normalize_tool_schema(schema, defs)
 
 
 def cfg_vocab_size(model) -> int:
@@ -247,7 +261,7 @@ class C2KVServer:
             normalized = [
                 {
                     "type": "function",
-                    "function": _normalize_tool_schema(t.get("function") or t),
+                    "function": _inline_refs(t.get("function") or t),
                 }
                 for t in tools
             ]
