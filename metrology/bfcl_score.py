@@ -712,6 +712,27 @@ def _check_duplicate_keys(rows: list[tuple[dict, str]]):
         raise SystemExit("\n".join(lines))
 
 
+def _check_expect_n(summary: dict, expect_n: int) -> None:
+    """--expect-n 守卫：每个 (condition, cap_tier) 汇总的样本数 n 必须 == expect_n。
+
+    防 shard 丢失静默缩水（2026-08-28 审计 I3：双 shard 同名互相覆盖后 dev 只剩
+    一半，无总数断言时评分照常出、summary 照常落盘）。不匹配即 SystemExit
+    （非零退出），summary 文件不写——phase_eval 的续跑跳过守卫看 summary.json
+    是否存在，先写 summary 再失败会把短评的 checkpoint 永久标记为已评。"""
+    bad = [
+        (cond, tier, cell["n"])
+        for (cond, tier), cell in sorted(summary.items())
+        if cell["n"] != expect_n
+    ]
+    if bad:
+        lines = [
+            f"--expect-n={expect_n} 不满足（每个 (condition, cap_tier) 格的 n 必须等于它）："
+        ]
+        for cond, tier, n in bad:
+            lines.append(f"  condition={cond} cap_tier={tier}: n={n} != {expect_n}")
+        raise SystemExit("\n".join(lines))
+
+
 def _build_summary(scored_rows: list[dict]) -> dict:
     """每 (condition, cap_tier) 一格：{n, native_valid_n, protocol_invalid_n,
     split_n, censored_n}。"""
@@ -832,6 +853,8 @@ def run(args):
 
     summary = _build_summary(scored_rows)
     _print_summary(summary)
+    if args.expect_n is not None:
+        _check_expect_n(summary, args.expect_n)
     if args.summary_out:
         _write_summary_out(summary, Path(args.summary_out))
         print(f"[score] summary -> {args.summary_out}")
@@ -857,6 +880,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--out", required=True, help="scored 结果 jsonl 输出路径")
     p.add_argument("--summary_out", default=None, help="可选：summary JSON 输出路径")
+    p.add_argument(
+        "--expect-n", dest="expect_n", type=int, default=None,
+        help="可选：提供时每个 (condition, cap_tier) 汇总的样本数 n 必须等于它，"
+             "否则非零退出且不写 summary（防 shard 丢失静默缩水）",
+    )
     return p
 
 

@@ -217,3 +217,39 @@ def test_cli_scoring_on_unique_cells(tmp_path):
             f"n_protocol_invalid_steps={r['n_protocol_invalid_steps']} "
             f"split_row={r['split_row']} censored={r['censored']}"
         )
+
+
+def test_expect_n_guard(tmp_path):
+    # --expect-n 守卫（2026-08-28 审计 I3 修复）：伪造两个各 3 行的 shard jsonl，
+    # 合并后 (c2kv, default) 格 n=6——expect 6 通过，expect 128 响亮失败。
+    # 纯 CPU 路径：只走 _collect_runs/_build_summary/_check_expect_n，
+    # 不触发原生评分（无需 bfcl_pkg/bfcl_data）。
+    def _row(i: int) -> dict:
+        return {
+            "id": f"multi_turn_base_{i}",
+            "category": "multi_turn_base",
+            "condition": "c2kv",
+            "cap_tier": "default",
+            "native_valid": True,
+            "protocol_valid": True,
+            "split_row": False,
+            "censored": False,
+        }
+
+    for name, offset in (("shard0.jsonl", 0), ("shard1.jsonl", 3)):
+        with open(tmp_path / name, "w", encoding="utf-8") as f:
+            for i in range(offset, offset + 3):
+                f.write(json.dumps(_row(i), ensure_ascii=False) + "\n")
+
+    rows = [row for row, _src in bfcl_score._collect_runs(str(tmp_path))]
+    summary = bfcl_score._build_summary(rows)
+    assert summary[("c2kv", "default")]["n"] == 6
+
+    # 匹配时通过（无异常、无输出文件副作用）
+    bfcl_score._check_expect_n(summary, 6)
+
+    # 不匹配时非零退出，报错含实际值/期望值与格子标识
+    with pytest.raises(SystemExit) as exc:
+        bfcl_score._check_expect_n(summary, 128)
+    msg = str(exc.value)
+    assert "n=6" in msg and "128" in msg and "c2kv" in msg

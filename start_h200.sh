@@ -14,8 +14,10 @@
 #   calibrate  先跑 CALIB_STEPS 步（SAVE_STEPS=CALIB_STEPS，校准存档计入正式训练），
 #              实测 rho / presented_per_step -> 写 run_config.json ->
 #              以最终 SAVE_STEPS / NUM_TRAIN_EPOCHS 从 checkpoint 续跑
-#   train      torchrun 多卡，崩溃自动 resume（上限 MAX_CRASH_RETRIES），wall 软上限 WALL_CAP_HOURS
-#   eval       对 milestone checkpoint 逐个跑 BFCL dev 128（双卡 id 分片）
+#   train      torchrun 多卡，崩溃自动 resume（上限 MAX_CRASH_RETRIES），wall 硬上限
+#              WALL_CAP_HOURS（到点/磁盘早退记 train.partial，按部分完成进 eval）
+#   eval       对本次 run 的 milestone checkpoint 逐个跑 BFCL dev 128
+#              （恒两个半区 shard：双卡并行、单卡顺序；合并评分带 --expect-n 校验）
 #   select     按 BFCL dev 分数选最佳 checkpoint，写 results/g_h200/FINAL_SUMMARY.md
 #
 # 关键旋钮（env 覆盖）：
@@ -30,10 +32,12 @@
 #   STALL_MIN                停滞看门狗窗口（分钟, 默认 35——必须大于大数据集的
 #                            静默建样本窗口（大池实测 ~22-25min), 否则误杀健康启动):
 #                            日志连续无写入且进程还在 -> 杀掉重试并升级 fallback 档位
-#                            (1=plain DDP; 2=+sdpa; 3=+eager)
+#                            (1=plain DDP; 2=+sdpa; 封顶 2——lvl3=eager 对最大档 batch
+#                            确定性 OOM(2026-08-28 step-3581), 自动升级禁用)
 #   EXPECT_GPUS              期望卡数（默认 2；不足只警告，便于单卡 smoke）
 #   RETAIN_CKPTS             磁盘紧张时整档保留的 checkpoint 数（默认 EVAL_MAX_CKPTS+2）：
-#                            最新档 + 均匀抽取（与 eval 同一公式），其余整档删除
+#                            均匀抽取（与 eval 同一公式）∪ 最新两档（带完整优化器态,
+#                            resume 锚点, 永不整档删除），其余整档删除
 #   PRUNE_MIN_FREE_GB        GU 可用低于此值才触发整档保留裁剪（默认 400）
 #   SMOKE=1                  本机端到端冒烟：极小剂量 + 单卡 + 评测截断
 set -euo pipefail
@@ -50,10 +54,16 @@ export PYTORCH_ALLOC_CONF="${PYTORCH_ALLOC_CONF:-expandable_segments:True}"
 export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-${PYTORCH_ALLOC_CONF}}"
 
 # H200 吞吐默认值（141GB 显存远够用, 利用率从 ~20% 拉起来; 平台低利用率会杀任务）:
-# - C2KV_GIST_DOC_MICROBATCH=16: 文档压缩从逐篇小前向改为 16 篇一批
-#   (逐篇是 NPU 64GB 时代的保守默认; 数值等价性 2026-08-26 4090 对照验证)
+# - C2KV_GIST_DOC_MICROBATCH=1: 文档压缩逐篇小前向。2026-08-26 的
+#   "microbatch 16 vs 1 逐位吻合" 声明撤回(2026-08-29 审计 I4): microbatch>1 时
+#   组内右填充槽是 gist_token_id 真实 embedding(gist_utils.py:579), 残差
+#   chunk-mean 按组 max padded 长度算(:429-434)而 mask 按真实长度建(:117),
+#   混合长度组里 L%8≠0 的短文档最后一个 gist row 必被污染; 且 flatten 在按
+#   训练样本切分之前(:564), bs=2 时中间组跨样本——该对照机制上不可能成立。
+#   数值正确性 > 吞吐: 默认回退 1(与全部 NPU 臂一致); 吞吐确实不够时可谨慎
+#   提高, 但须重做等价性验证且该臂与 NPU 臂不再可比。
 # - PER_DEVICE_BS=2 + GRAD_ACCUM=2: effective batch 仍为 8 (2卡 x 2 x 2)
-export C2KV_GIST_DOC_MICROBATCH="${C2KV_GIST_DOC_MICROBATCH:-16}"
+export C2KV_GIST_DOC_MICROBATCH="${C2KV_GIST_DOC_MICROBATCH:-1}"
 export PER_DEVICE_BS="${PER_DEVICE_BS:-2}"
 export GRAD_ACCUM="${GRAD_ACCUM:-2}"
 
@@ -113,7 +123,10 @@ SPLIT_NAME=taskproxy_disjoint
 REMOVAL_FILE="${REPO_ROOT}/outputs/removal_traces_final.json"
 PLAN_DIR="${PLAN_DIR:-${REPO_ROOT}/outputs/joint_h200_plan}"
 ORDER_FILE="${ORDER_FILE:-${PLAN_DIR}/g_h200_main.order.json}"
-PLAN_JSON="${PLAN_JSON:-$(dirname "${ORDER_FILE}")/g_h200_main.plan.json}"
+# PLAN_JSON 默认从 ORDER_FILE 派生(换大池 order 时 plan 跟着换)。旧默认钉死
+# g_h200_main.plan.json, bigpool 命令在干净 STATUS 上必 abort(2026-08-28 审计 I5)。
+# env 显式覆盖仍优先。
+PLAN_JSON="${PLAN_JSON:-${ORDER_FILE%.order.json}.plan.json}"
 RUN_CONFIG="${STATUS}/run_config.json"
 OUTPUT_DIR="${OUTPUT_DIR:-${GU_BASE}/checkpoints/qwen3-4b-joint-c2kv-h200}"
 DEV_MANIFEST="${REPO_ROOT}/configs/bfcl_dev_v3_mt.json"
@@ -148,6 +161,15 @@ run_phase() {  # run_phase <name> <cmd...>
   else
     rc=$?
   fi
+  if [[ ${rc} -eq 2 ]]; then
+    # rc=2 = 阶段自报"部分完成"（目前只有 train 的墙钟/磁盘早退）：记 .partial
+    # 而非 .done，主流程据此继续下游阶段；.partial 不阻断本阶段重跑（只有
+    # .done 跳过），续跑到足额后由下方 .done 覆盖。2026-08-28 审计 I6：此前
+    # 早退 return 0 被盖 train.done，部分剂量被永久标记"完成"。
+    touch "${STATUS}/${name}.partial"
+    log "[${name}] PARTIAL (rc=2)"
+    return 2
+  fi
   if [[ ${rc} -ne 0 ]]; then
     { echo "phase=${name} rc=${rc} ts=$(date -u +%FT%TZ)"
       tail -30 "${LOGS}/${name}.log" 2>/dev/null || true
@@ -155,6 +177,7 @@ run_phase() {  # run_phase <name> <cmd...>
     log "[${name}] FAIL (rc=${rc}, see ${STATUS}/${name}.fail)"
     exit "${rc}"
   fi
+  rm -f "${STATUS}/${name}.partial"
   touch "${STATUS}/${name}.done"
   log "[${name}] DONE"
 }
@@ -211,9 +234,11 @@ PY
 #    optimizer.pt/scheduler.pt/rng_state*(≈2.3G)。评测只需
 #    model.safetensors/config/tokenizer; 最新两个完整档保留优化器
 #    (最新档 resume 用, 次新档兜底)。
-# 2) GU 可用空间 < PRUNE_MIN_FREE_GB 时触发整档保留裁剪: 保留 = 最新档 +
-#    均匀抽取的 RETAIN_CKPTS-1 个(与 phase_eval 同一选取公式), 其余整档
-#    删除。2026-08-26 实锤必要: resume 会继承旧档 trainer_state.json 的
+# 2) GU 可用空间 < PRUNE_MIN_FREE_GB 时触发整档保留裁剪: 保留 = 最新两档
+#    (带完整优化器态的 resume 锚点——整档删掉会让下一次 resume 无
+#    optimizer/scheduler, transformers 5.8 静默重启 LR schedule, 2026-08-28
+#    实锤) ∪ 均匀抽取的 RETAIN_CKPTS 个(与 phase_eval 同一选取公式), 其余
+#    整档删除。2026-08-26 实锤必要: resume 会继承旧档 trainer_state.json 的
 #    save_steps(transformers v5 保存节奏走 state.save_steps 而非
 #    args.save_steps), calibrate 档的 150 覆盖 train 的 815, checkpoint
 #    以 150 步一档膨胀, 23 档就把 GU 配额吃到只剩 12G。
@@ -257,7 +282,11 @@ ckpts = sorted((c for c in ckpts if os.path.isfile(os.path.join(c, "trainer_stat
                key=step_of)
 if len(ckpts) > k and k >= 2:
     idx = sorted({round(i * (len(ckpts) - 1) / (k - 1)) for i in range(k)})
-    keep = {ckpts[i] for i in idx} | {ckpts[-1]}
+    # keep 集并入最新两档: 它们是仅剩的带完整优化器态的档(上面的磁盘卫生对
+    # 旧档剥了 optimizer/scheduler/rng); 整档删掉会让下一次 resume 无
+    # optimizer/scheduler——transformers 5.8 trainer.py:3603 是单 if 无告警,
+    # LR schedule 静默重启(2026-08-28 生产实锤: resume 锚点 3450 曾被整档删)。
+    keep = {ckpts[i] for i in idx} | set(ckpts[-2:])
     for c in ckpts:
         if c not in keep:
             print(c)
@@ -265,9 +294,11 @@ PY
 )"
     while IFS= read -r victim; do
       [[ -n "${victim}" && -d "${victim}" && "${victim%/}" != "${latest%/}" ]] || continue
+      # 双保险: 最新两档(protect)永不整档删除(理由见上 python 段注释)
+      grep -qxF "${victim%/}" <<< "${protect}" && continue
       case "${victim}" in "${OUTPUT_DIR}"/checkpoint-*) ;; *) continue ;; esac
       rm -rf "${victim}"
-      echo "disk-pressure prune: removed ${victim} (kept ${RETAIN_CKPTS} evenly-spaced + latest)"
+      echo "disk-pressure prune: removed ${victim} (kept ${RETAIN_CKPTS} evenly-spaced + latest two)"
     done <<< "${victims}"
   fi
 }
@@ -336,9 +367,14 @@ PY
 # 2026-08-28 实锤②: 只看目录名会选中"存档写到一半被杀"的残档(无
 # trainer_state.json), resume 直接 FileNotFoundError 崩 → 崩溃循环。
 # 完整档判定 = trainer_state.json + model.safetensors。注意**不要求**
-# optimizer.pt: 磁盘卫生会清掉旧档的优化器状态, HF resume 缺优化器只是
-# 告警(Adam moments 重置, 权重/scheduler 照常), 要求它反而会把可续跑的
+# optimizer.pt: 磁盘卫生会清掉旧档的优化器状态, 要求它反而会把可续跑的
 # 档全部判废、退化成 resume=<scratch> 从头训练(2026-08-28 实锤③)。
+# 但 2026-08-29 审计 I2 纠正旧注释: transformers 5.8 里 scheduler 的恢复
+# 与 optimizer.pt 同在 trainer.py:3603 的单 if 里、无 else 无告警——
+# 缺 optimizer.pt 时 LR schedule 会**静默从 step 0 重启**(warmup 重跑),
+# 并非"scheduler 照常"。weights-only resume 只是可用的兜底, 不是免费的:
+# prune 现已保证最新两档永远带完整 optimizer/scheduler/rng, 正常路径
+# 不会再走到 weights-only resume。
 latest_ckpt() {
   local d
   for d in $(ls -d "${OUTPUT_DIR}"/checkpoint-* 2>/dev/null | sort -V); do
@@ -351,12 +387,16 @@ latest_ckpt() {
 # 训练日志 STALL_MIN 分钟没有任何新写入且进程还在 -> 判停滞, 杀掉重试;
 # 每次停滞升级 fallback 档位: 1=USE_DEEPSPEED=0(plain DDP——ZeRO-3 下
 # generate_gist 调用次数随 rank 批内容漂移, 集合通信计数错位会 NCCL 超时挂死,
-# 2026-08-26 已实锤), 2=再降 ATTN_IMPL=sdpa(免编译兜底)。
+# 2026-08-26 已实锤), 2=再降 ATTN_IMPL=sdpa(免编译兜底)。自动升级封顶 2:
+# lvl3=eager 对全 order 最大档 batch 确定性 OOM(2026-08-28 step-3581 六连崩),
+# 绝不能自动升进去(launch_train 仍认人工预置的 lvl3, 便于保底调试)。
 # 带错误签名的崩溃同样升级：illegal memory access/AcceleratorError/CUDA error:
 # 之外还有 CheckpointError|recompile_limit——flex_attention 在变长数据上撞
 # dynamo recompile_limit=8 后退化为 unfused 实现, 梯度 checkpoint 重算时
 # 张量元数据与 forward 保存的不一致 -> CheckpointError, 确定性必现
 # (2026-08-26 step~156 两次复现), 只能切 sdpa 根治, 重试 flex 无意义。
+# 2026-08-29 起签名再扩 OutOfMemoryError|CUDA out of memory|NCCL|[Ww]atchdog|
+# Can't find a valid checkpoint(生产 7 次 step-3581 OOM 全部没触发升级的教训)。
 STALL_MIN="${STALL_MIN:-35}"
 
 fallback_level() {
@@ -371,7 +411,16 @@ fallback_level() {
   fi
   echo "${l}"
 }
-bump_fallback() { local l; l=$(fallback_level); echo $((l + 1)) > "${STATUS}/attn_fallback_level"; }
+# 自动升级封顶 FALLBACK_MAX=2(理由见上方注释); 到顶只告警, 不再写文件。
+FALLBACK_MAX=2
+bump_fallback() {
+  local l; l=$(fallback_level)
+  if (( l >= FALLBACK_MAX )); then
+    echo "WARNING: fallback 已到顶(${FALLBACK_MAX}), 不再自动升级(lvl3=eager 生产禁用)" >&2
+    return 0
+  fi
+  echo $((l + 1)) > "${STATUS}/attn_fallback_level"
+}
 
 # 把失败的真实原因带进 console.log：无人值守时用户只 tail 这个文件，
 # train 阶段崩溃不能只在 train.log 里留 traceback（2026-08-26 两次
@@ -400,6 +449,12 @@ launch_train() {  # launch_train <save_steps> <epochs> <resume>  (logs append to
   if (( lvl >= 1 )); then extra+=(USE_DEEPSPEED=0); fi
   if (( lvl >= 3 )); then extra+=(ATTN_IMPL=eager); elif (( lvl >= 2 )); then extra+=(ATTN_IMPL=sdpa); fi
   if ((${#extra[@]})); then echo "[launch_train] fallback level ${lvl}: ${extra[*]}"; fi
+  # train.log 轮转: 每次 launch 前把非空旧日志改名带时间戳, 保证崩溃升级判定
+  # 的 tail -200 只看本次 attempt(旧签名残留会误判升级, 2026-08-28 审计 I1)。
+  # 旧日志在 ${LOGS} 累积(单次数十 MB 量级), 人工定期清理即可。
+  if [[ -s "${LOGS}/train.log" ]]; then
+    mv "${LOGS}/train.log" "${LOGS}/train.log.$(date +%Y%m%d_%H%M%S)"
+  fi
   touch "${LOGS}/train.log"  # 停滞计时从本次启动起算
   # 每次启动用随机 master port：上一次的 torchrun 刚被杀时 rdzv 端口会
   # EADDRINUSE（TIME_WAIT），撞车已在 2026-08-26 冒烟中实测复现。
@@ -477,9 +532,9 @@ phase_calibrate() {
     kill_train || true
     wait "${tpid}" 2>/dev/null || true
     if [[ ${wrc} -eq 3 ]] \
-      || tail -200 "${LOGS}/train.log" | grep -qE "illegal memory access|AcceleratorError|CUDA error:|CheckpointError|recompile_limit|FloatingPointError"; then
+      || tail -200 "${LOGS}/train.log" | grep -qE "illegal memory access|AcceleratorError|CUDA error:|CheckpointError|recompile_limit|FloatingPointError|OutOfMemoryError|CUDA out of memory|NCCL|[Ww]atchdog|Can't find a valid checkpoint"; then
       bump_fallback
-      echo "stall/CUDA-signature crash -> fallback_level=$(fallback_level) (1=plain DDP 2=+sdpa 3=+eager)"
+      echo "stall/CUDA-signature crash -> fallback_level=$(fallback_level) (1=plain DDP 2=+sdpa; 封顶 2, lvl3=eager 生产禁用)"
     fi
     attempt=$((attempt + 1))
     if (( attempt > 3 )); then
@@ -506,7 +561,7 @@ PY
     --arm main="${STATUS}/manifest_trim1500.json" \
     --out "${STATUS}/psrc_calibration.json"
   "${PY}" - <<PY
-import json, math
+import json, math, hashlib
 manifest = json.load(open("${OUTPUT_DIR}/train_manifest_used.json"))
 psrc = json.load(open("${STATUS}/psrc_calibration.json"))
 arm = psrc["arms"]["main"]
@@ -530,7 +585,11 @@ cfg = dict(p_pool_presented=int(p_pool), est_pool=int(est_pool),
            save_steps=save_steps, epochs=epochs, total_steps=total_steps,
            expected_presented=int(p_pool * epochs),
            truncated_skips=manifest.get("tool_call_target_truncated_skips"),
-           action_type_counts=manifest.get("action_type_counts"))
+           action_type_counts=manifest.get("action_type_counts"),
+           # 2026-08-29 I5: 记录校准所依据的 order 文件及其 sha1; phase_train
+           # 启动前校验当前 ORDER_FILE 一致(防换池后拿错剂量/步数口径训练)。
+           order_file="${ORDER_FILE}",
+           order_sha1=hashlib.sha1(open("${ORDER_FILE}", "rb").read()).hexdigest())
 json.dump(cfg, open("${RUN_CONFIG}", "w"), indent=1)
 print(json.dumps(cfg, indent=1))
 assert epochs * p_pool >= ${MIN_PRESENTED_TOKENS}, "pool too small for floor dose"
@@ -540,6 +599,25 @@ PY
 
 # ---- phase: train ----------------------------------------------------------
 phase_train() {
+  # run_config 与当前 ORDER_FILE 一致性校验(2026-08-28 审计 I5): calibrate
+  # 记录的 order sha1 必须等于当前 ORDER_FILE 的 sha1, 不一致说明 env 指了
+  # 别的池子而剂量/步数还是旧口径。旧格式 run_config(无 order_sha1)跳过,
+  # 保持向后兼容。
+  "${PY}" - "${RUN_CONFIG}" "${ORDER_FILE}" <<'PY'
+import hashlib, json, sys
+cfg_path, order_path = sys.argv[1], sys.argv[2]
+cfg = json.load(open(cfg_path))
+want = cfg.get("order_sha1")
+if want:
+    got = hashlib.sha1(open(order_path, "rb").read()).hexdigest()
+    if got != want:
+        raise SystemExit(
+            "run_config 与当前 ORDER_FILE 不一致（剂量/步数是按旧 order 校准的）:\n"
+            f"  run_config: {cfg_path} (order_file={cfg.get('order_file')}, sha1={want})\n"
+            f"  当前 ORDER_FILE: {order_path} (sha1={got})\n"
+            "  换池重跑请删 STATUS 目录重来；误配则检查 ORDER_FILE/PLAN_JSON env。"
+        )
+PY
   local save_steps epochs
   save_steps=$("${PY}" -c "import json; print(json.load(open('${RUN_CONFIG}'))['save_steps'])")
   epochs=$("${PY}" -c "import json; print(json.load(open('${RUN_CONFIG}'))['epochs'])")
@@ -583,6 +661,15 @@ PY
         wait "${tpid}" || trc=$?
         break
       fi
+      # 墙钟硬上界在健康监控循环内判定(此前只在 crash/stall 尾部, 健康 run 没有
+      # 墙钟出口——2026-08-28 审计 I6): 到点杀掉训练, 按部分完成(rc=2)进 eval。
+      if (( ($(date +%s) - START_TS) / 3600 >= WALL_CAP_HOURS )); then
+        echo "wall cap ${WALL_CAP_HOURS}h reached; kill training, keep milestones for eval (partial)"
+        kill_train || true
+        wait "${tpid}" 2>/dev/null || true
+        prune_old_checkpoints || true
+        return 2
+      fi
       if stall_detected; then
         echo "STALL: train.log ${STALL_MIN}min 无进展且进程还在, 杀掉重试"
         kill_train || true
@@ -606,17 +693,18 @@ PY
       return 0
     fi
     if [[ ${stalled} -eq 1 ]] \
-      || { [[ ${trc} -ne 0 ]] && tail -200 "${LOGS}/train.log" | grep -qE "illegal memory access|AcceleratorError|CUDA error:|CheckpointError|recompile_limit|FloatingPointError"; }; then
+      || { [[ ${trc} -ne 0 ]] && tail -200 "${LOGS}/train.log" | grep -qE "illegal memory access|AcceleratorError|CUDA error:|CheckpointError|recompile_limit|FloatingPointError|OutOfMemoryError|CUDA out of memory|NCCL|[Ww]atchdog|Can't find a valid checkpoint"; }; then
       bump_fallback
-      echo "stall/CUDA-signature crash -> fallback_level=$(fallback_level) (1=plain DDP 2=+sdpa 3=+eager)"
+      echo "stall/CUDA-signature crash -> fallback_level=$(fallback_level) (1=plain DDP 2=+sdpa; 封顶 2, lvl3=eager 生产禁用)"
     fi
     attempt=$((attempt + 1))
     prune_old_checkpoints || true
     local elapsed_h=$(( ($(date +%s) - START_TS) / 3600 ))
     if (( elapsed_h >= WALL_CAP_HOURS )); then
-      echo "wall cap ${WALL_CAP_HOURS}h reached; stop training (milestones will be evaluated)"
+      # 到点不再重试: 部分完成(rc=2)进 eval, 不再盖 train.done(审计 I6)
+      echo "wall cap ${WALL_CAP_HOURS}h reached; stop training (milestones will be evaluated, partial)"
       prune_old_checkpoints || true
-      return 0
+      return 2
     fi
     if (( attempt > MAX_CRASH_RETRIES )); then
       echo "too many crashes/stalls (${attempt})"; tail -20 "${LOGS}/train.log" || true; return 1
@@ -624,8 +712,9 @@ PY
     local gu_free
     gu_free=$(df --output=avail -BG "${GU_BASE}" | tail -1 | tr -dc '0-9')
     if (( gu_free < 60 )); then
-      echo "GU disk nearly full (${gu_free}G); stop training, keep milestones for eval"
-      return 0
+      # 磁盘早退同样是部分完成(rc=2), milestone 保留进 eval(审计 I6)
+      echo "GU disk nearly full (${gu_free}G); stop training, keep milestones for eval (partial)"
+      return 2
     fi
     # 非停滞崩溃：把真实 traceback 带进 console.log 再睡 60s 重启
     [[ ${stalled} -eq 0 ]] && dump_train_tail || true
@@ -639,6 +728,32 @@ phase_eval() {
   local ckpts=()
   mapfile -t ckpts < <(for d in $(ls -d "${OUTPUT_DIR}"/checkpoint-* 2>/dev/null | sort -V); do [[ -f "${d}/trainer_state.json" ]] && printf '%s\n' "${d}"; done)
   [[ ${#ckpts[@]} -gt 0 ]] || { echo "no checkpoints to evaluate"; return 1; }
+  # 只评本次 run 的 milestone: step % save_steps == 0 或 step == total_steps
+  # (save_steps/total_steps 从 run_config.json 读; transformers 5.8 保存节奏是
+  # global_step % state.save_steps, 训练末尾另存最终档)。防旧 cadence(如
+  # calibrate 的 150)残档混入评分——2026-08-28 审计。旧格式 run_config 缺
+  # 这两个键时不过滤(保持原行为)。
+  mapfile -t ckpts < <("${PY}" - "${RUN_CONFIG}" "${ckpts[@]}" <<'PY'
+import json, os, sys
+try:
+    cfg = json.load(open(sys.argv[1]))
+except (FileNotFoundError, json.JSONDecodeError):
+    cfg = {}
+save_steps, total_steps = cfg.get("save_steps"), cfg.get("total_steps")
+out = []
+for c in sys.argv[2:]:
+    step = os.path.basename(c).rsplit("-", 1)[-1]
+    if not step.isdigit():
+        continue
+    step = int(step)
+    if save_steps and total_steps and not (step % save_steps == 0 or step == total_steps):
+        continue
+    out.append(c)
+if out:
+    print("\n".join(out))
+PY
+  )
+  [[ ${#ckpts[@]} -gt 0 ]] || { echo "no checkpoints to evaluate (after run_config cadence filter)"; return 1; }
   # 均匀抽取至多 EVAL_MAX_CKPTS 个（含最终档）
   "${PY}" - "${EVAL_MAX_CKPTS}" "${ckpts[@]}" > "${STATUS}/eval_list.txt" <<'PY'
 import sys
@@ -653,7 +768,9 @@ PY
   local eval_ckpts=()
   mapfile -t eval_ckpts < "${STATUS}/eval_list.txt"
   echo "evaluating: ${eval_ckpts[*]}"
-  # 双卡 id 分片：manifest 拆两半，两卡并行，评分合并
+  # id 分片：manifest 拆两个半区; shard 数恒为 2——GPU ≥2 时两卡并行, 单卡
+  # (如 SMOKE)顺序跑完两个 shard(修复前单卡 nshards=1 只评前一半 manifest);
+  # 每 shard 传 RUN_SUFFIX 防止输出 jsonl 同名互相覆盖(2026-08-28 审计 I3)。
   local ckpt name shard p rc
   for ckpt in "${eval_ckpts[@]}"; do
     name="$(basename "$(dirname "${ckpt}")")_$(basename "${ckpt}")"
@@ -669,39 +786,68 @@ for i, ids in enumerate((m["ids"][:half], m["ids"][half:])):
     part["items"] = [it for it in m["items"] if it["id"] in set(ids)]
     json.dump(part, open(f"{sys.argv[2]}/bfcl_dev_shard{i}.json", "w"), indent=1)
 PY
+    # 合并评分的期望样本数: Σ over shards of min(shard_len, EVAL_LIMIT),
+    # 传给 scorer --expect-n 逐格校验(shard 丢失则响亮失败)。
+    local expect_n
+    expect_n=$("${PY}" - "${STATUS}" "${EVAL_LIMIT:-}" <<'PY'
+import json, sys
+limit = int(sys.argv[2]) if sys.argv[2] else None
+tot = 0
+for i in (0, 1):
+    m = json.load(open(f"{sys.argv[1]}/bfcl_dev_shard{i}.json"))
+    n = len(m.get("ids") or m.get("items") or [])
+    tot += min(n, limit) if limit else n
+print(tot)
+PY
+    )
     local runs="${RESULTS}/bfcl_dev/${name}"
     mkdir -p "${runs}/shard0" "${runs}/shard1" "${runs}/all"
-    local pids=()
     local ngpu nshards=2
     ngpu=$("${PY}" -c "import torch; print(torch.cuda.device_count())")
-    if (( ngpu < 2 )); then nshards=1; fi
-    for (( shard=0; shard<nshards; shard++ )); do
-      CKPT="${ckpt}" BFCL_PKG_PATH="${BFCL_PKG}" BFCL_DATA_DIR="${BFCL_DATA}" \
-      DEV_MANIFEST="${STATUS}/bfcl_dev_shard${shard}.json" \
-      CUDA_VISIBLE_DEVICES=${shard} DEVICE=cuda LIMIT="${EVAL_LIMIT:-}" \
-      RUNS_DIR="${runs}/shard${shard}" SCORE_DIR="${runs}/score_shard${shard}" \
-      RUN_NAME="${name}_shard${shard}" \
-        bash agent/eval_bfcl_dev_c2kv_h200.sh >> "${LOGS}/eval_${name}.log" 2>&1 &
-      pids+=($!)
-    done
     rc=0
-    for p in "${pids[@]}"; do wait "${p}" || rc=1; done
+    if (( ngpu >= 2 )); then
+      local pids=()
+      for (( shard=0; shard<nshards; shard++ )); do
+        CKPT="${ckpt}" BFCL_PKG_PATH="${BFCL_PKG}" BFCL_DATA_DIR="${BFCL_DATA}" \
+        DEV_MANIFEST="${STATUS}/bfcl_dev_shard${shard}.json" \
+        CUDA_VISIBLE_DEVICES=${shard} DEVICE=cuda LIMIT="${EVAL_LIMIT:-}" \
+        RUNS_DIR="${runs}/shard${shard}" SCORE_DIR="${runs}/score_shard${shard}" \
+        RUN_NAME="${name}_shard${shard}" RUN_SUFFIX="_shard${shard}" \
+          bash agent/eval_bfcl_dev_c2kv_h200.sh >> "${LOGS}/eval_${name}.log" 2>&1 &
+        pids+=($!)
+      done
+      for p in "${pids[@]}"; do wait "${p}" || rc=1; done
+    else
+      for (( shard=0; shard<nshards; shard++ )); do
+        CKPT="${ckpt}" BFCL_PKG_PATH="${BFCL_PKG}" BFCL_DATA_DIR="${BFCL_DATA}" \
+        DEV_MANIFEST="${STATUS}/bfcl_dev_shard${shard}.json" \
+        CUDA_VISIBLE_DEVICES=0 DEVICE=cuda LIMIT="${EVAL_LIMIT:-}" \
+        RUNS_DIR="${runs}/shard${shard}" SCORE_DIR="${runs}/score_shard${shard}" \
+        RUN_NAME="${name}_shard${shard}" RUN_SUFFIX="_shard${shard}" \
+          bash agent/eval_bfcl_dev_c2kv_h200.sh >> "${LOGS}/eval_${name}.log" 2>&1 || rc=1
+      done
+    fi
     [[ ${rc} -eq 0 ]] || { echo "eval failed for ${name}"; tail -20 "${LOGS}/eval_${name}.log" || true; return 1; }
-    # 合并分片评分（scorer 读取 runs_dir 下所有 *.jsonl）
+    # 合并分片评分（scorer 读取 runs_dir 下所有 *.jsonl）。守卫数 all/ 里
+    # 实际 jsonl 文件数并要求 == shard 数——旧版两 shard 同名覆盖后数链接
+    # 次数(=2)掩盖了实际只剩 1 份(审计 I3)。
     rm -f "${runs}/all"/*.jsonl 2>/dev/null || true
-    local njsonl=0
     for (( shard=0; shard<nshards; shard++ )); do
       for j in "${runs}/shard${shard}"/*.jsonl; do
         [[ -f "${j}" ]] || continue
-        ln -sf "${j}" "${runs}/all/"; njsonl=$((njsonl + 1))
+        ln -sf "${j}" "${runs}/all/"
       done
     done
-    [[ ${njsonl} -gt 0 ]] || { echo "no runner jsonl produced for ${name}"; return 1; }
+    local njsonl
+    njsonl=$(find "${runs}/all" -maxdepth 1 -name '*.jsonl' | wc -l)
+    [[ ${njsonl} -eq ${nshards} ]] \
+      || { echo "FATAL: merged jsonl count ${njsonl} != shard count ${nshards} for ${name} (shard output missing/overwritten)"; return 1; }
     "${PY}" -m metrology.bfcl_score \
       --bfcl_pkg_path "${BFCL_PKG}" --bfcl_data_dir "${BFCL_DATA}" \
       --runs_dir "${runs}/all" \
       --out "${RESULTS}/bfcl_dev_scored/${name}_scored.jsonl" \
-      --summary_out "${RESULTS}/bfcl_dev_scored/${name}_summary.json"
+      --summary_out "${RESULTS}/bfcl_dev_scored/${name}_summary.json" \
+      --expect-n "${expect_n}"
   done
   echo "eval done"
 }
@@ -740,9 +886,33 @@ for path in sorted(glob.glob(os.path.join(results, "bfcl_dev_scored", "*_summary
 rows = [r for r in rows if r[2] is not None]
 assert rows, "no scored summaries with a usable score"
 best = max(rows, key=lambda r: r[2])
+# realized presented 剂量行(2026-08-29 I6): 最新 checkpoint trainer_state.json
+# log_history 里最后一条 presented_tokens(python/train/trainer.py 累计);
+# 取不到写 n/a, 不因此失败。
+dose_line = "realized presented tokens = n/a / target = ${TARGET_PRESENTED_TOKENS}"
+try:
+    cand = [p for p in glob.glob(os.path.join("${OUTPUT_DIR}", "checkpoint-*"))
+            if p.rsplit("-", 1)[-1].isdigit()]
+    cand.sort(key=lambda p: int(p.rsplit("-", 1)[-1]))
+    found = None
+    for ckpt in reversed(cand):
+        state_path = os.path.join(ckpt, "trainer_state.json")
+        if not os.path.isfile(state_path):
+            continue
+        for entry in reversed(json.load(open(state_path)).get("log_history") or []):
+            if "presented_tokens" in entry:
+                found = int(entry["presented_tokens"])
+                break
+        if found is not None:
+            break
+    if found is not None:
+        dose_line = f"realized presented tokens = {found} / target = ${TARGET_PRESENTED_TOKENS}"
+except Exception as e:  # noqa: BLE001 剂量行是信息性的, 绝不能挂 select
+    print("dose line unavailable:", type(e).__name__, e)
 with open(os.path.join(results, "FINAL_SUMMARY.md"), "w") as f:
     f.write("# G-H200 main arm — BFCL-dev checkpoint selection\n\n")
     f.write(f"best: **{os.path.basename(best[0]).replace('_summary.json','')}** ({best[1]} = {best[2]:.4f})\n\n")
+    f.write(f"{dose_line}\n\n")
     f.write("| checkpoint | metric | value |\n|---|---|---|\n")
     for path, key, val in rows:
         f.write(f"| {os.path.basename(path).replace('_summary.json','')} | {key} | {val:.4f} |\n")
@@ -790,7 +960,14 @@ log "=== g_h200 pipeline start (target=${TARGET_PRESENTED_TOKENS} presented, wal
 run_phase recon phase_recon
 run_phase plan phase_plan
 run_phase calibrate phase_calibrate
-run_phase train phase_train
+# train 的 rc=2(墙钟/磁盘早退=部分完成, 见 run_phase 的 .partial 语义)不阻断
+# eval: 已落盘 milestone 照常评分; 其余非零由 run_phase 自己 exit, 走不到这里。
+# `||` 捕获 rc 的同时抑制 set -e/ERR trap 把 rc=2 当失败。
+train_rc=0
+run_phase train phase_train || train_rc=$?
+if [[ ${train_rc} -eq 2 ]]; then
+  log "WARNING: train 未达目标剂量(rc=2, 见 ${STATUS}/train.partial), 按部分完成进 eval"
+fi
 run_phase eval phase_eval
 run_phase select phase_select
 log "=== g_h200 pipeline COMPLETE (elapsed $(( ($(date +%s) - START_TS) / 60 )) min) ==="

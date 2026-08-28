@@ -113,6 +113,10 @@ DATASET_SHUFFLE_SEED="${DATASET_SHUFFLE_SEED:-2948}"
 # to date; set SEED=43 for the G8-small-v2 seed-2 replication (nothing else
 # in the launch env may change for that arm).
 SEED="${SEED:-42}"
+# ddp_timeout(秒): HF 默认 1800 小于大池静默建样本窗口(实测 ~22-25min)与
+# start_h200.sh 的 STALL_MIN(35min)看门狗; 对齐 NPU 各脚本(如
+# scripts/train_qwen3-4b-mixed_mdoc_npu_high_ratio.sh)给 7200, env 可覆盖。
+DDP_TIMEOUT="${DDP_TIMEOUT:-7200}"
 
 CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0,1}"
 export CUDA_VISIBLE_DEVICES
@@ -244,6 +248,7 @@ echo "REQUIRE_TOOL_CALL=${REQUIRE_TOOL_CALL}"
 echo "ACTION_TOOL_CALL_FRAC=${ACTION_TOOL_CALL_FRAC}"
 echo "LR=${LR}"
 echo "SEED=${SEED} (HF TrainingArguments seed; 42 = every arm to date)"
+echo "DDP_TIMEOUT=${DDP_TIMEOUT}"
 echo "NUM_TRAIN_EPOCHS=${NUM_TRAIN_EPOCHS}"
 echo "WARMUP_RATIO=${WARMUP_RATIO}"
 echo "WARMUP_STEPS=${WARMUP_STEPS}"
@@ -297,6 +302,7 @@ echo "LOGGING_STEPS=${LOGGING_STEPS}"
   --logging_nan_inf_filter False \
   --remove_unused_columns False \
   "${DEEPSPEED_ARGS[@]}" \
+  --ddp_timeout "${DDP_TIMEOUT}" \
   --do_train True \
   --eval_strategy steps \
   --eval_steps "${EVAL_STEPS}" \

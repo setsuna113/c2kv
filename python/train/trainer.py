@@ -197,6 +197,9 @@ class GistMultiDocTrainer(TrainerDistillMixin, Trainer):
         super().__init__(*args, **kwargs)
         self.model_args = model_args
         self.max_doc_length = max_doc_length
+        # realized presented tokens 累计(纯 python int; 见 _accumulate_presented_tokens)
+        self._presented_tokens = 0
+        self._presented_seeded = False
         if self.model_args.gist_reconstruct_loss_coef is not None:
             self.log_data.update({"compress_loss": []})
 
@@ -285,6 +288,9 @@ class GistMultiDocTrainer(TrainerDistillMixin, Trainer):
             "teacher logits are not built for dynamic system/context batches."
         )
         context_masks = inputs['context_input_ids'] != -100
+        if model.training:
+            # presented 口径剂量记账: 本 microbatch 经 gist 压缩的源文档 token 数
+            self._accumulate_presented_tokens(int(context_masks.sum().item()))
         # build a per-sample system KV cache from variable-length system prompts
         system_input_ids = inputs.pop('system_input_ids')
         system_kv, system_mask, past_length = self._build_system_kv(model, system_input_ids)
@@ -356,7 +362,30 @@ class GistMultiDocTrainer(TrainerDistillMixin, Trainer):
         if self.model_args.gist_reconstruct_loss_coef is not None and model.training:
             self.log_data["compress_loss"].append(_as_scalar_loss(outputs["reconstruct_loss"]).detach())
         return (loss, outputs) if return_outputs else loss
-    
+
+    def _accumulate_presented_tokens(self, n_local: int) -> None:
+        """realized presented tokens 累计：每个 training microbatch 里经 gist 压缩
+        路径的源文档 token 数（context_input_ids 的非 -100 槽）。
+
+        纯 python int、无跨 rank 同步：各 rank 只数自己的 microbatch，× world_size
+        外推全局（各 rank 数据同分布，长程偏差可忽略；不引入 all-reduce）。
+        崩溃 resume 后从 log_history 最后一条恢复，保证跨 attempt 单调累计。"""
+        if not self._presented_seeded:
+            self._presented_seeded = True
+            state = getattr(self, "state", None)
+            for entry in reversed(getattr(state, "log_history", None) or []):
+                if "presented_tokens" in entry:
+                    self._presented_tokens = int(entry["presented_tokens"])
+                    break
+        self._presented_tokens += n_local * max(1, int(getattr(self.args, "world_size", 1)))
+
+    def log(self, logs: dict[str, float], start_time: Optional[float] = None) -> None:
+        # 随 log_history 每个 logging step 输出 presented_tokens 累计值
+        # (供 start_h200.sh select 阶段核对 realized/target 剂量)。
+        if self._presented_tokens > 0:
+            logs["presented_tokens"] = self._presented_tokens
+        super().log(logs, start_time)
+
     def prediction_step(
         self,
         model: torch.nn.Module,

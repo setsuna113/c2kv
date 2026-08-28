@@ -73,13 +73,19 @@ python agent/build_joint_medium_plan.py \
 # 5. 主训练：先 100–200 step 校准（sec/step、presented tokens/s、peak HBM、
 #    tool_call_target_truncated 丢弃率）→ 回填 SAVE_STEPS 使每 ≈16M presented 存一档
 #    → 正式跑，目标 256M presented（≈10 epoch），保底 96M。
-#    注：吞吐修复后小池 256M 只跑 ~20h，吃不满 144 GPUh。正式推荐改用
+#    注：吞吐修复后小池 256M 只跑 ~20h，吃不满 144 GPUh。正式改用
 #    Toucan 大池（toucan:0.85/traces:0.15，traces 绝对量不变，池子
-#    ≈70M presented/epoch，33,460 实例）+ 500M presented 目标（≈7 epoch，
-#    ~50-60h 主训练）：
+#    ≈70M presented/epoch，33,460 实例）。arm-1 作废后（见文末 2026-08-29 节）
+#    目标降为 256M presented（≈3 epoch，估 14-21h）。不设墙钟上限
+#    （WALL_CAP_HOURS 用脚本默认 70h，3 epoch 远到不了，仅作保险）：
 #    ORDER_FILE=outputs/joint_h200_plan/g_h200_bigpool.order.json \
-#    G_H200_EXPECT_SHARES=toucan:0.85,traces:0.15 TARGET_PRESENTED_TOKENS=500000000 \
+#    PLAN_JSON=outputs/joint_h200_plan/g_h200_bigpool.plan.json \
+#    G_H200_EXPECT_SHARES=toucan:0.85,traces:0.15 \
+#    TARGET_PRESENTED_TOKENS=256000000 \
 #      bash start_h200.sh
+#    PLAN_JSON 2026-08-29 起默认从 ORDER_FILE 派生（${ORDER_FILE%.order.json}.plan.json），
+#    显式写出只为醒目；G_H200_EXPECT_SHARES 必须与该 plan 的 families
+#    realized_share 对应（大池 = toucan:0.85,traces:0.15），否则 plan 断言 abort。
 CUDA_VISIBLE_DEVICES=0,1 EXAMPLE_ORDER_FILE=outputs/joint_h200_plan/g_h200_main.order.json \
   MAX_SOURCE_TOKENS=<折算值> SAVE_STEPS=<校准值> bash agent/train_joint_next_action_c2kv_h200.sh
 
@@ -114,7 +120,7 @@ CKPT=<档> BFCL_PKG_PATH=<pkg> BFCL_DATA_DIR=<dir> bash agent/eval_bfcl_dev_c2kv
 - **2026-08-25 集群侧验证**（yancheng 开发容器，RTX 4090 + cu128 代理 venv）：`--list_traces_subsets` 确认真子集命名（tau2_airline/retail/telecom 命中默认 map）；planner 真 tokenizer 全量跑出 60/40 realized（8,811 examples / 42.8M est，budget shrink 0.3565）；planner↔trainer 池一致性实测通过（`--no-require_tool_call` 下 order file 8,811 qid 全命中，无 unknown-qid 报错；`action_type_counts` = tool_call 3,292 / other 5,519——Toucan 全 decision-point 保留，traces 侧 0.75 目标占比经分层采样落在 91%，全局 tool_call 实例占比 37%，靠 loss 结构而非计数平衡，若要更高占比需给 Toucan 加 text-turn 子采样——留作后续 arm 旋钮）；4090 上 flex_attention 的 inductor kernel 需要 128KB smem 超过 sm_89 上限（101KB），H200(sm_90, 228KB)放得下；若 H200 侧仍触发，fallback `ATTN_IMPL=eager`（H200 141GB 上 eager 也能跑，只是慢）。
 - **2026-08-25 端到端冒烟通过**：`start_h200.sh`（SMOKE=1 缩小配置，单 4090）全状态机 recon→plan→calibrate→train→eval→select 29 分钟 exit=0：校准 5 步落档→实测 ρ/回填 run_config→断点续跑到 26 步→milestone 瘦身（旧档 8.6G / 最新档 23G 完整可 resume）→BFCL dev 双分片评测出分→FINAL_SUMMARY 选档；幂等重跑全 skip、断档重跑只补未完阶段。生产侧（H200）默认全量配置 + flex_attention + ZeRO-3。
 - **2026-08-26 H200 首跑事故与根因**：生产首挂在校准第 0 步 ~30 分钟后被 NCCL 看门狗 SIGABRT(`ALLGATHER_BASE 194M 元素超时`)。根因：ZeRO-3 逐执行 all-gather 参数，而 `process_context_input_ids` 会丢掉全空 doc 槽位、`_generate_gist_for_context_docs` 按有效文档数逐篇压缩——**两个 rank 的 microbatch 有效文档数不同 → generate_gist 调用次数不同 → 集合通信计数错位 → NCCL 超时挂死**。该 joint trainer 此前从未跑过多卡 ZeRO(NPU 各臂均为单卡）。对策：本臂改用 **plain DDP**(USE_DEEPSPEED=0,DDP 容忍 per-rank 变长计算图；4B 冻结 base + gist-only 梯队在 141GB 上绰绰有余）;`start_h200.sh` 加了停滞看门狗（日志 25 分钟无进展→杀掉重试）+ 降级阶梯（lvl1=plain DDP, lvl2=再降 sdpa)，生产状态目录已预置 `attn_fallback_level=1`（直接 DDP 起跑）。ZeRO-3 的正确修复（各 rank 以 all-reduce 对齐有效文档数、按最大值补齐哑迭代并丢弃其输出）留给作者线评估，本臂不依赖。
-- **2026-08-26 吞吐修复**：H200 实测 GPU 利用率仅 ~20%——主因是文档压缩逐篇小前向（`C2KV_GIST_DOC_MICROBATCH=1` 的 NPU 64GB 时代默认）+ 每篇一次 host 同步。`start_h200.sh` 现默认 `C2KV_GIST_DOC_MICROBATCH=16` + `PER_DEVICE_BS=2/GRAD_ACCUM=2`（effective batch 仍为 8）;microbatch 16 vs 1 的 loss 轨迹在 4090 上逐位吻合（bf16 噪声级差异）。
+- **2026-08-26 吞吐修复**：H200 实测 GPU 利用率仅 ~20%——主因是文档压缩逐篇小前向（`C2KV_GIST_DOC_MICROBATCH=1` 的 NPU 64GB 时代默认）+ 每篇一次 host 同步。`start_h200.sh` 一度默认 `C2KV_GIST_DOC_MICROBATCH=16` + `PER_DEVICE_BS=2/GRAD_ACCUM=2`（effective batch 仍为 8）。~~microbatch 16 vs 1 的 loss 轨迹在 4090 上逐位吻合~~——**2026-08-29 撤回该声明**：microbatch>1 时混合长度组的短文档最后一个 gist row 被填充槽 embedding 污染（残差 chunk-mean 按组 max padded 长度算而 mask 按真实长度建），且 flatten 先于按样本切分、bs=2 时中间组跨样本，该对照机制上不可能成立。生产默认已回退 1（见文末 2026-08-29 节）。
 - **2026-08-26 flex→sdpa 降级实锤**：train 阶段两次崩溃（05:08/05:39，均在 step ~156）根因 = flex_attention 在变长样本上反复重编译，撞 `torch._dynamo` recompile_limit=8 后永久退化为 unfused 实现（物化完整 scores 矩阵）；本训练开了梯度 checkpoint，forward 保存的 compiled-kernel 中间张量与 backward 重算出的 unfused 张量元数据不一致 → `torch.utils.checkpoint.CheckpointError`（saved `[5,1,108,108]` vs recomputed `[5,32,108,128]`）。确定性必现，与硬件/随机性无关，重试 flex 无意义。处置：生产状态目录 `attn_fallback_level` 手动升 2（sdpa，免编译、无 recompile 概念，4090 冒烟数值已验证）；升级签名扩 `CheckpointError|recompile_limit`；train 阶段崩溃/停滞现在会把 train.log 尾部（含 traceback）转储进 console.log——此前 console 只有一句 "crash/stall"，导致监控误判为"静默挂起"。
 - 唯一已知本机失败：`test_token_accounting.py::test_official_missing_mdoc_data_message`（需 torch，主基线上同样失败，与本分支无关）——2026-08-25 全量 venv 下 314 passed（含 torch），未复现该失败。
 - **2026-08-27 生产第二次停跑（step 3581）与三连修复**：
@@ -126,6 +132,16 @@ CKPT=<档> BFCL_PKG_PATH=<pkg> BFCL_DATA_DIR=<dir> bash agent/eval_bfcl_dev_c2kv
 - **2026-08-28 eager OOM 根因与 level-2 转正**:07:40 重启后 6 次崩溃全部确定性 OOM 在 step 3581(expandable_segments 无效:819MB 碎片 vs 135.95GB 真实分配)。栈顶在 `ForCausalLMLoss` 的 `logits.float()`,但真正大头是 **eager attention 逐层物化 [B,H,Q,K] 注意力权重 + fp32 softmax 副本**,随"答案长度 × gist 网格"平方增长——3581 的 batch 恰好是全 order file 里最大的一档;因 order 固定,每次 resume 都撞同一批。eager 只能当保底,不能当主力。处置:guarded sdpa(上一提交)在 4090 上跑通 SMOKE=1 全状态机(fallback level=2 全程 plain DDP + sdpa: recon→plan→calibrate→train→eval→select 14min exit=0,loss 4.37→1.13,NaN 守卫 0 触发),生产 `attn_fallback_level` 降到 2 重启。同批修复:`latest_ckpt` 只认含 trainer_state.json **且含优化器状态**(optimizer.pt 或 global_step*)的完整档(冒烟曾选中被杀在半路的残档,resume FileNotFoundError 崩溃循环);`wait_for_checkpoint` 同样等优化器落盘再杀 calibrate 训练(此前 15s 宽限在 ZeRO 档不够,checkpoint-5 没有 global_step*,train 阶段 deepspeed resume 报 "Can't find a valid checkpoint")。
 - **2026-08-28 续: resume 链路三连坑（全部实锤自真实事故）**:
   1. `attn_fallback_level` 被手工写坏（粘贴串行, 内容是 "2 cd /path"）时 `(( lvl >= 1 ))` 直接 unbound variable 崩溃循环——`fallback_level()` 现在对非数字内容告警并按 0 处理（降级梯子会自然重爬）。
-  2. 磁盘卫生清掉旧档 optimizer.pt 后, 严版 `latest_ckpt`（要求优化器状态）会把所有档判废 → `resume=<scratch>` **差点静默从头训练烧光预算**。教训: HF v5 resume 缺 optimizer.pt 只是告警（Adam moments 重置, 权重/scheduler 正常, 8-27 07:40 的生产 resume 就是这种情况且 loss/LR 轨迹正常）, 所以 `latest_ckpt` 只要求 trainer_state.json + model.safetensors; prune 保留最新**两个**完整档的优化器（次新档兜底）。
+  2. 磁盘卫生清掉旧档 optimizer.pt 后, 严版 `latest_ckpt`（要求优化器状态）会把所有档判废 → `resume=<scratch>` **差点静默从头训练烧光预算**。所以 `latest_ckpt` 只要求 trainer_state.json + model.safetensors; prune 保留最新**两个**完整档的优化器（次新档兜底）。~~教训: HF v5 resume 缺 optimizer.pt 只是告警（Adam moments 重置, 权重/scheduler 正常）~~——**2026-08-29 撤回**: transformers 5.8 的 scheduler 恢复与 optimizer.pt 同在 `trainer.py:3603` 单 if 内, 缺优化器时 LR schedule **静默重启**(warmup 重跑); 当时引为证据的"8-27 07:40 resume 后 loss/LR 正常"全程处在 re-warmup ramp 内, 没有判别力。详见文末 2026-08-29 节 I2。
   3. `phase_train` 新增 scratch 防护: OUTPUT_DIR 下有 checkpoint 但无一可续跑时拒绝静默从头训练, 需显式 `ALLOW_SCRATCH_RESTART=1`。
   - 终验: 4090 SMOKE=1 + fallback level 2 全程, 14min exit=0, loss 4.37→1.13, NaN 守卫 0 触发, prune 留两档优化器行为经 harness 验证。
+- **2026-08-29 arm-1 作废与重训**：审计 6 条 critical insights 逐条复核成立后裁定 arm-1（step ~14k 的整条 lineage）作废、从头重训。
+  - 根因（各一句话）：
+    - I1 崩溃升级正则不认 OOM/NCCL/watchdog/checkpoint 签名（生产 7 次 step-3581 OOM 全部没触发升级），降级梯子只升不降且会升进 lvl3=eager（该档对最大 batch 确定性 OOM），无 `ddp_timeout`，train.log 不轮转导致升级判定跨 attempt。
+    - I2 磁盘压力整档裁剪曾把 resume 锚点（checkpoint-3450）本身删掉；optimizer-less resume 在 transformers 5.8 下静默重启 LR schedule（`trainer.py:3603` 单 if 无告警），trainer_state 里留下 LR 重新 warmup 的实锤。
+    - I3 eval 双 shard 输出同名互相覆盖，dev 实际只评 64/128 条且守卫数的是链接次数；单卡（SMOKE）路径只评前一半 manifest。
+    - I4（决定性）gist 文档 microbatch=16 在机制上 ≠ 1：混合长度组里 L%8≠0 的短文档最后一个 gist row 被填充槽 embedding 污染，且 flatten 先于按样本切分、bs=2 时中间组跨样本——从 step 0 起每步 ~100% 样本命中，训练目标本身就是错的，与全部 NPU 臂（microbatch=1）及论文口径不可比，任何 checkpoint 都洗不掉。
+    - I5 `PLAN_JSON` 默认推导钉死 `g_h200_main.plan.json`，bigpool 命令在干净 STATUS 上必 abort（生产靠 plan.done 跳过断言才跑起来）；order/run_config 之间无一致性校验。
+    - I6 墙钟/磁盘早退 `return 0` 被 `run_phase` 盖 `train.done`，部分剂量被永久标记"完成"；健康运行的训练没有墙钟出口；全链路无 realized presented tokens 记账。
+  - 处置：arm-1 的 8 个 checkpoint（150/600/900/1050/11410/12225/13040/13855，~70GB）全部作废删除；`outputs/g_h200_status/` 归档为 `outputs/g_h200_status_arm1_failed_20260828/` 后以空 STATUS 重启；代码修复（本节 8 项，对应 start_h200.sh / eval 脚本 / scorer / trainer.py）落地并过 SMOKE 后再开跑。
+  - 新 run 参数：`C2KV_GIST_DOC_MICROBATCH=1`（脚本默认已回退）；`TARGET_PRESENTED_TOKENS=256000000`（calibrate 自动换算 ≈3 epochs）；不设墙钟上限（`WALL_CAP_HOURS` 用默认 70h，仅作保险；用户裁定 2026-08-29）；其余不变（LR 5e-5 cosine / wd 0.1 / eff-8 / fixed 8× / joint / only_train_gist / 33,460 大池 85/15）。启动命令见 §3 注。

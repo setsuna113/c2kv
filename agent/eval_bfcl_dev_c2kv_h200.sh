@@ -26,6 +26,9 @@
 #   DEVICE          cuda (cuda) / cpu
 #   LIMIT           debug: max new samples this run (empty = all)
 #   RUN_NAME        results subdir name (default <ckpt-parent>_<ckpt-name>)
+#   RUN_SUFFIX      optional suffix appended to the run jsonl basename (default
+#                   empty; start_h200.sh phase_eval passes _shard<i> so the two
+#                   half-manifest shards don't overwrite each other's output)
 #   RUNS_DIR / SCORE_DIR  override output locations
 #
 # Example:
@@ -52,7 +55,11 @@ LIMIT="${LIMIT:-}"
 RUN_NAME="${RUN_NAME:-$(basename "$(dirname "${CKPT}")")_$(basename "${CKPT}")}"
 RUNS_DIR="${RUNS_DIR:-./results/g_h200/bfcl_dev/${RUN_NAME}}"
 SCORE_DIR="${SCORE_DIR:-./results/g_h200/bfcl_dev_scored}"
-RUN_JSONL="${RUNS_DIR}/bfcl_dev_c2kv-${C2KV_DOC_MODE}-r${C2KV_RATIO}_${CAP_TIER}.jsonl"
+# RUN_SUFFIX: 拼进 RUN_JSONL basename 的可选后缀(默认空)。start_h200.sh 的
+# phase_eval 双 shard 并行时传 _shard0/_shard1——文件名全由常量构成时两 shard
+# 同名互相覆盖, 合并后只剩一份(2026-08-28 审计 I3 实锤)。
+RUN_SUFFIX="${RUN_SUFFIX:-}"
+RUN_JSONL="${RUNS_DIR}/bfcl_dev_c2kv-${C2KV_DOC_MODE}-r${C2KV_RATIO}_${CAP_TIER}${RUN_SUFFIX}.jsonl"
 SCORED_JSONL="${SCORE_DIR}/${RUN_NAME}_scored.jsonl"
 SUMMARY_JSON="${SCORE_DIR}/${RUN_NAME}_summary.json"
 
