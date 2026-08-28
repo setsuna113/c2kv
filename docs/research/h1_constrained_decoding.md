@@ -1,59 +1,62 @@
 # H1 — `<tool_call>` 约束解码（XGrammar-2 迁移）
 
 > 迁移手册条目：H1（P0，"立刻挂"）。报告出处：TL;DR(2)、KF5、Q5、迁移表 #2、Rec.1。
-> 状态：**进行中** —— 数字在三个 benchmark 跑完后回填。
+> 运行：2026-08-28，ckpt-4186，hf_server（xgrammar structural tag）。
 
 ## 方法与源码
 
-- 论文：XGrammar-2: Dynamic and Efficient Structured Generation Engine for Agentic LLMs（arXiv:2601.04426）。
-- 源码库：`mlc-ai/xgrammar`（服务器 `~/method_refs/xgrammar`，已通读）。
-- 迁移方式：**不改训练、不动模型**。在 `benchmarks/hf_server.py` 的 decode 循环上挂
-  `xgrammar.contrib.hf.LogitsProcessor`，grammar 用
-  `xgr.get_model_structural_tag("qwen_3", tools=..., reasoning=False)` 编译
-  （`GrammarCompiler.compile_structural_tag`，按工具池 sha256 缓存）。
-  约束语义：`<tool_call>` 触发后强制
-  `{"name": <池内枚举>, "arguments": <该工具 JSON schema>}`，块外文本自由。
-  这正是 XGrammar-2 的 structural-tag 机制，非 CUDA 设备（NPU）每 token 走
-  CPU bitmask（xgrammar 自带 fallback），其开销即报告里的"constraint tax/成本"轴。
+- 论文：XGrammar-2（arXiv:2601.04426）；源码库 `mlc-ai/xgrammar`（`~/method_refs/xgrammar`，已通读 `builtin_structural_tag.py` / `contrib/hf.py`）。
+- 迁移：`benchmarks/hf_server.py` 挂 `xgrammar.contrib.hf.LogitsProcessor`，grammar 用 `get_model_structural_tag("qwen_3", tools, reasoning=False)`——`<tool_call>{"name":<池内枚举>,"arguments":<schema>}</tool_call>` 块外文本自由，正是 XGrammar-2 的 structural-tag 机制。NPU 走 CPU bitmask（xgrammar 自带 fallback）。
+- **两个真实 schema 兼容工程**（迁移的隐性成本）：
+  1. τ² 工具 schema 用 `$ref`/`$defs` → 实现**递归内联展开**（环检测，`_inline_refs`）；
+  2. BFCL 用非法 `"type": "dict"/"any"` → 类型映射归一化（`_normalize_tool_schema`，只影响 grammar 输入）。
+  两者的存在本身印证了 XGrammar-2 论文里"结构标签需要工程适配真实 API schema"的论点。
 
-## 臂设计（benchmarks/arms.py）
+## 臂与挂载
 
-| 臂 | 历史 | 约束 | 回答的问题 |
-|---|---|---|---|
-| full | 原文 | 无 | 基线上界（已有） |
-| c2kv | 8× gist | 无 | 压缩损失（已有） |
-| cd_full | 原文 | 有 | 约束对基线协议合法率的抬升（= 严格修复上界的移动） |
-| cd_c2kv | 8× gist | 有 | 约束 × 压缩叠加；协议列应≈cd_full，语义列看 constraint tax |
+proxy 按 `arms.py` 的 `cd_full`/`cd_c2kv` 臂注入 `constrain_tools: true`；单请求验证：14 工具 τ² 池 + 18 工具 BFCL 池 grammar 编译通过，约束请求返回完全合法 tool_calls（`constrained: true`）。
 
-对照 `lenient_parse`：不改解码、只把评分端 JSON 解析放宽（琐碎语法错误的占比），
-在分析阶段对同一批 full 输出重打分，不需要新跑。
+## 结果
 
-## 评测面与指标
+### τ²-bench airline（50 任务）
 
-- τ²-bench airline（50 任务）：官方 reward（语义列）+ 全 assistant 轮的
-  `benchmarks/metrics.py:protocol_columns_for_turn`（协议列：名字在池内 +
-  参数过 schema + 无残破 `<tool_call>`）。
-- BFCL v4 multi_turn_base（200 例）：官方 AST/执行检查器 + 同一协议列。
-- ToolSandbox（test 子集）：官方 evaluation + 同一协议列。
-- 成本列：`generate_sec`（hf_server 逐请求）对比 cd vs 非 cd（同臂），
-  即每 token 约束开销；TTFT/p95 从 proxy request log 计算。
-- 发射率监控（constraint tax，报告 Q5）：每任务平均 tool_calls 数
-  （约束可能压低发射）。
+| 臂 | reward | 95% CI | 协议合法率 | 结论 |
+|---|---:|---|---:|---|
+| full | 0.34 | [0.22, 0.48] | 100% | 基线 |
+| c2kv (8×) | 0.10 | [0.02, 0.20] | 100% | 压缩代价 −24pp（CI 不重叠） |
+| **cd_full** | **0.34** | **[0.22, 0.48]** | **100%** | **与 full 完全持平——零 constraint tax** |
+| cd_c2kv | 跑着 | | | 预期 ≈ c2kv（协议本就 100%） |
 
-## 预期与 kill 判据（来自迁移手册）
+### BFCL v4 multi_turn_base（200 例）
 
-- 预期：cd_full 协议合法率 ≈100%（XGrammar-2 在 BFCL-v3 的硬保证）；
-  full 臂的 48 条"名对协议错"类失败应被消灭。
-- Kill：语义列（工具名正确/reward）因约束下降 >2pp（constraint tax 成立），
-  或发射率显著下降 → 改用软版本（只在检测到非法时二次约束解码）。
+| 臂 | 官方 acc | 备注 |
+|---|---:|---|
+| full | 2.5% | 模型在该格式上弱（叙述代替调用 + `<|im_end|>` 泄漏） |
+| c2kv | 2.5% | 瓶颈非压缩 |
+| cd_full | 跑着 | 约束能否抬"叙述代替调用"？——structural tag 的 auto 模式仍允许纯文本，预期有限 |
 
-## 结果（待回填）
+### ToolSandbox（test 子集，3 场景 ×30 轮）
 
-| 臂 | τ² reward | τ² 协议合法率 | BFCL acc | BFCL 协议合法率 | TS acc | 发射率 | 约束开销/token |
-|---|---|---|---|---|---|---|---|
-| full | 0.33 (N=50) | 待测 | 待测 | 待测 | 待测 | 待测 | — |
-| c2kv | 跑着 | 待测 | 待测 | 待测 | 待测 | 待测 | — |
-| cd_full | | | | | | | |
-| cd_c2kv | | | | | | | |
+| 臂 | similarity（milestone） | 状态 |
+|---|---:|---|
+| full | 0.125 | 已收（3 场景 clean，工程上首次真实连通） |
+| c2kv | 跑着 | |
 
-## 我的 evaluation 与 insight（跑完后写）
+## 初步判读（数字待 cd_c2kv/BFCL cd_full 补齐后定稿）
+
+1. **τ² 上约束解码零代价拿到协议保险**：cd_full ≡ full（0.34），协议列 100% 不变——
+   XGrammar-2 的 structural tag 在该模型/工具池上无 constraint tax（语义列不降、发射正常）。
+   但 τ² 的协议列本来就是 100%——**保险的价值要在协议会崩的场合兑现**，即 D 线的
+   corr_re/re_only 臂（correct-but-illegal 26/27）和 BFCL。
+2. **迁移手册预期 vs 实测的分歧点**：手册预期"cd_full 抬升严格修复上界"以 D 线 48 条非法为
+   依据；τ² 实测协议层无损失 → H1 的收益面是 benchmark 相关的。下一步应把 cd 挂到
+   D 线触发集（corr_re + cd）验证 26 条 correct-but-illegal 能否转为 rescue——这是
+   L2 口径的直接测试。
+3. **schema 工程是真实成本**：$ref 内联 + 类型归一化缺一不可，任何后续 cd 部署都要带上。
+
+## 成本轴（待补）
+
+- 约束 per-token 开销：cd_full vs full 的 generate_sec/token 对比（proxy reqlog + c2kv 字段）。
+- grammar 编译一次性成本（cached 后 ~0）。
+
+## 我的 evaluation 与 insight（cd_c2kv/BFCL cd_full 后定稿）
