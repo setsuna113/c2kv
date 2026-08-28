@@ -1986,7 +1986,7 @@ def _build_d_intervene_prefix(
             "d_corr_slice_prefill_sec": round(splice_sec, 4),
             "d_recompute_prefill_sec": 0.0,
             "d_splice_in_place": True,
-        }
+        }, None
 
     if mode in ("d_corr_recompute", "d_re_only"):
         grid = _grid_from_doc_ids(doc_ids[: k_star + 1], args.max_doc_length, args.max_doc_num)
