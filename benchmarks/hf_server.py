@@ -618,8 +618,10 @@ def chat_completions():
     try:
         result = SERVER.chat(
             messages=data.get("messages") or [],
+            # upstream alignment: 4096 max tokens when the client omits it
+            # (tau2/ToolSandbox send no max_tokens), temperature 0 default
             max_new_tokens=int(data.get("max_completion_tokens")
-                               or data.get("max_tokens") or 256),
+                               or data.get("max_tokens") or 4096),
             temperature=float(data.get("temperature") or 0.0),
             tools=data.get("tools"),
             constrain=bool(data.get("constrain_tools")),
