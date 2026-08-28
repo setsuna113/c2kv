@@ -41,29 +41,31 @@ Key properties:
     is in the advertised tool set and arguments JSON-parse and satisfy the
     advertised JSON schema.
   * **Semantic column**: the benchmark's own official scorer (tau2 reward /
-    BFCL AST+execution checker / ToolSandbox evaluation).
-  * **Cost columns**: TTFT, p50/p95 latency, prompt/completion tokens, and
-    KV bytes accounting (raw tokens vs gist tokens per arm, ResKV-style
-    b = m + r bookkeeping where applicable).
+    BFCL AST+execution checker / ToolSandbox dialogue similarity).
+  * **Cost columns**: per-request wall latency, prompt/completion tokens,
+    and gist-vs-original token accounting (from the proxy request log,
+    joinable offline; ResKV-style b = m + r bookkeeping where applicable).
+    TTFT is NOT measured — the serving path is non-streaming.
+
+Rendering note: historical assistant `tool_calls` are re-rendered into the
+training dialect (`content + "\n\n" + "Action:\n" + <tool_call>` minified,
+`train_data_multiturn._normal_agent_message`); the chat template's native
+tool_calls branch is deliberately not used (kept as a future A/B).
 
 ## Usage (on the server)
 
 ```bash
-# 1. serve the checkpoint (one device per server)
-cd ~/kvoffload-sglang-c2kv && source /usr/local/Ascend/cann-8.5.0/set_env.sh && source /usr/local/Ascend/nnal/atb/set_env.sh
-ASCEND_RT_VISIBLE_DEVICES=0 ~/envs/sgl/bin/python -m sglang.launch_server \
-  --model-path ~/c2kv/outputs_lyc/g_joint/med_dsingle_joint/checkpoint-4186 \
-  --served-model-name c2kv --device npu --attention-backend ascend \
-  --tool-call-parser qwen25 --enable-c2kv --dtype bfloat16 \
-  --mem-fraction-static 0.55 --host 127.0.0.1 --port 34000
+# 1. serve the checkpoint (HF path; the SGLang fork does not run on this
+#    NPU stack — see git history for the five compat patches tried)
+~/bench_logs/launch_hf.sh   # DEV=0 PORT=34000 by default
 
-# 2. start the arm proxy (one per arm, different ports)
-~/envs/bench/bin/python benchmarks/proxy.py --upstream http://127.0.0.1:34000 \
-  --arm c2kv --ratio 8 --port 34100
+# 2. start the arm proxy (one per arm, different ports; ratio comes from
+#    the arm registry, there is no --ratio flag)
+~/bench_logs/launch_proxy.sh c2kv 34100 34000 c2kv
 
 # 3. run each benchmark against the proxy (adapters wrap the official CLIs)
 ~/envs/bench/bin/python benchmarks/run.py --benchmark tau2 --arm c2kv \
-  --base-url http://127.0.0.1:34100 --out results/bench/tau2_c2kv
+  --upstream http://127.0.0.1:34000 --out results/bench/tau2_c2kv
 ```
 
 ## Arm registry

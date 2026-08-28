@@ -86,7 +86,9 @@ ARMS: Dict[str, Arm] = {
 
 def get_arm(name: str) -> Arm:
     try:
-        return ARMS[name]
+        arm = ARMS[name]
     except KeyError:
         known = ", ".join(sorted(ARMS))
         raise SystemExit(f"FATAL: unknown arm {name!r}; known arms: {known}")
+    arm.validate()
+    return arm

@@ -73,6 +73,23 @@ def install_handler(base_url: str) -> None:
     )
 
 
+def run(base_url: str, categories: str = "multi_turn_base",
+        mode: str = "both", run_ids: str = "") -> Dict[str, Any]:
+    """Programmatic entry for benchmarks/run.py: register the handler and
+    drive the official generate/evaluate CLI in-process."""
+    install_handler(base_url)
+    gen = ["generate", "--model", MODEL_NAME, "--test-category", categories]
+    ev = ["evaluate", "--model", MODEL_NAME, "--test-category", categories]
+    if run_ids:
+        gen += ["--run-ids", run_ids]
+        ev += ["--run-ids", run_ids]
+    if mode in ("generate", "both"):
+        run_cli(gen)
+    if mode in ("evaluate", "both"):
+        run_cli(ev)
+    return {"benchmark": "bfcl", "categories": categories, "mode": mode}
+
+
 def run_cli(argv):
     from bfcl_eval.__main__ import cli
 

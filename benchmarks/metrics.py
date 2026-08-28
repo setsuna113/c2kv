@@ -67,6 +67,10 @@ def _schema_violations(name: str, args: Any, tools: Sequence[Dict[str, Any]]) ->
     tool = next(
         (t for t in tools if (t.get("function") or {}).get("name") == name), None
     )
+    if not tools:
+        # no advertised pool: we cannot judge legality — degrade to unknown
+        # (None) instead of flagging every call as an unknown-tool violation
+        return None
     if tool is None:
         return f"unknown tool name {name!r}"
     if args is None or not isinstance(args, dict):
@@ -105,6 +109,11 @@ def protocol_columns_for_turn(
 ) -> Dict[str, Any]:
     """One row of the protocol column: legality, call count, first violation."""
     calls, broken = parse_tool_calls(message)
+    if calls and not tools:
+        # tool calls exist but no pool was advertised — legality is not
+        # computable, degrade to unknown rather than pass/fail
+        return {"n_tool_calls": len(calls), "protocol_legal": None,
+                "first_violation": "no_tool_pool"}
     violations = [
         _schema_violations(call["name"], call["arguments"], tools) for call in calls
     ]
@@ -164,7 +173,8 @@ def aggregate(
     summary: Dict[str, Any] = {"n": len(rows), "n_clusters": len(clusters)}
     summary["semantic_score"] = _mean([r.get("semantic_score") for r in rows])
     summary["protocol_legal_rate"] = _mean(
-        [1.0 if r.get("protocol_legal") else None for r in rows]
+        [float(r["protocol_legal"]) if r.get("protocol_legal") is not None else None
+         for r in rows]
     )
     for field in ("ttft_sec", "wall_sec", "gist_tokens", "original_tokens"):
         summary[f"{field}_mean"] = _mean([r.get(field) for r in rows])

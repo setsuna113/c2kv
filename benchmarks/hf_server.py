@@ -9,15 +9,26 @@ D-experiment results (`agent/eval_agent_history_c2kv.py`,
 teacher-forced line and repair arms can later reuse the same KV operations.
 
 Layout rules (mirroring benchmarks/proxy.py + the history harness):
-  * system message: raw prefill (position 0..)
-  * message with `c2kv_key_hash`: gist KV layer-catted at the current cache
-    end; logical positions advance by the ORIGINAL token count (RoPE for the
-    gist keys was already applied at extract time with prefix_length=0 and is
-    re-rotated here by the logical start — see rotate_k_cache_rope).
+  * system message: raw prefill (position 0..), cached across requests
+  * message with `c2kv_key_hash`: gist KV appended at the current cache end;
+    logical positions advance by the ORIGINAL token count.  A message longer
+    than MAX_DOC_LENGTH is split into chunks whose gists sit at sequential
+    offsets inside the message (per-chunk rotation, harness-grid semantics).
   * plain message: sequential raw prefill with continuing position_ids.
   * generation: mock zero tokens occupy the cache slots; positions continue
-    from the logical length; `use_gist` is True iff the turn directly follows
-    gist blocks (harness c2kv-mode behavior), else False.
+    from the logical length.
+  * use_gist projection rule (matches harness :1038/:1564 and training
+    modeling_qwen3:660): once ANY gist KV is in the cache, every later
+    forward — raw prefill included — runs with the gist projections; the
+    switch is global per forward call.
+
+Historical assistant tool_calls are re-rendered into the TRAINING dialect
+(``content + "\\n\\n" + "Action:\\n" + <tool_call> blocks`` with minified
+JSON, train_data_multiturn._normal_agent_message), not the chat template's
+native tool_calls branch.
+
+usage.prompt_tokens counts only the current-turn prompt segment (the mock
+cache tokens are excluded); cache_tokens/logical_tokens carry the rest.
 
 Single model instance behind a lock; run one request at a time
 (Flask `threaded=False`).
@@ -169,8 +180,18 @@ def _parse_tool_calls(raw_text: str):
 
 @dataclass
 class GistEntry:
-    keys: List[torch.Tensor]   # per-layer (1, heads, gist_len, head_dim)
-    values: List[torch.Tensor]
+    """One compressed message, possibly split into <=MAX_DOC_LENGTH chunks.
+
+    Chunk positions are 0-based within each chunk (generate_gist always
+    builds from 0); the i-th chunk's gists logically belong at
+    ``sum(original_len of chunks < i)`` inside the message, so _append_gist
+    rotates each chunk by ``logical_start + its cumulative offset`` — the
+    sequential-accumulation semantics of the harness grid
+    (gist_utils._concat_gist_key_values), which the previous single-rotation
+    version violated (all chunks collided on one position range).
+    """
+
+    chunks: List[Dict[str, Any]]  # per-chunk: keys, values, gist_len, original_len
     gist_len: int
     original_len: int
     role: str
@@ -286,28 +307,19 @@ class C2KVServer:
         attention_mask = tokenized["attention_mask"].to(self.device)
         # repo's HF generate_gist expects (batch, seqlen)
         L = input_ids.shape[-1]
-        if L > MAX_DOC_LENGTH:  # chunk into <=768-token docs, cat gists after
-            chunks = []
-            for start in range(0, L, MAX_DOC_LENGTH):
-                chunks.append(self._extract_grid(
-                    input_ids[..., start:start + MAX_DOC_LENGTH],
-                    attention_mask[..., start:start + MAX_DOC_LENGTH], ratio,
-                ))
-            keys = [torch.cat([c["keys"][i] for c in chunks], dim=-2)
-                    for i in range(len(chunks[0]["keys"]))]
-            values = [torch.cat([c["values"][i] for c in chunks], dim=-2)
-                      for i in range(len(chunks[0]["values"]))]
-            gist_len = sum(c["gist_len"] for c in chunks)
-            original_len = sum(c["original_len"] for c in chunks)
-        else:
-            out = self._extract_grid(input_ids, attention_mask, ratio)
-            keys, values, gist_len, original_len = (
-                out["keys"], out["values"], out["gist_len"], out["original_len"])
+        chunks: List[Dict[str, Any]] = []
+        for start in range(0, L, MAX_DOC_LENGTH):
+            chunks.append(self._extract_grid(
+                input_ids[..., start:start + MAX_DOC_LENGTH],
+                attention_mask[..., start:start + MAX_DOC_LENGTH], ratio,
+            ))
+        gist_len = sum(c["gist_len"] for c in chunks)
+        original_len = sum(c["original_len"] for c in chunks)
         key_hash = hashlib.sha256(
             f"{role}\x00{ratio}\x00{text}".encode("utf-8")
         ).hexdigest()
         self.entries[key_hash] = GistEntry(
-            keys=keys, values=values, gist_len=gist_len,
+            chunks=chunks, gist_len=gist_len,
             original_len=original_len, role=role, ratio=ratio,
         )
         return {
@@ -348,7 +360,9 @@ class C2KVServer:
 
         with self.lock, torch.inference_mode():
             # normalize OpenAI-style assistant tool_calls history into the
-            # Qwen <tool_call> text form the chat template understands
+            # TRAINING dialect (train_data_multiturn._normal_agent_message):
+            #   content + "\n\n" + "Action:\n" + "\n".join(<tool_call> blocks)
+            # with minified JSON — the surface the model was trained on
             for message in body:
                 if message.get("role") == "assistant" and message.get("tool_calls"):
                     blocks = []
@@ -362,11 +376,15 @@ class C2KVServer:
                             "<tool_call>\n"
                             + json.dumps(
                                 {"name": function.get("name"), "arguments": arguments},
-                                ensure_ascii=False,
+                                ensure_ascii=False, separators=(",", ":"),
                             )
                             + "\n</tool_call>"
                         )
-                    message["content"] = (message.get("content") or "") + "\n".join(blocks)
+                    action = "Action:\n" + "\n".join(blocks)
+                    content = message.get("content") or ""
+                    message["content"] = (
+                        content + "\n\n" + action if content else action
+                    )
                     message.pop("tool_calls", None)
                 content = message.get("content")
                 if not isinstance(content, str):
@@ -386,8 +404,14 @@ class C2KVServer:
                 cache, added, _ = self._prefill_system_cached(system_ids, tools)
                 logical += added
 
-            # 2. body[:-1]: gist refs and raw messages interleaved
-            follows_gist = False
+            # 2. body[:-1]: gist refs and raw messages interleaved.
+            # use_gist rule (harness :1038/:1564, training modeling_qwen3:660):
+            # once ANY gist KV is in the cache, every later forward — raw
+            # prefill included — runs with the gist projections.  The flag is
+            # global per forward (modeling_qwen3:242-250), so a raw tail under
+            # base projections after gist content would be a regime the
+            # training pipeline never produces.
+            cache_has_gist = False
             reextracted = 0
             for message in body[:-1]:
                 key_hash = message.get("c2kv_key_hash")
@@ -409,12 +433,13 @@ class C2KVServer:
                         return {"error": f"C2KV cache miss: {key_hash}"}
                     cache = self._append_gist(cache, entry, logical)
                     logical += entry.original_len
-                    follows_gist = True
+                    cache_has_gist = True
                     continue
                 ids = _chat_template_ids(self.tokenizer, [message])
-                cache, added = self._prefill_append(cache, ids, logical, use_gist=False)
+                cache, added = self._prefill_append(
+                    cache, ids, logical, use_gist=cache_has_gist
+                )
                 logical += added
-                follows_gist = False
 
             # 3. final message + generation (harness _generate_with_prefix
             # shape: mock zeros occupy the cache slots, positions continue
@@ -434,11 +459,11 @@ class C2KVServer:
                     return {"error": f"C2KV cache miss: {key_hash}"}
                 cache = self._append_gist(cache, entry, logical)
                 logical += entry.original_len
+                cache_has_gist = True
                 prompt_ids = _chat_template_ids(
                     self.tokenizer, [{"role": "user", "content": ""}],
                     add_generation_prompt=True,
                 )
-                follows_gist = True
             else:
                 prompt_ids = _chat_template_ids(
                     self.tokenizer, [last], add_generation_prompt=True
@@ -471,7 +496,7 @@ class C2KVServer:
                 do_sample=temperature > 0,
                 temperature=max(temperature, 1e-4),
                 pad_token_id=self.tokenizer.eos_token_id,
-                use_gist=follows_gist,
+                use_gist=cache_has_gist,
             )
             if logits_processor is not None:
                 gen_kwargs["logits_processor"] = logits_processor
@@ -520,26 +545,45 @@ class C2KVServer:
         return outputs.past_key_values, input_ids.shape[1]
 
     def _append_gist(self, cache, entry: GistEntry, logical_start: int):
-        keys = []
-        values = []
-        for i, layer in enumerate(entry.keys):
-            # rotate_k_cache_rope expects (heads, seq, dim); stored keys are
-            # (1, heads, seq, dim)
-            k = rotate_k_cache_rope(
-                layer[0], logical_start, self.rope_theta, self.rope_type
-            ).unsqueeze(0)
-            keys.append(k)
-            values.append(entry.values[i])
+        """Append a message's gist chunks at sequential logical positions.
+
+        Chunk i is rotated by ``logical_start + sum(original_len of chunks
+        < i)`` — mirroring the harness grid's per-doc accumulation
+        (gist_utils._concat_gist_key_values) instead of one shared offset,
+        which used to collapse every chunk onto the same position range.
+        """
+        keys: List[List[torch.Tensor]] = []
+        values: List[List[torch.Tensor]] = []
+        offset = 0
+        for chunk in entry.chunks:
+            chunk_keys = []
+            chunk_values = []
+            for i, layer in enumerate(chunk["keys"]):
+                # rotate_k_cache_rope expects (heads, seq, dim); stored keys
+                # are (1, heads, seq, dim)
+                k = rotate_k_cache_rope(
+                    layer[0], logical_start + offset,
+                    self.rope_theta, self.rope_type,
+                ).unsqueeze(0)
+                chunk_keys.append(k)
+                chunk_values.append(chunk["values"][i])
+            keys.append(chunk_keys)
+            values.append(chunk_values)
+            offset += int(chunk["original_len"])
+        flat_keys = [torch.cat([ks[i] for ks in keys], dim=-2)
+                     for i in range(len(keys[0]))]
+        flat_values = [torch.cat([vs[i] for vs in values], dim=-2)
+                       for i in range(len(values[0]))]
         if cache is None:
             from transformers.cache_utils import DynamicCache
 
             merged = DynamicCache()
-            for k, v in zip(keys, values):
+            for k, v in zip(flat_keys, flat_values):
                 merged.update(k, v, layer_idx=len(merged.layers))
             return merged
         for i, layer in enumerate(cache.layers):
-            layer.keys = torch.cat([layer.keys, keys[i]], dim=-2)
-            layer.values = torch.cat([layer.values, values[i]], dim=-2)
+            layer.keys = torch.cat([layer.keys, flat_keys[i]], dim=-2)
+            layer.values = torch.cat([layer.values, flat_values[i]], dim=-2)
         return cache
 
 

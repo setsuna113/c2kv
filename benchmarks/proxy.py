@@ -9,17 +9,17 @@ Per request the proxy decides, per the active arm, which *history* messages
 are sent as raw text and which are replaced by a server-side gist reference
 (`c2kv_key_hash`, produced by POST /v1/c2kv/extract).  The rule for what
 counts as history: every message except the trailing block after the last
-user/tool message — i.e. the system prompt, earlier user/assistant/tool
-turns are history; the final user message and tool results of the current
-turn stay raw.
+user/tool message; system messages are history by position but always kept
+raw (never compressed).  The final user message and tool results of the
+current turn stay raw.
 
 Extract results are cached by (role, sha256(content), ratio) so multi-turn
 sessions do not re-compress the same prefix, which also keeps KV accounting
 consistent with the teacher-forced harness (one gist per history block).
 
-Timing: the proxy streams through, records per-request first-byte time and
-total time, and appends them under the response object's
-`c2kv_proxy` field plus a JSONL request log for offline TTFT/p95 analysis.
+Timing: the proxy is NON-STREAMING (one buffered request/response per call).
+It records per-request wall time and token accounting under the response
+object's `c2kv_proxy` field plus a JSONL request log; TTFT is not measured.
 """
 from __future__ import annotations
 
@@ -97,10 +97,11 @@ def _history_cutoff(messages: List[Dict[str, Any]]) -> int:
     """Index where the current (raw) block starts.
 
     Walk from the end: the trailing run that ends with the last user or tool
-    message is current; everything before it (including the system prompt)
-    is history.  A conversation whose last message is the user's is fully
-    current except system/history — matching the teacher-forced harness
-    (system + history gist, current prompt raw).
+    message is current; everything before it is history.  System messages
+    are classified as history here but are ALWAYS kept raw by _assemble
+    (system prompts are never compressed).  A conversation whose last
+    message is the user's is fully current except system/history — matching
+    the teacher-forced harness (system + history gist, current prompt raw).
     """
     last_anchor = -1
     for i in range(len(messages) - 1, -1, -1):
@@ -188,9 +189,14 @@ class ProxyHandler(BaseHTTPRequestHandler):
         out_payload["messages"] = messages
         if ARM.constrain_tools:
             out_payload["constrain_tools"] = True
-        data = _http_json(UPSTREAM, self.path, out_payload, 600)
+        try:
+            data = _http_json(UPSTREAM, self.path, out_payload, 600)
+        except (RuntimeError, URLError, OSError) as error:
+            self._send_json(502, {"error": f"upstream failed: {error}"})
+            return
         total_sec = time.perf_counter() - start
-        # Cost columns ride along on the response object.
+        # Cost columns ride along on the response object.  TTFT is NOT
+        # measured: this proxy is non-streaming (single buffered response).
         data.setdefault("c2kv_proxy", {})
         data["c2kv_proxy"].update(
             {
@@ -201,7 +207,6 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 "n_gist_messages": n_gist,
                 "assemble_sec": round(assemble_sec, 4),
                 "wall_sec": round(total_sec, 4),
-                "ttft_sec": None,  # filled by the client when streaming
             }
         )
         self._send_json(200, data)
@@ -212,6 +217,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
             with urlrequest.urlopen(f"{UPSTREAM}{self.path}", timeout=60) as resp:
                 body = resp.read()
                 self.send_response(resp.status)
+                self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
                 self.wfile.write(body)
         except OSError as error:
@@ -228,6 +234,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
             with urlrequest.urlopen(req, timeout=600) as resp:
                 body = resp.read()
                 self.send_response(resp.status)
+                self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
                 self.wfile.write(body)
         except OSError as error:

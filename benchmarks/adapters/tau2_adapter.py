@@ -37,22 +37,27 @@ def run(
     task_set: str = "airline",
     num_workers: int = 4,
     max_tasks: Optional[int] = None,
+    run_name: str = "c2kv_run",
 ) -> Dict[str, Any]:
     """Run tau2 with the agent LLM behind the arm proxy.
 
     The user simulator points at a separate full-mode endpoint (same served
     model, no compression) so only the agent's context is ever compressed.
+    Official semantics: ``--save-to NAME`` writes
+    ``<TAU2_DIR>/data/simulations/NAME/results.json``; rewards are computed
+    by ``tau2 evaluate-trajs`` into ``updated_results.json``, which collect
+    then reads.
     """
     import os
 
-    out_dir.mkdir(parents=True, exist_ok=True)
     agent_args = json.dumps(
         {"api_base": base_url.rstrip("/") + "/v1", "api_key": "EMPTY", "temperature": 0.0}
     )
     user_args = json.dumps(
         {"api_base": user_base_url.rstrip("/") + "/v1", "api_key": "EMPTY", "temperature": 0.0}
     )
-    env = {**os.environ, "NO_PROXY": "127.0.0.1,localhost", "no_proxy": "127.0.0.1,localhost"}
+    env = {**os.environ,
+           "NO_PROXY": "127.0.0.1,localhost", "no_proxy": "127.0.0.1,localhost"}
     cmd = [
         sys.executable, "-m", "tau2.cli", "run",
         "--domain", task_set.split("_")[0],
@@ -62,12 +67,21 @@ def run(
         "--user-llm", "openai/c2kv-agent",
         "--user-llm-args", user_args,
         "--max-concurrency", str(num_workers),
-        "--save-to", str(out_dir / "trajectories"),
+        "--save-to", run_name,
     ]
     if max_tasks:
         cmd += ["--num-tasks", str(max_tasks)]
     subprocess.run(cmd, cwd=TAU2_DIR, env=env, check=True)
-    return collect(out_dir)
+    sims = TAU2_DIR / "data" / "simulations" / run_name
+    subprocess.run(
+        [sys.executable, "-m", "tau2.cli", "evaluate-trajs", "-o", str(sims),
+         str(sims / "results.json")],
+        cwd=TAU2_DIR, env=env, check=True,
+    )
+    updated = sims / "updated_results.json"
+    if not updated.exists():
+        raise SystemExit(f"FATAL: tau2 evaluation produced no {updated}")
+    return collect(updated, domain=task_set.split("_")[0])
 
 
 def collect(results_path: Path, domain: str = "airline") -> Dict[str, Any]:
@@ -91,7 +105,9 @@ def collect(results_path: Path, domain: str = "airline") -> Dict[str, Any]:
         tools = [
             tool.openai_schema for tool in env.tools.get_tools().values()
         ]
-    except Exception:  # noqa: BLE001 - protocol column degrades without pool
+    except Exception as error:  # noqa: BLE001 - protocol column degrades
+        print(f"WARNING: tau2 tool pool unavailable ({error!r}); "
+              "protocol column degrades to unknown", file=sys.stderr)
         tools = []
 
     data = json.loads(results_path.read_text(encoding="utf-8"))
