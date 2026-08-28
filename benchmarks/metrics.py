@@ -31,16 +31,21 @@ BROKEN_CALL_RE = re.compile(r"<tool_call>(?:(?!</tool_call>).)*$", re.DOTALL)
 
 
 def parse_tool_calls(message: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], bool]:
-    """Return (calls, has_broken_syntax) for one assistant message."""
+    """Return (calls, has_broken_syntax) for one assistant message.
+
+    Handles both the OpenAI shape ({id, function: {name, arguments}}) and
+    tau2's flat shape ({name, arguments}).
+    """
     calls: List[Dict[str, Any]] = []
     for item in message.get("tool_calls") or []:
+        function = item.get("function") or {}
+        name = function.get("name") or item.get("name")
+        raw_args = function.get("arguments", item.get("arguments"))
         try:
-            args = json.loads(item.get("function", {}).get("arguments") or "{}")
+            args = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
         except json.JSONDecodeError:
             args = None
-        calls.append(
-            {"name": item.get("function", {}).get("name"), "arguments": args}
-        )
+        calls.append({"name": name, "arguments": args})
     text = message.get("content") or ""
     if isinstance(text, list):  # multimodal content blocks
         text = " ".join(

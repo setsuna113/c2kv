@@ -66,6 +66,9 @@ ARM_MODES = {
     "corr_re": "d_corr_recompute",
     "full": "full",
     "corr_all": "d_corr_all",
+    # Transfer-manual A1/A2 exploratory arms (2026-08-28)
+    "re_only": "d_re_only",
+    "corr_text": "d_corr_text",
 }
 DEGENERATE_REPEAT_THRESHOLD = 0.5
 KIB = 1024

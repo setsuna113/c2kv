@@ -57,10 +57,11 @@ REQUEST_LOG_PATH = ""
 _log_lock = threading.Lock()
 
 
-def _http_json(url: str, payload: Dict[str, Any], timeout: int) -> Dict[str, Any]:
+def _http_json(base_url: str, path: str, payload: Dict[str, Any], timeout: int) -> Dict[str, Any]:
     body = json.dumps(payload).encode("utf-8")
     req = urlrequest.Request(
-        url, data=body, headers={"Content-Type": "application/json"}, method="POST"
+        f"{base_url.rstrip('/')}{path}", data=body,
+        headers={"Content-Type": "application/json"}, method="POST",
     )
     with urlrequest.urlopen(req, timeout=timeout) as resp:
         return json.loads(resp.read().decode("utf-8"))
@@ -145,6 +146,8 @@ def _assemble(messages: List[Dict[str, Any]], arm: Arm, timeout: int):
         compressed = dict(message)
         compressed["content"] = content
         compressed["c2kv_key_hash"] = record["key_hash"]
+        # lets the server re-extract on cache miss (e.g. after a restart)
+        compressed["c2kv_ratio"] = arm.ratio
         out.append(compressed)
     return out, gist_tokens, original_tokens, n_gist
 
@@ -183,6 +186,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
         assemble_sec = time.perf_counter() - start
         out_payload = dict(payload)
         out_payload["messages"] = messages
+        if ARM.constrain_tools:
+            out_payload["constrain_tools"] = True
         data = _http_json(UPSTREAM, self.path, out_payload, 600)
         total_sec = time.perf_counter() - start
         # Cost columns ride along on the response object.

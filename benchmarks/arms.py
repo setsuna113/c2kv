@@ -26,6 +26,7 @@ class Arm:
     compress_history: bool
     ratio: int = 8
     hybrid_top_k: int = 0  # 0 = none raw; >0 = keep this many tail messages raw
+    constrain_tools: bool = False  # H1: xgrammar structural-tag decoding on <tool_call>
     # Reserved for repair-arm extensions (block selection, raw-KV append,
     # recompute fraction, offset correction strength).  The proxy rejects
     # arms that use these until implemented.
@@ -65,6 +66,19 @@ ARMS: Dict[str, Arm] = {
             ratio=8,
             hybrid_top_k=3,
             description="top-3 tail messages raw, earlier history gist",
+        ),
+        Arm(
+            name="cd_full",
+            compress_history=False,
+            constrain_tools=True,
+            description="H1: full raw history + xgrammar structural-tag tool-call decoding",
+        ),
+        Arm(
+            name="cd_c2kv",
+            compress_history=True,
+            ratio=8,
+            constrain_tools=True,
+            description="H1: 8x gist history + xgrammar structural-tag tool-call decoding",
         ),
     )
 }
