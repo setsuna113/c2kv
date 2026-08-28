@@ -63,6 +63,53 @@ TOOL_CALL_RE = re.compile(
 )
 
 
+def _normalize_tool_schema(value: Any) -> Any:
+    """BFCL-style schema repair before grammar compilation.
+
+    gorilla_file_system and friends declare "type": "dict" / "any" and bare
+    {"type": "list"} without item schemas — not valid JSON Schema and
+    rejected by xgrammar's converter.  Map to the closest valid form and
+    strip unsupported keywords; repair is applied to the grammar input only,
+    never to the tool definition the model sees.
+    """
+    if isinstance(value, dict):
+        out = {}
+        for key, item in value.items():
+            if key in ("$schema", "$id", "$defs"):
+                continue
+            if key == "type":
+                if isinstance(item, str):
+                    item = {
+                        "dict": "object",
+                        "any": "object",
+                        "int": "integer",
+                        "float": "number",
+                        "str": "string",
+                        "bool": "boolean",
+                        "list": "array",
+                        "tuple": "array",
+                        "None": "null",
+                    }.get(item, item)
+                elif isinstance(item, list):
+                    mapped = []
+                    for t in item:
+                        t = {
+                            "dict": "object", "any": "object", "int": "integer",
+                            "float": "number", "str": "string", "bool": "boolean",
+                            "list": "array", "tuple": "array", "None": "null",
+                        }.get(t, t)
+                        if t not in mapped:
+                            mapped.append(t)
+                    if not mapped:
+                        continue
+                    item = mapped
+            out[key] = _normalize_tool_schema(item)
+        return out
+    if isinstance(value, list):
+        return [_normalize_tool_schema(v) for v in value]
+    return value
+
+
 def cfg_vocab_size(model) -> int:
     size = getattr(model.config, "vocab_size", None)
     if size is None:
@@ -197,8 +244,15 @@ class C2KVServer:
             json.dumps(tools, sort_keys=True).encode()
         ).hexdigest()
         if key not in self._grammar_cache:
+            normalized = [
+                {
+                    "type": "function",
+                    "function": _normalize_tool_schema(t.get("function") or t),
+                }
+                for t in tools
+            ]
             tag = xgr.get_model_structural_tag(
-                "qwen_3", tools=tools, reasoning=False
+                "qwen_3", tools=normalized, reasoning=False
             )
             self._grammar_cache[key] = self._xgr_compiler.compile_structural_tag(tag)
         return self._grammar_cache[key]
