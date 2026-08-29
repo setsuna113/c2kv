@@ -12,15 +12,21 @@ k=3).  For each example this script asserts:
   3. appended raw span per-layer max-abs K/V diff (informational, 1e-4 gate);
   4. greedy decode text identical (32 tokens, temperature 0).
 
-Run on the NPU server (both model instances land on the visible device):
+Single-model sequential execution: phase A builds every D-side prefix with
+the harness model and stashes the appended spans on CPU; the model is freed
+before phase B constructs C2KVServer (its own instance), so the two stacks
+never coexist in NPU memory.
+
+Run on the NPU server:
   cd ~/c2kv-bench && python benchmarks/selfcheck_repair_vs_dharness.py \
       --model ~/checkpoints_upstream/checkpoint-1088 \
       --base-model ~/c2kv/models/Qwen3-4B-Instruct-2507 \
-      --dataset ~/c2kv-bdf/datasets/agent-llm-traces --examples 4
+      --dataset ~/c2kv/datasets/agent-llm-traces --examples 4
 """
 from __future__ import annotations
 
 import argparse
+import gc
 import sys
 from pathlib import Path
 
@@ -30,9 +36,6 @@ for p in (ROOT, ROOT / "python", ROOT / "python/inference", ROOT / "agent", ROOT
         sys.path.insert(0, str(p))
 
 import torch  # noqa: E402
-
-import eval_agent_history_c2kv as HH  # noqa: E402
-from hf_server import C2KVServer  # noqa: E402
 
 MAX_NEW_TOKENS = 32
 TENSOR_GATE = 1e-4
@@ -74,26 +77,23 @@ def harness_args(ns: argparse.Namespace):
     import contextlib
     import io
     saved = sys.argv
-    buf = io.StringIO()
     try:
         sys.argv = argv
-        with contextlib.redirect_stdout(buf):
-            args = HH.parse_args()
+        with contextlib.redirect_stdout(io.StringIO()):
+            args = __import__("eval_agent_history_c2kv").parse_args()
     finally:
         sys.argv = saved
     return args
 
 
-def openai_payload(history, current, system_prompt, tools, server, ratio, hybrid_k):
+def openai_payload(history, current, system_prompt, server, ratio, hybrid_k):
     """Mirror proxy._assemble: history compressed (tail-k raw for hybrid),
     current turn raw, content always verbatim."""
-    tail_raw = history[len(history) - hybrid_k:] if hybrid_k else []
-    raw_ids = {id(m) for m in tail_raw}
     messages = [{"role": "system", "content": system_prompt}]
-    for message in history:
+    for index, message in enumerate(history):
         role = str(message.get("role") or "user")
         content = str(message.get("content") or "")
-        if id(message) in raw_ids:
+        if hybrid_k and index >= len(history) - hybrid_k:
             messages.append({"role": role, "content": content})
             continue
         record = server.extract(content, role, ratio)
@@ -108,38 +108,6 @@ def openai_payload(history, current, system_prompt, tools, server, ratio, hybrid
     return messages
 
 
-def compare(tag, d_prefix, server_debug, tokenizer, d_text):
-    """Return list of failure strings (empty = pass)."""
-    fails = []
-    span = int(d_prefix["d_corr_span_tokens"])
-    if span != int(server_debug["repair_block_tokens"]):
-        fails.append(f"span tokens {span} != {server_debug['repair_block_tokens']}")
-    if int(server_debug["repair_doc_index"] or -1) != 0:
-        fails.append(f"doc index {server_debug['repair_doc_index']} != 0")
-    d_len = int(d_prefix["cache"].get_seq_length())
-    if d_len != int(server_debug["cache_len"]):
-        fails.append(f"cache len {d_len} != {server_debug['cache_len']}")
-    max_diff = 0.0
-    if not fails:
-        cache = server_debug["cache"]
-        for li, layer in enumerate(d_prefix["cache"].layers):
-            for name, d_t, s_t in (
-                ("k", layer.keys[..., -span:, :], cache.layers[li].keys[..., -span:, :]),
-                ("v", layer.values[..., -span:, :], cache.layers[li].values[..., -span:, :]),
-            ):
-                diff = float((d_t.float() - s_t.float()).abs().max())
-                max_diff = max(max_diff, diff)
-        if max_diff > TENSOR_GATE:
-            fails.append(f"span tensor max-abs {max_diff:.3e} > {TENSOR_GATE}")
-    server_text = tokenizer.decode(server_debug.get("new_token_ids") or [],
-                                   skip_special_tokens=False)
-    if d_text.strip() != server_text.strip():
-        fails.append(f"decode differs:\n  D      : {d_text[:160]!r}\n  server : {server_text[:160]!r}")
-    print(f"    [{tag}] span={span} cache_len={d_len} tensor_maxdiff={max_diff:.2e} "
-          f"{'PASS' if not fails else 'FAIL ' + '; '.join(fails)}")
-    return fails
-
-
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model", required=True)
@@ -150,52 +118,111 @@ def main():
     parser.add_argument("--hybrid-top-k", type=int, default=3)
     ns = parser.parse_args()
 
+    # ---------- phase A: D harness prefixes, spans stashed on CPU
+    HH = __import__("eval_agent_history_c2kv")
     hargs = harness_args(ns)
     device = HH._setup_device("npu")
     tokenizer = HH._load_tokenizer(hargs)
     examples, _ = HH._load_examples(hargs, tokenizer)
     picked = []
+    seen = set()
     for example in examples:
         history = HH._history_messages(tokenizer, example, hargs)
-        if example.tools and len(history) >= ns.hybrid_top_k + 3 and example.qid not in {e.qid for e in picked}:
+        if (example.tools and len(history) >= ns.hybrid_top_k + 3
+                and example.qid not in seen):
             current = HH._current_messages(example)
             if len(current) == 1 and current[0].get("role") == "user":
                 picked.append(example)
+                seen.add(example.qid)
         if len(picked) >= ns.examples:
             break
     if not picked:
         raise SystemExit("FATAL: no example with tools + single-user current turn found")
     print(f"picked {len(picked)} examples: {[e.qid for e in picked]}")
 
-    model_args = hargs
-    model = HH._load_model(model_args, tokenizer, device)
-    server = C2KVServer(ns.model, "npu", tokenizer_path=ns.base_model)
-
-    all_fails = []
+    model = HH._load_model(hargs, tokenizer, device)
+    stash = []  # {qid, base, span_tokens, cache_len, span_kv (cpu), text}
+    HH.CORR_K_POLICY = "offset:0"
     for example in picked:
         history = HH._history_messages(tokenizer, example, hargs)
         current = HH._current_messages(example)
-        print(f"== {example.qid} (docs={len(history)})")
-        tools = example.tools or None
         for base, hybrid_k in (("c2kv", 0), ("hybrid", ns.hybrid_top_k)):
             HH.D_HYBRID_TOP_K = hybrid_k or None
-            HH.CORR_K_POLICY = "offset:0"
             prefix, skip = HH._build_d_intervene_prefix(
                 model, tokenizer, example, hargs, "d_corr", None
             )
             if prefix is None:
-                print(f"    [{base}] D-side skip: {skip}")
+                print(f"  {example.qid} [{base}] D-side skip: {skip}")
                 continue
             row = HH._generate_with_prefix(model, tokenizer, example, prefix, hargs)
-            payload = openai_payload(history, current, example.system_prompt,
-                                     tools, server, 8, hybrid_k)
-            server.chat(payload, max_new_tokens=MAX_NEW_TOKENS, temperature=0.0,
-                        tools=tools, repair={"policy": "first"})
-            all_fails += compare(f"{base}/corr@first", prefix, server.last_debug,
-                                 tokenizer, str(row.get("prediction") or ""))
+            span = int(prefix["d_corr_span_tokens"])
+            span_kv = [
+                (
+                    layer.keys[..., -span:, :].to("cpu").clone(),
+                    layer.values[..., -span:, :].to("cpu").clone(),
+                )
+                for layer in prefix["cache"].layers
+            ]
+            stash.append({
+                "qid": example.qid, "base": base,
+                "history": history, "current": current,
+                "system_prompt": example.system_prompt, "tools": example.tools or None,
+                "span_tokens": span,
+                "cache_len": int(prefix["cache"].get_seq_length()),
+                "span_kv": span_kv,
+                "text": str(row.get("prediction") or ""),
+            })
+            del prefix, row
+            HH._clear_device_cache("npu")
     HH.D_HYBRID_TOP_K = None
-    if all_fails:
-        print(f"\nSELFCHECK FAIL ({len(all_fails)} issues)")
+    del model
+    gc.collect()
+    HH._clear_device_cache("npu")
+    print(f"phase A done: {len(stash)} stashed prefixes")
+
+    # ---------- phase B: hf_server repair arm, one model at a time
+    from hf_server import C2KVServer  # noqa: E402  (imports torch_npu stack)
+
+    server = C2KVServer(ns.model, "npu", tokenizer_path=ns.base_model)
+    fails = []
+    for item in stash:
+        hybrid_k = ns.hybrid_top_k if item["base"] == "hybrid" else 0
+        payload = openai_payload(item["history"], item["current"],
+                                 item["system_prompt"], server, 8, hybrid_k)
+        server.chat(payload, max_new_tokens=MAX_NEW_TOKENS, temperature=0.0,
+                    tools=item["tools"], repair={"policy": "first"})
+        deb = server.last_debug
+        tag = f"{item['qid']}/{item['base']}"
+        local = []
+        if item["span_tokens"] != int(deb["repair_block_tokens"]):
+            local.append(f"span {item['span_tokens']} != {deb['repair_block_tokens']}")
+        if int(deb["repair_doc_index"] or -1) != 0:
+            local.append(f"doc index {deb['repair_doc_index']} != 0")
+        if item["cache_len"] != int(deb["cache_len"]):
+            local.append(f"cache len {item['cache_len']} != {deb['cache_len']}")
+        max_diff = 0.0
+        if not local:
+            for li, (d_k, d_v) in enumerate(item["span_kv"]):
+                s_layer = deb["cache"].layers[li]
+                for d_t, s_t in (
+                    (d_k, s_layer.keys[..., -item["span_tokens"]:, :]),
+                    (d_v, s_layer.values[..., -item["span_tokens"]:, :]),
+                ):
+                    diff = float((d_t.float() - s_t.to("cpu").float()).abs().max())
+                    max_diff = max(max_diff, diff)
+            if max_diff > TENSOR_GATE:
+                local.append(f"tensor max-abs {max_diff:.3e} > {TENSOR_GATE}")
+        server_text = tokenizer.decode(deb.get("new_token_ids") or [],
+                                        skip_special_tokens=False)
+        if item["text"].strip() != server_text.strip():
+            local.append(f"decode differs:\n  D      : {item['text'][:160]!r}\n"
+                         f"  server : {server_text[:160]!r}")
+        print(f"  [{tag}] span={item['span_tokens']} cache_len={item['cache_len']} "
+              f"tensor_maxdiff={max_diff:.2e} {'PASS' if not local else 'FAIL ' + '; '.join(local)}")
+        fails += local
+
+    if fails:
+        print(f"\nSELFCHECK FAIL ({len(fails)} issues)")
         sys.exit(1)
     print("\nSELFCHECK PASS: repair arm reproduces the D harness on both bases")
 
