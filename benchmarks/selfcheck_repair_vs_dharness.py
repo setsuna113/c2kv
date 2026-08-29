@@ -12,21 +12,25 @@ k=3).  For each example this script asserts:
   3. appended raw span per-layer max-abs K/V diff (informational, 1e-4 gate);
   4. greedy decode text identical (32 tokens, temperature 0).
 
-Single-model sequential execution: phase A builds every D-side prefix with
-the harness model and stashes the appended spans on CPU; the model is freed
-before phase B constructs C2KVServer (its own instance), so the two stacks
-never coexist in NPU memory.
+Two-process execution (a single 4B instance never coexists with the other):
+phase A builds every D-side prefix with the harness model, stashes spans and
+ledger on CPU to a file, and EXITS; phase B is a fresh process that loads the
+stash and drives C2KVServer.  In-process del+empty_cache proved unreliable
+(eager-attention transients kept ~59GB active and the second model OOMed).
 
 Run on the NPU server:
-  cd ~/c2kv-bench && python benchmarks/selfcheck_repair_vs_dharness.py \
+  cd ~/c2kv-bench
+  python benchmarks/selfcheck_repair_vs_dharness.py --phase a --stash /tmp/hxd_stash.pt \
       --model ~/checkpoints_upstream/checkpoint-1088 \
       --base-model ~/c2kv/models/Qwen3-4B-Instruct-2507 \
       --dataset ~/c2kv/datasets/agent-llm-traces --examples 4
+  python benchmarks/selfcheck_repair_vs_dharness.py --phase b --stash /tmp/hxd_stash.pt \
+      --model ~/checkpoints_upstream/checkpoint-1088 \
+      --base-model ~/c2kv/models/Qwen3-4B-Instruct-2507
 """
 from __future__ import annotations
 
 import argparse
-import gc
 import sys
 from pathlib import Path
 
@@ -34,8 +38,6 @@ ROOT = Path(__file__).resolve().parents[1]
 for p in (ROOT, ROOT / "python", ROOT / "python/inference", ROOT / "agent", ROOT):
     if str(p) not in sys.path:
         sys.path.insert(0, str(p))
-
-import torch  # noqa: E402
 
 MAX_NEW_TOKENS = 32
 TENSOR_GATE = 1e-4
@@ -86,39 +88,8 @@ def harness_args(ns: argparse.Namespace):
     return args
 
 
-def openai_payload(history, current, system_prompt, server, ratio, hybrid_k):
-    """Mirror proxy._assemble: history compressed (tail-k raw for hybrid),
-    current turn raw, content always verbatim."""
-    messages = [{"role": "system", "content": system_prompt}]
-    for index, message in enumerate(history):
-        role = str(message.get("role") or "user")
-        content = str(message.get("content") or "")
-        if hybrid_k and index >= len(history) - hybrid_k:
-            messages.append({"role": role, "content": content})
-            continue
-        record = server.extract(content, role, ratio)
-        messages.append({
-            "role": role, "content": content,
-            "c2kv_key_hash": record["key_hash"], "c2kv_ratio": ratio,
-        })
-    messages.extend(
-        {"role": str(m.get("role") or "user"), "content": str(m.get("content") or "")}
-        for m in current
-    )
-    return messages
-
-
-def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--model", required=True)
-    parser.add_argument("--base-model", required=True)
-    parser.add_argument("--dataset", required=True)
-    parser.add_argument("--examples", type=int, default=4)
-    parser.add_argument("--attn-impl", default="eager")
-    parser.add_argument("--hybrid-top-k", type=int, default=3)
-    ns = parser.parse_args()
-
-    # ---------- phase A: D harness prefixes, spans stashed on CPU
+def phase_a(ns: argparse.Namespace) -> None:
+    import torch  # noqa: F401
     HH = __import__("eval_agent_history_c2kv")
     hargs = harness_args(ns)
     device = HH._setup_device("npu")
@@ -141,7 +112,7 @@ def main():
     print(f"picked {len(picked)} examples: {[e.qid for e in picked]}")
 
     model = HH._load_model(hargs, tokenizer, device)
-    stash = []  # {qid, base, span_tokens, cache_len, span_kv (cpu), text}
+    stash = []
     HH.CORR_K_POLICY = "offset:0"
     for example in picked:
         history = HH._history_messages(tokenizer, example, hargs)
@@ -175,18 +146,22 @@ def main():
             del prefix, row
             HH._clear_device_cache("npu")
     HH.D_HYBRID_TOP_K = None
-    del model
-    gc.collect()
-    HH._clear_device_cache("npu")
-    print(f"phase A done: {len(stash)} stashed prefixes")
+    torch_save(stash, ns.stash)
+    print(f"phase A done: {len(stash)} stashed prefixes -> {ns.stash}")
 
-    # ---------- phase B: hf_server repair arm, one model at a time
-    from hf_server import C2KVServer  # noqa: E402  (imports torch_npu stack)
 
+def phase_b(ns: argparse.Namespace) -> None:
+    import torch  # noqa: F401
+    from hf_server import C2KVServer  # noqa: E402
+
+    stash = torch_load(ns.stash)
+    tokenizer_dir = ns.base_model
+    from transformers import AutoTokenizer
+    tokenizer = AutoTokenizer.from_pretrained(tokenizer_dir, local_files_only=True)
     server = C2KVServer(ns.model, "npu", tokenizer_path=ns.base_model)
     fails = []
     for item in stash:
-        hybrid_k = ns.hybrid_top_k if item["base"] == "hybrid" else 0
+        hybrid_k = item.get("hybrid_top_k") or (3 if item["base"] == "hybrid" else 0)
         payload = openai_payload(item["history"], item["current"],
                                  item["system_prompt"], server, 8, hybrid_k)
         server.chat(payload, max_new_tokens=MAX_NEW_TOKENS, temperature=0.0,
@@ -225,6 +200,57 @@ def main():
         print(f"\nSELFCHECK FAIL ({len(fails)} issues)")
         sys.exit(1)
     print("\nSELFCHECK PASS: repair arm reproduces the D harness on both bases")
+
+
+def openai_payload(history, current, system_prompt, server, ratio, hybrid_k):
+    """Mirror proxy._assemble: history compressed (tail-k raw for hybrid),
+    current turn raw, content always verbatim."""
+    messages = [{"role": "system", "content": system_prompt}]
+    for index, message in enumerate(history):
+        role = str(message.get("role") or "user")
+        content = str(message.get("content") or "")
+        if hybrid_k and index >= len(history) - hybrid_k:
+            messages.append({"role": role, "content": content})
+            continue
+        record = server.extract(content, role, ratio)
+        messages.append({
+            "role": role, "content": content,
+            "c2kv_key_hash": record["key_hash"], "c2kv_ratio": ratio,
+        })
+    messages.extend(
+        {"role": str(m.get("role") or "user"), "content": str(m.get("content") or "")}
+        for m in current
+    )
+    return messages
+
+
+def torch_save(obj, path: str) -> None:
+    import torch
+    torch.save(obj, path)
+
+
+def torch_load(path: str):
+    import torch
+    return torch.load(path, weights_only=False)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--phase", choices=["a", "b"], required=True)
+    parser.add_argument("--stash", required=True)
+    parser.add_argument("--model", required=True)
+    parser.add_argument("--base-model", required=True)
+    parser.add_argument("--dataset", default="")
+    parser.add_argument("--examples", type=int, default=4)
+    parser.add_argument("--attn-impl", default="eager")
+    parser.add_argument("--hybrid-top-k", type=int, default=3)
+    ns = parser.parse_args()
+    if ns.phase == "a":
+        if not ns.dataset:
+            raise SystemExit("phase a needs --dataset")
+        phase_a(ns)
+    else:
+        phase_b(ns)
 
 
 if __name__ == "__main__":
