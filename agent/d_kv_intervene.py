@@ -74,6 +74,11 @@ ARM_MODES = {
     "splice_keep": "d_splice_keep",
     "splice_rep": "d_splice_rep",
 }
+# Hybrid-x-D combo (2026-08-29): arms that may run on --base hybrid.  The
+# hybrid base (tail-k raw, gist_first layout, docs/hybrid_spec.md) preserves
+# original offsets, so the append machinery is unchanged; the splice/recompute
+# families pre-date it and stay pure-c2kv.  `full` is base-independent.
+HYBRID_BASE_ARMS = {"none", "sham", "corr", "corr_all", "sham_mech", "full"}
 PLAN_REQUIRED_ARMS = {"sham"}
 PLAN_USING_ARMS = {"sham", "corr", "corr_re", "corr_all", "sham_mech"}
 # d_re_only and d_corr_text read no plan payload and are not prereg arms.
@@ -202,6 +207,8 @@ def _d_args(args: argparse.Namespace) -> Any:
         "--generate_attn_impl", args.attn_impl,
         "--device_type", args.device_type,
         "--override_ratio", str(args.ratio),
+        "--hybrid_top_k", str(args.hybrid_top_k),
+        "--hybrid_layout", "gist_first",
     ]
     if args.split_manifest_file:
         argv += ["--split_manifest_file", args.split_manifest_file]
@@ -555,6 +562,18 @@ def _downstream_rows(
 
 def evaluate(args: argparse.Namespace) -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", datefmt="%H:%M:%S")
+    if args.base == "hybrid" and args.arm not in HYBRID_BASE_ARMS:
+        raise SystemExit(
+            f"FATAL: arm {args.arm!r} is not supported on --base hybrid "
+            f"(supported: {sorted(HYBRID_BASE_ARMS)}). The splice/recompute "
+            "families pre-date the hybrid base; re-extract triggers on the "
+            "hybrid base before extending them."
+        )
+    if args.base == "c2kv" and args.hybrid_top_k != 3:
+        raise SystemExit(
+            "FATAL: --hybrid_top_k only applies to --base hybrid "
+            "(the pure c2kv base compresses every history doc)."
+        )
     frozen = _bind_frozen_state(args)
     code_sha: Optional[str] = None
     if args.downstream_turns:
@@ -617,8 +636,10 @@ def evaluate(args: argparse.Namespace) -> None:
     if args.max_qids:
         qids = qids[: args.max_qids]
     logger.info(
-        "arm=%s mode=%s qids=%d manifest_sha=%s… plan_sha=%s",
-        args.arm, ARM_MODES[args.arm], len(qids), frozen["manifest_sha256"][:16],
+        "arm=%s mode=%s base=%s hybrid_top_k=%s qids=%d manifest_sha=%s… plan_sha=%s",
+        args.arm, ARM_MODES[args.arm], args.base,
+        args.hybrid_top_k if args.base == "hybrid" else "-",
+        len(qids), frozen["manifest_sha256"][:16],
         (frozen["plan_sha256"] or "none")[:16],
     )
 
@@ -651,6 +672,16 @@ def evaluate(args: argparse.Namespace) -> None:
     HH.CORR_K_POLICY = args.corr_k_policy
     if args.corr_k_policy != "median":
         logger.info("K1 corr_k_policy=%s (plan k* pin bypassed)", args.corr_k_policy)
+    if args.base == "hybrid":
+        recorded_k = (manifest.get("kv_recipe") or {}).get("hybrid_top_k")
+        if recorded_k is not None and int(recorded_k) != int(args.hybrid_top_k):
+            raise SystemExit(
+                f"FATAL: hybrid_top_k mismatch — the trigger manifest was frozen at "
+                f"k={recorded_k}, this run passes {args.hybrid_top_k}. A different "
+                "tail size changes which blocks are compressed, so k* would no "
+                "longer name the block whose failure defined the trigger."
+            )
+    HH.D_HYBRID_TOP_K = args.hybrid_top_k if args.base == "hybrid" else None
     if args.arm in PLAN_REQUIRED_ARMS:
         without_payload = [q for q in qids if not HH.D_INTERVENE.get(q, {}).get("sham_token_ids")]
         if without_payload:
@@ -659,6 +690,11 @@ def evaluate(args: argparse.Namespace) -> None:
             )
 
     mode = ARM_MODES[args.arm]
+    if args.base == "hybrid" and args.arm == "none":
+        # The hybrid base IS the battery hybrid mode — same single builder
+        # (_build_hybrid_prefix), so arm none on hybrid reproduces the plain
+        # hybrid rows by construction (the combo self-check).
+        mode = "hybrid"
     device = HH._setup_device(args.device_type)
     model_args = copy.copy(hargs)
     if args.arm == "full":
@@ -722,6 +758,8 @@ def evaluate(args: argparse.Namespace) -> None:
             for item in rows:
                 item["d_arm"] = args.arm
                 item["d_mode"] = mode
+                item["d_base"] = args.base
+                item["d_hybrid_top_k"] = args.hybrid_top_k if args.base == "hybrid" else None
                 item["bundle_manifest_sha256"] = frozen["manifest_sha256"]
                 item["sham_plan_sha256"] = frozen["plan_sha256"]
                 item["attn_impl_runtime"] = attn_runtime
@@ -764,6 +802,16 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         "--corr_k_policy",
         default="median",
         help="K1 erratum block selection: median (prereg default), last, or offset:<j>",
+    )
+    parser.add_argument(
+        "--base", choices=["c2kv", "hybrid"], default="c2kv",
+        help="Base prefix the D arms intervene on: pure c2kv (historical "
+        "default) or hybrid tail-k raw (gist_first layout, docs/hybrid_spec.md). "
+        "arm none on the hybrid base runs the battery hybrid mode itself.",
+    )
+    parser.add_argument(
+        "--hybrid_top_k", type=int, default=3,
+        help="Tail docs kept raw under --base hybrid.",
     )
     parser.add_argument("--manifest", default="./configs/bdf_pilot/d_cw_manifest.json")
     parser.add_argument("--bundles", default="./results/d/bundles_batch_tf.jsonl")

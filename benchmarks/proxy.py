@@ -189,6 +189,11 @@ class ProxyHandler(BaseHTTPRequestHandler):
         out_payload["messages"] = messages
         if ARM.constrain_tools:
             out_payload["constrain_tools"] = True
+        if ARM.repair:
+            # repair arm (docs/hybrid_spec.md): hf_server resolves the policy
+            # over the compressed chunks it assembles (it owns chunking and
+            # the logical ledger)
+            out_payload["c2kv_repair"] = dict(ARM.repair)
         try:
             data = _http_json(UPSTREAM, self.path, out_payload, 600)
         except (RuntimeError, URLError, OSError) as error:
@@ -209,6 +214,12 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 "wall_sec": round(total_sec, 4),
             }
         )
+        # surface the server-side repair cost columns when present
+        upstream_c2kv = data.get("c2kv") or {}
+        for key in ("repair_policy", "repair_block_tokens",
+                    "repair_doc_index", "repair_prefill_sec"):
+            if key in upstream_c2kv:
+                data["c2kv_proxy"][key] = upstream_c2kv[key]
         self._send_json(200, data)
         self._log_request(payload, data, gist_tokens, original_tokens, n_gist, total_sec)
 
@@ -264,6 +275,11 @@ class ProxyHandler(BaseHTTPRequestHandler):
             "usage": response.get("usage"),
             "finish_reason": (response.get("choices") or [{}])[0].get("finish_reason"),
         }
+        upstream_c2kv = response.get("c2kv") or {}
+        for key in ("repair_policy", "repair_block_tokens",
+                    "repair_doc_index", "repair_prefill_sec"):
+            if key in upstream_c2kv:
+                row[key] = upstream_c2kv[key]
         with _log_lock:
             with open(REQUEST_LOG_PATH, "a", encoding="utf-8") as handle:
                 handle.write(json.dumps(row, ensure_ascii=False) + "\n")

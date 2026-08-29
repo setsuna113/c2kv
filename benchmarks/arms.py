@@ -1,18 +1,19 @@
 """Arm registry for the modular benchmark layer.
 
 An arm fully describes how conversation history reaches the model, so the
-proxy and the metrics layer share one source of truth.  Semantics mirror
-agent/api/eval_agent_history_sglang_api.py:
+proxy and the metrics layer share one source of truth.  Hybrid semantics are
+defined once in docs/hybrid_spec.md (canonical gist_first layout):
 
 * full    — every message is sent as raw text.
 * c2kv    — every history message is compressed via /v1/c2kv/extract and
             referenced by c2kv_key_hash; the current turn stays raw.
-* hybrid  — top-k tail of history stays raw, the rest is compressed.
-
-Repair arms (corr / corr_re / splice_keep / splice_rep / offset / ...) will
-be added here once their server-side KV primitives exist in the SGLang fork;
-each entry then declares which history block keeps/gets raw KV in addition
-to the gist reference.
+* hybrid  — top-k tail of history stays raw, the rest is compressed
+            (hybrid / hybrid_k1 / hybrid_k5 = k 3/1/5).
+* *_repair — corr@first on the compressed prefix (docs/hybrid_spec.md
+            "Repair interaction"): the server appends the raw KV of the
+            policy-selected compressed history block at its original logical
+            offset, the bench port of the D-harness `--arm corr
+            --corr_k_policy offset:0` arm.
 """
 from __future__ import annotations
 
@@ -27,9 +28,11 @@ class Arm:
     ratio: int = 8
     hybrid_top_k: int = 0  # 0 = none raw; >0 = keep this many tail messages raw
     constrain_tools: bool = False  # H1: xgrammar structural-tag decoding on <tool_call>
-    # Reserved for repair-arm extensions (block selection, raw-KV append,
-    # recompute fraction, offset correction strength).  The proxy rejects
-    # arms that use these until implemented.
+    # Repair-arm extension (docs/hybrid_spec.md "Repair interaction"):
+    # {"policy": "first" | "offset:<j>"} — the proxy forwards it as the
+    # request-level "c2kv_repair" field and hf_server appends the raw KV of
+    # the selected COMPRESSED history block at its original logical offset
+    # (the bench port of D-harness corr / --corr_k_policy offset:<j>).
     repair: Optional[Dict[str, object]] = None
     description: str = ""
 
@@ -65,7 +68,36 @@ ARMS: Dict[str, Arm] = {
             compress_history=True,
             ratio=8,
             hybrid_top_k=3,
-            description="top-3 tail messages raw, earlier history gist",
+            description="hybrid k=3: top-3 tail messages raw, earlier history gist (docs/hybrid_spec.md)",
+        ),
+        Arm(
+            name="hybrid_k1",
+            compress_history=True,
+            ratio=8,
+            hybrid_top_k=1,
+            description="hybrid k=1: top-1 tail message raw, earlier history gist",
+        ),
+        Arm(
+            name="hybrid_k5",
+            compress_history=True,
+            ratio=8,
+            hybrid_top_k=5,
+            description="hybrid k=5: top-5 tail messages raw, earlier history gist",
+        ),
+        Arm(
+            name="c2kv_repair",
+            compress_history=True,
+            ratio=8,
+            repair={"policy": "first"},
+            description="c2kv 8x + corr@first: raw KV of the first compressed history block appended at its original offset",
+        ),
+        Arm(
+            name="hybrid_repair",
+            compress_history=True,
+            ratio=8,
+            hybrid_top_k=3,
+            repair={"policy": "first"},
+            description="hybrid k=3 + corr@first on the compressed prefix",
         ),
         Arm(
             name="cd_full",

@@ -350,8 +350,26 @@ class C2KVServer:
     # ---------------- chat ----------------
     def chat(self, messages: List[Dict[str, Any]], max_new_tokens: int,
              temperature: float, tools: Optional[List[Dict[str, Any]]] = None,
-             constrain: bool = False):
+             constrain: bool = False,
+             repair: Optional[Dict[str, Any]] = None):
         t0 = time.perf_counter()
+        # repair arm (docs/hybrid_spec.md "Repair interaction"): policy picks
+        # the compressed history chunk whose raw KV gets appended at its
+        # original logical offset.  "first" == D harness corr@first.
+        repair_policy: Optional[str] = None
+        repair_target = 0
+        if repair:
+            policy = str(repair.get("policy") or "first")
+            if policy == "first":
+                repair_target = 0
+            elif policy.startswith("offset:"):
+                try:
+                    repair_target = int(policy.split(":", 1)[1])
+                except ValueError:
+                    return {"error": f"c2kv_repair: bad offset policy {policy!r}"}
+            else:
+                return {"error": f"c2kv_repair: unknown policy {policy!r}"}
+            repair_policy = policy
         system_messages = [m for m in messages if m.get("role") == "system"]
         body = [m for m in messages if m.get("role") != "system"]
         if not body:
@@ -395,12 +413,14 @@ class C2KVServer:
             # the harness's _prefill_system); cached across requests
             cache = None
             logical = 0
+            repair_system_ids: Optional[List[int]] = None
             if system_text or tools:
                 system_ids = _chat_template_ids(
                     self.tokenizer,
                     [{"role": "system", "content": system_text}],
                     tools=tools, keep_bos=True,
                 )
+                repair_system_ids = system_ids
                 cache, added, _ = self._prefill_system_cached(system_ids, tools)
                 logical += added
 
@@ -413,6 +433,8 @@ class C2KVServer:
             # training pipeline never produces.
             cache_has_gist = False
             reextracted = 0
+            # compressed history in conversation order, for the repair arm
+            compressed: List[Tuple[Dict[str, Any], GistEntry]] = []
             for message in body[:-1]:
                 key_hash = message.get("c2kv_key_hash")
                 if key_hash:
@@ -434,12 +456,33 @@ class C2KVServer:
                     cache = self._append_gist(cache, entry, logical)
                     logical += entry.original_len
                     cache_has_gist = True
+                    compressed.append((message, entry))
                     continue
                 ids = _chat_template_ids(self.tokenizer, [message])
                 cache, added = self._prefill_append(
                     cache, ids, logical, use_gist=cache_has_gist
                 )
                 logical += added
+
+            # 2.5 repair arm: append the raw KV of the policy-selected
+            # compressed history block onto the assembled prefix (its gists
+            # already advanced `logical`, so the span re-occupies its own
+            # logical range at the physical cache end; decode positions are
+            # untouched).  Short conversations with nothing compressed yet
+            # are a legitimate no-op.
+            repair_block_tokens = 0
+            repair_prefill_sec = 0.0
+            repair_doc_index: Optional[int] = None
+            if repair_policy is not None and compressed:
+                try:
+                    cache, repair_block_tokens, repair_prefill_sec = (
+                        self._append_raw_block(
+                            cache, repair_system_ids, tools, compressed, repair_target
+                        )
+                    )
+                    repair_doc_index = repair_target
+                except ValueError as error:
+                    return {"error": f"c2kv_repair: {error}"}
 
             # 3. final message + generation (harness _generate_with_prefix
             # shape: mock zeros occupy the cache slots, positions continue
@@ -479,6 +522,18 @@ class C2KVServer:
                 dtype=torch.long, device=self.device,
             ).unsqueeze(0)
             self._set_impl(GIST_IMPL)
+            # prefix-level debug snapshot for the cross-check harness
+            # (benchmarks/selfcheck_repair_vs_dharness.py); harmless to
+            # normal serving — plain attribute, read after chat() returns.
+            self.last_debug = {
+                "logical": logical,
+                "cache_len": cache_len,
+                "cache_has_gist": cache_has_gist,
+                "repair_policy": repair_policy,
+                "repair_block_tokens": repair_block_tokens,
+                "repair_doc_index": repair_doc_index,
+                "cache": cache,
+            }
             logits_processor = None
             if constrain and tools:
                 from xgrammar.contrib import hf as xgr_hf
@@ -503,6 +558,8 @@ class C2KVServer:
             outputs = self.model.generate(**gen_kwargs)
             generate_sec = time.perf_counter() - t_gen
             new_tokens = outputs[0][input_ids.shape[1]:]
+            if hasattr(self, "last_debug"):
+                self.last_debug["new_token_ids"] = [int(t) for t in new_tokens]
             raw_text = self.tokenizer.decode(new_tokens, skip_special_tokens=False)
             content, tool_calls = _parse_tool_calls(raw_text)
             text = content if content else self.tokenizer.decode(
@@ -517,6 +574,10 @@ class C2KVServer:
             "prompt_tokens": len(prompt_ids),
             "cache_tokens": cache_len,
             "logical_tokens": logical,
+            "repair_policy": repair_policy,
+            "repair_block_tokens": repair_block_tokens,
+            "repair_doc_index": repair_doc_index,
+            "repair_prefill_sec": round(repair_prefill_sec, 4),
             "generate_sec": round(generate_sec, 4),
             "wall_sec": round(time.perf_counter() - t0, 4),
         }
@@ -586,6 +647,72 @@ class C2KVServer:
             layer.values = torch.cat([layer.values, flat_values[i]], dim=-2)
         return cache
 
+    def _append_raw_block(self, cache, system_ids, tools,
+                          compressed: List[Tuple[Dict[str, Any], "GistEntry"]],
+                          target_chunk: int):
+        """corr append — raw KV of a compressed history block (docs/hybrid_spec.md).
+
+        Mirrors the D harness d_corr pass (eval_agent_history_c2kv.py
+        _build_d_intervene_prefix): a scratch cache prefills the system prompt
+        and then the raw text of every compressed message up to and including
+        the target chunk, at the ORIGINAL logical offsets (use_gist=False —
+        the scratch cache holds no gist).  The target chunk's span — already
+        carrying its original RoPE phases — is concatenated onto the request
+        cache end unrotated.  Chunk indices enumerate entry.chunks across
+        ``compressed`` in conversation order.
+
+        Returns (cache, block_tokens, prefill_sec); raises ValueError when
+        target_chunk is out of range.
+        """
+        t0 = time.perf_counter()
+        n_chunks = sum(len(entry.chunks) for _, entry in compressed)
+        if not 0 <= target_chunk < n_chunks:
+            raise ValueError(
+                f"offset {target_chunk} out of range (0..{n_chunks - 1})"
+            )
+        with torch.inference_mode():
+            if system_ids is not None:
+                raw_cache, system_length, _ = self._prefill_system_cached(
+                    system_ids, tools
+                )
+            else:
+                raw_cache, system_length = None, 0
+            logical = system_length
+            block_tokens = 0
+            remaining = target_chunk + 1  # chunks left to prefill
+            for message, entry in compressed:
+                if remaining <= 0:
+                    break
+                tokenized = tokenize_for_reuse(
+                    self.tokenizer, [str(message.get("content") or "")],
+                    keep_bos=False, role=str(message.get("role") or "user"),
+                )
+                ids = tokenized["input_ids"][0].tolist()
+                pos = 0
+                for chunk in entry.chunks:
+                    if remaining <= 0:
+                        break
+                    chunk_len = int(chunk["original_len"])
+                    chunk_ids = ids[pos: pos + chunk_len]
+                    raw_cache, _ = self._prefill_append(
+                        raw_cache, chunk_ids, logical, use_gist=False
+                    )
+                    logical += len(chunk_ids)
+                    pos += chunk_len
+                    block_tokens = len(chunk_ids)
+                    remaining -= 1
+            # the target chunk is the tail of the scratch cache; slice it out
+            span_keys = [layer.keys[..., -block_tokens:, :].clone()
+                         for layer in raw_cache.layers]
+            span_values = [layer.values[..., -block_tokens:, :].clone()
+                           for layer in raw_cache.layers]
+            del raw_cache
+            for i, layer in enumerate(cache.layers):
+                layer.keys = torch.cat([layer.keys, span_keys[i]], dim=-2)
+                layer.values = torch.cat([layer.values, span_values[i]], dim=-2)
+            del span_keys, span_values
+        return cache, block_tokens, time.perf_counter() - t0
+
 
 SERVER: Optional[C2KVServer] = None
 
@@ -625,6 +752,7 @@ def chat_completions():
             temperature=float(data.get("temperature") or 0.0),
             tools=data.get("tools"),
             constrain=bool(data.get("constrain_tools")),
+            repair=data.get("c2kv_repair"),
         )
     except Exception as error:  # noqa: BLE001
         import traceback

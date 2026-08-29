@@ -1704,6 +1704,14 @@ D_INTERVENE: Dict[str, Dict[str, Any]] = {}
 # the prereg default; see _build_d_intervene_prefix).
 CORR_K_POLICY = "median"
 
+# Hybrid base (hybrid-x-D combo, 2026-08-29): None = pure c2kv base (the
+# historical D default); an int k = keep the last k docs raw and compress the
+# rest, with the base built by _build_hybrid_prefix (gist_first layout, see
+# docs/hybrid_spec.md).  Because gist_first preserves original offsets, the
+# erratum/append machinery below is unchanged: offsets stay the original
+# absolute positions and the span lands at the end unrotated.
+D_HYBRID_TOP_K: Optional[int] = None
+
 D_INTERVENE_MODES = {
     "d_sham_neutral",
     "d_corr",
@@ -1883,6 +1891,18 @@ def _build_d_intervene_prefix(
     if policy == "median" and planned_k is not None and int(planned_k) != k_star:
         return None, f"d_plan_k_star_mismatch:{int(planned_k)}!={k_star}"
 
+    # Hybrid-x-D combo (2026-08-29): on the hybrid base the last k docs are
+    # raw and the erratum must live in the compressed prefix [0, T-k).
+    hybrid_top_k = D_HYBRID_TOP_K
+    hybrid_prefix: Optional[Dict[str, Any]] = None
+    if hybrid_top_k is not None:
+        if mode not in ("d_sham_neutral", "d_corr", "d_sham_mech", "d_corr_all"):
+            return None, f"d_hybrid_base_unsupported_mode:{mode}"
+        if n_docs - hybrid_top_k <= 0:
+            return None, f"d_hybrid_no_compressed_docs:{n_docs}docs-k{hybrid_top_k}"
+        if k_star >= n_docs - hybrid_top_k:
+            return None, f"d_hybrid_k_star_in_raw_tail:{k_star}/{n_docs - hybrid_top_k}"
+
     system_ids = _chat_template_ids(
         tokenizer,
         [{"role": "system", "content": example.system_prompt}],
@@ -1988,31 +2008,54 @@ def _build_d_intervene_prefix(
             "d_splice_in_place": True,
         }, None
 
-    if mode in ("d_corr_recompute", "d_re_only"):
-        grid = _grid_from_doc_ids(doc_ids[: k_star + 1], args.max_doc_length, args.max_doc_num)
-    elif mode == "d_drop_g":
-        # B1 append + drop G_k*: the grid omits doc k*, the raw span still
-        # lands at the end (existing append machinery below).
-        grid = _grid_from_doc_ids(
-            doc_ids[:k_star] + doc_ids[k_star + 1:], args.max_doc_length, args.max_doc_num
+    if hybrid_top_k is not None:
+        # Hybrid base = the canonical single builder (_build_hybrid_prefix,
+        # gist_first layout).  Original offsets are preserved, so the raw-span
+        # pass and the unrotated append below are the pure-c2kv machinery
+        # unchanged; only the ledger fields switch to the hybrid raw counts.
+        hybrid_prefix, hybrid_skip = _build_hybrid_prefix(
+            model,
+            tokenizer,
+            example,
+            args,
+            recent_full_docs=hybrid_top_k,
+            history_override=history,
         )
+        if hybrid_prefix is None:
+            return None, f"d_hybrid_base_skip:{hybrid_skip}"
+        prefix_cache = hybrid_prefix["cache"]
+        gist_tokens = hybrid_prefix["gist_tokens"]
+        actual_ratio = hybrid_prefix["actual_compression_ratio"]
+        compress_sec = hybrid_prefix["tool_compress_sec"]
+        blend_sec = hybrid_prefix["blend_sec"]
+        system_prefill_sec += hybrid_prefix["system_prefill_sec"]
+        gist_input_tokens = gist_tokens
     else:
-        grid = context_input_ids
-    (
-        prefix_cache,
-        gist_input_tokens,
-        gist_tokens,
-        actual_ratio,
-        compress_sec,
-        blend_sec,
-    ) = _build_tool_cache(
-        model,
-        grid,
-        system_cache,
-        system_length,
-        args.gist_attn_impl,
-        args.override_ratio,
-    )
+        if mode in ("d_corr_recompute", "d_re_only"):
+            grid = _grid_from_doc_ids(doc_ids[: k_star + 1], args.max_doc_length, args.max_doc_num)
+        elif mode == "d_drop_g":
+            # B1 append + drop G_k*: the grid omits doc k*, the raw span still
+            # lands at the end (existing append machinery below).
+            grid = _grid_from_doc_ids(
+                doc_ids[:k_star] + doc_ids[k_star + 1:], args.max_doc_length, args.max_doc_num
+            )
+        else:
+            grid = context_input_ids
+        (
+            prefix_cache,
+            gist_input_tokens,
+            gist_tokens,
+            actual_ratio,
+            compress_sec,
+            blend_sec,
+        ) = _build_tool_cache(
+            model,
+            grid,
+            system_cache,
+            system_length,
+            args.gist_attn_impl,
+            args.override_ratio,
+        )
 
     d_corr_span_tokens = 0
     d_sham_tokens = 0
@@ -2141,18 +2184,23 @@ def _build_d_intervene_prefix(
         "cache": prefix_cache,
         "system_length": system_length,
         # Original layout: decode positions must match plain c2kv exactly.
-        "history_length": doc_tokens,
+        # On the hybrid base the ledger switches to the hybrid raw counts
+        # (rest raw + uncapped tail), which is the same original layout.
+        "history_length": hybrid_prefix["history_length"] if hybrid_prefix else doc_tokens,
         "cache_length": prefix_cache.get_seq_length(),
-        "doc_tokens": doc_tokens,
+        "doc_tokens": hybrid_prefix["doc_tokens"] if hybrid_prefix else doc_tokens,
         "doc_chunks": doc_chunks,
-        "kept_history_tokens": doc_tokens,
+        "kept_history_tokens": hybrid_prefix["kept_history_tokens"] if hybrid_prefix else doc_tokens,
         "gist_tokens": gist_tokens,
         "actual_compression_ratio": actual_ratio,
+        "compressed_history_tokens": hybrid_prefix["compressed_history_tokens"] if hybrid_prefix else None,
         "system_prefill_sec": system_prefill_sec,
         "full_prefill_sec": 0.0,
         "tool_compress_sec": compress_sec,
         "blend_sec": blend_sec,
         "use_gist": True,
+        "d_base": "hybrid" if hybrid_prefix else "c2kv",
+        "d_hybrid_top_k": hybrid_top_k,
         "d_corr_doc_index": None if mode == "d_corr_all" else k_star,
         "d_corr_span_tokens": d_corr_span_tokens,
         # d_corr_slice_prefill_sec is the injection-side prefill cost for
@@ -2734,6 +2782,13 @@ def _build_hybrid_prefix(
     history_override: Optional[Sequence[Dict[str, Any]]] = None,
     full_doc_max_length: Optional[int] = None,
 ) -> tuple[Optional[Dict[str, Any]], Optional[str]]:
+    """The single battery-side hybrid prefix builder (see docs/hybrid_spec.md).
+
+    tail-k docs stay raw, the rest go through the 768/16 gist grid at
+    args.override_ratio.  The D-intervene hybrid base calls this same function
+    (history_override + recent_full_docs), so "d none on hybrid" is the plain
+    hybrid mode by construction.
+    """
     history = list(history_override) if history_override is not None else _history_messages(tokenizer, example, args)
     if len(history) < args.min_doc_num:
         return None, f"history_docs<{args.min_doc_num}"
@@ -2750,7 +2805,11 @@ def _build_hybrid_prefix(
         full_history = history[-full_count:] if args.history_selection == "tail" else history[:full_count]
         full_set = set(range(len(history) - len(full_history), len(history))) if args.history_selection == "tail" else set(range(len(full_history)))
     rest_history = [message for index, message in enumerate(history) if index not in full_set]
-    full_after_c2kv = bool(getattr(args, "hybrid_full_after_c2kv", False))
+    # docs/hybrid_spec.md: gist_first (original conversation order) is the
+    # canonical layout and the only one the bench stack produces; raw_first is
+    # the legacy reorder that hoisted the tail right after the system prefix.
+    layout = str(getattr(args, "hybrid_layout", "gist_first"))
+    assert layout in ("gist_first", "raw_first"), f"unknown hybrid_layout {layout!r}"
 
     system_ids = _chat_template_ids(
         tokenizer,
@@ -2774,23 +2833,28 @@ def _build_hybrid_prefix(
     prefix_cache = system_cache
     full_length = 0
 
-    def append_full_history(current_past_length: int) -> int:
+    def append_full_history(current_past_length: int, use_gist: bool) -> int:
         nonlocal prefix_cache, top_prefill_sec
         if not full_ids:
             return 0
         full_input_ids = torch.tensor([full_ids], dtype=torch.long, device=model.device)
-        prefix_cache, appended_length, prefill_sec = _prefill_tokens_with_cache(
+        # use_gist global rule (harness :1038/:1564, modeling_qwen3:660, and
+        # hf_server chat's cache_has_gist): once ANY gist KV is in the cache,
+        # the raw-tail prefill must also run with the gist projections.  Only
+        # the raw_first layout appends the tail before any gist exists.
+        prefix_cache, appended_length, prefill_sec = _prefill_tokens_with_cache_maybe_gist(
             model,
             full_input_ids,
             past_key_values=prefix_cache,
             past_length=current_past_length,
             attn_impl=args.generate_attn_impl,
+            use_gist=use_gist,
         )
         top_prefill_sec += prefill_sec
         return appended_length
 
-    if not full_after_c2kv:
-        full_length = append_full_history(system_length)
+    if layout == "raw_first":
+        full_length = append_full_history(system_length, use_gist=False)
 
     rest_tokens = 0
     rest_length = 0
@@ -2822,8 +2886,10 @@ def _build_hybrid_prefix(
             args.gist_attn_impl,
             args.override_ratio,
         )
-    if full_after_c2kv:
-        full_length = append_full_history(system_length + rest_length)
+    if layout == "gist_first":
+        # Raw tail in place at its ORIGINAL offsets, after the gists; gist
+        # projections stay on because the rest already put gist KV in the cache.
+        full_length = append_full_history(system_length + rest_length, use_gist=bool(rest_history))
 
     doc_tokens = rest_tokens + full_tokens
     compressed_tokens = gist_tokens + full_tokens
@@ -3770,7 +3836,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--prefix_history_doc_num", type=int)
     parser.add_argument("--prefix_history_exact", type=lambda x: str(x).lower() == "true", default=False)
     parser.add_argument("--split_oversized_history_docs", type=lambda x: str(x).lower() == "true", default=True)
-    parser.add_argument("--hybrid_full_after_c2kv", type=lambda x: str(x).lower() == "true", default=False)
+    parser.add_argument(
+        "--hybrid_layout",
+        choices=["gist_first", "raw_first"],
+        default="gist_first",
+        help="hybrid cache layout (docs/hybrid_spec.md): gist_first = original "
+        "conversation order, raw tail in place (canonical, matches the bench "
+        "stack); raw_first = legacy layout that hoists the raw tail right "
+        "after the system prefix",
+    )
     parser.add_argument("--device_type", choices=["auto", "cuda", "npu", "cpu"], default="auto")
     parser.add_argument("--system_attn_impl", default="eager")
     parser.add_argument("--gist_attn_impl", default="eager")
