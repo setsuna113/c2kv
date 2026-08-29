@@ -77,7 +77,7 @@ proxy 臂任务静默失败。修复：`16#`、cleanup 守卫、代理健康检�
 | benchmark | full | c2kv 8× | hybrid k1 | k3 | k5 | 备注 |
 |---|---|---|---|---|---|---|
 | τ² (reward) | **0.28** | hr2 待跑（受染值 0.16） | hr2 | hr2 | hr2 | 受染值曾显 hybrid 阶梯（hy3 0.30>full），方向或仍成立但幅度不可信 |
-| BFCL (acc) | up2 跑中 | hr2（地板） | — | — | — | 地板效应，k 档无分辨率 |
+| BFCL (acc) | **3.0%**（6/200；82/200 记录生成，118 decode 失败） | hr2（地板） | — | — | — | full 臂本身也只记录 82/200——BFCL 在该模型族是格式地板，修复臂无意义，整行只作下限参考 |
 | TS (sim) | 0.32 均值 | hr2 | hr2 | hr2 | hr2 | n=3 |
 
 成本列（proxy 记账 gist/original tokens、wall、有效压缩比）在 hr2 完成后随
