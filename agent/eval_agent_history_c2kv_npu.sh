@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# CANN runtime (libhccl etc.) — required for torch_npu when launched from a
+# bare setsid/cron env (same guard as run_d_pilot_npu.sh).
+if [[ -f /usr/local/Ascend/ascend-toolkit/set_env.sh ]]; then
+  source /usr/local/Ascend/ascend-toolkit/set_env.sh
+fi
+
 export PYTHONPATH="$(pwd)/python:$(pwd)/python/inference:$(pwd)/agent:${PYTHONPATH:-}"
 export HF_HUB_OFFLINE="${HF_HUB_OFFLINE:-1}"
 export ASCEND_RT_VISIBLE_DEVICES="${ASCEND_RT_VISIBLE_DEVICES:-0,1,3,4,5,6,7}"
