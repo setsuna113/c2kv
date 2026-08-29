@@ -1,8 +1,7 @@
 # HybridKV
 
 This directory is a compact, runnable copy of the C2KV multi-document inference
-path, focused on document hybrid experiments. It intentionally excludes agent
-and BFCL evaluation code, checkpoints, datasets, and old experiment outputs.
+path, focused on document hybrid experiments.
 
 ## Contents
 
