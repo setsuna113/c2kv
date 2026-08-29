@@ -103,6 +103,18 @@ def phase_a(ns: argparse.Namespace) -> None:
                 and example.qid not in seen):
             current = HH._current_messages(example)
             if len(current) == 1 and current[0].get("role") == "user":
+                # The harness caps system+tools at max_system_length; the
+                # server does NOT cap its system prefill, so only examples
+                # whose full rendered system block fits the harness budget
+                # are comparable (big agent-llm-traces tool schemas would
+                # make the server prefill a 50k-token eager forward).
+                system_ids = HH._chat_template_ids(
+                    tokenizer,
+                    [{"role": "system", "content": example.system_prompt}],
+                    tools=example.tools or None, keep_bos=True,
+                )
+                if len(system_ids) > hargs.max_system_length:
+                    continue
                 picked.append(example)
                 seen.add(example.qid)
         if len(picked) >= ns.examples:
