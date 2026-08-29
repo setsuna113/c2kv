@@ -414,6 +414,7 @@ class C2KVServer:
             cache = None
             logical = 0
             repair_system_ids: Optional[List[int]] = None
+            system_length_debug = 0
             if system_text or tools:
                 system_ids = _chat_template_ids(
                     self.tokenizer,
@@ -423,6 +424,7 @@ class C2KVServer:
                 repair_system_ids = system_ids
                 cache, added, _ = self._prefill_system_cached(system_ids, tools)
                 logical += added
+                system_length_debug = added
 
             # 2. body[:-1]: gist refs and raw messages interleaved.
             # use_gist rule (harness :1038/:1564, training modeling_qwen3:660):
@@ -529,6 +531,8 @@ class C2KVServer:
                 "logical": logical,
                 "cache_len": cache_len,
                 "cache_has_gist": cache_has_gist,
+                "system_len": system_length_debug,
+                "n_gist_messages": len(compressed),
                 "repair_policy": repair_policy,
                 "repair_block_tokens": repair_block_tokens,
                 "repair_doc_index": repair_doc_index,

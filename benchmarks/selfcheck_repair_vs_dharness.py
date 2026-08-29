@@ -152,6 +152,10 @@ def phase_a(ns: argparse.Namespace) -> None:
                 "system_prompt": example.system_prompt, "tools": example.tools or None,
                 "span_tokens": span,
                 "cache_len": int(prefix["cache"].get_seq_length()),
+                "system_length": int(prefix["system_length"]),
+                "gist_tokens": int(prefix["gist_tokens"]),
+                "gist_input_raw": int(prefix.get("d_gist_input_tokens") or 0),
+                "doc_tokens": int(prefix["doc_tokens"]),
                 "span_kv": span_kv,
                 "text": str(row.get("prediction") or ""),
             })
@@ -183,10 +187,14 @@ def phase_b(ns: argparse.Namespace) -> None:
         local = []
         if item["span_tokens"] != int(deb["repair_block_tokens"]):
             local.append(f"span {item['span_tokens']} != {deb['repair_block_tokens']}")
-        if int(deb["repair_doc_index"] or -1) != 0:
-            local.append(f"doc index {deb['repair_doc_index']} != 0")
+        doc_index = deb["repair_doc_index"]
+        if -1 if doc_index is None else int(doc_index) != 0:
+            local.append(f"doc index {doc_index} != 0")
         if item["cache_len"] != int(deb["cache_len"]):
-            local.append(f"cache len {item['cache_len']} != {deb['cache_len']}")
+            local.append(f"cache len {item['cache_len']} != {deb['cache_len']} "
+                         f"(D sys={item['system_length']} gists={item['gist_tokens']} "
+                         f"raw={item['doc_tokens'] - item['gist_input_raw']} | "
+                         f"server sys={deb.get('system_len')} logical={deb.get('logical')})")
         max_diff = 0.0
         if not local:
             for li, (d_k, d_v) in enumerate(item["span_kv"]):
@@ -201,7 +209,12 @@ def phase_b(ns: argparse.Namespace) -> None:
                 local.append(f"tensor max-abs {max_diff:.3e} > {TENSOR_GATE}")
         server_text = tokenizer.decode(deb.get("new_token_ids") or [],
                                         skip_special_tokens=False)
-        if item["text"].strip() != server_text.strip():
+        # stop-token tolerance: the server's generate emits the eos token
+        # itself; the harness decode strips it
+        for stop in ("<|im_end|>", "<|endoftext|>"):
+            server_text = server_text.replace(stop, "")
+            item_text = item["text"].replace(stop, "")
+        if item_text.strip() != server_text.strip():
             local.append(f"decode differs:\n  D      : {item['text'][:160]!r}\n"
                          f"  server : {server_text[:160]!r}")
         print(f"  [{tag}] span={item['span_tokens']} cache_len={item['cache_len']} "
