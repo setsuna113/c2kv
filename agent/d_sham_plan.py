@@ -79,6 +79,25 @@ def k_star_for(n_docs: int) -> int:
     return (n_docs - 1) // 2
 
 
+def parse_k_policy(policy: str):
+    """k* selector mirroring the harness CORR_K_POLICY grammar.
+
+    'median' (prereg default) / 'last' / 'offset:<j>' — hybrid-x-D (2026-08-29)
+    freezes sham plans under offset:0 (corr@first): on every base the first
+    compressed block is doc 0.
+    """
+    if policy == "median":
+        return k_star_for
+    if policy == "last":
+        return lambda n_docs: n_docs - 1
+    if policy.startswith("offset:"):
+        j = int(policy.split(":", 1)[1])
+        if j < 0:
+            raise ValueError(f"negative offset policy {policy!r}")
+        return lambda n_docs, _j=j: _j
+    raise ValueError(f"unknown k policy {policy!r}")
+
+
 def corpus_offset(seed: int, qid: str, corpus_tokens: int) -> int:
     """Per-qid start position on the corpus token ring."""
     if corpus_tokens <= 0:
@@ -110,6 +129,7 @@ def build_plan(
     *,
     seed: int = SEED,
     header: Optional[Dict[str, Any]] = None,
+    k_star_fn: Callable[[int], int] = k_star_for,
 ) -> Dict[str, Any]:
     """Assemble the frozen sham plan document.
 
@@ -134,7 +154,10 @@ def build_plan(
         if n_docs <= 0:
             degenerate.append(qid)
             continue
-        k = k_star_for(n_docs)
+        k = k_star_fn(n_docs)
+        if not 0 <= k < n_docs:
+            degenerate.append(qid)
+            continue
         span_len = doc_lens[k]
         if span_len <= 0:
             degenerate.append(qid)
@@ -215,6 +238,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--out", default="./configs/bdf_pilot/d_sham_plan.json")
     parser.add_argument("--seed", type=int, default=SEED)
     parser.add_argument(
+        "--k_policy", default="median",
+        help="which doc the sham span budget mirrors (same grammar as the "
+        "harness CORR_K_POLICY): median (prereg default) / last / offset:<j>. "
+        "hybrid-x-D freezes offset:0 plans for the corr@first arms.",
+    )
+    parser.add_argument(
         "--allow_missing",
         action="store_true",
         help="Downgrade missing/degenerate frozen qids from FATAL to a warning. "
@@ -242,7 +271,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         corpus_ids,
         lambda ids: tokenizer.decode(ids, skip_special_tokens=False),
         seed=args.seed,
+        k_star_fn=parse_k_policy(args.k_policy),
         header={
+            "k_policy": args.k_policy,
             "corpus_path": str(corpus_path.as_posix()),
             "corpus_sha256": _sha256_text(corpus_text),
             "corpus_tokens": len(corpus_ids),

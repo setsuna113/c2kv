@@ -56,6 +56,10 @@ TRIGGER_SOURCES = ("oracle", "L1", "silent")  # enum kept for later phases
 # forces run_ratios=[1] for mode "full"); used to cross-check the CLI claims.
 FULL_ROW_MODES = frozenset({"full"})
 COMPRESSED_ROW_MODES = frozenset({"c2kv"})
+# hybrid-x-D combo (2026-08-29): the compressed side of a trigger batch may be
+# the hybrid battery arm; its mode string and hybrid_top_k are frozen into the
+# kv_recipe (d_kv_intervene enforces the tail size on --base hybrid).
+COMPRESSED_ROW_MODES_HYBRID = frozenset({"hybrid"})
 
 # Local copies of the harness scorers (agent/eval_agent_tool_definition_c2kv.py
 # ::_extract_tool_name and agent/eval_agent_history_c2kv.py::_has_tool_call).
@@ -340,6 +344,8 @@ def _bundle_row(
             "model_sha": args.model_sha,
             "eval_code_sha": args.eval_code_sha,
             "ratio": args.ratio,
+            "compressed_mode": args.compressed_mode,
+            "hybrid_top_k": args.hybrid_top_k if args.compressed_mode == "hybrid" else None,
             "chunk_policy": args.chunk_policy,
             "seed": args.seed,
             "decode": args.decode,
@@ -487,6 +493,8 @@ def _freeze_manifest(
             "model_sha": args.model_sha,
             "eval_code_sha": args.eval_code_sha,
             "ratio": args.ratio,
+            "compressed_mode": args.compressed_mode,
+            "hybrid_top_k": args.hybrid_top_k if args.compressed_mode == "hybrid" else None,
             "chunk_policy": args.chunk_policy,
             "seed": args.seed,
             "decode": args.decode,
@@ -542,6 +550,15 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--model_sha", required=True)
     parser.add_argument("--eval_code_sha", required=True)
     parser.add_argument("--ratio", type=int, default=8)
+    parser.add_argument(
+        "--compressed_mode", choices=["c2kv", "hybrid"], default="c2kv",
+        help="which battery arm the --compressed_rows came from; 'hybrid' "
+        "(hybrid-x-D combo) freezes hybrid_top_k into the kv_recipe",
+    )
+    parser.add_argument(
+        "--hybrid_top_k", type=int, default=3,
+        help="tail docs kept raw when --compressed_mode hybrid",
+    )
     parser.add_argument("--chunk_policy", required=True)
     parser.add_argument("--seed", type=int, default=20260815)
     parser.add_argument("--decode", default="greedy")
@@ -577,7 +594,13 @@ def run(args: argparse.Namespace) -> Dict[str, Any]:
         args.compressed_rows, args.compressed_condition, "compressed"
     )
     _assert_rows_match_claims(full, "full", FULL_ROW_MODES, 1)
-    _assert_rows_match_claims(compressed, "compressed", COMPRESSED_ROW_MODES, args.ratio)
+    # hybrid-x-D combo: the compressed side may be the hybrid battery arm
+    # (mode "hybrid", tail-k raw, docs/hybrid_spec.md); the frozen recipe then
+    # stamps hybrid_top_k so the D driver refuses a different tail size.
+    compressed_modes = (
+        COMPRESSED_ROW_MODES_HYBRID if args.compressed_mode == "hybrid" else COMPRESSED_ROW_MODES
+    )
+    _assert_rows_match_claims(compressed, "compressed", compressed_modes, args.ratio)
     paired = sorted(set(full) & set(compressed))
     only_full = sorted(set(full) - set(compressed))
     only_compressed = sorted(set(compressed) - set(full))
