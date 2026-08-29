@@ -78,17 +78,23 @@ proxy 臂任务静默失败。修复：`16#`、cleanup 守卫、代理健康检�
 |---|---|---|---|---|---|---|
 | τ² (reward) | **0.28** | hr2 待跑（受染值 0.16） | hr2 | hr2 | hr2 | 受染值曾显 hybrid 阶梯（hy3 0.30>full），方向或仍成立但幅度不可信 |
 | BFCL (acc) | **3.0%**（6/200；82/200 记录生成，118 decode 失败） | hr2（地板） | — | — | — | full 臂本身也只记录 82/200——BFCL 在该模型族是格式地板，修复臂无意义，整行只作下限参考 |
-| TS (sim) | 0.32 均值 | hr2 | hr2 | hr2 | hr2 | n=3 |
+| TS (sim, n=3) | 0.320 | 0.215 | 0.216 | **0.376** | 0.319 | 阶梯干净复现：k5≈full、k3 超 full；受损场景 3_distraction：full 0.700 / c2kv 0.377 / k3 0.606 / k5 0.695 |
 
 成本列（proxy 记账 gist/original tokens、wall、有效压缩比）在 hr2 完成后随
 成功率一并补；修复臂成本管线已验证（repair_block_tokens 均值 19/请求，
 TS 修复臂实测）。
 
-## 2. 修复臂（bench，oracle 触发子集）——hr2 基线后重算重跑
+## 2. 修复臂（bench，oracle 触发子集）
 
-eligible = 任务级 full✓ ∧ base✗。受染轮曾得到 τ² c2kv 基 11 题、hy3 基 4 题、
-TS c2kv 基 1 题（TS 修复 0/1——n=1 无统计力）；全部待 hr2 基线后重算重跑。
-工具：`benchmarks/repair_oracle.py`（eligible/task/score；ts 成功判据 sim≥0.5）。
+eligible = 任务级 full✓ ∧ base✗。**TS（post-fix，唯一有区分度的受损场景
+3_distraction，full 0.700 / c2kv 0.377）**：`c2kv+corr@first` 重跑得
+**0.650**——救回 full-c2kv 差距的 **93%**（0.377→0.650/0.700）。n=1 场景无
+统计力，但这是修复臂在真实任务上的首个干净正向证据，与机制面 corr@first
+一致。TS 上动作擦除 bug 前后无差（0.380→0.377，短历史）。
+
+τ²（11 题 c2kv 基 / 4 题 hy3 基的受染轮已作废）：等 hr2 基线落地后重算
+oracle 再跑 hr2 修复臂。BFCL：地板，不跑。工具：
+`benchmarks/repair_oracle.py`（ts 成功判据 sim≥0.5）。
 
 ## 3. 机制表（battery，agent-llm-traces eval @1088，768/16，ratio 8，n=686/臂）
 
