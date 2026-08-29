@@ -1,62 +1,57 @@
 # H1 — `<tool_call>` 约束解码（XGrammar-2 迁移）
 
 > 迁移手册条目：H1（P0，"立刻挂"）。报告出处：TL;DR(2)、KF5、Q5、迁移表 #2、Rec.1。
-> 运行：2026-08-28，ckpt-4186，hf_server（xgrammar structural tag）。
+> 运行：2026-08-28/29，ckpt-4186（256/2048 max-token 口径），hf_server + xgrammar。
+
+## ⚠️ 数据有效性声明（2026-08-29，两轮 review 后）
+
+1. **本表 τ²/BFCL/TS 的全部 c2kv/cd_c2kv 数字已被 bug① 作废、正在重跑**：
+   review round-2 发现 `proxy.py` 把 assistant 工具调用轮的 `content=None` 提取成字面量
+   `""`（tool_calls 从不渲染）——**压缩历史里 agent 自己的动作被删除而非压缩**。
+   full/cd_full 臂不走压缩路径，数字有效。
+2. 早期版本的"协议 100%"含 metrics 公式 bug（False 被丢）；修复公式后的真实值见下。
+3. 旧表（full 0.34/c2kv 0.10/协议全 100%）为 bug 修复前数字，**全部作废**。
 
 ## 方法与源码
 
-- 论文：XGrammar-2（arXiv:2601.04426）；源码库 `mlc-ai/xgrammar`（`~/method_refs/xgrammar`，已通读 `builtin_structural_tag.py` / `contrib/hf.py`）。
-- 迁移：`benchmarks/hf_server.py` 挂 `xgrammar.contrib.hf.LogitsProcessor`，grammar 用 `get_model_structural_tag("qwen_3", tools, reasoning=False)`——`<tool_call>{"name":<池内枚举>,"arguments":<schema>}</tool_call>` 块外文本自由，正是 XGrammar-2 的 structural-tag 机制。NPU 走 CPU bitmask（xgrammar 自带 fallback）。
-- **两个真实 schema 兼容工程**（迁移的隐性成本）：
-  1. τ² 工具 schema 用 `$ref`/`$defs` → 实现**递归内联展开**（环检测，`_inline_refs`）；
-  2. BFCL 用非法 `"type": "dict"/"any"` → 类型映射归一化（`_normalize_tool_schema`，只影响 grammar 输入）。
-  两者的存在本身印证了 XGrammar-2 论文里"结构标签需要工程适配真实 API schema"的论点。
+- 论文：XGrammar-2（arXiv:2601.04426）；源码 `mlc-ai/xgrammar`（`~/method_refs/xgrammar`，通读 `builtin_structural_tag.py`/`contrib/hf.py`）。
+- 迁移：hf_server 挂 `xgrammar.contrib.hf.LogitsProcessor`，`get_model_structural_tag("qwen_3", tools, reasoning=False)`；NPU 走 CPU bitmask。
+- schema 工程（迁移隐性成本）：τ² 的 `$ref/$defs` 递归内联（环检测）+ BFCL 的 `"type":"dict"` 类型归一化——印证"structural tag 需要适配真实 API schema"。
 
-## 臂与挂载
+## τ²-bench airline（50 任务，修复公式后的有效数字）
 
-proxy 按 `arms.py` 的 `cd_full`/`cd_c2kv` 臂注入 `constrain_tools: true`；单请求验证：14 工具 τ² 池 + 18 工具 BFCL 池 grammar 编译通过，约束请求返回完全合法 tool_calls（`constrained: true`）。
-
-## 结果
-
-### τ²-bench airline（50 任务）
-
-| 臂 | reward | 95% CI | 协议合法率 | 结论 |
+| 臂 | reward | 95% CI | 协议合法率 | 状态 |
 |---|---:|---|---:|---|
-| full | 0.34 | [0.22, 0.48] | 100% | 基线 |
-| c2kv (8×) | 0.10 | [0.02, 0.20] | 100% | 压缩代价 −24pp（CI 不重叠） |
-| **cd_full** | **0.34** | **[0.22, 0.48]** | **100%** | **与 full 完全持平——零 constraint tax** |
-| cd_c2kv | 跑着 | | | 预期 ≈ c2kv（协议本就 100%） |
+| full | 0.26 | [0.14, 0.38] | **0.98** | ✅ 有效 |
+| cd_full | 0.26 | [0.14, 0.38] | 0.98 | ✅ 有效——**与 full 完全持平，零 constraint tax** |
+| c2kv (8×) | ~~0.12~~ | | ~~0.776~~ | ❌ 作废（bug①），f3 重跑中 |
+| cd_c2kv | ~~0.04~~ | | ~~1.00~~ | ❌ 作废（bug①；协议 1.00 的硬保证本身仍成立），f3 重跑中 |
 
-### BFCL v4 multi_turn_base（200 例）
+**有效结论**（仅基于未作废数字）：
+1. cd_full ≡ full（0.26/0.26，协议 0.98/0.98）：无压缩时 XGrammar-2 structural tag
+   **零语义损失、零发射代价**——协议保险免费。
+2. 待 f3 重跑回答：cd_c2kv 的协议率是否仍强制 1.00、语义 tax 是否存在（作废数字曾显示
+   0.776→1.00 但 reward 0.12→0.04；因两值均含 bug①，该 trade-off 需重测）。
 
-| 臂 | 官方 acc | 备注 |
+## BFCL v4 multi_turn_base（200 例）
+
+| 臂 | acc | 状态 |
 |---|---:|---|
-| full | 2.5% | 模型在该格式上弱（叙述代替调用 + `<|im_end|>` 泄漏） |
-| c2kv | 2.5% | 瓶颈非压缩 |
-| cd_full | 跑着 | 约束能否抬"叙述代替调用"？——structural tag 的 auto 模式仍允许纯文本，预期有限 |
+| full | 2.0% | ✅（模型对文件操作多轮格式弱：叙述代替调用——约束的 auto 模式允许纯文本，修不了"不调用"，与 XGrammar-2 论文边界一致） |
+| cd_full | 2.0% | ✅ 与 full 持平 |
+| c2kv / cd_c2kv | — | 作废，f3 重跑中（两臂均处 1.5-2.5% 地板，预期仍地板） |
 
-### ToolSandbox（test 子集，3 场景 ×30 轮）
+## ToolSandbox（test 子集，3 场景）
 
-| 臂 | similarity（milestone） | 状态 |
+| 臂 | similarity | 状态 |
 |---|---:|---|
-| full | 0.125 | 已收（3 场景 clean，工程上首次真实连通） |
-| c2kv | 跑着 | |
+| full | 0.32（0 aborts） | ✅ |
+| c2kv | — | 作废重跑中（作废版曾 3/3 场景因选错工具中止） |
 
-## 初步判读（数字待 cd_c2kv/BFCL cd_full 补齐后定稿）
+## 我的 evaluation 与 insight
 
-1. **τ² 上约束解码零代价拿到协议保险**：cd_full ≡ full（0.34），协议列 100% 不变——
-   XGrammar-2 的 structural tag 在该模型/工具池上无 constraint tax（语义列不降、发射正常）。
-   但 τ² 的协议列本来就是 100%——**保险的价值要在协议会崩的场合兑现**，即 D 线的
-   corr_re/re_only 臂（correct-but-illegal 26/27）和 BFCL。
-2. **迁移手册预期 vs 实测的分歧点**：手册预期"cd_full 抬升严格修复上界"以 D 线 48 条非法为
-   依据；τ² 实测协议层无损失 → H1 的收益面是 benchmark 相关的。下一步应把 cd 挂到
-   D 线触发集（corr_re + cd）验证 26 条 correct-but-illegal 能否转为 rescue——这是
-   L2 口径的直接测试。
-3. **schema 工程是真实成本**：$ref 内联 + 类型归一化缺一不可，任何后续 cd 部署都要带上。
-
-## 成本轴（待补）
-
-- 约束 per-token 开销：cd_full vs full 的 generate_sec/token 对比（proxy reqlog + c2kv 字段）。
-- grammar 编译一次性成本（cached 后 ~0）。
-
-## 我的 evaluation 与 insight（cd_c2kv/BFCL cd_full 后定稿）
+1. **约束解码的免费保险在无压缩侧已证实**（cd_full≡full）；压缩侧的全部断言
+   （协议回收 vs 语义 tax）在 f3 重跑前处于悬置状态——不基于作废数字下结论。
+2. **两轮 review 的教训写进方法**：压缩路径的任何"内容变换"（渲染/提取）必须与 raw
+   路径逐字节一致，否则测的是变换差异不是压缩；这是 bug① 的根因。
+3. schema 工程（$ref 内联 + 类型归一化）是任何 structural-tag 部署的实际成本。

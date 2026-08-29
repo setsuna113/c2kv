@@ -60,3 +60,10 @@ TS 上 c2kv 在两个 checkpoint 上都触发"在仅允许 end_conversation 时�
   （C→W 转移是 checkpoint 相对的），机制结论按设计是 checkpoint 内部对照。
 - 训练收官：med_dmulti_joint **checkpoint-6322** 已落盘（新一代最新）；本轮矩阵未含，
   是否补跑由后续决定（队列一行即可入队）。
+
+## ⚠️ 2026-08-29 bug① 作废声明
+
+review round-2 发现 proxy 把 assistant 工具调用轮提取成 `""`（tool_calls 不渲染）——
+**本表所有 c2kv/cd_c2kv/hybrid 数字（两个 checkpoint）测的是"压缩+删除历史动作"，
+已作废**，修复后 f3 重跑进行中。full/cd_full 臂不走压缩路径，数字有效。
+归档：`~/bench_results/void_20260829_bug1/`。

@@ -6,15 +6,29 @@
 
 ## K1：修哪一块（k* 的选择）
 
-臂（等 bytes：均追加一块 raw，47.3MB）：
+臂（同单位：均追加**一块真实 raw**，非等 bytes——first 块平均 413.4 tok vs median 320.5
+vs last 232.3，@first 比 @median 多注入 +29.0% KV；块内四分位 rescue 非单调
+0.174/0.217/0.435/0.208，均值比仅 1.07×，+15pp 大概率非 byte 效应，但变量未控住）：
 
-| 策略 | k* | L2 rescue | rescued | correct-but-illegal | 备注 |
-|---|---|---:|---:|---:|---|
-| median（prereg 现状） | (T-1)//2 | 0.2581 | 24 | 6 | 基线 |
-| last（recency） | T-1 | 0.2688 | 25 | 19 | 与 median 差 1pp（噪声内） |
-| **first（offset:0）** | 0 | **0.4086** | **38** | 12 | **≡ corr_re（0.4086），+15pp** |
+| 策略 | k* | L2 rescue | rescued | correct-but-illegal | 追加 tokens（均值） | 备注 |
+|---|---|---:|---:|---:|---:|---|
+| median（prereg 现状） | (T-1)//2 | 0.2581 | 24 | 6 | 320.5 | 基线 |
+| last（recency） | T-1 | 0.2688 | 25 | 19 | 232.3 | 与 median 差 1pp（噪声内） |
+| **first（offset:0）** | 0 | **0.4086** | **38** | 12 | 413.4 | **≡ corr_re（0.4086），+15pp** |
 
 对照：corr_re（下游全重算 raw，304.9MB）L2=0.4086。
+
+### 三条必须声明的限制（下游 review 指出，已核实）
+
+1. **非等 bytes**：见表头（first +29.0% tokens vs median）。
+2. **offset:0 无等长 sham 对照**：冻结 sham plan 按 median 块长制定，74/93 在 first 块长
+   上 mismatch——corr@first 只有点估计，没有 sham 锚（r2 的 sham 0.0968 只对 median 有效）。
+3. **"第一块"是混淆变量**：41/93（44.1%）的题撞到 max_doc_num=16 上限，此时选择策略保留
+   `[doc_0] + 最后 15 个`——doc_0 是**会话锚点**而非"窗口内最早块"；offset:0 在这 44% 的
+   题上与其余 56% 不同类。逐块扫描（oracle 上界）的噪声底：B 分布下纯零假设
+   P(至少一块救活)≈0.56，只能报"oracle 上界"不能与单臂 sham 相减。
+4. 另：L2/协议列的绝对值受 battery max_new_tokens=128 截断口径影响（full 49.1% 卡顶），
+   4096 重跑进行中，届时校正。
 
 ### 判读（手册 K1 逻辑）
 

@@ -72,3 +72,13 @@ HF 路径的 `generate_gist` 不接受 `past_key_values`（modeling_qwen3.py:552
    agent-llm-traces 的 48 条非法同源。
 3. **corr_text 是线上化的现实候选**：点估计 75% 的 corr 收益、无 KV 冷层依赖。
    建议进批次 0 扩容复测，而不是现在下结论。
+
+## ⚠️ 口径限制（2026-08-29 review round-2 补注）
+
+1. **correct-but-illegal 列疑为截断伪影**：battery max_new_tokens=128 下 full 49.1%/c2kv
+   57.4% 的生成卡顶；协议合法≈"是否在 128 token 内写完"（capped 合法率 0.9% vs uncapped
+   37.1%）。re_only 27 / corr_re 26 的 correct-but-illegal 在 4096 口径重跑前不可作为
+   "语义修复与协议独立"的证据。L2 阶梯为同口径配对对照，方向性（corr_re≫sham）预计
+   仍立，绝对值待 4096 重跑校正（进行中）。
+2. full=0.4839"上限"同为截断假象；且该 battery 上 c2kv tool_name_match 0.2089 > full
+   0.1789（120 反向翻转 vs 93 触发）——"修复压缩损失"的前提本身待 4096 重跑裁决。
