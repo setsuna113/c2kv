@@ -119,6 +119,39 @@ def _history_cutoff(messages: List[Dict[str, Any]]) -> int:
     return start
 
 
+def _render_action_dialect(message: Dict[str, Any]) -> str:
+    """Assistant tool_calls -> the TRAINING dialect text (hf_server.chat's
+    normalization, verbatim): content + "\\n\\n" + "Action:\\n" + the
+    minified <tool_call> blocks.
+
+    OpenAI-style assistant turns carry content=None with the actions in
+    ``tool_calls``; extracting the bare content here used to send the literal
+    string '""' to /v1/c2kv/extract — erasing every historical action from
+    the compressed KV and drifting the logical ledger (original_seq_len~2
+    instead of the real action length, shifting every later block's RoPE
+    phases).  The same rendering must be used for the extract text and the
+    compressed message content so a server-side re-extract reproduces the
+    same gist."""
+    blocks = []
+    for call in message.get("tool_calls") or []:
+        function = call.get("function") or {}
+        try:
+            arguments = json.loads(function.get("arguments") or "{}")
+        except json.JSONDecodeError:
+            arguments = function.get("arguments") or {}
+        blocks.append(
+            "<tool_call>\n"
+            + json.dumps(
+                {"name": function.get("name"), "arguments": arguments},
+                ensure_ascii=False, separators=(",", ":"),
+            )
+            + "\n</tool_call>"
+        )
+    action = "Action:\n" + "\n".join(blocks)
+    content = message.get("content") or ""
+    return content + "\n\n" + action if content else action
+
+
 def _assemble(messages: List[Dict[str, Any]], arm: Arm, timeout: int):
     """Return (out_messages, gist_tokens, original_tokens, n_gist)."""
     cutoff = _history_cutoff(messages)
@@ -140,12 +173,17 @@ def _assemble(messages: List[Dict[str, Any]], arm: Arm, timeout: int):
         if keep_raw:
             out.append(message)
             continue
+        if message.get("role") == "assistant" and message.get("tool_calls"):
+            # see _render_action_dialect: never extract the bare (null)
+            # content of a tool-call turn
+            content = _render_action_dialect(message)
         record = _extract(role, content, arm.ratio, timeout)
         gist_tokens += int(record.get("gist_len") or 0)
         original_tokens += int(record.get("original_seq_len") or 0)
         n_gist += 1
         compressed = dict(message)
         compressed["content"] = content
+        compressed.pop("tool_calls", None)
         compressed["c2kv_key_hash"] = record["key_hash"]
         # lets the server re-extract on cache miss (e.g. after a restart)
         compressed["c2kv_ratio"] = arm.ratio

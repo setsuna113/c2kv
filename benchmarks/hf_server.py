@@ -566,6 +566,10 @@ class C2KVServer:
                 self.last_debug["new_token_ids"] = [int(t) for t in new_tokens]
             raw_text = self.tokenizer.decode(new_tokens, skip_special_tokens=False)
             content, tool_calls = _parse_tool_calls(raw_text)
+            # strip stop tokens from the returned content: an emitted
+            # <|im_end|>/<|endoftext|> used to leak into benchmark clients
+            for stop in ("<|im_end|>", "<|endoftext|>"):
+                content = content.replace(stop, "")
             text = content if content else self.tokenizer.decode(
                 new_tokens, skip_special_tokens=True
             )
@@ -582,6 +586,7 @@ class C2KVServer:
             "repair_block_tokens": repair_block_tokens,
             "repair_doc_index": repair_doc_index,
             "repair_prefill_sec": round(repair_prefill_sec, 4),
+            "truncated": bool(new_tokens.shape[0] >= max_new_tokens),
             "generate_sec": round(generate_sec, 4),
             "wall_sec": round(time.perf_counter() - t0, 4),
         }
@@ -770,6 +775,8 @@ def chat_completions():
     if result.get("tool_calls"):
         message["tool_calls"] = result["tool_calls"]
         finish_reason = "tool_calls"
+    elif result.get("truncated"):
+        finish_reason = "length"
     return jsonify({
         "id": "c2kv-hf",
         "object": "chat.completion",

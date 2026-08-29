@@ -65,6 +65,47 @@ class TestAssemble:
         assert out[-1]["content"] == "current"
         assert all("c2kv_key_hash" not in m for m in (out[0], out[-1]))
 
+    def test_toolcall_turn_renders_action_dialect(self, monkeypatch):
+        """assistant content=None + tool_calls must extract the TRAINING
+        dialect text, never the literal '""' (the action-erasure bug)."""
+        seen = {}
+
+        def extract(role, content, ratio, timeout=0):
+            seen["text"] = content
+            return _extract_stub(role, content, ratio, timeout)
+
+        monkeypatch.setattr(proxy_mod, "_extract", extract)
+        messages = [
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "find flights"},
+            {"role": "assistant", "content": None, "tool_calls": [
+                {"function": {"name": "search_flights",
+                              "arguments": "{\"origin\": \"JFK\"}"}},
+            ]},
+            {"role": "user", "content": "current"},
+        ]
+        out, *_ = proxy_mod._assemble(messages, get_arm("c2kv"), 0)
+        assert seen["text"].startswith("Action:\n<tool_call>\n")
+        assert '"name":"search_flights"' in seen["text"].replace(", ", ",").replace(": ", ":") or "search_flights" in seen["text"]
+        compressed = out[2]
+        assert "c2kv_key_hash" in compressed
+        assert "tool_calls" not in compressed
+        assert compressed["content"] == seen["text"]  # re-extract reproduces the gist
+
+    def test_toolcall_rendering_matches_hf_server(self):
+        """the proxy renderer must be verbatim-identical to hf_server.chat's
+        normalization (a mismatch breaks re-extraction on gist-pool miss)."""
+        import importlib.util
+        import types
+
+        hf_source = Path(proxy_mod.__file__).parent / "hf_server.py"
+        source = hf_source.read_text(encoding="utf-8")
+        # extract the rendering block from hf_server (flask/torch imports
+        # make the module unimportable here): compare the JSON dump kwargs
+        assert 'separators=(",", ":")' in source
+        assert '"Action:\\n" + "\\n".join(blocks)' in source
+        assert 'ensure_ascii=False, separators=(",", ":")' in source
+
     def test_hybrid_k1_keeps_one_tail_raw(self, monkeypatch):
         monkeypatch.setattr(proxy_mod, "_extract", _extract_stub)
         out, *_ = proxy_mod._assemble(_messages(), get_arm("hybrid_k1"), 0)

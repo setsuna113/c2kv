@@ -94,7 +94,11 @@ def main(argv=None):
     log_dir.mkdir(exist_ok=True)
     proxy_proc, request_log = start_proxy(args.upstream, args.arm, args.proxy_port, log_dir)
     try:
-        base_url = f"http://127.0.0.1:{args.proxy_port}"
+        # the BFCL handler expects an OpenAI base_url WITH /v1 (tau2 and
+        # toolsandbox build their paths themselves)
+        base_url = f"http://127.0.0.1:{args.proxy_port}" + (
+            "/v1" if args.benchmark == "bfcl" else ""
+        )
         user_base_url = args.user_upstream or args.upstream
         summary = run_benchmark(
             args.benchmark, base_url, user_base_url, args.out,
