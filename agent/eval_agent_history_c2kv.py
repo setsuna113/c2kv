@@ -1703,6 +1703,19 @@ D_INTERVENE: Dict[str, Dict[str, Any]] = {}
 # K1: erratum block-selection policy, overridable by the driver (median is
 # the prereg default; see _build_d_intervene_prefix).
 CORR_K_POLICY = "median"
+# Block 3.1: base compression the D arms are layered on top of.
+#   0  -> pure C2KV (every history doc compressed) — the original D base.
+#   k>0-> hybrid: the last k docs stay raw, docs 0..T-k-1 are compressed.
+# Set by d_kv_intervene from --base_hybrid_top_k.  The compressed half is built
+# with the same _grid_from_doc_ids + _build_tool_cache call as
+# _build_hybrid_prefix, and grid rows are the compression batch dimension, so a
+# doc's gist is bit-identical between the two paths (see _grid_from_doc_ids).
+D_HYBRID_TOP_K = 0
+# Arms whose semantics are still well defined once the tail is raw.  The rest
+# are refused rather than silently reinterpreted: d_corr_all would re-append
+# docs that are already raw, and the d_corr_recompute / d_drop_g / splice grids
+# are defined over the full-grid layout.
+D_HYBRID_SUPPORTED_MODES = frozenset({"d_sham_neutral", "d_corr"})
 
 D_INTERVENE_MODES = {
     "d_sham_neutral",
@@ -1876,6 +1889,23 @@ def _build_d_intervene_prefix(
             return None, f"d_k_policy_offset_oob:{k_star}/{n_docs}"
     else:
         return None, f"d_k_policy_unknown:{policy}"
+    # Hybrid base: the last hybrid_k docs stay raw, so only docs
+    # 0..n_compressed-1 are in the compression grid.
+    hybrid_k = max(0, min(int(D_HYBRID_TOP_K), n_docs))
+    n_compressed = n_docs - hybrid_k
+    if hybrid_k:
+        if mode not in D_HYBRID_SUPPORTED_MODES:
+            return None, f"d_hybrid_unsupported_mode:{mode}"
+        if n_compressed == 0:
+            # Every doc is raw: the base IS the full arm, there is nothing to
+            # repair.  Skipping keeps these qids out of the trigger set instead
+            # of scoring a "hybrid" row that is really a full row.
+            return None, f"d_hybrid_degenerate_to_full:{n_docs}<={hybrid_k}"
+        if k_star >= n_compressed:
+            # doc k* is already raw in the prefix; appending its KV again is a
+            # duplicate, not a repair.  The per-block scan must skip these.
+            return None, f"d_hybrid_k_star_in_raw_tail:{k_star}>={n_compressed}"
+
     plan = plan or {}
     planned_k = plan.get("k_star")
     # The frozen plans pin k*=median; alternative K1 policies deliberately
@@ -1996,6 +2026,10 @@ def _build_d_intervene_prefix(
         grid = _grid_from_doc_ids(
             doc_ids[:k_star] + doc_ids[k_star + 1:], args.max_doc_length, args.max_doc_num
         )
+    elif hybrid_k:
+        grid = _grid_from_doc_ids(
+            doc_ids[:n_compressed], args.max_doc_length, args.max_doc_num
+        )
     else:
         grid = context_input_ids
     (
@@ -2013,6 +2047,30 @@ def _build_d_intervene_prefix(
         args.gist_attn_impl,
         args.override_ratio,
     )
+
+    # Hybrid base: the raw recent tail goes in next, so the cache order is
+    # chronological (S -> gists -> raw tail) and the erratum span appends after
+    # it.  past_length is offsets[n_compressed] -- the tail's true logical
+    # start -- and use_gist=True because the cache already holds gists, which
+    # is training's rule (modeling_qwen3.py:242-246 swaps in gist_{q,k,v}_proj).
+    hybrid_tail_tokens = 0
+    hybrid_tail_sec = 0.0
+    if hybrid_k:
+        tail_ids = [token for ids in doc_ids[n_compressed:] for token in ids]
+        if tail_ids:
+            tail_input_ids = torch.tensor(
+                [tail_ids], dtype=torch.long, device=model.device
+            )
+            prefix_cache, hybrid_tail_tokens, hybrid_tail_sec = (
+                _prefill_tokens_with_cache_maybe_gist(
+                    model,
+                    tail_input_ids,
+                    past_key_values=prefix_cache,
+                    past_length=offsets[n_compressed],
+                    attn_impl=args.generate_attn_impl,
+                    use_gist=True,
+                )
+            )
 
     d_corr_span_tokens = 0
     d_sham_tokens = 0
@@ -2153,6 +2211,13 @@ def _build_d_intervene_prefix(
         "tool_compress_sec": compress_sec,
         "blend_sec": blend_sec,
         "use_gist": True,
+        # Base-layer identity.  Stamped on every row so a hybrid-base jsonl can
+        # never be compared against a pure-C2KV-base one by accident.
+        "d_base": "hybrid" if hybrid_k else "c2kv",
+        "d_base_hybrid_top_k": hybrid_k,
+        "d_base_compressed_docs": n_compressed,
+        "d_base_raw_tail_tokens": hybrid_tail_tokens,
+        "d_base_raw_tail_prefill_sec": round(hybrid_tail_sec, 4),
         "d_corr_doc_index": None if mode == "d_corr_all" else k_star,
         "d_corr_span_tokens": d_corr_span_tokens,
         # d_corr_slice_prefill_sec is the injection-side prefill cost for
@@ -2722,6 +2787,34 @@ def _rank_history_by_attention(
     return ranked, scores, system_prefill_sec + router_build_sec, head_rankings
 
 
+HYBRID_LAYOUTS = ("chronological", "legacy_tail_first")
+
+
+def _hybrid_layout(args: argparse.Namespace) -> str:
+    """Resolve the hybrid prefix layout, honouring the deprecated bool flag.
+
+    `--hybrid_layout` is the knob.  `--hybrid_full_after_c2kv` is the old
+    boolean; when it is passed explicitly it still wins, so recorded reruns of
+    old commands reproduce.  Its historical default (False) is NOT honoured as
+    a default here: it selected `legacy_tail_first`, which put the raw recent
+    tail *ahead* of the older gists.  That ordering was never the specified
+    algorithm -- it was the only one that worked, because the chronological
+    branch used a prefill whose attention mask is wrong over a gist cache.
+    With that fixed, chronological is the default.
+    """
+    layout = getattr(args, "hybrid_layout", None)
+    legacy_flag = getattr(args, "hybrid_full_after_c2kv", None)
+    if layout is None:
+        layout = "chronological" if legacy_flag is None else (
+            "chronological" if legacy_flag else "legacy_tail_first"
+        )
+    if layout not in HYBRID_LAYOUTS:
+        raise SystemExit(
+            f"FATAL: unknown --hybrid_layout {layout!r}; known: {', '.join(HYBRID_LAYOUTS)}"
+        )
+    return layout
+
+
 @torch.inference_mode()
 def _build_hybrid_prefix(
     model: Any,
@@ -2740,6 +2833,11 @@ def _build_hybrid_prefix(
     if not history:
         return _build_system_only_prefix(model, tokenizer, example, args)
     full_count = args.hybrid_top_k if recent_full_docs is None else recent_full_docs
+    # Guard the tail slice the way _build_raw_first15_hybrid_prefix does: with
+    # k > len(history) the arm silently degenerates to "everything raw" (== the
+    # full arm) instead of failing, which then shows up as a hybrid row that is
+    # really a full row.  Clamp and record it so the caller can see it.
+    full_count = max(0, min(int(full_count), len(history)))
     if selected_full_indices is not None:
         full_set = set(selected_full_indices)
         full_history = [message for index, message in enumerate(history) if index in full_set]
@@ -2750,7 +2848,16 @@ def _build_hybrid_prefix(
         full_history = history[-full_count:] if args.history_selection == "tail" else history[:full_count]
         full_set = set(range(len(history) - len(full_history), len(history))) if args.history_selection == "tail" else set(range(len(full_history)))
     rest_history = [message for index, message in enumerate(history) if index not in full_set]
-    full_after_c2kv = bool(getattr(args, "hybrid_full_after_c2kv", False))
+    # Prefix layout.  "chronological" is the algorithm as specified (and as
+    # _build_raw_first15_hybrid_prefix has always built it): the compressed
+    # older history first, the raw recent tail last, adjacent to the query.
+    # "legacy_tail_first" is what this builder used to do unconditionally
+    # (hybrid_full_after_c2kv defaulted to False): the raw tail was prefilled
+    # directly after the system prompt, ahead of the gists, so the model saw
+    # the conversation out of order and no prefix-cache reuse was possible.
+    # Kept only so pre-2026-08-29 rows can be reproduced bit-for-bit.
+    layout = _hybrid_layout(args)
+    full_after_c2kv = layout == "chronological"
 
     system_ids = _chat_template_ids(
         tokenizer,
@@ -2774,23 +2881,38 @@ def _build_hybrid_prefix(
     prefix_cache = system_cache
     full_length = 0
 
-    def append_full_history(current_past_length: int) -> int:
+    def append_full_history(current_past_length: int, *, gist_in_cache: bool) -> int:
         nonlocal prefix_cache, top_prefill_sec
         if not full_ids:
             return 0
         full_input_ids = torch.tensor([full_ids], dtype=torch.long, device=model.device)
-        prefix_cache, appended_length, prefill_sec = _prefill_tokens_with_cache(
+        # Must be the history harness's own prefill, never the tool-definition
+        # eval's same-named function: that one sizes the attention mask from
+        # `past_length + input_length` (logical positions), which is wrong the
+        # moment the cache holds fewer slots than logical positions -- exactly
+        # the case here once gists are in the cache.  See d_prereg.md "Suffix
+        # recompute".  This is why the chronological layout was unusable before.
+        #
+        # use_gist selects gist_{q,k,v}_proj instead of {q,k,v}_proj
+        # (modeling_qwen3.py:242-246).  Training's rule is "a gist in the cache
+        # => every later forward uses the gist projections", so the raw tail is
+        # projected with gist weights iff it is being appended after the gists.
+        prefix_cache, appended_length, prefill_sec = _prefill_tokens_with_cache_maybe_gist(
             model,
             full_input_ids,
             past_key_values=prefix_cache,
             past_length=current_past_length,
             attn_impl=args.generate_attn_impl,
+            use_gist=gist_in_cache,
         )
         top_prefill_sec += prefill_sec
         return appended_length
 
     if not full_after_c2kv:
-        full_length = append_full_history(system_length)
+        # legacy_tail_first: nothing is in the cache yet beyond the system
+        # prompt, so cache slots == logical positions and there are no gist
+        # projections to inherit.
+        full_length = append_full_history(system_length, gist_in_cache=False)
 
     rest_tokens = 0
     rest_length = 0
@@ -2823,7 +2945,9 @@ def _build_hybrid_prefix(
             args.override_ratio,
         )
     if full_after_c2kv:
-        full_length = append_full_history(system_length + rest_length)
+        full_length = append_full_history(
+            system_length + rest_length, gist_in_cache=bool(rest_history)
+        )
 
     doc_tokens = rest_tokens + full_tokens
     compressed_tokens = gist_tokens + full_tokens
@@ -2847,6 +2971,11 @@ def _build_hybrid_prefix(
         "tool_compress_sec": compress_sec,
         "blend_sec": blend_sec,
         "use_gist": bool(rest_history),
+        # Stamped on every row so a jsonl can never be silently compared
+        # against one built with the other layout.
+        "hybrid_layout": layout,
+        "hybrid_top_k_effective": full_count,
+        "hybrid_degenerate_to_full": not rest_history,
     }
     if router_debug:
         prefix.update(router_debug)
@@ -3770,7 +3899,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--prefix_history_doc_num", type=int)
     parser.add_argument("--prefix_history_exact", type=lambda x: str(x).lower() == "true", default=False)
     parser.add_argument("--split_oversized_history_docs", type=lambda x: str(x).lower() == "true", default=True)
-    parser.add_argument("--hybrid_full_after_c2kv", type=lambda x: str(x).lower() == "true", default=False)
+    # Deprecated: kept so archived commands still parse.  default=None so
+    # _hybrid_layout can tell "not passed" from "explicitly False".
+    parser.add_argument("--hybrid_full_after_c2kv",
+                        type=lambda x: str(x).lower() == "true", default=None)
+    parser.add_argument("--hybrid_layout", choices=HYBRID_LAYOUTS, default=None,
+                        help="hybrid prefix order; default chronological "
+                             "(gists first, raw recent tail adjacent to the query)")
     parser.add_argument("--device_type", choices=["auto", "cuda", "npu", "cpu"], default="auto")
     parser.add_argument("--system_attn_impl", default="eager")
     parser.add_argument("--gist_attn_impl", default="eager")

@@ -33,7 +33,8 @@ from typing import Any, Dict, List, Optional, Tuple
 from urllib import request as urlrequest
 from urllib.error import URLError
 
-from arms import Arm, get_arm  # type: ignore
+from arms import Arm, get_arm
+from dialect import message_text  # type: ignore
 
 
 class ExtractCache:
@@ -128,8 +129,12 @@ def _assemble(messages: List[Dict[str, Any]], arm: Arm, timeout: int):
     n_gist = 0
     for i, message in enumerate(messages):
         role = message.get("role") or "user"
-        content = message.get("content")
-        content = content if isinstance(content, str) else json.dumps(content or "")
+        # The text this message contributes to the context, tool calls
+        # rendered into it exactly as hf_server renders raw history.  Reading
+        # `content` alone deleted every assistant action in the compressed
+        # history: an OpenAI assistant tool-call turn carries content=None, so
+        # the old `json.dumps(content or "")` hashed the string `""`.
+        content = message_text(message)
         in_history = i < cutoff
         keep_raw = (
             not arm.compress_history
@@ -146,6 +151,9 @@ def _assemble(messages: List[Dict[str, Any]], arm: Arm, timeout: int):
         n_gist += 1
         compressed = dict(message)
         compressed["content"] = content
+        # tool_calls are already inside `content` now; leaving them would make
+        # hf_server render the action a second time on a cache miss.
+        compressed.pop("tool_calls", None)
         compressed["c2kv_key_hash"] = record["key_hash"]
         # lets the server re-extract on cache miss (e.g. after a restart)
         compressed["c2kv_ratio"] = arm.ratio

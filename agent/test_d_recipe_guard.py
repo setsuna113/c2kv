@@ -44,7 +44,8 @@ def _guard():
 
 
 def _args(**over):
-    base = dict(max_doc_length=768, max_doc_num=16, ratio=8, arm="corr")
+    base = dict(max_doc_length=768, max_doc_num=16, ratio=8, arm="corr",
+                base_hybrid_top_k=0)
     base.update(over)
     return argparse.Namespace(**base)
 
@@ -122,3 +123,28 @@ def test_full_arm_is_still_checked():
     """The full arm overrides ratio to 1 at call time but shares the frozen set."""
     with pytest.raises(SystemExit):
         _guard()(_manifest(), _args(arm="full", max_doc_length=1024))
+
+
+def test_hybrid_base_mismatch_is_fatal():
+    """A pure-C2KV trigger set must not be repaired on a hybrid base.
+
+    Every manifest frozen before Block 3.1 predates the field, so its absence
+    means base_hybrid_top_k=0 -- the guard has to catch the old-manifest case,
+    which is the one that will actually happen.
+    """
+    with pytest.raises(SystemExit) as exc:
+        _guard()(_manifest(), _args(base_hybrid_top_k=3))
+    msg = str(exc.value)
+    assert "base-layer mismatch" in msg
+    assert "base_hybrid_top_k=0" in msg and "passes 3" in msg
+
+
+def test_hybrid_base_match_passes():
+    _guard()(_manifest(recipe={"base_hybrid_top_k": 3}), _args(base_hybrid_top_k=3))
+
+
+def test_hybrid_manifest_run_on_c2kv_base_is_fatal():
+    """The mirror image: a hybrid trigger set replayed on the pure base."""
+    with pytest.raises(SystemExit) as exc:
+        _guard()(_manifest(recipe={"base_hybrid_top_k": 3}), _args(base_hybrid_top_k=0))
+    assert "base-layer mismatch" in str(exc.value)

@@ -347,6 +347,11 @@ def _bundle_row(
             "tokenizer": args.tokenizer,
             "max_doc_length": args.max_doc_length,
             "max_doc_num": args.max_doc_num,
+            # Base layer of the COMPRESSED arm this trigger set describes.
+            # 0 = pure C2KV; k>0 = hybrid with the last k docs raw.
+            # d_kv_intervene._assert_recipe_matches_run refuses to repair a
+            # trigger set whose base differs from the run's.
+            "base_hybrid_top_k": args.base_hybrid_top_k,
             "doc_ids_table": args.out_doc_table,
         },
         "source": {
@@ -496,6 +501,11 @@ def _freeze_manifest(
             # d_kv_intervene refuses to start on a mismatch.
             "max_doc_length": args.max_doc_length,
             "max_doc_num": args.max_doc_num,
+            # Base layer of the COMPRESSED arm this trigger set describes.
+            # 0 = pure C2KV; k>0 = hybrid with the last k docs raw.
+            # d_kv_intervene._assert_recipe_matches_run refuses to repair a
+            # trigger set whose base differs from the run's.
+            "base_hybrid_top_k": args.base_hybrid_top_k,
         },
         # Which harness dialect the paired rows came from.  D intervenes with the
         # history harness, so joint-battery rows are not interchangeable here even
@@ -562,6 +572,12 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--base_model", default=None)
     parser.add_argument("--max_doc_length", type=int, default=768)
     parser.add_argument("--max_doc_num", type=int, default=16)
+    parser.add_argument(
+        "--base_hybrid_top_k", type=int, default=0,
+        help="base compression of the --compressed_rows arm: 0 = pure C2KV, "
+             "k>0 = hybrid with the last k history docs raw. Recorded in the "
+             "manifest so the repair run cannot target a different base.",
+    )
     return parser.parse_args(argv)
 
 

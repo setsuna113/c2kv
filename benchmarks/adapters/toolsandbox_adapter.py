@@ -76,7 +76,12 @@ def collect(out_dir: Path) -> Dict[str, Any]:
                 "turn_count": scenario.get("turn_count"),
                 "protocol_legal": None,  # TS has no tool-call legality metric
             })
-    return aggregate(rows, cluster_key="task_id")
+    summary = aggregate(rows, cluster_key="task_id")
+    # Per-task rows are what the task-level oracle joins on (an arm pair
+    # gives the "full succeeded, compressed failed" set).  They were built
+    # and discarded here, which made the oracle impossible to compute.
+    summary["rows"] = rows
+    return summary
 
 
 if __name__ == "__main__":

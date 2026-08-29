@@ -56,7 +56,10 @@ MAX_ANSWER_CHARS="${MAX_ANSWER_CHARS:-}"
 PREFIX_HISTORY_DOC_NUM="${PREFIX_HISTORY_DOC_NUM:-}"
 PREFIX_HISTORY_EXACT="${PREFIX_HISTORY_EXACT:-False}"
 SPLIT_OVERSIZED_HISTORY_DOCS="${SPLIT_OVERSIZED_HISTORY_DOCS:-True}"
-HYBRID_FULL_AFTER_C2KV="${HYBRID_FULL_AFTER_C2KV:-False}"
+# Prefix layout for the hybrid arm.  Default chronological: older history as
+# gists first, the raw recent tail last (adjacent to the query).  Set to
+# legacy_tail_first only to reproduce pre-2026-08-29 rows.
+HYBRID_LAYOUT="${HYBRID_LAYOUT:-chronological}"
 NPU_ATTN_IMPL="${NPU_ATTN_IMPL:-eager}"
 PARALLEL_EVAL="${PARALLEL_EVAL:-True}"
 OUTPUT_STEM="${OUTPUT_FILE%.jsonl}"
@@ -82,7 +85,7 @@ if [[ -n "${PREFIX_HISTORY_DOC_NUM}" ]]; then
 fi
 OPTIONAL_ARGS+=(--prefix_history_exact "${PREFIX_HISTORY_EXACT}")
 OPTIONAL_ARGS+=(--split_oversized_history_docs "${SPLIT_OVERSIZED_HISTORY_DOCS}")
-OPTIONAL_ARGS+=(--hybrid_full_after_c2kv "${HYBRID_FULL_AFTER_C2KV}")
+OPTIONAL_ARGS+=(--hybrid_layout "${HYBRID_LAYOUT}")
 if [[ "${DUMP_RAW_HISTORY_DOCS}" == "True" || "${DUMP_RAW_HISTORY_DOCS}" == "true" || "${DUMP_RAW_HISTORY_DOCS}" == "1" ]]; then
   OPTIONAL_ARGS+=(--dump_raw_history_docs --raw_history_doc_debug_chars "${RAW_HISTORY_DOC_DEBUG_CHARS}")
 fi
@@ -112,7 +115,7 @@ echo "TRUNCATE_SELECTION=${TRUNCATE_SELECTION}"
 echo "PREFIX_HISTORY_DOC_NUM=${PREFIX_HISTORY_DOC_NUM}"
 echo "PREFIX_HISTORY_EXACT=${PREFIX_HISTORY_EXACT}"
 echo "SPLIT_OVERSIZED_HISTORY_DOCS=${SPLIT_OVERSIZED_HISTORY_DOCS}"
-echo "HYBRID_FULL_AFTER_C2KV=${HYBRID_FULL_AFTER_C2KV}"
+echo "HYBRID_LAYOUT=${HYBRID_LAYOUT}"
 echo "INCLUDE_TOOLS=${INCLUDE_TOOLS}"
 echo "PARALLEL_EVAL=${PARALLEL_EVAL}"
 

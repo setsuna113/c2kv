@@ -136,7 +136,12 @@ def collect(results_path: Path, domain: str = "airline") -> Dict[str, Any]:
         )
     from metrics import aggregate  # noqa: E402
 
-    return aggregate(rows, cluster_key="task_id")
+    summary = aggregate(rows, cluster_key="task_id")
+    # Per-task rows are what the task-level oracle joins on (an arm pair
+    # gives the "full succeeded, compressed failed" set).  They were built
+    # and discarded here, which made the oracle impossible to compute.
+    summary["rows"] = rows
+    return summary
 
 
 def _task_tools(traj: Dict[str, Any]) -> List[Dict[str, Any]]:

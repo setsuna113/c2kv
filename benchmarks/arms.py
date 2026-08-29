@@ -38,6 +38,17 @@ class Arm:
             raise ValueError(f"arm {self.name!r}: compression ratio must be >= 2")
         if not self.compress_history and (self.hybrid_top_k or self.repair):
             raise ValueError(f"arm {self.name!r}: hybrid/repair knobs need compression")
+        # The docstring above used to claim the proxy rejected repair arms.  It
+        # did not: proxy._assemble never reads Arm.repair, so a repair arm ran
+        # as a plain c2kv/hybrid arm and its rows were labelled with the repair
+        # arm's name.  Until the server-side KV primitives land, fail loudly
+        # rather than emit mislabelled numbers.
+        if self.repair:
+            raise NotImplementedError(
+                f"arm {self.name!r} declares repair={self.repair!r}, but no repair "
+                "primitive exists in proxy.py/hf_server.py yet. Running it would "
+                "silently produce plain-compression numbers under a repair label."
+            )
 
 
 ARMS: Dict[str, Arm] = {
@@ -60,12 +71,33 @@ ARMS: Dict[str, Arm] = {
             ratio=16,
             description="all history as gist KV at 16x (compression ladder)",
         ),
+        # hybrid_top_k counts MESSAGES, which is also what the battery counts
+        # (a history "doc" there is one message, split if it exceeds
+        # max_doc_length).  It is NOT turns: an agent turn is an assistant
+        # tool-call message plus its tool result, so k messages ~ k/2 turns.
+        # The compression unit is the doc, so the doc is the only unit in which
+        # "keep the recent ones raw" is well defined -- k=1/3/5 here is the
+        # plan's k=1/3/5 read in that unit.
+        Arm(
+            name="hybrid1",
+            compress_history=True,
+            ratio=8,
+            hybrid_top_k=1,
+            description="top-1 tail message raw, earlier history gist (~0.5 turn)",
+        ),
         Arm(
             name="hybrid",
             compress_history=True,
             ratio=8,
             hybrid_top_k=3,
-            description="top-3 tail messages raw, earlier history gist",
+            description="top-3 tail messages raw, earlier history gist (~1.5 turns)",
+        ),
+        Arm(
+            name="hybrid5",
+            compress_history=True,
+            ratio=8,
+            hybrid_top_k=5,
+            description="top-5 tail messages raw, earlier history gist (~2.5 turns)",
         ),
         Arm(
             name="cd_full",

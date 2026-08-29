@@ -60,6 +60,11 @@ logger = logging.getLogger("d_kv_intervene")
 
 ARM_MODES = {
     "none": "c2kv",
+    # Block 3.1 base arms.  "hybrid_none" is the untouched hybrid prefix, i.e.
+    # the baseline the repair arms are layered on when --base_hybrid_top_k > 0;
+    # it goes through the harness's own "hybrid" mode so the base is literally
+    # the same construction the battery scores.
+    "hybrid_none": "hybrid",
     "sham": "d_sham_neutral",
     "corr": "d_corr",
     "corr_re": "d_corr_recompute",
@@ -202,6 +207,9 @@ def _d_args(args: argparse.Namespace) -> Any:
         "--generate_attn_impl", args.attn_impl,
         "--device_type", args.device_type,
         "--override_ratio", str(args.ratio),
+        # Both the hybrid base arm and the hybrid-base repair arms read this.
+        "--hybrid_top_k", str(args.base_hybrid_top_k),
+        "--hybrid_layout", args.hybrid_layout,
     ]
     if args.split_manifest_file:
         argv += ["--split_manifest_file", args.split_manifest_file]
@@ -246,6 +254,24 @@ def _assert_recipe_matches_run(manifest: Dict[str, Any], args: argparse.Namespac
             "The intervention would land on a different grid than the one whose "
             "failure defined the trigger. Re-run with the recorded value, or "
             "re-extract the triggers at the budget you intend to run."
+        )
+
+    # The base layer is part of the grid.  A trigger frozen on a pure-C2KV
+    # base names a document whose failure happened with EVERY doc compressed;
+    # replaying it with the last k docs raw repairs a different context.
+    # Absent means 0: every manifest frozen before Block 3.1 was extracted
+    # against a pure-C2KV base, so a missing field is a positive statement, not
+    # an excuse to skip the check.
+    recorded_base = int(recipe.get("base_hybrid_top_k") or 0)
+    run_base = int(getattr(args, "base_hybrid_top_k", 0) or 0)
+    if recorded_base != run_base:
+        raise SystemExit(
+            "FATAL: base-layer mismatch — the trigger manifest was frozen with "
+            f"base_hybrid_top_k={recorded_base}, this run passes {run_base}. "
+            "The trigger set describes failures of a different base prefix "
+            "(a hybrid base leaves the last k docs raw, so both which documents "
+            "are compressed and which one k* names change). Re-extract the "
+            "triggers against the base you intend to repair."
         )
 
     recorded_num = recipe.get("max_doc_num")
@@ -649,6 +675,14 @@ def evaluate(args: argparse.Namespace) -> None:
 
     HH.D_INTERVENE = _intervene_table(frozen["plan"], qids)
     HH.CORR_K_POLICY = args.corr_k_policy
+    HH.D_HYBRID_TOP_K = int(args.base_hybrid_top_k)
+    if args.base_hybrid_top_k:
+        logger.info(
+            "Block 3.1 base=hybrid k=%d layout=%s (docs 0..T-%d-1 compressed, "
+            "the rest raw); repair arms restricted to %s",
+            args.base_hybrid_top_k, args.hybrid_layout, args.base_hybrid_top_k,
+            ", ".join(sorted(HH.D_HYBRID_SUPPORTED_MODES)),
+        )
     if args.corr_k_policy != "median":
         logger.info("K1 corr_k_policy=%s (plan k* pin bypassed)", args.corr_k_policy)
     if args.arm in PLAN_REQUIRED_ARMS:
@@ -760,6 +794,16 @@ def evaluate(args: argparse.Namespace) -> None:
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--arm", choices=sorted(ARM_MODES), required=True)
+    parser.add_argument(
+        "--base_hybrid_top_k", type=int, default=0,
+        help="Block 3.1: base compression under the repair arms. 0 = pure C2KV "
+             "(original D base); k>0 = hybrid, the last k history docs stay raw",
+    )
+    parser.add_argument(
+        "--hybrid_layout", default="chronological",
+        choices=list(getattr(HH, "HYBRID_LAYOUTS", ("chronological",))),
+        help="prefix order for the hybrid base (see eval_agent_history_c2kv)",
+    )
     parser.add_argument(
         "--corr_k_policy",
         default="median",

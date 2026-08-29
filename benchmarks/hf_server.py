@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+from dialect import message_text  # type: ignore
 import json
 import re
 import threading
@@ -364,33 +365,8 @@ class C2KVServer:
             #   content + "\n\n" + "Action:\n" + "\n".join(<tool_call> blocks)
             # with minified JSON — the surface the model was trained on
             for message in body:
-                if message.get("role") == "assistant" and message.get("tool_calls"):
-                    blocks = []
-                    for call in message["tool_calls"]:
-                        function = call.get("function") or {}
-                        try:
-                            arguments = json.loads(function.get("arguments") or "{}")
-                        except json.JSONDecodeError:
-                            arguments = function.get("arguments") or {}
-                        blocks.append(
-                            "<tool_call>\n"
-                            + json.dumps(
-                                {"name": function.get("name"), "arguments": arguments},
-                                ensure_ascii=False, separators=(",", ":"),
-                            )
-                            + "\n</tool_call>"
-                        )
-                    action = "Action:\n" + "\n".join(blocks)
-                    content = message.get("content") or ""
-                    message["content"] = (
-                        content + "\n\n" + action if content else action
-                    )
-                    message.pop("tool_calls", None)
-                content = message.get("content")
-                if not isinstance(content, str):
-                    message["content"] = (
-                        json.dumps(content, ensure_ascii=False) if content else ""
-                    )
+                message["content"] = message_text(message)
+                message.pop("tool_calls", None)
             # 1. system prefill (tools render inside the system block, as in
             # the harness's _prefill_system); cached across requests
             cache = None

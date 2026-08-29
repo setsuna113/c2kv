@@ -43,7 +43,33 @@ def start_proxy(upstream: str, arm: str, port: int, log_dir: Path):
     raise SystemExit(f"proxy did not come up on port {port}")
 
 
+def _task_ids(value: str) -> str:
+    """`--task-ids` as a comma-separated string; `@path` reads one id per line."""
+    if not value:
+        return ""
+    if value.startswith("@"):
+        path = Path(value[1:])
+        if not path.exists():
+            raise SystemExit(f"FATAL: --task-ids file not found: {path}")
+        ids = [line.strip() for line in path.read_text(encoding="utf-8").splitlines()
+               if line.strip() and not line.startswith("#")]
+        if not ids:
+            raise SystemExit(f"FATAL: --task-ids file {path} is empty")
+        return ",".join(ids)
+    return value
+
+
 def run_benchmark(name: str, base_url: str, user_base_url: str, out_dir: Path, **kwargs) -> Dict[str, Any]:
+    task_ids = kwargs.get("task_ids") or ""
+    if task_ids and name in ("tau2", "toolsandbox"):
+        # Only BFCL exposes an id filter (--run-ids) today.  Accepting the flag
+        # and quietly running the whole set would report full-set numbers as if
+        # they were the oracle subset's.
+        raise SystemExit(
+            f"FATAL: --task-ids is not plumbed for {name!r} yet (only bfcl has "
+            "--run-ids). Wire the id filter into its adapter before using the "
+            "oracle-subset re-run on this benchmark."
+        )
     if name == "tau2":
         from adapters import tau2_adapter
 
@@ -60,6 +86,7 @@ def run_benchmark(name: str, base_url: str, user_base_url: str, out_dir: Path, *
         return bfcl_adapter.run(
             base_url,
             categories=kwargs.get("categories", "multi_turn_base"),
+            run_ids=kwargs.get("task_ids", "") or "",
         )
     if name == "toolsandbox":
         from adapters import toolsandbox_adapter
@@ -85,6 +112,10 @@ def main(argv=None):
     parser.add_argument("--num-workers", type=int, default=4)
     parser.add_argument("--max-tasks", type=int)
     parser.add_argument("--run-name", default="c2kv_run")
+    parser.add_argument("--task-ids", default="",
+                        help="comma-separated task ids, or @file with one per "
+                             "line. Used to re-run only the oracle subset "
+                             "(tasks the full arm passed and this arm failed).")
     parser.add_argument("--full", action="store_true",
                         help="toolsandbox: full suite instead of test mode")
     args = parser.parse_args(argv)
@@ -101,12 +132,24 @@ def main(argv=None):
             task_set=args.task_set, categories=args.categories,
             num_workers=args.num_workers, max_tasks=args.max_tasks,
             run_name=args.run_name, full=args.full,
+            task_ids=_task_ids(args.task_ids),
         )
     finally:
         proxy_proc.terminate()
     summary["arm"] = args.arm
     summary["benchmark"] = args.benchmark
     summary["request_log"] = str(request_log)
+    # Per-task rows keyed by task_id: this is what oracle_subset.py joins
+    # across arms.  Without them an arm's summary is a single number and the
+    # task-level oracle cannot be computed at all.
+    rows = summary.pop("rows", None)
+    if rows:
+        rows_path = args.out / f"rows_{args.arm}.jsonl"
+        with rows_path.open("w", encoding="utf-8") as handle:
+            for row in rows:
+                handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+        summary["rows_file"] = str(rows_path)
+        summary["n_rows"] = len(rows)
     (args.out / f"summary_{args.arm}.json").write_text(
         json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8"
     )

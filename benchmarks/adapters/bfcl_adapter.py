@@ -73,6 +73,94 @@ def install_handler(base_url: str) -> None:
     )
 
 
+def _score_roots() -> list:
+    """Directories bfcl_eval may have written result/ and score/ into."""
+    import os
+    roots = []
+    for var in ("BFCL_PROJECT_ROOT", "BFCL_RESULT_ROOT"):
+        if os.environ.get(var):
+            roots.append(Path(os.environ[var]))
+    try:
+        import bfcl_eval
+        roots.append(Path(bfcl_eval.__file__).resolve().parent)
+    except Exception:
+        pass
+    roots.append(Path.cwd())
+    return roots
+
+
+def collect(categories: str) -> list:
+    """Per-entry rows from bfcl_eval's own score output.
+
+    Layout written by `bfcl evaluate` (v3/v4): JSONL score files at
+    `score/<model>/BFCL_v*_<category>_score.json` whose FIRST line is the
+    summary ({"accuracy", "correct_count", "total_count"}) and whose remaining
+    lines are the failing entries, each carrying an "id".  The full entry set
+    comes from the matching `result/<model>/..._result.json`.
+
+    Raises rather than returning [] when nothing is found: an empty BFCL column
+    that silently reads as "0 rows" is exactly how this adapter used to report
+    no score at all.
+    """
+    model_dir = MODEL_NAME.replace("/", "_")
+    wanted = [c.strip() for c in categories.split(",") if c.strip()]
+    score_files, result_files = [], []
+    for root in _score_roots():
+        for cat in wanted:
+            score_files += sorted((root / "score" / model_dir).glob(f"*{cat}*_score.json"))
+            result_files += sorted((root / "result" / model_dir).glob(f"*{cat}*_result.json"))
+        if score_files:
+            break
+    if not score_files:
+        searched = ", ".join(str(r / "score" / model_dir) for r in _score_roots())
+        raise SystemExit(
+            f"FATAL: no BFCL score file for categories {categories!r} under: {searched}. "
+            "Run `bfcl evaluate` first, or point BFCL_PROJECT_ROOT at its output root."
+        )
+
+    def _jsonl(path):
+        out = []
+        for line in path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line:
+                try:
+                    out.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
+        return out
+
+    all_ids, failed = [], set()
+    for path in result_files:
+        all_ids += [str(r.get("id")) for r in _jsonl(path) if r.get("id") is not None]
+    summaries = []
+    for path in score_files:
+        records = _jsonl(path)
+        if not records:
+            continue
+        summaries.append(records[0])
+        failed |= {str(r.get("id")) for r in records[1:] if r.get("id") is not None}
+    if not all_ids:
+        # No result file: fall back to the summary counts so the arm still
+        # reports its official accuracy, with synthetic ids.
+        total = sum(int(s.get("total_count") or 0) for s in summaries)
+        correct = sum(int(s.get("correct_count") or 0) for s in summaries)
+        if not total:
+            raise SystemExit(
+                f"FATAL: BFCL score files {[str(p) for p in score_files]} carry no "
+                "total_count and no result file was found; refusing to report an "
+                "empty accuracy."
+            )
+        return ([{"task_id": f"correct_{i}", "semantic_score": 1.0, "protocol_legal": None}
+                 for i in range(correct)]
+                + [{"task_id": f"incorrect_{i}", "semantic_score": 0.0, "protocol_legal": None}
+                   for i in range(total - correct)])
+    return [
+        {"task_id": tid, "semantic_score": 0.0 if tid in failed else 1.0,
+         "protocol_legal": None}
+        for tid in all_ids
+    ]
+
+
 def run(base_url: str, categories: str = "multi_turn_base",
         mode: str = "both", run_ids: str = "") -> Dict[str, Any]:
     """Programmatic entry for benchmarks/run.py: register the handler and
@@ -87,7 +175,17 @@ def run(base_url: str, categories: str = "multi_turn_base",
         run_cli(gen)
     if mode in ("evaluate", "both"):
         run_cli(ev)
-    return {"benchmark": "bfcl", "categories": categories, "mode": mode}
+    rows = collect(categories)
+    if rows:
+        import sys as _s; from pathlib import Path as _P
+        _s.path.insert(0, str(_P(__file__).resolve().parents[1]))
+        from metrics import aggregate  # noqa: E402
+        summary = aggregate(rows, cluster_key="task_id")
+    else:
+        summary = {"n": 0}
+    summary.update({"benchmark": "bfcl", "categories": categories, "mode": mode})
+    summary["rows"] = rows
+    return summary
 
 
 def run_cli(argv):
