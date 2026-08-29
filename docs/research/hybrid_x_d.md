@@ -133,9 +133,11 @@ c2kv 错误质量）、**hybrid 回归（c2kv✓∧hybrid✗）仅 1 例**；W�
 
 ### 3.4 口径 caveat（外部 review 采纳）
 
-- **128-token 生成截断**：battery 全部数字在此口径下（full 中位生成长度≈125）。
-  配对结论（corr vs sham、hybrid vs c2kv 同口径对比）方向不受影响；**绝对修复率
-  是截断口径下的值**。512-token 版 full/c2kv/hybrid 基线已排（过夜）验证。
+- **128-token 生成截断**：battery 全部数字在此口径下。@1088 实测：卡顶率
+  full 39.1% / hybrid 32.9% / c2kv 27.7%（中位生成长度 91/85/74）——截断是
+  显著但三臂同向的口径因子。配对结论（corr vs sham、hybrid vs c2kv 同口径
+  对比）方向不受影响；**绝对修复率是截断口径下的值**。512-token 版
+  full/c2kv/hybrid 基线已排（过夜）验证。
 - **doc_0 锚点混淆**：`_select_history` tail 超过 16 doc 时保
   `[doc_0]+最后15`——在撞上限的题上 offset:0 是"会话锚点"而非"窗口最早块"，
   与未撞上限的题不同类。影响第一块先验的机制解释，不影响配对数字。
