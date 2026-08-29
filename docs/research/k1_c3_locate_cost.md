@@ -35,6 +35,18 @@
 **把 D 线默认 k\* 从 median 改为 first 是当前免费的最大的杠杆**：同等成本下 L2 从 0.26
 → 0.41。后续所有修复臂（splice/corr_text/cd）都应在 first 上重估。
 
+### @first 交叉复测（2026-08-29 补充，`~/bench_results/k1/pa_full.md`）
+
+| 臂 | median | @first | 判读 |
+|---|---:|---:|---|
+| corr | 0.2581 | **0.4086** | K1 主发现 |
+| corr_text | 0.1935 | **0.2796** | 文本 erratum 在最优块上 +8.6pp，追平 corr@median |
+| re_only | 0.2258 | **0.1613** | **下游重算在 first 上反而有害**（−6.5pp），correct-but-illegal 29 全场最高 |
+
+**A1 的"互补两半"结论在 first 定位下瓦解**：选对块后，下游重算不仅不必要，还有害——
+corr@first（0.409，单块 47MB，无重算段）就是最优修复配置；re_only 系与 corr_re 的
+必要性完全来自 median 的次优定位。线上最小可行配置收敛为 **corr@first（可选 +cd）**。
+
 ## C3：修复成本 crossover（长度扫描）
 
 | target_len | full 重 prefill | 修复边际（slice+recompute） | repair/full |
