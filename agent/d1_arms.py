@@ -65,6 +65,13 @@ ARM_MODES = {
     "raw_erratum_tail": "d_raw_erratum_tail",
     # D2 (built by d2_short_erratum.py; dispatched through D_CONTRACT_MODES)
     "short_erratum": "d_short_erratum",
+    # D4/D5/D6/D7 runtime arms (d37_arms.py; run-gated on the |R| verdict)
+    "reskv_capsule": "d_reskv_capsule",
+    "keepkv_capsule": "d_keepkv_capsule",
+    "less_fold": "d_less_fold",
+    "grkv_v_edit": "d_grkv_v_edit",
+    "selkv_bias": "d_selkv_bias",
+    "selkv_count": "d_selkv_count",
 }
 D_CONTRACT_MODES = set(ARM_MODES.values())
 

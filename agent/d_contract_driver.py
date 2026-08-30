@@ -208,6 +208,11 @@ def main(argv=None):
             row["d_arm"] = args.arm
             row["d_mode"] = mode
             row["wall_sec"] = round(wall, 3)
+            # D4/D5/D7 arms leave the eager-path bias registry ACTIVE
+            # during decode; clear it every row so nothing leaks across qids
+            from inference import attn_bias as _attn_bias
+
+            _attn_bias.clear()
             handle.write(json.dumps(row, ensure_ascii=False, default=str) + "\n")
             handle.flush()
             if (i + 1) % 10 == 0:

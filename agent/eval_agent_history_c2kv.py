@@ -1749,6 +1749,13 @@ D_CONTRACT_MODES = {
     "d_raw_replaceG",
     "d_raw_erratum_tail",
     "d_short_erratum",
+    # D4/D5/D6/D7 runtime arms (d37_arms.py; registry cleared by the driver)
+    "d_reskv_capsule",
+    "d_keepkv_capsule",
+    "d_less_fold",
+    "d_grkv_v_edit",
+    "d_selkv_bias",
+    "d_selkv_count",
 }
 
 
@@ -3065,9 +3072,11 @@ def _generate_one(
             model, tokenizer, example, args, mode, D_INTERVENE.get(example.qid)
         )
     elif mode in D_CONTRACT_MODES:
-        # lazy import: d1_arms/d2_short_erratum import this module at top level
+        # lazy import: d1_arms/d2_short_erratum/d37_arms import this module at top level
         if mode == "d_short_erratum":
             from d2_short_erratum import build_short_erratum_prefix as _d_contract_builder
+        elif mode.startswith(("d_reskv", "d_keepkv", "d_less", "d_grkv", "d_selkv")):
+            from d37_arms import build_d37_prefix as _d_contract_builder
         else:
             from d1_arms import build_d_contract_prefix as _d_contract_builder
         prefix, skip_reason = _d_contract_builder(
