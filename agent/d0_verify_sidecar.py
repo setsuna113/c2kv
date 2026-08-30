@@ -67,6 +67,7 @@ def main(argv=None):
         split_oversized_history_docs=True, max_prompt_tokens=1536,
         eval_ratio=0.1, split_seed=42, max_samples_per_session=0,
         require_tool_call="False", include_tools="True",
+        split_manifest_file=None, split_manifest_name="subset_disjoint",
     )
     tokenizer = HH._load_tokenizer(hargs)
     examples, _ = HH._load_examples(hargs, tokenizer)
