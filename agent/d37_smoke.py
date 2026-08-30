@@ -49,11 +49,13 @@ def main(argv=None):
     parser.add_argument("--device_type", default="npu")
     parser.add_argument("--attn_impl", default="eager")
     parser.add_argument("--ratio", type=int, default=8)
+    parser.add_argument("--max_doc_length", type=int, default=768)
+    parser.add_argument("--max_doc_num", type=int, default=16)
+    parser.add_argument("--max_new_tokens", type=int, default=128)
     parser.add_argument("--output_file", default="/home/liuyancheng/bench_results/d_v2/d37_smoke.jsonl")
     args = parser.parse_args(argv)
 
     hargs = _d_contract_args(args)
-    hargs.want_q = True  # teacher arms need raw Q
     tokenizer = HH._load_tokenizer(hargs)
     examples, _ = HH._load_examples(hargs, tokenizer)
     by_qid = {e.qid: e for e in examples}
