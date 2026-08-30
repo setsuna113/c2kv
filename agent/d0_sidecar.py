@@ -83,12 +83,14 @@ class SidecarStore:
         handles = []
         for idx, layer in enumerate(layers):
             attn = layer.self_attn
+            # Qwen3Attention stores head counts only on the config, not self
+            cfg = inner_model.config
             handles.append(attn.q_proj.register_forward_hook(
-                make_hook(idx, "q", attn.num_heads)))
+                make_hook(idx, "q", cfg.num_attention_heads)))
             handles.append(attn.k_proj.register_forward_hook(
-                make_hook(idx, "k", attn.num_key_value_heads)))
+                make_hook(idx, "k", cfg.num_key_value_heads)))
             handles.append(attn.v_proj.register_forward_hook(
-                make_hook(idx, "v", attn.num_key_value_heads)))
+                make_hook(idx, "v", cfg.num_key_value_heads)))
         try:
             result = model_call()
         finally:
