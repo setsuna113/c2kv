@@ -59,9 +59,14 @@ def main(argv=None):
     hargs = argparse.Namespace(
         mode="c2kv", model=args.model, base_model=args.base_model,
         tokenizer=args.tokenizer, untrained_c2kv=False,
+        dataset_path=args.dataset_path, split="eval",
         system_attn_impl=args.attn_impl, gist_attn_impl=args.attn_impl,
         generate_attn_impl=args.attn_impl, override_ratio=args.ratio,
         max_doc_length=args.max_doc_length, max_doc_num=args.max_doc_num,
+        max_system_length=4096, history_selection="tail",
+        split_oversized_history_docs=True, max_prompt_tokens=1536,
+        eval_ratio=0.1, split_seed=42, max_samples_per_session=0,
+        require_tool_call="False", include_tools="True",
     )
     tokenizer = HH._load_tokenizer(hargs)
     examples, _ = HH._load_examples(hargs, tokenizer)
