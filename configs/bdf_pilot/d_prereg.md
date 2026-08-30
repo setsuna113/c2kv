@@ -476,3 +476,31 @@ boundary exists so the diagnostic columns stay honest too.
   default-off bias/fold registry wired (D), D5 rewritten as d5_v2 (E),
   kvtc centered basis with mu as shared artifact (F), SelKV log-space
   geometric mean (G), pack_bits unsigned assertion (H).
+
+### v2.9 sentinel verdict reframed (2026-08-31, evidence on record)
+
+The 3-qid sentinel FAILED both stages at the bit level — root cause PROVEN
+not to be a code defect: a controlled probe (same k_proj weight, same row
+content, batch 1x413 vs embedded in the 16x768 grid) on the same NPU
+gives max|d| = 0.0078125 — digit-identical to the sentinel's layer-0 K
+mismatch — while a same-shape rerun is bit-equal.  NPU bf16 matmul
+rounding is shape-dependent; 36 layers of residual/layernorm amplify the
+1-ulp perturbation to O(0.5) per-entry diffs (bf16 deep-net chaos).
+
+Rulings:
+1. "Sidecar == standalone prefill, bit-identical" is UNATTAINABLE across
+   batch shapes on this hardware; the premise is retracted, not the code.
+2. The D0 contract itself is intact: P_k is what the NORMAL compression
+   forward computes, and the hooks capture exactly that (they do not
+   perturb computation; the interleave mask's token->gist block is never
+   filled — verified in _build_interleave_mask_vectorized — so the raw KV
+   is document-local in CONTENT, with no gist leakage).
+3. Placement (B7) remains certified by the unit identity
+   (metrology/test_abs_rope, atol 1e-4), independent of this finding.
+4. Line-B arms proceed: they splice the compression forward's own raw KV,
+   which is the contract's definition of the payload.  Their numbers
+   carry this caveat verbatim.
+
+Sentinel code follow-up (non-blocking): verdict logic becomes
+L0-vs-shape-noise control (<= 2 ulp) + per-layer RELATIVE Frobenius error
+(the probe's mean|d| is 8e-8 — max|d| alone overstates the divergence).
