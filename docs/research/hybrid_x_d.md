@@ -298,9 +298,26 @@ divergence_step；recover 臂在该步以同一 payload 全 raw 组装重发（=
 re_diverged。arms：`c2kv_recover` / `hybrid_recover`；旧任务级 oracle
 （§2）降为历史记录。
 
-### 5.4 v2 四臂端到端数字（τ²/TS/BFCL × full/c2kv/c2kv_recover/hybrid_recover）
+### 5.4 v2 端到端数字（SGLang 后端重基线 + hf_server-final 对照）
 
-（跑数中，数字随终态校验通过后填入；每格带 n_scored/n_total。）
+**hf_server-final（v2 修复层下的旧后端定妆，归档口径）：**
+
+| benchmark | 臂 | 结果 | 终态 |
+|---|---|---|---|
+| τ² | full | **0.26**（13/50 perfect；与 v1 full_r2 逐位复现） | 50/50 ✓ |
+| τ² | c2kv | 0.15-0.18（终值见 sims） | 50/50 ✓ |
+| BFCL | full | **6/82 = 7.3%**（官方 scorer total_count=82：118 例解码失败被 scorer 丢弃——B2 机制的官方口径定量） | 200/200 生成 ✓ |
+
+**SGLang 重基线（O-1b，两 regime）：**
+
+| benchmark | 臂 | 结果 | 备注 |
+|---|---|---|---|
+| τ² | full | **0.24**（12/50 perfect） | vs hf_server 0.26：**full 臂两 regime 几乎一致**（−0.02）——O-1b 的关键正面证据 |
+| τ² | c2kv/recover/repair ×4 | chain-v2 跑数中 | 首轮 c2kv 因服务器 NPU OOM 中途崩死作废（262k 默认 ctx 的 KV 池 + radix 累积压掉 workspace，07:13:33 崩、49/50 infrastructure_error）；chain-v2 以 16k ctx + mem 0.20 + **每臂重启服务器**重跑 |
+
+B 修复的服务器侧证据（重启后 smoke）：同一 system 文本不带 tools `original_seq_len=7` vs 带 1 个工具 `=125`（工具序言 +118 token）——position_offset 缺口正是这一段。
+
+**成本初步（τ² full 臂 proxy wall_sec）：SGLang(no cuda-graph) p50 5.95s < hf_server 11.28s**——--disable-cuda-graph 的代价被 SGLang 本身的速度盖过，不构成回退理由（跑数完成后给全臂成本表）。
 
 ### 5.5 压缩率新口径（B5/B6）
 
