@@ -10,6 +10,12 @@ Branch `task/hybrid-repair`（已推送 origin）。Checkpoint
 全部 bench 压缩侧数字已作废重跑；τ² 上该 bug 修复前后终值相同（0.16），
 TS 上亦无差，BFCL 为格式地板。
 
+**v2（2026-08-31，评测层修复 + oracle-recover 重做）**：外部交接的批评处置
+落地——统计判据全面换血（Fisher/CI/McNemar/headroom，§5.1），BFCL 掉数据
+归因取证翻案（§5.2），oracle 口径升级为步级双 oracle 并在我们自己的栈上
+重做四臂（§5.3-5.4，数字随跑填入）。被推翻的旧结论**保留原文**，各节首有
+⚠ 指针。
+
 三个问题（任务书）：
 
 1. hybrid 把错误压低后，剩下的错还有多少能被 corr@first 救回？（加性还是冗余）
@@ -39,10 +45,13 @@ system prefill 不截断，大工具 schema 会 50k-token eager OOM）：
 - **追加 span 的 KV 逐层逐位一致（max-abs diff = 0.00e+00，全部例）**——修复
   原语（scratch raw pass 于原始 logical offsets、span 不旋转 cat 到 cache 末尾）
   与 D harness 语义完全等价。这是本报告第二块结果的可信度基础。
-- 已知残差：**harness 的 gist 物理记账比 server 多 ~60-720 token/例**（诊断：
-  system 长度两侧一致、span 一致，差值全部在 harness grid 的 gist 侧；server
-  的 cache = sys+gist+span 精确闭合）。影响 battery↔bench 的跨面逐 token 对齐
-  声明，不影响各面内部结论；待查 harness grid padding 的gist 计数行为。
+- 已知残差（**v2 已定位，B14**）：**harness 的物理 gist KV 按网格倍数
+  padding（实测 ~16 token/chunk，例均 +60-720），且其自身 `gist_tokens`
+  账本不计 padding；server 的物理 cache 与账本精确闭合**（例：sys 324 +
+  gist 785 + span 713 = 1822 = server cache_len，harness 则多 210）。
+  影响：跨面（battery↔bench）**物理长度**逐 token 对齐主张不成立（账本
+  口径仍一致）；span KV 逐位一致不受影响。v2 起 selfcheck 将 cache-len
+  差记为信息项。
 
 ### 0.3 proxy 动作擦除缺陷（2026-08-29 20:25 修复，外部 review 发现）
 
@@ -68,7 +77,13 @@ proxy 臂任务静默失败。修复：`16#`、cleanup 守卫、代理健康检�
 （tau2 --task-ids / bfcl --run-ids / ts -s）、**就地编辑脚本必须 temp+mv 原子
 替换**（两次实测：bash 按字节偏移增量读脚本，就地改会错位运行中任务的尾部）。
 
-## 1. P 层对比表（bench，真实任务面）——hr2 重跑中，暂记 full 臂
+## 1. P 层对比表（bench，真实任务面）
+
+> ⚠ **v2（2026-08-31）**：本节判读已被 §5 部分推翻——τ² "hy3 超 full +8pp"
+> 配对 McNemar p=0.30 不显著，只可表述为无显著差异；BFCL 行的
+> "118/200 缺失"归因（评测层丢数据）被取证证伪（真因见 §5.2）；
+> 成本表的 7.8-7.9× 均匀压缩率是 B1 记账产物，已作废（§5.5）。
+> 原文按下保留。
 
 τ² airline n=50、BFCL multi_turn_base n=200、TS test 子集 n=3。**单种子、小 N、
 只读大效应**；TS 为 3 场景测试子集（近轶事级）；BFCL 在该模型族贴近格式地板
@@ -100,6 +115,10 @@ slice prefill"的开销量级一致。TS 同口径（7.2-7.3×，修复臂 4.6s/
 `~/bench_logs/proxy_task_*.jsonl` 可随时补算。
 
 ## 2. 修复臂（bench，oracle 触发子集，post-fix 干净数据）
+
+> ⚠ **v2**：任务级 oracle 口径（full✓∧base✗ + 固定 @first）已降级为
+> n 极小的历史记录（τ² 3/9、3/4），不再作为结论；新口径是步级双 oracle
+> （见 §5.3），数字待 v2 四臂跑完后填入。原文按下保留。
 
 eligible = 任务级 full✓ ∧ base✗。
 
@@ -138,6 +157,11 @@ c2kv 错误质量）、**hybrid 回归（c2kv✓∧hybrid✗）仅 1 例**；W�
 
 ### 3.2 加性（on C→W(c2kv)=91）
 
+> ⚠ **v2**：Jaccard>0.5 硬阈值判据已废弃。Fisher exact 复算：重叠 10 vs
+> 独立性期望 5.63，OR=4.02，p=0.0194——**重叠显著超出随机，方向偏冗余而非
+> 加性**；corr 在 hybrid 之上的边际贡献仅 9/91=9.9pp（单独 17.6pp）。
+> 详见 §5.1。原文按下保留。
+
 - hybrid 单独修好 32（35.2%）；corr@first 单独（c2kv 基座）修好 16（17.6%）；
   重叠 10，**Jaccard 0.263 → additive-leaning**：两者修的不是同一批。
 - **组合覆盖（hybrid ∪ hybrid+corr@first）= 41/91 = 45.1%**。
@@ -145,13 +169,18 @@ c2kv 错误质量）、**hybrid 回归（c2kv✓∧hybrid✗）仅 1 例**；W�
 
 ### 3.3 位置分布（逐块扫描 offset:j，j∈[0,T−k)，767 行）
 
+> ⚠ **v2**：下方的独立块噪声底外推已删除——该公式与自身输入矛盾
+> （B=767/59≈13 代入得 49.4% "噪声底"，与实测 sham@first=5.1% 冲突）。
+> 替代表述：完美定位器相对固定 @first 的全部 headroom = (14−9)/59 =
+> **8.5pp**；扫描 j=0 命中集与 corr@first 救回集逐元素相同（sym-diff=0），
+> 两条独立链路互证。见 §5.1。原文按下保留。
+
 - 天花板（至少一块能救）14/59 = **23.7%**；直方图 j=0:9, 1:3, 2:2, 3:1, 5/6/7/10/11 各 1
   ——**明显前倾，P(j=0 | 有块能救) = 64%**。
 - **"第一块"先验在 hybrid 基座上成立**：corr@first − sham@first = +10.2pp 是
   主证据；扫描分布前倾一致。
-- ⚠️ 口径：23.7% 的天花板**低于**按实测 sham@first=5.1% 折算的纯噪声底
-  （1−0.949^B，B≈6-7 → ~29%）——"存在可定位块"超出噪声的部分不可分辨，
-  天花板只能报为 oracle 上界，不得与单臂 sham 相减。
+- ⚠️ 口径（v2 修订）：天花板只能报为 oracle 上界，不得与单臂 sham 相减
+  （原独立块噪声底外推已删除，理由见节首 v2 注）。
 
 ### 3.4 口径 caveat（外部 review 采纳）
 
@@ -173,6 +202,11 @@ c2kv 错误质量）、**hybrid 回归（c2kv✓∧hybrid✗）仅 1 例**；W�
 
 ## 4. 三问回答（最终，post-fix 干净数据）
 
+> ⚠ **v2**：本节结论按 §5 修订——"可叠加"降级为"方向倾向、重叠显著偏冗余"
+> （Fisher p=0.019）；τ² 阶梯的臂间差异均不显著；"在线定位器不可行"的
+> 判据由坏公式改为 headroom 口径（8.5pp 上限内无从分辨）；帕累托结论待
+> v2 四臂端到端数字复核。原文按下保留。
+
 1. **能不能叠加**：两面一致倾向**可叠加**。机制面：hybrid 与 corr@first 修的
    样本重合度低（Jaccard 0.263），组合覆盖 45.1% vs 单独 35.2%/17.6%；修复在
    hybrid 基座保留 2/3 效力（净 +10.2 vs +15.4pp）。bench 面：hybrid k3 单独
@@ -188,12 +222,107 @@ c2kv 错误质量）、**hybrid 回归（c2kv✓∧hybrid✗）仅 1 例**；W�
    C3 交叉点 ~4K）；对比纯 c2kv+修复（τ² 0.16 起步，救回率反而更低）与
    纯 hybrid（放弃剩余可修错误）。BFCL 地板与修复无关。
 
+## 5. v2 增补（评测层修复 + oracle-recover 重做，branch `task/bench-recover`）
+
+方法论变更的执行记录与重算数字。旧结论的推翻清单：§1 τ² 阶梯判读、§1 BFCL
+行、§1 成本表压缩率列、§2 任务级 oracle 数字、§3.2 加性判据、§3.3 噪声底、
+§4 三问的对应措辞。复算输入 = 与 v1 完全相同的冻结 jsonl（未重跑实验），
+工具 `agent/d_hybrid_repair_analysis.py`（v2 重写）。
+
+### 5.1 机制面重算（统计判据换血；数据不变）
+
+- **加性 → 偏冗余（推翻 §3.2）**：N=91 上 hybrid 修好 32、corr@first 修好
+  16、重叠 10；独立性期望重叠 5.63，实测为随机的 1.78×；Fisher exact
+  **p=0.0194**（OR=4.02）——重叠显著超出随机，方向是**冗余**而非加性。
+  corr 叠在 hybrid 之上的边际覆盖仅 9/91=**9.9pp**（其单独跑为 17.6pp）。
+- **救回率全部带 CI（B8 补课）**（session 聚类 bootstrap 20000 次）：
+  c2kv 基座 sham 2.2% [0, 5.8] / corr@first 17.6% [9.7, 26.1]，净 +15.4pp
+  **[6.7, 24.4]**（配对 McNemar p=0.0013，显著）；hybrid 基座 sham 5.1%
+  [0, 11.7] / corr@first 15.3% [6.6, 25.0]，净 +10.2pp [0, 20.7]（p=0.109，
+  **不显著**）——"修复在 hybrid 基座保留 2/3 效力"的说法降级为点估。
+- **定位（headroom 口径，替换噪声底）**：完美定位器 14/59=23.7% vs 固定
+  @first 命中 9/59——**全部 headroom = 8.5pp**；且扫描 j=0 命中集与
+  corr@first 救回集**逐元素一致**（sym-diff=0，9=9），两条独立链路互证，
+  数据自洽。旧独立块噪声底外推公式与其输入自相矛盾（B≈13 代入得
+  49.4%，vs 实测 sham@first 5.1%），已从报告删除。
+- **τ² 阶梯判读（§1.7 措辞）**：重算逐任务 reward（hr2 三跑，n=50）——
+  full 0.26 / c2kv 0.16 / hy3 0.36；配对 McNemar：full vs hy3（b=5,c=10）
+  **p=0.30**、full vs c2kv（b=9,c=4）p=0.27——**臂间差异均不显著**，
+  不得表述为"hybrid 超 full"。（均值 0.26 与 v1 表中 0.28 的微小差异来自
+  聚合口径；配对检验是裁决口径。）TS n=3 维持轶事级不变。
+- **sham 臂退役（§1.3 决策）**：后续实验不再跑 sham；"+15.4/+10.2pp 净
+  修复"类表述退回裸救回率 17.6%/15.3%，"修复 vs 任意扰动"的区分层不再
+  存在（上方历史数字含 sham，作为记录保留）。
+- 触发集三态化（B10）：重算零缺失指标行（missing_metric=0），触发集不变。
+- **O-1 决议（保留 §3）**：机制面不跑 4096 闸门、不删节。已知张力如实
+  记录：battery4096 裁定书在 fixed_joint 上实测 4096 后 full≈c2kv（教师
+  强制近乎无损），与本节 128 口径下 full 0.153 ≫ c2kv 0.023 的缺口并存；
+  512 口径（§3.4）支持排序稳健但未到 4096。§3 数字继续以 128 截断口径
+  caveat 使用。
+
+### 5.2 BFCL 掉数据翻案（B2 取证）
+
+v1 报告把 BFCL 118/200 缺失归因于 hf_server 的 `except Exception`→500 丢
+请求。**取证结论：该归因不成立**——
+
+- hr_bfcl_hy3（完整跑）客户端任务日志：**734 次 "Failed to decode the
+  model response"**，API/连接/超时/traceback **零条**；proxy 请求日志
+  finish_reason 分布 tool_calls 880 / **stop 734**，与解码失败数**精确相等**；
+  归档 result 文件 200/200 entry 在档（hr_bfcl_c2kv 的 39 条是中断残档，
+  非传输丢失）。
+- 即真因是**模型行为**：压缩历史下 45% 的步骤该发工具调用时输出了散文
+  （finish_reason=stop、中位 48 token），BFCL 状态机解不出动作即放弃该轮
+  （"Proceed to next turn"），entry 随之塌陷、调用循环加剧（与
+  bfcl-timing-attribution 的 20.9 vs 5.9 calls/entry 一致）。metrology
+  bfcl_hf_runner 360/360 零缺行说明同权重下自研 runner 能终态化全部
+  entry——掉数据是 bench 栈客户端链路语义，不是服务端 500。
+- 处置：B1 重试+错误行落盘照做（廉价加固，服务端诊断 500 保留）；新增
+  **终态校验**（terminal_check.py + 适配器非零退出，n_scored/n_total），
+  这类失败从此显式失败而非缩水分母。BFCL 行在 v2 四臂上整行重建。
+
+### 5.3 oracle 口径升级（步级双 oracle，契约对齐）
+
+触发 = full 与压缩臂**首次动作不一致的那一步**（真值来自 full 轨迹）；
+内容 = full 在该步的 KV（整段前缀替换，O-2 决议：逐块留第二轮）；full 臂
+同时是比较者与供体。实现全在 proxy（外部 CLI 拥有轮次循环，但所有模型
+调用都过 proxy）：full 臂跑时记录 canonical 动作（工具名+按键排序参数/
+归一化文本），以 RAW 消息列表指纹为键；压缩臂每步比对，首错即
+divergence_step；recover 臂在该步以同一 payload 全 raw 组装重发（= full
+的 KV regime，对拍已证逐位一致），**每会话只修一次**，再漂移记
+re_diverged。arms：`c2kv_recover` / `hybrid_recover`；旧任务级 oracle
+（§2）降为历史记录。
+
+### 5.4 v2 四臂端到端数字（τ²/TS/BFCL × full/c2kv/c2kv_recover/hybrid_recover）
+
+（跑数中，数字随终态校验通过后填入；每格带 n_scored/n_total。）
+
+### 5.5 压缩率新口径（B5/B6）
+
+`compression = (logical_tokens − system_len) / (cache_tokens − system_len)`
+（分母 = gist + raw tail + repair span 的物理 KV，与 Tracy-ZYH 口径同义），
+由 request log 直算。v1 成本表四臂 7.8-7.9× 均匀（与 k 无关）是记账 bug
+产物（raw 尾/system/当前轮从不进分母），已作废；v2 表将给出真实随 k 变化
+的压缩率（验收：hybrid_k5 明显低于 c2kv）。
+
+### 5.6 修复清单与验收状态
+
+B1 重试/终态校验 ✓、B3 零 token span 守卫 ✓、B4 offset doc 粒度+chunk 语法
+✓、B5/B6 记账列 ✓、B7 unscored 语义 ✓、B8-B11 统计 ✓、B12 分层对拍
+（待服务器重跑）□、B13 过时标注 ✓、B14 harness gist 记账差**已定位**
+（§0.2：grid padding ~16 token/chunk 进物理不进账本；跨面物理长度对齐
+主张撤回，账本口径与 span 逐位一致不受影响）。CPU 单测 33 项全过
+（含 B3/B7 回归、漂移决策、v1 臂快照）。
+
 ## 附：产物路径（服务器）
 
-- battery：`~/c2kv-bdf/results/hxd/{battery_1088.jsonl, battery_1088_t512*(跑中),
+- battery：`~/c2kv-bdf/results/hxd/{battery_1088.jsonl, battery_1088_t512*,
   d_*_first.jsonl, d_hyb_scan_j*.jsonl, combo_analysis.json}`
 - 冻结件：`~/c2kv-bdf/configs/hxd/{manifest_*,sham_plan_*_first}.json`、
   `results/hxd/{bundles_*,d_doc_ids_*}.json(l)`
 - bench：`~/bench_results/`（task_*、bfcl_archive/）、τ² sims、`~/bench_logs/proxy_task_*.jsonl`
 - 队列：hr2_*（τ²/TS 基线重跑）→ oracle 重算 → hr2 修复臂；f3_*/up2_* 为并行
   会话的矩阵（其中 up2_bfcl_c2kv、up2_bfcl_cd_c2kv、up2_tau2_c2kv 修复前启动，受染）
+- v2：`~/bench_results/reference/bx_*.jsonl`（full 臂 reference 轨迹）、
+  bx_*（v2 四臂跑）、`~/bench_logs/proxy_task_bx_*.jsonl`（含
+  cache/logical/prompt/system_len 记账列与漂移/recover 列）、
+  `combo_analysis_v2.json`（机制面重算输出）

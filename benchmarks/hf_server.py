@@ -64,7 +64,7 @@ from models.gist_utils import blend_gist_key_values  # noqa: E402
 from train.train_data_multiturn import _chat_template_ids  # noqa: E402
 from inference.reuse_pipeline import tokenize_for_reuse  # noqa: E402
 from inference.rope_reposition import rotate_k_cache_rope  # noqa: E402
-import repair_policy  # noqa: E402
+import repair_policy as _rp  # noqa: E402  (aliased: chat() has a local `repair_policy`)
 
 app = Flask(__name__)
 
@@ -369,7 +369,7 @@ class C2KVServer:
         if repair:
             policy = str(repair.get("policy") or "first")
             try:
-                parsed = repair_policy.parse_policy(policy)
+                parsed = _rp.parse_policy(policy)
             except ValueError as error:
                 return {"error": f"c2kv_repair: {error}"}
             if parsed["kind"] == "doc":
@@ -698,7 +698,7 @@ class C2KVServer:
         counts = [len(entry.chunks) for _, entry in compressed]
         kind = "doc" if target_doc is not None else "chunk"
         index = target_doc if target_doc is not None else target_chunk
-        doc_index, first_chunk, span_len = repair_policy.span_selection(
+        doc_index, first_chunk, span_len = _rp.span_selection(
             counts, kind, int(index))
         span_end = first_chunk + span_len  # exclusive, chunk counter space
         with torch.inference_mode():

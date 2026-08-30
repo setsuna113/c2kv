@@ -44,17 +44,23 @@ def fail(benchmark: str, n_scored: int, n_total: int, missing) -> int:
     return 0
 
 
-def check_tau2(run: str, expected) -> int:
+def check_tau2(run: str, expected, task_ids: str = "") -> int:
     path = TAU2_SIMS / run / "results.json"
     if not path.exists():
         print(f"FATAL: no tau2 results at {path}")
         return 2
     sims = (json.loads(path.read_text(encoding="utf-8")).get("simulations")) or []
     got = {str(s.get("task_id")) for s in sims}
-    if expected is None:
-        expected = DEFAULT_EXPECTED["tau2"]
-    missing = sorted({str(i) for i in range(expected)} - got) if expected else []
-    return fail("tau2", len(got), expected or len(got), missing)
+    if task_ids:
+        # id-exact over the pinned subset (ids are task_id strings, not
+        # necessarily 0..N when a TASK_IDS subset was run)
+        want = {t.strip() for t in task_ids.replace(",", " ").split() if t.strip()}
+    else:
+        if expected is None:
+            expected = DEFAULT_EXPECTED["tau2"]
+        want = {str(i) for i in range(expected)}
+    missing = sorted(want - got)
+    return fail("tau2", len(got & want), len(want), missing)
 
 
 def check_bfcl(expected, run_ids) -> int:
@@ -86,7 +92,7 @@ def check_bfcl(expected, run_ids) -> int:
     return fail("bfcl", len(got), expected, missing)
 
 
-def check_ts(run: str, expected) -> int:
+def check_ts(run: str, expected, scenarios: str = "") -> int:
     hits = sorted(glob.glob(str(TS_RESULTS / f"task_{run}" / "*" / "result_summary.json")))
     if not hits:
         print(f"FATAL: no result_summary.json under {TS_RESULTS / f'task_{run}'}")
@@ -94,6 +100,10 @@ def check_ts(run: str, expected) -> int:
     data = json.loads(Path(hits[-1]).read_text(encoding="utf-8"))
     per = data.get("per_scenario_results") or []
     got = {str(r.get("name")) for r in per}
+    if scenarios:
+        want = {s.strip() for s in scenarios.replace(",", " ").split() if s.strip()}
+        missing = sorted(want - got)
+        return fail("ts", len(got & want), len(want), missing)
     missing: list = []
     if expected is not None:
         missing = ["?"] * max(0, expected - len(got))
@@ -107,17 +117,21 @@ def main(argv=None) -> None:
         p = sub.add_parser(name)
         p.add_argument("--run", required=True)
         p.add_argument("--expected", type=int, default=None)
+        p.add_argument("--task-ids", default="",
+                       help="tau2: id-exact check over this subset")
+        p.add_argument("--scenarios", default="",
+                       help="ts: id-exact check over this subset")
     p = sub.add_parser("bfcl")
     p.add_argument("--expected", type=int, default=None)
     p.add_argument("--run-ids", default="")
     args = parser.parse_args(argv)
 
     if args.benchmark == "tau2":
-        code = check_tau2(args.run, args.expected)
+        code = check_tau2(args.run, args.expected, args.task_ids)
     elif args.benchmark == "bfcl":
         code = check_bfcl(args.expected, args.run_ids)
     else:
-        code = check_ts(args.run, args.expected)
+        code = check_ts(args.run, args.expected, args.scenarios)
     raise SystemExit(code)
 
 
