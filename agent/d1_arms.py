@@ -170,6 +170,23 @@ def prepare_d_contract_state(
     outputs = store.capture(example.qid, compress_call, doc_lengths)
     t_capture = store.last_compress_with_capture_sec
 
+    # offline distortion bench feed: persist the first N captured qids'
+    # full sidecar (pre-RoPE K/V, plus Q when the store has want_q) before
+    # any arm logic touches or releases it (driver sets HH.D_CONTRACT_DUMP)
+    dump_cfg = getattr(HH, "D_CONTRACT_DUMP", None)
+    if dump_cfg and dump_cfg.get("remaining", 0) > 0:
+        entry = store.entries[example.qid]
+        Path(dump_cfg["path"]).mkdir(parents=True, exist_ok=True)
+        torch.save({
+            "qid": example.qid,
+            "doc_lengths": [len(ids) for ids in doc_ids],
+            "n_layers": len(entry),
+            "k": [layer["k"] for layer in entry],
+            "v": [layer["v"] for layer in entry],
+            "q": [layer["q"] for layer in entry],
+        }, str(Path(dump_cfg["path"]) / f"{example.qid.replace(':', '_')}.pt"))
+        dump_cfg["remaining"] -= 1
+
     from models.gist_utils import blend_gist_key_values
     gist_mask = outputs[1]
     pos_ids = outputs[2]

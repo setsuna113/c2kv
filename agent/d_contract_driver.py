@@ -60,6 +60,14 @@ def parse_args(argv=None):
     parser.add_argument("--output_file", required=True)
     parser.add_argument("--qids", default="")
     parser.add_argument("--max_qids", type=int, default=0)
+    parser.add_argument("--sidecar_dump", default="",
+                        help="directory to dump the first N qids' captured sidecar "
+                             "blocks (pre-RoPE K/V[/Q], per-layer, CPU) for the "
+                             "offline distortion bench")
+    parser.add_argument("--sidecar_dump_qids", type=int, default=0)
+    parser.add_argument("--want_q", action="store_true",
+                        help="capture raw Q too (teacher arms / distortion bench; "
+                             "bills Q in sidecar bytes per prereg v2.5)")
     parser.add_argument("--resume", type=lambda x: str(x).lower() == "true", default=True)
     return parser.parse_args(argv)
 
@@ -152,9 +160,16 @@ def main(argv=None):
     model_args.mode = "c2kv"
     model = HH._load_model(model_args, tokenizer, device)
 
-    store = SidecarStore(model)
+    store = SidecarStore(model, want_q=args.want_q)
     HH.D_CONTRACT_STORE = store
     HH.D_INTERVENE = {}  # no per-qid plan needed for contract arms
+    HH.D_CONTRACT_DUMP = (
+        {"path": args.sidecar_dump, "remaining": args.sidecar_dump_qids}
+        if args.sidecar_dump and args.sidecar_dump_qids else None
+    )
+    if HH.D_CONTRACT_DUMP:
+        Path(args.sidecar_dump).mkdir(parents=True, exist_ok=True)
+        logger.info("sidecar dump: first %d qids -> %s", args.sidecar_dump_qids, args.sidecar_dump)
 
     out_path = Path(args.output_file)
     out_path.parent.mkdir(parents=True, exist_ok=True)

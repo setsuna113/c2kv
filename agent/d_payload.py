@@ -93,6 +93,12 @@ class Payload:
         payload._offset = 0
         return payload
 
+    def _in_memory(self, name: str):
+        for arr in self._arrays:
+            if arr["name"] == name:
+                return arr
+        return None
+
     def read_packed(self, name: str) -> torch.Tensor:
         from inference.bits import unpack_bits
 
@@ -101,8 +107,14 @@ class Payload:
         for d in meta["shape"]:
             n *= d
         n_bytes = (n * meta["bits"] + 7) // 8
-        buf = torch.frombuffer(bytearray(self._blob_tail[self._offset:self._offset + n_bytes]), dtype=torch.uint8)
-        self._offset += n_bytes
+        arr = self._in_memory(name)
+        if arr is not None:
+            buf = arr["buf"]
+        else:
+            buf = torch.frombuffer(
+                bytearray(self._blob_tail[self._offset:self._offset + n_bytes]),
+                dtype=torch.uint8)
+            self._offset += n_bytes
         return unpack_bits(buf, meta["bits"], n).reshape(meta["shape"])
 
     def read_floats(self, name: str) -> torch.Tensor:
@@ -113,8 +125,12 @@ class Payload:
         for d in meta["shape"]:
             n *= d
         itemsize = {"float16": 2, "float32": 4}[meta["dtype"]]
-        raw = self._blob_tail[self._offset:self._offset + n * itemsize]
-        self._offset += n * itemsize
+        arr = self._in_memory(name)
+        if arr is not None:
+            raw = arr["raw"]
+        else:
+            raw = self._blob_tail[self._offset:self._offset + n * itemsize]
+            self._offset += n * itemsize
         dt = np.float16 if meta["dtype"] == "float16" else np.float32
         return torch.from_numpy(np.frombuffer(raw, dtype=dt).copy()).reshape(meta["shape"])
 
