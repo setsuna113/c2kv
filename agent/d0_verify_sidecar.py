@@ -6,11 +6,12 @@ standalone causal prefill of the same doc (both post-norm, pre-RoPE, via
 the same q/k/v_proj hooks).
 
 Stage 2 — placement equality (post-RoPE, the B7 gate): the sidecar K
-released through `apply_abs_rope(k, logical_start)` must be bit-identical
-to the K that a sequential raw prefill of [system + docs 0..k*] leaves in
-the cache at that doc's span.  Stage 1 is structurally blind to RoPE
-placement bugs, so stage 2 is the gate that makes every downstream D1+
-number valid.
+released through `apply_abs_rope(k, span_start)` must be bit-identical to
+the K of doc k* prefilled ALONE at the absolute positions
+[span_start, span_start+L_k) — content held fixed at document-local (the
+property Stage 1 verified), only the placement tested.  Stage 1 is
+structurally blind to RoPE placement bugs, so stage 2 is the gate that
+makes every downstream D1+ number valid.
 
 Acceptance (prereg v2 / handoff §4.2): stage 2 PASSES on >= 3 qids before
 any arm number is read.
@@ -173,41 +174,46 @@ def verify_one(args, hargs, model, tokenizer, example, want_q: bool = True) -> d
     report["stage1"]["pass"] = not any(m.startswith("s1") for m in mismatches)
 
     # ---------------- Stage 2: placement equality (post-RoPE) -------------
-    # sequential raw prefill [system + docs 0..k*]; doc k*'s cache K at its
-    # absolute logical span must equal apply_abs_rope(sidecar K, span start)
+    # Content held fixed at DOCUMENT-LOCAL — the very property Stage 1 just
+    # verified.  The reference is doc k* prefilled ALONE at the absolute
+    # positions [span_start, span_start+L_k): identical content, only the
+    # placement differs from the sidecar's position-free storage.  This is
+    # what the arms' apply_abs_rope release must reproduce (the B7 gate).
+    # NOTE (review 2026-08-31): do NOT use a sequential [system + docs
+    # 0..k*] prefill as the reference — that K is CONTEXTUAL (doc k*
+    # attends the system and earlier docs) while the sidecar is
+    # document-local by construction (grid rows are isolated in the
+    # compression batch), so the two differ regardless of RoPE and the
+    # gate could never pass.
     system_ids = HH._chat_template_ids(
         tokenizer,
         [{"role": "system", "content": example.system_prompt}],
         tools=example.tools or None,
         keep_bos=True,
-        max_length=args.max_system_length,
+        max_length=hargs.max_system_length,  # harness namespace, not the sentinel's
     )
-    system_input_ids = torch.tensor([system_ids], dtype=torch.long, device=model.device)
-    seq_cache, system_length, _ = HH._prefill_system(model, system_input_ids, args.attn_impl)
-    offsets = []
-    off = system_length
-    for ids in doc_ids:
-        offsets.append(off)
-        off += len(ids)
+    system_length = len(system_ids)
+    span_start = system_length + sum(len(doc_ids[d]) for d in range(k_star))
+    assert span_start > 0
 
-    for d in range(k_star + 1):
-        ids = torch.tensor([doc_ids[d]], dtype=torch.long, device=model.device)
-        seq_cache, _, _ = HH._prefill_tokens_with_cache_maybe_gist(
-            model, ids, seq_cache, offsets[d], args.attn_impl, use_gist=False
-        )
-    span_start = offsets[k_star]
-    assert seq_cache.get_seq_length() == span_start + L_k, (
-        f"sequential cache {seq_cache.get_seq_length()} != span_start {span_start} + L {L_k}"
+    place_ids = torch.tensor([doc_ids[k_star]], dtype=torch.long, device=model.device)
+    placement_out = model(
+        input_ids=place_ids,
+        attention_mask=torch.ones_like(place_ids),
+        position_ids=torch.arange(span_start, span_start + L_k, device=model.device).unsqueeze(0),
+        use_cache=True,
+        logits_to_keep=1,
     )
+    place_cache = placement_out.past_key_values
+    assert place_cache.get_seq_length() == L_k
 
-    cache_layer0 = seq_cache.layers[0].keys
-    device, dtype = cache_layer0.device, cache_layer0.dtype
+    device, dtype = place_cache.layers[0].keys.device, place_cache.layers[0].keys.dtype
     rotary_emb = model.model.rotary_emb
     s2_mismatch = []
     k_bit_equal = 0
     max_diff_overall = 0.0
-    for li, layer in enumerate(seq_cache.layers):
-        scratch_k = layer.keys[0, :, span_start:span_start + L_k, :]      # post-RoPE
+    for li, layer in enumerate(place_cache.layers):
+        scratch_k = layer.keys[0]      # doc-local, post-RoPE at ABSOLUTE positions
         sidecar_k = store.get(example.qid, k_star, "k", device=device, dtype=dtype)[li]
         released = apply_abs_rope(sidecar_k, span_start, rotary_emb)
         if torch.equal(scratch_k, released):
@@ -220,7 +226,7 @@ def verify_one(args, hargs, model, tokenizer, example, want_q: bool = True) -> d
         "span_start": span_start,
         "L": L_k,
         "bit_equal_layers": k_bit_equal,
-        "total": len(seq_cache.layers),
+        "total": len(place_cache.layers),
         "max_abs_diff": max_diff_overall,
         "pass": not s2_mismatch,
     }
