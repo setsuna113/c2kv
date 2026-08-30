@@ -81,8 +81,9 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--benchmark", required=True, choices=["tau2", "bfcl", "toolsandbox"])
     parser.add_argument("--arm", required=True)
-    parser.add_argument("--upstream", default="http://127.0.0.1:34000",
-                        help="SGLang/hf_server base URL (shared by all arms)")
+    parser.add_argument("--upstream", required=True,
+                        help="backend base URL (REQUIRED: a default here once "
+                             "silently aimed sglang runs at the hf_server port)")
     parser.add_argument("--user-upstream", default="",
                         help="base URL for user-simulator/judge traffic (defaults to --upstream; only the agent arm proxy compresses)")
     parser.add_argument("--proxy-port", type=int, default=34100)

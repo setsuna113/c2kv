@@ -97,22 +97,26 @@ def _inline_refs(schema: Dict[str, Any]) -> Dict[str, Any]:
 
 class SglangBackend(Backend):
     name = "sglang"
+    needs_repair_plan = True
 
     def __init__(self, post_json):
         self._post_json = post_json  # (path, payload, timeout) -> dict
 
     # ---- primitives ----
-    def extract(self, text: str, role: str, ratio: int) -> Dict[str, Any]:
-        result = self._post_json(
-            "/v1/c2kv/extract",
-            {
-                "text": text,
-                "compression_ratio": ratio,
-                "role": role,
-                "chat_template_kwargs": {"enable_thinking": False},
-            },
-            600,
-        )
+    def extract(self, text: str, role: str, ratio: int,
+                tools: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+        payload = {
+            "text": text,
+            "compression_ratio": ratio,
+            "role": role,
+            "chat_template_kwargs": {"enable_thinking": False},
+        }
+        if tools:
+            # the server renders tools into the chat template exactly as
+            # the serving path does, so original_seq_len measures the TRUE
+            # system block (fixes the position_offset short-by-tools bug)
+            payload["tools"] = tools
+        result = self._post_json("/v1/c2kv/extract", payload, 600)
         if not result.get("success", True) or not result.get("key_hash"):
             raise BackendError(
                 "extract_failed",

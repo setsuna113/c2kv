@@ -15,10 +15,11 @@ class HfServerBackend(Backend):
     name = "hfserver"
 
     def __init__(self, post_json):
-        # post_json(base_url, path, payload, timeout) -> dict (retries incl.)
+        # post_json(path, payload, timeout) -> dict (retries included)
         self._post_json = post_json
 
-    def extract(self, text: str, role: str, ratio: int) -> Dict[str, Any]:
+    def extract(self, text: str, role: str, ratio: int,
+                tools: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
         result = self._post_json(
             "/v1/c2kv/extract",
             {

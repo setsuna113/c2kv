@@ -441,11 +441,12 @@ class TestBackends:
 
     class FakeSglang:
         name = "sglang"
+        needs_repair_plan = True
 
         def __init__(self):
             self.repairs = []
 
-        def extract(self, text, role, ratio):
+        def extract(self, text, role, ratio, tools=None):
             return {
                 "key_hash": f"h-{role}-{len(text)}",
                 "gist_len": max(1, len(text) // ratio),
@@ -473,7 +474,8 @@ class TestBackends:
         fake = self.FakeSglang()
         monkeypatch.setattr(proxy_mod, "BACKEND", fake)
         monkeypatch.setattr(proxy_mod, "_extract", lambda role, content,
-                            ratio, timeout=0: fake.extract(content, role, ratio))
+                            ratio, timeout=0, tools=None:
+                            fake.extract(content, role, ratio, tools=tools))
         messages = [
             {"role": "system", "content": "S" * 30},
             {"role": "user", "content": "A" * 40},      # doc 0 (compressed)
@@ -572,3 +574,92 @@ class TestBackends:
         })
         assert normalized["cost"]["cache_tokens"] == 10
         assert normalized["cost"]["repair_block_tokens"] == 7
+
+
+class TestABRegressions:
+    """External review round-2: two bugs introduced by the sglang port."""
+
+    def test_plan_repair_empty_records_is_noop(self, monkeypatch):
+        """A: a repair arm's FIRST request of a session (nothing compressed
+        yet) must be a no-op plan, not an uncaught ValueError — hf_server's
+        `repair_policy is not None and compressed` guard."""
+        fake = TestBackends.FakeSglang()
+        fake.needs_repair_plan = True
+        monkeypatch.setattr(proxy_mod, "BACKEND", fake)
+        monkeypatch.setattr(proxy_mod, "_extract", lambda role, content,
+                            ratio, timeout=0, tools=None:
+                            fake.extract(content, role, ratio))
+        messages = [
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "current"},
+        ]
+        out, counts = proxy_mod._assemble(messages, get_arm("c2kv_repair"))
+        assert counts["compressed_records"] == []
+        plan = proxy_mod.plan_repair(messages, get_arm("c2kv_repair"), counts)
+        assert plan is None
+        assert fake.repairs == []  # nothing extracted, nothing crashed
+
+    def test_plan_repair_skipped_for_hfserver_backend(self, monkeypatch):
+        """hfserver resolves repair server-side: no system extract (which
+        would pollute the c2kv pool) and no no-op repair_extract."""
+        monkeypatch.setattr(
+            proxy_mod, "BACKEND",
+            __import__("backends.hfserver", fromlist=["HfServerBackend"]).HfServerBackend(None))
+        out, counts = proxy_mod._assemble(
+            [{"role": "system", "content": "sys"},
+             {"role": "user", "content": "u" * 80},
+             {"role": "user", "content": "cur"}],
+            get_arm("c2kv_repair"))
+        # hfserver path: _extract is monkeypatched to FAIL if called for planning
+        def boom(role, content, ratio, timeout=0, tools=None):
+            raise AssertionError("hfserver plan must not extract")
+        monkeypatch.setattr(proxy_mod, "_extract", boom)
+        assert proxy_mod.plan_repair([], get_arm("c2kv_repair"), counts) is None
+
+    def test_position_offset_includes_tools(self, monkeypatch):
+        """B: the system-length measurement must include the tool schemas
+        (Qwen templates render tools into the system block); same system
+        text with different tools must not hit a stale cache entry."""
+        calls = {}
+
+        class ToolsFake(TestBackends.FakeSglang):
+            def extract(self, text, role, ratio, tools=None):
+                key = (role, len(text), _digest_of(tools))
+                if key not in calls:
+                    calls[key] = f"h-{role}-{len(text)}-{len(tools or [])}"
+                return {
+                    "key_hash": calls[key],
+                    "gist_len": 1,
+                    # the tool schemas add to the rendered system length
+                    "original_seq_len": len(text) + 120 * len(tools or []),
+                    "success": True,
+                }
+
+        def _digest_of(tools):
+            import json as _json
+            return _json.dumps(tools or [], sort_keys=True)
+
+        fake = ToolsFake()
+        monkeypatch.setattr(proxy_mod, "BACKEND", fake)
+        monkeypatch.setattr(proxy_mod, "_extract", lambda role, content,
+                            ratio, timeout=0, tools=None:
+                            fake.extract(content, role, ratio, tools=tools))
+        tools = [{"type": "function", "function": {"name": f"t{i}",
+                                                   "parameters": {}}}
+                 for i in range(20)]
+        messages = [
+            {"role": "system", "content": "S" * 30},
+            {"role": "user", "content": "A" * 40},
+            {"role": "assistant", "content": "B" * 20},
+            {"role": "user", "content": "current"},
+        ]
+        arm = get_arm("c2kv_repair")
+        out, counts = proxy_mod._assemble(messages, arm)
+        assert counts["compressed_records"], "need a compressed history doc"
+        plan = proxy_mod.plan_repair(messages, arm, counts, tools=tools)
+        # 30 (system) + 20*120 (tools) — WITHOUT the tools fix this was 30
+        assert plan["position_offset"] == 30 + 20 * 120
+        # cache discrimination: different tools -> different measurement
+        plan2 = proxy_mod.plan_repair(
+            messages, arm, counts, tools=tools[:1])
+        assert plan2["position_offset"] == 30 + 120

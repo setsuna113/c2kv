@@ -127,7 +127,8 @@ def build_payload(item: Dict[str, Any], arm, backend) -> Dict[str, Any]:
     if arm.repair and compressed_records:
         # harness stash was built with CORR_K_POLICY offset:0
         system_record = backend.extract(
-            item["system_prompt"], "system", arm.ratio) if item["system_prompt"] else None
+            item["system_prompt"], "system", arm.ratio,
+            tools=item.get("tools")) if item["system_prompt"] else None
         offset = int((system_record or {}).get("original_seq_len") or 0)
         target = compressed_records[0]
         span = backend.repair_extract(

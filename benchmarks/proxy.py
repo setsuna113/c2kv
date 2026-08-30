@@ -124,9 +124,15 @@ def _content_key(role: str, content: str) -> str:
     return hashlib.sha256(f"{role}\x00{content}".encode("utf-8")).hexdigest()
 
 
-def _extract(role: str, content: str, ratio: int, timeout: int = 600) -> Dict[str, Any]:
-    key = (role, _content_key(role, content), ratio)
-    return CACHE.get_or_put(key, lambda: BACKEND.extract(content, role, ratio))
+def _extract(role: str, content: str, ratio: int, timeout: int = 600,
+             tools: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+    # tools participate in the cache key: the same system text rendered
+    # with different tool schemas yields different original_seq_len (the
+    # Qwen template renders tools into the system block)
+    tools_key = _digest(tools or [])
+    key = (role, _content_key(role, content), ratio, tools_key)
+    return CACHE.get_or_put(
+        key, lambda: BACKEND.extract(content, role, ratio, tools=tools))
 
 
 def _history_cutoff(messages: List[Dict[str, Any]]) -> int:
@@ -412,7 +418,8 @@ def _system_text(messages: List[Dict[str, Any]]) -> str:
 
 
 def plan_repair(messages: List[Dict[str, Any]], arm: Arm,
-                counts: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+                counts: Dict[str, Any],
+                tools: Optional[List[Dict[str, Any]]] = None) -> Optional[Dict[str, Any]]:
     """Resolve an arm's repair policy against the proxy ledger.
 
     The target doc's position_offset (d_corr bakes the absolute RoPE phase
@@ -420,11 +427,17 @@ def plan_repair(messages: List[Dict[str, Any]], arm: Arm,
     message before the target.  Raw tail / current turns sit AFTER the
     compressed prefix and are never crossed.
     """
-    if not arm.repair:
+    if not arm.repair or not getattr(BACKEND, "needs_repair_plan", False):
         return None
     policy = str((arm.repair or {}).get("policy") or "first")
     parsed = repair_policy.parse_policy(policy)
     records = counts.get("compressed_records") or []
+    if not records:
+        # no history compressed yet: a legitimate no-op (hf_server's
+        # `repair_policy is not None and compressed` guard — dropping it
+        # made the FIRST request of every repair-arm session crash with an
+        # uncaught ValueError and no log row)
+        return None
     doc_counts = [1] * len(records)  # sglang: whole-message docs (O-2)
     doc_index, _first_chunk, _span_len = repair_policy.span_selection(
         doc_counts, parsed["kind"], parsed["index"])
@@ -435,7 +448,7 @@ def plan_repair(messages: List[Dict[str, Any]], arm: Arm,
         # one cached extract of the system block gives its template token
         # length (and doubles as the request-log system_len column source);
         # the resulting gist entry simply sits unused in the pool
-        sys_record = _extract("system", system, arm.ratio)
+        sys_record = _extract("system", system, arm.ratio, tools=tools)
         system_len = int(sys_record.get("original_seq_len") or 0)
     offset = system_len
     for record in records[:doc_index]:
@@ -494,8 +507,10 @@ class ProxyHandler(BaseHTTPRequestHandler):
         turn = len(messages)
         try:
             messages_out, counts = _assemble(messages, ARM)
-            repair_plan = plan_repair(messages, ARM, counts)
-        except (RuntimeError, URLError, OSError, UpstreamError, BackendError) as error:
+            repair_plan = plan_repair(messages, ARM, counts,
+                                     tools=payload.get("tools"))
+        except (RuntimeError, ValueError, URLError, OSError, UpstreamError,
+                BackendError) as error:
             kind = getattr(error, "kind", "assemble_error")
             self._log_request(payload, None, None, status=kind,
                               error=str(error), fingerprint=fingerprint, conv=conv,
@@ -539,7 +554,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
                     raw_out, _ = _assemble(messages, FULL_ASSEMBLY)
                     data_b, _ = send_upstream(raw_out, None)
                     normalized_b = BACKEND.normalize_response(data_b)
-                except (UpstreamError, BackendError, RuntimeError,
+                except (UpstreamError, BackendError, RuntimeError, ValueError,
                         URLError, OSError) as error:
                     kind = getattr(error, "kind", "recover_error")
                     self._log_request(payload, None, counts, status=kind,

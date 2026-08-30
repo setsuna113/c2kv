@@ -31,10 +31,22 @@ class BackendError(RuntimeError):
 
 class Backend:
     name: str = "base"
+    # True when the backend needs the proxy-resolved repair plan
+    # (sglang: repair_extract + message-level hashes).  hf_server resolves
+    # the policy server-side, so planning (and its system extract) is
+    # skipped entirely there — no needless c2kv-pool pollution.
+    needs_repair_plan: bool = False
 
     # ---- KV primitives ----
-    def extract(self, text: str, role: str, ratio: int) -> Dict[str, Any]:
-        """Compress one message; returns {key_hash, gist_len, original_seq_len}."""
+    def extract(self, text: str, role: str, ratio: int,
+                tools: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+        """Compress one message; returns {key_hash, gist_len, original_seq_len}.
+
+        ``tools`` (when given) is rendered into the chat template the same
+        way the serving path renders the request's tools — required for
+        measuring the TRUE system-block length (Qwen templates put the
+        tool schemas in the system block).  Backends that cannot render
+        tools must raise, not silently return a short length."""
         raise NotImplementedError
 
     def repair_extract(self, text: str, role: str, span_start: int,
