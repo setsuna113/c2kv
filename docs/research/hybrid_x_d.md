@@ -42,9 +42,15 @@ TS 上亦无差，BFCL 为格式地板。
 两进程串行避免双模型 OOM；只选 system+tools 渲染 ≤4096 的例子——server 的
 system prefill 不截断，大工具 schema 会 50k-token eager OOM）：
 
-- **追加 span 的 KV 逐层逐位一致（max-abs diff = 0.00e+00，全部例）**——修复
-  原语（scratch raw pass 于原始 logical offsets、span 不旋转 cat 到 cache 末尾）
-  与 D harness 语义完全等价。这是本报告第二块结果的可信度基础。
+- ⚠ **v2 推翻（重大）**：v1 的"追加 span KV 逐层逐位一致（0.00e+00，全部
+  例）"**从未被真正测量**——旧 selfcheck 的 doc-index falsy bug（`0 or -1`）
+  使校验列表恒非空，张量比对分支从未执行，打印的 0.00e+00 是未运行的默认值
+  （v4/v5 原始日志复核确认）。修复该 bug 后首次实测（v2 分层对拍，含短例）：
+  harness(eager) vs server(eager) max-abs **3.9-10.5**，vs server(fusion,
+  生产配置) **7.5-158**，且 2/10 例解码文本可见分叉；v1 server 代码同差
+  （排除 v2 重写回归）。**"server 修复臂 ≡ D harness corr"的张量级等价主张
+  撤回**；bench 修复臂与 D 线只剩行为级相似性。根因（两侧 prefill 的
+  position/mask/blend 细节差）待第二轮定位。
 - 已知残差（**v2 已定位，B14**）：**harness 的物理 gist KV 按网格倍数
   padding（实测 ~16 token/chunk，例均 +60-720），且其自身 `gist_tokens`
   账本不计 padding；server 的物理 cache 与账本精确闭合**（例：sys 324 +
@@ -307,8 +313,9 @@ re_diverged。arms：`c2kv_recover` / `hybrid_recover`；旧任务级 oracle
 ### 5.6 修复清单与验收状态
 
 B1 重试/终态校验 ✓、B3 零 token span 守卫 ✓、B4 offset doc 粒度+chunk 语法
-✓、B5/B6 记账列 ✓、B7 unscored 语义 ✓、B8-B11 统计 ✓、B12 分层对拍
-（待服务器重跑）□、B13 过时标注 ✓、B14 harness gist 记账差**已定位**
+✓、B5/B6 记账列 ✓、B7 unscored 语义 ✓、B8-B11 统计 ✓、B12 分层对拍 ✓（分层后首次真测即推翻 §0.2 的张量级等价主张——历史
+0.00e+00 全为未执行的默认值，见 §0.2 v2 注；实测 eager 3.9-10.5 /
+fusion 7.5-158、2/10 解码分叉）、B13 过时标注 ✓、B14 harness gist 记账差**已定位**
 （§0.2：grid padding ~16 token/chunk 进物理不进账本；跨面物理长度对齐
 主张撤回，账本口径与 span 逐位一致不受影响）。CPU 单测 33 项全过
 （含 B3/B7 回归、漂移决策、v1 臂快照）。
