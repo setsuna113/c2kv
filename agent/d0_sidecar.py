@@ -65,9 +65,6 @@ class SidecarStore:
                 b, s, hd = output.shape
                 head_dim = hd // n_heads
                 t = output.view(b, s, n_heads, head_dim).transpose(1, 2)
-                # q_norm/k_norm: RMSNorm over head_dim (last dim) — applying
-                # on (H,S,D) is equivalent to the modeling code's (S,H,D)
-                # application since both normalize over head_dim
                 if which == "q" and getattr(attn, "q_norm", None) is not None:
                     t = attn.q_norm(t)
                 elif which == "k" and getattr(attn, "k_norm", None) is not None:
@@ -75,7 +72,10 @@ class SidecarStore:
                 rows = []
                 for r in range(b):
                     L = doc_lengths[r] if r < len(doc_lengths) else s
-                    rows.append(t[r, :, :L, :].detach())
+                    # move to CPU immediately: keeping the full grid's raw
+                    # K/V/Q on NPU alongside the model (~60 GB) causes OOM;
+                    # the sidecar only needs to return to NPU at repair time
+                    rows.append(t[r, :, :L, :].detach().to("cpu", copy=False))
                 per_layer[idx][which] = rows
 
             return hook

@@ -167,6 +167,10 @@ def main(argv=None):
 
     scratch.capture(args.qid + "_scratch", scratch_prefill, [len(doc_ids[k_star])])
 
+    # compare on CPU (sidecar already moved there; scratch needs move too)
+    # The scratch sidecar also uses SidecarStore which now moves to CPU,
+    # so both sides are on CPU — direct comparison works.
+
     mismatches = []
     per_layer = store.entries[args.qid]
     scratch_layers = scratch.entries[args.qid + "_scratch"]
