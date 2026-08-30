@@ -90,9 +90,11 @@ class TestSelKV:
         assert R[0, 1] > R[0, 0], f"weak gist should need more compensation: {R}"
 
     def test_bias_and_control(self):
-        R = torch.tensor([[2.0, 8.0]])
-        b = selkv_logit_bias(R, alpha=0.5)
-        assert torch.allclose(b, 0.5 * torch.log(R))
+        # selkv_mass_ratio now returns LOG-space ratios (geometric mean);
+        # selkv_logit_bias consumes them directly
+        log_R = torch.tensor([[math.log(2.0), math.log(8.0)]])
+        b = selkv_logit_bias(log_R, alpha=0.5)
+        assert torch.allclose(b, 0.5 * log_R)
         c = selkv_count_bias(768, 2, alpha=0.5)
         assert torch.allclose(c, torch.full((2,), 0.5 * math.log(768)))
 

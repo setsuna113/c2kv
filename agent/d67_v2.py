@@ -78,31 +78,77 @@ def selkv_mass_ratio(
     q_raw: torch.Tensor,       # (H_q, L, D) raw queries at the same positions
     n_rep: int = 4,
 ) -> torch.Tensor:
-    """R (H_kv, g): unnormalized mass the gist tokens SHOULD carry relative
-    to what one raw token carries, averaged over the block's own queries.
+    """log R (H_kv, g) — the LOG of the unnormalized mass ratio, averaged
+    over the block's own queries IN LOG SPACE (geometric mean).
 
-    R_g = mean_q ( Σ_i exp(q·k_i/√d) ) / exp(q·k_g/√d)
+    log R_g = mean_q [ log Σ_i exp(q·k_i/√d) − q·k_g/√d ]
+
+    Review G: the ratio of exponentials is heavy-tailed; an arithmetic
+    mean would be dominated by whichever query sees a tiny gist mass,
+    while the bias consumes α·log R — so average the logs directly.
+    (logsumexp keeps the raw mass term overflow-safe.)
     """
     H_kv, g, D = k_gist.shape
     scale = 1.0 / math.sqrt(D)
-    R = torch.zeros(H_kv, g, dtype=torch.float64)
+    log_R = torch.zeros(H_kv, g, dtype=torch.float64)
     for h in range(H_kv):
         qh = q_raw.double()[h * n_rep:(h + 1) * n_rep]           # (n_rep, L, D)
-        raw_mass = torch.exp(
-            torch.matmul(qh, k_raw.double()[h].transpose(-1, -2)) * scale
-        ).sum(dim=-1, keepdim=True)                               # (n_rep, L, 1)
-        gist_mass = torch.exp(
-            torch.matmul(qh, k_gist.double()[h].transpose(-1, -2)) * scale
-        )                                                          # (n_rep, L, g)
-        R[h] = (raw_mass / gist_mass).mean(dim=(0, 1))
-    return R.to(torch.float32)
+        raw_logits = torch.matmul(qh, k_raw.double()[h].transpose(-1, -2)) * scale
+        log_raw_mass = torch.logsumexp(raw_logits, dim=-1, keepdim=True)   # (n_rep, L, 1)
+        gist_logits = torch.matmul(qh, k_gist.double()[h].transpose(-1, -2)) * scale
+        log_R[h] = (log_raw_mass - gist_logits).mean(dim=(0, 1))
+    return log_R.to(torch.float32)
 
 
-def selkv_logit_bias(mass_ratio: torch.Tensor, alpha: float) -> torch.Tensor:
-    """Per-key logit bias α·log R (inject through d_attn_ext / the live path)."""
-    return alpha * torch.log(mass_ratio.clamp_min(1e-12))
+def selkv_logit_bias(log_mass_ratio: torch.Tensor, alpha: float) -> torch.Tensor:
+    """Per-key logit bias α·log R from the (already log-space) ratio."""
+    return alpha * log_mass_ratio
 
 
 def selkv_count_bias(token_count: int, g: int, alpha: float) -> torch.Tensor:
     """Control arm: α·log(token_count) uniform over the g gist tokens."""
     return torch.full((g,), alpha * math.log(max(token_count, 1)), dtype=torch.float32)
+
+
+# ---------------------------------------------------------------------------
+# D6 runtime caller: rotate the sidecar's pre-RoPE K/Q to absolute
+# positions, slice the live gist span, solve, and write the edit back.
+# (Review D/I: the student a_gist is deliberately NOT causal — in the real
+# compression forward tokens never attend gists, so the student is
+# counterfactual either way; declared in the D6 report.)
+# ---------------------------------------------------------------------------
+
+def grkv_edit_cache(
+    cache,                       # live prefix cache (layers with .keys/.values)
+    store,                       # SidecarStore holding doc k*'s raw K/V/Q (want_q=True)
+    qid: str,
+    k_star: int,
+    gist_span,                   # (gs, ge) physical gist span of doc k* (gist_doc_spans + system_length)
+    abs_start: int,              # doc k*'s absolute logical offset (offsets[k_star])
+    rotary_emb,                  # model rotary for apply_abs_rope
+    n_rep: int = 4,
+    ridge: float = 1e-2,
+):
+    """Per-layer: ΔV solved against the block's OWN raw teacher and written
+    back into the cache's gist span.  Returns the per-layer residual norms
+    (diagnostic)."""
+    from inference.abs_rope import apply_abs_rope
+
+    gs, ge = gist_span
+    layer0 = cache.layers[0]
+    device, dtype = layer0.keys.device, layer0.keys.dtype
+    k_raw = store.get(qid, k_star, "k", device=device, dtype=torch.float32)
+    v_raw = store.get(qid, k_star, "v", device=device, dtype=torch.float32)
+    q_raw = store.get(qid, k_star, "q", device=device, dtype=torch.float32)
+    residuals = []
+    for li, layer in enumerate(cache.layers):
+        k_gist = layer.keys[0, :, gs:ge, :]                 # post-RoPE at blend positions
+        v_gist = layer.values[0, :, gs:ge, :]
+        k_rot = apply_abs_rope(k_raw[li], abs_start, rotary_emb)
+        q_rot = apply_abs_rope(q_raw[li], abs_start, rotary_emb)
+        delta = grkv_v_edit(k_gist.float(), v_gist.float(), q_rot, k_rot,
+                            v_raw[li], n_rep=n_rep, ridge=ridge)
+        before = layer.values[0, :, gs:ge, :].float().norm().item()
+        layer.values[0, :, gs:ge, :] += delta.to(layer.values.dtype)
+        residuals.append(before)
+    return residuals

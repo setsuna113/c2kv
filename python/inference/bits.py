@@ -24,6 +24,8 @@ def pack_bits(codes: torch.Tensor, bits: int) -> torch.Tensor:
     flat = codes.reshape(-1).to(torch.int64)
     if flat.numel() and int(flat.max()) >= (1 << bits):
         raise ValueError(f"code {int(flat.max())} does not fit in {bits} bits")
+    if flat.numel() and int(flat.min()) < 0:
+        raise ValueError(f"negative code {int(flat.min())}: pack_bits takes UNSIGNED codes")
     # (n, bits) MSB-first bit matrix
     shifts = torch.arange(bits - 1, -1, -1, dtype=torch.int64)
     stream = (flat.unsqueeze(1) >> shifts) & 1          # (n, bits) int64

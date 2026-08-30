@@ -452,3 +452,27 @@ boundary exists so the diagnostic columns stay honest too.
 |---|---|
 | witness table | `configs/bdf_pilot/d_witness_r2.json` |
 | O-1 gate recomputation | reproduced in the D1 report; inputs are git-tracked |
+
+### v2.8 go/no-go gate + caliber reconciliation (2026-08-31, written BEFORE any sweep number is read)
+
+* **R gate (decides whether codec/capsule arms burn cards):** the frozen
+  trigger set gives n=93; the repair channel counts as ALIVE iff
+  S@k_witness clears the non-witness (wrong-block distribution) flip-rate
+  floor under a one-sided binomial test at p<0.05 (floor p estimated from
+  the non-witness k rows; analysis emits both numbers).  Below the floor:
+  the channel is judged dead, D3–D7 arms are NOT run, and line A's offline
+  rate–distortion results stand alone.
+* **O-1 vs `battery4096_adjudication.md` — not a contradiction:** 128 is
+  the caliber of the FROZEN C→W mechanism face (its trigger pairing was
+  mined under 128 and O-1's gate showed raising it buys nothing on S);
+  the 4096 adjudication eliminated the 128-TRUNCATION artifact on the
+  end-to-end BATTERY face.  Two faces, each ruling stands on its own.
+* **Declared assumption (review I):** D6's student attention over the
+  gist span is NOT causal — in the real compression forward tokens never
+  attend gists, so the student is counterfactual either way; the D6
+  report states this explicitly.
+* Round-2 review fixes recorded: masked-fold phantom denominator (A),
+  max-shift + e^{-m} units (B), extra_den-only raises (C), eager-path
+  default-off bias/fold registry wired (D), D5 rewritten as d5_v2 (E),
+  kvtc centered basis with mu as shared artifact (F), SelKV log-space
+  geometric mean (G), pack_bits unsigned assertion (H).

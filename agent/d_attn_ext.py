@@ -48,6 +48,8 @@ def attention_with_bias(
     extra_den: Optional[torch.Tensor] = None,        # (H, Lq, 1) | (H, Lq)
     scale: Optional[float] = None,
 ) -> torch.Tensor:
+    if extra_den is not None and extra_num is None:
+        raise ValueError("extra_den without extra_num is a silent no-op; pass both or neither")
     if scale is None:
         scale = 1.0 / math.sqrt(q.shape[-1])
     logits = torch.matmul(q.float(), k.float().transpose(-1, -2)) * scale
@@ -60,17 +62,22 @@ def attention_with_bias(
         logits = logits + bias.float()
     attn = torch.softmax(logits, dim=-1)  # fp32 softmax (spec)
     out = torch.matmul(attn, v.float())
-    if extra_num is not None or extra_den is not None:
-        den0 = torch.exp(logits).sum(dim=-1, keepdim=True)  # (H, Lq, 1) plain denominator
-        num0 = out * den0                                   # exact plain numerator
+    if extra_num is not None:
+        # manual exp MUST shift by the row max (softmax does internally;
+        # SelKV's alpha*log R can push logits past fp32 exp range);
+        # extra_num/extra_den are in UNSHIFTED units -> carry e^{-m}
+        m = logits.max(dim=-1, keepdim=True).values
+        m = m.where(torch.isfinite(m), torch.zeros_like(m))   # fully-masked rows
+        e_neg_m = torch.exp(-m)
+        den0 = torch.exp(logits - m).sum(dim=-1, keepdim=True)  # (H, Lq, 1)
+        num0 = out * den0                                     # exact plain numerator
         den = den0
         if extra_den is not None:
             d = extra_den.float()
             if d.dim() == 2:
                 d = d.unsqueeze(-1)
-            den = den + d
-        if extra_num is not None:
-            out = (num0 + extra_num.float()) / den
+            den = den + d * e_neg_m
+        out = (num0 + extra_num.float() * e_neg_m) / den
     return out.to(v.dtype)
 
 
@@ -88,6 +95,8 @@ def masked_attention_with_bias(
 ) -> torch.Tensor:
     """attention_with_bias with a causal mask over the block's own tokens
     (the model never computes the bidirectional quantity — v1's A_raw did)."""
+    if extra_den is not None and extra_num is None:
+        raise ValueError("extra_den without extra_num is a silent no-op; pass both or neither")
     Lq, Lk = q.shape[-2], k.shape[-2]
     if Lq != Lk:
         raise ValueError("causal variant assumes q and k span the same block")
@@ -106,13 +115,20 @@ def masked_attention_with_bias(
     attn = torch.softmax(logits, dim=-1)
     out = torch.matmul(attn, v.float())
     if extra_num is not None:
-        den0 = torch.exp(logits.masked_fill(~mask, 0.0)).sum(dim=-1, keepdim=True)
+        # exp(-inf) is already 0 — do NOT masked_fill(~mask, 0.0), which
+        # turns masked positions into exp(0)=1 phantom denominator mass
+        # (review A); shift by the row max for overflow safety (review B)
+        # and carry the extra terms in unshifted units scaled by e^{-m}
+        m = logits.max(dim=-1, keepdim=True).values
+        m = m.where(torch.isfinite(m), torch.zeros_like(m))
+        e_neg_m = torch.exp(-m)
+        den0 = torch.exp(logits - m).sum(dim=-1, keepdim=True)
         num0 = out * den0
         den = den0
         if extra_den is not None:
             d = extra_den.float()
             if d.dim() == 2:
                 d = d.unsqueeze(-1)
-            den = den + d
-        out = (num0 + extra_num.float()) / den
+            den = den + d * e_neg_m
+        out = (num0 + extra_num.float() * e_neg_m) / den
     return out.to(v.dtype)

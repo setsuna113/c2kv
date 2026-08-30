@@ -227,19 +227,24 @@ def dec_vector_konly(p: Payload, W: Optional[torch.Tensor] = None) -> Tuple[torc
 # kvtc: offline PCA basis + water-filled coefficient bits
 # ---------------------------------------------------------------------------
 
-def fit_pca_basis(blocks: List[torch.Tensor], rank: int = 32) -> torch.Tensor:
-    """Shared PCA basis per layer over held-out blocks (top-r right
-    singular vectors of the concatenated token matrix)."""
+def fit_pca_basis(blocks: List[torch.Tensor], rank: int = 32):
+    """Shared per-layer PCA over held-out blocks, CENTERED per channel:
+    returns (Vh[:rank] (r, D), mu (D,)).  mu is a shared artifact — without
+    centering, the mean stays in the residual and eats rank capacity
+    (review F: v1 fitted the basis on uncentered data but subtracted a
+    scalar at encode)."""
     flat = torch.cat([b.float().reshape(-1, b.shape[-1]) for b in blocks], dim=0)
-    U, S, Vh = torch.linalg.svd(flat, full_matrices=False)
-    return Vh[:rank]
+    mu = flat.mean(dim=0)
+    U, S, Vh = torch.linalg.svd(flat - mu, full_matrices=False)
+    return Vh[:rank], mu
 
 
 def enc_kvtc(k: torch.Tensor, v: torch.Tensor,
-             basis_k: Optional[torch.Tensor] = None, basis_v: Optional[torch.Tensor] = None,
+             basis_k=None, basis_v=None,
              budget_bytes: Optional[int] = None) -> Payload:
-    """PCA-basis codec: basis fitted OFFLINE (shared artifact).  Per block:
-    means + quantized coefficients, bits water-filled by basis mass."""
+    """PCA-basis codec: (Vh, mu) fitted OFFLINE (shared artifacts).  Per
+    block: quantized coefficients of the CENTERED projection, bits
+    water-filled by basis mass."""
     H, L, D = k.shape
     self_fit = basis_k is None
     if self_fit:
@@ -251,24 +256,20 @@ def enc_kvtc(k: torch.Tensor, v: torch.Tensor,
     # bits are PER COEFFICIENT (H*L of them per component): the width
     # vector's TOTAL budget is budget_bytes/(H*L) bits, split k/v
     per_elem_bits = budget_bytes * 8 * 0.75 / (H * L)
-    bits_k = waterfill_bits(basis_k.float().norm(dim=-1), per_elem_bits / 2)
-    bits_v = waterfill_bits(basis_v.float().norm(dim=-1), per_elem_bits / 2)
-    for name, t, basis, bits in (("k", k, basis_k, bits_k), ("v", v, basis_v, bits_v)):
-        mean = t.float().mean()  # single block mean (scalar per name)
-        coef = torch.einsum("hld,rd->hlr", t.float() - mean, basis.float())
+    bits_k = waterfill_bits(basis_k[0].float().norm(dim=-1), per_elem_bits / 2)
+    bits_v = waterfill_bits(basis_v[0].float().norm(dim=-1), per_elem_bits / 2)
+    for name, t, (basis, mu), bits in (("k", k, basis_k, bits_k), ("v", v, basis_v, bits_v)):
+        coef = torch.einsum("hld,rd->hlr", t.float() - mu.float(), basis.float())
         _pack_qchannels(p, f"{name}_coef", coef, bits)
-        p.add_floats(f"{name}_mean", mean.reshape(1))
     p.header["self_fit"] = self_fit
     return p
 
 
-def dec_kvtc(p: Payload, basis_k: torch.Tensor, basis_v: torch.Tensor,
-             lead_shape) -> Tuple[torch.Tensor, torch.Tensor]:
+def dec_kvtc(p: Payload, basis_k, basis_v, lead_shape) -> Tuple[torch.Tensor, torch.Tensor]:
     out = []
-    for name, basis in (("k", basis_k), ("v", basis_v)):
+    for name, (basis, mu) in (("k", basis_k), ("v", basis_v)):
         coef = _read_qchannels(p, f"{name}_coef", lead_shape)
-        mean = p.read_floats(f"{name}_mean")
-        t = torch.einsum("hlr,rd->hld", coef, basis.float()) + mean.item()
+        t = torch.einsum("hlr,rd->hld", coef, basis.float()) + mu.float()
         out.append(t)
     return out[0], out[1]
 
