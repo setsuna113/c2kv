@@ -88,6 +88,11 @@ RUN_CMD=(python -m metrology.bfcl_hf_runner
   --device "${DEVICE}"
   --bfcl_data_dir "${BFCL_DATA_DIR}"
   --output "${RUN_JSONL}"
+  # --skip_errors(2026-08-30 v2): error 行视为已完成、按错误答案计分(与
+  # --expect-n 口径一致——每个 id 恰好一行)。不传时重跑会把 error 行再跑一遍
+  # 并 append 重复行, scorer 的 _check_duplicate_keys 直接 SystemExit, 该
+  # checkpoint 永远评不出(2026-08-29 审计#5 实锤的死锁)。
+  --skip_errors
   "${LIMIT_ARGS[@]}")
 
 SCORE_CMD=(python -m metrology.bfcl_score

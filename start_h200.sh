@@ -54,16 +54,19 @@ export PYTORCH_ALLOC_CONF="${PYTORCH_ALLOC_CONF:-expandable_segments:True}"
 export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-${PYTORCH_ALLOC_CONF}}"
 
 # H200 吞吐默认值（141GB 显存远够用, 利用率从 ~20% 拉起来; 平台低利用率会杀任务）:
-# - C2KV_GIST_DOC_MICROBATCH=1: 文档压缩逐篇小前向。2026-08-26 的
-#   "microbatch 16 vs 1 逐位吻合" 声明撤回(2026-08-29 审计 I4): microbatch>1 时
-#   组内右填充槽是 gist_token_id 真实 embedding(gist_utils.py:579), 残差
-#   chunk-mean 按组 max padded 长度算(:429-434)而 mask 按真实长度建(:117),
-#   混合长度组里 L%8≠0 的短文档最后一个 gist row 必被污染; 且 flatten 在按
-#   训练样本切分之前(:564), bs=2 时中间组跨样本——该对照机制上不可能成立。
-#   数值正确性 > 吞吐: 默认回退 1(与全部 NPU 臂一致); 吞吐确实不够时可谨慎
-#   提高, 但须重做等价性验证且该臂与 NPU 臂不再可比。
+# - C2KV_GIST_DOC_MICROBATCH=16: 文档压缩分组小前向(吞吐关键: mb=1 生产实测
+#   27-31 s/it vs mb=16 的 4.1 s/it, ~7x; 3 epochs 从 ~94h 回到 ~17-24h)。
+#   2026-08-29 审计 I4 曾把默认回退 1(过渡措施): 组内混合长度时残差 chunk-mean
+#   按组 max padded 网格算, L%8!=0 的短文档最后一个 gist row 混入填充 embedding。
+#   2026-08-30 已修: gist_utils.py 的残差改按每篇文档真实长度(generate_gist
+#   注入的 gist_token_true_lens)分块取均值, 组内全等长保留原向量化快路径;
+#   修复后分组前向在数学上等价逐篇(仅 bf16 归约噪声), 硬门槛等价性测试
+#   python/models/test_gist_microbatch_equiv.py(float64 逐位 + tiny Qwen3 整层
+#   集成)。flatten 先于按训练样本切分导致的 bs=2 跨样本组, 在 per-row
+#   attention mask + per-doc 残差下只剩纯 batching, 无信息串流(测试 docstring
+#   有论证)。
 # - PER_DEVICE_BS=2 + GRAD_ACCUM=2: effective batch 仍为 8 (2卡 x 2 x 2)
-export C2KV_GIST_DOC_MICROBATCH="${C2KV_GIST_DOC_MICROBATCH:-1}"
+export C2KV_GIST_DOC_MICROBATCH="${C2KV_GIST_DOC_MICROBATCH:-16}"
 export PER_DEVICE_BS="${PER_DEVICE_BS:-2}"
 export GRAD_ACCUM="${GRAD_ACCUM:-2}"
 
@@ -515,14 +518,19 @@ kill_train() {  # 带重试地杀干净整个训练进程树（孤儿进程会�
 # ---- phase: calibrate ------------------------------------------------------
 phase_calibrate() {
   if [[ -f "${RUN_CONFIG}" ]]; then echo "run_config exists, reuse:"; cat "${RUN_CONFIG}"; return 0; fi
-  local prov_epochs=2 attempt=0
+  local prov_epochs=2 attempt=0 calib_secs=0
   while true; do
     echo "calibration launch: ${CALIB_STEPS} steps (provisional epochs=${prov_epochs}, fallback_level=$(fallback_level), attempt=${attempt})"
+    # 计时(2026-08-30 v2): launch -> checkpoint-CALIB_STEPS 落盘的墙钟秒数,
+    # 按成功那次 attempt 计(失败 attempt 不算产能), 写 run_config sec_step
+    local launch_ts
+    launch_ts=$(date +%s)
     launch_train "${CALIB_STEPS}" "${prov_epochs}" "" &
     local tpid=$!
     local wrc=0
     wait_for_checkpoint "${CALIB_STEPS}" "${CALIB_TIMEOUT_MIN}" || wrc=$?
     if [[ ${wrc} -eq 0 ]]; then
+      calib_secs=$(( $(date +%s) - launch_ts ))
       kill_train || true
       wait "${tpid}" 2>/dev/null || true
       break
@@ -578,12 +586,20 @@ presented_per_step = p_pool / steps_per_epoch
 save_steps = max(1, int(${CHECKPOINT_TOKEN_GRAN} // max(1, presented_per_step)))
 epochs = max(1, round(${TARGET_PRESENTED_TOKENS} / max(1, p_pool)))
 total_steps = epochs * steps_per_epoch
+# 2026-08-30 v2: calibrate 计时入账。sec_step 按 CALIB_STEPS 摊(含启动/编译/
+# 建样本窗口, 是"端到端口径"的保守秒/步); projected_hours = sec_step x
+# total_steps; gist_doc_microbatch 记录校准时的吞吐配置——phase_train 启动前
+# 校验与当前 env 一致, 无此键的旧 run_config(mb=1 时代遗物)同样响亮失败。
+sec_step = ${calib_secs} / ${CALIB_STEPS}
+projected_hours = sec_step * total_steps / 3600
 cfg = dict(p_pool_presented=int(p_pool), est_pool=int(est_pool),
            rho=(round(rho, 4) if rho else None),
            n_examples=n_ex, steps_per_epoch=steps_per_epoch,
            presented_per_step=int(presented_per_step),
            save_steps=save_steps, epochs=epochs, total_steps=total_steps,
            expected_presented=int(p_pool * epochs),
+           sec_step=round(sec_step, 3), projected_hours=round(projected_hours, 2),
+           gist_doc_microbatch=int("${C2KV_GIST_DOC_MICROBATCH}"),
            truncated_skips=manifest.get("tool_call_target_truncated_skips"),
            action_type_counts=manifest.get("action_type_counts"),
            # 2026-08-29 I5: 记录校准所依据的 order 文件及其 sha1; phase_train
@@ -592,6 +608,19 @@ cfg = dict(p_pool_presented=int(p_pool), est_pool=int(est_pool),
            order_sha1=hashlib.sha1(open("${ORDER_FILE}", "rb").read()).hexdigest())
 json.dump(cfg, open("${RUN_CONFIG}", "w"), indent=1)
 print(json.dumps(cfg, indent=1))
+bar = "=" * 76
+print(bar)
+print(f"CALIB TIMING: ${calib_secs}s / ${CALIB_STEPS} steps = {sec_step:.2f} s/it"
+      f" (gist_doc_microbatch=${C2KV_GIST_DOC_MICROBATCH})")
+print(f"CALIB PROJECTION: total_steps={total_steps} -> {projected_hours:.1f} h"
+      f" (WALL_CAP_HOURS=${WALL_CAP_HOURS})")
+print(bar)
+if projected_hours > float("${WALL_CAP_HOURS}"):
+    # 用户不设硬上限(2026-08-29 裁定): 大字告警, 不 assert
+    print("#" * 76)
+    print(f"WARNING: projected_hours={projected_hours:.1f} 超过 WALL_CAP_HOURS=${WALL_CAP_HOURS} ——"
+          " 剂量/吞吐口径务必人工复核(不阻断, 仅告警)")
+    print("#" * 76)
 assert epochs * p_pool >= ${MIN_PRESENTED_TOKENS}, "pool too small for floor dose"
 PY
   echo "calibrate done -> ${RUN_CONFIG}"
@@ -604,9 +633,27 @@ phase_train() {
   # 别的池子而剂量/步数还是旧口径。旧格式 run_config(无 order_sha1)跳过,
   # 保持向后兼容。
   "${PY}" - "${RUN_CONFIG}" "${ORDER_FILE}" <<'PY'
-import hashlib, json, sys
+import hashlib, json, os, sys
 cfg_path, order_path = sys.argv[1], sys.argv[2]
 cfg = json.load(open(cfg_path))
+# gist_doc_microbatch 一致性(2026-08-30 v2): run_config 的 sec_step/
+# projected_hours/presented_per_step 都只在校准时的 microbatch 下成立。
+# 与 order_sha1 的"缺键跳过"不同——无此键 = mb=1 时代的旧校准, 剂量口径对
+# 当前配置直接无效, 同样响亮失败并提示重新校准。
+want_mb = cfg.get("gist_doc_microbatch")
+cur_mb = os.environ.get("C2KV_GIST_DOC_MICROBATCH")
+if want_mb is None:
+    raise SystemExit(
+        "run_config 缺 gist_doc_microbatch 键——这是 2026-08-30 之前(mb=1 时代)的旧校准,\n"
+        "sec/step 与剂量口径对当前配置无效。请重新校准:\n"
+        f"  rm -f {os.path.dirname(cfg_path)}/calibrate.done {cfg_path}"
+    )
+if cur_mb is None or int(cur_mb) != int(want_mb):
+    raise SystemExit(
+        f"gist_doc_microbatch 不一致: run_config 记录={want_mb}, 当前 env={cur_mb}。\n"
+        "校准的 sec/step 与剂量口径只在同 microbatch 下成立; 确要切换请重新校准:\n"
+        f"  rm -f {os.path.dirname(cfg_path)}/calibrate.done {cfg_path}"
+    )
 want = cfg.get("order_sha1")
 if want:
     got = hashlib.sha1(open(order_path, "rb").read()).hexdigest()
@@ -707,7 +754,16 @@ PY
       return 2
     fi
     if (( attempt > MAX_CRASH_RETRIES )); then
-      echo "too many crashes/stalls (${attempt})"; tail -20 "${LOGS}/train.log" || true; return 1
+      echo "too many crashes/stalls (${attempt})"; tail -20 "${LOGS}/train.log" || true
+      # 2026-08-30 v2: 烧尽重试但已有可评 milestone 时按部分完成(rc=2)进 eval,
+      # 不零产出 return 1; 一个完整档都没有才是真失败
+      local last_ckpt
+      last_ckpt="$(latest_ckpt)"
+      if [[ -n "${last_ckpt}" ]]; then
+        echo "crash 烧尽但有 milestone (${last_ckpt}), 按 partial 进 eval"
+        return 2
+      fi
+      return 1
     fi
     local gu_free
     gu_free=$(df --output=avail -BG "${GU_BASE}" | tail -1 | tr -dc '0-9')
@@ -729,10 +785,13 @@ phase_eval() {
   mapfile -t ckpts < <(for d in $(ls -d "${OUTPUT_DIR}"/checkpoint-* 2>/dev/null | sort -V); do [[ -f "${d}/trainer_state.json" ]] && printf '%s\n' "${d}"; done)
   [[ ${#ckpts[@]} -gt 0 ]] || { echo "no checkpoints to evaluate"; return 1; }
   # 只评本次 run 的 milestone: step % save_steps == 0 或 step == total_steps
-  # (save_steps/total_steps 从 run_config.json 读; transformers 5.8 保存节奏是
-  # global_step % state.save_steps, 训练末尾另存最终档)。防旧 cadence(如
+  # 或最新档(save_steps/total_steps 从 run_config.json 读; transformers 5.8 保存
+  # 节奏是 global_step % state.save_steps, 训练末尾另存最终档)。防旧 cadence(如
   # calibrate 的 150)残档混入评分——2026-08-28 审计。旧格式 run_config 缺
   # 这两个键时不过滤(保持原行为)。
+  # 2026-08-30 v2: 放行最新档(c == ckpts[-1])——冒烟实证实际 max_steps(100)
+  # 不等于 run_config total_steps(128) 时, 完成完整退火的最终档被 filter 丢掉;
+  # 被排除的档 echo 出来, 不再静默。
   mapfile -t ckpts < <("${PY}" - "${RUN_CONFIG}" "${ckpts[@]}" <<'PY'
 import json, os, sys
 try:
@@ -740,15 +799,21 @@ try:
 except (FileNotFoundError, json.JSONDecodeError):
     cfg = {}
 save_steps, total_steps = cfg.get("save_steps"), cfg.get("total_steps")
-out = []
-for c in sys.argv[2:]:
+ckpts = sys.argv[2:]
+out, excluded = [], []
+for c in ckpts:
     step = os.path.basename(c).rsplit("-", 1)[-1]
     if not step.isdigit():
         continue
     step = int(step)
-    if save_steps and total_steps and not (step % save_steps == 0 or step == total_steps):
+    if save_steps and total_steps and not (
+        step % save_steps == 0 or step == total_steps or c == ckpts[-1]
+    ):
+        excluded.append(c)
         continue
     out.append(c)
+if excluded:
+    print("cadence filter excluded: " + " ".join(excluded), file=sys.stderr)
 if out:
     print("\n".join(out))
 PY
@@ -855,10 +920,19 @@ PY
 # ---- phase: select ---------------------------------------------------------
 phase_select() {
   "${PY}" - <<PY
-import glob, json, os
+import glob, json, os, re
 results = "${RESULTS}"
 rows = []
+ghost = []
 for path in sorted(glob.glob(os.path.join(results, "bfcl_dev_scored", "*_summary.json"))):
+    base = os.path.basename(path)
+    # 2026-08-30 v2: 只认 OUTPUT_DIR 现存的 checkpoint——partial/rerun+prune
+    # 必制造幽灵 summary(跨 run 残留、或档位已被磁盘裁剪删掉), 选中已删档
+    # 就是事故。被过滤的打印出来, 不静默。
+    m = re.search(r"checkpoint-(\d+)", base)
+    if m and not os.path.isdir(os.path.join("${OUTPUT_DIR}", m.group(0))):
+        ghost.append(base)
+        continue
     s = json.load(open(path))
     # bfcl_score summary schema: {condition: {cap_tier: {n, native_valid_n, ...}}}
     # 选择指标 = native_valid_n / n（协议合法率, c2kv 格）
@@ -879,10 +953,14 @@ for path in sorted(glob.glob(os.path.join(results, "bfcl_dev_scored", "*_summary
         score_keys = [k for k in flat if "acc" in k.lower() or "score" in k.lower()]
         key = score_keys[0] if score_keys else None
         val = flat.get(key) if key else None
+        n_val = None
     else:
         key, val = "native_valid_rate", cell["native_valid_n"] / cell["n"]
-    rows.append((path, key, val))
-    print(os.path.basename(path), "->", key, val)
+        n_val = cell["n"]
+    rows.append((path, key, val, n_val))
+    print(base, "->", key, val, f"n={n_val}")
+if ghost:
+    print("select: 忽略 checkpoint 已不存在的 summary:", ghost)
 rows = [r for r in rows if r[2] is not None]
 assert rows, "no scored summaries with a usable score"
 best = max(rows, key=lambda r: r[2])
@@ -913,9 +991,9 @@ with open(os.path.join(results, "FINAL_SUMMARY.md"), "w") as f:
     f.write("# G-H200 main arm — BFCL-dev checkpoint selection\n\n")
     f.write(f"best: **{os.path.basename(best[0]).replace('_summary.json','')}** ({best[1]} = {best[2]:.4f})\n\n")
     f.write(f"{dose_line}\n\n")
-    f.write("| checkpoint | metric | value |\n|---|---|---|\n")
-    for path, key, val in rows:
-        f.write(f"| {os.path.basename(path).replace('_summary.json','')} | {key} | {val:.4f} |\n")
+    f.write("| checkpoint | metric | value | n |\n|---|---|---|---|\n")
+    for path, key, val, n_val in rows:
+        f.write(f"| {os.path.basename(path).replace('_summary.json','')} | {key} | {val:.4f} | {n_val if n_val is not None else 'n/a'} |\n")
     f.write("\n详细数值见各 summary.json；逐条明细见对应 _scored.jsonl。\n")
 print("BEST:", best[0], best[1], best[2])
 PY
@@ -957,16 +1035,36 @@ echo $$ > "${LOCKDIR}/pid"
 trap 'rm -rf "${LOCKDIR}"; rm -f "${G_H200_SNAPSHOT_PATH}"' EXIT
 
 log "=== g_h200 pipeline start (target=${TARGET_PRESENTED_TOKENS} presented, wall_cap=${WALL_CAP_HOURS}h, SMOKE=${SMOKE:-0}) ==="
+# fallback 预置(2026-08-30 v2, 二轮评审#3): 非 SMOKE 且 level 文件不存在时种子
+# 写 2——level 0(ZeRO-3 NCCL 挂死, 2026-08-26 实锤)与 level 1(flex 变长重编译
+# CheckpointError, 2026-08-30 arm-2 calibrate 实锤)都是致命配置, 空 STATUS 不该
+# 再从 0 爬梯子(arm-2 为此白烧 ~1.7h)。梯子与封顶 FALLBACK_MAX=2 不变;
+# FALLBACK_LEVEL_SEED 可覆盖。
+if [[ "${SMOKE:-0}" != "1" && ! -f "${STATUS}/attn_fallback_level" ]]; then
+  echo "${FALLBACK_LEVEL_SEED:-2}" > "${STATUS}/attn_fallback_level"
+  log "attn_fallback_level 预置 $(fallback_level) (level 0/1 为实锤致命配置; FALLBACK_LEVEL_SEED 可覆盖)"
+fi
 run_phase recon phase_recon
 run_phase plan phase_plan
 run_phase calibrate phase_calibrate
 # train 的 rc=2(墙钟/磁盘早退=部分完成, 见 run_phase 的 .partial 语义)不阻断
 # eval: 已落盘 milestone 照常评分; 其余非零由 run_phase 自己 exit, 走不到这里。
 # `||` 捕获 rc 的同时抑制 set -e/ERR trap 把 rc=2 当失败。
+# 2026-08-30 v2(二轮评审#1): 记录本次是否真跑了 train。train.done 已存在时
+# run_phase 跳过, 无需动下游; 真跑且 rc∈{0,2} 时, 既有 eval.done/select.done
+# 是基于旧 milestone 集的——此前 rc=2 partial 进 eval 盖了 eval.done, train
+# 续跑到 rc=0 后重跑时 eval 被 .done 跳过, 新 milestone 永不评分。真跑过就在
+# 进 eval 前失效下游(eval 内部对已评分 checkpoint 仍有 per-name 跳过, 只补新档)。
 train_rc=0
+train_done_pre=0
+[[ -f "${STATUS}/train.done" ]] && train_done_pre=1
 run_phase train phase_train || train_rc=$?
 if [[ ${train_rc} -eq 2 ]]; then
   log "WARNING: train 未达目标剂量(rc=2, 见 ${STATUS}/train.partial), 按部分完成进 eval"
+fi
+if [[ "${train_done_pre}" -eq 0 && ( ${train_rc} -eq 0 || ${train_rc} -eq 2 ) ]]; then
+  log "train 本次真跑(rc=${train_rc}): 失效 eval.done/select.done/eval_list.txt, 按新 milestone 集重评"
+  rm -f "${STATUS}/eval.done" "${STATUS}/select.done" "${STATUS}/eval_list.txt"
 fi
 run_phase eval phase_eval
 run_phase select phase_select

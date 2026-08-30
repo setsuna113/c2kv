@@ -535,6 +535,11 @@ class LlamaModel(LlamaPreTrainedModel):
         attention_mask: torch.BoolTensor,
         **kwargs: Unpack[TransformersKwargs],
     ) -> Tuple[BaseModelOutputWithPast, torch.Tensor, torch.Tensor]:
+        # per-doc 真实长度注入 kwargs, 供 layer-0 gist 残差按文档真实长度切 chunk
+        # (gist_utils._apply_gist_residual_interleave; 2026-08-30 审计 I4 修复:
+        # 分组 microbatch 下残差不再按组 max padded 网格取均值)。该键随 **kwargs
+        # 顺路穿过 attention interface(各家均吞 **kwargs), 无副作用。
+        kwargs["gist_token_true_lens"] = attention_mask.sum(dim=1)
         attention_mask, gist_mask, position_ids = self.prepare_gist_input(
             input_ids, attention_mask, **kwargs
         )
