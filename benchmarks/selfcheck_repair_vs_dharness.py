@@ -88,6 +88,16 @@ def harness_args(ns: argparse.Namespace):
     return args
 
 
+def _example_system_len(tokenizer, HH, example, hargs) -> int:
+    """Rendered system+tools length of an example (chat template applied)."""
+    system_ids = HH._chat_template_ids(
+        tokenizer,
+        [{"role": "system", "content": example.system_prompt}],
+        tools=example.tools or None, keep_bos=True,
+    )
+    return len(system_ids)
+
+
 def phase_a(ns: argparse.Namespace) -> None:
     import torch  # noqa: F401
     HH = __import__("eval_agent_history_c2kv")
@@ -95,7 +105,14 @@ def phase_a(ns: argparse.Namespace) -> None:
     device = HH._setup_device("npu")
     tokenizer = HH._load_tokenizer(hargs)
     examples, _ = HH._load_examples(hargs, tokenizer)
-    picked = []
+    # B12: length-stratified picking (short/mid/long by RENDERED SYSTEM
+    # length, terciles over the candidate pool) instead of "first N that
+    # fit".  The old short-only filter made the bit-consistency cross-check
+    # blind to the large tool schemas that dominate the real τ²/TS request
+    # population.  Per stratum the harness's max_system_length is RAISED to
+    # the stratum's max so both faces see the same un-truncated system (the
+    # server never caps its system prefill).
+    candidates = []
     seen = set()
     for example in examples:
         history = HH._history_messages(tokenizer, example, hargs)
@@ -103,30 +120,45 @@ def phase_a(ns: argparse.Namespace) -> None:
                 and example.qid not in seen):
             current = HH._current_messages(example)
             if len(current) == 1 and current[0].get("role") == "user":
-                # The harness caps system+tools at max_system_length; the
-                # server does NOT cap its system prefill, so only examples
-                # whose full rendered system block fits the harness budget
-                # are comparable (big agent-llm-traces tool schemas would
-                # make the server prefill a 50k-token eager forward).
                 system_ids = HH._chat_template_ids(
                     tokenizer,
                     [{"role": "system", "content": example.system_prompt}],
                     tools=example.tools or None, keep_bos=True,
                 )
-                if len(system_ids) > hargs.max_system_length:
-                    continue
-                picked.append(example)
+                candidates.append((len(system_ids), example))
                 seen.add(example.qid)
-        if len(picked) >= ns.examples:
-            break
-    if not picked:
+    if not candidates:
         raise SystemExit("FATAL: no example with tools + single-user current turn found")
-    print(f"picked {len(picked)} examples: {[e.qid for e in picked]}")
+    candidates.sort(key=lambda pair: pair[0])
+    lengths = [length for length, _ in candidates]
+    q1 = lengths[len(lengths) // 3]
+    q2 = lengths[2 * len(lengths) // 3]
+    strata = [
+        ("short", [c for c in candidates if c[0] <= q1]),
+        ("mid", [c for c in candidates if q1 < c[0] <= q2]),
+        ("long", [c for c in candidates if c[0] > q2]),
+    ]
+    per_stratum = max(1, ns.examples // 3)
+    picked: list = []
+    stratum_bounds: dict = {}
+    for name, bucket in strata:
+        take = bucket[:per_stratum]
+        picked.extend(example for _, example in take)
+        if take:
+            stratum_bounds[name] = (take[0][0], take[-1][0])
+    if not picked:
+        raise SystemExit("FATAL: stratified picking came up empty")
+    print(f"picked {len(picked)} examples across system-length strata "
+          f"{stratum_bounds}: {[e.qid for e in picked]}")
 
     model = HH._load_model(hargs, tokenizer, device)
     stash = []
     HH.CORR_K_POLICY = "offset:0"
     for example in picked:
+        # keep the two faces byte-identical on the system block: raise the
+        # harness cap to this example's true rendered system length
+        hargs.max_system_length = max(hargs.max_system_length, _example_system_len(
+            tokenizer, HH, example, hargs))
         history = HH._history_messages(tokenizer, example, hargs)
         current = HH._current_messages(example)
         for base, hybrid_k in (("c2kv", 0), ("hybrid", ns.hybrid_top_k)):

@@ -57,12 +57,14 @@ import sys
 sys.path.insert(0, str(REPO / "python"))
 sys.path.insert(0, str(REPO / "python" / "inference"))
 sys.path.insert(0, str(REPO / "agent"))
+sys.path.insert(0, str(REPO / "benchmarks"))
 
 from models import get_model_class  # noqa: E402
 from models.gist_utils import blend_gist_key_values  # noqa: E402
 from train.train_data_multiturn import _chat_template_ids  # noqa: E402
 from inference.reuse_pipeline import tokenize_for_reuse  # noqa: E402
 from inference.rope_reposition import rotate_k_cache_rope  # noqa: E402
+import repair_policy  # noqa: E402
 
 app = Flask(__name__)
 
@@ -353,22 +355,27 @@ class C2KVServer:
              constrain: bool = False,
              repair: Optional[Dict[str, Any]] = None):
         t0 = time.perf_counter()
-        # repair arm (docs/hybrid_spec.md "Repair interaction"): policy picks
-        # the compressed history chunk whose raw KV gets appended at its
-        # original logical offset.  "first" == D harness corr@first.
+        # repair arm (docs/hybrid_spec.md "Repair interaction"): the policy
+        # picks the compressed history block whose raw KV gets appended at
+        # its original logical offset.  "first" == D harness corr@first.
+        # "offset:<j>" indexes DOCS (one history message), matching
+        # agent/d_kv_intervene.py --corr_k_policy offset:<j>; "chunk:<i>"
+        # indexes the server's 768-token extract chunks explicitly.
+        # Grammar + range checks live in benchmarks/repair_policy.py (pure,
+        # CPU-testable); _append_raw_block executes the selected span.
         repair_policy: Optional[str] = None
-        repair_target = 0
+        repair_target_doc: Optional[int] = None
+        repair_target_chunk: Optional[int] = None
         if repair:
             policy = str(repair.get("policy") or "first")
-            if policy == "first":
-                repair_target = 0
-            elif policy.startswith("offset:"):
-                try:
-                    repair_target = int(policy.split(":", 1)[1])
-                except ValueError:
-                    return {"error": f"c2kv_repair: bad offset policy {policy!r}"}
+            try:
+                parsed = repair_policy.parse_policy(policy)
+            except ValueError as error:
+                return {"error": f"c2kv_repair: {error}"}
+            if parsed["kind"] == "doc":
+                repair_target_doc = parsed["index"]
             else:
-                return {"error": f"c2kv_repair: unknown policy {policy!r}"}
+                repair_target_chunk = parsed["index"]
             repair_policy = policy
         system_messages = [m for m in messages if m.get("role") == "system"]
         body = [m for m in messages if m.get("role") != "system"]
@@ -477,12 +484,13 @@ class C2KVServer:
             repair_doc_index: Optional[int] = None
             if repair_policy is not None and compressed:
                 try:
-                    cache, repair_block_tokens, repair_prefill_sec = (
+                    cache, repair_block_tokens, repair_prefill_sec, repair_doc_index = (
                         self._append_raw_block(
-                            cache, repair_system_ids, tools, compressed, repair_target
+                            cache, repair_system_ids, tools, compressed,
+                            target_doc=repair_target_doc,
+                            target_chunk=repair_target_chunk,
                         )
                     )
-                    repair_doc_index = repair_target
                 except ValueError as error:
                     return {"error": f"c2kv_repair: {error}"}
 
@@ -582,6 +590,7 @@ class C2KVServer:
             "prompt_tokens": len(prompt_ids),
             "cache_tokens": cache_len,
             "logical_tokens": logical,
+            "system_len": system_length_debug,
             "repair_policy": repair_policy,
             "repair_block_tokens": repair_block_tokens,
             "repair_doc_index": repair_doc_index,
@@ -658,27 +667,40 @@ class C2KVServer:
 
     def _append_raw_block(self, cache, system_ids, tools,
                           compressed: List[Tuple[Dict[str, Any], "GistEntry"]],
-                          target_chunk: int):
+                          target_doc: Optional[int] = None,
+                          target_chunk: Optional[int] = None):
         """corr append — raw KV of a compressed history block (docs/hybrid_spec.md).
 
         Mirrors the D harness d_corr pass (eval_agent_history_c2kv.py
         _build_d_intervene_prefix): a scratch cache prefills the system prompt
         and then the raw text of every compressed message up to and including
-        the target chunk, at the ORIGINAL logical offsets (use_gist=False —
-        the scratch cache holds no gist).  The target chunk's span — already
+        the target block, at the ORIGINAL logical offsets (use_gist=False —
+        the scratch cache holds no gist).  The target block's span — already
         carrying its original RoPE phases — is concatenated onto the request
-        cache end unrotated.  Chunk indices enumerate entry.chunks across
-        ``compressed`` in conversation order.
+        cache end unrotated.
 
-        Returns (cache, block_tokens, prefill_sec); raises ValueError when
-        target_chunk is out of range.
+        Granularity: ``target_doc`` indexes DOCS (history messages, the
+        semantics of agent/d_kv_intervene.py --corr_k_policy offset:<j> —
+        the span is ALL chunks of that doc); ``target_chunk`` indexes the
+        server's extract chunks across ``compressed`` explicitly.  Exactly
+        one must be set.
+
+        Returns (cache, block_tokens, prefill_sec, doc_index_of_block);
+        raises ValueError when the target is out of range or resolves to
+        zero tokens (a silent whole-cache concatenation must never happen:
+        ``keys[..., -0:, :]`` is the full scratch cache including system).
         """
         t0 = time.perf_counter()
-        n_chunks = sum(len(entry.chunks) for _, entry in compressed)
-        if not 0 <= target_chunk < n_chunks:
-            raise ValueError(
-                f"offset {target_chunk} out of range (0..{n_chunks - 1})"
-            )
+        if (target_doc is None) == (target_chunk is None):
+            raise ValueError("exactly one of target_doc / target_chunk")
+        # selection semantics (doc vs chunk granularity, range and empty
+        # checks) live in benchmarks/repair_policy.py — CPU-unit-tested
+        counts = [len(entry.chunks) for _, entry in compressed]
+        kind = "doc" if target_doc is not None else "chunk"
+        index = target_doc if target_doc is not None else target_chunk
+        doc_index, first_chunk, span_len = repair_policy.span_selection(
+            counts, kind, int(index))
+        span_end = first_chunk + span_len  # exclusive, chunk counter space
         with torch.inference_mode():
             if system_ids is not None:
                 raw_cache, system_length, _ = self._prefill_system_cached(
@@ -687,10 +709,11 @@ class C2KVServer:
             else:
                 raw_cache, system_length = None, 0
             logical = system_length
-            block_tokens = 0
-            remaining = target_chunk + 1  # chunks left to prefill
+            chunk_counter = -1
+            mark: Optional[int] = None  # scratch length where the span starts
+            done = False
             for message, entry in compressed:
-                if remaining <= 0:
+                if done:
                     break
                 tokenized = tokenize_for_reuse(
                     self.tokenizer, [str(message.get("content") or "")],
@@ -699,8 +722,10 @@ class C2KVServer:
                 ids = tokenized["input_ids"][0].tolist()
                 pos = 0
                 for chunk in entry.chunks:
-                    if remaining <= 0:
-                        break
+                    chunk_counter += 1
+                    if chunk_counter == first_chunk:
+                        mark = (raw_cache.get_seq_length()
+                                if raw_cache is not None else 0)
                     chunk_len = int(chunk["original_len"])
                     chunk_ids = ids[pos: pos + chunk_len]
                     raw_cache, _ = self._prefill_append(
@@ -708,19 +733,36 @@ class C2KVServer:
                     )
                     logical += len(chunk_ids)
                     pos += chunk_len
-                    block_tokens = len(chunk_ids)
-                    remaining -= 1
-            # the target chunk is the tail of the scratch cache; slice it out
-            span_keys = [layer.keys[..., -block_tokens:, :].clone()
+                    if chunk_counter + 1 >= span_end:
+                        done = True
+                        break
+            # B3 guard: a zero-token span would make a tail slice of `-0:`
+            # concatenate the ENTIRE scratch cache (system included) into
+            # the request — refuse instead.
+            if mark is None:
+                raise ValueError(
+                    "repair target resolved to no blocks (tokenization drift?)"
+                )
+            scratch_len = raw_cache.get_seq_length()
+            block_tokens = scratch_len - mark
+            if block_tokens <= 0:
+                raise ValueError(
+                    f"repair block resolved to {block_tokens} tokens; refusing "
+                    "to concatenate the whole scratch cache"
+                )
+            span_keys = [layer.keys[..., mark:, :].clone()
                          for layer in raw_cache.layers]
-            span_values = [layer.values[..., -block_tokens:, :].clone()
+            span_values = [layer.values[..., mark:, :].clone()
                            for layer in raw_cache.layers]
+            for layer in span_keys + span_values:
+                if layer.shape[-2] != block_tokens:
+                    raise ValueError("scratch layer length drift")
             del raw_cache
             for i, layer in enumerate(cache.layers):
                 layer.keys = torch.cat([layer.keys, span_keys[i]], dim=-2)
                 layer.values = torch.cat([layer.values, span_values[i]], dim=-2)
             del span_keys, span_values
-        return cache, block_tokens, time.perf_counter() - t0
+        return cache, block_tokens, time.perf_counter() - t0, doc_index
 
 
 SERVER: Optional[C2KVServer] = None

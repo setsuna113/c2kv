@@ -9,9 +9,15 @@ against pulled-back bundles).
 
 Per-benchmark success predicate (documented, big-effect reading only):
 * tau2  — official reward == 1.0 per task_id (updated_results.json).
-* bfcl  — id absent from the score json's failure records (the score file is
-          [header, *failure_records]; eligible = base_failures - full_failures).
+* bfcl  — id present in the run's GENERATED entries (result jsonl) and
+          absent from the score json's failure records (the score file is
+          [header, *failure_records]).  An id with no generation is
+          UNSCORED — never a rescue and never in the denominator.
 * ts    — scenario similarity >= 0.5 in result_summary.json (test subset).
+
+Unscored handling (B7): ids the run never produced are excluded from the
+denominator (rescue_rate = n_rescued / n_scored) and listed in
+unscored_ids with the count surfaced as n_unscored.
 
 Usage:
   python benchmarks/repair_oracle.py eligible -b tau2 \
@@ -50,18 +56,45 @@ def _tau2_scores(run: str) -> Dict[str, Optional[float]]:
     }
 
 
-def _bfcl_fail_ids(run: str) -> List[str]:
-    hits = sorted(glob.glob(str(BFCL_ARCHIVE / run / "*_score.json")))
+def _archive_hits(run: str, pattern: str) -> List[str]:
+    hits = sorted(glob.glob(str(BFCL_ARCHIVE / run / pattern)))
     if not hits:
-        raise SystemExit(f"FATAL: no archived score json for run {run!r} under {BFCL_ARCHIVE / run}")
-    rows = json.loads(Path(hits[0]).read_text(encoding="utf-8"))
+        raise SystemExit(f"FATAL: no {pattern} for run {run!r} under {BFCL_ARCHIVE / run}")
+    if len(hits) > 1:
+        print(f"WARNING: {len(hits)} candidate files for {run!r}, using the last: {hits[-1]}")
+    return hits
+
+
+def _bfcl_fail_ids(run: str) -> List[str]:
+    rows = json.loads(Path(_archive_hits(run, "*_score.json")[-1]).read_text(encoding="utf-8"))
     return [str(row.get("id")) for row in rows[1:] if row.get("id") is not None]
+
+
+def _bfcl_generated_ids(run: str) -> set:
+    """Ids the run actually produced a generation for (result jsonl rows)."""
+    path = Path(_archive_hits(run, "*_result.json*")[-1])
+    generated = set()
+    with path.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                # some writers append a bare JSON array / progress junk
+                continue
+            if isinstance(row, dict) and row.get("id") is not None:
+                generated.add(str(row["id"]))
+    return generated
 
 
 def _ts_scores(run: str) -> Dict[str, Optional[float]]:
     hits = sorted(glob.glob(str(TS_RESULTS / f"task_{run}" / "*" / "result_summary.json")))
     if not hits:
         raise SystemExit(f"FATAL: no result_summary.json for run {run!r} under {TS_RESULTS / f'task_{run}'}")
+    if len(hits) > 1:
+        print(f"WARNING: {len(hits)} candidate files for {run!r}, using the last: {hits[-1]}")
     data = json.loads(Path(hits[-1]).read_text(encoding="utf-8"))
     return {
         str(r.get("name")): r.get("similarity")
@@ -135,21 +168,37 @@ def score_repair(benchmark: str, repair_run: str, eligible: Dict[str, Any]) -> D
     ids = set(eligible["eligible_ids"])
     if benchmark == "tau2":
         scores = _tau2_scores(repair_run)
+        generated: Optional[set] = None
     elif benchmark == "bfcl":
         fails = set(_bfcl_fail_ids(repair_run))
-        scores = {i: (0.0 if i in fails else 1.0) for i in ids}
+        generated = _bfcl_generated_ids(repair_run)
+        # B7: an id with no generation is UNSCORED — never a rescue, never
+        # in the denominator.  "not in the failure table" used to promote
+        # never-run ids to rescues (inverted direction).
+        scores = {i: (0.0 if i in fails else 1.0) for i in generated}
     elif benchmark == "ts":
         scores = _ts_scores(repair_run)
+        generated = None
     else:
         raise SystemExit(f"FATAL: unknown benchmark {benchmark!r}")
-    scored = {i: scores.get(i) for i in sorted(ids)}
+    scored: Dict[str, Optional[float]] = {}
+    unscored = sorted(
+        i for i in ids
+        if (generated is not None and i not in generated) or i not in scores
+    )
+    for i in sorted(ids):
+        if i in unscored:
+            continue
+        scored[i] = scores.get(i)
     rescued = [i for i, s in scored.items() if _success(benchmark, s)]
-    missing = [i for i in scored if i not in scores]
+    n_scored = len(scored)
     return {
         "benchmark": benchmark, "repair_run": repair_run,
-        "n_eligible": len(ids), "n_rescued": len(rescued),
-        "rescue_rate": round(len(rescued) / len(ids), 4) if ids else None,
-        "rescued_ids": rescued, "unscored_ids": missing,
+        "n_eligible": len(ids), "n_scored": n_scored,
+        "n_unscored": len(unscored),
+        "n_rescued": len(rescued),
+        "rescue_rate": round(len(rescued) / n_scored, 4) if n_scored else None,
+        "rescued_ids": rescued, "unscored_ids": unscored,
         "costs": _proxy_costs(repair_run),
         "per_id": scored,
     }

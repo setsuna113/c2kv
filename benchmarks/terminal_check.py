@@ -1,0 +1,125 @@
+"""Terminal-state check: every benchmark entry must end with a recorded state.
+
+A run where entries silently vanish (transport drop, killed mid-run, client
+exception) must FAIL instead of producing a deceptively small denominator
+(acceptance 1: n_scored == n_total).  Pure stdlib; designed to be called by
+bench_queue/run_one_task.sh after each benchmark, and by run.py adapters.
+
+Exit codes: 0 = every expected id has a terminal state; 1 = shortfall (the
+caller must void the run); 2 = artifacts not found.
+
+Usage:
+  python terminal_check.py tau2  --run hr2_tau2_hy3 [--expected 50]
+  python terminal_check.py bfcl  [--expected 200] [--run-ids a,b,c]
+  python terminal_check.py ts    --run hr2_ts_hy3 [--expected 16]
+"""
+from __future__ import annotations
+
+import argparse
+import glob
+import json
+import os
+import sys
+from pathlib import Path
+
+TAU2_SIMS = Path.home() / "benchmarks/tau2/data/simulations"
+TS_RESULTS = Path.home() / "bench_results"
+GORILLA = Path(
+    os.environ.get(
+        "BFCL_CHECKOUT",
+        str(Path.home() / "benchmarks/gorilla/berkeley-function-call-leaderboard"),
+    )
+)
+DEFAULT_EXPECTED = {"tau2": 50, "bfcl": 200, "ts": None}
+
+
+def fail(benchmark: str, n_scored: int, n_total: int, missing) -> int:
+    print(f"TERMINAL-STATE {benchmark}: n_scored={n_scored} n_total={n_total} "
+          f"missing={len(missing)}")
+    if missing:
+        shown = ",".join(map(str, missing[:20]))
+        more = f" (+{len(missing) - 20} more)" if len(missing) > 20 else ""
+        print(f"FATAL: {benchmark} run has no terminal state for: {shown}{more}")
+        return 1
+    return 0
+
+
+def check_tau2(run: str, expected) -> int:
+    path = TAU2_SIMS / run / "results.json"
+    if not path.exists():
+        print(f"FATAL: no tau2 results at {path}")
+        return 2
+    sims = (json.loads(path.read_text(encoding="utf-8")).get("simulations")) or []
+    got = {str(s.get("task_id")) for s in sims}
+    if expected is None:
+        expected = DEFAULT_EXPECTED["tau2"]
+    missing = sorted({str(i) for i in range(expected)} - got) if expected else []
+    return fail("tau2", len(got), expected or len(got), missing)
+
+
+def check_bfcl(expected, run_ids) -> int:
+    pattern = str(GORILLA / "result/c2kv-hf/multi_turn/*multi_turn_base_result.json")
+    hits = sorted(glob.glob(pattern))
+    if not hits:
+        print(f"FATAL: no bfcl result file under {pattern}")
+        return 2
+    got = set()
+    with open(hits[-1], "r", encoding="utf-8") as handle:
+        for line in handle:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(row, dict) and row.get("id") is not None:
+                got.add(str(row["id"]))
+    if run_ids:
+        # id-exact check when the caller pinned the id list
+        want = {r.strip() for r in run_ids.split(",") if r.strip()}
+        missing = sorted(want - got)
+        return fail("bfcl", len(got & want), len(want), missing)
+    # count-based otherwise (bfcl ids are category-prefixed, not numeric)
+    expected = expected if expected is not None else DEFAULT_EXPECTED["bfcl"]
+    missing = ["?"] * max(0, expected - len(got))
+    return fail("bfcl", len(got), expected, missing)
+
+
+def check_ts(run: str, expected) -> int:
+    hits = sorted(glob.glob(str(TS_RESULTS / f"task_{run}" / "*" / "result_summary.json")))
+    if not hits:
+        print(f"FATAL: no result_summary.json under {TS_RESULTS / f'task_{run}'}")
+        return 2
+    data = json.loads(Path(hits[-1]).read_text(encoding="utf-8"))
+    per = data.get("per_scenario_results") or []
+    got = {str(r.get("name")) for r in per}
+    missing: list = []
+    if expected is not None:
+        missing = ["?"] * max(0, expected - len(got))
+    return fail("ts", len(got), expected if expected is not None else len(got), missing)
+
+
+def main(argv=None) -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    sub = parser.add_subparsers(dest="benchmark", required=True)
+    for name in ("tau2", "ts"):
+        p = sub.add_parser(name)
+        p.add_argument("--run", required=True)
+        p.add_argument("--expected", type=int, default=None)
+    p = sub.add_parser("bfcl")
+    p.add_argument("--expected", type=int, default=None)
+    p.add_argument("--run-ids", default="")
+    args = parser.parse_args(argv)
+
+    if args.benchmark == "tau2":
+        code = check_tau2(args.run, args.expected)
+    elif args.benchmark == "bfcl":
+        code = check_bfcl(args.expected, args.run_ids)
+    else:
+        code = check_ts(args.run, args.expected)
+    raise SystemExit(code)
+
+
+if __name__ == "__main__":
+    main()

@@ -81,6 +81,15 @@ def run(
     updated = sims / "updated_results.json"
     if not updated.exists():
         raise SystemExit(f"FATAL: tau2 evaluation produced no {updated}")
+    # terminal-state check (acceptance 1): every task must have a simulated
+    # trajectory — a killed or erroring run fails loudly instead of quietly
+    # shrinking the denominator
+    n_sims = len(json.loads(updated.read_text(encoding="utf-8")).get("simulations") or [])
+    expected = max_tasks or 50  # airline default task count
+    if n_sims < expected:
+        raise SystemExit(
+            f"FATAL: tau2 terminal-state check failed: n_scored={n_sims} < n_total={expected}")
+    print(f"TERMINAL-STATE tau2: n_scored={n_sims} n_total={expected}")
     return collect(updated, domain=task_set.split("_")[0])
 
 

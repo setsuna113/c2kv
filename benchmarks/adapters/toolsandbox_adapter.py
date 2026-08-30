@@ -30,7 +30,7 @@ AGENT = "GPT_4_o_2024_05_13"  # openai_api_agent/openai_api_user role keys
 
 
 def run(base_url: str, out_dir: Path, test_mode: bool = True,
-        agent: str = AGENT, user: str = AGENT) -> Dict[str, Any]:
+        agent: str = AGENT, user: str = AGENT, expected: int = None) -> Dict[str, Any]:
     out_dir.mkdir(parents=True, exist_ok=True)
     env = {
         **os.environ,
@@ -45,7 +45,16 @@ def run(base_url: str, out_dir: Path, test_mode: bool = True,
     completed = subprocess.run(cmd, cwd=TS_DIR, env=env)
     if completed.returncode != 0:
         raise SystemExit(f"FATAL: tool_sandbox CLI exited {completed.returncode}")
-    return collect(out_dir)
+    summary = collect(out_dir)
+    # terminal-state check (acceptance 1): a scenario that never ran must
+    # fail the run, not shrink the denominator
+    n_scored = summary.get("n") if isinstance(summary, dict) else None
+    if expected is not None and n_scored is not None and n_scored < expected:
+        raise SystemExit(
+            f"FATAL: ts terminal-state check failed: n_scored={n_scored} < n_total={expected}")
+    if expected is not None:
+        print(f"TERMINAL-STATE ts: n_scored={n_scored} n_total={expected}")
+    return summary
 
 
 def collect(out_dir: Path) -> Dict[str, Any]:

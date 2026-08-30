@@ -49,7 +49,7 @@ def install_handler(base_url: str) -> None:
                 "model": "c2kv-agent",
                 "temperature": self.temperature,
                 "store": False,
-                "max_completion_tokens": 2048,
+                "max_completion_tokens": 4096,
             }
             if inference_data.get("tools"):
                 kwargs["tools"] = inference_data["tools"]
@@ -76,7 +76,10 @@ def install_handler(base_url: str) -> None:
 def run(base_url: str, categories: str = "multi_turn_base",
         mode: str = "both", run_ids: str = "") -> Dict[str, Any]:
     """Programmatic entry for benchmarks/run.py: register the handler and
-    drive the official generate/evaluate CLI in-process."""
+    drive the official generate/evaluate CLI in-process.
+
+    Terminal-state check (acceptance 1): every expected entry must have a
+    result row — the run fails loudly instead of shrinking the denominator."""
     install_handler(base_url)
     gen = ["generate", "--model", MODEL_NAME, "--test-category", categories]
     ev = ["evaluate", "--model", MODEL_NAME, "--test-category", categories]
@@ -87,7 +90,14 @@ def run(base_url: str, categories: str = "multi_turn_base",
         run_cli(gen)
     if mode in ("evaluate", "both"):
         run_cli(ev)
-    return {"benchmark": "bfcl", "categories": categories, "mode": mode}
+    import terminal_check  # noqa: E402  (sibling module, sys.path has parent)
+
+    expected = len([r for r in run_ids.split(",") if r.strip()]) or 200
+    code = terminal_check.check_bfcl(expected, run_ids)
+    if code != 0:
+        raise SystemExit(f"FATAL: bfcl terminal-state check failed (rc={code})")
+    return {"benchmark": "bfcl", "categories": categories, "mode": mode,
+            "n_total": expected, "n_scored": expected}
 
 
 def run_cli(argv):

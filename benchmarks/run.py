@@ -19,15 +19,21 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
 
-def start_proxy(upstream: str, arm: str, port: int, log_dir: Path):
+def start_proxy(upstream: str, arm: str, port: int, log_dir: Path,
+                record_reference: str = "", reference: str = ""):
     log_path = log_dir / f"proxy_{arm}_{port}.jsonl"
     out_handle = open(log_dir / f"proxy_{arm}_{port}.out", "w")
+    command = [
+        sys.executable, str(HERE / "proxy.py"),
+        "--upstream", upstream, "--arm", arm,
+        "--port", str(port), "--request-log", str(log_path),
+    ]
+    if record_reference:
+        command += ["--record-reference", record_reference]
+    if reference:
+        command += ["--reference", reference]
     proc = subprocess.Popen(
-        [
-            sys.executable, str(HERE / "proxy.py"),
-            "--upstream", upstream, "--arm", arm,
-            "--port", str(port), "--request-log", str(log_path),
-        ],
+        command,
         stdout=out_handle,
         stderr=subprocess.STDOUT,
     )
@@ -87,12 +93,20 @@ def main(argv=None):
     parser.add_argument("--run-name", default="c2kv_run")
     parser.add_argument("--full", action="store_true",
                         help="toolsandbox: full suite instead of test mode")
+    parser.add_argument("--record-reference", default="",
+                        help="full-arm run: write the reference trajectory jsonl "
+                             "the recover arms diff against")
+    parser.add_argument("--reference", default="",
+                        help="recover arm: reference trajectory jsonl (from a "
+                             "--record-reference full-arm run)")
     args = parser.parse_args(argv)
 
     args.out.mkdir(parents=True, exist_ok=True)
     log_dir = args.out / "logs"
     log_dir.mkdir(exist_ok=True)
-    proxy_proc, request_log = start_proxy(args.upstream, args.arm, args.proxy_port, log_dir)
+    proxy_proc, request_log = start_proxy(
+        args.upstream, args.arm, args.proxy_port, log_dir,
+        record_reference=args.record_reference, reference=args.reference)
     try:
         # the BFCL handler expects an OpenAI base_url WITH /v1 (tau2 and
         # toolsandbox build their paths themselves)
@@ -111,6 +125,10 @@ def main(argv=None):
     summary["arm"] = args.arm
     summary["benchmark"] = args.benchmark
     summary["request_log"] = str(request_log)
+    if args.reference:
+        summary["reference"] = args.reference
+    if args.record_reference:
+        summary["record_reference"] = args.record_reference
     (args.out / f"summary_{args.arm}.json").write_text(
         json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8"
     )

@@ -48,3 +48,35 @@ Given a conversation `system, m_0 .. m_{T-1}, current`:
    target span sliced and concatenated at the cache end **unrotated**.
    `j` must index a COMPRESSED doc (`j < T-k`); the raw tail is never an
    erratum target and is never scanned.
+
+   Bench-side policy grammar (`benchmarks/repair_policy.py`, forwarded by
+   the proxy as the request-level `c2kv_repair` field):
+   - `first` — doc 0 (identical to the D harness corr@first);
+   - `offset:<j>` — **doc j** (one history message; the span is ALL extract
+     chunks of that doc), the same granularity as the harness
+     `--corr_k_policy offset:<j>`.  (Pre-v2 the server counted 768-token
+     extract CHUNKS here — the two grammars agreed only at j=0.)
+   - `chunk:<i>` — explicit extract-chunk index across the compressed
+     history (768-token units; one long doc = many chunks).
+   A target that resolves to zero tokens raises — the server must never
+   concatenate the whole scratch cache (a `[..., -0:, :]` slice).
+
+7. **Oracle recover (bench, step-level).** The recover arms
+   (`c2kv_recover`, `hybrid_recover`) implement the step-level oracle
+   contract entirely in the proxy (`benchmarks/proxy.py`):
+   - **Reference** — during the full-arm run the proxy records, per
+     request, the canonical action (tool name + arguments with recursively
+     sorted keys; plain text stripped) keyed by a fingerprint of the RAW
+     message list (`--record-reference`).  Before the first divergence the
+     compressed run's raw message lists are identical to the reference's
+     (greedy decoding, same inputs), so fingerprint lookups hit.
+   - **Divergence** — every compressed-regime generation is compared with
+     the reference action at the same fingerprint; the first mismatch is
+     `divergence_step` (only recorded for base arms; recorded + acted on
+     for recover arms).
+   - **Recover** — at `divergence_step` the proxy re-sends the IDENTICAL
+     payload assembled full-raw (the reference KV regime: raw prefill under
+     base projections — selfcheck-verified bit-identical spans) and returns
+     the regenerated step.  ONE repair per conversation (`conv_id` = digest
+     of system head + first non-system message); a later mismatch after a
+     repair is logged `re_diverged=True` and never repaired again.
