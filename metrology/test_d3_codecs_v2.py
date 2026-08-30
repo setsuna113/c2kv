@@ -78,6 +78,8 @@ def test_raw_bf16_roundtrip_exact_bytes():
     k2, v2 = dec_raw_bf16(p)
     assert torch.equal(k2, k.to(torch.float16).to(torch.float32))
     assert p.part_bytes()["k"] == k.numel() * 2
+    # S0.3: DEFLATE column exists and is a real compression size
+    assert 0 < p.bytes_deflate < p.nbytes + 64
 
 
 def test_raw_q4_roundtrip_and_packed_size():
@@ -112,14 +114,29 @@ def test_vector_konly_heldout_vs_selffit():
 def test_kvtc_offline_basis_roundtrip():
     blocks = [_kv(seed=s)[0] for s in range(3)]
     vblocks = [_kv(seed=s)[1] for s in range(3)]
-    basis_k = fit_pca_basis(blocks, rank=32)
+    basis_k = fit_pca_basis(blocks, rank=32)   # (Vh, mu, S)
     basis_v = fit_pca_basis(vblocks, rank=32)
     k, v = _kv(seed=7)
+    # fidelity at the DEFAULT budget
     p = enc_kvtc(k, v, basis_k=basis_k, basis_v=basis_v)
     k2, v2 = dec_kvtc(p, basis_k, basis_v, lead_shape=(H, L))
     assert k2.shape == k.shape
     assert ((k2 - k).norm() / k.norm()).item() < 0.3
     assert p.header["self_fit"] is False
+    # allocation checks on a TIGHT budget so the DP actually zeroes the
+    # trailing components
+    pt = enc_kvtc(k, v, basis_k=basis_k, basis_v=basis_v,
+                  budget_bytes=(H * L * D * 2) // 16)
+    bits_k = pt.header["bits_k"]
+    # S0.1: bits follow the singular values (monotone non-increasing) —
+    # v1.1 weights were Vh row norms == 1, i.e. constant allocation
+    assert len(set(bits_k)) > 1, bits_k
+    assert all(bits_k[i] >= bits_k[i + 1] for i in range(len(bits_k) - 1)), bits_k
+    # S0.2: trailing components take ZERO bits (the paper's DP behavior)
+    assert min(bits_k) == 0, bits_k
+    # and the zero-width payload still decodes
+    kt, _ = dec_kvtc(pt, basis_k, basis_v, lead_shape=(H, L))
+    assert kt.shape == k.shape and torch.isfinite(kt).all()
 
 
 def test_aatc_budget_matched_and_decode():
@@ -127,6 +144,9 @@ def test_aatc_budget_matched_and_decode():
     q = _q()
     ref = enc_kvtc(k, v, basis_k=fit_pca_basis([k], 32), basis_v=fit_pca_basis([v], 32))
     p = enc_aatc(k, v, q, target_bytes=ref.nbytes)
+    # S0.2: lo=0 -> bits actually vary with sensitivity and stay in budget
+    assert len(set(p.header["sens_bits"])) > 1
+    assert sum(p.header["sens_bits"]) * H * L / 8 <= ref.nbytes * 1.02
     # byte-match against the kvtc budget (target_bytes is actually read):
     # packed payload bytes ~ H*L*sum(bits)/8 must land near the target
     packed = sum(n for name, n in p.part_bytes().items() if name.startswith(("k_w", "v_w")))

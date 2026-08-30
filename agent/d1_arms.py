@@ -65,6 +65,10 @@ ARM_MODES = {
     "raw_erratum_tail": "d_raw_erratum_tail",
     # D2 (built by d2_short_erratum.py; dispatched through D_CONTRACT_MODES)
     "short_erratum": "d_short_erratum",
+    # D1 fourth arm (S1.1): SSA's DEFAULT config SG+SR — keep ONLY k*'s
+    # gist, drop every other doc's gist, append R_k* (raw_keepG is the
+    # paper's AG+SR, measured and rejected; raw_replaceG ~ SR-only)
+    "raw_SGSR": "d_raw_SGSR",
     # D4/D5/D6/D7 runtime arms (d37_arms.py; run-gated on the |R| verdict)
     "reskv_capsule": "d_reskv_capsule",
     "keepkv_capsule": "d_keepkv_capsule",
@@ -74,6 +78,19 @@ ARM_MODES = {
     "selkv_count": "d_selkv_count",
 }
 D_CONTRACT_MODES = set(ARM_MODES.values())
+
+@torch.inference_mode()
+def _keep_only_gist_span(cache: Any, keep_start: int, keep_end: int, system_length: int) -> Any:
+    """Cut every gist slot OUTSIDE [keep_start, keep_end) from the cache
+    (SG+SR surgery: the system block is preserved)."""
+    for layer in cache.layers:
+        layer.keys = torch.cat(
+            [layer.keys[..., :system_length, :],
+             layer.keys[..., keep_start:keep_end, :]], dim=-2)
+        layer.values = torch.cat(
+            [layer.values[..., :system_length, :],
+             layer.values[..., keep_start:keep_end, :]], dim=-2)
+    return cache
 
 
 class _KMissing:
@@ -480,6 +497,21 @@ def build_d_contract_prefix(
             injected=True, sidecar_bytes_used=sidecar_bytes_target, k_anchor=anchor,
             gist_span_of_target=[gs, ge],
         )
+    elif mode == "d_raw_SGSR":
+        # S1.1 — SSA's DEFAULT configuration (SG+SR): keep ONLY k*'s gist,
+        # drop every other doc's gist, then append R_k* at its original
+        # offset.  (raw_keepG = the paper's AG+SR, which §4.5 measured and
+        # rejected; raw_replaceG ~ SR-only, its worst row.)
+        prefix_cache = _keep_only_gist_span(prefix_cache, phys_start, phys_end, system_length)
+        anchor = offsets[k_star]
+        span = _sidecar_raw_span(
+            store, example.qid, k_star, anchor, rotary_emb, cache_device, cache_dtype
+        )
+        prefix_cache = _cat_span_to_cache(prefix_cache, span)
+        dropped_gist_tokens = state["total_gist_tokens"] - (ge - gs)
+        injected, span_tokens = True, len(doc_ids[k_star])
+        d_mode_info.update(injected=True, sidecar_bytes_used=sidecar_bytes_all,
+                           k_anchor=anchor, note="SG+SR: other docs' gists dropped")
     elif mode == "d_raw_erratum_tail":
         # keep G_k; anchor R_k at the REPAIR TAIL — positions continuing
         # after the logical history — and advance the position ledger by L

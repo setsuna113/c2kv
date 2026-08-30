@@ -1,9 +1,16 @@
 """D5 LESS/RMA v2 (line A; runtime fold via python/inference/attn_bias.py).
 
+**STATUS LABEL (S1.5, must appear in the report): the fixed elu+1 feature
+map makes this the UNTRAINED LOWER BOUND of both LESS (|GELU-MLP|) and
+RMA (ReZero MLP) — both papers TRAIN their feature maps on the sidecar
+dump's raw K/V/Q against the block's true attention output (an offline
+small regression, GPU-hours).  It is not an implementation of either
+paper's method.**
+
 The v1 module (d5_less_rma.py, deprecated) was unwirable: identity
 features made z sign-indefinite, and the "arm" was a rank-1 slot appended
 to the cache — not a fold.  v2 keeps the arm identity separate from D4's
-RESA (same elu+1 positive-feature ledgers, different runtime semantics):
+ledger capsule (same positive features, different runtime semantics):
 
   encode_less: H = Σψ(k)^T v (H_kv, D, Dv), z = Σψ(k) (H_kv, D), ψ=elu+1
   runtime:     o = (Σ_cache e^{qk}v + φ(q)H) / (Σ_cache e^{qk} + φ(q)z)

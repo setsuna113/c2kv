@@ -73,6 +73,14 @@ class Payload:
         """Exact disk bytes for THIS block's payload."""
         return sum(self.part_bytes().values())
 
+    @property
+    def bytes_deflate(self) -> int:
+        """DEFLATE-compressed size of the serialized payload (the paper's
+        §3.3 entropy stage; zlib on CPU == nvCOMP's algorithm class)."""
+        import zlib
+
+        return len(zlib.compress(self.serialize(), 6))
+
     def serialize(self) -> bytes:
         blob = json.dumps(self.header, separators=(",", ":")).encode("utf-8")
         blob += b"|"

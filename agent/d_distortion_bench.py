@@ -127,7 +127,7 @@ def main(argv=None):
 
     results: Dict[str, Dict] = {}
     for codec in ("raw_bf16", "raw_q4", "vector_konly", "kvtc", "aatc"):
-        agg = {"bytes": 0, "k_err": 0.0, "v_err": 0.0, "attn_err": 0.0, "n": 0}
+        agg = {"bytes": 0, "bytes_deflate": 0, "k_err": 0.0, "v_err": 0.0, "attn_err": 0.0, "n": 0}
         for b in test_blocks:
             k, v, q, L = b["k"], b["v"], b["q"], b["L"]
             if codec == "raw_bf16":
@@ -144,6 +144,7 @@ def main(argv=None):
                 ref = enc_kvtc(k, v, basis_k=bk, basis_v=bv)
                 p = enc_aatc(k, v, q, target_bytes=ref.nbytes); k2, v2 = dec_aatc(p, lead_shape=(k.shape[0], L))
             agg["bytes"] += p.nbytes + shared_amort_bytes
+            agg["bytes_deflate"] += p.bytes_deflate + shared_amort_bytes
             agg["k_err"] += rel_err(k, k2)
             agg["v_err"] += rel_err(v, v2)
             agg["attn_err"] += attention_output_error(k, v, q, k2, v2)
@@ -151,6 +152,7 @@ def main(argv=None):
         n = max(1, agg["n"])
         results[codec] = {
             "bytes_per_block": round(agg["bytes"] / n, 1),
+            "bytes_deflate_per_block": round(agg["bytes_deflate"] / n, 1),
             "k_recon_rel": round(agg["k_err"] / n, 4),
             "v_recon_rel": round(agg["v_err"] / n, 4),
             "attn_out_rel": round(agg["attn_err"] / n, 4),
@@ -176,11 +178,12 @@ def main(argv=None):
         "",
         f"blocks: {len(test_blocks)} test / {len(blocks)} total; shared amort {shared_amort_bytes:.0f} B/block",
         "",
-        "| codec | bytes/block | K recon | V recon | attn out err |",
-        "|---|---|---|---|---|",
+        "| codec | bytes/block | bytes DEFLATE | K recon | V recon | attn out err |",
+        "|---|---|---|---|---|---|",
     ]
     for codec, r in sorted(results.items(), key=lambda kv: kv[1]["bytes_per_block"]):
-        lines.append(f"| {codec} | {r['bytes_per_block']} | {r['k_recon_rel']} | {r['v_recon_rel']} | {r['attn_out_rel']} |")
+        lines.append(f"| {codec} | {r['bytes_per_block']} | {r['bytes_deflate_per_block']} | "
+                     f"{r['k_recon_rel']} | {r['v_recon_rel']} | {r['attn_out_rel']} |")
     md.write_text("\n".join(lines) + "\n", encoding="utf-8")
     print(json.dumps(report["codecs"], indent=1))
     print(f"wrote {out} and {md}")

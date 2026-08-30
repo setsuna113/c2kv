@@ -141,16 +141,16 @@ class TestD_eager_registry:
 class TestF_centered_pca:
     def test_offset_costs_nothing_extra(self):
         blocks = [_rand((1, 64, D), s) for s in (50, 51, 52)]
-        (Vh, mu) = fit_pca_basis(blocks, rank=32)
-        (Vv, muv) = fit_pca_basis([_rand((1, 64, D), 53)], rank=32)
+        (Vh, mu, _S) = fit_pca_basis(blocks, rank=32)
+        (Vv, muv, _Sv) = fit_pca_basis([_rand((1, 64, D), 53)], rank=32)
         k = _rand((1, 64, D), 54)
         v = _rand((1, 64, D), 55)
-        base = enc_kvtc(k, v, basis_k=(Vh, mu), basis_v=(Vv, muv))
-        k2, _ = dec_kvtc(base, (Vh, mu), (Vv, muv), lead_shape=(1, 64))
+        base = enc_kvtc(k, v, basis_k=(Vh, mu, _S), basis_v=(Vv, muv, _Sv))
+        k2, _ = dec_kvtc(base, (Vh, mu, _S), (Vv, muv, _Sv), lead_shape=(1, 64))
         err0 = ((k2 - k).norm() / k.norm()).item()
         big = k + 100.0
-        p1 = enc_kvtc(big, v, basis_k=(Vh, mu), basis_v=(Vv, muv))
-        k3, _ = dec_kvtc(p1, (Vh, mu), (Vv, muv), lead_shape=(1, 64))
+        p1 = enc_kvtc(big, v, basis_k=(Vh, mu, _S), basis_v=(Vv, muv, _Sv))
+        k3, _ = dec_kvtc(p1, (Vh, mu, _S), (Vv, muv, _Sv), lead_shape=(1, 64))
         err1 = ((k3 - big).norm() / big.norm()).item()
         assert err1 < err0 + 0.15, f"offset cost: {err0} -> {err1}"
 

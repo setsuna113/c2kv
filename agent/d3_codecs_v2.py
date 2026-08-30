@@ -46,7 +46,9 @@ def _asym_dequant(codes: torch.Tensor, mn: torch.Tensor, delta: torch.Tensor) ->
 
 def _pack_qchannels(p: Payload, name: str, t: torch.Tensor, bits) -> None:
     """Quantize the LAST dim of t channel-by-channel (per-channel scalar
-    scale) and pack channels grouped by bit width."""
+    scale) and pack channels grouped by bit width.  Width-0 channels are
+    DROPPED (zero storage; decode as 0 — the paper's 'zero bits to
+    trailing principal components')."""
     C = t.shape[-1]
     widths = [int(b) for b in bits]
     p.header[f"{name}_widths"] = widths
@@ -54,6 +56,10 @@ def _pack_qchannels(p: Payload, name: str, t: torch.Tensor, bits) -> None:
     by_width = {}
     for c in range(C):
         w = widths[c]
+        if w == 0:
+            mns.append(torch.zeros(1, dtype=torch.float16))
+            dls.append(torch.zeros(1, dtype=torch.float16))
+            continue
         codes, mn, dl = _asym_quant(t[..., c].float(), w)
         mns.append(mn)
         dls.append(dl)
@@ -72,8 +78,12 @@ def _read_qchannels(p: Payload, name: str, lead_shape) -> torch.Tensor:
     n_per = max(1, math.prod(lead_shape))
     outs: List[torch.Tensor] = [None] * C
     for w in sorted(set(widths)):
-        codes = p.read_packed(f"{name}_w{w}")
         idxs = [c for c in range(C) if widths[c] == w]
+        if w == 0:
+            for c in idxs:
+                outs[c] = torch.zeros(*lead_shape)
+            continue
+        codes = p.read_packed(f"{name}_w{w}")
         for j, c in enumerate(idxs):
             outs[c] = _asym_dequant(
                 codes[j * n_per:(j + 1) * n_per].reshape(*lead_shape), mn[c], dl[c]
@@ -229,14 +239,15 @@ def dec_vector_konly(p: Payload, W: Optional[torch.Tensor] = None) -> Tuple[torc
 
 def fit_pca_basis(blocks: List[torch.Tensor], rank: int = 32):
     """Shared per-layer PCA over held-out blocks, CENTERED per channel:
-    returns (Vh[:rank] (r, D), mu (D,)).  mu is a shared artifact — without
-    centering, the mean stays in the residual and eats rank capacity
-    (review F: v1 fitted the basis on uncentered data but subtracted a
-    scalar at encode)."""
+    returns (Vh[:rank] (r, D), mu (D,), S (min(n,D),)).  mu and Vh are
+    shared artifacts; S carries the explained-variance weights — v1.1 fed
+    waterfill with Vh row norms, which are IDENTICALLY 1 (orthonormal
+    rows), so every component got equal bits and the paper's mechanism
+    never engaged (S0.1)."""
     flat = torch.cat([b.float().reshape(-1, b.shape[-1]) for b in blocks], dim=0)
     mu = flat.mean(dim=0)
     U, S, Vh = torch.linalg.svd(flat - mu, full_matrices=False)
-    return Vh[:rank], mu
+    return Vh[:rank], mu, S
 
 
 def enc_kvtc(k: torch.Tensor, v: torch.Tensor,
@@ -254,20 +265,23 @@ def enc_kvtc(k: torch.Tensor, v: torch.Tensor,
         budget_bytes = (H * L * D * 2) // 4
     p = Payload("kvtc_v2_selffit" if self_fit else "kvtc_v2")
     # bits are PER COEFFICIENT (H*L of them per component): the width
-    # vector's TOTAL budget is budget_bytes/(H*L) bits, split k/v
+    # vector's TOTAL budget is budget_bytes/(H*L) bits, split k/v.
+    # Weights are the singular values (explained variance) — S0.1; lo=0
+    # lets trailing components take ZERO bits (the paper's DP behavior).
     per_elem_bits = budget_bytes * 8 * 0.75 / (H * L)
-    bits_k = waterfill_bits(basis_k[0].float().norm(dim=-1), per_elem_bits / 2)
-    bits_v = waterfill_bits(basis_v[0].float().norm(dim=-1), per_elem_bits / 2)
-    for name, t, (basis, mu), bits in (("k", k, basis_k, bits_k), ("v", v, basis_v, bits_v)):
+    bits_k = waterfill_bits(basis_k[2][: basis_k[0].shape[0]] ** 2, per_elem_bits / 2, lo=0)
+    bits_v = waterfill_bits(basis_v[2][: basis_v[0].shape[0]] ** 2, per_elem_bits / 2, lo=0)
+    for name, t, (basis, mu, _s), bits in (("k", k, basis_k, bits_k), ("v", v, basis_v, bits_v)):
         coef = torch.einsum("hld,rd->hlr", t.float() - mu.float(), basis.float())
         _pack_qchannels(p, f"{name}_coef", coef, bits)
     p.header["self_fit"] = self_fit
+    p.header["bits_k"] = [int(b) for b in bits_k.tolist()]
     return p
 
 
 def dec_kvtc(p: Payload, basis_k, basis_v, lead_shape) -> Tuple[torch.Tensor, torch.Tensor]:
     out = []
-    for name, (basis, mu) in (("k", basis_k), ("v", basis_v)):
+    for name, (basis, mu, _s) in (("k", basis_k), ("v", basis_v)):
         coef = _read_qchannels(p, f"{name}_coef", lead_shape)
         t = torch.einsum("hlr,rd->hld", coef, basis.float()) + mu.float()
         out.append(t)
@@ -308,9 +322,15 @@ def enc_aatc(k: torch.Tensor, v: torch.Tensor, q: torch.Tensor,
     # budget and every channel clamped to 8 bits
     H, L, D = k.shape
     # budget split evenly between k and v (each channel's width applies to
-    # its H*L elements in BOTH tensors)
+    # its H*L elements in BOTH tensors).  lo=0 — v1.1's lo=2 floor put
+    # every channel at the floor (real budget ~1.8 bits/channel < 2), so
+    # the sensitivity vector had ZERO effect and the sum overshot the
+    # budget by ~11% (S0.2).
     per_elem_bits = target_bytes * 8 * 0.9 / (H * L) / 2
-    bits = waterfill_bits(sens, per_elem_bits)
+    bits = waterfill_bits(sens, per_elem_bits, lo=0)
+    assert int(bits.sum()) * H * L / 8 <= target_bytes * 1.02, (
+        f"aatc budget violated: {int(bits.sum()) * H * L / 8:.0f} B > {target_bytes} B"
+    )
     p = Payload("aatc_v2")
     for name, t in (("k", k), ("v", v)):
         _pack_qchannels(p, name, t, bits)

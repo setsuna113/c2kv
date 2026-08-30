@@ -73,6 +73,9 @@ def build_d37_prefix(model, tokenizer, example, args, mode, store):
     dtype = prefix_cache.layers[0].keys.dtype
     rotary = model.model.rotary_emb
     want_q = bool(store.want_q)
+    # GQA group size from the model config (was hardcoded 4)
+    n_rep = int(model.config.num_attention_heads) // int(model.config.num_key_value_heads)
+    n_kv_heads = int(model.config.num_key_value_heads)
 
     info: Dict[str, Any] = {"k_star": k_star, "k_witness": k_witness,
                             "gist_span": [gs, ge], "mode": mode}
@@ -106,9 +109,10 @@ def build_d37_prefix(model, tokenizer, example, args, mode, store):
                 bias = torch.log(c["votes"].clamp_min(1e-9))
             ck = apply_abs_rope(ck.float(), offsets[k_star], rotary, dtype=dtype, device=device)
             span_kv.append((ck.unsqueeze(0), cv.to(dtype).unsqueeze(0)))
-            bias_full = torch.zeros(1, prefix_cache.get_seq_length(),
+            # key_bias is PER KV HEAD: (H_kv, P) — the registry GQA-expands it
+            bias_full = torch.zeros(n_kv_heads, prefix_cache.get_seq_length(),
                                     dtype=torch.float32, device=device)
-            bias_full[0, phys_start:phys_start + ck.shape[-2]] = bias.float().to(device)
+            bias_full[:, phys_start:phys_start + ck.shape[-2]] = bias.float().to(device)
             entries[li] = attn_bias.LayerBiasEntry(key_bias=bias_full)
         prefix_cache = _replace_span_in_cache(prefix_cache, span_kv, phys_start, phys_end)
         dropped = ge - gs
@@ -128,7 +132,7 @@ def build_d37_prefix(model, tokenizer, example, args, mode, store):
             return None, "d6_needs_want_q"
         residuals = grkv_edit_cache(prefix_cache, store, qid, k_star,
                                     (phys_start, phys_end), offsets[k_star], rotary,
-                                    n_rep=N_REP)
+                                    n_rep=n_rep)
         info.update(residual_first=round(residuals[0], 3),
                     residual_last=round(residuals[-1], 3))
 
@@ -137,19 +141,20 @@ def build_d37_prefix(model, tokenizer, example, args, mode, store):
             store.release(qid)
             return None, "selkv_needs_want_q"
         alpha = float(getattr(args, "selkv_alpha", 0.5))
+        L_k = len(state["doc_ids"][k_star])  # state has no doc_lengths key
         k_raw = store.get(qid, k_star, "k", device=device, dtype=torch.float32)
         q_raw = store.get(qid, k_star, "q", device=device, dtype=torch.float32)
         for li, layer in enumerate(prefix_cache.layers):
             k_gist = layer.keys[0, :, phys_start:phys_end, :]
             q_rot = apply_abs_rope(q_raw[li], offsets[k_star], rotary)
             if mode == "d_selkv_bias":
-                bias_slots = alpha * selkv_mass_ratio(k_gist.float(), k_raw[li], q_rot, n_rep=N_REP)
+                bias_slots = alpha * selkv_mass_ratio(k_gist.float(), k_raw[li], q_rot, n_rep=n_rep)
             else:
-                bias_slots = selkv_count_bias(int(state["doc_lengths"][k_star]),
-                                              phys_end - phys_start, alpha)
-            bias_full = torch.zeros(1, prefix_cache.get_seq_length(),
+                bias_slots = selkv_count_bias(L_k, phys_end - phys_start, alpha)
+            # per-kv-head bias over physical cache positions: (H_kv, P)
+            bias_full = torch.zeros(n_kv_heads, prefix_cache.get_seq_length(),
                                     dtype=torch.float32, device=device)
-            bias_full[0, phys_start:phys_end] = bias_slots.float().to(device)
+            bias_full[:, phys_start:phys_end] = bias_slots.float().to(device)
             entries[li] = attn_bias.LayerBiasEntry(key_bias=bias_full)
         info.update(alpha=alpha)
 
