@@ -1,4 +1,12 @@
 """D3: Repair payload codec tournament — P0 baseline codecs.
+DEPRECATED / FROZEN (2026-08-30, prereg v2 / handoff §2.6): this module
+was written before the D1 upper-bound verdict and has ZERO call sites; the
+downstream review verified fatal defects in its core algorithm (see
+docs/research/ and the handoff list).  Do NOT run, do NOT patch — the v2
+plan rewrites these arms from scratch AFTER the D1 verdict.  Kept verbatim
+for the record of what was tried.
+
+
 
 All codecs encode/decode the SAME sidecar payload (per-block raw KV),
 differing only in storage format. Uses the D1 winning splice layout.

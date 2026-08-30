@@ -1,27 +1,30 @@
-"""D2: Short new erratum (not replaying the raw block).
+"""D2: Short new erratum — v2 rewrite (2026-08-30).
 
-Source: Models Take Notes at Prefill (arXiv:2606.17107).
+Idea source: Models Take Notes at Prefill (arXiv:2606.17107).
 
-Arms:
-  short_erratum: oracle provides the correct content, forward ONE new
-    correction sentence (e.g. "The correct value of X in history is Y")
-    appended after the gist prefix. The correction forward counts as T_edit.
-  short_erratum_kvbank (conditional): encode the same correction as a
-    selected-layer latent KV bank (Memory Inception transfer). Only if the
-    visible erratum shows benefit.
+Arm `short_erratum`: c2kv prefix + ONE forward of a compact correction
+sentence composed ONLY of witness literal values (prereg v2.6 leak boundary):
 
-This is NOT a raw block replay — it is a compact textual correction at
-~1/100 the bytes of a full block's raw KV.
+> the erratum may contain only literal values that occurred in doc k*,
+> NEVER the tool name, NEVER values absent from history.
+
+The v1 file pasted the gold target ("The next action should be:
+name(args)") into the prompt — answer leakage, not an erratum.  v2 draws
+its values from the frozen witness table (target_doc_values: values found
+in the decoded doc k*, tool name excluded), advances the position ledger
+by the erratum tokens (v1 made erratum and prompt share absolute
+positions), and device-syncs T_edit.
+
+`short_erratum_kvbank` stays UNIMPLEMENTED until the D1 verdict (plan §2.5).
 """
 from __future__ import annotations
 
 import argparse
-import json
 import logging
 import sys
 import time
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python" / "inference"))
@@ -33,99 +36,119 @@ import eval_agent_history_c2kv as HH
 
 logger = logging.getLogger(__name__)
 
+ERRATUM_TEMPLATE = "[correction] The following values from the earlier record are authoritative: {values}. Treat them as overriding any conflicting summary."
 
-def _compose_erratum_text(target: str) -> str:
-    """Compose a compact correction sentence from the gold target.
 
-    The oracle knows what the correct next action is; the erratum tells the
-    model the relevant fact from history that leads to that action. Since we
-    are on a teacher-forced eval, the 'correction' is a restatement of the
-    key content from the target block's raw doc.
+def compose_erratum_text(target_doc_values: List[List[Any]]) -> str:
+    """Deterministic erratum from the witness table's literal values.
+
+    ``target_doc_values`` is [[value, df], ...] (df-ascending, tool name
+    already excluded, every value present in decoded doc k*).  All values
+    are included — no hidden knobs; the token count is measured and
+    reported per row.
     """
-    from d_strict_metric import _parse_tool_call_payload
-    payload = _parse_tool_call_payload(target)
-    if payload and payload["name"]:
-        args_str = json.dumps(payload["arguments"], ensure_ascii=False) if payload["arguments"] else ""
-        return f"[correction] The next action should be: {payload['name']}({args_str}). Ignore any conflicting prior information."
-    return f"[correction] The correct information is: {target[:200]}"
+    rendered = "; ".join(str(v) for v, _df in target_doc_values)
+    return ERRATUM_TEMPLATE.format(values=rendered)
 
 
 @torch.inference_mode()
 def build_short_erratum_prefix(
-    model, tokenizer, example, args, mode: str,
+    model: Any,
+    tokenizer: Any,
+    example: Any,
+    args: argparse.Namespace,
+    mode: str,
+    store: Optional[Any] = None,
 ) -> tuple[Optional[Dict[str, Any]], Optional[str]]:
-    """Build a short-erratum prefix: c2kv + one correction sentence."""
-    from d1_arms import build_d_contract_prefix
-    from d0_sidecar import SidecarStore
+    """c2kv prefix + one correction-sentence forward (counted as T_edit)."""
+    from d1_arms import prepare_d_contract_state, _merge_system_gist
 
-    # First: standard c2kv prefix (compression only, no repair injection)
-    context_input_ids, doc_tokens, doc_chunks, history, skip = HH._build_history_chunks(
-        tokenizer, example, args
-    )
-    if context_input_ids is None:
-        return None, skip
-    doc_ids = [
-        HH._chat_template_ids(tokenizer, [m], max_length=args.max_doc_length)
-        for m in history
-    ]
-    n_docs = len(doc_ids)
-    if n_docs == 0:
-        return None, "d_no_history_docs"
-    k_star = (n_docs - 1) // 2
+    if mode != "d_short_erratum":
+        return None, f"d2_unknown_mode:{mode}"
+    witness = HH.D_CONTRACT_WITNESS.get(example.qid)
+    if witness is None:
+        # the table is frozen before D2 runs; a missing entry is an
+        # implementation error, not a scored outcome
+        return None, "d2_no_witness_entry"
 
-    system_ids = HH._chat_template_ids(
-        tokenizer,
-        [{"role": "system", "content": example.system_prompt}],
-        tools=example.tools or None,
-        keep_bos=True,
-        max_length=args.max_system_length,
-    )
-    system_input_ids = torch.tensor([system_ids], dtype=torch.long, device=model.device)
-    system_cache, system_length, system_prefill_sec = HH._prefill_system(
-        model, system_input_ids, args.system_attn_impl
-    )
+    state, skip_reason = prepare_d_contract_state(model, tokenizer, example, args, store)
+    if state is None:
+        return None, skip_reason
+    if store is not None:
+        store.release(example.qid)  # D2 never injects KV payloads
+    prefix_cache = _merge_system_gist(state, model.config)
+    system_length = state["system_length"]
+    doc_tokens = state["doc_tokens"]
+    k_star = witness.get("k_witness")
 
-    # compression forward (standard)
-    grid = context_input_ids
-    valid_mask = grid != -100
-    ids = grid.clone().to(model.device)
-    ids[~valid_mask] = model.model.gist_token_id
-    gist_kwargs = {}
-    if getattr(model.config, "gist_type", None) == "dynamic-interleave":
-        gist_kwargs["ratio"] = args.override_ratio
-    t_comp_start = time.perf_counter()
-    outputs, gist_mask, pos_ids = model.model.generate_gist(
-        input_ids=ids, attention_mask=valid_mask.to(model.device), **gist_kwargs
-    )
-    t_compress = time.perf_counter() - t_comp_start
+    d_mode_info: Dict[str, Any] = {
+        "k_policy": "witness",
+        "k_star": k_star,
+        "sidecar_bytes_all": 0,
+        "sidecar_bytes_target": 0,
+        "sidecar_bytes_used": 0,
+        "t_capture_sec": round(state["t_capture"], 4),
+        "gist_span_of_target": None,
+        "k_anchor": None,
+        "erratum_values": [],
+    }
 
-    gist_len = int(gist_mask.shape[-1])
-    pos_ids = pos_ids[:, -gist_len:]
-    from models.gist_utils import blend_gist_key_values
-    prefix_cache, _ = blend_gist_key_values(
-        model.config, [outputs.past_key_values], [gist_mask],
-        [pos_ids], model.model.rotary_emb, system_length,
-    )
-    for sys_l, gl in zip(system_cache.layers, prefix_cache.layers):
-        gl.keys = torch.cat([sys_l.keys, gl.keys], dim=-2)
-        gl.values = torch.cat([sys_l.values, gl.values], dim=-2)
-    gist_tokens = prefix_cache.get_seq_length() - system_length
+    if k_star is None or not witness.get("target_doc_values"):
+        # no literal witness (or none inside doc k*): nothing may be said
+        # within the leak boundary -> explicit no-injection row
+        d_mode_info.update(
+            injected=False,
+            note="k_star=None / no witness values: leak boundary forbids any erratum",
+        )
+        cache_length = prefix_cache.get_seq_length()
+        return {
+            "cache": prefix_cache,
+            "system_length": system_length,
+            "history_length": doc_tokens,
+            "cache_length": cache_length,
+            "doc_tokens": doc_tokens,
+            "doc_chunks": state["doc_chunks"],
+            "kept_history_tokens": doc_tokens,
+            "gist_tokens": state["total_gist_tokens"],
+            "actual_compression_ratio": float(doc_tokens / max(1, cache_length - system_length)),
+            "system_prefill_sec": state["system_prefill_sec"],
+            "full_prefill_sec": 0.0,
+            "tool_compress_sec": state["t_capture"],
+            "blend_sec": 0.0,
+            "use_gist": True,
+            "d_corr_doc_index": k_star,
+            "d_corr_span_tokens": 0,
+            "d_sham_tokens": 0,
+            "d_recompute_tokens": 0,
+            "d_recompute_docs": 0,
+            "d_dropped_gist_tokens": 0,
+            "d_corr_slice_prefill_sec": 0.0,
+            "d_recompute_prefill_sec": 0.0,
+            "d_contract_info": d_mode_info,
+        }, None
 
-    # --- short erratum forward (T_edit) ---
-    t_edit_start = time.perf_counter()
-    erratum_text = _compose_erratum_text(example.answer)
+    # --- compose the erratum inside the leak boundary (prereg v2.6) ---
+    target_doc_values = witness["target_doc_values"]
+    erratum_text = compose_erratum_text(target_doc_values)
+    tool_name = witness.get("tool_name")
+    assert tool_name is None or tool_name not in erratum_text, "leak boundary: tool name in erratum"
+
     erratum_ids = HH._chat_template_ids(
         tokenizer, [{"role": "user", "content": erratum_text}]
     )
     erratum_input = torch.tensor([erratum_ids], dtype=torch.long, device=model.device)
+    erratum_tokens = len(erratum_ids)
+    logical_start = system_length + doc_tokens  # tail: after the whole history
     past_length = prefix_cache.get_seq_length()
-    logical_start = system_length + doc_tokens
+
+    # --- erratum forward = T_edit (device-synced on both ends) ---
+    HH._sync_device(model.device)
+    t_edit_start = time.perf_counter()
     attention_mask = torch.ones(
         1, past_length + erratum_input.shape[1], device=model.device, dtype=torch.long
     )
     position_ids = torch.arange(
-        logical_start, logical_start + erratum_input.shape[1],
-        device=model.device
+        logical_start, logical_start + erratum_input.shape[1], device=model.device
     ).unsqueeze(0)
     model.model.config._attn_implementation = args.generate_attn_impl
     erratum_out = model(
@@ -134,27 +157,40 @@ def build_short_erratum_prefix(
         position_ids=position_ids,
         past_key_values=prefix_cache,
         use_cache=True,
-        use_gist=True,
+        use_gist=True,  # the cache holds gist KV -> gist projections apply
         logits_to_keep=1,
     )
     prefix_cache = erratum_out.past_key_values
+    HH._sync_device(model.device)
     t_edit = time.perf_counter() - t_edit_start
-    erratum_tokens = len(erratum_ids)
 
+    # ledger advance: the erratum occupies logical positions
+    # [system+doc_tokens, system+doc_tokens+erratum_tokens); decode continues
+    # after it — no position collision (v1 bug: shared absolute positions)
+    history_length = doc_tokens + erratum_tokens
     cache_length = prefix_cache.get_seq_length()
+    d_mode_info.update(
+        injected=True,
+        erratum_values=[v for v, _df in target_doc_values],
+        erratum_text=erratum_text[:300],
+        erratum_tokens=erratum_tokens,
+        t_edit_sec=round(t_edit, 4),
+        k_anchor=logical_start,
+    )
     return {
         "cache": prefix_cache,
         "system_length": system_length,
-        "history_length": doc_tokens,
+        "history_length": history_length,
         "cache_length": cache_length,
         "doc_tokens": doc_tokens,
-        "doc_chunks": doc_chunks,
+        "doc_chunks": state["doc_chunks"],
         "kept_history_tokens": doc_tokens,
-        "gist_tokens": gist_tokens,
-        "actual_compression_ratio": float(doc_tokens / gist_tokens) if gist_tokens else 0.0,
-        "system_prefill_sec": system_prefill_sec,
+        "gist_tokens": state["total_gist_tokens"],
+        # resident footprint includes the erratum tokens (v1 ignored them)
+        "actual_compression_ratio": float(doc_tokens / max(1, cache_length - system_length)),
+        "system_prefill_sec": state["system_prefill_sec"],
         "full_prefill_sec": 0.0,
-        "tool_compress_sec": t_compress,
+        "tool_compress_sec": state["t_capture"],
         "blend_sec": 0.0,
         "use_gist": True,
         "d_corr_doc_index": k_star,
@@ -165,11 +201,5 @@ def build_short_erratum_prefix(
         "d_dropped_gist_tokens": 0,
         "d_corr_slice_prefill_sec": round(t_edit, 4),
         "d_recompute_prefill_sec": 0.0,
-        "d_contract_info": {
-            "mode": mode,
-            "erratum_text": erratum_text[:200],
-            "erratum_tokens": erratum_tokens,
-            "t_compress_sec": round(t_compress, 4),
-            "t_edit_sec": round(t_edit, 4),
-        },
+        "d_contract_info": d_mode_info,
     }, None

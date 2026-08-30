@@ -1,4 +1,12 @@
 """D5: LESS / Residual-Mass Accounting merged structural arm.
+DEPRECATED / FROZEN (2026-08-30, prereg v2 / handoff §2.6): this module
+was written before the D1 upper-bound verdict and has ZERO call sites; the
+downstream review verified fatal defects in its core algorithm (see
+docs/research/ and the handoff list).  Do NOT run, do NOT patch — the v2
+plan rewrites these arms from scratch AFTER the D1 verdict.  Kept verbatim
+for the record of what was tried.
+
+
 
 Source: Get More with LESS (arXiv:2402.09398) + Residual-Mass Accounting.
 

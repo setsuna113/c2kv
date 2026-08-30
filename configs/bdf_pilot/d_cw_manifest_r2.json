@@ -13,7 +13,9 @@
     "seed": 20260815,
     "decode": "greedy",
     "max_doc_length": 768,
-    "max_doc_num": 16
+    "max_doc_num": 16,
+    "max_new_tokens": 128,
+    "max_new_tokens_provenance": "backfilled 2026-08-30 (was missing, the v2-review reproducibility gap): verified from battery_full.jsonl generated_tokens over all 900 rows — max=128, 442 rows exactly at 128, none above; d_kv_intervene.py and eval_agent_history_c2kv.py launch defaults are also 128"
   },
   "source_dialects": {
     "history": 1800

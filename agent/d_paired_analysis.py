@@ -73,6 +73,16 @@ ARM_MODES = {
     "drop_g": "d_drop_g",
     "splice_keep": "d_splice_keep",
     "splice_rep": "d_splice_rep",
+    # Sidecar repair contract v2 (2026-08-30, prereg v2).  Rows carry
+    # d_contract_info (bytes/timing/k policy); k-sweep rows repeat per
+    # (qid, k) and are analyzed by d_ksweep_analysis.py, NOT here (this
+    # analyzer's _load_arm fatals on duplicate qids by design).
+    "oracle_target_only": "d_oracle_target_only",
+    "allblock_sidecar": "d_allblock_sidecar",
+    "raw_keepG": "d_raw_keepG",
+    "raw_replaceG": "d_raw_replaceG",
+    "raw_erratum_tail": "d_raw_erratum_tail",
+    "short_erratum": "d_short_erratum",
 }
 DEGENERATE_REPEAT_THRESHOLD = 0.5
 KIB = 1024

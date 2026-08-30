@@ -1,22 +1,17 @@
-"""Driver for D0/D1 contract arms on the r2 trigger set (v2, 2026-08-30).
+"""D1 k-sweep driver (prereg v2.2 / handoff §3.2) — raw_keepG over all k.
+
+Per qid the system prefill + compression forward + sidecar capture run
+ONCE and are shared across all k; only the splice + generation repeat
+(through HH._generate_one's prefix_override).  One row per (qid, k):
+S under the harness parser plus diagnostics come from the row itself;
+bytes/timing come from d_contract_info.
+
+Cost control: run --max_qids 5 --timing_report first and report the
+measured multiplier before the full sweep (Σ n_docs = 928 generations).
 
 Usage (c2kv env, ~/c2kv-dnew):
-  python agent/d_contract_driver.py --arm raw_keepG --device 0 \
-    [--witness configs/bdf_pilot/d_witness_r2.json] \
-    [--qid <specific_qid>] [--max_qids N] [--output_file path]
-
-Drives one D-contract arm end to end:
-  compression + sidecar capture (single forward)
-  -> repair injection (no history forward)
-  -> generation + strict scoring
-
-k* comes from the frozen witness table (prereg v2.2) when --witness is
-given; without it the driver falls back to the median (legacy column).
-The store and witness table are injected via the HH.D_CONTRACT_* module
-globals (mirroring HH.D_INTERVENE) — the frozen example dataclass is never
-touched.
-
-Writes per-row jsonl compatible with d_paired_analysis.
+  python agent/d_ksweep_driver.py --device 0 --output_file <path> \
+    [--qids q1,q2] [--max_qids N] [--timing_report path]
 """
 from __future__ import annotations
 
@@ -36,17 +31,16 @@ import torch
 
 import eval_agent_history_c2kv as HH
 from d0_sidecar import SidecarStore
-from d1_arms import ARM_MODES
+from d1_arms import ksweep_prefix_for_k, prepare_d_contract_state
 
 logger = logging.getLogger(__name__)
+
+MODE = "d_raw_keepG"
 
 
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--arm", choices=sorted(ARM_MODES), required=True)
     parser.add_argument("--manifest", default="./configs/bdf_pilot/d_cw_manifest_r2.json")
-    parser.add_argument("--witness", default="./configs/bdf_pilot/d_witness_r2.json",
-                        help="frozen witness table (k* policy); absent => median fallback")
     parser.add_argument("--model", default="/home/liuyancheng/c2kv/outputs_lyc/g_joint/fixed_joint")
     parser.add_argument("--base_model", default="/home/liuyancheng/c2kv/models/Qwen3-4B-Instruct-2507")
     parser.add_argument("--tokenizer", default="/home/liuyancheng/c2kv/models/Qwen3-4B-Instruct-2507")
@@ -58,14 +52,14 @@ def parse_args(argv=None):
     parser.add_argument("--max_doc_num", type=int, default=16)
     parser.add_argument("--max_new_tokens", type=int, default=128)
     parser.add_argument("--output_file", required=True)
+    parser.add_argument("--timing_report", default="")
     parser.add_argument("--qids", default="")
     parser.add_argument("--max_qids", type=int, default=0)
     parser.add_argument("--resume", type=lambda x: str(x).lower() == "true", default=True)
     return parser.parse_args(argv)
 
 
-def _d_contract_args(args):
-    """History-harness namespace via argv round-trip (proven pattern)."""
+def _harness_args(args):
     argv = [
         "prog",
         "--model", args.model,
@@ -109,8 +103,7 @@ def main(argv=None):
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s",
                         datefmt="%H:%M:%S")
     args = parse_args(argv)
-    mode = ARM_MODES[args.arm]
-    logger.info("arm=%s mode=%s", args.arm, mode)
+    logger.info("k-sweep arm=%s", MODE)
 
     manifest = json.loads(Path(args.manifest).read_text(encoding="utf-8"))
     qids: List[str] = list(manifest.get("cw_qids", []))
@@ -122,39 +115,22 @@ def main(argv=None):
         qids = wanted
     if args.max_qids:
         qids = qids[:args.max_qids]
-    logger.info("qids=%d", len(qids))
 
-    witness_path = Path(args.witness)
-    if witness_path.exists():
-        witness_doc = json.loads(witness_path.read_text(encoding="utf-8"))
-        # table format: {"entries": {qid: {...}}} or a bare {qid: {...}}
-        entries = witness_doc.get("entries", witness_doc) if isinstance(witness_doc, dict) else {}
-        HH.D_CONTRACT_K = {qid: entry.get("k_witness") for qid, entry in entries.items()}
-        HH.D_CONTRACT_WITNESS = {qid: entry for qid, entry in entries.items()}
-        n_none = sum(1 for v in HH.D_CONTRACT_K.values() if v is None)
-        logger.info("witness table loaded: %d entries (%d k*=None)", len(HH.D_CONTRACT_K), n_none)
-    else:
-        HH.D_CONTRACT_K = {}
-        HH.D_CONTRACT_WITNESS = {}
-        logger.warning("no witness table at %s — k* falls back to median (legacy column)", witness_path)
-
-    hargs = _d_contract_args(args)
+    hargs = _harness_args(args)
     tokenizer = HH._load_tokenizer(hargs)
-    examples, skips = HH._load_examples(hargs, tokenizer)
-    logger.info("loaded %d examples (skips=%s)", len(examples), skips)
+    examples, _ = HH._load_examples(hargs, tokenizer)
     by_qid = {e.qid: e for e in examples}
     missing = [q for q in qids if q not in by_qid]
     if missing:
         raise SystemExit(f"FATAL: {len(missing)} qids not loaded: {missing[:3]}")
 
     device = HH._setup_device(args.device_type)
-    model_args = hargs
-    model_args.mode = "c2kv"
-    model = HH._load_model(model_args, tokenizer, device)
+    hargs.mode = "c2kv"
+    model = HH._load_model(hargs, tokenizer, device)
 
     store = SidecarStore(model)
     HH.D_CONTRACT_STORE = store
-    HH.D_INTERVENE = {}  # no per-qid plan needed for contract arms
+    HH.D_INTERVENE = {}
 
     out_path = Path(args.output_file)
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -164,42 +140,92 @@ def main(argv=None):
             try:
                 row = json.loads(line)
                 if not row.get("skipped"):
-                    done.add(row["qid"])
+                    done.add((row["qid"], row.get("d_corr_doc_index")))
             except json.JSONDecodeError:
                 pass
-    if done:
-        logger.info("resume: %d qids already done", len(done))
+        if done:
+            logger.info("resume: %d (qid, k) rows already done", len(done))
 
-    remaining = [e for e in (by_qid[q] for q in qids) if e.qid not in done]
-    open_mode = "a" if args.resume else "w"
-    with out_path.open(open_mode, encoding="utf-8") as handle:
-        for i, example in enumerate(remaining):
-            start = time.perf_counter()
+    timing_rows = []
+    n_rows = 0
+    with out_path.open("a" if args.resume else "w", encoding="utf-8") as handle:
+        for qi, qid in enumerate(qids):
+            example = by_qid[qid]
+            q_start = time.perf_counter()
             try:
-                # mode/store reach the prefix builder through HH.D_CONTRACT_*
-                # globals — the CompressHistoryExample dataclass is frozen and
-                # must never be monkey-patched
-                original_mode = hargs.mode
-                hargs.mode = mode
-                row = HH._generate_one(model, tokenizer, example, hargs, mode)
-                hargs.mode = original_mode
+                state, skip_reason = prepare_d_contract_state(
+                    model, tokenizer, example, hargs, store
+                )
             except RuntimeError as e:
                 if not HH._is_oom_error(e):
                     raise
-                logger.warning("OOM qid=%s, skipped", example.qid)
-                row = HH._oom_row(example, mode, args.ratio)
+                logger.warning("OOM in prepare qid=%s -> skipped", qid)
+                handle.write(json.dumps(
+                    HH._oom_row(example, MODE, args.ratio), ensure_ascii=False) + "\n")
                 HH._clear_device_cache(args.device_type)
-            wall = time.perf_counter() - start
-            row["d_arm"] = args.arm
-            row["d_mode"] = mode
-            row["wall_sec"] = round(wall, 3)
-            handle.write(json.dumps(row, ensure_ascii=False, default=str) + "\n")
-            handle.flush()
-            if (i + 1) % 10 == 0:
-                logger.info("[%d/%d] qid=%s done", i + 1, len(remaining), example.qid)
+                continue
+            if state is None:
+                row = HH._oom_row(example, MODE, args.ratio)
+                row["skip_reason"] = skip_reason
+                handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+                continue
+            n_docs = len(state["doc_ids"])
+            t_prepare = time.perf_counter() - q_start
+
+            # ---- per k: fresh splice from the shared state + generate ----
+            t_gens = 0.0
+            n_new = 0
+            for k in range(n_docs):
+                if (qid, k) in done:
+                    continue
+                n_new += 1
+                g_start = time.perf_counter()
+                try:
+                    prefix = ksweep_prefix_for_k(model, state, store, k)
+                    original_mode = hargs.mode
+                    hargs.mode = MODE
+                    row = HH._generate_one(
+                        model, tokenizer, example, hargs, MODE, prefix_override=prefix
+                    )
+                    hargs.mode = original_mode
+                except RuntimeError as e:
+                    if not HH._is_oom_error(e):
+                        raise
+                    logger.warning("OOM qid=%s k=%d, skipped", qid, k)
+                    row = HH._oom_row(example, MODE, args.ratio)
+                    HH._clear_device_cache(args.device_type)
+                t_gens += time.perf_counter() - g_start
+                row["d_arm"] = "raw_keepG_sweep"
+                row["d_mode"] = MODE
+                row["d_ksweep_k"] = k
+                handle.write(json.dumps(row, ensure_ascii=False, default=str) + "\n")
+                handle.flush()
+                n_rows += 1
+            store.release(qid)
+            timing_rows.append({
+                "qid": qid, "n_docs": n_docs, "n_new_rows": n_new,
+                "prepare_sec": round(t_prepare, 3),
+                "splices_plus_generate_sec": round(t_gens, 3),
+                "wall_sec": round(time.perf_counter() - q_start, 3),
+            })
+            logger.info("[%d/%d] qid=%s n_docs=%d prepare=%.1fs splice+gen=%.1fs",
+                        qi + 1, len(qids), qid, n_docs, t_prepare, t_gens)
             HH._clear_device_cache(args.device_type)
 
-    logger.info("done: %d rows -> %s", len(remaining), out_path)
+    if args.timing_report:
+        Path(args.timing_report).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.timing_report).write_text(
+            json.dumps(timing_rows, indent=1), encoding="utf-8")
+    total_prep = sum(r["prepare_sec"] for r in timing_rows)
+    total_gen = sum(r["splices_plus_generate_sec"] for r in timing_rows)
+    print(json.dumps({
+        "rows": n_rows,
+        "qids": len(timing_rows),
+        "sum_prepare_sec": round(total_prep, 1),
+        "sum_splice_gen_sec": round(total_gen, 1),
+        "gen_over_prepare_ratio": round(total_gen / max(total_prep, 1e-9), 2),
+    }, indent=2))
+    logger.info("done: %d rows -> %s", n_rows, out_path)
 
 
 if __name__ == "__main__":
