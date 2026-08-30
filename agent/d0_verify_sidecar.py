@@ -56,19 +56,47 @@ def main(argv=None):
     Path(args.output_file).parent.mkdir(parents=True, exist_ok=True)
     device = HH._setup_device(args.device_type)
 
-    hargs = argparse.Namespace(
-        mode="c2kv", model=args.model, base_model=args.base_model,
-        tokenizer=args.tokenizer, untrained_c2kv=False,
-        dataset_path=args.dataset_path, split="eval",
-        system_attn_impl=args.attn_impl, gist_attn_impl=args.attn_impl,
-        generate_attn_impl=args.attn_impl, override_ratio=args.ratio,
-        max_doc_length=args.max_doc_length, max_doc_num=args.max_doc_num,
-        max_system_length=4096, history_selection="tail",
-        split_oversized_history_docs=True, max_prompt_tokens=1536,
-        eval_ratio=0.1, split_seed=42, max_samples_per_session=0,
-        require_tool_call="False", include_tools="True",
-        split_manifest_file=None, split_manifest_name="subset_disjoint",
-    )
+    # build the history-harness namespace the same way d_kv_intervene does
+    # (argv round-trip through HH.parse_args — the only construction proven
+    # to carry every field _load_examples touches)
+    import sys as _sys
+    argv = [
+        "prog",
+        "--model", args.model,
+        "--base_model", args.base_model,
+        "--tokenizer", args.tokenizer,
+        "--dataset_path", args.dataset_path,
+        "--split", "eval",
+        "--include_tools", "True",
+        "--require_tool_call", "False",
+        "--max_examples", "0",
+        "--max_samples_per_session", "0",
+        "--eval_ratio", "0.1",
+        "--split_seed", "42",
+        "--split_manifest_name", "subset_disjoint",
+        "--max_doc_length", str(args.max_doc_length),
+        "--max_doc_num", str(args.max_doc_num),
+        "--min_doc_num", "1",
+        "--max_history_tokens", "12288",
+        "--max_system_length", "4096",
+        "--max_prompt_tokens", "1536",
+        "--max_baseline_input_tokens", "16000",
+        "--max_new_tokens", "128",
+        "--history_selection", "tail",
+        "--system_attn_impl", args.attn_impl,
+        "--gist_attn_impl", args.attn_impl,
+        "--generate_attn_impl", args.attn_impl,
+        "--device_type", args.device_type,
+        "--override_ratio", str(args.ratio),
+        "--hybrid_top_k", "3",
+        "--hybrid_layout", "gist_first",
+    ]
+    saved = _sys.argv
+    try:
+        _sys.argv = argv
+        hargs = HH.parse_args()
+    finally:
+        _sys.argv = saved
     tokenizer = HH._load_tokenizer(hargs)
     examples, _ = HH._load_examples(hargs, tokenizer)
     by_qid = {e.qid: e for e in examples}
