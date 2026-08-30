@@ -20,12 +20,13 @@ sys.path.insert(0, str(HERE))
 
 
 def start_proxy(upstream: str, arm: str, port: int, log_dir: Path,
-                record_reference: str = "", reference: str = ""):
+                record_reference: str = "", reference: str = "",
+                backend: str = "hfserver"):
     log_path = log_dir / f"proxy_{arm}_{port}.jsonl"
     out_handle = open(log_dir / f"proxy_{arm}_{port}.out", "w")
     command = [
         sys.executable, str(HERE / "proxy.py"),
-        "--upstream", upstream, "--arm", arm,
+        "--upstream", upstream, "--arm", arm, "--backend", backend,
         "--port", str(port), "--request-log", str(log_path),
     ]
     if record_reference:
@@ -99,6 +100,9 @@ def main(argv=None):
     parser.add_argument("--reference", default="",
                         help="recover arm: reference trajectory jsonl (from a "
                              "--record-reference full-arm run)")
+    parser.add_argument("--backend", default="hfserver",
+                        choices=["hfserver", "sglang"],
+                        help="serving stack behind the proxy")
     args = parser.parse_args(argv)
 
     args.out.mkdir(parents=True, exist_ok=True)
@@ -106,7 +110,8 @@ def main(argv=None):
     log_dir.mkdir(exist_ok=True)
     proxy_proc, request_log = start_proxy(
         args.upstream, args.arm, args.proxy_port, log_dir,
-        record_reference=args.record_reference, reference=args.reference)
+        record_reference=args.record_reference, reference=args.reference,
+        backend=args.backend)
     try:
         # the BFCL handler expects an OpenAI base_url WITH /v1 (tau2 and
         # toolsandbox build their paths themselves)
@@ -124,6 +129,7 @@ def main(argv=None):
         proxy_proc.terminate()
     summary["arm"] = args.arm
     summary["benchmark"] = args.benchmark
+    summary["backend"] = args.backend
     summary["request_log"] = str(request_log)
     if args.reference:
         summary["reference"] = args.reference

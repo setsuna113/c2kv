@@ -224,7 +224,7 @@ class TestRepairPolicy:
         assert "refusing" in source and "block_tokens <= 0" in source
         assert "mark:" in source and "[..., mark:, :]" in source
         assert "[..., -block_tokens:, :]" not in source
-        assert "repair_policy.span_selection" in source  # selection is shared
+        assert "_rp.span_selection" in source  # selection is shared (aliased import)
 
 
 class TestRecoverDecision:
@@ -433,3 +433,142 @@ class TestTerminalCheck:
         assert tc.check_bfcl(expected=2, run_ids="") == 0
         assert tc.check_bfcl(expected=3, run_ids="") == 1
         assert tc.check_bfcl(expected=None, run_ids="multi_turn_base_1") == 0
+
+
+class TestBackends:
+    """Fake-backend tests for the backend abstraction + proxy repair
+    planning (no HTTP, no torch)."""
+
+    class FakeSglang:
+        name = "sglang"
+
+        def __init__(self):
+            self.repairs = []
+
+        def extract(self, text, role, ratio):
+            return {
+                "key_hash": f"h-{role}-{len(text)}",
+                "gist_len": max(1, len(text) // ratio),
+                "original_seq_len": len(text),
+                "success": True,
+            }
+
+        def repair_extract(self, text, role, span_start, span_end,
+                           position_offset, source_doc_index):
+            self.repairs.append({
+                "text": text, "role": role, "span_start": span_start,
+                "span_end": span_end, "position_offset": position_offset,
+                "source_doc_index": source_doc_index})
+            return {"key_hash": f"rep-{source_doc_index}",
+                    "token_len": len(text), "success": True}
+
+        def prepare_chat(self, payload, arm, repair_plan):
+            from backends.sglang import SglangBackend
+            return SglangBackend.prepare_chat(self, payload, arm, repair_plan)
+
+    def test_repair_plan_offset_math(self, monkeypatch):
+        """position_offset = system_len + sum(original_seq_len of compressed
+        docs before the target); doc/chunk policies agree on whole-message
+        docs."""
+        fake = self.FakeSglang()
+        monkeypatch.setattr(proxy_mod, "BACKEND", fake)
+        monkeypatch.setattr(proxy_mod, "_extract", lambda role, content,
+                            ratio, timeout=0: fake.extract(content, role, ratio))
+        messages = [
+            {"role": "system", "content": "S" * 30},
+            {"role": "user", "content": "A" * 40},      # doc 0 (compressed)
+            {"role": "assistant", "content": "B" * 20},  # doc 1 (compressed)
+            {"role": "user", "content": "current"},
+        ]
+        arm = get_arm("c2kv_repair")
+        out, counts = proxy_mod._assemble(messages, arm)
+        plan = proxy_mod.plan_repair(messages, arm, counts)
+        assert plan["doc_index"] == 0
+        assert plan["position_offset"] == 30          # system only before doc 0
+        assert fake.repairs[-1]["span_start"] == 0 and fake.repairs[-1]["span_end"] is None
+        # the assembled target message carries BOTH its gist and the repair hash
+        prepared = fake.prepare_chat({"messages": out}, arm, plan)
+        target = prepared["messages"][plan["message_index"]]
+        assert target["c2kv_key_hash"] == "h-user-40"
+        assert target["c2kv_repair_key_hashes"] == ["rep-0"]
+        # offset policy: target doc 1 -> system + doc0
+        arm1 = Arm(name="r1", compress_history=True, repair={"policy": "offset:1"})
+        plan1 = proxy_mod.plan_repair(messages, arm1, counts)
+        assert plan1["doc_index"] == 1
+        assert plan1["position_offset"] == 30 + 40
+
+    def test_raw_toolcall_turns_render_dialect(self, monkeypatch):
+        """keep_raw assistant tool_calls turns (full arm, hybrid tail,
+        current) must ALSO go out in the training dialect — the sglang
+        backend has no server-side normalization."""
+        monkeypatch.setattr(proxy_mod, "_extract", _extract_stub)
+        messages = [
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "hi"},
+            {"role": "assistant", "content": None, "tool_calls": [
+                {"function": {"name": "f", "arguments": "{\"a\": 1}"}}]},
+            {"role": "user", "content": "current"},
+        ]
+        out, counts = proxy_mod._assemble(messages, get_arm("full"))
+        raw_asst = out[2]
+        assert "tool_calls" not in raw_asst
+        assert raw_asst["content"].startswith("Action:\n<tool_call>\n")
+        # incoming message untouched (fingerprints/reference use the raw form)
+        assert messages[2]["tool_calls"] is not None
+        # hybrid tail raw render as well
+        out_h, _ = proxy_mod._assemble(messages, get_arm("hybrid_k5"))
+        assert out_h[2]["content"].startswith("Action:\n")
+
+    def test_sglang_prepare_constrained_tools(self):
+        from backends.sglang import SglangBackend
+        backend = SglangBackend(None)
+        payload = {
+            "messages": [{"role": "user", "content": "x"}],
+            "tools": [{"type": "function", "function": {
+                "name": "t", "parameters": {
+                    "type": "object", "$defs": {"a": {"type": "dict"}},
+                    "properties": {"p": {"$ref": "#/$defs/a"}}}}}],
+        }
+        arm = Arm(name="cd", compress_history=False, constrain_tools=True)
+        out = backend.prepare_chat(payload, arm, None)
+        assert out["response_format"] == {"type": "structural_tag"}
+        params = out["tools"][0]["function"]["parameters"]
+        assert "$defs" not in params and "$ref" not in params
+        assert params["properties"]["p"] == {"type": "object"}
+        # the payload the model SEES keeps the original schema
+        assert payload["tools"][0]["function"]["parameters"]["type"] == "object"
+
+    def test_sglang_normalize_response_and_failures(self):
+        from backends.sglang import SglangBackend
+        from backends import BackendError
+        backend = SglangBackend(None)
+        ok = backend.normalize_response({
+            "choices": [{"message": {"content": "hi", "tool_calls": None},
+                         "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 5},
+            "metadata": {"sglang_runtime": {
+                "kv_resident_tokens": 100, "kv_pool_size": 4437}},
+        })
+        assert ok["finish_reason"] == "stop"
+        assert ok["cost"] == {"kv_resident_tokens": 100, "kv_pool_size": 4437}
+        with pytest.raises(BackendError) as err:
+            backend.normalize_response({"choices": [
+                {"message": {"content": None}, "finish_reason": "abort"}]})
+        assert err.value.kind == "finish_abort"
+        with pytest.raises(BackendError) as err2:
+            backend.normalize_response({"object": "error", "error": "boom"})
+        assert err2.value.kind == "upstream"
+
+    def test_hfserver_backend_shapes(self):
+        from backends.hfserver import HfServerBackend
+        backend = HfServerBackend(None)
+        arm = get_arm("c2kv_repair")
+        payload = backend.prepare_chat({"messages": []}, arm, {"doc_index": 0})
+        assert payload["c2kv_repair"] == {"policy": "first"}
+        normalized = backend.normalize_response({
+            "choices": [{"message": {"content": "x"}, "finish_reason": "stop"}],
+            "usage": {}, "c2kv": {"cache_tokens": 10, "logical_tokens": 80,
+                                  "system_len": 5, "repair_block_tokens": 7},
+        })
+        assert normalized["cost"]["cache_tokens"] == 10
+        assert normalized["cost"]["repair_block_tokens"] == 7

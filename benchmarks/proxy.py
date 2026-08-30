@@ -1,9 +1,9 @@
-"""Arm-aware OpenAI-compatible reverse proxy.
+"""Arm-aware OpenAI-compatible reverse proxy (backend-abstracted).
 
 All three benchmarks speak the OpenAI chat-completions protocol, so instead
-of forking each benchmark we front the hf_server with this proxy:
+of forking each benchmark we front the serving stack with this proxy:
 
-    benchmark client -> proxy (arm assembly) -> hf_server
+    benchmark client -> proxy (arm assembly) -> backend (hf_server | sglang)
 
 Per request the proxy decides, per the active arm, which *history* messages
 are sent as raw text and which are replaced by a server-side gist reference
@@ -13,25 +13,28 @@ user/tool message; system messages are history by position but always kept
 raw (never compressed).  The final user message and tool results of the
 current turn stay raw.
 
-Extract results are cached by (role, sha256(content), ratio) so multi-turn
-sessions do not re-compress the same prefix, which also keeps KV accounting
-consistent with the teacher-forced harness (one gist per history block).
+Assistant tool_calls turns are rendered into the TRAINING dialect (content
++ "Action:" + minified <tool_call> JSON) on EVERY outgoing path —
+compressed AND raw — so a backend without server-side normalization
+(SGLang) sees the same surface the old hf_server normalized itself.
 
 Oracle-recover arms (``recover`` in arms.py) implement the step-level
 contract: during a full-arm run the proxy RECORDS a reference trajectory
 (``--record-reference``); a recover arm then compares every generated
 action against the reference entry with the same message fingerprint,
 flags the first mismatch as ``divergence_step``, and ONCE per conversation
-re-sends the identical payload assembled in full-raw mode (the reference KV
-regime) — the regenerated step replaces the divergent one.
+re-sends the identical payload assembled in full-raw mode — the
+regenerated step replaces the divergent one.
+
+Repair arms (``repair`` in arms.py): the target doc is selected by
+benchmarks/repair_policy.py IN THE PROXY; the backend turns the plan into
+its own protocol (hf_server: request-level c2kv_repair; sglang:
+/v1/c2kv/repair_extract + message-level c2kv_repair_key_hashes with the
+proxy-ledger position_offset).
 
 Upstream failures are retried (2x, exponential backoff) and always leave a
-request-log row with status="upstream_error" — a benchmark entry must never
-vanish without a trace.
-
-Timing: the proxy is NON-STREAMING (one buffered request/response per call).
-It records per-request wall time and token accounting under the response
-object's `c2kv_proxy` field plus a JSONL request log; TTFT is not measured.
+request-log row with a failure kind — a benchmark entry must never vanish
+without a trace.
 """
 from __future__ import annotations
 
@@ -45,7 +48,9 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 from urllib import request as urlrequest
 from urllib.error import HTTPError, URLError
 
+import repair_policy
 from arms import Arm, get_arm  # type: ignore
+from backends import BackendError, get_backend  # type: ignore
 
 
 class ExtractCache:
@@ -64,13 +69,14 @@ class ExtractCache:
 
 CACHE = ExtractCache()
 ARM: Optional[Arm] = None
+BACKEND = None  # set in main()
 UPSTREAM = ""
 REQUEST_LOG_PATH = ""
 _log_lock = threading.Lock()
 
 
 class UpstreamError(RuntimeError):
-    """Non-200 from the hf_server after retries; carries the response body."""
+    """Non-200 transport failure after retries; carries the response body."""
 
     def __init__(self, status: int, body: str):
         super().__init__(f"upstream {status}: {body[:2000]}")
@@ -78,19 +84,20 @@ class UpstreamError(RuntimeError):
         self.body = body
 
 
-def _post_json(base_url: str, path: str, payload: Dict[str, Any],
+def _post_json(path: str, payload: Dict[str, Any],
                timeout: int, retries: int = 2) -> Dict[str, Any]:
-    """POST JSON, retrying 5xx/network failures with exponential backoff.
+    """POST JSON to UPSTREAM, retrying 5xx/network failures with backoff.
 
     4xx (except 429) are deterministic client errors and are not retried.
-    The final failure raises UpstreamError with the upstream body (the
-    hf_server's 500 body carries the traceback).
+    The final failure raises UpstreamError with the upstream body.  Note
+    the SGLang stack reports many failures as HTTP 200 with error bodies —
+    those are classified by the backend (BackendError), not here.
     """
     body = json.dumps(payload).encode("utf-8")
     last: Optional[UpstreamError] = None
     for attempt in range(retries + 1):
         req = urlrequest.Request(
-            f"{base_url.rstrip('/')}{path}", data=body,
+            f"{UPSTREAM.rstrip('/')}{path}", data=body,
             headers={"Content-Type": "application/json"}, method="POST",
         )
         try:
@@ -117,26 +124,9 @@ def _content_key(role: str, content: str) -> str:
     return hashlib.sha256(f"{role}\x00{content}".encode("utf-8")).hexdigest()
 
 
-def _extract(role: str, content: str, ratio: int, timeout: int) -> Dict[str, Any]:
+def _extract(role: str, content: str, ratio: int, timeout: int = 600) -> Dict[str, Any]:
     key = (role, _content_key(role, content), ratio)
-
-    def produce() -> Dict[str, Any]:
-        result = _post_json(
-            UPSTREAM,
-            "/v1/c2kv/extract",
-            {
-                "text": content,
-                "compression_ratio": ratio,
-                "role": role,
-                "chat_template_kwargs": {"enable_thinking": False},
-            },
-            timeout,
-        )
-        if not result.get("success", True) or not result.get("key_hash"):
-            raise RuntimeError(f"c2kv extract failed: {result.get('error') or result}")
-        return result
-
-    return CACHE.get_or_put(key, produce)
+    return CACHE.get_or_put(key, lambda: BACKEND.extract(content, role, ratio))
 
 
 def _history_cutoff(messages: List[Dict[str, Any]]) -> int:
@@ -258,11 +248,11 @@ def conversation_id(messages: List[Dict[str, Any]]) -> str:
     return _digest([head, first])
 
 
-def action_canonical(choice_message: Dict[str, Any]) -> Dict[str, Any]:
-    """Canonical form of a RESPONSE: tool calls (sorted keys) + stripped text."""
+def action_canonical(message: Dict[str, Any]) -> Dict[str, Any]:
+    """Canonical form of a RESPONSE message: tool calls (sorted keys) + text."""
     return {
-        "tool_calls": _canon_calls(choice_message.get("tool_calls")),
-        "text": (choice_message.get("content") or "").strip(),
+        "tool_calls": _canon_calls(message.get("tool_calls")),
+        "text": (message.get("content") or "").strip(),
     }
 
 
@@ -336,20 +326,19 @@ def load_reference(path: str) -> Dict[str, Dict[str, Any]]:
 
 
 # full-mode pseudo-arm for the recover re-send: identical payload, history
-# assembled raw — the server prefills raw KV under base projections, i.e.
-# exactly the reference (full-arm) KV regime.
+# assembled raw — the reference KV regime of whichever backend is active.
 FULL_ASSEMBLY = Arm(name="full_recover_assembly", compress_history=False)
 
 
-def _assemble(messages: List[Dict[str, Any]], arm: Arm, timeout: int):
-    """Return (out_messages, gist_tokens, original_tokens, n_gist, counts).
+def _assemble(messages: List[Dict[str, Any]], arm: Arm, timeout: int = 600):
+    """Return (out_messages, counts).
 
     ``counts`` carries the message-class breakdown (system/hybrid-tail/
-    current kept raw vs compressed) plus the compressed-token ledger — the
-    old ledger only counted compressed messages, which made every arm's
-    token ratio look identical (B5).  Raw token counts are NOT estimated
-    here; per-request physical/logical numbers come from the server ledger
-    (response c2kv field) so no second tokenizer is introduced.
+    current kept raw vs compressed) plus the compressed-token ledger and
+    the per-doc extract records (message index, role, record) in
+    conversation order — the proxy-side ledger that repair planning and
+    the logical-token cost column are computed from.  Raw token counts are
+    NOT estimated here; physical numbers come from the backend's response.
     """
     cutoff = _history_cutoff(messages)
     out: List[Dict[str, Any]] = []
@@ -358,6 +347,7 @@ def _assemble(messages: List[Dict[str, Any]], arm: Arm, timeout: int):
     n_gist = 0
     message_counts = {"system_raw": 0, "history_raw": 0, "current_raw": 0,
                       "compressed": 0}
+    compressed_records: List[Dict[str, Any]] = []
     for i, message in enumerate(messages):
         role = message.get("role") or "user"
         content = message.get("content")
@@ -370,7 +360,17 @@ def _assemble(messages: List[Dict[str, Any]], arm: Arm, timeout: int):
             or (arm.hybrid_top_k and i >= cutoff - arm.hybrid_top_k)
         )
         if keep_raw:
-            out.append(message)
+            raw = dict(message)
+            # training-dialect rendering applies to RAW assistant
+            # tool_calls turns as well: backends without server-side
+            # normalization (sglang) would otherwise feed the chat
+            # template's native tool_calls branch — a surface the model
+            # was never trained on.  Idempotent for hf_server (its chat()
+            # normalization produced the identical text).
+            if role == "assistant" and message.get("tool_calls"):
+                raw["content"] = _render_action_dialect(message)
+                raw.pop("tool_calls", None)
+            out.append(raw)
             if role == "system":
                 message_counts["system_raw"] += 1
             elif in_history:
@@ -394,15 +394,66 @@ def _assemble(messages: List[Dict[str, Any]], arm: Arm, timeout: int):
         # lets the server re-extract on cache miss (e.g. after a restart)
         compressed["c2kv_ratio"] = arm.ratio
         out.append(compressed)
+        compressed_records.append({
+            "message_index": i, "role": role, "content": content,
+            "record": record,
+        })
     counts = dict(message_counts)
     counts["gist_tokens"] = gist_tokens
     counts["original_tokens"] = original_tokens
     counts["n_gist_messages"] = n_gist
+    counts["compressed_records"] = compressed_records
     return out, counts
 
 
+def _system_text(messages: List[Dict[str, Any]]) -> str:
+    return "\n".join(
+        (m.get("content") or "") for m in messages if m.get("role") == "system")
+
+
+def plan_repair(messages: List[Dict[str, Any]], arm: Arm,
+                counts: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Resolve an arm's repair policy against the proxy ledger.
+
+    The target doc's position_offset (d_corr bakes the absolute RoPE phase
+    at capture) = system tokens + Σ original_seq_len of every compressed
+    message before the target.  Raw tail / current turns sit AFTER the
+    compressed prefix and are never crossed.
+    """
+    if not arm.repair:
+        return None
+    policy = str((arm.repair or {}).get("policy") or "first")
+    parsed = repair_policy.parse_policy(policy)
+    records = counts.get("compressed_records") or []
+    doc_counts = [1] * len(records)  # sglang: whole-message docs (O-2)
+    doc_index, _first_chunk, _span_len = repair_policy.span_selection(
+        doc_counts, parsed["kind"], parsed["index"])
+    target = records[doc_index]
+    system_len = 0
+    system = _system_text(messages)
+    if system:
+        # one cached extract of the system block gives its template token
+        # length (and doubles as the request-log system_len column source);
+        # the resulting gist entry simply sits unused in the pool
+        sys_record = _extract("system", system, arm.ratio)
+        system_len = int(sys_record.get("original_seq_len") or 0)
+    offset = system_len
+    for record in records[:doc_index]:
+        offset += int(record["record"].get("original_seq_len") or 0)
+    span = BACKEND.repair_extract(
+        text=target["content"], role=target["role"],
+        span_start=0, span_end=None,
+        position_offset=offset, source_doc_index=doc_index)
+    return {
+        "policy": policy, "message_index": target["message_index"],
+        "doc_index": doc_index, "position_offset": offset,
+        "repair_key_hash": span.get("key_hash"),
+        "repair_block_tokens": span.get("token_len"),
+    }
+
+
 class ProxyState:
-    """Process-wide proxy state (recover config + reference log path)."""
+    """Process-wide proxy state (backend, recover config, reference log)."""
 
     def __init__(self):
         self.lock = threading.Lock()
@@ -435,50 +486,47 @@ class ProxyHandler(BaseHTTPRequestHandler):
         except json.JSONDecodeError:
             self._send_json(400, {"error": "invalid json"})
             return
-        assert ARM is not None
+        assert ARM is not None and BACKEND is not None
         start = time.perf_counter()
         messages = payload.get("messages") or []
         fingerprint = messages_fingerprint(messages)
         conv = conversation_id(messages)
         turn = len(messages)
         try:
-            messages_out, counts = _assemble(messages, ARM, 600)
-        except (RuntimeError, URLError, OSError, UpstreamError) as error:
-            self._log_request(payload, None, None, status="assemble_error",
+            messages_out, counts = _assemble(messages, ARM)
+            repair_plan = plan_repair(messages, ARM, counts)
+        except (RuntimeError, URLError, OSError, UpstreamError, BackendError) as error:
+            kind = getattr(error, "kind", "assemble_error")
+            self._log_request(payload, None, None, status=kind,
                               error=str(error), fingerprint=fingerprint, conv=conv,
                               turn=turn)
             self._send_json(502, {"error": f"c2kv assembly failed: {error}"})
             return
         assemble_sec = time.perf_counter() - start
 
-        def send_upstream(out_messages):
-            out_payload = dict(payload)
+        def send_upstream(out_messages, plan):
+            out_payload = BACKEND.prepare_chat(dict(payload), ARM, plan)
             out_payload["messages"] = out_messages
-            if ARM.constrain_tools:
-                out_payload["constrain_tools"] = True
-            if ARM.repair:
-                # repair arm (docs/hybrid_spec.md): hf_server resolves the
-                # policy over the compressed docs it assembles (it owns
-                # chunking and the logical ledger)
-                out_payload["c2kv_repair"] = dict(ARM.repair)
-            else:
-                out_payload.pop("c2kv_repair", None)
-            return _post_json(UPSTREAM, self.path, out_payload, 600), out_payload
+            return _post_json(self.path, out_payload, 600), out_payload
 
         try:
-            data, _ = send_upstream(messages_out)
-        except UpstreamError as error:
-            self._log_request(payload, None, counts, status="upstream_error",
+            data, _ = send_upstream(messages_out, repair_plan)
+            normalized = BACKEND.normalize_response(data)
+        except (UpstreamError, BackendError) as error:
+            kind = getattr(error, "kind", "upstream_error")
+            self._log_request(payload, None, counts, status=kind,
                               error=str(error), fingerprint=fingerprint, conv=conv,
-                              turn=turn)
+                              turn=turn, repair=self._slim_plan(repair_plan))
             self._send_json(502, {"error": f"upstream failed: {error}"})
             return
         total_sec = time.perf_counter() - start
 
         # ---- oracle-recover (docs/hybrid_spec.md "Oracle recover") ----
         recover_flags: Dict[str, Any] = {}
-        action = action_canonical(
-            ((data.get("choices") or [{}])[0].get("message") or {}))
+        action = action_canonical({
+            "content": normalized["content"],
+            "tool_calls": normalized["tool_calls"],
+        })
         if STATE.recover is not None:
             with STATE.lock:
                 recover_flags = STATE.recover.check(conv, fingerprint, action, turn)
@@ -488,38 +536,45 @@ class ProxyHandler(BaseHTTPRequestHandler):
             if recover_now:
                 repair_t0 = time.perf_counter()
                 try:
-                    raw_out, _ = _assemble(messages, FULL_ASSEMBLY, 600)
-                    data_b, _ = send_upstream(raw_out)
-                except (UpstreamError, RuntimeError, URLError, OSError) as error:
-                    self._log_request(payload, None, counts, status="recover_error",
+                    raw_out, _ = _assemble(messages, FULL_ASSEMBLY)
+                    data_b, _ = send_upstream(raw_out, None)
+                    normalized_b = BACKEND.normalize_response(data_b)
+                except (UpstreamError, BackendError, RuntimeError,
+                        URLError, OSError) as error:
+                    kind = getattr(error, "kind", "recover_error")
+                    self._log_request(payload, None, counts, status=kind,
                                       error=str(error), fingerprint=fingerprint,
                                       conv=conv, turn=turn, recover=recover_flags)
                     self._send_json(502, {"error": f"c2kv recover failed: {error}"})
                     return
                 ref = STATE.recover.reference.get(fingerprint)
-                action_b = action_canonical(
-                    ((data_b.get("choices") or [{}])[0].get("message") or {}))
+                action_b = action_canonical({
+                    "content": normalized_b["content"],
+                    "tool_calls": normalized_b["tool_calls"],
+                })
                 recover_flags.update({
                     "repaired": True,
                     "repair_sec": round(time.perf_counter() - repair_t0, 4),
-                    "repair_tokens": (data_b.get("usage") or {}).get("completion_tokens"),
+                    "repair_tokens": (normalized_b["usage"] or {}).get("completion_tokens"),
                     # did the full-regime regeneration reproduce the
                     # reference action verbatim?
                     "repair_fidelity": bool(ref and action_b == ref.get("action")),
                     "recovered_action_match": action_b == action,
                 })
-                data = data_b
+                data, normalized = data_b, normalized_b
                 total_sec = time.perf_counter() - start
 
         # ---- reference recording (full-arm run, --record-reference) ----
         if STATE.reference_log_path:
-            final_action = action_canonical(
-                ((data.get("choices") or [{}])[0].get("message") or {}))
+            final_action = action_canonical({
+                "content": normalized["content"],
+                "tool_calls": normalized["tool_calls"],
+            })
             row = {
                 "ts": time.time(), "arm": ARM.name, "conv_id": conv,
                 "fp": fingerprint, "turn": turn, "action": final_action,
-                "finish_reason": (data.get("choices") or [{}])[0].get("finish_reason"),
-                "completion_tokens": (data.get("usage") or {}).get("completion_tokens"),
+                "finish_reason": normalized["finish_reason"],
+                "completion_tokens": (normalized["usage"] or {}).get("completion_tokens"),
             }
             with _log_lock:
                 with open(STATE.reference_log_path, "a", encoding="utf-8") as handle:
@@ -530,6 +585,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
         data.setdefault("c2kv_proxy", {})
         data["c2kv_proxy"].update(
             {
+                "backend": BACKEND.name,
                 "arm": ARM.name,
                 "ratio": ARM.ratio,
                 "gist_tokens": counts["gist_tokens"],
@@ -539,16 +595,20 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 "wall_sec": round(total_sec, 4),
             }
         )
-        # surface the server-side repair cost columns when present
-        upstream_c2kv = data.get("c2kv") or {}
-        for key in ("repair_policy", "repair_block_tokens",
-                    "repair_doc_index", "repair_prefill_sec"):
-            if key in upstream_c2kv:
-                data["c2kv_proxy"][key] = upstream_c2kv[key]
+        data["c2kv_proxy"].update(normalized["cost"])
         self._send_json(200, data)
         counts["wall_sec"] = round(total_sec, 4)
-        self._log_request(payload, data, counts, recover=recover_flags,
-                          fingerprint=fingerprint, conv=conv, turn=turn)
+        self._log_request(payload, normalized, counts, recover=recover_flags,
+                          fingerprint=fingerprint, conv=conv, turn=turn,
+                          plan=self._slim_plan(repair_plan))
+
+    @staticmethod
+    def _slim_plan(plan):
+        if not plan:
+            return None
+        return {k: plan[k] for k in (
+            "policy", "doc_index", "position_offset", "repair_block_tokens")
+            if k in plan}
 
     def do_GET(self):
         try:
@@ -586,17 +646,18 @@ class ProxyHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _log_request(self, request, response, counts, recover=None, status="ok",
-                     error=None, fingerprint=None, conv=None, turn=None):
+    def _log_request(self, request, normalized, counts, recover=None, status="ok",
+                     error=None, fingerprint=None, conv=None, turn=None, plan=None):
         if not REQUEST_LOG_PATH:
             return
-        response = response or {}
         counts = counts or {}
         recover = recover or {}
         row: Dict[str, Any] = {
             "ts": time.time(),
+            "backend": BACKEND.name if BACKEND else None,
             "arm": ARM.name if ARM else None,
             "status": status,
+            "error_kind": None,
             "fp": fingerprint,
             "conv_id": conv,
             "turn": turn,
@@ -607,20 +668,20 @@ class ProxyHandler(BaseHTTPRequestHandler):
             "n_gist_messages": counts.get("n_gist_messages"),
             "wall_sec": counts.get("wall_sec"),
             "error": error,
-            "usage": response.get("usage"),
-            "finish_reason": (response.get("choices") or [{}])[0].get("finish_reason"),
+            "usage": (normalized or {}).get("usage"),
+            "finish_reason": (normalized or {}).get("finish_reason"),
         }
-        # raw-vs-compressed message-class breakdown (B5)
+        if status != "ok":
+            row["error_kind"] = status
+        # raw-vs-compressed message-class breakdown
         row.update({f"raw_{k}": v for k, v in counts.items()
                     if k in ("system_raw", "history_raw", "current_raw", "compressed")})
-        # server ledger columns (B6): physical KV vs logical tokens so the
-        # request log alone yields the compression ratio per request
-        upstream_c2kv = response.get("c2kv") or {}
-        for key in ("cache_tokens", "logical_tokens", "prompt_tokens", "system_len",
-                    "repair_policy", "repair_block_tokens",
-                    "repair_doc_index", "repair_prefill_sec"):
-            if key in upstream_c2kv:
-                row[key] = upstream_c2kv[key]
+        # backend cost block (hfserver: cache/logical/prompt/system_len;
+        # sglang: kv_resident/kv_peak/kv_pool) + repair columns
+        cost = (normalized or {}).get("cost") or {}
+        row.update(cost)
+        if plan:
+            row.update({f"repair_{k}": v for k, v in plan.items()})
         if recover:
             row.update({k: v for k, v in recover.items()})
         with _log_lock:
@@ -629,9 +690,12 @@ class ProxyHandler(BaseHTTPRequestHandler):
 
 
 def main(argv=None):
-    global ARM, UPSTREAM, REQUEST_LOG_PATH
+    global ARM, BACKEND, UPSTREAM, REQUEST_LOG_PATH
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--upstream", required=True, help="hf_server base URL, e.g. http://127.0.0.1:34000")
+    parser.add_argument("--upstream", required=True,
+                        help="backend base URL, e.g. http://127.0.0.1:34000")
+    parser.add_argument("--backend", default="hfserver",
+                        choices=["hfserver", "sglang"])
     parser.add_argument("--arm", required=True)
     parser.add_argument("--port", type=int, required=True)
     parser.add_argument("--request-log", default="")
@@ -644,6 +708,7 @@ def main(argv=None):
     ARM = get_arm(args.arm)
     UPSTREAM = args.upstream.rstrip("/")
     REQUEST_LOG_PATH = args.request_log
+    BACKEND = get_backend(args.backend, _post_json)
     STATE.reference_log_path = args.record_reference
     if args.reference:
         if not ARM.recover:
@@ -652,7 +717,8 @@ def main(argv=None):
         print(f"loaded reference: {len(STATE.recover.reference)} states "
               f"from {args.reference}", flush=True)
     server = ThreadingHTTPServer((args.host, args.port), ProxyHandler)
-    print(f"proxy arm={ARM.name} listening on {args.host}:{args.port} -> {UPSTREAM}", flush=True)
+    print(f"proxy backend={BACKEND.name} arm={ARM.name} listening on "
+          f"{args.host}:{args.port} -> {UPSTREAM}", flush=True)
     server.serve_forever()
 
 
