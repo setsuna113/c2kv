@@ -62,17 +62,18 @@ one single-arm run for 10× the data.
 
 injected = 90 = 93 − 3 (k\*=None stratum) in every injection arm.
 
-## D3–D7 smoke (1 qid, all six arms, one process; rerun complete)
+## D3–D7 smoke (1 qid, all six arms, one process) — **6/6 GREEN**
 
-3/6 arms green end-to-end (less_fold, selkv_bias, selkv_count — **the
-eager-path bias/fold registry works on the real model**).  Remaining
-failures after the round-2 fixes, honestly recorded:
-- reskv/keepkv capsules: NPU `AclSetCompileopt` error 500001 (an ACL
-  compiler-environment failure triggered by the capsule path — needs a
-  standalone repro; NOT a math bug, unit tests are green on CPU).
-- grkv_v_edit: residual device mismatch under investigation (the
-  `torch.eye` CPU default was fixed; one more straggler remains).
-Smoke rows are plumbing evidence only, not scored data.
+reskv_capsule / keepkv_capsule / less_fold / grkv_v_edit / selkv_bias /
+selkv_count all produce rows with d_contract_info end-to-end on the real
+model — **the eager-path bias/fold registry, the capsule splice channel,
+and the GRKV writeback all work**.  Failures closed en route: torch.cdist
+crashes this torch_npu build's ACL compiler (AclSetCompileopt 500001;
+k-means rewritten on manual matmul distances), keepkv spliced head-0 only
+(all heads stacked now), per-layer bias-width staleness across the splice
+loop (width pinned to the final cache length), and the sentinel's
+post-verify print crash (v2.9 keys + incremental JSON write).  Smoke rows
+are plumbing evidence, not scored data.
 
 ## Witness selection (prereg v2.2, user's frozen algorithm)
 
