@@ -313,7 +313,8 @@ re_diverged。arms：`c2kv_recover` / `hybrid_recover`；旧任务级 oracle
 | benchmark | 臂 | 结果 | 备注 |
 |---|---|---|---|
 | τ² | full | **0.24**（12/50 perfect） | vs hf_server 0.26：**full 臂两 regime 几乎一致**（−0.02）——O-1b 的关键正面证据 |
-| τ² | c2kv/recover/repair ×4 | chain-v2 跑数中 | 首轮 c2kv 因服务器 NPU OOM 中途崩死作废（262k 默认 ctx 的 KV 池 + radix 累积压掉 workspace，07:13:33 崩、49/50 infrastructure_error）；chain-v2 以 16k ctx + mem 0.20 + **每臂重启服务器**重跑 |
+| τ² | c2kv | **0.20**（5/25 perfect；任务 0-24 块，终态 25/25 零 infra 错误） | 压缩代价 ≈ **−17%** vs full 0.24 —— 对照 hf_server 同压缩 0.26→0.15（−42%）：**新栈把压缩代价砍掉一大半**；termination: 17 max_steps + 8 user_stop（循环常见但部分得分） |
+| τ² | c2kv_b/recover/repair | chainA 在跑 | 块 b(任务 25-49)进行中；recover/repair 臂随后；首轮 c2kv 因 NPU OOM 作废已重跑 |
 
 B 修复的服务器侧证据（重启后 smoke）：同一 system 文本不带 tools `original_seq_len=7` vs 带 1 个工具 `=125`（工具序言 +118 token）——position_offset 缺口正是这一段。
 
