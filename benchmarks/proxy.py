@@ -531,7 +531,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
             kind = getattr(error, "kind", "upstream_error")
             self._log_request(payload, None, counts, status=kind,
                               error=str(error), fingerprint=fingerprint, conv=conv,
-                              turn=turn, repair=self._slim_plan(repair_plan))
+                              turn=turn, plan=self._slim_plan(repair_plan))
             self._send_json(502, {"error": f"upstream failed: {error}"})
             return
         total_sec = time.perf_counter() - start

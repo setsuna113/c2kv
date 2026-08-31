@@ -51,6 +51,11 @@ def check_tau2(run: str, expected, task_ids: str = "") -> int:
         return 2
     sims = (json.loads(path.read_text(encoding="utf-8")).get("simulations")) or []
     got = {str(s.get("task_id")) for s in sims}
+    # a simulation that died on infrastructure_error is NOT a valid
+    # terminal state — counting it as scored let a 25/25-infrastructure-error
+    # chunk pass the gate (the run is void, not complete)
+    infra = {str(s.get("task_id")) for s in sims
+             if s.get("termination_reason") == "infrastructure_error"}
     if task_ids:
         # id-exact over the pinned subset (ids are task_id strings, not
         # necessarily 0..N when a TASK_IDS subset was run)
@@ -59,8 +64,8 @@ def check_tau2(run: str, expected, task_ids: str = "") -> int:
         if expected is None:
             expected = DEFAULT_EXPECTED["tau2"]
         want = {str(i) for i in range(expected)}
-    missing = sorted(want - got)
-    return fail("tau2", len(got & want), len(want), missing)
+    missing = sorted((want - got) | (want & infra))
+    return fail("tau2", len((got & want) - infra), len(want), missing)
 
 
 def check_bfcl(expected, run_ids) -> int:
