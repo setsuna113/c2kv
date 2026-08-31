@@ -104,8 +104,14 @@ def main(argv=None):
     if not blocks:
         raise SystemExit("FATAL: no blocks with Q captured (rerun dump with --want_q)")
 
-    n_fit = max(1, int(len(blocks) * args.fit_frac))
-    fit_blocks, test_blocks = blocks[:n_fit], blocks[n_fit:]
+    # stratified split WITHIN each layer (a contiguous whole-list split
+    # puts some layers entirely in one side and starves the fit set)
+    fit_blocks, test_blocks = [], []
+    for layer in sorted({b["layer"] for b in blocks}):
+        lb = [b for b in blocks if b["layer"] == layer]
+        n_fit = max(1, int(len(lb) * args.fit_frac))
+        fit_blocks.extend(lb[:n_fit])
+        test_blocks.extend(lb[n_fit:])
     if not test_blocks:
         test_blocks = fit_blocks  # tiny dumps: report in-sample with a flag
         in_sample = True

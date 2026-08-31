@@ -99,12 +99,38 @@ history_length) asserted distinct.)
 
 ## D2 short_erratum @ frozen k_witness
 
-(effective denominator 42; erratum bytes/timing; T_edit device-synced.)
+Shard A (46 qids) complete: **S = 2/28 on the ACTIVE denominator**
+(injected=28; NoneK=2; empty-witness=16 — the leak-boundary no-ops).
+Erratum ≈ 62 tokens of pure witness literals.  **Reading: a TEXTUAL
+correction of the right values repairs almost nothing (2/28 ≈ 7%) while
+the raw-KV transplant of the same block repairs 76% — the channel needs
+the block's KV content itself, not a declarative note.**  Combined D2
+numbers (with shard B, effective denominator ≈ 56/93 per the 42/93
+full-set split) appended when it lands.
 
 ## Bytes and timing axes
 
 (payload_bytes from d_contract_info; T_capture synced; per-k load timing
 from the sweep rows.)
+
+## D3 offline rate–distortion (real sidecar dumps, held-out, 30 blocks)
+
+| codec | bytes/block | DEFLATE | K recon | V recon | **attn out err** |
+|---|---|---|---|---|---|
+| aatc | 126.5K | 96.0K | 0.661 | 2.137 | **4.78** |
+| kvtc | 136.5K | 123.4K | 0.285 | 0.698 | 0.818 |
+| vector_konly | 344.3K | 228.2K | **0.018** | 0.639 | **0.690** |
+| raw_q4 | 344.5K | 164.2K | 0.309 | **0.383** | 0.975 |
+| raw_bf16 | 1346.9K | 974.5K | 0 | 0 | 0.0002 |
+
+**Verdicts.**  aatc is ELIMINATED — at byte-parity with kvtc it is worse
+on every axis (per-channel-scalar quantization at ~1.6 bits/element
+destroys V; sensitivity allocation cannot save it).  Survivors:
+kvtc (cheapest usable), vector_konly (best K fidelity 0.018 and best
+attention error 0.69 — K fidelity dominates the attention output, V can
+be regressed), raw_q4 (deflate-friendly).  DEFLATE is a real component
+(q4 −52%, aatc −24%).  Consistent with the D1 finding: the K content is
+what the repair runs on.
 
 ## Line A artifacts (built tonight, CPU-tested)
 
