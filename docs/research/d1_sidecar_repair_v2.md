@@ -23,12 +23,48 @@ eager, `max_doc_length=768`.
 |---|---|
 | O-1 caliber gate (128 kept) | PASS — recomputed on battery_full rows: 41 unclosed / 41-41 fallback / full 93/93; strict parses 45/93 |
 | witness table frozen | 93 qids, **k\*=None 3/93**, Σn_docs=928 (matches manifest hist exactly) |
-| sentinel stage-1 (capture equality) | (pending run) |
-| sentinel stage-2 (placement equality, the B7 gate; doc-local reference at absolute positions) | (pending run) |
+| sentinel stage-1/2 | **FAIL at bit level → root-caused to hardware, prereg v2.9**: a controlled probe (same k_proj weight + content, batch 1×413 vs inside the 16×768 grid) gives max\|d\| = 0.0078125 — digit-identical to the sentinel's L0 K mismatch — while a same-shape rerun is bit-equal. NPU bf16 matmul rounding is batch-shape-dependent; 36 layers amplify 1 ulp to O(0.5). The interleave mask's token→gist block is never filled (verified in `_build_interleave_mask_vectorized`) — no gist leakage; the sidecar captures exactly the compression forward's own raw KV (the contract's definition of P_k). Placement (B7) remains unit-certified (`metrology/test_abs_rope`). |
+| **R gate (prereg v2.8)** | **PASS, decisively** — see below |
 
-Stage-2 history: v1 compared a contextual sequential prefill against
-document-local sidecar — could never pass (review 2026-08-31); v2 holds
-content document-local and tests only placement.
+## D1 k-sweep — MAIN RESULTS (928/928 generations)
+
+| quantity | value |
+|---|---|
+| **S @ k_witness (main estimate)** | **71/93 = 76.3%** (witness rows present 90/90) |
+| S @ k_median (legacy column) | 33/93 = 35.5% |
+| wrong-block distribution (non-witness ks) | 25.0% (823 trials) |
+| **R gate** | one-sided binomial P(X≥71 \| p=0.2503, n=93) = **4.7e-25 → PASS** |
+| best-k envelope (oracle only) | 81/93 = 87.1% vs random envelope E[max]=73.4 (78.9%) |
+| flip concentration | 42/81 flipping qids have EXACTLY ONE flipping k; witness-k flips 71 vs median-k 33 |
+| baseline c2kv on trigger set | 0/93 by construction (C→W set) |
+
+**Reading.**  The repair channel is real and item-specific: restoring the
+witness block's raw KV repairs **76%** of the C→W failures while an
+arbitrary (wrong) block repairs only 25% — the witness annotation carries
+almost all of the signal (71 of the 81 best-k hits).  The old median-k
+policy sat at 35.5%, barely above the lottery floor — quantitatively
+confirming that the v1 D-line repaired the wrong block most of the time
+(witness==median on only 19/90).  Cost: shared-capture worked exactly as
+designed — all 93 compressions+captures took **6 minutes** total; the 928
+generations took 171 min (**11.1 s/gen**), i.e. the full sweep cost ~7.7×
+one single-arm run for 10× the data.
+
+## D1 arms @ frozen k_witness
+
+- raw_keepG: from the sweep's k_witness rows (= the 76.3% above).
+- raw_replaceG: **93/93 complete** (numbers below as analysis lands).
+- raw_erratum_tail / raw_SGSR (the SSA paper's actual SG+SR cell, added
+  S1.1): running at the deadline; numbers appended.
+- Layout invariants (cache_length, k_anchor, history_length) pairwise
+  distinct per the regression test.
+
+## D3–D7 smoke (1 qid, all six arms, one process)
+
+3/6 arms green end-to-end (less_fold, selkv_bias, selkv_count — **the
+eager-path bias/fold registry works on the real model**); 3 failed on two
+smoke-scope bugs now fixed and queued for rerun (capsule einsum had one
+extra unsqueeze into `equalize_r`; GRKV's ridge `torch.eye` defaulted to
+CPU).  Smoke rows are evidence of plumbing only, not scored data.
 
 ## Witness selection (prereg v2.2, user's frozen algorithm)
 

@@ -92,8 +92,9 @@ def build_d37_prefix(model, tokenizer, example, args, mode, store):
                  if want_q else None)
         r = 16
         if want_q:
-            eq = equalize_r(k_raw[0].unsqueeze(0), v_raw[0].unsqueeze(0),
-                            q_raw[0].unsqueeze(0))
+            # k_raw[0] is layer 0's (H_kv, L, D) — equalize_r expects exactly
+            # that; the extra unsqueeze made every capsule einsum 4-D (smoke)
+            eq = equalize_r(k_raw[0], v_raw[0], q_raw[0])
             r = eq.get("reskv_r" if splice == "reskv" else "keepkv_r") or 16
             info["capsule_bytes"] = eq
         span_kv = []

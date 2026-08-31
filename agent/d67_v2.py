@@ -61,7 +61,8 @@ def grkv_v_edit(
         # ridge solve (g is small; A^T A near-collinear) in fp32
         AtA = A.T @ A
         lam = ridge * torch.diagonal(AtA).mean().clamp_min(1e-8)
-        delta[h] = torch.linalg.solve(AtA + lam * torch.eye(g, dtype=AtA.dtype), A.T @ R)
+        delta[h] = torch.linalg.solve(
+            AtA + lam * torch.eye(g, dtype=AtA.dtype, device=AtA.device), A.T @ R)
     return delta
 
 
