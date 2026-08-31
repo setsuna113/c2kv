@@ -55,18 +55,28 @@ tool_calls branch is deliberately not used (kept as a future A/B).
 ## Usage (on the server)
 
 ```bash
-# 1. serve the checkpoint (HF path; the SGLang fork does not run on this
-#    NPU stack — see git history for the five compat patches tried)
-~/bench_logs/launch_hf.sh   # DEV=0 PORT=34000 by default
+# 1. serve the checkpoint. The DEFAULT backend is the SGLang c2kv fork
+#    (branch c2kv-sglang-bfcl @ 22fbf3146 + the in-repo deployment patches
+#    benchmarks/backends/sglang_patches/). The old claim that the fork
+#    "does not run on this NPU stack" was WRONG: it was decided 2026-08-27
+#    in a 2-hour window on the July-era c2kv-v0.5.10 base (pure CUDA) while
+#    the NPU-ready line existed on another branch; on the right branch plus
+#    one compat port (split_qkv import guard) it serves cleanly.
+#    Launcher (dev3 :35000, 0.28 mem / 16k ctx / no cuda-graph):
+~/bench_logs/sgl_deploy/launch_sgl1088.sh
 
-# 2. start the arm proxy (one per arm, different ports; ratio comes from
-#    the arm registry, there is no --ratio flag)
-~/bench_logs/launch_proxy.sh c2kv 34100 34000 c2kv
+# 2. start the arm proxy (one per arm; ratio comes from the arm registry)
+~/bench_logs/launch_sgl_proxy.sh c2kv 35100 35000 task_myrun
 
 # 3. run each benchmark against the proxy (adapters wrap the official CLIs)
 ~/envs/bench/bin/python benchmarks/run.py --benchmark tau2 --arm c2kv \
-  --upstream http://127.0.0.1:34000 --out results/bench/tau2_c2kv
+  --backend sglang --upstream http://127.0.0.1:35000 \
+  --out results/bench/tau2_c2kv
 ```
+
+The in-repo Flask `hf_server` is RETIRED from the evaluation path: it
+survives only as the `hfserver` contrast backend (`backends/hfserver.py`)
+for A/B checks and D-side tooling. Do not baseline new numbers on it.
 
 ## Arm registry
 
