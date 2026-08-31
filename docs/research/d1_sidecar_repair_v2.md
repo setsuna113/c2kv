@@ -53,22 +53,27 @@ one single-arm run for 10× the data.
 
 | arm | n | S | injected | reading |
 |---|---|---|---|---|
-| raw_keepG (sweep k_witness rows) | 93 | **71 (76.3%)** | 90 | main estimate |
-| raw_replaceG (delete G_k, R_k in place) | 93 | **70 (75.3%)** | 90 | ≈ keepG: with the RIGHT content, layout is second-order |
+| **raw_erratum_tail** (R_k at repair tail, ledger advanced) | 93 | **75 (80.6%)** | 90 | **best arm** — anchoring the block as a fresh end-of-history note beats both original-position placements |
+| raw_keepG (sweep k_witness rows) | 93 | 71 (76.3%) | 90 | main estimate |
+| raw_replaceG (delete G_k, R_k in place) | 93 | 70 (75.3%) | 90 | ≈ keepG: with the RIGHT content, layout is second-order |
 | allblock_sidecar (same cache as keepG) | 93 | 71 (76.3%) | 90 | identical to keepG by construction — ledger-only twin, verified |
 | oracle_target_only (storage-only control) | 93 | 0 (0.0%) | 0 | injects nothing = the c2kv baseline on the trigger set — exact control behavior |
 
 injected = 90 = 93 − 3 (k\*=None stratum) in every injection arm.
-raw_erratum_tail / raw_SGSR (SSA's SG+SR cell): tokenizing at the
-deadline on dev3/dev4; numbers appended when they land.
+raw_SGSR (SSA's SG+SR cell): crashed on a missing mode registration
+(fixed); rerun appended when it lands.
 
-## D3–D7 smoke (1 qid, all six arms, one process)
+## D3–D7 smoke (1 qid, all six arms, one process; rerun complete)
 
 3/6 arms green end-to-end (less_fold, selkv_bias, selkv_count — **the
-eager-path bias/fold registry works on the real model**); 3 failed on two
-smoke-scope bugs now fixed and queued for rerun (capsule einsum had one
-extra unsqueeze into `equalize_r`; GRKV's ridge `torch.eye` defaulted to
-CPU).  Smoke rows are evidence of plumbing only, not scored data.
+eager-path bias/fold registry works on the real model**).  Remaining
+failures after the round-2 fixes, honestly recorded:
+- reskv/keepkv capsules: NPU `AclSetCompileopt` error 500001 (an ACL
+  compiler-environment failure triggered by the capsule path — needs a
+  standalone repro; NOT a math bug, unit tests are green on CPU).
+- grkv_v_edit: residual device mismatch under investigation (the
+  `torch.eye` CPU default was fixed; one more straggler remains).
+Smoke rows are plumbing evidence only, not scored data.
 
 ## Witness selection (prereg v2.2, user's frozen algorithm)
 
@@ -97,16 +102,14 @@ E[max]=1−(1−p)^n_docs, flip concentration, wrong-block distribution.)
 runs fill the rest; layout invariants (cache_length, k_anchor,
 history_length) asserted distinct.)
 
-## D2 short_erratum @ frozen k_witness
+## D2 short_erratum @ frozen k_witness (FINAL, 93 qids)
 
-Shard A (46 qids) complete: **S = 2/28 on the ACTIVE denominator**
-(injected=28; NoneK=2; empty-witness=16 — the leak-boundary no-ops).
-Erratum ≈ 62 tokens of pure witness literals.  **Reading: a TEXTUAL
-correction of the right values repairs almost nothing (2/28 ≈ 7%) while
-the raw-KV transplant of the same block repairs 76% — the channel needs
-the block's KV content itself, not a declarative note.**  Combined D2
-numbers (with shard B, effective denominator ≈ 56/93 per the 42/93
-full-set split) appended when it lands.
+**S = 4/93 overall; 4/42 on the ACTIVE denominator** (injected = 42 —
+matching the frozen witness table's 42/93 prediction exactly; 3 NoneK +
+48 tool-name-only no-ops).  Erratum ≈ 62 tokens of pure witness
+literals.  **Verdict: the textual erratum channel is DEAD (9.5% vs the
+KV transplant's 76-81%) — repair requires the block's raw KV content,
+not a declarative note of the right values.**
 
 ## Bytes and timing axes
 

@@ -1748,6 +1748,7 @@ D_CONTRACT_MODES = {
     "d_raw_keepG",
     "d_raw_replaceG",
     "d_raw_erratum_tail",
+    "d_raw_SGSR",
     "d_short_erratum",
     # D4/D5/D6/D7 runtime arms (d37_arms.py; registry cleared by the driver)
     "d_reskv_capsule",
