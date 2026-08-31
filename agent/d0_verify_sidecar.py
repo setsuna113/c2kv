@@ -291,13 +291,19 @@ def main(argv=None):
     for qid in qids:
         rep = verify_one(args, hargs, model, tokenizer, by_qid[qid], want_q=True)
         reports.append(rep)
+        # v2.9 keys: L0 shape-noise control + rel-Frobenius profile (the
+        # v2.8 print referenced removed bit-equality keys and crashed AFTER
+        # the verification but BEFORE the JSON write — 3h lost, never again)
         print(
             f"[{qid}] stage1={'PASS' if rep['stage1']['pass'] else 'FAIL'} "
+            f"(L0k max|d|={rep['stage1']['k']['L0_max_abs']}) "
             f"stage2={'PASS' if rep['stage2']['pass'] else 'FAIL'} "
-            f"(K bit-equal {rep['stage2']['bit_equal_layers']}/{rep['stage2']['total']}, "
-            f"max|d|={rep['stage2']['max_abs_diff']:.3e})",
+            f"(L0={rep['stage2']['L0_max_abs']}, relF mean={rep['stage2']['rel_frob_mean']})",
             flush=True,
         )
+        # write the report INCREMENTALLY so a late crash cannot lose it
+        out_path.write_text(json.dumps(
+            {"n_qids": len(reports), "reports": reports}, indent=2), encoding="utf-8")
         HH._clear_device_cache(args.device_type)
 
     summary = {

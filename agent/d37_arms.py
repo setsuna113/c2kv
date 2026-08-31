@@ -105,9 +105,12 @@ def build_d37_prefix(model, tokenizer, example, args, mode, store):
             else:
                 q_l = q_raw[li] if q_raw is not None else torch.zeros_like(k_raw[li])
                 cap = encode_keepkv(k_raw[li], v_raw[li], q_l, r)
-                c = cap["caps"][0]
-                ck, cv = c["k"], c["v"]
-                bias = torch.log(c["votes"].clamp_min(1e-9))
+                # stack ALL heads (caps[0] would splice head 0's capsule
+                # into every head — the 5/6 smoke failure)
+                ck = torch.stack([c["k"] for c in cap["caps"]])       # (H, r, D)
+                cv = torch.stack([c["v"] for c in cap["caps"]])       # (H, r, D)
+                bias = torch.stack([torch.log(c["votes"].clamp_min(1e-9))
+                                    for c in cap["caps"]])            # (H, r)
             ck = apply_abs_rope(ck.float(), offsets[k_star], rotary, dtype=dtype, device=device)
             span_kv.append((ck.unsqueeze(0), cv.to(dtype).unsqueeze(0)))
             # key_bias is PER KV HEAD: (H_kv, P) — the registry GQA-expands it
