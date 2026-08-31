@@ -98,6 +98,10 @@ def build_d37_prefix(model, tokenizer, example, args, mode, store):
             r = eq.get("reskv_r" if splice == "reskv" else "keepkv_r") or 16
             info["capsule_bytes"] = eq
         span_kv = []
+        # bias widths must ALL match the FINAL cache length (the splice
+        # shrinks the cache per layer; reading get_seq_length() inside the
+        # loop gives layer-dependent widths that break the registry at decode)
+        bias_len = prefix_cache.get_seq_length() - (ge - gs) + r
         for li in range(len(prefix_cache.layers)):
             if splice == "reskv":
                 cap = encode_reskv(k_raw[li], v_raw[li], r)
@@ -113,8 +117,9 @@ def build_d37_prefix(model, tokenizer, example, args, mode, store):
                                     for c in cap["caps"]])            # (H, r)
             ck = apply_abs_rope(ck.float(), offsets[k_star], rotary, dtype=dtype, device=device)
             span_kv.append((ck.unsqueeze(0), cv.to(dtype).unsqueeze(0)))
-            # key_bias is PER KV HEAD: (H_kv, P) — the registry GQA-expands it
-            bias_full = torch.zeros(n_kv_heads, prefix_cache.get_seq_length(),
+            # key_bias is PER KV HEAD: (H_kv, P) — the registry GQA-expands it;
+            # width fixed to the FINAL cache length for every layer
+            bias_full = torch.zeros(n_kv_heads, bias_len,
                                     dtype=torch.float32, device=device)
             bias_full[:, phys_start:phys_start + ck.shape[-2]] = bias.float().to(device)
             entries[li] = attn_bias.LayerBiasEntry(key_bias=bias_full)

@@ -95,9 +95,13 @@ def main(argv=None):
                             arm, ok, row["wall_sec"], row.get("cache_tokens"),
                             (row.get("d_contract_info") or {}).get("k_star"))
                 n_ok += int(ok)
-            except Exception as exc:  # smoke: record and continue with the next arm
-                logger.error("arm=%s FAILED: %s", arm, exc)
+            except Exception as exc:  # smoke: record (with traceback) and continue
+                import traceback
+
+                tb = traceback.format_exc()
+                logger.error("arm=%s FAILED: %s\n%s", arm, exc, tb)
                 handle.write(json.dumps({"qid": args.qid, "d_arm": arm, "smoke_error": str(exc),
+                                         "smoke_traceback": tb,
                                          "wall_sec": round(time.perf_counter() - start, 3)},
                                         ensure_ascii=False) + "\n")
                 handle.flush()
