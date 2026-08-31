@@ -504,3 +504,31 @@ Rulings:
 Sentinel code follow-up (non-blocking): verdict logic becomes
 L0-vs-shape-noise control (<= 2 ulp) + per-layer RELATIVE Frobenius error
 (the probe's mean|d| is 8e-8 — max|d| alone overstates the divergence).
+
+### v2.10 positive-conformance record + accepted limitations (S1.3/S1.4/S1.6, 2026-08-31)
+
+**CONFORMS (the one place the project may claim it):**
+`python/inference/abs_rope.apply_abs_rope` implements the Leyline/Nexus
+RoPE-reanchor primitive, and is STRICTLY MORE GENERAL.  By RoPE's closure
+R(a)·R(b) = R(a+b), applying R(start+i) to PRE-RoPE keys is algebraically
+identical to the papers' delta-displacement R(start)·R(i) of post-RoPE
+keys — but does not require having the post-RoPE cache first (the sidecar
+stores position-free K precisely to allow this).  Evidence:
+`metrology/test_abs_rope.py` (identity vs `rotate_k_cache_rope` at fp32
+associativity, atol 1e-4; distinct-positions regression pinning the v1
+collapse bug).  Everything ELSE in the D line is labelled per S1.5 as
+"block-local transfer" or "the paper's baseline/ablation" — most
+prominently d5_v2 is the UNTRAINED LOWER BOUND of LESS/RMA, and
+`grkv_v_edit` is the paper's GRV ablation (the full method adds a ΔK arm
+via matrix-free JVP/VJP + CG).
+
+**Accepted limitations (not re-run for):**
+- warm repair latency needs an in-process second call per qid — recorded
+  as a limitation, not reconstructed (review concurrence).
+- Seam effects (Notes-at-Prefill §5): boundary tokens of the transplanted
+  block miss the prefix they would have attended in a full prefill; we do
+  NOT recompute boundary tokens this round — declared, not hidden.
+- raw_keepG's bytes ledger: billed at sidecar_bytes_all for SSA-labelling
+  purposes (SSA has no oracle and must keep every block resident); the
+  all-target-only vs all-blocks差额 IS the oracle's saving — reported as
+  such (S1.2).  Both columns were already in every row; reporting-only.
