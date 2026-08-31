@@ -1,0 +1,83 @@
+--- python/sglang/srt/entrypoints/openai/protocol.py	2026-08-30 20:20:01.000000000 +0800
++++ /home/liuyancheng/sgl-22fbf3146/python/sglang/srt/entrypoints/openai/protocol.py	2026-08-31 05:02:03.955259300 +0800
+@@ -1514,6 +1514,11 @@
+     compression_ratio: int = Field(default=4)
+     role: Optional[str] = None
+     chat_template_kwargs: Optional[Dict] = None
++    # optional tool schemas: rendered into the chat template exactly as the
++    # serving path renders them (Qwen templates put tools in the system
++    # block), so original_seq_len measures the TRUE system-block length —
++    # required for callers computing repair position offsets
++    tools: Optional[List[Dict]] = None
+ 
+ 
+ class C2KVExtractResponse(BaseModel):
+--- python/sglang/srt/entrypoints/http_server.py	2026-08-30 20:20:01.000000000 +0800
++++ /home/liuyancheng/sgl-22fbf3146/python/sglang/srt/entrypoints/http_server.py	2026-08-31 05:02:28.927259300 +0800
+@@ -1470,11 +1470,17 @@
+             # then tokenize the string.  The two-step approach avoids BPE
+             # boundary differences that arise when subtracting token-ID
+             # prefixes from a jointly-tokenized multi-message sequence.
++            extract_template_kwargs = dict(chat_template_kwargs)
++            if request.tools:
++                # render tool schemas into the template the same way the
++                # serving path does (serving_chat._chat_template_tools) so
++                # original_seq_len includes the tools prologue
++                extract_template_kwargs["tools"] = request.tools
+             text_str = tokenizer.apply_chat_template(
+                 [{"role": request.role, "content": request.text}],
+                 tokenize=False,
+                 add_generation_prompt=False,
+-                **chat_template_kwargs,
++                **extract_template_kwargs,
+             )
+             if tokenizer.bos_token and text_str.startswith(tokenizer.bos_token):
+                 text_str = text_str[len(tokenizer.bos_token):]
+--- python/sglang/srt/models/qwen3.py	2026-08-30 20:20:01.000000000 +0800
++++ /home/liuyancheng/sgl-22fbf3146/python/sglang/srt/models/qwen3.py	2026-08-31 03:58:46.183259300 +0800
+@@ -66,7 +66,15 @@
+ if _is_npu:
+     import torch_npu
+ 
+-    from sgl_kernel_npu.norm.split_qkv_rmsnorm_rope import split_qkv_rmsnorm_rope
++    try:
++        from sgl_kernel_npu.norm.split_qkv_rmsnorm_rope import (
++            split_qkv_rmsnorm_rope,
++        )
++    except ImportError:
++        # older triton-ascend without language.extra.cann: fall back to the
++        # native path (split + qk_norm + rope) for decode as well
++        # (compat 27f21a588, ported onto 22fbf3146)
++        split_qkv_rmsnorm_rope = None
+ 
+     from sglang.srt.hardware_backend.npu.cmo import get_cmo_stream, wait_cmo_stream
+ 
+@@ -364,6 +372,7 @@
+             save_kv_cache = False
+         elif (
+             not _is_npu
++            or split_qkv_rmsnorm_rope is None
+             or forward_batch.forward_mode.is_extend_or_draft_extend_or_mixed()
+         ):
+             q, k, v = self.forward_prepare_native(
+--- python/sglang/srt/model_executor/forward_batch_info.py	2026-08-30 20:20:01.000000000 +0800
++++ /home/liuyancheng/sgl-22fbf3146/python/sglang/srt/model_executor/forward_batch_info.py	2026-08-31 03:57:46.391259300 +0800
+@@ -1235,6 +1235,18 @@
+ def compute_position_torch(
+     extend_prefix_lens: torch.Tensor, extend_seq_lens: torch.Tensor
+ ):
++    import logging as _logging
++
++    _logger = _logging.getLogger(__name__)
++    if (extend_seq_lens < 0).any() or (extend_prefix_lens < 0).any():
++        _logger.error(
++            "compute_position_torch: negative lens extend_prefix_lens=%s "
++            "extend_seq_lens=%s — clamping to 0 to keep the engine alive",
++            extend_prefix_lens.tolist(),
++            extend_seq_lens.tolist(),
++        )
++        extend_prefix_lens = extend_prefix_lens.clamp(min=0)
++        extend_seq_lens = extend_seq_lens.clamp(min=0)
+     positions = torch.cat(
+         [
+             torch.arange(
