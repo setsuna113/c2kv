@@ -49,14 +49,18 @@ designed — all 93 compressions+captures took **6 minutes** total; the 928
 generations took 171 min (**11.1 s/gen**), i.e. the full sweep cost ~7.7×
 one single-arm run for 10× the data.
 
-## D1 arms @ frozen k_witness
+## D1 arms @ frozen k_witness (complete)
 
-- raw_keepG: from the sweep's k_witness rows (= the 76.3% above).
-- raw_replaceG: **93/93 complete** (numbers below as analysis lands).
-- raw_erratum_tail / raw_SGSR (the SSA paper's actual SG+SR cell, added
-  S1.1): running at the deadline; numbers appended.
-- Layout invariants (cache_length, k_anchor, history_length) pairwise
-  distinct per the regression test.
+| arm | n | S | injected | reading |
+|---|---|---|---|---|
+| raw_keepG (sweep k_witness rows) | 93 | **71 (76.3%)** | 90 | main estimate |
+| raw_replaceG (delete G_k, R_k in place) | 93 | **70 (75.3%)** | 90 | ≈ keepG: with the RIGHT content, layout is second-order |
+| allblock_sidecar (same cache as keepG) | 93 | 71 (76.3%) | 90 | identical to keepG by construction — ledger-only twin, verified |
+| oracle_target_only (storage-only control) | 93 | 0 (0.0%) | 0 | injects nothing = the c2kv baseline on the trigger set — exact control behavior |
+
+injected = 90 = 93 − 3 (k\*=None stratum) in every injection arm.
+raw_erratum_tail / raw_SGSR (SSA's SG+SR cell): tokenizing at the
+deadline on dev3/dev4; numbers appended when they land.
 
 ## D3–D7 smoke (1 qid, all six arms, one process)
 
