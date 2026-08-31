@@ -25,15 +25,21 @@ import torch
 
 
 def _kmeans(x: torch.Tensor, r: int, iters: int = 8, seed: int = 0) -> Tuple[torch.Tensor, torch.Tensor]:
-    """(n, d) -> centroids (r, d), assignments (n,) — deterministic init."""
+    """(n, d) -> centroids (r, d), assignments (n,) — deterministic init.
+
+    Distances via manual (x-c)^2 = |x|^2 + |c|^2 - 2x.c: torch.cdist
+    crashes this torch_npu build's ACL compiler (AclSetCompileopt 500001,
+    repro'd standalone on dev3 2026-08-31) and poisons the process's ACL
+    state for every later op — plain matmul is fine."""
     g = torch.Generator().manual_seed(seed)
     n = x.shape[0]
     r = min(r, n)
     idx = torch.randperm(n, generator=g)[:r]
     cent = x[idx].clone()
-    assign = torch.zeros(n, dtype=torch.long)
+    assign = torch.zeros(n, dtype=torch.long, device=x.device)
+    x2 = (x * x).sum(dim=1)
     for _ in range(iters):
-        d2 = torch.cdist(x, cent)
+        d2 = x2[:, None] + (cent * cent).sum(dim=1)[None, :] - 2.0 * (x @ cent.T)
         assign = d2.argmin(dim=1)
         for j in range(r):
             sel = x[assign == j]
@@ -76,7 +82,7 @@ def decode_reskv(cap: Dict) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
 def _attn_importance(k: torch.Tensor, q: torch.Tensor, n_rep: int, scale: float) -> torch.Tensor:
     """imp[i] = sum over the block's own queries of attn[q, i] (causal)."""
     H, L, D = k.shape
-    imp = torch.zeros(H, L)
+    imp = torch.zeros(H, L, device=k.device)
     for h in range(H):
         qh = q.float()[h * n_rep:(h + 1) * n_rep]
         logits = torch.matmul(qh, k.float()[h].transpose(-1, -2)) * scale

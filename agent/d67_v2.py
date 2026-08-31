@@ -45,7 +45,7 @@ def grkv_v_edit(
     """ΔV (H_kv, g, D) in fp32; caller adds it to the cache's gist span."""
     H_kv, g, D = k_gist.shape
     scale = 1.0 / math.sqrt(D)          # DIVISION, not multiplication
-    delta = torch.zeros(H_kv, g, D, dtype=torch.float32)
+    delta = torch.zeros(H_kv, g, D, dtype=torch.float32, device=k_gist.device)
     for h in range(H_kv):
         # teacher: ALL n_rep query heads of this kv head, stacked
         qh = q_raw.float()[h * n_rep:(h + 1) * n_rep]           # (n_rep, L, D)
@@ -91,7 +91,7 @@ def selkv_mass_ratio(
     """
     H_kv, g, D = k_gist.shape
     scale = 1.0 / math.sqrt(D)
-    log_R = torch.zeros(H_kv, g, dtype=torch.float64)
+    log_R = torch.zeros(H_kv, g, dtype=torch.float64, device=k_gist.device)
     for h in range(H_kv):
         qh = q_raw.double()[h * n_rep:(h + 1) * n_rep]           # (n_rep, L, D)
         raw_logits = torch.matmul(qh, k_raw.double()[h].transpose(-1, -2)) * scale
