@@ -71,3 +71,20 @@ c2kv-sglang-bfcl 线上完整服务,三项冒烟全过:
 ## Phase 1-4
 
 见 docs/research/hybrid_x_d.md §5 与本文件后续增补。
+
+## 遗留物处置记录(2026-08-31)
+
+- **`fix/c2kv-segment-offset-tools`(737974315)**:功能性已被 22fbf3146 收编
+  ——目标树的 `serving_chat.py` 含 `_chat_template_tools` +
+  `_c2kv_chat_template_input_ids(..., tools=tools)`(242/315-336 行),
+  即本分支所修"tools 不进 segment 插入点"的成熟版。判定:过时,
+  远程分支可删;删除因 GitHub 网络抖动暂缓(本地 `git push origin
+  --delete fix/c2kv-segment-offset-tools` 待重试)。
+- **z4_f3_bfcl_cd_c2kv_4186**:并行会话的任务,保持 `~/bench_queue/delayed/`,
+  由其所有者决定(其 4186 ckpt + 旧 hf_server 栈在迁移后是否仍要跑)。
+- **fork 同步**:github.com 主站从服务器不可达(codeload 走 squid 可用),
+  git fetch 暂无法执行。部署以 tarball(22fbf3146)+
+  `benchmarks/backends/sglang_patches/`(入库)为准,完全可复现;
+  网络恢复后:checkout fetch → 在 c2kv-sglang-bfcl 上提交同内容三补丁 → push。
+- **hf_server 退役**:README 已改(8bc3a30),`backends/hfserver.py` 保留为
+  对照后端;`benchmarks/hf_server.py` 不再进评测路径。
