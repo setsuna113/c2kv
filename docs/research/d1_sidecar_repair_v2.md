@@ -55,13 +55,12 @@ one single-arm run for 10× the data.
 |---|---|---|---|---|
 | **raw_erratum_tail** (R_k at repair tail, ledger advanced) | 93 | **75 (80.6%)** | 90 | **best arm** — anchoring the block as a fresh end-of-history note beats both original-position placements |
 | raw_keepG (sweep k_witness rows) | 93 | 71 (76.3%) | 90 | main estimate |
+| raw_SGSR (SSA's SG+SR: only k*'s gist kept, rest dropped) | 93 | 71 (76.3%) | 90 | = keepG: dropping the OTHER docs' gists (mean 426 tokens) costs NOTHING — the repair runs on the witness block alone |
 | raw_replaceG (delete G_k, R_k in place) | 93 | 70 (75.3%) | 90 | ≈ keepG: with the RIGHT content, layout is second-order |
 | allblock_sidecar (same cache as keepG) | 93 | 71 (76.3%) | 90 | identical to keepG by construction — ledger-only twin, verified |
 | oracle_target_only (storage-only control) | 93 | 0 (0.0%) | 0 | injects nothing = the c2kv baseline on the trigger set — exact control behavior |
 
 injected = 90 = 93 − 3 (k\*=None stratum) in every injection arm.
-raw_SGSR (SSA's SG+SR cell): crashed on a missing mode registration
-(fixed); rerun appended when it lands.
 
 ## D3–D7 smoke (1 qid, all six arms, one process; rerun complete)
 
