@@ -536,8 +536,13 @@ class ProxyHandler(BaseHTTPRequestHandler):
         assemble_sec = time.perf_counter() - start
 
         def send_upstream(out_messages, plan):
-            out_payload = BACKEND.prepare_chat(dict(payload), ARM, plan)
-            out_payload["messages"] = out_messages
+            # prepare_chat must SEE the assembled messages: the sglang
+            # backend attaches repair hashes to the (gist-marked) target
+            # message — feeding it the raw payload made every rp-arm
+            # request fail "repair target has no c2kv_key_hash"
+            staged = dict(payload)
+            staged["messages"] = out_messages
+            out_payload = BACKEND.prepare_chat(staged, ARM, plan)
             return _post_json(self.path, out_payload, 600), out_payload
 
         try:
