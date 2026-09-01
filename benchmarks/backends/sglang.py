@@ -4,25 +4,29 @@ Wire protocol (verified live against 22fbf3146 on NPU, docs/sglang_migration.md)
 * ``POST /v1/c2kv/extract`` — same request/response shape as hf_server
   (``text``/``compression_ratio``/``role`` → ``key_hash``/``gist_len``/
   ``original_seq_len``); failures are HTTP 200 with ``success=false``.
-* ``POST /v1/c2kv/repair_extract`` — stores the raw KV of a span; the
-  d_corr entry bakes the CALLER-SUPPLIED ``position_offset`` into the
-  absolute RoPE phase at capture time and is copied verbatim at injection
-  (``inject_c2kv_stored_kv``: already_rotated entries are not re-rotated).
-  The offset must therefore be the span's true logical position in the
-  ORIGINAL uncompressed conversation: system tokens + Σ original_seq_len
-  of every message before it.  The proxy ledger supplies it.
-* message-level ``c2kv_key_hash`` + ``c2kv_repair_key_hashes`` on chat
-  messages; injection follows the message's own gist block.
+* ``POST /v1/c2kv/repair_extract`` — full-context form (server branch
+  task/c2kv-serve-align, c2kv/c2kv_serving_semantics.md): ``messages`` +
+  ``target_index`` + ``tools``; the server renders the prefix like a chat
+  request and stores the target message's raw K/V (pre-RoPE) with its
+  absolute positions in that rendering.  The legacy ``text``+``role`` form
+  (standalone encoding, caller-supplied ``position_offset``) is kept only
+  for A/B.
+* message-level ``c2kv_key_hash`` (gist), ``c2kv_repair_key_hashes`` /
+  ``c2kv_repair_only_key_hashes`` (raw KV) and ``c2kv_repair_placement``
+  (in_place / append_keep_ledger / append_tail) on chat messages.
+* every response carries ``metadata.sglang_runtime.c2kv_query_proj`` (which
+  projection the server used for post-gist tokens) and ``c2kv_layout`` (the
+  injections with their RoPE positions) for provenance / frame checks.
 * constrained decoding via ``response_format={"type": "structural_tag"}``;
   tool schemas need xgrammar-safe repair (``_normalize_tool_schema``,
   moved verbatim from hf_server.py).
 * per-request KV accounting in ``metadata.sglang_runtime``
   (kv_resident_tokens / kv_peak_resident_tokens / kv_pool_size).
 
-Accepted regime differences (decided 2026-08-30, docs/sglang_migration.md):
-no use_gist global rule (bench face is its own regime, all numbers
-rebaselined); whole-message chunking (no <=768 split simulation); repair
-injects after the target's own gist block, not at the prefix end.
+Regime notes (superseding the 2026-08-30 decisions in docs/sglang_migration.md):
+the server's ``--c2kv-query-proj gist`` restores the training use_gist rule
+for post-gist tokens; docs are packed by the proxy in the TRAINING turn
+format (``--doc-packing turn``); repair placement is explicit.
 """
 from __future__ import annotations
 
@@ -144,6 +148,30 @@ class SglangBackend(Backend):
                 f"c2kv repair_extract failed: {result.get('error') or json.dumps(result)[:500]}")
         return result
 
+    def repair_extract_messages(self, messages: List[Dict[str, Any]],
+                                target_index: int,
+                                tools: Optional[List[Dict[str, Any]]],
+                                source_doc_index: int) -> Dict[str, Any]:
+        payload: Dict[str, Any] = {
+            "messages": [
+                {"role": m.get("role") or "user", "content": m.get("content") or ""}
+                for m in messages
+            ],
+            "target_index": int(target_index),
+            "chat_template_kwargs": {"enable_thinking": False},
+            "repair_mode": "d_corr",
+            "source_doc_index": source_doc_index,
+        }
+        if tools:
+            payload["tools"] = tools
+        result = self._post_json("/v1/c2kv/repair_extract", payload, 600)
+        if not result.get("success", True) or not result.get("key_hash"):
+            raise BackendError(
+                "repair_failed",
+                f"c2kv repair_extract(messages) failed: "
+                f"{result.get('error') or json.dumps(result)[:500]}")
+        return result
+
     # ---- chat shaping ----
     def prepare_chat(self, payload: Dict[str, Any], arm,
                      repair_plan: Optional[Dict[str, Any]]) -> Dict[str, Any]:
@@ -166,22 +194,40 @@ class SglangBackend(Backend):
                     for tool in tools
                 ]
         if repair_plan and arm.repair:
-            index = repair_plan.get("message_index")
+            placement = str(repair_plan.get("placement") or "append_keep_ledger")
+            key_hash = repair_plan["repair_key_hash"]
+            index = repair_plan.get("target_out_index", repair_plan.get("message_index"))
             if index is None or not 0 <= index < len(messages):
                 raise BackendError(
                     "repair_failed",
-                    f"repair plan message_index {index!r} out of range")
-            message = dict(messages[index])
-            # the repair hashes are read only on messages that also carry
-            # their own gist reference (scheduler walks c2kv segments)
-            if not message.get("c2kv_key_hash"):
-                raise BackendError(
-                    "repair_failed",
-                    f"repair target message {index} has no c2kv_key_hash")
-            hashes = list(message.get("c2kv_repair_key_hashes") or [])
-            hashes.append(repair_plan["repair_key_hash"])
-            message["c2kv_repair_key_hashes"] = hashes
-            messages[index] = message
+                    f"repair plan target index {index!r} out of range")
+            if placement == "in_place":
+                # the raw span REPLACES the target doc's gist: the message
+                # becomes repair-only (no gist), the server re-anchors the
+                # query to the span's absolute end
+                message = dict(messages[index])
+                if not message.get("c2kv_key_hash"):
+                    raise BackendError(
+                        "repair_failed",
+                        f"in_place repair target {index} has no c2kv_key_hash")
+                message.pop("c2kv_key_hash", None)
+                message["c2kv_repair_only_key_hashes"] = [key_hash]
+                message["c2kv_repair_placement"] = placement
+                messages[index] = message
+            elif placement in ("append_keep_ledger", "append_tail"):
+                # the raw span is appended to the end of history (after all
+                # gists and the raw hybrid tail, before the current turn) as a
+                # repair-only message; the gist of the target doc stays
+                insert_at = repair_plan.get("current_start_out_index")
+                if insert_at is None or not 0 <= insert_at <= len(messages):
+                    insert_at = len(messages)
+                messages.insert(int(insert_at), {
+                    "role": "user", "content": "",
+                    "c2kv_repair_only_key_hashes": [key_hash],
+                    "c2kv_repair_placement": placement,
+                })
+            else:
+                raise BackendError("repair_failed", f"unknown placement {placement!r}")
         out["messages"] = messages
         return out
 
@@ -194,9 +240,14 @@ class SglangBackend(Backend):
         if finish == "abort":
             raise BackendError("finish_abort", json.dumps(data)[:500])
         message = choice.get("message") or {}
+        error_text = str(data.get("error") or "")
+        if "C2KV_CACHE_MISS" in error_text or "C2KV cache miss" in error_text:
+            raise BackendError("cache_miss", error_text)
         runtime = ((data.get("metadata") or {}).get("sglang_runtime")) or {}
         cost = {k: runtime[k] for k in (
-            "kv_resident_tokens", "kv_peak_resident_tokens", "kv_pool_size")
+            "kv_resident_tokens", "kv_peak_resident_tokens", "kv_pool_size",
+            "c2kv_query_proj", "c2kv_gist_seen", "c2kv_position_correction",
+            "c2kv_layout")
             if k in runtime}
         return {
             "content": message.get("content"),

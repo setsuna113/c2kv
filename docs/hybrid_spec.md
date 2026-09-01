@@ -16,10 +16,15 @@ ran on this NPU stack and its semantics were already absorbed here.
 
 Given a conversation `system, m_0 .. m_{T-1}, current`:
 
-1. **Fitting.** History messages are normalized and split into per-message
-   docs of at most `max_doc_length` (768) tokens; the tail up to
-   `max_doc_num` (16) docs is kept (harness `_fit_reused_history`; the server
-   chunks extracts at 768).
+1. **Fitting.** History messages are normalized and packed into TURN docs
+   (`train_data_multiturn._agent_history_turn_docs`: one `Previous turn /
+   [User query] / [Assistant output]` doc per input message + following
+   outputs), split to at most `max_doc_length` (768) tokens; the tail up to
+   `max_doc_num` (16) docs is kept with the doc-0 anchor (harness
+   `_fit_reused_history`). Since 2026-09-02 the bench proxy does the same
+   (`--doc-packing turn`, `proxy._turn_docs` / `_fit_doc` / `_select_docs`);
+   its earlier per-message format survives as `--doc-packing message`.
+   See docs/c2kv_semantics.md section 3.
 2. **Split.** The last `k` docs (`hybrid_top_k`) stay **raw** (uncapped — a
    doc is ≤768 after fitting; the server never caps raw messages); the
    remaining prefix docs `[0, T-k)` are compressed through the 768/16 gist
@@ -48,6 +53,13 @@ Given a conversation `system, m_0 .. m_{T-1}, current`:
    target span sliced and concatenated at the cache end **unrotated**.
    `j` must index a COMPRESSED doc (`j < T-k`); the raw tail is never an
    erratum target and is never scanned.
+
+   Bench-side placement (2026-09-02, docs/c2kv_semantics.md section 5): the
+   arm's `repair.placement` selects `append_keep_ledger` (= this corr
+   append), `append_tail` (= D-line raw_erratum_tail) or `in_place`
+   (= replaceG); the raw KV is extracted server-side in full context
+   (`repair_extract` messages form) and the plan records a frame check
+   against the server's gist ledger.
 
    Bench-side policy grammar (`benchmarks/repair_policy.py`, forwarded by
    the proxy as the request-level `c2kv_repair` field):

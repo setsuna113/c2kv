@@ -10,10 +10,16 @@ defined once in docs/hybrid_spec.md (canonical gist_first layout):
 * hybrid  — top-k tail of history stays raw, the rest is compressed
             (hybrid / hybrid_k1 / hybrid_k5 = k 3/1/5).
 * *_repair — corr@first on the compressed prefix (docs/hybrid_spec.md
-            "Repair interaction"): the server appends the raw KV of the
-            policy-selected compressed history block at its original logical
-            offset, the bench port of the D-harness `--arm corr
-            --corr_k_policy offset:0` arm.
+            "Repair interaction", docs/c2kv_semantics.md "Repair placement"):
+            the raw KV of the policy-selected compressed doc, computed in its
+            full context, is injected with an explicit placement:
+              append_keep_ledger (default) = D-harness corr / keepG, the
+                doc's gist stays, the span keeps its original RoPE phase;
+              append_tail (*_repair_tail) = D-harness raw_erratum_tail, the
+                span is re-rotated to the end of history and the ledger
+                advances;
+              in_place (*_repair_inplace) = D-harness replaceG, the span
+                replaces the doc's gist.
 * *_recover — step-level oracle recover (docs/hybrid_spec.md "Oracle
             recover"): the proxy diffs every generated action against a
             full-arm reference trajectory keyed by message fingerprint; at
@@ -26,6 +32,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Dict, Optional
+
+
+REPAIR_PLACEMENTS = ("append_keep_ledger", "append_tail", "in_place")
 
 
 @dataclass(frozen=True)
@@ -57,6 +66,12 @@ class Arm:
             raise ValueError(f"arm {self.name!r}: hybrid/repair/recover knobs need compression")
         if self.repair and self.recover:
             raise ValueError(f"arm {self.name!r}: repair and recover are mutually exclusive")
+        if self.repair:
+            placement = str(self.repair.get("placement") or "append_keep_ledger")
+            if placement not in REPAIR_PLACEMENTS:
+                raise ValueError(
+                    f"arm {self.name!r}: unknown repair placement {placement!r}; "
+                    f"expected one of {REPAIR_PLACEMENTS}")
 
 
 ARMS: Dict[str, Arm] = {
@@ -104,16 +119,38 @@ ARMS: Dict[str, Arm] = {
             name="c2kv_repair",
             compress_history=True,
             ratio=8,
-            repair={"policy": "first"},
-            description="c2kv 8x + corr@first: raw KV of the first compressed history block appended at its original offset",
+            repair={"policy": "first", "placement": "append_keep_ledger"},
+            description="c2kv 8x + corr@first (D-harness corr/keepG): raw KV of doc 0 computed in context, appended, gist kept, original RoPE phase",
+        ),
+        Arm(
+            name="c2kv_repair_tail",
+            compress_history=True,
+            ratio=8,
+            repair={"policy": "first", "placement": "append_tail"},
+            description="c2kv 8x + erratum_tail@first (D-harness raw_erratum_tail): raw KV of doc 0 re-rotated to the end of history, ledger advanced",
+        ),
+        Arm(
+            name="c2kv_repair_inplace",
+            compress_history=True,
+            ratio=8,
+            repair={"policy": "first", "placement": "in_place"},
+            description="c2kv 8x + replaceG@first: raw KV of doc 0 replaces its gist in place",
         ),
         Arm(
             name="hybrid_repair",
             compress_history=True,
             ratio=8,
             hybrid_top_k=3,
-            repair={"policy": "first"},
+            repair={"policy": "first", "placement": "append_keep_ledger"},
             description="hybrid k=3 + corr@first on the compressed prefix",
+        ),
+        Arm(
+            name="hybrid_repair_tail",
+            compress_history=True,
+            ratio=8,
+            hybrid_top_k=3,
+            repair={"policy": "first", "placement": "append_tail"},
+            description="hybrid k=3 + erratum_tail@first on the compressed prefix",
         ),
         Arm(
             name="c2kv_recover",

@@ -21,13 +21,17 @@ sys.path.insert(0, str(HERE))
 
 def start_proxy(upstream: str, arm: str, port: int, log_dir: Path,
                 record_reference: str = "", reference: str = "",
-                backend: str = "hfserver"):
+                backend: str = "hfserver", doc_packing: str = "turn",
+                max_doc_length: int = 768, max_doc_num: int = 16):
     log_path = log_dir / f"proxy_{arm}_{port}.jsonl"
     out_handle = open(log_dir / f"proxy_{arm}_{port}.out", "w")
     command = [
         sys.executable, str(HERE / "proxy.py"),
         "--upstream", upstream, "--arm", arm, "--backend", backend,
         "--port", str(port), "--request-log", str(log_path),
+        "--doc-packing", doc_packing,
+        "--max-doc-length", str(max_doc_length),
+        "--max-doc-num", str(max_doc_num),
     ]
     if record_reference:
         command += ["--record-reference", record_reference]
@@ -104,6 +108,11 @@ def main(argv=None):
     parser.add_argument("--backend", default="hfserver",
                         choices=["hfserver", "sglang"],
                         help="serving stack behind the proxy")
+    parser.add_argument("--doc-packing", default="turn", choices=["turn", "message"],
+                        help="proxy doc packing: 'turn' = training format "
+                             "(default), 'message' = pre-2026-09 per-message")
+    parser.add_argument("--max-doc-length", type=int, default=768)
+    parser.add_argument("--max-doc-num", type=int, default=16)
     args = parser.parse_args(argv)
 
     args.out.mkdir(parents=True, exist_ok=True)
@@ -112,7 +121,8 @@ def main(argv=None):
     proxy_proc, request_log = start_proxy(
         args.upstream, args.arm, args.proxy_port, log_dir,
         record_reference=args.record_reference, reference=args.reference,
-        backend=args.backend)
+        backend=args.backend, doc_packing=args.doc_packing,
+        max_doc_length=args.max_doc_length, max_doc_num=args.max_doc_num)
     try:
         # the BFCL handler expects an OpenAI base_url WITH /v1 (tau2 and
         # toolsandbox build their paths themselves)
@@ -131,6 +141,9 @@ def main(argv=None):
     summary["arm"] = args.arm
     summary["benchmark"] = args.benchmark
     summary["backend"] = args.backend
+    summary["doc_packing"] = args.doc_packing
+    summary["max_doc_length"] = args.max_doc_length
+    summary["max_doc_num"] = args.max_doc_num
     summary["request_log"] = str(request_log)
     if args.reference:
         summary["reference"] = args.reference

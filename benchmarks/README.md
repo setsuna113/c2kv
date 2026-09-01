@@ -1,5 +1,12 @@
 # Modular benchmark layer for the C2KV / experiment-D line
 
+> Read `docs/c2kv_semantics.md` first. It records where the paper, the
+> training checkpoint, this proxy and the SGLang server disagree, which
+> proxy/server switch covers each difference, and which numbers in this repo
+> were produced under which regime. Serve from the SGLang fork branch
+> `task/c2kv-serve-align` (its `c2kv/c2kv_serving_semantics.md` is the
+> server-side twin of that document).
+
 Replaces the single-dataset custom evaluation with a modular design that can
 run the same *arms* (full / c2kv / hybrid / repair arms) against three
 standard agent benchmarks:
@@ -52,6 +59,14 @@ training dialect (`content + "\n\n" + "Action:\n" + <tool_call>` minified,
 `train_data_multiturn._normal_agent_message`); the chat template's native
 tool_calls branch is deliberately not used (kept as a future A/B).
 
+Doc packing (2026-09-02): compressed history is packed the way the
+checkpoint was trained (`--doc-packing turn`, one `Previous turn / [User
+query] / [Assistant output]` doc per turn, split at `--max-doc-length`,
+tail-selected to `--max-doc-num` with the doc-0 anchor). `--doc-packing
+message` reproduces the pre-2026-09 per-message format. Repair arms take an
+explicit placement (`append_keep_ledger` / `append_tail` / `in_place`) and
+extract the raw KV in full context (`repair_extract` messages form).
+
 ## Usage (on the server)
 
 ```bash
@@ -71,8 +86,14 @@ tool_calls branch is deliberately not used (kept as a future A/B).
 # 3. run each benchmark against the proxy (adapters wrap the official CLIs)
 ~/envs/bench/bin/python benchmarks/run.py --benchmark tau2 --arm c2kv \
   --backend sglang --upstream http://127.0.0.1:35000 \
+  --doc-packing turn --max-doc-length 768 --max-doc-num 16 \
   --out results/bench/tau2_c2kv
 ```
+
+The server must be launched with `--enable-c2kv --c2kv-query-proj gist`
+(training-consistent projections; `base` = pre-2026-09 behaviour, for A/B
+only) and `--disable-cuda-graph`. Every response and every request-log row
+records the mode (`c2kv_query_proj`).
 
 The in-repo Flask `hf_server` is RETIRED from the evaluation path: it
 survives only as the `hfserver` contrast backend (`backends/hfserver.py`)
@@ -81,9 +102,10 @@ for A/B checks and D-side tooling. Do not baseline new numbers on it.
 ## Arm registry
 
 See `arms.py`. Arms are declarative: name, which history is compressed,
-ratio, extra KV interventions (empty for now; corr / corr_re / splice /
-offset arms get entries when their server-side primitives land in the
-SGLang fork). The proxy refuses unknown arms.
+ratio, and for repair arms the block policy plus placement
+(`c2kv_repair` = D-harness corr/keepG, `c2kv_repair_tail` = raw_erratum_tail,
+`c2kv_repair_inplace` = replaceG; hybrid twins). The proxy refuses unknown
+arms and unknown placements.
 
 ## Relation to experiment D
 

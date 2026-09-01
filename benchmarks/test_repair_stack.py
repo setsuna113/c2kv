@@ -76,9 +76,17 @@ class TestArms:
         assert ARMS["hybrid_k5"].hybrid_top_k == 5
 
     def test_repair_arms(self):
-        assert ARMS["c2kv_repair"].repair == {"policy": "first"}
-        assert ARMS["hybrid_repair"].repair == {"policy": "first"}
+        assert ARMS["c2kv_repair"].repair == {"policy": "first", "placement": "append_keep_ledger"}
+        assert ARMS["hybrid_repair"].repair == {"policy": "first", "placement": "append_keep_ledger"}
         assert ARMS["hybrid_repair"].hybrid_top_k == 3
+        assert ARMS["c2kv_repair_tail"].repair["placement"] == "append_tail"
+        assert ARMS["hybrid_repair_tail"].repair["placement"] == "append_tail"
+        assert ARMS["c2kv_repair_inplace"].repair["placement"] == "in_place"
+
+    def test_repair_placement_validated(self):
+        with pytest.raises(ValueError):
+            Arm(name="bad", compress_history=True,
+                repair={"policy": "first", "placement": "sideways"}).validate()
 
     def test_recover_arms(self):
         assert ARMS["c2kv_recover"].recover == {"once": True}
@@ -107,6 +115,7 @@ class TestArms:
 class TestAssemble:
     def test_c2kv_compresses_all_history(self, monkeypatch):
         monkeypatch.setattr(proxy_mod, "_extract", _extract_stub)
+        monkeypatch.setattr(proxy_mod, "DOC_PACKING", "message")  # legacy per-message
         out, counts = proxy_mod._assemble(_messages(), get_arm("c2kv"), 0)
         marked = [m for m in out if "c2kv_key_hash" in m]
         assert len(marked) == 4  # 4 history messages, system+current raw
@@ -135,6 +144,7 @@ class TestAssemble:
             return _extract_stub(role, content, ratio, timeout)
 
         monkeypatch.setattr(proxy_mod, "_extract", extract)
+        monkeypatch.setattr(proxy_mod, "DOC_PACKING", "message")  # legacy per-message
         messages = [
             {"role": "system", "content": "sys"},
             {"role": "user", "content": "find flights"},
@@ -165,6 +175,7 @@ class TestAssemble:
 
     def test_hybrid_k1_keeps_one_tail_raw(self, monkeypatch):
         monkeypatch.setattr(proxy_mod, "_extract", _extract_stub)
+        monkeypatch.setattr(proxy_mod, "DOC_PACKING", "message")  # legacy per-message
         out, _ = proxy_mod._assemble(_messages(), get_arm("hybrid_k1"), 0)
         # cutoff = 5 (current user after last assistant); tail-1 history raw
         assert "c2kv_key_hash" not in out[4]  # u2 is the last history message
@@ -180,6 +191,104 @@ class TestAssemble:
         out, counts = proxy_mod._assemble(_messages(), get_arm("full"), 0)
         assert counts["gist_tokens"] == 0
         assert all("c2kv_key_hash" not in m for m in out)
+
+
+class TestTurnPacking:
+    """--doc-packing turn: the TRAINING history format
+    (train_data_multiturn._agent_history_turn_docs / _fit_reused_history),
+    see docs/c2kv_semantics.md."""
+
+    @staticmethod
+    def _conv():
+        return [
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "weather in Shanghai tomorrow?"},
+            {"role": "assistant", "content": None, "tool_calls": [
+                {"function": {"name": "get_weather",
+                              "arguments": "{\"city\": \"Shanghai\"}"}}]},
+            {"role": "tool", "content": "{\"temp\": 26}"},
+            {"role": "assistant", "content": "Sunny, 26C."},
+            {"role": "user", "content": "and the day after?"},
+        ]
+
+    def test_turn_docs_group_input_plus_outputs(self, monkeypatch):
+        monkeypatch.setattr(proxy_mod, "_extract", _extract_stub)
+        out, counts = proxy_mod._assemble(self._conv(), get_arm("c2kv"), 0)
+        assert counts["doc_packing"] == "turn"
+        docs = [m for m in out if "c2kv_key_hash" in m]
+        assert len(docs) == 2 and counts["n_docs"] == 2
+        assert all(m["role"] == "user" for m in docs)
+        assert docs[0]["content"] == (
+            "Previous turn\n[User query]\nweather in Shanghai tomorrow?\n"
+            "[Assistant output]\nAction:\n<tool_call>\n"
+            "{\"name\":\"get_weather\",\"arguments\":{\"city\":\"Shanghai\"}}\n</tool_call>")
+        # the tool result opens the next doc as its [User query] (tool -> user)
+        assert docs[1]["content"] == (
+            "Previous turn\n[User query]\n{\"temp\": 26}\n"
+            "[Assistant output]\nSunny, 26C.")
+        recs = counts["compressed_records"]
+        assert recs[0]["source_indices"] == [1, 2] and recs[1]["source_indices"] == [3, 4]
+        assert recs[0]["out_index"] == 1 and recs[1]["out_index"] == 2
+        # order: system, doc0, doc1, current
+        assert [m["role"] for m in out] == ["system", "user", "user", "user"]
+        assert out[-1]["content"] == "and the day after?"
+        assert counts["current_start_out_index"] == 3
+
+    def test_current_block_is_last_input_message_only(self, monkeypatch):
+        """training cutoff: everything before the LAST input message (user
+        or tool) is history, including the current turn's earlier steps."""
+        monkeypatch.setattr(proxy_mod, "_extract", _extract_stub)
+        conv = self._conv()[:4]  # ends with the tool result
+        out, counts = proxy_mod._assemble(conv, get_arm("c2kv"), 0)
+        assert out[-1]["role"] == "tool" and counts["current_raw"] == 1
+        docs = [m for m in out if "c2kv_key_hash" in m]
+        assert len(docs) == 1 and "get_weather" in docs[0]["content"]
+
+    def test_tail_selection_keeps_doc0_anchor(self, monkeypatch):
+        monkeypatch.setattr(proxy_mod, "_extract", _extract_stub)
+        monkeypatch.setattr(proxy_mod, "MAX_DOC_NUM", 4)
+        conv = [{"role": "system", "content": "sys"}]
+        for t in range(8):
+            conv.append({"role": "user", "content": f"q{t}"})
+            conv.append({"role": "assistant", "content": f"a{t}"})
+        conv.append({"role": "user", "content": "current"})
+        out, counts = proxy_mod._assemble(conv, get_arm("c2kv"), 0)
+        docs = [m["content"] for m in out if "c2kv_key_hash" in m]
+        assert len(docs) == 4 and counts["dropped_docs"] == 4
+        assert "q0" in docs[0]          # doc 0 anchor kept
+        assert "q5" in docs[1] and "q7" in docs[3]  # last three
+
+    def test_oversize_doc_is_split_and_verified(self, monkeypatch):
+        monkeypatch.setattr(proxy_mod, "_extract", _extract_stub)  # tokens == chars
+        monkeypatch.setattr(proxy_mod, "MAX_DOC_LENGTH", 60)
+        long_answer = "\n".join(f"line {i} " + "x" * 20 for i in range(12))
+        conv = [
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "q"},
+            {"role": "assistant", "content": long_answer},
+            {"role": "user", "content": "current"},
+        ]
+        out, counts = proxy_mod._assemble(conv, get_arm("c2kv"), 0)
+        recs = counts["compressed_records"]
+        assert len(recs) >= 3
+        assert all(r["record"]["original_seq_len"] <= 60 for r in recs)
+        assert "".join(r["content"] for r in recs) == (
+            "Previous turn\n[User query]\nq\n[Assistant output]\n" + long_answer)
+
+    def test_hybrid_tail_raw_rest_packed(self, monkeypatch):
+        monkeypatch.setattr(proxy_mod, "_extract", _extract_stub)
+        out, counts = proxy_mod._assemble(self._conv(), get_arm("hybrid_k1"), 0)
+        # history = idx 1..4; k=1 keeps idx 4 (assistant text) raw
+        assert counts["history_raw"] == 1 and counts["n_docs"] == 2
+        assert out[-2]["content"] == "Sunny, 26C." and "c2kv_key_hash" not in out[-2]
+
+    def test_message_packing_is_legacy(self, monkeypatch):
+        monkeypatch.setattr(proxy_mod, "_extract", _extract_stub)
+        monkeypatch.setattr(proxy_mod, "DOC_PACKING", "message")
+        out, counts = proxy_mod._assemble(self._conv(), get_arm("c2kv"), 0)
+        assert counts["doc_packing"] == "message" and counts["n_docs"] == 4
+        assert [m.get("role") for m in out if "c2kv_key_hash" in m] == [
+            "user", "assistant", "tool", "assistant"]
 
 
 class TestRepairPolicy:
@@ -463,16 +572,32 @@ class TestBackends:
             return {"key_hash": f"rep-{source_doc_index}",
                     "token_len": len(text), "success": True}
 
+        # tools add 120 "tokens" each to the prologue, like the extract fake
+        # in TestABRegressions; message length == token length
+        def repair_extract_messages(self, messages, target_index, tools,
+                                    source_doc_index):
+            prefix = sum(len(m["content"]) for m in messages[:target_index])
+            prefix += 120 * len(tools or [])
+            self.repairs.append({
+                "messages": messages, "target_index": target_index,
+                "tools": tools, "source_doc_index": source_doc_index})
+            span_len = len(messages[target_index]["content"])
+            return {"key_hash": f"rep-{source_doc_index}", "token_len": span_len,
+                    "position_start": prefix, "position_end": prefix + span_len,
+                    "already_rotated": False, "success": True}
+
         def prepare_chat(self, payload, arm, repair_plan):
             from backends.sglang import SglangBackend
             return SglangBackend.prepare_chat(self, payload, arm, repair_plan)
 
-    def test_repair_plan_offset_math(self, monkeypatch):
-        """position_offset = system_len + sum(original_seq_len of compressed
-        docs before the target); doc/chunk policies agree on whole-message
-        docs."""
+    def test_repair_plan_full_context_form(self, monkeypatch):
+        """The raw KV is extracted with the FULL-CONTEXT form (messages +
+        target_index); the plan records the server position and the proxy's
+        ledger expectation (system + Σ original_seq_len before the target)
+        and their difference (frame check)."""
         fake = self.FakeSglang()
         monkeypatch.setattr(proxy_mod, "BACKEND", fake)
+        monkeypatch.setattr(proxy_mod, "DOC_PACKING", "message")
         monkeypatch.setattr(proxy_mod, "_extract", lambda role, content,
                             ratio, timeout=0, tools=None:
                             fake.extract(content, role, ratio, tools=tools))
@@ -484,20 +609,69 @@ class TestBackends:
         ]
         arm = get_arm("c2kv_repair")
         out, counts = proxy_mod._assemble(messages, arm)
-        plan = proxy_mod.plan_repair(messages, arm, counts)
-        assert plan["doc_index"] == 0
-        assert plan["position_offset"] == 30          # system only before doc 0
-        assert fake.repairs[-1]["span_start"] == 0 and fake.repairs[-1]["span_end"] is None
-        # the assembled target message carries BOTH its gist and the repair hash
+        plan = proxy_mod.plan_repair(messages, arm, counts, out_messages=out)
+        assert plan["doc_index"] == 0 and plan["target_out_index"] == 1
+        call = fake.repairs[-1]
+        # context = system + doc 0, stripped of c2kv fields
+        assert [m["role"] for m in call["messages"]] == ["system", "user"]
+        assert all(not k.startswith("c2kv_") for m in call["messages"] for k in m)
+        assert call["target_index"] == 1
+        assert plan["position_start"] == 30 and plan["expected_offset"] == 30
+        assert plan["frame_delta"] == 0
+        assert plan["placement"] == "append_keep_ledger"
+        # append placements: a repair-only message right before the current block
         prepared = fake.prepare_chat({"messages": out}, arm, plan)
-        target = prepared["messages"][plan["message_index"]]
-        assert target["c2kv_key_hash"] == "h-user-40"
-        assert target["c2kv_repair_key_hashes"] == ["rep-0"]
+        msgs = prepared["messages"]
+        assert len(msgs) == len(out) + 1
+        inserted = msgs[plan["current_start_out_index"]]
+        assert inserted["c2kv_repair_only_key_hashes"] == ["rep-0"]
+        assert inserted["c2kv_repair_placement"] == "append_keep_ledger"
+        assert "c2kv_key_hash" not in inserted and msgs[-1]["content"] == "current"
+        assert msgs[1]["c2kv_key_hash"] == "h-user-40"  # target's gist stays
         # offset policy: target doc 1 -> system + doc0
         arm1 = Arm(name="r1", compress_history=True, repair={"policy": "offset:1"})
-        plan1 = proxy_mod.plan_repair(messages, arm1, counts)
-        assert plan1["doc_index"] == 1
-        assert plan1["position_offset"] == 30 + 40
+        plan1 = proxy_mod.plan_repair(messages, arm1, counts, out_messages=out)
+        assert plan1["doc_index"] == 1 and plan1["target_out_index"] == 2
+        assert plan1["position_start"] == 30 + 40 and plan1["frame_delta"] == 0
+
+    def test_repair_placements_shape_the_request(self, monkeypatch):
+        fake = self.FakeSglang()
+        monkeypatch.setattr(proxy_mod, "BACKEND", fake)
+        monkeypatch.setattr(proxy_mod, "_extract", lambda role, content,
+                            ratio, timeout=0, tools=None:
+                            fake.extract(content, role, ratio, tools=tools))
+        messages = [
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "q1"}, {"role": "assistant", "content": "a1"},
+            {"role": "user", "content": "q2"}, {"role": "assistant", "content": "a2"},
+            {"role": "user", "content": "current"},
+        ]
+        # in_place: the target doc loses its gist and becomes repair-only
+        arm_ip = get_arm("c2kv_repair_inplace")
+        out, counts = proxy_mod._assemble(messages, arm_ip)
+        plan = proxy_mod.plan_repair(messages, arm_ip, counts, out_messages=out)
+        msgs = fake.prepare_chat({"messages": out}, arm_ip, plan)["messages"]
+        assert len(msgs) == len(out)
+        target = msgs[plan["target_out_index"]]
+        assert "c2kv_key_hash" not in target
+        assert target["c2kv_repair_only_key_hashes"] == ["rep-0"]
+        assert target["c2kv_repair_placement"] == "in_place"
+        # append_tail: repair-only message before the current block, placement set
+        arm_tail = get_arm("c2kv_repair_tail")
+        out2, counts2 = proxy_mod._assemble(messages, arm_tail)
+        plan2 = proxy_mod.plan_repair(messages, arm_tail, counts2, out_messages=out2)
+        msgs2 = fake.prepare_chat({"messages": out2}, arm_tail, plan2)["messages"]
+        inserted = msgs2[plan2["current_start_out_index"]]
+        assert inserted["c2kv_repair_placement"] == "append_tail"
+        assert msgs2[-1]["content"] == "current"
+        # hybrid: the repair-only message sits AFTER the raw tail
+        arm_h = get_arm("hybrid_repair_tail")
+        out3, counts3 = proxy_mod._assemble(messages, arm_h)
+        plan3 = proxy_mod.plan_repair(messages, arm_h, counts3, out_messages=out3)
+        msgs3 = fake.prepare_chat({"messages": out3}, arm_h, plan3)["messages"]
+        idx = plan3["current_start_out_index"]
+        assert msgs3[idx]["c2kv_repair_placement"] == "append_tail"
+        assert all("c2kv_key_hash" not in m for m in msgs3[idx - counts3["history_raw"]:idx])
 
     def test_raw_toolcall_turns_render_dialect(self, monkeypatch):
         """keep_raw assistant tool_calls turns (full arm, hybrid tail,
@@ -566,7 +740,7 @@ class TestBackends:
         backend = HfServerBackend(None)
         arm = get_arm("c2kv_repair")
         payload = backend.prepare_chat({"messages": []}, arm, {"doc_index": 0})
-        assert payload["c2kv_repair"] == {"policy": "first"}
+        assert payload["c2kv_repair"]["policy"] == "first"
         normalized = backend.normalize_response({
             "choices": [{"message": {"content": "x"}, "finish_reason": "stop"}],
             "usage": {}, "c2kv": {"cache_tokens": 10, "logical_tokens": 80,
@@ -595,7 +769,8 @@ class TestABRegressions:
         ]
         out, counts = proxy_mod._assemble(messages, get_arm("c2kv_repair"))
         assert counts["compressed_records"] == []
-        plan = proxy_mod.plan_repair(messages, get_arm("c2kv_repair"), counts)
+        plan = proxy_mod.plan_repair(messages, get_arm("c2kv_repair"), counts,
+                                     out_messages=out)
         assert plan is None
         assert fake.repairs == []  # nothing extracted, nothing crashed
 
@@ -654,15 +829,20 @@ class TestABRegressions:
             {"role": "user", "content": "current"},
         ]
         arm = get_arm("c2kv_repair")
+        monkeypatch.setattr(proxy_mod, "DOC_PACKING", "message")
         out, counts = proxy_mod._assemble(messages, arm)
         assert counts["compressed_records"], "need a compressed history doc"
-        plan = proxy_mod.plan_repair(messages, arm, counts, tools=tools)
-        # 30 (system) + 20*120 (tools) — WITHOUT the tools fix this was 30
-        assert plan["position_offset"] == 30 + 20 * 120
+        plan = proxy_mod.plan_repair(messages, arm, counts, tools=tools,
+                                     out_messages=out)
+        # proxy ledger expectation: 30 (system) + 20*120 (tools); the server
+        # (fake) rendered the same prologue -> frame check passes
+        assert plan["expected_offset"] == 30 + 20 * 120
+        assert plan["position_start"] == 30 + 20 * 120 and plan["frame_delta"] == 0
+        assert fake.repairs[-1]["tools"] == tools
         # cache discrimination: different tools -> different measurement
         plan2 = proxy_mod.plan_repair(
-            messages, arm, counts, tools=tools[:1])
-        assert plan2["position_offset"] == 30 + 120
+            messages, arm, counts, tools=tools[:1], out_messages=out)
+        assert plan2["expected_offset"] == 30 + 120 and plan2["frame_delta"] == 0
 
 
 class TestCacheMissRecovery:

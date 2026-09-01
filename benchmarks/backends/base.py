@@ -52,10 +52,21 @@ class Backend:
     def repair_extract(self, text: str, role: str, span_start: int,
                        span_end: Optional[int], position_offset: int,
                        source_doc_index: int) -> Dict[str, Any]:
-        """Store the raw repair KV of a span; returns the entry record
-        (must include key_hash + token_len).  Backends without a
-        message-level repair primitive (hf_server) implement repair via
-        prepare_chat instead and may return {} here."""
+        """LEGACY standalone form: the message text alone is encoded (no
+        context) and rotated to ``position_offset``.  Lower fidelity than
+        ``repair_extract_messages`` (docs/c2kv_semantics.md "Raw KV"); kept
+        for A/B only."""
+        raise NotImplementedError
+
+    def repair_extract_messages(self, messages: List[Dict[str, Any]],
+                                target_index: int,
+                                tools: Optional[List[Dict[str, Any]]],
+                                source_doc_index: int) -> Dict[str, Any]:
+        """FULL-CONTEXT form: the backend renders ``messages[:target_index+1]``
+        like a chat request (with ``tools``) and stores the raw KV of message
+        ``target_index`` computed inside that context.  Returns the entry
+        record: key_hash, token_len, position_start, position_end,
+        already_rotated."""
         raise NotImplementedError
 
     # ---- chat shaping ----

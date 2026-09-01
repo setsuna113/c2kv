@@ -1,5 +1,13 @@
 # hf_server → SGLang c2kv fork 迁移记录
 
+> **2026-09-02 更新**：serving 树改为 fork 分支 `task/c2kv-serve-align`
+> （基于雨晗 `c2kv-sglang-bfcl` @ 7de9e8105，已含本文件后面描述的 4 文件补丁，
+> `benchmarks/backends/sglang_patches/` 作废）。启动时加
+> `--c2kv-query-proj gist`（训练一致的投影；`base` 只用于 A/B）。proxy 默认
+> `--doc-packing turn`。语义与口径见 `docs/c2kv_semantics.md` 和 server 侧
+> `c2kv/c2kv_serving_semantics.md`；上线前先跑
+> `scripts/c2kv/smoke_c2kv_semantics.py --base-url http://127.0.0.1:PORT`。
+
 Branch `task/bench-recover`。决策(刘言成 2026-08-30):O-1 选 (b) 直接接受
 SGLang regime、不做 A/C 生成对拍闸门、bench 数字全部重基线;O-2 跟雨晗的
 切法(整条消息不切);O-3 与雨晗重合不管。

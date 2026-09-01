@@ -1,5 +1,11 @@
 # SGLang c2kv fork deployment patches (branch c2kv-sglang-bfcl @ 22fbf3146)
 
+> SUPERSEDED 2026-09-02: all four hunks are committed on the fork branch
+> `task/c2kv-serve-align` (based on 7de9e8105) together with the
+> train/serve projection switch, explicit repair placement and the
+> full-context repair endpoint. Deploy that branch; keep this file only to
+> reproduce pre-2026-09 runs. See docs/c2kv_semantics.md.
+
 The serving tree lives at `~/sgl-22fbf3146/` on the NPU server (codeload
 tarball of `setsuna113/kvoffload-sglang-c2kv@22fbf3146`, github.com main
 site unreachable from the server; codeload works via the squid proxy —

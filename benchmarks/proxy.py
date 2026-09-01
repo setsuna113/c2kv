@@ -11,7 +11,22 @@ are sent as raw text and which are replaced by a server-side gist reference
 counts as history: every message except the trailing block after the last
 user/tool message; system messages are history by position but always kept
 raw (never compressed).  The final user message and tool results of the
-current turn stay raw.
+current turn stay raw.  This is the training rule
+(train_data_multiturn._session_examples: everything before the last input
+message is compressed).
+
+How the compressed history is cut into docs is ``--doc-packing``
+(docs/c2kv_semantics.md):
+
+* ``turn`` (default) — the TRAINING format.  History is normalized like
+  train_data_multiturn._normal_agent_message (tool->user, assistant
+  tool_calls rendered as the Action dialect) and packed one doc per turn
+  exactly like _agent_history_turn_docs ("Previous turn\n[User query]...\n
+  [Assistant output]..."), split to <= --max-doc-length tokens and tail-
+  selected to --max-doc-num docs with the doc-0 anchor (_fit_reused_history).
+  Every doc is extracted as a user-role message.
+* ``message`` — the pre-2026-09 bench format: one doc per message with its
+  own role, no splitting, no cap.  Kept for reproducing older numbers.
 
 Assistant tool_calls turns are rendered into the TRAINING dialect (content
 + "Action:" + minified <tool_call> JSON) on EVERY outgoing path —
@@ -28,9 +43,12 @@ regenerated step replaces the divergent one.
 
 Repair arms (``repair`` in arms.py): the target doc is selected by
 benchmarks/repair_policy.py IN THE PROXY; the backend turns the plan into
-its own protocol (hf_server: request-level c2kv_repair; sglang:
-/v1/c2kv/repair_extract + message-level c2kv_repair_key_hashes with the
-proxy-ledger position_offset).
+its own protocol.  On sglang the raw KV is extracted with the FULL-CONTEXT
+form of /v1/c2kv/repair_extract (messages + target_index + tools: the
+server renders the prefix exactly like the chat request and captures the
+target doc's KV inside it) and injected with an explicit
+``c2kv_repair_placement`` (in_place / append_keep_ledger / append_tail,
+see docs/c2kv_semantics.md "Repair placement").
 
 Upstream failures are retried (2x, exponential backoff) and always leave a
 request-log row with a failure kind — a benchmark entry must never vanish
@@ -73,6 +91,15 @@ BACKEND = None  # set in main()
 UPSTREAM = ""
 REQUEST_LOG_PATH = ""
 _log_lock = threading.Lock()
+
+# --doc-packing / --max-doc-length / --max-doc-num (see module docstring and
+# docs/c2kv_semantics.md).  768/16 is the D-line harness caliber; the
+# checkpoint-1088 training run used 512/12 (HISTORY_MAX_DOC_LENGTH /
+# HISTORY_MAX_DOC_NUM defaults in agent/train_agent_history_c2kv_npu.sh).
+DOC_PACKING = "turn"
+MAX_DOC_LENGTH = 768
+MAX_DOC_NUM = 16
+DOC_PACKINGS = ("turn", "message")
 
 
 class CacheMiss(RuntimeError):
@@ -208,6 +235,140 @@ def _render_action_dialect(message: Dict[str, Any]) -> str:
     action = "Action:\n" + "\n".join(blocks)
     content = message.get("content") or ""
     return content + "\n\n" + action if content else action
+
+
+def _normalize_history_message(message: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """train_data_multiturn._normal_agent_message, stdlib version.
+
+    tool -> user; assistant tool_calls rendered as the Action dialect
+    (_render_action_dialect == hf_server.chat == training renderer); a
+    message that renders to nothing is dropped unless it is an assistant
+    turn (training keeps empty assistant turns as empty outputs)."""
+    role = message.get("role") or "user"
+    if role == "tool":
+        role = "user"
+    content = message.get("content")
+    if not isinstance(content, str):
+        content = "" if content is None else json.dumps(content, ensure_ascii=False)
+    if role == "assistant" and message.get("tool_calls"):
+        content = _render_action_dialect(message)
+    if not content and role != "assistant":
+        return None
+    return {"role": role, "content": content}
+
+
+def _turn_docs(indexed_messages: List[Tuple[int, Dict[str, Any]]]) -> List[Dict[str, Any]]:
+    """train_data_multiturn._agent_history_turn_docs, stdlib version.
+
+    One doc per turn: an input message (user query OR tool result, both are
+    role user after normalization) opens a doc, every assistant output that
+    follows joins it.  Rendered as
+    "Previous turn\n[User query]\n...\n[Assistant output]\n..." and sent to
+    the extractor as ONE user-role message.  ``source_indices`` records the
+    original message indices behind each doc."""
+    docs: List[Dict[str, Any]] = []
+    current_user: Optional[str] = None
+    outputs: List[str] = []
+    sources: List[int] = []
+
+    def flush() -> None:
+        nonlocal current_user, outputs, sources
+        if current_user is None and not outputs:
+            return
+        parts = ["Previous turn"]
+        if current_user:
+            parts.extend(["[User query]", current_user.strip()])
+        if outputs:
+            parts.extend([
+                "[Assistant output]",
+                "\n\n".join(item.strip() for item in outputs if item.strip()),
+            ])
+        docs.append({
+            "role": "user",
+            "content": "\n".join(parts).strip(),
+            "source_indices": list(sources),
+        })
+        current_user = None
+        outputs = []
+        sources = []
+
+    for index, message in indexed_messages:
+        role = message.get("role", "user")
+        content = str(message.get("content") or "").strip()
+        if not content and role != "assistant":
+            continue
+        if role == "user":
+            flush()
+            current_user = content
+        elif role == "assistant":
+            outputs.append(content)
+        else:
+            outputs.append(f"[{role}]\n{content}")
+        sources.append(index)
+    flush()
+    return docs
+
+
+def _split_lines_keep(text: str) -> List[str]:
+    """Line units with their newline kept (train_data_multiturn._semantic_units
+    analogue): splitting only at line boundaries keeps the turn markers and
+    tool-call blocks intact."""
+    units = text.splitlines(keepends=True)
+    return units or [text]
+
+
+def _fit_doc(doc_text: str, ratio: int, extract_fn, max_doc_length: int,
+             depth: int = 0) -> List[Tuple[str, Dict[str, Any]]]:
+    """Extract ``doc_text``; if its template length exceeds ``max_doc_length``
+    split it (train_data_multiturn._split_message_to_fit: greedy line
+    accumulation against a char budget, then hard halves) and extract the
+    pieces.  Without a tokenizer the char budget is calibrated from the
+    first extract's own chars/token; every piece is verified by its extract
+    response, so the guarantee is exact, only the cut points are
+    approximate."""
+    record = extract_fn("user", doc_text, ratio)
+    length = int(record.get("original_seq_len") or 0)
+    if length <= max_doc_length or depth >= 6 or len(doc_text) < 8:
+        return [(doc_text, record)]
+    chars_per_token = max(1.0, len(doc_text) / max(1, length))
+    budget = max(64, int(max_doc_length * chars_per_token * 0.9))
+    pieces: List[str] = []
+    current = ""
+    for unit in _split_lines_keep(doc_text):
+        if current and len(current) + len(unit) > budget:
+            pieces.append(current)
+            current = ""
+        if len(unit) > budget:
+            if current:
+                pieces.append(current)
+                current = ""
+            for start in range(0, len(unit), budget):
+                pieces.append(unit[start:start + budget])
+            continue
+        current += unit
+    if current:
+        pieces.append(current)
+    if len(pieces) <= 1:  # cannot split further at line level: hard halves
+        half = len(doc_text) // 2
+        pieces = [doc_text[:half], doc_text[half:]]
+    out: List[Tuple[str, Dict[str, Any]]] = []
+    for piece in pieces:
+        if not piece.strip():
+            continue
+        out.extend(_fit_doc(piece, ratio, extract_fn, max_doc_length, depth + 1))
+    return out
+
+
+def _select_docs(docs: List[Any], max_doc_num: int) -> Tuple[List[Any], int]:
+    """train_data_multiturn._select_history(policy="tail"): keep doc 0 (the
+    session anchor) plus the last max_doc_num-1 docs; the rest are DROPPED,
+    the model never sees them (same as training and the D-line harness)."""
+    if max_doc_num <= 0 or len(docs) <= max_doc_num:
+        return list(docs), 0
+    if max_doc_num == 1:
+        return list(docs[-1:]), len(docs) - 1
+    kept = [docs[0]] + list(docs[-(max_doc_num - 1):])
+    return kept, len(docs) - len(kept)
 
 
 def _sorted_keys(value: Any) -> Any:
@@ -370,61 +531,116 @@ def _assemble(messages: List[Dict[str, Any]], arm: Arm, timeout: int = 600):
     message_counts = {"system_raw": 0, "history_raw": 0, "current_raw": 0,
                       "compressed": 0}
     compressed_records: List[Dict[str, Any]] = []
-    for i, message in enumerate(messages):
-        role = message.get("role") or "user"
-        content = message.get("content")
-        content = content if isinstance(content, str) else json.dumps(content or "")
-        in_history = i < cutoff
-        keep_raw = (
+    packing = DOC_PACKING if arm.compress_history else "message"
+    dropped_docs = 0
+    n_docs = 0
+
+    def _keep_raw(i: int, role: str) -> bool:
+        return (
             not arm.compress_history
-            or not in_history
+            or not (i < cutoff)
             or role == "system"
-            or (arm.hybrid_top_k and i >= cutoff - arm.hybrid_top_k)
+            or bool(arm.hybrid_top_k and i >= cutoff - arm.hybrid_top_k)
         )
-        if keep_raw:
-            raw = dict(message)
-            # training-dialect rendering applies to RAW assistant
-            # tool_calls turns as well: backends without server-side
-            # normalization (sglang) would otherwise feed the chat
-            # template's native tool_calls branch — a surface the model
-            # was never trained on.  Idempotent for hf_server (its chat()
-            # normalization produced the identical text).
-            if role == "assistant" and message.get("tool_calls"):
-                raw["content"] = _render_action_dialect(message)
-                raw.pop("tool_calls", None)
-            out.append(raw)
-            if role == "system":
-                message_counts["system_raw"] += 1
-            elif in_history:
-                message_counts["history_raw"] += 1
-            else:
-                message_counts["current_raw"] += 1
-            continue
-        if message.get("role") == "assistant" and message.get("tool_calls"):
-            # see _render_action_dialect: never extract the bare (null)
-            # content of a tool-call turn
-            content = _render_action_dialect(message)
-        record = _extract(role, content, arm.ratio, timeout)
+
+    def _emit_raw(i: int, message: Dict[str, Any]) -> None:
+        role = message.get("role") or "user"
+        raw = dict(message)
+        # training-dialect rendering applies to RAW assistant tool_calls
+        # turns as well: backends without server-side normalization
+        # (sglang) would otherwise feed the chat template's native
+        # tool_calls branch, a surface the model was never trained on.
+        if role == "assistant" and message.get("tool_calls"):
+            raw["content"] = _render_action_dialect(message)
+            raw.pop("tool_calls", None)
+        out.append(raw)
+        if role == "system":
+            message_counts["system_raw"] += 1
+        elif i < cutoff:
+            message_counts["history_raw"] += 1
+        else:
+            message_counts["current_raw"] += 1
+
+    def _emit_doc(doc_role: str, doc_text: str, record: Dict[str, Any],
+                  source_indices: List[int]) -> None:
+        nonlocal gist_tokens, original_tokens, n_gist, n_docs
         gist_tokens += int(record.get("gist_len") or 0)
         original_tokens += int(record.get("original_seq_len") or 0)
         n_gist += 1
+        n_docs += 1
         message_counts["compressed"] += 1
-        compressed = dict(message)
-        compressed["content"] = content
-        compressed.pop("tool_calls", None)
-        compressed["c2kv_key_hash"] = record["key_hash"]
-        # lets the server re-extract on cache miss (e.g. after a restart)
-        compressed["c2kv_ratio"] = arm.ratio
-        out.append(compressed)
+        compressed = {
+            "role": doc_role,
+            "content": doc_text,
+            "c2kv_key_hash": record["key_hash"],
+            # lets the server re-extract on cache miss (e.g. after a restart)
+            "c2kv_ratio": arm.ratio,
+        }
         compressed_records.append({
-            "message_index": i, "role": role, "content": content,
-            "record": record,
+            "message_index": source_indices[0] if source_indices else -1,
+            "source_indices": list(source_indices),
+            "out_index": len(out),
+            "role": doc_role, "content": doc_text, "record": record,
         })
+        out.append(compressed)
+
+    if packing == "turn":
+        # TRAINING format: normalize, pack per turn, split to fit, tail-select.
+        compressible = [
+            (i, m) for i, m in enumerate(messages)
+            if not _keep_raw(i, m.get("role") or "user")
+        ]
+        docs: List[Tuple[str, List[int]]] = []
+        if compressible:
+            normalized = []
+            for i, m in compressible:
+                item = _normalize_history_message(m)
+                if item is not None:
+                    normalized.append((i, item))
+            for doc in _turn_docs(normalized):
+                for text, record in _fit_doc(
+                    doc["content"], arm.ratio,
+                    lambda role, text, ratio: _extract(role, text, ratio, timeout),
+                    MAX_DOC_LENGTH,
+                ):
+                    docs.append((text, record, doc["source_indices"]))
+            docs, dropped_docs = _select_docs(docs, MAX_DOC_NUM)
+        first_index = compressible[0][0] if compressible else None
+        compressible_set = {i for i, _ in compressible}
+        for i, message in enumerate(messages):
+            if i == first_index:
+                for text, record, sources in docs:
+                    _emit_doc("user", text, record, sources)
+                continue
+            if i in compressible_set:
+                continue
+            _emit_raw(i, message)
+    else:
+        # LEGACY bench format: one doc per message with its own role.
+        for i, message in enumerate(messages):
+            role = message.get("role") or "user"
+            if _keep_raw(i, role):
+                _emit_raw(i, message)
+                continue
+            content = message.get("content")
+            content = content if isinstance(content, str) else json.dumps(content or "")
+            if role == "assistant" and message.get("tool_calls"):
+                # see _render_action_dialect: never extract the bare (null)
+                # content of a tool-call turn
+                content = _render_action_dialect(message)
+            record = _extract(role, content, arm.ratio, timeout)
+            _emit_doc(role, content, record, [i])
     counts = dict(message_counts)
     counts["gist_tokens"] = gist_tokens
     counts["original_tokens"] = original_tokens
     counts["n_gist_messages"] = n_gist
     counts["compressed_records"] = compressed_records
+    counts["doc_packing"] = packing
+    counts["n_docs"] = n_docs
+    counts["dropped_docs"] = dropped_docs
+    # index in `out` where the current (raw) block starts: repair-only
+    # messages for append placements are inserted right before it
+    counts["current_start_out_index"] = len(out) - message_counts["current_raw"]
     return out, counts
 
 
@@ -433,52 +649,114 @@ def _system_text(messages: List[Dict[str, Any]]) -> str:
         (m.get("content") or "") for m in messages if m.get("role") == "system")
 
 
+def _strip_c2kv_fields(message: Dict[str, Any]) -> Dict[str, Any]:
+    return {k: v for k, v in message.items() if not str(k).startswith("c2kv_")}
+
+
 def plan_repair(messages: List[Dict[str, Any]], arm: Arm,
                 counts: Dict[str, Any],
-                tools: Optional[List[Dict[str, Any]]] = None) -> Optional[Dict[str, Any]]:
-    """Resolve an arm's repair policy against the proxy ledger.
+                tools: Optional[List[Dict[str, Any]]] = None,
+                out_messages: Optional[List[Dict[str, Any]]] = None) -> Optional[Dict[str, Any]]:
+    """Resolve an arm's repair policy against the assembled request.
 
-    The target doc's position_offset (d_corr bakes the absolute RoPE phase
-    at capture) = system tokens + Σ original_seq_len of every compressed
-    message before the target.  Raw tail / current turns sit AFTER the
-    compressed prefix and are never crossed.
+    The raw KV of the target doc is extracted with the FULL-CONTEXT form of
+    /v1/c2kv/repair_extract: the server renders ``out_messages[:target+1]``
+    (system messages + compressed docs as plain user messages, with the
+    request's tools) exactly like a chat request and captures the target
+    doc's K/V inside that context (docs/c2kv_semantics.md, "Raw KV").  The
+    returned ``position_start`` is the doc's absolute position in that
+    rendering; the server's gist ledger places the doc's gist at
+    ``P + Σ original_seq_len(docs before)``, and the two must agree when the
+    per-message rendering is additive (Qwen3 template).  The proxy records
+    its own ledger expectation for the frame check in the request log.
     """
     if not arm.repair or not getattr(BACKEND, "needs_repair_plan", False):
         return None
     policy = str((arm.repair or {}).get("policy") or "first")
+    placement = str((arm.repair or {}).get("placement") or "append_keep_ledger")
     parsed = repair_policy.parse_policy(policy)
     records = counts.get("compressed_records") or []
     if not records:
-        # no history compressed yet: a legitimate no-op (hf_server's
-        # `repair_policy is not None and compressed` guard — dropping it
-        # made the FIRST request of every repair-arm session crash with an
-        # uncaught ValueError and no log row)
+        # no history compressed yet: a legitimate no-op (the FIRST request
+        # of every repair-arm session has nothing to repair)
         return None
-    doc_counts = [1] * len(records)  # sglang: whole-message docs (O-2)
+    doc_counts = [1] * len(records)  # whole docs (turn docs or messages)
     doc_index, _first_chunk, _span_len = repair_policy.span_selection(
         doc_counts, parsed["kind"], parsed["index"])
     target = records[doc_index]
-    system_len = 0
+    target_out_index = int(target.get("out_index", target["message_index"]))
+    if out_messages is None:
+        raise ValueError("plan_repair needs the assembled out_messages")
+    context = [_strip_c2kv_fields(m) for m in out_messages[:target_out_index + 1]]
+    span = BACKEND.repair_extract_messages(
+        messages=context, target_index=target_out_index, tools=tools,
+        source_doc_index=doc_index)
+    # proxy-side ledger expectation (frame check): system block incl. tools
+    # + Σ original_seq_len of the compressed docs before the target.  Only
+    # computable when a system message exists (the tool prologue length is
+    # measured through it); BFCL FC sends none -> None, check skipped.
+    expected_offset: Optional[int] = None
     system = _system_text(messages)
     if system:
-        # one cached extract of the system block gives its template token
-        # length (and doubles as the request-log system_len column source);
-        # the resulting gist entry simply sits unused in the pool
         sys_record = _extract("system", system, arm.ratio, tools=tools)
-        system_len = int(sys_record.get("original_seq_len") or 0)
-    offset = system_len
-    for record in records[:doc_index]:
-        offset += int(record["record"].get("original_seq_len") or 0)
-    span = BACKEND.repair_extract(
-        text=target["content"], role=target["role"],
-        span_start=0, span_end=None,
-        position_offset=offset, source_doc_index=doc_index)
+        expected_offset = int(sys_record.get("original_seq_len") or 0)
+        for record in records[:doc_index]:
+            expected_offset += int(record["record"].get("original_seq_len") or 0)
+    position_start = span.get("position_start")
+    frame_delta = None
+    if expected_offset is not None and position_start is not None:
+        frame_delta = int(position_start) - int(expected_offset)
     return {
-        "policy": policy, "message_index": target["message_index"],
-        "doc_index": doc_index, "position_offset": offset,
+        "policy": policy, "placement": placement,
+        "message_index": target_out_index, "target_out_index": target_out_index,
+        "doc_index": doc_index,
+        "current_start_out_index": int(counts.get("current_start_out_index", len(out_messages))),
+        "position_offset": position_start,
+        "position_start": position_start, "position_end": span.get("position_end"),
+        "expected_offset": expected_offset, "frame_delta": frame_delta,
+        "already_rotated": bool(span.get("already_rotated", False)),
         "repair_key_hash": span.get("key_hash"),
         "repair_block_tokens": span.get("token_len"),
     }
+
+
+def _repair_frame_check(plan: Optional[Dict[str, Any]],
+                        normalized: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Compare the repair span's RoPE position with the server's gist ledger
+    (metadata.sglang_runtime.c2kv_layout, docs/c2kv_semantics.md "Position
+    frames").  For append placements the span must sit exactly where the
+    target doc's gist sits (position_cursor of the doc_index-th gist); for
+    in_place the target's gist is not injected, so the span must start
+    where the previous gist ends.  ``ok`` is None when not computable."""
+    if not plan:
+        return None
+    layout = ((normalized.get("cost") or {}).get("c2kv_layout")) or []
+    gists = [e for e in layout if e.get("kind") == "gist"]
+    repairs = [e for e in layout if e.get("kind") == "repair"]
+    result: Dict[str, Any] = {
+        "placement": plan.get("placement"),
+        "position_start": plan.get("position_start"),
+        "n_gist_injections": len(gists),
+        "n_repair_injections": len(repairs),
+        "ok": None,
+    }
+    k = int(plan.get("doc_index", -1))
+    expected = None
+    if plan.get("placement") == "in_place":
+        if k == 0 and gists:
+            expected = None  # first doc: prologue end, not derivable from gists
+        elif 0 < k <= len(gists):
+            prev = gists[k - 1]
+            expected = int(prev["position_cursor"]) + int(prev["original_seq_len"])
+    elif 0 <= k < len(gists):
+        expected = int(gists[k]["position_cursor"])
+    if expected is not None and plan.get("position_start") is not None:
+        result["expected_from_layout"] = expected
+        result["ok"] = int(plan["position_start"]) == expected
+    if repairs:
+        result["server_placement"] = repairs[0].get("placement")
+        result["server_position_start"] = repairs[0].get("position_start")
+    return result
 
 
 class ProxyState:
@@ -524,7 +802,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
         try:
             messages_out, counts = _assemble(messages, ARM)
             repair_plan = plan_repair(messages, ARM, counts,
-                                     tools=payload.get("tools"))
+                                     tools=payload.get("tools"),
+                                     out_messages=messages_out)
         except (RuntimeError, ValueError, URLError, OSError, UpstreamError,
                 BackendError) as error:
             kind = getattr(error, "kind", "assemble_error")
@@ -545,17 +824,25 @@ class ProxyHandler(BaseHTTPRequestHandler):
             out_payload = BACKEND.prepare_chat(staged, ARM, plan)
             return _post_json(self.path, out_payload, 600), out_payload
 
+        def call_upstream(out_messages, plan):
+            data_, _ = send_upstream(out_messages, plan)
+            try:
+                return data_, BACKEND.normalize_response(data_)
+            except BackendError as error:
+                if getattr(error, "kind", "") == "cache_miss":
+                    raise CacheMiss(error.detail) from error
+                raise
+
         try:
             try:
-                data, _ = send_upstream(messages_out, repair_plan)
+                data, normalized = call_upstream(messages_out, repair_plan)
             except CacheMiss:
-                # pool-evicted gists: re-extract every compressed message
+                # pool-evicted gists: re-extract every compressed doc
                 # (re-inserts entries under the same content hashes), then
                 # retry the identical request once
                 for record in counts.get("compressed_records") or []:
                     _extract(record["role"], record["content"], ARM.ratio)
-                data, _ = send_upstream(messages_out, repair_plan)
-            normalized = BACKEND.normalize_response(data)
+                data, normalized = call_upstream(messages_out, repair_plan)
         except (UpstreamError, BackendError, CacheMiss) as error:
             kind = getattr(error, "kind", "upstream_error")
             if isinstance(error, CacheMiss):
@@ -583,8 +870,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 repair_t0 = time.perf_counter()
                 try:
                     raw_out, _ = _assemble(messages, FULL_ASSEMBLY)
-                    data_b, _ = send_upstream(raw_out, None)
-                    normalized_b = BACKEND.normalize_response(data_b)
+                    data_b, normalized_b = call_upstream(raw_out, None)
                 except (UpstreamError, BackendError, RuntimeError, ValueError,
                         URLError, OSError) as error:
                     kind = getattr(error, "kind", "recover_error")
@@ -642,6 +928,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
             }
         )
         data["c2kv_proxy"].update(normalized["cost"])
+        counts["repair_frame"] = _repair_frame_check(repair_plan, normalized)
         self._send_json(200, data)
         counts["wall_sec"] = round(total_sec, 4)
         self._log_request(payload, normalized, counts, recover=recover_flags,
@@ -653,7 +940,9 @@ class ProxyHandler(BaseHTTPRequestHandler):
         if not plan:
             return None
         return {k: plan[k] for k in (
-            "policy", "doc_index", "position_offset", "repair_block_tokens")
+            "policy", "placement", "doc_index", "position_start", "position_end",
+            "expected_offset", "frame_delta", "repair_block_tokens",
+            "already_rotated")
             if k in plan}
 
     def do_GET(self):
@@ -722,6 +1011,9 @@ class ProxyHandler(BaseHTTPRequestHandler):
         # raw-vs-compressed message-class breakdown
         row.update({f"raw_{k}": v for k, v in counts.items()
                     if k in ("system_raw", "history_raw", "current_raw", "compressed")})
+        row.update({k: counts.get(k) for k in
+                    ("doc_packing", "n_docs", "dropped_docs", "repair_frame")
+                    if k in counts})
         # backend cost block (hfserver: cache/logical/prompt/system_len;
         # sglang: kv_resident/kv_peak/kv_pool) + repair columns
         cost = (normalized or {}).get("cost") or {}
@@ -737,6 +1029,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
 
 def main(argv=None):
     global ARM, BACKEND, UPSTREAM, REQUEST_LOG_PATH
+    global DOC_PACKING, MAX_DOC_LENGTH, MAX_DOC_NUM
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--upstream", required=True,
                         help="backend base URL, e.g. http://127.0.0.1:34000")
@@ -750,7 +1043,20 @@ def main(argv=None):
                         help="append a reference-trajectory row per request (full-arm run)")
     parser.add_argument("--reference", default="",
                         help="reference jsonl to diff against (recover arms)")
+    parser.add_argument("--doc-packing", default=DOC_PACKING, choices=DOC_PACKINGS,
+                        help="how compressed history is cut into docs: 'turn' = "
+                             "the training format (default), 'message' = one doc "
+                             "per message (pre-2026-09 bench numbers)")
+    parser.add_argument("--max-doc-length", type=int, default=MAX_DOC_LENGTH,
+                        help="turn packing: split docs above this many template "
+                             "tokens (D-line caliber 768; ckpt-1088 trained at 512)")
+    parser.add_argument("--max-doc-num", type=int, default=MAX_DOC_NUM,
+                        help="turn packing: keep doc 0 + the last N-1 docs, drop "
+                             "the rest (D-line caliber 16; ckpt-1088 trained at 12)")
     args = parser.parse_args(argv)
+    DOC_PACKING = args.doc_packing
+    MAX_DOC_LENGTH = int(args.max_doc_length)
+    MAX_DOC_NUM = int(args.max_doc_num)
     ARM = get_arm(args.arm)
     UPSTREAM = args.upstream.rstrip("/")
     REQUEST_LOG_PATH = args.request_log
@@ -763,7 +1069,8 @@ def main(argv=None):
         print(f"loaded reference: {len(STATE.recover.reference)} states "
               f"from {args.reference}", flush=True)
     server = ThreadingHTTPServer((args.host, args.port), ProxyHandler)
-    print(f"proxy backend={BACKEND.name} arm={ARM.name} listening on "
+    print(f"proxy backend={BACKEND.name} arm={ARM.name} doc_packing={DOC_PACKING} "
+          f"max_doc_length={MAX_DOC_LENGTH} max_doc_num={MAX_DOC_NUM} listening on "
           f"{args.host}:{args.port} -> {UPSTREAM}", flush=True)
     server.serve_forever()
 
