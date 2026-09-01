@@ -75,6 +75,15 @@ REQUEST_LOG_PATH = ""
 _log_lock = threading.Lock()
 
 
+class CacheMiss(RuntimeError):
+    """SGLang c2kv pool eviction (400 C2KV cache miss) — recoverable by
+    re-running /v1/c2kv/extract for the marked messages (the pool re-inserts
+    the entry under the same content-derived hash) and retrying the chat."""
+
+    def __init__(self, detail: str):
+        super().__init__(f"c2kv cache miss: {detail[:500]}")
+
+
 class UpstreamError(RuntimeError):
     """Non-200 transport failure after retries; carries the response body."""
 
@@ -110,6 +119,13 @@ def _post_json(path: str, payload: Dict[str, Any],
             except OSError:
                 pass
             if error.code < 500 and error.code != 429:
+                if error.code == 400 and "C2KV cache miss" in text:
+                    # SGLang c2kv pool LRU eviction: the referenced gist is
+                    # no longer resident (pool ~4437 tokens; long looping
+                    # conversations evict their own early turns). Marked so
+                    # the chat path can re-extract and retry instead of
+                    # killing the task deterministically (~600s in, 5/5).
+                    raise CacheMiss(text) from error
                 raise UpstreamError(error.code, text) from error
             last = UpstreamError(error.code, text)
         except (URLError, OSError) as error:
@@ -525,10 +541,20 @@ class ProxyHandler(BaseHTTPRequestHandler):
             return _post_json(self.path, out_payload, 600), out_payload
 
         try:
-            data, _ = send_upstream(messages_out, repair_plan)
+            try:
+                data, _ = send_upstream(messages_out, repair_plan)
+            except CacheMiss:
+                # pool-evicted gists: re-extract every compressed message
+                # (re-inserts entries under the same content hashes), then
+                # retry the identical request once
+                for record in counts.get("compressed_records") or []:
+                    _extract(record["role"], record["content"], ARM.ratio)
+                data, _ = send_upstream(messages_out, repair_plan)
             normalized = BACKEND.normalize_response(data)
-        except (UpstreamError, BackendError) as error:
+        except (UpstreamError, BackendError, CacheMiss) as error:
             kind = getattr(error, "kind", "upstream_error")
+            if isinstance(error, CacheMiss):
+                kind = "cache_miss"
             self._log_request(payload, None, counts, status=kind,
                               error=str(error), fingerprint=fingerprint, conv=conv,
                               turn=turn, plan=self._slim_plan(repair_plan))

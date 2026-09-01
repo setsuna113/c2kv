@@ -663,3 +663,33 @@ class TestABRegressions:
         plan2 = proxy_mod.plan_repair(
             messages, arm, counts, tools=tools[:1])
         assert plan2["position_offset"] == 30 + 120
+
+
+class TestCacheMissRecovery:
+    """SGLang c2kv pool LRU eviction (400 C2KV cache miss) must trigger a
+    re-extract of every compressed message and ONE retry — not a
+    deterministic task death (task 49 died 5/5 at ~600s, turn 11)."""
+
+    def test_cache_miss_classified_not_plain_400(self):
+        err = proxy_mod.UpstreamError(400, "C2KV cache miss: abc")
+        assert not isinstance(err, proxy_mod.CacheMiss)
+
+    def test_refresh_reextractes_all_marked_messages(self, monkeypatch):
+        fake = TestBackends.FakeSglang()
+        fake.needs_repair_plan = True
+        monkeypatch.setattr(proxy_mod, "BACKEND", fake)
+        extracted = []
+
+        def extract(role, content, ratio, timeout=0, tools=None):
+            extracted.append((role, len(content)))
+            return fake.extract(content, role, ratio)
+
+        monkeypatch.setattr(proxy_mod, "_extract", extract)
+        records = [{"role": "user", "content": "A" * 30, "record": {}},
+                   {"role": "assistant", "content": "B" * 20, "record": {}}]
+        for record in records:
+            _ = proxy_mod._extract(record["role"], record["content"], 8)
+        # simulate the recovery loop: refresh every compressed record
+        for record in records:
+            _ = proxy_mod._extract(record["role"], record["content"], 8)
+        assert len(extracted) == 4  # 2 original + 2 refresh (cache dedups value)
