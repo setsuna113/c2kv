@@ -37,7 +37,12 @@ BFCL_ARMS = ["full", "c2kv", "c2kv_rec", "hy3_rec", "c2kv_rp", "hy3_rp"]
 
 def tau2_arm(arm: str) -> dict | None:
     sims, notes = [], []
-    for name in (f"sg_tau2_{arm}", f"sg_tau2_{arm}_a", f"sg_tau2_{arm}_b"):
+    import glob as _glob
+    names = [f"sg_tau2_{arm}", f"sg_tau2_{arm}_a", f"sg_tau2_{arm}_b"]
+    # single-task makeup runs (terminal-gate rejects rerun solo) merge in
+    names += [Path(x).name for x in
+              _glob.glob(str(TAU2 / f"sg_makeup_{arm}_*"))]
+    for name in names:
         d = TAU2 / name
         if not (d / "updated_results.json").exists():
             continue
