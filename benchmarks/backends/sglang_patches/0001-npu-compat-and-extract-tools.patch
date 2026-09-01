@@ -34,7 +34,7 @@
              if tokenizer.bos_token and text_str.startswith(tokenizer.bos_token):
                  text_str = text_str[len(tokenizer.bos_token):]
 --- python/sglang/srt/models/qwen3.py	2026-08-30 20:20:01.000000000 +0800
-+++ /home/liuyancheng/sgl-22fbf3146/python/sglang/srt/models/qwen3.py	2026-08-31 03:58:46.183259300 +0800
++++ /home/liuyancheng/sgl-22fbf3146/python/sglang/srt/models/qwen3.py	2026-09-01 22:45:11.715259300 +0800
 @@ -66,7 +66,15 @@
  if _is_npu:
      import torch_npu
@@ -52,7 +52,18 @@
  
      from sglang.srt.hardware_backend.npu.cmo import get_cmo_stream, wait_cmo_stream
  
-@@ -364,6 +372,7 @@
+@@ -260,6 +268,10 @@
+         return q, k, v
+ 
+     def forward_prepare_npu(self, positions, hidden_states, forward_batch):
++        if split_qkv_rmsnorm_rope is None:
++            # compat fallback (27f21a588 port): repair_extract calls this
++            # path directly, bypassing the forward dispatch guard
++            return self.forward_prepare_native(positions, hidden_states)
+         qkv, _ = self.qkv_proj(hidden_states)
+ 
+         if self.attn.layer_id == forward_batch.token_to_kv_pool.start_layer:
+@@ -364,6 +376,7 @@
              save_kv_cache = False
          elif (
              not _is_npu
