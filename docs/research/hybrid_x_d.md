@@ -321,6 +321,19 @@ re_diverged。arms：`c2kv_recover` / `hybrid_recover`；旧任务级 oracle
 | τ² | **hybrid_repair(终)** | **0.36**(18 perfect,**零 infra,十臂唯一全净 50/50**) | 块 a=0.28 + 块 b=**0.44**(25/25 一次过,21 user_stop+4 max_steps);**τ² 终局王座:hy3_rp 0.36 > hy3_rec 0.34 > full 0.24 > c2kv_rec 0.18 = c2kv 0.18 > c2kv_rp(并集含废块)**。hybrid 基座+任一步级修复≈+90% vs 纯 c2kv;修复增益来源=尾部 raw KV,repair 与 recover 两形态等效 |
 
 
+**TS 面(六臂全过闸,n=3 场景):**
+
+| 臂 | similarity | 相对 full |
+|---|---|---|
+| full | **0.86** | — |
+| hybrid_recover | **0.80** | −7%(近 full) |
+| hybrid_repair | 0.69 | −20% |
+| c2kv_recover | 0.39 | −55%(**较 c2kv +84% 救回 —— TS 上 recover 救援远大于 τ² 的 0**) |
+| c2kv_repair | 0.30 | −65% |
+| c2kv | 0.21 | −75%(TS 对压缩最敏感) |
+
+TS 与 τ² 同向但幅度放大:hybrid+步级修复把 75% 的压缩损失修到仅剩 7%;c2kv 基座上 recover 救援 0.21→0.39(τ² 上 0.18→0.18)—— 修复收益取决于损伤分布的机制预测得到跨面印证。
+
 **本轮基础设施定因(写入迁移史)**:四块 24/25 的"块尾杀手"最终定因为 SGLang c2kv 池 LRU 驱逐(4437-token 默认池;400 C2KV cache miss;任务 49 五死于 ~600s 同一时刻)—— proxy 修复(检测→重 extract→重试)+ 池扩容(--c2kv-pool-fraction 0.06)双保护后,hy3_rec_b 成为首个 25/25 全过的 b 型块,任务 49 首次存活。4 项单任务补跑(c2kv/49、c2kv_rec/24、c2kv_rec/49、hy3_rec/24)由 sg_makeup 自动执行,各自重启服务器取双保护。|
 
 B 修复的服务器侧证据（重启后 smoke）：同一 system 文本不带 tools `original_seq_len=7` vs 带 1 个工具 `=125`（工具序言 +118 token）——position_offset 缺口正是这一段。
