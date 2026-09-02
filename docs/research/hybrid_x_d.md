@@ -317,7 +317,7 @@ re_diverged。arms：`c2kv_recover` / `hybrid_recover`；旧任务级 oracle
 | τ² | c2kv(50 任务并集) | **0.18**(9 perfect,1 infra 缺任务 49) | 压缩代价 −25% vs full 0.24 |
 | τ² | c2kv_recover | 0.18(2 infra) | recover 未增益于 c2kv 基座(50 任务口径);干净块 a=0.22 曾到 full 线 |
 | τ² | **hybrid_recover** | **0.34**(17 perfect,4 infra 缺任务) | **全场最强:超 full +42%、超 c2kv_rec +89%**;干净块 hy3_rec_b=**0.40**(25/25 过闸,22/25 自然完成、仅 3 循环 —— hybrid 尾部几乎消除病理性 tool-loop);同点位对 c2kv_rec_b +23pp。**头条:hybrid 尾 raw + 步级 oracle-recover 不只修平压缩损失,而是大幅超越 full**(单种子、n=50) |
-| τ² | c2kv_repair | 块 b=**0.16**(25/25 过闸,任务 49 存活;21 max_steps+4 user_stop)| corr@first 在 b 半无增益(vs c2kv_b 同点 0.17);**块 a 作废待重跑**(双层 bug 时代,25 infra)——50 任务并集暂含无效 a,终值待 a 重跑后修正 |
+| τ² | c2kv_repair(终) | **0.14**(7 perfect,50 任务零 infra;a2 重跑 25/25 一次过 + b) | corr@first 无增益(0.14 < c2kv 0.18)—— 修复臂在 c2kv 基座上反而略降,与 b 半结论一致 |
 | τ² | **hybrid_repair(终)** | **0.36**(18 perfect,**零 infra,十臂唯一全净 50/50**) | 块 a=0.28 + 块 b=**0.44**(25/25 一次过,21 user_stop+4 max_steps);**τ² 终局王座:hy3_rp 0.36 > hy3_rec 0.34 > full 0.24 > c2kv_rec 0.18 = c2kv 0.18 > c2kv_rp(并集含废块)**。hybrid 基座+任一步级修复≈+90% vs 纯 c2kv;修复增益来源=尾部 raw KV,repair 与 recover 两形态等效 |
 
 
