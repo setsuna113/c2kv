@@ -318,7 +318,8 @@ re_diverged。arms：`c2kv_recover` / `hybrid_recover`；旧任务级 oracle
 | τ² | c2kv_recover | 0.18(2 infra) | recover 未增益于 c2kv 基座(50 任务口径);干净块 a=0.22 曾到 full 线 |
 | τ² | **hybrid_recover** | **0.34**(17 perfect,4 infra 缺任务) | **全场最强:超 full +42%、超 c2kv_rec +89%**;干净块 hy3_rec_b=**0.40**(25/25 过闸,22/25 自然完成、仅 3 循环 —— hybrid 尾部几乎消除病理性 tool-loop);同点位对 c2kv_rec_b +23pp。**头条:hybrid 尾 raw + 步级 oracle-recover 不只修平压缩损失,而是大幅超越 full**(单种子、n=50) |
 | τ² | c2kv_repair | 块 b=**0.16**(25/25 过闸,任务 49 存活;21 max_steps+4 user_stop)| corr@first 在 b 半无增益(vs c2kv_b 同点 0.17);**块 a 作废待重跑**(双层 bug 时代,25 infra)——50 任务并集暂含无效 a,终值待 a 重跑后修正 |
-| τ² | hybrid_repair | 块 a=**0.28**(25/25 一次过闸,零 infra;17 user_stop+8 max_steps) | 对 hy3_rec_a 同任务 0.33 差 5pp —— **repair≈recover 在 hybrid 基座上等效**,增益来源是尾部 raw;termination 与 c2kv 臂对比再证 hybrid 消除循环 |
+| τ² | **hybrid_repair(终)** | **0.36**(18 perfect,**零 infra,十臂唯一全净 50/50**) | 块 a=0.28 + 块 b=**0.44**(25/25 一次过,21 user_stop+4 max_steps);**τ² 终局王座:hy3_rp 0.36 > hy3_rec 0.34 > full 0.24 > c2kv_rec 0.18 = c2kv 0.18 > c2kv_rp(并集含废块)**。hybrid 基座+任一步级修复≈+90% vs 纯 c2kv;修复增益来源=尾部 raw KV,repair 与 recover 两形态等效 |
+
 
 **本轮基础设施定因(写入迁移史)**:四块 24/25 的"块尾杀手"最终定因为 SGLang c2kv 池 LRU 驱逐(4437-token 默认池;400 C2KV cache miss;任务 49 五死于 ~600s 同一时刻)—— proxy 修复(检测→重 extract→重试)+ 池扩容(--c2kv-pool-fraction 0.06)双保护后,hy3_rec_b 成为首个 25/25 全过的 b 型块,任务 49 首次存活。4 项单任务补跑(c2kv/49、c2kv_rec/24、c2kv_rec/49、hy3_rec/24)由 sg_makeup 自动执行,各自重启服务器取双保护。|
 
