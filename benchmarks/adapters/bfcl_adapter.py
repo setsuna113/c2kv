@@ -29,7 +29,11 @@ SERVED_MODEL = "c2kv-agent"  # default served model name at the endpoint
 
 
 def install_handler(base_url: str, model: str = SERVED_MODEL,
-                    handler_name: str = MODEL_NAME) -> None:
+                    handler_name: "str | None" = None) -> None:
+    # NOTE: default resolved at CALL time — binding the default to
+    # MODEL_NAME at def time made monkeypatched names register the
+    # wrong key (val20 evaluate failure)
+    handler_name = handler_name or MODEL_NAME
     import httpx
     from openai import OpenAI
     from bfcl_eval.constants.model_config import MODEL_CONFIG_MAPPING, ModelConfig
@@ -105,9 +109,9 @@ def run(base_url: str, categories: str = "multi_turn_base",
         tmp.write_text(json.dumps({categories: ids}), encoding="utf-8")
         tmp.replace(id_file)
         gen.append("--run-ids")
-        # NOTE: generate-only flag.  This vintage's evaluate subcommand has
-        # no --run-ids option (bfcl_eval/__main__.py:251-277) — appending it
-        # made every subset evaluate crash (audit BLOCKER).
+        # generate-only flag; the subset EVALUATE instead needs
+        # --partial-eval (this vintage scores the full category otherwise)
+        ev.append("--partial-eval")
         expected = len(ids)
     if mode in ("generate", "both"):
         run_cli(gen)
