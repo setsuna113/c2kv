@@ -44,9 +44,14 @@ def start_proxy(upstream: str, arm: str, port: int, log_dir: Path,
     )
     import urllib.request
 
+    # never route the local health probe through an ambient http_proxy
+    # (an inherited proxy env once made every run.py launch fail its own
+    # gateway check)
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
     for _ in range(100):
         try:
-            urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=2)
+            opener.open(f"http://127.0.0.1:{port}/health", timeout=2)
             return proc, log_path
         except OSError:
             time.sleep(0.2)

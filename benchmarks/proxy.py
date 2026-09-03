@@ -66,6 +66,11 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 from urllib import request as urlrequest
 from urllib.error import HTTPError, URLError
 
+# this proxy is always a local sidecar talking to 127.0.0.1 upstreams; an
+# ambient http_proxy env (login shells here carry one) must never intercept
+# its upstream calls
+_OPENER = urlrequest.build_opener(urlrequest.ProxyHandler({}))
+
 import repair_policy
 from arms import Arm, get_arm  # type: ignore
 from backends import BackendError, get_backend  # type: ignore
@@ -137,7 +142,7 @@ def _post_json(path: str, payload: Dict[str, Any],
             headers={"Content-Type": "application/json"}, method="POST",
         )
         try:
-            with urlrequest.urlopen(req, timeout=timeout) as resp:
+            with _OPENER.open(req, timeout=timeout) as resp:
                 return json.loads(resp.read().decode("utf-8"))
         except HTTPError as error:
             text = ""
@@ -799,8 +804,38 @@ class ProxyHandler(BaseHTTPRequestHandler):
         fingerprint = messages_fingerprint(messages)
         conv = conversation_id(messages)
         turn = len(messages)
+        text_stats: Optional[Dict[str, Any]] = None
+        if getattr(ARM, "text_policy", None):
+            # text-level baseline arms (textarms.py): rewrite history BEFORE
+            # assembly; the arm itself is full-mode downstream.  Compressor
+            # calls go straight to the upstream endpoint (no arm semantics,
+            # no recursion through this handler).
+            import textarms
+
+            def _compress(system_text: str, user_text: str) -> str:
+                data = _post_json("/v1/chat/completions", {
+                    "model": payload.get("model") or "c2kv-agent",
+                    "messages": [
+                        {"role": "system", "content": system_text},
+                        {"role": "user", "content": user_text},
+                    ],
+                    "temperature": 0.0, "max_tokens": 1024, "stream": False,
+                }, 600)
+                return (((data.get("choices") or [{}])[0]
+                         .get("message") or {}).get("content")) or ""
+
+            if ARM.text_policy == "hiagent":
+                messages, text_stats = textarms.hiagent_transform(
+                    messages, _compress, _render_action_dialect)
+            else:
+                messages, text_stats = textarms.acon_transform(
+                    messages, _compress, _render_action_dialect, conv)
+            payload = dict(payload)
+            payload["messages"] = messages
         try:
             messages_out, counts = _assemble(messages, ARM)
+            if text_stats is not None:
+                counts["textarm"] = text_stats
             repair_plan = plan_repair(messages, ARM, counts,
                                      tools=payload.get("tools"),
                                      out_messages=messages_out)
@@ -947,7 +982,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         try:
-            with urlrequest.urlopen(f"{UPSTREAM}{self.path}", timeout=60) as resp:
+            with _OPENER.open(f"{UPSTREAM}{self.path}", timeout=60) as resp:
                 body = resp.read()
                 self.send_response(resp.status)
                 self.send_header("Content-Length", str(len(body)))
@@ -964,7 +999,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 headers={"Content-Type": self.headers.get("Content-Type", "application/json")},
                 method="POST",
             )
-            with urlrequest.urlopen(req, timeout=600) as resp:
+            with _OPENER.open(req, timeout=600) as resp:
                 body = resp.read()
                 self.send_response(resp.status)
                 self.send_header("Content-Length", str(len(body)))

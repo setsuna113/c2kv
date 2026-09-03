@@ -75,27 +75,38 @@ def install_handler(base_url: str, model: str = SERVED_MODEL) -> None:
 
 
 def run(base_url: str, categories: str = "multi_turn_base",
-        mode: str = "both", run_ids: str = "",
+        mode: str = "both", run_ids: "list[str] | str | None" = None,
         model: str = SERVED_MODEL) -> Dict[str, Any]:
     """Programmatic entry for benchmarks/run.py: register the handler and
     drive the official generate/evaluate CLI in-process.
+
+    ``run_ids`` subsets the category: this BFCL vintage implements subsetting
+    through <gorilla-root>/test_case_ids_to_generate.json ({"<category>":
+    [ids]}) + the boolean --run-ids flag, NOT a CLI value, so the ids are
+    written to that file and the flag is passed (comma string or list).
 
     Terminal-state check (acceptance 1): every expected entry must have a
     result row — the run fails loudly instead of shrinking the denominator."""
     install_handler(base_url, model=model)
     gen = ["generate", "--model", MODEL_NAME, "--test-category", categories]
     ev = ["evaluate", "--model", MODEL_NAME, "--test-category", categories]
+    expected = 200
     if run_ids:
-        gen += ["--run-ids", run_ids]
-        ev += ["--run-ids", run_ids]
+        ids = ([i.strip() for i in run_ids.split(",") if i.strip()]
+               if isinstance(run_ids, str) else list(run_ids))
+        id_file = Path.cwd() / "test_case_ids_to_generate.json"
+        id_file.write_text(json.dumps({categories: ids}), encoding="utf-8")
+        gen.append("--run-ids")
+        ev.append("--run-ids")
+        expected = len(ids)
     if mode in ("generate", "both"):
         run_cli(gen)
     if mode in ("evaluate", "both"):
         run_cli(ev)
     import terminal_check  # noqa: E402  (sibling module, sys.path has parent)
 
-    expected = len([r for r in run_ids.split(",") if r.strip()]) or 200
-    code = terminal_check.check_bfcl(expected, run_ids)
+    ids_str = ",".join(run_ids) if isinstance(run_ids, list) else (run_ids or "")
+    code = terminal_check.check_bfcl(expected, ids_str)
     if code != 0:
         raise SystemExit(f"FATAL: bfcl terminal-state check failed (rc={code})")
     return {"benchmark": "bfcl", "categories": categories, "mode": mode,
@@ -122,8 +133,11 @@ def main(argv=None) -> None:
     gen = ["generate", "--model", MODEL_NAME, "--test-category", args.categories]
     ev = ["evaluate", "--model", MODEL_NAME, "--test-category", args.categories]
     if args.run_ids:
-        gen += ["--run-ids", args.run_ids]
-        ev += ["--run-ids", args.run_ids]
+        ids = [i.strip() for i in args.run_ids.split(",") if i.strip()]
+        (Path.cwd() / "test_case_ids_to_generate.json").write_text(
+            json.dumps({args.categories: ids}), encoding="utf-8")
+        gen.append("--run-ids")
+        ev.append("--run-ids")
     if args.mode in ("generate", "both"):
         run_cli(gen)
     if args.mode in ("evaluate", "both"):

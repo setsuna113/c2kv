@@ -57,6 +57,11 @@ class Arm:
     # regenerating the step with full-raw history KV.  Mutually exclusive
     # with repair (both replace the same step's generation).
     recover: Optional[Dict[str, object]] = None
+    # Text-level baseline arms (benchmarks/textarms.py): the proxy rewrites
+    # the request history per the named paper's policy instead of any KV
+    # compression; "hiagent" | "acon".  Compressor calls go to the same
+    # upstream endpoint in full mode (self-compression).
+    text_policy: Optional[str] = None
     description: str = ""
 
     def validate(self) -> None:
@@ -66,6 +71,10 @@ class Arm:
             raise ValueError(f"arm {self.name!r}: hybrid/repair/recover knobs need compression")
         if self.repair and self.recover:
             raise ValueError(f"arm {self.name!r}: repair and recover are mutually exclusive")
+        if self.text_policy and self.compress_history:
+            raise ValueError(f"arm {self.name!r}: text_policy and KV compression are exclusive")
+        if self.text_policy and self.text_policy not in ("hiagent", "acon"):
+            raise ValueError(f"arm {self.name!r}: unknown text_policy {self.text_policy!r}")
         if self.repair:
             placement = str(self.repair.get("placement") or "append_keep_ledger")
             if placement not in REPAIR_PLACEMENTS:
@@ -81,6 +90,23 @@ ARMS: Dict[str, Arm] = {
             name="full",
             compress_history=False,
             description="raw text history, no compression (upper reference)",
+        ),
+        Arm(
+            name="hiagent",
+            compress_history=False,
+            text_policy="hiagent",
+            description="HiAgent baseline (2408.09559, hiagent2024/hiagent cme_final.py): subgoal-protocol "
+                        "note injected, completed subgoal segments replaced by trajectory summaries "
+                        "(same-endpoint self-compression); current segment stays raw",
+        ),
+        Arm(
+            name="acon",
+            compress_history=False,
+            text_policy="acon",
+            description="ACON baseline (2510.00615, microsoft/acon context_opt): tool observations "
+                        ">256 tok refined in place, history >4096 tok replaced by the structured "
+                        "rolling summary (REASONING/COMPLETED), last turn preserved (same-endpoint "
+                        "self-compression)",
         ),
         Arm(
             name="c2kv",
