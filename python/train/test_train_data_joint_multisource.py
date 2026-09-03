@@ -816,3 +816,31 @@ def test_wiki2_real_row_through_source_parquet(tmp_path, fixtures):
     assert len(examples) == 1
     assert len(examples[0].history_documents) == 10
     assert examples[0].gold_history_doc_indices == (0, 1, 2, 8)
+
+
+# ---------------------------------------------------------------------------
+# selected_tools propagation (the tools_in_system arm renders these RAW in the
+# system prefix instead of through the gist grid).
+# ---------------------------------------------------------------------------
+
+
+def test_toucan_examples_carry_selected_tools(fixtures):
+    example = toucan_row_to_examples(fixtures["toucan"][1])[0]
+    assert example.selected_tools is not None
+    assert len(example.selected_tools) == len(example.tool_documents)
+    # The recorded pool is the post-selection, PRE-render tool dicts.
+    names = {tool["function"]["name"] for tool in example.selected_tools}
+    assert example.target_tool in names
+
+
+def test_openswe_examples_carry_selected_tools(fixtures):
+    examples = openswe_row_to_examples(fixtures["openswe"][0], subset="openswe:test")
+    for example in examples:
+        assert example.selected_tools is not None
+        assert len(example.selected_tools) == len(example.tool_documents)
+
+
+def test_qa_examples_have_no_selected_tools(fixtures):
+    example = hotpotqa_row_to_example(fixtures["hotpotqa"][0], 0)
+    assert example is not None
+    assert example.selected_tools is None

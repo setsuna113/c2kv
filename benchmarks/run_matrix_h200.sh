@@ -25,6 +25,13 @@ BFCL_CATEGORIES="${BFCL_CATEGORIES:-multi_turn_base}"
 TAU2_SMOKE_TASKS="${TAU2_SMOKE_TASKS:-2}"
 BFCL_SMOKE_RUN_IDS="${BFCL_SMOKE_RUN_IDS:-multi_turn_base_1}"
 TOOLSANDBOX_SMOKE_SCENARIO="${TOOLSANDBOX_SMOKE_SCENARIO:-send_message_with_contact_content_cellular_off_multiple_user_turn}"
+# TOOLSANDBOX_FULL=1 forces benchmarks/run.py --full (whole ToolSandbox suite)
+# even under SMOKE=1. Default 0 keeps today's behaviour exactly: --full in a
+# normal run, --toolsandbox-scenarios in a smoke run. run.py rejects --full
+# combined with --toolsandbox-scenarios, so the two are mutually exclusive.
+# A non-smoke run ALREADY passes --full, so TOOLSANDBOX_FULL only has an
+# effect together with SMOKE=1 (the script says so at run time).
+TOOLSANDBOX_FULL="${TOOLSANDBOX_FULL:-0}"
 
 SGLANG_URL="${SGLANG_URL:-git@github.com:setsuna113/kvoffload-sglang-c2kv.git}"
 SGLANG_COMMIT="${SGLANG_COMMIT:-4d08b7b92184f7c14e97947fe7bfb6f41e9d3a2d}"
@@ -421,9 +428,12 @@ for arm in "${ARM_LIST[@]}"; do
         ;;
       toolsandbox)
         extra=()
-        if [[ "$SMOKE" == "1" ]]; then
+        if [[ "$SMOKE" == "1" && "$TOOLSANDBOX_FULL" != "1" ]]; then
           extra+=("--toolsandbox-scenarios" "$TOOLSANDBOX_SMOKE_SCENARIO")
         else
+          if [[ "$TOOLSANDBOX_FULL" == "1" && "$SMOKE" != "1" ]]; then
+            echo "[note] TOOLSANDBOX_FULL=1 is redundant outside SMOKE=1: the full suite is already the default"
+          fi
           extra+=("--full")
         fi
         "$RUN_PYTHON" "$REPO_ROOT/benchmarks/run.py" \

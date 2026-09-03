@@ -254,6 +254,8 @@ def chunk_doc_texts(
     max_doc_length: int,
     max_doc_num: int,
     max_tool_chunks: int | None,
+    has_tool_documents: bool | None = None,
+    meta_out: dict | None = None,
 ) -> tuple[list[list[int]], list[list[int]]]:
     """doc 文本 → chat-template 包裹的 token 块（joint 预算分配）。
 
@@ -263,24 +265,47 @@ def chunk_doc_texts(
     **常量** max_doc_num - tool_cap 槽位（不回收工具侧空槽，与
     train_data_joint._history_chunk_budget(per_side_caps=True) 一致），
     _fit_reused_history（超长切分 + 尾偏 tail 选择）后逐条包裹。
-    不实现 max_tool_definition_tokens 的 skip，也不做 target-doc 保留
-    （BFCL 每条目工具数少，tool_cap 截断在生产参数下不触发；若未来
-    工具池扩大需与 train_data_joint.build_tool_chunks 同步）。
+    不实现 max_tool_definition_tokens 的 skip，也不做 target-doc 保留。
+
+    has_tool_documents: the ENTRY carries at least one non-empty tool
+    document -- NOT "this doc_mode routes tool docs through the grid". The
+    empty-tool reclaim (tool_cap = 0, history gets the whole max_doc_num) is
+    the v2 rule of train_data_joint._history_chunk_budget, which keys on
+    _has_tool_documents(example) in EVERY doc mode; deciding it from the
+    doc_mode-filtered tool_doc_texts instead would hand every history_only
+    BFCL entry the full grid and reinstate the 1.691x presented-budget
+    confound that docs/0820_g_joint_progress.md section 9 removed. Defaults
+    to bool(tool_doc_texts) when the caller does not know (unit tests, tool
+    docs already filtered). For the tools-in-system arm -- where the trainer
+    passes has_tool_documents=False because tools never enter the grid --
+    pass max_tool_chunks=0 explicitly (--c2kv_max_tool_chunks 0).
+
+    NOTE: the tool cap DOES fire on BFCL -- dev-128 entries carry 17-39
+    functions, i.e. far more tool chunks than min(max_tool_chunks,
+    max_doc_num); meta_out["tool_truncated"] reports it per call. If the tool
+    pool grows further this must stay in sync with
+    train_data_joint.build_tool_chunks.
+
+    meta_out (optional): filled with has_tool_documents, num_tool_docs,
+    num_tool_chunks_before_cap, tool_cap, tool_truncated, num_history_docs,
+    history_budget, num_history_chunks. The return value is unchanged.
     """
     imp = _lazy_train_imports()
     if max_tool_chunks is None:
         max_tool_chunks = imp["_default_max_tool_chunks"](max_doc_num)
 
+    tool_texts = [text for text in tool_doc_texts if text and text.strip()]
+    if has_tool_documents is None:
+        has_tool_documents = bool(tool_texts)
     tool_chunks: list[list[int]] = []
-    tool_cap = min(max_tool_chunks, max_doc_num)
-    for doc_text in tool_doc_texts:
-        if not doc_text.strip():
-            continue
+    tool_cap = min(max_tool_chunks, max_doc_num) if has_tool_documents else 0
+    for doc_text in tool_texts:
         doc_ids = imp["_chat_template_ids"](
             tokenizer, [{"role": "user", "content": doc_text}]
         )
         for start in range(0, len(doc_ids), max_doc_length):
             tool_chunks.append(doc_ids[start : start + max_doc_length])
+    num_tool_chunks_before_cap = len(tool_chunks)
     tool_chunks = tool_chunks[:tool_cap]
 
     history_chunks: list[list[int]] = []
@@ -305,6 +330,19 @@ def chunk_doc_texts(
             imp["_chat_template_ids"](tokenizer, [message], max_length=max_doc_length)
             for message in fitted
         ]
+    if meta_out is not None:
+        meta_out.update(
+            {
+                "has_tool_documents": bool(has_tool_documents),
+                "num_tool_docs": len(tool_texts),
+                "num_tool_chunks_before_cap": num_tool_chunks_before_cap,
+                "tool_cap": tool_cap,
+                "tool_truncated": num_tool_chunks_before_cap > tool_cap,
+                "num_history_docs": len(raw_history),
+                "history_budget": history_budget,
+                "num_history_chunks": len(history_chunks),
+            }
+        )
     return tool_chunks, history_chunks
 
 
@@ -402,13 +440,41 @@ def c2kv_row_meta(args) -> dict:
     (condition, cap_tier) 分格不变），臂间差异全部落在此字段与逐步
     compression_meta；默认输出文件名含 doc_mode/ratio 防 resume 撞键。
     """
-    return {
+    meta = {
         "checkpoint": getattr(args, "c2kv_checkpoint", None),
         "trained": bool(getattr(args, "c2kv_checkpoint", None)),
         "ratio": int(getattr(args, "c2kv_ratio", 8)),
         "doc_mode": getattr(args, "c2kv_doc_mode", "joint"),
         "max_doc_length": int(getattr(args, "c2kv_max_doc_length", 1024)),
         "max_doc_num": int(getattr(args, "c2kv_max_doc_num", 24)),
+    }
+    # Always present, None = the 2/3-of-max_doc_num default. A row must be able
+    # to say which tool budget produced it without re-deriving the default;
+    # the per-step compression_meta carries the realized tool_cap.
+    max_tool_chunks = getattr(args, "c2kv_max_tool_chunks", None)
+    meta["max_tool_chunks"] = (
+        int(max_tool_chunks) if max_tool_chunks is not None else None
+    )
+    return meta
+
+
+def _tool_budget_meta(chunk_meta: dict) -> dict:
+    """chunk_doc_texts(meta_out=...) budget fields -> _c2kv_compression_meta kwargs.
+
+    history_budget / num_history_docs travel with the tool fields: the
+    presented history budget is the number the arm is selected on, and
+    reading it back from tool_cap requires knowing max_doc_num.
+    """
+    return {
+        "has_tool_documents": bool(chunk_meta.get("has_tool_documents", False)),
+        "num_tool_docs": int(chunk_meta.get("num_tool_docs", 0)),
+        "num_tool_chunks_before_cap": int(
+            chunk_meta.get("num_tool_chunks_before_cap", 0)
+        ),
+        "tool_cap": int(chunk_meta.get("tool_cap", 0)),
+        "tool_truncated": bool(chunk_meta.get("tool_truncated", False)),
+        "num_history_docs": int(chunk_meta.get("num_history_docs", 0)),
+        "history_budget": int(chunk_meta.get("history_budget", 0)),
     }
 
 
@@ -424,11 +490,24 @@ def _c2kv_compression_meta(
     raw_history_tokens: int,
     suffix_tokens: int,
     degenerate: bool,
+    has_tool_documents: bool = False,
+    num_tool_docs: int = 0,
+    num_tool_chunks_before_cap: int = 0,
+    tool_cap: int = 0,
+    tool_truncated: bool = False,
+    num_history_docs: int = 0,
+    history_budget: int = 0,
 ) -> dict:
     """逐步 compression_meta（snapkv 形状兼容键 + c2kv 专属键）。
 
     kept_tokens = 解码开始前 cache 实际槽位（system + gist + 原文历史 + 后缀）；
     budget/obs_window/n_sink 置 None 保持与 snapkv/streamingllm 相同的键集合。
+
+    The budget fields come from chunk_doc_texts(meta_out=...): whether the
+    entry had tool documents at all (has_tool_documents -> tool_cap == 0 when
+    False), whether the tool side of the grid was truncated, and how many
+    history slots were actually presented (history_budget). Every
+    pre-existing key keeps its previous value.
     """
     kept = system_length + gist_tokens + raw_history_tokens + suffix_tokens
     return {
@@ -450,6 +529,13 @@ def _c2kv_compression_meta(
             round(doc_tokens / gist_tokens, 4) if gist_tokens else None
         ),
         "degenerate": degenerate,
+        "has_tool_documents": bool(has_tool_documents),
+        "num_tool_docs": num_tool_docs,
+        "num_tool_chunks_before_cap": num_tool_chunks_before_cap,
+        "tool_cap": tool_cap,
+        "tool_truncated": bool(tool_truncated),
+        "num_history_docs": num_history_docs,
+        "history_budget": history_budget,
     }
 
 
@@ -602,6 +688,14 @@ def hf_generate_c2kv(handler, message: list[dict], function: list[dict],
     plan = build_c2kv_prompt_plan(
         message, function, doc_mode, handler._c2kv_bare_system
     )
+    # Empty-tool reclaim is an ENTRY property: history_only filters the tool
+    # docs out of the plan, but the entry still has 17-39 functions and must
+    # keep the same constant history budget as joint (per-side caps, docs/0820
+    # section 9). Mirrors train_data_joint._has_tool_documents(example).
+    has_tool_docs = bool(
+        plan["tool_doc_texts"] if plan["gist_tool"] else build_tool_doc_texts(function)
+    )
+    chunk_meta: dict = {}
     tool_chunks, history_chunks = chunk_doc_texts(
         tokenizer,
         plan["tool_doc_texts"],
@@ -609,6 +703,8 @@ def hf_generate_c2kv(handler, message: list[dict], function: list[dict],
         max_doc_length=max_doc_length,
         max_doc_num=max_doc_num,
         max_tool_chunks=max_tool_chunks,
+        has_tool_documents=has_tool_docs,
+        meta_out=chunk_meta,
     )
     chunks = [*tool_chunks, *history_chunks]
 
@@ -637,6 +733,7 @@ def hf_generate_c2kv(handler, message: list[dict], function: list[dict],
             tool_doc_chunks=0, history_doc_chunks=0,
             raw_history_tokens=0, suffix_tokens=prompt_len,
             degenerate=True,
+            **_tool_budget_meta(chunk_meta),
         )
         return generated, meta
 
@@ -735,6 +832,7 @@ def hf_generate_c2kv(handler, message: list[dict], function: list[dict],
         raw_history_tokens=raw_history_tokens,
         suffix_tokens=suffix_tokens,
         degenerate=False,
+        **_tool_budget_meta(chunk_meta),
     )
     return generated, meta
 

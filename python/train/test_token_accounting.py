@@ -381,3 +381,51 @@ def test_cli_joint_writes_json(tmp_path):
         "--out", str(out2),
     ])
     assert json.loads(out2.read_text(encoding="utf-8")) == report
+
+
+# ---------------------------------------------------------------------------
+# f. Regime-arm knobs: tools_in_system / hybrid_tail_choices replay the
+#    trainer's dialect (2026-09-03).
+# ---------------------------------------------------------------------------
+
+
+def test_tools_in_system_scan_excludes_tool_docs_and_matches_grid(tokenizer):
+    example = _example(history_docs=[_HISTORY_DOC, _HISTORY_DOC_B])
+    geometry = dict(max_length=256, max_doc_length=32, min_doc_num=2, max_doc_num=8, max_system_length=96)
+    row, reason = JointDataset.preprocess_example(
+        example, tokenizer=tokenizer, doc_mode="history_only", tools_in_system=True, **geometry
+    )
+    assert row is not None, reason
+    expected_p = sum(1 for token_id in row["context_input_ids"] if token_id != -100)
+
+    regime = scan_joint_examples(
+        [example], tokenizer, doc_mode="history_only", tools_in_system=True, **geometry
+    )
+    joint = scan_joint_examples([example], tokenizer, doc_mode="joint", **geometry)
+    assert regime["total"]["samples"] == 1
+    assert regime["total"]["P_src"] == expected_p
+    # Tool docs never enter the gist path under tools_in_system: U_src counts
+    # only the two history docs, whereas the joint scan also counts the tool doc.
+    assert regime["total"]["unique_docs"] == 2
+    assert joint["total"]["unique_docs"] == 3
+    assert regime["total"]["U_src"] < joint["total"]["U_src"]
+
+
+def test_hybrid_tail_choices_scan_uses_the_dataset_draw(tokenizer):
+    example = _example(history_docs=[_HISTORY_DOC, _HISTORY_DOC_B, _HISTORY_DOC, _HISTORY_DOC_B])
+    geometry = dict(max_length=512, max_doc_length=32, min_doc_num=2, max_doc_num=8, max_system_length=96)
+    kwargs = dict(doc_mode="history_only", tools_in_system=True, **geometry)
+    no_tail = scan_joint_examples([example], tokenizer, **kwargs)
+    with_tail = scan_joint_examples([example], tokenizer, hybrid_tail_choices=[2], **kwargs)
+    # The dataset draws k with random.Random(f"{qid}:hybrid_tail").choice(...);
+    # with a single choice the draw is k=2, so the replayed grid must equal the
+    # trainer's compressed grid for hybrid_tail_k=2 and be smaller than k=0.
+    row, reason = JointDataset.preprocess_example(
+        example, tokenizer=tokenizer, hybrid_tail_k=2, **kwargs
+    )
+    assert row is not None, reason
+    expected_p = sum(1 for token_id in row["context_input_ids"] if token_id != -100)
+    assert with_tail["total"]["P_src"] == expected_p
+    assert with_tail["total"]["P_src"] < no_tail["total"]["P_src"]
+    with pytest.raises(ValueError):
+        scan_joint_examples([example], tokenizer, hybrid_tail_choices=[-1], **kwargs)

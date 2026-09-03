@@ -220,17 +220,29 @@ def scan_joint_examples(
     max_tool_definition_tokens: int = 32000,
     split_oversized_history_docs: bool = True,
     per_side_caps: bool = True,
+    tools_in_system: bool = False,
+    hybrid_tail_choices: Optional[Sequence[int]] = None,
     min_target_tokens: Optional[int] = None,
     epochs: int = 1,
     max_examples: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Compute U_src/P_src/T_tgt for a joint manifest.
 
+    ``tools_in_system`` / ``hybrid_tail_choices`` mirror the JointDataset knobs
+    of the regime arm (tools rendered raw in the system prefix, per-example raw
+    history tail drawn from the qid): with ``tools_in_system`` the tool documents
+    never go through the gist path, so they are excluded from U_src/P_src, and
+    the per-example ``hybrid_tail_k`` is drawn exactly as JointDataset does so
+    the replayed presented budget matches what the trainer actually presents.
+
     Every example contributes its ``tool_documents + history_documents`` to
     U_src (pool-level, deduped per subset and globally); only examples that
     survive ``JointDataset.preprocess_example`` contribute rows to
     P_src/T_tgt.  Deterministic given the example order.
     """
+    tail_choices = [int(value) for value in (hybrid_tail_choices or [])]
+    if any(value < 0 for value in tail_choices):
+        raise ValueError(f"hybrid_tail_choices must be non-negative: {tail_choices!r}")
     per_subset: Dict[str, TokenAccumulator] = {}
     total = TokenAccumulator()
     skipped: Counter[str] = Counter()
@@ -241,9 +253,21 @@ def scan_joint_examples(
         scanned += 1
         subset = str(getattr(example, "subset", "unknown") or "unknown")
         accumulator = per_subset.setdefault(subset, TokenAccumulator())
-        documents = list(example.tool_documents) + list(example.history_documents)
+        # Under tools_in_system the tool schemas are rendered raw in the system
+        # prefix and never presented through the gist path: only history docs
+        # count as source tokens (same rule as _estimate_source_tokens).
+        documents = (
+            list(example.history_documents)
+            if tools_in_system
+            else list(example.tool_documents) + list(example.history_documents)
+        )
         accumulator.add_source_documents(documents, tokenizer)
         total.add_source_documents(documents, tokenizer)
+        # Same per-qid draw as JointDataset.__init__ so the replay presents the
+        # same raw tail / compressed split the trainer did.
+        hybrid_tail_k = (
+            random.Random(f"{example.qid}:hybrid_tail").choice(tail_choices) if tail_choices else 0
+        )
         row, reason = JointDataset.preprocess_example(
             example,
             tokenizer=tokenizer,
@@ -258,6 +282,8 @@ def scan_joint_examples(
             max_tool_definition_tokens=max_tool_definition_tokens,
             split_oversized_history_docs=split_oversized_history_docs,
             per_side_caps=per_side_caps,
+            tools_in_system=tools_in_system,
+            hybrid_tail_k=hybrid_tail_k,
         )
         if row is not None and min_target_tokens is not None:
             # Mirror MinTargetJointDataset: the trainer drops rows whose
@@ -611,11 +637,19 @@ def run_joint(args: argparse.Namespace, tokenizer) -> Dict[str, Any]:
         max_tool_definition_tokens=args.max_tool_definition_tokens,
         split_oversized_history_docs=not args.no_split_oversized_history_docs,
         per_side_caps=not args.legacy_mode_caps,
+        tools_in_system=args.tools_in_system,
+        hybrid_tail_choices=(
+            [int(v) for v in args.hybrid_tail_choices.split(",") if v.strip()]
+            if args.hybrid_tail_choices
+            else None
+        ),
         epochs=args.epochs,
         max_examples=args.max_examples,
     )
     report.update({
         "mode": "joint",
+        "tools_in_system": bool(args.tools_in_system),
+        "hybrid_tail_choices": args.hybrid_tail_choices or None,
         "dataset_path": args.dataset_path,
         "tokenizer": args.tokenizer,
     })
@@ -658,6 +692,18 @@ def main(argv: Optional[Sequence[str]] = None) -> Dict[str, Any]:
     joint.add_argument("--max_tool_chunks", type=int, default=None)
     joint.add_argument("--max_tool_definition_tokens", type=int, default=32000)
     joint.add_argument("--no_split_oversized_history_docs", action="store_true")
+    joint.add_argument(
+        "--tools_in_system",
+        action="store_true",
+        help="Regime arm: tools rendered raw in the system prefix (history_only only); "
+        "tool docs are excluded from U_src/P_src.",
+    )
+    joint.add_argument(
+        "--hybrid_tail_choices",
+        default=None,
+        help="Regime arm: comma-separated raw-tail depths (e.g. 0,0,1,3,5), drawn per qid "
+        "exactly as JointDataset does.",
+    )
     joint.add_argument(
         "--legacy_mode_caps",
         action="store_true",

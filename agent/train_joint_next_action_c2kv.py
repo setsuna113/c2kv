@@ -73,6 +73,14 @@ class JointDataArgs:
     action_tool_call_frac: float = 0.75
     history_selection: str = "tail"
     doc_mode: str = "joint"  # joint | tool_only | history_only | alternate
+    # Regime-first arm: present the selected tool schemas RAW in the system
+    # prefix (chat template tools=) and compress ONLY history — the dialect
+    # every serving path actually runs.  Legal with doc_mode=history_only only.
+    tools_in_system: bool = False
+    # Per-example raw-tail depth pool for the serving "hybrid" arm, as
+    # comma-separated non-negative ints (e.g. "0,0,1,3,5"); None/"" -> off.
+    # Applied to the TRAIN datasets only; eval always renders k=0.
+    hybrid_tail_choices: Optional[str] = None
     max_tools_per_sample: int = 32
     same_namespace_negative_tools: int = 8
     random_negative_tools: int = 24
@@ -115,6 +123,43 @@ class MinTargetJointDataset(JointDataset):
         if supervised < reserved:
             return None, f"target_tokens<{reserved}"
         return row, "ok"
+
+
+def _parse_hybrid_tail_choices(raw: Optional[str]) -> List[int]:
+    """Parse ``--hybrid_tail_choices`` ("0,0,1,3,5") into a draw pool.
+
+    ``None`` / empty / all-blank -> ``[]`` (knob off).  Non-integer or
+    negative entries are a hard error at argument-parsing time.
+    """
+    if raw is None:
+        return []
+    choices: List[int] = []
+    for piece in str(raw).split(","):
+        piece = piece.strip()
+        if not piece:
+            continue
+        try:
+            value = int(piece)
+        except ValueError as exc:
+            raise ValueError(
+                f"--hybrid_tail_choices must be comma-separated integers, got {raw!r}"
+            ) from exc
+        if value < 0:
+            raise ValueError(
+                f"--hybrid_tail_choices entries must be non-negative, got {value} in {raw!r}"
+            )
+        choices.append(value)
+    return choices
+
+
+def _validate_regime_args(data_args: JointDataArgs) -> List[int]:
+    """Fail loudly on an illegal regime-first combination; return the tail pool."""
+    if data_args.tools_in_system and data_args.doc_mode != "history_only":
+        raise ValueError(
+            "--tools_in_system True requires --doc_mode history_only "
+            f"(got {data_args.doc_mode!r}): tools would be presented twice."
+        )
+    return _parse_hybrid_tail_choices(data_args.hybrid_tail_choices)
 
 
 def _load_joint_examples(data_args: JointDataArgs, split: str) -> List[JointExample]:
@@ -218,18 +263,26 @@ def _apply_example_order_file(
     return [by_qid[qid] for qid in raw]
 
 
-def _estimate_source_tokens(example: JointExample, tokenizer) -> int:
-    """Pre-chunking source-token estimate: tool documents + history documents."""
-    return sum(
-        len(tokenizer.encode(doc))
-        for doc in example.tool_documents + example.history_documents
+def _estimate_source_tokens(example: JointExample, tokenizer, tools_in_system: bool = False) -> int:
+    """Pre-chunking source-token estimate: tool documents + history documents.
+
+    ``tools_in_system=True`` excludes the tool documents: that arm never
+    presents them through the gist path, so counting them would inflate the
+    budget by a side the run does not compress.
+    """
+    documents = (
+        list(example.history_documents)
+        if tools_in_system
+        else example.tool_documents + example.history_documents
     )
+    return sum(len(tokenizer.encode(doc)) for doc in documents)
 
 
 def _take_within_source_token_budget(
     examples: Sequence[JointExample],
     tokenizer,
     max_source_tokens: int,
+    tools_in_system: bool = False,
 ) -> Tuple[List[JointExample], int]:
     """Greedy prefix take until the cumulative source-token estimate reaches the budget.
 
@@ -245,7 +298,7 @@ def _take_within_source_token_budget(
         if total >= max_source_tokens:
             break
         kept.append(example)
-        total += _estimate_source_tokens(example, tokenizer)
+        total += _estimate_source_tokens(example, tokenizer, tools_in_system=tools_in_system)
     logger.info(
         "max_source_tokens=%d: kept %d/%d examples (achieved estimated source tokens=%d)",
         max_source_tokens,
@@ -287,11 +340,15 @@ def _dump_train_manifest(
     interleaved_train_len: Optional[int],
     achieved_source_tokens: Optional[int],
     train_datasets: Optional[Dict[str, Any]] = None,
+    eval_dataset: Optional[Any] = None,
 ) -> str:
     path = Path(output_dir) / "train_manifest_used.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     manifest = {
         "doc_mode": data_args.doc_mode,
+        # Regime-first knobs: which dialect this run's features were built in.
+        "tools_in_system": data_args.tools_in_system,
+        "hybrid_tail_choices": data_args.hybrid_tail_choices,
         "legacy_mode_caps": data_args.legacy_mode_caps,
         "cap_regime": cap_regime_name(data_args.legacy_mode_caps),
         "split_seed": data_args.split_seed,
@@ -328,6 +385,31 @@ def _dump_train_manifest(
             name: dataset.skipped_by_reason.get("tool_call_target_truncated", 0)
             for name, dataset in train_datasets.items()
         }
+        # tools_in_system integrity drops: an over-long raw tool prefix is
+        # skipped, never truncated, so the rate must stay visible per pass.
+        manifest["system_overflow_skips"] = {
+            name: dataset.skipped_by_reason.get("system_overflow", 0)
+            for name, dataset in train_datasets.items()
+        }
+        # Realized hybrid raw-tail depth histogram over the emitted rows, and
+        # the DRAWN histogram over all candidate examples.  Realized < drawn
+        # for some k means that stratum is being lost to skips (or shortened by
+        # the sequence budget) — invisible from the realized counts alone.
+        manifest["hybrid_tail_k_counts"] = {
+            name: {str(k): count for k, count in dataset.hybrid_tail_k_counts.items()}
+            for name, dataset in train_datasets.items()
+        }
+        manifest["hybrid_tail_k_drawn_counts"] = {
+            name: {str(k): count for k, count in dataset.hybrid_tail_k_drawn_counts.items()}
+            for name, dataset in train_datasets.items()
+        }
+        # Rows presented under tools_in_system with no selected_tools: they get
+        # a bare system prefix (NO tools presented at all).  Non-zero on a
+        # tools_in_system run means part of the mixture is mistrained.
+        manifest["tools_in_system_missing_tools"] = {
+            name: dataset.tools_in_system_missing_tools
+            for name, dataset in train_datasets.items()
+        }
         # QA history/gold-doc retention counters (P0-1), from the passes that
         # render history at all (tool_only passes have no history side).
         manifest["qa_retention"] = {
@@ -335,6 +417,16 @@ def _dump_train_manifest(
             for name, dataset in train_datasets.items()
             if name != "tool_only"
         }
+    if eval_dataset is not None:
+        # The eval dataset is built in the SAME dialect, so an over-long tool
+        # prefix drops eval rows too — and a fully overflowed eval set silently
+        # turns into no evaluation at all.  Record it next to the train side so
+        # the system-overflow abort rule can see both.
+        manifest["num_eval_rows"] = len(eval_dataset)
+        manifest["eval_skip_counts"] = dict(getattr(eval_dataset, "skipped_by_reason", {}) or {})
+        manifest["eval_system_overflow_skips"] = int(
+            (getattr(eval_dataset, "skipped_by_reason", {}) or {}).get("system_overflow", 0)
+        )
     path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     logger.info("Wrote effective train manifest to %s", path)
     return str(path)
@@ -345,6 +437,7 @@ def main() -> None:
     model_args, training_args, data_args = parser.parse_args_into_dataclasses()
     if data_args.doc_mode not in DOC_MODES:
         raise ValueError(f"Unsupported --doc_mode {data_args.doc_mode!r}; choose from {DOC_MODES}")
+    hybrid_tail_choices = _validate_regime_args(data_args)
     device_type = _setup_device(model_args, data_args)
 
     if model_args.gist_gradient_checkpointing:
@@ -391,7 +484,10 @@ def main() -> None:
     achieved_source_tokens: Optional[int] = None
     if data_args.max_source_tokens is not None:
         train_examples, achieved_source_tokens = _take_within_source_token_budget(
-            train_examples, tokenizer, data_args.max_source_tokens
+            train_examples,
+            tokenizer,
+            data_args.max_source_tokens,
+            tools_in_system=data_args.tools_in_system,
         )
     if data_args.max_train_examples is not None:
         train_examples = train_examples[: data_args.max_train_examples]
@@ -415,15 +511,23 @@ def main() -> None:
         max_tool_definition_tokens=data_args.max_tool_definition_tokens,
         min_target_tokens=data_args.min_target_tokens,
         per_side_caps=not data_args.legacy_mode_caps,
+        # Same dialect on both sides: train AND eval render the tool schemas
+        # in the system prefix when the arm asks for it.
+        tools_in_system=data_args.tools_in_system,
     )
+    # The raw tail is a TRAIN-side augmentation only; eval always renders k=0
+    # so the eval loss stays comparable across arms.
+    train_dataset_kwargs: Dict[str, Any] = dict(dataset_kwargs)
+    if hybrid_tail_choices:
+        train_dataset_kwargs["hybrid_tail_choices"] = hybrid_tail_choices
     interleaved_train_len: Optional[int] = None
     train_pass_datasets: Dict[str, Any] = {}
     if data_args.doc_mode == "alternate":
         # Same examples rendered twice — tool documents only / history
         # documents only — then interleaved so the shared extractor sees
         # alternating batch types.  Eval stays joint.
-        tool_dataset = MinTargetJointDataset(train_examples, doc_mode="tool_only", **dataset_kwargs)
-        history_dataset = MinTargetJointDataset(train_examples, doc_mode="history_only", **dataset_kwargs)
+        tool_dataset = MinTargetJointDataset(train_examples, doc_mode="tool_only", **train_dataset_kwargs)
+        history_dataset = MinTargetJointDataset(train_examples, doc_mode="history_only", **train_dataset_kwargs)
         if len(tool_dataset) == 0 or len(history_dataset) == 0:
             logger.warning(
                 "alternate doc_mode with an empty side: tool_only=%d history_only=%d",
@@ -435,7 +539,7 @@ def main() -> None:
         train_pass_datasets = {"tool_only": tool_dataset, "history_only": history_dataset}
         eval_dataset = MinTargetJointDataset(eval_examples, doc_mode="joint", **dataset_kwargs)
     else:
-        train_dataset = MinTargetJointDataset(train_examples, doc_mode=data_args.doc_mode, **dataset_kwargs)
+        train_dataset = MinTargetJointDataset(train_examples, doc_mode=data_args.doc_mode, **train_dataset_kwargs)
         train_pass_datasets = {data_args.doc_mode: train_dataset}
         eval_dataset = MinTargetJointDataset(eval_examples, doc_mode=data_args.doc_mode, **dataset_kwargs)
 
@@ -451,6 +555,17 @@ def main() -> None:
             interleaved_train_len,
             achieved_source_tokens,
             train_pass_datasets,
+            eval_dataset,
+        )
+    eval_overflow = (getattr(eval_dataset, "skipped_by_reason", {}) or {}).get("system_overflow", 0)
+    if eval_overflow:
+        logger.warning(
+            "eval dataset dropped %d/%d examples as system_overflow (raw tool prefix > "
+            "max_system_length=%d); %d eval rows remain",
+            eval_overflow,
+            len(eval_examples),
+            data_args.max_system_length,
+            len(eval_dataset),
         )
 
     trainer = GistMultiDocTrainer(

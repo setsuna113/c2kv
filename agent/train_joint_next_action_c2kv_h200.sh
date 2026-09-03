@@ -20,6 +20,20 @@
 #                          estimated, 96M ≈ 245M.
 #   OUTPUT_DIR             checkpoint dir (./checkpoints/qwen3-4b-joint-c2kv-h200)
 #   DOC_MODE               joint | tool_only | history_only | alternate (joint)
+#   TOOLS_IN_SYSTEM        False (default) | True. True renders the selected
+#                          tool schemas RAW in the system prefix (chat template
+#                          tools=) and compresses ONLY history — the dialect
+#                          every serving path actually runs. Requires
+#                          DOC_MODE=history_only; an over-long prefix is
+#                          SKIPPED (system_overflow), never truncated, so give
+#                          MAX_SYSTEM_LENGTH enough room (4096 for the regime
+#                          arm) and watch the manifest's system_overflow_skips.
+#   HYBRID_TAIL_CHOICES    empty (default = off) | comma-separated non-negative
+#                          ints, e.g. "0,0,1,3,5". Per-example raw-tail depth k
+#                          drawn deterministically from the qid: the last k
+#                          fitted history docs leave the gist grid and are
+#                          prepended RAW to the prompt (the serving "hybrid"
+#                          arm). TRAIN datasets only; eval always uses k=0.
 #   LR / NUM_TRAIN_EPOCHS / PER_DEVICE_BS / GRAD_ACCUM
 #                          defaults 5e-5 / 1 / 1 / 4: 2 GPUs x 1 x 4 = eff
 #                          batch 8; if microbatch 2 fits, set PER_DEVICE_BS=2
@@ -84,6 +98,8 @@ TOUCAN_PATH="${TOUCAN_PATH:-}"
 MULTISOURCE_MAX_RECORDS="${MULTISOURCE_MAX_RECORDS:-}"
 
 DOC_MODE="${DOC_MODE:-joint}"
+TOOLS_IN_SYSTEM="${TOOLS_IN_SYSTEM:-False}"
+HYBRID_TAIL_CHOICES="${HYBRID_TAIL_CHOICES:-}"
 MAX_DOC_LENGTH="${MAX_DOC_LENGTH:-1024}"
 MAX_DOC_NUM="${MAX_DOC_NUM:-24}"
 MAX_TOOL_CHUNKS="${MAX_TOOL_CHUNKS:-}"
@@ -181,6 +197,9 @@ fi
 if [[ -n "${MAX_TOOL_CHUNKS}" ]]; then
   OPTIONAL_ARGS+=(--max_tool_chunks "${MAX_TOOL_CHUNKS}")
 fi
+if [[ -n "${HYBRID_TAIL_CHOICES}" ]]; then
+  OPTIONAL_ARGS+=(--hybrid_tail_choices "${HYBRID_TAIL_CHOICES}")
+fi
 if [[ -n "${TOUCAN_PATH}" ]]; then
   OPTIONAL_ARGS+=(--toucan_path "${TOUCAN_PATH}")
 fi
@@ -237,6 +256,8 @@ echo "MAX_EVAL_EXAMPLES=${MAX_EVAL_EXAMPLES}"
 echo "TOUCAN_PATH=${TOUCAN_PATH}"
 echo "MULTISOURCE_MAX_RECORDS=${MULTISOURCE_MAX_RECORDS}"
 echo "DOC_MODE=${DOC_MODE}"
+echo "TOOLS_IN_SYSTEM=${TOOLS_IN_SYSTEM}"
+echo "HYBRID_TAIL_CHOICES=${HYBRID_TAIL_CHOICES}"
 echo "MAX_DOC_LENGTH=${MAX_DOC_LENGTH}"
 echo "MAX_DOC_NUM=${MAX_DOC_NUM}"
 echo "MAX_TOOL_CHUNKS=${MAX_TOOL_CHUNKS}"
@@ -287,6 +308,7 @@ echo "LOGGING_STEPS=${LOGGING_STEPS}"
   --example_order_file "${EXAMPLE_ORDER_FILE}" \
   --max_samples_per_session "${MAX_SAMPLES_PER_SESSION}" \
   --doc_mode "${DOC_MODE}" \
+  --tools_in_system "${TOOLS_IN_SYSTEM}" \
   --max_doc_length "${MAX_DOC_LENGTH}" \
   --max_doc_num "${MAX_DOC_NUM}" \
   --max_length "${MAX_LENGTH}" \

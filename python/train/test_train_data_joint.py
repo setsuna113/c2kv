@@ -1156,3 +1156,449 @@ def test_plain_answer_over_budget_still_truncated(tokenizer):
     full = tokenizer.encode(answer, add_special_tokens=False) + [tokenizer.eos_token_id]
     assert len(supervised) < len(full)  # hard-truncated to the budget
     assert supervised == full[: len(supervised)]
+
+
+# ---------------------------------------------------------------------------
+# Regime-first knobs: tools_in_system (raw tool schemas in the system prefix)
+# and the hybrid raw history tail.  Both default OFF and must leave every
+# existing feature byte-identical when unset.
+# ---------------------------------------------------------------------------
+
+
+def _selected_tools(n=1):
+    return [
+        {
+            "type": "function",
+            "function": {
+                "name": f"zzmarker_tool_{index}",
+                "description": f"zzmarkerdesc{index} synthetic schema for the system prefix probe",
+                "parameters": {
+                    "type": "object",
+                    "properties": {f"zzarg{index}": {"type": "string"}},
+                    "required": [f"zzarg{index}"],
+                },
+            },
+        }
+        for index in range(n)
+    ]
+
+
+def _system_text(tokenizer, features):
+    real = [token_id for token_id in features["system_input_ids"] if token_id >= 0]
+    return " ".join(tokenizer.decode(real, skip_special_tokens=True).split())
+
+
+def _prompt_text(tokenizer, features):
+    real = [
+        token_id
+        for token_id, mask in zip(features["input_ids"], features["attention_mask"])
+        if mask
+    ]
+    return " ".join(tokenizer.decode(real, skip_special_tokens=True).split())
+
+
+_HYBRID_CONFIG = dict(
+    doc_mode="history_only",
+    max_doc_num=5,
+    max_tool_chunks=0,
+    min_doc_num=1,
+    max_length=512,
+    max_system_length=256,
+)
+
+
+def test_tools_in_system_puts_tools_only_in_the_system_prefix(tokenizer):
+    example = _example(selected_tools=_selected_tools(2))
+    features, reason = _features(
+        tokenizer,
+        example,
+        doc_mode="history_only",
+        tools_in_system=True,
+        max_system_length=256,
+    )
+    assert reason == "ok"
+    system_text = _system_text(tokenizer, features)
+    assert "<TOOLS>" in system_text
+    assert "zzmarker_tool_0" in system_text and "zzmarker_tool_1" in system_text
+    # ... and nowhere else: not in the gist grid, not in the ordinary prompt.
+    context_text = _context_text(tokenizer, features)
+    prompt_text = _prompt_text(tokenizer, features)
+    for probe in ("<TOOLS>", "zzmarker_tool_0", "zzmarker_tool_1", "zzmarkerdesc0"):
+        assert probe not in context_text
+        assert probe not in prompt_text
+
+
+def test_tools_in_system_off_keeps_the_bare_system_prefix(tokenizer):
+    example = _example(selected_tools=_selected_tools(2))
+    features, reason = _features(tokenizer, example, doc_mode="history_only")
+    assert reason == "ok"
+    system_text = _system_text(tokenizer, features)
+    assert "<TOOLS>" not in system_text and "zzmarker_tool_0" not in system_text
+
+
+def test_tools_in_system_gives_history_the_full_grid(tokenizer):
+    example = _example(history_documents=_history_docs(5), selected_tools=_selected_tools(1))
+    # max_tool_chunks stays at its default (2/3 of max_doc_num), which without
+    # tools_in_system reserves tool slots the history side can never use.
+    baseline_meta = {}
+    _features(
+        tokenizer,
+        example,
+        meta_out=baseline_meta,
+        doc_mode="history_only",
+        max_doc_num=5,
+        max_system_length=256,
+    )
+    assert baseline_meta["num_history_docs"] == 2  # 5 - min(default 3, 5)
+
+    meta = {}
+    features, reason = _features(
+        tokenizer,
+        example,
+        meta_out=meta,
+        doc_mode="history_only",
+        tools_in_system=True,
+        max_doc_num=5,
+        max_system_length=256,
+    )
+    assert reason == "ok"
+    assert meta["num_history_docs"] == 5
+    context_text = _context_text(tokenizer, features)
+    for marker in _HISTORY_MARKERS[:5]:
+        assert f"{marker} question" in context_text
+
+
+def test_tools_in_system_skips_over_long_system_prefix(tokenizer):
+    example = _example(selected_tools=_selected_tools(8))
+    row, reason = _features(
+        tokenizer,
+        example,
+        reason_ok=False,
+        doc_mode="history_only",
+        tools_in_system=True,
+        max_system_length=32,
+    )
+    assert row is None
+    assert reason == "system_overflow"
+    dataset = JointDataset(
+        [example],
+        tokenizer=tokenizer,
+        **_config(doc_mode="history_only", tools_in_system=True, max_system_length=32),
+    )
+    assert len(dataset) == 0
+    assert dataset.skipped_by_reason == {"system_overflow": 1}
+    assert dataset.skipped_by_family_reason == {"traces:system_overflow": 1}
+    # Never truncated: with room the LAST tool and the closing template marker
+    # both survive (HF right-truncation would have deleted them silently).
+    features, ok_reason = _features(
+        tokenizer,
+        example,
+        doc_mode="history_only",
+        tools_in_system=True,
+        max_system_length=4096,
+    )
+    assert ok_reason == "ok"
+    system_text = _system_text(tokenizer, features)
+    assert "zzmarker_tool_7" in system_text
+    assert "</TOOLS>" in system_text
+
+
+def test_tools_in_system_requires_history_only(tokenizer):
+    example = _example(selected_tools=_selected_tools(1))
+    for mode in ("joint", "tool_only"):
+        with pytest.raises(ValueError, match="history_only"):
+            JointDataset.preprocess_example(
+                example, tokenizer=tokenizer, **_config(doc_mode=mode, tools_in_system=True)
+            )
+        with pytest.raises(ValueError, match="history_only"):
+            JointDataset(
+                [example], tokenizer=tokenizer, **_config(doc_mode=mode, tools_in_system=True)
+            )
+
+
+def test_new_knobs_at_defaults_are_byte_identical(tokenizer):
+    for mode in ("joint", "tool_only", "history_only"):
+        example = _example(history_documents=_history_docs(4), selected_tools=_selected_tools(2))
+        baseline, reason_a = JointDataset.preprocess_example(
+            example, tokenizer=tokenizer, **_config(doc_mode=mode)
+        )
+        explicit, reason_b = JointDataset.preprocess_example(
+            example,
+            tokenizer=tokenizer,
+            **_config(doc_mode=mode, tools_in_system=False, hybrid_tail_k=0),
+        )
+        assert reason_a == reason_b
+        assert baseline == explicit
+        plain = JointDataset([example], tokenizer=tokenizer, **_config(doc_mode=mode))
+        knobbed = JointDataset(
+            [example],
+            tokenizer=tokenizer,
+            hybrid_tail_choices=None,
+            **_config(doc_mode=mode),
+        )
+        assert plain.data == knobbed.data
+        assert knobbed.hybrid_tail_k_counts == ({0: len(knobbed)} if len(knobbed) else {})
+
+
+def test_hybrid_tail_moves_last_docs_out_of_the_grid(tokenizer):
+    example = _example(history_documents=_history_docs(5))
+    meta = {}
+    features, reason = _features(
+        tokenizer, example, meta_out=meta, hybrid_tail_k=2, **_HYBRID_CONFIG
+    )
+    assert reason == "ok"
+    assert meta["hybrid_tail_k"] == 2
+    assert meta["num_history_docs"] == 5
+    assert meta["num_compressed_history_docs"] == 3
+
+    context_text = _context_text(tokenizer, features)
+    assert "charlie question" in context_text
+    assert "delta question" not in context_text
+    assert "echo question" not in context_text
+
+    # The raw tail is chat-template rendered and PREPENDED to the prompt.
+    expected = []
+    for index in (3, 4):
+        expected.extend(
+            _chat_template_ids(
+                tokenizer,
+                [{"role": "user", "content": example.history_documents[index]}],
+                max_length=_config(**_HYBRID_CONFIG)["max_doc_length"],
+            )
+        )
+    assert features["input_ids"][: len(expected)] == expected
+    assert features["labels"][: len(expected)] == [-100] * len(expected)
+
+
+def test_hybrid_tail_capped_so_min_doc_num_stays_compressed(tokenizer):
+    example = _example(history_documents=_history_docs(5))
+    meta = {}
+    config = dict(_HYBRID_CONFIG)
+    config["min_doc_num"] = 2
+    features, reason = _features(tokenizer, example, meta_out=meta, hybrid_tail_k=99, **config)
+    assert reason == "ok"
+    assert meta["hybrid_tail_k"] == 3  # 5 fitted docs - min_doc_num=2
+    assert meta["num_compressed_history_docs"] == 2
+    context_text = _context_text(tokenizer, features)
+    assert "alpha question" in context_text and "bravo question" in context_text
+    assert "charlie question" not in context_text
+
+
+def test_hybrid_tail_k_zero_is_identical_to_no_tail(tokenizer):
+    example = _example(history_documents=_history_docs(5))
+    baseline, _ = _features(tokenizer, example, **_HYBRID_CONFIG)
+    zero, _ = _features(tokenizer, example, hybrid_tail_k=0, **_HYBRID_CONFIG)
+    assert baseline == zero
+
+
+def test_hybrid_tail_choices_drawn_deterministically_from_qid(tokenizer):
+    choices = [0, 1, 3]
+    examples = [
+        _example(qid=f"t:{index}", history_documents=_history_docs(5)) for index in range(12)
+    ]
+    kwargs = dict(tokenizer=tokenizer, **_config(**_HYBRID_CONFIG))
+    first = JointDataset(examples, hybrid_tail_choices=choices, **kwargs)
+    again = JointDataset(examples, hybrid_tail_choices=choices, **kwargs)
+    reversed_order = JointDataset(list(reversed(examples)), hybrid_tail_choices=choices, **kwargs)
+    assert first.data == again.data
+    # Order-independent: the draw is seeded by the qid, not by position.
+    assert first.hybrid_tail_k_counts == reversed_order.hybrid_tail_k_counts
+    assert first.data == list(reversed(reversed_order.data))
+    expected = Counter(
+        random.Random(f"{example.qid}:hybrid_tail").choice(choices) for example in examples
+    )
+    assert first.hybrid_tail_k_counts == dict(sorted(expected.items()))
+    assert len(first.hybrid_tail_k_counts) > 1  # the pool is actually sampled
+
+
+def test_hybrid_tail_choices_reject_negative(tokenizer):
+    with pytest.raises(ValueError, match="non-negative"):
+        JointDataset(
+            [_example()], tokenizer=tokenizer, hybrid_tail_choices=[0, -1], **_config()
+        )
+    with pytest.raises(ValueError, match="non-negative"):
+        JointDataset.preprocess_example(
+            _example(), tokenizer=tokenizer, hybrid_tail_k=-1, **_config()
+        )
+
+
+# ---------------------------------------------------------------------------
+# Regime-first knobs, review round 2: the raw tail must SHORTEN under the
+# sequence budget instead of dropping the row, drawn-vs-realized k must be
+# visible, and tools_in_system on a tool-less example must be countable.
+# ---------------------------------------------------------------------------
+
+
+def _long_history_docs(n=5, words=40):
+    return [
+        "Previous turn\n[User query]\n"
+        + " ".join([_HISTORY_MARKERS[i]] * words)
+        + f"\n[Assistant output]\n{_HISTORY_MARKERS[i]} answer number {i}"
+        for i in range(n)
+    ]
+
+
+_LONG_TAIL_CONFIG = dict(
+    doc_mode="history_only",
+    max_doc_num=8,
+    max_tool_chunks=0,
+    min_doc_num=1,
+    max_doc_length=64,
+    max_length=128,
+    max_system_length=96,
+)
+
+
+def test_hybrid_tail_over_budget_shortens_instead_of_dropping_the_row(tokenizer):
+    # k raw docs of max_doc_length tokens each can be several times max_length.
+    # Left-truncating them used to leave no room for the answer, so every
+    # large-k row died as tool_call_target_truncated -- silently deleting whole
+    # strata of the pool and breaking the paired-arm example set.
+    example = _example(history_documents=_long_history_docs(5))
+    meta = {}
+    features, reason = _features(
+        tokenizer, example, meta_out=meta, hybrid_tail_k=5, **_LONG_TAIL_CONFIG
+    )
+    assert reason == "ok"
+    assert 0 < meta["hybrid_tail_k"] < 5
+    # The shed docs go BACK into the compressed grid, they are not lost.
+    assert meta["num_compressed_history_docs"] + meta["hybrid_tail_k"] == meta["num_history_docs"]
+    assert meta["num_history_docs"] == 5
+
+    # The surviving tail is still the CHRONOLOGICAL end of the history and is
+    # still a raw prefix of the prompt.
+    realized = meta["hybrid_tail_k"]
+    expected = []
+    for index in range(5 - realized, 5):
+        expected.extend(
+            _chat_template_ids(
+                tokenizer,
+                [{"role": "user", "content": example.history_documents[index]}],
+                max_length=_LONG_TAIL_CONFIG["max_doc_length"],
+            )
+        )
+    assert features["input_ids"][: len(expected)] == expected
+    assert features["labels"][: len(expected)] == [-100] * len(expected)
+    # ... and the answer survived intact (the whole point of the shedding).
+    assert sum(1 for value in features["labels"] if value != -100) > 0
+
+
+def test_hybrid_tail_fully_shed_degrades_to_k_zero(tokenizer):
+    # Not even ONE raw doc fits: the row must still be emitted, byte-identical
+    # to the no-tail rendering, with realized k == 0.
+    config = dict(_LONG_TAIL_CONFIG)
+    config["max_length"] = 64
+    example = _example(history_documents=_long_history_docs(5))
+    meta = {}
+    features, reason = _features(
+        tokenizer, example, meta_out=meta, hybrid_tail_k=5, **config
+    )
+    assert reason == "ok"
+    assert meta["hybrid_tail_k"] == 0
+    assert meta["num_compressed_history_docs"] == meta["num_history_docs"]
+    baseline, baseline_reason = _features(tokenizer, example, **config)
+    assert baseline_reason == "ok"
+    assert features == baseline
+
+
+def test_hybrid_tail_choices_keep_the_same_row_set_as_k_zero(tokenizer):
+    examples = [
+        _example(qid=f"t:{index}", history_documents=_long_history_docs(5))
+        for index in range(24)
+    ]
+    kwargs = dict(tokenizer=tokenizer, **_config(**_LONG_TAIL_CONFIG))
+    plain = JointDataset(examples, **kwargs)
+    hybrid = JointDataset(examples, hybrid_tail_choices=[0, 5], **kwargs)
+    # The paired comparison only holds if both arms train on the same rows.
+    assert len(hybrid) == len(plain) == len(examples)
+    assert hybrid.skipped_by_reason == plain.skipped_by_reason == {}
+    # Both strata were drawn ...
+    assert set(hybrid.hybrid_tail_k_drawn_counts) == {0, 5}
+    assert sum(hybrid.hybrid_tail_k_drawn_counts.values()) == len(examples)
+    # ... and the k=5 stratum realized as a SHORTENED tail, not as a drop.
+    assert sum(hybrid.hybrid_tail_k_counts.values()) == len(examples)
+    assert max(hybrid.hybrid_tail_k_counts) > 0
+
+
+def test_hybrid_tail_drawn_counts_cover_every_candidate(tokenizer):
+    choices = [0, 1, 3]
+    examples = [
+        _example(qid=f"t:{index}", history_documents=_history_docs(5)) for index in range(12)
+    ]
+    kwargs = dict(tokenizer=tokenizer, **_config(**_HYBRID_CONFIG))
+    dataset = JointDataset(examples, hybrid_tail_choices=choices, **kwargs)
+    expected = Counter(
+        random.Random(f"{example.qid}:hybrid_tail").choice(choices) for example in examples
+    )
+    # Drawn counts cover EVERY candidate (emitted + skipped), so a stratum lost
+    # to skips shows up as drawn > realized instead of vanishing.
+    assert dataset.hybrid_tail_k_drawn_counts == dict(sorted(expected.items()))
+    assert sum(dataset.hybrid_tail_k_drawn_counts.values()) == len(examples)
+
+
+def test_hybrid_tail_drawn_counts_default_off(tokenizer):
+    dataset = JointDataset([_example()], tokenizer=tokenizer, **_config())
+    assert dataset.hybrid_tail_k_drawn_counts == {0: 1}
+    assert dataset.tools_in_system_missing_tools == 0
+
+
+def test_tools_in_system_without_selected_tools_is_lenient_but_counted(tokenizer):
+    # QA rows (and any caller that does not populate selected_tools) get a BARE
+    # system prefix under tools_in_system -- no tools presented at all.  That is
+    # deliberately not a skip, but it must be countable: a non-zero counter on a
+    # tools_in_system run means part of the mixture is mistrained.
+    example = _example(selected_tools=None)
+    features, reason = _features(
+        tokenizer,
+        example,
+        doc_mode="history_only",
+        tools_in_system=True,
+        max_system_length=256,
+    )
+    assert reason == "ok"
+    assert "<TOOLS>" not in _system_text(tokenizer, features)
+
+    dataset = JointDataset(
+        [_example(qid="t:0", selected_tools=None), _example(qid="t:1", selected_tools=_selected_tools(1))],
+        tokenizer=tokenizer,
+        tools_in_system=True,
+        **_config(doc_mode="history_only", max_system_length=256),
+    )
+    assert dataset.tools_in_system_missing_tools == 1
+
+
+def test_assert_no_leakage_accepts_declared_regime_knobs(tokenizer):
+    example = _example(history_documents=_history_docs(5), selected_tools=_selected_tools(2))
+    config = dict(_HYBRID_CONFIG)
+    config["max_system_length"] = 256
+    meta = {}
+    features, reason = _features(
+        tokenizer, example, meta_out=meta, tools_in_system=True, hybrid_tail_k=2, **config
+    )
+    assert reason == "ok"
+    # Undeclared: the tool schemas in the system prefix and the raw history tail
+    # in input_ids both look like leaks.
+    with pytest.raises(AssertionError):
+        assert_no_leakage(example, features, tokenizer)
+    # Declared: both are the intended dialect and must pass.
+    assert_no_leakage(
+        example,
+        features,
+        tokenizer,
+        tools_in_system=True,
+        hybrid_tail_k=meta["hybrid_tail_k"],
+    )
+
+
+def test_traces_source_examples_carry_selected_tools(synthetic_dataset):
+    # A1's primary call site: the traces source is what the regime arm consumes,
+    # so selected_tools must be populated THERE, matching the rendered pool.
+    source = _joint_source(synthetic_dataset)
+    examples = list(source)
+    assert examples
+    for example in examples:
+        assert example.selected_tools is not None
+        assert len(example.selected_tools) == len(example.tool_documents)
+        for tool in example.selected_tools:
+            name = tdj._tool_name(tool)
+            assert any(f"<NAME> {name}" in doc for doc in example.tool_documents)

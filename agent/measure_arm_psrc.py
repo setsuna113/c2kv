@@ -176,7 +176,24 @@ def _arm_examples(
     return doc_mode, examples, manifest
 
 
-def _scan(args: argparse.Namespace, tokenizer, examples: Sequence[JointExample], doc_mode: str) -> Dict[str, Any]:
+def _parse_tail_choices(value: Any) -> Optional[List[int]]:
+    """Manifest ``hybrid_tail_choices`` ("0,0,1,3,5" / list / None) -> ints or None."""
+    if value is None or value == "" or value == []:
+        return None
+    if isinstance(value, str):
+        return [int(item) for item in value.split(",") if item.strip()]
+    return [int(item) for item in value]
+
+
+def _scan(
+    args: argparse.Namespace,
+    tokenizer,
+    examples: Sequence[JointExample],
+    doc_mode: str,
+    *,
+    tools_in_system: bool = False,
+    hybrid_tail_choices: Optional[Sequence[int]] = None,
+) -> Dict[str, Any]:
     return scan_joint_examples(
         examples,
         tokenizer,
@@ -190,11 +207,28 @@ def _scan(args: argparse.Namespace, tokenizer, examples: Sequence[JointExample],
         max_tool_chunks=args.max_tool_chunks,
         max_tool_definition_tokens=args.max_tool_definition_tokens,
         per_side_caps=not args.legacy_mode_caps,
+        tools_in_system=tools_in_system,
+        hybrid_tail_choices=hybrid_tail_choices,
         min_target_tokens=args.min_target_tokens,
     )
 
 
-def _measure_arm(args: argparse.Namespace, tokenizer, doc_mode: str, examples: Sequence[JointExample]) -> Dict[str, Any]:
+def _measure_arm(
+    args: argparse.Namespace,
+    tokenizer,
+    doc_mode: str,
+    examples: Sequence[JointExample],
+    *,
+    tools_in_system: bool = False,
+    hybrid_tail_choices: Optional[Sequence[int]] = None,
+) -> Dict[str, Any]:
+    # The regime arm's manifest records tools_in_system / hybrid_tail_choices;
+    # replaying without them measures the OLD dialect (tools in the grid, no raw
+    # tail) and the derived save_steps cadence would be wrong.
+    regime = {
+        "tools_in_system": bool(tools_in_system),
+        "hybrid_tail_choices": list(hybrid_tail_choices) if hybrid_tail_choices else None,
+    }
     if doc_mode == "alternate":
         # The alternate arm renders every example twice: a tool-only pass and
         # a history-only pass.  Its presented budget is the sum of both scans.
@@ -202,14 +236,23 @@ def _measure_arm(args: argparse.Namespace, tokenizer, doc_mode: str, examples: S
         history_scan = _scan(args, tokenizer, examples, "history_only")
         return {
             "doc_mode": doc_mode,
+            **regime,
             "num_examples": len(examples),
             "P_src": tool_scan["total"]["P_src"] + history_scan["total"]["P_src"],
             "T_tgt": tool_scan["total"]["T_tgt"] + history_scan["total"]["T_tgt"],
             "passes": {"tool_only": tool_scan, "history_only": history_scan},
         }
-    scan = _scan(args, tokenizer, examples, doc_mode)
+    scan = _scan(
+        args,
+        tokenizer,
+        examples,
+        doc_mode,
+        tools_in_system=tools_in_system,
+        hybrid_tail_choices=hybrid_tail_choices,
+    )
     return {
         "doc_mode": doc_mode,
+        **regime,
         "num_examples": len(examples),
         "P_src": scan["total"]["P_src"],
         "T_tgt": scan["total"]["T_tgt"],
@@ -293,7 +336,14 @@ def main(argv: Optional[Sequence[str]] = None) -> Dict[str, Any]:
         if not manifest_path:
             raise SystemExit(f"--arm expects NAME=path, got: {spec!r}")
         doc_mode, examples, manifest = _arm_examples(args, Path(manifest_path).expanduser(), by_qid)
-        arms[name] = _measure_arm(args, tokenizer, doc_mode, examples)
+        arms[name] = _measure_arm(
+            args,
+            tokenizer,
+            doc_mode,
+            examples,
+            tools_in_system=bool(manifest.get("tools_in_system")),
+            hybrid_tail_choices=_parse_tail_choices(manifest.get("hybrid_tail_choices")),
+        )
         arms[name]["manifest_legacy_mode_caps"] = manifest.get("legacy_mode_caps")
 
     report: Dict[str, Any] = {

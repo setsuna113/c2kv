@@ -216,6 +216,77 @@ def test_c2kv_doc_mode_invalid_rejected():
         )
 
 
+_BASE_ARGV = ["--bfcl_pkg_path", "x", "--condition", "c2kv", "--model", "m"]
+
+
+def test_c2kv_max_tool_chunks_arg():
+    """--c2kv_max_tool_chunks: default None (= 2/3 rule), explicit int kept,
+    negative rejected by main()."""
+    args = runner.build_parser().parse_args(_BASE_ARGV)
+    assert args.c2kv_max_tool_chunks is None
+    args = runner.build_parser().parse_args(
+        _BASE_ARGV + ["--c2kv_max_tool_chunks", "0"]
+    )
+    assert args.c2kv_max_tool_chunks == 0
+    with pytest.raises(SystemExit):
+        runner.main(_BASE_ARGV + ["--c2kv_max_tool_chunks", "-1"])
+
+
+def test_c2kv_max_tool_chunks_reaches_settings():
+    """The flag lands in the c2kv_settings dict handed to the gist path."""
+    args = runner.build_parser().parse_args(
+        _BASE_ARGV + ["--c2kv_doc_mode", "history_only",
+                      "--c2kv_max_doc_length", "768",
+                      "--c2kv_max_doc_num", "16",
+                      "--c2kv_max_tool_chunks", "0"]
+    )
+    assert runner._build_c2kv_settings(args) == {
+        "doc_mode": "history_only",
+        "ratio": 8,
+        "max_doc_length": 768,
+        "max_doc_num": 16,
+        "max_tool_chunks": 0,
+    }
+    # unset -> None, i.e. today's 2/3 max_doc_num default inside chunk_doc_texts
+    base = runner.build_parser().parse_args(_BASE_ARGV)
+    assert runner._build_c2kv_settings(base) == {
+        "doc_mode": "joint",
+        "ratio": 8,
+        "max_doc_length": 1024,
+        "max_doc_num": 24,
+        "max_tool_chunks": None,
+    }
+
+
+def test_default_output_basename_unchanged_for_joint(monkeypatch):
+    """Joint default basename is byte-identical to before; -t{N} only appears
+    when --c2kv_max_tool_chunks is set (different geometries must not share a
+    resume file)."""
+    seen = {}
+
+    def _fake_run_inference(args, output_path):
+        seen["path"] = output_path
+
+    monkeypatch.setattr(runner, "run_inference", _fake_run_inference)
+    runner.main(_BASE_ARGV + ["--cap_tier", "128"])
+    assert seen["path"].name == "bfcl_run_c2kv-joint-r8_128.jsonl"
+    runner.main(_BASE_ARGV + ["--cap_tier", "128", "--c2kv_max_tool_chunks", "0"])
+    assert seen["path"].name == "bfcl_run_c2kv-joint-r8-t0_128.jsonl"
+    runner.main(_BASE_ARGV + ["--cap_tier", "128", "--c2kv_doc_mode", "history_only",
+                              "--c2kv_max_tool_chunks", "4"])
+    assert seen["path"].name == "bfcl_run_c2kv-history_only-r8-t4_128.jsonl"
+    # 网格几何也入名（否则 768/16 的手动跑会 resume 进 1024/24 的文件）
+    runner.main(_BASE_ARGV + ["--cap_tier", "128", "--c2kv_doc_mode", "history_only",
+                              "--c2kv_max_doc_num", "16",
+                              "--c2kv_max_doc_length", "768",
+                              "--c2kv_max_tool_chunks", "0"])
+    assert seen["path"].name == "bfcl_run_c2kv-history_only-r8-d16l768-t0_128.jsonl"
+    # 显式传入解析器默认值 = 不加几何后缀（老 resume 文件仍匹配）
+    runner.main(_BASE_ARGV + ["--cap_tier", "128", "--c2kv_max_doc_num", "24",
+                              "--c2kv_max_doc_length", "1024"])
+    assert seen["path"].name == "bfcl_run_c2kv-joint-r8_128.jsonl"
+
+
 # ══════════════════════════════════════════════════════════════════════════
 # b. doc 构建
 # ══════════════════════════════════════════════════════════════════════════
@@ -394,6 +465,136 @@ def test_chunk_doc_texts_tool_cap_default_two_thirds():
     assert history_chunks == []
 
 
+def test_chunk_doc_texts_no_tool_docs_gives_history_full_budget():
+    """B1: an ENTRY with no tool documents -> tool_cap 0, history_budget ==
+    max_doc_num (has_tool_documents defaults to bool(tool_doc_texts)).
+
+    Before the fix the 2/3 reserve fired even with no tool documents, so a
+    tool-less entry lost a third of the grid to nothing."""
+    _train_imports_or_skip()
+    tok = StubTokenizer()
+    history_texts = [f"Previous turn q{i} a{i}" for i in range(6)]
+    meta: dict = {}
+    tool_chunks, history_chunks = c2kv_gist.chunk_doc_texts(
+        tok, [], history_texts,
+        max_doc_length=16, max_doc_num=4, max_tool_chunks=None, meta_out=meta,
+    )
+    assert tool_chunks == []
+    assert len(history_chunks) == 4          # 旧口径只有 4 - 2 = 2
+    assert meta["tool_cap"] == 0
+    assert meta["history_budget"] == 4
+    assert meta["num_tool_docs"] == 0
+    assert meta["num_tool_chunks_before_cap"] == 0
+    assert meta["tool_truncated"] is False
+    assert meta["num_history_docs"] == 6
+    assert meta["num_history_chunks"] == 4
+
+
+def test_chunk_doc_texts_blank_tool_docs_count_as_empty():
+    """Whitespace-only tool doc texts are not tool documents -> tool_cap 0."""
+    _train_imports_or_skip()
+    tok = StubTokenizer()
+    meta: dict = {}
+    tool_chunks, history_chunks = c2kv_gist.chunk_doc_texts(
+        tok, ["", "   "], [f"Previous turn q{i}" for i in range(3)],
+        max_doc_length=16, max_doc_num=3, max_tool_chunks=None, meta_out=meta,
+    )
+    assert tool_chunks == []
+    assert meta["num_tool_docs"] == 0 and meta["tool_cap"] == 0
+    assert meta["history_budget"] == 3
+    assert len(history_chunks) == 3
+
+
+def test_chunk_doc_texts_meta_out_tool_truncated():
+    """tool_truncated True exactly when the pre-cap chunk count exceeds the cap
+    (BFCL dev entries carry 17-39 functions, so this fires in production)."""
+    _train_imports_or_skip()
+    tok = StubTokenizer()
+    many = [f"Tool definition:\nt{i} alpha beta" for i in range(10)]
+    meta: dict = {}
+    tool_chunks, _hist = c2kv_gist.chunk_doc_texts(
+        tok, many, [], max_doc_length=32, max_doc_num=6, max_tool_chunks=None,
+        meta_out=meta,
+    )
+    assert meta["num_tool_docs"] == 10
+    assert meta["num_tool_chunks_before_cap"] == 10
+    assert meta["tool_cap"] == 4 and len(tool_chunks) == 4
+    assert meta["tool_truncated"] is True
+    # 不超上限时为 False
+    meta2: dict = {}
+    c2kv_gist.chunk_doc_texts(
+        tok, many[:2], [], max_doc_length=32, max_doc_num=6,
+        max_tool_chunks=None, meta_out=meta2,
+    )
+    assert meta2["num_tool_chunks_before_cap"] == 2
+    assert meta2["tool_truncated"] is False
+
+
+def test_chunk_doc_texts_meta_out_is_optional_and_return_unchanged():
+    """meta_out is purely additive: the return value is identical with and
+    without it."""
+    _train_imports_or_skip()
+    tok = StubTokenizer()
+    tool_texts = ["Tool definition:\nalpha beta", "Tool definition:\ngamma"]
+    history_texts = [f"Previous turn q{i} a{i}" for i in range(5)]
+    kw = dict(max_doc_length=16, max_doc_num=4, max_tool_chunks=2)
+    a = c2kv_gist.chunk_doc_texts(tok, tool_texts, history_texts, **kw)
+    meta: dict = {}
+    b = c2kv_gist.chunk_doc_texts(
+        tok, tool_texts, history_texts, meta_out=meta, **kw
+    )
+    assert a == b
+    assert set(meta) == {
+        "has_tool_documents", "num_tool_docs", "num_tool_chunks_before_cap",
+        "tool_cap", "tool_truncated", "num_history_docs", "history_budget",
+        "num_history_chunks",
+    }
+
+
+def test_chunk_doc_texts_history_only_entry_with_tools_keeps_tool_reserve():
+    """The empty-tool reclaim is an ENTRY property, not a doc_mode property.
+
+    history_only filters the tool docs out of the plan, but the entry still
+    carries functions -> the constant per-side reserve stays, so the
+    history-side presented budget is identical to joint's (docs/0820 section 9:
+    letting a single-side doc_mode take the whole grid was a measured 1.691x
+    presented-budget confound)."""
+    _train_imports_or_skip()
+    tok = StubTokenizer()
+    history_texts = [f"Previous turn q{i} a{i}" for i in range(6)]
+    meta: dict = {}
+    tool_chunks, history_chunks = c2kv_gist.chunk_doc_texts(
+        tok, [], history_texts,
+        max_doc_length=16, max_doc_num=6, max_tool_chunks=None,
+        has_tool_documents=True, meta_out=meta,
+    )
+    assert tool_chunks == []                    # 该 doc_mode 不把工具放进网格
+    assert meta["has_tool_documents"] is True
+    assert meta["num_tool_docs"] == 0
+    assert meta["tool_cap"] == 4                # max(1, 2*6//3) = 4
+    assert meta["history_budget"] == 2
+    assert len(history_chunks) == 2
+    assert meta["num_history_chunks"] == 2
+
+
+def test_chunk_doc_texts_max_tool_chunks_zero_gives_history_full_grid():
+    """--c2kv_max_tool_chunks 0 is the explicit lever for the tools-in-system
+    arm (trainer passes has_tool_documents=False): the whole grid to history
+    even though the entry carries tools."""
+    _train_imports_or_skip()
+    tok = StubTokenizer()
+    history_texts = [f"Previous turn q{i} a{i}" for i in range(6)]
+    meta: dict = {}
+    _tool_chunks, history_chunks = c2kv_gist.chunk_doc_texts(
+        tok, [], history_texts,
+        max_doc_length=16, max_doc_num=6, max_tool_chunks=0,
+        has_tool_documents=True, meta_out=meta,
+    )
+    assert meta["tool_cap"] == 0
+    assert meta["history_budget"] == 6
+    assert len(history_chunks) == 6
+
+
 # ══════════════════════════════════════════════════════════════════════════
 # c. gist 配置注入（mock 重加载）
 # ══════════════════════════════════════════════════════════════════════════
@@ -456,11 +657,26 @@ def test_c2kv_row_meta_fields():
         "doc_mode": "joint",
         "max_doc_length": 1024,
         "max_doc_num": 24,
+        "max_tool_chunks": None,
     }
     # untrained 对照臂
     args.c2kv_checkpoint = None
     meta = c2kv_gist.c2kv_row_meta(args)
     assert meta["checkpoint"] is None and meta["trained"] is False
+
+
+def test_c2kv_row_meta_max_tool_chunks_always_present():
+    """max_tool_chunks is always recorded: None = the 2/3 default, an int = the
+    override. A row must say which tool budget produced it without the reader
+    re-deriving the default."""
+    args = types.SimpleNamespace(
+        c2kv_checkpoint=None, c2kv_ratio=8, c2kv_doc_mode="history_only",
+        c2kv_max_doc_length=768, c2kv_max_doc_num=16,
+        c2kv_max_tool_chunks=None,
+    )
+    assert c2kv_gist.c2kv_row_meta(args)["max_tool_chunks"] is None
+    args.c2kv_max_tool_chunks = 0
+    assert c2kv_gist.c2kv_row_meta(args)["max_tool_chunks"] == 0
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -659,6 +875,53 @@ def test_end_to_end_c2kv_degenerate_no_docs():
     assert meta["tool_doc_chunks"] == 0 and meta["history_doc_chunks"] == 0
     assert meta["actual_compression_ratio"] is None
     assert entry["gen_tokens"] > 0
+
+
+def test_end_to_end_c2kv_meta_carries_tool_budget():
+    """B2: the chunk_doc_texts tool-budget fields reach the per-step
+    compression_meta, on both the compressed and the degenerate path."""
+    handler = _make_c2kv_handler("joint")
+    _api, entry = _run_query(handler)
+    meta = entry["compression_meta"]
+    # _make_c2kv_handler: max_doc_num=8, max_tool_chunks=None -> cap max(1, 16//3)=5
+    assert meta["num_tool_docs"] == 2
+    assert meta["tool_cap"] == 5
+    assert meta["num_tool_chunks_before_cap"] >= meta["tool_doc_chunks"]
+    assert meta["tool_truncated"] is (
+        meta["num_tool_chunks_before_cap"] > meta["tool_cap"]
+    )
+
+    # history_only: the tool docs leave the grid, but the ENTRY still carries
+    # functions -> the per-side reserve stays and the history budget matches
+    # joint's. max_doc_num=8 -> tool_cap 5, history_budget 3.
+    handler = _make_c2kv_handler("history_only")
+    _api, entry = _run_query(handler)
+    meta = entry["compression_meta"]
+    assert meta["has_tool_documents"] is True
+    assert meta["num_tool_docs"] == 0            # 该 doc_mode 不压缩工具
+    assert meta["tool_cap"] == 5
+    assert meta["history_budget"] == 3
+    assert meta["num_tool_chunks_before_cap"] == 0
+    assert meta["tool_truncated"] is False
+
+    # 退化路径（无可压缩文档）也带齐这些字段
+    handler = _make_c2kv_handler("history_only")
+    _api, entry = _run_query(handler, messages=[
+        {"role": "system", "content": "SYS WITH TOOLS"},
+        {"role": "user", "content": "first query"},
+    ])
+    meta = entry["compression_meta"]
+    assert meta["degenerate"] is True
+    assert meta["num_tool_docs"] == 0 and meta["tool_cap"] == 5
+    assert meta["num_history_docs"] == 0 and meta["history_budget"] == 3
+    assert meta["tool_truncated"] is False
+
+    # 无 function 的 entry：空工具侧回收，历史独占整个网格
+    handler = _make_c2kv_handler("history_only")
+    _api, entry = _run_query(handler, function=())
+    meta = entry["compression_meta"]
+    assert meta["has_tool_documents"] is False
+    assert meta["tool_cap"] == 0 and meta["history_budget"] == 8
 
 
 def test_handler_class_keeps_final_guard_and_hook():

@@ -293,8 +293,14 @@ def _render_example_tool_documents(
     max_tools_per_sample: int = 32,
     same_namespace_negative_tools: int = 8,
     random_negative_tools: int = 24,
-) -> Tuple[List[str], Optional[int]]:
-    """Per-example target-inclusive tool pool + rendering (traces-source policy)."""
+) -> Tuple[List[str], Optional[int], List[Dict[str, Any]]]:
+    """Per-example target-inclusive tool pool + rendering (traces-source policy).
+
+    Returns ``(docs, target_index, selected_tools)``; ``selected_tools`` is the
+    post-selection pre-render tool dict list, carried on the JointExample so
+    the ``tools_in_system`` arm can render the same pool RAW in the system
+    prefix.
+    """
     selected_tools = _select_tools(
         tools,
         target_tool,
@@ -303,7 +309,7 @@ def _render_example_tool_documents(
         same_namespace_negative_tools=same_namespace_negative_tools,
         random_negative_tools=random_negative_tools,
     )
-    return _render_tool_documents(
+    docs, target_index = _render_tool_documents(
         selected_tools,
         rng,
         canonical_format_prob=canonical_format_prob,
@@ -312,6 +318,7 @@ def _render_example_tool_documents(
         truncate_description_chars=truncate_description_chars,
         target_tool=target_tool,
     )
+    return docs, target_index, list(selected_tools)
 
 
 # ---------------------------------------------------------------------------
@@ -397,7 +404,7 @@ def toucan_row_to_examples(
             continue
         target_tool = _first_tool_call_name(output_messages)
         rng = random.Random(f"{split_seed}:{session_id}:u{index}:tools")
-        tool_documents, target_doc_index = _render_example_tool_documents(
+        tool_documents, target_doc_index, selected_tools = _render_example_tool_documents(
             tools,
             target_tool,
             rng,
@@ -422,6 +429,7 @@ def toucan_row_to_examples(
                 target_tool=target_tool,
                 target_tool_doc_index=target_doc_index,
                 action_type="tool_call" if has_tool_call else "other",
+                selected_tools=list(selected_tools),
             )
         )
     return examples
@@ -516,7 +524,7 @@ def openswe_row_to_examples(
             continue
         target_tool = _first_tool_call_name([output_message])
         rng = random.Random(f"{split_seed}:{session_id}:a{k}:tools")
-        tool_documents, target_doc_index = _render_example_tool_documents(
+        tool_documents, target_doc_index, selected_tools = _render_example_tool_documents(
             tools,
             target_tool,
             rng,
@@ -541,6 +549,7 @@ def openswe_row_to_examples(
                 target_tool=target_tool,
                 target_tool_doc_index=target_doc_index,
                 action_type="tool_call" if has_tool_call else "other",
+                selected_tools=list(selected_tools),
             )
         )
     return examples

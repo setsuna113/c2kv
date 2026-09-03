@@ -40,6 +40,36 @@
 #                            resume 锚点, 永不整档删除），其余整档删除
 #   PRUNE_MIN_FREE_GB        GU 可用低于此值才触发整档保留裁剪（默认 400）
 #   SMOKE=1                  本机端到端冒烟：极小剂量 + 单卡 + 评测截断
+#
+# 2026-09-03 新增（regime-first history 臂；默认值 = 旧行为逐位不变）：
+#   RECIPE            planner 的 --recipe（默认 g_h200_main=toucan:0.6,traces:0.4）。
+#                     改 recipe 名会改 order/plan 文件名 —— 必须同时显式给 ORDER_FILE。
+#   SUBSET_WEIGHTS    空格分隔的 --subset_weights 列表
+#                     （默认 "traces:tau2=0.75 traces:appworld=0.25 traces:other=0"）；
+#                     history 臂用 "traces:tau2=0 traces:appworld=1 traces:other=0"。
+#   EPOCHS_OVERRIDE   calibrate 直接钉死 epoch 数（允许小数, 如 1.5）：
+#                     total_steps = ceil(epochs x steps_per_epoch)，
+#                     不再按 TARGET_PRESENTED_TOKENS 反推, 也不做 MIN_PRESENTED 断言。
+#   EVAL_BFCL         1(默认)=照跑 BFCL dev 评测；0=跳过。
+#   EVAL_HISTORY      1=对每个 milestone 跑 agent/eval_history_dev_c2kv_h200.sh
+#                     （双卡并行/单卡顺序, 输出 ${RESULTS}/history_dev/<name>/）；0(默认)=不跑。
+#   SELECT_METRIC     bfcl(默认, 旧行为) | history —— history 时 select 读
+#                     ${RESULTS}/history_dev/*/summary.json 的 c2kv 模式
+#                     tool_name_accuracy（ratio=HIST_RATIO）, BFCL 只作为列打印。
+#   HIST_RATIO / HIST_MAX_EXAMPLES / HIST_SPLIT_MANIFEST / HIST_SPLIT_NAME
+#                     history 评测几何（8 / 700 / outputs/appworld_dev_split_manifest.json
+#                     / appworld_dev）。
+#   HIST_COMPARE_MODES / HIST_HYBRID_TOP_K / HIST_MAX_DOC_LENGTH / HIST_MAX_DOC_NUM
+#   HIST_MAX_SYSTEM_LENGTH / HIST_MAX_LENGTH
+#                     history 评测自己的模式集与网格几何（c2kv,hybrid,full,truncate /
+#                     3 / 768 / 16 / 4096 / 1536）。与训练 env 解耦: 不钉死的话
+#                     wrapper 会读到 start_h200 环境里同名的**训练**变量, 选档指标
+#                     的几何会跟着训练几何漂。
+#   RESULTS_DIR       结果根目录（默认 ${GU_BASE}/results/g_h200）。**多臂/多 seed
+#                     必须各给一个**: history_dev/ 与 FINAL_SUMMARY.md 都落在这里。
+#   下列 env 若在外层环境里非空, 原样透传给训练 launcher（未设则 launcher 用自己的默认）：
+#   DOC_MODE TOOLS_IN_SYSTEM HYBRID_TAIL_CHOICES MAX_DOC_LENGTH MAX_DOC_NUM
+#   MAX_TOOL_CHUNKS MAX_SYSTEM_LENGTH MAX_LENGTH C2KV_GIST_TRAIN_RATIOS SEED
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -84,6 +114,23 @@ CHECKPOINT_TOKEN_GRAN="${CHECKPOINT_TOKEN_GRAN:-16000000}"
 EVAL_MAX_CKPTS="${EVAL_MAX_CKPTS:-6}"
 MAX_CRASH_RETRIES="${MAX_CRASH_RETRIES:-5}"
 EXPECT_GPUS="${EXPECT_GPUS:-2}"
+# 2026-09-03 regime arm 旋钮(默认全部 = 旧行为, 见头部注释)
+RECIPE="${RECIPE:-g_h200_main=toucan:0.6,traces:0.4}"
+SUBSET_WEIGHTS="${SUBSET_WEIGHTS:-traces:tau2=0.75 traces:appworld=0.25 traces:other=0}"
+EVAL_BFCL="${EVAL_BFCL:-1}"
+EVAL_HISTORY="${EVAL_HISTORY:-0}"
+SELECT_METRIC="${SELECT_METRIC:-bfcl}"
+HIST_RATIO="${HIST_RATIO:-8}"
+HIST_MAX_EXAMPLES="${HIST_MAX_EXAMPLES:-700}"
+HIST_SPLIT_MANIFEST="${HIST_SPLIT_MANIFEST:-${REPO_ROOT}/outputs/appworld_dev_split_manifest.json}"
+HIST_SPLIT_NAME="${HIST_SPLIT_NAME:-appworld_dev}"
+# history 评测几何: 显式钉死, 不继承训练侧的同名变量(2026-09-03 评审)。
+HIST_COMPARE_MODES="${HIST_COMPARE_MODES:-c2kv,hybrid,full,truncate}"
+HIST_HYBRID_TOP_K="${HIST_HYBRID_TOP_K:-3}"
+HIST_MAX_DOC_LENGTH="${HIST_MAX_DOC_LENGTH:-768}"
+HIST_MAX_DOC_NUM="${HIST_MAX_DOC_NUM:-16}"
+HIST_MAX_SYSTEM_LENGTH="${HIST_MAX_SYSTEM_LENGTH:-4096}"
+HIST_MAX_LENGTH="${HIST_MAX_LENGTH:-1536}"
 RETAIN_CKPTS="${RETAIN_CKPTS:-$((EVAL_MAX_CKPTS + 2))}"
 PRUNE_MIN_FREE_GB="${PRUNE_MIN_FREE_GB:-400}"
 if [[ "${SMOKE:-0}" == "1" ]]; then
@@ -115,6 +162,26 @@ if [[ "${SMOKE:-0}" == "1" ]]; then
 fi
 LOGS="${STATUS}/logs"
 mkdir -p "${LOGS}" "${RESULTS}"
+
+# SELECT_METRIC / EVAL_* 一致性早检(2026-09-03 评审): 错配只会在全部阶段跑完后的
+# select 里才暴露, 代价是一整轮 H200 机时。未知取值直接死; 选档指标对应的评测被
+# 关掉**且**结果目录里也没有可用 summary 时同样直接死(续跑场景下已有结果则只告警)。
+case "${SELECT_METRIC}" in
+  bfcl|history) ;;
+  *) echo "unknown SELECT_METRIC=${SELECT_METRIC} (expected bfcl|history)" >&2; exit 1 ;;
+esac
+select_precheck() {  # select_precheck <metric> <eval_flag> <existing-summary-glob>
+  local metric="$1" flag="$2" pattern="$3"
+  [[ "${SELECT_METRIC}" == "${metric}" && "${flag}" != "1" ]] || return 0
+  if compgen -G "${pattern}" > /dev/null; then
+    echo "WARNING: SELECT_METRIC=${metric} 但对应评测被关掉; 沿用已存在的 ${pattern}" >&2
+    return 0
+  fi
+  echo "SELECT_METRIC=${metric} 需要对应评测打开, 且 ${pattern} 目前没有任何结果" >&2
+  exit 1
+}
+select_precheck history "${EVAL_HISTORY}" "${RESULTS}/history_dev/*/summary.json"
+select_precheck bfcl "${EVAL_BFCL}" "${RESULTS}/bfcl_dev_scored/*_summary.json"
 
 MODEL_DIR="${REPO_ROOT}/models/Qwen3-4B-Instruct-2507"
 TRACES_DIR="${REPO_ROOT}/datasets/agent-llm-traces"
@@ -329,20 +396,27 @@ PY
       --tokenizer "${MODEL_DIR}" --out_dir "${PLAN_DIR}" --list_traces_subsets
   fi
   if [[ ! -f "${ORDER_FILE}" ]]; then
+    # RECIPE / SUBSET_WEIGHTS 参数化(2026-09-03): 默认值逐字等于旧硬编码命令。
+    # SUBSET_WEIGHTS 按空格切分, 每项一个 --subset_weights 参数。
+    local sw_args=() sw
+    for sw in ${SUBSET_WEIGHTS}; do sw_args+=(--subset_weights "${sw}"); done
+    # 两者都是 ${VAR:-default} 形式: 显式传空串 = 取默认(含 traces:tau2=0.75)。
+    # 因此把最终生效的值打出来, 别让它悄悄发生。
+    echo "[plan] RECIPE=${RECIPE}"
+    echo "[plan] SUBSET_WEIGHTS=${SUBSET_WEIGHTS} -> ${#sw_args[@]} args"
     "${PY}" agent/build_joint_medium_plan.py \
       --traces_path "${TRACES_DIR}" --toucan_path "${TOUCAN_DIR}" \
       --split_manifest_file "${SPLIT_MANIFEST}" --split_manifest_name "${SPLIT_NAME}" \
-      --recipe g_h200_main=toucan:0.6,traces:0.4 \
+      --recipe "${RECIPE}" \
       --split_traces_subsets \
-      --subset_weights traces:tau2=0.75 --subset_weights traces:appworld=0.25 \
-      --subset_weights traces:other=0 \
+      ${sw_args[@]+"${sw_args[@]}"} \
       --no-require_tool_call \
       --budget_estimated_tokens "${PLAN_BUDGET_EST}" --oversample_factor 1.25 \
       --removal_files "${REMOVAL_FILE}" \
       --order_seed 42 --out_dir "${PLAN_DIR}" --tokenizer "${MODEL_DIR}"
   fi
   "${PY}" - <<PY
-import json
+import json, os
 p = json.load(open("${PLAN_JSON}"))
 fam = {k: v["realized_share"] for k, v in p["families"].items()}
 tr = p["families"]["traces"].get("subsets", {})
@@ -356,9 +430,31 @@ assert set(fam) == set(expect), fam
 assert "qa" not in fam and "openswe" not in fam, fam
 for k in tr:
     assert k in ("appworld", "tau2"), f"unexpected traces stratum leaked: {k}"
-n = len(json.load(open("${ORDER_FILE}")))
+order = json.load(open("${ORDER_FILE}"))
+n = len(order)
 print("order examples:", n)
 assert n > 1000
+# 污染断言(2026-09-03 评审; kill 表 "contamination abort" 的自动化版本):
+# history dev split 的 eval session 绝不能出现在 order file 的训练 qid 里
+# (traces qid = "<session_id>:<span_index>"; toucan/openswe 的 qid 前缀撞不上
+# traces 的 session id)。manifest 不存在 = 还没建 dev split, 跳过(joint 主臂
+# 路径逐字不变)。
+hist_manifest = "${HIST_SPLIT_MANIFEST}"
+hist_name = "${HIST_SPLIT_NAME}"
+if os.path.isfile(hist_manifest):
+    ev = set((json.load(open(hist_manifest)).get(hist_name) or {}).get("eval_session_ids") or [])
+    if ev:
+        hit = sorted({q for q in order if q.rsplit(":", 1)[0] in ev})
+        assert not hit, (
+            f"contamination: {len(hit)} order qid(s) come from {hist_name} eval sessions,"
+            f" e.g. {hit[:5]}"
+        )
+        print(f"contamination check ok: 0/{n} order qids in {hist_name} eval sessions"
+              f" ({len(ev)} sessions)")
+    else:
+        print("contamination check skipped: no eval_session_ids in", hist_manifest)
+else:
+    print("contamination check skipped: no history dev split manifest at", hist_manifest)
 PY
 }
 
@@ -462,7 +558,16 @@ launch_train() {  # launch_train <save_steps> <epochs> <resume>  (logs append to
   # 每次启动用随机 master port：上一次的 torchrun 刚被杀时 rdzv 端口会
   # EADDRINUSE（TIME_WAIT），撞车已在 2026-08-26 冒烟中实测复现。
   local master_port=$((29600 + RANDOM % 700))
-  env ${extra[@]+"${extra[@]}"} \
+  # 2026-09-03: 训练 dialect/几何 env 透传。只在**外层环境里非空**时才拼进
+  # env 前缀 —— 拼一个空串会让 launcher 的 ${VAR:-default} 看到空值(对 `:-`
+  # 无害, 但对 `${VAR-default}` 形式会直接吃掉默认), 未设时必须完全不出现。
+  local passthru=() pv
+  for pv in DOC_MODE TOOLS_IN_SYSTEM HYBRID_TAIL_CHOICES MAX_DOC_LENGTH MAX_DOC_NUM \
+            MAX_TOOL_CHUNKS MAX_SYSTEM_LENGTH MAX_LENGTH C2KV_GIST_TRAIN_RATIOS SEED; do
+    if [[ -n "${!pv:-}" ]]; then passthru+=("${pv}=${!pv}"); fi
+  done
+  if ((${#passthru[@]})); then echo "[launch_train] passthrough: ${passthru[*]}"; fi
+  env ${extra[@]+"${extra[@]}"} ${passthru[@]+"${passthru[@]}"} \
   MASTER_PORT="${master_port}" \
   MODEL_PATH="${MODEL_DIR}" \
   DATASET_PATH="${TRACES_DIR}" \
@@ -562,10 +667,24 @@ trim["train_qids"] = m["train_qids"][:1500]
 json.dump(trim, open("${STATUS}/manifest_trim1500.json", "w"))
 print("trimmed manifest:", len(trim["train_qids"]), "/", m["num_train_examples"])
 PY
+  # 2026-09-03 评审: 几何必须跟着本臂走。measure_arm_psrc.py 的 argparse 默认是
+  # joint 口径(max_length 2048 / 1024 x 24 槽 / system 512), 不透传的话 history 臂
+  # (768 x 16, system 4096)的 P_src、以及由它派生的 save_steps 都是按错几何算的。
+  # 下面的默认值逐字等于 measure_arm_psrc.py 自己的 argparse 默认 -> 未设 env 时
+  # 命令行完全等价。注意 measure_arm_psrc.py 没有 --tools_in_system: "tools 进不进
+  # 网格"这一维仍无法透传, 该臂的 P_src 因此仍带残余偏差(run_config.json 里记了
+  # tools_in_system, 事后可据此判读)。
+  local psrc_geom=(--max_length "${MAX_LENGTH:-2048}"
+                   --max_doc_length "${MAX_DOC_LENGTH:-1024}"
+                   --max_doc_num "${MAX_DOC_NUM:-24}"
+                   --max_system_length "${MAX_SYSTEM_LENGTH:-512}")
+  if [[ -n "${MAX_TOOL_CHUNKS:-}" ]]; then psrc_geom+=(--max_tool_chunks "${MAX_TOOL_CHUNKS}"); fi
+  echo "[calibrate] measure_arm_psrc geometry: ${psrc_geom[*]}"
   "${PY}" agent/measure_arm_psrc.py \
     --dataset_path "${TRACES_DIR}" --toucan_path "${TOUCAN_DIR}" \
     --split_manifest_file "${SPLIT_MANIFEST}" --split_manifest_name "${SPLIT_NAME}" \
     --tokenizer "${MODEL_DIR}" \
+    "${psrc_geom[@]}" \
     --arm main="${STATUS}/manifest_trim1500.json" \
     --out "${STATUS}/psrc_calibration.json"
   "${PY}" - <<PY
@@ -584,8 +703,15 @@ eff_batch = n_gpus * int("${PER_DEVICE_BS}") * int("${GRAD_ACCUM}")
 steps_per_epoch = math.ceil(n_ex / eff_batch)   # 2卡 x bs2 x accum2 = 8（默认）
 presented_per_step = p_pool / steps_per_epoch
 save_steps = max(1, int(${CHECKPOINT_TOKEN_GRAN} // max(1, presented_per_step)))
-epochs = max(1, round(${TARGET_PRESENTED_TOKENS} / max(1, p_pool)))
-total_steps = epochs * steps_per_epoch
+# EPOCHS_OVERRIDE(2026-09-03): 换 dialect/几何后 presented 口径不可比, 直接钉
+# epoch 数（HF num_train_epochs 接受小数）。未设 = 旧行为逐位不变。
+epochs_override = "${EPOCHS_OVERRIDE:-}".strip()
+if epochs_override:
+    epochs = float(epochs_override)
+    total_steps = math.ceil(epochs * steps_per_epoch)
+else:
+    epochs = max(1, round(${TARGET_PRESENTED_TOKENS} / max(1, p_pool)))
+    total_steps = epochs * steps_per_epoch
 # 2026-08-30 v2: calibrate 计时入账。sec_step 按 CALIB_STEPS 摊(含启动/编译/
 # 建样本窗口, 是"端到端口径"的保守秒/步); projected_hours = sec_step x
 # total_steps; gist_doc_microbatch 记录校准时的吞吐配置——phase_train 启动前
@@ -605,7 +731,16 @@ cfg = dict(p_pool_presented=int(p_pool), est_pool=int(est_pool),
            # 2026-08-29 I5: 记录校准所依据的 order 文件及其 sha1; phase_train
            # 启动前校验当前 ORDER_FILE 一致(防换池后拿错剂量/步数口径训练)。
            order_file="${ORDER_FILE}",
-           order_sha1=hashlib.sha1(open("${ORDER_FILE}", "rb").read()).hexdigest())
+           order_sha1=hashlib.sha1(open("${ORDER_FILE}", "rb").read()).hexdigest(),
+           # 2026-09-03 信息性字段: 记录本次校准所处的 dialect/几何, 供 select
+           # 与事后审计对照(不参与任何断言)。
+           epochs_override=(float(epochs_override) if epochs_override else None),
+           doc_mode="${DOC_MODE:-}" or None,
+           tools_in_system="${TOOLS_IN_SYSTEM:-}" or None,
+           hybrid_tail_choices="${HYBRID_TAIL_CHOICES:-}" or None,
+           max_doc_length="${MAX_DOC_LENGTH:-}" or None,
+           max_doc_num="${MAX_DOC_NUM:-}" or None,
+           ratios="${C2KV_GIST_TRAIN_RATIOS:-}" or None)
 json.dump(cfg, open("${RUN_CONFIG}", "w"), indent=1)
 print(json.dumps(cfg, indent=1))
 bar = "=" * 76
@@ -621,7 +756,11 @@ if projected_hours > float("${WALL_CAP_HOURS}"):
     print(f"WARNING: projected_hours={projected_hours:.1f} 超过 WALL_CAP_HOURS=${WALL_CAP_HOURS} ——"
           " 剂量/吞吐口径务必人工复核(不阻断, 仅告警)")
     print("#" * 76)
-assert epochs * p_pool >= ${MIN_PRESENTED_TOKENS}, "pool too small for floor dose"
+if not epochs_override:
+    assert epochs * p_pool >= ${MIN_PRESENTED_TOKENS}, "pool too small for floor dose"
+else:
+    print(f"EPOCHS_OVERRIDE={epochs}: skip MIN_PRESENTED_TOKENS floor assert"
+          f" (expected presented ~= {int(p_pool * epochs)})")
 PY
   echo "calibrate done -> ${RUN_CONFIG}"
 }
@@ -779,6 +918,79 @@ PY
 }
 
 # ---- phase: eval -----------------------------------------------------------
+# AppWorld history-dev 评测(2026-09-03, EVAL_HISTORY=1 时启用): 每个 milestone
+# 一个 ${RESULTS}/history_dev/<name>/summary.json。BFCL dev-128 对 history 臂
+# 分辨率不足(单点 ≈1 次正确调用, 早早饱和), 选档指标改用本 harness 的
+# tool_name_accuracy; BFCL 仍可并存, 只作为打印列。
+# 双卡时一个 milestone 一张卡并行(history harness 单进程单卡, 与 BFCL 的
+# id 分片并行是两种不同的切法), 单卡顺序。已有 summary.json 的 milestone 跳过。
+eval_history_milestones() {  # eval_history_milestones <ckpt...>
+  local ckpts=("$@")
+  [[ ${#ckpts[@]} -gt 0 ]] || return 0
+  local ngpu
+  ngpu=$("${PY}" -c "import torch; print(torch.cuda.device_count())")
+  local hist_root="${RESULTS}/history_dev"
+  mkdir -p "${hist_root}"
+  local pending=()
+  local ckpt name
+  for ckpt in "${ckpts[@]}"; do
+    name="$(basename "$(dirname "${ckpt}")")_$(basename "${ckpt}")"
+    if [[ -f "${hist_root}/${name}/summary.json" ]]; then
+      echo "[eval_history] ${name} already scored, skip"; continue
+    fi
+    pending+=("${ckpt}")
+  done
+  [[ ${#pending[@]} -gt 0 ]] || { echo "[eval_history] nothing to do"; return 0; }
+  local i rc=0 pids=() gpu
+  if (( ngpu >= 2 )); then
+    # 两张卡一批, 批内并行
+    for (( i=0; i<${#pending[@]}; i+=2 )); do
+      pids=()
+      for (( gpu=0; gpu<2 && i+gpu<${#pending[@]}; gpu++ )); do
+        ckpt="${pending[i+gpu]}"
+        name="$(basename "$(dirname "${ckpt}")")_$(basename "${ckpt}")"
+        echo "[eval_history] ${name} on cuda:${gpu}"
+        CKPT="${ckpt}" MODEL_PATH="${MODEL_DIR}" DATASET_PATH="${TRACES_DIR}" \
+        SPLIT_MANIFEST_FILE="${HIST_SPLIT_MANIFEST}" SPLIT_NAME="${HIST_SPLIT_NAME}" \
+        MAX_EXAMPLES="${HIST_MAX_EXAMPLES}" RATIO="${HIST_RATIO}" \
+        COMPARE_MODES="${HIST_COMPARE_MODES}" HYBRID_TOP_K="${HIST_HYBRID_TOP_K}" \
+        MAX_DOC_LENGTH="${HIST_MAX_DOC_LENGTH}" MAX_DOC_NUM="${HIST_MAX_DOC_NUM}" \
+        MAX_SYSTEM_LENGTH="${HIST_MAX_SYSTEM_LENGTH}" MAX_LENGTH="${HIST_MAX_LENGTH}" \
+        OUT_DIR="${hist_root}/${name}" \
+        CUDA_VISIBLE_DEVICES=${gpu} DEVICE=cuda \
+          bash agent/eval_history_dev_c2kv_h200.sh >> "${LOGS}/eval_history_${name}.log" 2>&1 &
+        pids+=($!)
+      done
+      local p
+      for p in "${pids[@]}"; do wait "${p}" || rc=1; done
+    done
+  else
+    for ckpt in "${pending[@]}"; do
+      name="$(basename "$(dirname "${ckpt}")")_$(basename "${ckpt}")"
+      echo "[eval_history] ${name} on cuda:0 (sequential)"
+      CKPT="${ckpt}" MODEL_PATH="${MODEL_DIR}" DATASET_PATH="${TRACES_DIR}" \
+      SPLIT_MANIFEST_FILE="${HIST_SPLIT_MANIFEST}" SPLIT_NAME="${HIST_SPLIT_NAME}" \
+      MAX_EXAMPLES="${HIST_MAX_EXAMPLES}" RATIO="${HIST_RATIO}" \
+      COMPARE_MODES="${HIST_COMPARE_MODES}" HYBRID_TOP_K="${HIST_HYBRID_TOP_K}" \
+      MAX_DOC_LENGTH="${HIST_MAX_DOC_LENGTH}" MAX_DOC_NUM="${HIST_MAX_DOC_NUM}" \
+      MAX_SYSTEM_LENGTH="${HIST_MAX_SYSTEM_LENGTH}" MAX_LENGTH="${HIST_MAX_LENGTH}" \
+      OUT_DIR="${hist_root}/${name}" \
+      CUDA_VISIBLE_DEVICES=0 DEVICE=cuda \
+        bash agent/eval_history_dev_c2kv_h200.sh >> "${LOGS}/eval_history_${name}.log" 2>&1 || rc=1
+    done
+  fi
+  if [[ ${rc} -ne 0 ]]; then
+    echo "history dev eval failed for at least one milestone; tails:"
+    for ckpt in "${pending[@]}"; do
+      name="$(basename "$(dirname "${ckpt}")")_$(basename "${ckpt}")"
+      [[ -f "${LOGS}/eval_history_${name}.log" ]] || continue
+      echo "---- ${name} ----"; tail -20 "${LOGS}/eval_history_${name}.log" || true
+    done
+    return 1
+  fi
+  echo "history dev eval done -> ${hist_root}"
+}
+
 phase_eval() {
   prune_old_checkpoints || true
   local ckpts=()
@@ -833,6 +1045,14 @@ PY
   local eval_ckpts=()
   mapfile -t eval_ckpts < "${STATUS}/eval_list.txt"
   echo "evaluating: ${eval_ckpts[*]}"
+  if [[ "${EVAL_HISTORY}" == "1" ]]; then
+    eval_history_milestones "${eval_ckpts[@]}"
+  fi
+  if [[ "${EVAL_BFCL}" != "1" ]]; then
+    echo "EVAL_BFCL=${EVAL_BFCL}: skip BFCL dev eval"
+    echo "eval done"
+    return 0
+  fi
   # id 分片：manifest 拆两个半区; shard 数恒为 2——GPU ≥2 时两卡并行, 单卡
   # (如 SMOKE)顺序跑完两个 shard(修复前单卡 nshards=1 只评前一半 manifest);
   # 每 shard 传 RUN_SUFFIX 防止输出 jsonl 同名互相覆盖(2026-08-28 审计 I3)。
@@ -867,6 +1087,13 @@ PY
     )
     local runs="${RESULTS}/bfcl_dev/${name}"
     mkdir -p "${runs}/shard0" "${runs}/shard1" "${runs}/all"
+    # 2026-09-03: BFCL dev 评测跟着本臂的 dialect/几何走(此前只会按 joint 几何评)。
+    # tools-in-system 臂的 trainer 把工具排除在网格外(has_tool_documents=False),
+    # runner 侧对应 --c2kv_max_tool_chunks 0; 未显式给 MAX_TOOL_CHUNKS 时自动补 0。
+    local bfcl_tool_chunks="${MAX_TOOL_CHUNKS:-}"
+    if [[ -z "${bfcl_tool_chunks}" && "${TOOLS_IN_SYSTEM:-False}" =~ ^([Tt]rue|1)$ ]]; then
+      bfcl_tool_chunks=0
+    fi
     local ngpu nshards=2
     ngpu=$("${PY}" -c "import torch; print(torch.cuda.device_count())")
     rc=0
@@ -874,6 +1101,8 @@ PY
       local pids=()
       for (( shard=0; shard<nshards; shard++ )); do
         CKPT="${ckpt}" BFCL_PKG_PATH="${BFCL_PKG}" BFCL_DATA_DIR="${BFCL_DATA}" \
+        C2KV_DOC_MODE="${DOC_MODE:-joint}" C2KV_MAX_DOC_LENGTH="${MAX_DOC_LENGTH:-}" \
+        C2KV_MAX_DOC_NUM="${MAX_DOC_NUM:-}" C2KV_MAX_TOOL_CHUNKS="${bfcl_tool_chunks}" \
         DEV_MANIFEST="${STATUS}/bfcl_dev_shard${shard}.json" \
         CUDA_VISIBLE_DEVICES=${shard} DEVICE=cuda LIMIT="${EVAL_LIMIT:-}" \
         RUNS_DIR="${runs}/shard${shard}" SCORE_DIR="${runs}/score_shard${shard}" \
@@ -885,6 +1114,8 @@ PY
     else
       for (( shard=0; shard<nshards; shard++ )); do
         CKPT="${ckpt}" BFCL_PKG_PATH="${BFCL_PKG}" BFCL_DATA_DIR="${BFCL_DATA}" \
+        C2KV_DOC_MODE="${DOC_MODE:-joint}" C2KV_MAX_DOC_LENGTH="${MAX_DOC_LENGTH:-}" \
+        C2KV_MAX_DOC_NUM="${MAX_DOC_NUM:-}" C2KV_MAX_TOOL_CHUNKS="${bfcl_tool_chunks}" \
         DEV_MANIFEST="${STATUS}/bfcl_dev_shard${shard}.json" \
         CUDA_VISIBLE_DEVICES=0 DEVICE=cuda LIMIT="${EVAL_LIMIT:-}" \
         RUNS_DIR="${runs}/shard${shard}" SCORE_DIR="${runs}/score_shard${shard}" \
@@ -918,7 +1149,120 @@ PY
 }
 
 # ---- phase: select ---------------------------------------------------------
+# SELECT_METRIC=history(2026-09-03): 用 AppWorld history-dev 的 c2kv
+# tool_name_accuracy 选档(BFCL dev-128 对本臂分辨率不足)。幽灵档过滤、剂量行
+# 与 FINAL_SUMMARY 落点跟 bfcl 分支一致; BFCL native_valid_rate 若同时存在
+# 则作为附加列打印, 不参与排序。
+phase_select_history() {
+  "${PY}" - <<PY
+import glob, json, os, re
+results = "${RESULTS}"
+hist_ratio = int("${HIST_RATIO}")
+rows = []
+ghost = []
+bad = []
+# history_dev/ 是一个**共享池**: Gate-0 的手工跑(未训练对照 untrained_control、
+# 别的臂的 checkpoint)以及共用 RESULTS_DIR 的别的 seed 都会往这里写。候选因此必须
+# 双重限定: 目录名以本次 OUTPUT_DIR 的 basename 打头(eval_history_milestones 的
+# 命名规则 <parent>_<ckpt>), 且含 checkpoint-<n> 且该档在 OUTPUT_DIR 里还在。
+# 不含 checkpoint-<n> 的目录一律拒收 —— 旧写法 "if m and ..." 在 m 为 None 时
+# 会让它直接通过并进入排序(untrained_control 就是这么被选中的)。
+run_prefix = os.path.basename(os.path.normpath("${OUTPUT_DIR}")) + "_"
+for path in sorted(glob.glob(os.path.join(results, "history_dev", "*", "summary.json"))):
+    name = os.path.basename(os.path.dirname(path))
+    m = re.search(r"checkpoint-(\d+)", name)
+    if m is None:
+        bad.append((name, "not a milestone dir (no checkpoint-<n>)"))
+        continue
+    if not name.startswith(run_prefix):
+        bad.append((name, f"not this run (expected prefix {run_prefix!r})"))
+        continue
+    if not os.path.isdir(os.path.join("${OUTPUT_DIR}", m.group(0))):
+        ghost.append(name)
+        continue
+    s = json.load(open(path))
+    cell = (s.get("modes") or {}).get("c2kv")
+    if not isinstance(cell, dict) or cell.get("tool_name_accuracy") is None:
+        bad.append((name, "no c2kv mode row"))
+        continue
+    if cell.get("ratio") is not None and int(cell["ratio"]) != hist_ratio:
+        bad.append((name, f"ratio {cell.get('ratio')} != HIST_RATIO {hist_ratio}"))
+        continue
+    val = float(cell["tool_name_accuracy"])
+    n_val = cell.get("n")
+    # BFCL 只作为打印列(条件项): 同名 scored summary 存在时取 native_valid_rate。
+    # phase_eval 自 2026-09-03 起向 BFCL wrapper 透传 C2KV_DOC_MODE 与几何, 所以
+    # 这一列与本臂同方言, 可直接贴; 但它仍不参与排序。
+    bfcl = None
+    bfcl_path = os.path.join(results, "bfcl_dev_scored", f"{name}_summary.json")
+    if bfcl_path and os.path.isfile(bfcl_path):
+        try:
+            bs = json.load(open(bfcl_path))
+            for tier, c in (bs.get("c2kv") or {}).items():
+                if isinstance(c, dict) and c.get("n"):
+                    bfcl = c["native_valid_n"] / c["n"]
+                    break
+        except Exception as e:  # noqa: BLE001 附加列, 绝不能挂 select
+            print("bfcl column unavailable for", name, type(e).__name__, e)
+    rows.append((name, "tool_name_accuracy", val, n_val, bfcl))
+    print(name, "-> tool_name_accuracy", val, f"n={n_val}", f"bfcl={bfcl}")
+if ghost:
+    print("select: 忽略 checkpoint 已不存在的 summary:", ghost)
+if bad:
+    print("select: 忽略不可用的 history summary:", bad)
+assert rows, "no history_dev summaries with a usable c2kv tool_name_accuracy"
+best = max(rows, key=lambda r: r[2])
+dose_line = "realized presented tokens = n/a / target = ${TARGET_PRESENTED_TOKENS}"
+try:
+    cand = [p for p in glob.glob(os.path.join("${OUTPUT_DIR}", "checkpoint-*"))
+            if p.rsplit("-", 1)[-1].isdigit()]
+    cand.sort(key=lambda p: int(p.rsplit("-", 1)[-1]))
+    found = None
+    for ckpt in reversed(cand):
+        state_path = os.path.join(ckpt, "trainer_state.json")
+        if not os.path.isfile(state_path):
+            continue
+        for entry in reversed(json.load(open(state_path)).get("log_history") or []):
+            if "presented_tokens" in entry:
+                found = int(entry["presented_tokens"])
+                break
+        if found is not None:
+            break
+    if found is not None:
+        dose_line = f"realized presented tokens = {found} / target = ${TARGET_PRESENTED_TOKENS}"
+except Exception as e:  # noqa: BLE001 剂量行是信息性的, 绝不能挂 select
+    print("dose line unavailable:", type(e).__name__, e)
+has_bfcl = any(r[4] is not None for r in rows)
+with open(os.path.join(results, "FINAL_SUMMARY.md"), "w") as f:
+    f.write("# G-H200 regime arm — AppWorld history-dev checkpoint selection\n\n")
+    f.write(f"selection metric: **tool_name_accuracy** (mode c2kv, ratio {hist_ratio}, "
+            f"split ${HIST_SPLIT_NAME}); BFCL native_valid_rate is a printed column only\n\n")
+    f.write(f"best: **{best[0]}** ({best[1]} = {best[2]:.4f})\n\n")
+    f.write(f"{dose_line}\n\n")
+    if has_bfcl:
+        f.write("| checkpoint | metric | value | n | bfcl_native_valid_rate |\n|---|---|---|---|---|\n")
+    else:
+        f.write("| checkpoint | metric | value | n |\n|---|---|---|---|\n")
+    for name, key, val, n_val, bfcl in rows:
+        cells = f"| {name} | {key} | {val:.4f} | {n_val if n_val is not None else 'n/a'} |"
+        if has_bfcl:
+            cells += f" {f'{bfcl:.4f}' if bfcl is not None else 'n/a'} |"
+        f.write(cells + "\n")
+    f.write("\n详细数值见各 history_dev/<name>/summary.json（source 字段指向 harness 原始 summary）。\n")
+print("BEST:", best[0], best[1], best[2])
+PY
+  echo "FINAL_SUMMARY at ${RESULTS}/FINAL_SUMMARY.md"
+}
+
 phase_select() {
+  if [[ "${SELECT_METRIC}" == "history" ]]; then
+    phase_select_history
+    return 0
+  fi
+  if [[ "${SELECT_METRIC}" != "bfcl" ]]; then
+    echo "unknown SELECT_METRIC=${SELECT_METRIC} (expected bfcl|history)" >&2
+    return 1
+  fi
   "${PY}" - <<PY
 import glob, json, os, re
 results = "${RESULTS}"

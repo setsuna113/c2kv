@@ -98,7 +98,7 @@ MathAPI 需要 mpmath（轻量纯 python，BFCL 自身依赖），dryrun 会自�
                    (仅单轮类附 decoded_ast / decode_ast_error)}]}],
  actual_cap_per_turn, model, max_context_length, seed: null, wall_sec,
  (仅 c2kv 附 c2kv_meta{checkpoint, trained, ratio, doc_mode, max_doc_length,
-                      max_doc_num}),
+                      max_doc_num, max_tool_chunks(None=2/3 默认)}),
  bfcl_result(与 BFCL 生成器 _llm_response_generation.py:214-218 同形，可直接
              handler.write() 落成 BFCL 原生结果文件), snapshot_manifest_sha256, error}
 multi_turn 的 raw_text 完整保留原始文本（下游双列评分要用）；first_divergence_turn
@@ -1198,6 +1198,22 @@ def run_dryrun(args, output_path: Path):
     print(f"  快照 manifest_sha256={manifest_sha}")
 
 
+def _build_c2kv_settings(args) -> dict:
+    """c2kv geometry passed to the gist path (shared by run_inference + tests)."""
+    return {
+        "doc_mode": args.c2kv_doc_mode,
+        "ratio": args.c2kv_ratio,
+        "max_doc_length": args.c2kv_max_doc_length,
+        "max_doc_num": args.c2kv_max_doc_num,
+        # None = 2/3 max_doc_num (joint driver default). --c2kv_max_tool_chunks
+        # overrides it; chunk_doc_texts forces tool_cap=0 only for an ENTRY with
+        # no tool documents, so 0 is the explicit lever that gives history the
+        # whole grid (the tools-in-system arm, where the trainer passes
+        # has_tool_documents=False).
+        "max_tool_chunks": args.c2kv_max_tool_chunks,
+    }
+
+
 def run_inference(args, output_path: Path):
     _bfcl_dir, manifest_sha, frozen_items = _setup_bfcl(args, output_path)
     id_to_entry, missing = _load_bfcl_entries_by_id(frozen_items)
@@ -1206,13 +1222,7 @@ def run_inference(args, output_path: Path):
     handler_cls = _define_handler_class()
     c2kv_settings = None
     if args.condition == "c2kv":
-        c2kv_settings = {
-            "doc_mode": args.c2kv_doc_mode,
-            "ratio": args.c2kv_ratio,
-            "max_doc_length": args.c2kv_max_doc_length,
-            "max_doc_num": args.c2kv_max_doc_num,
-            "max_tool_chunks": None,  # 缺省 = 2/3 max_doc_num（joint 驱动口径）
-        }
+        c2kv_settings = _build_c2kv_settings(args)
     handler = _build_handler(
         handler_cls=handler_cls,
         model_path=args.model,
@@ -1339,6 +1349,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="仅 c2kv：文档块总槽位（工具块上限缺省 2/3，历史块取余下槽位尾偏选择）",
     )
     p.add_argument(
+        "--c2kv_max_tool_chunks", type=int, default=None,
+        help="仅 c2kv：工具块槽位上限。缺省 None = 2/3 max_doc_num（joint 驱动口径）；"
+             "无工具文档时（history_only）上限自动为 0，历史占满 max_doc_num",
+    )
+    p.add_argument(
         "--limit", type=int, default=None,
         help="调试参数：本次最多新跑的样本数（resume 过滤后）",
     )
@@ -1388,6 +1403,10 @@ def main(argv=None):
             raise SystemExit(f"--c2kv_checkpoint 不存在: {args.c2kv_checkpoint}")
         if args.c2kv_ratio < 1:
             raise SystemExit(f"--c2kv_ratio 必须 >= 1: {args.c2kv_ratio}")
+        if args.c2kv_max_tool_chunks is not None and args.c2kv_max_tool_chunks < 0:
+            raise SystemExit(
+                f"--c2kv_max_tool_chunks 必须 >= 0: {args.c2kv_max_tool_chunks}"
+            )
     if not args.dryrun and not args.model:
         raise SystemExit("非 dryrun 模式必须提供 --model")
 
@@ -1395,8 +1414,20 @@ def main(argv=None):
         output_path = Path(args.output)
     elif args.condition == "c2kv":
         # 臂名入文件名：防不同 doc_mode/ratio 的 resume 键 (id, cap_tier, condition) 撞车
+        # The geometry tags appear only when the flags differ from the parser
+        # defaults, so the joint default basename stays byte-identical to
+        # earlier runs (and existing resume files still match).
+        geom_tag = ""
+        if args.c2kv_max_doc_num != 24 or args.c2kv_max_doc_length != 1024:
+            geom_tag = f"-d{args.c2kv_max_doc_num}l{args.c2kv_max_doc_length}"
+        tool_chunks_tag = (
+            f"-t{args.c2kv_max_tool_chunks}"
+            if args.c2kv_max_tool_chunks is not None
+            else ""
+        )
         output_path = REPO_ROOT / "metrology" / "outputs" / (
-            f"bfcl_run_c2kv-{args.c2kv_doc_mode}-r{args.c2kv_ratio}_{args.cap_tier}.jsonl"
+            f"bfcl_run_c2kv-{args.c2kv_doc_mode}-r{args.c2kv_ratio}"
+            f"{geom_tag}{tool_chunks_tag}_{args.cap_tier}.jsonl"
         )
     else:
         output_path = REPO_ROOT / "metrology" / "outputs" / (
@@ -1408,6 +1439,10 @@ def main(argv=None):
     elif args.condition == "c2kv":
         kv_note = (
             f"  c2kv_doc_mode={args.c2kv_doc_mode}  c2kv_ratio={args.c2kv_ratio}"
+            f"  c2kv_max_doc_length={args.c2kv_max_doc_length}"
+            f"  c2kv_max_doc_num={args.c2kv_max_doc_num}"
+            f"  c2kv_max_tool_chunks="
+            f"{args.c2kv_max_tool_chunks if args.c2kv_max_tool_chunks is not None else '(2/3 max_doc_num)'}"
             f"  c2kv_checkpoint={args.c2kv_checkpoint or '(基座+注入,未训练)'}"
         )
     print(f"[runner] condition={args.condition}  cap_tier={args.cap_tier}{kv_note}  "
