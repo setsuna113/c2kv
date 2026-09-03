@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import time
@@ -75,11 +76,22 @@ def run_benchmark(name: str, base_url: str, user_base_url: str, out_dir: Path,
     if name == "bfcl":
         from adapters import bfcl_adapter
 
-        return bfcl_adapter.run(
-            base_url,
-            categories=kwargs.get("categories", "multi_turn_base"),
-            model=model,
-        )
+        # bfcl_eval resolves its data/result dirs from cwd; the adapter is
+        # driven from the gorilla checkout ($BENCH_BFCL_DIR override).
+        bfcl_dir = os.environ.get("BENCH_BFCL_DIR") or str(
+            Path.home() / "benchmarks" / "gorilla"
+            / "berkeley-function-call-leaderboard")
+        prev_cwd = os.getcwd()
+        os.chdir(bfcl_dir)
+        try:
+            return bfcl_adapter.run(
+                base_url,
+                categories=kwargs.get("categories", "multi_turn_base"),
+                model=model,
+                handler_name=f"c2kv-{kwargs.get('arm') or 'full'}",
+            )
+        finally:
+            os.chdir(prev_cwd)
     if name == "toolsandbox":
         from adapters import toolsandbox_adapter
 
@@ -154,7 +166,7 @@ def main(argv=None):
         user_base_url = args.user_upstream or args.upstream
         summary = run_benchmark(
             args.benchmark, base_url, user_base_url, args.out,
-            model=args.model,
+            model=args.model, arm=args.arm,
             task_set=args.task_set, categories=args.categories,
             num_workers=args.num_workers, max_tasks=args.max_tasks,
             run_name=args.run_name, full=args.full,

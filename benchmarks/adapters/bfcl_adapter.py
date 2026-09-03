@@ -28,7 +28,8 @@ MODEL_NAME = "c2kv-hf"  # BFCL handler key / result-dir name (stable layout)
 SERVED_MODEL = "c2kv-agent"  # default served model name at the endpoint
 
 
-def install_handler(base_url: str, model: str = SERVED_MODEL) -> None:
+def install_handler(base_url: str, model: str = SERVED_MODEL,
+                    handler_name: str = MODEL_NAME) -> None:
     import httpx
     from openai import OpenAI
     from bfcl_eval.constants.model_config import MODEL_CONFIG_MAPPING, ModelConfig
@@ -62,7 +63,7 @@ def install_handler(base_url: str, model: str = SERVED_MODEL) -> None:
             response = self.client.chat.completions.create(**kwargs)
             return response, time.perf_counter() - t0
 
-    MODEL_CONFIG_MAPPING[MODEL_NAME] = ModelConfig(
+    MODEL_CONFIG_MAPPING[handler_name] = ModelConfig(
         model_name=model,
         display_name="c2kv-hf",
         url="",
@@ -76,9 +77,13 @@ def install_handler(base_url: str, model: str = SERVED_MODEL) -> None:
 
 def run(base_url: str, categories: str = "multi_turn_base",
         mode: str = "both", run_ids: "list[str] | str | None" = None,
-        model: str = SERVED_MODEL) -> Dict[str, Any]:
+        model: str = SERVED_MODEL,
+        handler_name: str = MODEL_NAME) -> Dict[str, Any]:
     """Programmatic entry for benchmarks/run.py: register the handler and
     drive the official generate/evaluate CLI in-process.
+
+    ``handler_name`` is the BFCL model key (= result-dir name); run.py passes
+    f"c2kv-{arm}" so different arms never overwrite each other's results.
 
     ``run_ids`` subsets the category: this BFCL vintage implements subsetting
     through <gorilla-root>/test_case_ids_to_generate.json ({"<category>":
@@ -87,9 +92,9 @@ def run(base_url: str, categories: str = "multi_turn_base",
 
     Terminal-state check (acceptance 1): every expected entry must have a
     result row — the run fails loudly instead of shrinking the denominator."""
-    install_handler(base_url, model=model)
-    gen = ["generate", "--model", MODEL_NAME, "--test-category", categories]
-    ev = ["evaluate", "--model", MODEL_NAME, "--test-category", categories]
+    install_handler(base_url, model=model, handler_name=handler_name)
+    gen = ["generate", "--model", handler_name, "--test-category", categories]
+    ev = ["evaluate", "--model", handler_name, "--test-category", categories]
     expected = 200
     if run_ids:
         ids = ([i.strip() for i in run_ids.split(",") if i.strip()]
