@@ -317,7 +317,33 @@ re_diverged。arms：`c2kv_recover` / `hybrid_recover`；旧任务级 oracle
 | τ² | c2kv(50 任务并集) | **0.18**(9 perfect,1 infra 缺任务 49) | 压缩代价 −25% vs full 0.24 |
 | τ² | c2kv_recover | 0.18(2 infra) | recover 未增益于 c2kv 基座(50 任务口径);干净块 a=0.22 曾到 full 线 |
 | τ² | **hybrid_recover** | **0.34**(17 perfect,4 infra 缺任务) | **全场最强:超 full +42%、超 c2kv_rec +89%**;干净块 hy3_rec_b=**0.40**(25/25 过闸,22/25 自然完成、仅 3 循环 —— hybrid 尾部几乎消除病理性 tool-loop);同点位对 c2kv_rec_b +23pp。**头条:hybrid 尾 raw + 步级 oracle-recover 不只修平压缩损失,而是大幅超越 full**(单种子、n=50) |
-| τ² | repair×2 | chainA 在跑 | c2kv_rp/hy3_rp 块排队 |
+| τ² | c2kv_repair(终) | **0.14**(7 perfect,50 任务零 infra;a2 重跑 25/25 一次过 + b) | corr@first 无增益(0.14 < c2kv 0.18)—— 修复臂在 c2kv 基座上反而略降,与 b 半结论一致 |
+| τ² | **hybrid_repair(终)** | **0.36**(18 perfect,**零 infra,十臂唯一全净 50/50**) | 块 a=0.28 + 块 b=**0.44**(25/25 一次过,21 user_stop+4 max_steps);**τ² 终局王座:hy3_rp 0.36 > hy3_rec 0.34 > full 0.24 > c2kv_rec 0.18 = c2kv 0.18 > c2kv_rp(并集含废块)**。hybrid 基座+任一步级修复≈+90% vs 纯 c2kv;修复增益来源=尾部 raw KV,repair 与 recover 两形态等效 |
+
+
+**BFCL 面(四臂过闸 200/200 生成,官方 scorer 口径):**
+
+| 臂 | accuracy | scorer total |
+|---|---|---|
+| full | 6/82 = 7.3% | 82(118 例解码失败被 scorer 丢弃 —— 散文代动作地板) |
+| c2kv | 6/82 = 7.3% | 82 |
+| c2kv_recover | 6/82 = 7.3% | 82 |
+| hybrid_recover | 6/82 = 7.3% | 82 |
+
+**四臂完全同值** —— BFCL 面被格式地板全主导:该 checkpoint 在 BFCL 上把 ~45% 的步骤输出散文而非工具调用(scorer 丢弃后 6/82 封顶),压缩/修复/hybrid 的任何差异都不可见。与 hf_server 时代的地板结论(B2 取证:6/82 同值)跨栈一致 —— 地板是模型×任务的属性,不是栈的。剩余 rp×2 臂因四臂同值而冗余,未跑(分支收尾决策)。
+
+**TS 面(六臂全过闸,n=3 场景):**
+
+| 臂 | similarity | 相对 full |
+|---|---|---|
+| full | **0.86** | — |
+| hybrid_recover | **0.80** | −7%(近 full) |
+| hybrid_repair | 0.69 | −20% |
+| c2kv_recover | 0.39 | −55%(**较 c2kv +84% 救回 —— TS 上 recover 救援远大于 τ² 的 0**) |
+| c2kv_repair | 0.30 | −65% |
+| c2kv | 0.21 | −75%(TS 对压缩最敏感) |
+
+TS 与 τ² 同向但幅度放大:hybrid+步级修复把 75% 的压缩损失修到仅剩 7%;c2kv 基座上 recover 救援 0.21→0.39(τ² 上 0.18→0.18)—— 修复收益取决于损伤分布的机制预测得到跨面印证。
 
 **本轮基础设施定因(写入迁移史)**:四块 24/25 的"块尾杀手"最终定因为 SGLang c2kv 池 LRU 驱逐(4437-token 默认池;400 C2KV cache miss;任务 49 五死于 ~600s 同一时刻)—— proxy 修复(检测→重 extract→重试)+ 池扩容(--c2kv-pool-fraction 0.06)双保护后,hy3_rec_b 成为首个 25/25 全过的 b 型块,任务 49 首次存活。4 项单任务补跑(c2kv/49、c2kv_rec/24、c2kv_rec/49、hy3_rec/24)由 sg_makeup 自动执行,各自重启服务器取双保护。|
 
@@ -356,3 +382,33 @@ fusion 7.5-158、2/10 解码分叉）、B13 过时标注 ✓、B14 harness gist 
   bx_*（v2 四臂跑）、`~/bench_logs/proxy_task_bx_*.jsonl`（含
   cache/logical/prompt/system_len 记账列与漂移/recover 列）、
   `combo_analysis_v2.json`（机制面重算输出）
+
+
+## 6. 分支收尾(2026-09-03,task/bench-recover close)
+
+**最终三面全表**(完整 json:`~/bench_results/sg_matrix.json`;收割器
+`benchmarks/sg_harvest.py` 一键复算):
+
+| 面 | full | c2kv | c2kv_rec | hy3_rec | c2kv_rp | hy3_rp |
+|---|---|---|---|---|---|---|
+| τ² reward(n=50) | 0.24 | 0.18 | 0.18 | **0.34** | 0.14 | **0.36** |
+| TS sim(n=3) | **0.86** | 0.21 | 0.39 | **0.80** | 0.30 | 0.69 |
+| BFCL acc | 7.3% | 7.3% | 7.3% | 7.3% | (冗余未跑) | (冗余未跑) |
+
+**成本列**(proxy 记账,τ² 全程):请求 wall p50 —— full 5.4s / c2kv 6.5s /
+hy3_rec 7.0s / hy3_rp 9.2s;压缩比(logical/gist)7.78-7.83× 均匀(分母口径
+见 §5.5 的 B1 遗留声明)。
+
+**三问终答(v2,SGLang 后端,全部终态硬闸过):**
+1. **能不能叠加**:能,且是乘性而非加性 —— hybrid 尾 raw + 任一步级修复
+   ≈ 纯 c2kv 的 2 倍(τ² 0.36-0.34 vs 0.18;TS 0.80 vs 0.21)。
+2. **修哪块**:增益来源是尾部 raw KV 本身(hybrid 基座贡献 >> 修复形式);
+   repair 与 recover 两形态等效(τ² 0.36 vs 0.34);corr@first 在纯 c2kv
+   基座上无增益(0.14 < 0.18)。
+3. **谁帕累托**:hybrid_recover(TS 最优 0.80、τ² 次优 0.34、成本 p50 7.0s)
+   与 hybrid_repair(τ² 最优 0.36 零 infra、TS 0.69)并列,按面取舍。
+
+**分支关闭清单**:代码(全部修复+补丁+收割器,43 CPU 单测)在
+task/bench-recover;服务器已清场(我们全部 NPU 进程已终止,雨晗的未动);
+`~/bench_results/sg_matrix.json` 为最终数字源;BFCL rp×2 臂因四臂同值冗余
+未跑;z4 任务仍在 delayed/ 由其所有者决定。
