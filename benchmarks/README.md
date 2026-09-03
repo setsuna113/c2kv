@@ -101,7 +101,8 @@ port layout is baked into the adapters:
 #    in a 2-hour window on the July-era c2kv-v0.5.10 base (pure CUDA) while
 #    the NPU-ready line existed on another branch; on the right branch plus
 #    one compat port (split_qkv import guard) it serves cleanly.
-#    Launcher (dev3 :35000, 0.28 mem / 16k ctx / no cuda-graph):
+#    Launcher (dev3 :35000, mem 0.20 / c2kv-pool 0.06 / 16k ctx / no cuda-graph,
+#    validated 2026-09-03 on the b0817204 tree):
 bash benchmarks/ops/launch_sgl1088.sh
 
 # 2. start the arm proxy (one per arm; ratio comes from the arm registry)

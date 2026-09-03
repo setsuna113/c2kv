@@ -1049,6 +1049,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
         row.update({k: counts.get(k) for k in
                     ("doc_packing", "n_docs", "dropped_docs", "repair_frame")
                     if k in counts})
+        if counts.get("textarm") is not None:
+            row["textarm"] = counts["textarm"]
         # backend cost block (hfserver: cache/logical/prompt/system_len;
         # sglang: kv_resident/kv_peak/kv_pool) + repair columns
         cost = (normalized or {}).get("cost") or {}
@@ -1068,7 +1070,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--upstream", required=True,
                         help="backend base URL, e.g. http://127.0.0.1:34000")
-    parser.add_argument("--backend", default="hfserver",
+    parser.add_argument("--backend", default="sglang",
                         choices=["hfserver", "sglang"])
     parser.add_argument("--arm", required=True)
     parser.add_argument("--port", type=int, required=True)
