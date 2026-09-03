@@ -5,6 +5,11 @@
 > train/serve projection switch, explicit repair placement and the
 > full-context repair endpoint. Deploy that branch; keep this file only to
 > reproduce pre-2026-09 runs. See docs/c2kv_semantics.md.
+>
+> CURRENT REGIME (2026-09-03): the launcher (benchmarks/ops/launch_sgl1088.sh)
+> serves the b0817204 codeload extract + the detokenizer kv_runtime_stats fix
+> 718a654e as a working-tree patch; the ~/sgl-22fbf3146 tree below is the
+> PRE-2026-09 deployment, kept for history only.
 
 The serving tree lives at `~/sgl-22fbf3146/` on the NPU server (codeload
 tarball of `setsuna113/kvoffload-sglang-c2kv@22fbf3146`, github.com main

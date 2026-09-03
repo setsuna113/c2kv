@@ -72,6 +72,7 @@ from urllib.error import HTTPError, URLError
 _OPENER = urlrequest.build_opener(urlrequest.ProxyHandler({}))
 
 import repair_policy
+import textarms
 from arms import Arm, get_arm  # type: ignore
 from backends import BackendError, get_backend  # type: ignore
 
@@ -684,11 +685,14 @@ def _strip_c2kv_fields(message: Dict[str, Any]) -> Dict[str, Any]:
     return {k: v for k, v in message.items() if not str(k).startswith("c2kv_")}
 
 
-def _textarm_compress(payload: Dict[str, Any]) -> str:
+def _textarm_compress(payload: Dict[str, Any], meter=None) -> str:
     """One compressor call for a text-level baseline arm.  Validates the
     finish reason and non-empty content — HTTP-200-with-error-body and
     abort finishes are FAILURES (TextarmCompressorError), never empty
-    summaries that would get cached for the rest of the conversation."""
+    summaries that would get cached for the rest of the conversation.
+    "length" is a NORMAL finish: the HiAgent summarizer decodes with
+    max_tokens~100 and works BY truncation.  ``meter`` (optional) receives
+    the response usage block for cost accounting."""
     import textarms
 
     data = _post_json("/v1/chat/completions", payload, 600)
@@ -698,7 +702,9 @@ def _textarm_compress(payload: Dict[str, Any]) -> str:
         content = (choice.get("message") or {}).get("content") or ""
     except (AttributeError, IndexError):
         raise textarms.TextarmCompressorError(f"bad compressor response: {data!r:.400}")
-    if finish != "stop" or not str(content).strip():
+    if meter is not None:
+        meter(data.get("usage") or {})
+    if finish not in ("stop", "length") or not str(content).strip():
         raise textarms.TextarmCompressorError(
             f"compressor call failed: finish_reason={finish!r} "
             f"content_len={len(str(content))}")
@@ -710,19 +716,36 @@ def _apply_text_arm(payload: Dict[str, Any], arm, conv: str
     """Rewrite history per the arm's text policy (textarms.py) BEFORE
     assembly; the arm is full-mode downstream.  Compressor calls go
     straight to the upstream endpoint (no arm semantics, no recursion
-    through the chat handler)."""
+    through the chat handler).  Compressor tokens/wall-time accumulate
+    into stats["compressor_usage"] (the fairness ruling: text baselines'
+    extra LLM calls must appear in the cost columns)."""
     import textarms
 
     messages = payload.get("messages") or []
     model = payload.get("model") or "c2kv-agent"
+    usage_acc = {"calls": 0, "prompt_tokens": 0,
+                 "completion_tokens": 0, "wall_sec": 0.0}
+
+    def _meter(u: Dict[str, Any]) -> None:
+        usage_acc["prompt_tokens"] += int(u.get("prompt_tokens") or 0)
+        usage_acc["completion_tokens"] += int(u.get("completion_tokens") or 0)
+
+    def compress(pl: Dict[str, Any]) -> str:
+        t0 = time.perf_counter()
+        out = _textarm_compress(pl, meter=_meter)
+        usage_acc["calls"] += 1
+        usage_acc["wall_sec"] += time.perf_counter() - t0
+        return out
+
     if arm.text_policy == "hiagent":
         out, stats = textarms.hiagent_transform(
-            messages, _textarm_compress, _render_action_dialect, model=model)
+            messages, compress, _render_action_dialect, model=model)
     else:
         mode = "hist" if arm.text_policy == "acon_hist" else "obs"
         out, stats = textarms.acon_transform(
-            messages, _textarm_compress, _render_action_dialect, conv,
+            messages, compress, _render_action_dialect, conv,
             mode=mode, model=model)
+    stats["compressor_usage"] = usage_acc
     staged = dict(payload)
     staged["messages"] = out
     return staged, stats
@@ -1114,6 +1137,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
 def main(argv=None):
     global ARM, BACKEND, UPSTREAM, REQUEST_LOG_PATH
     global DOC_PACKING, MAX_DOC_LENGTH, MAX_DOC_NUM
+    textarms.reset_state()  # fresh caches/state per proxy process
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--upstream", required=True,
                         help="backend base URL, e.g. http://127.0.0.1:34000")

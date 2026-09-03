@@ -16,9 +16,14 @@ bench 栈迁移 SGLang + hybrid×D 端到端矩阵:hybrid+步级修复 ≈2× �
    (推翻"five compat patches"旧叙事)、hf_server 退役为对照后端。
 2. **端到端六臂 × 三 benchmark 矩阵**(全部终态硬闸过):τ²/TS/BFCL
    三面全表 + 成本列,收割器一键复算。
-3. **头条科学结论**:hybrid 尾 raw KV + 步级 oracle 修复 ≈ 纯 c2kv 的
-   2 倍(τ² 0.36 vs 0.18;TS 0.80 vs 0.21);增益来源是尾部 raw,
-   repair 与 recover 等效;BFCL 面被格式地板全主导(四臂同 7.3%)。
+3. **头条科学结论(2026-09-03 审计更正后)**:hybrid 尾 raw KV + 步级
+   oracle 修复 ≈ 纯 c2kv 的 2 倍(τ² 0.36 vs 0.18 —— **τ² 全列
+   CONTAMINATED,官方口径重算 hy3_rec .370 > hy3_rp .360,排序反转见
+   hybrid_x_d.md §5.4/§6**;TS 0.80 vs 0.21 —— **TS 产自未 vendor 的
+   roles patch 且 user sim 同走压缩臂(联合退化),数字需重跑方可用**);
+   增益来源是尾部 raw;BFCL 面已整体 **VOID** —— 共享 handler 覆盖写 +
+   82 评分时点分母,快照重评 2.5-32% 发散,per-arm 溯源丢失(详见
+   hybrid_x_d.md §5.4);干净数字待 matrix2 per-arm handler 重跑。
 4. **工程修复链**(每一条都有根因取证):A/B 评审修复、round-3 错误路径
    kwarg、terminal_check infrastructure_error 硬化、c2kv 池 LRU 驱逐
    双保护(re-extract+retry + 池扩容)、repair 双层 bug(服务器 split_qkv

@@ -187,6 +187,35 @@ def main(argv=None):
     summary["benchmark"] = args.benchmark
     summary["backend"] = args.backend
     summary["model"] = args.model
+    if args.arm in ("hiagent", "acon_hist", "acon_obs"):
+        # text-arm consumers: degeneration and compressor cost surfaced at
+        # the RUN level (the per-request stats live in the request log)
+        ta_rows = []
+        try:
+            with open(request_log, encoding="utf-8") as handle:
+                for line in handle:
+                    if line.strip():
+                        row = json.loads(line).get("textarm")
+                        if isinstance(row, dict):
+                            ta_rows.append(row)
+        except OSError:
+            pass
+        summary["textarm_summary"] = {
+            "textarm_requests": len(ta_rows),
+            "degenerate_requests": sum(1 for t in ta_rows if t.get("degenerate")),
+            "compressor_calls": sum(int(t.get("n_compressor_calls") or 0)
+                                    for t in ta_rows),
+            "compressor_prompt_tokens": sum(
+                int((t.get("compressor_usage") or {}).get("prompt_tokens") or 0)
+                for t in ta_rows),
+            "compressor_completion_tokens": sum(
+                int((t.get("compressor_usage") or {}).get("completion_tokens") or 0)
+                for t in ta_rows),
+        }
+        if any(t.get("degenerate") for t in ta_rows):
+            print(f"WARNING: arm {args.arm!r} ran DEGENERATE (no Subgoal "
+                  f"segments) on {sum(1 for t in ta_rows if t.get('degenerate'))}"
+                  f"/{len(ta_rows)} requests — effectively a full arm")
     summary["doc_packing"] = args.doc_packing
     summary["max_doc_length"] = args.max_doc_length
     summary["max_doc_num"] = args.max_doc_num

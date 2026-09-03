@@ -436,22 +436,39 @@ def acon_transform(messages: List[Dict[str, Any]], compress: Compress,
         stats["prefix_est_tokens"] = prefix_chars // 4
 
         if prefix and prefix_chars > ACON_HISTORY_THRESHOLD_CHARS:
-            prefix_digest = _sha(json.dumps(
-                [{"role": m.get("role"), "content": _content_of(m)}
-                 for m in prefix], ensure_ascii=False, sort_keys=True))
+            # TRUE rolling state (audit M2 fix): _ACON_STATE[conv] =
+            # (covered_until, summary) where covered_until is an index into
+            # the append-only nonsystem list.  Each turn the compressor sees
+            # prev_summary + ONLY the messages past the covered point — the
+            # original ACON semantics (session shrinks after compression;
+            # the threshold re-triggers on new content alone).  The old
+            # digest-keyed version re-rendered the whole prefix every turn:
+            # O(T^2) calls and a double-stuffed prompt that hit 16k ctx.
             with _LOCK:
-                covered = _ACON_STATE.get(conv)
-            prev_summary = covered[1] if covered else "(none)"
-            history_text = "\n".join(_render_line(m, action_dialect)
-                                     for m in prefix)
-            summary = _summarize(
-                _sha(f"acon-hist|{conv}|{prefix_digest}"),
-                "acon", model, ACON_SYSTEM,
-                ACON_HISTORY_PROMPT.format(task=task, prev_summary=prev_summary,
-                                           history=history_text),
-                compress, stats)
-            with _LOCK:
-                _ACON_STATE[conv] = (prefix_digest, summary)
+                state = _ACON_STATE.get(conv)
+            if state is None or state[0] > len(prefix):
+                # fresh conversation, or the benchmark rewrote history
+                covered_until, prev_summary = 0, "(none)"
+            else:
+                covered_until, prev_summary = state
+            summary = None
+            if covered_until == len(prefix):
+                # nothing new since the last compression: reuse the summary
+                with _LOCK:
+                    summary = prev_summary if prev_summary != "(none)" else None
+            if summary is None:
+                new_msgs = nonsystem[covered_until:len(prefix)]
+                history_text = "\n".join(_render_line(m, action_dialect)
+                                         for m in new_msgs)
+                summary = _summarize(
+                    _sha(f"acon-hist|{conv}|{covered_until}|{len(prefix)}"),
+                    "acon", model, ACON_SYSTEM,
+                    ACON_HISTORY_PROMPT.format(
+                        task=task, prev_summary=prev_summary,
+                        history=history_text),
+                    compress, stats)
+                with _LOCK:
+                    _ACON_STATE[conv] = (len(prefix), summary)
             block = (f"\n<HISTORY_SUMMARY>\n{summary}\n</HISTORY_SUMMARY>")
             # the summary REPLACES the prefix: keep system messages and the
             # first user prompt (the task instruction, which lives in the

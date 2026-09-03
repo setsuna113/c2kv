@@ -245,6 +245,89 @@ def test_compressor_decode_params():
     assert ac["chat_template_kwargs"] == {"enable_thinking": False}
 
 
+def test_acon_rolling_only_new_messages():
+    """Audit M2 fix: the second turn's compressor input must contain ONLY
+    the messages past the covered point (not the whole prefix again), with
+    prev_summary carried — O(new content), never O(T^2)."""
+    _reset()
+    prompts = []
+
+    def spy(payload):
+        prompts.append(payload["messages"][-1]["content"])
+        return f"SUMMARY({len(prompts)})"
+
+    def msgs(obs_mark):
+        m = [
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "long task"},
+        ]
+        for i in range(20):
+            m += [
+                {"role": "assistant", "content": "",
+                 "tool_calls": [{"id": f"a{i}"}]},
+                {"role": "tool", "content": f"{obs_mark}-{i}-" + "z" * 900},
+            ]
+        return m
+
+    _, s1 = textarms.acon_transform(msgs("OLDMARK"), spy, _action_dialect,
+                                    "convRoll", mode="hist")
+    assert s1["n_compressor_calls"] == 1
+    # first cover: the whole prefix (the last action/observation pair is the
+    # preserved TAIL, so OLDMARK-19 is deliberately NOT in the prompt)
+    assert "OLDMARK-0-" in prompts[0] and "OLDMARK-18-" in prompts[0]
+    assert "OLDMARK-19-" not in prompts[0]
+
+    # turn 2: two NEW messages appended; the pair that moves out of the
+    # preserved tail into the prefix (OLDMARK-19) is the new coverage —
+    # NEWMARK itself is still the preserved tail this turn
+    m2 = msgs("OLDMARK") + [
+        {"role": "assistant", "content": "", "tool_calls": [{"id": "n0"}]},
+        {"role": "tool", "content": "NEWMARK-extra-" + "y" * 900},
+    ]
+    _, s2 = textarms.acon_transform(m2, spy, _action_dialect,
+                                    "convRoll", mode="hist")
+    assert s2["n_compressor_calls"] == 1  # one call for the NEW coverage only
+    assert "OLDMARK-19-" in prompts[1]
+    # the turn-2 prompt is incremental: only the newly-covered old pair,
+    # never the whole prefix again
+    old_hits = sum(1 for i in range(19) if f"OLDMARK-{i}-" in prompts[1])
+    assert old_hits == 0, f"rolling prompt re-rendered {old_hits} old msgs"
+    assert "SUMMARY(" in prompts[1]  # prev_summary carried
+
+    # identical history again: covered == prefix -> pure reuse, ZERO calls
+    _, s3 = textarms.acon_transform(m2, spy, _action_dialect,
+                                    "convRoll", mode="hist")
+    assert s3["n_compressor_calls"] == 0
+
+
+def test_textarm_compress_finish_semantics():
+    """Audit BUG1 fix: finish_reason=length (the HiAgent 100-token
+    truncation regime) is a NORMAL completion; abort / missing finish /
+    empty content are failures.  Self-contained (no pytest fixtures)."""
+    import proxy
+
+    orig = proxy._post_json
+
+    def resp(finish, content):
+        return {"choices": [{"finish_reason": finish,
+                             "message": {"content": content}}]}
+
+    try:
+        proxy._post_json = lambda path, payload, timeout: resp("length", "truncated but usable")
+        assert proxy._textarm_compress({"model": "m"}) == "truncated but usable"
+        proxy._post_json = lambda path, payload, timeout: resp("stop", "ok")
+        assert proxy._textarm_compress({"model": "m"}) == "ok"
+        for bad in (resp("abort", "x"), resp(None, "x"), resp("stop", "   ")):
+            proxy._post_json = lambda path, payload, timeout, r=bad: r
+            try:
+                proxy._textarm_compress({"model": "m"})
+                raise AssertionError(f"must raise on {bad}")
+            except textarms.TextarmCompressorError:
+                pass
+    finally:
+        proxy._post_json = orig
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_"):

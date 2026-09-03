@@ -36,8 +36,12 @@ SGLang (kvoffload-sglang-c2kv, --enable-c2kv) serving the gist checkpoint
 
 Key properties:
 
-* Benchmarks run **unmodified** — they only point `base_url` at the proxy.
-  No forked tau2/bfcl/toolsandbox code to maintain.
+* Benchmarks run **unmodified** at the protocol level — they only point
+  `base_url` at the proxy.  One vendored patch exists and is REQUIRED for
+  ToolSandbox (`toolsandbox_patches/0001`: route the agent through
+  `OPENAI_BASE_URL` and the user simulator through its own
+  `TOOLSANDBOX_USER_BASE_URL` — upstream hard-codes api.openai.com, so a
+  vanilla clone produces no TS numbers).  tau2/BFCL run unpatched.
 * The arm semantics live in one place (`proxy.py` + `arms.py`) and mirror
   `agent/api/eval_agent_history_sglang_api.py` (same `/v1/c2kv/extract` +
   `c2kv_key_hash` protocol, same hybrid tail rule).

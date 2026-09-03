@@ -77,15 +77,14 @@ def collect(out_dir: Path) -> Dict[str, Any]:
     from metrics import aggregate  # noqa: E402
 
     rows: List[Dict[str, Any]] = []
+    crashed: List[str] = []
     for path in summaries:
         data = json.loads(path.read_text(encoding="utf-8"))
         for scenario in data.get("per_scenario_results") or []:
             if scenario.get("traceback"):
-                rows.append({
-                    "task_id": scenario.get("name"),
-                    "semantic_score": None,
-                    "error": str(scenario.get("exception_type") or "traceback"),
-                })
+                # a crashed scenario FAILS the run — _mean used to skip
+                # these None rows and the upstream recorded a silent 0
+                crashed.append(str(scenario.get("name")))
                 continue
             rows.append({
                 "task_id": scenario.get("name"),
@@ -97,6 +96,10 @@ def collect(out_dir: Path) -> Dict[str, Any]:
                 "turn_count": scenario.get("turn_count"),
                 "protocol_legal": None,  # TS has no tool-call legality metric
             })
+    if crashed:
+        raise SystemExit(
+            f"FATAL: ts terminal-state check failed: {len(crashed)} scenario(s) "
+            f"crashed (traceback in result_summary): {', '.join(crashed[:10])}")
     return aggregate(rows, cluster_key="task_id")
 
 

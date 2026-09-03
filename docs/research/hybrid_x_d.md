@@ -99,7 +99,7 @@ proxy 臂任务静默失败。修复：`16#`、cleanup 守卫、代理健康检�
 | benchmark | full | c2kv 8× | hybrid k1 | k3 | k5 | 备注 |
 |---|---|---|---|---|---|---|
 | τ² (reward) | 0.28 | 0.16 | 0.26 | **0.36** | 0.30 | 干净阶梯：hy3 超 full +8pp、hy5 +2pp；c2kv −12pp（动作擦除 bug 修复前后终值同为 0.16，τ² 上该 bug 无实质影响） |
-| BFCL (acc) | **3.0%**（6/200；82/200 记录生成，118 decode 失败） | hr2（地板） | — | — | — | full 臂本身也只记录 82/200——BFCL 在该模型族是格式地板，修复臂无意义，整行只作下限参考 |
+| BFCL (acc) | **VOID**(见 §5.4 更正:共享 handler 覆盖写+82 评分时点分母,快照重评 2.5-32% 发散,per-arm 溯源丢失;旧"82/200 生成"与"7.3%"记录一并作废) | hr2（地板） | — | — | — | 干净数字待 matrix2 重跑(per-arm handler);val20 方言修复验证 = preliminary, n=20: acc 30.0%、call_rate 75.2%(修复前 ~55%) |
 | TS (sim, n=3) | 0.320 | 0.215 | 0.216 | **0.376** | 0.319 | 阶梯干净复现：k5≈full、k3 超 full；受损场景 3_distraction：full 0.700 / c2kv 0.377 / k3 0.606 / k5 0.695 |
 
 **成本列（proxy 记账，τ² 全 50 任务/TS 3 场景；full 臂直连无 proxy 日志，成本
@@ -306,7 +306,7 @@ re_diverged。arms：`c2kv_recover` / `hybrid_recover`；旧任务级 oracle
 |---|---|---|---|
 | τ² | full | **0.26**（13/50 perfect；与 v1 full_r2 逐位复现） | 50/50 ✓ |
 | τ² | c2kv | 0.15-0.18（终值见 sims） | 50/50 ✓ |
-| BFCL | full | **6/200 = 3.0%**(2026-09-03 审计更正:归档结果文件实为 200 行全带生成,九份 score 均报 total_count=82——82 是评分时点的 `len(model_result)`,非生成缺失;"scorer 丢弃 118 例解码失败"的机制陈述撤销;官方分母 200 ⇒ 3.0%,prose-vs-detector 拆解待 `<tool_call>` 扫描定案) | 200/200 生成 ✓ |
+| BFCL | full | **列作废(VOID,2026-09-03 重评定案)**:全部臂共用 handler c2kv-hf 串行覆盖写同一 result 文件,归档为不同时刻快照;82 分母是评分时点产物(118 行从未被评分);对四份 200 行快照重评得 2.5%-32% 发散值(full 期快照 27.5/32%、c2kv 期 2.5/3.0%)——**per-arm 溯源已丢失,任何"X/200"都不再可归因**。干净数字由 matrix2 重跑产出(per-arm handler c2kv-\<arm\>) | 200/200 生成 ✓(混合) |
 
 **SGLang 重基线（O-1b，两 regime）：**
 
@@ -321,16 +321,13 @@ re_diverged。arms：`c2kv_recover` / `hybrid_recover`；旧任务级 oracle
 | τ² | **hybrid_repair(终)** | **0.36**(18 perfect,**零 infra,十臂唯一全净 50/50**) | 块 a=0.28 + 块 b=**0.44**(25/25 一次过,21 user_stop+4 max_steps)。**2026-09-03 审计更正:按 tau2 官方口径(非 AGENT/USER_STOP 终止即 reward=0、infra 出分母)重算为 full .240 / c2kv 9/49=.184 / c2kv_rec 9/48=.188 / hy3_rec 17/46=.370 / c2kv_rp .140 / hy3_rp .360 ⇒ 排序反转为 hy3_rec .370 > hy3_rp .360,原"终局王座 hy3_rp 0.36 > hy3_rec 0.34"撤销**;且 c2kv_rp 块 a 17/25 max_steps vs hy3_rp 块 b 仅 4/25——这些任务在 evaluator 之前就已被终止规则清零(user simulator 即同一 4B 模型,###STOP### 按键方与被测方同源);50 题二项 SE≈6.5pp,.34 vs .36 本不可区分。τ² airline 31.3% 在 ckpt-1088 训练池 ⇒ **本列全部 CONTAMINATED,不可作为 benchmark 结果发表** |
 
 
-**BFCL 面(四臂过闸 200/200 生成)——2026-09-03 审计更正后的口径:**
+**BFCL 面(四臂过闸 200/200 生成)——2026-09-03 重评定案:整面 VOID:**
 
-| 臂 | accuracy | 官方口径 |
+| 臂 | accuracy | 状态 |
 |---|---|---|
-| full | 6/200 = **3.0%** | 200(官方分母) |
-| c2kv | 6/200 = 3.0% | 200 |
-| c2kv_recover | 6/200 = 3.0% | 200 |
-| hybrid_recover | 6/200 = 3.0% | 200 |
+| 全部 | — | **VOID:per-arm 溯源丢失**(共享 handler c2kv-hf 覆盖写、四快照重评 2.5-32% 发散;82 系评分时点分母) |
 
-原表 6/82=7.3% 系评分时点分母(九份 score 全报 total_count=82,但归档结果文件均为 200 行全带生成——82 另有来源,整行重推)。**"四臂完全同值"是构造性的**:turn-0 step-0 时 `_history_cutoff` 返回 0,所有臂发出的第一个请求字节相同——同值本身未构成可比性证据;~45% 步骤输出散文代工具调用的现象仍成立,但其归因(raw path 方言:tool 消息未转 user 裸消息、无 DEFAULT_SYSTEM_PROMPT——arm-invariant,已在本分支修复)优先于"格式地板是模型×任务属性"的旧结论;prose-vs-detector 拆解待 `<tool_call>` 扫描定案。与 hf_server 时代 B2 取证的 6/82 同值现象跨栈一致,但分母与机制陈述均以本更正为准。
+原"四臂同 6/82=7.3%"与后续"6/200=3.0%"更正一并作废——两者读的都是臂混合行。"四臂同值"本身为 turn-0 构造性现象(所有臂首请求字节相同),从未构成可比性证据。~45% 步骤散文代工具调用的现象由 val20 重跑证实与 raw path 方言直接相关(修复后 call_rate 75.2%,preliminary n=20,acc 30.0%)。干净 per-arm 数字由 matrix2 重跑产出(handler c2kv-\<dashed-arm\>)。
 
 **TS 面(六臂全过闸,n=3 场景)——2026-09-03 审计标注:**
 
@@ -394,7 +391,7 @@ fusion 7.5-158、2/10 解码分叉）、B13 过时标注 ✓、B14 harness gist 
 | τ² 官方口径 reward | .240 | 9/49=.184 | 9/48=.188 | 17/46=**.370** | .140 | .360 |
 | τ² 原始均值(n=50) | 0.24 | 0.18 | 0.18 | 0.34 | 0.14 | 0.36 |
 | TS sim(n=3)† | **0.86** | 0.21 | 0.39 | **0.80** | 0.30 | 0.69 |
-| BFCL acc(官方分母 200) | 3.0% | 3.0% | 3.0% | 3.0% | (冗余未跑) | (冗余未跑) |
+| BFCL acc | **VOID**(共享 handler 覆盖写+82 评分时点分母,快照重评 2.5-32% 发散,per-arm 溯源丢失;待 matrix2 重跑) | VOID | VOID | VOID | (冗余未跑) | (冗余未跑) |
 
 **审计更正与标注(2026-09-03,全部两票确认)**:
 - τ² 原始均值受终止规则支配(非 AGENT/USER_STOP 即 reward=0;user sim 与被测同模型),官方口径重算后 **hy3_rec .370 > hy3_rp .360,三问终答第 2/3 问的排序结论以官方口径为准**;τ² airline 31.3% 在 ckpt-1088 训练池 ⇒ **τ² 列全 CONTAMINATED,不可发表**;50 题二项 SE≈6.5pp。

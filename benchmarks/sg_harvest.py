@@ -128,10 +128,67 @@ def costs(arm: str) -> dict | None:
     return out
 
 
+MATRIX2_ARMS = ["full", "hiagent", "acon_hist", "acon_obs"]
+MATRIX2 = HOME / "bsa_results/matrix2"
+
+
+def matrix2_harvest(json_out: str | None = None) -> dict:
+    """Harvest the post-audit-fix matrix2 chain: summary_*.json per run +
+    BFCL score dirs (handler c2kv-<dashed arm>) + textarm consumers
+    (degenerate rate, compressor usage) from the request logs."""
+    report: dict = {}
+    print("| benchmark | arm | n | metric | textarm note |")
+    print("|---|---|---|---|---|")
+    for arm in MATRIX2_ARMS:
+        dashed = arm.replace("_", "-")
+        for bench, prefix in (("tau2", f"tau2_{arm}_CONTAMINATED"),
+                              ("ts", f"ts_{arm}")):
+            summary = MATRIX2 / prefix / f"summary_{arm}.json"
+            if not summary.exists():
+                continue
+            d = json.loads(summary.read_text())
+            ta = d.get("textarm_summary") or {}
+            note = ""
+            if ta:
+                note = (f"degenerate {ta.get('degenerate_requests')}/"
+                        f"{ta.get('textarm_requests')}; compressor "
+                        f"{ta.get('compressor_calls')} calls "
+                        f"({ta.get('compressor_prompt_tokens')}+"
+                        f"{ta.get('compressor_completion_tokens')} tok)")
+            metric = (f"reward {d.get('semantic_score')} ci{d.get('semantic_score_ci95')}"
+                      if bench == "tau2" else f"sim {d.get('semantic_score')}")
+            label = "τ²†CONTAMINATED" if bench == "tau2" else "TS"
+            print(f"| {label} | {arm} | {d.get('n')} | {metric} | {note} |")
+            report.setdefault(bench, {})[arm] = d
+        score_dir = HOME / ("benchmarks/gorilla/berkeley-function-call-leaderboard"
+                            f"/result/c2kv-{dashed}/score/multi_turn")
+        if score_dir.exists():
+            for f in sorted(score_dir.glob("*score*.json")):
+                for line in f.read_text().splitlines():
+                    line = line.strip()
+                    if not line:
+                        continue
+                    d = json.loads(line)
+                    if d.get("total_count") is not None:
+                        print(f"| BFCL | {arm} | {d['total_count']} | "
+                              f"acc {round(d['accuracy'], 4)} "
+                              f"({d['correct_count']}/{d['total_count']}) | |")
+                        report.setdefault("bfcl", {})[arm] = d
+    if json_out:
+        Path(json_out).write_text(json.dumps(report, indent=2, ensure_ascii=False))
+    return report
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--json-out", default=None)
+    parser.add_argument("--matrix2", action="store_true",
+                        help="harvest the post-audit matrix2 chain instead "
+                             "of the Sep-2 sg matrix")
     args = parser.parse_args()
+    if args.matrix2:
+        matrix2_harvest(args.json_out)
+        return
     report = {"tau2": {}, "ts": {}, "bfcl": {}, "costs": {}}
     print("| benchmark | arm | n | metric | infra/errors | note |")
     print("|---|---|---|---|---|---|")
