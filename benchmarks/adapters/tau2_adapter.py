@@ -18,6 +18,7 @@ Run recipe (see benchmarks/README.md):
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -26,11 +27,11 @@ from typing import Any, Dict, List, Optional
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from metrics import aggregate, protocol_columns_for_turn  # noqa: E402
 
-TAU2_DIR = Path.home() / "benchmarks" / "tau2"
+TAU2_DIR = Path(os.environ.get("TAU2_DIR") or Path.home() / "benchmarks" / "tau2")
 
 
 def run(
-    benchmark_dir: Path,
+    benchmark_dir: Optional[Path],
     base_url: str,
     user_base_url: str,
     out_dir: Path,
@@ -38,17 +39,20 @@ def run(
     num_workers: int = 4,
     max_tasks: Optional[int] = None,
     run_name: str = "c2kv_run",
+    model: str = "c2kv-agent",
 ) -> Dict[str, Any]:
     """Run tau2 with the agent LLM behind the arm proxy.
 
     The user simulator points at a separate full-mode endpoint (same served
     model, no compression) so only the agent's context is ever compressed.
+    ``benchmark_dir`` (or $TAU2_DIR, or ~/benchmarks/tau2) is the tau2
+    checkout that provides both the CLI and the tool registry.
     Official semantics: ``--save-to NAME`` writes
-    ``<TAU2_DIR>/data/simulations/NAME/results.json``; rewards are computed
+    ``<tau2_dir>/data/simulations/NAME/results.json``; rewards are computed
     by ``tau2 evaluate-trajs`` into ``updated_results.json``, which collect
     then reads.
     """
-    import os
+    tau2_dir = Path(benchmark_dir) if benchmark_dir else TAU2_DIR
 
     agent_args = json.dumps(
         {"api_base": base_url.rstrip("/") + "/v1", "api_key": "EMPTY", "temperature": 0.0}
@@ -62,21 +66,21 @@ def run(
         sys.executable, "-m", "tau2.cli", "run",
         "--domain", task_set.split("_")[0],
         "--task-set-name", task_set,
-        "--agent-llm", "openai/c2kv-agent",
+        "--agent-llm", f"openai/{model}",
         "--agent-llm-args", agent_args,
-        "--user-llm", "openai/c2kv-agent",
+        "--user-llm", f"openai/{model}",
         "--user-llm-args", user_args,
         "--max-concurrency", str(num_workers),
         "--save-to", run_name,
     ]
     if max_tasks:
         cmd += ["--num-tasks", str(max_tasks)]
-    subprocess.run(cmd, cwd=TAU2_DIR, env=env, check=True)
-    sims = TAU2_DIR / "data" / "simulations" / run_name
+    subprocess.run(cmd, cwd=tau2_dir, env=env, check=True)
+    sims = tau2_dir / "data" / "simulations" / run_name
     subprocess.run(
         [sys.executable, "-m", "tau2.cli", "evaluate-trajs", "-o", str(sims),
          str(sims / "results.json")],
-        cwd=TAU2_DIR, env=env, check=True,
+        cwd=tau2_dir, env=env, check=True,
     )
     updated = sims / "updated_results.json"
     if not updated.exists():
@@ -159,16 +163,18 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--benchmark-dir", type=Path, default=TAU2_DIR)
+    parser.add_argument("--benchmark-dir", type=Path, default=None)
     parser.add_argument("--base-url", required=True)
     parser.add_argument("--user-base-url", required=True)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--task-set", default="airline")
     parser.add_argument("--num-workers", type=int, default=4)
     parser.add_argument("--max-tasks", type=int)
+    parser.add_argument("--model", default="c2kv-agent")
     args = parser.parse_args()
     summary = run(
         args.benchmark_dir, args.base_url, args.user_base_url, args.out,
-        args.task_set, args.num_workers, args.max_tasks,
+        task_set=args.task_set, num_workers=args.num_workers,
+        max_tasks=args.max_tasks, model=args.model,
     )
     print(json.dumps(summary, indent=2))

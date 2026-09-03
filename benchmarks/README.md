@@ -67,21 +67,45 @@ message` reproduces the pre-2026-09 per-message format. Repair arms take an
 explicit placement (`append_keep_ledger` / `append_tail` / `in_place`) and
 extract the raw KV in full context (`repair_extract` messages form).
 
+## Pluggable contract (any endpoint, any model)
+
+The three benchmarks are wired to **any** OpenAI-compatible serving stack
+and **any** served model name — nothing about c2kv, the checkpoint, or the
+port layout is baked into the adapters:
+
+* `--upstream` (required) points at whatever serves `/v1/chat/completions`
+  (+ the `/v1/c2kv/*` endpoints when an arm needs them). No default on
+  purpose: a default once silently aimed sglang runs at the hf_server port.
+* `--model` (default `c2kv-agent`) is the served model name handed to the
+  tau2 agent/user LLMs and the BFCL handler. Rename the served model,
+  re-run, nothing else changes.
+* ToolSandbox selects its agent/user implementations by *role key*
+  (`--ts-agent` / `--ts-user`, default `GPT_4_o_2024_05_13` →
+  `openai_api_agent`/`openai_api_user`); the endpoint itself is pure
+  `OPENAI_BASE_URL`.
+* Benchmark checkout locations are overridable: `$TAU2_DIR`,
+  `$TS_DIR` (defaults `~/benchmarks/tau2`, `~/benchmarks/ToolSandbox`);
+  BFCL runs in-process from the caller's cwd (the gorilla checkout).
+* Extension seams, one file each: new serving stack → `backends/<name>.py`
+  (+ register in `backends/__init__.py`), never benchmark-side changes; new
+  compression arm → `arms.py` only; new benchmark → `adapters/<name>.py`
+  + one dispatch branch in `run.py`.
+
 ## Usage (on the server)
 
 ```bash
 # 1. serve the checkpoint. The DEFAULT backend is the SGLang c2kv fork
-#    (branch c2kv-sglang-bfcl @ 22fbf3146 + the in-repo deployment patches
+#    (branch task/c2kv-serve-align + the in-repo deployment patches
 #    benchmarks/backends/sglang_patches/). The old claim that the fork
 #    "does not run on this NPU stack" was WRONG: it was decided 2026-08-27
 #    in a 2-hour window on the July-era c2kv-v0.5.10 base (pure CUDA) while
 #    the NPU-ready line existed on another branch; on the right branch plus
 #    one compat port (split_qkv import guard) it serves cleanly.
 #    Launcher (dev3 :35000, 0.28 mem / 16k ctx / no cuda-graph):
-~/bench_logs/sgl_deploy/launch_sgl1088.sh
+bash benchmarks/ops/launch_sgl1088.sh
 
 # 2. start the arm proxy (one per arm; ratio comes from the arm registry)
-~/bench_logs/launch_sgl_proxy.sh c2kv 35100 35000 task_myrun
+bash benchmarks/ops/launch_sgl_proxy.sh c2kv 35100 35000 task_myrun
 
 # 3. run each benchmark against the proxy (adapters wrap the official CLIs)
 ~/envs/bench/bin/python benchmarks/run.py --benchmark tau2 --arm c2kv \

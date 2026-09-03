@@ -25,12 +25,14 @@ from typing import Any, Dict, List
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-TS_DIR = Path.home() / "benchmarks" / "ToolSandbox"
+TS_DIR = Path(os.environ.get("TS_DIR") or Path.home() / "benchmarks" / "ToolSandbox")
 AGENT = "GPT_4_o_2024_05_13"  # openai_api_agent/openai_api_user role keys
 
 
 def run(base_url: str, out_dir: Path, test_mode: bool = True,
-        agent: str = AGENT, user: str = AGENT, expected: int = None) -> Dict[str, Any]:
+        agent: str = AGENT, user: str = AGENT, expected: int = None,
+        benchmark_dir: Path = None) -> Dict[str, Any]:
+    ts_dir = Path(benchmark_dir) if benchmark_dir else TS_DIR
     out_dir.mkdir(parents=True, exist_ok=True)
     env = {
         **os.environ,
@@ -42,7 +44,7 @@ def run(base_url: str, out_dir: Path, test_mode: bool = True,
            "-o", str(out_dir)]
     if test_mode:
         cmd.append("-t")
-    completed = subprocess.run(cmd, cwd=TS_DIR, env=env)
+    completed = subprocess.run(cmd, cwd=ts_dir, env=env)
     if completed.returncode != 0:
         raise SystemExit(f"FATAL: tool_sandbox CLI exited {completed.returncode}")
     summary = collect(out_dir)
@@ -94,6 +96,13 @@ if __name__ == "__main__":
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--full", action="store_true",
                         help="run the full suite instead of test mode")
+    parser.add_argument("--agent", default=AGENT,
+                        help="agent role key (openai_api_agent config entry)")
+    parser.add_argument("--user", default=AGENT,
+                        help="user-simulator role key (openai_api_user config entry)")
+    parser.add_argument("--ts-dir", type=Path, default=None,
+                        help="ToolSandbox checkout (default $TS_DIR or ~/benchmarks/ToolSandbox)")
     args = parser.parse_args()
-    summary = run(args.base_url, args.out, test_mode=not args.full)
+    summary = run(args.base_url, args.out, test_mode=not args.full,
+                  agent=args.agent, user=args.user, benchmark_dir=args.ts_dir)
     print(json.dumps(summary, indent=2, ensure_ascii=False))

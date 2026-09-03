@@ -24,10 +24,11 @@ from typing import Any, Dict
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-MODEL_NAME = "c2kv-hf"
+MODEL_NAME = "c2kv-hf"  # BFCL handler key / result-dir name (stable layout)
+SERVED_MODEL = "c2kv-agent"  # default served model name at the endpoint
 
 
-def install_handler(base_url: str) -> None:
+def install_handler(base_url: str, model: str = SERVED_MODEL) -> None:
     import httpx
     from openai import OpenAI
     from bfcl_eval.constants.model_config import MODEL_CONFIG_MAPPING, ModelConfig
@@ -46,7 +47,7 @@ def install_handler(base_url: str) -> None:
         def _query_FC(self, inference_data: dict):
             kwargs = {
                 "messages": inference_data["message"],
-                "model": "c2kv-agent",
+                "model": model,
                 "temperature": self.temperature,
                 "store": False,
                 "max_completion_tokens": 4096,
@@ -62,7 +63,7 @@ def install_handler(base_url: str) -> None:
             return response, time.perf_counter() - t0
 
     MODEL_CONFIG_MAPPING[MODEL_NAME] = ModelConfig(
-        model_name="c2kv-agent",
+        model_name=model,
         display_name="c2kv-hf",
         url="",
         org="c2kv",
@@ -74,13 +75,14 @@ def install_handler(base_url: str) -> None:
 
 
 def run(base_url: str, categories: str = "multi_turn_base",
-        mode: str = "both", run_ids: str = "") -> Dict[str, Any]:
+        mode: str = "both", run_ids: str = "",
+        model: str = SERVED_MODEL) -> Dict[str, Any]:
     """Programmatic entry for benchmarks/run.py: register the handler and
     drive the official generate/evaluate CLI in-process.
 
     Terminal-state check (acceptance 1): every expected entry must have a
     result row — the run fails loudly instead of shrinking the denominator."""
-    install_handler(base_url)
+    install_handler(base_url, model=model)
     gen = ["generate", "--model", MODEL_NAME, "--test-category", categories]
     ev = ["evaluate", "--model", MODEL_NAME, "--test-category", categories]
     if run_ids:
@@ -113,8 +115,10 @@ def main(argv=None) -> None:
     parser.add_argument("--categories", default="multi_turn_base")
     parser.add_argument("--mode", choices=["generate", "evaluate", "both"], default="both")
     parser.add_argument("--run-ids", default="")
+    parser.add_argument("--model", default=SERVED_MODEL,
+                        help="served model name at the endpoint")
     args = parser.parse_args(argv)
-    install_handler(args.base_url)
+    install_handler(args.base_url, model=args.model)
     gen = ["generate", "--model", MODEL_NAME, "--test-category", args.categories]
     ev = ["evaluate", "--model", MODEL_NAME, "--test-category", args.categories]
     if args.run_ids:
