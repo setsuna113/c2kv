@@ -23,7 +23,7 @@ sys.path.insert(0, str(HERE))
 def start_proxy(upstream: str, arm: str, port: int, log_dir: Path,
                 record_reference: str = "", reference: str = "",
                 backend: str = "sglang", doc_packing: str = "turn",
-                max_doc_length: int = 768, max_doc_num: int = 16):
+                max_doc_length: int = 512, max_doc_num: int = 12):
     log_path = log_dir / f"proxy_{arm}_{port}.jsonl"
     out_handle = open(log_dir / f"proxy_{arm}_{port}.out", "w")
     command = [
@@ -84,11 +84,14 @@ def run_benchmark(name: str, base_url: str, user_base_url: str, out_dir: Path,
         prev_cwd = os.getcwd()
         os.chdir(bfcl_dir)
         try:
+            # eval_runner.py:782 un-escapes the result dir with
+            # replace("_", "/") — underscores in arm names would corrupt
+            # the path, so the handler key uses dashes
             return bfcl_adapter.run(
                 base_url,
                 categories=kwargs.get("categories", "multi_turn_base"),
                 model=model,
-                handler_name=f"c2kv-{kwargs.get('arm') or 'full'}",
+                handler_name=f"c2kv-{(kwargs.get('arm') or 'full').replace('_', '-')}",
             )
         finally:
             os.chdir(prev_cwd)
@@ -99,6 +102,9 @@ def run_benchmark(name: str, base_url: str, user_base_url: str, out_dir: Path,
             base_url, out_dir, test_mode=not kwargs.get("full", False),
             agent=kwargs.get("ts_agent") or toolsandbox_adapter.AGENT,
             user=kwargs.get("ts_user") or toolsandbox_adapter.AGENT,
+            # the user simulator must NOT ride the arm proxy: route it to
+            # the raw upstream endpoint (tau2 already does the same split)
+            user_base_url=user_base_url,
         )
     raise SystemExit(f"unknown benchmark {name!r}")
 
@@ -145,8 +151,11 @@ def main(argv=None):
     parser.add_argument("--doc-packing", default="turn", choices=["turn", "message"],
                         help="proxy doc packing: 'turn' = training format "
                              "(default), 'message' = pre-2026-09 per-message")
-    parser.add_argument("--max-doc-length", type=int, default=768)
-    parser.add_argument("--max-doc-num", type=int, default=16)
+    parser.add_argument("--max-doc-length", type=int, default=512,
+                        help="training regime = 512 (ckpt-1088); 768 was the "
+                             "old D-harness caliber")
+    parser.add_argument("--max-doc-num", type=int, default=12,
+                        help="training regime = 12 (ckpt-1088)")
     args = parser.parse_args(argv)
 
     args.out.mkdir(parents=True, exist_ok=True)

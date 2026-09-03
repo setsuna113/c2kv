@@ -68,8 +68,12 @@ def check_tau2(run: str, expected, task_ids: str = "") -> int:
     return fail("tau2", len((got & want) - infra), len(want), missing)
 
 
-def check_bfcl(expected, run_ids) -> int:
-    pattern = str(GORILLA / "result/c2kv-hf/multi_turn/*multi_turn_base_result.json")
+def check_bfcl(expected, run_ids, handler: str = "c2kv-hf") -> int:
+    """``handler`` is the BFCL model key the run registered (result dir
+    name).  run.py registers one per arm (c2kv-<arm>); hardcoding c2kv-hf
+    made every non-default arm read the WRONG directory — or stale files
+    when an old c2kv-hf dir was lying around (audit BLOCKER)."""
+    pattern = str(GORILLA / f"result/{handler}/multi_turn/*multi_turn_base_result.json")
     hits = sorted(glob.glob(pattern))
     if not hits:
         print(f"FATAL: no bfcl result file under {pattern}")
@@ -129,12 +133,14 @@ def main(argv=None) -> None:
     p = sub.add_parser("bfcl")
     p.add_argument("--expected", type=int, default=None)
     p.add_argument("--run-ids", default="")
+    p.add_argument("--handler", default="c2kv-hf",
+                   help="BFCL model key / result-dir name (run.py: c2kv-<arm>)")
     args = parser.parse_args(argv)
 
     if args.benchmark == "tau2":
         code = check_tau2(args.run, args.expected, args.task_ids)
     elif args.benchmark == "bfcl":
-        code = check_bfcl(args.expected, args.run_ids)
+        code = check_bfcl(args.expected, args.run_ids, handler=args.handler)
     else:
         code = check_ts(args.run, args.expected, args.scenarios)
     raise SystemExit(code)

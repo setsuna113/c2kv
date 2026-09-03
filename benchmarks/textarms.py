@@ -1,36 +1,55 @@
-"""Text-level baseline arms: HiAgent and ACON, ported from the official repos.
+"""Text-level baseline arms: HiAgent and ACON, ported faithfully per the
+2026-09-03 audit rulings (paper wins over repo unless the paper's numbers
+came from that repo code).
 
-Both methods manage the agent's context at the TEXT level (no KV-cache
-involvement): the proxy rewrites the request's history messages before the
-request reaches the serving backend, and the compression/summarization
-calls themselves go to the same upstream endpoint in full mode
-("self-compression", the decision recorded in the consolidation plan).
+Both methods manage the agent's context at the TEXT level: the proxy
+rewrites the request's history before it reaches the serving backend, and
+the compression/summarization calls go to the SAME served ckpt-1088
+endpoint (policy and compressor are the same model — the papers' own
+protocol: HiAgent §4.1 uses gpt-4-turbo for both roles, ACON §4.2 uses
+gpt-4.1 for both).  Cost columns must carry the compressor calls (one extra
+LLM call per turn); the standing asymmetry (C2KV is trained for its
+mechanism, these baselines are training-free here) is footnote material.
 
-Sources (SHAs pinned in benchmarks/ops/README.md baselines note):
-* HiAgent  — hiagent2024/hiagent @ cebdd8e: agentboard/agents/cme_final.py
-  (subgoal protocol + segment replacement) and summarize.py
-  (TrajectorySummarizer prompt, verbatim below).
-* ACON     — microsoft/acon @ d63f9ae: experiments/appworld/
-  configs/context_opt/gpt-4.1-mini_{history,obs}.yaml (thresholds: history
-  4096 tok, obs 256 tok, preserve_last_k_turns 1, rule reset) and
-  prompts/context_opt/{prompt_history_v2,prompt_user,system_prompt}.jinja
-  (verbatim below).
+Sources:
+* HiAgent  — arXiv 2408.09559.  The working-memory summarization prompt
+  below is the PAPER's §3.3 prompt verbatim (subgoal-met judgment, one-line
+  output constraint, {example} slot).  The repo's summarize.py
+  (hiagent2024/hiagent @ cebdd8e) was AI-rebuilt in 2026-04 and post-dates
+  the paper's numbers — audit ruling 1: not used.
+  Deliberate deltas, recorded for the report:
+  - "Trajectory Retrieval not ported" (ruling 2): the note's instruction 4
+    advertising retrieve(k) is REMOVED; implementing it would only produce
+    hallucinated tool calls in these benchmarks.
+  - The repo's gripper/blocksworld summarization-off special case
+    (cme_final.py:115-120) is NOT inherited (ruling 3: that is the paper's
+    w/o-OS ablation, not the method).
+  - User turns are NOT action-observation pairs: they survive verbatim in
+    the output AND ride along in the summarizer input as "User:" lines
+    (audit: a "$300 budget" constraint was silently dropped otherwise).
+  - Compressor decode per paper §4.1: max_tokens~100, stop "\n\n",
+    temperature 0, top_p 1; enable_thinking off (serving stack has no
+    reasoning parser).
+  - Degeneration is VISIBLE: when no assistant content ever declares a
+    Subgoal (e.g. pure tool-call replies), the arm is a passthrough and
+    stats["degenerate"] is True.
+* ACON     — arXiv 2510.00615.  Thresholds per paper §8.3 (ruling 4):
+  T_obs = 1024 tok (~4096 chars), history 4096 tok, preserve the last ONE
+  action/observation PAIR = k=2 messages.  The compression prompts are the
+  repo's base guidelines (microsoft/acon @ d63f9ae, context_opt jinja),
+  verbatim; the §3.3-optimized guidelines (ACON-U) are printed in the
+  paper's appendix and can be transcribed later — until then every row is
+  labeled "acon-base: ACON pipeline, base guideline, guideline optimization
+  not reproduced" (ruling 5 + critic correction; NOT "acon-prompting",
+  which is a different ContextualizeWeb-derived baseline).
+  History/observation are evaluated SEPARATELY by the paper (ruling 6):
+  arms acon_hist and acon_obs.
+  Summary is embedded into the first user prompt as a <HISTORY_SUMMARY>
+  block (the original memory.py:481-498 shape), not a standalone message.
 
-Deliberate deltas from the originals (recorded for the report):
-1. HiAgent's action dialect is plain text ("Action: ..."); our benchmarks
-   are OpenAI tool-call environments, so the subgoal note gains one
-   sentence saying actions are tool calls, and its AgentBoard-specific
-   "check valid actions" item is dropped.  The segmentation/summary
-   mechanics are unchanged.
-2. ACON's compressor model is the same served endpoint (self-compression)
-   instead of gpt-4.1-mini; the guideline prompts are kept verbatim.
-3. Token counts are estimated as chars/4 (no tokenizer in the proxy);
-   thresholds are converted with the same factor and the estimate is
-   recorded in the stats so the report can quote it.
-
-Both transforms are deterministic given the message list plus a
-content-hash-keyed summary cache, so re-sends of the same prefix never
-re-summarize (the ExtractCache discipline of the KV arms, applied to text).
+Token counts are estimated as chars/4 (no tokenizer in the proxy); the
+estimate is recorded in stats.  Summaries are cached per content hash; an
+EMPTY compressor result is a failure and is never cached.
 """
 from __future__ import annotations
 
@@ -39,17 +58,51 @@ import json
 import threading
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-# ---- compressor callback contract -------------------------------------------
-# compress(system: str, user: str) -> str  — a full-mode chat call to the
-# same upstream endpoint; supplied by proxy.py (which owns _post_json).
+# ---- compressor plumbing -----------------------------------------------------
 
-Compress = Callable[[str, str], str]
+# decode parameters per policy (papers' originals + NPU serving reality:
+# Qwen3 thinking must be off, the server has no reasoning parser)
+
+
+COMPRESSOR_DECODE: Dict[str, Dict[str, Any]] = {
+    "hiagent": {
+        "max_tokens": 100, "stop": ["\n\n"],
+        "temperature": 0.0, "top_p": 1.0, "seed": 42,
+        "chat_template_kwargs": {"enable_thinking": False},
+    },
+    "acon": {
+        "max_tokens": 2048, "temperature": 0.0, "seed": 42,
+        "chat_template_kwargs": {"enable_thinking": False},
+    },
+}
+
+
+class TextarmCompressorError(RuntimeError):
+    """The summarizer/refiner call failed (transport, abort finish, or an
+    empty completion).  Must surface as an infrastructure error, never as
+    an empty summary that gets cached for the rest of the conversation."""
+
+
+def compressor_payload(policy: str, model: str, system_text: str,
+                       user_text: str) -> Dict[str, Any]:
+    """Full chat request for one compressor call (decode params above)."""
+    payload: Dict[str, Any] = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": system_text},
+            {"role": "user", "content": user_text},
+        ],
+    }
+    payload.update(COMPRESSOR_DECODE[policy])
+    return payload
+
+
+# compress(payload_dict) -> str : performs the POST, validates the finish
+# reason and non-empty content, raises TextarmCompressorError otherwise.
+Compress = Callable[[Dict[str, Any]], str]
 
 _LOCK = threading.Lock()
 _SUMMARY_CACHE: Dict[str, str] = {}
-# ACON rolling state per conversation: conv id -> (covered prefix digest,
-# prev_summary).  "reset" rule: when the summarized prefix no longer matches
-# (new conversation, or history rewritten by the benchmark), start over.
 _ACON_STATE: Dict[str, Tuple[str, str]] = {}
 
 
@@ -57,8 +110,8 @@ def _sha(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-def _est_tokens(text: str) -> int:
-    return max(1, len(text) // 4)
+def _est_tokens(chars: int) -> int:
+    return max(1, chars // 4)
 
 
 def _content_of(message: Dict[str, Any]) -> str:
@@ -70,9 +123,14 @@ def _content_of(message: Dict[str, Any]) -> str:
     return json.dumps(content, ensure_ascii=False)
 
 
-def _render_segment_line(message: Dict[str, Any], action_dialect) -> str:
-    """One 'Action:'/'Observation:' line for an assistant/tool message,
-    reusing the proxy's training-dialect rendering for tool-call turns."""
+def _message_chars(messages: List[Dict[str, Any]]) -> int:
+    return sum(
+        len(_content_of(m)) + len(json.dumps(m.get("tool_calls") or []))
+        for m in messages
+    )
+
+
+def _render_line(message: Dict[str, Any], action_dialect) -> str:
     role = message.get("role") or "user"
     if role == "assistant":
         if message.get("tool_calls"):
@@ -85,6 +143,27 @@ def _render_segment_line(message: Dict[str, Any], action_dialect) -> str:
     return f"{role}: " + _content_of(message)
 
 
+def _summarize(cache_key: str, policy: str, model: str, system_text: str,
+               user_text: str, compress: Compress,
+               stats: Dict[str, Any]) -> str:
+    """Cached summary with failure semantics: an empty result raises and is
+    never stored."""
+    with _LOCK:
+        cached = _SUMMARY_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+    summary = compress(compressor_payload(policy, model, system_text,
+                                          user_text)).strip()
+    if not summary:
+        raise TextarmCompressorError(
+            f"{policy} compressor returned an empty summary "
+            f"(key={cache_key[:12]})")
+    with _LOCK:
+        summary = _SUMMARY_CACHE.setdefault(cache_key, summary)
+    stats["n_compressor_calls"] = stats.get("n_compressor_calls", 0) + 1
+    return summary
+
+
 # ---- HiAgent -----------------------------------------------------------------
 
 HIAGENT_SUBGOAL_NOTE = """
@@ -95,23 +174,44 @@ Instructions:
 1. You cannot output two subgoals consecutively.
 2. Subgoal must be one line of text and does not print any newline characters.
 3. Each subgoal must be followed by the execution of at least one valid action.
-4. Detailed trajectory information (action-observation pair) of previously satisfied subgoals will be hidden for context efficiency. If you believe that the detailed trajectory information of a particular subgoal is crucial for the current subgoal, you can use Action: \"retrieve(subgoal_id_1, subgoal_id_2, ...)\" to obtain the detailed trajectory information.
-5. Actions in this environment are tool calls: emit the tool call that executes the action (the Subgoal line goes in the message text alongside the tool call).
+4. Actions in this environment are tool calls: emit the tool call that executes the action (the Subgoal line goes in the message text alongside the tool call).
 """
 
-HIAGENT_SUMMARY_SYSTEM = (
-    "You are a helpful assistant that summarizes agent trajectories concisely."
-)
+# Paper §3.3, verbatim (the repo's summarize.py is a 2026 rebuild and is
+# NOT the prompt the paper's numbers were produced with — audit ruling 1).
+HIAGENT_SUMMARY_USER_TEMPLATE = """You are an advanced AI system tasked with summarizing and analyzing a series of action-observation pairs (trajectories) and determining whether a specific subgoal has been met.
 
-HIAGENT_SUMMARY_USER = """Subgoal: {subgoal}
-Trajectory:
-{trajectory}
+Your goal is to create a summary that captures all essential information, decisions, and outcomes from the given trajectories, and indicate whether the subgoal has been met based on the summarized observations.
 
-Please provide a concise summary (1-2 sentences) of what happened during this trajectory and the outcome. Focus on the key actions taken and the final result."""
+If there are no valid actions taken, you need to analyze the reason.
+
+### Instructions:
+
+1. Provide a summarized observation related to the subgoal in a concise manner.
+
+2. Determine whether the subgoal has been met.
+
+3. Do not output anything except whether summary and subgoal are met. Your output should be only one line. Do not output things like '##Summary', '##Summary and Analysis'.
+
+{example}
+
+##Trajectory
+
+{formatted_trajectory}
+
+##Subgoal:
+
+{subgoal}
+
+###Output:"""
+
+HIAGENT_SUMMARY_SYSTEM = "You are a helpful assistant."
+# per-task in-context example from the paper's setup; none transcribed for
+# these benchmarks — the slot stays for provenance
+HIAGENT_EXAMPLE = ""
 
 
 def _subgoal_of(message: Dict[str, Any]) -> Optional[str]:
-    """The subgoal text if this assistant message opens a new segment."""
     if (message.get("role") or "") != "assistant":
         return None
     text = _content_of(message).strip()
@@ -121,15 +221,14 @@ def _subgoal_of(message: Dict[str, Any]) -> Optional[str]:
 
 
 def hiagent_transform(messages: List[Dict[str, Any]], compress: Compress,
-                      action_dialect) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
-    """HiAgent (cme_final.py make_prompt): inject the subgoal protocol note,
-    segment history by assistant 'Subgoal:' declarations, replace every
-    COMPLETED segment with subgoal line + trajectory summary (summarize.py),
-    keep the final (current) segment raw."""
+                      action_dialect, model: str = "c2kv-agent"
+                      ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    """Subgoal-protocol note into the system message; segment history by
+    assistant 'Subgoal:' declarations; completed segments become their
+    surviving user turns + one paper-prompt summary; the current segment
+    stays raw.  Passthrough (degenerate=True) when no subgoal is ever
+    declared — e.g. pure tool-call replies with null content."""
     stats: Dict[str, Any] = {"policy": "hiagent", "n_compressor_calls": 0}
-    out: List[Dict[str, Any]] = []
-
-    # 1. subgoal note into the first system message (or a new one)
     messages = [dict(m) for m in messages]
     for m in messages:
         if m.get("role") == "system":
@@ -138,7 +237,6 @@ def hiagent_transform(messages: List[Dict[str, Any]], compress: Compress,
     else:
         messages.insert(0, {"role": "system", "content": HIAGENT_SUBGOAL_NOTE.strip()})
 
-    # 2. segment by Subgoal declarations
     segments: List[Dict[str, Any]] = [{"start": 0, "subgoal": None, "messages": []}]
     for m in messages:
         subgoal = _subgoal_of(m)
@@ -151,38 +249,35 @@ def hiagent_transform(messages: List[Dict[str, Any]], compress: Compress,
 
     stats["n_segments"] = len(segs)
     stats["n_summarized"] = len(completed)
-    raw_chars = sum(len(_content_of(m)) + len(json.dumps(m.get("tool_calls") or [])) for m in messages)
+    stats["degenerate"] = bool(
+        len(segs) == 0 and any(m.get("role") == "assistant" for m in messages))
+    raw_chars = _message_chars(messages)
 
-    # 3. replace completed segments with subgoal + cached summary
-    out = list(pre)
+    out: List[Dict[str, Any]] = list(pre)
     for k, seg in enumerate(completed, start=1):
-        trajectory = "\n".join(
-            _render_segment_line(m, action_dialect) for m in seg["messages"]
-            if (m.get("role") or "") in ("assistant", "tool")
-        )
+        # user turns are instructions, not trajectory: survive verbatim
+        for m in seg["messages"]:
+            if m.get("role") == "user":
+                out.append(dict(m))
+        trajectory = "\n".join(_render_line(m, action_dialect)
+                               for m in seg["messages"])
         subgoal = seg["subgoal"] or f"(segment {k})"
-        key = _sha(f"hiagent|{subgoal}|{trajectory}")
-        with _LOCK:
-            summary = _SUMMARY_CACHE.get(key)
-        if summary is None:
-            summary = compress(
-                HIAGENT_SUMMARY_SYSTEM,
-                HIAGENT_SUMMARY_USER.format(subgoal=subgoal, trajectory=trajectory),
-            ).strip()
-            with _LOCK:
-                summary = _SUMMARY_CACHE.setdefault(key, summary)
-            stats["n_compressor_calls"] += 1
-        out.append({
-            "role": "user",
-            "content": f"Subgoal {k}: {subgoal}\nSummary: {summary}",
-        })
-
+        summary = _summarize(
+            _sha(f"hiagent|{subgoal}|{trajectory}"),
+            "hiagent", model, HIAGENT_SUMMARY_SYSTEM,
+            HIAGENT_SUMMARY_USER_TEMPLATE.format(
+                example=HIAGENT_EXAMPLE,
+                formatted_trajectory=trajectory, subgoal=subgoal),
+            compress, stats)
+        out.append({"role": "user",
+                    "content": f"Subgoal {k}: {subgoal}\nSummary: {summary}"})
     out.extend(m for seg in current for m in seg["messages"])
-    out_chars = sum(len(_content_of(m)) + len(json.dumps(m.get("tool_calls") or [])) for m in out)
+
+    out_chars = _message_chars(out)
     stats["raw_chars"] = raw_chars
     stats["out_chars"] = out_chars
-    stats["raw_est_tokens"] = _est_tokens("x" * raw_chars)
-    stats["out_est_tokens"] = _est_tokens("x" * out_chars)
+    stats["raw_est_tokens"] = _est_tokens(raw_chars)
+    stats["out_est_tokens"] = _est_tokens(out_chars)
     return out, stats
 
 
@@ -257,10 +352,15 @@ In the "Refined Observation", include only the information that is minimal but s
 # Refined Observation
 ... reduced and actionable observation ..."""
 
-# gpt-4.1-mini_obs.yaml / gpt-4.1-mini_history.yaml, chars = tokens * 4
-ACON_OBS_THRESHOLD_CHARS = 256 * 4
+# paper §8.3 (ruling 4): T_obs = 1024 tok; history = 4096 tok; chars = tok*4
+ACON_OBS_THRESHOLD_CHARS = 1024 * 4
 ACON_HISTORY_THRESHOLD_CHARS = 4096 * 4
-ACON_PRESERVE_LAST_K_TURNS = 1
+# one preserved action/observation PAIR = 2 messages
+ACON_PRESERVE_LAST_K_MESSAGES = 2
+# the original feeds the full history to the obs compressor; we window it
+# (documented approximation)
+ACON_OBS_HISTORY_MESSAGES = 12
+ACON_OBS_HISTORY_CHARS = 8000
 
 
 def _task_text(messages: List[Dict[str, Any]]) -> str:
@@ -270,104 +370,122 @@ def _task_text(messages: List[Dict[str, Any]]) -> str:
     return "(no user instruction)"
 
 
-def _compress_observation(observation: str, task: str, history: str,
-                          compress: Compress, cache_key: str,
-                          stats: Dict[str, Any]) -> str:
+def _acompress_obs(observation: str, task: str, history: str, compress,
+                   cache_key: str, stats: Dict[str, Any], model: str) -> str:
     with _LOCK:
         refined = _SUMMARY_CACHE.get(cache_key)
-    if refined is None:
-        out = compress(ACON_SYSTEM, ACON_OBS_PROMPT.format(
-            task=task, history=history[:4000], observation=observation))
-        # keep only the Refined Observation section when the model follows
-        # the output format; the whole output is the fallback
-        marker = "# Refined Observation"
-        if marker in out:
-            out = out.split(marker, 1)[1].strip()
-        refined = out.strip()
-        with _LOCK:
-            refined = _SUMMARY_CACHE.setdefault(cache_key, refined)
-        stats["n_compressor_calls"] += 1
+    if refined is not None:
+        return refined
+    out = compress(compressor_payload(
+        "acon", model, ACON_SYSTEM,
+        ACON_OBS_PROMPT.format(task=task, history=history,
+                               observation=observation)))
+    marker = "# Refined Observation"
+    if marker in out:
+        out = out.split(marker, 1)[1].strip()
+    refined = out.strip()
+    if not refined:
+        raise TextarmCompressorError(
+            f"acon obs compressor returned empty (key={cache_key[:12]})")
+    with _LOCK:
+        refined = _SUMMARY_CACHE.setdefault(cache_key, refined)
+    stats["n_compressor_calls"] = stats.get("n_compressor_calls", 0) + 1
     return refined
 
 
 def acon_transform(messages: List[Dict[str, Any]], compress: Compress,
-                   action_dialect, conv: str
+                   action_dialect, conv: str, mode: str = "both",
+                   model: str = "c2kv-agent"
                    ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
-    """ACON (context_opt): compress oversized tool observations in place
-    (>256 tok), then when the conversation exceeds 4096 tok replace the
-    covered prefix with the structured rolling summary (REASONING/COMPLETED,
-    prev_summary carried across turns, last 1 turn preserved)."""
-    stats: Dict[str, Any] = {"policy": "acon", "n_compressor_calls": 0,
-                             "n_obs_compressed": 0}
+    """acon-base (ruling 5 label).  mode: 'obs' refines oversized tool
+    observations in place; 'hist' replaces the covered prefix with the
+    rolling structured summary embedded in the first user prompt
+    (<HISTORY_SUMMARY> block, the original memory.py:481-498 shape);
+    'both' applies obs first then hist, as the original pipeline does."""
+    assert mode in ("obs", "hist", "both")
+    stats: Dict[str, Any] = {"policy": "acon", "mode": mode,
+                             "n_compressor_calls": 0, "n_obs_compressed": 0}
     messages = [dict(m) for m in messages]
     task = _task_text(messages)
-    raw_chars = sum(len(_content_of(m)) + len(json.dumps(m.get("tool_calls") or [])) for m in messages)
+    raw_chars = _message_chars(messages)
 
-    # 1. observation compression (before history measurement, as in ACON)
-    for idx, m in enumerate(messages):
-        if (m.get("role") or "") != "tool":
-            continue
-        obs = _content_of(m)
-        if len(obs) <= ACON_OBS_THRESHOLD_CHARS:
-            continue
-        history = "\n".join(
-            _render_segment_line(h, action_dialect)
-            for h in messages[max(0, idx - 6):idx]
-        )
-        key = _sha(f"acon-obs|{task}|{obs}")
-        m["content"] = _compress_observation(obs, task, history, compress, key, stats)
-        stats["n_obs_compressed"] += 1
+    if mode in ("obs", "both"):
+        for idx, m in enumerate(messages):
+            if (m.get("role") or "") != "tool":
+                continue
+            obs = _content_of(m)
+            if len(obs) <= ACON_OBS_THRESHOLD_CHARS:
+                continue
+            window = messages[max(0, idx - ACON_OBS_HISTORY_MESSAGES):idx]
+            history = ("\n".join(_render_line(h, action_dialect) for h in window)
+                       )[:ACON_OBS_HISTORY_CHARS]
+            key = _sha(f"acon-obs|{task}|{obs}")
+            m["content"] = _acompress_obs(obs, task, history, compress, key,
+                                          stats, model)
+            stats["n_obs_compressed"] += 1
 
-    # 2. history compression (threshold on everything except the system
-    #    message and the preserved tail turns)
-    system_msgs = [m for m in messages if m.get("role") == "system"]
-    nonsystem = [m for m in messages if m.get("role") != "system"]
-    k = ACON_PRESERVE_LAST_K_TURNS
-    prefix, tail = nonsystem[:-k] if len(nonsystem) > k else [], nonsystem
-    prefix_chars = sum(len(_content_of(m)) for m in prefix)
-    stats["prefix_est_tokens"] = prefix_chars // 4
+    out: List[Dict[str, Any]] = list(messages)
+    stats["history_compressed"] = False
+    if mode in ("hist", "both"):
+        system_msgs = [m for m in out if m.get("role") == "system"]
+        nonsystem = [m for m in out if m.get("role") != "system"]
+        k = ACON_PRESERVE_LAST_K_MESSAGES
+        prefix, tail = ((nonsystem[:-k], nonsystem[-k:])
+                        if len(nonsystem) > k else ([], nonsystem))
+        prefix_chars = sum(len(_content_of(m)) for m in prefix)
+        stats["prefix_est_tokens"] = prefix_chars // 4
 
-    out: List[Dict[str, Any]] = list(system_msgs)
-    if prefix and prefix_chars > ACON_HISTORY_THRESHOLD_CHARS:
-        prefix_digest = _sha(json.dumps(
-            [{"role": m.get("role"), "content": _content_of(m)} for m in prefix],
-            ensure_ascii=False, sort_keys=True))
-        with _LOCK:
-            covered = _ACON_STATE.get(conv)
-        # rolling summary: whatever was summarized last for this conversation
-        # becomes prev_summary for the next (longer) prefix; the digest is
-        # stored for diagnostics only — a new turn always changes the digest
-        prev_summary = covered[1] if covered else "(none)"
-        state_key = _sha(f"acon-hist|{conv}|{prefix_digest}")
-        with _LOCK:
-            summary = _SUMMARY_CACHE.get(state_key)
-        if summary is None:
-            history_text = "\n".join(
-                _render_segment_line(m, action_dialect) for m in prefix)
-            summary = compress(ACON_SYSTEM, ACON_HISTORY_PROMPT.format(
-                task=task, prev_summary=prev_summary, history=history_text)).strip()
+        if prefix and prefix_chars > ACON_HISTORY_THRESHOLD_CHARS:
+            prefix_digest = _sha(json.dumps(
+                [{"role": m.get("role"), "content": _content_of(m)}
+                 for m in prefix], ensure_ascii=False, sort_keys=True))
             with _LOCK:
-                summary = _SUMMARY_CACHE.setdefault(state_key, summary)
-            stats["n_compressor_calls"] += 1
-        with _LOCK:
-            _ACON_STATE[conv] = (prefix_digest, summary)
-        out.append({"role": "user", "content": f"[CONTEXT SUMMARY]\n{summary}"})
-        stats["history_compressed"] = True
-    else:
-        out.extend(prefix)
-        stats["history_compressed"] = False
-    out.extend(tail)
+                covered = _ACON_STATE.get(conv)
+            prev_summary = covered[1] if covered else "(none)"
+            history_text = "\n".join(_render_line(m, action_dialect)
+                                     for m in prefix)
+            summary = _summarize(
+                _sha(f"acon-hist|{conv}|{prefix_digest}"),
+                "acon", model, ACON_SYSTEM,
+                ACON_HISTORY_PROMPT.format(task=task, prev_summary=prev_summary,
+                                           history=history_text),
+                compress, stats)
+            with _LOCK:
+                _ACON_STATE[conv] = (prefix_digest, summary)
+            block = (f"\n<HISTORY_SUMMARY>\n{summary}\n</HISTORY_SUMMARY>")
+            # the summary REPLACES the prefix: keep system messages and the
+            # first user prompt (the task instruction, which lives in the
+            # prefix) carrying the <HISTORY_SUMMARY> block — the original
+            # memory.py:481-498 shape — plus the preserved tail; every
+            # other prefix message is dropped
+            placed = False
+            rebuilt = list(system_msgs)
+            for m in prefix:
+                if (not placed and m.get("role") == "user"
+                        and not m.get("tool_calls")):
+                    rebuilt.append({"role": "user",
+                                    "content": _content_of(m) + block})
+                    placed = True
+                # all other prefix messages are dropped (that IS the
+                # compression)
+            for m in tail:
+                rebuilt.append(dict(m))
+            if not placed:  # no user instruction anywhere (should not happen)
+                rebuilt.insert(len(system_msgs),
+                               {"role": "user", "content": block.strip()})
+            out = rebuilt
+            stats["history_compressed"] = True
 
-    out_chars = sum(len(_content_of(m)) + len(json.dumps(m.get("tool_calls") or [])) for m in out)
+    out_chars = _message_chars(out)
     stats["raw_chars"] = raw_chars
     stats["out_chars"] = out_chars
-    stats["raw_est_tokens"] = _est_tokens("x" * raw_chars)
-    stats["out_est_tokens"] = _est_tokens("x" * out_chars)
+    stats["raw_est_tokens"] = _est_tokens(raw_chars)
+    stats["out_est_tokens"] = _est_tokens(out_chars)
     return out, stats
 
 
 def reset_state() -> None:
-    """Clear caches/state (fresh proxy process does this implicitly)."""
+    """Test isolation hook (also used by proxy startup)."""
     with _LOCK:
         _SUMMARY_CACHE.clear()
         _ACON_STATE.clear()

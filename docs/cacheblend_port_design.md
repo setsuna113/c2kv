@@ -15,68 +15,61 @@ selective-recompute MECHANISM into our SGLang fork as an arm, so it shares
 the model, endpoint and benchmarks with every other arm (the
 resident-bytes=1x Pareto anchor, per the baseline table).
 
-## The official algorithm (blender.py, verbatim semantics)
+## The official algorithm (EuroSys artifact — the lineage the paper's
+## numbers came from; audit ruling 7)
 
-1. Per-chunk KV (256 tok/chunk, `LMCACHE_CHUNK_SIZE`) precomputed
-   OUT of context and stored.
+1. Per-chunk KV (256 tok/chunk) precomputed OUT of context and stored.
 2. At request time the chunks' KV is spliced at the concatenated positions.
-3. Check layer = 1 (`LMCACHE_BLEND_CHECK_LAYERS`): compute the fresh rotary
-   keys at the NEW positions and the per-token L2 diff against the cached
-   keys: `diff_k = torch.sum((k - old_k)**2, dim=1)` (float32).
-4. Select `topk_num = max(int(total_len * 0.15), 1)` tokens by diff_k
-   (`LMCACHE_BLEND_RECOMPUTE_RATIOS`), sorted; their q/k/v/residual are
-   recomputed and spliced over the cached values; remaining layers run only
-   on the selected tokens.
+3. Check layer = index 1 (the SECOND layer). Selection criterion =
+   **V-deviation with r = 0.16** per the EuroSys artifact (the LMCache
+   monorepo's post-RoPE K-deviation r=0.15 is a DIFFERENT lineage — the
+   paper only says "KV deviation").
+4. `topk_num = max(int(total_len * 0.16), 1)` tokens by the deviation,
+   sorted; their q/k/v/residual are recomputed and spliced over the cached
+   values; remaining layers run only on the selected tokens.
 
-## Mapping onto this fork's primitives
+## Mapping onto this fork's primitives — CORRECTED (2026-09-03 audit)
 
 * Per-doc standalone raw KV (the "chunk cache"): `/v1/c2kv/repair_extract`
   with `messages=[system?, doc]`, `target_index=<doc>` — span covers the
   doc, rendered prefix ≈ 0 ⇒ standalone. KV returned pre-RoPE, stable under
   the content-hash key ⇒ cacheable forever (proxy ExtractCache discipline).
-* Placement: chunk KV rotated at the doc's LEDGER position in the assembled
-  conversation = the `in_place` placement semantics of b081720
-  ("keeps original absolute position" — the ledger position IS the doc's
-  logical offset).
-* The quality measurement needs both KV sets per doc:
-  - chunk KV (above, cached), and
-  - in-context KV for the top-15% tokens: `repair_extract(messages=<full
-    conversation>, target_index=<doc>)` already computes exactly this
-    (full-context span KV, pre-RoPE).
-* Selection criterion — faithful: with both sets available, per-token
-  `diff_k = ||R(p_ledger)·k_ic − R(p_local)·k_chunk||²`… in fact simpler:
-  rotate both pre-RoPE sets at the ledger positions and diff directly; this
-  IS `k_new − old_k` from blender.py (fresh-context key vs cached key),
-  computed at the check layer only.
-* Injection: extend `mem_cache/c2kv_injection.py` (335 lines, single
-  purpose) with `inject_c2kv_blend(entry_chunk, entry_context, mask, …)`:
-  per token in the span, take context KV where `mask[t]` else chunk KV,
-  then RoPE once at the ledger position. Mask = top-15% by diff_k (min 1).
-* Protocol: chat request field `c2kv_blend: {ratio: 0.15}` + per-doc
-  `c2kv_blend_key_hashes` (chunk hashes) + `c2kv_blend_ctx_key_hashes`
-  (in-context hashes). Scheduler resolves both pools, computes diff_k on
-  the check layer (layer 1 only — needs that layer's k from the stored
-  entries; both pools already store per-layer K), builds the mask, injects.
-* Proxy arm: `cacheblend` — per request: ensure chunk KV per doc (cached
-  standalone extracts), ensure in-context KV for changed docs (per-turn),
-  send blend hashes + ratio. Cost columns: resident KV = 1x raw (the
-  anchor), recompute tokens = Σ ceil(0.15·len_doc).
+* Placement: **NOT in_place** (the original design's claim was wrong): the
+  fork's scheduler only constructs a position override for `append_tail`
+  (scheduler.py:3421-3437); `in_place` reuses the stored absolute
+  positions. Correct: repair-only segments in doc order with
+  `append_tail`, or the input_ids form with an explicit position_offset.
+* **The "in-context KV" leg is an oracle upper bound, NOT CacheBlend**: it
+  comes from repair_extract(messages=<full conversation>) — a complete
+  dense prefill of the whole conversation. CacheBlend's actual mechanism
+  recomputes 16% of tokens against a STALE chunk cache; here we pay the
+  full forward and keep only 16% of its KV. Any row produced by this
+  design must be labeled `cacheblend-oracle` (quality upper bound under
+  chunk-KV reuse with selective in-context correction); it may NOT be
+  printed as "CacheBlend", and the "16%" is not a compute/flops number.
+* Selection: with both KV sets available per doc, per-token deviation =
+  the artifact's criterion computed from the two stored sets (fresh-context
+  value vs cached value, check layer = index 1 only).
+* Injection: extend `mem_cache/c2kv_injection.py` with
+  `inject_c2kv_blend(entry_chunk, entry_ctx, mask, …)`: per token in the
+  span, take context KV where `mask[t]` else chunk KV, rotated once at the
+  doc's ledger position (append_tail semantics).
+* Protocol: chat request field `c2kv_blend: {ratio: 0.16}` + per-doc
+  `c2kv_blend_key_hashes` (chunk) + `c2kv_blend_ctx_key_hashes` (context).
+* Proxy arm: `cacheblend_oracle` — per request: ensure chunk KV per doc
+  (cached standalone extracts), ensure in-context KV for changed docs
+  (per-turn), send blend hashes + ratio. Cost columns: resident KV = 1x
+  raw (the Pareto anchor), recompute tokens = Σ ceil(0.16·len_doc).
 
 ## Honest deltas vs the official implementation
 
-1. Wall-clock speedup is NOT reproduced: we pay the full-context forward
-   per turn to obtain the in-context KV set (the fork has no layer-wise
-   partial forward). The benchmark therefore measures CacheBlend's QUALITY
-   under chunk-KV reuse with selective in-context correction — the resident
-   -bytes/recompute-fraction tradeoff — which is the number our Pareto
-   table needs. Serving-stack speedup (their TTFT/throughput claims) is
-   explicitly out of scope for this port and should be footnoted as such.
-2. Selection uses the same layer-1 key-diff criterion, computed from two
-   stored KV sets instead of an interleaved layer-1 forward — numerically
-   the same quantity (fresh-context key vs cached key), obtained differently.
-3. Chunking is per-turn-doc (doc packing, `--doc-packing turn`) rather than
-   a fixed 256-token grid; docs ARE our chunks (c2kv's unit). Note in the
-   report.
+1. Wall-clock speedup is NOT reproduced (see the oracle note above — the
+   fork has no layer-wise partial forward). The row measures quality under
+   chunk-KV reuse + selective in-context correction at 1x resident bytes.
+2. Selection uses the same check-layer deviation criterion, computed from
+   two stored KV sets instead of an interleaved partial forward.
+3. Chunking is per-turn-doc (doc packing) rather than a fixed 256-token
+   grid; docs ARE our chunks. Note in the report.
 
 ## Implementation checklist (next session)
 

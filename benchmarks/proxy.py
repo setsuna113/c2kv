@@ -98,12 +98,14 @@ REQUEST_LOG_PATH = ""
 _log_lock = threading.Lock()
 
 # --doc-packing / --max-doc-length / --max-doc-num (see module docstring and
-# docs/c2kv_semantics.md).  768/16 is the D-line harness caliber; the
-# checkpoint-1088 training run used 512/12 (HISTORY_MAX_DOC_LENGTH /
-# HISTORY_MAX_DOC_NUM defaults in agent/train_agent_history_c2kv_npu.sh).
+# docs/c2kv_semantics.md).  DEFAULTS = the checkpoint-1088 training values
+# (HISTORY_MAX_DOC_LENGTH / HISTORY_MAX_DOC_NUM in
+# agent/train_agent_history_c2kv_npu.sh: 512/12) — serving must match
+# training; 768/16 (the old D-line harness caliber) is available by flag
+# but shifts every compression arm off its trained regime.
 DOC_PACKING = "turn"
-MAX_DOC_LENGTH = 768
-MAX_DOC_NUM = 16
+MAX_DOC_LENGTH = 512
+MAX_DOC_NUM = 12
 DOC_PACKINGS = ("turn", "message")
 
 
@@ -518,6 +520,20 @@ def load_reference(path: str) -> Dict[str, Dict[str, Any]]:
 FULL_ASSEMBLY = Arm(name="full_recover_assembly", compress_history=False)
 
 
+# training dialect (python/train/train_data_multiturn.py): tool messages
+# are rendered as bare user messages, and every sample carries a system
+# prompt.  The raw path must match (audit: the mismatch is arm-invariant
+# and a direct candidate for the tool-call-in-prose failures).
+DEFAULT_SYSTEM_PROMPT = "You are a helpful assistant."
+
+
+def _stringify_content(message: Dict[str, Any]) -> str:
+    content = message.get("content")
+    if isinstance(content, str):
+        return content
+    return "" if content is None else json.dumps(content, ensure_ascii=False)
+
+
 def _assemble(messages: List[Dict[str, Any]], arm: Arm, timeout: int = 600):
     """Return (out_messages, counts).
 
@@ -528,6 +544,16 @@ def _assemble(messages: List[Dict[str, Any]], arm: Arm, timeout: int = 600):
     the logical-token cost column are computed from.  Raw token counts are
     NOT estimated here; physical numbers come from the backend's response.
     """
+    # raw-path training dialect: tool -> bare user message (_normal_chat_message:
+    # {"role": "user", "content": str}); a missing system prompt gets the
+    # training default injected
+    messages = [
+        ({"role": "user", "content": _stringify_content(m)}
+         if m.get("role") == "tool" else dict(m))
+        for m in messages
+    ]
+    if not any(m.get("role") == "system" for m in messages):
+        messages.insert(0, {"role": "system", "content": DEFAULT_SYSTEM_PROMPT})
     cutoff = _history_cutoff(messages)
     out: List[Dict[str, Any]] = []
     gist_tokens = 0
@@ -656,6 +682,50 @@ def _system_text(messages: List[Dict[str, Any]]) -> str:
 
 def _strip_c2kv_fields(message: Dict[str, Any]) -> Dict[str, Any]:
     return {k: v for k, v in message.items() if not str(k).startswith("c2kv_")}
+
+
+def _textarm_compress(payload: Dict[str, Any]) -> str:
+    """One compressor call for a text-level baseline arm.  Validates the
+    finish reason and non-empty content — HTTP-200-with-error-body and
+    abort finishes are FAILURES (TextarmCompressorError), never empty
+    summaries that would get cached for the rest of the conversation."""
+    import textarms
+
+    data = _post_json("/v1/chat/completions", payload, 600)
+    try:
+        choice = (data.get("choices") or [{}])[0]
+        finish = choice.get("finish_reason")
+        content = (choice.get("message") or {}).get("content") or ""
+    except (AttributeError, IndexError):
+        raise textarms.TextarmCompressorError(f"bad compressor response: {data!r:.400}")
+    if finish != "stop" or not str(content).strip():
+        raise textarms.TextarmCompressorError(
+            f"compressor call failed: finish_reason={finish!r} "
+            f"content_len={len(str(content))}")
+    return str(content)
+
+
+def _apply_text_arm(payload: Dict[str, Any], arm, conv: str
+                    ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """Rewrite history per the arm's text policy (textarms.py) BEFORE
+    assembly; the arm is full-mode downstream.  Compressor calls go
+    straight to the upstream endpoint (no arm semantics, no recursion
+    through the chat handler)."""
+    import textarms
+
+    messages = payload.get("messages") or []
+    model = payload.get("model") or "c2kv-agent"
+    if arm.text_policy == "hiagent":
+        out, stats = textarms.hiagent_transform(
+            messages, _textarm_compress, _render_action_dialect, model=model)
+    else:
+        mode = "hist" if arm.text_policy == "acon_hist" else "obs"
+        out, stats = textarms.acon_transform(
+            messages, _textarm_compress, _render_action_dialect, conv,
+            mode=mode, model=model)
+    staged = dict(payload)
+    staged["messages"] = out
+    return staged, stats
 
 
 def plan_repair(messages: List[Dict[str, Any]], arm: Arm,
@@ -805,34 +875,10 @@ class ProxyHandler(BaseHTTPRequestHandler):
         conv = conversation_id(messages)
         turn = len(messages)
         text_stats: Optional[Dict[str, Any]] = None
-        if getattr(ARM, "text_policy", None):
-            # text-level baseline arms (textarms.py): rewrite history BEFORE
-            # assembly; the arm itself is full-mode downstream.  Compressor
-            # calls go straight to the upstream endpoint (no arm semantics,
-            # no recursion through this handler).
-            import textarms
-
-            def _compress(system_text: str, user_text: str) -> str:
-                data = _post_json("/v1/chat/completions", {
-                    "model": payload.get("model") or "c2kv-agent",
-                    "messages": [
-                        {"role": "system", "content": system_text},
-                        {"role": "user", "content": user_text},
-                    ],
-                    "temperature": 0.0, "max_tokens": 1024, "stream": False,
-                }, 600)
-                return (((data.get("choices") or [{}])[0]
-                         .get("message") or {}).get("content")) or ""
-
-            if ARM.text_policy == "hiagent":
-                messages, text_stats = textarms.hiagent_transform(
-                    messages, _compress, _render_action_dialect)
-            else:
-                messages, text_stats = textarms.acon_transform(
-                    messages, _compress, _render_action_dialect, conv)
-            payload = dict(payload)
-            payload["messages"] = messages
         try:
+            if getattr(ARM, "text_policy", None):
+                payload, text_stats = _apply_text_arm(payload, ARM, conv)
+                messages = payload["messages"]
             messages_out, counts = _assemble(messages, ARM)
             if text_stats is not None:
                 counts["textarm"] = text_stats
@@ -841,7 +887,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
                                      out_messages=messages_out)
         except (RuntimeError, ValueError, URLError, OSError, UpstreamError,
                 BackendError) as error:
-            kind = getattr(error, "kind", "assemble_error")
+            kind = getattr(error, "kind",
+                           "textarm_error" if text_stats is not None else "assemble_error")
             self._log_request(payload, None, None, status=kind,
                               error=str(error), fingerprint=fingerprint, conv=conv,
                               turn=turn)

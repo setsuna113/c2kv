@@ -43,6 +43,9 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 from urllib import request as urlrequest
 
+# local sidecar: never route through an ambient http_proxy
+_OPENER = urlrequest.build_opener(urlrequest.ProxyHandler({}))
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -58,7 +61,7 @@ def _post_json(upstream: str, path: str, payload, timeout: int = 600):
     req = urlrequest.Request(
         f"{upstream.rstrip('/')}{path}", data=body,
         headers={"Content-Type": "application/json"}, method="POST")
-    with urlrequest.urlopen(req, timeout=timeout) as resp:
+    with _OPENER.open(req, timeout=timeout) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
 

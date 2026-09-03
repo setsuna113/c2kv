@@ -94,10 +94,21 @@ def bfcl_arm(arm: str) -> dict | None:
 
 
 def costs(arm: str) -> dict | None:
+    # EXACT names only (audit: the old `*_{arm}*` glob absorbed sibling
+    # arms -- c2kv pulled in c2kv_rec/c2kv_rp, full pulled in cd_full --
+    # double-counted chunk files and mixed TS/BFCL logs into the "tau2
+    # full-run" wall percentiles)
+    names = [f"proxy_task_task_sg_tau2_{arm}",
+             f"proxy_task_task_sg_tau2_{arm}_a",
+             f"proxy_task_task_sg_tau2_{arm}_b",
+             f"proxy_task_task_sg_tau2_{arm}_a2"]
+    names += [Path(x).stem for x in
+              glob.glob(str(PROXY / f"proxy_task_task_sg_makeup_{arm}_[0-9]*.jsonl"))]
     rows = []
-    for path in glob.glob(str(PROXY / f"proxy_task_task_sg_*_{arm}*.jsonl")) + \
-             glob.glob(str(PROXY / f"proxy_task_task_sg_tau2_{arm}_?.jsonl")):
-        rows.extend(json.loads(l) for l in open(path) if l.strip())
+    for name in names:
+        path = PROXY / f"{name}.jsonl"
+        if path.exists():
+            rows.extend(json.loads(l) for l in open(path) if l.strip())
     if not rows:
         return None
     ok = [r for r in rows if r.get("status") == "ok"]

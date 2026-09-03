@@ -99,10 +99,15 @@ def run(base_url: str, categories: str = "multi_turn_base",
     if run_ids:
         ids = ([i.strip() for i in run_ids.split(",") if i.strip()]
                if isinstance(run_ids, str) else list(run_ids))
+        # atomic write: concurrent runs racing on one file truncated ids
         id_file = Path.cwd() / "test_case_ids_to_generate.json"
-        id_file.write_text(json.dumps({categories: ids}), encoding="utf-8")
+        tmp = id_file.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps({categories: ids}), encoding="utf-8")
+        tmp.replace(id_file)
         gen.append("--run-ids")
-        ev.append("--run-ids")
+        # NOTE: generate-only flag.  This vintage's evaluate subcommand has
+        # no --run-ids option (bfcl_eval/__main__.py:251-277) — appending it
+        # made every subset evaluate crash (audit BLOCKER).
         expected = len(ids)
     if mode in ("generate", "both"):
         run_cli(gen)
@@ -111,7 +116,7 @@ def run(base_url: str, categories: str = "multi_turn_base",
     import terminal_check  # noqa: E402  (sibling module, sys.path has parent)
 
     ids_str = ",".join(run_ids) if isinstance(run_ids, list) else (run_ids or "")
-    code = terminal_check.check_bfcl(expected, ids_str)
+    code = terminal_check.check_bfcl(expected, ids_str, handler=handler_name)
     if code != 0:
         raise SystemExit(f"FATAL: bfcl terminal-state check failed (rc={code})")
     return {"benchmark": "bfcl", "categories": categories, "mode": mode,

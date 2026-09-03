@@ -31,13 +31,23 @@ AGENT = "GPT_4_o_2024_05_13"  # openai_api_agent/openai_api_user role keys
 
 def run(base_url: str, out_dir: Path, test_mode: bool = True,
         agent: str = AGENT, user: str = AGENT, expected: int = None,
-        benchmark_dir: Path = None) -> Dict[str, Any]:
+        benchmark_dir: Path = None, user_base_url: str = "") -> Dict[str, Any]:
+    """``user_base_url`` (default: the raw upstream endpoint) routes the
+    user simulator OUT of the arm proxy via TOOLSANDBOX_USER_BASE_URL —
+    the patched openai_api_user role reads it.  Routing the simulator
+    through the compression arm made every historical TS number an
+    agent+user joint degradation (audit BLOCKER)."""
     ts_dir = Path(benchmark_dir) if benchmark_dir else TS_DIR
     out_dir.mkdir(parents=True, exist_ok=True)
     env = {
         **os.environ,
         "OPENAI_API_KEY": "EMPTY",
+        "OPENAI_API_KEY_USER": "EMPTY",
         "OPENAI_BASE_URL": base_url.rstrip("/") + "/v1",
+        # default: same endpoint the proxy itself fronts (full mode)
+        "TOOLSANDBOX_USER_BASE_URL": (user_base_url.rstrip("/") + "/v1") if user_base_url
+        else os.environ.get("TOOLSANDBOX_USER_BASE_URL",
+                            base_url.rstrip("/") + "/v1"),
         "NO_PROXY": "127.0.0.1,localhost", "no_proxy": "127.0.0.1,localhost",
     }
     cmd = ["tool_sandbox", "--user", user, "--agent", agent,

@@ -7,8 +7,14 @@
 # benchmarks/backends/sglang_patches/README.md for the deployment recipe:
 # codeload tarball + in-repo patches, PYTHONPATH precedence over the
 # editable install in the sgl venv).  Default tree: the b0817204 codeload
-# extract (includes the detokenizer kv_runtime_stats fix 425cd6573, applied
-# in ~/kvoffload-sglang-c2kv and the tarball).
+# extract PLUS the working-tree detokenizer fix 718a654e (git hash on
+# GitHub; the b0817204 tarball itself predates it — apply it from the fork
+# branch or copy from ~/kvoffload-sglang-c2kv).  Without that fix
+# metadata.sglang_runtime is null and cost columns come out silently empty.
+# NOTE on regime provenance: the Sep-2 matrix numbers were produced under
+# an EVOLVING regime (mem 0.28/no pool -> mid-run pool expansion +
+# cache-miss retry, four sg_makeup_* merges) — per-row regime columns are
+# mandatory when quoting them.
 SGLANG_DIR=${SGLANG_DIR:-/home/liuyancheng/sgl-b0817204}
 PYTHON_BIN=${PYTHON_BIN:-/home/liuyancheng/envs/sgl/bin/python}
 MODEL_PATH=${MODEL_PATH:-/home/liuyancheng/checkpoints_upstream/checkpoint-1088}

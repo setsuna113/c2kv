@@ -236,11 +236,13 @@ class TestTurnPacking:
 
     def test_current_block_is_last_input_message_only(self, monkeypatch):
         """training cutoff: everything before the LAST input message (user
-        or tool) is history, including the current turn's earlier steps."""
+        or tool) is history, including the current turn's earlier steps.
+        Raw tool messages surface as bare USER messages — the training
+        dialect (audit fix; _normal_chat_message semantics)."""
         monkeypatch.setattr(proxy_mod, "_extract", _extract_stub)
         conv = self._conv()[:4]  # ends with the tool result
         out, counts = proxy_mod._assemble(conv, get_arm("c2kv"), 0)
-        assert out[-1]["role"] == "tool" and counts["current_raw"] == 1
+        assert out[-1]["role"] == "user" and counts["current_raw"] == 1
         docs = [m for m in out if "c2kv_key_hash" in m]
         assert len(docs) == 1 and "get_weather" in docs[0]["content"]
 
@@ -287,8 +289,10 @@ class TestTurnPacking:
         monkeypatch.setattr(proxy_mod, "DOC_PACKING", "message")
         out, counts = proxy_mod._assemble(self._conv(), get_arm("c2kv"), 0)
         assert counts["doc_packing"] == "message" and counts["n_docs"] == 4
+        # tool docs extract under the USER role after the training-dialect
+        # conversion (audit fix: bare user messages, never <tool_response>)
         assert [m.get("role") for m in out if "c2kv_key_hash" in m] == [
-            "user", "assistant", "tool", "assistant"]
+            "user", "assistant", "user", "assistant"]
 
 
 class TestRepairPolicy:

@@ -59,8 +59,10 @@ class Arm:
     recover: Optional[Dict[str, object]] = None
     # Text-level baseline arms (benchmarks/textarms.py): the proxy rewrites
     # the request history per the named paper's policy instead of any KV
-    # compression; "hiagent" | "acon".  Compressor calls go to the same
-    # upstream endpoint in full mode (self-compression).
+    # compression; compressor calls go to the same served endpoint (same
+    # model as policy — the papers' own protocol).  "hiagent" |
+    # "acon_hist" | "acon_obs" (ACON evaluates history and observation
+    # compression separately, audit ruling 6).
     text_policy: Optional[str] = None
     description: str = ""
 
@@ -73,7 +75,7 @@ class Arm:
             raise ValueError(f"arm {self.name!r}: repair and recover are mutually exclusive")
         if self.text_policy and self.compress_history:
             raise ValueError(f"arm {self.name!r}: text_policy and KV compression are exclusive")
-        if self.text_policy and self.text_policy not in ("hiagent", "acon"):
+        if self.text_policy and self.text_policy not in ("hiagent", "acon_hist", "acon_obs"):
             raise ValueError(f"arm {self.name!r}: unknown text_policy {self.text_policy!r}")
         if self.repair:
             placement = str(self.repair.get("placement") or "append_keep_ledger")
@@ -95,18 +97,27 @@ ARMS: Dict[str, Arm] = {
             name="hiagent",
             compress_history=False,
             text_policy="hiagent",
-            description="HiAgent baseline (2408.09559, hiagent2024/hiagent cme_final.py): subgoal-protocol "
-                        "note injected, completed subgoal segments replaced by trajectory summaries "
-                        "(same-endpoint self-compression); current segment stays raw",
+            description="HiAgent (2408.09559): subgoal-protocol note + completed subgoal segments "
+                        "replaced by paper-§3.3 summaries (same model as compressor, decode per paper); "
+                        "user turns survive; Trajectory Retrieval not ported; degenerate passthrough is "
+                        "flagged in stats",
         ),
         Arm(
-            name="acon",
+            name="acon_hist",
             compress_history=False,
-            text_policy="acon",
-            description="ACON baseline (2510.00615, microsoft/acon context_opt): tool observations "
-                        ">256 tok refined in place, history >4096 tok replaced by the structured "
-                        "rolling summary (REASONING/COMPLETED), last turn preserved (same-endpoint "
-                        "self-compression)",
+            text_policy="acon_hist",
+            description="acon-base (2510.00615), history face: prefix >4096 tok replaced by the rolling "
+                        "structured summary embedded in the first user prompt's <HISTORY_SUMMARY> block, "
+                        "last action/observation pair preserved. Label: 'ACON pipeline, base guideline, "
+                        "guideline optimization not reproduced'",
+        ),
+        Arm(
+            name="acon_obs",
+            compress_history=False,
+            text_policy="acon_obs",
+            description="acon-base (2510.00615), observation face: tool observations >1024 tok refined "
+                        "in place. Same base-guideline label as acon_hist (paper evaluates the two "
+                        "faces separately)",
         ),
         Arm(
             name="c2kv",
