@@ -321,6 +321,17 @@ re_diverged。arms：`c2kv_recover` / `hybrid_recover`；旧任务级 oracle
 | τ² | **hybrid_repair(终)** | **0.36**(18 perfect,**零 infra,十臂唯一全净 50/50**) | 块 a=0.28 + 块 b=**0.44**(25/25 一次过,21 user_stop+4 max_steps);**τ² 终局王座:hy3_rp 0.36 > hy3_rec 0.34 > full 0.24 > c2kv_rec 0.18 = c2kv 0.18 > c2kv_rp(并集含废块)**。hybrid 基座+任一步级修复≈+90% vs 纯 c2kv;修复增益来源=尾部 raw KV,repair 与 recover 两形态等效 |
 
 
+**BFCL 面(四臂过闸 200/200 生成,官方 scorer 口径):**
+
+| 臂 | accuracy | scorer total |
+|---|---|---|
+| full | 6/82 = 7.3% | 82(118 例解码失败被 scorer 丢弃 —— 散文代动作地板) |
+| c2kv | 6/82 = 7.3% | 82 |
+| c2kv_recover | 6/82 = 7.3% | 82 |
+| hybrid_recover | 6/82 = 7.3% | 82 |
+
+**四臂完全同值** —— BFCL 面被格式地板全主导:该 checkpoint 在 BFCL 上把 ~45% 的步骤输出散文而非工具调用(scorer 丢弃后 6/82 封顶),压缩/修复/hybrid 的任何差异都不可见。与 hf_server 时代的地板结论(B2 取证:6/82 同值)跨栈一致 —— 地板是模型×任务的属性,不是栈的。剩余 rp×2 臂因四臂同值而冗余,未跑(分支收尾决策)。
+
 **TS 面(六臂全过闸,n=3 场景):**
 
 | 臂 | similarity | 相对 full |
@@ -371,3 +382,33 @@ fusion 7.5-158、2/10 解码分叉）、B13 过时标注 ✓、B14 harness gist 
   bx_*（v2 四臂跑）、`~/bench_logs/proxy_task_bx_*.jsonl`（含
   cache/logical/prompt/system_len 记账列与漂移/recover 列）、
   `combo_analysis_v2.json`（机制面重算输出）
+
+
+## 6. 分支收尾(2026-09-03,task/bench-recover close)
+
+**最终三面全表**(完整 json:`~/bench_results/sg_matrix.json`;收割器
+`benchmarks/sg_harvest.py` 一键复算):
+
+| 面 | full | c2kv | c2kv_rec | hy3_rec | c2kv_rp | hy3_rp |
+|---|---|---|---|---|---|---|
+| τ² reward(n=50) | 0.24 | 0.18 | 0.18 | **0.34** | 0.14 | **0.36** |
+| TS sim(n=3) | **0.86** | 0.21 | 0.39 | **0.80** | 0.30 | 0.69 |
+| BFCL acc | 7.3% | 7.3% | 7.3% | 7.3% | (冗余未跑) | (冗余未跑) |
+
+**成本列**(proxy 记账,τ² 全程):请求 wall p50 —— full 5.4s / c2kv 6.5s /
+hy3_rec 7.0s / hy3_rp 9.2s;压缩比(logical/gist)7.78-7.83× 均匀(分母口径
+见 §5.5 的 B1 遗留声明)。
+
+**三问终答(v2,SGLang 后端,全部终态硬闸过):**
+1. **能不能叠加**:能,且是乘性而非加性 —— hybrid 尾 raw + 任一步级修复
+   ≈ 纯 c2kv 的 2 倍(τ² 0.36-0.34 vs 0.18;TS 0.80 vs 0.21)。
+2. **修哪块**:增益来源是尾部 raw KV 本身(hybrid 基座贡献 >> 修复形式);
+   repair 与 recover 两形态等效(τ² 0.36 vs 0.34);corr@first 在纯 c2kv
+   基座上无增益(0.14 < 0.18)。
+3. **谁帕累托**:hybrid_recover(TS 最优 0.80、τ² 次优 0.34、成本 p50 7.0s)
+   与 hybrid_repair(τ² 最优 0.36 零 infra、TS 0.69)并列,按面取舍。
+
+**分支关闭清单**:代码(全部修复+补丁+收割器,43 CPU 单测)在
+task/bench-recover;服务器已清场(我们全部 NPU 进程已终止,雨晗的未动);
+`~/bench_results/sg_matrix.json` 为最终数字源;BFCL rp×2 臂因四臂同值冗余
+未跑;z4 任务仍在 delayed/ 由其所有者决定。
