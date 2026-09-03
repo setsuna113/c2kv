@@ -11,7 +11,7 @@ tarball of `setsuna113/kvoffload-sglang-c2kv@22fbf3146`, github.com main
 site unreachable from the server; codeload works via the squid proxy —
 see docs/sglang_migration.md). The editable install in env `sgl` points at
 the git checkout, so the tarball tree is injected via PYTHONPATH precedence
-(`~/bench_logs/sgl_deploy/launch_sgl1088.sh`).
+(`benchmarks/ops/launch_sgl1088.sh`, vendored from the server copy).
 
 `0001-npu-compat-and-extract-tools.patch` = diff of the deployed tree vs
 the pristine tarball, four files:
