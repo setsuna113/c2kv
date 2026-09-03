@@ -72,6 +72,9 @@ def run(
         "--user-llm-args", user_args,
         "--max-concurrency", str(num_workers),
         "--save-to", run_name,
+        # headless: resume an existing checkpoint without the interactive
+        # prompt (a killed run's checkpoint otherwise EOFs the CLI)
+        "--auto-resume",
     ]
     if max_tasks:
         cmd += ["--num-tasks", str(max_tasks)]
