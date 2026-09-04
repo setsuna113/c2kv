@@ -1,0 +1,114 @@
+** WARNING: connection is not using a post-quantum key exchange algorithm.
+** This session may be vulnerable to "store now, decrypt later" attacks.
+** The server may need to be upgraded. See https://openssh.com/pq.html
+
+Authorized users only. All activities may be monitored and reported.
+{
+ "pass_counts": {
+  "full": 0,
+  "c2kv": 0,
+  "replace_w1": 0,
+  "replace_w2": 0,
+  "replace_w4": 0,
+  "replace_all": 0,
+  "recompute_w2": 0,
+  "append_w2": 0,
+  "append_w2_hint": 0,
+  "hint_only": 0,
+  "append_masked_w2": 0
+ },
+ "error_types": {
+  "full": {},
+  "c2kv": {
+   "multi_turn:empty_turn_model_response": 11,
+   "multi_turn:instance_state_mismatch": 23,
+   "multi_turn:execution_response_mismatch": 9
+  },
+  "replace_w1": {
+   "multi_turn:execution_response_mismatch": 6,
+   "multi_turn:instance_state_mismatch": 18,
+   "multi_turn:empty_turn_model_response": 8
+  },
+  "replace_w2": {
+   "multi_turn:instance_state_mismatch": 8,
+   "multi_turn:empty_turn_model_response": 8,
+   "multi_turn:execution_response_mismatch": 1
+  },
+  "replace_w4": {
+   "multi_turn:empty_turn_model_response": 2,
+   "multi_turn:instance_state_mismatch": 6
+  },
+  "replace_all": {
+   "multi_turn:execution_response_mismatch": 1,
+   "multi_turn:empty_turn_model_response": 1
+  },
+  "recompute_w2": {
+   "multi_turn:instance_state_mismatch": 8,
+   "multi_turn:empty_turn_model_response": 5
+  },
+  "append_w2": {
+   "multi_turn:empty_turn_model_response": 36,
+   "multi_turn:instance_state_mismatch": 8,
+   "multi_turn:execution_response_mismatch": 2
+  },
+  "append_w2_hint": {
+   "multi_turn:execution_response_mismatch": 9,
+   "multi_turn:empty_turn_model_response": 25,
+   "multi_turn:instance_state_mismatch": 11
+  },
+  "hint_only": {
+   "multi_turn:empty_turn_model_response": 7,
+   "multi_turn:instance_state_mismatch": 16,
+   "multi_turn:execution_response_mismatch": 15
+  },
+  "append_masked_w2": {
+   "multi_turn:instance_state_mismatch": 8,
+   "multi_turn:empty_turn_model_response": 8,
+   "multi_turn:execution_response_mismatch": 1
+  }
+ },
+ "mcnemar": {
+  "c2kv|append_w2": {
+   "a_only": [],
+   "b_only": [],
+   "p": 1.0
+  },
+  "hint_only|append_w2": {
+   "a_only": [],
+   "b_only": [],
+   "p": 1.0
+  },
+  "replace_w2|append_w2": {
+   "a_only": [],
+   "b_only": [],
+   "p": 1.0
+  },
+  "c2kv|hint_only": {
+   "a_only": [],
+   "b_only": [],
+   "p": 1.0
+  },
+  "replace_w2|append_masked_w2": {
+   "a_only": [],
+   "b_only": [],
+   "p": 1.0
+  }
+ },
+ "v3_sham_vs_c2kv": {
+  "n": 44,
+  "identical_vectors": true,
+  "sham_pass": 0,
+  "c2kv_pass": 0,
+  "diff_ids": [],
+  "sham_error_types": {
+   "multi_turn:empty_turn_model_response": 11,
+   "multi_turn:instance_state_mismatch": 23,
+   "multi_turn:execution_response_mismatch": 10
+  }
+ },
+ "v3_append_pass": 0,
+ "v3_vs_cur_append_agree": {
+  "agree": 43,
+  "n": 46
+ }
+}

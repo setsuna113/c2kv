@@ -1,0 +1,64 @@
+diff --git a/python/sglang/srt/managers/tokenizer_communicator_mixin.py b/python/sglang/srt/managers/tokenizer_communicator_mixin.py
+index 0fd39b9a5..3de5d359b 100644
+--- a/python/sglang/srt/managers/tokenizer_communicator_mixin.py
++++ b/python/sglang/srt/managers/tokenizer_communicator_mixin.py
+@@ -424,40 +424,58 @@ class TokenizerCommunicatorMixin:
+         )
+         return (await self.c2kv_extract_communicator(req))[0]
+ 
+     async def c2kv_repair_extract(
+         self: TokenizerManager,
+         input_ids: list,
+         input_text: str,
+         span_start: int,
+         span_end: int,
+         position_offset: int = 0,
++        repair_position_ids: Optional[List[int]] = None,
++        raw_kv_position_mode: str = "rotated",
+         repair_mode: str = "d_corr",
+         source_doc_index: Optional[int] = None,
+         extract_source: str = "model_prefill",
++        history_kv_method: Optional[str] = None,
++        history_kv_target_tokens: Optional[int] = None,
++        history_kv_retention_ratio: Optional[float] = None,
++        history_kv_recent_window: int = 64,
++        history_kv_kernel_size: int = 5,
++        history_kv_pooling: str = "avgpool",
++        history_kv_h2o_recent_fraction: float = 0.5,
+         rid: Optional[str] = None,
+     ) -> C2KVRepairExtractReqOutput:
+         """Run C2KV repair KV extraction via the scheduler."""
+         import uuid
+ 
+         self.auto_create_handle_loop()
+         req = TokenizedRepairExtractReqInput(
+             rid=rid or uuid.uuid4().hex,
+             input_ids=input_ids,
+             input_text=input_text,
+             span_start=span_start,
+             span_end=span_end,
+             position_offset=position_offset,
++            repair_position_ids=repair_position_ids,
++            raw_kv_position_mode=raw_kv_position_mode,
+             repair_mode=repair_mode,
+             source_doc_index=source_doc_index,
+-            already_rotated=True,
++            already_rotated=(raw_kv_position_mode != "pre_rope"),
+             extract_source=extract_source,
++            history_kv_method=history_kv_method,
++            history_kv_target_tokens=history_kv_target_tokens,
++            history_kv_retention_ratio=history_kv_retention_ratio,
++            history_kv_recent_window=history_kv_recent_window,
++            history_kv_kernel_size=history_kv_kernel_size,
++            history_kv_pooling=history_kv_pooling,
++            history_kv_h2o_recent_fraction=history_kv_h2o_recent_fraction,
+         )
+         return (await self.c2kv_repair_extract_communicator(req))[0]
+ 
+     async def clear_hicache_storage(self: TokenizerManager) -> ClearHiCacheReqOutput:
+         """Clear the hierarchical cache storage."""
+         self.auto_create_handle_loop()
+         # Delegate to the scheduler to handle HiCacheStorage clearing
+         return (await self.clear_hicache_storage_communicator(ClearHiCacheReqInput()))[
+             0
+         ]

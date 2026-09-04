@@ -1,0 +1,560 @@
+** WARNING: connection is not using a post-quantum key exchange algorithm.
+** This session may be vulnerable to "store now, decrypt later" attacks.
+** The server may need to be upgraded. See https://openssh.com/pq.html
+
+Authorized users only. All activities may be monitored and reported.
+=== frozen ids ===
+52 /home/zhuyuhan/project/gorilla/bfcl_runs/history_full_temp0_stability_20260819_172725/frozen_reference/correct_ids.txt
+multi_turn_base_5
+multi_turn_base_12
+multi_turn_base_15
+correct_ids.summary.json
+correct_ids.txt
+details.jsonl
+export_success_ids.log
+run_summary.json
+
+=== append_w2_diagnosis.json (full) ===
+{
+  "interpretation": "Append W2 keeps target gist KV visible while appending the same Recent-2 raw KV. If Append has more correct_to_wrong segments than Replace W2, the likely cause is duplicate representation interference, not a missing repair path.",
+  "append_w2": {
+    "counts": {
+      "triggered": 133,
+      "success": 10,
+      "action_wrong_to_correct": 10,
+      "action_wrong_to_wrong": 105,
+      "action_correct_to_wrong": 8,
+      "action_correct_to_correct": 10,
+      "state_wrong_to_correct": 11,
+      "state_wrong_to_wrong": 88,
+      "state_correct_to_wrong": 0,
+      "state_correct_to_correct": 34,
+      "action_net_recovery_gain": 2,
+      "state_net_recovery_gain": 11
+    },
+    "correct_to_wrong_examples": [
+      {
+        "id": "multi_turn_base_110",
+        "turn": 5,
+        "segment_start_step": 0,
+        "segment_length": 3,
+        "repair_target_indices": [
+          11,
+          12
+        ],
+        "repair_operation": "append",
+        "candidate_action_correct": true,
+        "repaired_action_correct": false,
+        "candidate_state_correct": false,
+        "repaired_state_correct": false,
+        "repair_raw_tokens": 166,
+        "physical_prefix_len_before": 212,
+        "physical_prefix_len_after": 378,
+        "logical_position_before": 623,
+        "logical_position_after": 623
+      },
+      {
+        "id": "multi_turn_base_121",
+        "turn": 3,
+        "segment_start_step": 0,
+        "segment_length": 3,
+        "repair_target_indices": [
+          7,
+          8
+        ],
+        "repair_operation": "append",
+        "candidate_action_correct": true,
+        "repaired_action_correct": false,
+        "candidate_state_correct": false,
+        "repaired_state_correct": false,
+        "repair_raw_tokens": 169,
+        "physical_prefix_len_before": 168,
+        "physical_prefix_len_after": 337,
+        "logical_position_before": 515,
+        "logical_position_after": 515
+      },
+      {
+        "id": "multi_turn_base_123",
+        "turn": 2,
+        "segment_start_step": 1,
+        "segment_length": 1,
+        "repair_target_indices": [
+          5,
+          6
+        ],
+        "repair_operation": "append",
+        "candidate_action_correct": true,
+        "repaired_action_correct": false,
+        "candidate_state_correct": false,
+        "repaired_state_correct": false,
+        "repair_raw_tokens": 53,
+        "physical_prefix_len_before": 163,
+        "physical_prefix_len_after": 216,
+        "logical_position_before": 536,
+        "logical_position_after": 536
+      },
+      {
+        "id": "multi_turn_base_136",
+        "turn": 3,
+        "segment_start_step": 0,
+        "segment_length": 2,
+        "repair_target_indices": [
+          7,
+          8
+        ],
+        "repair_operation": "append",
+        "candidate_action_correct": true,
+        "repaired_action_correct": false,
+        "candidate_state_correct": false,
+        "repaired_state_correct": false,
+        "repair_raw_tokens": 84,
+        "physical_prefix_len_before": 177,
+        "physical_prefix_len_after": 261,
+        "logical_position_before": 552,
+        "logical_position_after": 552
+      },
+      {
+        "id": "multi_turn_base_151",
+        "turn": 2,
+        "segment_start_step": 0,
+        "segment_length": 3,
+        "repair_target_indices": [
+          6,
+          7
+        ],
+        "repair_operation": "append",
+        "candidate_action_correct": true,
+        "repaired_action_correct": false,
+        "candidate_state_correct": false,
+        "repaired_state_correct": false,
+        "repair_raw_tokens": 144,
+        "physical_prefix_len_before": 224,
+        "physical_prefix_len_after": 368,
+        "logical_position_before": 766,
+        "logical_position_after": 766
+      },
+      {
+        "id": "multi_turn_base_154",
+        "turn": 4,
+        "segment_start_step": 0,
+        "segment_length": 2,
+        "repair_target_indices": [
+          12,
+          13
+        ],
+        "repair_operation": "append",
+        "candidate_action_correct": true,
+        "repaired_action_correct": false,
+        "candidate_state_correct": false,
+        "repaired_state_correct": false,
+        "repair_raw_tokens": 211,
+        "physical_prefix_len_before": 310,
+        "physical_prefix_len_after": 521,
+        "logical_position_before": 1020,
+        "logical_position_after": 1020
+      },
+      {
+        "id": "multi_turn_base_167",
+        "turn": 3,
+        "segment_start_step": 1,
+        "segment_length": 1,
+        "repair_target_indices": [
+          6,
+          7
+        ],
+        "repair_operation": "append",
+        "candidate_action_correct": true,
+        "repaired_action_correct": false,
+        "candidate_state_correct": false,
+        "repaired_state_correct": false,
+        "repair_raw_tokens": 94,
+        "physical_prefix_len_before": 142,
+        "physical_prefix_len_after": 236,
+        "logical_position_before": 436,
+        "logical_position_after": 436
+      },
+      {
+        "id": "multi_turn_base_186",
+        "turn": 5,
+        "segment_start_step": 0,
+        "segment_length": 3,
+        "repair_target_indices": [
+          12,
+          13
+        ],
+        "repair_operation": "append",
+        "candidate_action_correct": true,
+        "repaired_action_correct": false,
+        "candidate_state_correct": false,
+        "repaired_state_correct": false,
+        "repair_raw_tokens": 116,
+        "physical_prefix_len_before": 229,
+        "physical_prefix_len_after": 345,
+        "logical_position_before": 683,
+        "logical_position_after": 683
+      }
+    ]
+  },
+  "replace_w2": {
+    "counts": {
+      "triggered": 124,
+      "success": 78,
+      "action_wrong_to_correct": 82,
+      "action_wrong_to_wrong": 35,
+      "action_correct_to_wrong": 0,
+      "action_correct_to_correct": 7,
+      "state_wrong_to_correct": 43,
+      "state_wrong_to_wrong": 28,
+      "state_correct_to_wrong": 1,
+      "state_correct_to_correct": 52,
+      "action_net_recovery_gain": 82,
+      "state_net_recovery_gain": 42
+    },
+    "correct_to_wrong_examples": []
+  }
+}
+
+=== per-arm summary.json (first 1200 chars each) ===
+--- full
+{
+  "arm": "full",
+  "detector_arm": "oracle",
+  "rule_detector_threshold": 5.0,
+  "detector_signal_threshold": 5.0,
+  "logistic_detector_features_csv": "",
+  "logistic_detector_kfolds": 0,
+  "logistic_detector_feature_set": "auto",
+  "request_candidate_logprobs": false,
+  "category": "multi_turn_base",
+  "num_examples": 52,
+  "errors": 0,
+  "chat_calls": 490,
+  "extract_calls": 0,
+  "extract_success": 0,
+  "chat_seconds": 528.5308000000001,
+  "extract_seconds": 0.0,
+  "c2kv_extract_seconds": 0.0,
+  "repair_extract_seconds": 0.0,
+  "tool_execution_seconds": 0.13180000000000003,
+  "episode_e2e_observed_seconds": 528.6629000000001,
+  "chat_prompt_tokens": 2000937,
+  "chat_cached_tokens": 1890944,
+  "chat_recomputed_prompt_tokens": 78555,
+  "chat_cache_report_missing": 8,
+  "chat_completion_tokens": 26385,
+  "kv_peak_resident_tokens": 0,
+  "kv_runtime_report_missing": 490,
+  "c2kv_extract_recomputed_tokens": 0,
+  "repair_extract_recomputed_tokens": 0,
+  "total_actual_recomputed_tokens": 104940,
+  "history_original_tokens": 847,
+  "history_effective_tokens": 847,
+  "canonical_full_history_tokens": 847,
+  "physical_history_kv_tokens": 847,
+  "c2kv_gist_tokens": 0,
+  "repair_kv_tokens": 
+--- c2kv
+{
+  "arm": "c2kv",
+  "detector_arm": "oracle",
+  "rule_detector_threshold": 5.0,
+  "detector_signal_threshold": 5.0,
+  "logistic_detector_features_csv": "",
+  "logistic_detector_kfolds": 0,
+  "logistic_detector_feature_set": "auto",
+  "request_candidate_logprobs": false,
+  "category": "multi_turn_base",
+  "num_examples": 52,
+  "errors": 0,
+  "chat_calls": 481,
+  "extract_calls": 2569,
+  "extract_success": 2569,
+  "chat_seconds": 849.1682000000001,
+  "extract_seconds": 96.05669999999999,
+  "c2kv_extract_seconds": 96.05669999999999,
+  "repair_extract_seconds": 0.0,
+  "tool_execution_seconds": 0.10390000000000002,
+  "episode_e2e_observed_seconds": 945.3287999999998,
+  "chat_prompt_tokens": 1797261,
+  "chat_cached_tokens": 438144,
+  "chat_recomputed_prompt_tokens": 40319,
+  "chat_cache_report_missing": 356,
+  "chat_completion_tokens": 23703,
+  "kv_peak_resident_tokens": 0,
+  "kv_runtime_report_missing": 481,
+  "c2kv_extract_recomputed_tokens": 195480,
+  "repair_extract_recomputed_tokens": 0,
+  "total_actual_recomputed_tokens": 259502,
+  "history_original_tokens": 195480,
+  "history_effective_tokens": 49819,
+  "canonical_full_history_tokens": 154822,
+  "physical_history_kv_tokens": 4981
+--- replace_w2
+{
+  "arm": "d_corr_replace_w2",
+  "detector_arm": "oracle",
+  "rule_detector_threshold": 5.0,
+  "detector_signal_threshold": 5.0,
+  "logistic_detector_features_csv": "",
+  "logistic_detector_kfolds": 0,
+  "logistic_detector_feature_set": "auto",
+  "request_candidate_logprobs": false,
+  "category": "multi_turn_base",
+  "num_examples": 52,
+  "errors": 0,
+  "chat_calls": 739,
+  "extract_calls": 4571,
+  "extract_success": 4571,
+  "chat_seconds": 1426.1616000000001,
+  "extract_seconds": 240.84680000000003,
+  "c2kv_extract_seconds": 111.1725,
+  "repair_extract_seconds": 129.67450000000002,
+  "tool_execution_seconds": 0.19219999999999998,
+  "episode_e2e_observed_seconds": 1667.2008999999998,
+  "chat_prompt_tokens": 2740978,
+  "chat_cached_tokens": 438144,
+  "chat_recomputed_prompt_tokens": 40319,
+  "chat_cache_report_missing": 614,
+  "chat_completion_tokens": 38230,
+  "kv_peak_resident_tokens": 0,
+  "kv_runtime_report_missing": 739,
+  "c2kv_extract_recomputed_tokens": 325111,
+  "repair_extract_recomputed_tokens": 2465052,
+  "total_actual_recomputed_tokens": 2868712,
+  "history_original_tokens": 359110,
+  "history_effective_tokens": 116824,
+  "canonical_full_history_tokens": 294321,
+  "phy
+--- replace_all
+{
+  "arm": "d_corr_replace_all",
+  "detector_arm": "oracle",
+  "rule_detector_threshold": 5.0,
+  "detector_signal_threshold": 5.0,
+  "logistic_detector_features_csv": "",
+  "logistic_detector_kfolds": 0,
+  "logistic_detector_feature_set": "auto",
+  "request_candidate_logprobs": false,
+  "category": "multi_turn_base",
+  "num_examples": 52,
+  "errors": 0,
+  "chat_calls": 730,
+  "extract_calls": 3134,
+  "extract_success": 3134,
+  "chat_seconds": 1310.0354999999997,
+  "extract_seconds": 166.65189999999996,
+  "c2kv_extract_seconds": 104.4959,
+  "repair_extract_seconds": 62.15619999999999,
+  "tool_execution_seconds": 0.14590000000000003,
+  "episode_e2e_observed_seconds": 1476.8333000000002,
+  "chat_prompt_tokens": 2701383,
+  "chat_cached_tokens": 438144,
+  "chat_recomputed_prompt_tokens": 40319,
+  "chat_cache_report_missing": 605,
+  "chat_completion_tokens": 37777,
+  "kv_peak_resident_tokens": 0,
+  "kv_runtime_report_missing": 730,
+  "c2kv_extract_recomputed_tokens": 236370,
+  "repair_extract_recomputed_tokens": 1147249,
+  "total_actual_recomputed_tokens": 1461715,
+  "history_original_tokens": 339364,
+  "history_effective_tokens": 163195,
+  "canonical_full_history_tokens": 293347,
+  "phy
+--- recompute_w2
+{
+  "arm": "d_corr_recompute_w2",
+  "detector_arm": "oracle",
+  "rule_detector_threshold": 5.0,
+  "detector_signal_threshold": 5.0,
+  "logistic_detector_features_csv": "",
+  "logistic_detector_kfolds": 0,
+  "logistic_detector_feature_set": "auto",
+  "request_candidate_logprobs": false,
+  "category": "multi_turn_base",
+  "num_examples": 52,
+  "errors": 0,
+  "chat_calls": 740,
+  "extract_calls": 4382,
+  "extract_success": 4382,
+  "chat_seconds": 1431.7818999999997,
+  "extract_seconds": 174.98689999999996,
+  "c2kv_extract_seconds": 111.00389999999997,
+  "repair_extract_seconds": 63.98270000000002,
+  "tool_execution_seconds": 0.19130000000000003,
+  "episode_e2e_observed_seconds": 1606.9598000000008,
+  "chat_prompt_tokens": 2764118,
+  "chat_cached_tokens": 438144,
+  "chat_recomputed_prompt_tokens": 40319,
+  "chat_cache_report_missing": 615,
+  "chat_completion_tokens": 38679,
+  "kv_peak_resident_tokens": 0,
+  "kv_runtime_report_missing": 740,
+  "c2kv_extract_recomputed_tokens": 328446,
+  "repair_extract_recomputed_tokens": 1223191,
+  "total_actual_recomputed_tokens": 1630635,
+  "history_original_tokens": 363593,
+  "history_effective_tokens": 101253,
+  "canonical_full_history_tokens": 298
+--- append_w2
+{
+  "arm": "d_corr_w2",
+  "detector_arm": "oracle",
+  "rule_detector_threshold": 5.0,
+  "detector_signal_threshold": 5.0,
+  "logistic_detector_features_csv": "",
+  "logistic_detector_kfolds": 0,
+  "logistic_detector_feature_set": "auto",
+  "request_candidate_logprobs": false,
+  "category": "multi_turn_base",
+  "num_examples": 52,
+  "errors": 0,
+  "chat_calls": 700,
+  "extract_calls": 4419,
+  "extract_success": 4419,
+  "chat_seconds": 1304.8702999999998,
+  "extract_seconds": 235.2336,
+  "c2kv_extract_seconds": 100.00890000000001,
+  "repair_extract_seconds": 135.22490000000002,
+  "tool_execution_seconds": 0.1578,
+  "episode_e2e_observed_seconds": 1540.2615999999998,
+  "chat_prompt_tokens": 2585950,
+  "chat_cached_tokens": 438144,
+  "chat_recomputed_prompt_tokens": 40319,
+  "chat_cache_report_missing": 575,
+  "chat_completion_tokens": 34978,
+  "kv_peak_resident_tokens": 0,
+  "kv_runtime_report_missing": 700,
+  "c2kv_extract_recomputed_tokens": 294052,
+  "repair_extract_recomputed_tokens": 2195361,
+  "total_actual_recomputed_tokens": 2564710,
+  "history_original_tokens": 294052,
+  "history_effective_tokens": 98322,
+  "canonical_full_history_tokens": 230498,
+  "physical_history_kv_token
+--- append_w2_hint
+{
+  "arm": "d_corr_w2_hint",
+  "detector_arm": "oracle",
+  "rule_detector_threshold": 5.0,
+  "detector_signal_threshold": 5.0,
+  "logistic_detector_features_csv": "",
+  "logistic_detector_kfolds": 0,
+  "logistic_detector_feature_set": "auto",
+  "request_candidate_logprobs": false,
+  "category": "multi_turn_base",
+  "num_examples": 52,
+  "errors": 0,
+  "chat_calls": 680,
+  "extract_calls": 4208,
+  "extract_success": 4208,
+  "chat_seconds": 1738.7540999999999,
+  "extract_seconds": 242.4183,
+  "c2kv_extract_seconds": 102.28829999999999,
+  "repair_extract_seconds": 140.12990000000002,
+  "tool_execution_seconds": 0.12419999999999999,
+  "episode_e2e_observed_seconds": 1981.2960999999991,
+  "chat_prompt_tokens": 2522300,
+  "chat_cached_tokens": 438144,
+  "chat_recomputed_prompt_tokens": 40319,
+  "chat_cache_report_missing": 555,
+  "chat_completion_tokens": 57165,
+  "kv_peak_resident_tokens": 0,
+  "kv_runtime_report_missing": 680,
+  "c2kv_extract_recomputed_tokens": 414659,
+  "repair_extract_recomputed_tokens": 2037686,
+  "total_actual_recomputed_tokens": 2549829,
+  "history_original_tokens": 414659,
+  "history_effective_tokens": 148242,
+  "canonical_full_history_tokens": 354103,
+  "physic
+--- hint_only
+{
+  "arm": "hint_only",
+  "detector_arm": "oracle",
+  "rule_detector_threshold": 5.0,
+  "detector_signal_threshold": 5.0,
+  "logistic_detector_features_csv": "",
+  "logistic_detector_kfolds": 0,
+  "logistic_detector_feature_set": "auto",
+  "request_candidate_logprobs": false,
+  "category": "multi_turn_base",
+  "num_examples": 52,
+  "errors": 0,
+  "chat_calls": 783,
+  "extract_calls": 5094,
+  "extract_success": 5094,
+  "chat_seconds": 1497.6031000000003,
+  "extract_seconds": 107.27119999999996,
+  "c2kv_extract_seconds": 107.27119999999996,
+  "repair_extract_seconds": 0.0,
+  "tool_execution_seconds": 0.17140000000000002,
+  "episode_e2e_observed_seconds": 1605.0450999999998,
+  "chat_prompt_tokens": 2912701,
+  "chat_cached_tokens": 438144,
+  "chat_recomputed_prompt_tokens": 40319,
+  "chat_cache_report_missing": 658,
+  "chat_completion_tokens": 38384,
+  "kv_peak_resident_tokens": 0,
+  "kv_runtime_report_missing": 783,
+  "c2kv_extract_recomputed_tokens": 395747,
+  "repair_extract_recomputed_tokens": 0,
+  "total_actual_recomputed_tokens": 474450,
+  "history_original_tokens": 395747,
+  "history_effective_tokens": 100905,
+  "canonical_full_history_tokens": 314549,
+  "physical_history_kv_tok
+--- append_masked_w2
+{
+  "arm": "append_masked_w2",
+  "detector_arm": "oracle",
+  "rule_detector_threshold": 5.0,
+  "detector_signal_threshold": 5.0,
+  "logistic_detector_features_csv": "",
+  "logistic_detector_kfolds": 0,
+  "logistic_detector_feature_set": "auto",
+  "request_candidate_logprobs": false,
+  "category": "multi_turn_base",
+  "num_examples": 52,
+  "errors": 0,
+  "chat_calls": 739,
+  "extract_calls": 4571,
+  "extract_success": 4571,
+  "chat_seconds": 1417.9704000000002,
+  "extract_seconds": 239.70289999999994,
+  "c2kv_extract_seconds": 110.38959999999999,
+  "repair_extract_seconds": 129.313,
+  "tool_execution_seconds": 0.18090000000000003,
+  "episode_e2e_observed_seconds": 1657.8549000000003,
+  "chat_prompt_tokens": 2740978,
+  "chat_cached_tokens": 438144,
+  "chat_recomputed_prompt_tokens": 40319,
+  "chat_cache_report_missing": 614,
+  "chat_completion_tokens": 38230,
+  "kv_peak_resident_tokens": 0,
+  "kv_runtime_report_missing": 739,
+  "c2kv_extract_recomputed_tokens": 325111,
+  "repair_extract_recomputed_tokens": 2465052,
+  "total_actual_recomputed_tokens": 2868712,
+  "history_original_tokens": 359110,
+  "history_effective_tokens": 116824,
+  "canonical_full_history_tokens": 294321,
+  "physi
+
+=== append_w2 metrics.jsonl: n lines + keys of first ===
+52 /home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/append_w2/logs/metrics.jsonl
+['avg_chat_seconds', 'c2kv_correct_repair_wrong', 'c2kv_extract_recomputed_tokens', 'c2kv_extract_seconds', 'c2kv_gist_tokens', 'c2kv_wrong_repair_correct', 'c2kv_wrong_repair_wrong', 'canonical_full_history_tokens', 'canonical_history_kv_compression', 'chat_cache_report_missing', 'chat_cached_tokens', 'chat_calls', 'chat_completion_tokens', 'chat_prompt_tokens', 'chat_recomputed_prompt_tokens', 'chat_seconds', 'decode_tokens', 'detector_fn', 'detector_fp', 'detector_tn', 'detector_tp', 'detector_trigger_count', 'detector_trigger_rate', 'episode_e2e_observed_seconds', 'errors', 'extract_calls', 'extract_seconds', 'extract_success', 'extract_success_rate', 'false_negative_count', 'first_action_divergence', 'first_state_divergence', 'fp_recovery_count', 'fp_recovery_harm_count', 'history_compression_ratio', 'history_effective_tokens', 'history_original_tokens', 'id', 'kv_peak_resident_tokens', 'kv_runtime_report_missing', 'mode', 'net_repair_gain', 'oracle_harmful_segments', 'peak_physical_kv_tokens', 'physical_history_kv_tokens', 'query_prefill_tokens', 'ratio', 'recomputed_raw_tokens', 'repair_changed_action_count', 'repair_changed_action_rate', 'repair_changed_first_token_count', 'repair_changed_first_token_rate', 'repair_extract_recomputed_tokens', 'repair_extract_seconds', 'repair_kv_tokens', 'repair_rate', 'repair_segment_success_rate', 'repair_segments', 'repair_success_count', 'repair_success_rate', 'repair_success_when_start_state_already_drifted', 'repair_success_when_start_state_correct', 'repaired_step_count', 'speculative_terminal_discarded_count', 'tool_execution_seconds', 'total_actual_recomputed_tokens', 'tp_recovery_attempts', 'tp_recovery_success_count']
+
+=== append_w2 details.jsonl: n lines + keys ===
+52 /home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/append_w2/logs/details.jsonl
+['c2kv_drift_metrics', 'drift_steps', 'id', 'inference_log', 'input_token_count', 'kv_repair_arm', 'latency', 'output_token_count', 'repair_segments', 'result']
+
+=== append_w2 runner.log head ===
+kv_repair:d_corr_w2:   0%|          | 0/52 [00:00<?, ?it/s]kv_repair:d_corr_w2:   2%|▏         | 1/52 [00:33<28:03, 33.00s/it]kv_repair:d_corr_w2:   4%|▍         | 2/52 [00:50<19:51, 23.83s/it]kv_repair:d_corr_w2:   6%|▌         | 3/52 [01:25<23:32, 28.84s/it]kv_repair:d_corr_w2:   8%|▊         | 4/52 [01:42<19:23, 24.23s/it]kv_repair:d_corr_w2:  10%|▉         | 5/52 [02:17<22:08, 28.27s/it]kv_repair:d_corr_w2:  12%|█▏        | 6/52 [03:00<25:32, 33.31s/it]kv_repair:d_corr_w2:  13%|█▎        | 7/52 [03:03<17:21, 23.15s/it]kv_repair:d_corr_w2:  15%|█▌        | 8/52 [03:14<14:13, 19.39s/it]kv_repair:d_corr_w2:  17%|█▋        | 9/52 [03:30<13:08, 18.34s/it]kv_repair:d_corr_w2:  19%|█▉        | 10/52 [03:41<11:12, 16.01s/it]kv_repair:d_corr_w2:  21%|██        | 11/52 [03:53<10:08, 14.85s/it]kv_repair:d_corr_w2:  23%|██▎       | 12/52 [04:28<13:54, 20.87s/it]kv_repair:d_corr_w2:  25%|██▌       | 13/52 [05:28<21:15, 32.72s/it]kv_repair:d_corr_w2:  27%|██▋       | 14/52 [06:23<25:04, 39.59s/it]kv_repair:d_corr_w2:  29%|██▉       | 15/52 [07:02<24:22, 39.53s/it]kv_repair:d_corr_w2:  31%|███       | 16/52 [07:44<24:05, 40.16s/it]kv_repair:d_corr_w2:  33%|███▎      | 17/52 [08:09<20:47, 35.64s/it]kv_repair:d_corr_w2:  35%|███▍      | 18/52 [08:45<20:17, 35.82s/it]kv_repair:d_corr_w2:  37%|███▋      | 19/52 [09:25<20:18, 36.93s/it]kv_repair:d_corr_w2:  38%|███▊      | 20/52 [09:45<17:01, 31.92s/it]kv_repair:d_corr_w2:  40%|████      | 21/52 [10:08<15:00, 29.06s/it]kv_repair:d_corr_w2:  42%|████▏     | 22/52 [10:39<14:48, 29.62s/it]kv_repair:d_corr_w2:  44%|████▍     | 23/52 [11:06<13:56, 28.83s/it]kv_repair:d_corr_w2:  46%|████▌     | 24/52 [11:39<14:05, 30.21s/it]kv_repair:d_corr_w2:  48%|████▊     | 25/52 [12:03<12:41, 28.22s/it]kv_repair:d_corr_w2:  50%|█████     | 26/52 [12:34<12:35, 29.05s/it]kv_repair:d_corr_w2:  52%|█████▏    | 27/52 [13:05<12:26, 29.84s/it]kv_repair:d_corr_w2:  54%|█████▍    | 28/52 [13:40<12:31, 31.33s/it]kv_repair:d_corr_w2:  56%|█████▌    | 29/52 [14:44<15:47, 41.17s/it]kv_repair:d_corr_w2:  58%|█████▊    | 30/52 [14:57<12:01, 32.82s/it]kv_repair:d_corr_w2:  60%|█████▉    | 31/52 [15:35<12:00, 34.29s/it]kv_repair:d_corr_w2:  62%|██████▏   | 32/52 [16:08<11:15, 33.79s/it]kv_repair:d_corr_w2:  63%|██████▎   | 33/52 [16:14<08:03, 25.44s/it]kv_repair:d_corr_w2:  65%|██████▌   | 34/52 [16:41<07:45, 25.87s/it]kv_repair:d_corr_w2:  67%|██████▋   | 35/52 [17:45<10:36, 37.43s/it]kv_repair:d_corr_w2:  69%|██████▉   | 36/52 [18:12<09:06, 34.16s/it]kv_repair:d_corr_w2:  71%|███████   | 37/52 [18:50<08:51, 35.44s/it]kv_repair:d_corr_w2:  73%|███████▎  | 38/52 [19:43<09:30, 40.74s/it]kv_repair:d_corr_w2:  75%|███████▌  | 39/52 [20:42<09:58, 46.06s/it]kv_repair:d_corr_w2:  77%|███████▋  | 40/52 [21:26<09:07, 45.63s/it]kv_repair:d_corr_w2:  79%|███████▉  | 41/52 [21:52<07:17, 39.73s/it]kv_repair:d_corr_w2:  81%|████████  | 42/52 [22:13<05:39, 33.95s/it]kv_repair:d_corr_w2:  83%|████████▎ | 43/52 [23:22<06:41, 44.65s/it]kv_repair:d_corr_w2:  85%|████████▍ | 44/52 [24:03<05:48, 43.60s/it]kv_repair:d_corr_w2:  87%|████████▋ | 45/52 [24:47<05:05, 43.62s/it]kv_repair:d_corr_w2:  88%|████████▊ | 46/52 [25:36<04:31, 45.21s/it]kv_repair:d_corr_w2:  90%|█████████ | 47/52 [25:51<03:00, 36.06s/it]kv_repair:d_corr_w2:  92%|█████████▏| 48/52 [26:00<01:52, 28.12s/it]kv_repair:d_corr_w2:  94%|█████████▍| 49/52 [27:21<02:11, 43.77s/it]kv_repair:d_corr_w2:  96%|█████████▌| 50/52 [27:55<01:21, 40.89s/it]kv_repair:d_corr_w2:  98%|█████████▊| 51/52 [28:49<00:44, 44.76s/it]kv_repair:d_corr_w2: 100%|██████████| 52/52 [29:32<00:00, 44.21s/it]kv_repair:d_corr_w2: 100%|██████████| 52/52 [29:32<00:00, 34.08s/it]
+
+=== append_w2 runner.log tail ===
+kv_repair:d_corr_w2:   0%|          | 0/52 [00:00<?, ?it/s]kv_repair:d_corr_w2:   2%|▏         | 1/52 [00:33<28:03, 33.00s/it]kv_repair:d_corr_w2:   4%|▍         | 2/52 [00:50<19:51, 23.83s/it]kv_repair:d_corr_w2:   6%|▌         | 3/52 [01:25<23:32, 28.84s/it]kv_repair:d_corr_w2:   8%|▊         | 4/52 [01:42<19:23, 24.23s/it]kv_repair:d_corr_w2:  10%|▉         | 5/52 [02:17<22:08, 28.27s/it]kv_repair:d_corr_w2:  12%|█▏        | 6/52 [03:00<25:32, 33.31s/it]kv_repair:d_corr_w2:  13%|█▎        | 7/52 [03:03<17:21, 23.15s/it]kv_repair:d_corr_w2:  15%|█▌        | 8/52 [03:14<14:13, 19.39s/it]kv_repair:d_corr_w2:  17%|█▋        | 9/52 [03:30<13:08, 18.34s/it]kv_repair:d_corr_w2:  19%|█▉        | 10/52 [03:41<11:12, 16.01s/it]kv_repair:d_corr_w2:  21%|██        | 11/52 [03:53<10:08, 14.85s/it]kv_repair:d_corr_w2:  23%|██▎       | 12/52 [04:28<13:54, 20.87s/it]kv_repair:d_corr_w2:  25%|██▌       | 13/52 [05:28<21:15, 32.72s/it]kv_repair:d_corr_w2:  27%|██▋       | 14/52 [06:23<25:04, 39.59s/it]kv_repair:d_corr_w2:  29%|██▉       | 15/52 [07:02<24:22, 39.53s/it]kv_repair:d_corr_w2:  31%|███       | 16/52 [07:44<24:05, 40.16s/it]kv_repair:d_corr_w2:  33%|███▎      | 17/52 [08:09<20:47, 35.64s/it]kv_repair:d_corr_w2:  35%|███▍      | 18/52 [08:45<20:17, 35.82s/it]kv_repair:d_corr_w2:  37%|███▋      | 19/52 [09:25<20:18, 36.93s/it]kv_repair:d_corr_w2:  38%|███▊      | 20/52 [09:45<17:01, 31.92s/it]kv_repair:d_corr_w2:  40%|████      | 21/52 [10:08<15:00, 29.06s/it]kv_repair:d_corr_w2:  42%|████▏     | 22/52 [10:39<14:48, 29.62s/it]kv_repair:d_corr_w2:  44%|████▍     | 23/52 [11:06<13:56, 28.83s/it]kv_repair:d_corr_w2:  46%|████▌     | 24/52 [11:39<14:05, 30.21s/it]kv_repair:d_corr_w2:  48%|████▊     | 25/52 [12:03<12:41, 28.22s/it]kv_repair:d_corr_w2:  50%|█████     | 26/52 [12:34<12:35, 29.05s/it]kv_repair:d_corr_w2:  52%|█████▏    | 27/52 [13:05<12:26, 29.84s/it]kv_repair:d_corr_w2:  54%|█████▍    | 28/52 [13:40<12:31, 31.33s/it]kv_repair:d_corr_w2:  56%|█████▌    | 29/52 [14:44<15:47, 41.17s/it]kv_repair:d_corr_w2:  58%|█████▊    | 30/52 [14:57<12:01, 32.82s/it]kv_repair:d_corr_w2:  60%|█████▉    | 31/52 [15:35<12:00, 34.29s/it]kv_repair:d_corr_w2:  62%|██████▏   | 32/52 [16:08<11:15, 33.79s/it]kv_repair:d_corr_w2:  63%|██████▎   | 33/52 [16:14<08:03, 25.44s/it]kv_repair:d_corr_w2:  65%|██████▌   | 34/52 [16:41<07:45, 25.87s/it]kv_repair:d_corr_w2:  67%|██████▋   | 35/52 [17:45<10:36, 37.43s/it]kv_repair:d_corr_w2:  69%|██████▉   | 36/52 [18:12<09:06, 34.16s/it]kv_repair:d_corr_w2:  71%|███████   | 37/52 [18:50<08:51, 35.44s/it]kv_repair:d_corr_w2:  73%|███████▎  | 38/52 [19:43<09:30, 40.74s/it]kv_repair:d_corr_w2:  75%|███████▌  | 39/52 [20:42<09:58, 46.06s/it]kv_repair:d_corr_w2:  77%|███████▋  | 40/52 [21:26<09:07, 45.63s/it]kv_repair:d_corr_w2:  79%|███████▉  | 41/52 [21:52<07:17, 39.73s/it]kv_repair:d_corr_w2:  81%|████████  | 42/52 [22:13<05:39, 33.95s/it]kv_repair:d_corr_w2:  83%|████████▎ | 43/52 [23:22<06:41, 44.65s/it]kv_repair:d_corr_w2:  85%|████████▍ | 44/52 [24:03<05:48, 43.60s/it]kv_repair:d_corr_w2:  87%|████████▋ | 45/52 [24:47<05:05, 43.62s/it]kv_repair:d_corr_w2:  88%|████████▊ | 46/52 [25:36<04:31, 45.21s/it]kv_repair:d_corr_w2:  90%|█████████ | 47/52 [25:51<03:00, 36.06s/it]kv_repair:d_corr_w2:  92%|█████████▏| 48/52 [26:00<01:52, 28.12s/it]kv_repair:d_corr_w2:  94%|█████████▍| 49/52 [27:21<02:11, 43.77s/it]kv_repair:d_corr_w2:  96%|█████████▌| 50/52 [27:55<01:21, 40.89s/it]kv_repair:d_corr_w2:  98%|█████████▊| 51/52 [28:49<00:44, 44.76s/it]kv_repair:d_corr_w2: 100%|██████████| 52/52 [29:32<00:00, 44.21s/it]kv_repair:d_corr_w2: 100%|██████████| 52/52 [29:32<00:00, 34.08s/it]
+
+=== adapter location ===
+/home/zhuyuhan/project/gorilla/berkeley-function-call-leaderboard/c2kv_eval/adapters/bfcl_history_kv_repair.py
+/home/zhuyuhan/project/gorilla/berkeley-function-call-leaderboard/c2kv_eval/scripts/run_bfcl_kv_repair_sweep.sh
