@@ -378,14 +378,36 @@ class TestRecoverDecision:
         assert proxy_mod.messages_fingerprint(m1) != proxy_mod.messages_fingerprint(m3)
 
     def test_conversation_id_stable_across_growth(self):
+        # stable once the conversation has its second message (the task
+        # instruction); the 1->2 message boundary is a documented one-time
+        # reset, no compression has happened that early
         base = [{"role": "system", "content": "sys"},
-                {"role": "user", "content": "hello"}]
-        grown = base + [{"role": "assistant", "content": "hi"},
-                        {"role": "user", "content": "next"}]
+                {"role": "user", "content": "hello"},
+                {"role": "assistant", "content": "hi"}]
+        grown = base + [{"role": "user", "content": "next"},
+                        {"role": "assistant", "content": "again"}]
         assert proxy_mod.conversation_id(base) == proxy_mod.conversation_id(grown)
         other = [{"role": "system", "content": "sys"},
-                 {"role": "user", "content": "different"}]
+                 {"role": "user", "content": "different"},
+                 {"role": "assistant", "content": "hi"}]
         assert proxy_mod.conversation_id(base) != proxy_mod.conversation_id(other)
+
+    def test_conversation_id_tau2_shape_tasks_do_not_collide(self):
+        # THE 2026-09-04 audit bug: tau2 non-solo tasks all open with the
+        # same agent greeting under the same system prompt — a one-message
+        # key merged all 50 tasks onto one conversation id
+        def tau2_conv(instruction, extra=""):
+            return [{"role": "system", "content": "airline system"},
+                    {"role": "assistant", "content":
+                     "Hi! How can I help you today?"},
+                    {"role": "user", "content": instruction},
+                    {"role": "assistant", "content": "action" + extra}]
+        a1 = tau2_conv("book a flight to JFK")
+        a2 = tau2_conv("refund my ticket")
+        assert proxy_mod.conversation_id(a1) != proxy_mod.conversation_id(a2)
+        # growth-stable per task
+        assert proxy_mod.conversation_id(a1) == proxy_mod.conversation_id(
+            a1 + [{"role": "user", "content": "and back"}])
 
     def test_divergence_at_step_k_and_single_recover(self):
         reference, match, _, divergent = self._ref_and_actions()

@@ -128,7 +128,8 @@ def costs(arm: str) -> dict | None:
     return out
 
 
-MATRIX2_ARMS = ["full", "hiagent", "acon_hist", "acon_obs"]
+MATRIX2_ARMS = ["full", "c2kv", "hybrid",
+                "hiagent", "acon_hist", "acon_obs"]
 MATRIX2 = HOME / "bsa_results/matrix2"
 
 
@@ -160,20 +161,32 @@ def matrix2_harvest(json_out: str | None = None) -> dict:
             label = "τ²†CONTAMINATED" if bench == "tau2" else "TS"
             print(f"| {label} | {arm} | {d.get('n')} | {metric} | {note} |")
             report.setdefault(bench, {})[arm] = d
-        score_dir = HOME / ("benchmarks/gorilla/berkeley-function-call-leaderboard"
-                            f"/result/c2kv-{dashed}/score/multi_turn")
-        if score_dir.exists():
-            for f in sorted(score_dir.glob("*score*.json")):
-                for line in f.read_text().splitlines():
-                    line = line.strip()
-                    if not line:
-                        continue
-                    d = json.loads(line)
-                    if d.get("total_count") is not None:
-                        print(f"| BFCL | {arm} | {d['total_count']} | "
-                              f"acc {round(d['accuracy'], 4)} "
-                              f"({d['correct_count']}/{d['total_count']}) | |")
-                        report.setdefault("bfcl", {})[arm] = d
+        # bfcl_eval writes scores to <gorilla-root>/score/<model>/... ; the
+        # result/<model>/score/... layout only exists in some archive
+        # copies — probe BOTH (audit: reading only the latter made BFCL
+        # rows silently vanish from the matrix2 table)
+        gorr = HOME / ("benchmarks/gorilla/berkeley-function-call-leaderboard")
+        score_files = sorted(
+            (gorr / f"score/c2kv-{dashed}/multi_turn").glob("*score*.json"))
+        score_files += sorted(
+            (gorr / f"result/c2kv-{dashed}/score/multi_turn").glob("*score*.json"))
+        result_dir = gorr / f"result/c2kv-{dashed}/multi_turn"
+        if not score_files and result_dir.exists():
+            raise SystemExit(
+                f"FATAL: BFCL result rows exist for c2kv-{dashed} but no "
+                f"score file was found (score/ and result/*/score/ both "
+                f"empty) — the run scored nothing")
+        for f in score_files:
+            for line in f.read_text().splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                d = json.loads(line)
+                if d.get("total_count") is not None:
+                    print(f"| BFCL | {arm} | {d['total_count']} | "
+                          f"acc {round(d['accuracy'], 4)} "
+                          f"({d['correct_count']}/{d['total_count']}) | |")
+                    report.setdefault("bfcl", {})[arm] = d
     if json_out:
         Path(json_out).write_text(json.dumps(report, indent=2, ensure_ascii=False))
     return report

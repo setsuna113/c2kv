@@ -334,3 +334,50 @@ if __name__ == "__main__":
             fn()
             print(f"PASS {name}")
     print("ALL PASS")
+
+
+def test_acon_state_isolated_across_tau2_shaped_tasks():
+    """2026-09-04 audit BLOCKER: with a colliding conversation id, task B
+    inherited task A's rolling state (prev_summary + covered_until) and B's
+    early messages were neither summarized nor present.  The digest check
+    plus per-task ids must keep the two tasks' states independent even if
+    they somehow share one id."""
+    import proxy as proxy_mod
+
+    def tau2_msgs(instruction, mark):
+        m = [
+            {"role": "system", "content": "airline system"},
+            {"role": "assistant", "content": "Hi! How can I help you today?"},
+            {"role": "user", "content": instruction},
+        ]
+        for i in range(20):
+            m += [
+                {"role": "assistant", "content": "",
+                 "tool_calls": [{"id": f"{mark}{i}"}]},
+                {"role": "tool", "content": f"{mark}{i}-" + "z" * 900},
+            ]
+        return m
+
+    # different tasks MUST get different conversation ids (the primary fix)
+    c1 = proxy_mod.conversation_id(tau2_msgs("book a flight", "A"))
+    c2 = proxy_mod.conversation_id(tau2_msgs("refund my ticket", "B"))
+    assert c1 != c2
+
+    # belt-and-braces: even under a FORCED shared id, the digest check
+    # resets the rolling state instead of inheriting the other task's
+    _reset()
+    seen = []
+
+    def spy(payload):
+        seen.append(payload["messages"][-1]["content"])
+        return "SUMMARY"
+
+    m1, m2 = tau2_msgs("book a flight", "A"), tau2_msgs("refund", "B")
+    textarms.acon_transform(m1, spy, _action_dialect, "SHARED", mode="hist")
+    _, s2 = textarms.acon_transform(m2, spy, _action_dialect, "SHARED",
+                                    mode="hist")
+    # B must NOT inherit A's coverage: its compressor saw B's own messages
+    # from zero (A's marks absent from B's summary input)
+    assert "A0-" not in seen[-1] and "A19-" not in seen[-1]
+    assert "B0-" in seen[-1]
+    assert s2["n_compressor_calls"] == 1

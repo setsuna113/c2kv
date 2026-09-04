@@ -381,6 +381,10 @@ fusion 7.5-158、2/10 解码分叉）、B13 过时标注 ✓、B14 harness gist 
   `combo_analysis_v2.json`（机制面重算输出）
 
 
+### 5.7 conv 碰撞 × recover 臂机制注记(2026-09-04 审计)
+
+proxy 的 conversation_id 原为 system+第一条非 system 消息的摘要;tau2 非 solo 任务全部以同一 agent 问候语开头 ⇒ **50 个任务共享一个 conv id**。后果:RecoverState 的 repaired/re_diverged 按 conv 存——第一个任务修复一次后,其余任务的首次分歧都走 re_diverged 直接不修。**9 月 2 日矩阵中 tau2 的 c2kv_rec / hy3_rec 两列实际语义是"整个 benchmark 修一次",不是"每会话修一次"**(该两列已因 CONTAMINATED 作废,此处记录机制以免任何 agent-first benchmark 重蹈;ACON rolling 状态同理串会话,已由前 3→前 2 条消息键 + 内容 digest 校验 + 内容寻址缓存键三重修复,见 test_conversation_id_tau2_shape_tasks_do_not_collide 与 test_acon_state_isolated_across_tau2_shaped_tasks)。
+
 ## 6. 分支收尾(2026-09-03,task/bench-recover close;**同日审计更正**)
 
 **最终三面全表**(完整 json:`~/bench_results/sg_matrix.json`;收割器

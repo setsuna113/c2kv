@@ -432,11 +432,19 @@ def messages_fingerprint(messages: List[Dict[str, Any]]) -> str:
 
 
 def conversation_id(messages: List[Dict[str, Any]]) -> str:
-    """Stable per-conversation id: system head + first non-system message."""
+    """Stable per-conversation id: system head + first TWO non-system
+    messages.  Two, not one: agent-first benchmarks (tau2 non-solo) open
+    EVERY task with the same assistant greeting, so a one-message key
+    collapsed all 50 tasks onto one id — cross-contaminating ACON rolling
+    state under --max-concurrency and making RecoverState repair "once per
+    BENCHMARK" instead of once per conversation (2026-09-04 audit).  The
+    second message is the task instruction (distinct per task); the id
+    shifts once when a conversation grows past its first message — a
+    benign one-time state reset, no compression happens that early."""
     canon = _canonical_messages(messages)
     head = canon[0] if canon else {}
-    first = next((m for m in canon if m.get("role") != "system"), {})
-    return _digest([head, first])
+    nonsystem = [m for m in canon if m.get("role") != "system"][:2]
+    return _digest([head] + nonsystem)
 
 
 def action_canonical(message: Dict[str, Any]) -> Dict[str, Any]:
@@ -693,8 +701,6 @@ def _textarm_compress(payload: Dict[str, Any], meter=None) -> str:
     "length" is a NORMAL finish: the HiAgent summarizer decodes with
     max_tokens~100 and works BY truncation.  ``meter`` (optional) receives
     the response usage block for cost accounting."""
-    import textarms
-
     data = _post_json("/v1/chat/completions", payload, 600)
     try:
         choice = (data.get("choices") or [{}])[0]
@@ -719,8 +725,6 @@ def _apply_text_arm(payload: Dict[str, Any], arm, conv: str
     through the chat handler).  Compressor tokens/wall-time accumulate
     into stats["compressor_usage"] (the fairness ruling: text baselines'
     extra LLM calls must appear in the cost columns)."""
-    import textarms
-
     messages = payload.get("messages") or []
     model = payload.get("model") or "c2kv-agent"
     usage_acc = {"calls": 0, "prompt_tokens": 0,

@@ -22,7 +22,8 @@ import os
 import sys
 from pathlib import Path
 
-TAU2_SIMS = Path.home() / "benchmarks/tau2/data/simulations"
+TAU2_SIMS = (Path(os.environ.get("TAU2_DIR") or Path.home() / "benchmarks/tau2")
+             / "data/simulations")
 TS_RESULTS = Path.home() / "bench_results"
 GORILLA = Path(
     os.environ.get(

@@ -109,6 +109,21 @@ def run_benchmark(name: str, base_url: str, user_base_url: str, out_dir: Path,
     raise SystemExit(f"unknown benchmark {name!r}")
 
 
+def _git_short_sha() -> str:
+    """Short commit of the running tree: run_name/out-dir suffix so a code
+    change can never silently mix old and new trajectories via tau2's
+    --auto-resume (which keeps every normally-terminated simulation)."""
+    import subprocess
+    try:
+        sha = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=Path(__file__).resolve().parent, capture_output=True,
+            text=True, timeout=10).stdout.strip()
+        return sha or "nogit"
+    except Exception:
+        return "nogit"
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--benchmark", required=True, choices=["tau2", "bfcl", "toolsandbox"])
@@ -158,6 +173,12 @@ def main(argv=None):
                         help="training regime = 12 (ckpt-1088)")
     args = parser.parse_args(argv)
 
+    sha = _git_short_sha()
+    if sha not in (args.run_name or ""):
+        args.run_name = f"{args.run_name}_{sha}"
+    if sha not in str(args.out):
+        args.out = args.out.with_name(f"{args.out.name}_{sha}")
+
     args.out.mkdir(parents=True, exist_ok=True)
     log_dir = args.out / "logs"
     log_dir.mkdir(exist_ok=True)
@@ -200,9 +221,12 @@ def main(argv=None):
                             ta_rows.append(row)
         except OSError:
             pass
+        degenerate_requests = sum(1 for t in ta_rows if t.get("degenerate"))
         summary["textarm_summary"] = {
             "textarm_requests": len(ta_rows),
-            "degenerate_requests": sum(1 for t in ta_rows if t.get("degenerate")),
+            "degenerate_requests": degenerate_requests,
+            "degenerate_arm": bool(
+                ta_rows and degenerate_requests == len(ta_rows)),
             "compressor_calls": sum(int(t.get("n_compressor_calls") or 0)
                                     for t in ta_rows),
             "compressor_prompt_tokens": sum(
@@ -211,6 +235,9 @@ def main(argv=None):
             "compressor_completion_tokens": sum(
                 int((t.get("compressor_usage") or {}).get("completion_tokens") or 0)
                 for t in ta_rows),
+            "compressor_wall_sec": round(sum(
+                float((t.get("compressor_usage") or {}).get("wall_sec") or 0)
+                for t in ta_rows), 1),
         }
         if any(t.get("degenerate") for t in ta_rows):
             print(f"WARNING: arm {args.arm!r} ran DEGENERATE (no Subgoal "
