@@ -1602,3 +1602,37 @@ def test_traces_source_examples_carry_selected_tools(synthetic_dataset):
         for tool in example.selected_tools:
             name = tdj._tool_name(tool)
             assert any(f"<NAME> {name}" in doc for doc in example.tool_documents)
+
+
+def test_shuffled_system_tools_removes_the_gold_first_oracle():
+    """tools_in_system must not put the target tool at position 0 every time.
+
+    _select_tools seeds its pool with target[:1], so the raw return order is a
+    positional oracle.  The grid path never sees it (it shuffles its own
+    copy), but the system prefix renders selected_tools verbatim.
+    """
+    tools = [{"type": "function", "function": {"name": f"ns{i // 8}.tool_{i}"}} for i in range(64)]
+    first_is_target = 0
+    trials = 60
+    for span in range(trials):
+        selected = tdj._select_tools(
+            tools, "ns0.tool_0", random.Random(f"seed:{span}"), max_tools_per_sample=32
+        )
+        assert tdj._tool_name(selected[0]) == "ns0.tool_0"  # the oracle we are removing
+        ordered = tdj._shuffled_system_tools(selected, 42, "sess", span)
+        assert sorted(tdj._tool_name(t) for t in ordered) == sorted(
+            tdj._tool_name(t) for t in selected
+        )
+        if tdj._tool_name(ordered[0]) == "ns0.tool_0":
+            first_is_target += 1
+    # uniform position => ~1/32 of trials; the unfixed code scores trials/trials
+    assert first_is_target < trials // 4, first_is_target
+
+
+def test_shuffled_system_tools_is_deterministic():
+    tools = [{"type": "function", "function": {"name": f"t{i}"}} for i in range(40)]
+    a = tdj._shuffled_system_tools(tools, 42, "sess", 3)
+    b = tdj._shuffled_system_tools(tools, 42, "sess", 3)
+    c = tdj._shuffled_system_tools(tools, 42, "sess", 4)
+    assert [tdj._tool_name(t) for t in a] == [tdj._tool_name(t) for t in b]
+    assert [tdj._tool_name(t) for t in a] != [tdj._tool_name(t) for t in c]

@@ -555,6 +555,7 @@ def plan_recipes(
     scan_removals: Optional[Dict[str, int]] = None,
     provenance: Optional[Dict[str, Any]] = None,
     presented_target_est: Optional[int] = None,
+    min_budget_shrink: float = 0.5,
 ) -> Dict[str, Dict[str, Any]]:
     """Fill per-recipe family quotas and interleave into frozen orders.
 
@@ -648,6 +649,32 @@ def plan_recipes(
                 base_shrink,
                 budget_estimated_tokens,
                 int(math.ceil(effective_budget)),
+            )
+        # 2026-09-05: a WARNING is not a guard.  The g_h200_hist plan locked
+        # traces at share 0.4 while the traces pool had been narrowed to
+        # AppWorld alone, so base_shrink collapsed a 120M budget to ~4M -- a
+        # 32x under-dose that then trained, evaluated and published a "best
+        # checkpoint" without one abort anywhere in the pipeline.  A share
+        # locked to a starved family is a recipe bug, not a budget: fail here
+        # (or pass --min_budget_shrink 0 to accept it deliberately).
+        if base_shrink < min_budget_shrink:
+            binding = sorted(
+                (
+                    (available_tokens.get(family, 0.0) / (share * budget_estimated_tokens), family)
+                    for family, share in recipe.shares
+                    if share * budget_estimated_tokens > 0
+                )
+            )
+            raise ValueError(
+                f"recipe {recipe.name!r}: budget_shrink_factor={base_shrink:.4f} < "
+                f"--min_budget_shrink={min_budget_shrink}. The share lock costs "
+                f"{budget_estimated_tokens - int(math.ceil(effective_budget))} of "
+                f"{budget_estimated_tokens} estimated tokens. Binding family: "
+                f"{binding[0][1]!r} (available "
+                f"{int(available_tokens.get(binding[0][1], 0))} vs quota "
+                f"{int(dict(recipe.shares)[binding[0][1]] * budget_estimated_tokens)}). "
+                "Either widen that family, lower its share, or lower "
+                "--budget_estimated_tokens to what the pools can actually fill."
             )
         order, family_reports, total_tokens = _fill_recipe(
             recipe, filtered_pools, effective_budget, order_seed, seed_suffix="sample"
@@ -1542,6 +1569,7 @@ def main() -> None:
         help=f"repeatable; families from {FAMILIES}; shares sum to 1.0 (required unless --list_traces_subsets)",
     )
     parser.add_argument("--budget_estimated_tokens", type=int, default=None, help="N: per-recipe total estimated source tokens (required unless --list_traces_subsets)")
+    parser.add_argument("--min_budget_shrink", type=float, default=0.5, help="abort when a starved family shrinks every quota below this fraction of --budget_estimated_tokens (a share locked to a small family silently costs the whole budget; 0 = accept any shrink)")
     parser.add_argument("--oversample_factor", type=float, default=1.25, help="scan cap = quota x this factor")
     parser.add_argument("--repeat_unique_tokens", type=int, default=None, help="M: also emit <recipe>_repeat variants with ~M unique tokens per family pool")
     parser.add_argument("--epochs_override", action="append", default=None, metavar="name=n", help="repeatable audit record: recipe name -> train epochs (integer >= 1); scales presented_estimated_tokens in the plan jsons; applies to BOTH the base and the repeat variant of the named recipe")
@@ -1750,6 +1778,7 @@ def main() -> None:
         },
         provenance=provenance,
         presented_target_est=args.presented_target_est,
+        min_budget_shrink=args.min_budget_shrink,
     )
     # P0-2 audit: how each recipe family's pool was scanned (per-subset caps,
     # weights, exhaustion) — the same scan underlies every recipe/variant.

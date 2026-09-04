@@ -2654,7 +2654,91 @@ def _summarize_rows(args: argparse.Namespace, rows: List[Dict[str, Any]]) -> Lis
                 if valid_rows else 0.0
             ),
         })
+    _attach_paired_metrics(summaries, rows)
     return summaries
+
+
+_PAIRED_METRICS = (
+    "tool_name_accuracy",
+    "tool_name_accuracy_on_tool_targets",
+    "exact_match",
+    "response_type_accuracy",
+    "avg_text_token_f1",
+    "tool_call_rate",
+    "target_tool_call_rate",
+)
+
+
+def _attach_paired_metrics(
+    summaries: List[Dict[str, Any]], rows: List[Dict[str, Any]]
+) -> None:
+    """Add a ``paired`` block scored on the rows valid in EVERY mode.
+
+    Per-mode skips are not uniform: ``max_baseline_input_tokens`` only ever
+    fires on the uncompressed arms, so an appworld_dev cell can report c2kv on
+    700 decision points and ``full`` on the 102 with the shortest histories --
+    a different, systematically easier population (43/102 tool targets vs
+    558/700).  Reading those two numbers as "the cost of compression" compares
+    two different test sets.
+
+    ``paired`` re-scores every mode on the intersection of the qids that no
+    mode skipped, so the arms are comparable by construction.  The unpaired
+    fields are left untouched: they stay the right thing to quote for a single
+    arm's own population, and every earlier summary stays readable.
+    """
+    if not summaries:
+        return
+    keys = [(summary["mode"], summary["ratio"]) for summary in summaries]
+    by_key: Dict[Tuple[Any, Any], Dict[Any, Dict[str, Any]]] = {}
+    for row in rows:
+        key = (row.get("mode"), row.get("ratio"))
+        if key not in by_key:
+            by_key[key] = {}
+        identity = row.get("qid", row.get("id"))
+        if identity is None:
+            return  # no stable row identity: do not invent a pairing
+        by_key[key][identity] = row
+
+    common: Optional[set] = None
+    for key in keys:
+        valid = {
+            identity
+            for identity, row in by_key.get(key, {}).items()
+            if not row.get("skipped")
+        }
+        common = valid if common is None else (common & valid)
+    common = common or set()
+
+    for summary, key in zip(summaries, keys):
+        paired_rows = [by_key.get(key, {})[i] for i in sorted(common) if i in by_key.get(key, {})]
+        tool_targets = [
+            row for row in paired_rows
+            if row.get("target_has_tool_call") or row.get("target_tool_name") is not None
+        ]
+        n = len(paired_rows)
+        block: Dict[str, Any] = {
+            "n": n,
+            "n_unpaired": summary["num_valid"] - n,
+            "num_tool_targets": len(tool_targets),
+        }
+        if n:
+            block.update({
+                "tool_name_accuracy": sum(1 for r in paired_rows if r.get("tool_name_match")) / n,
+                "tool_name_accuracy_on_tool_targets": (
+                    sum(1 for r in tool_targets if r.get("tool_name_match")) / len(tool_targets)
+                    if tool_targets else 0.0
+                ),
+                "exact_match": sum(1 for r in paired_rows if r.get("exact_match")) / n,
+                "response_type_accuracy": (
+                    sum(1 for r in paired_rows if r.get("response_type_match")) / n
+                ),
+                "avg_text_token_f1": (
+                    sum(r.get("text_token_f1", 0.0) for r in paired_rows) / n
+                ),
+                "tool_call_rate": sum(1 for r in paired_rows if r.get("has_tool_call")) / n,
+                "target_tool_call_rate": len(tool_targets) / n,
+            })
+        summary["paired"] = block
 
 
 def _decision_step_bucket(step: int) -> str:

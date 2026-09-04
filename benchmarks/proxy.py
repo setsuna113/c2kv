@@ -54,6 +54,11 @@ CACHE = ExtractCache()
 ARM: Optional[Arm] = None
 UPSTREAM = ""
 REQUEST_LOG_PATH = ""
+# Segment granularity handed to /v1/c2kv/extract: "message" (historical
+# default) or "turn" (the granularity history_only arms are trained on).
+DOC_PACKING = "message"
+# Trainer max_doc_num tail cap; 0 = uncapped (historical default).
+MAX_DOCS = 0
 _log_lock = threading.Lock()
 
 
@@ -69,6 +74,134 @@ def _http_json(base_url: str, path: str, payload: Dict[str, Any], timeout: int) 
 
 def _content_key(role: str, content: str) -> str:
     return hashlib.sha256(f"{role}\x00{content}".encode("utf-8")).hexdigest()
+
+
+def _render_tool_calls(tool_calls: Any) -> str:
+    """Render OpenAI ``tool_calls`` exactly as the trainer renders them.
+
+    Byte-for-byte ``train.train_data_multiturn._render_agent_tool_calls``:
+    one ``<tool_call>{"name":...,"arguments":...}</tool_call>`` block per
+    call, compact JSON separators, ``ensure_ascii=False``.
+
+    Without this the proxy hands ``/v1/c2kv/extract`` an assistant message
+    whose ``content`` is ``None`` and whose action lives only in
+    ``tool_calls`` -- and because ``serving_chat._compute_c2kv_segments``
+    POPS every annotated message out of the request, that action is then
+    absent from the prompt entirely.  The compressed history of the
+    c2kv/hybrid arms would keep every tool result while losing every call the
+    agent made to obtain it.
+    """
+    if isinstance(tool_calls, str):
+        try:
+            tool_calls = json.loads(tool_calls)
+        except json.JSONDecodeError:
+            return ""
+    if not tool_calls:
+        return ""
+    if isinstance(tool_calls, dict):
+        tool_calls = [tool_calls]
+    if not isinstance(tool_calls, list):
+        return ""
+    rendered = []
+    for call in tool_calls:
+        if not isinstance(call, dict):
+            continue
+        if call.get("type") not in (None, "tool_call", "function_call") and "function" not in call:
+            continue
+        function = call.get("function") if isinstance(call.get("function"), dict) else {}
+        name = (
+            function.get("name")
+            or call.get("name")
+            or call.get("tool_name")
+            or call.get("function_name")
+            or ""
+        )
+        arguments = (
+            function.get("arguments")
+            or call.get("arguments")
+            or call.get("args")
+            or call.get("input")
+            or {}
+        )
+        rendered.append(
+            "<tool_call>\n"
+            + json.dumps({"name": name, "arguments": arguments},
+                         ensure_ascii=False, separators=(",", ":"))
+            + "\n</tool_call>"
+        )
+    return "\n".join(rendered)
+
+
+def _message_doc_text(message: Dict[str, Any]) -> str:
+    """Text the trainer would have compressed for this single message.
+
+    ``content`` (stringified) plus, for assistant messages, the rendered
+    ``tool_calls`` under an ``Action:`` header -- the same two parts
+    ``train_data_multiturn._normal_agent_message`` concatenates before the
+    turn-document builder ever sees the message.
+    """
+    content = message.get("content")
+    if not isinstance(content, str):
+        content = "" if content is None else json.dumps(content, ensure_ascii=False)
+    parts = [content] if content else []
+    calls = _render_tool_calls(
+        message.get("tool_calls") or message.get("toolCalls") or message.get("function_call")
+    )
+    if calls:
+        parts.append("Action:\n" + calls)
+    return "\n\n".join(parts)
+
+
+def _turn_documents(history: List[Dict[str, Any]]) -> List[str]:
+    """Group history messages into the trainer's turn documents.
+
+    Byte-for-byte the layout of
+    ``train_data_multiturn._agent_history_turn_docs`` applied to
+    ``_normal_agent_message`` output (which maps ``role="tool"`` to
+    ``"user"``): a user message opens a turn, assistant output accumulates
+    into it, any other role is appended as ``[role]\ncontent``.  Selected by
+    ``--doc-packing turn``: this is the document granularity every
+    ``doc_mode=history_only`` arm is trained on, whereas ``message`` packing
+    (the default, kept for continuity with earlier matrices) compresses one
+    document per raw message and therefore feeds the gist encoder a segment
+    shape it never saw during training.
+    """
+    docs: List[str] = []
+    current_user: Optional[str] = None
+    outputs: List[str] = []
+
+    def flush() -> None:
+        nonlocal current_user, outputs
+        if current_user is None and not outputs:
+            return
+        parts = ["Previous turn"]
+        if current_user:
+            parts.extend(["[User query]", current_user.strip()])
+        if outputs:
+            parts.extend([
+                "[Assistant output]",
+                "\n\n".join(item.strip() for item in outputs if item.strip()),
+            ])
+        docs.append("\n".join(parts).strip())
+        current_user = None
+        outputs = []
+
+    for message in history:
+        role = message.get("role") or "user"
+        if role == "tool":
+            role = "user"
+        content = _message_doc_text(message).strip()
+        if not content and role != "assistant":
+            continue
+        if role == "user":
+            flush()
+            current_user = content
+        elif role == "assistant":
+            outputs.append(content)
+        else:
+            outputs.append(f"[{role}]\n{content}")
+    flush()
+    return docs
 
 
 def _extract(role: str, content: str, ratio: int, timeout: int) -> Dict[str, Any]:
@@ -120,37 +253,75 @@ def _history_cutoff(messages: List[Dict[str, Any]]) -> int:
 
 
 def _assemble(messages: List[Dict[str, Any]], arm: Arm, timeout: int):
-    """Return (out_messages, gist_tokens, original_tokens, n_gist)."""
+    """Return (out_messages, gist_tokens, original_tokens, n_gist, n_dropped).
+
+    ``DOC_PACKING`` selects the segment granularity handed to
+    ``/v1/c2kv/extract``:
+
+    * ``message`` -- one document per raw history message, keeping its own
+      role.  Historical default; kept so earlier matrices stay reproducible.
+    * ``turn``    -- the trainer's turn documents (``_turn_documents``), each
+      extracted with ``role="user"``.  This is the packing every
+      ``doc_mode=history_only`` checkpoint is trained on, so it is the only
+      packing under which a serving number is a measurement of the checkpoint
+      rather than of an unseen segment shape.
+
+    ``MAX_DOCS`` mirrors the trainer's ``max_doc_num`` tail policy: when the
+    history yields more documents than the grid the arm was trained with, the
+    OLDEST documents are dropped (``0`` = no cap, the historical behaviour).
+    Dropped documents are reported so a cell can never silently be scored on
+    a truncated history.
+    """
     cutoff = _history_cutoff(messages)
-    out: List[Dict[str, Any]] = []
     gist_tokens = 0
     original_tokens = 0
     n_gist = 0
+
+    if not arm.compress_history:
+        return list(messages), 0, 0, 0, 0
+
+    raw_tail = arm.hybrid_top_k or 0
+    head: List[Dict[str, Any]] = []          # system prefix, always raw
+    history: List[Dict[str, Any]] = []       # compressible block
+    tail: List[Dict[str, Any]] = []          # raw hybrid tail + current turn
     for i, message in enumerate(messages):
-        role = message.get("role") or "user"
-        content = message.get("content")
-        content = content if isinstance(content, str) else json.dumps(content or "")
-        in_history = i < cutoff
-        keep_raw = (
-            not arm.compress_history
-            or not in_history
-            or role == "system"
-            or (arm.hybrid_top_k and i >= cutoff - arm.hybrid_top_k)
-        )
-        if keep_raw:
-            out.append(message)
-            continue
-        record = _extract(role, content, arm.ratio, timeout)
+        if (message.get("role") or "user") == "system":
+            head.append(message)
+        elif i >= cutoff or (raw_tail and i >= cutoff - raw_tail):
+            tail.append(message)
+        else:
+            history.append(message)
+
+    if DOC_PACKING == "turn":
+        docs = [("user", text) for text in _turn_documents(history)]
+    else:
+        docs = []
+        for message in history:
+            text = _message_doc_text(message)
+            if not text:
+                continue
+            docs.append((message.get("role") or "user", text))
+
+    n_dropped = 0
+    if MAX_DOCS and len(docs) > MAX_DOCS:
+        n_dropped = len(docs) - MAX_DOCS
+        docs = docs[-MAX_DOCS:]
+
+    out: List[Dict[str, Any]] = list(head)
+    for role, text in docs:
+        record = _extract(role, text, arm.ratio, timeout)
         gist_tokens += int(record.get("gist_len") or 0)
         original_tokens += int(record.get("original_seq_len") or 0)
         n_gist += 1
-        compressed = dict(message)
-        compressed["content"] = content
-        compressed["c2kv_key_hash"] = record["key_hash"]
-        # lets the server re-extract on cache miss (e.g. after a restart)
-        compressed["c2kv_ratio"] = arm.ratio
-        out.append(compressed)
-    return out, gist_tokens, original_tokens, n_gist
+        out.append({
+            "role": role,
+            "content": text,
+            "c2kv_key_hash": record["key_hash"],
+            # lets the server re-extract on cache miss (e.g. after a restart)
+            "c2kv_ratio": arm.ratio,
+        })
+    out.extend(tail)
+    return out, gist_tokens, original_tokens, n_gist, n_dropped
 
 
 class ProxyHandler(BaseHTTPRequestHandler):
@@ -189,7 +360,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
             return
         start = time.perf_counter()
         try:
-            messages, gist_tokens, original_tokens, n_gist = _assemble(
+            messages, gist_tokens, original_tokens, n_gist, n_dropped = _assemble(
                 payload.get("messages") or [], ARM, 600
             )
         except (RuntimeError, URLError, OSError) as error:
@@ -214,12 +385,16 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 "gist_tokens": gist_tokens,
                 "original_tokens": original_tokens,
                 "n_gist_messages": n_gist,
+                "doc_packing": DOC_PACKING,
+                "dropped_docs": n_dropped,
                 "assemble_sec": round(assemble_sec, 4),
                 "wall_sec": round(total_sec, 4),
             }
         )
         self._send_json(200, data)
-        self._log_request(payload, data, gist_tokens, original_tokens, n_gist, total_sec)
+        self._log_request(
+            payload, data, gist_tokens, original_tokens, n_gist, total_sec, n_dropped
+        )
 
     def do_GET(self):
         try:
@@ -257,7 +432,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _log_request(self, request, response, gist_tokens, original_tokens, n_gist, total_sec):
+    def _log_request(self, request, response, gist_tokens, original_tokens, n_gist, total_sec, n_dropped=0):
         if not REQUEST_LOG_PATH:
             return
         row = {
@@ -268,6 +443,9 @@ class ProxyHandler(BaseHTTPRequestHandler):
             "gist_tokens": gist_tokens,
             "original_tokens": original_tokens,
             "n_gist_messages": n_gist,
+            "doc_packing": DOC_PACKING,
+            "max_docs": MAX_DOCS,
+            "dropped_docs": n_dropped,
             "wall_sec": round(total_sec, 4),
             "status": "ok",
             "usage": response.get("usage"),
@@ -279,19 +457,43 @@ class ProxyHandler(BaseHTTPRequestHandler):
 
 
 def main(argv=None):
-    global ARM, UPSTREAM, REQUEST_LOG_PATH
+    global ARM, UPSTREAM, REQUEST_LOG_PATH, DOC_PACKING, MAX_DOCS
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--upstream", required=True, help="SGLang base URL, e.g. http://127.0.0.1:34000")
     parser.add_argument("--arm", required=True)
     parser.add_argument("--port", type=int, required=True)
     parser.add_argument("--request-log", default="")
     parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument(
+        "--doc-packing", choices=("message", "turn"), default="message",
+        help=(
+            "segment granularity for /v1/c2kv/extract. 'message' = one document"
+            " per raw history message (historical default). 'turn' = the"
+            " trainer's turn documents, i.e. the granularity every"
+            " doc_mode=history_only checkpoint was trained on."
+        ),
+    )
+    parser.add_argument(
+        "--max-docs", type=int, default=0,
+        help=(
+            "cap on compressed history documents, mirroring the trainer's"
+            " max_doc_num tail policy (oldest dropped). 0 = uncapped."
+        ),
+    )
     args = parser.parse_args(argv)
+    if args.max_docs < 0:
+        parser.error("--max-docs must be >= 0")
     ARM = get_arm(args.arm)
     UPSTREAM = args.upstream.rstrip("/")
     REQUEST_LOG_PATH = args.request_log
+    DOC_PACKING = args.doc_packing
+    MAX_DOCS = args.max_docs
     server = ThreadingHTTPServer((args.host, args.port), ProxyHandler)
-    print(f"proxy arm={ARM.name} listening on {args.host}:{args.port} -> {UPSTREAM}", flush=True)
+    print(
+        f"proxy arm={ARM.name} doc_packing={DOC_PACKING} max_docs={MAX_DOCS}"
+        f" listening on {args.host}:{args.port} -> {UPSTREAM}",
+        flush=True,
+    )
     server.serve_forever()
 
 

@@ -86,6 +86,32 @@ time.
 | `OVERWRITE` | `0` | Rebuild target cells |
 | `PORT` | `34000` | SGLang port |
 
+## Document packing (2026-09-05)
+
+`proxy.py` used to hand `/v1/c2kv/extract` only a message's `content`.  An
+assistant message that carries its action in `tool_calls` has `content: null`,
+so that document was extracted from an empty string -- and
+`serving_chat._compute_c2kv_segments` POPS every annotated message out of the
+prompt.  The compressed history of the `c2kv`/`hybrid` arms therefore kept
+every tool result while losing every call the agent made to obtain it.  Tool
+calls are now rendered into the document exactly as the trainer renders them,
+so **c2kv/hybrid cells produced before this fix are not comparable with cells
+produced after it**.
+
+`run.py --doc-packing` selects the segment granularity:
+
+| value | meaning |
+|---|---|
+| `message` (default) | one document per raw history message, keeping its role |
+| `turn` | the trainer's turn documents (`Previous turn / [User query] / [Assistant output]`, role `user`) |
+
+Every `doc_mode=history_only` checkpoint is trained on `turn` documents, so a
+serving number for such a checkpoint is only a measurement of the checkpoint
+under `--doc-packing turn`.  `--max-docs N` additionally mirrors the trainer's
+`max_doc_num` tail policy (oldest documents dropped, count reported as
+`dropped_docs` in the proxy log).  The proxy has no tokenizer, so the
+trainer's per-document `max_doc_length` split is NOT reproduced.
+
 `launch_sglang_h200.sh` can also be used directly. It enables C2KV and the
 `qwen25` tool parser, uses a static memory fraction of 0.8, and deliberately
 does not set `--attention-backend`. It passes

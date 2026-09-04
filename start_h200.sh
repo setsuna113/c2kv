@@ -27,6 +27,9 @@
 #   PLAN_BUDGET_EST          planner 扫描预算（estimated tokens，默认 120M；pool 不足自动 shrink）
 #   CALIB_STEPS              校准步数（默认 150）
 #   CHECKPOINT_TOKEN_GRAN    checkpoint 间隔（presented tokens，默认 16M）
+#   MIN_MILESTONES           save_steps 钳位下界：至少存这么多个里程碑（默认 4）
+#   ALLOW_SMALL_DOSE         1 = 允许 EPOCHS_OVERRIDE 下低于 MIN_PRESENTED_TOKENS
+#                            的剂量（探针臂专用；默认 0 = 直接 FATAL）
 #   EVAL_MAX_CKPTS           最多评几个 milestone（默认 6，均匀抽取含最终档）
 #   MAX_CRASH_RETRIES        训练崩溃/停滞自动恢复上限（默认 5）
 #   STALL_MIN                停滞看门狗窗口（分钟, 默认 35——必须大于大数据集的
@@ -671,9 +674,10 @@ PY
   # joint 口径(max_length 2048 / 1024 x 24 槽 / system 512), 不透传的话 history 臂
   # (768 x 16, system 4096)的 P_src、以及由它派生的 save_steps 都是按错几何算的。
   # 下面的默认值逐字等于 measure_arm_psrc.py 自己的 argparse 默认 -> 未设 env 时
-  # 命令行完全等价。注意 measure_arm_psrc.py 没有 --tools_in_system: "tools 进不进
-  # 网格"这一维仍无法透传, 该臂的 P_src 因此仍带残余偏差(run_config.json 里记了
-  # tools_in_system, 事后可据此判读)。
+  # 命令行完全等价。tools_in_system 不需要透传: measure_arm_psrc.py:344 从 arm
+  # manifest 的 tools_in_system 字段读取(train_manifest_used.json 记了它), 所以
+  # 该臂的 P_src 是按"工具不进网格"算的 —— 2026-09-03 那条"仍带残余偏差"的注释
+  # 是错的, 2026-09-05 核对 psrc_calibration.json(tools_in_system: true)后更正。
   local psrc_geom=(--max_length "${MAX_LENGTH:-2048}"
                    --max_doc_length "${MAX_DOC_LENGTH:-1024}"
                    --max_doc_num "${MAX_DOC_NUM:-24}"
@@ -716,6 +720,13 @@ else:
 # 建样本窗口, 是"端到端口径"的保守秒/步); projected_hours = sec_step x
 # total_steps; gist_doc_microbatch 记录校准时的吞吐配置——phase_train 启动前
 # 校验与当前 env 一致, 无此键的旧 run_config(mb=1 时代遗物)同样响亮失败。
+# 2026-09-05: save_steps 由 token 粒度算出, 与 total_steps 无关 ->
+# g_hist_s42 得到 save_steps=1597 > total_steps=603, 一个中途档都没存,
+# phase_select 于是在"只有终档"上选档, FINAL_SUMMARY 的选档表退化成一行。
+# 钳到至少 MIN_MILESTONES 个里程碑; 数值只会变小, 剂量口径不受影响。
+min_milestones = max(1, int("${MIN_MILESTONES:-4}"))
+if total_steps > min_milestones:
+    save_steps = min(save_steps, max(1, total_steps // min_milestones))
 sec_step = ${calib_secs} / ${CALIB_STEPS}
 projected_hours = sec_step * total_steps / 3600
 cfg = dict(p_pool_presented=int(p_pool), est_pool=int(est_pool),
@@ -735,6 +746,10 @@ cfg = dict(p_pool_presented=int(p_pool), est_pool=int(est_pool),
            # 2026-09-03 信息性字段: 记录本次校准所处的 dialect/几何, 供 select
            # 与事后审计对照(不参与任何断言)。
            epochs_override=(float(epochs_override) if epochs_override else None),
+           # 2026-09-05: 欠剂量豁免必须留痕, 否则事后无法把"探针臂"和"被
+           # planner 饿死却照常跑完的臂"区分开。
+           allow_small_dose=("${ALLOW_SMALL_DOSE:-0}" == "1"),
+           min_milestones=min_milestones,
            doc_mode="${DOC_MODE:-}" or None,
            tools_in_system="${TOOLS_IN_SYSTEM:-}" or None,
            hybrid_tail_choices="${HYBRID_TAIL_CHOICES:-}" or None,
@@ -759,8 +774,30 @@ if projected_hours > float("${WALL_CAP_HOURS}"):
 if not epochs_override:
     assert epochs * p_pool >= ${MIN_PRESENTED_TOKENS}, "pool too small for floor dose"
 else:
-    print(f"EPOCHS_OVERRIDE={epochs}: skip MIN_PRESENTED_TOKENS floor assert"
-          f" (expected presented ~= {int(p_pool * epochs)})")
+    # 2026-09-05: EPOCHS_OVERRIDE 曾把这条地板断言整条跳过, 于是 g_hist_s42/s43
+    # 用 p_pool=3.8M x 1.5 epoch = 6.1M presented(TARGET 的 2.4%)跑完全程,
+    # projected_hours=1.29 也低到不触发 WALL_CAP 告警, 最后照常写出
+    # FINAL_SUMMARY "best checkpoint"。剂量地板与 epoch 口径无关: 换方言只让
+    # "几个 epoch"不可比, 不让"总共喂了多少 token"不可比。要故意跑欠剂量的
+    # 探针臂就显式设 ALLOW_SMALL_DOSE=1(会记进 run_config, 事后可判读)。
+    expected = epochs * p_pool
+    if expected < ${MIN_PRESENTED_TOKENS} and "${ALLOW_SMALL_DOSE:-0}" != "1":
+        raise SystemExit(
+            "#" * 76 + "\n"
+            f"FATAL: EPOCHS_OVERRIDE={epochs} x p_pool={int(p_pool)} ="
+            f" {int(expected)} presented tokens < MIN_PRESENTED_TOKENS="
+            "${MIN_PRESENTED_TOKENS}"
+            f" ({expected / ${MIN_PRESENTED_TOKENS}:.1%} of the floor,"
+            f" {expected / ${TARGET_PRESENTED_TOKENS}:.1%} of TARGET).\n"
+            "池子太小 = 这个 checkpoint 测不出任何关于臂设计的东西。常见成因:\n"
+            "  * planner 的 budget_shrink_factor 被某个饿死的 family 拖垮\n"
+            "    (查 plan.json 的 budget_shrink_factor / families[*].shortfall);\n"
+            "  * RECIPE 的份额锁死在一个只有几百个 session 的子集上。\n"
+            "确要跑欠剂量探针臂: ALLOW_SMALL_DOSE=1 重跑 calibrate。\n"
+            + "#" * 76
+        )
+    print(f"EPOCHS_OVERRIDE={epochs}: expected presented ~= {int(expected)}"
+          f" (floor ${MIN_PRESENTED_TOKENS}, target ${TARGET_PRESENTED_TOKENS})")
 PY
   echo "calibrate done -> ${RUN_CONFIG}"
 }

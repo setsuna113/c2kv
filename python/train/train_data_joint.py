@@ -305,6 +305,31 @@ def _shuffle_json_keys(value: Any, rng: random.Random) -> Any:
     return value
 
 
+def _shuffled_system_tools(
+    selected_tools: Sequence[Dict[str, Any]],
+    split_seed: int,
+    session_id: Any,
+    span_index: Any,
+) -> List[Dict[str, Any]]:
+    """Order the ``tools_in_system`` pool without a positional oracle.
+
+    ``_select_tools`` builds its pool as ``target + same-namespace negatives +
+    random negatives``, so the gold tool is always element 0 whenever the
+    session ships more tools than ``max_tools_per_sample``.  The grid path
+    never sees that order (``_render_tool_documents`` shuffles its own copy),
+    but ``tools_in_system`` renders this list verbatim into the system prefix
+    -- and "the answer is the first tool" is a shortcut that no serving path
+    (BFCL, tau2, ToolSandbox all pass the caller's own tool order) reproduces.
+
+    A dedicated RNG stream keyed by the example id keeps this deterministic
+    and leaves the grid path's ``rng`` consumption untouched, so every
+    ``doc_mode != history_only`` arm stays bit-identical.
+    """
+    tools = list(selected_tools)
+    random.Random(f"{split_seed}:{session_id}:{span_index}:system_tool_order").shuffle(tools)
+    return tools
+
+
 def _render_tool_documents(
     tools: Sequence[Dict[str, Any]],
     rng: random.Random,
@@ -795,7 +820,18 @@ class AgentLLMTracesJointSource(AgentLLMTracesCompressHistorySource):
                     target_tool=target_tool,
                     target_tool_doc_index=target_doc_index,
                     action_type="tool_call" if has_tool_call else "other",
-                    selected_tools=list(selected_tools),
+                    # ``_select_tools`` returns the target FIRST (it seeds the
+                    # pool with ``target[:1]``).  ``tools_in_system`` renders
+                    # this list verbatim into the system prefix, so leaving the
+                    # order as returned would put the gold tool at position 0
+                    # of every over-budget example -- a positional oracle no
+                    # serving path ever offers (BFCL / tau2 / ToolSandbox ship
+                    # the caller's own tool order).  Shuffle on a dedicated RNG
+                    # stream so the grid path's ``rng`` consumption, and hence
+                    # every doc_mode != history_only arm, stays bit-identical.
+                    selected_tools=_shuffled_system_tools(
+                        selected_tools, self.split_seed, session_id, span_index
+                    ),
                 )
             )
         return examples

@@ -163,6 +163,12 @@ KEEP = (
     "exact_match",
     "response_type_accuracy",
     "avg_text_token_f1",
+    # 2026-09-05: paired = every mode re-scored on the rows no mode skipped.
+    # max_baseline_input_tokens only ever skips the uncompressed arms, so the
+    # unpaired full/truncate columns are a different (shorter-history, fewer
+    # tool-target) population than c2kv/hybrid; only the paired block may be
+    # read as "the cost of compression".
+    "paired",
 )
 
 results = harness.get("results") or []
@@ -230,8 +236,19 @@ with open(out_path, "w", encoding="utf-8") as handle:
     json.dump(summary, handle, ensure_ascii=False, indent=2)
     handle.write("\n")
 print(json.dumps({mode: {"ratio": row["ratio"], "n": row["n"],
-                         "tool_name_accuracy": row.get("tool_name_accuracy")}
+                         "tool_name_accuracy": row.get("tool_name_accuracy"),
+                         "paired_n": (row.get("paired") or {}).get("n"),
+                         "paired_tool_name_accuracy":
+                             (row.get("paired") or {}).get("tool_name_accuracy")}
                   for mode, row in modes.items()}, ensure_ascii=False, indent=2))
+_paired_n = {(row.get("paired") or {}).get("n") for row in modes.values()}
+if len(_paired_n) == 1 and next(iter(_paired_n)) is not None:
+    _n = next(iter(_paired_n))
+    _unpaired = {mode: row["n"] for mode, row in modes.items() if row["n"] != _n}
+    if _unpaired:
+        print(f"NOTE: paired population n={_n}; these modes were scored unpaired on a "
+              f"different population: {_unpaired}. Only the paired block is "
+              f"comparable across modes.")
 PY
 
 echo "history dev summary -> ${SUMMARY_JSON}"

@@ -15,7 +15,10 @@ sys.path.insert(0, str(HERE))
 from arms import get_arm  # noqa: E402
 
 
-def start_proxy(upstream: str, arm: str, port: int, log_dir: Path):
+def start_proxy(
+    upstream: str, arm: str, port: int, log_dir: Path,
+    doc_packing: str = "message", max_docs: int = 0,
+):
     log_path = log_dir / f"proxy_{arm}_{port}.jsonl"
     proxy_out = log_dir / f"proxy_{arm}_{port}.out"
     with proxy_out.open("w", encoding="utf-8") as out_handle:
@@ -27,6 +30,8 @@ def start_proxy(upstream: str, arm: str, port: int, log_dir: Path):
                 "--arm", arm,
                 "--port", str(port),
                 "--request-log", str(log_path),
+                "--doc-packing", doc_packing,
+                "--max-docs", str(max_docs),
             ],
             stdout=out_handle,
             stderr=subprocess.STDOUT,
@@ -107,6 +112,18 @@ def main(argv=None) -> None:
         help="defaults to --upstream; user-simulator traffic bypasses the arm proxy",
     )
     parser.add_argument("--proxy-port", type=int, default=34100)
+    parser.add_argument(
+        "--doc-packing", choices=["message", "turn"], default="message",
+        help=(
+            "segment granularity for compressed history. 'turn' matches the"
+            " trainer's turn documents and is the only setting under which a"
+            " doc_mode=history_only checkpoint is served in its own dialect."
+        ),
+    )
+    parser.add_argument(
+        "--max-docs", type=int, default=0,
+        help="trainer max_doc_num tail cap on compressed docs (0 = uncapped)",
+    )
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--benchmark-dir", type=Path, default=None,
                         help="tau2 checkout or BFCL package root; adapters also honor env vars")
@@ -134,7 +151,10 @@ def main(argv=None) -> None:
     args.out.mkdir(parents=True, exist_ok=True)
     log_dir = args.out / "logs"
     log_dir.mkdir(exist_ok=True)
-    proxy_proc, request_log = start_proxy(args.upstream, args.arm, args.proxy_port, log_dir)
+    proxy_proc, request_log = start_proxy(
+        args.upstream, args.arm, args.proxy_port, log_dir,
+        doc_packing=args.doc_packing, max_docs=args.max_docs,
+    )
     try:
         base_url = f"http://127.0.0.1:{args.proxy_port}"
         user_base_url = args.user_upstream or args.upstream

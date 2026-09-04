@@ -262,7 +262,10 @@ def test_budget_shrink_keeps_realized_shares_when_pool_undersized(caplog):
     pools = {"qa": _pool("qa", 3), "traces": _pool("traces", 5)}  # 300 + 500 tokens
     recipes = [parse_recipe("r=qa:0.5,traces:0.5")]
     with caplog.at_level(logging.WARNING):
-        results = plan_recipes(pools, recipes, budget_estimated_tokens=10000, order_seed=42)
+        results = plan_recipes(
+            pools, recipes, budget_estimated_tokens=10000, order_seed=42,
+            min_budget_shrink=0.0,  # this test IS the extreme-shrink case
+        )
     plan = results["r"]["plan"]
     assert plan["budget_shrink_factor"] == pytest.approx(0.06)  # 300 / 5000 binds
     assert plan["effective_budget_estimated_tokens"] == 600
@@ -407,6 +410,7 @@ def test_repeat_variant_short_pool_epochs_use_realized_total():
         budget_estimated_tokens=5000,
         order_seed=42,
         repeat_unique_tokens=2000,
+        min_budget_shrink=0.0,  # this test IS the extreme-shrink case
     )
     plan = results["r_repeat"]["plan"]
     # P1-3: the repeat pool shrinks to the binding family (qa 200 of its 1000
@@ -1391,3 +1395,28 @@ def test_scan_subset_prefix_default_tags_scan_stratum():
     )
     assert {entry.subset for entry in entries} == {"traces"}
     assert total == 300
+
+
+def test_min_budget_shrink_aborts_a_share_locked_starved_family():
+    """A share locked to a starved family must fail, not silently under-dose.
+
+    g_hist_s42/s43 locked traces at 0.4 with the traces pool narrowed to
+    AppWorld alone; base_shrink collapsed a 120M budget to ~4M and the
+    pipeline trained, evaluated and published a "best checkpoint" on 2.4% of
+    the intended dose without a single abort.
+    """
+    pools = {"qa": _pool("qa", 3), "traces": _pool("traces", 500)}
+    recipes = [parse_recipe("r=qa:0.5,traces:0.5")]
+    with pytest.raises(ValueError) as excinfo:
+        plan_recipes(pools, recipes, budget_estimated_tokens=10000, order_seed=42)
+    message = str(excinfo.value)
+    assert "budget_shrink_factor" in message
+    assert "min_budget_shrink" in message
+    assert "'qa'" in message  # names the binding family
+
+
+def test_min_budget_shrink_allows_a_pool_that_fills_the_budget():
+    pools = {"qa": _pool("qa", 60), "traces": _pool("traces", 60)}
+    recipes = [parse_recipe("r=qa:0.5,traces:0.5")]
+    results = plan_recipes(pools, recipes, budget_estimated_tokens=4000, order_seed=42)
+    assert results["r"]["plan"]["budget_shrink_factor"] == pytest.approx(1.0)
