@@ -16,7 +16,7 @@ Checks:
 Example:
   python benchmarks/ops/check_algorithm_parity.py \
       --official-repo /tmp/C2KV \
-      --sglang-repo /tmp/sglang-reconcile \
+      --sglang-repo /path/to/sglang-c2kv \
       --device npu
 """
 
@@ -482,9 +482,20 @@ def _check_rephase(torch, device, official, local, injection_path: Path):
         "C2KVPool": Any,
         "apply_rotary_emb": apply_rotary_emb,
     }
-    inject, _source, _tree = _nested_function(
-        injection_path, "inject_c2kv_gist", injection_ns
+    semantics, _source, _tree = _source_definitions(
+        injection_path.with_name("c2kv_semantics.py"),
+        {"validate_rope_position_range"},
+        dict(injection_ns),
     )
+    injection_ns["validate_rope_position_range"] = semantics[
+        "validate_rope_position_range"
+    ]
+    injection, _source, _tree = _source_definitions(
+        injection_path,
+        {"_validate_rope_positions", "inject_c2kv_gist"},
+        injection_ns,
+    )
+    inject = injection["inject_c2kv_gist"]
 
     entries = []
     for segment_idx, (positions, original_len) in enumerate(
@@ -663,6 +674,20 @@ def _sglang_mixed_case_wiring(source: str, tree: ast.AST):
     return uppercase_literal or uppercase_call, projection_block
 
 
+def _sglang_mixed_case_rejection(sglang_root: Path):
+    marker = "C2KV_GIST_PARAM_CASE_UNSUPPORTED"
+    definitions = []
+    for path in (sglang_root / "python/sglang/srt").rglob("*.py"):
+        source = path.read_text(encoding="utf-8")
+        if marker in source and "def validate_gist_param" in source:
+            definitions.append(path)
+    server_args = sglang_root / "python/sglang/srt/server_args.py"
+    wired = "validate_gist_param(" in server_args.read_text(encoding="utf-8")
+    if len(definitions) == 1 and wired:
+        return definitions[0].relative_to(sglang_root).as_posix()
+    return None
+
+
 def _local_lowercase_query_semantics(source: str):
     lowered = "gist_param = self.gist_param.lower()" in source
     lowercase_tests = all(
@@ -683,6 +708,7 @@ def _check_projection_routing(
     official_model_path: Path,
     local_model_path: Path,
     sglang_model_path: Path,
+    sglang_root: Path,
 ):
     official_source = official_model_path.read_text(encoding="utf-8")
     _official_case_contract(official_source)
@@ -696,11 +722,12 @@ def _check_projection_routing(
         {"torch": torch, "os": os},
     )
     mixed_supported, block = _sglang_mixed_case_wiring(sglang_source, sglang_tree)
-    if not mixed_supported:
+    mixed_rejection = _sglang_mixed_case_rejection(sglang_root)
+    if not mixed_supported and mixed_rejection is None:
         compact = " ".join(block.split())[:240]
         raise AssertionError(
-            "SGLang initializer does not preserve official mixed-case QkV query "
-            f"semantics; inspected: {compact}"
+            "SGLang neither preserves official mixed-case QkV query semantics "
+            f"nor rejects it explicitly; inspected: {compact}"
         )
 
     rows = 3
@@ -745,7 +772,12 @@ def _check_projection_routing(
     return {
         "official_lowercase_qkv": "base",
         "local_lowercase_qkv": local_semantics,
-        "uppercase_QkV": "gist_q_base_k_gist_v",
+        "official_uppercase_QkV": "gist_q_base_k_gist_v",
+        "sglang_uppercase_QkV": (
+            "gist_q_base_k_gist_v"
+            if mixed_supported
+            else f"explicitly_rejected_by:{mixed_rejection}"
+        ),
     }
 
 
@@ -823,6 +855,7 @@ def main(argv=None):
                 paths["official_qwen3"],
                 paths["local_qwen3"],
                 paths["sglang_qwen3"],
+                Path(args.sglang_repo).expanduser().resolve(),
             ),
         }
         checks = {}
