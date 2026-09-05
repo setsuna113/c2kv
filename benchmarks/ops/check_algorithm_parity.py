@@ -270,8 +270,6 @@ def _paper_residual(
 
 def _check_residuals(torch, device, official, local, sglang):
     checked = 0
-    upstream_short_document_errors = 0
-    local_short_document_errors = 0
     for seq_len, ratio in ((1, 4), (7, 4), (8, 4), (9, 4), (17, 8)):
         hidden = 6
         tokens = torch.arange(
@@ -294,45 +292,30 @@ def _check_residuals(torch, device, official, local, sglang):
                 oracle = _paper_residual(
                     torch, tokens, gist, ratio, residual_type, layer_idx
                 )
-                try:
-                    expected = official["get_apply_gist_residual_func"](
-                        official_cfg, layer_idx
-                    )(tokens, gist, ratio=ratio)
-                except RuntimeError:
-                    if seq_len >= ratio or torch.equal(oracle, gist):
-                        raise
-                    # The official implementation reshapes an empty full-block
-                    # prefix with an inferred dimension when len < ratio.  That
-                    # is an upstream edge bug, not the paper's block-mean rule.
-                    upstream_short_document_errors += 1
-                else:
-                    _assert_close(
-                        torch,
-                        expected,
-                        oracle,
-                        "official residual="
-                        f"{residual_type},layer={layer_idx},len={seq_len},ratio={ratio}",
-                    )
-                try:
-                    local_value = local["get_apply_gist_residual_func"](
-                        local["GistConfigMixin"](
-                            gist_type="dynamic-interleave",
-                            gist_residual_type=residual_type,
-                        ),
-                        layer_idx,
-                    )(tokens, gist, ratio=ratio)
-                except RuntimeError:
-                    if seq_len >= ratio or torch.equal(oracle, gist):
-                        raise
-                    local_short_document_errors += 1
-                else:
-                    _assert_close(
-                        torch,
-                        local_value,
-                        oracle,
-                        "local residual="
-                        f"{residual_type},layer={layer_idx},len={seq_len},ratio={ratio}",
-                    )
+                expected = official["get_apply_gist_residual_func"](
+                    official_cfg, layer_idx
+                )(tokens, gist, ratio=ratio)
+                _assert_close(
+                    torch,
+                    expected,
+                    oracle,
+                    "official residual="
+                    f"{residual_type},layer={layer_idx},len={seq_len},ratio={ratio}",
+                )
+                local_value = local["get_apply_gist_residual_func"](
+                    local["GistConfigMixin"](
+                        gist_type="dynamic-interleave",
+                        gist_residual_type=residual_type,
+                    ),
+                    layer_idx,
+                )(tokens, gist, ratio=ratio)
+                _assert_close(
+                    torch,
+                    local_value,
+                    oracle,
+                    "local residual="
+                    f"{residual_type},layer={layer_idx},len={seq_len},ratio={ratio}",
+                )
                 actual = sglang["get_apply_gist_residual_func"](
                     sglang_cfg, layer_idx
                 )(tokens, gist, ratio=ratio)
@@ -343,11 +326,7 @@ def _check_residuals(torch, device, official, local, sglang):
                     f"residual={residual_type},layer={layer_idx},len={seq_len},ratio={ratio}",
                 )
                 checked += 1
-    return {
-        "cases": checked,
-        "official_short_document_errors": upstream_short_document_errors,
-        "local_short_document_errors": local_short_document_errors,
-    }
+    return checked
 
 
 def _rope_tables(torch, max_position: int, head_dim: int, device):
