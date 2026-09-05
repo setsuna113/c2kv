@@ -130,9 +130,18 @@ class T33CaptureContext:
             return
         arm_dir = self.out_dir / self.arm
         arm_dir.mkdir(parents=True, exist_ok=True)
-        # numbered shards — a fixed name would overwrite earlier flushes
-        self._hid_flush_count = getattr(self, "_hid_flush_count", 0) + 1
-        shard = arm_dir / f"{self.part}_{self._hid_flush_count:04d}.hid.npz"
+        # numbered shards, continuing AFTER whatever already exists on disk —
+        # a per-process counter starting at 1 let a resumed/topup process
+        # overwrite its own earlier shards
+        existing = arm_dir.glob(f"{self.part}_*.hid.npz")
+        next_idx = 1
+        for p in existing:
+            try:
+                stem = p.name[len(self.part) + 1:-len(".hid.npz")]
+                next_idx = max(next_idx, int(stem) + 1)
+            except ValueError:
+                continue
+        shard = arm_dir / f"{self.part}_{next_idx:04d}.hid.npz"
         np.savez_compressed(shard, **{
             f"{qid}::{key}": arr for qid, entry in self._hid_store.items() for key, arr in entry.items()
         })
@@ -214,6 +223,7 @@ class T33CaptureContext:
         eos_id: int,
         max_new_tokens: int,
         tool_pool_names: Optional[Sequence[str]],
+        past_key_values: Any = None,
     ) -> Dict[str, Any]:
         """Build the steps/spans/IC record; consumes hook buffers."""
         # input_ids includes the mock-cache prefix; the continuation is:
@@ -251,6 +261,26 @@ class T33CaptureContext:
         decode_fn = lambda ids: tokenizer.decode(ids, skip_special_tokens=True)
         spans = spans_from_generation(decode_fn, gen_ids)
 
+        # The generation loop never runs a forward AFTER the last token, so
+        # the state at the final generated token (the 'last'/'penult' anchors)
+        # was previously zero-filled — tool_call_error_last was a constant
+        # fold-intercept.  One extra forward on the final token (with the
+        # generate-time KV cache, use_cache off) fills it.
+        if n_gen and past_key_values is not None:
+            try:
+                self.install_generation_hooks(model)
+                with torch.no_grad():
+                    model(
+                        input_ids=torch.tensor([[gen_ids[-1]]], dtype=torch.long,
+                                               device=next(model.parameters()).device),
+                        past_key_values=past_key_values,
+                        use_cache=False,
+                    )
+            except Exception:
+                self._bump_error("last_token_forward")
+            finally:
+                self.remove_generation_hooks(model)
+
         anchors = self._select_anchors(spans)
         hid_entry = self._extract_anchor_hiddens(anchors)
         ic = self._compute_ic(model, tokenizer, hid_entry, spans, tool_pool_names)
@@ -270,7 +300,13 @@ class T33CaptureContext:
         return record
 
     def _select_anchors(self, spans: Dict[str, Any]) -> List[Tuple[str, int]]:
-        """Ordered, de-duplicated anchor positions (token idx into continuation)."""
+        """Ordered anchor positions (token idx into continuation).
+
+        Multiple labels may share one position: a single-token tool name is
+        both name_first and name_last, and the previous build silently
+        swallowed name_last (setdefault kept the first label per position),
+        which dropped the name_last anchor row set to 89 rows.
+        """
         n = spans.get("n_generated", 0)
         wanted: List[Tuple[str, int]] = [("first", 0), ("last", n - 1 if n else None), ("penult", n - 2 if n >= 2 else None)]
         nf, nl = spans.get("name_first"), spans.get("name_last")
@@ -284,24 +320,35 @@ class T33CaptureContext:
             v = spans.get(key)
             if v is not None:
                 wanted.append((label, v))
-        seen_pos = {}
+        anchors: List[Tuple[str, int]] = []
+        seen: set = set()
         for label, pos in wanted:
             if pos is None or pos < 0 or pos >= n:
                 continue
-            seen_pos.setdefault(int(pos), label)
+            if (label, pos) not in seen:
+                seen.add((label, pos))
+                anchors.append((label, int(pos)))
         # name span tokens (for span-level probes) — cap total anchors
         if nf is not None and nl is not None:
             for pos in range(nf, min(nl + 1, nf + 10)):
-                if pos not in seen_pos and len(seen_pos) < self.max_anchor_tokens:
-                    seen_pos.setdefault(int(pos), f"name_span_{pos}")
-        anchors = [(label, pos) for pos, label in sorted(seen_pos.items(), key=lambda kv: kv[0])]
+                if ("name_span_%d" % pos, pos) not in seen and len(anchors) < self.max_anchor_tokens:
+                    seen.add(("name_span_%d" % pos, pos))
+                    anchors.append((f"name_span_{pos}", pos))
+        anchors.sort(key=lambda lp: (lp[1], lp[0]))
         return anchors
 
     def _layer_count(self) -> int:
         return len(self._gen_buffers)
 
     def _extract_anchor_hiddens(self, anchors: List[Tuple[str, int]]) -> Dict[str, Any]:
-        """hidden_for_token(j) = layer buffer entry j+1 ('token' records)."""
+        """hidden_for_token(j) = layer buffer entry j+1 ('token' records).
+
+        Also stores anchor_pre_hidden: the hidden state at the position
+        immediately BEFORE each anchor (query_last for pos 0) — the state
+        whose next-token distribution actually produced the anchor token.
+        The IC logit-lens must read THAT state; reading the anchor's own
+        state reads the distribution of the token AFTER it (one step late).
+        """
         out: Dict[str, Any] = {}
         try:
             layer_ids = sorted(self._gen_buffers.keys())
@@ -309,37 +356,45 @@ class T33CaptureContext:
             query_last = []
             query_mean = []
             anchor_mats = [[] for _ in anchors]  # [anchor][layer]
+            pre_mats = [[] for _ in anchors]
             for li in layer_ids:
                 buf = self._gen_buffers[li]
                 first = buf[0] if buf else {}
-                query_last.append(_to_fp16_cpu(first.get("query_last", torch.zeros(0))))
+                q_last = first.get("query_last", torch.zeros(0))
+                query_last.append(_to_fp16_cpu(q_last))
                 query_mean.append(_to_fp16_cpu(first.get("query_mean", torch.zeros(0))))
                 # token j -> buf[j+1]
                 token_vecs = [b.get("token") for b in buf[1:]]
                 for a_idx, (_label, pos) in enumerate(anchors):
                     vec = token_vecs[pos] if pos < len(token_vecs) else None
                     anchor_mats[a_idx].append(_to_fp16_cpu(vec) if vec is not None else None)
+                    # pre-position: pos-1's own state; pos==0 -> prompt last
+                    pre = (q_last if pos == 0 else
+                           (token_vecs[pos - 1] if pos - 1 < len(token_vecs) else None))
+                    pre_mats[a_idx].append(_to_fp16_cpu(pre) if pre is not None else None)
             out["layers"] = layer_ids
             out["query_last"] = np.stack(query_last) if n_layers else None
             out["query_mean"] = np.stack(query_mean) if n_layers else None
-            anchor_arr = []
-            anchor_valid = []
-            for a_idx, (label, pos) in enumerate(anchors):
-                col = anchor_mats[a_idx]
-                valid = [v is not None for v in col]
-                if any(valid):
-                    dim = next(v.shape[0] for v in col if v is not None)
-                    filled = [v if v is not None else np.zeros(dim, dtype=np.float16) for v in col]
-                    anchor_arr.append(np.stack(filled))
-                    anchor_valid.append(bool(all(valid)))
-                else:
-                    dim = query_last[0].shape[0] if n_layers else 0
-                    anchor_arr.append(np.zeros((n_layers, dim), dtype=np.float16))
-                    anchor_valid.append(False)
+
+            def stack_cols(mats):
+                arrs, valid_flags = [], []
+                for col in mats:
+                    valid = [v is not None for v in col]
+                    if any(valid):
+                        dim = next(v.shape[0] for v in col if v is not None)
+                        filled = [v if v is not None else np.zeros(dim, dtype=np.float16) for v in col]
+                        arrs.append(np.stack(filled))
+                        valid_flags.append(bool(all(valid)))
+                    else:
+                        dim = query_last[0].shape[0] if n_layers else 0
+                        arrs.append(np.zeros((n_layers, dim), dtype=np.float16))
+                        valid_flags.append(False)
+                return (np.stack(arrs, axis=1) if arrs else None), valid_flags  # [L, A, H]
+
             out["anchor_labels"] = [label for label, _pos in anchors]
             out["anchor_positions"] = [pos for _label, pos in anchors]
-            out["anchor_hidden"] = (np.stack(anchor_arr, axis=1) if anchor_arr else None)  # [L, A, H]
-            out["anchor_valid"] = anchor_valid
+            out["anchor_hidden"], out["anchor_valid"] = stack_cols(anchor_mats)
+            out["anchor_pre_hidden"], out["anchor_pre_valid"] = stack_cols(pre_mats)
         except Exception:
             self._bump_error("anchor_extract")
         return out
@@ -354,28 +409,40 @@ class T33CaptureContext:
     ) -> Optional[Dict[str, Any]]:
         """Candidate-restricted unembed Internal Consistency (4.4).
 
-        Candidates = FIRST token ids of the session's tool names.  At the
-        name_first / name_last anchors, per layer: restricted softmax argmax;
-        agreement with the final layer's restricted argmax at the same anchor.
+        Candidates = FIRST token ids of the session's tool names, tokenized
+        IN CONTEXT (the name as it appears inside ``{"name":"<name>"``), not
+        as isolated strings — Qwen BPE merges the leading quote differently.
+        At the name_first / name_last anchors the logit lens reads the
+        PRE-anchor hidden state (the state that produced the name token);
+        reading the anchor's own state would read the next token's
+        distribution.
         """
         if not tool_pool_names:
             return None
         try:
             labels = hid_entry.get("anchor_labels") or []
-            anchor_hidden = hid_entry.get("anchor_hidden")
-            if anchor_hidden is None or not labels:
+            lens_hidden = hid_entry.get("anchor_pre_hidden")
+            if lens_hidden is None or not labels:
                 return None
+            name_prefix = '{"name":"'
+            prefix_ids = tokenizer.encode(name_prefix, add_special_tokens=False)
             cand_ids = []
             for name in tool_pool_names:
-                ids = tokenizer.encode(name, add_special_tokens=False)
-                if ids:
-                    cand_ids.append(ids[0])
+                ids = tokenizer.encode(name_prefix + name, add_special_tokens=False)
+                # the name's first token = the token after the prefix, when
+                # the prefix tokenizes identically in context
+                if ids[:len(prefix_ids)] == prefix_ids and len(ids) > len(prefix_ids):
+                    cand_ids.append(ids[len(prefix_ids)])
+                else:
+                    bare = tokenizer.encode(name, add_special_tokens=False)
+                    if bare:
+                        cand_ids.append(bare[0])
             cand_ids = sorted(set(cand_ids))
             if len(cand_ids) < 2:
                 return {"note": "pool collapsed to <2 first tokens", "n_candidates": len(cand_ids)}
             weight = model.get_output_embeddings().weight
             w = weight[torch.tensor(cand_ids, device=weight.device)].to(torch.float32)  # [C, H]
-            n_layers = anchor_hidden.shape[0]
+            n_layers = lens_hidden.shape[0]
 
             def restricted(h_f16: np.ndarray):
                 h = torch.from_numpy(h_f16.astype(np.float32)).to(w.device)
@@ -389,7 +456,7 @@ class T33CaptureContext:
                 if label not in labels:
                     continue
                 a = labels.index(label)
-                col = anchor_hidden[:, a, :]  # [L, H]
+                col = lens_hidden[:, a, :]  # [L, H] — PRE-anchor states
                 choices = []
                 p1s, p2s = [], []
                 for li in range(n_layers):
@@ -439,6 +506,10 @@ class T33CaptureContext:
         hooks: List[Any] = []
         collected: Dict[str, List[Any]] = {"hid": [], "oproj": []}
         meta: Dict[str, Any] = {"tag": tag, "hid_layers": [], "oproj_layers": []}
+        if positions_by_row is not None:
+            meta["positions_by_row"] = [list(map(int, p)) for p in positions_by_row]
+        if flat_positions is not None:
+            meta["flat_positions"] = [int(p) for p in flat_positions]
 
         def sel_positions(hidden_shape):
             # hidden: [B, L, H]
@@ -493,8 +564,45 @@ class T33CaptureContext:
                 hooks.append(layer.register_forward_hook(make_layer_hook(i)))
                 if want_oproj:
                     hooks.append(layer.self_attn.o_proj.register_forward_hook(make_oproj_hook(i)))
+            # generate_gist drives the compression forward through
+            # decoder_layer.forward_with_gist(...) as a DIRECT method call,
+            # which bypasses nn.Module.__call__ — the layer forward hooks
+            # above never fired on the c2kv arm, leaving the gist-side
+            # context capture structurally empty (only the o_proj hooks
+            # fired, at padding positions).  Patch the method for the
+            # capture window; the wrapper calls the original and only READS
+            # its output, so numerics are untouched.
+            patched: List[Any] = []
+
+            def make_gist_wrapper(orig, layer_idx: int):
+                def wrapper(*a, **kw):
+                    out = orig(*a, **kw)
+                    try:
+                        if layer_idx % stride == 0 or layer_idx == len(layers) - 1:
+                            hidden = out[0] if isinstance(out, tuple) else out
+                            pos = sel_positions(hidden.shape)
+                            if pos:
+                                rows = torch.tensor([r for r, _p in pos], device=hidden.device)
+                                cols = torch.tensor([p for _r, p in pos], device=hidden.device)
+                                collected["hid"].append(hidden[rows, cols].detach().to(torch.float16).cpu().numpy())
+                                meta["hid_layers"].append(layer_idx)
+                    except Exception:
+                        ctx._bump_error(f"{tag}_gist_hid")
+                    return out
+                return wrapper
+
+            for i, layer in enumerate(layers):
+                if hasattr(layer, "forward_with_gist"):
+                    orig = layer.forward_with_gist
+                    layer.forward_with_gist = make_gist_wrapper(orig, i)
+                    patched.append((layer, orig))
             yield self
         finally:
+            for layer, orig in patched:
+                try:
+                    del layer.forward_with_gist  # restore the class method
+                except AttributeError:
+                    layer.forward_with_gist = orig
             for h in hooks:
                 h.remove()
             if collected["hid"]:
@@ -700,6 +808,17 @@ class T33CaptureContext:
                     entry["query_mean"] = hid["query_mean"]
                     if hid.get("anchor_hidden") is not None:
                         entry["anchor_hidden"] = hid["anchor_hidden"]
+                    if hid.get("anchor_pre_hidden") is not None:
+                        entry["anchor_pre_hidden"] = hid["anchor_pre_hidden"]
+                    # anchor bookkeeping persisted with the matrices so the
+                    # fitter can verify column alignment instead of trusting
+                    # the main-run steps file (topup shards previously had no
+                    # way to be checked against their labels)
+                    if hid.get("anchor_labels") is not None:
+                        entry["anchor_labels"] = np.array(hid["anchor_labels"], dtype=object)
+                        entry["anchor_positions"] = np.array(hid["anchor_positions"], dtype=np.int64)
+                        entry["anchor_valid"] = np.array(hid.get("anchor_valid") or [], dtype=bool)
+                        entry["anchor_pre_valid"] = np.array(hid.get("anchor_pre_valid") or [], dtype=bool)
                 for key, arr in self._ctx_capture.items():
                     if isinstance(arr, np.ndarray):
                         entry[key] = arr

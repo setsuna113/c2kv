@@ -6,7 +6,7 @@ set -uo pipefail
 
 REPO="${1:-$HOME/c2kv-t33}"
 OUT="${T33_OUT:-/home/liuyancheng/c2kv/outputs_lyc/t33}"
-RES="${REPO}/results/t33"
+RES="${T33_RES:-${REPO}/results/t33}"
 CAP="${OUT}/capture"
 TOKENIZER=/home/liuyancheng/c2kv/models/Qwen3-4B-Instruct-2507
 FROZEN_FULL="${REPO}/results/bdf_pilot/d_r2/battery_full.jsonl"
@@ -24,15 +24,31 @@ export PATH="$HOME/envs/c2kv/bin:$PATH"
 mkdir -p "${RES}"
 
 echo "== [1/7] determinism gate =="
+# The old loop verified with a garbled frozen path (${FROZEN_FULL/c2kv/full}
+# rewrote the repo dir, not the battery file), swallowed failures with
+# `|| true`, and never gated the topup batteries.  A gate FAIL now stops the
+# pipeline: downstream numbers do not inherit the manifest labels.
+GATE_FAIL=0
+gate_one() { # frozen rerun out
+  "${PY}" agent/t33_verify_rerun.py --frozen "$1" --rerun "$2" --out "$3" || GATE_FAIL=1
+}
+gate_one "${FROZEN_FULL}" "${OUT}/battery_full.jsonl" "${RES}/gate_full.json"
+gate_one "${FROZEN_C2KV}" "${OUT}/battery_c2kv.jsonl" "${RES}/gate_c2kv.json"
 for arm in full c2kv; do
-  "${PY}" agent/t33_verify_rerun.py \
-    --frozen "${FROZEN_FULL/c2kv/full}" \
-    --rerun "${OUT}/battery_${arm}.jsonl" \
-    --out "${RES}/gate_${arm}.json" || true
+  for suffix in _topup _topup2; do
+    tb="${OUT}/battery_${arm}${suffix}.jsonl"
+    [ -f "${tb}" ] || continue
+    if [ "${arm}" = full ]; then
+      gate_one "${FROZEN_FULL}" "${tb}" "${RES}/gate_${arm}${suffix}.json"
+    else
+      gate_one "${FROZEN_C2KV}" "${tb}" "${RES}/gate_${arm}${suffix}.json"
+    fi
+  done
 done
-# correct the full/c2kv frozen pairing explicitly
-"${PY}" agent/t33_verify_rerun.py --frozen "${FROZEN_FULL}" --rerun "${OUT}/battery_full.jsonl" --out "${RES}/gate_full.json" || true
-"${PY}" agent/t33_verify_rerun.py --frozen "${FROZEN_C2KV}" --rerun "${OUT}/battery_c2kv.jsonl" --out "${RES}/gate_c2kv.json" || true
+if [ "${GATE_FAIL}" != "0" ]; then
+  echo "!! determinism gate FAILED — stopping (rerun is not the frozen battery)"
+  exit 1
+fi
 
 echo "== [2/7] feature extraction =="
 "${PY}" agent/t33_extract_features.py --capture_dir "${CAP}" --arm full \
