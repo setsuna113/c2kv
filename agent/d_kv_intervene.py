@@ -644,6 +644,16 @@ def evaluate(args: argparse.Namespace) -> None:
     )
 
     hargs = _d_args(args)
+    if args.downstream_turns:
+        # Load every harness-valid span from the selected trigger sessions;
+        # max_samples_per_session was forced to zero above.
+        hargs.selected_qids = None
+        hargs.selected_sessions = sorted({
+            qid.rpartition(":")[0] if ":" in qid else qid for qid in qids
+        })
+    else:
+        hargs.selected_qids = list(qids)
+        hargs.selected_sessions = None
     tokenizer = HH._load_tokenizer(hargs)
     examples, selection_skips = HH._load_examples(hargs, tokenizer)
     logger.info("source: %d examples, selection_skips=%s", len(examples), selection_skips)

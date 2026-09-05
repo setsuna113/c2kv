@@ -750,6 +750,8 @@ class AgentLLMTracesCompressHistorySource(CompressHistorySource):
         include_tools: bool = False,
         prefix_history_doc_num: Optional[int] = None,
         prefix_history_exact: bool = False,
+        selected_qids: Optional[Sequence[str]] = None,
+        selected_sessions: Optional[Sequence[str]] = None,
     ) -> None:
         self.path = Path(path)
         self.split = split
@@ -765,6 +767,21 @@ class AgentLLMTracesCompressHistorySource(CompressHistorySource):
         self.include_tools = include_tools
         self.prefix_history_doc_num = prefix_history_doc_num
         self.prefix_history_exact = prefix_history_exact
+        self.selected_qids = (
+            frozenset(str(qid) for qid in selected_qids)
+            if selected_qids is not None else None
+        )
+        self.selected_sessions = (
+            frozenset(str(session) for session in selected_sessions)
+            if selected_sessions is not None else None
+        )
+        self._selected_qid_sessions = (
+            frozenset(
+                qid.rpartition(":")[0] if ":" in qid else qid
+                for qid in self.selected_qids
+            )
+            if self.selected_qids is not None else None
+        )
         self.records = self._load_records()
 
     def __len__(self) -> int:
@@ -772,6 +789,30 @@ class AgentLLMTracesCompressHistorySource(CompressHistorySource):
 
     def __iter__(self) -> Iterator[CompressHistoryExample]:
         yield from self.records
+
+    def _session_is_selected(self, session_id: str) -> bool:
+        if (self.selected_sessions is not None
+                and session_id not in self.selected_sessions):
+            return False
+        if (self._selected_qid_sessions is not None
+                and session_id not in self._selected_qid_sessions):
+            return False
+        return True
+
+    def _filter_selected_examples(
+        self,
+        session_id: str,
+        examples: Sequence[CompressHistoryExample],
+    ) -> List[CompressHistoryExample]:
+        if not self._session_is_selected(session_id):
+            return []
+        if self.selected_qids is None:
+            return list(examples)
+        return [example for example in examples if example.qid in self.selected_qids]
+
+    def _must_materialize_unselected_session(self) -> bool:
+        """Whether discarded sessions still affect sampling or max_records."""
+        return bool(self.max_samples_per_session) or self.max_records is not None
 
     def _load_records(self) -> List[CompressHistoryExample]:
         data_files = _find_agent_parquet_files(self.path)
@@ -804,15 +845,23 @@ class AgentLLMTracesCompressHistorySource(CompressHistorySource):
         keep_ids = train_ids if self.split == "train" else eval_ids
         rng = random.Random(self.split_seed + (0 if self.split == "train" else 1))
         records: List[CompressHistoryExample] = []
+        source_records = 0
         for session in sessions:
             if session["session_id"] not in keep_ids:
+                continue
+            selected = self._session_is_selected(session["session_id"])
+            if not selected and not self._must_materialize_unselected_session():
                 continue
             examples = self._session_examples(session["session_id"], session["spans"])
             if self.max_samples_per_session and len(examples) > self.max_samples_per_session:
                 examples = rng.sample(examples, self.max_samples_per_session)
-            records.extend(examples)
-            if self.max_records is not None and len(records) >= self.max_records:
-                return records[: self.max_records]
+            if self.max_records is not None:
+                remaining = max(0, self.max_records - source_records)
+                examples = examples[:remaining]
+            source_records += len(examples)
+            records.extend(self._filter_selected_examples(session["session_id"], examples))
+            if self.max_records is not None and source_records >= self.max_records:
+                return records
         return records
 
     def _load_records_from_manifest(self, data_files: Sequence[Path]) -> List[CompressHistoryExample]:
@@ -830,6 +879,7 @@ class AgentLLMTracesCompressHistorySource(CompressHistorySource):
         }
         rng = random.Random(self.split_seed + (0 if self.split == "train" else 1))
         records: List[CompressHistoryExample] = []
+        source_records = 0
         row_iter = _iter_agent_rows(data_files) if data_files and data_files[0].suffix == ".parquet" else _iter_agent_jsonl_rows(data_files)
         for row_index, row in enumerate(row_iter):
             session_id = str(
@@ -848,12 +898,20 @@ class AgentLLMTracesCompressHistorySource(CompressHistorySource):
                 spans = _sort_agent_spans(_json_loads(row.get("spans"), row.get("spans")) or [])
             if session_id not in keep_ids:
                 continue
+            selected_session = self._session_is_selected(session_id)
+            if (not selected_session
+                    and not self._must_materialize_unselected_session()):
+                continue
             examples = self._session_examples(session_id, spans)
             if self.max_samples_per_session and len(examples) > self.max_samples_per_session:
                 examples = rng.sample(examples, self.max_samples_per_session)
-            records.extend(examples)
-            if self.max_records is not None and len(records) >= self.max_records:
-                return records[: self.max_records]
+            if self.max_records is not None:
+                remaining = max(0, self.max_records - source_records)
+                examples = examples[:remaining]
+            source_records += len(examples)
+            records.extend(self._filter_selected_examples(session_id, examples))
+            if self.max_records is not None and source_records >= self.max_records:
+                return records
         return records
 
     def _split_session_ids(self, sessions: Sequence[Dict[str, Any]]) -> tuple[set[str], set[str]]:

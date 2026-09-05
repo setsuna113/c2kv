@@ -326,8 +326,12 @@ def test_downstream_forces_max_samples_per_session_zero(tmp_path, monkeypatch):
         )
     )
     assert seen["hargs"].max_samples_per_session == 0
+    assert seen["hargs"].selected_qids is None
+    assert seen["hargs"].selected_sessions == ["s1"]
     D.evaluate(_driver_args(tmp_path, manifest_path, bundles, out_name="k0.jsonl"))
     assert seen["hargs"].max_samples_per_session == 4
+    assert seen["hargs"].selected_qids == ["s1:0"]
+    assert seen["hargs"].selected_sessions is None
 
 
 # ---------------------------------------------------------------------------

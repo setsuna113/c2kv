@@ -3695,6 +3695,13 @@ def _summarize_turn_buckets(args: argparse.Namespace, rows: List[Dict[str, Any]]
 
 
 def _load_examples(args: argparse.Namespace, tokenizer: Any) -> tuple[List[CompressHistoryExample], Dict[str, int]]:
+    selected_qids = getattr(args, "selected_qids", None)
+    selected_sessions = getattr(args, "selected_sessions", None)
+    has_selection = selected_qids is not None or selected_sessions is not None
+    # max_examples is a global limit after selection_filter.  Applying the
+    # source filter first would move that boundary, so limited runs keep the
+    # original load/tokenize/limit order and filter only afterward.
+    source_prefilter = has_selection and not args.max_examples
     source = AgentLLMTracesCompressHistorySource(
         args.dataset_path,
         split=args.split,
@@ -3710,6 +3717,8 @@ def _load_examples(args: argparse.Namespace, tokenizer: Any) -> tuple[List[Compr
         include_tools=args.include_tools,
         prefix_history_doc_num=args.prefix_history_doc_num,
         prefix_history_exact=args.prefix_history_exact,
+        selected_qids=selected_qids if source_prefilter else None,
+        selected_sessions=selected_sessions if source_prefilter else None,
     )
     selection_skips: Counter[str] = Counter()
     examples = []
@@ -3722,6 +3731,21 @@ def _load_examples(args: argparse.Namespace, tokenizer: Any) -> tuple[List[Compr
         examples.append(example)
         if args.max_examples and len(examples) >= args.max_examples:
             break
+    if has_selection and not source_prefilter:
+        qids = set(str(qid) for qid in selected_qids) if selected_qids is not None else None
+        sessions = (
+            set(str(session) for session in selected_sessions)
+            if selected_sessions is not None else None
+        )
+        examples = [
+            example for example in examples
+            if (qids is None or example.qid in qids)
+            and (
+                sessions is None
+                or (example.qid.rpartition(":")[0] if ":" in example.qid else example.qid)
+                in sessions
+            )
+        ]
     return examples, dict(selection_skips)
 
 
