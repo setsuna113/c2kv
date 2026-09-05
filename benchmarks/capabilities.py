@@ -351,34 +351,44 @@ def _method_capabilities(result: PreflightResult, arm: str, backend: str,
             "detail": "turn-doc chunks and per-request materialisation; not the upstream artifact runtime",
         })
 
-    if spec.text_policy == "hiagent":
+    if spec.text_policy in {"hiagent", "hiagent_summary", "hiagent_full"}:
         _append_warning(
             result, "hiagent_protocol_compliance_unverified",
             "the proxy injects the Subgoal protocol, but compression requires the model to emit recognizable Subgoal turns",
         )
+    if spec.text_policy in {"hiagent", "hiagent_summary"}:
+        result.variants.append({
+            "name": "hiagent_summary_only",
+            "status": "partial",
+            "detail": "Subgoal prompt plus completed-subgoal summaries; no Trajectory Retrieval",
+        })
+    elif spec.text_policy == "hiagent_full":
         _append_warning(
-            result, "hiagent_trajectory_retrieval_unavailable",
-            "the integrated HiAgent variant does not implement Trajectory Retrieval",
+            result, "hiagent_trajectory_retrieval_runtime_unverified",
+            "the required feature attests proxy wiring, but no benchmark result has yet exercised a retrieval request",
         )
         result.variants.append({
-            "name": "hiagent_prompt_summary_no_retrieval",
-            "status": "partial",
-            "detail": "Subgoal prompt plus completed-segment summaries; retrieval is absent",
+            "name": "hiagent_trajectory_retrieval_v1",
+            "status": "conditional",
+            "detail": "full protocol is enabled only when the declared retrieval capability is supplied",
         })
 
-    if spec.text_policy in {"acon_hist", "acon_obs"}:
+    if spec.text_policy and spec.text_policy.startswith("acon_"):
         _append_warning(
-            result, "acon_guideline_optimization_unavailable",
-            "only fixed ACON base guidelines are ported; offline/ACON-U guideline optimization is not reproduced",
+            result, "acon_offline_guideline_optimizer_not_reproduced",
+            "the arm uses a fixed base/UT/UT+CO guideline; ACON's offline optimization loop is not run here",
         )
         _append_warning(
             result, "acon_trigger_runtime_dependent",
             "history/observation compression is a per-request threshold decision and may remain full",
         )
+        parts = spec.text_policy.split("_", 2)
+        mode = parts[1]
+        guideline = parts[2] if len(parts) == 3 else "base"
         result.variants.append({
-            "name": "acon_base_guidelines",
+            "name": f"acon_{mode}_{guideline}",
             "status": "partial",
-            "detail": "fixed text prompts with rolling history or observation refinement; no guideline optimizer",
+            "detail": f"fixed {guideline} guideline for {mode} compression; offline optimizer is absent",
         })
 
     if backend == "hfserver" and (spec.kv_reuse or spec.history_kv):

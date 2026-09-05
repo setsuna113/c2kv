@@ -119,6 +119,24 @@ def test_text_method_variants_are_warnings_not_static_success_claims(tmp_path):
     assert result.ok
     assert {item.code for item in result.warnings} == {
         "hiagent_protocol_compliance_unverified",
-        "hiagent_trajectory_retrieval_unavailable",
     }
     assert result.variants[0]["status"] == "partial"
+
+    full = capabilities.preflight(
+        "tau2", "hiagent_full", "sglang", options={"runner_python": sys.executable},
+        environ=_env(tmp_path, TAU2_DIR=str(tau2)),
+    )
+    assert "arm_capability:hiagent_trajectory_retrieval_v1" in _codes(full)
+
+    acon = capabilities.preflight(
+        "tau2", "acon_obs_ut_co", "sglang",
+        options={"runner_python": sys.executable},
+        environ=_env(tmp_path, TAU2_DIR=str(tau2)),
+    )
+    assert "acon_offline_guideline_optimizer_not_reproduced" in {
+        item.code for item in acon.warnings
+    }
+    assert acon.variants == [{
+        "name": "acon_obs_ut_co", "status": "partial",
+        "detail": "fixed ut_co guideline for obs compression; offline optimizer is absent",
+    }]
