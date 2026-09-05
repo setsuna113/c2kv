@@ -138,6 +138,10 @@ MATRIX2_LABELS = {
     "hiagent": "HiAgent (paper 3.3 prompt)",
     "acon_hist": "acon-base (guideline optimization not reproduced)",
     "acon_obs": "acon-base (guideline optimization not reproduced)",
+    # KV-reuse baseline (real mechanism, resident bytes = 1x raw; the
+    # 2026-09-03 "cacheblend-oracle" label is retired, see README)
+    "cacheblend_r16": "CacheBlend (artifact: V-dev, r=0.16, doc chunks)",
+    "cacheblend_r15_k": "CacheBlend (LMCache lineage: K-dev, r=0.15, doc chunks)",
 }
 MATRIX2 = HOME / "bsa_results/matrix2"
 

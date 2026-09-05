@@ -391,6 +391,152 @@ class SglangBackend(Backend):
         }
         return out, hint, session_id
 
+    # ---- KV reuse (CacheBlend) request shaping ----
+    def kv_reuse_extract(self, history_docs: List[Dict[str, Any]],
+                         system_text: str,
+                         tools: Optional[List[Dict[str, Any]]],
+                         spec: Dict[str, Any]) -> Dict[str, Any]:
+        """One CacheBlend extract (reconciled server,
+        c2kv_serving_semantics.md section 10).
+
+        Form: the FULL-CONTEXT multi-message ``messages`` /
+        ``target_index``..``target_end_index`` request -- system + tools +
+        one message PER HISTORY DOC -- so the server renders the prologue and
+        the docs exactly like a chat prompt, takes each doc's rendered message
+        as one chunk (``chunking="doc"``; ``"grid"`` sends
+        ``cacheblend_chunk_tokens`` instead and the server cuts a fixed token
+        grid across the span), computes every chunk's KV standalone, and
+        recomputes the ``recomp_ratio`` highest-deviation tokens in context.
+        The entry is the WHOLE span (post-RoPE at its absolute positions);
+        the chat request places it ``in_place``.
+        """
+        method = str(spec["method"])
+        messages: List[Dict[str, Any]] = []
+        if system_text:
+            messages.append({"role": "system", "content": system_text})
+        target_index = len(messages)
+        for doc in history_docs:
+            messages.append({"role": str(doc.get("role") or "user"),
+                             "content": str(doc.get("content") or "")})
+        target_end_index = len(messages) - 1
+        payload: Dict[str, Any] = {
+            "messages": messages,
+            "target_index": target_index,
+            "target_end_index": target_end_index,
+            "chat_template_kwargs": {"enable_thinking": False},
+            # "cacheblend" resolves to in_place (scheduler
+            # _C2KV_IN_PLACE_REPAIR_MODE_PREFIXES): the blended span stands in
+            # for the history it was extracted from
+            "repair_mode": method,
+            # the entry is post-RoPE at its native positions; the server
+            # forces this for kv_reuse anyway, sent explicitly for the log
+            "raw_kv_position_mode": "rotated",
+            "extract_source": "model_prefill",
+            "source_doc_index": 0,
+            "kv_reuse_method": method,
+            "cacheblend_recomp_ratio": float(spec["recomp_ratio"]),
+            "cacheblend_check_layer": int(spec["check_layer"]),
+            "cacheblend_metric": str(spec["metric"]),
+            "cacheblend_mask": str(spec["mask"]),
+        }
+        if str(spec["chunking"]) == "grid":
+            # a grid ignores the per-message boundaries: target_end_index
+            # still defines the span, the server cuts chunk_tokens across it
+            payload["cacheblend_chunk_tokens"] = int(spec["chunk_tokens"])
+        if tools:
+            payload["tools"] = tools
+        result = self._post_json("/v1/c2kv/repair_extract", payload, 600)
+        if not result.get("success", True) or not result.get("key_hash"):
+            raise BackendError(
+                "kv_reuse_extract_failed",
+                f"c2kv KV-reuse extract ({method}) failed: "
+                f"{result.get('error') or json.dumps(result)[:500]}")
+        # strict: a server that ignored kv_reuse_method would return a plain
+        # full raw-history entry, and the run would silently be a full-history
+        # arm wearing CacheBlend's name (same rule as history_kv_extract)
+        echoed = str(result.get("kv_reuse_method") or "")
+        if echoed != method:
+            raise BackendError(
+                "kv_reuse_extract_failed",
+                f"server did not apply kv_reuse_method={method!r} "
+                f"(echoed {echoed!r}); refusing to report a full-history "
+                "request as a KV-reuse baseline")
+        acct = result.get("cacheblend")
+        if not isinstance(acct, dict):
+            raise BackendError(
+                "kv_reuse_extract_failed",
+                f"server echoed no cacheblend accounting for {method!r}")
+        return result
+
+    @staticmethod
+    def _kv_reuse_carrier(method: str, key_hash: str) -> Dict[str, Any]:
+        """Repair-only carrier for the blended history span; ``in_place`` so
+        the query continues at the span's absolute end (the history-KV
+        carrier relies on the legacy prefix rule for the same effect).  No
+        ``c2kv_use_gist_projection`` is sent: the projection regime is the
+        server's ``--c2kv-query-proj`` decision, read per row from
+        ``c2kv_query_proj_effective``."""
+        return {
+            "role": "user",
+            "content": f"[{method} reused history kv]",
+            "c2kv_repair_only_key_hashes": [key_hash],
+            "c2kv_repair_placement": "in_place",
+        }
+
+    def _apply_kv_reuse(self, messages: List[Dict[str, Any]],
+                        reuse: Dict[str, Any],
+                        tools: Optional[List[Dict[str, Any]]]) -> tuple:
+        """Return (messages, hint) for a KV-reuse arm."""
+        spec = reuse["spec"]
+        method = str(spec["method"])
+        indices = [int(i) for i in reuse.get("history_out_indices") or []]
+        docs = reuse.get("history_docs") or []
+        if not indices or not docs:
+            # first turn: nothing completed to reuse; no extract, no hint, so
+            # such a row carries no cacheblend_* cost columns
+            return list(messages), None
+        record = self.kv_reuse_extract(
+            docs, reuse.get("system_text") or "", tools, spec)
+        acct = record.get("cacheblend") or {}
+        span = int(record.get("requested_span_tokens")
+                   or record.get("token_len") or 0)
+        recomputed = acct.get("recomputed_tokens")
+        keep = set(indices)
+        out: List[Dict[str, Any]] = []
+        for index, message in enumerate(messages):
+            if index == indices[0]:
+                out.append(self._kv_reuse_carrier(method, record["key_hash"]))
+            if index in keep:
+                continue
+            out.append(message)
+        hint = {
+            # CacheBlend keeps the WHOLE span resident: the saving is compute
+            "full_equivalent_history_tokens": span,
+            "active_history_kv_tokens": span,
+            "active_full_raw_tokens": 0,
+            "active_c2kv_gist_tokens": 0,
+            "active_raw_repair_tokens": span,
+            "active_recomputed_raw_tokens": int(recomputed or 0),
+            "estimated": False,
+            # provenance: the scheduler copies the whole hint into
+            # kv_memory_report, so these come back on the response
+            "kv_reuse_method": method,
+            "kv_reuse_backend": "repair_extract",
+            "cacheblend_span_tokens": span,
+            "cacheblend_recomputed_tokens": recomputed,
+            "cacheblend_effective_recomp_ratio": acct.get("effective_recomp_ratio"),
+            "cacheblend_recomp_ratio": float(spec["recomp_ratio"]),
+            "cacheblend_check_layer": int(spec["check_layer"]),
+            "cacheblend_metric": str(spec["metric"]),
+            "cacheblend_mask": str(spec["mask"]),
+            "cacheblend_chunking": str(spec["chunking"]),
+            "cacheblend_chunk_count": acct.get("chunk_count"),
+            "cacheblend_deviation_max": acct.get("deviation_max"),
+            "cacheblend_deviation_selected_min": acct.get("deviation_selected_min"),
+            "cacheblend_cache_hit": bool(acct.get("cache_hit", False)),
+        }
+        return out, hint
+
     # ---- chat shaping ----
     def prepare_chat(self, payload: Dict[str, Any], arm,
                      repair_plan: Optional[Dict[str, Any]],
@@ -426,6 +572,16 @@ class SglangBackend(Backend):
                 params = dict(out.get("session_params") or {})
                 params["id"] = session_id
                 out["session_params"] = params
+        if getattr(arm, "kv_reuse", None):
+            reuse = (context or {}).get("kv_reuse")
+            if not reuse:
+                raise BackendError(
+                    "kv_reuse_failed",
+                    f"arm {arm.name!r} is a KV-reuse arm but the proxy sent "
+                    "no history context")
+            messages, hint = self._apply_kv_reuse(messages, reuse, out.get("tools"))
+            if hint is not None:
+                out["c2kv_kv_memory_hint"] = hint
         if arm.constrain_tools:
             # structural_tag constrained decoding; the grammar input needs
             # xgrammar-safe schemas.  SGLang compiles the grammar from
@@ -519,6 +675,32 @@ class SglangBackend(Backend):
         }
         return {k: v for k, v in columns.items() if v is not None}
 
+    @staticmethod
+    def _kv_reuse_cost(data: Dict[str, Any]) -> Dict[str, Any]:
+        """The server's KV-reuse (CacheBlend) echo, flattened into cost
+        columns.  ``metadata.kv_memory_report`` carries the hint the proxy
+        sent (scheduler._init_c2kv_kv_memory_report copies it whole), and the
+        hint carries the SERVER's extract accounting (the proxy only relays
+        the repair_extract response).  ``cacheblend_recomputed_tokens`` /
+        ``cacheblend_span_tokens`` are the compute-saving columns; resident
+        KV is the whole span by construction."""
+        report = ((data.get("metadata") or {}).get("kv_memory_report")) or {}
+        if not isinstance(report, dict) or not report.get("kv_reuse_method"):
+            return {}
+        keys = (
+            "kv_reuse_method", "kv_reuse_backend",
+            "cacheblend_span_tokens", "cacheblend_recomputed_tokens",
+            "cacheblend_effective_recomp_ratio", "cacheblend_recomp_ratio",
+            "cacheblend_check_layer", "cacheblend_metric", "cacheblend_mask",
+            "cacheblend_chunking", "cacheblend_chunk_count",
+            "cacheblend_deviation_max", "cacheblend_deviation_selected_min",
+            "cacheblend_cache_hit",
+        )
+        columns = {k: report.get(k) for k in keys}
+        columns["kv_reuse_active_tokens"] = report.get("active_history_kv_tokens")
+        columns["kv_reuse_recomputed_tokens"] = report.get("active_recomputed_raw_tokens")
+        return {k: v for k, v in columns.items() if v is not None}
+
     def normalize_response(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Response -> (content, tool_calls, finish_reason, usage, cost).
 
@@ -572,6 +754,7 @@ class SglangBackend(Backend):
         if isinstance(metadata, dict) and metadata.get("finish_message") is not None:
             cost["finish_message"] = metadata["finish_message"]
         cost.update(self._history_kv_cost(data))
+        cost.update(self._kv_reuse_cost(data))
         return {
             "content": message.get("content"),
             "tool_calls": message.get("tool_calls"),

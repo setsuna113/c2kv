@@ -93,6 +93,18 @@ class Backend:
         session id the server acknowledged."""
         raise NotImplementedError
 
+    def kv_reuse_extract(self, history_docs: List[Dict[str, Any]],
+                         system_text: str,
+                         tools: Optional[List[Dict[str, Any]]],
+                         spec: Dict[str, Any]) -> Dict[str, Any]:
+        """KV REUSE form (CacheBlend): the completed history as per-chunk
+        out-of-context KV with the ``spec["recomp_ratio"]`` highest-deviation
+        tokens recomputed in context by the SERVER (arms.kv_reuse_spec).  One
+        chunk per ``history_docs`` entry (or a token grid).  Returns the entry
+        record: key_hash, requested_span_tokens, kv_reuse_method and the
+        ``cacheblend`` accounting (chunk_count, recomputed_tokens, ...)."""
+        raise NotImplementedError
+
     # ---- chat shaping ----
     def prepare_chat(self, payload: Dict[str, Any], arm,
                      repair_plan: Optional[Dict[str, Any]],

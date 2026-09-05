@@ -83,7 +83,7 @@ _OPENER = urlrequest.build_opener(urlrequest.ProxyHandler({}))
 
 import repair_policy
 import textarms
-from arms import Arm, get_arm, history_kv_spec  # type: ignore
+from arms import Arm, get_arm, history_kv_spec, kv_reuse_spec  # type: ignore
 from backends import BackendError, get_backend  # type: ignore
 
 
@@ -762,6 +762,51 @@ def _history_kv_context(out_messages: List[Dict[str, Any]],
     }
 
 
+def _kv_reuse_context(out_messages: List[Dict[str, Any]],
+                      counts: Dict[str, Any],
+                      arm: Arm) -> Optional[Dict[str, Any]]:
+    """Proxy-side history split for a KV-reuse (CacheBlend) arm.
+
+    Same split and the same turn-doc packing as ``_history_kv_context`` (so
+    a CacheBlend row is comparable with every other arm's row on the same
+    request), but the docs are kept SEPARATE: each turn doc is one CacheBlend
+    chunk, sent to the server as its own message of the multi-message
+    ``repair_extract`` form (``backends/sglang.SglangBackend.kv_reuse_extract``).
+    System messages stay raw and outside the reused span (bench rule); the
+    artifact caches the system prompt as chunk 0 -- README "CacheBlend arms".
+    """
+    spec = kv_reuse_spec(arm)
+    if spec is None:
+        return None
+    cutoff = int(counts.get("current_start_out_index") or 0)
+    system_parts: List[str] = []
+    history_indices: List[int] = []
+    indexed: List[Tuple[int, Dict[str, Any]]] = []
+    for index, message in enumerate(out_messages[:cutoff]):
+        if (message.get("role") or "user") == "system":
+            system_parts.append(str(message.get("content") or ""))
+            continue
+        item = _normalize_history_message(message)
+        if item is None:
+            continue
+        history_indices.append(index)
+        indexed.append((index, item))
+    docs = _turn_docs(indexed)
+    history_docs = [{"role": doc["role"], "content": doc["content"]}
+                    for doc in docs if doc["content"]]
+    return {
+        "spec": spec,
+        "method": spec["method"],
+        "chunking": spec["chunking"],
+        "system_text": "\n".join(part for part in system_parts if part),
+        "history_docs": history_docs,
+        "history_out_indices": history_indices,
+        "current_start_out_index": cutoff,
+        "n_history_messages": len(history_indices),
+        "n_history_docs": len(history_docs),
+    }
+
+
 def _textarm_compress(payload: Dict[str, Any], meter=None) -> str:
     """One compressor call for a text-level baseline arm.  Validates the
     finish reason and non-empty content — HTTP-200-with-error-body and
@@ -1075,6 +1120,12 @@ class ProxyHandler(BaseHTTPRequestHandler):
                     k: history_ctx[k] for k in
                     ("method", "backend", "n_history_messages",
                      "n_history_docs", "history_message_count")}
+            reuse_ctx = _kv_reuse_context(messages_out, counts, ARM)
+            if reuse_ctx is not None:
+                counts["kv_reuse"] = {
+                    k: reuse_ctx[k] for k in
+                    ("method", "chunking", "n_history_messages",
+                     "n_history_docs")}
         except (RuntimeError, ValueError, URLError, OSError, UpstreamError,
                 BackendError) as error:
             kind = getattr(error, "kind",
@@ -1098,7 +1149,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 # .wants_request_context); hfserver keeps its 3-arg signature
                 out_payload = BACKEND.prepare_chat(
                     staged, ARM, plan,
-                    context={"conversation_id": conv, "history_kv": history_ctx})
+                    context={"conversation_id": conv, "history_kv": history_ctx,
+                             "kv_reuse": reuse_ctx})
             else:
                 out_payload = BACKEND.prepare_chat(staged, ARM, plan)
             return _post_json(self.path, out_payload, 600), out_payload
@@ -1315,7 +1367,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
                     if k in ("system_raw", "history_raw", "current_raw", "compressed")})
         row.update({k: counts.get(k) for k in
                     ("doc_packing", "n_docs", "dropped_docs", "repair_frame",
-                     "history_kv")
+                     "history_kv", "kv_reuse")
                     if k in counts})
         if counts.get("textarm") is not None:
             row["textarm"] = counts["textarm"]

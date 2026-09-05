@@ -410,6 +410,90 @@ message (so a conversation opens two sessions, the second starting from an
 empty prefix), and sessions are never closed — there is no
 end-of-conversation signal — so they live until the server restarts.
 
+### CacheBlend arms (KV reuse with selective recompute)
+
+**These arms have NOT been run against a live server or a model. Everything
+below is the request contract, verified only by unit tests against a fake
+`post_json` (`test_cacheblend_arm.py`) and by the engine's own unit tests in
+the SGLang fork (`test/registered/unit/test_c2kv_cacheblend.py`); no number
+here comes from a run.  They need the fork branch `task/c2kv-cacheblend`
+(`c2kv/c2kv_serving_semantics.md` section 10).**
+
+`cacheblend_r16` and `cacheblend_r15_k` port CacheBlend (Yao et al., EuroSys
+2025, arXiv 2405.16444) as the REAL mechanism, not the "oracle" of the
+2026-09-03 design doc (`docs/cacheblend_port_design.md`, a full dense prefill
+keeping 16 % of it, which must never be printed as CacheBlend): the
+completed history's KV is the per-chunk STANDALONE KV (each chunk prefilled
+alone, positions 0..n-1, K kept pre-RoPE and rotated to the chunk's absolute
+position at blend time) with the `recomp_ratio` highest-deviation tokens
+recomputed in context — layers 0..`check_layer` fully, the deviation
+(`sum((fresh - old)^2)` over kv heads x head dim of V, or of K for `_k`)
+measured once at `check_layer`, every later layer computed only for the
+selected rows.  `r16` = the EuroSys artifact's `recomp_ratio 0.16`,
+`check_layers=[1]`, V-deviation; `r15_k` = the LMCache-monorepo lineage
+(K-deviation, 0.15).  Nothing is gisted and NOTHING is evicted: the served
+KV is the whole span, so resident bytes are 1x raw (the Pareto anchor of the
+baseline table) and the saving is compute, reported per row as
+`cacheblend_recomputed_tokens` / `cacheblend_span_tokens`
+(`cacheblend_effective_recomp_ratio`).
+
+One proxy chat request:
+
+1. `POST /v1/c2kv/repair_extract` in the multi-message form — system + tools
+   + ONE MESSAGE PER HISTORY DOC (`target_index`..`target_end_index`), with
+   `kv_reuse_method="cacheblend"`, `repair_mode="cacheblend"`,
+   `raw_kv_position_mode="rotated"`, `extract_source="model_prefill"` and the
+   `cacheblend_*` knobs.  The server renders the prologue and the docs like a
+   chat prompt, takes each doc's rendered message as one chunk
+   (`chunking: "doc"`; `"grid"` sends `cacheblend_chunk_tokens` and the
+   server cuts a token grid across the span instead), runs the blend, and
+   stores the whole span as one repair entry.  The server MUST echo
+   `kv_reuse_method="cacheblend"` and a `cacheblend` accounting block, or
+   the request fails hard (`kv_reuse_extract_failed`) rather than silently
+   running as a full-history arm — the same rule as the history-KV arms.
+2. the chat request replaces the history messages with a repair-only carrier
+   `{"role": "user", "content": "[cacheblend reused history kv]",
+   "c2kv_repair_only_key_hashes": [key_hash], "c2kv_repair_placement":
+   "in_place"}` and sends the accounting in `c2kv_kv_memory_hint`
+   (`active_raw_repair_tokens` = span, `active_recomputed_raw_tokens` =
+   recomputed, plus the `cacheblend_*` provenance).  No
+   `c2kv_use_gist_projection` is sent: the projection regime is the server's
+   `--c2kv-query-proj` decision, read per row from
+   `c2kv_query_proj_effective` / `c2kv_query_proj_source`.
+
+The echo comes back in `metadata.kv_memory_report` and `normalize_response`
+flattens it into request-log columns: `kv_reuse_method`, `kv_reuse_backend`,
+`cacheblend_span_tokens`, `cacheblend_recomputed_tokens`,
+`cacheblend_effective_recomp_ratio`, `cacheblend_recomp_ratio`,
+`cacheblend_check_layer`, `cacheblend_metric`, `cacheblend_mask`,
+`cacheblend_chunking`, `cacheblend_chunk_count`, `cacheblend_deviation_max`,
+`cacheblend_deviation_selected_min`, `cacheblend_cache_hit`,
+`kv_reuse_active_tokens`, `kv_reuse_recomputed_tokens`.  The proxy request
+log row also carries `kv_reuse` (method, chunking, n_history_messages,
+n_history_docs).
+
+**Deviations from the official artifact** (all recorded in the fork's
+semantics doc section 10; label them on any row):
+
+1. *Chunks are the bench's turn docs* (`_normalize_history_message` +
+   `_turn_docs`, the same units the `c2kv` arm gists), each rendered as its
+   own chat message — not the artifact's dataset passages and not a
+   256-token grid (`chunking: "grid"` exists for that, unregistered).
+2. *The system/tool prologue is prefilled fresh* in the same forward (the
+   bench never compresses system prompts; the artifact caches the system
+   prompt as chunk 0), and the current turn is served by the normal extend
+   path over the entry rather than as a `last_len` suffix inside one forward.
+3. *The chunk cache is materialised per request* from the chunk tokens
+   (identical values, no storage) — the entry is the same, but no
+   wall-clock / TTFT number from this path is CacheBlend's.  TTFT is not
+   measured here anyway.
+4. *The default attention mask is exactly causal* for the scattered
+   recompute queries; the artifact's `LowerTriangularFromBottomRightMask`
+   (which lets a selected token attend to later keys) is opt-in
+   (`mask: "bottom_right"`), not registered as an arm.
+5. *First turn:* nothing completed → no extract, no hint, the row carries no
+   `cacheblend_*` columns (same as the history-KV arms).
+
 ## Relation to experiment D
 
 The teacher-forced D harness (`agent/d_kv_intervene.py`,

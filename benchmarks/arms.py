@@ -136,6 +136,81 @@ def history_kv_spec(arm: "Arm") -> Optional[Dict[str, Any]]:
     return spec
 
 
+# ---- KV reuse with selective recompute (CacheBlend) ---------------------
+# CacheBlend (Yao et al., EuroSys 2025, arXiv 2405.16444) served through the
+# reconciled server's /v1/c2kv/repair_extract ``kv_reuse_method="cacheblend"``
+# (c2kv_serving_semantics.md section 10, mem_cache/cacheblend.py).  Defaults
+# mirror the EuroSys artifact (vllm_blend llama.py cache_fuse_metadata:
+# check_layers=[1], recomp_ratio=0.16, V-deviation); ``metric="k"`` with
+# ratio 0.15 is the LMCache-monorepo lineage (blender.py).
+KV_REUSE_METHODS = ("cacheblend",)
+KV_REUSE_METRICS = ("v", "k")
+KV_REUSE_MASKS = ("causal", "bottom_right")
+KV_REUSE_CHUNKINGS = ("doc", "grid")
+KV_REUSE_DEFAULTS: Dict[str, Any] = {
+    "recomp_ratio": 0.16,     # cacheblend_recomp_ratio (artifact recomp_ratio)
+    "check_layer": 1,         # cacheblend_check_layer  (artifact check_layers[0])
+    "metric": "v",            # cacheblend_metric: v (artifact) | k (LMCache)
+    "mask": "causal",         # cacheblend_mask: exact causality | artifact bottom_right
+    "chunking": "doc",        # doc = one chunk per history doc | grid = chunk_tokens
+    "chunk_tokens": None,     # cacheblend_chunk_tokens (grid only)
+}
+
+
+def kv_reuse_spec(arm: "Arm") -> Optional[Dict[str, Any]]:
+    """Canonical, fully defaulted KV-reuse spec of ``arm`` (or None).
+
+    Raises ValueError on an unusable spec, so an arm can never reach the wire
+    with a method or a knob the server would reject.
+    """
+    config = getattr(arm, "kv_reuse", None)
+    if not config:
+        return None
+    if not isinstance(config, dict):
+        raise ValueError(f"arm {arm.name!r}: kv_reuse must be a dict")
+    unknown = set(config) - set(KV_REUSE_DEFAULTS) - {"method"}
+    if unknown:
+        raise ValueError(
+            f"arm {arm.name!r}: unknown kv_reuse keys {sorted(unknown)}")
+    spec: Dict[str, Any] = dict(KV_REUSE_DEFAULTS)
+    spec.update(config)
+    method = str(spec.get("method") or "").strip().lower()
+    if method not in KV_REUSE_METHODS:
+        raise ValueError(
+            f"arm {arm.name!r}: unknown kv_reuse method {spec.get('method')!r}; "
+            f"expected one of {KV_REUSE_METHODS}")
+    spec["method"] = method
+    ratio = float(spec["recomp_ratio"])
+    if not 0.0 <= ratio <= 1.0:
+        raise ValueError(
+            f"arm {arm.name!r}: kv_reuse recomp_ratio must be in [0, 1]")
+    spec["recomp_ratio"] = ratio
+    if int(spec["check_layer"]) < 0:
+        raise ValueError(f"arm {arm.name!r}: kv_reuse check_layer must be >= 0")
+    spec["check_layer"] = int(spec["check_layer"])
+    spec["metric"] = str(spec["metric"]).lower()
+    if spec["metric"] not in KV_REUSE_METRICS:
+        raise ValueError(
+            f"arm {arm.name!r}: kv_reuse metric must be one of {KV_REUSE_METRICS}")
+    spec["mask"] = str(spec["mask"]).lower()
+    if spec["mask"] not in KV_REUSE_MASKS:
+        raise ValueError(
+            f"arm {arm.name!r}: kv_reuse mask must be one of {KV_REUSE_MASKS}")
+    spec["chunking"] = str(spec["chunking"]).lower()
+    if spec["chunking"] not in KV_REUSE_CHUNKINGS:
+        raise ValueError(
+            f"arm {arm.name!r}: kv_reuse chunking must be one of {KV_REUSE_CHUNKINGS}")
+    if spec["chunking"] == "grid":
+        if spec["chunk_tokens"] is None or int(spec["chunk_tokens"]) < 1:
+            raise ValueError(
+                f"arm {arm.name!r}: kv_reuse chunking 'grid' needs chunk_tokens >= 1")
+        spec["chunk_tokens"] = int(spec["chunk_tokens"])
+    elif spec["chunk_tokens"] is not None:
+        raise ValueError(
+            f"arm {arm.name!r}: kv_reuse chunk_tokens only applies to chunking 'grid'")
+    return spec
+
+
 @dataclass(frozen=True)
 class Arm:
     name: str
@@ -173,6 +248,14 @@ class Arm:
     #  "persistent_session"}.  history_kv_spec() fills the defaults and
     # rejects anything the server would refuse.
     history_kv: Optional[Dict[str, object]] = None
+    # KV reuse with selective recompute (CacheBlend): no gist compression;
+    # the completed history is served as per-chunk out-of-context KV with the
+    # highest-deviation ``recomp_ratio`` of its tokens recomputed in context
+    # by the server.  {"method": "cacheblend", "recomp_ratio", "check_layer",
+    #  "metric": v|k, "mask": causal|bottom_right, "chunking": doc|grid,
+    #  "chunk_tokens"}.  kv_reuse_spec() fills the defaults and rejects
+    # anything the server would refuse.
+    kv_reuse: Optional[Dict[str, object]] = None
     description: str = ""
 
     def validate(self) -> None:
@@ -182,6 +265,13 @@ class Arm:
                     f"arm {self.name!r}: history_kv is exclusive with gist "
                     "compression, text_policy, repair and recover")
             history_kv_spec(self)
+        if self.kv_reuse:
+            if (self.compress_history or self.text_policy or self.repair
+                    or self.recover or self.history_kv):
+                raise ValueError(
+                    f"arm {self.name!r}: kv_reuse is exclusive with gist "
+                    "compression, text_policy, repair, recover and history_kv")
+            kv_reuse_spec(self)
         if self.compress_history and self.ratio < 2:
             raise ValueError(f"arm {self.name!r}: compression ratio must be >= 2")
         if not self.compress_history and (self.hybrid_top_k or self.repair or self.recover):
@@ -397,6 +487,28 @@ ARMS: Dict[str, Arm] = {
                 "CONFOUND vs 'c2kv': same prologue rewrite as cd_full — the "
                 "grammar and the rendered tool definitions come from one field."
             ),
+        ),
+        # ---- KV reuse with selective recompute (CacheBlend) ---------------
+        # r16 = recomp_ratio 0.16 (per cent), the EuroSys artifact default;
+        # the served KV is the WHOLE history span (resident bytes = 1x raw,
+        # the Pareto anchor of the baseline table), the saving is compute.
+        # NOT RUN against a live server yet.
+        Arm(
+            name="cacheblend_r16",
+            compress_history=False,
+            kv_reuse={"method": "cacheblend", "recomp_ratio": 0.16},
+            description="CacheBlend (EuroSys artifact lineage): one chunk per "
+                        "history doc, standalone chunk KV, V-deviation at layer "
+                        "index 1, 16% highest-deviation tokens recomputed in "
+                        "context; server-side via /v1/c2kv/repair_extract "
+                        "kv_reuse_method=cacheblend",
+        ),
+        Arm(
+            name="cacheblend_r15_k",
+            compress_history=False,
+            kv_reuse={"method": "cacheblend", "recomp_ratio": 0.15, "metric": "k"},
+            description="CacheBlend (LMCache-monorepo lineage): same mechanism "
+                        "with K-deviation and recomp_ratio 0.15 (blender.py)",
         ),
     )
 }
