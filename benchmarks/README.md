@@ -15,7 +15,7 @@ agent benchmarks:
 |---|---|---|
 | τ²-bench | `~/benchmarks/tau2` (sierra-research/tau2-bench) | `~/envs/bench312` (Python 3.12, `uv`) |
 | BFCL v3/v4 | `~/benchmarks/gorilla/berkeley-function-call-leaderboard` | `~/envs/bench` |
-| ToolSandbox | `~/benchmarks/ToolSandbox` | `~/envs/bench` |
+| ToolSandbox | `~/benchmarks/ToolSandbox` | `~/envs/benchts` |
 | AppWorld (ACON runner) | `$ACON_DIR/experiments/appworld` (microsoft/acon + StonyBrookNLP/appworld) | acon venv |
 | 8-objective QA (ACON runner) | `$ACON_DIR/experiments/smolagents` (microsoft/acon, `data/nq_multi_8`) | acon venv + retriever server |
 | ACEBench | `$ACEBENCH_DIR` (ACEBench/ACEBench) | acon/bench venv |
@@ -38,8 +38,8 @@ benchmarks/proxy.py        <- single integration point for ALL benchmarks
         |    full   : pass messages through unchanged
         |    c2kv   : history messages -> /v1/c2kv/extract -> c2kv_key_hash
         |    hybrid : top-k tail raw, rest gist (existing repo semantics)
-        |    (repair arms plug in here later: append raw KV of block k,
-        |     selective recompute, offset correction, ...)
+        |    repair : full-context raw KV with explicit placement
+        |    history_kv / cacheblend : configured KV reuse and recompute
         v
 SGLang (kvoffload-sglang-c2kv, --enable-c2kv) serving the gist checkpoint
 ```
