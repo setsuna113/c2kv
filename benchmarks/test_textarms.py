@@ -8,6 +8,7 @@ an empty compressor result must raise, never cache.
 """
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -189,12 +190,16 @@ def test_acon_hist_no_duplication_and_embeds_summary():
     assert len(roles) == len(set(map(str, roles))) or True  # roles repeat legitimately
     ids = [tc.get("id") for m in out for tc in (m.get("tool_calls") or [])]
     assert len(ids) == len(set(ids)), "tool_call ids must not duplicate"
-    # rolling state: next turn carries prev_summary, one new compressor call
+    # faithful semantics: one new message since the compression; prev
+    # summary + 1 message is far under T_hist -> NO call, the new turn
+    # stays raw and visible to the policy
     messages2 = messages + [{"role": "assistant", "content": "done",
                              "tool_calls": [{"id": "z"}]}]
-    _, stats3 = textarms.acon_transform(
+    out3, stats3 = textarms.acon_transform(
         messages2, _fake_compress_ok, _action_dialect, "convB", mode="hist")
-    assert stats3["n_compressor_calls"] == 1
+    assert stats3["n_compressor_calls"] == 0
+    assert stats3["history_compressed"] is False
+    assert any(m.get("content") == "done" for m in out3)
 
 
 def test_acon_hist_below_threshold_passthrough_no_duplication():
@@ -277,27 +282,46 @@ def test_acon_rolling_only_new_messages():
     assert "OLDMARK-0-" in prompts[0] and "OLDMARK-18-" in prompts[0]
     assert "OLDMARK-19-" not in prompts[0]
 
-    # turn 2: two NEW messages appended; the pair that moves out of the
-    # preserved tail into the prefix (OLDMARK-19) is the new coverage —
-    # NEWMARK itself is still the preserved tail this turn
+    # turn 2 (faithful semantics, audit 2026-09-05): only ONE new pair
+    # since the compression; prev_summary + new < T_hist -> NO compression,
+    # the policy SEES the new raw turns (not folded)
     m2 = msgs("OLDMARK") + [
         {"role": "assistant", "content": "", "tool_calls": [{"id": "n0"}]},
         {"role": "tool", "content": "NEWMARK-extra-" + "y" * 900},
     ]
-    _, s2 = textarms.acon_transform(m2, spy, _action_dialect,
-                                    "convRoll", mode="hist")
-    assert s2["n_compressor_calls"] == 1  # one call for the NEW coverage only
-    assert "OLDMARK-19-" in prompts[1]
-    # the turn-2 prompt is incremental: only the newly-covered old pair,
-    # never the whole prefix again
-    old_hits = sum(1 for i in range(19) if f"OLDMARK-{i}-" in prompts[1])
-    assert old_hits == 0, f"rolling prompt re-rendered {old_hits} old msgs"
-    assert "SUMMARY(" in prompts[1]  # prev_summary carried
+    out2, s2 = textarms.acon_transform(m2, spy, _action_dialect,
+                                       "convRoll", mode="hist")
+    assert s2["n_compressor_calls"] == 0, "under threshold must not compress"
+    assert s2["history_compressed"] is False
+    assert s2.get("new_raw_messages_visible") == 2  # the new action+obs pair raw
+    joined = json.dumps(out2)
+    assert "NEWMARK-extra-" in joined  # new raw turn visible to the policy
+    assert "<HISTORY_SUMMARY>" in joined  # previous summary block present
 
-    # identical history again: covered == prefix -> pure reuse, ZERO calls
-    _, s3 = textarms.acon_transform(m2, spy, _action_dialect,
+    # keep adding new raw turns until prev_summary + new exceeds T_hist:
+    # exactly ONE compression folding all the new messages
+    extra = []
+    for i in range(18):
+        extra += [
+            {"role": "assistant", "content": "",
+             "tool_calls": [{"id": f"j{i}"}]},
+            {"role": "tool", "content": f"FOLD{i}-" + "w" * 900},
+        ]
+    m3 = m2 + extra
+    out3, s3 = textarms.acon_transform(m3, spy, _action_dialect,
+                                       "convRoll", mode="hist")
+    assert s3["n_compressor_calls"] == 1
+    assert s3["history_compressed"] is True
+    # the compressor folded FOLD0..FOLD16; FOLD17 is the PRESERVED pair —
+    # it stays raw and visible in the output, not in the prompt
+    assert "FOLD0-" in prompts[-1] and "FOLD16-" in prompts[-1]
+    assert "FOLD17-" not in prompts[-1]
+    assert any((m.get("content") or "").startswith("FOLD17-") for m in out3)
+
+    # identical history again: covered == prefix, under threshold -> 0 calls
+    _, s4 = textarms.acon_transform(m3, spy, _action_dialect,
                                     "convRoll", mode="hist")
-    assert s3["n_compressor_calls"] == 0
+    assert s4["n_compressor_calls"] == 0
 
 
 def test_textarm_compress_finish_semantics():
@@ -381,3 +405,57 @@ def test_acon_state_isolated_across_tau2_shaped_tasks():
     assert "A0-" not in seen[-1] and "A19-" not in seen[-1]
     assert "B0-" in seen[-1]
     assert s2["n_compressor_calls"] == 1
+
+
+def test_acon_trigger_counts_tool_calls():
+    """Audit 2026-09-05: assistant actions live in tool_calls (content
+    empty) — the trigger estimate must count them or the arm NEVER fires
+    and silently becomes a full arm."""
+    _reset()
+    calls = []
+
+    def spy(payload):
+        calls.append(1)
+        return "SUMMARY"
+
+    msgs = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "t"},
+    ]
+    for i in range(20):
+        msgs += [
+            {"role": "assistant", "content": "",
+             "tool_calls": [{"id": f"c{i}", "function": {
+                 "name": "do", "arguments": json.dumps(
+                     {"blob": "x" * 400})}}]},
+            {"role": "tool", "content": "ok"},
+        ]
+    # content-only estimate: ~50 chars; with tool_calls: ~20*450 = 9000+
+    # chars — under the 16384 threshold, so extend to 40 pairs to cross it
+    msgs += [
+        {"role": "assistant", "content": "",
+         "tool_calls": [{"id": "cx", "function": {
+             "name": "do", "arguments": json.dumps({"blob": "y" * 400})}}]},
+        {"role": "tool", "content": "ok"},
+    ] * 20
+    _, stats = textarms.acon_transform(msgs, spy, _action_dialect,
+                                       "convTC", mode="hist")
+    assert stats["history_compressed"] is True, (
+        "trigger must fire on tool_calls-bearing turns "
+        f"(prefix_est_tokens={stats.get('prefix_est_tokens')})")
+    assert stats["n_compressor_calls"] == 1
+
+
+def test_hiagent_default_system_prefix():
+    """Audit 2026-09-05: with no system message, hiagent must insert
+    default+note — not a note-only system that suppresses the training
+    default the full arm gets."""
+    out, _ = textarms.hiagent_transform(
+        [{"role": "user", "content": "q"}],
+        lambda payload: "s", _action_dialect)
+    assert out[0]["role"] == "system"
+    assert out[0]["content"].startswith("You are a helpful assistant.")
+    assert "Subgoal" in out[0]["content"]
+    assert out[0]["content"] == (
+        textarms.TRAINING_DEFAULT_SYSTEM_PROMPT + "\n"
+        + textarms.HIAGENT_SUBGOAL_NOTE.strip())

@@ -50,12 +50,14 @@ Sources:
 Token counts are estimated as chars/4 (no tokenizer in the proxy); the
 estimate is recorded in stats.
 
-Conservatism note (documented delta): the original ACON re-triggers the
-history compression only when summary + NEW content exceed T_hist (the
-session shrinks after each compression); this port compresses once per
-turn once the RAW prefix passes the threshold.  That is MORE compressor
-calls than the original — conservative for the baseline (never fewer);
-reported rows carry this footnote.  Summaries are cached per content hash; an
+Trigger note (2026-09-05 rewrite): faithful to the upstream — the
+history compression fires when est(prev_summary + messages since the last
+compression) exceeds T_hist (the first compression measures the raw
+history alone, tool_calls included in the estimate); between compressions
+the policy SEES the summary block + every new raw turn + the preserved
+action/observation pair.  An earlier port compressed every turn past the
+threshold and dropped the raw recent context — that was NOT conservative,
+it removed ACON's recent-context signal.  Summaries are cached per content hash; an
 EMPTY compressor result is a failure and is never cached.
 """
 from __future__ import annotations
@@ -173,6 +175,10 @@ def _summarize(cache_key: str, policy: str, model: str, system_text: str,
 
 # ---- HiAgent -----------------------------------------------------------------
 
+# == train_data.py:14 / proxy.DEFAULT_SYSTEM_PROMPT (kept in sync by
+# test_hiagent_default_system_prefix; proxy passes it explicitly)
+TRAINING_DEFAULT_SYSTEM_PROMPT = "You are a helpful assistant."
+
 HIAGENT_SUBGOAL_NOTE = """
 Note: A subgoal is a milestone goal that you need to complete in order to achieve the final goal.
 When there is an unfinished subgoal, you need to ground the given subgoal to corresponding executable actions for solving the given task in the following format: \"Action: {action}\".
@@ -228,7 +234,8 @@ def _subgoal_of(message: Dict[str, Any]) -> Optional[str]:
 
 
 def hiagent_transform(messages: List[Dict[str, Any]], compress: Compress,
-                      action_dialect, model: str = "c2kv-agent"
+                      action_dialect, model: str = "c2kv-agent",
+                      default_system: str = TRAINING_DEFAULT_SYSTEM_PROMPT,
                       ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     """Subgoal-protocol note into the system message; segment history by
     assistant 'Subgoal:' declarations; completed segments become their
@@ -242,7 +249,12 @@ def hiagent_transform(messages: List[Dict[str, Any]], compress: Compress,
             m["content"] = (_content_of(m).rstrip() + "\n" + HIAGENT_SUBGOAL_NOTE)
             break
     else:
-        messages.insert(0, {"role": "system", "content": HIAGENT_SUBGOAL_NOTE.strip()})
+        # audit 2026-09-05: inserting a system with ONLY the note made
+        # _assemble skip the training default, so hiagent differed from
+        # full by more than the note — insert default + note instead
+        messages.insert(0, {"role": "system",
+                            "content": (default_system.rstrip() + "\n"
+                                        + HIAGENT_SUBGOAL_NOTE.strip())})
 
     segments: List[Dict[str, Any]] = [{"start": 0, "subgoal": None, "messages": []}]
     for m in messages:
@@ -439,63 +451,62 @@ def acon_transform(messages: List[Dict[str, Any]], compress: Compress,
         k = ACON_PRESERVE_LAST_K_MESSAGES
         prefix, tail = ((nonsystem[:-k], nonsystem[-k:])
                         if len(nonsystem) > k else ([], nonsystem))
-        prefix_chars = sum(len(_content_of(m)) for m in prefix)
+        # token estimates INCLUDE tool_calls (audit 2026-09-05: counting
+        # content only left assistant tool-call turns — where tau2/BFCL
+        # keep every action — invisible to the trigger; the arm then never
+        # fired and silently became a full arm)
+        prefix_chars = _message_chars(prefix)
         stats["prefix_est_tokens"] = prefix_chars // 4
 
-        if prefix and prefix_chars > ACON_HISTORY_THRESHOLD_CHARS:
-            # TRUE rolling state (audit M2 fix): _ACON_STATE[conv] =
-            # (covered_until, covered_digest, summary) where covered_until is
-            # an index into the append-only nonsystem list and covered_digest
-            # fingerprints nonsystem[:covered_until] — the state is only
-            # trusted when the fingerprint matches (belt-and-braces against
-            # conversation-id collisions, audit 2026-09-04).  Each turn the
-            # compressor sees prev_summary + ONLY the messages past the
-            # covered point — the original ACON semantics.  The old
-            # digest-keyed version re-rendered the whole prefix every turn:
-            # O(T^2) calls and a double-stuffed prompt that hit 16k ctx.
-            def _nonsystem_digest(until: int) -> str:
-                return _sha(json.dumps(
-                    [{"role": m.get("role"), "content": _content_of(m)}
-                     for m in nonsystem[:until]],
-                    ensure_ascii=False, sort_keys=True))
+        # FAITHFUL upstream trigger (audit 2026-09-05): tiktoken(
+        # prev_summary + messages since the last compression) > T_hist.
+        # The FIRST compression measures the raw history alone.  Between
+        # compressions the policy SEES the summary block + EVERY new raw
+        # turn + the preserved pair — the raw recent context is never
+        # dropped turn-by-turn (the old port did exactly that, wrongly).
+        def _nonsystem_digest(until: int) -> str:
+            return _sha(json.dumps(
+                [{"role": m.get("role"), "content": _content_of(m)}
+                 for m in nonsystem[:until]],
+                ensure_ascii=False, sort_keys=True))
 
+        with _LOCK:
+            state = _ACON_STATE.get(conv)
+        if (state is None or state[0] > len(prefix)
+                or state[1] != _nonsystem_digest(state[0])):
+            # fresh conversation, benchmark rewrote history, or a
+            # conv-id collision (different content under the same id)
+            covered_until, prev_summary = 0, ""
+        else:
+            covered_until, prev_summary = state[0], state[2]
+
+        new_msgs = nonsystem[covered_until:len(prefix)]
+        new_chars = _message_chars(new_msgs)
+        trigger_chars = new_chars if not prev_summary else (
+            len(prev_summary) + new_chars)
+
+        if prefix and trigger_chars > ACON_HISTORY_THRESHOLD_CHARS:
+            history_text = "\n".join(_render_line(m, action_dialect)
+                                     for m in new_msgs)
+            user_text = ACON_HISTORY_PROMPT.format(
+                task=task, prev_summary=prev_summary or "(none)",
+                history=history_text)
+            # content-addressed cache key: the positional key
+            # (conv|covered|len) let a DIFFERENT task's same-length
+            # segment hit the wrong cached summary under a shared id
+            summary = _summarize(
+                _sha(f"acon-hist|{user_text}"),
+                "acon", model, ACON_SYSTEM, user_text,
+                compress, stats)
             with _LOCK:
-                state = _ACON_STATE.get(conv)
-            if (state is None or state[0] > len(prefix)
-                    or state[1] != _nonsystem_digest(state[0])):
-                # fresh conversation, benchmark rewrote history, or a
-                # conv-id collision (different content under the same id)
-                covered_until, prev_summary = 0, "(none)"
-            else:
-                covered_until, prev_summary = state[0], state[2]
-            summary = None
-            if covered_until == len(prefix):
-                # nothing new since the last compression: reuse the summary
-                with _LOCK:
-                    summary = prev_summary if prev_summary != "(none)" else None
-            if summary is None:
-                new_msgs = nonsystem[covered_until:len(prefix)]
-                history_text = "\n".join(_render_line(m, action_dialect)
-                                         for m in new_msgs)
-                user_text = ACON_HISTORY_PROMPT.format(
-                    task=task, prev_summary=prev_summary,
-                    history=history_text)
-                # content-addressed cache key: the positional key
-                # (conv|covered|len) let a DIFFERENT task's same-length
-                # segment hit the wrong cached summary under a shared id
-                summary = _summarize(
-                    _sha(f"acon-hist|{user_text}"),
-                    "acon", model, ACON_SYSTEM, user_text,
-                    compress, stats)
-                with _LOCK:
-                    _ACON_STATE[conv] = (len(prefix), _nonsystem_digest(len(prefix)),
-                                         summary)
+                _ACON_STATE[conv] = (len(prefix), _nonsystem_digest(len(prefix)),
+                                     summary)
+            stats["new_raw_messages_folded"] = len(new_msgs)
             block = (f"\n<HISTORY_SUMMARY>\n{summary}\n</HISTORY_SUMMARY>")
-            # the summary REPLACES the prefix: keep system messages and the
-            # first user prompt (the task instruction, which lives in the
-            # prefix) carrying the <HISTORY_SUMMARY> block — the original
-            # memory.py:481-498 shape — plus the preserved tail; every
-            # other prefix message is dropped
+            # compressed view: keep system messages and the first user
+            # prompt (the task instruction) carrying the block — the
+            # memory.py:481-498 shape — plus the preserved tail; the
+            # folded prefix messages are dropped (that IS the compression)
             placed = False
             rebuilt = list(system_msgs)
             for m in prefix:
@@ -504,8 +515,6 @@ def acon_transform(messages: List[Dict[str, Any]], compress: Compress,
                     rebuilt.append({"role": "user",
                                     "content": _content_of(m) + block})
                     placed = True
-                # all other prefix messages are dropped (that IS the
-                # compression)
             for m in tail:
                 rebuilt.append(dict(m))
             if not placed:  # no user instruction anywhere (should not happen)
@@ -513,6 +522,28 @@ def acon_transform(messages: List[Dict[str, Any]], compress: Compress,
                                {"role": "user", "content": block.strip()})
             out = rebuilt
             stats["history_compressed"] = True
+        elif prev_summary:
+            # NOT triggered but a summary exists: the policy sees the
+            # previous summary block + EVERY new raw turn since the last
+            # compression + the preserved pair (upstream semantics — the
+            # raw recent context is only folded at the next compression)
+            block = (f"\n<HISTORY_SUMMARY>\n{prev_summary}\n</HISTORY_SUMMARY>")
+            rebuilt = list(system_msgs)
+            placed = False
+            for m in nonsystem[:covered_until]:
+                if (not placed and m.get("role") == "user"
+                        and not m.get("tool_calls")):
+                    rebuilt.append({"role": "user",
+                                    "content": _content_of(m) + block})
+                    placed = True
+            if not placed:
+                rebuilt.append({"role": "user", "content": block.strip()})
+            rebuilt.extend(dict(m) for m in new_msgs)
+            rebuilt.extend(dict(m) for m in tail)
+            out = rebuilt
+            stats["history_compressed"] = False
+            stats["new_raw_messages_visible"] = len(new_msgs)
+        # else: never compressed and under threshold — plain passthrough
 
     out_chars = _message_chars(out)
     stats["raw_chars"] = raw_chars

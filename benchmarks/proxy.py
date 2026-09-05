@@ -812,7 +812,8 @@ def _apply_text_arm(payload: Dict[str, Any], arm, conv: str
 
     if arm.text_policy == "hiagent":
         out, stats = textarms.hiagent_transform(
-            messages, compress, _render_action_dialect, model=model)
+            messages, compress, _render_action_dialect, model=model,
+            default_system=DEFAULT_SYSTEM_PROMPT)
     else:
         mode = "hist" if arm.text_policy == "acon_hist" else "obs"
         out, stats = textarms.acon_transform(
