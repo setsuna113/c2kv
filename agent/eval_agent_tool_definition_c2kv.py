@@ -293,6 +293,8 @@ def _build_tool_cache(
     system_length: int,
     attn_impl: str,
     override_ratio: int,
+    *,
+    capture_ctx: Any = None,
 ) -> tuple[Any, int, int, float, float, float]:
     device = model.device
     context_input_ids = context_input_ids.to(device)
@@ -308,13 +310,35 @@ def _build_tool_cache(
         gist_kwargs["ratio"] = override_ratio
     _sync_device(input_ids.device)
     compress_start = time.perf_counter()
-    outputs, gist_mask, pos_ids = model.model.generate_gist(
-        input_ids=input_ids,
-        attention_mask=valid_mask,
-        **gist_kwargs,
-    )
+    if capture_ctx is not None and capture_ctx.capture_context:
+        # KWTS-style chunk-boundary activations during the compression
+        # forward: positions = gist slots per grid row (best effort; failures
+        # are counted by the ctx and never kill the row).
+        gist_slots = _gist_slot_positions(valid_mask)
+        try:
+            with capture_ctx.capture_plain_forward(
+                model, positions_by_row=gist_slots, want_oproj=True, tag="gist"
+            ):
+                outputs, gist_mask, pos_ids = model.model.generate_gist(
+                    input_ids=input_ids,
+                    attention_mask=valid_mask,
+                    **gist_kwargs,
+                )
+        except Exception:
+            capture_ctx._bump_error("gist_forward_hook")
+            outputs, gist_mask, pos_ids = model.model.generate_gist(
+                input_ids=input_ids,
+                attention_mask=valid_mask,
+                **gist_kwargs,
+            )
+    else:
+        outputs, gist_mask, pos_ids = model.model.generate_gist(
+            input_ids=input_ids,
+            attention_mask=valid_mask,
+            **gist_kwargs,
+        )
     _sync_device(input_ids.device)
-    tool_compress_sec = time.perf_counter() - compress_start
+    compress_sec = time.perf_counter() - compress_start
     model.model.config._attn_implementation = original_attn_impl
 
     _sync_device(input_ids.device)
@@ -334,7 +358,33 @@ def _build_tool_cache(
     blend_sec = time.perf_counter() - blend_start
     gist_tokens = max(0, tool_cache.get_seq_length() - system_length)
     actual_ratio = float(tool_length / gist_tokens) if gist_tokens else 0.0
-    return tool_cache, tool_length, gist_tokens, actual_ratio, tool_compress_sec, blend_sec
+    if capture_ctx is not None:
+        capture_ctx.record_gist_stats(tool_cache, system_length, _per_row_gist_counts(gist_mask))
+    return tool_cache, tool_length, gist_tokens, actual_ratio, compress_sec, blend_sec
+
+
+def _gist_slot_positions(valid_mask: torch.Tensor):
+    """Gist slot columns per grid row: where the input is NOT a real doc token
+    and not trailing all-padding (leading pad slots carry gist tokens)."""
+    rows, cols = (valid_mask == 0).nonzero(as_tuple=True)
+    per_row: Dict[int, List[int]] = {}
+    for r, c in zip(rows.tolist(), cols.tolist()):
+        per_row.setdefault(r, []).append(c)
+    return [per_row.get(r, []) for r in range(valid_mask.shape[0])]
+
+
+def _per_row_gist_counts(gist_mask: Any) -> Optional[List[int]]:
+    """Per-grid-row gist counts from the mask generate_gist returns."""
+    try:
+        m = gist_mask
+        if m is None or not hasattr(m, "reshape"):
+            return None
+        if m.dim() == 1:
+            return None
+        counts = m.reshape(m.shape[0], -1).to(torch.long).sum(dim=-1).tolist()
+        return [int(c) for c in counts]
+    except Exception:
+        return None
 
 
 @torch.inference_mode()
@@ -351,11 +401,22 @@ def _generate_from_input_ids(
     do_sample: bool = False,
     temperature: Optional[float] = None,
     top_p: Optional[float] = None,
+    capture: Optional[Dict[str, Any]] = None,
 ) -> tuple[str, float, int, float]:
     """Greedy by default.  ``do_sample=True`` enables sampling; ``temperature``
     and ``top_p`` are injected ONLY then, so the default kwargs dict is
     byte-identical to what this function has always built (every existing eval
-    calls it without the sampling arguments).  Seeding is the caller's job."""
+    calls it without the sampling arguments).  Seeding is the caller's job.
+
+    ``capture`` (t33): when a dict is passed, generate additionally runs with
+    ``output_scores=True, return_dict_in_generate=True`` plus per-layer forward
+    hooks, and the dict is FILLED with the capture record (steps with entropy
+    / top-k, spans, anchor hiddens, IC) by t33_capture.  capture requires
+    greedy decoding (entropy of warper-processed scores would be a different
+    statistic).  The 4-tuple return is unchanged either way."""
+
+    if capture is not None and do_sample:
+        raise ValueError("capture=True requires greedy decoding (do_sample=False)")
 
     original_attn_impl = model.model.config._attn_implementation if hasattr(model, "model") else None
     if original_attn_impl is not None:
@@ -370,6 +431,9 @@ def _generate_from_input_ids(
         "eos_token_id": tokenizer.eos_token_id,
         "use_cache": True,
     }
+    if capture is not None:
+        generate_kwargs["output_scores"] = True
+        generate_kwargs["return_dict_in_generate"] = True
     if do_sample:
         if temperature is not None:
             generate_kwargs["temperature"] = temperature
@@ -381,18 +445,44 @@ def _generate_from_input_ids(
         generate_kwargs["past_key_values"] = past_key_values
     if use_gist:
         generate_kwargs["use_gist"] = True
+    ctx = (capture or {}).get("ctx")
+    if ctx is not None:
+        ctx.install_generation_hooks(model)
     _sync_device(input_ids.device)
     start = time.perf_counter()
-    generated = model.generate(**generate_kwargs)
+    generated_out = model.generate(**generate_kwargs)
     _sync_device(input_ids.device)
     latency = time.perf_counter() - start
     if original_attn_impl is not None:
         model.model.config._attn_implementation = original_attn_impl
+    if ctx is not None:
+        ctx.remove_generation_hooks(model)
+    if capture is not None:
+        sequences = generated_out.sequences
+        if ctx is not None:
+            scores = generated_out.scores
+            try:
+                record = ctx.handle_generate_output(
+                    model,
+                    tokenizer,
+                    input_ids=input_ids,
+                    sequences=sequences,
+                    scores=scores,
+                    eos_id=int(tokenizer.eos_token_id),
+                    max_new_tokens=max_new_tokens,
+                    tool_pool_names=capture.get("tool_pool_names"),
+                )
+                capture["record"] = record
+            finally:
+                del scores
+        del generated_out
+    else:
+        sequences = generated_out
     prediction = tokenizer.decode(
-        generated[0, input_ids.shape[1] :],
+        sequences[0, input_ids.shape[1] :],
         skip_special_tokens=True,
     ).strip()
-    generated_tokens = int(generated.shape[1] - input_ids.shape[1])
+    generated_tokens = int(sequences.shape[1] - input_ids.shape[1])
     tbt_sec = latency / generated_tokens if generated_tokens > 0 else 0.0
     return prediction, latency, generated_tokens, tbt_sec
 

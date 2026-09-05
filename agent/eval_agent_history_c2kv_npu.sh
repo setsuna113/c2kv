@@ -2,9 +2,12 @@
 set -euo pipefail
 
 # CANN runtime (libhccl etc.) — required for torch_npu when launched from a
-# bare setsid/cron env (same guard as run_d_pilot_npu.sh).
+# bare setsid/cron env (same guard as run_d_pilot_npu.sh).  set_env.sh
+# references variables that are unbound under set -u in bare environments.
 if [[ -f /usr/local/Ascend/ascend-toolkit/set_env.sh ]]; then
+  set +u
   source /usr/local/Ascend/ascend-toolkit/set_env.sh
+  set -u
 fi
 
 export PYTHONPATH="$(pwd)/python:$(pwd)/python/inference:$(pwd)/agent:${PYTHONPATH:-}"
@@ -91,6 +94,12 @@ OPTIONAL_ARGS+=(--split_oversized_history_docs "${SPLIT_OVERSIZED_HISTORY_DOCS}"
 OPTIONAL_ARGS+=(--hybrid_layout "${HYBRID_LAYOUT}")
 if [[ "${DUMP_RAW_HISTORY_DOCS}" == "True" || "${DUMP_RAW_HISTORY_DOCS}" == "true" || "${DUMP_RAW_HISTORY_DOCS}" == "1" ]]; then
   OPTIONAL_ARGS+=(--dump_raw_history_docs --raw_history_doc_debug_chars "${RAW_HISTORY_DOC_DEBUG_CHARS}")
+fi
+if [[ -n "${EXTRA_ARGS:-}" ]]; then
+  # t33: pass-through extra harness flags (e.g. --capture_out ...) without
+  # touching the frozen COMMON_ARGS construction.  Word splitting intended.
+  # shellcheck disable=SC2206
+  OPTIONAL_ARGS+=(${EXTRA_ARGS})
 fi
 
 echo "ASCEND_RT_VISIBLE_DEVICES=${ASCEND_RT_VISIBLE_DEVICES}"

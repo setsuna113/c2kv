@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import copy
 import gc
+import itertools
 import json
 import logging
 import re
@@ -1169,6 +1170,14 @@ def _generate_with_prefix(
         device=model.device,
     ).unsqueeze(0)
     _seed_generation(args, example.qid, mode or args.mode, args.override_ratio)
+    capture_dict = None
+    capture_ctx = getattr(args, "t33_ctx", None)
+    if capture_ctx is not None:
+        capture_ctx.note_cache_length(cache_length)
+        capture_dict = {
+            "ctx": capture_ctx,
+            "tool_pool_names": _t33_tool_pool_names(example),
+        }
     prediction, generate_sec, generated_tokens, tbt_sec = _generate_from_input_ids(
         model,
         tokenizer,
@@ -1181,6 +1190,7 @@ def _generate_with_prefix(
         do_sample=args.do_sample,
         temperature=args.temperature,
         top_p=args.top_p,
+        capture=capture_dict,
     )
     target = prefix.get("target_override", example.answer)
     metrics = _target_metrics(tokenizer, target, prediction)
@@ -1191,7 +1201,34 @@ def _generate_with_prefix(
         "generate_sec": round(generate_sec, 4),
         "tbt_sec": round(tbt_sec, 6),
     })
+    if capture_ctx is not None:
+        capture_summary = capture_ctx.finish_row(
+            (capture_dict or {}).get("record"),
+            extra_meta={
+                "system_length": prefix.get("system_length"),
+                "history_length": prefix.get("history_length"),
+                "cache_length": prefix.get("cache_length"),
+                "prompt_tokens": len(prompt_ids),
+                "use_gist": prefix.get("use_gist", False),
+                "session_id": example.qid.rsplit(":", 1)[0] if ":" in example.qid else None,
+            },
+        )
+        if capture_summary is not None:
+            metrics["capture"] = capture_summary
     return metrics
+
+
+def _t33_tool_pool_names(example: CompressHistoryExample) -> List[str]:
+    """Session tool-name pool for the restricted-unembed IC / KnowNo features."""
+    names: List[str] = []
+    for tool in example.tools or []:
+        if not isinstance(tool, dict):
+            continue
+        name = (tool.get("function") or {}).get("name") if isinstance(tool.get("function"), dict) else None
+        name = name or tool.get("name")
+        if isinstance(name, str) and name:
+            names.append(name)
+    return sorted(set(names))
 
 
 @torch.inference_mode()
@@ -1218,7 +1255,8 @@ def _build_full_or_truncate_prefix(
             tokenizer, history, args.override_ratio, args.truncate_selection
         )
     else:
-        history_ids = [token for ids in _history_doc_ids(tokenizer, history) for token in ids]
+        per_doc_ids = _history_doc_ids(tokenizer, history)
+        history_ids = [token for ids in per_doc_ids for token in ids]
         doc_tokens = len(history_ids)
         kept_tokens = doc_tokens
     if doc_tokens > args.max_history_tokens:
@@ -1238,13 +1276,33 @@ def _build_full_or_truncate_prefix(
     history_cache = system_cache
     if history_ids:
         history_input_ids = torch.tensor([history_ids], dtype=torch.long, device=model.device)
-        history_cache, history_length, full_prefill_sec = _prefill_tokens_with_cache(
-            model,
-            history_input_ids,
-            past_key_values=system_cache,
-            past_length=system_length,
-            attn_impl=args.generate_attn_impl,
-        )
+        capture_ctx = getattr(args, "t33_ctx", None)
+        if capture_ctx is not None:
+            doc_token_lens = [len(ids) for ids in per_doc_ids]
+            n_docs_original = sum(1 for m in example.history_messages if m.get("content"))
+            capture_ctx.record_history_docs(history, doc_token_lens, n_docs_original)
+        if capture_ctx is not None and capture_ctx.capture_context and len(history_ids) > 1:
+            # chunk-end boundaries + the very last history position
+            bounds = [acc - 1 for acc in itertools.accumulate(len(ids) for ids in per_doc_ids)]
+            with capture_ctx.capture_plain_forward(
+                model, flat_positions=bounds, want_oproj=True, tag="ctx"
+            ):
+                history_cache, history_length, full_prefill_sec = _prefill_tokens_with_cache(
+                    model,
+                    history_input_ids,
+                    past_key_values=system_cache,
+                    past_length=system_length,
+                    attn_impl=args.generate_attn_impl,
+                )
+            capture_ctx.record_last_context_position(len(history_ids))
+        else:
+            history_cache, history_length, full_prefill_sec = _prefill_tokens_with_cache(
+                model,
+                history_input_ids,
+                past_key_values=system_cache,
+                past_length=system_length,
+                attn_impl=args.generate_attn_impl,
+            )
     else:
         history_length = 0
         full_prefill_sec = 0.0
@@ -1515,11 +1573,21 @@ def _build_c2kv_prefix(
 ) -> tuple[Optional[Dict[str, Any]], Optional[str]]:
     if not _history_messages(tokenizer, example, args) and args.min_doc_num <= 0:
         return _build_system_only_prefix(model, tokenizer, example, args)
-    context_input_ids, doc_tokens, doc_chunks, _, skip_reason = _build_history_chunks(
+    context_input_ids, doc_tokens, doc_chunks, history, skip_reason = _build_history_chunks(
         tokenizer, example, args
     )
     if context_input_ids is None:
         return None, skip_reason
+
+    capture_ctx = getattr(args, "t33_ctx", None)
+    if capture_ctx is not None:
+        doc_token_lens = [
+            int((context_input_ids[row] != -100).sum().item())
+            for row in range(context_input_ids.shape[0])
+            if bool((context_input_ids[row] != -100).any())
+        ]
+        n_docs_original = sum(1 for m in example.history_messages if m.get("content"))
+        capture_ctx.record_history_docs(history, doc_token_lens, n_docs_original)
 
     system_ids = _chat_template_ids(
         tokenizer,
@@ -1546,6 +1614,7 @@ def _build_c2kv_prefix(
         system_length,
         args.gist_attn_impl,
         args.override_ratio,
+        capture_ctx=capture_ctx,
     )
     return {
         "cache": history_cache,
@@ -3025,6 +3094,13 @@ def _generate_one(
     # caller-supplied prefix dict (the D k-sweep driver shares ONE compression
     # forward across all k and rebuilds only the splice per k).
     total_start = time.perf_counter()
+    capture_ctx = getattr(args, "t33_ctx", None)
+    if capture_ctx is not None:
+        capture_ctx.set_arm(
+            "full" if (mode == "full" or mode in FULL_PROMPT_MODES or mode in TRUNCATE_MODES
+                       or mode == "history_full") else mode
+        )
+        capture_ctx.begin_row(example.qid, mode=mode, ratio=args.override_ratio)
     if mode in FULL_PROMPT_MODES:
         row = _generate_full_prompt(model, tokenizer, example, args, mode)
         return (row, None) if return_state else row
@@ -3149,6 +3225,8 @@ def _generate_one(
     else:
         raise ValueError(f"Unknown mode: {mode}")
     if prefix is None:
+        if capture_ctx is not None:
+            capture_ctx.finish_row(None, extra_meta={"skipped": skip_reason})
         row = {
             "qid": example.qid,
             "session_id": example.qid.rsplit(":", 1)[0] if ":" in example.qid else None,
@@ -3628,6 +3706,21 @@ def evaluate(args: argparse.Namespace) -> Dict[str, Any]:
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token_id = tokenizer.eos_token_id
 
+    args.t33_ctx = None
+    if getattr(args, "capture_out", ""):
+        from t33_capture import T33CaptureContext
+
+        args.t33_ctx = T33CaptureContext(
+            args.capture_out,
+            part=getattr(args, "capture_part", "p0"),
+            topk=getattr(args, "capture_topk", 5),
+            ctx_layer_stride=getattr(args, "capture_ctx_stride", 4),
+            capture_context=not getattr(args, "capture_no_context", False),
+            capture_gist_stats=not getattr(args, "capture_no_gist_stats", False),
+        )
+        args.t33_ctx.open()
+        logger.info("t33 capture enabled: out=%s part=%s", args.capture_out, getattr(args, "capture_part", "p0"))
+
     examples, selection_skips = _load_examples(args, tokenizer)
     logger.info("Selected %d examples; selection_skips=%s", len(examples), selection_skips)
     modes = [item.strip() for item in (args.compare_modes or args.mode).split(",") if item.strip()]
@@ -3699,8 +3792,16 @@ def evaluate(args: argparse.Namespace) -> Dict[str, Any]:
         del model
         _clear_device_cache(device)
 
+    t33_capture_errors: Optional[Dict[str, int]] = None
+    if args.t33_ctx is not None:
+        args.t33_ctx.close()
+        t33_capture_errors = dict(args.t33_ctx.errors)
+        logger.info("t33 capture closed; errors=%s", t33_capture_errors)
+
     summary = {
         "model": args.model,
+        "t33_capture_out": getattr(args, "capture_out", "") or None,
+        "t33_capture_errors": t33_capture_errors,
         "base_model": args.base_model,
         "dataset_path": args.dataset_path,
         "split": args.split,
@@ -3907,6 +4008,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dtype", choices=["bf16", "fp16", "fp32"], default="bf16")
     parser.add_argument("--baseline_model_class", choices=["gist", "auto"], default="auto")
     parser.add_argument("--untrained_c2kv", action="store_true", help=argparse.SUPPRESS)
+    # --- t33 capture (survey item 4.0-2); defaults keep the path untouched ---
+    parser.add_argument(
+        "--capture_out", default="",
+        help="t33: enable per-row capture instrumentation; artifacts under this dir",
+    )
+    parser.add_argument("--capture_part", default="p0", help="t33: part-shard tag in artifact names")
+    parser.add_argument("--capture_topk", type=int, default=5, help="t33: top-k logprobs per step")
+    parser.add_argument("--capture_ctx_stride", type=int, default=4,
+                        help="t33: layer stride for context-side (boundary/o_proj) captures")
+    parser.add_argument("--capture_no_context", action="store_true",
+                        help="t33: disable context-side captures (boundary hiddens / o_proj)")
+    parser.add_argument("--capture_no_gist_stats", action="store_true",
+                        help="t33: disable per-doc gist saturation stats (4.1)")
     args = parser.parse_args()
     if args.do_sample and args.temperature is None:
         parser.error(
