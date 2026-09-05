@@ -139,6 +139,12 @@ def test_subset_harness_remaps_category_without_changing_upstream_checkout(tmp_p
     assert (root / "category.py").read_text(encoding="utf-8") == source_category
 
 
+def test_prepare_score_dir_matches_official_model_normalization(tmp_path):
+    path = B.prepare_score_dir(tmp_path, "en", "org/model")
+    assert path == tmp_path / "score_all" / "score_en" / "org_model"
+    assert path.is_dir()
+
+
 # ---- terminal-state gate ----------------------------------------------------
 
 def test_check_terminal_missing_ids_is_fatal(tmp_path):

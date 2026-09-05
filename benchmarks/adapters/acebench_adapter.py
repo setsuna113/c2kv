@@ -282,6 +282,13 @@ def eval_command(python: str, acebench_dir: Path, model: str, category: str,
             "--model", model, "--category", category, "--language", language]
 
 
+def prepare_score_dir(work: Path, language: str, model: str) -> Path:
+    """Create the parent path assumed by ACEBench's agent process scorer."""
+    path = Path(work) / "score_all" / f"score_{language}" / model.replace("/", "_")
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 def _jsonl(path: Path) -> List[Dict[str, Any]]:
     return [json.loads(line) for line in Path(path).read_text(encoding="utf-8").splitlines()
             if line.strip()]
@@ -418,6 +425,7 @@ def run_acebench(base_url: str, user_base_url: str, out_dir: Path,
                          max_tokens),
         cwd=work, env=env, check=True)
     check_terminal(work, language, model, tests)
+    prepare_score_dir(work, language, model)
     subprocess.run(eval_command(python, harness, model, category, language),
                    cwd=work, env=env, check=True)
     summary = collect(work, language, model, tests)
