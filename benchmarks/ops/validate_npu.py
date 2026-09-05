@@ -85,6 +85,15 @@ def validate_mode(args, mode):
                         result["passed"] = result["semantics_returncode"] == 0
                     finally:
                         stop_owned_group(semantic_tests)
+            if result["passed"] and args.official_smoke:
+                official_command = [sys.executable, str(HERE / "official_smoke.py"),
+                                    "--upstream", upstream, "--out", str(mode_dir / "official")]
+                official_tests = subprocess.Popen(official_command, start_new_session=True)
+                try:
+                    result["official_returncode"] = official_tests.wait(timeout=3 * args.test_timeout)
+                    result["passed"] = result["official_returncode"] == 0
+                finally:
+                    stop_owned_group(official_tests)
         except Exception as error:
             result["error"] = f"{type(error).__name__}: {error}"
         finally:
@@ -103,6 +112,8 @@ def main():
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--modes", nargs="+", choices=("base", "gist"), default=["base", "gist"])
     parser.add_argument("--arms", nargs="+")
+    parser.add_argument("--official-smoke", action="store_true",
+                        help="also run one bounded official BFCL, tau2 and ToolSandbox case per mode")
     parser.add_argument("--startup-timeout", type=int, default=600)
     parser.add_argument("--test-timeout", type=int, default=1800)
     args = parser.parse_args()

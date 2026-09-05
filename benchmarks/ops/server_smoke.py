@@ -71,7 +71,8 @@ def check_responses(arm_name, responses, rows, query_projection):
     for i, (response, row) in enumerate(zip(responses, rows)):
         prefix = f"request {i}: "
         choice = (response.get("choices") or [{}])[0]
-        require(choice.get("finish_reason") in ("stop", "length"), prefix + "generation did not finish")
+        require(choice.get("finish_reason") in ("stop", "length", "tool_calls"),
+                prefix + "generation did not finish")
         require(row.get("status") == "ok", prefix + f"proxy status={row.get('status')}")
         require(isinstance(row.get("kv_resident_tokens"), int), prefix + "KV accounting missing")
         require(row.get("c2kv_query_proj") == query_projection, prefix + "server projection flag mismatch")

@@ -42,7 +42,25 @@ Then check the algorithm against a pinned original checkout (the original
 source is an input, not a vendored duplicate):
 
 ```bash
-python benchmarks/ops/check_algorithm_parity.py --help
+python benchmarks/ops/check_algorithm_parity.py \
+  --official-repo /path/to/original-C2KV \
+  --sglang-repo /path/to/sglang-c2kv --device npu
+```
+
+The original reference used by this gate is commit
+`832ccd9c985055a95c1e219383e043bb005a1b36` of `s7a9/C2KV`.
+The gate checks masks, residuals, segment rephasing and projection routing.
+It does not compare all checkpoint logits.
+
+Run the D continuation gate with the real tokenizer and model before a D
+matrix (source CANN and ATB first, then select an available device):
+
+```bash
+ASCEND_RT_VISIBLE_DEVICES=1 \
+C2KV_REAL_TOKENIZER_DIR=/home/liuyancheng/checkpoints_upstream/checkpoint-1088 \
+C2KV_SERVED_MODEL_DIR=/home/liuyancheng/checkpoints_upstream/checkpoint-1088 \
+C2KV_GATE_DEVICE=npu \
+python -m pytest agent/test_d_downstream_server_gate.py -v
 ```
 
 On the NPU host, run the checkpoint integration gates in an unused output
@@ -61,6 +79,9 @@ hybrid, repair placements, history-KV methods and CacheBlend, with two
 identical cold/warm requests per arm. `summary.json`, raw responses, request
 logs and server logs persist. Failure stops the next mode. These synthetic
 requests test integration; they are not official benchmark scores.
+Each successful mode also runs the server's `smoke_c2kv_semantics.py`,
+covering request overrides, extraction/injection positions and rejected
+repair placements; its output is retained as `semantics.log`.
 
 For a server already launched by the caller:
 
@@ -73,3 +94,17 @@ After these gates pass, use the registered adapters in `benchmarks/run.py`
 for bounded official smoke cases, then full matrices. Use separate output
 directories for checkpoint, query mode and packing regime. Do not merge
 historical message-packing or unrecorded projection modes into a new run.
+
+Add `--official-smoke` to `validate_npu.py` to run one official case per
+adapter after each mode's integration gates. It uses the environment map
+above, one BFCL multi-turn case, one tau2 airline task (one trial, 12 steps,
+300-second simulation timeout), and one local ToolSandbox messaging
+scenario. Each adapter process has a 900-second outer timeout. The agent
+uses the C2KV proxy; user simulators use the raw upstream endpoint.
+Official scores are retained, but these single-case gates only establish
+that requests and official scoring complete. For an existing server:
+
+```bash
+python benchmarks/ops/official_smoke.py \
+  --upstream http://127.0.0.1:35020 --out /path/to/new-official-smoke
+```
