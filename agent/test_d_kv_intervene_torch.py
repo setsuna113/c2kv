@@ -660,13 +660,8 @@ def test_every_arm_keeps_the_original_decode_layout(stack):
 
 def test_d_intervene_modes_are_wired_into_dispatch():
     HH = _harness()
-    assert HH.D_INTERVENE_MODES == {
-        "d_sham_neutral",
-        "d_corr",
-        "d_corr_recompute",
-        "d_corr_all",
-        "d_sham_mech",
-    }
+    declared_modes = set(_driver().ARM_MODES.values()) - {"full", "c2kv"}
+    assert HH.D_INTERVENE_MODES == declared_modes
     assert isinstance(HH.D_INTERVENE, dict)
 
 
