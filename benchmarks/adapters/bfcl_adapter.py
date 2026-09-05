@@ -373,7 +373,7 @@ def run_bfcl(base_url: str, categories: str = "multi_turn_base",
 
         summary: Dict[str, Any] = {
             "benchmark": "bfcl", "categories": categories, "mode": mode,
-            "n": expected, "n_total": expected,
+            "n_total": expected,
             "bfcl_project_root": str(project_root),
         }
         if mode == "generate":

@@ -213,7 +213,8 @@ def test_generate_mode_does_not_claim_scored_tasks(tmp_path, monkeypatch):
     summary = bfcl_adapter.run_bfcl(
         "http://proxy/v1", mode="generate", project_root=tmp_path)
 
-    assert summary["n"] == summary["n_generated"] == 1
+    assert summary["n_generated"] == summary["n_total"] == 1
     assert summary["scored"] is False
-    assert "n_scored" not in summary and "semantic_score" not in summary
+    assert "n" not in summary and "n_scored" not in summary
+    assert "semantic_score" not in summary
     assert argv == [bfcl_adapter.generate_argv("c2kv-hf", "multi_turn_base")]
