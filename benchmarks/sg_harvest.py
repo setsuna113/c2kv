@@ -130,6 +130,15 @@ def costs(arm: str) -> dict | None:
 
 MATRIX2_ARMS = ["full", "c2kv", "hybrid",
                 "hiagent", "acon_hist", "acon_obs"]
+# audit ruling 5 labels (read by the harvest table, not just arms.py)
+MATRIX2_LABELS = {
+    "full": "reference (no compression)",
+    "c2kv": "ours: gist KV @8x",
+    "hybrid": "ours: hybrid tail",
+    "hiagent": "HiAgent (paper 3.3 prompt)",
+    "acon_hist": "acon-base (guideline optimization not reproduced)",
+    "acon_obs": "acon-base (guideline optimization not reproduced)",
+}
 MATRIX2 = HOME / "bsa_results/matrix2"
 
 
@@ -138,15 +147,19 @@ def matrix2_harvest(json_out: str | None = None) -> dict:
     BFCL score dirs (handler c2kv-<dashed arm>) + textarm consumers
     (degenerate rate, compressor usage) from the request logs."""
     report: dict = {}
-    print("| benchmark | arm | n | metric | textarm note |")
-    print("|---|---|---|---|---|")
+    print("| benchmark | arm | label | n | metric | textarm note |")
+    print("|---|---|---|---|---|---|")
     for arm in MATRIX2_ARMS:
         dashed = arm.replace("_", "-")
         for bench, prefix in (("tau2", f"tau2_{arm}_CONTAMINATED"),
                               ("ts", f"ts_{arm}")):
-            summary = MATRIX2 / prefix / f"summary_{arm}.json"
-            if not summary.exists():
+            # sha-suffixed out dirs (run.py appends the git sha): glob both
+            # the literal and suffixed forms; silent-continue only when no
+            # variant exists at all
+            summaries = sorted(MATRIX2.glob(f"{prefix}*/summary_{arm}.json"))
+            if not summaries:
                 continue
+            summary = summaries[-1]
             d = json.loads(summary.read_text())
             ta = d.get("textarm_summary") or {}
             note = ""
@@ -159,13 +172,32 @@ def matrix2_harvest(json_out: str | None = None) -> dict:
             metric = (f"reward {d.get('semantic_score')} ci{d.get('semantic_score_ci95')}"
                       if bench == "tau2" else f"sim {d.get('semantic_score')}")
             label = "τ²†CONTAMINATED" if bench == "tau2" else "TS"
-            print(f"| {label} | {arm} | {d.get('n')} | {metric} | {note} |")
+            print(f"| {label} | {arm} | {MATRIX2_LABELS.get(arm, '')} "
+                  f"| {d.get('n')} | {metric} | {note} |")
             report.setdefault(bench, {})[arm] = d
         # bfcl_eval writes scores to <gorilla-root>/score/<model>/... ; the
         # result/<model>/score/... layout only exists in some archive
         # copies — probe BOTH (audit: reading only the latter made BFCL
         # rows silently vanish from the matrix2 table)
         gorr = HOME / ("benchmarks/gorilla/berkeley-function-call-leaderboard")
+        # BFCL rows carry the textarm note (degenerate / never-compressed /
+        # compressor cost) from the run's summary json — the rows most
+        # likely to be degenerate must not print an empty note column
+        bfcl_note = ""
+        for bfcl_sum in sorted(MATRIX2.glob(f"bfcl_{arm}*/summary_{arm}.json")):
+            ta = (json.loads(bfcl_sum.read_text())
+                  .get("textarm_summary") or {})
+            if ta.get("degenerate_arm"):
+                bfcl_note = (f"DEGENERATE {ta.get('degenerate_requests')}"
+                             f"/{ta.get('textarm_requests')}")
+            elif (arm.startswith("acon")
+                  and not ta.get("history_compressed_requests")):
+                bfcl_note = "NEVER-COMPRESSED (full arm under acon label)"
+            elif ta:
+                bfcl_note = (f"compressor {ta.get('compressor_calls')} calls "
+                             f"({ta.get('compressor_prompt_tokens')}+"
+                             f"{ta.get('compressor_completion_tokens')} tok)")
+            break
         score_files = sorted(
             (gorr / f"score/c2kv-{dashed}/multi_turn").glob("*score*.json"))
         score_files += sorted(
@@ -185,7 +217,8 @@ def matrix2_harvest(json_out: str | None = None) -> dict:
                 if d.get("total_count") is not None:
                     print(f"| BFCL | {arm} | {d['total_count']} | "
                           f"acc {round(d['accuracy'], 4)} "
-                          f"({d['correct_count']}/{d['total_count']}) | |")
+                          f"({d['correct_count']}/{d['total_count']}) "
+                          f"| {bfcl_note} |")
                     report.setdefault("bfcl", {})[arm] = d
     if json_out:
         Path(json_out).write_text(json.dumps(report, indent=2, ensure_ascii=False))

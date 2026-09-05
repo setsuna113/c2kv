@@ -228,11 +228,14 @@ def main(argv=None):
         except OSError:
             pass
         degenerate_requests = sum(1 for t in ta_rows if t.get("degenerate"))
+        compressed_requests = sum(
+            1 for t in ta_rows if t.get("history_compressed"))
         summary["textarm_summary"] = {
             "textarm_requests": len(ta_rows),
             "degenerate_requests": degenerate_requests,
             "degenerate_arm": bool(
                 ta_rows and degenerate_requests == len(ta_rows)),
+            "history_compressed_requests": compressed_requests,
             "compressor_calls": sum(int(t.get("n_compressor_calls") or 0)
                                     for t in ta_rows),
             "compressor_prompt_tokens": sum(
@@ -245,6 +248,11 @@ def main(argv=None):
                 float((t.get("compressor_usage") or {}).get("wall_sec") or 0)
                 for t in ta_rows), 1),
         }
+        if (args.arm == "acon_hist" and ta_rows
+                and compressed_requests == 0):
+            print(f"WARNING: arm {args.arm!r} NEVER compressed history in "
+                  f"{len(ta_rows)} requests — the trigger never fired; the "
+                  f"row is effectively a full arm under the acon label")
         if any(t.get("degenerate") for t in ta_rows):
             print(f"WARNING: arm {args.arm!r} ran DEGENERATE (no Subgoal "
                   f"segments) on {sum(1 for t in ta_rows if t.get('degenerate'))}"
