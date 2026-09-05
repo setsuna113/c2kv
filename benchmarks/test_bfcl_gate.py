@@ -5,7 +5,7 @@ import json
 import os
 import sys
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 
 import pytest
 
@@ -40,6 +40,13 @@ def _results(root: Path, handler: str, family: str, category: str, ids):
     path = root / "result" / handler / family / f"BFCL_v4_{category}_result.json"
     path.parent.mkdir(parents=True)
     path.write_text("".join(json.dumps({"id": i}) + "\n" for i in ids), encoding="utf-8")
+
+
+def _score(root: Path, handler: str, family: str, category: str, header):
+    path = root / "score" / handler / family / f"BFCL_v4_{category}_score.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(header) + "\n", encoding="utf-8")
+    return path
 
 
 def test_check_bfcl_finds_non_base_categories(tmp_path, monkeypatch):
@@ -99,28 +106,114 @@ def test_run_bfcl_sets_official_root_before_import_and_writes_ids_there(
         return 0
 
     monkeypatch.setattr(bfcl_adapter, "install_handler", install)
-    monkeypatch.setattr(bfcl_adapter, "expected_count", lambda category: 99)
+    monkeypatch.setattr(
+        bfcl_adapter, "official_category_counts", lambda category: {category: 99})
     monkeypatch.setattr(bfcl_adapter, "run_cli", seen["argv"].append)
     monkeypatch.setattr(terminal_check, "check_bfcl", check)
+    monkeypatch.setattr(
+        bfcl_adapter, "collect_score_summary",
+        lambda root, handler, counts: {
+            "n": sum(counts.values()), "n_total": sum(counts.values()),
+            "n_scored": sum(counts.values()), "correct_count": 1,
+            "semantic_score": 1.0, "official_score_headers": [], "scored": True,
+        })
 
     summary = bfcl_adapter.run_bfcl(
-        "http://proxy/v1", categories="memory", run_ids=["memory_7"],
+        "http://proxy/v1", categories="multi_turn_base",
+        run_ids=["multi_turn_base_7"],
         handler_name="c2kv-full", project_root=isolated,
     )
 
     assert seen["root_at_import"] == str(isolated.resolve())
     assert not (shared / "test_case_ids_to_generate.json").exists()
     assert json.loads((isolated / "test_case_ids_to_generate.json").read_text()) == {
-        "memory": ["memory_7"]}
+        "multi_turn_base": ["multi_turn_base_7"]}
     assert seen["check"][2]["root"] == isolated.resolve()
+    assert summary["n"] == summary["n_scored"] == 1
+    assert summary["semantic_score"] == 1.0
     assert summary["bfcl_project_root"] == str(isolated.resolve())
     assert "BFCL_PROJECT_ROOT" not in os.environ
 
 
-def test_expected_count_reads_category_data_file(tmp_path, capsys):
-    data = tmp_path / "bfcl_eval" / "data"
-    data.mkdir(parents=True)
-    (data / "BFCL_v4_memory.json").write_text("{}\n{}\n\n{}\n", encoding="utf-8")
-    assert bfcl_adapter.expected_count("memory", root=tmp_path) == 3
-    assert bfcl_adapter.expected_count("web_search", root=tmp_path) == 200  # fallback
-    assert "falls back" in capsys.readouterr().err
+def test_expected_count_uses_official_collection_mapping(monkeypatch):
+    package = ModuleType("bfcl_eval")
+    package.__path__ = []
+    utils = ModuleType("bfcl_eval.utils")
+    utils.parse_test_category_argument = lambda categories: ["part_a", "part_b"]
+    utils.load_dataset_entry = lambda category, **kwargs: [
+        {"id": f"{category}_{index}"}
+        for index in range(2 if category == "part_a" else 3)
+    ]
+    monkeypatch.setitem(sys.modules, "bfcl_eval", package)
+    monkeypatch.setitem(sys.modules, "bfcl_eval.utils", utils)
+
+    assert bfcl_adapter.official_category_counts("collection") == {
+        "part_a": 2, "part_b": 3}
+    assert bfcl_adapter.expected_count("collection") == 5
+
+
+def test_non_scoring_category_is_rejected(monkeypatch):
+    package = ModuleType("bfcl_eval")
+    package.__path__ = []
+    utils = ModuleType("bfcl_eval.utils")
+    utils.parse_test_category_argument = lambda categories: ["format_sensitivity"]
+    utils.load_dataset_entry = lambda category, **kwargs: [{"id": "unused"}]
+    monkeypatch.setitem(sys.modules, "bfcl_eval", package)
+    monkeypatch.setitem(sys.modules, "bfcl_eval.utils", utils)
+
+    with pytest.raises(ValueError, match="non-scoring"):
+        bfcl_adapter.expected_count("format_sensitivity")
+
+
+def test_collect_score_summary_reads_and_aggregates_official_headers(tmp_path):
+    first = _score(tmp_path, "c2kv-full", "multi_turn", "part_a", {
+        "accuracy": 0.5, "correct_count": 1, "total_count": 2})
+    second = _score(tmp_path, "c2kv-full", "multi_turn", "part_b", {
+        "accuracy": 1.0, "correct_count": 1, "total_count": 1})
+
+    summary = bfcl_adapter.collect_score_summary(
+        tmp_path, "c2kv-full", {"part_a": 2, "part_b": 1})
+
+    assert summary["n"] == summary["n_scored"] == 3
+    assert summary["correct_count"] == 2
+    assert summary["semantic_score"] == pytest.approx(2 / 3)
+    assert [row["path"] for row in summary["official_score_headers"]] == [
+        str(first), str(second)]
+
+
+def test_collect_score_summary_rejects_missing_or_wrong_denominator(tmp_path):
+    with pytest.raises(RuntimeError, match="found 0"):
+        bfcl_adapter.collect_score_summary(
+            tmp_path, "c2kv-full", {"multi_turn_base": 1})
+
+    _score(tmp_path, "c2kv-full", "multi_turn", "multi_turn_base", {
+        "accuracy": 0.5, "correct_count": 1, "total_count": 2})
+    with pytest.raises(RuntimeError, match="denominator mismatch"):
+        bfcl_adapter.collect_score_summary(
+            tmp_path, "c2kv-full", {"multi_turn_base": 1})
+
+
+def test_collect_score_summary_rejects_inconsistent_accuracy(tmp_path):
+    _score(tmp_path, "c2kv-full", "multi_turn", "multi_turn_base", {
+        "accuracy": 1.0, "correct_count": 0, "total_count": 1})
+    with pytest.raises(RuntimeError, match="accuracy mismatch"):
+        bfcl_adapter.collect_score_summary(
+            tmp_path, "c2kv-full", {"multi_turn_base": 1})
+
+
+def test_generate_mode_does_not_claim_scored_tasks(tmp_path, monkeypatch):
+    monkeypatch.setattr(bfcl_adapter, "install_handler", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        bfcl_adapter, "official_category_counts",
+        lambda category: {"multi_turn_base": 1})
+    argv = []
+    monkeypatch.setattr(bfcl_adapter, "run_cli", argv.append)
+    monkeypatch.setattr(terminal_check, "check_bfcl", lambda *args, **kwargs: 0)
+
+    summary = bfcl_adapter.run_bfcl(
+        "http://proxy/v1", mode="generate", project_root=tmp_path)
+
+    assert summary["n"] == summary["n_generated"] == 1
+    assert summary["scored"] is False
+    assert "n_scored" not in summary and "semantic_score" not in summary
+    assert argv == [bfcl_adapter.generate_argv("c2kv-hf", "multi_turn_base")]

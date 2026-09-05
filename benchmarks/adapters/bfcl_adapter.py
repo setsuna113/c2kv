@@ -28,11 +28,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import sys
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Mapping, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -135,19 +136,120 @@ def install_handler(base_url: str, model: str = SERVED_MODEL,
     )
 
 
-def expected_count(category: str, root: "Path | None" = None,
-                   fallback: int = 200) -> int:
-    """Entries in the category's data file (bfcl_eval/data/BFCL_v4_<category>
-    .json under the gorilla checkout = cwd).  The literal 200 was
-    multi_turn_base only; memory has 155, web_search 100."""
-    root = Path(root) if root else Path.cwd()
-    data = root / "bfcl_eval" / "data" / f"BFCL_v4_{category}.json"
-    if not data.exists():
-        print(f"WARNING: {data} not found; expected count falls back to {fallback}",
-              file=sys.stderr)
-        return fallback
-    return sum(1 for line in data.read_text(encoding="utf-8").splitlines()
-               if line.strip())
+def official_category_counts(category: str) -> Dict[str, int]:
+    """Resolve a BFCL category/collection with the pinned official loader.
+
+    A collection such as ``multi_turn`` is not a data filename. Memory and
+    web-search concrete categories also share source files and are rewritten
+    by the official loader, so counting ``BFCL_v4_<argument>.json`` is not a
+    general denominator rule.
+    """
+    try:
+        from bfcl_eval.utils import load_dataset_entry, parse_test_category_argument
+    except ImportError as error:
+        raise RuntimeError(
+            "BFCL expected-count resolution requires the pinned bfcl_eval package"
+        ) from error
+
+    concrete = parse_test_category_argument([category])
+    if not concrete:
+        raise ValueError(f"BFCL category resolves to no concrete categories: {category}")
+    if "format_sensitivity" in concrete:
+        raise ValueError(
+            "BFCL format_sensitivity is non-scoring and cannot produce a scored summary"
+        )
+
+    counts: Dict[str, int] = {}
+    for name in concrete:
+        entries = load_dataset_entry(
+            name, include_prereq=False, include_language_specific_hint=False)
+        ids = [entry.get("id") for entry in entries if isinstance(entry, dict)]
+        if not ids or any(item is None for item in ids):
+            raise RuntimeError(f"BFCL category has no complete official id set: {name}")
+        if len(ids) != len(set(map(str, ids))):
+            raise RuntimeError(f"BFCL category has duplicate official ids: {name}")
+        counts[name] = len(ids)
+    return counts
+
+
+def expected_count(category: str) -> int:
+    """Number of scored tasks after official collection expansion."""
+    return sum(official_category_counts(category).values())
+
+
+def _score_header(path: Path) -> Dict[str, Any]:
+    try:
+        with path.open(encoding="utf-8") as handle:
+            header = next((json.loads(line) for line in handle if line.strip()), None)
+    except (OSError, json.JSONDecodeError) as error:
+        raise RuntimeError(f"invalid BFCL score file {path}: {error}") from error
+    if not isinstance(header, dict):
+        raise RuntimeError(f"BFCL score file has no JSON header: {path}")
+
+    total = header.get("total_count")
+    correct = header.get("correct_count")
+    accuracy = header.get("accuracy")
+    if (not isinstance(total, int) or isinstance(total, bool) or total <= 0
+            or not isinstance(correct, int) or isinstance(correct, bool)
+            or correct < 0 or correct > total
+            or not isinstance(accuracy, (int, float)) or isinstance(accuracy, bool)
+            or not math.isfinite(float(accuracy))):
+        raise RuntimeError(f"invalid BFCL score header in {path}: {header}")
+    derived = correct / total
+    if not math.isclose(float(accuracy), derived, rel_tol=0.0, abs_tol=1e-12):
+        raise RuntimeError(
+            f"BFCL score header accuracy mismatch in {path}: "
+            f"accuracy={accuracy} correct_count={correct} total_count={total}")
+    return header
+
+
+def collect_score_summary(project_root: "Path | str", handler_name: str,
+                          selected_counts: Mapping[str, int]) -> Dict[str, Any]:
+    """Read and validate official per-category score headers without inference."""
+    score_root = Path(project_root) / "score" / handler_name
+    if not selected_counts:
+        raise ValueError("BFCL selected category counts are empty")
+
+    headers = []
+    total = 0
+    correct = 0
+    for category, expected in selected_counts.items():
+        if not isinstance(expected, int) or isinstance(expected, bool) or expected <= 0:
+            raise ValueError(f"invalid selected count for BFCL/{category}: {expected!r}")
+        filename = f"BFCL_v4_{category}_score.json"
+        hits = sorted(score_root.rglob(filename)) if score_root.is_dir() else []
+        if len(hits) != 1:
+            raise RuntimeError(
+                f"expected one BFCL score file for {category} under {score_root}, "
+                f"found {len(hits)}")
+        header = _score_header(hits[0])
+        if header["total_count"] != expected:
+            raise RuntimeError(
+                f"BFCL scorer denominator mismatch for {category}: "
+                f"total_count={header['total_count']} selected_expected={expected}")
+        total += header["total_count"]
+        correct += header["correct_count"]
+        headers.append({
+            "category": category,
+            "path": str(hits[0]),
+            "accuracy": float(header["accuracy"]),
+            "correct_count": header["correct_count"],
+            "total_count": header["total_count"],
+        })
+
+    selected_expected = sum(selected_counts.values())
+    if total != selected_expected:
+        raise RuntimeError(
+            f"BFCL scorer coverage mismatch: n_scored={total} n={selected_expected}")
+    return {
+        "n": selected_expected,
+        "n_total": selected_expected,
+        "n_scored": total,
+        "correct_count": correct,
+        "semantic_score": correct / total,
+        "official_score_headers": headers,
+        "scored": True,
+    }
 
 
 def run(ctx: RunContext) -> Dict[str, Any]:
@@ -221,8 +323,11 @@ def run_bfcl(base_url: str, categories: str = "multi_turn_base",
     RESULT_PATH, SCORE_PATH and TEST_IDS_TO_GENERATE_PATH.  It must be set
     before the first official import.
 
-    Terminal-state check (acceptance 1): every expected entry must have a
-    result row — the run fails loudly instead of shrinking the denominator."""
+    Terminal-state check (acceptance 1): every selected entry must have a
+    result row and, after evaluation, an official score row. Generation-only
+    summaries deliberately contain no ``n_scored`` or ``semantic_score``."""
+    if mode not in ("generate", "evaluate", "both"):
+        raise ValueError(f"invalid BFCL mode: {mode}")
     project_root = Path(
         project_root or os.environ.get("BFCL_PROJECT_ROOT") or Path.cwd()
     ).resolve()
@@ -231,31 +336,54 @@ def run_bfcl(base_url: str, categories: str = "multi_turn_base",
     os.environ["BFCL_PROJECT_ROOT"] = str(project_root)
     try:
         install_handler(base_url, model=model, handler_name=handler_name)
-        expected = expected_count(categories)
+        category_counts = official_category_counts(categories)
         ids: Optional[List[str]] = None
         if run_ids:
             ids = ([i.strip() for i in run_ids.split(",") if i.strip()]
                    if isinstance(run_ids, str) else list(run_ids))
+            if len(category_counts) != 1:
+                raise ValueError(
+                    "BFCL --run-ids requires one concrete category, not collection "
+                    f"{categories!r} -> {sorted(category_counts)}")
+            if not ids:
+                raise ValueError("BFCL --run-ids resolved to an empty id list")
             # atomic write: concurrent runs racing on one file truncated ids
             id_file = project_root / "test_case_ids_to_generate.json"
             tmp = id_file.with_suffix(".json.tmp")
             tmp.write_text(json.dumps({categories: ids}), encoding="utf-8")
             tmp.replace(id_file)
-            expected = len(ids)
+            selected_counts = {next(iter(category_counts)): len(ids)}
+        else:
+            selected_counts = category_counts
+        expected = sum(selected_counts.values())
         if mode in ("generate", "both"):
             run_cli(generate_argv(handler_name, categories, ids))
         if mode in ("evaluate", "both"):
             run_cli(evaluate_argv(handler_name, categories, ids))
         import terminal_check  # noqa: E402  (sibling module, sys.path has parent)
 
-        ids_str = ",".join(run_ids) if isinstance(run_ids, list) else (run_ids or "")
-        code = terminal_check.check_bfcl(expected, ids_str, handler=handler_name,
-                                         category=categories, root=project_root)
-        if code != 0:
-            raise SystemExit(f"FATAL: bfcl terminal-state check failed (rc={code})")
-        return {"benchmark": "bfcl", "categories": categories, "mode": mode,
-                "n_total": expected, "n_scored": expected,
-                "bfcl_project_root": str(project_root)}
+        ids_str = ",".join(ids or [])
+        for category, selected in selected_counts.items():
+            code = terminal_check.check_bfcl(
+                selected, ids_str, handler=handler_name,
+                category=category, root=project_root)
+            if code != 0:
+                raise SystemExit(
+                    f"FATAL: bfcl terminal-state check failed for {category} (rc={code})")
+
+        summary: Dict[str, Any] = {
+            "benchmark": "bfcl", "categories": categories, "mode": mode,
+            "n": expected, "n_total": expected,
+            "bfcl_project_root": str(project_root),
+        }
+        if mode == "generate":
+            summary.update({"n_generated": expected, "scored": False})
+        else:
+            summary.update(collect_score_summary(
+                project_root, handler_name, selected_counts))
+            if mode == "both":
+                summary["n_generated"] = expected
+        return summary
     finally:
         if previous_project_root is None:
             os.environ.pop("BFCL_PROJECT_ROOT", None)
