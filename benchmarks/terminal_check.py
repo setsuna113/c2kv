@@ -70,7 +70,8 @@ def check_tau2(run: str, expected, task_ids: str = "") -> int:
 
 
 def check_bfcl(expected, run_ids, handler: str = "c2kv-hf",
-               category: str = "multi_turn_base") -> int:
+               category: str = "multi_turn_base",
+               root: "Path | str | None" = None) -> int:
     """``handler`` is the BFCL model key the run registered (result dir
     name).  run.py registers one per arm (c2kv-<arm>); hardcoding c2kv-hf
     made every non-default arm read the WRONG directory — or stale files
@@ -81,7 +82,10 @@ def check_bfcl(expected, run_ids, handler: str = "c2kv-hf",
     <category>_result.json), so the glob is recursive — hard-wiring
     multi_turn/ left every other category (memory, long_context, ...)
     without a terminal gate."""
-    pattern = str(GORILLA / f"result/{handler}/**/*{category}_result.json")
+    project_root = Path(
+        root or os.environ.get("BFCL_PROJECT_ROOT") or GORILLA
+    )
+    pattern = str(project_root / f"result/{handler}/**/*{category}_result.json")
     hits = sorted(glob.glob(pattern, recursive=True))
     if not hits:
         print(f"FATAL: no bfcl result file under {pattern}")

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -37,6 +38,58 @@ def test_check_bfcl_id_exact_subset(tmp_path, monkeypatch):
                                      category="memory") == 0
     assert terminal_check.check_bfcl(None, "memory_0,memory_1", handler="c2kv-full",
                                      category="memory") == 1
+
+
+def test_check_bfcl_explicit_root_ignores_stale_shared_results(
+        tmp_path, monkeypatch):
+    shared = tmp_path / "shared"
+    isolated = tmp_path / "isolated"
+    monkeypatch.setattr(terminal_check, "GORILLA", shared)
+    _results(shared, "c2kv-full", "memory", "memory", ["memory_0"])
+    _results(isolated, "c2kv-full", "memory", "memory", ["memory_1"])
+
+    assert terminal_check.check_bfcl(
+        None, "memory_1", handler="c2kv-full", category="memory",
+        root=isolated,
+    ) == 0
+    assert terminal_check.check_bfcl(
+        None, "memory_0", handler="c2kv-full", category="memory",
+        root=isolated,
+    ) == 1
+
+
+def test_run_bfcl_sets_official_root_before_import_and_writes_ids_there(
+        tmp_path, monkeypatch):
+    shared = tmp_path / "shared"
+    isolated = tmp_path / "isolated"
+    shared.mkdir()
+    monkeypatch.chdir(shared)
+    monkeypatch.delenv("BFCL_PROJECT_ROOT", raising=False)
+    seen = {"argv": []}
+
+    def install(base_url, model, handler_name):
+        seen["root_at_import"] = os.environ.get("BFCL_PROJECT_ROOT")
+
+    def check(expected, run_ids, **kwargs):
+        seen["check"] = (expected, run_ids, kwargs)
+        return 0
+
+    monkeypatch.setattr(bfcl_adapter, "install_handler", install)
+    monkeypatch.setattr(bfcl_adapter, "expected_count", lambda category: 99)
+    monkeypatch.setattr(bfcl_adapter, "run_cli", seen["argv"].append)
+    monkeypatch.setattr(terminal_check, "check_bfcl", check)
+
+    summary = bfcl_adapter.run_bfcl(
+        "http://proxy/v1", categories="memory", run_ids=["memory_7"],
+        handler_name="c2kv-full", project_root=isolated,
+    )
+
+    assert seen["root_at_import"] == str(isolated.resolve())
+    assert not (shared / "test_case_ids_to_generate.json").exists()
+    assert json.loads((isolated / "test_case_ids_to_generate.json").read_text()) == {
+        "memory": ["memory_7"]}
+    assert seen["check"][2]["root"] == isolated.resolve()
+    assert summary["bfcl_project_root"] == str(isolated.resolve())
 
 
 def test_expected_count_reads_category_data_file(tmp_path, capsys):

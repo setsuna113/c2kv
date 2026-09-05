@@ -49,8 +49,7 @@ def add_arguments(parser) -> None:
 
 
 def default_bfcl_dir() -> str:
-    """bfcl_eval resolves its data/result dirs from cwd; the adapter runs
-    from the gorilla checkout ($BENCH_BFCL_DIR override)."""
+    """Checkout containing the installed BFCL package data."""
     return os.environ.get("BENCH_BFCL_DIR") or str(
         Path.home() / "benchmarks" / "gorilla"
         / "berkeley-function-call-leaderboard")
@@ -152,13 +151,18 @@ def expected_count(category: str, root: "Path | None" = None,
 def run(ctx: RunContext) -> Dict[str, Any]:
     """Adapter entry: run the official CLI from inside the gorilla checkout.
 
-    bfcl_eval resolves data/ and result/ from the process cwd, so the chdir
-    (and its restore) belongs here, not in run.py.  The handler expects an
-    OpenAI base_url WITH ``/v1``.
+    BFCL reads ``BFCL_PROJECT_ROOT`` when its modules are first imported.
+    Point it at this run's output directory before ``run_bfcl`` imports BFCL,
+    while keeping cwd in the checkout so the installed package data resolves.
+    The handler expects an OpenAI base_url WITH ``/v1``.
 
     No cost join: see ``COST_JOIN`` below.
     """
+    project_root = ctx.out_dir.resolve()
+    project_root.mkdir(parents=True, exist_ok=True)
     prev_cwd = os.getcwd()
+    previous_project_root = os.environ.get("BFCL_PROJECT_ROOT")
+    os.environ["BFCL_PROJECT_ROOT"] = str(project_root)
     os.chdir(ctx.opt("bfcl_dir") or default_bfcl_dir())
     try:
         summary = run_bfcl(
@@ -168,9 +172,14 @@ def run(ctx: RunContext) -> Dict[str, Any]:
             run_ids=ctx.opt("run_ids"),
             model=ctx.model,
             handler_name=handler_key(ctx.arm),
+            project_root=project_root,
         )
     finally:
         os.chdir(prev_cwd)
+        if previous_project_root is None:
+            os.environ.pop("BFCL_PROJECT_ROOT", None)
+        else:
+            os.environ["BFCL_PROJECT_ROOT"] = previous_project_root
     summary["cost_join"] = COST_JOIN
     return summary
 
@@ -193,7 +202,8 @@ COST_JOIN = ("not joinable: the steady-state conversation id needs the first "
 def run_bfcl(base_url: str, categories: str = "multi_turn_base",
              mode: str = "both", run_ids: "list[str] | str | None" = None,
              model: str = SERVED_MODEL,
-             handler_name: str = MODEL_NAME) -> Dict[str, Any]:
+             handler_name: str = MODEL_NAME,
+             project_root: "Path | str | None" = None) -> Dict[str, Any]:
     """Register the handler and drive the official generate/evaluate CLI
     in-process.
 
@@ -201,12 +211,21 @@ def run_bfcl(base_url: str, categories: str = "multi_turn_base",
     passes ``handler_key(arm)`` so arms never overwrite each other's results.
 
     ``run_ids`` subsets the category: this BFCL vintage implements subsetting
-    through <gorilla-root>/test_case_ids_to_generate.json ({"<category>":
+    through <project-root>/test_case_ids_to_generate.json ({"<category>":
     [ids]}) + the boolean --run-ids flag, NOT a CLI value, so the ids are
     written to that file and the flag is passed (comma string or list).
 
+    ``project_root`` is the isolated output root used by BFCL's official
+    RESULT_PATH, SCORE_PATH and TEST_IDS_TO_GENERATE_PATH.  It must be set
+    before the first official import.
+
     Terminal-state check (acceptance 1): every expected entry must have a
     result row — the run fails loudly instead of shrinking the denominator."""
+    project_root = Path(
+        project_root or os.environ.get("BFCL_PROJECT_ROOT") or Path.cwd()
+    ).resolve()
+    project_root.mkdir(parents=True, exist_ok=True)
+    os.environ["BFCL_PROJECT_ROOT"] = str(project_root)
     install_handler(base_url, model=model, handler_name=handler_name)
     expected = expected_count(categories)
     ids: Optional[List[str]] = None
@@ -214,7 +233,7 @@ def run_bfcl(base_url: str, categories: str = "multi_turn_base",
         ids = ([i.strip() for i in run_ids.split(",") if i.strip()]
                if isinstance(run_ids, str) else list(run_ids))
         # atomic write: concurrent runs racing on one file truncated ids
-        id_file = Path.cwd() / "test_case_ids_to_generate.json"
+        id_file = project_root / "test_case_ids_to_generate.json"
         tmp = id_file.with_suffix(".json.tmp")
         tmp.write_text(json.dumps({categories: ids}), encoding="utf-8")
         tmp.replace(id_file)
@@ -227,11 +246,12 @@ def run_bfcl(base_url: str, categories: str = "multi_turn_base",
 
     ids_str = ",".join(run_ids) if isinstance(run_ids, list) else (run_ids or "")
     code = terminal_check.check_bfcl(expected, ids_str, handler=handler_name,
-                                     category=categories)
+                                     category=categories, root=project_root)
     if code != 0:
         raise SystemExit(f"FATAL: bfcl terminal-state check failed (rc={code})")
     return {"benchmark": "bfcl", "categories": categories, "mode": mode,
-            "n_total": expected, "n_scored": expected}
+            "n_total": expected, "n_scored": expected,
+            "bfcl_project_root": str(project_root)}
 
 
 def run_cli(argv):

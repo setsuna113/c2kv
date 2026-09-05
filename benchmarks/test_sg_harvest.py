@@ -28,10 +28,18 @@ def test_matrix2_harvest_includes_cacheblend_and_labels_bfcl(
             {"n": 1, "semantic_score": 0.5},
         )
 
-    score = (tmp_path / "benchmarks" / "gorilla" /
-             "berkeley-function-call-leaderboard" / "score" /
+    bfcl_root = matrix2 / "bfcl_cacheblend_r16_sha"
+    _write_json(
+        bfcl_root / "summary_cacheblend_r16.json",
+        {"bfcl_project_root": str(bfcl_root)},
+    )
+    score = (bfcl_root / "score" /
              "c2kv-cacheblend-r16" / "multi_turn" / "score.json")
     _write_json(score, {"total_count": 2, "correct_count": 1, "accuracy": 0.5})
+    stale = (tmp_path / "benchmarks" / "gorilla" /
+             "berkeley-function-call-leaderboard" / "score" /
+             "c2kv-cacheblend-r16" / "multi_turn" / "stale_score.json")
+    _write_json(stale, {"total_count": 9, "correct_count": 0, "accuracy": 0.0})
 
     report = sg_harvest.matrix2_harvest()
     output = capsys.readouterr().out

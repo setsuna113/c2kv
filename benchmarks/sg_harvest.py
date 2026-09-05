@@ -189,9 +189,14 @@ def matrix2_harvest(json_out: str | None = None) -> dict:
         # compressor cost) from the run's summary json — the rows most
         # likely to be degenerate must not print an empty note column
         bfcl_note = ""
-        for bfcl_sum in sorted(MATRIX2.glob(f"bfcl_{arm}*/summary_{arm}.json")):
-            ta = (json.loads(bfcl_sum.read_text())
-                  .get("textarm_summary") or {})
+        bfcl_summaries = sorted(MATRIX2.glob(f"bfcl_{arm}*/summary_{arm}.json"))
+        bfcl_project_root = None
+        if bfcl_summaries:
+            bfcl_summary = json.loads(bfcl_summaries[-1].read_text())
+            project_root = bfcl_summary.get("bfcl_project_root")
+            if project_root:
+                bfcl_project_root = Path(project_root)
+            ta = bfcl_summary.get("textarm_summary") or {}
             if ta.get("degenerate_arm"):
                 bfcl_note = (f"DEGENERATE {ta.get('degenerate_requests')}"
                              f"/{ta.get('textarm_requests')}")
@@ -202,13 +207,20 @@ def matrix2_harvest(json_out: str | None = None) -> dict:
                 bfcl_note = (f"compressor {ta.get('compressor_calls')} calls "
                              f"({ta.get('compressor_prompt_tokens')}+"
                              f"{ta.get('compressor_completion_tokens')} tok)")
-            break
-        score_files = sorted(
-            (gorr / f"score/c2kv-{dashed}/multi_turn").glob("*score*.json"))
-        score_files += sorted(
-            (gorr / f"result/c2kv-{dashed}/score/multi_turn").glob("*score*.json"))
-        result_dir = gorr / f"result/c2kv-{dashed}/multi_turn"
-        if not score_files and result_dir.exists():
+        score_files = []
+        if bfcl_project_root:
+            score_files = sorted(
+                (bfcl_project_root / f"score/c2kv-{dashed}/multi_turn")
+                .glob("*score*.json"))
+            result_dirs = [bfcl_project_root / f"result/c2kv-{dashed}/multi_turn"]
+        else:
+            # Legacy matrix2 runs predate per-run BFCL_PROJECT_ROOT.
+            score_files = sorted(
+                (gorr / f"score/c2kv-{dashed}/multi_turn").glob("*score*.json"))
+            score_files += sorted(
+                (gorr / f"result/c2kv-{dashed}/score/multi_turn").glob("*score*.json"))
+            result_dirs = [gorr / f"result/c2kv-{dashed}/multi_turn"]
+        if not score_files and any(path.exists() for path in result_dirs):
             raise SystemExit(
                 f"FATAL: BFCL result rows exist for c2kv-{dashed} but no "
                 f"score file was found (score/ and result/*/score/ both "

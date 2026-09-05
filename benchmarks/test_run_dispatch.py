@@ -265,6 +265,7 @@ def test_toolsandbox_dispatch_splits_scenarios(monkeypatch):
 def test_bfcl_dispatch_adds_v1_and_chdirs(monkeypatch, tmp_path):
     calls = _capture(monkeypatch, bfcl_adapter, "run_bfcl")
     seen = {}
+    monkeypatch.setenv("BFCL_PROJECT_ROOT", "previous-root")
     monkeypatch.setattr(bfcl_adapter.os, "chdir",
                         lambda path: seen.setdefault("cwds", []).append(str(path)))
     ctx = _ctx("bfcl", categories="memory", bfcl_dir=str(tmp_path),
@@ -275,10 +276,12 @@ def test_bfcl_dispatch_adds_v1_and_chdirs(monkeypatch, tmp_path):
     assert calls["args"] == ("http://127.0.0.1:34100/v1",)
     assert calls["kwargs"]["categories"] == "memory"
     assert calls["kwargs"]["run_ids"] == "memory_1"
+    assert calls["kwargs"]["project_root"] == ctx.out_dir.resolve()
     # underscores in an arm name would corrupt the result dir path
     assert calls["kwargs"]["handler_name"] == "c2kv-c2kv-repair"
     assert seen["cwds"][0] == str(tmp_path)
     assert len(seen["cwds"]) == 2  # chdir in, chdir back (try/finally)
+    assert bfcl_adapter.os.environ["BFCL_PROJECT_ROOT"] == "previous-root"
     assert summary["cost_join"].startswith("not joinable:")
 
 
