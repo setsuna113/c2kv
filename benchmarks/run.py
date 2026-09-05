@@ -147,6 +147,8 @@ def add_core_arguments(parser: argparse.ArgumentParser) -> None:
                         help="local checkpoint served by --upstream")
     parser.add_argument("--checkpoint-profile", type=Path,
                         help="explicit checkpoint profile JSON; otherwise discovered beside checkpoint")
+    parser.add_argument("--expected-profile-fingerprint",
+                        help="matrix binding; reject a profile file changed after planning")
     parser.add_argument("--reference-profile", choices=["checkpoint-1088"],
                         help="explicit historical reference recipe; its missing training provenance remains recorded")
     parser.add_argument("--allow-unprofiled", action="store_true",
@@ -217,6 +219,9 @@ def resolve_run_profile(args: argparse.Namespace) -> dict:
         args.checkpoint, profile_path=args.checkpoint_profile,
         reference_profile=args.reference_profile,
         query_projection=args.query_projection, require_serving_e2e=True)
+    if (args.expected_profile_fingerprint is not None
+            and args.expected_profile_fingerprint != profile.get("profile_fingerprint")):
+        raise ProfileError("resolved checkpoint profile differs from the planned profile fingerprint")
     serving = profile["serving"]
     for key in ("doc_packing", "max_doc_length", "max_doc_num", "query_projection"):
         explicit = getattr(args, key)

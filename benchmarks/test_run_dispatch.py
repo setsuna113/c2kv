@@ -58,6 +58,7 @@ CLI_SURFACE = [
     ("--max-doc-num", None, False),
     ("--checkpoint", None, False),
     ("--checkpoint-profile", None, False),
+    ("--expected-profile-fingerprint", None, False),
     ("--reference-profile", None, False),
     ("--allow-unprofiled", False, False),
     ("--query-projection", None, False),
@@ -157,6 +158,10 @@ def test_g_profile_drives_query_and_document_geometry(tmp_path):
     assert (args.doc_packing, args.max_doc_length, args.max_doc_num, args.query_projection) == (
         "turn", 768, 16, "gist")
     assert profile["profile_kind"] == "legacy_artifacts"
+    args.expected_profile_fingerprint = "outdated-plan"
+    with pytest.raises(run.ProfileError, match="planned profile fingerprint"):
+        run.resolve_run_profile(args)
+    args.expected_profile_fingerprint = profile["profile_fingerprint"]
     args.max_doc_length = 512
     with pytest.raises(run.ProfileError, match="conflicts with checkpoint profile"):
         run.resolve_run_profile(args)

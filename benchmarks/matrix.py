@@ -66,7 +66,8 @@ def _string_list(value: Any, field: str) -> list[str]:
 def _flag_args(args: Iterable[str]) -> list[str]:
     values = list(args)
     forbidden = {"--benchmark", "--arm", "--backend", "--upstream", "--user-upstream",
-                 "--out", "--run-name", "--checkpoint", "--checkpoint-profile"}
+                 "--out", "--run-name", "--checkpoint", "--checkpoint-profile",
+                 "--expected-profile-fingerprint"}
     for value in values:
         if value in forbidden or any(value.startswith(flag + "=") for flag in forbidden):
             raise ValueError(f"matrix owns {value!r}; remove it from run_args")
@@ -114,7 +115,8 @@ def _profile_runner_args(profile: Mapping[str, Any]) -> list[str]:
         raise ValueError("matrix profile.path is required for run.py")
     if not isinstance(checkpoint_path, str) or not checkpoint_path.strip():
         raise ValueError("matrix profile.checkpoint.path is required for run.py")
-    return ["--checkpoint", checkpoint_path, "--checkpoint-profile", profile_path]
+    return ["--checkpoint", checkpoint_path, "--checkpoint-profile", profile_path,
+            "--expected-profile-fingerprint", str(profile["fingerprint"])]
 
 
 def _cell_id(benchmark: str, arm: str) -> str:
