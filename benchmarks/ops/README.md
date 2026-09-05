@@ -65,6 +65,10 @@ python -m pytest agent/test_d_downstream_server_gate.py -v
 
 For a frozen D smoke, select the manifest's qids with
 `agent/d_kv_intervene.py --qids ...`, using its matching bundle and plan.
+The archived `d_sham_plan_r2.json` references the earlier manifest without
+the later `max_new_tokens` metadata. For the current manifest, generate a
+separate plan with `agent/d_sham_plan.py` as shown in
+`docs/bdf_pilot_runbook.md`; keep the historical plan unchanged.
 The loader filters selected qids before history tokenization while preserving
 the original split, sampling RNG and source limits. Downstream runs retain
 all valid spans from the selected trigger sessions. A nonzero global

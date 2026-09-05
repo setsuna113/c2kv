@@ -238,14 +238,26 @@ export HF_HUB_OFFLINE=1 TOKENIZERS_PARALLELISM=false
 export PYTORCH_NPU_ALLOC_CONF="${PYTORCH_NPU_ALLOC_CONF:-max_split_size_mb:128}"
 export ASCEND_RT_VISIBLE_DEVICES="${ASCEND_RT_VISIBLE_DEVICES:-0}"
 
+D_TOKENIZER_DIR="${D_TOKENIZER_DIR:?set D_TOKENIZER_DIR to the local tokenizer checkpoint}"
 OUT_DIR=/home/liuyancheng/c2kv/outputs_lyc/g_joint/bdf/d_downstream_r2
 mkdir -p "${OUT_DIR}/smoke" results/bdf_pilot/logs
+# Freeze a run-local plan against the current manifest. The archived r2
+# plan references the manifest before its max_new_tokens metadata was added.
+# Preserve that historical plan, and preserve this plan when resuming.
+if [[ ! -f "${OUT_DIR}/d_sham_plan.json" ]]; then
+  python agent/d_sham_plan.py \
+    --manifest configs/bdf_pilot/d_cw_manifest_r2.json \
+    --doc_table results/d/d_doc_ids_r2.json \
+    --corpus configs/bdf_pilot/d_neutral_corpus.txt \
+    --tokenizer "${D_TOKENIZER_DIR}" \
+    --out "${OUT_DIR}/d_sham_plan.json"
+fi
 FROZEN="--manifest configs/bdf_pilot/d_cw_manifest_r2.json \
   --bundles results/d/bundles_batch_tf_r2.jsonl \
-  --sham_plan configs/bdf_pilot/d_sham_plan_r2.json \
+  --sham_plan ${OUT_DIR}/d_sham_plan.json \
   --model /home/liuyancheng/c2kv/outputs_lyc/g_joint/fixed_joint \
   --base_model /home/liuyancheng/c2kv/models/Qwen3-4B-Instruct-2507 \
-  --tokenizer /home/liuyancheng/c2kv/models/Qwen3-4B-Instruct-2507 \
+  --tokenizer ${D_TOKENIZER_DIR} \
   --dataset_path /home/liuyancheng/c2kv/datasets/agent-llm-traces-v2 \
   --device_type npu --attn_impl eager --ratio 8"
 
