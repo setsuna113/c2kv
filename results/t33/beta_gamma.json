@@ -1,0 +1,15 @@
+{
+  "n_sessions": 227,
+  "n_step_pairs": 444,
+  "gamma_max": 0.38095238095238093,
+  "gamma_nonzero": 39,
+  "beta_distinct_values": 49,
+  "beta_quantiles": {
+    "5": 0.0,
+    "50": 0.75,
+    "95": 1.0
+  },
+  "non_monotone_sessions": 31,
+  "gate": "PROCEED (or inspect): mechanism non-degenerate",
+  "note": "gamma measured from doc-sha order across a session's steps; CCI would remain, but CCI needs the attention pass (optional)"
+}

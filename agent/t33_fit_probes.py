@@ -129,7 +129,7 @@ def load_anchor_matrix(
     keep = []
     for i, qid in enumerate(qids):
         key = f"{qid}::anchor_hidden"
-        if key not in npz.files:
+        if key not in npz:
             continue
         anchors = (steps_by_qid.get(qid) or {}).get("anchors") or []
         labels = [lab for lab, _pos in anchors]
@@ -170,7 +170,14 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     steps_rows = load_jsonl(Path(args.capture_dir) / args.arm / "p0.steps.jsonl")
     steps_by_qid = {r["qid"]: r for r in steps_rows}
-    npz = np.load(Path(args.capture_dir) / args.arm / "p0.hid.npz")
+    # hidden shards: the main run's p0.hid.npz may hold only a tail (historic
+    # overwrite bug); topup shards add the trigger subset.  Load them all.
+    npz: Dict[str, Any] = {}
+    for path in sorted((Path(args.capture_dir) / args.arm).glob("*.hid.npz")):
+        with np.load(path) as z:
+            for k in z.files:
+                if k not in npz:
+                    npz[k] = z[k]
 
     qids = [r["qid"] for r in steps_rows if r["qid"] in lab_by_qid]
     if args.max_rows:
@@ -184,7 +191,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     n_layers = None
     if qids_t:
         k0 = f"{qids_t[0]}::query_last"
-        if k0 in npz.files:
+        if k0 in npz:
             n_layers = npz[k0].shape[0]
     every5 = list(range(2, n_layers, 5)) if n_layers else []
 
@@ -199,28 +206,36 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     # --- joint overflow: [context side; query side] on shared strided layers ---
     ctx_key = "ctx_hid" if args.arm == "full" else "gist_hid"
-    have_ctx = qids_t and f"{qids_t[0]}::{ctx_key}" in npz.files
-    if have_ctx:
-        Xc = np.stack([npz[f"{q}::{ctx_key}"] for q in qids_t]).astype(np.float32)  # [n, Sel, K, H]
-        sel_layers = Xc.shape[1]
-        ctx_last = Xc[:, :, -1, :].reshape(len(qids_t), -1)  # [n, Sel*H]
-        query_sel = Xq[:, :: max(1, n_layers // sel_layers), :].reshape(len(qids_t), -1)
-        joint = np.concatenate([ctx_last, query_sel], axis=1)
-        out["joint_overflow"] = fit_lr_cv(joint, y, clusters)
-        out["joint_context_only"] = fit_lr_cv(ctx_last, y, clusters)
+    try:
+        have_ctx = qids_t and f"{qids_t[0]}::{ctx_key}" in npz
+        if have_ctx:
+            # K (doc/gist count) varies per row: slice the LAST position per
+            # row before stacking, never stack raw [Sel, K, H].
+            ctx_rows = [npz[f"{q}::{ctx_key}"][:, -1, :] for q in qids_t]  # [Sel, H]
+            Xc = np.stack(ctx_rows).astype(np.float32)  # [n, Sel, H]
+            sel_layers = Xc.shape[1]
+            ctx_last = Xc.reshape(len(qids_t), -1)  # [n, Sel*H]
+            query_sel = Xq[:, :: max(1, n_layers // sel_layers), :].reshape(len(qids_t), -1)
+            joint = np.concatenate([ctx_last, query_sel], axis=1)
+            out["joint_overflow"] = fit_lr_cv(joint, y, clusters)
+            out["joint_context_only"] = fit_lr_cv(ctx_last, y, clusters)
+    except Exception as exc:  # noqa: BLE001
+        out["joint_overflow_error"] = repr(exc)[:200]
 
     # --- kwts: per-(layer,head) probes on boundary o_proj inputs ---
     oproj_key = "ctx_oproj" if args.arm == "full" else "gist_oproj"
-    if qids_t and f"{qids_t[0]}::{oproj_key}" in npz.files:
-        Xo = np.stack([npz[f"{q}::{oproj_key}"] for q in qids_t]).astype(np.float32)  # [n, Sel, K, H]
-        n_rows, sel, K, H = Xo.shape
-        n_heads = 32
-        head_dim = H // n_heads
-        per_head_auprc = {}
-        head_features = {}
-        for si in range(sel):
-            for h in range(n_heads):
-                feats = Xo[:, si, :, h * head_dim:(h + 1) * head_dim].mean(axis=1)  # [n, head_dim]
+    try:
+        if qids_t and f"{qids_t[0]}::{oproj_key}" in npz:
+            # K (chunk count) varies per row: per-row mean over boundaries first
+            row_means = [npz[f"{q}::{oproj_key}"].mean(axis=1) for q in qids_t]  # [Sel, H]
+            Xo = np.stack(row_means).astype(np.float32)  # [n, Sel, H]
+            n_rows, sel, H = Xo.shape
+            n_heads = 32
+            head_dim = H // n_heads
+            head_features = {}
+            for si in range(sel):
+                for h in range(n_heads):
+                    feats = Xo[:, si, h * head_dim:(h + 1) * head_dim]  # [n, head_dim]
                 head_features[(si, h)] = feats
         # inner selection inside CV: rank heads on inner train folds
         folds = grouped_folds(clusters, FOLDS)
@@ -273,6 +288,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                 "p95": round(float(np.percentile(perm_auprcs, 95)), 4),
                 "n_perms": len(perm_auprcs),
             }
+    except Exception as exc:  # noqa: BLE001
+        out["kwts_error"] = repr(exc)[:200]
 
     # --- tool-call error probe: per-layer at two anchors + FPR@90TPR ---
     for anchor in ("name_last", "last"):

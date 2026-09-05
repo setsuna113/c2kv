@@ -181,6 +181,11 @@ def steps_features(rec: Dict[str, Any], tokenizer: Any) -> Dict[str, Any]:
     f["flare_min_p_all"] = math.exp(min(lps))
     f["flare_min_p_span"] = math.exp(min((lps[i] for i in payload_idx), default=min(lps)))
     f["flare_min_p_name"] = math.exp(min((lps[i] for i in name_idx), default=min(lps)))
+    # length-matched variant (fixed window): E[min over N] falls with N, and
+    # cap rate is ~50% — the prereg mandates a fixed-window min + window mean
+    w = min(32, n)
+    f["flare_min_p_window32"] = math.exp(min(lps[:w]))
+    f["fc_avg_nll_window32"] = sum(-x for x in lps[:w]) / w
     nll = [-x for x in lps]
     f["fc_max_nll_all"] = max(nll)
     f["fc_avg_nll_all"] = sum(nll) / n

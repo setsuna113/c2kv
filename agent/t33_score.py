@@ -48,6 +48,7 @@ META_COLS = {
 ORIENTATIONS: Dict[str, int] = {
     # 4.2 uncertainty: lower confidence => risk
     "flare_min_p_all": -1, "flare_min_p_span": -1, "flare_min_p_name": -1,
+    "flare_min_p_window32": -1, "fc_avg_nll_window32": 1,
     "fc_max_nll_all": 1, "fc_avg_nll_all": 1, "fc_gnll_all": 1,
     "fc_max_nll_smt": 1, "fc_avg_nll_smt": 1, "fc_gnll_smt": 1,
     "name_region_nll": 1, "args_region_nll": 1,
@@ -179,6 +180,22 @@ def rank_residualize(x: np.ndarray, control: np.ndarray) -> np.ndarray:
     return rx - (slope * rc + intercept)
 
 
+def spearman(x: np.ndarray, y: np.ndarray) -> Tuple[Optional[float], Optional[float]]:
+    """Spearman rho + two-sided p (t approximation; diagnostics only)."""
+    rx = np.argsort(np.argsort(x)).astype(float)
+    ry = np.argsort(np.argsort(y)).astype(float)
+    n = len(x)
+    if n < 4:
+        return None, None
+    rho = float(np.corrcoef(rx, ry)[0, 1])
+    if abs(rho) >= 1.0:
+        return rho, 0.0
+    t = rho * math.sqrt((n - 2) / (1 - rho * rho))
+    # normal approximation of the t distribution (n>=50 here)
+    p = 2.0 * (1.0 - 0.5 * (1.0 + math.erf(abs(t) / math.sqrt(2.0))))
+    return rho, p
+
+
 def operating_point(scores: np.ndarray, labels: np.ndarray, thresh: float) -> Dict[str, Any]:
     fire = scores >= thresh
     n_fire = int(fire.sum())
@@ -238,7 +255,7 @@ def ecusum_finalize(frame_rows: List[Dict[str, Any]]) -> Dict[str, Any]:
 # ------------------------------------------------------------------ KnowNo
 
 def knono_report(frame_rows: List[Dict[str, Any]]) -> Dict[str, Any]:
-    rows = [r for r in frame_rows if r.get("kono_pool_mass_top5") is not None]
+    rows = [r for r in frame_rows if r.get("c::kono_pool_mass_top5") is not None]
     if not rows:
         return {}
     # |C| histogram at a swept q-hat; split-half session-grouped calibration
@@ -251,13 +268,13 @@ def knono_report(frame_rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     # kappa on calibration: 1 - f_hat of the emitted token is degenerate
     # without full pool probabilities; we report the pool-mass distribution
     # and the |C| histogram under a pool-mass threshold proxy.
-    masses = np.array([r["kono_pool_mass_top5"] for r in rows])
+    masses = np.array([r["c::kono_pool_mass_top5"] for r in rows])
     out["pool_mass_quantiles"] = {
         str(q): round(float(np.percentile(masses, q)), 4) for q in (10, 50, 90)
     }
     sizes = []
     for r in ev:
-        m = r["kono_pool_mass_top5"]
+        m = r["c::kono_pool_mass_top5"]
         sizes.append(1 + int(m < 0.9))  # degenerate |C| proxy; documented
     out["c_size_histogram_ev"] = {str(v): sizes.count(v) for v in sorted(set(sizes))}
     out["note"] = ("top-5 truncated: full pool renormalization needs top_logprobs "
@@ -329,7 +346,8 @@ def score_feature(
     # S0 twin
     s0_col = col.replace("c::", "s0::", 1)
     delta = None
-    if s0_col != col and frame and frame[0].get(s0_col) is not None:
+    s0_any = any(frame[i].get(s0_col) is not None for i in range(len(frame)))
+    if s0_col != col and s0_any:
         v0 = np.array([frame[i].get(s0_col) if frame[i].get(s0_col) is not None else np.nan
                        for i in range(len(frame))], dtype=float)[keep]
         if not np.all(np.isnan(v0)) and len(np.unique(v0[~np.isnan(v0)])) >= 2:
@@ -340,10 +358,10 @@ def score_feature(
                      "ci_hi": round(d_hi, 4) if d_hi is not None else None}
 
     # length control
-    ngen = v_filled  # same-arm n_generated as the control
     control = np.array([frame[i].get("n_generated") or 0 for i in range(len(frame))], dtype=float)[keep]
     resid = rank_residualize(v_filled, control)
     ap_resid = auprc(resid, y)
+    rho_len, p_len = spearman(v_filled, control)
 
     # stratified
     cens = np.array([bool(frame[i].get("censored")) for i in range(len(frame))])[keep]
@@ -369,6 +387,8 @@ def score_feature(
         "auroc_ci": [None if ar_lo is None else round(ar_lo, 4), None if ar_hi is None else round(ar_hi, 4)],
         "base_rate": 0.1033,
         "delta_vs_s0": delta,
+        "spearman_vs_len": None if rho_len is None else round(rho_len, 4),
+        "spearman_vs_len_p": None if p_len is None else round(p_len, 6),
         "auprc_length_controlled": None if ap_resid is None else round(ap_resid, 4),
         "auprc_uncensored": None if ap_uncens is None else round(ap_uncens, 4),
         "auprc_censored": None if ap_cens is None else round(ap_cens, 4),

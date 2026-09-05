@@ -1,0 +1,11 @@
+{
+ "n_scored": 161,
+ "n_skipped": 0,
+ "gamma_seq_median": 4.0491,
+ "gamma_seq_p10": 2.4234,
+ "gamma_seq_p90": 6.4646,
+ "frac_gamma_le_1_36": 0.0,
+ "kl_mean_median": 1.4588,
+ "h_q_mean_median": 0.5781,
+ "note": "gamma = H_qp/H_q, teacher-forced frozen emitted text under same-checkpoint c2kv(r8)/full prefixes; diagnostic only per prereg; Pinsker certificate requires gamma<=2c+1=1.36"
+}

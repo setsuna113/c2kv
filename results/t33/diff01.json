@@ -1,0 +1,178 @@
+{
+ "n": 900,
+ "tier0_columns": [
+  "s8_n_docs_kept",
+  "s8_dropped_docs",
+  "s8_doc_tokens_sum",
+  "s8_n_ctx",
+  "s8_packing_sat",
+  "boundary_max_doc_len",
+  "boundary_mean_doc_len",
+  "gzip_ratio_mean",
+  "surprise_max_k",
+  "surprise_mean_k",
+  "n_generated"
+ ],
+ "var_z": 0.2358,
+ "nonpredictability_gate": {
+  "r2_tier0_vs_full_gnll": 0.1128,
+  "var_z": 0.2358,
+  "verdict": "gate-pass"
+ },
+ "deferral_curve": [
+  {
+   "deferred_frac": 0.02,
+   "gpu_sec": 183.97,
+   "z_pos_covered": 2,
+   "z_neg_covered": 2,
+   "z_zero_deferred": 14
+  },
+  {
+   "deferred_frac": 0.072,
+   "gpu_sec": 578.97,
+   "z_pos_covered": 6,
+   "z_neg_covered": 4,
+   "z_zero_deferred": 54
+  },
+  {
+   "deferred_frac": 0.123,
+   "gpu_sec": 1087.12,
+   "z_pos_covered": 10,
+   "z_neg_covered": 8,
+   "z_zero_deferred": 92
+  },
+  {
+   "deferred_frac": 0.175,
+   "gpu_sec": 1704.91,
+   "z_pos_covered": 16,
+   "z_neg_covered": 10,
+   "z_zero_deferred": 131
+  },
+  {
+   "deferred_frac": 0.226,
+   "gpu_sec": 2238.89,
+   "z_pos_covered": 21,
+   "z_neg_covered": 13,
+   "z_zero_deferred": 169
+  },
+  {
+   "deferred_frac": 0.278,
+   "gpu_sec": 2730.93,
+   "z_pos_covered": 26,
+   "z_neg_covered": 18,
+   "z_zero_deferred": 206
+  },
+  {
+   "deferred_frac": 0.329,
+   "gpu_sec": 3275.91,
+   "z_pos_covered": 33,
+   "z_neg_covered": 21,
+   "z_zero_deferred": 242
+  },
+  {
+   "deferred_frac": 0.381,
+   "gpu_sec": 3905.39,
+   "z_pos_covered": 37,
+   "z_neg_covered": 22,
+   "z_zero_deferred": 283
+  },
+  {
+   "deferred_frac": 0.433,
+   "gpu_sec": 4530.75,
+   "z_pos_covered": 45,
+   "z_neg_covered": 25,
+   "z_zero_deferred": 319
+  },
+  {
+   "deferred_frac": 0.484,
+   "gpu_sec": 5117.99,
+   "z_pos_covered": 50,
+   "z_neg_covered": 28,
+   "z_zero_deferred": 357
+  },
+  {
+   "deferred_frac": 0.536,
+   "gpu_sec": 5703.73,
+   "z_pos_covered": 57,
+   "z_neg_covered": 28,
+   "z_zero_deferred": 397
+  },
+  {
+   "deferred_frac": 0.587,
+   "gpu_sec": 6295.86,
+   "z_pos_covered": 61,
+   "z_neg_covered": 29,
+   "z_zero_deferred": 438
+  },
+  {
+   "deferred_frac": 0.639,
+   "gpu_sec": 6919.12,
+   "z_pos_covered": 65,
+   "z_neg_covered": 36,
+   "z_zero_deferred": 474
+  },
+  {
+   "deferred_frac": 0.691,
+   "gpu_sec": 7540.6,
+   "z_pos_covered": 72,
+   "z_neg_covered": 42,
+   "z_zero_deferred": 507
+  },
+  {
+   "deferred_frac": 0.742,
+   "gpu_sec": 8146.86,
+   "z_pos_covered": 77,
+   "z_neg_covered": 47,
+   "z_zero_deferred": 543
+  },
+  {
+   "deferred_frac": 0.794,
+   "gpu_sec": 8795.13,
+   "z_pos_covered": 83,
+   "z_neg_covered": 57,
+   "z_zero_deferred": 574
+  },
+  {
+   "deferred_frac": 0.845,
+   "gpu_sec": 9466.78,
+   "z_pos_covered": 90,
+   "z_neg_covered": 65,
+   "z_zero_deferred": 605
+  },
+  {
+   "deferred_frac": 0.897,
+   "gpu_sec": 10072.39,
+   "z_pos_covered": 90,
+   "z_neg_covered": 77,
+   "z_zero_deferred": 640
+  },
+  {
+   "deferred_frac": 0.948,
+   "gpu_sec": 10701.17,
+   "z_pos_covered": 93,
+   "z_neg_covered": 95,
+   "z_zero_deferred": 665
+  },
+  {
+   "deferred_frac": 1.0,
+   "gpu_sec": 11462.07,
+   "z_pos_covered": 93,
+   "z_neg_covered": 120,
+   "z_zero_deferred": 687
+  }
+ ],
+ "oracle": {
+  "r_hat_01": {
+   "note": "fires iff z==+1",
+   "coverage_of_cw": 1.0,
+   "fire_rate": 0.1033
+  },
+  "r_hat_conf": {
+   "note": "fires iff compressed arm unparseable (confidence proxy)",
+   "coverage_of_cw": null,
+   "family": "oracle"
+  },
+  "family": "oracle — headroom only, never a candidate"
+ },
+ "scoring": "session-grouped 5-fold outer, 3-fold inner over lambda grid"
+}

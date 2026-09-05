@@ -1,0 +1,93 @@
+{
+ "arm": "c2kv",
+ "n": 161,
+ "n_pos": 93,
+ "probe_prefill_per_layer": {
+  "2": {
+   "auprc": 0.7155,
+   "auroc": 0.6033,
+   "n_scored": 161
+  },
+  "7": {
+   "auprc": 0.657,
+   "auroc": 0.5633,
+   "n_scored": 161
+  },
+  "12": {
+   "auprc": 0.7163,
+   "auroc": 0.6314,
+   "n_scored": 161
+  },
+  "17": {
+   "auprc": 0.7737,
+   "auroc": 0.717,
+   "n_scored": 161
+  },
+  "22": {
+   "auprc": 0.792,
+   "auroc": 0.7173,
+   "n_scored": 161
+  },
+  "27": {
+   "auprc": 0.7924,
+   "auroc": 0.6967,
+   "n_scored": 161
+  },
+  "32": {
+   "auprc": 0.7873,
+   "auroc": 0.7076,
+   "n_scored": 161
+  }
+ },
+ "probe_prefill_all_layers": {
+  "auprc": 0.7597,
+  "auroc": 0.6801,
+  "n_scored": 161
+ },
+ "kwts_error": "ValueError('shape mismatch: value array of shape (127,) could not be broadcast to indexing result of shape (127,128)')",
+ "tool_call_error_name_last": {
+  "auprc": 0.7849,
+  "auroc": 0.776,
+  "n_scored": 89,
+  "fpr_at_90tpr": 0.425
+ },
+ "tool_call_error_last": {
+  "auprc": 0.522,
+  "auroc": 0.4228,
+  "n_scored": 161,
+  "fpr_at_90tpr": 0.8971
+ },
+ "exact_answer_positions": {
+  "name_first": {
+   "auprc": 0.8626,
+   "auroc": 0.8296,
+   "n_scored": 148
+  },
+  "name_last": {
+   "auprc": 0.7849,
+   "auroc": 0.776,
+   "n_scored": 89
+  },
+  "penult": {
+   "auprc": 0.6878,
+   "auroc": 0.7035,
+   "n_scored": 161
+  },
+  "query_last_ref": {
+   "auprc": 0.7737,
+   "auroc": 0.717,
+   "n_scored": 161
+  }
+ },
+ "alien_arm_b_cw": {
+  "auprc": 0.7924,
+  "auroc": 0.7607,
+  "n_scored": 89
+ },
+ "s_text_whitelist_lr": {
+  "auprc": 0.6398,
+  "auroc": 0.5512,
+  "n_scored": 161
+ },
+ "concealment_gap": 0.1199
+}

@@ -102,9 +102,11 @@ class T33CaptureContext:
 
     def open(self) -> None:
         """Mark the context open; per-arm files are created lazily by set_arm
-        (the arm is not known until the first row)."""
+        (or here, when the arm was already set before open — the topup path)."""
         self._opened = True
         self.out_dir.mkdir(parents=True, exist_ok=True)
+        if self.arm != "unknown" and self._steps_fh is None:
+            self._switch_part_files()
 
     def _switch_part_files(self) -> None:
         self._close_files()
@@ -128,7 +130,10 @@ class T33CaptureContext:
             return
         arm_dir = self.out_dir / self.arm
         arm_dir.mkdir(parents=True, exist_ok=True)
-        np.savez_compressed(arm_dir / f"{self.part}.hid.npz", **{
+        # numbered shards — a fixed name would overwrite earlier flushes
+        self._hid_flush_count = getattr(self, "_hid_flush_count", 0) + 1
+        shard = arm_dir / f"{self.part}_{self._hid_flush_count:04d}.hid.npz"
+        np.savez_compressed(shard, **{
             f"{qid}::{key}": arr for qid, entry in self._hid_store.items() for key, arr in entry.items()
         })
         self._hid_store = {}
