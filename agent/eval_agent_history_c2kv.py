@@ -113,6 +113,16 @@ RAW_PREFIX_NEXT_MODES = {
     "raw_prefix_next_hybrid",
 }
 TRUNCATE_MODES = {"truncate", "tail_truncate"}
+# Modes that are NOT supposed to carry a gist block.  A row of any other mode
+# with gist_tokens == 0 got no compression at all (e.g. hybrid_top_k >= the
+# number of history turns), so its cell is an uncompressed number wearing a
+# compressed label -- counted as num_uncompressed_rows per mode.
+UNCOMPRESSED_BASELINE_MODES = (
+    FULL_PROMPT_MODES
+    | SPLIT_FULL_MODES
+    | TRUNCATE_MODES
+    | {"full", "history_full", "all_full"}
+)
 
 
 def _sync_device(device: Any) -> None:
@@ -672,6 +682,8 @@ def _generate_full_prompt(
         ))),
         "cache_tokens": 0,
         "generated_tokens": generated_tokens,
+        "generation_capped": generated_tokens >= args.max_new_tokens,
+        "uncompressed": False,
         "latency_sec": round(generate_sec, 4),
         "generate_sec": round(generate_sec, 4),
         "tbt_sec": round(tbt_sec, 6),
@@ -689,6 +701,65 @@ def _generate_full_prompt(
 
 def _history_doc_ids(tokenizer: Any, messages: Sequence[Dict[str, Any]]) -> List[List[int]]:
     return [_chat_template_ids(tokenizer, [message]) for message in messages]
+
+
+def _system_prefix_ids(
+    tokenizer: Any,
+    example: CompressHistoryExample,
+    args: argparse.Namespace,
+    *,
+    overflow: Optional[str] = None,
+) -> tuple[Optional[List[int]], Dict[str, Any], Optional[str]]:
+    """Render the tools-in-system prefix ONCE untruncated, then cut it here.
+
+    The returned ids are identical to the previous
+    ``_chat_template_ids(..., max_length=args.max_system_length)`` call (HF
+    truncates from the right and ``keep_bos=True`` means no offset), but the
+    pre-cut length is now observable.  It has to be: the trainer renders this
+    prefix with ``max_length=None`` and SKIPS an over-long one
+    (python/train/train_data_joint.py:1345-1359, whose comment says
+    right-truncation silently deletes the tail tools and the closing template
+    tokens), while this harness right-truncates it and reported nothing.
+
+    ``--system_overflow skip`` opts into the trainer's rule.  Every mode
+    builder renders the same prefix from the same example, so the skip fires
+    on the same rows in every mode and the paired population is preserved.
+    ``overflow`` forces one policy for a caller that cannot return a skip
+    reason; the row it belongs to is skipped by its own builder anyway.
+    """
+    ids = _chat_template_ids(
+        tokenizer,
+        [{"role": "system", "content": example.system_prompt}],
+        tools=example.tools or None,
+        keep_bos=True,
+        max_length=None,
+    )
+    limit = args.max_system_length
+    truncated = bool(limit) and len(ids) > limit
+    debug = {"system_truncated": truncated, "system_tokens_untruncated": len(ids)}
+    if truncated:
+        if (overflow or getattr(args, "system_overflow", "truncate")) == "skip":
+            return None, debug, "system_overflow"
+        ids = ids[:limit]
+    return ids, debug, None
+
+
+def _current_prompt_ids(
+    tokenizer: Any,
+    current_messages: Sequence[Dict[str, Any]],
+    args: argparse.Namespace,
+) -> tuple[List[int], Dict[str, Any]]:
+    """Current-turn prompt ids, left-truncated to ``--max_prompt_tokens``.
+
+    Same truncation as before; the pre-truncation length is recorded so a cell
+    cannot report a score whose current turn was silently cut.
+    """
+    ids = _chat_template_ids(tokenizer, list(current_messages), add_generation_prompt=True)
+    untruncated = len(ids)
+    truncated = bool(args.max_prompt_tokens) and untruncated > args.max_prompt_tokens
+    if truncated:
+        ids = ids[-args.max_prompt_tokens :]
+    return ids, {"prompt_truncated": truncated, "prompt_tokens_untruncated": untruncated}
 
 
 def _first_token_diff(left: Sequence[int], right: Sequence[int]) -> Optional[int]:
@@ -844,13 +915,9 @@ def _build_raw_first15_c2kv_prefix(
     if not current_ids:
         return None, "empty_raw_current"
 
-    system_ids = _chat_template_ids(
-        tokenizer,
-        [{"role": "system", "content": example.system_prompt}],
-        tools=example.tools or None,
-        keep_bos=True,
-        max_length=args.max_system_length,
-    )
+    system_ids, system_debug, system_skip_reason = _system_prefix_ids(tokenizer, example, args)
+    if system_skip_reason is not None:
+        return None, system_skip_reason
     system_input_ids = torch.tensor([system_ids], dtype=torch.long, device=model.device)
     system_cache, system_length, system_prefill_sec = _prefill_system(
         model, system_input_ids, args.system_attn_impl
@@ -881,6 +948,7 @@ def _build_raw_first15_c2kv_prefix(
         "gist_tokens": gist_tokens,
         "compressed_history_tokens": history_cache.get_seq_length() - system_length,
         "actual_compression_ratio": actual_ratio,
+        **system_debug,
         "system_prefill_sec": system_prefill_sec,
         "full_prefill_sec": 0.0,
         "tool_compress_sec": compress_sec,
@@ -946,13 +1014,9 @@ def _build_raw_first15_hybrid_prefix(
     if rest_tokens + full_tokens > args.max_history_tokens:
         return None, f"history_tokens>{args.max_history_tokens}"
 
-    system_ids = _chat_template_ids(
-        tokenizer,
-        [{"role": "system", "content": example.system_prompt}],
-        tools=example.tools or None,
-        keep_bos=True,
-        max_length=args.max_system_length,
-    )
+    system_ids, system_debug, system_skip_reason = _system_prefix_ids(tokenizer, example, args)
+    if system_skip_reason is not None:
+        return None, system_skip_reason
     system_input_ids = torch.tensor([system_ids], dtype=torch.long, device=model.device)
     prefix_cache, system_length, system_prefill_sec = _prefill_system(
         model, system_input_ids, args.system_attn_impl
@@ -1013,6 +1077,7 @@ def _build_raw_first15_hybrid_prefix(
         "gist_tokens": gist_tokens,
         "compressed_history_tokens": compressed_tokens,
         "actual_compression_ratio": doc_tokens / compressed_tokens if compressed_tokens else 0.0,
+        **system_debug,
         "system_prefill_sec": system_prefill_sec,
         "full_prefill_sec": full_prefill_sec,
         "tool_compress_sec": compress_sec,
@@ -1111,9 +1176,7 @@ def _generate_with_prefix(
     args: argparse.Namespace,
 ) -> Dict[str, Any]:
     current_messages = prefix.get("current_messages") or _current_messages(example)
-    prompt_ids = _chat_template_ids(tokenizer, current_messages, add_generation_prompt=True)
-    if args.max_prompt_tokens and len(prompt_ids) > args.max_prompt_tokens:
-        prompt_ids = prompt_ids[-args.max_prompt_tokens :]
+    prompt_ids, prompt_debug = _current_prompt_ids(tokenizer, current_messages, args)
     prompt_input_ids = torch.tensor([prompt_ids], dtype=torch.long, device=model.device)
     cache_length = prefix["cache"].get_seq_length()
     mock_cache_ids = prompt_input_ids.new_zeros((1, cache_length))
@@ -1140,9 +1203,14 @@ def _generate_with_prefix(
     metrics["generated_tokens"] = generated_tokens
     metrics.update({
         "prompt_tokens": len(prompt_ids),
+        # The decode stopped at the budget, not at an EOS: the prediction is a
+        # prefix of the model's answer and any exact-match style metric on this
+        # row is bounded by --max_new_tokens rather than by the model.
+        "generation_capped": generated_tokens >= args.max_new_tokens,
         "latency_sec": round(generate_sec, 4),
         "generate_sec": round(generate_sec, 4),
         "tbt_sec": round(tbt_sec, 6),
+        **prompt_debug,
     })
     return metrics
 
@@ -1159,13 +1227,9 @@ def _build_full_or_truncate_prefix(
     if len(history) < args.min_doc_num:
         return None, f"history_docs<{args.min_doc_num}"
 
-    system_ids = _chat_template_ids(
-        tokenizer,
-        [{"role": "system", "content": example.system_prompt}],
-        tools=example.tools or None,
-        keep_bos=True,
-        max_length=args.max_system_length,
-    )
+    system_ids, system_debug, system_skip_reason = _system_prefix_ids(tokenizer, example, args)
+    if system_skip_reason is not None:
+        return None, system_skip_reason
     if mode == "truncate":
         history_ids, doc_tokens, kept_tokens = _truncate_history_ids(
             tokenizer, history, args.override_ratio, args.truncate_selection
@@ -1177,9 +1241,7 @@ def _build_full_or_truncate_prefix(
     if doc_tokens > args.max_history_tokens:
         return None, f"history_tokens>{args.max_history_tokens}"
 
-    prompt_ids = _chat_template_ids(tokenizer, _current_messages(example), add_generation_prompt=True)
-    if args.max_prompt_tokens and len(prompt_ids) > args.max_prompt_tokens:
-        prompt_ids = prompt_ids[-args.max_prompt_tokens :]
+    prompt_ids, _prompt_debug = _current_prompt_ids(tokenizer, _current_messages(example), args)
     total_len = len(system_ids) + len(history_ids) + len(prompt_ids)
     if args.max_baseline_input_tokens and total_len > args.max_baseline_input_tokens:
         return None, f"baseline_input_tokens>{args.max_baseline_input_tokens}"
@@ -1211,6 +1273,7 @@ def _build_full_or_truncate_prefix(
         "kept_history_tokens": kept_tokens,
         "gist_tokens": 0,
         "actual_compression_ratio": doc_tokens / kept_tokens if kept_tokens else 1.0,
+        **system_debug,
         "system_prefill_sec": system_prefill_sec,
         "full_prefill_sec": full_prefill_sec,
         "tool_compress_sec": 0.0,
@@ -1225,14 +1288,10 @@ def _build_system_only_prefix(
     tokenizer: Any,
     example: CompressHistoryExample,
     args: argparse.Namespace,
-) -> tuple[Dict[str, Any], None]:
-    system_ids = _chat_template_ids(
-        tokenizer,
-        [{"role": "system", "content": example.system_prompt}],
-        tools=example.tools or None,
-        keep_bos=True,
-        max_length=args.max_system_length,
-    )
+) -> tuple[Optional[Dict[str, Any]], Optional[str]]:
+    system_ids, system_debug, system_skip_reason = _system_prefix_ids(tokenizer, example, args)
+    if system_skip_reason is not None:
+        return None, system_skip_reason
     system_input_ids = torch.tensor([system_ids], dtype=torch.long, device=model.device)
     system_cache, system_length, system_prefill_sec = _prefill_system(
         model, system_input_ids, args.system_attn_impl
@@ -1248,6 +1307,7 @@ def _build_system_only_prefix(
         "gist_tokens": 0,
         "compressed_history_tokens": 0,
         "actual_compression_ratio": 1.0,
+        **system_debug,
         "system_prefill_sec": system_prefill_sec,
         "full_prefill_sec": 0.0,
         "tool_compress_sec": 0.0,
@@ -1320,13 +1380,9 @@ def _build_split_full_prefix(
     if not current_ids:
         return None, "empty_current"
 
-    system_ids = _chat_template_ids(
-        tokenizer,
-        [{"role": "system", "content": example.system_prompt}],
-        tools=example.tools or None,
-        keep_bos=True,
-        max_length=args.max_system_length,
-    )
+    system_ids, system_debug, system_skip_reason = _system_prefix_ids(tokenizer, example, args)
+    if system_skip_reason is not None:
+        return None, system_skip_reason
     doc_ids = _history_doc_ids(tokenizer, history)
     doc_tokens = sum(len(ids) for ids in doc_ids)
     total_len = len(system_ids) + doc_tokens + len(current_ids)
@@ -1368,6 +1424,7 @@ def _build_split_full_prefix(
         "kept_history_tokens": doc_tokens,
         "gist_tokens": 0,
         "actual_compression_ratio": 1.0,
+        **system_debug,
         "system_prefill_sec": system_prefill_sec,
         "full_prefill_sec": full_prefill_sec,
         "tool_compress_sec": 0.0,
@@ -1390,13 +1447,9 @@ def _build_sequential_full_prefix(
     if not current_ids:
         return None, "empty_current"
 
-    system_ids = _chat_template_ids(
-        tokenizer,
-        [{"role": "system", "content": example.system_prompt}],
-        tools=example.tools or None,
-        keep_bos=True,
-        max_length=args.max_system_length,
-    )
+    system_ids, system_debug, system_skip_reason = _system_prefix_ids(tokenizer, example, args)
+    if system_skip_reason is not None:
+        return None, system_skip_reason
     doc_ids = _history_doc_ids(tokenizer, history)
     doc_tokens = sum(len(ids) for ids in doc_ids)
     total_len = len(system_ids) + doc_tokens + len(current_ids)
@@ -1451,6 +1504,7 @@ def _build_sequential_full_prefix(
         "kept_history_tokens": doc_tokens,
         "gist_tokens": 0,
         "actual_compression_ratio": 1.0,
+        **system_debug,
         "system_prefill_sec": system_prefill_sec,
         "full_prefill_sec": full_prefill_sec,
         "tool_compress_sec": 0.0,
@@ -1474,13 +1528,9 @@ def _build_c2kv_prefix(
     if context_input_ids is None:
         return None, skip_reason
 
-    system_ids = _chat_template_ids(
-        tokenizer,
-        [{"role": "system", "content": example.system_prompt}],
-        tools=example.tools or None,
-        keep_bos=True,
-        max_length=args.max_system_length,
-    )
+    system_ids, system_debug, system_skip_reason = _system_prefix_ids(tokenizer, example, args)
+    if system_skip_reason is not None:
+        return None, system_skip_reason
     system_input_ids = torch.tensor([system_ids], dtype=torch.long, device=model.device)
     system_cache, system_length, system_prefill_sec = _prefill_system(
         model, system_input_ids, args.system_attn_impl
@@ -1510,6 +1560,7 @@ def _build_c2kv_prefix(
         "kept_history_tokens": doc_tokens,
         "gist_tokens": gist_tokens,
         "actual_compression_ratio": actual_ratio,
+        **system_debug,
         "system_prefill_sec": system_prefill_sec,
         "full_prefill_sec": 0.0,
         "tool_compress_sec": compress_sec,
@@ -1538,13 +1589,9 @@ def _build_each_turn_independent_c2kv_prefix(
     if doc_tokens > args.max_history_tokens:
         return None, f"history_tokens>{args.max_history_tokens}"
 
-    system_ids = _chat_template_ids(
-        tokenizer,
-        [{"role": "system", "content": example.system_prompt}],
-        tools=example.tools or None,
-        keep_bos=True,
-        max_length=args.max_system_length,
-    )
+    system_ids, system_debug, system_skip_reason = _system_prefix_ids(tokenizer, example, args)
+    if system_skip_reason is not None:
+        return None, system_skip_reason
     system_input_ids = torch.tensor([system_ids], dtype=torch.long, device=model.device)
     prefix_cache, system_length, system_prefill_sec = _prefill_system(
         model, system_input_ids, args.system_attn_impl
@@ -1588,6 +1635,7 @@ def _build_each_turn_independent_c2kv_prefix(
         "gist_tokens": compressed_history_tokens,
         "compressed_history_tokens": compressed_history_tokens,
         "actual_compression_ratio": doc_tokens / compressed_history_tokens if compressed_history_tokens else 0.0,
+        **system_debug,
         "system_prefill_sec": system_prefill_sec,
         "full_prefill_sec": 0.0,
         "tool_compress_sec": compress_sec,
@@ -1624,13 +1672,9 @@ def _build_recompress_all_every_turn_c2kv_prefix(
     rows.extend([[-100] * args.max_doc_length for _ in range(args.max_doc_num - len(rows))])
     context_input_ids = torch.tensor(rows, dtype=torch.long)
 
-    system_ids = _chat_template_ids(
-        tokenizer,
-        [{"role": "system", "content": example.system_prompt}],
-        tools=example.tools or None,
-        keep_bos=True,
-        max_length=args.max_system_length,
-    )
+    system_ids, system_debug, system_skip_reason = _system_prefix_ids(tokenizer, example, args)
+    if system_skip_reason is not None:
+        return None, system_skip_reason
     system_input_ids = torch.tensor([system_ids], dtype=torch.long, device=model.device)
     system_cache, system_length, system_prefill_sec = _prefill_system(
         model, system_input_ids, args.system_attn_impl
@@ -1662,6 +1706,7 @@ def _build_recompress_all_every_turn_c2kv_prefix(
         "gist_tokens": gist_tokens,
         "compressed_history_tokens": gist_tokens,
         "actual_compression_ratio": actual_ratio,
+        **system_debug,
         "system_prefill_sec": system_prefill_sec,
         "full_prefill_sec": 0.0,
         "tool_compress_sec": compress_sec,
@@ -1702,13 +1747,9 @@ def _build_contiguous_history_c2kv_prefix(
     rows.extend([[-100] * args.max_doc_length for _ in range(max(0, args.max_doc_num - 1))])
     context_input_ids = torch.tensor(rows, dtype=torch.long)
 
-    system_ids = _chat_template_ids(
-        tokenizer,
-        [{"role": "system", "content": example.system_prompt}],
-        tools=example.tools or None,
-        keep_bos=True,
-        max_length=args.max_system_length,
-    )
+    system_ids, system_debug, system_skip_reason = _system_prefix_ids(tokenizer, example, args)
+    if system_skip_reason is not None:
+        return None, system_skip_reason
     total_len = len(system_ids) + doc_tokens + len(current_ids)
     if args.max_baseline_input_tokens and total_len > args.max_baseline_input_tokens:
         return None, f"baseline_input_tokens>{args.max_baseline_input_tokens}"
@@ -1760,6 +1801,7 @@ def _build_contiguous_history_c2kv_prefix(
         "kept_history_tokens": doc_tokens,
         "gist_tokens": gist_tokens,
         "actual_compression_ratio": actual_ratio,
+        **system_debug,
         "system_prefill_sec": system_prefill_sec,
         "full_prefill_sec": 0.0,
         "tool_compress_sec": compress_sec,
@@ -1915,12 +1957,11 @@ def _rank_history_by_attention(
     history: Sequence[Dict[str, Any]],
     cache_mode: str,
 ) -> tuple[List[int], List[float], float, List[Dict[str, Any]]]:
-    system_ids = _chat_template_ids(
-        tokenizer,
-        [{"role": "system", "content": example.system_prompt}],
-        tools=example.tools or None,
-        keep_bos=True,
-        max_length=args.max_system_length,
+    # Router only needs the ids and cannot return a skip reason, so it always
+    # truncates: --system_overflow skip is enforced by the prefix builder that
+    # runs right after this on the same example.
+    system_ids, _system_debug, _system_skip = _system_prefix_ids(
+        tokenizer, example, args, overflow="truncate"
     )
     system_input_ids = torch.tensor([system_ids], dtype=torch.long, device=model.device)
     system_cache, system_length, system_prefill_sec = _prefill_system(
@@ -2102,13 +2143,9 @@ def _build_hybrid_prefix(
     rest_history = [message for index, message in enumerate(history) if index not in full_set]
     full_after_c2kv = bool(getattr(args, "hybrid_full_after_c2kv", False))
 
-    system_ids = _chat_template_ids(
-        tokenizer,
-        [{"role": "system", "content": example.system_prompt}],
-        tools=example.tools or None,
-        keep_bos=True,
-        max_length=args.max_system_length,
-    )
+    system_ids, system_debug, system_skip_reason = _system_prefix_ids(tokenizer, example, args)
+    if system_skip_reason is not None:
+        return None, system_skip_reason
     system_input_ids = torch.tensor([system_ids], dtype=torch.long, device=model.device)
     system_cache, system_length, system_prefill_sec = _prefill_system(
         model, system_input_ids, args.system_attn_impl
@@ -2124,23 +2161,37 @@ def _build_hybrid_prefix(
     prefix_cache = system_cache
     full_length = 0
 
-    def append_full_history(current_past_length: int) -> int:
+    def append_full_history(current_past_length: int, *, after_gist: bool) -> int:
         nonlocal prefix_cache, top_prefill_sec
         if not full_ids:
             return 0
         full_input_ids = torch.tensor([full_ids], dtype=torch.long, device=model.device)
-        prefix_cache, appended_length, prefill_sec = _prefill_tokens_with_cache(
-            model,
-            full_input_ids,
-            past_key_values=prefix_cache,
-            past_length=current_past_length,
-            attn_impl=args.generate_attn_impl,
-        )
+        if after_gist:
+            # The raw tail sits AFTER a gist block, so the cache is shorter than
+            # current_past_length: _prefill_tokens_with_cache would size the
+            # attention mask from the logical length and mismatch the KV width.
+            # Same call shape as _build_raw_first15_hybrid_prefix.
+            prefix_cache, appended_length, prefill_sec = _prefill_tokens_with_cache_maybe_gist(
+                model,
+                full_input_ids,
+                past_key_values=prefix_cache,
+                past_length=current_past_length,
+                attn_impl=args.generate_attn_impl,
+                use_gist=bool(rest_history),
+            )
+        else:
+            prefix_cache, appended_length, prefill_sec = _prefill_tokens_with_cache(
+                model,
+                full_input_ids,
+                past_key_values=prefix_cache,
+                past_length=current_past_length,
+                attn_impl=args.generate_attn_impl,
+            )
         top_prefill_sec += prefill_sec
         return appended_length
 
     if not full_after_c2kv:
-        full_length = append_full_history(system_length)
+        full_length = append_full_history(system_length, after_gist=False)
 
     rest_tokens = 0
     rest_length = 0
@@ -2173,7 +2224,7 @@ def _build_hybrid_prefix(
             args.override_ratio,
         )
     if full_after_c2kv:
-        full_length = append_full_history(system_length + rest_length)
+        full_length = append_full_history(system_length + rest_length, after_gist=bool(rest_history))
 
     doc_tokens = rest_tokens + full_tokens
     compressed_tokens = gist_tokens + full_tokens
@@ -2192,11 +2243,13 @@ def _build_hybrid_prefix(
         "gist_tokens": gist_tokens,
         "compressed_history_tokens": compressed_tokens,
         "actual_compression_ratio": doc_tokens / compressed_tokens if compressed_tokens else 0.0,
+        **system_debug,
         "system_prefill_sec": system_prefill_sec,
         "full_prefill_sec": top_prefill_sec,
         "tool_compress_sec": compress_sec,
         "blend_sec": blend_sec,
         "use_gist": bool(rest_history),
+        "hybrid_full_after_c2kv": full_after_c2kv,
     }
     if router_debug:
         prefix.update(router_debug)
@@ -2408,6 +2461,9 @@ def _generate_one(
         "cache_tokens": prefix.get("cache_length", 0),
         "input_tokens": prefix.get("cache_length", 0) + row.get("prompt_tokens", 0),
         "actual_compression_ratio": round(prefix.get("actual_compression_ratio", 0.0), 4),
+        "uncompressed": (
+            mode not in UNCOMPRESSED_BASELINE_MODES and prefix.get("gist_tokens", 0) == 0
+        ),
         "system_prefill_sec": round(prefix.get("system_prefill_sec", 0.0), 4),
         "full_prefill_sec": round(prefix.get("full_prefill_sec", 0.0), 4),
         "tool_compress_sec": round(prefix.get("tool_compress_sec", 0.0), 4),
@@ -2416,6 +2472,9 @@ def _generate_one(
         "total_sec": round(time.perf_counter() - total_start, 4),
     })
     for key in (
+        "system_truncated",
+        "system_tokens_untruncated",
+        "hybrid_full_after_c2kv",
         "full_history_docs",
         "rest_history_docs",
         "top_full_tokens",
@@ -2494,6 +2553,14 @@ def _summarize_rows(args: argparse.Namespace, rows: List[Dict[str, Any]]) -> Lis
         skip_reasons = Counter(row.get("skip_reason", "unknown") for row in group if row.get("skipped"))
         generated_total = sum(row.get("generated_tokens", 0) for row in valid_rows)
         compressed_history_total = sum(row.get("compressed_history_tokens", 0) for row in valid_rows)
+        # Rows that actually carry a gist block.  The nominal --ratio is a
+        # request, not a measurement, and a row with gist_tokens == 0 drags the
+        # realized ratio towards 1.0 while being uncompressed.
+        compressed_rows = [row for row in valid_rows if row.get("gist_tokens", 0) > 0]
+        compressed_rows_doc_total = sum(row.get("doc_tokens", 0) for row in compressed_rows)
+        compressed_rows_kv_total = sum(
+            row.get("compressed_history_tokens", 0) for row in compressed_rows
+        )
         called = [row for row in valid_rows if row.get("has_tool_call")]
         tool_targets = [
             row for row in valid_rows
@@ -2516,6 +2583,20 @@ def _summarize_rows(args: argparse.Namespace, rows: List[Dict[str, Any]]) -> Lis
             "skip_reasons": dict(skip_reasons),
             "num_tool_targets": len(tool_targets),
             "num_non_tool_targets": len(non_tool_targets),
+            # Silent-divergence counters.  The trainer SKIPS an over-long
+            # tools-in-system prefix; this harness right-truncates it, so a cell
+            # with num_system_truncated > 0 is scored on a dialect the model was
+            # never trained on.  num_generation_capped bounds every
+            # target-length-sensitive metric from above.
+            "num_system_truncated": sum(1 for row in valid_rows if row.get("system_truncated")),
+            "num_prompt_truncated": sum(1 for row in valid_rows if row.get("prompt_truncated")),
+            "num_generation_capped": sum(1 for row in valid_rows if row.get("generation_capped")),
+            "num_uncompressed_rows": sum(1 for row in valid_rows if row.get("uncompressed")),
+            "realized_ratio_on_compressed": (
+                compressed_rows_doc_total / compressed_rows_kv_total
+                if compressed_rows_kv_total else 0.0
+            ),
+            "num_compressed_rows": len(compressed_rows),
             "exact_match": (
                 sum(1 for row in valid_rows if row.get("exact_match")) / len(valid_rows)
                 if valid_rows else 0.0
@@ -3006,6 +3087,9 @@ def evaluate(args: argparse.Namespace) -> Dict[str, Any]:
         "max_history_tokens": args.max_history_tokens,
         "max_prompt_tokens": args.max_prompt_tokens,
         "max_system_length": args.max_system_length,
+        "max_new_tokens": args.max_new_tokens,
+        "system_overflow": args.system_overflow,
+        "hybrid_full_after_c2kv": args.hybrid_full_after_c2kv,
         "max_baseline_input_tokens": args.max_baseline_input_tokens,
         "raw_first_n_turns": args.raw_first_n_turns,
         "raw_prefix_n_turns": args.raw_prefix_n_turns,
@@ -3125,6 +3209,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max_history_tokens", type=int, default=12288)
     parser.add_argument("--max_length", type=int, default=1536)
     parser.add_argument("--max_system_length", type=int, default=4096)
+    parser.add_argument(
+        "--system_overflow",
+        choices=["truncate", "skip"],
+        default="truncate",
+        help=(
+            "What to do when the tools-in-system prefix exceeds --max_system_length. "
+            "'truncate' (default, unchanged) right-truncates it, which deletes the tail "
+            "tools and the closing template tokens; 'skip' drops the row with "
+            "skip_reason 'system_overflow', the rule the trainer uses "
+            "(python/train/train_data_joint.py). The skip fires on the same rows in "
+            "every mode, so the paired population is preserved."
+        ),
+    )
     parser.add_argument("--max_prompt_tokens", type=int, default=1536)
     parser.add_argument("--max_baseline_input_tokens", type=int, default=16000)
     parser.add_argument(

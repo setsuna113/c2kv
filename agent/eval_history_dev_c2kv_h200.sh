@@ -27,6 +27,17 @@
 #   RATIO             gist compression ratio (8)
 #   COMPARE_MODES     c2kv,hybrid,full,truncate
 #   HYBRID_TOP_K      raw tail messages kept by the hybrid arm (3)
+#   HYBRID_FULL_AFTER_C2KV  False (default, unchanged) = the hybrid raw tail is
+#                     prefilled BEFORE the gist block; True = AFTER it, the
+#                     layout training (train_data_joint.py) and serving
+#                     (benchmarks/proxy.py) both use.  Changes the hybrid
+#                     column only; keep False to stay comparable with s42/s43.
+#   SYSTEM_OVERFLOW   truncate (default, unchanged) | skip.  'skip' drops rows
+#                     whose untruncated tools-in-system prefix exceeds
+#                     MAX_SYSTEM_LENGTH instead of right-truncating it, i.e.
+#                     the trainer's rule.  It shrinks the denominator, so a
+#                     summary written under 'skip' is NOT comparable with one
+#                     written under 'truncate'.
 #   MAX_DOC_LENGTH / MAX_DOC_NUM / MIN_DOC_NUM   gist grid geometry (768/16/1)
 #   MAX_LENGTH / MAX_SYSTEM_LENGTH / MAX_PROMPT_TOKENS / MAX_NEW_TOKENS
 #   INCLUDE_TOOLS     True = tools raw in the system prompt (the arm's dialect)
@@ -62,6 +73,8 @@ MAX_EXAMPLES="${MAX_EXAMPLES:-700}"
 RATIO="${RATIO:-8}"
 COMPARE_MODES="${COMPARE_MODES:-c2kv,hybrid,full,truncate}"
 HYBRID_TOP_K="${HYBRID_TOP_K:-3}"
+HYBRID_FULL_AFTER_C2KV="${HYBRID_FULL_AFTER_C2KV:-False}"
+SYSTEM_OVERFLOW="${SYSTEM_OVERFLOW:-truncate}"
 MAX_DOC_LENGTH="${MAX_DOC_LENGTH:-768}"
 MAX_DOC_NUM="${MAX_DOC_NUM:-16}"
 MIN_DOC_NUM="${MIN_DOC_NUM:-1}"
@@ -108,6 +121,8 @@ RUN_CMD=(python agent/eval_agent_history_c2kv.py
   --compare_modes "${COMPARE_MODES}"
   --ratios "${RATIO}"
   --hybrid_top_k "${HYBRID_TOP_K}"
+  --hybrid_full_after_c2kv "${HYBRID_FULL_AFTER_C2KV}"
+  --system_overflow "${SYSTEM_OVERFLOW}"
   --max_examples "${MAX_EXAMPLES}"
   --include_tools "${INCLUDE_TOOLS}"
   --max_doc_length "${MAX_DOC_LENGTH}"
@@ -131,6 +146,7 @@ echo "SPLIT_NAME=${SPLIT_NAME} SPLIT=${SPLIT}"
 echo "COMPARE_MODES=${COMPARE_MODES} RATIO=${RATIO} MAX_EXAMPLES=${MAX_EXAMPLES}"
 echo "GEOMETRY: max_doc_length=${MAX_DOC_LENGTH} max_doc_num=${MAX_DOC_NUM} min_doc_num=${MIN_DOC_NUM}"
 echo "INCLUDE_TOOLS=${INCLUDE_TOOLS} HYBRID_TOP_K=${HYBRID_TOP_K} UNTRAINED=${UNTRAINED}"
+echo "HYBRID_FULL_AFTER_C2KV=${HYBRID_FULL_AFTER_C2KV} SYSTEM_OVERFLOW=${SYSTEM_OVERFLOW}"
 echo "OUT_DIR=${OUT_DIR}"
 printf '+'; printf ' %q' "${RUN_CMD[@]}"; echo
 "${RUN_CMD[@]}"
@@ -163,6 +179,23 @@ KEEP = (
     "exact_match",
     "response_type_accuracy",
     "avg_text_token_f1",
+    # 2026-09-05: instrumentation. A cell is only readable next to these.
+    # num_system_truncated  : rows whose tools-in-system prefix was right-
+    #                         truncated (the trainer SKIPS those instead).
+    # num_prompt_truncated  : rows whose current turn was left-truncated at
+    #                         --max_prompt_tokens.
+    # num_generation_capped : rows whose decode stopped at --max_new_tokens,
+    #                         which bounds exact_match/avg_text_token_f1.
+    # num_uncompressed_rows : rows of a compressed mode with gist_tokens == 0.
+    # realized_ratio_on_compressed / num_compressed_rows : doc-token weighted
+    #                         ratio over the rows that DID carry a gist block,
+    #                         as opposed to the nominal RATIO.
+    "num_system_truncated",
+    "num_prompt_truncated",
+    "num_generation_capped",
+    "num_uncompressed_rows",
+    "num_compressed_rows",
+    "realized_ratio_on_compressed",
     # 2026-09-05: paired = every mode re-scored on the rows no mode skipped.
     # max_baseline_input_tokens only ever skips the uncompressed arms, so the
     # unpaired full/truncate columns are a different (shorter-history, fewer
@@ -224,6 +257,11 @@ summary = {
     # are otherwise indistinguishable to phase_select.
     "max_prompt_tokens": harness.get("max_prompt_tokens"),
     "max_system_length": harness.get("max_system_length"),
+    "max_new_tokens": harness.get("max_new_tokens"),
+    # Denominator and hybrid-layout knobs: two summaries that differ on either
+    # are scored on different populations / different prefixes.
+    "system_overflow": harness.get("system_overflow"),
+    "hybrid_full_after_c2kv": harness.get("hybrid_full_after_c2kv"),
     "max_history_tokens": harness.get("max_history_tokens"),
     "history_selection": harness.get("history_selection"),
     "compare_modes": harness.get("modes"),

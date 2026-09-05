@@ -46,11 +46,15 @@
 #                   half-manifest shards don't overwrite each other's output)
 #   RUNS_DIR / SCORE_DIR  override output locations
 #
-# NOTE: start_h200.sh phase_eval does NOT forward any of these (nor
-# C2KV_DOC_MODE) today, and passes RUN_NAME explicitly -- so a non-joint arm
-# launched through start_h200.sh would be evaluated as joint under a
-# joint-looking name. Until phase_eval forwards them, run this wrapper
-# directly for non-joint arms (or set EVAL_BFCL=0).
+# NOTE (2026-09-03, corrected 2026-09-05): start_h200.sh phase_eval DOES
+# forward the arm's dialect and geometry -- C2KV_DOC_MODE / C2KV_MAX_DOC_LENGTH /
+# C2KV_MAX_DOC_NUM / C2KV_MAX_TOOL_CHUNKS -- and auto-sets C2KV_MAX_TOOL_CHUNKS=0
+# when TOOLS_IN_SYSTEM=True and MAX_TOOL_CHUNKS is unset.  This runner drives
+# BFCL's PROMPTING surface (plain-text function listing, Python-AST decode),
+# not the chat-template / FC surface the checkpoint is trained on and served
+# with, so its numbers are a printed column only -- never a selection metric
+# for a history_only + tools_in_system arm (start_h200.sh defaults
+# SELECT_METRIC=history / EVAL_BFCL=0 for DOC_MODE=history_only).
 #
 # Example:
 #   CKPT=./checkpoints/qwen3-4b-joint-c2kv-h200/checkpoint-2000 \

@@ -272,3 +272,102 @@ def test_missing_benchmark_column_raises(tmp_path):
         _build(
             tmp_path, dataset=dataset, train=["s-appworld-1"], evals=["s-appworld-3"]
         )
+
+
+# --- --max_system_tokens: drop eval sessions the harness would truncate -----
+#
+# The measurement itself (_eval_session_system_tokens) parses agent-llm-traces
+# spans through python/train/train_data_multiturn.py, which pulls in
+# datasets/torch; it is stubbed here so the filter, the guards and the metadata
+# stay covered on a CPU-only host.
+
+
+def _stub_tokenizer(monkeypatch):
+    monkeypatch.setattr(
+        "transformers.AutoTokenizer.from_pretrained",
+        classmethod(lambda cls, *args, **kwargs: object()),
+    )
+
+
+def test_max_system_tokens_is_off_by_default(tmp_path):
+    manifest, _ = _build(tmp_path)
+    meta = manifest["metadata"]
+    assert meta["max_system_tokens"] == 0
+    assert meta["num_eval_sessions_before"] == meta["num_eval_sessions_after"] == 1
+    assert meta["num_eval_sessions_dropped_system_overflow"] == 0
+
+
+def test_max_system_tokens_drops_the_overlong_eval_session(tmp_path, monkeypatch):
+    _stub_tokenizer(monkeypatch)
+    monkeypatch.setattr(
+        bads,
+        "_eval_session_system_tokens",
+        lambda data_files, session_ids, tokenizer: {
+            "s-appworld-2": 20480,
+            "s-appworld-3": 3000,
+        },
+    )
+    baseline, _ = _build(
+        tmp_path, train=["s-appworld-1"], evals=["s-appworld-2", "s-appworld-3"]
+    )
+    manifest, tables = _build(
+        tmp_path,
+        train=["s-appworld-1"],
+        evals=["s-appworld-2", "s-appworld-3"],
+        max_system_tokens=4096,
+        tokenizer="./models/Qwen3-4B-Instruct-2507",
+    )
+    split = manifest["appworld_dev"]
+    assert baseline["appworld_dev"]["eval_session_ids"] == ["s-appworld-2", "s-appworld-3"]
+    assert split["eval_session_ids"] == ["s-appworld-3"]
+    meta = manifest["metadata"]
+    assert meta["max_system_tokens"] == 4096
+    assert meta["num_eval_sessions_before"] == 2
+    assert meta["num_eval_sessions_after"] == meta["num_eval_sessions"] == 1
+    assert meta["num_eval_sessions_dropped_system_overflow"] == 1
+    # The slice is pinnable: dropping a session moves the hash and shows up in
+    # the dropped_eval accounting.
+    assert meta["eval_session_ids_sha256"] != baseline["metadata"]["eval_session_ids_sha256"]
+    assert tables["dropped_eval"]["AppWorld"] == 1
+    # The train side is untouched by the eval-only filter.
+    assert split["train_session_ids"] == baseline["appworld_dev"]["train_session_ids"]
+
+
+def test_max_system_tokens_keeps_unmeasured_sessions(tmp_path, monkeypatch):
+    # A session with no usable span never reaches the mapping; only sessions we
+    # actually measured may be dropped.
+    _stub_tokenizer(monkeypatch)
+    monkeypatch.setattr(
+        bads, "_eval_session_system_tokens", lambda data_files, session_ids, tokenizer: {}
+    )
+    manifest, _ = _build(
+        tmp_path,
+        train=["s-appworld-1"],
+        evals=["s-appworld-2", "s-appworld-3"],
+        max_system_tokens=16,
+        tokenizer="./models/Qwen3-4B-Instruct-2507",
+    )
+    assert manifest["appworld_dev"]["eval_session_ids"] == ["s-appworld-2", "s-appworld-3"]
+    assert manifest["metadata"]["num_eval_sessions_dropped_system_overflow"] == 0
+
+
+def test_max_system_tokens_emptying_the_eval_side_raises(tmp_path, monkeypatch):
+    # An over-tight threshold must abort loudly rather than silently shrink the
+    # selection set to nothing.
+    _stub_tokenizer(monkeypatch)
+    monkeypatch.setattr(
+        bads,
+        "_eval_session_system_tokens",
+        lambda data_files, session_ids, tokenizer: {"s-appworld-3": 5000},
+    )
+    with pytest.raises(RuntimeError, match="eval side is empty after --max_system_tokens"):
+        _build(
+            tmp_path,
+            max_system_tokens=4096,
+            tokenizer="./models/Qwen3-4B-Instruct-2507",
+        )
+
+
+def test_max_system_tokens_without_tokenizer_raises(tmp_path):
+    with pytest.raises(ValueError, match="requires --tokenizer"):
+        _build(tmp_path, max_system_tokens=4096)
