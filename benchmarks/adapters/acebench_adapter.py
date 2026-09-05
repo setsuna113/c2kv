@@ -198,8 +198,17 @@ def prepare_workdir(out_dir: Path, acebench_dir: Path, *, language: str | None =
             # file.  The private category mapping below exposes only sources
             # that actually contributed rows.
             continue
+        answer_source = source.parent / "possible_answer" / source.name
+        answers = _jsonl(answer_source)
+        answer_by_id = {str(row.get("id")): row for row in answers}
+        answer_rows = [answer_by_id.get(str(row["id"])) for row in candidates]
+        missing_answers = [str(row["id"]) for row, answer in zip(candidates, answer_rows)
+                           if answer is None]
+        if missing_answers:
+            raise SystemExit(
+                f"FATAL: ACEBench possible_answer has no rows for: {','.join(missing_answers)}")
         matched.update(str(row["id"]) for row in candidates)
-        prepared.append((test, source, rows, candidates))
+        prepared.append((test, source, rows, candidates, answer_source, answer_rows))
     if not prepared:
         raise SystemExit("FATAL: ACEBench subset selected no official rows")
     missing = sorted(wanted - matched)
@@ -208,15 +217,22 @@ def prepare_workdir(out_dir: Path, acebench_dir: Path, *, language: str | None =
 
     target_dir = data / f"data_{language}"
     target_dir.mkdir(parents=True)
+    answer_dir = target_dir / "possible_answer"
+    answer_dir.mkdir()
     sources = []
-    for test, source, rows, candidates in prepared:
+    for test, source, rows, candidates, answer_source, answer_rows in prepared:
         target = target_dir / f"data_{test}.json"
         target.write_text("".join(json.dumps(row, ensure_ascii=False) + "\n"
                                    for row in candidates), encoding="utf-8")
+        answer_target = answer_dir / f"data_{test}.json"
+        answer_target.write_text("".join(json.dumps(row, ensure_ascii=False) + "\n"
+                                          for row in answer_rows), encoding="utf-8")
         sources.append({
             "test": test, "source_path": str(source), "source_rows": len(rows),
             "selected_rows": len(candidates),
             "selected_ids": [str(row["id"]) for row in candidates],
+            "possible_answer_source_path": str(answer_source),
+            "possible_answer_selected_rows": len(answer_rows),
         })
     (work / "selected_tasks.json").write_text(json.dumps({
         "schema_version": 1, "language": language, "requested_task_ids": selected_ids,

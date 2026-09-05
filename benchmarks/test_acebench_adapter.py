@@ -99,6 +99,9 @@ def test_prepare_workdir_materializes_exact_official_subset_with_provenance(tmp_
     root = _checkout(tmp_path)
     source = root / "data_all" / "data_en" / "data_agent_multi_step.json"
     _write_jsonl(source, [{"id": "agent_multi_step_0"}, {"id": "agent_multi_step_1"}])
+    _write_jsonl(source.parent / "possible_answer" / source.name,
+                 [{"id": "agent_multi_step_0", "ground_truth": []},
+                  {"id": "agent_multi_step_1", "ground_truth": []}])
     work = B.prepare_workdir(tmp_path / "out", root, language="en",
                              tests=["agent_multi_step"], task_ids="agent_multi_step_1")
     selected = B._jsonl(work / "data_all" / "data_en" / "data_agent_multi_step.json")
@@ -107,11 +110,16 @@ def test_prepare_workdir_materializes_exact_official_subset_with_provenance(tmp_
     record = json.loads((work / "selected_tasks.json").read_text(encoding="utf-8"))
     assert record["sources"][0]["selected_ids"] == ["agent_multi_step_1"]
     assert record["sources"][0]["source_rows"] == 2
+    assert B._jsonl(work / "data_all" / "data_en" / "possible_answer" /
+                    "data_agent_multi_step.json") == [{"id": "agent_multi_step_1", "ground_truth": []}]
 
 
 def test_prepare_workdir_max_tasks_selects_first_source_row(tmp_path):
     root = _checkout(tmp_path)
     _write_jsonl(root / "data_all" / "data_en" / "data_agent_multi_step.json",
+                 [{"id": "agent_multi_step_0"}, {"id": "agent_multi_step_1"}])
+    _write_jsonl(root / "data_all" / "data_en" / "possible_answer" /
+                 "data_agent_multi_step.json",
                  [{"id": "agent_multi_step_0"}, {"id": "agent_multi_step_1"}])
     work = B.prepare_workdir(tmp_path / "out", root, language="en",
                              tests=["agent_multi_step"], max_tasks=1)
