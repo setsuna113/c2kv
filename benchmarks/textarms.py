@@ -40,6 +40,9 @@ Sources:
   initial ``context_opt`` guidelines (microsoft/acon @ d63f9ae); ``ut`` and
   ``ut_co`` use the paper appendix's fixed guidelines after the utility and
   utility-plus-compression optimization steps respectively.
+  Source/licensing: the base templates come from microsoft/acon @ d63f9ae
+  under its MIT License; the UT and UT+CO templates are transcribed from
+  Appendix D of arXiv:2510.00615v3, whose arXiv HTML is CC BY 4.0.
   History/observation are evaluated SEPARATELY by the paper (ruling 6):
   arms keep the two faces and guideline stages explicit in their names.
   Summary is embedded into the first user prompt as a <HISTORY_SUMMARY>
