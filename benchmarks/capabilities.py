@@ -50,6 +50,7 @@ class PreflightResult:
     features: tuple[str, ...]
     requirements: list[Requirement] = field(default_factory=list)
     variants: list[dict[str, str]] = field(default_factory=list)
+    effective: dict[str, str] = field(default_factory=dict)
 
     @property
     def errors(self) -> list[Requirement]:
@@ -80,6 +81,7 @@ class PreflightResult:
             "ok": self.ok,
             "requirements": [item.as_dict() for item in self.requirements],
             "variants": list(self.variants),
+            "effective": dict(self.effective),
         }
 
 
@@ -159,7 +161,12 @@ def _profile_value(profile: Optional[Mapping[str, Any]], key: str) -> Any:
         return profile[key]
     flags = profile.get("sglang_flags")
     if isinstance(flags, Mapping):
-        return flags.get(key)
+        value = flags.get(key)
+        if value is not None:
+            return value
+    serving = profile.get("serving")
+    if isinstance(serving, Mapping):
+        return serving.get(key)
     return None
 
 
@@ -279,6 +286,12 @@ def _method_capabilities(result: PreflightResult, arm: str, backend: str,
         return
 
     history_arm = bool(spec.compress_history or spec.kv_reuse or spec.text_policy)
+    for capability in getattr(spec, "required_capabilities", ()) or ():
+        result.requirements.append(Requirement(
+            code=f"arm_capability:{capability}", severity="error",
+            satisfied=str(capability) in features,
+            message=f"arm {arm!r} requires declared capability {capability!r}",
+        ))
     if benchmark == "acebench" and history_arm and ACE_ROLE_HISTORY_FEATURE not in features:
         result.requirements.append(Requirement(
             code="acebench_role_history_normalizer", severity="error", satisfied=False,
@@ -295,11 +308,24 @@ def _method_capabilities(result: PreflightResult, arm: str, backend: str,
         query_proj = _profile_value(profile, "query_projection")
         if query_proj is None:
             query_proj = _profile_value(profile, "c2kv_query_proj")
+        # CacheBlend is a base-projection baseline even when the checkpoint's
+        # serving profile is gist.  The SGLang backend owns this arm-specific
+        # override for both the top-level request and the repair carrier.  Do
+        # not reject a valid G profile here; surface the effective regime in
+        # the plan so it cannot be mistaken for the checkpoint default.
+        declared_projection = getattr(spec, "query_projection", None) or "base"
         result.requirements.append(Requirement(
-            code="cacheblend_base_query_projection", severity="error",
-            satisfied=query_proj == "base",
-            message="CacheBlend requires resolved profile query_projection=base",
+            code="cacheblend_arm_projection", severity="error",
+            satisfied=declared_projection == "base",
+            message="CacheBlend arm metadata must declare query_projection='base'",
         ))
+        result.effective["query_projection"] = str(declared_projection)
+        result.effective["query_projection_source"] = "cacheblend_arm_override"
+        if query_proj not in (None, "base"):
+            _append_warning(
+                result, "cacheblend_query_projection_overridden",
+                f"profile query_projection={query_proj!r}; CacheBlend runs with effective base projection",
+            )
         result.requirements.append(Requirement(
             code="cacheblend_server_capability", severity="error",
             satisfied=CACHEBLEND_SERVER_FEATURE in features,

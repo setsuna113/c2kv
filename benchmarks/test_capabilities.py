@@ -38,7 +38,7 @@ def _codes(result: capabilities.PreflightResult) -> set[str]:
     return {item.code for item in result.errors}
 
 
-def test_cacheblend_requires_sglang_base_projection_and_server_capability(tmp_path):
+def test_cacheblend_overrides_profile_projection_but_requires_server_capability(tmp_path):
     tau2 = _tau2(tmp_path)
     common = {
         "options": {"runner_python": sys.executable},
@@ -48,11 +48,16 @@ def test_cacheblend_requires_sglang_base_projection_and_server_capability(tmp_pa
         "tau2", "cacheblend_r16", "sglang",
         profile={"query_projection": "gist"}, **common,
     )
-    assert {"cacheblend_base_query_projection", "cacheblend_server_capability"} <= _codes(bad)
+    assert _codes(bad) == {"cacheblend_server_capability"}
+    assert bad.as_dict()["effective"] == {
+        "query_projection": "base",
+        "query_projection_source": "cacheblend_arm_override",
+    }
+    assert "cacheblend_query_projection_overridden" in {item.code for item in bad.warnings}
 
     good = capabilities.preflight(
         "tau2", "cacheblend_r16", "sglang",
-        profile={"query_projection": "base", "server_features": [
+        profile={"serving": {"query_projection": "gist"}, "server_features": [
             capabilities.CACHEBLEND_SERVER_FEATURE]}, **common,
     )
     assert good.ok

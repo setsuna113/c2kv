@@ -15,7 +15,11 @@ import matrix
 def _spec() -> dict:
     return {
         "schema_version": 1,
-        "profile": {"fingerprint": "profile-a", "query_projection": "base"},
+        "profile": {
+            "path": "/profile.json", "profile_fingerprint": "profile-a",
+            "checkpoint": {"path": "/checkpoint-588"},
+            "serving": {"query_projection": "gist"},
+        },
         "defaults": {
             "backend": "sglang", "upstream": "http://127.0.0.1:35000",
             "runner_python": sys.executable,
@@ -33,12 +37,15 @@ def _env(tmp_path: Path) -> dict[str, str]:
 
 def test_plan_is_explicit_and_profile_bound(tmp_path):
     plan = matrix.build_plan(_spec(), tmp_path / "out", environ=_env(tmp_path))
-    assert plan["profile"]["fingerprint"] == "profile-a"
+    assert plan["profile"]["profile_fingerprint"] == "profile-a"
     assert len(plan["cells"]) == 1
     cell = plan["cells"][0]
     assert cell["benchmark"] == "tau2" and cell["arm"] == "c2kv"
     assert cell["preflight"]["ok"]
     assert "--task-set" in cell["command"]
+    assert "--exact-out" in cell["command"]
+    assert cell["command"].count("--checkpoint") == 1
+    assert cell["command"].count("--checkpoint-profile") == 1
     assert Path(cell["status_path"]).parent.name == "status"
 
 

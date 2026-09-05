@@ -66,7 +66,7 @@ def _string_list(value: Any, field: str) -> list[str]:
 def _flag_args(args: Iterable[str]) -> list[str]:
     values = list(args)
     forbidden = {"--benchmark", "--arm", "--backend", "--upstream", "--user-upstream",
-                 "--out", "--run-name"}
+                 "--out", "--run-name", "--checkpoint", "--checkpoint-profile"}
     for value in values:
         if value in forbidden or any(value.startswith(flag + "=") for flag in forbidden):
             raise ValueError(f"matrix owns {value!r}; remove it from run_args")
@@ -89,11 +89,32 @@ def _append_adapter_path_options(command: list[str], options: Mapping[str, Any])
 def _profile(spec: Mapping[str, Any]) -> dict[str, Any]:
     profile = spec.get("profile")
     if not isinstance(profile, Mapping):
-        raise ValueError("matrix profile must be an object with a non-empty fingerprint")
+        raise ValueError("matrix profile must be the complete resolved checkpoint profile")
     result = dict(profile)
-    if not isinstance(result.get("fingerprint"), str) or not result["fingerprint"].strip():
-        raise ValueError("matrix profile.fingerprint is required")
+    fingerprint = result.get("profile_fingerprint") or result.get("fingerprint")
+    if not isinstance(fingerprint, str) or not fingerprint.strip():
+        raise ValueError("matrix profile.profile_fingerprint is required")
+    # Internally one key keeps the cell format stable while preserving the
+    # resolver's complete source object under its original field names.
+    result["fingerprint"] = fingerprint
     return result
+
+
+def _profile_runner_args(profile: Mapping[str, Any]) -> list[str]:
+    """Bind every matrix cell to the resolver object used to plan it.
+
+    The cell fingerprint alone is retrospective evidence.  Supplying the
+    checkpoint and its resolved-profile file to ``run.py`` makes the launch
+    itself reject an incompatible serving recipe before it starts a proxy.
+    """
+    profile_path = profile.get("path")
+    checkpoint = profile.get("checkpoint")
+    checkpoint_path = checkpoint.get("path") if isinstance(checkpoint, Mapping) else None
+    if not isinstance(profile_path, str) or not profile_path.strip():
+        raise ValueError("matrix profile.path is required for run.py")
+    if not isinstance(checkpoint_path, str) or not checkpoint_path.strip():
+        raise ValueError("matrix profile.checkpoint.path is required for run.py")
+    return ["--checkpoint", checkpoint_path, "--checkpoint-profile", profile_path]
 
 
 def _cell_id(benchmark: str, arm: str) -> str:
@@ -125,6 +146,7 @@ def build_plan(spec: Mapping[str, Any], output_root: Path, *,
     if spec.get("schema_version") != SCHEMA_VERSION:
         raise ValueError(f"matrix schema_version must be {SCHEMA_VERSION}")
     profile = _profile(spec)
+    profile_args = _profile_runner_args(profile)
     defaults = spec.get("defaults") or {}
     if not isinstance(defaults, Mapping):
         raise ValueError("matrix defaults must be an object")
@@ -181,9 +203,11 @@ def build_plan(spec: Mapping[str, Any], output_root: Path, *,
                        "--proxy-port", str(config.get("proxy_port")
                                              or defaults.get("proxy_port") or 34100),
                        "--out", str(run_out), "--run-name", run_name,
-                       "--model", model]
+                       "--model", model, *profile_args, "--exact-out"]
             if user_upstream:
                 command += ["--user-upstream", user_upstream]
+            if features:
+                command += ["--capability-features", ",".join(features)]
             command += common_args + bench_args
             _append_adapter_path_options(command, options)
             preflight = capabilities.preflight(
@@ -197,8 +221,10 @@ def build_plan(spec: Mapping[str, Any], output_root: Path, *,
                 "command": command,
                 "features": features,
             })
-            # run.py suffixes --out using this same repository's short HEAD.
-            summary_dir = Path(str(run_out) + f"_{repo_commit[:7]}")
+            # --exact-out is intentional: run.py's short SHA may vary in
+            # length (and snapshots may report nogit), so inferring its
+            # suffix would make matrix success detection unreliable.
+            summary_dir = run_out
             cells.append({
                 "id": cell_id,
                 "benchmark": benchmark,
