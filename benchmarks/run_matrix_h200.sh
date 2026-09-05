@@ -32,9 +32,18 @@ TOOLSANDBOX_SMOKE_SCENARIO="${TOOLSANDBOX_SMOKE_SCENARIO:-send_message_with_cont
 # A non-smoke run ALREADY passes --full, so TOOLSANDBOX_FULL only has an
 # effect together with SMOKE=1 (the script says so at run time).
 TOOLSANDBOX_FULL="${TOOLSANDBOX_FULL:-0}"
+# Serving knobs are owned by launch_sglang_h200.sh; they are resolved here too
+# so the run manifest records the value that was actually served rather than a
+# literal that can drift away from the launcher.
+C2KV_POOL_FRACTION="${C2KV_POOL_FRACTION:-0.06}"
+C2KV_QUERY_PROJ="${C2KV_QUERY_PROJ:-gist}"
+export C2KV_POOL_FRACTION C2KV_QUERY_PROJ
 
 SGLANG_URL="${SGLANG_URL:-git@github.com:setsuna113/kvoffload-sglang-c2kv.git}"
-SGLANG_COMMIT="${SGLANG_COMMIT:-4d08b7b92184f7c14e97947fe7bfb6f41e9d3a2d}"
+# task/c2kv-serve-align tip: renders the segment insertion point with `tools`
+# (4d08 rendered it without, so every gist landed at a tool-free offset) and
+# adds --c2kv-query-proj.
+SGLANG_COMMIT="${SGLANG_COMMIT:-718a654e3df356e262c3318a095e1efd91c23512}"
 TAU2_URL="${TAU2_URL:-git@github.com:sierra-research/tau2-bench.git}"
 TAU2_COMMIT="${TAU2_COMMIT:-a2c024725189473d2d7cea3a5cfdbcc67478e41f}"
 BFCL_URL="${BFCL_URL:-git@github.com:ShishirPatil/gorilla.git}"
@@ -271,6 +280,19 @@ print(arm.ratio if arm.compress_history else 0)
 PY
 }
 
+proxy_regime() {
+  # doc_packing / max_docs / max_doc_length, read from proxy.py itself so the
+  # manifest cannot claim a segmentation regime the proxy does not run.
+  "$SGLANG_PYTHON" - "$REPO_ROOT/benchmarks" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import proxy
+print(proxy.DOC_PACKING)
+print(proxy.MAX_DOCS)
+print(proxy.MAX_DOC_LENGTH)
+PY
+}
+
 ensure_pool_ratio() {
   local arm=$1 ratio
   ratio=$(arm_pool_ratio "$arm")
@@ -349,12 +371,18 @@ log "S3 proxy-arm gate"
   --base-url "$BASE_URL" --served-model-name "$SERVED_MODEL_NAME" \
   --log-dir "$GATE_DIR" --out "$GATE_DIR/S3_proxy.json"
 
+log "S6 tools-through-proxy gate"
+"$SGLANG_PYTHON" "$REPO_ROOT/benchmarks/sglang_smoke.py" tools-proxy \
+  --base-url "$BASE_URL" --served-model-name "$SERVED_MODEL_NAME" \
+  --checkpoint "$CKPT_PATH" --log-dir "$GATE_DIR" \
+  --out "$GATE_DIR/S6_tools_through_proxy.json"
+
 cat >"$GATE_DIR/S4_repair.json" <<'EOF'
 {
   "gate": "S4_repair",
   "passed": true,
   "status": "skipped",
-  "reason": "selected sglang commit 4d08b7b92184f7c14e97947fe7bfb6f41e9d3a2d has no /v1/c2kv/repair_extract"
+  "reason": "repair arms are disabled by policy in this matrix; /v1/c2kv/repair_extract exists at the pinned commit but no repair arm is wired into benchmarks/arms.py"
 }
 EOF
 
@@ -452,9 +480,12 @@ if [[ "$SMOKE" == "1" ]]; then
 fi
 
 MANIFEST="$RESULT_ROOT/run_manifest.json"
+mapfile -t PROXY_REGIME < <(proxy_regime)
 "$SGLANG_PYTHON" - "$MANIFEST" "$CKPT_PATH" "$CKPT_NAME" "$REPO_ROOT" \
 "$SGLANG_REPO" "$TAU2_DIR" "$BFCL_MONOREPO" "$TOOLSANDBOX_DIR" \
 "$BASE_URL" "$SERVED_MODEL_NAME" "$SMOKE" "$NUM_WORKERS" "$PORT" \
+"$C2KV_POOL_FRACTION" "$C2KV_QUERY_PROJ" \
+"${PROXY_REGIME[0]}" "${PROXY_REGIME[1]}" "${PROXY_REGIME[2]}" \
 "${#BENCHMARK_LIST[@]}" "${BENCHMARK_LIST[@]}" "${ARM_LIST[@]}" <<'PY'
 import datetime
 import json
@@ -462,10 +493,12 @@ import subprocess
 import sys
 
 argv = sys.argv[1:]
-out, ckpt, ckpt_name, repo, sglang, tau2, bfcl, toolsandbox, url, model, smoke, workers, port = argv[:13]
-benchmark_count = int(argv[13])
-benchmarks = argv[14:14 + benchmark_count]
-arms = argv[14 + benchmark_count:]
+(out, ckpt, ckpt_name, repo, sglang, tau2, bfcl, toolsandbox, url, model, smoke,
+ workers, port, pool_fraction, query_proj, doc_packing, max_docs,
+ max_doc_length) = argv[:18]
+benchmark_count = int(argv[18])
+benchmarks = argv[19:19 + benchmark_count]
+arms = argv[19 + benchmark_count:]
 def commit(path):
     return subprocess.check_output(["git", "-C", path, "rev-parse", "HEAD"], text=True).strip()
 manifest = {
@@ -487,22 +520,31 @@ manifest = {
     "num_workers": int(workers),
     "sglang_flags": {
         "enable_c2kv": True,
-        "c2kv_pool_fraction": 0.01,
+        "c2kv_pool_fraction": float(pool_fraction),
         "c2kv_max_tokens": 4096,
+        "c2kv_query_proj": query_proj,
         "tool_call_parser": "qwen25",
         "mem_fraction_static": 0.8,
         "disable_piecewise_cuda_graph": True,
-        "disable_piecewise_cuda_graph_reason": "4d08 Qwen3 C2KV data-dependent branch is incompatible with piecewise tracing",
+        "disable_piecewise_cuda_graph_reason": "Qwen3 C2KV data-dependent branch is incompatible with piecewise tracing",
+        "disable_cuda_graph": True,
+        "disable_cuda_graph_reason": "the per-token gist/base projection mask is not part of CUDA-graph capture, so a captured decode would revert to the base projections",
         "attention_backend": "sglang_default",
         "port": int(port),
     },
+    "proxy_segmentation": {
+        "doc_packing": doc_packing,
+        "max_docs": int(max_docs),
+        "max_doc_length": int(max_doc_length),
+        "history_cutoff": "after_last_assistant",
+    },
     "sglang_pool_isolation": {
         "restart_on_ratio_change": True,
-        "reason": "4d08 C2KV pool hashes input ids but not compression ratio; mixed-ratio arms would collide",
+        "reason": "the C2KV pool hashes input ids but not compression ratio; mixed-ratio arms would collide",
     },
     "repair": {
         "enabled": False,
-        "reason": "sglang 4d08b7b92184f7c14e97947fe7bfb6f41e9d3a2d has no repair endpoint",
+        "reason": "repair arms are disabled by policy in this matrix; /v1/c2kv/repair_extract exists at the pinned commit but no repair arm is wired into benchmarks/arms.py",
     },
     "reporting_note": "preliminary, n=1; no historical NPU comparisons",
 }

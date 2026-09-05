@@ -17,7 +17,7 @@ from arms import get_arm  # noqa: E402
 
 def start_proxy(
     upstream: str, arm: str, port: int, log_dir: Path,
-    doc_packing: str = "message", max_docs: int = 0,
+    doc_packing: str = "turn", max_docs: int = 16, max_doc_length: int = 768,
 ):
     log_path = log_dir / f"proxy_{arm}_{port}.jsonl"
     proxy_out = log_dir / f"proxy_{arm}_{port}.out"
@@ -32,6 +32,7 @@ def start_proxy(
                 "--request-log", str(log_path),
                 "--doc-packing", doc_packing,
                 "--max-docs", str(max_docs),
+                "--max-doc-length", str(max_doc_length),
             ],
             stdout=out_handle,
             stderr=subprocess.STDOUT,
@@ -113,16 +114,27 @@ def main(argv=None) -> None:
     )
     parser.add_argument("--proxy-port", type=int, default=34100)
     parser.add_argument(
-        "--doc-packing", choices=["message", "turn"], default="message",
+        "--doc-packing", choices=["message", "turn"], default="turn",
         help=(
-            "segment granularity for compressed history. 'turn' matches the"
-            " trainer's turn documents and is the only setting under which a"
-            " doc_mode=history_only checkpoint is served in its own dialect."
+            "segment granularity for compressed history. 'turn' (default)"
+            " matches the trainer's turn documents and is the only setting"
+            " under which a doc_mode=history_only checkpoint is served in its"
+            " own dialect."
         ),
     )
     parser.add_argument(
-        "--max-docs", type=int, default=0,
-        help="trainer max_doc_num tail cap on compressed docs (0 = uncapped)",
+        "--max-docs", type=int, default=16,
+        help=(
+            "trainer max_doc_num tail cap on compressed docs, keeping doc 0"
+            " plus the newest ones (0 = uncapped)"
+        ),
+    )
+    parser.add_argument(
+        "--max-doc-length", type=int, default=768,
+        help=(
+            "trainer max_doc_length: oversized turn documents are split on"
+            " line boundaries before the --max-docs cap (0 = no split)"
+        ),
     )
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--benchmark-dir", type=Path, default=None,
@@ -154,6 +166,7 @@ def main(argv=None) -> None:
     proxy_proc, request_log = start_proxy(
         args.upstream, args.arm, args.proxy_port, log_dir,
         doc_packing=args.doc_packing, max_docs=args.max_docs,
+        max_doc_length=args.max_doc_length,
     )
     try:
         base_url = f"http://127.0.0.1:{args.proxy_port}"

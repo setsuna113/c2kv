@@ -20,10 +20,20 @@ def _request_log_stats(path_value: Any) -> Dict[str, Any]:
     original = sum(int(row.get("original_tokens") or 0) for row in rows)
     gist = sum(int(row.get("gist_tokens") or 0) for row in rows)
     walls = [float(row["wall_sec"]) for row in rows if row.get("wall_sec") is not None]
+    # A request the proxy failed (assembly or upstream) aborts the task in the
+    # benchmark client, which then scores as a model failure.  Surface it.
+    failed = [row for row in rows if (row.get("status") or "ok") != "ok"]
+    failure_statuses: Dict[str, int] = {}
+    for row in failed:
+        status = str(row.get("status"))
+        failure_statuses[status] = failure_statuses.get(status, 0) + 1
     return {
         "request_count": len(rows),
         "request_log": str(path),
         "request_log_exists": True,
+        "failed_request_count": len(failed),
+        "failed_request_statuses": failure_statuses,
+        "first_failed_request_error": failed[0].get("error") if failed else None,
         "original_tokens_total": original,
         "gist_tokens_total": gist,
         "effective_ratio": original / gist if gist else None,
@@ -43,6 +53,7 @@ def collect(root: Path, manifest: Dict[str, Any]) -> Dict[str, Any]:
             summary = json.loads(summary_path.read_text(encoding="utf-8"))
             request_stats = _request_log_stats(summary.get("request_log"))
             official = summary.get("bfcl_official") or {}
+            failed_requests = int(request_stats.get("failed_request_count") or 0)
             cells.append(
                 {
                     "benchmark": benchmark,
@@ -58,7 +69,10 @@ def collect(root: Path, manifest: Dict[str, Any]) -> Dict[str, Any]:
                     "request_count": request_stats.get("request_count"),
                     "source_summary": str(summary_path),
                     "request_log": request_stats.get("request_log"),
-                    "status": "complete",
+                    "failed_request_count": failed_requests,
+                    "failed_request_statuses": request_stats.get("failed_request_statuses") or {},
+                    "first_failed_request_error": request_stats.get("first_failed_request_error"),
+                    "status": "degraded" if failed_requests else "complete",
                 }
             )
     return {
@@ -81,12 +95,20 @@ def render_markdown(report: Dict[str, Any]) -> str:
         f"- num_workers: `{manifest.get('num_workers')}`",
         "- Historical NPU numbers are intentionally not used as references.",
         "",
-        "| Benchmark | Arm | n | Semantic | BFCL official acc | Protocol legal | Wall mean (s) | Effective compression | Source |",
-        "|---|---|---:|---:|---:|---:|---:|---:|---|",
+        "| Benchmark | Arm | n | Semantic | BFCL official acc | Protocol legal | Wall mean (s) | Effective compression | Cell status | Source |",
+        "|---|---|---:|---:|---:|---:|---:|---:|---|---|",
     ]
+    degraded = []
     for cell in report["cells"]:
+        failed = int(cell.get("failed_request_count") or 0)
+        status = cell.get("status")
+        if failed:
+            statuses = cell.get("failed_request_statuses") or {}
+            detail = ", ".join(f"{key}={value}" for key, value in sorted(statuses.items()))
+            status = f"degraded ({failed} failed proxy requests: {detail})"
+            degraded.append(cell)
         lines.append(
-            "| {benchmark} | {arm} | {n} | {semantic} | {official} | {protocol} | {wall} | {compression} | `{source}` |".format(
+            "| {benchmark} | {arm} | {n} | {semantic} | {official} | {protocol} | {wall} | {compression} | {status} | `{source}` |".format(
                 benchmark=cell["benchmark"],
                 arm=cell["arm"],
                 n=cell.get("n"),
@@ -95,9 +117,31 @@ def render_markdown(report: Dict[str, Any]) -> str:
                 protocol=cell.get("protocol_legal_rate"),
                 wall=cell.get("wall_sec_mean"),
                 compression=cell.get("effective_compression"),
+                status=status,
                 source=cell.get("source_summary"),
             )
         )
+    if degraded:
+        lines.extend([
+            "",
+            "## Degraded cells",
+            "",
+            "A proxy request that failed aborts the task in the benchmark client, so"
+            " the score of a degraded cell mixes model failures with serving failures"
+            " and must not be reported as a property of the checkpoint.",
+            "",
+        ])
+        for cell in degraded:
+            lines.append(
+                "- `{benchmark}/{arm}`: {failed} failed of {total} requests;"
+                " first error: {error}".format(
+                    benchmark=cell["benchmark"],
+                    arm=cell["arm"],
+                    failed=cell.get("failed_request_count"),
+                    total=cell.get("request_count"),
+                    error=cell.get("first_failed_request_error"),
+                )
+            )
     return "\n".join(lines) + "\n"
 
 

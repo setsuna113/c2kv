@@ -17,6 +17,13 @@ Extract results are cached by (role, sha256(content), ratio) so multi-turn
 sessions do not re-compress the same prefix, which also keeps KV accounting
 consistent with the teacher-forced harness (one gist per history block).
 
+The compressed block is cut into documents exactly the way the trainer cuts
+them (``train_data_multiturn._fit_reused_history_with_indices``): turn
+documents by default (``--doc-packing turn``), each split to at most
+``--max-doc-length`` template tokens, and only then tail-selected to
+``--max-docs`` documents keeping doc 0 plus the newest ones.  Split before
+cap is the trainer's order, so the cap counts chunks and not turns.
+
 Timing: the proxy is NON-STREAMING (one buffered request/response per call).
 It records per-request wall time and token accounting under the response
 object's `c2kv_proxy` field plus a JSONL request log; TTFT is not measured.
@@ -54,11 +61,23 @@ CACHE = ExtractCache()
 ARM: Optional[Arm] = None
 UPSTREAM = ""
 REQUEST_LOG_PATH = ""
-# Segment granularity handed to /v1/c2kv/extract: "message" (historical
-# default) or "turn" (the granularity history_only arms are trained on).
-DOC_PACKING = "message"
-# Trainer max_doc_num tail cap; 0 = uncapped (historical default).
-MAX_DOCS = 0
+# Segment granularity handed to /v1/c2kv/extract: "turn" (the granularity
+# history_only arms are trained on) or "message" (one document per raw
+# message, kept selectable for continuity with earlier matrices).
+DOC_PACKING = "turn"
+# Trainer max_doc_num tail cap; 0 = uncapped.
+MAX_DOCS = 16
+# Trainer max_doc_length: per-document template-token cap, enforced by
+# splitting oversized turn documents; 0 = no split.
+MAX_DOC_LENGTH = 768
+# Stats shape used when assembly itself failed and nothing was compressed.
+_EMPTY_STATS = {
+    "gist_tokens": 0,
+    "original_tokens": 0,
+    "n_docs": 0,
+    "n_split": 0,
+    "dropped_docs": 0,
+}
 _log_lock = threading.Lock()
 
 
@@ -80,8 +99,10 @@ def _render_tool_calls(tool_calls: Any) -> str:
     """Render OpenAI ``tool_calls`` exactly as the trainer renders them.
 
     Byte-for-byte ``train.train_data_multiturn._render_agent_tool_calls``:
-    one ``<tool_call>{"name":...,"arguments":...}</tool_call>`` block per
-    call, compact JSON separators, ``ensure_ascii=False``.
+    one ``<tool_call>{"name":...,"arguments":{...}}</tool_call>`` block per
+    call, compact JSON separators, ``ensure_ascii=False``, with the OpenAI
+    JSON-string ``arguments`` parsed back into an object first (the trainer's
+    traces already carry objects there).
 
     Without this the proxy hands ``/v1/c2kv/extract`` an assistant message
     whose ``content`` is ``None`` and whose action lives only in
@@ -116,13 +137,24 @@ def _render_tool_calls(tool_calls: Any) -> str:
             or call.get("function_name")
             or ""
         )
-        arguments = (
+        raw_arguments = (
             function.get("arguments")
             or call.get("arguments")
             or call.get("args")
             or call.get("input")
             or {}
         )
+        # OpenAI carries ``function.arguments`` as a JSON *string*; the traces
+        # the trainer reads carry it as an object.  Parse so both render to
+        # the same bytes -- otherwise every historical action reaches the gist
+        # encoder as an escaped string literal.
+        if isinstance(raw_arguments, str):
+            try:
+                arguments = json.loads(raw_arguments or "{}")
+            except json.JSONDecodeError:
+                arguments = raw_arguments
+        else:
+            arguments = raw_arguments
         rendered.append(
             "<tool_call>\n"
             + json.dumps({"name": name, "arguments": arguments},
@@ -226,6 +258,70 @@ def _extract(role: str, content: str, ratio: int, timeout: int) -> Dict[str, Any
     return CACHE.get_or_put(key, produce)
 
 
+def _split_lines_keep(text: str) -> List[str]:
+    """Line units with their newline kept (``_semantic_units`` analogue):
+    splitting only at line boundaries keeps the turn markers and tool-call
+    blocks intact."""
+    units = text.splitlines(keepends=True)
+    return units or [text]
+
+
+def _fit_doc(doc_text: str, ratio: int, extract_fn, max_doc_length: int,
+             depth: int = 0) -> List[Tuple[str, Dict[str, Any]]]:
+    """Extract ``doc_text``; if its template length exceeds ``max_doc_length``
+    split it (``train_data_multiturn._split_message_to_fit``: greedy line
+    accumulation against a char budget, then hard halves) and extract the
+    pieces.  The proxy has no tokenizer, so the char budget is calibrated
+    from the first extract's own chars/token; every piece is verified by its
+    own extract response, so the length guarantee is exact and only the cut
+    points are approximate.  ``max_doc_length <= 0`` disables splitting.
+    """
+    record = extract_fn("user", doc_text, ratio)
+    length = int(record.get("original_seq_len") or 0)
+    if max_doc_length <= 0 or length <= max_doc_length or depth >= 6 or len(doc_text) < 8:
+        return [(doc_text, record)]
+    chars_per_token = max(1.0, len(doc_text) / max(1, length))
+    budget = max(64, int(max_doc_length * chars_per_token * 0.9))
+    pieces: List[str] = []
+    current = ""
+    for unit in _split_lines_keep(doc_text):
+        if current and len(current) + len(unit) > budget:
+            pieces.append(current)
+            current = ""
+        if len(unit) > budget:
+            if current:
+                pieces.append(current)
+                current = ""
+            for start in range(0, len(unit), budget):
+                pieces.append(unit[start:start + budget])
+            continue
+        current += unit
+    if current:
+        pieces.append(current)
+    if len(pieces) <= 1:  # cannot split further at line level: hard halves
+        half = len(doc_text) // 2
+        pieces = [doc_text[:half], doc_text[half:]]
+    out: List[Tuple[str, Dict[str, Any]]] = []
+    for piece in pieces:
+        if not piece.strip():
+            continue
+        out.extend(_fit_doc(piece, ratio, extract_fn, max_doc_length, depth + 1))
+    return out
+
+
+def _select_docs(docs: List[Any], max_doc_num: int) -> Tuple[List[Any], int]:
+    """``train_data_multiturn._select_history(policy="tail")``: keep doc 0
+    (the session anchor, which carries the task statement) plus the last
+    ``max_doc_num - 1`` docs; the rest are DROPPED and the model never sees
+    them, exactly as in training."""
+    if max_doc_num <= 0 or len(docs) <= max_doc_num:
+        return list(docs), 0
+    if max_doc_num == 1:
+        return list(docs[-1:]), len(docs) - 1
+    kept = [docs[0]] + list(docs[-(max_doc_num - 1):])
+    return kept, len(docs) - len(kept)
+
+
 def _history_cutoff(messages: List[Dict[str, Any]]) -> int:
     """Index where the current (raw) block starts.
 
@@ -253,32 +349,43 @@ def _history_cutoff(messages: List[Dict[str, Any]]) -> int:
 
 
 def _assemble(messages: List[Dict[str, Any]], arm: Arm, timeout: int):
-    """Return (out_messages, gist_tokens, original_tokens, n_gist, n_dropped).
+    """Return ``(out_messages, stats)``.
+
+    ``stats`` carries the segmentation regime and its outcome:
+    ``gist_tokens``, ``original_tokens``, ``n_docs`` (documents actually
+    referenced), ``n_split`` (turn documents that exceeded
+    ``MAX_DOC_LENGTH`` and were cut into pieces) and ``dropped_docs``.
 
     ``DOC_PACKING`` selects the segment granularity handed to
     ``/v1/c2kv/extract``:
 
-    * ``message`` -- one document per raw history message, keeping its own
-      role.  Historical default; kept so earlier matrices stay reproducible.
     * ``turn``    -- the trainer's turn documents (``_turn_documents``), each
-      extracted with ``role="user"``.  This is the packing every
+      extracted with ``role="user"``.  Default: this is the packing every
       ``doc_mode=history_only`` checkpoint is trained on, so it is the only
       packing under which a serving number is a measurement of the checkpoint
       rather than of an unseen segment shape.
+    * ``message`` -- one document per raw history message, keeping its own
+      role.  Kept selectable so earlier matrices stay reproducible.
 
-    ``MAX_DOCS`` mirrors the trainer's ``max_doc_num`` tail policy: when the
-    history yields more documents than the grid the arm was trained with, the
-    OLDEST documents are dropped (``0`` = no cap, the historical behaviour).
-    Dropped documents are reported so a cell can never silently be scored on
-    a truncated history.
+    Turn documents are then fitted to ``MAX_DOC_LENGTH`` template tokens
+    (``_fit_doc``) and only afterwards tail-selected to ``MAX_DOCS``
+    (``_select_docs``) -- the trainer's split-then-select order, so the cap
+    counts chunks rather than turns.  Dropped documents are reported so a
+    cell can never silently be scored on a truncated history.
     """
     cutoff = _history_cutoff(messages)
     gist_tokens = 0
     original_tokens = 0
-    n_gist = 0
+    n_split = 0
 
     if not arm.compress_history:
-        return list(messages), 0, 0, 0, 0
+        return list(messages), {
+            "gist_tokens": 0,
+            "original_tokens": 0,
+            "n_docs": 0,
+            "n_split": 0,
+            "dropped_docs": 0,
+        }
 
     raw_tail = arm.hybrid_top_k or 0
     head: List[Dict[str, Any]] = []          # system prefix, always raw
@@ -292,36 +399,50 @@ def _assemble(messages: List[Dict[str, Any]], arm: Arm, timeout: int):
         else:
             history.append(message)
 
+    # (role, text, record-or-None); turn documents are extracted while being
+    # fitted, message documents are extracted below.
+    docs: List[Tuple[str, str, Optional[Dict[str, Any]]]] = []
     if DOC_PACKING == "turn":
-        docs = [("user", text) for text in _turn_documents(history)]
+        def extract_fn(role: str, text: str, ratio: int) -> Dict[str, Any]:
+            return _extract(role, text, ratio, timeout)
+
+        for text in _turn_documents(history):
+            pieces = _fit_doc(text, arm.ratio, extract_fn, MAX_DOC_LENGTH)
+            if len(pieces) > 1:
+                n_split += 1
+            docs.extend(("user", piece, record) for piece, record in pieces)
     else:
-        docs = []
         for message in history:
             text = _message_doc_text(message)
             if not text:
                 continue
-            docs.append((message.get("role") or "user", text))
+            docs.append((message.get("role") or "user", text, None))
 
-    n_dropped = 0
-    if MAX_DOCS and len(docs) > MAX_DOCS:
-        n_dropped = len(docs) - MAX_DOCS
-        docs = docs[-MAX_DOCS:]
+    docs, n_dropped = _select_docs(docs, MAX_DOCS)
 
     out: List[Dict[str, Any]] = list(head)
-    for role, text in docs:
-        record = _extract(role, text, arm.ratio, timeout)
+    for role, text, record in docs:
+        if record is None:
+            record = _extract(role, text, arm.ratio, timeout)
         gist_tokens += int(record.get("gist_len") or 0)
         original_tokens += int(record.get("original_seq_len") or 0)
-        n_gist += 1
         out.append({
             "role": role,
             "content": text,
             "c2kv_key_hash": record["key_hash"],
-            # lets the server re-extract on cache miss (e.g. after a restart)
+            # Provenance only.  The server does not read c2kv_ratio (it does
+            # not appear anywhere in the pinned fork): a pool miss returns
+            # "C2KV_CACHE_MISS: ..." and aborts, it never re-extracts.
             "c2kv_ratio": arm.ratio,
         })
     out.extend(tail)
-    return out, gist_tokens, original_tokens, n_gist, n_dropped
+    return out, {
+        "gist_tokens": gist_tokens,
+        "original_tokens": original_tokens,
+        "n_docs": len(docs),
+        "n_split": n_split,
+        "dropped_docs": n_dropped,
+    }
 
 
 class ProxyHandler(BaseHTTPRequestHandler):
@@ -360,11 +481,16 @@ class ProxyHandler(BaseHTTPRequestHandler):
             return
         start = time.perf_counter()
         try:
-            messages, gist_tokens, original_tokens, n_gist, n_dropped = _assemble(
-                payload.get("messages") or [], ARM, 600
-            )
+            messages, stats = _assemble(payload.get("messages") or [], ARM, 600)
         except (RuntimeError, URLError, OSError) as error:
+            # A failed cell must be visible in the request log: without this
+            # row an aborted task is indistinguishable from a task the model
+            # simply got wrong.
             self._send_json(502, {"error": f"c2kv assembly failed: {error}"})
+            self._log_request(
+                payload, None, _EMPTY_STATS, time.perf_counter() - start,
+                status="assembly_failed", error=str(error),
+            )
             return
         assemble_sec = time.perf_counter() - start
         out_payload = dict(payload)
@@ -373,6 +499,10 @@ class ProxyHandler(BaseHTTPRequestHandler):
             data = _http_json(UPSTREAM, self.path, out_payload, 600)
         except (RuntimeError, URLError, OSError) as error:
             self._send_json(502, {"error": f"upstream failed: {error}"})
+            self._log_request(
+                payload, None, stats, time.perf_counter() - start,
+                status="upstream_failed", error=str(error),
+            )
             return
         total_sec = time.perf_counter() - start
         # Cost columns ride along on the response object.  TTFT is NOT
@@ -382,19 +512,21 @@ class ProxyHandler(BaseHTTPRequestHandler):
             {
                 "arm": ARM.name,
                 "ratio": ARM.ratio,
-                "gist_tokens": gist_tokens,
-                "original_tokens": original_tokens,
-                "n_gist_messages": n_gist,
+                "gist_tokens": stats["gist_tokens"],
+                "original_tokens": stats["original_tokens"],
+                "n_gist_messages": stats["n_docs"],
                 "doc_packing": DOC_PACKING,
-                "dropped_docs": n_dropped,
+                "max_docs": MAX_DOCS,
+                "max_doc_length": MAX_DOC_LENGTH,
+                "n_docs": stats["n_docs"],
+                "n_split": stats["n_split"],
+                "dropped_docs": stats["dropped_docs"],
                 "assemble_sec": round(assemble_sec, 4),
                 "wall_sec": round(total_sec, 4),
             }
         )
         self._send_json(200, data)
-        self._log_request(
-            payload, data, gist_tokens, original_tokens, n_gist, total_sec, n_dropped
-        )
+        self._log_request(payload, data, stats, total_sec)
 
     def do_GET(self):
         try:
@@ -432,22 +564,28 @@ class ProxyHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _log_request(self, request, response, gist_tokens, original_tokens, n_gist, total_sec, n_dropped=0):
+    def _log_request(self, request, response, stats, total_sec,
+                     status="ok", error=None):
         if not REQUEST_LOG_PATH:
             return
+        response = response or {}
         row = {
             "ts": time.time(),
             "arm": ARM.name if ARM else None,
             "n_messages": len(request.get("messages") or []),
             "n_tools": len(request.get("tools") or []),
-            "gist_tokens": gist_tokens,
-            "original_tokens": original_tokens,
-            "n_gist_messages": n_gist,
+            "gist_tokens": stats["gist_tokens"],
+            "original_tokens": stats["original_tokens"],
+            "n_gist_messages": stats["n_docs"],
             "doc_packing": DOC_PACKING,
             "max_docs": MAX_DOCS,
-            "dropped_docs": n_dropped,
+            "max_doc_length": MAX_DOC_LENGTH,
+            "n_docs": stats["n_docs"],
+            "n_split": stats["n_split"],
+            "dropped_docs": stats["dropped_docs"],
             "wall_sec": round(total_sec, 4),
-            "status": "ok",
+            "status": status,
+            "error": error,
             "usage": response.get("usage"),
             "finish_reason": (response.get("choices") or [{}])[0].get("finish_reason"),
         }
@@ -457,7 +595,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
 
 
 def main(argv=None):
-    global ARM, UPSTREAM, REQUEST_LOG_PATH, DOC_PACKING, MAX_DOCS
+    global ARM, UPSTREAM, REQUEST_LOG_PATH, DOC_PACKING, MAX_DOCS, MAX_DOC_LENGTH
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--upstream", required=True, help="SGLang base URL, e.g. http://127.0.0.1:34000")
     parser.add_argument("--arm", required=True)
@@ -465,32 +603,45 @@ def main(argv=None):
     parser.add_argument("--request-log", default="")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument(
-        "--doc-packing", choices=("message", "turn"), default="message",
+        "--doc-packing", choices=("message", "turn"), default=DOC_PACKING,
         help=(
-            "segment granularity for /v1/c2kv/extract. 'message' = one document"
-            " per raw history message (historical default). 'turn' = the"
+            "segment granularity for /v1/c2kv/extract. 'turn' (default) = the"
             " trainer's turn documents, i.e. the granularity every"
-            " doc_mode=history_only checkpoint was trained on."
+            " doc_mode=history_only checkpoint was trained on. 'message' = one"
+            " document per raw history message."
         ),
     )
     parser.add_argument(
-        "--max-docs", type=int, default=0,
+        "--max-docs", type=int, default=MAX_DOCS,
         help=(
             "cap on compressed history documents, mirroring the trainer's"
-            " max_doc_num tail policy (oldest dropped). 0 = uncapped."
+            " max_doc_num tail policy (doc 0 plus the newest ones are kept)."
+            " 0 = uncapped."
+        ),
+    )
+    parser.add_argument(
+        "--max-doc-length", type=int, default=MAX_DOC_LENGTH,
+        help=(
+            "per-document template-token cap, mirroring the trainer's"
+            " max_doc_length: oversized turn documents are split on line"
+            " boundaries before the --max-docs cap. 0 = no split."
         ),
     )
     args = parser.parse_args(argv)
     if args.max_docs < 0:
         parser.error("--max-docs must be >= 0")
+    if args.max_doc_length < 0:
+        parser.error("--max-doc-length must be >= 0")
     ARM = get_arm(args.arm)
     UPSTREAM = args.upstream.rstrip("/")
     REQUEST_LOG_PATH = args.request_log
     DOC_PACKING = args.doc_packing
     MAX_DOCS = args.max_docs
+    MAX_DOC_LENGTH = args.max_doc_length
     server = ThreadingHTTPServer((args.host, args.port), ProxyHandler)
     print(
         f"proxy arm={ARM.name} doc_packing={DOC_PACKING} max_docs={MAX_DOCS}"
+        f" max_doc_length={MAX_DOC_LENGTH}"
         f" listening on {args.host}:{args.port} -> {UPSTREAM}",
         flush=True,
     )

@@ -179,8 +179,30 @@ def _chat_payload(model: str) -> Dict[str, Any]:
     }
 
 
+def _proxy_regime() -> Dict[str, Any]:
+    """The segmentation regime the matrix runs with, read from proxy.py so a
+    gate can never certify a regime the matrix does not use."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import proxy  # noqa: E402
+
+    return {
+        "doc_packing": proxy.DOC_PACKING,
+        "max_docs": proxy.MAX_DOCS,
+        "max_doc_length": proxy.MAX_DOC_LENGTH,
+    }
+
+
+def _proxy_regime_flags(regime: Dict[str, Any]) -> List[str]:
+    return [
+        "--doc-packing", str(regime["doc_packing"]),
+        "--max-docs", str(regime["max_docs"]),
+        "--max-doc-length", str(regime["max_doc_length"]),
+    ]
+
+
 def proxy_command(args: argparse.Namespace) -> None:
     payload = _chat_payload(args.served_model_name)
+    regime = _proxy_regime()
     direct = _post_json(args.base_url, "/v1/chat/completions", payload, 300)
     log_dir = args.log_dir or Path(tempfile.mkdtemp(prefix="c2kv-proxy-smoke-"))
     log_dir.mkdir(parents=True, exist_ok=True)
@@ -199,6 +221,7 @@ def proxy_command(args: argparse.Namespace) -> None:
                         "--arm", arm,
                         "--port", str(port),
                         "--request-log", str(request_log),
+                        *_proxy_regime_flags(regime),
                     ],
                     stdout=output,
                     stderr=subprocess.STDOUT,
@@ -226,6 +249,7 @@ def proxy_command(args: argparse.Namespace) -> None:
         ratio = original / gist if gist else None
         result = {
             "gate": "S3_proxy",
+            "proxy_regime": regime,
             "full_matches_direct": full_normalized == direct_normalized,
             "c2kv_proxy": metadata,
             "effective_ratio": ratio,
@@ -251,6 +275,190 @@ def proxy_command(args: argparse.Namespace) -> None:
             except subprocess.TimeoutExpired:
                 process.kill()
                 process.wait()
+
+
+S6_TOOLS: List[Dict[str, Any]] = [
+    {
+        "type": "function",
+        "function": {
+            "name": "search_flights",
+            "description": "Search flights between two cities on a date.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "origin": {"type": "string"},
+                    "destination": {"type": "string"},
+                    "date": {"type": "string"},
+                },
+                "required": ["origin", "destination", "date"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_reservation",
+            "description": "Fetch a reservation by confirmation number.",
+            "parameters": {
+                "type": "object",
+                "properties": {"confirmation": {"type": "string"}},
+                "required": ["confirmation"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "change_seat",
+            "description": "Change the seat on a booked segment.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "confirmation": {"type": "string"},
+                    "seat": {"type": "string"},
+                },
+                "required": ["confirmation", "seat"],
+            },
+        },
+    },
+]
+S6_SYSTEM = "You are a precise airline assistant. Use the tools when needed."
+
+
+def _s6_payload(model: str) -> Dict[str, Any]:
+    """System + tools + a four-message history whose earlier turns compress."""
+    return {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": S6_SYSTEM},
+            {
+                "role": "user",
+                "content": (
+                    "Find me a flight from SFO to LHR on 2026-10-02. "
+                    + "Context: " + ("passenger segment and fare rule detail. " * 48)
+                ),
+            },
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "call_0",
+                        "type": "function",
+                        "function": {
+                            "name": "search_flights",
+                            "arguments": (
+                                '{"origin": "SFO", "destination": "LHR",'
+                                ' "date": "2026-10-02"}'
+                            ),
+                        },
+                    }
+                ],
+            },
+            {
+                "role": "tool",
+                "tool_call_id": "call_0",
+                "content": '{"flights": [{"number": "BA286", "fare": 812}]}',
+            },
+            {"role": "user", "content": "What is the fare of that flight?"},
+        ],
+        "tools": S6_TOOLS,
+        "temperature": 0.0,
+        "max_tokens": 64,
+        "chat_template_kwargs": {"enable_thinking": False},
+    }
+
+
+def _prologue_token_len(checkpoint: Path) -> int:
+    """Token length of the rendered system+tools prologue, computed locally.
+
+    This is the frame the server must place the first gist at: training's
+    layout is [system+tools] -> [gists] -> [current turn]."""
+    from transformers import AutoTokenizer
+
+    tokenizer = AutoTokenizer.from_pretrained(checkpoint, local_files_only=True)
+    messages = [{"role": "system", "content": S6_SYSTEM}]
+    try:
+        ids = tokenizer.apply_chat_template(
+            messages, tools=S6_TOOLS, tokenize=True,
+            add_generation_prompt=False, enable_thinking=False,
+        )
+    except TypeError:  # template without an enable_thinking knob
+        ids = tokenizer.apply_chat_template(
+            messages, tools=S6_TOOLS, tokenize=True, add_generation_prompt=False,
+        )
+    return len(ids)
+
+
+def tools_proxy_command(args: argparse.Namespace) -> None:
+    """S6: tools AND compressed history through the proxy in one request.
+
+    S2 exercises tools without gists and S3 exercises gists without tools, so
+    neither can see a gist inserted at a tool-free prefix length."""
+    regime = _proxy_regime()
+    payload = _s6_payload(args.served_model_name)
+    log_dir = args.log_dir or Path(tempfile.mkdtemp(prefix="c2kv-s6-smoke-"))
+    log_dir.mkdir(parents=True, exist_ok=True)
+    request_log = log_dir / f"proxy_c2kv_{args.port}.jsonl"
+    output_log = log_dir / f"proxy_c2kv_{args.port}.out"
+    process = None
+    try:
+        with output_log.open("w", encoding="utf-8") as output:
+            process = subprocess.Popen(
+                [
+                    sys.executable,
+                    str(Path(__file__).with_name("proxy.py")),
+                    "--upstream", args.base_url,
+                    "--arm", "c2kv",
+                    "--port", str(args.port),
+                    "--request-log", str(request_log),
+                    *_proxy_regime_flags(regime),
+                ],
+                stdout=output,
+                stderr=subprocess.STDOUT,
+            )
+        _wait_http(f"http://127.0.0.1:{args.port}/health", process)
+        response = _post_json(
+            f"http://127.0.0.1:{args.port}", "/v1/chat/completions", payload, 600
+        )
+    finally:
+        if process is not None and process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
+
+    choices = response.get("choices") or []
+    runtime = (response.get("metadata") or {}).get("sglang_runtime") or {}
+    layout = runtime.get("c2kv_layout") or []
+    gists = [entry for entry in layout if entry.get("kind") == "gist"]
+    result: Dict[str, Any] = {
+        "gate": "S6_tools_through_proxy",
+        "proxy_regime": regime,
+        "n_tools": len(S6_TOOLS),
+        "n_messages": len(payload["messages"]),
+        "choices_non_empty": bool(choices),
+        "c2kv_proxy": response.get("c2kv_proxy") or {},
+        "c2kv_query_proj": runtime.get("c2kv_query_proj"),
+        "c2kv_layout_gists": gists,
+        "request_log": str(request_log),
+    }
+    if not layout:
+        # The layout block only exists from the serve-align pin onwards.
+        result["layout_check"] = "layout metadata unavailable"
+        result["passed"] = bool(choices)
+    else:
+        expected = _prologue_token_len(args.checkpoint)
+        observed = int(gists[0]["position_cursor"]) if gists else None
+        result["expected_prologue_tokens"] = expected
+        result["first_gist_position_cursor"] = observed
+        result["layout_check"] = "first gist position_cursor vs local system+tools prologue"
+        result["passed"] = bool(choices) and observed == expected
+    _write(result, args.out)
+    if not result["passed"]:
+        raise SystemExit(2)
 
 
 def flex_command(args: argparse.Namespace) -> None:
@@ -341,6 +549,15 @@ def build_parser() -> argparse.ArgumentParser:
     proxy.add_argument("--log-dir", type=Path, default=None)
     proxy.add_argument("--out", type=Path, default=None)
     proxy.set_defaults(func=proxy_command)
+
+    tools_proxy = subparsers.add_parser("tools-proxy")
+    tools_proxy.add_argument("--base-url", required=True)
+    tools_proxy.add_argument("--served-model-name", required=True)
+    tools_proxy.add_argument("--checkpoint", type=Path, required=True)
+    tools_proxy.add_argument("--port", type=int, default=34192)
+    tools_proxy.add_argument("--log-dir", type=Path, default=None)
+    tools_proxy.add_argument("--out", type=Path, default=None)
+    tools_proxy.set_defaults(func=tools_proxy_command)
 
     flex = subparsers.add_parser("flex")
     flex.add_argument("--base-url", required=True)
