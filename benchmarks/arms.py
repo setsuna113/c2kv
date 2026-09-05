@@ -234,10 +234,17 @@ class Arm:
     # Text-level baseline arms (benchmarks/textarms.py): the proxy rewrites
     # the request history per the named paper's policy instead of any KV
     # compression; compressor calls go to the same served endpoint (same
-    # model as policy — the papers' own protocol).  "hiagent" |
-    # "acon_hist" | "acon_obs" (ACON evaluates history and observation
-    # compression separately, audit ruling 6).
+    # model as policy — the papers' own protocol). Variant names keep
+    # HiAgent retrieval and ACON guideline stages explicit.
     text_policy: Optional[str] = None
+    # Capabilities supplied by benchmark/proxy plumbing rather than by the
+    # model endpoint itself. A matrix preflight must reject an arm when one
+    # of these markers is absent.
+    required_capabilities: tuple[str, ...] = ()
+    # Per-arm query projection override. CacheBlend is a training-free base
+    # projection baseline even if the shared server was launched with gist as
+    # its general default.
+    query_projection: Optional[str] = None
     # History-KV eviction baselines (upstream
     # c2kv_eval.adapters.bfcl_history_kv_baselines): no gist compression at
     # all -- the completed history is compressed by TOKEN EVICTION inside the
@@ -280,8 +287,18 @@ class Arm:
             raise ValueError(f"arm {self.name!r}: repair and recover are mutually exclusive")
         if self.text_policy and self.compress_history:
             raise ValueError(f"arm {self.name!r}: text_policy and KV compression are exclusive")
-        if self.text_policy and self.text_policy not in ("hiagent", "acon_hist", "acon_obs"):
+        text_policies = {
+            "hiagent", "hiagent_summary", "hiagent_full",
+            "acon_hist", "acon_obs",
+            "acon_hist_base", "acon_hist_ut", "acon_hist_ut_co",
+            "acon_obs_base", "acon_obs_ut", "acon_obs_ut_co",
+        }
+        if self.text_policy and self.text_policy not in text_policies:
             raise ValueError(f"arm {self.name!r}: unknown text_policy {self.text_policy!r}")
+        if self.query_projection not in (None, "base", "gist"):
+            raise ValueError(
+                f"arm {self.name!r}: unknown query_projection "
+                f"{self.query_projection!r}")
         if self.repair:
             placement = str(self.repair.get("placement") or "append_keep_ledger")
             if placement not in REPAIR_PLACEMENTS:
@@ -302,27 +319,68 @@ ARMS: Dict[str, Arm] = {
             name="hiagent",
             compress_history=False,
             text_policy="hiagent",
-            description="HiAgent (2408.09559): subgoal-protocol note + completed subgoal segments "
-                        "replaced by paper-§3.3 summaries (same model as compressor, decode per paper); "
-                        "user turns survive; Trajectory Retrieval not ported; degenerate passthrough is "
-                        "flagged in stats",
+            description="Compatibility alias for hiagent_summary; observation summarization only",
+        ),
+        Arm(
+            name="hiagent_summary",
+            compress_history=False,
+            text_policy="hiagent_summary",
+            description="HiAgent (2408.09559) summary-only ablation: subgoal protocol and completed-subgoal observation summaries, without Trajectory Retrieval",
+        ),
+        Arm(
+            name="hiagent_full",
+            compress_history=False,
+            text_policy="hiagent_full",
+            required_capabilities=("hiagent_trajectory_retrieval_v1",),
+            description="HiAgent complete inference protocol: subgoal summaries plus proxy-intercepted Trajectory Retrieval; requires hiagent_trajectory_retrieval_v1",
         ),
         Arm(
             name="acon_hist",
             compress_history=False,
             text_policy="acon_hist",
-            description="acon-base (2510.00615), history face: prefix >4096 tok replaced by the rolling "
-                        "structured summary embedded in the first user prompt's <HISTORY_SUMMARY> block, "
-                        "last action/observation pair preserved. Label: 'ACON pipeline, base guideline, "
-                        "guideline optimization not reproduced'",
+            description="Compatibility alias for acon_hist_base",
         ),
         Arm(
             name="acon_obs",
             compress_history=False,
             text_policy="acon_obs",
-            description="acon-base (2510.00615), observation face: tool observations >1024 tok refined "
-                        "in place. Same base-guideline label as acon_hist (paper evaluates the two "
-                        "faces separately)",
+            description="Compatibility alias for acon_obs_base",
+        ),
+        Arm(
+            name="acon_hist_base",
+            compress_history=False,
+            text_policy="acon_hist_base",
+            description="ACON (2510.00615) history compression with the official initial base guideline; threshold 4096 tokens and last action-observation pair preserved",
+        ),
+        Arm(
+            name="acon_hist_ut",
+            compress_history=False,
+            text_policy="acon_hist_ut",
+            description="ACON history compression with the paper Appendix D guideline after one utility-maximization (UT) step",
+        ),
+        Arm(
+            name="acon_hist_ut_co",
+            compress_history=False,
+            text_policy="acon_hist_ut_co",
+            description="ACON history compression with the paper Appendix D guideline after UT then compression-maximization (CO)",
+        ),
+        Arm(
+            name="acon_obs_base",
+            compress_history=False,
+            text_policy="acon_obs_base",
+            description="ACON observation compression with the official initial base guideline and 1024-token threshold",
+        ),
+        Arm(
+            name="acon_obs_ut",
+            compress_history=False,
+            text_policy="acon_obs_ut",
+            description="ACON observation compression with the paper Appendix D guideline after one utility-maximization (UT) step",
+        ),
+        Arm(
+            name="acon_obs_ut_co",
+            compress_history=False,
+            text_policy="acon_obs_ut_co",
+            description="ACON observation compression with the paper Appendix D guideline after UT then compression-maximization (CO)",
         ),
         Arm(
             name="c2kv",
@@ -497,6 +555,7 @@ ARMS: Dict[str, Arm] = {
             name="cacheblend_r16",
             compress_history=False,
             kv_reuse={"method": "cacheblend", "recomp_ratio": 0.16},
+            query_projection="base",
             description="CacheBlend (EuroSys artifact lineage): one chunk per "
                         "history doc, standalone chunk KV, V-deviation at layer "
                         "index 1, 16% highest-deviation tokens recomputed in "
@@ -507,6 +566,7 @@ ARMS: Dict[str, Arm] = {
             name="cacheblend_r15_k",
             compress_history=False,
             kv_reuse={"method": "cacheblend", "recomp_ratio": 0.15, "metric": "k"},
+            query_projection="base",
             description="CacheBlend (LMCache-monorepo lineage): same mechanism "
                         "with K-deviation and recomp_ratio 0.15 (blender.py)",
         ),

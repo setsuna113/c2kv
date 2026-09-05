@@ -17,6 +17,7 @@ from types import SimpleNamespace
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import textarms
+from arms import Arm, get_arm
 
 
 def _action_dialect(message):
@@ -152,6 +153,50 @@ def test_hiagent_user_in_summary_input():
     assert "$300" in seen["user"], "user constraint must reach the summarizer"
 
 
+def test_hiagent_full_retrieves_selected_completed_trajectory():
+    _reset()
+    messages = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "task"},
+        {"role": "assistant", "content": "Subgoal: first"},
+        {"role": "tool", "content": "FIRST-RAW"},
+        {"role": "assistant", "content": "Subgoal: second"},
+        {"role": "tool", "content": "SECOND-RAW"},
+        {"role": "assistant", "content": "Subgoal: current"},
+        {"role": "tool", "content": "CURRENT-RAW"},
+    ]
+    out, stats = textarms.hiagent_transform(
+        messages, _fake_compress_ok, _action_dialect,
+        variant="full", retrieve_subgoals=[2, 99])
+    rendered = json.dumps(out)
+    assert "hiagent_retrieve" in out[0]["content"]
+    assert "FIRST-RAW" not in rendered
+    assert "SECOND-RAW" in rendered
+    assert "CURRENT-RAW" in rendered
+    assert stats["retrieved_subgoals"] == [2]
+    assert stats["invalid_retrieval_subgoals"] == [99]
+    assert stats["n_summarized"] == 1
+    assert stats["n_compressor_calls"] == 1
+
+
+def test_hiagent_retrieval_tool_call_contract():
+    schema = textarms.hiagent_retrieval_tool()
+    assert schema["function"]["name"] == "hiagent_retrieve"
+    message = {"tool_calls": [
+        {"function": {"name": "other", "arguments": "{}"}},
+        {"function": {"name": "hiagent_retrieve",
+                      "arguments": '{"subgoal_ids": [2, 1, 2]}'}}
+    ]}
+    assert textarms.hiagent_retrieval_request(message) == [2, 1]
+    assert textarms.hiagent_retrieval_request({"content": "normal"}) is None
+    try:
+        textarms.hiagent_retrieval_request({"tool_calls": [{"function": {
+            "name": "hiagent_retrieve", "arguments": '{"subgoal_ids": [0]}'}}]})
+        raise AssertionError("malformed retrieval must fail")
+    except ValueError:
+        pass
+
+
 def out_chars_lt(stats):
     return stats["out_chars"] < stats["raw_chars"]
 
@@ -257,6 +302,61 @@ def test_acon_modes_split():
     _, sh = textarms.acon_transform(
         messages, _fake_compress_ok, _action_dialect, "convD", mode="hist")
     assert sh["n_obs_compressed"] == 0 and sh["history_compressed"] is True
+
+
+def test_acon_guideline_stages_are_distinct_and_cache_separated():
+    _reset()
+    seen = []
+
+    def spy(payload):
+        prompt = payload["messages"][-1]["content"]
+        seen.append(prompt)
+        return "# Refined Observation\nshort"
+
+    big = _acon_messages(obs_len=textarms.ACON_OBS_THRESHOLD_CHARS + 10)
+    for guideline in textarms.ACON_GUIDELINES:
+        _, stats = textarms.acon_transform(
+            big, spy, _action_dialect, "same-conv", mode="obs",
+            guideline=guideline)
+        assert stats["guideline"] == guideline
+        assert stats["n_compressor_calls"] == 1
+    assert len(seen) == 3
+    assert "generate a \"Reasoning\"" in seen[0]
+    assert "Always preserve:" in seen[1]
+    assert "Reasoning (<=40 words)" in seen[2]
+
+
+def test_acon_optimized_history_wrapper_is_not_nested():
+    _reset()
+
+    def wrapped(_payload):
+        return "<HISTORY_SUMMARY>\n1. REASONING\nkept\n</HISTORY_SUMMARY>"
+
+    out, stats = textarms.acon_transform(
+        _acon_long_messages(), wrapped, _action_dialect, "conv-ut",
+        mode="hist", guideline="ut")
+    first_user = next(m for m in out if m.get("role") == "user")
+    assert first_user["content"].count("<HISTORY_SUMMARY>") == 1
+    assert stats["guideline"] == "ut"
+
+
+def test_textarm_registry_names_and_capability_contracts():
+    assert get_arm("hiagent").text_policy == "hiagent"
+    assert get_arm("hiagent_summary").required_capabilities == ()
+    assert get_arm("hiagent_full").required_capabilities == (
+        "hiagent_trajectory_retrieval_v1",)
+    for mode in ("hist", "obs"):
+        for guideline in textarms.ACON_GUIDELINES:
+            arm = get_arm(f"acon_{mode}_{guideline}")
+            assert arm.text_policy == f"acon_{mode}_{guideline}"
+    for name in ("cacheblend_r16", "cacheblend_r15_k"):
+        assert get_arm(name).query_projection == "base"
+    try:
+        Arm(name="bad", compress_history=False,
+            query_projection="auto").validate()
+        raise AssertionError("unknown query projection must fail")
+    except ValueError:
+        pass
 
 
 def test_empty_compressor_result_raises_and_never_caches():

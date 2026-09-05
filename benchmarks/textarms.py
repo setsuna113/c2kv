@@ -1,6 +1,4 @@
-"""Text-level baseline arms: HiAgent and ACON, ported faithfully per the
-2026-09-03 audit rulings (paper wins over repo unless the paper's numbers
-came from that repo code).
+"""Text-level baseline arms: HiAgent and ACON.
 
 Both methods manage the agent's context at the TEXT level: the proxy
 rewrites the request's history before it reaches the serving backend, and
@@ -17,10 +15,10 @@ Sources:
   output constraint, {example} slot).  The repo's summarize.py
   (hiagent2024/hiagent @ cebdd8e) was AI-rebuilt in 2026-04 and post-dates
   the paper's numbers — audit ruling 1: not used.
-  Deliberate deltas, recorded for the report:
-  - "Trajectory Retrieval not ported" (ruling 2): the note's instruction 4
-    advertising retrieve(k) is REMOVED; implementing it would only produce
-    hallucinated tool calls in these benchmarks.
+  ``hiagent_summary`` contains the subgoal and observation-summarization
+  components. ``hiagent_full`` additionally exposes Trajectory Retrieval as
+  a proxy-owned meta-tool: the proxy expands selected completed trajectories
+  and retries policy generation without forwarding retrieval to the task.
   - The repo's gripper/blocksworld summarization-off special case
     (cme_final.py:115-120) is NOT inherited (ruling 3: that is the paper's
     w/o-OS ablation, not the method).
@@ -33,17 +31,14 @@ Sources:
   - Degeneration is VISIBLE: when no assistant content ever declares a
     Subgoal (e.g. pure tool-call replies), the arm is a passthrough and
     stats["degenerate"] is True.
-* ACON     — arXiv 2510.00615.  Thresholds per paper §8.3 (ruling 4):
+* ACON     — arXiv 2510.00615.  Thresholds per paper appendix B.3:
   T_obs = 1024 tok (~4096 chars), history 4096 tok, preserve the last ONE
-  action/observation PAIR = k=2 messages.  The compression prompts are the
-  repo's base guidelines (microsoft/acon @ d63f9ae, context_opt jinja),
-  verbatim; the §3.3-optimized guidelines (ACON-U) are printed in the
-  paper's appendix and can be transcribed later — until then every row is
-  labeled "acon-base: ACON pipeline, base guideline, guideline optimization
-  not reproduced" (ruling 5 + critic correction; NOT "acon-prompting",
-  which is a different ContextualizeWeb-derived baseline).
+  action/observation PAIR = k=2 messages. ``base`` uses the official repo's
+  initial ``context_opt`` guidelines (microsoft/acon @ d63f9ae); ``ut`` and
+  ``ut_co`` use the paper appendix's fixed guidelines after the utility and
+  utility-plus-compression optimization steps respectively.
   History/observation are evaluated SEPARATELY by the paper (ruling 6):
-  arms acon_hist and acon_obs.
+  arms keep the two faces and guideline stages explicit in their names.
   Summary is embedded into the first user prompt as a <HISTORY_SUMMARY>
   block (the original memory.py:481-498 shape), not a standalone message.
 
@@ -114,7 +109,7 @@ Compress = Callable[[Dict[str, Any]], str]
 
 _LOCK = threading.Lock()
 _SUMMARY_CACHE: Dict[str, str] = {}
-_ACON_STATE: Dict[str, Tuple[str, str]] = {}
+_ACON_STATE: Dict[Tuple[str, str, str], Tuple[int, str, str]] = {}
 
 
 def _sha(text: str) -> str:
@@ -192,6 +187,11 @@ Instructions:
 4. Actions in this environment are tool calls: emit the tool call that executes the action (the Subgoal line goes in the message text alongside the tool call).
 """
 
+HIAGENT_RETRIEVE_TOOL_NAME = "hiagent_retrieve"
+HIAGENT_RETRIEVAL_NOTE = """
+5. Detailed action-observation trajectories for completed subgoals are hidden. If a hidden trajectory is needed, call hiagent_retrieve with its one-based subgoal id. This is a context-retrieval action, not an environment action.
+"""
+
 # Paper §3.3, verbatim (the repo's summarize.py is a 2026 rebuild and is
 # NOT the prompt the paper's numbers were produced with — audit ruling 1).
 HIAGENT_SUMMARY_USER_TEMPLATE = """You are an advanced AI system tasked with summarizing and analyzing a series of action-observation pairs (trajectories) and determining whether a specific subgoal has been met.
@@ -235,20 +235,99 @@ def _subgoal_of(message: Dict[str, Any]) -> Optional[str]:
     return None
 
 
+def hiagent_retrieval_tool() -> Dict[str, Any]:
+    """Native tool schema for HiAgent's internal Trajectory Retrieval.
+
+    This is a proxy meta-tool: the proxy consumes it and retries generation;
+    the benchmark environment must never receive the call.
+    """
+    return {
+        "type": "function",
+        "function": {
+            "name": HIAGENT_RETRIEVE_TOOL_NAME,
+            "description": (
+                "Reveal the full action-observation trajectory of one or more "
+                "completed HiAgent subgoals before choosing an environment action."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "subgoal_ids": {
+                        "type": "array",
+                        "items": {"type": "integer", "minimum": 1},
+                        "minItems": 1,
+                    }
+                },
+                "required": ["subgoal_ids"],
+                "additionalProperties": False,
+            },
+        },
+    }
+
+
+def hiagent_retrieval_request(message: Dict[str, Any]) -> Optional[List[int]]:
+    """Parse one native retrieval meta-call from an assistant response.
+
+    ``None`` means no retrieval call. A malformed retrieval call raises
+    ``ValueError`` instead of leaking through as an environment action.
+    """
+    matches: List[int] = []
+    for call in message.get("tool_calls") or []:
+        function = call.get("function") or {}
+        if function.get("name") != HIAGENT_RETRIEVE_TOOL_NAME:
+            continue
+        try:
+            arguments = function.get("arguments") or "{}"
+            arguments = (json.loads(arguments) if isinstance(arguments, str)
+                         else dict(arguments))
+            values = arguments["subgoal_ids"]
+            if (not isinstance(values, list) or not values
+                    or any(isinstance(v, bool) or not isinstance(v, int) or v < 1
+                           for v in values)):
+                raise ValueError
+        except (KeyError, TypeError, json.JSONDecodeError, ValueError) as error:
+            raise ValueError("malformed hiagent_retrieve subgoal_ids") from error
+        matches.extend(values)
+    if not matches:
+        return None
+    return list(dict.fromkeys(matches))
+
+
 def hiagent_transform(messages: List[Dict[str, Any]], compress: Compress,
                       action_dialect, model: str = "c2kv-agent",
                       default_system: str = TRAINING_DEFAULT_SYSTEM_PROMPT,
+                      variant: str = "summary",
+                      retrieve_subgoals: Optional[List[int]] = None,
                       ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     """Subgoal-protocol note into the system message; segment history by
     assistant 'Subgoal:' declarations; completed segments become their
     surviving user turns + one paper-prompt summary; the current segment
     stays raw.  Passthrough (degenerate=True) when no subgoal is ever
-    declared — e.g. pure tool-call replies with null content."""
-    stats: Dict[str, Any] = {"policy": "hiagent", "n_compressor_calls": 0}
+    declared — e.g. pure tool-call replies with null content.
+
+    ``variant='full'`` becomes the complete method only when the caller also
+    advertises :func:`hiagent_retrieval_tool`, intercepts the returned
+    meta-call with :func:`hiagent_retrieval_request`, and retries with those
+    ids in ``retrieve_subgoals``.
+    """
+    if variant not in ("summary", "full"):
+        raise ValueError(f"unknown HiAgent variant {variant!r}")
+    requested = set(retrieve_subgoals or [])
+    if any(isinstance(v, bool) or not isinstance(v, int) or v < 1
+           for v in requested):
+        raise ValueError("retrieve_subgoals must contain positive integer ids")
+    if requested and variant != "full":
+        raise ValueError("trajectory retrieval requires variant='full'")
+    note = HIAGENT_SUBGOAL_NOTE
+    if variant == "full":
+        note = note.rstrip() + "\n" + HIAGENT_RETRIEVAL_NOTE.strip() + "\n"
+    stats: Dict[str, Any] = {
+        "policy": "hiagent", "variant": variant, "n_compressor_calls": 0,
+    }
     messages = [dict(m) for m in messages]
     for m in messages:
         if m.get("role") == "system":
-            m["content"] = (_content_of(m).rstrip() + "\n" + HIAGENT_SUBGOAL_NOTE)
+            m["content"] = (_content_of(m).rstrip() + "\n" + note)
             break
     else:
         # audit 2026-09-05: inserting a system with ONLY the note made
@@ -256,7 +335,7 @@ def hiagent_transform(messages: List[Dict[str, Any]], compress: Compress,
         # full by more than the note — insert default + note instead
         messages.insert(0, {"role": "system",
                             "content": (default_system.rstrip() + "\n"
-                                        + HIAGENT_SUBGOAL_NOTE.strip())})
+                                        + note.strip())})
 
     segments: List[Dict[str, Any]] = [{"start": 0, "subgoal": None, "messages": []}]
     for m in messages:
@@ -276,6 +355,9 @@ def hiagent_transform(messages: List[Dict[str, Any]], compress: Compress,
 
     out: List[Dict[str, Any]] = list(pre)
     for k, seg in enumerate(completed, start=1):
+        if k in requested:
+            out.extend(dict(m) for m in seg["messages"])
+            continue
         # user turns are instructions, not trajectory: survive verbatim
         for m in seg["messages"]:
             if m.get("role") == "user":
@@ -294,6 +376,11 @@ def hiagent_transform(messages: List[Dict[str, Any]], compress: Compress,
                     "content": f"Subgoal {k}: {subgoal}\nSummary: {summary}"})
     out.extend(m for seg in current for m in seg["messages"])
 
+    valid_ids = set(range(1, len(completed) + 1))
+    stats["retrieved_subgoals"] = sorted(requested & valid_ids)
+    stats["invalid_retrieval_subgoals"] = sorted(requested - valid_ids)
+    stats["n_summarized"] = len(completed) - len(requested & valid_ids)
+
     out_chars = _message_chars(out)
     stats["raw_chars"] = raw_chars
     stats["out_chars"] = out_chars
@@ -310,7 +397,7 @@ ACON_SYSTEM = (
     "other provided information."
 )
 
-ACON_HISTORY_PROMPT = """You are maintaining a structured context-aware summary for a productivity agent. You will be given the user instruction for the agent, a list of interactions corresponding to actions taken by the agent, and the most recent previous summary if one exists. Produce the following:
+ACON_HISTORY_PROMPT_BASE = """You are maintaining a structured context-aware summary for a productivity agent. You will be given the user instruction for the agent, a list of interactions corresponding to actions taken by the agent, and the most recent previous summary if one exists. Produce the following:
 
 ### REASONING
 Summarize key progress, decisions made, important observed outcomes, and rationale behind actions taken so far. Include how earlier steps influenced later ones and why certain data is retained in the summary.
@@ -350,7 +437,76 @@ List completed subtasks or successful outcomes, with brief results if applicable
 
 Do **not** include the input or any additional explanation. Only return the formatted summary."""
 
-ACON_OBS_PROMPT = """Your task is to generate a "Reasoning" and a "Refined Observation" based on the inputs below.
+ACON_HISTORY_PROMPT_UT = """You maintain a compact, state-preserving HISTORY_SUMMARY for a multi-session agent.
+
+Input:
+[USER INSTRUCTION] {task}
+[PREVIOUS SUMMARY] {prev_summary}
+[HISTORY OF INTERACTIONS] {history}
+
+Create the following sections-use the exact headings and order:
+<HISTORY_SUMMARY>
+1. REASONING
+- Key progress, decisions, outcomes, and their rationale.
+- Note how earlier steps influence later ones.
+2. VARS
+| name | value | purpose |
+|---|---|---|
+Record every runtime value the next session must re-declare (tokens, ids, lists, last page_index/page_limit, etc.).
+3. TODO
+List pending actions with enough detail to execute directly.
+4. COMPLETED
+Bullet list of finished subtasks with brief results.
+5. GUARDRAILS
+Short reminders that prevent repeat errors, e.g.
+- Memory resets; re-create VARS before use.
+- Paginate until empty page.
+- Validate API parameters against spec.
+- Avoid redundant logins or doc look-ups.
+
+Requirements:
+- Be concise-bullets and tables preferred; no extraneous prose.
+- Preserve all essential facts, parameters, and artifacts; omit nothing critical.
+- Include errors only if they inform future avoidance.
+- Do not output the input or any commentary-return only <HISTORY_SUMMARY>."""
+
+ACON_HISTORY_PROMPT_UT_CO = """You maintain a compact, state-preserving HISTORY_SUMMARY for a multi-session agent.
+
+Input:
+[USER INSTRUCTION] {task}
+[PREVIOUS SUMMARY] {prev_summary}
+[HISTORY OF INTERACTIONS] {history}
+
+Summary Compression Rules:
+- Collapse multi-bullet narratives into <=2 concise sentences.
+- Replace repetitive step logs with one summarizing phrase.
+- Truncate long token/credential strings to "<token>" unless verbatim reuse is required.
+- Remove unused/expired credentials, page_index/page_limit, verbose API dumps, and table borders.
+- Shrink GUARDRAILS to one bullet unless multiple items are still critical.
+- Delete tool/API log output, greetings, meta prose, and section headers that no longer contain content.
+- Keep only variables actively referenced in upcoming steps; list each once in VARS.
+- Reference removal categories [repetition], [tool-logs], [meta], [formatting] to prune similar lines.
+- Preserve factual continuity; never invent or alter state variables.
+- Target summaries well under 1500 characters.
+
+Critical Essentials:
+Always keep evidence-driven items required next session (e.g., tokens, ids, emails, amounts, lists, paths, description strings, brief task status).
+
+Output EXACTLY the following structure-nothing more:
+<HISTORY_SUMMARY>
+1. REASONING
+One brief paragraph on key progress and rationale.
+2. VARS
+key=value pairs, comma-separated; only still-needed runtime values.
+3. TODO
+Bulleted next actions (<=5).
+4. COMPLETED
+Bulleted finished subtasks (<=5).
+5. GUARDRAILS
+Single concise bullet, or omit if none.
+Return only the <HISTORY_SUMMARY> block-no additional commentary or input echoes."""
+
+ACON_OBS_PROMPT_BASE = """Your task is to generate a "Reasoning" and a "Refined Observation" based on the inputs below.
 
 In the "Reasoning", analyze the user instruction and history to identify what information from the current observation is necessary to complete the remaining steps.
 Think about what parts can be summarized or transformed to reduce length, while ensuring that future actions can still be executed based on the refined observation alone.
@@ -373,6 +529,88 @@ In the "Refined Observation", include only the information that is minimal but s
 # Refined Observation
 ... reduced and actionable observation ..."""
 
+ACON_OBS_PROMPT_UT = """Your task: write two sections-"Reasoning" and "Refined Observation".
+
+1. Reasoning
+- Examine task, history, and observation.
+- Decide exactly which parts of the observation must be kept so the next agent step can succeed.
+- Note any need to paginate (page_limit default = 5, page_index).
+- Justify any data you drop.
+
+2. Refined Observation
+- Contain only the minimal yet sufficient info for the next step.
+- Always preserve:
+  - Every endpoint that may be called, plus its full parameter list and defaults (especially page_limit/page_index, auth tokens).
+  - Response-schema fields referenced or likely needed later (e.g., play_count, release_date, like_count, position, ids).
+  - Raw data rows required for future comparisons or loops; if summarising, keep at least all positive-match examples.
+- Never:
+  - Omit defaults that affect behaviour.
+  - Declare parameters "not critical" without proof.
+  - Hallucinate endpoints or fields.
+  - Replace machine-readable data with vague prose.
+
+[Information source]
+# User Instruction
+{task}
+# History of interactions
+{history}
+# Observation at the current time step
+{observation}
+
+[Output format]
+# Reasoning
+...concise analysis explaining what is kept/removed...
+# Refined Observation
+...trimmed yet complete observation ensuring future steps remain possible..."""
+
+ACON_OBS_PROMPT_UT_CO = """Your task: create two sections-"Reasoning" and "Refined Observation".
+
+1. Reasoning (<=40 words)
+- Briefly state what was kept and why; note dropped categories and any pagination needs.
+
+2. Refined Observation (use ONLY the current observation)
+- Keep strictly necessary data for the next step.
+- Always preserve, when present:
+  - access_token or other auth values
+  - page_limit, page_index and other defaults that affect calls
+  - every endpoint name; include parameters only if required; description <= 4 words
+  - identifiers/fields needed for comparisons, loops, or API calls (ids, titles, counts, paths, etc.)
+- Minimise length:
+  - Delete unused fields and narrative text.
+  - Compress JSON/arrays (one object per line, no extra spaces).
+  - Summarise long uniform lists with a range/pattern when individual rows are not needed.
+- Never invent, alter, or omit a required literal.
+- Exclude history, prior summaries, and meta comments.
+
+[Information source]
+# User Instruction
+{task}
+# History of interactions
+{history}
+# Observation at the current time step
+{observation}
+
+[Output format]
+# Reasoning
+...
+# Refined Observation
+..."""
+
+ACON_GUIDELINES = ("base", "ut", "ut_co")
+ACON_HISTORY_PROMPTS = {
+    "base": ACON_HISTORY_PROMPT_BASE,
+    "ut": ACON_HISTORY_PROMPT_UT,
+    "ut_co": ACON_HISTORY_PROMPT_UT_CO,
+}
+ACON_OBS_PROMPTS = {
+    "base": ACON_OBS_PROMPT_BASE,
+    "ut": ACON_OBS_PROMPT_UT,
+    "ut_co": ACON_OBS_PROMPT_UT_CO,
+}
+# Compatibility aliases for callers that inspect the original base prompt.
+ACON_HISTORY_PROMPT = ACON_HISTORY_PROMPT_BASE
+ACON_OBS_PROMPT = ACON_OBS_PROMPT_BASE
+
 # paper §8.3 (ruling 4): T_obs = 1024 tok; history = 4096 tok; chars = tok*4
 ACON_OBS_THRESHOLD_CHARS = 1024 * 4
 ACON_HISTORY_THRESHOLD_CHARS = 4096 * 4
@@ -391,16 +629,25 @@ def _task_text(messages: List[Dict[str, Any]]) -> str:
     return "(no user instruction)"
 
 
+def _history_summary_body(summary: str) -> str:
+    """Normalize optimized ACON prompts that emit their own XML wrapper."""
+    start, end = "<HISTORY_SUMMARY>", "</HISTORY_SUMMARY>"
+    if start in summary and end in summary:
+        return summary.split(start, 1)[1].split(end, 1)[0].strip()
+    return summary.strip()
+
+
 def _acompress_obs(observation: str, task: str, history: str, compress,
-                   cache_key: str, stats: Dict[str, Any], model: str) -> str:
+                   cache_key: str, stats: Dict[str, Any], model: str,
+                   guideline: str) -> str:
     with _LOCK:
         refined = _SUMMARY_CACHE.get(cache_key)
     if refined is not None:
         return refined
     out = compress(compressor_payload(
         "acon", model, ACON_SYSTEM,
-        ACON_OBS_PROMPT.format(task=task, history=history,
-                               observation=observation)))
+        ACON_OBS_PROMPTS[guideline].format(
+            task=task, history=history, observation=observation)))
     marker = "# Refined Observation"
     if marker in out:
         out = out.split(marker, 1)[1].strip()
@@ -416,15 +663,23 @@ def _acompress_obs(observation: str, task: str, history: str, compress,
 
 def acon_transform(messages: List[Dict[str, Any]], compress: Compress,
                    action_dialect, conv: str, mode: str = "both",
-                   model: str = "c2kv-agent"
+                   model: str = "c2kv-agent", guideline: str = "base",
                    ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
-    """acon-base (ruling 5 label).  mode: 'obs' refines oversized tool
+    """Apply one fixed ACON compression guideline. ``mode='obs'`` refines oversized tool
     observations in place; 'hist' replaces the covered prefix with the
     rolling structured summary embedded in the first user prompt
     (<HISTORY_SUMMARY> block, the original memory.py:481-498 shape);
-    'both' applies obs first then hist, as the original pipeline does."""
+    'both' applies obs first then hist, as the original pipeline does.
+
+    ``guideline`` identifies the paper's actual stages: ``base`` (official
+    repository initial prompt), ``ut`` (utility optimization), or ``ut_co``
+    (utility followed by compression optimization).
+    """
     assert mode in ("obs", "hist", "both")
+    if guideline not in ACON_GUIDELINES:
+        raise ValueError(f"unknown ACON guideline {guideline!r}")
     stats: Dict[str, Any] = {"policy": "acon", "mode": mode,
+                             "guideline": guideline,
                              "n_compressor_calls": 0, "n_obs_compressed": 0}
     messages = [dict(m) for m in messages]
     task = _task_text(messages)
@@ -440,9 +695,9 @@ def acon_transform(messages: List[Dict[str, Any]], compress: Compress,
             window = messages[max(0, idx - ACON_OBS_HISTORY_MESSAGES):idx]
             history = ("\n".join(_render_line(h, action_dialect) for h in window)
                        )[:ACON_OBS_HISTORY_CHARS]
-            key = _sha(f"acon-obs|{task}|{obs}")
+            key = _sha(f"acon-obs|{guideline}|{task}|{history}|{obs}")
             m["content"] = _acompress_obs(obs, task, history, compress, key,
-                                          stats, model)
+                                          stats, model, guideline)
             stats["n_obs_compressed"] += 1
 
     out: List[Dict[str, Any]] = list(messages)
@@ -468,12 +723,14 @@ def acon_transform(messages: List[Dict[str, Any]], compress: Compress,
         # dropped turn-by-turn (the old port did exactly that, wrongly).
         def _nonsystem_digest(until: int) -> str:
             return _sha(json.dumps(
-                [{"role": m.get("role"), "content": _content_of(m)}
+                [{"role": m.get("role"), "content": _content_of(m),
+                  "tool_calls": m.get("tool_calls") or []}
                  for m in nonsystem[:until]],
                 ensure_ascii=False, sort_keys=True))
 
         with _LOCK:
-            state = _ACON_STATE.get(conv)
+            state_key = (conv, mode, guideline)
+            state = _ACON_STATE.get(state_key)
         if (state is None or state[0] > len(prefix)
                 or state[1] != _nonsystem_digest(state[0])):
             # fresh conversation, benchmark rewrote history, or a
@@ -490,19 +747,19 @@ def acon_transform(messages: List[Dict[str, Any]], compress: Compress,
         if prefix and trigger_chars > ACON_HISTORY_THRESHOLD_CHARS:
             history_text = "\n".join(_render_line(m, action_dialect)
                                      for m in new_msgs)
-            user_text = ACON_HISTORY_PROMPT.format(
+            user_text = ACON_HISTORY_PROMPTS[guideline].format(
                 task=task, prev_summary=prev_summary or "(none)",
                 history=history_text)
             # content-addressed cache key: the positional key
             # (conv|covered|len) let a DIFFERENT task's same-length
             # segment hit the wrong cached summary under a shared id
-            summary = _summarize(
-                _sha(f"acon-hist|{user_text}"),
+            summary = _history_summary_body(_summarize(
+                _sha(f"acon-hist|{guideline}|{user_text}"),
                 "acon", model, ACON_SYSTEM, user_text,
-                compress, stats)
+                compress, stats))
             with _LOCK:
-                _ACON_STATE[conv] = (len(prefix), _nonsystem_digest(len(prefix)),
-                                     summary)
+                _ACON_STATE[state_key] = (
+                    len(prefix), _nonsystem_digest(len(prefix)), summary)
             stats["new_raw_messages_folded"] = len(new_msgs)
             block = (f"\n<HISTORY_SUMMARY>\n{summary}\n</HISTORY_SUMMARY>")
             # compressed view: keep system messages and the first user
