@@ -105,6 +105,7 @@ def run_benchmark(name: str, base_url: str, user_base_url: str, out_dir: Path,
             # the user simulator must NOT ride the arm proxy: route it to
             # the raw upstream endpoint (tau2 already does the same split)
             user_base_url=user_base_url,
+            scenarios=kwargs.get("ts_scenarios") or None,
         )
     raise SystemExit(f"unknown benchmark {name!r}")
 
@@ -158,6 +159,9 @@ def main(argv=None):
                              "tau2 agent/user LLMs and the BFCL handler "
                              "both use it; toolsandbox role keys are "
                              "separate, see --ts-agent)")
+    parser.add_argument("--ts-scenarios", default="",
+                        help="toolsandbox: comma-separated scenario names "
+                             "for subset runs (-s); overrides --full")
     parser.add_argument("--ts-agent", default="",
                         help="toolsandbox: agent role key (default "
                              "GPT_4_o_2024_05_13 -> openai_api_agent)")
@@ -201,6 +205,8 @@ def main(argv=None):
             num_workers=args.num_workers, max_tasks=args.max_tasks,
             run_name=args.run_name, full=args.full,
             ts_agent=args.ts_agent, ts_user=args.ts_user,
+            ts_scenarios=[s.strip() for s in args.ts_scenarios.split(",")
+                          if s.strip()],
         )
     finally:
         proxy_proc.terminate()

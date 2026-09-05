@@ -31,7 +31,8 @@ AGENT = "GPT_4_o_2024_05_13"  # openai_api_agent/openai_api_user role keys
 
 def run(base_url: str, out_dir: Path, test_mode: bool = True,
         agent: str = AGENT, user: str = AGENT, expected: int = None,
-        benchmark_dir: Path = None, user_base_url: str = "") -> Dict[str, Any]:
+        benchmark_dir: Path = None, user_base_url: str = "",
+        scenarios: "list[str] | None" = None) -> Dict[str, Any]:
     """``user_base_url`` (default: the raw upstream endpoint) routes the
     user simulator OUT of the arm proxy via TOOLSANDBOX_USER_BASE_URL —
     the patched openai_api_user role reads it.  Routing the simulator
@@ -52,7 +53,14 @@ def run(base_url: str, out_dir: Path, test_mode: bool = True,
     }
     cmd = ["tool_sandbox", "--user", user, "--agent", agent,
            "-o", str(out_dir)]
-    if test_mode:
+    if scenarios:
+        # subset run: -s names... (CLI also accepts -p for parallelism,
+        # set via the TS_PARALLEL env; default sequential)
+        cmd += ["-s"] + list(scenarios)
+        parallel = os.environ.get("TS_PARALLEL")
+        if parallel:
+            cmd += ["-p", parallel]
+    elif test_mode:
         cmd.append("-t")
     completed = subprocess.run(cmd, cwd=ts_dir, env=env)
     if completed.returncode != 0:
