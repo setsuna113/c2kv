@@ -193,11 +193,15 @@ def prepare_workdir(out_dir: Path, acebench_dir: Path, *, language: str | None =
             candidates = candidates[:remaining]
             remaining -= len(candidates)
         if not candidates:
-            raise SystemExit(
-                f"FATAL: ACEBench subset selected no rows from {source}; "
-                "use a bare test name when --max-tasks is smaller than a category")
+            # A finite category subset may spend its full budget in an earlier
+            # test file; an explicit task id may similarly belong to a later
+            # file.  The private category mapping below exposes only sources
+            # that actually contributed rows.
+            continue
         matched.update(str(row["id"]) for row in candidates)
         prepared.append((test, source, rows, candidates))
+    if not prepared:
+        raise SystemExit("FATAL: ACEBench subset selected no official rows")
     missing = sorted(wanted - matched)
     if missing:
         raise SystemExit(f"FATAL: ACEBench task ids not found in requested category: {','.join(missing)}")
@@ -219,6 +223,28 @@ def prepare_workdir(out_dir: Path, acebench_dir: Path, *, language: str | None =
         "max_tasks": max_tasks, "sources": sources,
     }, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     return work
+
+
+def prepare_subset_harness(work: Path, acebench_dir: Path, category: str,
+                           selected_tests: List[str]) -> Path:
+    """Copy a patched, private ACEBench harness with a narrow category map.
+
+    The upstream generator accepts only names defined in ``category.py`` and
+    always resolves that module beside ``generate.py``.  A copied harness is
+    therefore the smallest way to run one official test from a multi-test
+    category without patching source data, the upstream scorer, or the shared
+    checkout.  Its data files still resolve from the private workdir.
+    """
+    harness = work / "acebench_harness"
+    if harness.exists():
+        raise SystemExit(f"FATAL: refusing to reuse existing ACEBench subset harness {harness}")
+    shutil.copytree(acebench_dir, harness, ignore=shutil.ignore_patterns(
+        "data_all", "result_all", "score_all", "__pycache__", ".git"))
+    (harness / "category.py").write_text(
+        "# Private finite-smoke category; official generator/scorer are unchanged.\n"
+        f"ACE_DATA_CATEGORY = {{{category!r}: {list(selected_tests)!r}}}\n",
+        encoding="utf-8")
+    return harness
 
 
 def generate_command(python: str, acebench_dir: Path, model: str, category: str,
@@ -364,14 +390,19 @@ def run_acebench(base_url: str, user_base_url: str, out_dir: Path,
     tests = expand_categories(category, load_category_map(acebench_dir))
     work = prepare_workdir(out_dir, acebench_dir, language=language, tests=tests,
                            task_ids=task_ids, max_tasks=max_tasks)
+    harness = acebench_dir
+    if _task_id_list(task_ids) or max_tasks is not None:
+        selection = json.loads((work / "selected_tasks.json").read_text(encoding="utf-8"))
+        selected_tests = [str(source["test"]) for source in selection["sources"]]
+        harness = prepare_subset_harness(work, acebench_dir, category, selected_tests)
     env = harness_env(base_url, user_base_url, model)
     subprocess.run(
-        generate_command(python, acebench_dir, model, category, language, num_threads,
+        generate_command(python, harness, model, category, language, num_threads,
                          max_dialog_turns, user_model or model, temperature, top_p,
                          max_tokens),
         cwd=work, env=env, check=True)
     check_terminal(work, language, model, tests)
-    subprocess.run(eval_command(python, acebench_dir, model, category, language),
+    subprocess.run(eval_command(python, harness, model, category, language),
                    cwd=work, env=env, check=True)
     summary = collect(work, language, model, tests)
     summary["user_model"] = user_model or model

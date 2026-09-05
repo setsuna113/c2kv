@@ -119,6 +119,18 @@ def test_prepare_workdir_max_tasks_selects_first_source_row(tmp_path):
         {"id": "agent_multi_step_0"}]
 
 
+def test_subset_harness_remaps_category_without_changing_upstream_checkout(tmp_path):
+    root = _checkout(tmp_path)
+    (root / "generate.py").write_text("# upstream generator\n", encoding="utf-8")
+    source_category = (root / "category.py").read_text(encoding="utf-8")
+    work = tmp_path / "out" / "acebench_work"
+    work.mkdir(parents=True)
+    harness = B.prepare_subset_harness(work, root, "agent", ["agent_multi_step"])
+    assert (harness / "generate.py").read_text(encoding="utf-8") == "# upstream generator\n"
+    assert "'agent': ['agent_multi_step']" in (harness / "category.py").read_text(encoding="utf-8")
+    assert (root / "category.py").read_text(encoding="utf-8") == source_category
+
+
 # ---- terminal-state gate ----------------------------------------------------
 
 def test_check_terminal_missing_ids_is_fatal(tmp_path):
