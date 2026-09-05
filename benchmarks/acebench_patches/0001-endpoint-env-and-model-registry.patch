@@ -1,0 +1,95 @@
+diff --git a/model_inference/apimodel_inference.py b/model_inference/apimodel_inference.py
+index 091d470..f1d2c1b 100644
+--- a/model_inference/apimodel_inference.py
++++ b/model_inference/apimodel_inference.py
+@@ -34,7 +34,12 @@ class APIModelInference(BaseHandler):
+ 
+         load_dotenv()
+ 
+-        if "gpt" in self.model_name:
++        if os.getenv("ACEBENCH_AGENT_BASE_URL"):
++            # C2KV bench: single-turn inference is the evaluated agent too,
++            # so it rides the arm proxy (benchmarks/adapters/acebench_adapter.py)
++            api_key = os.getenv("ACEBENCH_AGENT_API_KEY", "EMPTY")
++            base_url = os.getenv("ACEBENCH_AGENT_BASE_URL")
++        elif "gpt" in self.model_name:
+             api_key = os.getenv("GPT_AGENT_API_KEY")
+             base_url = os.getenv("GPT_BASE_URL")
+         elif "deepseek-r1" in self.model_name:
+diff --git a/model_inference/inference_map.py b/model_inference/inference_map.py
+index 942202b..139a9b3 100644
+--- a/model_inference/inference_map.py
++++ b/model_inference/inference_map.py
+@@ -1,3 +1,5 @@
++import os
++
+ from model_inference.common_inference import CommonInference
+ from model_inference.apimodel_inference import APIModelInference
+ 
+@@ -56,3 +58,11 @@ inference_map_groups = {
+ 
+ 
+ inference_map = {model: handler for handler, models in inference_map_groups.items() for model in models}
++
++# C2KV bench: model names served by an OpenAI-compatible endpoint (the arm
++# proxy) are registered from the environment instead of this list, so the
++# served model name is not baked into the harness
++# (benchmarks/adapters/acebench_adapter.py exports ACEBENCH_API_MODELS).
++for _name in os.environ.get("ACEBENCH_API_MODELS", "").split(","):
++    if _name.strip():
++        inference_map.setdefault(_name.strip(), APIModelInference)
+diff --git a/model_inference/multi_step/APIModel_agent.py b/model_inference/multi_step/APIModel_agent.py
+index 604575a..d4678bf 100644
+--- a/model_inference/multi_step/APIModel_agent.py
++++ b/model_inference/multi_step/APIModel_agent.py
+@@ -65,7 +65,12 @@ class APIAgent_step():
+     def __init__(self, model_name, time, functions, temperature=0.001, top_p=1, max_tokens=1000, language="zh") -> None:
+         self.model_name = model_name.lower()
+         
+-        if "gpt" in self.model_name:
++        if os.getenv("ACEBENCH_AGENT_BASE_URL"):
++            # C2KV bench: the AGENT rides the arm proxy regardless of its
++            # served model name (benchmarks/adapters/acebench_adapter.py)
++            api_key = os.getenv("ACEBENCH_AGENT_API_KEY", "EMPTY")
++            base_url = os.getenv("ACEBENCH_AGENT_BASE_URL")
++        elif "gpt" in self.model_name:
+             api_key = os.getenv("GPT_AGENT_API_KEY")
+             base_url = os.getenv("GPT_AGENT_BASE_URL")
+         elif "deepseek" in self.model_name:
+diff --git a/model_inference/multi_turn/APIModel_agent.py b/model_inference/multi_turn/APIModel_agent.py
+index d1ecfa9..c323e8a 100644
+--- a/model_inference/multi_turn/APIModel_agent.py
++++ b/model_inference/multi_turn/APIModel_agent.py
+@@ -46,7 +46,12 @@ class APIAgent_turn():
+     def __init__(self, model_name, time, functions, involved_class, temperature=0.001, top_p=1, max_tokens=1000, language="zh") -> None:
+         self.model_name = model_name.lower()
+         
+-        if "gpt" in self.model_name:
++        if os.getenv("ACEBENCH_AGENT_BASE_URL"):
++            # C2KV bench: the AGENT rides the arm proxy regardless of its
++            # served model name (benchmarks/adapters/acebench_adapter.py)
++            api_key = os.getenv("ACEBENCH_AGENT_API_KEY", "EMPTY")
++            base_url = os.getenv("ACEBENCH_AGENT_BASE_URL")
++        elif "gpt" in self.model_name:
+             api_key = os.getenv("GPT_AGENT_API_KEY")
+             base_url = os.getenv("GPT_AGENT_BASE_URL")
+         elif "deepseek" in self.model_name:
+diff --git a/model_inference/multi_turn/APIModel_user.py b/model_inference/multi_turn/APIModel_user.py
+index cf32599..ce9199e 100644
+--- a/model_inference/multi_turn/APIModel_user.py
++++ b/model_inference/multi_turn/APIModel_user.py
+@@ -79,7 +79,13 @@ class APIUSER():
+     def __init__(self, model_name, involved_class, temperature=0.001, top_p=1, max_tokens=1000, language="zh") -> None:
+         
+         self.model_name = model_name.lower()
+-        if "gpt" in self.model_name:
++        if os.getenv("ACEBENCH_USER_BASE_URL"):
++            # C2KV bench: the USER SIMULATOR gets its own endpoint (the raw
++            # upstream, full mode) - routing it through the arm proxy would
++            # make every number an agent+user joint degradation
++            api_key = os.getenv("ACEBENCH_USER_API_KEY", "EMPTY")
++            base_url = os.getenv("ACEBENCH_USER_BASE_URL")
++        elif "gpt" in self.model_name:
+             api_key = os.getenv("GPT_API_KEY")
+             base_url = os.getenv("GPT_BASE_URL")
+         elif "deepseek" in self.model_name:

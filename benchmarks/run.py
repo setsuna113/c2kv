@@ -1,23 +1,49 @@
 """Unified runner: one benchmark x one arm -> unified rows + summary.
 
-Thin dispatcher around the per-benchmark adapters; owns the proxy lifecycle
-(spawn benchmarks/proxy.py in the requested arm, tear it down after).
-The compression ratio comes from the arm registry (arms.py), NOT from a
---ratio flag.
+Registry dispatch over the per-benchmark adapters (contract:
+``adapters/base.py`` — NAME, add_arguments, run(ctx)); this module owns only
+what is common to every benchmark: the proxy lifecycle (spawn
+benchmarks/proxy.py in the requested arm, tear it down after), the git-sha
+suffix on --run-name/--out, and the summary envelope.  The compression ratio
+comes from the arm registry (arms.py), NOT from a --ratio flag.
+
+Adding a benchmark = one adapter module + one ADAPTERS entry.  Server
+scripts drive this file BY CLI ONLY: every flag below is the interface, so
+a flag never changes name, default or meaning.
 """
 from __future__ import annotations
 
 import argparse
 import json
-import os
 import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Any, Dict
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+
+from adapters import (  # noqa: E402
+    acebench_adapter, acon_adapter, bfcl_adapter, tau2_adapter,
+    toolsandbox_adapter,
+)
+from adapters.base import RunContext  # noqa: E402
+
+# --benchmark value -> adapter module.  Two names share acon_adapter (the
+# module dispatches on ctx.options["benchmark"]); add_arguments is called
+# once per MODULE, so a shared flag would collide in argparse and must stay
+# in the core block of main() instead.
+ADAPTERS = {
+    "tau2": tau2_adapter,
+    "bfcl": bfcl_adapter,
+    "toolsandbox": toolsandbox_adapter,
+    "acon_appworld": acon_adapter,
+    "acon_qa": acon_adapter,
+    "acebench": acebench_adapter,
+}
+assert set(acon_adapter.NAMES) <= set(ADAPTERS)
+assert all(module.NAME in ADAPTERS or name in getattr(module, "NAMES", ())
+           for name, module in ADAPTERS.items())
 
 
 def start_proxy(upstream: str, arm: str, port: int, log_dir: Path,
@@ -60,56 +86,6 @@ def start_proxy(upstream: str, arm: str, port: int, log_dir: Path,
     raise SystemExit(f"proxy did not come up on port {port}")
 
 
-def run_benchmark(name: str, base_url: str, user_base_url: str, out_dir: Path,
-                  model: str = "c2kv-agent", **kwargs) -> Dict[str, Any]:
-    if name == "tau2":
-        from adapters import tau2_adapter
-
-        return tau2_adapter.run(
-            kwargs.get("benchmark_dir"), base_url, user_base_url,
-            out_dir, task_set=kwargs.get("task_set", "airline"),
-            num_workers=kwargs.get("num_workers", 4),
-            max_tasks=kwargs.get("max_tasks"),
-            run_name=kwargs.get("run_name", "c2kv_run"),
-            model=model,
-        )
-    if name == "bfcl":
-        from adapters import bfcl_adapter
-
-        # bfcl_eval resolves its data/result dirs from cwd; the adapter is
-        # driven from the gorilla checkout ($BENCH_BFCL_DIR override).
-        bfcl_dir = os.environ.get("BENCH_BFCL_DIR") or str(
-            Path.home() / "benchmarks" / "gorilla"
-            / "berkeley-function-call-leaderboard")
-        prev_cwd = os.getcwd()
-        os.chdir(bfcl_dir)
-        try:
-            # eval_runner.py:782 un-escapes the result dir with
-            # replace("_", "/") — underscores in arm names would corrupt
-            # the path, so the handler key uses dashes
-            return bfcl_adapter.run(
-                base_url,
-                categories=kwargs.get("categories", "multi_turn_base"),
-                model=model,
-                handler_name=f"c2kv-{(kwargs.get('arm') or 'full').replace('_', '-')}",
-            )
-        finally:
-            os.chdir(prev_cwd)
-    if name == "toolsandbox":
-        from adapters import toolsandbox_adapter
-
-        return toolsandbox_adapter.run(
-            base_url, out_dir, test_mode=not kwargs.get("full", False),
-            agent=kwargs.get("ts_agent") or toolsandbox_adapter.AGENT,
-            user=kwargs.get("ts_user") or toolsandbox_adapter.AGENT,
-            # the user simulator must NOT ride the arm proxy: route it to
-            # the raw upstream endpoint (tau2 already does the same split)
-            user_base_url=user_base_url,
-            scenarios=kwargs.get("ts_scenarios") or None,
-        )
-    raise SystemExit(f"unknown benchmark {name!r}")
-
-
 def _git_short_sha() -> str:
     """Short commit of the running tree: run_name/out-dir suffix so a code
     change can never silently mix old and new trajectories via tau2's
@@ -125,9 +101,11 @@ def _git_short_sha() -> str:
         return "nogit"
 
 
-def main(argv=None):
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--benchmark", required=True, choices=["tau2", "bfcl", "toolsandbox"])
+def add_core_arguments(parser: argparse.ArgumentParser) -> None:
+    """Flags run.py itself owns: the proxy/arm/serving knobs, plus the few
+    flags MORE THAN ONE adapter reads (argparse refuses a duplicate option
+    string, so those cannot live in an adapter's add_arguments)."""
+    parser.add_argument("--benchmark", required=True, choices=list(ADAPTERS))
     parser.add_argument("--arm", required=True)
     parser.add_argument("--upstream", required=True,
                         help="backend base URL (REQUIRED: a default here once "
@@ -136,13 +114,11 @@ def main(argv=None):
                         help="base URL for user-simulator/judge traffic (defaults to --upstream; only the agent arm proxy compresses)")
     parser.add_argument("--proxy-port", type=int, default=34100)
     parser.add_argument("--out", type=Path, required=True)
-    parser.add_argument("--task-set", default="airline")
-    parser.add_argument("--categories", default="multi_turn_base")
+    # shared by tau2 (--max-concurrency) and acebench (--num-threads)
     parser.add_argument("--num-workers", type=int, default=4)
+    # shared by tau2 (--num-tasks) and acon_qa (--limit)
     parser.add_argument("--max-tasks", type=int)
     parser.add_argument("--run-name", default="c2kv_run")
-    parser.add_argument("--full", action="store_true",
-                        help="toolsandbox: full suite instead of test mode")
     parser.add_argument("--record-reference", default="",
                         help="full-arm run: write the reference trajectory jsonl "
                              "the recover arms diff against")
@@ -159,14 +135,6 @@ def main(argv=None):
                              "tau2 agent/user LLMs and the BFCL handler "
                              "both use it; toolsandbox role keys are "
                              "separate, see --ts-agent)")
-    parser.add_argument("--ts-scenarios", default="",
-                        help="toolsandbox: comma-separated scenario names "
-                             "for subset runs (-s); overrides --full")
-    parser.add_argument("--ts-agent", default="",
-                        help="toolsandbox: agent role key (default "
-                             "GPT_4_o_2024_05_13 -> openai_api_agent)")
-    parser.add_argument("--ts-user", default="",
-                        help="toolsandbox: user-simulator role key (same default)")
     parser.add_argument("--doc-packing", default="turn", choices=["turn", "message"],
                         help="proxy doc packing: 'turn' = training format "
                              "(default), 'message' = pre-2026-09 per-message")
@@ -175,6 +143,45 @@ def main(argv=None):
                              "old D-harness caliber")
     parser.add_argument("--max-doc-num", type=int, default=12,
                         help="training regime = 12 (ckpt-1088)")
+    # shared by acon_* (agent step cap) and acebench (--max-dialog-turns)
+    parser.add_argument("--max-iter", type=int, default=None,
+                        help="acon_qa/acon_appworld: agent step cap (runner defaults "
+                             "30/50); acebench: --max-dialog-turns (default 40)")
+    # shared by acon_* and acebench
+    parser.add_argument("--bench-python", default="",
+                        help="python of the harness venv for acon_*/acebench "
+                             "(default: this interpreter)")
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Core flags + every adapter's own flags (each module once)."""
+    parser = argparse.ArgumentParser(description=__doc__)
+    add_core_arguments(parser)
+    for module in dict.fromkeys(ADAPTERS.values()):
+        module.add_arguments(parser)
+    return parser
+
+
+def build_context(args: argparse.Namespace, request_log: Path) -> RunContext:
+    """The one object an adapter receives.  ``options`` is the whole parsed
+    namespace, so an adapter reads exactly the flags it registered (plus the
+    core ones) and run.py needs no per-benchmark knowledge."""
+    options = dict(vars(args))
+    options["benchmark"] = args.benchmark
+    return RunContext(
+        base_url=f"http://127.0.0.1:{args.proxy_port}",
+        user_base_url=args.user_upstream or args.upstream,
+        out_dir=args.out,
+        model=args.model,
+        arm=args.arm,
+        run_name=args.run_name,
+        request_log=Path(request_log) if request_log else None,
+        options=options,
+    )
+
+
+def main(argv=None):
+    parser = build_parser()
     args = parser.parse_args(argv)
 
     sha = _git_short_sha()
@@ -192,22 +199,10 @@ def main(argv=None):
         backend=args.backend, doc_packing=args.doc_packing,
         max_doc_length=args.max_doc_length, max_doc_num=args.max_doc_num)
     try:
-        # the BFCL handler expects an OpenAI base_url WITH /v1 (tau2 and
-        # toolsandbox build their paths themselves)
-        base_url = f"http://127.0.0.1:{args.proxy_port}" + (
-            "/v1" if args.benchmark == "bfcl" else ""
-        )
-        user_base_url = args.user_upstream or args.upstream
-        summary = run_benchmark(
-            args.benchmark, base_url, user_base_url, args.out,
-            model=args.model, arm=args.arm,
-            task_set=args.task_set, categories=args.categories,
-            num_workers=args.num_workers, max_tasks=args.max_tasks,
-            run_name=args.run_name, full=args.full,
-            ts_agent=args.ts_agent, ts_user=args.ts_user,
-            ts_scenarios=[s.strip() for s in args.ts_scenarios.split(",")
-                          if s.strip()],
-        )
+        # every adapter owns its own "/v1" (adapters/base.py:v1) and its own
+        # cwd; run.py hands over the bare proxy URL and nothing else
+        ctx = build_context(args, request_log)
+        summary = ADAPTERS[args.benchmark].run(ctx)
     finally:
         proxy_proc.terminate()
     summary["arm"] = args.arm
@@ -257,6 +252,20 @@ def main(argv=None):
             print(f"WARNING: arm {args.arm!r} ran DEGENERATE (no Subgoal "
                   f"segments) on {sum(1 for t in ta_rows if t.get('degenerate'))}"
                   f"/{len(ta_rows)} requests — effectively a full arm")
+    # every arm: regime facts from the request log (doc drops, projection
+    # mode mix, outcome mix, wall percentiles) — a compressed number whose
+    # run dropped docs or mixed query_proj modes is not one regime
+    import reqlog  # noqa: E402  (sibling module)
+
+    summary["request_log_summary"] = reqlog.summarize_file(request_log)
+    rl = summary["request_log_summary"]
+    if rl.get("dropped_requests"):
+        print(f"NOTE: {rl['dropped_requests']}/{rl['n_ok']} requests dropped history "
+              f"docs (turn packing, max_doc_num={args.max_doc_num}); mean dropped "
+              f"{rl['dropped_docs_mean']}")
+    if rl.get("mixed_query_proj"):
+        print(f"WARNING: request log mixes c2kv_query_proj modes {rl['c2kv_query_proj']} "
+              "— not one serving regime")
     summary["doc_packing"] = args.doc_packing
     summary["max_doc_length"] = args.max_doc_length
     summary["max_doc_num"] = args.max_doc_num

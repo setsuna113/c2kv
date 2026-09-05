@@ -50,6 +50,15 @@ target doc's KV inside it) and injected with an explicit
 ``c2kv_repair_placement`` (in_place / append_keep_ledger / append_tail,
 see docs/c2kv_semantics.md "Repair placement").
 
+History-KV eviction arms (``history_kv`` in arms.py) are the upstream
+baselines (StreamingLLM / H2O / SnapKV / PyramidKV): nothing is gisted, and
+the completed history is instead compressed by TOKEN EVICTION inside the
+server.  The proxy owns the split (which assembled messages are completed
+history, how they render into one span) and the per-conversation streaming
+session; the backend owns the wire form.  See README "History-KV eviction
+arms" for the two deviations from the upstream client and for the fact that
+these arms have never been run against a live server.
+
 Upstream failures are retried (2x, exponential backoff) and always leave a
 request-log row with a failure kind — a benchmark entry must never vanish
 without a trace.
@@ -61,6 +70,7 @@ import hashlib
 import json
 import threading
 import time
+import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Dict, List, Optional, Set, Tuple
 from urllib import request as urlrequest
@@ -73,7 +83,7 @@ _OPENER = urlrequest.build_opener(urlrequest.ProxyHandler({}))
 
 import repair_policy
 import textarms
-from arms import Arm, get_arm  # type: ignore
+from arms import Arm, get_arm, history_kv_spec, kv_reuse_spec  # type: ignore
 from backends import BackendError, get_backend  # type: ignore
 
 
@@ -83,10 +93,14 @@ class ExtractCache:
         self._cache: Dict[Tuple[str, str, int], Dict[str, Any]] = {}
 
     def get_or_put(
-        self, key: Tuple[str, str, int], producer
+        self, key: Tuple[str, str, int], producer, force: bool = False
     ) -> Dict[str, Any]:
+        """Memoised extract.  ``force=True`` re-runs the producer and
+        overwrites the memo: it is the cache-miss recovery path, where the
+        memoised record describes a pool entry the SERVER has already evicted,
+        so returning it would re-send a dead ``key_hash`` and miss again."""
         with self._lock:
-            if key not in self._cache:
+            if force or key not in self._cache:
                 self._cache[key] = producer()
             return self._cache[key]
 
@@ -176,14 +190,16 @@ def _content_key(role: str, content: str) -> str:
 
 
 def _extract(role: str, content: str, ratio: int, timeout: int = 600,
-             tools: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+             tools: Optional[List[Dict[str, Any]]] = None,
+             force: bool = False) -> Dict[str, Any]:
     # tools participate in the cache key: the same system text rendered
     # with different tool schemas yields different original_seq_len (the
     # Qwen template renders tools into the system block)
     tools_key = _digest(tools or [])
     key = (role, _content_key(role, content), ratio, tools_key)
     return CACHE.get_or_put(
-        key, lambda: BACKEND.extract(content, role, ratio, tools=tools))
+        key, lambda: BACKEND.extract(content, role, ratio, tools=tools),
+        force=force)
 
 
 def _history_cutoff(messages: List[Dict[str, Any]]) -> int:
@@ -693,6 +709,104 @@ def _strip_c2kv_fields(message: Dict[str, Any]) -> Dict[str, Any]:
     return {k: v for k, v in message.items() if not str(k).startswith("c2kv_")}
 
 
+def _history_kv_context(out_messages: List[Dict[str, Any]],
+                        counts: Dict[str, Any],
+                        arm: Arm) -> Optional[Dict[str, Any]]:
+    """Proxy-side history split for a history-KV eviction arm.
+
+    The upstream client splits at the latest user query and compresses
+    everything before it; here the split is the bench's own
+    ``_history_cutoff`` (``counts["current_start_out_index"]``), so a
+    history-KV row is comparable with every other arm's row on the same
+    request.  System messages stay raw and OUTSIDE the compressed span (bench
+    rule), which the upstream client does not do — see README.
+
+    ``history_text`` is the SAME text the c2kv arm gists: the completed
+    history normalized into the training dialect and packed into turn docs
+    (``_normalize_history_message`` + ``_turn_docs``), joined into one span so
+    a single budget covers the whole history exactly as upstream applies it.
+    ``history_message_count`` is instead a count of LEADING assembled
+    messages, which is what the physical-eviction path sends to the server
+    (system message included: the server's own range resolution starts at
+    message 0).
+    """
+    spec = history_kv_spec(arm)
+    if spec is None:
+        return None
+    cutoff = int(counts.get("current_start_out_index") or 0)
+    system_parts: List[str] = []
+    history_indices: List[int] = []
+    indexed: List[Tuple[int, Dict[str, Any]]] = []
+    for index, message in enumerate(out_messages[:cutoff]):
+        if (message.get("role") or "user") == "system":
+            system_parts.append(str(message.get("content") or ""))
+            continue
+        item = _normalize_history_message(message)
+        if item is None:
+            continue
+        history_indices.append(index)
+        indexed.append((index, item))
+    docs = _turn_docs(indexed)
+    history_text = "\n\n".join(doc["content"] for doc in docs if doc["content"])
+    return {
+        "spec": spec,
+        "method": spec["method"],
+        "backend": spec["backend"],
+        "system_text": "\n".join(part for part in system_parts if part),
+        "history_text": history_text,
+        "history_out_indices": history_indices,
+        "history_message_count": cutoff,
+        "current_start_out_index": cutoff,
+        "n_history_messages": len(history_indices),
+        "n_history_docs": len(docs),
+    }
+
+
+def _kv_reuse_context(out_messages: List[Dict[str, Any]],
+                      counts: Dict[str, Any],
+                      arm: Arm) -> Optional[Dict[str, Any]]:
+    """Proxy-side history split for a KV-reuse (CacheBlend) arm.
+
+    Same split and the same turn-doc packing as ``_history_kv_context`` (so
+    a CacheBlend row is comparable with every other arm's row on the same
+    request), but the docs are kept SEPARATE: each turn doc is one CacheBlend
+    chunk, sent to the server as its own message of the multi-message
+    ``repair_extract`` form (``backends/sglang.SglangBackend.kv_reuse_extract``).
+    System messages stay raw and outside the reused span (bench rule); the
+    artifact caches the system prompt as chunk 0 -- README "CacheBlend arms".
+    """
+    spec = kv_reuse_spec(arm)
+    if spec is None:
+        return None
+    cutoff = int(counts.get("current_start_out_index") or 0)
+    system_parts: List[str] = []
+    history_indices: List[int] = []
+    indexed: List[Tuple[int, Dict[str, Any]]] = []
+    for index, message in enumerate(out_messages[:cutoff]):
+        if (message.get("role") or "user") == "system":
+            system_parts.append(str(message.get("content") or ""))
+            continue
+        item = _normalize_history_message(message)
+        if item is None:
+            continue
+        history_indices.append(index)
+        indexed.append((index, item))
+    docs = _turn_docs(indexed)
+    history_docs = [{"role": doc["role"], "content": doc["content"]}
+                    for doc in docs if doc["content"]]
+    return {
+        "spec": spec,
+        "method": spec["method"],
+        "chunking": spec["chunking"],
+        "system_text": "\n".join(part for part in system_parts if part),
+        "history_docs": history_docs,
+        "history_out_indices": history_indices,
+        "current_start_out_index": cutoff,
+        "n_history_messages": len(history_indices),
+        "n_history_docs": len(history_docs),
+    }
+
+
 def _textarm_compress(payload: Dict[str, Any], meter=None) -> str:
     """One compressor call for a text-level baseline arm.  Validates the
     finish reason and non-empty content — HTTP-200-with-error-body and
@@ -772,6 +886,20 @@ def plan_repair(messages: List[Dict[str, Any]], arm: Arm,
     ``P + Σ original_seq_len(docs before)``, and the two must agree when the
     per-message rendering is additive (Qwen3 template).  The proxy records
     its own ledger expectation for the frame check in the request log.
+
+    ``frame_delta`` is a MEASUREMENT of that additivity, not an identity, and
+    it is not always computable: the prologue length ``P`` is only observable
+    through a system-message extract.  That extract is taken from the
+    ASSEMBLED list (``out_messages``), not from the caller's payload —
+    ``_assemble`` injects ``DEFAULT_SYSTEM_PROMPT`` when the client sends no
+    system message (BFCL FC sends none), and the server renders THAT, so
+    measuring the caller's pre-assembly list left ``expected_offset = None``
+    and the frame check unmeasured on every BFCL repair-arm row.  A list
+    carrying more than one system message is still not measurable: the server
+    renders them as separate blocks, so joining them would measure a prologue
+    that is never rendered (``not_measured_multi_system``).
+    ``frame_delta_status`` says which case a row is in — never read a null
+    delta as a zero delta.
     """
     if not arm.repair or not getattr(BACKEND, "needs_repair_plan", False):
         return None
@@ -795,20 +923,37 @@ def plan_repair(messages: List[Dict[str, Any]], arm: Arm,
         messages=context, target_index=target_out_index, tools=tools,
         source_doc_index=doc_index)
     # proxy-side ledger expectation (frame check): system block incl. tools
-    # + Σ original_seq_len of the compressed docs before the target.  Only
-    # computable when a system message exists (the tool prologue length is
-    # measured through it); BFCL FC sends none -> None, check skipped.
+    # + Σ original_seq_len of the compressed docs before the target.  The
+    # prologue is measured on the ASSEMBLED list, which is what the server
+    # renders: _assemble injects DEFAULT_SYSTEM_PROMPT when the client sends
+    # none, so a BFCL FC request DOES have a measurable prologue (measuring
+    # the caller's list left it None and no arm ever ran the frame check).
     expected_offset: Optional[int] = None
-    system = _system_text(messages)
-    if system:
-        sys_record = _extract("system", system, arm.ratio, tools=tools)
-        expected_offset = int(sys_record.get("original_seq_len") or 0)
-        for record in records[:doc_index]:
-            expected_offset += int(record["record"].get("original_seq_len") or 0)
+    frame_delta_status: Optional[str] = None
+    system_messages = [m for m in out_messages if m.get("role") == "system"]
+    if len(system_messages) > 1:
+        # the server renders each system message as its own block; a joined
+        # extract would measure a prologue that is never rendered
+        frame_delta_status = "not_measured_multi_system"
+    else:
+        system = _system_text(out_messages)
+        if system:
+            sys_record = _extract("system", system, arm.ratio, tools=tools)
+            expected_offset = int(sys_record.get("original_seq_len") or 0)
+            for record in records[:doc_index]:
+                expected_offset += int(record["record"].get("original_seq_len") or 0)
     position_start = span.get("position_start")
     frame_delta = None
-    if expected_offset is not None and position_start is not None:
+    # explicit status so a null delta is never read as a passing check
+    if frame_delta_status is not None:
+        pass  # already decided above (multi-system)
+    elif expected_offset is None:
+        frame_delta_status = "not_measured_no_system"
+    elif position_start is None:
+        frame_delta_status = "not_measured_no_position_start"
+    else:
         frame_delta = int(position_start) - int(expected_offset)
+        frame_delta_status = "measured"
     return {
         "policy": policy, "placement": placement,
         "message_index": target_out_index, "target_out_index": target_out_index,
@@ -817,6 +962,7 @@ def plan_repair(messages: List[Dict[str, Any]], arm: Arm,
         "position_offset": position_start,
         "position_start": position_start, "position_end": span.get("position_end"),
         "expected_offset": expected_offset, "frame_delta": frame_delta,
+        "frame_delta_status": frame_delta_status,
         "already_rotated": bool(span.get("already_rotated", False)),
         "repair_key_hash": span.get("key_hash"),
         "repair_block_tokens": span.get("token_len"),
@@ -830,7 +976,16 @@ def _repair_frame_check(plan: Optional[Dict[str, Any]],
     frames").  For append placements the span must sit exactly where the
     target doc's gist sits (position_cursor of the doc_index-th gist); for
     in_place the target's gist is not injected, so the span must start
-    where the previous gist ends.  ``ok`` is None when not computable."""
+    where the previous gist ends.
+
+    ``ok`` is None when the check is NOT COMPUTABLE — that is not a pass.
+    ``ok_reason`` names the case; the one that matters in practice is
+    in_place at doc_index 0 (policy "first" on a single-doc conversation, i.e.
+    the c2kv_repair_inplace arm on BFCL), where the expectation is the end of
+    the prologue and the gist ledger does not contain it.  Only THIS check is
+    unavailable on such a row: plan["frame_delta"] is measured independently
+    (against the assembled prologue) and is carried here as
+    ``frame_delta_status``."""
     if not plan:
         return None
     layout = ((normalized.get("cost") or {}).get("c2kv_layout")) or []
@@ -842,20 +997,31 @@ def _repair_frame_check(plan: Optional[Dict[str, Any]],
         "n_gist_injections": len(gists),
         "n_repair_injections": len(repairs),
         "ok": None,
+        "ok_reason": "not_measured_no_layout" if not layout else "not_measured",
+        "frame_delta_status": plan.get("frame_delta_status"),
     }
     k = int(plan.get("doc_index", -1))
     expected = None
     if plan.get("placement") == "in_place":
-        if k == 0 and gists:
-            expected = None  # first doc: prologue end, not derivable from gists
+        if k == 0:
+            # first doc: the expectation is the end of the prologue, which the
+            # gist ledger does not carry -- not derivable, and NOT a pass
+            result["ok_reason"] = "not_measured_in_place_first_doc"
         elif 0 < k <= len(gists):
             prev = gists[k - 1]
             expected = int(prev["position_cursor"]) + int(prev["original_seq_len"])
+        else:
+            result["ok_reason"] = "not_measured_doc_index_outside_layout"
     elif 0 <= k < len(gists):
         expected = int(gists[k]["position_cursor"])
+    else:
+        result["ok_reason"] = "not_measured_doc_index_outside_layout"
     if expected is not None and plan.get("position_start") is not None:
         result["expected_from_layout"] = expected
         result["ok"] = int(plan["position_start"]) == expected
+        result["ok_reason"] = "measured"
+    elif expected is not None:
+        result["ok_reason"] = "not_measured_no_position_start"
     if repairs:
         result["server_placement"] = repairs[0].get("placement")
         result["server_position_start"] = repairs[0].get("position_start")
@@ -863,15 +1029,48 @@ def _repair_frame_check(plan: Optional[Dict[str, Any]],
 
 
 class ProxyState:
-    """Process-wide proxy state (backend, recover config, reference log)."""
+    """Process-wide proxy state (backend, recover config, reference log,
+    history-KV streaming sessions)."""
 
     def __init__(self):
         self.lock = threading.Lock()
         self.recover: Optional[RecoverState] = None
         self.reference_log_path: str = ""
+        # conversation_id -> server streaming-session id (physical-eviction
+        # history-KV arms only)
+        self.history_sessions: Dict[str, str] = {}
 
 
 STATE = ProxyState()
+
+
+def _history_session_id(conv: str) -> str:
+    """Streaming-session id for ``conv``, opened once on the server.
+
+    The physical-eviction baselines only mean anything when the compacted KV
+    survives across turns, which on this server needs a streaming session
+    (``--enable-streaming-session``) whose id rides on every chat request of
+    the conversation.  The upstream client holds that id per BFCL sample and
+    closes it at the end; a stateless HTTP proxy has no end-of-conversation
+    signal, so:
+
+    * the id is keyed by ``proxy.conversation_id``, which by construction
+      SHIFTS ONCE after a conversation grows past its first message (see
+      conversation_id) — such a conversation opens two sessions, the second
+      starting from an empty prefix;
+    * sessions are never closed, so they live until the server restarts.
+
+    Both limitations are documented in README "History-KV eviction arms".
+    """
+    with STATE.lock:
+        session_id = STATE.history_sessions.get(conv)
+        if session_id:
+            return session_id
+    session_id = f"c2kv-bench-history-{conv[:16]}-{uuid.uuid4().hex}"
+    BACKEND.open_history_session(session_id)
+    with STATE.lock:
+        STATE.history_sessions.setdefault(conv, session_id)
+        return STATE.history_sessions[conv]
 
 
 class ProxyHandler(BaseHTTPRequestHandler):
@@ -913,6 +1112,20 @@ class ProxyHandler(BaseHTTPRequestHandler):
             repair_plan = plan_repair(messages, ARM, counts,
                                      tools=payload.get("tools"),
                                      out_messages=messages_out)
+            history_ctx = _history_kv_context(messages_out, counts, ARM)
+            if history_ctx is not None:
+                if history_ctx["spec"]["persistent_session"]:
+                    history_ctx["session_id"] = _history_session_id(conv)
+                counts["history_kv"] = {
+                    k: history_ctx[k] for k in
+                    ("method", "backend", "n_history_messages",
+                     "n_history_docs", "history_message_count")}
+            reuse_ctx = _kv_reuse_context(messages_out, counts, ARM)
+            if reuse_ctx is not None:
+                counts["kv_reuse"] = {
+                    k: reuse_ctx[k] for k in
+                    ("method", "chunking", "n_history_messages",
+                     "n_history_docs")}
         except (RuntimeError, ValueError, URLError, OSError, UpstreamError,
                 BackendError) as error:
             kind = getattr(error, "kind",
@@ -931,7 +1144,15 @@ class ProxyHandler(BaseHTTPRequestHandler):
             # request fail "repair target has no c2kv_key_hash"
             staged = dict(payload)
             staged["messages"] = out_messages
-            out_payload = BACKEND.prepare_chat(staged, ARM, plan)
+            if getattr(BACKEND, "wants_request_context", False):
+                # only backends that asked for it (base.Backend
+                # .wants_request_context); hfserver keeps its 3-arg signature
+                out_payload = BACKEND.prepare_chat(
+                    staged, ARM, plan,
+                    context={"conversation_id": conv, "history_kv": history_ctx,
+                             "kv_reuse": reuse_ctx})
+            else:
+                out_payload = BACKEND.prepare_chat(staged, ARM, plan)
             return _post_json(self.path, out_payload, 600), out_payload
 
         def call_upstream(out_messages, plan):
@@ -947,11 +1168,34 @@ class ProxyHandler(BaseHTTPRequestHandler):
             try:
                 data, normalized = call_upstream(messages_out, repair_plan)
             except CacheMiss:
-                # pool-evicted gists: re-extract every compressed doc
-                # (re-inserts entries under the same content hashes), then
-                # retry the identical request once
+                # Pool-evicted gists and/or an evicted repair span.  Three
+                # things are needed for the retry to be anything but a second
+                # identical miss:
+                #   1. force=True — the memoised record describes the entry
+                #      the server has just dropped, so the plain _extract call
+                #      that used to stand here issued NO http request at all
+                #      (ExtractCache.get_or_put memoises forever and is never
+                #      cleared) and the retry re-sent the same dead hash;
+                #   2. refresh the hash actually carried by messages_out, in
+                #      case the re-extract does not land on the same
+                #      content-derived key_hash;
+                #   3. re-plan the repair — BACKEND.repair_extract_messages is
+                #      not memoised, but plan_repair was never re-run, so a
+                #      miss on the repair key (the scheduler emits the same
+                #      C2KV_CACHE_MISS prefix for c2kv_repair_*_key_hashes)
+                #      survived the retry unchanged.
                 for record in counts.get("compressed_records") or []:
-                    _extract(record["role"], record["content"], ARM.ratio)
+                    fresh = _extract(record["role"], record["content"],
+                                     ARM.ratio, force=True)
+                    record["record"] = fresh
+                    idx = record.get("out_index")
+                    if (isinstance(idx, int) and 0 <= idx < len(messages_out)
+                            and messages_out[idx].get("c2kv_key_hash")
+                            and fresh.get("key_hash")):
+                        messages_out[idx]["c2kv_key_hash"] = fresh["key_hash"]
+                repair_plan = plan_repair(messages, ARM, counts,
+                                          tools=payload.get("tools"),
+                                          out_messages=messages_out)
                 data, normalized = call_upstream(messages_out, repair_plan)
         except (UpstreamError, BackendError, CacheMiss) as error:
             kind = getattr(error, "kind", "upstream_error")
@@ -1051,8 +1295,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
             return None
         return {k: plan[k] for k in (
             "policy", "placement", "doc_index", "position_start", "position_end",
-            "expected_offset", "frame_delta", "repair_block_tokens",
-            "already_rotated")
+            "expected_offset", "frame_delta", "frame_delta_status",
+            "repair_block_tokens", "already_rotated")
             if k in plan}
 
     def do_GET(self):
@@ -1122,7 +1366,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
         row.update({f"raw_{k}": v for k, v in counts.items()
                     if k in ("system_raw", "history_raw", "current_raw", "compressed")})
         row.update({k: counts.get(k) for k in
-                    ("doc_packing", "n_docs", "dropped_docs", "repair_frame")
+                    ("doc_packing", "n_docs", "dropped_docs", "repair_frame",
+                     "history_kv", "kv_reuse")
                     if k in counts})
         if counts.get("textarm") is not None:
             row["textarm"] = counts["textarm"]
