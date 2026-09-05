@@ -1,0 +1,24 @@
+{
+ "_readme": [
+  "Static tool partition for one benchmark, per arXiv 2608.16370 section 3.2.",
+  "The three buckets are MANDATORY; prose_or_other is not optional (~45% of BFCL",
+  "steps emit prose rather than a tool call, and their ALFWorld probe needed a",
+  "third bucket too).  This template ships EMPTY on purpose: tool names must be",
+  "copied from the benchmark's own manifest, never invented here.",
+  "retrieval        = returns environment state, no side effect",
+  "execution        = mutates state and/or reveals a constraint",
+  "prose_or_other   = anything else the step can emit, including no tool call",
+  "retrieval_returns = OPTIONAL {tool: {return_field: json_type}} (or a bare field",
+  "list).  When present the D*/R* call is schema-grounded ('mode': 'schema');",
+  "when absent it falls back to a declared token-overlap heuristic.",
+  "Fill the buckets, then recompute sha256 with:",
+  "  python agent/t34_bench_signals.py partition-check --partition <this file>",
+  "and copy expected_sha256 into the sha256 field."
+ ],
+ "benchmark": "TEMPLATE",
+ "execution": [],
+ "prose_or_other": [],
+ "retrieval": [],
+ "retrieval_returns": {},
+ "sha256": "2a70d0ebbae44ea807fa2de5f08384597bca039dba82fdfc469b0b4c148dc071"
+}

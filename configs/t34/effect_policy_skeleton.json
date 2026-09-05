@@ -1,0 +1,11 @@
+{
+ "_schema": "DART EffectAllowed policy (2605.23311 §4.5). Frozen BEFORE any evaluation.",
+ "_usage": "Copy this file to configs/t34/effect_policy_<bench>.json and fill the two lists from THAT benchmark's own tool registry. Do not fill them from memory; read the registry the harness advertises.",
+ "_semantics": "irreversible = a call whose replay changes external state that cannot be undone (bookings, payments, submissions, sends, deletions). read_only = a call with no external effect. A name in NEITHER list is 'unknown' and effect_allowed() treats it as irreversible (fail-closed on effects). Note the asymmetry with the must_read_before_write gate, which fails OPEN on its own exceptions (2607.07405 §3.2): a detector must not block generation, but a replay policy must not permit an unclassified effect.",
+ "_placeholders": "The two lists below are deliberately EMPTY. An empty policy blocks every repair as 'unknown_effect'; that is the correct behaviour for an unfilled policy and it is visible in the admissibility panel's block_reasons.",
+ "bench": "<tau2|bfcl|ts>",
+ "registry_source": "<path or URL of the tool registry these names were read from>",
+ "frozen_at": "<ISO date the policy was frozen>",
+ "irreversible": [],
+ "read_only": []
+}

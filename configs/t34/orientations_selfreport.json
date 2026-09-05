@@ -1,0 +1,15 @@
+{
+ "judge_answer_parse_ok": -1,
+ "judge_completion_tokens": 1,
+ "judge_harmful_probability": 1,
+ "judge_prompt_tokens": 1,
+ "judge_seconds": 1,
+ "judge_utility_risk": 1,
+ "p4_self_reported_loss": 1,
+ "pagein_reload_fired": 1,
+ "pageout_pressure_ratio": 1,
+ "selfcheck_answer_parse_ok": -1,
+ "selfcheck_generate_sec": 1,
+ "selfcheck_risk": 1,
+ "selfcheck_says_inconsistent": 1
+}

@@ -1,0 +1,27 @@
+{
+ "delta": 0.05,
+ "grid": [
+  {
+   "alpha": 0.05,
+   "certifiable": true,
+   "max_false_alarms_allowed": 0,
+   "min_pvalue_at_zero_false_alarms": 0.030563645913324063,
+   "n_required_for_alpha": 59
+  },
+  {
+   "alpha": 0.1,
+   "certifiable": true,
+   "max_false_alarms_allowed": 2,
+   "min_pvalue_at_zero_false_alarms": 0.0007735540101454297,
+   "n_required_for_alpha": 29
+  },
+  {
+   "alpha": 0.2,
+   "certifiable": true,
+   "max_false_alarms_allowed": 7,
+   "min_pvalue_at_zero_false_alarms": 2.571100870814394e-07,
+   "n_required_for_alpha": 14
+  }
+ ],
+ "n": 68
+}

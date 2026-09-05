@@ -1,0 +1,18 @@
+{
+ "_comment": "t34 unit U7b (survey 4.9 sequential). Risk orientation of every feature agent/t34_sequential.py writes into a features jsonl. +1 = higher value is riskier (more likely C->W); -1 = lower value is riskier. Declared BEFORE any scoring; must stay in sync with t34_sequential.SEQ_ORIENTATIONS (the unit test asserts equality).",
+ "cura_constants_out_of_fold": -1,
+ "cura_phys_nll": 1,
+ "cura_phys_nll_max_causal": 1,
+ "cura_phys_nll_mean_causal": 1,
+ "cura_phys_tool_seen": -1,
+ "cura_prefix_S": 1,
+ "cura_prefix_W": 1,
+ "cura_prefix_n_signals": 1,
+ "ecusum_a_fused": 1,
+ "ecusum_a_rep_only": 1,
+ "ecusum_r": 1,
+ "ecusum_u_abs": 1,
+ "ecusum_u_rel": 1,
+ "seq_n_prior_steps": 1,
+ "seq_step_index": 1
+}

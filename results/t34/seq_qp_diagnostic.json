@@ -1,0 +1,341 @@
+{
+ "bootstrap_reps": 2000,
+ "ci95": {
+  "p_hat": [
+   0.0,
+   0.6666666666666666
+  ],
+  "q_hat": [
+   0.5,
+   1.0
+  ],
+  "q_minus_p": [
+   0.0635714285714286,
+   1.0
+  ]
+ },
+ "ci_excludes_zero": true,
+ "deviations": [
+  {
+   "method": "qp_persistence_diagnostic",
+   "paper": "2606.12476 sec.3.1 (tab:markov)",
+   "what": "The unit of the label process is a DECISION STEP inside a battery session, not a generated token; ordering is step_index(qid) (the qid suffix), never the logged decision_step (= doc_chunks + 1).",
+   "why": "Our frozen face has no per-token faithfulness labels; the pre-registered label C->W is defined once per decision step (t33_labels.cw_label)."
+  },
+  {
+   "method": "qp_persistence_diagnostic",
+   "paper": "2606.12476 sec.3.1",
+   "what": "Steps whose label is undefined (W->C / W->W) BREAK the chain instead of being coerced to y=0; the number of adjacent pairs dropped that way is reported as its own denominator.",
+   "why": "Coercing them to 0 would silently import the full arm's correctness into the transition table (label-side leakage into a diagnostic)."
+  },
+  {
+   "method": "qp_persistence_diagnostic",
+   "paper": "2606.12476 sec.3.1 (gate rule)",
+   "what": "The pre-registered rule (CI of q_hat - p_hat contains 0 -> not licensed) is kept unchanged, but licensing additionally requires n_adjacent_pairs >= MIN_ADJACENT_PAIRS = 30 (declared before looking). The frozen battery SUBSAMPLES decision steps inside a session (qid suffixes such as 8/13/16/19), leaving only 15 genuinely adjacent labelled pairs, so the 2x2 table is not estimable on this face.",
+   "why": "A gate that licenses the whole sequential family off 8 and 7 transitions would be a verdict-changing artefact; the extra clause is strictly CONSERVATIVE (it can only refuse, never license)."
+  },
+  {
+   "method": "markov_order_ladder",
+   "paper": "2606.12476 sec.3.1 (tab:markov, orders 1-4)",
+   "what": "Orders 2-4 are fitted but their context counts are printed alongside; on 2-4 step sessions orders 3 and 4 have almost no data and the ladder is reported as uninformative rather than as a model-selection result.",
+   "why": "Their L ~= 120 tokens per generation; our sessions are 2-4 steps."
+  },
+  {
+   "method": "learned_cusum",
+   "paper": "2606.12476 sec.3.3",
+   "what": "logit(p_hat_t) is the LogisticRegression decision_function of a session-grouped nested-CV probe (out-of-fold), not a trained causal GRU; k = (mu_0+mu_1)/2 is the textbook value computed on the CALIBRATION pool, never fitted.",
+   "why": "93 positives cannot train a recurrent labeler; the paper's own decomposition says the accumulator is worth -4.5 tokens and the score -12.9, so the cheap score is the honest arm."
+  },
+  {
+   "method": "threshold_for_arl",
+   "paper": "2606.12476 sec.4.1 (ARL in {50,100,200})",
+   "what": "ARL is estimated by i.i.d. resampling of NEGATIVE-pool increments, and the report carries a flag saying the requested ARL exceeds our maximum episode length (max 4 decision steps per session).",
+   "why": "ln(gamma)/D does not exist at our horizon; the pre-registered pitfall is an output rather than something silently produced."
+  },
+  {
+   "method": "ecusum_alarm_score",
+   "paper": "2607.11317 sec.3.1",
+   "what": "w_rep=0.7 / w_ent=0.3 are kept exactly; when the u channel is absent the score is NOT back-filled with u=0 under the same name - a separately named a_rep_only = min(1, w_rep*r) column is emitted and the fused column is null.",
+   "why": "A silent u=0 is a sentinel fallback under a fused name (t34 rule 3 / the parse-failure absorption pitfall)."
+  },
+  {
+   "method": "ecusum_cross_step",
+   "paper": "2607.11317 sec.3.2",
+   "what": "n indexes DECISION STEPS in a session (the paper indexes tokens); r_n is the max over the causal per-token r_t stream of that step's own emitted text; the reset that breaks the supermartingale property is declared, as the paper declares it.",
+   "why": "The digest's cross-step migration; the intra-step token-window version is the runner's t33 arm and is not duplicated here."
+  },
+  {
+   "method": "entropy_spike_relative",
+   "paper": "2607.11317 sec.3.1 (u_t relative to recent H_t history)",
+   "what": "The rolling history is the mean entropy of the PREVIOUS steps of the same session (window ECUSUM_ROLL_W = 3); the first step of a session has no history and gets None, never 0.  Absolute variants live in separate columns.",
+   "why": "Battery rows have no t-1 inside a step; the session is the only rolling unit that exists on this face."
+  },
+  {
+   "method": "ecusum_calibrate_and_evaluate",
+   "paper": "2607.11317 sec.3.3 + sec.7",
+   "what": "The calibration/evaluation split IS strict here: C->C sessions are cut in half BY SESSION, mu_0 comes from the calibration half only, and the achieved false-alarm rate is measured on the held-out half.  'Healthy session' is the strict reading (>= 1 C->C row and NO C->W row).",
+   "why": "The paper admits (sec.7) its own split was not strict; our false-reset metric is pre-registered and cannot be reported in-sample."
+  },
+  {
+   "method": "truncated_entropy",
+   "paper": "2607.11317 sec.3.1",
+   "what": "On the serving face only a top-k renormalised entropy is obtainable (--enable-custom-logit-processor is not in the launcher); the column is named truncated_entropy everywhere and is never called 'entropy'. The local dump shape [logprob, token_id] is VERIFIED against its writer (t33_capture.py:234); the serving shape is not, so an unrecognised row raises with the row printed instead of reading element 0 of whatever arrived. A --capture_dir without the dump raises CaptureUnavailable rather than degrading to a silent null u channel, and every command that can use the channel emits a u_channel_status block.",
+   "why": "Card 2607.11317: 'do not quietly call it entropy'; and a u channel that is absent must be visibly absent, not a column of nulls whose cause the reader has to guess."
+  },
+  {
+   "method": "matched_fpr_comparison (length-only baseline)",
+   "paper": "2608.27808 sec.5 C",
+   "what": "Each arm's operating point is the quantile of ITS OWN negatives on a session-grouped CALIBRATION half and every reported rate is measured on the disjoint held-out half; the paper calibrates both alarms by LTT on a separate healthy pool. The LTT-calibrated length arm is NOT implemented: it needs the 4096-caliber rows, and at the 128 cap the length score is ~48% tied, which the result reports as matched=false with the tie mass beside it.",
+   "why": "A threshold read from the very negatives the arm is then scored against is selection on the evaluation frame; an unmatched budget is reported as unmatched rather than silently compared."
+  },
+  {
+   "method": "ltt_select_threshold",
+   "paper": "2608.27808 sec.4 (Learn-then-Test, fixed sequence, delta=0.05)",
+   "what": "Implemented exactly (descending candidates, exact binomial H_j: FPR(theta_j) > alpha, stop at first non-rejection, return the last rejected).  The calibration pool is the C->C rows (n=68), not successful GUI trajectories, and the achievable-alpha grid is computed FIRST.",
+   "why": "Our only failure-label-free healthy pool on the battery face is C->C."
+  },
+  {
+   "method": "physiology_fit",
+   "paper": "2608.27808 sec.4 (per-action-type diagonal Gaussian on successes)",
+   "what": "Keyed by the tool name the COMPRESSED arm itself emitted (parsed from its own text with t33_spanmap.parse_tool_call, never read from the prediction_tool_name scoring column); tools with fewer than PHYS_MIN_TOOL_ROWS calibration rows fall back to the POOLED Gaussian and are flagged by a tool_seen companion column; with no pooled model at all the value is None.",
+   "why": "68 C->C rows spread over many tool names; a per-tool sigma from n=1 is undefined.  The fallback is a declared pooled estimator, not a sentinel."
+  },
+  {
+   "method": "cura_prefix_gate",
+   "paper": "2608.27808 sec.4 (S_t = sum_j sign_j (s_j-mu_j)/sigma_j, W_t = max(0, W-0.5))",
+   "what": "k = 0.5 and the a-priori sign vector are kept; the signal list is our prefix-only family (CURA_PREFIX_SIGNS).  hybrid_top_k / dropped_docs / n_docs / repair_frame_delta are null on the battery face and are dropped from S_t per row, with the participating-signal count reported.  The sidecar's `docs` / `doc_lengths` are the KEPT blocks only and `dropped_docs` indexes the post-split history list, so the n_docs signal is kept + dropped and is None when the dropped side is missing - never the visible count under the total's name.",
+   "why": "Those fields exist only in the sidecar / proxy row; a missing signal must not enter the sum as a zero."
+  },
+  {
+   "method": "esn_observation_vector",
+   "paper": "2608.02464 sec.3-4 (x_t = [e;u;m], d in {43,51,60})",
+   "what": "No u channel at all (declared, per the paper's own +0.000 ablation) and no e channel; the channels are size / timing / protocol built from proxy row fields.  Per-channel-max fusion is the headline; mean fusion is computed only as the contrast the paper's ablation demands.",
+   "why": "We have never emitted a logprob on the serving face, and the paper measures the surprisal channel at +0.000 AUROC."
+  },
+  {
+   "method": "esn_monitor",
+   "paper": "2608.02464 sec.3 (theta from healthy validation episodes)",
+   "what": "healthy = bench TASK SUCCESS only; the monitor aborts with a message when fewer than ESN_MIN_HEALTHY_EPISODES=15 healthy episodes are supplied, and rows whose error_kind is in ESN_EXCLUDED_ERROR_KINDS (C2KV_CACHE_MISS) form an explicit exclusion class counted in the output.",
+   "why": "'compressed matched full' is the oracle we are removing; the gist-pool LRU eviction would otherwise turn the monitor into a cache-miss detector."
+  },
+  {
+   "method": "learned_cusum / cusum_reference_k (CLI arm `arl`)",
+   "paper": "2606.12476 sec.3.3 + sec.4.1",
+   "what": "k = (mu_0+mu_1)/2 and the ARL null pool are computed on a session-grouped CALIBRATION half and every arm is scored on the disjoint held-out sessions; the halving leaves ~34 calibration negatives, so the output carries n_calibration_negatives and the declared null_pool_underpowered flag (ARL_MIN_NULL_POOL = 20) instead of presenting the alignment as a matched operating point. A one-class calibration half aborts rather than borrowing the evaluation rows. The all-rows k is reported beside it under a name that says it is NOT used.",
+   "why": "Reading k and the null quantile off the rows the arms are then scored on is threshold selection on the evaluation frame; the coarse-resolution consequence of splitting is a reported flag, not a reason to keep the in-sample number."
+  },
+  {
+   "method": "ecusum_calibrate_and_evaluate (mu_0 pooling unit)",
+   "paper": "2607.11317 sec.3.3",
+   "what": "mu_0 actually used is the 90th percentile of the per-STEP a_n over the calibration-half C->C sessions, i.e. the unit of the statistic that is accumulated. The paper's per-TOKEN pooling is reported as a companion (calibration_paper_unit_companion) and is NOT used.",
+   "why": "Our n indexes decision steps and a_n is the max of the step's causal per-token r_t stream; a per-token 90th percentile is not an upper bound on E[a_n | F_{n-1}] and would mis-scale the betting increment."
+  },
+  {
+   "method": "ltt_select_threshold (candidate sequence)",
+   "paper": "2608.27808 sec.4",
+   "what": "The descending fixed sequence gets one rung just above the observed calibration maximum so that k = 0 false alarms is expressible; the result flags theta_above_all_calibration_scores when that rung wins.",
+   "why": "At n = 68 alpha = 0.05 admits at most 0 false alarms, so a grid taken from the observed scores alone could never certify it for an arithmetic reason rather than a data reason."
+  },
+  {
+   "method": "esn_channel_fit (sigma_err, ensemble, leak)",
+   "paper": "2608.02464 sec.3 (eq.2 reservoir, eq.4 surprise)",
+   "what": "sigma_err (eq.4) and the (q_mean, q_std) the CUSUM z-scores with are measured on a HELD-OUT healthy split (sigma_frac = 0.2 of the healthy episodes, disjoint from both the readout fit split and the threshold validation split), as the paper does; if that split ends up empty the fit residuals are used and the channel reports sigma_in_sample = True / sigma_err_source.held_out = False. The reservoir ensemble is K = 1 (the paper averages q over K reservoirs); the leak rate of eq.2 is declared at alpha = 1.0 (the paper writes the leaky form but fixes no value).",
+   "why": "Residuals measured on the rows the readout was solved on are optimistically small and inflate every q_t on unseen episodes; K and alpha are reported rather than tuned, and both are exposed as constructor arguments."
+  },
+  {
+   "method": "esn_monitor (false-alarm denominator)",
+   "paper": "2608.02464 sec.3 (theta from healthy validation, FPR on unseen)",
+   "what": "False positives are reported as raw counts on each of the three healthy splits - FIT (in-sample for the readout), VALIDATION (the threshold's own source) and SIGMA (unseen by both, but the pool sigma_err and the q normalisation were measured on) - each labelled with what it is in-sample for. None of the three is a clean held-out false-alarm rate.",
+   "why": "Reporting one pooled count over fit+val under the paper's name would read as their 0/63 held-out figure when it is not."
+  },
+  {
+   "method": "cura_fold_internal_floor / _cmd_cura",
+   "paper": "2608.27808 sec.4 + sec.5 (three-way split)",
+   "what": "The physiology Gaussian and the prefix (mu_j, sigma_j) are fitted on a DISJOINT fit half of the C->C sessions before LTT calibration, and refitted inside every fold of the floor and inside every replicate of the three-way split (ltt_three_way(score_fn=...)). The `features` subcommand now emits OUT-OF-FOLD columns too: the sessions are cut into FEATURES_OOF_FOLDS = 3 grouped folds and each row's cura_* columns come from constants fitted on the other folds' C->C rows, stamped per row by cura_constants_out_of_fold. The in-sample dump survives only behind --in_sample_dump, which stamps 0.0 on every C->C row and prints the warning. The matched-FPR contrast runs on the rows OUTSIDE the fit half only.",
+   "why": "Fitting the constants on every C->C row and then calibrating or scoring on those same rows is the leakage the fold-internal floor exists to exclude."
+  }
+ ],
+ "estimable": false,
+ "markov_ladder": [
+  {
+   "delta_pct_vs_prev": null,
+   "loglik": -7.36949538496933,
+   "n_contexts_seen": 2,
+   "n_terms": 15,
+   "order": 1,
+   "params": 2
+  },
+  {
+   "delta_pct_vs_prev": 100.0,
+   "loglik": 0.0,
+   "n_contexts_seen": 1,
+   "n_terms": 1,
+   "order": 2,
+   "params": 4
+  },
+  {
+   "delta_pct_vs_prev": null,
+   "loglik": 0.0,
+   "n_contexts_seen": 0,
+   "n_terms": 0,
+   "order": 3,
+   "params": 8
+  },
+  {
+   "delta_pct_vs_prev": null,
+   "loglik": 0.0,
+   "n_contexts_seen": 0,
+   "n_terms": 0,
+   "order": 4,
+   "params": 16
+  }
+ ],
+ "min_adjacent_pairs": 30,
+ "n_session_clusters": 227,
+ "notes": [
+  "teacher-forced single-step battery: the compressed arm's own errors cannot propagate, so this face measures a FLOOR on persistence.",
+  "on fixed_joint W->C (120) > C->W (93): prima facie evidence against a one-sided change-point model on this face.",
+  "the frozen battery samples a few decision steps per session (qid suffixes such as 8/13/16/19), so adjacency in the SESSION is not adjacency in the FRAME; the sequential family needs new rows, not a re-read of these.",
+  "The r2 trigger set was generated at the 128-token cap (kv_recipe.max_new_tokens=128), so any length / termination / repetition column is partly reading 'hit the cap'. Every length-bearing row below must also be run at the 4096 caliber before it is reported as a behavioural signal."
+ ],
+ "ordering_key": "step_index(qid)",
+ "pair_stats": {
+  "dropped_nonadjacent": 459,
+  "dropped_undefined": 199,
+  "gap_hist": {
+   "1": 214,
+   "10": 11,
+   "11": 4,
+   "12": 8,
+   "13": 9,
+   "14": 6,
+   "15": 8,
+   "16": 5,
+   "17": 5,
+   "18": 6,
+   "19": 5,
+   "2": 97,
+   "20": 5,
+   "21": 2,
+   "22": 4,
+   "23": 3,
+   "24": 1,
+   "25": 2,
+   "26": 2,
+   "27": 2,
+   "29": 2,
+   "3": 83,
+   "30": 1,
+   "32": 1,
+   "33": 1,
+   "34": 1,
+   "4": 52,
+   "41": 1,
+   "42": 1,
+   "48": 1,
+   "5": 42,
+   "6": 33,
+   "7": 20,
+   "76": 1,
+   "8": 19,
+   "89": 1,
+   "9": 14
+  },
+  "max_gap": 1,
+  "n_pairs": 15
+ },
+ "rule_version": "d_cw_v1",
+ "sequential_licensed": false,
+ "steps_per_session": {
+  "hist": {
+   "2": 1,
+   "3": 6,
+   "4": 220
+  },
+  "max": 4,
+  "mean": 3.9647577092511015,
+  "min": 2,
+  "n_sessions": 227
+ },
+ "transition": {
+  "counts": {
+   "n00": 6.0,
+   "n01": 2.0,
+   "n10": 1.0,
+   "n11": 6.0
+  },
+  "n_from_0": 8,
+  "n_from_1": 7,
+  "p_hat": 0.25,
+  "q_hat": 0.8571428571428571,
+  "q_minus_p": 0.6071428571428571,
+  "q_over_p": 3.4285714285714284
+ },
+ "variant_consecutive_in_frame_NOT_THE_ESTIMAND": {
+  "ci95_q_minus_p": [
+   0.06693035835023661,
+   0.6982432432432429
+  ],
+  "pair_stats": {
+   "dropped_nonadjacent": 0,
+   "dropped_undefined": 625,
+   "gap_hist": {
+    "1": 214,
+    "10": 11,
+    "11": 4,
+    "12": 8,
+    "13": 9,
+    "14": 6,
+    "15": 8,
+    "16": 5,
+    "17": 5,
+    "18": 6,
+    "19": 5,
+    "2": 97,
+    "20": 5,
+    "21": 2,
+    "22": 4,
+    "23": 3,
+    "24": 1,
+    "25": 2,
+    "26": 2,
+    "27": 2,
+    "29": 2,
+    "3": 83,
+    "30": 1,
+    "32": 1,
+    "33": 1,
+    "34": 1,
+    "4": 52,
+    "41": 1,
+    "42": 1,
+    "48": 1,
+    "5": 42,
+    "6": 33,
+    "7": 20,
+    "76": 1,
+    "8": 19,
+    "89": 1,
+    "9": 14
+   },
+   "max_gap": null,
+   "n_pairs": 48
+  },
+  "transition": {
+   "counts": {
+    "n00": 21.0,
+    "n01": 7.0,
+    "n10": 7.0,
+    "n11": 13.0
+   },
+   "n_from_0": 28,
+   "n_from_1": 20,
+   "p_hat": 0.25,
+   "q_hat": 0.65,
+   "q_minus_p": 0.4,
+   "q_over_p": 2.6
+  },
+  "warning": "consecutive battery rows in a session are typically 3-10 decision steps apart; this row is diagnostic of the subsampling, not an estimate of P(y_t | y_{t-1})."
+ },
+ "verdict": "NOT ESTIMABLE: only 15 genuinely adjacent (gap = 1) labelled pairs exist (< MIN_ADJACENT_PAIRS=30); the frozen battery SUBSAMPLES decision steps inside a session, so the adjacent-pair transition table has no usable denominator on this face. Sequential family not opened."
+}

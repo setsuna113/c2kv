@@ -1,0 +1,162 @@
+{
+ "deviations": [
+  {
+   "method": "tau_adv / utility model",
+   "paper": "2606.21399",
+   "what": "The paper fixes a single flat intervention cost per benchmark (ALFWorld c_a=0.05, s=0.01, w=1.0, section 9.2).  We normalise c_a PER ARM from the measured KV bytes and GPU-seconds of that arm, rescaled onto [0, cost_scale] with cost_scale defaulting to the paper's 0.05.",
+   "why": "Our K repair arms differ in cost by an order of magnitude (slice-prefill vs full recompute); a flat c_a would erase exactly the cost asymmetry the utility model exists to express.  The paper-faithful flat-cost variant is kept behind cost_mode='flat'."
+  },
+  {
+   "method": "tau_adv / branch length m(h,a)",
+   "paper": "2606.21399",
+   "what": "m is the number of remaining agent steps in the paper; we use the arm's generated-token count divided by the battery cap (manifest kv_recipe.max_new_tokens, 128) so m stays in [0,1].  The CONTINUE branch is charged m = 0 (and c = 0), so it pays no step cost at all while every arm pays s*m <= s.",
+   "why": "The battery is single-step teacher-forced: there is no multi-step branch to measure.  Normalising keeps s comparable to the paper's per-step 0.01 instead of silently rescaling the harm term by ~128.  The m=0 continue branch makes the utility model conservative in the direction that matters (it never manufactures intervention advantage); at s=0.01 the asymmetry is bounded by 0.01 against a utility range of 1+w."
+  },
+  {
+   "method": "action set / quit is optional and OFF by default",
+   "paper": "2606.21399",
+   "what": "The paper's control set is three-way -- {continue, intervention, quit} -- with U_quit = 0 by definition (section 9.2, 'Quit always yields utility zero').  Our default action set is {continue} + the K repair arms; quit is available as an OPTIONAL action (``include_quit=True`` / ``--include-quit``) and is then a deterministic U = 0 column -- no forest, because its utility is not a random variable.  ``tau_adv`` keeps the paper's definition (EU_i - EU_c, intervention vs continue) and is NOT quit-augmented.",
+   "why": "The battery has no abstain branch executed on disk: U_quit = 0 is an assumption, not a measured branch, which is why it is not the default.  It is load-bearing for comparability: with w = 1 quit dominates (U = 0 > -1) on exactly the rows where continue is wrong and no arm rescues, so WITHOUT it the tau_adv <= 0 subpopulation means 'no arm beats continuing' rather than 'no action beats quitting' and regret is measured against a strictly smaller oracle than Table tab:fork.  Only the ``include_quit=True`` table is on the paper's action set; ``regret_comparability`` in every report says which of the two was run.  ``--include-quit`` switches the controller, the abstraction Gap and the exploitability oracle action TOGETHER, so the three always share one action set (``action_set`` / ``gap_action_set`` in the report)."
+  },
+  {
+   "method": "tau_adv / EU_continue",
+   "paper": "2606.21399",
+   "what": "EU_continue uses the compressed arm's own realised correctness rather than a fitted P(U_c <= 0 | h).",
+   "why": "Single-step teacher forcing makes the continue branch a realised outcome, not a random variable to be predicted; the paper's own prefix-branching protocol executes the continue branch too."
+  },
+  {
+   "method": "witness controller",
+   "paper": "2606.21399",
+   "what": "RandomForest(200 trees, depth 6, min_samples_leaf=2) as in section 9.5; beta_a defaults to 1.0 because the paper's beta value is not stated in the sections the transfer card read.",
+   "why": "Card explicitly records beta_a as unspecified; we expose it as an argument and report the value used instead of inventing the paper's number."
+  },
+  {
+   "method": "witness controller / scalar baseline",
+   "paper": "2606.21399",
+   "what": "The scalar p_fail is a probe score fitted on the 161-row trigger subset and read off on the arm-covered rows; the paper thresholds a p_fail estimate on the same rows it evaluates.  Because the two frames carry DIFFERENT session splits, every fitted use of the scalar -- the threshold baseline, the RF+LCB scalar ablation, the abstraction-Gap binning variable and the exploitability scalar-only predictor -- goes through ``make_pfail_scalar_fn``, which refits the probe inside each outer fold with that fold's sessions held out.  A fold whose refit cannot score every row is SKIPPED and counted (``n_folds_skipped_scalar_unavailable``), never filled in.",
+   "why": "The D-line arm sweep only ran on the 93 C->W rows, where the C->W label is constant; a scalar fitted there would be degenerate, so the probe is trained on the frame where the label varies.  Reusing one out-of-fold vector across a different split would hand the paper's own baseline the evaluation fold's labels: it inflates acc_scalar_only (deflating the exploitability increment) and moves the Gap's bin edges.  ``scalar_split_alignment`` records which regime produced every number."
+  },
+  {
+   "method": "abstraction loss Gap(g)",
+   "paper": "2606.21399",
+   "what": "V* and V_g are estimated with REALISED per-row utilities and quantile bins of g, on session-grouped held-out folds, not with true conditional expectations.",
+   "why": "We have realised branch outcomes (that is what the D-line sweep is) but no access to E[U_a | h]; the plug-in estimator keeps Gap >= 0 by max-of-means <= mean-of-maxes."
+  },
+  {
+   "method": "5x5 cost x penalty sweep / cell statistic",
+   "paper": "2606.21399",
+   "what": "The paper's sweep (section 5.3) counts how many of the 25 cells keep the SIGN OF THE CONTROLLER GAIN (witness regret below scalar regret; 25/25 on ALFWorld, 23/25 on ScienceWorld).  Our cell statistic is instead the fraction of rows with tau_adv > 0, and a cell 'keeps sign' when that fraction exceeds 0.5.",
+   "why": "The sweep here is attached to the tau_adv population split, which is a pure re-analysis of realised arm outcomes and costs no fit; re-fitting the RF+LCB controller in all 25 cells would produce 25 regret differences that are all far below the n=93 MDE and would read as an arm ranking, which digest 4.0 forbids.  The gain-sign count is therefore NOT reported, and our count must not be compared against their 25/25."
+  },
+  {
+   "method": "regret / arm ranking",
+   "paper": "2606.21399",
+   "what": "We report a population split and a regret table but NEVER an arm ranking; MDE_PP (17-25 pp at n=93) is printed with every table.",
+   "why": "Digest 4.0 forbids rankings finer than the MDE; the paper's ALFWorld n is far larger than 93."
+  },
+  {
+   "method": "random@matched-rate",
+   "paper": "2608.10441",
+   "what": "The paper draws random acquisitions i.i.d. at a budget b.  We draw EXACTLY b fires confined to a randomly chosen union of whole sessions (see random_matched_rate_masks for the scheme).",
+   "why": "Our rows are clustered in 100 sessions on the 161-row frame; an i.i.d. row null would understate the variance of a candidate whose fires clump inside sessions."
+  },
+  {
+   "method": "matched-moment placebo",
+   "paper": "2608.10441",
+   "what": "The paper matches the moments of a CONTINUOUS Delta.  Our flip vector is binary, so matched moments means a per-entry Bernoulli(p) draw: level='per_qid' matches each qid's own flip rate (and hence its variance p(1-p)); level='pooled' matches the global non-witness flip rate and reproduces the analytic envelope 1-(1-p)^n_docs of agent/d_ksweep_analysis.py.  BOTH levels now use the same denominator -- k != k_witness -- so p_q and p_bar are the per-qid and pooled versions of one quantity; a qid with no k_witness (or with only the witness k logged) falls back to all of its k and is counted in ``n_qids_rate_over_all_k``.",
+   "why": "For a binary vector the mean determines the variance; there is no second free moment to match.  Both levels are reported so the reader can see how much of the observed gap is per-qid over-dispersion rather than content-specific localisation."
+  },
+  {
+   "method": "positive control",
+   "paper": "2608.10441",
+   "what": "The paper injects a synthetic CLUSTER signal at a dialled cluster-SNR into a recommendation pipeline.  We inject a synthetic per-row scalar at correlation strength s (part row-level, part session-level) into t34_common.nested_cv_logistic, and define the bar as 'AUPRC clustered-bootstrap lower bound above the evaluation frame's prevalence'.",
+   "why": "Our estimand is a binary trigger label, not an NDCG delta; the cluster-SNR scale does not transfer.  The bar is the computable subset of the digest 4.0 winner rule (the S0-twin and three-metric clauses need a real feature, not a synthetic one)."
+  },
+  {
+   "method": "granularity ladder",
+   "paper": "2608.10441",
+   "what": "The paper's ladder has FOUR rungs -- per-instance, KMeans K=4..64, hand-defined cross-product regimes, and honest uplift trees (section 6).  Ours has three: the honest-uplift-tree rung is NOT implemented.  Empirical-Bayes shrinkage uses a fixed pseudo-count of 1 toward the training prior rather than a fitted prior variance, and KMeans runs with n_init=4.",
+   "why": "No uplift-tree dependency is installed on this box.  The claim 'no granularity rescues the policy' therefore covers three of their four rungs and must be written that way; a flat ladder here is weaker evidence than theirs."
+  },
+  {
+   "method": "reward-SNR floor rho*(N) = 2.8/sqrt(N)",
+   "paper": "2608.10441",
+   "what": "Reported as an MDE-in-disguise with a mandatory caller-supplied Delta definition string; never used as a post-hoc significance test, and never applied to the binary C->W label directly.",
+   "why": "The paper's floor is a one-sample MEAN-detection bound on a continuous Delta.  Our label is binary with prevalence 0.1033 on the 900-frame; the repo already forbids using an MDE as a post-hoc test."
+  }
+ ],
+ "paper": "2608.10441",
+ "parse_failure_only": {
+  "coverage": 35,
+  "coverage_rate": 0.3763440860215054,
+  "false_reset_rate": 0.4117647058823529,
+  "false_resets": 28,
+  "fires": 63,
+  "n_neg": 68,
+  "n_pos": 93,
+  "precision": 0.5555555555555556
+ },
+ "parse_failure_vs_random_band": {
+  "metrics": {
+   "coverage": {
+    "above_random_median": false,
+    "candidate": 0.3763440860215054,
+    "inside_random_band": true,
+    "random_hi": 0.46236559139784944,
+    "random_lo": 0.3118279569892473,
+    "random_median": 0.3870967741935484
+   },
+   "false_reset": {
+    "above_random_median": true,
+    "candidate": 0.4117647058823529,
+    "inside_random_band": true,
+    "random_hi": 0.5,
+    "random_lo": 0.29411764705882354,
+    "random_median": 0.39705882352941174
+   },
+   "precision": {
+    "above_random_median": false,
+    "candidate": 0.5555555555555556,
+    "inside_random_band": true,
+    "random_hi": 0.6825396825396826,
+    "random_lo": 0.4603174603174603,
+    "random_median": 0.5714285714285714
+   }
+  },
+  "rate_matched": true,
+  "verdict": "Coverage AND precision both sit INSIDE the matched-rate random band: at this fire rate the candidate is not distinguishable from random firing, so 'beats this baseline' cannot mean 'beats random at the same rate'."
+ },
+ "prevalence_chance_ap": 0.577639751552795,
+ "random_at_matched_rate": {
+  "coverage": {
+   "denominator": 93,
+   "hi": 0.46236559139784944,
+   "lo": 0.3118279569892473,
+   "mean": 0.3909247311827956,
+   "median": 0.3870967741935484
+  },
+  "false_reset": {
+   "denominator": 68,
+   "hi": 0.5,
+   "lo": 0.29411764705882354,
+   "mean": 0.39182352941176474,
+   "median": 0.39705882352941174
+  },
+  "n_clusters": 100,
+  "n_fires": 63,
+  "n_neg": 68,
+  "n_pos": 93,
+  "n_rows": 161,
+  "paper": "2608.10441",
+  "precision": {
+   "denominator": 63,
+   "hi": 0.6825396825396826,
+   "lo": 0.4603174603174603,
+   "mean": 0.5770793650793651,
+   "median": 0.5714285714285714
+  },
+  "reps": 2000,
+  "row": "random@matched-rate",
+  "scheme": "B session-clustered random fire masks with EXACTLY ``n_fires`` fires."
+ }
+}

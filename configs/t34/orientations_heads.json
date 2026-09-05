@@ -1,0 +1,13 @@
+{
+ "alien_u_arm_cw_oof": 1,
+ "alien_u_arm_wrongany_oof": 1,
+ "ctrl_cap_hit": 1,
+ "ctrl_generated_tokens": 1,
+ "entropy_name_token_vocab": 1,
+ "margin_name_top1_top2": -1,
+ "memgen_p_oof": 1,
+ "pool_size_c": 1,
+ "span_entropy_max": 1,
+ "span_entropy_mean": 1,
+ "span_seq_nll": 1
+}

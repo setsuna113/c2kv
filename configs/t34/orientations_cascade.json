@@ -1,0 +1,14 @@
+{
+ "_doc": "Risk orientation of every scalar agent/t34_cascade.py emits into a features jsonl. +1 = higher is riskier (higher P(C->W)); -1 = lower is riskier. Pre-declared before scoring; a post-hoc sign flip must be registered family='diagnostic' (digest 2.1, S0 logp_prefix_full specimen).",
+ "cascade_parse_fail": 1,
+ "cascade_s_cheap": 1,
+ "cascade_stage2_action_changed": 1,
+ "ctl_input_tokens": 1,
+ "ctl_history_tokens": 1,
+ "ctl_prompt_tokens": 1,
+ "s8_compression_ratio": 1,
+ "s8_doc_chunks": 1,
+ "s8_gist_per_doc": -1,
+ "s9_ledger_gap": 1,
+ "s10_hybrid_tail_frac": 1
+}

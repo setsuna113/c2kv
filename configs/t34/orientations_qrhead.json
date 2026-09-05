@@ -1,0 +1,13 @@
+{
+ "cacheblend_dev_margin": 1,
+ "cacheblend_dev_max": 1,
+ "cacheblend_dev_mean": 1,
+ "qrhead_calib_delta": -1,
+ "qrhead_margin_top1_top2": -1,
+ "qrhead_mass_gist": -1,
+ "qrhead_mass_raw_tail": 1,
+ "qrhead_mass_sink": 1,
+ "qrhead_r_max": -1,
+ "_primary_head_fraction": 0.01,
+ "_secondary_head_fraction": 0.02
+}

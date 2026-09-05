@@ -1,0 +1,506 @@
+{
+ "baseline_parse_fail": {
+  "auprc": 0.5693284949946942,
+  "auprc_ci95": [
+   0.4763938091214581,
+   0.6726323692180465
+  ],
+  "auroc": 0.4822896900695762,
+  "cost": {
+   "base_gpu_sec": 2068.0654,
+   "escalation_gpu_sec": 0.0,
+   "gpu_sec_per_step": 12.845126708074535,
+   "n_escalated": 0,
+   "n_escalated_unpriced": 0,
+   "relative_overhead": 0.0,
+   "total_gpu_sec": 2068.0654
+  },
+  "coverage": 0.3763440860215054,
+  "coverage_hits": 35,
+  "false_reset": 0.4117647058823529,
+  "false_resets": 28,
+  "fires": 63,
+  "n": 161,
+  "n_clusters": 100,
+  "n_neg": 68,
+  "n_pos": 93,
+  "precision": 0.5555555555555556,
+  "prevalence": 0.577639751552795,
+  "random_at_matched_rate": {
+   "coverage_ci": [
+    0.33306451612903226,
+    0.45161290322580644
+   ],
+   "coverage_mean": 0.3910537634408602,
+   "false_reset_ci": [
+    0.3088235294117647,
+    0.47095588235293917
+   ],
+   "false_reset_mean": 0.3916470588235294,
+   "n_fires": 63,
+   "precision_ci": [
+    0.49166666666666664,
+    0.6666666666666666
+   ],
+   "precision_mean": 0.5772698412698412,
+   "reps": 2000
+  }
+ },
+ "cost_inputs": {
+  "missing_base_fields": {},
+  "n_priced_expensive": 0
+ },
+ "deviations": [
+  {
+   "method": "Algorithm 1 stage 1 (MPD(M_self))",
+   "paper": "2502.15845 Sec. 4 / Sec. 5",
+   "what": "s_cheap is NOT the mean-pairwise-disentailment of m=10 resamples; rung 0 is a deterministic parse-failure indicator and the higher rungs are free pre-generation prefix scalars (S8/S9/S10).",
+   "why": "m=10 tau'=1.0 samples break the determinism gate (SPEC 5.5.9) and cost ~111 GPU-s/step against a 0.79-3.80 s recovery action; the digest (line 1189) fixes parse-failure-only as the starting point because it is the T1 kill line's baseline."
+  },
+  {
+   "method": "Algorithm 1 stage 2 (MPD(M_cross) from a verifier LLM)",
+   "paper": "2502.15845 Sec. 4.2 / Sec. 5",
+   "what": "s_expensive is a single-block slice-prefill + regenerate whose score is 1.0 iff the canonical action CHANGED, 0.0 otherwise (binary, so the t2 grid degenerates to one interior cut).",
+   "why": "A second (larger) model verifying against the full KV history is Tracy's cost-disqualified KV_VERIFIERS and VeriCache's occupied cell (C-K2).  A sub-full slice prefill is outside both; the escalation is the action itself, not a second judgement."
+  },
+  {
+   "method": "Threshold calibration (400 validation examples, 5 seeds)",
+   "paper": "2502.15845 Sec. 6",
+   "what": "(t1, t2) are chosen as QUANTILE LEVELS in inner folds of a session-grouped nested CV over 100 session clusters, and the number of combinations tried is reported.",
+   "why": "n=161 rows / 100 sessions, not 400 i.i.d. questions; three thresholds on this many clusters is the binding statistical risk the digest names (line 1841).  Quantile levels (not absolute values) are the knob so inner folds are comparable."
+  },
+  {
+   "method": "Two threshold-transfer regimes",
+   "paper": "2502.15845 Sec. 6 (same-question resample vs different questions)",
+   "what": "The oracle regime is calibration ON THE EVALUATION ROWS THEMSELVES; there is no independent redraw of the same qid.",
+   "why": "Decoding is greedy and frozen -- an independent resample of the same qid does not exist on this face.  Reported as an optimistic bound, which is what the paper's oracle regime measures too.  CONFOUND to carry: the two regimes here differ in TWO ways, not one -- the practical regime also refits the stage-1 ladder's ECDF per outer-train fold while the oracle regime scores the whole-frame ECDF, so at n_rungs>1 the reported gap mixes threshold transfer with score normalisation (at n_rungs=1 s_cheap is the bare parse-failure indicator and the two normalisations coincide, so the gap is clean there)."
+  },
+  {
+   "method": "Cost metric (relative additional FLOPs, p * N_v / N_t)",
+   "paper": "2502.15845 Sec. 5",
+   "what": "Cost is the measured frozen GPU-sec sum per SPEC 5.6 (system_prefill + full_prefill + tool_compress + blend + generate, plus slice_prefill + generate for escalated rows).",
+   "why": "Their zero point is 'self-consistency only', which already contains 10 generations + 100 NLI calls; our zero point is ONE compressed generation, so their 'relative cost 0' is already ~10x our entire per-step budget (card, Cost per decision)."
+  },
+  {
+   "method": "GCN ceiling on M_self",
+   "paper": "2502.15845 Sec. 4.1 (LaTeX line 831) and Sec. 4.2.1 (857-861)",
+   "what": "Node set is the history blocks of one decision step (not m sampled answers); node features are a per-doc score vector and the adjacency is an RBF kernel over those features, not an entailment matrix.  Implemented in numpy with explicit backward (finite-difference tested) so it runs without torch.",
+   "why": "We have no entailment estimator and no resampling; the raw representation whose ceiling we want is the per-doc score vector.  The construction (flexible model, BCE, independent train/test) is what transfers."
+  },
+  {
+   "method": "Ceiling label discipline",
+   "paper": "2502.15845 Sec. 4.1",
+   "what": "Gold-scored per-doc witness vectors are exposed only through ``gold_witness_label_node_features`` (family='oracle'); the detector-side family is the gold-free query-lexical vector.",
+   "why": "The frozen witness table is gold-scored AND exists for the 93 positives only -- its availability is the label.  A ceiling built on it is an oracle envelope, not a detection ceiling."
+  },
+  {
+   "method": "Threshold selection objective",
+   "paper": "2502.15845 Sec. 6 (AUROC / AURAC)",
+   "what": "(q1, q2) are chosen by Youden's J on the three-metric denominators (coverage rate - false-reset rate), not by AUROC or AURAC; ``--select_by`` also offers precision / coverage and the choice travels with every reported row.",
+   "why": "Algorithm 1 emits a BINARY decision, so an AUROC over the cascade's own output is degenerate; the house contract scores triggers on coverage / precision / false-reset (digest 1.3).  The transfer gap between regimes is therefore reported on this objective as well as on coverage."
+  },
+  {
+   "method": "Stage-2 block choice",
+   "paper": "2502.15845 Sec. 5 (the verifier is a second model, so the paper has no block-choice analogue)",
+   "what": "s_expensive comes from a repair dump whose prefilled block was chosen by a POSITION heuristic (``k_median`` on all 93 rows of the frozen d_corr.jsonl), never by the gold witness selector; ``expensive_block_choice_audit`` checks this and reports None rather than assuming it when the witness table is absent.",
+   "why": "A block index taken from the gold-scored witness table would make the whole escalation branch gold-conditioned, which is the other half of the card's label/feature-separation pitfall."
+  },
+  {
+   "method": "Stage-1 undefined-rung handling",
+   "paper": "n/a (2502.15845's stage 1 is a single resampling scalar)",
+   "what": "A rung that is undefined for SOME rows takes the neutral ECDF rank 0.5 inside s_cheap; the count is reported per rung in ``Stage1Ladder.audit()['neutral_rank_imputations']``.  The EMITTED feature for such a row stays None -- the 0.5 exists only inside the composite score, never in the feature frame.",
+   "why": "A composite score has to be defined on every row it ranks; dropping the row instead would change the denominators.  Rungs undefined on EVERY row are declared unusable and excluded outright rather than imputed (S9 and S10 on this face)."
+  },
+  {
+   "method": "Feature-dump normalisation",
+   "paper": "n/a (house contract)",
+   "what": "``cascade_s_cheap`` in the emitted jsonl uses an ECDF fitted on the WHOLE frame (label-free but transductive); the scored path inside p_sweep refits the ladder on each outer-train fold.",
+   "why": "The dump is one row per qid with no fold structure; any consumer that scores that column inherits the transductive normalisation and must say so."
+  },
+  {
+   "method": "Evaluation frame / chance level",
+   "paper": "n/a (house contract; digest 4.0 default writes AUPRC against the 900-frame base rate 0.1033)",
+   "what": "Scoring runs on the 161-row trigger subset (93 C->W = 1, 68 C->C = 0, 100 session clusters) and chance AP is that frame's own prevalence 0.578.",
+   "why": "The 900-frame's other 739 rows are W->C / W->W steps where the full arm was already wrong: a fire there is neither a rescue nor a false reset, so they belong to no denominator in the three-metric contract.  ``trigger_subset`` is the frozen t34 convention; the 0.1033 base rate is NEVER used as chance here."
+  },
+  {
+   "method": "parse-failure indicator",
+   "paper": "n/a (our T1 baseline, digest line 1189)",
+   "what": "``parse_fail_indicator(prediction, expects_call)`` takes the expected-call flag as an ARGUMENT; t33_labels.parse_fail_baseline reads ``target_has_tool_call`` off the row.",
+   "why": "Feature code may not read target fields (rule 4).  On the 161-row frame the two agree exactly: all 161 rows have target_has_tool_call=True, so EXPECTS_CALL_ALWAYS is equivalent there; in deployment the flag comes from the request's tools (``expects_call_from_tools``)."
+  }
+ ],
+ "expensive_block_choice": null,
+ "expensive_coverage": {
+  "balanced": true,
+  "coverage_neg": 0.0,
+  "coverage_pos": 0.0,
+  "n": 161,
+  "n_available": 0,
+  "ok": false,
+  "reason": "no stage-2 scores at all: the escalation branch is untestable"
+ },
+ "features_path": "results/t34/features_cascade_c2kv.jsonl",
+ "features_written": 161,
+ "frame": {
+  "cap_tokens": 128,
+  "n": 161,
+  "n_neg": 68,
+  "n_pos": 93,
+  "n_sessions": 100,
+  "n_with_predecessor": 15,
+  "prevalence_is_chance_ap": 0.577639751552795
+ },
+ "ladder": {
+  "declared": [
+   "cascade_parse_fail",
+   "s8_compression_ratio",
+   "s8_doc_chunks",
+   "s8_gist_per_doc",
+   "s9_ledger_gap",
+   "s10_hybrid_tail_frac"
+  ],
+  "n_rungs": 6,
+  "n_scored": 161,
+  "neutral_rank_imputations": {},
+  "orientations": {
+   "cascade_parse_fail": 1,
+   "s10_hybrid_tail_frac": 1,
+   "s8_compression_ratio": 1,
+   "s8_doc_chunks": 1,
+   "s8_gist_per_doc": -1,
+   "s9_ledger_gap": 1
+  },
+  "unusable": {
+   "s10_hybrid_tail_frac": "undefined on this face (all None)",
+   "s9_ledger_gap": "undefined on this face (all None)"
+  },
+  "usable": [
+   "s8_compression_ratio",
+   "s8_doc_chunks",
+   "s8_gist_per_doc"
+  ]
+ },
+ "length_control": {
+  "ctl_history_tokens": {
+   "auprc": 0.5454226757716026,
+   "auprc_ci95": [
+    0.4411390205958602,
+    0.6862775607570251
+   ],
+   "auroc": 0.45540796963946867,
+   "n_clusters": 100,
+   "n_scored": 161
+  },
+  "ctl_input_tokens": {
+   "auprc": 0.7832177134791491,
+   "auprc_ci95": [
+    0.6865226974868073,
+    0.8679887701244388
+   ],
+   "auroc": 0.6740986717267552,
+   "n_clusters": 100,
+   "n_scored": 161
+  },
+  "ctl_prompt_tokens": {
+   "auprc": 0.6709203256690867,
+   "auprc_ci95": [
+    0.5562566480516254,
+    0.7762015320211482
+   ],
+   "auroc": 0.6223908918406073,
+   "n_clusters": 100,
+   "n_scored": 161
+  },
+  "note": "each length alone as s_cheap (pre-registered length control)"
+ },
+ "oracle_trigger": {
+  "cost": {
+   "base_gpu_sec": 2068.0654,
+   "escalation_gpu_sec": 0.0,
+   "gpu_sec_per_step": 12.845126708074535,
+   "n_escalated": 93,
+   "n_escalated_unpriced": 93,
+   "relative_overhead": 0.0,
+   "total_gpu_sec": 2068.0654
+  },
+  "coverage": 1.0,
+  "coverage_hits": 93,
+  "false_reset": 0.0,
+  "false_resets": 0,
+  "family": "oracle",
+  "fires": 93,
+  "n": 161,
+  "n_neg": 68,
+  "n_pos": 93,
+  "precision": 1.0,
+  "prevalence": 0.577639751552795
+ },
+ "p_rows": [
+  {
+   "family": "candidate",
+   "oracle": {
+    "cost": {
+     "base_gpu_sec": 2068.0654,
+     "escalation_gpu_sec": 0.0,
+     "gpu_sec_per_step": 12.845126708074535,
+     "n_escalated": 0,
+     "n_escalated_unpriced": 0,
+     "relative_overhead": 0.0,
+     "total_gpu_sec": 2068.0654
+    },
+    "coverage": 0.12903225806451613,
+    "coverage_hits": 12,
+    "false_reset": 0.10294117647058823,
+    "false_resets": 7,
+    "fires": 19,
+    "ladder_refit_per_fold": false,
+    "n": 161,
+    "n_band_unavailable": 0,
+    "n_escalated": 0,
+    "n_neg": 68,
+    "n_pos": 93,
+    "n_threshold_combos": 40,
+    "p_realized_mean": 0.0,
+    "precision": 0.631578947368421,
+    "prevalence": 0.577639751552795,
+    "random_at_matched_rate": {
+     "coverage_ci": [
+      0.07526881720430108,
+      0.16129032258064516
+     ],
+     "coverage_mean": 0.11762903225806448,
+     "false_reset_ci": [
+      0.058823529411764705,
+      0.17647058823529413
+     ],
+     "false_reset_mean": 0.11853676470588234,
+     "n_fires": 19,
+     "precision_ci": [
+      0.3684210526315789,
+      0.7894736842105263
+     ],
+     "precision_mean": 0.5757631578947369,
+     "reps": 2000
+    },
+    "regime": "oracle_same_qid",
+    "select_by": "youden",
+    "selection_objective": 0.026091081593927895
+   },
+   "p": 0.0,
+   "practical": {
+    "cost": {
+     "base_gpu_sec": 2068.0654,
+     "escalation_gpu_sec": 0.0,
+     "gpu_sec_per_step": 12.845126708074535,
+     "n_escalated": 0,
+     "n_escalated_unpriced": 0,
+     "relative_overhead": 0.0,
+     "total_gpu_sec": 2068.0654
+    },
+    "coverage": 0.3333333333333333,
+    "coverage_hits": 31,
+    "false_reset": 0.4117647058823529,
+    "false_resets": 28,
+    "fires": 59,
+    "ladder_refit_per_fold": true,
+    "n": 161,
+    "n_band_unavailable": 0,
+    "n_escalated": 0,
+    "n_neg": 68,
+    "n_pos": 93,
+    "n_threshold_combos": 40,
+    "p_realized_mean": 0.0,
+    "precision": 0.5254237288135594,
+    "prevalence": 0.577639751552795,
+    "random_at_matched_rate": {
+     "coverage_ci": [
+      0.3010752688172043,
+      0.43010752688172044
+     ],
+     "coverage_mean": 0.36682795698924725,
+     "false_reset_ci": [
+      0.27941176470588236,
+      0.45588235294117646
+     ],
+     "false_reset_mean": 0.3659558823529411,
+     "n_fires": 59,
+     "precision_ci": [
+      0.4745762711864407,
+      0.6779661016949152
+     ],
+     "precision_mean": 0.5782203389830508,
+     "reps": 2000
+    },
+    "regime": "practical_cross_session",
+    "select_by": "youden",
+    "selection_objective": -0.0784313725490196
+   },
+   "transfer_gap_coverage": -0.2043010752688172,
+   "transfer_gap_note": "oracle regime = same-row calibration with labels visible (an optimistic bound over the threshold grid); the practical regime fits a DIFFERENT threshold pair per outer fold, so neither gap is sign-guaranteed at n=161",
+   "transfer_gap_primary": "transfer_gap_youden",
+   "transfer_gap_youden": 0.1045224541429475
+  }
+ ],
+ "refusals": [
+  {
+   "fix": "run the single-block slice-prefill + regenerate arm on the C->C rows too (RUNBOOK step 2)",
+   "p": 0.05,
+   "reason": "no stage-2 scores at all: the escalation branch is untestable"
+  },
+  {
+   "fix": "run the single-block slice-prefill + regenerate arm on the C->C rows too (RUNBOOK step 2)",
+   "p": 0.1,
+   "reason": "no stage-2 scores at all: the escalation branch is untestable"
+  },
+  {
+   "fix": "run the single-block slice-prefill + regenerate arm on the C->C rows too (RUNBOOK step 2)",
+   "p": 0.2,
+   "reason": "no stage-2 scores at all: the escalation branch is untestable"
+  },
+  {
+   "fix": "run the single-block slice-prefill + regenerate arm on the C->C rows too (RUNBOOK step 2)",
+   "p": 0.4,
+   "reason": "no stage-2 scores at all: the escalation branch is untestable"
+  },
+  {
+   "fix": "run the single-block slice-prefill + regenerate arm on the C->C rows too (RUNBOOK step 2)",
+   "p": 0.8,
+   "reason": "no stage-2 scores at all: the escalation branch is untestable"
+  },
+  {
+   "fix": "run the single-block slice-prefill + regenerate arm on the C->C rows too (RUNBOOK step 2)",
+   "p": 1.0,
+   "reason": "no stage-2 scores at all: the escalation branch is untestable"
+  }
+ ],
+ "s0_twin": {
+  "auprc": 0.5713326210817914,
+  "auroc": 0.4959677419354839,
+  "family": "control",
+  "note": "the SAME s_cheap on the FULL arm's rows (label-side control)"
+ },
+ "s_cheap": {
+  "auprc": 0.5823105291995787,
+  "auprc_ci95": [
+   0.4654798375134518,
+   0.7140096962260114
+  ],
+  "auroc": 0.4527197975964579,
+  "n_clusters": 100,
+  "n_distinct": 140
+ },
+ "strata": {
+  "censored_at_cap": {
+   "auprc": 0.608640643171666,
+   "auroc": 0.3965638148667602,
+   "n": 77,
+   "n_pos": 46,
+   "prevalence": 0.5974025974025974
+  },
+  "uncensored": {
+   "auprc": 0.5835020481095122,
+   "auroc": 0.4873490511788384,
+   "n": 84,
+   "n_pos": 47,
+   "prevalence": 0.5595238095238095
+  }
+ },
+ "winner_rule": {
+  "candidate": {
+   "auprc": 0.5823105291995787,
+   "auprc_ci95": [
+    0.4654798375134518,
+    0.7140096962260114
+   ],
+   "auroc": 0.4527197975964579,
+   "n_clusters": 100
+  },
+  "chance_ap": 0.577639751552795,
+  "chance_note": "evaluation-frame prevalence (161-row trigger subset), NOT the 900-frame base rate 0.1033",
+  "delta_auprc_vs_baseline": {
+   "ci95": [
+    -0.03893128229790893,
+    0.07346722902512524
+   ],
+   "ci_lower_gt_0": false,
+   "delta_auprc": 0.01298203420488453,
+   "n_scored": 161
+  },
+  "delta_auprc_vs_length_controls": {
+   "ctl_history_tokens": {
+    "ci95": [
+     -0.08911045317428923,
+     0.14557127678343487
+    ],
+    "ci_lower_gt_0": false,
+    "delta_auprc": 0.03688785342797607,
+    "n_scored": 161
+   },
+   "ctl_input_tokens": {
+    "ci95": [
+     -0.30765820433063595,
+     -0.08234900098149667
+    ],
+    "ci_lower_gt_0": false,
+    "delta_auprc": -0.20090718427957044,
+    "n_scored": 161
+   },
+   "ctl_prompt_tokens": {
+    "ci95": [
+     -0.21424271038883153,
+     0.055382547210579315
+    ],
+    "ci_lower_gt_0": false,
+    "delta_auprc": -0.08860979646950795,
+    "n_scored": 161
+   }
+  },
+  "delta_auprc_vs_s0_twin": {
+   "ci95": [
+    -0.04407150998323187,
+    0.06769928477789966
+   ],
+   "ci_lower_gt_0": false,
+   "delta_auprc": 0.010977908117787316,
+   "n_scored": 161
+  },
+  "failed_criteria": [
+   "three_metrics_vs_parse_fail_baseline",
+   "auprc_ci_lower_above_chance",
+   "delta_auprc_vs_s0_twin",
+   "delta_auprc_vs_ctl_input_tokens",
+   "delta_auprc_vs_ctl_history_tokens",
+   "delta_auprc_vs_ctl_prompt_tokens"
+  ],
+  "three_metrics_at_baseline_fire_count": {
+   "baseline": {
+    "coverage": 0.3763440860215054,
+    "false_reset": 0.4117647058823529,
+    "fires": 63,
+    "precision": 0.5555555555555556,
+    "ties_at_threshold": 63
+   },
+   "candidate": {
+    "coverage": 0.3763440860215054,
+    "false_reset": 0.4117647058823529,
+    "fires": 63,
+    "precision": 0.5555555555555556,
+    "ties_at_threshold": 1
+   },
+   "passes": false
+  },
+  "uncensored_stratum_direction": {
+   "auprc": 0.5835020481095122,
+   "auroc": 0.4873490511788384,
+   "checked": true,
+   "direction_holds": true,
+   "n": 84,
+   "prevalence": 0.5595238095238095,
+   "reason": null
+  },
+  "unchecked_criteria": [],
+  "verdict": "dead",
+  "verdict_note": "all clauses evaluated"
+ }
+}

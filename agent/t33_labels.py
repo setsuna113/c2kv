@@ -122,9 +122,16 @@ def build_label_frame(pairs: List[Tuple[Dict[str, Any], Dict[str, Any]]],
             # denominators / stratifiers (not features)
             "censored_at_cap": bool(c.get("generated_tokens", 0) >= _cap_tokens(manifest)),
             "censored_at_cap_full": bool(f.get("generated_tokens", 0) >= _cap_tokens(manifest)),
-            # parse-failure baseline over the COMPRESSED arm's own text only
-            "parse_fail_fire": parse_fail_baseline(c.get("prediction", ""),
-                                                   bool(c.get("target_has_tool_call"))),
+            # parse-failure baseline over the COMPRESSED arm's own text only:
+            # fires iff the emission is unparseable.  It reads NO target field
+            # (t34 audit: the previous gold gate `target_has_tool_call` made the
+            # L1 comparator depend on the label side; on the 161-row trigger
+            # subset the two definitions coincide because every such row expects
+            # a call).  The gold-gated variant is kept under its own LABEL-side
+            # name for diagnostics only.
+            "parse_fail_fire": parse_fail_baseline(c.get("prediction", "")),
+            "parse_fail_fire_gold_gated": parse_fail_baseline(
+                c.get("prediction", ""), bool(c.get("target_has_tool_call"))),
             # three-valued Diff-01 target (needs the full arm — label side only)
             "z_deferral": (1 if f.get("tool_name_match") and not c.get("tool_name_match")
                            else (-1 if not f.get("tool_name_match") and c.get("tool_name_match")
@@ -144,15 +151,22 @@ def _cap_tokens(manifest: Dict[str, Any]) -> int:
     return int(manifest.get("kv_recipe", {}).get("max_new_tokens", 128))
 
 
-def parse_fail_baseline(prediction: str, target_has_tool_call: bool) -> bool:
+def parse_fail_baseline(prediction: str, target_has_tool_call: Optional[bool] = None) -> bool:
     """The L1 baseline: fire iff the compressed arm's own emission is
-    unparseable while a tool call was expected.
+    unparseable.
+
+    ``target_has_tool_call`` is LABEL-SIDE information and must not gate a
+    deployable baseline; pass it ONLY for the diagnostic
+    ``parse_fail_fire_gold_gated`` column (None = the deployable,
+    prediction-only definition).  Where an "is a call expected" gate is
+    wanted on the feature side, derive it from the request's tools
+    (``t34_cascade.expects_call_from_tools``), never from the target.
 
     Uses the shared parser (t33_spanmap) so 'unparseable' means exactly what
     the span map could not strictly parse — censoring without a closing tag
     still counts as parseable when the JSON object itself balanced.
     """
-    if not target_has_tool_call:
+    if target_has_tool_call is not None and not target_has_tool_call:
         return False
     from t33_spanmap import parse_tool_call
     parsed = parse_tool_call(prediction or "")

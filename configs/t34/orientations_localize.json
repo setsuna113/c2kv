@@ -1,0 +1,14 @@
+{
+ "loc_edge_own_block_count": -1,
+ "loc_edge_own_max_strength": -1,
+ "loc_edge_typed_block_count": -1,
+ "loc_gap_raw_proposal": -1,
+ "loc_gap_second_proposal": -1,
+ "loc_proposal_n_values": -1,
+ "loc_rrf3_margin": -1,
+ "loc_rrf3_sigma_top1": -1,
+ "loc_sigma_bar_agg": -1,
+ "loc_sigma_paper_k1_proposal": -1,
+ "loc_sigma_top1_proposal": -1,
+ "loc_tag_jaccard_max": -1
+}

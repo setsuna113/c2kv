@@ -1,0 +1,15 @@
+{
+ "actual_compression_ratio": 1,
+ "cache_tokens": 1,
+ "compressed_history_tokens": 1,
+ "doc_chunks": 1,
+ "doc_tokens": 1,
+ "gist_tokens": 1,
+ "history_turns": 1,
+ "hybrid_top_k": -1,
+ "input_tokens": 1,
+ "kept_history_tokens": -1,
+ "pc_synthetic_signal": 1,
+ "prompt_tokens": 1,
+ "step_idx": 1
+}
