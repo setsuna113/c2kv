@@ -8,6 +8,10 @@ evaluation layout.
 from __future__ import annotations
 
 import json
+import os
+import runpy
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -15,6 +19,88 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from adapters import acon_adapter as A  # noqa: E402
+
+
+def test_bm25_patch_applies_and_imports_without_dense_stack(tmp_path, monkeypatch):
+    project_root = Path(__file__).resolve().parents[1]
+    default_acon_root = project_root.parent / "tmp" / "baselines" / "acon"
+    acon_root = Path(os.environ.get("ACON_ROOT", default_acon_root))
+    source_rel = Path("experiments/smolagents/search/retriever_server.py")
+    if not (acon_root / source_rel).is_file():
+        pytest.skip("set ACON_ROOT to the pinned microsoft/acon checkout")
+
+    staged_root = tmp_path / "acon"
+    staged_source = staged_root / source_rel
+    staged_source.parent.mkdir(parents=True)
+    shutil.copy2(acon_root / source_rel, staged_source)
+    patch_path = project_root / "benchmarks" / "acon_patches" / "0003-bm25-lazy-imports.patch"
+    subprocess.run(
+        ["git", "apply", "--ignore-space-change", str(patch_path)],
+        cwd=staged_root,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    stubs = tmp_path / "stubs"
+    (stubs / "pyserini" / "search").mkdir(parents=True)
+    (stubs / "pyserini" / "__init__.py").write_text("")
+    (stubs / "pyserini" / "search" / "__init__.py").write_text("")
+    (stubs / "pyserini" / "search" / "lucene.py").write_text(
+        "class _Doc:\n"
+        "    def raw(self): return '{}'\n"
+        "class LuceneSearcher:\n"
+        "    def __init__(self, path): self.path = path\n"
+        "    def doc(self, idx): return _Doc()\n"
+    )
+    (stubs / "uvicorn.py").write_text("def run(*args, **kwargs): pass\n")
+    (stubs / "fastapi.py").write_text(
+        "class FastAPI:\n"
+        "    def post(self, path): return lambda fn: fn\n"
+    )
+    (stubs / "pydantic.py").write_text("class BaseModel: pass\n")
+
+    monkeypatch.syspath_prepend(str(stubs))
+    for module in ("datasets", "faiss", "numpy", "torch", "tqdm", "transformers"):
+        monkeypatch.setitem(sys.modules, module, None)
+    monkeypatch.setattr(sys, "argv", [str(staged_source), "--index_path", "dummy-index"])
+    namespace = runpy.run_path(str(staged_source), run_name="acon_retriever_import_test")
+    assert type(namespace["retriever"]).__name__ == "BM25Retriever"
+    assert namespace["retriever"].contain_doc is True
+
+
+def test_pyserini_sparse_patch_removes_only_dense_exports(tmp_path):
+    site_packages = tmp_path / "site-packages"
+    init_path = site_packages / "pyserini" / "search" / "lucene" / "__init__.py"
+    init_path.parent.mkdir(parents=True)
+    prefix = "".join(f"# line {i}\n" for i in range(1, 24))
+    source = (
+        "JBagOfWordsQueryGenerator = autoclass('io.anserini.search.query.BagOfWordsQueryGenerator')\n"
+        "JDisjunctionMaxQueryGenerator = autoclass('io.anserini.search.query.DisjunctionMaxQueryGenerator')\n"
+        "JCovid19QueryGenerator = autoclass('io.anserini.search.query.Covid19QueryGenerator')\n"
+        "\n"
+        "from ._impact_searcher import LuceneImpactSearcher, SlimSearcher\n"
+        "from ._searcher import LuceneSearcher, LuceneFusionSearcher, LuceneSimilarities\n"
+        "from ._hnsw_searcher import LuceneHnswDenseSearcher, LuceneFlatDenseSearcher\n"
+    )
+    init_path.write_text(prefix + source)
+    patch_path = (
+        Path(__file__).resolve().parent
+        / "acon_patches"
+        / "0004-pyserini-sparse-imports.patch"
+    )
+    subprocess.run(
+        ["git", "apply", str(patch_path)],
+        cwd=site_packages,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    patched = init_path.read_text()
+    assert "from ._searcher import LuceneSearcher" in patched
+    assert "_impact_searcher" not in patched
+    assert "_hnsw_searcher" not in patched
+    assert patched.count("\n") == (prefix + source).count("\n") - 2
 
 
 def _write_jsonl(path: Path, rows):

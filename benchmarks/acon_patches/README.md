@@ -23,6 +23,21 @@ JSON `null`; AppWorld prints that API cost is unavailable and still records
 token counts. This fixes the upstream missing `gpt-4o` fallback without
 assigning a hosted-model price to local inference.
 
+Apply `0003-bm25-lazy-imports.patch` with `git apply --ignore-space-change`
+before launching the 8-objective QA
+retriever. The shipped server eagerly imports its optional dense-retrieval
+stack even when `retrieval_method="bm25"`. The patch defers those imports to
+the dense and external-corpus paths, so a stored-document Lucene index needs
+only Pyserini and the FastAPI server dependencies. Dense retrieval behavior is
+unchanged when its optional dependencies are installed.
+
+Pyserini `0.44.0` also exports its impact and HNSW searchers eagerly from
+`pyserini.search.lucene`, which imports the neural encoder stack before the
+BM25 `LuceneSearcher` can be used. Apply `0004-pyserini-sparse-imports.patch`
+from the virtual environment's `site-packages` directory. This task-local
+sparse installation deliberately stops exporting those two optional searcher
+families; its BM25 API and Lucene implementation are unchanged.
+
 Both runners then need only the served model name to NOT contain `gpt`,
 `o1`, `o3`, `o4` or `gemini` (those names are routed to the OpenAI / Gemini
 clients instead).  `c2kv-agent` is fine.
