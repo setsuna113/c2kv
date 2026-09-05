@@ -28,6 +28,8 @@ from adapters import (  # noqa: E402
     toolsandbox_adapter,
 )
 from adapters.base import RunContext  # noqa: E402
+from checkpoint_profile import ProfileError, resolve_checkpoint_profile  # noqa: E402
+from capabilities import run_preflight  # noqa: E402
 
 # --benchmark value -> adapter module.  Two names share acon_adapter (the
 # module dispatches on ctx.options["benchmark"]); add_arguments is called
@@ -49,7 +51,8 @@ assert all(module.NAME in ADAPTERS or name in getattr(module, "NAMES", ())
 def start_proxy(upstream: str, arm: str, port: int, log_dir: Path,
                 record_reference: str = "", reference: str = "",
                 backend: str = "sglang", doc_packing: str = "turn",
-                max_doc_length: int = 512, max_doc_num: int = 12):
+                max_doc_length: int = 512, max_doc_num: int = 12,
+                query_projection: str | None = None):
     log_path = log_dir / f"proxy_{arm}_{port}.jsonl"
     out_handle = open(log_dir / f"proxy_{arm}_{port}.out", "w")
     command = [
@@ -64,6 +67,8 @@ def start_proxy(upstream: str, arm: str, port: int, log_dir: Path,
         command += ["--record-reference", record_reference]
     if reference:
         command += ["--reference", reference]
+    if query_projection:
+        command += ["--query-projection", query_projection]
     proc = subprocess.Popen(
         command,
         stdout=out_handle,
@@ -114,6 +119,8 @@ def add_core_arguments(parser: argparse.ArgumentParser) -> None:
                         help="base URL for user-simulator/judge traffic (defaults to --upstream; only the agent arm proxy compresses)")
     parser.add_argument("--proxy-port", type=int, default=34100)
     parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--exact-out", action="store_true",
+                        help="use the supplied output directory verbatim (matrix cells)")
     # shared by tau2 (--max-concurrency) and acebench (--num-threads)
     parser.add_argument("--num-workers", type=int, default=4)
     # shared by tau2 (--num-tasks) and acon_qa (--limit)
@@ -135,14 +142,24 @@ def add_core_arguments(parser: argparse.ArgumentParser) -> None:
                              "tau2 agent/user LLMs and the BFCL handler "
                              "both use it; toolsandbox role keys are "
                              "separate, see --ts-agent)")
-    parser.add_argument("--doc-packing", default="turn", choices=["turn", "message"],
-                        help="proxy doc packing: 'turn' = training format "
-                             "(default), 'message' = pre-2026-09 per-message")
-    parser.add_argument("--max-doc-length", type=int, default=512,
-                        help="training regime = 512 (ckpt-1088); 768 was the "
-                             "old D-harness caliber")
-    parser.add_argument("--max-doc-num", type=int, default=12,
-                        help="training regime = 12 (ckpt-1088)")
+    parser.add_argument("--checkpoint", type=Path,
+                        help="local checkpoint served by --upstream")
+    parser.add_argument("--checkpoint-profile", type=Path,
+                        help="explicit checkpoint profile JSON; otherwise discovered beside checkpoint")
+    parser.add_argument("--reference-profile", choices=["checkpoint-1088"],
+                        help="explicit historical reference recipe; its missing training provenance remains recorded")
+    parser.add_argument("--allow-unprofiled", action="store_true",
+                        help="opt into the legacy 512/12 recipe without claiming checkpoint alignment")
+    parser.add_argument("--query-projection", choices=["base", "gist"],
+                        help="explicit legacy checkpoint query regime; checked against any saved profile")
+    parser.add_argument("--capability-features", default="",
+                        help="comma-separated verified server/harness capabilities")
+    parser.add_argument("--doc-packing", choices=["turn", "message"],
+                        help="must agree with the checkpoint profile when supplied")
+    parser.add_argument("--max-doc-length", type=int,
+                        help="checkpoint profile document token limit")
+    parser.add_argument("--max-doc-num", type=int,
+                        help="checkpoint profile maximum history documents")
     # shared by acon_* (agent step cap) and acebench (--max-dialog-turns)
     parser.add_argument("--max-iter", type=int, default=None,
                         help="acon_qa/acon_appworld: agent step cap (runner defaults "
@@ -180,24 +197,65 @@ def build_context(args: argparse.Namespace, request_log: Path) -> RunContext:
     )
 
 
+def resolve_run_profile(args: argparse.Namespace) -> dict:
+    """Resolve once and reject conflicting CLI values before any model call."""
+    if args.checkpoint is None:
+        if args.checkpoint_profile or args.reference_profile:
+            raise ProfileError("--checkpoint is required with a checkpoint/reference profile")
+        if not args.allow_unprofiled:
+            raise ProfileError("supply --checkpoint (and its profile), or explicitly use --allow-unprofiled")
+        for key, default in (("doc_packing", "turn"), ("max_doc_length", 512),
+                             ("max_doc_num", 12)):
+            if getattr(args, key) is None:
+                setattr(args, key, default)
+        return {"profile_kind": "unprofiled", "serving": {
+            key: getattr(args, key) for key in
+            ("doc_packing", "max_doc_length", "max_doc_num", "query_projection")},
+            "missing": ["checkpoint identity and training alignment are unverified"]}
+    profile = resolve_checkpoint_profile(
+        args.checkpoint, profile_path=args.checkpoint_profile,
+        reference_profile=args.reference_profile,
+        query_projection=args.query_projection, require_serving_e2e=True)
+    serving = profile["serving"]
+    for key in ("doc_packing", "max_doc_length", "max_doc_num", "query_projection"):
+        explicit = getattr(args, key)
+        resolved = serving[key]
+        if explicit is not None and explicit != resolved:
+            raise ProfileError(f"--{key.replace('_', '-')}={explicit!r} conflicts with checkpoint profile {resolved!r}")
+        setattr(args, key, resolved)
+    return profile
+
+
 def main(argv=None):
     parser = build_parser()
     args = parser.parse_args(argv)
+    try:
+        profile = resolve_run_profile(args)
+    except ProfileError as exc:
+        parser.error(str(exc))
+    preflight = run_preflight(args.benchmark, args.arm, args.backend,
+                              options=vars(args), profile=profile)
 
     sha = _git_short_sha()
     if sha not in (args.run_name or ""):
         args.run_name = f"{args.run_name}_{sha}"
-    if sha not in str(args.out):
+    if not args.exact_out and sha not in str(args.out):
         args.out = args.out.with_name(f"{args.out.name}_{sha}")
 
     args.out.mkdir(parents=True, exist_ok=True)
+    (args.out / "checkpoint_profile.resolved.json").write_text(
+        json.dumps(profile, indent=2, ensure_ascii=False), encoding="utf-8")
+    (args.out / "preflight.json").write_text(
+        json.dumps(preflight.as_dict(), indent=2, ensure_ascii=False), encoding="utf-8")
+    preflight.raise_for_errors()
     log_dir = args.out / "logs"
     log_dir.mkdir(exist_ok=True)
     proxy_proc, request_log = start_proxy(
         args.upstream, args.arm, args.proxy_port, log_dir,
         record_reference=args.record_reference, reference=args.reference,
         backend=args.backend, doc_packing=args.doc_packing,
-        max_doc_length=args.max_doc_length, max_doc_num=args.max_doc_num)
+        max_doc_length=args.max_doc_length, max_doc_num=args.max_doc_num,
+        query_projection=args.query_projection)
     try:
         # every adapter owns its own "/v1" (adapters/base.py:v1) and its own
         # cwd; run.py hands over the bare proxy URL and nothing else
@@ -209,6 +267,8 @@ def main(argv=None):
     summary["benchmark"] = args.benchmark
     summary["backend"] = args.backend
     summary["model"] = args.model
+    summary["checkpoint_profile"] = profile
+    summary["preflight"] = preflight.as_dict()
     if args.arm in ("hiagent", "acon_hist", "acon_obs"):
         # text-arm consumers: degeneration and compressor cost surfaced at
         # the RUN level (the per-request stats live in the request log)

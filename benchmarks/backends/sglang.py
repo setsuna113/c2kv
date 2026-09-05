@@ -472,15 +472,16 @@ class SglangBackend(Backend):
     def _kv_reuse_carrier(method: str, key_hash: str) -> Dict[str, Any]:
         """Repair-only carrier for the blended history span; ``in_place`` so
         the query continues at the span's absolute end (the history-KV
-        carrier relies on the legacy prefix rule for the same effect).  No
-        ``c2kv_use_gist_projection`` is sent: the projection regime is the
-        server's ``--c2kv-query-proj`` decision, read per row from
-        ``c2kv_query_proj_effective``."""
+        carrier relies on the legacy prefix rule for the same effect).
+        CacheBlend reuses base-model KV, so its query must also use the base
+        projections even when this endpoint serves a gist-query checkpoint.
+        """
         return {
             "role": "user",
             "content": f"[{method} reused history kv]",
             "c2kv_repair_only_key_hashes": [key_hash],
             "c2kv_repair_placement": "in_place",
+            "c2kv_use_gist_projection": False,
         }
 
     def _apply_kv_reuse(self, messages: List[Dict[str, Any]],
@@ -543,6 +544,10 @@ class SglangBackend(Backend):
                      context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         out = dict(payload)
         out.pop("c2kv_repair", None)  # request-level repair is hf_server-only
+        if getattr(arm, "history_kv", None) or getattr(arm, "kv_reuse", None):
+            # The raw-KV baselines have a fixed query regime. Override both
+            # the server default and a profile supplied by the proxy.
+            out["c2kv_use_gist_projection"] = False
         # Same chat_template_kwargs as the two FRAME-DEFINING endpoints
         # (extract() and repair_extract_messages() above both send
         # enable_thinking=False).  Every position this bench measures --

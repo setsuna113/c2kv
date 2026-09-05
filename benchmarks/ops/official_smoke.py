@@ -38,7 +38,11 @@ def run_case(args, name):
                "--model", args.model, "--proxy-port", str(port), "--backend", "sglang",
                "--num-workers", "1", "--out", str(cell),
                "--run-name", f"c2kv_integration_{name}_{uuid.uuid4().hex[:12]}",
+               "--checkpoint", str(args.checkpoint),
                *CASES[name]]
+    for key in ("checkpoint_profile", "reference_profile", "query_projection", "capability_features"):
+        if getattr(args, key):
+            command += ["--" + key.replace("_", "-"), str(getattr(args, key))]
     env = dict(os.environ, PATH=str(python.parent) + os.pathsep + os.environ.get("PATH", ""),
                TS_PARALLEL="1", NO_PROXY="127.0.0.1,localhost", no_proxy="127.0.0.1,localhost",
                OPENAI_API_KEY="EMPTY", OPENAI_API_KEY_USER="EMPTY")
@@ -86,6 +90,11 @@ def main():
     parser.add_argument("--upstream", required=True)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--model", default="c2kv-agent")
+    parser.add_argument("--checkpoint", type=Path, required=True)
+    parser.add_argument("--checkpoint-profile", type=Path)
+    parser.add_argument("--reference-profile", choices=["checkpoint-1088"])
+    parser.add_argument("--query-projection", choices=["base", "gist"])
+    parser.add_argument("--capability-features", default="")
     parser.add_argument("--arm", default="c2kv")
     parser.add_argument("--benchmarks", nargs="+", choices=list(CASES), default=list(CASES))
     parser.add_argument("--env-root", type=Path, default=Path("/home/liuyancheng/envs"))

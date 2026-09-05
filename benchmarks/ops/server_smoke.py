@@ -61,7 +61,7 @@ def synthetic_payload(model):
     }
 
 
-def check_responses(arm_name, responses, rows, query_projection):
+def check_responses(arm_name, responses, rows, query_projection, server_query_projection=None):
     arm = get_arm(arm_name)
     failures = []
     def require(condition, message):
@@ -75,7 +75,8 @@ def check_responses(arm_name, responses, rows, query_projection):
                 prefix + "generation did not finish")
         require(row.get("status") == "ok", prefix + f"proxy status={row.get('status')}")
         require(isinstance(row.get("kv_resident_tokens"), int), prefix + "KV accounting missing")
-        require(row.get("c2kv_query_proj") == query_projection, prefix + "server projection flag mismatch")
+        require(row.get("c2kv_query_proj") == (server_query_projection or query_projection),
+                prefix + "server projection flag mismatch")
         if arm.compress_history:
             require((row.get("n_gist_messages") or 0) > 0, prefix + "no history compressed")
             require(row.get("c2kv_query_proj_effective") == query_projection,
@@ -92,6 +93,9 @@ def check_responses(arm_name, responses, rows, query_projection):
                     prefix + "repair placement mismatch")
             frame = row.get("repair_frame") or {}
             require(frame.get("ok") is not False, prefix + "repair/gist frame mismatch")
+        if arm.kv_reuse or arm.history_kv:
+            require(row.get("c2kv_query_proj_effective") == "base",
+                    prefix + "raw-KV baseline must use base query projections")
         if arm.history_kv:
             require(row.get("history_kv_method") == arm.history_kv["method"],
                     prefix + "history-KV method not reported")
@@ -120,7 +124,8 @@ def run_arm(args, arm_name):
                "--arm", arm_name, "--backend", "sglang", "--port", str(port),
                "--request-log", str(log_path), "--doc-packing", "turn",
                "--max-doc-length", str(args.max_doc_length),
-               "--max-doc-num", str(args.max_doc_num)]
+               "--max-doc-num", str(args.max_doc_num),
+               "--query-projection", args.query_projection]
     responses = []
     errors = []
     with (arm_dir / "proxy.log").open("w", encoding="utf-8") as output:
@@ -154,7 +159,8 @@ def run_arm(args, arm_name):
     rows = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines()
             if line.strip()] if log_path.exists() else []
     (arm_dir / "responses.json").write_text(json.dumps(responses, indent=2), encoding="utf-8")
-    errors.extend(check_responses(arm_name, responses, rows, args.query_projection))
+    errors.extend(check_responses(arm_name, responses, rows, args.query_projection,
+                                   args.server_query_projection))
     if len(responses) != 2:
         errors.append("expected two completed requests")
     return {"arm": arm_name, "passed": not errors, "errors": errors,
@@ -168,6 +174,8 @@ def main():
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--arms", nargs="+", default=list(DEFAULT_ARMS))
     parser.add_argument("--query-projection", choices=("base", "gist"), default="base")
+    parser.add_argument("--server-query-projection", choices=("base", "gist"),
+                        help="expected server default, if distinct from the per-request query regime")
     parser.add_argument("--max-doc-length", type=int, default=512)
     parser.add_argument("--max-doc-num", type=int, default=12)
     args = parser.parse_args()

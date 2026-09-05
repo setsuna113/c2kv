@@ -53,9 +53,16 @@ CLI_SURFACE = [
     ("--ts-scenarios", "", False),
     ("--ts-agent", "", False),
     ("--ts-user", "", False),
-    ("--doc-packing", "turn", False),
-    ("--max-doc-length", 512, False),
-    ("--max-doc-num", 12, False),
+    ("--doc-packing", None, False),
+    ("--max-doc-length", None, False),
+    ("--max-doc-num", None, False),
+    ("--checkpoint", None, False),
+    ("--checkpoint-profile", None, False),
+    ("--reference-profile", None, False),
+    ("--allow-unprofiled", False, False),
+    ("--query-projection", None, False),
+    ("--capability-features", "", False),
+    ("--exact-out", False, False),
     ("--acon-dir", None, False),
     ("--acebench-dir", None, False),
     ("--split", "", False),
@@ -130,6 +137,37 @@ def test_build_context_defaults(tmp_path):
     assert ctx.request_log == tmp_path / "proxy.jsonl"
     assert ctx.options["benchmark"] == "tau2"
     assert ctx.options["task_set"] == "airline"
+
+
+def test_g_profile_drives_query_and_document_geometry(tmp_path):
+    checkpoint = tmp_path / "g_hist_s43" / "checkpoint-588"
+    checkpoint.mkdir(parents=True)
+    (checkpoint / "config.json").write_text(json.dumps({
+        "model_type": "qwen3", "gist_param": "qkv", "gist_type": "dynamic-interleave",
+        "gist_overlap": 64, "gist_residual_type": "embed-mean"}), encoding="utf-8")
+    (checkpoint.parent / "run_config.json").write_text(json.dumps({
+        "doc_mode": "history_only", "tools_in_system": True,
+        "max_doc_length": 768, "max_doc_num": 16, "ratios": "8,8,4,16"}), encoding="utf-8")
+    (checkpoint.parent / "train_manifest_used.json").write_text(json.dumps({
+        "doc_mode": "history_only", "tools_in_system": True}), encoding="utf-8")
+    args = _args(["--benchmark", "tau2", *BASE_ARGV, "--checkpoint", str(checkpoint),
+                  "--query-projection", "gist"])
+    profile = run.resolve_run_profile(args)
+    assert (args.doc_packing, args.max_doc_length, args.max_doc_num, args.query_projection) == (
+        "turn", 768, 16, "gist")
+    assert profile["profile_kind"] == "legacy_artifacts"
+    args.max_doc_length = 512
+    with pytest.raises(run.ProfileError, match="conflicts with checkpoint profile"):
+        run.resolve_run_profile(args)
+
+
+def test_run_requires_explicit_legacy_opt_in():
+    args = _args(["--benchmark", "tau2", *BASE_ARGV])
+    with pytest.raises(run.ProfileError, match="allow-unprofiled"):
+        run.resolve_run_profile(args)
+    args.allow_unprofiled = True
+    assert run.resolve_run_profile(args)["profile_kind"] == "unprofiled"
+    assert (args.max_doc_length, args.max_doc_num) == (512, 12)
 
 
 def test_build_context_user_upstream_split():
@@ -285,18 +323,18 @@ def test_bfcl_dispatch_adds_v1_and_chdirs(monkeypatch, tmp_path):
     assert summary["cost_join"].startswith("not joinable:")
 
 
-def test_h200_matrix_smoke_uses_unified_runner_flags():
+def test_h200_matrix_delegates_to_generic_runner_with_smoke_flags():
     matrix = (Path(__file__).resolve().parent / "run_matrix_h200.sh").read_text(
         encoding="utf-8")
-    runner_calls = matrix.rsplit('case "$benchmark" in', 1)[1]
-    assert '--model "$SERVED_MODEL_NAME"' in runner_calls
-    assert "--run-ids" in runner_calls
-    assert "--ts-scenarios" in runner_calls
-    assert "--tau2-num-trials" in runner_calls
-    assert "--tau2-max-steps" in runner_calls
-    assert "--tau2-timeout" in runner_calls
-    assert "--served-model-name" not in runner_calls
-    assert "--toolsandbox-scenarios" not in runner_calls
+    assert '"$REPO_ROOT/benchmarks/matrix.py"' in matrix
+    assert "--execute" in matrix
+    assert '"$REPO_ROOT/benchmarks/run.py"' not in matrix
+    for flag in (
+        "--run-ids", "--ts-scenarios", "--tau2-num-trials",
+        "--tau2-max-steps", "--tau2-timeout", "--checkpoint-profile",
+        "--doc-packing", "--max-doc-length", "--max-doc-num",
+    ):
+        assert flag in matrix
 
 
 def test_cli_accepts_new_benchmarks():
@@ -346,6 +384,9 @@ def _stub_run(monkeypatch, tmp_path, summary, arm="c2kv", extra_argv=()):
 
     monkeypatch.setattr(run, "start_proxy", fake_start_proxy)
     monkeypatch.setattr(run, "_git_short_sha", lambda: "ab12cd3")
+    monkeypatch.setattr(run, "run_preflight", lambda *a, **k:
+                        type("Ready", (), {"raise_for_errors": lambda self: None,
+                                            "as_dict": lambda self: {"ok": True}})())
     monkeypatch.setitem(run.ADAPTERS, "tau2",
                         type("Stub", (), {
                             "NAME": "tau2",
@@ -354,7 +395,7 @@ def _stub_run(monkeypatch, tmp_path, summary, arm="c2kv", extra_argv=()):
                                 lambda ctx: (seen.update(ctx=ctx), dict(summary))[1]),
                         }))
     run.main(["--benchmark", "tau2", "--arm", arm, "--upstream", "http://up:35000",
-              "--out", str(tmp_path / "outdir"), *extra_argv])
+              "--out", str(tmp_path / "outdir"), "--allow-unprofiled", *extra_argv])
     seen["proc"] = proc
     return seen
 

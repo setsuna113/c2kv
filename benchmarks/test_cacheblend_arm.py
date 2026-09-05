@@ -202,7 +202,10 @@ class TestWire:
         post = FakePost(responses if responses is not None
                         else {"/v1/c2kv/repair_extract": _cacheblend_ok})
         backend = SglangBackend(post)
-        payload = {"model": "c2kv-agent", "messages": out, "tools": _tools()}
+        # Simulate a G checkpoint profile on the shared endpoint. The raw-KV
+        # baseline must override this query mode at both protocol levels.
+        payload = {"model": "c2kv-agent", "messages": out, "tools": _tools(),
+                   "c2kv_use_gist_projection": True}
         prepared = backend.prepare_chat(
             payload, arm, None,
             context={"conversation_id": "c", "history_kv": None, "kv_reuse": ctx})
@@ -239,7 +242,8 @@ class TestWire:
         carrier = msgs[1]
         assert carrier["c2kv_repair_only_key_hashes"] == ["cb-cacheblend"]
         assert carrier["c2kv_repair_placement"] == "in_place"
-        assert "c2kv_use_gist_projection" not in carrier
+        assert carrier["c2kv_use_gist_projection"] is False
+        assert prepared["c2kv_use_gist_projection"] is False
         assert msgs[2]["content"] == "current question"
         hint = prepared["c2kv_kv_memory_hint"]
         # the whole span stays resident; the saving is compute

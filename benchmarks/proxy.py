@@ -119,6 +119,7 @@ _log_lock = threading.Lock()
 # training; 768/16 (the old D-line harness caliber) is available by flag
 # but shifts every compression arm off its trained regime.
 DOC_PACKING = "turn"
+QUERY_PROJECTION = None
 MAX_DOC_LENGTH = 512
 MAX_DOC_NUM = 12
 DOC_PACKINGS = ("turn", "message")
@@ -1144,6 +1145,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
             # request fail "repair target has no c2kv_key_hash"
             staged = dict(payload)
             staged["messages"] = out_messages
+            if QUERY_PROJECTION is not None and BACKEND.name == "sglang":
+                staged["c2kv_use_gist_projection"] = QUERY_PROJECTION == "gist"
             if getattr(BACKEND, "wants_request_context", False):
                 # only backends that asked for it (base.Backend
                 # .wants_request_context); hfserver keeps its 3-arg signature
@@ -1386,7 +1389,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
 
 def main(argv=None):
     global ARM, BACKEND, UPSTREAM, REQUEST_LOG_PATH
-    global DOC_PACKING, MAX_DOC_LENGTH, MAX_DOC_NUM
+    global DOC_PACKING, MAX_DOC_LENGTH, MAX_DOC_NUM, QUERY_PROJECTION
     textarms.reset_state()  # fresh caches/state per proxy process
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--upstream", required=True,
@@ -1401,20 +1404,23 @@ def main(argv=None):
                         help="append a reference-trajectory row per request (full-arm run)")
     parser.add_argument("--reference", default="",
                         help="reference jsonl to diff against (recover arms)")
+    parser.add_argument("--query-projection", choices=["base", "gist"],
+                        help="checkpoint query projection; raw-KV baselines always use base")
     parser.add_argument("--doc-packing", default=DOC_PACKING, choices=DOC_PACKINGS,
                         help="how compressed history is cut into docs: 'turn' = "
                              "the training format (default), 'message' = one doc "
                              "per message (pre-2026-09 bench numbers)")
     parser.add_argument("--max-doc-length", type=int, default=MAX_DOC_LENGTH,
                         help="turn packing: split docs above this many template "
-                             "tokens (D-line caliber 768; ckpt-1088 trained at 512)")
+                             "tokens; supplied by the checkpoint profile")
     parser.add_argument("--max-doc-num", type=int, default=MAX_DOC_NUM,
                         help="turn packing: keep doc 0 + the last N-1 docs, drop "
-                             "the rest (D-line caliber 16; ckpt-1088 trained at 12)")
+                             "the rest; supplied by the checkpoint profile")
     args = parser.parse_args(argv)
     DOC_PACKING = args.doc_packing
     MAX_DOC_LENGTH = int(args.max_doc_length)
     MAX_DOC_NUM = int(args.max_doc_num)
+    QUERY_PROJECTION = args.query_projection
     ARM = get_arm(args.arm)
     UPSTREAM = args.upstream.rstrip("/")
     REQUEST_LOG_PATH = args.request_log
