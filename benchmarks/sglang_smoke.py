@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Mapping
 import json
 import os
 import re
@@ -398,15 +399,41 @@ def _prologue_token_len(checkpoint: Path) -> int:
 
     tokenizer = AutoTokenizer.from_pretrained(checkpoint, local_files_only=True)
     messages = [{"role": "system", "content": S6_SYSTEM}]
+    # The pinned server uses c2kv_tools_dump=full: Tool.model_validate()
+    # discards client-only fields (for example BFCL's function.response) and
+    # model_dump() materializes the Function.strict default. Mirror that
+    # exact prompt surface instead of tokenizing the caller's loose objects.
+    tools = []
+    for tool in S6_TOOLS:
+        function = tool["function"]
+        tools.append({
+            "type": tool.get("type", "function"),
+            "function": {
+                "description": function.get("description"),
+                "name": function["name"],
+                "parameters": function.get("parameters"),
+                "strict": bool(function.get("strict", False)),
+            },
+        })
     try:
         ids = tokenizer.apply_chat_template(
-            messages, tools=S6_TOOLS, tokenize=True,
+            messages, tools=tools, tokenize=True,
             add_generation_prompt=False, enable_thinking=False,
         )
     except TypeError:  # template without an enable_thinking knob
         ids = tokenizer.apply_chat_template(
-            messages, tools=S6_TOOLS, tokenize=True, add_generation_prompt=False,
+            messages, tools=tools, tokenize=True, add_generation_prompt=False,
         )
+    # Transformers 5 returns a BatchEncoding by default; ``len`` then counts
+    # mapping keys (normally input_ids + attention_mask), not tokens.
+    if isinstance(ids, Mapping):
+        ids = ids["input_ids"]
+    if hasattr(ids, "tolist"):
+        ids = ids.tolist()
+    if ids and isinstance(ids[0], list):
+        if len(ids) != 1:
+            raise RuntimeError("expected one rendered prologue")
+        ids = ids[0]
     return len(ids)
 
 

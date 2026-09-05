@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
+import types
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -325,6 +327,22 @@ def test_smoke_gate_uses_resolved_profile_instead_of_proxy_defaults(tmp_path):
         "--max-doc-length", "768",
         "--query-projection", "gist",
     ]
+
+
+def test_prologue_token_count_handles_transformers5_batch_encoding(tmp_path, monkeypatch):
+    class _Tokenizer:
+        @staticmethod
+        def apply_chat_template(messages, **kwargs):
+            tools = kwargs["tools"]
+            assert all(tool["function"]["strict"] is False for tool in tools)
+            assert all("response" not in tool["function"] for tool in tools)
+            return {"input_ids": [list(range(318))], "attention_mask": [[1] * 318]}
+
+    fake = types.SimpleNamespace(
+        AutoTokenizer=types.SimpleNamespace(from_pretrained=lambda *_args, **_kwargs: _Tokenizer())
+    )
+    monkeypatch.setitem(sys.modules, "transformers", fake)
+    assert sglang_smoke._prologue_token_len(tmp_path) == 318
 
 
 def test_h200_wrapper_delegates_cells_to_generic_matrix():
