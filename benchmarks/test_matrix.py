@@ -49,6 +49,20 @@ def test_plan_is_explicit_and_profile_bound(tmp_path):
     assert Path(cell["status_path"]).parent.name == "status"
 
 
+def test_toolsandbox_option_binds_preflight_and_execution_to_the_same_checkout(tmp_path):
+    root = tmp_path / "selected-ts"
+    roles = root / "tool_sandbox" / "roles"
+    roles.mkdir(parents=True)
+    for role, marker in (("agent", "OPENAI_BASE_URL"), ("user", "TOOLSANDBOX_USER_BASE_URL")):
+        (roles / f"openai_api_{role}.py").write_text(
+            marker + "\nif not openai_response_message.tool_calls:\n")
+    spec = _spec()
+    spec["benchmarks"] = {"toolsandbox": {"options": {"toolsandbox_dir": str(root)}}}
+    cell = matrix.build_plan(spec, tmp_path / "out")["cells"][0]
+    assert cell["preflight"]["ok"]
+    assert cell["command"][cell["command"].index("--toolsandbox-dir") + 1] == str(root)
+
+
 def test_execute_requires_summary_and_resume_matches_exact_fingerprint(tmp_path):
     plan = matrix.build_plan(_spec(), tmp_path / "out", environ=_env(tmp_path))
     cell = plan["cells"][0]
