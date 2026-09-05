@@ -8,9 +8,11 @@ an empty compressor result must raise, never cache.
 """
 from __future__ import annotations
 
+import io
 import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -34,6 +36,39 @@ def _fake_compress_empty(payload):
 
 def _reset():
     textarms.reset_state()
+
+
+def test_compressor_failure_is_logged_as_textarm_error(monkeypatch, tmp_path):
+    """A failure before _apply_text_arm returns still gets the text-arm label."""
+    import proxy as proxy_mod
+
+    log = tmp_path / "requests.jsonl"
+    monkeypatch.setattr(
+        proxy_mod, "ARM", SimpleNamespace(name="acon_hist", text_policy="acon_hist"))
+    monkeypatch.setattr(proxy_mod, "BACKEND", SimpleNamespace(name="fake"))
+    monkeypatch.setattr(proxy_mod, "REQUEST_LOG_PATH", str(log))
+
+    def fail_before_stats(payload, arm, conv):
+        raise textarms.TextarmCompressorError("compressor failed")
+
+    monkeypatch.setattr(proxy_mod, "_apply_text_arm", fail_before_stats)
+    body = json.dumps({
+        "model": "m",
+        "messages": [{"role": "user", "content": "question"}],
+    }).encode("utf-8")
+    handler = proxy_mod.ProxyHandler.__new__(proxy_mod.ProxyHandler)
+    handler.path = "/v1/chat/completions"
+    handler.headers = {"Content-Length": str(len(body))}
+    handler.rfile = io.BytesIO(body)
+    sent = {}
+    handler._send_json = lambda code, obj: sent.update(code=code, obj=obj)
+
+    handler.do_POST()
+
+    row = json.loads(log.read_text(encoding="utf-8"))
+    assert sent["code"] == 502
+    assert row["status"] == "textarm_error"
+    assert row["error_kind"] == "textarm_error"
 
 
 # ---- HiAgent -----------------------------------------------------------------

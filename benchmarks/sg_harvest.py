@@ -129,6 +129,7 @@ def costs(arm: str) -> dict | None:
 
 
 MATRIX2_ARMS = ["full", "c2kv", "hybrid",
+                "cacheblend_r16", "cacheblend_r15_k",
                 "hiagent", "acon_hist", "acon_obs"]
 # audit ruling 5 labels (read by the harvest table, not just arms.py)
 MATRIX2_LABELS = {
@@ -219,7 +220,8 @@ def matrix2_harvest(json_out: str | None = None) -> dict:
                     continue
                 d = json.loads(line)
                 if d.get("total_count") is not None:
-                    print(f"| BFCL | {arm} | {d['total_count']} | "
+                    print(f"| BFCL | {arm} | {MATRIX2_LABELS.get(arm, '')} "
+                          f"| {d['total_count']} | "
                           f"acc {round(d['accuracy'], 4)} "
                           f"({d['correct_count']}/{d['total_count']}) "
                           f"| {bfcl_note} |")

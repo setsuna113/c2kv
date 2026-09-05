@@ -91,6 +91,8 @@ class TextarmCompressorError(RuntimeError):
     empty completion).  Must surface as an infrastructure error, never as
     an empty summary that gets cached for the rest of the conversation."""
 
+    kind = "textarm_error"
+
 
 def compressor_payload(policy: str, model: str, system_text: str,
                        user_text: str) -> Dict[str, Any]:
