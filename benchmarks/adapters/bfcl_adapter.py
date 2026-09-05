@@ -264,8 +264,9 @@ def run_bfcl(base_url: str, categories: str = "multi_turn_base",
 def run_cli(argv):
     from bfcl_eval.__main__ import cli
 
-    sys.argv = ["bfcl"] + argv
-    cli()
+    # Typer's standalone mode raises SystemExit(0) after generate, which
+    # would skip evaluate, terminal checks and the unified run summary.
+    cli(args=argv, prog_name="bfcl", standalone_mode=False)
 
 
 def main(argv=None) -> None:

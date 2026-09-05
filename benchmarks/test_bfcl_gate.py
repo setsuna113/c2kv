@@ -5,11 +5,35 @@ import json
 import os
 import sys
 from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import terminal_check  # noqa: E402
 from adapters import bfcl_adapter  # noqa: E402
+
+
+def test_embedded_cli_returns_to_run_evaluation(monkeypatch):
+    typer = pytest.importorskip("typer")
+    cli = typer.Typer()
+    completed = []
+
+    @cli.command()
+    def generate():
+        completed.append("generate")
+
+    @cli.command()
+    def evaluate():
+        completed.append("evaluate")
+
+    monkeypatch.setitem(sys.modules, "bfcl_eval.__main__", SimpleNamespace(cli=cli))
+    original_argv = list(sys.argv)
+    bfcl_adapter.run_cli(["generate"])
+    bfcl_adapter.run_cli(["evaluate"])
+    assert completed == ["generate", "evaluate"]
+    assert sys.argv == original_argv
 
 
 def _results(root: Path, handler: str, family: str, category: str, ids):
