@@ -57,11 +57,22 @@ def run_case(args, name):
                     raise RuntimeError(f"expected one summary, found {len(summaries)}")
                 summary = json.loads(summaries[0].read_text(encoding="utf-8"))
                 result["summary"] = str(summaries[0])
-                result["n"] = summary.get("n")
+                result["n"] = (summary.get("n_scored") if name == "bfcl"
+                               else summary.get("n"))
                 requests = summary.get("request_log_summary") or {}
                 result["n_ok_requests"] = requests.get("n_ok", 0)
-                if result["n"] != 1 or result["n_ok_requests"] < 1:
+                if (result["n"] != 1 or result["n_ok_requests"] < 1
+                        or requests.get("n_error", 0)):
                     raise RuntimeError("one scored case with live proxy requests is required")
+                if name == "bfcl":
+                    score = (Path(summary["bfcl_project_root"]) / "score" /
+                             f"c2kv-{args.arm.replace('_', '-')}" / "multi_turn" /
+                             "BFCL_v4_multi_turn_base_score.json")
+                    with score.open(encoding="utf-8") as handle:
+                        official_score = json.loads(handle.readline())
+                    if official_score.get("total_count") != 1:
+                        raise RuntimeError("official BFCL scorer did not score exactly one case")
+                    result["official_score"] = str(score)
                 result["passed"] = True
         except Exception as error:
             result["error"] = f"{type(error).__name__}: {error}"
