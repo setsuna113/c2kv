@@ -372,6 +372,11 @@ def _dump_train_manifest(
         "eval_qids": [example.qid for example in eval_examples],
     }
     if train_datasets:
+        # Post-skip training ROW count.  ``num_train_examples`` above is the
+        # pre-skip example count; HF derives max_steps from the rows that
+        # actually survive, so a dose/step calibration that divides by the
+        # example count over-estimates steps_per_epoch by the skip rate.
+        manifest["num_train_rows"] = sum(len(dataset) for dataset in train_datasets.values())
         # Per-pass skip counters broken down by qid family (P1-7): the
         # alternate arm's tool_only pass skips every QA example
         # (``qa:doc_num<2`` — QA has no tool side), an intended asymmetry that

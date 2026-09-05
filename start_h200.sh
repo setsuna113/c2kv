@@ -37,7 +37,11 @@
 #                            日志连续无写入且进程还在 -> 杀掉重试并升级 fallback 档位
 #                            (1=plain DDP; 2=+sdpa; 封顶 2——lvl3=eager 对最大档 batch
 #                            确定性 OOM(2026-08-28 step-3581), 自动升级禁用)
-#   EXPECT_GPUS              期望卡数（默认 2；不足只警告，便于单卡 smoke）
+#   EXPECT_GPUS              期望卡数（默认 2；SMOKE=1 时强制 1）。实测可见卡数与
+#                            它**不相等**直接 FATAL —— 此前只警告, g_hist_s42 于是
+#                            在单卡上跑成 eff-batch 4 而无人察觉。确要换卡数就显式
+#                            设 EXPECT_GPUS, 或 ALLOW_GPU_MISMATCH=1 只警告。
+#   ALLOW_GPU_MISMATCH       1 = 卡数与 EXPECT_GPUS 不符时只警告（默认 0 = FATAL）
 #   RETAIN_CKPTS             磁盘紧张时整档保留的 checkpoint 数（默认 EVAL_MAX_CKPTS+2）：
 #                            均匀抽取（与 eval 同一公式）∪ 最新两档（带完整优化器态,
 #                            resume 锚点, 永不整档删除），其余整档删除
@@ -46,17 +50,28 @@
 #
 # 2026-09-03 新增（regime-first history 臂；默认值 = 旧行为逐位不变）：
 #   RECIPE            planner 的 --recipe（默认 g_h200_main=toucan:0.6,traces:0.4）。
-#                     改 recipe 名会改 order/plan 文件名 —— 必须同时显式给 ORDER_FILE。
-#   SUBSET_WEIGHTS    空格分隔的 --subset_weights 列表
-#                     （默认 "traces:tau2=0.75 traces:appworld=0.25 traces:other=0"）；
-#                     history 臂用 "traces:tau2=0 traces:appworld=1 traces:other=0"。
+#                     ORDER_FILE 默认已由 recipe 名派生（${PLAN_DIR}/<name>.order.json,
+#                     PLAN_JSON 再由 ORDER_FILE 派生）, 换 recipe 名不必再手动给
+#                     ORDER_FILE; 显式 env 仍然优先。
+#   SUBSET_WEIGHTS    空格分隔的 --subset_weights 列表。2026-09-05 默认翻成
+#                     "traces:tau2=0 traces:appworld=1 traces:other=0"（fail closed）:
+#                     tau2-airline 是要交付的 benchmark, 训练侧唯一的排除屏障就是这个
+#                     planner 权重（--exclude_benchmarks 只塑形 history-dev manifest,
+#                     trainer 根本不读它）, 漏掉这一行以前会静默拿回 tau2=0.75。
+#                     用 tau2=0.75 的 joint 主臂已停摆; 确要重跑就显式给权重, 并且
+#                     ALLOW_TAU2_IN_TRAIN=1 才过得了 phase_plan 的断言。
+#   ALLOW_TAU2_IN_TRAIN  1 = 允许 plan 的 traces:tau2 stratum 非空（默认 0 = FATAL）
 #   EPOCHS_OVERRIDE   calibrate 直接钉死 epoch 数（允许小数, 如 1.5）：
 #                     total_steps = ceil(epochs x steps_per_epoch)，
 #                     不再按 TARGET_PRESENTED_TOKENS 反推, 也不做 MIN_PRESENTED 断言。
-#   EVAL_BFCL         1(默认)=照跑 BFCL dev 评测；0=跳过。
+#   EVAL_BFCL         1=照跑 BFCL dev 评测；0=跳过。默认随臂而定:
+#                     DOC_MODE=history_only 时默认 0, 否则 1（旧行为逐位不变）。
 #   EVAL_HISTORY      1=对每个 milestone 跑 agent/eval_history_dev_c2kv_h200.sh
 #                     （双卡并行/单卡顺序, 输出 ${RESULTS}/history_dev/<name>/）；0(默认)=不跑。
-#   SELECT_METRIC     bfcl(默认, 旧行为) | history —— history 时 select 读
+#   SELECT_METRIC     bfcl | history。默认随臂而定: DOC_MODE=history_only 时默认
+#                     history, 否则 bfcl（旧行为逐位不变）。离线 HF BFCL runner 打的
+#                     是 BFCL 的 prompting 面（Python 调用列表）, 与 chat-template/FC
+#                     训练出来的臂不是同一个表面, 不能当选档指标。history 时 select 读
 #                     ${RESULTS}/history_dev/*/summary.json 的 c2kv 模式
 #                     tool_name_accuracy（ratio=HIST_RATIO）, BFCL 只作为列打印。
 #   HIST_RATIO / HIST_MAX_EXAMPLES / HIST_SPLIT_MANIFEST / HIST_SPLIT_NAME
@@ -73,6 +88,28 @@
 #   下列 env 若在外层环境里非空, 原样透传给训练 launcher（未设则 launcher 用自己的默认）：
 #   DOC_MODE TOOLS_IN_SYSTEM HYBRID_TAIL_CHOICES MAX_DOC_LENGTH MAX_DOC_NUM
 #   MAX_TOOL_CHUNKS MAX_SYSTEM_LENGTH MAX_LENGTH C2KV_GIST_TRAIN_RATIOS SEED
+#   MAX_EVAL_EXAMPLES MAX_SAMPLES_PER_SESSION MAX_TOOLS_PER_SAMPLE
+#
+# 2026-09-05 新增（剂量闸门 / 口径记账；括号内是默认值）：
+#   MAX_EPOCHS        (3) 未设 EPOCHS_OVERRIDE 时, 由 TARGET/p_pool 反推出的 epoch
+#                     数超过它就 FATAL。epochs 被 max(1, ...) 钳死过, 于是"池子被
+#                     planner 饿死"只会表现为 epoch 数暴涨, 而地板断言 epochs*p_pool
+#                     >= MIN 对任何 p_pool 都恒真 —— 大 epoch 数 = 池子太小, 不是剂量
+#                     够。旧的 ≈10 epoch 口径（TARGET 256M / p_pool ≈25M）现在必须
+#                     显式 MAX_EPOCHS=10 才能跑; ALLOW_SMALL_DOSE=1 同样放行。
+#   WARMUP_STEPS      (100) 常数 warmup, 同时传给 calibrate 与 train 两次 launch。
+#                     calibrate 的前缀会被续跑继承, 两边必须共用同一个 warmup:
+#                     用 warmup_ratio 时 calibrate 那次按**临时** epoch 数算步数
+#                     (g_hist_s42: 32 步, 最终 schedule 只该 24 步), 续跑边界上
+#                     LambdaLR 直接掉 6.4% 学习率。
+#   EVAL_STEPS        (500) 评测间隔。transformers v5 的评测节奏走
+#                     TrainerState.eval_steps, 因此 phase_train 续跑前把 resume 档的
+#                     eval_steps 与 save_steps 一起改写（只改其一 = 本旋钮对续跑无效）。
+#   MAX_EVAL_EXAMPLES 显式透传给 launcher（此前只靠环境继承, 不进 run_config）。
+#   MAX_SAMPLES_PER_SESSION / MAX_TOOLS_PER_SAMPLE
+#                     (4 / 32) 池子几何: **同时**传给 planner、measure_arm_psrc 与
+#                     trainer。只改一侧 = order file 的成员校验硬报错（或按错几何
+#                     算出的 P_src / save_steps）。
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -117,12 +154,25 @@ CHECKPOINT_TOKEN_GRAN="${CHECKPOINT_TOKEN_GRAN:-16000000}"
 EVAL_MAX_CKPTS="${EVAL_MAX_CKPTS:-6}"
 MAX_CRASH_RETRIES="${MAX_CRASH_RETRIES:-5}"
 EXPECT_GPUS="${EXPECT_GPUS:-2}"
+# 2026-09-05: 剂量闸门 / 显式常数 warmup / 评测节奏(见头部注释)
+MAX_EPOCHS="${MAX_EPOCHS:-3}"
+WARMUP_STEPS="${WARMUP_STEPS:-100}"
+EVAL_STEPS="${EVAL_STEPS:-500}"
 # 2026-09-03 regime arm 旋钮(默认全部 = 旧行为, 见头部注释)
 RECIPE="${RECIPE:-g_h200_main=toucan:0.6,traces:0.4}"
-SUBSET_WEIGHTS="${SUBSET_WEIGHTS:-traces:tau2=0.75 traces:appworld=0.25 traces:other=0}"
-EVAL_BFCL="${EVAL_BFCL:-1}"
+# 2026-09-05: 默认翻成 fail-closed 的 tau2=0（见头部注释）。
+SUBSET_WEIGHTS="${SUBSET_WEIGHTS:-traces:tau2=0 traces:appworld=1 traces:other=0}"
+# 2026-09-05: EVAL_BFCL / SELECT_METRIC 的默认随臂而定。history_only 臂上离线 HF
+# BFCL runner 打的是 BFCL 的 prompting 面, 不是本臂训练/服务的表面, 当选档指标无效;
+# 非 history_only（含 DOC_MODE 未设 = joint）逐位保持旧默认 1 / bfcl。
+if [[ "${DOC_MODE:-joint}" == "history_only" ]]; then
+  EVAL_BFCL="${EVAL_BFCL:-0}"
+  SELECT_METRIC="${SELECT_METRIC:-history}"
+else
+  EVAL_BFCL="${EVAL_BFCL:-1}"
+  SELECT_METRIC="${SELECT_METRIC:-bfcl}"
+fi
 EVAL_HISTORY="${EVAL_HISTORY:-0}"
-SELECT_METRIC="${SELECT_METRIC:-bfcl}"
 HIST_RATIO="${HIST_RATIO:-8}"
 HIST_MAX_EXAMPLES="${HIST_MAX_EXAMPLES:-700}"
 HIST_SPLIT_MANIFEST="${HIST_SPLIT_MANIFEST:-${REPO_ROOT}/outputs/appworld_dev_split_manifest.json}"
@@ -183,6 +233,7 @@ select_precheck() {  # select_precheck <metric> <eval_flag> <existing-summary-gl
   echo "SELECT_METRIC=${metric} 需要对应评测打开, 且 ${pattern} 目前没有任何结果" >&2
   exit 1
 }
+echo "[precheck] DOC_MODE=${DOC_MODE:-<unset,=joint>} -> SELECT_METRIC=${SELECT_METRIC} EVAL_BFCL=${EVAL_BFCL} EVAL_HISTORY=${EVAL_HISTORY}"
 select_precheck history "${EVAL_HISTORY}" "${RESULTS}/history_dev/*/summary.json"
 select_precheck bfcl "${EVAL_BFCL}" "${RESULTS}/bfcl_dev_scored/*_summary.json"
 
@@ -195,7 +246,10 @@ SPLIT_MANIFEST="${REPO_ROOT}/outputs/agent_taskproxy_split_manifest.json"
 SPLIT_NAME=taskproxy_disjoint
 REMOVAL_FILE="${REPO_ROOT}/outputs/removal_traces_final.json"
 PLAN_DIR="${PLAN_DIR:-${REPO_ROOT}/outputs/joint_h200_plan}"
-ORDER_FILE="${ORDER_FILE:-${PLAN_DIR}/g_h200_main.order.json}"
+# ORDER_FILE 默认由 RECIPE 名派生(RECIPE 定义在上面的旋钮块): 默认 recipe
+# g_h200_main 下与旧的硬编码默认逐字节相同, 换 recipe 名时不再需要手动同步
+# ORDER_FILE(2026-09-05 审计 #37)。显式 env 覆盖仍优先。
+ORDER_FILE="${ORDER_FILE:-${PLAN_DIR}/${RECIPE%%=*}.order.json}"
 # PLAN_JSON 默认从 ORDER_FILE 派生(换大池 order 时 plan 跟着换)。旧默认钉死
 # g_h200_main.plan.json, bigpool 命令在干净 STATUS 上必 abort(2026-08-28 审计 I5)。
 # env 显式覆盖仍优先。
@@ -274,8 +328,19 @@ PY
   local ngpu
   ngpu=$("${PY}" -c "import torch; print(torch.cuda.device_count())")
   [[ "${ngpu}" -ge 1 ]] || { echo "no CUDA GPU visible"; return 1; }
-  if [[ "${ngpu}" -lt "${EXPECT_GPUS}" ]]; then
-    echo "WARNING: ${ngpu} GPU(s) visible, expected ${EXPECT_GPUS} (single-card smoke?)"
+  # 2026-09-05 审计 #36: 卡数不符必须硬失败。此前只在 ngpu < EXPECT_GPUS 时警告,
+  # g_hist_s42 于是在单卡上以 eff-batch 4(而非 2 卡的 8)跑完全程, 事后只能靠推断
+  # 还原它的优化 regime。用 -ne 而不是 -lt: 多分到卡(eff-batch 变大)同样是换了
+  # regime。SMOKE=1 已把 EXPECT_GPUS 钉成 1, 单卡冒烟不受影响。
+  if [[ "${ngpu}" -ne "${EXPECT_GPUS}" ]]; then
+    if [[ "${ALLOW_GPU_MISMATCH:-0}" == "1" ]]; then
+      echo "WARNING: ${ngpu} GPU(s) visible, EXPECT_GPUS=${EXPECT_GPUS} (ALLOW_GPU_MISMATCH=1)"
+    else
+      echo "FATAL: ${ngpu} GPU(s) visible, EXPECT_GPUS=${EXPECT_GPUS}." >&2
+      echo "       eff_batch = n_gpus x PER_DEVICE_BS x GRAD_ACCUM, 卡数变了就是换了" >&2
+      echo "       优化 regime。显式设 EXPECT_GPUS=${ngpu} 再跑, 或 ALLOW_GPU_MISMATCH=1。" >&2
+      return 1
+    fi
   fi
   nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader || true
   local f
@@ -390,21 +455,42 @@ json.dump(d["final_exclusion"], open("outputs/removal_traces_final.json", "w"), 
 print("removal ids:", len(d["final_exclusion"]))
 PY
   fi
+  # planner 的池子几何必须与 trainer 逐字一致(2026-09-05 审计 #32): 两侧的
+  # max_samples_per_session 不同 = 两侧的 qid 集合不同 = trainer 的
+  # --example_order_file 成员校验直接硬报错。--tools_in_system 只改 token 估计的
+  # 口径(工具文档是否计入), 估计缓存的 stamp 带了它, 两种口径不会互相污染。
+  local plan_pool_args=(--max_samples_per_session "${MAX_SAMPLES_PER_SESSION:-4}")
+  # 取值语义与 launcher 一致(HfArgumentParser 的 bool 认 True/true/1):
+  # 写 true 而 planner 不认, 两侧的 token 口径就会静默劈叉。
+  case "${TOOLS_IN_SYSTEM:-}" in
+    True|true|1) plan_pool_args+=(--tools_in_system) ;;
+  esac
+  echo "[plan] pool args: ${plan_pool_args[*]}"
   # 前置扫描 dry-run：确认 tau2 子集命名并预热 token cache（非破坏性；SMOKE 跳过）
   if [[ "${SMOKE:-0}" != "1" ]]; then
     "${PY}" agent/build_joint_medium_plan.py \
       --traces_path "${TRACES_DIR}" \
       --split_manifest_file "${SPLIT_MANIFEST}" --split_manifest_name "${SPLIT_NAME}" \
       --removal_files "${REMOVAL_FILE}" --no-require_tool_call \
+      "${plan_pool_args[@]}" \
       --tokenizer "${MODEL_DIR}" --out_dir "${PLAN_DIR}" --list_traces_subsets
   fi
+  # ORDER_FILE 存在 = 整个 planning 被跳过(recipe/权重全按上一次那份 order)。
+  # 这一步以前完全静默, 换了 RECIPE 却复用旧 order 是无声事故(审计 #37)。
+  if [[ -f "${ORDER_FILE}" ]]; then
+    echo "[plan] ORDER_FILE=${ORDER_FILE} exists=yes -> planning SKIPPED"
+  else
+    echo "[plan] ORDER_FILE=${ORDER_FILE} exists=no -> planning will run"
+  fi
   if [[ ! -f "${ORDER_FILE}" ]]; then
-    # RECIPE / SUBSET_WEIGHTS 参数化(2026-09-03): 默认值逐字等于旧硬编码命令。
+    # RECIPE / SUBSET_WEIGHTS 参数化(2026-09-03)。
     # SUBSET_WEIGHTS 按空格切分, 每项一个 --subset_weights 参数。
+    # 2026-09-05: SUBSET_WEIGHTS 的默认已翻成 traces:tau2=0(不再逐字等于旧硬编码
+    # 命令), 见头部注释。
     local sw_args=() sw
     for sw in ${SUBSET_WEIGHTS}; do sw_args+=(--subset_weights "${sw}"); done
-    # 两者都是 ${VAR:-default} 形式: 显式传空串 = 取默认(含 traces:tau2=0.75)。
-    # 因此把最终生效的值打出来, 别让它悄悄发生。
+    # 两者都是 ${VAR:-default} 形式: 显式传空串 = 取默认(SUBSET_WEIGHTS 的默认
+    # 是 traces:tau2=0)。因此把最终生效的值打出来, 别让它悄悄发生。
     echo "[plan] RECIPE=${RECIPE}"
     echo "[plan] SUBSET_WEIGHTS=${SUBSET_WEIGHTS} -> ${#sw_args[@]} args"
     "${PY}" agent/build_joint_medium_plan.py \
@@ -414,6 +500,7 @@ PY
       --split_traces_subsets \
       ${sw_args[@]+"${sw_args[@]}"} \
       --no-require_tool_call \
+      "${plan_pool_args[@]}" \
       --budget_estimated_tokens "${PLAN_BUDGET_EST}" --oversample_factor 1.25 \
       --removal_files "${REMOVAL_FILE}" \
       --order_seed 42 --out_dir "${PLAN_DIR}" --tokenizer "${MODEL_DIR}"
@@ -431,8 +518,27 @@ for k, want in expect.items():
     assert abs(fam.get(k, 0) - want) < 0.05, (fam, expect)
 assert set(fam) == set(expect), fam
 assert "qa" not in fam and "openswe" not in fam, fam
+# 2026-09-05 审计 #8: tau2-airline 是要交付的 benchmark, 训练侧唯一的排除屏障
+# 就是 planner 权重 traces:tau2=0(--exclude_benchmarks 只塑形 history-dev 的
+# manifest, trainer 从不读它)。默认禁止, 要训进去必须显式 ALLOW_TAU2_IN_TRAIN=1。
+allow_tau2 = "${ALLOW_TAU2_IN_TRAIN:-0}" == "1"
+assert allow_tau2 or (tr.get("tau2") or {}).get("examples", 0) == 0, (
+    "tau2 leaked into the train pool: "
+    f"{(tr.get('tau2') or {}).get('examples')} examples."
+    " SUBSET_WEIGHTS 里把 traces:tau2 设成 0, 或显式 ALLOW_TAU2_IN_TRAIN=1。"
+)
+# traces:other 有权重时, planner 把落进 other 这个 catch-all 的样本按它们的
+# **原始** subset 名记进 plan(build_joint_medium_plan._classify_traces_subset),
+# 所以 swebench / browsecompplus 等名字是合法的, 只在 other 权重为 0 时才是泄漏。
+other_weight = 0.0
+for _tok in "${SUBSET_WEIGHTS}".split():
+    _k, _sep, _v = _tok.partition("=")
+    if _sep and _k.strip() == "traces:other":
+        other_weight = float(_v or 0)
 for k in tr:
-    assert k in ("appworld", "tau2"), f"unexpected traces stratum leaked: {k}"
+    assert k in ("appworld", "tau2") or other_weight > 0, (
+        f"unexpected traces stratum leaked: {k} (traces:other weight={other_weight})"
+    )
 order = json.load(open("${ORDER_FILE}"))
 n = len(order)
 print("order examples:", n)
@@ -566,7 +672,8 @@ launch_train() {  # launch_train <save_steps> <epochs> <resume>  (logs append to
   # 无害, 但对 `${VAR-default}` 形式会直接吃掉默认), 未设时必须完全不出现。
   local passthru=() pv
   for pv in DOC_MODE TOOLS_IN_SYSTEM HYBRID_TAIL_CHOICES MAX_DOC_LENGTH MAX_DOC_NUM \
-            MAX_TOOL_CHUNKS MAX_SYSTEM_LENGTH MAX_LENGTH C2KV_GIST_TRAIN_RATIOS SEED; do
+            MAX_TOOL_CHUNKS MAX_SYSTEM_LENGTH MAX_LENGTH C2KV_GIST_TRAIN_RATIOS SEED \
+            MAX_EVAL_EXAMPLES MAX_SAMPLES_PER_SESSION MAX_TOOLS_PER_SAMPLE; do
     if [[ -n "${!pv:-}" ]]; then passthru+=("${pv}=${!pv}"); fi
   done
   if ((${#passthru[@]})); then echo "[launch_train] passthrough: ${passthru[*]}"; fi
@@ -579,7 +686,8 @@ launch_train() {  # launch_train <save_steps> <epochs> <resume>  (logs append to
   SPLIT_MANIFEST_FILE="${SPLIT_MANIFEST}" SPLIT_NAME="${SPLIT_NAME}" \
   EXAMPLE_ORDER_FILE="${ORDER_FILE}" \
   MAX_SOURCE_TOKENS="" \
-  NUM_TRAIN_EPOCHS="${epochs}" SAVE_STEPS="${save_steps}" EVAL_STEPS=500 \
+  NUM_TRAIN_EPOCHS="${epochs}" SAVE_STEPS="${save_steps}" EVAL_STEPS="${EVAL_STEPS}" \
+  WARMUP_STEPS="${WARMUP_STEPS}" \
   RESUME_FROM_CHECKPOINT="${resume}" \
   CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0,1}" \
   bash agent/train_joint_next_action_c2kv_h200.sh >> "${LOGS}/train.log" 2>&1
@@ -625,7 +733,65 @@ kill_train() {  # 带重试地杀干净整个训练进程树（孤儿进程会�
 
 # ---- phase: calibrate ------------------------------------------------------
 phase_calibrate() {
-  if [[ -f "${RUN_CONFIG}" ]]; then echo "run_config exists, reuse:"; cat "${RUN_CONFIG}"; return 0; fi
+  if [[ -f "${RUN_CONFIG}" ]]; then
+    echo "run_config exists, reuse:"; cat "${RUN_CONFIG}"
+    # 2026-09-05 审计 #31: 复用 != 免检。一次 FATAL 的 calibrate 也可能留下
+    # run_config(旧版本先 dump 后判剂量), 下一次同样的命令就从这条短路直接过,
+    # touch calibrate.done, 把欠剂量的臂完整跑完。这里用**当前**的
+    # MIN_PRESENTED_TOKENS / MAX_EPOCHS / ALLOW_SMALL_DOSE 再判一次;
+    # 缺新键的旧 run_config 取 None = 跳过对应那条(向后兼容)。
+    MIN_PRESENTED_TOKENS="${MIN_PRESENTED_TOKENS}" MAX_EPOCHS="${MAX_EPOCHS}" \
+    ALLOW_SMALL_DOSE="${ALLOW_SMALL_DOSE:-0}" \
+    "${PY}" - "${RUN_CONFIG}" <<'PY'
+import json, os, sys
+
+cfg_path = sys.argv[1]
+cfg = json.load(open(cfg_path))
+floor = float(os.environ["MIN_PRESENTED_TOKENS"])
+max_epochs = float(os.environ["MAX_EPOCHS"])
+recorded_small_dose = bool(cfg.get("allow_small_dose"))
+allow_small_dose = os.environ.get("ALLOW_SMALL_DOSE") == "1" or recorded_small_dose
+redo = (
+    "要按当前口径重新校准, 先删掉这份 run_config:\n"
+    f"  rm -f {os.path.dirname(cfg_path)}/calibrate.done {cfg_path}"
+)
+expected = cfg.get("expected_presented")
+if expected is not None and float(expected) < floor and not allow_small_dose:
+    raise SystemExit(
+        "#" * 76 + "\n"
+        f"FATAL: 复用的 run_config 记录 expected_presented={int(expected)} <"
+        f" MIN_PRESENTED_TOKENS={int(floor)}"
+        f" ({float(expected) / floor:.1%} of the floor),"
+        f" allow_small_dose={recorded_small_dose}.\n"
+        f"{redo}\n"
+        "确要跑欠剂量探针臂: ALLOW_SMALL_DOSE=1。\n"
+        + "#" * 76
+    )
+epochs = cfg.get("epochs")
+if (
+    epochs is not None
+    and cfg.get("epochs_override") is None
+    and float(epochs) > max_epochs
+    and not allow_small_dose
+):
+    raise SystemExit(
+        "#" * 76 + "\n"
+        f"FATAL: 复用的 run_config 记录 epochs={epochs} > MAX_EPOCHS={max_epochs}"
+        f" (p_pool_presented={cfg.get('p_pool_presented')}) —"
+        " 池子太小, 不是剂量够。\n"
+        f"{redo}\n"
+        "放宽上限: MAX_EPOCHS=<n>; 明知故犯: ALLOW_SMALL_DOSE=1。\n"
+        + "#" * 76
+    )
+print(
+    "run_config re-validated against the CURRENT caps:"
+    f" expected_presented={expected} min_presented={int(floor)}"
+    f" epochs={epochs} max_epochs={max_epochs}"
+    f" allow_small_dose={allow_small_dose}"
+)
+PY
+    return 0
+  fi
   local prov_epochs=2 attempt=0 calib_secs=0
   while true; do
     echo "calibration launch: ${CALIB_STEPS} steps (provisional epochs=${prov_epochs}, fallback_level=$(fallback_level), attempt=${attempt})"
@@ -687,6 +853,8 @@ PY
   "${PY}" agent/measure_arm_psrc.py \
     --dataset_path "${TRACES_DIR}" --toucan_path "${TOUCAN_DIR}" \
     --split_manifest_file "${SPLIT_MANIFEST}" --split_manifest_name "${SPLIT_NAME}" \
+    --max_samples_per_session "${MAX_SAMPLES_PER_SESSION:-4}" \
+    --max_tools_per_sample "${MAX_TOOLS_PER_SAMPLE:-32}" \
     --tokenizer "${MODEL_DIR}" \
     "${psrc_geom[@]}" \
     --arm main="${STATUS}/manifest_trim1500.json" \
@@ -704,7 +872,14 @@ p_pool = p_prefix * n_ex / max(1, n_prefix)
 rho = (p_pool / est_pool) if est_pool else None
 n_gpus = max(1, len([x for x in "${CUDA_VISIBLE_DEVICES:-0,1}".split(",") if x.strip() != ""]))
 eff_batch = n_gpus * int("${PER_DEVICE_BS}") * int("${GRAD_ACCUM}")
-steps_per_epoch = math.ceil(n_ex / eff_batch)   # 2卡 x bs2 x accum2 = 8（默认）
+max_epochs = float("${MAX_EPOCHS}")
+# 2026-09-05 审计 #10: steps_per_epoch 的分母必须是**跳过之后**的训练行数。
+# num_train_examples 是跳过前的 example 数(g_hist_s42: 1606), HF 实际拿到 1565 行
+# -> run_config 的 total_steps 603 对上 trainer_state 的 max_steps 588。p_pool 的
+# 外推仍然用 n_ex: P_src 本身已经排除了被跳过的行, 换分母会把跳过率算两遍。
+# 旧 manifest 无 num_train_rows 键时退回 n_ex(旧行为逐位不变)。
+n_rows = manifest.get("num_train_rows") or n_ex
+steps_per_epoch = math.ceil(n_rows / eff_batch)   # 2卡 x bs2 x accum2 = 8（默认）
 presented_per_step = p_pool / steps_per_epoch
 save_steps = max(1, int(${CHECKPOINT_TOKEN_GRAN} // max(1, presented_per_step)))
 # EPOCHS_OVERRIDE(2026-09-03): 换 dialect/几何后 presented 口径不可比, 直接钉
@@ -727,6 +902,16 @@ else:
 min_milestones = max(1, int("${MIN_MILESTONES:-4}"))
 if total_steps > min_milestones:
     save_steps = min(save_steps, max(1, total_steps // min_milestones))
+def _skip_total(value):
+    # manifest 记的是 {pass_name: count}; 老格式可能直接是个数字。
+    return sum(value.values()) if isinstance(value, dict) else value
+
+
+skip_counts = dict(
+    system_overflow=_skip_total(manifest.get("system_overflow_skips")),
+    train_skip_counts_by_family=manifest.get("train_skip_counts_by_family"),
+    tools_in_system_missing_tools=manifest.get("tools_in_system_missing_tools"),
+)
 sec_step = ${calib_secs} / ${CALIB_STEPS}
 projected_hours = sec_step * total_steps / 3600
 cfg = dict(p_pool_presented=int(p_pool), est_pool=int(est_pool),
@@ -750,14 +935,41 @@ cfg = dict(p_pool_presented=int(p_pool), est_pool=int(est_pool),
            # planner 饿死却照常跑完的臂"区分开。
            allow_small_dose=("${ALLOW_SMALL_DOSE:-0}" == "1"),
            min_milestones=min_milestones,
+           max_epochs=max_epochs,
+           # 2026-09-05 审计 #36: 优化 regime 必须留痕。此前 run_config 既不记卡数
+           # 也不记 eff_batch, g_hist_s42 到底是单卡 eff-4 还是双卡 eff-8 只能靠推断。
+           n_train_rows=n_rows,
+           n_gpus=n_gpus,
+           eff_batch=eff_batch,
+           per_device_bs=int("${PER_DEVICE_BS}"),
+           grad_accum=int("${GRAD_ACCUM}"),
+           cuda_visible_devices="${CUDA_VISIBLE_DEVICES:-0,1}",
+           lr="${LR:-5e-5}",
+           warmup_steps=int("${WARMUP_STEPS}"),
+           eval_steps=int("${EVAL_STEPS}"),
+           max_eval_examples=("${MAX_EVAL_EXAMPLES:-}" or None),
+           max_length="${MAX_LENGTH:-}" or None,
+           max_system_length="${MAX_SYSTEM_LENGTH:-}" or None,
+           max_tool_chunks="${MAX_TOOL_CHUNKS:-}" or None,
+           max_samples_per_session=int("${MAX_SAMPLES_PER_SESSION:-4}"),
+           max_tools_per_sample=int("${MAX_TOOLS_PER_SAMPLE:-32}"),
+           skip_counts=skip_counts,
            doc_mode="${DOC_MODE:-}" or None,
            tools_in_system="${TOOLS_IN_SYSTEM:-}" or None,
            hybrid_tail_choices="${HYBRID_TAIL_CHOICES:-}" or None,
            max_doc_length="${MAX_DOC_LENGTH:-}" or None,
            max_doc_num="${MAX_DOC_NUM:-}" or None,
            ratios="${C2KV_GIST_TRAIN_RATIOS:-}" or None)
-json.dump(cfg, open("${RUN_CONFIG}", "w"), indent=1)
+# 2026-09-05 审计 #31: cfg 先打印、闸门全部过完, **最后**才落盘。此前 run_config
+# 在剂量闸门之前就写了, 于是一次 FATAL 的 calibrate 反而留下让下一次直接短路的
+# 那个文件(见本函数开头的复用再校验)。
 print(json.dumps(cfg, indent=1))
+print(
+    "CALIB SKIPS: system_overflow="
+    f"{skip_counts['system_overflow']}"
+    f" by_family={skip_counts['train_skip_counts_by_family']}"
+    f" tools_in_system_missing_tools={skip_counts['tools_in_system_missing_tools']}"
+)
 bar = "=" * 76
 print(bar)
 print(f"CALIB TIMING: ${calib_secs}s / ${CALIB_STEPS} steps = {sec_step:.2f} s/it"
@@ -772,6 +984,24 @@ if projected_hours > float("${WALL_CAP_HOURS}"):
           " 剂量/吞吐口径务必人工复核(不阻断, 仅告警)")
     print("#" * 76)
 if not epochs_override:
+    # 2026-09-05 审计 #34: epochs 被 max(1, ...) 钳过, 所以下面那条地板断言对**任何**
+    # p_pool 都恒真 —— 池子被 planner 饿死只会表现为 epoch 数暴涨(同样几千个样本刷
+    # 几十遍), 断言一次都不会响。大 epoch 数 = 池子太小, 不是剂量够。
+    if epochs > max_epochs and "${ALLOW_SMALL_DOSE:-0}" != "1":
+        raise SystemExit(
+            "#" * 76 + "\n"
+            f"FATAL: 反推出的 epochs={epochs} > MAX_EPOCHS={max_epochs}"
+            f" (p_pool={int(p_pool)} presented tokens,"
+            " TARGET=${TARGET_PRESENTED_TOKENS}, MIN=${MIN_PRESENTED_TOKENS}).\n"
+            "池子太小: 同一批样本要刷这么多遍才凑得出 TARGET, 学到的东西与臂设计无关。\n"
+            "把池子撑大(任选):\n"
+            "  * MAX_SAMPLES_PER_SESSION 调高(planner / measure_arm_psrc / trainer"
+            " 三处一起, 且必须换一个新的 RECIPE 名重新 plan);\n"
+            "  * SUBSET_WEIGHTS 里给 traces:other 非零权重(放 swebench/browsecompplus 进来);\n"
+            "  * PLAN_BUDGET_EST 调高(planner 扫描预算被 budget_shrink_factor 拖垮时).\n"
+            "明知故犯(探针臂): MAX_EPOCHS=<n> 或 ALLOW_SMALL_DOSE=1(会记进 run_config)。\n"
+            + "#" * 76
+        )
     assert epochs * p_pool >= ${MIN_PRESENTED_TOKENS}, "pool too small for floor dose"
 else:
     # 2026-09-05: EPOCHS_OVERRIDE 曾把这条地板断言整条跳过, 于是 g_hist_s42/s43
@@ -798,6 +1028,8 @@ else:
         )
     print(f"EPOCHS_OVERRIDE={epochs}: expected presented ~= {int(expected)}"
           f" (floor ${MIN_PRESENTED_TOKENS}, target ${TARGET_PRESENTED_TOKENS})")
+# 所有闸门都过了才落盘。
+json.dump(cfg, open("${RUN_CONFIG}", "w"), indent=1)
 PY
   echo "calibrate done -> ${RUN_CONFIG}"
 }
@@ -863,15 +1095,22 @@ PY
     # checkpoint 以 150 步一档膨胀, 23 档吃满 GU 配额)。启动前把 resume 档的
     # save_steps 改成本轮配置值。
     if [[ -n "${resume}" && -f "${resume}/trainer_state.json" ]]; then
-      "${PY}" - "${resume}/trainer_state.json" "${save_steps}" <<'PY'
+      "${PY}" - "${resume}/trainer_state.json" "${save_steps}" "${EVAL_STEPS}" <<'PY'
 import json, sys
-p, want = sys.argv[1], int(sys.argv[2])
+# 2026-09-05 审计 #39: 评测节奏和存档节奏一样走 TrainerState(DefaultFlowCallback
+# 读 state.eval_steps), 只改 save_steps 会让 EVAL_STEPS 这个旋钮对续跑完全无效 ——
+# 续跑的评测节奏仍然是 calibrate 那一档 trainer_state 里的旧值。
+p, want_save, want_eval = sys.argv[1], int(sys.argv[2]), int(sys.argv[3])
 s = json.load(open(p))
-if int(s.get("save_steps") or 0) != want:
-    s["save_steps"] = want
+changed = []
+for key, want in (("save_steps", want_save), ("eval_steps", want_eval)):
+    if int(s.get(key) or 0) != want:
+        s[key] = want
+        changed.append(f"{key} -> {want}")
+if changed:
     with open(p, "w") as f:
         json.dump(s, f, indent=1)
-    print(f"patched resume state save_steps -> {want} ({p})")
+    print(f"patched resume state {', '.join(changed)} ({p})")
 PY
     fi
     echo "train attempt ${attempt} resume=${resume:-<scratch>} fallback_level=$(fallback_level)"
@@ -1222,6 +1461,18 @@ for path in sorted(glob.glob(os.path.join(results, "history_dev", "*", "summary.
     if not isinstance(cell, dict) or cell.get("tool_name_accuracy") is None:
         bad.append((name, "no c2kv mode row"))
         continue
+    # 2026-09-05 审计 #3/#24: 排序键仍然是 c2kv 的 tool_name_accuracy(改键没有意义 ——
+    # tool_name_accuracy 与 on_tool_targets 只差一个与 checkpoint 无关的常数缩放,
+    # 名次完全相同, 换键只会破坏与 s42/s43 的可比性)。但 0.0386 不能被读成"工具调用
+    # 里叫对名字的比例"(那是 on_tool_targets), 所以把它和分母、以及 hybrid 模式的同名
+    # 指标一起打成附加列。
+    hybrid_cell = (s.get("modes") or {}).get("hybrid")
+    hybrid = None
+    if isinstance(hybrid_cell, dict) and hybrid_cell.get("tool_name_accuracy") is not None:
+        hybrid = float(hybrid_cell["tool_name_accuracy"])
+    on_tool = cell.get("tool_name_accuracy_on_tool_targets")
+    on_tool = float(on_tool) if on_tool is not None else None
+    n_tool = cell.get("num_tool_targets")
     if cell.get("ratio") is not None and int(cell["ratio"]) != hist_ratio:
         bad.append((name, f"ratio {cell.get('ratio')} != HIST_RATIO {hist_ratio}"))
         continue
@@ -1241,14 +1492,24 @@ for path in sorted(glob.glob(os.path.join(results, "history_dev", "*", "summary.
                     break
         except Exception as e:  # noqa: BLE001 附加列, 绝不能挂 select
             print("bfcl column unavailable for", name, type(e).__name__, e)
-    rows.append((name, "tool_name_accuracy", val, n_val, bfcl))
-    print(name, "-> tool_name_accuracy", val, f"n={n_val}", f"bfcl={bfcl}")
+    rows.append((name, "tool_name_accuracy", val, n_val, bfcl, hybrid, on_tool, n_tool))
+    print(name, "-> tool_name_accuracy", val, f"n={n_val}", f"bfcl={bfcl}",
+          f"hybrid={hybrid}", f"on_tool_targets={on_tool}", f"num_tool_targets={n_tool}")
 if ghost:
     print("select: 忽略 checkpoint 已不存在的 summary:", ghost)
 if bad:
     print("select: 忽略不可用的 history summary:", bad)
 assert rows, "no history_dev summaries with a usable c2kv tool_name_accuracy"
 best = max(rows, key=lambda r: r[2])
+# 2026-09-05 审计 #35: 欠剂量 / 部分完成必须进结论行。found 在 try 之前先绑定,
+# 否则取剂量的第一句就抛异常时下面会 NameError。
+partial = os.path.isfile(os.path.join("${STATUS}", "train.partial"))
+allow_small_dose = None
+try:
+    allow_small_dose = json.load(open("${RUN_CONFIG}")).get("allow_small_dose")
+except Exception as e:  # noqa: BLE001 信息性字段, 绝不能挂 select
+    print("allow_small_dose unavailable:", type(e).__name__, e)
+found = None
 dose_line = "realized presented tokens = n/a / target = ${TARGET_PRESENTED_TOKENS}"
 try:
     cand = [p for p in glob.glob(os.path.join("${OUTPUT_DIR}", "checkpoint-*"))
@@ -1270,21 +1531,40 @@ try:
 except Exception as e:  # noqa: BLE001 剂量行是信息性的, 绝不能挂 select
     print("dose line unavailable:", type(e).__name__, e)
 has_bfcl = any(r[4] is not None for r in rows)
+has_hybrid = any(r[5] is not None for r in rows)
+# 2026-09-05 审计 #35: 欠剂量必须写在 best 行**上面**并改掉 best 的措辞, 否则
+# "best: **X**" 会被当成一个可用的选档结论。
+under_dosed = (found is not None and found < ${MIN_PRESENTED_TOKENS}) or partial
 with open(os.path.join(results, "FINAL_SUMMARY.md"), "w") as f:
     f.write("# G-H200 regime arm — AppWorld history-dev checkpoint selection\n\n")
     f.write(f"selection metric: **tool_name_accuracy** (mode c2kv, ratio {hist_ratio}, "
-            f"split ${HIST_SPLIT_NAME}); BFCL native_valid_rate is a printed column only\n\n")
-    f.write(f"best: **{best[0]}** ({best[1]} = {best[2]:.4f})\n\n")
-    f.write(f"{dose_line}\n\n")
-    if has_bfcl:
-        f.write("| checkpoint | metric | value | n | bfcl_native_valid_rate |\n|---|---|---|---|---|\n")
+            f"split ${HIST_SPLIT_NAME}) — 这一列, 且只有这一列, 参与排序; "
+            "hybrid / on_tool_targets / BFCL native_valid_rate 都只是打印列\n\n")
+    if under_dosed:
+        ratio_txt = f"{found / ${MIN_PRESENTED_TOKENS}:.1%}" if found is not None else "n/a"
+        f.write(f"**UNDER-DOSED RUN** realized {found} presented tokens = {ratio_txt}"
+                f" of the MIN_PRESENTED_TOKENS floor (${MIN_PRESENTED_TOKENS});"
+                f" allow_small_dose={allow_small_dose}, partial={partial}\n\n")
+        f.write(f"best-of-an-under-dosed-run: **{best[0]}** ({best[1]} = {best[2]:.4f})\n\n")
     else:
-        f.write("| checkpoint | metric | value | n |\n|---|---|---|---|\n")
-    for name, key, val, n_val, bfcl in rows:
-        cells = f"| {name} | {key} | {val:.4f} | {n_val if n_val is not None else 'n/a'} |"
+        f.write(f"best: **{best[0]}** ({best[1]} = {best[2]:.4f})\n\n")
+    f.write(f"{dose_line}\n\n")
+    header = ["checkpoint", "metric", "value (RANKED)", "n"]
+    if has_hybrid:
+        header.append("hybrid_tool_name_accuracy")
+    header += ["tool_name_accuracy_on_tool_targets", "num_tool_targets"]
+    if has_bfcl:
+        header.append("bfcl_native_valid_rate")
+    f.write("| " + " | ".join(header) + " |\n|" + "---|" * len(header) + "\n")
+    for name, key, val, n_val, bfcl, hybrid, on_tool, n_tool in rows:
+        cells = [name, key, f"{val:.4f}", str(n_val) if n_val is not None else "n/a"]
+        if has_hybrid:
+            cells.append(f"{hybrid:.4f}" if hybrid is not None else "n/a")
+        cells.append(f"{on_tool:.4f}" if on_tool is not None else "n/a")
+        cells.append(str(n_tool) if n_tool is not None else "n/a")
         if has_bfcl:
-            cells += f" {f'{bfcl:.4f}' if bfcl is not None else 'n/a'} |"
-        f.write(cells + "\n")
+            cells.append(f"{bfcl:.4f}" if bfcl is not None else "n/a")
+        f.write("| " + " | ".join(cells) + " |\n")
     f.write("\n详细数值见各 history_dev/<name>/summary.json（source 字段指向 harness 原始 summary）。\n")
 print("BEST:", best[0], best[1], best[2])
 PY
@@ -1348,6 +1628,15 @@ best = max(rows, key=lambda r: r[2])
 # realized presented 剂量行(2026-08-29 I6): 最新 checkpoint trainer_state.json
 # log_history 里最后一条 presented_tokens(python/train/trainer.py 累计);
 # 取不到写 n/a, 不因此失败。
+# 2026-09-05 审计 #35: 欠剂量 / 部分完成必须进结论行。found 在 try 之前先绑定,
+# 否则取剂量的第一句就抛异常时下面会 NameError。
+partial = os.path.isfile(os.path.join("${STATUS}", "train.partial"))
+allow_small_dose = None
+try:
+    allow_small_dose = json.load(open("${RUN_CONFIG}")).get("allow_small_dose")
+except Exception as e:  # noqa: BLE001 信息性字段, 绝不能挂 select
+    print("allow_small_dose unavailable:", type(e).__name__, e)
+found = None
 dose_line = "realized presented tokens = n/a / target = ${TARGET_PRESENTED_TOKENS}"
 try:
     cand = [p for p in glob.glob(os.path.join("${OUTPUT_DIR}", "checkpoint-*"))
@@ -1368,9 +1657,18 @@ try:
         dose_line = f"realized presented tokens = {found} / target = ${TARGET_PRESENTED_TOKENS}"
 except Exception as e:  # noqa: BLE001 剂量行是信息性的, 绝不能挂 select
     print("dose line unavailable:", type(e).__name__, e)
+under_dosed = (found is not None and found < ${MIN_PRESENTED_TOKENS}) or partial
 with open(os.path.join(results, "FINAL_SUMMARY.md"), "w") as f:
     f.write("# G-H200 main arm — BFCL-dev checkpoint selection\n\n")
-    f.write(f"best: **{os.path.basename(best[0]).replace('_summary.json','')}** ({best[1]} = {best[2]:.4f})\n\n")
+    best_name = os.path.basename(best[0]).replace("_summary.json", "")
+    if under_dosed:
+        ratio_txt = f"{found / ${MIN_PRESENTED_TOKENS}:.1%}" if found is not None else "n/a"
+        f.write(f"**UNDER-DOSED RUN** realized {found} presented tokens = {ratio_txt}"
+                f" of the MIN_PRESENTED_TOKENS floor (${MIN_PRESENTED_TOKENS});"
+                f" allow_small_dose={allow_small_dose}, partial={partial}\n\n")
+        f.write(f"best-of-an-under-dosed-run: **{best_name}** ({best[1]} = {best[2]:.4f})\n\n")
+    else:
+        f.write(f"best: **{best_name}** ({best[1]} = {best[2]:.4f})\n\n")
     f.write(f"{dose_line}\n\n")
     f.write("| checkpoint | metric | value | n |\n|---|---|---|---|\n")
     for path, key, val, n_val in rows:

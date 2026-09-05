@@ -1055,6 +1055,31 @@ def test_stratified_pick_action_balance_pool_short_fallback(tmp_path):
     assert all(example.action_type == "tool_call" for example in examples)
 
 
+def test_stratified_pick_text_first_then_tools_does_not_crash(tmp_path):
+    # Regression (2026-09-05 audit): "text turns first, tool calls later" made
+    # the middle bucket backfill from the other pool, driving other_target
+    # negative, and the late bucket then called rng.sample(pool, -1) ->
+    # ValueError at dataset load with the launcher default
+    # require_tool_call=False.  Every shape must load and return min(k, n).
+    shapes = [
+        [False, False, True, True, True],
+        [False, False, False, True, True, True],
+        [False, True, False, True, True, True, True],
+        [False, False, True, True, True, True, True, True, True],
+    ]
+    for mask in shapes:
+        name = "sess-neg-" + "".join("t" if m else "o" for m in mask)
+        (tmp_path / name).mkdir()
+        dataset = _write_traces_dataset(tmp_path / name, [(name, _decision_session_spans(len(mask), mask))])
+        source = _joint_source(
+            dataset, max_samples_per_session=4, require_tool_call=False, action_tool_call_frac=0.75,
+        )
+        examples = list(source)
+        assert len(examples) == 4, (mask, [e.qid for e in examples])
+        indices = [_span_index(example.qid) for example in examples]
+        assert indices == sorted(indices)
+
+
 def test_require_tool_call_keeps_legacy_uniform_pick(tmp_path):
     # Regression: require_tool_call=True must stay bit-identical to the
     # pre-change behavior — tool-call-only candidates, uniform random pick

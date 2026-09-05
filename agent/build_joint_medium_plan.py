@@ -265,18 +265,31 @@ def _load_tokenizer(tokenizer_path: Optional[str]):
     return AutoTokenizer.from_pretrained(tokenizer_path)
 
 
-def estimate_source_tokens(example: "JointExample", tokenizer) -> int:
+def estimate_source_tokens(
+    example: "JointExample", tokenizer, tools_in_system: bool = False
+) -> int:
     """Mirror of ``train_joint_next_action_c2kv._estimate_source_tokens``.
 
     Re-implemented (3 lines) because the trainer module imports torch/models
     at import time and this planner must stay CPU-only: pre-chunking estimate
     = tool documents + history documents.  Duck-typed on purpose so tests can
     feed lightweight stand-ins.
+
+    ``tools_in_system=True`` drops the tool documents from the estimate: in
+    that dialect the tool schemas are rendered RAW in the system prefix and
+    never enter the compression grid, so counting them would inflate the
+    budget currency the quota math spends.  Legal only with a history_only
+    recipe (the planner does not enforce that -- the trainer does, via
+    ``--tools_in_system`` requiring ``--doc_mode history_only``).  The two
+    currencies are NOT interchangeable, hence the cache-stamp bump in
+    ``_cache_stamp``.
     """
-    return sum(
-        len(tokenizer.encode(doc))
-        for doc in example.tool_documents + example.history_documents
+    documents = (
+        example.history_documents
+        if tools_in_system
+        else example.tool_documents + example.history_documents
     )
+    return sum(len(tokenizer.encode(doc)) for doc in documents)
 
 
 # ---------------------------------------------------------------------------
@@ -284,8 +297,16 @@ def estimate_source_tokens(example: "JointExample", tokenizer) -> int:
 # ---------------------------------------------------------------------------
 
 
-def _cache_stamp(tokenizer_tag: str, split_seed: int) -> str:
+def _cache_stamp(
+    tokenizer_tag: str, split_seed: int, tools_in_system: bool = False
+) -> str:
     raw = f"{_ESTIMATE_VERSION}|tokenizer={tokenizer_tag}|split_seed={split_seed}"
+    if tools_in_system:
+        # Appended ONLY when set, so the default stamp stays byte-identical and
+        # every existing tokencache_*.jsonl keeps hitting.  A tools_in_system
+        # estimate excludes the tool documents, so the two currencies must
+        # never share a (qid, stamp) cache key.
+        raw += "|tools_in_system=1"
     return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
 
 
@@ -1046,7 +1067,10 @@ def _traces_source_kwargs(args: argparse.Namespace) -> Dict[str, Any]:
         split_seed=args.split_seed,
         split_manifest_file=args.split_manifest_file,
         split_manifest_name=args.split_manifest_name,
-        max_samples_per_session=4,  # JointDataArgs default: MUST match the trainer run
+        # JointDataArgs default 4: MUST match the trainer run's
+        # MAX_SAMPLES_PER_SESSION.  getattr keeps fabricated/test namespaces
+        # (and pre-flag call sites) on the old literal.
+        max_samples_per_session=getattr(args, "max_samples_per_session", 4),
         # MUST match the trainer run's REQUIRE_TOOL_CALL / ACTION_TOOL_CALL_FRAC
         # (G-H200 main arm: False / 0.75): the planner pool has to equal the
         # trainer pool, otherwise --example_order_file membership filtering
@@ -1233,6 +1257,7 @@ def _scan_subset_prefix(
     subset: str,
     removal_identifiers: FrozenSet[str] = frozenset(),
     subset_classifier: Optional[Callable[[str], str]] = None,
+    tools_in_system: bool = False,
 ) -> Tuple[List[PoolEntry], int, int, int]:
     """Stream one subset source into pool entries, stopping at ``token_cap``.
 
@@ -1260,7 +1285,7 @@ def _scan_subset_prefix(
         key = (example.qid, stamp)
         estimated = cache.get(key)
         if estimated is None:
-            estimated = estimate_source_tokens(example, tokenizer)
+            estimated = estimate_source_tokens(example, tokenizer, tools_in_system)
             cache[key] = estimated
         else:
             cache_hits += 1
@@ -1352,6 +1377,7 @@ def scan_family_pool(
             name,
             removal_identifiers,
             subset_classifier=getattr(source, "subset_classifier", None),
+            tools_in_system=getattr(args, "tools_in_system", False),
         )
         pool.extend(entries)
         subsets_report[name] = {
@@ -1428,6 +1454,7 @@ def _list_traces_subsets(
     cache: Dict[Tuple[str, str], int],
     removal_identifiers: FrozenSet[str] = frozenset(),
     subset_map=None,
+    tools_in_system: bool = False,
 ) -> List[Dict[str, Any]]:
     """Inventory of the traces pool's raw ``benchmark``/``subset`` values.
 
@@ -1449,6 +1476,7 @@ def _list_traces_subsets(
         "",
         removal_identifiers,
         subset_classifier=lambda raw: raw,
+        tools_in_system=tools_in_system,
     )
     tally: Dict[str, Dict[str, Any]] = {}
     for entry in entries:
@@ -1554,6 +1582,25 @@ def main() -> None:
         "clarification/no-call/final targets also reach the order file",
     )
     parser.add_argument(
+        "--max_samples_per_session",
+        type=int,
+        default=4,
+        help="pool-scan knob that MUST match the trainer run's MAX_SAMPLES_PER_SESSION "
+        "(JointDataArgs default 4): the planner pool has to equal the trainer pool, "
+        "otherwise --example_order_file membership filtering hard-errors on qids the "
+        "trainer's per-session pick never produced",
+    )
+    parser.add_argument(
+        "--tools_in_system",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="estimate source tokens WITHOUT the tool documents (the tools_in_system "
+        "dialect renders tool schemas raw in the system prefix, so they never enter the "
+        "compression grid). Legal only for a history_only recipe -- the planner does not "
+        "check that. The estimate cache stamp carries this flag, so the two currencies "
+        "never share cached estimates",
+    )
+    parser.add_argument(
         "--action_tool_call_frac",
         type=float,
         default=0.75,
@@ -1636,6 +1683,7 @@ def main() -> None:
         stamp = _cache_stamp(
             str(getattr(tokenizer, "name_or_path", tokenizer.__class__.__name__)),
             args.split_seed,
+            args.tools_in_system,
         )
         removal_identifiers, _ = load_removal_identifiers(args.removal_files)
         out_dir = Path(args.out_dir)
@@ -1653,6 +1701,7 @@ def main() -> None:
             cache,
             removal_identifiers,
             subset_map,
+            args.tools_in_system,
         )
         if len(cache) != cache_size:
             _write_token_cache(cache_path, cache)
@@ -1698,6 +1747,7 @@ def main() -> None:
     stamp = _cache_stamp(
         str(getattr(tokenizer, "name_or_path", tokenizer.__class__.__name__)),
         args.split_seed,
+        args.tools_in_system,
     )
     removal_identifiers, removal_file_counts = load_removal_identifiers(args.removal_files)
 
@@ -1761,6 +1811,13 @@ def main() -> None:
         },
         "subset_weights": subset_weights,
         "repeat_unique_tokens": args.repeat_unique_tokens,
+        # Pool-geometry knobs: a plan is only reusable by a trainer run that
+        # scanned the SAME pool, and tools_in_system changes the estimate's
+        # currency outright.  Recorded so a divergence is detectable post hoc.
+        "max_samples_per_session": args.max_samples_per_session,
+        "require_tool_call": args.require_tool_call,
+        "action_tool_call_frac": args.action_tool_call_frac,
+        "tools_in_system": args.tools_in_system,
     }
     results = plan_recipes(
         pools,

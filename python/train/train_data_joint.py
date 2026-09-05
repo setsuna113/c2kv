@@ -521,8 +521,13 @@ def _stratified_pick(
         take = min(quota, len(bucket))
         tool_pool = [example for example in bucket if example.action_type == "tool_call"]
         other_pool = [example for example in bucket if example.action_type != "tool_call"]
-        n_tool = min(take, tool_target, len(tool_pool))
-        n_other = min(take - n_tool, other_target, len(other_pool))
+        # Targets are clamped at 0: a bucket that had to backfill from the
+        # non-preferred pool (``short`` below) can drive the other target
+        # negative, and ``rng.sample(pool, -1)`` raises ValueError -- an ordinary
+        # "text turns first, tool calls later" trajectory crashed dataset load
+        # with the launcher default require_tool_call=False (2026-09-05 audit).
+        n_tool = min(take, max(0, tool_target), len(tool_pool))
+        n_other = min(take - n_tool, max(0, other_target), len(other_pool))
         short = take - n_tool - n_other
         if short:
             # Pool short on the preferred action: fill the bucket quota from
@@ -532,8 +537,8 @@ def _stratified_pick(
             n_other += min(short - extra_tool, len(other_pool) - n_other)
         chosen = rng.sample(tool_pool, n_tool) + rng.sample(other_pool, n_other)
         chosen_tool = sum(1 for example in chosen if example.action_type == "tool_call")
-        tool_target -= chosen_tool
-        other_target -= len(chosen) - chosen_tool
+        tool_target = max(0, tool_target - chosen_tool)
+        other_target = max(0, other_target - (len(chosen) - chosen_tool))
         picked.extend(chosen)
     if len(picked) < k:
         # Bucket short overall: backfill late -> middle -> early.

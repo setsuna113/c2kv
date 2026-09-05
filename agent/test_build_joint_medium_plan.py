@@ -1420,3 +1420,115 @@ def test_min_budget_shrink_allows_a_pool_that_fills_the_budget():
     recipes = [parse_recipe("r=qa:0.5,traces:0.5")]
     results = plan_recipes(pools, recipes, budget_estimated_tokens=4000, order_seed=42)
     assert results["r"]["plan"]["budget_shrink_factor"] == pytest.approx(1.0)
+
+
+# ---------------------------------------------------------------------------
+# Pool-geometry flags: --max_samples_per_session / --tools_in_system.
+# ---------------------------------------------------------------------------
+
+
+class _EstimateStub:
+    """Minimal JointExample stand-in for estimate_source_tokens."""
+
+    def __init__(self, tool_documents, history_documents):
+        self.tool_documents = tool_documents
+        self.history_documents = history_documents
+
+
+def test_estimate_source_tokens_excludes_tool_docs_under_tools_in_system():
+    example = _EstimateStub(
+        tool_documents=["a b c d", "e f"],
+        history_documents=["g h i"],
+    )
+    tokenizer = bjmp.WhitespaceTokenizer()
+    # Default currency (joint dialect): tools + history.
+    assert bjmp.estimate_source_tokens(example, tokenizer) == 9
+    assert bjmp.estimate_source_tokens(example, tokenizer, False) == 9
+    # tools_in_system: the tool schemas are rendered raw in the system prefix
+    # and never enter the grid, so they must not be budgeted.
+    assert bjmp.estimate_source_tokens(example, tokenizer, True) == 3
+
+
+def test_cache_stamp_separates_the_two_estimate_currencies():
+    plain = bjmp._cache_stamp("tok", 42)
+    assert bjmp._cache_stamp("tok", 42, False) == plain  # default byte-identical
+    assert bjmp._cache_stamp("tok", 42, True) != plain
+
+
+def test_max_samples_per_session_is_threaded_into_traces_kwargs():
+    base = dict(
+        traces_path="/x",
+        split_seed=42,
+        split_manifest_file=None,
+        split_manifest_name="subset_disjoint",
+        require_tool_call=False,
+        action_tool_call_frac=0.75,
+    )
+    args = argparse.Namespace(max_samples_per_session=8, **base)
+    assert bjmp._traces_source_kwargs(args)["max_samples_per_session"] == 8
+    # A namespace predating the flag keeps the JointDataArgs default.
+    legacy = argparse.Namespace(**base)
+    assert bjmp._traces_source_kwargs(legacy)["max_samples_per_session"] == 4
+
+
+def test_scan_honours_tools_in_system_on_the_namespace(monkeypatch):
+    """_scan_subset_prefix forwards tools_in_system down to the estimator."""
+    seen = []
+
+    def _fake_estimate(example, tokenizer, tools_in_system=False):
+        seen.append(tools_in_system)
+        return 1
+
+    monkeypatch.setattr(bjmp, "estimate_source_tokens", _fake_estimate)
+    source = [_EstimateStub(["tool"], ["hist"]) for _ in range(3)]
+    for index, example in enumerate(source):
+        example.qid = f"q{index}"
+        example.session_id = f"s{index}"
+    bjmp._scan_subset_prefix(
+        source, bjmp.WhitespaceTokenizer(), "stamp", {}, None, set(), "traces", "traces",
+        tools_in_system=True,
+    )
+    assert seen == [True, True, True]
+
+
+def test_new_pool_flags_are_accepted_by_the_cli(tmp_path, monkeypatch):
+    """Both flags parse; an unknown flag still exits 2 (so this really parsed)."""
+    base = [
+        "build_joint_medium_plan.py",
+        "--list_traces_subsets",
+        "--out_dir", str(tmp_path),
+    ]
+    monkeypatch.setattr(sys, "argv", base + [
+        "--max_samples_per_session", "8", "--tools_in_system",
+    ])
+    with pytest.raises(ValueError, match="requires --traces_path"):
+        bjmp.main()
+    monkeypatch.setattr(sys, "argv", base + ["--no-tools_in_system"])
+    with pytest.raises(ValueError, match="requires --traces_path"):
+        bjmp.main()
+    monkeypatch.setattr(sys, "argv", base + ["--not_a_flag"])
+    with pytest.raises(SystemExit):
+        bjmp.main()
+
+
+@requires_train_stack
+def test_plan_provenance_records_pool_knobs(tmp_path, monkeypatch):
+    hotpotqa_path, _, _ = _write_tiny_qa_tree(tmp_path)
+    out_dir = tmp_path / "plan"
+    monkeypatch.setattr(sys, "argv", [
+        "build_joint_medium_plan.py",
+        "--recipe", "r=qa:1.0",
+        "--qa_hotpotqa_path", str(hotpotqa_path),
+        "--budget_estimated_tokens", "500",
+        "--out_dir", str(out_dir),
+        "--max_samples_per_session", "8",
+        "--action_tool_call_frac", "0.5",
+        "--no-require_tool_call",
+    ])
+    bjmp.main()
+    plan = json.loads((out_dir / "r.plan.json").read_text(encoding="utf-8"))
+    provenance = plan["provenance"]
+    assert provenance["max_samples_per_session"] == 8
+    assert provenance["require_tool_call"] is False
+    assert provenance["action_tool_call_frac"] == 0.5
+    assert provenance["tools_in_system"] is False

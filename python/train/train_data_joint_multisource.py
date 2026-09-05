@@ -88,6 +88,7 @@ from .train_data_joint import (
     _first_tool_call_name,
     _render_tool_documents,
     _select_tools,
+    _shuffled_system_tools,
     _strip_think_blocks,
     qid_source_family,
 )
@@ -429,7 +430,11 @@ def toucan_row_to_examples(
                 target_tool=target_tool,
                 target_tool_doc_index=target_doc_index,
                 action_type="tool_call" if has_tool_call else "other",
-                selected_tools=list(selected_tools),
+                # See the Open-SWE site below: shuffle the tools_in_system pool
+                # so the gold tool is not always element 0 (2026-09-05).
+                selected_tools=_shuffled_system_tools(
+                    selected_tools, split_seed, session_id, f"u{index}"
+                ),
             )
         )
     return examples
@@ -549,7 +554,13 @@ def openswe_row_to_examples(
                 target_tool=target_tool,
                 target_tool_doc_index=target_doc_index,
                 action_type="tool_call" if has_tool_call else "other",
-                selected_tools=list(selected_tools),
+                # tools_in_system renders this list verbatim into the system
+                # prefix; _select_tools puts the gold tool first, so shuffle
+                # on the same dedicated RNG stream the traces path uses
+                # (2026-09-05: the 2cea1d1 de-oracle fix covered traces only).
+                selected_tools=_shuffled_system_tools(
+                    selected_tools, split_seed, session_id, f"a{k}"
+                ),
             )
         )
     return examples

@@ -840,6 +840,34 @@ def test_openswe_examples_carry_selected_tools(fixtures):
         assert len(example.selected_tools) == len(example.tool_documents)
 
 
+def test_toucan_and_openswe_selected_tools_are_shuffled_like_traces(fixtures, monkeypatch):
+    # 2cea1d1 removed the gold-tool-at-position-0 oracle from the traces
+    # path only; the Toucan / Open-SWE cores stored the raw _select_tools
+    # output.  Both must now go through the same dedicated RNG stream keyed by
+    # (split_seed, session_id, span tag) as train_data_joint._shuffled_system_tools.
+    import train.train_data_joint_multisource as ms
+
+    calls = []
+
+    def recorder(tools, split_seed, session_id, span_index):
+        calls.append((split_seed, session_id, str(span_index)))
+        return [{"marker": f"{split_seed}:{session_id}:{span_index}"}] + list(tools)
+
+    monkeypatch.setattr(ms, "_shuffled_system_tools", recorder)
+    example = toucan_row_to_examples(fixtures["toucan"][1], split_seed=7)[0]
+    session_id, tag = example.qid.rsplit(":", 1)  # session ids carry a "toucan:"/"openswe:" prefix
+    assert example.selected_tools[0] == {"marker": f"7:{session_id}:{tag}"}
+    assert tag.startswith("u")
+    calls.clear()
+    examples = openswe_row_to_examples(fixtures["openswe"][0], subset="openswe:test", split_seed=9)
+    assert examples
+    for example in examples:
+        session_id, tag = example.qid.rsplit(":", 1)  # session ids carry a "toucan:"/"openswe:" prefix
+        assert tag.startswith("a")
+        assert example.selected_tools[0] == {"marker": f"9:{session_id}:{tag}"}
+    assert len(calls) == len(examples)
+
+
 def test_qa_examples_have_no_selected_tools(fixtures):
     example = hotpotqa_row_to_example(fixtures["hotpotqa"][0], 0)
     assert example is not None

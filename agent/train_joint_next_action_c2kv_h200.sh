@@ -53,6 +53,15 @@
 #                          attn impl 由 C2KV_SYSTEM_ATTN_IMPL 控制(默认 sdpa,
 #                          因为 flash-attn 预编译 wheel 要 glibc>=2.32)
 #   REQUIRE_TOOL_CALL      default False; ACTION_TOOL_CALL_FRAC default 0.75
+#   MAX_SAMPLES_PER_SESSION / MAX_TOOLS_PER_SAMPLE
+#                          defaults 4 / 32.  BOTH are pool-geometry knobs and
+#                          MUST match whatever the planner scanned with
+#                          (agent/build_joint_medium_plan.py
+#                          --max_samples_per_session) and whatever
+#                          agent/measure_arm_psrc.py measured P_src with —
+#                          a divergence either hard-errors on
+#                          --example_order_file membership or silently sizes
+#                          save_steps off the wrong geometry.
 #   USE_DEEPSPEED          1 -> torchrun + configs/ds_config_h200.json (1);
 #                          0 -> plain torchrun DDP fallback
 #   CUDA_VISIBLE_DEVICES   default 0,1; NPROC_PER_NODE derives from its entry
@@ -89,6 +98,7 @@ SPLIT_NAME="${SPLIT_NAME:-subset_disjoint}"
 SPLIT_SEED="${SPLIT_SEED:-42}"
 EVAL_RATIO="${EVAL_RATIO:-0.1}"
 MAX_SAMPLES_PER_SESSION="${MAX_SAMPLES_PER_SESSION:-4}"
+MAX_TOOLS_PER_SAMPLE="${MAX_TOOLS_PER_SAMPLE:-32}"
 EXAMPLE_ORDER_FILE="${EXAMPLE_ORDER_FILE:-}"
 MAX_SOURCE_TOKENS="${MAX_SOURCE_TOKENS:-}"
 MAX_TRAIN_EXAMPLES="${MAX_TRAIN_EXAMPLES:-}"
@@ -307,6 +317,7 @@ echo "LOGGING_STEPS=${LOGGING_STEPS}"
   --split_manifest_name "${SPLIT_NAME}" \
   --example_order_file "${EXAMPLE_ORDER_FILE}" \
   --max_samples_per_session "${MAX_SAMPLES_PER_SESSION}" \
+  --max_tools_per_sample "${MAX_TOOLS_PER_SAMPLE}" \
   --doc_mode "${DOC_MODE}" \
   --tools_in_system "${TOOLS_IN_SYSTEM}" \
   --max_doc_length "${MAX_DOC_LENGTH}" \
