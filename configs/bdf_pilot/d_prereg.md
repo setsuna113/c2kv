@@ -316,3 +316,219 @@ no r1/r2 artifact is regenerated or overwritten.
    (`d_ds_cache_over_budget`), never silent truncations. There is
    deliberately no separate per-block token cap — one budget knob, one
    skip reason.
+
+## Addendum v2 — Sidecar repair line (D1/D2 rewrite), 2026-08-30
+
+Status: pre-first-run for the sidecar line. No sidecar arm has ever
+produced a row (the v1 sidecar code at `7e43909` was wiring-dead and
+physically wrong; 22 defects verified and repaired before any launch).
+This addendum governs the sidecar-based D1/D2 experiments only; the five
+v1 arms above and the downstream extension keep their frozen rules and
+their existing numbers.
+
+**Governing contract (restated, unchanged).** `P_k = f(K_local, V_local,
+Q_local, H_local)` must be produced during the normal C2KV compression
+forward; repair is `oracle(k*) -> load/decode(P_k*) -> edit ->
+query/decode`; **forwarding any already-seen history token is forbidden**
+(no replay). The `full` arm is an end-to-end comparator only and is never
+a repair-payload donor.
+
+### v2.1 Main metric (amends §3 clause "S")
+
+* **S stays `tool_name_match`** under the harness parser
+  (`_extract_tool_name`, including its unclosed-block fallbacks). Not
+  re-derived differently; the harness field and the recomputation must
+  continue to agree.
+* **`strict_action_match` (name + exact canonical-JSON arguments) is
+  demoted to a diagnostic column.** Its parser is re-specified: the name
+  MUST come from the same `_extract_tool_name` candidate/fallback chain
+  (so `strict ⊆ tool_name_match` by construction), with arguments parsed
+  from the first successfully-parsing `<tool_call>` block.
+* Basis (recomputed 2026-08-30 on the frozen full-arm rows,
+  `results/bdf_pilot/d_r2/battery_full.jsonl` ∩ 93 cw_qids, gate script
+  reproduced all three): 41/93 predictions lack a closing `</tool_call>`;
+  the fallback recovers the correct name for **41/41** of them; full
+  `tool_name_match` = **93/93**; the closed-block-only strict parser
+  parses **45/93**. Strict is a generation-hard metric on this set
+  (66/93 targets carry >60-char literal strings) — unfit for the main
+  claim, kept as diagnostics.
+* **`max_new_tokens` stays 128** (decision O-1). Raising it buys nothing
+  on S (41/41 already recovered) and would invalidate the frozen C→W
+  pairing, which was mined under this caliber. No re-mining.
+
+### v2.2 Target block k\* (amends §2 clause "k\*")
+
+The median rule is superseded **for the sidecar line** by a
+witness-localization oracle, frozen verbatim (decision O-2):
+
+```python
+texts = [tokenizer.decode(ids) for ids in doc_ids]      # decoded grid rows
+values = [target_tool_name] + leaves(target_args)       # tool name + arg leaves
+
+def occurs(v, t):
+    s = str(v)
+    return s in t if len(s) >= 8 else \
+           bool(re.search(rf"(?<![\w.]){re.escape(s)}(?![\w.])", t))
+
+df    = {v: sum(occurs(v, t) for t in texts) for v in values}
+score = [sum(1 / df[v] for v in values if occurs(v, texts[i])) for i in range(n)]
+
+k_star = argmax(score) if max(score) > 0 else None
+```
+
+Semantics, frozen with the code:
+
+1. `1/df` is the entire localization power — **no additional filtering**.
+   Values occurring in every doc add the same `1/n` to each block and
+   cancel in argmax; values occurring in exactly one doc add 1.0. No
+   `df <= n//2` truncation.
+2. `texts` are the **decoded grid rows** (post-`max_doc_length=768`
+   truncation, post chat-template rendering) — the text the model
+   actually saw — never the raw dataset JSON.
+3. `k_star is None` **is a result, not an exception**: qids whose target
+   values have no literal witness in history (free-text synthesized
+   queries) are marked by the algorithm itself; they are not KV-repair
+   questions.
+
+Point estimates on the sweep: **main = the arm's row at the frozen
+`k_witness`**; `k_median` is reported as a legacy comparability column
+only; **best-k is an oracle upper envelope, never a point estimate**,
+reported with two mandatory corrections (v2.4). The witness table is
+computed CPU-only from tokenizer + frozen doc ids and frozen at
+`configs/bdf_pilot/d_witness_r2.json` **before any analysis reads a
+number**.
+
+### v2.3 Sham arms cancelled (amends §1/§2 "E-sham" for the sidecar line)
+
+`wrongblock_sidecar_sham` / `wrongblock_raw_sham` are **deleted**: the
+measured sham construction was degenerate (`wrong_k = (k_star +
+n_docs//2) % n_docs` collapses to `n_docs-1`, i.e. always the most recent
+round; on the 17/93 single-doc qids the sham IS the treatment; span
+lengths unequal on 75/93, violating the equal-bytes anchor definition).
+The k-sweep's non-witness ks form each qid's wrong-block **distribution**
+(no equal-length matching required). The 17 `n_docs=1` qids have no wrong
+block and participate in no sham-style argument.
+
+### v2.4 Denominators, stratification, multiplicity
+
+* Denominator = all 93, no per-arm filtering; skip/OOM rows are failures
+  and counted in a separate tally.
+* Strata: `n_docs=1` (17) / `n_docs>=2` (76), plus the **`k_star=None`
+  stratum** (synthesized-argument qids; repair arms run them as
+  explicit no-injection rows, `injected=false`, kept in the denominator).
+* Paired tests (exact McNemar, session-cluster bootstrap) run on the 93.
+* best-k corrections, both mandatory: (a) estimate the empirical
+  single-k flip rate `p` from non-witness ks, compare observed best-k
+  against the pure-random envelope `E[max] = 1 − (1−p)^n_docs`;
+  (b) report the **concentration of flipping ks** — exactly one k
+  flipping at a non-uniform position ⇒ item-specific repair; many ks
+  flipping ⇒ "any extra KV helps", not content. This diagnostic outranks
+  the best-k number itself.
+
+### v2.5 Cost accounting (amends §7 for the sidecar line)
+
+* `payload_bytes` = all disk bytes needed to reconstruct the single block
+  `P_k` (bitstream + that block's metadata). Session-shared artifacts
+  (PCA basis, dictionaries, regression weights) are amortized over the
+  session's block count — neither double-billed nor free.
+* Q is **not captured and not billed by default**; teacher arms that set
+  `want_q=True` bill it (GQA 4:1 ⇒ Q alone ≈ 2× the k+v bill; residency
+  ≈ 3× k+v when captured).
+* Latency segments `T_capture / T_load / T_edit / T_query /
+  T_fixed_decode` are device-synced; `warm` = second call on the same
+  qid. `oracle_target_only` reports `injected=false` and span tokens 0 —
+  it never claims storage it did not inject.
+
+### v2.6 D2 erratum leak boundary (new clause)
+
+An erratum may contain **only literal values that occurred in doc k\***,
+never the tool name, never values absent from history. Since S scores the
+tool name only, the leak path is physically cut at the metric level; the
+boundary exists so the diagnostic columns stay honest too.
+
+### v2.7 Frozen artifacts added by this addendum
+
+| artifact | path |
+|---|---|
+| witness table | `configs/bdf_pilot/d_witness_r2.json` |
+| O-1 gate recomputation | reproduced in the D1 report; inputs are git-tracked |
+
+### v2.8 go/no-go gate + caliber reconciliation (2026-08-31, written BEFORE any sweep number is read)
+
+* **R gate (decides whether codec/capsule arms burn cards):** the frozen
+  trigger set gives n=93; the repair channel counts as ALIVE iff
+  S@k_witness clears the non-witness (wrong-block distribution) flip-rate
+  floor under a one-sided binomial test at p<0.05 (floor p estimated from
+  the non-witness k rows; analysis emits both numbers).  Below the floor:
+  the channel is judged dead, D3–D7 arms are NOT run, and line A's offline
+  rate–distortion results stand alone.
+* **O-1 vs `battery4096_adjudication.md` — not a contradiction:** 128 is
+  the caliber of the FROZEN C→W mechanism face (its trigger pairing was
+  mined under 128 and O-1's gate showed raising it buys nothing on S);
+  the 4096 adjudication eliminated the 128-TRUNCATION artifact on the
+  end-to-end BATTERY face.  Two faces, each ruling stands on its own.
+* **Declared assumption (review I):** D6's student attention over the
+  gist span is NOT causal — in the real compression forward tokens never
+  attend gists, so the student is counterfactual either way; the D6
+  report states this explicitly.
+* Round-2 review fixes recorded: masked-fold phantom denominator (A),
+  max-shift + e^{-m} units (B), extra_den-only raises (C), eager-path
+  default-off bias/fold registry wired (D), D5 rewritten as d5_v2 (E),
+  kvtc centered basis with mu as shared artifact (F), SelKV log-space
+  geometric mean (G), pack_bits unsigned assertion (H).
+
+### v2.9 sentinel verdict reframed (2026-08-31, evidence on record)
+
+The 3-qid sentinel FAILED both stages at the bit level — root cause PROVEN
+not to be a code defect: a controlled probe (same k_proj weight, same row
+content, batch 1x413 vs embedded in the 16x768 grid) on the same NPU
+gives max|d| = 0.0078125 — digit-identical to the sentinel's layer-0 K
+mismatch — while a same-shape rerun is bit-equal.  NPU bf16 matmul
+rounding is shape-dependent; 36 layers of residual/layernorm amplify the
+1-ulp perturbation to O(0.5) per-entry diffs (bf16 deep-net chaos).
+
+Rulings:
+1. "Sidecar == standalone prefill, bit-identical" is UNATTAINABLE across
+   batch shapes on this hardware; the premise is retracted, not the code.
+2. The D0 contract itself is intact: P_k is what the NORMAL compression
+   forward computes, and the hooks capture exactly that (they do not
+   perturb computation; the interleave mask's token->gist block is never
+   filled — verified in _build_interleave_mask_vectorized — so the raw KV
+   is document-local in CONTENT, with no gist leakage).
+3. Placement (B7) remains certified by the unit identity
+   (metrology/test_abs_rope, atol 1e-4), independent of this finding.
+4. Line-B arms proceed: they splice the compression forward's own raw KV,
+   which is the contract's definition of the payload.  Their numbers
+   carry this caveat verbatim.
+
+Sentinel code follow-up (non-blocking): verdict logic becomes
+L0-vs-shape-noise control (<= 2 ulp) + per-layer RELATIVE Frobenius error
+(the probe's mean|d| is 8e-8 — max|d| alone overstates the divergence).
+
+### v2.10 positive-conformance record + accepted limitations (S1.3/S1.4/S1.6, 2026-08-31)
+
+**CONFORMS (the one place the project may claim it):**
+`python/inference/abs_rope.apply_abs_rope` implements the Leyline/Nexus
+RoPE-reanchor primitive, and is STRICTLY MORE GENERAL.  By RoPE's closure
+R(a)·R(b) = R(a+b), applying R(start+i) to PRE-RoPE keys is algebraically
+identical to the papers' delta-displacement R(start)·R(i) of post-RoPE
+keys — but does not require having the post-RoPE cache first (the sidecar
+stores position-free K precisely to allow this).  Evidence:
+`metrology/test_abs_rope.py` (identity vs `rotate_k_cache_rope` at fp32
+associativity, atol 1e-4; distinct-positions regression pinning the v1
+collapse bug).  Everything ELSE in the D line is labelled per S1.5 as
+"block-local transfer" or "the paper's baseline/ablation" — most
+prominently d5_v2 is the UNTRAINED LOWER BOUND of LESS/RMA, and
+`grkv_v_edit` is the paper's GRV ablation (the full method adds a ΔK arm
+via matrix-free JVP/VJP + CG).
+
+**Accepted limitations (not re-run for):**
+- warm repair latency needs an in-process second call per qid — recorded
+  as a limitation, not reconstructed (review concurrence).
+- Seam effects (Notes-at-Prefill §5): boundary tokens of the transplanted
+  block miss the prefix they would have attended in a full prefill; we do
+  NOT recompute boundary tokens this round — declared, not hidden.
+- raw_keepG's bytes ledger: billed at sidecar_bytes_all for SSA-labelling
+  purposes (SSA has no oracle and must keep every block resident); the
+  all-target-only vs all-blocks差额 IS the oracle's saving — reported as
+  such (S1.2).  Both columns were already in every row; reporting-only.

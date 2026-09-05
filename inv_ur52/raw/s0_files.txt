@@ -1,0 +1,537 @@
+** WARNING: connection is not using a post-quantum key exchange algorithm.
+** This session may be vulnerable to "store now, decrypt later" attacks.
+** The server may need to be upgraded. See https://openssh.com/pq.html
+
+Authorized users only. All activities may be monitored and reported.
+=== run_manifest.json ===
+{
+  "bfcl_git_commit": "1efcc4ec6c255c88b19a1d2126486945570d5375",
+  "sglang_git_commit": "7de9e81051a31aa02e635c8af86f6ca100cc7f0c",
+  "model_path": "/home/zhuyuhan/project/c2kv/checkpoints/qwen3-4b-agent-history-c2kv-toolcall-npu-v2/checkpoint-1088",
+  "tokenizer_path": "/home/zhuyuhan/project/c2kv/models/Qwen3-4B-Instruct-2507",
+  "ids_path": "/home/zhuyuhan/project/gorilla/bfcl_runs/history_full_temp0_stability_20260819_172725/frozen_reference/correct_ids.txt",
+  "reference_details_path": "/home/zhuyuhan/project/gorilla/bfcl_runs/history_full_temp0_stability_20260819_172725/frozen_reference/details.jsonl",
+  "category": "multi_turn_base",
+  "ratio": 4,
+  "checkpoint_interval": 4,
+  "recent_full_units": 0,
+  "temperature": 0.0,
+  "repair_extract_source": "auto",
+  "c2kv_repair_extract_attn_impl": "prompt_flash",
+  "methods": [
+    "full",
+    "c2kv",
+    "rollback_d1",
+    "rollback_d2",
+    "rollback_d4",
+    "replace_w1",
+    "replace_w2",
+    "replace_w4",
+    "replace_all",
+    "recompute_w2",
+    "append_w2",
+    "append_w2_hint",
+    "hint_only",
+    "append_masked_w2"
+  ],
+  "devices": "6,7",
+  "ports": "34660,34670"
+}
+
+=== manifest_write.log ===
+{"bfcl_git_commit": "1efcc4ec6c255c88b19a1d2126486945570d5375", "sglang_git_commit": "7de9e81051a31aa02e635c8af86f6ca100cc7f0c", "model_path": "/home/zhuyuhan/project/c2kv/checkpoints/qwen3-4b-agent-history-c2kv-toolcall-npu-v2/checkpoint-1088", "tokenizer_path": "/home/zhuyuhan/project/c2kv/models/Qwen3-4B-Instruct-2507", "ids_path": "/home/zhuyuhan/project/gorilla/bfcl_runs/history_full_temp0_stability_20260819_172725/frozen_reference/correct_ids.txt", "reference_details_path": "/home/zhuyuhan/project/gorilla/bfcl_runs/history_full_temp0_stability_20260819_172725/frozen_reference/details.jsonl", "category": "multi_turn_base", "ratio": 4, "checkpoint_interval": 4, "recent_full_units": 0, "temperature": 0.0, "repair_extract_source": "auto", "c2kv_repair_extract_attn_impl": "prompt_flash", "methods": ["full", "c2kv", "rollback_d1", "rollback_d2", "rollback_d4", "replace_w1", "replace_w2", "replace_w4", "replace_all", "recompute_w2", "append_w2", "append_w2_hint", "hint_only", "append_masked_w2"], "devices": "6,7", "ports": "34660,34670"}
+
+=== ALL launcher logs ===
+----- /home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/logs/append_masked_w2.launcher.log
+[2026-09-03 03:51:40] [append_masked_w2] repair arm=append_masked_w2 device=7 port=34670
+[2026-09-03 03:51:40] BFCL KV repair sweep starting
+[2026-09-03 03:51:40] RUN_ROOT=/home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915
+[2026-09-03 03:51:40] ARMS=append_masked_w2
+[2026-09-03 03:51:40] CHECKPOINT_INTERVAL=4
+[2026-09-03 03:51:40] DEVICES=7 PORTS=34670
+[2026-09-03 03:51:40] C2KV_POOL_FRACTION=0.06
+[2026-09-03 03:51:40] REPAIR_WINDOW=1
+[2026-09-03 03:51:40] REPAIR_EXTRACT_SOURCE=auto
+[2026-09-03 03:51:40] MAX_COMPLETION_TOKENS=4096
+[2026-09-03 03:51:40] FLUSH_CACHE_BETWEEN_ARMS=1
+[2026-09-03 03:51:40] IDS_PATH=/home/zhuyuhan/project/gorilla/bfcl_runs/history_full_temp0_stability_20260819_172725/frozen_reference/correct_ids.txt
+[2026-09-03 03:51:40] PLAN_PATH=
+[2026-09-03 03:51:40] source /usr/local/Ascend/cann-8.5.0/set_env.sh
+[2026-09-03 03:51:41] source /usr/local/Ascend/nnal/atb/set_env.sh
+[2026-09-03 03:51:44] server slot=0 device=7 port=34670 pid=4023139 log=/home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/server_7_34670.log
+[2026-09-03 03:55:26] runner start arm=append_masked_w2 slot=0 port=34670
+[2026-09-03 04:27:49] runner done arm=append_masked_w2
+[2026-09-03 04:28:01] eval done arm=append_masked_w2
+[2026-09-03 04:28:01] skip compare_kv_repair_sweep because RUN_COMPARE=0
+[2026-09-03 04:28:01] summary: /home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/kv_repair_summary.csv
+[2026-09-03 04:28:01] report: /home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/kv_repair_report.md
+----- /home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/logs/append_w2_hint.launcher.log
+[2026-09-03 03:10:38] [append_w2_hint] repair arm=d_corr_w2_hint device=7 port=34670
+[2026-09-03 03:10:38] BFCL KV repair sweep starting
+[2026-09-03 03:10:38] RUN_ROOT=/home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915
+[2026-09-03 03:10:38] ARMS=d_corr_w2_hint
+[2026-09-03 03:10:38] CHECKPOINT_INTERVAL=4
+[2026-09-03 03:10:38] DEVICES=7 PORTS=34670
+[2026-09-03 03:10:38] C2KV_POOL_FRACTION=0.06
+[2026-09-03 03:10:38] REPAIR_WINDOW=1
+[2026-09-03 03:10:38] REPAIR_EXTRACT_SOURCE=auto
+[2026-09-03 03:10:38] MAX_COMPLETION_TOKENS=4096
+[2026-09-03 03:10:38] FLUSH_CACHE_BETWEEN_ARMS=1
+[2026-09-03 03:10:38] IDS_PATH=/home/zhuyuhan/project/gorilla/bfcl_runs/history_full_temp0_stability_20260819_172725/frozen_reference/correct_ids.txt
+[2026-09-03 03:10:38] PLAN_PATH=
+[2026-09-03 03:10:38] source /usr/local/Ascend/cann-8.5.0/set_env.sh
+[2026-09-03 03:10:39] source /usr/local/Ascend/nnal/atb/set_env.sh
+[2026-09-03 03:10:42] server slot=0 device=7 port=34670 pid=3770185 log=/home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/server_7_34670.log
+[2026-09-03 03:14:24] runner start arm=d_corr_w2_hint slot=0 port=34670
+[2026-09-03 03:51:27] runner done arm=d_corr_w2_hint
+[2026-09-03 03:51:38] eval done arm=d_corr_w2_hint
+[2026-09-03 03:51:38] skip compare_kv_repair_sweep because RUN_COMPARE=0
+[2026-09-03 03:51:38] summary: /home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/kv_repair_summary.csv
+[2026-09-03 03:51:38] report: /home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/kv_repair_report.md
+----- /home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/logs/append_w2.launcher.log
+[2026-09-03 03:10:38] [append_w2] repair arm=d_corr_w2 device=6 port=34660
+[2026-09-03 03:10:38] BFCL KV repair sweep starting
+[2026-09-03 03:10:38] RUN_ROOT=/home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915
+[2026-09-03 03:10:38] ARMS=d_corr_w2
+[2026-09-03 03:10:38] CHECKPOINT_INTERVAL=4
+[2026-09-03 03:10:38] DEVICES=6 PORTS=34660
+[2026-09-03 03:10:38] C2KV_POOL_FRACTION=0.06
+[2026-09-03 03:10:38] REPAIR_WINDOW=1
+[2026-09-03 03:10:38] REPAIR_EXTRACT_SOURCE=auto
+[2026-09-03 03:10:38] MAX_COMPLETION_TOKENS=4096
+[2026-09-03 03:10:38] FLUSH_CACHE_BETWEEN_ARMS=1
+[2026-09-03 03:10:38] IDS_PATH=/home/zhuyuhan/project/gorilla/bfcl_runs/history_full_temp0_stability_20260819_172725/frozen_reference/correct_ids.txt
+[2026-09-03 03:10:38] PLAN_PATH=
+[2026-09-03 03:10:38] source /usr/local/Ascend/cann-8.5.0/set_env.sh
+[2026-09-03 03:10:39] source /usr/local/Ascend/nnal/atb/set_env.sh
+[2026-09-03 03:10:42] server slot=0 device=6 port=34660 pid=3770181 log=/home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/server_6_34660.log
+[2026-09-03 03:14:19] runner start arm=d_corr_w2 slot=0 port=34660
+[2026-09-03 03:44:12] runner done arm=d_corr_w2
+[2026-09-03 03:44:23] eval done arm=d_corr_w2
+[2026-09-03 03:44:23] skip compare_kv_repair_sweep because RUN_COMPARE=0
+[2026-09-03 03:44:23] summary: /home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/kv_repair_summary.csv
+[2026-09-03 03:44:23] report: /home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/kv_repair_report.md
+----- /home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/logs/c2kv.launcher.log
+[2026-09-03 00:29:16] [c2kv] repair arm=c2kv device=7 port=34670
+[2026-09-03 00:29:16] BFCL KV repair sweep starting
+[2026-09-03 00:29:16] RUN_ROOT=/home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915
+[2026-09-03 00:29:16] ARMS=c2kv
+[2026-09-03 00:29:16] CHECKPOINT_INTERVAL=4
+[2026-09-03 00:29:16] DEVICES=7 PORTS=34670
+[2026-09-03 00:29:16] C2KV_POOL_FRACTION=0.06
+[2026-09-03 00:29:16] REPAIR_WINDOW=1
+[2026-09-03 00:29:16] REPAIR_EXTRACT_SOURCE=auto
+[2026-09-03 00:29:16] MAX_COMPLETION_TOKENS=4096
+[2026-09-03 00:29:16] FLUSH_CACHE_BETWEEN_ARMS=1
+[2026-09-03 00:29:16] IDS_PATH=/home/zhuyuhan/project/gorilla/bfcl_runs/history_full_temp0_stability_20260819_172725/frozen_reference/correct_ids.txt
+[2026-09-03 00:29:16] PLAN_PATH=
+[2026-09-03 00:29:16] source /usr/local/Ascend/cann-8.5.0/set_env.sh
+[2026-09-03 00:29:16] source /usr/local/Ascend/nnal/atb/set_env.sh
+[2026-09-03 00:29:20] server slot=0 device=7 port=34670 pid=2788251 log=/home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/server_7_34670.log
+[2026-09-03 00:32:56] runner start arm=c2kv slot=0 port=34670
+[2026-09-03 00:51:32] runner done arm=c2kv
+[2026-09-03 00:51:43] eval done arm=c2kv
+[2026-09-03 00:51:43] skip compare_kv_repair_sweep because RUN_COMPARE=0
+[2026-09-03 00:51:43] summary: /home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/kv_repair_summary.csv
+[2026-09-03 00:51:43] report: /home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/kv_repair_report.md
+----- /home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/logs/full.launcher.log
+[2026-09-03 00:29:16] [full] repair arm=full device=6 port=34660
+[2026-09-03 00:29:16] BFCL KV repair sweep starting
+[2026-09-03 00:29:16] RUN_ROOT=/home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915
+[2026-09-03 00:29:16] ARMS=full
+[2026-09-03 00:29:16] CHECKPOINT_INTERVAL=4
+[2026-09-03 00:29:16] DEVICES=6 PORTS=34660
+[2026-09-03 00:29:16] C2KV_POOL_FRACTION=0.06
+[2026-09-03 00:29:16] REPAIR_WINDOW=1
+[2026-09-03 00:29:16] REPAIR_EXTRACT_SOURCE=auto
+[2026-09-03 00:29:16] MAX_COMPLETION_TOKENS=4096
+[2026-09-03 00:29:16] FLUSH_CACHE_BETWEEN_ARMS=1
+[2026-09-03 00:29:16] IDS_PATH=/home/zhuyuhan/project/gorilla/bfcl_runs/history_full_temp0_stability_20260819_172725/frozen_reference/correct_ids.txt
+[2026-09-03 00:29:16] PLAN_PATH=
+[2026-09-03 00:29:16] source /usr/local/Ascend/cann-8.5.0/set_env.sh
+[2026-09-03 00:29:16] source /usr/local/Ascend/nnal/atb/set_env.sh
+[2026-09-03 00:29:20] server slot=0 device=6 port=34660 pid=2788255 log=/home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/server_6_34660.log
+[2026-09-03 00:32:56] runner start arm=full slot=0 port=34660
+[2026-09-03 00:42:11] runner done arm=full
+[2026-09-03 00:42:23] eval done arm=full
+[2026-09-03 00:42:23] skip compare_kv_repair_sweep because RUN_COMPARE=0
+[2026-09-03 00:42:23] summary: /home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/kv_repair_summary.csv
+[2026-09-03 00:42:23] report: /home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/kv_repair_report.md
+----- /home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/logs/hint_only.launcher.log
+[2026-09-03 03:51:40] [hint_only] repair arm=hint_only device=6 port=34660
+[2026-09-03 03:51:40] BFCL KV repair sweep starting
+[2026-09-03 03:51:40] RUN_ROOT=/home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915
+[2026-09-03 03:51:40] ARMS=hint_only
+[2026-09-03 03:51:40] CHECKPOINT_INTERVAL=4
+[2026-09-03 03:51:40] DEVICES=6 PORTS=34660
+[2026-09-03 03:51:40] C2KV_POOL_FRACTION=0.06
+[2026-09-03 03:51:40] REPAIR_WINDOW=1
+[2026-09-03 03:51:40] REPAIR_EXTRACT_SOURCE=auto
+[2026-09-03 03:51:40] MAX_COMPLETION_TOKENS=4096
+[2026-09-03 03:51:40] FLUSH_CACHE_BETWEEN_ARMS=1
+[2026-09-03 03:51:40] IDS_PATH=/home/zhuyuhan/project/gorilla/bfcl_runs/history_full_temp0_stability_20260819_172725/frozen_reference/correct_ids.txt
+[2026-09-03 03:51:40] PLAN_PATH=
+[2026-09-03 03:51:40] source /usr/local/Ascend/cann-8.5.0/set_env.sh
+[2026-09-03 03:51:41] source /usr/local/Ascend/nnal/atb/set_env.sh
+[2026-09-03 03:51:44] server slot=0 device=6 port=34660 pid=4023136 log=/home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/server_6_34660.log
+[2026-09-03 03:55:20] runner start arm=hint_only slot=0 port=34660
+[2026-09-03 04:27:15] runner done arm=hint_only
+[2026-09-03 04:27:27] eval done arm=hint_only
+[2026-09-03 04:27:27] skip compare_kv_repair_sweep because RUN_COMPARE=0
+[2026-09-03 04:27:27] summary: /home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/kv_repair_summary.csv
+[2026-09-03 04:27:27] report: /home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/kv_repair_report.md
+----- /home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/logs/recompute_w2.launcher.log
+[2026-09-03 02:35:11] [recompute_w2] repair arm=d_corr_recompute_w2 device=7 port=34670
+[2026-09-03 02:35:11] BFCL KV repair sweep starting
+[2026-09-03 02:35:11] RUN_ROOT=/home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915
+[2026-09-03 02:35:11] ARMS=d_corr_recompute_w2
+[2026-09-03 02:35:11] CHECKPOINT_INTERVAL=4
+[2026-09-03 02:35:11] DEVICES=7 PORTS=34670
+[2026-09-03 02:35:11] C2KV_POOL_FRACTION=0.06
+[2026-09-03 02:35:11] REPAIR_WINDOW=1
+[2026-09-03 02:35:11] REPAIR_EXTRACT_SOURCE=auto
+[2026-09-03 02:35:11] MAX_COMPLETION_TOKENS=4096
+[2026-09-03 02:35:11] FLUSH_CACHE_BETWEEN_ARMS=1
+[2026-09-03 02:35:11] IDS_PATH=/home/zhuyuhan/project/gorilla/bfcl_runs/history_full_temp0_stability_20260819_172725/frozen_reference/correct_ids.txt
+[2026-09-03 02:35:11] PLAN_PATH=
+[2026-09-03 02:35:11] source /usr/local/Ascend/cann-8.5.0/set_env.sh
+[2026-09-03 02:35:11] source /usr/local/Ascend/nnal/atb/set_env.sh
+[2026-09-03 02:35:15] server slot=0 device=7 port=34670 pid=3551883 log=/home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/server_7_34670.log
+[2026-09-03 02:38:51] runner start arm=d_corr_recompute_w2 slot=0 port=34670
+[2026-09-03 03:10:21] runner done arm=d_corr_recompute_w2
+[2026-09-03 03:10:33] eval done arm=d_corr_recompute_w2
+[2026-09-03 03:10:33] skip compare_kv_repair_sweep because RUN_COMPARE=0
+[2026-09-03 03:10:33] summary: /home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/kv_repair_summary.csv
+[2026-09-03 03:10:33] report: /home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/kv_repair_report.md
+----- /home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/logs/replace_all.launcher.log
+[2026-09-03 02:35:11] [replace_all] repair arm=d_corr_replace_all device=6 port=34660
+[2026-09-03 02:35:11] BFCL KV repair sweep starting
+[2026-09-03 02:35:11] RUN_ROOT=/home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915
+[2026-09-03 02:35:11] ARMS=d_corr_replace_all
+[2026-09-03 02:35:11] CHECKPOINT_INTERVAL=4
+[2026-09-03 02:35:11] DEVICES=6 PORTS=34660
+[2026-09-03 02:35:11] C2KV_POOL_FRACTION=0.06
+[2026-09-03 02:35:11] REPAIR_WINDOW=1
+[2026-09-03 02:35:11] REPAIR_EXTRACT_SOURCE=auto
+[2026-09-03 02:35:11] MAX_COMPLETION_TOKENS=4096
+[2026-09-03 02:35:11] FLUSH_CACHE_BETWEEN_ARMS=1
+[2026-09-03 02:35:11] IDS_PATH=/home/zhuyuhan/project/gorilla/bfcl_runs/history_full_temp0_stability_20260819_172725/frozen_reference/correct_ids.txt
+[2026-09-03 02:35:11] PLAN_PATH=
+[2026-09-03 02:35:11] source /usr/local/Ascend/cann-8.5.0/set_env.sh
+[2026-09-03 02:35:11] source /usr/local/Ascend/nnal/atb/set_env.sh
+[2026-09-03 02:35:15] server slot=0 device=6 port=34660 pid=3551887 log=/home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/server_6_34660.log
+[2026-09-03 02:38:51] runner start arm=d_corr_replace_all slot=0 port=34660
+[2026-09-03 03:08:00] runner done arm=d_corr_replace_all
+[2026-09-03 03:08:12] eval done arm=d_corr_replace_all
+[2026-09-03 03:08:12] skip compare_kv_repair_sweep because RUN_COMPARE=0
+[2026-09-03 03:08:12] summary: /home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/kv_repair_summary.csv
+[2026-09-03 03:08:12] report: /home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/kv_repair_report.md
+----- /home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/logs/replace_w1.launcher.log
+[2026-09-03 01:19:51] [replace_w1] repair arm=d_corr_replace_w1 device=7 port=34670
+[2026-09-03 01:19:51] BFCL KV repair sweep starting
+[2026-09-03 01:19:51] RUN_ROOT=/home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915
+[2026-09-03 01:19:51] ARMS=d_corr_replace_w1
+[2026-09-03 01:19:51] CHECKPOINT_INTERVAL=4
+[2026-09-03 01:19:51] DEVICES=7 PORTS=34670
+[2026-09-03 01:19:51] C2KV_POOL_FRACTION=0.06
+[2026-09-03 01:19:51] REPAIR_WINDOW=1
+[2026-09-03 01:19:51] REPAIR_EXTRACT_SOURCE=auto
+[2026-09-03 01:19:51] MAX_COMPLETION_TOKENS=4096
+[2026-09-03 01:19:51] FLUSH_CACHE_BETWEEN_ARMS=1
+[2026-09-03 01:19:51] IDS_PATH=/home/zhuyuhan/project/gorilla/bfcl_runs/history_full_temp0_stability_20260819_172725/frozen_reference/correct_ids.txt
+[2026-09-03 01:19:51] PLAN_PATH=
+[2026-09-03 01:19:51] source /usr/local/Ascend/cann-8.5.0/set_env.sh
+[2026-09-03 01:19:52] source /usr/local/Ascend/nnal/atb/set_env.sh
+[2026-09-03 01:19:55] server slot=0 device=7 port=34670 pid=3107247 log=/home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/server_7_34670.log
+[2026-09-03 01:23:36] runner start arm=d_corr_replace_w1 slot=0 port=34670
+[2026-09-03 01:57:49] runner done arm=d_corr_replace_w1
+[2026-09-03 01:58:01] eval done arm=d_corr_replace_w1
+[2026-09-03 01:58:01] skip compare_kv_repair_sweep because RUN_COMPARE=0
+[2026-09-03 01:58:01] summary: /home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/kv_repair_summary.csv
+[2026-09-03 01:58:01] report: /home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/kv_repair_report.md
+----- /home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/logs/replace_w2.launcher.log
+[2026-09-03 01:58:04] [replace_w2] repair arm=d_corr_replace_w2 device=6 port=34660
+[2026-09-03 01:58:04] BFCL KV repair sweep starting
+[2026-09-03 01:58:04] RUN_ROOT=/home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915
+[2026-09-03 01:58:04] ARMS=d_corr_replace_w2
+[2026-09-03 01:58:04] CHECKPOINT_INTERVAL=4
+[2026-09-03 01:58:04] DEVICES=6 PORTS=34660
+[2026-09-03 01:58:04] C2KV_POOL_FRACTION=0.06
+[2026-09-03 01:58:04] REPAIR_WINDOW=1
+[2026-09-03 01:58:04] REPAIR_EXTRACT_SOURCE=auto
+[2026-09-03 01:58:04] MAX_COMPLETION_TOKENS=4096
+[2026-09-03 01:58:04] FLUSH_CACHE_BETWEEN_ARMS=1
+[2026-09-03 01:58:04] IDS_PATH=/home/zhuyuhan/project/gorilla/bfcl_runs/history_full_temp0_stability_20260819_172725/frozen_reference/correct_ids.txt
+[2026-09-03 01:58:04] PLAN_PATH=
+[2026-09-03 01:58:04] source /usr/local/Ascend/cann-8.5.0/set_env.sh
+[2026-09-03 01:58:05] source /usr/local/Ascend/nnal/atb/set_env.sh
+[2026-09-03 01:58:08] server slot=0 device=6 port=34660 pid=3330087 log=/home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/server_6_34660.log
+[2026-09-03 02:01:45] runner start arm=d_corr_replace_w2 slot=0 port=34660
+[2026-09-03 02:34:23] runner done arm=d_corr_replace_w2
+[2026-09-03 02:34:35] eval done arm=d_corr_replace_w2
+[2026-09-03 02:34:35] skip compare_kv_repair_sweep because RUN_COMPARE=0
+[2026-09-03 02:34:35] summary: /home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/kv_repair_summary.csv
+[2026-09-03 02:34:35] report: /home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/kv_repair_report.md
+----- /home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/logs/replace_w4.launcher.log
+[2026-09-03 01:58:04] [replace_w4] repair arm=d_corr_replace_w4 device=7 port=34670
+[2026-09-03 01:58:04] BFCL KV repair sweep starting
+[2026-09-03 01:58:04] RUN_ROOT=/home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915
+[2026-09-03 01:58:04] ARMS=d_corr_replace_w4
+[2026-09-03 01:58:04] CHECKPOINT_INTERVAL=4
+[2026-09-03 01:58:04] DEVICES=7 PORTS=34670
+[2026-09-03 01:58:04] C2KV_POOL_FRACTION=0.06
+[2026-09-03 01:58:04] REPAIR_WINDOW=1
+[2026-09-03 01:58:04] REPAIR_EXTRACT_SOURCE=auto
+[2026-09-03 01:58:04] MAX_COMPLETION_TOKENS=4096
+[2026-09-03 01:58:04] FLUSH_CACHE_BETWEEN_ARMS=1
+[2026-09-03 01:58:04] IDS_PATH=/home/zhuyuhan/project/gorilla/bfcl_runs/history_full_temp0_stability_20260819_172725/frozen_reference/correct_ids.txt
+[2026-09-03 01:58:04] PLAN_PATH=
+[2026-09-03 01:58:04] source /usr/local/Ascend/cann-8.5.0/set_env.sh
+[2026-09-03 01:58:05] source /usr/local/Ascend/nnal/atb/set_env.sh
+[2026-09-03 01:58:08] server slot=0 device=7 port=34670 pid=3330083 log=/home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/server_7_34670.log
+[2026-09-03 02:01:50] runner start arm=d_corr_replace_w4 slot=0 port=34670
+[2026-09-03 02:34:56] runner done arm=d_corr_replace_w4
+[2026-09-03 02:35:08] eval done arm=d_corr_replace_w4
+[2026-09-03 02:35:08] skip compare_kv_repair_sweep because RUN_COMPARE=0
+[2026-09-03 02:35:08] summary: /home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/kv_repair_summary.csv
+[2026-09-03 02:35:08] report: /home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/kv_repair_report.md
+----- /home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/logs/rollback_d1.launcher.log
+[2026-09-03 00:51:45] [rollback_d1] rollback depth=1 device=6 port=34660
+[2026-09-03 00:51:45] BFCL history multi-step checkpoint run starting
+[2026-09-03 00:51:45] RUN_ROOT=/home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915
+[2026-09-03 00:51:45] MODE=rollback_d1
+[2026-09-03 00:51:45] CATEGORY=multi_turn_base MAX_EXAMPLES=52
+[2026-09-03 00:51:45] INTERVAL=4 VERIFIER=oracle RECOVERY_MODE=since_checkpoint
+[2026-09-03 00:51:45] RECOVERY_HORIZON=suffix
+[2026-09-03 00:51:45] ATTRIBUTION=whole_segment ATTRIBUTION_SAFETY_MARGIN=0
+[2026-09-03 00:51:45] ROLLBACK_POLICY=fixed_depth ROLLBACK_DEPTH=1
+[2026-09-03 00:51:45] RULE_DETECTOR_THRESHOLD=5
+[2026-09-03 00:51:45] ROLLBACK_BACKEND=kv_restore_strict
+[2026-09-03 00:51:45] COLLECT_CANDIDATE_DETECTOR_SIGNALS=0 CANDIDATE_LOGPROBS_TOP_K=20
+[2026-09-03 00:51:45] ENABLE_HICACHE=auto HICACHE_RATIO=2
+[2026-09-03 00:51:45] DEVICE=6 PORT=34660
+[2026-09-03 00:51:45] RUN_COMPARE=0
+[2026-09-03 00:51:45] IDS_PATH=/home/zhuyuhan/project/gorilla/bfcl_runs/history_full_temp0_stability_20260819_172725/frozen_reference/correct_ids.txt
+[2026-09-03 00:51:45] REFERENCE_DETAILS=/home/zhuyuhan/project/gorilla/bfcl_runs/history_full_temp0_stability_20260819_172725/frozen_reference/details.jsonl
+[2026-09-03 00:51:45] source /usr/local/Ascend/cann-8.5.0/set_env.sh
+[2026-09-03 00:51:46] source /usr/local/Ascend/nnal/atb/set_env.sh
+[2026-09-03 00:51:49] [server] device=6 port=34660 pid=2926167 log=/home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/rollback_d1/logs/server_6_34660.log
+[2026-09-03 00:52:17] [server] waiting for health on port 34660 (15/900)
+[2026-09-03 00:52:47] [server] waiting for health on port 34660 (30/900)
+[2026-09-03 00:53:17] [server] waiting for health on port 34660 (45/900)
+[2026-09-03 00:53:48] [server] waiting for health on port 34660 (60/900)
+[2026-09-03 00:54:18] [server] waiting for health on port 34660 (75/900)
+[2026-09-03 00:54:48] [server] waiting for health on port 34660 (90/900)
+[2026-09-03 00:55:18] [server] waiting for health on port 34660 (105/900)
+[2026-09-03 00:55:27] [server] healthy on port 34660
+[2026-09-03 01:19:20] [runner:rollback_d1] done
+[2026-09-03 01:19:32] [eval:rollback_d1] done
+[2026-09-03 01:19:32] [compare:rollback_d1] skipped; run a final merged compare after parallel jobs finish
+[2026-09-03 01:19:32] History multi-step checkpoint run complete
+[2026-09-03 01:19:32] Report: /home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/report.md
+[2026-09-03 01:19:32] Logs: /home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/rollback_d1/logs
+----- /home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/logs/rollback_d2.launcher.log
+[2026-09-03 00:51:45] [rollback_d2] rollback depth=2 device=7 port=34670
+[2026-09-03 00:51:45] BFCL history multi-step checkpoint run starting
+[2026-09-03 00:51:45] RUN_ROOT=/home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915
+[2026-09-03 00:51:45] MODE=rollback_d2
+[2026-09-03 00:51:45] CATEGORY=multi_turn_base MAX_EXAMPLES=52
+[2026-09-03 00:51:45] INTERVAL=4 VERIFIER=oracle RECOVERY_MODE=since_checkpoint
+[2026-09-03 00:51:45] RECOVERY_HORIZON=suffix
+[2026-09-03 00:51:45] ATTRIBUTION=whole_segment ATTRIBUTION_SAFETY_MARGIN=0
+[2026-09-03 00:51:45] ROLLBACK_POLICY=fixed_depth ROLLBACK_DEPTH=2
+[2026-09-03 00:51:45] RULE_DETECTOR_THRESHOLD=5
+[2026-09-03 00:51:45] ROLLBACK_BACKEND=kv_restore_strict
+[2026-09-03 00:51:45] COLLECT_CANDIDATE_DETECTOR_SIGNALS=0 CANDIDATE_LOGPROBS_TOP_K=20
+[2026-09-03 00:51:45] ENABLE_HICACHE=auto HICACHE_RATIO=2
+[2026-09-03 00:51:45] DEVICE=7 PORT=34670
+[2026-09-03 00:51:45] RUN_COMPARE=0
+[2026-09-03 00:51:45] IDS_PATH=/home/zhuyuhan/project/gorilla/bfcl_runs/history_full_temp0_stability_20260819_172725/frozen_reference/correct_ids.txt
+[2026-09-03 00:51:45] REFERENCE_DETAILS=/home/zhuyuhan/project/gorilla/bfcl_runs/history_full_temp0_stability_20260819_172725/frozen_reference/details.jsonl
+[2026-09-03 00:51:45] source /usr/local/Ascend/cann-8.5.0/set_env.sh
+[2026-09-03 00:51:46] source /usr/local/Ascend/nnal/atb/set_env.sh
+[2026-09-03 00:51:49] [server] device=7 port=34670 pid=2926172 log=/home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/rollback_d2/logs/server_7_34670.log
+[2026-09-03 00:52:17] [server] waiting for health on port 34670 (15/900)
+[2026-09-03 00:52:47] [server] waiting for health on port 34670 (30/900)
+[2026-09-03 00:53:18] [server] waiting for health on port 34670 (45/900)
+[2026-09-03 00:53:48] [server] waiting for health on port 34670 (60/900)
+[2026-09-03 00:54:18] [server] waiting for health on port 34670 (75/900)
+[2026-09-03 00:54:48] [server] waiting for health on port 34670 (90/900)
+[2026-09-03 00:55:18] [server] waiting for health on port 34670 (105/900)
+[2026-09-03 00:55:27] [server] healthy on port 34670
+[2026-09-03 01:19:24] [runner:rollback_d2] done
+[2026-09-03 01:19:36] [eval:rollback_d2] done
+[2026-09-03 01:19:36] [compare:rollback_d2] skipped; run a final merged compare after parallel jobs finish
+[2026-09-03 01:19:36] History multi-step checkpoint run complete
+[2026-09-03 01:19:36] Report: /home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/report.md
+[2026-09-03 01:19:36] Logs: /home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/rollback_d2/logs
+----- /home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/logs/rollback_d4.launcher.log
+[2026-09-03 01:19:51] [rollback_d4] rollback depth=4 device=6 port=34660
+[2026-09-03 01:19:51] BFCL history multi-step checkpoint run starting
+[2026-09-03 01:19:51] RUN_ROOT=/home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915
+[2026-09-03 01:19:51] MODE=rollback_d4
+[2026-09-03 01:19:51] CATEGORY=multi_turn_base MAX_EXAMPLES=52
+[2026-09-03 01:19:51] INTERVAL=4 VERIFIER=oracle RECOVERY_MODE=since_checkpoint
+[2026-09-03 01:19:51] RECOVERY_HORIZON=suffix
+[2026-09-03 01:19:51] ATTRIBUTION=whole_segment ATTRIBUTION_SAFETY_MARGIN=0
+[2026-09-03 01:19:51] ROLLBACK_POLICY=fixed_depth ROLLBACK_DEPTH=4
+[2026-09-03 01:19:51] RULE_DETECTOR_THRESHOLD=5
+[2026-09-03 01:19:51] ROLLBACK_BACKEND=kv_restore_strict
+[2026-09-03 01:19:51] COLLECT_CANDIDATE_DETECTOR_SIGNALS=0 CANDIDATE_LOGPROBS_TOP_K=20
+[2026-09-03 01:19:51] ENABLE_HICACHE=auto HICACHE_RATIO=2
+[2026-09-03 01:19:51] DEVICE=6 PORT=34660
+[2026-09-03 01:19:51] RUN_COMPARE=0
+[2026-09-03 01:19:51] IDS_PATH=/home/zhuyuhan/project/gorilla/bfcl_runs/history_full_temp0_stability_20260819_172725/frozen_reference/correct_ids.txt
+[2026-09-03 01:19:51] REFERENCE_DETAILS=/home/zhuyuhan/project/gorilla/bfcl_runs/history_full_temp0_stability_20260819_172725/frozen_reference/details.jsonl
+[2026-09-03 01:19:51] source /usr/local/Ascend/cann-8.5.0/set_env.sh
+[2026-09-03 01:19:52] source /usr/local/Ascend/nnal/atb/set_env.sh
+[2026-09-03 01:19:55] [server] device=6 port=34660 pid=3107257 log=/home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/rollback_d4/logs/server_6_34660.log
+[2026-09-03 01:20:23] [server] waiting for health on port 34660 (15/900)
+[2026-09-03 01:20:53] [server] waiting for health on port 34660 (30/900)
+[2026-09-03 01:21:23] [server] waiting for health on port 34660 (45/900)
+[2026-09-03 01:21:54] [server] waiting for health on port 34660 (60/900)
+[2026-09-03 01:22:24] [server] waiting for health on port 34660 (75/900)
+[2026-09-03 01:22:54] [server] waiting for health on port 34660 (90/900)
+[2026-09-03 01:23:24] [server] waiting for health on port 34660 (105/900)
+[2026-09-03 01:23:33] [server] healthy on port 34660
+[2026-09-03 01:47:22] [runner:rollback_d4] done
+[2026-09-03 01:47:33] [eval:rollback_d4] done
+[2026-09-03 01:47:33] [compare:rollback_d4] skipped; run a final merged compare after parallel jobs finish
+[2026-09-03 01:47:33] History multi-step checkpoint run complete
+[2026-09-03 01:47:33] Report: /home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/report.md
+[2026-09-03 01:47:33] Logs: /home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/rollback_d4/logs
+
+=== unified_recovery_comparison.md ===
+# Unified C2KV Recovery Comparison
+
+| method | bfcl_accuracy | correct_count | executed_action_drift_rate | state_drift_rate | detector_trigger_rate | reference_recovery_success_rate | total_committed_steps | model_calls_per_committed_step | history_kv_compression | mean_step_history_kv_compression | worst_step_history_kv_compression | peak_gpu_kv_mib | peak_host_checkpoint_kv_mib | memory_report_coverage | actual_compression_status |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Full | 1.0000 | 52 | 0.0000 | 0.0000 | - | - | 490 | 1.0000 | - | - | - | - | - | 0.0000 | incomplete |
+| C2KV | 0.1731 | 9 | 0.9423 | 0.7115 | - | - | 481 | 1.0000 | - | - | - | - | - | 0.0000 | incomplete |
+| Rollback D1 | 0.5192 | 27 | 0.8462 | 0.6731 | 0.4778 | 0.2481 | 541 | 1.2384 | - | - | - | - | - | 0.0000 | incomplete |
+| Rollback D2 | 0.9231 | 48 | 0.4423 | 0.3077 | 0.4423 | 0.6783 | 522 | 1.3736 | - | - | - | - | - | 0.0000 | incomplete |
+| Rollback D4 | 1.0000 | 52 | 0.0000 | 0.0000 | 0.4492 | 1.0000 | 490 | 1.4837 | - | - | - | - | - | 0.0000 | incomplete |
+| Replace W1 | 0.3846 | 20 | 0.8269 | 0.6538 | 0.5440 | 0.2279 | 495 | 1.6444 | - | - | - | - | - | 0.0000 | incomplete |
+| Replace W2 | 0.6731 | 35 | 0.4038 | 0.2500 | 0.5000 | 0.6290 | 479 | 1.6200 | - | - | - | - | - | 0.0000 | incomplete |
+| Replace W4 | 0.8462 | 44 | 0.2308 | 0.1538 | 0.4722 | 0.7983 | 484 | 1.5847 | - | - | - | - | - | 0.0000 | incomplete |
+| Replace All | 0.9615 | 50 | 0.1731 | 0.0000 | 0.4585 | 0.9138 | 488 | 1.5635 | - | - | - | - | - | 0.0000 | incomplete |
+| Recompute W2 | 0.7500 | 39 | 0.3654 | 0.2500 | 0.5020 | 0.6080 | 482 | 1.6058 | - | - | - | - | - | 0.0000 | incomplete |
+| Append W2 | 0.1154 | 6 | 0.9038 | 0.7115 | 0.5885 | 0.0752 | 413 | 1.8983 | - | - | - | - | - | 0.0000 | incomplete |
+| Append W2 + Hint | 0.1346 | 7 | 0.8846 | 0.6731 | 0.5815 | 0.0909 | 398 | 1.9523 | - | - | - | - | - | 0.0000 | incomplete |
+| Hint Only | 0.2692 | 14 | 0.8654 | 0.6731 | 0.5560 | 0.0863 | 497 | 1.6137 | - | - | - | - | - | 0.0000 | incomplete |
+| Append-Masked W2 | 0.6731 | 35 | 0.4038 | 0.2500 | 0.5000 | 0.6290 | 479 | 1.6200 | - | - | - | - | - | 0.0000 | incomplete |
+
+=== unified_recovery_minimal.md ===
+# Unified Recovery Minimal Summary
+
+| Method | BFCL Acc | Reference Recovery Success | Step Exec Drift | Step State Drift | Model Calls / Committed Step |
+| --- | --- | --- | --- | --- | --- |
+| Full | 1.0000 | - | 0.0000 | 0.0000 | 1.0000 |
+| C2KV | 0.1731 | - | 0.3430 | 0.3493 | 1.0000 |
+| Rollback D1 | 0.5192 | 0.2481 | 0.2865 | 0.2200 | 1.2384 |
+| Rollback D2 | 0.9231 | 0.6783 | 0.1494 | 0.0575 | 1.3736 |
+| Rollback D4 | 1.0000 | 1.0000 | 0.0000 | 0.0000 | 1.4837 |
+| Replace W1 | 0.3846 | 0.2279 | 0.2727 | 0.2586 | 1.6444 |
+| Replace W2 | 0.6731 | 0.6290 | 0.0898 | 0.1065 | 1.6200 |
+| Replace W4 | 0.8462 | 0.7983 | 0.0475 | 0.0537 | 1.5847 |
+| Replace All | 0.9615 | 0.9138 | 0.0225 | 0.0000 | 1.5635 |
+| Recompute W2 | 0.7500 | 0.6080 | 0.0851 | 0.1120 | 1.6058 |
+| Append W2 | 0.1154 | 0.0752 | 0.3293 | 0.3027 | 1.8983 |
+| Append W2 + Hint | 0.1346 | 0.0909 | 0.3090 | 0.2588 | 1.9523 |
+| Hint Only | 0.2692 | 0.0863 | 0.3199 | 0.2837 | 1.6137 |
+| Append-Masked W2 | 0.6731 | 0.6290 | 0.0898 | 0.1065 | 1.6200 |
+
+=== quick_recovery_comparison.md ===
+# Quick Recovery Comparison
+
+| Method | BFCL Acc | Turn Joint | Step Executed Action Drift | Step State Drift | Detector Trigger Rate | Recovery Success Rate | Avg Committed Steps / Episode | Regenerated Steps | Model Calls / Committed Step | Avg Active GPU KV Tokens / Step | History KV Compression | Mean Step History KV Compression | Worst Step History KV Compression | Peak GPU KV MiB | Peak Main KV MiB | Peak C2KV Pool MiB | Memory Report Coverage | Peak Host Checkpoint KV MiB |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Full | 1.0000 | 1.0000 | 0.0000 | 0.0000 | - | - | 9.4231 | 0 | 1.0000 | - | - | - | - | - | - | - | 0.0000 | - |
+| C2KV | 0.1731 | 0.3932 | 0.3430 | 0.3493 | - | - | 9.2500 | 0 | 1.0000 | - | - | - | - | - | - | - | 0.0000 | - |
+| Rollback D1 | 0.5192 | 0.5680 | 0.2865 | 0.2200 | 0.4778 | 0.2481 | 10.4038 | 129 | 1.2384 | - | - | - | - | - | - | - | 0.0000 | - |
+| Rollback D2 | 0.9231 | 0.8301 | 0.1494 | 0.0575 | 0.4423 | 0.6783 | 10.0385 | 194 | 1.3736 | - | - | - | - | - | - | - | 0.0000 | - |
+| Rollback D4 | 1.0000 | 1.0000 | 0.0000 | 0.0000 | 0.4492 | 1.0000 | 9.4231 | 206 | 1.4837 | - | - | - | - | - | - | - | 0.0000 | - |
+| Replace W1 | 0.3846 | 0.5437 | 0.2727 | 0.2586 | 0.5440 | 0.2279 | 9.5192 | 290 | 1.6444 | - | - | - | - | - | - | - | 0.0000 | - |
+| Replace W2 | 0.6731 | 0.8010 | 0.0898 | 0.1065 | 0.5000 | 0.6290 | 9.2115 | 260 | 1.6200 | - | - | - | - | - | - | - | 0.0000 | - |
+| Replace W4 | 0.8462 | 0.8883 | 0.0475 | 0.0537 | 0.4722 | 0.7983 | 9.3077 | 249 | 1.5847 | - | - | - | - | - | - | - | 0.0000 | - |
+| Replace All | 0.9615 | 0.9515 | 0.0225 | 0.0000 | 0.4585 | 0.9138 | 9.3846 | 242 | 1.5635 | - | - | - | - | - | - | - | 0.0000 | - |
+| Recompute W2 | 0.7500 | 0.7961 | 0.0851 | 0.1120 | 0.5020 | 0.6080 | 9.2692 | 258 | 1.6058 | - | - | - | - | - | - | - | 0.0000 | - |
+| Append W2 | 0.1154 | 0.4417 | 0.3293 | 0.3027 | 0.5885 | 0.0752 | 7.9423 | 287 | 1.8983 | - | - | - | - | - | - | - | 0.0000 | - |
+| Append W2 + Hint | 0.1346 | 0.4515 | 0.3090 | 0.2588 | 0.5815 | 0.0909 | 7.6538 | 282 | 1.9523 | - | - | - | - | - | - | - | 0.0000 | - |
+| Hint Only | 0.2692 | 0.4515 | 0.3199 | 0.2837 | 0.5560 | 0.0863 | 9.5577 | 286 | 1.6137 | - | - | - | - | - | - | - | 0.0000 | - |
+| Append-Masked W2 | 0.6731 | 0.8010 | 0.0898 | 0.1065 | 0.5000 | 0.6290 | 9.2115 | 260 | 1.6200 | - | - | - | - | - | - | - | 0.0000 | - |
+
+=== frozen_reference ===
+/home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/../history_full_closed_loop_multi_turn_base_200/correct_ids.txt
+/home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/../history_full_closed_loop_multi_turn_base_200/correct_ids.summary.json
+
+=== arm logs dir listing ===
+--- c2kv:
+details.jsonl
+eval.log
+metrics.jsonl
+runner.log
+summary.json
+data_agentic.csv
+data_format_sensitivity.csv
+data_live.csv
+data_multi_turn.csv
+data_non_live.csv
+data_overall.csv
+Qwen_Qwen3-4B-Instruct-2507-FC
+--- append_w2:
+details.jsonl
+eval.log
+metrics.jsonl
+runner.log
+summary.json
+data_agentic.csv
+data_format_sensitivity.csv
+data_live.csv
+data_multi_turn.csv
+data_non_live.csv
+data_overall.csv
+Qwen_Qwen3-4B-Instruct-2507-FC
+--- replace_w2:
+details.jsonl
+eval.log
+metrics.jsonl
+runner.log
+summary.json
+data_agentic.csv
+data_format_sensitivity.csv
+data_live.csv
+data_multi_turn.csv
+data_non_live.csv
+data_overall.csv
+Qwen_Qwen3-4B-Instruct-2507-FC
+--- full:
+details.jsonl
+eval.log
+metrics.jsonl
+runner.log
+summary.json
+data_agentic.csv
+data_format_sensitivity.csv
+data_live.csv
+data_multi_turn.csv
+data_non_live.csv
+data_overall.csv
+Qwen_Qwen3-4B-Instruct-2507-FC
+--- sham_mech:
+--- rollback_d1:
+checkpoint_metrics.jsonl
+checkpoint_segments.jsonl
+checkpoint_steps.jsonl
+details.jsonl
+eval.log
+run.log
+run_summary.json
+server_6_34660.log
+data_agentic.csv
+data_format_sensitivity.csv
+data_live.csv
+data_multi_turn.csv
+data_non_live.csv
+data_overall.csv
+Qwen_Qwen3-4B-Instruct-2507-FC

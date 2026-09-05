@@ -1,0 +1,94 @@
+** WARNING: connection is not using a post-quantum key exchange algorithm.
+** This session may be vulnerable to "store now, decrypt later" attacks.
+** The server may need to be upgraded. See https://openssh.com/pq.html
+
+Authorized users only. All activities may be monitored and reported.
+=== SG HEAD/status ===
+7de9e81051a31aa02e635c8af86f6ca100cc7f0c
+ M python/sglang/srt/entrypoints/http_server.py
+ M python/sglang/srt/entrypoints/openai/protocol.py
+ M python/sglang/srt/entrypoints/openai/serving_chat.py
+ M python/sglang/srt/managers/detokenizer_manager.py
+ M python/sglang/srt/managers/io_struct.py
+ M python/sglang/srt/managers/multi_tokenizer_mixin.py
+ M python/sglang/srt/managers/schedule_batch.py
+ M python/sglang/srt/managers/scheduler.py
+ M python/sglang/srt/managers/scheduler_output_processor_mixin.py
+ M python/sglang/srt/managers/tokenizer_communicator_mixin.py
+ M python/sglang/srt/managers/tokenizer_manager.py
+ M python/sglang/srt/managers/tp_worker.py
+ M python/sglang/srt/managers/utils.py
+ M python/sglang/srt/model_executor/forward_batch_info.py
+ M python/sglang/srt/model_executor/model_runner.py
+ M python/sglang/srt/models/qwen3.py
+?? python/sglang/srt/mem_cache/history_kv_eviction.py
+
+=== SG diff --stat ===
+ python/sglang/srt/entrypoints/http_server.py       |  13 +
+ python/sglang/srt/entrypoints/openai/protocol.py   |  16 +
+ .../sglang/srt/entrypoints/openai/serving_chat.py  | 109 +++++
+ python/sglang/srt/managers/detokenizer_manager.py  |   2 +
+ python/sglang/srt/managers/io_struct.py            |  25 +
+ .../sglang/srt/managers/multi_tokenizer_mixin.py   |  10 +
+ python/sglang/srt/managers/schedule_batch.py       |  70 ++-
+ python/sglang/srt/managers/scheduler.py            | 535 ++++++++++++++++++++-
+ .../managers/scheduler_output_processor_mixin.py   | 151 +++++-
+ .../srt/managers/tokenizer_communicator_mixin.py   |  20 +-
+ python/sglang/srt/managers/tokenizer_manager.py    |  11 +
+ python/sglang/srt/managers/tp_worker.py            |   3 +
+ python/sglang/srt/managers/utils.py                |   1 +
+ .../srt/model_executor/forward_batch_info.py       |  35 +-
+ python/sglang/srt/model_executor/model_runner.py   |  29 +-
+ python/sglang/srt/models/qwen3.py                  | 409 +++++++++++++++-
+ 16 files changed, 1379 insertions(+), 60 deletions(-)
+
+=== S7.2 dirty file mtimes (tracked-modified + untracked) ===
+2026-09-03 13:23:29.195259300 +0800  /home/zhuyuhan/project/kvoffload-sglang/python/sglang/srt/entrypoints/http_server.py
+2026-09-03 13:23:28.603259300 +0800  /home/zhuyuhan/project/kvoffload-sglang/python/sglang/srt/entrypoints/openai/protocol.py
+2026-09-04 17:41:29.439259300 +0800  /home/zhuyuhan/project/kvoffload-sglang/python/sglang/srt/entrypoints/openai/serving_chat.py
+2026-09-04 18:00:35.907259300 +0800  /home/zhuyuhan/project/kvoffload-sglang/python/sglang/srt/managers/detokenizer_manager.py
+2026-09-04 18:06:43.051259300 +0800  /home/zhuyuhan/project/kvoffload-sglang/python/sglang/srt/managers/io_struct.py
+2026-09-04 18:00:36.143259300 +0800  /home/zhuyuhan/project/kvoffload-sglang/python/sglang/srt/managers/multi_tokenizer_mixin.py
+2026-09-04 17:50:57.535259300 +0800  /home/zhuyuhan/project/kvoffload-sglang/python/sglang/srt/managers/schedule_batch.py
+2026-09-04 18:20:57.227259300 +0800  /home/zhuyuhan/project/kvoffload-sglang/python/sglang/srt/managers/scheduler.py
+2026-09-04 17:50:57.983259300 +0800  /home/zhuyuhan/project/kvoffload-sglang/python/sglang/srt/managers/scheduler_output_processor_mixin.py
+2026-09-03 13:23:29.003259300 +0800  /home/zhuyuhan/project/kvoffload-sglang/python/sglang/srt/managers/tokenizer_communicator_mixin.py
+2026-09-04 17:50:58.407259300 +0800  /home/zhuyuhan/project/kvoffload-sglang/python/sglang/srt/managers/tokenizer_manager.py
+2026-09-03 19:58:10.259259300 +0800  /home/zhuyuhan/project/kvoffload-sglang/python/sglang/srt/managers/tp_worker.py
+2026-09-03 19:58:01.803259300 +0800  /home/zhuyuhan/project/kvoffload-sglang/python/sglang/srt/managers/utils.py
+2026-09-03 19:56:43.167259300 +0800  /home/zhuyuhan/project/kvoffload-sglang/python/sglang/srt/model_executor/forward_batch_info.py
+2026-09-03 19:57:56.195259300 +0800  /home/zhuyuhan/project/kvoffload-sglang/python/sglang/srt/model_executor/model_runner.py
+2026-09-03 19:57:31.739259300 +0800  /home/zhuyuhan/project/kvoffload-sglang/python/sglang/srt/models/qwen3.py
+2026-09-04 18:20:57.627259300 +0800  /home/zhuyuhan/project/kvoffload-sglang/python/sglang/srt/mem_cache/history_kv_eviction.py (untracked)
+
+=== BFCL repo state ===
+1b6f3770131befff1ec64fd1e533a4f863efd630
+ M c2kv_eval/adapters/bfcl_history_kv_baselines.py
+ M c2kv_eval/analysis/compare_history_kv_baselines.py
+ M c2kv_eval/scripts/run_bfcl_history_kv_baselines.sh
+ c2kv_eval/adapters/bfcl_history_kv_baselines.py    | 159 +++++++++++++++++++--
+ c2kv_eval/analysis/compare_history_kv_baselines.py | 134 +++++++++++++++--
+ c2kv_eval/scripts/run_bfcl_history_kv_baselines.sh |  79 +++++++---
+ 3 files changed, 333 insertions(+), 39 deletions(-)
+
+=== BFCL dirty mtimes ===
+2026-09-04 15:41:43.927259300 +0800  /home/zhuyuhan/project/gorilla/berkeley-function-call-leaderboard/c2kv_eval/adapters/bfcl_history_kv_baselines.py
+2026-09-04 19:15:21.487259300 +0800  /home/zhuyuhan/project/gorilla/berkeley-function-call-leaderboard/c2kv_eval/analysis/compare_history_kv_baselines.py
+2026-09-04 19:15:21.819259300 +0800  /home/zhuyuhan/project/gorilla/berkeley-function-call-leaderboard/c2kv_eval/scripts/run_bfcl_history_kv_baselines.sh
+
+=== c2kv pool peak in surviving server logs ===
+--- unified_recovery_stable52_npu67_20260903_002915/server_6_34660.log
+max_pool_tokens_line: c2kv pool: 0/26628 tokens, c2kv usage: 0.00, #c2kv-entry: 0
+0
+--- unified_recovery_stable52_npu67_20260903_002915/server_7_34670.log
+max_pool_tokens_line: c2kv pool: 0/26628 tokens, c2kv usage: 0.00, #c2kv-entry: 0
+0
+--- unified_recovery_stable52_npu67_20260903_002915/rollback_d1/logs/server_6_34660.log
+max_pool_tokens_line: 
+0
+--- unified_recovery_stable52_npu67_20260903_002915/rollback_d2/logs/server_7_34670.log
+max_pool_tokens_line: 
+0
+--- unified_recovery_stable52_npu67_20260903_002915/rollback_d4/logs/server_6_34660.log
+max_pool_tokens_line: 
+0

@@ -1,0 +1,448 @@
+** WARNING: connection is not using a post-quantum key exchange algorithm.
+** This session may be vulnerable to "store now, decrypt later" attacks.
+** The server may need to be upgraded. See https://openssh.com/pq.html
+
+Authorized users only. All activities may be monitored and reported.
+@@@@@ _arm_config full (1852-1965)
+    def _arm_config(self, effective_arm: str) -> dict[str, Any]:
+        config = {
+            "operation": "append",
+            "repair_kind": "none",
+            "window": self._repair_window_arg,
+            "hint": False,
+            "oracle_location_hint": False,
+        }
+        if effective_arm in {"c2kv", "d_sham_mech"}:
+            config["repair_kind"] = "none"
+        elif effective_arm == "hint_only":
+            config.update({"repair_kind": "none", "hint": True})
+        elif effective_arm == "d_sham_neutral":
+            config.update({"repair_kind": "neutral", "window": "1"})
+        elif effective_arm in {"d_corr", "d_corr_w1"}:
+            config.update({"repair_kind": "raw", "window": "1"})
+        elif effective_arm in {"d_corr_w2", "d_corr_w2_hint"}:
+            config.update({
+                "repair_kind": "raw",
+                "window": "2",
+                "hint": effective_arm.endswith("_hint"),
+            })
+        elif effective_arm == "d_corr_w2_oracle_location_hint":
+            config.update({
+                "repair_kind": "raw",
+                "window": "2",
+                "hint": True,
+                "oracle_location_hint": True,
+            })
+        elif effective_arm == "d_corr_w4":
+            config.update({"repair_kind": "raw", "window": "4"})
+        elif effective_arm == "d_corr_all":
+            config.update({"repair_kind": "raw", "window": "all"})
+        elif effective_arm == "d_corr_replace_w1":
+            config.update({
+                "operation": "replace",
+                "repair_kind": "raw",
+                "window": "1",
+            })
+        elif effective_arm == "d_corr_replace_w2":
+            config.update({
+                "operation": "replace",
+                "repair_kind": "raw",
+                "window": "2",
+            })
+        elif effective_arm == "append_masked_w2":
+            config.update({
+                "operation": "append_masked",
+                "repair_kind": "raw",
+                "window": "2",
+            })
+        elif effective_arm == "d_corr_replace_w4":
+            config.update({
+                "operation": "replace",
+                "repair_kind": "raw",
+                "window": "4",
+            })
+        elif effective_arm == "d_corr_replace_all":
+            config.update({
+                "operation": "replace",
+                "repair_kind": "raw",
+                "window": "all",
+            })
+        elif effective_arm in {"d_corr_recompute", "d_corr_recompute_w2"}:
+            config.update({
+                "operation": "recompute",
+                "repair_kind": "raw",
+                "window": "2",
+            })
+        elif effective_arm in {"raw_all_replace", "raw_all_replace_direct"}:
+            config.update({
+                "operation": "replace",
+                "repair_kind": "raw",
+                "window": "all",
+            })
+        else:
+            raise RuntimeError(f"Unsupported KV repair arm: {effective_arm}")
+        return config
+
+    @staticmethod
+    def _ordered_roles(unit: Sequence[dict[str, Any]]) -> list[str]:
+        roles: list[str] = []
+        for message in unit:
+            role = str(message.get("role") or "")
+            if role and role not in roles:
+                roles.append(role)
+        return roles
+
+    def _recent_repair_indices(
+        self,
+        *,
+        num_docs: int,
+        latest_index: int,
+        window: str,
+    ) -> list[int]:
+        if num_docs <= 0:
+            return []
+        latest_index = min(max(0, latest_index), num_docs - 1)
+        if window == "all":
+            return list(range(num_docs))
+        try:
+            width = int(window)
+        except Exception as exc:
+            raise RuntimeError(f"Invalid repair window: {window}") from exc
+        if width <= 0:
+            raise RuntimeError(f"repair window must be positive, got {window}")
+        start = max(0, latest_index - width + 1)
+        return list(range(start, latest_index + 1))
+
+    def _repair_hint(
+        self,
+        *,
+        target_metadata: Sequence[dict[str, Any]],
+        include_oracle_location: bool,
+@@@@@ raw KV mode selection (2180-2262)
+            if config["operation"] == "recompute" and index >= anchor_index:
+                return False
+            return True
+
+        def build_repair_for_index(index: int) -> None:
+            nonlocal repair_tokens
+            if config["repair_kind"] == "none":
+                return
+            span_len = doc_lens[index]
+            operation = str(config["operation"])
+            append_coordinate_frame = (
+                operation == "append"
+                and self.c2kv_append_position_frame == "wrapper"
+            )
+            repair_position_ids: list[int] | None = None
+            raw_kv_position_mode = "rotated"
+            if config["repair_kind"] == "neutral":
+                input_ids = self._neutral_ids_for(plan, span_len)
+                span_start = 0
+                span_end = span_len
+                position_offset = (
+                    wrapper_starts[index] if append_coordinate_frame else starts[index]
+                )
+            elif config["repair_kind"] == "raw":
+                extract_source = self._repair_extract_source_for(
+                    effective_arm,
+                    "raw",
+                )
+                if append_coordinate_frame and extract_source == "serving_cache":
+                    raise RuntimeError(
+                        "Append repair needs pre-RoPE raw K so it can be placed "
+                        "in the C2KV wrapper frame; serving_cache only contains "
+                        "already-rotated native-frame K."
+                    )
+                input_ids = (
+                    full_prompt_ids
+                    if extract_source == "serving_cache"
+                    else full_prompt_ids[: ends[index]]
+                )
+                span_start = starts[index]
+                span_end = ends[index]
+                position_offset = 0
+                if append_coordinate_frame:
+                    # The raw repair KV length is the native Full-context span
+                    # length. The C2KV wrapper unit may tokenize longer/shorter,
+                    # so place raw KV in the wrapper coordinate frame starting at
+                    # the corresponding unit start, but keep the position vector
+                    # exactly token_len long.
+                    repair_position_ids = list(
+                        range(wrapper_starts[index], wrapper_starts[index] + span_len)
+                    )
+                    raw_kv_position_mode = "pre_rope"
+            else:
+                raise RuntimeError(f"Unsupported repair kind: {config['repair_kind']}")
+            if config["repair_kind"] != "raw":
+                extract_source = self._repair_extract_source_for(
+                    effective_arm,
+                    str(config["repair_kind"]),
+                )
+
+            repair = self._extract_repair(
+                input_ids=input_ids,
+                span_start=span_start,
+                span_end=span_end,
+                position_offset=position_offset,
+                repair_position_ids=repair_position_ids,
+                raw_kv_position_mode=raw_kv_position_mode,
+                repair_mode=effective_arm,
+                source_doc_index=index,
+                stats=stats,
+                extract_source=extract_source,
+            )
+            token_len = int(repair["token_len"])
+            expected_len = span_len
+            if token_len != expected_len:
+                raise RuntimeError(
+                    "repair token length mismatch: "
+                    f"index={index}, requested={expected_len}, injected={token_len}"
+                )
+            repair_keys_by_index.setdefault(index, []).append(repair["key_hash"])
+            repair_tokens_by_index[index] = repair_tokens_by_index.get(index, 0) + token_len
+            repair_tokens += token_len
+            position_start = int(repair.get("position_start", starts[index]))
+@@@@@ append/masked layout build (2300,2470)
+                    "repair_extract_source": repair.get("extract_source") or "",
+                    "repair_extract_cache_hit_tokens": int(
+                        repair.get("cache_hit_tokens") or 0
+                    ),
+                }
+            )
+
+        if config["operation"] == "append":
+            for index in target_indices:
+                build_repair_for_index(index)
+        elif config["operation"] in {"replace", "append_masked"}:
+            for index in target_indices:
+                build_repair_for_index(index)
+        elif config["operation"] == "recompute":
+            build_repair_for_index(anchor_index)
+
+        for index, (unit, text, ids) in enumerate(zip(units, texts, doc_ids)):
+            if not should_compress_doc(index):
+                stats.original_history_tokens += doc_lens[index]
+                if index in repair_keys_by_index:
+                    raw_len = repair_tokens_by_index[index]
+                    stats.effective_history_tokens += raw_len
+                    stats.physical_history_kv_tokens += raw_len
+                    stats.repair_kv_tokens += raw_len
+                    local_physical_history_tokens += raw_len
+                    if config["operation"] == "append_masked":
+                        history_layout_debug.append(
+                            {
+                                "history_index": index,
+                                "mode": "raw_append_masked",
+                                "roles": self._ordered_roles(unit),
+                                "logical_token_range": [starts[index], ends[index]],
+                                "native_position_range": [starts[index], ends[index]],
+                                "wrapper_position_range": [
+                                    wrapper_starts[index],
+                                    wrapper_ends[index],
+                                ],
+                                "absolute_rope_position_range": [starts[index], ends[index]],
+                                "raw_tokens": raw_len,
+                            }
+                        )
+                    else:
+                        messages.append(
+                            {
+                                "role": "user",
+                                "content": text,
+                                "c2kv_repair_only_key_hashes": repair_keys_by_index[index],
+                                "c2kv_use_gist_projection": True,
+                            }
+                        )
+                        history_layout_debug.append(
+                            {
+                                "history_index": index,
+                                "mode": "raw_replace",
+                                "roles": self._ordered_roles(unit),
+                                "logical_token_range": [starts[index], ends[index]],
+                                "native_position_range": [starts[index], ends[index]],
+                                "wrapper_position_range": [
+                                    wrapper_starts[index],
+                                    wrapper_ends[index],
+                                ],
+                                "absolute_rope_position_range": [starts[index], ends[index]],
+                                "raw_tokens": raw_len,
+                            }
+                        )
+                else:
+                    full_tokens = _token_count(self.tokenizer, unit)
+                    stats.effective_history_tokens += full_tokens
+                    stats.physical_history_kv_tokens += doc_lens[index]
+                    stats.recomputed_raw_tokens += doc_lens[index]
+                    local_physical_history_tokens += doc_lens[index]
+                    messages.extend(deepcopy(unit))
+                    history_layout_debug.append(
+                        {
+                            "history_index": index,
+                            "mode": (
+                                "recomputed_raw"
+                                if config["operation"] == "recompute"
+                                else "full"
+                            ),
+                            "roles": self._ordered_roles(unit),
+                            "logical_token_range": [starts[index], ends[index]],
+                            "native_position_range": [starts[index], ends[index]],
+                            "wrapper_position_range": [
+                                wrapper_starts[index],
+                                wrapper_ends[index],
+                            ],
+                            "absolute_rope_position_range": [starts[index], ends[index]],
+                            "raw_tokens": doc_lens[index],
+                        }
+                    )
+                gist_records.append(None)
+                continue
+
+            full_tokens = len(ids)
+            record = self._extract_history_unit(text, stats)
+            stats.original_history_tokens += int(record.original_seq_len or full_tokens)
+            if not (record.success and record.key_hash):
+                raise RuntimeError(f"C2KV extract failed in arm={self.arm}: {record.error}")
+            gist_len = int(record.gist_len or record.original_seq_len or full_tokens)
+            stats.effective_history_tokens += gist_len
+            stats.physical_history_kv_tokens += gist_len
+            stats.c2kv_gist_tokens += gist_len
+            local_physical_history_tokens += gist_len
+            messages.append(
+                {
+                    "role": "user",
+                    "content": text,
+                    "c2kv_key_hash": record.key_hash,
+                    "c2kv_use_gist_projection": True,
+                }
+            )
+            history_layout_debug.append(
+                {
+                    "history_index": index,
+                    "mode": "gist",
+                    "roles": self._ordered_roles(unit),
+                    "logical_token_range": [starts[index], ends[index]],
+                    "native_position_range": [starts[index], ends[index]],
+                    "wrapper_position_range": [
+                        wrapper_starts[index],
+                        wrapper_ends[index],
+                    ],
+                    "physical_kv_tokens": gist_len,
+                    "full_equivalent_tokens": int(record.original_seq_len or full_tokens),
+                }
+            )
+            gist_records.append(record)
+
+        append_repair_keys = [
+            key_hash
+            for index in target_indices
+            for key_hash in repair_keys_by_index.get(index, [])
+        ]
+        if config["operation"] in {"append", "append_masked"} and append_repair_keys:
+            if config["operation"] == "append_masked":
+                # Diagnostic parity mode for replace_w2: build the raw repair
+                # keys through the append plumbing, but expose them as a
+                # repair-only carrier after the remaining gist history so the
+                # active layout is G0...Gk + Rtarget, not Gtarget + Rtarget.
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": "",
+                        "c2kv_repair_only_key_hashes": append_repair_keys,
+                        "c2kv_use_gist_projection": True,
+                    }
+                )
+            else:
+                target_message = None
+                for message in reversed(messages):
+                    if message.get("c2kv_key_hash"):
+                        target_message = message
+                        break
+                if target_message is None:
+                    raise RuntimeError(f"Cannot attach append repair keys for arm={effective_arm}")
+                target_message["c2kv_repair_key_hashes"] = append_repair_keys
+            if config["operation"] == "append":
+                stats.effective_history_tokens += repair_tokens
+                stats.physical_history_kv_tokens += repair_tokens
+                stats.repair_kv_tokens += repair_tokens
+                local_physical_history_tokens += repair_tokens
+
+        if config["operation"] == "recompute" and anchor_index + 1 < len(units):
+            recomputed_total = sum(doc_lens[anchor_index + 1 :])
+            if recomputed_total <= 0:
+                raise RuntimeError(
+                    f"{effective_arm} expected downstream recompute tokens."
+                )
+
+        physical_before = local_physical_history_tokens
+@@@@@ build info writer (2470,2540)
+        physical_before = local_physical_history_tokens
+        logical_before = canonical_full_history_tokens
+        logical_after = canonical_full_history_tokens
+        if repair_tokens and logical_before != logical_after:
+            raise RuntimeError("repair unexpectedly changed logical current position")
+
+        if config["hint"] and self._repair_enabled_for_current_step:
+            messages.append(
+                {
+                    "role": "system",
+                    "content": self._repair_hint(
+                        target_metadata=repair_metadata,
+                        include_oracle_location=bool(config["oracle_location_hint"]),
+                    ),
+                }
+            )
+
+        self._last_repair_build_info = {
+            "repair_mode": effective_arm,
+            "repair_extract_source": self._repair_extract_source_for(
+                effective_arm,
+                str(config["repair_kind"]),
+            ),
+            "repair_window": config["window"],
+            "repair_operation": config["operation"],
+            "uses_oracle_error_location": bool(config["oracle_location_hint"]),
+            "repair_target_indices": target_indices,
+            "repair_target_roles": [
+                self._ordered_roles(units[index]) for index in target_indices
+            ],
+            "repair_target_metadata": repair_metadata,
+            "repair_tokens_requested": repair_tokens,
+            "repair_tokens_injected": repair_tokens,
+            "repair_raw_tokens": repair_tokens,
+            "repair_physical_tokens": repair_tokens,
+            "repair_absolute_position_ranges": [
+                [meta["absolute_position_start"], meta["absolute_position_end"]]
+                for meta in repair_metadata
+            ],
+            "history_layout": history_layout_debug,
+            "position_frame_debug_enabled": self.c2kv_debug_position_frame,
+            "history_original_tokens": sum(len(ids) for ids in doc_ids),
+            "canonical_full_history_tokens": canonical_full_history_tokens,
+            "wrapper_native_length_delta": (
+                sum(len(ids) for ids in doc_ids) - canonical_full_history_tokens
+            ),
+            "wrapper_native_length_ratio": (
+                sum(len(ids) for ids in doc_ids) / canonical_full_history_tokens
+                if canonical_full_history_tokens
+                else None
+            ),
+            "physical_prefix_len_before": max(0, physical_before - repair_tokens),
+            "physical_prefix_len_after": physical_before,
+            "logical_position_before": logical_before,
+            "logical_position_after": logical_after,
+        }
+        if repair_tokens != self._last_repair_build_info["repair_tokens_injected"]:
+            raise RuntimeError("repair token accounting invariant failed")
+
+        self._last_kv_memory_hint = {
+            "full_equivalent_history_tokens": canonical_full_history_tokens,
+            "history_scope": "completed_history_only",
+            "source": "bfcl_canonical_history_layout",
+        }
+        messages.extend(current)
+        return messages
+
+    def _oracle_repair_arms(self) -> set[str]:
+        return {
+            "d_sham_mech",
+            "hint_only",

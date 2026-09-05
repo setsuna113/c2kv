@@ -1,0 +1,3101 @@
+** WARNING: connection is not using a post-quantum key exchange algorithm.
+** This session may be vulnerable to "store now, decrypt later" attacks.
+** The server may need to be upgraded. See https://openssh.com/pq.html
+
+Authorized users only. All activities may be monitored and reported.
+@@@@@ DIFF FILE: python/sglang/srt/managers/scheduler.py
+diff --git a/python/sglang/srt/managers/scheduler.py b/python/sglang/srt/managers/scheduler.py
+index 953034be0..0d78efe0c 100644
+--- a/python/sglang/srt/managers/scheduler.py
++++ b/python/sglang/srt/managers/scheduler.py
+@@ -10,20 +10,21 @@
+ # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ # See the License for the specific language governing permissions and
+ # limitations under the License.
+ # ==============================================================================
+ """A scheduler that manages a tensor parallel GPU worker."""
+ 
+ import faulthandler
+ import hashlib
+ import json
+ import logging
++import math
+ import os
+ import signal
+ import sys
+ import time
+ from collections import deque
+ from contextlib import nullcontext
+ from dataclasses import dataclass
+ from http import HTTPStatus
+ from typing import Any, Deque, Dict, List, Optional, Tuple, Union
+ 
+@@ -2027,22 +2028,51 @@ class Scheduler(
+         else:
+             req.logprob_start_len = recv_req.logprob_start_len
+ 
+         if req.logprob_start_len > len(req.origin_input_ids):
+             error_msg = f"{req.logprob_start_len=} is higher than the number of input tokens {len(req.origin_input_ids)=}. Please use a smaller logprob_start_len."
+             req.logprob_start_len = -1
+             req.set_finish_with_abort(error_msg)
+             self._add_request_to_queue(req)
+             return
+ 
++        if getattr(recv_req, "c2kv_kv_memory_hint", None) and not getattr(
++            recv_req, "c2kv_segments", None
++        ):
++            logger.info(
++                "C2KV KV-memory scheduler init rid=%s history_eviction=%s",
++                req.rid,
++                bool(
++                    getattr(recv_req, "c2kv_kv_memory_hint", {}).get(
++                        "history_kv_eviction"
++                    )
++                ),
++            )
++            self._init_c2kv_kv_memory_report(
++                req,
++                getattr(recv_req, "c2kv_kv_memory_hint", None),
++            )
++            history_kv_error = self._build_history_kv_eviction_rounds(req)
++            if history_kv_error is not None:
++                req.set_finish_with_abort(history_kv_error)
++                self._add_request_to_queue(req)
++                return
++
+         if getattr(recv_req, "c2kv_segments", None):
+             req.c2kv_segments = recv_req.c2kv_segments
++            req.c2kv_use_gist_projection = bool(
++                getattr(recv_req, "c2kv_use_gist_projection", True)
++            )
++            self._init_c2kv_kv_memory_report(
++                req,
++                getattr(recv_req, "c2kv_kv_memory_hint", None),
++            )
+             self._log_c2kv_token_usage(
+                 "generate_before_build_rounds",
+                 req=req,
+                 full_prompt_len=len(req.origin_input_ids),
+                 num_segments=len(req.c2kv_segments),
+             )
+             c2kv_error = self._build_c2kv_prefill_rounds(req)
+             if c2kv_error is not None:
+                 req.set_finish_with_abort(c2kv_error)
+                 self._log_c2kv_token_usage(
+@@ -2369,90 +2399,173 @@ class Scheduler(
+                     "Invalid repair span: "
+                     f"{recv_req.span_start=}, {recv_req.span_end=}, {input_len=}"
+                 ),
+                 success=False,
+             )
+         token_len = recv_req.span_end - recv_req.span_start
+         if token_len <= 0:
+             return C2KVRepairExtractReqOutput(
+                 error="repair span is empty.", success=False
+             )
+-        if token_len > min(
++        history_kv_method = (recv_req.history_kv_method or "").strip().lower()
++        if history_kv_method == "snapkv":
++            history_kv_method = "snapkv_persistent"
++        if history_kv_method == "pyramid":
++            history_kv_method = "pyramidkv"
++        if history_kv_method and history_kv_method not in {
++            "streamingllm",
++            "h2o",
++            "snapkv_persistent",
++            "snapkv_refresh",
++            "pyramidkv",
++        }:
++            return C2KVRepairExtractReqOutput(
++                error=f"Unsupported history_kv_method: {history_kv_method!r}.",
++                success=False,
++                history_kv_method=history_kv_method,
++                requested_span_tokens=token_len,
++            )
++        raw_kv_position_mode = recv_req.raw_kv_position_mode or "rotated"
++        if raw_kv_position_mode not in {"rotated", "pre_rope"}:
++            return C2KVRepairExtractReqOutput(
++                error=f"Unsupported raw_kv_position_mode: {raw_kv_position_mode!r}.",
++                success=False,
++            )
++        if recv_req.repair_position_ids is not None and (
++            len(recv_req.repair_position_ids) != token_len
++        ):
++            return C2KVRepairExtractReqOutput(
++                error=(
++                    "repair_position_ids length mismatch: "
++                    f"{len(recv_req.repair_position_ids)} != {token_len}"
++                ),
++                success=False,
++            )
++        alloc_check_len = token_len
++        if history_kv_method:
++            if recv_req.history_kv_target_tokens is not None:
++                alloc_check_len = max(1, min(token_len, int(recv_req.history_kv_target_tokens)))
++            elif recv_req.history_kv_retention_ratio is not None:
++                alloc_check_len = max(
++                    1,
++                    min(
++                        token_len,
++                        int(math.ceil(token_len * float(recv_req.history_kv_retention_ratio))),
++                    ),
++                )
++        if alloc_check_len > min(
+             self.c2kv_pool.max_entry_tokens,
+             self.c2kv_pool.max_total_tokens,
+         ):
+             return C2KVRepairExtractReqOutput(
+                 error=(
+-                    f"repair entry would have {token_len} tokens, exceeding pool limits "
++                    f"repair entry would have {alloc_check_len} tokens, exceeding pool limits "
+                     f"({self.c2kv_pool.max_entry_tokens=}, "
+                     f"{self.c2kv_pool.max_total_tokens=})."
+                 ),
+                 success=False,
++                history_kv_method=history_kv_method or None,
++                requested_span_tokens=token_len,
+             )
+ 
+         payload = {
+             "input_ids": recv_req.input_ids,
+             "span_start": recv_req.span_start,
+             "span_end": recv_req.span_end,
+             "position_offset": recv_req.position_offset,
++            "repair_position_ids": recv_req.repair_position_ids,
++            "raw_kv_position_mode": recv_req.raw_kv_position_mode,
+             "repair_mode": recv_req.repair_mode,
+             "source_doc_index": recv_req.source_doc_index,
+             "extract_source": recv_req.extract_source,
++            "history_kv_method": history_kv_method,
++            "history_kv_target_tokens": recv_req.history_kv_target_tokens,
++            "history_kv_retention_ratio": recv_req.history_kv_retention_ratio,
++            "history_kv_recent_window": recv_req.history_kv_recent_window,
++            "history_kv_kernel_size": recv_req.history_kv_kernel_size,
++            "history_kv_pooling": recv_req.history_kv_pooling,
++            "history_kv_h2o_recent_fraction": recv_req.history_kv_h2o_recent_fraction,
+         }
+         key_hash = hashlib.sha256(
+             json.dumps(payload, separators=(",", ":")).encode("utf-8")
+         ).hexdigest()
+         extract_source = recv_req.extract_source or "model_prefill"
+         if extract_source not in {"model_prefill", "serving_cache"}:
+             return C2KVRepairExtractReqOutput(
+                 error=f"Unsupported repair extract_source: {extract_source!r}.",
+                 success=False,
+                 extract_source=extract_source,
+             )
++        if extract_source == "serving_cache" and raw_kv_position_mode == "pre_rope":
++            return C2KVRepairExtractReqOutput(
++                error=(
++                    "serving_cache repair extraction cannot return pre-RoPE K; "
++                    "use model_prefill for wrapper-frame Append repair."
++                ),
++                success=False,
++                extract_source=extract_source,
++            )
+ 
+         existing = self.c2kv_pool.get(key_hash)
+         if existing is not None:
+             pos = self.c2kv_pool.get_position_ids(existing)
+             return C2KVRepairExtractReqOutput(
+                 key_hash=key_hash,
+                 token_len=existing.token_len,
+                 position_start=int(pos[0].item()),
+                 position_end=int(pos[-1].item()) + 1,
+                 original_seq_len=existing.original_seq_len,
+                 repair_mode=existing.repair_mode or recv_req.repair_mode,
+                 extract_source=extract_source,
+                 cache_hit_tokens=input_len if extract_source == "serving_cache" else 0,
++                history_kv_method=history_kv_method or None,
++                requested_span_tokens=token_len,
++                selected_token_count=existing.token_len,
+             )
+ 
+-        has_space = self.c2kv_pool.can_allocate(token_len, existing_key=key_hash)
++        has_space = self.c2kv_pool.can_allocate(alloc_check_len, existing_key=key_hash)
+         if self.tp_size > 1 and torch.distributed.is_initialized():
+             all_ranks_have_space = torch.tensor([int(has_space)], dtype=torch.long)
+             torch.distributed.all_reduce(
+                 all_ranks_have_space,
+                 op=torch.distributed.ReduceOp.MIN,
+                 group=self.tp_cpu_group,
+             )
+             has_space = bool(all_ranks_have_space.item())
+         if not has_space:
+             return C2KVRepairExtractReqOutput(
+-                error=f"C2KV pool cannot allocate {token_len} repair tokens.",
++                error=f"C2KV pool cannot allocate {alloc_check_len} repair tokens.",
+                 success=False,
++                history_kv_method=history_kv_method or None,
++                requested_span_tokens=token_len,
+             )
+ 
+         if self.enable_overlap and self.forward_stream is not None:
+             self.schedule_stream.wait_stream(self.forward_stream)
+ 
+         error_msg = None
+         key_values = position_ids = None
+         cache_hit_tokens = 0
++        history_meta = {}
+ 
+         if extract_source == "serving_cache":
++            if history_kv_method:
++                return C2KVRepairExtractReqOutput(
++                    error=(
++                        "history_kv_method compression is only supported with "
++                        "model_prefill extraction in this runtime path."
++                    ),
++                    success=False,
++                    extract_source=extract_source,
++                    history_kv_method=history_kv_method,
++                    requested_span_tokens=token_len,
++                )
+             try:
+                 if self.tree_cache is None:
+                     raise RuntimeError("Serving cache is disabled.")
+                 match_result = self.tree_cache.match_prefix(
+                     MatchPrefixParams(
+                         key=RadixKey(recv_req.input_ids, extra_key=None)
+                     )
+                 )
+                 cached_indices = match_result.device_indices
+                 cache_hit_tokens = int(cached_indices.numel())
+@@ -2535,28 +2648,39 @@ class Scheduler(
+                     exc_info=True,
+                 )
+                 error_msg = str(e)
+         else:
+             input_ids = torch.tensor(
+                 [recv_req.input_ids],
+                 dtype=torch.long,
+                 device="cuda",
+             )
+             try:
+-                key_values, position_ids = (
+-                    self.tp_worker.model_runner.forward_c2kv_repair_extract(
+-                        input_ids,
+-                        span_start=recv_req.span_start,
+-                        span_end=recv_req.span_end,
+-                        position_offset=recv_req.position_offset,
+-                    )
++                repair_result = self.tp_worker.model_runner.forward_c2kv_repair_extract(
++                    input_ids,
++                    span_start=recv_req.span_start,
++                    span_end=recv_req.span_end,
++                    position_offset=recv_req.position_offset,
++                    repair_position_ids=recv_req.repair_position_ids,
++                    raw_kv_position_mode=recv_req.raw_kv_position_mode,
++                    history_kv_method=history_kv_method or None,
++                    history_kv_target_tokens=recv_req.history_kv_target_tokens,
++                    history_kv_retention_ratio=recv_req.history_kv_retention_ratio,
++                    history_kv_recent_window=recv_req.history_kv_recent_window,
++                    history_kv_kernel_size=recv_req.history_kv_kernel_size,
++                    history_kv_pooling=recv_req.history_kv_pooling,
++                    history_kv_h2o_recent_fraction=recv_req.history_kv_h2o_recent_fraction,
+                 )
++                if isinstance(repair_result, tuple) and len(repair_result) == 3:
++                    key_values, position_ids, history_meta = repair_result
++                else:
++                    key_values, position_ids = repair_result
+             except Exception as e:
+                 logger.error("C2KV repair extract failed: %s", e, exc_info=True)
+                 error_msg = str(e)
+             finally:
+                 input_ids = None
+ 
+         if self.tp_size > 1 and torch.distributed.is_initialized():
+             local_ok = torch.tensor([0 if error_msg else 1], dtype=torch.long)
+             torch.distributed.all_reduce(
+                 local_ok,
+@@ -2572,51 +2696,64 @@ class Scheduler(
+                 try:
+                     torch.npu.synchronize()
+                     torch.npu.empty_cache()
+                 except Exception:
+                     logger.warning("C2KV NPU repair cleanup failed", exc_info=True)
+             return C2KVRepairExtractReqOutput(
+                 error=error_msg,
+                 success=False,
+                 extract_source=extract_source,
+                 cache_hit_tokens=cache_hit_tokens,
++                history_kv_method=history_kv_method or None,
++                requested_span_tokens=token_len,
+             )
+ 
+         try:
+             entry = self.c2kv_pool.store_repair(
+                 key_hash=key_hash,
+                 key_values=key_values,
+                 position_ids=position_ids,
+                 original_seq_len=input_len,
+-                already_rotated=recv_req.already_rotated,
+-                repair_mode=recv_req.repair_mode,
+-                source_doc_index=recv_req.source_doc_index,
+-            )
++                already_rotated=(raw_kv_position_mode != "pre_rope"),
++            repair_mode=recv_req.repair_mode,
++            source_doc_index=recv_req.source_doc_index,
++        )
+         except ValueError as e:
+             key_values = position_ids = None
+             return C2KVRepairExtractReqOutput(
+                 error=str(e),
+                 success=False,
+                 extract_source=extract_source,
+                 cache_hit_tokens=cache_hit_tokens,
++                history_kv_method=history_kv_method or None,
++                requested_span_tokens=token_len,
+             )
+ 
+         pos = self.c2kv_pool.get_position_ids(entry)
+         self._log_c2kv_token_usage(
+             "repair_extract_store",
+             key_hash=key_hash[:16],
+             repair_mode=recv_req.repair_mode,
+             token_len=entry.token_len,
+             position_start=int(pos[0].item()),
+             position_end=int(pos[-1].item()) + 1,
+             extract_source=extract_source,
+             cache_hit_tokens=cache_hit_tokens,
++            history_kv_method=history_kv_method or None,
++            requested_span_tokens=token_len,
++            selected_token_count=entry.token_len,
++            selected_relative_indices=(
++                list(history_meta.get("selected_relative_indices") or [])
++                if isinstance(history_meta, dict)
++                and history_meta.get("selected_relative_indices") is not None
++                else None
++            ),
+             serving_kv_buffer_shape=(
+                 first_key_buffer_shape
+                 if extract_source == "serving_cache"
+                 and "first_key_buffer_shape" in locals()
+                 else None
+             ),
+         )
+         key_values = position_ids = None
+         if _is_npu:
+             try:
+@@ -2632,33 +2769,381 @@ class Scheduler(
+             original_seq_len=entry.original_seq_len,
+             repair_mode=entry.repair_mode or "",
+             extract_source=extract_source,
+             cache_hit_tokens=cache_hit_tokens,
+             serving_kv_buffer_shape=(
+                 first_key_buffer_shape
+                 if extract_source == "serving_cache"
+                 and "first_key_buffer_shape" in locals()
+                 else None
+             ),
++            history_kv_method=history_kv_method or None,
++            requested_span_tokens=token_len,
++            selected_token_count=entry.token_len,
++            selected_relative_indices=(
++                list(history_meta.get("selected_relative_indices") or [])
++                if isinstance(history_meta, dict)
++                and history_meta.get("selected_relative_indices") is not None
++                else None
++            ),
++        )
++
++    def _init_c2kv_kv_memory_report(self, req: "Req", hint) -> None:
++        if not isinstance(hint, dict):
++            hint = {}
++        report = dict(hint)
++        history_eviction = hint.get("history_kv_eviction")
++        if isinstance(history_eviction, dict):
++            req.history_kv_eviction = dict(history_eviction)
++        for key in (
++            "full_equivalent_history_tokens",
++            "active_history_kv_tokens",
++            "active_c2kv_gist_tokens",
++            "active_raw_repair_tokens",
++            "active_recomputed_raw_tokens",
++            "active_full_raw_tokens",
++        ):
++            try:
++                report[key] = int(report.get(key) or 0)
++            except Exception:
++                report[key] = 0
++        report["source"] = "sglang_c2kv_runtime_injection"
++        req.c2kv_kv_memory_hint = dict(hint)
++        req.kv_memory_report = report
++
++    def _build_history_kv_eviction_rounds(self, req: "Req") -> Optional[str]:
++        config = getattr(req, "history_kv_eviction", None)
++        if not isinstance(config, dict):
++            return None
++
++        from sglang.srt.managers.schedule_batch import C2KVPrefillRound
++
++        method = str(config.get("method") or "").strip().lower()
++        if method == "snapkv":
++            method = "snapkv_persistent"
++        if method == "pyramid":
++            method = "pyramidkv"
++        supported = {"streamingllm", "h2o", "snapkv_persistent", "pyramidkv"}
++        if method not in supported:
++            return f"Unsupported physical history KV eviction method: {method!r}"
++
++        if len(getattr(req, "prefix_indices", ())) > 0:
++            return (
++                "PHYSICAL_HISTORY_KV_EVICTION_SHARED_PREFIX_UNSUPPORTED: "
++                "disable radix cache before issuing an in-place eviction request."
++            )
++
++        original_input_ids = list(req.origin_input_ids)
++        original_len = len(original_input_ids)
++        history_start = int(config.get("history_start") or 0)
++        history_end = int(config.get("history_end") or 0)
++        if not (0 <= history_start <= history_end <= original_len):
++            return (
++                "Invalid physical history KV eviction range: "
++                f"{history_start=}, {history_end=}, {original_len=}"
++            )
++        if history_end <= 0:
++            return None
++
++        rounds = [
++            C2KVPrefillRound(
++                original_input_ids[:history_end],
++                [],
++                post_history_kv_eviction=True,
++            )
++        ]
++        if history_end < original_len:
++            rounds.append(C2KVPrefillRound(original_input_ids[history_end:], []))
++
++        req.c2kv_rounds = rounds
++        req.c2kv_round_idx = 0
++        req.c2kv_round_start_len = 0
++        req.c2kv_virtual_input_ids = original_input_ids
++        req.c2kv_pinned_keys = []
++        req.history_kv_eviction["method"] = method
++        self._log_c2kv_token_usage(
++            "history_kv_eviction_build_rounds",
++            req=req,
++            method=method,
++            original_len=original_len,
++            history_start=history_start,
++            history_end=history_end,
++            target_tokens=config.get("target_tokens"),
++            round_lens=[len(round_info.tokens) for round_info in rounds],
+         )
++        return None
++
++    def _apply_history_kv_eviction(self, req: "Req") -> bool:
++        config = getattr(req, "history_kv_eviction", None)
++        if not isinstance(config, dict):
++            return True
++        try:
++            from sglang.srt.mem_cache.history_kv_eviction import PhysicalHistoryKVEvictor
++
++            evictor = PhysicalHistoryKVEvictor(
++                self.req_to_token_pool,
++                self.token_to_kv_pool_allocator,
++                bytes_per_kv_token=self._bytes_per_kv_token(),
++            )
++            selected = config.get("selected_history_indices")
++            if not isinstance(selected, list):
++                selected = self._select_history_kv_eviction_indices(req, config)
++            result = evictor.evict(
++                req,
++                method=str(config.get("method") or ""),
++                history_start=int(config.get("history_start") or 0),
++                history_end=int(config.get("history_end") or 0),
++                target_tokens=int(config.get("target_tokens") or 0),
++                selected_history_indices=selected if isinstance(selected, list) else None,
++            )
++        except Exception as exc:
++            logger.error("Physical history KV eviction failed", exc_info=True)
++            result = None
++            error = f"PHYSICAL_HISTORY_KV_EVICTION_EXCEPTION: {type(exc).__name__}: {exc}"
++        else:
++            error = result.error
++
++        report = getattr(req, "kv_memory_report", None)
++        if isinstance(report, dict):
++            report["history_kv_physical_eviction"] = (
++                result.as_dict() if result is not None else {"success": False, "error": error}
++            )
++            if result is not None and result.success:
++                runtime_status = str(
++                    config.get("runtime_status_override") or result.runtime_status
++                )
++                report["active_history_kv_tokens"] = result.kept_history_tokens
++                report["active_full_raw_tokens"] = result.kept_history_tokens
++                report["history_kv_runtime_status"] = runtime_status
++                report["physical_slots_freed"] = result.freed_physical_slots
++                report["logical_total_len"] = result.next_rope_position_after
++                report["physical_kv_len"] = result.new_physical_kv_slots
++                report["next_rope_position"] = result.next_rope_position_after
++                report["selected_history_indices"] = result.selected_history_indices or []
++                for key in (
++                    "selection_reason",
++                    "h2o_heavy_kept",
++                    "h2o_recent_kept",
++                    "snapkv_selected_old",
++                    "snapkv_recent_kept",
++                    "per_layer_budget_tokens",
++                ):
++                    if key in config:
++                        report[key] = config[key]
++            else:
++                report["history_kv_runtime_status"] = (
++                    result.runtime_status if result is not None else "physical_eviction_exception"
++                )
++
++        if result is None or not result.success:
++            from sglang.srt.managers.schedule_batch import FINISH_ABORT as _FA
++
++            req.to_finish = _FA(error or "Physical history KV eviction failed")
++            req.check_finished()
++            return False
++
++        req.history_kv_eviction_result = result.as_dict()
++        # Keep a detached copy: request teardown/requeue paths must not make a
++        # successfully measured eviction disappear before the final response.
++        if isinstance(getattr(req, "kv_memory_report", None), dict):
++            req.history_kv_eviction_report_snapshot = dict(req.kv_memory_report)
++        logger.info(
++            "Physical history KV eviction applied rid=%s method=%s old_slots=%s "
++            "new_slots=%s freed_slots=%s",
++            req.rid,
++            result.method,
++            result.old_physical_kv_slots,
++            result.new_physical_kv_slots,
++            result.freed_physical_slots,
++        )
++        self._log_c2kv_token_usage(
++            "history_kv_eviction_applied",
++            req=req,
++            **result.as_dict(),
++        )
++        return True
++
++    def _select_history_kv_eviction_indices(self, req: "Req", config: dict) -> Optional[list[int]]:
++        method = str(config.get("method") or "").strip().lower()
++        if method == "snapkv":
++            method = "snapkv_persistent"
++        if method == "pyramid":
++            method = "pyramidkv"
++        if method == "streamingllm":
++            return None
++
++        score_info = getattr(req, "history_kv_selection_scores", None)
++        if not isinstance(score_info, dict):
++            return None
++        layers = score_info.get("layers") or []
++        if not layers:
++            return None
++        history_start = int(config.get("history_start") or 0)
++        history_end = int(config.get("history_end") or 0)
++        history_len = max(0, history_end - history_start)
++        if history_len <= 0:
++            return []
++        target_tokens = max(1, min(history_len, int(config.get("target_tokens") or history_len)))
++
++        layer_scores = []
++        for item in layers:
++            try:
++                score = item.detach().float().cpu() if torch.is_tensor(item) else torch.tensor(item, dtype=torch.float32)
++            except Exception:
++                continue
++            if score.numel() == history_len:
++                layer_scores.append(score.reshape(history_len))
++        if not layer_scores:
++            return None
++
++        def _unique_sorted(indices):
++            return sorted({int(i) for i in indices if 0 <= int(i) < history_len})
++
++        def _topk(scores: torch.Tensor, k: int, limit: int | None = None) -> list[int]:
++            if k <= 0:
++                return []
++            search = scores if limit is None else scores[:limit]
++            if search.numel() <= 0:
++                return []
++            _, idx = torch.topk(search, k=min(k, int(search.numel())), largest=True)
++            return [int(i) for i in idx.tolist()]
++
++        recent_window = max(1, int(config.get("history_kv_recent_window") or 64))
++        if method == "h2o":
++            recent_budget = max(
++                0,
++                min(
++                    target_tokens,
++                    int(round(target_tokens * float(config.get("history_kv_h2o_recent_fraction") or 0.5))),
++                    history_len,
++                ),
++            )
++            heavy_budget = max(0, target_tokens - recent_budget)
++            recent = list(range(history_len - recent_budget, history_len)) if recent_budget else []
++            past_limit = max(0, history_len - recent_budget)
++            scores = torch.stack(layer_scores, dim=0).mean(dim=0)
++            selected = _unique_sorted(_topk(scores, heavy_budget, past_limit) + recent)
++            req.history_kv_eviction["selection_reason"] = "h2o_heavy_hitter_recent"
++            req.history_kv_eviction["h2o_heavy_kept"] = len(selected) - len(recent)
++            req.history_kv_eviction["h2o_recent_kept"] = len(recent)
++            return selected
++
++        if method.startswith("snapkv"):
++            recent_budget = min(target_tokens, recent_window, history_len)
++            recent = list(range(history_len - recent_budget, history_len))
++            past_budget = max(0, target_tokens - len(recent))
++            past_limit = max(0, history_len - len(recent))
++            scores = torch.stack(layer_scores, dim=0).mean(dim=0)
++            if past_budget > 0 and past_limit > 0:
++                past_scores = scores[:past_limit]
++                kernel = max(1, int(config.get("history_kv_kernel_size") or 1))
++                pooling = str(config.get("history_kv_pooling") or "avgpool").lower()
++                if kernel > 1 and past_scores.numel() > 1:
++                    fn = torch.nn.functional.max_pool1d if pooling == "maxpool" else torch.nn.functional.avg_pool1d
++                    pooled = fn(
++                        past_scores.view(1, 1, -1),
++                        kernel_size=kernel,
++                        stride=1,
++                        padding=kernel // 2,
++                    ).view(-1)
++                    past_scores = pooled[: past_scores.numel()]
++                selected = _unique_sorted(_topk(past_scores, past_budget) + recent)
++            else:
++                selected = recent
++            req.history_kv_eviction["selection_reason"] = "snapkv_attention_pooling_recent"
++            req.history_kv_eviction["snapkv_selected_old"] = max(0, len(selected) - len(recent))
++            req.history_kv_eviction["snapkv_recent_kept"] = len(recent)
++            return selected[-target_tokens:] if len(selected) > target_tokens else selected
++
++        if method == "pyramidkv":
++            num_layers = len(layer_scores)
++            weighted_scores = torch.zeros(history_len, dtype=torch.float32)
++            per_layer_budget_tokens = []
++            if num_layers <= 1:
++                weights = [1.0]
++            else:
++                weights = []
++                low_budget = max(1, min(history_len, int(round(target_tokens * 1.5))))
++                high_budget = max(1, min(history_len, int(round(target_tokens * 0.5))))
++                for layer_idx in range(num_layers):
++                    frac = layer_idx / float(num_layers - 1)
++                    budget = int(round(low_budget * (1.0 - frac) + high_budget * frac))
++                    budget = max(1, min(history_len, budget))
++                    per_layer_budget_tokens.append(budget)
++                    weights.append(float(budget) / float(target_tokens))
++            if not per_layer_budget_tokens:
++                per_layer_budget_tokens = [target_tokens for _ in range(num_layers)]
++            for score, weight in zip(layer_scores, weights):
++                score = score.float()
++                denom = float(score.max().item() - score.min().item())
++                if denom > 1e-8:
++                    score = (score - score.min()) / denom
++                weighted_scores += score * weight
++            selected = _unique_sorted(_topk(weighted_scores, target_tokens))
++            req.history_kv_eviction["selection_reason"] = "pyramidkv_layer_weighted_globalized"
++            req.history_kv_eviction["per_layer_budget_tokens"] = per_layer_budget_tokens
++            req.history_kv_eviction["runtime_status_override"] = "physical_eviction_globalized"
++            return selected
++
++        return None
++
++    @staticmethod
++    def _add_c2kv_kv_memory_tokens(
++        req: "Req",
++        *,
++        kind: str,
++        tokens: int,
++        original_tokens: int = 0,
++    ) -> None:
++        report = getattr(req, "kv_memory_report", None)
++        if not isinstance(report, dict):
++            return
++        tokens = max(0, int(tokens or 0))
++        original_tokens = max(0, int(original_tokens or 0))
++        report["active_history_kv_tokens"] = (
++            int(report.get("active_history_kv_tokens") or 0) + tokens
++        )
++        if original_tokens and not report.get("full_equivalent_history_tokens"):
++            report["full_equivalent_history_tokens"] = (
++                int(report.get("full_equivalent_history_tokens") or 0)
++                + original_tokens
++            )
++        if kind == "gist":
++            report["active_c2kv_gist_tokens"] = (
++                int(report.get("active_c2kv_gist_tokens") or 0) + tokens
++            )
++        elif kind == "repair":
++            report["active_raw_repair_tokens"] = (
++                int(report.get("active_raw_repair_tokens") or 0) + tokens
++            )
++        elif kind == "recomputed":
++            report["active_recomputed_raw_tokens"] = (
++                int(report.get("active_recomputed_raw_tokens") or 0) + tokens
++            )
++        elif kind == "full":
++            report["active_full_raw_tokens"] = (
++                int(report.get("active_full_raw_tokens") or 0) + tokens
++            )
+ 
+     def _build_c2kv_prefill_rounds(self, req: "Req") -> Optional[str]:
+         if not req.c2kv_segments:
+             return None
+ 
+         from sglang.srt.managers.schedule_batch import C2KVPrefillRound
+         from sglang.srt.mem_cache.c2kv_pool import c2kv_gist_token_ids
+ 
+         original_input_ids = list(req.origin_input_ids)
+         original_len = len(original_input_ids)
+         segments = sorted(req.c2kv_segments, key=lambda s: s.token_start)
+         req.c2kv_segments = segments
++        if getattr(req, "c2kv_use_gist_projection", False) and segments:
++            req.c2kv_gist_projection_start_pos = int(segments[0].token_start)
+ 
+         if self.c2kv_pool is None:
+             return "C2KV not enabled."
+ 
+         prev_end = 0
+         for seg in segments:
+             if not (0 <= seg.token_start <= seg.token_end <= original_len):
+                 return (
+                     "Invalid C2KV segment boundary: "
+                     f"{seg.token_start=}, {seg.token_end=}, {original_len=}"
+@@ -3193,20 +3678,26 @@ class Scheduler(
+                 "inject_failed",
+                 req=req,
+                 seg_idx=seg_idx,
+                 key_hash=seg.key_hash[:16],
+                 gist_len=gist_len,
+             )
+             return False
+ 
+         req.kv_committed_len = kv_start + gist_len
+         req.kv_allocated_len = kv_start + gist_len
++        self._add_c2kv_kv_memory_tokens(
++            req,
++            kind="gist",
++            tokens=gist_len,
++            original_tokens=entry.original_seq_len,
++        )
+         req.c2kv_position_correction += entry.original_seq_len - gist_len
+ 
+         for repair_key in getattr(seg, "repair_key_hashes", []) or []:
+             repair_entry = self.c2kv_pool.get(repair_key)
+             if repair_entry is None:
+                 logger.warning("C2KV repair miss: %s", repair_key[:16])
+                 return False
+             if not self._inject_c2kv_repair_entry(req, repair_entry):
+                 logger.warning("C2KV repair injection failed: %s", repair_key[:16])
+                 return False
+@@ -3353,30 +3844,42 @@ class Scheduler(
+             logger.error("C2KV repair injection failed: %s", e, exc_info=True)
+             _rollback()
+             return False
+ 
+         position_ids = self.c2kv_pool.get_position_ids(entry)
+         position_start = int(position_ids[0].item())
+         position_end = int(position_ids[-1].item()) + 1
+ 
+         req.kv_committed_len = kv_start + repair_len
+         req.kv_allocated_len = kv_start + repair_len
++        repair_kind = (
++            "recomputed"
++            if entry.repair_mode in {"d_corr_recompute", "d_corr_recompute_w2"}
++            else "repair"
++        )
++        self._add_c2kv_kv_memory_tokens(
++            req,
++            kind=repair_kind,
++            tokens=repair_len,
++            original_tokens=entry.original_seq_len,
++        )
+         repair_advances_logical_position = entry.repair_mode in {
+             "d_corr_recompute",
+             "d_corr_recompute_w2",
+             "d_corr_replace_w1",
+             "d_corr_replace_w2",
+             "d_corr_replace_w4",
+             "d_corr_replace_all",
++            "append_masked_w2",
+             "raw_all_replace",
+             "raw_all_replace_direct",
+-        }
++        } or str(entry.repair_mode or "").startswith("history_kv_")
+         if repair_advances_logical_position:
+             # Raw replacement repair KV is already RoPE-rotated at its original
+             # Full-prompt absolute positions.  The compressed active prompt may
+             # inject the raw span at a shorter physical KV offset, so following
+             # query tokens must continue from the raw span's absolute end.
+             req.c2kv_position_correction = position_end - req.kv_committed_len
+         else:
+             req.c2kv_position_correction -= repair_len
+         self._log_c2kv_token_usage(
+             "repair_inject_success",
+@@@@@ DIFF FILE: python/sglang/srt/models/qwen3.py
+diff --git a/python/sglang/srt/models/qwen3.py b/python/sglang/srt/models/qwen3.py
+index 05b97a2d2..5dac13cc8 100644
+--- a/python/sglang/srt/models/qwen3.py
++++ b/python/sglang/srt/models/qwen3.py
+@@ -240,32 +240,145 @@ class Qwen3Attention(nn.Module):
+         if self.use_fused_qk_norm_mrope:
+             # Scale tensors MUST stay on CPU: the C++ kernel uses .item<float>()
+             # which triggers hipMemcpy D2H + sync on CUDA tensors, breaking graph capture.
+             # Explicit device='cpu' is required because SGLang constructs models inside
+             # a `with torch.device('cuda'):` context that changes the default device.
+             self._fused_k_scale = torch.tensor(1.0, dtype=torch.float32, device="cpu")
+             self._fused_v_scale = torch.tensor(1.0, dtype=torch.float32, device="cpu")
+ 
+     def forward_prepare_native(self, positions, hidden_states):
+         qkv, _ = self.qkv_proj(hidden_states)
++        gist_mask = getattr(
++            getattr(self, "_active_forward_batch", None),
++            "c2kv_use_gist_projection",
++            None,
++        )
++        if (
++            gist_mask is not None
++            and os.environ.get("C2KV_USE_GIST_QUERY_PROJECTION", "1") != "0"
++            and bool(gist_mask.any().item())
++            and hasattr(self, "gist_qkv_proj")
++        ):
++            gist_qkv, _ = self.gist_qkv_proj(hidden_states)
++            if gist_mask.ndim != 1 or gist_mask.shape[0] != qkv.shape[0]:
++                raise RuntimeError(
++                    "c2kv_use_gist_projection mask shape mismatch: "
++                    f"{tuple(gist_mask.shape)} != {(qkv.shape[0],)}"
++                )
++            qkv = torch.where(gist_mask.to(qkv.device).view(-1, 1), gist_qkv, qkv)
+         q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size], dim=-1)
+         q, k = apply_qk_norm(
+             q=q,
+             k=k,
+             q_norm=self.q_norm,
+             k_norm=self.k_norm,
+             head_dim=self.head_dim,
+             alt_stream=self.alt_stream,
+         )
+         q, k = self.rotary_emb(positions, q, k)
+         return q, k, v
+ 
++    def _collect_history_kv_eviction_scores(
++        self,
++        q: torch.Tensor,
++        k: torch.Tensor,
++        positions: torch.Tensor,
++        forward_batch: ForwardBatch,
++    ) -> None:
++        configs = getattr(forward_batch, "c2kv_history_kv_eviction_configs", None)
++        if not configs or not forward_batch.forward_mode.is_extend_or_draft_extend_or_mixed():
++            return
++        if (
++            forward_batch.extend_seq_lens_cpu is None
++            or forward_batch.extend_prefix_lens_cpu is None
++            or forward_batch.req_pool_indices is None
++        ):
++            return
++        if q is None or k is None or positions is None:
++            return
++
++        score_store = getattr(forward_batch, "c2kv_history_kv_selection_scores", None)
++        if score_store is None:
++            score_store = {}
++            forward_batch.c2kv_history_kv_selection_scores = score_store
++
++        offset = 0
++        flat_positions = positions.reshape(-1)
++        for batch_idx, config in enumerate(configs):
++            extend_len = int(forward_batch.extend_seq_lens_cpu[batch_idx])
++            prefix_len = int(forward_batch.extend_prefix_lens_cpu[batch_idx])
++            token_start = offset
++            token_end = offset + extend_len
++            offset = token_end
++            if not isinstance(config, dict):
++                continue
++            # The first runtime-eviction implementation scores a full history
++            # prefill round. Prefix scoring against cached K/V can be added
++            # later, but silently mixing the two would corrupt token indices.
++            if prefix_len != 0:
++                continue
++
++            history_start = int(config.get("history_start") or 0)
++            history_end = int(config.get("history_end") or 0)
++            if not (0 <= history_start < history_end <= extend_len):
++                continue
++
++            method = str(config.get("method") or "").strip().lower()
++            if method in {"", "streamingllm"}:
++                continue
++            recent_window = max(1, int(config.get("history_kv_recent_window") or 64))
++            q_end = history_end
++            q_start = max(0, q_end - recent_window)
++            if q_start >= q_end:
++                continue
++
++            q_req = q[token_start:token_end].view(
++                extend_len, self.num_heads, self.head_dim
++            ).transpose(0, 1).contiguous()
++            k_req = k[token_start:token_end].view(
++                extend_len, self.num_kv_heads, self.head_dim
++            ).transpose(0, 1).contiguous()
++            if self.num_heads != self.num_kv_heads:
++                groups = self.num_heads // self.num_kv_heads
++                k_score = k_req.repeat_interleave(groups, dim=0)
++            else:
++                k_score = k_req
++
++            q_window = q_req[:, q_start:q_end, :]
++            k_all = k_score[:, :history_end, :]
++            logits = torch.matmul(
++                q_window.float(),
++                k_all.transpose(-2, -1).float(),
++            ) * self.scaling
++            q_pos = flat_positions[token_start + q_start : token_start + q_end].to(
++                logits.device
++            ).view(1, -1, 1)
++            k_pos = flat_positions[token_start : token_start + history_end].to(
++                logits.device
++            ).view(1, 1, -1)
++            logits = logits.masked_fill(k_pos > q_pos, float("-inf"))
++            probs = torch.softmax(logits, dim=-1, dtype=torch.float32)
++            layer_score = probs[:, :, history_start:history_end].sum(dim=(0, 1))
++
++            req_pool_idx = int(forward_batch.req_pool_indices[batch_idx].item())
++            entry = score_store.setdefault(
++                req_pool_idx,
++                {
++                    "method": method,
++                    "history_start": history_start,
++                    "history_end": history_end,
++                    "history_len": history_end - history_start,
++                    "layers": [],
++                },
++            )
++            entry["layers"].append(layer_score.detach().cpu())
++
+     def forward_prepare_npu(self, positions, hidden_states, forward_batch):
+         qkv, _ = self.qkv_proj(hidden_states)
+ 
+         if self.attn.layer_id == forward_batch.token_to_kv_pool.start_layer:
+             self.rotary_emb.get_cos_sin_with_position(positions)
+         q, k, v = split_qkv_rmsnorm_rope(
+             qkv,
+             self.rotary_emb.position_sin,
+             self.rotary_emb.position_cos,
+             self.q_size,
+@@ -347,47 +460,56 @@ class Qwen3Attention(nn.Module):
+         hidden_states: torch.Tensor,
+         forward_batch: ForwardBatch,
+     ) -> torch.Tensor:
+         if get_global_server_args().rl_on_policy_target is not None:
+             hidden_states = hidden_states.bfloat16()
+ 
+         save_kv_cache = True
+         use_aiter_fused = (
+             self.use_fused_qk_norm_mrope
+             and forward_batch.forward_mode.is_decode()
++            and getattr(forward_batch, "c2kv_use_gist_projection", None) is None
+             and get_global_server_args().rl_on_policy_target is None
+         )
+ 
+         if use_aiter_fused:
+             q, k, v = self.forward_prepare_aiter_fused_mrope(
+                 positions, hidden_states, forward_batch
+             )
+             save_kv_cache = False
+         elif (
++            getattr(forward_batch, "c2kv_use_gist_projection", None) is not None
++            or
+             not _is_npu
+             or forward_batch.forward_mode.is_extend_or_draft_extend_or_mixed()
+         ):
+-            q, k, v = self.forward_prepare_native(
+-                positions=positions,
+-                hidden_states=hidden_states,
+-            )
++            self._active_forward_batch = forward_batch
++            try:
++                q, k, v = self.forward_prepare_native(
++                    positions=positions,
++                    hidden_states=hidden_states,
++                )
++            finally:
++                self._active_forward_batch = None
+         else:
+             q, k, v = self.forward_prepare_npu(
+                 positions=positions,
+                 hidden_states=hidden_states,
+                 forward_batch=forward_batch,
+             )
+ 
+         if get_global_server_args().rl_on_policy_target is not None:
+             q = q.to(torch.bfloat16)
+             k = k.to(torch.bfloat16)
+ 
++        self._collect_history_kv_eviction_scores(q, k, positions, forward_batch)
++
+         # ---------------------------------------------------------
+         # C2KV_LAYER0_DIFF_DUMP
+         #
+         # Dump exactly one real C2KV EXTEND at layer 0:
+         #   hidden -> RoPE Q/K/V -> paged attention output
+         #   + the exact logical KV sequence read from paged cache.
+         # ---------------------------------------------------------
+         _c2kv_diff_path = os.environ.get("C2KV_DEBUG_LAYER0_DUMP")
+         _c2kv_force_dump = (
+             os.environ.get("C2KV_DEBUG_LAYER0_DUMP_FORCE") == "1"
+@@ -1185,74 +1307,107 @@ class Qwen3ForCausalLM(nn.Module):
+         return gist_key_values, gist_mask, gist_position_ids
+ 
+     @torch.no_grad()
+     def generate_raw_repair_kv(
+         self,
+         input_ids: torch.Tensor,
+         span_start: int,
+         span_end: int,
+         *,
+         position_offset: int = 0,
++        repair_position_ids: Optional[List[int]] = None,
++        raw_kv_position_mode: str = "rotated",
++        history_kv_method: Optional[str] = None,
++        history_kv_target_tokens: Optional[int] = None,
++        history_kv_retention_ratio: Optional[float] = None,
++        history_kv_recent_window: int = 64,
++        history_kv_kernel_size: int = 5,
++        history_kv_pooling: str = "avgpool",
++        history_kv_h2o_recent_fraction: float = 0.5,
+     ):
+-        """Run a correctness-first full prefill and capture raw RoPE'd KV.
++        """Run a correctness-first full prefill and capture raw repair KV.
+ 
+         This is used by the C2KV repair endpoints. It intentionally captures
+-        ordinary self-attention K/V, not gist/PIC K/V. The returned K already
+-        carries the requested absolute RoPE phase and must be injected with
+-        `already_rotated=True`.
++        ordinary self-attention K/V, not gist/PIC K/V. In ``rotated`` mode the
++        returned K already carries native Full-prompt RoPE. In ``pre_rope`` mode
++        the returned K is captured after base QKV + QK norm but before RoPE; the
++        caller supplies the position IDs that will be used when it is injected.
+         """
+ 
+         if input_ids.ndim != 2 or input_ids.shape[0] != 1:
+             raise ValueError(
+                 f"generate_raw_repair_kv expects input_ids shape (1, L), got {input_ids.shape}."
+             )
+         seq_len = int(input_ids.shape[1])
+         if not (0 <= span_start <= span_end <= seq_len):
+             raise ValueError(
+                 f"Invalid repair span: {span_start=}, {span_end=}, {seq_len=}."
+             )
+         if span_start == span_end:
+             raise ValueError("repair span must be non-empty.")
++        if raw_kv_position_mode not in {"rotated", "pre_rope"}:
++            raise ValueError(
++                f"Unsupported raw_kv_position_mode: {raw_kv_position_mode!r}."
++            )
++        if repair_position_ids is not None and len(repair_position_ids) != (
++            span_end - span_start
++        ):
++            raise ValueError(
++                "repair_position_ids length mismatch: "
++                f"{len(repair_position_ids)} != {span_end - span_start}"
++            )
+ 
+         device = input_ids.device
+         positions = torch.arange(
+             position_offset,
+             position_offset + seq_len,
+             dtype=torch.long,
+             device=device,
+         )
+         hidden_states = self.model.embed_tokens(input_ids).squeeze(0)
+         raw_key_values = []
++        history_scores = []
++        requested_span_tokens = span_end - span_start
++        history_method = (history_kv_method or "").strip().lower()
++        if history_method == "snapkv":
++            history_method = "snapkv_persistent"
++        if history_method == "pyramid":
++            history_method = "pyramidkv"
+         npu_forward_batch_stub = None
+         if _is_npu:
+             npu_forward_batch_stub = SimpleNamespace(
+                 token_to_kv_pool=SimpleNamespace(
+                     start_layer=self.model.layers[0].self_attn.attn.layer_id
+                 )
+             )
+ 
+         for layer in self.model.layers:
+             residual = hidden_states
+             attn_input = layer.input_layernorm(hidden_states)
+-            # Normal SGLang prefill/extend on Ascend takes the native
+-            # QK-norm/RoPE preparation path before entering the Ascend
+-            # attention backend.  Repair KV must be captured from that same
+-            # Full-prefill path; using the decode-oriented NPU fused prepare
+-            # changes the raw K/V slightly and breaks raw-all replacement
+-            # equivalence on sensitive BFCL trajectories.
+-            q, k, v = layer.self_attn.forward_prepare_native(
+-                positions=positions,
+-                hidden_states=attn_input,
++            qkv, _ = layer.self_attn.qkv_proj(attn_input)
++            q, k_pre, v = qkv.split(
++                [layer.self_attn.q_size, layer.self_attn.kv_size, layer.self_attn.kv_size],
++                dim=-1,
++            )
++            q, k_pre = apply_qk_norm(
++                q=q,
++                k=k_pre,
++                q_norm=layer.self_attn.q_norm,
++                k_norm=layer.self_attn.k_norm,
++                head_dim=layer.self_attn.head_dim,
++                alt_stream=layer.self_attn.alt_stream,
+             )
++            q, k = layer.self_attn.rotary_emb(positions, q, k_pre)
++            repair_k = k_pre if raw_kv_position_mode == "pre_rope" else k
+             raw_key_values.append(
+                 (
+-                    k[span_start:span_end].contiguous().clone(),
++                    repair_k[span_start:span_end].contiguous().clone(),
+                     v[span_start:span_end].contiguous().clone(),
+                 )
+             )
+ 
+             q = q.view(1, seq_len, layer.self_attn.num_heads, layer.self_attn.head_dim)
+             k_attn = k.view(
+                 1,
+                 seq_len,
+                 layer.self_attn.num_kv_heads,
+                 layer.self_attn.head_dim,
+@@ -1260,20 +1415,57 @@ class Qwen3ForCausalLM(nn.Module):
+             v_attn = v.view(
+                 1,
+                 seq_len,
+                 layer.self_attn.num_kv_heads,
+                 layer.self_attn.head_dim,
+             )
+             q = q.transpose(1, 2).contiguous()
+             k_attn = k_attn.transpose(1, 2).contiguous()
+             v_attn = v_attn.transpose(1, 2).contiguous()
+ 
++            if history_method in {"h2o", "snapkv_persistent", "snapkv_refresh"}:
++                try:
++                    if layer.self_attn.num_heads != layer.self_attn.num_kv_heads:
++                        groups = layer.self_attn.num_heads // layer.self_attn.num_kv_heads
++                        score_k = k_attn.repeat_interleave(groups, dim=1)
++                    else:
++                        score_k = k_attn
++                    q_window = max(1, min(int(history_kv_recent_window or 64), seq_len))
++                    q_start = seq_len - q_window
++                    score_q = q[:, :, q_start:seq_len, :]
++                    score_logits = torch.matmul(
++                        score_q.float(), score_k.transpose(-2, -1).float()
++                    ) * layer.self_attn.scaling
++                    q_positions = torch.arange(
++                        q_start, seq_len, dtype=torch.long, device=device
++                    ).view(1, 1, q_window, 1)
++                    k_positions = torch.arange(
++                        0, seq_len, dtype=torch.long, device=device
++                    ).view(1, 1, 1, seq_len)
++                    score_logits = score_logits.masked_fill(
++                        k_positions > q_positions,
++                        float("-inf"),
++                    )
++                    score_probs = torch.softmax(
++                        score_logits, dim=-1, dtype=torch.float32
++                    )
++                    layer_score = score_probs[
++                        :, :, :, span_start:span_end
++                    ].sum(dim=(0, 1, 2))
++                    history_scores.append(layer_score.detach())
++                except Exception:
++                    logger.warning(
++                        "history KV score collection failed at layer %s",
++                        getattr(layer.self_attn.attn, "layer_id", "?"),
++                        exc_info=True,
++                    )
++
+             if _is_npu:
+                 # Match the serving attention path: do not materialize repeated
+                 # KV heads for GQA. Repair KV must be captured from the same
+                 # Full-context computation that the normal Ascend backend uses.
+                 k_run = k_attn.contiguous()
+                 v_run = v_attn.contiguous()
+                 blocked = torch.triu(
+                     torch.ones((seq_len, seq_len), dtype=torch.bool, device=device),
+                     diagonal=1,
+                 ).view(1, 1, seq_len, seq_len)
+@@ -1334,22 +1526,199 @@ class Qwen3ForCausalLM(nn.Module):
+                 .view(seq_len, layer.self_attn.num_heads * layer.self_attn.head_dim)
+             )
+             attn_output, _ = layer.self_attn.o_proj(attn_output)
+             attn_output = tensor_model_parallel_all_reduce(attn_output)
+             hidden_states = residual + attn_output
+ 
+             residual = hidden_states
+             mlp_input = layer.post_attention_layernorm(hidden_states)
+             hidden_states = residual + layer.mlp(mlp_input)
+ 
+-        repair_position_ids = positions[span_start:span_end].view(1, -1).contiguous()
+-        return raw_key_values, repair_position_ids
++        if repair_position_ids is None:
++            repair_positions = positions[span_start:span_end]
++        else:
++            repair_positions = torch.tensor(
++                repair_position_ids, dtype=torch.long, device=device
++            )
++
++        history_meta = None
++        if history_method:
++            if history_method not in {
++                "streamingllm",
++                "h2o",
++                "snapkv_persistent",
++                "snapkv_refresh",
++                "pyramidkv",
++            }:
++                raise ValueError(
++                    f"Unsupported history_kv_method for repair extraction: {history_method!r}."
++                )
++            if history_kv_target_tokens is not None:
++                target_tokens = int(history_kv_target_tokens)
++            elif history_kv_retention_ratio is not None:
++                target_tokens = int(
++                    torch.ceil(
++                        torch.tensor(
++                            requested_span_tokens * float(history_kv_retention_ratio)
++                        )
++                    ).item()
++                )
++            else:
++                target_tokens = requested_span_tokens
++            target_tokens = max(1, min(requested_span_tokens, target_tokens))
++
++            def _unique_sorted(indices: Iterable[int]) -> List[int]:
++                return sorted({int(i) for i in indices if 0 <= int(i) < requested_span_tokens})
++
++            if history_method == "streamingllm":
++                selected_rel = list(
++                    range(requested_span_tokens - target_tokens, requested_span_tokens)
++                )
++                reason = "recent_suffix"
++            elif history_method == "pyramidkv":
++                if history_scores:
++                    layer_scores = history_scores
++                else:
++                    layer_scores = [
++                        torch.zeros(
++                            requested_span_tokens,
++                            dtype=torch.float32,
++                            device=device,
++                        )
++                        for _ in range(len(self.model.layers))
++                    ]
++                num_layers = max(1, len(layer_scores))
++                low_budget = max(1, min(requested_span_tokens, int(round(target_tokens * 1.5))))
++                high_budget = max(1, min(requested_span_tokens, int(round(target_tokens * 0.5))))
++                per_layer_budgets = []
++                per_layer_selected_counts = []
++                union_selected: set[int] = set()
++                for layer_idx, scores in enumerate(layer_scores):
++                    if num_layers == 1:
++                        layer_budget = target_tokens
++                    else:
++                        # PyramidKV-style funnel: lower layers retain a larger
++                        # history cache, upper layers retain a smaller cache.
++                        frac = layer_idx / float(num_layers - 1)
++                        layer_budget = int(round(low_budget * (1.0 - frac) + high_budget * frac))
++                    layer_budget = max(1, min(requested_span_tokens, layer_budget))
++                    per_layer_budgets.append(layer_budget)
++                    recent_budget = min(
++                        layer_budget,
++                        max(1, min(int(history_kv_recent_window or 64), requested_span_tokens)),
++                    )
++                    recent_rel = list(
++                        range(requested_span_tokens - recent_budget, requested_span_tokens)
++                    )
++                    past_budget = max(0, layer_budget - len(recent_rel))
++                    layer_selected = set(recent_rel)
++                    past_len = max(0, requested_span_tokens - len(recent_rel))
++                    if past_budget > 0 and past_len > 0:
++                        _, top_idx = torch.topk(
++                            scores[:past_len],
++                            k=min(past_budget, past_len),
++                            largest=True,
++                        )
++                        layer_selected.update(int(i) for i in top_idx.tolist())
++                    per_layer_selected_counts.append(len(layer_selected))
++                    union_selected.update(layer_selected)
++                selected_rel = sorted(union_selected)
++                reason = "pyramidkv_layer_budget_union_shared_page_table"
++            else:
++                if history_scores:
++                    scores = torch.stack(history_scores, dim=0).mean(dim=0)
++                else:
++                    scores = torch.zeros(
++                        requested_span_tokens, dtype=torch.float32, device=device
++                    )
++                recent_budget = max(
++                    1,
++                    min(
++                        target_tokens,
++                        int(round(target_tokens * float(history_kv_h2o_recent_fraction))),
++                    ),
++                )
++                recent_budget = min(
++                    recent_budget,
++                    int(history_kv_recent_window or recent_budget),
++                    requested_span_tokens,
++                )
++                if history_method.startswith("snapkv"):
++                    recent_budget = min(
++                        target_tokens,
++                        max(1, min(int(history_kv_recent_window or 64), requested_span_tokens)),
++                    )
++                recent_rel = list(
++                    range(requested_span_tokens - recent_budget, requested_span_tokens)
++                )
++                past_budget = max(0, target_tokens - len(recent_rel))
++                past_len = max(0, requested_span_tokens - len(recent_rel))
++                if past_budget > 0 and past_len > 0:
++                    past_scores = scores[:past_len]
++                    if history_method.startswith("snapkv"):
++                        kernel = max(1, int(history_kv_kernel_size or 1))
++                        if kernel > 1 and past_scores.numel() > 1:
++                            pad = kernel // 2
++                            pooled = torch.nn.functional.avg_pool1d(
++                                past_scores.view(1, 1, -1),
++                                kernel_size=kernel,
++                                stride=1,
++                                padding=pad,
++                            ).view(-1)
++                            if pooled.numel() != past_scores.numel():
++                                pooled = pooled[: past_scores.numel()]
++                            past_scores = pooled
++                    _, top_idx = torch.topk(
++                        past_scores,
++                        k=min(past_budget, past_scores.numel()),
++                        largest=True,
++                    )
++                    selected_rel = _unique_sorted(top_idx.tolist() + recent_rel)
++                else:
++                    selected_rel = _unique_sorted(recent_rel)
++                if len(selected_rel) > target_tokens:
++                    selected_rel = selected_rel[-target_tokens:]
++                reason = "attention_heavy_hitter_recent"
++                if history_method.startswith("snapkv"):
++                    reason = "snapkv_attention_pooling_recent"
++
++            if len(selected_rel) != requested_span_tokens:
++                selected_tensor = torch.tensor(
++                    selected_rel, dtype=torch.long, device=device
++                )
++                raw_key_values = [
++                    (
++                        key.index_select(0, selected_tensor).contiguous().clone(),
++                        value.index_select(0, selected_tensor).contiguous().clone(),
++                    )
++                    for key, value in raw_key_values
++                ]
++                repair_positions = repair_positions.index_select(
++                    0, selected_tensor
++                ).contiguous()
++            history_meta = {
++                "history_kv_method": history_method,
++                "requested_span_tokens": requested_span_tokens,
++                "target_tokens": target_tokens,
++                "selected_token_count": len(selected_rel),
++                "selected_relative_indices": selected_rel,
++                "selection_reason": reason,
++                "recent_window": int(history_kv_recent_window or 0),
++            }
++            if history_method == "pyramidkv":
++                history_meta["shared_page_table_approximation"] = True
++                history_meta["per_layer_budget_tokens"] = per_layer_budgets
++                history_meta["per_layer_selected_counts"] = per_layer_selected_counts
++        repair_positions = repair_positions.view(1, -1).contiguous()
++        if history_meta is not None:
++            return raw_key_values, repair_positions, history_meta
++        return raw_key_values, repair_positions
+ 
+     @torch.no_grad()
+     def generate_pic(self, input_ids, attention_mask, ratio=1, **kwargs):
+         """Extract full-length residual-QKV PIC states for one document."""
+         if not self.full_length_pic:
+             raise ValueError("generate_pic requires a checkpoint with pic_enabled=True.")
+         if ratio != 1:
+             raise ValueError("Full-length PIC storage requires compression_ratio=1.")
+ 
+         pic_mask, position_ids = prepare_pic_input(input_ids, attention_mask)
+@@@@@ DIFF FILE: python/sglang/srt/managers/scheduler_output_processor_mixin.py
+diff --git a/python/sglang/srt/managers/scheduler_output_processor_mixin.py b/python/sglang/srt/managers/scheduler_output_processor_mixin.py
+index c8c5665e0..af7ea9287 100644
+--- a/python/sglang/srt/managers/scheduler_output_processor_mixin.py
++++ b/python/sglang/srt/managers/scheduler_output_processor_mixin.py
+@@ -78,42 +78,133 @@ class SchedulerOutputProcessorMixin:
+             return {
+                 "device": req.cached_tokens,
+                 "host": 0,
+             }
+ 
+         return None
+ 
+     def _get_kv_runtime_stats(self: Scheduler) -> Optional[dict]:
+         """Return a real KV allocator residency snapshot for accounting."""
+ 
++        snapshot = self._get_physical_kv_snapshot()
++        if snapshot is None:
++            return None
++        return {
++            "kv_pool_size": snapshot["main_kv_pool_size"],
++            "kv_available_tokens": snapshot["main_kv_available_slots"],
++            "kv_resident_tokens": snapshot["physical_main_kv_slots"],
++            "kv_peak_resident_tokens": snapshot["peak_main_paged_kv_slots"],
++            "kv_page_size": snapshot["page_size_tokens"],
++            **snapshot,
++        }
++
++    def _bytes_per_kv_token(self: Scheduler) -> Optional[int]:
++        try:
++            model_runner = self.tp_worker.model_runner
++            dtype = getattr(model_runner, "dtype", None)
++            if dtype is None:
++                dtype = getattr(self.token_to_kv_pool_allocator, "dtype", torch.float16)
++            dtype_bytes = torch.tensor([], dtype=dtype).element_size()
++            num_layers = int(getattr(model_runner, "num_effective_layers"))
++            num_kv_heads = int(
++                self.model_config.get_num_kv_heads(self.attn_tp_group.world_size)
++            )
++            head_dim = int(self.model_config.head_dim)
++            value_head_dim = int(getattr(self.model_config, "v_head_dim", head_dim))
++            return num_layers * num_kv_heads * (head_dim + value_head_dim) * dtype_bytes
++        except Exception:
++            return None
++
++    def _get_physical_kv_snapshot(self: Scheduler) -> Optional[dict]:
++        """Return physical GPU KV residency for main paged KV and C2KV pool."""
++
+         allocator = getattr(self, "token_to_kv_pool_allocator", None)
+         if allocator is None:
+             return None
+         try:
+             size = int(getattr(allocator, "size", 0) or 0)
+             available = int(allocator.available_size())
+-            resident = max(0, size - available)
+-            peak = max(
+-                int(getattr(self, "_c2kv_runtime_peak_kv_tokens", 0) or 0),
+-                resident,
++            page_size = int(getattr(allocator, "page_size", 1) or 1)
++            main_slots = max(0, size - available)
++            main_pages = (
++                (main_slots + page_size - 1) // page_size if page_size > 0 else 0
++            )
++
++            c2kv_pool = getattr(self, "c2kv_pool", None)
++            c2kv_slots = int(c2kv_pool.current_tokens()) if c2kv_pool is not None else 0
++            c2kv_pages = c2kv_slots
++            if c2kv_pool is not None:
++                c2kv_page_size = int(
++                    getattr(getattr(c2kv_pool, "allocator", None), "page_size", 1) or 1
++                )
++                c2kv_pages = (
++                    (c2kv_slots + c2kv_page_size - 1) // c2kv_page_size
++                    if c2kv_page_size > 0
++                    else 0
++                )
++
++            bytes_per_token = self._bytes_per_kv_token() or 0
++            main_bytes = main_slots * bytes_per_token
++            c2kv_bytes = c2kv_slots * bytes_per_token
++            total_bytes = main_bytes + c2kv_bytes
++
++            peak_main = max(
++                int(getattr(self, "_c2kv_runtime_peak_main_kv_slots", 0) or 0),
++                main_slots,
+             )
+-            self._c2kv_runtime_peak_kv_tokens = peak
++            peak_c2kv = max(
++                int(getattr(self, "_c2kv_runtime_peak_c2kv_pool_slots", 0) or 0),
++                c2kv_slots,
++            )
++            peak_total = max(
++                int(getattr(self, "_c2kv_runtime_peak_total_gpu_kv_bytes", 0) or 0),
++                total_bytes,
++            )
++            self._c2kv_runtime_peak_main_kv_slots = peak_main
++            self._c2kv_runtime_peak_c2kv_pool_slots = peak_c2kv
++            self._c2kv_runtime_peak_total_gpu_kv_bytes = peak_total
+             return {
+-                "kv_pool_size": size,
+-                "kv_available_tokens": available,
+-                "kv_resident_tokens": resident,
+-                "kv_peak_resident_tokens": peak,
+-                "kv_page_size": int(getattr(allocator, "page_size", 1) or 1),
++                "main_kv_pool_size": size,
++                "main_kv_available_slots": available,
++                "page_size_tokens": page_size,
++                "bytes_per_kv_token": bytes_per_token,
++                "physical_main_kv_pages": main_pages,
++                "physical_main_kv_slots": main_slots,
++                "physical_main_kv_bytes": main_bytes,
++                "physical_c2kv_pool_pages": c2kv_pages,
++                "physical_c2kv_pool_slots": c2kv_slots,
++                "physical_c2kv_pool_bytes": c2kv_bytes,
++                "total_gpu_kv_bytes": total_bytes,
++                "peak_main_paged_kv_slots": peak_main,
++                "peak_c2kv_pool_slots": peak_c2kv,
++                "peak_total_gpu_kv_bytes": peak_total,
+             }
+         except Exception:
+             return None
+ 
++    def _get_kv_memory_report(self: Scheduler, req: Req) -> Optional[dict]:
++        report = getattr(req, "kv_memory_report", None)
++        if not isinstance(report, dict):
++            snapshot = getattr(req, "history_kv_eviction_report_snapshot", None)
++            if isinstance(snapshot, dict):
++                logger.warning(
++                    "KV-memory report recovered from eviction snapshot rid=%s",
++                    req.rid,
++                )
++                report = dict(snapshot)
++        if not isinstance(report, dict):
++            return None
++        snapshot = self._get_physical_kv_snapshot()
++        if snapshot is not None:
++            report = {**report, **snapshot}
++        return report
++
+     def process_batch_result_prebuilt(self: Scheduler, batch: ScheduleBatch):
+         assert self.disaggregation_mode == DisaggregationMode.DECODE
+         for req in batch.reqs:
+             req.time_stats.set_decode_prebuilt_finish_time()
+             req.check_finished()
+             if req.finished():
+                 req.time_stats.set_quick_finish_time()
+                 self._release_c2kv_pins(req)
+                 release_kv_cache(
+                     req,
+@@ -246,20 +337,32 @@ class SchedulerOutputProcessorMixin:
+                                     req=req,
+                                     failed_seg_idx=seg_idx,
+                                 )
+                                 self.stream_output([req], req.return_logprob)
+                                 abort = True
+                                 break
+                             logical_kv_start = req.kv_committed_len
+                         if abort:
+                             continue
+ 
++                        if getattr(cur_round, "post_history_kv_eviction", False):
++                            score_map = getattr(result, "history_kv_selection_scores", None)
++                            if isinstance(score_map, dict):
++                                req.history_kv_selection_scores = score_map.get(
++                                    int(req.req_pool_idx)
++                                )
++                            if not self._apply_history_kv_eviction(req):
++                                self._release_c2kv_pins(req)
++                                release_kv_cache(req, self.tree_cache, is_insert=False)
++                                self.stream_output([req], req.return_logprob)
++                                continue
++
+                         req.c2kv_round_idx += 1
+ 
+                         if req.c2kv_round_idx < len(req.c2kv_rounds):
+                             next_round = req.c2kv_rounds[req.c2kv_round_idx]
+                             model_runner = self.tp_worker.model_runner
+ 
+                             req.prefix_indices = (
+                                 model_runner.req_to_token_pool.req_to_token[
+                                     req.req_pool_idx, : req.kv_committed_len
+                                 ].to(torch.int64)
+@@ -285,34 +388,36 @@ class SchedulerOutputProcessorMixin:
+                                     else None
+                                 ),
+                             )
+ 
+                             req.c2kv_requeued = True
+                             self.waiting_queue.insert(0, req)
+                             continue
+ 
+                         # If gist was injected this round, batch.seq_lens is stale.
+                         # Patch it so decode allocates at the correct position.
+-                        if cur_round.post_inject_seg_indices:
+-                            gist_delta = req.kv_committed_len - int(
+-                                batch.seq_lens_cpu[i].item()
+-                            )
+-                            if gist_delta > 0:
+-                                batch.seq_lens_cpu[i] += gist_delta
++                        if (
++                            cur_round.post_inject_seg_indices
++                            or getattr(cur_round, "post_history_kv_eviction", False)
++                        ):
++                            old_seq_len = int(batch.seq_lens_cpu[i].item())
++                            seq_delta = req.kv_committed_len - old_seq_len
++                            if seq_delta != 0:
++                                batch.seq_lens_cpu[i] = req.kv_committed_len
+                                 if batch.seq_lens is None:
+                                     batch.seq_lens = batch.seq_lens_cpu.to(
+                                         batch.device
+                                     )
+                                 else:
+-                                    batch.seq_lens[i] += gist_delta
++                                    batch.seq_lens[i] += seq_delta
+                                 if batch.seq_lens_sum is not None:
+-                                    batch.seq_lens_sum += gist_delta
++                                    batch.seq_lens_sum += seq_delta
+ 
+                         self._log_c2kv_token_usage(
+                             "all_rounds_finished",
+                             req=req,
+                             batch_seq_len=int(batch.seq_lens_cpu[i].item()),
+                             c2kv_virtual_len=(
+                                 len(req.c2kv_virtual_input_ids)
+                                 if req.c2kv_virtual_input_ids is not None
+                                 else None
+                             ),
+@@ -1092,20 +1197,21 @@ class SchedulerOutputProcessorMixin:
+ 
+         skip_special_tokens = []
+         spaces_between_special_tokens = []
+         no_stop_trim = []
+         prompt_tokens = []
+         reasoning_tokens = []
+         completion_tokens = []
+         cached_tokens = []
+         cached_tokens_details = []  # Detailed breakdown by cache source
+         kv_runtime_stats = []
++        kv_memory_reports = []
+         spec_verify_ct = []
+         spec_accepted_tokens = []
+         spec_acceptance_histogram = []
+         retraction_counts = []
+         output_hidden_states = None
+         load = self.get_load()
+         routed_experts = None
+         customized_info = {}
+ 
+         time_stats = []
+@@ -1196,20 +1302,28 @@ class SchedulerOutputProcessorMixin:
+                 )
+                 no_stop_trim.append(req.sampling_params.no_stop_trim)
+                 prompt_tokens.append(len(req.origin_input_ids))
+                 reasoning_tokens.append(req.reasoning_tokens)
+                 completion_tokens.append(len(output_ids_))
+                 cached_tokens.append(req.cached_tokens)
+ 
+                 # Collect detailed cache breakdown if available
+                 cached_tokens_details.append(self._get_cached_tokens_details(req))
+                 kv_runtime_stats.append(self._get_kv_runtime_stats())
++                kv_memory_report = self._get_kv_memory_report(req)
++                if getattr(req, "history_kv_eviction_result", None) is not None:
++                    logger.info(
++                        "KV-memory output snapshot rid=%s report_present=%s",
++                        req.rid,
++                        kv_memory_report is not None,
++                    )
++                kv_memory_reports.append(kv_memory_report)
+ 
+                 retraction_counts.append(req.retraction_count)
+ 
+                 time_stats.append(req.time_stats)
+ 
+                 if not self.spec_algorithm.is_none():
+                     spec_verify_ct.append(req.spec_verify_ct)
+                     spec_accepted_tokens.append(req.spec_accepted_tokens)
+                     spec_acceptance_histogram.append(req.spec_acceptance_histogram)
+ 
+@@ -1325,20 +1439,21 @@ class SchedulerOutputProcessorMixin:
+                     output_ids=output_ids,
+                     skip_special_tokens=skip_special_tokens,
+                     spaces_between_special_tokens=spaces_between_special_tokens,
+                     no_stop_trim=no_stop_trim,
+                     prompt_tokens=prompt_tokens,
+                     reasoning_tokens=reasoning_tokens,
+                     completion_tokens=completion_tokens,
+                     cached_tokens=cached_tokens,
+                     cached_tokens_details=cached_tokens_details,
+                     kv_runtime_stats=kv_runtime_stats,
++                    kv_memory_reports=kv_memory_reports,
+                     input_token_logprobs_val=input_token_logprobs_val,
+                     input_token_logprobs_idx=input_token_logprobs_idx,
+                     output_token_logprobs_val=output_token_logprobs_val,
+                     output_token_logprobs_idx=output_token_logprobs_idx,
+                     input_top_logprobs_val=input_top_logprobs_val,
+                     input_top_logprobs_idx=input_top_logprobs_idx,
+                     output_top_logprobs_val=output_top_logprobs_val,
+                     output_top_logprobs_idx=output_top_logprobs_idx,
+                     input_token_ids_logprobs_val=input_token_ids_logprobs_val,
+                     input_token_ids_logprobs_idx=input_token_ids_logprobs_idx,
+@@@@@ DIFF FILE: python/sglang/srt/entrypoints/openai/protocol.py
+diff --git a/python/sglang/srt/entrypoints/openai/protocol.py b/python/sglang/srt/entrypoints/openai/protocol.py
+index 55debf06b..895c052c3 100644
+--- a/python/sglang/srt/entrypoints/openai/protocol.py
++++ b/python/sglang/srt/entrypoints/openai/protocol.py
+@@ -493,20 +493,21 @@ class ChatCompletionMessageGenericParam(BaseModel):
+     )
+     tool_call_id: Optional[str] = None
+     name: Optional[str] = None
+     reasoning_content: Optional[str] = None
+     tool_calls: Optional[List[ToolCall]] = Field(default=None, examples=[None])
+     tools: Optional[List[Tool]] = Field(default=None, examples=[None])
+     c2kv_key_hash: Optional[str] = None
+     c2kv_repair_key_hashes: Optional[List[str]] = None
+     c2kv_repair_only_key_hashes: Optional[List[str]] = None
+     c2kv_repair_token_start: Optional[int] = None
++    c2kv_use_gist_projection: Optional[bool] = None
+ 
+     @field_validator("role", mode="before")
+     @classmethod
+     def _normalize_role(cls, v):
+         if isinstance(v, str):
+             v_lower = v.lower()
+             if v_lower not in {"system", "assistant", "tool", "function", "developer"}:
+                 raise ValueError(
+                     "'role' must be one of 'system', 'developer', 'assistant', 'tool', or 'function' (case-insensitive)."
+                 )
+@@ -514,20 +515,21 @@ class ChatCompletionMessageGenericParam(BaseModel):
+         raise ValueError("'role' must be a string")
+ 
+ 
+ class ChatCompletionMessageUserParam(BaseModel):
+     role: Literal["user"]
+     content: Union[str, List[ChatCompletionMessageContentPart]]
+     c2kv_key_hash: Optional[str] = None
+     c2kv_repair_key_hashes: Optional[List[str]] = None
+     c2kv_repair_only_key_hashes: Optional[List[str]] = None
+     c2kv_repair_token_start: Optional[int] = None
++    c2kv_use_gist_projection: Optional[bool] = None
+ 
+ 
+ ChatCompletionMessageParam = Union[
+     ChatCompletionMessageGenericParam, ChatCompletionMessageUserParam
+ ]
+ 
+ 
+ class Function(BaseModel):
+     """Function descriptions."""
+ 
+@@ -590,20 +592,21 @@ class ChatCompletionRequest(BaseModel):
+     top_p: Optional[float] = None
+     user: Optional[str] = None
+     tools: Optional[List[Tool]] = Field(default=None, examples=[None])
+     tool_choice: Union[ToolChoice, Literal["auto", "required", "none"]] = Field(
+         default="auto", examples=["none"]
+     )  # noqa
+     parallel_tool_calls: bool = True
+     return_hidden_states: bool = False
+     return_routed_experts: bool = False
+     return_cached_tokens_details: bool = False
++    c2kv_kv_memory_hint: Optional[Dict[str, Any]] = None
+     reasoning_effort: Optional[Literal["none", "low", "medium", "high"]] = Field(
+         default=None,
+         description="Constrains effort on reasoning for reasoning models. "
+         "'none' disables reasoning entirely, 'low' is the least effort, 'high' is the most effort. "
+         "Reducing reasoning effort can result in faster responses and fewer tokens used on reasoning "
+         "in a response. 'none' defaults thinking and enable_thinking to false in "
+         "chat_template_kwargs (unless explicitly overridden). Not supported in the harmony path.",
+     )
+ 
+     # Extra parameters for SRT backend only and will be ignored by OpenAI models.
+@@ -1533,29 +1536,42 @@ class C2KVExtractResponse(BaseModel):
+ class C2KVRepairExtractRequest(BaseModel):
+     """Request to extract and store raw/neutral repair KV."""
+ 
+     text: str = ""
+     input_ids: Optional[List[int]] = None
+     role: Optional[str] = None
+     chat_template_kwargs: Optional[Dict] = None
+     span_start: int = 0
+     span_end: Optional[int] = None
+     position_offset: int = 0
++    repair_position_ids: Optional[List[int]] = None
++    raw_kv_position_mode: str = "rotated"
+     repair_mode: str = "d_corr"
+     source_doc_index: Optional[int] = None
+     extract_source: str = "model_prefill"
++    history_kv_method: Optional[str] = None
++    history_kv_target_tokens: Optional[int] = None
++    history_kv_retention_ratio: Optional[float] = None
++    history_kv_recent_window: int = 64
++    history_kv_kernel_size: int = 5
++    history_kv_pooling: str = "avgpool"
++    history_kv_h2o_recent_fraction: float = 0.5
+ 
+ 
+ class C2KVRepairExtractResponse(BaseModel):
+     """Response from C2KV repair KV extraction."""
+ 
+     key_hash: str
+     token_len: int = 0
+     position_start: int = 0
+     position_end: int = 0
+     original_seq_len: int = 0
+     repair_mode: str = ""
+     extract_source: str = ""
+     cache_hit_tokens: int = 0
+     serving_kv_buffer_shape: Optional[List[int]] = None
++    history_kv_method: Optional[str] = None
++    requested_span_tokens: int = 0
++    selected_token_count: int = 0
++    selected_relative_indices: Optional[List[int]] = None
+     success: bool = True
+     error: Optional[str] = None
+@@@@@ DIFF FILE: python/sglang/srt/managers/io_struct.py
+diff --git a/python/sglang/srt/managers/io_struct.py b/python/sglang/srt/managers/io_struct.py
+index f589209c0..1a274c114 100644
+--- a/python/sglang/srt/managers/io_struct.py
++++ b/python/sglang/srt/managers/io_struct.py
+@@ -237,20 +237,22 @@ class GenerateReqInput(BaseReq):
+ 
+     # For EPD-disaggregated inference
+     need_wait_for_mm_inputs: Optional[bool] = None
+     num_items_assigned: Optional[Dict[Modality, List[int]]] = None
+ 
+     # Multimodal tiling controls (extensions)
+     max_dynamic_patch: Optional[int] = None
+ 
+     # C2KV: per-segment descriptors for gist injection
+     c2kv_segments: Optional[List] = None  # List[C2KVSegmentInfo]
++    c2kv_kv_memory_hint: Optional[Dict[str, Any]] = None
++    c2kv_use_gist_projection: bool = False
+     min_dynamic_patch: Optional[int] = None
+     image_max_dynamic_patch: Optional[int] = None
+     video_max_dynamic_patch: Optional[int] = None
+ 
+     def contains_mm_input(self) -> bool:
+         return (
+             has_valid_data(self.image_data)
+             or has_valid_data(self.video_data)
+             or has_valid_data(self.audio_data)
+         )
+@@ -749,20 +751,22 @@ class TokenizedGenerateReqInput(BaseReq):
+     token_type_ids: Optional[List[int]] = None
+ 
+     need_wait_for_mm_inputs: bool = False
+     num_items_assigned: Optional[Dict[Modality, List[int]]] = None
+ 
+     # For observability
+     time_stats: Optional[Union[APIServerReqTimeStats, DPControllerReqTimeStats]] = None
+ 
+     # C2KV: per-segment descriptors for gist injection
+     c2kv_segments: Optional[List] = None  # List[C2KVSegmentInfo]
++    c2kv_kv_memory_hint: Optional[Dict[str, Any]] = None
++    c2kv_use_gist_projection: bool = False
+ 
+ 
+ @dataclass
+ class BatchTokenizedGenerateReqInput(BaseBatchReq):
+     # The batch of tokenized requests
+     batch: List[TokenizedGenerateReqInput]
+ 
+     def __len__(self):
+         return len(self.batch)
+ 
+@@ -1019,20 +1023,22 @@ class BatchTokenIDOutput(BaseBatchReq, SpeculativeDecodingMetricsMixin):
+     token_steps: List[List[int]] = None
+ 
+     # Load for DP balance
+     load: GetLoadReqOutput = None
+     # Customized info
+     customized_info: Optional[Dict[str, List[Any]]] = None
+     # Detailed breakdown of cached tokens by source (device/host/storage)
+     cached_tokens_details: Optional[List[Optional[Dict[str, Any]]]] = None
+     # Runtime KV allocator snapshot for accounting/debug.
+     kv_runtime_stats: Optional[List[Optional[Dict[str, Any]]]] = None
++    # Per-request C2KV/repair history KV layout report for accounting/debug.
++    kv_memory_reports: Optional[List[Optional[Dict[str, Any]]]] = None
+     # DP rank of the scheduler that processed each request
+     dp_ranks: Optional[List[int]] = None
+ 
+     # For observability
+     time_stats: Optional[List[SchedulerReqTimeStats]] = None
+ 
+ 
+ @dataclass
+ class BatchStrOutput(BaseBatchReq, SpeculativeDecodingMetricsMixin):
+     # The finish reason
+@@ -1082,20 +1088,24 @@ class BatchStrOutput(BaseBatchReq, SpeculativeDecodingMetricsMixin):
+     # The trainer step id. Used to know which step's weights are used for sampling.
+     token_steps: List[List[int]] = None
+ 
+     # Load for DP balance
+     load: GetLoadReqOutput = None
+ 
+     # Customized info
+     customized_info: Optional[Dict[str, List[Any]]] = None
+     # Detailed breakdown of cached tokens by source (device/host/storage)
+     cached_tokens_details: Optional[List[Optional[Dict[str, Any]]]] = None
++    # Runtime KV allocator snapshot for accounting/debug.
++    kv_runtime_stats: Optional[List[Optional[Dict[str, Any]]]] = None
++    # Per-request C2KV/repair history KV layout report for accounting/debug.
++    kv_memory_reports: Optional[List[Optional[Dict[str, Any]]]] = None
+     # DP rank of the scheduler that processed each request
+     dp_ranks: Optional[List[int]] = None
+ 
+     # For observability
+     time_stats: Optional[List[SchedulerReqTimeStats]] = None
+ 
+ 
+ @dataclass
+ class BatchEmbeddingOutput(BaseBatchReq):
+     # The finish reason
+@@ -2008,25 +2018,27 @@ class DumperControlReqOutput(BaseReq):
+ 
+ class C2KVSegmentInfo:
+     """Describes one C2KV-compressed segment within a generation request."""
+ 
+     def __init__(
+         self,
+         key_hash: str = "",
+         token_start: int = 0,
+         token_end: int = 0,
+         repair_key_hashes: Optional[List[str]] = None,
++        use_gist_projection: bool = False,
+     ):
+         self.key_hash = key_hash
+         self.token_start = token_start
+         self.token_end = token_end
+         self.repair_key_hashes = repair_key_hashes or []
++        self.use_gist_projection = use_gist_projection
+ 
+ 
+ @dataclass
+ class TokenizedExtractReqInput(BaseReq):
+     """Internal request type for a C2KV gist extraction job."""
+ 
+     input_ids: List[int] = field(default_factory=list)
+     input_text: str = ""
+     compression_ratio: int = 4
+ 
+@@ -2044,39 +2056,52 @@ class C2KVExtractReqOutput(BaseReq):
+ 
+ @dataclass
+ class TokenizedRepairExtractReqInput(BaseReq):
+     """Internal request type for C2KV repair raw/sham KV extraction."""
+ 
+     input_ids: List[int] = field(default_factory=list)
+     input_text: str = ""
+     span_start: int = 0
+     span_end: int = 0
+     position_offset: int = 0
++    repair_position_ids: Optional[List[int]] = None
++    raw_kv_position_mode: str = "rotated"
+     repair_mode: str = "d_corr"
+     source_doc_index: Optional[int] = None
+     already_rotated: bool = True
+     extract_source: str = "model_prefill"
++    history_kv_method: Optional[str] = None
++    history_kv_target_tokens: Optional[int] = None
++    history_kv_retention_ratio: Optional[float] = None
++    history_kv_recent_window: int = 64
++    history_kv_kernel_size: int = 5
++    history_kv_pooling: str = "avgpool"
++    history_kv_h2o_recent_fraction: float = 0.5
+ 
+ 
+ @dataclass
+ class C2KVRepairExtractReqOutput(BaseReq):
+     """Output returned from C2KV repair extraction."""
+ 
+     key_hash: str = ""
+     token_len: int = 0
+     position_start: int = 0
+     position_end: int = 0
+     original_seq_len: int = 0
+     repair_mode: str = ""
+     extract_source: str = ""
+     cache_hit_tokens: int = 0
+     serving_kv_buffer_shape: Optional[Tuple[int, ...]] = None
++    history_kv_method: Optional[str] = None
++    requested_span_tokens: int = 0
++    selected_token_count: int = 0
++    selected_relative_indices: Optional[List[int]] = None
+     error: str = ""
+     success: bool = True
+ 
+ 
+ def _check_all_req_types():
+     """A helper function to check all request types are defined in this file."""
+     import inspect
+     import sys
+ 
+     all_classes = inspect.getmembers(sys.modules[__name__], inspect.isclass)
+@@@@@ DIFF FILE: python/sglang/srt/entrypoints/http_server.py
+diff --git a/python/sglang/srt/entrypoints/http_server.py b/python/sglang/srt/entrypoints/http_server.py
+index 26af1643c..8d5964d3b 100644
+--- a/python/sglang/srt/entrypoints/http_server.py
++++ b/python/sglang/srt/entrypoints/http_server.py
+@@ -1548,38 +1548,51 @@ async def v1_c2kv_repair_extract(
+                 error="The repair input contributes no tokens.",
+             )
+ 
+         span_end = len(input_ids) if request.span_end is None else request.span_end
+         result = await tokenizer_manager.c2kv_repair_extract(
+             input_ids=input_ids,
+             input_text=request.text,
+             span_start=request.span_start,
+             span_end=span_end,
+             position_offset=request.position_offset,
++            repair_position_ids=request.repair_position_ids,
++            raw_kv_position_mode=request.raw_kv_position_mode,
+             repair_mode=request.repair_mode,
+             source_doc_index=request.source_doc_index,
+             extract_source=request.extract_source,
++            history_kv_method=request.history_kv_method,
++            history_kv_target_tokens=request.history_kv_target_tokens,
++            history_kv_retention_ratio=request.history_kv_retention_ratio,
++            history_kv_recent_window=request.history_kv_recent_window,
++            history_kv_kernel_size=request.history_kv_kernel_size,
++            history_kv_pooling=request.history_kv_pooling,
++            history_kv_h2o_recent_fraction=request.history_kv_h2o_recent_fraction,
+         )
+         return C2KVRepairExtractResponse(
+             key_hash=result.key_hash,
+             token_len=result.token_len,
+             position_start=result.position_start,
+             position_end=result.position_end,
+             original_seq_len=result.original_seq_len,
+             repair_mode=result.repair_mode,
+             extract_source=result.extract_source,
+             cache_hit_tokens=result.cache_hit_tokens,
+             serving_kv_buffer_shape=(
+                 list(result.serving_kv_buffer_shape)
+                 if result.serving_kv_buffer_shape is not None
+                 else None
+             ),
++            history_kv_method=result.history_kv_method,
++            requested_span_tokens=result.requested_span_tokens,
++            selected_token_count=result.selected_token_count,
++            selected_relative_indices=result.selected_relative_indices,
+             success=result.success,
+             error=result.error or None,
+         )
+     except Exception as e:
+         return C2KVRepairExtractResponse(
+             key_hash="",
+             token_len=0,
+             success=False,
+             error=str(e),
+         )
+@@@@@ DIFF FILE: python/sglang/srt/managers/schedule_batch.py
+diff --git a/python/sglang/srt/managers/schedule_batch.py b/python/sglang/srt/managers/schedule_batch.py
+index a60715dde..01316b466 100644
+--- a/python/sglang/srt/managers/schedule_batch.py
++++ b/python/sglang/srt/managers/schedule_batch.py
+@@ -552,25 +552,31 @@ class MultimodalInputs:
+             if "_id" in key:
+                 # set token_ids
+                 if getattr(self, key, None) is None:
+                     setattr(self, key, getattr(other, key, None))
+         # other args would be kept intact
+ 
+ 
+ class C2KVPrefillRound:
+     """One round of C2KV multi-round prefill."""
+ 
+-    __slots__ = ("tokens", "post_inject_seg_indices")
++    __slots__ = ("tokens", "post_inject_seg_indices", "post_history_kv_eviction")
+ 
+-    def __init__(self, tokens: List[int], post_inject_seg_indices: List[int]):
++    def __init__(
++        self,
++        tokens: List[int],
++        post_inject_seg_indices: List[int],
++        post_history_kv_eviction: bool = False,
++    ):
+         self.tokens = tokens
+         self.post_inject_seg_indices = post_inject_seg_indices
++        self.post_history_kv_eviction = post_history_kv_eviction
+ 
+ 
+ class Req(ReqDllmMixin):
+     """The input and output status of a request."""
+ 
+     def __init__(
+         self,
+         rid: str,
+         origin_input_text: str,
+         origin_input_ids: List[int],
+@@ -890,20 +896,28 @@ class Req(ReqDllmMixin):
+         # C2KV multi-round prefill state
+         self.c2kv_segments = None           # List[C2KVSegmentInfo], sorted by token_start
+         self.c2kv_rounds = None             # List[C2KVPrefillRound]
+         self.c2kv_round_idx = 0
+         self.c2kv_round_start_len = 0       # KV length before the active round's real tokens
+         self.c2kv_position_correction = 0  # running sum: original_seq_len - gist_len
+         self.c2kv_virtual_input_ids = None  # virtual token IDs including synthetic gist IDs
+         self.c2kv_requeued = False              # True while waiting for next round
+         self.c2kv_pinned_keys = None        # Unique C2KV keys pinned while rounds inject
+         self.c2kv_tree_cache_prefix_len = 0  # Prefix slots owned by radix/tree cache
++        self.c2kv_kv_memory_hint = None
++        self.history_kv_eviction = None
++        self.history_kv_eviction_result = None
++        self.history_kv_eviction_report_snapshot = None
++        self.history_kv_selection_scores = None
++        self.c2kv_use_gist_projection = False
++        self.c2kv_gist_projection_start_pos = 0
++        self.kv_memory_report = None
+ 
+     @property
+     def seqlen(self) -> int:
+         """Get the current sequence length of the request."""
+         return len(self.origin_input_ids) + len(self.output_ids)
+ 
+     @property
+     def is_prefill_only(self) -> bool:
+         """Check if this request is prefill-only (no token generation needed)."""
+         # NOTE: when spec is enabled, prefill_only optimizations are disabled
+@@ -1353,20 +1367,34 @@ class Req(ReqDllmMixin):
+         self.has_log_time_stats = True
+ 
+     def set_extend_input_len(self, extend_input_len: int):
+         # Setting extend_input_len and computing the relative logprob_start_len in an extend batch
+         #
+         # Key variables:
+         # - logprob_start_len: Absolute position in full sequence where logprob computation begins
+         # - extend_logprob_start_len: Relative position within current extend batch where logprob computation begins
+         # - extend_input_len: Number of tokens that need to be processed in this extend batch
+         self.extend_input_len = extend_input_len
++        if (
++            self.c2kv_rounds is not None
++            and self.return_logprob
++            and self.token_ids_logprob is None
++            and self.logprob_start_len >= len(self.origin_input_ids)
++        ):
++            # OpenAI-style generation logprobs only need sampled output token
++            # logprobs. During C2KV multi-round prefill, the virtual prefix can
++            # be longer than origin_input_ids, so the generic relative
++            # logprob_start_len calculation would incorrectly request input
++            # logprobs for the transient C2KV round tokens and later fail the
++            # origin-input length invariant in the output processor.
++            self.extend_logprob_start_len = self.extend_input_len
++            return
+         if self.logprob_start_len == -1:
+             logprob_start_len = len(self.fill_ids)
+         else:
+             # logprob_start_len should be at least the length of the prefix indices
+             logprob_start_len = max(self.logprob_start_len, len(self.prefix_indices))
+         self.extend_logprob_start_len = min(
+             logprob_start_len - len(self.prefix_indices),
+             self.extend_input_len,
+         )
+ 
+@@ -2475,20 +2503,50 @@ class ScheduleBatch(ScheduleBatchDisaggregationDecodeMixin):
+ 
+         seq_lens_cpu = (
+             seq_lens_cpu_cache if seq_lens_cpu_cache is not None else self.seq_lens_cpu
+         )
+ 
+         c2kv_corr = None
+         if any(getattr(r, "c2kv_position_correction", 0) for r in self.reqs):
+             c2kv_corr = [
+                 getattr(r, "c2kv_position_correction", 0) for r in self.reqs
+             ]
++        c2kv_use_gist_projection = None
++        if any(getattr(r, "c2kv_use_gist_projection", False) for r in self.reqs):
++            c2kv_use_gist_projection = [
++                bool(getattr(r, "c2kv_use_gist_projection", False))
++                for r in self.reqs
++            ]
++        c2kv_gist_projection_start_positions = None
++        if c2kv_use_gist_projection is not None:
++            c2kv_gist_projection_start_positions = [
++                int(getattr(r, "c2kv_gist_projection_start_pos", 0) or 0)
++                for r in self.reqs
++            ]
++        c2kv_history_kv_eviction_configs = None
++        if any(getattr(r, "history_kv_eviction", None) for r in self.reqs):
++            c2kv_history_kv_eviction_configs = []
++            for r in self.reqs:
++                config = getattr(r, "history_kv_eviction", None)
++                if (
++                    isinstance(config, dict)
++                    and getattr(r, "c2kv_rounds", None) is not None
++                    and r.c2kv_round_idx < len(r.c2kv_rounds)
++                    and getattr(
++                        r.c2kv_rounds[r.c2kv_round_idx],
++                        "post_history_kv_eviction",
++                        False,
++                    )
++                ):
++                    c2kv_history_kv_eviction_configs.append(dict(config))
++                else:
++                    c2kv_history_kv_eviction_configs.append(None)
+ 
+         if os.environ.get("C2KV_DEBUG_POSITIONS") == "1":
+             print(
+                 "[C2KV WORKER CORR DEBUG]",
+                 {
+                     "forward_mode": str(self.forward_mode),
+                     "c2kv_corr": c2kv_corr,
+                     "req_corr": [
+                         getattr(r, "c2kv_position_correction", 0)
+                         for r in self.reqs
+@@ -2555,20 +2613,25 @@ class ScheduleBatch(ScheduleBatchDisaggregationDecodeMixin):
+             is_prefill_only=self.is_prefill_only,
+             dimensions=self.dimensions,
+             dllm_block_offsets=[req.dllm_block_offset for req in self.reqs],
+             dllm_config=self.dllm_config,
+             reqs=self.reqs,
+             has_grammar=self.has_grammar,
+             mamba_track_indices=self.mamba_track_indices,
+             mamba_track_mask=self.mamba_track_mask,
+             mamba_track_seqlens=self.mamba_track_seqlens,
+             c2kv_position_corrections=c2kv_corr,
++            c2kv_use_gist_projection=c2kv_use_gist_projection,
++            c2kv_gist_projection_start_positions=(
++                c2kv_gist_projection_start_positions
++            ),
++            c2kv_history_kv_eviction_configs=c2kv_history_kv_eviction_configs,
+         )
+ 
+     def copy(self):
+         # Only contain fields that will be used by process_batch_result.
+         # Shallow-copy the reqs list so that in-place mutations (filter_batch,
+         # merge_batch) on the original don't corrupt this snapshot.
+         return ScheduleBatch(
+             reqs=self.reqs[:],
+             req_to_token_pool=self.req_to_token_pool,
+             req_pool_indices=self.req_pool_indices,
+@@ -2745,10 +2808,13 @@ class ModelWorkerBatch:
+     # For hidden states before normal
+     return_hidden_states_before_norm: bool = False
+ 
+     # For mamba state tracking
+     mamba_track_indices: Optional[torch.Tensor] = None  # shape: [b], int64
+     mamba_track_mask: Optional[torch.Tensor] = None  # shape: [b], bool
+     mamba_track_seqlens: Optional[torch.Tensor] = None  # shape: [b], int64
+ 
+     # C2KV position corrections per request
+     c2kv_position_corrections: Optional[List[int]] = None
++    c2kv_use_gist_projection: Optional[List[bool]] = None
++    c2kv_gist_projection_start_positions: Optional[List[int]] = None
++    c2kv_history_kv_eviction_configs: Optional[List[Optional[Dict[str, Any]]]] = None
+@@@@@ DIFF FILE: python/sglang/srt/model_executor/forward_batch_info.py
+diff --git a/python/sglang/srt/model_executor/forward_batch_info.py b/python/sglang/srt/model_executor/forward_batch_info.py
+index 750c7e4e0..d2177e0f8 100644
+--- a/python/sglang/srt/model_executor/forward_batch_info.py
++++ b/python/sglang/srt/model_executor/forward_batch_info.py
+@@ -27,21 +27,21 @@ ScheduleBatch -> ModelWorkerBatch -> ForwardBatch
+   It contains low-level tensor data. Most of the data consists of GPU tensors.
+ """
+ 
+ from __future__ import annotations
+ 
+ import os
+ 
+ from dataclasses import dataclass
+ from enum import IntEnum, auto
+ from functools import total_ordering
+-from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, Union
++from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
+ 
+ import torch
+ import triton
+ import triton.language as tl
+ 
+ from sglang.srt.distributed.parallel_state import (
+     get_moe_expert_parallel_world_size,
+     get_tensor_model_parallel_world_size,
+ )
+ from sglang.srt.layers.attention.nsa.utils import NSAContextParallelMetadata
+@@ -423,20 +423,24 @@ class ForwardBatch(ForwardBatchDeepSeekMHAMixin):
+     nsa_cp_metadata: Optional[NSAContextParallelMetadata] = None
+ 
+     # For hidden states before normal
+     return_hidden_states_before_norm: bool = False
+ 
+     # For hisparse
+     hisparse_coordinator: Optional[HiSparseCoordinator] = None
+ 
+     # For C2KV extraction
+     c2kv_position_corrections: Optional[torch.Tensor] = None  # (batch_size,) int64
++    c2kv_use_gist_projection: Optional[torch.Tensor] = None  # (num_tokens,) bool
++    c2kv_gist_projection_start_positions: Optional[torch.Tensor] = None
++    c2kv_history_kv_eviction_configs: Optional[List[Optional[Dict[str, Any]]]] = None
++    c2kv_history_kv_selection_scores: Optional[Dict[int, Dict[str, Any]]] = None
+ 
+     # For ngram embedding
+     ngram_embedding_info: Optional[NgramEmbeddingInfo] = None
+ 
+     # For dumper: request IDs for cross-step sequence tracking
+     rids: Optional[List[str]] = None
+ 
+     @classmethod
+     def init_new(
+         cls,
+@@ -477,20 +481,25 @@ class ForwardBatch(ForwardBatchDeepSeekMHAMixin):
+             spec_algorithm=batch.spec_algorithm,
+             spec_info=batch.spec_info,
+             capture_hidden_mode=batch.capture_hidden_mode,
+             input_embeds=batch.input_embeds,
+             token_type_ids=batch.token_type_ids,
+             tbo_split_seq_index=batch.tbo_split_seq_index,
+             dimensions=batch.dimensions,
+             return_hidden_states_before_norm=batch.return_hidden_states_before_norm,
+             rids=[req.rid for req in batch.reqs],
+         )
++        ret.c2kv_history_kv_eviction_configs = (
++            batch.c2kv_history_kv_eviction_configs
++        )
++        if ret.c2kv_history_kv_eviction_configs is not None:
++            ret.c2kv_history_kv_selection_scores = {}
+         device = model_runner.device
+ 
+         if batch.extend_input_logprob_token_ids is not None:
+             ret.extend_input_logprob_token_ids_gpu = (
+                 batch.extend_input_logprob_token_ids.to(device, non_blocking=True)
+             )
+ 
+         num_tokens = len(batch.input_ids) if batch.input_ids is not None else 0
+         if enable_num_token_non_padded(model_runner.server_args):
+             ret.num_token_non_padded = torch.tensor(num_tokens, dtype=torch.int32).to(
+@@ -591,20 +600,44 @@ class ForwardBatch(ForwardBatchDeepSeekMHAMixin):
+             )
+             if ret.forward_mode.is_decode() or ret.forward_mode.is_target_verify():
+                 ret.positions = ret.positions + corr
+             elif ret.positions is not None and batch.extend_seq_lens is not None:
+                 ext_lens = torch.tensor(
+                     batch.extend_seq_lens, dtype=torch.int32, device=device
+                 )
+                 per_token_corr = torch.repeat_interleave(corr, ext_lens)
+                 ret.positions = ret.positions + per_token_corr
+ 
++        if batch.c2kv_use_gist_projection is not None:
++            req_flags = torch.tensor(
++                batch.c2kv_use_gist_projection, dtype=torch.bool, device=device
++            )
++            req_starts = torch.tensor(
++                batch.c2kv_gist_projection_start_positions
++                or [0] * len(batch.c2kv_use_gist_projection),
++                dtype=torch.int64,
++                device=device,
++            )
++            if ret.forward_mode.is_decode() or ret.forward_mode.is_target_verify():
++                ret.c2kv_use_gist_projection = req_flags & (
++                    ret.positions.reshape(-1).to(dtype=torch.int64) >= req_starts
++                )
++            elif batch.extend_seq_lens is not None:
++                ext_lens = torch.tensor(
++                    batch.extend_seq_lens, dtype=torch.int32, device=device
++                )
++                token_flags = torch.repeat_interleave(req_flags, ext_lens)
++                token_starts = torch.repeat_interleave(req_starts, ext_lens)
++                ret.c2kv_use_gist_projection = token_flags & (
++                    ret.positions.reshape(-1).to(dtype=torch.int64) >= token_starts
++                )
++
+ 
+         # ---------------------------------------------------------
+         # C2KV runtime position debug
+         # ---------------------------------------------------------
+         if (
+             os.environ.get("C2KV_DEBUG_POSITIONS") == "1"
+             and batch.c2kv_position_corrections is not None
+         ):
+             def _c2kv_debug_list(x):
+                 if x is None:
+@@@@@ DIFF FILE: python/sglang/srt/model_executor/model_runner.py
+diff --git a/python/sglang/srt/model_executor/model_runner.py b/python/sglang/srt/model_executor/model_runner.py
+index 0d6e2803c..f04ea8122 100644
+--- a/python/sglang/srt/model_executor/model_runner.py
++++ b/python/sglang/srt/model_executor/model_runner.py
+@@ -19,21 +19,21 @@ import datetime
+ import gc
+ import inspect
+ import json
+ import logging
+ import os
+ import socket
+ import threading
+ import time
+ from collections import defaultdict
+ from dataclasses import dataclass
+-from typing import Callable, List, Optional, Tuple, Union
++from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+ 
+ import torch
+ import torch.distributed as dist
+ from torch import nn
+ 
+ from sglang.jit_kernel.ngram_embedding import update_token_table
+ from sglang.srt.configs import (
+     BailingHybridConfig,
+     FalconH1Config,
+     GraniteMoeHybridConfig,
+@@ -274,20 +274,21 @@ class RankZeroFilter(logging.Filter):
+         if record.levelno == logging.INFO:
+             return self.is_rank_zero
+         return True
+ 
+ 
+ @dataclass
+ class ModelRunnerOutput:
+     logits_output: Union[LogitsProcessorOutput, PPProxyTensors]
+     can_run_graph: bool
+     expert_distribution_metrics: Optional[ExpertDistributionMetrics] = None
++    history_kv_selection_scores: Optional[Dict[int, Dict[str, Any]]] = None
+ 
+ 
+ class ModelRunner(ModelRunnerKVCacheMixin):
+     """ModelRunner runs the forward passes of the models."""
+ 
+     def __init__(
+         self,
+         model_config: ModelConfig,
+         mem_fraction_static: float,
+         gpu_id: int,
+@@ -2744,31 +2745,49 @@ class ModelRunner(ModelRunnerKVCacheMixin):
+         return self.model.generate_gist(
+             input_ids, attention_mask, ratio=compression_ratio
+         )
+ 
+     def forward_c2kv_repair_extract(
+         self,
+         input_ids: torch.Tensor,
+         span_start: int,
+         span_end: int,
+         position_offset: int = 0,
++        repair_position_ids=None,
++        raw_kv_position_mode: str = "rotated",
++        history_kv_method: str = None,
++        history_kv_target_tokens: int = None,
++        history_kv_retention_ratio: float = None,
++        history_kv_recent_window: int = 64,
++        history_kv_kernel_size: int = 5,
++        history_kv_pooling: str = "avgpool",
++        history_kv_h2o_recent_fraction: float = 0.5,
+     ):
+         """Capture ordinary full-prefill KV for a repair span."""
+         if not hasattr(self.model, "generate_raw_repair_kv"):
+             raise ValueError(
+                 f"{type(self.model).__name__} does not support C2KV repair KV extraction."
+             )
+         return self.model.generate_raw_repair_kv(
+             input_ids,
+             span_start=span_start,
+             span_end=span_end,
+             position_offset=position_offset,
++            repair_position_ids=repair_position_ids,
++            raw_kv_position_mode=raw_kv_position_mode,
++            history_kv_method=history_kv_method,
++            history_kv_target_tokens=history_kv_target_tokens,
++            history_kv_retention_ratio=history_kv_retention_ratio,
++            history_kv_recent_window=history_kv_recent_window,
++            history_kv_kernel_size=history_kv_kernel_size,
++            history_kv_pooling=history_kv_pooling,
++            history_kv_h2o_recent_fraction=history_kv_h2o_recent_fraction,
+         )
+ 
+     def get_c2kv_compression_ratio(self, requested_ratio: int) -> int:
+         from sglang.srt.mem_cache.gist_utils import resolve_c2kv_compression_ratio
+ 
+         return resolve_c2kv_compression_ratio(
+             requested_ratio,
+             full_length_pic=getattr(self.model, "full_length_pic", False),
+         )
+ 
+@@ -2905,21 +2924,27 @@ class ModelRunner(ModelRunnerKVCacheMixin):
+             ret = self.forward_idle(forward_batch, pp_proxy_tensors=pp_proxy_tensors)
+         else:
+             raise ValueError(f"Invalid forward mode: {forward_batch.forward_mode}")
+ 
+         if (
+             forward_batch.global_num_tokens_cpu is not None
+             and self.pp_group.is_last_rank
+         ):
+             forward_batch.post_forward_mlp_sync_batch(ret)
+ 
+-        return ModelRunnerOutput(logits_output=ret, can_run_graph=can_run_graph)
++        return ModelRunnerOutput(
++            logits_output=ret,
++            can_run_graph=can_run_graph,
++            history_kv_selection_scores=getattr(
++                forward_batch, "c2kv_history_kv_selection_scores", None
++            ),
++        )
+ 
+     def _preprocess_logits(
+         self, logits_output: LogitsProcessorOutput, sampling_info: SamplingBatchInfo
+     ):
+         # NOTE: In overlap mode, the function update_regex_vocab_mask (in sample)
+         #       was executed after we processed last batch's results.
+ 
+         # Calculate logits bias and apply it to next_token_logits.
+         sampling_info.update_regex_vocab_mask()
+         sampling_info.apply_logits_bias(logits_output.next_token_logits)
+@@@@@ DIFF FILE: python/sglang/srt/entrypoints/openai/serving_chat.py
+diff --git a/python/sglang/srt/entrypoints/openai/serving_chat.py b/python/sglang/srt/entrypoints/openai/serving_chat.py
+index 0a7764e64..5eaa0f1ee 100644
+--- a/python/sglang/srt/entrypoints/openai/serving_chat.py
++++ b/python/sglang/srt/entrypoints/openai/serving_chat.py
+@@ -439,31 +439,111 @@ class OpenAIServingChat(OpenAIServingBase):
+                 C2KVSegmentInfo(
+                     key_hash=getattr(msg, "c2kv_key_hash", "") or "",
+                     token_start=insertion_point,
+                     token_end=insertion_point,
+                     repair_key_hashes=(
+                         list(getattr(msg, "c2kv_repair_key_hashes", None) or [])
+                         + list(
+                             getattr(msg, "c2kv_repair_only_key_hashes", None) or []
+                         )
+                     ),
++                    use_gist_projection=(
++                        getattr(msg, "c2kv_use_gist_projection", None) is not False
++                    ),
+                 )
+             )
+ 
+         # Remove annotated messages so _process_messages omits their tokens from
+         # origin_input_ids; the gist injection fills each insertion point at
+         # inference time.
+         for i in reversed(annotated):
+             request.messages.pop(i)
+ 
+         return segments
+ 
++    @staticmethod
++    def _find_token_subsequence(haystack: List[int], needle: List[int]) -> int:
++        if not needle or len(needle) > len(haystack):
++            return -1
++        limit = len(haystack) - len(needle) + 1
++        for start in range(limit):
++            if haystack[start : start + len(needle)] == needle:
++                return start
++        return -1
++
++    def _resolve_history_kv_eviction_range(
++        self,
++        request: "ChatCompletionRequest",
++        prompt_ids: List[int],
++    ) -> None:
++        """Resolve BFCL history offsets in the server's actual token frame.
++
++        The client sends a completed-message count, never client-side token
++        offsets. Tool templates can produce a different prologue or fallback
++        representation on the server, so only the final OpenAI prompt IDs are
++        authoritative for physical KV eviction.
++        """
++
++        hint = request.c2kv_kv_memory_hint
++        if not isinstance(hint, dict):
++            return
++        config = hint.get("history_kv_eviction")
++        if not isinstance(config, dict):
++            return
++        count = config.get("history_message_count")
++        if count is None:
++            return
++        try:
++            count = int(count)
++        except (TypeError, ValueError) as exc:
++            raise ValueError(f"Invalid history_message_count: {count!r}") from exc
++        if not (0 < count <= len(request.messages)):
++            raise ValueError(
++                "Invalid physical history message boundary: "
++                f"history_message_count={count}, messages={len(request.messages)}"
++            )
++
++        tools = self._chat_template_tools(request)
++        completed = list(request.messages[:count])
++        with_tools = self._c2kv_chat_template_input_ids(request, completed, tools)
++        without_tools = self._c2kv_chat_template_input_ids(request, completed, None)
++        bos_id = getattr(self.tokenizer_manager.tokenizer, "bos_token_id", None)
++        while without_tools and bos_id is not None and without_tools[0] == bos_id:
++            without_tools = without_tools[1:]
++        if not without_tools:
++            raise ValueError("Cannot resolve an empty physical history token span")
++
++        prefix_start = 0
++        if prompt_ids[: len(with_tools)] != with_tools:
++            prefix_start = self._find_token_subsequence(prompt_ids, with_tools)
++        if prefix_start < 0:
++            raise ValueError(
++                "Server chat template prefix is not present in the final prompt; "
++                "refusing physical history KV eviction."
++            )
++        history_relative_start = self._find_token_subsequence(with_tools, without_tools)
++        if history_relative_start < 0:
++            raise ValueError(
++                "Cannot isolate completed history from the server tool prologue; "
++                "refusing physical history KV eviction."
++            )
++        history_start = prefix_start + history_relative_start
++        history_end = history_start + len(without_tools)
++        if history_end > len(prompt_ids) or prompt_ids[history_start:history_end] != without_tools:
++            raise ValueError(
++                "Resolved physical history range does not match the server prompt IDs; "
++                "refusing physical history KV eviction."
++            )
++        config["history_start"] = history_start
++        config["history_end"] = history_end
++        config["server_tokenized"] = True
++
+     def _convert_to_internal_request(
+         self,
+         request: ChatCompletionRequest,
+         raw_request: Request = None,
+     ) -> tuple[GenerateReqInput, ChatCompletionRequest]:
+         reasoning_effort = (
+             request.chat_template_kwargs.pop("reasoning_effort", None)
+             if request.chat_template_kwargs
+             else None
+         )
+@@ -476,20 +556,22 @@ class OpenAIServingChat(OpenAIServingBase):
+             request.reasoning_effort = reasoning_effort
+ 
+         """Convert OpenAI chat completion request to internal format"""
+         is_multimodal = self.tokenizer_manager.model_config.is_multimodal
+ 
+         # Compute C2KV segment boundaries before the chat template is applied
+         c2kv_segments = self._compute_c2kv_segments(request)
+ 
+         # Process messages and apply chat template
+         processed_messages = self._process_messages(request, is_multimodal)
++        if not is_multimodal and isinstance(processed_messages.prompt_ids, list):
++            self._resolve_history_kv_eviction_range(request, processed_messages.prompt_ids)
+ 
+         # Build sampling parameters
+         sampling_params = request.to_sampling_params(
+             stop=processed_messages.stop,
+             model_generation_config=self.default_sampling_params,
+             tool_call_constraint=processed_messages.tool_call_constraint,
+         )
+ 
+         # Handle single vs multiple requests
+         if is_multimodal:
+@@ -537,22 +619,37 @@ class OpenAIServingChat(OpenAIServingBase):
+             extra_key=self._compute_extra_key(request),
+             require_reasoning=self._get_reasoning_from_request(request),
+             priority=request.priority,
+             routing_key=self.extract_routing_key(raw_request),
+             custom_labels=custom_labels,
+             custom_logit_processor=request.custom_logit_processor,
+             image_max_dynamic_patch=img_max_dynamic_patch,
+             video_max_dynamic_patch=vid_max_dynamic_patch,
+             max_dynamic_patch=getattr(request, "max_dynamic_patch", None),
+             c2kv_segments=c2kv_segments,
++            c2kv_kv_memory_hint=request.c2kv_kv_memory_hint,
++            c2kv_use_gist_projection=bool(
++                c2kv_segments
++                and any(
++                    getattr(seg, "use_gist_projection", True)
++                    for seg in c2kv_segments
++                )
++            ),
+         )
+ 
++        if request.c2kv_kv_memory_hint:
++            logger.info(
++                "C2KV KV-memory hint accepted rid=%s history_eviction=%s",
++                adapted_request.rid,
++                bool(request.c2kv_kv_memory_hint.get("history_kv_eviction")),
++            )
++
+         return adapted_request, request
+ 
+     def _process_messages(
+         self, request: ChatCompletionRequest, is_multimodal: bool
+     ) -> MessageProcessingResult:
+         """Process chat messages and apply chat template"""
+         # GptOss model needs to keep special tokens for harmony parsing
+         if self.is_gpt_oss:
+             request.skip_special_tokens = False
+ 
+@@ -1246,29 +1343,41 @@ class OpenAIServingChat(OpenAIServingBase):
+             )
+             choices.append(choice_data)
+ 
+         # Calculate usage
+         usage = UsageProcessor.calculate_response_usage(
+             ret,
+             n_choices=request.n,
+             enable_cache_report=self.tokenizer_manager.server_args.enable_cache_report,
+         )
+ 
++        kv_memory_report = ret[0]["meta_info"].get("kv_memory_report")
++        if kv_memory_report is not None:
++            logger.info(
++                "C2KV KV-memory report returned rid=%s status=%s",
++                ret[0]["meta_info"]["id"],
++                kv_memory_report.get("history_kv_runtime_status"),
++            )
++
+         return ChatCompletionResponse(
+             id=ret[0]["meta_info"]["id"],
+             created=created,
+             model=request.model,
+             choices=choices,
+             usage=usage,
+             metadata={
+                 "weight_version": ret[0]["meta_info"]["weight_version"],
+                 "sglang_runtime": ret[0]["meta_info"].get("kv_runtime_stats"),
++                # Keep the per-request layout report produced by the scheduler.
++                # BFCL uses this to distinguish measured physical KV residency
++                # from client-side history-token estimates.
++                "kv_memory_report": kv_memory_report,
+             },
+             sglext=response_sglext,
+         )
+ 
+     def _process_logprobs_tokens(
+         self, logprobs: LogProbs, use_token_index: bool = False
+     ) -> List[ChatCompletionTokenLogprob]:
+         """Common helper to process logprobs tokens for both streaming and non-streaming
+ 
+         Args:
+@@@@@ DIFF FILE: python/sglang/srt/managers/tokenizer_manager.py
+diff --git a/python/sglang/srt/managers/tokenizer_manager.py b/python/sglang/srt/managers/tokenizer_manager.py
+index ae61435ac..933464b32 100644
+--- a/python/sglang/srt/managers/tokenizer_manager.py
++++ b/python/sglang/srt/managers/tokenizer_manager.py
+@@ -976,20 +976,24 @@ class TokenizerManager(TokenizerCommunicatorMixin, TokenizerManagerScoreMixin):
+                 return_routed_experts=obj.return_routed_experts,
+                 routed_dp_rank=obj.routed_dp_rank,
+                 disagg_prefill_dp_rank=obj.disagg_prefill_dp_rank,
+                 priority=obj.priority,
+                 extra_key=obj.extra_key,
+                 routing_key=obj.routing_key,
+                 token_type_ids=token_type_ids,
+                 need_wait_for_mm_inputs=obj.need_wait_for_mm_inputs,
+                 num_items_assigned=obj.num_items_assigned,
+                 c2kv_segments=getattr(obj, "c2kv_segments", None),
++                c2kv_kv_memory_hint=getattr(obj, "c2kv_kv_memory_hint", None),
++                c2kv_use_gist_projection=getattr(
++                    obj, "c2kv_use_gist_projection", False
++                ),
+             )
+         elif isinstance(obj, EmbeddingReqInput):
+             tokenized_obj = TokenizedEmbeddingReqInput(
+                 input_text,
+                 input_ids,
+                 mm_inputs,
+                 token_type_ids,
+                 sampling_params,
+                 rid=obj.rid,
+                 priority=obj.priority,
+@@ -1587,20 +1591,27 @@ class TokenizerManager(TokenizerCommunicatorMixin, TokenizerManagerScoreMixin):
+                 ):
+                     meta_info["cached_tokens_details"] = recv_obj.cached_tokens_details[
+                         i
+                     ]
+                 if (
+                     hasattr(recv_obj, "kv_runtime_stats")
+                     and recv_obj.kv_runtime_stats
+                     and recv_obj.kv_runtime_stats[i] is not None
+                 ):
+                     meta_info["kv_runtime_stats"] = recv_obj.kv_runtime_stats[i]
++                if (
++                    hasattr(recv_obj, "kv_memory_reports")
++                    and recv_obj.kv_memory_reports
++                    and recv_obj.kv_memory_reports[i] is not None
++                ):
++                    meta_info["kv_memory_report"] = recv_obj.kv_memory_reports[i]
++                    logger.info("KV-memory report attached to response rid=%s", rid)
+ 
+             if getattr(recv_obj, "output_hidden_states", None):
+                 meta_info["hidden_states"] = recv_obj.output_hidden_states[i]
+             if getattr(recv_obj, "routed_experts", None):
+                 routed_experts_tensor = recv_obj.routed_experts[i]
+                 if routed_experts_tensor is not None:
+                     meta_info["routed_experts"] = pybase64.b64encode(
+                         routed_experts_tensor.numpy().tobytes()
+                     ).decode("utf-8")
+             if getattr(recv_obj, "customized_info", None):
+@@@@@ DIFF FILE: python/sglang/srt/managers/tokenizer_communicator_mixin.py
+diff --git a/python/sglang/srt/managers/tokenizer_communicator_mixin.py b/python/sglang/srt/managers/tokenizer_communicator_mixin.py
+index 0fd39b9a5..3de5d359b 100644
+--- a/python/sglang/srt/managers/tokenizer_communicator_mixin.py
++++ b/python/sglang/srt/managers/tokenizer_communicator_mixin.py
+@@ -424,40 +424,58 @@ class TokenizerCommunicatorMixin:
+         )
+         return (await self.c2kv_extract_communicator(req))[0]
+ 
+     async def c2kv_repair_extract(
+         self: TokenizerManager,
+         input_ids: list,
+         input_text: str,
+         span_start: int,
+         span_end: int,
+         position_offset: int = 0,
++        repair_position_ids: Optional[List[int]] = None,
++        raw_kv_position_mode: str = "rotated",
+         repair_mode: str = "d_corr",
+         source_doc_index: Optional[int] = None,
+         extract_source: str = "model_prefill",
++        history_kv_method: Optional[str] = None,
++        history_kv_target_tokens: Optional[int] = None,
++        history_kv_retention_ratio: Optional[float] = None,
++        history_kv_recent_window: int = 64,
++        history_kv_kernel_size: int = 5,
++        history_kv_pooling: str = "avgpool",
++        history_kv_h2o_recent_fraction: float = 0.5,
+         rid: Optional[str] = None,
+     ) -> C2KVRepairExtractReqOutput:
+         """Run C2KV repair KV extraction via the scheduler."""
+         import uuid
+ 
+         self.auto_create_handle_loop()
+         req = TokenizedRepairExtractReqInput(
+             rid=rid or uuid.uuid4().hex,
+             input_ids=input_ids,
+             input_text=input_text,
+             span_start=span_start,
+             span_end=span_end,
+             position_offset=position_offset,
++            repair_position_ids=repair_position_ids,
++            raw_kv_position_mode=raw_kv_position_mode,
+             repair_mode=repair_mode,
+             source_doc_index=source_doc_index,
+-            already_rotated=True,
++            already_rotated=(raw_kv_position_mode != "pre_rope"),
+             extract_source=extract_source,
++            history_kv_method=history_kv_method,
++            history_kv_target_tokens=history_kv_target_tokens,
++            history_kv_retention_ratio=history_kv_retention_ratio,
++            history_kv_recent_window=history_kv_recent_window,
++            history_kv_kernel_size=history_kv_kernel_size,
++            history_kv_pooling=history_kv_pooling,
++            history_kv_h2o_recent_fraction=history_kv_h2o_recent_fraction,
+         )
+         return (await self.c2kv_repair_extract_communicator(req))[0]
+ 
+     async def clear_hicache_storage(self: TokenizerManager) -> ClearHiCacheReqOutput:
+         """Clear the hierarchical cache storage."""
+         self.auto_create_handle_loop()
+         # Delegate to the scheduler to handle HiCacheStorage clearing
+         return (await self.clear_hicache_storage_communicator(ClearHiCacheReqInput()))[
+             0
+         ]
+@@@@@ DIFF FILE: python/sglang/srt/managers/multi_tokenizer_mixin.py
+diff --git a/python/sglang/srt/managers/multi_tokenizer_mixin.py b/python/sglang/srt/managers/multi_tokenizer_mixin.py
+index 80fb14871..8b9927062 100644
+--- a/python/sglang/srt/managers/multi_tokenizer_mixin.py
++++ b/python/sglang/srt/managers/multi_tokenizer_mixin.py
+@@ -147,20 +147,23 @@ def _handle_output_by_index(output, i):
+             prompt_tokens=_extract_field_by_index(output, "prompt_tokens", i),
+             completion_tokens=_extract_field_by_index(output, "completion_tokens", i),
+             reasoning_tokens=_extract_field_by_index(output, "reasoning_tokens", i),
+             cached_tokens=_extract_field_by_index(output, "cached_tokens", i),
+             cached_tokens_details=_extract_field_by_index(
+                 output, "cached_tokens_details", i
+             ),
+             kv_runtime_stats=_extract_field_by_index(
+                 output, "kv_runtime_stats", i
+             ),
++            kv_memory_reports=_extract_field_by_index(
++                output, "kv_memory_reports", i
++            ),
+             input_token_logprobs_val=_extract_field_by_index(
+                 output, "input_token_logprobs_val", i, check_length=False
+             ),
+             input_token_logprobs_idx=_extract_field_by_index(
+                 output, "input_token_logprobs_idx", i, check_length=False
+             ),
+             output_token_logprobs_val=_extract_field_by_index(
+                 output, "output_token_logprobs_val", i, check_length=False
+             ),
+             output_token_logprobs_idx=_extract_field_by_index(
+@@ -223,20 +226,27 @@ def _handle_output_by_index(output, i):
+                 output, "spec_acceptance_histogram", i
+             ),
+             time_stats=_extract_field_by_index(output, "time_stats", i),
+             finished_reasons=_extract_field_by_index(output, "finished_reasons", i),
+             output_strs=_extract_field_by_index(output, "output_strs", i),
+             output_ids=_extract_field_by_index(output, "output_ids", i),
+             prompt_tokens=_extract_field_by_index(output, "prompt_tokens", i),
+             completion_tokens=_extract_field_by_index(output, "completion_tokens", i),
+             reasoning_tokens=_extract_field_by_index(output, "reasoning_tokens", i),
+             cached_tokens=_extract_field_by_index(output, "cached_tokens", i),
++            cached_tokens_details=_extract_field_by_index(
++                output, "cached_tokens_details", i
++            ),
++            kv_runtime_stats=_extract_field_by_index(output, "kv_runtime_stats", i),
++            kv_memory_reports=_extract_field_by_index(
++                output, "kv_memory_reports", i
++            ),
+             input_token_logprobs_val=_extract_field_by_index(
+                 output, "input_token_logprobs_val", i, check_length=False
+             ),
+             input_token_logprobs_idx=_extract_field_by_index(
+                 output, "input_token_logprobs_idx", i, check_length=False
+             ),
+             output_token_logprobs_val=_extract_field_by_index(
+                 output, "output_token_logprobs_val", i, check_length=False
+             ),
+             output_token_logprobs_idx=_extract_field_by_index(
+@@@@@ DIFF FILE: python/sglang/srt/managers/tp_worker.py
+diff --git a/python/sglang/srt/managers/tp_worker.py b/python/sglang/srt/managers/tp_worker.py
+index 7f63610da..b1523ff29 100644
+--- a/python/sglang/srt/managers/tp_worker.py
++++ b/python/sglang/srt/managers/tp_worker.py
+@@ -469,20 +469,21 @@ class TpModelWorker(BaseTpWorker):
+             out = self.model_runner.forward(
+                 forward_batch,
+                 pp_proxy_tensors=pp_proxy_tensors,
+                 skip_attn_backend_init=skip_attn_backend_init,
+             )
+             logits_output, can_run_cuda_graph = out.logits_output, out.can_run_graph
+             batch_result = GenerationBatchResult(
+                 logits_output=logits_output,
+                 can_run_cuda_graph=can_run_cuda_graph,
+                 expert_distribution_metrics=out.expert_distribution_metrics,
++                history_kv_selection_scores=out.history_kv_selection_scores,
+             )
+ 
+             if is_verify:
+                 # Skip sampling and return logits for target forward
+                 return batch_result
+ 
+             if (
+                 self.enable_overlap
+                 and not self.enable_spec
+                 and model_worker_batch.sampling_info.grammars is not None
+@@ -524,20 +525,21 @@ class TpModelWorker(BaseTpWorker):
+             out = self.model_runner.forward(
+                 forward_batch,
+                 pp_proxy_tensors=pp_proxy_tensors,
+                 skip_attn_backend_init=skip_attn_backend_init,
+             )
+             pp_proxy_tensors, can_run_cuda_graph = out.logits_output, out.can_run_graph
+             return GenerationBatchResult(
+                 pp_hidden_states_proxy_tensors=pp_proxy_tensors,
+                 can_run_cuda_graph=can_run_cuda_graph,
+                 expert_distribution_metrics=out.expert_distribution_metrics,
++                history_kv_selection_scores=out.history_kv_selection_scores,
+             )
+ 
+     def forward_batch_split_prefill(self, batch: ScheduleBatch):
+         if batch.split_index == 0:
+             model_worker_batch = batch.get_model_worker_batch()
+             forward_batch = ForwardBatch.init_new(model_worker_batch, self.model_runner)
+             batch.split_forward_batch = forward_batch
+             batch.seq_lens_cpu_cache = model_worker_batch.seq_lens_cpu
+         else:
+             model_worker_batch = batch.get_model_worker_batch(batch.seq_lens_cpu_cache)
+@@ -547,13 +549,14 @@ class TpModelWorker(BaseTpWorker):
+         )
+         logits_output, can_run_cuda_graph = out.logits_output, out.can_run_graph
+         if logits_output:
+             next_token_ids = self.model_runner.sample(logits_output, model_worker_batch)
+         else:
+             next_token_ids = None
+         batch_result = GenerationBatchResult(
+             logits_output=logits_output,
+             can_run_cuda_graph=can_run_cuda_graph,
+             expert_distribution_metrics=out.expert_distribution_metrics,
++            history_kv_selection_scores=out.history_kv_selection_scores,
+         )
+         batch_result.next_token_ids = next_token_ids
+         return batch_result
+@@@@@ DIFF FILE: python/sglang/srt/managers/utils.py
+diff --git a/python/sglang/srt/managers/utils.py b/python/sglang/srt/managers/utils.py
+index ba7773300..563004f95 100644
+--- a/python/sglang/srt/managers/utils.py
++++ b/python/sglang/srt/managers/utils.py
+@@ -41,20 +41,21 @@ class GenerationBatchResult:
+ 
+     # FIXME(lsyin): maybe move to a better place?
+     # sync path: forward stream -> output processor
+     accept_lens: Optional[torch.Tensor] = None
+ 
+     # relay path: forward stream -> next step forward
+     next_draft_input: Optional[EagleDraftInput] = None
+ 
+     # metrics
+     expert_distribution_metrics: Optional[ExpertDistributionMetrics] = None
++    history_kv_selection_scores: Optional[dict] = None
+ 
+     def copy_to_cpu(self, return_logprob: bool):
+         """Copy tensors to CPU in overlap scheduling.
+         Only the tensors which are needed for processing results are copied,
+         e.g., next_token_ids, logits outputs
+         """
+         if return_logprob:
+             if self.logits_output.next_token_logprobs is not None:
+                 self.logits_output.next_token_logprobs = (
+                     self.logits_output.next_token_logprobs.to("cpu", non_blocking=True)
+@@@@@ DIFF FILE: python/sglang/srt/managers/detokenizer_manager.py
+diff --git a/python/sglang/srt/managers/detokenizer_manager.py b/python/sglang/srt/managers/detokenizer_manager.py
+index 568699c4d..22b5953d8 100644
+--- a/python/sglang/srt/managers/detokenizer_manager.py
++++ b/python/sglang/srt/managers/detokenizer_manager.py
+@@ -329,20 +329,22 @@ class DetokenizerManager(MultiHttpWorkerDetokenizerMixin):
+             rids=recv_obj.rids,
+             http_worker_ipcs=recv_obj.http_worker_ipcs,
+             finished_reasons=recv_obj.finished_reasons,
+             output_strs=output_strs,
+             output_ids=recv_obj.output_ids,
+             prompt_tokens=recv_obj.prompt_tokens,
+             reasoning_tokens=recv_obj.reasoning_tokens,
+             completion_tokens=recv_obj.completion_tokens,
+             cached_tokens=recv_obj.cached_tokens,
+             cached_tokens_details=recv_obj.cached_tokens_details,
++            kv_runtime_stats=recv_obj.kv_runtime_stats,
++            kv_memory_reports=recv_obj.kv_memory_reports,
+             spec_verify_ct=recv_obj.spec_verify_ct,
+             spec_accepted_tokens=recv_obj.spec_accepted_tokens,
+             spec_acceptance_histogram=recv_obj.spec_acceptance_histogram,
+             input_token_logprobs_val=recv_obj.input_token_logprobs_val,
+             input_token_logprobs_idx=recv_obj.input_token_logprobs_idx,
+             output_token_logprobs_val=recv_obj.output_token_logprobs_val,
+             output_token_logprobs_idx=recv_obj.output_token_logprobs_idx,
+             input_top_logprobs_val=recv_obj.input_top_logprobs_val,
+             input_top_logprobs_idx=recv_obj.input_top_logprobs_idx,
+             output_top_logprobs_val=recv_obj.output_top_logprobs_val,
+@@@@@ EXPECTED-EMPTY CHECK
+EXISTS: python/sglang/srt/mem_cache/c2kv_pool.py
+EXISTS: python/sglang/srt/mem_cache/c2kv_injection.py
+EXISTS: python/sglang/srt/hardware_backend/npu/attention/ascend_backend.py
+allocator.py
+base_prefix_cache.py
+c2kv_injection.py
+c2kv_pool.py
+cache_init_params.py
+chunk_cache.py
+common.py
+cpp_radix_tree
+evict_policy.py
+flush_cache.py
+gist_utils.py
+hicache_storage.py
+hi_mamba_radix_cache.py
+hiradix_cache.py
+hisparse_memory_pool.py
+history_kv_eviction.py
+hybrid_cache
+mamba_radix_cache.py
+memory_pool_host.py
+memory_pool.py
+@@@@@ BFCL adapter mtimes + ancestry
+2026-09-02 17:02:47.279259300 +0800 /home/zhuyuhan/project/gorilla/berkeley-function-call-leaderboard/c2kv_eval/adapters/bfcl_history_kv_repair.py
+2026-09-02 15:50:39.827259300 +0800 /home/zhuyuhan/project/gorilla/berkeley-function-call-leaderboard/c2kv_eval/scripts/run_bfcl_kv_repair_sweep.sh
+2026-08-19 15:31:08.955259300 +0800 /home/zhuyuhan/project/gorilla/berkeley-function-call-leaderboard/c2kv_eval/adapters/history_step_common.py
+1b6f377 add kv baselines
+1efcc4e fix append
+2e88af8 fix repair
+f183b07 fix comp
+b5ff463 unify rollback and repair
+1efcc4ec IS ancestor of HEAD
+@@@@@ server_7 repair/inject line samples
+21:[2026-09-03 03:52:02] server_args=ServerArgs(model_path='/home/zhuyuhan/project/c2kv/checkpoints/qwen3-4b-agent-history-c2kv-toolcall-npu-v2/checkpoint-1088', tokenizer_path='/home/zhuyuhan/project/c2kv/checkpoints/qwen3-4b-agent-history-c2kv-toolcall-npu-v2/checkpoint-1088', tokenizer_mode='auto', tokenizer_worker_num=1, skip_tokenizer_init=False, load_format='auto', model_loader_extra_config='{}', trust_remote_code=False, context_length=None, is_embedding=False, enable_multimodal=None, revision=None, model_impl='sglang', host='127.0.0.1', port=34670, fastapi_root_path='', grpc_mode=False, skip_server_warmup=False, warmups=None, nccl_port=None, checkpoint_engine_wait_weights_before_ready=False, ssl_keyfile=None, ssl_certfile=None, ssl_ca_certs=None, ssl_keyfile_password=None, enable_ssl_refresh=False, dtype='bfloat16', quantization=None, quantization_param_path=None, kv_cache_dtype='auto', enable_fp32_lm_head=False, modelopt_quant=None, modelopt_checkpoint_restore_path=None, modelopt_checkpoint_save_path=None, modelopt_export_path=None, quantize_and_serve=False, rl_quant_profile=None, mem_fraction_static=0.55, max_running_requests=None, max_queued_requests=None, max_total_tokens=None, chunked_prefill_size=8192, enable_dynamic_chunking=False, max_prefill_tokens=16384, prefill_max_requests=None, schedule_policy='fcfs', enable_priority_scheduling=False, disable_priority_preemption=False, default_priority_value=None, abort_on_priority_when_disabled=False, schedule_low_priority_values_first=False, priority_scheduling_preemption_threshold=10, schedule_conservativeness=1.0, page_size=128, swa_full_tokens_ratio=0.8, disable_hybrid_swa_memory=False, radix_eviction_policy='lru', enable_prefill_delayer=False, prefill_delayer_max_delay_passes=30, prefill_delayer_token_usage_low_watermark=None, prefill_delayer_forward_passes_buckets=None, prefill_delayer_wait_seconds_buckets=None, device='npu', tp_size=1, pp_size=1, pp_max_micro_batch_size=None, pp_async_batch_depth=0, stream_interval=1, stream_response_default_include_usage=False, incremental_streaming_output=False, enable_streaming_session=False, random_seed=411977286, constrained_json_whitespace_pattern=None, constrained_json_disable_any_whitespace=False, watchdog_timeout=300, soft_watchdog_timeout=None, dist_timeout=None, download_dir=None, model_checksum=None, base_gpu_id=0, gpu_id_step=1, sleep_on_idle=False, use_ray=False, custom_sigquit_handler=None, log_level='info', log_level_http=None, log_requests=False, log_requests_level=2, log_requests_format='text', log_requests_target=None, uvicorn_access_log_exclude_prefixes=[], crash_dump_folder=None, show_time_cost=False, enable_metrics=False, enable_mfu_metrics=False, enable_metrics_for_all_schedulers=False, tokenizer_metrics_custom_labels_header='x-custom-labels', tokenizer_metrics_allowed_custom_labels=None, extra_metric_labels=None, bucket_time_to_first_token=None, bucket_inter_token_latency=None, bucket_e2e_request_latency=None, collect_tokens_histogram=False, prompt_tokens_buckets=None, generation_tokens_buckets=None, gc_warning_threshold_secs=0.0, decode_log_interval=40, enable_request_time_stats_logging=False, kv_events_config=None, enable_trace=False, otlp_traces_endpoint='localhost:4317', export_metrics_to_file=False, export_metrics_to_file_dir=None, api_key=None, admin_api_key=None, served_model_name='Qwen/Qwen3-4B-Instruct-2507-FC', weight_version='default', chat_template=None, hf_chat_template_name=None, completion_template=None, file_storage_path='sglang_storage', enable_cache_report=False, reasoning_parser=None, tool_call_parser='qwen', tool_server=None, sampling_defaults='model', dp_size=1, load_balance_method='round_robin', attn_cp_size=1, moe_dp_size=1, dist_init_addr=None, nnodes=1, node_rank=0, json_model_override_args='{}', preferred_sampling_params=None, enable_lora=None, enable_lora_overlap_loading=None, max_lora_rank=None, lora_target_modules=None, lora_paths=None, max_loaded_loras=None, max_loras_per_batch=8, lora_eviction_policy='lru', lora_backend='csgmv', max_lora_chunk_size=16, experts_shared_outer_loras=None, attention_backend='ascend', decode_attention_backend='ascend', prefill_attention_backend='ascend', sampling_backend='pytorch', grammar_backend='xgrammar', mm_attention_backend=None, fp8_gemm_runner_backend='auto', fp4_gemm_runner_backend='auto', nsa_prefill_backend=None, nsa_decode_backend=None, disable_flashinfer_autotune=False, mamba_backend='triton', speculative_algorithm=None, speculative_draft_model_path=None, speculative_draft_model_revision=None, speculative_draft_load_format=None, speculative_num_steps=None, speculative_eagle_topk=None, speculative_num_draft_tokens=None, speculative_accept_threshold_single=1.0, speculative_accept_threshold_acc=1.0, speculative_token_map=None, speculative_attention_mode='prefill', speculative_draft_attention_backend=None, speculative_moe_runner_backend='auto', speculative_moe_a2a_backend=None, speculative_draft_model_quantization=None, speculative_ngram_min_bfs_breadth=1, speculative_ngram_max_bfs_breadth=10, speculative_ngram_match_type='BFS', speculative_ngram_max_trie_depth=18, speculative_ngram_capacity=10000000, enable_multi_layer_eagle=False, ep_size=1, moe_a2a_backend='none', moe_runner_backend='auto', flashinfer_mxfp4_moe_precision='default', enable_flashinfer_allreduce_fusion=False, enforce_disable_flashinfer_allreduce_fusion=False, enable_aiter_allreduce_fusion=False, deepep_mode='auto', ep_num_redundant_experts=0, ep_dispatch_algorithm=None, init_expert_location='trivial', enable_eplb=False, eplb_algorithm='auto', eplb_rebalance_num_iterations=1000, eplb_rebalance_layers_per_chunk=None, eplb_min_rebalancing_utilization_threshold=1.0, expert_distribution_recorder_mode=None, expert_distribution_recorder_buffer_size=1000, enable_expert_distribution_metrics=False, deepep_config=None, moe_dense_tp_size=None, elastic_ep_backend=None, enable_elastic_expert_backup=False, mooncake_ib_device=None, max_mamba_cache_size=None, mamba_ssm_dtype=None, mamba_full_memory_ratio=0.9, mamba_scheduler_strategy='no_buffer', mamba_track_interval=256, linear_attn_backend='triton', linear_attn_decode_backend=None, linear_attn_prefill_backend=None, enable_hierarchical_cache=False, hicache_ratio=2.0, hicache_size=0, hicache_write_policy='write_through', hicache_io_backend='kernel', hicache_mem_layout='layer_first', hicache_storage_backend=None, hicache_storage_prefetch_policy='best_effort', hicache_storage_backend_extra_config=None, enable_hisparse=False, hisparse_config=None, enable_lmcache=False, enable_c2kv=True, c2kv_gist_type='dynamic-interleave', c2kv_gist_param='qkv', c2kv_pool_fraction=0.06, c2kv_max_tokens=65536, kt_weight_path=None, kt_method='AMXINT4', kt_cpuinfer=None, kt_threadpool_count=2, kt_num_gpu_experts=None, kt_max_deferred_experts_per_token=None, dllm_algorithm=None, dllm_algorithm_config=None, enable_double_sparsity=False, ds_channel_config_path=None, ds_heavy_channel_num=32, ds_heavy_token_num=256, ds_heavy_channel_type='qk', ds_sparse_decode_threshold=4096, cpu_offload_gb=0, offload_group_size=-1, offload_num_in_group=1, offload_prefetch_step=1, offload_mode='cpu', multi_item_scoring_delimiter=None, disable_radix_cache=False, cuda_graph_max_bs=64, cuda_graph_bs=[1, 2, 4, 8, 12, 16, 24, 32, 40, 48, 56, 64], disable_cuda_graph=False, disable_cuda_graph_padding=False, enable_profile_cuda_graph=False, enable_cudagraph_gc=False, enable_layerwise_nvtx_marker=False, enable_nccl_nvls=False, enable_symm_mem=False, disable_flashinfer_cutlass_moe_fp4_allgather=False, enable_tokenizer_batch_encode=False, disable_tokenizer_batch_decode=False, disable_outlines_disk_cache=False, disable_custom_all_reduce=True, enable_mscclpp=False, enable_torch_symm_mem=False, pre_warm_nccl=False, disable_overlap_schedule=False, enable_mixed_chunk=False, enable_dp_attention=False, enable_dp_lm_head=False, enable_two_batch_overlap=False, enable_single_batch_overlap=False, tbo_token_distribution_threshold=0.48, enable_torch_compile=False, disable_piecewise_cuda_graph=True, enforce_piecewise_cuda_graph=False, enable_torch_compile_debug_mode=False, torch_compile_max_bs=32, piecewise_cuda_graph_max_tokens=8192, piecewise_cuda_graph_tokens=[4, 8, 12, 16, 20, 24, 28, 32, 48, 64, 80, 96, 112, 128, 144, 160, 176, 192, 208, 224, 240, 256, 288, 320, 352, 384, 416, 448, 480, 512, 576, 640, 704, 768, 832, 896, 960, 1024, 1280, 1536, 1792, 2048, 2304, 2560, 2816, 3072, 3328, 3584, 3840, 4096, 4608, 5120, 5632, 6144, 6656, 7168, 7680, 8192], piecewise_cuda_graph_compiler='eager', torchao_config='', enable_nan_detection=False, enable_p2p_check=False, triton_attention_reduce_in_fp32=False, triton_attention_num_kv_splits=8, triton_attention_split_tile_size=None, num_continuous_decode_steps=1, delete_ckpt_after_loading=False, enable_memory_saver=False, enable_weights_cpu_backup=False, enable_draft_weights_cpu_backup=False, allow_auto_truncate=False, enable_custom_logit_processor=False, flashinfer_mla_disable_ragged=False, disable_shared_experts_fusion=False, disable_chunked_prefix_cache=False, disable_fast_image_processor=False, keep_mm_feature_on_device=False, enable_return_hidden_states=False, enable_return_routed_experts=False, scheduler_recv_interval=1, numa_node=None, enable_deterministic_inference=False, rl_on_policy_target=None, enable_attn_tp_input_scattered=False, gc_threshold=None, enable_nsa_prefill_context_parallel=False, nsa_prefill_cp_mode='round-robin-split', enable_fused_qk_norm_rope=False, enable_precise_embedding_interpolation=False, enable_fused_moe_sum_all_reduce=False, enable_prefill_context_parallel=False, prefill_cp_mode='in-seq-split', enable_dynamic_batch_tokenizer=False, dynamic_batch_tokenizer_batch_size=32, dynamic_batch_tokenizer_batch_timeout=0.002, debug_tensor_dump_output_folder=None, debug_tensor_dump_layers=None, debug_tensor_dump_input_file=None, debug_tensor_dump_inject=False, disaggregation_mode='null', disaggregation_transfer_backend='mooncake', disaggregation_bootstrap_port=8998, disaggregation_ib_device=None, disaggregation_decode_enable_offload_kvcache=False, num_reserved_decode_tokens=512, disaggregation_decode_polling_interval=1, encoder_only=False, language_only=False, encoder_transfer_backend='zmq_to_scheduler', encoder_urls=[], enable_adaptive_dispatch_to_encoder=False, custom_weight_loader=[], weight_loader_disable_mmap=False, remote_instance_weight_loader_seed_instance_ip=None, remote_instance_weight_loader_seed_instance_service_port=None, remote_instance_weight_loader_send_weights_group_ports=None, remote_instance_weight_loader_backend='nccl', remote_instance_weight_loader_start_seed_via_transfer_engine=False, engine_info_bootstrap_port=6789, modelexpress_config=None, enable_pdmux=False, pdmux_config_path=None, sm_group_num=8, enable_broadcast_mm_inputs_process=False, enable_prefix_mm_cache=False, mm_enable_dp_encoder=False, mm_process_config={}, limit_mm_data_per_request=None, enable_mm_global_cache=False, decrypted_config_file=None, decrypted_draft_config_file=None, forward_hooks=None)
+/home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/server_7_34670.log:2654
+/home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/server_6_34660.log:2878
+146:[2026-09-03 03:55:49] Prefill batch, #new-seq: 1, #new-token: 4992, #cached-token: 0, token usage: 0.03, #running-req: 0, #queue-req: 1, c2kv pool: 74/26628 tokens, c2kv usage: 0.00, #c2kv-entry: 5, npu graph: False, input throughput (token/s): 54.92
+151:[2026-09-03 03:55:49] Prefill batch, #new-seq: 1, #new-token: 128, #cached-token: 4947, token usage: 0.03, #running-req: 0, #queue-req: 0, c2kv pool: 74/26628 tokens, c2kv usage: 0.00, #c2kv-entry: 5, npu graph: False, input throughput (token/s): 16761.32
+152:[2026-09-03 03:55:50] Decode batch, #running-req: 1, #token: 5120, token usage: 0.03, c2kv pool: 74/26628 tokens, c2kv usage: 0.00, #c2kv-entry: 5, npu graph: True, gen throughput (token/s): 13.34, #queue-req: 0
+162:[2026-09-03 03:55:51] Prefill batch, #new-seq: 1, #new-token: 4992, #cached-token: 0, token usage: 0.03, #running-req: 0, #queue-req: 1, c2kv pool: 74/26628 tokens, c2kv usage: 0.00, #c2kv-entry: 5, npu graph: False, input throughput (token/s): 69.21
+167:[2026-09-03 03:55:51] Prefill batch, #new-seq: 1, #new-token: 128, #cached-token: 4947, token usage: 0.03, #running-req: 0, #queue-req: 1, c2kv pool: 74/26628 tokens, c2kv usage: 0.00, #c2kv-entry: 5, npu graph: False, input throughput (token/s): 19534.47
+@@@@@ phaseB (09-02) witness for fork features
+append_masked_w2
+c2kv
+d_corr_recompute_w2
+d_corr_replace_all
+d_corr_replace_w2
+d_corr_w2
+full
+kv_repair_report.md
+kv_repair_summary.csv
+kv_repair_summary.json
+logs
+server_6_34660.log
+server_7_34670.log
+/home/zhuyuhan/project/gorilla/bfcl_runs/kv_repair_phaseB_stable52_npu67_20260902_200049/server_6_34660.log
+/home/zhuyuhan/project/gorilla/bfcl_runs/kv_repair_phaseB_stable52_npu67_20260902_200049/server_7_34670.log

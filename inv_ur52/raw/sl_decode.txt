@@ -1,0 +1,83 @@
+** WARNING: connection is not using a post-quantum key exchange algorithm.
+** This session may be vulnerable to "store now, decrypt later" attacks.
+** The server may need to be upgraded. See https://openssh.com/pq.html
+
+Authorized users only. All activities may be monitored and reported.
+130:            status = "invalid_format"
+231:        if candidate_status in {"decode_error", "invalid_format"}
+106:class CandidateDecode:
+108:    status: str
+114:def decode_candidate(decoder: Any, raw_text: str) -> CandidateDecode:
+121:            status="decode_error",
+128:            status = "empty_response"
+130:            status = "invalid_format"
+132:            status = "empty_action"
+135:            status=status,
+142:        status="decoded_action",
+203:    candidate_status: str,
+205:    alignment_status: str,
+231:        if candidate_status in {"decode_error", "invalid_format"}
+248:        "alignment_status": alignment_status,
+251:        "candidate_status": candidate_status,
+253:        "tool_call_parse_success": candidate_status == "decoded_action",
+                candidate_empty_response = decoded.empty_response
+                if source_info is not None:
+                    source_record = source_info["step_record"]
+                    candidate_raw_text = source_record.get("candidate_raw_text") or ""
+                    candidate_action = list(source_record.get("candidate_action") or [])
+                    candidate_status = source_record.get("candidate_status") or "empty_action"
+                    candidate_decode_error = source_record.get("decode_error")
+                    candidate_empty_response = bool(source_record.get("empty_response"))
+
+                step_record = build_step_record(
+                    sample_id=test_entry_id,
+                    turn_idx=turn_idx,
+                    step_idx=step_idx,
+                    global_step=global_step,
+                    candidate_raw_text=candidate_raw_text,
+                    candidate_action=candidate_action,
+                    candidate_status=candidate_status,
+                    reference_step=ref_step,
+                    alignment_status=alignment_status,
+                    executed_action=decoded_to_execute,
+                    state=state_after_step,
+                    decode_error=candidate_decode_error,
+                    empty_response=candidate_empty_response,
+                    execution_error=execution_error,
+                    candidate_assistant_message=(
+                        source_info["assistant_history"]
+                        if source_info is not None
+                        else assistant_history
+                    ),
+                    executed_assistant_message=assistant_history,
+                    execution_results=execution_results,
+                    history_execution_results=execution_results,
+                    roundtrip=roundtrip,
+                    extra={
+                        "repair_triggered": repair_enabled,
+                        "repair_arm": self.arm,
+                        "repair_mode": self.arm if repair_enabled else "c2kv",
+                        "repair_target_history_index": self._repair_target_history_index,
+                        "repair_build_info": repair_build_info,
+                        "repair_raw_text": text if repair_enabled else None,
+                        "repair_action": decoded.action if repair_enabled else None,
+                        "repair_status": decoded.status if repair_enabled else None,
+                    },
+                )
+                if usage.get("kv_memory_report") is not None:
+                    step_record["kv_memory_report"] = usage.get("kv_memory_report")
+                if usage.get("kv_runtime_stats") is not None:
+                    step_record["kv_runtime_stats"] = usage.get("kv_runtime_stats")
+                step_record["oracle_harmful"] = bool(
+                    step_record.get("candidate_action_drift")
+                    or step_record.get("state_drift")
+                )
+                if source_info is not None:
+                    step_record["plain_c2kv_raw_text"] = candidate_raw_text
+                    step_record["plain_c2kv_action"] = candidate_action
+                    step_record["plain_c2kv_status"] = candidate_status
+                    step_record["repair_changed_action"] = not action_matches(
+                        decoded.action,
+                        candidate_action,
+                    )
+                    candidate_ids = self.tokenizer.encode(

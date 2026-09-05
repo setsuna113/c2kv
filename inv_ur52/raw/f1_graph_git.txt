@@ -1,0 +1,109 @@
+** WARNING: connection is not using a post-quantum key exchange algorithm.
+** This session may be vulnerable to "store now, decrypt later" attacks.
+** The server may need to be upgraded. See https://openssh.com/pq.html
+
+Authorized users only. All activities may be monitored and reported.
+@@@@@ (1) new-pattern greps over ALL server logs (top-level + rollback arms)
+--- server_6_34660.log
+102:[2026-09-03 03:55:06] Capture npu graph begin. This can take up to several minutes. avail mem=25.24 GB
+105:[2026-09-03 03:55:13] Capture npu graph end. Time elapsed: 6.26 s. mem usage=0.43 GB. avail mem=24.81 GB.
+   npu_graph_True=959 npu_graph_False=1929 capture_lines=3
+--- server_7_34670.log
+102:[2026-09-03 03:55:08] Capture npu graph begin. This can take up to several minutes. avail mem=25.25 GB
+105:[2026-09-03 03:55:14] Capture npu graph end. Time elapsed: 6.32 s. mem usage=0.43 GB. avail mem=24.82 GB.
+   npu_graph_True=955 npu_graph_False=1709 capture_lines=3
+--- rollback_d1/logs/server_6_34660.log
+102:[2026-09-03 00:55:12] Capture npu graph begin. This can take up to several minutes. avail mem=25.24 GB
+105:[2026-09-03 00:55:19] Capture npu graph end. Time elapsed: 6.32 s. mem usage=0.43 GB. avail mem=24.81 GB.
+   npu_graph_True=884 npu_graph_False=1786 capture_lines=3
+--- rollback_d2/logs/server_7_34670.log
+102:[2026-09-03 00:55:12] Capture npu graph begin. This can take up to several minutes. avail mem=25.25 GB
+105:[2026-09-03 00:55:18] Capture npu graph end. Time elapsed: 6.30 s. mem usage=0.43 GB. avail mem=24.82 GB.
+   npu_graph_True=922 npu_graph_False=1786 capture_lines=3
+--- rollback_d4/logs/server_6_34660.log
+102:[2026-09-03 01:23:19] Capture npu graph begin. This can take up to several minutes. avail mem=25.24 GB
+105:[2026-09-03 01:23:25] Capture npu graph end. Time elapsed: 6.47 s. mem usage=0.43 GB. avail mem=24.81 GB.
+   npu_graph_True=931 npu_graph_False=1783 capture_lines=3
+@@@@@ (2) disable_cuda_graph / attention_backend / graph config per server_args
+--- server_6_34660.log
+log_requests=False
+attention_backend='ascend'
+decode_attention_backend='ascend'
+prefill_attention_backend='ascend'
+c2kv=True
+c2kv_gist_type='dynamic-interleave'
+c2kv_gist_param='qkv'
+c2kv_pool_fraction=0.06
+c2kv_max_tokens=65536
+cuda_graph_max_bs=64
+disable_cuda_graph=False
+disable_piecewise_cuda_graph=True
+--- server_7_34670.log
+log_requests=False
+attention_backend='ascend'
+decode_attention_backend='ascend'
+prefill_attention_backend='ascend'
+c2kv=True
+c2kv_gist_type='dynamic-interleave'
+c2kv_gist_param='qkv'
+c2kv_pool_fraction=0.06
+c2kv_max_tokens=65536
+cuda_graph_max_bs=64
+disable_cuda_graph=False
+disable_piecewise_cuda_graph=True
+--- rollback_d1/logs/server_6_34660.log
+log_requests=False
+attention_backend='ascend'
+decode_attention_backend='ascend'
+prefill_attention_backend='ascend'
+c2kv=True
+c2kv_gist_type='dynamic-interleave'
+c2kv_gist_param='qkv'
+c2kv_pool_fraction=0.01
+c2kv_max_tokens=65536
+cuda_graph_max_bs=64
+disable_cuda_graph=False
+disable_piecewise_cuda_graph=True
+--- rollback_d2/logs/server_7_34670.log
+log_requests=False
+attention_backend='ascend'
+decode_attention_backend='ascend'
+prefill_attention_backend='ascend'
+c2kv=True
+c2kv_gist_type='dynamic-interleave'
+c2kv_gist_param='qkv'
+c2kv_pool_fraction=0.01
+c2kv_max_tokens=65536
+cuda_graph_max_bs=64
+disable_cuda_graph=False
+disable_piecewise_cuda_graph=True
+--- rollback_d4/logs/server_6_34660.log
+log_requests=False
+attention_backend='ascend'
+decode_attention_backend='ascend'
+prefill_attention_backend='ascend'
+c2kv=True
+c2kv_gist_type='dynamic-interleave'
+c2kv_gist_param='qkv'
+c2kv_pool_fraction=0.01
+c2kv_max_tokens=65536
+cuda_graph_max_bs=64
+disable_cuda_graph=False
+disable_piecewise_cuda_graph=True
+@@@@@ (3) GIST_QUERY_PROJECTION / projection toggles anywhere
+4
+@@@@@ (4) kvoffload-sglang: does d42ce815f exist here?
+commit
+d42ce815f fix append
+7de9e8105 add repair
+22fbf3146 fix repair
+f8be45a48 fix repair
+b38755424 add kv repair
+5f5c7e54f fix api
+ M python/sglang/srt/mem_cache/session_aware_cache.py
+* c2kv-sglang-bfcl
+  remotes/origin/HEAD -> origin/c2kv-v0.5.10
+  remotes/origin/c2kv-sglang-bfcl
+  remotes/origin/c2kv-v0.5.10
+origin	https://github.com/Tracy-ZYH/kvoffload-sglang-c2kv.git (fetch)
+origin	https://github.com/Tracy-ZYH/kvoffload-sglang-c2kv.git (push)

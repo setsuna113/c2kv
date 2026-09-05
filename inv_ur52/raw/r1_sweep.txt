@@ -1,0 +1,153 @@
+** WARNING: connection is not using a post-quantum key exchange algorithm.
+** This session may be vulnerable to "store now, decrypt later" attacks.
+** The server may need to be upgraded. See https://openssh.com/pq.html
+
+Authorized users only. All activities may be monitored and reported.
+@@@@@ sweep: server launch block (120-230)
+    cd "${SGLANG_ROOT}"
+    SGLANG_DEBUG_MEMORY_POOL=1 \
+    SGLANG_ENABLE_STRICT_MEM_CHECK_DURING_IDLE=0 \
+    SGLANG_EMPTY_CACHE_INTERVAL=1 \
+    ASCEND_LAUNCH_BLOCKING=1 \
+    TASK_QUEUE_ENABLE=1 \
+    no_proxy='*' \
+    NO_PROXY='*' \
+    http_proxy='' \
+    https_proxy='' \
+    HTTP_PROXY='' \
+    HTTPS_PROXY='' \
+    SGLANG_ENABLE_C2KV_LOGGING="${SGLANG_ENABLE_C2KV_LOGGING:-0}" \
+    C2KV_DEBUG_POSITIONS="${C2KV_DEBUG_POSITIONS:-0}" \
+    C2KV_DEBUG_ASCEND_ATTN="${C2KV_DEBUG_ASCEND_ATTN:-0}" \
+    C2KV_REPAIR_EXTRACT_ATTN_IMPL="${C2KV_REPAIR_EXTRACT_ATTN_IMPL:-prompt_flash}" \
+    ASCEND_RT_VISIBLE_DEVICES="${device}" \
+    exec "${SGLANG_PYTHON}" -m sglang.launch_server \
+      --model-path "${MODEL_PATH}" \
+      --served-model-name "${MODEL_ID}" \
+      --model-impl sglang \
+      --device npu \
+      --attention-backend ascend \
+      --tool-call-parser qwen25 \
+      --enable-c2kv \
+      --c2kv-pool-fraction "${C2KV_POOL_FRACTION}" \
+      --dtype bfloat16 \
+      --mem-fraction-static "${MEM_FRACTION_STATIC:-0.55}" \
+      --host 127.0.0.1 \
+      --port "${port}"
+  ) >"${log}" 2>&1 &
+  SERVER_PIDS+=("$!")
+  log_info "server slot=${slot} device=${device} port=${port} pid=${SERVER_PIDS[-1]} log=${log}"
+}
+
+wait_health() {
+  local port="$1"
+  local deadline=$((SECONDS + 1800))
+  while [ "${SECONDS}" -lt "${deadline}" ]; do
+    if curl --noproxy '*' -fsS "http://127.0.0.1:${port}/health" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 5
+  done
+  echo "Server on port ${port} did not become healthy."
+  return 1
+}
+
+flush_server_cache() {
+  local port="$1"
+  if [ "${FLUSH_CACHE_BETWEEN_ARMS}" != "1" ]; then
+    return 0
+  fi
+  curl --noproxy '*' -fsS -X POST "http://127.0.0.1:${port}/flush_cache?timeout=60" >/dev/null
+}
+
+run_arm() {
+  local arm="$1"
+  local slot="$2"
+  local port="${PORT_LIST[$slot]}"
+  local arm_root="${RUN_ROOT}/${arm}"
+  mkdir -p "${arm_root}/result" "${arm_root}/score" "${arm_root}/logs"
+  log_info "runner start arm=${arm} slot=${slot} port=${port}"
+  flush_server_cache "${port}"
+  (
+    cd "${ROOT}"
+    "${BFCL_PYTHON}" -m c2kv_eval.adapters.bfcl_history_kv_repair \
+      --arm "${arm}" \
+      --category "${CATEGORY}" \
+      --max-examples "${MAX_EXAMPLES}" \
+      --ids-path "${IDS_PATH}" \
+      --reference-details-path "${REFERENCE_DETAILS_PATH}" \
+      --plan-path "${PLAN_PATH}" \
+      --base-url "http://127.0.0.1:${port}" \
+      --model "${MODEL_ID}" \
+      --served-model-name "${MODEL_ID}" \
+      --tokenizer-path "${TOKENIZER_PATH}" \
+      --ratio "${RATIO}" \
+      --checkpoint-interval "${CHECKPOINT_INTERVAL}" \
+      --repair-window "${REPAIR_WINDOW}" \
+      --repair-extract-source "${REPAIR_EXTRACT_SOURCE}" \
+      --c2kv-append-position-frame "${C2KV_APPEND_POSITION_FRAME}" \
+      --repair-trigger "${REPAIR_TRIGGER}" \
+      --max-completion-tokens "${MAX_COMPLETION_TOKENS}" \
+      --result-dir "${arm_root}/result" \
+      --details-path "${arm_root}/logs/details.jsonl" \
+      --metrics-path "${arm_root}/logs/metrics.jsonl" \
+      --summary-path "${arm_root}/logs/summary.json" \
+      --temperature 0 \
+      $([ "${C2KV_DEBUG_POSITION_FRAME}" = "1" ] && printf '%s' '--c2kv-debug-position-frame')
+  ) >"${arm_root}/logs/runner.log" 2>&1
+  log_info "runner done arm=${arm}"
+}
+
+evaluate_arm() {
+  local arm="$1"
+  local arm_root="${RUN_ROOT}/${arm}"
+  local cmd=(
+    "${BFCL_PYTHON}" -m bfcl_eval.eval_checker.eval_runner
+    --model "${MODEL_ID}"
+    --test-category "${CATEGORY}"
+    --result-dir "${arm_root}/result"
+    --score-dir "${arm_root}/score"
+  )
+  if [ "${MAX_EXAMPLES}" -lt 200 ] || [ -n "${IDS_PATH}" ]; then
+    cmd+=(--partial-eval)
+  fi
+  (
+    cd "${ROOT}"
+    exec "${cmd[@]}"
+  ) >"${arm_root}/logs/eval.log" 2>&1
+  log_info "eval done arm=${arm}"
+}
+
+build_plan_if_needed() {
+  if [[ "${USE_REPAIR_PLAN}" != "1" && "${USE_REPAIR_PLAN}" != "true" ]]; then
+@@@@@ scheduler: extract/inject handler names
+2382:    def handle_repair_extract_request(
+2385:        from sglang.srt.managers.io_struct import C2KVRepairExtractReqOutput
+2388:            return C2KVRepairExtractReqOutput(
+2392:            return C2KVRepairExtractReqOutput(
+2397:            return C2KVRepairExtractReqOutput(
+2406:            return C2KVRepairExtractReqOutput(
+2421:            return C2KVRepairExtractReqOutput(
+2429:            return C2KVRepairExtractReqOutput(
+2436:            return C2KVRepairExtractReqOutput(
+2459:            return C2KVRepairExtractReqOutput(
+2493:            return C2KVRepairExtractReqOutput(
+2499:            return C2KVRepairExtractReqOutput(
+2511:            return C2KVRepairExtractReqOutput(
+2535:            return C2KVRepairExtractReqOutput(
+2552:                return C2KVRepairExtractReqOutput(
+2701:            return C2KVRepairExtractReqOutput(
+2722:            return C2KVRepairExtractReqOutput(
+2764:        return C2KVRepairExtractReqOutput(
+3373:    def _inject_c2kv_gist_segment(
+3391:                if not self._inject_c2kv_repair_entry(req, repair_entry):
+2067:    raw_kv_position_mode: str = "rotated"
+2070:    already_rotated: bool = True
+2082:class C2KVRepairExtractReqOutput(BaseReq):
+@@@@@ http endpoints for extract
+1460:@app.post("/v1/c2kv/extract")
+1461:async def v1_c2kv_extract(
+1502:        result = await tokenizer_manager.c2kv_extract(
+1521:@app.post("/v1/c2kv/repair_extract")
+1522:async def v1_c2kv_repair_extract(
+1555:        result = await tokenizer_manager.c2kv_repair_extract(

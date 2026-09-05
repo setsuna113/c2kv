@@ -1729,6 +1729,36 @@ D_INTERVENE_MODES = {
     "d_splice_rep",  # in-place + replace:  S -> G0..G_{k*-1} R_k G_{k+1}.. -> Q
 }
 
+# --- Task D sidecar repair contract (v2, 2026-08-30) --------------------------
+# Sidecar-based D1/D2 arms (d1_arms.py / d2_short_erratum.py).  The driver
+# injects the store + the frozen witness table before generation, mirroring
+# the D_INTERVENE pattern above:
+#   HH.D_CONTRACT_STORE = SidecarStore(model)          # None => built fresh
+#   HH.D_CONTRACT_K     = {qid: k_witness | None}      # prereg v2.2 (absent => median)
+#   HH.D_CONTRACT_WITNESS = {qid: witness entry}       # literal values, D2 erratum
+# Modes are dispatched in _generate_one via a lazy import (d1_arms imports
+# this module at top level, so a module-level back-import would be circular).
+D_CONTRACT_STORE: Any = None
+D_CONTRACT_K: Dict[str, Any] = {}
+D_CONTRACT_WITNESS: Dict[str, Any] = {}
+
+D_CONTRACT_MODES = {
+    "d_oracle_target_only",
+    "d_allblock_sidecar",
+    "d_raw_keepG",
+    "d_raw_replaceG",
+    "d_raw_erratum_tail",
+    "d_raw_SGSR",
+    "d_short_erratum",
+    # D4/D5/D6/D7 runtime arms (d37_arms.py; registry cleared by the driver)
+    "d_reskv_capsule",
+    "d_keepkv_capsule",
+    "d_less_fold",
+    "d_grkv_v_edit",
+    "d_selkv_bias",
+    "d_selkv_count",
+}
+
 
 @torch.inference_mode()
 def _append_precomputed_span_cache(prefix_cache: Any, span_kv: Sequence[Any]) -> Any:
@@ -2986,15 +3016,21 @@ def _generate_one(
     mode: str,
     *,
     return_state: bool = False,
+    prefix_override: Optional[Dict[str, Any]] = None,
 ) -> Any:
     # return_state=True hands (row, prefix) to callers that continue on the
     # live cache (the task-D downstream driver); (row, None) on skip.  The
     # default path is unchanged.
+    # prefix_override: skip the build dispatch entirely and generate from a
+    # caller-supplied prefix dict (the D k-sweep driver shares ONE compression
+    # forward across all k and rebuilds only the splice per k).
     total_start = time.perf_counter()
     if mode in FULL_PROMPT_MODES:
         row = _generate_full_prompt(model, tokenizer, example, args, mode)
         return (row, None) if return_state else row
-    if mode == "history_full":
+    if prefix_override is not None:
+        prefix, skip_reason = prefix_override, None
+    elif mode == "history_full":
         prefix, skip_reason = _build_full_or_truncate_prefix(model, tokenizer, example, args, "full")
     elif mode == "history_all_c2kv4":
         prefix, skip_reason = _build_c2kv_prefix(model, tokenizer, example, args)
@@ -3035,6 +3071,17 @@ def _generate_one(
     elif mode in D_INTERVENE_MODES:
         prefix, skip_reason = _build_d_intervene_prefix(
             model, tokenizer, example, args, mode, D_INTERVENE.get(example.qid)
+        )
+    elif mode in D_CONTRACT_MODES:
+        # lazy import: d1_arms/d2_short_erratum/d37_arms import this module at top level
+        if mode == "d_short_erratum":
+            from d2_short_erratum import build_short_erratum_prefix as _d_contract_builder
+        elif mode.startswith(("d_reskv", "d_keepkv", "d_less", "d_grkv", "d_selkv")):
+            from d37_arms import build_d37_prefix as _d_contract_builder
+        else:
+            from d1_arms import build_d_contract_prefix as _d_contract_builder
+        prefix, skip_reason = _d_contract_builder(
+            model, tokenizer, example, args, mode, D_CONTRACT_STORE
         )
     elif mode in C2KV_MODES:
         prefix, skip_reason = _build_c2kv_prefix(model, tokenizer, example, args)
@@ -3204,6 +3251,7 @@ def _generate_one(
         "d_corr_slice_prefill_sec",
         "d_recompute_prefill_sec",
         "d_gist_input_tokens",
+        "d_contract_info",
         "raw_history_source",
         "raw_history_window",
         "raw_history_docs",
@@ -3593,6 +3641,7 @@ def evaluate(args: argparse.Namespace) -> Dict[str, Any]:
             mode in HYBRID_MODES
             or mode in C2KV_MODES
             or mode in D_INTERVENE_MODES
+            or mode in D_CONTRACT_MODES
             or mode == "c2kv_anchor"
             or mode in DECISION_PREFIX_MODES
             or mode in {

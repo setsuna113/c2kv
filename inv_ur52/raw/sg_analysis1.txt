@@ -1,0 +1,547 @@
+** WARNING: connection is not using a post-quantum key exchange algorithm.
+** This session may be vulnerable to "store now, decrypt later" attacks.
+** The server may need to be upgraded. See https://openssh.com/pq.html
+
+Authorized users only. All activities may be monitored and reported.
+@@@@@ committed qwen3 raw_kv markers
+@@@@@ committed scheduler markers
+3363:        repair_advances_logical_position = entry.repair_mode in {
+3373:        if repair_advances_logical_position:
+3387:            repair_advances_logical_position=repair_advances_logical_position,
+@@@@@ committed io_struct markers
+2054:    repair_mode: str = "d_corr"
+2056:    already_rotated: bool = True
+2069:    repair_mode: str = ""
+@@@@@ committed protocol markers
+500:    c2kv_repair_key_hashes: Optional[List[str]] = None
+501:    c2kv_repair_only_key_hashes: Optional[List[str]] = None
+502:    c2kv_repair_token_start: Optional[int] = None
+521:    c2kv_repair_key_hashes: Optional[List[str]] = None
+522:    c2kv_repair_only_key_hashes: Optional[List[str]] = None
+523:    c2kv_repair_token_start: Optional[int] = None
+1534:    """Request to extract and store raw/neutral repair KV."""
+1543:    repair_mode: str = "d_corr"
+1549:    """Response from C2KV repair KV extraction."""
+1556:    repair_mode: str = ""
+@@@@@@@@@ ANALYZE
+{
+ "probe_append_w2_ep0": {
+  "details_keys": [
+   "c2kv_drift_metrics",
+   "drift_steps",
+   "id",
+   "inference_log",
+   "input_token_count",
+   "kv_repair_arm",
+   "latency",
+   "output_token_count",
+   "repair_segments",
+   "result"
+  ],
+  "result_type": "list",
+  "result_len": 4,
+  "result0": "['I\\'ll help you find the analysis_report.csv file and move it to the \\'archive\\' directory. Let me break this down into steps:\\n\\n1. First, I\\'ll search for the analysis_report.csv file\\n2. Then I\\'ll create an archive directory if it doesn\\'t exist\\n3. Finally, I\\'ll move the file to the archive d",
+  "inference_log_type": "list",
+  "inference_log_keys": "[{'role': 'state_info', 'class_name': 'TwitterAPI', 'content': {'username': 'dr_smith', 'password': 'securePass123', 'authenticated': True, 'tweets': {}, 'comments': {}, 'retweets': {}, 'following_lis",
+  "repair_segments_type": "list",
+  "repair_segment_keys": [
+   "c2kv_correct_repair_wrong",
+   "c2kv_wrong_repair_correct",
+   "c2kv_wrong_repair_wrong",
+   "candidate_action_correct",
+   "candidate_action_drift_per_step",
+   "candidate_detector_features_per_step",
+   "candidate_state_correct",
+   "checkpoint_interval",
+   "detector",
+   "detector_arm",
+   "detector_evaluation_mode",
+   "detector_fn",
+   "detector_fp",
+   "detector_reason",
+   "detector_signal_name",
+   "detector_signal_score",
+   "detector_signal_threshold",
+   "detector_threshold",
+   "detector_tn",
+   "detector_tp",
+   "detector_trigger",
+   "harmful_step_indices",
+   "heuristic_attributes_per_step",
+   "logistic_detector_score",
+   "logistic_detector_threshold",
+   "oracle_harmful_drift_per_step",
+   "oracle_harmful_reason",
+   "oracle_reference_drift_reason",
+   "oracle_reference_drift_segment",
+   "oracle_segment_harmful",
+   "repair_changed_action_count",
+   "repair_changed_first_token_count",
+   "repair_mode",
+   "repair_segment_success",
+   "repair_target_history_index",
+   "repair_trigger_policy",
+   "repair_triggered",
+   "repaired_action_correct",
+   "repaired_state_correct",
+   "rule_detector_max_risk",
+   "rule_detector_reason",
+   "rule_detector_trigger",
+   "sample_id",
+   "segment_length",
+   "segment_start_state_matches_reference",
+   "segment_start_step",
+   "speculative_terminal_discarded",
+   "state_drift_per_step",
+   "threshold_selection_rule",
+   "turn"
+  ],
+  "drift_steps_type": "list",
+  "drift_step_keys": [
+   "action_matches_reference",
+   "alignment_status",
+   "arguments",
+   "assistant_message",
+   "candidate_action",
+   "candidate_action_drift",
+   "candidate_action_matches_reference",
+   "candidate_global_step",
+   "candidate_raw_text",
+   "candidate_response_matches_reference",
+   "candidate_status",
+   "decode_error",
+   "decoded_action",
+   "decoded_written_action",
+   "empty_response",
+   "executed_action",
+   "executed_action_drift",
+   "executed_action_matches_reference",
+   "executed_assistant_message",
+   "execution_error",
+   "execution_results",
+   "execution_success",
+   "global_step",
+   "has_tool_call",
+   "history_execution_results",
+   "id",
+   "oracle_corrected",
+   "oracle_harmful",
+   "oracle_suppressed_extra_action",
+   "reference_action",
+   "reference_global_step",
+   "reference_has_action",
+   "reference_state",
+   "repair_action",
+   "repair_arm",
+   "repair_build_info",
+   "repair_mode",
+   "repair_raw_text",
+   "repair_status",
+   "repair_target_history_index",
+   "repair_triggered",
+   "response_matches_reference",
+   "schema_version",
+   "serialization_decode_error",
+   "serialization_mismatch",
+   "serialized_raw_text",
+   "state",
+   "state_drift",
+   "state_matches_reference",
+   "step",
+   "step_in_turn",
+   "tool_call_parse_success",
+   "tool_name",
+   "turn",
+   "user_turn"
+  ],
+  "c2kv_drift_metrics_keys": [
+   "avg_chat_seconds",
+   "c2kv_correct_repair_wrong",
+   "c2kv_extract_recomputed_tokens",
+   "c2kv_extract_seconds",
+   "c2kv_gist_tokens",
+   "c2kv_wrong_repair_correct",
+   "c2kv_wrong_repair_wrong",
+   "canonical_full_history_tokens",
+   "canonical_history_kv_compression",
+   "chat_cache_report_missing",
+   "chat_cached_tokens",
+   "chat_calls",
+   "chat_completion_tokens",
+   "chat_prompt_tokens",
+   "chat_recomputed_prompt_tokens",
+   "chat_seconds",
+   "decode_tokens",
+   "detector_fn",
+   "detector_fp",
+   "detector_tn",
+   "detector_tp",
+   "detector_trigger_count",
+   "detector_trigger_rate",
+   "episode_e2e_observed_seconds",
+   "errors",
+   "extract_calls",
+   "extract_seconds",
+   "extract_success",
+   "extract_success_rate",
+   "false_negative_count",
+   "first_action_divergence",
+   "first_state_divergence",
+   "fp_recovery_count",
+   "fp_recovery_harm_count",
+   "history_compression_ratio",
+   "history_effective_tokens",
+   "history_original_tokens",
+   "id",
+   "kv_peak_resident_tokens",
+   "kv_runtime_report_missing",
+   "mode",
+   "net_repair_gain",
+   "oracle_harmful_segments",
+   "peak_physical_kv_tokens",
+   "physical_history_kv_tokens",
+   "query_prefill_tokens",
+   "ratio",
+   "recomputed_raw_tokens",
+   "repair_changed_action_count",
+   "repair_changed_action_rate",
+   "repair_changed_first_token_count",
+   "repair_changed_first_token_rate",
+   "repair_extract_recomputed_tokens",
+   "repair_extract_seconds",
+   "repair_kv_tokens",
+   "repair_rate",
+   "repair_segment_success_rate",
+   "repair_segments",
+   "repair_success_count",
+   "repair_success_rate",
+   "repair_success_when_start_state_already_drifted",
+   "repair_success_when_start_state_correct",
+   "repaired_step_count",
+   "speculative_terminal_discarded_count",
+   "tool_execution_seconds",
+   "total_actual_recomputed_tokens",
+   "tp_recovery_attempts",
+   "tp_recovery_success_count"
+  ]
+ },
+ "probe_append_w2_ep0_id": "multi_turn_base_5",
+ "pass_counts": {
+  "full": 52,
+  "c2kv": 52,
+  "rollback_d1": 52,
+  "rollback_d2": 52,
+  "rollback_d4": 52,
+  "replace_w1": 52,
+  "replace_w2": 52,
+  "replace_w4": 52,
+  "replace_all": 52,
+  "recompute_w2": 52,
+  "append_w2": 52,
+  "append_w2_hint": 52,
+  "hint_only": 52,
+  "append_masked_w2": 52
+ },
+ "pass_none_counts": {
+  "full": 0,
+  "c2kv": 0,
+  "rollback_d1": 0,
+  "rollback_d2": 0,
+  "rollback_d4": 0,
+  "replace_w1": 0,
+  "replace_w2": 0,
+  "replace_w4": 0,
+  "replace_all": 0,
+  "recompute_w2": 0,
+  "append_w2": 0,
+  "append_w2_hint": 0,
+  "hint_only": 0,
+  "append_masked_w2": 0
+ },
+ "mcnemar": {
+  "c2kv|append_w2": {
+   "a_pass_b_fail": 0,
+   "a_fail_b_pass": 0,
+   "p_exact2s": 1.0
+  },
+  "hint_only|append_w2": {
+   "a_pass_b_fail": 0,
+   "a_fail_b_pass": 0,
+   "p_exact2s": 1.0
+  },
+  "replace_w2|append_w2": {
+   "a_pass_b_fail": 0,
+   "a_fail_b_pass": 0,
+   "p_exact2s": 1.0
+  },
+  "c2kv|hint_only": {
+   "a_pass_b_fail": 0,
+   "a_fail_b_pass": 0,
+   "p_exact2s": 1.0
+  },
+  "replace_w2|append_masked_w2": {
+   "a_pass_b_fail": 0,
+   "a_fail_b_pass": 0,
+   "p_exact2s": 1.0
+  },
+  "append_w2|append_w2_hint": {
+   "a_pass_b_fail": 0,
+   "a_fail_b_pass": 0,
+   "p_exact2s": 1.0
+  }
+ },
+ "masked_vs_replace_episode_result_identical": 52,
+ "masked_vs_replace_n": 52,
+ "s22_empty": {
+  "full": {
+   "calls": 206,
+   "empty_content": 206,
+   "c2kv_in_log": 0,
+   "finish_reasons": {}
+  },
+  "c2kv": {
+   "calls": 206,
+   "empty_content": 206,
+   "c2kv_in_log": 0,
+   "finish_reasons": {}
+  },
+  "replace_w2": {
+   "calls": 206,
+   "empty_content": 206,
+   "c2kv_in_log": 0,
+   "finish_reasons": {}
+  },
+  "replace_all": {
+   "calls": 206,
+   "empty_content": 206,
+   "c2kv_in_log": 0,
+   "finish_reasons": {}
+  },
+  "recompute_w2": {
+   "calls": 206,
+   "empty_content": 206,
+   "c2kv_in_log": 0,
+   "finish_reasons": {}
+  },
+  "append_w2": {
+   "calls": 206,
+   "empty_content": 206,
+   "c2kv_in_log": 0,
+   "finish_reasons": {}
+  },
+  "append_w2_hint": {
+   "calls": 206,
+   "empty_content": 206,
+   "c2kv_in_log": 0,
+   "finish_reasons": {}
+  },
+  "hint_only": {
+   "calls": 206,
+   "empty_content": 206,
+   "c2kv_in_log": 0,
+   "finish_reasons": {}
+  },
+  "append_masked_w2": {
+   "calls": 206,
+   "empty_content": 206,
+   "c2kv_in_log": 0,
+   "finish_reasons": {}
+  }
+ },
+ "s31_changed": {
+  "full": {
+   "segments": 0,
+   "changed_action": 0,
+   "changed_first_token": 0,
+   "success": 0
+  },
+  "c2kv": {
+   "segments": 0,
+   "changed_action": 0,
+   "changed_first_token": 0,
+   "success": 0
+  },
+  "rollback_d1": {
+   "segments": 0,
+   "changed_action": 0,
+   "changed_first_token": 0,
+   "success": 0
+  },
+  "rollback_d2": {
+   "segments": 0,
+   "changed_action": 0,
+   "changed_first_token": 0,
+   "success": 0
+  },
+  "rollback_d4": {
+   "segments": 0,
+   "changed_action": 0,
+   "changed_first_token": 0,
+   "success": 0
+  },
+  "replace_w1": {
+   "segments": 250,
+   "changed_action": 128,
+   "changed_first_token": 108,
+   "success": 31
+  },
+  "replace_w2": {
+   "segments": 248,
+   "changed_action": 145,
+   "changed_first_token": 118,
+   "success": 78
+  },
+  "replace_w4": {
+   "segments": 252,
+   "changed_action": 151,
+   "changed_first_token": 124,
+   "success": 95
+  },
+  "replace_all": {
+   "segments": 253,
+   "changed_action": 154,
+   "changed_first_token": 125,
+   "success": 106
+  },
+  "recompute_w2": {
+   "segments": 249,
+   "changed_action": 146,
+   "changed_first_token": 120,
+   "success": 76
+  },
+  "append_w2": {
+   "segments": 226,
+   "changed_action": 121,
+   "changed_first_token": 78,
+   "success": 10
+  },
+  "append_w2_hint": {
+   "segments": 227,
+   "changed_action": 116,
+   "changed_first_token": 104,
+   "success": 12
+  },
+  "hint_only": {
+   "segments": 250,
+   "changed_action": 93,
+   "changed_first_token": 90,
+   "success": 12
+  },
+  "append_masked_w2": {
+   "segments": 248,
+   "changed_action": 145,
+   "changed_first_token": 118,
+   "success": 78
+  }
+ },
+ "s43_ratio": {
+  "full": {
+   "eff": 847,
+   "canon": 847,
+   "orig": 847,
+   "phys": 847,
+   "gist": 0,
+   "repair": 0,
+   "eff_over_canon": 1.0
+  },
+  "c2kv": {
+   "eff": 49819,
+   "canon": 154822,
+   "orig": 195480,
+   "phys": 49819,
+   "gist": 49819,
+   "repair": 0,
+   "eff_over_canon": 0.3218
+  },
+  "rollback_d1": {
+   "err": "[Errno 2] No such file or directory: '/home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/rollback_d1/logs/summary.json'"
+  },
+  "rollback_d2": {
+   "err": "[Errno 2] No such file or directory: '/home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/rollback_d2/logs/summary.json'"
+  },
+  "rollback_d4": {
+   "err": "[Errno 2] No such file or directory: '/home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/rollback_d4/logs/summary.json'"
+  },
+  "replace_w1": {
+   "eff": 116521,
+   "canon": 322006,
+   "orig": 398010,
+   "phys": 116521,
+   "gist": 96253,
+   "repair": 20268,
+   "eff_over_canon": 0.3619
+  },
+  "replace_w2": {
+   "eff": 116824,
+   "canon": 294321,
+   "orig": 359110,
+   "phys": 116824,
+   "gist": 82825,
+   "repair": 33999,
+   "eff_over_canon": 0.3969
+  },
+  "replace_w4": {
+   "eff": 133377,
+   "canon": 295841,
+   "orig": 354271,
+   "phys": 133377,
+   "gist": 75525,
+   "repair": 57852,
+   "eff_over_canon": 0.4508
+  },
+  "replace_all": {
+   "eff": 163195,
+   "canon": 293347,
+   "orig": 339364,
+   "phys": 163195,
+   "gist": 60201,
+   "repair": 102994,
+   "eff_over_canon": 0.5563
+  },
+  "recompute_w2": {
+   "eff": 101253,
+   "canon": 298246,
+   "orig": 363593,
+   "phys": 118816,
+   "gist": 83669,
+   "repair": 17136,
+   "eff_over_canon": 0.3395
+  },
+  "append_w2": {
+   "eff": 98322,
+   "canon": 230498,
+   "orig": 294052,
+   "phys": 98322,
+   "gist": 75013,
+   "repair": 23309,
+   "eff_over_canon": 0.4266
+  },
+  "append_w2_hint": {
+   "eff": 148242,
+   "canon": 354103,
+   "orig": 414659,
+   "phys": 148242,
+   "gist": 105134,
+   "repair": 43108,
+   "eff_over_canon": 0.4186
+  },
+  "hint_only": {
+   "eff": 100905,
+   "canon": 314549,
+   "orig": 395747,
+   "phys": 100905,
+   "gist": 100905,
+   "repair": 0,
+   "eff_over_canon": 0.3208
+  },
+  "append_masked_w2": {
+   "eff": 116824,
+   "canon": 294321,
+   "orig": 359110,
+   "phys": 116824,
+   "gist": 82825,
+   "repair": 33999,
+   "eff_over_canon": 0.3969
+  }
+ }
+}

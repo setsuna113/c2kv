@@ -1,0 +1,128 @@
+diff --git a/python/sglang/srt/model_executor/model_runner.py b/python/sglang/srt/model_executor/model_runner.py
+index 0d6e2803c..f04ea8122 100644
+--- a/python/sglang/srt/model_executor/model_runner.py
++++ b/python/sglang/srt/model_executor/model_runner.py
+@@ -19,21 +19,21 @@ import datetime
+ import gc
+ import inspect
+ import json
+ import logging
+ import os
+ import socket
+ import threading
+ import time
+ from collections import defaultdict
+ from dataclasses import dataclass
+-from typing import Callable, List, Optional, Tuple, Union
++from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+ 
+ import torch
+ import torch.distributed as dist
+ from torch import nn
+ 
+ from sglang.jit_kernel.ngram_embedding import update_token_table
+ from sglang.srt.configs import (
+     BailingHybridConfig,
+     FalconH1Config,
+     GraniteMoeHybridConfig,
+@@ -274,20 +274,21 @@ class RankZeroFilter(logging.Filter):
+         if record.levelno == logging.INFO:
+             return self.is_rank_zero
+         return True
+ 
+ 
+ @dataclass
+ class ModelRunnerOutput:
+     logits_output: Union[LogitsProcessorOutput, PPProxyTensors]
+     can_run_graph: bool
+     expert_distribution_metrics: Optional[ExpertDistributionMetrics] = None
++    history_kv_selection_scores: Optional[Dict[int, Dict[str, Any]]] = None
+ 
+ 
+ class ModelRunner(ModelRunnerKVCacheMixin):
+     """ModelRunner runs the forward passes of the models."""
+ 
+     def __init__(
+         self,
+         model_config: ModelConfig,
+         mem_fraction_static: float,
+         gpu_id: int,
+@@ -2744,31 +2745,49 @@ class ModelRunner(ModelRunnerKVCacheMixin):
+         return self.model.generate_gist(
+             input_ids, attention_mask, ratio=compression_ratio
+         )
+ 
+     def forward_c2kv_repair_extract(
+         self,
+         input_ids: torch.Tensor,
+         span_start: int,
+         span_end: int,
+         position_offset: int = 0,
++        repair_position_ids=None,
++        raw_kv_position_mode: str = "rotated",
++        history_kv_method: str = None,
++        history_kv_target_tokens: int = None,
++        history_kv_retention_ratio: float = None,
++        history_kv_recent_window: int = 64,
++        history_kv_kernel_size: int = 5,
++        history_kv_pooling: str = "avgpool",
++        history_kv_h2o_recent_fraction: float = 0.5,
+     ):
+         """Capture ordinary full-prefill KV for a repair span."""
+         if not hasattr(self.model, "generate_raw_repair_kv"):
+             raise ValueError(
+                 f"{type(self.model).__name__} does not support C2KV repair KV extraction."
+             )
+         return self.model.generate_raw_repair_kv(
+             input_ids,
+             span_start=span_start,
+             span_end=span_end,
+             position_offset=position_offset,
++            repair_position_ids=repair_position_ids,
++            raw_kv_position_mode=raw_kv_position_mode,
++            history_kv_method=history_kv_method,
++            history_kv_target_tokens=history_kv_target_tokens,
++            history_kv_retention_ratio=history_kv_retention_ratio,
++            history_kv_recent_window=history_kv_recent_window,
++            history_kv_kernel_size=history_kv_kernel_size,
++            history_kv_pooling=history_kv_pooling,
++            history_kv_h2o_recent_fraction=history_kv_h2o_recent_fraction,
+         )
+ 
+     def get_c2kv_compression_ratio(self, requested_ratio: int) -> int:
+         from sglang.srt.mem_cache.gist_utils import resolve_c2kv_compression_ratio
+ 
+         return resolve_c2kv_compression_ratio(
+             requested_ratio,
+             full_length_pic=getattr(self.model, "full_length_pic", False),
+         )
+ 
+@@ -2905,21 +2924,27 @@ class ModelRunner(ModelRunnerKVCacheMixin):
+             ret = self.forward_idle(forward_batch, pp_proxy_tensors=pp_proxy_tensors)
+         else:
+             raise ValueError(f"Invalid forward mode: {forward_batch.forward_mode}")
+ 
+         if (
+             forward_batch.global_num_tokens_cpu is not None
+             and self.pp_group.is_last_rank
+         ):
+             forward_batch.post_forward_mlp_sync_batch(ret)
+ 
+-        return ModelRunnerOutput(logits_output=ret, can_run_graph=can_run_graph)
++        return ModelRunnerOutput(
++            logits_output=ret,
++            can_run_graph=can_run_graph,
++            history_kv_selection_scores=getattr(
++                forward_batch, "c2kv_history_kv_selection_scores", None
++            ),
++        )
+ 
+     def _preprocess_logits(
+         self, logits_output: LogitsProcessorOutput, sampling_info: SamplingBatchInfo
+     ):
+         # NOTE: In overlap mode, the function update_regex_vocab_mask (in sample)
+         #       was executed after we processed last batch's results.
+ 
+         # Calculate logits bias and apply it to next_token_logits.
+         sampling_info.update_regex_vocab_mask()
+         sampling_info.apply_logits_bias(logits_output.next_token_logits)

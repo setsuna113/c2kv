@@ -1,0 +1,70 @@
+** WARNING: connection is not using a post-quantum key exchange algorithm.
+** This session may be vulnerable to "store now, decrypt later" attacks.
+** The server may need to be upgraded. See https://openssh.com/pq.html
+
+Authorized users only. All activities may be monitored and reported.
+@@@@@ commit meta
+d42ce815f179719f59d0d983092114809d7bda56 | 2026-09-05 00:32:03 +0800 | fix append
+
+@@@@@ commit stat (all files)
+Date:   Sat Sep 5 00:32:03 2026 +0800
+
+    fix append
+
+ python/sglang/srt/entrypoints/http_server.py       |  16 +
+ python/sglang/srt/entrypoints/openai/protocol.py   |  16 +
+ .../sglang/srt/entrypoints/openai/serving_chat.py  | 243 ++++++++-
+ python/sglang/srt/managers/detokenizer_manager.py  |   2 +
+ python/sglang/srt/managers/io_struct.py            |  25 +
+ .../sglang/srt/managers/multi_tokenizer_mixin.py   |  10 +
+ python/sglang/srt/managers/schedule_batch.py       |  77 ++-
+ python/sglang/srt/managers/scheduler.py            | 596 ++++++++++++++++++++-
+ .../managers/scheduler_output_processor_mixin.py   | 162 +++++-
+ python/sglang/srt/managers/session_controller.py   |  11 +-
+ .../srt/managers/tokenizer_communicator_mixin.py   |  20 +-
+ python/sglang/srt/managers/tokenizer_manager.py    |  11 +
+ python/sglang/srt/managers/tp_worker.py            |   3 +
+ python/sglang/srt/managers/utils.py                |   1 +
+ python/sglang/srt/mem_cache/common.py              |  15 +
+ python/sglang/srt/mem_cache/history_kv_eviction.py | 250 +++++++++
+ python/sglang/srt/mem_cache/session_aware_cache.py | 179 +++++++
+ .../srt/model_executor/forward_batch_info.py       |  35 +-
+ python/sglang/srt/model_executor/model_runner.py   |  29 +-
+ python/sglang/srt/models/qwen3.py                  | 409 +++++++++++++-
+ 20 files changed, 2047 insertions(+), 63 deletions(-)
+
+@@@@@ graph-runner c2kv awareness: 7de9e8105 (run-time committed) vs d42ce815f
+--- 7de9e8105 cuda_graph_runner c2kv/gist hits: 0
+--- 7de9e8105 npu_graph_runner c2kv/gist hits: 0
+--- d42ce815f cuda_graph_runner c2kv/gist hits: 0
+--- d42ce815f npu_graph_runner c2kv/gist hits: 0
+
+@@@@@ commit diffs for the 5 files (for local comparison)
+bash: line 17: /tmp/zh/commit_1.diff: No such file or directory
+commit_1.diff (models/qwen3.py):  lines
+commit_2.diff (model_executor/forward_batch_info.py):  lines
+bash: line 18: /tmp/zh/commit_1.diff: No such file or directory
+bash: line 17: /tmp/zh/commit_2.diff: No such file or directory
+bash: line 18: /tmp/zh/commit_2.diff: No such file or directory
+commit_3.diff (model_executor/cuda_graph_runner.py):  lines
+commit_4.diff (hardware_backend/npu/graph_runner/npu_graph_runner.py):  lines
+bash: line 17: /tmp/zh/commit_3.diff: No such file or directory
+bash: line 18: /tmp/zh/commit_3.diff: No such file or directory
+bash: line 17: /tmp/zh/commit_4.diff: No such file or directory
+bash: line 18: /tmp/zh/commit_4.diff: No such file or directory
+bash: line 17: /tmp/zh/commit_5.diff: No such file or directory
+bash: line 18: /tmp/zh/commit_5.diff: No such file or directory
+commit_5.diff (managers/scheduler.py):  lines
+
+@@@@@ ③ payload sizes
+3.8M	/home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/c2kv/logs/details.jsonl
+5.5M	/home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/append_w2/logs/details.jsonl
+6.4M	/home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/replace_w2/logs/details.jsonl
+6.5M	/home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/append_masked_w2/logs/details.jsonl
+5.3M	/home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_v3_stable52_npu67_20260901_002715/sham_mech/logs/details.jsonl
+3.7M	/home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_v3_stable52_npu67_20260901_002715/c2kv/logs/details.jsonl
+/home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/append_w2/score/Qwen_Qwen3-4B-Instruct-2507-FC/multi_turn/:
+BFCL_v4_multi_turn_base_score.json
+
+/home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_v3_stable52_npu67_20260901_002715/sham_mech/score/Qwen_Qwen3-4B-Instruct-2507-FC/multi_turn/:
+BFCL_v4_multi_turn_base_score.json

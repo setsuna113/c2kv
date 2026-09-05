@@ -1,0 +1,106 @@
+        if request.stream:
+            raise ValueError("PERSISTENT_HISTORY_SESSION_STREAMING_UNSUPPORTED")
+        params = request.session_params or {}
+        session_id = params.get("id")
+        if not isinstance(session_id, str) or not session_id:
+            raise ValueError("PERSISTENT_HISTORY_SESSION_ID_REQUIRED")
+        # Store the canonical prompt *before* decode, not raw generated IDs.
+        # Tool parsers may return a structured assistant/tool-call message whose
+        # next-turn chat-template serialization differs from the raw completion.
+        # That completion suffix is deliberately discarded from the physical
+        # session cache and is re-prefilled in its canonical serialized form.
+        previous = self._persistent_history_sessions.get(session_id)
+        hint = request.c2kv_kv_memory_hint
+        config = hint.get("history_kv_eviction") if isinstance(hint, dict) else None
+        if previous is None:
+            if isinstance(config, dict):
+                config["persistent_session"] = True
+                config["persistent_continuation"] = False
+            if isinstance(hint, dict):
+                hint["persistent_session_logical_prefix_tokens"] = 0
+                hint["persistent_session_delta_tokens"] = len(full_prompt_ids)
+            params["drop_previous_output"] = True
+            return full_prompt_ids, session_id, full_prompt_ids
+
+        common = min(len(previous), len(full_prompt_ids))
+        if full_prompt_ids[:common] != previous[:common] or len(full_prompt_ids) < len(previous):
+            mismatch = next(
+                (
+                    i
+                    for i, (left, right) in enumerate(zip(previous, full_prompt_ids))
+                    if left != right
+                ),
+                common,
+            )
+            raise ValueError(
+                "PERSISTENT_HISTORY_SESSION_PREFIX_MISMATCH: "
+                f"session_id={session_id}, previous_tokens={len(previous)}, "
+                f"full_prompt_tokens={len(full_prompt_ids)}, mismatch_at={mismatch}"
+            )
+
+        delta = full_prompt_ids[len(previous) :]
+        # Session.create_req must not append last_req.output_ids. Those raw
+        # decode tokens are not necessarily the canonical serialization of an
+        # OpenAI tool call; the delta above contains that serialization.
+        params["drop_previous_output"] = True
+        if isinstance(hint, dict):
+            hint["persistent_session_logical_prefix_tokens"] = len(previous)
+            hint["persistent_session_delta_tokens"] = len(delta)
+        if isinstance(config, dict):
+            history_end = int(config.get("history_end") or 0)
+            history_start = int(config.get("history_start") or 0)
+            if not (history_start <= history_end and history_end >= len(previous)):
+                raise ValueError(
+                    "PERSISTENT_HISTORY_SESSION_BOUNDARY_MISMATCH: "
+                    f"history_start={history_start}, history_end={history_end}, "
+                    f"previous_tokens={len(previous)}"
+                )
+            config["persistent_session"] = True
+            config["persistent_continuation"] = True
+            config["persistent_protected_prefix_tokens"] = history_start
+            config["persistent_delta_history_tokens"] = history_end - len(previous)
+            config["persistent_canonical_prompt_tokens"] = len(full_prompt_ids)
+        return delta, session_id, full_prompt_ids
+
+    def _commit_persistent_history_session(
+        self,
+        adapted_request: GenerateReqInput,
+        ret: List[Dict[str, Any]],
+    ) -> None:
+        session_id = getattr(adapted_request, "_persistent_history_session_id", None)
+        canonical_prompt_ids = getattr(
+            adapted_request, "_persistent_history_canonical_prompt_ids", None
+        )
+        if not session_id or not isinstance(canonical_prompt_ids, list) or not ret:
+            return
+        output_ids = ret[0].get("output_ids") or []
+        if not isinstance(output_ids, list):
+            raise ValueError("PERSISTENT_HISTORY_SESSION_OUTPUT_IDS_MISSING")
+        # The next request is compared against the pre-decode canonical prompt.
+        # Raw output IDs are never assumed to be equivalent to the API's
+        # structured assistant/tool-call serialization.
+        self._persistent_history_sessions[session_id] = list(canonical_prompt_ids)
+        ret[0].setdefault("meta_info", {})["persistent_history_session"] = {
+            "session_id": session_id,
+            "canonical_prompt_tokens": len(canonical_prompt_ids),
+            "generated_tokens": len(output_ids),
+            "next_prefix_tokens": len(canonical_prompt_ids),
+            "generated_suffix_reprefill_required": True,
+        }
+
+    def _handle_last_assistant_message(
+        self,
+        messages: List[Dict[str, Any]],
+        request: ChatCompletionRequest,
+    ) -> tuple[List[Dict[str, Any]], Optional[str]]:
+        """
+@@@CAP
+51:from sglang.srt.model_executor.forward_batch_info import ForwardBatch, PPProxyTensors
+164:    def replay(
+166:        forward_batch: ForwardBatch,
+171:            self.replay_prepare(forward_batch, pp_proxy_tensors)
+174:            self.buffers.input_ids[: self.raw_num_token].copy_(forward_batch.input_ids)
+175:            self.buffers.positions[: self.raw_num_token].copy_(forward_batch.positions)
+181:            if forward_batch.forward_mode.is_target_verify():
+182:                seq_lens_cpu = forward_batch.seq_lens.cpu() + self.num_tokens_per_bs
+185:                seq_lens = forward_batch.seq_lens.cpu().tolist() + [0] * (

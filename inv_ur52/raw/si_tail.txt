@@ -1,0 +1,47 @@
+** WARNING: connection is not using a post-quantum key exchange algorithm.
+** This session may be vulnerable to "store now, decrypt later" attacks.
+** The server may need to be upgraded. See https://openssh.com/pq.html
+
+Authorized users only. All activities may be monitored and reported.
+@@@@@ per-entry score location probe
+/home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/append_w2/score/Qwen_Qwen3-4B-Instruct-2507-FC/multi_turn/BFCL_v4_multi_turn_base_score.json
+--- /home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/append_w2/score/Qwen_Qwen3-4B-Instruct-2507-FC/multi_turn/BFCL_v4_multi_turn_base_score.json
+{"accuracy": 0.11538461538461539, "correct_count": 6, "total_count": 52}
+{"id": "multi_turn_base_5", "model_name": "Qwen_Qwen3-4B-Instruct-2507-FC", "test_category": "multi_turn_base", "valid": false, "error": {"error_message": "Model response list is empty for turn 3", "error_type": "multi_turn:empty_turn_model_response", "details": {"execution_result": [{"model": [["{\"matches\": [\"./project/analysis_report.csv\"]}"], ["{\"current_working_directory\": \"project\"}"], ["{\"result\": \"'analysis_report.csv' moved to 'archive/analysis_report.csv'\"}"]], "ground_truth": ["{\"current_working_dir
+@@@@@ phaseB summary
+method,bfcl_accuracy,correct_count,num_examples,errors,chat_calls,extract_calls,extract_success_rate,turn_joint_pass_rate,executed_action_drift_rate,state_drift_rate,serialization_mismatch_rate,repair_segments,oracle_harmful_segments,detector_trigger_count,detector_trigger_rate,repair_rate,repair_success_count,repair_success_rate,repair_segment_success_rate,c2kv_wrong_repair_correct,c2kv_wrong_repair_wrong,c2kv_correct_repair_wrong,net_repair_gain,repaired_step_count,repair_changed_action_count,repair_changed_action_rate,repair_changed_first_token_count,repair_changed_first_token_rate,repair_success_when_start_state_correct,repair_success_when_start_state_already_drifted,full_history_kv_tokens,physical_history_kv_tokens,c2kv_gist_tokens,repair_kv_tokens,recomputed_raw_tokens,legacy_history_original_tokens,legacy_history_effective_tokens,history_kv_compression,peak_physical_kv_tokens,peak_kv_compression,c2kv_extract_recomputed_tokens,repair_extract_recomputed_tokens,query_prefill_tokens,query_prefill_tokens_source,query_cache_report_missing,kv_runtime_report_missing,decode_tokens,total_actual_recomputed_tokens,e2e_token_work_ratio,chat_seconds,extract_seconds,c2kv_extract_seconds,repair_extract_seconds,tool_execution_seconds,episode_e2e_observed_seconds,avg_episode_e2e_observed_seconds,plan_path,plan_build_mode,plan_build_seconds,plan_build_tokenization_tokens,plan_n_qids,plan_budget_gate_passed,plan_neutrality_gate_passed,episode_e2e_observed_with_plan_seconds,avg_episode_e2e_observed_with_plan_seconds,avg_chat_latency_sec,avg_chat_latency_sec_note,ttft_sec,ttft_note,detail_step_rows
+full,1.0,52,52,0,490,0,,1.0,0.0,0.0,0.0,0,0,0,,,0,,,0,0,0,0,0,0,,0,,,,847,847,0,0,0,847,847,1.0,,,0,0,78555,sglang_runtime_cached_tokens,8,490,26385,104940,1.0,537.1888,0.0,0.0,0.0,0.11629999999999999,537.3051000000002,10.332790384615388,,,0.0,0,,,,537.3051000000002,10.332790384615388,1.1196249999999999,chat/completions only; excludes extract and tool execution,,unavailable: server response does not expose first-token timestamp,490
+c2kv,0.17307692307692307,9,52,0,481,2569,1.0,0.3932038834951456,0.9423076923076923,0.7115384615384616,0.0,0,0,0,,,0,,,0,0,0,0,0,0,,0,,,,154822,49819,49819,0,0,195480,49819,3.1076898372107027,,,195480,0,40319,sglang_runtime_cached_tokens,356,481,23703,259502,0.4043899468982898,805.4785,87.11299999999999,87.11299999999999,0.0,0.1164,892.7074,17.16745,,,0.0,0,,,,892.7074,17.16745,1.6431307692307693,chat/completions only; excludes extract and tool execution,,unavailable: server response does not expose first-token timestamp,481
+d_corr_w2,0.11538461538461539,6,52,0,700,4419,1.0,0.441747572815534,0.9038461538461539,0.7115384615384616,0.0,226,133,133,0.588495575221239,0.588495575221239,10,0.07518796992481203,0.07518796992481203,22,118,51,-29,287,121,0.42160278745644597,78,0.27177700348432055,0.08020050125313283,0.014563106796116505,230498,98322,75013,23309,0,294052,98322,2.34431765016985,,,294052,2195361,40319,sglang_runtime_cached_tokens,575,700,34978,2564710,0.040916906784782686,1436.2279,256.60279999999995,118.49520000000001,138.10739999999998,0.17999999999999997,1693.0113,32.55790961538462,,,0.0,0,,,,1693.0113,32.55790961538462,2.0091634615384617,chat/completions only; excludes extract and tool execution,,unavailable: server response does not expose first-token timestamp,413
+d_corr_replace_w2,0.6730769230769231,35,52,0,739,4571,1.0,0.8009708737864077,0.40384615384615385,0.25,0.0,248,124,124,0.5,0.5,78,0.6290322580645161,0.6290322580645161,110,49,23,87,260,145,0.5576923076923077,118,0.45384615384615384,0.6545698924731184,0.05952380952380952,294321,116824,82825,33999,0,359110,116824,2.5193538998835856,,,325111,2465052,40319,sglang_runtime_cached_tokens,614,739,38230,2868712,0.036580876714009634,1358.9429000000005,224.771,98.79439999999998,125.97670000000002,0.1535,1583.8671999999997,30.458984615384608,,,0.0,0,,,,1583.8671999999997,30.458984615384608,1.7952634615384615,chat/completions only; excludes extract and tool execution,,unavailable: server response does not expose first-token timestamp,479
+append_masked_w2,0.6730769230769231,35,52,0,739,4571,1.0,0.8009708737864077,0.40384615384615385,0.25,0.0,248,124,124,0.5,0.5,78,0.6290322580645161,0.6290322580645161,110,49,23,87,260,145,0.5576923076923077,118,0.45384615384615384,0.6545698924731184,0.05952380952380952,294321,116824,82825,33999,0,359110,116824,2.5193538998835856,,,325111,2465052,40319,sglang_runtime_cached_tokens,614,739,38230,2868712,0.036580876714009634,1524.8779,258.84219999999993,127.5401,131.3018,0.16949999999999993,1783.8896,34.30556923076923,,,0.0,0,,,,1783.8896,34.30556923076923,1.9991480769230774,chat/completions only; excludes extract and tool execution,,unavailable: server response does not expose first-token timestamp,479
+d_corr_recompute_w2,0.75,39,52,0,740,4382,1.0,0.7961165048543689,0.36538461538461536,0.25,0.0,249,125,125,0.5020080321285141,0.5020080321285141,76,0.608,0.608,107,50,23,84,258,146,0.5658914728682171,120,0.46511627906976744,0.6466666666666666,0.052083333333333336,298246,118816,83669,17136,18011,363593,101253,2.510150148128198,,,328446,1223191,40319,sglang_runtime_cached_tokens,615,740,38679,1630635,0.06435529716950758,1446.2052,175.07950000000002,109.84570000000002,65.2343,0.18590000000000007,1621.4708,31.18213076923077,,,0.0,0,,,,1621.4708,31.18213076923077,1.9066288461538459,chat/completions only; excludes extract and tool execution,,unavailable: server response does not expose first-token timestamp,482
+d_corr_replace_all,0.9615384615384616,50,52,0,730,3134,1.0,0.9514563106796117,0.17307692307692307,0.0,0.0,253,116,116,0.45849802371541504,0.45849802371541504,106,0.9137931034482759,0.9137931034482759,146,11,0,146,242,154,0.6363636363636364,125,0.5165289256198347,0.9137931034482759,,293347,163195,60201,102994,0,339364,163195,1.7975244339593737,,,236370,1147249,40319,sglang_runtime_cached_tokens,605,730,37777,1461715,0.0717923808676794,1412.7909000000006,187.53119999999998,123.7689,63.76259999999998,0.1772,1600.4997000000003,30.77884038461539,,,0.0,0,,,,1600.4997000000003,30.77884038461539,1.8874250000000006,chat/completions only; excludes extract and tool execution,,unavailable: server response does not expose first-token timestamp,488
+# BFCL History C2KV KV-Repair Sweep
+
+| Method | BFCL Acc | Correct | Turn Joint | Executed Drift | State Drift | Repair Attempts | Repair Success | Wrong -> Correct | Wrong -> Wrong | Correct -> Wrong | Net Gain | Changed Action | Repair KV | Recomputed Raw | KV Compression | E2E Work | Avg E2E s |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| full | 1.0000 | 52 | 1.0000 | 0.0000 | 0.0000 | 0 | - | 0 | 0 | 0 | 0 | - | 0 | 0 | 1.0000x | 1.0000x | 10.3328 |
+| c2kv | 0.1731 | 9 | 0.3932 | 0.9423 | 0.7115 | 0 | - | 0 | 0 | 0 | 0 | - | 0 | 0 | 3.1077x | 0.4044x | 17.1674 |
+| d_corr_w2 | 0.1154 | 6 | 0.4417 | 0.9038 | 0.7115 | 133 | 0.0752 | 22 | 118 | 51 | -29 | 0.4216 | 23309 | 0 | 2.3443x | 0.0409x | 32.5579 |
+| d_corr_replace_w2 | 0.6731 | 35 | 0.8010 | 0.4038 | 0.2500 | 124 | 0.6290 | 110 | 49 | 23 | 87 | 0.5577 | 33999 | 0 | 2.5194x | 0.0366x | 30.4590 |
+| append_masked_w2 | 0.6731 | 35 | 0.8010 | 0.4038 | 0.2500 | 124 | 0.6290 | 110 | 49 | 23 | 87 | 0.5577 | 33999 | 0 | 2.5194x | 0.0366x | 34.3056 |
+| d_corr_recompute_w2 | 0.7500 | 39 | 0.7961 | 0.3654 | 0.2500 | 125 | 0.6080 | 107 | 50 | 23 | 84 | 0.5659 | 17136 | 18011 | 2.5102x | 0.0644x | 31.1821 |
+| d_corr_replace_all | 0.9615 | 50 | 0.9515 | 0.1731 | 0.0000 | 116 | 0.9138 | 146 | 11 | 0 | 146 | 0.6364 | 102994 | 0 | 1.7975x | 0.0718x | 30.7788 |
+
+## Automatic Readout
+
+- W2_gain_over_W1: unavailable
+- W4_gain_over_W2: unavailable
+- Replace_gain_over_Append: +116
+- Hint_gain_over_Corr: unavailable
+- OracleHint_gain_over_NormalHint: unavailable
+- RawAllReplace_gap_to_Full: unavailable
+- RawAllReplaceDirect_gap_to_Full: unavailable
+- CorrAllAppend_gap_to_RawAllReplace: unavailable
+@@@@@ v3 sham_mech dir listing
+details.jsonl
+eval.log
+metrics.jsonl
+runner.log
+summary.json

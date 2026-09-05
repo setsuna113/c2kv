@@ -1,0 +1,224 @@
+** WARNING: connection is not using a post-quantum key exchange algorithm.
+** This session may be vulnerable to "store now, decrypt later" attacks.
+** The server may need to be upgraded. See https://openssh.com/pq.html
+
+Authorized users only. All activities may be monitored and reported.
+@@@@@ _arm_config + arm definitions
+65:    "hint_only",
+69:    "d_corr_w2",
+71:    "d_corr_w2_hint",
+72:    "d_corr_w2_oracle_location_hint",
+73:    "d_corr_replace_w1",
+74:    "d_corr_replace_w2",
+75:    "d_corr_replace_w4",
+76:    "d_corr_replace_all",
+77:    "append_masked_w2",
+78:    "d_corr_recompute",
+79:    "d_corr_recompute_w2",
+1852:    def _arm_config(self, effective_arm: str) -> dict[str, Any]:
+1862:        elif effective_arm == "hint_only":
+1868:        elif effective_arm in {"d_corr_w2", "d_corr_w2_hint"}:
+1874:        elif effective_arm == "d_corr_w2_oracle_location_hint":
+1885:        elif effective_arm == "d_corr_replace_w1":
+1891:        elif effective_arm == "d_corr_replace_w2":
+1897:        elif effective_arm == "append_masked_w2":
+1899:                "operation": "append_masked",
+1903:        elif effective_arm == "d_corr_replace_w4":
+1909:        elif effective_arm == "d_corr_replace_all":
+1915:        elif effective_arm in {"d_corr_recompute", "d_corr_recompute_w2"}:
+2051:        config = self._arm_config(effective_arm)
+2062:            in {"d_corr_replace_all", "raw_all_replace", "raw_all_replace_direct"}
+2178:            if config["operation"] == "append_masked" and index in target_set:
+2310:        elif config["operation"] in {"replace", "append_masked"}:
+2325:                    if config["operation"] == "append_masked":
+2329:                                "mode": "raw_append_masked",
+2434:        if config["operation"] in {"append", "append_masked"} and append_repair_keys:
+2435:            if config["operation"] == "append_masked":
+2540:            "hint_only",
+2544:            "d_corr_w2",
+2546:            "d_corr_w2_hint",
+2547:            "d_corr_w2_oracle_location_hint",
+2548:            "d_corr_replace_w1",
+2549:            "d_corr_replace_w2",
+2550:            "d_corr_replace_w4",
+2551:            "d_corr_replace_all",
+2552:            "append_masked_w2",
+2553:            "d_corr_recompute",
+
+@@@@@ already_rotated / raw_kv_position_mode / pre_rope in adapter
+1540:        raw_kv_position_mode: str = "rotated",
+1611:                    "raw_kv_position_mode": raw_kv_position_mode,
+2195:            raw_kv_position_mode = "rotated"
+2212:                        "already-rotated native-frame K."
+2231:                    raw_kv_position_mode = "pre_rope"
+2246:                raw_kv_position_mode=raw_kv_position_mode,
+2298:                    "raw_kv_position_mode": raw_kv_position_mode,
+2299:                    "already_rotated": raw_kv_position_mode != "pre_rope",
+
+@@@@@ c2kv_use_gist_projection
+2161:                    "c2kv_use_gist_projection": True,
+2347:                                "c2kv_use_gist_projection": True,
+2409:                    "c2kv_use_gist_projection": True,
+2445:                        "c2kv_use_gist_projection": True,
+
+@@@@@ APPEND_POSITION_FRAME
+226:        self.c2kv_debug_position_frame = bool(
+227:            getattr(args, "c2kv_debug_position_frame", False)
+229:        self.c2kv_append_position_frame = str(
+230:            getattr(args, "c2kv_append_position_frame", "wrapper") or "wrapper"
+2192:                and self.c2kv_append_position_frame == "wrapper"
+2510:            "position_frame_debug_enabled": self.c2kv_debug_position_frame,
+3609:        default=os.environ.get("C2KV_APPEND_POSITION_FRAME", "wrapper"),
+
+@@@@@ repair_trigger / always
+147:        self.repair_trigger = args.repair_trigger
+361:        triggered = [seg for seg in segments if seg.get("repair_triggered")]
+2566:        if self.repair_trigger != "oracle":
+2567:            return self.repair_trigger == "always"
+2804:                        "repair_triggered": repair_enabled,
+2997:                repair_triggered = bool(detector_debug.get("detector_trigger"))
+2998:                if self.repair_trigger == "always":
+2999:                    repair_triggered = True
+3004:                        "detector_reason": "legacy_repair_trigger_always",
+3008:                    detector_trigger=repair_triggered,
+3037:                    "detector_trigger": repair_triggered,
+3077:                    "repair_triggered": repair_triggered,
+3078:                    "repair_trigger_policy": self.repair_trigger,
+3079:                    "repair_mode": self.arm if repair_triggered else "c2kv",
+3119:                if not repair_triggered:
+3157:                    step_record["detector_trigger"] = repair_triggered
+3158:                    step_record["repair_triggered"] = True
+
+@@@@@ details.jsonl writer: repair_segments / repair_build_info / history_layout / wrapper_native
+233:        self._last_repair_build_info: dict[str, Any] = {}
+2001:        self._last_repair_build_info = {}
+2017:                "source": "bfcl_canonical_history_layout",
+2028:                "source": "bfcl_canonical_history_layout",
+2122:            self._last_repair_build_info = {
+2153:                "source": "bfcl_canonical_history_layout",
+2171:        history_layout_debug: list[dict[str, Any]] = []
+2326:                        history_layout_debug.append(
+2332:                                "native_position_range": [starts[index], ends[index]],
+2333:                                "wrapper_position_range": [
+2350:                        history_layout_debug.append(
+2356:                                "native_position_range": [starts[index], ends[index]],
+2357:                                "wrapper_position_range": [
+2372:                    history_layout_debug.append(
+2382:                            "native_position_range": [starts[index], ends[index]],
+2383:                            "wrapper_position_range": [
+2412:            history_layout_debug.append(
+2418:                    "native_position_range": [starts[index], ends[index]],
+2419:                    "wrapper_position_range": [
+2487:        self._last_repair_build_info = {
+2509:            "history_layout": history_layout_debug,
+2513:            "wrapper_native_length_delta": (
+2516:            "wrapper_native_length_ratio": (
+2526:        if repair_tokens != self._last_repair_build_info["repair_tokens_injected"]:
+2532:            "source": "bfcl_canonical_history_layout",
+
+@@@@@ metrics writer: repair_changed_action
+387:            int(seg.get("repair_changed_action_count") or 0) for seg in segments
+390:            int(seg.get("repair_changed_first_token_count") or 0) for seg in segments
+414:            "repair_changed_action_count": changed_action,
+415:            "repair_changed_action_rate": (
+418:            "repair_changed_first_token_count": changed_first,
+419:            "repair_changed_first_token_rate": (
+433:            "speculative_terminal_discarded_count": sum(
+434:                int(bool(seg.get("speculative_terminal_discarded")))
+2826:                    step_record["repair_changed_action"] = not action_matches(
+2844:                    step_record["repair_changed_first_token"] = (
+3103:                    "speculative_terminal_discarded": False,
+3108:                    "repair_changed_action_count": 0,
+
+@@@@@ arm config body (context around first _arm_config def)
+    def _arm_config(self, effective_arm: str) -> dict[str, Any]:
+        config = {
+            "operation": "append",
+            "repair_kind": "none",
+            "window": self._repair_window_arg,
+            "hint": False,
+            "oracle_location_hint": False,
+        }
+        if effective_arm in {"c2kv", "d_sham_mech"}:
+            config["repair_kind"] = "none"
+        elif effective_arm == "hint_only":
+            config.update({"repair_kind": "none", "hint": True})
+        elif effective_arm == "d_sham_neutral":
+            config.update({"repair_kind": "neutral", "window": "1"})
+        elif effective_arm in {"d_corr", "d_corr_w1"}:
+            config.update({"repair_kind": "raw", "window": "1"})
+        elif effective_arm in {"d_corr_w2", "d_corr_w2_hint"}:
+            config.update({
+                "repair_kind": "raw",
+                "window": "2",
+                "hint": effective_arm.endswith("_hint"),
+            })
+        elif effective_arm == "d_corr_w2_oracle_location_hint":
+            config.update({
+                "repair_kind": "raw",
+                "window": "2",
+                "hint": True,
+                "oracle_location_hint": True,
+            })
+        elif effective_arm == "d_corr_w4":
+            config.update({"repair_kind": "raw", "window": "4"})
+        elif effective_arm == "d_corr_all":
+            config.update({"repair_kind": "raw", "window": "all"})
+        elif effective_arm == "d_corr_replace_w1":
+            config.update({
+                "operation": "replace",
+                "repair_kind": "raw",
+                "window": "1",
+            })
+        elif effective_arm == "d_corr_replace_w2":
+            config.update({
+                "operation": "replace",
+                "repair_kind": "raw",
+                "window": "2",
+            })
+        elif effective_arm == "append_masked_w2":
+            config.update({
+                "operation": "append_masked",
+                "repair_kind": "raw",
+                "window": "2",
+            })
+        elif effective_arm == "d_corr_replace_w4":
+            config.update({
+                "operation": "replace",
+                "repair_kind": "raw",
+                "window": "4",
+            })
+        elif effective_arm == "d_corr_replace_all":
+            config.update({
+                "operation": "replace",
+                "repair_kind": "raw",
+                "window": "all",
+            })
+        elif effective_arm in {"d_corr_recompute", "d_corr_recompute_w2"}:
+            config.update({
+                "operation": "recompute",
+                "repair_kind": "raw",
+                "window": "2",
+            })
+        elif effective_arm in {"raw_all_replace", "raw_all_replace_direct"}:
+            config.update({
+                "operation": "replace",
+                "repair_kind": "raw",
+                "window": "all",
+            })
+        else:
+            raise RuntimeError(f"Unsupported KV repair arm: {effective_arm}")
+        return config
+
+    @staticmethod
+    def _ordered_roles(unit: Sequence[dict[str, Any]]) -> list[str]:
+        roles: list[str] = []
+        for message in unit:
+            role = str(message.get("role") or "")
+            if role and role not in roles:
+                roles.append(role)
+        return roles
+
+    def _recent_repair_indices(
+        self,
+        *,

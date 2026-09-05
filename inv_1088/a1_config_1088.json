@@ -1,0 +1,94 @@
+{
+ "peak_lr": {
+  "v": "5e-07",
+  "src": "trainer_state.json log_history (peak at step 6) + scheduler.pt base_lrs=[5e-7,5e-7]"
+ },
+ "warmup": {
+  "v": "5 steps",
+  "src": "training_args.bin warmup_steps=5.0; lr=0 at step1, peak 5e-7 at step6"
+ },
+ "scheduler": {
+  "v": "cosine (to ~0; last lr 1.05e-12)",
+  "src": "training_args.bin lr_scheduler_type=COSINE + log_history tail"
+ },
+ "world_size": {
+  "v": 4,
+  "src": "rng_state_0..3.pth (4 files) in checkpoint-1088; double-confirmed by step math: 4349 records -> ceil(4349/4)=1088 steps/rank"
+ },
+ "eff_batch": {
+  "v": 4,
+  "src": "per_device_train_batch_size=1 x grad_accum=1 x 4 procs (training_args.bin)"
+ },
+ "steps": {
+  "v": "global_step=1088 = max_steps; training_args.bin max_steps=-1 => natural 1-epoch end",
+  "src": "trainer_state.json + training_args.bin"
+ },
+ "epochs": {
+  "v": "1.0",
+  "src": "trainer_state.json epoch=1.0; training_args num_train_epochs=1.0"
+ },
+ "num_examples": {
+  "v": 4349,
+  "src": "RECONSTRUCTION: agent-llm-traces v1, split_seed=42, eval_ratio=0.1, max_samples_per_session=4, require_tool_call=True -> 4349 train records = ceil(4349/4)=1088 steps/rank"
+ },
+ "require_tool_call": {
+  "v": "True (OVERRIDE of default False)",
+  "src": "count test: True->4349 records->1088 steps matches trainer_state exactly; False->6230->1558 steps does not; run name 'toolcall-npu-v2' corroborates"
+ },
+ "num_samples": {
+  "v": "6000 (default; non-binding, pool only 4349)",
+  "src": "agent/train_agent_history_c2kv_npu.sh default; reconstruction 4349<6000"
+ },
+ "dataset": {
+  "v": "./datasets/agent-llm-traces (v1, 39 parquet, 1781 sessions)",
+  "src": "training_args.bin train_data; v2 dataset appeared Aug 18 on server, training <= Aug 5 (our archived evals of ckpt-1088 dated 2026-08-05/06)"
+ },
+ "split": {
+  "v": "subset_disjoint (no manifest file), split_seed=42, eval_ratio=0.1 (all defaults)",
+  "src": "script defaults; reconstruction with these matches 4349"
+ },
+ "lr_related": {
+  "v": "weight_decay=0.1, seed=42, adamw_torch_fused, bf16, max_grad_norm=1.0, dataset_shuffle_seed=2948",
+  "src": "training_args.bin"
+ },
+ "save": {
+  "v": "save_steps=500, save_total_limit=3 (siblings 500/1000 expected; direct read NOT FOUND)",
+  "src": "trainer_state.json + training_args.bin"
+ },
+ "doc_geometry": {
+  "v": "NOT FOUND individually (defaults consistent: MAX_DOC_LENGTH=512, MAX_DOC_NUM=12, MIN_DOC_NUM=1, MAX_LENGTH=1024, MAX_SYSTEM_LENGTH=4096)",
+  "src": "not stored in training_args.bin (source-level args); launcher echo unreachable"
+ },
+ "include_tools": {
+  "v": "NOT FOUND individually (default True; run is toolcall-focused, REQUIRE_TOOL_CALL=True)",
+  "src": "launcher echo unreachable; count test insensitive to it"
+ },
+ "gist_train_ratios": {
+  "v": "NOT FOUND (default 4,8,16)",
+  "src": "env var C2KV_GIST_TRAIN_RATIOS read at runtime; not in training_args.bin; launcher echo unreachable"
+ },
+ "sibling_ckpt1000_500": {
+  "v": "v2 run on disk has only checkpoint-500 (step500/max1088/epoch0.4596/tbs1/save500, created 2026-08-01 03:47) and checkpoint-1088 (created 2026-08-01 06:35); no checkpoint-1000 present (earlier archive refs to ckpt-1000 predate cleanup)",
+  "src": "direct read of /home/zhuyuhan/project/c2kv/checkpoints/qwen3-4b-agent-history-c2kv-toolcall-npu-v2/ via borrowed account (read-only)"
+ },
+ "ckpt2678_other_run": {
+  "v": "qwen3-4b-agent-history-c2kv-npu: ckpts 500/1000/1500/2000/2500/2678; step2678=max_steps=1.0 epoch, tbs1, save500 (2678 steps x tbs1; world size not read for this run)",
+  "src": "direct read via borrowed account"
+ },
+ "launcher_evidence": {
+  "v": "his agent/train_agent_history_c2kv_npu.sh md5 639b41522d67fafc694a0529ed6eaf5e == our copy (byte-identical) => defaults ARE his script's defaults; proven overrides: OUTPUT_DIR=...toolcall-npu-v2 (training_args.bin output_dir), REQUIRE_TOOL_CALL=True (4349-record count match + run name), world_size=4 (rng_state_0..3 + step math 4349->1088); torchrun_agent_history_logs dir does not exist under his outputs/; bash_history contains no toolcall-npu-v2 / REQUIRE_TOOL_CALL / C2KV_GIST_TRAIN_RATIOS lines => no evidence of further overrides; echo block per se NOT FOUND",
+  "src": "borrowed-account md5sum + ls outputs/ + grep bash_history"
+ },
+ "loss": {
+  "v": "first20 mean 1.011, last20 mean 1.020, min 0.144; no NaN",
+  "src": "trainer_state.json log_history"
+ },
+ "training_window": {
+  "v": "2026-08-01 ~03:00-06:35 (ckpt-500 03:47:52, ckpt-1088 06:35:32, ~2.8h)",
+  "src": "stat mtimes of v2 checkpoints"
+ },
+ "device_ids": {
+  "v": "NOT FOUND (bash_history shows generic 'export ASCEND_RT_VISIBLE_DEVICES=4' x4 and other combos, none tieable to this launch)",
+  "src": "bash_history grep (inconclusive)"
+ }
+}

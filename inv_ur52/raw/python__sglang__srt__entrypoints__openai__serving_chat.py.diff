@@ -1,0 +1,219 @@
+diff --git a/python/sglang/srt/entrypoints/openai/serving_chat.py b/python/sglang/srt/entrypoints/openai/serving_chat.py
+index 0a7764e64..5eaa0f1ee 100644
+--- a/python/sglang/srt/entrypoints/openai/serving_chat.py
++++ b/python/sglang/srt/entrypoints/openai/serving_chat.py
+@@ -439,31 +439,111 @@ class OpenAIServingChat(OpenAIServingBase):
+                 C2KVSegmentInfo(
+                     key_hash=getattr(msg, "c2kv_key_hash", "") or "",
+                     token_start=insertion_point,
+                     token_end=insertion_point,
+                     repair_key_hashes=(
+                         list(getattr(msg, "c2kv_repair_key_hashes", None) or [])
+                         + list(
+                             getattr(msg, "c2kv_repair_only_key_hashes", None) or []
+                         )
+                     ),
++                    use_gist_projection=(
++                        getattr(msg, "c2kv_use_gist_projection", None) is not False
++                    ),
+                 )
+             )
+ 
+         # Remove annotated messages so _process_messages omits their tokens from
+         # origin_input_ids; the gist injection fills each insertion point at
+         # inference time.
+         for i in reversed(annotated):
+             request.messages.pop(i)
+ 
+         return segments
+ 
++    @staticmethod
++    def _find_token_subsequence(haystack: List[int], needle: List[int]) -> int:
++        if not needle or len(needle) > len(haystack):
++            return -1
++        limit = len(haystack) - len(needle) + 1
++        for start in range(limit):
++            if haystack[start : start + len(needle)] == needle:
++                return start
++        return -1
++
++    def _resolve_history_kv_eviction_range(
++        self,
++        request: "ChatCompletionRequest",
++        prompt_ids: List[int],
++    ) -> None:
++        """Resolve BFCL history offsets in the server's actual token frame.
++
++        The client sends a completed-message count, never client-side token
++        offsets. Tool templates can produce a different prologue or fallback
++        representation on the server, so only the final OpenAI prompt IDs are
++        authoritative for physical KV eviction.
++        """
++
++        hint = request.c2kv_kv_memory_hint
++        if not isinstance(hint, dict):
++            return
++        config = hint.get("history_kv_eviction")
++        if not isinstance(config, dict):
++            return
++        count = config.get("history_message_count")
++        if count is None:
++            return
++        try:
++            count = int(count)
++        except (TypeError, ValueError) as exc:
++            raise ValueError(f"Invalid history_message_count: {count!r}") from exc
++        if not (0 < count <= len(request.messages)):
++            raise ValueError(
++                "Invalid physical history message boundary: "
++                f"history_message_count={count}, messages={len(request.messages)}"
++            )
++
++        tools = self._chat_template_tools(request)
++        completed = list(request.messages[:count])
++        with_tools = self._c2kv_chat_template_input_ids(request, completed, tools)
++        without_tools = self._c2kv_chat_template_input_ids(request, completed, None)
++        bos_id = getattr(self.tokenizer_manager.tokenizer, "bos_token_id", None)
++        while without_tools and bos_id is not None and without_tools[0] == bos_id:
++            without_tools = without_tools[1:]
++        if not without_tools:
++            raise ValueError("Cannot resolve an empty physical history token span")
++
++        prefix_start = 0
++        if prompt_ids[: len(with_tools)] != with_tools:
++            prefix_start = self._find_token_subsequence(prompt_ids, with_tools)
++        if prefix_start < 0:
++            raise ValueError(
++                "Server chat template prefix is not present in the final prompt; "
++                "refusing physical history KV eviction."
++            )
++        history_relative_start = self._find_token_subsequence(with_tools, without_tools)
++        if history_relative_start < 0:
++            raise ValueError(
++                "Cannot isolate completed history from the server tool prologue; "
++                "refusing physical history KV eviction."
++            )
++        history_start = prefix_start + history_relative_start
++        history_end = history_start + len(without_tools)
++        if history_end > len(prompt_ids) or prompt_ids[history_start:history_end] != without_tools:
++            raise ValueError(
++                "Resolved physical history range does not match the server prompt IDs; "
++                "refusing physical history KV eviction."
++            )
++        config["history_start"] = history_start
++        config["history_end"] = history_end
++        config["server_tokenized"] = True
++
+     def _convert_to_internal_request(
+         self,
+         request: ChatCompletionRequest,
+         raw_request: Request = None,
+     ) -> tuple[GenerateReqInput, ChatCompletionRequest]:
+         reasoning_effort = (
+             request.chat_template_kwargs.pop("reasoning_effort", None)
+             if request.chat_template_kwargs
+             else None
+         )
+@@ -476,20 +556,22 @@ class OpenAIServingChat(OpenAIServingBase):
+             request.reasoning_effort = reasoning_effort
+ 
+         """Convert OpenAI chat completion request to internal format"""
+         is_multimodal = self.tokenizer_manager.model_config.is_multimodal
+ 
+         # Compute C2KV segment boundaries before the chat template is applied
+         c2kv_segments = self._compute_c2kv_segments(request)
+ 
+         # Process messages and apply chat template
+         processed_messages = self._process_messages(request, is_multimodal)
++        if not is_multimodal and isinstance(processed_messages.prompt_ids, list):
++            self._resolve_history_kv_eviction_range(request, processed_messages.prompt_ids)
+ 
+         # Build sampling parameters
+         sampling_params = request.to_sampling_params(
+             stop=processed_messages.stop,
+             model_generation_config=self.default_sampling_params,
+             tool_call_constraint=processed_messages.tool_call_constraint,
+         )
+ 
+         # Handle single vs multiple requests
+         if is_multimodal:
+@@ -537,22 +619,37 @@ class OpenAIServingChat(OpenAIServingBase):
+             extra_key=self._compute_extra_key(request),
+             require_reasoning=self._get_reasoning_from_request(request),
+             priority=request.priority,
+             routing_key=self.extract_routing_key(raw_request),
+             custom_labels=custom_labels,
+             custom_logit_processor=request.custom_logit_processor,
+             image_max_dynamic_patch=img_max_dynamic_patch,
+             video_max_dynamic_patch=vid_max_dynamic_patch,
+             max_dynamic_patch=getattr(request, "max_dynamic_patch", None),
+             c2kv_segments=c2kv_segments,
++            c2kv_kv_memory_hint=request.c2kv_kv_memory_hint,
++            c2kv_use_gist_projection=bool(
++                c2kv_segments
++                and any(
++                    getattr(seg, "use_gist_projection", True)
++                    for seg in c2kv_segments
++                )
++            ),
+         )
+ 
++        if request.c2kv_kv_memory_hint:
++            logger.info(
++                "C2KV KV-memory hint accepted rid=%s history_eviction=%s",
++                adapted_request.rid,
++                bool(request.c2kv_kv_memory_hint.get("history_kv_eviction")),
++            )
++
+         return adapted_request, request
+ 
+     def _process_messages(
+         self, request: ChatCompletionRequest, is_multimodal: bool
+     ) -> MessageProcessingResult:
+         """Process chat messages and apply chat template"""
+         # GptOss model needs to keep special tokens for harmony parsing
+         if self.is_gpt_oss:
+             request.skip_special_tokens = False
+ 
+@@ -1246,29 +1343,41 @@ class OpenAIServingChat(OpenAIServingBase):
+             )
+             choices.append(choice_data)
+ 
+         # Calculate usage
+         usage = UsageProcessor.calculate_response_usage(
+             ret,
+             n_choices=request.n,
+             enable_cache_report=self.tokenizer_manager.server_args.enable_cache_report,
+         )
+ 
++        kv_memory_report = ret[0]["meta_info"].get("kv_memory_report")
++        if kv_memory_report is not None:
++            logger.info(
++                "C2KV KV-memory report returned rid=%s status=%s",
++                ret[0]["meta_info"]["id"],
++                kv_memory_report.get("history_kv_runtime_status"),
++            )
++
+         return ChatCompletionResponse(
+             id=ret[0]["meta_info"]["id"],
+             created=created,
+             model=request.model,
+             choices=choices,
+             usage=usage,
+             metadata={
+                 "weight_version": ret[0]["meta_info"]["weight_version"],
+                 "sglang_runtime": ret[0]["meta_info"].get("kv_runtime_stats"),
++                # Keep the per-request layout report produced by the scheduler.
++                # BFCL uses this to distinguish measured physical KV residency
++                # from client-side history-token estimates.
++                "kv_memory_report": kv_memory_report,
+             },
+             sglext=response_sglext,
+         )
+ 
+     def _process_logprobs_tokens(
+         self, logprobs: LogProbs, use_token_index: bool = False
+     ) -> List[ChatCompletionTokenLogprob]:
+         """Common helper to process logprobs tokens for both streaming and non-streaming
+ 
+         Args:
