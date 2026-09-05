@@ -1,4 +1,4 @@
-# Modular benchmark layer for the C2KV / experiment-D line
+# Modular benchmark layer for C2KV / experiment D / experiment G
 
 > Read `docs/c2kv_semantics.md` first. It records where the paper, the
 > training checkpoint, this proxy and the SGLang server disagree, which
@@ -54,6 +54,9 @@ Key properties:
   `OPENAI_BASE_URL` and the user simulator through its own
   `TOOLSANDBOX_USER_BASE_URL` — upstream hard-codes api.openai.com, so a
   vanilla clone produces no TS numbers).  tau2/BFCL run unpatched.
+  BFCL summaries use the official score headers' task counts and accuracy;
+  generation alone does not produce a scored summary. AppWorld and ACEBench
+  materialize private task selections for both generation and official scoring.
 * The arm semantics live in `proxy.py` + `arms.py`; serving requests go
   through `backends/sglang.py`. The former dataset-specific history API
   runner has been removed. The D and G entrypoints share this benchmark layer.

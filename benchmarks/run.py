@@ -7,9 +7,9 @@ benchmarks/proxy.py in the requested arm, tear it down after), the git-sha
 suffix on --run-name/--out, and the summary envelope.  The compression ratio
 comes from the arm registry (arms.py), NOT from a --ratio flag.
 
-Adding a benchmark = one adapter module + one ADAPTERS entry.  Server
-scripts drive this file BY CLI ONLY: every flag below is the interface, so
-a flag never changes name, default or meaning.
+Adding a benchmark = one adapter module + one ADAPTERS entry. Server
+scripts use this CLI; checkpoint profiles resolve packing and projection
+before the proxy starts, and conflicting explicit overrides are rejected.
 """
 from __future__ import annotations
 

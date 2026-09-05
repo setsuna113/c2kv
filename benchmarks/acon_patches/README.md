@@ -17,6 +17,12 @@ else in the runners changes: prompts, memory, decoding options
 Apply from the acon checkout root:
 `git apply benchmarks/acon_patches/0001-openai-base-url-env.patch`
 
+Apply `0002-unknown-api-cost.patch` with `git apply --ignore-whitespace`
+(the pinned source uses CRLF). Unknown model tariffs return
+JSON `null`; AppWorld prints that API cost is unavailable and still records
+token counts. This fixes the upstream missing `gpt-4o` fallback without
+assigning a hosted-model price to local inference.
+
 Both runners then need only the served model name to NOT contain `gpt`,
 `o1`, `o3`, `o4` or `gemini` (those names are routed to the OpenAI / Gemini
 clients instead).  `c2kv-agent` is fine.
@@ -28,10 +34,12 @@ Runner prerequisites (see the upstream READMEs under `experiments/`):
   `experiments/smolagents/search/database/wikipedia`; the retriever server
   `python search/retriever_server.py --index_path search/database/wikipedia/bm25`
   running before the run.  Data = the shipped `data/nq_multi_8` (100/100).
-* AppWorld — `pip install -e` the StonyBrookNLP/appworld checkout,
-  `appworld install --repo`, `appworld download data`, and the produced
-  `data/` moved into `experiments/appworld/`.  The official scorer is the
-  `appworld` CLI on the same venv PATH.
+* AppWorld — install `appworld` (validated with `0.1.3.post1`), run
+  `appworld install` and `appworld download data`. Set `APPWORLD_ROOT` to
+  the directory containing `data/`, or place it in `experiments/appworld/`.
+  The adapter creates a private harness per run, links immutable data, and
+  gives generation and official scoring the same selected task list.
+  The official scorer is the `appworld` CLI beside the runner Python.
 
 ACON's own compression arm (`--co_config_path`) is NOT wired: with
 `model_type: local` its compressor is an in-process vLLM, not the served
