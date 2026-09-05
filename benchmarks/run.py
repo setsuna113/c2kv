@@ -30,6 +30,7 @@ from adapters import (  # noqa: E402
 from adapters.base import RunContext  # noqa: E402
 from checkpoint_profile import ProfileError, resolve_checkpoint_profile  # noqa: E402
 from capabilities import run_preflight  # noqa: E402
+from arms import get_arm  # noqa: E402
 
 # --benchmark value -> adapter module.  Two names share acon_adapter (the
 # module dispatches on ctx.options["benchmark"]); add_arguments is called
@@ -269,7 +270,7 @@ def main(argv=None):
     summary["model"] = args.model
     summary["checkpoint_profile"] = profile
     summary["preflight"] = preflight.as_dict()
-    if args.arm in ("hiagent", "acon_hist", "acon_obs"):
+    if get_arm(args.arm).text_policy:
         # text-arm consumers: degeneration and compressor cost surfaced at
         # the RUN level (the per-request stats live in the request log)
         ta_rows = []
@@ -302,8 +303,14 @@ def main(argv=None):
             "compressor_wall_sec": round(sum(
                 float((t.get("compressor_usage") or {}).get("wall_sec") or 0)
                 for t in ta_rows), 1),
+            "retrieval_calls": sum(int((t.get("retrieval_usage") or {}).get("calls") or 0)
+                                   for t in ta_rows),
+            "retrieval_prompt_tokens": sum(int((t.get("retrieval_usage") or {}).get("prompt_tokens") or 0)
+                                           for t in ta_rows),
+            "retrieval_completion_tokens": sum(int((t.get("retrieval_usage") or {}).get("completion_tokens") or 0)
+                                               for t in ta_rows),
         }
-        if (args.arm == "acon_hist" and ta_rows
+        if (get_arm(args.arm).text_policy.startswith("acon_hist") and ta_rows
                 and compressed_requests == 0):
             print(f"WARNING: arm {args.arm!r} NEVER compressed history in "
                   f"{len(ta_rows)} requests — the trigger never fired; the "

@@ -832,7 +832,8 @@ def _textarm_compress(payload: Dict[str, Any], meter=None) -> str:
     return str(content)
 
 
-def _apply_text_arm(payload: Dict[str, Any], arm, conv: str
+def _apply_text_arm(payload: Dict[str, Any], arm, conv: str,
+                    retrieve_subgoals: Optional[List[int]] = None
                     ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """Rewrite history per the arm's text policy (textarms.py) BEFORE
     assembly; the arm is full-mode downstream.  Compressor calls go
@@ -856,19 +857,70 @@ def _apply_text_arm(payload: Dict[str, Any], arm, conv: str
         usage_acc["wall_sec"] += time.perf_counter() - t0
         return out
 
-    if arm.text_policy == "hiagent":
+    if arm.text_policy in ("hiagent", "hiagent_summary", "hiagent_full"):
         out, stats = textarms.hiagent_transform(
             messages, compress, _render_action_dialect, model=model,
-            default_system=DEFAULT_SYSTEM_PROMPT)
+            default_system=DEFAULT_SYSTEM_PROMPT,
+            variant="full" if arm.text_policy == "hiagent_full" else "summary",
+            retrieve_subgoals=retrieve_subgoals)
     else:
-        mode = "hist" if arm.text_policy == "acon_hist" else "obs"
+        parts = arm.text_policy.split("_", 2)
+        if len(parts) < 2 or parts[0] != "acon" or parts[1] not in ("hist", "obs"):
+            raise ValueError(f"unsupported text policy {arm.text_policy!r}")
+        mode = parts[1]
+        guideline = parts[2] if len(parts) > 2 else "base"
         out, stats = textarms.acon_transform(
             messages, compress, _render_action_dialect, conv,
-            mode=mode, model=model)
+            mode=mode, model=model, guideline=guideline)
     stats["compressor_usage"] = usage_acc
     staged = dict(payload)
     staged["messages"] = out
+    if arm.text_policy == "hiagent_full":
+        tools = list(payload.get("tools") or [])
+        if any((tool.get("function") or {}).get("name") == textarms.HIAGENT_RETRIEVE_TOOL_NAME
+               for tool in tools):
+            raise ValueError("benchmark tool name collides with HiAgent's internal retrieval tool")
+        staged["tools"] = tools + [textarms.hiagent_retrieval_tool()]
     return staged, stats
+
+
+def _hiagent_retrieval_loop(original_payload, arm, conv, data, stats, send):
+    """Consume context-retrieval calls internally, charging every extra call.
+
+    Only a final environment action is returned to the official harness.
+    The bounded loop fails explicitly if the model keeps retrieving without
+    advancing; no meta-tool can leak into the benchmark's tool executor.
+    """
+    retrieved = set()
+    retrieval_usage = {"calls": 0, "prompt_tokens": 0, "completion_tokens": 0}
+    for attempt in range(5):
+        message = ((data.get("choices") or [{}])[0].get("message") or {})
+        ids = textarms.hiagent_retrieval_request(message)
+        if ids is None:
+            stats["retrieval_usage"] = retrieval_usage
+            return data
+        if attempt == 4:
+            raise ValueError("HiAgent exceeded four internal trajectory retrieval rounds")
+        if any((call.get("function") or {}).get("name") != textarms.HIAGENT_RETRIEVE_TOOL_NAME
+               for call in message.get("tool_calls") or []):
+            raise ValueError("HiAgent mixed internal retrieval and environment actions in one response")
+        if set(ids) <= retrieved:
+            raise ValueError("HiAgent requested an already revealed trajectory without advancing")
+        retrieved.update(ids)
+        usage = data.get("usage") or {}
+        retrieval_usage["calls"] += 1
+        for key in ("prompt_tokens", "completion_tokens"):
+            retrieval_usage[key] += int(usage.get(key) or 0)
+        staged, updated = _apply_text_arm(original_payload, arm, conv, sorted(retrieved))
+        if updated.get("invalid_retrieval_subgoals"):
+            raise ValueError(f"HiAgent requested nonexistent completed subgoals: {updated['invalid_retrieval_subgoals']}")
+        for key, value in (updated.get("compressor_usage") or {}).items():
+            stats.setdefault("compressor_usage", {}).setdefault(key, 0)
+            stats["compressor_usage"][key] += value
+        stats["n_compressor_calls"] += int(updated.get("n_compressor_calls") or 0)
+        stats.update({key: value for key, value in updated.items()
+                      if key not in ("compressor_usage", "n_compressor_calls")})
+        data = send(staged)
 
 
 def plan_repair(messages: List[Dict[str, Any]], arm: Arm,
@@ -1103,6 +1155,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
         conv = conversation_id(messages)
         turn = len(messages)
         text_stats: Optional[Dict[str, Any]] = None
+        original_payload = payload
         try:
             if getattr(ARM, "text_policy", None):
                 payload, text_stats = _apply_text_arm(payload, ARM, conv)
@@ -1130,7 +1183,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
         except (RuntimeError, ValueError, URLError, OSError, UpstreamError,
                 BackendError) as error:
             kind = getattr(error, "kind",
-                           "textarm_error" if text_stats is not None else "assemble_error")
+                           "textarm_error" if ARM.text_policy else "assemble_error")
             self._log_request(payload, None, None, status=kind,
                               error=str(error), fingerprint=fingerprint, conv=conv,
                               turn=turn)
@@ -1170,6 +1223,15 @@ class ProxyHandler(BaseHTTPRequestHandler):
         try:
             try:
                 data, normalized = call_upstream(messages_out, repair_plan)
+                if ARM.text_policy == "hiagent_full":
+                    def send_retrieved(staged):
+                        nonlocal payload, messages_out
+                        payload = staged
+                        messages_out, _ = _assemble(staged["messages"], ARM)
+                        return send_upstream(messages_out, None)[0]
+                    data = _hiagent_retrieval_loop(
+                        original_payload, ARM, conv, data, text_stats, send_retrieved)
+                    normalized = BACKEND.normalize_response(data)
             except CacheMiss:
                 # Pool-evicted gists and/or an evicted repair span.  Three
                 # things are needed for the retry to be anything but a second
@@ -1200,7 +1262,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
                                           tools=payload.get("tools"),
                                           out_messages=messages_out)
                 data, normalized = call_upstream(messages_out, repair_plan)
-        except (UpstreamError, BackendError, CacheMiss) as error:
+        except (UpstreamError, BackendError, CacheMiss, RuntimeError, ValueError,
+                URLError, OSError) as error:
             kind = getattr(error, "kind", "upstream_error")
             if isinstance(error, CacheMiss):
                 kind = "cache_miss"
