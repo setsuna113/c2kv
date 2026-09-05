@@ -131,13 +131,46 @@ def _summary_facts(summary_path: Path) -> tuple[bool, dict[str, Any] | str]:
     n = payload.get("n")
     if not isinstance(n, int) or n <= 0:
         return False, "summary has no positive task count n"
-    return True, {
+    request_log = payload.get("request_log_summary")
+    if not isinstance(request_log, Mapping):
+        return False, "summary has no request_log_summary"
+    n_ok = request_log.get("n_ok")
+    n_error = request_log.get("n_error")
+    if not isinstance(n_ok, int) or n_ok <= 0:
+        return False, "request_log_summary has no positive n_ok"
+    if not isinstance(n_error, int) or n_error != 0:
+        return False, f"request_log_summary n_error must be zero, got {n_error!r}"
+    if "n_scored" in payload and payload["n_scored"] != n:
+        return False, f"summary n_scored={payload['n_scored']!r} does not equal n={n}"
+    method_exercised: bool | None = None
+    method_warning: str | None = None
+    textarm = payload.get("textarm_summary")
+    if isinstance(textarm, Mapping):
+        requests = textarm.get("textarm_requests")
+        compressor_calls = textarm.get("compressor_calls")
+        retrieval_calls = textarm.get("retrieval_calls")
+        if not all(isinstance(value, int) and not isinstance(value, bool)
+                   for value in (requests, compressor_calls, retrieval_calls)):
+            return False, "textarm_summary has invalid request/call counts"
+        method_exercised = bool(requests > 0 and
+                                (compressor_calls > 0 or retrieval_calls > 0))
+        if not method_exercised:
+            method_warning = (
+                "text arm received requests but no compressor or trajectory-retrieval "
+                "operation ran; this is a full-context plumbing result, not a method result"
+            )
+    facts: dict[str, Any] = {
         "n": n,
         "semantic_score": payload.get("semantic_score"),
         "cost_join": payload.get("cost_join"),
-        "request_log_summary": payload.get("request_log_summary"),
+        "request_log_summary": request_log,
         "summary_path": str(summary_path),
     }
+    if method_exercised is not None:
+        facts["method_exercised"] = method_exercised
+        if method_warning:
+            facts["method_warning"] = method_warning
+    return True, facts
 
 
 def build_plan(spec: Mapping[str, Any], output_root: Path, *,
@@ -327,20 +360,34 @@ def execute_plan(plan: Mapping[str, Any], *, resume: bool = False,
             completed = runner(cell["command"], cwd=str(REPO_ROOT),
                                stdout=log, stderr=subprocess.STDOUT, check=False)
         valid, facts = _summary_facts(Path(cell["summary_path"]))
-        passed = completed.returncode == 0 and valid
+        unexercised = bool(valid and isinstance(facts, Mapping)
+                            and facts.get("method_exercised") is False)
+        passed = completed.returncode == 0 and valid and not unexercised
+        state = "passed" if passed else ("unexercised" if unexercised else "failed")
+        if passed:
+            failure = None
+        elif unexercised:
+            failure = facts.get("method_warning")
+        elif completed.returncode:
+            failure = f"runner returncode={completed.returncode}"
+        else:
+            failure = str(facts)
         _atomic_json(status_path, {
             "schema_version": SCHEMA_VERSION,
-            "state": "passed" if passed else "failed",
+            "state": state,
             "cell_fingerprint": fingerprint,
             "command": cell["command"],
             "returncode": completed.returncode,
             "log_path": str(log_path),
             "summary": facts if valid else None,
-            "failure": None if passed else (
-                f"runner returncode={completed.returncode}" if completed.returncode else str(facts)),
+            "method_exercised": (facts.get("method_exercised")
+                                 if valid and isinstance(facts, Mapping) else None),
+            "warning": (facts.get("method_warning")
+                        if valid and isinstance(facts, Mapping) else None),
+            "failure": failure,
         })
         if not passed:
-            exit_code = max(exit_code, completed.returncode or 1)
+            exit_code = max(exit_code, completed.returncode or (3 if unexercised else 1))
     return exit_code
 
 

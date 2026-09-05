@@ -59,7 +59,7 @@ def test_execute_requires_summary_and_resume_matches_exact_fingerprint(tmp_path)
         summary = Path(cell["summary_path"])
         summary.parent.mkdir(parents=True, exist_ok=True)
         summary.write_text(json.dumps({"n": 1, "semantic_score": 0.0,
-                                       "request_log_summary": {"n_ok": 1}}),
+                                       "request_log_summary": {"n_ok": 1, "n_error": 0}}),
                            encoding="utf-8")
         kwargs["stdout"].write("runner invoked\n")
         return subprocess.CompletedProcess(command, 0)
@@ -68,6 +68,50 @@ def test_execute_requires_summary_and_resume_matches_exact_fingerprint(tmp_path)
     assert len(calls) == 1
     assert matrix.execute_plan(plan, resume=True, runner=fake_runner) == 0
     assert len(calls) == 1
+
+
+def test_summary_requires_clean_requests_scoring_coverage_and_exercised_text_arm(tmp_path):
+    summary = tmp_path / "summary.json"
+    summary.write_text(json.dumps({
+        "n": 1, "n_scored": 0,
+        "request_log_summary": {"n_ok": 1, "n_error": 0},
+    }), encoding="utf-8")
+    valid, reason = matrix._summary_facts(summary)
+    assert not valid and "n_scored" in reason
+
+    summary.write_text(json.dumps({
+        "n": 1, "request_log_summary": {"n_ok": 1, "n_error": 1},
+    }), encoding="utf-8")
+    valid, reason = matrix._summary_facts(summary)
+    assert not valid and "n_error" in reason
+
+    summary.write_text(json.dumps({
+        "n": 1, "request_log_summary": {"n_ok": 1, "n_error": 0},
+        "textarm_summary": {
+            "textarm_requests": 1, "compressor_calls": 0, "retrieval_calls": 0,
+        },
+    }), encoding="utf-8")
+    valid, facts = matrix._summary_facts(summary)
+    assert valid and facts["method_exercised"] is False
+    assert "full-context plumbing" in facts["method_warning"]
+
+    plan = matrix.build_plan(_spec(), tmp_path / "matrix", environ=_env(tmp_path))
+    cell = plan["cells"][0]
+
+    def no_trigger_runner(command, **kwargs):
+        Path(cell["summary_path"]).parent.mkdir(parents=True, exist_ok=True)
+        Path(cell["summary_path"]).write_text(json.dumps({
+            "n": 1, "request_log_summary": {"n_ok": 1, "n_error": 0},
+            "textarm_summary": {
+                "textarm_requests": 1, "compressor_calls": 0, "retrieval_calls": 0,
+            },
+        }), encoding="utf-8")
+        return subprocess.CompletedProcess(command, 0)
+
+    assert matrix.execute_plan(plan, runner=no_trigger_runner) == 3
+    status = json.loads(Path(cell["status_path"]).read_text(encoding="utf-8"))
+    assert status["state"] == "unexercised"
+    assert status["method_exercised"] is False
 
 
 def test_profile_mismatch_preserves_prior_passed_status(tmp_path):
