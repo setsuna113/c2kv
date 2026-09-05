@@ -52,7 +52,7 @@ def run_case(args, name):
             if result["returncode"] != 0:
                 result["error"] = "official adapter failed; inspect its log"
             else:
-                summaries = list(args.out.glob(f"{name}*/summary.json"))
+                summaries = list(args.out.glob(f"{name}*/summary_{args.arm}.json"))
                 if len(summaries) != 1:
                     raise RuntimeError(f"expected one summary, found {len(summaries)}")
                 summary = json.loads(summaries[0].read_text(encoding="utf-8"))
