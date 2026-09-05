@@ -3,23 +3,23 @@
 # Vendored from ~/bench_logs/sgl_deploy/launch_sgl1088.sh (2026-09-03);
 # absolute paths overridable via env so any checkout/serve target works.
 #
-# Requires the SGLang fork branch task/c2kv-serve-align (see
-# benchmarks/backends/sglang_patches/README.md for the deployment recipe:
-# codeload tarball + in-repo patches, PYTHONPATH precedence over the
-# editable install in the sgl venv).  Default tree: the b0817204 codeload
-# extract PLUS the working-tree detokenizer fix 718a654e (git hash on
-# GitHub; the b0817204 tarball itself predates it — apply it from the fork
-# branch or copy from ~/kvoffload-sglang-c2kv).  Without that fix
-# metadata.sglang_runtime is null and cost columns come out silently empty.
-# NOTE on regime provenance: the Sep-2 matrix numbers were produced under
-# an EVOLVING regime (mem 0.28/no pool -> mid-run pool expansion +
-# cache-miss retry, four sg_makeup_* merges) — per-row regime columns are
-# mandatory when quoting them.
-SGLANG_DIR=${SGLANG_DIR:-/home/liuyancheng/sgl-b0817204}
+# Requires the consolidated SGLang task/bdf-pilot source tree.
+# base is the original lowercase-qkv rule; gist is the later local fork
+# rule. Choose explicitly for checkpoints trained under the latter.
+SGLANG_DIR=${SGLANG_DIR:?Set SGLANG_DIR to the consolidated SGLang checkout}
 PYTHON_BIN=${PYTHON_BIN:-/home/liuyancheng/envs/sgl/bin/python}
 MODEL_PATH=${MODEL_PATH:-/home/liuyancheng/checkpoints_upstream/checkpoint-1088}
 PORT=${PORT:-35000}
 DEVICE=${DEVICE:-3}
+QUERY_PROJECTION=${QUERY_PROJECTION:-base}
+case "$QUERY_PROJECTION" in
+  gist|base) ;;
+  *) echo "QUERY_PROJECTION must be gist or base" >&2; exit 2 ;;
+esac
+if [ ! -f "$SGLANG_DIR/python/sglang/srt/models/qwen3.py" ]; then
+  echo "SGLANG_DIR does not contain the serving source: $SGLANG_DIR" >&2
+  exit 2
+fi
 # pool tuning validated 2026-09-03 on dev3 (the 0.30/no-pool config of the
 # 22fbf31 era OOMs the c2kv pool under the b0817204 layout)
 MEM_FRACTION_STATIC=${MEM_FRACTION_STATIC:-0.20}
@@ -38,7 +38,7 @@ SGLANG_EMPTY_CACHE_INTERVAL=1 \
 ASCEND_LAUNCH_BLOCKING=1 \
 TASK_QUEUE_ENABLE=1 \
 ASCEND_RT_VISIBLE_DEVICES=$DEVICE \
-"${PYTHON_BIN}" -m sglang.launch_server \
+exec "${PYTHON_BIN}" -m sglang.launch_server \
   --model-path "${MODEL_PATH}" \
   --served-model-name c2kv-agent \
   --model-impl sglang \
@@ -46,7 +46,7 @@ ASCEND_RT_VISIBLE_DEVICES=$DEVICE \
   --attention-backend ascend \
   --tool-call-parser qwen25 \
   --enable-c2kv \
-  --c2kv-query-proj gist \
+  --c2kv-query-proj "$QUERY_PROJECTION" \
   --dtype bfloat16 \
   --mem-fraction-static "$MEM_FRACTION_STATIC" \
   --c2kv-pool-fraction "$C2KV_POOL_FRACTION" \

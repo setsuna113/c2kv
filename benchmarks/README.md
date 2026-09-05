@@ -4,12 +4,12 @@
 > training checkpoint, this proxy and the SGLang server disagree, which
 > proxy/server switch covers each difference, and which numbers in this repo
 > were produced under which regime. Serve from the SGLang fork branch
-> `task/c2kv-serve-align` (its `c2kv/c2kv_serving_semantics.md` is the
+> `task/bdf-pilot` (its `c2kv/c2kv_serving_semantics.md` is the
 > server-side twin of that document).
 
 Replaces the single-dataset custom evaluation with a modular design that can
-run the same *arms* (full / c2kv / hybrid / repair arms) against three
-standard agent benchmarks:
+run the same *arms* (full / c2kv / hybrid / repair arms) against the registered
+agent benchmarks:
 
 | Benchmark | Source on the NPU server | Env |
 |---|---|---|
@@ -52,9 +52,9 @@ Key properties:
   `OPENAI_BASE_URL` and the user simulator through its own
   `TOOLSANDBOX_USER_BASE_URL` — upstream hard-codes api.openai.com, so a
   vanilla clone produces no TS numbers).  tau2/BFCL run unpatched.
-* The arm semantics live in one place (`proxy.py` + `arms.py`) and mirror
-  `agent/api/eval_agent_history_sglang_api.py` (same `/v1/c2kv/extract` +
-  `c2kv_key_hash` protocol, same hybrid tail rule).
+* The arm semantics live in `proxy.py` + `arms.py`; serving requests go
+  through `backends/sglang.py`. The former dataset-specific history API
+  runner has been removed. The D and G entrypoints share this benchmark layer.
 * Metrics are computed on **raw transcripts** in `metrics.py`, so every
   benchmark gets the same two-column evaluation:
   * **Protocol column**: every model turn is parsed for tool calls
@@ -176,31 +176,22 @@ port layout is baked into the adapters:
 ## Usage (on the server)
 
 ```bash
-# 1. serve the checkpoint. The DEFAULT backend is the SGLang c2kv fork
-#    (branch task/c2kv-serve-align + the in-repo deployment patches
-#    benchmarks/backends/sglang_patches/). The old claim that the fork
-#    "does not run on this NPU stack" was WRONG: it was decided 2026-08-27
-#    in a 2-hour window on the July-era c2kv-v0.5.10 base (pure CUDA) while
-#    the NPU-ready line existed on another branch; on the right branch plus
-#    one compat port (split_qkv import guard) it serves cleanly.
-#    Launcher (dev3 :35000, mem 0.20 / c2kv-pool 0.06 / 16k ctx / no cuda-graph,
-#    validated 2026-09-03 on the b0817204 tree):
-bash benchmarks/ops/launch_sgl1088.sh
+# 1. serve the checkpoint from the consolidated source (no deployment patches).
+SGLANG_DIR=/path/to/sglang-c2kv DEVICE=1 PORT=35020 \
+  QUERY_PROJECTION=base bash benchmarks/ops/launch_sgl1088.sh
 
-# 2. start the arm proxy (one per arm; ratio comes from the arm registry)
-bash benchmarks/ops/launch_sgl_proxy.sh c2kv 35100 35000 task_myrun
-
-# 3. run each benchmark against the proxy (adapters wrap the official CLIs)
+# 2. in another terminal, run.py owns the arm proxy and the official adapter.
 ~/envs/bench/bin/python benchmarks/run.py --benchmark tau2 --arm c2kv \
-  --backend sglang --upstream http://127.0.0.1:35000 \
-  --doc-packing turn --max-doc-length 768 --max-doc-num 16 \
+  --backend sglang --upstream http://127.0.0.1:35020 \
+  --doc-packing turn --max-doc-length 512 --max-doc-num 12 \
   --out results/bench/tau2_c2kv
 ```
 
-The server must be launched with `--enable-c2kv --c2kv-query-proj gist`
-(training-consistent projections; `base` = pre-2026-09 behaviour, for A/B
-only) and `--disable-cuda-graph`. Every response and every request-log row
-records the mode (`c2kv_query_proj`).
+For checkpoint-1088, use `--enable-c2kv --c2kv-query-proj base` and
+`--disable-cuda-graph`. `base` is the paper/original lowercase-qkv rule;
+`gist` reproduces the later local fork used by G training. Select the mode
+from the checkpoint provenance (see `docs/c2kv_semantics.md`), and record
+both the configured and effective modes in every run.
 
 The in-repo Flask `hf_server` is RETIRED from the evaluation path: it
 survives only as the `hfserver` contrast backend (`backends/hfserver.py`)

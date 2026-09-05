@@ -1,28 +1,25 @@
 # C2KV semantics across paper, training checkpoint, harnesses and server
 
-Status: authoritative for the bench stack (`benchmarks/`) since 2026-09-02.
+Current implementation contract for the consolidated `task/bdf-pilot` stack.
 Companion to the server-side document
 `kvoffload-sglang-c2kv:c2kv/c2kv_serving_semantics.md` (branch
-`task/c2kv-serve-align`). Read both before adding an arm, changing the proxy,
+`task/bdf-pilot`). Read both before adding an arm, changing the proxy,
 or comparing a number from this repo with a number from anywhere else.
 
-The one rule: **the checkpoint is the ground truth.** A checkpoint is defined
-by the code that trained it (`python/train/*`, `python/models/*`). Where the
-paper text (arXiv 2607.17715) and the training code disagree, an evaluation
-must follow the training code, otherwise it evaluates a model that was never
-trained. "The server matches the paper" is therefore not evidence that the
-checkpoint is wrong, and "the harness matches the training code" is not
-evidence that the paper is wrong. Both naive readings have been made in this
-project; do not repeat them.
+Keep the paper algorithm, a checkpoint's training implementation, and the
+current fork distinct. Current `python/models/*` is not evidence of the code
+that trained an older checkpoint. The projection correction in section 4
+supersedes this document's earlier claim that default `gist` matched both
+the paper and checkpoint-1088.
 
 ## 1. Four implementations, one name
 
 | face | code | regime it implements |
 |---|---|---|
 | training | `python/train/trainer.py`, `train_data_multiturn.py`, `python/models/qwen3/modeling_qwen3.py`, `gist_utils.py` | defines the checkpoint |
-| D-line harness (single-step, teacher-forced) | `agent/eval_agent_history_c2kv.py`, `agent/d_kv_intervene.py`, `agent/d1_arms.py`, sidecar `agent/d0_sidecar.py` | same loader and same model code as training: matches training by construction (modulo 768/16 vs 512/12) |
-| bench proxy (end-to-end, τ²/BFCL/ToolSandbox) | `benchmarks/proxy.py` + `benchmarks/backends/sglang.py` | client of the SGLang fork; since 2026-09-02 re-aligned to training (sections 2, 3, 5) |
-| SGLang fork server | `Tracy-ZYH/kvoffload-sglang-c2kv` branch `c2kv-sglang-bfcl`, our branch `task/c2kv-serve-align` | serves the checkpoint; see the server document |
+| D-line harness (single-step, teacher-forced) | `agent/eval_agent_history_c2kv.py`, `agent/d_kv_intervene.py`, `agent/d1_arms.py`, sidecar `agent/d0_sidecar.py` | current local model implementation; its post-gist query projections differ from the original lowercase-qkv implementation |
+| bench proxy (end-to-end) | `benchmarks/proxy.py` + `benchmarks/backends/sglang.py` | one serving/arm interface shared by registered benchmark adapters |
+| SGLang fork server | `Tracy-ZYH/kvoffload-sglang-c2kv` branch `c2kv-sglang-bfcl`, consolidated branch `task/bdf-pilot` | explicit base/gist query modes; see section 4 and the server document |
 | upstream BFCL harness (雨晗) | `Tracy-ZYH/bfcl-c2kv` `c2kv_eval/` | a different client of the same server, with its own regime (section 6) |
 
 ## 2. What is compressed
@@ -74,32 +71,38 @@ at 768/16.
   `Completed history unit:\n<history_message role=…>…`. Neither of the two
   bench formats above; the extractor never saw it in training.
 
-Consequence for reading numbers: every bench number produced before
-2026-09-02 with a compressed arm used the `message` format, and every
-`bfcl-c2kv` number uses the `Completed history unit` format. Neither is the
-training format. Only D-line numbers are.
+Read packing and projection mode from each run's inputs and request logs.
+Matching document text alone does not establish matching attention semantics.
 
 ## 4. Projections after gist KV
 
-Training (`modeling_qwen3.py:242-246, :673`): once gist KV is in the cache,
-every token of the main forward (query, answer) is projected with
-`gist_{q,k,v}_proj` (all three, `--gist_param qkv` in every training
-script). The system prefix is prefilled separately with the base
-projections (`trainer.py:_build_system_kv`). Paper §3.2.2 says the gist
-projections apply "exclusively" to gist tokens; the training code does not
-do that.
+The [paper](https://arxiv.org/abs/2607.17715) section 3.2.2 and
+[original implementation](https://github.com/s7a9/C2KV/blob/832ccd9c/python/models/qwen3/modeling_qwen3.py)
+agree for lowercase `gist_param=qkv`: original/query tokens use base QKV;
+gist tokens use the trained QKV heads. The original code tests uppercase
+`Q`, `K`, `V` for main-query substitutions. Mixed-case `QkV` is a separate
+configuration with gist Q/V and base K; it must not be silently treated as
+all-base or all-gist.
 
-- D-line harness / hf_server: `use_gist` global rule (docs/hybrid_spec.md §4),
-  matches training.
-- SGLang server before 2026-09-02: base projections for the query
-  (train/serve mismatch). Since `task/c2kv-serve-align`:
-  `--c2kv-query-proj gist` (default) restores the training rule; `base`
-  keeps the old behaviour for A/B. The mode used is echoed in every response
-  (`metadata.sglang_runtime.c2kv_query_proj`) and copied into the proxy
-  request log (`c2kv_query_proj` column).
-- Effect size: **unknown** until the A/B is run (τ² c2kv arm, same
-  checkpoint, both modes). Until then a compressed bench number must carry
-  its mode; a number without it cannot be compared across modes.
+Local commit `6b3531f` (2026-08-09) changed those tests to lowercase. Current
+D/HF code and later local G training therefore have a different query rule.
+This is a fork extension, not a discrepancy between the paper and its code.
+
+`inv_1088/a1_config_1088.json` records checkpoint-1088 creation on 2026-08-01;
+its config contains lowercase `qkv`. The recorded timeline supports base
+query projections for that checkpoint. An exact training source snapshot
+was not archived, so a training-machine dirty patch cannot be excluded from
+the timeline alone.
+
+- `--c2kv-query-proj base` is the serving default and the reference mode for
+  lowercase-qkv checkpoints, including the checkpoint-1088 launcher.
+- `--c2kv-query-proj gist` explicitly reproduces the later local fork rule.
+  Use it for checkpoints known to have been trained with that rule and for
+  matched A/B tests. Existing D results are not retroactively relabelled.
+- Every response records the server flag, effective per-request mode and
+  decode verification. Compare D and SGLang only after matching these modes,
+  packing, tools rendering and placement. A synthetic smoke test checks the
+  implementation path; it does not estimate benchmark quality effects.
 
 ## 5. Repair arms
 
@@ -129,7 +132,7 @@ Placement (`arms.py` `repair.placement`, server field
 | placement | D-line arm | bench arm | what the server does |
 |---|---|---|---|
 | `append_keep_ledger` | `corr`, `raw_keepG` | `c2kv_repair`, `hybrid_repair` | span keeps its original RoPE phase, gist stays, query position unchanged |
-| `append_tail` | `raw_erratum_tail` (best D-line arm) | `c2kv_repair_tail`, `hybrid_repair_tail` | span re-rotated to the end of history, ledger advances |
+| `append_tail` | `raw_erratum_tail` | `c2kv_repair_tail`, `hybrid_repair_tail` | span re-rotated to the end of history, ledger advances |
 | `in_place` | `raw_replaceG` | `c2kv_repair_inplace` | span replaces the gist, query continues from the span's end |
 
 The proxy inserts a repair-only message right before the current block for
@@ -154,39 +157,24 @@ After the response, `repair_frame` compares the span position with the
 server-reported gist ledger (`c2kv_layout`) and carries its own `ok_reason`;
 `ok: null` is likewise not a pass, and it is null for `in_place` at
 `doc_index` 0 — policy `first` on a single-doc turn — so on BFCL the
-`c2kv_repair_inplace` arm has BOTH frame checks unavailable. A non-zero delta
+`c2kv_repair_inplace` arm still has the independently measured extraction-frame check. A non-zero delta
 means gist frame and raw frame diverged, which is exactly the defect
 described in section 6; do not read a repair number with a non-zero delta,
 and do not read a null one as a zero.
 
-## 6. Reading 雨晗's table against ours
+## 6. Historical D/BFCL results
 
-`bfcl-c2kv` (BFCL multi_turn_base, stable52, ratio 4, checkpoint-1088):
+`inv_ur52/FIX_VERIFY.md`, `TOOLS_NORM52.md` and `FORK_192.md` contain the
+successive tools-rendering correction and frozen-history investigations.
+They supersede the earlier explanation in this section that attributed
+Append failures to duplicated gist content or a small wrapper offset.
+These artifacts retain their original single-run scope and server numerics;
+the consolidation does not turn them into a new benchmark result.
 
-- Full 100 %, Rollback D4 100 %: by construction (stable52 = ids where Full
-  succeeded twice; D4 regenerates the whole 4-step segment with the
-  uncompressed history).
-- Append W2 < C2KV: her gists are extracted from the `Completed history
-  unit` wrapper while her raw repair KV is sliced from the native rendering;
-  the server's position ledger advances by the wrapper length, so gist and
-  raw live in two frames 14–27 tokens per unit apart, and the append
-  placement leaves the query in the gist frame. Mechanism verified in code
-  (server `scheduler.py` ledger + her `_full_history_unit_layout`), effect
-  size not established. Our proxy uses one rendering for both, so the two
-  frames should agree by construction — but that is a claim the frame check
-  can only confirm where it is computable, and on BFCL FC it is not (no
-  system message, see section 5).
-- her Replace/Recompute > Append and our `corr_re` > `corr`: same
-  direction, both underpowered.
-- her Hint Only: injects no KV at all (`repair_kind='none'`), the note it
-  emits is literally "units [] have been restored"; not a repair result.
-- her detector precision-1.0 rows: label and feature are the same event
-  (execution error ⇒ harmful); the generation-NLL rows (AUROC ≈ 0.54) agree
-  with our own finding that log-prob signals are unusable.
-- her `c2kv` compresses less than ours (section 2) and uses a rendering the
-  extractor never saw (section 3); her table was produced with the server's
-  base query projections (section 4). None of her rows is directly
-  comparable with a τ² or D-line row here.
+The upstream BFCL client uses a different history wrapper and compression
+boundary. Comparing its rows to this proxy requires matching the rendered
+tools, packing, query projections, compression ratio, repair source/placement
+and scoring protocol. Request logs provide the serving-side checks.
 
 ## 7. Provenance columns every bench row now carries
 
@@ -201,16 +189,21 @@ run), `c2kv_query_proj_effective` (what the request actually ran),
 `ok_reason`). `run.py` summaries carry `doc_packing`, `max_doc_length`,
 `max_doc_num`, `backend`.
 
-A number without these columns predates 2026-09-02 and was produced under
-the `message` packing and base query projections.
+Missing provenance is unknown, not proof that a run used a particular
+historical mode. `benchmarks/reqlog.py` retains missing effective modes as
+`absent` and reports mixed server flags.
 
-## 8. Open items
+## 8. Validation order
 
-- A/B `--c2kv-query-proj base` vs `gist` on τ² (same checkpoint, same seed)
-  — the only way to learn the effect size of section 4.
-- Re-run the SGLang matrix (full / c2kv / hybrid / recover / repair arms)
-  under `turn` packing; pre-2026-09 compressed rows are a different regime.
-- BFCL on the SGLang stack has never been run in this repo; the 3 %/7.3 %
-  Full number is hf_server-era and its cause is undetermined (not the
-  decode fallback, not the dialect).
-- `rp` arms: no valid number exists yet on any stack.
+1. Run the local pure-Python contracts, then the torch-backed D/G and
+   SGLang cache/attention tests in the server environments.
+2. Run `benchmarks/ops/check_algorithm_parity.py` against a pinned original
+   checkout for extraction masks, logical positions, residuals and projection
+   rules. Known original edge cases are reported separately from parity.
+3. Run `benchmarks/ops/server_smoke.py` through the real proxy in both base
+   and gist modes. It checks cold/warm requests, KV accounting, effective
+   projection and all repair placements before any quality experiment.
+4. Run bounded official benchmark adapter smoke cases, then the selected
+   full/c2kv/hybrid/repair matrix with frozen inputs and separate output
+   directories per mode. A/B quality results require matched seeds and
+   scoring; integration-test success alone is not an improvement claim.

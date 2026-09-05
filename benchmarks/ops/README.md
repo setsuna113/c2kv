@@ -1,64 +1,75 @@
-# Ops: live launchers for the SGLang eval path
+# Serving and validation
 
-The two scripts vendored here are the **only** ops tooling still on the
-live SGLang evaluation path (verified 2026-09-03 by auditing every script
-under `~/bench_queue/`, `~/bench_logs/` and `~/bench_results/` on the NPU
-server). Everything else there is hf_server-era or one-off history — see
-"Not vendored" below. Server-side live copies remain the deployed
-originals; these in-repo copies are the version-controlled reference with
-absolute paths demoted to env-overridable defaults.
+Use the consolidated `task/bdf-pilot` branches of both repositories. Serve
+from an explicit `SGLANG_DIR`; the launchers no longer select an old patched
+tarball. Historical patches in `backends/sglang_patches/` are reproduction
+material and are not applied to the consolidated tree.
 
-## Scripts
+`launch_sgl1088.sh` runs the server in the foreground. `MODEL_PATH`,
+`PYTHON_BIN`, `SGLANG_DIR`, `DEVICE`, `PORT`, `QUERY_PROJECTION`, pool sizes
+and context length are environment overrides. For checkpoint-1088 the
+default is `QUERY_PROJECTION=base`. `gist` is the later local-fork rule;
+see `docs/c2kv_semantics.md` before selecting it for a checkpoint.
 
-* `launch_sgl1088.sh` — boots the SGLang c2kv server (default dev3 :35000,
-  checkpoint-1088 as `c2kv-agent`, `--enable-c2kv --c2kv-query-proj gist
-  --disable-cuda-graph`). Env overrides: `SGLANG_DIR`, `PYTHON_BIN`,
-  `MODEL_PATH`, `PORT`, `DEVICE`. The in-repo copy adds
-  `--c2kv-query-proj gist` over the server original because
-  `benchmarks/README.md` mandates training-consistent projections and the
-  deployed fork predates the flag.
-* `launch_sgl_proxy.sh <arm> <port> <upstream_port> [suffix] [extra...]` —
-  (re)starts the arm proxy in front of the SGLang server, kills the previous
-  proxy on the port, logs under `$LOG_DIR`. Env overrides: `REPO_DIR`,
-  `LOG_DIR`, `PY`.
+`launch_sgl_proxy.sh <arm> <port> <upstream_port> [suffix] [extra...]` starts
+a standalone proxy from this checkout. An occupied port is an error; the
+launcher does not stop another service. Normally use `benchmarks/run.py`,
+which owns the proxy for one benchmark run.
 
-## Environment map (NPU server)
+## Environment map
 
-| Component | venv / python | Notes |
-|---|---|---|
-| SGLang server | `~/envs/sgl/bin/python` | tree from `SGLANG_DIR` via PYTHONPATH precedence |
-| proxy.py / BFCL | `~/envs/bench/bin/python` | BFCL must run with cwd inside the gorilla checkout |
-| τ²-bench | `~/envs/bench312/bin/python` | `TAU2_DIR=~/benchmarks/tau2` |
-| ToolSandbox | `~/envs/benchts/bin/python` | `TS_DIR=~/benchmarks/ToolSandbox` |
-| hf_server (contrast only) | `~/envs/c2kv/bin/python` | retired from the eval path |
+| Component | NPU-host Python/environment |
+|---|---|
+| SGLang server | `/home/liuyancheng/envs/sgl/bin/python` |
+| Torch-backed D/G tests | `/home/liuyancheng/envs/c2kv/bin/python` |
+| BFCL / proxy | `/home/liuyancheng/envs/bench/bin/python` |
+| tau2 | `/home/liuyancheng/envs/bench312/bin/python` |
+| ToolSandbox | `/home/liuyancheng/envs/benchts/bin/python` |
 
-NPU env: `source /usr/local/Ascend/cann-8.5.0/set_env.sh` +
-`/usr/local/Ascend/nnal/atb/set_env.sh`, unset http(s)_proxy, keep
-`NO_PROXY=127.0.0.1,localhost`.
+NPU processes need the CANN and ATB environment setup already sourced by
+`launch_sgl1088.sh`. The launcher uses `--disable-cuda-graph`; graph mode
+must not be assumed to preserve per-request projection routing.
 
-Port conventions: SGLang servers 35000+ (35000 dev3, a second instance was
-seen on 35002), per-task arm proxies 34200+ (hash of the task name), ad-hoc
-proxies 34100+/35100+. Device affinity: the sgl server pins
-`ASCEND_RT_VISIBLE_DEVICES` (3 in the default script); respect the team
-device-allocation rules before changing it.
+## Gates
 
-## Not vendored (audited 2026-09-03, deliberately out of repo)
+Run the CPU contracts from the C2KV repository:
 
-* `~/bench_queue/{worker,run_one_task,delayed_worker}.sh` and
-  `~/bench_logs/{launch_hf,launch_proxy}.sh` — the hf_server-era task
-  queue. Structurally superseded by `benchmarks/run.py` (which owns proxy
-  lifecycle, adapter dispatch and terminal-state checks in one command);
-  kept server-side only as the record of how the Aug-31 `bx_*` runs were
-  produced. If the hfserver contrast backend is ever rerun, run it through
-  `run.py --backend hfserver`, not the queue.
-* `~/bench_results/bfcl_arm.py` — mirror of
-  `benchmarks/adapters/bfcl_adapter.py`; the adapter is canonical (adds
-  terminal-state enforcement). The mirror's extra `--partial-eval` /
-  `bfcl_scores.log` append were queue-only conveniences.
-* `~/bench_logs/sgl_deploy/*.patch` (7 files) — 2 of 7
-  (`split_qkv_rmsnorm_rope`, negative-extend clamp) are load-bearing and
-  already encoded in `benchmarks/backends/sglang_patches/0001-*.patch`;
-  the other 5 are stale working-copy patches superseded by the fork's own
-  NPU commits. `0001` is the deployment source of record.
-* `~/bench_results/collect_all_r2.sh` — one-shot collector for the frozen
-  Aug-30 r2 matrix.
+```bash
+python -m pytest agent metrology python/train python/models benchmarks -q
+```
+
+Then check the algorithm against a pinned original checkout (the original
+source is an input, not a vendored duplicate):
+
+```bash
+python benchmarks/ops/check_algorithm_parity.py --help
+```
+
+On the NPU host, run the checkpoint integration gates in an unused output
+directory and an available device. This starts and stops only its own
+server/proxy process groups:
+
+```bash
+python benchmarks/ops/validate_npu.py \
+  --sglang-dir /path/to/sglang-c2kv \
+  --model /home/liuyancheng/checkpoints_upstream/checkpoint-1088 \
+  --device 1 --out /path/to/new-validation-output
+```
+
+The default runs base and gist sequentially. Each mode checks full, C2KV,
+hybrid, repair placements, history-KV methods and CacheBlend, with two
+identical cold/warm requests per arm. `summary.json`, raw responses, request
+logs and server logs persist. Failure stops the next mode. These synthetic
+requests test integration; they are not official benchmark scores.
+
+For a server already launched by the caller:
+
+```bash
+python benchmarks/ops/server_smoke.py --upstream http://127.0.0.1:35020 \
+  --query-projection base --out /path/to/new-smoke-output
+```
+
+After these gates pass, use the registered adapters in `benchmarks/run.py`
+for bounded official smoke cases, then full matrices. Use separate output
+directories for checkpoint, query mode and packing regime. Do not merge
+historical message-packing or unrecorded projection modes into a new run.

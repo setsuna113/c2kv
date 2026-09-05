@@ -43,10 +43,10 @@ Wire protocol (verified live against 22fbf3146 on NPU, docs/sglang_migration.md)
   freed slots / kept tokens), which normalize_response turns into
   ``history_kv_*`` cost columns.
 
-Regime notes (superseding the 2026-08-30 decisions in docs/sglang_migration.md):
-the server's ``--c2kv-query-proj gist`` restores the training use_gist rule
-for post-gist tokens; docs are packed by the proxy in the TRAINING turn
-format (``--doc-packing turn``); repair placement is explicit.
+Regime notes: ``--c2kv-query-proj base`` follows the original lowercase-qkv
+algorithm; ``gist`` selects the later local fork's query rule. Choose from
+checkpoint provenance (docs/c2kv_semantics.md). The proxy supports turn
+packing and explicit repair placement independently of that choice.
 """
 from __future__ import annotations
 

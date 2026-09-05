@@ -37,6 +37,8 @@ from pathlib import Path
 
 import pytest
 
+pytest.importorskip("torch")
+
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 for _sub in ("python", "python/inference", "agent"):
     _path = str(_REPO_ROOT / _sub)
