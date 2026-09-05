@@ -1250,12 +1250,15 @@ def _build_full_or_truncate_prefix(
         keep_bos=True,
         max_length=args.max_system_length,
     )
+    # per_doc_ids is needed by the capture path in BOTH modes; previously it
+    # was only assigned in the non-truncate branch, so capture+truncate died
+    # with a NameError at the doc-lens line below
+    per_doc_ids = _history_doc_ids(tokenizer, history)
     if mode == "truncate":
         history_ids, doc_tokens, kept_tokens = _truncate_history_ids(
             tokenizer, history, args.override_ratio, args.truncate_selection
         )
     else:
-        per_doc_ids = _history_doc_ids(tokenizer, history)
         history_ids = [token for ids in per_doc_ids for token in ids]
         doc_tokens = len(history_ids)
         kept_tokens = doc_tokens
@@ -1281,8 +1284,13 @@ def _build_full_or_truncate_prefix(
             doc_token_lens = [len(ids) for ids in per_doc_ids]
             n_docs_original = sum(1 for m in example.history_messages if m.get("content"))
             capture_ctx.record_history_docs(history, doc_token_lens, n_docs_original)
-        if capture_ctx is not None and capture_ctx.capture_context and len(history_ids) > 1:
-            # chunk-end boundaries + the very last history position
+        if capture_ctx is not None and capture_ctx.capture_context and len(history_ids) > 1 \
+                and mode != "truncate":
+            # chunk-end boundaries + the very last history position.  In
+            # truncate mode history_ids is NOT the concatenation of
+            # per_doc_ids (docs are dropped/split by the truncator), so the
+            # per-doc bounds do not align with the prefilled sequence — skip
+            # the ctx-position capture there rather than record wrong positions.
             bounds = [acc - 1 for acc in itertools.accumulate(len(ids) for ids in per_doc_ids)]
             with capture_ctx.capture_plain_forward(
                 model, flat_positions=bounds, want_oproj=True, tag="ctx"
