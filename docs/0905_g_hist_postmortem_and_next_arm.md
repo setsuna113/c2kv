@@ -209,3 +209,94 @@ CPU 测试：**290 passed / 16 skipped**。4 个失败是既有环境项
 - 不要拿 10595 的 τ² 数字（训练池含 tau2 轨迹，见 32 号文档第 0 节）。
 - 不要把第 2 节的 c2kv/hybrid 差值称为 improvement：单 seed、欠剂量 checkpoint，
   `preliminary, n=1`。
+
+
+---
+
+## 5. 2026-09-05 晚：审计更正与下一臂修订（本节覆盖 §2 与 §4 中与之冲突的说法）
+
+本节来自当日对论文配方、训练 / 选档 / 流水线 / serving 四条代码路径的审计（60 条发现，按文件簇对抗核查后 55 条成立，17 条判为开训前必修）。代码修复已随本 commit 落地；本节只记**读数怎么改**与**下一臂怎么跑**。
+
+### 5.1 §2 的数字要改读：c2kv 不在地板上，是选档 harness 把它压到地板
+
+对 HF 上 s42 / s43 的 `history_dev/checkpoint-588/rows.jsonl` 离线重算 `paired` 块
+（`agent/eval_agent_history_c2kv.py::_summarize_rows`，零 GPU；结果在本机 `tmp/hf_status/dl/paired_rescore_s42_s43.json`）。
+paired = full / truncate 都没跳过的 102 行（43 个 tool target），四个 mode 在**同一批行**上：
+
+| mode | s42 acc / on_tool | s43 acc / on_tool |
+|---|---|---|
+| c2kv@8x | 0.098 / **0.233** | 0.118 / **0.279** |
+| hybrid (tail 3) | 0.206 / 0.488 | 0.196 / 0.465 |
+| full | 0.216 / 0.512 | 0.216 / 0.512 |
+| truncate@8x | 0.059 / 0.140 | 0.059 / 0.140 |
+
+即在同分布行上 c2kv@8x 保留 full 的 45–55%，是 truncate 的近两倍；两个 seed 方向一致。`preliminary, n=1`，且 43 个 tool target 的区间很宽。
+
+§2 的 `c2kv 0.0386` 是全 700 行的读数，它低主要是 harness 自身的三个问题（代码已修，旧数字不重算不可比）：
+
+1. **system 前缀右截断**：harness 把 AppWorld 整个工具表（均值 18.5k token）渲进 system，再在 `max_system_length=20480` 处右截断——593/700 行被截在某个 tool schema 中间；训练侧是「超长整例 skip」且最多 32 个工具、上限 4096。
+2. **`max_new_tokens=128`**：578/700 行 c2kv 生成在 128 处被截断（482/700 行 target 本身就超过 128 token）。
+3. **hybrid 列有 171/700 行实际未压缩**（历史全部落进 raw tail，`actual_compression_ratio=1.0`），所以 §2 的「+22.7pp」不是 iso-compression 的比较；剔除这些行后 hybrid 仍在 412 行上以 124:5 压过 c2kv（tool target 行，成对计数）。
+
+harness 现在把这四项写进每行（`system_truncated` / `generation_capped` / `prompt_truncated` / `uncompressed`）与每 mode 计数，并提供 `SYSTEM_OVERFLOW=skip`（训练侧规则，改变分母，与旧 summary 不可比）。
+
+### 5.2 论文的起点配方，G 线从未按它跑过
+
+`scripts/train_qwen3-4b-mixed_agent.sh`（论文自己的 agent 臂）：**两段式**（从 mdoc gist `checkpoint-8000` 续训）、eff-batch 32（8×1×4）、warmup 200 步、`--recent_message_num 4`（每例随机保留 1–4 条**原文**近期消息，`train_data_multiturn.py:234-238`，即论文口径本身就带 raw tail）、`max_system_length 8192`、`max_length 16384`、130k 样本 1 epoch。
+§4.0 只记了 eff-batch 与 warmup 两条差距；两段式、raw tail、system 8192 三条此前没有记录，也没有写过偏离理由。训练目标本身（answer-only CE、只训 gist、冻结 base）与论文一致，`GistMultiDocTrainer` 同一份代码。
+
+### 5.3 Arm B 的 raw tail 三处表面不一致，所以先跑 k=0
+
+- 训练（`train_data_joint.py` hybrid tail）：把最后 k 个**轮文档**（user-role「Previous turn…」文本）用 chat template 渲成 user 消息，放在 gist 之后。
+- serving（`benchmarks/arms.py` hybrid）：最后 3 条**原生消息**（assistant 带 `tool_calls`、tool 角色）原样放在 gist 之后。
+- 选档 harness（`--hybrid_full_after_c2kv` 默认 False）：raw tail 放在 gist **之前**。
+
+三者的单位（轮 vs 消息）、渲染面（文本 vs 原生）与位置都不同。§4.1 第 2 条「第一臂跑 Arm B」**撤回**：下一臂 = Arm C（k=0，其余同 Arm A，剂量修好），hybrid regime 等 serving 侧 BUNDLE C（arms.py 改为轮单位 + 与训练同一渲染面）和 harness 的 `HYBRID_FULL_AFTER_C2KV=True` 一起定案后再训。
+
+### 5.4 本轮落地的代码（默认值变化以 `start_h200.sh` 头部注释为准）
+
+- 训练数据：`_stratified_pick` 负数样本数崩溃（`require_tool_call=False` 下「先文本后工具」的普通轨迹必现）；Toucan / Open-SWE 的 `tools_in_system` 池同样走 `_shuffled_system_tools`（2cea1d1 只修了 traces）。
+- 流水线：剂量闸门先于 `run_config.json` 落盘，复用 run_config 时按当前上限再判；新旋钮 `MAX_EPOCHS`（默认 3）、`WARMUP_STEPS`（常数 100，calibrate 与 train 共用）、`EVAL_STEPS`、`ALLOW_GPU_MISMATCH`（卡数不符默认 FATAL）、`ALLOW_TAU2_IN_TRAIN`（`SUBSET_WEIGHTS` 默认翻成 `traces:tau2=0`）；`ORDER_FILE` 由 recipe 名派生；`MAX_SAMPLES_PER_SESSION` / `MAX_TOOLS_PER_SAMPLE` 同时传给 planner、`measure_arm_psrc` 与 trainer；run_config 记 n_gpus / eff_batch / lr / warmup / skip_counts 等；`DOC_MODE=history_only` 时 `SELECT_METRIC` 默认 history、`EVAL_BFCL` 默认 0；FINAL_SUMMARY 加 hybrid / on_tool_targets 列与欠剂量横幅。
+- 选档 harness：5.1 的四项计数；`SYSTEM_OVERFLOW`；`HYBRID_FULL_AFTER_C2KV=True` 路径的 attention mask 宽度修正；`build_appworld_dev_split.py --max_system_tokens`。
+- serving：`run_matrix_h200.sh` pin 改到 `task/c2kv-serve-align` 718a654e3（4d08 的 `_compute_c2kv_segments` 渲染插入点时不带 `tools=`，每个 gist 都插错位；4d08 与 HEAD 都用 base 投影处理 query）；`launch_sglang_h200.sh` 加 `--c2kv-query-proj gist`（默认）与 `--disable-cuda-graph`，`C2KV_POOL_FRACTION` 0.01→0.06；proxy 默认 `--doc-packing turn --max-docs 16 --max-doc-length 768`（先按 768 切分、再按 [doc0]+尾部选取，与 trainer 同序），`tool_calls.arguments` 字符串先 `json.loads` 再渲染，502 路径进请求日志，`summarize_matrix` 标记 degraded；新增 S6 gate（带 tools 走 proxy，核对首个 gist 的 `position_cursor`）。
+- **09-05 之前所有 c2kv / hybrid 的 serving 数字与之后不可比**（消息级打包 + 空 tool_calls + 插入点错位三重叠加）。
+
+### 5.5 下一臂：先 14 GPU-h 的探针表，再一个剂量修好的 Arm C
+
+**S0（本机已完成）**：5.1 的 paired 重算。
+
+**S1（H200，CPU，半天）**：(a) 统计 Toucan / Open-SWE 中 `len(tools) > 32` 的行数（决定 5.4 第一条是否改变 p_pool）；(b) 对 700 个 appworld_dev qid 分别按「整个工具表」与「`_select_tools(max_tools_per_sample=32/48)`」渲染 system 前缀，报能装进 4096 / 8192 的比例；(c) 把 s42 的 `train_manifest_used.json` 按 qid 前缀拆成 toucan / traces 两份 manifest，用 `agent/measure_arm_psrc.py --arm toucan=… --arm traces=…`（768×16 / system 4096 / `--max_samples_per_session 4 --max_tools_per_sample 32`）实测**每例 presented tokens**；(d) planner `--list_traces_subsets` 列出 `traces:other` 的记录数。
+
+**S2（14 GPU-h，全部在 s42 checkpoint 上、前 300 个 qid、ratio 8、768×16、system 20480、128 new tokens、greedy）**：
+(1) `--compare_modes current_only,recent1_hybrid`（`--model $S42 --base_model $S42 --baseline_model_class gist`，current_only 走 FULL_PROMPT_MODES 的换模型路径，指回 checkpoint 本身）；
+(2) untrained control：`CKPT=./models/Qwen3-4B-Instruct-2507 UNTRAINED=1 COMPARE_MODES=c2kv,hybrid MAX_EXAMPLES=300 MAX_SYSTEM_LENGTH=20480 OUT_DIR=<RESULTS_DIR 之外>` 跑 `agent/eval_history_dev_c2kv_h200.sh`（H200 各臂都是 plain DDP，非 ZeRO-3，`--untrained_c2kv` 的 gist_embed 初始化与各臂一致，无需改 `gist_utils`）；
+(3) `--compare_modes c2kv,history_full`，三个 attn impl 全用 sdpa（34k 前缀 eager 会 OOM；c2kv 在同一次调用里重跑，配对不跨 impl）。
+第一张表的行：s42 c2kv（现有行截 300）、untrained c2kv、s42 current_only、s42 recent1_hybrid、s42 hybrid（现有行）、untrained hybrid、s42 history_full（sdpa）、s42 c2kv（sdpa 配对行）、s43 c2kv（现有行）；列：n_valid、num_tool_targets、tool_name_accuracy、on_tool_targets（带二项 95% 区间）、严格 `<tool_call>` 率、exact_match、realized ratio、num_system_truncated、attn_impl、GPU-h。
+
+**停止规则（先写后跑）**，在 300 个配对 qid 的 on_tool_targets 上：
+`D_dose = c2kv(s42) − c2kv(untrained)`，`D_info = c2kv(s42) − current_only(s42)`，`D_headroom = history_full(s42) − c2kv(s42, sdpa)`。
+(1) D_dose 与 D_info 的区间都含 0 → 这个剂量下 gist 路径不可测，直接开 Arm C，不再动方言 / 几何 / ratio / serving（预期分支）。
+(2) D_dose 排除 0 但 c2kv 仍远低于 recent1_hybrid → 开 Arm C 并**只加一项**混合变化（已 import 未接线的 QA 源）。
+(3) current_only / c2kv / hybrid / history_full 四者相差不到一个区间宽度 → harness 或 split 坏了：停，先用 `build_appworld_dev_split.py --max_system_tokens` 重建 dev split。
+(4) calibrate 的 `expected_presented` 必须落在 [96M, 160M] 且 epochs ≤ 2；`ALLOW_SMALL_DOSE` 与 `MAX_EPOCHS` 一律不放宽；两次重新 plan 仍不达标 → 可报告的结论是「此池撑不起这个臂」。
+(5) 每个 milestone 在同 300 行、同几何下必须以区间排除 0 的幅度赢过 untrained control，且第三档不得比第二档低超过一个区间宽度；否则杀掉、不跑 serving、按负结果报（带实际 presented 剂量）。
+(6) serving 确认（S8）：BFCL multi_turn_base 上 c2kv@8x 的 `semantic_score_ci95` 与 full 若无可测保留率、或不赢 untrained 的 served 对照 → 训练线停，改报压缩-精度曲线。
+
+**Arm C 环境块**（`bash start_h200.sh`，不设 `EPOCHS_OVERRIDE` / `ALLOW_SMALL_DOSE`）：
+```
+RECIPE='g_hist_dose=toucan:<1-s>,traces:<s>' SUBSET_WEIGHTS='traces:tau2=0 traces:appworld=1 traces:other=<w>'
+MAX_SAMPLES_PER_SESSION=<4..16> PLAN_BUDGET_EST=<B> G_H200_EXPECT_SHARES=toucan:<realized>,traces:<realized>
+DOC_MODE=history_only TOOLS_IN_SYSTEM=True MAX_DOC_LENGTH=768 MAX_DOC_NUM=16 MAX_SYSTEM_LENGTH=4096 MAX_LENGTH=2048
+MAX_TOOLS_PER_SAMPLE=32 C2KV_GIST_TRAIN_RATIOS=8 PER_DEVICE_BS=2 GRAD_ACCUM=8 EXPECT_GPUS=2 CUDA_VISIBLE_DEVICES=0,1
+LR=5e-5 WARMUP_STEPS=100 TARGET_PRESENTED_TOKENS=128000000 MIN_PRESENTED_TOKENS=96000000 MAX_EPOCHS=2
+MAX_EVAL_EXAMPLES=300 EVAL_HISTORY=1 EVAL_BFCL=0 SELECT_METRIC=history HIST_SPLIT_MANIFEST=./outputs/appworld_dev_split_manifest.json
+HIST_MAX_EXAMPLES=300 HIST_COMPARE_MODES=c2kv HIST_MAX_SYSTEM_LENGTH=20480 CHECKPOINT_TOKEN_GRAN=16000000 MIN_MILESTONES=4
+SEED=42 STATUS_DIR=<GU>/status/g_hist_dose OUTPUT_DIR=<GU>/checkpoints/qwen3-4b-hist-dose-h200 RESULTS_DIR=<GU>/results/g_hist_dose
+```
+s、w、B 由 S1(c)(d) 的实测决定：`s×B ≤ A_traces` 且 `(1−s)×B ≤ A_toucan`（planner 的 `budget_shrink` 取各 family 的 min，这正是 Arm A 缩到 1,606 例的机制），并要求预测 `p_pool_presented ≥ 96M` 且 epochs ≤ 2；`--min_budget_shrink` 用 0.9，绝不传 0。ratio 固定 8（Arm A 的 8,8,4,16 把一半剂量花在服务从不用的几何上）；eff-batch 32 = 论文全局 batch（梯度累积不多花 GPU-h）；`HIST_MAX_SYSTEM_LENGTH=20480` 是刻意的——它是 S2 全部对照行与 s42/s43 的口径，停止规则是**差值**；`HIST_MAX_EXAMPLES=300 / c2kv only` 每档 ~0.9 GPU-h（700×4 mode 实测 10.2 GPU-h）。选出的档再以 `MAX_EXAMPLES=700 COMPARE_MODES=c2kv,hybrid,full,truncate` 跑一次，只读 `paired` 块。
+
+**S8（在 S7 之后，serving 修复已在本 commit 落地）**：top-2 档 + full 臂只跑 BFCL multi_turn_base（`ARMS="full c2kv" BENCHMARKS=bfcl`），caption 必须写 `doc_packing / max_docs / max_doc_length / sglang_commit / c2kv_query_proj`。三 benchmark 全矩阵、BUNDLE C、ToolSandbox user simulator 单独 base URL、`--c2kv-query-proj base/gist` A/B、seed 43，全部在第一张 served 表之后按需买。
+
+### 5.6 serving pin 的现状
+
+`run_matrix_h200.sh` 现 pin `setsuna113/kvoffload-sglang-c2kv` `task/c2kv-serve-align` @ 718a654e3。雨涵上游 `Tracy-ZYH/kvoffload-sglang-c2kv` 的 `c2kv-sglang-bfcl` 已于 2026-09-05 00:32 +0800 推到 d42ce815f（`history_kv_eviction` / `session_aware_cache` / 消息级 `c2kv_use_gist_projection`，2047 行），serve-align 尚未 rebase 到它；S8 前要么先 rebase 再 pin，要么在 caption 里注明 pin 落后上游。两个 pin 都没有 `_compute_c2kv_segments` 的单元测试。

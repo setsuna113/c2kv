@@ -53,8 +53,13 @@ python agent/dedup_cross_dataset.py \
 > 但 repo 里**只有 BFCL 侧的 eval 导出器**（`--bfcl_dir`）。`agent/extract_medium_dedup_units.py`
 > 导出的是 traces-v2 eval / QA / OpenSWE 三类 train 侧或 traces 侧单元，
 > **τ² 与 ToolSandbox 的 eval 导出器没有实现**——所以今天跑不出"训练集 × τ²/ToolSandbox"这一对的 removal 清单。
-> 在实现之前，本臂对 τ² 的处置是**双重排除**：planner 侧 `traces:tau2=0`，
-> split manifest 侧 `--exclude_benchmarks` 把 airline/retail/telecom 从 train 侧剔掉。
+> 在实现之前，本臂对 τ² 的处置是 planner 侧 `traces:tau2=0`（冻进 order file，
+> trainer 的 `_apply_example_order_file` 只吃 order file 里的 qid，所以训练侧的排除**只有这一道**）。
+> **2026-09-05 更正**：此前写的「双重排除」不成立——`--exclude_benchmarks` 只作用于
+> `build_appworld_dev_split.py` 产出的 history-dev manifest 的 train 侧，而 trainer 从不读它
+> （start_h200.sh 传给 trainer 的是 `agent_taskproxy_split_manifest.json` / `taskproxy_disjoint`）。
+> 2026-09-05 起 start_h200.sh 的 `SUBSET_WEIGHTS` 默认已改为 `traces:tau2=0`，且 phase_plan
+> 断言 plan 里 tau2 层为空（`ALLOW_TAU2_IN_TRAIN=1` 才放行）。
 > τ² 因此只能作为**未被训练污染的 serving benchmark**使用，不作为训练分层。
 
 ```bash
