@@ -252,6 +252,14 @@ def steps_features(rec: Dict[str, Any], tokenizer: Any,
         f["fc_avg_nll_smt"] = sum(-x for x in smt_lps) / len(smt_lps)
         f["fc_gnll_smt"] = sum(-x for x in smt_lps)
         f["smt_token_frac"] = len(smt_lps) / n
+    # DRAGIN s-masked entropy: the prereg's three-factor decomposition asks
+    # for H alone / a_max alone / s-masked H; the s-masked row was never
+    # computed.  Semantic mask = name span + arg keys/values (syntax and
+    # whitespace excluded), same SMT set as above.
+    smt_ents = [ents[i] for i in sorted(smt) if i < n]
+    if smt_ents:
+        f["dragin_h_smasked_max"] = max(smt_ents)
+        f["dragin_h_smasked_mean"] = sum(smt_ents) / len(smt_ents)
 
     # --- 4.2 Leyline / KnowNo (name first token) ---
     vocab = FALLBACK_VOCAB

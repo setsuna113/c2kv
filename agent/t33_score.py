@@ -61,6 +61,7 @@ ORIENTATIONS: Dict[str, int] = {
     "entropy_args_max": 1, "entropy_max_span": 1,
     "entropycache_max_all": 1, "entropycache_max_no_eos": 1, "hbar_no_eos": 1,
     "ergo_dh_region": 1,
+    "dragin_h_smasked_max": 1, "dragin_h_smasked_mean": 1,
     "svip_sqrt_h_name_first": 1, "svip_sqrt_h_args_first": 1, "svip_sqrt_h_argvalue_max": 1,
     "confkv_c_min": -1, "confkv_c_mean": -1, "confkv_c_name": -1,
     "ecusum_u_max": 1, "ecusum_u_mean": 1, "ecusum_a_max": 1, "ecusum_a_mean": 1,
@@ -291,32 +292,58 @@ def ecusum_finalize(frame_rows: List[Dict[str, Any]]) -> Dict[str, Any]:
 
 # ------------------------------------------------------------------ KnowNo
 
-def knono_report(frame_rows: List[Dict[str, Any]]) -> Dict[str, Any]:
-    rows = [r for r in frame_rows if r.get("c::kono_pool_mass_top5") is not None]
+def knono_report(frame_rows: List[Dict[str, Any]], keep_mask: Optional[np.ndarray] = None) -> Dict[str, Any]:
+    """KnowNo diagnostics on the TRIGGER SUBSET (C->W vs C->C).  The previous
+    build ran over the whole 900-row frame with a random half split, so its
+    '317/354' numbers were not on the prereg's 161-row eval set."""
+    rows = [r for i, r in enumerate(frame_rows)
+            if (keep_mask is None or bool(keep_mask[i]))
+            and r.get("c::kono_pool_mass_top5") is not None]
     if not rows:
         return {}
-    # |C| histogram at a swept q-hat; split-half session-grouped calibration
     sessions = sorted({r["session_id"] for r in rows})
     rng = np.random.default_rng(11)
     half = set(rng.choice(sessions, size=max(1, len(sessions) // 2), replace=False))
     cal = [r for r in rows if r["session_id"] in half]
     ev = [r for r in rows if r["session_id"] not in half]
-    out: Dict[str, Any] = {"n_rows": len(rows), "top5_truncation": True}
-    # kappa on calibration: 1 - f_hat of the emitted token is degenerate
-    # without full pool probabilities; we report the pool-mass distribution
-    # and the |C| histogram under a pool-mass threshold proxy.
+    out: Dict[str, Any] = {"n_rows": len(rows), "top5_truncation": True,
+                           "n_cal": len(cal), "n_ev": len(ev),
+                           "n_cal_sessions": len(half), "n_ev_sessions": len(sessions) - len(half)}
     masses = np.array([r["c::kono_pool_mass_top5"] for r in rows])
     out["pool_mass_quantiles"] = {
         str(q): round(float(np.percentile(masses, q)), 4) for q in (10, 50, 90)
     }
+    # |C| histogram at a swept q-hat (pool-mass proxy, documented)
     sizes = []
     for r in ev:
         m = r["c::kono_pool_mass_top5"]
-        sizes.append(1 + int(m < 0.9))  # degenerate |C| proxy; documented
+        sizes.append(1 + int(m < 0.9))
     out["c_size_histogram_ev"] = {str(v): sizes.count(v) for v in sorted(set(sizes))}
+    # split-half conformal with the ACHIEVED error reported next to the
+    # nominal eps (kappa proxy = 1 - top pool prob; top-5 truncated, so this
+    # is a documented proxy, not a coverage claim)
+    eps_nom = 0.25
+    if cal and ev:
+        kappas = sorted(1.0 - (r.get("c::kono_top_pool_prob") or 0.0) for r in cal)
+        n_cal = len(kappas)
+        q_idx = min(n_cal - 1, max(0, math.ceil((n_cal + 1) * (1 - eps_nom)) - 1))
+        q_hat = kappas[q_idx]
+        # a session 'needs help' (set > 1) iff its kappa exceeds q-hat; the
+        # achieved quantity is the empirical false-fire rate on C->C rows
+        cc_ev = [r for r in ev if r.get("label_cw") == 0]
+        cw_ev = [r for r in ev if r.get("label_cw") == 1]
+        fire_cc = sum(1 for r in cc_ev if (1.0 - (r.get("c::kono_top_pool_prob") or 0.0)) > q_hat)
+        fire_cw = sum(1 for r in cw_ev if (1.0 - (r.get("c::kono_top_pool_prob") or 0.0)) > q_hat)
+        out["conformal_proxy"] = {
+            "eps_nominal": eps_nom, "q_hat": round(float(q_hat), 4),
+            "n_cal": n_cal,
+            "achieved_fire_rate_cc": round(fire_cc / max(1, len(cc_ev)), 4),
+            "achieved_coverage_cw": round(fire_cw / max(1, len(cw_ev)), 4),
+        }
     out["note"] = ("top-5 truncated: full pool renormalization needs top_logprobs "
                    "over the pool; |C| is a pool-mass proxy, conformal numbers "
-                   "are diagnostic only per prereg")
+                   "are diagnostic only per prereg; computed on the trigger "
+                   "subset (C->W vs C->C), session-grouped split halves")
     return out
 
 
@@ -518,7 +545,8 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     stats = census(label_frame, manifest)
     cusum_cal = ecusum_finalize(frame)
-    knono = knono_report(frame)
+    keep_pre = np.array([r["label_cw"] in (0, 1) for r in frame])
+    knono = knono_report(frame, keep_mask=keep_pre)
 
     keep = np.array([r["label_cw"] in (0, 1) for r in frame])
     labels = np.array([1 if r["label_cw"] == 1 else 0 for r in frame])[keep]

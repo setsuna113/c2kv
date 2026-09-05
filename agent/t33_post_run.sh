@@ -84,9 +84,12 @@ echo "== [5/7] diff-01 deferral =="
   --rows_c2kv "${OUT}/battery_c2kv.jsonl" \
   --out "${RES}/diff01.json" || true
 
-echo "== [6/7] beta/gamma gate =="
+echo "== [6/7] beta/gamma gate + parameter-bearing denominator =="
 "${PY}" agent/t33_beta_gamma.py --docs "${CAP}/c2kv/p0.docs.jsonl" \
   --out "${RES}/beta_gamma.json" || true
+"${PY}" agent/t33_denominator.py \
+  --c2kv "${FROZEN_C2KV}" --manifest "${MANIFEST}" \
+  --out "${RES}/denominator.json" || true
 
 echo "== [7/7] svip summary =="
 "${PY}" - "${OUT}/svip/gamma.jsonl" "${RES}/svip_summary.json" <<'PYEOF'
@@ -100,6 +103,7 @@ ok = [r for r in rows if r.get("gamma_seq") is not None]
 if ok:
     import statistics as st
     gs = sorted(r["gamma_seq"] for r in ok)
+    pg = [r["p_gamma_le_136"] for r in ok if r.get("p_gamma_le_136") is not None]
     def pct(p):
         return gs[min(len(gs)-1, int(len(gs)*p))]
     out = {
@@ -107,7 +111,17 @@ if ok:
         "gamma_seq_median": round(st.median(gs), 4),
         "gamma_seq_p10": round(pct(0.10), 4), "gamma_seq_p90": round(pct(0.90), 4),
         "frac_gamma_le_1_36": round(sum(1 for g in gs if g <= 1.36) / len(gs), 4),
-        "note": "gamma = H_qp/H_q on frozen emitted text under same-checkpoint c2kv/full prefixes; diagnostic only per prereg",
+        # per-position certificate fraction: the sequence aggregate above says
+        # "0% of rows", the per-position mean says ~17% of POSITIONS satisfy
+        # gamma<=2c+1 — both are reported; the old summary quoted only the
+        # sequence aggregate as "0%"
+        "mean_p_gamma_le_136_per_position": round(sum(pg) / len(pg), 4) if pg else None,
+        "n_rows_p_gamma": len(pg),
+        "note": ("gamma = H_qp/H_q = 1 + KL/H_q >= 1 ALWAYS (mechanically large "
+                 "when H_q is small; Pinsker bound direction unaffected but the "
+                 "ratio is not a distance); sequence aggregate and per-position "
+                 "fractions are different estimands, both shown; diagnostic "
+                 "only per prereg"),
     }
 else:
     out = {"n_scored": 0}
