@@ -16,9 +16,9 @@ MEM_FRACTION_STATIC="${MEM_FRACTION_STATIC:-0.8}"
 # under 4-way concurrency, which the client can only see as a task failure.
 C2KV_POOL_FRACTION="${C2KV_POOL_FRACTION:-0.06}"
 C2KV_MAX_TOKENS="${C2KV_MAX_TOKENS:-4096}"
-# base | gist: which Q/K/V projection the main forward uses. Training sets
-# use_gist=True for the whole forward whenever gists are present, so serving
-# must use the gist projections to measure the trained checkpoint.
+# Later local G training uses gist Q/K/V for the main query after gist KV.
+# Keep that matched default here; original lowercase-qkv checkpoints use
+# base instead (see docs/c2kv_semantics.md).
 C2KV_QUERY_PROJ="${C2KV_QUERY_PROJ:-gist}"
 TOOL_CALL_PARSER="${TOOL_CALL_PARSER:-qwen25}"
 HEALTH_TIMEOUT_SEC="${HEALTH_TIMEOUT_SEC:-1800}"

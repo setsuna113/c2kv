@@ -45,7 +45,7 @@ export C2KV_POOL_FRACTION C2KV_QUERY_PROJ
 SGLANG_URL="${SGLANG_URL:-git@github.com:setsuna113/kvoffload-sglang-c2kv.git}"
 # Consolidated bdf-pilot tip: preserves the tool-aware segment insertion point
 # and the serving/cache contracts used by the H200 matrix.
-SGLANG_COMMIT="${SGLANG_COMMIT:-3f4803efeeb0c49d1da0838c2812c6c841219d6c}"
+SGLANG_COMMIT="${SGLANG_COMMIT:-2651a20344bde0552b004d64e3068b4b49398c1c}"
 TAU2_URL="${TAU2_URL:-git@github.com:sierra-research/tau2-bench.git}"
 TAU2_COMMIT="${TAU2_COMMIT:-a2c024725189473d2d7cea3a5cfdbcc67478e41f}"
 BFCL_URL="${BFCL_URL:-git@github.com:ShishirPatil/gorilla.git}"
