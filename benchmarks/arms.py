@@ -332,7 +332,7 @@ ARMS: Dict[str, Arm] = {
             compress_history=False,
             text_policy="hiagent_full",
             required_capabilities=("hiagent_trajectory_retrieval_v1",),
-            description="HiAgent complete inference protocol: subgoal summaries plus proxy-intercepted Trajectory Retrieval; requires hiagent_trajectory_retrieval_v1",
+            description="HiAgent full integrated variant: subgoal summaries plus proxy-intercepted Trajectory Retrieval; tool-native adaptation with no claim of reproducing the paper's benchmark numbers; requires hiagent_trajectory_retrieval_v1",
         ),
         Arm(
             name="acon_hist",

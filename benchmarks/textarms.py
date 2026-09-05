@@ -19,6 +19,9 @@ Sources:
   components. ``hiagent_full`` additionally exposes Trajectory Retrieval as
   a proxy-owned meta-tool: the proxy expands selected completed trajectories
   and retries policy generation without forwarding retrieval to the task.
+  ``full`` names the included method components, not a claim that this
+  tool-native adaptation reproduces the paper's benchmark numbers; its
+  task-specific in-context example slot remains empty below.
   - The repo's gripper/blocksworld summarization-off special case
     (cme_final.py:115-120) is NOT inherited (ruling 3: that is the paper's
     w/o-OS ablation, not the method).
@@ -305,8 +308,8 @@ def hiagent_transform(messages: List[Dict[str, Any]], compress: Compress,
     stays raw.  Passthrough (degenerate=True) when no subgoal is ever
     declared — e.g. pure tool-call replies with null content.
 
-    ``variant='full'`` becomes the complete method only when the caller also
-    advertises :func:`hiagent_retrieval_tool`, intercepts the returned
+    ``variant='full'`` includes the retrieval component only when the caller
+    also advertises :func:`hiagent_retrieval_tool`, intercepts the returned
     meta-call with :func:`hiagent_retrieval_request`, and retries with those
     ids in ``retrieve_subgoals``.
     """
