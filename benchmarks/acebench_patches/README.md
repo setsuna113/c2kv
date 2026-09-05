@@ -11,7 +11,9 @@ leaves `base_url` unbound) and only names listed in
 `model_inference/inference_map.py` are runnable at all.
 
 * `inference_map.py` — names in `ACEBENCH_API_MODELS` (comma-separated) are
-  registered as `APIModelInference`.
+  registered as `APIModelInference`.  `CommonInference` is lazy, so an
+  API-only C2KV run does not import the upstream local-vLLM implementation;
+  selecting an upstream local-model name still imports vLLM at construction.
 * `apimodel_inference.py`, `multi_turn/APIModel_agent.py`,
   `multi_step/APIModel_agent.py` — the evaluated agent's clients read
   `ACEBENCH_AGENT_BASE_URL` / `ACEBENCH_AGENT_API_KEY` first (the arm proxy).

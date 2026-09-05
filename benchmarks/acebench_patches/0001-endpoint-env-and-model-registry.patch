@@ -26,10 +26,19 @@ diff --git a/model_inference/inference_map.py b/model_inference/inference_map.py
 index 942202b..139a9b3 100644
 --- a/model_inference/inference_map.py
 +++ b/model_inference/inference_map.py
-@@ -0,0 +1,2 @@
+@@ -1,2 +1,7 @@
+-from model_inference.common_inference import CommonInference
 +import os
+ from model_inference.apimodel_inference import APIModelInference
 +
-@@ -58,0 +61,8 @@ inference_map = {model: handler for handler, models in inference_map_groups.item
++def _lazy_common_inference(*args, **kwargs):
++    from model_inference.common_inference import CommonInference
++    return CommonInference(*args, **kwargs)
++
+@@ -36 +41 @@ inference_map_groups = {
+-    CommonInference: [
++    _lazy_common_inference: [
+@@ -58,0 +64,8 @@ inference_map = {model: handler for handler, models in inference_map_groups.item
 +
 +# C2KV bench: model names served by an OpenAI-compatible endpoint (the arm
 +# proxy) are registered from the environment instead of this list, so the
