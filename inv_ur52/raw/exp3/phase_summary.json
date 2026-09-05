@@ -1,0 +1,702 @@
+[
+ {
+  "file": "phase_0000.pt",
+  "mode": "pre_rope",
+  "span": [
+   5534,
+   5575
+  ],
+  "seq": 5575,
+  "rph": [
+   5548,
+   5549,
+   5550,
+   5551,
+   5552,
+   5553
+  ],
+  "rotary": "RotaryEmbedding",
+  "rotmod": "sglang.srt.layers.rotary_embedding.base",
+  "dtype": "torch.bfloat16",
+  "shape": [
+   5575,
+   1024
+  ],
+  "inplace_max": 0.0,
+  "stored_vs_before": 0.0,
+  "k_scale": 314.0,
+  "posh": [
+   0,
+   1,
+   2,
+   3,
+   4,
+   5
+  ]
+ },
+ {
+  "file": "phase_0001.pt",
+  "mode": "pre_rope",
+  "span": [
+   5575,
+   5598
+  ],
+  "seq": 5598,
+  "rph": [
+   5610,
+   5611,
+   5612,
+   5613,
+   5614,
+   5615
+  ],
+  "rotary": "RotaryEmbedding",
+  "rotmod": "sglang.srt.layers.rotary_embedding.base",
+  "dtype": "torch.bfloat16",
+  "shape": [
+   5598,
+   1024
+  ],
+  "inplace_max": 0.0,
+  "stored_vs_before": 0.0,
+  "k_scale": 314.0,
+  "posh": [
+   0,
+   1,
+   2,
+   3,
+   4,
+   5
+  ]
+ },
+ {
+  "file": "phase_0002.pt",
+  "mode": "pre_rope",
+  "span": [
+   5598,
+   5655
+  ],
+  "seq": 5655,
+  "rph": [
+   5649,
+   5650,
+   5651,
+   5652,
+   5653,
+   5654
+  ],
+  "rotary": "RotaryEmbedding",
+  "rotmod": "sglang.srt.layers.rotary_embedding.base",
+  "dtype": "torch.bfloat16",
+  "shape": [
+   5655,
+   1024
+  ],
+  "inplace_max": 0.0,
+  "stored_vs_before": 0.0,
+  "k_scale": 314.0,
+  "posh": [
+   0,
+   1,
+   2,
+   3,
+   4,
+   5
+  ]
+ },
+ {
+  "file": "phase_0003.pt",
+  "mode": "pre_rope",
+  "span": [
+   5655,
+   5709
+  ],
+  "seq": 5709,
+  "rph": [
+   5720,
+   5721,
+   5722,
+   5723,
+   5724,
+   5725
+  ],
+  "rotary": "RotaryEmbedding",
+  "rotmod": "sglang.srt.layers.rotary_embedding.base",
+  "dtype": "torch.bfloat16",
+  "shape": [
+   5709,
+   1024
+  ],
+  "inplace_max": 0.0,
+  "stored_vs_before": 0.0,
+  "k_scale": 314.0,
+  "posh": [
+   0,
+   1,
+   2,
+   3,
+   4,
+   5
+  ]
+ },
+ {
+  "file": "phase_0004.pt",
+  "mode": "pre_rope",
+  "span": [
+   5748,
+   5791
+  ],
+  "seq": 5791,
+  "rph": [
+   5842,
+   5843,
+   5844,
+   5845,
+   5846,
+   5847
+  ],
+  "rotary": "RotaryEmbedding",
+  "rotmod": "sglang.srt.layers.rotary_embedding.base",
+  "dtype": "torch.bfloat16",
+  "shape": [
+   5791,
+   1024
+  ],
+  "inplace_max": 0.0,
+  "stored_vs_before": 0.0,
+  "k_scale": 314.0,
+  "posh": [
+   0,
+   1,
+   2,
+   3,
+   4,
+   5
+  ]
+ },
+ {
+  "file": "phase_0005.pt",
+  "mode": "pre_rope",
+  "span": [
+   5791,
+   5844
+  ],
+  "seq": 5844,
+  "rph": [
+   5906,
+   5907,
+   5908,
+   5909,
+   5910,
+   5911
+  ],
+  "rotary": "RotaryEmbedding",
+  "rotmod": "sglang.srt.layers.rotary_embedding.base",
+  "dtype": "torch.bfloat16",
+  "shape": [
+   5844,
+   1024
+  ],
+  "inplace_max": 0.0,
+  "stored_vs_before": 0.0,
+  "k_scale": 314.0,
+  "posh": [
+   0,
+   1,
+   2,
+   3,
+   4,
+   5
+  ]
+ },
+ {
+  "file": "phase_0006.pt",
+  "mode": "pre_rope",
+  "span": [
+   5844,
+   5881
+  ],
+  "seq": 5881,
+  "rph": [
+   5974,
+   5975,
+   5976,
+   5977,
+   5978,
+   5979
+  ],
+  "rotary": "RotaryEmbedding",
+  "rotmod": "sglang.srt.layers.rotary_embedding.base",
+  "dtype": "torch.bfloat16",
+  "shape": [
+   5881,
+   1024
+  ],
+  "inplace_max": 0.0,
+  "stored_vs_before": 0.0,
+  "k_scale": 314.0,
+  "posh": [
+   0,
+   1,
+   2,
+   3,
+   4,
+   5
+  ]
+ },
+ {
+  "file": "phase_0007.pt",
+  "mode": "pre_rope",
+  "span": [
+   5881,
+   5906
+  ],
+  "seq": 5906,
+  "rph": [
+   6025,
+   6026,
+   6027,
+   6028,
+   6029,
+   6030
+  ],
+  "rotary": "RotaryEmbedding",
+  "rotmod": "sglang.srt.layers.rotary_embedding.base",
+  "dtype": "torch.bfloat16",
+  "shape": [
+   5906,
+   1024
+  ],
+  "inplace_max": 0.0,
+  "stored_vs_before": 0.0,
+  "k_scale": 314.0,
+  "posh": [
+   0,
+   1,
+   2,
+   3,
+   4,
+   5
+  ]
+ },
+ {
+  "file": "phase_0008.pt",
+  "mode": "pre_rope",
+  "span": [
+   5947,
+   6021
+  ],
+  "seq": 6021,
+  "rph": [
+   6120,
+   6121,
+   6122,
+   6123,
+   6124,
+   6125
+  ],
+  "rotary": "RotaryEmbedding",
+  "rotmod": "sglang.srt.layers.rotary_embedding.base",
+  "dtype": "torch.bfloat16",
+  "shape": [
+   6021,
+   1024
+  ],
+  "inplace_max": 0.0,
+  "stored_vs_before": 0.0,
+  "k_scale": 314.0,
+  "posh": [
+   0,
+   1,
+   2,
+   3,
+   4,
+   5
+  ]
+ },
+ {
+  "file": "phase_0009.pt",
+  "mode": "pre_rope",
+  "span": [
+   6021,
+   6113
+  ],
+  "seq": 6113,
+  "rph": [
+   6215,
+   6216,
+   6217,
+   6218,
+   6219,
+   6220
+  ],
+  "rotary": "RotaryEmbedding",
+  "rotmod": "sglang.srt.layers.rotary_embedding.base",
+  "dtype": "torch.bfloat16",
+  "shape": [
+   6113,
+   1024
+  ],
+  "inplace_max": 0.0,
+  "stored_vs_before": 0.0,
+  "k_scale": 314.0,
+  "posh": [
+   0,
+   1,
+   2,
+   3,
+   4,
+   5
+  ]
+ },
+ {
+  "file": "phase_0010.pt",
+  "mode": "pre_rope",
+  "span": [
+   3722,
+   3820
+  ],
+  "seq": 3820,
+  "rph": [
+   3736,
+   3737,
+   3738,
+   3739,
+   3740,
+   3741
+  ],
+  "rotary": "RotaryEmbedding",
+  "rotmod": "sglang.srt.layers.rotary_embedding.base",
+  "dtype": "torch.bfloat16",
+  "shape": [
+   3820,
+   1024
+  ],
+  "inplace_max": 0.0,
+  "stored_vs_before": 0.0,
+  "k_scale": 314.0,
+  "posh": [
+   0,
+   1,
+   2,
+   3,
+   4,
+   5
+  ]
+ },
+ {
+  "file": "phase_0011.pt",
+  "mode": "pre_rope",
+  "span": [
+   3820,
+   3943
+  ],
+  "seq": 3943,
+  "rph": [
+   3847,
+   3848,
+   3849,
+   3850,
+   3851,
+   3852
+  ],
+  "rotary": "RotaryEmbedding",
+  "rotmod": "sglang.srt.layers.rotary_embedding.base",
+  "dtype": "torch.bfloat16",
+  "shape": [
+   3943,
+   1024
+  ],
+  "inplace_max": 0.0,
+  "stored_vs_before": 0.0,
+  "k_scale": 314.0,
+  "posh": [
+   0,
+   1,
+   2,
+   3,
+   4,
+   5
+  ]
+ },
+ {
+  "file": "phase_0012.pt",
+  "mode": "pre_rope",
+  "span": [
+   3943,
+   3976
+  ],
+  "seq": 3976,
+  "rph": [
+   3985,
+   3986,
+   3987,
+   3988,
+   3989,
+   3990
+  ],
+  "rotary": "RotaryEmbedding",
+  "rotmod": "sglang.srt.layers.rotary_embedding.base",
+  "dtype": "torch.bfloat16",
+  "shape": [
+   3976,
+   1024
+  ],
+  "inplace_max": 0.0,
+  "stored_vs_before": 0.0,
+  "k_scale": 314.0,
+  "posh": [
+   0,
+   1,
+   2,
+   3,
+   4,
+   5
+  ]
+ },
+ {
+  "file": "phase_0013.pt",
+  "mode": "pre_rope",
+  "span": [
+   3976,
+   4007
+  ],
+  "seq": 4007,
+  "rph": [
+   4032,
+   4033,
+   4034,
+   4035,
+   4036,
+   4037
+  ],
+  "rotary": "RotaryEmbedding",
+  "rotmod": "sglang.srt.layers.rotary_embedding.base",
+  "dtype": "torch.bfloat16",
+  "shape": [
+   4007,
+   1024
+  ],
+  "inplace_max": 0.0,
+  "stored_vs_before": 0.0,
+  "k_scale": 314.0,
+  "posh": [
+   0,
+   1,
+   2,
+   3,
+   4,
+   5
+  ]
+ },
+ {
+  "file": "phase_0014.pt",
+  "mode": "pre_rope",
+  "span": [
+   6725,
+   6825
+  ],
+  "seq": 6825,
+  "rph": [
+   6777,
+   6778,
+   6779,
+   6780,
+   6781,
+   6782
+  ],
+  "rotary": "RotaryEmbedding",
+  "rotmod": "sglang.srt.layers.rotary_embedding.base",
+  "dtype": "torch.bfloat16",
+  "shape": [
+   6825,
+   1024
+  ],
+  "inplace_max": 0.0,
+  "stored_vs_before": 0.0,
+  "k_scale": 314.0,
+  "posh": [
+   0,
+   1,
+   2,
+   3,
+   4,
+   5
+  ]
+ },
+ {
+  "file": "phase_0015.pt",
+  "mode": "pre_rope",
+  "span": [
+   6825,
+   6976
+  ],
+  "seq": 6976,
+  "rph": [
+   6890,
+   6891,
+   6892,
+   6893,
+   6894,
+   6895
+  ],
+  "rotary": "RotaryEmbedding",
+  "rotmod": "sglang.srt.layers.rotary_embedding.base",
+  "dtype": "torch.bfloat16",
+  "shape": [
+   6976,
+   1024
+  ],
+  "inplace_max": 0.0,
+  "stored_vs_before": 0.0,
+  "k_scale": 314.0,
+  "posh": [
+   0,
+   1,
+   2,
+   3,
+   4,
+   5
+  ]
+ },
+ {
+  "file": "phase_0016.pt",
+  "mode": "pre_rope",
+  "span": [
+   6976,
+   6999
+  ],
+  "seq": 6999,
+  "rph": [
+   7056,
+   7057,
+   7058,
+   7059,
+   7060,
+   7061
+  ],
+  "rotary": "RotaryEmbedding",
+  "rotmod": "sglang.srt.layers.rotary_embedding.base",
+  "dtype": "torch.bfloat16",
+  "shape": [
+   6999,
+   1024
+  ],
+  "inplace_max": 0.0,
+  "stored_vs_before": 0.0,
+  "k_scale": 314.0,
+  "posh": [
+   0,
+   1,
+   2,
+   3,
+   4,
+   5
+  ]
+ },
+ {
+  "file": "phase_0017.pt",
+  "mode": "pre_rope",
+  "span": [
+   6999,
+   7029
+  ],
+  "seq": 7029,
+  "rph": [
+   7093,
+   7094,
+   7095,
+   7096,
+   7097,
+   7098
+  ],
+  "rotary": "RotaryEmbedding",
+  "rotmod": "sglang.srt.layers.rotary_embedding.base",
+  "dtype": "torch.bfloat16",
+  "shape": [
+   7029,
+   1024
+  ],
+  "inplace_max": 0.0,
+  "stored_vs_before": 0.0,
+  "k_scale": 314.0,
+  "posh": [
+   0,
+   1,
+   2,
+   3,
+   4,
+   5
+  ]
+ },
+ {
+  "file": "phase_0018.pt",
+  "mode": "pre_rope",
+  "span": [
+   7029,
+   7053
+  ],
+  "seq": 7053,
+  "rph": [
+   7139,
+   7140,
+   7141,
+   7142,
+   7143,
+   7144
+  ],
+  "rotary": "RotaryEmbedding",
+  "rotmod": "sglang.srt.layers.rotary_embedding.base",
+  "dtype": "torch.bfloat16",
+  "shape": [
+   7053,
+   1024
+  ],
+  "inplace_max": 0.0,
+  "stored_vs_before": 0.0,
+  "k_scale": 314.0,
+  "posh": [
+   0,
+   1,
+   2,
+   3,
+   4,
+   5
+  ]
+ },
+ {
+  "file": "phase_0019.pt",
+  "mode": "pre_rope",
+  "span": [
+   7053,
+   7113
+  ],
+  "seq": 7113,
+  "rph": [
+   7177,
+   7178,
+   7179,
+   7180,
+   7181,
+   7182
+  ],
+  "rotary": "RotaryEmbedding",
+  "rotmod": "sglang.srt.layers.rotary_embedding.base",
+  "dtype": "torch.bfloat16",
+  "shape": [
+   7113,
+   1024
+  ],
+  "inplace_max": 0.0,
+  "stored_vs_before": 0.0,
+  "k_scale": 314.0,
+  "posh": [
+   0,
+   1,
+   2,
+   3,
+   4,
+   5
+  ]
+ }
+]
