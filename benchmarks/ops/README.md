@@ -20,11 +20,11 @@ which owns the proxy for one benchmark run.
 
 | Component | NPU-host Python/environment |
 |---|---|
-| SGLang server | `/home/liuyancheng/envs/sgl/bin/python` |
-| Torch-backed D/G tests | `/home/liuyancheng/envs/c2kv/bin/python` |
-| BFCL / proxy | `/home/liuyancheng/envs/bench/bin/python` |
-| tau2 | `/home/liuyancheng/envs/bench312/bin/python` |
-| ToolSandbox | `/home/liuyancheng/envs/benchts/bin/python` |
+| SGLang server | `$HOME/envs/sgl/bin/python` |
+| Torch-backed D/G tests | `$HOME/envs/c2kv/bin/python` |
+| BFCL / proxy | `$HOME/envs/bench/bin/python` |
+| tau2 | `$HOME/envs/bench312/bin/python` |
+| ToolSandbox | `$HOME/envs/benchts/bin/python` |
 
 NPU processes need the CANN and ATB environment setup already sourced by
 `launch_sgl1088.sh`. The launcher uses `--disable-cuda-graph`; graph mode
@@ -57,8 +57,8 @@ matrix (source CANN and ATB first, then select an available device):
 
 ```bash
 ASCEND_RT_VISIBLE_DEVICES=1 \
-C2KV_REAL_TOKENIZER_DIR=/home/liuyancheng/checkpoints_upstream/checkpoint-1088 \
-C2KV_SERVED_MODEL_DIR=/home/liuyancheng/checkpoints_upstream/checkpoint-1088 \
+C2KV_REAL_TOKENIZER_DIR=$HOME/checkpoints_upstream/checkpoint-1088 \
+C2KV_SERVED_MODEL_DIR=$HOME/checkpoints_upstream/checkpoint-1088 \
 C2KV_GATE_DEVICE=npu \
 python -m pytest agent/test_d_downstream_server_gate.py -v
 ```
@@ -82,7 +82,7 @@ server/proxy process groups:
 ```bash
 python benchmarks/ops/validate_npu.py \
   --sglang-dir /path/to/sglang-c2kv \
-  --model /home/liuyancheng/checkpoints_upstream/checkpoint-1088 \
+  --model $HOME/checkpoints_upstream/checkpoint-1088 \
   --device 1 --out /path/to/new-validation-output
 ```
 
@@ -120,6 +120,6 @@ that requests and official scoring complete. For an existing server:
 ```bash
 python benchmarks/ops/official_smoke.py \
   --upstream http://127.0.0.1:35020 --out /path/to/new-official-smoke \
-  --checkpoint /home/liuyancheng/checkpoints_upstream/checkpoint-1088 \
+  --checkpoint $HOME/checkpoints_upstream/checkpoint-1088 \
   --reference-profile checkpoint-1088
 ```
