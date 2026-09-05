@@ -36,11 +36,20 @@ TAU2_DIR = Path(os.environ.get("TAU2_DIR") or Path.home() / "benchmarks" / "tau2
 def add_arguments(parser) -> None:
     """tau2-only CLI flags (shared ones live in run.py's core block)."""
     parser.add_argument("--task-set", default="airline")
+    parser.add_argument("--tau2-num-trials", type=int, default=None,
+                        help="tau2: trials per selected task (unset keeps the official default)")
+    parser.add_argument("--tau2-max-steps", type=int, default=None,
+                        help="tau2: per-task turn cap (unset keeps the official default)")
+    parser.add_argument("--tau2-timeout", type=int, default=None,
+                        help="tau2: per-task wallclock cap in seconds (unset means no cap)")
 
 
 def run_command(base_url: str, user_base_url: str, task_set: str, model: str,
                 num_workers: int, run_name: str,
                 max_tasks: Optional[int] = None,
+                num_trials: Optional[int] = None,
+                max_steps: Optional[int] = None,
+                timeout: Optional[int] = None,
                 python: Optional[str] = None) -> List[str]:
     """``tau2.cli run`` argv — PINNED: the server scripts quote these
     numbers, so any edit here changes what every historical tau2 row means.
@@ -65,8 +74,14 @@ def run_command(base_url: str, user_base_url: str, task_set: str, model: str,
         # prompt (a killed run's checkpoint otherwise EOFs the CLI)
         "--auto-resume",
     ]
-    if max_tasks:
+    if num_trials is not None:
+        cmd += ["--num-trials", str(num_trials)]
+    if max_tasks is not None:
         cmd += ["--num-tasks", str(max_tasks)]
+    if max_steps is not None:
+        cmd += ["--max-steps", str(max_steps)]
+    if timeout is not None:
+        cmd += ["--timeout", str(timeout)]
     return cmd
 
 
@@ -104,7 +119,11 @@ def run(ctx: RunContext) -> Dict[str, Any]:
     env = harness_env()
     subprocess.run(
         run_command(ctx.base_url, ctx.user_base_url, task_set, ctx.model,
-                    ctx.opt("num_workers", 4), ctx.run_name, max_tasks=max_tasks),
+                    ctx.opt("num_workers", 4), ctx.run_name,
+                    max_tasks=max_tasks,
+                    num_trials=ctx.opt("tau2_num_trials"),
+                    max_steps=ctx.opt("tau2_max_steps"),
+                    timeout=ctx.opt("tau2_timeout")),
         cwd=tau2_dir, env=env, check=True)
     sims = tau2_dir / "data" / "simulations" / ctx.run_name
     subprocess.run(evaluate_command(sims), cwd=tau2_dir, env=env, check=True)

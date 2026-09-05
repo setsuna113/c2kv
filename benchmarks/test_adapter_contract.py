@@ -72,8 +72,9 @@ def test_add_arguments_registers_only_that_adapters_flags():
     import argparse
 
     owned = {
-        tau2_adapter: {"--task-set"},
-        bfcl_adapter: {"--categories"},
+        tau2_adapter: {"--task-set", "--tau2-num-trials", "--tau2-max-steps",
+                       "--tau2-timeout"},
+        bfcl_adapter: {"--categories", "--run-ids"},
         toolsandbox_adapter: {"--full", "--ts-scenarios", "--ts-agent", "--ts-user"},
         acon_adapter: {"--acon-dir", "--split", "--tag", "--task-ids"},
         acebench_adapter: {"--acebench-dir", "--acebench-category",
@@ -116,6 +117,15 @@ def test_tau2_run_command_domain_and_num_tasks():
     assert cmd[cmd.index("--task-set-name") + 1] == "telecom_small"
     assert cmd[-2:] == ["--num-tasks", "5"]
     assert cmd[-3] == "--auto-resume"
+
+
+def test_tau2_run_command_forwards_bounded_smoke_knobs():
+    cmd = tau2_adapter.run_command("http://p", "http://u", "airline", "m", 1,
+                                   "smoke", max_tasks=1, num_trials=1,
+                                   max_steps=12, timeout=300, python="/py")
+    for flag, value in (("--num-tasks", "1"), ("--num-trials", "1"),
+                        ("--max-steps", "12"), ("--timeout", "300")):
+        assert cmd[cmd.index(flag) + 1] == value
 
 
 def test_tau2_evaluate_command_is_byte_identical(tmp_path):

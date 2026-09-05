@@ -37,7 +37,11 @@ CLI_SURFACE = [
     ("--proxy-port", 34100, False),
     ("--out", None, True),
     ("--task-set", "airline", False),
+    ("--tau2-num-trials", None, False),
+    ("--tau2-max-steps", None, False),
+    ("--tau2-timeout", None, False),
     ("--categories", "multi_turn_base", False),
+    ("--run-ids", "", False),
     ("--num-workers", 4, False),
     ("--max-tasks", None, False),
     ("--run-name", "c2kv_run", False),
@@ -134,6 +138,15 @@ def test_build_context_user_upstream_split():
     ctx = run.build_context(args, None)
     assert ctx.user_base_url == "http://raw:35000"
     assert ctx.request_log is None
+
+
+def test_bfcl_subset_cli_reaches_context(tmp_path):
+    args = _args(["--benchmark", "bfcl", "--model", "Qwen/Frozen-FC",
+                  "--run-ids", "multi_turn_base_1", *BASE_ARGV])
+    args.out = tmp_path
+    ctx = run.build_context(args, None)
+    assert ctx.model == "Qwen/Frozen-FC"
+    assert ctx.options["run_ids"] == "multi_turn_base_1"
 
 
 def _ctx(benchmark, **options):
@@ -254,17 +267,33 @@ def test_bfcl_dispatch_adds_v1_and_chdirs(monkeypatch, tmp_path):
     seen = {}
     monkeypatch.setattr(bfcl_adapter.os, "chdir",
                         lambda path: seen.setdefault("cwds", []).append(str(path)))
-    ctx = _ctx("bfcl", categories="memory", bfcl_dir=str(tmp_path))
+    ctx = _ctx("bfcl", categories="memory", bfcl_dir=str(tmp_path),
+               run_ids="memory_1")
     ctx.arm = "c2kv_repair"
     summary = bfcl_adapter.run(ctx)
     # the handler needs /v1; run.py hands over the bare URL
     assert calls["args"] == ("http://127.0.0.1:34100/v1",)
     assert calls["kwargs"]["categories"] == "memory"
+    assert calls["kwargs"]["run_ids"] == "memory_1"
     # underscores in an arm name would corrupt the result dir path
     assert calls["kwargs"]["handler_name"] == "c2kv-c2kv-repair"
     assert seen["cwds"][0] == str(tmp_path)
     assert len(seen["cwds"]) == 2  # chdir in, chdir back (try/finally)
     assert summary["cost_join"].startswith("not joinable:")
+
+
+def test_h200_matrix_smoke_uses_unified_runner_flags():
+    matrix = (Path(__file__).resolve().parent / "run_matrix_h200.sh").read_text(
+        encoding="utf-8")
+    runner_calls = matrix.rsplit('case "$benchmark" in', 1)[1]
+    assert '--model "$SERVED_MODEL_NAME"' in runner_calls
+    assert "--run-ids" in runner_calls
+    assert "--ts-scenarios" in runner_calls
+    assert "--tau2-num-trials" in runner_calls
+    assert "--tau2-max-steps" in runner_calls
+    assert "--tau2-timeout" in runner_calls
+    assert "--served-model-name" not in runner_calls
+    assert "--toolsandbox-scenarios" not in runner_calls
 
 
 def test_cli_accepts_new_benchmarks():

@@ -44,6 +44,8 @@ SERVED_MODEL = "c2kv-agent"  # default served model name at the endpoint
 def add_arguments(parser) -> None:
     """BFCL-only CLI flags (shared ones live in run.py's core block)."""
     parser.add_argument("--categories", default="multi_turn_base")
+    parser.add_argument("--run-ids", default="",
+                        help="bfcl: comma-separated official case ids for a subset run")
 
 
 def default_bfcl_dir() -> str:

@@ -22,13 +22,16 @@ PORT="${PORT:-34000}"
 PROXY_PORT_BASE="${PROXY_PORT_BASE:-34100}"
 TAU2_TASK_SET="${TAU2_TASK_SET:-airline}"
 BFCL_CATEGORIES="${BFCL_CATEGORIES:-multi_turn_base}"
-TAU2_SMOKE_TASKS="${TAU2_SMOKE_TASKS:-2}"
+TAU2_SMOKE_TASKS="${TAU2_SMOKE_TASKS:-1}"
+TAU2_SMOKE_TRIALS="${TAU2_SMOKE_TRIALS:-1}"
+TAU2_SMOKE_MAX_STEPS="${TAU2_SMOKE_MAX_STEPS:-12}"
+TAU2_SMOKE_TIMEOUT_SEC="${TAU2_SMOKE_TIMEOUT_SEC:-300}"
 BFCL_SMOKE_RUN_IDS="${BFCL_SMOKE_RUN_IDS:-multi_turn_base_1}"
 TOOLSANDBOX_SMOKE_SCENARIO="${TOOLSANDBOX_SMOKE_SCENARIO:-send_message_with_contact_content_cellular_off_multiple_user_turn}"
 # TOOLSANDBOX_FULL=1 forces benchmarks/run.py --full (whole ToolSandbox suite)
 # even under SMOKE=1. Default 0 keeps today's behaviour exactly: --full in a
-# normal run, --toolsandbox-scenarios in a smoke run. run.py rejects --full
-# combined with --toolsandbox-scenarios, so the two are mutually exclusive.
+# normal run, --ts-scenarios in a smoke run. run.py rejects --full combined
+# with --ts-scenarios, so the two are mutually exclusive.
 # A non-smoke run ALREADY passes --full, so TOOLSANDBOX_FULL only has an
 # effect together with SMOKE=1 (the script says so at run time).
 TOOLSANDBOX_FULL="${TOOLSANDBOX_FULL:-0}"
@@ -40,10 +43,9 @@ C2KV_QUERY_PROJ="${C2KV_QUERY_PROJ:-gist}"
 export C2KV_POOL_FRACTION C2KV_QUERY_PROJ
 
 SGLANG_URL="${SGLANG_URL:-git@github.com:setsuna113/kvoffload-sglang-c2kv.git}"
-# task/c2kv-serve-align tip: renders the segment insertion point with `tools`
-# (4d08 rendered it without, so every gist landed at a tool-free offset) and
-# adds --c2kv-query-proj.
-SGLANG_COMMIT="${SGLANG_COMMIT:-718a654e3df356e262c3318a095e1efd91c23512}"
+# Consolidated bdf-pilot tip: preserves the tool-aware segment insertion point
+# and the serving/cache contracts used by the H200 matrix.
+SGLANG_COMMIT="${SGLANG_COMMIT:-3f4803efeeb0c49d1da0838c2812c6c841219d6c}"
 TAU2_URL="${TAU2_URL:-git@github.com:sierra-research/tau2-bench.git}"
 TAU2_COMMIT="${TAU2_COMMIT:-a2c024725189473d2d7cea3a5cfdbcc67478e41f}"
 BFCL_URL="${BFCL_URL:-git@github.com:ShishirPatil/gorilla.git}"
@@ -439,11 +441,15 @@ for arm in "${ARM_LIST[@]}"; do
       tau2)
         extra=()
         if [[ "$SMOKE" == "1" ]]; then
-          extra+=("--max-tasks" "$TAU2_SMOKE_TASKS")
+          extra+=("--max-tasks" "$TAU2_SMOKE_TASKS"
+                  "--tau2-num-trials" "$TAU2_SMOKE_TRIALS"
+                  "--tau2-max-steps" "$TAU2_SMOKE_MAX_STEPS"
+                  "--tau2-timeout" "$TAU2_SMOKE_TIMEOUT_SEC")
         fi
         "$RUN_PYTHON" "$REPO_ROOT/benchmarks/run.py" \
           --benchmark tau2 --arm "$arm" --upstream "$BASE_URL" \
           --proxy-port "$proxy_port" --out "$cell_base" \
+          --model "$SERVED_MODEL_NAME" \
           --task-set "$TAU2_TASK_SET" --num-workers "$NUM_WORKERS" \
           --run-name "${CKPT_NAME}_tau2_${arm}" \
           "${extra[@]}" 2>&1 | tee "$RESULT_ROOT/${benchmark}_${arm}.log"
@@ -457,13 +463,13 @@ for arm in "${ARM_LIST[@]}"; do
           --benchmark bfcl --arm "$arm" --upstream "$BASE_URL" \
           --proxy-port "$proxy_port" --out "$cell_base" \
           --categories "$BFCL_CATEGORIES" \
-          --served-model-name "$SERVED_MODEL_NAME" \
+          --model "$SERVED_MODEL_NAME" \
           "${extra[@]}" 2>&1 | tee "$RESULT_ROOT/${benchmark}_${arm}.log"
         ;;
       toolsandbox)
         extra=()
         if [[ "$SMOKE" == "1" && "$TOOLSANDBOX_FULL" != "1" ]]; then
-          extra+=("--toolsandbox-scenarios" "$TOOLSANDBOX_SMOKE_SCENARIO")
+          extra+=("--ts-scenarios" "$TOOLSANDBOX_SMOKE_SCENARIO")
         else
           if [[ "$TOOLSANDBOX_FULL" == "1" && "$SMOKE" != "1" ]]; then
             echo "[note] TOOLSANDBOX_FULL=1 is redundant outside SMOKE=1: the full suite is already the default"
