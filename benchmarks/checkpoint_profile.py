@@ -127,6 +127,25 @@ def _jsonable(value: Any) -> Any:
     return str(value)
 
 
+def _redacted_argv(argv: Sequence[str]) -> list[str]:
+    result: list[str] = []
+    redact_next = False
+    for argument in argv:
+        if redact_next:
+            result.append("<redacted>")
+            redact_next = False
+            continue
+        flag, separator, value = argument.partition("=")
+        key = flag.lstrip("-").replace("-", "_").lower()
+        sensitive = key in _SECRET_KEYS or key.endswith(("_password", "_secret", "_api_key", "_access_token"))
+        if flag.startswith("--") and sensitive:
+            result.append(flag + "=<redacted>" if separator else flag)
+            redact_next = not bool(separator)
+        else:
+            result.append(argument)
+    return result
+
+
 def _git_identity(repo_root: Path) -> Dict[str, Any]:
     def run(*args: str) -> str:
         return subprocess.run(
@@ -257,11 +276,24 @@ def build_training_profile(
         model_config.to_dict() if hasattr(model_config, "to_dict") else model_config
     )
     env = os.environ if environ is None else environ
-    ratios = _as_ratios(env.get("C2KV_GIST_TRAIN_RATIOS"))
-    if not ratios:
-        raise ProfileError(
-            "C2KV_GIST_TRAIN_RATIOS is unset; the dynamic training ratios cannot be recorded"
-        )
+    configured_ratios = env.get("C2KV_GIST_TRAIN_RATIOS")
+    # models.gist_utils._sample_dynamic_gist_ratio uses this fallback when
+    # unset/empty. Record that supported training regime instead of failing
+    # a previously valid launch just because profile writing was enabled.
+    gist_type = str(config_values.get("gist_type") or model_values.get("gist_type") or "")
+    if gist_type.startswith(("interleave-", "anchor-")):
+        ratios = [_as_positive_int(gist_type.split("-", 1)[1], "gist_type ratio")]
+        sampling_ratios = ratios[:]
+        ratio_source = "model.config.gist_type fixed ratio; dynamic environment is unused"
+    elif gist_type == "dynamic-interleave":
+        ratios = _as_ratios(configured_ratios) or [2, 4, 8]
+        sampling_ratios = ([int(item.strip()) for item in configured_ratios.split(",")
+                           if item.strip()] if configured_ratios else []) or [2, 4, 8]
+        ratio_source = ("C2KV_GIST_TRAIN_RATIOS (duplicates preserve sampling weights)"
+                        if configured_ratios else "models.gist_utils._sample_dynamic_gist_ratio default")
+    else:
+        ratios, sampling_ratios = [], []
+        ratio_source = "no global interleave ratio for this gist_type"
     gist_param = config_values.get("gist_param") or model_values.get("gist_param")
     query_projection = "gist" if "q" in str(gist_param or "").lower() else "base"
     training = {
@@ -271,6 +303,7 @@ def build_training_profile(
         "max_doc_length": _as_positive_int(data_values.get("max_doc_length"), "max_doc_length"),
         "max_doc_num": _as_positive_int(data_values.get("max_doc_num"), "max_doc_num"),
         "compression_ratios": ratios,
+        "compression_ratio_sampling": sampling_ratios,
         "history_selection": data_values.get("history_selection"),
         "hybrid_tail_choices": data_values.get("hybrid_tail_choices"),
         "resolved_args": {
@@ -329,11 +362,12 @@ def build_training_profile(
         "provenance": {
             "claim": "resolved by the training process; applies to checkpoints under output_dir",
             "output_dir": str(Path(output_dir).resolve()),
-            "command_line": list(sys.argv if argv is None else argv),
+            "command_line": _redacted_argv(list(sys.argv if argv is None else argv)),
             "source": _git_identity(Path(repo_root)),
             "artifacts": artifacts,
             "field_sources": {
                 "training": "resolved HfArgumentParser dataclasses and runtime environment",
+                "training.compression_ratio_sampling": ratio_source,
                 "serving.query_projection": "training source contract: use_gist selects lowercase gist q",
             },
         },
@@ -574,6 +608,8 @@ def resolve_checkpoint_profile(
                 raise ProfileError(
                     f"resolved profile checkpoint {embedded_path} does not match {checkpoint_path}"
                 )
+            if profile["checkpoint"].get("config_sha256") != _file_sha256(config_path):
+                raise ProfileError("checkpoint config.json changed since this profile was resolved")
             recorded_fingerprint = profile.get("profile_fingerprint")
             unsigned_loaded = copy.deepcopy(profile)
             unsigned_loaded.pop("profile_fingerprint", None)
@@ -598,6 +634,10 @@ def resolve_checkpoint_profile(
         )
         profile = _legacy_profile(checkpoint_path, config, run_path, manifest_path)
 
+    for key in ("gist_param", "gist_type", "gist_overlap", "gist_residual_type"):
+        recorded = profile.get("model", {}).get(key)
+        if recorded is not None and recorded != config.get(key):
+            raise ProfileError(f"checkpoint {key}={config.get(key)!r} conflicts with profile {recorded!r}")
     _apply_query_projection(profile, query_projection)
     profile["checkpoint"] = {
         "path": str(checkpoint_path),

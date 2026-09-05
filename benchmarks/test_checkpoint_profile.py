@@ -210,13 +210,15 @@ def test_new_training_profile_is_self_describing_and_secret_safe(tmp_path):
             "gist_overlap": 64,
             "gist_residual_type": "embed-mean",
         },
-        argv=["train.py", "--do_train", "True"],
-        environ={"C2KV_GIST_TRAIN_RATIOS": "8,4,16"},
+        argv=["train.py", "--do_train", "True", "--hub_token", "private-value", "--api-key=another-private-value"],
+        environ={"C2KV_GIST_TRAIN_RATIOS": "8,8,4,16"},
     )
     assert profile["profile_kind"] == "as_trained"
     assert profile["serving"]["query_projection"] == "gist"
     assert profile["serving"]["max_doc_length"] == 768
     assert profile["training"]["compression_ratios"] == [8, 4, 16]
+    assert profile["training"]["compression_ratio_sampling"] == [8, 8, 4, 16]
+    assert "private-value" not in json.dumps(profile)
     resolved_training = profile["training"]["resolved_args"]["training"]
     assert resolved_training["max_new_tokens"] == 128
     assert resolved_training["push_to_hub_token"] == "<redacted>"
@@ -266,6 +268,27 @@ def test_resolved_profile_is_stable_and_bound_to_checkpoint(tmp_path):
     other = _checkpoint(tmp_path / "other")
     with pytest.raises(ProfileError, match="does not match"):
         resolve_checkpoint_profile(other, profile_path=resolved_path)
+    config = json.loads((checkpoint / "config.json").read_text())
+    config["gist_param"] = "QkV"
+    _write_json(checkpoint / "config.json", config)
+    with pytest.raises(ProfileError, match="config.json changed"):
+        resolve_checkpoint_profile(checkpoint, profile_path=resolved_path)
+
+
+def test_profile_preserves_supported_default_training_ratios(tmp_path):
+    profile = build_training_profile(output_dir=tmp_path, repo_root=tmp_path,
+        model_args=_ModelArgs(), training_args=_TrainingArgs(), data_args=_DataArgs(),
+        model_config={"gist_param": "qkv", "gist_type": "dynamic-interleave"}, environ={})
+    assert profile["training"]["compression_ratio_sampling"] == [2, 4, 8]
+    assert "default" in profile["provenance"]["field_sources"]["training.compression_ratio_sampling"]
+
+
+def test_fixed_ratio_profile_ignores_dynamic_environment(tmp_path):
+    profile = build_training_profile(output_dir=tmp_path, repo_root=tmp_path,
+        model_args=_ModelArgs(), training_args=_TrainingArgs(), data_args=_DataArgs(),
+        model_config={"gist_param": "qkv", "gist_type": "interleave-4"},
+        environ={"C2KV_GIST_TRAIN_RATIOS": "8,16"})
+    assert profile["training"]["compression_ratio_sampling"] == [4]
 
 
 def test_smoke_gate_uses_resolved_profile_instead_of_proxy_defaults(tmp_path):
