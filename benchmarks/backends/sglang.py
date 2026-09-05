@@ -22,6 +22,26 @@ Wire protocol (verified live against 22fbf3146 on NPU, docs/sglang_migration.md)
   moved verbatim from hf_server.py).
 * per-request KV accounting in ``metadata.sglang_runtime``
   (kv_resident_tokens / kv_peak_resident_tokens / kv_pool_size).
+* history-KV eviction baselines (arms.history_kv, upstream
+  ``c2kv_eval.adapters.bfcl_history_kv_baselines``), two server paths:
+  - ``repair_extract`` (default): ONE ``/v1/c2kv/repair_extract`` call with
+    ``repair_mode="history_kv_<method>"`` + ``history_kv_method`` +
+    ``history_kv_retention_ratio``; the server prefills the span, selects the
+    surviving token slots (``selected_relative_indices``) and stores them as a
+    single repair entry.  The chat request replaces the history text with the
+    upstream carrier message (``c2kv_repair_only_key_hashes`` +
+    ``c2kv_use_gist_projection: false``) and echoes the accounting in
+    ``c2kv_kv_memory_hint``.
+  - ``physical_eviction``: no extract call; the history stays raw text and
+    ``c2kv_kv_memory_hint.history_kv_eviction`` asks the scheduler to compact
+    the request's own KV slots after the history round.  The server resolves
+    the token range itself from ``history_message_count``
+    (serving_chat._resolve_history_kv_eviction_range), so the proxy never
+    sends client-side token offsets.  Needs ``--disable-radix-cache`` and,
+    with ``persistent_session``, ``--enable-streaming-session``.
+  Both echo back in ``metadata.kv_memory_report`` (method / runtime status /
+  freed slots / kept tokens), which normalize_response turns into
+  ``history_kv_*`` cost columns.
 
 Regime notes (superseding the 2026-08-30 decisions in docs/sglang_migration.md):
 the server's ``--c2kv-query-proj gist`` restores the training use_gist rule
@@ -44,10 +64,15 @@ def _normalize_tool_schema(value: Any, defs: Dict[str, Any] = None,
 
     Benchmark tool schemas use loose types ("type": "dict"/"any"/...,
     {"type": "list"} without items) and $ref/$defs indirection, neither
-    of which xgrammar's JSON-schema converter accepts.  Repair applies to
-    the grammar input only, never to the tool definition the model sees:
-    $refs are inlined (cycle-guarded), then types are mapped and
-    unsupported keywords stripped.
+    of which xgrammar's JSON-schema converter accepts.  $refs are inlined
+    (cycle-guarded), then types are mapped and unsupported keywords stripped.
+
+    CONFOUND, not a separate channel: SGLang derives the grammar from
+    ``request.tools``, which is also what the chat template renders into the
+    prompt, so the repaired schema is what the MODEL SEES too.  The
+    ``cd_full`` / ``cd_c2kv`` arms therefore differ from ``full`` / ``c2kv``
+    by prompt AND grammar; the H1 comparison cannot separate the two (see
+    arms.py and README "Constrained-decoding arms").
     """
     if isinstance(value, dict):
         if "$ref" in value and defs is not None:
@@ -102,6 +127,9 @@ def _inline_refs(schema: Dict[str, Any]) -> Dict[str, Any]:
 class SglangBackend(Backend):
     name = "sglang"
     needs_repair_plan = True
+    # the history-KV arms need the proxy's history/current split and its
+    # per-conversation streaming-session id
+    wants_request_context = True
 
     def __init__(self, post_json):
         self._post_json = post_json  # (path, payload, timeout) -> dict
@@ -161,6 +189,10 @@ class SglangBackend(Backend):
             "chat_template_kwargs": {"enable_thinking": False},
             "repair_mode": "d_corr",
             "source_doc_index": source_doc_index,
+            # storage form (reconciled server, c2kv_serving_semantics.md §3):
+            # pre-RoPE entries can take every placement; a rotated entry makes
+            # append_tail fail with C2KV_APPEND_TAIL_REQUIRES_PRE_ROPE
+            "raw_kv_position_mode": "pre_rope",
         }
         if tools:
             payload["tools"] = tools
@@ -172,15 +204,234 @@ class SglangBackend(Backend):
                 f"{result.get('error') or json.dumps(result)[:500]}")
         return result
 
+    def history_kv_extract(self, history_text: str, system_text: str,
+                           tools: Optional[List[Dict[str, Any]]],
+                           spec: Dict[str, Any]) -> Dict[str, Any]:
+        """One history-KV eviction extract (upstream ``repair_extract``
+        backend, c2kv_eval.adapters.bfcl_history_kv_baselines
+        ``_build_runtime_history_kv``).
+
+        Form: the FULL-CONTEXT ``messages``/``target_index`` request, so the
+        server renders system + tools + the history block exactly like a chat
+        prompt, prefills it, and captures the history block's raw K/V at its
+        true absolute positions (``raw_kv_position_mode="rotated"``, as
+        upstream sends).  The budget travels as ``history_kv_retention_ratio``
+        and is resolved against the span the SERVER measured
+        (qwen3.generate_raw_repair_kv: ``ceil(requested_span_tokens * ratio)``)
+        — the upstream client instead multiplied its own tokenizer's history
+        length and sent absolute ``history_kv_target_tokens``.  Deviation
+        recorded in README "History-KV eviction arms".
+        """
+        method = str(spec["method"])
+        messages: List[Dict[str, Any]] = []
+        if system_text:
+            messages.append({"role": "system", "content": system_text})
+        messages.append({"role": "user", "content": history_text})
+        target_index = len(messages) - 1
+        payload: Dict[str, Any] = {
+            "messages": messages,
+            "target_index": target_index,
+            "chat_template_kwargs": {"enable_thinking": False},
+            # the legacy placement rule maps any "history_kv_" repair mode to
+            # in_place (scheduler._resolve_c2kv_repair_placement), i.e. the
+            # compressed span stands in for the history unit it replaces
+            "repair_mode": f"history_kv_{method}",
+            # upstream stores the history entry post-RoPE at its own absolute
+            # positions; it is never re-placed, so "rotated" is exact
+            "raw_kv_position_mode": "rotated",
+            "extract_source": "model_prefill",
+            "source_doc_index": 0,
+            "history_kv_method": method,
+            "history_kv_recent_window": int(spec["recent_window"]),
+            "history_kv_kernel_size": int(spec["kernel_size"]),
+            "history_kv_pooling": str(spec["pooling"]),
+            "history_kv_h2o_recent_fraction": float(spec["h2o_recent_fraction"]),
+        }
+        if spec.get("target_tokens") is not None:
+            payload["history_kv_target_tokens"] = int(spec["target_tokens"])
+        else:
+            payload["history_kv_retention_ratio"] = float(spec["retention_ratio"])
+        if tools:
+            payload["tools"] = tools
+        result = self._post_json("/v1/c2kv/repair_extract", payload, 600)
+        if not result.get("success", True) or not result.get("key_hash"):
+            raise BackendError(
+                "history_kv_extract_failed",
+                f"c2kv history-KV extract ({method}) failed: "
+                f"{result.get('error') or json.dumps(result)[:500]}")
+        # strict: a server that ignored the history_kv_* fields would return a
+        # plain uncompressed repair entry, and the run would silently be a
+        # full-history arm wearing a baseline's name (upstream
+        # --strict-runtime-eviction)
+        echoed = str(result.get("history_kv_method") or "")
+        if echoed != method:
+            raise BackendError(
+                "history_kv_extract_failed",
+                f"server did not apply history_kv_method={method!r} "
+                f"(echoed {echoed!r}); refusing to report an uncompressed "
+                "request as a history-KV baseline")
+        return result
+
+    def open_history_session(self, session_id: str, timeout: int = 600) -> str:
+        """Open the streaming session the physical-eviction arms need.
+
+        Same call the upstream client makes
+        (``_open_persistent_history_session``); the server hands the id back as
+        a bare JSON string and refuses a duplicate id."""
+        result = self._post_json(
+            "/open_session",
+            {
+                "capacity_of_str_len": 0,
+                "session_id": session_id,
+                "streaming": True,
+                "timeout": float(timeout),
+            },
+            timeout,
+        )
+        if result != session_id:
+            raise BackendError(
+                "history_kv_session_failed",
+                f"open_session did not return {session_id!r}: "
+                f"{json.dumps(result)[:500]}")
+        return session_id
+
+    # ---- history-KV request shaping ----
+    @staticmethod
+    def _history_kv_carrier(method: str, key_hash: str) -> Dict[str, Any]:
+        """The upstream carrier message, verbatim (bfcl_history_kv_baselines
+        ``_build_runtime_history_kv``).
+
+        ``c2kv_use_gist_projection: false`` is sent because upstream sends it;
+        which projection the request ACTUALLY ran under is a server decision
+        (the message value overrides the ``--c2kv-query-proj`` default) and
+        must be read per row from ``c2kv_query_proj_effective`` /
+        ``c2kv_query_proj_source``, never assumed from this field."""
+        return {
+            "role": "user",
+            "content": f"[runtime {method} compressed history kv]",
+            "c2kv_repair_only_key_hashes": [key_hash],
+            "c2kv_use_gist_projection": False,
+        }
+
+    def _apply_history_kv(self, messages: List[Dict[str, Any]],
+                          history: Dict[str, Any],
+                          tools: Optional[List[Dict[str, Any]]]
+                          ) -> tuple:
+        """Return (messages, hint, session_id) for a history-KV arm."""
+        spec = history["spec"]
+        method = str(spec["method"])
+        indices = [int(i) for i in history.get("history_out_indices") or []]
+        session_id = history.get("session_id")
+        if not indices or not history.get("history_text"):
+            # first turn of a conversation: nothing completed to compress.
+            # Upstream returns the current block unchanged and issues no
+            # extract; no hint is sent, so such a row simply carries no
+            # history_kv_* cost columns.
+            return list(messages), None, session_id
+
+        if str(spec["backend"]) == "physical_eviction":
+            count = int(history["history_message_count"])
+            target = int(spec["target_tokens"])
+            eviction = {
+                "method": method,
+                # the server resolves the token range itself in its own frame
+                "history_message_count": count,
+                "target_tokens": target,
+                "retention_ratio": spec.get("retention_ratio"),
+                "history_kv_recent_window": int(spec["recent_window"]),
+                "history_kv_kernel_size": int(spec["kernel_size"]),
+                "history_kv_pooling": str(spec["pooling"]),
+                "history_kv_h2o_recent_fraction": float(spec["h2o_recent_fraction"]),
+                "persistent_session": bool(session_id),
+            }
+            hint: Dict[str, Any] = {
+                # left at 0 on purpose: serving_chat._resolve_history_kv_
+                # eviction_range overwrites it with the server's own exact
+                # history token count
+                "full_equivalent_history_tokens": 0,
+                "active_history_kv_tokens": target,
+                "active_full_raw_tokens": 0,
+                "active_c2kv_gist_tokens": 0,
+                "history_kv_method": method,
+                "estimated": True,
+                "history_kv_backend": "physical_eviction",
+                "history_kv_eviction": eviction,
+            }
+            if session_id:
+                hint["persistent_history_session"] = {"enabled": True}
+            return list(messages), hint, session_id
+
+        record = self.history_kv_extract(
+            history["history_text"], history.get("system_text") or "", tools, spec)
+        kept = int(record.get("selected_token_count")
+                   or record.get("token_len") or 0)
+        span = int(record.get("requested_span_tokens") or 0)
+        keep = set(indices)
+        out: List[Dict[str, Any]] = []
+        for index, message in enumerate(messages):
+            if index == indices[0]:
+                out.append(self._history_kv_carrier(method, record["key_hash"]))
+            if index in keep:
+                continue
+            out.append(message)
+        hint = {
+            "full_equivalent_history_tokens": span,
+            "active_history_kv_tokens": kept,
+            "active_full_raw_tokens": 0,
+            "active_c2kv_gist_tokens": 0,
+            "active_raw_repair_tokens": kept,
+            "history_kv_method": method,
+            "estimated": False,
+            # provenance beyond the upstream hint; the scheduler copies the
+            # whole hint into kv_memory_report, so these come back on the
+            # response and become request-log columns
+            "history_kv_backend": "repair_extract",
+            "history_kv_requested_span_tokens": span,
+            "history_kv_selected_token_count": kept,
+        }
+        return out, hint, session_id
+
     # ---- chat shaping ----
     def prepare_chat(self, payload: Dict[str, Any], arm,
-                     repair_plan: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+                     repair_plan: Optional[Dict[str, Any]],
+                     context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         out = dict(payload)
         out.pop("c2kv_repair", None)  # request-level repair is hf_server-only
+        # Same chat_template_kwargs as the two FRAME-DEFINING endpoints
+        # (extract() and repair_extract_messages() above both send
+        # enable_thinking=False).  Every position this bench measures --
+        # original_seq_len, position_start, rendered_prefix_len -- was computed
+        # with thinking off; the served prompt must be rendered the same way or
+        # the two renderings differ by whatever the checkpoint's template does
+        # with enable_thinking.  setdefault, so an explicit client value still
+        # wins (BFCL's OpenAI client sends none) -- but such a request is then
+        # outside the measured frame.
+        raw_kwargs = out.get("chat_template_kwargs")
+        template_kwargs = dict(raw_kwargs) if isinstance(raw_kwargs, dict) else {}
+        template_kwargs.setdefault("enable_thinking", False)
+        out["chat_template_kwargs"] = template_kwargs
         messages = list(out.get("messages") or [])
+        if getattr(arm, "history_kv", None):
+            history = (context or {}).get("history_kv")
+            if not history:
+                raise BackendError(
+                    "history_kv_failed",
+                    f"arm {arm.name!r} is a history-KV arm but the proxy sent "
+                    "no history context")
+            messages, hint, session_id = self._apply_history_kv(
+                messages, history, out.get("tools"))
+            if hint is not None:
+                out["c2kv_kv_memory_hint"] = hint
+            if session_id:
+                params = dict(out.get("session_params") or {})
+                params["id"] = session_id
+                out["session_params"] = params
         if arm.constrain_tools:
             # structural_tag constrained decoding; the grammar input needs
-            # xgrammar-safe schemas (repair only the copy the server compiles)
+            # xgrammar-safe schemas.  SGLang compiles the grammar from
+            # request.tools, the SAME field the chat template renders, so the
+            # repaired schema also reaches the prompt (known cd_* confound,
+            # see the module docstring and arms.py)
             out["response_format"] = {"type": "structural_tag"}
             tools = out.get("tools")
             if tools:
@@ -232,23 +483,95 @@ class SglangBackend(Backend):
         return out
 
     # ---- response normalization ----
+    @staticmethod
+    def _history_kv_cost(data: Dict[str, Any]) -> Dict[str, Any]:
+        """The server's history-KV echo, flattened into cost columns.
+
+        ``metadata.kv_memory_report`` is the scheduler's per-request layout
+        report (scheduler._init_c2kv_kv_memory_report + _apply_history_kv_
+        eviction): it carries back the hint the proxy sent plus, on the
+        physical path, the MEASURED eviction result.  Every column is the
+        server's number, never a proxy estimate."""
+        report = ((data.get("metadata") or {}).get("kv_memory_report")) or {}
+        if not isinstance(report, dict) or not report:
+            return {}
+        physical = report.get("history_kv_physical_eviction")
+        physical = physical if isinstance(physical, dict) else {}
+        columns = {
+            "history_kv_method": report.get("history_kv_method") or physical.get("method"),
+            "history_kv_backend": report.get("history_kv_backend"),
+            "history_kv_runtime_status": report.get("history_kv_runtime_status")
+            or physical.get("runtime_status"),
+            "history_kv_full_equivalent_tokens": report.get("full_equivalent_history_tokens"),
+            "history_kv_active_tokens": report.get("active_history_kv_tokens"),
+            # repair_extract path (echoed hint)
+            "history_kv_span_tokens": report.get("history_kv_requested_span_tokens"),
+            "history_kv_selected_tokens": report.get("history_kv_selected_token_count"),
+            # physical path (measured by PhysicalHistoryKVEvictor)
+            "history_kv_eviction_ok": physical.get("success"),
+            "history_kv_eviction_error": physical.get("error") or None,
+            "history_kv_kept_tokens": physical.get("kept_history_tokens"),
+            "history_kv_history_tokens": physical.get("history_tokens"),
+            "history_kv_freed_slots": physical.get(
+                "freed_physical_slots", report.get("physical_slots_freed")),
+            "history_kv_freed_bytes": physical.get("freed_kv_bytes"),
+            "history_kv_selection_reason": report.get("selection_reason"),
+        }
+        return {k: v for k, v in columns.items() if v is not None}
+
     def normalize_response(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Response -> (content, tool_calls, finish_reason, usage, cost).
+
+        Injection-time failures are the ones that must NOT pass as answers:
+        the reconciled server aborts the request and reports WHY in
+        ``metadata.sglang_runtime.c2kv_injection_error`` plus
+        ``metadata.finish_message`` (the finish_reason message).  Both are
+        read here, because a plain ``finish_reason == "abort"`` body used to
+        be classified ``finish_abort`` with a truncated JSON dump as the only
+        evidence — and an abort caused by a pool eviction was therefore never
+        retried.  A ``C2KV_CACHE_MISS`` in either field is raised as
+        ``cache_miss`` so proxy.CacheMiss's re-extract-and-retry path fires.
+
+        Admission-time misses do not arrive here at all: the server answers
+        them with HTTP 400 and ``proxy._post_json`` raises CacheMiss directly.
+        The ``data["error"]`` classifier below is still reachable — the top
+        guard only raises for an error body WITHOUT choices — so it stays.
+        """
         if data.get("object") == "error" or (data.get("error") and not data.get("choices")):
             raise BackendError("upstream", f"sglang error body: {data.get('error')}")
         choice = (data.get("choices") or [{}])[0] or {}
         finish = choice.get("finish_reason")
+        metadata = data.get("metadata") or {}
+        runtime = (metadata.get("sglang_runtime") or {}) if isinstance(metadata, dict) else {}
+        injection_error = str(runtime.get("c2kv_injection_error") or "").strip()
+        finish_message = str(
+            (metadata.get("finish_message") if isinstance(metadata, dict) else "") or "").strip()
         if finish == "abort":
-            raise BackendError("finish_abort", json.dumps(data)[:500])
+            detail = " | ".join(t for t in (injection_error, finish_message) if t)
+            if "C2KV_CACHE_MISS" in injection_error or "C2KV_CACHE_MISS" in finish_message:
+                raise BackendError("cache_miss", detail)
+            raise BackendError("finish_abort", detail or json.dumps(data)[:500])
         message = choice.get("message") or {}
         error_text = str(data.get("error") or "")
         if "C2KV_CACHE_MISS" in error_text or "C2KV cache miss" in error_text:
             raise BackendError("cache_miss", error_text)
-        runtime = ((data.get("metadata") or {}).get("sglang_runtime")) or {}
         cost = {k: runtime[k] for k in (
             "kv_resident_tokens", "kv_peak_resident_tokens", "kv_pool_size",
-            "c2kv_query_proj", "c2kv_gist_seen", "c2kv_position_correction",
-            "c2kv_layout")
+            # c2kv_query_proj = the server FLAG (one value per run; reqlog's
+            # mixed-mode check keys on it); _effective / _source / _decode_
+            # verified are the per-request provenance of the reconciled server
+            "c2kv_query_proj", "c2kv_query_proj_effective",
+            "c2kv_query_proj_source", "c2kv_query_proj_decode_verified",
+            "c2kv_tools_dump",
+            "c2kv_gist_seen", "c2kv_position_correction", "c2kv_layout",
+            # injection provenance on a request the server DID serve (an
+            # injection error that aborted the request raised above): the row
+            # is not a clean measurement and must say so in its own column
+            "c2kv_injection_error")
             if k in runtime}
+        if isinstance(metadata, dict) and metadata.get("finish_message") is not None:
+            cost["finish_message"] = metadata["finish_message"]
+        cost.update(self._history_kv_cost(data))
         return {
             "content": message.get("content"),
             "tool_calls": message.get("tool_calls"),

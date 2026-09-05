@@ -3,6 +3,7 @@ repair oracle, repair policy, oracle-recover decision layer, terminal-state
 checks).  No torch; run anywhere with pytest."""
 from __future__ import annotations
 
+import io
 import json
 import sys
 from pathlib import Path
@@ -880,22 +881,305 @@ class TestCacheMissRecovery:
         err = proxy_mod.UpstreamError(400, "C2KV cache miss: abc")
         assert not isinstance(err, proxy_mod.CacheMiss)
 
-    def test_refresh_reextractes_all_marked_messages(self, monkeypatch):
-        fake = TestBackends.FakeSglang()
-        fake.needs_repair_plan = True
+    def test_cache_miss_retry_re_extracts_through_the_real_cache(self, monkeypatch):
+        """The retry must issue REAL re-extracts, counted at the BACKEND.
+
+        The previous version of this test monkeypatched ``proxy._extract``
+        with a stub, which bypasses ``ExtractCache`` entirely -- so it stayed
+        green while the shipped path returned the memoised (dead) record and
+        re-sent the same evicted key_hash, and the retry was a second
+        identical miss.  Here only the BACKEND is faked: ``_extract``,
+        ``ExtractCache`` and the ``do_POST`` recovery loop are the real ones,
+        and the assertion is how many calls actually reach the backend.
+        """
+        backend = _CountingSglang()
+        arm = get_arm("c2kv_repair")
+        monkeypatch.setattr(proxy_mod, "DOC_PACKING", "message")
+        payload = {"model": "m", "messages": [
+            {"role": "system", "content": "S" * 30},
+            {"role": "user", "content": "A" * 40},       # doc 0
+            {"role": "assistant", "content": "B" * 20},  # doc 1
+            {"role": "user", "content": "current"},
+        ]}
+
+        def miss():
+            raise proxy_mod.CacheMiss("C2KV_CACHE_MISS: gist h-user-40 evicted")
+
+        def ok():
+            return {"choices": [{"message": {"content": "hi", "tool_calls": None},
+                                 "finish_reason": "stop"}],
+                    "usage": {"completion_tokens": 2}}
+
+        sent, posts = _drive_chat(monkeypatch, backend, arm, payload, [miss, ok])
+        assert [code for code, _ in sent] == [200]
+        assert len(posts) == 2  # the miss and exactly one retry
+        # 2 assemble extracts + 1 system extract (plan_repair) = 3 before the
+        # miss; the recovery loop must add ONE REAL extract per compressed
+        # record.  Without force=True reaching the backend this stays at 3 --
+        # which is exactly what the old stub-based test could not see.
+        assert backend.extract_calls[:3] == [("user", 40), ("assistant", 20),
+                                             ("system", 30)]
+        assert backend.extract_calls[3:] == [("user", 40), ("assistant", 20)]
+        # and the repair span is re-planned, not reused across the retry
+        assert len(backend.repairs) == 2
+
+
+# ---------------------------------------------------------------------------
+# Harness for tests that must exercise the REAL ExtractCache / do_POST path.
+# Only the backend and the upstream POST are faked; proxy._extract,
+# proxy.plan_repair and the recovery loop are the shipped ones.
+
+
+class _CountingSglang(TestBackends.FakeSglang):
+    """FakeSglang that records every call that REACHES the backend."""
+
+    def __init__(self):
+        super().__init__()
+        self.extract_calls = []
+
+    def extract(self, text, role, ratio, tools=None):
+        self.extract_calls.append((role, len(text)))
+        return super().extract(text, role, ratio, tools=tools)
+
+    def normalize_response(self, data):
+        choice = (data.get("choices") or [{}])[0] or {}
+        message = choice.get("message") or {}
+        return {"content": message.get("content"),
+                "tool_calls": message.get("tool_calls"),
+                "finish_reason": choice.get("finish_reason"),
+                "usage": data.get("usage") or {},
+                "cost": {}}
+
+
+def _drive_chat(monkeypatch, backend, arm, payload, responses):
+    """Run the real ``ProxyHandler.do_POST`` once against fakes.
+
+    ``responses`` is consumed one entry per upstream chat POST; each entry is
+    a zero-arg callable returning a body or raising.  Returns
+    ``(sent, posts)``: what the handler answered, and what it POSTed.
+    """
+    monkeypatch.setattr(proxy_mod, "BACKEND", backend)
+    monkeypatch.setattr(proxy_mod, "ARM", arm)
+    monkeypatch.setattr(proxy_mod, "CACHE", proxy_mod.ExtractCache())
+    monkeypatch.setattr(proxy_mod, "REQUEST_LOG_PATH", "")
+    posts = []
+
+    def fake_post(path, body, timeout, retries=2):
+        posts.append((path, body))
+        return responses[len(posts) - 1]()
+
+    monkeypatch.setattr(proxy_mod, "_post_json", fake_post)
+    raw = json.dumps(payload).encode("utf-8")
+    handler = proxy_mod.ProxyHandler.__new__(proxy_mod.ProxyHandler)
+    handler.rfile = io.BytesIO(raw)
+    handler.headers = {"Content-Length": str(len(raw))}
+    handler.path = "/v1/chat/completions"
+    sent = []
+    handler._send_json = lambda code, obj: sent.append((code, obj))
+    handler.do_POST()
+    return sent, posts
+
+
+class TestFrameCheckWithoutClientSystem:
+    """B1: the frame check was never MEASURED on any repair arm.
+
+    ``_assemble`` injects ``proxy.DEFAULT_SYSTEM_PROMPT`` when the client
+    sends no system message (BFCL FC never sends one), but ``plan_repair``
+    measured the prologue from the CALLER's pre-assembly list.  So
+    ``expected_offset`` stayed None and ``frame_delta`` was never computed on
+    a single repair-arm row of any BFCL run: the check reported
+    ``not_measured_no_system`` while the server was rendering a perfectly
+    measurable prologue.  It must be measured on the ASSEMBLED list.
+    """
+
+    def _fake(self, monkeypatch):
+        fake = _CountingSglang()
         monkeypatch.setattr(proxy_mod, "BACKEND", fake)
-        extracted = []
+        monkeypatch.setattr(proxy_mod, "DOC_PACKING", "message")
+        monkeypatch.setattr(proxy_mod, "CACHE", proxy_mod.ExtractCache())
+        return fake
 
-        def extract(role, content, ratio, timeout=0, tools=None):
-            extracted.append((role, len(content)))
-            return fake.extract(content, role, ratio)
+    def test_expected_offset_uses_the_injected_default_prompt(self, monkeypatch):
+        fake = self._fake(monkeypatch)
+        messages = [                                   # BFCL FC: no system msg
+            {"role": "user", "content": "A" * 40},     # doc 0 (compressed)
+            {"role": "assistant", "content": "B" * 20},  # doc 1 (compressed)
+            {"role": "user", "content": "current"},
+        ]
+        arm = get_arm("c2kv_repair")
+        out, counts = proxy_mod._assemble(messages, arm)
+        assert out[0]["role"] == "system"
+        assert out[0]["content"] == proxy_mod.DEFAULT_SYSTEM_PROMPT
+        plan = proxy_mod.plan_repair(messages, arm, counts, out_messages=out)
+        prologue = len(proxy_mod.DEFAULT_SYSTEM_PROMPT)
+        # the extract that produced expected_offset is the INJECTED prompt's
+        assert ("system", prologue) in fake.extract_calls
+        assert plan["expected_offset"] == prologue
+        assert plan["position_start"] == prologue  # fake renders the same prefix
+        assert plan["frame_delta"] == 0
+        assert plan["frame_delta_status"] == "measured"
 
-        monkeypatch.setattr(proxy_mod, "_extract", extract)
-        records = [{"role": "user", "content": "A" * 30, "record": {}},
-                   {"role": "assistant", "content": "B" * 20, "record": {}}]
-        for record in records:
-            _ = proxy_mod._extract(record["role"], record["content"], 8)
-        # simulate the recovery loop: refresh every compressed record
-        for record in records:
-            _ = proxy_mod._extract(record["role"], record["content"], 8)
-        assert len(extracted) == 4  # 2 original + 2 refresh (cache dedups value)
+    def test_client_system_message_still_wins(self, monkeypatch):
+        """A client that DOES send a system message is measured on that one;
+        _assemble then injects no default, and neither does the frame check."""
+        fake = self._fake(monkeypatch)
+        messages = [
+            {"role": "system", "content": "S" * 77},
+            {"role": "user", "content": "A" * 40},
+            {"role": "assistant", "content": "B" * 20},
+            {"role": "user", "content": "current"},
+        ]
+        arm = get_arm("c2kv_repair")
+        out, counts = proxy_mod._assemble(messages, arm)
+        plan = proxy_mod.plan_repair(messages, arm, counts, out_messages=out)
+        assert plan["expected_offset"] == 77 and plan["frame_delta"] == 0
+        assert plan["frame_delta_status"] == "measured"
+        assert ("system", 77) in fake.extract_calls
+        assert ("system", len(proxy_mod.DEFAULT_SYSTEM_PROMPT)) not in fake.extract_calls
+
+    def test_two_system_messages_are_not_measured(self, monkeypatch):
+        """The server renders each system message as its own block, so a
+        joined extract would measure a prologue that is never rendered."""
+        fake = self._fake(monkeypatch)
+        messages = [
+            {"role": "system", "content": "S" * 30},
+            {"role": "user", "content": "A" * 40},
+            {"role": "assistant", "content": "B" * 20},
+            {"role": "system", "content": "T" * 10},
+            {"role": "user", "content": "current"},
+        ]
+        arm = get_arm("c2kv_repair")
+        out, counts = proxy_mod._assemble(messages, arm)
+        assert sum(1 for m in out if m["role"] == "system") == 2
+        plan = proxy_mod.plan_repair(messages, arm, counts, out_messages=out)
+        assert plan["frame_delta_status"] == "not_measured_multi_system"
+        assert plan["expected_offset"] is None and plan["frame_delta"] is None
+        # no system extract was issued at all -- there is nothing to join
+        assert not [c for c in fake.extract_calls if c[0] == "system"]
+
+
+class TestInjectionErrorSurfacing:
+    """B2: injection-time aborts must not pass as answers.
+
+    The reconciled server reports them in
+    ``metadata.sglang_runtime.c2kv_injection_error`` and
+    ``metadata.finish_message``.  A ``C2KV_CACHE_MISS`` in either must
+    classify as ``cache_miss`` (so proxy.CacheMiss's re-extract-and-retry
+    fires); anything else as ``finish_abort`` carrying the SERVER's text
+    instead of a truncated JSON dump of the whole body.
+
+    Every body below is FAKE.  Nothing here has been executed against a live
+    server or a model.
+    """
+
+    @staticmethod
+    def _backend():
+        from backends.sglang import SglangBackend
+        return SglangBackend(None)
+
+    @staticmethod
+    def _body(runtime=None, finish_message=None, finish="abort"):
+        metadata = {"sglang_runtime": dict(runtime or {})}
+        if finish_message is not None:
+            metadata["finish_message"] = finish_message
+        return {"choices": [{"message": {"content": None, "tool_calls": None},
+                             "finish_reason": finish}],
+                "usage": {}, "metadata": metadata}
+
+    def test_injection_cache_miss_classifies_as_cache_miss(self):
+        from backends import BackendError
+        body = self._body(runtime={
+            "c2kv_injection_error":
+                "C2KV_CACHE_MISS: repair entry 0xdead is not resident"})
+        with pytest.raises(BackendError) as err:
+            self._backend().normalize_response(body)
+        assert err.value.kind == "cache_miss"
+        assert "0xdead" in err.value.detail
+
+    def test_cache_miss_in_finish_message_alone_also_classifies(self):
+        from backends import BackendError
+        body = self._body(finish_message="abort: C2KV_CACHE_MISS gist 0xbeef")
+        with pytest.raises(BackendError) as err:
+            self._backend().normalize_response(body)
+        assert err.value.kind == "cache_miss" and "0xbeef" in err.value.detail
+
+    def test_other_injection_error_is_finish_abort_with_server_text(self):
+        from backends import BackendError
+        body = self._body(
+            runtime={"c2kv_injection_error":
+                     "C2KV_APPEND_TAIL_REQUIRES_PRE_ROPE"},
+            finish_message="aborted during c2kv injection")
+        with pytest.raises(BackendError) as err:
+            self._backend().normalize_response(body)
+        assert err.value.kind == "finish_abort"
+        assert "C2KV_APPEND_TAIL_REQUIRES_PRE_ROPE" in err.value.detail
+        assert "aborted during c2kv injection" in err.value.detail
+
+    def test_bare_abort_without_metadata_keeps_the_body_dump(self):
+        from backends import BackendError
+        with pytest.raises(BackendError) as err:
+            self._backend().normalize_response(
+                {"choices": [{"message": {"content": None},
+                              "finish_reason": "abort"}]})
+        assert err.value.kind == "finish_abort" and "abort" in err.value.detail
+
+    def test_served_request_forwards_the_columns(self):
+        """A request the server DID serve while reporting an injection note is
+        not classified as a failure, but both fields become cost columns so
+        the row is auditable instead of silently clean."""
+        normalized = self._backend().normalize_response(self._body(
+            runtime={"kv_resident_tokens": 12,
+                     "c2kv_injection_error": "gist 3 skipped (already rotated)"},
+            finish_message="stopped normally", finish="stop"))
+        cost = normalized["cost"]
+        assert cost["c2kv_injection_error"] == "gist 3 skipped (already rotated)"
+        assert cost["finish_message"] == "stopped normally"
+        assert cost["kv_resident_tokens"] == 12
+
+    def test_clean_response_carries_neither_column(self):
+        cost = self._backend().normalize_response(self._body(
+            runtime={"kv_resident_tokens": 12}, finish="stop"))["cost"]
+        assert "c2kv_injection_error" not in cost
+        assert "finish_message" not in cost
+
+    def test_proxy_turns_the_backend_cache_miss_into_a_retry(self, monkeypatch):
+        """End to end through the real do_POST: an injection-time abort whose
+        text is C2KV_CACHE_MISS reaches the CacheMiss recovery path instead of
+        killing the request with finish_abort."""
+        from backends.sglang import SglangBackend
+
+        class RealNormalize(_CountingSglang):
+            def __init__(self):
+                super().__init__()
+                self._real = SglangBackend(None)
+
+            def normalize_response(self, data):
+                return self._real.normalize_response(data)
+
+        backend = RealNormalize()
+        arm = get_arm("c2kv_repair")
+        monkeypatch.setattr(proxy_mod, "DOC_PACKING", "message")
+        payload = {"model": "m", "messages": [
+            {"role": "system", "content": "S" * 30},
+            {"role": "user", "content": "A" * 40},
+            {"role": "assistant", "content": "B" * 20},
+            {"role": "user", "content": "current"},
+        ]}
+        abort_body = {
+            "choices": [{"message": {"content": None, "tool_calls": None},
+                         "finish_reason": "abort"}],
+            "usage": {},
+            "metadata": {"sglang_runtime": {
+                "c2kv_injection_error": "C2KV_CACHE_MISS: gist h-user-40"}},
+        }
+        good_body = {"choices": [{"message": {"content": "hi", "tool_calls": None},
+                                  "finish_reason": "stop"}],
+                     "usage": {"completion_tokens": 1},
+                     "metadata": {"sglang_runtime": {"kv_resident_tokens": 5}}}
+        sent, posts = _drive_chat(monkeypatch, backend, arm, payload,
+                                  [lambda: abort_body, lambda: good_body])
+        assert [code for code, _ in sent] == [200]
+        assert len(posts) == 2
+        assert sent[0][1]["choices"][0]["message"]["content"] == "hi"
+        # recovered by re-extracting both compressed docs, not by dying
+        assert backend.extract_calls[-2:] == [("user", 40), ("assistant", 20)]

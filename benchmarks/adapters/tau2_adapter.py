@@ -27,43 +27,32 @@ from typing import Any, Dict, List, Optional
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from metrics import aggregate, protocol_columns_for_turn  # noqa: E402
 
+from adapters.base import RunContext, v1  # noqa: E402
+
+NAME = "tau2"
 TAU2_DIR = Path(os.environ.get("TAU2_DIR") or Path.home() / "benchmarks" / "tau2")
 
 
-def run(
-    benchmark_dir: Optional[Path],
-    base_url: str,
-    user_base_url: str,
-    out_dir: Path,
-    task_set: str = "airline",
-    num_workers: int = 4,
-    max_tasks: Optional[int] = None,
-    run_name: str = "c2kv_run",
-    model: str = "c2kv-agent",
-) -> Dict[str, Any]:
-    """Run tau2 with the agent LLM behind the arm proxy.
+def add_arguments(parser) -> None:
+    """tau2-only CLI flags (shared ones live in run.py's core block)."""
+    parser.add_argument("--task-set", default="airline")
 
-    The user simulator points at a separate full-mode endpoint (same served
-    model, no compression) so only the agent's context is ever compressed.
-    ``benchmark_dir`` (or $TAU2_DIR, or ~/benchmarks/tau2) is the tau2
-    checkout that provides both the CLI and the tool registry.
-    Official semantics: ``--save-to NAME`` writes
-    ``<tau2_dir>/data/simulations/NAME/results.json``; rewards are computed
-    by ``tau2 evaluate-trajs`` into ``updated_results.json``, which collect
-    then reads.
+
+def run_command(base_url: str, user_base_url: str, task_set: str, model: str,
+                num_workers: int, run_name: str,
+                max_tasks: Optional[int] = None,
+                python: Optional[str] = None) -> List[str]:
+    """``tau2.cli run`` argv — PINNED: the server scripts quote these
+    numbers, so any edit here changes what every historical tau2 row means.
     """
-    tau2_dir = Path(benchmark_dir) if benchmark_dir else TAU2_DIR
-
     agent_args = json.dumps(
-        {"api_base": base_url.rstrip("/") + "/v1", "api_key": "EMPTY", "temperature": 0.0}
+        {"api_base": v1(base_url), "api_key": "EMPTY", "temperature": 0.0}
     )
     user_args = json.dumps(
-        {"api_base": user_base_url.rstrip("/") + "/v1", "api_key": "EMPTY", "temperature": 0.0}
+        {"api_base": v1(user_base_url), "api_key": "EMPTY", "temperature": 0.0}
     )
-    env = {**os.environ,
-           "NO_PROXY": "127.0.0.1,localhost", "no_proxy": "127.0.0.1,localhost"}
     cmd = [
-        sys.executable, "-m", "tau2.cli", "run",
+        python or sys.executable, "-m", "tau2.cli", "run",
         "--domain", task_set.split("_")[0],
         "--task-set-name", task_set,
         "--agent-llm", f"openai/{model}",
@@ -78,13 +67,47 @@ def run(
     ]
     if max_tasks:
         cmd += ["--num-tasks", str(max_tasks)]
-    subprocess.run(cmd, cwd=tau2_dir, env=env, check=True)
-    sims = tau2_dir / "data" / "simulations" / run_name
+    return cmd
+
+
+def evaluate_command(sims: Path, python: Optional[str] = None) -> List[str]:
+    """``tau2.cli evaluate-trajs`` argv (writes updated_results.json)."""
+    return [python or sys.executable, "-m", "tau2.cli", "evaluate-trajs",
+            "-o", str(sims), str(sims / "results.json")]
+
+
+def harness_env() -> Dict[str, str]:
+    return {**os.environ,
+            "NO_PROXY": "127.0.0.1,localhost", "no_proxy": "127.0.0.1,localhost"}
+
+
+def run(ctx: RunContext) -> Dict[str, Any]:
+    """Run tau2 with the agent LLM behind the arm proxy.
+
+    The user simulator points at a separate full-mode endpoint (same served
+    model, no compression) so only the agent's context is ever compressed.
+    ``$TAU2_DIR`` (or ~/benchmarks/tau2, or ``benchmark_dir`` when this
+    module is driven standalone) is the tau2 checkout that provides both the
+    CLI and the tool registry.
+    Official semantics: ``--save-to NAME`` writes
+    ``<tau2_dir>/data/simulations/NAME/results.json``; rewards are computed
+    by ``tau2 evaluate-trajs`` into ``updated_results.json``, which collect
+    then reads.
+
+    No cost join: see ``COST_JOIN`` below.
+    """
+    benchmark_dir = ctx.opt("benchmark_dir")
+    tau2_dir = Path(benchmark_dir) if benchmark_dir else TAU2_DIR
+    task_set = ctx.opt("task_set", "airline")
+    max_tasks = ctx.opt("max_tasks")
+
+    env = harness_env()
     subprocess.run(
-        [sys.executable, "-m", "tau2.cli", "evaluate-trajs", "-o", str(sims),
-         str(sims / "results.json")],
-        cwd=tau2_dir, env=env, check=True,
-    )
+        run_command(ctx.base_url, ctx.user_base_url, task_set, ctx.model,
+                    ctx.opt("num_workers", 4), ctx.run_name, max_tasks=max_tasks),
+        cwd=tau2_dir, env=env, check=True)
+    sims = tau2_dir / "data" / "simulations" / ctx.run_name
+    subprocess.run(evaluate_command(sims), cwd=tau2_dir, env=env, check=True)
     updated = sims / "updated_results.json"
     if not updated.exists():
         raise SystemExit(f"FATAL: tau2 evaluation produced no {updated}")
@@ -93,10 +116,33 @@ def run(
     # them as scored)
     import terminal_check  # noqa: E402  (sibling module)
 
-    code = terminal_check.check_tau2(run_name, max_tasks or None)
+    code = terminal_check.check_tau2(ctx.run_name, max_tasks or None)
     if code != 0:
         raise SystemExit(f"FATAL: tau2 terminal-state check failed (rc={code})")
-    return collect(updated, domain=task_set.split("_")[0])
+    summary = collect(updated, domain=task_set.split("_")[0])
+    summary["cost_join"] = COST_JOIN
+    return summary
+
+
+# Why tau2 gets no per-task cost columns.  ``proxy.conversation_id`` keys on
+# the system head + the first two non-system messages OF THE REQUEST AS SENT
+# (proxy.py:434-447), so rebuilding it needs the exact wire payload:
+#   1. the agent system message is NOT in results.json — tau2 keeps it in
+#      LLMAgentState.system_messages and only the conversation messages are
+#      serialised (tau2-bench src/tau2/agent/llm_agent.py:101,127);
+#   2. even reconstructing it through tau2's own code (LLMAgent.system_prompt
+#      + registry policy) leaves litellm between us and the socket: an
+#      assistant tool-call message carries ``content: None``
+#      (src/tau2/utils/llm_utils.py:191-197), and None vs "" changes
+#      _canonical_messages' output (proxy.py:412-414), so the key would
+#      silently mismatch.
+# This repo holds no captured (results.json, request log) pair to pin either
+# question, and a key that is wrong for the steady-state id would attribute
+# only each task's FIRST request — worse than no column.  One captured pair
+# turns this into a small addition.
+COST_JOIN = ("not joinable: the agent system message is not stored in "
+             "results.json and the litellm wire form of an assistant "
+             "tool-call message is unpinned (see adapters/tau2_adapter.py)")
 
 
 def collect(results_path: Path, domain: str = "airline") -> Dict[str, Any]:
@@ -172,11 +218,14 @@ if __name__ == "__main__":
     parser.add_argument("--task-set", default="airline")
     parser.add_argument("--num-workers", type=int, default=4)
     parser.add_argument("--max-tasks", type=int)
+    parser.add_argument("--run-name", default="c2kv_run")
     parser.add_argument("--model", default="c2kv-agent")
     args = parser.parse_args()
-    summary = run(
-        args.benchmark_dir, args.base_url, args.user_base_url, args.out,
-        task_set=args.task_set, num_workers=args.num_workers,
-        max_tasks=args.max_tasks, model=args.model,
-    )
+    # one code path: standalone use builds the same RunContext run.py builds
+    summary = run(RunContext(
+        base_url=args.base_url, user_base_url=args.user_base_url,
+        out_dir=args.out, model=args.model, arm="full", run_name=args.run_name,
+        options={"benchmark_dir": args.benchmark_dir, "task_set": args.task_set,
+                 "num_workers": args.num_workers, "max_tasks": args.max_tasks},
+    ))
     print(json.dumps(summary, indent=2))

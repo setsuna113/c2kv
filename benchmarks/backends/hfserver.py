@@ -6,7 +6,7 @@ doc/chunk ledger), the cost block rides on the response ``c2kv`` field.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from .base import Backend
 
@@ -44,6 +44,13 @@ class HfServerBackend(Backend):
     def prepare_chat(self, payload: Dict[str, Any], arm,
                      repair_plan: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         out = dict(payload)
+        # same template kwargs as extract() above, for the same reason the
+        # sglang backend does it: the served prompt must be rendered in the
+        # frame every measured position was computed in
+        raw_kwargs = out.get("chat_template_kwargs")
+        template_kwargs = dict(raw_kwargs) if isinstance(raw_kwargs, dict) else {}
+        template_kwargs.setdefault("enable_thinking", False)
+        out["chat_template_kwargs"] = template_kwargs
         if arm.constrain_tools:
             out["constrain_tools"] = True
         if arm.repair:

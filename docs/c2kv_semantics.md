@@ -138,11 +138,26 @@ the target doc's message into a repair-only message for `in_place`.
 
 Frame check: the plan records the server's `position_start` of the span
 and the proxy's own ledger expectation (system block incl. tools + Σ
-`original_seq_len` of the docs before the target); `frame_delta` must be 0.
+`original_seq_len` of the docs before the target). `frame_delta` is a
+MEASUREMENT of chat-template additivity, not an identity. The prologue is
+measured on the ASSEMBLED message list (`proxy.plan_repair`), which is
+what the server renders: a client that sends no system message (BFCL FC)
+gets the proxy's `DEFAULT_SYSTEM_PROMPT` injected by `_assemble`, and that
+injected block is what the system extract measures, so BFCL repair-arm
+rows DO carry a measured `frame_delta` (one extra `/v1/c2kv/extract` per
+distinct tool set, memoised per proxy process). `repair_frame_delta_status`
+says which case a row is in (`measured` / `not_measured_no_system` /
+`not_measured_multi_system` — more than one system message in the
+assembled list, which the server renders as separate blocks / 
+`not_measured_no_position_start`); **a null delta is not a passing check.**
 After the response, `repair_frame` compares the span position with the
-server-reported gist ledger (`c2kv_layout`). A non-zero delta means gist
-frame and raw frame diverged, which is exactly the defect described in
-section 6; do not read a repair number with a non-zero delta.
+server-reported gist ledger (`c2kv_layout`) and carries its own `ok_reason`;
+`ok: null` is likewise not a pass, and it is null for `in_place` at
+`doc_index` 0 — policy `first` on a single-doc turn — so on BFCL the
+`c2kv_repair_inplace` arm has BOTH frame checks unavailable. A non-zero delta
+means gist frame and raw frame diverged, which is exactly the defect
+described in section 6; do not read a repair number with a non-zero delta,
+and do not read a null one as a zero.
 
 ## 6. Reading 雨晗's table against ours
 
@@ -157,8 +172,10 @@ section 6; do not read a repair number with a non-zero delta.
   raw live in two frames 14–27 tokens per unit apart, and the append
   placement leaves the query in the gist frame. Mechanism verified in code
   (server `scheduler.py` ledger + her `_full_history_unit_layout`), effect
-  size not established. Our proxy uses one rendering for both, so the
-  frame check above is 0 by construction.
+  size not established. Our proxy uses one rendering for both, so the two
+  frames should agree by construction — but that is a claim the frame check
+  can only confirm where it is computable, and on BFCL FC it is not (no
+  system message, see section 5).
 - her Replace/Recompute > Append and our `corr_re` > `corr`: same
   direction, both underpowered.
 - her Hint Only: injects no KV at all (`repair_kind='none'`), the note it
@@ -174,11 +191,15 @@ section 6; do not read a repair number with a non-zero delta.
 ## 7. Provenance columns every bench row now carries
 
 Proxy request log (`~/bench_logs/proxy_task_*.jsonl`): `doc_packing`,
-`n_docs`, `dropped_docs`, `c2kv_query_proj`, `c2kv_gist_seen`,
-`c2kv_position_correction`, `c2kv_layout` (per-request injection ledger),
-`repair_placement`, `repair_position_start`, `repair_expected_offset`,
-`repair_frame_delta`, `repair_frame` (post-response check). `run.py`
-summaries carry `doc_packing`, `max_doc_length`, `max_doc_num`, `backend`.
+`n_docs`, `dropped_docs`, `c2kv_query_proj` (the server FLAG, constant per
+run), `c2kv_query_proj_effective` (what the request actually ran),
+`c2kv_query_proj_source`, `c2kv_query_proj_decode_verified`,
+`c2kv_tools_dump`, `c2kv_gist_seen`, `c2kv_position_correction`,
+`c2kv_layout` (per-request injection ledger), `repair_placement`,
+`repair_position_start`, `repair_expected_offset`, `repair_frame_delta`,
+`repair_frame_delta_status`, `repair_frame` (post-response check, with
+`ok_reason`). `run.py` summaries carry `doc_packing`, `max_doc_length`,
+`max_doc_num`, `backend`.
 
 A number without these columns predates 2026-09-02 and was produced under
 the `message` packing and base query projections.
