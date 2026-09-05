@@ -74,6 +74,7 @@ no path here does), and history documents are always chronological.
 from __future__ import annotations
 
 import ast
+import json
 import logging
 import random
 import re
@@ -469,7 +470,9 @@ def openswe_row_to_examples(
     """
     if row.get("resolved") != 1:
         return []
-    trajectory = _json_loads(row.get("trajectory"), [])
+    # 2026-08-21+ public shards renamed ``trajectory`` to ``messages`` while
+    # keeping the same nested message payload. Accept both on-disk names.
+    trajectory = _json_loads(row.get("trajectory"), row.get("messages", []))
     if not isinstance(trajectory, list) or not trajectory:
         return []
     raw_tools = _json_loads(row.get("tools"), [])
@@ -1015,7 +1018,40 @@ class OpenSWEJointSource(_StreamedJointSource):
     Streams ``data/*/*.parquet``; ``subset`` is ``openswe:<subdir_name>`` (the
     trajectory-config directory, e.g. ``openswe:qwen35_sweagent``).
     Conversion itself lives in ``openswe_row_to_examples``.
+    Legacy shards that predate the ``tools`` column may omit it; the
+    repository-side ``openhands_tools.json`` / ``sweagent_tools.json`` tables
+    are injected per config directory when they are present beside ``data/``.
     """
+
+    @staticmethod
+    def _load_fallback_tools(path: Path) -> Dict[str, List[str]]:
+        result: Dict[str, List[str]] = {}
+        for prefix, filename in (
+            ("openhands", "openhands_tools.json"),
+            ("sweagent", "sweagent_tools.json"),
+            ("minisweagent", "mini_sweagent_tools.json"),
+        ):
+            for candidate in (path / filename, path.parent / filename):
+                if not candidate.is_file():
+                    continue
+                try:
+                    payload = json.loads(candidate.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError):
+                    continue
+                if isinstance(payload, list) and all(isinstance(tool, dict) for tool in payload):
+                    result[prefix] = [json.dumps(tool, ensure_ascii=False) for tool in payload]
+                    break
+        return result
+
+    @staticmethod
+    def _fallback_tools_for_config(
+        config_name: str, tables: Dict[str, List[str]]
+    ) -> Optional[List[str]]:
+        name = config_name.lower()
+        for prefix in ("minisweagent", "openhands", "sweagent"):
+            if prefix in name and prefix in tables:
+                return tables[prefix]
+        return None
 
     def __init__(
         self,
@@ -1051,6 +1087,7 @@ class OpenSWEJointSource(_StreamedJointSource):
         self.random_negative_tools = random_negative_tools
         self.file_order_seed = file_order_seed
         self._cache = None
+        self._fallback_tools = self._load_fallback_tools(self.path)
 
     def _iter_rows(self) -> Iterator[Tuple[Dict[str, Any], str]]:
         files = _find_openswe_parquet_files(self.path)
@@ -1058,7 +1095,11 @@ class OpenSWEJointSource(_StreamedJointSource):
             raise FileNotFoundError(f"No parquet files found under {self.path} (or data/*/)")
         for file in _apply_file_order_seed(files, self.file_order_seed):
             subset = f"openswe:{file.parent.name}"
+            fallback = self._fallback_tools_for_config(file.parent.name, self._fallback_tools)
             for row in _iter_parquet_rows(file):
+                if fallback is not None and row.get("tools") is None:
+                    row = dict(row)
+                    row["tools"] = fallback
                 yield row, subset
 
     def _iter_records(self) -> Iterator[JointExample]:

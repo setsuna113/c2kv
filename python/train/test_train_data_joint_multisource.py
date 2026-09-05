@@ -222,6 +222,13 @@ def test_openswe_resolved_filter(fixtures):
         assert example.target_tool == "str_replace_editor"
 
 
+def test_openswe_accepts_current_messages_column(fixtures):
+    row = dict(fixtures["openswe"][0])
+    row["messages"] = row.pop("trajectory")
+    expected = openswe_row_to_examples(fixtures["openswe"][0], subset="openswe:test")
+    assert openswe_row_to_examples(row, subset="openswe:test") == expected
+
+
 def test_openswe_answer_surface_matches_traces_renderer(fixtures):
     row = fixtures["openswe"][0]
     examples = openswe_row_to_examples(row, subset="openswe:test")
