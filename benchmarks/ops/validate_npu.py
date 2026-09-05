@@ -72,6 +72,19 @@ def validate_mode(args, mode):
                 result["passed"] = result["returncode"] == 0
             finally:
                 stop_owned_group(tests)
+            if result["passed"]:
+                semantic_command = [sys.executable, str(args.sglang_dir / "scripts" /
+                                    "c2kv" / "smoke_c2kv_semantics.py"),
+                                    "--base-url", upstream]
+                with (mode_dir / "semantics.log").open("w", encoding="utf-8") as semantic_log:
+                    semantic_tests = subprocess.Popen(
+                        semantic_command, stdout=semantic_log, stderr=subprocess.STDOUT,
+                        start_new_session=True)
+                    try:
+                        result["semantics_returncode"] = semantic_tests.wait(timeout=args.test_timeout)
+                        result["passed"] = result["semantics_returncode"] == 0
+                    finally:
+                        stop_owned_group(semantic_tests)
         except Exception as error:
             result["error"] = f"{type(error).__name__}: {error}"
         finally:
