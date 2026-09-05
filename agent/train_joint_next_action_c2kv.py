@@ -14,8 +14,11 @@ from transformers import DataCollatorWithPadding, HfArgumentParser
 from gist_args import ModelArgs, TrainingArgs
 
 if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python"))
     sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from benchmarks.checkpoint_profile import write_training_profile  # noqa: E402
 
 from train.train_data_joint import (  # noqa: E402
     AgentLLMTracesJointSource,
@@ -566,6 +569,20 @@ def main() -> None:
             train_pass_datasets,
             eval_dataset,
         )
+        # Every new run carries the resolved model/training/data contract next
+        # to its checkpoints.  Only the saving process writes it under DDP;
+        # checkpoint-N descendants are resolved by walking to this parent.
+        if training_args.should_save:
+            profile_path = write_training_profile(
+                output_dir=training_args.output_dir,
+                repo_root=Path(__file__).resolve().parents[1],
+                model_args=model_args,
+                training_args=training_args,
+                data_args=data_args,
+                model_config=model.config,
+                argv=sys.argv,
+            )
+            logger.info("Wrote resolved C2KV checkpoint profile to %s", profile_path)
     eval_overflow = (getattr(eval_dataset, "skipped_by_reason", {}) or {}).get("system_overflow", 0)
     if eval_overflow:
         logger.warning(

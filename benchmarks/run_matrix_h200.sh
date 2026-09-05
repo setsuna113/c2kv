@@ -8,6 +8,12 @@ GU_BASE="${GU_BASE:-/inspire/hdd/global_user/yanjunchi-24040}"
 BENCH_ROOT="${BENCH_ROOT:-$GU_BASE/bench-sglang-h200}"
 RESULT_ROOT_ENV="${RESULT_ROOT:-}"
 CKPT_NAME="${CKPT_NAME:-}"
+PROFILE_PYTHON="${PROFILE_PYTHON:-python3}"
+C2KV_CHECKPOINT_PROFILE="${C2KV_CHECKPOINT_PROFILE:-}"
+C2KV_REFERENCE_PROFILE="${C2KV_REFERENCE_PROFILE:-}"
+C2KV_RUN_CONFIG="${C2KV_RUN_CONFIG:-}"
+C2KV_TRAIN_MANIFEST="${C2KV_TRAIN_MANIFEST:-}"
+C2KV_QUERY_PROJ_OVERRIDE="${C2KV_QUERY_PROJ:-}"
 SETUP="${SETUP:-1}"
 INSTALL_SYSTEM_DEPS="${INSTALL_SYSTEM_DEPS:-1}"
 RESUME="${RESUME:-1}"
@@ -39,8 +45,8 @@ TOOLSANDBOX_FULL="${TOOLSANDBOX_FULL:-0}"
 # so the run manifest records the value that was actually served rather than a
 # literal that can drift away from the launcher.
 C2KV_POOL_FRACTION="${C2KV_POOL_FRACTION:-0.06}"
-C2KV_QUERY_PROJ="${C2KV_QUERY_PROJ:-gist}"
-export C2KV_POOL_FRACTION C2KV_QUERY_PROJ
+MATRIX_FEATURES="${MATRIX_FEATURES:-cacheblend_repair_extract_v1}"
+export C2KV_POOL_FRACTION
 
 SGLANG_URL="${SGLANG_URL:-git@github.com:setsuna113/kvoffload-sglang-c2kv.git}"
 # Consolidated bdf-pilot tip: preserves the tool-aware segment insertion point
@@ -78,11 +84,33 @@ fi
 RESULT_ROOT=${RESULT_ROOT_ENV:-$GU_BASE/bench_results/$CKPT_NAME}
 GATE_DIR="$RESULT_ROOT/gates"
 mkdir -p "$RESULT_ROOT" "$GATE_DIR" "$BENCH_ROOT" "$UV_CACHE_DIR"
-# benchmarks/run.py adds the current repository short SHA to --out so a
-# resumed matrix can never mix trajectories from different benchmark code.
-# Keep every matrix-side existence/summary check on that same concrete path.
-C2KV_SHORT_SHA=$(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || printf 'nogit')
-RESULT_CELL_SUFFIX="_${C2KV_SHORT_SHA}"
+RESOLVED_PROFILE="$RESULT_ROOT/checkpoint_profile.resolved.json"
+RESOLVED_PROFILE_SHELL="$RESULT_ROOT/checkpoint_profile.resolved.sh"
+PROFILE_ARGS=(
+  --checkpoint "$CKPT_PATH"
+  --out "$RESOLVED_PROFILE"
+  --shell-out "$RESOLVED_PROFILE_SHELL"
+  --require-serving-e2e
+)
+if [[ -n "$C2KV_CHECKPOINT_PROFILE" ]]; then
+  PROFILE_ARGS+=(--profile "$C2KV_CHECKPOINT_PROFILE")
+fi
+if [[ -n "$C2KV_REFERENCE_PROFILE" ]]; then
+  PROFILE_ARGS+=(--reference-profile "$C2KV_REFERENCE_PROFILE")
+fi
+if [[ -n "$C2KV_RUN_CONFIG" ]]; then
+  PROFILE_ARGS+=(--run-config "$C2KV_RUN_CONFIG")
+fi
+if [[ -n "$C2KV_TRAIN_MANIFEST" ]]; then
+  PROFILE_ARGS+=(--train-manifest "$C2KV_TRAIN_MANIFEST")
+fi
+if [[ -n "$C2KV_QUERY_PROJ_OVERRIDE" ]]; then
+  PROFILE_ARGS+=(--query-projection "$C2KV_QUERY_PROJ_OVERRIDE")
+fi
+"$PROFILE_PYTHON" "$REPO_ROOT/benchmarks/checkpoint_profile.py" "${PROFILE_ARGS[@]}"
+# shellcheck disable=SC1090
+source "$RESOLVED_PROFILE_SHELL"
+export C2KV_QUERY_PROJ C2KV_RESOLVED_PROFILE="$RESOLVED_PROFILE"
 
 log() {
   printf '[%s] %s\n' "$(date -Is)" "$*"
@@ -148,19 +176,6 @@ ensure_adapter_pins() {
   if [[ "$install_path" == "$TOOLSANDBOX_DIR" ]] && ! "$venv/bin/python" -c 'import httpx; assert httpx.__version__ == "0.27.2"' >/dev/null 2>&1; then
     "$UV_BIN" pip install --python "$venv/bin/python" "httpx==0.27.2"
   fi
-}
-
-summary_is_complete() {
-  local summary=$1
-  "$SGLANG_PYTHON" - "$summary" <<'PY'
-import json
-import sys
-try:
-    data = json.load(open(sys.argv[1], encoding="utf-8"))
-except Exception:
-    raise SystemExit(1)
-raise SystemExit(0 if int(data.get("n") or 0) > 0 and data.get("semantic_score") is not None else 1)
-PY
 }
 
 ensure_host_libnuma() {
@@ -249,7 +264,6 @@ PY
 }
 
 SERVER_WRAPPER_PID=""
-CURRENT_POOL_RATIO=""
 
 stop_server() {
   if [[ -n "$SERVER_WRAPPER_PID" ]] && kill -0 "$SERVER_WRAPPER_PID" 2>/dev/null; then
@@ -266,7 +280,8 @@ start_server() {
     cd "$BENCH_ROOT"
     exec env HOST="$HOST" PORT="$PORT" CKPT="$CKPT_PATH" \
       SGLANG_VENV="$SGLANG_VENV" SERVED_MODEL_NAME="$SERVED_MODEL_NAME" \
-      SGLANG_LOG="$log_path" \
+      SGLANG_LOG="$log_path" C2KV_RESOLVED_PROFILE="$RESOLVED_PROFILE" \
+      C2KV_PROFILE_WORK_DIR="$RESULT_ROOT/server_profile" \
       bash "$REPO_ROOT/benchmarks/launch_sglang_h200.sh"
   ) >"${log_path%.log}_launcher.out" 2>&1 &
   SERVER_WRAPPER_PID=$!
@@ -275,44 +290,6 @@ start_server() {
     tail -100 "$log_path" >&2 || true
     exit 2
   fi
-}
-
-arm_pool_ratio() {
-  "$SGLANG_PYTHON" - "$REPO_ROOT/benchmarks" "$1" <<'PY'
-import sys
-sys.path.insert(0, sys.argv[1])
-from arms import get_arm
-arm = get_arm(sys.argv[2])
-print(arm.ratio if arm.compress_history else 0)
-PY
-}
-
-proxy_regime() {
-  # doc_packing / max_doc_num / max_doc_length, read from proxy.py itself so the
-  # manifest cannot claim a segmentation regime the proxy does not run.
-  "$SGLANG_PYTHON" - "$REPO_ROOT/benchmarks" <<'PY'
-import sys
-sys.path.insert(0, sys.argv[1])
-import proxy
-print(proxy.DOC_PACKING)
-print(proxy.MAX_DOC_NUM)
-print(proxy.MAX_DOC_LENGTH)
-PY
-}
-
-ensure_pool_ratio() {
-  local arm=$1 ratio
-  ratio=$(arm_pool_ratio "$arm")
-  if [[ "$ratio" == "0" ]]; then
-    return
-  fi
-  if [[ -n "$CURRENT_POOL_RATIO" && "$CURRENT_POOL_RATIO" != "$ratio" ]]; then
-    log "restarting sglang to isolate C2KV ratio $CURRENT_POOL_RATIO -> $ratio"
-    stop_server
-    sleep 2
-    start_server "$RESULT_ROOT/sglang_${arm}_ratio${ratio}.log"
-  fi
-  CURRENT_POOL_RATIO=$ratio
 }
 
 cleanup() {
@@ -357,7 +334,6 @@ log "static checkpoint gate"
 
 SGLANG_LOG="$RESULT_ROOT/sglang.log"
 start_server "$SGLANG_LOG"
-CURRENT_POOL_RATIO=8  # all pre-matrix extract gates use ratio 8
 
 log "S1 extract gate"
 "$SGLANG_PYTHON" "$REPO_ROOT/benchmarks/sglang_smoke.py" service \
@@ -376,199 +352,178 @@ log "variable-length flex attention gate"
 log "S3 proxy-arm gate"
 "$SGLANG_PYTHON" "$REPO_ROOT/benchmarks/sglang_smoke.py" proxy \
   --base-url "$BASE_URL" --served-model-name "$SERVED_MODEL_NAME" \
+  --checkpoint "$CKPT_PATH" --checkpoint-profile "$RESOLVED_PROFILE" \
   --log-dir "$GATE_DIR" --out "$GATE_DIR/S3_proxy.json"
 
 log "S6 tools-through-proxy gate"
 "$SGLANG_PYTHON" "$REPO_ROOT/benchmarks/sglang_smoke.py" tools-proxy \
   --base-url "$BASE_URL" --served-model-name "$SERVED_MODEL_NAME" \
-  --checkpoint "$CKPT_PATH" --log-dir "$GATE_DIR" \
+  --checkpoint "$CKPT_PATH" --checkpoint-profile "$RESOLVED_PROFILE" \
+  --log-dir "$GATE_DIR" \
   --out "$GATE_DIR/S6_tools_through_proxy.json"
-
-cat >"$GATE_DIR/S4_repair.json" <<'EOF'
-{
-  "gate": "S4_repair",
-  "passed": true,
-  "status": "skipped",
-  "reason": "repair arms are disabled by policy in this matrix; /v1/c2kv/repair_extract exists at the pinned commit but no repair arm is wired into benchmarks/arms.py"
-}
-EOF
 
 read -r -a BENCHMARK_LIST <<<"$BENCHMARKS"
 read -r -a ARM_LIST <<<"$ARMS"
-CELL_INDEX=0
-for arm in "${ARM_LIST[@]}"; do
-  arm_is_complete=1
-  for benchmark in "${BENCHMARK_LIST[@]}"; do
-    if ! summary_is_complete "$RESULT_ROOT/${benchmark}_${arm}${RESULT_CELL_SUFFIX}/summary_${arm}.json"; then
-      arm_is_complete=0
-      break
-    fi
-  done
-  if [[ "$arm_is_complete" == "1" ]]; then
-    log "skip complete arm $arm"
-    continue
-  fi
-  ensure_pool_ratio "$arm"
-  for benchmark in "${BENCHMARK_LIST[@]}"; do
-    case "$benchmark" in
-      tau2) RUN_PYTHON="$TAU2_VENV/bin/python" ;;
-      bfcl) RUN_PYTHON="$BFCL_VENV/bin/python" ;;
-      toolsandbox) RUN_PYTHON="$TOOLSANDBOX_VENV/bin/python" ;;
-      *) echo "FATAL: unknown benchmark $benchmark" >&2; exit 2 ;;
-    esac
+if [[ "$OVERWRITE" == "1" ]]; then
+  echo "FATAL: generic matrix evidence is immutable; choose a new RESULT_ROOT instead of OVERWRITE=1" >&2
+  exit 2
+fi
 
-    cell_base="$RESULT_ROOT/${benchmark}_${arm}"
-    cell="${cell_base}${RESULT_CELL_SUFFIX}"
-    summary="$cell/summary_${arm}.json"
-    if [[ -e "$cell" && "$RESUME" == "0" ]]; then
-      echo "FATAL: RESUME=0 and target cell already exists: $cell" >&2
-      exit 2
-    fi
-    if [[ "$OVERWRITE" == "1" && -e "$cell" ]]; then
-      rm -rf -- "$cell"
-    elif [[ -f "$summary" && "$RESUME" == "1" ]] && summary_is_complete "$summary"; then
-      log "skip complete cell $benchmark/$arm"
-      continue
-    elif [[ -d "$cell" ]]; then
-      rm -rf -- "$cell"
-    fi
+MATRIX_SPEC="$RESULT_ROOT/matrix.json"
+MANIFEST="$RESULT_ROOT/run_manifest.json"
+"$SGLANG_PYTHON" - "$RESOLVED_PROFILE" "$MATRIX_SPEC" "$MANIFEST" \
+  "$CKPT_PATH" "$REPO_ROOT" "$SGLANG_REPO" "$TAU2_DIR" "$BFCL_MONOREPO" \
+  "$TOOLSANDBOX_DIR" "$BASE_URL" "$SERVED_MODEL_NAME" "$PROXY_PORT_BASE" \
+  "$NUM_WORKERS" "$SMOKE" "$TAU2_TASK_SET" "$TAU2_SMOKE_TASKS" \
+  "$TAU2_SMOKE_TRIALS" "$TAU2_SMOKE_MAX_STEPS" "$TAU2_SMOKE_TIMEOUT_SEC" \
+  "$BFCL_CATEGORIES" "$BFCL_SMOKE_RUN_IDS" "$TOOLSANDBOX_FULL" \
+  "$TOOLSANDBOX_SMOKE_SCENARIO" "$C2KV_POOL_FRACTION" "$MATRIX_FEATURES" \
+  "$TAU2_VENV/bin/python" "$BFCL_VENV/bin/python" "$TOOLSANDBOX_VENV/bin/python" \
+  "${#BENCHMARK_LIST[@]}" "${BENCHMARK_LIST[@]}" "${ARM_LIST[@]}" <<'PY'
+import datetime
+import json
+import shlex
+import subprocess
+import sys
 
-    proxy_port=$(( PROXY_PORT_BASE + CELL_INDEX ))
-    CELL_INDEX=$(( CELL_INDEX + 1 ))
-    log "run $benchmark/$arm on proxy port $proxy_port"
-    set -o pipefail
-    case "$benchmark" in
-      tau2)
-        extra=()
-        if [[ "$SMOKE" == "1" ]]; then
-          extra+=("--max-tasks" "$TAU2_SMOKE_TASKS"
-                  "--tau2-num-trials" "$TAU2_SMOKE_TRIALS"
-                  "--tau2-max-steps" "$TAU2_SMOKE_MAX_STEPS"
-                  "--tau2-timeout" "$TAU2_SMOKE_TIMEOUT_SEC")
-        fi
-        "$RUN_PYTHON" "$REPO_ROOT/benchmarks/run.py" \
-          --benchmark tau2 --arm "$arm" --upstream "$BASE_URL" \
-          --proxy-port "$proxy_port" --out "$cell_base" \
-          --model "$SERVED_MODEL_NAME" \
-          --task-set "$TAU2_TASK_SET" --num-workers "$NUM_WORKERS" \
-          --run-name "${CKPT_NAME}_tau2_${arm}" \
-          "${extra[@]}" 2>&1 | tee "$RESULT_ROOT/${benchmark}_${arm}.log"
-        ;;
-      bfcl)
-        extra=()
-        if [[ "$SMOKE" == "1" ]]; then
-          extra+=("--run-ids" "$BFCL_SMOKE_RUN_IDS")
-        fi
-        "$RUN_PYTHON" "$REPO_ROOT/benchmarks/run.py" \
-          --benchmark bfcl --arm "$arm" --upstream "$BASE_URL" \
-          --proxy-port "$proxy_port" --out "$cell_base" \
-          --categories "$BFCL_CATEGORIES" \
-          --model "$SERVED_MODEL_NAME" \
-          "${extra[@]}" 2>&1 | tee "$RESULT_ROOT/${benchmark}_${arm}.log"
-        ;;
-      toolsandbox)
-        extra=()
-        if [[ "$SMOKE" == "1" && "$TOOLSANDBOX_FULL" != "1" ]]; then
-          extra+=("--ts-scenarios" "$TOOLSANDBOX_SMOKE_SCENARIO")
-        else
-          if [[ "$TOOLSANDBOX_FULL" == "1" && "$SMOKE" != "1" ]]; then
-            echo "[note] TOOLSANDBOX_FULL=1 is redundant outside SMOKE=1: the full suite is already the default"
-          fi
-          extra+=("--full")
-        fi
-        "$RUN_PYTHON" "$REPO_ROOT/benchmarks/run.py" \
-          --benchmark toolsandbox --arm "$arm" --upstream "$BASE_URL" \
-          --proxy-port "$proxy_port" --out "$cell_base" \
-          --num-workers "$NUM_WORKERS" \
-          "${extra[@]}" 2>&1 | tee "$RESULT_ROOT/${benchmark}_${arm}.log"
-        ;;
-    esac
-  done
-done
+args = sys.argv[1:]
+(profile_path, spec_path, manifest_path, checkpoint, repo, sglang, tau2, bfcl,
+ toolsandbox, base_url, model, proxy_port, workers, smoke, tau2_task_set,
+ tau2_smoke_tasks, tau2_smoke_trials, tau2_smoke_steps, tau2_smoke_timeout,
+ bfcl_categories, bfcl_smoke_ids, toolsandbox_full, toolsandbox_scenario,
+ pool_fraction, feature_text, tau2_python, bfcl_python,
+ toolsandbox_python) = args[:28]
+benchmark_count = int(args[28])
+benchmark_names = args[29:29 + benchmark_count]
+arms = args[29 + benchmark_count:]
+with open(profile_path, encoding="utf-8") as handle:
+    profile = json.load(handle)
+features = [
+    item
+    for token in shlex.split(feature_text.replace(",", " "))
+    for item in [token.strip()]
+    if item
+]
+
+common_args = [
+    "--num-workers", workers,
+    "--doc-packing", profile["serving"]["doc_packing"],
+    "--max-doc-length", str(profile["serving"]["max_doc_length"]),
+    "--max-doc-num", str(profile["serving"]["max_doc_num"]),
+]
+benchmark_configs = {}
+for name in benchmark_names:
+    if name == "tau2":
+        run_args = ["--task-set", tau2_task_set]
+        if smoke == "1":
+            run_args += [
+                "--max-tasks", tau2_smoke_tasks,
+                "--tau2-num-trials", tau2_smoke_trials,
+                "--tau2-max-steps", tau2_smoke_steps,
+                "--tau2-timeout", tau2_smoke_timeout,
+            ]
+        benchmark_configs[name] = {
+            "runner_python": tau2_python,
+            "run_args": run_args,
+            "options": {"tau2_dir": tau2},
+        }
+    elif name == "bfcl":
+        run_args = ["--categories", bfcl_categories]
+        if smoke == "1":
+            run_args += ["--run-ids", bfcl_smoke_ids]
+        benchmark_configs[name] = {
+            "runner_python": bfcl_python,
+            "run_args": run_args,
+            "options": {"bfcl_dir": f"{bfcl}/berkeley-function-call-leaderboard"},
+        }
+    elif name == "toolsandbox":
+        run_args = (
+            ["--ts-scenarios", toolsandbox_scenario]
+            if smoke == "1" and toolsandbox_full != "1"
+            else ["--full"]
+        )
+        benchmark_configs[name] = {
+            "runner_python": toolsandbox_python,
+            "run_args": run_args,
+            "options": {"toolsandbox_dir": toolsandbox},
+        }
+    else:
+        raise SystemExit(f"FATAL: H200 setup has no runner for benchmark {name!r}")
+
+spec = {
+    "schema_version": 1,
+    "profile": {**profile, "path": profile_path},
+    "defaults": {
+        "backend": "sglang",
+        "upstream": base_url,
+        "user_upstream": base_url,
+        "model": model,
+        "proxy_port": int(proxy_port),
+        "run_args": common_args,
+    },
+    "features": features,
+    "arms": arms,
+    "benchmarks": benchmark_configs,
+}
+
+def commit(path):
+    return subprocess.check_output(
+        ["git", "-C", path, "rev-parse", "HEAD"], text=True
+    ).strip()
+
+manifest = {
+    "created_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+    "checkpoint_profile": {
+        "path": profile_path,
+        "kind": profile["profile_kind"],
+        "fingerprint": profile["profile_fingerprint"],
+        "query_projection": profile["serving"]["query_projection"],
+        "doc_packing": profile["serving"]["doc_packing"],
+        "max_doc_length": profile["serving"]["max_doc_length"],
+        "max_doc_num": profile["serving"]["max_doc_num"],
+        "compression_ratios": profile["serving"]["compression_ratios"],
+        "doc_mode": profile["training"]["doc_mode"],
+        "tools_in_system": profile["training"]["tools_in_system"],
+    },
+    "checkpoint": checkpoint,
+    "c2kv_commit": commit(repo),
+    "sglang_commit": commit(sglang),
+    "benchmark_commits": {
+        "tau2": commit(tau2), "bfcl": commit(bfcl), "toolsandbox": commit(toolsandbox),
+    },
+    "endpoint": base_url,
+    "served_model_name": model,
+    "server": {
+        "features": features,
+        "c2kv_pool_fraction": float(pool_fraction),
+        "cuda_graph": "disabled",
+    },
+    "matrix_spec": spec_path,
+    "reporting_note": "execution status is recorded per cell; constructing this manifest is not a pass",
+}
+with open(spec_path, "w", encoding="utf-8") as handle:
+    json.dump(spec, handle, indent=2, ensure_ascii=False)
+    handle.write("\n")
+with open(manifest_path, "w", encoding="utf-8") as handle:
+    json.dump(manifest, handle, indent=2, ensure_ascii=False)
+    handle.write("\n")
+PY
+
+MATRIX_ARGS=(
+  --matrix "$MATRIX_SPEC"
+  --out "$RESULT_ROOT"
+  --plan-out "$RESULT_ROOT/matrix_plan.json"
+  --execute
+)
+if [[ "$RESUME" == "1" ]]; then
+  MATRIX_ARGS+=(--resume)
+fi
+log "execute generic matrix (${#BENCHMARK_LIST[@]} benchmarks x ${#ARM_LIST[@]} arms)"
+"$SGLANG_PYTHON" "$REPO_ROOT/benchmarks/matrix.py" "${MATRIX_ARGS[@]}"
 
 if [[ "$SMOKE" == "1" ]]; then
   printf '%s\n' '{"gate":"S5_smoke","passed":true,"status":"all_requested_minimal_cells_completed"}' \
     >"$GATE_DIR/S5_smoke.json"
 fi
-
-MANIFEST="$RESULT_ROOT/run_manifest.json"
-mapfile -t PROXY_REGIME < <(proxy_regime)
-"$SGLANG_PYTHON" - "$MANIFEST" "$CKPT_PATH" "$CKPT_NAME" "$REPO_ROOT" \
-"$SGLANG_REPO" "$TAU2_DIR" "$BFCL_MONOREPO" "$TOOLSANDBOX_DIR" \
-"$BASE_URL" "$SERVED_MODEL_NAME" "$SMOKE" "$NUM_WORKERS" "$PORT" \
-"$C2KV_POOL_FRACTION" "$C2KV_QUERY_PROJ" \
-"${PROXY_REGIME[0]}" "${PROXY_REGIME[1]}" "${PROXY_REGIME[2]}" \
-"${#BENCHMARK_LIST[@]}" "${BENCHMARK_LIST[@]}" "${ARM_LIST[@]}" <<'PY'
-import datetime
-import json
-import subprocess
-import sys
-
-argv = sys.argv[1:]
-(out, ckpt, ckpt_name, repo, sglang, tau2, bfcl, toolsandbox, url, model, smoke,
- workers, port, pool_fraction, query_proj, doc_packing, max_doc_num,
- max_doc_length) = argv[:18]
-benchmark_count = int(argv[18])
-benchmarks = argv[19:19 + benchmark_count]
-arms = argv[19 + benchmark_count:]
-def commit(path):
-    return subprocess.check_output(["git", "-C", path, "rev-parse", "HEAD"], text=True).strip()
-manifest = {
-    "created_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-    "checkpoint": ckpt,
-    "checkpoint_name": ckpt_name,
-    "c2kv_commit": commit(repo),
-    "sglang_commit": commit(sglang),
-    "benchmark_commits": {
-        "tau2": commit(tau2),
-        "bfcl": commit(bfcl),
-        "toolsandbox": commit(toolsandbox),
-    },
-    "endpoint": url,
-    "served_model_name": model,
-    "benchmarks": benchmarks,
-    "arms": arms,
-    "result_cell_suffix": "_" + commit(repo)[:7],
-    "smoke": smoke == "1",
-    "num_workers": int(workers),
-    "sglang_flags": {
-        "enable_c2kv": True,
-        "c2kv_pool_fraction": float(pool_fraction),
-        "c2kv_max_tokens": 4096,
-        "c2kv_query_proj": query_proj,
-        "tool_call_parser": "qwen25",
-        "mem_fraction_static": 0.8,
-        "disable_piecewise_cuda_graph": True,
-        "disable_piecewise_cuda_graph_reason": "Qwen3 C2KV data-dependent branch is incompatible with piecewise tracing",
-        "disable_cuda_graph": True,
-        "disable_cuda_graph_reason": "the per-token gist/base projection mask is not part of CUDA-graph capture, so a captured decode would revert to the base projections",
-        "attention_backend": "sglang_default",
-        "port": int(port),
-    },
-    "proxy_segmentation": {
-        "doc_packing": doc_packing,
-        "max_doc_num": int(max_doc_num),
-        "max_doc_length": int(max_doc_length),
-        "history_cutoff": "after_last_assistant",
-    },
-    "sglang_pool_isolation": {
-        "restart_on_ratio_change": True,
-        "reason": "the C2KV pool hashes input ids but not compression ratio; mixed-ratio arms would collide",
-    },
-    "repair": {
-        "enabled": False,
-        "reason": "repair arms are disabled by policy in this matrix; /v1/c2kv/repair_extract exists at the pinned commit but no repair arm is wired into benchmarks/arms.py",
-    },
-    "reporting_note": "preliminary, n=1; no historical NPU comparisons",
-}
-with open(out, "w", encoding="utf-8") as handle:
-    json.dump(manifest, handle, indent=2, ensure_ascii=False)
-    handle.write("\n")
-PY
-
-"$SGLANG_PYTHON" "$REPO_ROOT/benchmarks/summarize_matrix.py" \
-  --root "$RESULT_ROOT" --manifest "$MANIFEST" \
-  --output-json "$RESULT_ROOT/matrix_summary.json" \
-  --output-md "$RESULT_ROOT/MATRIX_SUMMARY.md"
 
 log "matrix complete: $RESULT_ROOT"
