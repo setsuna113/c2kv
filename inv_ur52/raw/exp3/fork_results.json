@@ -133,13 +133,17 @@
    18785,
    788,
    330,
-   36326,
-   6352,
+   82916,
+   43,
    95642,
    151658,
    151645
   ],
-  "D_text": "<tool_call>\n{\"name\": \"get_stock_info\", \"arguments\": {\"symbol\": \"NVDA\"}}\n</tool_call><|im_end|>"
+  "D_starts": [
+   3851,
+   3913
+  ],
+  "D_text": "<tool_call>\n{\"name\": \"get_stock_info\", \"arguments\": {\"symbol\": \"AAPL\"}}\n</tool_call><|im_end|>"
  },
  "multi_turn_base_122": {
   "past_len": 2824,
@@ -276,6 +280,10 @@
    21,
    11248
   ],
+  "D_starts": [
+   2586,
+   2697
+  ],
   "D_text": "<tool_call>\n{\"name\": \"get_order_details\", \"arguments\": {\"order_id\": 12446}}\n</tool_call><|im_end|>"
  },
  "multi_turn_base_136": {
@@ -395,31 +403,35 @@
   "A_eq_C": false,
   "A_eq_D": false,
   "D_ids_head": [
-   151657,
-   198,
-   4913,
-   606,
-   788,
-   330,
-   455,
-   7869,
-   13260,
-   497,
-   330,
-   16370,
-   788,
-   5212,
-   1358,
-   842,
-   788,
-   220,
-   16,
-   17,
-   19,
-   19,
-   21,
-   11248
+   1249,
+   1779,
+   279,
+   1482,
+   2639,
+   315,
+   697,
+   1973,
+   11,
+   358,
+   646,
+   17179,
+   279,
+   3565,
+   1667,
+   279,
+   1973,
+   3034,
+   13,
+   6771,
+   752,
+   633,
+   429,
+   1995
   ],
-  "D_text": "<tool_call>\n{\"name\": \"get_order_details\", \"arguments\": {\"order_id\": 12446}}\n</tool_call><|im_end|>"
+  "D_starts": [
+   5107,
+   5220
+  ],
+  "D_text": "To check the current status of your order, I can retrieve the details using the order ID. Let me get that information for you.  \n\n<tool_call>\n{\"name\": \"get_order_details\", \"arguments\": {\"order_id\": 12446}}\n</tool_call><|im_end|>"
  }
 }

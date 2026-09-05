@@ -207,15 +207,17 @@ for ep, sig in EPISODES.items():
     print("  B done", flush=True)
     genC = run_variant(Kfull, Vfull, past_len, ids, qpos, raw_cols)
     print("  C done", flush=True)
-    # D: re-phase raw K from client wrapper frame (abs_pos) to compressed frame
-    # adjacent to the query: p_new = past_len - T_total + t
+    # D': pure common-origin shift — move BOTH raw blocks by the SAME constant
+    # (client->server tool-preamble origin difference), keeping KV content,
+    # the inter-block gap, and all query positions untouched.
+    SHIFT = {"multi_turn_base_110": -1697, "multi_turn_base_122": -1150, "multi_turn_base_136": -1670}
     KD = Kfull.clone()
     Ttot = past_len - e1["kv_start"]
     t0 = e1["kv_start"]
     for t in range(Ttot):
         slot = t0 + t
         p_old = e1["abs_pos"][t] if slot < e2["kv_start"] else e2["abs_pos"][slot - e2["kv_start"]]
-        p_new = past_len - Ttot + t
+        p_new = p_old + SHIFT[ep]
         inv = THETA ** (-torch.arange(0, HD // 2, dtype=torch.float32, device=DEV) * 2 / HD)
         def rot(k, p):
             fr = torch.tensor(float(p), dtype=torch.float32, device=DEV) * inv
@@ -234,7 +236,7 @@ for ep, sig in EPISODES.items():
         "B_text": tokz.decode(genB)[:600],
         "C_text": tokz.decode(genC)[:600],
         "A_eq_B": genA == genB, "A_eq_C": genA == genC, "A_eq_D": genA == genD,
-        "D_ids_head": genD[:24],
+        "D_ids_head": genD[:24], "D_starts": [e1["abs_pos"][0] + SHIFT[ep], e2["abs_pos"][0] + SHIFT[ep]],
         "D_text": tokz.decode(genD)[:600],
     })
     results[ep] = out
