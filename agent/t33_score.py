@@ -586,6 +586,39 @@ def main(argv: Optional[List[str]] = None) -> int:
             e["verdict"] = verdict(e)
             entries.append(e)
 
+    # score-family dedupe: algebraic restatements of one score (identical
+    # oriented values on identical complete-case row sets) collapse into one
+    # family — the old "12 LIVE" count contained two such duplicate pairs
+    fam_of: Dict[str, str] = {}
+    masks: Dict[str, np.ndarray] = {}
+    vecs: Dict[str, np.ndarray] = {}
+    for e in entries:
+        col = e["feature"]
+        vals = np.array([frame[i].get(col) if frame[i].get(col) is not None else np.nan
+                         for i in range(len(frame))], dtype=float)[keep]
+        m = ~np.isnan(vals)
+        v = vals[m]
+        orient = e.get("orientation", 1)
+        masks[col] = m
+        vecs[col] = -v if orient < 0 else v
+    for i, c1 in enumerate([e["feature"] for e in entries]):
+        if c1 in fam_of:
+            continue
+        fam_of[c1] = c1
+        for c2 in [e["feature"] for e in entries][i + 1:]:
+            if c2 in fam_of or masks[c1].shape != masks[c2].shape:
+                continue
+            if not np.array_equal(masks[c1], masks[c2]):
+                continue
+            v1, v2 = vecs[c1], vecs[c2]
+            if len(np.unique(v1)) < 2:
+                continue
+            rho = float(np.corrcoef(v1, v2)[0, 1]) if len(v1) > 2 else 1.0
+            if abs(rho) > 0.9999 or np.allclose(np.sort(v1), np.sort(v2), atol=1e-9, rtol=0):
+                fam_of[c2] = c1
+    for e in entries:
+        e["score_family"] = fam_of.get(e["feature"], e["feature"])
+
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     result = {

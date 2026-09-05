@@ -366,8 +366,12 @@ def main(argv: Optional[List[str]] = None) -> int:
             ctx_last = Xc.reshape(len(qids_t), -1)
             query_sel = Xq[:, :: max(1, n_layers // sel_layers), :].reshape(len(qids_t), -1)
             joint = np.concatenate([ctx_last, query_sel], axis=1)
-            out["joint_overflow"] = fit_lr_cv(joint, y, clusters)
-            out["joint_context_only"] = fit_lr_cv(ctx_last, y, clusters)
+            dj = fit_lr_cv_detailed(joint, y, clusters)
+            out["joint_overflow"] = {k: v for k, v in dj.items() if not k.startswith("_")}
+            out["joint_overflow"]["oof_scores"] = [None if np.isnan(v) else round(float(v), 5)
+                                                   for v in dj["_oof"]]
+            dc = fit_lr_cv_detailed(ctx_last, y, clusters)
+            out["joint_context_only"] = {k: v for k, v in dc.items() if not k.startswith("_")}
         else:
             out["joint_overflow_missing"] = (f"no {ctx_key} arrays in capture; the gist-path "
                                              "hooks were structurally dead before the fix")
@@ -385,7 +389,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             ok = ~np.isnan(preds)
             if ok.all() and len(np.unique(y[ok])) == 2:
                 out["kwts_ensemble"] = {"auprc": round(auprc(preds, y), 4),
-                                        "auroc": round(auroc(preds, y), 4)}
+                                        "auroc": round(auroc(preds, y), 4),
+                                        "oof_scores": [round(float(v), 5) for v in preds]}
             else:
                 out["kwts_ensemble"] = {"n_scored": int(ok.sum()),
                                         "note": "some folds produced no predictions"}
@@ -420,6 +425,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         ca = clusters[keep]
         d = fit_lr_cv_detailed(Xa, ya, ca)
         entry = {k: v for k, v in d.items() if not k.startswith("_")}
+        entry["oof_scores"] = [None if np.isnan(v) else round(float(v), 5) for v in d["_oof"]]
         okp = d["_ok"]
         if okp.sum() == len(ya) and len(np.unique(ya[okp])) == 2:
             entry["fpr_at_90tpr"] = fpr_at_tpr(d["_oof"][okp], ya[okp])
@@ -480,6 +486,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         # arm B: C->W labels on the trigger subset (as before)
         db = fit_lr_cv_detailed(Xa, y[keep], clusters[keep])
         out["alien_arm_b_cw"] = {k: v for k, v in db.items() if not k.startswith("_")}
+        out["alien_arm_b_cw"]["oof_scores"] = [None if np.isnan(v) else round(float(v), 5)
+                                               for v in db["_oof"]]
+        out["alien_arm_b_cw"]["oof_row_indices"] = [int(i) for i in keep]
         # arm A: wrong-any labels (c2kv wrong vs gold) over ALL hidden rows,
         # scored on the C->W subset via the OOF predictions — the two-arm gap
         # on C->W is the prereg's reported quantity.  Previously rows_arm_a
