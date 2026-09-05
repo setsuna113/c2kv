@@ -148,10 +148,41 @@ def test_collect_appworld_joins_runner_results(tmp_path):
 def test_collect_appworld_terminal_gate_and_missing_eval(tmp_path):
     eval_path = tmp_path / "test_normal.json"
     eval_path.write_text(json.dumps({"individual": {"t1": {"success": True}}}))
-    with pytest.raises(SystemExit, match="n_scored=1 < n_total=168"):
+    with pytest.raises(SystemExit, match="n_scored=1 != n_total=168"):
         A.collect_appworld(eval_path, tmp_path / "none", expected=168)
     with pytest.raises(SystemExit, match="wrote no"):
         A.collect_appworld(tmp_path / "missing.json", tmp_path)
+
+
+def test_appworld_subset_is_private_and_shared_by_runner_and_scorer(tmp_path, monkeypatch):
+    source = tmp_path / "acon" / "experiments" / "appworld"
+    source.mkdir(parents=True)
+    (source / "run_all.py").write_text("# official runner\n")
+    data_root = tmp_path / "official"
+    datasets = data_root / "data" / "datasets"
+    datasets.mkdir(parents=True)
+    dataset = datasets / "test_normal.txt"
+    dataset.write_text("task_1\ntask_2\n")
+    monkeypatch.setenv("APPWORLD_ROOT", str(data_root))
+    out = tmp_path / "run"
+    out.mkdir()
+    root = A.prepare_appworld_run(tmp_path / "acon", out, "test_normal", ["task_2"])
+    private = root / "experiments" / "appworld"
+    assert (private / "run_all.py").is_file()
+    assert (private / "data" / "datasets" / "test_normal.txt").read_text() == "task_2\n"
+    assert dataset.read_text() == "task_1\ntask_2\n"
+    assert json.loads((out / "selected_tasks.json").read_text())["task_ids"] == ["task_2"]
+    with pytest.raises(SystemExit, match="outside test_normal"):
+        A.prepare_appworld_run(tmp_path / "acon", tmp_path / "other", "test_normal", ["task_3"])
+    with pytest.raises(FileExistsError):
+        A.prepare_appworld_run(tmp_path / "acon", out, "test_normal", ["task_2"])
+
+
+def test_appworld_score_must_match_selected_ids(tmp_path):
+    path = tmp_path / "score.json"
+    path.write_text(json.dumps({"individual": {"task_1": {"success": True}}}))
+    with pytest.raises(SystemExit, match="scored task IDs"):
+        A.collect_appworld(path, tmp_path, expected=1, expected_ids=["task_2"])
 
 
 def test_run_dispatch_rejects_unknown_kind(tmp_path):

@@ -53,6 +53,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -349,6 +350,50 @@ def appworld_split_size(python: str, split: str, cwd: Path, env: Dict[str, str])
     return int(proc.stdout.strip())
 
 
+def prepare_appworld_run(acon_dir: Path, out_dir: Path, split: str,
+                         task_ids: Optional[List[str]] = None) -> Path:
+    """Isolate mutable runner outputs and the scorer's exact dataset list.
+
+    AppWorld's official CLI evaluates a dataset name, not ``--task_ids``.
+    A private dataset file therefore binds generation and scoring to the
+    same selected tasks without editing the installed official dataset.
+    Large immutable databases and task files remain linked to the data root.
+    """
+    if not split or Path(split).name != split or split in {".", ".."}:
+        raise SystemExit(f"FATAL: invalid AppWorld split: {split!r}")
+    source = Path(acon_dir) / "experiments" / "appworld"
+    data = Path(os.environ.get("APPWORLD_ROOT", str(source))) / "data"
+    dataset = data / "datasets" / f"{split}.txt"
+    if not dataset.is_file():
+        raise SystemExit(f"FATAL: missing AppWorld dataset {dataset}")
+    available = [line.strip() for line in dataset.read_text().splitlines() if line.strip()]
+    selected = list(task_ids) if task_ids else available
+    if not selected or len(selected) != len(set(selected)):
+        raise SystemExit("FATAL: AppWorld task selection is empty or contains duplicates")
+    unknown = set(selected) - set(available)
+    if unknown:
+        raise SystemExit(f"FATAL: AppWorld tasks are outside {split}: {sorted(unknown)}")
+    root = Path(out_dir).resolve() / "appworld_harness"
+    cwd = root / "experiments" / "appworld"
+    shutil.copytree(source, cwd, ignore=shutil.ignore_patterns(
+        "data", "outputs", "experiments", "__pycache__"))
+    private_data = cwd / "data"
+    private_data.mkdir()
+    for entry in data.iterdir():
+        target = private_data / entry.name
+        if entry.name == "datasets":
+            shutil.copytree(entry, target)
+        else:
+            target.symlink_to(entry.resolve(), target_is_directory=entry.is_dir())
+    (private_data / "datasets" / f"{split}.txt").write_text(
+        "\n".join(selected) + "\n", encoding="utf-8")
+    (Path(out_dir) / "selected_tasks.json").write_text(json.dumps({
+        "benchmark": "appworld", "source_dataset": str(dataset),
+        "split": split, "source_count": len(available), "task_ids": selected,
+    }, indent=2) + "\n", encoding="utf-8")
+    return root
+
+
 def run_appworld(base_url: str, out_dir: Path, acon_dir: Optional[Path] = None,
                  model: str = "c2kv-agent", tag: str = "c2kv_run",
                  split: str = APPWORLD_DEFAULT_SPLIT,
@@ -358,9 +403,10 @@ def run_appworld(base_url: str, out_dir: Path, acon_dir: Optional[Path] = None,
                  request_log: Optional[Path] = None) -> Dict[str, Any]:
     acon_dir = Path(acon_dir) if acon_dir else ACON_DIR
     python = python or sys.executable
-    cwd = acon_dir / "experiments" / "appworld"
-    env = runner_env(base_url)
     out_dir.mkdir(parents=True, exist_ok=True)
+    run_root = prepare_appworld_run(acon_dir, out_dir, split, task_ids)
+    cwd = run_root / "experiments" / "appworld"
+    env = {**runner_env(base_url), "APPWORLD_ROOT": str(cwd)}
     subprocess.run(appworld_command(python, model, tag, split, max_iter, task_ids),
                    cwd=cwd, env=env, check=True)
     # official scorer (state-based unit tests); the runner's own success flag
@@ -368,9 +414,10 @@ def run_appworld(base_url: str, out_dir: Path, acon_dir: Optional[Path] = None,
     subprocess.run(appworld_evaluate_command(_appworld_cli(python), model, tag, split),
                    cwd=cwd, env=env, check=True)
     expected = len(task_ids) if task_ids else appworld_split_size(python, split, cwd, env)
-    return collect_appworld(appworld_eval_path(acon_dir, model, tag, split),
-                            appworld_run_dir(acon_dir, model, tag, split),
-                            expected=expected, request_log=request_log)
+    return collect_appworld(appworld_eval_path(run_root, model, tag, split),
+                            appworld_run_dir(run_root, model, tag, split),
+                            expected=expected, request_log=request_log,
+                            expected_ids=task_ids)
 
 
 _TASK_SECTIONS = ("individual", "tasks", "per_task", "task_results", "results")
@@ -427,13 +474,19 @@ def appworld_per_task(data: Any) -> Dict[str, bool]:
 
 def collect_appworld(eval_path: Path, run_dir: Path,
                      expected: Optional[int] = None,
-                     request_log: Optional[Path] = None) -> Dict[str, Any]:
+                     request_log: Optional[Path] = None,
+                     expected_ids: Optional[List[str]] = None) -> Dict[str, Any]:
     eval_path = Path(eval_path)
     if not eval_path.exists():
         raise SystemExit(f"FATAL: appworld evaluate wrote no {eval_path}")
     data = json.loads(eval_path.read_text(encoding="utf-8"))
     rows: List[Dict[str, Any]] = []
-    for task_id, ok in sorted(appworld_per_task(data).items()):
+    scored = appworld_per_task(data)
+    if expected_ids is not None and set(scored) != set(expected_ids):
+        raise SystemExit("FATAL: AppWorld scored task IDs differ from selected tasks")
+    if expected is not None and len(scored) != expected:
+        raise SystemExit(f"FATAL: AppWorld n_scored={len(scored)} != n_total={expected}")
+    for task_id, ok in sorted(scored.items()):
         row: Dict[str, Any] = {"task_id": task_id,
                                "semantic_score": 1.0 if ok else 0.0,
                                "protocol_legal": None}  # code-action agent
