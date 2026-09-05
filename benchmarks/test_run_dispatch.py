@@ -53,6 +53,7 @@ CLI_SURFACE = [
     ("--ts-scenarios", "", False),
     ("--ts-agent", "", False),
     ("--ts-user", "", False),
+    ("--toolsandbox-dir", None, False),
     ("--doc-packing", None, False),
     ("--max-doc-length", None, False),
     ("--max-doc-num", None, False),

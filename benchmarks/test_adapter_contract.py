@@ -75,7 +75,7 @@ def test_add_arguments_registers_only_that_adapters_flags():
         tau2_adapter: {"--task-set", "--tau2-num-trials", "--tau2-max-steps",
                        "--tau2-timeout"},
         bfcl_adapter: {"--categories", "--run-ids"},
-        toolsandbox_adapter: {"--full", "--ts-scenarios", "--ts-agent", "--ts-user"},
+        toolsandbox_adapter: {"--full", "--ts-scenarios", "--ts-agent", "--ts-user", "--toolsandbox-dir"},
         acon_adapter: {"--acon-dir", "--split", "--tag", "--task-ids"},
         acebench_adapter: {"--acebench-dir", "--acebench-category",
                            "--acebench-language", "--acebench-task-ids", "--user-model"},
@@ -234,6 +234,25 @@ def test_acebench_commands_are_byte_identical(tmp_path):
         "/py", tmp_path, "c2kv-agent", "agent", "en") == [
         "/py", str(tmp_path / "eval_main.py"), "--model", "c2kv-agent",
         "--category", "agent", "--language", "en"]
+
+
+def test_toolsandbox_uses_selected_environment_and_checkout(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    import os
+    selected = tmp_path / "selected-source"
+    selected.mkdir()
+    python = tmp_path / "selected-env" / "bin" / "python"
+    calls = []
+    monkeypatch.setenv("PYTHONPATH", str(tmp_path / "stale-source"))
+    monkeypatch.setattr(toolsandbox_adapter.subprocess, "run", lambda cmd, **kw:
+                        calls.append((cmd, kw)) or SimpleNamespace(returncode=0))
+    monkeypatch.setattr(toolsandbox_adapter, "collect", lambda out: {"n": 1})
+    toolsandbox_adapter.run_ts("http://agent", tmp_path / "out",
+        benchmark_dir=selected, python=str(python), user_base_url="http://user")
+    cmd, kwargs = calls[0]
+    assert cmd[0] == str(python.parent / "tool_sandbox")
+    assert kwargs["env"]["PYTHONPATH"].split(os.pathsep)[0] == str(selected.resolve())
+    assert kwargs["env"]["TOOLSANDBOX_USER_BASE_URL"] == "http://user/v1"
 
 
 # ---- cost-join declarations -------------------------------------------------

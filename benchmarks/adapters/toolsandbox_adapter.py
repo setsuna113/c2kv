@@ -34,6 +34,8 @@ AGENT = "GPT_4_o_2024_05_13"  # openai_api_agent/openai_api_user role keys
 
 def add_arguments(parser) -> None:
     """ToolSandbox-only CLI flags (shared ones live in run.py's core block)."""
+    parser.add_argument("--toolsandbox-dir", type=Path, default=None,
+                        help="ToolSandbox checkout (default $TS_DIR)")
     parser.add_argument("--full", action="store_true",
                         help="toolsandbox: full suite instead of test mode")
     parser.add_argument("--ts-scenarios", default="",
@@ -103,6 +105,7 @@ def run(ctx: RunContext) -> Dict[str, Any]:
         # raw upstream endpoint (tau2 already does the same split)
         user_base_url=ctx.user_base_url,
         scenarios=split_scenarios(ctx.opt("ts_scenarios", "")),
+        benchmark_dir=ctx.opt("toolsandbox_dir"), python=ctx.opt("bench_python"),
     )
     summary["cost_join"] = COST_JOIN
     return summary
@@ -120,14 +123,20 @@ COST_JOIN = ("not joinable: result_summary.json holds per-scenario scores "
 def run_ts(base_url: str, out_dir: Path, test_mode: bool = True,
            agent: str = AGENT, user: str = AGENT, expected: int = None,
            benchmark_dir: Path = None, user_base_url: str = "",
-           scenarios: "list[str] | None" = None) -> Dict[str, Any]:
+           scenarios: "list[str] | None" = None,
+           python: "str | None" = None) -> Dict[str, Any]:
     """Run the CLI and collect ``result_summary.json``."""
     ts_dir = Path(benchmark_dir) if benchmark_dir else TS_DIR
     out_dir.mkdir(parents=True, exist_ok=True)
     env = harness_env(base_url, user_base_url)
+    # The console script's directory is otherwise first on sys.path, and an
+    # editable installation may silently import a different checkout.
+    env["PYTHONPATH"] = os.pathsep.join(filter(None, (
+        str(ts_dir.resolve()), env.get("PYTHONPATH"))))
     cmd = cli_command(out_dir, agent=agent, user=user, test_mode=test_mode,
                       scenarios=scenarios,
                       parallel=os.environ.get("TS_PARALLEL"))
+    cmd[0] = str(Path(python or sys.executable).parent / "tool_sandbox")
     completed = subprocess.run(cmd, cwd=ts_dir, env=env)
     if completed.returncode != 0:
         raise SystemExit(f"FATAL: tool_sandbox CLI exited {completed.returncode}")
