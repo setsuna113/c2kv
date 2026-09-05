@@ -63,6 +63,14 @@ C2KV_GATE_DEVICE=npu \
 python -m pytest agent/test_d_downstream_server_gate.py -v
 ```
 
+For a frozen D smoke, select the manifest's qids with
+`agent/d_kv_intervene.py --qids ...`, using its matching bundle and plan.
+The loader filters selected qids before history tokenization while preserving
+the original split, sampling RNG and source limits. Downstream runs retain
+all valid spans from the selected trigger sessions. A nonzero global
+`max_examples` keeps the old full selection order before applying the qid
+filter, so that limit does not silently change the frozen sample.
+
 On the NPU host, run the checkpoint integration gates in an unused output
 directory and an available device. This starts and stops only its own
 server/proxy process groups:

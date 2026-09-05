@@ -15,7 +15,9 @@ argv and append ``--run-ids`` to BOTH generate and evaluate; it now shares
 ``run_bfcl`` with ``run(ctx)``, so a subset run evaluates with
 ``--partial-eval`` (this vintage's evaluate has no ``--run-ids`` and scored
 the whole category instead) and the terminal-state gate can exit non-zero.
-``run.py --benchmark bfcl`` is unchanged.  A subset number from the OLD
+Both entrypoints now keep the embedded Typer CLI alive through generation,
+evaluation and terminal checks; run.py also isolates BFCL's result, score
+and subset-id files under its output directory. A subset number from the OLD
 standalone recipe is a full-category score — do not compare it with a new
 one (README "BFCL standalone-CLI argv change").
 
