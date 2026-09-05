@@ -23,7 +23,9 @@ agent benchmarks:
 ## Architecture
 
 ```
-benchmarks/run.py          <- CLI, proxy lifecycle, summary envelope
+benchmarks/matrix.py       <- checkpoint-bound cells, preflight, resume, status
+        |
+benchmarks/run.py          <- checkpoint profile, proxy lifecycle, summary envelope
         |  RunContext (adapters/base.py)
         v
 adapters/<name>.py         <- NAME / add_arguments(parser) / run(ctx)
@@ -46,8 +48,8 @@ SGLang (kvoffload-sglang-c2kv, --enable-c2kv) serving the gist checkpoint
 
 Key properties:
 
-* Benchmarks run **unmodified** at the protocol level — they only point
-  `base_url` at the proxy.  One vendored patch exists and is REQUIRED for
+* Official scorers remain the metric source. Vendored patches adapt endpoints
+  and the history boundary where required. A patch is REQUIRED for
   ToolSandbox (`toolsandbox_patches/0001`: route the agent through
   `OPENAI_BASE_URL` and the user simulator through its own
   `TOOLSANDBOX_USER_BASE_URL` — upstream hard-codes api.openai.com, so a
@@ -74,7 +76,7 @@ Key properties:
     | `tau2` | not joinable | the agent system message is not in `results.json`, and the litellm wire form of an assistant tool-call message (`content: None` vs `""`) is unpinned |
     | `bfcl` | not joinable | the steady-state id needs the first assistant message verbatim; the result file keeps only the decoded `model_responses` (the verbatim log needs `--include-input-log`, which the pinned argv does not pass) |
     | `toolsandbox` | not joinable | `result_summary.json` holds scores only, no messages |
-    | `acebench` | not joinable | the whole transcript rides in ONE growing user message, so the conversation id changes every turn (and every arm is a full arm here anyway) |
+    | `acebench` | not joinable | the role-preserving patch exposes history, but the requests still lack the official scorer's task id |
 
     The join is self-checking: it keys on `proxy.conversation_id`, so a
     wrong key matches nothing and `cost_join` says so — it can never
@@ -181,9 +183,10 @@ SGLANG_DIR=/path/to/sglang-c2kv DEVICE=1 PORT=35020 \
   QUERY_PROJECTION=base bash benchmarks/ops/launch_sgl1088.sh
 
 # 2. in another terminal, run.py owns the arm proxy and the official adapter.
-~/envs/bench/bin/python benchmarks/run.py --benchmark tau2 --arm c2kv \
+~/envs/bench312/bin/python benchmarks/run.py --benchmark tau2 --arm c2kv \
   --backend sglang --upstream http://127.0.0.1:35020 \
-  --doc-packing turn --max-doc-length 512 --max-doc-num 12 \
+  --checkpoint ~/checkpoints_upstream/checkpoint-1088 \
+  --reference-profile checkpoint-1088 \
   --out results/bench/tau2_c2kv
 ```
 
@@ -192,6 +195,35 @@ For checkpoint-1088, use `--enable-c2kv --c2kv-query-proj base` and
 `gist` reproduces the later local fork used by G training. Select the mode
 from the checkpoint provenance (see `docs/c2kv_semantics.md`), and record
 both the configured and effective modes in every run.
+
+`run.py` now requires a checkpoint profile, or the explicit
+`--allow-unprofiled` legacy opt-in. New G training writes
+`c2kv_checkpoint_profile.json`; old G checkpoints resolve their parent
+`run_config.json` and `train_manifest_used.json` with an explicit
+`--query-projection gist`. The verified G history recipe uses turn packing
+at `768` tokens and `16` documents. Explicit packing flags must agree with
+the resolved profile. Joint checkpoints fail the history-serving check.
+The `checkpoint-1088` reference uses `base` and a reconstructed `512/12`
+evaluation recipe; it does not establish the missing as-trained geometry.
+
+`matrix.py --matrix <spec.json> --out <new-directory>` writes a plan;
+add `--execute` to run it. Its JSON contains `schema_version: 1`, the full
+resolved `profile` plus its file `path`, `arms`, `defaults`, and a
+`benchmarks` mapping. Each benchmark selects its interpreter and `run_args`.
+Every cell gets an isolated output directory, preflight, logs and status.
+`--resume` only reuses a passed cell with the same profile and command.
+The H200 wrapper constructs this same matrix, including the checkpoint's
+packing settings. All six benchmark adapters use this entrypoint.
+
+CacheBlend and the raw history-KV baselines always override query projection
+to `base`, including when the endpoint's checkpoint profile selects `gist`.
+Text policies are explicit: `hiagent_summary`, `hiagent_full` (tool-native
+trajectory retrieval), and `acon_{hist,obs}_{base,ut,ut_co}`. Legacy `hiagent`
+is the summary variant; legacy ACON names select the base guideline. Fixed
+ACON guidelines do not run its offline optimizer. HiAgent full requires the
+`hiagent_trajectory_retrieval_v1` capability; CacheBlend requires
+`cacheblend_repair_extract_v1`. Neither a no-op first turn nor a run whose
+compression trigger never fires establishes method effectiveness.
 
 The in-repo Flask `hf_server` is RETIRED from the evaluation path: it
 survives only as the `hfserver` contrast backend (`backends/hfserver.py`)
@@ -203,21 +235,31 @@ Three more benchmarks ride the same proxy through the same seam (one
 adapter file + one dispatch branch each): `adapters/acon_adapter.py`
 (`--benchmark acon_appworld | acon_qa`) and `adapters/acebench_adapter.py`
 (`--benchmark acebench`).  Each external harness needs one vendored patch
-that only moves its endpoint into the environment — `acon_patches/`,
+that adapts the endpoint and, for ACE, preserves structured history — `acon_patches/`,
 `acebench_patches/` (README + `git apply` recipe in each).
 
 ```bash
 # 8-objective QA (ACON's shipped data/nq_multi_8 test split, 100 tasks; the
 # Search-R1 wiki-18 BM25 retriever server must be up, see acon_patches/README.md)
-~/envs/bench/bin/python benchmarks/run.py --benchmark acon_qa --arm c2kv   --upstream http://127.0.0.1:35000 --acon-dir ~/baselines/acon   --bench-python ~/envs/acon/bin/python --out results/bench/qa_c2kv
+~/envs/acon/bin/python benchmarks/run.py --benchmark acon_qa --arm c2kv \
+  --upstream http://127.0.0.1:35000 --acon-dir ~/baselines/acon \
+  --checkpoint ~/checkpoints_upstream/checkpoint-1088 --reference-profile checkpoint-1088 \
+  --capability-features acon_qa_retriever_v1 --out results/bench/qa_c2kv
 #   smoke: --max-tasks 5   (= run.py --limit)   or   --task-ids nq_multi8_test_2200
 
 # AppWorld test_normal (168 tasks; official scorer `appworld evaluate` runs after)
-~/envs/bench/bin/python benchmarks/run.py --benchmark acon_appworld --arm c2kv   --upstream http://127.0.0.1:35000 --acon-dir ~/baselines/acon   --bench-python ~/envs/acon/bin/python --out results/bench/appworld_c2kv
+~/envs/acon/bin/python benchmarks/run.py --benchmark acon_appworld --arm c2kv \
+  --upstream http://127.0.0.1:35000 --acon-dir ~/baselines/acon \
+  --checkpoint ~/checkpoints_upstream/checkpoint-1088 --reference-profile checkpoint-1088 \
+  --out results/bench/appworld_c2kv
 #   smoke: --task-ids <one id> ; split: --split dev
 
 # ACEBench agent group (user simulator = same served model at --user-upstream)
-~/envs/bench/bin/python benchmarks/run.py --benchmark acebench --arm full   --upstream http://127.0.0.1:35000 --acebench-dir ~/baselines/acebench   --acebench-category agent --num-workers 4 --out results/bench/ace_full
+~/envs/bench/bin/python benchmarks/run.py --benchmark acebench --arm c2kv \
+  --upstream http://127.0.0.1:35000 --acebench-dir ~/baselines/acebench \
+  --checkpoint ~/checkpoints_upstream/checkpoint-1088 --reference-profile checkpoint-1088 \
+  --capability-features acebench_role_history_v1 --acebench-category agent \
+  --num-workers 4 --out results/bench/ace_c2kv
 ```
 
 Semantic columns: QA = ACON's EM (F1 alongside, `f1_mean`); AppWorld = the
@@ -232,12 +274,13 @@ be scored or the run fails.
 
 Read before quoting:
 
-* **ACEBench cannot exercise any arm.** Its agent request is system + ONE
-  user message carrying the whole transcript as text, so under the
-  training rule there is no history and every arm — KV or text —
-  assembles zero docs (`n_docs` = 0 on every request-log row).  An
-  ACEBench column is a full-arm number for every arm; run it with
-  `--arm full` and treat it as a tool-calling sanity column.
+* **ACEBench needs the role-history patch for compression experiments.**
+  Its original flattened transcript exposes no completed history to the
+  proxy. The patch renders the actual dialogue history as user, assistant
+  and tool messages; it does not parse labels out of user text. The user
+  simulator uses the raw endpoint. Historical unpatched KV runs remain
+  no-compression runs; the old HiAgent prompt intervention is a separate
+  effect and must not be called a full-method result.
 * **AppWorld is in the ckpt-1088 training pool** (31.5 % of records,
   `fork/task/d-repair-v2 inv_1088/a3_train_pool_benchmarks.json`); its
   rows on that checkpoint carry the same CONTAMINATED label as tau2.  The

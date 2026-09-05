@@ -87,7 +87,10 @@ def validate_mode(args, mode):
                         stop_owned_group(semantic_tests)
             if result["passed"] and args.official_smoke:
                 official_command = [sys.executable, str(HERE / "official_smoke.py"),
-                                    "--upstream", upstream, "--out", str(mode_dir / "official")]
+                                    "--upstream", upstream, "--out", str(mode_dir / "official"),
+                                    "--checkpoint", str(args.model), "--query-projection", mode]
+                if args.model.name == "checkpoint-1088":
+                    official_command += ["--reference-profile", "checkpoint-1088"]
                 official_tests = subprocess.Popen(official_command, start_new_session=True)
                 try:
                     result["official_returncode"] = official_tests.wait(timeout=3 * args.test_timeout)
@@ -117,6 +120,9 @@ def main():
     parser.add_argument("--startup-timeout", type=int, default=600)
     parser.add_argument("--test-timeout", type=int, default=1800)
     args = parser.parse_args()
+    if args.official_smoke and args.model.name == "checkpoint-1088" and args.modes != ["base"]:
+        parser.error("checkpoint-1088 official smoke uses the base reference; pass --modes base. "
+                     "Other projection modes remain available as synthetic ablations without --official-smoke")
     if sys.platform != "linux":
         parser.error("this launcher requires the Linux NPU host")
     args.out = args.out.resolve()

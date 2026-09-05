@@ -107,8 +107,9 @@ for bounded official smoke cases, then full matrices. Use separate output
 directories for checkpoint, query mode and packing regime. Do not merge
 historical message-packing or unrecorded projection modes into a new run.
 
-Add `--official-smoke` to `validate_npu.py` to run one official case per
-adapter after each mode's integration gates. It uses the environment map
+Add `--official-smoke --modes base` to `validate_npu.py` for checkpoint-1088
+to run one official case per adapter after its integration gates. Other
+projection modes remain synthetic ablations. It uses the environment map
 above, one BFCL multi-turn case, one tau2 airline task (one trial, 12 steps,
 300-second simulation timeout), and one local ToolSandbox messaging
 scenario. Each adapter process has a 900-second outer timeout. The agent
@@ -118,5 +119,7 @@ that requests and official scoring complete. For an existing server:
 
 ```bash
 python benchmarks/ops/official_smoke.py \
-  --upstream http://127.0.0.1:35020 --out /path/to/new-official-smoke
+  --upstream http://127.0.0.1:35020 --out /path/to/new-official-smoke \
+  --checkpoint /home/liuyancheng/checkpoints_upstream/checkpoint-1088 \
+  --reference-profile checkpoint-1088
 ```
