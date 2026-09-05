@@ -18,19 +18,16 @@ exports:
 * ``ACEBENCH_API_MODELS`` — registers the served model name in
   ``inference_map`` as an API model.
 
-What the proxy sees — READ THIS before quoting an ACEBench arm number.  The
-agent request is always exactly two messages: a system prompt and ONE user
-message that embeds the whole ``user:/agent:/execution:`` transcript as
-text (``multi_turn/APIModel_agent.py:respond``, ``multi_step`` likewise;
-single-turn categories are system + question).  Under the training rule
-nothing before the last user message exists, so every KV arm and every text
-arm assembles zero history docs: an ACEBench column is a full-arm number
-for every arm by construction.  It measures the served model's tool-calling
-competence, not compression.  The request log's ``n_docs`` is the proof
-(0 on every row).  The same shape makes ``proxy.conversation_id`` change on
-every turn (it keys on the first two non-system messages and the single
-user message grows), so any conversation-keyed arm state (recover, ACON
-rolling) is meaningless here — another reason to run ``--arm full`` only.
+Role history. With ``ACEBENCH_ROLE_HISTORY_V1=1``, the patch passes the
+upstream scene's structured ``dialogue_history`` to the agent client and
+emits one canonical message per entry: ``user`` -> user, ``agent`` ->
+assistant, ``execution`` -> tool. API definitions remain in the system
+message. It never tries to recover roles by splitting the legacy opaque
+transcript. Without the flag, upstream's original two-message request is
+unchanged. The adapter always enables the flag and advertises capability
+``acebench_role_history_v1`` so non-full arms have compressible history.
+The independently stateful user simulator still uses the raw endpoint and
+is never routed through compression.
 
 Semantic column: the official checker (``eval_main.py``).  The score file
 is one header row (accuracy / end_to_end_accuracy, process_accuracy,
@@ -83,21 +80,20 @@ AGENT_API_KEY_ENV = "ACEBENCH_AGENT_API_KEY"
 USER_BASE_URL_ENV = "ACEBENCH_USER_BASE_URL"
 USER_API_KEY_ENV = "ACEBENCH_USER_API_KEY"
 MODELS_ENV = "ACEBENCH_API_MODELS"
+ROLE_HISTORY_ENV = "ACEBENCH_ROLE_HISTORY_V1"
+CAPABILITY_FEATURES = ("acebench_role_history_v1",)
 DEFAULT_CATEGORY = "agent"
 DEFAULT_LANGUAGE = "en"
 DEFAULT_MAX_DIALOG_TURNS = 40
 HEADER_KEYS = ("accuracy", "end_to_end_accuracy", "process_accuracy",
                "correct_count", "total_count")
 
-# Why ACEBench gets no per-task cost columns — and would gain nothing from
-# them.  The agent request is system + ONE user message carrying the whole
-# transcript as text, so ``proxy.conversation_id`` (system head + first two
-# non-system messages, proxy.py:434-447) changes on EVERY turn as that one
-# message grows: there is no stable per-task conversation id to join on.
-# The same shape is why every arm assembles zero docs here (module
-# docstring), so the cost column would be a full-arm column anyway.
-COST_JOIN = ("not joinable: the whole transcript rides in ONE growing user "
-             "message, so the conversation id changes every turn")
+# The vendored patch emits one OpenAI message per structured ACEBench
+# dialogue entry. This makes the first task messages stable and lets the
+# proxy form history docs. Requests still carry no ACE task id, so a proxy
+# request-log row cannot be joined strictly to an official scorer row.
+COST_JOIN = ("not joinable: role-preserving history enables compression but "
+             "the agent request carries no ACE task-id metadata")
 
 
 def add_arguments(parser) -> None:
@@ -131,7 +127,7 @@ def expand_categories(category: str, category_map: Dict[str, List[str]]) -> List
 
 
 def harness_env(base_url: str, user_base_url: str, model: str) -> Dict[str, str]:
-    """Agent clients -> arm proxy; user simulator -> raw upstream (full)."""
+    """Agent clients -> role history + arm proxy; simulator -> raw upstream."""
     return {
         **os.environ,
         AGENT_BASE_URL_ENV: v1(base_url),
@@ -139,6 +135,7 @@ def harness_env(base_url: str, user_base_url: str, model: str) -> Dict[str, str]
         USER_BASE_URL_ENV: v1(user_base_url or base_url),
         USER_API_KEY_ENV: "EMPTY",
         MODELS_ENV: model,
+        ROLE_HISTORY_ENV: "1",
         "NO_PROXY": "127.0.0.1,localhost", "no_proxy": "127.0.0.1,localhost",
     }
 
@@ -266,9 +263,9 @@ def collect(work: Path, language: str, model: str, tests: List[str]) -> Dict[str
 def run(ctx: RunContext) -> Dict[str, Any]:
     """Adapter entry: drive generate.py / eval_main.py against the arm proxy.
 
-    The user simulator must NOT ride the arm proxy (same split as tau2 /
-    toolsandbox).  NOTE the agent request is system + ONE user message, so
-    no arm compresses anything here — see the module docstring.
+    The user simulator stays on the raw endpoint (same split as tau2 /
+    toolsandbox). The vendored patch supplies role-preserving agent history
+    to the arm proxy; see the module docstring.
     """
     summary = run_acebench(
         ctx.base_url, ctx.user_base_url, ctx.out_dir,
@@ -308,6 +305,8 @@ def run_acebench(base_url: str, user_base_url: str, out_dir: Path,
     summary = collect(work, language, model, tests)
     summary["user_model"] = user_model or model
     summary["language"] = language
+    summary["capability_features"] = list(CAPABILITY_FEATURES)
+    summary["agent_history_protocol"] = "acebench_role_history_v1"
     return summary
 
 

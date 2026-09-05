@@ -1,7 +1,7 @@
 """Offline tests for adapters/acebench_adapter.py (no subprocess, no network).
 
 Covers: category expansion from a checkout's category.py, the agent/user
-endpoint split in the harness env, the per-run working directory, the
+endpoint split and role-history marker, the per-run working directory, the
 terminal-state gate, and the score-file parsing for both failure-row
 conventions (index-keyed agent rows, id-keyed normal rows) including the
 turn-group clustering of normal_multi_turn_*.
@@ -50,10 +50,27 @@ def test_harness_env_splits_agent_and_user(monkeypatch):
     assert env[B.AGENT_BASE_URL_ENV] == "http://127.0.0.1:34100/v1"
     assert env[B.USER_BASE_URL_ENV] == "http://127.0.0.1:35000/v1"
     assert env[B.MODELS_ENV] == "c2kv-agent"
+    assert env[B.ROLE_HISTORY_ENV] == "1"
+    assert B.CAPABILITY_FEATURES == ("acebench_role_history_v1",)
     assert env[B.AGENT_API_KEY_ENV] == env[B.USER_API_KEY_ENV] == "EMPTY"
     # no separate user endpoint given: the simulator falls back to the SAME
     # url as the agent (standalone use), never to an OpenAI default
     assert B.harness_env("http://a", "", "m")[B.USER_BASE_URL_ENV] == "http://a/v1"
+
+
+def test_vendored_patch_uses_structured_agent_history_only():
+    patch = (Path(__file__).parent / "acebench_patches" /
+             "0001-endpoint-env-and-model-registry.patch").read_text(encoding="utf-8")
+    assert "ACEBENCH_ROLE_HISTORY_V1" in patch
+    assert "message_history if" in patch
+    assert "model_inference/role_history.py" in patch
+    assert 'roles = {"user": "user", "agent": "assistant", "execution": "tool"}' in patch
+    assert "history.split" not in patch and "inference_data.split" not in patch
+    # User-simulator endpoint routing is retained, while structured-history
+    # conversion applies only to the evaluated agent and scorer code is absent.
+    assert "ACEBENCH_USER_BASE_URL" in patch
+    assert "eval_main.py" not in patch
+    assert "not joinable" in B.COST_JOIN
 
 
 def test_generate_and_eval_commands_pin_protocol_knobs(tmp_path):
