@@ -90,6 +90,7 @@ def test_run_bfcl_sets_official_root_before_import_and_writes_ids_there(
         "memory": ["memory_7"]}
     assert seen["check"][2]["root"] == isolated.resolve()
     assert summary["bfcl_project_root"] == str(isolated.resolve())
+    assert "BFCL_PROJECT_ROOT" not in os.environ
 
 
 def test_expected_count_reads_category_data_file(tmp_path, capsys):

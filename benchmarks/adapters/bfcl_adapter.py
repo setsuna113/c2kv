@@ -225,33 +225,40 @@ def run_bfcl(base_url: str, categories: str = "multi_turn_base",
         project_root or os.environ.get("BFCL_PROJECT_ROOT") or Path.cwd()
     ).resolve()
     project_root.mkdir(parents=True, exist_ok=True)
+    previous_project_root = os.environ.get("BFCL_PROJECT_ROOT")
     os.environ["BFCL_PROJECT_ROOT"] = str(project_root)
-    install_handler(base_url, model=model, handler_name=handler_name)
-    expected = expected_count(categories)
-    ids: Optional[List[str]] = None
-    if run_ids:
-        ids = ([i.strip() for i in run_ids.split(",") if i.strip()]
-               if isinstance(run_ids, str) else list(run_ids))
-        # atomic write: concurrent runs racing on one file truncated ids
-        id_file = project_root / "test_case_ids_to_generate.json"
-        tmp = id_file.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps({categories: ids}), encoding="utf-8")
-        tmp.replace(id_file)
-        expected = len(ids)
-    if mode in ("generate", "both"):
-        run_cli(generate_argv(handler_name, categories, ids))
-    if mode in ("evaluate", "both"):
-        run_cli(evaluate_argv(handler_name, categories, ids))
-    import terminal_check  # noqa: E402  (sibling module, sys.path has parent)
+    try:
+        install_handler(base_url, model=model, handler_name=handler_name)
+        expected = expected_count(categories)
+        ids: Optional[List[str]] = None
+        if run_ids:
+            ids = ([i.strip() for i in run_ids.split(",") if i.strip()]
+                   if isinstance(run_ids, str) else list(run_ids))
+            # atomic write: concurrent runs racing on one file truncated ids
+            id_file = project_root / "test_case_ids_to_generate.json"
+            tmp = id_file.with_suffix(".json.tmp")
+            tmp.write_text(json.dumps({categories: ids}), encoding="utf-8")
+            tmp.replace(id_file)
+            expected = len(ids)
+        if mode in ("generate", "both"):
+            run_cli(generate_argv(handler_name, categories, ids))
+        if mode in ("evaluate", "both"):
+            run_cli(evaluate_argv(handler_name, categories, ids))
+        import terminal_check  # noqa: E402  (sibling module, sys.path has parent)
 
-    ids_str = ",".join(run_ids) if isinstance(run_ids, list) else (run_ids or "")
-    code = terminal_check.check_bfcl(expected, ids_str, handler=handler_name,
-                                     category=categories, root=project_root)
-    if code != 0:
-        raise SystemExit(f"FATAL: bfcl terminal-state check failed (rc={code})")
-    return {"benchmark": "bfcl", "categories": categories, "mode": mode,
-            "n_total": expected, "n_scored": expected,
-            "bfcl_project_root": str(project_root)}
+        ids_str = ",".join(run_ids) if isinstance(run_ids, list) else (run_ids or "")
+        code = terminal_check.check_bfcl(expected, ids_str, handler=handler_name,
+                                         category=categories, root=project_root)
+        if code != 0:
+            raise SystemExit(f"FATAL: bfcl terminal-state check failed (rc={code})")
+        return {"benchmark": "bfcl", "categories": categories, "mode": mode,
+                "n_total": expected, "n_scored": expected,
+                "bfcl_project_root": str(project_root)}
+    finally:
+        if previous_project_root is None:
+            os.environ.pop("BFCL_PROJECT_ROOT", None)
+        else:
+            os.environ["BFCL_PROJECT_ROOT"] = previous_project_root
 
 
 def run_cli(argv):
