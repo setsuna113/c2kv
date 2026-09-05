@@ -78,7 +78,7 @@ def test_add_arguments_registers_only_that_adapters_flags():
         toolsandbox_adapter: {"--full", "--ts-scenarios", "--ts-agent", "--ts-user"},
         acon_adapter: {"--acon-dir", "--split", "--tag", "--task-ids"},
         acebench_adapter: {"--acebench-dir", "--acebench-category",
-                           "--acebench-language", "--user-model"},
+                           "--acebench-language", "--acebench-task-ids", "--user-model"},
     }
     for module, flags in owned.items():
         parser = argparse.ArgumentParser()

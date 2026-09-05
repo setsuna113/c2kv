@@ -173,7 +173,7 @@ def _profile_value(profile: Optional[Mapping[str, Any]], key: str) -> Any:
 def _benchmark_prerequisites(result: PreflightResult, benchmark: str,
                              options: Mapping[str, Any],
                              environ: Mapping[str, str],
-                             features: frozenset[str]) -> None:
+                             features: frozenset[str], *, arm: str) -> None:
     home = _home(environ)
     runner_python = _python_option(options)
     _append_path(result, "runner_python", runner_python,
@@ -266,6 +266,22 @@ def _benchmark_prerequisites(result: PreflightResult, benchmark: str,
             root / "model_inference" / "inference_map.py", "ACEBENCH_API_MODELS",
             "apply benchmarks/acebench_patches/0001-endpoint-env-and-model-registry.patch",
         )
+        # Endpoint routing alone is insufficient for a compression/text arm:
+        # the legacy agent request otherwise remains one growing user string.
+        # Verify the three concrete patch sites, so a stale endpoint-only
+        # checkout cannot be made eligible merely by declaring the feature.
+        if arm != "full" and ACE_ROLE_HISTORY_FEATURE in features:
+            _append_marker(
+                result, "acebench_role_history_helper",
+                root / "model_inference" / "role_history.py", "def agent_messages",
+                "apply the ACEBench role-history helper patch",
+            )
+            for test in ("multi_step", "multi_turn"):
+                _append_marker(
+                    result, f"acebench_role_history_{test}_agent",
+                    root / "model_inference" / test / "APIModel_agent.py", "agent_messages(",
+                    "apply the ACEBench role-history agent patch",
+                )
 
 
 def _method_capabilities(result: PreflightResult, arm: str, backend: str,
@@ -434,7 +450,7 @@ def preflight(benchmark: str, arm: str, backend: str = "sglang", *,
 
     feature_set = frozenset(all_features)
     _method_capabilities(result, arm, backend, benchmark, profile, feature_set)
-    _benchmark_prerequisites(result, benchmark, opts, env, feature_set)
+    _benchmark_prerequisites(result, benchmark, opts, env, feature_set, arm=arm)
     return result
 
 

@@ -103,6 +103,8 @@ def add_arguments(parser) -> None:
     parser.add_argument("--acebench-category", default="agent",
                         help="ACE_DATA_CATEGORY key or one test name")
     parser.add_argument("--acebench-language", default="en", choices=["en", "zh"])
+    parser.add_argument("--acebench-task-ids", default="",
+                        help="comma-separated official ACEBench ids; creates a private filtered data_all")
     parser.add_argument("--user-model", default="",
                         help="acebench: user-simulator model name at --user-upstream "
                              "(default: --model)")
@@ -140,16 +142,82 @@ def harness_env(base_url: str, user_base_url: str, model: str) -> Dict[str, str]
     }
 
 
-def prepare_workdir(out_dir: Path, acebench_dir: Path) -> Path:
+def _task_id_list(value: str | None) -> List[str]:
+    values = [part.strip() for part in (value or "").split(",") if part.strip()]
+    if len(set(values)) != len(values):
+        raise SystemExit("FATAL: --acebench-task-ids contains a duplicate id")
+    return values
+
+
+def prepare_workdir(out_dir: Path, acebench_dir: Path, *, language: str | None = None,
+                    tests: Optional[List[str]] = None, task_ids: str = "",
+                    max_tasks: Optional[int] = None) -> Path:
+    """Create a private harness cwd, optionally with exact official rows only.
+
+    ``generate.py`` resolves ``./data_all`` from its cwd and resumes result
+    ids, so subset selection must be materialised here rather than passed as
+    an unofficial scorer flag.  The upstream files stay read-only; the
+    selection record makes a finite smoke denominator auditable.
+    """
     work = Path(out_dir) / "acebench_work"
     work.mkdir(parents=True, exist_ok=True)
     data = work / "data_all"
-    if not data.exists():
+    selected_ids = _task_id_list(task_ids)
+    subset = bool(selected_ids or max_tasks is not None)
+    if max_tasks is not None and max_tasks <= 0:
+        raise SystemExit("FATAL: --max-tasks for ACEBench must be positive")
+    if not subset:
+        if data.exists():
+            return work
         source = Path(acebench_dir) / "data_all"
         try:
             os.symlink(source, data, target_is_directory=True)
         except OSError:
             shutil.copytree(source, data)
+        return work
+
+    if not language or not tests:
+        raise ValueError("subset preparation requires language and resolved test names")
+    if data.exists():
+        raise SystemExit(f"FATAL: refusing to mix ACEBench subset data in existing {data}")
+
+    wanted = set(selected_ids)
+    matched: Set[str] = set()
+    remaining = max_tasks
+    prepared = []
+    for test in tests:
+        source = Path(acebench_dir) / "data_all" / f"data_{language}" / f"data_{test}.json"
+        rows = _jsonl(source)
+        candidates = [row for row in rows if not wanted or str(row.get("id")) in wanted]
+        if remaining is not None:
+            candidates = candidates[:remaining]
+            remaining -= len(candidates)
+        if not candidates:
+            raise SystemExit(
+                f"FATAL: ACEBench subset selected no rows from {source}; "
+                "use a bare test name when --max-tasks is smaller than a category")
+        matched.update(str(row["id"]) for row in candidates)
+        prepared.append((test, source, rows, candidates))
+    missing = sorted(wanted - matched)
+    if missing:
+        raise SystemExit(f"FATAL: ACEBench task ids not found in requested category: {','.join(missing)}")
+
+    target_dir = data / f"data_{language}"
+    target_dir.mkdir(parents=True)
+    sources = []
+    for test, source, rows, candidates in prepared:
+        target = target_dir / f"data_{test}.json"
+        target.write_text("".join(json.dumps(row, ensure_ascii=False) + "\n"
+                                   for row in candidates), encoding="utf-8")
+        sources.append({
+            "test": test, "source_path": str(source), "source_rows": len(rows),
+            "selected_rows": len(candidates),
+            "selected_ids": [str(row["id"]) for row in candidates],
+        })
+    (work / "selected_tasks.json").write_text(json.dumps({
+        "schema_version": 1, "language": language, "requested_task_ids": selected_ids,
+        "max_tasks": max_tasks, "sources": sources,
+    }, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     return work
 
 
@@ -275,6 +343,7 @@ def run(ctx: RunContext) -> Dict[str, Any]:
         model=ctx.model, user_model=ctx.opt("user_model"),
         num_threads=ctx.opt("num_workers", 1),
         max_dialog_turns=ctx.opt("max_iter", DEFAULT_MAX_DIALOG_TURNS),
+        task_ids=ctx.opt("acebench_task_ids", ""), max_tasks=ctx.opt("max_tasks"),
         python=ctx.opt("bench_python"),
     )
     summary["cost_join"] = COST_JOIN
@@ -287,12 +356,14 @@ def run_acebench(base_url: str, user_base_url: str, out_dir: Path,
                  user_model: Optional[str] = None, num_threads: int = 1,
                  max_dialog_turns: int = DEFAULT_MAX_DIALOG_TURNS,
                  temperature: float = 0.0, top_p: float = 1.0,
-                 max_tokens: int = 1200,
+                 max_tokens: int = 1200, task_ids: str = "",
+                 max_tasks: Optional[int] = None,
                  python: Optional[str] = None) -> Dict[str, Any]:
     acebench_dir = Path(acebench_dir) if acebench_dir else ACEBENCH_DIR
     python = python or sys.executable
     tests = expand_categories(category, load_category_map(acebench_dir))
-    work = prepare_workdir(out_dir, acebench_dir)
+    work = prepare_workdir(out_dir, acebench_dir, language=language, tests=tests,
+                           task_ids=task_ids, max_tasks=max_tasks)
     env = harness_env(base_url, user_base_url, model)
     subprocess.run(
         generate_command(python, acebench_dir, model, category, language, num_threads,
@@ -305,6 +376,9 @@ def run_acebench(base_url: str, user_base_url: str, out_dir: Path,
     summary = collect(work, language, model, tests)
     summary["user_model"] = user_model or model
     summary["language"] = language
+    selection = work / "selected_tasks.json"
+    if selection.exists():
+        summary["selection"] = json.loads(selection.read_text(encoding="utf-8"))
     summary["capability_features"] = list(CAPABILITY_FEATURES)
     summary["agent_history_protocol"] = "acebench_role_history_v1"
     return summary
@@ -322,6 +396,8 @@ if __name__ == "__main__":
                         help="ACE_DATA_CATEGORY key (agent | multi_turn | normal | "
                              "special | test_all | ...) or one test name")
     parser.add_argument("--language", default=DEFAULT_LANGUAGE, choices=["en", "zh"])
+    parser.add_argument("--task-ids", default="", help="comma-separated official ids")
+    parser.add_argument("--max-tasks", type=int, default=None)
     parser.add_argument("--model", default="c2kv-agent")
     parser.add_argument("--user-model", default="", help="default = --model")
     parser.add_argument("--num-threads", type=int, default=1)
@@ -337,5 +413,6 @@ if __name__ == "__main__":
                            user_model=args.user_model or None,
                            num_threads=args.num_threads,
                            max_dialog_turns=args.max_dialog_turns,
-                           temperature=args.temperature, python=args.python)
+                           temperature=args.temperature, task_ids=args.task_ids,
+                           max_tasks=args.max_tasks, python=args.python)
     print(json.dumps(summary, indent=2, ensure_ascii=False))

@@ -38,6 +38,23 @@ def _codes(result: capabilities.PreflightResult) -> set[str]:
     return {item.code for item in result.errors}
 
 
+def _acebench_tree(tmp_path: Path, *, role_history: bool = False) -> Path:
+    root = tmp_path / "acebench"
+    (root / "model_inference" / "multi_step").mkdir(parents=True)
+    (root / "model_inference" / "multi_turn").mkdir(parents=True)
+    (root / "generate.py").write_text("# generate\n", encoding="utf-8")
+    (root / "eval_main.py").write_text("# eval\n", encoding="utf-8")
+    (root / "model_inference" / "inference_map.py").write_text(
+        "ACEBENCH_API_MODELS = ''\n", encoding="utf-8")
+    if role_history:
+        (root / "model_inference" / "role_history.py").write_text(
+            "def agent_messages():\n    return []\n", encoding="utf-8")
+        for test in ("multi_step", "multi_turn"):
+            (root / "model_inference" / test / "APIModel_agent.py").write_text(
+                "agent_messages()\n", encoding="utf-8")
+    return root
+
+
 def test_cacheblend_overrides_profile_projection_but_requires_server_capability(tmp_path):
     tau2 = _tau2(tmp_path)
     common = {
@@ -93,6 +110,21 @@ def test_acebench_history_arms_are_rejected_until_normalizer_feature(tmp_path):
         options={"runner_python": sys.executable}, environ=_env(tmp_path),
     )
     assert "acebench_role_history_normalizer" not in _codes(full)
+
+
+def test_acebench_declared_role_history_feature_requires_patched_files(tmp_path):
+    root = _acebench_tree(tmp_path)
+    options = {"runner_python": sys.executable, "acebench_dir": root,
+               "capability_features": capabilities.ACE_ROLE_HISTORY_FEATURE}
+    stale = capabilities.preflight("acebench", "c2kv", "sglang",
+                                   options=options, environ=_env(tmp_path))
+    assert {"acebench_role_history_helper", "acebench_role_history_multi_step_agent",
+            "acebench_role_history_multi_turn_agent"} <= _codes(stale)
+
+    ready = _acebench_tree(tmp_path / "ready", role_history=True)
+    options["acebench_dir"] = ready
+    assert capabilities.preflight("acebench", "c2kv", "sglang",
+                                  options=options, environ=_env(tmp_path)).ok
 
 
 def test_acon_qa_requires_patch_data_and_explicit_retriever_attestation(tmp_path):

@@ -71,6 +71,7 @@ CLI_SURFACE = [
     ("--task-ids", "", False),
     ("--acebench-category", "agent", False),
     ("--acebench-language", "en", False),
+    ("--acebench-task-ids", "", False),
     ("--user-model", "", False),
     ("--bench-python", "", False),
 ]
