@@ -70,8 +70,10 @@
 #   SPLIT_MANIFEST_FILE / SPLIT_NAME / MAX_TRAIN_EXAMPLES / MAX_EVAL_EXAMPLES /
 #   MAX_TOOL_CHUNKS / MULTISOURCE_MAX_RECORDS
 #
-# Intentionally NOT wired vs the NPU script: OPENSWE_PATH / QA_HOTPOTQA_PATH /
-# QA_2WIKI_PATH / QA_LONGMAGPIE_PATH — this arm's mixture is toucan+traces only.
+#   OPENSWE_PATH / QA_HOTPOTQA_PATH / QA_2WIKI_PATH / QA_LONGMAGPIE_PATH
+#                          optional extra sources (wired 2026-09-05, same
+#                          semantics as the NPU launcher): Open-SWE traces and
+#                          the paper's stage-1 multi-doc QA.  Empty = disabled.
 #
 # Example (single-card short gate run):
 #   CUDA_VISIBLE_DEVICES=0 EXAMPLE_ORDER_FILE=<planner.jsonl> \
@@ -105,6 +107,10 @@ MAX_TRAIN_EXAMPLES="${MAX_TRAIN_EXAMPLES:-}"
 MAX_EVAL_EXAMPLES="${MAX_EVAL_EXAMPLES:-}"
 
 TOUCAN_PATH="${TOUCAN_PATH:-}"
+OPENSWE_PATH="${OPENSWE_PATH:-}"
+QA_HOTPOTQA_PATH="${QA_HOTPOTQA_PATH:-}"
+QA_2WIKI_PATH="${QA_2WIKI_PATH:-}"
+QA_LONGMAGPIE_PATH="${QA_LONGMAGPIE_PATH:-}"
 MULTISOURCE_MAX_RECORDS="${MULTISOURCE_MAX_RECORDS:-}"
 
 DOC_MODE="${DOC_MODE:-joint}"
@@ -212,6 +218,18 @@ if [[ -n "${HYBRID_TAIL_CHOICES}" ]]; then
 fi
 if [[ -n "${TOUCAN_PATH}" ]]; then
   OPTIONAL_ARGS+=(--toucan_path "${TOUCAN_PATH}")
+fi
+if [[ -n "${OPENSWE_PATH}" ]]; then
+  OPTIONAL_ARGS+=(--openswe_path "${OPENSWE_PATH}")
+fi
+if [[ -n "${QA_HOTPOTQA_PATH}" ]]; then
+  OPTIONAL_ARGS+=(--qa_hotpotqa_path "${QA_HOTPOTQA_PATH}")
+fi
+if [[ -n "${QA_2WIKI_PATH}" ]]; then
+  OPTIONAL_ARGS+=(--qa_2wiki_path "${QA_2WIKI_PATH}")
+fi
+if [[ -n "${QA_LONGMAGPIE_PATH}" ]]; then
+  OPTIONAL_ARGS+=(--qa_longmagpie_path "${QA_LONGMAGPIE_PATH}")
 fi
 if [[ -n "${MULTISOURCE_MAX_RECORDS}" ]]; then
   OPTIONAL_ARGS+=(--multisource_max_records "${MULTISOURCE_MAX_RECORDS}")

@@ -300,3 +300,13 @@ s、w、B 由 S1(c)(d) 的实测决定：`s×B ≤ A_traces` 且 `(1−s)×B ≤
 ### 5.6 serving pin 的现状
 
 `run_matrix_h200.sh` 现 pin `setsuna113/kvoffload-sglang-c2kv` `task/c2kv-serve-align` @ 718a654e3。雨涵上游 `Tracy-ZYH/kvoffload-sglang-c2kv` 的 `c2kv-sglang-bfcl` 已于 2026-09-05 00:32 +0800 推到 d42ce815f（`history_kv_eviction` / `session_aware_cache` / 消息级 `c2kv_use_gist_projection`，2047 行），serve-align 尚未 rebase 到它；S8 前要么先 rebase 再 pin，要么在 caption 里注明 pin 落后上游。两个 pin 都没有 `_compute_c2kv_segments` 的单元测试。
+
+### 5.7 2026-09-05 深夜修订：交付物是一个 checkpoint，不是「臂」
+
+刘言成当晚裁定三件事，§5.5 中与之冲突的部分以本节为准：
+
+1. **论文的 mdoc `checkpoint-8000` 拿不到** → 论文 stage-1 的多文档 QA（HotpotQA / 2Wiki / LongMagpie）按约 15% 混进同一次训练；`agent/train_joint_next_action_c2kv_h200.sh` 与 `start_h200.sh` 现已透传 `OPENSWE_PATH` / `QA_HOTPOTQA_PATH` / `QA_2WIKI_PATH` / `QA_LONGMAGPIE_PATH`（planner、`measure_arm_psrc` 重放、trainer 三处同一套 env），phase_plan 不再硬禁 `qa` / `openswe` family，只按 `G_H200_EXPECT_SHARES` 断言 family 集合。
+2. **served 选档不现实**（H200 上 SGLang + 三个 benchmark 从未部署过，S6 gate 未在 GPU 上跑过）→ 选档只用 history-dev（300 题、c2kv 列），里程碑减到 3 档（第 1 个 epoch 末、第 2 个 epoch 中、终档），两档在噪声内时取剂量更大的那档。served 表是对交付 checkpoint 的**评测**，不参与选档，在已经跑通 C2KV serving 的机器上做（NPU 侧 `~/sgl-serve-align` 已按 31 号文档验证过 1088；H200 的 `run_matrix_h200.sh` 是独立任务）。full 臂同一 server 不同 proxy arm，untrained 参照直接用已部署的 1088。
+3. **tau2 只排 airline，retail / telecom 训**。理由：traces 全集 10,057 个 session 里 tau2 三个域约 4,800 个、appworld 只有 406 个，整族排除等于把深历史数据砍到只剩 appworld（这正是 s42 池子缩到 1,606 例的原因之一）；评测只有 airline 50 题，训练池里的 airline session 跑的是同一环境 / policy / 工具集，task id 无法核对，必须排；retail / telecom 是不评测的域，跨域训练可写进论文。实现：`TRACES_SUBSET_MAP="appworld=appworld,airline=airline,tau2rt=retail:telecom"` + `SUBSET_WEIGHTS="traces:airline=0 traces:tau2rt=<w> traces:appworld=1 traces:other=0"`；phase_plan 的断言改为「任何覆盖 airline 的 stratum 非空即 FATAL」（`ALLOW_AIRLINE_IN_TRAIN=1` 放行），默认表下 tau2 层非空同样触发。
+
+配方其余不变：history_only + 工具原文进 system、768×16、ratio 8,8,4,16、system 8192 / max_length 4096 / 48 工具、eff-batch 32、LR 5e-5、warmup 100、剂量 96 到 160M presented、≤2 epoch、k=0（raw tail 的训练 / 服务表面对齐后再加）。交付 = 一个 checkpoint 上传 `Jasonning/c2kv/<run>/checkpoint-N`，附 run_config / manifest / history-dev summary，然后在 serving 机器上出 full / c2kv@8x / hybrid 三行。

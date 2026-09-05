@@ -58,9 +58,20 @@
 #                     tau2-airline 是要交付的 benchmark, 训练侧唯一的排除屏障就是这个
 #                     planner 权重（--exclude_benchmarks 只塑形 history-dev manifest,
 #                     trainer 根本不读它）, 漏掉这一行以前会静默拿回 tau2=0.75。
-#                     用 tau2=0.75 的 joint 主臂已停摆; 确要重跑就显式给权重, 并且
-#                     ALLOW_TAU2_IN_TRAIN=1 才过得了 phase_plan 的断言。
-#   ALLOW_TAU2_IN_TRAIN  1 = 允许 plan 的 traces:tau2 stratum 非空（默认 0 = FATAL）
+#                     用 tau2=0.75 的 joint 主臂已停摆; 确要把 airline 训进去就显式
+#                     给权重, 并且 ALLOW_AIRLINE_IN_TRAIN=1 才过得了 phase_plan 的断言。
+#   TRACES_SUBSET_MAP planner 的 --traces_subset_map（一个逗号分隔的表, 如
+#                     "appworld=appworld,airline=airline,tau2rt=retail:telecom"）。
+#                     默认表把 airline/retail/telecom 合成一个 tau2 层; 要只排 airline、
+#                     保留 retail/telecom（不评测的域）就用上面的表 + SUBSET_WEIGHTS
+#                     "traces:airline=0 traces:tau2rt=<w> traces:appworld=1 traces:other=0"。
+#   ALLOW_AIRLINE_IN_TRAIN  1 = 允许任何覆盖 airline 的 stratum 非空（默认 0 = FATAL;
+#                     tau2-airline 50 题是要交付的 benchmark, 训练池里的 airline
+#                     session 跑的是同一个环境 / policy / 工具集）。
+#   OPENSWE_PATH / QA_HOTPOTQA_PATH / QA_2WIKI_PATH / QA_LONGMAGPIE_PATH
+#                     可选数据源目录, 设了就同时传给 planner 与 trainer（recipe 里对应
+#                     family 名 openswe / qa）。QA 是论文 stage-1 的多文档数据, mdoc
+#                     checkpoint 拿不到时按论文口径混进同一次训练。
 #   EPOCHS_OVERRIDE   calibrate 直接钉死 epoch 数（允许小数, 如 1.5）：
 #                     total_steps = ceil(epochs x steps_per_epoch)，
 #                     不再按 TARGET_PRESENTED_TOKENS 反推, 也不做 MIN_PRESENTED 断言。
@@ -465,6 +476,16 @@ PY
   case "${TOOLS_IN_SYSTEM:-}" in
     True|true|1) plan_pool_args+=(--tools_in_system) ;;
   esac
+  if [[ -n "${TRACES_SUBSET_MAP:-}" ]]; then
+    plan_pool_args+=(--traces_subset_map "${TRACES_SUBSET_MAP}")
+  fi
+  # 可选数据源(论文 stage-1 QA / Open-SWE): 设了就同时进 planner 与 trainer。
+  local dp
+  for dp in OPENSWE_PATH QA_HOTPOTQA_PATH QA_2WIKI_PATH QA_LONGMAGPIE_PATH; do
+    if [[ -n "${!dp:-}" ]]; then
+      plan_pool_args+=("--$(echo "${dp}" | tr '[:upper:]' '[:lower:]')" "${!dp}")
+    fi
+  done
   echo "[plan] pool args: ${plan_pool_args[*]}"
   # 前置扫描 dry-run：确认 tau2 子集命名并预热 token cache（非破坏性；SMOKE 跳过）
   if [[ "${SMOKE:-0}" != "1" ]]; then
@@ -517,16 +538,32 @@ print("traces subsets:", {k: v.get("examples") for k, v in tr.items()})
 for k, want in expect.items():
     assert abs(fam.get(k, 0) - want) < 0.05, (fam, expect)
 assert set(fam) == set(expect), fam
-assert "qa" not in fam and "openswe" not in fam, fam
-# 2026-09-05 审计 #8: tau2-airline 是要交付的 benchmark, 训练侧唯一的排除屏障
-# 就是 planner 权重 traces:tau2=0(--exclude_benchmarks 只塑形 history-dev 的
-# manifest, trainer 从不读它)。默认禁止, 要训进去必须显式 ALLOW_TAU2_IN_TRAIN=1。
-allow_tau2 = "${ALLOW_TAU2_IN_TRAIN:-0}" == "1"
-assert allow_tau2 or (tr.get("tau2") or {}).get("examples", 0) == 0, (
-    "tau2 leaked into the train pool: "
-    f"{(tr.get('tau2') or {}).get('examples')} examples."
-    " SUBSET_WEIGHTS 里把 traces:tau2 设成 0, 或显式 ALLOW_TAU2_IN_TRAIN=1。"
-)
+# family 集合已由 G_H200_EXPECT_SHARES 钉死(set(fam) == set(expect)); recipe 里
+# 声明了 qa / openswe 就允许出现, 没声明就断言不出现。
+# 2026-09-05 审计 #8(当晚改为 airline-only): tau2-airline 50 题是要交付的 benchmark,
+# 训练池里的 airline session 跑的是同一个环境 / policy / 工具集, 训进去 τ² 那列
+# 就报不出去; retail / telecom 是不评测的域, 允许训。训练侧唯一的排除屏障是
+# planner 的 stratum 权重(--exclude_benchmarks 只塑形 history-dev 的 manifest,
+# trainer 从不读它)。默认表把三个域合成一个 tau2 层, 所以默认下 tau2 层非空 =
+# airline 泄漏; 给了 TRACES_SUBSET_MAP 就按表判断每个 stratum 覆盖了哪些 subset。
+subset_map = {"appworld": ["appworld"], "tau2": ["airline", "retail", "telecom"]}
+raw_map = "${TRACES_SUBSET_MAP:-}".strip()
+if raw_map:
+    subset_map = {}
+    for entry in raw_map.split(","):
+        stratum, _sep, subsets = entry.partition("=")
+        subset_map[stratum.strip()] = [x.strip() for x in subsets.split(":") if x.strip()]
+allow_airline = "${ALLOW_AIRLINE_IN_TRAIN:-0}" == "1"
+for k, cell in tr.items():
+    n_examples = (cell or {}).get("examples", 0) or 0
+    covers = subset_map.get(k, [k])  # unmapped strata carry their raw subset name
+    if n_examples > 0 and any("airline" in str(sub) for sub in covers):
+        assert allow_airline, (
+            f"airline leaked into the train pool via stratum {k!r} ({n_examples} examples,"
+            f" covers {covers}). SUBSET_WEIGHTS 里把该 stratum 设成 0(默认表: traces:tau2=0;"
+            " 只排 airline 请用 TRACES_SUBSET_MAP 把 airline 单独成层), 或显式"
+            " ALLOW_AIRLINE_IN_TRAIN=1。"
+        )
 # traces:other 有权重时, planner 把落进 other 这个 catch-all 的样本按它们的
 # **原始** subset 名记进 plan(build_joint_medium_plan._classify_traces_subset),
 # 所以 swebench / browsecompplus 等名字是合法的, 只在 other 权重为 0 时才是泄漏。
@@ -536,8 +573,9 @@ for _tok in "${SUBSET_WEIGHTS}".split():
     if _sep and _k.strip() == "traces:other":
         other_weight = float(_v or 0)
 for k in tr:
-    assert k in ("appworld", "tau2") or other_weight > 0, (
-        f"unexpected traces stratum leaked: {k} (traces:other weight={other_weight})"
+    assert k in subset_map or other_weight > 0, (
+        f"unexpected traces stratum leaked: {k} (declared strata {sorted(subset_map)},"
+        f" traces:other weight={other_weight})"
     )
 order = json.load(open("${ORDER_FILE}"))
 n = len(order)
@@ -673,7 +711,7 @@ launch_train() {  # launch_train <save_steps> <epochs> <resume>  (logs append to
   local passthru=() pv
   for pv in DOC_MODE TOOLS_IN_SYSTEM HYBRID_TAIL_CHOICES MAX_DOC_LENGTH MAX_DOC_NUM \
             MAX_TOOL_CHUNKS MAX_SYSTEM_LENGTH MAX_LENGTH C2KV_GIST_TRAIN_RATIOS SEED \
-            MAX_EVAL_EXAMPLES MAX_SAMPLES_PER_SESSION MAX_TOOLS_PER_SAMPLE; do
+            MAX_EVAL_EXAMPLES MAX_SAMPLES_PER_SESSION MAX_TOOLS_PER_SAMPLE             OPENSWE_PATH QA_HOTPOTQA_PATH QA_2WIKI_PATH QA_LONGMAGPIE_PATH; do
     if [[ -n "${!pv:-}" ]]; then passthru+=("${pv}=${!pv}"); fi
   done
   if ((${#passthru[@]})); then echo "[launch_train] passthrough: ${passthru[*]}"; fi
@@ -850,8 +888,17 @@ PY
                    --max_system_length "${MAX_SYSTEM_LENGTH:-512}")
   if [[ -n "${MAX_TOOL_CHUNKS:-}" ]]; then psrc_geom+=(--max_tool_chunks "${MAX_TOOL_CHUNKS}"); fi
   echo "[calibrate] measure_arm_psrc geometry: ${psrc_geom[*]}"
+  # 可选数据源与 planner / trainer 同一套 env: manifest 里有 openswe / qa 的 qid 而
+  # 这里不给路径, 重放会在 --example_order_file 成员校验上硬报错。
+  local psrc_paths=() dp
+  for dp in OPENSWE_PATH QA_HOTPOTQA_PATH QA_2WIKI_PATH QA_LONGMAGPIE_PATH; do
+    if [[ -n "${!dp:-}" ]]; then
+      psrc_paths+=("--$(echo "${dp}" | tr '[:upper:]' '[:lower:]')" "${!dp}")
+    fi
+  done
   "${PY}" agent/measure_arm_psrc.py \
     --dataset_path "${TRACES_DIR}" --toucan_path "${TOUCAN_DIR}" \
+    ${psrc_paths[@]+"${psrc_paths[@]}"} \
     --split_manifest_file "${SPLIT_MANIFEST}" --split_manifest_name "${SPLIT_NAME}" \
     --max_samples_per_session "${MAX_SAMPLES_PER_SESSION:-4}" \
     --max_tools_per_sample "${MAX_TOOLS_PER_SAMPLE:-32}" \
