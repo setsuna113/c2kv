@@ -203,6 +203,50 @@ def eager_attention_forward(
     return attn_output, attn_weights
 
 
+def sdpa_attention_forward_guarded(
+    module: nn.Module,
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    attention_mask: torch.Tensor | None,
+    scaling: float,
+    dropout: float = 0.0,
+    **kwargs: Unpack[TransformersKwargs],
+):
+    """sdpa with eager_attention_forward's fully-masked-row semantics.
+
+    Stock transformers sdpa feeds the additive mask straight into the fused
+    kernel; a row whose keys are ALL masked out softmaxes to NaN (production
+    NaN guard trip: `FloatingPointError ... attn_impl=sdpa`, 2026-08-26).
+    eager_attention_forward instead zeroes those rows (value and gradient).
+    Mirror that here: unmask fully-masked rows for the kernel call (uniform
+    finite scores), then zero the corresponding outputs — autograd through
+    masked_fill zeroes their gradients too, matching eager exactly.
+    """
+    sdpa = ALL_ATTENTION_FUNCTIONS["sdpa"]
+    if attention_mask is None:
+        return sdpa(module, query, key, value, None, dropout=dropout, scaling=scaling, **kwargs)
+    if attention_mask.dtype == torch.bool:
+        # torch/transformers bool convention: True = allowed to attend.
+        fully_masked = (~attention_mask).all(dim=-1)
+        safe_mask = attention_mask | fully_masked.unsqueeze(-1)
+    else:
+        disallowed = torch.isneginf(attention_mask) | (
+            attention_mask == torch.finfo(attention_mask.dtype).min
+        )
+        fully_masked = disallowed.all(dim=-1)
+        safe_mask = attention_mask.masked_fill(fully_masked.unsqueeze(-1), 0.0)
+    if not bool(fully_masked.any()):
+        return sdpa(module, query, key, value, attention_mask, dropout=dropout, scaling=scaling, **kwargs)
+    attn_output, attn_weights = sdpa(
+        module, query, key, value, safe_mask, dropout=dropout, scaling=scaling, **kwargs
+    )
+    # stock sdpa returns [B, Q, H, D]; fully_masked is [B, Hm, Q] with Hm in {1, H}
+    row_mask = fully_masked.transpose(1, 2).unsqueeze(-1)  # [B, Q, Hm, 1]
+    attn_output = attn_output.masked_fill(row_mask, 0.0)
+    return attn_output, attn_weights
+
+
 @use_kernelized_func(apply_rotary_pos_emb)
 class Qwen3Attention(nn.Module):
     """Multi-headed attention from 'Attention Is All You Need' paper"""
@@ -279,6 +323,8 @@ class Qwen3Attention(nn.Module):
 
         if self.config._attn_implementation == "npu_fusion_attention":
             attention_interface = npu_fusion_attention_forward
+        elif self.config._attn_implementation == "sdpa":
+            attention_interface = sdpa_attention_forward_guarded
         else:
             attention_interface: Callable = ALL_ATTENTION_FUNCTIONS.get_interface(
                 self.config._attn_implementation, eager_attention_forward
@@ -340,6 +386,8 @@ class Qwen3Attention(nn.Module):
 
         if self.config._attn_implementation == "npu_fusion_attention":
             attention_interface = npu_fusion_attention_forward
+        elif self.config._attn_implementation == "sdpa":
+            attention_interface = sdpa_attention_forward_guarded
         else:
             attention_interface: Callable = ALL_ATTENTION_FUNCTIONS.get_interface(
                 self.config._attn_implementation, eager_attention_forward
@@ -552,6 +600,11 @@ class Qwen3Model(Qwen3PreTrainedModel):
         attention_mask: torch.BoolTensor,
         **kwargs: Unpack[TransformersKwargs],
     ) -> Tuple[BaseModelOutputWithPast, torch.Tensor, torch.Tensor]:
+        # per-doc 真实长度注入 kwargs, 供 layer-0 gist 残差按文档真实长度切 chunk
+        # (gist_utils._apply_gist_residual_interleave; 2026-08-30 审计 I4 修复:
+        # 分组 microbatch 下残差不再按组 max padded 网格取均值)。该键随 **kwargs
+        # 顺路穿过 attention interface(各家均吞 **kwargs), 无副作用。
+        kwargs["gist_token_true_lens"] = attention_mask.sum(dim=1)
         attention_mask, gist_mask, position_ids = self.prepare_gist_input(
             input_ids, attention_mask, **kwargs
         )

@@ -1,0 +1,162 @@
+# G-H200 主 checkpoint 臂（task/g-h200-main）— 2026-08-24
+
+**分支/基线**：`task/g-h200-main`，从 G 主线 `fork/task/g-joint-c2kv` tip `9aebbfe`（含 capfix `9a1dffc`）切出。主 worktree 的 `npu-fusion-attention`（D/B/F 线）不受影响。
+**性质**：两份外部批评裁定的执行层落地——①训练从 8×Ascend 910B 移植到 2×H200；②G-medium 的数据配方与训练实例构造按"追求 BFCL 精度"修订。本文是 runbook + 记账基准；设计权威仍是 26 号手册 v3（§3-G）与 24 号 G 章，冲突处以手册为准。
+
+## 1. 臂定义
+
+| 项 | 值 |
+|---|---|
+| Base | Qwen3-4B-Instruct-2507 |
+| 可训练参数 | gist sidecar only（`--only_train_gist True`，base 全冻结） |
+| 初始化 | **新鲜 gist init**（2026-08-25 裁定：G8-small-v2 在 NPU 服务器拿不到，init gate 取消，单臂直接跑） |
+| 数据 | **60% Toucan + 30% τ² traces + 10% AppWorld**（按 estimated source tokens 配比；QA / OpenSWE 不进 recipe；traces 的 swebench/browsecompplus 兜底substrata 用 `traces:other=0` 显式排除） |
+| 实例构造 | 每 assistant decision point 一个实例；`max_samples_per_session=4` 按 early/middle/late = 1/1/2 分层；`REQUIRE_TOOL_CALL=False` + action-balanced（tool_call 目标占比 0.75）；tool-call target 放不下整条丢弃（`tool_call_target_truncated`），不再训练残缺 JSON；capfix 的 target-tool schema 保证不动。**planner 扫描必须带 `--no-require_tool_call`（池子与 trainer 一致，否则 order file 滤掉全部非 tool-call 目标）** |
+| Objective | 单一 next-action CE（context 全 -100，只在 assistant target 计 loss）；无 KL / distill / reconstruction / curriculum |
+| 压缩 | `DOC_MODE=joint`，固定 8×（`C2KV_GIST_TRAIN_RATIOS=8`） |
+| 优化 | LR 5e-5，cosine，weight decay 0.1，warmup_ratio 0.04，BF16 |
+| Batch | per-device 1 × grad-accum 4 × 2 卡 = effective 8（microbatch 2 放得下则 2×2，eff-8 不变） |
+| 硬件 | 2×H200（141GB），torchrun **plain DDP**（`USE_DEEPSPEED=0`；ZeRO-3 在 gist 双 pass 之外还有 per-rank generate_gist 调用计数漂移导致的 NCCL 计数错位挂死——2026-08-26 实锤，见 §5；ZeRO-2 双重 reduce 也不行。`configs/ds_config_h200.json` 留作后续修复后的备选） |
+| 预算 | **144 GPUh = 72h wall**（2026-08-25 上调）；目标 96M–256M **presented** source tokens（不以 epoch 为停止条件；2026-08-26 实测 ρ=0.62、池子 26.6M presented/epoch，默认剂量 256M ≈10 epoch；更粗的 Toucan 大池备选 `g_h200_bigpool` 见 §3 注） |
+
+## 2. 与 v3 手册的关系
+
+- 本臂取代 d_multi（20% QA + 50% traces + 25% Toucan + 5% OpenSWE，24 号 :1170/:1354）成为 §3-G 问题②"多源是否改善泛化"的多源方；traces-heavy 对照由既有 G8-small-v2 自然承担，不再重复训练单源臂。
+- G8 绝对阈值冻结判据不变；**预注册线数值须在 medium 判读前写入 prereg**（v3 §3-G 机制照行）。
+- 记账纪律照 v3 §2.2：nominal/realized 双口径；`train_manifest_used.json` 新增 `action_type_counts` 与 `tool_call_target_truncated_skips` 两列入账。
+
+## 3. Runbook（服务器侧）
+
+**一条命令（2026-08-25 起，推荐）**：`bash <repo>/start_h200.sh` —— 无人值守状态机（recon→plan→calibrate→train→eval→select），幂等续跑，状态在 `outputs/g_h200_status/`；交互终端直接运行时自动 nohup 脱离会话（`FG=1` 强制前台；跟踪 `tail -f outputs/g_h200_status/logs/console.log`）。下面的手工步骤即该脚本各阶段的展开（排障时用）。
+
+```bash
+# 0. 前置（2026-08-25 已在 yancheng 集群侧完成落位, 详见 .foreman/ref/SOURCES.md）：
+#    .venv（py3.12 + torch2.9.0+cu130 + transformers5.8 + deepspeed0.18.1, 离线可用）;
+#    models/Qwen3-4B-Instruct-2507、datasets/agent-llm-traces（v1, CDLA）、
+#    datasets/toucan（Agent-Ark/Toucan-1.5M 的 SFT/）、.foreman/ref/bfcl_{pkg,data}（gorilla 6ea5797）。
+#    初始化 = 新鲜 gist init（G8-small-v2 拿不到, init gate 取消）。
+
+#    注意必须带 --no-require_tool_call（与训练一致），否则池子缺全部非 tool-call 目标；
+#    split 名与 builder 默认一致用 taskproxy_disjoint（planner/trainer 两侧同名）
+python agent/build_joint_medium_plan.py \
+    --traces_path ~/c2kv/datasets/agent-llm-traces \
+    --split_manifest_file outputs/agent_taskproxy_split_manifest.json \
+    --split_manifest_name taskproxy_disjoint \
+    --removal_files outputs/removal_traces_final.json \
+    --no-require_tool_call \
+    --tokenizer ~/c2kv/models/Qwen3-4B-Instruct-2507 \
+    --out_dir outputs/joint_h200_plan --list_traces_subsets
+
+# 2. 规划 60/30/10 order file（traces 0.4 × 内部 75/25 = 全局 30/10；
+#    traces:other=0 显式排除 swebench/browsecompplus 兜底substrata）
+python agent/build_joint_medium_plan.py \
+    --traces_path ~/c2kv/datasets/agent-llm-traces \
+    --toucan_path ~/c2kv/datasets/toucan \
+    --split_manifest_file outputs/agent_taskproxy_split_manifest.json \
+    --split_manifest_name taskproxy_disjoint \
+    --recipe g_h200_main=toucan:0.6,traces:0.4 \
+    --split_traces_subsets \
+    --subset_weights traces:tau2=0.75 --subset_weights traces:appworld=0.25 \
+    --subset_weights traces:other=0 \
+    --no-require_tool_call \
+    --budget_estimated_tokens <N> --oversample_factor 1.25 \
+    --removal_files outputs/removal_traces_final.json \
+    --order_seed 42 --out_dir outputs/joint_h200_plan \
+    --tokenizer ~/c2kv/models/Qwen3-4B-Instruct-2507
+
+# 3. ρ 重测（presented/estimated，旧值 0.392 是 traces-only 小臂口径）：
+#    用 agent/measure_arm_psrc.py 实测新 mixture 的 ρ_new；
+#    MAX_SOURCE_TOKENS = presented_target / ρ_new。
+
+# 4.（已取消）Init gate：2026-08-25 裁定 G8-small-v2 拿不到，单臂新鲜 gist init 直接跑。
+
+# 5. 主训练：先 100–200 step 校准（sec/step、presented tokens/s、peak HBM、
+#    tool_call_target_truncated 丢弃率）→ 回填 SAVE_STEPS 使每 ≈16M presented 存一档
+#    → 正式跑，目标 256M presented（≈10 epoch），保底 96M。
+#    注：吞吐修复后小池 256M 只跑 ~20h，吃不满 144 GPUh。正式改用
+#    Toucan 大池（toucan:0.85/traces:0.15，traces 绝对量不变，池子
+#    ≈70M presented/epoch，33,460 实例）。arm-1 作废后（见文末 2026-08-29 节）
+#    目标降为 256M presented（≈3 epoch，估 14-21h）。不设墙钟上限
+#    （WALL_CAP_HOURS 用脚本默认 70h，3 epoch 远到不了，仅作保险）：
+#    ORDER_FILE=outputs/joint_h200_plan/g_h200_bigpool.order.json \
+#    PLAN_JSON=outputs/joint_h200_plan/g_h200_bigpool.plan.json \
+#    G_H200_EXPECT_SHARES=toucan:0.85,traces:0.15 \
+#    TARGET_PRESENTED_TOKENS=256000000 \
+#      bash start_h200.sh
+#    PLAN_JSON 2026-08-29 起默认从 ORDER_FILE 派生（${ORDER_FILE%.order.json}.plan.json），
+#    显式写出只为醒目；G_H200_EXPECT_SHARES 必须与该 plan 的 families
+#    realized_share 对应（大池 = toucan:0.85,traces:0.15），否则 plan 断言 abort。
+#    bigpool order/plan provenance（2026-08-30 补记）：g_h200_bigpool.{order,plan}.json
+#    是 2026-08-26 人工生成（交互式 planner 调用，参数未留档），repo 内**没有**可
+#    复现的构建命令——phase_plan 在 ORDER_FILE 缺失时的重建命令只产小池
+#    g_h200_main（I5 已实锤干净 STATUS 上 bigpool 命令必 abort）。PLAN_DIR
+#    （outputs/joint_h200_plan/）整体属于生产资产，删除/迁移/换机前必须备份。
+CUDA_VISIBLE_DEVICES=0,1 EXAMPLE_ORDER_FILE=outputs/joint_h200_plan/g_h200_main.order.json \
+  MAX_SOURCE_TOKENS=<折算值> SAVE_STEPS=<校准值> bash agent/train_joint_next_action_c2kv_h200.sh
+
+# 6. Dev 评测选 checkpoint（不看 train loss）
+python agent/build_bfcl_dev_manifest.py <bfcl_data_dir 或 multi_turn_base jsonl> --n 128 --seed 42 --out configs/bfcl_dev_v3_mt.json
+CKPT=<档> BFCL_PKG_PATH=<pkg> BFCL_DATA_DIR=<dir> bash agent/eval_bfcl_dev_c2kv_h200.sh
+```
+
+时间分配（144 GPUh = 72h wall）：前 ~1h 校准（计入正式训练）→ ≤62h 主训练 → ~6h dev 评测（milestone 隔档评，双卡 id 分片）→ ~3h buffer。C_general 出分后再决定是否做 BFCL-derived adaptation tail（条件项，不在本臂）。
+
+## 4. 代码变更清单（本分支相对 9aebbfe）
+
+| 文件 | 变更 |
+|---|---|
+| `python/train/train_data_joint.py` | decision point early/mid/late 分层（`_stratified_pick`）；`action_type` 标记 + action-balanced（`action_tool_call_frac=0.75`，仅 `require_tool_call=False` 时生效，True 旧行为逐位不变）；tool-call target 超预算整条丢弃；answer 抽取处剥 `<think>` |
+| `python/train/train_data_joint_multisource.py` | Toucan/OpenSWE core 同步剥 `<think>` + 标 `action_type` |
+| `agent/train_joint_next_action_c2kv.py` | `JointDataArgs.action_tool_call_frac`；manifest 增 `action_type_counts` / `tool_call_target_truncated_skips` |
+| `agent/build_joint_medium_plan.py` | traces 拆 `appworld`/`tau2` substrata（`--split_traces_subsets` / `--traces_subset_map` / `--subset_weights traces:*`）；`--list_traces_subsets` dry-run；默认无 split 时旧 recipe 输出逐位不变 |
+| `agent/build_joint_medium_plan.py`（2026-08-25 补丁） | `--require_tool_call`/`--action_tool_call_frac` 透传进扫描 knobs（修 order-file 池子与 trainer 不一致的致命缺口；默认 True 逐位不变）；`--subset_weights` 允许 0=整层跳过（`traces:other=0` 排除 swebench/browsecompplus），report 记 `skipped_zero_weight` |
+| `agent/train_joint_next_action_c2kv_h200.sh`（新） | 2×H200 launcher：CUDA + flex_attention + torchrun，ZeRO-2，LR 5e-5 / eff-8 / warmup 4% / fixed 8× / joint / REQUIRE_TOOL_CALL=False；头部注释写明 SAVE_STEPS 与 ρ 折算纪律、init-gate 用法 |
+| `configs/ds_config_h200.json`（新） | ZeRO-3、无 offload、bf16（2026-08-25 从 ZeRO-2 修正：gist 双 pass backward 在 ZeRO-2 下双重 reduce 报错；对齐 ds_config.json/ds_config_npu.json 的已验证 stage） |
+| `agent/build_bfcl_dev_manifest.py`（新） | BFCL V3 multi-turn dev manifest 生成（seed 42 / n 128 / sha256 冻结） |
+| `agent/eval_bfcl_dev_c2kv_h200.sh`（新） | `metrology.bfcl_hf_runner --condition c2kv --ids_file <dev manifest> --device cuda` + `bfcl_score` 薄封装，输出落 `results/g_h200/` |
+| `conftest.py`（新） | 主线上方 guarded test bootstrap 回填（本分支此前缺失，torch-free 机器上测试收集用；server venv 下 no-op） |
+| `python/train/trainer.py`（2026-08-25 补丁） | `_system_attn_impl` 的 flex→flash_attention_2 映射改为可配置（`C2KV_SYSTEM_ATTN_IMPL`，默认 `sdpa`）：flash-attn 预编译 wheel 要 glibc≥2.32，本镜像族 2.31 装不上；sdpa 数值等价（system 前缀是普通 causal attention）。gist 路径仍是 flex_attention（纯 torch） |
+| `python/train/trainer.py`（2026-08-25 补丁②） | `label_tokens` 日志张量强制 float32（`new_tensor` 继承 labels 的 Long dtype，torch 2.9 下 `mean()` 直接报错——首个 logging step 必炸；修复后 4090 冒烟进入正常训练循环） |
+
+## 5. 验证状态
+
+- **本机已验证**：`pytest` 119 passed（新增 23 用例：分层配额/确定性/回退、action balance 精确计数与回退、`require_tool_call=True` 回归逐位一致、target 截断丢弃/完整保留、planner 分类/75-25 配额/端到端 recipe/向后兼容）；`bash -n` 两个脚本；planner 与 manifest 生成器 CLI smoke；manifest 生成器对伪 jsonl 确定性复跑逐字节一致。
+- **需服务器验证**（本机无 GPU/真数据）：launcher 端到端 smoke + 校准；`--list_traces_subsets` 确认真 τ² 子集命名；`--action_tool_call_frac` 在完整依赖下的 argparse 联通；dev 评测管线跑通一个 checkpoint。
+- **2026-08-25 集群侧验证**（yancheng 开发容器，RTX 4090 + cu128 代理 venv）：`--list_traces_subsets` 确认真子集命名（tau2_airline/retail/telecom 命中默认 map）；planner 真 tokenizer 全量跑出 60/40 realized（8,811 examples / 42.8M est，budget shrink 0.3565）；planner↔trainer 池一致性实测通过（`--no-require_tool_call` 下 order file 8,811 qid 全命中，无 unknown-qid 报错；`action_type_counts` = tool_call 3,292 / other 5,519——Toucan 全 decision-point 保留，traces 侧 0.75 目标占比经分层采样落在 91%，全局 tool_call 实例占比 37%，靠 loss 结构而非计数平衡，若要更高占比需给 Toucan 加 text-turn 子采样——留作后续 arm 旋钮）；4090 上 flex_attention 的 inductor kernel 需要 128KB smem 超过 sm_89 上限（101KB），H200(sm_90, 228KB)放得下；若 H200 侧仍触发，fallback `ATTN_IMPL=eager`（H200 141GB 上 eager 也能跑，只是慢）。
+- **2026-08-25 端到端冒烟通过**：`start_h200.sh`（SMOKE=1 缩小配置，单 4090）全状态机 recon→plan→calibrate→train→eval→select 29 分钟 exit=0：校准 5 步落档→实测 ρ/回填 run_config→断点续跑到 26 步→milestone 瘦身（旧档 8.6G / 最新档 23G 完整可 resume）→BFCL dev 双分片评测出分→FINAL_SUMMARY 选档；幂等重跑全 skip、断档重跑只补未完阶段。生产侧（H200）默认全量配置 + flex_attention + ZeRO-3。
+- **2026-08-26 H200 首跑事故与根因**：生产首挂在校准第 0 步 ~30 分钟后被 NCCL 看门狗 SIGABRT(`ALLGATHER_BASE 194M 元素超时`)。根因：ZeRO-3 逐执行 all-gather 参数，而 `process_context_input_ids` 会丢掉全空 doc 槽位、`_generate_gist_for_context_docs` 按有效文档数逐篇压缩——**两个 rank 的 microbatch 有效文档数不同 → generate_gist 调用次数不同 → 集合通信计数错位 → NCCL 超时挂死**。该 joint trainer 此前从未跑过多卡 ZeRO(NPU 各臂均为单卡）。对策：本臂改用 **plain DDP**(USE_DEEPSPEED=0,DDP 容忍 per-rank 变长计算图；4B 冻结 base + gist-only 梯队在 141GB 上绰绰有余）;`start_h200.sh` 加了停滞看门狗（日志 25 分钟无进展→杀掉重试）+ 降级阶梯（lvl1=plain DDP, lvl2=再降 sdpa)，生产状态目录已预置 `attn_fallback_level=1`（直接 DDP 起跑）。ZeRO-3 的正确修复（各 rank 以 all-reduce 对齐有效文档数、按最大值补齐哑迭代并丢弃其输出）留给作者线评估，本臂不依赖。
+- **2026-08-26 吞吐修复**：H200 实测 GPU 利用率仅 ~20%——主因是文档压缩逐篇小前向（`C2KV_GIST_DOC_MICROBATCH=1` 的 NPU 64GB 时代默认）+ 每篇一次 host 同步。`start_h200.sh` 一度默认 `C2KV_GIST_DOC_MICROBATCH=16` + `PER_DEVICE_BS=2/GRAD_ACCUM=2`（effective batch 仍为 8）。~~microbatch 16 vs 1 的 loss 轨迹在 4090 上逐位吻合~~——**2026-08-29 撤回该声明**：microbatch>1 时混合长度组的短文档最后一个 gist row 被填充槽 embedding 污染（残差 chunk-mean 按组 max padded 长度算而 mask 按真实长度建），且 flatten 先于按样本切分、bs=2 时中间组跨样本，该对照机制上不可能成立。生产默认一度回退 1；**2026-08-30 已修复残差（per-doc 真实长度均值）并恢复默认 16**（见文末 2026-08-30 节）。
+- **2026-08-26 flex→sdpa 降级实锤**：train 阶段两次崩溃（05:08/05:39，均在 step ~156）根因 = flex_attention 在变长样本上反复重编译，撞 `torch._dynamo` recompile_limit=8 后永久退化为 unfused 实现（物化完整 scores 矩阵）；本训练开了梯度 checkpoint，forward 保存的 compiled-kernel 中间张量与 backward 重算出的 unfused 张量元数据不一致 → `torch.utils.checkpoint.CheckpointError`（saved `[5,1,108,108]` vs recomputed `[5,32,108,128]`）。确定性必现，与硬件/随机性无关，重试 flex 无意义。处置：生产状态目录 `attn_fallback_level` 手动升 2（sdpa，免编译、无 recompile 概念，4090 冒烟数值已验证）；升级签名扩 `CheckpointError|recompile_limit`；train 阶段崩溃/停滞现在会把 train.log 尾部（含 traceback）转储进 console.log——此前 console 只有一句 "crash/stall"，导致监控误判为"静默挂起"。
+- 唯一已知本机失败：`test_token_accounting.py::test_official_missing_mdoc_data_message`（需 torch，主基线上同样失败，与本分支无关）——2026-08-25 全量 venv 下 314 passed（含 torch），未复现该失败。
+- **2026-08-27 生产第二次停跑（step 3581）与三连修复**：
+  1. **sdpa NaN（step ~151，calibrate 档 resume 后首步）**：stock transformers sdpa 把 additive mask 直接喂 fused kernel，全掩行（该 query 没有任何可 attend 的 key）在 CUDA fused kernel 下 softmax 出 NaN（CPU math kernel 会置零，所以本机单测复现不了）。修复：`python/models/qwen3/modeling_qwen3.py` 新增 `sdpa_attention_forward_guarded`——临时放行全掩行跑 kernel、再把对应输出置零，数值与 `eager_attention_forward`（490ba48 的守卫）逐位一致（`python/models/test_sdpa_fully_masked.py` 3 用例：前向/梯度/无全掩行时零开销 passthrough）。fallback level 2（sdpa）自此可用。
+  2. **OOM（step 3581,eager+plain DDP）**:139.8GB 打满，其中 21.4GB reserved-but-unallocated（碎片）。修复：`start_h200.sh` 全局 `PYTORCH_ALLOC_CONF=expandable_segments:True`（torch 2.9 新名；旧名 PYTORCH_CUDA_ALLOC_CONF 同设兼容）。
+  3. **checkpoint 爆量吃满 GU（隐性, 最危险）**:transformers v5 的保存节奏走 `TrainerState.save_steps` 而非 `args.save_steps`（`DefaultFlowCallback.on_step_end`, trainer_callback.py:586）;resume 从旧档 `trainer_state.json` 继承 cadence 且不纠正——calibrate 档的 `save_steps=150` 覆盖了 train 阶段的 815,checkpoint 以 150 步一档膨胀,7.7h 积了 23 档 ×11G≈246G,把 10T GU 配额吃到只剩 12G。修复三连：`phase_train` 每次 launch 前把 resume 档的 `state.save_steps` 改成本轮配置值；`prune_old_checkpoints` 扩展为 非最新档删 plain-DDP 优化器文件（optimizer.pt/scheduler.pt/rng_state*,原逻辑只管 ZeRO 的 global_step*) + **GU 可用 < PRUNE_MIN_FREE_GB(默认 400G) 时整档裁剪**（保留 = 最新档 + 均匀抽取 RETAIN_CKPTS-1 个，与 eval 选取同一公式；写入中的档不碰）;train 监控循环每 15 分钟定期 prune（此前只在崩溃后）。`phase_recon` 改为先 prune 再量磁盘，续跑（已有 checkpoint）的磁盘门槛降到 30G。另：SMOKE 现在默认隔离 `OUTPUT_DIR` 到 `smoke-qwen3-4b-joint-c2kv-h200`——此前冒烟与生产共用 OUTPUT_DIR,latest_ckpt/resume/prune 会误碰生产档。
+  - 恢复路径：直接重跑 `start_h200.sh` 即可。recon 的 prune 会自动把 23 个旧档裁到 8 个均匀档（保留 {150,600,1050,1500,2100,2550,3000,3450},释放 ~190G),train 从 checkpoint-3450 以正确的 815 步节奏续跑。
+  4. **`latest_ckpt` 排序退化（resume 错锚）**:`ls -d .../checkpoint-* | sort -t- -k2 -n` 对含 `-` 的完整路径（`yanjunchi-24040` 等）排序时字段 2 是路径前缀而非步数，数值排序退化为字典序，最大值恒为 `checkpoint-900`——07:22 重启因此从 900 续跑而非 3450（白丢 2550 步），且此后每次崩溃 resume 都会锚回 900。修复：`sort -V`（eval 的 checkpoint 枚举同改）。注意 `-t- -k2 -n` 在路径无 `-` 时是对的，所以此前冒烟/短跑从未暴露。
+- **2026-08-28 eager OOM 根因与 level-2 转正**:07:40 重启后 6 次崩溃全部确定性 OOM 在 step 3581(expandable_segments 无效:819MB 碎片 vs 135.95GB 真实分配)。栈顶在 `ForCausalLMLoss` 的 `logits.float()`,但真正大头是 **eager attention 逐层物化 [B,H,Q,K] 注意力权重 + fp32 softmax 副本**,随"答案长度 × gist 网格"平方增长——3581 的 batch 恰好是全 order file 里最大的一档;因 order 固定,每次 resume 都撞同一批。eager 只能当保底,不能当主力。处置:guarded sdpa(上一提交)在 4090 上跑通 SMOKE=1 全状态机(fallback level=2 全程 plain DDP + sdpa: recon→plan→calibrate→train→eval→select 14min exit=0,loss 4.37→1.13,NaN 守卫 0 触发),生产 `attn_fallback_level` 降到 2 重启。同批修复:`latest_ckpt` 只认含 trainer_state.json **且含优化器状态**(optimizer.pt 或 global_step*)的完整档(冒烟曾选中被杀在半路的残档,resume FileNotFoundError 崩溃循环);`wait_for_checkpoint` 同样等优化器落盘再杀 calibrate 训练(此前 15s 宽限在 ZeRO 档不够,checkpoint-5 没有 global_step*,train 阶段 deepspeed resume 报 "Can't find a valid checkpoint")。
+- **2026-08-28 续: resume 链路三连坑（全部实锤自真实事故）**:
+  1. `attn_fallback_level` 被手工写坏（粘贴串行, 内容是 "2 cd /path"）时 `(( lvl >= 1 ))` 直接 unbound variable 崩溃循环——`fallback_level()` 现在对非数字内容告警并按 0 处理（降级梯子会自然重爬）。
+  2. 磁盘卫生清掉旧档 optimizer.pt 后, 严版 `latest_ckpt`（要求优化器状态）会把所有档判废 → `resume=<scratch>` **差点静默从头训练烧光预算**。所以 `latest_ckpt` 只要求 trainer_state.json + model.safetensors; prune 保留最新**两个**完整档的优化器（次新档兜底）。~~教训: HF v5 resume 缺 optimizer.pt 只是告警（Adam moments 重置, 权重/scheduler 正常）~~——**2026-08-29 撤回**: transformers 5.8 的 scheduler 恢复与 optimizer.pt 同在 `trainer.py:3603` 单 if 内, 缺优化器时 LR schedule **静默重启**(warmup 重跑); 当时引为证据的"8-27 07:40 resume 后 loss/LR 正常"全程处在 re-warmup ramp 内, 没有判别力。详见文末 2026-08-29 节 I2。
+  3. `phase_train` 新增 scratch 防护: OUTPUT_DIR 下有 checkpoint 但无一可续跑时拒绝静默从头训练, 需显式 `ALLOW_SCRATCH_RESTART=1`。
+  - 终验: 4090 SMOKE=1 + fallback level 2 全程, 14min exit=0, loss 4.37→1.13, NaN 守卫 0 触发, prune 留两档优化器行为经 harness 验证。
+- **2026-08-29 arm-1 作废与重训**：审计 6 条 critical insights 逐条复核成立后裁定 arm-1（step ~14k 的整条 lineage）作废、从头重训。
+  - 根因（各一句话）：
+    - I1 崩溃升级正则不认 OOM/NCCL/watchdog/checkpoint 签名（生产 7 次 step-3581 OOM 全部没触发升级），降级梯子只升不降且会升进 lvl3=eager（该档对最大 batch 确定性 OOM），无 `ddp_timeout`，train.log 不轮转导致升级判定跨 attempt。
+    - I2 磁盘压力整档裁剪曾把 resume 锚点（checkpoint-3450）本身删掉；optimizer-less resume 在 transformers 5.8 下静默重启 LR schedule（`trainer.py:3603` 单 if 无告警），trainer_state 里留下 LR 重新 warmup 的实锤。
+    - I3 eval 双 shard 输出同名互相覆盖，dev 实际只评 64/128 条且守卫数的是链接次数；单卡（SMOKE）路径只评前一半 manifest。
+    - I4（决定性）gist 文档 microbatch=16 在机制上 ≠ 1：混合长度组里 L%8≠0 的短文档最后一个 gist row 被填充槽 embedding 污染，且 flatten 先于按样本切分、bs=2 时中间组跨样本——从 step 0 起每步 ~100% 样本命中，训练目标本身就是错的，与全部 NPU 臂（microbatch=1）及论文口径不可比，任何 checkpoint 都洗不掉。
+    - I5 `PLAN_JSON` 默认推导钉死 `g_h200_main.plan.json`，bigpool 命令在干净 STATUS 上必 abort（生产靠 plan.done 跳过断言才跑起来）；order/run_config 之间无一致性校验。
+    - I6 墙钟/磁盘早退 `return 0` 被 `run_phase` 盖 `train.done`，部分剂量被永久标记"完成"；健康运行的训练没有墙钟出口；全链路无 realized presented tokens 记账。
+  - 处置：arm-1 的 8 个 checkpoint（150/600/900/1050/11410/12225/13040/13855，~70GB）全部作废删除；`outputs/g_h200_status/` 归档为 `outputs/g_h200_status_arm1_failed_20260828/` 后以空 STATUS 重启；代码修复（本节 8 项，对应 start_h200.sh / eval 脚本 / scorer / trainer.py）落地并过 SMOKE 后再开跑。
+  - 新 run 参数：`C2KV_GIST_DOC_MICROBATCH=1`（脚本默认当时已回退；**2026-08-30 更新**：残差 per-doc 修复 + 等价性测试落地，默认已恢复 16，见下节）；`TARGET_PRESENTED_TOKENS=256000000`（calibrate 自动换算 ≈3 epochs）；不设墙钟上限（`WALL_CAP_HOURS` 用默认 70h，仅作保险；用户裁定 2026-08-29）；其余不变（LR 5e-5 cosine / wd 0.1 / eff-8 / fixed 8× / joint / only_train_gist / 33,460 大池 85/15）。启动命令见 §3 注。
+- **2026-08-30 二轮评审与 v2**：第二轮外部评审 6 条新指控，逐条复核后 5 条实锤、1 条半对（担心的 watchdog 死锁未发生——梯子按设计 0→1→2 爬出，但"预置 level 2"的建议成立）；"上一轮 8 项只有 I4 真修好"评价公允。arm-2（mb=1）07:50 起跑，calibrate 期间**实测 27-31 s/it**（arm-1 mb=16 为 4.1 s/it，慢 ~7×）——照此 3 epochs ≈94h，远超预算；教训：**剂量/耗时推算必须在生产配置下实测，不能沿用旧口径**（旧 run_config 连 sec/step 都不记）。据此停掉 arm-2（尚无 checkpoint，零损失），裁定方向 A：修 gist 残差 + v2 八项 + 等价性测试后 mb=16 重启。
+  - 6 条判定（各一句话）：
+    1. rc=2 partial 后 eval.done/select.done 不失效，train 续跑到 rc=0 的新 milestone 永不评分——CONFIRMED；
+    2. calibrate 跑 150 步却丢掉计时，剂量未在 mb=1 下重推——CONFIRMED（实测证明这是预算级问题，不只是记账）；
+    3. 空 STATUS 从 level 0 起跑，逃逸只剩 watchdog——半对（死锁未发生；但 level 0/1 均为实锤致命配置，预置 2 成立，arm-2 白烧 ~1.7h 爬梯子）；
+    4. eval cadence filter 静默丢最终档——CONFIRMED，已在冒烟发作（实际 max_steps=100 ≠ run_config total_steps=128，完成完整退火的 checkpoint-100 被滤掉）；
+    5. crash 烧尽 return 1 零产出；eval 重跑 error 行 append 重复 → scorer `_check_duplicate_keys` SystemExit 死锁——CONFIRMED；
+    6. select glob 持久 RESULTS 全 summary、无 run identity，可能选中已被 prune 删除的档——CONFIRMED（机制）。
+  - v2 修复清单（start_h200.sh / agent/eval_bfcl_dev_c2kv_h200.sh，均已落地）：①本次真跑了 train（rc∈{0,2}）则进 eval 前失效 eval.done/select.done/eval_list.txt；②calibrate 计时写 run_config（`sec_step`/`projected_hours`/`gist_doc_microbatch`），投影超 WALL_CAP_HOURS 大字告警（不 assert，用户不设硬上限），phase_train 开头校验 microbatch 一致、**缺键的旧 run_config 同样响亮失败**并提示删 calibrate.done + run_config.json 重新校准；③非 SMOKE 空 STATUS 预置 `attn_fallback_level=2`（`FALLBACK_LEVEL_SEED` 可覆盖，梯子与封顶不变）；④eval filter 放行最新档（`c == ckpts[-1]`）并 echo 被排除的档；⑤crash 烧尽时有 milestone 则 return 2（partial 进 eval），否则 return 1；⑥eval runner RUN_CMD 加 `--skip_errors`（error 行视为完成、按错误答案计分，与 expect-n 口径一致）；⑦select 只认 OUTPUT_DIR 现存档（幽灵 summary 打印后忽略），FINAL_SUMMARY 表格加 n 列；⑧本 runbook 补 bigpool provenance（§3 注）与本节。
+  - gist 残差修复与 mb 回 16（方向 A 核心）：`gist_utils._apply_gist_residual_interleave` 改按每篇文档真实长度（generate_gist 从 2D attention mask 求和注入 `gist_token_true_lens`）分块取均值，组内全等长保留原向量化快路径（逐位不变）；等价性硬门槛 `python/models/test_gist_microbatch_equiv.py`（混合长度组 float64 逐位 + tiny Qwen3 整层 generate_gist 集成，本机实测逐位一致）；修复后分组前向在数学上等价逐篇（仅 bf16 归约噪声），bs=2 跨样本组只剩纯 batching、无信息串流。`C2KV_GIST_DOC_MICROBATCH` 默认恢复 16，3 epochs/256M 估 17-24h，同时满足剂量与预算。

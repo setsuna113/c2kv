@@ -171,6 +171,8 @@ from train.train_data_joint import (  # noqa: E402
     _default_max_tool_chunks,
     build_history_chunks,
     build_tool_chunks,
+    cap_regime_name,
+    regime_from_record,
 )
 from train.train_data_multiturn import (  # noqa: E402
     _chat_template_ids,
@@ -1312,6 +1314,7 @@ def evaluate(args: argparse.Namespace) -> Dict[str, Any]:
         "max_doc_num": args.max_doc_num,
         "max_tool_chunks": args.max_tool_chunks,
         "legacy_mode_caps": args.legacy_mode_caps,
+        "cap_regime": cap_regime_name(args.legacy_mode_caps),
         "min_doc_num": args.min_doc_num,
         "max_tool_definition_tokens": args.max_tool_definition_tokens,
         "max_system_length": args.max_system_length,
@@ -1380,6 +1383,7 @@ def merge_shards(args: argparse.Namespace) -> Dict[str, Any]:
     shard_chunk_policies: List[Any] = []
     shard_qid_manifests: List[str] = []
     qid_manifest_missing_total = 0
+    shard_cap_regimes: List[str] = []
     for input_file in args.input_files:
         rows.extend(_read_jsonl(Path(input_file)))
         # Aggregate the shard summaries' gist-init diagnostics (worst case per
@@ -1407,6 +1411,17 @@ def merge_shards(args: argparse.Namespace) -> Dict[str, Any]:
             missing = shard_summary.get("qid_manifest_missing")
             if isinstance(missing, (int, float)) and not isinstance(missing, bool):
                 qid_manifest_missing_total += int(missing)
+            if "legacy_mode_caps" in shard_summary or "cap_regime" in shard_summary:
+                shard_cap_modes.append(bool(shard_summary.get("legacy_mode_caps")))
+                # Normalized regime string: pre-string summaries map to
+                # legacy/per_side_caps(v1) via the boolean, so a v1 shard and
+                # a v2 (empty-tool-reclaim) shard are told apart here even
+                # though both carry legacy_mode_caps=False.
+                shard_cap_regimes.append(
+                    regime_from_record(
+                        shard_summary.get("legacy_mode_caps"), shard_summary.get("cap_regime")
+                    )
+                )
     # The doc-budget regime must be visible on the merged summary: legacy and
     # fixed caps produce non-comparable numbers, and mixing shards from both
     # regimes in one merge is almost certainly an ops mistake.
@@ -1416,6 +1431,13 @@ def merge_shards(args: argparse.Namespace) -> Dict[str, Any]:
             "MERGING SHARDS FROM DIFFERENT DOC-BUDGET REGIMES (legacy_mode_caps=%s) — "
             "the merged numbers are not internally comparable",
             cap_modes,
+        )
+    cap_regimes = sorted(set(shard_cap_regimes))
+    if len(cap_regimes) > 1:
+        logger.warning(
+            "MERGING SHARDS FROM DIFFERENT DOC-BUDGET REGIMES (cap_regime=%s) — "
+            "the merged numbers are not internally comparable",
+            cap_regimes,
         )
     merged_legacy_mode_caps: Any = cap_modes[0] if len(cap_modes) == 1 else (cap_modes or None)
     # Same treatment for the chunking policy: merging arms into one file
@@ -1449,6 +1471,7 @@ def merge_shards(args: argparse.Namespace) -> Dict[str, Any]:
             "(b_prereg.md §2)",
             qid_manifest_missing_total,
         )
+    merged_cap_regime: Any = cap_regimes[0] if len(cap_regimes) == 1 else (cap_regimes or None)
     if args.output_file:
         _jsonl_write(args.output_file, rows)
     common_rows = _common_valid_rows(rows)
@@ -1466,6 +1489,7 @@ def merge_shards(args: argparse.Namespace) -> Dict[str, Any]:
         "chunk_policy": merged_chunk_policy,
         "qid_manifest": merged_qid_manifest,
         "qid_manifest_missing": qid_manifest_missing_total,
+        "cap_regime": merged_cap_regime,
         "gist_init_fractions": gist_init_fractions,
         "results": _summarize(rows),
         "common_num_qids": len({row.get("qid") for row in common_rows}),

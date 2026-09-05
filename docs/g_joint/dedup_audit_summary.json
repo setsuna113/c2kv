@@ -1,0 +1,46 @@
+{
+  "generated": "2026-08-23",
+  "scope": "G-medium train/eval contamination audit, traces v1 vs taskproxy_disjoint_v2 eval (774 sessions) + BFCL",
+  "inputs": {
+    "pass_a": "dedup_medium_messages.json (unit=messages, threshold 0.8, num_perm 128, seed 42)",
+    "pass_b": "dedup_medium_qa_raw.json (unit=raw, qa docs vs v2eval raw msgs + BFCL)"
+  },
+  "raw_surface": {
+    "train_units": {"v1": 948568, "toucan": 961362, "openswe": 5488033},
+    "eval_units": {"v2eval": 291927, "bfcl": 7156},
+    "removal_count_raw": 378760,
+    "exact_dup_train_units": {"v1_x_v2eval": 308513, "toucan_x_v2eval": 39, "toucan_x_bfcl": 1}
+  },
+  "finding_1_boilerplate": {
+    "claim": "raw removal mass is harness boilerplate, not trajectory leakage",
+    "evidence": [
+      "top exact hash = '(no content)' (12 chars), 201746 multiplicities (65% of v1 exact), train session DF=735",
+      "system-reminder template 481 chars DF=699; tau2 transfer notice DF=115; 'top-30 tools' 36KB prompt DF=82",
+      "near-dup sampled pairs differ by one call-id digit or returncode (J>=0.98, len<=259)",
+      "v1 units are re-emitted per span (full conversation prefix per LLM call), inflating multiplicities"
+    ]
+  },
+  "finding_2_split_integrity": {
+    "train_intersect_eval_sessions": 0,
+    "task_fingerprint_collisions": 0,
+    "fingerprint": "sha1 of normalized task-defining message (earliest 'New task:' user msg / earliest long user msg); 277 distinct over 774 eval sessions (same-task repeats stay inside eval)",
+    "note": "run-prefix heuristic retired: session_id = run_id + suffix, 29-87 sessions per run; prefix collisions are run-level, not task-level"
+  },
+  "finding_3_true_exclusions": {
+    "final_exclusion_sessions": 427,
+    "rules": {
+      "exact_marker": 16,
+      "near_jaccard_gte_0.95": 231,
+      "near_marker_below_0.95": 188
+    },
+    "examples": "byte-identical 'Task from supervisor: ...' wrappers; single-eval-session near-duplicates at J>=0.95",
+    "file": "final_train_exclusion.json (planner consumes removal_traces_final.json, a bare-id copy)"
+  },
+  "not_penalized": {
+    "benchmark_shared_environment_material": "488 exact + 121 near sessions sharing appworld API docs / browsecomp corpus / SWE harness outputs across DIFFERENT tasks; eval-time-visible reference material, retained by design",
+    "short_boilerplate": "<200 normalized chars or template on both sides (train DF>=18 and eval DF>=8)"
+  },
+  "pass_b_qa": {"removal_count": 0, "shared_exact_hashes": 0, "note": "reproduced on both old and new (shard-stable) qa id schemes"},
+  "pool_impact": {"v1_train_pool_sessions_before": 1364, "after": 937},
+  "artifacts_server": ["dedup_medium_messages.json", "dedup_medium_messages.filtered.json (superseded)", "taskfp_exclusion.json (superseded)", "final_train_exclusion.json", "survivor_detail.json"]
+}

@@ -1,0 +1,657 @@
+{
+ "task": "G-H200 BFCL multi-turn dev manifest (checkpoint selection)",
+ "seed": 42,
+ "n_total": 128,
+ "category": "multi_turn_base",
+ "categories": [
+  "multi_turn_base"
+ ],
+ "source_file": ".foreman/ref/bfcl_data/BFCL_v4_multi_turn_base.json",
+ "source_sha256": "1a21a995d06fd6f20ba55de7bced30ef953ec35e998f502ec2ecf4d66ef1c43a",
+ "created_utc": "2026-08-25T01:55:34Z",
+ "ids": [
+  "multi_turn_base_1",
+  "multi_turn_base_101",
+  "multi_turn_base_103",
+  "multi_turn_base_104",
+  "multi_turn_base_105",
+  "multi_turn_base_106",
+  "multi_turn_base_108",
+  "multi_turn_base_113",
+  "multi_turn_base_114",
+  "multi_turn_base_116",
+  "multi_turn_base_117",
+  "multi_turn_base_118",
+  "multi_turn_base_119",
+  "multi_turn_base_12",
+  "multi_turn_base_120",
+  "multi_turn_base_121",
+  "multi_turn_base_122",
+  "multi_turn_base_123",
+  "multi_turn_base_124",
+  "multi_turn_base_126",
+  "multi_turn_base_128",
+  "multi_turn_base_129",
+  "multi_turn_base_13",
+  "multi_turn_base_133",
+  "multi_turn_base_134",
+  "multi_turn_base_135",
+  "multi_turn_base_14",
+  "multi_turn_base_141",
+  "multi_turn_base_142",
+  "multi_turn_base_143",
+  "multi_turn_base_144",
+  "multi_turn_base_146",
+  "multi_turn_base_147",
+  "multi_turn_base_148",
+  "multi_turn_base_149",
+  "multi_turn_base_15",
+  "multi_turn_base_150",
+  "multi_turn_base_151",
+  "multi_turn_base_154",
+  "multi_turn_base_155",
+  "multi_turn_base_157",
+  "multi_turn_base_159",
+  "multi_turn_base_16",
+  "multi_turn_base_161",
+  "multi_turn_base_162",
+  "multi_turn_base_163",
+  "multi_turn_base_165",
+  "multi_turn_base_166",
+  "multi_turn_base_168",
+  "multi_turn_base_17",
+  "multi_turn_base_171",
+  "multi_turn_base_172",
+  "multi_turn_base_173",
+  "multi_turn_base_174",
+  "multi_turn_base_175",
+  "multi_turn_base_176",
+  "multi_turn_base_177",
+  "multi_turn_base_178",
+  "multi_turn_base_179",
+  "multi_turn_base_18",
+  "multi_turn_base_180",
+  "multi_turn_base_181",
+  "multi_turn_base_182",
+  "multi_turn_base_183",
+  "multi_turn_base_185",
+  "multi_turn_base_186",
+  "multi_turn_base_187",
+  "multi_turn_base_188",
+  "multi_turn_base_189",
+  "multi_turn_base_192",
+  "multi_turn_base_195",
+  "multi_turn_base_196",
+  "multi_turn_base_197",
+  "multi_turn_base_2",
+  "multi_turn_base_21",
+  "multi_turn_base_23",
+  "multi_turn_base_24",
+  "multi_turn_base_25",
+  "multi_turn_base_26",
+  "multi_turn_base_27",
+  "multi_turn_base_3",
+  "multi_turn_base_30",
+  "multi_turn_base_33",
+  "multi_turn_base_35",
+  "multi_turn_base_37",
+  "multi_turn_base_38",
+  "multi_turn_base_39",
+  "multi_turn_base_4",
+  "multi_turn_base_42",
+  "multi_turn_base_43",
+  "multi_turn_base_44",
+  "multi_turn_base_45",
+  "multi_turn_base_46",
+  "multi_turn_base_47",
+  "multi_turn_base_48",
+  "multi_turn_base_51",
+  "multi_turn_base_52",
+  "multi_turn_base_53",
+  "multi_turn_base_54",
+  "multi_turn_base_55",
+  "multi_turn_base_56",
+  "multi_turn_base_58",
+  "multi_turn_base_59",
+  "multi_turn_base_60",
+  "multi_turn_base_66",
+  "multi_turn_base_67",
+  "multi_turn_base_68",
+  "multi_turn_base_69",
+  "multi_turn_base_70",
+  "multi_turn_base_71",
+  "multi_turn_base_75",
+  "multi_turn_base_76",
+  "multi_turn_base_77",
+  "multi_turn_base_8",
+  "multi_turn_base_81",
+  "multi_turn_base_82",
+  "multi_turn_base_83",
+  "multi_turn_base_84",
+  "multi_turn_base_85",
+  "multi_turn_base_86",
+  "multi_turn_base_89",
+  "multi_turn_base_9",
+  "multi_turn_base_90",
+  "multi_turn_base_91",
+  "multi_turn_base_96",
+  "multi_turn_base_97",
+  "multi_turn_base_98",
+  "multi_turn_base_99"
+ ],
+ "ids_sha256": "341e58135aca8f7d0f4887e70b590bb9916b2b8b08a5212bfa804054062b2a9f",
+ "items": [
+  {
+   "id": "multi_turn_base_1",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_101",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_103",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_104",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_105",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_106",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_108",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_113",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_114",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_116",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_117",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_118",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_119",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_12",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_120",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_121",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_122",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_123",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_124",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_126",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_128",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_129",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_13",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_133",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_134",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_135",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_14",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_141",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_142",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_143",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_144",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_146",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_147",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_148",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_149",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_15",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_150",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_151",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_154",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_155",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_157",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_159",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_16",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_161",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_162",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_163",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_165",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_166",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_168",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_17",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_171",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_172",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_173",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_174",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_175",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_176",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_177",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_178",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_179",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_18",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_180",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_181",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_182",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_183",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_185",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_186",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_187",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_188",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_189",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_192",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_195",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_196",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_197",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_2",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_21",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_23",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_24",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_25",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_26",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_27",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_3",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_30",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_33",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_35",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_37",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_38",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_39",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_4",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_42",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_43",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_44",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_45",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_46",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_47",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_48",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_51",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_52",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_53",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_54",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_55",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_56",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_58",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_59",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_60",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_66",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_67",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_68",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_69",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_70",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_71",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_75",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_76",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_77",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_8",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_81",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_82",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_83",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_84",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_85",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_86",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_89",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_9",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_90",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_91",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_96",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_97",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_98",
+   "category": "multi_turn_base"
+  },
+  {
+   "id": "multi_turn_base_99",
+   "category": "multi_turn_base"
+  }
+ ]
+}

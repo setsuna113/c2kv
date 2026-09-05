@@ -16,9 +16,11 @@ joint dataset only needs this new data module:
 - context documents = tool-schema chunks FIRST, then history-turn chunks in
   chronological order (each doc keeps its type prefix: ``"Tool definition:\n"``
   for tools, ``"Previous turn\n..."`` for history);
-- ordinary prompt = current turn only;
+- ordinary prompt = current turn only (plus the raw history tail when the
+  ``hybrid_tail_choices`` knob is set — see ``JointDataset``);
 - target = next assistant action;
-- system prefix = bare system prompt WITHOUT ``tools=`` (the de-leak).
+- system prefix = bare system prompt WITHOUT ``tools=`` (the de-leak), unless
+  the ``tools_in_system`` knob is set — see ``JointDataset``.
 
 Answer-format choice
 --------------------
@@ -29,7 +31,11 @@ surface ``Action:\n<tool_call>\n{"name":...,"arguments":...}\n</tool_call>``
 (same payload keys, same minified JSON), so next-action supervision is
 consistent with ``train_unified_next_action_c2kv.py``; spans without tool calls
 fall back to the assistant text (history-path behavior).  ``require_tool_call``
-restricts to tool-call targets when set.
+restricts to tool-call targets when set.  Inline ``<think>...</think>``
+residue is stripped from the rendered answer (``_strip_think_blocks``), and a
+tool-call answer that still does not fit the sequence budget after maximal
+prompt truncation is dropped (``tool_call_target_truncated``) rather than
+trained on as a partial action.
 
 Document-budget allocation
 --------------------------
@@ -62,6 +68,18 @@ reshaping the fixed training grid.  ``content_tokens`` accounting is opt-in
 so the trainer leaves it off (``None`` = not measured) and only the eval
 driver, which needs it for the presented-token check, turns it on.
 
+Per-side caps regime (``per_side_caps=True``, the default since the cap fix):
+the tool side gets ``min(max_tool_chunks, max_doc_num)`` slots and the history
+side a CONSTANT ``max_doc_num - min(max_tool_chunks, max_doc_num)`` in every
+doc mode, so both presented budgets are identical across the J-arms (the G-Q3
+fairness constraint); spare tool slots are NOT recycled.  Regime
+``per_side_caps_v2_empty_tool_reclaim`` refines this for examples with NO
+non-empty tool documents (the QA family): they reserve no tool slots at all
+(``tool_cap=0``) and history gets the full ``max_doc_num`` grid.  Examples
+WITH tool documents are bit-for-bit identical to v1; the legacy regime
+(``per_side_caps=False``) is untouched byte-for-byte.  The regime string
+recorded in manifests/summaries comes from ``cap_regime_name``.
+
 Self-checks
 -----------
 ``assert_no_leakage`` is NOT run per-sample in production; it is called from
@@ -76,10 +94,11 @@ import argparse
 import json
 import logging
 import random
+import re
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional, Sequence
+from typing import Any, Dict, List, Literal, Optional, Sequence, Tuple
 
 from .chunk_policy import (
     FROZEN_JOIN,
@@ -102,6 +121,7 @@ from .train_data_multiturn import (
     _find_agent_parquet_files,
     _fit_reused_history,
     _flatten_turn_units,
+    _fit_reused_history_with_indices,
     _iter_agent_jsonl_rows,
     _iter_agent_rows,
     _json_loads,
@@ -157,6 +177,71 @@ class JointExample:
     # on records built before the B-line chunking work; the ``structural``
     # policy degrades to a pass-through when it is missing.
     history_units: Optional[List[List[Dict[str, str]]]] = None
+    # Indices into ``history_documents`` of the GOLD (supporting-fact)
+    # documents, when the source corpus labels them (HotpotQA / 2Wiki QA
+    # rows).  ``None`` when unlabelled.  Used only for the retention audit
+    # counters — never for training decisions.
+    gold_history_doc_indices: Optional[Tuple[int, ...]] = None
+    # ``"tool_call"`` when the rendered answer carries a tool call (the
+    # ``_render_agent_output_messages`` predicate at the extraction point),
+    # else ``"other"`` (clarification / no-call / final response).  Drives
+    # action-balanced per-session sampling and the manifest's
+    # ``action_type_counts`` audit; never a training decision.
+    action_type: str = "other"
+    # The raw tool dicts chosen by ``_select_tools`` (post-selection,
+    # pre-render), kept so a training arm can present the tool schemas RAW in
+    # the system prefix (``tools_in_system``) exactly as every serving path
+    # does, instead of through the gist grid.  ``None`` when the source has no
+    # tool side (QA) or did not record the selection.
+    selected_tools: Optional[List[Dict[str, Any]]] = None
+
+
+# Mixture-family prefixes on qids (``toucan:`` / ``openswe:`` / ``qa:``);
+# agent-llm-traces qids are bare ``session_id:span_index``.  Defined here (not
+# in the multisource module) so JointDataset can attribute skip counters per
+# family without an import cycle; re-exported by train_data_joint_multisource.
+FAMILY_PREFIXES = ("toucan", "openswe", "qa")
+
+
+def qid_source_family(qid: str) -> str:
+    """Mixture family of an example qid (bare qids count as ``traces``)."""
+    for prefix in FAMILY_PREFIXES:
+        if qid.startswith(prefix + ":"):
+            return prefix
+    return "traces"
+
+
+# Doc-budget regime names recorded in trainer manifests / eval summaries.
+# ``per_side_caps`` (v1, the first fixed regime) and v2 differ ONLY for
+# tool-less examples; both record legacy_mode_caps=False, so the boolean alone
+# cannot tell them apart when merging shards — the string can.
+CAP_REGIME_LEGACY = "legacy_mode_caps"
+CAP_REGIME_V1 = "per_side_caps"
+CAP_REGIME_V2_EMPTY_TOOL_RECLAIM = "per_side_caps_v2_empty_tool_reclaim"
+
+
+def cap_regime_name(legacy_mode_caps: bool) -> str:
+    """The regime THIS code produces: legacy, or v2 (empty-tool reclaim)."""
+    return CAP_REGIME_LEGACY if legacy_mode_caps else CAP_REGIME_V2_EMPTY_TOOL_RECLAIM
+
+
+def regime_from_record(legacy_mode_caps: Any, cap_regime: Any) -> str:
+    """Normalize a manifest/summary's regime fields to a comparable string.
+
+    Records written before the regime string existed carry only the
+    ``legacy_mode_caps`` boolean; map those to v1 (they predate the v2
+    reclaim).  Missing entirely -> "unknown".
+    """
+    if isinstance(cap_regime, str) and cap_regime:
+        return cap_regime
+    if legacy_mode_caps is None:
+        return "unknown"
+    return CAP_REGIME_LEGACY if bool(legacy_mode_caps) else CAP_REGIME_V1
+
+
+def _has_tool_documents(example: JointExample) -> bool:
+    """True when the example carries at least one non-empty tool document."""
+    return any(str(doc).strip() for doc in example.tool_documents)
 
 
 # ---------------------------------------------------------------------------
@@ -253,6 +338,31 @@ def _shuffle_json_keys(value: Any, rng: random.Random) -> Any:
     if isinstance(value, list):
         return [_shuffle_json_keys(item, rng) for item in value]
     return value
+
+
+def _shuffled_system_tools(
+    selected_tools: Sequence[Dict[str, Any]],
+    split_seed: int,
+    session_id: Any,
+    span_index: Any,
+) -> List[Dict[str, Any]]:
+    """Order the ``tools_in_system`` pool without a positional oracle.
+
+    ``_select_tools`` builds its pool as ``target + same-namespace negatives +
+    random negatives``, so the gold tool is always element 0 whenever the
+    session ships more tools than ``max_tools_per_sample``.  The grid path
+    never sees that order (``_render_tool_documents`` shuffles its own copy),
+    but ``tools_in_system`` renders this list verbatim into the system prefix
+    -- and "the answer is the first tool" is a shortcut that no serving path
+    (BFCL, tau2, ToolSandbox all pass the caller's own tool order) reproduces.
+
+    A dedicated RNG stream keyed by the example id keeps this deterministic
+    and leaves the grid path's ``rng`` consumption untouched, so every
+    ``doc_mode != history_only`` arm stays bit-identical.
+    """
+    tools = list(selected_tools)
+    random.Random(f"{split_seed}:{session_id}:{span_index}:system_tool_order").shuffle(tools)
+    return tools
 
 
 def _render_tool_documents(
@@ -382,13 +492,114 @@ def _select_tools(
     return selected[:max_tools_per_sample]
 
 
+_THINK_BLOCK_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
+
+
+def _strip_think_blocks(answer: str) -> str:
+    """Remove inline ``<think>...</think>`` residue from a rendered answer.
+
+    Raw traces can carry the model's reasoning inline in the assistant
+    ``content`` string (Hermes-style ``<think>`` segments, docs/datastes.md)
+    instead of a dedicated ``reasoning_content`` key, and no extraction
+    helper strips them.  Reasoning is deliberately supervised only via the
+    ``Thought:`` rendering of the dedicated keys, so inline segments are
+    dropped here.  An unclosed trailing ``<think>`` (``max_answer_chars`` can
+    cut a block in half) is stripped to the end as well.
+    """
+    stripped = _THINK_BLOCK_RE.sub("", answer)
+    if "<think>" in stripped:
+        stripped = stripped.split("<think>", 1)[0]
+    return stripped.strip()
+
+
+def _answer_has_tool_call(answer: str) -> bool:
+    """The marker half of the ``_render_agent_output_messages`` tool-call
+    predicate, applied to an already-rendered answer string."""
+    marker_text = answer.lower()
+    return any(
+        marker in marker_text
+        for marker in ("<tool_call>", "action:", "function_call", "tool call")
+    )
+
+
+def _stratified_pick(
+    examples: Sequence[JointExample],
+    k: int,
+    rng: random.Random,
+    action_tool_call_frac: float = 0.75,
+) -> List[JointExample]:
+    """Position-stratified, action-balanced down-sampling of one session.
+
+    ``examples`` are in chronological decision-point order (the order
+    ``_session_examples`` yields them).  The index range is split into
+    early/middle/late thirds with quotas ``k // 3`` / ``k // 3`` / remainder
+    (1/1/2 for the default ``k=4``): late decision points carry the longest
+    histories and keep the largest share.  Within each bucket the seeded rng
+    picks the members, preferring action types so the session's tool_call
+    share approaches ``action_tool_call_frac``: per-session targets are
+    ``round(k * frac)`` tool-call picks and the rest ``other``, consumed
+    bucket by bucket; a bucket short on the preferred pool backfills from its
+    other pool, and a bucket short overall is topped up after the pass in
+    late -> middle -> early order.  Deterministic given the caller's rng —
+    every DDP rank rebuilds the same example list independently.  Returns the
+    picks in chronological order.
+    """
+    if len(examples) <= k:
+        return list(examples)
+    third = len(examples) // 3
+    buckets = [examples[:third], examples[third : 2 * third], examples[2 * third :]]
+    quotas = (k // 3, k // 3, k - 2 * (k // 3))
+    tool_target = max(0, min(k, int(round(k * action_tool_call_frac))))
+    other_target = k - tool_target
+    picked: List[JointExample] = []
+    for bucket, quota in zip(buckets, quotas):
+        take = min(quota, len(bucket))
+        tool_pool = [example for example in bucket if example.action_type == "tool_call"]
+        other_pool = [example for example in bucket if example.action_type != "tool_call"]
+        # Targets are clamped at 0: a bucket that had to backfill from the
+        # non-preferred pool (``short`` below) can drive the other target
+        # negative, and ``rng.sample(pool, -1)`` raises ValueError -- an ordinary
+        # "text turns first, tool calls later" trajectory crashed dataset load
+        # with the launcher default require_tool_call=False (2026-09-05 audit).
+        n_tool = min(take, max(0, tool_target), len(tool_pool))
+        n_other = min(take - n_tool, max(0, other_target), len(other_pool))
+        short = take - n_tool - n_other
+        if short:
+            # Pool short on the preferred action: fill the bucket quota from
+            # whichever pool still has members.
+            extra_tool = min(short, len(tool_pool) - n_tool)
+            n_tool += extra_tool
+            n_other += min(short - extra_tool, len(other_pool) - n_other)
+        chosen = rng.sample(tool_pool, n_tool) + rng.sample(other_pool, n_other)
+        chosen_tool = sum(1 for example in chosen if example.action_type == "tool_call")
+        tool_target = max(0, tool_target - chosen_tool)
+        other_target = max(0, other_target - (len(chosen) - chosen_tool))
+        picked.extend(chosen)
+    if len(picked) < k:
+        # Bucket short overall: backfill late -> middle -> early.
+        chosen_ids = {id(example) for example in picked}
+        for bucket in reversed(buckets):
+            pool = [example for example in bucket if id(example) not in chosen_ids]
+            extra = rng.sample(pool, min(k - len(picked), len(pool)))
+            picked.extend(extra)
+            chosen_ids.update(id(example) for example in extra)
+            if len(picked) >= k:
+                break
+    position = {id(example): index for index, example in enumerate(examples)}
+    return sorted(picked, key=lambda example: position[id(example)])
+
+
 class AgentLLMTracesJointSource(AgentLLMTracesCompressHistorySource):
     """True-joint source for agent-llm-traces.
 
     Subclasses the history-path source so sessions/spans/tool definitions are
     read identically: same parquet/jsonl discovery, same span sorting by
     (start_time, span_id), same history/current split at the last user message,
-    same ``max_samples_per_session`` sub-sampling, same split-manifest args.
+    same split-manifest args.  Per-session ``max_samples_per_session``
+    sub-sampling is the parent's seeded uniform pick when
+    ``require_tool_call=True`` (bit-identical to the existing arms); with
+    ``require_tool_call=False`` it is position-stratified and action-balanced
+    (``_stratified_pick``, target tool-call share ``action_tool_call_frac``).
     The parsing addition is that tool definitions (first span of the session
     carrying ``gen_ai.tool.definitions``) are rendered into per-tool documents
     with the unified path's variant policy.  Rendering is PER EXAMPLE: the
@@ -421,6 +632,7 @@ class AgentLLMTracesJointSource(AgentLLMTracesCompressHistorySource):
         max_tools_per_sample: int = 32,
         same_namespace_negative_tools: int = 8,
         random_negative_tools: int = 24,
+        action_tool_call_frac: float = 0.75,
     ) -> None:
         # Set joint knobs BEFORE super().__init__(): the parent constructor
         # calls self._load_records(), which dispatches to the overridden
@@ -432,6 +644,10 @@ class AgentLLMTracesJointSource(AgentLLMTracesCompressHistorySource):
         self.max_tools_per_sample = max_tools_per_sample
         self.same_namespace_negative_tools = same_namespace_negative_tools
         self.random_negative_tools = random_negative_tools
+        # Target tool-call share for the per-session down-sampling; consulted
+        # only when require_tool_call=False (True keeps the legacy uniform
+        # pick, so existing arms are bit-identical).
+        self.action_tool_call_frac = action_tool_call_frac
         super().__init__(
             path=path,
             split=split,
@@ -489,7 +705,17 @@ class AgentLLMTracesJointSource(AgentLLMTracesCompressHistorySource):
                 continue
             examples = self._session_examples(session["session_id"], session["spans"], session["subset"])
             if self.max_samples_per_session and len(examples) > self.max_samples_per_session:
-                examples = rng.sample(examples, self.max_samples_per_session)
+                if self.require_tool_call:
+                    # Legacy uniform pick: bit-identical to the pre-change
+                    # behavior the existing require_tool_call=True arms ran on.
+                    examples = rng.sample(examples, self.max_samples_per_session)
+                else:
+                    examples = _stratified_pick(
+                        examples,
+                        self.max_samples_per_session,
+                        rng,
+                        action_tool_call_frac=self.action_tool_call_frac,
+                    )
             records.extend(examples)
             if self.max_records is not None and len(records) >= self.max_records:
                 return records[: self.max_records]
@@ -532,7 +758,17 @@ class AgentLLMTracesJointSource(AgentLLMTracesCompressHistorySource):
                 continue
             examples = self._session_examples(session_id, spans, subset)
             if self.max_samples_per_session and len(examples) > self.max_samples_per_session:
-                examples = rng.sample(examples, self.max_samples_per_session)
+                if self.require_tool_call:
+                    # Legacy uniform pick: bit-identical to the pre-change
+                    # behavior the existing require_tool_call=True arms ran on.
+                    examples = rng.sample(examples, self.max_samples_per_session)
+                else:
+                    examples = _stratified_pick(
+                        examples,
+                        self.max_samples_per_session,
+                        rng,
+                        action_tool_call_frac=self.action_tool_call_frac,
+                    )
             records.extend(examples)
             if self.max_records is not None and len(records) >= self.max_records:
                 return records[: self.max_records]
@@ -587,6 +823,11 @@ class AgentLLMTracesJointSource(AgentLLMTracesCompressHistorySource):
             answer, has_tool_call = _render_agent_output_messages(output_messages, self.max_answer_chars)
             if self.require_tool_call and not has_tool_call:
                 continue
+            # Inline <think> residue (reasoning embedded in the content
+            # string, not a dedicated reasoning key) is training-surface
+            # noise; strip it AFTER the require_tool_call filter so that
+            # filter's predicate stays bit-identical.
+            answer = _strip_think_blocks(answer)
             if not history_docs or not current_messages or not answer:
                 continue
             # Per-example tool pool: target-inclusive bounded subset so large
@@ -623,6 +864,19 @@ class AgentLLMTracesJointSource(AgentLLMTracesCompressHistorySource):
                     target_tool=target_tool,
                     target_tool_doc_index=target_doc_index,
                     history_units=[list(units) for units in history_units],
+                    action_type="tool_call" if has_tool_call else "other",
+                    # ``_select_tools`` returns the target FIRST (it seeds the
+                    # pool with ``target[:1]``).  ``tools_in_system`` renders
+                    # this list verbatim into the system prefix, so leaving the
+                    # order as returned would put the gold tool at position 0
+                    # of every over-budget example -- a positional oracle no
+                    # serving path ever offers (BFCL / tau2 / ToolSandbox ship
+                    # the caller's own tool order).  Shuffle on a dedicated RNG
+                    # stream so the grid path's ``rng`` consumption, and hence
+                    # every doc_mode != history_only arm, stays bit-identical.
+                    selected_tools=_shuffled_system_tools(
+                        selected_tools, self.split_seed, session_id, span_index
+                    ),
                 )
             )
         return examples
@@ -638,6 +892,7 @@ def _history_chunk_budget(
     max_tool_chunks: int,
     num_tool_chunks: int,
     per_side_caps: bool,
+    has_tool_documents: bool = True,
 ) -> int:
     """History-side slot budget for one example.
 
@@ -645,13 +900,19 @@ def _history_chunk_budget(
     max_doc_num)`` in every doc mode, so the history-side presented budget is
     identical across ``joint``/``history_only`` (and across the J-arms that
     train them) — the G-Q3 fairness constraint.  Spare tool slots are NOT
-    recycled into history.
+    recycled into history — EXCEPT (v2 empty-tool reclaim) when the example
+    has no non-empty tool documents at all (the QA family): then there is no
+    tool side to stay fair against, ``tool_cap`` is 0, and history gets the
+    full ``max_doc_num`` grid.  Tool-bearing examples are bit-for-bit
+    identical to v1.
 
     ``per_side_caps=False`` (legacy, pre-fix behavior): ``history_only`` gets
     all ``max_doc_num`` slots and ``joint`` gets ``max_doc_num -
     num_tool_chunks`` (spare tool slots recycled).
     """
     if per_side_caps:
+        if not has_tool_documents:
+            return max_doc_num
         return max(0, max_doc_num - min(max_tool_chunks, max_doc_num))
     return max_doc_num if doc_mode == "history_only" else max(0, max_doc_num - num_tool_chunks)
 
@@ -678,6 +939,13 @@ def build_tool_chunks(
     across doc modes and J-arms.  ``per_side_caps=False`` reproduces the
     pre-fix behavior (``tool_only`` gets all ``max_doc_num`` slots).
 
+    v2 empty-tool reclaim (``per_side_caps=True`` only): an example with NO
+    non-empty tool documents (the QA family) gets ``tool_cap = 0`` — reserving
+    dead tool slots would starve its history side (the P0-1 audit finding).
+    Tool-bearing examples are bit-for-bit identical to v1, so the eval
+    driver (``_condition_doc_chunks``), whose appworld examples always carry
+    tool schemas, is unaffected by the change.
+
     Truncation keeps the target tool's schema: when
     ``example.target_tool_doc_index`` is known and the chunk list exceeds the
     cap, every chunk of the target document is selected first and the
@@ -703,6 +971,9 @@ def build_tool_chunks(
         return [], None, meta
     if per_side_caps:
         tool_cap = min(max_tool_chunks, max_doc_num)
+        if not _has_tool_documents(example):
+            # v2 empty-tool reclaim: no tool side -> reserve no tool slots.
+            tool_cap = 0
     else:
         tool_cap = max_doc_num if doc_mode == "tool_only" else min(max_tool_chunks, max_doc_num)
     meta["tool_cap"] = tool_cap
@@ -809,6 +1080,7 @@ def build_history_chunks(
     split_oversized_history_docs: bool,
     chunk_policy: str = "agent-turn",
     delay_recent_turns: int = 0,
+    has_tool_documents: Optional[bool] = None,
     need_content_tokens: bool = False,
 ) -> tuple[List[Message], List[Message], Dict[str, Any]]:
     """Chunk one example's history side under ``chunk_policy``.
@@ -848,6 +1120,8 @@ def build_history_chunks(
         "structural_fallback_docs": 0,
         "structural_partial_docs": 0,
         "delayed_docs": 0,
+        "history_docs_total": 0,
+        "history_kept_source_indices": [],
     }
     kind, chunk_size = parse_chunk_policy(chunk_policy)
     if delay_recent_turns < 0:
@@ -860,15 +1134,25 @@ def build_history_chunks(
     if doc_mode == "tool_only":
         return [], [], meta
 
-    history_budget = _history_chunk_budget(
-        doc_mode, max_doc_num, max_tool_chunks, num_tool_chunks, per_side_caps
-    )
     raw_history, history_units = _history_pairs(example)
+    meta["history_docs_total"] = len(raw_history)
+    history_budget = _history_chunk_budget(
+        doc_mode,
+        max_doc_num,
+        max_tool_chunks,
+        num_tool_chunks,
+        per_side_caps,
+        has_tool_documents=(
+            _has_tool_documents(example)
+            if has_tool_documents is None
+            else has_tool_documents
+        ),
+    )
     if history_budget <= 0 or not raw_history:
         return [], [], meta
 
     if kind == "agent-turn" and delay_recent_turns == 0:
-        history = _fit_reused_history(
+        history, kept_source_indices = _fit_reused_history_with_indices(
             tokenizer,
             raw_history,
             max_doc_length=max_doc_length,
@@ -897,6 +1181,7 @@ def build_history_chunks(
             content_tokens=content_tokens,
             policy_content_tokens=content_tokens,
             history_chunk_count=len(history),
+            history_kept_source_indices=sorted(set(kept_source_indices)),
         )
         return history, [], meta
 
@@ -941,6 +1226,13 @@ def build_history_chunks(
         structural_passthrough_docs=policy_meta["structural_passthrough_docs"],
         fixed_window_tokens=policy_meta["fixed_window_tokens"],
         delayed_docs=len(delayed),
+        history_kept_source_indices=sorted(
+            {
+                int(turn_index)
+                for turn_index in policy_meta["doc_turn_indices"]
+                if turn_index is not None
+            }
+        ),
     )
     return kept, delayed, meta
 
@@ -957,6 +1249,22 @@ class JointDataset:
     -100 padded; tool chunks first, then history chunks in chronological
     order), ``input_ids``, ``labels`` (prompt masked -100, answer+EOS
     supervised), ``attention_mask``, ``dynamic``.
+
+    Regime-first knobs (both default OFF; with them unset every feature is
+    byte-identical to the pre-knob code path):
+
+    - ``tools_in_system`` (``doc_mode="history_only"`` only): render the tool
+      schemas RAW into the system prefix via the chat template's ``tools=``
+      — the dialect every serving path actually runs — instead of putting them
+      through the gist grid.  History then gets the full ``max_doc_num``
+      grid, and an over-long prefix is skipped (``system_overflow``) rather
+      than truncated.
+    - ``hybrid_tail_choices``: per-example raw-tail depth k, drawn
+      deterministically from the example qid.  The last k fitted history
+      documents leave the grid and are prepended RAW to the prompt (the
+      serving "hybrid" arm); at least ``min_doc_num`` documents stay
+      compressed, and the tail is further shortened (oldest raw doc first)
+      until the current turn and the answer still fit ``max_length``.
     """
 
     def __init__(
@@ -976,9 +1284,21 @@ class JointDataset:
         per_side_caps: bool = True,
         chunk_policy: str = "agent-turn",
         delay_recent_turns: int = 0,
+        tools_in_system: bool = False,
+        hybrid_tail_choices: Optional[Sequence[int]] = None,
     ) -> None:
         if doc_mode not in ("joint", "tool_only", "history_only"):
             raise ValueError(f"Unsupported doc_mode: {doc_mode!r}")
+        if tools_in_system and doc_mode != "history_only":
+            # Tools would be presented twice (raw system prefix AND gist grid).
+            raise ValueError(
+                f"tools_in_system=True requires doc_mode='history_only', got {doc_mode!r}"
+            )
+        tail_choices: List[int] = [int(value) for value in (hybrid_tail_choices or [])]
+        if any(value < 0 for value in tail_choices):
+            raise ValueError(f"hybrid_tail_choices must be non-negative: {tail_choices!r}")
+        self.tools_in_system = tools_in_system
+        self.hybrid_tail_choices = list(tail_choices)
         self.max_doc_length = max_doc_length
         self.min_doc_num = min_doc_num
         self.max_doc_num = max_doc_num
@@ -990,11 +1310,37 @@ class JointDataset:
         self.delay_recent_turns = delay_recent_turns
         self.data: List[Dict[str, Any]] = []
         skipped_by_reason: Counter[str] = Counter()
+        skipped_by_family_reason: Counter[str] = Counter()
         target_known = 0
         target_in_grid = 0
         target_truncated = 0
+        # QA retention audit (P0-1): source history docs / gold docs that
+        # survived the grid budget, summed over emitted QA rows.
+        qa_history_kept = 0
+        qa_history_total = 0
+        qa_gold_kept = 0
+        qa_gold_total = 0
+        qa_truncated_by_subset: Counter[str] = Counter()
+        hybrid_tail_k_counts: Counter[int] = Counter()
+        # Drawn k over ALL candidate examples (vs hybrid_tail_k_counts, which
+        # counts EMITTED rows only): a stratum that is drawn but never emitted
+        # is otherwise indistinguishable from one that was never drawn.
+        hybrid_tail_k_drawn_counts: Counter[int] = Counter()
+        # Rows presented through tools_in_system with no selected_tools (they
+        # get a bare system prefix, i.e. NO tools at all).  Not a skip — QA
+        # rows legitimately have none — but a silent mistrain risk worth a
+        # counter in the manifest.
+        tools_in_system_missing_tools = 0
         for example in examples:
             meta: Dict[str, Any] = {}
+            hybrid_tail_k = (
+                random.Random(f"{example.qid}:hybrid_tail").choice(tail_choices)
+                if tail_choices
+                else 0
+            )
+            hybrid_tail_k_drawn_counts[int(hybrid_tail_k)] += 1
+            if tools_in_system and not example.selected_tools:
+                tools_in_system_missing_tools += 1
             row, reason = self.preprocess_example(
                 example,
                 tokenizer=tokenizer,
@@ -1011,22 +1357,54 @@ class JointDataset:
                 per_side_caps=per_side_caps,
                 chunk_policy=chunk_policy,
                 delay_recent_turns=delay_recent_turns,
+                tools_in_system=tools_in_system,
+                hybrid_tail_k=hybrid_tail_k,
                 meta_out=meta,
             )
             if row is None:
                 skipped_by_reason[reason] += 1
+                skipped_by_family_reason[f"{qid_source_family(example.qid)}:{reason}"] += 1
                 continue
             self.data.append(row)
+            hybrid_tail_k_counts[int(meta.get("hybrid_tail_k") or 0)] += 1
             if doc_mode != "history_only" and meta.get("target_known") and meta.get("tool_cap", 0) > 0:
                 target_known += 1
                 if meta.get("target_in_grid"):
                     target_in_grid += 1
                 elif meta.get("target_truncated_to_cap"):
                     target_truncated += 1
+            if doc_mode != "tool_only" and qid_source_family(example.qid) == "qa":
+                kept_sources = set(meta.get("history_kept_source_indices") or [])
+                total_docs = int(meta.get("history_docs_total") or 0)
+                qa_history_kept += len(kept_sources)
+                qa_history_total += total_docs
+                if len(kept_sources) < total_docs:
+                    qa_truncated_by_subset[str(example.subset)] += 1
+                gold = example.gold_history_doc_indices
+                if gold:
+                    qa_gold_total += len(gold)
+                    qa_gold_kept += sum(1 for index in gold if index in kept_sources)
         self.target_stats = {
             "target_known": target_known,
             "target_in_grid": target_in_grid,
             "target_truncated_to_cap": target_truncated,
+        }
+        self.skipped_by_reason = dict(skipped_by_reason)
+        # Per-family skip breakdown (P1-7): makes the alternate arm's
+        # tool_only-pass QA skips (``qa:doc_num<2``) explicit instead of an
+        # inflated aggregate skip count.
+        self.skipped_by_family_reason = dict(skipped_by_family_reason)
+        # Realized hybrid raw-tail depth over the EMITTED rows (always {} ->
+        # {0: n} when the knob is off), for the manifest's per-pass audit.
+        self.hybrid_tail_k_counts = dict(sorted(hybrid_tail_k_counts.items()))
+        # Drawn k over all candidate examples (emitted + skipped).  A
+        # drawn-vs-realized mismatch means a stratum is being lost to skips.
+        self.hybrid_tail_k_drawn_counts = dict(sorted(hybrid_tail_k_drawn_counts.items()))
+        self.tools_in_system_missing_tools = tools_in_system_missing_tools
+        self.qa_retention_stats = {
+            "qa_history_doc_retention": {"kept": qa_history_kept, "total": qa_history_total},
+            "qa_gold_doc_retention": {"kept": qa_gold_kept, "total": qa_gold_total},
+            "qa_history_truncated_examples_by_subset": dict(qa_truncated_by_subset),
         }
         # With per_side_caps the target-preserving truncation makes this an
         # invariant: a target-known row may be fully present or (when the
@@ -1041,7 +1419,8 @@ class JointDataset:
             )
         logger.info(
             "Built %d joint samples (%s, per_side_caps=%s); skipped %d by reason=%s; "
-            "target schema fully in grid for %d/%d target-known rows (%d truncated to the full cap)",
+            "target schema fully in grid for %d/%d target-known rows (%d truncated to the full cap); "
+            "qa retention=%s",
             len(self.data),
             doc_mode,
             per_side_caps,
@@ -1050,6 +1429,7 @@ class JointDataset:
             target_in_grid,
             target_known,
             target_truncated,
+            self.qa_retention_stats,
         )
 
     def __len__(self) -> int:
@@ -1075,10 +1455,18 @@ class JointDataset:
         per_side_caps: bool = True,
         chunk_policy: str = "agent-turn",
         delay_recent_turns: int = 0,
+        tools_in_system: bool = False,
+        hybrid_tail_k: int = 0,
         meta_out: Optional[Dict[str, Any]] = None,
     ) -> tuple[Optional[Dict[str, Any]], str]:
         if doc_mode not in ("joint", "tool_only", "history_only"):
             raise ValueError(f"Unsupported doc_mode: {doc_mode!r}")
+        if tools_in_system and doc_mode != "history_only":
+            raise ValueError(
+                f"tools_in_system=True requires doc_mode='history_only', got {doc_mode!r}"
+            )
+        if hybrid_tail_k < 0:
+            raise ValueError(f"hybrid_tail_k must be non-negative, got {hybrid_tail_k}")
         if max_tool_chunks is None:
             max_tool_chunks = _default_max_tool_chunks(max_doc_num)
 
@@ -1112,6 +1500,7 @@ class JointDataset:
             split_oversized_history_docs=split_oversized_history_docs,
             chunk_policy=chunk_policy,
             delay_recent_turns=delay_recent_turns,
+            has_tool_documents=False if tools_in_system else None,
             # Training never reads content_tokens (it was log-only bookkeeping),
             # and measuring it doubles the history-side tokenization cost of the
             # whole dataset build.  The eval driver asks for it explicitly.
@@ -1119,6 +1508,8 @@ class JointDataset:
         )
         if meta_out is not None:
             meta_out.update(history_meta)
+        history_kept_source_indices = list(history_meta["history_kept_source_indices"])
+        num_raw_history_docs = int(history_meta["history_docs_total"])
 
         current = [
             _normal_chat_message(message)
@@ -1126,8 +1517,69 @@ class JointDataset:
             if message.get("content") or message.get("role") == "assistant"
         ]
         doc_count = len(tool_chunks) + len(history)
+        # ---- hybrid raw tail: the last k fitted history docs stay RAW ------
+        # Mirrors train_data_multiturn.preprocess_example's full_history_doc_num
+        # split: only the compressed prefix enters the context grid, the tail
+        # is chat-template rendered and PREPENDED to the ordinary prompt.  At
+        # least ``min_doc_num`` documents stay compressed, and ``doc_count``
+        # (the min_doc_num gate) is computed on the pre-split history.
+        # The tail is additionally capped by the SEQUENCE budget: k raw docs of
+        # up to ``max_doc_length`` tokens each can be several times
+        # ``max_length``, and the left-truncation below would then leave no room
+        # for the supervised answer, dropping every large-k row as
+        # ``tool_call_target_truncated``.  An over-long tail must SHORTEN
+        # (shedding the OLDEST raw docs back into the compressed grid, degrading
+        # towards k=0), never drop the row: the hybrid arm has to train on the
+        # same example set as the arm it is paired against.
+        realized_tail_k = 0
+        raw_tail_ids: List[int] = []
+        if hybrid_tail_k > 0 and history:
+            realized_tail_k = min(hybrid_tail_k, max(0, len(history) - min_doc_num))
+            if realized_tail_k > 0:
+                candidate_tail = list(history[len(history) - realized_tail_k :])
+                tail_id_lists = [
+                    _chat_template_ids(tokenizer, [message], max_length=max_doc_length)
+                    for message in candidate_tail
+                ]
+                # Same reserve the truncation below enforces: current turn +
+                # answer (+EOS) must still fit into ``max_length``.
+                current_ids_probe = (
+                    _chat_template_ids(tokenizer, current, add_generation_prompt=True)
+                    if current
+                    else []
+                )
+                answer_reserve = (
+                    len(tokenizer.encode(example.answer, add_special_tokens=False)) + 1
+                    if example.answer
+                    else 0
+                )
+                fixed_budget = len(current_ids_probe) + answer_reserve
+                while tail_id_lists and (
+                    sum(len(ids) for ids in tail_id_lists) + fixed_budget > max_length
+                ):
+                    tail_id_lists.pop(0)
+                    realized_tail_k -= 1
+                if realized_tail_k > 0:
+                    raw_tail_ids = [
+                        token_id for ids in tail_id_lists for token_id in ids
+                    ]
+                    history = list(history[: len(history) - realized_tail_k])
         if meta_out is not None:
-            meta_out.update(num_tool_chunks=len(tool_chunks), num_history_docs=len(history))
+            meta_out.update(
+                num_tool_chunks=len(tool_chunks),
+                # Fitted history depth BEFORE the hybrid split (the history
+                # depth of the example); the grid occupancy after the split is
+                # num_compressed_history_docs.
+                num_history_docs=len(history) + realized_tail_k,
+                num_compressed_history_docs=len(history),
+                hybrid_tail_k=realized_tail_k,
+                # History retention audit (P0-1): how many of the example's
+                # non-empty source history documents survived the budget (a
+                # split doc counts once).  Used by JointDataset's
+                # qa_history/qa_gold retention counters.
+                history_docs_total=num_raw_history_docs,
+                history_kept_source_indices=sorted(set(history_kept_source_indices)),
+            )
         if doc_count < min_doc_num:
             return None, f"doc_num<{min_doc_num}"
         if doc_count > max_doc_num:
@@ -1143,13 +1595,34 @@ class JointDataset:
         if not example.answer:
             return None, "empty_answer"
 
-        # ---- bare system prefix: NO tools= (the de-leak) ------------------
-        system_ids = _chat_template_ids(
-            tokenizer,
-            [{"role": "system", "content": example.system_prompt}],
-            keep_bos=True,
-            max_length=max_system_length,
-        )
+        # ---- system prefix -------------------------------------------------
+        # Default: bare system prompt, NO tools= (the de-leak).
+        # ``tools_in_system``: the regime every serving path actually runs —
+        # tool schemas RAW in the system prefix, only history compressed.  The
+        # prefix is rendered UNTRUNCATED and an over-long one is SKIPPED: HF's
+        # right-truncation would silently delete the tail tools and the closing
+        # template tokens, producing a malformed prefix instead of a loud skip.
+        if tools_in_system:
+            system_ids = _chat_template_ids(
+                tokenizer,
+                [{"role": "system", "content": example.system_prompt}],
+                tools=example.selected_tools or None,
+                keep_bos=True,
+                max_length=None,
+            )
+            if meta_out is not None:
+                meta_out["system_tokens"] = len(system_ids)
+            if len(system_ids) > max_system_length:
+                return None, "system_overflow"
+        else:
+            system_ids = _chat_template_ids(
+                tokenizer,
+                [{"role": "system", "content": example.system_prompt}],
+                keep_bos=True,
+                max_length=max_system_length,
+            )
+            if meta_out is not None:
+                meta_out["system_tokens"] = len(system_ids)
         system_input_ids = _pad(system_ids, max_system_length, -100)
 
         # ---- flat context grid: tool chunks, then history chunks ----------
@@ -1181,7 +1654,7 @@ class JointDataset:
             current,
             add_generation_prompt=True,
         )
-        prompt_ids = delayed_ids + prompt_ids
+        prompt_ids = delayed_ids + raw_tail_ids + prompt_ids
         answer_ids = tokenizer.encode(example.answer, add_special_tokens=False)
         if not answer_ids:
             return None, "empty_answer_ids"
@@ -1189,6 +1662,12 @@ class JointDataset:
         if len(prompt_ids) >= max_length:
             prompt_ids = prompt_ids[-(max_length - 1):]
         answer_budget = max_length - len(prompt_ids)
+        if _answer_has_tool_call(example.answer) and len(answer_ids) > answer_budget:
+            # A truncated tool-call JSON is a broken supervision target: drop
+            # the example (counted as tool_call_target_truncated) instead of
+            # training on a partial action.  Non-tool-call answers keep the
+            # plain budget truncation below.
+            return None, "tool_call_target_truncated"
         answer_ids = answer_ids[:answer_budget]
         if not answer_ids:
             return None, "empty_answer_budget"
@@ -1238,7 +1717,14 @@ def _decode_real_ids(tokenizer, ids: Sequence[int]) -> str:
     return tokenizer.decode(real, skip_special_tokens=True) if real else ""
 
 
-def assert_no_leakage(example: JointExample, features: Dict[str, Any], tokenizer) -> None:
+def assert_no_leakage(
+    example: JointExample,
+    features: Dict[str, Any],
+    tokenizer,
+    *,
+    tools_in_system: bool = False,
+    hybrid_tail_k: int = 0,
+) -> None:
     """Assert a preprocessed example keeps every document in the context grid.
 
     Checks (all on whitespace-normalized decodings):
@@ -1252,6 +1738,14 @@ def assert_no_leakage(example: JointExample, features: Dict[str, Any], tokenizer
     Documents dropped by budget truncation legitimately absent from the grid
     are not required to appear there; doc modes that exclude a document type
     by design therefore pass as well.
+
+    The regime knobs move documents on purpose, so the caller must declare
+    them: with ``tools_in_system`` the tool schemas legitimately live in
+    ``system_input_ids``, and with ``hybrid_tail_k > 0`` the last k history
+    documents legitimately live in ``input_ids``.  Both checks are relaxed
+    accordingly (the hybrid case relaxes the history check entirely — which of
+    the fitted documents ended up in the tail is not recoverable from
+    ``features``).
     """
 
     system_text = _normalize_ws(_decode_real_ids(tokenizer, features["system_input_ids"]))
@@ -1266,13 +1760,14 @@ def assert_no_leakage(example: JointExample, features: Dict[str, Any], tokenizer
     history_probes = [probe for probe in (_leak_probe(doc) for doc in example.history_documents) if probe]
 
     for probe in tool_probes:
-        if probe in system_text:
+        if probe in system_text and not tools_in_system:
             raise AssertionError(f"tool document leaked into system_input_ids: {probe!r}")
         if probe in prompt_answer_text:
             raise AssertionError(f"tool document leaked into input_ids: {probe!r}")
-    for probe in history_probes:
-        if probe in prompt_answer_text:
-            raise AssertionError(f"history document leaked into input_ids: {probe!r}")
+    if hybrid_tail_k <= 0:
+        for probe in history_probes:
+            if probe in prompt_answer_text:
+                raise AssertionError(f"history document leaked into input_ids: {probe!r}")
 
     if (tool_probes or history_probes) and not any(
         int(token_id) >= 0 for token_id in features["context_input_ids"]
@@ -1401,7 +1896,14 @@ class _WhitespaceSelfTestTokenizer:
             if not isinstance(content, str):
                 content = json.dumps(content, ensure_ascii=False)
             if role == "system" and tools:
-                content = content + "\n# Tools\n" + json.dumps(list(tools), ensure_ascii=False)
+                # Deterministic, whitespace-separable marker so leakage /
+                # tools_in_system assertions can locate the rendered schemas.
+                content = (
+                    content
+                    + "\n# Tools\n<TOOLS> "
+                    + json.dumps(list(tools), ensure_ascii=False)
+                    + " </TOOLS>"
+                )
             parts.append(f"<|im_start|>{role}\n{content}<|im_end|>")
         if add_generation_prompt:
             parts.append("<|im_start|>assistant\n")

@@ -423,29 +423,69 @@ def get_prepare_gist_input_func(config: GistConfigMixin, padding_side: str = "ri
 
 def get_apply_gist_residual_func(config: GistConfigMixin, layer_idx: int = 0) -> Callable:
     def _apply_gist_residual_interleave(
-        tokens_tensor: torch.Tensor, gist_tensor: torch.Tensor, ratio: int = 4
+        tokens_tensor: torch.Tensor,
+        gist_tensor: torch.Tensor,
+        ratio: int = 4,
+        true_lens: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         batch_size, seq_length, hidden_size = tokens_tensor.shape
-        pad_length = seq_length % ratio
-        nopad_length = seq_length - pad_length
-        mean_tensor = tokens_tensor[:, :nopad_length].reshape(batch_size, -1, ratio, hidden_size).mean(dim=2)
-        if pad_length != 0:
-            pad_mean = tokens_tensor[:, nopad_length:].mean(dim=1, keepdim=True)
-            mean_tensor = torch.cat([mean_tensor, pad_mean], dim=1)
-        return mean_tensor + gist_tensor
+        # 2026-08-30 修复(2026-08-29 审计 I4): 旧实现只按张量宽度(分组 microbatch
+        # 裁剪后的"组 max 真实长度")切 chunk——组内短文档 L < seq_length 且
+        # L%ratio!=0 时, 其最后一个有效 gist row 的均值混入 [L, seq_length) 区间
+        # 的填充 embedding(gist_token_id), 而 attention mask 按 per-sample 真实
+        # 长度建, 该 row 有效、进 past_key_values → 训练目标被污染。true_lens
+        # (generate_gist 从 2D attention mask 求和注入 kwargs)给出每篇真实长度:
+        # 组内全等长时旧向量化路径本就正确, 原样保留(逐位不变); 不等长走 per-doc
+        # 路径(≤16 篇小 mean, 代价可忽略), 与逐篇(mb=1)语义逐位一致。
+        if true_lens is None or bool((true_lens == seq_length).all()):
+            pad_length = seq_length % ratio
+            nopad_length = seq_length - pad_length
+            mean_tensor = tokens_tensor[:, :nopad_length].reshape(batch_size, -1, ratio, hidden_size).mean(dim=2)
+            if pad_length != 0:
+                pad_mean = tokens_tensor[:, nopad_length:].mean(dim=1, keepdim=True)
+                mean_tensor = torch.cat([mean_tensor, pad_mean], dim=1)
+            return mean_tensor + gist_tensor
+        max_gist_num = gist_tensor.shape[1]
+        mean_rows = []
+        for d, l in enumerate(true_lens.tolist()):
+            # 与逐篇调用完全相同的切片与归约形状, 保证浮点逐位一致
+            tok = tokens_tensor[d : d + 1, :l]
+            pad_d = l % ratio
+            nopad_d = l - pad_d
+            parts = []
+            if nopad_d > 0:
+                parts.append(tok[:, :nopad_d].reshape(1, -1, ratio, hidden_size).mean(dim=2))
+            if pad_d:
+                parts.append(tok[:, nopad_d:].mean(dim=1, keepdim=True))
+            if parts:
+                mean_d = torch.cat(parts, dim=1)
+            else:
+                # l == 0 的全填充槽位: gist row 全部无效(被 gist_mask 掩掉,
+                # 不会进合并 cache), 均值置 0 保持有限值
+                mean_d = tokens_tensor.new_zeros((1, 0, hidden_size))
+            if mean_d.shape[1] < max_gist_num:
+                # 无效 gist row(gist_mask 外, 不会被 attend)均值补 0
+                mean_d = torch.cat(
+                    [mean_d, mean_d.new_zeros((1, max_gist_num - mean_d.shape[1], hidden_size))],
+                    dim=1,
+                )
+            mean_rows.append(mean_d)
+        return torch.cat(mean_rows, dim=0) + gist_tensor
+    # gist_token_true_lens: generate_gist 注入的 per-doc 真实长度(见上方修复注释);
+    # 没有注入的老调用路径拿到 None → 旧行为(仅组内全等长时正确)。
     if config.gist_residual_type == "embed-mean":
         if layer_idx == 0:
             if config.gist_type.startswith("interleave-"):
                 ratio = int(config.gist_type.split('-')[1])
-                return lambda tokens_tensor, gist_tensor, **kwargs: _apply_gist_residual_interleave(tokens_tensor, gist_tensor, ratio=ratio)
+                return lambda tokens_tensor, gist_tensor, **kwargs: _apply_gist_residual_interleave(tokens_tensor, gist_tensor, ratio=ratio, true_lens=kwargs.get("gist_token_true_lens"))
             elif config.gist_type == "dynamic-interleave":
-                return lambda tokens_tensor, gist_tensor, **kwargs: _apply_gist_residual_interleave(tokens_tensor, gist_tensor, ratio=kwargs["ratio"])
+                return lambda tokens_tensor, gist_tensor, **kwargs: _apply_gist_residual_interleave(tokens_tensor, gist_tensor, ratio=kwargs["ratio"], true_lens=kwargs.get("gist_token_true_lens"))
         return lambda tokens_tensor, gist_tensor, **kwargs: gist_tensor
     if config.gist_residual_type == "mean" and config.gist_type.startswith("interleave-"):
         ratio = int(config.gist_type.split('-')[1])
-        return lambda tokens_tensor, gist_tensor, **kwargs: _apply_gist_residual_interleave(tokens_tensor, gist_tensor, ratio=ratio)
+        return lambda tokens_tensor, gist_tensor, **kwargs: _apply_gist_residual_interleave(tokens_tensor, gist_tensor, ratio=ratio, true_lens=kwargs.get("gist_token_true_lens"))
     elif config.gist_residual_type == "mean" and config.gist_type == "dynamic-interleave":
-        return lambda tokens_tensor, gist_tensor, **kwargs: _apply_gist_residual_interleave(tokens_tensor, gist_tensor, ratio=kwargs["ratio"])
+        return lambda tokens_tensor, gist_tensor, **kwargs: _apply_gist_residual_interleave(tokens_tensor, gist_tensor, ratio=kwargs["ratio"], true_lens=kwargs.get("gist_token_true_lens"))
     return lambda tokens_tensor, gist_tensor, **kwargs: gist_tensor
 
 

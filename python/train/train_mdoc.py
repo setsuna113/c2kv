@@ -2,11 +2,9 @@ import os
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from transformers import HfArgumentParser, DataCollatorWithPadding
+from transformers import HfArgumentParser
 
 from .train_data import get_dataset
-from .trainer import GistMultiDocTrainer
-from models import *
 from gist_args import ModelArgs, TrainingArgs
 
 logging.basicConfig(
@@ -206,6 +204,10 @@ def _load_mdoc_mix(tokenizer, training_args, data_args: MDocDataArgs):
 
 
 def main():
+    from transformers import DataCollatorWithPadding
+    from .trainer import GistMultiDocTrainer
+    from models import format_numel_str, get_model_and_tokenizer
+
     parser = HfArgumentParser([ModelArgs, TrainingArgs, MDocDataArgs])
     model_args, training_args, data_args = parser.parse_args_into_dataclasses()
     device_type = _setup_device(model_args, data_args)

@@ -256,3 +256,6 @@ logs/
 # System
 .DS_Store
 Thumbs.db
+
+# Server-side scratch scripts (scp'd down for reference; not for commit)
+/scratch_server_extract/

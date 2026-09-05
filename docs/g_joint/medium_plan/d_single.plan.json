@@ -1,0 +1,219 @@
+{
+  "recipe": "d_single",
+  "variant": "base",
+  "shares": {
+    "qa": 0.2,
+    "traces": 0.8
+  },
+  "budget_estimated_tokens": 53137593,
+  "budget_shrink_factor": 1.0,
+  "effective_budget_estimated_tokens": 53137593,
+  "families": {
+    "qa": {
+      "share": 0.2,
+      "quota_estimated_tokens": 10627519,
+      "examples": 7127,
+      "estimated_tokens": 10627572,
+      "subsets": {
+        "hotpotqa": {
+          "examples": 2449,
+          "estimated_tokens": 3559062,
+          "share_within_family": 0.33488947428443677
+        },
+        "2wiki": {
+          "examples": 3992,
+          "estimated_tokens": 3580477,
+          "share_within_family": 0.33690451591388887
+        },
+        "longmagpie": {
+          "examples": 686,
+          "estimated_tokens": 3488033,
+          "share_within_family": 0.32820600980167436
+        }
+      },
+      "pool_examples": 8838,
+      "pool_estimated_tokens": 13286077,
+      "shortfall_estimated_tokens": 0,
+      "realized_share": 0.2000008016915013
+    },
+    "traces": {
+      "share": 0.8,
+      "quota_estimated_tokens": 42510075,
+      "examples": 1781,
+      "estimated_tokens": 42510075,
+      "subsets": {
+        "traces": {
+          "examples": 1781,
+          "estimated_tokens": 42510075,
+          "share_within_family": 1.0
+        }
+      },
+      "pool_examples": 1781,
+      "pool_estimated_tokens": 42510075,
+      "shortfall_estimated_tokens": 0,
+      "realized_share": 0.7999991983084986
+    }
+  },
+  "total_estimated_tokens": 53137647,
+  "epochs_override": 2,
+  "epochs_override_scope": "base_and_repeat_variants",
+  "presented_estimated_tokens": 106275294,
+  "order_examples": 8908,
+  "order_sha1": "87725b689e33509fda50a5a9799a9941504a5cff",
+  "interleave": "token_deficit",
+  "alternate_pass_counts": {
+    "qa": {
+      "tool_only": 0,
+      "history_only": 1
+    },
+    "traces": {
+      "tool_only": 1,
+      "history_only": 1
+    }
+  },
+  "alternate_pass_counts_note": "alternate arm renders every example twice (tool_only + history_only passes); qa examples have no tool side, so their tool_only pass is always skipped (qa:doc_num<2 in the trainer manifest's train_skip_counts_by_family) and qa contributes one supervised pass per epoch where tool-bearing families contribute two.",
+  "removals": {
+    "by_family": {
+      "openswe": 0,
+      "qa": 0,
+      "toucan": 22,
+      "traces": 1482
+    },
+    "identifiers": 530,
+    "by_file": {
+      "/home/liuyancheng/c2kv/outputs_lyc/g_joint/removal_traces_final.json": 427,
+      "/home/liuyancheng/c2kv/outputs_lyc/g_joint/removal_toucan_openswe_passA.json": 103,
+      "/home/liuyancheng/c2kv/outputs_lyc/g_joint/dedup_medium_qa_raw.json": 0
+    },
+    "applied_at": "scan"
+  },
+  "provenance": {
+    "tokenizer": "/home/liuyancheng/c2kv/models/Qwen3-4B-Instruct-2507",
+    "estimate_stamp": "46d6cfeb3b967498",
+    "split_seed": 42,
+    "oversample_factor": 1.25,
+    "family_scan_caps_estimated_tokens": {
+      "openswe": 3321100,
+      "qa": 13284399,
+      "toucan": 16605498,
+      "traces": 53137594
+    },
+    "subset_weights": {},
+    "repeat_unique_tokens": null
+  },
+  "seeds": {
+    "order_seed": 42
+  },
+  "eta": {
+    "small_arm_hours": 22.7,
+    "small_arm_hours_alternate": 27.7,
+    "tokens_per_unit": 32000000,
+    "unit": "hours per 32M ESTIMATED source tokens (estimator 口径; presented is ~0.392x)"
+  },
+  "arm_launch_table": {
+    "presented_per_estimated": 0.392,
+    "parity_slack": 1.02,
+    "parity_floor_presented_est": 41659915.248,
+    "parity_max_presented_est": 41669478.480000004,
+    "parity_ok": true,
+    "arms": [
+      {
+        "arm": "med_dsingle_alt",
+        "plan_key": "d_single",
+        "variant": "base",
+        "doc_mode": "alternate",
+        "order_file": "d_single.order.json",
+        "unique_est_tokens": 53137647,
+        "effective_epochs": 2,
+        "max_source_tokens": 53137647,
+        "presented_est_tokens": 41659915.248,
+        "suggested_card": 2,
+        "suggested_num_train_epochs": 3
+      },
+      {
+        "arm": "med_dsingle_joint",
+        "plan_key": "d_single",
+        "variant": "base",
+        "doc_mode": "joint",
+        "order_file": "d_single.order.json",
+        "unique_est_tokens": 53137647,
+        "effective_epochs": 2,
+        "max_source_tokens": 53137647,
+        "presented_est_tokens": 41659915.248,
+        "suggested_card": 3,
+        "suggested_num_train_epochs": 3
+      },
+      {
+        "arm": "med_dmulti_alt",
+        "plan_key": "d_multi",
+        "variant": "base",
+        "doc_mode": "alternate",
+        "order_file": "d_multi.order.json",
+        "unique_est_tokens": 53149845,
+        "effective_epochs": 2,
+        "max_source_tokens": 53149845,
+        "presented_est_tokens": 41669478.480000004,
+        "suggested_card": 4,
+        "suggested_num_train_epochs": 3
+      }
+    ],
+    "skipped_arms": [
+      "med_dmulti_repeat_alt"
+    ],
+    "notes": [
+      "presented = unique_est x epochs x 0.392 (small-arm measured presented/estimated coefficient, identical for joint and alternate under per-side caps)",
+      "med_dsingle_alt and med_dsingle_joint share d_single.order.json (Gate-3 re-check pair)",
+      "suggested_num_train_epochs levels every arm up to the strongest arm's presented total with 2% headroom"
+    ]
+  },
+  "pool_scan": {
+    "qa": {
+      "subsets": {
+        "hotpotqa": {
+          "examples": 3047,
+          "estimated_tokens": 4428135,
+          "cap_estimated_tokens": 4428133,
+          "weight": 1.0,
+          "exhausted": false,
+          "cache_hits": 0,
+          "removed": 0
+        },
+        "2wiki": {
+          "examples": 4947,
+          "estimated_tokens": 4428246,
+          "cap_estimated_tokens": 4428132,
+          "weight": 1.0,
+          "exhausted": false,
+          "cache_hits": 0,
+          "removed": 0
+        },
+        "longmagpie": {
+          "examples": 844,
+          "estimated_tokens": 4429696,
+          "cap_estimated_tokens": 4428018,
+          "weight": 1.0,
+          "exhausted": false,
+          "cache_hits": 0,
+          "removed": 0
+        }
+      },
+      "cap_estimated_tokens": 13284398,
+      "removed_total": 0
+    },
+    "traces": {
+      "subsets": {
+        "traces": {
+          "examples": 1781,
+          "estimated_tokens": 42510075,
+          "cap_estimated_tokens": 53137594,
+          "weight": 1.0,
+          "exhausted": true,
+          "cache_hits": 0,
+          "removed": 1482
+        }
+      },
+      "cap_estimated_tokens": 53137593,
+      "removed_total": 1482
+    }
+  }
+}

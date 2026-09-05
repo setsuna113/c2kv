@@ -22,6 +22,14 @@ Run it once with ``--legacy_mode_caps`` to measure the arms AS TRAINED
 (pre-fix budgets), and once without to preview the fixed budgets.  Dataset /
 source args must match the training launch (same manifest, same knobs).
 
+G-medium mixture arms: pass the extra source paths exactly as the training
+launch did — ``--toucan_path`` / ``--openswe_path`` / ``--qa_hotpotqa_path`` /
+``--qa_2wiki_path`` / ``--qa_longmagpie_path`` (JointDataArgs mirrors).  The
+extra sources load through the trainer's own ``_load_multisource_examples``
+(same knobs, ``keep_qids`` prefilter to the union of the arms' train_qids),
+so the measurement口径 is the training口径 and ``qa:``/``toucan:``/
+``openswe:`` manifest qids resolve instead of dying as unknown (P1-4).
+
 Example (NPU server):
   python agent/measure_arm_psrc.py \
     --dataset_path ~/c2kv/datasets/agent-llm-traces-v2 \
@@ -38,19 +46,30 @@ Example (NPU server):
 
 import argparse
 import json
+import logging
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, FrozenSet, List, Optional, Sequence
 
 if True:  # isort: keep the path bootstrap above the repo imports
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python"))
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python" / "inference"))
 
 from train.token_accounting import scan_joint_examples  # noqa: E402
-from train.train_data_joint import AgentLLMTracesJointSource, JointExample  # noqa: E402
+from train.train_data_joint import (  # noqa: E402
+    CAP_REGIME_V1,
+    CAP_REGIME_V2_EMPTY_TOOL_RECLAIM,
+    AgentLLMTracesJointSource,
+    JointExample,
+    _has_tool_documents,
+    cap_regime_name,
+    regime_from_record,
+)
+
+logger = logging.getLogger(__name__)
 
 
-def _load_examples(args: argparse.Namespace) -> Dict[str, JointExample]:
+def _load_examples(args: argparse.Namespace, needed_qids: Optional[FrozenSet[str]] = None) -> Dict[str, JointExample]:
     source = AgentLLMTracesJointSource(
         path=args.dataset_path,
         split="train",
@@ -69,6 +88,34 @@ def _load_examples(args: argparse.Namespace) -> Dict[str, JointExample]:
         if example.qid in by_qid:
             raise RuntimeError(f"duplicate qid in loaded train examples: {example.qid}")
         by_qid[example.qid] = example
+    if any([args.toucan_path, args.openswe_path, args.qa_hotpotqa_path, args.qa_2wiki_path, args.qa_longmagpie_path]):
+        # G-medium mixture arms: load the extra sources through the TRAINER's
+        # own multisource path (same knobs, same keep_qids prefilter) so the
+        # measurement口径 is the training口径 — qa:/toucan:/openswe: qids in a
+        # manifest used to die here with a RuntimeError (P1-4).  Lazy import:
+        # the trainer module pulls in torch/models.
+        from train_joint_next_action_c2kv import JointDataArgs, _load_multisource_examples
+
+        data_args = JointDataArgs(
+            dataset_path=args.dataset_path,
+            split_seed=args.split_seed,
+            split_manifest_file=args.split_manifest_file,
+            split_manifest_name=args.split_manifest_name,
+            require_tool_call=args.require_tool_call,
+            max_tools_per_sample=args.max_tools_per_sample,
+            same_namespace_negative_tools=args.same_namespace_negative_tools,
+            random_negative_tools=args.random_negative_tools,
+            toucan_path=args.toucan_path,
+            openswe_path=args.openswe_path,
+            qa_hotpotqa_path=args.qa_hotpotqa_path,
+            qa_2wiki_path=args.qa_2wiki_path,
+            qa_longmagpie_path=args.qa_longmagpie_path,
+        )
+        for example in _load_multisource_examples(data_args, keep_qids=needed_qids):
+            if example.qid in by_qid:
+                raise RuntimeError(f"duplicate qid across sources: {example.qid}")
+            by_qid[example.qid] = example
+        logger.info("multisource load: %d extra examples (keep_qids=%s)", len(by_qid), needed_qids is not None)
     return by_qid
 
 
@@ -101,10 +148,52 @@ def _arm_examples(
             f"{manifest_path}: {len(missing)} train_qids not found in the loaded source "
             f"(source args differ from the training launch?), e.g. {missing[:5]}"
         )
-    return doc_mode, [by_qid[qid] for qid in qids], manifest
+    examples = [by_qid[qid] for qid in qids]
+    # Cap-regime cross-check, string-level (the boolean cannot tell the two
+    # post-fix regimes apart): a v1 manifest (per_side_caps, no reclaim)
+    # measured with v2 code (empty-tool reclaim) is bit-identical ONLY for
+    # tool-bearing examples; a QA-bearing mismatch is a hard error.
+    expected_regime = cap_regime_name(args.legacy_mode_caps)
+    manifest_regime = regime_from_record(manifest.get("legacy_mode_caps"), manifest.get("cap_regime"))
+    if manifest_regime not in ("unknown", expected_regime):
+        if {manifest_regime, expected_regime} == {
+            CAP_REGIME_V1,
+            CAP_REGIME_V2_EMPTY_TOOL_RECLAIM,
+        } and all(_has_tool_documents(example) for example in examples):
+            logger.warning(
+                "%s: manifest cap_regime=%s vs code regime=%s — identical for tool-bearing "
+                "examples, and every example in this arm has tools; proceeding",
+                manifest_path,
+                manifest_regime,
+                expected_regime,
+            )
+        else:
+            raise RuntimeError(
+                f"{manifest_path}: manifest cap_regime={manifest_regime!r} conflicts with the "
+                f"code regime {expected_regime!r} (--legacy_mode_caps={args.legacy_mode_caps}); "
+                f"the v1/v2 regimes differ for tool-less (QA) examples"
+            )
+    return doc_mode, examples, manifest
 
 
-def _scan(args: argparse.Namespace, tokenizer, examples: Sequence[JointExample], doc_mode: str) -> Dict[str, Any]:
+def _parse_tail_choices(value: Any) -> Optional[List[int]]:
+    """Manifest ``hybrid_tail_choices`` ("0,0,1,3,5" / list / None) -> ints or None."""
+    if value is None or value == "" or value == []:
+        return None
+    if isinstance(value, str):
+        return [int(item) for item in value.split(",") if item.strip()]
+    return [int(item) for item in value]
+
+
+def _scan(
+    args: argparse.Namespace,
+    tokenizer,
+    examples: Sequence[JointExample],
+    doc_mode: str,
+    *,
+    tools_in_system: bool = False,
+    hybrid_tail_choices: Optional[Sequence[int]] = None,
+) -> Dict[str, Any]:
     return scan_joint_examples(
         examples,
         tokenizer,
@@ -118,11 +207,28 @@ def _scan(args: argparse.Namespace, tokenizer, examples: Sequence[JointExample],
         max_tool_chunks=args.max_tool_chunks,
         max_tool_definition_tokens=args.max_tool_definition_tokens,
         per_side_caps=not args.legacy_mode_caps,
+        tools_in_system=tools_in_system,
+        hybrid_tail_choices=hybrid_tail_choices,
         min_target_tokens=args.min_target_tokens,
     )
 
 
-def _measure_arm(args: argparse.Namespace, tokenizer, doc_mode: str, examples: Sequence[JointExample]) -> Dict[str, Any]:
+def _measure_arm(
+    args: argparse.Namespace,
+    tokenizer,
+    doc_mode: str,
+    examples: Sequence[JointExample],
+    *,
+    tools_in_system: bool = False,
+    hybrid_tail_choices: Optional[Sequence[int]] = None,
+) -> Dict[str, Any]:
+    # The regime arm's manifest records tools_in_system / hybrid_tail_choices;
+    # replaying without them measures the OLD dialect (tools in the grid, no raw
+    # tail) and the derived save_steps cadence would be wrong.
+    regime = {
+        "tools_in_system": bool(tools_in_system),
+        "hybrid_tail_choices": list(hybrid_tail_choices) if hybrid_tail_choices else None,
+    }
     if doc_mode == "alternate":
         # The alternate arm renders every example twice: a tool-only pass and
         # a history-only pass.  Its presented budget is the sum of both scans.
@@ -130,14 +236,23 @@ def _measure_arm(args: argparse.Namespace, tokenizer, doc_mode: str, examples: S
         history_scan = _scan(args, tokenizer, examples, "history_only")
         return {
             "doc_mode": doc_mode,
+            **regime,
             "num_examples": len(examples),
             "P_src": tool_scan["total"]["P_src"] + history_scan["total"]["P_src"],
             "T_tgt": tool_scan["total"]["T_tgt"] + history_scan["total"]["T_tgt"],
             "passes": {"tool_only": tool_scan, "history_only": history_scan},
         }
-    scan = _scan(args, tokenizer, examples, doc_mode)
+    scan = _scan(
+        args,
+        tokenizer,
+        examples,
+        doc_mode,
+        tools_in_system=tools_in_system,
+        hybrid_tail_choices=hybrid_tail_choices,
+    )
     return {
         "doc_mode": doc_mode,
+        **regime,
         "num_examples": len(examples),
         "P_src": scan["total"]["P_src"],
         "T_tgt": scan["total"]["T_tgt"],
@@ -148,6 +263,14 @@ def _measure_arm(args: argparse.Namespace, tokenizer, doc_mode: str, examples: S
 def main(argv: Optional[Sequence[str]] = None) -> Dict[str, Any]:
     parser = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
     parser.add_argument("--dataset_path", required=True)
+    # G-medium extra mixture sources (mirrors JointDataArgs; all optional,
+    # train split only).  When any is set, qa:/toucan:/openswe: qids in the
+    # arm manifests resolve through the trainer's own multisource loader.
+    parser.add_argument("--toucan_path", default=None)
+    parser.add_argument("--openswe_path", default=None)
+    parser.add_argument("--qa_hotpotqa_path", default=None)
+    parser.add_argument("--qa_2wiki_path", default=None)
+    parser.add_argument("--qa_longmagpie_path", default=None)
     parser.add_argument("--eval_ratio", type=float, default=0.1)
     parser.add_argument("--split_seed", type=int, default=42)
     parser.add_argument("--split_manifest_file", default=None)
@@ -190,7 +313,19 @@ def main(argv: Optional[Sequence[str]] = None) -> Dict[str, Any]:
     from train.token_accounting import _load_tokenizer
 
     tokenizer = _load_tokenizer(args.tokenizer)
-    by_qid = _load_examples(args)
+    needed_qids: Optional[FrozenSet[str]] = None
+    if any([args.toucan_path, args.openswe_path, args.qa_hotpotqa_path, args.qa_2wiki_path, args.qa_longmagpie_path]):
+        # Prefilter the extra-source scans to the union of arm qids (memory
+        # guard); the per-arm manifest checks below stay authoritative.
+        needed: set = set()
+        for spec in args.arm:
+            _, _, manifest_path = spec.partition("=")
+            if not manifest_path:
+                raise SystemExit(f"--arm expects NAME=path, got: {spec!r}")
+            manifest = json.loads(Path(manifest_path).expanduser().read_text(encoding="utf-8"))
+            needed.update(str(qid) for qid in manifest.get("train_qids") or [])
+        needed_qids = frozenset(needed)
+    by_qid = _load_examples(args, needed_qids)
 
     if args.min_target_tokens is not None and args.min_target_tokens <= 0:
         args.min_target_tokens = None
@@ -201,7 +336,14 @@ def main(argv: Optional[Sequence[str]] = None) -> Dict[str, Any]:
         if not manifest_path:
             raise SystemExit(f"--arm expects NAME=path, got: {spec!r}")
         doc_mode, examples, manifest = _arm_examples(args, Path(manifest_path).expanduser(), by_qid)
-        arms[name] = _measure_arm(args, tokenizer, doc_mode, examples)
+        arms[name] = _measure_arm(
+            args,
+            tokenizer,
+            doc_mode,
+            examples,
+            tools_in_system=bool(manifest.get("tools_in_system")),
+            hybrid_tail_choices=_parse_tail_choices(manifest.get("hybrid_tail_choices")),
+        )
         arms[name]["manifest_legacy_mode_caps"] = manifest.get("legacy_mode_caps")
 
     report: Dict[str, Any] = {

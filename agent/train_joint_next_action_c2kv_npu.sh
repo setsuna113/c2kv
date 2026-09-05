@@ -15,6 +15,9 @@
 #                          via ASCEND_RT_VISIBLE_DEVICES passthrough
 #   SPLIT_MANIFEST_FILE / SPLIT_NAME / EXAMPLE_ORDER_FILE / MAX_SOURCE_TOKENS
 #   MAX_TRAIN_EXAMPLES / MAX_EVAL_EXAMPLES / MAX_TOOL_CHUNKS (empty = omit flag)
+#   TOUCAN_PATH / OPENSWE_PATH / QA_HOTPOTQA_PATH / QA_2WIKI_PATH /
+#   QA_LONGMAGPIE_PATH / MULTISOURCE_MAX_RECORDS (G-medium extra sources;
+#   empty = disabled, train split only)
 #
 # Example (single card acquired by scripts/joint_gated_run.sh):
 #   USE_DEEPSPEED=0 bash agent/train_joint_next_action_c2kv_npu.sh
@@ -51,6 +54,13 @@ MAX_SOURCE_TOKENS="${MAX_SOURCE_TOKENS:-}"
 MAX_TRAIN_EXAMPLES="${MAX_TRAIN_EXAMPLES:-}"
 MAX_EVAL_EXAMPLES="${MAX_EVAL_EXAMPLES:-}"
 
+TOUCAN_PATH="${TOUCAN_PATH:-}"
+OPENSWE_PATH="${OPENSWE_PATH:-}"
+QA_HOTPOTQA_PATH="${QA_HOTPOTQA_PATH:-}"
+QA_2WIKI_PATH="${QA_2WIKI_PATH:-}"
+QA_LONGMAGPIE_PATH="${QA_LONGMAGPIE_PATH:-}"
+MULTISOURCE_MAX_RECORDS="${MULTISOURCE_MAX_RECORDS:-}"
+
 DOC_MODE="${DOC_MODE:-joint}"
 MAX_DOC_LENGTH="${MAX_DOC_LENGTH:-1024}"
 MAX_DOC_NUM="${MAX_DOC_NUM:-24}"
@@ -75,6 +85,10 @@ RESUME_FROM_CHECKPOINT="${RESUME_FROM_CHECKPOINT:-}"
 DATALOADER_NUM_WORKERS="${DATALOADER_NUM_WORKERS:-4}"
 DATALOADER_PREFETCH_FACTOR="${DATALOADER_PREFETCH_FACTOR:-4}"
 DATASET_SHUFFLE_SEED="${DATASET_SHUFFLE_SEED:-2948}"
+# HF TrainingArguments seed (sampler/训练随机流): default 42 matches every arm
+# to date; set SEED=43 for the G8-small-v2 seed-2 replication (nothing else
+# in the launch env may change for that arm).
+SEED="${SEED:-42}"
 
 ASCEND_RT_VISIBLE_DEVICES="${ASCEND_RT_VISIBLE_DEVICES:-0}"
 export ASCEND_RT_VISIBLE_DEVICES
@@ -136,6 +150,24 @@ fi
 if [[ -n "${MAX_TOOL_CHUNKS}" ]]; then
   OPTIONAL_ARGS+=(--max_tool_chunks "${MAX_TOOL_CHUNKS}")
 fi
+if [[ -n "${TOUCAN_PATH}" ]]; then
+  OPTIONAL_ARGS+=(--toucan_path "${TOUCAN_PATH}")
+fi
+if [[ -n "${OPENSWE_PATH}" ]]; then
+  OPTIONAL_ARGS+=(--openswe_path "${OPENSWE_PATH}")
+fi
+if [[ -n "${QA_HOTPOTQA_PATH}" ]]; then
+  OPTIONAL_ARGS+=(--qa_hotpotqa_path "${QA_HOTPOTQA_PATH}")
+fi
+if [[ -n "${QA_2WIKI_PATH}" ]]; then
+  OPTIONAL_ARGS+=(--qa_2wiki_path "${QA_2WIKI_PATH}")
+fi
+if [[ -n "${QA_LONGMAGPIE_PATH}" ]]; then
+  OPTIONAL_ARGS+=(--qa_longmagpie_path "${QA_LONGMAGPIE_PATH}")
+fi
+if [[ -n "${MULTISOURCE_MAX_RECORDS}" ]]; then
+  OPTIONAL_ARGS+=(--multisource_max_records "${MULTISOURCE_MAX_RECORDS}")
+fi
 # Pre-fix doc budgets, for diffing against the pre-fix small arms only.
 # Value semantics (not mere presence): false/0/no keep the fixed budgets.
 case "${LEGACY_MODE_CAPS}" in
@@ -174,6 +206,12 @@ echo "EXAMPLE_ORDER_FILE=${EXAMPLE_ORDER_FILE}"
 echo "MAX_SOURCE_TOKENS=${MAX_SOURCE_TOKENS}"
 echo "MAX_TRAIN_EXAMPLES=${MAX_TRAIN_EXAMPLES}"
 echo "MAX_EVAL_EXAMPLES=${MAX_EVAL_EXAMPLES}"
+echo "TOUCAN_PATH=${TOUCAN_PATH}"
+echo "OPENSWE_PATH=${OPENSWE_PATH}"
+echo "QA_HOTPOTQA_PATH=${QA_HOTPOTQA_PATH}"
+echo "QA_2WIKI_PATH=${QA_2WIKI_PATH}"
+echo "QA_LONGMAGPIE_PATH=${QA_LONGMAGPIE_PATH}"
+echo "MULTISOURCE_MAX_RECORDS=${MULTISOURCE_MAX_RECORDS}"
 echo "DOC_MODE=${DOC_MODE}"
 echo "MAX_DOC_LENGTH=${MAX_DOC_LENGTH}"
 echo "MAX_DOC_NUM=${MAX_DOC_NUM}"
@@ -183,6 +221,7 @@ echo "MAX_SYSTEM_LENGTH=${MAX_SYSTEM_LENGTH}"
 echo "MAX_TOOL_DEFINITION_TOKENS=${MAX_TOOL_DEFINITION_TOKENS}"
 echo "MIN_TARGET_TOKENS=${MIN_TARGET_TOKENS}"
 echo "LR=${LR}"
+echo "SEED=${SEED} (HF TrainingArguments seed; 42 = every arm to date)"
 echo "NUM_TRAIN_EPOCHS=${NUM_TRAIN_EPOCHS}"
 echo "WARMUP_STEPS=${WARMUP_STEPS}"
 echo "PER_DEVICE_BS=${PER_DEVICE_BS}"
@@ -241,4 +280,5 @@ echo "LOGGING_STEPS=${LOGGING_STEPS}"
   --save_steps "${SAVE_STEPS}" \
   "${DATALOADER_ARGS[@]}" \
   --bf16 True \
-  --dataset_shuffle_seed "${DATASET_SHUFFLE_SEED}"
+  --dataset_shuffle_seed "${DATASET_SHUFFLE_SEED}" \
+  --seed "${SEED}"

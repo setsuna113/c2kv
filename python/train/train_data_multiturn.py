@@ -5,7 +5,7 @@ import random
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Literal, Optional, Sequence
+from typing import Any, Dict, Iterator, List, Literal, Optional, Sequence, Tuple
 
 import datasets
 from transformers import AutoTokenizer
@@ -1037,6 +1037,40 @@ def _split_message_to_fit(
     return chunks
 
 
+def _fit_reused_history_with_indices(
+    tokenizer: AutoTokenizer,
+    messages: Sequence[Message],
+    max_doc_length: int,
+    max_doc_num: int,
+    policy: HistorySelection,
+    split_oversized_history_docs: bool = True,
+) -> Tuple[List[Message], List[int]]:
+    """``_fit_reused_history`` plus, per kept chunk, its source message index.
+
+    Identical splitting/selection to ``_fit_reused_history`` (same primitives,
+    same order); the returned indices (into the input ``messages``) let callers
+    count how many SOURCE documents survived the budget — the QA gold/history
+    retention audit needs that without re-matching text.
+    """
+    split_source: List[int] = []
+    if split_oversized_history_docs:
+        split_messages: List[Message] = []
+        for index, message in enumerate(messages):
+            parts = _split_message_to_fit(tokenizer, message, max_doc_length)
+            split_messages.extend(parts)
+            split_source.extend([index] * len(parts))
+    else:
+        split_messages = []
+        for index, message in enumerate(messages):
+            if _message_token_length(tokenizer, message) <= max_doc_length:
+                split_messages.append(message)
+                split_source.append(index)
+    selected, kept_positions = _select_history_with_indices(
+        split_messages, max_doc_num=max_doc_num, policy=policy
+    )
+    return selected, [split_source[position] for position in kept_positions]
+
+
 def _fit_reused_history(
     tokenizer: AutoTokenizer,
     messages: Sequence[Message],
@@ -1045,18 +1079,33 @@ def _fit_reused_history(
     policy: HistorySelection,
     split_oversized_history_docs: bool = True,
 ) -> List[Message]:
-    if split_oversized_history_docs:
-        split_messages: List[Message] = []
-        for message in messages:
-            split_messages.extend(_split_message_to_fit(tokenizer, message, max_doc_length))
-        messages = list(split_messages)
-    else:
-        messages = [
-            message
-            for message in messages
-            if _message_token_length(tokenizer, message) <= max_doc_length
-        ]
-    return _select_history(messages, max_doc_num=max_doc_num, policy=policy)
+    return _fit_reused_history_with_indices(
+        tokenizer,
+        messages,
+        max_doc_length,
+        max_doc_num,
+        policy,
+        split_oversized_history_docs,
+    )[0]
+
+
+def _select_history_with_indices(
+    messages: Sequence[Message],
+    max_doc_num: int,
+    policy: HistorySelection,
+) -> Tuple[List[Message], List[int]]:
+    """``_select_history`` plus the kept positions (selection is a subsequence)."""
+    if len(messages) <= max_doc_num:
+        return list(messages), list(range(len(messages)))
+    if policy == "head":
+        return list(messages[:max_doc_num]), list(range(max_doc_num))
+    if policy == "tail":
+        if max_doc_num <= 1:
+            start = len(messages) - max_doc_num
+            return list(messages[start:]), list(range(start, len(messages)))
+        keep = [0] + list(range(len(messages) - (max_doc_num - 1), len(messages)))
+        return [messages[index] for index in keep], keep
+    raise ValueError(f"Unsupported history selection policy: {policy}")
 
 
 def _select_history(
@@ -1064,15 +1113,7 @@ def _select_history(
     max_doc_num: int,
     policy: HistorySelection,
 ) -> List[Message]:
-    if len(messages) <= max_doc_num:
-        return list(messages)
-    if policy == "head":
-        return list(messages[:max_doc_num])
-    if policy == "tail":
-        if max_doc_num <= 1:
-            return list(messages[-max_doc_num:])
-        return [messages[0]] + list(messages[-(max_doc_num - 1):])
-    raise ValueError(f"Unsupported history selection policy: {policy}")
+    return _select_history_with_indices(messages, max_doc_num, policy)[0]
 
 
 def _pad(values: List[int], length: int, pad_value: int) -> List[int]:
