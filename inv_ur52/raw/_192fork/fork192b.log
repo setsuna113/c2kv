@@ -1,0 +1,36 @@
+/home/zhuyuhan/miniconda3/envs/sglang/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/zhuyuhan/miniconda3/envs/sglang/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0/aarch64-linux/ascend_ops_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/zhuyuhan/miniconda3/envs/sglang/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/zhuyuhan/miniconda3/envs/sglang/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0/aarch64-linux/ascend_ops_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+cfg theta 5000000 layers 36
+weights loaded
+Warning: The current version of the file storing weights is old, and it is relanded due to internal bug of torch and compatibility issue. We will deprecate the loading support for this type of file in the future, please use newer torch to re-store the weight file.
+captures loaded
+idsA 3305 idsR 3305 equal: True
+  qpos chain out2_append: [(3501, 83), (3584, 23)]
+  qpos chain out2_replace: [(3462, 110)]
+qposA 106 [3719, 3720, 3721] ... [3823, 3824]
+qposR 110 [3622, 3623, 3624] ... [3730, 3731]
+genA ids n: 37 | genR ids n: 37
+== A: len 37
+    <tool_call> {"name": "set_budget_limit", "arguments": {"access_token": "ABCDE12345", "budget_limit": 1500}} </tool_call><|im_end|>
+== B: len 37
+    <tool_call> {"name": "set_budget_limit", "arguments": {"access_token": "ABCDE12345", "budget_limit": 1500}} </tool_call><|im_end|>
+== C: len 37
+    <tool_call> {"name": "set_budget_limit", "arguments": {"access_token": "ABCDE12345", "budget_limit": 1500}} </tool_call><|im_end|>
+== D: len 37
+    <tool_call> {"name": "set_budget_limit", "arguments": {"access_token": "ABCDE12345", "budget_limit": 1500}} </tool_call><|im_end|>
+CALIBRATION(token-ids) A==genlogAppend: False  D==genlogReplace: True
+genA text: <tool_call> {"name": "set_budget_limit", "arguments": {"access_token": "ABCDEFG12345", "budget_limit": 1500}} </tool_call>
+genR text: <tool_call> {"name": "set_budget_limit", "arguments": {"access_token": "ABCDE12345", "budget_limit": 1500}} </tool_call>
+servedAppend: <tool_call> {"name":"set_budget_limit","arguments":{"access_token":"ABCDEFG12345","budget_limit":1500}} </tool_call>
+servedReplace: <tool_call> {"name":"set_budget_limit","arguments":{"access_token":"ABCDE12345","budget_limit":1500}} </tool_call>
+A step 18 top5: [(63663, 36.5), (67004, 36.5), (71286, 33.75), (25411, 33.5), (74445, 28.625)]
+B step 18 top5: [(63663, 37.0), (67004, 36.75), (71286, 34.25), (25411, 33.75), (74445, 28.75)]
+C step 18 top5: [(63663, 38.75), (67004, 37.25), (71286, 35.0), (25411, 34.75), (1867, 29.375)]
+D step 18 top5: [(63663, 36.75), (67004, 36.25), (71286, 33.75), (25411, 33.5), (74445, 28.5)]
+DONE
