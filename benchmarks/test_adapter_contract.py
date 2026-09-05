@@ -239,6 +239,7 @@ def test_acebench_commands_are_byte_identical(tmp_path):
 def test_toolsandbox_uses_selected_environment_and_checkout(tmp_path, monkeypatch):
     from types import SimpleNamespace
     import os
+    monkeypatch.chdir(tmp_path)
     selected = tmp_path / "selected-source"
     selected.mkdir()
     python = tmp_path / "selected-env" / "bin" / "python"
@@ -247,10 +248,11 @@ def test_toolsandbox_uses_selected_environment_and_checkout(tmp_path, monkeypatc
     monkeypatch.setattr(toolsandbox_adapter.subprocess, "run", lambda cmd, **kw:
                         calls.append((cmd, kw)) or SimpleNamespace(returncode=0))
     monkeypatch.setattr(toolsandbox_adapter, "collect", lambda out: {"n": 1})
-    toolsandbox_adapter.run_ts("http://agent", tmp_path / "out",
+    toolsandbox_adapter.run_ts("http://agent", Path("out"),
         benchmark_dir=selected, python=str(python), user_base_url="http://user")
     cmd, kwargs = calls[0]
     assert cmd[0] == str(python.parent / "tool_sandbox")
+    assert cmd[cmd.index("-o") + 1] == str(tmp_path / "out")
     assert kwargs["env"]["PYTHONPATH"].split(os.pathsep)[0] == str(selected.resolve())
     assert kwargs["env"]["TOOLSANDBOX_USER_BASE_URL"] == "http://user/v1"
 

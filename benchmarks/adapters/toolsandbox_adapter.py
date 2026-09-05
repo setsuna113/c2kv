@@ -126,7 +126,8 @@ def run_ts(base_url: str, out_dir: Path, test_mode: bool = True,
            scenarios: "list[str] | None" = None,
            python: "str | None" = None) -> Dict[str, Any]:
     """Run the CLI and collect ``result_summary.json``."""
-    ts_dir = Path(benchmark_dir) if benchmark_dir else TS_DIR
+    ts_dir = (Path(benchmark_dir) if benchmark_dir else TS_DIR).resolve()
+    out_dir = Path(out_dir).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
     env = harness_env(base_url, user_base_url)
     # The console script's directory is otherwise first on sys.path, and an
