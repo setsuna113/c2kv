@@ -124,7 +124,7 @@
 #                     算出的 P_src / save_steps）。
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="${C2KV_REPO_ROOT_OVERRIDE:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 cd "${REPO_ROOT}"
 export PYTHONPATH="${REPO_ROOT}/python:${REPO_ROOT}/agent:${PYTHONPATH:-}"
 export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 HF_DATASETS_OFFLINE=1 TOKENIZERS_PARALLELISM=false OMP_NUM_THREADS=16
@@ -1744,8 +1744,11 @@ if [[ -z "${G_H200_SNAPSHOT_PATH:-}" ]]; then
     exit 2
   fi
   hostname > "${LOCKDIR}/host"; echo $$ > "${LOCKDIR}/pid"
-  SNAP="${REPO_ROOT}/.start_h200.snapshot.$$.sh"
+  # Project directories can have tight per-user quotas.  Keep the executable
+  # snapshot in global storage; C2KV_REPO_ROOT_OVERRIDE preserves REPO_ROOT.
+  SNAP="${GU_BASE}/status/.start_h200.snapshot.$$.sh"
   cp "${BASH_SOURCE[0]}" "${SNAP}"
+  export C2KV_REPO_ROOT_OVERRIDE="${REPO_ROOT}"
   export G_H200_SNAPSHOT_PATH="${SNAP}"
   # 无人值守：在交互终端直接运行时，自动 nohup 脱离会话到后台（幂等，重跑=续跑）。
   # 已在 nohup/管道/cron 中（stdin/stdout 非 TTY）则原地运行；FG=1 强制前台。
