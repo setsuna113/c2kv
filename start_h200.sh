@@ -25,6 +25,7 @@
 #   G_H200_EXPECT_SHARES     plan 断言的配比（默认 toucan:0.6,traces:0.4；换大池 order file 时同步改）
 #   WALL_CAP_HOURS           默认 70（144 GPUh / 2 卡，留 buffer）
 #   PLAN_BUDGET_EST          planner 扫描预算（estimated tokens，默认 120M；pool 不足自动 shrink）
+#   MIN_BUDGET_SHRINK        planner 的 --min_budget_shrink（默认 0.5；Arm C 剂量预检用 0.9）
 #   CALIB_STEPS              校准步数（默认 150）
 #   CHECKPOINT_TOKEN_GRAN    checkpoint 间隔（presented tokens，默认 16M）
 #   MIN_MILESTONES           save_steps 钳位下界：至少存这么多个里程碑（默认 4）
@@ -159,6 +160,7 @@ TARGET_PRESENTED_TOKENS="${TARGET_PRESENTED_TOKENS:-256000000}"
 MIN_PRESENTED_TOKENS="${MIN_PRESENTED_TOKENS:-96000000}"
 WALL_CAP_HOURS="${WALL_CAP_HOURS:-70}"
 PLAN_BUDGET_EST="${PLAN_BUDGET_EST:-120000000}"
+MIN_BUDGET_SHRINK="${MIN_BUDGET_SHRINK:-0.5}"
 CALIB_STEPS="${CALIB_STEPS:-150}"
 CALIB_TIMEOUT_MIN="${CALIB_TIMEOUT_MIN:-90}"
 CHECKPOINT_TOKEN_GRAN="${CHECKPOINT_TOKEN_GRAN:-16000000}"
@@ -471,6 +473,7 @@ PY
   # --example_order_file 成员校验直接硬报错。--tools_in_system 只改 token 估计的
   # 口径(工具文档是否计入), 估计缓存的 stamp 带了它, 两种口径不会互相污染。
   local plan_pool_args=(--max_samples_per_session "${MAX_SAMPLES_PER_SESSION:-4}")
+  plan_pool_args+=(--max_tools_per_sample "${MAX_TOOLS_PER_SAMPLE:-32}")
   # 取值语义与 launcher 一致(HfArgumentParser 的 bool 认 True/true/1):
   # 写 true 而 planner 不认, 两侧的 token 口径就会静默劈叉。
   case "${TOOLS_IN_SYSTEM:-}" in
@@ -523,6 +526,7 @@ PY
       --no-require_tool_call \
       "${plan_pool_args[@]}" \
       --budget_estimated_tokens "${PLAN_BUDGET_EST}" --oversample_factor 1.25 \
+      --min_budget_shrink "${MIN_BUDGET_SHRINK}" \
       --removal_files "${REMOVAL_FILE}" \
       --order_seed 42 --out_dir "${PLAN_DIR}" --tokenizer "${MODEL_DIR}"
   fi

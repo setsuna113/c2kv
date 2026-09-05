@@ -298,7 +298,10 @@ def estimate_source_tokens(
 
 
 def _cache_stamp(
-    tokenizer_tag: str, split_seed: int, tools_in_system: bool = False
+    tokenizer_tag: str,
+    split_seed: int,
+    tools_in_system: bool = False,
+    max_tools_per_sample: int = 32,
 ) -> str:
     raw = f"{_ESTIMATE_VERSION}|tokenizer={tokenizer_tag}|split_seed={split_seed}"
     if tools_in_system:
@@ -307,6 +310,11 @@ def _cache_stamp(
         # estimate excludes the tool documents, so the two currencies must
         # never share a (qid, stamp) cache key.
         raw += "|tools_in_system=1"
+    if max_tools_per_sample != 32:
+        # The default is omitted for byte compatibility with existing caches.
+        # A non-default tool cap changes tool_documents (and can preserve a
+        # different target tool), so it must not share cache estimates.
+        raw += f"|max_tools_per_sample={max_tools_per_sample}"
     return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
 
 
@@ -1061,7 +1069,7 @@ def _parse_traces_subset_map(specs: Optional[Sequence[str]]):
 
 def _traces_source_kwargs(args: argparse.Namespace) -> Dict[str, Any]:
     """Trainer-matching knobs for the traces source (shared by every mode)."""
-    return dict(
+    kwargs: Dict[str, Any] = dict(
         path=args.traces_path,
         split="train",
         split_seed=args.split_seed,
@@ -1079,7 +1087,12 @@ def _traces_source_kwargs(args: argparse.Namespace) -> Dict[str, Any]:
         # JointDataArgs defaults keeps fabricated/test namespaces valid.
         require_tool_call=getattr(args, "require_tool_call", True),
         action_tool_call_frac=getattr(args, "action_tool_call_frac", 0.75),
+        # Pool geometry for the target-inclusive tool subset. This changes
+        # tool_documents/selected_tools (and therefore tools_in_system tokens).
     )
+    if hasattr(args, "max_tools_per_sample"):
+        kwargs["max_tools_per_sample"] = args.max_tools_per_sample
+    return kwargs
 
 
 class _LazyTracesBase:
@@ -1195,6 +1208,9 @@ def _family_subsources(family: str, args: argparse.Namespace) -> List[Tuple[str,
         # targets too, and the order file must list them.
         require_tool_call=getattr(args, "require_tool_call", True),
     )
+    tool_common: Dict[str, Any] = dict(common)
+    if hasattr(args, "max_tools_per_sample"):
+        tool_common["max_tools_per_sample"] = args.max_tools_per_sample
 
     def _seed(subset: str) -> str:
         return f"{args.order_seed}:scan:{family}:{subset}"
@@ -1202,7 +1218,7 @@ def _family_subsources(family: str, args: argparse.Namespace) -> List[Tuple[str,
     if family == "toucan":
         if not args.toucan_path:
             raise ValueError("a recipe needs the toucan family but --toucan_path is not set")
-        return [("toucan", ToucanJointSource(args.toucan_path, file_order_seed=_seed("toucan"), **common))]
+        return [("toucan", ToucanJointSource(args.toucan_path, file_order_seed=_seed("toucan"), **tool_common))]
     if family == "openswe":
         if not args.openswe_path:
             raise ValueError("a recipe needs the openswe family but --openswe_path is not set")
@@ -1212,15 +1228,15 @@ def _family_subsources(family: str, args: argparse.Namespace) -> List[Tuple[str,
         # degenerates to a single subset over the whole root.
         root = Path(args.openswe_path)
         if root.is_file():
-            return [("all", OpenSWEJointSource(str(root), file_order_seed=_seed("all"), **common))]
+            return [("all", OpenSWEJointSource(str(root), file_order_seed=_seed("all"), **tool_common))]
         data_root = root / "data" if (root / "data").is_dir() else root
         config_dirs = sorted(
             d for d in data_root.iterdir() if d.is_dir() and list(d.glob("*.parquet"))
         )
         if not config_dirs:
-            return [("all", OpenSWEJointSource(str(root), file_order_seed=_seed("all"), **common))]
+            return [("all", OpenSWEJointSource(str(root), file_order_seed=_seed("all"), **tool_common))]
         return [
-            (d.name, OpenSWEJointSource(str(d), file_order_seed=_seed(d.name), **common))
+            (d.name, OpenSWEJointSource(str(d), file_order_seed=_seed(d.name), **tool_common))
             for d in config_dirs
         ]
     if family == "qa":
@@ -1591,6 +1607,13 @@ def main() -> None:
         "trainer's per-session pick never produced",
     )
     parser.add_argument(
+        "--max_tools_per_sample",
+        type=int,
+        default=32,
+        help="pool-scan knob that MUST match the trainer run's MAX_TOOLS_PER_SAMPLE; "
+        "it changes the selected tool pool before tools_in_system rendering",
+    )
+    parser.add_argument(
         "--tools_in_system",
         action=argparse.BooleanOptionalAction,
         default=False,
@@ -1684,6 +1707,7 @@ def main() -> None:
             str(getattr(tokenizer, "name_or_path", tokenizer.__class__.__name__)),
             args.split_seed,
             args.tools_in_system,
+            args.max_tools_per_sample,
         )
         removal_identifiers, _ = load_removal_identifiers(args.removal_files)
         out_dir = Path(args.out_dir)
@@ -1748,6 +1772,7 @@ def main() -> None:
         str(getattr(tokenizer, "name_or_path", tokenizer.__class__.__name__)),
         args.split_seed,
         args.tools_in_system,
+        args.max_tools_per_sample,
     )
     removal_identifiers, removal_file_counts = load_removal_identifiers(args.removal_files)
 
@@ -1815,6 +1840,7 @@ def main() -> None:
         # scanned the SAME pool, and tools_in_system changes the estimate's
         # currency outright.  Recorded so a divergence is detectable post hoc.
         "max_samples_per_session": args.max_samples_per_session,
+        "max_tools_per_sample": args.max_tools_per_sample,
         "require_tool_call": args.require_tool_call,
         "action_tool_call_frac": args.action_tool_call_frac,
         "tools_in_system": args.tools_in_system,

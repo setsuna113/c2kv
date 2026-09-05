@@ -5,12 +5,21 @@ import copy
 import gc
 import json
 import logging
+import os
 import re
 import sys
 import time
 from collections import Counter
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
+
+# Match start_h200.sh's allocator configuration. Direct Gate-0 invocations
+# previously inherited fragmentation-prone defaults and OOMed long prompts.
+os.environ.setdefault("PYTORCH_ALLOC_CONF", "expandable_segments:True")
+os.environ.setdefault(
+    "PYTORCH_CUDA_ALLOC_CONF",
+    os.environ["PYTORCH_ALLOC_CONF"],
+)
 
 import torch
 from tqdm import tqdm
