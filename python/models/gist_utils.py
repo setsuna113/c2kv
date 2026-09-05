@@ -440,17 +440,7 @@ def get_apply_gist_residual_func(config: GistConfigMixin, layer_idx: int = 0) ->
         if true_lens is None or bool((true_lens == seq_length).all()):
             pad_length = seq_length % ratio
             nopad_length = seq_length - pad_length
-            # A complete-block view cannot infer its -1 dimension from an
-            # empty prefix (seq_length < ratio).  The partial block below is
-            # the only valid gist row in that case.
-            if nopad_length:
-                mean_tensor = (
-                    tokens_tensor[:, :nopad_length]
-                    .reshape(batch_size, -1, ratio, hidden_size)
-                    .mean(dim=2)
-                )
-            else:
-                mean_tensor = tokens_tensor.new_zeros((batch_size, 0, hidden_size))
+            mean_tensor = tokens_tensor[:, :nopad_length].reshape(batch_size, -1, ratio, hidden_size).mean(dim=2)
             if pad_length != 0:
                 pad_mean = tokens_tensor[:, nopad_length:].mean(dim=1, keepdim=True)
                 mean_tensor = torch.cat([mean_tensor, pad_mean], dim=1)
