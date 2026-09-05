@@ -22,6 +22,12 @@ that existed nowhere in this repository):
 Apply from the ToolSandbox checkout root:
 `patch -p1 < benchmarks/toolsandbox_patches/0001-openai-base-url-env.patch`
 
+Apply `0002-empty-tool-calls.patch` as well. OpenAI-compatible servers may
+return `tool_calls: []` for a normal text reply. Both roles must treat that
+like `null`: upstream otherwise appends no messages, so its message-count
+limit never advances and the scenario loops indefinitely. The patch changes
+only this response-shape normalization; prompts and scoring remain unchanged.
+
 TS test-mode's "n=3" is ONE base scenario (`send_message_with_contact_
 content_cellular_off`) plus two perturbations (distractor tools / scrambled
 arg descriptions) — not three independent tasks; only the full suite is a

@@ -38,6 +38,21 @@ def _codes(result: capabilities.PreflightResult) -> set[str]:
     return {item.code for item in result.errors}
 
 
+def test_toolsandbox_requires_empty_tool_call_normalization_for_both_roles(tmp_path):
+    root = tmp_path / "toolsandbox"
+    roles = root / "tool_sandbox" / "roles"
+    roles.mkdir(parents=True)
+    for role, endpoint in (("agent", "OPENAI_BASE_URL"), ("user", "TOOLSANDBOX_USER_BASE_URL")):
+        (roles / f"openai_api_{role}.py").write_text(endpoint + "\n")
+    options = {"runner_python": sys.executable, "toolsandbox_dir": str(root)}
+    old = capabilities.preflight("toolsandbox", "full", options=options)
+    assert _codes(old) == {"toolsandbox_agent_empty_tool_calls_patch", "toolsandbox_user_empty_tool_calls_patch"}
+    for role in ("agent", "user"):
+        path = roles / f"openai_api_{role}.py"
+        path.write_text(path.read_text() + "if not openai_response_message.tool_calls:\n")
+    assert capabilities.preflight("toolsandbox", "full", options=options).ok
+
+
 def _acebench_tree(tmp_path: Path, *, role_history: bool = False) -> Path:
     root = tmp_path / "acebench"
     (root / "model_inference" / "multi_step").mkdir(parents=True)

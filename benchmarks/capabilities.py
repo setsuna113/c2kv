@@ -213,6 +213,13 @@ def _benchmark_prerequisites(result: PreflightResult, benchmark: str,
             "TOOLSANDBOX_USER_BASE_URL",
             "apply benchmarks/toolsandbox_patches/0001-openai-base-url-env.patch",
         )
+        for role in ("agent", "user"):
+            _append_marker(
+                result, f"toolsandbox_{role}_empty_tool_calls_patch",
+                root / "tool_sandbox" / "roles" / f"openai_api_{role}.py",
+                "if not openai_response_message.tool_calls:",
+                "apply benchmarks/toolsandbox_patches/0002-empty-tool-calls.patch",
+            )
         return
 
     if benchmark in {"acon_qa", "acon_appworld"}:
