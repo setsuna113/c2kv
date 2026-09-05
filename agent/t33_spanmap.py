@@ -121,8 +121,10 @@ def parse_tool_call(text: str) -> Dict[str, Any]:
             out["name"] = m.group(1)
     ma = _ARGS_RE.search(payload)
     if ma:
-        # cover from the '{' to the end of the (possibly truncated) region
-        out["args_span"] = (payload_start + ma.end() - 1, strict_end)
+        # start AFTER the arguments '{' brace — the brace is JSON syntax and
+        # prereg forbids syntax positions for point readouts (the old span
+        # started on the '{' itself, so svip/args_first read the brace token)
+        out["args_span"] = (payload_start + ma.end(), strict_end)
 
     if js is None:
         out["json_error"] = "unterminated_json"

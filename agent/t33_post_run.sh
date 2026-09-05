@@ -6,7 +6,7 @@ set -uo pipefail
 
 REPO="${1:-$HOME/c2kv-t33}"
 OUT="${T33_OUT:-/home/liuyancheng/c2kv/outputs_lyc/t33}"
-RES="${REPO}/results/t33"
+RES="${T33_RES:-${REPO}/results/t33}"
 CAP="${OUT}/capture"
 TOKENIZER=/home/liuyancheng/c2kv/models/Qwen3-4B-Instruct-2507
 FROZEN_FULL="${REPO}/results/bdf_pilot/d_r2/battery_full.jsonl"
@@ -24,15 +24,31 @@ export PATH="$HOME/envs/c2kv/bin:$PATH"
 mkdir -p "${RES}"
 
 echo "== [1/7] determinism gate =="
+# The old loop verified with a garbled frozen path (${FROZEN_FULL/c2kv/full}
+# rewrote the repo dir, not the battery file), swallowed failures with
+# `|| true`, and never gated the topup batteries.  A gate FAIL now stops the
+# pipeline: downstream numbers do not inherit the manifest labels.
+GATE_FAIL=0
+gate_one() { # frozen rerun out
+  "${PY}" agent/t33_verify_rerun.py --frozen "$1" --rerun "$2" --out "$3" || GATE_FAIL=1
+}
+gate_one "${FROZEN_FULL}" "${OUT}/battery_full.jsonl" "${RES}/gate_full.json"
+gate_one "${FROZEN_C2KV}" "${OUT}/battery_c2kv.jsonl" "${RES}/gate_c2kv.json"
 for arm in full c2kv; do
-  "${PY}" agent/t33_verify_rerun.py \
-    --frozen "${FROZEN_FULL/c2kv/full}" \
-    --rerun "${OUT}/battery_${arm}.jsonl" \
-    --out "${RES}/gate_${arm}.json" || true
+  for suffix in _topup _topup2; do
+    tb="${OUT}/battery_${arm}${suffix}.jsonl"
+    [ -f "${tb}" ] || continue
+    if [ "${arm}" = full ]; then
+      gate_one "${FROZEN_FULL}" "${tb}" "${RES}/gate_${arm}${suffix}.json"
+    else
+      gate_one "${FROZEN_C2KV}" "${tb}" "${RES}/gate_${arm}${suffix}.json"
+    fi
+  done
 done
-# correct the full/c2kv frozen pairing explicitly
-"${PY}" agent/t33_verify_rerun.py --frozen "${FROZEN_FULL}" --rerun "${OUT}/battery_full.jsonl" --out "${RES}/gate_full.json" || true
-"${PY}" agent/t33_verify_rerun.py --frozen "${FROZEN_C2KV}" --rerun "${OUT}/battery_c2kv.jsonl" --out "${RES}/gate_c2kv.json" || true
+if [ "${GATE_FAIL}" != "0" ]; then
+  echo "!! determinism gate FAILED — stopping (rerun is not the frozen battery)"
+  exit 1
+fi
 
 echo "== [2/7] feature extraction =="
 "${PY}" agent/t33_extract_features.py --capture_dir "${CAP}" --arm full \
@@ -68,9 +84,12 @@ echo "== [5/7] diff-01 deferral =="
   --rows_c2kv "${OUT}/battery_c2kv.jsonl" \
   --out "${RES}/diff01.json" || true
 
-echo "== [6/7] beta/gamma gate =="
+echo "== [6/7] beta/gamma gate + parameter-bearing denominator =="
 "${PY}" agent/t33_beta_gamma.py --docs "${CAP}/c2kv/p0.docs.jsonl" \
   --out "${RES}/beta_gamma.json" || true
+"${PY}" agent/t33_denominator.py \
+  --c2kv "${FROZEN_C2KV}" --manifest "${MANIFEST}" \
+  --out "${RES}/denominator.json" || true
 
 echo "== [7/7] svip summary =="
 "${PY}" - "${OUT}/svip/gamma.jsonl" "${RES}/svip_summary.json" <<'PYEOF'
@@ -84,6 +103,7 @@ ok = [r for r in rows if r.get("gamma_seq") is not None]
 if ok:
     import statistics as st
     gs = sorted(r["gamma_seq"] for r in ok)
+    pg = [r["p_gamma_le_136"] for r in ok if r.get("p_gamma_le_136") is not None]
     def pct(p):
         return gs[min(len(gs)-1, int(len(gs)*p))]
     out = {
@@ -91,7 +111,17 @@ if ok:
         "gamma_seq_median": round(st.median(gs), 4),
         "gamma_seq_p10": round(pct(0.10), 4), "gamma_seq_p90": round(pct(0.90), 4),
         "frac_gamma_le_1_36": round(sum(1 for g in gs if g <= 1.36) / len(gs), 4),
-        "note": "gamma = H_qp/H_q on frozen emitted text under same-checkpoint c2kv/full prefixes; diagnostic only per prereg",
+        # per-position certificate fraction: the sequence aggregate above says
+        # "0% of rows", the per-position mean says ~17% of POSITIONS satisfy
+        # gamma<=2c+1 — both are reported; the old summary quoted only the
+        # sequence aggregate as "0%"
+        "mean_p_gamma_le_136_per_position": round(sum(pg) / len(pg), 4) if pg else None,
+        "n_rows_p_gamma": len(pg),
+        "note": ("gamma = H_qp/H_q = 1 + KL/H_q >= 1 ALWAYS (mechanically large "
+                 "when H_q is small; Pinsker bound direction unaffected but the "
+                 "ratio is not a distance); sequence aggregate and per-position "
+                 "fractions are different estimands, both shown; diagnostic "
+                 "only per prereg"),
     }
 else:
     out = {"n_scored": 0}

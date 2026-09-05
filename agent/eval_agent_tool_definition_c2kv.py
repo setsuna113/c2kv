@@ -364,12 +364,16 @@ def _build_tool_cache(
 
 
 def _gist_slot_positions(valid_mask: torch.Tensor):
-    """Gist slot columns per grid row: where the input is NOT a real doc token
-    and not trailing all-padding (leading pad slots carry gist tokens)."""
-    rows, cols = (valid_mask == 0).nonzero(as_tuple=True)
+    """Per grid row, the chunk-BOUNDARY positions for the KWTS-style context
+    capture: the LAST REAL doc token of each row.  The previous build
+    returned every valid_mask==0 cell — i.e. all -100 padding slots, a
+    median of ~8k positions per row — so whatever was collected there was
+    padding activation, and the layer hooks never fired anyway (generate_gist
+    calls forward_with_gist directly; t33_capture now patches that path)."""
     per_row: Dict[int, List[int]] = {}
+    rows, cols = valid_mask.nonzero(as_tuple=True)
     for r, c in zip(rows.tolist(), cols.tolist()):
-        per_row.setdefault(r, []).append(c)
+        per_row[r] = [c]  # keep only the last valid col per row
     return [per_row.get(r, []) for r in range(valid_mask.shape[0])]
 
 
@@ -471,6 +475,7 @@ def _generate_from_input_ids(
                     eos_id=int(tokenizer.eos_token_id),
                     max_new_tokens=max_new_tokens,
                     tool_pool_names=capture.get("tool_pool_names"),
+                    past_key_values=getattr(generated_out, "past_key_values", None),
                 )
                 capture["record"] = record
             finally:

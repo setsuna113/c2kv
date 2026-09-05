@@ -95,28 +95,32 @@ def _is_key_position(text: str, quote_start: int) -> bool:
 
 
 def smt_token_set(text: str, spans: Dict[str, Any], offsets: Sequence[Tuple[int, int]]) -> Optional[set]:
-    """FC-UQ SMT mask, mapped to token indices: the six grammar classes
-    collapse to (opening token, name value tokens, arg key tokens, arg value
-    tokens, separators) — separators excluded from the mask, per the paper."""
+    """FC-UQ SMT mask, mapped to token indices.  The paper's six grammar
+    classes map to: (1) the first generated token — the call/no-call decision
+    token, NOT the name start; (2) name value tokens; (3) arg KEY tokens;
+    (4) arg VALUE tokens.  Separators, '=', quotes and the JSON braces are
+    excluded.  (The previous build dropped class (3) and put class (1) on the
+    name start, contrary to the paper's class list.)
+    """
     parsed = parse_tool_call(text)
     toks: set = set()
     def add_span(cs: int, ce: int) -> None:
         for idx, (s, e) in enumerate(offsets):
             if e > cs and s < ce:
                 toks.add(idx)
-    if spans.get("name_first") is not None:
-        toks.add(spans["name_first"])  # opening/decision token region start
+    # class (1): the decision token is the first generated token
+    if spans.get("first_tok") is not None:
+        toks.add(spans["first_tok"])
     if parsed.get("name_span"):
-        add_span(*parsed["name_span"])
+        add_span(*parsed["name_span"])  # class (2)
     if parsed.get("args_span"):
         args_text = text[parsed["args_span"][0]:parsed["args_span"][1]]
         base = parsed["args_span"][0]
         keys, values = arg_key_value_char_spans(args_text)
-        for cs, ce in values:
+        for cs, ce in keys:               # class (3): argument-name tokens
             add_span(base + cs, base + ce)
-        # arg keys stay OUT of the semantic mask (they are schema echoes of
-        # the tool definition); the paper's class (3) is excluded, class (4)
-        # included — we follow the value-only reading.
+        for cs, ce in values:             # class (4): argument-value tokens
+            add_span(base + cs, base + ce)
     return toks if toks else None
 
 
@@ -126,32 +130,66 @@ def _sigmoid(x: float) -> float:
     return 1.0 / (1.0 + math.exp(-x))
 
 
-def _rolling_baseline(series: List[float], w: int) -> List[float]:
-    out: List[float] = []
-    for t in range(len(series)):
-        lo = max(0, t - w)
-        window = series[lo:t]
-        base = sum(window) / len(window) if window else series[t]
-        out.append(series[t] - base)
-    return out
+def session_entropy_baselines(steps_rows: List[Dict[str, Any]]) -> Dict[str, Optional[float]]:
+    """Per-row entropy baseline: the mean token entropy of the SAME session's
+    PREVIOUS rows (prereg: u_t is relative to the session's earlier steps,
+    not an intra-row window).  Rows are ordered by the step index in the qid
+    (`<session>:<step>`); a session's first row gets None (no history) and is
+    flagged, not silently folded into a window.
+    """
+    by_session: Dict[str, List[Tuple[int, Dict[str, Any]]]] = {}
+    for rec in steps_rows:
+        qid = rec["qid"]
+        sess = (rec.get("meta") or {}).get("session_id") or qid.rsplit(":", 1)[0]
+        try:
+            step = int(qid.rsplit(":", 1)[1])
+        except (IndexError, ValueError):
+            step = 0
+        by_session.setdefault(sess, []).append((step, rec))
+    baselines: Dict[str, Optional[float]] = {}
+    for _sess, items in by_session.items():
+        items.sort(key=lambda t: t[0])
+        prior_hbars: List[float] = []
+        for _step, rec in items:
+            baselines[rec["qid"]] = (sum(prior_hbars) / len(prior_hbars)) if prior_hbars else None
+            ents = [s.get("entropy_full") for s in (rec.get("steps") or [])]
+            ents = [e for e in ents if e is not None]
+            if ents:
+                prior_hbars.append(sum(ents) / len(ents))
+    return baselines
 
 
 def _repeat_trigram_coverage(ids: Sequence[int], window: int) -> List[float]:
+    """Causal repeat-n-gram coverage: at token time t only trigrams that are
+    fully observed by t (starting at i <= t-2) are evaluated, and a trigram
+    counts as repeated iff it occurred earlier in the sequence.  The old
+    version required a repeat WITHIN the current 3-trigram block
+    (cur.count(g) > 1), which is structurally zero for period>=3 cycles such
+    as [1,2,3]*10 — exactly the confident-repetition regime the channel
+    exists to catch.
+    """
+    n = len(ids)
+    grams = [tuple(ids[i:i + 3]) for i in range(max(0, n - 2))]
+    seen: set = set()
+    is_repeat = [False] * len(grams)
+    for idx, g in enumerate(grams):
+        if g in seen:
+            is_repeat[idx] = True
+        else:
+            seen.add(g)
     out: List[float] = []
-    for t in range(len(ids)):
-        lo = max(0, t - window)
-        local = [tuple(ids[i:i + 3]) for i in range(lo, max(lo, t - 2))]
-        cur = [tuple(ids[i:i + 3]) for i in range(max(0, t - 2), t + 1)]
-        if not local or not cur:
-            out.append(0.0)
-            continue
-        seen = set(local)
-        reps = sum(1 for g in cur if g in seen and cur.count(g) > 1)
-        out.append(reps / len(cur))
+    for t in range(n):
+        # trigram i is observable at time i+2; window over the last `window`
+        # observable trigrams
+        hi = min(t - 1, len(grams))
+        lo = max(0, hi - window)
+        block = is_repeat[lo:hi]
+        out.append(sum(block) / len(block) if block else 0.0)
     return out
 
 
-def steps_features(rec: Dict[str, Any], tokenizer: Any) -> Dict[str, Any]:
+def steps_features(rec: Dict[str, Any], tokenizer: Any,
+                   session_baseline: Optional[float] = None) -> Dict[str, Any]:
     steps: List[Dict[str, Any]] = rec.get("steps") or []
     spans: Dict[str, Any] = rec.get("spans") or {}
     text: str = rec.get("text") or ""
@@ -172,15 +210,17 @@ def steps_features(rec: Dict[str, Any], tokenizer: Any) -> Dict[str, Any]:
 
     name_idx = list(rng(nf, nl))
     args_idx = list(rng(af, al))
-    payload_idx = list(rng(pf, pl)) or list(range(n))
+    # no silent full-sequence fallback: rows without a payload span get None
+    # for the span features (previously they scored the whole continuation)
+    payload_idx = list(rng(pf, pl))
 
     f["n_name_tokens"] = len(name_idx) or None
     f["n_args_tokens"] = len(args_idx) or None
 
     # --- 4.2 FLARE / FC-UQ ---
     f["flare_min_p_all"] = math.exp(min(lps))
-    f["flare_min_p_span"] = math.exp(min((lps[i] for i in payload_idx), default=min(lps)))
-    f["flare_min_p_name"] = math.exp(min((lps[i] for i in name_idx), default=min(lps)))
+    f["flare_min_p_span"] = math.exp(min((lps[i] for i in payload_idx))) if payload_idx else None
+    f["flare_min_p_name"] = math.exp(min((lps[i] for i in name_idx))) if name_idx else None
     # length-matched variant (fixed window): E[min over N] falls with N, and
     # cap rate is ~50% — the prereg mandates a fixed-window min + window mean
     w = min(32, n)
@@ -212,6 +252,14 @@ def steps_features(rec: Dict[str, Any], tokenizer: Any) -> Dict[str, Any]:
         f["fc_avg_nll_smt"] = sum(-x for x in smt_lps) / len(smt_lps)
         f["fc_gnll_smt"] = sum(-x for x in smt_lps)
         f["smt_token_frac"] = len(smt_lps) / n
+    # DRAGIN s-masked entropy: the prereg's three-factor decomposition asks
+    # for H alone / a_max alone / s-masked H; the s-masked row was never
+    # computed.  Semantic mask = name span + arg keys/values (syntax and
+    # whitespace excluded), same SMT set as above.
+    smt_ents = [ents[i] for i in sorted(smt) if i < n]
+    if smt_ents:
+        f["dragin_h_smasked_max"] = max(smt_ents)
+        f["dragin_h_smasked_mean"] = sum(smt_ents) / len(smt_ents)
 
     # --- 4.2 Leyline / KnowNo (name first token) ---
     vocab = FALLBACK_VOCAB
@@ -258,15 +306,18 @@ def steps_features(rec: Dict[str, Any], tokenizer: Any) -> Dict[str, Any]:
         f["entropy_args_max"] = max(ents[i] for i in args_idx)
     if f.get("hbar_args") is not None and f.get("hbar_name") is not None:
         f["ergo_dh_region"] = f["hbar_args"] - f["hbar_name"]
-    f["entropy_max_span"] = max((ents[i] for i in payload_idx), default=max(ents))
+    f["entropy_max_span"] = max((ents[i] for i in payload_idx)) if payload_idx else None
 
-    # SVIP: no span averaging — point readouts at name/arg-value starts
-    svip_points = {"name_first": nf, "args_first": af}
-    for label, pos in svip_points.items():
-        if pos is not None and pos < n:
-            f[f"svip_sqrt_h_{label}"] = math.sqrt(max(0.0, ents[pos]))
-    # arg-value first tokens: first tokens of each leaf value (approximation:
-    # the first token after each arg key) — via the SMT value char spans
+    # SVIP: no span averaging — point readouts at name / arg-value starts.
+    # svip_sqrt_h_args_first must read the FIRST ARGUMENT VALUE token (prereg
+    # bans JSON syntax positions; the old span pointed at the `{` brace).  The
+    # raw args_first readout is kept as a _syntax variant for audit only.
+    if nf is not None and nf < n:
+        f["svip_sqrt_h_name_first"] = math.sqrt(max(0.0, ents[nf]))
+    if af is not None and af < n:
+        f["svip_sqrt_h_args_first_syntax"] = math.sqrt(max(0.0, ents[af]))
+    # arg-value first tokens: first tokens of each leaf value — via the SMT
+    # value char spans
     if tokenizer is not None and gen_ids and spans.get("args_first") is not None:
         try:
             from t33_spanmap import token_char_offsets
@@ -277,11 +328,16 @@ def steps_features(rec: Dict[str, Any], tokenizer: Any) -> Dict[str, Any]:
                 base = parsed["args_span"][0]
                 _keys, values = arg_key_value_char_spans(args_text)
                 sq = []
+                first_val_tok = None
                 for cs, ce in values:
                     for idx, (s, e) in enumerate(offs):
                         if e > base + cs and s < base + ce:
+                            if first_val_tok is None:
+                                first_val_tok = idx
                             sq.append(math.sqrt(max(0.0, ents[idx])))
                             break
+                if first_val_tok is not None and first_val_tok < n:
+                    f["svip_sqrt_h_args_first"] = math.sqrt(max(0.0, ents[first_val_tok]))
                 if sq:
                     f["svip_sqrt_h_argvalue_max"] = max(sq)
         except Exception:
@@ -302,13 +358,23 @@ def steps_features(rec: Dict[str, Any], tokenizer: Any) -> Dict[str, Any]:
         f["confkv_c_name"] = cs_vals[nf]
 
     # --- 4.3 e-CUSUM relative entropy + repeat channel ---
-    u = _rolling_baseline(ents, ROLLING_W)
-    hbar = f["hbar_all"]
-    u_norm = [max(0.0, x) / (max(0.0, x) + hbar + 1e-9) for x in u]
+    # u_t is relative to the SESSION-PREFIX baseline (mean token entropy of
+    # the same session's previous rows), per prereg — not an intra-row
+    # 8-token rolling window.  Sessions with no prior row: u channel is
+    # undefined; a_t falls back to the repeat channel only and the row is
+    # flagged via ecusum_u_defined=0.
+    if session_baseline is not None:
+        u = [e - session_baseline for e in ents]
+        denom = [max(0.0, x) + session_baseline + 1e-9 for x in u]
+        u_norm = [max(0.0, x) / d for x, d in zip(u, denom)]
+        f["ecusum_u_max"] = max(u)
+        f["ecusum_u_mean"] = sum(u) / n
+        f["ecusum_u_defined"] = 1
+    else:
+        u_norm = [0.0] * n
+        f["ecusum_u_defined"] = 0
     r = _repeat_trigram_coverage(gen_ids, REPEAT_WINDOW) if gen_ids else [0.0] * n
     a = [min(1.0, 0.7 * rv + 0.3 * un) for rv, un in zip(r, u_norm)]
-    f["ecusum_u_max"] = max(u)
-    f["ecusum_u_mean"] = sum(u) / n
     f["ecusum_a_max"] = max(a)
     f["ecusum_a_mean"] = sum(a) / n
     f["ecusum_a_seq"] = [round(x, 5) for x in a]
@@ -451,10 +517,11 @@ def main(argv: Optional[List[str]] = None) -> int:
             print(f"[warn] tokenizer unavailable ({exc}); SMT mask falls back to spans", file=sys.stderr)
 
     out_features: List[Dict[str, Any]] = []
+    baselines = session_entropy_baselines(steps_rows)
     for rec in steps_rows:
         qid = rec["qid"]
         f: Dict[str, Any] = {"qid": qid, "arm": args.arm}
-        f.update(steps_features(rec, tokenizer))
+        f.update(steps_features(rec, tokenizer, session_baseline=baselines.get(qid)))
         f.update(docs_features(docs_rows.get(qid) or {}))
         f.update(text_surface_features(rec))
         f["stop_reason"] = rec.get("stop_reason")

@@ -79,7 +79,10 @@ def compare(frozen_rows: List[Dict[str, Any]], rerun_rows: List[Dict[str, Any]])
         "n_has_tool_call_mismatch": len(call_mismatch),
         "n_capture_missing": len(capture_missing),
         "capture_missing_examples": capture_missing[:5],
+        # has_tool_call mismatches and missing capture records are gate
+        # failures too — the previous expression ignored both
         "gate": "PASS" if (not pred_mismatch and not tok_mismatch and not match_mismatch
+                           and not call_mismatch and not capture_missing
                            and not missing and not extra and n == len(rerun)) else "FAIL",
     }
 

@@ -61,6 +61,7 @@ ORIENTATIONS: Dict[str, int] = {
     "entropy_args_max": 1, "entropy_max_span": 1,
     "entropycache_max_all": 1, "entropycache_max_no_eos": 1, "hbar_no_eos": 1,
     "ergo_dh_region": 1,
+    "dragin_h_smasked_max": 1, "dragin_h_smasked_mean": 1,
     "svip_sqrt_h_name_first": 1, "svip_sqrt_h_args_first": 1, "svip_sqrt_h_argvalue_max": 1,
     "confkv_c_min": -1, "confkv_c_mean": -1, "confkv_c_name": -1,
     "ecusum_u_max": 1, "ecusum_u_mean": 1, "ecusum_a_max": 1, "ecusum_a_mean": 1,
@@ -114,16 +115,29 @@ def auroc(scores: np.ndarray, labels: np.ndarray) -> Optional[float]:
 
 
 def auprc(scores: np.ndarray, labels: np.ndarray) -> Optional[float]:
-    """Average precision (step interpolation off; sklearn-equivalent AP)."""
+    """Average precision with correct tie handling (sklearn-equivalent AP).
+
+    Scores are grouped by distinct value; precision is read at the END of each
+    tie group, so tied scores contribute one threshold instead of an
+    order-dependent step inside the block.  The previous version ranked ties
+    by stable sort order, which biased AP whenever the median fill created
+    large tie blocks.
+    """
+    n_pos = int(labels.sum())
+    if n_pos == 0 or len(labels) == n_pos:
+        return None
     order = np.argsort(-scores, kind="mergesort")
+    s = np.asarray(scores, dtype=float)[order]
     y = labels[order]
     tp = np.cumsum(y)
-    fp = np.cumsum(1 - y)
-    precision = tp / np.maximum(1, tp + fp)
-    n_pos = int(y.sum())
-    if n_pos == 0 or len(y) == n_pos:
-        return None
-    return float((precision * y).sum() / n_pos)
+    k = np.arange(1, len(y) + 1)
+    prec = tp / k
+    end_of_group = np.r_[s[1:] != s[:-1], True]
+    tp_end = tp[end_of_group]
+    tp_prev = np.r_[0, tp_end[:-1]]
+    pos_in_group = tp_end - tp_prev
+    p_end = prec[end_of_group]
+    return float((p_end * pos_in_group).sum() / n_pos)
 
 
 def session_clusters(sessions: Sequence[str]) -> np.ndarray:
@@ -172,18 +186,40 @@ def paired_delta_bootstrap(
     return point, float(np.percentile(deltas, 2.5)), float(np.percentile(deltas, 97.5))
 
 
+def midrank(x: np.ndarray) -> np.ndarray:
+    """1-based ranks with ties averaged (deterministic: mergesort order)."""
+    order = np.argsort(x, kind="mergesort")
+    ranks = np.empty(len(x), dtype=float)
+    ranks[order] = np.arange(1, len(x) + 1)
+    sx = x[order]
+    i = 0
+    while i < len(sx):
+        j = i
+        while j + 1 < len(sx) and sx[j + 1] == sx[i]:
+            j += 1
+        if j > i:
+            ranks[order[i:j + 1]] = (i + j + 2) / 2.0
+        i = j + 1
+    return ranks
+
+
 def rank_residualize(x: np.ndarray, control: np.ndarray) -> np.ndarray:
-    """Length control: residual of x's ranks on control's ranks (linear)."""
-    rx = np.argsort(np.argsort(x)).astype(float)
-    rc = np.argsort(np.argsort(control)).astype(float)
+    """Length control: residual of x's ranks on control's ranks (linear).
+
+    Midranks (tie-averaged, mergesort-stable) on both sides so the result is
+    reproducible run-to-run; the old double-argsort used quicksort and broke
+    ties by position, making AP(len-ctl) unreproducible.
+    """
+    rx = midrank(x)
+    rc = midrank(control)
     slope, intercept = np.polyfit(rc, rx, 1)
     return rx - (slope * rc + intercept)
 
 
 def spearman(x: np.ndarray, y: np.ndarray) -> Tuple[Optional[float], Optional[float]]:
     """Spearman rho + two-sided p (t approximation; diagnostics only)."""
-    rx = np.argsort(np.argsort(x)).astype(float)
-    ry = np.argsort(np.argsort(y)).astype(float)
+    rx = midrank(x)
+    ry = midrank(y)
     n = len(x)
     if n < 4:
         return None, None
@@ -245,41 +281,69 @@ def ecusum_finalize(frame_rows: List[Dict[str, Any]]) -> Dict[str, Any]:
         seq = r.get("ecusum_a_seq")
         if not seq:
             continue
-        r["ecusum_cusum_s_max"] = cusum(seq)
+        # c:: prefix so the winner-table column filter picks these up;
+        # previously they were computed but silently dropped from scoring.
+        r["c::ecusum_cusum_s_max"] = cusum(seq)
         shuffled = list(seq)
         rng.shuffle(shuffled)
-        r["ecusum_cusum_s_shuf_max"] = cusum(shuffled)
+        r["c::ecusum_cusum_s_shuf_max"] = cusum(shuffled)
     return {"mu0": mu0, "lam": lam, "n_cc_token_pool": int(pooled.size)}
 
 
 # ------------------------------------------------------------------ KnowNo
 
-def knono_report(frame_rows: List[Dict[str, Any]]) -> Dict[str, Any]:
-    rows = [r for r in frame_rows if r.get("c::kono_pool_mass_top5") is not None]
+def knono_report(frame_rows: List[Dict[str, Any]], keep_mask: Optional[np.ndarray] = None) -> Dict[str, Any]:
+    """KnowNo diagnostics on the TRIGGER SUBSET (C->W vs C->C).  The previous
+    build ran over the whole 900-row frame with a random half split, so its
+    '317/354' numbers were not on the prereg's 161-row eval set."""
+    rows = [r for i, r in enumerate(frame_rows)
+            if (keep_mask is None or bool(keep_mask[i]))
+            and r.get("c::kono_pool_mass_top5") is not None]
     if not rows:
         return {}
-    # |C| histogram at a swept q-hat; split-half session-grouped calibration
     sessions = sorted({r["session_id"] for r in rows})
     rng = np.random.default_rng(11)
     half = set(rng.choice(sessions, size=max(1, len(sessions) // 2), replace=False))
     cal = [r for r in rows if r["session_id"] in half]
     ev = [r for r in rows if r["session_id"] not in half]
-    out: Dict[str, Any] = {"n_rows": len(rows), "top5_truncation": True}
-    # kappa on calibration: 1 - f_hat of the emitted token is degenerate
-    # without full pool probabilities; we report the pool-mass distribution
-    # and the |C| histogram under a pool-mass threshold proxy.
+    out: Dict[str, Any] = {"n_rows": len(rows), "top5_truncation": True,
+                           "n_cal": len(cal), "n_ev": len(ev),
+                           "n_cal_sessions": len(half), "n_ev_sessions": len(sessions) - len(half)}
     masses = np.array([r["c::kono_pool_mass_top5"] for r in rows])
     out["pool_mass_quantiles"] = {
         str(q): round(float(np.percentile(masses, q)), 4) for q in (10, 50, 90)
     }
+    # |C| histogram at a swept q-hat (pool-mass proxy, documented)
     sizes = []
     for r in ev:
         m = r["c::kono_pool_mass_top5"]
-        sizes.append(1 + int(m < 0.9))  # degenerate |C| proxy; documented
+        sizes.append(1 + int(m < 0.9))
     out["c_size_histogram_ev"] = {str(v): sizes.count(v) for v in sorted(set(sizes))}
+    # split-half conformal with the ACHIEVED error reported next to the
+    # nominal eps (kappa proxy = 1 - top pool prob; top-5 truncated, so this
+    # is a documented proxy, not a coverage claim)
+    eps_nom = 0.25
+    if cal and ev:
+        kappas = sorted(1.0 - (r.get("c::kono_top_pool_prob") or 0.0) for r in cal)
+        n_cal = len(kappas)
+        q_idx = min(n_cal - 1, max(0, math.ceil((n_cal + 1) * (1 - eps_nom)) - 1))
+        q_hat = kappas[q_idx]
+        # a session 'needs help' (set > 1) iff its kappa exceeds q-hat; the
+        # achieved quantity is the empirical false-fire rate on C->C rows
+        cc_ev = [r for r in ev if r.get("label_cw") == 0]
+        cw_ev = [r for r in ev if r.get("label_cw") == 1]
+        fire_cc = sum(1 for r in cc_ev if (1.0 - (r.get("c::kono_top_pool_prob") or 0.0)) > q_hat)
+        fire_cw = sum(1 for r in cw_ev if (1.0 - (r.get("c::kono_top_pool_prob") or 0.0)) > q_hat)
+        out["conformal_proxy"] = {
+            "eps_nominal": eps_nom, "q_hat": round(float(q_hat), 4),
+            "n_cal": n_cal,
+            "achieved_fire_rate_cc": round(fire_cc / max(1, len(cc_ev)), 4),
+            "achieved_coverage_cw": round(fire_cw / max(1, len(cw_ev)), 4),
+        }
     out["note"] = ("top-5 truncated: full pool renormalization needs top_logprobs "
                    "over the pool; |C| is a pool-mass proxy, conformal numbers "
-                   "are diagnostic only per prereg")
+                   "are diagnostic only per prereg; computed on the trigger "
+                   "subset (C->W vs C->C), session-grouped split halves")
     return out
 
 
@@ -326,98 +390,137 @@ def score_feature(
     frame: List[Dict[str, Any]], col: str, sessions: np.ndarray,
     labels: np.ndarray, keep: np.ndarray,
 ) -> Optional[Dict[str, Any]]:
+    """Complete-case scoring: every statistic runs on the rows where THIS
+    feature is actually defined (no median fill).  n_scored and the subset's
+    own prevalence are reported so the winner clauses can compare against the
+    right base rate instead of the 900-frame 0.1033."""
     vals = np.array([frame[i].get(col) if frame[i].get(col) is not None else np.nan
-                     for i in range(len(frame))], dtype=float)
-    v = vals[keep]
-    y = labels[keep]
-    s = sessions[keep]
-    if np.all(np.isnan(v)) or len(np.unique(v[~np.isnan(v)])) < 2:
+                     for i in range(len(frame))], dtype=float)[keep]
+    y_all = labels[keep]
+    s_all = sessions[keep]
+    scored = ~np.isnan(vals)
+    n_scored = int(scored.sum())
+    if n_scored < 10:
         return None
-    med = float(np.nanmedian(v))
-    v_filled = np.where(np.isnan(v), med, v)
+    v = vals[scored]
+    y = y_all[scored]
+    s = s_all[scored]
+    if len(np.unique(v)) < 2 or int(y.sum()) == 0 or int((y == 0).sum()) == 0:
+        return None
+    prevalence = float(y.mean())
     orientation = ORIENTATIONS.get(col.split("::")[-1], 1)
-    risk = -v_filled if orientation < 0 else v_filled
+    risk = -v if orientation < 0 else v
 
     ap = auprc(risk, y)
     ar = auroc(risk, y)
     ap_lo, ap_hi = clustered_bootstrap(risk, y, s, auprc)
     ar_lo, ar_hi = clustered_bootstrap(risk, y, s, auroc)
 
-    # S0 twin
+    # S0 twin on the paired complete-case rows (feature AND twin both defined)
     s0_col = col.replace("c::", "s0::", 1)
     delta = None
-    s0_any = any(frame[i].get(s0_col) is not None for i in range(len(frame)))
-    if s0_col != col and s0_any:
-        v0 = np.array([frame[i].get(s0_col) if frame[i].get(s0_col) is not None else np.nan
-                       for i in range(len(frame))], dtype=float)[keep]
-        if not np.all(np.isnan(v0)) and len(np.unique(v0[~np.isnan(v0)])) >= 2:
-            v0f = np.where(np.isnan(v0), float(np.nanmedian(v0)), v0)
-            risk0 = -v0f if orientation < 0 else v0f
-            d_point, d_lo, d_hi = paired_delta_bootstrap(risk, risk0, y, s)
+    n_paired = 0
+    if s0_col != col:
+        v0_all = np.array([frame[i].get(s0_col) if frame[i].get(s0_col) is not None else np.nan
+                           for i in range(len(frame))], dtype=float)[keep]
+        pair_mask = scored & ~np.isnan(v0_all)
+        n_paired = int(pair_mask.sum())
+        v0 = v0_all[pair_mask]
+        if n_paired >= 10 and len(np.unique(v0)) >= 2 \
+                and int(y_all[pair_mask].sum()) > 0 and int((y_all[pair_mask] == 0).sum()) > 0:
+            risk0 = -v0 if orientation < 0 else v0
+            d_point, d_lo, d_hi = paired_delta_bootstrap(
+                risk[pair_mask[scored]], risk0, y_all[pair_mask], s_all[pair_mask])
             delta = {"point": round(d_point, 4), "ci_lo": round(d_lo, 4) if d_lo is not None else None,
-                     "ci_hi": round(d_hi, 4) if d_hi is not None else None}
+                     "ci_hi": round(d_hi, 4) if d_hi is not None else None, "n_paired": n_paired}
 
-    # length control
-    control = np.array([frame[i].get("n_generated") or 0 for i in range(len(frame))], dtype=float)[keep]
-    resid = rank_residualize(v_filled, control)
+    # length control: residualize the ORIENTED risk (not the raw value), and
+    # compare against the LEN-only score on the same rows
+    control = np.array([frame[i].get("n_generated") or 0 for i in range(len(frame))],
+                       dtype=float)[keep][scored]
+    resid = rank_residualize(risk, control)
     ap_resid = auprc(resid, y)
-    rho_len, p_len = spearman(v_filled, control)
+    ap_len_only = auprc(control, y)  # longer => more likely cap-censored => risk
+    rho_len, p_len = spearman(risk, control)
 
-    # stratified
-    cens = np.array([bool(frame[i].get("censored")) for i in range(len(frame))])[keep]
+    # stratified by censoring (same complete-case rows)
+    cens = np.array([bool(frame[i].get("censored")) for i in range(len(frame))])[keep][scored]
     ap_uncens = auprc(risk[~cens], y[~cens]) if (~cens).sum() > 10 else None
     ap_cens = auprc(risk[cens], y[cens]) if cens.sum() > 10 else None
+    prev_uncens = float(y[~cens].mean()) if (~cens).sum() > 0 else None
 
-    # matched-fire-rate operating point vs parse baseline
-    pf = np.array([bool(frame[i].get("parse_fail_fire")) for i in range(len(frame))])[keep]
+    # matched-fire-rate operating point vs parse baseline (same rows)
+    pf = np.array([bool(frame[i].get("parse_fail_fire")) for i in range(len(frame))])[keep][scored]
     pf_rate = float(pf.mean())
-    thresh = float(np.quantile(risk, 1.0 - pf_rate))
+    thresh = float(np.quantile(risk, 1.0 - pf_rate)) if pf_rate < 1.0 else float(np.max(risk))
     op = operating_point(risk, y, thresh)
     op["baseline_fire_rate"] = round(pf_rate, 4)
 
     base_cov = int((pf & (y == 1)).sum())
     base_fr = int((pf & (y == 0)).sum())
+    base_prec = round(base_cov / int(pf.sum()), 4) if pf.sum() else None
 
     return {
         "feature": col,
         "orientation": orientation,
+        "n_scored": n_scored,
+        "eval_prevalence": round(prevalence, 4),
         "auprc": None if ap is None else round(ap, 4),
         "auprc_ci": [None if ap_lo is None else round(ap_lo, 4), None if ap_hi is None else round(ap_hi, 4)],
         "auroc": None if ar is None else round(ar, 4),
         "auroc_ci": [None if ar_lo is None else round(ar_lo, 4), None if ar_hi is None else round(ar_hi, 4)],
-        "base_rate": 0.1033,
+        "base_rate_900": 0.1033,
         "delta_vs_s0": delta,
         "spearman_vs_len": None if rho_len is None else round(rho_len, 4),
         "spearman_vs_len_p": None if p_len is None else round(p_len, 6),
         "auprc_length_controlled": None if ap_resid is None else round(ap_resid, 4),
+        "auprc_len_only": None if ap_len_only is None else round(ap_len_only, 4),
         "auprc_uncensored": None if ap_uncens is None else round(ap_uncens, 4),
+        "uncens_prevalence": None if prev_uncens is None else round(prev_uncens, 4),
         "auprc_censored": None if ap_cens is None else round(ap_cens, 4),
         "matched_rate_op": op,
-        "parse_baseline": {"coverage": base_cov, "false_resets": base_fr,
-                           "precision": round(base_cov / max(1, int(pf.sum())), 4)},
+        "parse_baseline": {"coverage": base_cov, "false_resets": base_fr, "precision": base_prec},
         "sweep": sweep(risk, y),
     }
 
 
 def verdict(entry: Dict[str, Any]) -> str:
-    """The 4.0 winner rule, applied mechanically."""
+    """The 4.0 winner rule, applied mechanically.
+
+    Prevalence amendment (disclosed in the report): every clause compares
+    against the prevalence of the exact row set that statistic was computed
+    on — the feature's complete-case set for the CI clause, the same set for
+    the LEN clause, and the uncensored slice for the direction clause.  The
+    900-frame 0.1033 stays in the table as a reference column only; comparing
+    subset APs against it made all three clauses vacuous (min CI lower bound
+    across the old table was 0.404).
+    """
     if entry.get("auprc") is None:
         return "n/a"
+    if entry.get("orientation") == 0:
+        return "control (no asserted direction)"
+    prev = entry.get("eval_prevalence")
     ap_lo = (entry["auprc_ci"] or [None, None])[0]
     d = entry.get("delta_vs_s0") or {}
     d_lo = d.get("ci_lo")
     unc = entry.get("auprc_uncensored")
+    prev_unc = entry.get("uncens_prevalence")
+    ap_resid = entry.get("auprc_length_controlled")
+    ap_len_only = entry.get("auprc_len_only")
     base = entry.get("parse_baseline") or {}
     op = entry.get("matched_rate_op") or {}
     beats_base = (op.get("coverage", 0) > (base.get("coverage") or 0)
                   and (op.get("precision") or 0) > (base.get("precision") or 0)
                   and (base.get("false_resets") or 0) >= op.get("false_resets", 0))
-    above_base_rate = ap_lo is not None and ap_lo > 0.1033
+    above_prevalence = prev is not None and ap_lo is not None and ap_lo > prev
     s0_ok = d_lo is not None and d_lo > 0
-    length_ok = (entry.get("auprc_length_controlled") is not None
-                 and entry["auprc_length_controlled"] > 0.1033)
-    unc_ok = unc is not None and unc > 0.1033
-    live = beats_base and above_base_rate and s0_ok and length_ok and unc_ok
+    # prereg: increment over the relative-length control, not just above a
+    # base rate — the residualized AP must beat the LEN-only score on the
+    # same rows
+    len_ok = (ap_resid is not None and ap_len_only is not None
+              and ap_resid > ap_len_only)
+    unc_ok = unc is not None and prev_unc is not None and unc > prev_unc
+    live = beats_base and above_prevalence and s0_ok and len_ok and unc_ok
     return "LIVE" if live else "not-live"
 
 
@@ -442,7 +545,8 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     stats = census(label_frame, manifest)
     cusum_cal = ecusum_finalize(frame)
-    knono = knono_report(frame)
+    keep_pre = np.array([r["label_cw"] in (0, 1) for r in frame])
+    knono = knono_report(frame, keep_mask=keep_pre)
 
     keep = np.array([r["label_cw"] in (0, 1) for r in frame])
     labels = np.array([1 if r["label_cw"] == 1 else 0 for r in frame])[keep]
@@ -450,16 +554,27 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     # baseline row first
     pf = np.array([bool(r.get("parse_fail_fire")) for r in frame])[keep]
+    n_pf_fires = int(pf.sum())
     baseline_entry = {
         "feature": "baseline::parse_fail_only",
+        "n_scored": int(keep.sum()),
+        "eval_prevalence": round(float(labels.mean()), 4),
         "auprc": round(auprc(pf.astype(float), labels), 4),
         "auroc": round(auroc(pf.astype(float), labels), 4),
         "parse_baseline": {"coverage": int((pf & (labels == 1)).sum()),
                            "false_resets": int((pf & (labels == 0)).sum()),
-                           "precision": round(float(pf[labels == 1].mean() if pf.any() else 0), 4)},
+                           # precision = of the fires, the fraction that are
+                           # true C->W (35/63-class number); the old code
+                           # reported coverage of positives (35/93) here
+                           "precision": (round(int((pf & (labels == 1)).sum()) / n_pf_fires, 4)
+                                         if n_pf_fires else None)},
     }
-    # LEN control row
-    len_entry = score_feature(frame, "c::n_generated", session_clusters([r["session_id"] for r in frame]),
+    # LEN control row: n_generated lives in the frame's meta columns, so it is
+    # mirrored under a c:: name for the scorer (previously the row came back
+    # null and no feature was ever required to beat the length control)
+    for r in frame:
+        r["c::len_n_generated"] = r.get("n_generated")
+    len_entry = score_feature(frame, "c::len_n_generated", session_clusters([r["session_id"] for r in frame]),
                               np.array([1 if r["label_cw"] == 1 else 0 for r in frame]), keep)
 
     cols = sorted({k for r in frame for k in r if k.startswith("c::")})
@@ -470,6 +585,39 @@ def main(argv: Optional[List[str]] = None) -> int:
         if e is not None:
             e["verdict"] = verdict(e)
             entries.append(e)
+
+    # score-family dedupe: algebraic restatements of one score (identical
+    # oriented values on identical complete-case row sets) collapse into one
+    # family — the old "12 LIVE" count contained two such duplicate pairs
+    fam_of: Dict[str, str] = {}
+    masks: Dict[str, np.ndarray] = {}
+    vecs: Dict[str, np.ndarray] = {}
+    for e in entries:
+        col = e["feature"]
+        vals = np.array([frame[i].get(col) if frame[i].get(col) is not None else np.nan
+                         for i in range(len(frame))], dtype=float)[keep]
+        m = ~np.isnan(vals)
+        v = vals[m]
+        orient = e.get("orientation", 1)
+        masks[col] = m
+        vecs[col] = -v if orient < 0 else v
+    for i, c1 in enumerate([e["feature"] for e in entries]):
+        if c1 in fam_of:
+            continue
+        fam_of[c1] = c1
+        for c2 in [e["feature"] for e in entries][i + 1:]:
+            if c2 in fam_of or masks[c1].shape != masks[c2].shape:
+                continue
+            if not np.array_equal(masks[c1], masks[c2]):
+                continue
+            v1, v2 = vecs[c1], vecs[c2]
+            if len(np.unique(v1)) < 2:
+                continue
+            rho = float(np.corrcoef(v1, v2)[0, 1]) if len(v1) > 2 else 1.0
+            if abs(rho) > 0.9999 or np.allclose(np.sort(v1), np.sort(v2), atol=1e-9, rtol=0):
+                fam_of[c2] = c1
+    for e in entries:
+        e["score_family"] = fam_of.get(e["feature"], e["feature"])
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -491,16 +639,18 @@ def main(argv: Optional[List[str]] = None) -> int:
              f"frame={len(frame)} trigger-subset={int(keep.sum())} "
              f"(C->W={int(labels.sum())}, C->C={int((labels==0).sum())})",
              f"baseline parse-fail: {baseline_entry['parse_baseline']}", "",
-             "| feature | AUPRC [CI] | AUROC | ΔvsS0 [CI] | AP(len-ctl) | AP(uncens) | verdict |",
-             "|---|---|---|---|---|---|---|"]
+             "| feature | n | prev | AUPRC [CI] | AUROC | ΔvsS0 [CI] | AP(len-ctl) vs AP(len) | AP(uncens) vs prev | verdict |",
+             "|---|---|---|---|---|---|---|---|---|"]
     def fmt(x):
         return "-" if x is None else str(x)
     for e in sorted(entries, key=lambda x: -(x.get("auprc") or -1)):
         d = e.get("delta_vs_s0") or {}
         lines.append(
-            f"| {e['feature']} | {fmt(e['auprc'])} {e['auprc_ci']} | {fmt(e['auroc'])} | "
+            f"| {e['feature']} | {fmt(e.get('n_scored'))} | {fmt(e.get('eval_prevalence'))} | "
+            f"{fmt(e['auprc'])} {e['auprc_ci']} | {fmt(e['auroc'])} | "
             f"{fmt(d.get('point'))} {fmt(d.get('ci_lo'))},{fmt(d.get('ci_hi'))} | "
-            f"{fmt(e.get('auprc_length_controlled'))} | {fmt(e.get('auprc_uncensored'))} | {e.get('verdict')} |")
+            f"{fmt(e.get('auprc_length_controlled'))} vs {fmt(e.get('auprc_len_only'))} | "
+            f"{fmt(e.get('auprc_uncensored'))} vs {fmt(e.get('uncens_prevalence'))} | {e.get('verdict')} |")
     (out_dir / "winner_table.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
     print(f"[t33] scored {len(entries)} features -> {out_dir}/winner_table.{{json,md}}")
     return 0

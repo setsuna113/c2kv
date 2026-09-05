@@ -157,17 +157,17 @@ def test_guard_message_names_the_column():
 # --- parse-failure baseline ------------------------------------------------
 
 def test_parse_fail_baseline_fires_on_unparseable():
-    assert parse_fail_baseline("Action:\n<tool_call>\n" + '{"name":"mcp__x","argu', True) is True
-    assert parse_fail_baseline("plain text, no call at all", True) is True
+    assert parse_fail_baseline("Action:\n<tool_call>\n" + '{"name":"mcp__x","argu') is True
+    assert parse_fail_baseline("plain text, no call at all") is True
 
 
 def test_parse_fail_baseline_silent_on_parseable():
     ok = 'Action:\n<tool_call>\n{"name":"mcp__x","arguments":{"a":"b"}}'
-    assert parse_fail_baseline(ok, True) is False
+    assert parse_fail_baseline(ok) is False
 
 
 def test_parse_fail_baseline_never_fires_when_no_call_expected():
-    assert parse_fail_baseline("anything", False) is False
+    assert parse_fail_baseline("anything") is True  # no gold gate: any unparseable emission fires
 
 
 # --- real frozen battery (integration) -------------------------------------
