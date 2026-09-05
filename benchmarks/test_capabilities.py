@@ -67,6 +67,20 @@ def test_cacheblend_overrides_profile_projection_but_requires_server_capability(
     }]
 
 
+def test_compression_ratio_outside_profile_is_an_explicit_warning(tmp_path):
+    tau2 = _tau2(tmp_path)
+    result = capabilities.preflight(
+        "tau2", "c2kv", "sglang",
+        options={"runner_python": sys.executable},
+        profile={"serving": {"compression_ratios": [4]}},
+        environ={"HOME": str(tmp_path), "TAU2_DIR": str(tau2)},
+    )
+    assert result.ok
+    assert "compression_ratio_out_of_training_profile" in {
+        item.code for item in result.warnings
+    }
+
+
 def test_acebench_history_arms_are_rejected_until_normalizer_feature(tmp_path):
     result = capabilities.preflight(
         "acebench", "c2kv", "sglang",

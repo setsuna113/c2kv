@@ -286,6 +286,19 @@ def _method_capabilities(result: PreflightResult, arm: str, backend: str,
         return
 
     history_arm = bool(spec.compress_history or spec.kv_reuse or spec.text_policy)
+    # This is deliberately a warning: an out-of-training compression ratio is
+    # an explicit ablation, not an invalid request.  It remains visible in the
+    # cell preflight so a matrix result cannot later be described as using the
+    # checkpoint's trained ratio regime.
+    trained_ratios = _profile_value(profile, "compression_ratios")
+    if spec.compress_history and spec.ratio > 0 and isinstance(trained_ratios, (list, tuple)):
+        numeric_ratios = {int(value) for value in trained_ratios
+                          if isinstance(value, (int, float)) and not isinstance(value, bool)}
+        if numeric_ratios and int(spec.ratio) not in numeric_ratios:
+            _append_warning(
+                result, "compression_ratio_out_of_training_profile",
+                f"arm ratio={spec.ratio} is outside profile serving compression_ratios={sorted(numeric_ratios)}",
+            )
     for capability in getattr(spec, "required_capabilities", ()) or ():
         result.requirements.append(Requirement(
             code=f"arm_capability:{capability}", severity="error",
