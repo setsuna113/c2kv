@@ -59,11 +59,35 @@ PERMUTATIONS = 20
 KWTS_HEAD_C = 1e-3
 
 
+_FOLD_MODE: Dict[str, Any] = {"mode": "default", "signatures": {}}
+
+
 def grouped_folds(clusters: np.ndarray, n_folds: int, seed: int = SEED) -> List[np.ndarray]:
+    if _FOLD_MODE["mode"] == "toolset_disjoint":
+        return toolset_disjoint_folds(clusters, _FOLD_MODE["signatures"], n_folds, seed)
     rng = np.random.default_rng(seed)
     uniq = np.unique(clusters)
     rng.shuffle(uniq)
     return [np.isin(clusters, uniq[i::n_folds]) for i in range(n_folds)]
+
+
+def toolset_disjoint_folds(clusters: np.ndarray, signatures: Dict[str, int],
+                           n_folds: int, seed: int = SEED) -> List[np.ndarray]:
+    """toolset_disjoint split (prereg): sessions sharing a tool-set signature
+    land in the SAME fold, so no tool set spans train/test.  signatures maps
+    session-label -> signature id (built from the capture's per-session
+    candidate pools)."""
+    rng = np.random.default_rng(seed)
+    sig_groups: Dict[int, List[int]] = {}
+    for c in np.unique(clusters):
+        sig_groups.setdefault(signatures.get(int(c), -1), []).append(int(c))
+    groups = list(sig_groups.values())
+    rng.shuffle(groups)
+    folds = []
+    for i in range(n_folds):
+        members = [c for g in groups[i::n_folds] for c in g]
+        folds.append(np.isin(clusters, members) if members else np.zeros(len(clusters), dtype=bool))
+    return folds
 
 
 def _lr(c: float):
@@ -290,6 +314,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--features", default="", help="features.jsonl (text-surface cols)")
     parser.add_argument("--out", required=True)
     parser.add_argument("--max_rows", type=int, default=0)
+    parser.add_argument("--split", default="default", choices=["default", "toolset_disjoint"],
+                        help="toolset_disjoint: sessions sharing a tool-pool signature land "
+                             "in the same fold (prereg's second split)")
     args = parser.parse_args(argv)
 
     if not HAS_SKLEARN:
@@ -324,7 +351,26 @@ def main(argv: Optional[List[str]] = None) -> int:
     clusters = session_clusters([lab_by_qid[q]["session_id"] for q in qids_t])
     pf = np.array([bool(lab_by_qid[q].get("parse_fail_fire")) for q in qids_t])
     out: Dict[str, Any] = {"arm": args.arm, "n": len(qids_t), "n_pos": int(y.sum()),
-                           "qids": qids_t, "npz_shards": npz_shards}
+                           "qids": qids_t, "npz_shards": npz_shards, "split": args.split}
+
+    if args.split == "toolset_disjoint":
+        # signature = the session's candidate tool pool (first-token ids from
+        # the capture's IC record); sessions sharing a pool go to one fold
+        sess_sorted = sorted({r["session_id"] for r in label_frame})
+        sess_to_pool: Dict[str, tuple] = {}
+        for rec in steps_rows:
+            sess = (rec.get("meta") or {}).get("session_id") or rec["qid"].rsplit(":", 1)[0]
+            pool = tuple(sorted(((rec.get("ic") or {}).get("candidate_token_ids")) or []))
+            if pool:
+                sess_to_pool[sess] = pool
+        sig_ids: Dict[tuple, int] = {}
+        signatures: Dict[int, int] = {}
+        for si, sess in enumerate(sess_sorted):
+            pool = sess_to_pool.get(sess)
+            signatures[si] = sig_ids.setdefault(pool, len(sig_ids)) if pool is not None else -1
+        _FOLD_MODE["mode"] = "toolset_disjoint"
+        _FOLD_MODE["signatures"] = signatures
+        out["n_toolset_signatures"] = len(sig_ids)
 
     n_layers = None
     if qids_t:
