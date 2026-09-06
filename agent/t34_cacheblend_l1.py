@@ -541,19 +541,17 @@ def probe_row(model: Any, ctx: Dict[str, Any], *,
     return row
 
 
-def load_model_for_probe(model_path: str):  # pragma: no cover - NPU only
+def load_model_for_probe(model_path: str, device_type: str = "npu"):  # pragma: no cover - NPU only
     """Load a checkpoint with EAGER attention.  The probe reads K,V straight out
     of the prefix cache and recomputes one query state by hand, so no hook is
     needed -- which matters because ``forward_with_gist`` bypasses nn.Module
     forward hooks (``modeling_qwen3.py``:303)."""
-    import torch
-    from transformers import AutoModelForCausalLM, AutoTokenizer
+    from t34_model_loader import load_model_and_tokenizer
 
-    tok = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
-    model = AutoModelForCausalLM.from_pretrained(
-        model_path, torch_dtype=torch.bfloat16, attn_implementation="eager",
-        trust_remote_code=True)
-    model.eval()
+    # harness loader: the repo's gist-aware class on the NPU (the compression
+    # pass and the gist K/V do not exist on a plain AutoModelForCausalLM)
+    model, tok, _mode = load_model_and_tokenizer(
+        model_path, device_type=device_type, attn_impl="eager", mode="c2kv")
     return model, tok
 
 
@@ -878,6 +876,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     p.add_argument("--arm", choices=("c2kv", "full"), default="c2kv")
     p.add_argument("--n-rows", type=int, default=24)
     p.add_argument("--probe-layers", type=int, default=8, help="layers 1..L_probe")
+    p.add_argument("--device_type", default="npu", help="npu (default) | cpu")
     p.add_argument("--out", required=True)
 
     p = sub.add_parser("probe", help="[NPU] per-block layer-1 deviation -> jsonl")
@@ -885,6 +884,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     p.add_argument("--model", required=True, help="checkpoint path or hub id")
     p.add_argument("--arm", choices=("c2kv", "full"), default="c2kv")
     p.add_argument("--probe-layer", type=int, default=DEFAULT_PROBE_LAYER)
+    p.add_argument("--device_type", default="npu", help="npu (default) | cpu")
     p.add_argument("--s0-swap", action="store_true",
                    help="also emit the full-arm self-deviation control")
     p.add_argument("--out", required=True)
@@ -902,7 +902,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     if args.cmd in ("pregate", "probe"):  # pragma: no cover - needs torch
         sidecar = load_sidecar(Path(args.sidecar))
-        model, tok = load_model_for_probe(args.model)
+        model, tok = load_model_for_probe(args.model, getattr(args, "device_type", "npu"))
         qids = sorted(sidecar)
         if args.cmd == "pregate":
             # The go/no-go gate is label-free (a between-layer rank correlation),

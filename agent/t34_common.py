@@ -684,11 +684,40 @@ def load_flip_table(path: Path) -> Dict[str, Dict[int, bool]]:
     return out
 
 
-def load_proxy_log(path: Path) -> List[Dict[str, Any]]:
+def proxy_backend_census(rows: Sequence[Dict[str, Any]]) -> Dict[str, int]:
+    """Count of the ``backend`` field over proxy rows (``"missing"`` when absent)."""
+    out: Dict[str, int] = {}
+    for r in rows:
+        key = r.get("backend")
+        key = "missing" if key in (None, "") else str(key)
+        out[key] = out.get(key, 0) + 1
+    return out
+
+
+def load_proxy_log(path: Path, expect_backend: Optional[str] = None) -> List[Dict[str, Any]]:
     """bench proxy request log (one JSON row per request; fields such as
     arm / conv_id / turn / fp / status / error_kind / finish_reason / usage /
-    action / match / diverged_now / re_diverged / tracking_lost ...)."""
-    return load_jsonl(str(path))
+    action / match / diverged_now / re_diverged / tracking_lost ...).
+
+    BACKEND GUARD (2026-09-06 ruling: the bench side uses the sglang serving
+    backend only; the hf_server backend is not to be used).  Rows are checked
+    against ``expect_backend`` -- default ``"sglang"``, overridable with the
+    env var ``T34_PROXY_BACKEND`` (``any`` disables the guard).  On the server
+    the sglang runs stamp ``backend: "sglang"``; the older hf_server-era logs
+    (``proxy_task_{bx,f2*,f3,f4,hr*,up*,z4}_*.jsonl``) carry no backend field at
+    all, so a missing field is treated as NOT sglang and refused with the census.
+    """
+    rows = load_jsonl(str(path))
+    want = expect_backend if expect_backend is not None else os.environ.get("T34_PROXY_BACKEND", "sglang")
+    if want and want != "any" and rows:
+        census = proxy_backend_census(rows)
+        bad = {k: v for k, v in census.items() if k != want}
+        if bad:
+            raise ValueError(
+                f"{path}: proxy log backend census {census} is not all {want!r}; the bench face "
+                "reads sglang-backend runs only (hf_server logs are refused).  Set "
+                "T34_PROXY_BACKEND=any to override deliberately and say so in the report.")
+    return rows
 
 
 # --------------------------------------------------------------------------

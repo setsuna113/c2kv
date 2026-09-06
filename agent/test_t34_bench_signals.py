@@ -503,7 +503,7 @@ def _traj_rows(n_conv=12, n_steps=12, seed=0):
         y = int(i % 2 == 0)
         labels[conv] = y
         for t in range(n_steps):
-            rows.append({"arm": "c2kv", "conv_id": conv, "turn": t, "ts": float(t),
+            rows.append({"backend": "sglang", "arm": "c2kv", "conv_id": conv, "turn": t, "ts": float(t),
                          "entropy": float(rng.normal(2.0 + 1.5 * y, 0.05))})
     return rows, labels
 
@@ -743,11 +743,11 @@ def test_equilibrium_cli_fits_on_the_cc_pool_only(tmp_path, capsys):
         y = int(i % 2 == 0)
         for t in range(6):
             # positives carry a wildly different ratio, so including them moves the fit
-            rows.append({"arm": "c2kv", "conv_id": conv, "turn": t, "ts": float(t),
+            rows.append({"backend": "sglang", "arm": "c2kv", "conv_id": conv, "turn": t, "ts": float(t),
                          "gist_tokens": 100.0,
                          "original_tokens": 800.0 + (400.0 * y * t)})
     log = tmp_path / "proxy.jsonl"
-    log.write_text(chr(10).join(json.dumps(r) for r in rows), encoding="utf-8")
+    log.write_text(chr(10).join(json.dumps({"backend": "sglang", **r}) for r in rows), encoding="utf-8")
     labels = tmp_path / "labels.json"
     labels.write_text(json.dumps({"c%d" % i: int(i % 2 == 0) for i in range(8)}),
                       encoding="utf-8")
@@ -800,7 +800,7 @@ def test_equilibrium_cli_completes_the_fire_rule_on_real_dynamics(tmp_path, caps
             rows.append({"arm": "c2kv", "conv_id": conv, "turn": t,
                          "gist_tokens": 100.0, "original_tokens": 100.0 * float(zt)})
     log = tmp_path / "proxy.jsonl"
-    log.write_text(chr(10).join(json.dumps(r) for r in rows), encoding="utf-8")
+    log.write_text(chr(10).join(json.dumps({"backend": "sglang", **r}) for r in rows), encoding="utf-8")
     labels = tmp_path / "labels.json"
     labels.write_text(json.dumps(labels_map), encoding="utf-8")
     out = tmp_path / "eq.json"
@@ -827,7 +827,7 @@ def test_equilibrium_reports_the_four_component_bench_face(tmp_path, capsys):
              "original_tokens": 800.0, "dropped_docs": [1], "repair_frame": 3.0}
             for t in range(6)]
     log = tmp_path / "proxy.jsonl"
-    log.write_text(chr(10).join(json.dumps(r) for r in rows), encoding="utf-8")
+    log.write_text(chr(10).join(json.dumps({"backend": "sglang", **r}) for r in rows), encoding="utf-8")
     out = tmp_path / "eq.json"
     assert B.main(["equilibrium", "--proxy-log", str(log), "--reps", "20",
                    "--out", str(out)]) == 0
@@ -845,7 +845,7 @@ def test_equilibrium_aborts_when_the_chosen_z_is_absent(tmp_path, capsys):
     rows = [{"arm": "c2kv", "conv_id": "c0", "turn": t, "gist_tokens": 100.0,
              "original_tokens": 800.0} for t in range(6)]
     log = tmp_path / "proxy.jsonl"
-    log.write_text(chr(10).join(json.dumps(r) for r in rows), encoding="utf-8")
+    log.write_text(chr(10).join(json.dumps({"backend": "sglang", **r}) for r in rows), encoding="utf-8")
     rc = B.main(["equilibrium", "--proxy-log", str(log), "--z", "hybrid_tail",
                  "--reps", "20"])
     printed = json.loads(capsys.readouterr().out)

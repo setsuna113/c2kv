@@ -1481,13 +1481,13 @@ def _build_prefix_factory(args: argparse.Namespace,
     """
     import torch
     import eval_agent_history_c2kv as HH
-    from transformers import AutoModelForCausalLM, AutoTokenizer
+    from t34_model_loader import load_model_and_tokenizer
 
-    tokenizer = AutoTokenizer.from_pretrained(args.model, trust_remote_code=True)
-    model = AutoModelForCausalLM.from_pretrained(
-        args.model, torch_dtype=torch.bfloat16, attn_implementation="eager",
-        trust_remote_code=True)
-    model.eval()
+    # harness loader: the repo's gist-aware class on the NPU (a plain
+    # AutoModelForCausalLM drops gist_q_proj, which --query-proj gist needs)
+    model, tokenizer, _mode = load_model_and_tokenizer(
+        args.model, device_type=getattr(args, "device_type", "npu"), attn_impl="eager",
+        mode="c2kv")
 
     def build_prefix(qid: str) -> Optional[Dict[str, Any]]:
         rec = sidecar.get(qid)
@@ -1612,6 +1612,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     p.add_argument("--max-doc-length", type=int, default=768)
     p.add_argument("--max-doc-num", type=int, default=16)
     p.add_argument("--override-ratio", type=int, default=8)
+    p.add_argument("--device_type", default="npu", help="npu (default) | cpu")
     p.add_argument("--out", required=True)
 
     p = sub.add_parser("detect-heads", help="Eq. score_agg -> frozen head table")

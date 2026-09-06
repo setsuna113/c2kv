@@ -162,3 +162,20 @@ def test_load_flip_table_accepts_raw_ksweep_rows(tmp_path):
     p.write_text(chr(10).join(json.dumps(r) for r in rows) + chr(10), encoding='utf-8')
     ft = load_flip_table(p)
     assert ft == {'s:1': {0: False, 2: True}, 's:2': {1: True}}
+
+
+def test_load_proxy_log_refuses_non_sglang_backends(tmp_path, monkeypatch):
+    import json, pytest
+    from t34_common import load_proxy_log, proxy_backend_census
+    good = tmp_path / 'sg.jsonl'; bad = tmp_path / 'hf.jsonl'
+    good.write_text(chr(10).join(json.dumps({'backend': 'sglang', 'arm': 'c2kv', 'turn': i}) for i in range(3)) + chr(10), encoding='utf-8')
+    bad.write_text(chr(10).join(json.dumps({'arm': 'c2kv', 'turn': i}) for i in range(2)) + chr(10) + json.dumps({'backend': 'hf_server'}) + chr(10), encoding='utf-8')
+    monkeypatch.delenv('T34_PROXY_BACKEND', raising=False)
+    assert len(load_proxy_log(good)) == 3
+    with pytest.raises(ValueError) as e:
+        load_proxy_log(bad)
+    assert 'missing' in str(e.value) and 'hf_server' in str(e.value)
+    assert proxy_backend_census([{'backend': None}, {'backend': 'sglang'}]) == {'missing': 1, 'sglang': 1}
+    monkeypatch.setenv('T34_PROXY_BACKEND', 'any')
+    assert len(load_proxy_log(bad)) == 3
+    assert len(load_proxy_log(bad, expect_backend='any')) == 3

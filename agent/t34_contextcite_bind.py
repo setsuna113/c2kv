@@ -49,7 +49,9 @@ CONFIGURATION (the factories take no arguments): environment variables
   T34_CC_SPAN           payload (default) | full
   T34_CC_LEDGER         where the binding writes its per-qid ledger jsonl
 
-Everything except :class:`Binding` is pure and unit-tested on a torch-free box.
+The raw and sham factories share one ``_Runtime`` (model, rows, sidecar store and the
+per-qid state), so the pass loads the model once and compresses each qid once.
+Everything except ``_Runtime`` / ``Binding`` is pure and unit-tested on a torch-free box.
 """
 from __future__ import annotations
 
@@ -146,12 +148,14 @@ def env_config(env: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
 # the binding (torch; server only)
 # ---------------------------------------------------------------------------
 
-class Binding:  # pragma: no cover - torch + NPU
-    """Callable ``score_fn(qid, v)`` with a ``state_fingerprint()`` method."""
+class _Runtime:  # pragma: no cover - torch + NPU
+    """Everything the raw and sham bindings SHARE: the loaded model, the
+    frozen rows, the sidecar store, and the per-qid state (one compression
+    forward with sidecar capture, prepared once per qid and reused by both
+    placements -- ``run_attribution`` scores every design point through the
+    raw scorer and then through the sham scorer on the SAME qid)."""
 
-    def __init__(self, placement: str, cfg: Optional[Dict[str, Any]] = None) -> None:
-        if placement not in ("raw", "sham"):
-            raise ValueError(placement)
+    def __init__(self, cfg: Optional[Dict[str, Any]] = None) -> None:
         import argparse
         import torch  # noqa: F401
         import d_ksweep_driver as KD
@@ -160,16 +164,14 @@ class Binding:  # pragma: no cover - torch + NPU
         from t34_common import FrozenAssets
         from t34_extra_forward import load_capture_steps
 
-        self.placement = placement
         self.cfg = cfg or env_config()
         self.HH = HH
         ns = argparse.Namespace(**{k: self.cfg[k] for k in (
             "model", "base_model", "tokenizer", "dataset_path", "device_type", "attn_impl",
             "ratio", "max_doc_length", "max_doc_num", "max_new_tokens")})
         self.hargs = KD._harness_args(ns)
-        frame = FrozenAssets(Path(self.cfg["root"])).load()
-        self.frame = frame
-        qids = [r["qid"] for r in frame.trigger_subset()]
+        self.frame = FrozenAssets(Path(self.cfg["root"])).load()
+        qids = [r["qid"] for r in self.frame.trigger_subset()]
         self.hargs.qid_allowlist = set(qids)
         self.tokenizer = HH._load_tokenizer(self.hargs)
         examples, _ = HH._load_examples(self.hargs, self.tokenizer)
@@ -182,31 +184,34 @@ class Binding:  # pragma: no cover - torch + NPU
         HH.D_INTERVENE = {}
         cap = self.cfg.get("capture_steps")
         self.capture_index = load_capture_steps(Path(cap)) if cap and Path(cap).exists() else {}
-        self.corpus_ids: List[int] = []
-        if placement == "sham":
-            text = Path(self.cfg["corpus"]).read_text(encoding="utf-8")
-            self.corpus_ids = list(self.tokenizer(text, add_special_tokens=False)["input_ids"])
-            if not self.corpus_ids:
-                raise RuntimeError("empty neutral corpus")
-        self._qid: Optional[str] = None
-        self._state: Optional[Dict[str, Any]] = None
-        self._prompt_ids: List[int] = []
-        self._ids: List[int] = []
-        self._slice: Tuple[int, int] = (0, 0)
-        self._ledger_path = Path(self.cfg["ledger"])
-        self._ledger_path.parent.mkdir(parents=True, exist_ok=True)
+        self._corpus_ids: Optional[List[int]] = None
+        self.qid: Optional[str] = None
+        self.state: Optional[Dict[str, Any]] = None
+        self.prompt_ids: List[int] = []
+        self.ids: List[int] = []
+        self.slice: Tuple[int, int] = (0, 0)
+        self.ledger_path = Path(self.cfg["ledger"])
+        self.ledger_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # -- per-qid state ------------------------------------------------------
-    def _release(self) -> None:
-        if self._qid is not None:
-            self.store.release(self._qid)
-        self._qid, self._state = None, None
+    @property
+    def corpus_ids(self) -> List[int]:
+        if self._corpus_ids is None:
+            text = Path(self.cfg["corpus"]).read_text(encoding="utf-8")
+            self._corpus_ids = list(self.tokenizer(text, add_special_tokens=False)["input_ids"])
+            if not self._corpus_ids:
+                raise RuntimeError("empty neutral corpus")
+        return self._corpus_ids
+
+    def release(self) -> None:
+        if self.qid is not None:
+            self.store.release(self.qid)
+        self.qid, self.state = None, None
         self.HH._clear_device_cache(self.cfg["device_type"])
 
-    def _ensure(self, qid: str) -> None:
-        if self._qid == qid and self._state is not None:
+    def ensure(self, qid: str) -> None:
+        if self.qid == qid and self.state is not None:
             return
-        self._release()
+        self.release()
         from d1_arms import prepare_d_contract_state
         from t33_spanmap import spans_from_generation
         from t34_extra_forward import emitted_ids_for_row
@@ -231,35 +236,49 @@ class Binding:  # pragma: no cover - torch + NPU
             prompt_ids = prompt_ids[-self.hargs.max_prompt_tokens:]
         spans = spans_from_generation(lambda i: tok.decode(i, skip_special_tokens=True), ids)
         a, b, kind = scored_slice(spans, len(ids), self.cfg["span"])
-        self._qid, self._state = qid, state
-        self._prompt_ids, self._ids, self._slice = list(prompt_ids), list(ids), (a, b)
-        with self._ledger_path.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps({"qid": qid, "placement": self.placement, "ids_source": src,
-                                 "n_ids": len(ids), "scored_slice": [a, b], "span_kind": kind,
+        self.qid, self.state = qid, state
+        self.prompt_ids, self.ids, self.slice = list(prompt_ids), list(ids), (a, b)
+        with self.ledger_path.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps({"qid": qid, "ids_source": src, "n_ids": len(ids),
+                                 "scored_slice": [a, b], "span_kind": kind,
                                  "n_docs": len(state["doc_ids"])}) + "\n")
 
-    def state_fingerprint(self) -> Any:
-        st = self._state
+    def fingerprint(self) -> Any:
+        st = self.state
         if st is None:
             return None
         keys0 = st["gist_cache"].layers[0].keys
-        return (self._qid, tuple(int(o) for o in st["offsets"]), int(st["total_gist_tokens"]),
-                float(keys0.float().sum().item()), tuple(self._ids[:8]), self._slice)
+        return (self.qid, tuple(int(o) for o in st["offsets"]), int(st["total_gist_tokens"]),
+                float(keys0.float().sum().item()), tuple(self.ids[:8]), self.slice)
 
-    # -- one ablation ---------------------------------------------------------
+
+class Binding:  # pragma: no cover - torch + NPU
+    """Callable ``score_fn(qid, v)`` with a ``state_fingerprint()`` method;
+    ``placement`` selects the raw_keepG restore or the equal-length sham."""
+
+    def __init__(self, placement: str, runtime: _Runtime) -> None:
+        if placement not in ("raw", "sham"):
+            raise ValueError(placement)
+        self.placement = placement
+        self.rt = runtime
+
+    def state_fingerprint(self) -> Any:
+        return self.rt.fingerprint()
+
     def __call__(self, qid: str, v: Sequence[int]) -> Optional[float]:
         import torch
         import t33_svip_gamma as SV
         from d1_arms import _cat_span_to_cache, _finish_prefix, _merge_system_gist, _sidecar_raw_span
 
-        self._ensure(qid)
-        st = self._state
+        rt = self.rt
+        rt.ensure(qid)
+        st = rt.state
         assert st is not None
         d = len(st["doc_ids"])
         if len(v) != d:
             raise ValueError(f"{qid}: design d={len(v)} but the harness grid has {d} blocks")
         ks = blocks_from_v(v)
-        model, HH = self.model, self.HH
+        model, HH = rt.model, rt.HH
         cache = _merge_system_gist(st, model.config)  # fresh cache from immutable tensors
         device, dtype = cache.layers[0].keys.device, cache.layers[0].keys.dtype
         span_tokens = 0
@@ -267,12 +286,12 @@ class Binding:  # pragma: no cover - torch + NPU
             anchor = int(st["offsets"][k])
             length = len(st["doc_ids"][k])
             if self.placement == "raw":
-                span = _sidecar_raw_span(self.store, qid, k, anchor, model.model.rotary_emb, device, dtype)
+                span = _sidecar_raw_span(rt.store, qid, k, anchor, model.model.rotary_emb, device, dtype)
                 cache = _cat_span_to_cache(cache, span)
             else:
-                sham_ids = neutral_span_ids(self.corpus_ids, qid, k, length)
+                sham_ids = neutral_span_ids(rt.corpus_ids, qid, k, length)
                 sham_t = torch.tensor([sham_ids], dtype=torch.long, device=model.device)
-                sham_cache, _, _ = HH._prefill_ids_no_past(model, sham_t, self.hargs.gist_attn_impl)
+                sham_cache, _, _ = HH._prefill_ids_no_past(model, sham_t, rt.hargs.gist_attn_impl)
                 cache = HH._append_span_cache(model, cache, sham_cache, anchor, list(range(length)))
                 del sham_cache
             span_tokens += length
@@ -282,29 +301,32 @@ class Binding:  # pragma: no cover - torch + NPU
             d_mode_info={"k_policy": "contextcite", "k_star": None, "blocks": ks,
                          "placement": self.placement, "injected": bool(ks)},
             t_load_sec=0.0)
-        out = SV._score_under_prefix(model, self.tokenizer, prefix, self._prompt_ids, self._ids,
-                                     self.cfg["attn_impl"])
+        out = SV._score_under_prefix(model, rt.tokenizer, prefix, rt.prompt_ids, rt.ids,
+                                     rt.cfg["attn_impl"])
         del prefix, cache
-        HH._clear_device_cache(self.cfg["device_type"])
+        HH._clear_device_cache(rt.cfg["device_type"])
         if out is None:
             return None
-        a, b = self._slice
+        a, b = rt.slice
         chosen = out["chosen_logprob"]
         return float(sum(chosen[a:b + 1]))
 
 
-_BINDINGS: Dict[str, Any] = {}
+_RUNTIME: Dict[str, Any] = {}
+
+
+def _runtime() -> _Runtime:  # pragma: no cover - server
+    if "rt" not in _RUNTIME:
+        _RUNTIME["rt"] = _Runtime()
+    return _RUNTIME["rt"]
 
 
 def factory():  # pragma: no cover - server
-    """score_fn bound to the raw_keepG multi-block restore."""
-    if "raw" not in _BINDINGS:
-        _BINDINGS["raw"] = Binding("raw")
-    return _BINDINGS["raw"]
+    """score_fn bound to the raw_keepG multi-block restore (shares the loaded
+    model, rows and per-qid state with ``sham_factory``)."""
+    return Binding("raw", _runtime())
 
 
 def sham_factory():  # pragma: no cover - server
     """score_fn bound to the equal-length neutral-span restore (the sham floor)."""
-    if "sham" not in _BINDINGS:
-        _BINDINGS["sham"] = Binding("sham")
-    return _BINDINGS["sham"]
+    return Binding("sham", _runtime())

@@ -505,17 +505,19 @@ def make_greedy_decode_fn(model: Any, tokenizer: Any):  # pragma: no cover - NPU
     return decode_fn
 
 
-def load_model_for_detection(model_path: str):  # pragma: no cover - NPU only
+def load_model_for_detection(model_path: str, *, device_type: str = "npu",
+                             mode: str = "auto"):  # pragma: no cover - NPU only
     """Load a checkpoint with EAGER attention (fused kernels return no
-    probabilities -- arXiv 2404.15574's signal is unreachable without them)."""
-    import torch
-    from transformers import AutoModelForCausalLM, AutoTokenizer
+    probabilities -- arXiv 2404.15574's signal is unreachable without them)
+    through the harness loader (``t34_model_loader``): the gist checkpoints
+    need the repo's model class (plain AutoModelForCausalLM drops every gist
+    parameter) and the model must live on the NPU, not the CPU."""
+    from t34_model_loader import load_model_and_tokenizer
 
-    tok = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
-    model = AutoModelForCausalLM.from_pretrained(
-        model_path, torch_dtype=torch.bfloat16, attn_implementation="eager",
-        trust_remote_code=True)
-    model.eval()
+    model, tok, resolved = load_model_and_tokenizer(
+        model_path, device_type=device_type, attn_impl="eager", mode=mode)
+    print(json.dumps({"loader": "harness", "mode": resolved, "device_type": device_type,
+                      "model": model_path}))
     return model, tok
 
 
@@ -628,6 +630,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     p.add_argument("--depths", type=int, default=len(DEFAULT_DEPTHS))
     p.add_argument("--count-mode", choices=("set", "positions"), default="set")
     p.add_argument("--max-new-tokens", type=int, default=32)
+    p.add_argument("--device_type", default="npu", help="npu (default) | cpu")
+    p.add_argument("--mode", default="auto", choices=("auto", "full", "c2kv"),
+                   help="harness model class: auto = c2kv for gist checkpoints, full otherwise")
     p.add_argument("--out", required=True)
 
     p = sub.add_parser("compare", help="pairwise Pearson r + heatmaps")
@@ -644,7 +649,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     args = ap.parse_args(argv)
 
     if args.cmd == "detect":  # pragma: no cover - needs torch + a checkpoint
-        model, tok = load_model_for_detection(args.model)
+        model, tok = load_model_for_detection(args.model, device_type=args.device_type,
+                                              mode=args.mode)
         lengths = [int(x) for x in args.lengths.split(",")]
         depths = tuple(round(i / args.depths, 4) for i in range(args.depths))
         table = detect_on_model(
