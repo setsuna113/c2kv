@@ -373,38 +373,83 @@ def load_capture_steps(path: Path) -> Dict[str, Dict[str, Any]]:
     return out
 
 
-def load_anchor_hiddens(arm_dir: Path, *, anchor: str = "name_first") -> Dict[str, Dict[str, Any]]:
+def anchor_labels_from_steps(row: Optional[Dict[str, Any]]) -> Tuple[List[str], List[bool]]:
+    """Anchor labels (+ validity) from a t33 ``steps.jsonl`` row.
+
+    The p0 shards on the server carry ``anchor_hidden`` [L, A, H] but NO
+    ``anchor_labels`` key (the labels were persisted into the shards only from
+    the runner's fix round 3c1d96c on, i.e. in the top-up shards); the steps
+    row has them as ``anchors``: a list of ``[label, position]`` (optionally a
+    third ``valid`` element) in the same A order, or a dict with ``labels`` /
+    ``valid`` lists.  Returns ([], []) when the row carries neither.
+    """
+    if not row:
+        return [], []
+    anchors = row.get("anchors")
+    if isinstance(anchors, dict):
+        labels = [str(x) for x in (anchors.get("labels") or [])]
+        valid = anchors.get("valid")
+        valid = [bool(x) for x in valid] if valid is not None else [True] * len(labels)
+        return labels, valid
+    labels: List[str] = []
+    valid: List[bool] = []
+    for a in anchors or []:
+        if isinstance(a, (list, tuple)) and a:
+            labels.append(str(a[0]))
+            valid.append(bool(a[2]) if len(a) > 2 else (a[1] is not None))
+        elif isinstance(a, dict):
+            labels.append(str(a.get("label")))
+            valid.append(bool(a.get("valid", a.get("position") is not None)))
+    return labels, valid
+
+
+def load_anchor_hiddens(arm_dir: Path, *, anchor: str = "name_first",
+                        steps_index: Optional[Dict[str, Dict[str, Any]]] = None,
+                        ) -> Dict[str, Dict[str, Any]]:
     """Read every ``*.hid.npz`` shard in ``arm_dir``; return qid -> anchor record.
 
     Shard keys are ``"<qid>::<field>"`` (t33_capture.flush_hidden_store) with
-    fields ``anchor_hidden`` [L, A, H] fp16, ``anchor_labels``,
-    ``anchor_positions``, ``anchor_valid``, ``layers``.  Later shards win, which
-    matches the t33 top-up convention (the top-up shards are the good ones).
+    fields ``anchor_hidden`` [L, A, H] fp16 and, on the newer shards,
+    ``anchor_labels`` / ``anchor_positions`` / ``anchor_valid`` / ``layers``.
+    When a shard has no ``anchor_labels`` the labels come from the matching
+    ``steps.jsonl`` row (``steps_index``, see :func:`anchor_labels_from_steps`);
+    a qid with neither is skipped.  Later shards win, which matches the t33
+    top-up convention (the top-up shards are the good ones).
     """
     arm_dir = Path(arm_dir)
     per_qid: Dict[str, Dict[str, Any]] = {}
+    wanted = ("anchor_hidden", "anchor_labels", "anchor_positions", "anchor_valid", "layers")
     for shard in sorted(arm_dir.glob("*.hid.npz")):
         with np.load(shard, allow_pickle=True) as data:
             for key in data.files:
                 if "::" not in key:
                     continue
                 qid, field_name = key.rsplit("::", 1)
+                # npz members are decompressed lazily: touching only the anchor
+                # fields keeps the multi-GB gist_oproj / query_* members on disk
+                # (materialising every member made the 900-row build take >10 min
+                # and tens of GB on the server, 2026-09-06)
+                if field_name not in wanted:
+                    continue
                 per_qid.setdefault(qid, {})[field_name] = data[key]
     out: Dict[str, Dict[str, Any]] = {}
     for qid, entry in per_qid.items():
         hidden = entry.get("anchor_hidden")
-        labels = entry.get("anchor_labels")
-        if hidden is None or labels is None:
+        if hidden is None:
             continue
-        labels = [str(x) for x in np.atleast_1d(labels).tolist()]
+        labels_raw = entry.get("anchor_labels")
+        valid = entry.get("anchor_valid")
+        if labels_raw is not None:
+            labels = [str(x) for x in np.atleast_1d(labels_raw).tolist()]
+            valid_list = ([bool(x) for x in np.atleast_1d(valid).tolist()]
+                          if valid is not None else [True] * len(labels))
+        else:
+            labels, valid_list = anchor_labels_from_steps(
+                (steps_index or {}).get(qid))
         if anchor not in labels:
             continue
         a = labels.index(anchor)
-        valid = entry.get("anchor_valid")
-        ok = True
-        if valid is not None:
-            vv = np.atleast_1d(valid).tolist()
-            ok = bool(vv[a]) if a < len(vv) else False
+        ok = bool(valid_list[a]) if a < len(valid_list) else False
         arr = np.asarray(hidden)          # [L, A, H]
         if arr.ndim != 3 or a >= arr.shape[1]:
             continue
@@ -1841,7 +1886,8 @@ def _cmd_dump_lm_head(args: argparse.Namespace) -> int:
 def _cmd_build_inputs(args: argparse.Namespace) -> int:
     frame = C.FrozenAssets(Path(args.root)).load()
     capture = load_capture_steps(Path(args.capture_dir) / args.arm / args.steps_name)
-    hiddens = load_anchor_hiddens(Path(args.capture_dir) / args.arm, anchor=args.anchor)
+    hiddens = load_anchor_hiddens(Path(args.capture_dir) / args.arm, anchor=args.anchor,
+                                  steps_index=capture)
     qids = [r["qid"] for r in frame.labels]
     sessions = [r["session_id"] for r in frame.labels]
     inputs = build_head_inputs(qids, sessions, capture, hiddens,

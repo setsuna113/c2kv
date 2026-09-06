@@ -961,3 +961,20 @@ def test_decode_span_scalars_five_columns_and_none_when_span_absent():
     assert math.isclose(sc["span_seq_nll"], 0.85)
     sc2 = H.decode_span_scalars({"steps": steps, "spans": {}})
     assert all(v is None for v in sc2.values())
+
+
+def test_anchor_labels_fall_back_to_the_steps_row(tmp_path):
+    import numpy as np, json
+    import t34_heads as H
+    arm = tmp_path / 'c2kv'; arm.mkdir()
+    hid = np.random.default_rng(0).standard_normal((4, 3, 8)).astype(np.float16)
+    np.savez(arm / 'p0.hid.npz', **{'q:1::anchor_hidden': hid, 'q:1::query_last': hid[:, 0, :]})
+    steps = {'q:1': {'qid': 'q:1', 'anchors': [['first', 0], ['name_first', 10], ['last', 127]]}}
+    out = H.load_anchor_hiddens(arm, anchor='name_first', steps_index=steps)
+    assert set(out) == {'q:1'} and out['q:1']['valid'] is True
+    assert out['q:1']['hidden'].shape == (4, 8) and out['q:1']['layers'] == [0, 1, 2, 3]
+    assert np.allclose(out['q:1']['hidden'], hid[:, 1, :].astype(np.float32))
+    assert H.load_anchor_hiddens(arm, anchor='name_first') == {}        # no labels anywhere -> skipped
+    labels, valid = H.anchor_labels_from_steps({'anchors': {'labels': ['a', 'b'], 'valid': [1, 0]}})
+    assert labels == ['a', 'b'] and valid == [True, False]
+    assert H.anchor_labels_from_steps({'anchors': [['x', None]]}) == (['x'], [False])
