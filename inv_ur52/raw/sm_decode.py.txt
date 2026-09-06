@@ -1,0 +1,56 @@
+** WARNING: connection is not using a post-quantum key exchange algorithm.
+** This session may be vulnerable to "store now, decrypt later" attacks.
+** The server may need to be upgraded. See https://openssh.com/pq.html
+
+Authorized users only. All activities may be monitored and reported.
+            "matched_synthetic_from_result",
+        )
+    return None, "missing_reference"
+
+
+@dataclass
+class CandidateDecode:
+    action: list[str]
+    status: str
+    decode_error: str | None
+    empty_response: bool
+    tool_call_parse_success: bool
+
+
+def decode_candidate(decoder: Any, raw_text: str) -> CandidateDecode:
+    empty_response = not bool((raw_text or "").strip())
+    try:
+        action = decoder.decode_execute(raw_text or "", has_tool_call_tag=False)
+    except Exception as exc:
+        return CandidateDecode(
+            action=[],
+            status="decode_error",
+            decode_error=str(exc),
+            empty_response=empty_response,
+            tool_call_parse_success=False,
+        )
+    if is_empty_execute_response(action):
+        if empty_response:
+            status = "empty_response"
+        elif "<tool_call" in (raw_text or ""):
+            status = "invalid_format"
+        else:
+            status = "empty_action"
+        return CandidateDecode(
+            action=[],
+            status=status,
+            decode_error=None,
+            empty_response=empty_response,
+            tool_call_parse_success=False,
+        )
+    return CandidateDecode(
+        action=list(action),
+        status="decoded_action",
+        decode_error=None,
+        empty_response=False,
+        tool_call_parse_success=True,
+    )
+
+
+def action_matches(candidate_action: Any, reference_action: Any) -> bool:
+    return normalize_action_text(candidate_action or []) == normalize_action_text(

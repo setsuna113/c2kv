@@ -1,0 +1,34 @@
+diff --git a/c2kv_eval/adapters/bfcl_history_drift.py b/c2kv_eval/adapters/bfcl_history_drift.py
+--- a/c2kv_eval/adapters/bfcl_history_drift.py
++++ b/c2kv_eval/adapters/bfcl_history_drift.py
+@@ -1,6 +1,25 @@
++def _normalize_tool_for_sglang(tool: dict[str, Any]) -> dict[str, Any]:
++    # Mirror sglang's Tool/Function.model_dump(): the server parses the HTTP
++    # payload through pydantic (dropping unknown keys such as "response",
++    # filling strict from its default) and renders the chat template from
++    # model_dump() with fixed field order description/name/parameters/strict
++    # inside the {"type": "function", "function": {...}} wrapper.
++    fn = tool.get("function") if isinstance(tool, dict) and "function" in tool else tool
++    fn = {
++        "description": fn.get("description"),
++        "name": fn.get("name"),
++        "parameters": fn.get("parameters"),
++        "strict": fn.get("strict", False),
++    }
++    return {"type": "function", "function": fn}
++
++
+ def _tool_payload(functions: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
+-    return convert_to_tool(
+-        list(functions),
+-        GORILLA_TO_OPENAPI,
+-        ModelStyle.OPENAI_COMPLETIONS,
+-    )
++    return [
++        _normalize_tool_for_sglang(t)
++        for t in convert_to_tool(
++            list(functions),
++            GORILLA_TO_OPENAPI,
++            ModelStyle.OPENAI_COMPLETIONS,
++        )
++    ]

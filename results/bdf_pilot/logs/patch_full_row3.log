@@ -1,0 +1,115 @@
+/home/liuyancheng/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/liuyancheng/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0/aarch64-linux/ascend_ops_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/liuyancheng/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/liuyancheng/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0/aarch64-linux/ascend_ops_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+08/23/2026 09:14:10 - INFO - eval_agent_history_c2kv - Loading tokenizer from /home/liuyancheng/c2kv/models/Qwen3-4B-Instruct-2507 use_fast=True
+08/23/2026 09:16:57 - INFO - __main__ - Loaded 2051 joint eval examples
+08/23/2026 09:16:57 - INFO - __main__ - qid manifest /home/liuyancheng/c2kv/outputs_lyc/g_joint/bdf/patch_qid.json: 1 examples kept
+08/23/2026 09:16:57 - INFO - __main__ - Loading base model for mode=full model=/home/liuyancheng/c2kv/models/Qwen3-4B-Instruct-2507
+[transformers] The argument `trust_remote_code` is to be used with Auto classes. It has no effect here and is ignored.
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+Loading weights:   0%|          | 0/398 [00:00<?, ?it/s]Loading weights:   0%|          | 1/398 [00:00<00:43,  9.17it/s]Loading weights:  26%|██▌       | 104/398 [00:00<00:00, 587.55it/s]Loading weights:  42%|████▏     | 168/398 [00:00<00:00, 605.34it/s]Loading weights:  62%|██████▏   | 245/398 [00:00<00:00, 658.46it/s]Loading weights:  81%|████████  | 322/398 [00:00<00:00, 688.66it/s]Loading weights:  98%|█████████▊| 392/398 [00:00<00:00, 590.22it/s]Loading weights: 100%|██████████| 398/398 [00:00<00:00, 591.13it/s]
+[transformers] [1mQwen3ForCausalLM LOAD REPORT[0m from: /home/liuyancheng/c2kv/models/Qwen3-4B-Instruct-2507
+Key                                                | Status  | 
+---------------------------------------------------+---------+-
+model.layers.{0...35}.self_attn.gist_v_proj.weight | MISSING | 
+model.layers.{0...35}.self_attn.gist_k_proj.weight | MISSING | 
+model.layers.{0...35}.self_attn.gist_q_proj.weight | MISSING | 
+model.gist_embed_tokens.weight                     | MISSING | 
+
+Notes:
+- MISSING:	those params were newly initialized because missing from the checkpoint. Consider training on your downstream task.
+joint/full:   0%|          | 0/1 [00:00<?, ?it/s]08/23/2026 09:17:28 - WARNING - __main__ - Skipping sample after OOM: condition=joint mode=full ratio=1 qid=9f000393d262_3a5fdfe0:9
+joint/full: 100%|██████████| 1/1 [00:28<00:00, 28.90s/it]joint/full: 100%|██████████| 1/1 [00:28<00:00, 28.90s/it]
+08/23/2026 09:17:29 - INFO - __main__ - Wrote predictions to /home/liuyancheng/c2kv/outputs_lyc/g_joint/bdf/patch_full_row.jsonl
+08/23/2026 09:17:29 - INFO - __main__ - Wrote summary to /home/liuyancheng/c2kv/outputs_lyc/g_joint/bdf/patch_full_row.summary.json
+{
+  "model": "/home/liuyancheng/c2kv/outputs_lyc/g_joint/fixed_joint",
+  "base_model": "/home/liuyancheng/c2kv/models/Qwen3-4B-Instruct-2507",
+  "dataset_path": "/home/liuyancheng/c2kv/datasets/agent-llm-traces-v2",
+  "split": "eval",
+  "separate": false,
+  "checkpoint_tool": null,
+  "checkpoint_history": null,
+  "separate_generator": null,
+  "gist_init_fractions": {},
+  "conditions": [
+    "joint"
+  ],
+  "modes": [
+    "full"
+  ],
+  "ratios": [
+    8
+  ],
+  "history_selection": "tail",
+  "max_doc_length": 1024,
+  "max_doc_num": 24,
+  "max_tool_chunks": 16,
+  "legacy_mode_caps": false,
+  "min_doc_num": 2,
+  "max_tool_definition_tokens": 32000,
+  "max_system_length": 512,
+  "max_prompt_tokens": 1920,
+  "max_baseline_input_tokens": 16000,
+  "chunk_policy": "agent-turn",
+  "delay_recent_turns": 0,
+  "qid_manifest": "/home/liuyancheng/c2kv/outputs_lyc/g_joint/bdf/patch_qid.json",
+  "qid_manifest_missing": 0,
+  "num_examples": 1,
+  "do_sample": false,
+  "temperature": null,
+  "top_p": null,
+  "gen_seed": 0,
+  "num_rows": 1,
+  "results": [
+    {
+      "condition": "joint",
+      "mode": "full",
+      "ratio": 1,
+      "num_examples": 1,
+      "num_valid": 0,
+      "num_skipped": 1,
+      "skip_reasons": {
+        "oom": 1
+      },
+      "exact_match": 0.0,
+      "tool_name_accuracy": 0.0,
+      "tool_call_rate": 0.0,
+      "response_type_accuracy": 0.0,
+      "argument_name_f1": 0.0,
+      "argument_value_f1": 0.0,
+      "avg_text_token_f1": 0.0,
+      "avg_rouge_l_f1": 0.0,
+      "avg_doc_tokens": 0.0,
+      "avg_doc_chunks": 0.0,
+      "avg_gist_tokens": 0.0,
+      "avg_compressed_tokens": 0.0,
+      "avg_prompt_tokens": 0.0,
+      "avg_raw_recent_tokens": 0.0,
+      "avg_history_wrapped_tokens": 0.0,
+      "avg_history_content_tokens": 0.0,
+      "avg_generated_tokens": 0.0,
+      "avg_actual_compression_ratio": 0.0,
+      "token_weighted_actual_compression_ratio": 0.0,
+      "avg_system_prefill_sec": 0.0,
+      "avg_tool_compress_sec": 0.0,
+      "avg_full_prefill_sec": 0.0,
+      "avg_blend_sec": 0.0,
+      "avg_ttft_sec": 0.0,
+      "avg_generate_sec": 0.0,
+      "avg_tbt_sec": 0.0,
+      "token_weighted_tbt_sec": 0.0,
+      "avg_total_sec": 0.0,
+      "missing_metric_fields": {}
+    }
+  ]
+}

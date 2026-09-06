@@ -2,6 +2,25 @@
 
 C2KV enables **independently prefilled text segments to be compressed into compact KV Cache representations** that can be correctly concatenated and recognized by downstream tasks. The core idea is to freeze the original model weights, introduce additional QKV Projection layers, and use C2KV as Memory Slots. Each text chunk is independently compressed into C2KV entries with properly repositioned RoPE (Rotary Position Embedding), so that multiple C2KV caches can be seamlessly stitched together for downstream inference.
 
+### Active development
+
+`task/bdf-pilot` is the consolidation branch for experiment D, experiment G
+and the modular benchmark system. Serving lives in the separate
+`sglang-c2kv` repository on its corresponding `task/bdf-pilot` branch.
+
+| Work | Entry points |
+|---|---|
+| D repair experiments | `agent/d_contract_driver.py`, `agent/d_ksweep_driver.py`, `agent/eval_agent_history_c2kv.py` |
+| G training and evaluation | `agent/train_joint_next_action_c2kv.py`, `start_h200.sh`, `agent/eval_history_dev_c2kv_h200.sh` |
+| Shared end-to-end evaluation | [`benchmarks/run.py`](benchmarks/run.py), [`benchmarks/README.md`](benchmarks/README.md) |
+| Server validation | [`benchmarks/ops/README.md`](benchmarks/ops/README.md) |
+
+Read [`docs/c2kv_semantics.md`](docs/c2kv_semantics.md) before choosing a
+checkpoint's query-projection mode. The current local model fork and the
+original lowercase-qkv implementation use different query projections.
+Historical experiment data remains under `results/` and `inv_*/`; it is not
+an alternative serving implementation.
+
 ### Supported Models
 
 | Architecture | Example Model |

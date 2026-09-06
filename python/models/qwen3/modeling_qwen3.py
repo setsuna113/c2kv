@@ -175,6 +175,20 @@ def eager_attention_forward(
     if attention_mask is not None:
         attn_weights = attn_weights + attention_mask
 
+    # D-line runtime injection (default-off): per-key logit bias (ResKV
+    # log-counts / KeepKV votes / SelKV alpha*logR) and the LESS ledger
+    # fold.  Empty registry -> both hooks are dict lookups returning None
+    # and the path is bit-identical to vanilla.
+    _bias_entry = None
+    try:
+        from inference.attn_bias import get_entry as _get_bias_entry
+
+        _bias_entry = _get_bias_entry(module.layer_idx)
+    except Exception:
+        _bias_entry = None
+    if _bias_entry is not None:
+        attn_weights = _bias_entry.pre_softmax(attn_weights, module.num_key_value_groups)
+
     fully_masked = torch.isneginf(attn_weights).all(dim=-1, keepdim=True)
     fully_masked = fully_masked | (attn_weights == torch.finfo(attn_weights.dtype).min).all(dim=-1, keepdim=True)
     attn_weights = attn_weights.masked_fill(fully_masked, 0.0)
@@ -182,6 +196,8 @@ def eager_attention_forward(
     attn_weights = attn_weights.masked_fill(fully_masked, 0.0)
     attn_weights = nn.functional.dropout(attn_weights, p=dropout, training=module.training)
     attn_output = torch.matmul(attn_weights, value_states)
+    if _bias_entry is not None:
+        attn_output = _bias_entry.post_output(attn_output, query, module.num_key_value_groups)
     attn_output = attn_output.transpose(1, 2).contiguous()
 
     return attn_output, attn_weights

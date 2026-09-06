@@ -1,0 +1,57 @@
+    async def _handle_non_streaming_request(
+        self,
+        adapted_request: GenerateReqInput,
+        request: ChatCompletionRequest,
+        raw_request: Request,
+    ) -> Union[ChatCompletionResponse, ErrorResponse, ORJSONResponse]:
+        """Handle non-streaming chat completion request"""
+        try:
+            ret = await self.tokenizer_manager.generate_request(
+                adapted_request, raw_request
+            ).__anext__()
+        except ValueError as e:
+            return self.create_error_response(str(e))
+
+        if not isinstance(ret, list):
+            ret = [ret]
+
+        self._commit_persistent_history_session(adapted_request, ret)
+
+        response = self._build_chat_response(
+            request,
+            ret,
+            int(time.time()),
+        )
+
+        return response
+
+    def _build_chat_response(
+        self,
+        request: ChatCompletionRequest,
+        ret: List[Dict[str, Any]],
+        created: int,
+    ) -> Union[ChatCompletionResponse, ORJSONResponse]:
+        """Build chat completion response from generation results"""
+        choices = []
+
+        # Build sglext at response level (from first ret_item, as these are per-request)
+        first_ret = ret[0]
+        routed_experts = process_routed_experts_from_ret(first_ret, request)
+        cached_tokens_details = process_cached_tokens_details_from_ret(
+            first_ret, request
+        )
+        response_sglext = None
+@NPU_PREP
+375:    def forward_prepare_npu(self, positions, hidden_states, forward_batch):
+@CAPDEF
+/tmp/zh_exp/python/sglang/srt/model_executor/cuda_graph_runner.py:759:    def capture(self) -> None:
+/tmp/zh_exp/python/sglang/srt/model_executor/cuda_graph_runner.py:839:    def capture_one_batch_size(
+/tmp/zh_exp/python/sglang/srt/model_executor/cuda_graph_runner.py:1245:    def capture(self, is_extend_in_batch: bool):
+@RAWKV_ANCHOR
+1367:        raw_key_values = []
+1536:        if repair_position_ids is None:
+@FILLIDS
+627:        # fill_ids = origin_input_ids + output_ids. Updated if chunked.
+628:        self.fill_ids = []
+882:        # kv_send(req.input_ids[req.start_send_idx:len(req.fill_ids)])
+883:        # start_send_idx = len(req.fill_ids)

@@ -1,4 +1,18 @@
-"""ToolSandbox adapter driven by the official CLI."""
+"""ToolSandbox adapter (official-CLI driver).
+
+The ToolSandbox Python API (Scenario/play/play_and_evaluate) does not expose
+a Scenario.discover(); the supported entrypoint is the ``tool_sandbox`` CLI,
+which runs scenarios against an OpenAI-compatible endpoint configured via
+``OPENAI_BASE_URL`` and writes ``result_summary.json`` per run.  This
+adapter drives that CLI and parses the summaries.
+
+Verified metrics fields (per scenario): similarity / milestone_similarity /
+minefield_similarity / turn_count.  There is no "main_acc".
+
+Usage (benchts venv on the server):
+    python benchmarks/adapters/toolsandbox_adapter.py \
+        --base-url http://127.0.0.1:34002/v1 --out results/bench/ts_full
+"""
 from __future__ import annotations
 
 import argparse
@@ -7,136 +21,185 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-DEFAULT_TS_DIR = Path.home() / "benchmarks" / "ToolSandbox"
-TS_DIR = DEFAULT_TS_DIR
+from adapters.base import RunContext, v1  # noqa: E402
+
+NAME = "toolsandbox"
+TS_DIR = Path(os.environ.get("TS_DIR") or Path.home() / "benchmarks" / "ToolSandbox")
 AGENT = "GPT_4_o_2024_05_13"  # openai_api_agent/openai_api_user role keys
 
 
-def _benchmark_dir() -> Path:
-    resolved = Path(os.environ.get("TOOLSANDBOX_DIR", str(DEFAULT_TS_DIR))).expanduser().resolve()
-    if not (resolved / "pyproject.toml").is_file() or not (resolved / "tool_sandbox").is_dir():
-        raise SystemExit(f"FATAL: TOOLSANDBOX_DIR is not a ToolSandbox checkout: {resolved}")
-    return resolved
+def add_arguments(parser) -> None:
+    """ToolSandbox-only CLI flags (shared ones live in run.py's core block)."""
+    parser.add_argument("--toolsandbox-dir", type=Path, default=None,
+                        help="ToolSandbox checkout (default $TS_DIR)")
+    parser.add_argument("--full", action="store_true",
+                        help="toolsandbox: full suite instead of test mode")
+    parser.add_argument("--ts-scenarios", default="",
+                        help="toolsandbox: comma-separated scenario names "
+                             "for subset runs (-s); overrides --full")
+    parser.add_argument("--ts-agent", default="",
+                        help="toolsandbox: agent role key (default "
+                             "GPT_4_o_2024_05_13 -> openai_api_agent)")
+    parser.add_argument("--ts-user", default="",
+                        help="toolsandbox: user-simulator role key (same default)")
 
 
-def run(
-    base_url: str,
-    out_dir: Path,
-    test_mode: bool = True,
-    agent: str = AGENT,
-    user: str = AGENT,
-    scenarios: Optional[Sequence[str]] = None,
-    num_workers: int = 4,
-) -> Dict[str, Any]:
-    """Run ToolSandbox and collect its official per-scenario similarities."""
-    cwd = _benchmark_dir()
-    out_dir.mkdir(parents=True, exist_ok=True)
-    selected = list(scenarios or [])
-    if selected and not test_mode:
-        raise SystemExit("FATAL: ToolSandbox --full cannot be combined with explicit scenarios")
-
-    env = {
-        **os.environ,
-        # run.py is invoked with an absolute benchmark-venv Python, so make
-        # that venv's console script visible without depending on the caller's
-        # activated PATH.
-        "PATH": str(Path(sys.executable).parent) + os.pathsep + os.environ.get("PATH", ""),
-        "OPENAI_API_KEY": "EMPTY",
-        "OPENAI_BASE_URL": base_url.rstrip("/") + "/v1",
-        "NO_PROXY": "127.0.0.1,localhost",
-        "no_proxy": "127.0.0.1,localhost",
-    }
-    cmd = [
-        sys.executable,
-        str(Path(__file__).resolve().parents[1] / "toolsandbox_cli.py"),
-        "--user", user,
-        "--agent", agent,
-        "--parallel", str(num_workers),
-        "-o", str(out_dir.resolve()),
-    ]
-    if selected:
-        cmd += ["--scenarios", *selected]
+def cli_command(out_dir: Path, agent: str = AGENT, user: str = AGENT,
+                test_mode: bool = True,
+                scenarios: "list[str] | None" = None,
+                parallel: "str | None" = None) -> List[str]:
+    """``tool_sandbox`` argv (PINNED).  ``-s names...`` is the subset form
+    (the CLI also takes ``-p`` for parallelism, from $TS_PARALLEL); ``-t``
+    is test mode, and a subset run overrides it."""
+    cmd = ["tool_sandbox", "--user", user, "--agent", agent, "-o", str(out_dir)]
+    if scenarios:
+        cmd += ["-s"] + list(scenarios)
+        if parallel:
+            cmd += ["-p", parallel]
     elif test_mode:
-        cmd.append("--test_mode")
+        cmd.append("-t")
+    return cmd
 
-    completed = subprocess.run(cmd, cwd=cwd, env=env)
+
+def split_scenarios(raw) -> "list[str] | None":
+    """``--ts-scenarios a,b`` -> ["a", "b"]; empty -> None (full/test mode)."""
+    if not raw:
+        return None
+    items = ([s.strip() for s in raw.split(",")] if isinstance(raw, str)
+             else [str(s).strip() for s in raw])
+    return [s for s in items if s] or None
+
+
+def harness_env(base_url: str, user_base_url: str = "") -> Dict[str, str]:
+    """``user_base_url`` (default: the raw upstream endpoint) routes the
+    user simulator OUT of the arm proxy via TOOLSANDBOX_USER_BASE_URL —
+    the patched openai_api_user role reads it.  Routing the simulator
+    through the compression arm made every historical TS number an
+    agent+user joint degradation (audit BLOCKER)."""
+    return {
+        **os.environ,
+        "OPENAI_API_KEY": "EMPTY",
+        "OPENAI_API_KEY_USER": "EMPTY",
+        "OPENAI_BASE_URL": v1(base_url),
+        # default: same endpoint the proxy itself fronts (full mode)
+        "TOOLSANDBOX_USER_BASE_URL": v1(user_base_url) if user_base_url
+        else os.environ.get("TOOLSANDBOX_USER_BASE_URL", v1(base_url)),
+        "NO_PROXY": "127.0.0.1,localhost", "no_proxy": "127.0.0.1,localhost",
+    }
+
+
+def run(ctx: RunContext) -> Dict[str, Any]:
+    """Drive the official ``tool_sandbox`` CLI against the arm proxy.
+
+    No cost join: see ``COST_JOIN`` below.
+    """
+    summary = run_ts(
+        ctx.base_url, ctx.out_dir,
+        test_mode=not ctx.options.get("full", False),
+        agent=ctx.opt("ts_agent", AGENT), user=ctx.opt("ts_user", AGENT),
+        # the user simulator must NOT ride the arm proxy: route it to the
+        # raw upstream endpoint (tau2 already does the same split)
+        user_base_url=ctx.user_base_url,
+        scenarios=split_scenarios(ctx.opt("ts_scenarios", "")),
+        benchmark_dir=ctx.opt("toolsandbox_dir"), python=ctx.opt("bench_python"),
+    )
+    summary["cost_join"] = COST_JOIN
+    return summary
+
+
+# Why ToolSandbox gets no per-task cost columns: ``result_summary.json`` is
+# the only artefact this adapter reads and it carries per-scenario SCORES
+# (similarity / milestone_similarity / minefield_similarity / turn_count,
+# tool_sandbox/cli/utils.py:196-208), no messages — so nothing here can
+# rebuild the message prefix ``proxy.conversation_id`` keys on.
+COST_JOIN = ("not joinable: result_summary.json holds per-scenario scores "
+             "only, no messages to key the request log by")
+
+
+def run_ts(base_url: str, out_dir: Path, test_mode: bool = True,
+           agent: str = AGENT, user: str = AGENT, expected: int = None,
+           benchmark_dir: Path = None, user_base_url: str = "",
+           scenarios: "list[str] | None" = None,
+           python: "str | None" = None) -> Dict[str, Any]:
+    """Run the CLI and collect ``result_summary.json``."""
+    ts_dir = (Path(benchmark_dir) if benchmark_dir else TS_DIR).resolve()
+    out_dir = Path(out_dir).resolve()
+    out_dir.mkdir(parents=True, exist_ok=True)
+    env = harness_env(base_url, user_base_url)
+    # The console script's directory is otherwise first on sys.path, and an
+    # editable installation may silently import a different checkout.
+    env["PYTHONPATH"] = os.pathsep.join(filter(None, (
+        str(ts_dir.resolve()), env.get("PYTHONPATH"))))
+    cmd = cli_command(out_dir, agent=agent, user=user, test_mode=test_mode,
+                      scenarios=scenarios,
+                      parallel=os.environ.get("TS_PARALLEL"))
+    cmd[0] = str(Path(python or sys.executable).parent / "tool_sandbox")
+    completed = subprocess.run(cmd, cwd=ts_dir, env=env)
     if completed.returncode != 0:
         raise SystemExit(f"FATAL: tool_sandbox CLI exited {completed.returncode}")
     summary = collect(out_dir)
-    if all(row.get("semantic_score") is None for row in summary.get("rows", [])):
-        raise SystemExit("FATAL: every ToolSandbox scenario failed before scoring")
-    summary.update(
-        {
-            "benchmark": "toolsandbox",
-            "num_workers": num_workers,
-            "test_mode": bool(test_mode and not selected),
-            "selected_scenarios": selected,
-            "error_count": sum(row.get("semantic_score") is None for row in summary.pop("rows", [])),
-        }
-    )
+    # terminal-state check (acceptance 1): a scenario that never ran must
+    # fail the run, not shrink the denominator
+    n_scored = summary.get("n") if isinstance(summary, dict) else None
+    if expected is not None and n_scored is not None and n_scored < expected:
+        raise SystemExit(
+            f"FATAL: ts terminal-state check failed: n_scored={n_scored} < n_total={expected}")
+    if expected is not None:
+        print(f"TERMINAL-STATE ts: n_scored={n_scored} n_total={expected}")
     return summary
 
 
 def collect(out_dir: Path) -> Dict[str, Any]:
     summaries = sorted(out_dir.glob("agent_*/result_summary.json"))
     if not summaries:
-        raise SystemExit(
-            f"FATAL: no result_summary.json under {out_dir} - the official CLI produced nothing"
-        )
+        raise SystemExit(f"FATAL: no result_summary.json under {out_dir} — "
+                         "the CLI produced nothing (check TS run logs)")
     from metrics import aggregate  # noqa: E402
 
     rows: List[Dict[str, Any]] = []
-    official_sources: List[str] = []
+    crashed: List[str] = []
     for path in summaries:
-        official_sources.append(str(path))
         data = json.loads(path.read_text(encoding="utf-8"))
         for scenario in data.get("per_scenario_results") or []:
             if scenario.get("traceback"):
-                rows.append(
-                    {
-                        "task_id": scenario.get("name"),
-                        "semantic_score": None,
-                        "error": str(scenario.get("exception_type") or "traceback"),
-                    }
-                )
+                # a crashed scenario FAILS the run — _mean used to skip
+                # these None rows and the upstream recorded a silent 0
+                crashed.append(str(scenario.get("name")))
                 continue
-            rows.append(
-                {
-                    "task_id": scenario.get("name"),
-                    "semantic_score": scenario.get("similarity"),
-                    "milestone_similarity": scenario.get("milestone_similarity"),
-                    "minefield_similarity": scenario.get("minefield_similarity"),
-                    "turn_count": scenario.get("turn_count"),
-                    "protocol_legal": None,
-                }
-            )
-    summary = aggregate(rows, cluster_key="task_id")
-    summary["rows"] = rows
-    summary["official_results"] = official_sources
-    return summary
-
-
-def main(argv=None) -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--base-url", required=True)
-    parser.add_argument("--out", type=Path, required=True)
-    parser.add_argument("--full", action="store_true")
-    parser.add_argument("--num-workers", type=int, default=4)
-    parser.add_argument("--scenarios", nargs="*", default=None)
-    args = parser.parse_args(argv)
-    summary = run(
-        args.base_url,
-        args.out,
-        test_mode=not args.full,
-        scenarios=args.scenarios,
-        num_workers=args.num_workers,
-    )
-    print(json.dumps(summary, indent=2, ensure_ascii=False))
+            rows.append({
+                "task_id": scenario.get("name"),
+                # official semantic column: dialogue similarity to the
+                # reference (milestone-weighted); minefield = violations
+                "semantic_score": scenario.get("similarity"),
+                "milestone_similarity": scenario.get("milestone_similarity"),
+                "minefield_similarity": scenario.get("minefield_similarity"),
+                "turn_count": scenario.get("turn_count"),
+                "protocol_legal": None,  # TS has no tool-call legality metric
+            })
+    if crashed:
+        raise SystemExit(
+            f"FATAL: ts terminal-state check failed: {len(crashed)} scenario(s) "
+            f"crashed (traceback in result_summary): {', '.join(crashed[:10])}")
+    return aggregate(rows, cluster_key="task_id")
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--base-url", required=True)
+    parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--full", action="store_true",
+                        help="run the full suite instead of test mode")
+    parser.add_argument("--agent", default=AGENT,
+                        help="agent role key (openai_api_agent config entry)")
+    parser.add_argument("--user", default=AGENT,
+                        help="user-simulator role key (openai_api_user config entry)")
+    parser.add_argument("--ts-dir", type=Path, default=None,
+                        help="ToolSandbox checkout (default $TS_DIR or ~/benchmarks/ToolSandbox)")
+    args = parser.parse_args()
+    summary = run_ts(args.base_url, args.out, test_mode=not args.full,
+                     agent=args.agent, user=args.user, benchmark_dir=args.ts_dir)
+    print(json.dumps(summary, indent=2, ensure_ascii=False))

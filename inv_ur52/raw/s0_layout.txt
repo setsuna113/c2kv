@@ -1,0 +1,161 @@
+** WARNING: connection is not using a post-quantum key exchange algorithm.
+** This session may be vulnerable to "store now, decrypt later" attacks.
+** The server may need to be upgraded. See https://openssh.com/pq.html
+
+Authorized users only. All activities may be monitored and reported.
+=== ls -la RUN_ROOT ===
+total 5204
+drwxrwxr-x. 17 zhuyuhan zhuyuhan    4096 Sep  3 04:28 .
+drwxrwxr-x. 57 zhuyuhan zhuyuhan    4096 Sep  4 19:16 ..
+drwxrwxr-x.  5 zhuyuhan zhuyuhan    4096 Sep  3 03:55 append_masked_w2
+drwxrwxr-x.  5 zhuyuhan zhuyuhan    4096 Sep  3 03:14 append_w2
+-rw-rw-r--.  1 zhuyuhan zhuyuhan    6108 Sep  3 04:28 append_w2_diagnosis.json
+drwxrwxr-x.  5 zhuyuhan zhuyuhan    4096 Sep  3 03:14 append_w2_hint
+drwxrwxr-x.  5 zhuyuhan zhuyuhan    4096 Sep  3 00:32 c2kv
+drwxrwxr-x.  5 zhuyuhan zhuyuhan    4096 Sep  3 00:32 full
+drwxrwxr-x.  5 zhuyuhan zhuyuhan    4096 Sep  3 03:55 hint_only
+drwxrwxr-x.  2 zhuyuhan zhuyuhan    4096 Sep  3 03:51 logs
+-rw-rw-r--.  1 zhuyuhan zhuyuhan    2497 Sep  3 04:28 quick_recovery_comparison.csv
+-rw-rw-r--.  1 zhuyuhan zhuyuhan    2460 Sep  3 04:28 quick_recovery_comparison.md
+drwxrwxr-x.  5 zhuyuhan zhuyuhan    4096 Sep  3 02:38 recompute_w2
+drwxrwxr-x.  5 zhuyuhan zhuyuhan    4096 Sep  3 02:38 replace_all
+drwxrwxr-x.  5 zhuyuhan zhuyuhan    4096 Sep  3 01:23 replace_w1
+drwxrwxr-x.  5 zhuyuhan zhuyuhan    4096 Sep  3 02:01 replace_w2
+drwxrwxr-x.  5 zhuyuhan zhuyuhan    4096 Sep  3 02:01 replace_w4
+drwxrwxr-x.  5 zhuyuhan zhuyuhan    4096 Sep  3 00:51 rollback_d1
+drwxrwxr-x.  5 zhuyuhan zhuyuhan    4096 Sep  3 00:51 rollback_d2
+drwxrwxr-x.  5 zhuyuhan zhuyuhan    4096 Sep  3 01:19 rollback_d4
+-rw-rw-r--.  1 zhuyuhan zhuyuhan    1147 Sep  3 00:29 run_manifest.json
+-rw-rw-r--.  1 zhuyuhan zhuyuhan 2702707 Sep  3 04:27 server_6_34660.log
+-rw-rw-r--.  1 zhuyuhan zhuyuhan 2432508 Sep  3 04:28 server_7_34670.log
+-rw-rw-r--.  1 zhuyuhan zhuyuhan   10537 Sep  3 04:28 unified_recovery_comparison.csv
+-rw-rw-r--.  1 zhuyuhan zhuyuhan   57786 Sep  3 04:28 unified_recovery_comparison.json
+-rw-rw-r--.  1 zhuyuhan zhuyuhan    2226 Sep  3 04:28 unified_recovery_comparison.md
+-rw-rw-r--.  1 zhuyuhan zhuyuhan    1322 Sep  3 04:28 unified_recovery_minimal.csv
+-rw-rw-r--.  1 zhuyuhan zhuyuhan    1027 Sep  3 04:28 unified_recovery_minimal.md
+-rw-rw-r--.  1 zhuyuhan zhuyuhan    4715 Sep  3 04:28 unified_recovery_summary_v3.csv
+
+=== per-arm dirs (one level) ===
+--- /home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/append_masked_w2/
+logs
+result
+score
+--- /home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/append_w2/
+logs
+result
+score
+--- /home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/append_w2_hint/
+logs
+result
+score
+--- /home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/c2kv/
+logs
+result
+score
+--- /home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/full/
+logs
+result
+score
+--- /home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/hint_only/
+logs
+result
+score
+--- /home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/logs/
+append_masked_w2.launcher.log
+append_w2_hint.launcher.log
+append_w2.launcher.log
+c2kv.launcher.log
+full.launcher.log
+hint_only.launcher.log
+manifest_write.log
+recompute_w2.launcher.log
+replace_all.launcher.log
+replace_w1.launcher.log
+replace_w2.launcher.log
+replace_w4.launcher.log
+rollback_d1.launcher.log
+rollback_d2.launcher.log
+rollback_d4.launcher.log
+--- /home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/recompute_w2/
+logs
+result
+score
+--- /home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/replace_all/
+logs
+result
+score
+--- /home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/replace_w1/
+logs
+result
+score
+--- /home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/replace_w2/
+logs
+result
+score
+--- /home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/replace_w4/
+logs
+result
+score
+--- /home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/rollback_d1/
+logs
+result
+score
+--- /home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/rollback_d2/
+logs
+result
+score
+--- /home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/rollback_d4/
+logs
+result
+score
+
+=== du -sh top ===
+14M	/home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/append_masked_w2
+13M	/home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/append_w2
+8.0K	/home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/append_w2_diagnosis.json
+14M	/home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/append_w2_hint
+8.6M	/home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/c2kv
+6.5M	/home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/full
+14M	/home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/hint_only
+64K	/home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/logs
+4.0K	/home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/quick_recovery_comparison.csv
+4.0K	/home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/quick_recovery_comparison.md
+14M	/home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/recompute_w2
+12M	/home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/replace_all
+15M	/home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/replace_w1
+14M	/home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/replace_w2
+15M	/home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/replace_w4
+29M	/home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/rollback_d1
+28M	/home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/rollback_d2
+27M	/home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/rollback_d4
+4.0K	/home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/run_manifest.json
+2.6M	/home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/server_6_34660.log
+2.4M	/home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/server_7_34670.log
+12K	/home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/unified_recovery_comparison.csv
+60K	/home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/unified_recovery_comparison.json
+4.0K	/home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/unified_recovery_comparison.md
+4.0K	/home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/unified_recovery_minimal.csv
+4.0K	/home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/unified_recovery_minimal.md
+8.0K	/home/zhuyuhan/project/gorilla/bfcl_runs/unified_recovery_stable52_npu67_20260903_002915/unified_recovery_summary_v3.csv
+
+=== logs dir? ===
+total 68
+drwxrwxr-x.  2 zhuyuhan zhuyuhan 4096 Sep  3 03:51 .
+drwxrwxr-x. 17 zhuyuhan zhuyuhan 4096 Sep  3 04:28 ..
+-rw-rw-r--.  1 zhuyuhan zhuyuhan 1659 Sep  3 04:28 append_masked_w2.launcher.log
+-rw-rw-r--.  1 zhuyuhan zhuyuhan 1647 Sep  3 03:51 append_w2_hint.launcher.log
+-rw-rw-r--.  1 zhuyuhan zhuyuhan 1617 Sep  3 03:44 append_w2.launcher.log
+-rw-rw-r--.  1 zhuyuhan zhuyuhan 1587 Sep  3 00:51 c2kv.launcher.log
+-rw-rw-r--.  1 zhuyuhan zhuyuhan 1587 Sep  3 00:42 full.launcher.log
+-rw-rw-r--.  1 zhuyuhan zhuyuhan 1617 Sep  3 04:27 hint_only.launcher.log
+-rw-rw-r--.  1 zhuyuhan zhuyuhan 1053 Sep  3 00:29 manifest_write.log
+-rw-rw-r--.  1 zhuyuhan zhuyuhan 1670 Sep  3 03:10 recompute_w2.launcher.log
+-rw-rw-r--.  1 zhuyuhan zhuyuhan 1664 Sep  3 03:08 replace_all.launcher.log
+-rw-rw-r--.  1 zhuyuhan zhuyuhan 1658 Sep  3 01:58 replace_w1.launcher.log
+-rw-rw-r--.  1 zhuyuhan zhuyuhan 1658 Sep  3 02:34 replace_w2.launcher.log
+-rw-rw-r--.  1 zhuyuhan zhuyuhan 1658 Sep  3 02:35 replace_w4.launcher.log
+-rw-rw-r--.  1 zhuyuhan zhuyuhan 2691 Sep  3 01:19 rollback_d1.launcher.log
+-rw-rw-r--.  1 zhuyuhan zhuyuhan 2691 Sep  3 01:19 rollback_d2.launcher.log
+-rw-rw-r--.  1 zhuyuhan zhuyuhan 2691 Sep  3 01:47 rollback_d4.launcher.log
+
+=== find eval adapter ===

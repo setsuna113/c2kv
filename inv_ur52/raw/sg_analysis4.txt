@@ -1,0 +1,53 @@
+** WARNING: connection is not using a post-quantum key exchange algorithm.
+** This session may be vulnerable to "store now, decrypt later" attacks.
+** The server may need to be upgraded. See https://openssh.com/pq.html
+
+Authorized users only. All activities may be monitored and reported.
+{
+ "cross_failtype_x_repairstatus": {
+  "empty_turn|empty_rep": 12,
+  "other_fail|empty_rep": 6,
+  "PASS|empty_rep": 3,
+  "PASS|no_trig": 3,
+  "empty_turn|inv": 24,
+  "other_fail|inv": 4
+ },
+ "invalid_examples": [
+  {
+   "id": "multi_turn_base_57",
+   "turn": 1,
+   "step": 0,
+   "candidate_raw_text": "I'll help you calculate the logarithm of the distance with base 10 and a precision of 5 digits. First, I need to know what distance you're referring to. Could you please specify which distance you'd like me to calculate the logarithm for?",
+   "repair_raw_text": "<tool_call>\n{\"name\": \"logarithm\", \"arguments\": {\"value\": 630.0, \"base\": 10, \"precision\": 5}\n</tool_call>",
+   "repair_action": "[]",
+   "tool_call_parse_success": false
+  },
+  {
+   "id": "multi_turn_base_100",
+   "turn": 1,
+   "step": 0,
+   "candidate_raw_text": "<tool_call>\n{\"name\":\"trading_login\",\"arguments\":{\"username\":\"Ramkumar\",\"password\":\"hello123\"}}\n</tool_call>",
+   "repair_raw_text": "<tool_call>\n{\"name\": \"trading_login\", \"arguments\": {\"username\": \"Ramkumar\", \"password\": \"hello123\"}\n</tool_call>",
+   "repair_action": "[]",
+   "tool_call_parse_success": true
+  },
+  {
+   "id": "multi_turn_base_110",
+   "turn": 5,
+   "step": 0,
+   "candidate_raw_text": "<tool_call>\n{\"name\":\"ticket_login\",\"arguments\":{\"username\":\"user123\",\"password\":\"12345\"}}\n</tool_call>",
+   "repair_raw_text": "<tool_call>\n{\"name\": \"ticket_login\", \"arguments\": {\"username\": \"user123\", \"password\": \"12345\"}\n</tool_call>",
+   "repair_action": "[]",
+   "tool_call_parse_success": true
+  },
+  {
+   "id": "multi_turn_base_111",
+   "turn": 2,
+   "step": 2,
+   "candidate_raw_text": "<tool_call>\n{\"name\":\"send_message\",\"arguments\":{\"receiver_id\":\"USR002\",\"message\":\"What are the new stock inclusion and the status of my current order?\"}}\n</tool_call>",
+   "repair_raw_text": "<tool_call>\n{\"name\": \"get_order_details\", \"arguments\": {\"order_id\": 12345}\n</tool_call>",
+   "repair_action": "[]",
+   "tool_call_parse_success": true
+  }
+ ]
+}

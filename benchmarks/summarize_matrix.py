@@ -44,9 +44,10 @@ def _request_log_stats(path_value: Any) -> Dict[str, Any]:
 
 def collect(root: Path, manifest: Dict[str, Any]) -> Dict[str, Any]:
     cells: List[Dict[str, Any]] = []
+    cell_suffix = str(manifest.get("result_cell_suffix") or "")
     for benchmark in manifest.get("benchmarks", []):
         for arm in manifest.get("arms", []):
-            cell_dir = root / f"{benchmark}_{arm}"
+            cell_dir = root / f"{benchmark}_{arm}{cell_suffix}"
             summary_path = cell_dir / f"summary_{arm}.json"
             if not summary_path.is_file():
                 continue

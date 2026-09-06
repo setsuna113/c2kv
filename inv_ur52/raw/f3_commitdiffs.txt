@@ -1,0 +1,52 @@
+** WARNING: connection is not using a post-quantum key exchange algorithm.
+** This session may be vulnerable to "store now, decrypt later" attacks.
+** The server may need to be upgraded. See https://openssh.com/pq.html
+
+Authorized users only. All activities may be monitored and reported.
+commit_1.diff (models/qwen3.py): 593 lines
+commit_2.diff (model_executor/forward_batch_info.py): 123 lines
+commit_3.diff (model_executor/cuda_graph_runner.py): 0 lines
+commit_4.diff (hardware_backend/npu/graph_runner/npu_graph_runner.py): 0 lines
+commit_5.diff (managers/scheduler.py): 886 lines
+commit_6.diff (mem_cache/c2kv_injection.py): 0 lines
+commit_7.diff (mem_cache/c2kv_pool.py): 0 lines
+@@@@@ qwen3 in d42ce815f: projection branch + pre_rope order around line 248/1391
+        if self.use_fused_qk_norm_mrope:
+            # Scale tensors MUST stay on CPU: the C++ kernel uses .item<float>()
+            # which triggers hipMemcpy D2H + sync on CUDA tensors, breaking graph capture.
+            # Explicit device='cpu' is required because SGLang constructs models inside
+            # a `with torch.device('cuda'):` context that changes the default device.
+            self._fused_k_scale = torch.tensor(1.0, dtype=torch.float32, device="cpu")
+            self._fused_v_scale = torch.tensor(1.0, dtype=torch.float32, device="cpu")
+
+    def forward_prepare_native(self, positions, hidden_states):
+        qkv, _ = self.qkv_proj(hidden_states)
+        gist_mask = getattr(
+            getattr(self, "_active_forward_batch", None),
+            "c2kv_use_gist_projection",
+            None,
+        )
+        if (
+            gist_mask is not None
+            and os.environ.get("C2KV_USE_GIST_QUERY_PROJECTION", "1") != "0"
+            and bool(gist_mask.any().item())
+            and hasattr(self, "gist_qkv_proj")
+        ):
+            gist_qkv, _ = self.gist_qkv_proj(hidden_states)
+            if gist_mask.ndim != 1 or gist_mask.shape[0] != qkv.shape[0]:
+            attn_input = layer.input_layernorm(hidden_states)
+            qkv, _ = layer.self_attn.qkv_proj(attn_input)
+            q, k_pre, v = qkv.split(
+                [layer.self_attn.q_size, layer.self_attn.kv_size, layer.self_attn.kv_size],
+                dim=-1,
+            )
+            q, k_pre = apply_qk_norm(
+                q=q,
+                k=k_pre,
+                q_norm=layer.self_attn.q_norm,
+                k_norm=layer.self_attn.k_norm,
+                head_dim=layer.self_attn.head_dim,
+                alt_stream=layer.self_attn.alt_stream,
+            )
+            q, k = layer.self_attn.rotary_emb(positions, q, k_pre)
+            repair_k = k_pre if raw_kv_position_mode == "pre_rope" else k

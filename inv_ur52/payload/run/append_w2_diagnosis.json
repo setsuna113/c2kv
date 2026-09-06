@@ -1,0 +1,198 @@
+{
+  "interpretation": "Append W2 keeps target gist KV visible while appending the same Recent-2 raw KV. If Append has more correct_to_wrong segments than Replace W2, the likely cause is duplicate representation interference, not a missing repair path.",
+  "append_w2": {
+    "counts": {
+      "triggered": 133,
+      "success": 10,
+      "action_wrong_to_correct": 10,
+      "action_wrong_to_wrong": 105,
+      "action_correct_to_wrong": 8,
+      "action_correct_to_correct": 10,
+      "state_wrong_to_correct": 11,
+      "state_wrong_to_wrong": 88,
+      "state_correct_to_wrong": 0,
+      "state_correct_to_correct": 34,
+      "action_net_recovery_gain": 2,
+      "state_net_recovery_gain": 11
+    },
+    "correct_to_wrong_examples": [
+      {
+        "id": "multi_turn_base_110",
+        "turn": 5,
+        "segment_start_step": 0,
+        "segment_length": 3,
+        "repair_target_indices": [
+          11,
+          12
+        ],
+        "repair_operation": "append",
+        "candidate_action_correct": true,
+        "repaired_action_correct": false,
+        "candidate_state_correct": false,
+        "repaired_state_correct": false,
+        "repair_raw_tokens": 166,
+        "physical_prefix_len_before": 212,
+        "physical_prefix_len_after": 378,
+        "logical_position_before": 623,
+        "logical_position_after": 623
+      },
+      {
+        "id": "multi_turn_base_121",
+        "turn": 3,
+        "segment_start_step": 0,
+        "segment_length": 3,
+        "repair_target_indices": [
+          7,
+          8
+        ],
+        "repair_operation": "append",
+        "candidate_action_correct": true,
+        "repaired_action_correct": false,
+        "candidate_state_correct": false,
+        "repaired_state_correct": false,
+        "repair_raw_tokens": 169,
+        "physical_prefix_len_before": 168,
+        "physical_prefix_len_after": 337,
+        "logical_position_before": 515,
+        "logical_position_after": 515
+      },
+      {
+        "id": "multi_turn_base_123",
+        "turn": 2,
+        "segment_start_step": 1,
+        "segment_length": 1,
+        "repair_target_indices": [
+          5,
+          6
+        ],
+        "repair_operation": "append",
+        "candidate_action_correct": true,
+        "repaired_action_correct": false,
+        "candidate_state_correct": false,
+        "repaired_state_correct": false,
+        "repair_raw_tokens": 53,
+        "physical_prefix_len_before": 163,
+        "physical_prefix_len_after": 216,
+        "logical_position_before": 536,
+        "logical_position_after": 536
+      },
+      {
+        "id": "multi_turn_base_136",
+        "turn": 3,
+        "segment_start_step": 0,
+        "segment_length": 2,
+        "repair_target_indices": [
+          7,
+          8
+        ],
+        "repair_operation": "append",
+        "candidate_action_correct": true,
+        "repaired_action_correct": false,
+        "candidate_state_correct": false,
+        "repaired_state_correct": false,
+        "repair_raw_tokens": 84,
+        "physical_prefix_len_before": 177,
+        "physical_prefix_len_after": 261,
+        "logical_position_before": 552,
+        "logical_position_after": 552
+      },
+      {
+        "id": "multi_turn_base_151",
+        "turn": 2,
+        "segment_start_step": 0,
+        "segment_length": 3,
+        "repair_target_indices": [
+          6,
+          7
+        ],
+        "repair_operation": "append",
+        "candidate_action_correct": true,
+        "repaired_action_correct": false,
+        "candidate_state_correct": false,
+        "repaired_state_correct": false,
+        "repair_raw_tokens": 144,
+        "physical_prefix_len_before": 224,
+        "physical_prefix_len_after": 368,
+        "logical_position_before": 766,
+        "logical_position_after": 766
+      },
+      {
+        "id": "multi_turn_base_154",
+        "turn": 4,
+        "segment_start_step": 0,
+        "segment_length": 2,
+        "repair_target_indices": [
+          12,
+          13
+        ],
+        "repair_operation": "append",
+        "candidate_action_correct": true,
+        "repaired_action_correct": false,
+        "candidate_state_correct": false,
+        "repaired_state_correct": false,
+        "repair_raw_tokens": 211,
+        "physical_prefix_len_before": 310,
+        "physical_prefix_len_after": 521,
+        "logical_position_before": 1020,
+        "logical_position_after": 1020
+      },
+      {
+        "id": "multi_turn_base_167",
+        "turn": 3,
+        "segment_start_step": 1,
+        "segment_length": 1,
+        "repair_target_indices": [
+          6,
+          7
+        ],
+        "repair_operation": "append",
+        "candidate_action_correct": true,
+        "repaired_action_correct": false,
+        "candidate_state_correct": false,
+        "repaired_state_correct": false,
+        "repair_raw_tokens": 94,
+        "physical_prefix_len_before": 142,
+        "physical_prefix_len_after": 236,
+        "logical_position_before": 436,
+        "logical_position_after": 436
+      },
+      {
+        "id": "multi_turn_base_186",
+        "turn": 5,
+        "segment_start_step": 0,
+        "segment_length": 3,
+        "repair_target_indices": [
+          12,
+          13
+        ],
+        "repair_operation": "append",
+        "candidate_action_correct": true,
+        "repaired_action_correct": false,
+        "candidate_state_correct": false,
+        "repaired_state_correct": false,
+        "repair_raw_tokens": 116,
+        "physical_prefix_len_before": 229,
+        "physical_prefix_len_after": 345,
+        "logical_position_before": 683,
+        "logical_position_after": 683
+      }
+    ]
+  },
+  "replace_w2": {
+    "counts": {
+      "triggered": 124,
+      "success": 78,
+      "action_wrong_to_correct": 82,
+      "action_wrong_to_wrong": 35,
+      "action_correct_to_wrong": 0,
+      "action_correct_to_correct": 7,
+      "state_wrong_to_correct": 43,
+      "state_wrong_to_wrong": 28,
+      "state_correct_to_wrong": 1,
+      "state_correct_to_correct": 52,
+      "action_net_recovery_gain": 82,
+      "state_net_recovery_gain": 42
+    },
+    "correct_to_wrong_examples": []
+  }
+}

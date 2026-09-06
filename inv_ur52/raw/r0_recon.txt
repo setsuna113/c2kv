@@ -1,0 +1,75 @@
+** WARNING: connection is not using a post-quantum key exchange algorithm.
+** This session may be vulnerable to "store now, decrypt later" attacks.
+** The server may need to be upgraded. See https://openssh.com/pq.html
+
+Authorized users only. All activities may be monitored and reported.
+@@@@@ npu-smi
++------------------------------------------------------------------------------------------------+
+| npu-smi 25.5.0                   Version: 25.5.0                                               |
++---------------------------+---------------+----------------------------------------------------+
+| NPU   Name                | Health        | Power(W)    Temp(C)           Hugepages-Usage(page)|
+| Chip                      | Bus-Id        | AICore(%)   Memory-Usage(MB)  HBM-Usage(MB)        |
++===========================+===============+====================================================+
+| 0     910B3               | OK            | 91.2        33                0    / 0             |
+| 0                         | 0000:C1:00.0  | 0           0    / 0          3443 / 65536         |
++===========================+===============+====================================================+
+| 1     910B3               | OK            | 86.8        32                0    / 0             |
+| 0                         | 0000:C2:00.0  | 0           0    / 0          36722/ 65536         |
++===========================+===============+====================================================+
+| 2     910B3               | OK            | 88.6        33                0    / 0             |
+| 0                         | 0000:81:00.0  | 0           0    / 0          21963/ 65536         |
++===========================+===============+====================================================+
+| 3     910B3               | OK            | 110.4       35                0    / 0             |
+| 0                         | 0000:82:00.0  | 6           0    / 0          22104/ 65536         |
++===========================+===============+====================================================+
+| 4     910B3               | OK            | 94.1        38                0    / 0             |
+| 0                         | 0000:01:00.0  | 0           0    / 0          3429 / 65536         |
++===========================+===============+====================================================+
+| 5     910B3               | OK            | 89.9        39                0    / 0             |
+| 0                         | 0000:02:00.0  | 0           0    / 0          3430 / 65536         |
++===========================+===============+====================================================+
+| 6     910B3               | OK            | 92.3        39                0    / 0             |
+| 0                         | 0000:41:00.0  | 0           0    / 0          3434 / 65536         |
++===========================+===============+====================================================+
+| 7     910B3               | OK            | 85.8        38                0    / 0             |
+| 0                         | 0000:42:00.0  | 0           0    / 0          3428 / 65536         |
++===========================+===============+====================================================+
++---------------------------+---------------+----------------------------------------------------+
+| NPU     Chip              | Process id    | Process name             | Process memory(MB)      |
++===========================+===============+====================================================+
+| No running processes found in NPU 0                                                            |
++===========================+===============+====================================================+
+| 1       0                 | 2041876       | python                   | 33314                   |
++===========================+===============+====================================================+
+| 2       0                 | 2041881       | python                   | 18588                   |
++===========================+===============+====================================================+
+| 3       0                 | 1494994       | sglangschedul            | 18683                   |
+@@@@@ sweep script: server launch section
+6:SGLANG_ROOT="${SGLANG_ROOT:-/home/zhuyuhan/project/kvoffload-sglang}"
+7:BFCL_PYTHON="${BFCL_PYTHON:-/home/zhuyuhan/miniconda3/envs/bfcl/bin/python}"
+8:SGLANG_PYTHON="${SGLANG_PYTHON:-/home/zhuyuhan/miniconda3/envs/sglang/bin/python}"
+92:  "${BFCL_PYTHON}" - "${port}" <<'PY'
+137:    exec "${SGLANG_PYTHON}" -m sglang.launch_server \
+140:      --model-impl sglang \
+186:    "${BFCL_PYTHON}" -m c2kv_eval.adapters.bfcl_history_kv_repair \
+218:    "${BFCL_PYTHON}" -m bfcl_eval.eval_checker.eval_runner
+245:    "${BFCL_PYTHON}" - "${PLAN_PATH}" "${RUN_ROOT}/logs/plan_build_summary.json" <<'PY'
+274:  start=$("${BFCL_PYTHON}" -c 'import time; print(time.perf_counter())')
+277:    "${BFCL_PYTHON}" -m c2kv_eval.scripts.build_bfcl_kv_repair_plan \
+285:  end=$("${BFCL_PYTHON}" -c 'import time; print(time.perf_counter())')
+286:  "${BFCL_PYTHON}" - "${PLAN_PATH}" "${RUN_ROOT}/logs/plan_build_summary.json" "${start}" "${end}" <<'PY'
+366:    "${BFCL_PYTHON}" -m c2kv_eval.analysis.compare_kv_repair_sweep \
+@@@@@ python env
+/home/zhuyuhan/miniconda3/bin/python3
+Python 3.13.13
+/home/zhuyuhan/project/kvoffload-sglang/python/sglang/version.py
+    from sglang._version import __version__, __version_tuple__
+        __version__ = importlib.metadata.version("sglang")
+@@@@@ disk space /tmp
+tmpfs          1006G  1.8G 1004G   1% /tmp
+@@@@@ running processes on npu (any)
+liuyanc+ 1494451 1494412  2 Sep03 ?        00:53:56 /home/liuyancheng/envs/sgl/bin/python -m sglang.launch_server --model-path /home/liuyancheng/checkpoints_upstream/checkpoint-1088 --served-model-name c2kv-agent --model-impl sglang --device npu --attention-backend ascend --tool-call-parser qwen25 --enable-c2kv --c2kv-query-proj gist --dtype bfloat16 --mem-fraction-static 0.20 --c2kv-pool-fraction 0.06 --context-length 16384 --disable-cuda-graph --host 127.0.0.1 --port 35000
+liuyanc+ 1494994 1494451 99 Sep03 ?        2-02:10:43 sglang::scheduler
+liuyanc+ 1494995 1494451  0 Sep03 ?        00:04:39 sglang::detokenizer
+liuyanc+ 1532135       1  0 Sep03 ?        00:00:10 /home/liuyancheng/envs/bench/bin/python -u benchmarks/proxy.py --upstream http://127.0.0.1:35000 --backend sglang --arm full --port 34103 --request-log /home/liuyancheng/bench_logs/proxy_task_t1bfclgate.jsonl
+liuyanc+ 1551304       1  0 Sep03 ?        00:00:30 /home/liuyancheng/envs/benchts/bin/python /home/liuyancheng/c2kv-bench/benchmarks/proxy.py --upstream http://127.0.0.1:35000 --arm hiagent --backend sglang --port 34111 --request-log /home/liuyancheng/bsa_results/smoke_ha_ts/logs/proxy_hiagent_34111.jsonl --doc-packing turn --max-doc-length 768 --max-doc-num 16

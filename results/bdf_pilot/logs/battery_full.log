@@ -1,0 +1,474 @@
+ASCEND_RT_VISIBLE_DEVICES=4
+MODEL_PATH=/home/liuyancheng/c2kv/outputs_lyc/g_joint/fixed_joint
+BASE_MODEL=/home/liuyancheng/c2kv/models/Qwen3-4B-Instruct-2507
+TOKENIZER_PATH=/home/liuyancheng/c2kv/models/Qwen3-4B-Instruct-2507
+DATASET_PATH=/home/liuyancheng/c2kv/datasets/agent-llm-traces-v2
+OUTPUT_FILE=/home/liuyancheng/c2kv/outputs_lyc/g_joint/bdf/d_r2/battery_full.jsonl
+SPLIT=eval
+COMPARE_MODES=full
+RATIOS=1
+HYBRID_TOP_K=3
+MAX_EXAMPLES=900
+MAX_DOC_LENGTH=768
+MAX_DOC_NUM=16
+MAX_HISTORY_TOKENS=12288
+MAX_PROMPT_TOKENS=1536
+MAX_BASELINE_INPUT_TOKENS=16000
+RAW_FIRST_N_TURNS=15
+RAW_PREFIX_N_TURNS=8
+RAW_PREFIX_NEXT_TARGET_SCOPE=turn
+DUMP_RAW_HISTORY_DOCS=False
+HISTORY_SELECTION=tail
+TRUNCATE_SELECTION=tail
+PREFIX_HISTORY_DOC_NUM=
+PREFIX_HISTORY_EXACT=False
+SPLIT_OVERSIZED_HISTORY_DOCS=True
+HYBRID_FULL_AFTER_C2KV=False
+INCLUDE_TOOLS=True
+PARALLEL_EVAL=True
+[launch] case=full_r1 device=4 output=/home/liuyancheng/c2kv/outputs_lyc/g_joint/bdf/d_r2/battery_full.parts/full_r1.jsonl
+{
+  "model": "/home/liuyancheng/c2kv/outputs_lyc/g_joint/fixed_joint",
+  "base_model": "/home/liuyancheng/c2kv/models/Qwen3-4B-Instruct-2507",
+  "reuse_model": "/home/liuyancheng/c2kv/outputs_lyc/g_joint/fixed_joint",
+  "dataset_path": "/home/liuyancheng/c2kv/datasets/agent-llm-traces-v2",
+  "split": "eval",
+  "tool_document_eval_mode": "full",
+  "modes": [
+    "full"
+  ],
+  "ratios": [
+    "1"
+  ],
+  "num_rows": 900,
+  "missing_files": [],
+  "input_file_rows": {
+    "/home/liuyancheng/c2kv/outputs_lyc/g_joint/bdf/d_r2/battery_full.parts/full_r1.jsonl": 900
+  },
+  "input_file_groups": {
+    "/home/liuyancheng/c2kv/outputs_lyc/g_joint/bdf/d_r2/battery_full.parts/full_r1.jsonl": {
+      "full@1": 900
+    }
+  },
+  "computed_common_subset": {
+    "num_groups": 1,
+    "num_common_samples": 900,
+    "valid_samples_by_group": {
+      "full@1": 900
+    },
+    "duplicate_valid_rows_by_group": {
+      "full@1": 0
+    },
+    "common_sample_keys_omitted": true,
+    "num_common_sample_keys_omitted": 900
+  },
+  "notes": {
+    "epic_leading32": "PyTorch selective recompute with recompute_type=leading-32.",
+    "cacheblend_vdiff": "PyTorch value-difference selective recompute with recompute_type=vdiff-0.15; not the vLLM+LMCache expr_cacheblend.py path.",
+    "snapkv_reuse": "Uses reuse_pipeline SnapKV compression, currently hard-coded to roughly 4x in compress_kv.",
+    "epic_leading32_snapkv": "EPIC leading-32 selective recompute on top of SnapKV-compressed document KV.",
+    "cacheblend_vdiff_snapkv": "Value-difference selective recompute on top of SnapKV-compressed document KV with recompute_type=vdiff-0.15.",
+    "snapkv_hybrid": "Hybrid top-k full tool schemas plus SnapKV-compressed rest tool schemas.",
+    "epic_leading32_snapkv_hybrid": "Hybrid top-k full tool schemas plus EPIC leading-32 selective recompute on SnapKV-compressed rest schemas.",
+    "cacheblend_vdiff_snapkv_hybrid": "Hybrid top-k full tool schemas plus value-difference selective recompute on SnapKV-compressed rest schemas.",
+    "c2kv_aug_hybrid": "All tool schemas C2KV-compressed plus an extra full top-k tool-schema prefix.",
+    "snapkv_aug_hybrid": "All tool schemas SnapKV-compressed plus an extra full top-k tool-schema prefix.",
+    "epic_leading32_snapkv_aug_hybrid": "All tool schemas SnapKV-compressed with EPIC leading-32 selective recompute plus an extra full top-k tool-schema prefix.",
+    "cacheblend_vdiff_snapkv_aug_hybrid": "All tool schemas SnapKV-compressed with value-difference selective recompute plus an extra full top-k tool-schema prefix.",
+    "common_subset_results": "Metrics recomputed on the internal common sample keys. If common_subset_file is set, these qids come from that reference summary; otherwise they are valid for every present mode/ratio group. Full common_sample_keys are omitted from output unless --include_common_sample_keys is set."
+  },
+  "results": [
+    {
+      "mode": "full",
+      "ratio": 1,
+      "num_examples": 900,
+      "num_valid": 900,
+      "num_skipped": 0,
+      "skip_reasons": {},
+      "num_tool_targets": 668,
+      "num_non_tool_targets": 232,
+      "exact_match": 0.0033333333333333335,
+      "avg_text_token_f1": 0.23862311111111098,
+      "avg_rouge_l_f1": 0.1943240000000002,
+      "response_type_accuracy": 0.5188888888888888,
+      "target_tool_call_rate": 0.7422222222222222,
+      "tool_name_accuracy": 0.17888888888888888,
+      "tool_name_accuracy_on_tool_targets": 0.2410179640718563,
+      "tool_call_rate": 0.3477777777777778,
+      "tool_call_rate_on_tool_targets": 0.4101796407185629,
+      "call_accuracy": 0.48562300319488816,
+      "non_tool_exact_match": 0.0,
+      "non_tool_text_token_f1": 0.24791250000000015,
+      "non_tool_rouge_l_f1": 0.17118663793103456,
+      "non_tool_false_tool_call_rate": 0.16810344827586207,
+      "router_hit_rate": 0.0,
+      "lexical_recall_at_1": 0.0,
+      "lexical_recall_at_3": 0.0,
+      "lexical_recall_at_5": 0.0,
+      "lexical_recall_at_10": 0.0,
+      "lexical_recall_at_20": 0.0,
+      "promotion_gain_count": 0,
+      "demotion_loss_count": 0,
+      "delta_hit_at_3": 0.0,
+      "hit_utilization": 0.0,
+      "lexical_hit_utilization": 0.0,
+      "attention_promotion_utilization": 0.0,
+      "miss_recovery_rate": 0.0,
+      "stable_candidate_hit_rate": 0.0,
+      "avg_stable_candidate_lexical_rank": 0.0,
+      "recovery_group_results": {
+        "lexical_top3_hit": {
+          "num_samples": 0,
+          "exact_match": 0.0,
+          "avg_text_token_f1": 0.0,
+          "avg_rouge_l_f1": 0.0,
+          "response_type_accuracy": 0.0,
+          "tool_name_accuracy": 0.0,
+          "tool_call_rate": 0.0,
+          "call_accuracy": 0.0
+        },
+        "stable_candidate_promotion": {
+          "num_samples": 0,
+          "exact_match": 0.0,
+          "avg_text_token_f1": 0.0,
+          "avg_rouge_l_f1": 0.0,
+          "response_type_accuracy": 0.0,
+          "tool_name_accuracy": 0.0,
+          "tool_call_rate": 0.0,
+          "call_accuracy": 0.0
+        },
+        "final_recovery_miss": {
+          "num_samples": 0,
+          "exact_match": 0.0,
+          "avg_text_token_f1": 0.0,
+          "avg_rouge_l_f1": 0.0,
+          "response_type_accuracy": 0.0,
+          "tool_name_accuracy": 0.0,
+          "tool_call_rate": 0.0,
+          "call_accuracy": 0.0
+        }
+      },
+      "avg_target_lexical_rank": 0.0,
+      "avg_target_attention_rank": 0.0,
+      "avg_target_final_rank": 0.0,
+      "att_rerank_replacement_rate": 0.0,
+      "avg_doc_tokens": 4314.351111111111,
+      "avg_prompt_tokens": 657.4388888888889,
+      "avg_generated_tokens": 91.50444444444445,
+      "avg_actual_compression_ratio": 1.0,
+      "token_weighted_actual_compression_ratio": 0.0,
+      "avg_full_tool_tokens": 0.0,
+      "avg_full_schema_tool_tokens": 0.0,
+      "avg_stable_summary_full_tokens": 0.0,
+      "avg_tool_original_tokens": 4314.351111111111,
+      "avg_tool_kv_tokens": 0.0,
+      "avg_combined_full_doc_tokens": 0.0,
+      "avg_combined_full_doc_actual_compression_ratio": 0.0,
+      "avg_c2kv2_doc_tokens": 0.0,
+      "avg_c2kv2_gist_tokens": 0.0,
+      "avg_c2kv4_doc_tokens": 0.0,
+      "avg_c2kv4_gist_tokens": 0.0,
+      "avg_final_kv_length": 0.0,
+      "avg_num_tools": 0.0,
+      "num_no_rest_tools": 0,
+      "no_rest_tool_rate": 0.0,
+      "avg_system_prefill_sec": 0.6204484444444438,
+      "avg_tool_compress_sec": 0.0,
+      "avg_full_prefill_sec": 1.6739615555555565,
+      "avg_blend_sec": 0.0,
+      "avg_ttft_sec": 2.29441188888889,
+      "avg_generate_sec": 9.623177555555559,
+      "avg_attention_router_sec": 0.0,
+      "avg_tbt_sec": 0.10942762000000013,
+      "token_weighted_tbt_sec": 0.1051662311484567,
+      "avg_total_sec": 12.393147444444441
+    }
+  ],
+  "common_subset": {
+    "num_groups": 1,
+    "num_common_samples": 900,
+    "valid_samples_by_group": {
+      "full@1": 900
+    },
+    "duplicate_valid_rows_by_group": {
+      "full@1": 0
+    },
+    "common_sample_keys_omitted": true,
+    "num_common_sample_keys_omitted": 900
+  },
+  "common_subset_results": [
+    {
+      "mode": "full",
+      "ratio": 1,
+      "num_examples": 900,
+      "num_valid": 900,
+      "num_skipped": 0,
+      "skip_reasons": {},
+      "num_tool_targets": 668,
+      "num_non_tool_targets": 232,
+      "exact_match": 0.0033333333333333335,
+      "avg_text_token_f1": 0.23862311111111098,
+      "avg_rouge_l_f1": 0.1943240000000002,
+      "response_type_accuracy": 0.5188888888888888,
+      "target_tool_call_rate": 0.7422222222222222,
+      "tool_name_accuracy": 0.17888888888888888,
+      "tool_name_accuracy_on_tool_targets": 0.2410179640718563,
+      "tool_call_rate": 0.3477777777777778,
+      "tool_call_rate_on_tool_targets": 0.4101796407185629,
+      "call_accuracy": 0.48562300319488816,
+      "non_tool_exact_match": 0.0,
+      "non_tool_text_token_f1": 0.24791250000000015,
+      "non_tool_rouge_l_f1": 0.17118663793103456,
+      "non_tool_false_tool_call_rate": 0.16810344827586207,
+      "router_hit_rate": 0.0,
+      "lexical_recall_at_1": 0.0,
+      "lexical_recall_at_3": 0.0,
+      "lexical_recall_at_5": 0.0,
+      "lexical_recall_at_10": 0.0,
+      "lexical_recall_at_20": 0.0,
+      "promotion_gain_count": 0,
+      "demotion_loss_count": 0,
+      "delta_hit_at_3": 0.0,
+      "hit_utilization": 0.0,
+      "lexical_hit_utilization": 0.0,
+      "attention_promotion_utilization": 0.0,
+      "miss_recovery_rate": 0.0,
+      "stable_candidate_hit_rate": 0.0,
+      "avg_stable_candidate_lexical_rank": 0.0,
+      "recovery_group_results": {
+        "lexical_top3_hit": {
+          "num_samples": 0,
+          "exact_match": 0.0,
+          "avg_text_token_f1": 0.0,
+          "avg_rouge_l_f1": 0.0,
+          "response_type_accuracy": 0.0,
+          "tool_name_accuracy": 0.0,
+          "tool_call_rate": 0.0,
+          "call_accuracy": 0.0
+        },
+        "stable_candidate_promotion": {
+          "num_samples": 0,
+          "exact_match": 0.0,
+          "avg_text_token_f1": 0.0,
+          "avg_rouge_l_f1": 0.0,
+          "response_type_accuracy": 0.0,
+          "tool_name_accuracy": 0.0,
+          "tool_call_rate": 0.0,
+          "call_accuracy": 0.0
+        },
+        "final_recovery_miss": {
+          "num_samples": 0,
+          "exact_match": 0.0,
+          "avg_text_token_f1": 0.0,
+          "avg_rouge_l_f1": 0.0,
+          "response_type_accuracy": 0.0,
+          "tool_name_accuracy": 0.0,
+          "tool_call_rate": 0.0,
+          "call_accuracy": 0.0
+        }
+      },
+      "avg_target_lexical_rank": 0.0,
+      "avg_target_attention_rank": 0.0,
+      "avg_target_final_rank": 0.0,
+      "att_rerank_replacement_rate": 0.0,
+      "avg_doc_tokens": 4314.351111111111,
+      "avg_prompt_tokens": 657.4388888888889,
+      "avg_generated_tokens": 91.50444444444445,
+      "avg_actual_compression_ratio": 1.0,
+      "token_weighted_actual_compression_ratio": 0.0,
+      "avg_full_tool_tokens": 0.0,
+      "avg_full_schema_tool_tokens": 0.0,
+      "avg_stable_summary_full_tokens": 0.0,
+      "avg_tool_original_tokens": 4314.351111111111,
+      "avg_tool_kv_tokens": 0.0,
+      "avg_combined_full_doc_tokens": 0.0,
+      "avg_combined_full_doc_actual_compression_ratio": 0.0,
+      "avg_c2kv2_doc_tokens": 0.0,
+      "avg_c2kv2_gist_tokens": 0.0,
+      "avg_c2kv4_doc_tokens": 0.0,
+      "avg_c2kv4_gist_tokens": 0.0,
+      "avg_final_kv_length": 0.0,
+      "avg_num_tools": 0.0,
+      "num_no_rest_tools": 0,
+      "no_rest_tool_rate": 0.0,
+      "avg_system_prefill_sec": 0.6204484444444438,
+      "avg_tool_compress_sec": 0.0,
+      "avg_full_prefill_sec": 1.6739615555555565,
+      "avg_blend_sec": 0.0,
+      "avg_ttft_sec": 2.29441188888889,
+      "avg_generate_sec": 9.623177555555559,
+      "avg_attention_router_sec": 0.0,
+      "avg_tbt_sec": 0.10942762000000013,
+      "token_weighted_tbt_sec": 0.1051662311484567,
+      "avg_total_sec": 12.393147444444441
+    }
+  ],
+  "common_subset_fairness_check": {
+    "expected_num_valid_per_group": 900,
+    "num_valid_by_group": {
+      "full@1": 900
+    },
+    "is_fair_common_subset": true
+  }
+}
+Shard summaries:
+==== /home/liuyancheng/c2kv/outputs_lyc/g_joint/bdf/d_r2/battery_full.parts/full_r1.summary.json ====
+{
+  "model": "/home/liuyancheng/c2kv/outputs_lyc/g_joint/fixed_joint",
+  "base_model": "/home/liuyancheng/c2kv/models/Qwen3-4B-Instruct-2507",
+  "dataset_path": "/home/liuyancheng/c2kv/datasets/agent-llm-traces-v2",
+  "split": "eval",
+  "modes": [
+    "full"
+  ],
+  "ratios": [
+    1
+  ],
+  "history_selection": "tail",
+  "truncate_selection": "tail",
+  "include_tools": true,
+  "hybrid_top_k": 3,
+  "max_doc_length": 768,
+  "max_doc_num": 16,
+  "max_history_tokens": 12288,
+  "max_prompt_tokens": 1536,
+  "max_system_length": 4096,
+  "max_baseline_input_tokens": 16000,
+  "raw_first_n_turns": 15,
+  "raw_prefix_n_turns": 8,
+  "raw_prefix_next_target_scope": "turn",
+  "selection_skips": {},
+  "num_rows": 900,
+  "results": [
+    {
+      "model": "/home/liuyancheng/c2kv/outputs_lyc/g_joint/fixed_joint",
+      "base_model": "/home/liuyancheng/c2kv/models/Qwen3-4B-Instruct-2507",
+      "dataset_path": "/home/liuyancheng/c2kv/datasets/agent-llm-traces-v2",
+      "split": "eval",
+      "mode": "full",
+      "ratio": 1,
+      "num_examples": 900,
+      "num_valid": 900,
+      "num_skipped": 0,
+      "skip_reasons": {},
+      "num_tool_targets": 669,
+      "num_non_tool_targets": 231,
+      "exact_match": 0.0033333333333333335,
+      "avg_text_token_f1": 0.23862311111111098,
+      "avg_rouge_l_f1": 0.1943240000000002,
+      "response_type_accuracy": 0.5188888888888888,
+      "target_tool_call_rate": 0.7433333333333333,
+      "tool_name_accuracy": 0.17888888888888888,
+      "tool_name_accuracy_on_tool_targets": 0.2406576980568012,
+      "tool_call_rate": 0.3477777777777778,
+      "tool_call_rate_on_tool_targets": 0.40956651718983555,
+      "call_accuracy": 0.48562300319488816,
+      "non_tool_exact_match": 0.0,
+      "non_tool_text_token_f1": 0.2479735930735932,
+      "non_tool_rouge_l_f1": 0.17144805194805202,
+      "non_tool_false_tool_call_rate": 0.16883116883116883,
+      "avg_doc_tokens": 4314.351111111111,
+      "avg_turn_original_tokens": 0.0,
+      "avg_full_restore_added_kv_tokens": 0.0,
+      "turn_position": null,
+      "avg_prompt_tokens": 657.4388888888889,
+      "avg_input_tokens": 7923.825555555555,
+      "avg_cache_tokens": 7266.386666666666,
+      "avg_compressed_history_tokens": 4314.351111111111,
+      "avg_generated_tokens": 91.50444444444445,
+      "avg_actual_compression_ratio": 1.0,
+      "token_weighted_actual_compression_ratio": 1.0,
+      "avg_system_prefill_sec": 0.6204484444444438,
+      "avg_history_compress_sec": 0.0,
+      "avg_full_prefill_sec": 1.6739615555555565,
+      "avg_blend_sec": 0.0,
+      "avg_ttft_sec": 2.29441188888889,
+      "avg_generate_sec": 9.623177555555559,
+      "avg_tbt_sec": 0.10942762000000013,
+      "token_weighted_tbt_sec": 0.1051662311484567,
+      "avg_total_sec": 12.393147444444441
+    }
+  ],
+  "turn_bucket_results": [
+    {
+      "model": "/home/liuyancheng/c2kv/outputs_lyc/g_joint/fixed_joint",
+      "base_model": "/home/liuyancheng/c2kv/models/Qwen3-4B-Instruct-2507",
+      "dataset_path": "/home/liuyancheng/c2kv/datasets/agent-llm-traces-v2",
+      "split": "eval",
+      "mode": "full",
+      "ratio": 1,
+      "buckets": {
+        "turn_1_2": {
+          "num_examples": 71,
+          "num_valid": 71,
+          "exact_match": 0.0,
+          "avg_text_token_f1": 0.2979028169014085,
+          "avg_rouge_l_f1": 0.25213521126760563,
+          "response_type_accuracy": 0.5070422535211268,
+          "tool_name_accuracy": 0.30985915492957744,
+          "tool_call_rate": 0.5070422535211268,
+          "call_accuracy": 0.3888888888888889,
+          "avg_doc_tokens": 448.3943661971831,
+          "avg_compressed_history_tokens": 448.3943661971831,
+          "token_weighted_actual_compression_ratio": 1.0
+        },
+        "turn_3_4": {
+          "num_examples": 86,
+          "num_valid": 86,
+          "exact_match": 0.011627906976744186,
+          "avg_text_token_f1": 0.29857558139534884,
+          "avg_rouge_l_f1": 0.24895930232558147,
+          "response_type_accuracy": 0.6395348837209303,
+          "tool_name_accuracy": 0.12790697674418605,
+          "tool_call_rate": 0.5116279069767442,
+          "call_accuracy": 0.25,
+          "avg_doc_tokens": 948.3139534883721,
+          "avg_compressed_history_tokens": 948.3139534883721,
+          "token_weighted_actual_compression_ratio": 1.0
+        },
+        "turn_5_8": {
+          "num_examples": 100,
+          "num_valid": 100,
+          "exact_match": 0.01,
+          "avg_text_token_f1": 0.2823910000000001,
+          "avg_rouge_l_f1": 0.2309199999999999,
+          "response_type_accuracy": 0.64,
+          "tool_name_accuracy": 0.2,
+          "tool_call_rate": 0.47,
+          "call_accuracy": 0.425531914893617,
+          "avg_doc_tokens": 1862.1,
+          "avg_compressed_history_tokens": 1862.1,
+          "token_weighted_actual_compression_ratio": 1.0
+        },
+        "turn_9_plus": {
+          "num_examples": 643,
+          "num_valid": 643,
+          "exact_match": 0.0015552099533437014,
+          "avg_text_token_f1": 0.217252099533437,
+          "avg_rouge_l_f1": 0.17494167962674959,
+          "response_type_accuracy": 0.48522550544323484,
+          "tool_name_accuracy": 0.16796267496111975,
+          "tool_call_rate": 0.2892690513219285,
+          "call_accuracy": 0.5752688172043011,
+          "avg_doc_tokens": 5572.807153965786,
+          "avg_compressed_history_tokens": 5572.807153965786,
+          "token_weighted_actual_compression_ratio": 1.0
+        },
+        "overall": {
+          "num_examples": 900,
+          "num_valid": 900,
+          "exact_match": 0.0033333333333333335,
+          "avg_text_token_f1": 0.23862311111111098,
+          "avg_rouge_l_f1": 0.1943240000000002,
+          "response_type_accuracy": 0.5188888888888888,
+          "tool_name_accuracy": 0.17888888888888888,
+          "tool_call_rate": 0.3477777777777778,
+          "call_accuracy": 0.48562300319488816,
+          "avg_doc_tokens": 4314.351111111111,
+          "avg_compressed_history_tokens": 4314.351111111111,
+          "token_weighted_actual_compression_ratio": 1.0
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+** WARNING: connection is not using a post-quantum key exchange algorithm.
+** This session may be vulnerable to "store now, decrypt later" attacks.
+** The server may need to be upgraded. See https://openssh.com/pq.html
+
+Authorized users only. All activities may be monitored and reported.
+@@@@@ copy tree
+47M	/home/zhuyuhan/project/kvoffload-sglang/python
+copied
+@@@@@ verify PYTHONPATH shadowing with the sglang env python
+/tmp/zh_exp/python/sglang/__init__.py
+/home/zhuyuhan/project/kvoffload-sglang/python/sglang/__init__.py
+@@@@@ read injection function
+3391:                if not self._inject_c2kv_repair_entry(req, repair_entry):
+3762:            if not self._inject_c2kv_repair_entry(req, repair_entry):
+3776:    def _inject_c2kv_repair_entry(self, req: "Req", entry) -> bool:

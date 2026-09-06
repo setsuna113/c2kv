@@ -1,0 +1,179 @@
+diff --git a/python/sglang/srt/managers/io_struct.py b/python/sglang/srt/managers/io_struct.py
+index f589209c0..1a274c114 100644
+--- a/python/sglang/srt/managers/io_struct.py
++++ b/python/sglang/srt/managers/io_struct.py
+@@ -237,20 +237,22 @@ class GenerateReqInput(BaseReq):
+ 
+     # For EPD-disaggregated inference
+     need_wait_for_mm_inputs: Optional[bool] = None
+     num_items_assigned: Optional[Dict[Modality, List[int]]] = None
+ 
+     # Multimodal tiling controls (extensions)
+     max_dynamic_patch: Optional[int] = None
+ 
+     # C2KV: per-segment descriptors for gist injection
+     c2kv_segments: Optional[List] = None  # List[C2KVSegmentInfo]
++    c2kv_kv_memory_hint: Optional[Dict[str, Any]] = None
++    c2kv_use_gist_projection: bool = False
+     min_dynamic_patch: Optional[int] = None
+     image_max_dynamic_patch: Optional[int] = None
+     video_max_dynamic_patch: Optional[int] = None
+ 
+     def contains_mm_input(self) -> bool:
+         return (
+             has_valid_data(self.image_data)
+             or has_valid_data(self.video_data)
+             or has_valid_data(self.audio_data)
+         )
+@@ -749,20 +751,22 @@ class TokenizedGenerateReqInput(BaseReq):
+     token_type_ids: Optional[List[int]] = None
+ 
+     need_wait_for_mm_inputs: bool = False
+     num_items_assigned: Optional[Dict[Modality, List[int]]] = None
+ 
+     # For observability
+     time_stats: Optional[Union[APIServerReqTimeStats, DPControllerReqTimeStats]] = None
+ 
+     # C2KV: per-segment descriptors for gist injection
+     c2kv_segments: Optional[List] = None  # List[C2KVSegmentInfo]
++    c2kv_kv_memory_hint: Optional[Dict[str, Any]] = None
++    c2kv_use_gist_projection: bool = False
+ 
+ 
+ @dataclass
+ class BatchTokenizedGenerateReqInput(BaseBatchReq):
+     # The batch of tokenized requests
+     batch: List[TokenizedGenerateReqInput]
+ 
+     def __len__(self):
+         return len(self.batch)
+ 
+@@ -1019,20 +1023,22 @@ class BatchTokenIDOutput(BaseBatchReq, SpeculativeDecodingMetricsMixin):
+     token_steps: List[List[int]] = None
+ 
+     # Load for DP balance
+     load: GetLoadReqOutput = None
+     # Customized info
+     customized_info: Optional[Dict[str, List[Any]]] = None
+     # Detailed breakdown of cached tokens by source (device/host/storage)
+     cached_tokens_details: Optional[List[Optional[Dict[str, Any]]]] = None
+     # Runtime KV allocator snapshot for accounting/debug.
+     kv_runtime_stats: Optional[List[Optional[Dict[str, Any]]]] = None
++    # Per-request C2KV/repair history KV layout report for accounting/debug.
++    kv_memory_reports: Optional[List[Optional[Dict[str, Any]]]] = None
+     # DP rank of the scheduler that processed each request
+     dp_ranks: Optional[List[int]] = None
+ 
+     # For observability
+     time_stats: Optional[List[SchedulerReqTimeStats]] = None
+ 
+ 
+ @dataclass
+ class BatchStrOutput(BaseBatchReq, SpeculativeDecodingMetricsMixin):
+     # The finish reason
+@@ -1082,20 +1088,24 @@ class BatchStrOutput(BaseBatchReq, SpeculativeDecodingMetricsMixin):
+     # The trainer step id. Used to know which step's weights are used for sampling.
+     token_steps: List[List[int]] = None
+ 
+     # Load for DP balance
+     load: GetLoadReqOutput = None
+ 
+     # Customized info
+     customized_info: Optional[Dict[str, List[Any]]] = None
+     # Detailed breakdown of cached tokens by source (device/host/storage)
+     cached_tokens_details: Optional[List[Optional[Dict[str, Any]]]] = None
++    # Runtime KV allocator snapshot for accounting/debug.
++    kv_runtime_stats: Optional[List[Optional[Dict[str, Any]]]] = None
++    # Per-request C2KV/repair history KV layout report for accounting/debug.
++    kv_memory_reports: Optional[List[Optional[Dict[str, Any]]]] = None
+     # DP rank of the scheduler that processed each request
+     dp_ranks: Optional[List[int]] = None
+ 
+     # For observability
+     time_stats: Optional[List[SchedulerReqTimeStats]] = None
+ 
+ 
+ @dataclass
+ class BatchEmbeddingOutput(BaseBatchReq):
+     # The finish reason
+@@ -2008,25 +2018,27 @@ class DumperControlReqOutput(BaseReq):
+ 
+ class C2KVSegmentInfo:
+     """Describes one C2KV-compressed segment within a generation request."""
+ 
+     def __init__(
+         self,
+         key_hash: str = "",
+         token_start: int = 0,
+         token_end: int = 0,
+         repair_key_hashes: Optional[List[str]] = None,
++        use_gist_projection: bool = False,
+     ):
+         self.key_hash = key_hash
+         self.token_start = token_start
+         self.token_end = token_end
+         self.repair_key_hashes = repair_key_hashes or []
++        self.use_gist_projection = use_gist_projection
+ 
+ 
+ @dataclass
+ class TokenizedExtractReqInput(BaseReq):
+     """Internal request type for a C2KV gist extraction job."""
+ 
+     input_ids: List[int] = field(default_factory=list)
+     input_text: str = ""
+     compression_ratio: int = 4
+ 
+@@ -2044,39 +2056,52 @@ class C2KVExtractReqOutput(BaseReq):
+ 
+ @dataclass
+ class TokenizedRepairExtractReqInput(BaseReq):
+     """Internal request type for C2KV repair raw/sham KV extraction."""
+ 
+     input_ids: List[int] = field(default_factory=list)
+     input_text: str = ""
+     span_start: int = 0
+     span_end: int = 0
+     position_offset: int = 0
++    repair_position_ids: Optional[List[int]] = None
++    raw_kv_position_mode: str = "rotated"
+     repair_mode: str = "d_corr"
+     source_doc_index: Optional[int] = None
+     already_rotated: bool = True
+     extract_source: str = "model_prefill"
++    history_kv_method: Optional[str] = None
++    history_kv_target_tokens: Optional[int] = None
++    history_kv_retention_ratio: Optional[float] = None
++    history_kv_recent_window: int = 64
++    history_kv_kernel_size: int = 5
++    history_kv_pooling: str = "avgpool"
++    history_kv_h2o_recent_fraction: float = 0.5
+ 
+ 
+ @dataclass
+ class C2KVRepairExtractReqOutput(BaseReq):
+     """Output returned from C2KV repair extraction."""
+ 
+     key_hash: str = ""
+     token_len: int = 0
+     position_start: int = 0
+     position_end: int = 0
+     original_seq_len: int = 0
+     repair_mode: str = ""
+     extract_source: str = ""
+     cache_hit_tokens: int = 0
+     serving_kv_buffer_shape: Optional[Tuple[int, ...]] = None
++    history_kv_method: Optional[str] = None
++    requested_span_tokens: int = 0
++    selected_token_count: int = 0
++    selected_relative_indices: Optional[List[int]] = None
+     error: str = ""
+     success: bool = True
+ 
+ 
+ def _check_all_req_types():
+     """A helper function to check all request types are defined in this file."""
+     import inspect
+     import sys
+ 
+     all_classes = inspect.getmembers(sys.modules[__name__], inspect.isclass)

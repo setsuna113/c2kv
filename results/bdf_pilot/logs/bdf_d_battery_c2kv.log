@@ -1,0 +1,478 @@
+ASCEND_RT_VISIBLE_DEVICES=0
+MODEL_PATH=/home/liuyancheng/c2kv/outputs_lyc/g_joint/fixed_joint
+BASE_MODEL=/home/liuyancheng/c2kv/models/Qwen3-4B-Instruct-2507
+TOKENIZER_PATH=/home/liuyancheng/c2kv/models/Qwen3-4B-Instruct-2507
+DATASET_PATH=/home/liuyancheng/c2kv/datasets/agent-llm-traces-v2
+OUTPUT_FILE=/home/liuyancheng/c2kv/outputs_lyc/g_joint/bdf_d_battery_c2kv.jsonl
+SPLIT=eval
+COMPARE_MODES=c2kv
+RATIOS=8
+HYBRID_TOP_K=3
+MAX_EXAMPLES=200
+MAX_DOC_LENGTH=768
+MAX_DOC_NUM=16
+MAX_HISTORY_TOKENS=12288
+MAX_PROMPT_TOKENS=1536
+MAX_BASELINE_INPUT_TOKENS=16000
+RAW_FIRST_N_TURNS=15
+RAW_PREFIX_N_TURNS=8
+RAW_PREFIX_NEXT_TARGET_SCOPE=turn
+DUMP_RAW_HISTORY_DOCS=False
+HISTORY_SELECTION=tail
+TRUNCATE_SELECTION=tail
+PREFIX_HISTORY_DOC_NUM=
+PREFIX_HISTORY_EXACT=False
+SPLIT_OVERSIZED_HISTORY_DOCS=True
+HYBRID_FULL_AFTER_C2KV=False
+INCLUDE_TOOLS=True
+PARALLEL_EVAL=True
+[launch] case=c2kv_r8 device=0 output=/home/liuyancheng/c2kv/outputs_lyc/g_joint/bdf_d_battery_c2kv.parts/c2kv_r8.jsonl
+{
+  "model": "/home/liuyancheng/c2kv/outputs_lyc/g_joint/fixed_joint",
+  "base_model": "/home/liuyancheng/c2kv/models/Qwen3-4B-Instruct-2507",
+  "reuse_model": "/home/liuyancheng/c2kv/outputs_lyc/g_joint/fixed_joint",
+  "dataset_path": "/home/liuyancheng/c2kv/datasets/agent-llm-traces-v2",
+  "split": "eval",
+  "tool_document_eval_mode": "full",
+  "modes": [
+    "c2kv"
+  ],
+  "ratios": [
+    "8"
+  ],
+  "num_rows": 200,
+  "missing_files": [],
+  "input_file_rows": {
+    "/home/liuyancheng/c2kv/outputs_lyc/g_joint/bdf_d_battery_c2kv.parts/c2kv_r8.jsonl": 200
+  },
+  "input_file_groups": {
+    "/home/liuyancheng/c2kv/outputs_lyc/g_joint/bdf_d_battery_c2kv.parts/c2kv_r8.jsonl": {
+      "c2kv@8": 200
+    }
+  },
+  "computed_common_subset": {
+    "num_groups": 1,
+    "num_common_samples": 196,
+    "valid_samples_by_group": {
+      "c2kv@8": 196
+    },
+    "duplicate_valid_rows_by_group": {
+      "c2kv@8": 0
+    },
+    "common_sample_keys_omitted": true,
+    "num_common_sample_keys_omitted": 196
+  },
+  "notes": {
+    "epic_leading32": "PyTorch selective recompute with recompute_type=leading-32.",
+    "cacheblend_vdiff": "PyTorch value-difference selective recompute with recompute_type=vdiff-0.15; not the vLLM+LMCache expr_cacheblend.py path.",
+    "snapkv_reuse": "Uses reuse_pipeline SnapKV compression, currently hard-coded to roughly 4x in compress_kv.",
+    "epic_leading32_snapkv": "EPIC leading-32 selective recompute on top of SnapKV-compressed document KV.",
+    "cacheblend_vdiff_snapkv": "Value-difference selective recompute on top of SnapKV-compressed document KV with recompute_type=vdiff-0.15.",
+    "snapkv_hybrid": "Hybrid top-k full tool schemas plus SnapKV-compressed rest tool schemas.",
+    "epic_leading32_snapkv_hybrid": "Hybrid top-k full tool schemas plus EPIC leading-32 selective recompute on SnapKV-compressed rest schemas.",
+    "cacheblend_vdiff_snapkv_hybrid": "Hybrid top-k full tool schemas plus value-difference selective recompute on SnapKV-compressed rest schemas.",
+    "c2kv_aug_hybrid": "All tool schemas C2KV-compressed plus an extra full top-k tool-schema prefix.",
+    "snapkv_aug_hybrid": "All tool schemas SnapKV-compressed plus an extra full top-k tool-schema prefix.",
+    "epic_leading32_snapkv_aug_hybrid": "All tool schemas SnapKV-compressed with EPIC leading-32 selective recompute plus an extra full top-k tool-schema prefix.",
+    "cacheblend_vdiff_snapkv_aug_hybrid": "All tool schemas SnapKV-compressed with value-difference selective recompute plus an extra full top-k tool-schema prefix.",
+    "common_subset_results": "Metrics recomputed on the internal common sample keys. If common_subset_file is set, these qids come from that reference summary; otherwise they are valid for every present mode/ratio group. Full common_sample_keys are omitted from output unless --include_common_sample_keys is set."
+  },
+  "results": [
+    {
+      "mode": "c2kv",
+      "ratio": 8,
+      "num_examples": 200,
+      "num_valid": 196,
+      "num_skipped": 4,
+      "skip_reasons": {
+        "oom": 4
+      },
+      "num_tool_targets": 160,
+      "num_non_tool_targets": 36,
+      "exact_match": 0.0,
+      "avg_text_token_f1": 0.34374489795918367,
+      "avg_rouge_l_f1": 0.30748979591836734,
+      "response_type_accuracy": 0.7806122448979592,
+      "target_tool_call_rate": 0.8163265306122449,
+      "tool_name_accuracy": 0.32142857142857145,
+      "tool_name_accuracy_on_tool_targets": 0.39375,
+      "tool_call_rate": 0.9642857142857143,
+      "tool_call_rate_on_tool_targets": 0.95625,
+      "call_accuracy": 0.3333333333333333,
+      "non_tool_exact_match": 0.0,
+      "non_tool_text_token_f1": 0.21941944444444442,
+      "non_tool_rouge_l_f1": 0.1683333333333333,
+      "non_tool_false_tool_call_rate": 1.0,
+      "router_hit_rate": 0.0,
+      "lexical_recall_at_1": 0.0,
+      "lexical_recall_at_3": 0.0,
+      "lexical_recall_at_5": 0.0,
+      "lexical_recall_at_10": 0.0,
+      "lexical_recall_at_20": 0.0,
+      "promotion_gain_count": 0,
+      "demotion_loss_count": 0,
+      "delta_hit_at_3": 0.0,
+      "hit_utilization": 0.0,
+      "lexical_hit_utilization": 0.0,
+      "attention_promotion_utilization": 0.0,
+      "miss_recovery_rate": 0.0,
+      "stable_candidate_hit_rate": 0.0,
+      "avg_stable_candidate_lexical_rank": 0.0,
+      "recovery_group_results": {
+        "lexical_top3_hit": {
+          "num_samples": 0,
+          "exact_match": 0.0,
+          "avg_text_token_f1": 0.0,
+          "avg_rouge_l_f1": 0.0,
+          "response_type_accuracy": 0.0,
+          "tool_name_accuracy": 0.0,
+          "tool_call_rate": 0.0,
+          "call_accuracy": 0.0
+        },
+        "stable_candidate_promotion": {
+          "num_samples": 0,
+          "exact_match": 0.0,
+          "avg_text_token_f1": 0.0,
+          "avg_rouge_l_f1": 0.0,
+          "response_type_accuracy": 0.0,
+          "tool_name_accuracy": 0.0,
+          "tool_call_rate": 0.0,
+          "call_accuracy": 0.0
+        },
+        "final_recovery_miss": {
+          "num_samples": 0,
+          "exact_match": 0.0,
+          "avg_text_token_f1": 0.0,
+          "avg_rouge_l_f1": 0.0,
+          "response_type_accuracy": 0.0,
+          "tool_name_accuracy": 0.0,
+          "tool_call_rate": 0.0,
+          "call_accuracy": 0.0
+        }
+      },
+      "avg_target_lexical_rank": 0.0,
+      "avg_target_attention_rank": 0.0,
+      "avg_target_final_rank": 0.0,
+      "att_rerank_replacement_rate": 0.0,
+      "avg_doc_tokens": 3105.0204081632655,
+      "avg_prompt_tokens": 276.7040816326531,
+      "avg_generated_tokens": 108.21938775510205,
+      "avg_actual_compression_ratio": 7.90483658069509,
+      "token_weighted_actual_compression_ratio": 7.919939616355639,
+      "avg_full_tool_tokens": 0.0,
+      "avg_full_schema_tool_tokens": 0.0,
+      "avg_stable_summary_full_tokens": 0.0,
+      "avg_tool_original_tokens": 3105.0204081632655,
+      "avg_tool_kv_tokens": 392.05102040816325,
+      "avg_combined_full_doc_tokens": 0.0,
+      "avg_combined_full_doc_actual_compression_ratio": 0.0,
+      "avg_c2kv2_doc_tokens": 0.0,
+      "avg_c2kv2_gist_tokens": 0.0,
+      "avg_c2kv4_doc_tokens": 0.0,
+      "avg_c2kv4_gist_tokens": 0.0,
+      "avg_final_kv_length": 0.0,
+      "avg_num_tools": 0.0,
+      "num_no_rest_tools": 0,
+      "no_rest_tool_rate": 0.0,
+      "avg_system_prefill_sec": 1.8080816326530602,
+      "avg_tool_compress_sec": 2.0606658163265306,
+      "avg_full_prefill_sec": 0.0,
+      "avg_blend_sec": 0.06791224489795919,
+      "avg_ttft_sec": 3.936658163265307,
+      "avg_generate_sec": 12.901494387755097,
+      "avg_attention_router_sec": 0.0,
+      "avg_tbt_sec": 0.12060210714285714,
+      "token_weighted_tbt_sec": 0.11921610956579129,
+      "avg_total_sec": 17.295364285714285
+    }
+  ],
+  "common_subset": {
+    "num_groups": 1,
+    "num_common_samples": 196,
+    "valid_samples_by_group": {
+      "c2kv@8": 196
+    },
+    "duplicate_valid_rows_by_group": {
+      "c2kv@8": 0
+    },
+    "common_sample_keys_omitted": true,
+    "num_common_sample_keys_omitted": 196
+  },
+  "common_subset_results": [
+    {
+      "mode": "c2kv",
+      "ratio": 8,
+      "num_examples": 196,
+      "num_valid": 196,
+      "num_skipped": 0,
+      "skip_reasons": {},
+      "num_tool_targets": 160,
+      "num_non_tool_targets": 36,
+      "exact_match": 0.0,
+      "avg_text_token_f1": 0.34374489795918367,
+      "avg_rouge_l_f1": 0.30748979591836734,
+      "response_type_accuracy": 0.7806122448979592,
+      "target_tool_call_rate": 0.8163265306122449,
+      "tool_name_accuracy": 0.32142857142857145,
+      "tool_name_accuracy_on_tool_targets": 0.39375,
+      "tool_call_rate": 0.9642857142857143,
+      "tool_call_rate_on_tool_targets": 0.95625,
+      "call_accuracy": 0.3333333333333333,
+      "non_tool_exact_match": 0.0,
+      "non_tool_text_token_f1": 0.21941944444444442,
+      "non_tool_rouge_l_f1": 0.1683333333333333,
+      "non_tool_false_tool_call_rate": 1.0,
+      "router_hit_rate": 0.0,
+      "lexical_recall_at_1": 0.0,
+      "lexical_recall_at_3": 0.0,
+      "lexical_recall_at_5": 0.0,
+      "lexical_recall_at_10": 0.0,
+      "lexical_recall_at_20": 0.0,
+      "promotion_gain_count": 0,
+      "demotion_loss_count": 0,
+      "delta_hit_at_3": 0.0,
+      "hit_utilization": 0.0,
+      "lexical_hit_utilization": 0.0,
+      "attention_promotion_utilization": 0.0,
+      "miss_recovery_rate": 0.0,
+      "stable_candidate_hit_rate": 0.0,
+      "avg_stable_candidate_lexical_rank": 0.0,
+      "recovery_group_results": {
+        "lexical_top3_hit": {
+          "num_samples": 0,
+          "exact_match": 0.0,
+          "avg_text_token_f1": 0.0,
+          "avg_rouge_l_f1": 0.0,
+          "response_type_accuracy": 0.0,
+          "tool_name_accuracy": 0.0,
+          "tool_call_rate": 0.0,
+          "call_accuracy": 0.0
+        },
+        "stable_candidate_promotion": {
+          "num_samples": 0,
+          "exact_match": 0.0,
+          "avg_text_token_f1": 0.0,
+          "avg_rouge_l_f1": 0.0,
+          "response_type_accuracy": 0.0,
+          "tool_name_accuracy": 0.0,
+          "tool_call_rate": 0.0,
+          "call_accuracy": 0.0
+        },
+        "final_recovery_miss": {
+          "num_samples": 0,
+          "exact_match": 0.0,
+          "avg_text_token_f1": 0.0,
+          "avg_rouge_l_f1": 0.0,
+          "response_type_accuracy": 0.0,
+          "tool_name_accuracy": 0.0,
+          "tool_call_rate": 0.0,
+          "call_accuracy": 0.0
+        }
+      },
+      "avg_target_lexical_rank": 0.0,
+      "avg_target_attention_rank": 0.0,
+      "avg_target_final_rank": 0.0,
+      "att_rerank_replacement_rate": 0.0,
+      "avg_doc_tokens": 3105.0204081632655,
+      "avg_prompt_tokens": 276.7040816326531,
+      "avg_generated_tokens": 108.21938775510205,
+      "avg_actual_compression_ratio": 7.90483658069509,
+      "token_weighted_actual_compression_ratio": 7.919939616355639,
+      "avg_full_tool_tokens": 0.0,
+      "avg_full_schema_tool_tokens": 0.0,
+      "avg_stable_summary_full_tokens": 0.0,
+      "avg_tool_original_tokens": 3105.0204081632655,
+      "avg_tool_kv_tokens": 392.05102040816325,
+      "avg_combined_full_doc_tokens": 0.0,
+      "avg_combined_full_doc_actual_compression_ratio": 0.0,
+      "avg_c2kv2_doc_tokens": 0.0,
+      "avg_c2kv2_gist_tokens": 0.0,
+      "avg_c2kv4_doc_tokens": 0.0,
+      "avg_c2kv4_gist_tokens": 0.0,
+      "avg_final_kv_length": 0.0,
+      "avg_num_tools": 0.0,
+      "num_no_rest_tools": 0,
+      "no_rest_tool_rate": 0.0,
+      "avg_system_prefill_sec": 1.8080816326530602,
+      "avg_tool_compress_sec": 2.0606658163265306,
+      "avg_full_prefill_sec": 0.0,
+      "avg_blend_sec": 0.06791224489795919,
+      "avg_ttft_sec": 3.936658163265307,
+      "avg_generate_sec": 12.901494387755097,
+      "avg_attention_router_sec": 0.0,
+      "avg_tbt_sec": 0.12060210714285714,
+      "token_weighted_tbt_sec": 0.11921610956579129,
+      "avg_total_sec": 17.295364285714285
+    }
+  ],
+  "common_subset_fairness_check": {
+    "expected_num_valid_per_group": 196,
+    "num_valid_by_group": {
+      "c2kv@8": 196
+    },
+    "is_fair_common_subset": true
+  }
+}
+Shard summaries:
+==== /home/liuyancheng/c2kv/outputs_lyc/g_joint/bdf_d_battery_c2kv.parts/c2kv_r8.summary.json ====
+{
+  "model": "/home/liuyancheng/c2kv/outputs_lyc/g_joint/fixed_joint",
+  "base_model": "/home/liuyancheng/c2kv/models/Qwen3-4B-Instruct-2507",
+  "dataset_path": "/home/liuyancheng/c2kv/datasets/agent-llm-traces-v2",
+  "split": "eval",
+  "modes": [
+    "c2kv"
+  ],
+  "ratios": [
+    8
+  ],
+  "history_selection": "tail",
+  "truncate_selection": "tail",
+  "include_tools": true,
+  "hybrid_top_k": 3,
+  "max_doc_length": 768,
+  "max_doc_num": 16,
+  "max_history_tokens": 12288,
+  "max_prompt_tokens": 1536,
+  "max_system_length": 4096,
+  "max_baseline_input_tokens": 16000,
+  "raw_first_n_turns": 15,
+  "raw_prefix_n_turns": 8,
+  "raw_prefix_next_target_scope": "turn",
+  "selection_skips": {},
+  "num_rows": 200,
+  "results": [
+    {
+      "model": "/home/liuyancheng/c2kv/outputs_lyc/g_joint/fixed_joint",
+      "base_model": "/home/liuyancheng/c2kv/models/Qwen3-4B-Instruct-2507",
+      "dataset_path": "/home/liuyancheng/c2kv/datasets/agent-llm-traces-v2",
+      "split": "eval",
+      "mode": "c2kv",
+      "ratio": 8,
+      "num_examples": 200,
+      "num_valid": 196,
+      "num_skipped": 4,
+      "skip_reasons": {
+        "oom": 4
+      },
+      "num_tool_targets": 160,
+      "num_non_tool_targets": 36,
+      "exact_match": 0.0,
+      "avg_text_token_f1": 0.34374489795918367,
+      "avg_rouge_l_f1": 0.30748979591836734,
+      "response_type_accuracy": 0.7806122448979592,
+      "target_tool_call_rate": 0.8163265306122449,
+      "tool_name_accuracy": 0.32142857142857145,
+      "tool_name_accuracy_on_tool_targets": 0.39375,
+      "tool_call_rate": 0.9642857142857143,
+      "tool_call_rate_on_tool_targets": 0.95625,
+      "call_accuracy": 0.3333333333333333,
+      "non_tool_exact_match": 0.0,
+      "non_tool_text_token_f1": 0.21941944444444442,
+      "non_tool_rouge_l_f1": 0.1683333333333333,
+      "non_tool_false_tool_call_rate": 1.0,
+      "avg_doc_tokens": 3105.0204081632655,
+      "avg_turn_original_tokens": 0.0,
+      "avg_full_restore_added_kv_tokens": 0.0,
+      "turn_position": null,
+      "avg_prompt_tokens": 276.7040816326531,
+      "avg_input_tokens": 4488.367346938776,
+      "avg_cache_tokens": 4211.663265306122,
+      "avg_compressed_history_tokens": 392.05102040816325,
+      "avg_generated_tokens": 108.21938775510205,
+      "avg_actual_compression_ratio": 7.904838775510208,
+      "token_weighted_actual_compression_ratio": 7.919939616355639,
+      "avg_system_prefill_sec": 1.8080816326530602,
+      "avg_history_compress_sec": 2.0606658163265306,
+      "avg_full_prefill_sec": 0.0,
+      "avg_blend_sec": 0.06791224489795919,
+      "avg_ttft_sec": 3.936658163265307,
+      "avg_generate_sec": 12.901494387755097,
+      "avg_tbt_sec": 0.12060210714285714,
+      "token_weighted_tbt_sec": 0.11921610956579129,
+      "avg_total_sec": 17.295364285714285
+    }
+  ],
+  "turn_bucket_results": [
+    {
+      "model": "/home/liuyancheng/c2kv/outputs_lyc/g_joint/fixed_joint",
+      "base_model": "/home/liuyancheng/c2kv/models/Qwen3-4B-Instruct-2507",
+      "dataset_path": "/home/liuyancheng/c2kv/datasets/agent-llm-traces-v2",
+      "split": "eval",
+      "mode": "c2kv",
+      "ratio": 8,
+      "buckets": {
+        "turn_1_2": {
+          "num_examples": 20,
+          "num_valid": 16,
+          "exact_match": 0.0,
+          "avg_text_token_f1": 0.43271875000000004,
+          "avg_rouge_l_f1": 0.4052125,
+          "response_type_accuracy": 0.9375,
+          "tool_name_accuracy": 0.3125,
+          "tool_call_rate": 1.0,
+          "call_accuracy": 0.3125,
+          "avg_doc_tokens": 395.6875,
+          "avg_compressed_history_tokens": 50.0,
+          "token_weighted_actual_compression_ratio": 7.91375
+        },
+        "turn_3_4": {
+          "num_examples": 30,
+          "num_valid": 30,
+          "exact_match": 0.0,
+          "avg_text_token_f1": 0.35409666666666667,
+          "avg_rouge_l_f1": 0.31481333333333333,
+          "response_type_accuracy": 0.8333333333333334,
+          "tool_name_accuracy": 0.13333333333333333,
+          "tool_call_rate": 1.0,
+          "call_accuracy": 0.13333333333333333,
+          "avg_doc_tokens": 777.6666666666666,
+          "avg_compressed_history_tokens": 98.3,
+          "token_weighted_actual_compression_ratio": 7.911156324177687
+        },
+        "turn_5_8": {
+          "num_examples": 42,
+          "num_valid": 42,
+          "exact_match": 0.0,
+          "avg_text_token_f1": 0.3773214285714286,
+          "avg_rouge_l_f1": 0.35001190476190475,
+          "response_type_accuracy": 0.8809523809523809,
+          "tool_name_accuracy": 0.42857142857142855,
+          "tool_call_rate": 0.9523809523809523,
+          "call_accuracy": 0.45,
+          "avg_doc_tokens": 1677.452380952381,
+          "avg_compressed_history_tokens": 211.88095238095238,
+          "token_weighted_actual_compression_ratio": 7.916956961456344
+        },
+        "turn_9_plus": {
+          "num_examples": 108,
+          "num_valid": 108,
+          "exact_match": 0.0,
+          "avg_text_token_f1": 0.3146305555555556,
+          "avg_rouge_l_f1": 0.27444166666666653,
+          "response_type_accuracy": 0.7037037037037037,
+          "tool_name_accuracy": 0.3333333333333333,
+          "tool_call_rate": 0.9537037037037037,
+          "call_accuracy": 0.34951456310679613,
+          "avg_doc_tokens": 4708.055555555556,
+          "avg_compressed_history_tokens": 594.3888888888889,
+          "token_weighted_actual_compression_ratio": 7.92083372277783
+        },
+        "overall": {
+          "num_examples": 200,
+          "num_valid": 196,
+          "exact_match": 0.0,
+          "avg_text_token_f1": 0.34374489795918367,
+          "avg_rouge_l_f1": 0.30748979591836734,
+          "response_type_accuracy": 0.7806122448979592,
+          "tool_name_accuracy": 0.32142857142857145,
+          "tool_call_rate": 0.9642857142857143,
+          "call_accuracy": 0.3333333333333333,
+          "avg_doc_tokens": 3105.0204081632655,
+          "avg_compressed_history_tokens": 392.05102040816325,
+          "token_weighted_actual_compression_ratio": 7.919939616355639
+        }
+      }
+    }
+  ]
+}

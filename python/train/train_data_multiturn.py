@@ -662,6 +662,70 @@ def _agent_history_turn_docs(messages: Sequence[Message]) -> List[Message]:
     return docs
 
 
+def _agent_history_turn_units(messages: Sequence[Message]) -> List[List[Dict[str, str]]]:
+    """Role-preserving twin of ``_agent_history_turn_docs``.
+
+    Same traversal, same turn boundaries and the same skip rule (:651-653),
+    but each turn is returned as its list of units instead of one rendered
+    string, so a chunking policy can re-cut a turn at message boundaries.
+    ``kind`` is ``"user"`` / ``"assistant"`` / the raw role for every other
+    role (tool, observation, ...), which is what ``chunk_policy._pair_units``
+    keys on.  ``_flatten_turn_units`` renders a unit list back to exactly the
+    string ``_agent_history_turn_docs`` would have produced.
+    """
+
+    turns: List[List[Dict[str, str]]] = []
+    current: List[Dict[str, str]] = []
+
+    def flush() -> None:
+        nonlocal current
+        if not current:
+            return
+        turns.append(current)
+        current = []
+
+    for message in messages:
+        role = message.get("role", "user")
+        content = str(message.get("content") or "").strip()
+        if not content and role != "assistant":
+            continue
+        if role == "user":
+            flush()
+            current = [{"kind": "user", "role": role, "text": content}]
+        elif role == "assistant":
+            current.append({"kind": "assistant", "role": role, "text": content})
+        else:
+            current.append({"kind": role, "role": role, "text": content})
+    flush()
+    return turns
+
+
+def _flatten_turn_units(units: Sequence[Dict[str, str]]) -> str:
+    """Render turn units exactly as ``_agent_history_turn_docs.flush()`` does.
+
+    Pure function (no tokenizer, no torch): ``chunk_policy.apply_policy``
+    injects it to render structural sub-blocks of a turn.
+    """
+
+    current_user: Optional[str] = None
+    outputs: List[str] = []
+    for unit in units:
+        kind = unit.get("kind")
+        text = str(unit.get("text") or "")
+        if kind == "user":
+            current_user = text
+        elif kind == "assistant":
+            outputs.append(text)
+        else:
+            outputs.append(f"[{unit.get('role')}]\n{text}")
+    parts = ["Previous turn"]
+    if current_user:
+        parts.extend(["[User query]", current_user.strip()])
+    if outputs:
+        parts.extend(["[Assistant output]", "\n\n".join(item.strip() for item in outputs if item.strip())])
+    return "\n".join(parts).strip()
+
+
 class AgentLLMTracesCompressHistorySource(CompressHistorySource):
     """Turn-level history compression source for agent-llm-traces.
 
@@ -686,6 +750,8 @@ class AgentLLMTracesCompressHistorySource(CompressHistorySource):
         include_tools: bool = False,
         prefix_history_doc_num: Optional[int] = None,
         prefix_history_exact: bool = False,
+        selected_qids: Optional[Sequence[str]] = None,
+        selected_sessions: Optional[Sequence[str]] = None,
     ) -> None:
         self.path = Path(path)
         self.split = split
@@ -701,6 +767,21 @@ class AgentLLMTracesCompressHistorySource(CompressHistorySource):
         self.include_tools = include_tools
         self.prefix_history_doc_num = prefix_history_doc_num
         self.prefix_history_exact = prefix_history_exact
+        self.selected_qids = (
+            frozenset(str(qid) for qid in selected_qids)
+            if selected_qids is not None else None
+        )
+        self.selected_sessions = (
+            frozenset(str(session) for session in selected_sessions)
+            if selected_sessions is not None else None
+        )
+        self._selected_qid_sessions = (
+            frozenset(
+                qid.rpartition(":")[0] if ":" in qid else qid
+                for qid in self.selected_qids
+            )
+            if self.selected_qids is not None else None
+        )
         self.records = self._load_records()
 
     def __len__(self) -> int:
@@ -708,6 +789,30 @@ class AgentLLMTracesCompressHistorySource(CompressHistorySource):
 
     def __iter__(self) -> Iterator[CompressHistoryExample]:
         yield from self.records
+
+    def _session_is_selected(self, session_id: str) -> bool:
+        if (self.selected_sessions is not None
+                and session_id not in self.selected_sessions):
+            return False
+        if (self._selected_qid_sessions is not None
+                and session_id not in self._selected_qid_sessions):
+            return False
+        return True
+
+    def _filter_selected_examples(
+        self,
+        session_id: str,
+        examples: Sequence[CompressHistoryExample],
+    ) -> List[CompressHistoryExample]:
+        if not self._session_is_selected(session_id):
+            return []
+        if self.selected_qids is None:
+            return list(examples)
+        return [example for example in examples if example.qid in self.selected_qids]
+
+    def _must_materialize_unselected_session(self) -> bool:
+        """Whether discarded sessions still affect sampling or max_records."""
+        return bool(self.max_samples_per_session) or self.max_records is not None
 
     def _load_records(self) -> List[CompressHistoryExample]:
         data_files = _find_agent_parquet_files(self.path)
@@ -740,15 +845,23 @@ class AgentLLMTracesCompressHistorySource(CompressHistorySource):
         keep_ids = train_ids if self.split == "train" else eval_ids
         rng = random.Random(self.split_seed + (0 if self.split == "train" else 1))
         records: List[CompressHistoryExample] = []
+        source_records = 0
         for session in sessions:
             if session["session_id"] not in keep_ids:
+                continue
+            selected = self._session_is_selected(session["session_id"])
+            if not selected and not self._must_materialize_unselected_session():
                 continue
             examples = self._session_examples(session["session_id"], session["spans"])
             if self.max_samples_per_session and len(examples) > self.max_samples_per_session:
                 examples = rng.sample(examples, self.max_samples_per_session)
-            records.extend(examples)
-            if self.max_records is not None and len(records) >= self.max_records:
-                return records[: self.max_records]
+            if self.max_records is not None:
+                remaining = max(0, self.max_records - source_records)
+                examples = examples[:remaining]
+            source_records += len(examples)
+            records.extend(self._filter_selected_examples(session["session_id"], examples))
+            if self.max_records is not None and source_records >= self.max_records:
+                return records
         return records
 
     def _load_records_from_manifest(self, data_files: Sequence[Path]) -> List[CompressHistoryExample]:
@@ -766,6 +879,7 @@ class AgentLLMTracesCompressHistorySource(CompressHistorySource):
         }
         rng = random.Random(self.split_seed + (0 if self.split == "train" else 1))
         records: List[CompressHistoryExample] = []
+        source_records = 0
         row_iter = _iter_agent_rows(data_files) if data_files and data_files[0].suffix == ".parquet" else _iter_agent_jsonl_rows(data_files)
         for row_index, row in enumerate(row_iter):
             session_id = str(
@@ -784,12 +898,20 @@ class AgentLLMTracesCompressHistorySource(CompressHistorySource):
                 spans = _sort_agent_spans(_json_loads(row.get("spans"), row.get("spans")) or [])
             if session_id not in keep_ids:
                 continue
+            selected_session = self._session_is_selected(session_id)
+            if (not selected_session
+                    and not self._must_materialize_unselected_session()):
+                continue
             examples = self._session_examples(session_id, spans)
             if self.max_samples_per_session and len(examples) > self.max_samples_per_session:
                 examples = rng.sample(examples, self.max_samples_per_session)
-            records.extend(examples)
-            if self.max_records is not None and len(records) >= self.max_records:
-                return records[: self.max_records]
+            if self.max_records is not None:
+                remaining = max(0, self.max_records - source_records)
+                examples = examples[:remaining]
+            source_records += len(examples)
+            records.extend(self._filter_selected_examples(session_id, examples))
+            if self.max_records is not None and source_records >= self.max_records:
+                return records
         return records
 
     def _split_session_ids(self, sessions: Sequence[Dict[str, Any]]) -> tuple[set[str], set[str]]:

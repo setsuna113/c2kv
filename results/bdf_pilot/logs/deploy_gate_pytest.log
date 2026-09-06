@@ -1,0 +1,142 @@
+........................................................................ [ 13%]
+........................................................................ [ 27%]
+.................ss..................................................... [ 40%]
+........................................................................ [ 54%]
+.....................................s.................................. [ 67%]
+........................................................................ [ 81%]
+..............................................ssssssFF.................. [ 94%]
+.............................                                            [100%]
+=================================== FAILURES ===================================
+____________________ test_cli_dedup_guard_on_smoke_fixtures ____________________
+
+tmp_path = PosixPath('/tmp/pytest-of-liuyancheng/pytest-9/test_cli_dedup_guard_on_smoke_0')
+
+    def test_cli_dedup_guard_on_smoke_fixtures(tmp_path):
+        # 5 个 fixture 文件里 identity_* 与同名条件文件的行键 (id, cap_tier, condition)
+        # 重复：按 CLI 规格必须报错、不得静默去重、不得产生输出。
+        out = tmp_path / "scored.jsonl"
+        with pytest.raises(SystemExit) as exc:
+>           bfcl_score.main(_cli_kwargs(SMOKE_DIR, out))
+
+metrology/test_bfcl_score.py:84: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+metrology/bfcl_score.py:871: in main
+    run(args)
+metrology/bfcl_score.py:759: in run
+    _setup_bfcl(args)
+metrology/bfcl_score.py:292: in _setup_bfcl
+    bfcl_dir = _inject_bfcl_syspath(args.bfcl_pkg_path)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+bfcl_pkg_path = '/home/liuyancheng/c2kv-bdf/.foreman/ref/bfcl_pkg'
+
+    def _inject_bfcl_syspath(bfcl_pkg_path: str) -> Path:
+        """--bfcl_pkg_path 接受两种形态：bfcl_eval 包目录本身，或包含 bfcl_eval/ 子包的
+        仓库目录。返回解析后的 bfcl_eval 包目录，并把其父目录插入 sys.path。"""
+        p = Path(bfcl_pkg_path).resolve()
+        if (p / "__init__.py").exists() and p.name == "bfcl_eval":
+            sys.path.insert(0, str(p.parent))
+            return p
+        if (p / "bfcl_eval" / "__init__.py").exists():
+            sys.path.insert(0, str(p))
+            return p / "bfcl_eval"
+>       raise FileNotFoundError(
+            f"--bfcl_pkg_path={bfcl_pkg_path} 下找不到 bfcl_eval 包（需含 bfcl_eval/__init__.py）"
+        )
+E       FileNotFoundError: --bfcl_pkg_path=/home/liuyancheng/c2kv-bdf/.foreman/ref/bfcl_pkg 下找不到 bfcl_eval 包（需含 bfcl_eval/__init__.py）
+
+metrology/bfcl_hf_runner.py:326: FileNotFoundError
+----------------------------- Captured stdout call -----------------------------
+[setup] import 面: filelock                 -> real
+[setup] import 面: openai                   -> stub
+[setup] import 面: overrides                -> stub
+[setup] import 面: requests                 -> real
+[setup] import 面: tenacity                 -> stub
+[setup] import 面: tree_sitter              -> stub
+[setup] import 面: tree_sitter_java         -> stub
+[setup] import 面: tree_sitter_javascript   -> stub
+[setup] 厂商 SDK 兜底 finder 已挂载（21 个顶层名，真实包优先）
+[setup] stub 修复: tree_sitter 设为包（__spec__=None 手工 stub，子模块走兜底 finder）
+[setup] stub 修复: tree_sitter_java 设为包（__spec__=None 手工 stub，子模块走兜底 finder）
+[setup] stub 修复: tree_sitter_javascript 设为包（__spec__=None 手工 stub，子模块走兜底 finder）
+[setup] stub 修复: openai 设为包（__spec__=None 手工 stub，子模块走兜底 finder）
+[setup] stub 修复: overrides 设为包（__spec__=None 手工 stub，子模块走兜底 finder）
+[setup] stub 修复: tenacity 设为包（__spec__=None 手工 stub，子模块走兜底 finder）
+[setup] stub 修复: tenacity 已重注册为增强版（retry_if_* 可 or 组合）
+_______________________ test_cli_scoring_on_unique_cells _______________________
+
+tmp_path = PosixPath('/tmp/pytest-of-liuyancheng/pytest-9/test_cli_scoring_on_unique_cel0')
+
+    def test_cli_scoring_on_unique_cells(tmp_path):
+        # 3 个唯一键文件（base / snapkv / streamingllm）的完整 CLI 评分
+        staged = tmp_path / "runs"
+        staged.mkdir()
+        for name in UNIQUE_FILES:
+            shutil.copyfile(SMOKE_DIR / name, staged / name)
+    
+        out = tmp_path / "scored.jsonl"
+        summary_out = tmp_path / "summary.json"
+>       bfcl_score.main(_cli_kwargs(staged, out, summary_out))
+
+metrology/test_bfcl_score.py:100: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+metrology/bfcl_score.py:871: in main
+    run(args)
+metrology/bfcl_score.py:759: in run
+    _setup_bfcl(args)
+metrology/bfcl_score.py:292: in _setup_bfcl
+    bfcl_dir = _inject_bfcl_syspath(args.bfcl_pkg_path)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+bfcl_pkg_path = '/home/liuyancheng/c2kv-bdf/.foreman/ref/bfcl_pkg'
+
+    def _inject_bfcl_syspath(bfcl_pkg_path: str) -> Path:
+        """--bfcl_pkg_path 接受两种形态：bfcl_eval 包目录本身，或包含 bfcl_eval/ 子包的
+        仓库目录。返回解析后的 bfcl_eval 包目录，并把其父目录插入 sys.path。"""
+        p = Path(bfcl_pkg_path).resolve()
+        if (p / "__init__.py").exists() and p.name == "bfcl_eval":
+            sys.path.insert(0, str(p.parent))
+            return p
+        if (p / "bfcl_eval" / "__init__.py").exists():
+            sys.path.insert(0, str(p))
+            return p / "bfcl_eval"
+>       raise FileNotFoundError(
+            f"--bfcl_pkg_path={bfcl_pkg_path} 下找不到 bfcl_eval 包（需含 bfcl_eval/__init__.py）"
+        )
+E       FileNotFoundError: --bfcl_pkg_path=/home/liuyancheng/c2kv-bdf/.foreman/ref/bfcl_pkg 下找不到 bfcl_eval 包（需含 bfcl_eval/__init__.py）
+
+metrology/bfcl_hf_runner.py:326: FileNotFoundError
+----------------------------- Captured stdout call -----------------------------
+[setup] import 面: filelock                 -> real
+[setup] import 面: openai                   -> real
+[setup] import 面: overrides                -> real
+[setup] import 面: requests                 -> real
+[setup] import 面: tenacity                 -> real
+[setup] import 面: tree_sitter              -> real
+[setup] import 面: tree_sitter_java         -> real
+[setup] import 面: tree_sitter_javascript   -> real
+[setup] stub 修复: tree_sitter 设为包（__spec__=None 手工 stub，子模块走兜底 finder）
+[setup] stub 修复: tree_sitter_java 设为包（__spec__=None 手工 stub，子模块走兜底 finder）
+[setup] stub 修复: tree_sitter_javascript 设为包（__spec__=None 手工 stub，子模块走兜底 finder）
+[setup] stub 修复: openai 设为包（__spec__=None 手工 stub，子模块走兜底 finder）
+[setup] stub 修复: overrides 设为包（__spec__=None 手工 stub，子模块走兜底 finder）
+[setup] stub 修复: tenacity 设为包（__spec__=None 手工 stub，子模块走兜底 finder）
+[setup] stub 修复: tenacity 已重注册为增强版（retry_if_* 可 or 组合）
+=============================== warnings summary ===============================
+../envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58
+../envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58
+  /home/liuyancheng/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0 owner does not match the current owner.
+    warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+
+../envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58
+../envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58
+  /home/liuyancheng/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0/aarch64-linux/ascend_ops_install.info owner does not match the current owner.
+    warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED metrology/test_bfcl_score.py::test_cli_dedup_guard_on_smoke_fixtures
+FAILED metrology/test_bfcl_score.py::test_cli_scoring_on_unique_cells - FileN...
+2 failed, 522 passed, 9 skipped, 4 warnings in 479.74s (0:07:59)

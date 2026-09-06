@@ -1,0 +1,543 @@
+** WARNING: connection is not using a post-quantum key exchange algorithm.
+** This session may be vulnerable to "store now, decrypt later" attacks.
+** The server may need to be upgraded. See https://openssh.com/pq.html
+
+Authorized users only. All activities may be monitored and reported.
+{
+ "score_dir_listing": [
+  "data_agentic.csv",
+  "data_multi_turn.csv",
+  "Qwen_Qwen3-4B-Instruct-2507-FC",
+  "data_non_live.csv",
+  "data_format_sensitivity.csv",
+  "data_live.csv",
+  "data_overall.csv"
+ ],
+ "score_head_data_multi_turn.csv": [
+  "Rank,Model,Multi Turn Overall Acc,Base,Miss Func,Miss Param,Long Context",
+  "1,Qwen3-4B-Instruct-2507 (FC),2.88%,11.54%,N/A,N/A,N/A"
+ ],
+ "score_head_data_overall.csv": [
+  "Rank,Overall Acc,Model,Model Link,Total Cost ($),Latency Mean (s),Latency Standard Deviation (s),Latency 95th Percentile (s),Non-Live AST Acc,Non-Live Simple AST,Non-Live Multiple AST,Non-Live Parallel AST,Non-Live Parallel Multiple AST,Live Acc,Live Simple AST,Live Multiple AST,Live Parallel AST,Live Parallel Multiple AST,Multi Turn Acc,Multi Turn Base,Multi Turn Miss Func,Multi Turn Miss Param,Multi Turn Long Context,Web Search Acc,Web Search Base,Web Search No Snippet,Memory Acc,Memory KV,Memory Vector,Memory Recursive Summarization,Relevance Detection,Irrelevance Detection,Format Sensitivity Max Delta,Format Sensitivity Standard Deviation,Organization,License",
+  "1,0.87%,Qwen3-4B-Instruct-2507 (FC),https://huggingface.co/Qwen/Qwen3-4B-Instruct-2507,0.05,1.75,1.58,2.96,N/A,N/A,N/A,N/A,N/A,0.00%,N/A,N/A,N/A,N/A,2.88%,11.54%,N/A,N/A,N/A,N/A,N/A,N/A,N/A,N/A,N/A,N/A,N/A,N/A,N/A,N/A,Qwen,apache-2.0"
+ ],
+ "score_cols": [
+  "Rank",
+  "Model",
+  "Multi Turn Overall Acc",
+  "Base",
+  "Miss Func",
+  "Miss Param",
+  "Long Context"
+ ],
+ "pass_counts": {
+  "full": 0,
+  "c2kv": 0,
+  "replace_w1": 0,
+  "replace_w2": 0,
+  "replace_w4": 0,
+  "replace_all": 0,
+  "recompute_w2": 0,
+  "append_w2": 0,
+  "append_w2_hint": 0,
+  "hint_only": 0,
+  "append_masked_w2": 0
+ },
+ "mcnemar": {
+  "c2kv|append_w2": {
+   "a_pass_b_fail": 0,
+   "a_fail_b_pass": 0,
+   "p": 1.0
+  },
+  "hint_only|append_w2": {
+   "a_pass_b_fail": 0,
+   "a_fail_b_pass": 0,
+   "p": 1.0
+  },
+  "replace_w2|append_w2": {
+   "a_pass_b_fail": 0,
+   "a_fail_b_pass": 0,
+   "p": 1.0
+  },
+  "c2kv|hint_only": {
+   "a_pass_b_fail": 0,
+   "a_fail_b_pass": 0,
+   "p": 1.0
+  },
+  "append_w2|append_w2_hint": {
+   "a_pass_b_fail": 0,
+   "a_fail_b_pass": 0,
+   "p": 1.0
+  }
+ },
+ "s32_copyeq": {
+  "replace_w2": {
+   "triggered_steps": 223,
+   "equal_action": 78,
+   "equal_raw_text": 19
+  },
+  "replace_all": {
+   "triggered_steps": 209,
+   "equal_action": 55,
+   "equal_raw_text": 9
+  },
+  "recompute_w2": {
+   "triggered_steps": 224,
+   "equal_action": 78,
+   "equal_raw_text": 18
+  },
+  "append_w2": {
+   "triggered_steps": 203,
+   "equal_action": 82,
+   "equal_raw_text": 28
+  },
+  "append_w2_hint": {
+   "triggered_steps": 185,
+   "equal_action": 69,
+   "equal_raw_text": 17
+  },
+  "hint_only": {
+   "triggered_steps": 267,
+   "equal_action": 174,
+   "equal_raw_text": 82
+  },
+  "append_masked_w2": {
+   "triggered_steps": 223,
+   "equal_action": 78,
+   "equal_raw_text": 19
+  }
+ },
+ "s35_ratchet": {
+  "c2kv": {
+   "total": 481,
+   "beyond_reference": 38,
+   "beyond_with_drift": 6,
+   "beyond_oracle_harmful": 0,
+   "align_status": {
+    "matched": 443,
+    "missing_reference": 38
+   }
+  },
+  "replace_w2": {
+   "total": 479,
+   "beyond_reference": 8,
+   "beyond_with_drift": 4,
+   "beyond_oracle_harmful": 5,
+   "align_status": {
+    "matched": 471,
+    "missing_reference": 8
+   }
+  },
+  "replace_all": {
+   "total": 488,
+   "beyond_reference": 0,
+   "beyond_with_drift": 0,
+   "beyond_oracle_harmful": 0,
+   "align_status": {
+    "matched": 488
+   }
+  },
+  "recompute_w2": {
+   "total": 482,
+   "beyond_reference": 7,
+   "beyond_with_drift": 4,
+   "beyond_oracle_harmful": 5,
+   "align_status": {
+    "matched": 475,
+    "missing_reference": 7
+   }
+  },
+  "append_w2": {
+   "total": 413,
+   "beyond_reference": 18,
+   "beyond_with_drift": 5,
+   "beyond_oracle_harmful": 5,
+   "align_status": {
+    "matched": 395,
+    "missing_reference": 18
+   }
+  },
+  "append_w2_hint": {
+   "total": 398,
+   "beyond_reference": 8,
+   "beyond_with_drift": 2,
+   "beyond_oracle_harmful": 3,
+   "align_status": {
+    "matched": 390,
+    "missing_reference": 8
+   }
+  },
+  "hint_only": {
+   "total": 497,
+   "beyond_reference": 42,
+   "beyond_with_drift": 7,
+   "beyond_oracle_harmful": 5,
+   "align_status": {
+    "matched": 455,
+    "missing_reference": 42
+   }
+  }
+ },
+ "s22_steps": {
+  "full": {
+   "steps": 490,
+   "cand_status=decoded_action": 284,
+   "repair_status=None": 490,
+   "cand_status=empty_action": 206
+  },
+  "c2kv": {
+   "steps": 481,
+   "cand_status=decoded_action": 275,
+   "repair_status=None": 481,
+   "cand_status=empty_action": 204,
+   "cand_status=invalid_format": 2
+  },
+  "replace_w2": {
+   "steps": 479,
+   "cand_status=decoded_action": 269,
+   "repair_status=None": 256,
+   "cand_status=empty_action": 206,
+   "repair_status=decoded_action": 138,
+   "repair_status=empty_action": 85,
+   "cand_status=invalid_format": 4
+  },
+  "replace_all": {
+   "steps": 488,
+   "cand_status=decoded_action": 270,
+   "repair_status=None": 279,
+   "cand_status=empty_action": 213,
+   "repair_status=decoded_action": 137,
+   "repair_status=empty_action": 72,
+   "cand_status=invalid_format": 5
+  },
+  "recompute_w2": {
+   "steps": 482,
+   "cand_status=decoded_action": 269,
+   "repair_status=None": 258,
+   "cand_status=empty_action": 210,
+   "repair_status=decoded_action": 139,
+   "repair_status=empty_action": 85,
+   "cand_status=invalid_format": 3
+  },
+  "append_w2": {
+   "steps": 413,
+   "cand_status=decoded_action": 253,
+   "repair_status=None": 210,
+   "cand_status=empty_action": 158,
+   "repair_status=decoded_action": 88,
+   "repair_status=empty_action": 81,
+   "cand_status=invalid_format": 2,
+   "repair_status=invalid_format": 34
+  },
+  "append_w2_hint": {
+   "steps": 398,
+   "cand_status=decoded_action": 238,
+   "repair_status=None": 213,
+   "cand_status=empty_action": 158,
+   "repair_status=decoded_action": 72,
+   "repair_status=empty_action": 89,
+   "repair_status=invalid_format": 24,
+   "cand_status=invalid_format": 2
+  },
+  "hint_only": {
+   "steps": 497,
+   "cand_status=decoded_action": 266,
+   "repair_status=None": 230,
+   "cand_status=empty_action": 228,
+   "repair_status=decoded_action": 170,
+   "repair_status=empty_action": 97,
+   "cand_status=invalid_format": 3
+  },
+  "append_masked_w2": {
+   "steps": 479,
+   "cand_status=decoded_action": 269,
+   "repair_status=None": 256,
+   "cand_status=empty_action": 206,
+   "repair_status=decoded_action": 138,
+   "repair_status=empty_action": 85,
+   "cand_status=invalid_format": 4
+  }
+ },
+ "s4_example": {
+  "id": "multi_turn_base_110",
+  "turn": 1,
+  "step": 0,
+  "build_info_keys": [
+   "canonical_full_history_tokens",
+   "history_layout",
+   "history_original_tokens",
+   "logical_position_after",
+   "logical_position_before",
+   "physical_prefix_len_after",
+   "physical_prefix_len_before",
+   "position_frame_debug_enabled",
+   "repair_absolute_position_ranges",
+   "repair_extract_source",
+   "repair_mode",
+   "repair_operation",
+   "repair_physical_tokens",
+   "repair_raw_tokens",
+   "repair_target_indices",
+   "repair_target_metadata",
+   "repair_target_roles",
+   "repair_tokens_injected",
+   "repair_tokens_requested",
+   "repair_window",
+   "uses_oracle_error_location",
+   "wrapper_native_length_delta",
+   "wrapper_native_length_ratio"
+  ]
+ },
+ "s4_example_layout": [
+  {
+   "history_index": 0,
+   "mode": "gist",
+   "roles": [
+    "user"
+   ],
+   "logical_token_range": [
+    5490,
+    5534
+   ],
+   "native_position_range": [
+    5490,
+    5534
+   ],
+   "wrapper_position_range": [
+    5490,
+    5548
+   ],
+   "physical_kv_tokens": 15,
+   "full_equivalent_tokens": 58
+  },
+  {
+   "history_index": 1,
+   "mode": "gist",
+   "roles": [
+    "assistant",
+    "tool"
+   ],
+   "logical_token_range": [
+    5534,
+    5575
+   ],
+   "native_position_range": [
+    5534,
+    5575
+   ],
+   "wrapper_position_range": [
+    5548,
+    5610
+   ],
+   "physical_kv_tokens": 16,
+   "full_equivalent_tokens": 62
+  },
+  {
+   "history_index": 2,
+   "mode": "gist",
+   "roles": [
+    "assistant"
+   ],
+   "logical_token_range": [
+    5575,
+    5598
+   ],
+   "native_position_range": [
+    5575,
+    5598
+   ],
+   "wrapper_position_range": [
+    5610,
+    5649
+   ],
+   "physical_kv_tokens": 10,
+   "full_equivalent_tokens": 39
+  }
+ ],
+ "s4_example_scalars": {
+  "repair_mode": "d_corr_w2",
+  "repair_extract_source": "model_prefill",
+  "repair_window": "2",
+  "repair_operation": "append",
+  "uses_oracle_error_location": false,
+  "repair_tokens_requested": 64,
+  "repair_tokens_injected": 64,
+  "repair_raw_tokens": 64,
+  "repair_physical_tokens": 64,
+  "position_frame_debug_enabled": false,
+  "history_original_tokens": 159,
+  "canonical_full_history_tokens": 108,
+  "wrapper_native_length_delta": 51,
+  "wrapper_native_length_ratio": 1.4722222222222223,
+  "physical_prefix_len_before": 41,
+  "physical_prefix_len_after": 105,
+  "logical_position_before": 108,
+  "logical_position_after": 108
+ },
+ "s4_example_targets": {
+  "repair_target_indices": [
+   1,
+   2
+  ],
+  "repair_absolute_position_ranges": [
+   [
+    5548,
+    5589
+   ],
+   [
+    5610,
+    5633
+   ]
+  ],
+  "wrapper_native_length_delta": 51,
+  "wrapper_native_length_ratio": 1.4722222222222223
+ },
+ "s4_replace_same_id": {
+  "id": "multi_turn_base_110",
+  "turn": 1,
+  "step": 0,
+  "layout": [
+   {
+    "history_index": 0,
+    "mode": "gist",
+    "roles": [
+     "user"
+    ],
+    "logical_token_range": [
+     5490,
+     5534
+    ],
+    "native_position_range": [
+     5490,
+     5534
+    ],
+    "wrapper_position_range": [
+     5490,
+     5548
+    ],
+    "physical_kv_tokens": 15,
+    "full_equivalent_tokens": 58
+   },
+   {
+    "history_index": 1,
+    "mode": "raw_replace",
+    "roles": [
+     "assistant",
+     "tool"
+    ],
+    "logical_token_range": [
+     5534,
+     5575
+    ],
+    "native_position_range": [
+     5534,
+     5575
+    ],
+    "wrapper_position_range": [
+     5548,
+     5610
+    ],
+    "absolute_rope_position_range": [
+     5534,
+     5575
+    ],
+    "raw_tokens": 41
+   },
+   {
+    "history_index": 2,
+    "mode": "raw_replace",
+    "roles": [
+     "assistant"
+    ],
+    "logical_token_range": [
+     5575,
+     5598
+    ],
+    "native_position_range": [
+     5575,
+     5598
+    ],
+    "wrapper_position_range": [
+     5610,
+     5649
+    ],
+    "absolute_rope_position_range": [
+     5575,
+     5598
+    ],
+    "raw_tokens": 23
+   }
+  ],
+  "scalars": {
+   "repair_mode": "d_corr_replace_w2",
+   "repair_extract_source": "model_prefill",
+   "repair_window": "2",
+   "repair_operation": "replace",
+   "uses_oracle_error_location": false,
+   "repair_tokens_requested": 64,
+   "repair_tokens_injected": 64,
+   "repair_raw_tokens": 64,
+   "repair_physical_tokens": 64,
+   "position_frame_debug_enabled": false,
+   "history_original_tokens": 159,
+   "canonical_full_history_tokens": 108,
+   "wrapper_native_length_delta": 51,
+   "wrapper_native_length_ratio": 1.4722222222222223,
+   "physical_prefix_len_before": 15,
+   "physical_prefix_len_after": 79,
+   "logical_position_before": 108,
+   "logical_position_after": 108
+  },
+  "targets": {
+   "repair_target_indices": [
+    1,
+    2
+   ],
+   "repair_absolute_position_ranges": [
+    [
+     5534,
+     5575
+    ],
+    [
+     5575,
+     5598
+    ]
+   ]
+  }
+ },
+ "s4_geom": {
+  "append_w2": {
+   "steps": 203,
+   "units": 1477,
+   "dup_wrapper_pos_units": 0,
+   "overlap_positions": 7579,
+   "tail_beyond_gist_tokens": 0,
+   "hole_positions": 0,
+   "last_unit_mode": {
+    "gist": 203
+   }
+  },
+  "replace_w2": {
+   "steps": 223,
+   "units": 1711,
+   "dup_wrapper_pos_units": 0,
+   "overlap_positions": 33999,
+   "tail_beyond_gist_tokens": 0,
+   "hole_positions": 0,
+   "last_unit_mode": {
+    "raw_replace": 223
+   }
+  },
+  "append_masked_w2": {
+   "steps": 223,
+   "units": 1711,
+   "dup_wrapper_pos_units": 0,
+   "overlap_positions": 33999,
+   "tail_beyond_gist_tokens": 0,
+   "hole_positions": 0,
+   "last_unit_mode": {
+    "raw_append_masked": 223
+   }
+  }
+ }
+}

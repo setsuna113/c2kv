@@ -1,0 +1,51 @@
+{
+ "config": {
+  "dataset": "/home/liuyancheng/c2kv/datasets/agent-llm-traces",
+  "split": "train",
+  "split_seed": 42,
+  "eval_ratio": 0.1,
+  "split_manifest_name": "subset_disjoint",
+  "max_samples_per_session": 4,
+  "require_tool_call": true,
+  "include_tools": true,
+  "num_samples_cap": 6000
+ },
+ "train_records": {
+  "total": 4349,
+  "tau2": 1362,
+  "by_benchmark": {
+   "appworld": 1371,
+   "browsecompplus": 468,
+   "swebench": 1148,
+   "tau2_airline": 254,
+   "tau2_retail": 584,
+   "tau2_telecom": 524
+  },
+  "tau2_share": 0.3132
+ },
+ "train_sessions": {
+  "total": 1102,
+  "tau2": 345,
+  "by_benchmark": {
+   "appworld": 347,
+   "browsecompplus": 121,
+   "swebench": 289,
+   "tau2_airline": 65,
+   "tau2_retail": 146,
+   "tau2_telecom": 134
+  },
+  "tau2_share": 0.3131
+ },
+ "full_dataset_sessions": {
+  "appworld": 406,
+  "browsecompplus": 133,
+  "swebench": 391,
+  "tau2_airline": 196,
+  "tau2_retail": 469,
+  "tau2_telecom": 186
+ },
+ "full_dataset_tau2": {
+  "sessions": 851,
+  "share": 0.4778
+ }
+}

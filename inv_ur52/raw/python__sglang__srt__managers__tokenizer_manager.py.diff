@@ -1,0 +1,57 @@
+diff --git a/python/sglang/srt/managers/tokenizer_manager.py b/python/sglang/srt/managers/tokenizer_manager.py
+index ae61435ac..933464b32 100644
+--- a/python/sglang/srt/managers/tokenizer_manager.py
++++ b/python/sglang/srt/managers/tokenizer_manager.py
+@@ -976,20 +976,24 @@ class TokenizerManager(TokenizerCommunicatorMixin, TokenizerManagerScoreMixin):
+                 return_routed_experts=obj.return_routed_experts,
+                 routed_dp_rank=obj.routed_dp_rank,
+                 disagg_prefill_dp_rank=obj.disagg_prefill_dp_rank,
+                 priority=obj.priority,
+                 extra_key=obj.extra_key,
+                 routing_key=obj.routing_key,
+                 token_type_ids=token_type_ids,
+                 need_wait_for_mm_inputs=obj.need_wait_for_mm_inputs,
+                 num_items_assigned=obj.num_items_assigned,
+                 c2kv_segments=getattr(obj, "c2kv_segments", None),
++                c2kv_kv_memory_hint=getattr(obj, "c2kv_kv_memory_hint", None),
++                c2kv_use_gist_projection=getattr(
++                    obj, "c2kv_use_gist_projection", False
++                ),
+             )
+         elif isinstance(obj, EmbeddingReqInput):
+             tokenized_obj = TokenizedEmbeddingReqInput(
+                 input_text,
+                 input_ids,
+                 mm_inputs,
+                 token_type_ids,
+                 sampling_params,
+                 rid=obj.rid,
+                 priority=obj.priority,
+@@ -1587,20 +1591,27 @@ class TokenizerManager(TokenizerCommunicatorMixin, TokenizerManagerScoreMixin):
+                 ):
+                     meta_info["cached_tokens_details"] = recv_obj.cached_tokens_details[
+                         i
+                     ]
+                 if (
+                     hasattr(recv_obj, "kv_runtime_stats")
+                     and recv_obj.kv_runtime_stats
+                     and recv_obj.kv_runtime_stats[i] is not None
+                 ):
+                     meta_info["kv_runtime_stats"] = recv_obj.kv_runtime_stats[i]
++                if (
++                    hasattr(recv_obj, "kv_memory_reports")
++                    and recv_obj.kv_memory_reports
++                    and recv_obj.kv_memory_reports[i] is not None
++                ):
++                    meta_info["kv_memory_report"] = recv_obj.kv_memory_reports[i]
++                    logger.info("KV-memory report attached to response rid=%s", rid)
+ 
+             if getattr(recv_obj, "output_hidden_states", None):
+                 meta_info["hidden_states"] = recv_obj.output_hidden_states[i]
+             if getattr(recv_obj, "routed_experts", None):
+                 routed_experts_tensor = recv_obj.routed_experts[i]
+                 if routed_experts_tensor is not None:
+                     meta_info["routed_experts"] = pybase64.b64encode(
+                         routed_experts_tensor.numpy().tobytes()
+                     ).decode("utf-8")
+             if getattr(recv_obj, "customized_info", None):

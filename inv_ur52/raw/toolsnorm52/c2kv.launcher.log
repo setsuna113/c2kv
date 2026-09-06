@@ -1,0 +1,23 @@
+[2026-09-05 20:07:43] BFCL KV repair sweep starting
+[2026-09-05 20:07:43] RUN_ROOT=/tmp/c2kv-toolsnorm52.NIhbBb/runs/c2kv
+[2026-09-05 20:07:43] ARMS=c2kv
+[2026-09-05 20:07:43] CHECKPOINT_INTERVAL=4
+[2026-09-05 20:07:43] DEVICES=6 PORTS=34770
+[2026-09-05 20:07:43] C2KV_POOL_FRACTION=0.06
+[2026-09-05 20:07:43] REPAIR_WINDOW=1
+[2026-09-05 20:07:43] REPAIR_EXTRACT_SOURCE=auto
+[2026-09-05 20:07:43] MAX_COMPLETION_TOKENS=4096
+[2026-09-05 20:07:43] FLUSH_CACHE_BETWEEN_ARMS=1
+[2026-09-05 20:07:43] IDS_PATH=/tmp/c2kv-toolsnorm52.NIhbBb/inputs/correct_ids.txt
+[2026-09-05 20:07:43] PLAN_PATH=
+[2026-09-05 20:07:43] REPAIR_LOCATOR=recent
+[2026-09-05 20:07:43] WITNESS_CORE_PATH=/home/zhuyuhan/project/c2kv/share/d-kv-repair/d_witness_core.py
+[2026-09-05 20:07:43] source /usr/local/Ascend/cann-8.5.0/set_env.sh
+[2026-09-05 20:07:43] source /usr/local/Ascend/nnal/atb/set_env.sh
+[2026-09-05 20:07:43] server slot=0 device=6 port=34770 pid=1594615 log=/tmp/c2kv-toolsnorm52.NIhbBb/runs/c2kv/server_6_34770.log
+[2026-09-05 20:11:25] runner start arm=c2kv slot=0 port=34770
+[2026-09-05 20:28:42] runner done arm=c2kv
+[2026-09-05 20:28:54] eval done arm=c2kv
+[2026-09-05 20:28:54] skip compare_kv_repair_sweep because RUN_COMPARE=0
+[2026-09-05 20:28:54] summary: /tmp/c2kv-toolsnorm52.NIhbBb/runs/c2kv/kv_repair_summary.csv
+[2026-09-05 20:28:54] report: /tmp/c2kv-toolsnorm52.NIhbBb/runs/c2kv/kv_repair_report.md

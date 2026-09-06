@@ -1,0 +1,231 @@
+                    requested_span_tokens=token_len,
+                )
+            try:
+                if self.tree_cache is None:
+                    raise RuntimeError("Serving cache is disabled.")
+                match_result = self.tree_cache.match_prefix(
+                    MatchPrefixParams(
+                        key=RadixKey(recv_req.input_ids, extra_key=None)
+                    )
+                )
+                cached_indices = match_result.device_indices
+                cache_hit_tokens = int(cached_indices.numel())
+                if cache_hit_tokens < recv_req.span_end:
+                    raise RuntimeError(
+                        "PREFIX_NOT_FOUND_IN_SERVING_CACHE: "
+                        f"cache_hit_tokens={cache_hit_tokens}, "
+                        f"required_span_end={recv_req.span_end}, "
+                        f"input_len={input_len}, page_size={self.tree_cache.page_size}"
+                    )
+                span_indices = cached_indices[
+                    recv_req.span_start : recv_req.span_end
+                ].to(dtype=torch.long)
+                if int(span_indices.numel()) != token_len:
+                    raise RuntimeError(
+                        "Serving-cache repair span index length mismatch: "
+                        f"{int(span_indices.numel())=} != {token_len=}"
+                    )
+                kv_cache = (
+                    self.tp_worker.model_runner.token_to_kv_pool_allocator.get_kvcache()
+                )
+                first_key_buffer_shape = tuple(
+                    kv_cache.get_key_buffer(self.c2kv_pool.start_layer).shape
+                )
+
+                def _slice_kv_tokens(buffer: torch.Tensor) -> torch.Tensor:
+                    if buffer.ndim >= 3:
+                        # Main serving KV can be either [token, Hkv, D] or
+                        # paged [page, page_size, Hkv, D].  Radix cache indices
+                        # are physical token locations, so flatten all physical
+                        # token dimensions and keep the final [Hkv, D] layout.
+                        flat = buffer.reshape(
+                            -1,
+                            buffer.shape[-2],
+                            buffer.shape[-1],
+                        )
+                        max_index = (
+                            int(span_indices.max().item())
+                            if int(span_indices.numel()) > 0
+                            else -1
+                        )
+                        if max_index >= int(flat.shape[0]):
+                            raise RuntimeError(
+                                "Serving-cache repair span index out of bounds: "
+                                f"{max_index=} >= flat_tokens={int(flat.shape[0])}, "
+                                f"buffer_shape={tuple(buffer.shape)}"
+                            )
+                        return flat[span_indices]
+                    raise RuntimeError(
+                        "Unsupported serving KV cache buffer shape for repair "
+                        f"extract: {tuple(buffer.shape)}"
+                    )
+
+                key_values = []
+                for layer_idx in range(self.c2kv_pool.num_layers):
+                    layer_id = self.c2kv_pool.start_layer + layer_idx
+                    key = (
+                        _slice_kv_tokens(kv_cache.get_key_buffer(layer_id))
+                        .reshape(token_len, -1)
+                        .contiguous()
+                        .clone()
+                    )
+                    value = (
+                        _slice_kv_tokens(kv_cache.get_value_buffer(layer_id))
+                        .reshape(token_len, -1)
+                        .contiguous()
+                        .clone()
+                    )
+                    key_values.append((key, value))
+                position_ids = torch.arange(
+                    recv_req.position_offset + recv_req.span_start,
+                    recv_req.position_offset + recv_req.span_end,
+                    dtype=torch.int64,
+                    device=self.c2kv_pool.position_buffer.device,
+                ).view(1, token_len)
+            except Exception as e:
+                logger.error(
+                    "C2KV serving-cache repair extract failed: %s",
+                    e,
+                    exc_info=True,
+                )
+                error_msg = str(e)
+        else:
+            input_ids = torch.tensor(
+                [recv_req.input_ids],
+                dtype=torch.long,
+                device="cuda",
+            )
+            try:
+                repair_result = self.tp_worker.model_runner.forward_c2kv_repair_extract(
+                    input_ids,
+                    span_start=recv_req.span_start,
+                    span_end=recv_req.span_end,
+                    position_offset=recv_req.position_offset,
+                    repair_position_ids=recv_req.repair_position_ids,
+                    raw_kv_position_mode=recv_req.raw_kv_position_mode,
+                    history_kv_method=history_kv_method or None,
+                    history_kv_target_tokens=recv_req.history_kv_target_tokens,
+                    history_kv_retention_ratio=recv_req.history_kv_retention_ratio,
+                    history_kv_recent_window=recv_req.history_kv_recent_window,
+                    history_kv_kernel_size=recv_req.history_kv_kernel_size,
+                    history_kv_pooling=recv_req.history_kv_pooling,
+                    history_kv_h2o_recent_fraction=recv_req.history_kv_h2o_recent_fraction,
+                )
+                if isinstance(repair_result, tuple) and len(repair_result) == 3:
+                    key_values, position_ids, history_meta = repair_result
+                else:
+                    key_values, position_ids = repair_result
+            except Exception as e:
+                logger.error("C2KV repair extract failed: %s", e, exc_info=True)
+                error_msg = str(e)
+            finally:
+                input_ids = None
+
+        if self.tp_size > 1 and torch.distributed.is_initialized():
+            local_ok = torch.tensor([0 if error_msg else 1], dtype=torch.long)
+            torch.distributed.all_reduce(
+                local_ok,
+                op=torch.distributed.ReduceOp.MIN,
+                group=self.tp_cpu_group,
+            )
+            if local_ok.item() == 0 and error_msg is None:
+                error_msg = "C2KV repair extract failed on a peer TP rank"
+
+        if error_msg is not None:
+            key_values = position_ids = None
+            if _is_npu:
+                try:
+                    torch.npu.synchronize()
+                    torch.npu.empty_cache()
+                except Exception:
+                    logger.warning("C2KV NPU repair cleanup failed", exc_info=True)
+            return C2KVRepairExtractReqOutput(
+                error=error_msg,
+                success=False,
+                extract_source=extract_source,
+                cache_hit_tokens=cache_hit_tokens,
+                history_kv_method=history_kv_method or None,
+                requested_span_tokens=token_len,
+            )
+
+        try:
+            entry = self.c2kv_pool.store_repair(
+                key_hash=key_hash,
+                key_values=key_values,
+                position_ids=position_ids,
+                original_seq_len=input_len,
+                already_rotated=(raw_kv_position_mode != "pre_rope"),
+            repair_mode=recv_req.repair_mode,
+            source_doc_index=recv_req.source_doc_index,
+        )
+        except ValueError as e:
+            key_values = position_ids = None
+            return C2KVRepairExtractReqOutput(
+                error=str(e),
+                success=False,
+                extract_source=extract_source,
+                cache_hit_tokens=cache_hit_tokens,
+                history_kv_method=history_kv_method or None,
+                requested_span_tokens=token_len,
+            )
+
+        pos = self.c2kv_pool.get_position_ids(entry)
+        self._log_c2kv_token_usage(
+            "repair_extract_store",
+            key_hash=key_hash[:16],
+            repair_mode=recv_req.repair_mode,
+            token_len=entry.token_len,
+            position_start=int(pos[0].item()),
+            position_end=int(pos[-1].item()) + 1,
+            extract_source=extract_source,
+            cache_hit_tokens=cache_hit_tokens,
+            history_kv_method=history_kv_method or None,
+            requested_span_tokens=token_len,
+            selected_token_count=entry.token_len,
+            selected_relative_indices=(
+                list(history_meta.get("selected_relative_indices") or [])
+                if isinstance(history_meta, dict)
+                and history_meta.get("selected_relative_indices") is not None
+                else None
+            ),
+            serving_kv_buffer_shape=(
+                first_key_buffer_shape
+                if extract_source == "serving_cache"
+                and "first_key_buffer_shape" in locals()
+                else None
+            ),
+        )
+        key_values = position_ids = None
+        if _is_npu:
+            try:
+                torch.npu.synchronize()
+                torch.npu.empty_cache()
+            except Exception:
+                logger.warning("C2KV NPU repair cleanup failed", exc_info=True)
+        return C2KVRepairExtractReqOutput(
+            key_hash=key_hash,
+            token_len=entry.token_len,
+            position_start=int(pos[0].item()),
+            position_end=int(pos[-1].item()) + 1,
+            original_seq_len=entry.original_seq_len,
+            repair_mode=entry.repair_mode or "",
+            extract_source=extract_source,
+            cache_hit_tokens=cache_hit_tokens,
+            serving_kv_buffer_shape=(
+                first_key_buffer_shape
+                if extract_source == "serving_cache"
+                and "first_key_buffer_shape" in locals()
+                else None
+            ),
+            history_kv_method=history_kv_method or None,
+            requested_span_tokens=token_len,
+            selected_token_count=entry.token_len,
+            selected_relative_indices=(
+                list(history_meta.get("selected_relative_indices") or [])
+                if isinstance(history_meta, dict)
+                and history_meta.get("selected_relative_indices") is not None
+                else None
+            ),
+        )
+
+    def _init_c2kv_kv_memory_report(self, req: "Req", hint) -> None:

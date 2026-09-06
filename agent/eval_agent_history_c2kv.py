@@ -9,6 +9,7 @@ import os
 import re
 import sys
 import time
+import zlib
 from collections import Counter
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
@@ -632,6 +633,21 @@ def _prompt_ids_for_mode(
     return prompt_ids, debug, None
 
 
+def _seed_generation(args: argparse.Namespace, qid: str, mode: str, ratio: Any) -> None:
+    """Per-row generation seed; no-op unless sampling is on.
+
+    Same formula as agent/eval_joint_next_action_c2kv.py so a (qid, mode,
+    ratio) cell draws the same stream in either harness.  ``ratio`` MUST be
+    the value the row records in its ``ratio`` field -- the cell is identified
+    by what the row says, not by ``args.override_ratio``, and the two differ
+    for the fixed-ratio full-prompt modes.
+    """
+    if not getattr(args, "do_sample", False):
+        return
+    gen_seed = int(getattr(args, "gen_seed", 0) or 0)
+    torch.manual_seed((gen_seed * 1_000_003) ^ zlib.crc32(f"{qid}:{mode}:{ratio}".encode()))
+
+
 @torch.inference_mode()
 def _generate_full_prompt(
     model: Any,
@@ -641,24 +657,34 @@ def _generate_full_prompt(
     mode: str,
 ) -> Dict[str, Any]:
     total_start = time.perf_counter()
+    # FULL_PROMPT_MODES replay an uncompressed prompt, so the row's ratio is 1
+    # by construction (main() also pins run_ratios=[1] for them).  One binding
+    # feeds both the recorded field and the per-row seed: the seed must be
+    # derived from the ratio the row reports, never from args.override_ratio,
+    # or the (qid, mode, ratio) cell would not identify the random stream.
+    row_ratio = 1
     prompt_ids, debug, skip_reason = _prompt_ids_for_mode(tokenizer, example, args, mode)
     if skip_reason is not None:
         return {
             "qid": example.qid,
             "session_id": example.qid.rsplit(":", 1)[0] if ":" in example.qid else None,
             "mode": mode,
-            "ratio": 1,
+            "ratio": row_ratio,
             "skipped": True,
             "skip_reason": skip_reason,
             **debug,
         }
     input_ids = torch.tensor([prompt_ids], dtype=torch.long, device=model.device)
+    _seed_generation(args, example.qid, mode, row_ratio)
     prediction, generate_sec, generated_tokens, tbt_sec = _generate_from_input_ids(
         model,
         tokenizer,
         input_ids=input_ids,
         max_new_tokens=args.max_new_tokens,
         attn_impl=args.generate_attn_impl,
+        do_sample=args.do_sample,
+        temperature=args.temperature,
+        top_p=args.top_p,
     )
     target = debug.get("target_override", example.answer)
     row = _target_metrics(tokenizer, target, prediction)
@@ -666,7 +692,7 @@ def _generate_full_prompt(
         "qid": example.qid,
         "session_id": example.qid.rsplit(":", 1)[0] if ":" in example.qid else None,
         "mode": mode,
-        "ratio": 1,
+        "ratio": row_ratio,
         "history_selection": args.history_selection,
         "skipped": False,
         "doc_tokens": max(0, debug.get("prompt_tokens", 0) - len(_chat_template_ids(
@@ -780,6 +806,23 @@ def _first_token_diff(left: Sequence[int], right: Sequence[int]) -> Optional[int
     return None
 
 
+def _grid_from_doc_ids(
+    doc_ids: Sequence[Sequence[int]],
+    max_doc_length: int,
+    max_doc_num: int,
+) -> torch.Tensor:
+    """Pad per-doc ids into the (max_doc_num, max_doc_length) compression grid.
+
+    Grid rows are the batch dimension of _build_tool_cache: the compressing
+    forward only ever sees one chunk per row, so the gist of a doc is
+    bit-identical whether the grid holds that doc alone or the full history.
+    Task-D's recompute arm relies on that (truncated upstream grid).
+    """
+    rows = [_pad(list(ids), max_doc_length, -100) for ids in doc_ids]
+    rows.extend([[-100] * max_doc_length for _ in range(max(0, max_doc_num - len(rows)))])
+    return torch.tensor(rows, dtype=torch.long)
+
+
 def _build_history_chunks(
     tokenizer: Any,
     example: CompressHistoryExample,
@@ -793,14 +836,13 @@ def _build_history_chunks(
     for message in history:
         doc_ids = _chat_template_ids(tokenizer, [message], max_length=args.max_doc_length)
         total_tokens += len(doc_ids)
-        rows.append(_pad(doc_ids, args.max_doc_length, -100))
+        rows.append(doc_ids)
     if total_tokens > args.max_history_tokens:
         return None, total_tokens, len(history), history, f"history_tokens>{args.max_history_tokens}"
     if len(rows) > args.max_doc_num:
         return None, total_tokens, len(history), history, f"history_docs>{args.max_doc_num}"
-    empty_docs = args.max_doc_num - len(rows)
-    rows.extend([[-100] * args.max_doc_length for _ in range(empty_docs)])
-    return torch.tensor(rows, dtype=torch.long), total_tokens, len(history), history, None
+    grid = _grid_from_doc_ids(rows, args.max_doc_length, args.max_doc_num)
+    return grid, total_tokens, len(history), history, None
 
 
 def _build_raw_first15_doc_ids(
@@ -1183,6 +1225,7 @@ def _generate_with_prefix(
     example: CompressHistoryExample,
     prefix: Dict[str, Any],
     args: argparse.Namespace,
+    mode: Optional[str] = None,
 ) -> Dict[str, Any]:
     current_messages = prefix.get("current_messages") or _current_messages(example)
     prompt_ids, prompt_debug = _current_prompt_ids(tokenizer, current_messages, args)
@@ -1197,6 +1240,7 @@ def _generate_with_prefix(
         dtype=torch.long,
         device=model.device,
     ).unsqueeze(0)
+    _seed_generation(args, example.qid, mode or args.mode, args.override_ratio)
     prediction, generate_sec, generated_tokens, tbt_sec = _generate_from_input_ids(
         model,
         tokenizer,
@@ -1206,6 +1250,9 @@ def _generate_with_prefix(
         use_gist=prefix.get("use_gist", False),
         position_ids=position_ids,
         past_key_values=prefix["cache"],
+        do_sample=args.do_sample,
+        temperature=args.temperature,
+        top_p=args.top_p,
     )
     target = prefix.get("target_override", example.answer)
     metrics = _target_metrics(tokenizer, target, prediction)
@@ -1575,6 +1622,687 @@ def _build_c2kv_prefix(
         "tool_compress_sec": compress_sec,
         "blend_sec": blend_sec,
         "use_gist": True,
+    }, None
+
+
+# --- R4 (task D): typed/random raw-KV anchors at original positions ---------
+# Per-qid span table injected by the r4 driver before generation:
+#   {qid: {doc_index: [[start, end), ...]}} — indices into the TRUNCATED
+# per-doc ids (the same construction _build_history_chunks compresses).
+R4_ANCHOR_SPANS: Dict[str, Dict[str, List[List[int]]]] = {}
+
+
+@torch.inference_mode()
+def _append_span_cache(
+    model: Any,
+    prefix_cache: Any,
+    doc_cache: Any,
+    doc_logical_start: int,
+    span_indices: List[int],
+) -> Any:
+    """Append selected token K/V of a standalone-prefilled doc to prefix_cache.
+
+    The standalone doc forward uses the regular K/V projections with
+    chunk-local context — identical to the raw-token K/V generate_gist
+    computes and discards (raw tokens never attend to gist tokens). Keys are
+    rotated to absolute positions first (same primitive as
+    _append_independent_cache), then the span slice is concatenated.
+    """
+    rope_theta, rope_type = _model_rope_params(model)
+    index = torch.tensor(span_indices, dtype=torch.long, device=doc_cache.layers[0].keys.device)
+    for prefix_layer, doc_layer in zip(prefix_cache.layers, doc_cache.layers):
+        rotated = rotate_k_cache_rope(doc_layer.keys[0], doc_logical_start, rope_theta, rope_type)
+        prefix_layer.keys = torch.cat(
+            [prefix_layer.keys, rotated.index_select(1, index).unsqueeze(0)], dim=-2
+        )
+        prefix_layer.values = torch.cat(
+            [prefix_layer.values, doc_layer.values[0].index_select(1, index).unsqueeze(0)], dim=-2
+        )
+    return prefix_cache
+
+
+@torch.inference_mode()
+def _build_c2kv_anchor_prefix(
+    model: Any,
+    tokenizer: Any,
+    example: CompressHistoryExample,
+    args: argparse.Namespace,
+    anchor_spans: Optional[Dict[str, List[List[int]]]],
+) -> tuple[Optional[Dict[str, Any]], Optional[str]]:
+    """c2kv@4 with raw-KV anchors kept at their original positions (double
+    coverage): gist compression runs unchanged; anchor span KV is appended
+    per layer with absolute-position RoPE. Decode-time position correction
+    is unchanged because spans keep their original positions."""
+    context_input_ids, doc_tokens, doc_chunks, history, skip_reason = _build_history_chunks(
+        tokenizer, example, args
+    )
+    if context_input_ids is None:
+        return None, skip_reason
+    system_ids = _chat_template_ids(
+        tokenizer,
+        [{"role": "system", "content": example.system_prompt}],
+        tools=example.tools or None,
+        keep_bos=True,
+        max_length=args.max_system_length,
+    )
+    system_input_ids = torch.tensor([system_ids], dtype=torch.long, device=model.device)
+    system_cache, system_length, system_prefill_sec = _prefill_system(
+        model, system_input_ids, args.system_attn_impl
+    )
+    (
+        history_cache,
+        history_length,
+        gist_tokens,
+        actual_ratio,
+        compress_sec,
+        blend_sec,
+    ) = _build_tool_cache(
+        model,
+        context_input_ids,
+        system_cache,
+        system_length,
+        args.gist_attn_impl,
+        args.override_ratio,
+    )
+    anchor_tokens = 0
+    anchor_docs = 0
+    anchor_prefill_sec = 0.0
+    if anchor_spans:
+        doc_ids = [
+            _chat_template_ids(tokenizer, [message], max_length=args.max_doc_length)
+            for message in history
+        ]
+        offsets: List[int] = []
+        offset = system_length
+        for ids in doc_ids:
+            offsets.append(offset)
+            offset += len(ids)
+        for doc_key, spans in sorted(anchor_spans.items(), key=lambda kv: int(kv[0])):
+            doc_index = int(doc_key)
+            if doc_index >= len(doc_ids):
+                continue
+            ids = doc_ids[doc_index]
+            index = sorted({i for s, e in spans for i in range(int(s), min(int(e), len(ids)))})
+            if not index:
+                continue
+            doc_input_ids = torch.tensor([ids], dtype=torch.long, device=model.device)
+            doc_cache, _, elapsed = _prefill_ids_no_past(model, doc_input_ids, args.gist_attn_impl)
+            anchor_prefill_sec += elapsed
+            history_cache = _append_span_cache(model, history_cache, doc_cache, offsets[doc_index], index)
+            anchor_tokens += len(index)
+            anchor_docs += 1
+            del doc_cache
+            _clear_device_cache(args.device_type)
+    return {
+        "cache": history_cache,
+        "system_length": system_length,
+        "history_length": history_length,
+        "cache_length": history_cache.get_seq_length(),
+        "doc_tokens": doc_tokens,
+        "doc_chunks": doc_chunks,
+        "kept_history_tokens": doc_tokens,
+        "gist_tokens": gist_tokens,
+        "anchor_tokens": anchor_tokens,
+        "anchor_docs": anchor_docs,
+        "actual_compression_ratio": actual_ratio,
+        "system_prefill_sec": system_prefill_sec,
+        "full_prefill_sec": anchor_prefill_sec,
+        "tool_compress_sec": compress_sec,
+        "blend_sec": blend_sec,
+        "use_gist": True,
+    }, None
+
+
+# --- Task D (BDF pilot): KV edit vs rollback interventions -----------------
+# Per-qid plan injected by the d_kv_intervene driver before generation:
+#   {qid: {"k_star": int, "span_len": int, "sham_token_ids": [...]}}
+# Only the sham arm needs payload tokens; the corr arms rebuild their slice
+# from the model itself.
+D_INTERVENE: Dict[str, Dict[str, Any]] = {}
+
+# K1: erratum block-selection policy, overridable by the driver (median is
+# the prereg default; see _build_d_intervene_prefix).
+CORR_K_POLICY = "median"
+
+# Hybrid base (hybrid-x-D combo, 2026-08-29): None = pure c2kv base (the
+# historical D default); an int k = keep the last k docs raw and compress the
+# rest, with the base built by _build_hybrid_prefix (gist_first layout, see
+# docs/hybrid_spec.md).  Because gist_first preserves original offsets, the
+# erratum/append machinery below is unchanged: offsets stay the original
+# absolute positions and the span lands at the end unrotated.
+D_HYBRID_TOP_K: Optional[int] = None
+
+D_INTERVENE_MODES = {
+    "d_sham_neutral",
+    "d_corr",
+    "d_corr_recompute",
+    "d_corr_all",
+    "d_sham_mech",
+    # Transfer-manual A1/A2 exploratory arms (2026-08-28):
+    "d_re_only",     # A1: corr_re without the R_k append — isolates the
+                     # downstream-recompute contribution from the erratum.
+    "d_corr_text",   # A2: erratum as TEXT — doc k* prefilled verbatim after
+                     # the gist prefix instead of KV transplantation.
+    # Transfer-manual B1 placement 2x2 (2026-08-29):
+    "d_drop_g",      # append + drop G_k*:  S -> G0..G4(-k*) -> R_k -> Q
+    "d_splice_keep", # in-place + keep G_k*: S -> G0..G_k R_k G_{k+1}.. -> Q
+    "d_splice_rep",  # in-place + replace:  S -> G0..G_{k*-1} R_k G_{k+1}.. -> Q
+}
+
+# --- Task D sidecar repair contract (v2, 2026-08-30) --------------------------
+# Sidecar-based D1/D2 arms (d1_arms.py / d2_short_erratum.py).  The driver
+# injects the store + the frozen witness table before generation, mirroring
+# the D_INTERVENE pattern above:
+#   HH.D_CONTRACT_STORE = SidecarStore(model)          # None => built fresh
+#   HH.D_CONTRACT_K     = {qid: k_witness | None}      # prereg v2.2 (absent => median)
+#   HH.D_CONTRACT_WITNESS = {qid: witness entry}       # literal values, D2 erratum
+# Modes are dispatched in _generate_one via a lazy import (d1_arms imports
+# this module at top level, so a module-level back-import would be circular).
+D_CONTRACT_STORE: Any = None
+D_CONTRACT_K: Dict[str, Any] = {}
+D_CONTRACT_WITNESS: Dict[str, Any] = {}
+
+D_CONTRACT_MODES = {
+    "d_oracle_target_only",
+    "d_allblock_sidecar",
+    "d_raw_keepG",
+    "d_raw_replaceG",
+    "d_raw_erratum_tail",
+    "d_raw_SGSR",
+    "d_short_erratum",
+    # D4/D5/D6/D7 runtime arms (d37_arms.py; registry cleared by the driver)
+    "d_reskv_capsule",
+    "d_keepkv_capsule",
+    "d_less_fold",
+    "d_grkv_v_edit",
+    "d_selkv_bias",
+    "d_selkv_count",
+}
+
+
+@torch.inference_mode()
+def _append_precomputed_span_cache(prefix_cache: Any, span_kv: Sequence[Any]) -> Any:
+    """Concatenate already-positioned per-layer K/V slices onto prefix_cache.
+
+    Distinct from _append_span_cache: the slice here was prefilled at its
+    ORIGINAL absolute positions (sequential prefill of docs 0..k*), so its
+    keys already carry the right RoPE phase and must NOT be rotated again.
+    An empty span_kv is a no-op — the d_sham_mech identity guard relies on
+    the surrounding plumbing leaving the cache byte-identical.
+    """
+    if not span_kv:
+        return prefix_cache
+    for layer, (keys, values) in zip(prefix_cache.layers, span_kv):
+        layer.keys = torch.cat([layer.keys, keys], dim=-2)
+        layer.values = torch.cat([layer.values, values], dim=-2)
+    return prefix_cache
+
+
+def _gist_tokens_for_lengths(
+    doc_lengths: Sequence[int],
+    ratio: int,
+    gist_residual_type: str,
+    grid_width: int,
+) -> int:
+    """Closed form of the gist-token count _build_tool_cache emits for a grid.
+
+    Mirrors gist_utils._build_interleave_mask_vectorized: with a mean /
+    embed-mean residual the valid length is first rounded up to a multiple of
+    ``ratio`` (clamped to the grid width), then one gist token is emitted per
+    ratio-sized chunk. Used only for the recompute arm's dropped-gist
+    accounting, and the upstream half of every call is cross-checked against
+    the count _build_tool_cache actually returned.
+    """
+    total = 0
+    for length in doc_lengths:
+        if length <= 0:
+            continue
+        seqlen = min(int(length), grid_width)
+        if gist_residual_type in ("mean", "embed-mean"):
+            residual = seqlen % ratio
+            if residual:
+                seqlen = min(seqlen + ratio - residual, grid_width)
+        total += (seqlen + ratio - 1) // ratio
+    return total
+
+
+@torch.inference_mode()
+def _extract_gists_at_prefix(
+    model: Any,
+    grid: torch.Tensor,
+    prefix_length: int,
+    attn_impl: str,
+    override_ratio: int,
+) -> tuple[Any, int]:
+    """Gist-only cache for a doc grid, RoPE-blended at ``prefix_length``.
+
+    Mirrors _build_tool_cache's extraction but skips the system-cat and the
+    system-length coupling: the returned DynamicCache contains ONLY the gist
+    layers, with key positions assigned as if the docs started at
+    ``prefix_length`` logical tokens.  Used by the B1 splice arms, which
+    interleave raw KV between two gist groups at their true offsets.
+    """
+    from models import blend_gist_key_values
+
+    device = model.device
+    grid = grid.to(device)
+    valid_mask = grid != -100
+    input_ids = grid.clone()
+    input_ids[~valid_mask] = model.model.gist_token_id
+    original_attn_impl = model.model.config._attn_implementation
+    model.model.config._attn_implementation = attn_impl
+    gist_kwargs = {}
+    if getattr(model.config, "gist_type", None) == "dynamic-interleave":
+        gist_kwargs["ratio"] = override_ratio
+    outputs, gist_mask, pos_ids = model.model.generate_gist(
+        input_ids=input_ids,
+        attention_mask=valid_mask,
+        **gist_kwargs,
+    )
+    model.model.config._attn_implementation = original_attn_impl
+    gist_cache, _ = blend_gist_key_values(
+        model.config,
+        [outputs.past_key_values],
+        [gist_mask],
+        [pos_ids],
+        model.model.rotary_emb,
+        prefix_length,
+    )
+    gist_tokens = gist_cache.get_seq_length()
+    return gist_cache, gist_tokens
+
+
+@torch.inference_mode()
+def _build_d_intervene_prefix(
+    model: Any,
+    tokenizer: Any,
+    example: CompressHistoryExample,
+    args: argparse.Namespace,
+    mode: str,
+    plan: Optional[Dict[str, Any]],
+) -> tuple[Optional[Dict[str, Any]], Optional[str]]:
+    """Task-D KV interventions on top of the c2kv prefix (BDF pilot, 5 arms).
+
+    Every mode keeps the ORIGINAL layout: ``history_length`` stays the raw
+    history token count, so decode positions are identical to plain c2kv and
+    the only variable is what sits in the cache.
+
+      d_sham_neutral    full-grid gist + L neutral-corpus tokens, prefilled
+                        standalone then rotated onto doc k*'s absolute start
+                        (equal token budget to d_corr by construction).
+      d_corr            full-grid gist + doc k*'s raw KV appended (append-only
+                        erratum, double coverage), k* = (T-1)//2.
+      d_corr_recompute  docs 0..k* gist + the SAME raw slice + docs k*+1..T-1
+                        recomputed on the corrected prefix; the downstream
+                        gist is dropped.  Upstream is bit-identical to d_corr
+                        (grid rows are the compression batch dimension), so
+                        the single variable vs. d_corr is the downstream
+                        representation: stale gist vs. recomputed raw.
+      d_corr_all        raw KV of every doc appended — flag-gated ceiling
+                        diagnostic, no registered arm, no +re counterpart.
+      d_sham_mech       mechanical disassembly/reassembly guard: the slice is
+                        extracted and discarded, nothing is appended.  Output
+                        must be token-identical to plain c2kv.
+
+    Cost note: d_corr_slice_prefill_sec / d_recompute_prefill_sec are NOT
+    folded into full_prefill_sec, so ttft_sec understates these arms; the
+    analyzer sums the seconds fields explicitly.
+    """
+    context_input_ids, doc_tokens, doc_chunks, history, skip_reason = _build_history_chunks(
+        tokenizer, example, args
+    )
+    if context_input_ids is None:
+        return None, skip_reason
+    doc_ids = [
+        _chat_template_ids(tokenizer, [message], max_length=args.max_doc_length)
+        for message in history
+    ]
+    n_docs = len(doc_ids)
+    if n_docs == 0:
+        return None, "d_no_history_docs"
+    # K1 (transfer manual): which history block the erratum targets.
+    # median keeps the prereg default; last tests recency; offset:<j> pins a
+    # block explicitly (for oracle sweeps driven from outside).
+    policy = str(CORR_K_POLICY)
+    if policy == "median":
+        k_star = (n_docs - 1) // 2
+    elif policy == "last":
+        k_star = n_docs - 1
+    elif policy.startswith("offset:"):
+        k_star = int(policy.split(":", 1)[1])
+        if not 0 <= k_star < n_docs:
+            return None, f"d_k_policy_offset_oob:{k_star}/{n_docs}"
+    else:
+        return None, f"d_k_policy_unknown:{policy}"
+    plan = plan or {}
+    planned_k = plan.get("k_star")
+    # The frozen plans pin k*=median; alternative K1 policies deliberately
+    # target a different block, so the pin only guards the prereg default.
+    if policy == "median" and planned_k is not None and int(planned_k) != k_star:
+        return None, f"d_plan_k_star_mismatch:{int(planned_k)}!={k_star}"
+
+    # Hybrid-x-D combo (2026-08-29): on the hybrid base the last k docs are
+    # raw and the erratum must live in the compressed prefix [0, T-k).
+    hybrid_top_k = D_HYBRID_TOP_K
+    hybrid_prefix: Optional[Dict[str, Any]] = None
+    if hybrid_top_k is not None:
+        if mode not in ("d_sham_neutral", "d_corr", "d_sham_mech", "d_corr_all"):
+            return None, f"d_hybrid_base_unsupported_mode:{mode}"
+        if n_docs - hybrid_top_k <= 0:
+            return None, f"d_hybrid_no_compressed_docs:{n_docs}docs-k{hybrid_top_k}"
+        if k_star >= n_docs - hybrid_top_k:
+            return None, f"d_hybrid_k_star_in_raw_tail:{k_star}/{n_docs - hybrid_top_k}"
+
+    system_ids = _chat_template_ids(
+        tokenizer,
+        [{"role": "system", "content": example.system_prompt}],
+        tools=example.tools or None,
+        keep_bos=True,
+        max_length=args.max_system_length,
+    )
+    system_input_ids = torch.tensor([system_ids], dtype=torch.long, device=model.device)
+    system_cache, system_length, system_prefill_sec = _prefill_system(
+        model, system_input_ids, args.system_attn_impl
+    )
+    offsets: List[int] = []
+    offset = system_length
+    for ids in doc_ids:
+        offsets.append(offset)
+        offset += len(ids)
+    doc_logical_start = offsets[k_star]
+    # The injection point always sits after the system prefix; delta_pos == 0
+    # would silently return an unrotated cache (rope_reposition.py:48).
+    assert doc_logical_start > 0, "doc k* must start after the system prefix"
+
+    if mode in ("d_splice_keep", "d_splice_rep"):
+        # B1 in-place placement: cache order follows conversation order.
+        #   splice_keep: S -> G0..G_k* -> R_k* -> G_{k*+1}.. -> Q  (double coverage in place)
+        #   splice_rep:  S -> G0..G_{k*-1} -> R_k* -> G_{k*+1}.. -> Q (Leyline-style replace)
+        # Left gists blend from system_length (their true c2kv positions);
+        # the raw span keeps its ORIGINAL absolute positions (sequential
+        # prefill, unrotated append); right gists blend at offsets[k*+1] so
+        # downstream gists land exactly where plain c2kv puts them.
+        left_docs = doc_ids[: k_star + 1] if mode == "d_splice_keep" else doc_ids[:k_star]
+        right_docs = doc_ids[k_star + 1:]
+        splice_t0 = time.perf_counter()
+        left_grid = _grid_from_doc_ids(left_docs, args.max_doc_length, args.max_doc_num)
+        left_cache, left_gist = _extract_gists_at_prefix(
+            model, left_grid, system_length, args.gist_attn_impl, args.override_ratio
+        )
+        # system layers cat onto the gist cache's layers in place
+        for system_layer, gist_layer in zip(system_cache.layers, left_cache.layers):
+            gist_layer.keys = torch.cat([system_layer.keys, gist_layer.keys], dim=-2)
+            gist_layer.values = torch.cat([system_layer.values, gist_layer.values], dim=-2)
+        prefix_cache = left_cache
+        # Fresh system prefill for the raw span (the primary system_cache is
+        # already consumed by the assembly above; one extra ~0.5s forward).
+        raw_cache, _, extra_sys_sec = _prefill_system(
+            model, system_input_ids, args.generate_attn_impl
+        )
+        logical_length = system_length
+        for doc_index in range(k_star + 1):
+            doc_input_ids = torch.tensor([doc_ids[doc_index]], dtype=torch.long, device=model.device)
+            raw_cache, added, elapsed = _prefill_tokens_with_cache(
+                model, doc_input_ids, past_key_values=raw_cache,
+                past_length=logical_length, attn_impl=args.generate_attn_impl,
+            )
+            logical_length += added
+        span_kv = [
+            (
+                layer.keys[..., doc_logical_start: doc_logical_start + len(doc_ids[k_star]), :].clone(),
+                layer.values[..., doc_logical_start: doc_logical_start + len(doc_ids[k_star]), :].clone(),
+            )
+            for layer in raw_cache.layers
+        ]
+        del raw_cache
+        _clear_device_cache(args.device_type)
+        for layer, (keys, values) in zip(prefix_cache.layers, span_kv):
+            layer.keys = torch.cat([layer.keys, keys], dim=-2)
+            layer.values = torch.cat([layer.values, values], dim=-2)
+        right_gist = 0
+        if right_docs:
+            right_grid = _grid_from_doc_ids(right_docs, args.max_doc_length, args.max_doc_num)
+            right_cache, right_gist = _extract_gists_at_prefix(
+                model, right_grid, offsets[k_star + 1], args.gist_attn_impl, args.override_ratio
+            )
+            for layer, right_layer in zip(prefix_cache.layers, right_cache.layers):
+                layer.keys = torch.cat([layer.keys, right_layer.keys], dim=-2)
+                layer.values = torch.cat([layer.values, right_layer.values], dim=-2)
+            del right_cache
+            _clear_device_cache(args.device_type)
+        splice_sec = time.perf_counter() - splice_t0
+        gist_tokens = left_gist + right_gist
+        return {
+            "cache": prefix_cache,
+            "system_length": system_length,
+            "history_length": doc_tokens,
+            "cache_length": prefix_cache.get_seq_length(),
+            "doc_tokens": doc_tokens,
+            "doc_chunks": doc_chunks,
+            "kept_history_tokens": doc_tokens,
+            "gist_tokens": gist_tokens,
+            "actual_compression_ratio": float(doc_tokens / gist_tokens) if gist_tokens else 0.0,
+            "system_prefill_sec": system_prefill_sec + extra_sys_sec,
+            "full_prefill_sec": 0.0,
+            "tool_compress_sec": 0.0,
+            "blend_sec": 0.0,
+            "use_gist": True,
+            "d_corr_doc_index": k_star,
+            "d_corr_span_tokens": len(doc_ids[k_star]),
+            "d_sham_tokens": 0,
+            "d_recompute_tokens": 0,
+            "d_recompute_docs": 0,
+            "d_dropped_gist_tokens": 0 if mode == "d_splice_rep" else None,
+            "d_corr_slice_prefill_sec": round(splice_sec, 4),
+            "d_recompute_prefill_sec": 0.0,
+            "d_splice_in_place": True,
+        }, None
+
+    if hybrid_top_k is not None:
+        # Hybrid base = the canonical single builder (_build_hybrid_prefix,
+        # gist_first layout).  Original offsets are preserved, so the raw-span
+        # pass and the unrotated append below are the pure-c2kv machinery
+        # unchanged; only the ledger fields switch to the hybrid raw counts.
+        hybrid_prefix, hybrid_skip = _build_hybrid_prefix(
+            model,
+            tokenizer,
+            example,
+            args,
+            recent_full_docs=hybrid_top_k,
+            history_override=history,
+        )
+        if hybrid_prefix is None:
+            return None, f"d_hybrid_base_skip:{hybrid_skip}"
+        prefix_cache = hybrid_prefix["cache"]
+        gist_tokens = hybrid_prefix["gist_tokens"]
+        actual_ratio = hybrid_prefix["actual_compression_ratio"]
+        compress_sec = hybrid_prefix["tool_compress_sec"]
+        blend_sec = hybrid_prefix["blend_sec"]
+        system_prefill_sec += hybrid_prefix["system_prefill_sec"]
+        gist_input_tokens = gist_tokens
+    else:
+        if mode in ("d_corr_recompute", "d_re_only"):
+            grid = _grid_from_doc_ids(doc_ids[: k_star + 1], args.max_doc_length, args.max_doc_num)
+        elif mode == "d_drop_g":
+            # B1 append + drop G_k*: the grid omits doc k*, the raw span still
+            # lands at the end (existing append machinery below).
+            grid = _grid_from_doc_ids(
+                doc_ids[:k_star] + doc_ids[k_star + 1:], args.max_doc_length, args.max_doc_num
+            )
+        else:
+            grid = context_input_ids
+        (
+            prefix_cache,
+            gist_input_tokens,
+            gist_tokens,
+            actual_ratio,
+            compress_sec,
+            blend_sec,
+        ) = _build_tool_cache(
+            model,
+            grid,
+            system_cache,
+            system_length,
+            args.gist_attn_impl,
+            args.override_ratio,
+        )
+
+    d_corr_span_tokens = 0
+    d_sham_tokens = 0
+    d_recompute_tokens = 0
+    d_recompute_docs = 0
+    d_dropped_gist_tokens: Optional[int] = 0
+    corr_slice_sec = 0.0
+    recompute_sec = 0.0
+
+    if mode == "d_sham_neutral":
+        sham_ids = [int(token) for token in (plan.get("sham_token_ids") or [])]
+        if not sham_ids:
+            return None, "d_sham_plan_missing"
+        if len(sham_ids) != len(doc_ids[k_star]):
+            return None, f"d_sham_length_mismatch:{len(sham_ids)}!={len(doc_ids[k_star])}"
+        sham_input_ids = torch.tensor([sham_ids], dtype=torch.long, device=model.device)
+        sham_cache, _, corr_slice_sec = _prefill_ids_no_past(
+            model, sham_input_ids, args.gist_attn_impl
+        )
+        prefix_cache = _append_span_cache(
+            model, prefix_cache, sham_cache, doc_logical_start, list(range(len(sham_ids)))
+        )
+        d_sham_tokens = len(sham_ids)
+        del sham_cache
+        _clear_device_cache(args.device_type)
+    elif mode in ("d_re_only", "d_corr_text"):
+        # A1 d_re_only: no raw span at all — the only intervention vs. plain
+        #   c2kv-on-docs-0..k* is the downstream recompute (below).
+        # A2 d_corr_text: the erratum is prefilled as TEXT after the gist
+        #   prefix (below), so no KV slice is transplanted here either.
+        pass
+    else:
+        if mode == "d_corr_all":
+            corr_docs = list(range(n_docs))
+            span_start, span_end = offsets[0], offsets[0] + doc_tokens
+        else:
+            corr_docs = list(range(k_star + 1))
+            span_start, span_end = doc_logical_start, doc_logical_start + len(doc_ids[k_star])
+        # _build_tool_cache only READS system_cache (it cats into fresh
+        # tensors), so the raw slice reuses that prefill instead of paying for
+        # a second system forward.
+        raw_cache, system_cache = system_cache, None
+        logical_length = system_length
+        for doc_index in corr_docs:
+            doc_input_ids = torch.tensor([doc_ids[doc_index]], dtype=torch.long, device=model.device)
+            raw_cache, added, elapsed = _prefill_tokens_with_cache(
+                model,
+                doc_input_ids,
+                past_key_values=raw_cache,
+                past_length=logical_length,
+                attn_impl=args.generate_attn_impl,
+            )
+            logical_length += added
+            corr_slice_sec += elapsed
+        span_kv = [
+            (
+                layer.keys[..., span_start:span_end, :].clone(),
+                layer.values[..., span_start:span_end, :].clone(),
+            )
+            for layer in raw_cache.layers
+        ]
+        del raw_cache
+        _clear_device_cache(args.device_type)
+        if mode != "d_sham_mech":
+            prefix_cache = _append_precomputed_span_cache(prefix_cache, span_kv)
+            d_corr_span_tokens = span_end - span_start
+        del span_kv
+        _clear_device_cache(args.device_type)
+
+    if mode == "d_corr_text":
+        # A2: doc k* text prefilled verbatim AFTER the full-grid gist prefix,
+        # positions continuing at the end of the (raw-counted) history —
+        # the layout matches d_corr's erratum slot, but the erratum is text
+        # conditioned on the gist prefix rather than transplanted KV that was
+        # prefilled against the ORIGINAL raw context.
+        text_input_ids = torch.tensor([doc_ids[k_star]], dtype=torch.long, device=model.device)
+        prefix_cache, added, corr_slice_sec = _prefill_tokens_with_cache(
+            model,
+            text_input_ids,
+            past_key_values=prefix_cache,
+            past_length=system_length + doc_tokens,
+            attn_impl=args.generate_attn_impl,
+        )
+        d_corr_span_tokens = added
+
+    if mode in ("d_corr_recompute", "d_re_only"):
+        for doc_index in range(k_star + 1, n_docs):
+            doc_input_ids = torch.tensor([doc_ids[doc_index]], dtype=torch.long, device=model.device)
+            prefix_cache, added, elapsed = _prefill_tokens_with_cache_maybe_gist(
+                model,
+                doc_input_ids,
+                past_key_values=prefix_cache,
+                past_length=offsets[doc_index],
+                attn_impl=args.generate_attn_impl,
+                use_gist=False,
+            )
+            d_recompute_tokens += added
+            d_recompute_docs += 1
+            recompute_sec += elapsed
+        residual_type = str(getattr(model.config, "gist_residual_type", "none"))
+        if str(getattr(model.config, "gist_type", None)) != "dynamic-interleave":
+            d_dropped_gist_tokens = None
+        else:
+            upstream = _gist_tokens_for_lengths(
+                [len(ids) for ids in doc_ids[: k_star + 1]],
+                args.override_ratio,
+                residual_type,
+                args.max_doc_length,
+            )
+            if upstream != gist_tokens:
+                logger.warning(
+                    "qid=%s: gist-count model predicted %d upstream gist tokens, harness produced %d;"
+                    " dropped-gist accounting reported as null",
+                    example.qid, upstream, gist_tokens,
+                )
+                d_dropped_gist_tokens = None
+            else:
+                d_dropped_gist_tokens = _gist_tokens_for_lengths(
+                    [len(ids) for ids in doc_ids[k_star + 1 :]],
+                    args.override_ratio,
+                    residual_type,
+                    args.max_doc_length,
+                )
+
+    return {
+        "cache": prefix_cache,
+        "system_length": system_length,
+        # Original layout: decode positions must match plain c2kv exactly.
+        # On the hybrid base the ledger switches to the hybrid raw counts
+        # (rest raw + uncapped tail), which is the same original layout.
+        "history_length": hybrid_prefix["history_length"] if hybrid_prefix else doc_tokens,
+        "cache_length": prefix_cache.get_seq_length(),
+        "doc_tokens": hybrid_prefix["doc_tokens"] if hybrid_prefix else doc_tokens,
+        "doc_chunks": doc_chunks,
+        "kept_history_tokens": hybrid_prefix["kept_history_tokens"] if hybrid_prefix else doc_tokens,
+        "gist_tokens": gist_tokens,
+        "actual_compression_ratio": actual_ratio,
+        "compressed_history_tokens": hybrid_prefix["compressed_history_tokens"] if hybrid_prefix else None,
+        "system_prefill_sec": system_prefill_sec,
+        "full_prefill_sec": 0.0,
+        "tool_compress_sec": compress_sec,
+        "blend_sec": blend_sec,
+        "use_gist": True,
+        "d_base": "hybrid" if hybrid_prefix else "c2kv",
+        "d_hybrid_top_k": hybrid_top_k,
+        "d_corr_doc_index": None if mode == "d_corr_all" else k_star,
+        "d_corr_span_tokens": d_corr_span_tokens,
+        # d_corr_slice_prefill_sec is the injection-side prefill cost for
+        # EVERY arm: the docs 0..k* pass for the corr arms, the standalone
+        # neutral-span pass for d_sham_neutral.
+        "d_sham_tokens": d_sham_tokens,
+        "d_recompute_tokens": d_recompute_tokens,
+        "d_recompute_docs": d_recompute_docs,
+        "d_dropped_gist_tokens": d_dropped_gist_tokens,
+        "d_corr_slice_prefill_sec": round(corr_slice_sec, 4),
+        "d_recompute_prefill_sec": round(recompute_sec, 4),
+        "d_gist_input_tokens": gist_input_tokens,
     }, None
 
 
@@ -2134,6 +2862,13 @@ def _build_hybrid_prefix(
     history_override: Optional[Sequence[Dict[str, Any]]] = None,
     full_doc_max_length: Optional[int] = None,
 ) -> tuple[Optional[Dict[str, Any]], Optional[str]]:
+    """The single battery-side hybrid prefix builder (see docs/hybrid_spec.md).
+
+    tail-k docs stay raw, the rest go through the 768/16 gist grid at
+    args.override_ratio.  The D-intervene hybrid base calls this same function
+    (history_override + recent_full_docs), so "d none on hybrid" is the plain
+    hybrid mode by construction.
+    """
     history = list(history_override) if history_override is not None else _history_messages(tokenizer, example, args)
     if len(history) < args.min_doc_num:
         return None, f"history_docs<{args.min_doc_num}"
@@ -2150,7 +2885,11 @@ def _build_hybrid_prefix(
         full_history = history[-full_count:] if args.history_selection == "tail" else history[:full_count]
         full_set = set(range(len(history) - len(full_history), len(history))) if args.history_selection == "tail" else set(range(len(full_history)))
     rest_history = [message for index, message in enumerate(history) if index not in full_set]
-    full_after_c2kv = bool(getattr(args, "hybrid_full_after_c2kv", False))
+    # docs/hybrid_spec.md: gist_first (original conversation order) is the
+    # canonical layout and the only one the bench stack produces; raw_first is
+    # the legacy reorder that hoisted the tail right after the system prefix.
+    layout = str(getattr(args, "hybrid_layout", "gist_first"))
+    assert layout in ("gist_first", "raw_first"), f"unknown hybrid_layout {layout!r}"
 
     system_ids, system_debug, system_skip_reason = _system_prefix_ids(tokenizer, example, args)
     if system_skip_reason is not None:
@@ -2170,37 +2909,28 @@ def _build_hybrid_prefix(
     prefix_cache = system_cache
     full_length = 0
 
-    def append_full_history(current_past_length: int, *, after_gist: bool) -> int:
+    def append_full_history(current_past_length: int, use_gist: bool) -> int:
         nonlocal prefix_cache, top_prefill_sec
         if not full_ids:
             return 0
         full_input_ids = torch.tensor([full_ids], dtype=torch.long, device=model.device)
-        if after_gist:
-            # The raw tail sits AFTER a gist block, so the cache is shorter than
-            # current_past_length: _prefill_tokens_with_cache would size the
-            # attention mask from the logical length and mismatch the KV width.
-            # Same call shape as _build_raw_first15_hybrid_prefix.
-            prefix_cache, appended_length, prefill_sec = _prefill_tokens_with_cache_maybe_gist(
-                model,
-                full_input_ids,
-                past_key_values=prefix_cache,
-                past_length=current_past_length,
-                attn_impl=args.generate_attn_impl,
-                use_gist=bool(rest_history),
-            )
-        else:
-            prefix_cache, appended_length, prefill_sec = _prefill_tokens_with_cache(
-                model,
-                full_input_ids,
-                past_key_values=prefix_cache,
-                past_length=current_past_length,
-                attn_impl=args.generate_attn_impl,
-            )
+        # use_gist global rule (harness :1038/:1564, modeling_qwen3:660, and
+        # hf_server chat's cache_has_gist): once ANY gist KV is in the cache,
+        # the raw-tail prefill must also run with the gist projections.  Only
+        # the raw_first layout appends the tail before any gist exists.
+        prefix_cache, appended_length, prefill_sec = _prefill_tokens_with_cache_maybe_gist(
+            model,
+            full_input_ids,
+            past_key_values=prefix_cache,
+            past_length=current_past_length,
+            attn_impl=args.generate_attn_impl,
+            use_gist=use_gist,
+        )
         top_prefill_sec += prefill_sec
         return appended_length
 
-    if not full_after_c2kv:
-        full_length = append_full_history(system_length, after_gist=False)
+    if layout == "raw_first":
+        full_length = append_full_history(system_length, use_gist=False)
 
     rest_tokens = 0
     rest_length = 0
@@ -2232,8 +2962,10 @@ def _build_hybrid_prefix(
             args.gist_attn_impl,
             args.override_ratio,
         )
-    if full_after_c2kv:
-        full_length = append_full_history(system_length + rest_length, after_gist=bool(rest_history))
+    if layout == "gist_first":
+        # Raw tail in place at its ORIGINAL offsets, after the gists; gist
+        # projections stay on because the rest already put gist KV in the cache.
+        full_length = append_full_history(system_length + rest_length, use_gist=bool(rest_history))
 
     doc_tokens = rest_tokens + full_tokens
     compressed_tokens = gist_tokens + full_tokens
@@ -2258,7 +2990,10 @@ def _build_hybrid_prefix(
         "tool_compress_sec": compress_sec,
         "blend_sec": blend_sec,
         "use_gist": bool(rest_history),
-        "hybrid_full_after_c2kv": full_after_c2kv,
+        # Historical H200 records called this boolean
+        # ``hybrid_full_after_c2kv``.  Keep the emitted field for result
+        # readers, but derive it from the canonical layout flag.
+        "hybrid_full_after_c2kv": layout == "gist_first",
     }
     if router_debug:
         prefix.update(router_debug)
@@ -2330,11 +3065,23 @@ def _generate_one(
     example: CompressHistoryExample,
     args: argparse.Namespace,
     mode: str,
-) -> Dict[str, Any]:
+    *,
+    return_state: bool = False,
+    prefix_override: Optional[Dict[str, Any]] = None,
+) -> Any:
+    # return_state=True hands (row, prefix) to callers that continue on the
+    # live cache (the task-D downstream driver); (row, None) on skip.  The
+    # default path is unchanged.
+    # prefix_override: skip the build dispatch entirely and generate from a
+    # caller-supplied prefix dict (the D k-sweep driver shares ONE compression
+    # forward across all k and rebuilds only the splice per k).
     total_start = time.perf_counter()
     if mode in FULL_PROMPT_MODES:
-        return _generate_full_prompt(model, tokenizer, example, args, mode)
-    if mode == "history_full":
+        row = _generate_full_prompt(model, tokenizer, example, args, mode)
+        return (row, None) if return_state else row
+    if prefix_override is not None:
+        prefix, skip_reason = prefix_override, None
+    elif mode == "history_full":
         prefix, skip_reason = _build_full_or_truncate_prefix(model, tokenizer, example, args, "full")
     elif mode == "history_all_c2kv4":
         prefix, skip_reason = _build_c2kv_prefix(model, tokenizer, example, args)
@@ -2368,6 +3115,25 @@ def _generate_one(
         "raw_prefix_next_hybrid",
     }:
         prefix, skip_reason = _build_raw_first15_hybrid_prefix(model, tokenizer, example, args, mode)
+    elif mode == "c2kv_anchor":
+        prefix, skip_reason = _build_c2kv_anchor_prefix(
+            model, tokenizer, example, args, R4_ANCHOR_SPANS.get(example.qid, {})
+        )
+    elif mode in D_INTERVENE_MODES:
+        prefix, skip_reason = _build_d_intervene_prefix(
+            model, tokenizer, example, args, mode, D_INTERVENE.get(example.qid)
+        )
+    elif mode in D_CONTRACT_MODES:
+        # lazy import: d1_arms/d2_short_erratum/d37_arms import this module at top level
+        if mode == "d_short_erratum":
+            from d2_short_erratum import build_short_erratum_prefix as _d_contract_builder
+        elif mode.startswith(("d_reskv", "d_keepkv", "d_less", "d_grkv", "d_selkv")):
+            from d37_arms import build_d37_prefix as _d_contract_builder
+        else:
+            from d1_arms import build_d_contract_prefix as _d_contract_builder
+        prefix, skip_reason = _d_contract_builder(
+            model, tokenizer, example, args, mode, D_CONTRACT_STORE
+        )
     elif mode in C2KV_MODES:
         prefix, skip_reason = _build_c2kv_prefix(model, tokenizer, example, args)
     elif mode in TURN_ABLATION_MODES:
@@ -2434,7 +3200,7 @@ def _generate_one(
     else:
         raise ValueError(f"Unknown mode: {mode}")
     if prefix is None:
-        return {
+        row = {
             "qid": example.qid,
             "session_id": example.qid.rsplit(":", 1)[0] if ":" in example.qid else None,
             "mode": mode,
@@ -2442,7 +3208,8 @@ def _generate_one(
             "skipped": True,
             "skip_reason": skip_reason,
         }
-    row = _generate_with_prefix(model, tokenizer, example, prefix, args)
+        return (row, None) if return_state else row
+    row = _generate_with_prefix(model, tokenizer, example, prefix, args, mode)
     ttft_sec = (
         prefix.get("system_prefill_sec", 0.0)
         + prefix.get("full_prefill_sec", 0.0)
@@ -2530,6 +3297,18 @@ def _generate_one(
         "ablation_turn_original_tokens",
         "full_restore_added_kv_tokens",
         "fixed_recent_full_tokens",
+        "anchor_tokens",
+        "anchor_docs",
+        "d_corr_doc_index",
+        "d_corr_span_tokens",
+        "d_sham_tokens",
+        "d_recompute_tokens",
+        "d_recompute_docs",
+        "d_dropped_gist_tokens",
+        "d_corr_slice_prefill_sec",
+        "d_recompute_prefill_sec",
+        "d_gist_input_tokens",
+        "d_contract_info",
         "raw_history_source",
         "raw_history_window",
         "raw_history_docs",
@@ -2550,7 +3329,7 @@ def _generate_one(
     ):
         if key in prefix:
             row[key] = prefix[key]
-    return row
+    return (row, prefix) if return_state else row
 
 
 def _summarize_rows(args: argparse.Namespace, rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -2916,6 +3695,13 @@ def _summarize_turn_buckets(args: argparse.Namespace, rows: List[Dict[str, Any]]
 
 
 def _load_examples(args: argparse.Namespace, tokenizer: Any) -> tuple[List[CompressHistoryExample], Dict[str, int]]:
+    selected_qids = getattr(args, "selected_qids", None)
+    selected_sessions = getattr(args, "selected_sessions", None)
+    has_selection = selected_qids is not None or selected_sessions is not None
+    # max_examples is a global limit after selection_filter.  Applying the
+    # source filter first would move that boundary, so limited runs keep the
+    # original load/tokenize/limit order and filter only afterward.
+    source_prefilter = has_selection and not args.max_examples
     source = AgentLLMTracesCompressHistorySource(
         args.dataset_path,
         split=args.split,
@@ -2931,6 +3717,8 @@ def _load_examples(args: argparse.Namespace, tokenizer: Any) -> tuple[List[Compr
         include_tools=args.include_tools,
         prefix_history_doc_num=args.prefix_history_doc_num,
         prefix_history_exact=args.prefix_history_exact,
+        selected_qids=selected_qids if source_prefilter else None,
+        selected_sessions=selected_sessions if source_prefilter else None,
     )
     selection_skips: Counter[str] = Counter()
     examples = []
@@ -2943,6 +3731,21 @@ def _load_examples(args: argparse.Namespace, tokenizer: Any) -> tuple[List[Compr
         examples.append(example)
         if args.max_examples and len(examples) >= args.max_examples:
             break
+    if has_selection and not source_prefilter:
+        qids = set(str(qid) for qid in selected_qids) if selected_qids is not None else None
+        sessions = (
+            set(str(session) for session in selected_sessions)
+            if selected_sessions is not None else None
+        )
+        examples = [
+            example for example in examples
+            if (qids is None or example.qid in qids)
+            and (
+                sessions is None
+                or (example.qid.rpartition(":")[0] if ":" in example.qid else example.qid)
+                in sessions
+            )
+        ]
     return examples, dict(selection_skips)
 
 
@@ -3024,6 +3827,9 @@ def evaluate(args: argparse.Namespace) -> Dict[str, Any]:
         if (
             mode in HYBRID_MODES
             or mode in C2KV_MODES
+            or mode in D_INTERVENE_MODES
+            or mode in D_CONTRACT_MODES
+            or mode == "c2kv_anchor"
             or mode in DECISION_PREFIX_MODES
             or mode in {
                 "raw_first15_c2kv",
@@ -3098,7 +3904,8 @@ def evaluate(args: argparse.Namespace) -> Dict[str, Any]:
         "max_system_length": args.max_system_length,
         "max_new_tokens": args.max_new_tokens,
         "system_overflow": args.system_overflow,
-        "hybrid_full_after_c2kv": args.hybrid_full_after_c2kv,
+        "hybrid_full_after_c2kv": args.hybrid_layout == "gist_first",
+        "hybrid_layout": args.hybrid_layout,
         "max_baseline_input_tokens": args.max_baseline_input_tokens,
         "raw_first_n_turns": args.raw_first_n_turns,
         "raw_prefix_n_turns": args.raw_prefix_n_turns,
@@ -3183,6 +3990,12 @@ def parse_args() -> argparse.Namespace:
             "raw_prefix_next_full_same_model",
             "raw_prefix_next_c2kv",
             "raw_prefix_next_hybrid",
+            "c2kv_anchor",
+            "d_sham_neutral",
+            "d_corr",
+            "d_corr_recompute",
+            "d_corr_all",
+            "d_sham_mech",
         ],
         default="c2kv",
     )
@@ -3276,15 +4089,36 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--prefix_history_doc_num", type=int)
     parser.add_argument("--prefix_history_exact", type=lambda x: str(x).lower() == "true", default=False)
     parser.add_argument("--split_oversized_history_docs", type=lambda x: str(x).lower() == "true", default=True)
-    parser.add_argument("--hybrid_full_after_c2kv", type=lambda x: str(x).lower() == "true", default=False)
+    parser.add_argument(
+        "--hybrid_layout",
+        choices=["gist_first", "raw_first"],
+        default="gist_first",
+        help="hybrid cache layout (docs/hybrid_spec.md): gist_first = original "
+        "conversation order, raw tail in place (canonical, matches the bench "
+        "stack); raw_first = legacy layout that hoists the raw tail right "
+        "after the system prefix",
+    )
     parser.add_argument("--device_type", choices=["auto", "cuda", "npu", "cpu"], default="auto")
     parser.add_argument("--system_attn_impl", default="eager")
     parser.add_argument("--gist_attn_impl", default="eager")
     parser.add_argument("--generate_attn_impl", default="eager")
+    # Sampling switches (shared contract with eval_joint_next_action_c2kv.py:
+    # same names, same defaults). Defaults keep the greedy path byte-identical.
+    parser.add_argument("--do_sample", type=lambda x: str(x).lower() == "true", default=False)
+    parser.add_argument("--temperature", type=float, default=None)
+    parser.add_argument("--top_p", type=float, default=None)
+    parser.add_argument("--gen_seed", type=int, default=0)
     parser.add_argument("--dtype", choices=["bf16", "fp16", "fp32"], default="bf16")
     parser.add_argument("--baseline_model_class", choices=["gist", "auto"], default="auto")
     parser.add_argument("--untrained_c2kv", action="store_true", help=argparse.SUPPRESS)
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.do_sample and args.temperature is None:
+        parser.error(
+            "--do_sample true requires an explicit --temperature: without it the "
+            "generation temperature is whatever generation_config.json happens to "
+            "carry, which is not a recorded run parameter"
+        )
+    return args
 
 
 def main() -> None:

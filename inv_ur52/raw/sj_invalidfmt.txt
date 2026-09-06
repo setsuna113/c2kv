@@ -1,0 +1,95 @@
+** WARNING: connection is not using a post-quantum key exchange algorithm.
+** This session may be vulnerable to "store now, decrypt later" attacks.
+** The server may need to be upgraded. See https://openssh.com/pq.html
+
+Authorized users only. All activities may be monitored and reported.
+542:        if candidate_status in {"decode_error", "invalid_format"}:
+571:            record.get("candidate_status") in {"decode_error", "invalid_format"}
+2571:        if candidate_status in {"decode_error", "invalid_format", "empty_response"}:
+2714:                    in {"decode_error", "invalid_format", "empty_response"}
+        return out
+
+    def _argument_grounding_score(
+        self,
+        *,
+        action: list[str],
+        messages: Sequence[dict[str, Any]],
+    ) -> float:
+        action_objects = self._parse_action_objects(action)
+        if not action_objects:
+            return 1.0 if is_empty_execute_response(action) else 0.0
+        recent_text = "\n".join(
+            str(message.get("content") or "")
+            for message in messages[-12:]
+            if message.get("role") in {"user", "tool", "assistant"}
+        ).lower()
+        values: list[str] = []
+        for obj in action_objects:
+            args = obj.get("arguments")
+            if isinstance(args, str):
+                try:
+                    args = json.loads(args)
+                except Exception:
+                    args = {"value": args}
+            if isinstance(args, dict):
+                for value in args.values():
+                    if isinstance(value, (str, int, float)) and str(value).strip():
+                        text = str(value).strip().lower()
+                        if len(text) >= 3:
+                            values.append(text)
+        if not values:
+            return 1.0
+        hits = sum(1 for value in values if value in recent_text)
+        return hits / len(values)
+
+    def _repeat_action_score(
+        self,
+        *,
+        action: list[str],
+        segment_infos: Sequence[dict[str, Any]],
+    ) -> float:
+        current = self._action_text(action)
+        if current == "[]":
+            return 0.0
+        previous = [
+            self._action_text(
+                (info.get("step_record") or {}).get("candidate_action") or []
+            )
+            for info in segment_infos
+        ]
+        return 1.0 if current in previous else 0.0
+
+    @staticmethod
+    def _observation_anomaly_score(
+        *,
+        execution_results: Sequence[Any],
+        execution_error: str | None,
+        candidate_status: str,
+        action: list[str],
+    ) -> float:
+        if candidate_status in {"decode_error", "invalid_format"}:
+            return 1.0
+        if execution_error:
+            return 1.0
+        if is_empty_execute_response(action):
+            return 0.5
+        if not execution_results:
+            return 0.5
+        text = "\n".join(str(item) for item in execution_results).lower()
+        bad_markers = [
+            "error",
+            "exception",
+            "failed",
+            "invalid",
+            "not found",
+            "no result",
+            "empty",
+        ]
+        return 1.0 if any(marker in text for marker in bad_markers) else 0.0
+
+    def _heuristic_attributes(
+        self,
+        *,
+        info: dict[str, Any],
+        segment_infos: Sequence[dict[str, Any]],
+    ) -> dict[str, Any]:

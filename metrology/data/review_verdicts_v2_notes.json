@@ -1,9 +1,0 @@
-{
- "review_standard": "与 v1 复核同一标准（见 review_verdicts_notes.json）：实质金标调用以正确函数名全覆盖 AND 终端动作正确；missed_function 轮次与纯导航/冗余步豁免；cap 截断但已发射内容语义在靶的（case 5, 19）判 agree——censoring 恰为 M2 测量对象本身。",
- "reviewer": "foreman（人工逐例，全文阅读，无截断）",
- "population": "v2 分裂行 839 例（v1 为 1765 例），同 seed=20260816 分层重抽",
- "cases": {
-  "16": "disagree：金标 mean 未被调用——模型在该轮输出澄清提问（散文提及 mean 一词），随后直接 standard_deviation；v2 的 200 字符调用形态窗被散文提及+邻行 [standard_deviation( 括号穿透，误认 mean 已覆盖。v2 已知残余假阳模式（散文提及误触调用形态）。",
-  "others_agree": "1-15, 17-30 逐例确认：金标名全覆盖、终端正确、参数键命中；观察项记录：#5/#19 cap 截断但已发射内容在靶；#21 permeability 值为表达式；#22 单引号 Python dict 风格（协议面问题，语义在靶）；#25 lockDoors unlock 值疑反；#29 两动作轮序互换；#30 echo 参数键 string 与金标 content 不一致但名称全覆盖。"
- }
-}

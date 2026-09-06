@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# CANN runtime (libhccl etc.) — required for torch_npu when launched from a
+# bare setsid/cron env (same guard as run_d_pilot_npu.sh).
+if [[ -f /usr/local/Ascend/ascend-toolkit/set_env.sh ]]; then
+  source /usr/local/Ascend/ascend-toolkit/set_env.sh
+fi
+
 export PYTHONPATH="$(pwd)/python:$(pwd)/python/inference:$(pwd)/agent:${PYTHONPATH:-}"
 export HF_HUB_OFFLINE="${HF_HUB_OFFLINE:-1}"
 export ASCEND_RT_VISIBLE_DEVICES="${ASCEND_RT_VISIBLE_DEVICES:-0,1,3,4,5,6,7}"
@@ -56,7 +62,7 @@ MAX_ANSWER_CHARS="${MAX_ANSWER_CHARS:-}"
 PREFIX_HISTORY_DOC_NUM="${PREFIX_HISTORY_DOC_NUM:-}"
 PREFIX_HISTORY_EXACT="${PREFIX_HISTORY_EXACT:-False}"
 SPLIT_OVERSIZED_HISTORY_DOCS="${SPLIT_OVERSIZED_HISTORY_DOCS:-True}"
-HYBRID_FULL_AFTER_C2KV="${HYBRID_FULL_AFTER_C2KV:-False}"
+HYBRID_LAYOUT="${HYBRID_LAYOUT:-gist_first}"
 NPU_ATTN_IMPL="${NPU_ATTN_IMPL:-eager}"
 PARALLEL_EVAL="${PARALLEL_EVAL:-True}"
 OUTPUT_STEM="${OUTPUT_FILE%.jsonl}"
@@ -82,7 +88,7 @@ if [[ -n "${PREFIX_HISTORY_DOC_NUM}" ]]; then
 fi
 OPTIONAL_ARGS+=(--prefix_history_exact "${PREFIX_HISTORY_EXACT}")
 OPTIONAL_ARGS+=(--split_oversized_history_docs "${SPLIT_OVERSIZED_HISTORY_DOCS}")
-OPTIONAL_ARGS+=(--hybrid_full_after_c2kv "${HYBRID_FULL_AFTER_C2KV}")
+OPTIONAL_ARGS+=(--hybrid_layout "${HYBRID_LAYOUT}")
 if [[ "${DUMP_RAW_HISTORY_DOCS}" == "True" || "${DUMP_RAW_HISTORY_DOCS}" == "true" || "${DUMP_RAW_HISTORY_DOCS}" == "1" ]]; then
   OPTIONAL_ARGS+=(--dump_raw_history_docs --raw_history_doc_debug_chars "${RAW_HISTORY_DOC_DEBUG_CHARS}")
 fi
@@ -112,7 +118,7 @@ echo "TRUNCATE_SELECTION=${TRUNCATE_SELECTION}"
 echo "PREFIX_HISTORY_DOC_NUM=${PREFIX_HISTORY_DOC_NUM}"
 echo "PREFIX_HISTORY_EXACT=${PREFIX_HISTORY_EXACT}"
 echo "SPLIT_OVERSIZED_HISTORY_DOCS=${SPLIT_OVERSIZED_HISTORY_DOCS}"
-echo "HYBRID_FULL_AFTER_C2KV=${HYBRID_FULL_AFTER_C2KV}"
+echo "HYBRID_LAYOUT=${HYBRID_LAYOUT}"
 echo "INCLUDE_TOOLS=${INCLUDE_TOOLS}"
 echo "PARALLEL_EVAL=${PARALLEL_EVAL}"
 

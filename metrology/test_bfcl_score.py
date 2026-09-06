@@ -20,6 +20,7 @@ native_valid 的具体取值不断言（原生评分由 eval_runner file runner 
 """
 
 import json
+import os
 import shutil
 from pathlib import Path
 
@@ -28,8 +29,12 @@ import pytest
 from metrology import bfcl_score
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-BFCL_PKG = REPO_ROOT / ".foreman" / "ref" / "bfcl_pkg"
-BFCL_DATA = REPO_ROOT / ".foreman" / "ref" / "bfcl_data"
+BFCL_PKG = Path(os.environ.get("C2KV_BFCL_PKG", REPO_ROOT / ".foreman" / "ref" / "bfcl_pkg"))
+BFCL_DATA = Path(os.environ.get("C2KV_BFCL_DATA", REPO_ROOT / ".foreman" / "ref" / "bfcl_data"))
+needs_bfcl = pytest.mark.skipif(
+    not BFCL_PKG.is_dir() or not BFCL_DATA.is_dir(),
+    reason="official BFCL integration requires C2KV_BFCL_PKG and C2KV_BFCL_DATA",
+)
 SMOKE_DIR = REPO_ROOT / "metrology" / "data" / "smoke_fixtures"
 
 ROW_KEYS = [
@@ -76,6 +81,7 @@ def _cli_kwargs(runs_dir: Path, out: Path, summary_out: Path | None = None) -> l
     return args
 
 
+@needs_bfcl
 def test_cli_dedup_guard_on_smoke_fixtures(tmp_path):
     # 5 个 fixture 文件里 identity_* 与同名条件文件的行键 (id, cap_tier, condition)
     # 重复：按 CLI 规格必须报错、不得静默去重、不得产生输出。
@@ -88,6 +94,7 @@ def test_cli_dedup_guard_on_smoke_fixtures(tmp_path):
     assert not out.exists()
 
 
+@needs_bfcl
 def test_cli_scoring_on_unique_cells(tmp_path):
     # 3 个唯一键文件（base / snapkv / streamingllm）的完整 CLI 评分
     staged = tmp_path / "runs"

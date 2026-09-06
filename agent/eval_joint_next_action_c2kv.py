@@ -95,6 +95,25 @@ Ratio control: ``--ratios`` (default 8) maps to the same override mechanism
 ``gist_type == "dynamic-interleave"`` (see ``_build_tool_cache`` in
 eval_agent_tool_definition_c2kv.py:289-337).
 
+History chunking (experiment B)
+-------------------------------
+``--chunk_policy {fixed-256,fixed-512,fixed-1024,agent-turn,structural}``
+selects where the history side is cut, and ``--delay_recent_turns k`` holds
+the last k turns out of the compressed grid and prepends them RAW to the
+prompt.  All policies re-cut the SAME frozen content stream (the incumbent
+``_fit_reused_history`` output plus turn provenance), so the arms are
+content-matched by construction and ``agent-turn``/``delay_recent_turns=0``
+short-circuits to today's exact call — the default pipeline is unchanged.
+Both flags reach the doc builder through
+``train_data_joint.build_history_chunks``, the same function the trainer
+runs.  Per-row accounting for the pilot's budget checks lands in
+``raw_recent_tokens`` / ``history_wrapped_tokens`` /
+``history_content_tokens``; ``avg_gist_tokens`` deliberately keeps its old
+meaning (compressed grid only).  ``--qid_manifest`` restricts the run to a
+frozen qid list, in manifest order, and counts anything the source failed to
+reproduce.  ``--do_sample/--temperature/--top_p/--gen_seed`` enable sampled
+decoding with a per-row seed; the default stays greedy.
+
 Outputs: per-row jsonl + ``.summary.json`` aggregates in the unified eval's
 shape (grouped by condition × mode × ratio), so ``agent/merge_*.py``-style
 tooling keeps working; ``--merge_only`` merges condition-aware shards written
@@ -109,6 +128,7 @@ import json
 import logging
 import sys
 import time
+import zlib
 from collections import Counter
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -143,20 +163,19 @@ from eval_agent_history_c2kv import (  # noqa: E402
     _target_metrics,
 )
 from eval_toolathlon_first_tool_c2kv import _arg_f1s, _parse_pred_call  # noqa: E402
+from train.chunk_policy import CHUNK_POLICIES  # noqa: E402
 from train.train_data_joint import (  # noqa: E402
     AgentLLMTracesJointSource,
     JointExample,
     TOOL_DOC_PREFIX,
     _default_max_tool_chunks,
-    _has_tool_documents,
-    _history_chunk_budget,
+    build_history_chunks,
     build_tool_chunks,
     cap_regime_name,
     regime_from_record,
 )
 from train.train_data_multiturn import (  # noqa: E402
     _chat_template_ids,
-    _fit_reused_history,
     _normal_chat_message,
     _pad,
 )
@@ -189,6 +208,27 @@ def _jsonl_write(path: str, rows: List[Dict[str, Any]]) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _wrap_history_message_ids(
+    tokenizer: Any, message: Dict[str, Any], max_doc_length: int
+) -> Tuple[List[int], bool]:
+    """Chat-template-wrap one kept/delayed history message; flag a ceiling hit.
+
+    The chunk policies size their windows so the wrap fits under
+    ``max_doc_length`` (fixed-N keeps an 8-token re-encode margin), but that
+    margin is a heuristic: BPE decode->re-encode drift beyond it would make
+    ``_chat_template_ids`` truncate SILENTLY, breaking the frozen-content
+    identity the B arms rest on.  A candidate hit (wrapped length at the
+    ceiling) is confirmed against an unbounded second encode — normally there
+    are zero candidates, so the extra encode costs nothing.
+    """
+
+    ids = _chat_template_ids(tokenizer, [message], max_length=max_doc_length)
+    truncated = len(ids) >= max_doc_length and len(
+        _chat_template_ids(tokenizer, [message])
+    ) > len(ids)
+    return ids, truncated
+
+
 def _condition_doc_chunks(
     tokenizer: Any,
     example: JointExample,
@@ -201,6 +241,8 @@ def _condition_doc_chunks(
     history_selection: str,
     split_oversized_history_docs: bool,
     per_side_caps: bool = True,
+    chunk_policy: str = "agent-turn",
+    delay_recent_turns: int = 0,
 ) -> Tuple[Optional[List[List[int]]], Optional[List[List[int]]], Optional[str], Dict[str, Any]]:
     """Build (tool_chunks, history_chunks) id lists for one condition.
 
@@ -208,10 +250,17 @@ def _condition_doc_chunks(
     ``max_doc_length`` tokens (NOT padded).  Returns ``(None, None, reason,
     meta)`` when the tool side exceeds ``max_tool_definition_tokens`` (the
     training skip).  The tool side delegates to
-    ``train_data_joint.build_tool_chunks`` and the history budget to
-    ``train_data_joint._history_chunk_budget`` — the SAME code the trainer
+    ``train_data_joint.build_tool_chunks`` and the history side to
+    ``train_data_joint.build_history_chunks`` — the SAME code the trainer
     runs — so train and eval cannot drift.  ``meta`` carries the builder's
-    ``target_known``/``target_in_grid`` flags for per-row logging.
+    ``target_known``/``target_in_grid`` flags for per-row logging plus the
+    B-line chunking accounting (``raw_history_ids`` for the delayed docs,
+    ``raw_recent_tokens`` / ``history_content_tokens`` /
+    ``history_wrapped_tokens`` and the structural counters).
+
+    The returned tuple arity is unchanged: delayed docs are NOT part of
+    ``history_chunks`` (they never enter the compressed grid); the caller
+    prepends ``meta["raw_history_ids"]`` to the plain prompt.
     """
 
     if condition not in CONDITIONS:
@@ -229,38 +278,85 @@ def _condition_doc_chunks(
         max_tool_definition_tokens=max_tool_definition_tokens,
         per_side_caps=per_side_caps,
     )
+    meta: Dict[str, Any] = dict(tool_meta)
+    meta.update({
+        "chunk_policy": chunk_policy,
+        "delay_recent_turns": delay_recent_turns,
+        "raw_history_ids": [],
+        "raw_recent_tokens": 0,
+        "history_content_tokens": 0,
+        "history_wrapped_tokens": 0,
+        "structural_fallback_docs": 0,
+        "structural_partial_docs": 0,
+        "delayed_docs": 0,
+        "wrap_truncated_docs": 0,
+    })
     if skip_reason is not None:
-        return None, None, skip_reason, tool_meta
+        return None, None, skip_reason, meta
 
+    kept, delayed, history_meta = build_history_chunks(
+        tokenizer,
+        example,
+        condition,
+        max_doc_length=max_doc_length,
+        max_doc_num=max_doc_num,
+        max_tool_chunks=max_tool_chunks,
+        num_tool_chunks=len(tool_chunks),
+        per_side_caps=per_side_caps,
+        history_selection=history_selection,
+        split_oversized_history_docs=split_oversized_history_docs,
+        chunk_policy=chunk_policy,
+        delay_recent_turns=delay_recent_turns,
+        # Eval-only: the presented-token check (analyze_b_pilot) and the gist
+        # declaration both need the frozen-content token count.  The trainer
+        # leaves this off — it is a second full encode of the history text.
+        need_content_tokens=True,
+    )
+    wrap_truncated_docs = 0
     history_chunks: List[List[int]] = []
-    if condition != "tool_only":
-        history_budget = _history_chunk_budget(
-            condition,
-            max_doc_num,
-            max_tool_chunks,
-            len(tool_chunks),
-            per_side_caps,
-            has_tool_documents=_has_tool_documents(example),
-        )
-        raw_history = [
-            {"role": "user", "content": text}
-            for text in example.history_documents
-            if text and text.strip()
-        ]
-        if history_budget > 0 and raw_history:
-            fitted = _fit_reused_history(
-                tokenizer,
-                raw_history,
-                max_doc_length=max_doc_length,
-                max_doc_num=history_budget,
-                policy=history_selection,
-                split_oversized_history_docs=split_oversized_history_docs,
-            )
-            history_chunks = [
-                _chat_template_ids(tokenizer, [message], max_length=max_doc_length)
-                for message in fitted
-            ]
-    return tool_chunks, history_chunks, None, tool_meta
+    for message in kept:
+        ids, truncated = _wrap_history_message_ids(tokenizer, message, max_doc_length)
+        wrap_truncated_docs += int(truncated)
+        history_chunks.append(ids)
+    raw_history_ids: List[int] = []
+    for message in delayed:
+        ids, truncated = _wrap_history_message_ids(tokenizer, message, max_doc_length)
+        wrap_truncated_docs += int(truncated)
+        raw_history_ids.extend(ids)
+    meta.update(history_meta)
+    meta.update({
+        "raw_history_ids": raw_history_ids,
+        "raw_recent_tokens": len(raw_history_ids),
+        "history_content_tokens": history_meta.get("content_tokens", 0),
+        "history_wrapped_tokens": sum(len(chunk) for chunk in history_chunks)
+        + len(raw_history_ids),
+        "wrap_truncated_docs": wrap_truncated_docs,
+    })
+    return tool_chunks, history_chunks, None, meta
+
+
+def _chunk_meta_fields(meta: Dict[str, Any]) -> Dict[str, Any]:
+    """B-line chunking accounting copied from the doc-chunk meta into a prefix.
+
+    ``raw_history_ids`` are the delayed (uncompressed) history docs; every
+    other field is per-row bookkeeping for the gist-declaration and
+    presented-token checks in ``agent/analyze_b_pilot.py``.
+    """
+
+    return {
+        "raw_history_ids": meta.get("raw_history_ids") or [],
+        "raw_recent_tokens": meta.get("raw_recent_tokens", 0),
+        "history_content_tokens": meta.get("history_content_tokens", 0),
+        "history_wrapped_tokens": meta.get("history_wrapped_tokens", 0),
+        "chunk_policy": meta.get("chunk_policy", "agent-turn"),
+        "delay_recent_turns": meta.get("delay_recent_turns", 0),
+        "structural_fallback_docs": meta.get("structural_fallback_docs", 0),
+        "structural_partial_docs": meta.get("structural_partial_docs", 0),
+        # Re-encode drift visibility: history docs whose chat-template wrap hit
+        # the max_doc_length ceiling (0 normally — any non-zero value means the
+        # policy's window margin was insufficient and content was cut).
+        "wrap_truncated_docs": meta.get("wrap_truncated_docs", 0),
+    }
 
 
 def _doc_grid(chunks: Sequence[List[int]], max_doc_length: int) -> torch.Tensor:
@@ -435,6 +531,8 @@ def _build_c2kv_prefix(
         history_selection=args.history_selection,
         split_oversized_history_docs=args.split_oversized_history_docs,
         per_side_caps=not args.legacy_mode_caps,
+        chunk_policy=getattr(args, "chunk_policy", "agent-turn"),
+        delay_recent_turns=getattr(args, "delay_recent_turns", 0),
     )
     if skip_reason is not None:
         return None, skip_reason
@@ -475,6 +573,7 @@ def _build_c2kv_prefix(
         "target_known": tool_meta.get("target_known"),
         "target_in_grid": tool_meta.get("target_in_grid"),
         "target_truncated_to_cap": tool_meta.get("target_truncated_to_cap"),
+        **_chunk_meta_fields(tool_meta),
         "gist_tokens": gist_tokens,
         "compressed_tokens": gist_tokens,
         "actual_compression_ratio": actual_ratio,
@@ -649,6 +748,7 @@ def _build_separate_prefix(
         "target_known": tool_meta.get("target_known"),
         "target_in_grid": tool_meta.get("target_in_grid"),
         "target_truncated_to_cap": tool_meta.get("target_truncated_to_cap"),
+        **_chunk_meta_fields(tool_meta),
         "gist_tokens": gist_tokens,
         "compressed_tokens": gist_tokens,
         "actual_compression_ratio": doc_tokens / gist_tokens if gist_tokens else 0.0,
@@ -671,6 +771,10 @@ def _build_baseline_prefix(
     ``truncate`` keeps the first ``ceil(doc_tokens / ratio)`` tokens of the
     concatenated (tool-first) document stream — the unified eval's head
     truncation, NOT the history eval's tail-biased one.
+
+    ``delay_recent_turns`` is forced to 0 here: full/truncate present every
+    document in the plain prompt already, so holding turns back would only
+    reorder the same raw tokens.
     """
 
     tool_chunks, history_chunks, skip_reason, tool_meta = _condition_doc_chunks(
@@ -684,6 +788,8 @@ def _build_baseline_prefix(
         history_selection=args.history_selection,
         split_oversized_history_docs=args.split_oversized_history_docs,
         per_side_caps=not args.legacy_mode_caps,
+        chunk_policy=getattr(args, "chunk_policy", "agent-turn"),
+        delay_recent_turns=0,
     )
     if skip_reason is not None:
         return None, skip_reason
@@ -739,6 +845,7 @@ def _build_baseline_prefix(
         "target_known": tool_meta.get("target_known"),
         "target_in_grid": tool_meta.get("target_in_grid"),
         "target_truncated_to_cap": tool_meta.get("target_truncated_to_cap"),
+        **_chunk_meta_fields(tool_meta),
         "gist_tokens": 0,
         "compressed_tokens": kept_tokens,
         "actual_compression_ratio": doc_tokens / kept_tokens if kept_tokens else 0.0,
@@ -754,6 +861,14 @@ def _build_baseline_prefix(
 # ---------------------------------------------------------------------------
 
 
+def _seed_row(args: argparse.Namespace, example: JointExample, mode: str) -> None:
+    """Per-row generation seed (shared formula with eval_agent_history_c2kv)."""
+    seed = (int(getattr(args, "gen_seed", 0)) * 1_000_003) ^ zlib.crc32(
+        f"{example.qid}:{mode}:{args.override_ratio}".encode()
+    )
+    torch.manual_seed(seed)
+
+
 @torch.inference_mode()
 def _generate_with_prefix(
     model: Any,
@@ -762,8 +877,16 @@ def _generate_with_prefix(
     prefix: Dict[str, Any],
     args: argparse.Namespace,
 ) -> Dict[str, Any]:
+    # Delayed history docs stay uncompressed: they ride in front of the
+    # current turn in the plain prompt.  position_ids already start at
+    # system_length + doc_length, and doc_length counts ONLY the original
+    # tokens of the compressed grid, so the raw turn naturally occupies the
+    # positions right after it — no extra bookkeeping needed.
+    raw_ids = prefix.get("raw_history_ids") or []
     prompt_ids = _current_prompt_ids(tokenizer, example, args.max_prompt_tokens)
-    prompt_input_ids = torch.tensor([prompt_ids], dtype=torch.long, device=model.device)
+    prompt_input_ids = torch.tensor(
+        [list(raw_ids) + prompt_ids], dtype=torch.long, device=model.device
+    )
     mock_cache_ids = prompt_input_ids.new_zeros((1, prefix["cache_length"]))
     input_ids = torch.cat([mock_cache_ids, prompt_input_ids], dim=1)
     original_prefix_length = prefix["system_length"] + prefix["doc_length"]
@@ -773,6 +896,9 @@ def _generate_with_prefix(
         dtype=torch.long,
         device=model.device,
     ).unsqueeze(0)
+    do_sample = bool(getattr(args, "do_sample", False))
+    if do_sample:
+        _seed_row(args, example, getattr(args, "row_mode", args.mode))
     prediction, generate_sec, generated_tokens, tbt_sec = _generate_from_input_ids(
         model,
         tokenizer,
@@ -782,6 +908,9 @@ def _generate_with_prefix(
         use_gist=prefix["use_gist"],
         position_ids=position_ids,
         past_key_values=prefix["cache"],
+        do_sample=do_sample,
+        temperature=getattr(args, "temperature", None),
+        top_p=getattr(args, "top_p", None),
     )
     metrics = _prediction_metrics(tokenizer, example.answer, prediction)
     metrics["generated_tokens"] = generated_tokens
@@ -802,6 +931,13 @@ def _generate_with_prefix(
         "gist_tokens": prefix["gist_tokens"],
         "compressed_tokens": prefix["compressed_tokens"],
         "prompt_tokens": len(prompt_ids),
+        "raw_recent_tokens": prefix.get("raw_recent_tokens", 0),
+        "history_wrapped_tokens": prefix.get("history_wrapped_tokens", 0),
+        "history_content_tokens": prefix.get("history_content_tokens", 0),
+        "chunk_policy": prefix.get("chunk_policy", "agent-turn"),
+        "delay_recent_turns": prefix.get("delay_recent_turns", 0),
+        "structural_fallback_docs": prefix.get("structural_fallback_docs", 0),
+        "structural_partial_docs": prefix.get("structural_partial_docs", 0),
         "actual_compression_ratio": round(prefix["actual_compression_ratio"], 4),
         "system_prefill_sec": round(prefix["system_prefill_sec"], 4),
         "tool_compress_sec": round(prefix["tool_compress_sec"], 4),
@@ -886,10 +1022,31 @@ def _summarize(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         doc_token_total = sum(row.get("doc_tokens", 0) for row in valid)
         compressed_total = sum(row.get("compressed_tokens", 0) for row in valid)
 
-        def _avg(field: str) -> float:
-            return sum(row.get(field, 0.0) for row in valid) / len(valid) if valid else 0.0
+        # Rows merged from heterogeneous shards (different code versions, or a
+        # partially-written shard) can be missing a metric key outright.  A
+        # missing key is folded in as falsy/0.0 so `merge_shards` cannot die at
+        # the last step of a long run, but it is NOT the same thing as a
+        # measured zero: every occurrence is counted per field and surfaced on
+        # the summary as `missing_metric_fields`, so a deflated rate can never
+        # be read as a real one.
+        missing: "Counter[str]" = Counter()
 
-        summaries.append({
+        def _count_missing(field: str) -> None:
+            absent = sum(1 for row in valid if field not in row)
+            if absent:
+                missing[field] += absent
+
+        def _rate(field: str) -> float:
+            _count_missing(field)
+            return sum(1 for row in valid if row.get(field)) / len(valid) if valid else 0.0
+
+        def _avg(field: str) -> float:
+            _count_missing(field)
+            return (
+                sum(row.get(field) or 0.0 for row in valid) / len(valid) if valid else 0.0
+            )
+
+        entry = {
             "condition": condition,
             "mode": mode,
             "ratio": ratio,
@@ -897,23 +1054,26 @@ def _summarize(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             "num_valid": len(valid),
             "num_skipped": len(group) - len(valid),
             "skip_reasons": dict(skips),
-            "exact_match": sum(1 for row in valid if row["exact_match"]) / len(valid) if valid else 0.0,
-            "tool_name_accuracy": (
-                sum(1 for row in valid if row["tool_name_match"]) / len(valid) if valid else 0.0
-            ),
-            "tool_call_rate": sum(1 for row in valid if row["has_tool_call"]) / len(valid) if valid else 0.0,
-            "response_type_accuracy": (
-                sum(1 for row in valid if row["response_type_match"]) / len(valid) if valid else 0.0
-            ),
+            "exact_match": _rate("exact_match"),
+            "tool_name_accuracy": _rate("tool_name_match"),
+            "tool_call_rate": _rate("has_tool_call"),
+            "response_type_accuracy": _rate("response_type_match"),
             "argument_name_f1": _avg("argument_name_f1"),
             "argument_value_f1": _avg("argument_value_f1"),
             "avg_text_token_f1": _avg("text_token_f1"),
             "avg_rouge_l_f1": _avg("rouge_l_f1"),
             "avg_doc_tokens": _avg("doc_tokens"),
             "avg_doc_chunks": _avg("doc_chunks"),
+            # avg_gist_tokens keeps its original meaning (compressed grid
+            # only): the delayed raw turn is reported separately as
+            # avg_raw_recent_tokens and NEVER folded in, or the 5% gist
+            # declaration check (判据1) would read a delay arm as inflated.
             "avg_gist_tokens": _avg("gist_tokens"),
             "avg_compressed_tokens": _avg("compressed_tokens"),
             "avg_prompt_tokens": _avg("prompt_tokens"),
+            "avg_raw_recent_tokens": _avg("raw_recent_tokens"),
+            "avg_history_wrapped_tokens": _avg("history_wrapped_tokens"),
+            "avg_history_content_tokens": _avg("history_content_tokens"),
             "avg_generated_tokens": generated_total / len(valid) if valid else 0.0,
             "avg_actual_compression_ratio": _avg("actual_compression_ratio"),
             "token_weighted_actual_compression_ratio": (
@@ -931,7 +1091,23 @@ def _summarize(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                 if generated_total else 0.0
             ),
             "avg_total_sec": _avg("total_sec"),
-        })
+        }
+        # Never silent: a rate computed over rows that did not carry the field
+        # is deflated, and the reader has to be able to see that.
+        entry["missing_metric_fields"] = dict(sorted(missing.items()))
+        if missing:
+            logger.warning(
+                "condition=%s mode=%s ratio=%s: %d/%d valid rows are missing metric keys %s — "
+                "those rows were folded in as 0 and the affected rates are DEFLATED; "
+                "this usually means shards from different code versions were merged",
+                condition,
+                mode,
+                ratio,
+                max(missing.values()),
+                len(valid),
+                dict(sorted(missing.items())),
+            )
+        summaries.append(entry)
     return summaries
 
 
@@ -973,6 +1149,39 @@ def _parse_csv(value: Optional[str], default: str) -> List[str]:
     return [item.strip() for item in (value or default).split(",") if item.strip()]
 
 
+def _load_qid_manifest(path: str) -> List[str]:
+    """Frozen qid list: a JSON list, a JSON object with ``qids``, or one per line."""
+    text = Path(path).read_text(encoding="utf-8")
+    stripped = text.lstrip()
+    if stripped.startswith("[") or stripped.startswith("{"):
+        payload = json.loads(text)
+        if isinstance(payload, dict):
+            payload = payload.get("qids")
+        if not isinstance(payload, list):
+            raise ValueError(f"{path}: expected a JSON list of qids (or a 'qids' key)")
+        return [str(item) for item in payload]
+    return [line.strip() for line in text.splitlines() if line.strip()]
+
+
+def _filter_by_manifest(
+    examples: List[JointExample], manifest_path: str
+) -> Tuple[List[JointExample], List[str]]:
+    """Keep only manifest qids, IN MANIFEST ORDER; report the missing ones.
+
+    A missing qid is never silent: the caller logs a warning and the count
+    lands in the run summary, because a shrunken frozen set breaks the paired
+    contrast the whole B analysis rests on.
+    """
+
+    qids = _load_qid_manifest(manifest_path)
+    by_qid: Dict[str, JointExample] = {}
+    for example in examples:
+        by_qid.setdefault(example.qid, example)
+    ordered = [by_qid[qid] for qid in qids if qid in by_qid]
+    missing = [qid for qid in qids if qid not in by_qid]
+    return ordered, missing
+
+
 def evaluate(args: argparse.Namespace) -> Dict[str, Any]:
     device = _setup_device(args.device_type)
     if args.model:
@@ -983,6 +1192,19 @@ def evaluate(args: argparse.Namespace) -> Dict[str, Any]:
 
     examples = _load_examples(args)
     logger.info("Loaded %d joint %s examples", len(examples), args.split)
+    manifest_missing: List[str] = []
+    if getattr(args, "qid_manifest", None):
+        examples, manifest_missing = _filter_by_manifest(examples, args.qid_manifest)
+        if manifest_missing:
+            logger.warning(
+                "qid manifest %s: %d/%d qids not reproduced by the source (first 5: %s) — "
+                "the frozen paired set is INCOMPLETE",
+                args.qid_manifest,
+                len(manifest_missing),
+                len(manifest_missing) + len(examples),
+                manifest_missing[:5],
+            )
+        logger.info("qid manifest %s: %d examples kept", args.qid_manifest, len(examples))
     ratios = [int(item) for item in _parse_csv(args.ratios, str(args.override_ratio))]
     rows: List[Dict[str, Any]] = []
     gist_init_fractions: Dict[str, float] = {}
@@ -1098,6 +1320,15 @@ def evaluate(args: argparse.Namespace) -> Dict[str, Any]:
         "max_system_length": args.max_system_length,
         "max_prompt_tokens": args.max_prompt_tokens,
         "max_baseline_input_tokens": args.max_baseline_input_tokens,
+        "chunk_policy": args.chunk_policy,
+        "delay_recent_turns": args.delay_recent_turns,
+        "qid_manifest": args.qid_manifest,
+        "qid_manifest_missing": len(manifest_missing),
+        "num_examples": len(examples),
+        "do_sample": args.do_sample,
+        "temperature": args.temperature,
+        "top_p": args.top_p,
+        "gen_seed": args.gen_seed,
         "num_rows": len(rows),
         "results": _summarize(rows),
     }
@@ -1149,6 +1380,9 @@ def merge_shards(args: argparse.Namespace) -> Dict[str, Any]:
     rows: List[Dict[str, Any]] = []
     gist_init_fractions: Dict[str, float] = {}
     shard_cap_modes: List[Any] = []
+    shard_chunk_policies: List[Any] = []
+    shard_qid_manifests: List[str] = []
+    qid_manifest_missing_total = 0
     shard_cap_regimes: List[str] = []
     for input_file in args.input_files:
         rows.extend(_read_jsonl(Path(input_file)))
@@ -1168,6 +1402,15 @@ def merge_shards(args: argparse.Namespace) -> Dict[str, Any]:
                     gist_init_fractions[key] = (
                         float(value) if previous is None else max(previous, float(value))
                     )
+            if "legacy_mode_caps" in shard_summary:
+                shard_cap_modes.append(bool(shard_summary["legacy_mode_caps"]))
+            if "chunk_policy" in shard_summary:
+                shard_chunk_policies.append(str(shard_summary["chunk_policy"]))
+            if shard_summary.get("qid_manifest") is not None:
+                shard_qid_manifests.append(str(shard_summary["qid_manifest"]))
+            missing = shard_summary.get("qid_manifest_missing")
+            if isinstance(missing, (int, float)) and not isinstance(missing, bool):
+                qid_manifest_missing_total += int(missing)
             if "legacy_mode_caps" in shard_summary or "cap_regime" in shard_summary:
                 shard_cap_modes.append(bool(shard_summary.get("legacy_mode_caps")))
                 # Normalized regime string: pre-string summaries map to
@@ -1197,6 +1440,37 @@ def merge_shards(args: argparse.Namespace) -> Dict[str, Any]:
             cap_regimes,
         )
     merged_legacy_mode_caps: Any = cap_modes[0] if len(cap_modes) == 1 else (cap_modes or None)
+    # Same treatment for the chunking policy: merging arms into one file
+    # destroys the per-arm contrast the B analysis needs, so it is loud.
+    chunk_policies = sorted(set(shard_chunk_policies))
+    if len(chunk_policies) > 1:
+        logger.warning(
+            "MERGING SHARDS FROM DIFFERENT CHUNK POLICIES (%s) — these are separate B arms "
+            "and must not be pooled into one summary",
+            chunk_policies,
+        )
+    merged_chunk_policy: Any = (
+        chunk_policies[0] if len(chunk_policies) == 1 else (chunk_policies or None)
+    )
+    # The frozen-set bookkeeping must survive the merge: b_prereg.md §2 gates
+    # every paired table on qid_manifest_missing == 0, and the merged summary
+    # is the artefact the B run script prints and the operator reads — losing
+    # the count here made the gate invisible on the parallel-shard path.
+    distinct_manifests = sorted(set(shard_qid_manifests))
+    if len(distinct_manifests) > 1:
+        logger.warning(
+            "MERGING SHARDS RUN AGAINST DIFFERENT QID MANIFESTS (%s) — "
+            "the frozen paired set is not well-defined for this merge",
+            distinct_manifests,
+        )
+    merged_qid_manifest = shard_qid_manifests[0] if shard_qid_manifests else None
+    if qid_manifest_missing_total > 0:
+        logger.warning(
+            "qid_manifest_missing=%d across the merged shards — the frozen paired "
+            "set is INCOMPLETE and this round must not enter any paired table "
+            "(b_prereg.md §2)",
+            qid_manifest_missing_total,
+        )
     merged_cap_regime: Any = cap_regimes[0] if len(cap_regimes) == 1 else (cap_regimes or None)
     if args.output_file:
         _jsonl_write(args.output_file, rows)
@@ -1212,6 +1486,9 @@ def merge_shards(args: argparse.Namespace) -> Dict[str, Any]:
         "separate_generator": args.separate_generator if args.separate else None,
         "num_rows": len(rows),
         "legacy_mode_caps": merged_legacy_mode_caps,
+        "chunk_policy": merged_chunk_policy,
+        "qid_manifest": merged_qid_manifest,
+        "qid_manifest_missing": qid_manifest_missing_total,
         "cap_regime": merged_cap_regime,
         "gist_init_fractions": gist_init_fractions,
         "results": _summarize(rows),
@@ -1287,6 +1564,43 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--max_new_tokens", type=int, default=128)
     parser.add_argument("--history_selection", choices=["head", "tail"], default="tail")
     parser.add_argument("--split_oversized_history_docs", type=lambda x: str(x).lower() == "true", default=True)
+    # ---- experiment B: chunking policy / delayed compression / sampling ----
+    parser.add_argument(
+        "--chunk_policy",
+        choices=list(CHUNK_POLICIES),
+        default="agent-turn",
+        help="History-side chunk boundaries. agent-turn is the incumbent (in-distribution "
+        "reference); fixed-* ignore turn boundaries; structural cuts at atomic "
+        "action+observation blocks. All arms share the same frozen content stream.",
+    )
+    parser.add_argument(
+        "--delay_recent_turns",
+        type=int,
+        default=0,
+        help="Hold the last k turns out of the compressed grid and prepend them raw to the "
+        "prompt (turn granularity). Not defined for the fixed-* policies.",
+    )
+    parser.add_argument(
+        "--qid_manifest",
+        help="Frozen qid list (JSON list, {'qids': [...]} or one qid per line). Examples are "
+        "filtered to it and kept in manifest order; missing qids are counted and warned.",
+    )
+    parser.add_argument("--do_sample", type=lambda x: str(x).lower() == "true", default=False)
+    parser.add_argument(
+        "--temperature",
+        type=float,
+        default=None,
+        help="Sampling temperature. MANDATORY when --do_sample true: leaving it unset would "
+        "silently inherit the checkpoint's generation_config while the run summary records "
+        "null, so the decode configuration could not be recovered from the artefacts.",
+    )
+    parser.add_argument("--top_p", type=float, default=None)
+    parser.add_argument(
+        "--gen_seed",
+        type=int,
+        default=0,
+        help="Per-row generation seed base; only used when --do_sample true.",
+    )
     parser.add_argument("--device_type", choices=["auto", "cuda", "npu", "cpu"], default="auto")
     parser.add_argument("--system_attn_impl", default="eager")
     parser.add_argument("--gist_attn_impl", default="eager")
@@ -1300,6 +1614,24 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         return args
     if not args.separate and not args.model:
         parser.error("--model is required unless --separate or --merge_only")
+    if args.delay_recent_turns < 0:
+        parser.error("--delay_recent_turns must be non-negative")
+    if args.chunk_policy.startswith("fixed-") and args.delay_recent_turns > 0:
+        parser.error(
+            f"--chunk_policy {args.chunk_policy} destroys turn boundaries; "
+            "--delay_recent_turns > 0 needs agent-turn or structural"
+        )
+    # Traceability, not taste: with do_sample=True and no explicit temperature,
+    # transformers silently falls back to the checkpoint's generation_config,
+    # while the run summary records "temperature": null.  The decode
+    # configuration of the run would then be unrecoverable from its artefacts.
+    if args.do_sample and args.temperature is None:
+        parser.error(
+            "--do_sample true requires an explicit --temperature: otherwise the sampling "
+            "temperature comes from the checkpoint's generation_config and the run summary "
+            "records temperature=null, making the decode configuration untraceable. "
+            "Pass --temperature (and --top_p) explicitly, or run greedy with --do_sample false."
+        )
     return args
 
 

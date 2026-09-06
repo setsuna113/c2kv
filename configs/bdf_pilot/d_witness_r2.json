@@ -1,0 +1,6343 @@
+{
+ "description": "Frozen witness table (prereg v2.2/v2.7): witness-IDF k* selection over decoded grid rows. Freeze BEFORE any analysis; amend the prereg, not this file.",
+ "manifest": "configs/bdf_pilot/d_cw_manifest_r2.json",
+ "algorithm": "d_witness_core.py (prereg v2 addendum, frozen verbatim)",
+ "max_doc_length": 768,
+ "max_doc_num": 16,
+ "n_qids": 93,
+ "n_k_none": 3,
+ "entries": {
+  "0c890a5dde8c_12dc86e7:8": {
+   "n_docs": 6,
+   "doc_lengths": [
+    85,
+    490,
+    203,
+    240,
+    350,
+    493
+   ],
+   "doc_text_sha256": [
+    "0212b8cff1241b60199c2ed704fd3a329f0ce1cd88308d111c2c77265ba30015",
+    "9452988e9aaaac4397e0366f9e116849fefad40511a9dd37d5841fb600e67c3a",
+    "ca3586c7b86123fc6e7d74f1e01c4307c407312226434850c0016087e982d785",
+    "dc489280e3b169f6a917d7b1ecb7240b5a95027f8f4490e753e5a6e4c70b4b55",
+    "bb3dc9638ac848583fa92e03b9128c3bfaad829b40a1f0fe6bfd676a831e7640",
+    "0f22e7a861df563678377cb60674d4f1179c7fa7cb8affdac985d8f2fa1f32b0"
+   ],
+   "doc_text_chars": [
+    401,
+    1356,
+    579,
+    567,
+    757,
+    1386
+   ],
+   "tool_name": "spotify__show_playlist_library",
+   "arg_leaf_values": [
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJzcG90aWZ5K2phY2stbWFsZG9uYWRvQGdtYWlsLmNvbSIsImV4cCI6MTY4NDQxMjA5OH0.I4PzSrs_njPl81oJIw4ELTrU-49-zeCw16TJg5mkemw",
+    "0",
+    "20"
+   ],
+   "df": {
+    "spotify__show_playlist_library": 1,
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJzcG90aWZ5K2phY2stbWFsZG9uYWRvQGdtYWlsLmNvbSIsImV4cCI6MTY4NDQxMjA5OH0.I4PzSrs_njPl81oJIw4ELTrU-49-zeCw16TJg5mkemw": 2,
+    "0": 1,
+    "20": 0
+   },
+   "score": [
+    0,
+    0,
+    0,
+    0.5,
+    0,
+    2.5
+   ],
+   "k_witness": 5,
+   "k_median": 2,
+   "target_doc_values": [
+    [
+     "0",
+     1
+    ],
+    [
+     "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJzcG90aWZ5K2phY2stbWFsZG9uYWRvQGdtYWlsLmNvbSIsImV4cCI6MTY4NDQxMjA5OH0.I4PzSrs_njPl81oJIw4ELTrU-49-zeCw16TJg5mkemw",
+     2
+    ]
+   ]
+  },
+  "0c890a5dde8c_c4d290c5:4": {
+   "n_docs": 4,
+   "doc_lengths": [
+    87,
+    486,
+    198,
+    368
+   ],
+   "doc_text_sha256": [
+    "32015e4e892fcb5dd012a4dc37b670e7864064eb83092d38c54a10e5ff574b44",
+    "ca74094f64350eb8be05f9edb00c353f0a9ef83eddbad256dc33f737ca23e9c9",
+    "e43affad5767631bde884aa355317dbe7d2fa4572fa5d89945f1e1725aeecb4c",
+    "c0ee93827f49130d5756c6b54597325eebf72b95a73d292b61619a92033e13a3"
+   ],
+   "doc_text_chars": [
+    429,
+    1356,
+    566,
+    799
+   ],
+   "tool_name": "spotify__show_liked_songs",
+   "arg_leaf_values": [
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJzcG90aWZ5K2pvc2VoYXJyQGdtYWlsLmNvbSIsImV4cCI6MTY4NDQxMjA5OH0.hcqCpRubJLnD0Rb1w1X-ajbN-E6xGyw-mnYWYV9rTqc",
+    "0",
+    "20"
+   ],
+   "df": {
+    "spotify__show_liked_songs": 1,
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJzcG90aWZ5K2pvc2VoYXJyQGdtYWlsLmNvbSIsImV4cCI6MTY4NDQxMjA5OH0.hcqCpRubJLnD0Rb1w1X-ajbN-E6xGyw-mnYWYV9rTqc": 1,
+    "0": 1,
+    "20": 0
+   },
+   "score": [
+    0,
+    0,
+    0,
+    3.0
+   ],
+   "k_witness": 3,
+   "k_median": 1,
+   "target_doc_values": [
+    [
+     "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJzcG90aWZ5K2pvc2VoYXJyQGdtYWlsLmNvbSIsImV4cCI6MTY4NDQxMjA5OH0.hcqCpRubJLnD0Rb1w1X-ajbN-E6xGyw-mnYWYV9rTqc",
+     1
+    ],
+    [
+     "0",
+     1
+    ]
+   ]
+  },
+  "0c890a5dde8c_ebac8eab:16": {
+   "n_docs": 16,
+   "doc_lengths": [
+    66,
+    757,
+    206,
+    366,
+    135,
+    643,
+    141,
+    221,
+    223,
+    627,
+    149,
+    212,
+    225,
+    209,
+    112,
+    722
+   ],
+   "doc_text_sha256": [
+    "cd00ed3d3aed03fbe2f8f3a05116999411a4e33cff3fb47a9c357151e30832d6",
+    "e30c1679648b9e9c8bda5d3d2d53e1b4ec4215da5405d7b4f85d8860b0b4e3bc",
+    "4900b5b0006417805e9d0ffedb4c9ce545b985cdd9a1888687d030cf2684929c",
+    "6198a683203b31ba167b67dbf9c1a1209ff4037bd3be93dbc1aa921ccc84e94c",
+    "4b256818e70d8c30fca2d68cf5cbd382ae4881857b4b24a0fc8a67c08909454e",
+    "410012e93a3808f73174639cfd712d8a0680e4caf0779ce503480837685f211d",
+    "5cdde89d13989be41339370cfe95fd530bebd6f7083b1999481d8137d1d0aa1d",
+    "e85a4be66c9d53ede08429009f5a519b973daa6fc1bd4666d24299c59e5fbb0b",
+    "22f7d809708f8d79eca2f34ee0757335b7c88b13c1b22d1e9382daacc30fcd65",
+    "31b09c059556e7e0176f0193cf559e1e22459c16269df824390621facb6543af",
+    "ae5666e4e58b7e20a568a3dc691bb72af4cc580ac9fe846c6fe29d554adde1ec",
+    "63ee204fd430053ec2a1ba2e797295f8a6ffcac9c92b842ddd5c7b7b99439234",
+    "4ae8cc02925f70c35d448f7263f5c364a896508a5716364c97ba3e31bef88f0e",
+    "4720fe49c886cac19d1394a44d23473a7b71b1bf09f20a75060e0f587ae48d24",
+    "b3e90436d55c5f819d7f8277a79c4ae73db7654a39fba4ec01f0f1cde29fcd05",
+    "f61a8429c276fbb4670d9d984a319affe2c90d7a19a3354c46ae3a2bffa8e28e"
+   ],
+   "doc_text_chars": [
+    298,
+    1868,
+    492,
+    1004,
+    290,
+    1665,
+    309,
+    580,
+    571,
+    1591,
+    331,
+    541,
+    578,
+    531,
+    453,
+    1814
+   ],
+   "tool_name": "venmo__approve_payment_request",
+   "arg_leaf_values": [
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ2ZW5tbyttYXJfYmxhY0BnbWFpbC5jb20iLCJleHAiOjE2ODQ0MTIwOTh9.EaOVvIGemoRII8G2dJTiIhZT0XR6NmoaeS6hLUZsyXk",
+    "6099"
+   ],
+   "df": {
+    "venmo__approve_payment_request": 5,
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ2ZW5tbyttYXJfYmxhY0BnbWFpbC5jb20iLCJleHAiOjE2ODQ0MTIwOTh9.EaOVvIGemoRII8G2dJTiIhZT0XR6NmoaeS6hLUZsyXk": 9,
+    "6099": 7
+   },
+   "score": [
+    0,
+    0.14285714285714285,
+    0,
+    0,
+    0.1111111111111111,
+    0.14285714285714285,
+    0.45396825396825397,
+    0.1111111111111111,
+    0.1111111111111111,
+    0,
+    0.45396825396825397,
+    0.45396825396825397,
+    0.45396825396825397,
+    0.45396825396825397,
+    0,
+    0.1111111111111111
+   ],
+   "k_witness": 6,
+   "k_median": 7,
+   "target_doc_values": [
+    [
+     "6099",
+     7
+    ],
+    [
+     "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ2ZW5tbyttYXJfYmxhY0BnbWFpbC5jb20iLCJleHAiOjE2ODQ0MTIwOTh9.EaOVvIGemoRII8G2dJTiIhZT0XR6NmoaeS6hLUZsyXk",
+     9
+    ]
+   ]
+  },
+  "10d642ac9c10_085f0768:8": {
+   "n_docs": 8,
+   "doc_lengths": [
+    485,
+    173,
+    341,
+    232,
+    320,
+    619,
+    219,
+    269
+   ],
+   "doc_text_sha256": [
+    "845cd834d3f692028d620ed59ed3051f62cbd892383b095dcbafeb2736d3398e",
+    "76b3d82de61951652d3f1ff166f67969a3792c024b0886f6ef625a6781cca4ac",
+    "742a0e8ba2bd0cae5975fd6ddfe8feeb5a1672859fcffc9947f6688006090e60",
+    "bb68a31462381e4b45547429dee67f3e1cf6216e71916824172ff038aa84e0f2",
+    "befda05e662941de470c9aadbde9b2741088c32494a3265c7519423137e023b3",
+    "c850e0bb1d8a020a321eb1c92eeed54358a0271af06bea320933c2daf963d8af",
+    "a6162f7a79b126236e5fdfadea5f19d9a5fbf584a88964d8f0bfe51d1d54ed60",
+    "454968b7d84fdaf698c3523878328d16d2c885e8f41ae463796e168275bd7931"
+   ],
+   "doc_text_chars": [
+    2338,
+    495,
+    967,
+    522,
+    667,
+    1515,
+    514,
+    711
+   ],
+   "tool_name": "venmo__show_transactions",
+   "arg_leaf_values": [
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ2ZW5tbyt0cmFfd2ViZXJAZ21haWwuY29tIiwiZXhwIjoxNjg0NDEyMDk4fQ.iee1-o5kpx-XDXo9EEr3oD26jekdO2LYQx8gHSKdRDQ",
+    "nicholas.weber@gmail.com",
+    "2022-12-31",
+    "sent"
+   ],
+   "df": {
+    "venmo__show_transactions": 2,
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ2ZW5tbyt0cmFfd2ViZXJAZ21haWwuY29tIiwiZXhwIjoxNjg0NDEyMDk4fQ.iee1-o5kpx-XDXo9EEr3oD26jekdO2LYQx8gHSKdRDQ": 3,
+    "nicholas.weber@gmail.com": 3,
+    "2022-12-31": 2,
+    "sent": 2
+   },
+   "score": [
+    0.5,
+    0,
+    0,
+    0.3333333333333333,
+    0,
+    0.3333333333333333,
+    1.6666666666666665,
+    2.1666666666666665
+   ],
+   "k_witness": 7,
+   "k_median": 3,
+   "target_doc_values": [
+    [
+     "2022-12-31",
+     2
+    ],
+    [
+     "sent",
+     2
+    ],
+    [
+     "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ2ZW5tbyt0cmFfd2ViZXJAZ21haWwuY29tIiwiZXhwIjoxNjg0NDEyMDk4fQ.iee1-o5kpx-XDXo9EEr3oD26jekdO2LYQx8gHSKdRDQ",
+     3
+    ],
+    [
+     "nicholas.weber@gmail.com",
+     3
+    ]
+   ]
+  },
+  "10d642ac9c10_4f13ce12:12": {
+   "n_docs": 12,
+   "doc_lengths": [
+    539,
+    338,
+    333,
+    260,
+    270,
+    225,
+    222,
+    221,
+    247,
+    99,
+    314,
+    270
+   ],
+   "doc_text_sha256": [
+    "e32b5ed672405b8eb8c5c0f82e669a39e4a5e4df772771361ea9714dbad427d4",
+    "153d43e7bf70eb7b3a621dbd2f27addf06d4bb7a09680f1996ff7d2d1ffd6b49",
+    "67b310435129320d94c35a308f6b96779c2088ec47102cd6edf184f44ba8480d",
+    "c4828fb791026d457bdeb40f651d18d0039c4e6bd540516f81f70ca196fd9f63",
+    "22fac5e45c6dd2bde67a4cba5897fb2847a92ef7b747be6ca3b8bc286886aed9",
+    "bd06cb3e24e4f859a003ac1bbe2c1f319dcccc5e831f9413b83bf9d55cca12ce",
+    "e96a24b961cd6633d9fa58c9e5232a3c4d59b0033bdbebbe5932433f1bde0dbd",
+    "a0a008cae756469ce8ff4c4bc0bbb22eab6788ae8181b9d214151c10cb4e9690",
+    "abf1a061671c5c4e5d7745ebc298083922c7aad90b9b8bedce4e1d71030dcb63",
+    "cc5c14c2d893d40c51e78ec08db4bb81b0f7f9d2980d44c5308871e515fa52d1",
+    "c40e49c228e9db432949f171ed0d5e3c8fc96dbe979cadf0003fd473bb339072",
+    "729b10150bdda595b2b0739bb91c446a73112fd17335da23775a3458791db2e6"
+   ],
+   "doc_text_chars": [
+    2603,
+    971,
+    693,
+    699,
+    742,
+    543,
+    524,
+    524,
+    620,
+    317,
+    656,
+    748
+   ],
+   "tool_name": "todoist__show_projects",
+   "arg_leaf_values": [
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ0b2RvaXN0K2pvLWhhcnJAZ21haWwuY29tIiwiZXhwIjoxNjg0NDk5MTQxfQ._Z0QyKLcRf6U-LKC6mgwh_jsILkIRMF_egunRAvSbbk",
+    "0",
+    "10",
+    "charcoal",
+    "false"
+   ],
+   "df": {
+    "todoist__show_projects": 2,
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ0b2RvaXN0K2pvLWhhcnJAZ21haWwuY29tIiwiZXhwIjoxNjg0NDk5MTQxfQ._Z0QyKLcRf6U-LKC6mgwh_jsILkIRMF_egunRAvSbbk": 2,
+    "0": 7,
+    "10": 5,
+    "charcoal": 1,
+    "false": 5
+   },
+   "score": [
+    0,
+    0,
+    0,
+    0.34285714285714286,
+    0.5428571428571429,
+    0.5428571428571429,
+    0.5428571428571429,
+    0.34285714285714286,
+    0.34285714285714286,
+    0,
+    1.0,
+    2.3428571428571425
+   ],
+   "k_witness": 11,
+   "k_median": 5,
+   "target_doc_values": [
+    [
+     "charcoal",
+     1
+    ],
+    [
+     "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ0b2RvaXN0K2pvLWhhcnJAZ21haWwuY29tIiwiZXhwIjoxNjg0NDk5MTQxfQ._Z0QyKLcRf6U-LKC6mgwh_jsILkIRMF_egunRAvSbbk",
+     2
+    ],
+    [
+     "10",
+     5
+    ],
+    [
+     "0",
+     7
+    ]
+   ]
+  },
+  "10d642ac9c10_535ae546:7": {
+   "n_docs": 7,
+   "doc_lengths": [
+    492,
+    342,
+    340,
+    250,
+    262,
+    218,
+    219
+   ],
+   "doc_text_sha256": [
+    "cc221916e1e292c0fed03ce93772d9b2a34030492b788560d28e039468817a01",
+    "b1a26a6843cc43f7396c5d205f21971728f65cf40ebc506e99469e0c1c9d1ed1",
+    "eb29b3d01dc929b615a733fc6bfaa142ae6113dcc38333ee5891de2a490c738f",
+    "1a85266ad96ad42bcb4d7569bf8be5ace66124c5c54b0828429636e3d15c51d0",
+    "d194d7d4977b442e8910f076ce088619df543cc2bb942c360e94e1b7340d9a7a",
+    "066b8209b247346d576e6970039bb68c9adb96284564e667863f97bdb8d5cb1a",
+    "73cf82d135097a8e846f62416ee05ebfa03041da41f73d58bb131aae0a71569e"
+   ],
+   "doc_text_chars": [
+    2373,
+    975,
+    699,
+    664,
+    707,
+    513,
+    514
+   ],
+   "tool_name": "simple_note__search_notes",
+   "arg_leaf_values": [
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJzaW1wbGVfbm90ZSticmVuZGEud2ViZUBnbWFpbC5jb20iLCJleHAiOjE2ODQ0MTIwOTh9.NmGEu2wIPVFtHgvgiQYjriCN6OAch0lDnq1GyG8tbEY",
+    "false",
+    "20"
+   ],
+   "df": {
+    "simple_note__search_notes": 5,
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJzaW1wbGVfbm90ZSticmVuZGEud2ViZUBnbWFpbC5jb20iLCJleHAiOjE2ODQ0MTIwOTh9.NmGEu2wIPVFtHgvgiQYjriCN6OAch0lDnq1GyG8tbEY": 5,
+    "false": 3,
+    "20": 0
+   },
+   "score": [
+    0,
+    0,
+    0.4,
+    0.4,
+    0.7333333333333334,
+    0.7333333333333334,
+    0.7333333333333334
+   ],
+   "k_witness": 4,
+   "k_median": 3,
+   "target_doc_values": [
+    [
+     "false",
+     3
+    ],
+    [
+     "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJzaW1wbGVfbm90ZSticmVuZGEud2ViZUBnbWFpbC5jb20iLCJleHAiOjE2ODQ0MTIwOTh9.NmGEu2wIPVFtHgvgiQYjriCN6OAch0lDnq1GyG8tbEY",
+     5
+    ]
+   ]
+  },
+  "10d642ac9c10_89206737:3": {
+   "n_docs": 3,
+   "doc_lengths": [
+    451,
+    346,
+    335
+   ],
+   "doc_text_sha256": [
+    "069ab13564450efaf5188376f5bbe9594bb6c43506c415f347d8343856c9db75",
+    "7ab289f86d50aa3ec7306533e0f54e120fba1e5fd48b0b530097ad204e6b4419",
+    "2f65b4c4c1889cdc1a155a0a6d32515dd75073e5635715d5ba67e2aae39f7df1"
+   ],
+   "doc_text_chars": [
+    2203,
+    971,
+    687
+   ],
+   "tool_name": "simple_note__search_notes",
+   "arg_leaf_values": [
+    "workout",
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJzaW1wbGVfbm90ZStqby5iYWxsQGdtYWlsLmNvbSIsImV4cCI6MTY4NDQxMjA5OH0.F54xTawOYD4SvKoL4vCoBgvEV3jg9NFQ7d0_v6DU8_g",
+    "null"
+   ],
+   "df": {
+    "simple_note__search_notes": 1,
+    "workout": 2,
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJzaW1wbGVfbm90ZStqby5iYWxsQGdtYWlsLmNvbSIsImV4cCI6MTY4NDQxMjA5OH0.F54xTawOYD4SvKoL4vCoBgvEV3jg9NFQ7d0_v6DU8_g": 1,
+    "null": 0
+   },
+   "score": [
+    0.5,
+    0,
+    2.5
+   ],
+   "k_witness": 2,
+   "k_median": 1,
+   "target_doc_values": [
+    [
+     "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJzaW1wbGVfbm90ZStqby5iYWxsQGdtYWlsLmNvbSIsImV4cCI6MTY4NDQxMjA5OH0.F54xTawOYD4SvKoL4vCoBgvEV3jg9NFQ7d0_v6DU8_g",
+     1
+    ],
+    [
+     "workout",
+     2
+    ]
+   ]
+  },
+  "10d642ac9c10_ba73f52d:11": {
+   "n_docs": 16,
+   "doc_lengths": [
+    455,
+    191,
+    757,
+    166,
+    145,
+    233,
+    12,
+    757,
+    291,
+    729,
+    150,
+    12,
+    757,
+    151,
+    648,
+    134
+   ],
+   "doc_text_sha256": [
+    "a1f3b7f0bcc06baf56f0c419f12b68451e75e785c5f9bf7c1e9c86e7d6638f60",
+    "d4d8c9ec93259cec022544b6ad2b6e826c60530a5069cbd35e2edb3924aae149",
+    "12cd5fa9c3c5e6e00d65c5e8628adddc00b2619c80e464787b7acc918801b8fc",
+    "79a37446834d4a857430f846dec6bd5f8b3fef5cad2a0403fe94a345449de653",
+    "2e858e157ac04ce1dd5f4a21aa0229f0c30f5a779ab9b3db93f3cf9b095dfa4d",
+    "2870425d50a16cbeff711d8bb107b9aca96704fe1e0241436f53e70092cdb98c",
+    "c99e4965eda3a52442d067b417b0221c320501c612cdce64dbee7abf0ad39dbf",
+    "af5c0301b4819ba8a737a52e7f4d5f9e9a67a0ee451e873e7fa513851c0e1eb2",
+    "fa69901867cfc061b3a0702cf09087c7343f53cde18e5d72c81276a8702a5692",
+    "0d2f99d860f38f88d835b851550fa2bf11bccbd353cbfbac34fe3185ae462b9d",
+    "5f013525e58f6f849d25565a0fc645a0a01397c3d49a53305435cad875a1a513",
+    "c99e4965eda3a52442d067b417b0221c320501c612cdce64dbee7abf0ad39dbf",
+    "c2d3a4a3b71f44ca054a3602d0ba80ab380f92f77f5da298af6d437b6d4d810e",
+    "9779ab16ed41a9fbe3af94fea46a3f06e490a5c4601e0a309f9176c501742af2",
+    "ab78e0936c99c1c906e35db95fefbd8e99fb4d166f50d0be7b2aded14276c7aa",
+    "8dbf8dec9463dd66c124fc366f5d2cbbb502334c6fe44327845921bc6b9f6e8c"
+   ],
+   "doc_text_chars": [
+    2212,
+    487,
+    1861,
+    417,
+    307,
+    560,
+    55,
+    1702,
+    658,
+    1850,
+    322,
+    55,
+    1965,
+    395,
+    1628,
+    311
+   ],
+   "tool_name": "phone__search_contacts",
+   "arg_leaf_values": [
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJwaG9uZSs3OTM0ODE4MTkxIiwiZXhwIjoxNjg0NDEyNzQxfQ.cppqU5Chx6rRcUIQI5dqLzehNy6hiIDMZ9k_pPlptvE",
+    "20"
+   ],
+   "df": {
+    "phone__search_contacts": 1,
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJwaG9uZSs3OTM0ODE4MTkxIiwiZXhwIjoxNjg0NDEyNzQxfQ.cppqU5Chx6rRcUIQI5dqLzehNy6hiIDMZ9k_pPlptvE": 1,
+    "20": 4
+   },
+   "score": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0.25,
+    0,
+    0,
+    0.25,
+    0,
+    0.25,
+    0,
+    0.25,
+    0,
+    0,
+    2.0
+   ],
+   "k_witness": 15,
+   "k_median": 7,
+   "target_doc_values": [
+    [
+     "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJwaG9uZSs3OTM0ODE4MTkxIiwiZXhwIjoxNjg0NDEyNzQxfQ.cppqU5Chx6rRcUIQI5dqLzehNy6hiIDMZ9k_pPlptvE",
+     1
+    ]
+   ]
+  },
+  "15bb4bab2031_3bc535d7:29": {
+   "n_docs": 16,
+   "doc_lengths": [
+    440,
+    52,
+    652,
+    651,
+    699,
+    641,
+    203,
+    42,
+    757,
+    53,
+    726,
+    675,
+    660,
+    647,
+    160,
+    44
+   ],
+   "doc_text_sha256": [
+    "fc59b541fd8c4dcea2b6e7cbd9a9382b86ce9b0a6648b5a8f105ac29ff2a092c",
+    "3e215f6d94436c634a58278b9c43c820635be4da3cbd8bae33b5b2931b7adfa2",
+    "5b37c3c7c8a60320f8efa92b3e6ead5d38def0f90037a4904b3a3e08971d1e42",
+    "69da7617cd2d453c4a1602fedbec8145a501298cc0f37f45265307a857a7a66e",
+    "242709624f73e718c7333bcf375d04976f9c4bbe61ac0808156d8944c81d6aeb",
+    "b494cbb714b8e872887aac565c86f71c19ac3c44dd459215c9f1f59bdb66744c",
+    "006d52956e735bab4f5a6b39c42f928faabb0338f28374606c14210760fc1edc",
+    "d92d3058642ac6624ba58ea1845674fa788ee5eee877e29c29a7295c49f7deb0",
+    "2b1d7a4966042c1f7b5e6f468533ccf8d874a85d3b6aa94245867728cd6fe77e",
+    "27e0c7e8aa421560b34a852262b372ff00f5973bcf6c6c21607e15ca00879750",
+    "bc9b64f326b1e5dc4ca655153c9e2cf7d409706d819cfd3455bf80267fb64eef",
+    "79aeb5cd6c64b7aa9475af71d5c240353e1a64c5955370fb0d2aa5b5827f9096",
+    "24a359a821369cd96f37770d6507d14a9f592f6f752b7dd7a1b2ef0e0e9b5090",
+    "cb566a3fedc5742c2af407902f15ca74f991bacfcb7d1157aef6102cf5218a39",
+    "a95a26fffb5f771439aec3c9921210c18481b067758539718c8c41e6b5a0826c",
+    "80f35c6cb5ef23ab1a5fe156442b972f5b748b22d218eba8e0a5491bd1e14bd8"
+   ],
+   "doc_text_chars": [
+    2187,
+    195,
+    2332,
+    2332,
+    2332,
+    2332,
+    874,
+    195,
+    2161,
+    199,
+    2332,
+    2332,
+    2332,
+    2332,
+    604,
+    187
+   ],
+   "tool_name": "mcp__environment__search",
+   "arg_leaf_values": [
+    "Leprous band Norway formed 2001 Einar Solberg singer vocalist"
+   ],
+   "df": {
+    "mcp__environment__search": 3,
+    "Leprous band Norway formed 2001 Einar Solberg singer vocalist": 0
+   },
+   "score": [
+    0.3333333333333333,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0.3333333333333333,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0.3333333333333333
+   ],
+   "k_witness": 0,
+   "k_median": 7,
+   "target_doc_values": []
+  },
+  "15bb4bab2031_a3ac2dd4:6": {
+   "n_docs": 7,
+   "doc_lengths": [
+    436,
+    640,
+    709,
+    632,
+    578,
+    285,
+    42
+   ],
+   "doc_text_sha256": [
+    "ee1295595d765c6de50c1219b00ccc703e9b13aedb792b2753edd550fe97bd6d",
+    "824c6dbe211011e5409d5ce2f390098b0306f693a679dfc9549c999f03b916b5",
+    "462b55f204bee4aacec099d103e971a8ec2b184a19d21c69dbd6d3022c9bad75",
+    "bd238a8d03c714e456de2956d3cd2bf7dced556fa1797983968f6f0f417fa417",
+    "f3b17676f0ecd84cfa26813e189642d50a56102e9d52e54c8ca241f1f596079c",
+    "fc1fa5734ef5cca9e5ce59431388fbfd3e0bbf7d4d3e76b0b020a8d7a70e5fd8",
+    "0eb84528f6bcfddb2f836dbdc7d4aa013d0891d6bee263055d718e2864fe6e17"
+   ],
+   "doc_text_chars": [
+    2287,
+    2332,
+    2332,
+    2332,
+    2332,
+    1085,
+    191
+   ],
+   "tool_name": "mcp__environment__search",
+   "arg_leaf_values": [
+    "Literary Hub 2023 article author two books researcher assistant professor university"
+   ],
+   "df": {
+    "mcp__environment__search": 2,
+    "Literary Hub 2023 article author two books researcher assistant professor university": 0
+   },
+   "score": [
+    0.5,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0.5
+   ],
+   "k_witness": 0,
+   "k_median": 3,
+   "target_doc_values": []
+  },
+  "1861edacc01c_8413bbcc:23": {
+   "n_docs": 16,
+   "doc_lengths": [
+    465,
+    486,
+    92,
+    408,
+    93,
+    367,
+    112,
+    357,
+    175,
+    288,
+    236,
+    406,
+    93,
+    386,
+    94,
+    113
+   ],
+   "doc_text_sha256": [
+    "fba72cd2202ff05889b7491e70daffa95af2216fb0b5f8baf333041b84535353",
+    "36b3a623183fc4df7316fff17a7b331cc67345c40c42ddca657749d423bd2d06",
+    "e35e48c10220d1decd73b6600694651ec6c448fb5e41a2392626f2ecee993392",
+    "365dc3c4565f593017185466409ec26c05f7b681bf5d29a724c2e16298833fd1",
+    "5e1649ad38a8d6f4b4c52a8cf2f6c911d887ca6b17266d560864317dce488ec1",
+    "7b1fce83dbcdf8e450d23a2082570aafd9095e5f9ac1cb9a60fef8bf72396fae",
+    "8a7c5f347b1148385559dce14b8522ca821a08fb7f44fe7fa501d84cc53833cd",
+    "4c0584476cc546546f5aa9834408e6ea527bbe64638e4ba9d30db7bc22815a20",
+    "8a32919fa9bc686f3f7780a8fd6709ab59704a0b225b4e775162506f17f2bd9f",
+    "6c84fad85d04c56af2919ca05f285762c2034198e825b3e75842728f67b20df6",
+    "2fdd0afc0673680fa59218d44546191f371e1c40fda7c4819b061828802119c0",
+    "7580a37e09906de739748c61250bf66b9fcf1a94cfd1b0aac455870746f23b7e",
+    "4f50221358819ef1c0f97474c004e8b87e64ebd512cea888779a880e633ef8e5",
+    "1ad643f5ed387af2f5962390a35a85c0730562058efc3c43df2e418650a0d6b7",
+    "c5e916b21a82a69b8748ee692da0036993a4f2f8a82590b2e3a0b7a9064c5428",
+    "4045290d6fecc1918d6b12ba670c7849650c8e23d338f96cdcf578a298d58c14"
+   ],
+   "doc_text_chars": [
+    2229,
+    1036,
+    375,
+    1034,
+    376,
+    924,
+    434,
+    897,
+    459,
+    693,
+    681,
+    1021,
+    376,
+    994,
+    377,
+    456
+   ],
+   "tool_name": "venmo__show_transactions",
+   "arg_leaf_values": [
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ2ZW5tbytjaHJpcy5tY2NvQGdtYWlsLmNvbSIsImV4cCI6MTY4NTU2MTc0Mn0.UR4ym0rqEn1WjhlARILp2G-8-PukkOVTjJH-gMedkFY",
+    "50"
+   ],
+   "df": {
+    "venmo__show_transactions": 7,
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ2ZW5tbytjaHJpcy5tY2NvQGdtYWlsLmNvbSIsImV4cCI6MTY4NTU2MTc0Mn0.UR4ym0rqEn1WjhlARILp2G-8-PukkOVTjJH-gMedkFY": 0,
+    "50": 0
+   },
+   "score": [
+    0,
+    0.14285714285714285,
+    0,
+    0.14285714285714285,
+    0,
+    0.14285714285714285,
+    0.14285714285714285,
+    0,
+    0,
+    0,
+    0,
+    0.14285714285714285,
+    0,
+    0.14285714285714285,
+    0,
+    0.14285714285714285
+   ],
+   "k_witness": 1,
+   "k_median": 7,
+   "target_doc_values": []
+  },
+  "1861edacc01c_c9c8ce14:11": {
+   "n_docs": 14,
+   "doc_lengths": [
+    539,
+    400,
+    185,
+    180,
+    334,
+    374,
+    12,
+    757,
+    197,
+    747,
+    740,
+    688,
+    432,
+    217
+   ],
+   "doc_text_sha256": [
+    "956b1be16126b02f88d098616d2e261c69d926755ca1b8c66675b44daf147661",
+    "38dce2c641dfc7f62c69b3d8d841fdf4f9d9187716ebf823f9b5fe6d6e556848",
+    "aab8fa06c75855cc87d3712595ff2f77c6fe7e63210b0a8fad2fcf41dae58a75",
+    "2d8e5d1df66fd4a1da4882317c137b5441a7522c54b0da24f35b2c534f3c8160",
+    "f27bb26e20ae3426cc55c668c80fa0230ddac08344502d7e80ff5f455c0ba7a5",
+    "f493a563e52b2b4a1ed09a6cde66d0d0a2502b1986702d16cbee8a400ff24b01",
+    "c99e4965eda3a52442d067b417b0221c320501c612cdce64dbee7abf0ad39dbf",
+    "4a72861097ca69b615e66648a3bb61d3e3e054dfc53ebb0edbb1428c61c90a71",
+    "6c77d2860a38b21526b87965fba2c701f4ce47d84a446e26f4564f8a37ddf7b8",
+    "533bea963cc71370314c25b56ad127f8029c164ea9202eb3356ac96dfa5b9f0f",
+    "40aee2ef79b0d1c968397dcf1d67d710db472157b1b198612ac9e39726b79117",
+    "1c79095de6ab8b0fa730ec38cdded0d02dec2a0b56f0502c7ee92fddb3934a01",
+    "bce289d70bae6bc8de816358bfc2f702fe466fb7ec6c094d1d2b26644c3c6377",
+    "9390f5ae709db8689c1e0730ed36a282412a96235fdb4c589ad52a8a8e7b3c82"
+   ],
+   "doc_text_chars": [
+    2562,
+    1249,
+    405,
+    391,
+    716,
+    922,
+    55,
+    1775,
+    585,
+    2332,
+    2332,
+    2332,
+    1393,
+    565
+   ],
+   "tool_name": "venmo__search_users",
+   "arg_leaf_values": [
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ2ZW5tbytrYXRocnlubWFsZG9uYWRvQGdtYWlsLmNvbSIsImV4cCI6MTY4NDQxMjc0MX0.gpzD7AMyTjPgwVc4l4149DACDHveQ4lYdNuy5_28aFo",
+    "jefsmith@gmail.com",
+    "5"
+   ],
+   "df": {
+    "venmo__search_users": 0,
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ2ZW5tbytrYXRocnlubWFsZG9uYWRvQGdtYWlsLmNvbSIsImV4cCI6MTY4NDQxMjc0MX0.gpzD7AMyTjPgwVc4l4149DACDHveQ4lYdNuy5_28aFo": 1,
+    "jefsmith@gmail.com": 0,
+    "5": 1
+   },
+   "score": [
+    0,
+    1.0,
+    0,
+    1.0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+   ],
+   "k_witness": 1,
+   "k_median": 6,
+   "target_doc_values": [
+    [
+     "5",
+     1
+    ]
+   ]
+  },
+  "1861edacc01c_c9c8ce14:17": {
+   "n_docs": 16,
+   "doc_lengths": [
+    539,
+    442,
+    420,
+    739,
+    469,
+    624,
+    312,
+    72,
+    72,
+    72,
+    77,
+    77,
+    77,
+    385,
+    61,
+    421
+   ],
+   "doc_text_sha256": [
+    "956b1be16126b02f88d098616d2e261c69d926755ca1b8c66675b44daf147661",
+    "fe587f2c23da346f9d6266c82fc2920ca0a52fc6ef253fc42b3426aff4e6a326",
+    "01bd942696d676540d9cb2f6955f6c52cd452f35b7b885de1ab26d1324551a3e",
+    "80faa12ec3e8d34984468de1037236bf0abefe598114dcb35e80fd7d2078b6f6",
+    "5dac813e420e43b0fa46d089c45c451d128bdf96637b3eb37f9d5ebab1265eec",
+    "15d791925b5b9a870b87db6d2d75cf3f892a572aa7c6881f6eb51fdb4280b536",
+    "14cddd71a0cb75452442ccd8e970263b5eaee217e2c795d394d4586455b0ec1a",
+    "8ea6be1a7a9e37cd046da8814b524b3139421f5b2c7744e69124cf48a77fb27b",
+    "f48bfc0a153652c47f4cdec346e4495675a68b1d509dcf3574e85939c16d93eb",
+    "9290543b5c363957eb97968d51bf038bf047814491fcc35d510be82d82a88486",
+    "ca1415348ba136cdb75b398028dec1177a35da26e66a37addffea11121854570",
+    "43ec10eed626af527c5154e7fac566ea505435bfc7a2dd213ef149bf6540e15c",
+    "ffe7d36a99f26ffbb992775ef59d96a339cd278b1a84fa761eb3ca6a73db47ce",
+    "8184f05638e8b2d3b682c912b2145304871f5947780cd1af2f8a0d5404710f35",
+    "229a4e8d8a5c43b03636ec445bfa041ea7ea6272210e428ac92b448cf07ac632",
+    "f670db7f3830c1798b7ac51acc90c43cc7889b449197e5147b59db6ff462cc1e"
+   ],
+   "doc_text_chars": [
+    2562,
+    1128,
+    1104,
+    1840,
+    1022,
+    1338,
+    662,
+    260,
+    260,
+    260,
+    315,
+    315,
+    315,
+    978,
+    207,
+    1059
+   ],
+   "tool_name": "venmo__create_transaction",
+   "arg_leaf_values": [
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ2ZW5tbytrYXRocnlubWFsZG9uYWRvQGdtYWlsLmNvbSIsImV4cCI6MTY4NDQxMjc0MX0.gpzD7AMyTjPgwVc4l4149DACDHveQ4lYdNuy5_28aFo",
+    "12",
+    "Notebooks",
+    "false",
+    "ta.weav@gmail.com",
+    "384"
+   ],
+   "df": {
+    "venmo__create_transaction": 5,
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ2ZW5tbytrYXRocnlubWFsZG9uYWRvQGdtYWlsLmNvbSIsImV4cCI6MTY4NDQxMjc0MX0.gpzD7AMyTjPgwVc4l4149DACDHveQ4lYdNuy5_28aFo": 3,
+    "12": 1,
+    "Notebooks": 1,
+    "false": 2,
+    "ta.weav@gmail.com": 1,
+    "384": 1
+   },
+   "score": [
+    0,
+    0,
+    0,
+    4.033333333333333,
+    1.0333333333333332,
+    0,
+    0,
+    0.2,
+    0.2,
+    0.2,
+    0,
+    0,
+    0,
+    0.3333333333333333,
+    0,
+    1.0
+   ],
+   "k_witness": 3,
+   "k_median": 7,
+   "target_doc_values": [
+    [
+     "12",
+     1
+    ],
+    [
+     "Notebooks",
+     1
+    ],
+    [
+     "ta.weav@gmail.com",
+     1
+    ],
+    [
+     "false",
+     2
+    ],
+    [
+     "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ2ZW5tbytrYXRocnlubWFsZG9uYWRvQGdtYWlsLmNvbSIsImV4cCI6MTY4NDQxMjc0MX0.gpzD7AMyTjPgwVc4l4149DACDHveQ4lYdNuy5_28aFo",
+     3
+    ]
+   ]
+  },
+  "18b5978679fb_8419955d:5": {
+   "n_docs": 5,
+   "doc_lengths": [
+    449,
+    12,
+    757,
+    75,
+    44
+   ],
+   "doc_text_sha256": [
+    "601eaba06e7d1c5f2ec5a3501b2b62561975cde4c37a8aeb676460729b6a20a5",
+    "c99e4965eda3a52442d067b417b0221c320501c612cdce64dbee7abf0ad39dbf",
+    "8d67fa224dec4e1522ceccc5c42eadb2a36d25997aaf238e673b46d03235cf60",
+    "c51ee390c39a6c541bddf107047b4f1b3dceb0b8f27db97518e8b3c28805e4b4",
+    "73c122aefbac8b0b1c471607188db3307eb0e51f46577f106b6c6bc7c58b6b3d"
+   ],
+   "doc_text_chars": [
+    2171,
+    55,
+    1345,
+    199,
+    162
+   ],
+   "tool_name": "phone__show_alarms",
+   "arg_leaf_values": [
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJwaG9uZSszMDE2OTQ3Njg2IiwiZXhwIjoxNjg0NDEyMDk4fQ.hMzDSLEgPp2ooMLz4z2GtsR84Ayd2DubbeWliO0369A"
+   ],
+   "df": {
+    "phone__show_alarms": 0,
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJwaG9uZSszMDE2OTQ3Njg2IiwiZXhwIjoxNjg0NDEyMDk4fQ.hMzDSLEgPp2ooMLz4z2GtsR84Ayd2DubbeWliO0369A": 0
+   },
+   "score": [
+    0,
+    0,
+    0,
+    0,
+    0
+   ],
+   "k_witness": null,
+   "k_median": 2,
+   "target_doc_values": []
+  },
+  "18b5978679fb_b62a7b4f:39": {
+   "n_docs": 16,
+   "doc_lengths": [
+    466,
+    757,
+    209,
+    571,
+    39,
+    12,
+    757,
+    757,
+    176,
+    288,
+    134,
+    12,
+    757,
+    514,
+    136,
+    461
+   ],
+   "doc_text_sha256": [
+    "26577fd5fb59bd28132d34a76d0e0bc3a97d8ce127973597eaba4ebcb857e8d0",
+    "3ec74e284801f26264742339661810916fab633898b24e2290ab61d4aca79e7e",
+    "4339e2344402e301781736916e77082ae5bf6429138975285f0d1fdee4e6bcf9",
+    "b3728a15796eeac53306b98107336e96d16715fee86b369daf468f9b58b88b66",
+    "300a7b134da7aab6113861d915e81c051eb53adb4072c944138d2345062a9ebc",
+    "c99e4965eda3a52442d067b417b0221c320501c612cdce64dbee7abf0ad39dbf",
+    "fc5ca799114c6678fc17acdb854c17df52e6bc01118fdfe19735a3eac91d62aa",
+    "c92e215bf22b3106f1117610d0072a1fd8221cabda9e1413c17bdb58861b559e",
+    "a42646e1080e9a44da62347814bf4adc284f008b26a6b6597e1ff8eef97da0d1",
+    "092a2a799f513377f239f373922fb48ed40780ec8df78fb4b10f207769d1d593",
+    "6b2821595ecfc0963874e9891984b5ddfb13b7a1bcbf07b3d184aa08a6d729bb",
+    "c99e4965eda3a52442d067b417b0221c320501c612cdce64dbee7abf0ad39dbf",
+    "3755e481d67753c37a14bae0948de5ac3e619f56f797c4d97273a47dc4c74ed3",
+    "94cde7b6322d2466beb76115b22d957f24287c5031b84cd4c9f18af5097e16e7",
+    "69bb7fad22698d1ac188e1d633073e6ea1ebcfcb175a680dd50de5787d3a7201",
+    "57bf66d778228b7e53ec686385ce558e94d5de29f9a5888c0473e418a0f1f72f"
+   ],
+   "doc_text_chars": [
+    2294,
+    1038,
+    303,
+    862,
+    168,
+    55,
+    1077,
+    1054,
+    257,
+    480,
+    311,
+    55,
+    1063,
+    781,
+    315,
+    1109
+   ],
+   "tool_name": "phone__search_voice_messages",
+   "arg_leaf_values": [
+    "0",
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJwaG9uZSs3Mjk1MDc3MzYzIiwiZXhwIjoxNjg0NDEyMDk4fQ.gdYS026MWH60BbHZKO1hc4hq0-7HeBX6FKykG3lSXow"
+   ],
+   "df": {
+    "phone__search_voice_messages": 0,
+    "0": 1,
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJwaG9uZSs3Mjk1MDc3MzYzIiwiZXhwIjoxNjg0NDEyMDk4fQ.gdYS026MWH60BbHZKO1hc4hq0-7HeBX6FKykG3lSXow": 0
+   },
+   "score": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    1.0,
+    0,
+    0,
+    0
+   ],
+   "k_witness": 12,
+   "k_median": 7,
+   "target_doc_values": [
+    [
+     "0",
+     1
+    ]
+   ]
+  },
+  "1bafd96e8923_3560d7f9:2": {
+   "n_docs": 9,
+   "doc_lengths": [
+    329,
+    12,
+    607,
+    666,
+    757,
+    23,
+    663,
+    699,
+    42
+   ],
+   "doc_text_sha256": [
+    "31018fbc1c6d2bf77f218100405d80d4f3f81b16ace8eed7bc19f23dd9344c4b",
+    "c99e4965eda3a52442d067b417b0221c320501c612cdce64dbee7abf0ad39dbf",
+    "bc45a8ea98c4683bf061dfa3981f9355f70e1431d68a146a266d388d06178588",
+    "602af59a1547a8a6fe655f899acb9f68e54cb5d1ea3e04f05a852d22fac79e76",
+    "befebd7e914d78b2a08b6266e2b62f200b38fa44ed54926db1321ddfe4950104",
+    "6d2af089a15860191aa48e6f1bf41b6255eec052d5149f5b1b029e09a83df217",
+    "e7a34e251d331f54e71af92ec8add23e9b1066480e7568528e96ee7540e6014f",
+    "995fa7d13c36da4f83f541e8157eeecfe78e05934d452c9f5fe5cdc3d3e8d45f",
+    "bf4e2df61bbf0ca2fad34f204972fa78fb81c67eb017ab2b13b645e476b5ba4f"
+   ],
+   "doc_text_chars": [
+    1592,
+    55,
+    2332,
+    2332,
+    2268,
+    92,
+    2332,
+    2294,
+    176
+   ],
+   "tool_name": "get_document",
+   "arg_leaf_values": [
+    "59886"
+   ],
+   "df": {
+    "get_document": 0,
+    "59886": 1
+   },
+   "score": [
+    0,
+    0,
+    0,
+    0,
+    1.0,
+    0,
+    0,
+    0,
+    0
+   ],
+   "k_witness": 4,
+   "k_median": 4,
+   "target_doc_values": [
+    [
+     "59886",
+     1
+    ]
+   ]
+  },
+  "1bafd96e8923_de668d42:3": {
+   "n_docs": 15,
+   "doc_lengths": [
+    350,
+    12,
+    661,
+    560,
+    517,
+    669,
+    626,
+    226,
+    31,
+    12,
+    576,
+    539,
+    607,
+    411,
+    35
+   ],
+   "doc_text_sha256": [
+    "1d3e34ba8b4d9336eb21e4ffc71b4d1327d272b4eb20124a79b99d9593ae9196",
+    "c99e4965eda3a52442d067b417b0221c320501c612cdce64dbee7abf0ad39dbf",
+    "2857c1330dcd23f49e03e6ca199f7fed9fd7ce857d65f7b9d275aff7e7a24dca",
+    "70ac6d8587a1d53d50ded722bdb0f82608d445868dcf69c9e9550eed0603cb70",
+    "708cdad5c7392f098b6380beacafa9af1bcadd41c3a932c40ea7224f968043f1",
+    "1878346e8df066434ec816133a5500c363d7e982b45b8328085666a51418ee03",
+    "a90a376604aa3e02e2e0b2851f365b8a93d746dcac4e7860fafed3ca21ac9173",
+    "2e1bcdd078ac9e7fe7768392a38db36b927a195c3e968e03d060c306d850c69f",
+    "ebff6a5116cdb948caa8ec5bab3d9ccfda3bbfde974bbaabe1fc66ac5958b6dd",
+    "c99e4965eda3a52442d067b417b0221c320501c612cdce64dbee7abf0ad39dbf",
+    "e9d5711fecbf676de2069c640562bd31e35b29f27929fc0773460e9d7f7cd843",
+    "df4596e1fabe872240af0bdfb152101d9a358c0e66a8be14acb866e92102039c",
+    "669d35ecdcfcd4c2854381d8b1efc09022de086f8c0c1f0627b457d7c1cb04f0",
+    "995e04ade9f3a98d8239ef4fa8578c1f0bea64f3555cb1bb586b2cbab1ed0470",
+    "9b59c4930a054ea8c8b83177c362e1561e36ab4c5d7751d6c82f1b48c6dfe059"
+   ],
+   "doc_text_chars": [
+    1566,
+    55,
+    2332,
+    2332,
+    2332,
+    2332,
+    2332,
+    1021,
+    133,
+    55,
+    2332,
+    2332,
+    2332,
+    1970,
+    188
+   ],
+   "tool_name": "search",
+   "arg_leaf_values": [
+    "\"most affordable city\" 2023 UK 15 cities Sheffield"
+   ],
+   "df": {
+    "search": 2,
+    "\"most affordable city\" 2023 UK 15 cities Sheffield": 0
+   },
+   "score": [
+    0.5,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0.5
+   ],
+   "k_witness": 0,
+   "k_median": 7,
+   "target_doc_values": []
+  },
+  "1bafd96e8923_f0f2747b:16": {
+   "n_docs": 16,
+   "doc_lengths": [
+    341,
+    709,
+    453,
+    260,
+    62,
+    576,
+    309,
+    291,
+    291,
+    251,
+    251,
+    85,
+    252,
+    252,
+    252,
+    94
+   ],
+   "doc_text_sha256": [
+    "c4edc919302d627a6ffee08c757089339201cd621ebbe419097865278f9ceb32",
+    "ebef197ce3f3dbac3c2094245bfeef39ffad263cb4658507277b50df69e232d2",
+    "820cd0816b58642e647c9b3bd9b675b0165fa4bf271f0dae35e369f30befc92f",
+    "09207a322d2a1d5cbc5c38d8b8433783756b2ced5f9d02683483eabf3670f66d",
+    "834d32e908bca5bc8e82fd1ead8101f6f2320e68b68238931ffce5988b89cf27",
+    "26de4afca5519de9a4d1f143b38a2468283fa2e9af950afdf0528fd3c6126ea9",
+    "ef8beae5f294f72e77363208776037957ebfc9e7c29d873d8825934445ea4b2e",
+    "622d51c5b89772641387c9383b1449c801fc2437bd6a0683db525940ead9147e",
+    "4aca8d12ab0fc84393bdfbdd47d525824251c134e69cb15b211107746cfe6ee4",
+    "9bc2d6a8ef19d6b2fdb73135911a7f39bda3705dfe910af676c166b4304099f1",
+    "15a912ee4a27e6f8fa8c540d7bd7e46c63f688f7e42ae0cd9ccb72b692ded704",
+    "90042689389f06c1970adb28a1796ba463a07efc9da5b0d5d5ba458ca060c779",
+    "87aff30ecd8489e9212cb7b40f9413e93483d4926732100b7937f6cac2e6b14b",
+    "d0a33986baf1fac0d33c3166d827f5dcdb8232b9018c17cf96856714621f880e",
+    "d1d92e3f7e82856aa4278abebe1a379543a544fc423e3a67339805d4150043f6",
+    "be5fb559ae90126b226d9e1b6ba1f86c857950c7b59e02042ab4030db9d75b91"
+   ],
+   "doc_text_chars": [
+    1665,
+    2332,
+    1869,
+    974,
+    313,
+    2134,
+    1167,
+    1063,
+    1063,
+    973,
+    973,
+    388,
+    974,
+    974,
+    971,
+    407
+   ],
+   "tool_name": "submit",
+   "arg_leaf_values": [
+    "Asian Horizons",
+    "The documentary Amrao Pari (We Too Can), filmed by 16 Bangladeshi teenagers and broadcast on ATN Bangla, won an International Emmy Award in 2004 (between 2001 and 2010). ATN Bangla is connected to the Asian Television Network (ATN), a Canadian broadcasting company. In 2015, more than 10 years after the 2004 Emmy win, ATN Canada produced a motivational TV show called The Achievers, where Dr. Shan Chandrasekar, President and CEO of ATN, served as host and interviewer. Shan Chandrasekar's wife is Jaya Chandrasekar, who hosted a long-running series called Asian Horizons starting in the early 1970s.",
+    "95"
+   ],
+   "df": {
+    "submit": 13,
+    "Asian Horizons": 10,
+    "The documentary Amrao Pari (We Too Can), filmed by 16 Bangladeshi teenagers and broadcast on ATN Bangla, won an International Emmy Award in 2004 (between 2001 and 2010). ATN Bangla is connected to the Asian Television Network (ATN), a Canadian broadcasting company. In 2015, more than 10 years after the 2004 Emmy win, ATN Canada produced a motivational TV show called The Achievers, where Dr. Shan Chandrasekar, President and CEO of ATN, served as host and interviewer. Shan Chandrasekar's wife is Jaya Chandrasekar, who hosted a long-running series called Asian Horizons starting in the early 1970s.": 1,
+    "95": 10
+   },
+   "score": [
+    0.07692307692307693,
+    0,
+    0,
+    0.27692307692307694,
+    0,
+    0.27692307692307694,
+    0.27692307692307694,
+    0.27692307692307694,
+    0.27692307692307694,
+    0.27692307692307694,
+    0.27692307692307694,
+    0.07692307692307693,
+    0.27692307692307694,
+    0.27692307692307694,
+    1.276923076923077,
+    0.07692307692307693
+   ],
+   "k_witness": 14,
+   "k_median": 7,
+   "target_doc_values": [
+    [
+     "The documentary Amrao Pari (We Too Can), filmed by 16 Bangladeshi teenagers and broadcast on ATN Bangla, won an International Emmy Award in 2004 (between 2001 and 2010). ATN Bangla is connected to the Asian Television Network (ATN), a Canadian broadcasting company. In 2015, more than 10 years after the 2004 Emmy win, ATN Canada produced a motivational TV show called The Achievers, where Dr. Shan Chandrasekar, President and CEO of ATN, served as host and interviewer. Shan Chandrasekar's wife is Jaya Chandrasekar, who hosted a long-running series called Asian Horizons starting in the early 1970s.",
+     1
+    ],
+    [
+     "Asian Horizons",
+     10
+    ],
+    [
+     "95",
+     10
+    ]
+   ]
+  },
+  "1bafd96e8923_f0f2747b:17": {
+   "n_docs": 16,
+   "doc_lengths": [
+    341,
+    453,
+    260,
+    62,
+    576,
+    309,
+    291,
+    291,
+    251,
+    251,
+    85,
+    252,
+    252,
+    252,
+    94,
+    252
+   ],
+   "doc_text_sha256": [
+    "c4edc919302d627a6ffee08c757089339201cd621ebbe419097865278f9ceb32",
+    "820cd0816b58642e647c9b3bd9b675b0165fa4bf271f0dae35e369f30befc92f",
+    "09207a322d2a1d5cbc5c38d8b8433783756b2ced5f9d02683483eabf3670f66d",
+    "834d32e908bca5bc8e82fd1ead8101f6f2320e68b68238931ffce5988b89cf27",
+    "26de4afca5519de9a4d1f143b38a2468283fa2e9af950afdf0528fd3c6126ea9",
+    "ef8beae5f294f72e77363208776037957ebfc9e7c29d873d8825934445ea4b2e",
+    "622d51c5b89772641387c9383b1449c801fc2437bd6a0683db525940ead9147e",
+    "4aca8d12ab0fc84393bdfbdd47d525824251c134e69cb15b211107746cfe6ee4",
+    "9bc2d6a8ef19d6b2fdb73135911a7f39bda3705dfe910af676c166b4304099f1",
+    "15a912ee4a27e6f8fa8c540d7bd7e46c63f688f7e42ae0cd9ccb72b692ded704",
+    "90042689389f06c1970adb28a1796ba463a07efc9da5b0d5d5ba458ca060c779",
+    "87aff30ecd8489e9212cb7b40f9413e93483d4926732100b7937f6cac2e6b14b",
+    "d0a33986baf1fac0d33c3166d827f5dcdb8232b9018c17cf96856714621f880e",
+    "d1d92e3f7e82856aa4278abebe1a379543a544fc423e3a67339805d4150043f6",
+    "be5fb559ae90126b226d9e1b6ba1f86c857950c7b59e02042ab4030db9d75b91",
+    "f288217d98c9da97f188e58d285b0311ef5a09cc3f6c11e19b163a4e974bdff3"
+   ],
+   "doc_text_chars": [
+    1665,
+    1869,
+    974,
+    313,
+    2134,
+    1167,
+    1063,
+    1063,
+    973,
+    973,
+    388,
+    974,
+    974,
+    971,
+    407,
+    971
+   ],
+   "tool_name": "submit",
+   "arg_leaf_values": [
+    "Asian Horizons",
+    "The documentary Amrao Pari (We Too Can), filmed by 16 Bangladeshi teenagers and broadcast on ATN Bangla, won an International Emmy Award in 2004 (between 2001 and 2010). ATN Bangla is connected to the Asian Television Network (ATN), a Canadian broadcasting company. In 2015, more than 10 years after the 2004 Emmy win, ATN Canada produced a motivational TV show called The Achievers, where Dr. Shan Chandrasekar, President and CEO of ATN, served as host and interviewer. Shan Chandrasekar's wife is Jaya Chandrasekar, who hosted a long-running series called Asian Horizons starting in the early 1970s.",
+    "95"
+   ],
+   "df": {
+    "submit": 14,
+    "Asian Horizons": 11,
+    "The documentary Amrao Pari (We Too Can), filmed by 16 Bangladeshi teenagers and broadcast on ATN Bangla, won an International Emmy Award in 2004 (between 2001 and 2010). ATN Bangla is connected to the Asian Television Network (ATN), a Canadian broadcasting company. In 2015, more than 10 years after the 2004 Emmy win, ATN Canada produced a motivational TV show called The Achievers, where Dr. Shan Chandrasekar, President and CEO of ATN, served as host and interviewer. Shan Chandrasekar's wife is Jaya Chandrasekar, who hosted a long-running series called Asian Horizons starting in the early 1970s.": 2,
+    "95": 11
+   },
+   "score": [
+    0.07142857142857142,
+    0,
+    0.2532467532467533,
+    0,
+    0.2532467532467533,
+    0.2532467532467533,
+    0.2532467532467533,
+    0.2532467532467533,
+    0.2532467532467533,
+    0.2532467532467533,
+    0.07142857142857142,
+    0.2532467532467533,
+    0.2532467532467533,
+    0.7532467532467533,
+    0.07142857142857142,
+    0.7532467532467533
+   ],
+   "k_witness": 13,
+   "k_median": 7,
+   "target_doc_values": [
+    [
+     "The documentary Amrao Pari (We Too Can), filmed by 16 Bangladeshi teenagers and broadcast on ATN Bangla, won an International Emmy Award in 2004 (between 2001 and 2010). ATN Bangla is connected to the Asian Television Network (ATN), a Canadian broadcasting company. In 2015, more than 10 years after the 2004 Emmy win, ATN Canada produced a motivational TV show called The Achievers, where Dr. Shan Chandrasekar, President and CEO of ATN, served as host and interviewer. Shan Chandrasekar's wife is Jaya Chandrasekar, who hosted a long-running series called Asian Horizons starting in the early 1970s.",
+     2
+    ],
+    [
+     "Asian Horizons",
+     11
+    ],
+    [
+     "95",
+     11
+    ]
+   ]
+  },
+  "24347bbedbb0_e293a74a:55": {
+   "n_docs": 16,
+   "doc_lengths": [
+    539,
+    117,
+    12,
+    757,
+    211,
+    448,
+    140,
+    277,
+    212,
+    213,
+    219,
+    308,
+    222,
+    410,
+    336,
+    352
+   ],
+   "doc_text_sha256": [
+    "61547953f79ae160aa9de03cfbee148cae1f885dc905acd25a903c4ffaab461c",
+    "e469bfe8bb222f83d069aa58f2495499249c0a17520061b977bac39808364555",
+    "c99e4965eda3a52442d067b417b0221c320501c612cdce64dbee7abf0ad39dbf",
+    "f71e7a5c667127ad6b8ee01ca3771035395aac219058e4dc91d605062e98dbdf",
+    "ca732755de194bdb046871f0fadc0c18660ef20e1bbf7460d1f0b13f32e8c194",
+    "0e8d70192bcdf6cd5c3d757072b3d9c2d2610d438074ae7992673abf58227cf5",
+    "d859731517c13a2b024673f09817ba7f8a078602d5580e20b167808ed7c87995",
+    "6c9fc652b023a5c3130ac4ea2e2b71c55b79ae72c3139c6b6afe76002d7ca710",
+    "13f83d5fc643f08a98cc1ce71d8069a1f75b8ea8602f163b4db31c28f37bac71",
+    "6df6b384160efa63ae09569f4f34d9190cb7e54bca19b63cb5740fe0e2cf4c64",
+    "44a84f4af627f42524608bb55ea4426ee8e1eec0f92a7f492129633a5677a3f2",
+    "805f2ffcfd2356956c6740d56912f345cc2f9c2e9a6b9574b6e2270bb3954be5",
+    "cf3dd9250f338a6d7e58011a35a56688ce0c3d0a943f4e25beefe6c7827860ee",
+    "7e48c2d74b75f57fb2118f864c496253782267ea6b27a1709f5e5bb3935e3588",
+    "dc370ffe3c2a68a5a0a5b735466d5b668a6b7de662d899e8967c01f3d869824b",
+    "026b39f91e0e6cd54a708d3f509fbb68b9fd6e1fe2c14b70488542c61eaadbae"
+   ],
+   "doc_text_chars": [
+    2562,
+    395,
+    55,
+    1834,
+    526,
+    1091,
+    308,
+    788,
+    512,
+    511,
+    529,
+    871,
+    527,
+    1024,
+    1007,
+    1052
+   ],
+   "tool_name": "todoist__show_tasks",
+   "arg_leaf_values": [
+    "0",
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ0b2RvaXN0K2plcy5taWxsQGdtYWlsLmNvbSIsImV4cCI6MTY4NDQxMjA5OH0.Qu4twfaZYMVk5vQOG0l_Rpn21LHgo3sR7yLcyuFpxnQ",
+    "jes.mill@gmail.com",
+    "false"
+   ],
+   "df": {
+    "todoist__show_tasks": 5,
+    "0": 3,
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ0b2RvaXN0K2plcy5taWxsQGdtYWlsLmNvbSIsImV4cCI6MTY4NDQxMjA5OH0.Qu4twfaZYMVk5vQOG0l_Rpn21LHgo3sR7yLcyuFpxnQ": 10,
+    "jes.mill@gmail.com": 5,
+    "false": 7
+   },
+   "score": [
+    0.2,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0.1,
+    0.24285714285714285,
+    0.24285714285714285,
+    0.1,
+    0.976190476190476,
+    0.976190476190476,
+    0.1,
+    0.6428571428571428,
+    0.4428571428571429,
+    0.976190476190476
+   ],
+   "k_witness": 10,
+   "k_median": 7,
+   "target_doc_values": [
+    [
+     "0",
+     3
+    ],
+    [
+     "jes.mill@gmail.com",
+     5
+    ],
+    [
+     "false",
+     7
+    ],
+    [
+     "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ0b2RvaXN0K2plcy5taWxsQGdtYWlsLmNvbSIsImV4cCI6MTY4NDQxMjA5OH0.Qu4twfaZYMVk5vQOG0l_Rpn21LHgo3sR7yLcyuFpxnQ",
+     10
+    ]
+   ]
+  },
+  "24347bbedbb0_f0695cdf:11": {
+   "n_docs": 8,
+   "doc_lengths": [
+    489,
+    341,
+    352,
+    12,
+    757,
+    121,
+    170,
+    227
+   ],
+   "doc_text_sha256": [
+    "862e1503fd580344a92f8442fa7c62b9a8ba8a8b9adbb304a03348858553cb39",
+    "0004672443f64de10620518ace18fb22396cd6012e6bc82ce26869bf06bdc467",
+    "76e30d5d73dbac4b4281a2859c5dc4eb96eac4c52785b7b6384b37b0d44c373b",
+    "c99e4965eda3a52442d067b417b0221c320501c612cdce64dbee7abf0ad39dbf",
+    "3edb96260fc96f25c618df003f871e31d9a963a3a0d729d63d21f8aa6d7d4dc8",
+    "ba4b7a5bc438f34dadcaeca138751bbbaabb889a76680ab0b4215a54af191f5a",
+    "517d1a62146de350c2cd4138a6eac78ad71c51ddff64c2a860c9fd7ba492dcf3",
+    "2ad2c0a059472697c0365ded8ff3db422fccf3c45afe9603d5a7866b695cb610"
+   ],
+   "doc_text_chars": [
+    2363,
+    976,
+    755,
+    55,
+    2010,
+    334,
+    395,
+    541
+   ],
+   "tool_name": "file_system__show_directory",
+   "arg_leaf_values": [
+    "~/documents/work/meetings_files/",
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJmaWxlX3N5c3RlbSthZC5ibGFja2J1cm5AZ21haWwuY29tIiwiZXhwIjoxNjg0NDEyMDk4fQ.s7U9wjne6ShDPsxno0m7C8e9uI-dV_SirrlM-PON2Do",
+    "true",
+    "files"
+   ],
+   "df": {
+    "file_system__show_directory": 3,
+    "~/documents/work/meetings_files/": 4,
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJmaWxlX3N5c3RlbSthZC5ibGFja2J1cm5AZ21haWwuY29tIiwiZXhwIjoxNjg0NDEyMDk4fQ.s7U9wjne6ShDPsxno0m7C8e9uI-dV_SirrlM-PON2Do": 3,
+    "true": 0,
+    "files": 1
+   },
+   "score": [
+    1.25,
+    0,
+    0.9166666666666665,
+    0,
+    0,
+    0,
+    0.9166666666666665,
+    0.9166666666666665
+   ],
+   "k_witness": 0,
+   "k_median": 3,
+   "target_doc_values": [
+    [
+     "files",
+     1
+    ],
+    [
+     "~/documents/work/meetings_files/",
+     4
+    ]
+   ]
+  },
+  "2a21e94e0687_0f5ba78c:12": {
+   "n_docs": 16,
+   "doc_lengths": [
+    752,
+    757,
+    230,
+    434,
+    188,
+    158,
+    426,
+    386,
+    324,
+    287,
+    263,
+    704,
+    148,
+    744,
+    356,
+    262
+   ],
+   "doc_text_sha256": [
+    "8d1ec9dfb1e016a14418d6c92c855b45cfb0ca2391537ac0365a7b1a417ed1a5",
+    "16de7849fe6e5a617112f069908cb1b18172cd7db60aae49c3cc9b87f4c11333",
+    "c34d817019c64e23f7ca023e17d009490b73cab842f92a8e42c82ac86dfec560",
+    "fbd26268252cf8b77251717134b5c76d37dafd7cb830cde8f2699fe134de56a5",
+    "458466a6d1e150a7fcc641f0a41aa7b58ac904289933605d4b2860a8900004df",
+    "fec46c9d565e6c5d6423d63f4cfc71218b2198f5321ffb86f60894fa03011fb9",
+    "79082099e5080e230ab7f5696f6c0675a4374540af98d32973364a848641b4ca",
+    "a1bc821538f577a02f985f186a9f1adfb5b241a28ca837786b5f934a48fd917d",
+    "972a3c5f72221511efc2771ec462fd42606681fddb0aa48c08938a84d529544f",
+    "8243c617353bd14752de2a0960eeea3b031c613d615f80480eb5256b8c1629fa",
+    "fd0b7cb43ee757ca0d48314a32efd07936c68217abab6c7254b1ce4154470ed4",
+    "6eba310dd8d4dbb711c16254a79ab7b3b6d45871f787bffc282b4cf2d41571fb",
+    "10d949a103b7381cd5c03bbbedc53d02116911e8b96224868282935afe860285",
+    "694c3a2422c61ed5a2ca7d12f60a81293d002297fa26e0eaec02fe382e8e9b1f",
+    "7e459f3e745cee31f810637749a50d8bc188a371edb70f2740007781b4a32ba7",
+    "b2e7fb4474d8d58570615e3a49a8ad53041ab2505d3665ef8fb25af42a7f6abc"
+   ],
+   "doc_text_chars": [
+    3701,
+    1829,
+    531,
+    1156,
+    941,
+    629,
+    1488,
+    1177,
+    1012,
+    825,
+    711,
+    1646,
+    315,
+    1916,
+    1575,
+    743
+   ],
+   "tool_name": "mcp__environment__venmo__search_users",
+   "arg_leaf_values": [
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ2ZW5tbyttb3JnYW4taGFycmlzb25AZ21haWwuY29tIiwiZXhwIjoxNjg0NDEyMDk4fQ.6lCoauG32ptq0X8ATOAwPYv3ONWNrSbC5I11ao1Cghk",
+    "3"
+   ],
+   "df": {
+    "mcp__environment__venmo__search_users": 3,
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ2ZW5tbyttb3JnYW4taGFycmlzb25AZ21haWwuY29tIiwiZXhwIjoxNjg0NDEyMDk4fQ.6lCoauG32ptq0X8ATOAwPYv3ONWNrSbC5I11ao1Cghk": 7,
+    "3": 3
+   },
+   "score": [
+    0,
+    0,
+    0,
+    0.3333333333333333,
+    0,
+    0.3333333333333333,
+    0.14285714285714285,
+    0.14285714285714285,
+    0.14285714285714285,
+    0.14285714285714285,
+    0.47619047619047616,
+    0,
+    0.47619047619047616,
+    0,
+    0,
+    0.8095238095238095
+   ],
+   "k_witness": 15,
+   "k_median": 7,
+   "target_doc_values": [
+    [
+     "3",
+     3
+    ],
+    [
+     "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ2ZW5tbyttb3JnYW4taGFycmlzb25AZ21haWwuY29tIiwiZXhwIjoxNjg0NDEyMDk4fQ.6lCoauG32ptq0X8ATOAwPYv3ONWNrSbC5I11ao1Cghk",
+     7
+    ]
+   ]
+  },
+  "2a21e94e0687_0f5ba78c:15": {
+   "n_docs": 16,
+   "doc_lengths": [
+    752,
+    426,
+    386,
+    324,
+    287,
+    263,
+    704,
+    148,
+    744,
+    356,
+    262,
+    676,
+    148,
+    640,
+    148,
+    150
+   ],
+   "doc_text_sha256": [
+    "8d1ec9dfb1e016a14418d6c92c855b45cfb0ca2391537ac0365a7b1a417ed1a5",
+    "79082099e5080e230ab7f5696f6c0675a4374540af98d32973364a848641b4ca",
+    "a1bc821538f577a02f985f186a9f1adfb5b241a28ca837786b5f934a48fd917d",
+    "972a3c5f72221511efc2771ec462fd42606681fddb0aa48c08938a84d529544f",
+    "8243c617353bd14752de2a0960eeea3b031c613d615f80480eb5256b8c1629fa",
+    "fd0b7cb43ee757ca0d48314a32efd07936c68217abab6c7254b1ce4154470ed4",
+    "6eba310dd8d4dbb711c16254a79ab7b3b6d45871f787bffc282b4cf2d41571fb",
+    "10d949a103b7381cd5c03bbbedc53d02116911e8b96224868282935afe860285",
+    "694c3a2422c61ed5a2ca7d12f60a81293d002297fa26e0eaec02fe382e8e9b1f",
+    "7e459f3e745cee31f810637749a50d8bc188a371edb70f2740007781b4a32ba7",
+    "b2e7fb4474d8d58570615e3a49a8ad53041ab2505d3665ef8fb25af42a7f6abc",
+    "a309160b940cb454c35d917a702270da22686b96c4cf7d723b44267cdc19749a",
+    "5b60315ad5f3edce70d8608b9cb1c7c35ccabc4828586ea69a3ec2992bfe5325",
+    "e9dae024ba9de921c72a1dd7789bc5c56a931f6b544588da216b9166636a9b7f",
+    "ae832b9318339625b552e114136b21b8233a22b81c39944ea6ca5ace93109da1",
+    "d7cf893d113c943d8fc09d654b7a794db0074e9b44659d55e5b305f7caa3f7cf"
+   ],
+   "doc_text_chars": [
+    3701,
+    1488,
+    1177,
+    1012,
+    825,
+    711,
+    1646,
+    315,
+    1916,
+    1575,
+    743,
+    1519,
+    315,
+    1671,
+    314,
+    573
+   ],
+   "tool_name": "mcp__environment__venmo__search_users",
+   "arg_leaf_values": [
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ2ZW5tbyttb3JnYW4taGFycmlzb25AZ21haWwuY29tIiwiZXhwIjoxNjg0NDEyNzQxfQ.fKMPNgTt0iyUaK-FSMs2vWKyVM82cTZ4sYNG2tnjNoY",
+    "4"
+   ],
+   "df": {
+    "mcp__environment__venmo__search_users": 5,
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ2ZW5tbyttb3JnYW4taGFycmlzb25AZ21haWwuY29tIiwiZXhwIjoxNjg0NDEyNzQxfQ.fKMPNgTt0iyUaK-FSMs2vWKyVM82cTZ4sYNG2tnjNoY": 0,
+    "4": 3
+   },
+   "score": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0.2,
+    0,
+    0.2,
+    0,
+    0,
+    0.5333333333333333,
+    0,
+    0.2,
+    0.3333333333333333,
+    0.5333333333333333,
+    0
+   ],
+   "k_witness": 10,
+   "k_median": 7,
+   "target_doc_values": [
+    [
+     "4",
+     3
+    ]
+   ]
+  },
+  "2a21e94e0687_3bdda2e7:8": {
+   "n_docs": 11,
+   "doc_lengths": [
+    576,
+    192,
+    504,
+    186,
+    188,
+    311,
+    335,
+    757,
+    223,
+    103,
+    136
+   ],
+   "doc_text_sha256": [
+    "8ce27ae88e91a8ae9c64f229d22a120410315bc0edc15f667168c1532f3212d0",
+    "e0cacd586088e7f4ddbc7484b9fe45a3f2116f0ab9ce7b76e5c02336401996a1",
+    "e0b31bbd2ac29bfab4bcaf265b040b3dd8a336b1804f9437ec228e2554eee86a",
+    "ea2b4a675501534dac33b0e14f18efb8d66e4e9fe8cb66fbd1a16f9f55390833",
+    "9d1dae7a0c37b9d18e4f99ed0406e90d31c590fed25db33e75a5ed46ac083466",
+    "27b1ef2bb3656325d82727b9c353bd9dd3326f40d0429d73eb142ce36149fb7c",
+    "dd3a68765b43527bf76675fbf1998a12d2642b8a270e8c0d5586429ec572c342",
+    "8f1586775e60c373d2721fbc9ca9418f82b4eea4c54c32711529431d03cdb1a7",
+    "13b8476ee6d24c6c4188af8979f03cb4be867b1b746f69f821890916f3c3457f",
+    "462eba91e0545de189a9d493e474d5bd8fc94262dab32812541372ec48f6de30",
+    "9f4467567aa915d6db215a7f2cca693275c61151bda99b67e9c39aa53ded2490"
+   ],
+   "doc_text_chars": [
+    2808,
+    714,
+    1377,
+    694,
+    694,
+    1240,
+    713,
+    1821,
+    539,
+    250,
+    303
+   ],
+   "tool_name": "mcp__environment__spotify__show_playlist_library",
+   "arg_leaf_values": [
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJzcG90aWZ5K2NvcndpbHNAZ21haWwuY29tIiwiZXhwIjoxNjg0NDEyMDk4fQ.ko4HCqrtWnAdCbOXXFc03xBwkcsst3xHdGweSvVMvAI",
+    "true"
+   ],
+   "df": {
+    "mcp__environment__spotify__show_playlist_library": 1,
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJzcG90aWZ5K2NvcndpbHNAZ21haWwuY29tIiwiZXhwIjoxNjg0NDEyMDk4fQ.ko4HCqrtWnAdCbOXXFc03xBwkcsst3xHdGweSvVMvAI": 2,
+    "true": 0
+   },
+   "score": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0.5,
+    0,
+    0,
+    0,
+    1.5
+   ],
+   "k_witness": 10,
+   "k_median": 5,
+   "target_doc_values": [
+    [
+     "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJzcG90aWZ5K2NvcndpbHNAZ21haWwuY29tIiwiZXhwIjoxNjg0NDEyMDk4fQ.ko4HCqrtWnAdCbOXXFc03xBwkcsst3xHdGweSvVMvAI",
+     2
+    ]
+   ]
+  },
+  "2a21e94e0687_b734292f:10": {
+   "n_docs": 7,
+   "doc_lengths": [
+    646,
+    220,
+    306,
+    144,
+    216,
+    528,
+    419
+   ],
+   "doc_text_sha256": [
+    "7462d31b575b09fe2f8113657f041ac23e3e2ba855ce1d757d6561d73e0cce74",
+    "9745bc2440eb74bbda282bc4e4f97c367d17b00528638271851c57d701b6b411",
+    "d51db66990f7623de4222710fd47fce7dcd387ec02874ffda4760e718486048a",
+    "220cd86afc63f369f7c718d25108b39e21615bf15f8175a7bd12dbfd843c6c7f",
+    "1ed53918c1aaba51bb4584f9a71f08cd0e8b514600ea93c64b7d7e58de3fb180",
+    "3498e01164be36fd451cc67b0536c15a737b97c18f97b695938e43414c5fbc9a",
+    "112d16c0c2b530918411cc90185ac0f161027d73400112f61765ea0ebe0f9673"
+   ],
+   "doc_text_chars": [
+    3153,
+    1105,
+    1432,
+    582,
+    630,
+    1493,
+    1511
+   ],
+   "tool_name": "mcp__environment__todoist__login",
+   "arg_leaf_values": [
+    "as_moore@gmail.com",
+    "7(%[]a8"
+   ],
+   "df": {
+    "mcp__environment__todoist__login": 0,
+    "as_moore@gmail.com": 3,
+    "7(%[]a8": 1
+   },
+   "score": [
+    0.3333333333333333,
+    0,
+    0,
+    0,
+    0.3333333333333333,
+    1.3333333333333333,
+    0
+   ],
+   "k_witness": 5,
+   "k_median": 3,
+   "target_doc_values": [
+    [
+     "7(%[]a8",
+     1
+    ],
+    [
+     "as_moore@gmail.com",
+     3
+    ]
+   ]
+  },
+  "2a21e94e0687_d3ce1db1:9": {
+   "n_docs": 9,
+   "doc_lengths": [
+    705,
+    115,
+    523,
+    376,
+    273,
+    339,
+    227,
+    232,
+    253
+   ],
+   "doc_text_sha256": [
+    "1a868e249bedbd6157cda0fbb486cefd6d3eb18f4a84e4f8a18c059aebf97c75",
+    "d8dbe7bab258dcff6bae3531213657ff74eac290ae1fc5591a1d789b910b92bf",
+    "de5fb021fa110ea9f4e7f2ee058423567c574f4e768b1115dc2ce74896c51175",
+    "928723979629826c36713e4c869f97bd85f44a2e6fe400f3992330a33f128895",
+    "a2109ff1618c3398ce10c97579c8abe178c2c9303a0305d4bf7fe71a9900e9c4",
+    "b21aedad43514778f86245cef18a87c6220412b9cafc2850e298f1785fdc275b",
+    "654d792b4732a9a8f475043625630bd671e812c703eeeef5d3a6a95a2528785d",
+    "4b662865413b7e1036ee0d5176bab41f24a2d50438b379e30f1af3d30963b0cc",
+    "a2d97a4dc652199b1ecea9a616e487bb1cf1acb6e539e902340bfa1e5a3aebe5"
+   ],
+   "doc_text_chars": [
+    3421,
+    438,
+    1485,
+    858,
+    780,
+    1084,
+    556,
+    576,
+    690
+   ],
+   "tool_name": "mcp__environment__todoist__login",
+   "arg_leaf_values": [
+    "jo-harr@gmail.com",
+    "YAeG+q9"
+   ],
+   "df": {
+    "mcp__environment__todoist__login": 0,
+    "jo-harr@gmail.com": 2,
+    "YAeG+q9": 1
+   },
+   "score": [
+    0.5,
+    0,
+    1.5,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+   ],
+   "k_witness": 2,
+   "k_median": 4,
+   "target_doc_values": [
+    [
+     "YAeG+q9",
+     1
+    ],
+    [
+     "jo-harr@gmail.com",
+     2
+    ]
+   ]
+  },
+  "2b035779e4f9_b27d0d58:2": {
+   "n_docs": 3,
+   "doc_lengths": [
+    530,
+    53,
+    76
+   ],
+   "doc_text_sha256": [
+    "16ff7bc4684ce4716009ad067acd205dce5d7562fb22b8cfd486ce2c58ee8544",
+    "385a9bcd8f2e2eadb832823b1fdc0cdca5e92522830633d15f4709f5415582d9",
+    "250ae294b0696aa5f3bde3f90e57c4c257114ff7b16b008c9f377f06e89adf42"
+   ],
+   "doc_text_chars": [
+    2535,
+    206,
+    313
+   ],
+   "tool_name": "file_system__login",
+   "arg_leaf_values": [
+    "corwils@gmail.com",
+    "rZlA^kz"
+   ],
+   "df": {
+    "file_system__login": 2,
+    "corwils@gmail.com": 1,
+    "rZlA^kz": 0
+   },
+   "score": [
+    1.5,
+    0.5,
+    0
+   ],
+   "k_witness": 0,
+   "k_median": 1,
+   "target_doc_values": [
+    [
+     "corwils@gmail.com",
+     1
+    ]
+   ]
+  },
+  "33b8f9e350cf_05148b9c:9": {
+   "n_docs": 16,
+   "doc_lengths": [
+    414,
+    17,
+    757,
+    70,
+    757,
+    89,
+    105,
+    34,
+    596,
+    757,
+    44,
+    640,
+    532,
+    637,
+    74,
+    32
+   ],
+   "doc_text_sha256": [
+    "c233649d657fdd7d43bf7047f7c49fa9d74680f101f523910ed4a543300dcc07",
+    "75acac70ded45f7c218633487d168555729a4338a480c5b002daf6d8cb6bafd9",
+    "a23f0c24a66e9abea84c3a961361391685b06344d5ffc0b332c5de21496f3ba1",
+    "07c2ebf5d64df1233d8fe04eb8ff45e86b8e3f763af774e41d1898973fe33520",
+    "d1d3f3f31f168037e7e4896ef68d1693e920fb795807340b9691ef362a4a6683",
+    "e0eab443bef3d4841b1cd5f0e8ca9462f368410e3a1bb2bd0b29d78e7cc9b201",
+    "6f04b667b8067a5cdf1be6c653a501f9d900d1560a242fc2a85cf641ce7476d9",
+    "c3719eff29a3ce4f307cbf95b84855cc141f43b17e917eb1cda1526c0a8de66c",
+    "de5fb5fe662f1b3ae60c8feacbf4490d06899e290dbb135ad0a4a3f7c8c9d2a7",
+    "36851b40c835ef77cfb9e7a3fe8ddaed774246fc00bbd35e0497a00152762d2e",
+    "b18f8c43ad4486263ba3d98513bfc38d83baaf9fecd425ae9b4930c0ea2b87a5",
+    "4c4813f95c06df4dd92fa2f93b59124d8bc13155c0cd9d925e99c7e70433bbe9",
+    "901c01b359a5ed887bba5964041404edd0b4149beb7eeec399260b39e641460c",
+    "25f711556922d15b86d75ccbc5258590f01e36f6c5c30aa8f15ad799ae4d785c",
+    "b2c748e367f499602e4387c58c95aee32d508069db31a309c52c55a9482dc22f",
+    "9e89236e809c7b8a25076952ef06c747ecf4b18a49b9e480522c52fe941e60a4"
+   ],
+   "doc_text_chars": [
+    1997,
+    53,
+    2153,
+    207,
+    2099,
+    261,
+    352,
+    170,
+    2332,
+    2261,
+    99,
+    2332,
+    2332,
+    2332,
+    197,
+    146
+   ],
+   "tool_name": "search",
+   "arg_leaf_values": [
+    "\"founded in 197\" cartoon studio animals"
+   ],
+   "df": {
+    "search": 5,
+    "\"founded in 197\" cartoon studio animals": 0
+   },
+   "score": [
+    0.2,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0.2,
+    0.2,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0.2,
+    0.2
+   ],
+   "k_witness": 0,
+   "k_median": 7,
+   "target_doc_values": []
+  },
+  "33b8f9e350cf_25815bf6:2": {
+   "n_docs": 9,
+   "doc_lengths": [
+    295,
+    12,
+    757,
+    65,
+    746,
+    757,
+    414,
+    570,
+    43
+   ],
+   "doc_text_sha256": [
+    "f3abb127e44f7898e44c675884d7f4bd52407e94184b2f018e6564baf8a262bf",
+    "c99e4965eda3a52442d067b417b0221c320501c612cdce64dbee7abf0ad39dbf",
+    "9032ecfae7af8d26f429ea9a98f47b6c80ccbc910ad97a1e3877898a4d2fde99",
+    "f127605544c9815bd7b0a9f389861dd135dc257ed0ddbd949daee4c60f6061af",
+    "53fd24d7ed916add336b4fa4171e4add88c7a2ef896630edfefa7ab9b8f6fb5a",
+    "4e955b4a72824f42470932ec09e656fba2b9b41ee35208c802def907f1365559",
+    "6601e1241619494c7150f43292825550426480c9a0937a64030e72963ad3daca",
+    "5c83f25d35d49f7f54720e28b136f16c2bf5174fe992a2436db7e7ad9b290756",
+    "87d40be20c975dcd9a4321b83e04c1cc1b08de22109569acc3d441d5ef2dde5f"
+   ],
+   "doc_text_chars": [
+    1497,
+    55,
+    2150,
+    210,
+    2332,
+    1532,
+    828,
+    2299,
+    212
+   ],
+   "tool_name": "get_document",
+   "arg_leaf_values": [
+    "51799"
+   ],
+   "df": {
+    "get_document": 0,
+    "51799": 0
+   },
+   "score": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+   ],
+   "k_witness": null,
+   "k_median": 4,
+   "target_doc_values": []
+  },
+  "33b8f9e350cf_25815bf6:6": {
+   "n_docs": 16,
+   "doc_lengths": [
+    295,
+    27,
+    630,
+    757,
+    180,
+    685,
+    638,
+    578,
+    382,
+    27,
+    757,
+    183,
+    577,
+    612,
+    432,
+    33
+   ],
+   "doc_text_sha256": [
+    "f3abb127e44f7898e44c675884d7f4bd52407e94184b2f018e6564baf8a262bf",
+    "6681ec15c8e35b8f07dca1ec04552ce0b32a1f628e5ed81daf52f34546ee48de",
+    "3d3e0f6930394385ba057cc38eae30e91d42098a2e476be0dc6bf1f85ae6e1aa",
+    "8f67f0172511866e1e12f438811e9409ce54645e9b8cd6008abfae83cf81ec60",
+    "028f19c4f2941c6f3330c34fa0d96e7c784f1f6482508fd1304746fdbe4528b9",
+    "3424fbb84174d87fa60af1d076258bde0d5ac1607d2d9909dcb6272ac4ebd18e",
+    "2fe005a21a5d860864745e9811a87cb47ca965014bbf1b46f33b48861896484d",
+    "73642e4c6d09779864817f7c0c96fb463c8e530b608641e5f6e287b07a34e0ad",
+    "3a9ed9adab3d72a58f5116d41e5eedf312f57bfc1c8d21bc7a192e2d21bd1f36",
+    "071b26b9883a17a62340df9c0c937745f8834eb82efb9cb551ed65dd84c838ed",
+    "33bbb21828713b3cb45a75d197d816ff7735256807343da241ce4bb2c89bab6c",
+    "d19182afcc1728363c7cf4817299c021bc538e8787e50a98cbe91652e3741ac7",
+    "de95cd20129a8fab23b179ef8c4c6a38f7fd73e7f4a3bc96805c1f0526f0eb9b",
+    "c8feff8a4c96cc72a90b6b67a3d21787bd10617f2d8fe45ab9f44120f8c4034c",
+    "83d8a2eeb89a1ba2f43bb5824c46d3cfda69fa73c4195a726870a8421342c0b2",
+    "8445dbc1a2610aeb0290519225e60975fb951848170a8cb7a5d2e69334972593"
+   ],
+   "doc_text_chars": [
+    1497,
+    114,
+    2052,
+    1800,
+    560,
+    2332,
+    2332,
+    2332,
+    1500,
+    114,
+    1801,
+    559,
+    2332,
+    2332,
+    1789,
+    150
+   ],
+   "tool_name": "search",
+   "arg_leaf_values": [
+    "\"Shibobo\" samples \"The Final Countdown\" Europe Nordic band 1980s"
+   ],
+   "df": {
+    "search": 4,
+    "\"Shibobo\" samples \"The Final Countdown\" Europe Nordic band 1980s": 0
+   },
+   "score": [
+    0.25,
+    0,
+    0.25,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0.25,
+    0.25
+   ],
+   "k_witness": 0,
+   "k_median": 7,
+   "target_doc_values": []
+  },
+  "33b8f9e350cf_b13d2558:4": {
+   "n_docs": 16,
+   "doc_lengths": [
+    555,
+    31,
+    715,
+    623,
+    649,
+    623,
+    475,
+    33,
+    760,
+    568,
+    642,
+    757,
+    65,
+    582,
+    259,
+    32
+   ],
+   "doc_text_sha256": [
+    "dcb9ec13cf2bcdb1660e94f69d6fba9ea3c748062762f9eff16184dd3073bdb9",
+    "e138ea43eb951d5d9bd5083cd2a1ef89d33cc2a26ef82e5c00263464a7133771",
+    "d0d030d26873b93c1691f61a0bf15898f5f1c8921eac5c1f236e72a03fd240f7",
+    "11616da84bc79154fbe6d8a7e61e86e1926e5d94d1e9780b07f612654318efed",
+    "61c537a378b297fd7cf427905141510d516e1452fccd80269cf42ab4d74a8829",
+    "fbb98e0caa93ae48a2bf0841807b7267bb20d31f4dfd88d8b324d7bdcdc39130",
+    "b5ea1858dec592a751dfa95bfb833cc90664d2e771f6b36f97e34e7c7072b863",
+    "e3eb5bedde06024a4b55f0e84bbb74c70cf931392fd944d285b99c54da87cc63",
+    "9f1518a97cf5bf245c47ca9d832b53d2c2203a74b58372b09707c83a2dc7b679",
+    "ddb259eadfca22c240cf88e10c1c77f7e3c9b91829e7237db19dec8e37f994d3",
+    "de2e162852b1d37507f0098842ad11240f64f600d84fdad866ced74939210f5a",
+    "8ae31c937c7d660f9c970a55f6ea311722ca03d562ae227bf8e6aa49adc735f8",
+    "279907ecf9aab900dfc8153d4ed4b90750eeb6e817ee774a9e710fcfa824633c",
+    "3577f4f2ca1809cf6aa0bcf58f048aed3ccaedfb62394fd4c74dee146d6bbecd",
+    "00551da8c0f068c9d873fa10efbe2bdbb1c097575024f4d7ece767bfb11ede31",
+    "f0376ece96e78352e0096b23b9af9455ec5a9e7986dde0d0706fde0e85b237cf"
+   ],
+   "doc_text_chars": [
+    2649,
+    164,
+    2332,
+    2332,
+    2332,
+    2332,
+    2057,
+    159,
+    2332,
+    2332,
+    2332,
+    2081,
+    279,
+    2332,
+    1172,
+    149
+   ],
+   "tool_name": "search",
+   "arg_leaf_values": [
+    "\"deadliest aviation accident\" \"country\" 2023"
+   ],
+   "df": {
+    "search": 6,
+    "\"deadliest aviation accident\" \"country\" 2023": 0
+   },
+   "score": [
+    0.16666666666666666,
+    0.16666666666666666,
+    0,
+    0,
+    0,
+    0,
+    0.16666666666666666,
+    0.16666666666666666,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0.16666666666666666,
+    0.16666666666666666
+   ],
+   "k_witness": 0,
+   "k_median": 7,
+   "target_doc_values": []
+  },
+  "33b8f9e350cf_b5b26346:10": {
+   "n_docs": 16,
+   "doc_lengths": [
+    567,
+    551,
+    566,
+    532,
+    574,
+    561,
+    484,
+    99,
+    38,
+    600,
+    572,
+    574,
+    625,
+    530,
+    378,
+    36
+   ],
+   "doc_text_sha256": [
+    "f8b5b49378733278e787f40c773793ad06d97fa4c58b1f8df4a9f4d974406da6",
+    "b57fca25adf08ef43a27eed8ae74deed342a35c81b0df3900f317b89fffbc694",
+    "1f121c797a9fbe76ebec790bd23dabc23877d3b4e715d1d2ad523f3b50b14bb3",
+    "c817dd1d8c6221094dbcf1df41caa818a94cf43496d298d6bf220c9813d8f2ad",
+    "fde728a2f1bee6b7bbebe6987a3f7b696335280c8f8bf5a1780cd3984c812604",
+    "a2efb9185553f99939778d84086c426a8db1a39b7efc30e42a8b5e31b0087770",
+    "19b80a8f74f1539ce8dd4b67ef15b5f6ac276cb28fde6b69f5d0e49438306724",
+    "3b327b920390aa322477c44cc9d91d479a38f3494aa787a7a7634207fdfad067",
+    "e491d1233af51d653ae3788ad3e2b1536225f08d3f42aee2a18b31bfebc0f801",
+    "1396edab6f438164a95274b00aeffab92a9023aa2819dcdc6f1e834e54a147a0",
+    "987e10188ecff554475bd272be4957618c7d3c972e2537a2fcb331df24b4b5af",
+    "84fae3f987bc7b00f2f4a8d4634cc7c7e1c18011f5ef6ac87a7593d443d260c6",
+    "6f9d0dc069d6f2560c6934ab8bb755f57f43bf270b3853d5027d481ab9326e37",
+    "1a75c15f4dd4bc83d8aaa2e633aae2b0c5564e0c4aa2a698f42b126e75e6ed9d",
+    "b062c94f12bc88d355ad1f6d1f383d982628b7cd074c083ee68d0de125faf41e",
+    "e68e864c0edb0db6efc8c0c09b6e8d73378ce0a215a855921ac0caf8c046c0a5"
+   ],
+   "doc_text_chars": [
+    2524,
+    2332,
+    2332,
+    2332,
+    2332,
+    2332,
+    2332,
+    398,
+    160,
+    2332,
+    2332,
+    2332,
+    2332,
+    2332,
+    1954,
+    152
+   ],
+   "tool_name": "search",
+   "arg_leaf_values": [
+    "\"Tribeca Festival\" \"audio selection\" \"Gotham Week\" creator"
+   ],
+   "df": {
+    "search": 5,
+    "\"Tribeca Festival\" \"audio selection\" \"Gotham Week\" creator": 0
+   },
+   "score": [
+    0.2,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0.2,
+    0.2,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0.2,
+    0.2
+   ],
+   "k_witness": 0,
+   "k_median": 7,
+   "target_doc_values": []
+  },
+  "33b8f9e350cf_b5b26346:9": {
+   "n_docs": 16,
+   "doc_lengths": [
+    567,
+    696,
+    537,
+    528,
+    573,
+    553,
+    387,
+    36,
+    551,
+    566,
+    532,
+    574,
+    561,
+    484,
+    99,
+    38
+   ],
+   "doc_text_sha256": [
+    "f8b5b49378733278e787f40c773793ad06d97fa4c58b1f8df4a9f4d974406da6",
+    "da61f8395bb7c755ea72250ed6aa57f83e14bd8b6b781f7706dc494d822b1c0f",
+    "90bc656c5c7b907b9b8a27de8d5b2dbf2c6d41d23ed173df16d4520a719f58c2",
+    "f8be0c24e8b4d1dba9adf9035054277066d55dbc17914dea99d287c2967666a6",
+    "c68191eb7401ffbfd2cb402e185fa30141ba046c2f5d2651886e72200d20f0cb",
+    "ee7baab760f8669fc0d2d8cd2ca3e3af83997996b15530d5b0b66acff3f4c75a",
+    "7efb520591f7d196de426d968de5c507eaa631de365046d77f5ea549311a9963",
+    "199d0357f2efad6fba7a80060669ee4167738041fa87bf534aad81e10b492ad8",
+    "b57fca25adf08ef43a27eed8ae74deed342a35c81b0df3900f317b89fffbc694",
+    "1f121c797a9fbe76ebec790bd23dabc23877d3b4e715d1d2ad523f3b50b14bb3",
+    "c817dd1d8c6221094dbcf1df41caa818a94cf43496d298d6bf220c9813d8f2ad",
+    "fde728a2f1bee6b7bbebe6987a3f7b696335280c8f8bf5a1780cd3984c812604",
+    "a2efb9185553f99939778d84086c426a8db1a39b7efc30e42a8b5e31b0087770",
+    "19b80a8f74f1539ce8dd4b67ef15b5f6ac276cb28fde6b69f5d0e49438306724",
+    "3b327b920390aa322477c44cc9d91d479a38f3494aa787a7a7634207fdfad067",
+    "e491d1233af51d653ae3788ad3e2b1536225f08d3f42aee2a18b31bfebc0f801"
+   ],
+   "doc_text_chars": [
+    2524,
+    2332,
+    2332,
+    2332,
+    2332,
+    2332,
+    1792,
+    158,
+    2332,
+    2332,
+    2332,
+    2332,
+    2332,
+    2332,
+    398,
+    160
+   ],
+   "tool_name": "search",
+   "arg_leaf_values": [
+    "Medium.com \"game taught me\" \"life skill\" 2020"
+   ],
+   "df": {
+    "search": 5,
+    "Medium.com \"game taught me\" \"life skill\" 2020": 0
+   },
+   "score": [
+    0.2,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0.2,
+    0.2,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0.2,
+    0.2
+   ],
+   "k_witness": 0,
+   "k_median": 7,
+   "target_doc_values": []
+  },
+  "33b8f9e350cf_e387ca3b:29": {
+   "n_docs": 16,
+   "doc_lengths": [
+    382,
+    757,
+    103,
+    581,
+    681,
+    721,
+    720,
+    38,
+    757,
+    64,
+    722,
+    757,
+    102,
+    447,
+    264,
+    110
+   ],
+   "doc_text_sha256": [
+    "bfb816cbc5f4397bd31f40001afe71a43c85c2f91b8f386dd48543495a65e1a0",
+    "f86e09f3d3d7db6da15dd391eb71bc91070c15ed320c865ade81f13ac349d020",
+    "02bb14ad0959a682880a1d58fa871985e9dbcdc033fd7521c77da7c5b4f117ad",
+    "aec9e6e455267784a620a1b5936451510735a4b303059851fbfbc7f88109b0bc",
+    "6d88b6c9d1762bf38c4d953f62cb09562847c41ea077a40fdf10a77bc322b523",
+    "5de55cc1533ea7d48de3de1777b08541fd597fee93996636699d1d19444942d2",
+    "2f91c4f845a915d273ab4eb4f9f8f69d945f8cc0de1f042e1edfcc7872abbe88",
+    "de93bdcf366820c961965686b6add750f04efe47e1dd3490f5f0f1ae484d5038",
+    "d8b99ba1abe95aa4cc02595bc36f47027b0f82603c755e63cc796755622be5d9",
+    "2118d2008fed3d95b40b7d54fe36b26e73f1bced6e94ac1b00668524a7ac04d2",
+    "d3fecde4d16b92358a3d990682acc8d0ffbeeccee1671781b18536451aef0146",
+    "0deba004860e6a98743b0ce84307e815240b61888e7dfe26f0999a5b576db349",
+    "7d5bc502e1078d3f592e296739728a1b11e8245c19e86037ca41352dc1604ab2",
+    "7d815297b8bc752d00d91a639f55d9c9a2a10242b42552f22f145fd5cc457944",
+    "23cc0392a6261c734ecc78d8887138a13a3975dc69dcc2e98550e3aa54057ceb",
+    "c98ca4c49852ebad2b18caf939931510964422a9a19214aadefc62f8ac90b740"
+   ],
+   "doc_text_chars": [
+    1804,
+    2048,
+    312,
+    2332,
+    2332,
+    2332,
+    2147,
+    159,
+    2094,
+    266,
+    2332,
+    2166,
+    194,
+    1194,
+    1029,
+    418
+   ],
+   "tool_name": "submit",
+   "arg_leaf_values": [
+    "Can't find the answer.",
+    "After extensive searching using multiple query strategies, I was unable to identify the specific football club matching all the provided criteria: founded in the 1920s, with exactly 7 wins, 16 draws, 15 losses, 37 goals scored, goal difference of -12 (49 goals conceded) in a 38-game season prior to 2023. I searched for the statistics in various combinations [15312][42725][49672][13721][11302], looked for clubs founded in the 1920s [20054][68186], and attempted to find league tables with these exact numbers [87239][75530], but none of the search results contained the specific club information needed to answer the question about the second-best scorer's total minutes played. Without identifying the club first, it's impossible to determine the minutes played by their second-best scorer.",
+    "25"
+   ],
+   "df": {
+    "submit": 3,
+    "Can't find the answer.": 2,
+    "After extensive searching using multiple query strategies, I was unable to identify the specific football club matching all the provided criteria: founded in the 1920s, with exactly 7 wins, 16 draws, 15 losses, 37 goals scored, goal difference of -12 (49 goals conceded) in a 38-game season prior to 2023. I searched for the statistics in various combinations [15312][42725][49672][13721][11302], looked for clubs founded in the 1920s [20054][68186], and attempted to find league tables with these exact numbers [87239][75530], but none of the search results contained the specific club information needed to answer the question about the second-best scorer's total minutes played. Without identifying the club first, it's impossible to determine the minutes played by their second-best scorer.": 0,
+    "25": 5
+   },
+   "score": [
+    0.8333333333333333,
+    0.2,
+    0,
+    0,
+    0,
+    0.2,
+    0,
+    0,
+    0.2,
+    0,
+    0,
+    0.2,
+    0.2,
+    0.3333333333333333,
+    0.8333333333333333,
+    0
+   ],
+   "k_witness": 0,
+   "k_median": 7,
+   "target_doc_values": [
+    [
+     "Can't find the answer.",
+     2
+    ]
+   ]
+  },
+  "379733137f5d_05583758:4": {
+   "n_docs": 8,
+   "doc_lengths": [
+    489,
+    336,
+    346,
+    12,
+    757,
+    118,
+    305,
+    68
+   ],
+   "doc_text_sha256": [
+    "0ae622cf3792a193a522b08fb7b9caf0f45c5f590e6f2ac7af9b80bcff6bb03b",
+    "6dca5b1cc522185e5febbc13b41e2a116834af841db84fe6b22f7e09ae1921f5",
+    "f9dc1854c4181f4c05e1674ae1b2b09b6b6c0178129e755e86f9d1013853119c",
+    "c99e4965eda3a52442d067b417b0221c320501c612cdce64dbee7abf0ad39dbf",
+    "569d7df1c8c4777490ecca43c089db8f6449f191e2c93fc831b8e98f41e30635",
+    "4f7921aea7837437088038c01e4053fd2df72ef52a6e5305b75779cec09fb2de",
+    "036466c3bdbda14b361d7b07d57c029cafc92aa09862a048c8c658acfadba098",
+    "0d7b2100b470c0eb57eaf5c8ba4340ad22adedb7f31d336ba2746f65d682109b"
+   ],
+   "doc_text_chars": [
+    2363,
+    977,
+    738,
+    55,
+    2015,
+    330,
+    701,
+    216
+   ],
+   "tool_name": "file_system__move_file",
+   "arg_leaf_values": [
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJmaWxlX3N5c3RlbSthZC5ibGFja2J1cm5AZ21haWwuY29tIiwiZXhwIjoxNjg0NDEyMDk4fQ.s7U9wjne6ShDPsxno0m7C8e9uI-dV_SirrlM-PON2Do",
+    "~/documents/work/meetings_files/2023-apr-03__slides.ppt",
+    "~/documents/work/meetings_files/slides/2023-apr-03.ppt"
+   ],
+   "df": {
+    "file_system__move_file": 0,
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJmaWxlX3N5c3RlbSthZC5ibGFja2J1cm5AZ21haWwuY29tIiwiZXhwIjoxNjg0NDEyMDk4fQ.s7U9wjne6ShDPsxno0m7C8e9uI-dV_SirrlM-PON2Do": 2,
+    "~/documents/work/meetings_files/2023-apr-03__slides.ppt": 0,
+    "~/documents/work/meetings_files/slides/2023-apr-03.ppt": 0
+   },
+   "score": [
+    0,
+    0,
+    0.5,
+    0,
+    0,
+    0,
+    0.5,
+    0
+   ],
+   "k_witness": 2,
+   "k_median": 3,
+   "target_doc_values": [
+    [
+     "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJmaWxlX3N5c3RlbSthZC5ibGFja2J1cm5AZ21haWwuY29tIiwiZXhwIjoxNjg0NDEyMDk4fQ.s7U9wjne6ShDPsxno0m7C8e9uI-dV_SirrlM-PON2Do",
+     2
+    ]
+   ]
+  },
+  "379733137f5d_0bbbfc38:7": {
+   "n_docs": 9,
+   "doc_lengths": [
+    560,
+    306,
+    103,
+    313,
+    520,
+    103,
+    461,
+    133,
+    120
+   ],
+   "doc_text_sha256": [
+    "439ae2597c651c002a527d112ba4a0ce67364cd03e400712b77acd69d4a971c8",
+    "2c8534e2d5c0c2f8f2ab1e335c22ca2a73a9091898212d8a35ee7a74d765477c",
+    "a149a6f06129c4c39c656a813de9f1fd9114e0102b986786b86b5653abfe84a1",
+    "007a030bfabb111cfb3130193e6a139b22b062c218ce8b071f69f404281abbf6",
+    "1631ef675a80332934a3a5e95dcebabad3a0f72433e23a46162c3c495d84bb64",
+    "dfe2803160ba480e0dc1a5bc2d9a052dc2a1d9c5f7cb49c68fdb2a0f3cc1744b",
+    "2a6245581ef6338840bc449068ecde10a12d660e9dea15a10f8b743d35665e17",
+    "a1264c6c7217c6b4d5161fbef6bf91e5fcda3f628007cc7a6babe36156b31643",
+    "6f4d981c85f9dda423e72ee352a6587bdc77c02c62c2b5aa96cc5156359d1860"
+   ],
+   "doc_text_chars": [
+    2607,
+    824,
+    341,
+    657,
+    1397,
+    354,
+    965,
+    357,
+    414
+   ],
+   "tool_name": "phone__send_text_message",
+   "arg_leaf_values": [
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJwaG9uZSs3NzYzMzYxMjQ2IiwiZXhwIjoxNjg0NDEyMDk4fQ.VT4WvQxht8ROi4vK5p46rr9hlQJt4ssmKNzN7xubZZU",
+    "4275730168",
+    "You have a venmo account now. Please activate it with the code you received in your email. Your password is jy**-a3U. Change it as well."
+   ],
+   "df": {
+    "phone__send_text_message": 0,
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJwaG9uZSs3NzYzMzYxMjQ2IiwiZXhwIjoxNjg0NDEyMDk4fQ.VT4WvQxht8ROi4vK5p46rr9hlQJt4ssmKNzN7xubZZU": 1,
+    "4275730168": 1,
+    "You have a venmo account now. Please activate it with the code you received in your email. Your password is jy**-a3U. Change it as well.": 1
+   },
+   "score": [
+    1.0,
+    0,
+    0,
+    1.0,
+    1.0,
+    0,
+    0,
+    0,
+    0
+   ],
+   "k_witness": 0,
+   "k_median": 4,
+   "target_doc_values": [
+    [
+     "You have a venmo account now. Please activate it with the code you received in your email. Your password is jy**-a3U. Change it as well.",
+     1
+    ]
+   ]
+  },
+  "379733137f5d_0f729ba3:2": {
+   "n_docs": 4,
+   "doc_lengths": [
+    546,
+    305,
+    156,
+    177
+   ],
+   "doc_text_sha256": [
+    "deb5594678feedcc08e57c3a584532e7d79085658fdbb590b33e5cf4a1a458d4",
+    "0ab609c66c5382eee4f818f3ced7651bbf687e767aa42463187141e25f2d3612",
+    "8c5501d612a558d1e7543964b941d50c029db17b078640471bcba34f920959e9",
+    "c83527c4523d0af12973ebbd0f9dfe362c5f24be8809bc894339b073da0ea3cc"
+   ],
+   "doc_text_chars": [
+    2589,
+    824,
+    553,
+    376
+   ],
+   "tool_name": "phone__search_contacts",
+   "arg_leaf_values": [
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJwaG9uZSs3MjczNzMxMDYzIiwiZXhwIjoxNjg0NDEyMDk4fQ.jo0TktWpkHfQr2HWWPdBNOb_RCVSYDCCCzau-mi9hTc",
+    "roommate",
+    "20"
+   ],
+   "df": {
+    "phone__search_contacts": 1,
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJwaG9uZSs3MjczNzMxMDYzIiwiZXhwIjoxNjg0NDEyMDk4fQ.jo0TktWpkHfQr2HWWPdBNOb_RCVSYDCCCzau-mi9hTc": 1,
+    "roommate": 1,
+    "20": 1
+   },
+   "score": [
+    3.0,
+    0,
+    0,
+    1.0
+   ],
+   "k_witness": 0,
+   "k_median": 1,
+   "target_doc_values": [
+    [
+     "roommate",
+     1
+    ],
+    [
+     "20",
+     1
+    ]
+   ]
+  },
+  "379733137f5d_18f7e5cb:4": {
+   "n_docs": 4,
+   "doc_lengths": [
+    465,
+    334,
+    337,
+    246
+   ],
+   "doc_text_sha256": [
+    "4ff6841b16f3e8c36412ea8799e371a017b9d6cbe8841111bdf026c333536040",
+    "4576c6256cec85a0c55b8e396e426e8831ba76d86c01d05ea01f6a9faf743065",
+    "721f1800d98b013fc688ce63b93c4e580cfab2fc056a209728bbb64fe63e4f30",
+    "f5aff6dfcb6e4a1c19d366cf3885099877fdf6405306d09e97c5d87fe1f10296"
+   ],
+   "doc_text_chars": [
+    2260,
+    976,
+    725,
+    679
+   ],
+   "tool_name": "simple_note__search_notes",
+   "arg_leaf_values": [
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJzaW1wbGVfbm90ZSthbml0YS5idXJjaEBnbWFpbC5jb20iLCJleHAiOjE2ODQ0NDUwNjZ9.lty9RseUcfgLtWSGGpZjfrDDvYqA7BfRt4T5xdXSCPw"
+   ],
+   "df": {
+    "simple_note__search_notes": 2,
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJzaW1wbGVfbm90ZSthbml0YS5idXJjaEBnbWFpbC5jb20iLCJleHAiOjE2ODQ0NDUwNjZ9.lty9RseUcfgLtWSGGpZjfrDDvYqA7BfRt4T5xdXSCPw": 2
+   },
+   "score": [
+    0,
+    0,
+    1.0,
+    1.0
+   ],
+   "k_witness": 2,
+   "k_median": 1,
+   "target_doc_values": [
+    [
+     "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJzaW1wbGVfbm90ZSthbml0YS5idXJjaEBnbWFpbC5jb20iLCJleHAiOjE2ODQ0NDUwNjZ9.lty9RseUcfgLtWSGGpZjfrDDvYqA7BfRt4T5xdXSCPw",
+     2
+    ]
+   ]
+  },
+  "379733137f5d_ece17a61:3": {
+   "n_docs": 3,
+   "doc_lengths": [
+    531,
+    105,
+    337
+   ],
+   "doc_text_sha256": [
+    "1bcde9f9bff4d336b4b9a55bdfe802cc225ed80ec3eddea3a6bdc95bd6061597",
+    "f4219a1654d51992ee755ee7ae671d6ccd260e44faa9b1777b50d67641e6c39a",
+    "3c39419aec15ef7c1af57242dcb80fc7f1d3ff65bb884a55d08aedcffb0db08a"
+   ],
+   "doc_text_chars": [
+    2538,
+    416,
+    959
+   ],
+   "tool_name": "phone__search_contacts",
+   "arg_leaf_values": [
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJwaG9uZSsyMjU0MjEzNzM0IiwiZXhwIjoxNjg0NDEyMDk4fQ.xDB7pMF6Krp9DLl8Iso5JL0Kc0SLV78Gpi7X42sF_v0",
+    "roommate"
+   ],
+   "df": {
+    "phone__search_contacts": 1,
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJwaG9uZSsyMjU0MjEzNzM0IiwiZXhwIjoxNjg0NDEyMDk4fQ.xDB7pMF6Krp9DLl8Iso5JL0Kc0SLV78Gpi7X42sF_v0": 0,
+    "roommate": 1
+   },
+   "score": [
+    2.0,
+    0,
+    0
+   ],
+   "k_witness": 0,
+   "k_median": 1,
+   "target_doc_values": [
+    [
+     "roommate",
+     1
+    ]
+   ]
+  },
+  "39f6781fd774_0700d34f:1": {
+   "n_docs": 1,
+   "doc_lengths": [
+    413
+   ],
+   "doc_text_sha256": [
+    "f3c5e5248e876302571d85fc4f6964f7dcdda237f6e89138303b810ac1d1ea32"
+   ],
+   "doc_text_chars": [
+    2159
+   ],
+   "tool_name": "search",
+   "arg_leaf_values": [
+    "pain and swelling upper part of body biopsy two months earlier developed stiffness followed by swelling four years later case report"
+   ],
+   "df": {
+    "search": 1,
+    "pain and swelling upper part of body biopsy two months earlier developed stiffness followed by swelling four years later case report": 0
+   },
+   "score": [
+    1.0
+   ],
+   "k_witness": 0,
+   "k_median": 0,
+   "target_doc_values": []
+  },
+  "39f6781fd774_0f76017d:4": {
+   "n_docs": 16,
+   "doc_lengths": [
+    490,
+    570,
+    598,
+    567,
+    596,
+    646,
+    326,
+    42,
+    12,
+    592,
+    637,
+    560,
+    757,
+    146,
+    463,
+    42
+   ],
+   "doc_text_sha256": [
+    "d1b8128f57207f59773045dee767a64ce7e12ae83abd10cacfda58a81a5c970e",
+    "2dfeff8893d8eebe4dbf6e7df0fb4d2b44b007b6b49b431e5be4a6bc644dce4f",
+    "bc335125cb950fd4e3bb2a854699261af2fbaf1fef3c333be22a31557371da14",
+    "ab0695960b7cb36cbf8fbc18395038e8f61a7a3c964414c0079f74fd14ceca98",
+    "65099d24349a98f534b69e47bfbe68755e4387a369f93e1964c545d1e8118bb1",
+    "2d3b8c41ab0ddae183afb1e3d2bd84af67e0dbc47fe423ad531ab83e540a794c",
+    "301d1457260405e5f9b1e1afe397c6ff9380772c27580e921864910130ed1b5b",
+    "a8c1904c460ddd3ed0a53a7b23623f748c32fd845663af4af52cc35d92183321",
+    "c99e4965eda3a52442d067b417b0221c320501c612cdce64dbee7abf0ad39dbf",
+    "73db9b0aa0fd0eef7a6faf9941fe79772a93e0ea24b27b18827422194b9b160e",
+    "e5aa9d2965138e9cd57f4a14f93e40fd92264043a850b8420cbd956642d6745e",
+    "052e0080bd6075b019d054d5e6c7f53640a5d2c91d4e6ed8f76c223f8bc205be",
+    "e6cec74c51c7120e601f302f24627b40b6469ea37d06ef0a7ad5305927a0ae17",
+    "d0111c098488231c3d43ca42eb24323b11613edc5ed4ee3e490588b346ea7062",
+    "e90191583ab5c6500199e32c53a894de3ea80db162b1a6528324dcf4fc40bec7",
+    "facb1a533b5da0f067f7961b17e6da5508e451844e075f680543dd08c189f7a0"
+   ],
+   "doc_text_chars": [
+    2247,
+    2332,
+    2332,
+    2332,
+    2332,
+    2332,
+    1417,
+    209,
+    55,
+    2332,
+    2332,
+    2332,
+    1953,
+    407,
+    2024,
+    193
+   ],
+   "tool_name": "search",
+   "arg_leaf_values": [
+    "\"only\" \"in its country\" \"until\" \"relaunched\" \"New\" name included old name magazine"
+   ],
+   "df": {
+    "search": 3,
+    "\"only\" \"in its country\" \"until\" \"relaunched\" \"New\" name included old name magazine": 0
+   },
+   "score": [
+    0.3333333333333333,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0.3333333333333333,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0.3333333333333333
+   ],
+   "k_witness": 0,
+   "k_median": 7,
+   "target_doc_values": []
+  },
+  "39f6781fd774_0f76017d:6": {
+   "n_docs": 16,
+   "doc_lengths": [
+    490,
+    604,
+    592,
+    510,
+    588,
+    439,
+    48,
+    12,
+    597,
+    607,
+    625,
+    584,
+    757,
+    19,
+    242,
+    58
+   ],
+   "doc_text_sha256": [
+    "d1b8128f57207f59773045dee767a64ce7e12ae83abd10cacfda58a81a5c970e",
+    "171b5bb6fad49f0bdba79c8274a9a094d650d978b02fd36f26f5e4a3f2232662",
+    "70b6e562c242bc54392c2270f0b04c1bf459f5d7552cd14ef03e4a779bd56dd6",
+    "fa9f6f6e9b35c664b6436496ce3fb86d7f0e932b832dc877ef80c2af02eeb27b",
+    "6b613926614b732be04860c0d79903fffe4ef787464fe0bffb3864a291869977",
+    "46786b561249df358a42bec310176455e2bf97419e88ea705e24570cb2909097",
+    "2a1e5ef41c4b08881984d7611a05ea95ea926ef6644e7e80e9946678a5911861",
+    "c99e4965eda3a52442d067b417b0221c320501c612cdce64dbee7abf0ad39dbf",
+    "fe140e815e1ef8368c90ce7b21dc0fd2cfeb97b54979fe8ee14db1973751a407",
+    "cba294b36c53fe937fc4b8ff9270dd0dab6ab775597ac46821070f9efb6344d4",
+    "564187169552d9fdcea27edd46b20e55acc630567a52f89516772820b08a5b9e",
+    "2170a1e5f840f11e81b3121e32fde27f491a4f85bef4f2be9ad61a45ac0ccf57",
+    "c09f7cc1b83ae92daf237645ac42a0398f160cfaaeddb6b719d1e5a62c5262ae",
+    "b8470398b47387bdb0b36aca63de03e1d8b97d5c839aa450cc1edb78dfed937b",
+    "088a33984c7ebf48c90e41b6a5f56a050de484000c816194f51bf7018e8c277c",
+    "19ef10126a7988640b6a8acdc5e0f88d68ecb64dffd78dce4dea086118b31c22"
+   ],
+   "doc_text_chars": [
+    2247,
+    2332,
+    2332,
+    2332,
+    2332,
+    1986,
+    214,
+    55,
+    2332,
+    2332,
+    2332,
+    2332,
+    2295,
+    65,
+    507,
+    239
+   ],
+   "tool_name": "search",
+   "arg_leaf_values": [
+    "\"relaunched\" \"new name\" \"included\" \"previous name\" magazine \"only\" \"in the country\" \"first published\" 1970"
+   ],
+   "df": {
+    "search": 3,
+    "\"relaunched\" \"new name\" \"included\" \"previous name\" magazine \"only\" \"in the country\" \"first published\" 1970": 0
+   },
+   "score": [
+    0.3333333333333333,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0.3333333333333333,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0.3333333333333333
+   ],
+   "k_witness": 0,
+   "k_median": 7,
+   "target_doc_values": []
+  },
+  "39f6781fd774_2140ef43:4": {
+   "n_docs": 16,
+   "doc_lengths": [
+    370,
+    757,
+    53,
+    757,
+    22,
+    205,
+    52,
+    12,
+    626,
+    635,
+    757,
+    111,
+    757,
+    23,
+    424,
+    49
+   ],
+   "doc_text_sha256": [
+    "22aa9ba8012b96e9ed320095e20a8fe42f60a8b66f6df827c7a31dc8a6d2c490",
+    "5ba466b87df1ef76841bd6fb67438e8779135a57ba6e0070c3799c200adc2521",
+    "8362aff26254d2c8022b826763a389ecf7aa998b82815af4161c595039e9117a",
+    "62060a7250c3963828cd13f7c920644a5df3081e1e69e0cbdee76e0b20c5bcf6",
+    "7a85f39b1a85da9260b0438a9670fcb76119e13728cf643d86507e132698e22d",
+    "cca83a2a52d9141ad4eb70e0383ca1fe2b300783446cb30ca99408b70bcf587d",
+    "939b7adaca5aa2c11e67e349eea5eb70908a5d51cc65ab9e791c57349d6d136d",
+    "c99e4965eda3a52442d067b417b0221c320501c612cdce64dbee7abf0ad39dbf",
+    "6c9a435b8789312afec0481ff6b686e6c2bc1ae0887d6c6fcc32b0a238813e83",
+    "0696d4e5405929639c0135e0a70d46e9926fb4e0afd6cba6b2c335bad90c6ccb",
+    "13dd506003a0350e914683bedff74b4d302c79ce4e66e06e967f6091baf8b6e5",
+    "3b15f4da000d0cc3df7d1e7741e37b605bc0b6c8e9e5956806561c79513df0d4",
+    "e1dddf9aa6102b9e7e0000966d2abab741ac8387ed74ccc5de29d5142c575d35",
+    "e3d655b2523d1f9551c305723a1257fffa844b03172bfcfda1bcde075fb9c85d",
+    "19294273c69ba3ce0150972dfa547dd9217c95938f88e8c9618a7a8e056494b1",
+    "2af297f42f8e39d6c7f35787d8bd1fc21f373b6fc617d29af7bccfd3665307e0"
+   ],
+   "doc_text_chars": [
+    1836,
+    2225,
+    135,
+    2250,
+    110,
+    882,
+    210,
+    55,
+    2332,
+    2332,
+    2099,
+    261,
+    2294,
+    66,
+    953,
+    196
+   ],
+   "tool_name": "search",
+   "arg_leaf_values": [
+    "Jakarta capital projected population over 300 million in 2050 country projected 300 million 2050 capital Jakarta"
+   ],
+   "df": {
+    "search": 3,
+    "Jakarta capital projected population over 300 million in 2050 country projected 300 million 2050 capital Jakarta": 0
+   },
+   "score": [
+    0.3333333333333333,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0.3333333333333333,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0.3333333333333333
+   ],
+   "k_witness": 0,
+   "k_median": 7,
+   "target_doc_values": []
+  },
+  "39f6781fd774_21434cf8:1": {
+   "n_docs": 1,
+   "doc_lengths": [
+    327
+   ],
+   "doc_text_sha256": [
+    "189edd4c713a9f2e58a33aee293549598df5f4a44f6818f4cfd42f850a1becc5"
+   ],
+   "doc_text_chars": [
+    1677
+   ],
+   "tool_name": "search",
+   "arg_leaf_values": [
+    "\"historic collection\" \"resource sharing\" African country landmass between one million and 1.3 million square kilometers"
+   ],
+   "df": {
+    "search": 1,
+    "\"historic collection\" \"resource sharing\" African country landmass between one million and 1.3 million square kilometers": 0
+   },
+   "score": [
+    1.0
+   ],
+   "k_witness": 0,
+   "k_median": 0,
+   "target_doc_values": []
+  },
+  "39f6781fd774_21434cf8:7": {
+   "n_docs": 16,
+   "doc_lengths": [
+    327,
+    12,
+    561,
+    607,
+    558,
+    557,
+    575,
+    385,
+    31,
+    12,
+    530,
+    495,
+    467,
+    568,
+    179,
+    43
+   ],
+   "doc_text_sha256": [
+    "189edd4c713a9f2e58a33aee293549598df5f4a44f6818f4cfd42f850a1becc5",
+    "c99e4965eda3a52442d067b417b0221c320501c612cdce64dbee7abf0ad39dbf",
+    "1969f6040657e6234200b159d18a9e88fe49c0c305471559a427249f5406401c",
+    "64ad20ea699305bc0a2b5f4500201b38d16775c38e3a36d5779bec1c5f999dfe",
+    "c3c5d6b84aff1f7e913473285ad8d3e11a4b0c4e53376c23a1d24c2560aa56cb",
+    "a8e63c9736011b7e8493f00a0435ce0361f90eeec2b5c14238ca9e78828bed67",
+    "1ba2dffc35158dc36fbe67d2d99d3d9aa647a183288a4bba914a8b5c70784a59",
+    "2e5aa214fe1d73c66fb4c70324f159120af528b1458ff0dc0edd9c077bffd595",
+    "8c56a726b87a7858197ae7d24777704af139d52fcecafe7154e650828cc41ff4",
+    "c99e4965eda3a52442d067b417b0221c320501c612cdce64dbee7abf0ad39dbf",
+    "5c909a8ddd6c6daea6157243b7fb3cbdfd6430186fa04631a295848f1f749147",
+    "2d29b95e2ba94f23ac325afdcf953ed651160257014b8c952c31e97f9a776906",
+    "4c07fa70e7fa30ffdc7d18ef0a616f8235a8d33036ab18ae5fe89e1642929d88",
+    "189a1c6a390f5a63201b6df10650368bfe9dc91234d1e115dccbc748d6bf7598",
+    "5ff11d68e7d22efb3d48fb66671248defa24b25a842d9619fe99f1fefe248ea9",
+    "49b4f6f948898d511d83b5b1525c1c5360b77c37fa48aff57689a4730419277e"
+   ],
+   "doc_text_chars": [
+    1677,
+    55,
+    2332,
+    2332,
+    2332,
+    2332,
+    2332,
+    1637,
+    133,
+    55,
+    2332,
+    2332,
+    2332,
+    2332,
+    817,
+    205
+   ],
+   "tool_name": "search",
+   "arg_leaf_values": [
+    "Ibrahim Alhaji Usman Gateway Model of Resource Sharing among Libraries symposium paper reference"
+   ],
+   "df": {
+    "search": 2,
+    "Ibrahim Alhaji Usman Gateway Model of Resource Sharing among Libraries symposium paper reference": 0
+   },
+   "score": [
+    0.5,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0.5
+   ],
+   "k_witness": 0,
+   "k_median": 7,
+   "target_doc_values": []
+  },
+  "39f6781fd774_48ec7fe3:1": {
+   "n_docs": 1,
+   "doc_lengths": [
+    440
+   ],
+   "doc_text_sha256": [
+    "6eb57a326c47e5e7475c858497de1e14acd76c135a27146c994e29a5e5ce02c1"
+   ],
+   "doc_text_chars": [
+    1889
+   ],
+   "tool_name": "search",
+   "arg_leaf_values": [
+    "\"highest wicket-taker\" for his country in the World Cup before 2022 inducted into the ICC Hall of Fame"
+   ],
+   "df": {
+    "search": 1,
+    "\"highest wicket-taker\" for his country in the World Cup before 2022 inducted into the ICC Hall of Fame": 0
+   },
+   "score": [
+    1.0
+   ],
+   "k_witness": 0,
+   "k_median": 0,
+   "target_doc_values": []
+  },
+  "39f6781fd774_48ec7fe3:2": {
+   "n_docs": 9,
+   "doc_lengths": [
+    440,
+    12,
+    641,
+    713,
+    671,
+    639,
+    556,
+    11,
+    52
+   ],
+   "doc_text_sha256": [
+    "6eb57a326c47e5e7475c858497de1e14acd76c135a27146c994e29a5e5ce02c1",
+    "c99e4965eda3a52442d067b417b0221c320501c612cdce64dbee7abf0ad39dbf",
+    "265a9f2bd5c38fa695a2eb99fb63596b3fd451f1053eae220b5240abba853567",
+    "26d8f1b5cea43de81d20ccab620e6c607a016350e7ecea46ef72cf8ecd29b0d3",
+    "a258e78e4d151a3de9312307877b1c790abd701c85091b9677db35726106240e",
+    "69bcf8bf0e301375c7d926861376595ffc397508526dbb3a0119c4681616adc2",
+    "ea598e35cf5bb5265416c9d56a13c88f338b17a4d820a505245c1a3b40c5ab55",
+    "dfc84220fea3edd96e637dd60bf3ddc02a0eb645db2bb077ab7e46feeefdce79",
+    "e3ce45804a055ace92770467f4e9f0fe846596b31afbede2290e47336419eff0"
+   ],
+   "doc_text_chars": [
+    1889,
+    55,
+    2332,
+    2332,
+    2332,
+    2332,
+    2332,
+    40,
+    226
+   ],
+   "tool_name": "search",
+   "arg_leaf_values": [
+    "ICC Hall of Fame inductee captain 1982 1983 retired 1993"
+   ],
+   "df": {
+    "search": 2,
+    "ICC Hall of Fame inductee captain 1982 1983 retired 1993": 0
+   },
+   "score": [
+    0.5,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0.5
+   ],
+   "k_witness": 0,
+   "k_median": 4,
+   "target_doc_values": []
+  },
+  "39f6781fd774_559fb693:10": {
+   "n_docs": 16,
+   "doc_lengths": [
+    433,
+    735,
+    744,
+    629,
+    694,
+    652,
+    71,
+    39,
+    12,
+    630,
+    637,
+    582,
+    611,
+    594,
+    252,
+    42
+   ],
+   "doc_text_sha256": [
+    "8a61c69331ab0fc68609aae9761bbb71b2a4e277d72c29927cfc08b38781f40a",
+    "2b66bd8ea00d0f51f7d21e4b40743c168855db1b418077313705386d0e4601b1",
+    "cd94e2209d670bc18a59741a2ea42a071cbfe01f899c2da076635d25049907bb",
+    "bbc6a4a34698e514c57d9a2eee5986fd9adfbddd3a264c450c9ed259d62c5832",
+    "e93793f855bbce0b902575795b53706070075385f07b6f03e67e9e04874922a6",
+    "487e639cb54b168019cf3b5d50308d8b612597bf8f25ff14a62cbc2c5ef57021",
+    "549ca0a37fba1d2c23849f2e332d1eb76788a5e7e0ae1b26f667171f68173498",
+    "fd74bd1c4f11d90c6a32cebc83de830bb76175c6f3bf07d7cbf8fb7f8db7cab9",
+    "c99e4965eda3a52442d067b417b0221c320501c612cdce64dbee7abf0ad39dbf",
+    "a0d35fa8c75e713b23f8e1c21e19f4e0e20c5ec99a47fcb8fafde828cd276d42",
+    "7d1759635d3e06b6b16433205ef7ec52ac86cea9e6cbd7cdb1b970e2a9efcc15",
+    "56543d72b01fd18fe18a884697ec4491317d9ac4f78bb7b46e71d8bbf4e1f927",
+    "b6cf133a05c18f1fb39898caf6d7f467c7a721d6a88fd326b08f9fa6b2936d71",
+    "bf29ac5eaabdf26dbaddf7d3bd3c12ca094f2c430d6f66e50ef88b42101efa55",
+    "ea43cafade09a116ca1505e537675993aaee1cbd320bcde3796b906af7c6a2b1",
+    "82f2de97f63e12e230add3cbd9769da8a4c74bea62b22a2673a2ad7e7d772a47"
+   ],
+   "doc_text_chars": [
+    2134,
+    2332,
+    2332,
+    2332,
+    2332,
+    2332,
+    265,
+    207,
+    55,
+    2332,
+    2332,
+    2332,
+    2332,
+    2332,
+    930,
+    191
+   ],
+   "tool_name": "search",
+   "arg_leaf_values": [
+    "\"evil scientist\" \"three henchmen\" \"Profesor Neurus\" Pucho Granhampa Dedo Negro"
+   ],
+   "df": {
+    "search": 3,
+    "\"evil scientist\" \"three henchmen\" \"Profesor Neurus\" Pucho Granhampa Dedo Negro": 0
+   },
+   "score": [
+    0.3333333333333333,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0.3333333333333333,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0.3333333333333333
+   ],
+   "k_witness": 0,
+   "k_median": 7,
+   "target_doc_values": []
+  },
+  "39f6781fd774_559fb693:15": {
+   "n_docs": 16,
+   "doc_lengths": [
+    433,
+    713,
+    726,
+    712,
+    678,
+    614,
+    162,
+    36,
+    12,
+    637,
+    650,
+    601,
+    609,
+    570,
+    252,
+    46
+   ],
+   "doc_text_sha256": [
+    "8a61c69331ab0fc68609aae9761bbb71b2a4e277d72c29927cfc08b38781f40a",
+    "cbb7ebf0c3ba38b9413e4e9a771c2329ce2b3694b154f53deca355d6b40aeb99",
+    "d93eb68b7b0f033a8963063a0af35baee93996fb0df560583ab616810870dca6",
+    "704640ec48f8be8f9312d402dbf6b7f3e920f4640fd9575961f067a4412f63fd",
+    "c858039d1eef28667f7ee108aad809f6d35bd0277ce83765298df7c404ec36b8",
+    "bb433fba25d9602aa6205c1d65a3b195dd0c25e2c0005a4826926505dec11544",
+    "131c7bd70a7a31038f52363fb817be8450e33e528b141574f68cec6bdcaa49a1",
+    "4d4bf36e1272cd703d2ec9edaa5a8ddda0d607588404ae658cd17213039d2626",
+    "c99e4965eda3a52442d067b417b0221c320501c612cdce64dbee7abf0ad39dbf",
+    "7d6787529204025dd4c090ad9e519e1d606c460e1c885cf23860c4435d91d6d3",
+    "8ed8b63768062b3b39dd5425dc24953801e0d07f35a484c68a481496173551ef",
+    "fa8a8d983766c9f2ad2066a722922332570a7bff0f442b3b21ccc2b3ea9feb27",
+    "c24bc654618e25de3f86e0a76ea002279264a49bf28fa08cb4533c30f3e18954",
+    "9f63156ca5292aa7b14a8284fcde26e7206b825bd9aa3845743fd22380949a02",
+    "25e4155b3e1de0fcc0ebba7521ccd2788ea89193646825950d9134331a882c28",
+    "52d538b41134a49c637144389a1daab7887162aa763e182d101b55c030baf07f"
+   ],
+   "doc_text_chars": [
+    2134,
+    2332,
+    2332,
+    2332,
+    2332,
+    2332,
+    681,
+    169,
+    55,
+    2332,
+    2332,
+    2332,
+    2332,
+    2332,
+    1005,
+    204
+   ],
+   "tool_name": "search",
+   "arg_leaf_values": [
+    "site:wikipedia.org \"Anteojito y Antifaz\" film scene regular clothes"
+   ],
+   "df": {
+    "search": 3,
+    "site:wikipedia.org \"Anteojito y Antifaz\" film scene regular clothes": 0
+   },
+   "score": [
+    0.3333333333333333,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0.3333333333333333,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0.3333333333333333
+   ],
+   "k_witness": 0,
+   "k_median": 7,
+   "target_doc_values": []
+  },
+  "39f6781fd774_75c29c1d:1": {
+   "n_docs": 1,
+   "doc_lengths": [
+    388
+   ],
+   "doc_text_sha256": [
+    "fa66c0333cab2339e405062a23ea049f35103902359b6ac19cbdb5b575e3579c"
+   ],
+   "doc_text_chars": [
+    1806
+   ],
+   "tool_name": "search",
+   "arg_leaf_values": [
+    "\"Royal Command Performance\" jazz bassist composer arranger born 1940 died 2012"
+   ],
+   "df": {
+    "search": 1,
+    "\"Royal Command Performance\" jazz bassist composer arranger born 1940 died 2012": 0
+   },
+   "score": [
+    1.0
+   ],
+   "k_witness": 0,
+   "k_median": 0,
+   "target_doc_values": []
+  },
+  "39f6781fd774_79248acd:1": {
+   "n_docs": 1,
+   "doc_lengths": [
+    408
+   ],
+   "doc_text_sha256": [
+    "c7022cd94e8d90c3a4dd15af49e103de54d2b0e59e9633baa58c1b181d47951e"
+   ],
+   "doc_text_chars": [
+    1847
+   ],
+   "tool_name": "search",
+   "arg_leaf_values": [
+    "\"two siblings\" model \"kicked out\" university third year 2023 interview"
+   ],
+   "df": {
+    "search": 1,
+    "\"two siblings\" model \"kicked out\" university third year 2023 interview": 0
+   },
+   "score": [
+    1.0
+   ],
+   "k_witness": 0,
+   "k_median": 0,
+   "target_doc_values": []
+  },
+  "39f6781fd774_79248acd:10": {
+   "n_docs": 16,
+   "doc_lengths": [
+    408,
+    703,
+    757,
+    24,
+    698,
+    32,
+    46,
+    12,
+    719,
+    757,
+    51,
+    757,
+    35,
+    577,
+    470,
+    42
+   ],
+   "doc_text_sha256": [
+    "c7022cd94e8d90c3a4dd15af49e103de54d2b0e59e9633baa58c1b181d47951e",
+    "036a8df893ce71e1544ad8bd997efc5625abd6157762f7a69f585bc3a419b355",
+    "ad606c9430cf2d43c2c313737b268eb680922b265049b607f89e0691d04f7002",
+    "2f922311e011fd15cbd00ff840ff407844e5708a8d291407af290467f968b011",
+    "48f4c5dc32ee095f81da4fc8ae73fd9ffa0ed3ccb345b93a969cdb9eb9986983",
+    "29056a89f1000c664c299e5fe541d2278fe944293873b4f7d7a2c1dadc38cceb",
+    "4a8e469737e2e9c42a85461775bb9d29aa19a0af0665be859fd0598025b409bc",
+    "c99e4965eda3a52442d067b417b0221c320501c612cdce64dbee7abf0ad39dbf",
+    "711a642141f40ca9dee1efd3daa9334c8c9055169157033cba87732f3bd600f5",
+    "1013d1c86211efbc13a4784b899ae2a5bc10d207efd89619953530a0712bc81c",
+    "9a35b607614357d947be5872f26d71454cd58a93abf51002568a034960f910da",
+    "de818e6dd53a4deaa8b35833b8ccfd550831828506ab2ec2174c9b6c02735bcd",
+    "20b408bbb81856d109530527a30dd0281673cc7bbd553f4369c0261d66cca002",
+    "ecf80bf8218ce990a2abe6c48492b38fb27edf7fc1e2f73184d3674bb6810376",
+    "ce7888804abcb67c439ebfdfc5d3229034aee1e01f66d5ffc4cdcaf7c2df6090",
+    "169e5a2c6c632451b200b574fa8216baf967e5a38195f5d634e1d90fd7ff9f15"
+   ],
+   "doc_text_chars": [
+    1847,
+    2332,
+    2264,
+    96,
+    2332,
+    75,
+    192,
+    55,
+    2332,
+    2180,
+    180,
+    2206,
+    154,
+    2332,
+    1325,
+    159
+   ],
+   "tool_name": "search",
+   "arg_leaf_values": [
+    "2023 article Yvonne Godswill Awanga two siblings model"
+   ],
+   "df": {
+    "search": 4,
+    "2023 article Yvonne Godswill Awanga two siblings model": 0
+   },
+   "score": [
+    0.25,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0.25,
+    0,
+    0.25,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0.25
+   ],
+   "k_witness": 0,
+   "k_median": 7,
+   "target_doc_values": []
+  },
+  "39f6781fd774_871064a0:2": {
+   "n_docs": 11,
+   "doc_lengths": [
+    385,
+    12,
+    757,
+    44,
+    752,
+    757,
+    80,
+    757,
+    59,
+    104,
+    49
+   ],
+   "doc_text_sha256": [
+    "edce228d8b29fe13ab23c24daf8720d0707ed1d322da9863e57a6b1a124fcb93",
+    "c99e4965eda3a52442d067b417b0221c320501c612cdce64dbee7abf0ad39dbf",
+    "8c7f63ae75a7db218dae691b10140a519b3d7948ef04560538c5009e791b0fd8",
+    "c46dccb71f1ba4b3aefca677c3c1d926439269c227a8f2eb0286c7d1634b1391",
+    "d8be2ce59200c51c593b61a7f271775a0c9119e7df062e37b81acfd2eb95bd1b",
+    "501b6d2c304f1c3f8f2de7db582638b172888fe21494f30e1a7ff38553ffb8ba",
+    "70d93823b0a7bb6f61f3702708bd84a3b397651294d6aec027695cf11093c9a6",
+    "bd122dc15a4057d056fcaa55bf957d49e8ac1ecd2283745d7276d9ce887beee9",
+    "faeb930340952e61d9f51d91b80337d73258adc388458a0b65a56a2f381e5207",
+    "4a8ce30243d3ec457dc9a8dbeb44071fbb1ba960f598d39f5a28177224d1d6e3",
+    "aca2205df707fd7603b4dcf3587f5162aa92f47ec5707b50c9e1aa6a01652266"
+   ],
+   "doc_text_chars": [
+    1685,
+    55,
+    2239,
+    121,
+    2332,
+    2163,
+    197,
+    2145,
+    215,
+    366,
+    204
+   ],
+   "tool_name": "search",
+   "arg_leaf_values": [
+    "1950s comedy film directed by \"died\" Cannes 1990 \"Paris\" actress"
+   ],
+   "df": {
+    "search": 2,
+    "1950s comedy film directed by \"died\" Cannes 1990 \"Paris\" actress": 0
+   },
+   "score": [
+    0.5,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0.5
+   ],
+   "k_witness": 0,
+   "k_median": 5,
+   "target_doc_values": []
+  },
+  "39f6781fd774_a3032232:1": {
+   "n_docs": 1,
+   "doc_lengths": [
+    393
+   ],
+   "doc_text_sha256": [
+    "3d5d9d2ac0e121a4999c55883f48ce5db82fa742b7d6f447af2d3dd0d6f9f0f9"
+   ],
+   "doc_text_chars": [
+    1811
+   ],
+   "tool_name": "search",
+   "arg_leaf_values": [
+    "\"based on a collection of earlier writings\" \"first book\" 1978 edited volume 2010"
+   ],
+   "df": {
+    "search": 1,
+    "\"based on a collection of earlier writings\" \"first book\" 1978 edited volume 2010": 0
+   },
+   "score": [
+    1.0
+   ],
+   "k_witness": 0,
+   "k_median": 0,
+   "target_doc_values": []
+  },
+  "39f6781fd774_b09911cf:1": {
+   "n_docs": 1,
+   "doc_lengths": [
+    338
+   ],
+   "doc_text_sha256": [
+    "d3cd44728360925eef857398cc4e6f8c65e445271c92e999be151df7a48ee3cf"
+   ],
+   "doc_text_chars": [
+    1678
+   ],
+   "tool_name": "search",
+   "arg_leaf_values": [
+    "\"production company\" produced award-winning children's TV series launched a digital platform benefits fellow musicians"
+   ],
+   "df": {
+    "search": 1,
+    "\"production company\" produced award-winning children's TV series launched a digital platform benefits fellow musicians": 0
+   },
+   "score": [
+    1.0
+   ],
+   "k_witness": 0,
+   "k_median": 0,
+   "target_doc_values": []
+  },
+  "4fad8197a4ef_97f84dd8:10": {
+   "n_docs": 16,
+   "doc_lengths": [
+    361,
+    12,
+    659,
+    688,
+    612,
+    567,
+    597,
+    210,
+    47,
+    12,
+    658,
+    688,
+    612,
+    644,
+    408,
+    42
+   ],
+   "doc_text_sha256": [
+    "4c39242b91f18b7cc97c56afac3f44a3b3aec222366228b5f70edc606b2022b0",
+    "c99e4965eda3a52442d067b417b0221c320501c612cdce64dbee7abf0ad39dbf",
+    "8ec7a8b132ae80480a8853b9dbdef69d3511cc8015bcfe2ee2b983a0d24c2f74",
+    "dab394d61a45af72882344ddae1c423fac8f95ed10cd8938effe218de91b89b3",
+    "05e8eb883d025580a4d8d204cc7194742943d1bce5d8898ffe6eb02224a5a791",
+    "d0b959c366f4c4fb6efc6c7b889c98d59d75ba58b52771512694f81df06aad36",
+    "a706428f83dab0495b429681120f74a08fb40d9196a16c4d20f2b91890123750",
+    "811edbcc7cecae322c212779d7d349a4424176ae0cf6e65a57f25da96d3a9ec7",
+    "fceb6350996f3505becedcaed8ab927ea711964592f7d3e50ff78bcfa15687ab",
+    "c99e4965eda3a52442d067b417b0221c320501c612cdce64dbee7abf0ad39dbf",
+    "e7b985ca8465620de647721feb3f99120e250e6af18ea46e8db9675e24aaf938",
+    "86b38b8ed6159a79b53702d73aa04a03665e99a3d92bd1eedc62ecedacb8832f",
+    "4a9b12d114dde925e07c86f16760d1cf8b6ac4dd2dd172f5ae9baabf915f773f",
+    "08aa20939bc5d6be05be80e81e9c1864bd903cbf8a0692eb07a8d5b254accdde",
+    "ea59d247932786a0e67ec447b8d3ad0b78454a64dbd16de3c2fc69d44e911177",
+    "5e9758421c12649521f6882679ac4de91d3597318bdc58cbb1c6872cd4ad6341"
+   ],
+   "doc_text_chars": [
+    1762,
+    55,
+    2332,
+    2332,
+    2332,
+    2332,
+    2332,
+    887,
+    192,
+    55,
+    2332,
+    2332,
+    2332,
+    2332,
+    1799,
+    208
+   ],
+   "tool_name": "search",
+   "arg_leaf_values": [
+    "\"International Booker Prize\" Wikipedia \"2005\" first winner Ismail Kadare"
+   ],
+   "df": {
+    "search": 3,
+    "\"International Booker Prize\" Wikipedia \"2005\" first winner Ismail Kadare": 0
+   },
+   "score": [
+    0.3333333333333333,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0.3333333333333333,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0.3333333333333333
+   ],
+   "k_witness": 0,
+   "k_median": 7,
+   "target_doc_values": []
+  },
+  "4fad8197a4ef_97f84dd8:38": {
+   "n_docs": 16,
+   "doc_lengths": [
+    361,
+    662,
+    614,
+    732,
+    601,
+    285,
+    37,
+    12,
+    602,
+    676,
+    669,
+    614,
+    757,
+    44,
+    145,
+    44
+   ],
+   "doc_text_sha256": [
+    "4c39242b91f18b7cc97c56afac3f44a3b3aec222366228b5f70edc606b2022b0",
+    "89818ac97d3d1fcc03731183716ce050801a84e0c940057550699535a5540b5f",
+    "b372578855904cfb76548144e83cb0ade520dd5c18ad8c95a6d1716d4a35e596",
+    "c9dc6b25ff76cfdccf659222335441c3e2e5e8987d6ae675b8c11bcf292513ab",
+    "288e6df95e84813f43c5e73b2116e6c2dde6acc04951aefd9eada0a4ac237590",
+    "fc61a19ab9f7daf9740347502c636727a54fef01bd981b708f17dbc30bb27c36",
+    "5dfcd798f851fb0ca627e1062aaff051db4d561393963862715f22f29e6de0d7",
+    "c99e4965eda3a52442d067b417b0221c320501c612cdce64dbee7abf0ad39dbf",
+    "3bb647e5a07d042fb96191037f55a57756613769d8045e70b84494b965b36814",
+    "c7ac41253b4a8ba1cc8947565b6a33582ba1fe35697bb2a5ae9bd2dc2771ee4c",
+    "fc1b8c01b4af7bf74f0f125d846b1a93fc1d8bf2c36ffa3d2cefd4e9cbd8de2d",
+    "2c1952351f8eab66f69a1d63d79728cd172c926095ec4049eefd5ce5ba5108f8",
+    "dcc79c96a8ec42e1de323f72ac63dec3498746f2c97cd846385362ea01aa83b2",
+    "fd411360876860bb8a47c1b07363a635e5d0a15c26d799cd0816b33425f5da38",
+    "f2ef843eb6f314fdadf54755b94904cd43641aae32a64af1ead437935573823e",
+    "645bffa34ac1833b05c3f4e1300ca6df4674cea0a50903a57b1c6b6e53b7f336"
+   ],
+   "doc_text_chars": [
+    1762,
+    2332,
+    2332,
+    2332,
+    2332,
+    1174,
+    189,
+    55,
+    2332,
+    2332,
+    2332,
+    2332,
+    2185,
+    175,
+    405,
+    202
+   ],
+   "tool_name": "search",
+   "arg_leaf_values": [
+    "\"Anxious People\" Fredrik Backman published 2019 International Booker Prize longlist 2021 translated 30 languages"
+   ],
+   "df": {
+    "search": 3,
+    "\"Anxious People\" Fredrik Backman published 2019 International Booker Prize longlist 2021 translated 30 languages": 0
+   },
+   "score": [
+    0.3333333333333333,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0.3333333333333333,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0.3333333333333333
+   ],
+   "k_witness": 0,
+   "k_median": 7,
+   "target_doc_values": []
+  },
+  "56c19f19c4f2_c240d17d:3": {
+   "n_docs": 4,
+   "doc_lengths": [
+    449,
+    748,
+    33,
+    552
+   ],
+   "doc_text_sha256": [
+    "c5c030651844df4b2988e4773de18954038f0ae219556e3f2a692fb6223d4624",
+    "974fd0d75d88385bd617ce683c7c6ab75c7d73d7842e78106c2b54f171f9279d",
+    "631aa44e9ade3ec22e9441cb7c7f7ebaf22bc976c6d5fcd1807c1bc4690b90eb",
+    "02867cda54a3166095344a71b9c42bdf7701edb09a286bad9ead1872720116c6"
+   ],
+   "doc_text_chars": [
+    2193,
+    1466,
+    139,
+    986
+   ],
+   "tool_name": "simple_note__search_notes",
+   "arg_leaf_values": [
+    "false",
+    "bucket list",
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJzaW1wbGVfbm90ZStqYS1zb2xvbW9uQGdtYWlsLmNvbSIsImV4cCI6MTY4NDQxMjA5OH0.Aqir7P4W70fG_SnVbsTijUUdrDvHG6oCQCZsI1zA8iE"
+   ],
+   "df": {
+    "simple_note__search_notes": 1,
+    "false": 0,
+    "bucket list": 2,
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJzaW1wbGVfbm90ZStqYS1zb2xvbW9uQGdtYWlsLmNvbSIsImV4cCI6MTY4NDQxMjA5OH0.Aqir7P4W70fG_SnVbsTijUUdrDvHG6oCQCZsI1zA8iE": 1
+   },
+   "score": [
+    0.5,
+    0,
+    0,
+    2.5
+   ],
+   "k_witness": 3,
+   "k_median": 1,
+   "target_doc_values": [
+    [
+     "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJzaW1wbGVfbm90ZStqYS1zb2xvbW9uQGdtYWlsLmNvbSIsImV4cCI6MTY4NDQxMjA5OH0.Aqir7P4W70fG_SnVbsTijUUdrDvHG6oCQCZsI1zA8iE",
+     1
+    ],
+    [
+     "bucket list",
+     2
+    ]
+   ]
+  },
+  "8eafd208fd5d_002d69b6:1": {
+   "n_docs": 1,
+   "doc_lengths": [
+    482
+   ],
+   "doc_text_sha256": [
+    "3f39b4496775394d1ccce75a17c7047207129a47b5421fc111e08393ba15b498"
+   ],
+   "doc_text_chars": [
+    2456
+   ],
+   "tool_name": "mcp__environment__search",
+   "arg_leaf_values": [
+    "\"nine authors\" mental health research 2018 2019 2020 six authors same institution"
+   ],
+   "df": {
+    "mcp__environment__search": 1,
+    "\"nine authors\" mental health research 2018 2019 2020 six authors same institution": 0
+   },
+   "score": [
+    1.0
+   ],
+   "k_witness": 0,
+   "k_median": 0,
+   "target_doc_values": []
+  },
+  "8eafd208fd5d_002d69b6:11": {
+   "n_docs": 16,
+   "doc_lengths": [
+    482,
+    675,
+    509,
+    491,
+    680,
+    716,
+    326,
+    47,
+    527,
+    507,
+    514,
+    594,
+    549,
+    663,
+    26,
+    61
+   ],
+   "doc_text_sha256": [
+    "3f39b4496775394d1ccce75a17c7047207129a47b5421fc111e08393ba15b498",
+    "1bbe7bebc04c38bc5c4df411aa77d13bc118f63ea01311e2ad40d9797bd91fed",
+    "caf82f3afd04d46bf9cae912b322dfb91d9cb8dfea27828e1d88e0ad8295b3a3",
+    "b552f1dc682cc4a4942afd7efae9525140cc808ddf03ad676a3011b8aa2c1674",
+    "3356fd167b19b9096d498a67030c6da90aa1deaa466e4db5fb1a16bcddfb6185",
+    "7e3af7150d93b9e7f21ac240862baf5ad4407fde433fa8fd0b11f36aa5b59173",
+    "6b23e641cf7101bf5263e259eac455d0ab69e4412f81a048040f07327075a7f2",
+    "352174f2b1234f9f19a05af04f355fbcc45f4c2c915d68e2cd46efa6c85e8595",
+    "03715cd90b85f3b32911db4594bcabca810fac78f2795cbb85a02bc8bf1eab42",
+    "782e4bc2cfaf4e33eca0a0122c7e55cc3be95b3a52091ff784e8f06130a06ff2",
+    "ea54bc5a41c9950fd00195e649f6e87f5b8c643176a07c2a0ab85b7233469a34",
+    "0f3e1145d4d1e73dd0c970994d480819a357dbb49c0183cf644df9f9fe679499",
+    "3648573f5094032cb363a591b260e085a41e61a74c5f19997dc62c66c097d65f",
+    "a15c3a1aab99ac7bb83308f87784a6e0448cfca31927e57383cc62066d3042d4",
+    "b142834487a52eb9f4ea10c8355b1238470a388d47d507fd1615008cfaf7aa8a",
+    "a4f773b974ce1d0d24aeb668d0c4aba8c630a42c8dd31fbd7906cde21e725e87"
+   ],
+   "doc_text_chars": [
+    2456,
+    2332,
+    2332,
+    2332,
+    2332,
+    2332,
+    872,
+    222,
+    2332,
+    2332,
+    2332,
+    2332,
+    2332,
+    2332,
+    130,
+    322
+   ],
+   "tool_name": "mcp__environment__search",
+   "arg_leaf_values": [
+    "\"mental health\" \"University of California\" \"Los Angeles\" \"San Diego\" \"Berkeley\" authors 9 2019"
+   ],
+   "df": {
+    "mcp__environment__search": 3,
+    "\"mental health\" \"University of California\" \"Los Angeles\" \"San Diego\" \"Berkeley\" authors 9 2019": 0
+   },
+   "score": [
+    0.3333333333333333,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0.3333333333333333,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0.3333333333333333
+   ],
+   "k_witness": 0,
+   "k_median": 7,
+   "target_doc_values": []
+  },
+  "8eafd208fd5d_0eb5b36a:29": {
+   "n_docs": 16,
+   "doc_lengths": [
+    538,
+    66,
+    613,
+    626,
+    662,
+    556,
+    611,
+    378,
+    131,
+    658,
+    559,
+    573,
+    603,
+    659,
+    433,
+    40
+   ],
+   "doc_text_sha256": [
+    "832a765effa674865461139d3d4ca4e809c53fbcd2efad2f5f740389e276ed27",
+    "876d3537f8e5b857bc52fae52916e1651cd96d615d7c3dfb5a80ab53b98370e3",
+    "786b2d82cf880d6f5de82d434996af82605c82425dd6424bcd3a6488346162c1",
+    "646445d8a59b670d111316043c6cd570de25c252e53dcd13b039dee19cb7cf65",
+    "456fc878c28c2f00c368bd94925fc9cb862de3bb1a59e9c0f4231a6aa02ee8ce",
+    "778e48c7dafd3eebc0fad2b5fa06b4cb7fa408b5b1d335ca9031a8870f7ce470",
+    "1f36d3c6b4cb8666124115c69b42b85dfc0521155056c4a334f6e72ae89dd5e6",
+    "d19fa764f728ea8ff6209be8e41c2fda3a5a6b402de8b62dbb9fa9b635d47e4b",
+    "71acf73933f21f0512621d94916546d832951890a4ccd627678eee1d339e2c8c",
+    "a7a159b187f6c819d1e2031c2f3c2226a7a3f8520d0db6bfead2a815e8e87124",
+    "324f7cbdcaab092d04f25d5822bc3cfdc87a562e7d9b354fdb870cecb04bd3ef",
+    "1f163b358cbc4c094f5cab462978ce967a4372923001bac4350081462e4b2ac9",
+    "c1a4c7e24e44bd26e2f660c979f0b5ea72092b2b48d87836c629d54354a02df3",
+    "7d14e02b186404218a3db610292f102dbd86f56c54f5b54855471be44c6e661a",
+    "e6f3793ee2351851d70dc91cc0f92bfc1d15ef31f59cff30638767fb038642e8",
+    "6d72089fcdcbeaf4975e31f57b916687bd1e873f3710286d6af65840df598606"
+   ],
+   "doc_text_chars": [
+    2734,
+    299,
+    2332,
+    2332,
+    2332,
+    2332,
+    2332,
+    1600,
+    538,
+    2332,
+    2332,
+    2332,
+    2332,
+    2332,
+    1649,
+    179
+   ],
+   "tool_name": "mcp__environment__search",
+   "arg_leaf_values": [
+    "\"John A. Macdonald\" thesis University of Toronto"
+   ],
+   "df": {
+    "mcp__environment__search": 4,
+    "\"John A. Macdonald\" thesis University of Toronto": 0
+   },
+   "score": [
+    0.25,
+    0.25,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0.25,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0.25
+   ],
+   "k_witness": 0,
+   "k_median": 7,
+   "target_doc_values": []
+  },
+  "8eafd208fd5d_0eb5b36a:5": {
+   "n_docs": 16,
+   "doc_lengths": [
+    538,
+    57,
+    86,
+    692,
+    570,
+    757,
+    131,
+    674,
+    75,
+    44,
+    561,
+    651,
+    638,
+    660,
+    560,
+    44
+   ],
+   "doc_text_sha256": [
+    "832a765effa674865461139d3d4ca4e809c53fbcd2efad2f5f740389e276ed27",
+    "ae29c29cee91fafc8c70cdff088d004f12c42e4f55f5f509cc5424d08eb56e5e",
+    "1587ed5bf3f87e291b8ab3478d0d70f0093fc3d153c7a71238c59fc9d3995d22",
+    "60408e34b6c3d62f3e1130e22144061532bd078db3fec2a2a04d8587ee247b0c",
+    "0369fee278a4dc72d0e81f9230c2674117f16919cb4ceb8db263da3234f2049e",
+    "b5cff18d676705315361888de805a9bb8c43965e97a24213057c07360a78cf3c",
+    "7566c219c7a5ac281de8f88376b1aa1651750ac2250604087f407ae818aa0714",
+    "8159f3ce4d298ac27bf373d6902515d5a2f803e2ed938940f7f678afe8fb992f",
+    "f5773e37cc6143e663b819df944bff936df4d71112c979fabceab7c0f3864227",
+    "54805c9de9e0b774ef86a0563fe1dc7ce3b55976931cbe5a73c983f18e29ebd0",
+    "8c8bec3d9fc80d39f7191199bacc81969f30935c878cb2c5448dca2ab71288d6",
+    "937263411e6a3a1796e2aa7ad832876f87c61464bfaa1d2c77c351067c876549",
+    "8299af0f1ed91dee4859e4bc9f074e68a216cc09188fdcfc2139487320f4f03e",
+    "8056afc3ae6ed1962e47a96bedae05b50bfc7e4b577b22546992f2b13dcd3f6f",
+    "69f7a385c5d718ddaa6e8893a05c2cd0e150c76aa1ddd48ad3cfac401ff1e38d",
+    "d4cb54cecaa61aa8f3a4c6994a8b549c9d3ca54be1a38c1bb8bf28a6e5045ce7"
+   ],
+   "doc_text_chars": [
+    2734,
+    247,
+    225,
+    2332,
+    2332,
+    2047,
+    313,
+    2332,
+    233,
+    179,
+    2332,
+    2332,
+    2332,
+    2332,
+    2218,
+    186
+   ],
+   "tool_name": "mcp__environment__search",
+   "arg_leaf_values": [
+    "\"Atatürk\" thesis 2000 2001 2002 2003 2004 2005 university"
+   ],
+   "df": {
+    "mcp__environment__search": 4,
+    "\"Atatürk\" thesis 2000 2001 2002 2003 2004 2005 university": 0
+   },
+   "score": [
+    0.25,
+    0,
+    0.25,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0.25,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0.25
+   ],
+   "k_witness": 0,
+   "k_median": 7,
+   "target_doc_values": []
+  },
+  "8eafd208fd5d_479c93c0:6": {
+   "n_docs": 16,
+   "doc_lengths": [
+    469,
+    42,
+    545,
+    559,
+    616,
+    666,
+    512,
+    37,
+    39,
+    548,
+    560,
+    578,
+    548,
+    603,
+    498,
+    75
+   ],
+   "doc_text_sha256": [
+    "d0db65c5bee9bb66114e03f8c39e43b6bb158b5d86cb37b7270f73785e48e0e4",
+    "7128c21a6c87ed691e82808c7dcb1385e2a43624a95e8c9936065d10b5b03db5",
+    "3904eeff9c25c23d0d0451e8a73cece8e773d13f6e4134c8f4d482572022d053",
+    "0388198760bf8d48b0d8dcb58f4e874467f108f27012853ea5ae2780b2cfd930",
+    "47627de6dd3b9eec9241777fdd9e47920b76502b2422cbef2b64beb3282286e6",
+    "774827c3706c8473732687447794fd2ca613c68995d1bd62e121618fa3311124",
+    "c31e21e96cb7b22027bcda3a76475f4ec9a68042978ca1ab38f8c0f639dc95a2",
+    "705bd2b7ceea12ba45e96da5986038a57a335c01fa9db6ade394f8b686617985",
+    "7395029bbd3e20b36d7c31caa1b0ebc7b59372a4803351f1ad88e71e4940e0a1",
+    "1507a545c65f94cc3fb15893cf5a666a30c84b82e53fae1ccd5daa9fb0493f62",
+    "b1bc030a7b9baf9e1dc1ea8552245f5cb3df71c9778695f050c6993d3bbd9d89",
+    "bcce931a8279ae46ae31284b70a80e4c7c135de91b144286515b9853c01091b2",
+    "b33baae66fcb7667fc2f1897dc27de5cb31b9dbacbb7d99b61e140ecb2940a6f",
+    "efeb07ea7322751c4fc0cc3c6acb49ed3635f8dedd5f8d5a579c93dd88515287",
+    "21ebc2703e8868ec0752ec710e01ba6e0f4de464f63f276105a9266e6ef5cd63",
+    "8e0779f3fba48c5e465005591a45fd4c280a29b402b4d128c06449df8fe9e351"
+   ],
+   "doc_text_chars": [
+    2299,
+    185,
+    2332,
+    2332,
+    2332,
+    2332,
+    2332,
+    163,
+    171,
+    2332,
+    2332,
+    2332,
+    2332,
+    2332,
+    2054,
+    335
+   ],
+   "tool_name": "mcp__environment__search",
+   "arg_leaf_values": [
+    "\"The Conservatory at Evergreen\" 2014 wedding"
+   ],
+   "df": {
+    "mcp__environment__search": 4,
+    "\"The Conservatory at Evergreen\" 2014 wedding": 0
+   },
+   "score": [
+    0.25,
+    0.25,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0.25,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0.25
+   ],
+   "k_witness": 0,
+   "k_median": 7,
+   "target_doc_values": []
+  },
+  "8eafd208fd5d_9fa29cd8:5": {
+   "n_docs": 16,
+   "doc_lengths": [
+    432,
+    568,
+    584,
+    77,
+    32,
+    616,
+    323,
+    39,
+    757,
+    139,
+    665,
+    757,
+    224,
+    615,
+    179,
+    38
+   ],
+   "doc_text_sha256": [
+    "61782f89c35cc20e163a1ae26f806d50947eed7fa3e884c4a8e42a7bbe375fad",
+    "e3a229fc334679b4010915f83ffb98d77beb6877697bd465fa2cad73c0a04247",
+    "74b7e1b4ae42be494e7adad353f429f8d400d5460010de34ae844f8c573f424b",
+    "74822e795135010707b64040b497dd37593052531ffae656095e7da8463cf947",
+    "34713e91c3fb922912373b395ecbdd419a086d0c2121d9c026cb67920b23484c",
+    "76329add76c602b4834ad3f148e0721c88eb61f644f2b0763dd3fb3dd088b9fd",
+    "539b28dfcc82263a1a8b58f0eeacc42ead1651d13f09bbea7e584713cac449a5",
+    "fec744dadb4fab4ee5751a09e906d572b6055367a7803884e45ec18ced6eb979",
+    "52594736a9458eec9d99f7833de9bc3fc84dc5b27775beaeb870dbd3bd60f792",
+    "ebbf4e6beb44f18514f06741e474cfc00044c2972dacb0f750236cddd2ebdc85",
+    "b9ca158f7936083925054595fa2801f55c5d911de822980fc0c4f427049ac875",
+    "49e9e2a55421074af1bef4850efd71df7236d04f150c8270136f104d26a1684a",
+    "cad8f0c8795c05ee0988665a8935c1b3bf8921fa5d79d75ae2ebf6dde17dd92e",
+    "0b6bf031a12675f045c401e7679db67034b4dbc351db1f879c08d86938a28af4",
+    "581b3bbd575616f92f42a48f998689c1a1c1d452a6b8678a21fa08d273053f20",
+    "16dae37340f8262ae63cd78d380b718deef9a4a61f3d63aeab3b29334388117e"
+   ],
+   "doc_text_chars": [
+    2115,
+    2332,
+    2332,
+    317,
+    132,
+    2332,
+    709,
+    173,
+    1945,
+    415,
+    2332,
+    2025,
+    335,
+    2332,
+    502,
+    148
+   ],
+   "tool_name": "mcp__environment__search",
+   "arg_leaf_values": [
+    "smallest countries area 700 800 square kilometers"
+   ],
+   "df": {
+    "mcp__environment__search": 3,
+    "smallest countries area 700 800 square kilometers": 0
+   },
+   "score": [
+    0.3333333333333333,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0.3333333333333333,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0.3333333333333333
+   ],
+   "k_witness": 0,
+   "k_median": 7,
+   "target_doc_values": []
+  },
+  "8eafd208fd5d_fb52e1ce:10": {
+   "n_docs": 16,
+   "doc_lengths": [
+    530,
+    38,
+    601,
+    698,
+    625,
+    757,
+    114,
+    360,
+    45,
+    614,
+    633,
+    641,
+    659,
+    678,
+    13,
+    47
+   ],
+   "doc_text_sha256": [
+    "00f793df4d1b837ad80db80750b8c121bb29324baa15cb05bb243faa9a9c886b",
+    "c540389703e4ddff41883fd9b919206e4a8a091b875d29de9c30ac667b35595b",
+    "80fb7bd2e836f71b7f385a54780738de6d2362d4314aa5adbc70b98b95bbb2d2",
+    "0ebb6eff093d8e18ceb24760fb7ed706bc3e2597004424232e0a289807981bae",
+    "a305dda5199886b1bef409aea5c6305096e23c2d1325dfc4b248c4f13bbb4966",
+    "d988a59dbbd86452a390dfdfa14a9cc33986ecb9454bcd30839b4daf1681cfa8",
+    "c5f83735412584c0077281c585c9fb866fbebeffeb5506d83eeebbb9b13b9491",
+    "3b1120cb7efc77d36d2870fea761f71b0640292ed450fdb1dd2512ef579eaece",
+    "4b3da55687dae2a7c07f74528322c57e2d96c87b8e59fa64053dfc31f2b215d9",
+    "3e8c52a179819c6aa07f2504b6d0dc33ca507f1dc26084f6ca6d3442c3dceb1e",
+    "045c8e67e9792a2155e59e314671bcd1ca0106b2f7e22dae0aefeb2eaeb788ab",
+    "9d0d7a0a2e5a8d2a38ec78aec3d1dcd28ec02aa15d9aee9d4af28dd2c90d3267",
+    "88265dfd77f89341d4a51303129af5d1043291b984dffe5a34135cd36904fcd4",
+    "0830651c4911f36941c7e1c0ccc48dc07cfc9f99dc87b477e3e6eb4da963b528",
+    "720122a5c3ed8cc27f51760a2b278901b17de751ba8511686e3c0ad3873f6ce8",
+    "d033f468c755d61f5eae7800652f3b59c09b58e5343528bc4f42ed9cc8a34b01"
+   ],
+   "doc_text_chars": [
+    2450,
+    149,
+    2332,
+    2332,
+    2332,
+    2093,
+    267,
+    916,
+    189,
+    2332,
+    2332,
+    2332,
+    2332,
+    2332,
+    54,
+    169
+   ],
+   "tool_name": "mcp__environment__search",
+   "arg_leaf_values": [
+    "Premier League season 7 wins 16 draws 15 losses 37 goals"
+   ],
+   "df": {
+    "mcp__environment__search": 4,
+    "Premier League season 7 wins 16 draws 15 losses 37 goals": 0
+   },
+   "score": [
+    0.25,
+    0.25,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0.25,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0.25
+   ],
+   "k_witness": 0,
+   "k_median": 7,
+   "target_doc_values": []
+  },
+  "8eafd208fd5d_fb52e1ce:27": {
+   "n_docs": 16,
+   "doc_lengths": [
+    530,
+    263,
+    757,
+    256,
+    757,
+    247,
+    309,
+    97,
+    757,
+    209,
+    757,
+    108,
+    757,
+    46,
+    692,
+    46
+   ],
+   "doc_text_sha256": [
+    "00f793df4d1b837ad80db80750b8c121bb29324baa15cb05bb243faa9a9c886b",
+    "d269d04dc3de76c385370427d108c4790c1713777ede426dfe8f81eb238ca59e",
+    "16be4d18a24bceb69896443d20f58d230469e07e92f433237130856e5010cbb3",
+    "3099140e22e472725f3eb51f6c01e525ce33929e0969acf614c88c2ac3d0da7d",
+    "c510fde652f0273365f3b3de44172d4ec292208b02212871720346a2795537bf",
+    "8e9f6a1e049ccf44201db155096f78b8c3cd4ab890a3c1c80228aa7e8dbd6967",
+    "81629f5c4cafcb5c3e5da87732dd2b09bf016f2684c52bb6caf3b24c972c06bd",
+    "8284381bd0096bb68f6df5bbed95c1afdce308fe1231d5180b2b864e4c524a68",
+    "e973d00ffb4919ee2476c3e4a09c90429a71d6a2fe61ba066fe0983e715f672c",
+    "89a6d93d2df94315d6f63b387ef1664f353eeb87b3147eccb911d822b7624530",
+    "cdcd2ab02b20ee5e22e2ba21408cdf335fd221f06ed19b11bcf1c6d87fc4605b",
+    "6a54b331c4b54e8ada469e42cd0182c0bb210c68988846e2e370c511321e9017",
+    "af1cfd24e801102c06c52cc4248eb30dc138feb90dec1a1a747a11c8a5a3d9ed",
+    "e400626426f7de71a7a507fd0e339c0e6e9abf45d6b148b9ad7361333643f439",
+    "e0a0b53d77e312d3f1da101c18f48dc36e9744f3c1e109b7d7954b439be8b013",
+    "6ddfccc107044283507d590a5aa7ca92f31968738fdf3eabd42ab025cb6fd26f"
+   ],
+   "doc_text_chars": [
+    2450,
+    664,
+    1734,
+    626,
+    1765,
+    595,
+    1030,
+    348,
+    1898,
+    462,
+    2000,
+    360,
+    2230,
+    130,
+    1693,
+    160
+   ],
+   "tool_name": "mcp__environment__search",
+   "arg_leaf_values": [
+    "AS Monaco 7 wins 16 draws 15 losses"
+   ],
+   "df": {
+    "mcp__environment__search": 3,
+    "AS Monaco 7 wins 16 draws 15 losses": 0
+   },
+   "score": [
+    0.3333333333333333,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0.3333333333333333,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0.3333333333333333
+   ],
+   "k_witness": 0,
+   "k_median": 7,
+   "target_doc_values": []
+  },
+  "8eafd208fd5d_fb52e1ce:32": {
+   "n_docs": 16,
+   "doc_lengths": [
+    530,
+    739,
+    611,
+    757,
+    86,
+    655,
+    248,
+    212,
+    757,
+    171,
+    757,
+    289,
+    757,
+    122,
+    368,
+    32
+   ],
+   "doc_text_sha256": [
+    "00f793df4d1b837ad80db80750b8c121bb29324baa15cb05bb243faa9a9c886b",
+    "faa941b77be30014ea677f71fa58c7998494a083cc404d3aaee95e98a8c50822",
+    "7e6e0c049cd29cbbba57d057741f1e67e301ed898908693e588c56e6ec470451",
+    "c9ebcb75b03e6d6e1219e1b0d6690964988ea93198f2e65cef1cc133310a199c",
+    "3aa1bb73f213ccb94cb7f6055033d2038a2850bb9994620103268a68bc7a111b",
+    "de94eb7360701ce749ce2b9bb627a6217c3639a69af57dd2af67cad2d84c7db1",
+    "4bce18218b31f54771372039c9698ee06b21e0e3e16c7f9dc99459b5200f9b90",
+    "7542da35e09383d755fc55dc43dcd3edec4214eaee5d271fd1387b503c23ae63",
+    "6b0ecf6fe9bbcfc514ca4b1291bef9816f6efa5fb4d78a5ec24439dd243f1e3b",
+    "1fb5d9ac69ee5d586cc116d7a9e71efe7cdd95d167e2b64c176fb2eda37fff80",
+    "c5cc860145a700e08cff194b5ddbbaab9b9fc0123dfd9919a52d7b6ea41ec739",
+    "ce4432ec86eb1b30b860abc95946d761eb3e28ff9bb731bb05d0ecdb0dda664f",
+    "c31f01e795f6ff18e4d67ef16d08343c4a50c72eae63d7d5c9631829466e0b92",
+    "039c503d07373c258f494bb416ccf4c84094fdd5de02077dd3dd6bd4b9a601f4",
+    "68cb14723a74e1f811fc1db6ca9d136c990ce30bea83960efd2ba717cf921937",
+    "dbff2ac9455cdaea0df2638919ee6b6c116612fefbd06c85d9351dd4257cce0d"
+   ],
+   "doc_text_chars": [
+    2450,
+    2332,
+    2332,
+    2163,
+    197,
+    2332,
+    950,
+    613,
+    1799,
+    561,
+    1656,
+    704,
+    2020,
+    340,
+    1423,
+    132
+   ],
+   "tool_name": "mcp__environment__search",
+   "arg_leaf_values": [
+    "\"37 points\" \"2016\\u201317 Premier League\""
+   ],
+   "df": {
+    "mcp__environment__search": 2,
+    "\"37 points\" \"2016\\u201317 Premier League\"": 0
+   },
+   "score": [
+    0.5,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0.5,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+   ],
+   "k_witness": 0,
+   "k_median": 7,
+   "target_doc_values": []
+  },
+  "8eafd208fd5d_fb52e1ce:9": {
+   "n_docs": 16,
+   "doc_lengths": [
+    530,
+    602,
+    657,
+    757,
+    161,
+    757,
+    240,
+    266,
+    38,
+    601,
+    698,
+    625,
+    757,
+    114,
+    360,
+    45
+   ],
+   "doc_text_sha256": [
+    "00f793df4d1b837ad80db80750b8c121bb29324baa15cb05bb243faa9a9c886b",
+    "bf89b8fdfe0bcba26a3411b31130c78183d76aef870669a090d5a3e027887262",
+    "f695c0ee375e91abcfd58f278d27a444d18c146ab24849af856c8793ee4fab1b",
+    "70513c319f3b545a64f698d1ffce3513ead4a5ee96c214fd86f2d21a1732bb73",
+    "cf258302af976550a0d92c77c41b59c7a6da186aae2b0429c668dd7e9f8fe7f9",
+    "46418bb58f29a1bab482f54796faf85036710a63f2d2c2b73dc3cabb4b140bf5",
+    "24e9d40fe694ef66481c522ee8b7777167ca8d8a1d91a183db65da88e0943ea3",
+    "01fad4b5e9a367cbd8fdbe2783c1b45513a42b54ed48016a81bbdd899e53cc9b",
+    "c540389703e4ddff41883fd9b919206e4a8a091b875d29de9c30ac667b35595b",
+    "80fb7bd2e836f71b7f385a54780738de6d2362d4314aa5adbc70b98b95bbb2d2",
+    "0ebb6eff093d8e18ceb24760fb7ed706bc3e2597004424232e0a289807981bae",
+    "a305dda5199886b1bef409aea5c6305096e23c2d1325dfc4b248c4f13bbb4966",
+    "d988a59dbbd86452a390dfdfa14a9cc33986ecb9454bcd30839b4daf1681cfa8",
+    "c5f83735412584c0077281c585c9fb866fbebeffeb5506d83eeebbb9b13b9491",
+    "3b1120cb7efc77d36d2870fea761f71b0640292ed450fdb1dd2512ef579eaece",
+    "4b3da55687dae2a7c07f74528322c57e2d96c87b8e59fa64053dfc31f2b215d9"
+   ],
+   "doc_text_chars": [
+    2450,
+    2332,
+    2332,
+    1922,
+    438,
+    1643,
+    717,
+    576,
+    149,
+    2332,
+    2332,
+    2332,
+    2093,
+    267,
+    916,
+    189
+   ],
+   "tool_name": "mcp__environment__search",
+   "arg_leaf_values": [
+    "38 matches 7 wins 16 draws 15 losses GF 37 GA 49"
+   ],
+   "df": {
+    "mcp__environment__search": 3,
+    "38 matches 7 wins 16 draws 15 losses GF 37 GA 49": 0
+   },
+   "score": [
+    0.3333333333333333,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0.3333333333333333,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0.3333333333333333
+   ],
+   "k_witness": 0,
+   "k_median": 7,
+   "target_doc_values": []
+  },
+  "a45d2c09567a_344ed9b0:5": {
+   "n_docs": 5,
+   "doc_lengths": [
+    199,
+    532,
+    246,
+    250,
+    415
+   ],
+   "doc_text_sha256": [
+    "255a7856f03d80a32308928adaaa6c6f3629fbe34b0c7f4f5b0c148366675bd2",
+    "40b47b5f228f2dcd75fb6631c1d83c2077d63933d58dcc1c2f63c87d6545f963",
+    "e5bd231a76c9165e95daba59ea6361f2b0b91e5ea0bd2778273c5fefe8cb6ad3",
+    "73abf999ac2a79f8d4f483672234f18ef2b6eddca5eefb91960e5c5f3cc20530",
+    "0717ef78cc1f71702c8345726028ed7277cd82ffaf95ff59d1057e385e77c30f"
+   ],
+   "doc_text_chars": [
+    929,
+    1498,
+    620,
+    630,
+    927
+   ],
+   "tool_name": "splitwise__show_activity",
+   "arg_leaf_values": [
+    "0",
+    "20",
+    "true",
+    "false",
+    "-created_at",
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJzcGxpdHdpc2UrbWF0dGhldy5ibGFjQGdtYWlsLmNvbSIsImV4cCI6MTY4NDU4NDg5OH0.EM2AZtfILQkEP6aqapMBfbLKeQKFOrieozOheMVjt9k"
+   ],
+   "df": {
+    "splitwise__show_activity": 1,
+    "0": 1,
+    "20": 1,
+    "true": 1,
+    "false": 1,
+    "-created_at": 1,
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJzcGxpdHdpc2UrbWF0dGhldy5ibGFjQGdtYWlsLmNvbSIsImV4cCI6MTY4NDU4NDg5OH0.EM2AZtfILQkEP6aqapMBfbLKeQKFOrieozOheMVjt9k": 2
+   },
+   "score": [
+    0,
+    0,
+    0.5,
+    0,
+    6.5
+   ],
+   "k_witness": 4,
+   "k_median": 2,
+   "target_doc_values": [
+    [
+     "0",
+     1
+    ],
+    [
+     "20",
+     1
+    ],
+    [
+     "true",
+     1
+    ],
+    [
+     "false",
+     1
+    ],
+    [
+     "-created_at",
+     1
+    ],
+    [
+     "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJzcGxpdHdpc2UrbWF0dGhldy5ibGFjQGdtYWlsLmNvbSIsImV4cCI6MTY4NDU4NDg5OH0.EM2AZtfILQkEP6aqapMBfbLKeQKFOrieozOheMVjt9k",
+     2
+    ]
+   ]
+  },
+  "a45d2c09567a_344ed9b0:6": {
+   "n_docs": 6,
+   "doc_lengths": [
+    199,
+    532,
+    246,
+    250,
+    415,
+    256
+   ],
+   "doc_text_sha256": [
+    "255a7856f03d80a32308928adaaa6c6f3629fbe34b0c7f4f5b0c148366675bd2",
+    "40b47b5f228f2dcd75fb6631c1d83c2077d63933d58dcc1c2f63c87d6545f963",
+    "e5bd231a76c9165e95daba59ea6361f2b0b91e5ea0bd2778273c5fefe8cb6ad3",
+    "73abf999ac2a79f8d4f483672234f18ef2b6eddca5eefb91960e5c5f3cc20530",
+    "0717ef78cc1f71702c8345726028ed7277cd82ffaf95ff59d1057e385e77c30f",
+    "dc462431ebb0844e769e7b124787e0dc82d9dd88496a0b12ebae3c917183a114"
+   ],
+   "doc_text_chars": [
+    929,
+    1498,
+    620,
+    630,
+    927,
+    682
+   ],
+   "tool_name": "venmo__show_transactions",
+   "arg_leaf_values": [
+    "0",
+    "20",
+    "2023-05-20",
+    "sent",
+    "-created_at",
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ2ZW5tbyttYXR0aGV3LmJsYWNAZ21haWwuY29tIiwiZXhwIjoxNjg0NTg1NTQxfQ.QxiePYOZ0jt-N19hJ23D7ZF-H3csX67aAqlOb_xzfM4"
+   ],
+   "df": {
+    "venmo__show_transactions": 0,
+    "0": 2,
+    "20": 2,
+    "2023-05-20": 1,
+    "sent": 0,
+    "-created_at": 2,
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ2ZW5tbyttYXR0aGV3LmJsYWNAZ21haWwuY29tIiwiZXhwIjoxNjg0NTg1NTQxfQ.QxiePYOZ0jt-N19hJ23D7ZF-H3csX67aAqlOb_xzfM4": 1
+   },
+   "score": [
+    0,
+    0,
+    0,
+    1.0,
+    2.5,
+    1.5
+   ],
+   "k_witness": 4,
+   "k_median": 2,
+   "target_doc_values": [
+    [
+     "2023-05-20",
+     1
+    ],
+    [
+     "0",
+     2
+    ],
+    [
+     "20",
+     2
+    ],
+    [
+     "-created_at",
+     2
+    ]
+   ]
+  },
+  "a45d2c09567a_42e3637f:2": {
+   "n_docs": 2,
+   "doc_lengths": [
+    92,
+    521
+   ],
+   "doc_text_sha256": [
+    "aef10e07db90f6f9ad81ae146e961a637538e410fb79671efbc04dfb3ace2fd8",
+    "214cd30b2f1f95abf376b20eecb6212fe5f8e8b46b707c6befccab3673a58e5e"
+   ],
+   "doc_text_chars": [
+    424,
+    1453
+   ],
+   "tool_name": "spotify__login",
+   "arg_leaf_values": [
+    "jo.ball@gmail.com",
+    "R3[Y7MX"
+   ],
+   "df": {
+    "spotify__login": 0,
+    "jo.ball@gmail.com": 0,
+    "R3[Y7MX": 1
+   },
+   "score": [
+    0,
+    1.0
+   ],
+   "k_witness": 1,
+   "k_median": 0,
+   "target_doc_values": [
+    [
+     "R3[Y7MX",
+     1
+    ]
+   ]
+  },
+  "a45d2c09567a_9ad55a9e:3": {
+   "n_docs": 3,
+   "doc_lengths": [
+    138,
+    522,
+    429
+   ],
+   "doc_text_sha256": [
+    "43c01ec40bf0eeb0e387ba82faa0a10b91e95a86572e6943821f2d0bf326f2e0",
+    "c75e3946ff97a4e5b9fd03bfc3270b13a01359c09c9220d0dddeb5bf5812a209",
+    "8d80f145dfcf45e361121ecc0d375874b8e7ae00bc40b58d7993e86395722a96"
+   ],
+   "doc_text_chars": [
+    698,
+    1474,
+    978
+   ],
+   "tool_name": "venmo__show_sent_payment_requests",
+   "arg_leaf_values": [
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ2ZW5tbytrYXRocnlubWFsZG9uYWRvQGdtYWlsLmNvbSIsImV4cCI6MTY4NDU3OTM0OH0.7VwZ0a-Pfkpg-D4uZESeRt3nsn7PLalFVIHm0326sxM"
+   ],
+   "df": {
+    "venmo__show_sent_payment_requests": 1,
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ2ZW5tbytrYXRocnlubWFsZG9uYWRvQGdtYWlsLmNvbSIsImV4cCI6MTY4NDU3OTM0OH0.7VwZ0a-Pfkpg-D4uZESeRt3nsn7PLalFVIHm0326sxM": 1
+   },
+   "score": [
+    0,
+    0,
+    2.0
+   ],
+   "k_witness": 2,
+   "k_median": 1,
+   "target_doc_values": [
+    [
+     "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ2ZW5tbytrYXRocnlubWFsZG9uYWRvQGdtYWlsLmNvbSIsImV4cCI6MTY4NDU3OTM0OH0.7VwZ0a-Pfkpg-D4uZESeRt3nsn7PLalFVIHm0326sxM",
+     1
+    ]
+   ]
+  },
+  "a45d2c09567a_c794536b:7": {
+   "n_docs": 16,
+   "doc_lengths": [
+    89,
+    224,
+    757,
+    128,
+    131,
+    757,
+    168,
+    757,
+    180,
+    757,
+    179,
+    757,
+    173,
+    328,
+    257,
+    295
+   ],
+   "doc_text_sha256": [
+    "7afd7ada9c986540ddacba0e3afc9d0f8298c5087537b6975e49d9396a753c08",
+    "f2093d1421ca1603209aea2161af34d1344e56acc44ef4457968823888e91f98",
+    "0a7edb79037fbad4f8e47171e998553ee2f968126f9d9e48936a28dcabed2513",
+    "73d59aac2a33343bf545c3ec73c1a3f751c4899103779a3235f338cf902aaf31",
+    "5fbaceb16d9b275c241d2c4a7a386084947edd6f22a997782e0d5ed86ed85812",
+    "47ead43b69b5fdb455ffff62f134d0707fc6a56443daeebf35863982c6445660",
+    "fb463740ee0528dd0d705a2fc98bcc14c2a2bbc2fe27d9202a1bf6cad2ac1d3b",
+    "fde3122477d8d4c6f543f1e69eda0514cb677c4c3f5c0852e8671ae4ee1993ab",
+    "63bd8719e52ec1a26acccdf5b684ac5c5853acbd8d9ffeac8c63731c9338b009",
+    "fe0c6ef6460dc81a48426166930cfa3d36edf26c1e684c8721b5150fa33e3fcb",
+    "b6c1a8a049cb267d8ec5dc059158c69a2b663e097c32913dfa67169d5c8a43e3",
+    "1be31907c001ce467e2631a780e0915891994c3c1e7e2abcbfea5357fc9ab16e",
+    "79b9d905d82fa02be57c9e6e71bd861137746c29f1b95e4ad856d9c263c12715",
+    "96db8377279d7ffc41834187a441be9d5591725240db8eddf1dc6bbc1963fb57",
+    "080fd78d5845f16f871e96ddde6873d540612acbd16cd503e611645378b8545f",
+    "7f758c9cafb83025aee7147381f5df81d1aaf3e6db2304a2bbb915220396878a"
+   ],
+   "doc_text_chars": [
+    424,
+    589,
+    1774,
+    329,
+    280,
+    1917,
+    443,
+    1894,
+    466,
+    1894,
+    466,
+    1906,
+    454,
+    915,
+    824,
+    879
+   ],
+   "tool_name": "spotify__remove_song_from_queue",
+   "arg_leaf_values": [
+    "14",
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJzcG90aWZ5K2NoZXdlYmVyQGdtYWlsLmNvbSIsImV4cCI6MTY4NDQxMjA5OH0.IVDEsv7W5sn2Tuim1RDI_gCZ2HGg41ltcLtvtdVDknY"
+   ],
+   "df": {
+    "spotify__remove_song_from_queue": 2,
+    "14": 2,
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJzcG90aWZ5K2NoZXdlYmVyQGdtYWlsLmNvbSIsImV4cCI6MTY4NDQxMjA5OH0.IVDEsv7W5sn2Tuim1RDI_gCZ2HGg41ltcLtvtdVDknY": 4
+   },
+   "score": [
+    0,
+    0.25,
+    0,
+    0,
+    0.25,
+    0,
+    0,
+    0,
+    0.5,
+    0.5,
+    0,
+    0,
+    0,
+    0,
+    0.75,
+    0.75
+   ],
+   "k_witness": 14,
+   "k_median": 7,
+   "target_doc_values": [
+    [
+     "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJzcG90aWZ5K2NoZXdlYmVyQGdtYWlsLmNvbSIsImV4cCI6MTY4NDQxMjA5OH0.IVDEsv7W5sn2Tuim1RDI_gCZ2HGg41ltcLtvtdVDknY",
+     4
+    ]
+   ]
+  },
+  "a45d2c09567a_c794536b:8": {
+   "n_docs": 16,
+   "doc_lengths": [
+    89,
+    757,
+    128,
+    131,
+    757,
+    168,
+    757,
+    180,
+    757,
+    179,
+    757,
+    173,
+    328,
+    257,
+    295,
+    437
+   ],
+   "doc_text_sha256": [
+    "7afd7ada9c986540ddacba0e3afc9d0f8298c5087537b6975e49d9396a753c08",
+    "0a7edb79037fbad4f8e47171e998553ee2f968126f9d9e48936a28dcabed2513",
+    "73d59aac2a33343bf545c3ec73c1a3f751c4899103779a3235f338cf902aaf31",
+    "5fbaceb16d9b275c241d2c4a7a386084947edd6f22a997782e0d5ed86ed85812",
+    "47ead43b69b5fdb455ffff62f134d0707fc6a56443daeebf35863982c6445660",
+    "fb463740ee0528dd0d705a2fc98bcc14c2a2bbc2fe27d9202a1bf6cad2ac1d3b",
+    "fde3122477d8d4c6f543f1e69eda0514cb677c4c3f5c0852e8671ae4ee1993ab",
+    "63bd8719e52ec1a26acccdf5b684ac5c5853acbd8d9ffeac8c63731c9338b009",
+    "fe0c6ef6460dc81a48426166930cfa3d36edf26c1e684c8721b5150fa33e3fcb",
+    "b6c1a8a049cb267d8ec5dc059158c69a2b663e097c32913dfa67169d5c8a43e3",
+    "1be31907c001ce467e2631a780e0915891994c3c1e7e2abcbfea5357fc9ab16e",
+    "79b9d905d82fa02be57c9e6e71bd861137746c29f1b95e4ad856d9c263c12715",
+    "96db8377279d7ffc41834187a441be9d5591725240db8eddf1dc6bbc1963fb57",
+    "080fd78d5845f16f871e96ddde6873d540612acbd16cd503e611645378b8545f",
+    "7f758c9cafb83025aee7147381f5df81d1aaf3e6db2304a2bbb915220396878a",
+    "27d68685c4ac05b2b3b7d7911259a44a8fefb0443cf9d6f54a21ca3bea03c225"
+   ],
+   "doc_text_chars": [
+    424,
+    1774,
+    329,
+    280,
+    1917,
+    443,
+    1894,
+    466,
+    1894,
+    466,
+    1906,
+    454,
+    915,
+    824,
+    879,
+    1280
+   ],
+   "tool_name": "spotify__remove_song_from_queue",
+   "arg_leaf_values": [
+    "15",
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJzcG90aWZ5K2NoZXdlYmVyQGdtYWlsLmNvbSIsImV4cCI6MTY4NDQxMjA5OH0.IVDEsv7W5sn2Tuim1RDI_gCZ2HGg41ltcLtvtdVDknY"
+   ],
+   "df": {
+    "spotify__remove_song_from_queue": 3,
+    "15": 3,
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJzcG90aWZ5K2NoZXdlYmVyQGdtYWlsLmNvbSIsImV4cCI6MTY4NDQxMjA5OH0.IVDEsv7W5sn2Tuim1RDI_gCZ2HGg41ltcLtvtdVDknY": 4
+   },
+   "score": [
+    0,
+    0,
+    0,
+    0.25,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0.3333333333333333,
+    0,
+    0,
+    0.3333333333333333,
+    0.5833333333333333,
+    0.5833333333333333,
+    0.9166666666666666
+   ],
+   "k_witness": 15,
+   "k_median": 7,
+   "target_doc_values": [
+    [
+     "15",
+     3
+    ],
+    [
+     "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJzcG90aWZ5K2NoZXdlYmVyQGdtYWlsLmNvbSIsImV4cCI6MTY4NDQxMjA5OH0.IVDEsv7W5sn2Tuim1RDI_gCZ2HGg41ltcLtvtdVDknY",
+     4
+    ]
+   ]
+  },
+  "a45d2c09567a_f2b8f831:14": {
+   "n_docs": 16,
+   "doc_lengths": [
+    198,
+    256,
+    757,
+    229,
+    757,
+    216,
+    752,
+    315,
+    254,
+    249,
+    239,
+    244,
+    239,
+    244,
+    238,
+    245
+   ],
+   "doc_text_sha256": [
+    "9ff2369d73af983b6a559bbd8b9dbbc1d2ab53b3b8cb41e2fcd1d3eace4e17c5",
+    "cb68e1aa652a3241cd075b46314e6b1ccba73212bce9e1d4118abb19df31b1c1",
+    "bea224b0ace32d2d091ec1e71ae2f18165e11b467165516c7399f0f09df5cfed",
+    "3b2261f2196366242b01263a81af2430f177fe9bb04e557b98d75a8f0829e9b1",
+    "3044cf56f3414ca474fee763b263fed38da3230a7c43564cda1062803af3fabf",
+    "97253153601d0be1f14b01407e36a6f9b6f99c1a1a034cff8e4b2e466f105b4a",
+    "849d7a71b340409ccb0a9ac1677957c9633ddb349899742e745b4b93236c50ab",
+    "1ed4f48f36d12985ee37cf3a03f5b1bf35bf424b2bb730b90db9759353567bb7",
+    "3f4b9b45a4266436927dc01208719235d7d1107fb98da7d90e15c8cd8fff3675",
+    "0c9999ebc492a278e7b39dcdd98bcb989f2b369e1b3ea76dd2ed3d82efe88316",
+    "67b6040f9cadcd4eae5e8c5466400aabc3c12f9b7671f14cd562cfef86641559",
+    "9e868325d652a85c90f10a63a8df9574fb83f4ccdcf1d6cedb548a758be76ba1",
+    "94ba91501a7ea96298013e71a01693869f2c8b5a26ad75d530e2da5326ef7066",
+    "8c42ff519a8cc63d1e1b706a10ce81371d9ad3a22ab334b5d639d91ee1be2e97",
+    "3b7f03ccbc32fd9b5f3c028997468b91ca03d5824ebc3fe1fb98fcec1287abf5",
+    "8bfec0e489ae1d1e883e25b12090f506009da5973aa57638067414a94158077f"
+   ],
+   "doc_text_chars": [
+    932,
+    731,
+    1800,
+    560,
+    1834,
+    526,
+    1797,
+    1007,
+    686,
+    633,
+    634,
+    624,
+    642,
+    619,
+    630,
+    626
+   ],
+   "tool_name": "venmo__create_payment_request",
+   "arg_leaf_values": [
+    "morgan-harrison@gmail.com",
+    "55",
+    "Dinner Order",
+    "false",
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ2ZW5tbytuYW5fcml0dEBnbWFpbC5jb20iLCJleHAiOjE2ODQ1NzMwNzF9.cSrrY1gvXPEgEIaWpqNcsGdghz8L_yePPowGWQcBfrE"
+   ],
+   "df": {
+    "venmo__create_payment_request": 4,
+    "morgan-harrison@gmail.com": 1,
+    "55": 5,
+    "Dinner Order": 8,
+    "false": 10,
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ2ZW5tbytuYW5fcml0dEBnbWFpbC5jb20iLCJleHAiOjE2ODQ1NzMwNzF9.cSrrY1gvXPEgEIaWpqNcsGdghz8L_yePPowGWQcBfrE": 10
+   },
+   "score": [
+    0,
+    0.1,
+    0.225,
+    0.225,
+    1.225,
+    0.1,
+    0.1,
+    0.525,
+    0.7749999999999999,
+    0.1,
+    0.7749999999999999,
+    0.1,
+    0.7749999999999999,
+    0.1,
+    0.7749999999999999,
+    0.1
+   ],
+   "k_witness": 4,
+   "k_median": 7,
+   "target_doc_values": [
+    [
+     "morgan-harrison@gmail.com",
+     1
+    ],
+    [
+     "Dinner Order",
+     8
+    ],
+    [
+     "false",
+     10
+    ]
+   ]
+  },
+  "a45d2c09567a_f2b8f831:6": {
+   "n_docs": 11,
+   "doc_lengths": [
+    198,
+    528,
+    217,
+    412,
+    256,
+    757,
+    229,
+    757,
+    216,
+    752,
+    315
+   ],
+   "doc_text_sha256": [
+    "9ff2369d73af983b6a559bbd8b9dbbc1d2ab53b3b8cb41e2fcd1d3eace4e17c5",
+    "c6cb679432322f550ec1f2b0b09d3d5bd68c9a55d9f8c019954aae7e2322d16a",
+    "daf196b1826a92d19a09ed92936a91a1238eeb7a0c72bc9975ba40434e11dc74",
+    "b090f61abd1418692ef78c346f3b4d5fe0f857bcdcabde75665de5f1e664f971",
+    "cb68e1aa652a3241cd075b46314e6b1ccba73212bce9e1d4118abb19df31b1c1",
+    "bea224b0ace32d2d091ec1e71ae2f18165e11b467165516c7399f0f09df5cfed",
+    "3b2261f2196366242b01263a81af2430f177fe9bb04e557b98d75a8f0829e9b1",
+    "3044cf56f3414ca474fee763b263fed38da3230a7c43564cda1062803af3fabf",
+    "97253153601d0be1f14b01407e36a6f9b6f99c1a1a034cff8e4b2e466f105b4a",
+    "849d7a71b340409ccb0a9ac1677957c9633ddb349899742e745b4b93236c50ab",
+    "1ed4f48f36d12985ee37cf3a03f5b1bf35bf424b2bb730b90db9759353567bb7"
+   ],
+   "doc_text_chars": [
+    932,
+    1493,
+    601,
+    977,
+    731,
+    1800,
+    560,
+    1834,
+    526,
+    1797,
+    1007
+   ],
+   "tool_name": "venmo__create_payment_request",
+   "arg_leaf_values": [
+    "nicholas.weber@gmail.com",
+    "55",
+    "Dinner Order",
+    "false",
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ2ZW5tbytuYW5fcml0dEBnbWFpbC5jb20iLCJleHAiOjE2ODQ1NzMwNzF9.cSrrY1gvXPEgEIaWpqNcsGdghz8L_yePPowGWQcBfrE"
+   ],
+   "df": {
+    "venmo__create_payment_request": 0,
+    "nicholas.weber@gmail.com": 1,
+    "55": 1,
+    "Dinner Order": 4,
+    "false": 6,
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ2ZW5tbytuYW5fcml0dEBnbWFpbC5jb20iLCJleHAiOjE2ODQ1NzMwNzF9.cSrrY1gvXPEgEIaWpqNcsGdghz8L_yePPowGWQcBfrE": 3
+   },
+   "score": [
+    0,
+    0,
+    0,
+    0.3333333333333333,
+    0.3333333333333333,
+    1.4166666666666667,
+    0.41666666666666663,
+    0.41666666666666663,
+    0.16666666666666666,
+    0.16666666666666666,
+    1.75
+   ],
+   "k_witness": 10,
+   "k_median": 5,
+   "target_doc_values": [
+    [
+     "55",
+     1
+    ],
+    [
+     "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ2ZW5tbytuYW5fcml0dEBnbWFpbC5jb20iLCJleHAiOjE2ODQ1NzMwNzF9.cSrrY1gvXPEgEIaWpqNcsGdghz8L_yePPowGWQcBfrE",
+     3
+    ],
+    [
+     "Dinner Order",
+     4
+    ],
+    [
+     "false",
+     6
+    ]
+   ]
+  },
+  "ac0f039f4468_0e7a17fd:1": {
+   "n_docs": 1,
+   "doc_lengths": [
+    435
+   ],
+   "doc_text_sha256": [
+    "d3f0c42aa14c1ad5a3193d1fea2405c925c79e4cd7227e5108c4d1e5a003c58a"
+   ],
+   "doc_text_chars": [
+    2144
+   ],
+   "tool_name": "mcp__environment__search",
+   "arg_leaf_values": [
+    "\"society founded in the 1960s\" article \"60 years later\""
+   ],
+   "df": {
+    "mcp__environment__search": 1,
+    "\"society founded in the 1960s\" article \"60 years later\"": 0
+   },
+   "score": [
+    1.0
+   ],
+   "k_witness": 0,
+   "k_median": 0,
+   "target_doc_values": []
+  },
+  "b455f37f04c7_08958bbb:1": {
+   "n_docs": 1,
+   "doc_lengths": [
+    140
+   ],
+   "doc_text_sha256": [
+    "8c9a4968d2cc57e159f8f9c4fd030ae8c4010a2ed2ab6ede02833480daddc030"
+   ],
+   "doc_text_chars": [
+    652
+   ],
+   "tool_name": "simple_note__login",
+   "arg_leaf_values": [
+    "alexwhite@gmail.com",
+    "sTv9L0p"
+   ],
+   "df": {
+    "simple_note__login": 0,
+    "alexwhite@gmail.com": 0,
+    "sTv9L0p": 0
+   },
+   "score": [
+    0
+   ],
+   "k_witness": null,
+   "k_median": 0,
+   "target_doc_values": []
+  },
+  "b455f37f04c7_0ee66cf1:7": {
+   "n_docs": 8,
+   "doc_lengths": [
+    104,
+    153,
+    492,
+    107,
+    305,
+    184,
+    107,
+    305
+   ],
+   "doc_text_sha256": [
+    "599da460c6d8fd8eeb8293b60f2faed5e831b9baf4fc89bd2490e06fd3fb547c",
+    "a06e4993a769a3e3f5142514b8ec351d92789bef38483e185e452db701348e17",
+    "5118b0851d4a0be606daa746a287be9280b4f839991071b88cdde585aff59d0e",
+    "ab7f942d3641ef7d0d5d881c479d0ae75f268acf8af7b0dfaed85979ce443816",
+    "6b7004ba89e4af2b58bced75a5b43d061887827055e464985f22170ed68e265c",
+    "0ce0e5f674b0b4c3f0f5cd8433a415ea39d267f513b8e63f4fccabfccf9a06ee",
+    "2c5ffc7122d783495a5507eaa2ccf4f16a539c39b830361c41dfc83207ddda8e",
+    "0f35dc99418d57c33bddcf830fa4e5fd3addcf00774bade41fbaea690cef056e"
+   ],
+   "doc_text_chars": [
+    466,
+    428,
+    1411,
+    434,
+    659,
+    497,
+    440,
+    677
+   ],
+   "tool_name": "venmo__create_payment_request",
+   "arg_leaf_values": [
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ2ZW5tbytkYXYubWFydEBnbWFpbC5jb20iLCJleHAiOjE2ODQ0MTI3NDF9.aQgyekcxrbONaCSXAdgD-LDgCvKQ9OFQLkgzfyDyMJg",
+    "29",
+    "ron.harrison@gmail.com",
+    "For the road trip",
+    "false"
+   ],
+   "df": {
+    "venmo__create_payment_request": 0,
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ2ZW5tbytkYXYubWFydEBnbWFpbC5jb20iLCJleHAiOjE2ODQ0MTI3NDF9.aQgyekcxrbONaCSXAdgD-LDgCvKQ9OFQLkgzfyDyMJg": 1,
+    "29": 1,
+    "ron.harrison@gmail.com": 0,
+    "For the road trip": 1,
+    "false": 0
+   },
+   "score": [
+    2.0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    1.0
+   ],
+   "k_witness": 0,
+   "k_median": 3,
+   "target_doc_values": [
+    [
+     "29",
+     1
+    ],
+    [
+     "For the road trip",
+     1
+    ]
+   ]
+  },
+  "b455f37f04c7_263e5d47:1": {
+   "n_docs": 2,
+   "doc_lengths": [
+    143,
+    48
+   ],
+   "doc_text_sha256": [
+    "2882fb4d01260bf41cf2de3e691af707449cb06d5ef1a49841340d746024601f",
+    "caedc42daf230a840db5437f2043bb16d0a9d2672bb3ef3581160e72cad192ef"
+   ],
+   "doc_text_chars": [
+    604,
+    192
+   ],
+   "tool_name": "phone__login",
+   "arg_leaf_values": [
+    "2307354647",
+    "!5VAxgi"
+   ],
+   "df": {
+    "phone__login": 2,
+    "2307354647": 1,
+    "!5VAxgi": 0
+   },
+   "score": [
+    1.5,
+    0.5
+   ],
+   "k_witness": 0,
+   "k_median": 0,
+   "target_doc_values": [
+    [
+     "2307354647",
+     1
+    ]
+   ]
+  },
+  "b455f37f04c7_263e5d47:4": {
+   "n_docs": 13,
+   "doc_lengths": [
+    143,
+    48,
+    526,
+    177,
+    471,
+    69,
+    339,
+    12,
+    757,
+    170,
+    757,
+    194,
+    745
+   ],
+   "doc_text_sha256": [
+    "2882fb4d01260bf41cf2de3e691af707449cb06d5ef1a49841340d746024601f",
+    "caedc42daf230a840db5437f2043bb16d0a9d2672bb3ef3581160e72cad192ef",
+    "4ce0e5a347aab3acbce7be6c0fed28a77ca16b566a6c7b75ee85e140ff276ea1",
+    "712746bd3fb2557cafa005e7dafc4339a1bd1a2fe7576c3659b879818c6eb525",
+    "10cc4427c42c7f738538c9ab1f96cb703de90867fecae369242501ff74284bdc",
+    "592ce3326a0ba94a4b379fb53b5297c8f7175055e7d6fea18a530515532ecbdd",
+    "f5e425c73c6e5fd661b74981ecd01380d7e1e88759ed583744d48c21dab1f266",
+    "c99e4965eda3a52442d067b417b0221c320501c612cdce64dbee7abf0ad39dbf",
+    "6e666b693601a6d1f059d0c9595d8ababc9ce48ec2f265e86f8e5998826c06f9",
+    "b2b553b876438b5d1ab6eff628661e32975dd37bd2be878775a3e6711c5f060a",
+    "02b80b2571ccf189ac0eb9dc0cd0cedfeca3f8f64a4e38ec224753a5e51da37f",
+    "19527c6997ecfcbe4cfe780c05de7004ca03c53dd9e81a13ef562f9b3e2df5b8",
+    "153e96d06419ae33e0e858be58b42f0dc3a1c5666b52fc6c248a1af3f64e6891"
+   ],
+   "doc_text_chars": [
+    604,
+    192,
+    1520,
+    385,
+    1071,
+    265,
+    834,
+    55,
+    1949,
+    411,
+    1877,
+    483,
+    1857
+   ],
+   "tool_name": "phone__search_contacts",
+   "arg_leaf_values": [
+    "roommate",
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJwaG9uZSsyMzA3MzU0NjQ3IiwiZXhwIjoxNjg0NDEyMDk4fQ.JgOA-dY8eM2Pz4cSL1BueV_YSUQWyhhn8aGjshNLRQs",
+    "20"
+   ],
+   "df": {
+    "phone__search_contacts": 4,
+    "roommate": 3,
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJwaG9uZSsyMzA3MzU0NjQ3IiwiZXhwIjoxNjg0NDEyMDk4fQ.JgOA-dY8eM2Pz4cSL1BueV_YSUQWyhhn8aGjshNLRQs": 3,
+    "20": 2
+   },
+   "score": [
+    0.3333333333333333,
+    0,
+    0,
+    0.3333333333333333,
+    0.9166666666666665,
+    0.75,
+    1.4166666666666665,
+    0,
+    0.25,
+    0,
+    0,
+    0,
+    0
+   ],
+   "k_witness": 6,
+   "k_median": 6,
+   "target_doc_values": [
+    [
+     "20",
+     2
+    ],
+    [
+     "roommate",
+     3
+    ],
+    [
+     "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJwaG9uZSsyMzA3MzU0NjQ3IiwiZXhwIjoxNjg0NDEyMDk4fQ.JgOA-dY8eM2Pz4cSL1BueV_YSUQWyhhn8aGjshNLRQs",
+     3
+    ]
+   ]
+  },
+  "b455f37f04c7_714ea5fe:37": {
+   "n_docs": 16,
+   "doc_lengths": [
+    181,
+    332,
+    12,
+    757,
+    139,
+    757,
+    70,
+    762,
+    757,
+    56,
+    693,
+    692,
+    470,
+    160,
+    335,
+    340
+   ],
+   "doc_text_sha256": [
+    "c1a48b5d859d92f013eeb602d6e8d58a8a586045f0eeddc2c413f1f86dc51af9",
+    "f0d44415fb3b3b6f36ecf862bd6fe512bb0bb12d6d8098ccca92c0c3749006ad",
+    "c99e4965eda3a52442d067b417b0221c320501c612cdce64dbee7abf0ad39dbf",
+    "d24775580b2c7e891cc052332e0a87b00ca1ecf537b63a6e77c9248b24d79195",
+    "87f6d4c6b46e64f67caf98b2f006bdb3a8670f299580b3d60009461671915023",
+    "5c0ffe57d20812585b0239a3fd81a6c1e910dabd7611c4ee1b036ce7cc696635",
+    "068daa8100a8af554b1bbaec5b81e44bfd5a51758c71608ece7df84b293d8cac",
+    "34f45ffbed4ca2feea78c678c77d0529a4f70fde9a669e499c850d92eb6706ee",
+    "27181cdd79e15268ce6322c6f03f9d19e59df122b0446ebb82b22fba81e6afc9",
+    "ad0ee64740a2dcf2ed3d107f7b2b6531c0b9f766baad41981f4ccea20fe87a05",
+    "d7534f602ee1e58aab5be4c81ef368b77965bdf3c68383f3b3e0b53b74e5bca9",
+    "d3130c391eacc855921b81ba1e41d394bf91fd194954bc2a2819c210b5617da5",
+    "1689393c6c63c8668b937a24c4b77a82f6b0bb0cf9166bb041807f323a31e0ea",
+    "41aa8828a30adfb9f452918f81fe114eef518186043b4878c6a32f6b65ce438a",
+    "8e98695042d2b020bc9b0b887bb403cb1393676dbd9c6140ef0c28320342a1f1",
+    "512f5d2dc3aecb00adf76527933f27a97276b39be4f9d2a3c34009e6ad5a2741"
+   ],
+   "doc_text_chars": [
+    804,
+    699,
+    55,
+    2002,
+    358,
+    2131,
+    229,
+    2332,
+    2158,
+    202,
+    2332,
+    2332,
+    1519,
+    372,
+    801,
+    962
+   ],
+   "tool_name": "simple_note__search_notes",
+   "arg_leaf_values": [
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJzaW1wbGVfbm90ZStjb25ub3Jicm93QGdtYWlsLmNvbSIsImV4cCI6MTY4NDQxMjA5OH0.MWVQWKo6sXHzORFllzqeuw0PgBeOcgMov6yRwrJ7acg",
+    "false"
+   ],
+   "df": {
+    "simple_note__search_notes": 1,
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJzaW1wbGVfbm90ZStjb25ub3Jicm93QGdtYWlsLmNvbSIsImV4cCI6MTY4NDQxMjA5OH0.MWVQWKo6sXHzORFllzqeuw0PgBeOcgMov6yRwrJ7acg": 1,
+    "false": 2
+   },
+   "score": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0.5,
+    2.5
+   ],
+   "k_witness": 15,
+   "k_median": 7,
+   "target_doc_values": [
+    [
+     "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJzaW1wbGVfbm90ZStjb25ub3Jicm93QGdtYWlsLmNvbSIsImV4cCI6MTY4NDQxMjA5OH0.MWVQWKo6sXHzORFllzqeuw0PgBeOcgMov6yRwrJ7acg",
+     1
+    ],
+    [
+     "false",
+     2
+    ]
+   ]
+  },
+  "c351b7150104_20ab4895:1": {
+   "n_docs": 1,
+   "doc_lengths": [
+    539
+   ],
+   "doc_text_sha256": [
+    "0cfddb6db441361613810ff39b34699addd4ea2ab3a74f05e6e0b4affdb47a30"
+   ],
+   "doc_text_chars": [
+    2463
+   ],
+   "tool_name": "mcp__environment__search",
+   "arg_leaf_values": [
+    "Kuzgun Acar eldest of four children award 2016 2017 2018 2019 2020 2021 2022 2023 award established 1970 1990"
+   ],
+   "df": {
+    "mcp__environment__search": 1,
+    "Kuzgun Acar eldest of four children award 2016 2017 2018 2019 2020 2021 2022 2023 award established 1970 1990": 0
+   },
+   "score": [
+    1.0
+   ],
+   "k_witness": 0,
+   "k_median": 0,
+   "target_doc_values": []
+  },
+  "c351b7150104_2ae20927:1": {
+   "n_docs": 1,
+   "doc_lengths": [
+    402
+   ],
+   "doc_text_sha256": [
+    "1eeae4c254dddd4aa653f968be0b6f7bb81a899a0223bdebe94d401e2d797350"
+   ],
+   "doc_text_chars": [
+    2009
+   ],
+   "tool_name": "mcp__environment__search",
+   "arg_leaf_values": [
+    "\"Tufts University\" \"Massachusetts Institute of Technology\" thesis 2015 \"advisor\" \"INFORMS President's Award\""
+   ],
+   "df": {
+    "mcp__environment__search": 1,
+    "\"Tufts University\" \"Massachusetts Institute of Technology\" thesis 2015 \"advisor\" \"INFORMS President's Award\"": 0
+   },
+   "score": [
+    1.0
+   ],
+   "k_witness": 0,
+   "k_median": 0,
+   "target_doc_values": []
+  },
+  "c351b7150104_3e5e7863:2": {
+   "n_docs": 8,
+   "doc_lengths": [
+    440,
+    576,
+    620,
+    621,
+    546,
+    601,
+    389,
+    32
+   ],
+   "doc_text_sha256": [
+    "7bc3fbe504b3b6be74106b51855bba73901b47305a46ee37c048327bf5e81418",
+    "00df81540b38c0c8fb3485a5f3cd34bedac1bfc89354892d4b66be58397ed180",
+    "92993c939c68f15d0432b96fea4f4ad2c5c9667469c7186ceebbf6c41480d54a",
+    "bbeaffdeb3ce74d9e12fdea13b35711d7bde713436653602c8d947c9aeb3ba45",
+    "aeaa1c3e8ff1d4c3fd1d7acf955ce8666d4836d13f0247ec49599dc7e0a9631f",
+    "0dcc099229e268140c3e9efc16b9e02346b47497eb44c92c8ef6195568e5c26a",
+    "085ede1c385952036add60677ed04bad5ee9653fe71452b3cc8a8e49111a4ec5",
+    "e45994f2567136fe0060eca1b1c36344afe78f6aeeeb96ac14d9214f708d5bfe"
+   ],
+   "doc_text_chars": [
+    2244,
+    2332,
+    2332,
+    2332,
+    2332,
+    2332,
+    1541,
+    132
+   ],
+   "tool_name": "mcp__environment__search",
+   "arg_leaf_values": [
+    "\"buff\" series \"street artist\" interview \"recommend a song\""
+   ],
+   "df": {
+    "mcp__environment__search": 1,
+    "\"buff\" series \"street artist\" interview \"recommend a song\"": 0
+   },
+   "score": [
+    1.0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+   ],
+   "k_witness": 0,
+   "k_median": 3,
+   "target_doc_values": []
+  },
+  "c351b7150104_5ffa4738:1": {
+   "n_docs": 1,
+   "doc_lengths": [
+    495
+   ],
+   "doc_text_sha256": [
+    "76dd7b3c85ab7bae0a64943139354bb74362896eb5657481cb9bfad3683f4e28"
+   ],
+   "doc_text_chars": [
+    2277
+   ],
+   "tool_name": "mcp__environment__search",
+   "arg_leaf_values": [
+    "\"father was an ambassador\" \"divorced\" 1980s \"writer\" \"born\" 195"
+   ],
+   "df": {
+    "mcp__environment__search": 1,
+    "\"father was an ambassador\" \"divorced\" 1980s \"writer\" \"born\" 195": 0
+   },
+   "score": [
+    1.0
+   ],
+   "k_witness": 0,
+   "k_median": 0,
+   "target_doc_values": []
+  },
+  "c351b7150104_7443b665:1": {
+   "n_docs": 1,
+   "doc_lengths": [
+    572
+   ],
+   "doc_text_sha256": [
+    "832c3bbd6dce6147c74b4fb25df4b4470ba01ed96be205ad5ee3e6c43ebc052e"
+   ],
+   "doc_text_chars": [
+    2709
+   ],
+   "tool_name": "mcp__environment__search",
+   "arg_leaf_values": [
+    "\"Blantyre Telegraph\" animal they raised together book"
+   ],
+   "df": {
+    "mcp__environment__search": 1,
+    "\"Blantyre Telegraph\" animal they raised together book": 0
+   },
+   "score": [
+    1.0
+   ],
+   "k_witness": 0,
+   "k_median": 0,
+   "target_doc_values": []
+  },
+  "c351b7150104_bc4b9c45:1": {
+   "n_docs": 1,
+   "doc_lengths": [
+    468
+   ],
+   "doc_text_sha256": [
+    "f12d3399bca99467bc9903c9cf39453d07748fcbaf6da298a30b9511438127d8"
+   ],
+   "doc_text_chars": [
+    2246
+   ],
+   "tool_name": "mcp__environment__search",
+   "arg_leaf_values": [
+    "\"appeared in\" \"two episodes\" \"born\" 1991 actor \"episode\" \"directed by\""
+   ],
+   "df": {
+    "mcp__environment__search": 1,
+    "\"appeared in\" \"two episodes\" \"born\" 1991 actor \"episode\" \"directed by\"": 0
+   },
+   "score": [
+    1.0
+   ],
+   "k_witness": 0,
+   "k_median": 0,
+   "target_doc_values": []
+  },
+  "c351b7150104_fbfdc6d0:1": {
+   "n_docs": 1,
+   "doc_lengths": [
+    494
+   ],
+   "doc_text_sha256": [
+    "9f2a46bb8457d0cb94e2c4ac627fbef7b9d82c4e4fcf53d2af0d0d5109c2d8d4"
+   ],
+   "doc_text_chars": [
+    2431
+   ],
+   "tool_name": "mcp__environment__search",
+   "arg_leaf_values": [
+    "\"how to become your own boss\" \"earn more money\" video actor writer"
+   ],
+   "df": {
+    "mcp__environment__search": 1,
+    "\"how to become your own boss\" \"earn more money\" video actor writer": 0
+   },
+   "score": [
+    1.0
+   ],
+   "k_witness": 0,
+   "k_median": 0,
+   "target_doc_values": []
+  },
+  "cfc3d70e7f3c_790b34c5:5": {
+   "n_docs": 8,
+   "doc_lengths": [
+    121,
+    516,
+    326,
+    12,
+    757,
+    71,
+    40,
+    353
+   ],
+   "doc_text_sha256": [
+    "fb1ec9dd5b05d54277b25bbdcb81fa85c58d164a12af76257f70e8b23161f548",
+    "a05cbf8e1b6e4f07347c407be541b98a6226c2b5f05404e4a522595025311f26",
+    "f037d55600f410aeca96ea221fee97c46694e4d3cda8b6afe7609450642357e0",
+    "c99e4965eda3a52442d067b417b0221c320501c612cdce64dbee7abf0ad39dbf",
+    "49003ead5f7ecf9929456143305bd82d06defe359835e620b32c20ae2febbf32",
+    "b8bf3cadce5b11e8027051fd0c71b4dd4dd1e6998df97bc329657a9bcc37b86d",
+    "68d67ced52124325c6b20341ad1544163812ae546158487cfa5ed8e16916f830",
+    "580c7bb5d6f2312e50f4838938c845290ccd9c0343ae1c77b1b31a6996e86c83"
+   ],
+   "doc_text_chars": [
+    527,
+    1391,
+    677,
+    55,
+    1873,
+    176,
+    169,
+    754
+   ],
+   "tool_name": "venmo__create_payment_request",
+   "arg_leaf_values": [
+    "10",
+    "Commute",
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ2ZW5tbytqby1oYXJyQGdtYWlsLmNvbSIsImV4cCI6MTY4NDQxMjc0MX0.jCDXE7B3S-9Y2n1Q_cumB4OaPL8QtvGpz2uBEBNwnuQ",
+    "tr_solo@gmail.com"
+   ],
+   "df": {
+    "venmo__create_payment_request": 1,
+    "10": 3,
+    "Commute": 2,
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ2ZW5tbytqby1oYXJyQGdtYWlsLmNvbSIsImV4cCI6MTY4NDQxMjc0MX0.jCDXE7B3S-9Y2n1Q_cumB4OaPL8QtvGpz2uBEBNwnuQ": 1,
+    "tr_solo@gmail.com": 1
+   },
+   "score": [
+    0.5,
+    0,
+    0,
+    0,
+    1.3333333333333333,
+    0.3333333333333333,
+    0,
+    2.833333333333333
+   ],
+   "k_witness": 7,
+   "k_median": 3,
+   "target_doc_values": [
+    [
+     "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ2ZW5tbytqby1oYXJyQGdtYWlsLmNvbSIsImV4cCI6MTY4NDQxMjc0MX0.jCDXE7B3S-9Y2n1Q_cumB4OaPL8QtvGpz2uBEBNwnuQ",
+     1
+    ],
+    [
+     "Commute",
+     2
+    ],
+    [
+     "10",
+     3
+    ]
+   ]
+  },
+  "ebba346cd20a_0e3e5e0b:15": {
+   "n_docs": 16,
+   "doc_lengths": [
+    618,
+    709,
+    668,
+    757,
+    49,
+    230,
+    39,
+    673,
+    757,
+    39,
+    596,
+    719,
+    669,
+    218,
+    42,
+    258
+   ],
+   "doc_text_sha256": [
+    "3ee96630ca12d5610e2b2b24c13eb216603fb9a146c09ba73c4c9ee079bb8fb3",
+    "3c2cf9bf07b66632a025116594ccadfc374675dcb9013a2b2bb73efdb5521ed9",
+    "b0c3a1b0ecca2ab64b17022439bc8d97d8d54aac5ebbcae672d5966f7a454cf2",
+    "24898a5d42ceb61ec90adce39648a1197349df67a99635e2513a5b9399df3806",
+    "a8fc443c3454ddb5f161f07f519618bbdd56c4058648fd3aa54eab174512df5d",
+    "4f9646d7838ab635dd365f5a3879d7742456dde18be15d324241ea763a55d93a",
+    "cfebe67c95ef74c542edb3c52f933161b47bbd4d08327d23bbfbedd970493519",
+    "b2e60455eef0fc7659bc238cac9467cf54a50082a7b6a28e3dd2ea125000075e",
+    "afe4c5c0b5d9a24d807ec98f17a16696b84699db3f89be5c7b9dd21fe9d7107b",
+    "5f669ed0df5d9d6a395485959e8d8e49c04de6f6208c17d5b71d821991e424e4",
+    "0f47587802afaba9449c96f8855b2d590e008e1c5ac680ff722de045d25d7c02",
+    "73ace1e5f950fddd8bd9f14b61c8e30f740312772033af86ed2b0b6a45fb8f2c",
+    "e61dc86468831f353d7d5b3ff13ebc01b8922b2d01cea54337322b346ce30714",
+    "cff29e9f9352cfe6c116c657625fa6e672c3a3e2fd7c4355827b2793fdb9e157",
+    "acbf6799a2550d1a27d4f657aebaf234203b6261b6653a9780e66bfdb5640e62",
+    "a9653d5f693d03ca8a876d4fc2d5b68d15cdbb63527b23faf1c7edc90a2c9658"
+   ],
+   "doc_text_chars": [
+    2683,
+    2332,
+    2332,
+    2178,
+    182,
+    882,
+    186,
+    2332,
+    2260,
+    100,
+    2332,
+    2332,
+    2332,
+    843,
+    187,
+    1127
+   ],
+   "tool_name": "mcp__environment__search",
+   "arg_leaf_values": [
+    "movie shot Carmel California 2019 2020 2021 two actors 106 minutes"
+   ],
+   "df": {
+    "mcp__environment__search": 5,
+    "movie shot Carmel California 2019 2020 2021 two actors 106 minutes": 0
+   },
+   "score": [
+    0.2,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0.2,
+    0.2,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0.2,
+    0.2
+   ],
+   "k_witness": 0,
+   "k_median": 7,
+   "target_doc_values": []
+  },
+  "ebba346cd20a_0e3e5e0b:4": {
+   "n_docs": 16,
+   "doc_lengths": [
+    618,
+    672,
+    672,
+    681,
+    757,
+    31,
+    592,
+    285,
+    38,
+    611,
+    584,
+    553,
+    566,
+    566,
+    425,
+    61
+   ],
+   "doc_text_sha256": [
+    "3ee96630ca12d5610e2b2b24c13eb216603fb9a146c09ba73c4c9ee079bb8fb3",
+    "ab57123dcc924309048cf781e6388d9f0f7f2e3d4553ec974c447a1f87777232",
+    "43fc6d4b6e6b77fa47c3f58a498da18b4bbb4c70c8bed37230113ee2080efd6f",
+    "238bbdd80ba30f8153c089d52cb97cb5845fd86f4fc7ede516dd4ab51e7c8097",
+    "a4df0e5c2391d8fa7279fb1e66dc29c7268899bfc915bafc8d285560e2c65ebc",
+    "ca35034d3b9ed0a48a2543ca969d39da12fd49e4f1488fde2c7da6f24540b835",
+    "5f6aa64ef28001951bdc084c7cfa77a6252642e16d34ea3c7699c84431a08ee6",
+    "a6ecfa774dd878b47330c59ec4b6821d9a611ed02fbe19e1f7ff8c4069bd1de6",
+    "b0a318b4682658e2dbc9c489a09941a0d7eadb5a762c30eb755968ce91c7e376",
+    "6c18cb6575dd58e9f98de214d88a564ef8d9241c240b70107c49beda62f3a912",
+    "8d1a06c59c1842170eb63ed816d58a70735ec91821791916c6e75debe7b1e501",
+    "9c7c802aa45ccfe3ee47a385c8c6ff702f21ac82fe5e7b85ce822caa8e46e346",
+    "fb0e31d4a70775870862441f57a2c0509280268b86db53b933d04edb553d0928",
+    "943ac0aef3fbf3e41d4c1459399341131f925f902e6589781303742f3998e9fc",
+    "3010b2550b7ac7dc346361d34a358e9d8588a64397931684d5a3d31e47920470",
+    "d117482a1dc0ffb7a2a02018b4d02ab8be45ddb77cbe69a0cdf13b1a663c92b4"
+   ],
+   "doc_text_chars": [
+    2683,
+    2332,
+    2332,
+    2332,
+    2240,
+    120,
+    2332,
+    1141,
+    182,
+    2332,
+    2332,
+    2332,
+    2332,
+    2332,
+    1685,
+    185
+   ],
+   "tool_name": "mcp__environment__search",
+   "arg_leaf_values": [
+    "\"Gia Coppola\" film two actors 2020 2021 2022 2023 runtime"
+   ],
+   "df": {
+    "mcp__environment__search": 5,
+    "\"Gia Coppola\" film two actors 2020 2021 2022 2023 runtime": 0
+   },
+   "score": [
+    0.2,
+    0.2,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0.2,
+    0.2,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0.2
+   ],
+   "k_witness": 0,
+   "k_median": 7,
+   "target_doc_values": []
+  },
+  "ebba346cd20a_274cb65a:1": {
+   "n_docs": 1,
+   "doc_lengths": [
+    607
+   ],
+   "doc_text_sha256": [
+    "968d152a7529cfb3a0a564eb9903021b4c56124fcb997d67fb724a566f16a326"
+   ],
+   "doc_text_chars": [
+    2884
+   ],
+   "tool_name": "mcp__environment__search",
+   "arg_leaf_values": [
+    "book September 2023 child mental health Associate Professor university"
+   ],
+   "df": {
+    "mcp__environment__search": 1,
+    "book September 2023 child mental health Associate Professor university": 0
+   },
+   "score": [
+    1.0
+   ],
+   "k_witness": 0,
+   "k_median": 0,
+   "target_doc_values": []
+  }
+ }
+}

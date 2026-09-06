@@ -1,0 +1,206 @@
+ASCEND_RT_VISIBLE_DEVICES=1
+MODEL_PATH=/home/liuyancheng/c2kv/outputs_lyc/g_joint/fixed_joint
+BASE_MODEL=/home/liuyancheng/c2kv/models/Qwen3-4B-Instruct-2507
+TOKENIZER_PATH=/home/liuyancheng/c2kv/models/Qwen3-4B-Instruct-2507
+DATASET_PATH=/home/liuyancheng/c2kv/datasets/agent-llm-traces-v2
+SPLIT=eval
+SPLIT_MANIFEST_FILE=/home/liuyancheng/c2kv/outputs_lyc/g_joint/taskproxy_disjoint_v2.json
+SPLIT_NAME=taskproxy_disjoint
+SPLIT_SEED=42
+EVAL_RATIO=0.1
+MAX_SAMPLES_PER_SESSION=4
+REQUIRE_TOOL_CALL=True
+QID_MANIFEST=configs/bdf_pilot/b_eval200_qids.json
+MAX_EXAMPLES=200
+ARM_SET=greedy_core
+TEMPERATURE=0.7
+TOP_P=0.95
+GEN_SEED=0
+L_MIN=64
+RATIO=8
+MAX_DOC_LENGTH=1024
+MAX_DOC_NUM=24
+MAX_TOOL_CHUNKS=
+MIN_DOC_NUM=2
+MAX_TOOL_DEFINITION_TOKENS=32000
+MAX_SYSTEM_LENGTH=512
+MAX_PROMPT_TOKENS=1920
+MAX_NEW_TOKENS=128
+HISTORY_SELECTION=tail
+SPLIT_OVERSIZED_HISTORY_DOCS=True
+NPU_ATTN_IMPL=eager
+OUTPUT_FILE=/home/liuyancheng/c2kv/outputs_lyc/g_joint/bdf/f_pilot/greedy_core.jsonl
+PREREG_FILE=./configs/bdf_pilot/f_prereg.md
+DEVICE_TYPE=npu
+RESUME=True
+ASSERT_GREEDY_REPEAT=2
+SKIP_ANALYZE=False
+/home/liuyancheng/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/liuyancheng/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0/aarch64-linux/ascend_ops_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/liuyancheng/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/liuyancheng/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0/aarch64-linux/ascend_ops_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+08/23/2026 08:01:07 - INFO - eval_agent_history_c2kv - Loading tokenizer from /home/liuyancheng/c2kv/models/Qwen3-4B-Instruct-2507 use_fast=True
+08/23/2026 08:03:55 - INFO - f_timing_fork - Loaded 200 joint eval examples
+08/23/2026 08:03:55 - INFO - f_timing_fork - Provenance stamps: {"model_path": "/home/liuyancheng/c2kv/outputs_lyc/g_joint/fixed_joint", "base_model": "/home/liuyancheng/c2kv/models/Qwen3-4B-Instruct-2507", "model_config_sha256": "bf41c75c0efb907837c6e188caf6a5102ce0a7fbebd0727c10dd10a57b4c9ac6", "prereg_sha256": "69161b6f574e5cb763ab4a601f26a026f35c68381ac93c012557d288c2d71d78", "split_manifest_sha256": "2d33b901793b85ce27a9d0a737cb344ebc39cf0773b7da0ae54cba62e97d2d14", "qid_manifest_sha256": "d58659054fe771a45f4f6aad50282fcc36edb232f1a0872cd9fe0753f8eaf994", "git_short_sha": "f84dc74f", "override_ratio": 8, "l_min": 64, "gen_seed": 0, "temperature": null, "top_p": null}
+08/23/2026 08:03:55 - INFO - f_timing_fork - Loading joint checkpoint /home/liuyancheng/c2kv/outputs_lyc/g_joint/fixed_joint
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+[ERROR] Config not found for qwen2-5. You can manually add it to HARDCODED_CONFIG_FOR_MODELS in utils/auto_docstring.py
+Loading weights:   0%|          | 0/507 [00:00<?, ?it/s]Loading weights:  15%|█▍        | 76/507 [00:00<00:00, 748.70it/s]Loading weights:  30%|██▉       | 151/507 [00:00<00:00, 609.02it/s]Loading weights:  45%|████▌     | 229/507 [00:00<00:00, 677.76it/s]Loading weights:  61%|██████    | 307/507 [00:00<00:00, 714.76it/s]Loading weights:  76%|███████▌  | 383/507 [00:00<00:00, 722.31it/s]Loading weights:  92%|█████████▏| 466/507 [00:00<00:00, 753.11it/s]Loading weights: 100%|██████████| 507/507 [00:00<00:00, 707.82it/s]
+08/23/2026 08:03:58 - INFO - f_timing_fork - runtime attn impl=eager
+f_fork/greedy_core:   0%|          | 0/200 [00:00<?, ?it/s]08/23/2026 08:04:19 - INFO - f_timing_fork - greedy repeat check OK for qid=2a21e94e0687_3c5b74bd:2
+f_fork/greedy_core:   0%|          | 1/200 [00:21<1:12:10, 21.76s/it]08/23/2026 08:05:08 - INFO - f_timing_fork - greedy repeat check OK for qid=2a21e94e0687_3c5b74bd:10
+f_fork/greedy_core:   1%|          | 2/200 [01:10<2:04:03, 37.60s/it]f_fork/greedy_core:   2%|▏         | 3/200 [01:49<2:06:22, 38.49s/it]f_fork/greedy_core:   2%|▏         | 4/200 [02:19<1:54:27, 35.04s/it]f_fork/greedy_core:   2%|▎         | 5/200 [02:58<1:58:09, 36.36s/it]f_fork/greedy_core:   3%|▎         | 6/200 [03:38<2:01:14, 37.50s/it]f_fork/greedy_core:   4%|▎         | 7/200 [04:17<2:02:20, 38.04s/it]f_fork/greedy_core:   4%|▍         | 8/200 [04:56<2:03:01, 38.45s/it]f_fork/greedy_core:   4%|▍         | 9/200 [05:35<2:02:50, 38.59s/it]f_fork/greedy_core:   5%|▌         | 10/200 [05:53<1:41:36, 32.09s/it]f_fork/greedy_core:   6%|▌         | 11/200 [06:32<1:48:24, 34.42s/it]f_fork/greedy_core:   6%|▌         | 12/200 [07:10<1:51:05, 35.46s/it]f_fork/greedy_core:   6%|▋         | 13/200 [07:49<1:54:04, 36.60s/it]f_fork/greedy_core:   7%|▋         | 14/200 [08:06<1:34:29, 30.48s/it]f_fork/greedy_core:   8%|▊         | 15/200 [08:45<1:42:09, 33.13s/it]f_fork/greedy_core:   8%|▊         | 16/200 [09:23<1:46:36, 34.77s/it]f_fork/greedy_core:   8%|▊         | 17/200 [10:03<1:50:11, 36.13s/it]f_fork/greedy_core:   9%|▉         | 18/200 [10:32<1:43:28, 34.11s/it]f_fork/greedy_core:  10%|▉         | 19/200 [11:12<1:47:56, 35.78s/it]f_fork/greedy_core:  10%|█         | 20/200 [11:50<1:49:05, 36.36s/it]f_fork/greedy_core:  10%|█         | 21/200 [12:24<1:47:06, 35.90s/it]f_fork/greedy_core:  11%|█         | 22/200 [13:02<1:48:03, 36.43s/it]f_fork/greedy_core:  12%|█▏        | 23/200 [13:39<1:48:00, 36.61s/it]f_fork/greedy_core:  12%|█▎        | 25/200 [14:09<1:17:34, 26.59s/it]f_fork/greedy_core:  13%|█▎        | 26/200 [14:39<1:19:15, 27.33s/it]f_fork/greedy_core:  14%|█▎        | 27/200 [15:16<1:26:39, 30.06s/it]f_fork/greedy_core:  14%|█▍        | 28/200 [15:33<1:16:04, 26.54s/it]f_fork/greedy_core:  14%|█▍        | 29/200 [16:13<1:26:14, 30.26s/it]f_fork/greedy_core:  15%|█▌        | 30/200 [16:53<1:33:27, 32.99s/it]f_fork/greedy_core:  16%|█▌        | 31/200 [17:32<1:37:58, 34.79s/it]f_fork/greedy_core:  16%|█▌        | 32/200 [18:09<1:38:49, 35.30s/it]f_fork/greedy_core:  16%|█▋        | 33/200 [18:49<1:42:38, 36.88s/it]f_fork/greedy_core:  17%|█▋        | 34/200 [19:28<1:43:40, 37.48s/it]f_fork/greedy_core:  18%|█▊        | 35/200 [20:06<1:43:25, 37.61s/it]f_fork/greedy_core:  18%|█▊        | 36/200 [20:46<1:44:48, 38.35s/it]f_fork/greedy_core:  18%|█▊        | 37/200 [21:26<1:45:23, 38.79s/it]f_fork/greedy_core:  19%|█▉        | 38/200 [21:44<1:27:43, 32.49s/it]f_fork/greedy_core:  20%|█▉        | 39/200 [22:03<1:16:34, 28.54s/it]f_fork/greedy_core:  20%|██        | 40/200 [22:43<1:25:12, 31.96s/it]f_fork/greedy_core:  20%|██        | 41/200 [22:58<1:11:07, 26.84s/it]f_fork/greedy_core:  21%|██        | 42/200 [23:39<1:21:36, 30.99s/it]f_fork/greedy_core:  22%|██▏       | 43/200 [24:21<1:29:47, 34.31s/it]f_fork/greedy_core:  22%|██▏       | 44/200 [24:55<1:29:09, 34.29s/it]f_fork/greedy_core:  22%|██▎       | 45/200 [25:34<1:32:01, 35.62s/it]f_fork/greedy_core:  23%|██▎       | 46/200 [26:15<1:35:40, 37.27s/it]f_fork/greedy_core:  24%|██▍       | 49/200 [26:55<1:00:03, 23.86s/it]f_fork/greedy_core:  25%|██▌       | 50/200 [27:28<1:04:09, 25.66s/it]f_fork/greedy_core:  26%|██▌       | 51/200 [27:54<1:04:07, 25.82s/it]f_fork/greedy_core:  26%|██▋       | 53/200 [28:34<57:29, 23.47s/it]  f_fork/greedy_core:  28%|██▊       | 55/200 [29:13<53:18, 22.06s/it]f_fork/greedy_core:  28%|██▊       | 56/200 [29:53<1:01:39, 25.69s/it]f_fork/greedy_core:  28%|██▊       | 57/200 [30:29<1:06:58, 28.10s/it]f_fork/greedy_core:  29%|██▉       | 58/200 [31:07<1:12:04, 30.45s/it]f_fork/greedy_core:  30%|███       | 60/200 [31:31<53:45, 23.04s/it]  f_fork/greedy_core:  30%|███       | 61/200 [32:07<59:44, 25.79s/it]f_fork/greedy_core:  31%|███       | 62/200 [32:43<1:05:21, 28.42s/it]f_fork/greedy_core:  32%|███▏      | 63/200 [33:12<1:05:14, 28.58s/it]f_fork/greedy_core:  32%|███▏      | 64/200 [33:49<1:09:44, 30.77s/it]f_fork/greedy_core:  32%|███▎      | 65/200 [34:28<1:14:16, 33.01s/it]f_fork/greedy_core:  33%|███▎      | 66/200 [35:04<1:16:00, 34.04s/it]f_fork/greedy_core:  34%|███▎      | 67/200 [35:44<1:19:13, 35.74s/it]f_fork/greedy_core:  34%|███▍      | 68/200 [36:22<1:19:41, 36.22s/it]f_fork/greedy_core:  34%|███▍      | 69/200 [37:00<1:20:40, 36.95s/it]f_fork/greedy_core:  35%|███▌      | 70/200 [37:35<1:18:49, 36.38s/it]f_fork/greedy_core:  36%|███▌      | 71/200 [38:17<1:21:52, 38.08s/it]f_fork/greedy_core:  36%|███▋      | 73/200 [38:54<1:01:31, 29.07s/it]f_fork/greedy_core:  37%|███▋      | 74/200 [39:34<1:06:42, 31.77s/it]f_fork/greedy_core:  38%|███▊      | 75/200 [39:56<1:00:43, 29.15s/it]f_fork/greedy_core:  38%|███▊      | 76/200 [40:34<1:05:12, 31.55s/it]f_fork/greedy_core:  39%|███▉      | 78/200 [41:12<52:54, 26.02s/it]  f_fork/greedy_core:  40%|███▉      | 79/200 [41:12<40:03, 19.86s/it]f_fork/greedy_core:  40%|████      | 80/200 [41:12<29:43, 14.86s/it]f_fork/greedy_core:  40%|████      | 81/200 [41:12<21:42, 10.95s/it]f_fork/greedy_core:  41%|████      | 82/200 [41:12<15:40,  7.97s/it]f_fork/greedy_core:  42%|████▏     | 83/200 [41:51<32:21, 16.60s/it]f_fork/greedy_core:  42%|████▎     | 85/200 [42:28<33:35, 17.53s/it]f_fork/greedy_core:  43%|████▎     | 86/200 [43:08<43:29, 22.89s/it]f_fork/greedy_core:  44%|████▎     | 87/200 [43:40<47:31, 25.24s/it]f_fork/greedy_core:  44%|████▍     | 88/200 [44:17<53:10, 28.49s/it]f_fork/greedy_core:  45%|████▌     | 90/200 [44:44<40:18, 21.99s/it]f_fork/greedy_core:  46%|████▌     | 91/200 [45:23<46:55, 25.83s/it]f_fork/greedy_core:  46%|████▌     | 92/200 [45:51<47:30, 26.39s/it]f_fork/greedy_core:  46%|████▋     | 93/200 [46:28<52:24, 29.39s/it]f_fork/greedy_core:  47%|████▋     | 94/200 [47:07<56:26, 31.94s/it]f_fork/greedy_core:  48%|████▊     | 95/200 [47:45<58:39, 33.52s/it]f_fork/greedy_core:  48%|████▊     | 96/200 [48:24<1:00:48, 35.09s/it]f_fork/greedy_core:  48%|████▊     | 97/200 [48:53<57:24, 33.44s/it]  f_fork/greedy_core:  49%|████▉     | 98/200 [49:32<59:28, 34.98s/it]f_fork/greedy_core:  50%|█████     | 100/200 [49:59<42:10, 25.31s/it]f_fork/greedy_core:  50%|█████     | 101/200 [50:36<46:21, 28.10s/it]f_fork/greedy_core:  51%|█████     | 102/200 [50:59<43:35, 26.69s/it]f_fork/greedy_core:  52%|█████▏    | 103/200 [51:35<47:25, 29.34s/it]f_fork/greedy_core:  52%|█████▏    | 104/200 [52:14<51:23, 32.12s/it]f_fork/greedy_core:  52%|█████▎    | 105/200 [52:52<53:30, 33.80s/it]f_fork/greedy_core:  53%|█████▎    | 106/200 [53:32<55:22, 35.35s/it]f_fork/greedy_core:  54%|█████▍    | 108/200 [54:09<42:32, 27.74s/it]f_fork/greedy_core:  55%|█████▍    | 109/200 [54:49<46:42, 30.79s/it]f_fork/greedy_core:  55%|█████▌    | 110/200 [55:17<45:02, 30.02s/it]f_fork/greedy_core:  56%|█████▌    | 111/200 [55:56<48:26, 32.66s/it]f_fork/greedy_core:  56%|█████▌    | 112/200 [56:35<50:24, 34.36s/it]f_fork/greedy_core:  56%|█████▋    | 113/200 [57:14<51:26, 35.47s/it]f_fork/greedy_core:  57%|█████▊    | 115/200 [57:48<38:48, 27.39s/it]f_fork/greedy_core:  58%|█████▊    | 116/200 [58:23<40:43, 29.09s/it]f_fork/greedy_core:  58%|█████▊    | 117/200 [58:56<41:47, 30.21s/it]f_fork/greedy_core:  59%|█████▉    | 118/200 [59:29<42:10, 30.86s/it]f_fork/greedy_core:  60%|█████▉    | 119/200 [1:00:02<42:37, 31.57s/it]f_fork/greedy_core:  60%|██████    | 120/200 [1:00:41<44:45, 33.57s/it]f_fork/greedy_core:  60%|██████    | 121/200 [1:01:22<46:58, 35.67s/it]f_fork/greedy_core:  61%|██████    | 122/200 [1:01:59<47:08, 36.26s/it]f_fork/greedy_core:  62%|██████▏   | 123/200 [1:02:38<47:23, 36.93s/it]f_fork/greedy_core:  62%|██████▏   | 124/200 [1:03:19<48:13, 38.07s/it]f_fork/greedy_core:  62%|██████▎   | 125/200 [1:03:57<47:49, 38.26s/it]f_fork/greedy_core:  63%|██████▎   | 126/200 [1:04:10<37:51, 30.70s/it]f_fork/greedy_core:  64%|██████▍   | 129/200 [1:04:35<21:23, 18.07s/it]f_fork/greedy_core:  66%|██████▌   | 131/200 [1:05:15<21:40, 18.84s/it]f_fork/greedy_core:  66%|██████▋   | 133/200 [1:05:54<21:15, 19.04s/it]f_fork/greedy_core:  67%|██████▋   | 134/200 [1:06:33<25:00, 22.73s/it]f_fork/greedy_core:  68%|██████▊   | 135/200 [1:07:12<28:31, 26.34s/it]f_fork/greedy_core:  68%|██████▊   | 136/200 [1:07:35<27:13, 25.52s/it]f_fork/greedy_core:  69%|██████▉   | 138/200 [1:08:10<23:06, 22.37s/it]f_fork/greedy_core:  70%|██████▉   | 139/200 [1:08:50<26:38, 26.21s/it]f_fork/greedy_core:  70%|███████   | 140/200 [1:09:30<29:27, 29.47s/it]f_fork/greedy_core:  70%|███████   | 141/200 [1:10:10<31:40, 32.21s/it]f_fork/greedy_core:  71%|███████   | 142/200 [1:10:50<33:07, 34.26s/it]f_fork/greedy_core:  72%|███████▏  | 143/200 [1:11:31<34:30, 36.32s/it]f_fork/greedy_core:  72%|███████▎  | 145/200 [1:12:11<26:41, 29.12s/it]f_fork/greedy_core:  73%|███████▎  | 146/200 [1:12:51<28:30, 31.68s/it]f_fork/greedy_core:  74%|███████▎  | 147/200 [1:13:30<29:34, 33.49s/it]f_fork/greedy_core:  74%|███████▍  | 148/200 [1:14:10<30:26, 35.12s/it]f_fork/greedy_core:  74%|███████▍  | 149/200 [1:14:51<31:18, 36.83s/it]f_fork/greedy_core:  75%|███████▌  | 150/200 [1:15:31<31:35, 37.90s/it]f_fork/greedy_core:  76%|███████▌  | 151/200 [1:16:11<31:16, 38.30s/it]f_fork/greedy_core:  76%|███████▌  | 152/200 [1:16:49<30:36, 38.27s/it]f_fork/greedy_core:  76%|███████▋  | 153/200 [1:17:28<30:04, 38.40s/it]f_fork/greedy_core:  77%|███████▋  | 154/200 [1:18:08<29:46, 38.84s/it]f_fork/greedy_core:  78%|███████▊  | 155/200 [1:18:47<29:22, 39.16s/it]f_fork/greedy_core:  78%|███████▊  | 156/200 [1:19:11<25:13, 34.39s/it]f_fork/greedy_core:  78%|███████▊  | 157/200 [1:19:50<25:38, 35.78s/it]f_fork/greedy_core:  79%|███████▉  | 158/200 [1:20:30<26:00, 37.15s/it]f_fork/greedy_core:  80%|████████  | 160/200 [1:21:11<19:37, 29.45s/it]f_fork/greedy_core:  80%|████████  | 161/200 [1:21:52<21:03, 32.39s/it]f_fork/greedy_core:  81%|████████  | 162/200 [1:22:18<19:20, 30.54s/it]f_fork/greedy_core:  82%|████████▏ | 163/200 [1:22:56<20:05, 32.59s/it]f_fork/greedy_core:  82%|████████▏ | 164/200 [1:23:23<18:39, 31.09s/it]f_fork/greedy_core:  82%|████████▎ | 165/200 [1:24:02<19:29, 33.42s/it]f_fork/greedy_core:  83%|████████▎ | 166/200 [1:24:41<19:47, 34.94s/it]f_fork/greedy_core:  84%|████████▎ | 167/200 [1:25:19<19:48, 36.02s/it]f_fork/greedy_core:  84%|████████▍ | 168/200 [1:25:58<19:39, 36.84s/it]f_fork/greedy_core:  84%|████████▍ | 169/200 [1:26:37<19:16, 37.32s/it]f_fork/greedy_core:  85%|████████▌ | 170/200 [1:27:17<19:08, 38.27s/it]f_fork/greedy_core:  86%|████████▌ | 171/200 [1:27:58<18:55, 39.15s/it]f_fork/greedy_core:  86%|████████▌ | 172/200 [1:28:22<16:02, 34.39s/it]f_fork/greedy_core:  86%|████████▋ | 173/200 [1:28:40<13:17, 29.53s/it]f_fork/greedy_core:  87%|████████▋ | 174/200 [1:29:19<14:06, 32.57s/it]f_fork/greedy_core:  88%|████████▊ | 175/200 [1:30:00<14:31, 34.85s/it]f_fork/greedy_core:  88%|████████▊ | 176/200 [1:30:39<14:27, 36.15s/it]f_fork/greedy_core:  88%|████████▊ | 177/200 [1:31:17<14:08, 36.88s/it]f_fork/greedy_core:  89%|████████▉ | 178/200 [1:31:58<13:56, 38.04s/it]f_fork/greedy_core:  90%|████████▉ | 179/200 [1:32:39<13:35, 38.84s/it]f_fork/greedy_core:  90%|█████████ | 180/200 [1:33:17<12:52, 38.65s/it]f_fork/greedy_core:  90%|█████████ | 181/200 [1:33:34<10:10, 32.15s/it]f_fork/greedy_core:  91%|█████████ | 182/200 [1:34:15<10:25, 34.76s/it]f_fork/greedy_core:  92%|█████████▏| 184/200 [1:34:55<07:26, 27.92s/it]f_fork/greedy_core:  92%|█████████▎| 185/200 [1:35:34<07:39, 30.64s/it]f_fork/greedy_core:  93%|█████████▎| 186/200 [1:36:12<07:37, 32.66s/it]f_fork/greedy_core:  94%|█████████▎| 187/200 [1:36:52<07:31, 34.69s/it]f_fork/greedy_core:  94%|█████████▍| 188/200 [1:37:33<07:15, 36.28s/it]f_fork/greedy_core:  94%|█████████▍| 189/200 [1:38:13<06:52, 37.47s/it]f_fork/greedy_core:  95%|█████████▌| 190/200 [1:38:51<06:16, 37.66s/it]f_fork/greedy_core:  96%|█████████▌| 191/200 [1:39:32<05:46, 38.47s/it]f_fork/greedy_core:  96%|█████████▌| 192/200 [1:40:10<05:08, 38.60s/it]f_fork/greedy_core:  96%|█████████▋| 193/200 [1:40:50<04:31, 38.85s/it]f_fork/greedy_core:  97%|█████████▋| 194/200 [1:41:28<03:52, 38.67s/it]f_fork/greedy_core:  98%|█████████▊| 196/200 [1:42:08<01:59, 29.95s/it]f_fork/greedy_core:  98%|█████████▊| 197/200 [1:42:47<01:36, 32.23s/it]f_fork/greedy_core:  99%|█████████▉| 198/200 [1:43:25<01:07, 33.82s/it]f_fork/greedy_core: 100%|█████████▉| 199/200 [1:44:03<00:34, 34.90s/it]f_fork/greedy_core: 100%|██████████| 200/200 [1:44:41<00:00, 35.87s/it]f_fork/greedy_core: 100%|██████████| 200/200 [1:44:41<00:00, 31.41s/it]
+08/23/2026 09:48:39 - INFO - f_timing_fork - Wrote 374 rows -> /home/liuyancheng/c2kv/outputs_lyc/g_joint/bdf/f_pilot/greedy_core.jsonl
+08/23/2026 09:48:39 - INFO - f_timing_fork - Wrote run summary -> /home/liuyancheng/c2kv/outputs_lyc/g_joint/bdf/f_pilot/greedy_core.run.json
+{
+  "output_file": "/home/liuyancheng/c2kv/outputs_lyc/g_joint/bdf/f_pilot/greedy_core.jsonl",
+  "arm_set": "greedy_core",
+  "passes": [
+    "greedy_core"
+  ],
+  "num_examples": 200,
+  "num_eligible": 174,
+  "num_ineligible": 26,
+  "num_rows_written": 374,
+  "num_rows_skipped": 26,
+  "sampling_supported": true,
+  "model_path": "/home/liuyancheng/c2kv/outputs_lyc/g_joint/fixed_joint",
+  "base_model": "/home/liuyancheng/c2kv/models/Qwen3-4B-Instruct-2507",
+  "model_config_sha256": "bf41c75c0efb907837c6e188caf6a5102ce0a7fbebd0727c10dd10a57b4c9ac6",
+  "prereg_sha256": "69161b6f574e5cb763ab4a601f26a026f35c68381ac93c012557d288c2d71d78",
+  "split_manifest_sha256": "2d33b901793b85ce27a9d0a737cb344ebc39cf0773b7da0ae54cba62e97d2d14",
+  "qid_manifest_sha256": "d58659054fe771a45f4f6aad50282fcc36edb232f1a0872cd9fe0753f8eaf994",
+  "git_short_sha": "f84dc74f",
+  "override_ratio": 8,
+  "l_min": 64,
+  "gen_seed": 0,
+  "temperature": null,
+  "top_p": null
+}
+Wrote /home/liuyancheng/c2kv/outputs_lyc/g_joint/bdf/f_pilot/greedy_core.analysis.json
+Wrote /home/liuyancheng/c2kv/outputs_lyc/g_joint/bdf/f_pilot/greedy_core.analysis.md
+Run summary:
+{
+  "output_file": "/home/liuyancheng/c2kv/outputs_lyc/g_joint/bdf/f_pilot/greedy_core.jsonl",
+  "arm_set": "greedy_core",
+  "passes": [
+    "greedy_core"
+  ],
+  "num_examples": 200,
+  "num_eligible": 174,
+  "num_ineligible": 26,
+  "num_rows_written": 374,
+  "num_rows_skipped": 26,
+  "sampling_supported": true,
+  "model_path": "/home/liuyancheng/c2kv/outputs_lyc/g_joint/fixed_joint",
+  "base_model": "/home/liuyancheng/c2kv/models/Qwen3-4B-Instruct-2507",
+  "model_config_sha256": "bf41c75c0efb907837c6e188caf6a5102ce0a7fbebd0727c10dd10a57b4c9ac6",
+  "prereg_sha256": "69161b6f574e5cb763ab4a601f26a026f35c68381ac93c012557d288c2d71d78",
+  "split_manifest_sha256": "2d33b901793b85ce27a9d0a737cb344ebc39cf0773b7da0ae54cba62e97d2d14",
+  "qid_manifest_sha256": "d58659054fe771a45f4f6aad50282fcc36edb232f1a0872cd9fe0753f8eaf994",
+  "git_short_sha": "f84dc74f",
+  "override_ratio": 8,
+  "l_min": 64,
+  "gen_seed": 0,
+  "temperature": null,
+  "top_p": null
+}
+Analysis:
+# F pilot — speculative compaction timing fork
+
+paired greedy n=174, paired sampled n=0, sessions=51
+
+## Arm table
+
+| arm | n | tool_name_match | action_key_match | argument_value_f1 | oracle |
+|---|---|---|---|---|---|
+| F0 | 174 | 0.5517 | 0.0230 | 0.0412 | no |
+| F2 | 174 | 0.5575 | 0.0230 | 0.0623 | no |
+| F3g | 174 | 0.5632 | 0.0230 | 0.0412 | no |
+| F3g_R1b | 174 | 0.5690 | 0.0230 | 0.0623 | no |
+| F4 | 174 | 0.5517 | 0.0172 | 0.0450 | no |
+| F5 | 174 | 0.6437 | 0.0460 | 0.0738 | yes |
+
+Δ_oracle(timing) = F5 − F2 = 0.0862 (basis: [F0,F2]). Oracle union: 立即压缩与延迟压缩任一成功的并集 ceiling，仅用于估计 draft-verify 理论空间，不构成选择机制
+
+Unconditional gap F2 − F0 = 0.0058 (F2-F0 is the gap you get by deferring on EVERY decision — it is not part of the selective (check-driven) story and is reported separately.)
+
+_174-example teacher-forced next-action eval, single seed, single checkpoint — preliminary, n=1. Training pool appworld-dominated. Paired MDE ≈ 8.96pp; no claim below MDE is a ranking._
+
+## Four-cell (compress_now × defer)
+
+| metric | both | compress_now only | defer only | neither | n |
+|---|---|---|---|---|---|
+| tool_name_match | 81 | 15 | 16 | 62 | 174 |
+| action_key_match | 0 | 4 | 4 | 166 | 174 |
+
+Branch disagreement on the emitted action: 72/174 (0.4138); both unparseable: 3.
+
+Both branches already gold: 0/174 (0.0000). both_match_gold is computed with the gold action in hand and is therefore unavailable to any online policy: it describes how many decisions no timing choice could have changed, not what a deployable selector achieves.
+
+_174-example teacher-forced next-action eval, single seed, single checkpoint — preliminary, n=1. Training pool appworld-dominated. Paired MDE ≈ 8.96pp; no claim below MDE is a ranking._
+
+## Noise floor (F4 coin, reseeded)
+
+Delta floor (coin − max(F0,F2), best=F2 at 0.5575): mean=-0.0013, 95% band=-0.0287–0.0345 over 200 coin seeds, n=174. Compare arm_table.delta_oracle_timing against THIS band; a delta_oracle_timing inside it is not headroom.
+
+Absolute coin rate (descriptive only): mean=0.5562, 95% band=0.5287–0.5920 over 200 coin seeds, n=174.
+
+_174-example teacher-forced next-action eval, single seed, single checkpoint — preliminary, n=1. Training pool appworld-dominated. Paired MDE ≈ 8.96pp; no claim below MDE is a ranking._
+
+## Session-clustered CIs
+
+| contrast | point | 95% CI | clusters | n |
+|---|---|---|---|---|
+| F3g-F0 | 0.0115 | [0.0000, 0.0287] | 51 | 174 |
+| F3g-F4 | 0.0115 | [-0.0291, 0.0533] | 51 | 174 |
+| F2-F0 | 0.0057 | [-0.0682, 0.0814] | 51 | 174 |
+| F5-F2 | 0.0862 | [0.0444, 0.1345] | 51 | 174 |
+
+_174-example teacher-forced next-action eval, single seed, single checkpoint — preliminary, n=1. Training pool appworld-dominated. Paired MDE ≈ 8.96pp; no claim below MDE is a ranking._
+
+## Cost ledgers
+
+| arm | rollouts generated | rollouts kept | per-decision as policy | GPU-ms total | GPU-ms prefill | GPU-ms decode | success/GPU-s |
+|---|---|---|---|---|---|---|---|
+| F0 | 174 | 174 | 1 | 3002741.0 | 595013.3 | 2407727.7 | 0.0320 |
+| F2 | 174 | 174 | 1 | 3029032.8 | 612379.3 | 2416653.5 | 0.0320 |
+| F3g | 348 | 174 | 2 | 6031773.8 | 1207392.6 | 4824381.2 | 0.0162 |
+| F3g_R1b | 348 | 174 | 2 | 6031773.8 | 1207392.6 | 4824381.2 | 0.0164 |
+| F4 | 348 | 174 | 1 | 6031773.8 | 1207392.6 | 4824381.2 | 0.0159 |
+| F5 | 348 | 348 | 2 | 6031773.8 | 1207392.6 | 4824381.2 | 0.0186 |
+
+Inside the speculation window both branches are resident: the fork segment costs gist(x_T) + raw(x_T) = 1.125x raw(x_T) at ratio 8, so the window uses MORE memory than a full-only prefix, never less. Any saving materialises only after the commit. No claim of the form "compression frees memory, so we can afford more branches" is made.
+
+_174-example teacher-forced next-action eval, single seed, single checkpoint — preliminary, n=1. Training pool appworld-dominated. Paired MDE ≈ 8.96pp; no claim below MDE is a ranking._
+
+## Tie-rule sensitivity (R1 vs R1b)
+
+| arm | R1 | R1b | Δ(R1b−R1) | decisions flipped | n |
+|---|---|---|---|---|---|
+| F3g | 0.5632 | 0.5690 | 0.0058 | 161 | 174 |
+
+_174-example teacher-forced next-action eval, single seed, single checkpoint — preliminary, n=1. Training pool appworld-dominated. Paired MDE ≈ 8.96pp; no claim below MDE is a ranking._
+
+## Reading card
+
+- ① headroom exists? -> arm_table.delta_oracle_timing vs noise_floor_delta.band95 (both are paired differences against max(F0,F2); noise_floor_absolute is descriptive only)
+- ② beats the simple baseline? -> cis['F3g-F4'] and cis['F3g-F0']
+- ③ cost acceptable? -> cost_tables.rollout_ledger / gpu_ms_ledger / bytes_table
+- ④ which failure class benefits? -> four_cell_table + both_match_gold_block
+
+Stopping-condition whitelist (text only, not wired to any logic):
+- implementation-invalid (position invariant or greedy repeat check fails)
+- no headroom (delta_oracle_timing inside the F4 coin noise_floor_delta.band95)
+- dominated by a simple baseline
+- cost unacceptable
+- priority
+
+> 174-example teacher-forced next-action eval, single seed, single checkpoint — preliminary, n=1. Training pool appworld-dominated. Paired MDE ≈ 8.96pp; no claim below MDE is a ranking.

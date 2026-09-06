@@ -27,11 +27,9 @@
 #   RATIO             gist compression ratio (8)
 #   COMPARE_MODES     c2kv,hybrid,full,truncate
 #   HYBRID_TOP_K      raw tail messages kept by the hybrid arm (3)
-#   HYBRID_FULL_AFTER_C2KV  False (default, unchanged) = the hybrid raw tail is
-#                     prefilled BEFORE the gist block; True = AFTER it, the
-#                     layout training (train_data_joint.py) and serving
-#                     (benchmarks/proxy.py) both use.  Changes the hybrid
-#                     column only; keep False to stay comparable with s42/s43.
+#   HYBRID_LAYOUT   gist_first (default, canonical: raw tail stays after the
+#                   gist block in original conversation order) | raw_first
+#                   (legacy reorder). Changes the hybrid column only.
 #   SYSTEM_OVERFLOW   truncate (default, unchanged) | skip.  'skip' drops rows
 #                     whose untruncated tools-in-system prefix exceeds
 #                     MAX_SYSTEM_LENGTH instead of right-truncating it, i.e.
@@ -73,7 +71,7 @@ MAX_EXAMPLES="${MAX_EXAMPLES:-700}"
 RATIO="${RATIO:-8}"
 COMPARE_MODES="${COMPARE_MODES:-c2kv,hybrid,full,truncate}"
 HYBRID_TOP_K="${HYBRID_TOP_K:-3}"
-HYBRID_FULL_AFTER_C2KV="${HYBRID_FULL_AFTER_C2KV:-False}"
+HYBRID_LAYOUT="${HYBRID_LAYOUT:-gist_first}"
 SYSTEM_OVERFLOW="${SYSTEM_OVERFLOW:-truncate}"
 MAX_DOC_LENGTH="${MAX_DOC_LENGTH:-768}"
 MAX_DOC_NUM="${MAX_DOC_NUM:-16}"
@@ -121,7 +119,7 @@ RUN_CMD=(python agent/eval_agent_history_c2kv.py
   --compare_modes "${COMPARE_MODES}"
   --ratios "${RATIO}"
   --hybrid_top_k "${HYBRID_TOP_K}"
-  --hybrid_full_after_c2kv "${HYBRID_FULL_AFTER_C2KV}"
+  --hybrid_layout "${HYBRID_LAYOUT}"
   --system_overflow "${SYSTEM_OVERFLOW}"
   --max_examples "${MAX_EXAMPLES}"
   --include_tools "${INCLUDE_TOOLS}"
@@ -146,7 +144,7 @@ echo "SPLIT_NAME=${SPLIT_NAME} SPLIT=${SPLIT}"
 echo "COMPARE_MODES=${COMPARE_MODES} RATIO=${RATIO} MAX_EXAMPLES=${MAX_EXAMPLES}"
 echo "GEOMETRY: max_doc_length=${MAX_DOC_LENGTH} max_doc_num=${MAX_DOC_NUM} min_doc_num=${MIN_DOC_NUM}"
 echo "INCLUDE_TOOLS=${INCLUDE_TOOLS} HYBRID_TOP_K=${HYBRID_TOP_K} UNTRAINED=${UNTRAINED}"
-echo "HYBRID_FULL_AFTER_C2KV=${HYBRID_FULL_AFTER_C2KV} SYSTEM_OVERFLOW=${SYSTEM_OVERFLOW}"
+echo "HYBRID_LAYOUT=${HYBRID_LAYOUT} SYSTEM_OVERFLOW=${SYSTEM_OVERFLOW}"
 echo "OUT_DIR=${OUT_DIR}"
 printf '+'; printf ' %q' "${RUN_CMD[@]}"; echo
 "${RUN_CMD[@]}"
@@ -261,6 +259,7 @@ summary = {
     # Denominator and hybrid-layout knobs: two summaries that differ on either
     # are scored on different populations / different prefixes.
     "system_overflow": harness.get("system_overflow"),
+    "hybrid_layout": harness.get("hybrid_layout"),
     "hybrid_full_after_c2kv": harness.get("hybrid_full_after_c2kv"),
     "max_history_tokens": harness.get("max_history_tokens"),
     "history_selection": harness.get("history_selection"),

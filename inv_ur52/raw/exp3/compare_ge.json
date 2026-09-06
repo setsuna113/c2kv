@@ -1,0 +1,187 @@
+{
+ "multi_turn_base_110": {
+  "n_trig_graph": 7,
+  "n_trig_eager": 7,
+  "result_identical": false,
+  "steps": [
+   {
+    "turn": 1,
+    "step": 0,
+    "same_cand": false,
+    "same_repair": true,
+    "status_g": "empty_action",
+    "status_e": "empty_action",
+    "repair_g": "I'll help you place a buy order for 100 shares. However, I don't have the current market price for the stock y",
+    "repair_e": "I'll help you place a buy order for 100 shares. However, I don't have the current market price for the stock y"
+   },
+   {
+    "turn": 2,
+    "step": 0,
+    "same_cand": true,
+    "same_repair": false,
+    "status_g": "decoded_action",
+    "status_e": "decoded_action",
+    "repair_g": "I'll check the details of your recent trade. Let me retrieve the order details for you. I'll need to first che",
+    "repair_e": "I'll check the details of your recent trade. Let me first verify if you've already placed an order, and then I"
+   },
+   {
+    "turn": 2,
+    "step": 1,
+    "same_cand": true,
+    "same_repair": true,
+    "status_g": "empty_action",
+    "status_e": "empty_action",
+    "repair_g": "I've retrieved your order history, which shows an order with ID 12345. I can now get the specific details of t",
+    "repair_e": "I've retrieved your order history, which shows an order with ID 12345. I can now get the specific details of t"
+   },
+   {
+    "turn": 3,
+    "step": 0,
+    "same_cand": true,
+    "same_repair": false,
+    "status_g": "empty_action",
+    "status_e": "empty_action",
+    "repair_g": "I'll help you cancel your recent order. Let me check the order details to confirm the cancellation.",
+    "repair_e": "I'll help you cancel your recent order. Could you please confirm the order ID of the order you'd like me to ca"
+   },
+   {
+    "turn": 4,
+    "step": 0,
+    "same_cand": true,
+    "same_repair": true,
+    "status_g": "decoded_action",
+    "status_e": "decoded_action",
+    "repair_g": "<tool_call>\n{\"name\":\"get_account_info\",\"arguments\":{}}\n</tool_call>",
+    "repair_e": "<tool_call>\n{\"name\":\"get_account_info\",\"arguments\":{}}\n</tool_call>"
+   },
+   {
+    "turn": 4,
+    "step": 1,
+    "same_cand": true,
+    "same_repair": false,
+    "status_g": "empty_action",
+    "status_e": "empty_action",
+    "repair_g": "Here is a summary of your current account information:\n\n- **Account ID**: 12345\n- **Current Balance**: $40,000",
+    "repair_e": "Here is a summary of your current account information:\n\n- **Account ID**: 12345\n- **Current Balance**: $40,000"
+   },
+   {
+    "turn": 5,
+    "step": 0,
+    "same_cand": true,
+    "same_repair": true,
+    "status_g": "invalid_format",
+    "status_e": "invalid_format",
+    "repair_g": "<tool_call>\n{\"name\": \"ticket_login\", \"arguments\": {\"username\": \"user123\", \"password\": \"12345\"}\n</tool_call>",
+    "repair_e": "<tool_call>\n{\"name\": \"ticket_login\", \"arguments\": {\"username\": \"user123\", \"password\": \"12345\"}\n</tool_call>"
+   }
+  ]
+ },
+ "multi_turn_base_122": {
+  "n_trig_graph": 4,
+  "n_trig_eager": 4,
+  "result_identical": false,
+  "steps": [
+   {
+    "turn": 1,
+    "step": 0,
+    "same_cand": true,
+    "same_repair": true,
+    "status_g": "invalid_format",
+    "status_e": "invalid_format",
+    "repair_g": "<tool_call>\n{\"name\": \"get_order_details\", \"arguments\": {\"order_id\": 124466}\n</tool_call>",
+    "repair_e": "<tool_call>\n{\"name\": \"get_order_details\", \"arguments\": {\"order_id\": 124466}\n</tool_call>"
+   },
+   {
+    "turn": 2,
+    "step": 0,
+    "same_cand": true,
+    "same_repair": true,
+    "status_g": "decoded_action",
+    "status_e": "decoded_action",
+    "repair_g": "<tool_call>\n{\"name\":\"get_order_history\",\"arguments\":{}}\n</tool_call>",
+    "repair_e": "<tool_call>\n{\"name\":\"get_order_history\",\"arguments\":{}}\n</tool_call>"
+   },
+   {
+    "turn": 2,
+    "step": 1,
+    "same_cand": true,
+    "same_repair": true,
+    "status_g": "decoded_action",
+    "status_e": "decoded_action",
+    "repair_g": "<tool_call>\n{\"name\":\"cancel_order\",\"arguments\":{\"order_id\":12446}}\n</tool_call>",
+    "repair_e": "<tool_call>\n{\"name\":\"cancel_order\",\"arguments\":{\"order_id\":12446}}\n</tool_call>"
+   },
+   {
+    "turn": 2,
+    "step": 2,
+    "same_cand": true,
+    "same_repair": true,
+    "status_g": "empty_action",
+    "status_e": "empty_action",
+    "repair_g": "Your recent order for AAPL shares has been successfully cancelled. The order ID is 12446, and its status is no",
+    "repair_e": "Your recent order for AAPL shares has been successfully cancelled. The order ID is 12446, and its status is no"
+   }
+  ]
+ },
+ "multi_turn_base_136": {
+  "n_trig_graph": 3,
+  "n_trig_eager": 3,
+  "result_identical": false,
+  "steps": [
+   {
+    "turn": 1,
+    "step": 0,
+    "same_cand": false,
+    "same_repair": true,
+    "status_g": "invalid_format",
+    "status_e": "invalid_format",
+    "repair_g": "<tool_call>\n{\"name\": \"get_order_details\", \"arguments\": {\"order_id\": 12446}\n</tool_call>",
+    "repair_e": "<tool_call>\n{\"name\": \"get_order_details\", \"arguments\": {\"order_id\": 12446}\n</tool_call>"
+   },
+   {
+    "turn": 2,
+    "step": 0,
+    "same_cand": true,
+    "same_repair": false,
+    "status_g": "empty_action",
+    "status_e": "empty_action",
+    "repair_g": "I'm sorry, but I don't have the ability to execute orders or perform actions on your behalf. I can provide inf",
+    "repair_e": "I'm sorry, but I don't have the capability to execute orders or perform actions on your behalf. I can provide "
+   },
+   {
+    "turn": 3,
+    "step": 0,
+    "same_cand": true,
+    "same_repair": false,
+    "status_g": "empty_action",
+    "status_e": "empty_action",
+    "repair_g": "I can help you with your account information, but I need to clarify a few things first. \n\nTo access your accou",
+    "repair_e": "I can help you with your account information, but I need to clarify a few things first. \n\nTo access your accou"
+   }
+  ]
+ },
+ "prep_graph": {
+  "npu_fused/none": 1296,
+  "native/none": 360,
+  "native/allfalse": 1368,
+  "native/anytrue": 1944
+ },
+ "prep_eager": {
+  "native/none": 396,
+  "npu_fused/none": 21780,
+  "native/allfalse": 1368,
+  "native/anytrue": 67932
+ },
+ "gen_graph": {
+  "n": 46,
+  "finish": {
+   "stop": 46
+  }
+ },
+ "gen_eager": {
+  "n": 46,
+  "finish": {
+   "stop": 46
+  }
+ }
+}

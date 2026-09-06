@@ -1,0 +1,231 @@
+        )
+
+
+def inject_c2kv_stored_kv(
+    entry: C2KVEntry,
+    c2kv_pool: C2KVPool,
+    *,
+    loc: torch.Tensor,
+    token_to_kv_pool,
+    attn_layers: List,
+    cos_sin_cache: torch.Tensor,
+    is_neox_style: bool = True,
+) -> None:
+    """Inject a generic stored KV entry into the active paged KV cache.
+
+    Repair entries may already contain K with the original absolute RoPE phase
+    (`entry.already_rotated=True`). In that case K is copied verbatim. For
+    neutral/sham entries stored pre-RoPE, apply RoPE exactly once at the stored
+    absolute position ids.
+    """
+
+    token_len = entry.token_len
+    if loc.numel() != token_len:
+        raise ValueError(
+            f"C2KV repair loc length mismatch: loc.numel()={loc.numel()} != {token_len=}"
+        )
+    if c2kv_pool.num_layers != len(attn_layers):
+        raise ValueError(
+            "C2KV repair layer count mismatch: "
+            f"{c2kv_pool.num_layers=} != {len(attn_layers)=}"
+        )
+
+    abs_pos = c2kv_pool.get_position_ids(entry).clamp(
+        0,
+        cos_sin_cache.shape[0] - 1,
+    )
+    rotary_dim = cos_sin_cache.shape[1]
+    half_dim = rotary_dim // 2
+    cos = cos_sin_cache[abs_pos, :half_dim]
+    sin = cos_sin_cache[abs_pos, half_dim:]
+    head_dim = half_dim * 2
+
+    for layer_idx in range(c2kv_pool.num_layers):
+        k_stored, v_stored = c2kv_pool.get_layer_kv(entry, layer_idx)
+        if k_stored.shape[2] != head_dim:
+            raise ValueError(
+                f"C2KV repair head_dim mismatch at layer {layer_idx}: "
+                f"{k_stored.shape[2]} != {head_dim}"
+            )
+        cache_k = (
+            k_stored
+            if entry.already_rotated
+            else apply_rotary_emb(k_stored, cos, sin, is_neox_style)
+        )
+        layer = attn_layers[layer_idx]
+        token_to_kv_pool.set_kv_buffer(
+            layer=layer,
+            loc=loc,
+            cache_k=cache_k,
+            cache_v=v_stored,
+        )
+
+    if (
+        os.environ.get("C2KV_DEBUG_FORCE_SYNC") == "1"
+        and hasattr(torch, "npu")
+        and torch.npu.is_available()
+    ):
+        torch.npu.synchronize()
+@@@@@@QWEN3_GEN_CORE
+            repair_k = k_pre if raw_kv_position_mode == "pre_rope" else k
+            raw_key_values.append(
+                (
+                    repair_k[span_start:span_end].contiguous().clone(),
+                    v[span_start:span_end].contiguous().clone(),
+                )
+            )
+
+            q = q.view(1, seq_len, layer.self_attn.num_heads, layer.self_attn.head_dim)
+            k_attn = k.view(
+                1,
+                seq_len,
+                layer.self_attn.num_kv_heads,
+                layer.self_attn.head_dim,
+            )
+            v_attn = v.view(
+                1,
+                seq_len,
+                layer.self_attn.num_kv_heads,
+                layer.self_attn.head_dim,
+            )
+            q = q.transpose(1, 2).contiguous()
+            k_attn = k_attn.transpose(1, 2).contiguous()
+            v_attn = v_attn.transpose(1, 2).contiguous()
+
+            if history_method in {"h2o", "snapkv_persistent", "snapkv_refresh"}:
+                try:
+                    if layer.self_attn.num_heads != layer.self_attn.num_kv_heads:
+                        groups = layer.self_attn.num_heads // layer.self_attn.num_kv_heads
+                        score_k = k_attn.repeat_interleave(groups, dim=1)
+                    else:
+                        score_k = k_attn
+                    q_window = max(1, min(int(history_kv_recent_window or 64), seq_len))
+                    q_start = seq_len - q_window
+                    score_q = q[:, :, q_start:seq_len, :]
+                    score_logits = torch.matmul(
+                        score_q.float(), score_k.transpose(-2, -1).float()
+                    ) * layer.self_attn.scaling
+                    q_positions = torch.arange(
+                        q_start, seq_len, dtype=torch.long, device=device
+                    ).view(1, 1, q_window, 1)
+                    k_positions = torch.arange(
+                        0, seq_len, dtype=torch.long, device=device
+                    ).view(1, 1, 1, seq_len)
+                    score_logits = score_logits.masked_fill(
+                        k_positions > q_positions,
+                        float("-inf"),
+                    )
+                    score_probs = torch.softmax(
+                        score_logits, dim=-1, dtype=torch.float32
+                    )
+                    layer_score = score_probs[
+                        :, :, :, span_start:span_end
+                    ].sum(dim=(0, 1, 2))
+                    history_scores.append(layer_score.detach())
+                except Exception:
+                    logger.warning(
+                        "history KV score collection failed at layer %s",
+                        getattr(layer.self_attn.attn, "layer_id", "?"),
+                        exc_info=True,
+                    )
+
+            if _is_npu:
+                # Match the serving attention path: do not materialize repeated
+                # KV heads for GQA. Repair KV must be captured from the same
+                # Full-context computation that the normal Ascend backend uses.
+                k_run = k_attn.contiguous()
+                v_run = v_attn.contiguous()
+                blocked = torch.triu(
+                    torch.ones((seq_len, seq_len), dtype=torch.bool, device=device),
+                    diagonal=1,
+                ).view(1, 1, seq_len, seq_len)
+                if os.environ.get(
+                    "C2KV_REPAIR_EXTRACT_ATTN_IMPL",
+                    "prompt_flash",
+                ) == "prompt_flash" and hasattr(
+                    torch_npu, "npu_prompt_flash_attention"
+                ):
+                    attn_output = torch_npu.npu_prompt_flash_attention(
+                        q,
+                        k_run,
+@@@@@@FWD_PREP
+    def forward_prepare_native(self, positions, hidden_states):
+        qkv, _ = self.qkv_proj(hidden_states)
+        gist_mask = getattr(
+            getattr(self, "_active_forward_batch", None),
+            "c2kv_use_gist_projection",
+            None,
+        )
+        if (
+            gist_mask is not None
+            and os.environ.get("C2KV_USE_GIST_QUERY_PROJECTION", "1") != "0"
+            and bool(gist_mask.any().item())
+            and hasattr(self, "gist_qkv_proj")
+        ):
+            gist_qkv, _ = self.gist_qkv_proj(hidden_states)
+            if gist_mask.ndim != 1 or gist_mask.shape[0] != qkv.shape[0]:
+                raise RuntimeError(
+                    "c2kv_use_gist_projection mask shape mismatch: "
+                    f"{tuple(gist_mask.shape)} != {(qkv.shape[0],)}"
+                )
+            qkv = torch.where(gist_mask.to(qkv.device).view(-1, 1), gist_qkv, qkv)
+        q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size], dim=-1)
+        q, k = apply_qk_norm(
+            q=q,
+            k=k,
+            q_norm=self.q_norm,
+            k_norm=self.k_norm,
+            head_dim=self.head_dim,
+            alt_stream=self.alt_stream,
+        )
+        q, k = self.rotary_emb(positions, q, k)
+        return q, k, v
+
+    def _collect_history_kv_eviction_scores(
+        self,
+        q: torch.Tensor,
+        k: torch.Tensor,
+        positions: torch.Tensor,
+        forward_batch: ForwardBatch,
+    ) -> None:
+        configs = getattr(forward_batch, "c2kv_history_kv_eviction_configs", None)
+        if not configs or not forward_batch.forward_mode.is_extend_or_draft_extend_or_mixed():
+            return
+        if (
+            forward_batch.extend_seq_lens_cpu is None
+            or forward_batch.extend_prefix_lens_cpu is None
+            or forward_batch.req_pool_indices is None
+        ):
+            return
+        if q is None or k is None or positions is None:
+            return
+
+        score_store = getattr(forward_batch, "c2kv_history_kv_selection_scores", None)
+        if score_store is None:
+@@@@@@ACTIVE_BATCH
+            q, k, v = self.forward_prepare_aiter_fused_mrope(
+                positions, hidden_states, forward_batch
+            )
+            save_kv_cache = False
+        elif (
+            getattr(forward_batch, "c2kv_use_gist_projection", None) is not None
+            or
+            not _is_npu
+            or forward_batch.forward_mode.is_extend_or_draft_extend_or_mixed()
+        ):
+            self._active_forward_batch = forward_batch
+            try:
+                q, k, v = self.forward_prepare_native(
+                    positions=positions,
+                    hidden_states=hidden_states,
+                )
+            finally:
+                self._active_forward_batch = None
+        else:
+            q, k, v = self.forward_prepare_npu(
+                positions=positions,
+                hidden_states=hidden_states,
+                forward_batch=forward_batch,
+            )
+
+        if get_global_server_args().rl_on_policy_target is not None:

@@ -1,0 +1,546 @@
+    def generate_raw_repair_kv(
+        self,
+        input_ids: torch.Tensor,
+        span_start: int,
+        span_end: int,
+        *,
+        position_offset: int = 0,
+        repair_position_ids: Optional[List[int]] = None,
+        raw_kv_position_mode: str = "rotated",
+        history_kv_method: Optional[str] = None,
+        history_kv_target_tokens: Optional[int] = None,
+        history_kv_retention_ratio: Optional[float] = None,
+        history_kv_recent_window: int = 64,
+        history_kv_kernel_size: int = 5,
+        history_kv_pooling: str = "avgpool",
+        history_kv_h2o_recent_fraction: float = 0.5,
+    ):
+        """Run a correctness-first full prefill and capture raw repair KV.
+
+        This is used by the C2KV repair endpoints. It intentionally captures
+        ordinary self-attention K/V, not gist/PIC K/V. In ``rotated`` mode the
+        returned K already carries native Full-prompt RoPE. In ``pre_rope`` mode
+        the returned K is captured after base QKV + QK norm but before RoPE; the
+        caller supplies the position IDs that will be used when it is injected.
+        """
+
+        if input_ids.ndim != 2 or input_ids.shape[0] != 1:
+            raise ValueError(
+                f"generate_raw_repair_kv expects input_ids shape (1, L), got {input_ids.shape}."
+            )
+        seq_len = int(input_ids.shape[1])
+        if not (0 <= span_start <= span_end <= seq_len):
+            raise ValueError(
+                f"Invalid repair span: {span_start=}, {span_end=}, {seq_len=}."
+            )
+        if span_start == span_end:
+            raise ValueError("repair span must be non-empty.")
+        if raw_kv_position_mode not in {"rotated", "pre_rope"}:
+            raise ValueError(
+                f"Unsupported raw_kv_position_mode: {raw_kv_position_mode!r}."
+            )
+        if repair_position_ids is not None and len(repair_position_ids) != (
+            span_end - span_start
+        ):
+            raise ValueError(
+                "repair_position_ids length mismatch: "
+                f"{len(repair_position_ids)} != {span_end - span_start}"
+            )
+
+        device = input_ids.device
+        positions = torch.arange(
+            position_offset,
+            position_offset + seq_len,
+            dtype=torch.long,
+            device=device,
+        )
+        hidden_states = self.model.embed_tokens(input_ids).squeeze(0)
+        raw_key_values = []
+        history_scores = []
+        requested_span_tokens = span_end - span_start
+        history_method = (history_kv_method or "").strip().lower()
+        if history_method == "snapkv":
+            history_method = "snapkv_persistent"
+        if history_method == "pyramid":
+            history_method = "pyramidkv"
+        npu_forward_batch_stub = None
+        if _is_npu:
+            npu_forward_batch_stub = SimpleNamespace(
+                token_to_kv_pool=SimpleNamespace(
+                    start_layer=self.model.layers[0].self_attn.attn.layer_id
+                )
+            )
+
+        for layer in self.model.layers:
+            residual = hidden_states
+            attn_input = layer.input_layernorm(hidden_states)
+            qkv, _ = layer.self_attn.qkv_proj(attn_input)
+            q, k_pre, v = qkv.split(
+                [layer.self_attn.q_size, layer.self_attn.kv_size, layer.self_attn.kv_size],
+                dim=-1,
+            )
+            q, k_pre = apply_qk_norm(
+                q=q,
+                k=k_pre,
+                q_norm=layer.self_attn.q_norm,
+                k_norm=layer.self_attn.k_norm,
+                head_dim=layer.self_attn.head_dim,
+                alt_stream=layer.self_attn.alt_stream,
+            )
+            q, k = layer.self_attn.rotary_emb(positions, q, k_pre)
+            repair_k = k_pre if raw_kv_position_mode == "pre_rope" else k
+            raw_key_values.append(
+                (
+                    repair_k[span_start:span_end].contiguous().clone(),
+                    v[span_start:span_end].contiguous().clone(),
+                )
+            )
+
+            q = q.view(1, seq_len, layer.self_attn.num_heads, layer.self_attn.head_dim)
+            k_attn = k.view(
+                1,
+                seq_len,
+                layer.self_attn.num_kv_heads,
+                layer.self_attn.head_dim,
+            )
+            v_attn = v.view(
+                1,
+                seq_len,
+                layer.self_attn.num_kv_heads,
+                layer.self_attn.head_dim,
+            )
+            q = q.transpose(1, 2).contiguous()
+            k_attn = k_attn.transpose(1, 2).contiguous()
+            v_attn = v_attn.transpose(1, 2).contiguous()
+
+            if history_method in {"h2o", "snapkv_persistent", "snapkv_refresh"}:
+                try:
+                    if layer.self_attn.num_heads != layer.self_attn.num_kv_heads:
+                        groups = layer.self_attn.num_heads // layer.self_attn.num_kv_heads
+                        score_k = k_attn.repeat_interleave(groups, dim=1)
+                    else:
+                        score_k = k_attn
+                    q_window = max(1, min(int(history_kv_recent_window or 64), seq_len))
+                    q_start = seq_len - q_window
+                    score_q = q[:, :, q_start:seq_len, :]
+                    score_logits = torch.matmul(
+                        score_q.float(), score_k.transpose(-2, -1).float()
+                    ) * layer.self_attn.scaling
+                    q_positions = torch.arange(
+                        q_start, seq_len, dtype=torch.long, device=device
+                    ).view(1, 1, q_window, 1)
+                    k_positions = torch.arange(
+                        0, seq_len, dtype=torch.long, device=device
+                    ).view(1, 1, 1, seq_len)
+                    score_logits = score_logits.masked_fill(
+                        k_positions > q_positions,
+                        float("-inf"),
+                    )
+                    score_probs = torch.softmax(
+                        score_logits, dim=-1, dtype=torch.float32
+                    )
+                    layer_score = score_probs[
+                        :, :, :, span_start:span_end
+                    ].sum(dim=(0, 1, 2))
+                    history_scores.append(layer_score.detach())
+                except Exception:
+                    logger.warning(
+                        "history KV score collection failed at layer %s",
+                        getattr(layer.self_attn.attn, "layer_id", "?"),
+                        exc_info=True,
+                    )
+
+            if _is_npu:
+                # Match the serving attention path: do not materialize repeated
+                # KV heads for GQA. Repair KV must be captured from the same
+                # Full-context computation that the normal Ascend backend uses.
+                k_run = k_attn.contiguous()
+                v_run = v_attn.contiguous()
+                blocked = torch.triu(
+                    torch.ones((seq_len, seq_len), dtype=torch.bool, device=device),
+                    diagonal=1,
+                ).view(1, 1, seq_len, seq_len)
+                if os.environ.get(
+                    "C2KV_REPAIR_EXTRACT_ATTN_IMPL",
+                    "prompt_flash",
+                ) == "prompt_flash" and hasattr(
+                    torch_npu, "npu_prompt_flash_attention"
+                ):
+                    attn_output = torch_npu.npu_prompt_flash_attention(
+                        q,
+                        k_run,
+                        v_run,
+                        num_heads=q.shape[1],
+                        num_key_value_heads=k_run.shape[1],
+                        input_layout="BNSD",
+                        atten_mask=blocked,
+                        scale_value=layer.self_attn.scaling,
+                        sparse_mode=0,
+                    )
+                else:
+                    attn_output = torch_npu.npu_fusion_attention(
+                        q,
+                        k_run,
+                        v_run,
+                        q.shape[1],
+                        input_layout="BNSD",
+                        atten_mask=blocked,
+                        scale=layer.self_attn.scaling,
+                        keep_prob=1.0,
+                        sparse_mode=0,
+                    )
+                attn_output = _npu_fusion_attention_output(attn_output, q.shape)
+            else:
+                if layer.self_attn.num_heads != layer.self_attn.num_kv_heads:
+                    groups = layer.self_attn.num_heads // layer.self_attn.num_kv_heads
+                    k_run = k_attn.repeat_interleave(groups, dim=1)
+                    v_run = v_attn.repeat_interleave(groups, dim=1)
+                else:
+                    k_run = k_attn
+                    v_run = v_attn
+                scores = torch.matmul(
+                    q.float(),
+                    k_run.transpose(-2, -1).float(),
+                ) * layer.self_attn.scaling
+                keep = torch.tril(
+                    torch.ones((seq_len, seq_len), dtype=torch.bool, device=device)
+                ).view(1, 1, seq_len, seq_len)
+                scores = scores.masked_fill(~keep, float("-inf"))
+                probs = torch.softmax(scores, dim=-1, dtype=torch.float32).to(
+                    v_run.dtype
+                )
+                attn_output = torch.matmul(probs, v_run)
+
+            attn_output = (
+                attn_output.transpose(1, 2)
+                .contiguous()
+                .view(seq_len, layer.self_attn.num_heads * layer.self_attn.head_dim)
+            )
+            attn_output, _ = layer.self_attn.o_proj(attn_output)
+            attn_output = tensor_model_parallel_all_reduce(attn_output)
+            hidden_states = residual + attn_output
+
+            residual = hidden_states
+            mlp_input = layer.post_attention_layernorm(hidden_states)
+            hidden_states = residual + layer.mlp(mlp_input)
+
+        if repair_position_ids is None:
+            repair_positions = positions[span_start:span_end]
+        else:
+            repair_positions = torch.tensor(
+                repair_position_ids, dtype=torch.long, device=device
+            )
+
+        history_meta = None
+        if history_method:
+            if history_method not in {
+                "streamingllm",
+                "h2o",
+                "snapkv_persistent",
+                "snapkv_refresh",
+                "pyramidkv",
+            }:
+                raise ValueError(
+                    f"Unsupported history_kv_method for repair extraction: {history_method!r}."
+                )
+            if history_kv_target_tokens is not None:
+                target_tokens = int(history_kv_target_tokens)
+            elif history_kv_retention_ratio is not None:
+                target_tokens = int(
+                    torch.ceil(
+                        torch.tensor(
+                            requested_span_tokens * float(history_kv_retention_ratio)
+                        )
+                    ).item()
+                )
+            else:
+                target_tokens = requested_span_tokens
+            target_tokens = max(1, min(requested_span_tokens, target_tokens))
+
+            def _unique_sorted(indices: Iterable[int]) -> List[int]:
+                return sorted({int(i) for i in indices if 0 <= int(i) < requested_span_tokens})
+
+            if history_method == "streamingllm":
+                selected_rel = list(
+                    range(requested_span_tokens - target_tokens, requested_span_tokens)
+                )
+                reason = "recent_suffix"
+            elif history_method == "pyramidkv":
+                if history_scores:
+                    layer_scores = history_scores
+                else:
+                    layer_scores = [
+                        torch.zeros(
+                            requested_span_tokens,
+                            dtype=torch.float32,
+                            device=device,
+                        )
+                        for _ in range(len(self.model.layers))
+                    ]
+                num_layers = max(1, len(layer_scores))
+                low_budget = max(1, min(requested_span_tokens, int(round(target_tokens * 1.5))))
+                high_budget = max(1, min(requested_span_tokens, int(round(target_tokens * 0.5))))
+                per_layer_budgets = []
+                per_layer_selected_counts = []
+                union_selected: set[int] = set()
+                for layer_idx, scores in enumerate(layer_scores):
+                    if num_layers == 1:
+                        layer_budget = target_tokens
+                    else:
+                        # PyramidKV-style funnel: lower layers retain a larger
+                        # history cache, upper layers retain a smaller cache.
+                        frac = layer_idx / float(num_layers - 1)
+                        layer_budget = int(round(low_budget * (1.0 - frac) + high_budget * frac))
+                    layer_budget = max(1, min(requested_span_tokens, layer_budget))
+                    per_layer_budgets.append(layer_budget)
+                    recent_budget = min(
+                        layer_budget,
+                        max(1, min(int(history_kv_recent_window or 64), requested_span_tokens)),
+                    )
+                    recent_rel = list(
+                        range(requested_span_tokens - recent_budget, requested_span_tokens)
+                    )
+                    past_budget = max(0, layer_budget - len(recent_rel))
+                    layer_selected = set(recent_rel)
+                    past_len = max(0, requested_span_tokens - len(recent_rel))
+                    if past_budget > 0 and past_len > 0:
+                        _, top_idx = torch.topk(
+                            scores[:past_len],
+                            k=min(past_budget, past_len),
+                            largest=True,
+                        )
+                        layer_selected.update(int(i) for i in top_idx.tolist())
+                    per_layer_selected_counts.append(len(layer_selected))
+                    union_selected.update(layer_selected)
+                selected_rel = sorted(union_selected)
+                reason = "pyramidkv_layer_budget_union_shared_page_table"
+            else:
+                if history_scores:
+                    scores = torch.stack(history_scores, dim=0).mean(dim=0)
+                else:
+                    scores = torch.zeros(
+                        requested_span_tokens, dtype=torch.float32, device=device
+                    )
+                recent_budget = max(
+                    1,
+                    min(
+                        target_tokens,
+                        int(round(target_tokens * float(history_kv_h2o_recent_fraction))),
+                    ),
+                )
+                recent_budget = min(
+                    recent_budget,
+                    int(history_kv_recent_window or recent_budget),
+                    requested_span_tokens,
+                )
+                if history_method.startswith("snapkv"):
+                    recent_budget = min(
+                        target_tokens,
+                        max(1, min(int(history_kv_recent_window or 64), requested_span_tokens)),
+                    )
+                recent_rel = list(
+                    range(requested_span_tokens - recent_budget, requested_span_tokens)
+                )
+                past_budget = max(0, target_tokens - len(recent_rel))
+                past_len = max(0, requested_span_tokens - len(recent_rel))
+                if past_budget > 0 and past_len > 0:
+                    past_scores = scores[:past_len]
+                    if history_method.startswith("snapkv"):
+                        kernel = max(1, int(history_kv_kernel_size or 1))
+                        if kernel > 1 and past_scores.numel() > 1:
+                            pad = kernel // 2
+                            pooled = torch.nn.functional.avg_pool1d(
+                                past_scores.view(1, 1, -1),
+                                kernel_size=kernel,
+                                stride=1,
+                                padding=pad,
+                            ).view(-1)
+                            if pooled.numel() != past_scores.numel():
+                                pooled = pooled[: past_scores.numel()]
+                            past_scores = pooled
+                    _, top_idx = torch.topk(
+                        past_scores,
+                        k=min(past_budget, past_scores.numel()),
+                        largest=True,
+                    )
+                    selected_rel = _unique_sorted(top_idx.tolist() + recent_rel)
+                else:
+                    selected_rel = _unique_sorted(recent_rel)
+                if len(selected_rel) > target_tokens:
+                    selected_rel = selected_rel[-target_tokens:]
+                reason = "attention_heavy_hitter_recent"
+                if history_method.startswith("snapkv"):
+                    reason = "snapkv_attention_pooling_recent"
+
+            if len(selected_rel) != requested_span_tokens:
+                selected_tensor = torch.tensor(
+                    selected_rel, dtype=torch.long, device=device
+                )
+                raw_key_values = [
+                    (
+                        key.index_select(0, selected_tensor).contiguous().clone(),
+                        value.index_select(0, selected_tensor).contiguous().clone(),
+                    )
+                    for key, value in raw_key_values
+                ]
+                repair_positions = repair_positions.index_select(
+                    0, selected_tensor
+                ).contiguous()
+            history_meta = {
+                "history_kv_method": history_method,
+                "requested_span_tokens": requested_span_tokens,
+                "target_tokens": target_tokens,
+                "selected_token_count": len(selected_rel),
+                "selected_relative_indices": selected_rel,
+                "selection_reason": reason,
+                "recent_window": int(history_kv_recent_window or 0),
+            }
+            if history_method == "pyramidkv":
+                history_meta["shared_page_table_approximation"] = True
+                history_meta["per_layer_budget_tokens"] = per_layer_budgets
+                history_meta["per_layer_selected_counts"] = per_layer_selected_counts
+        repair_positions = repair_positions.view(1, -1).contiguous()
+        if history_meta is not None:
+            return raw_key_values, repair_positions, history_meta
+        return raw_key_values, repair_positions
+
+    @torch.no_grad()
+    def generate_pic(self, input_ids, attention_mask, ratio=1, **kwargs):
+        """Extract full-length residual-QKV PIC states for one document."""
+        if not self.full_length_pic:
+            raise ValueError("generate_pic requires a checkpoint with pic_enabled=True.")
+        if ratio != 1:
+            raise ValueError("Full-length PIC storage requires compression_ratio=1.")
+
+        pic_mask, position_ids = prepare_pic_input(input_ids, attention_mask)
+        hidden_states = self.model.embed_tokens(input_ids)
+        pic_key_values = []
+        for layer in self.model.layers:
+            hidden_states, layer_kv = layer.forward_with_pic(
+                hidden_states,
+                positions=position_ids.squeeze(0),
+            )
+            pic_key_values.append(layer_kv)
+        return pic_key_values, pic_mask, position_ids
+
+    def load_weights(self, weights: Iterable[Tuple[str, torch.Tensor]]):
+        stacked_params_mapping = [
+            # (param_name, shard_name, shard_id)
+            ("qkv_proj", "q_proj", "q"),
+            ("qkv_proj", "k_proj", "k"),
+            ("qkv_proj", "v_proj", "v"),
+            ("gate_up_proj", "gate_proj", 0),
+            ("gate_up_proj", "up_proj", 1),
+        ]
+        if self.enable_c2kv:
+            if self.full_length_pic:
+                stacked_params_mapping += [
+                    ("residual_qkv_proj", "residual_q_proj", "q"),
+                    ("residual_qkv_proj", "residual_k_proj", "k"),
+                    ("residual_qkv_proj", "residual_v_proj", "v"),
+                ]
+            else:
+                stacked_params_mapping += [
+                    ("gist_qkv_proj", "gist_q_proj", "q"),
+                    ("gist_qkv_proj", "gist_k_proj", "k"),
+                    ("gist_qkv_proj", "gist_v_proj", "v"),
+                ]
+
+        params_dict = dict(self.named_parameters())
+        for name, loaded_weight in weights:
+            if not name.startswith("model.") and (
+                name.startswith("layers.")
+                or name.startswith("embed_tokens.")
+                or name.startswith("gist_embed_tokens.")
+                or name.startswith("norm.")
+            ):
+                name = add_prefix(name, "model")
+
+            if name == "model.embed_tokens.weight":
+                if self.pp_group.is_last_rank and self.config.tie_word_embeddings:
+                    if "lm_head.weight" in params_dict:
+                        param = params_dict["lm_head.weight"]
+                        weight_loader = getattr(
+                            param, "weight_loader", default_weight_loader
+                        )
+                        weight_loader(param, loaded_weight)
+
+            layer_id = get_layer_id(name)
+            if (
+                layer_id is not None
+                and hasattr(self.model, "start_layer")
+                and (
+                    layer_id < self.model.start_layer
+                    or layer_id >= self.model.end_layer
+                )
+            ):
+                continue
+
+            if "rotary_emb.inv_freq" in name or "projector" in name:
+                continue
+            if "rotary_emb.cos_cached" in name or "rotary_emb.sin_cached" in name:
+                # Models trained using ColossalAI may include these tensors in
+                # the checkpoint. Skip them.
+                continue
+            if name.startswith("model.vision_tower") and name not in params_dict:
+                continue
+            if "scale" in name:
+                name = maybe_remap_kv_scale_name(name, params_dict)
+                if name is None:
+                    continue
+            for param_name, weight_name, shard_id in stacked_params_mapping:
+                if weight_name not in name:
+                    continue
+                name = name.replace(weight_name, param_name)
+                # Skip loading extra bias for GPTQ models.
+                if name.endswith(".bias") and name not in params_dict:
+                    continue
+                param = params_dict[name]
+                weight_loader = param.weight_loader
+                weight_loader(param, loaded_weight, shard_id)
+                break
+            else:
+                # Skip loading extra bias for GPTQ models.
+                if name.endswith(".bias") and name not in params_dict:
+                    continue
+
+                if name in params_dict.keys():
+                    param = params_dict[name]
+                    weight_loader = getattr(
+                        param, "weight_loader", default_weight_loader
+                    )
+                    weight_loader(param, loaded_weight)
+                else:
+                    logger.warning(f"Parameter {name} not found in params_dict")
+
+    def get_embed_and_head(self):
+        return self.model.embed_tokens.weight, self.lm_head.weight
+
+    def set_embed_and_head(self, embed, head):
+        del self.model.embed_tokens.weight
+        del self.lm_head.weight
+        self.model.embed_tokens.weight = embed
+        self.lm_head.weight = head
+        torch.cuda.empty_cache()
+        torch.cuda.synchronize()
+
+    def load_kv_cache_scales(self, quantization_param_path: str) -> None:
+        self.model.load_kv_cache_scales(quantization_param_path)
+
+    def set_eagle3_layers_to_capture(self, layer_ids: Optional[List[int]] = None):
+        if not self.pp_group.is_last_rank:
+            return
+
+        self.capture_aux_hidden_states = True
+        if layer_ids is None:
+            num_layers = self.config.num_hidden_layers
+            self.model.layers_to_capture = [
+                2,
+                num_layers // 2,
+                num_layers - 3,
+            ]  # Specific layers for EAGLE3 support
+        else:
+            self.model.layers_to_capture = [val + 1 for val in layer_ids]
+
+
+EntryClass = Qwen3ForCausalLM

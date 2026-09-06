@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Mapping
 import json
 import os
 import re
@@ -179,30 +180,50 @@ def _chat_payload(model: str) -> Dict[str, Any]:
     }
 
 
-def _proxy_regime() -> Dict[str, Any]:
-    """The segmentation regime the matrix runs with, read from proxy.py so a
-    gate can never certify a regime the matrix does not use."""
+def _proxy_regime(args: argparse.Namespace | None = None) -> Dict[str, Any]:
+    """Resolve the same checkpoint regime that the matrix passes to run.py."""
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     import proxy  # noqa: E402
 
+    if args is not None and getattr(args, "checkpoint", None):
+        from checkpoint_profile import resolve_checkpoint_profile
+
+        profile = resolve_checkpoint_profile(
+            args.checkpoint,
+            profile_path=getattr(args, "checkpoint_profile", None),
+            reference_profile=getattr(args, "reference_profile", None),
+            query_projection=getattr(args, "query_projection", None),
+            require_serving_e2e=True,
+        )
+        serving = profile["serving"]
+        return {
+            "doc_packing": serving["doc_packing"],
+            "max_doc_num": serving["max_doc_num"],
+            "max_doc_length": serving["max_doc_length"],
+            "query_projection": serving["query_projection"],
+            "profile_fingerprint": profile["profile_fingerprint"],
+        }
     return {
         "doc_packing": proxy.DOC_PACKING,
-        "max_docs": proxy.MAX_DOCS,
+        "max_doc_num": proxy.MAX_DOC_NUM,
         "max_doc_length": proxy.MAX_DOC_LENGTH,
+        "query_projection": proxy.QUERY_PROJECTION,
+        "profile_fingerprint": None,
     }
 
 
 def _proxy_regime_flags(regime: Dict[str, Any]) -> List[str]:
     return [
         "--doc-packing", str(regime["doc_packing"]),
-        "--max-docs", str(regime["max_docs"]),
+        "--max-doc-num", str(regime["max_doc_num"]),
         "--max-doc-length", str(regime["max_doc_length"]),
+        "--query-projection", str(regime["query_projection"]),
     ]
 
 
 def proxy_command(args: argparse.Namespace) -> None:
     payload = _chat_payload(args.served_model_name)
-    regime = _proxy_regime()
+    regime = _proxy_regime(args)
     direct = _post_json(args.base_url, "/v1/chat/completions", payload, 300)
     log_dir = args.log_dir or Path(tempfile.mkdtemp(prefix="c2kv-proxy-smoke-"))
     log_dir.mkdir(parents=True, exist_ok=True)
@@ -378,15 +399,41 @@ def _prologue_token_len(checkpoint: Path) -> int:
 
     tokenizer = AutoTokenizer.from_pretrained(checkpoint, local_files_only=True)
     messages = [{"role": "system", "content": S6_SYSTEM}]
+    # The pinned server uses c2kv_tools_dump=full: Tool.model_validate()
+    # discards client-only fields (for example BFCL's function.response) and
+    # model_dump() materializes the Function.strict default. Mirror that
+    # exact prompt surface instead of tokenizing the caller's loose objects.
+    tools = []
+    for tool in S6_TOOLS:
+        function = tool["function"]
+        tools.append({
+            "type": tool.get("type", "function"),
+            "function": {
+                "description": function.get("description"),
+                "name": function["name"],
+                "parameters": function.get("parameters"),
+                "strict": bool(function.get("strict", False)),
+            },
+        })
     try:
         ids = tokenizer.apply_chat_template(
-            messages, tools=S6_TOOLS, tokenize=True,
+            messages, tools=tools, tokenize=True,
             add_generation_prompt=False, enable_thinking=False,
         )
     except TypeError:  # template without an enable_thinking knob
         ids = tokenizer.apply_chat_template(
-            messages, tools=S6_TOOLS, tokenize=True, add_generation_prompt=False,
+            messages, tools=tools, tokenize=True, add_generation_prompt=False,
         )
+    # Transformers 5 returns a BatchEncoding by default; ``len`` then counts
+    # mapping keys (normally input_ids + attention_mask), not tokens.
+    if isinstance(ids, Mapping):
+        ids = ids["input_ids"]
+    if hasattr(ids, "tolist"):
+        ids = ids.tolist()
+    if ids and isinstance(ids[0], list):
+        if len(ids) != 1:
+            raise RuntimeError("expected one rendered prologue")
+        ids = ids[0]
     return len(ids)
 
 
@@ -395,7 +442,7 @@ def tools_proxy_command(args: argparse.Namespace) -> None:
 
     S2 exercises tools without gists and S3 exercises gists without tools, so
     neither can see a gist inserted at a tool-free prefix length."""
-    regime = _proxy_regime()
+    regime = _proxy_regime(args)
     payload = _s6_payload(args.served_model_name)
     log_dir = args.log_dir or Path(tempfile.mkdtemp(prefix="c2kv-s6-smoke-"))
     log_dir.mkdir(parents=True, exist_ok=True)
@@ -544,6 +591,10 @@ def build_parser() -> argparse.ArgumentParser:
     proxy = subparsers.add_parser("proxy")
     proxy.add_argument("--base-url", required=True)
     proxy.add_argument("--served-model-name", required=True)
+    proxy.add_argument("--checkpoint", type=Path)
+    proxy.add_argument("--checkpoint-profile", type=Path)
+    proxy.add_argument("--reference-profile", choices=("checkpoint-1088",))
+    proxy.add_argument("--query-projection", choices=("base", "gist"))
     proxy.add_argument("--full-port", type=int, default=34190)
     proxy.add_argument("--c2kv-port", type=int, default=34191)
     proxy.add_argument("--log-dir", type=Path, default=None)
@@ -554,6 +605,9 @@ def build_parser() -> argparse.ArgumentParser:
     tools_proxy.add_argument("--base-url", required=True)
     tools_proxy.add_argument("--served-model-name", required=True)
     tools_proxy.add_argument("--checkpoint", type=Path, required=True)
+    tools_proxy.add_argument("--checkpoint-profile", type=Path)
+    tools_proxy.add_argument("--reference-profile", choices=("checkpoint-1088",))
+    tools_proxy.add_argument("--query-projection", choices=("base", "gist"))
     tools_proxy.add_argument("--port", type=int, default=34192)
     tools_proxy.add_argument("--log-dir", type=Path, default=None)
     tools_proxy.add_argument("--out", type=Path, default=None)

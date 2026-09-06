@@ -1,0 +1,8 @@
+Number of models evaluated:   0%|          | 0/1 [00:00<?, ?it/s]Number of models evaluated: 100%|██████████| 1/1 [00:00<00:00,  1.37it/s]Number of models evaluated: 100%|██████████| 1/1 [00:00<00:00,  1.37it/s]
+🦍 Model: Qwen_Qwen3-4B-Instruct-2507-FC
+🔍 Running test: multi_turn_base
+✅ Test completed: multi_turn_base. 🎯 Accuracy: 17.31%
+📈 Aggregating data to generate leaderboard score table...
+🏁 Evaluation completed. See /tmp/c2kv-toolsnorm52.NIhbBb/runs/c2kv/c2kv/score/data_overall.csv for overall evaluation results on BFCL V4.
+⚠️  Partial evaluation for a single category is enabled (--partial-run flag is set). Accuracy scores are computed only on the subset of entries present in the model result files, which may differ from a full evaluation and from the official leaderboard score.
+See /tmp/c2kv-toolsnorm52.NIhbBb/runs/c2kv/c2kv/score/data_live.csv, /tmp/c2kv-toolsnorm52.NIhbBb/runs/c2kv/c2kv/score/data_non_live.csv, /tmp/c2kv-toolsnorm52.NIhbBb/runs/c2kv/c2kv/score/data_multi_turn.csv, /tmp/c2kv-toolsnorm52.NIhbBb/runs/c2kv/c2kv/score/data_agentic.csv and /tmp/c2kv-toolsnorm52.NIhbBb/runs/c2kv/c2kv/score/data_format_sensitivity.csv for detailed evaluation results on each sub-section categories respectively.

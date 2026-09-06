@@ -1,0 +1,99 @@
+{
+  "description": "Frozen C->W trigger manifest for the task-D pilot. n_base_paired is the level-1 denominator (qids scoreable in BOTH arms).",
+  "rule_version": "d_cw_v1",
+  "batch": "batch-TF",
+  "s_metric": "tool_name_match",
+  "trigger_source": "oracle",
+  "kv_recipe": {
+    "ckpt_path": "/home/liuyancheng/c2kv/outputs_lyc/g_joint/fixed_joint",
+    "model_sha": "669502d350350342d51e85bd01d934e377566bafc78d0567ad158ea465e1ca7b",
+    "eval_code_sha": "f84dc74f54ed5b79b733564c792bd28d2454c28b",
+    "ratio": 8,
+    "chunk_policy": "pilot_v1",
+    "seed": 20260815,
+    "decode": "greedy",
+    "max_doc_length": 768,
+    "max_doc_num": 16
+  },
+  "source_dialects": {
+    "history": 400
+  },
+  "sources": {
+    "full_rows": [
+      {
+        "path": "/home/liuyancheng/c2kv/outputs_lyc/g_joint/bdf_d_battery_full.jsonl",
+        "sha256": "6794cdc80ffc63896964417aa1ad9852a0560ba37fe97c4415f86d4972b00b55"
+      }
+    ],
+    "compressed_rows": [
+      {
+        "path": "/home/liuyancheng/c2kv/outputs_lyc/g_joint/bdf_d_battery_c2kv.jsonl",
+        "sha256": "c51e762e54349b7492fd549b552ae99f176badc80c13487fd18406f781562b0d"
+      }
+    ],
+    "full_condition": null,
+    "compressed_condition": null,
+    "full_load": {
+      "files": [
+        "/home/liuyancheng/c2kv/outputs_lyc/g_joint/bdf_d_battery_full.jsonl"
+      ],
+      "condition": null,
+      "n_rows": 200,
+      "n_skipped": 0,
+      "n_condition_filtered": 0,
+      "dialects": {
+        "history": 200
+      }
+    },
+    "compressed_load": {
+      "files": [
+        "/home/liuyancheng/c2kv/outputs_lyc/g_joint/bdf_d_battery_c2kv.jsonl"
+      ],
+      "condition": null,
+      "n_rows": 196,
+      "n_skipped": 4,
+      "n_condition_filtered": 0,
+      "dialects": {
+        "history": 200
+      }
+    }
+  },
+  "n_base_paired": 196,
+  "transitions": {
+    "C->C": 22,
+    "C->W": 20,
+    "W->C": 41,
+    "W->W": 113
+  },
+  "harness_divergence": {
+    "n_metric_disagreements": 0,
+    "n_call_disagreements": 0
+  },
+  "n_cw": 20,
+  "cw_qids": [
+    "0c890a5dde8c_12dc86e7:8",
+    "0c890a5dde8c_c4d290c5:4",
+    "0c890a5dde8c_ebac8eab:16",
+    "2a21e94e0687_0f5ba78c:12",
+    "2a21e94e0687_0f5ba78c:15",
+    "2a21e94e0687_b734292f:10",
+    "2a21e94e0687_d3ce1db1:9",
+    "a45d2c09567a_344ed9b0:5",
+    "a45d2c09567a_344ed9b0:6",
+    "a45d2c09567a_42e3637f:2",
+    "a45d2c09567a_9ad55a9e:3",
+    "a45d2c09567a_c794536b:7",
+    "a45d2c09567a_c794536b:8",
+    "a45d2c09567a_f2b8f831:14",
+    "a45d2c09567a_f2b8f831:6",
+    "b455f37f04c7_08958bbb:1",
+    "b455f37f04c7_0ee66cf1:7",
+    "b455f37f04c7_263e5d47:1",
+    "b455f37f04c7_263e5d47:4",
+    "b455f37f04c7_714ea5fe:37"
+  ],
+  "bundles_file": "results/d/bundles_batch_tf.jsonl",
+  "bundles_sha256": "315873f9318b13513ab813995dfd18d27aec9e0acab0e4b6eb25bbec51397568",
+  "doc_binding": "bound",
+  "doc_ids_table": "./results/d/d_doc_ids.json"
+}

@@ -46,7 +46,7 @@ def rotate_k_cache_rope(
         旋转后的KV Cache，格式与输入相同
     """
     if delta_pos == 0:
-        return kv_cache
+        return k_cache
         
     # 计算位置偏移量
     num_heads, seq_len, head_size = k_cache.shape
