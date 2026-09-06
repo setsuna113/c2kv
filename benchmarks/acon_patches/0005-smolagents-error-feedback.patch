@@ -6,7 +6,7 @@ index e529962..0877256 100644
                      "Warning to user: Code execution failed due to an unauthorized import - Consider passing said import under `additional_authorized_imports` when initializing your CodeAgent."
                  )
              observation += f"\nError executing code: {error_msg}"
--            # return observation, 0.0, True, {"error": str(e)}
+-            # return observation, 0.0, True, {"error": str(e)} 
 -            return observation, 0.0, False, {"error": str(e)}
 +            return self._record_execution_error(action, observation, error_msg)
 +
@@ -30,13 +30,13 @@ index e529962..0877256 100644
 +            "info": self.info,
 +        })
 +        return self.observation, self.reward, self.done, self.info
-
+     
      def _clean_code(self, code: str) -> str:
          code_action = parse_code_blobs(code, ("```python", "```"))
 @@ -219,4 +239,4 @@ class SmolagentsEnv(BaseLanguageBasedEnv):
          with open(os.path.join(output_dir, "env_history.json"), 'w') as f:
              json.dump(self.trajectory, f, indent=2)
-
+         
 -        self.logger.info(f"Trajectory saved to {output_dir}/env_history.json")
 \ No newline at end of file
 +        self.logger.info(f"Trajectory saved to {output_dir}/env_history.json")
