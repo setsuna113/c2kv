@@ -90,7 +90,15 @@ def toolset_disjoint_folds(clusters: np.ndarray, signatures: Dict[str, int],
     return folds
 
 
-def _lr(c: float):
+def _lr(c: float, n_features: int = 0):
+    if n_features and n_features > 8000:
+        # liblinear crawls on the ~92k-dim all-layer concat when it fails to
+        # converge (2000 iters x dozens of fits stalled the full arm for
+        # hours); lbfgs handles wide inputs far better
+        return make_pipeline(
+            StandardScaler(),
+            LogisticRegression(C=c, max_iter=500, solver="lbfgs"),
+        )
     return make_pipeline(
         StandardScaler(),
         LogisticRegression(C=c, max_iter=2000, solver="liblinear"),
@@ -99,14 +107,15 @@ def _lr(c: float):
 
 def _pick_c_inner(X: np.ndarray, y: np.ndarray, clusters: np.ndarray) -> float:
     best_c, best = INNER_C_GRID[0], -1.0
+    grid = INNER_C_GRID if X.shape[1] <= 8000 else INNER_C_GRID[:2]
     inner_folds = grouped_folds(clusters, 3, seed=SEED + 1)
-    for c in INNER_C_GRID:
+    for c in grid:
         scores = []
         for itest in inner_folds:
             itrain = ~itest
             if len(np.unique(y[itrain])) < 2 or len(np.unique(y[itest])) < 2:
                 continue
-            pipe = _lr(c)
+            pipe = _lr(c, X.shape[1])
             pipe.fit(X[itrain], y[itrain])
             v = auroc(pipe.decision_function(X[itest]), y[itest])
             if v is not None:
@@ -134,7 +143,7 @@ def fit_lr_cv_detailed(
             continue
         c = _pick_c_inner(X[train], y[train], clusters[train]) if inner_pick else INNER_C_GRID[0]
         chosen_c.append(c)
-        pipe = _lr(c)
+        pipe = _lr(c, X.shape[1])
         pipe.fit(X[train], y[train])
         preds[test] = pipe.decision_function(X[test])
     ok = ~np.isnan(preds)
@@ -172,14 +181,15 @@ def fit_layer_select_cv(
             continue
         inner_folds = grouped_folds(clusters[train], 3, seed=SEED + 2)
         best = (-1.0, 0, INNER_C_GRID[0])
+        wide = X_layers.shape[-1] > 8000
         for li in range(L):
-            for c in (c_grid or INNER_C_GRID):
+            for c in (c_grid or (INNER_C_GRID[:2] if wide else INNER_C_GRID)):
                 scores = []
                 for itest in inner_folds:
                     itrain = ~itest
                     if len(np.unique(y[train][itrain])) < 2 or len(np.unique(y[train][itest])) < 2:
                         continue
-                    pipe = _lr(c)
+                    pipe = _lr(c, X_layers.shape[-1])
                     pipe.fit(X_layers[train][itrain, li, :], y[train][itrain])
                     v = auroc(pipe.decision_function(X_layers[train][itest, li, :]),
                               y[train][itest])
@@ -190,7 +200,7 @@ def fit_layer_select_cv(
         _, li, c = best
         sel_layers.append(li)
         sel_cs.append(c)
-        pipe = _lr(c)
+        pipe = _lr(c, X_layers.shape[-1])
         pipe.fit(X_layers[train, li, :], y[train])
         preds[test] = pipe.decision_function(X_layers[test, li, :])
     ok = ~np.isnan(preds)
@@ -383,7 +393,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     # shipped so the report can do the same-layer twin (c2kv vs full at the
     # SAME layer) instead of comparing each arm's own best layer
     Xq = np.stack([npz[f"{q}::query_last"] for q in qids_t]).astype(np.float32)  # [n, L, H]
-    sel = fit_layer_select_cv(Xq[:, every5 or list(range(n_layers or 0)), :, :], y, clusters)
+    sel = fit_layer_select_cv(Xq[:, every5 or list(range(n_layers or 0)), :], y, clusters)
     out["probe_prefill_layer_select"] = {k: v for k, v in sel.items() if not k.startswith("_")}
     out["probe_prefill_layer_select"]["oof_scores"] = [None if np.isnan(v) else round(float(v), 5)
                                                        for v in sel["_oof"]]

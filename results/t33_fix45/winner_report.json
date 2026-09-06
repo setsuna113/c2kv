@@ -1,0 +1,54 @@
+{
+ "scalar": {
+  "n_features": 96,
+  "n_live": 15,
+  "live_features": [
+   "c::confkv_c_name",
+   "c::dragin_h_smasked_mean",
+   "c::ecusum_u_mean",
+   "c::entropy_name_max",
+   "c::fc_avg_nll_smt",
+   "c::flare_min_p_name",
+   "c::hbar_name",
+   "c::kono_none_mass",
+   "c::kono_pool_mass_top5",
+   "c::kono_top_pool_prob",
+   "c::leyline_margin_name_first",
+   "c::name_region_nll",
+   "c::p1_name_first",
+   "c::svip_sqrt_h_args_first_syntax",
+   "c::svip_sqrt_h_name_first"
+  ],
+  "live_families": [
+   "c::confkv_c_name",
+   "c::dragin_h_smasked_mean",
+   "c::ecusum_u_mean",
+   "c::entropy_name_max",
+   "c::fc_avg_nll_smt",
+   "c::flare_min_p_name",
+   "c::hbar_name",
+   "c::kono_none_mass",
+   "c::kono_top_pool_prob",
+   "c::leyline_margin_name_first",
+   "c::name_region_nll",
+   "c::p1_name_first",
+   "c::svip_sqrt_h_args_first_syntax",
+   "c::svip_sqrt_h_name_first"
+  ]
+ },
+ "probes": {
+  "n": 5,
+  "live": [
+   "probe::alien_arm_b_cw"
+  ]
+ },
+ "prefix_41": {
+  "s8": "dominated-by-cheap-baseline",
+  "boundary": "dominated-by-cheap-baseline",
+  "gzip": "dominated-by-cheap-baseline",
+  "surprise": "dominated-by-cheap-baseline",
+  "gist": "dominated-by-cheap-baseline",
+  "sat": "dominated-by-cheap-baseline",
+  "rung0": "dominated-by-cheap-baseline"
+ }
+}

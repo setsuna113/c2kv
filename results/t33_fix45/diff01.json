@@ -1,0 +1,218 @@
+{
+ "n": 900,
+ "tier0_columns": [
+  "s8_n_docs_kept",
+  "s8_dropped_docs",
+  "s8_doc_tokens_sum",
+  "boundary_max_doc_len",
+  "gzip_ratio_mean",
+  "surprise_mean_k"
+ ],
+ "var_z": 0.2358,
+ "nonpredictability_gate": {
+  "r2_tier0_vs_full_gnll_oof": 0.0335,
+  "r2_tier0_vs_full_gnll_insample": 0.0783,
+  "var_z": 0.2358,
+  "verdict": "gate-pass"
+ },
+ "deferral_curve": [
+  {
+   "deferred_frac": 0.02,
+   "gpu_sec": 205.99,
+   "z_pos_covered": 1,
+   "z_neg_covered": 1,
+   "z_zero_deferred": 16,
+   "random_z_pos_covered": 2.04,
+   "lift_vs_random": 0.49
+  },
+  {
+   "deferred_frac": 0.072,
+   "gpu_sec": 778.57,
+   "z_pos_covered": 3,
+   "z_neg_covered": 4,
+   "z_zero_deferred": 57,
+   "random_z_pos_covered": 6.8,
+   "lift_vs_random": 0.441
+  },
+  {
+   "deferred_frac": 0.123,
+   "gpu_sec": 1321.96,
+   "z_pos_covered": 6,
+   "z_neg_covered": 5,
+   "z_zero_deferred": 99,
+   "random_z_pos_covered": 12.06,
+   "lift_vs_random": 0.498
+  },
+  {
+   "deferred_frac": 0.175,
+   "gpu_sec": 1860.99,
+   "z_pos_covered": 12,
+   "z_neg_covered": 6,
+   "z_zero_deferred": 139,
+   "random_z_pos_covered": 16.6,
+   "lift_vs_random": 0.723
+  },
+  {
+   "deferred_frac": 0.226,
+   "gpu_sec": 2445.03,
+   "z_pos_covered": 16,
+   "z_neg_covered": 9,
+   "z_zero_deferred": 178,
+   "random_z_pos_covered": 21.46,
+   "lift_vs_random": 0.746
+  },
+  {
+   "deferred_frac": 0.278,
+   "gpu_sec": 2945.48,
+   "z_pos_covered": 21,
+   "z_neg_covered": 11,
+   "z_zero_deferred": 218,
+   "random_z_pos_covered": 26.6,
+   "lift_vs_random": 0.789
+  },
+  {
+   "deferred_frac": 0.329,
+   "gpu_sec": 3513.25,
+   "z_pos_covered": 27,
+   "z_neg_covered": 13,
+   "z_zero_deferred": 256,
+   "random_z_pos_covered": 31.2,
+   "lift_vs_random": 0.865
+  },
+  {
+   "deferred_frac": 0.381,
+   "gpu_sec": 3997.01,
+   "z_pos_covered": 32,
+   "z_neg_covered": 15,
+   "z_zero_deferred": 295,
+   "random_z_pos_covered": 35.82,
+   "lift_vs_random": 0.893
+  },
+  {
+   "deferred_frac": 0.433,
+   "gpu_sec": 4509.03,
+   "z_pos_covered": 42,
+   "z_neg_covered": 16,
+   "z_zero_deferred": 331,
+   "random_z_pos_covered": 40.72,
+   "lift_vs_random": 1.031
+  },
+  {
+   "deferred_frac": 0.484,
+   "gpu_sec": 4912.06,
+   "z_pos_covered": 48,
+   "z_neg_covered": 20,
+   "z_zero_deferred": 367,
+   "random_z_pos_covered": 45.68,
+   "lift_vs_random": 1.051
+  },
+  {
+   "deferred_frac": 0.536,
+   "gpu_sec": 5418.11,
+   "z_pos_covered": 56,
+   "z_neg_covered": 24,
+   "z_zero_deferred": 402,
+   "random_z_pos_covered": 50.08,
+   "lift_vs_random": 1.118
+  },
+  {
+   "deferred_frac": 0.587,
+   "gpu_sec": 5845.81,
+   "z_pos_covered": 60,
+   "z_neg_covered": 29,
+   "z_zero_deferred": 439,
+   "random_z_pos_covered": 54.6,
+   "lift_vs_random": 1.099
+  },
+  {
+   "deferred_frac": 0.639,
+   "gpu_sec": 6286.35,
+   "z_pos_covered": 68,
+   "z_neg_covered": 32,
+   "z_zero_deferred": 475,
+   "random_z_pos_covered": 59.46,
+   "lift_vs_random": 1.144
+  },
+  {
+   "deferred_frac": 0.691,
+   "gpu_sec": 6798.53,
+   "z_pos_covered": 74,
+   "z_neg_covered": 38,
+   "z_zero_deferred": 509,
+   "random_z_pos_covered": 64.14,
+   "lift_vs_random": 1.154
+  },
+  {
+   "deferred_frac": 0.742,
+   "gpu_sec": 7247.85,
+   "z_pos_covered": 79,
+   "z_neg_covered": 47,
+   "z_zero_deferred": 541,
+   "random_z_pos_covered": 68.62,
+   "lift_vs_random": 1.151
+  },
+  {
+   "deferred_frac": 0.794,
+   "gpu_sec": 7831.82,
+   "z_pos_covered": 84,
+   "z_neg_covered": 56,
+   "z_zero_deferred": 574,
+   "random_z_pos_covered": 73.72,
+   "lift_vs_random": 1.139
+  },
+  {
+   "deferred_frac": 0.845,
+   "gpu_sec": 8332.55,
+   "z_pos_covered": 87,
+   "z_neg_covered": 70,
+   "z_zero_deferred": 603,
+   "random_z_pos_covered": 78.82,
+   "lift_vs_random": 1.104
+  },
+  {
+   "deferred_frac": 0.897,
+   "gpu_sec": 8871.94,
+   "z_pos_covered": 90,
+   "z_neg_covered": 82,
+   "z_zero_deferred": 635,
+   "random_z_pos_covered": 83.44,
+   "lift_vs_random": 1.079
+  },
+  {
+   "deferred_frac": 0.948,
+   "gpu_sec": 9369.79,
+   "z_pos_covered": 91,
+   "z_neg_covered": 100,
+   "z_zero_deferred": 662,
+   "random_z_pos_covered": 88.12,
+   "lift_vs_random": 1.033
+  },
+  {
+   "deferred_frac": 1.0,
+   "gpu_sec": 9966.02,
+   "z_pos_covered": 93,
+   "z_neg_covered": 120,
+   "z_zero_deferred": 687,
+   "random_z_pos_covered": 93.0,
+   "lift_vs_random": 1.0
+  }
+ ],
+ "oracle": {
+  "r_hat_01": {
+   "note": "fires iff z==+1 (the paper's Bayes rule under one-hot oracle)",
+   "coverage_of_cw": 1.0,
+   "fire_rate": 0.1033
+  },
+  "r_hat_rel": {
+   "note": "rel-confidence estimand (p_full - p_c2kv on the same emission) needs the paired-probability pass that S2's kill ruled out at serving; offline on three-valued labels it coincides with r_hat_01, so no separate curve is reported",
+   "family": "oracle"
+  },
+  "r_hat_conf": {
+   "note": "fires iff compressed arm unparseable (confidence proxy)",
+   "coverage_of_cw": null,
+   "family": "oracle"
+  },
+  "family": "oracle — headroom only, never a candidate"
+ },
+ "scoring": "session-grouped 5-fold outer, 3-fold inner over lambda grid; z-score fit on train folds only; GPU-sec axis from the frozen battery ledger; random-order chance band included"
+}

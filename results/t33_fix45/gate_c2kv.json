@@ -1,0 +1,18 @@
+{
+  "n_frozen": 900,
+  "n_rerun": 900,
+  "missing_qids": [],
+  "n_missing": 0,
+  "extra_qids": [],
+  "n_extra": 0,
+  "n_prediction_mismatch": 0,
+  "prediction_mismatch_examples": [],
+  "n_generated_tokens_mismatch": 0,
+  "generated_tokens_mismatch_examples": [],
+  "n_tool_name_match_mismatch": 0,
+  "tool_name_match_mismatch_examples": [],
+  "n_has_tool_call_mismatch": 0,
+  "n_capture_missing": 0,
+  "capture_missing_examples": [],
+  "gate": "PASS"
+}

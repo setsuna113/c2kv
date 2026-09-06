@@ -40,6 +40,30 @@ def _oof_vec(entry: Dict[str, Any], qids: List[str]) -> Optional[np.ndarray]:
     return arr
 
 
+def _inject(entry: Dict[str, Any], qids: List[str], frame2: List[Dict[str, Any]],
+            qid_index: Dict[str, int], col: str) -> bool:
+    """Place an OOF score vector into the frame.  Vectors are either aligned
+    with the probe file's qids list, or a SUBSET aligned via oof_row_indices
+    (anchor-complete-case rows) — both handled."""
+    v = entry.get("oof_scores")
+    if v is None:
+        return False
+    idxs = entry.get("oof_row_indices")
+    if idxs is not None and len(idxs) == len(v):
+        pairs = [(qids[i], x) for i, x in zip(idxs, v)]
+    elif len(v) == len(qids):
+        pairs = zip(qids, v)
+    else:
+        return False
+    placed = False
+    for qid, x in pairs:
+        i = qid_index.get(qid)
+        if i is not None and x is not None:
+            frame2[i][col] = float(x)
+            placed = True
+    return placed
+
+
 def probe_row(
     name: str, frame: List[Dict[str, Any]], qid_index: Dict[str, int],
     c2kv: Dict[str, Any], full: Dict[str, Any],
@@ -54,22 +78,11 @@ def probe_row(
     f_entry = full.get(name) if isinstance(full, dict) else None
     if not isinstance(c_entry, dict):
         return None
-    cv = _oof_vec(c_entry, cq)
-    if cv is None:
-        return None
-    # inject into frame copies
     frame2 = [dict(r) for r in frame]
-    for qid, val in zip(cq, cv):
-        i = qid_index.get(qid)
-        if i is not None and not np.isnan(val):
-            frame2[i]["c::probe_" + name] = float(val)
+    if not _inject(c_entry, cq, frame2, qid_index, "c::probe_" + name):
+        return None
     if isinstance(f_entry, dict):
-        fv = _oof_vec(f_entry, fq)
-        if fv is not None:
-            for qid, val in zip(fq, fv):
-                i = qid_index.get(qid)
-                if i is not None and not np.isnan(val):
-                    frame2[i]["s0::probe_" + name] = float(val)
+        _inject(f_entry, fq, frame2, qid_index, "s0::probe_" + name)
     ORIENTATIONS["probe_" + name] = 1
     e = score_feature(frame2, "c::probe_" + name, sessions, labels, keep)
     if e is None:
@@ -148,11 +161,19 @@ def main(argv: Optional[List[str]] = None) -> int:
     # ---- Section B: probes with the same-layer twin ----
     cq = pc.get("qids") or []
     sel_layers = (pc.get("probe_prefill_layer_select") or {}).get("selected_layers") or []
-    twin_layer = int(np.bincount([int(x) for x in sel_layers]).argmax()) if sel_layers else None
+    layers_grid = (pc.get("probe_prefill_layer_select") or {}).get("layers_grid") or []
+    twin_layer = None
+    if sel_layers:
+        maj_idx = int(np.bincount([int(x) for x in sel_layers]).argmax())
+        # selected_layers index INTO layers_grid (the every5 subset), not
+        # absolute layer ids — map back before looking up the full arm
+        twin_layer = int(layers_grid[maj_idx]) if maj_idx < len(layers_grid) else maj_idx
     lines += ["", "## B. hidden-state probes (same-layer S0 twin)", ""]
     if twin_layer is not None:
-        lines += [f"c2kv layer-select chose layers {sel_layers}; twin reported at the "
-                  f"majority layer {twin_layer} of the FULL arm (never each arm's own best).", ""]
+        lines += [f"c2kv layer-select chose grid indices {sel_layers} "
+                  f"(= absolute layers {[layers_grid[int(x)] for x in sel_layers]}); twin "
+                  f"reported at the majority absolute layer {twin_layer} of the FULL "
+                  "arm (never each arm's own best).", ""]
 
     # same-layer twin for probe_prefill: full per-layer oof at twin_layer
     frame2 = [dict(r) for r in frame]

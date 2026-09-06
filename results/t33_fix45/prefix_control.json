@@ -1,0 +1,131 @@
+{
+ "n": 161,
+ "n_pos": 93,
+ "baseline_cols": [
+  "n_generated",
+  "parse_fail_fire"
+ ],
+ "baseline_auprc": 0.5486,
+ "note": "arm-invariant features have S0 == identity-zero by construction and gist/sat have no S0 (undefined on the full arm); adjudication is increment over the cheap baseline on the SAME session-grouped folds",
+ "entries": [
+  {
+   "family": "s8",
+   "columns": [
+    "s8_n_docs_kept",
+    "s8_dropped_docs",
+    "s8_packing_sat",
+    "s8_doc_tokens_sum",
+    "s8_kept_frac"
+   ],
+   "baseline_auprc": 0.5486,
+   "plus_feature_auprc": 0.4899,
+   "delta_auprc": -0.0586,
+   "delta_ci": [
+    -0.1359,
+    0.0178
+   ],
+   "perm_p": 0.975,
+   "verdict": "dominated-by-cheap-baseline"
+  },
+  {
+   "family": "boundary",
+   "columns": [
+    "boundary_max_doc_len",
+    "boundary_mean_doc_len",
+    "boundary_longest_doc_pos_frac"
+   ],
+   "baseline_auprc": 0.5486,
+   "plus_feature_auprc": 0.5089,
+   "delta_auprc": -0.0397,
+   "delta_ci": [
+    -0.1101,
+    0.0332
+   ],
+   "perm_p": 0.915,
+   "verdict": "dominated-by-cheap-baseline"
+  },
+  {
+   "family": "gzip",
+   "columns": [
+    "gzip_ratio_mean",
+    "gzip_ratio_min",
+    "gzip_ratio_max"
+   ],
+   "baseline_auprc": 0.5486,
+   "plus_feature_auprc": 0.5332,
+   "delta_auprc": -0.0154,
+   "delta_ci": [
+    -0.0831,
+    0.0417
+   ],
+   "perm_p": 0.785,
+   "verdict": "dominated-by-cheap-baseline"
+  },
+  {
+   "family": "surprise",
+   "columns": [
+    "surprise_max_k",
+    "surprise_mean_k",
+    "surprise_hit_rate_mean"
+   ],
+   "baseline_auprc": 0.5486,
+   "plus_feature_auprc": 0.5834,
+   "delta_auprc": 0.0349,
+   "delta_ci": [
+    -0.0682,
+    0.1359
+   ],
+   "perm_p": 0.21,
+   "verdict": "dominated-by-cheap-baseline"
+  },
+  {
+   "family": "gist",
+   "columns": [
+    "gist_gists_per_doc_mean",
+    "gist_gists_per_doc_max"
+   ],
+   "baseline_auprc": 0.5486,
+   "plus_feature_auprc": 0.4907,
+   "delta_auprc": -0.0578,
+   "delta_ci": [
+    -0.1113,
+    -0.0076
+   ],
+   "perm_p": 0.98,
+   "verdict": "dominated-by-cheap-baseline"
+  },
+  {
+   "family": "sat",
+   "columns": [
+    "sat_hoyer_k",
+    "sat_spec_ent_k",
+    "sat_norm_k",
+    "sat_kurt_k"
+   ],
+   "baseline_auprc": 0.5486,
+   "plus_feature_auprc": 0.6465,
+   "delta_auprc": 0.0979,
+   "delta_ci": [
+    0.0179,
+    0.1611
+   ],
+   "perm_p": 0.06,
+   "verdict": "dominated-by-cheap-baseline"
+  },
+  {
+   "family": "rung0",
+   "columns": [
+    "rung0_dropped_any"
+   ],
+   "baseline_auprc": 0.5486,
+   "plus_feature_auprc": 0.5467,
+   "delta_auprc": -0.0019,
+   "delta_ci": [
+    -0.0508,
+    0.0388
+   ],
+   "perm_p": 0.565,
+   "verdict": "dominated-by-cheap-baseline"
+  }
+ ]
+}

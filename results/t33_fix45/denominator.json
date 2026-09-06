@@ -1,0 +1,18 @@
+{
+  "n_cw": 93,
+  "min_chars": 3,
+  "gold_side_bearing": 93,
+  "emitted_side_bearing": 77,
+  "emitted_side_bearing_strict_only": 55,
+  "both_bearing": 77,
+  "gold_side_fraction": 1.0,
+  "emitted_side_fraction": 0.828,
+  "non_strict_breakdown": {
+    "strict_bearing": 55,
+    "lenient_only": 22,
+    "non_bearing": 16,
+    "non_bearing_censored": 13,
+    "non_bearing_no_tool_call": 13
+  },
+  "note": "4.6 grounding tier / 4.7 proposal-witness defined on both_bearing rows; emitted side counts use the LENIENT arg-span path (cap-censored rows still count when real >=3-char values are present); compare against MDE 17-25pp before building that tier."
+}

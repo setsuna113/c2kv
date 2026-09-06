@@ -1,0 +1,11 @@
+{
+ "n_scored": 161,
+ "n_skipped": 0,
+ "gamma_seq_median": 4.0491,
+ "gamma_seq_p10": 2.4234,
+ "gamma_seq_p90": 6.4646,
+ "frac_gamma_le_1_36": 0.0,
+ "mean_p_gamma_le_136_per_position": 0.1716,
+ "n_rows_p_gamma": 161,
+ "note": "gamma = H_qp/H_q = 1 + KL/H_q >= 1 ALWAYS (mechanically large when H_q is small; Pinsker bound direction unaffected but the ratio is not a distance); sequence aggregate and per-position fractions are different estimands, both shown; diagnostic only per prereg"
+}
