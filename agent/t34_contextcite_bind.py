@@ -262,6 +262,13 @@ class Binding:  # pragma: no cover - torch + NPU
         self.placement = placement
         self.rt = runtime
 
+    def prepare(self, qid: str) -> None:
+        """Build the per-qid state BEFORE the runner reads the first
+        fingerprint: the state is prepared lazily otherwise, and a lazy first
+        call would (correctly) trip the pollution sentinel with
+        ``None -> <state>`` (seen on the 2026-09-06 NPU smoke)."""
+        self.rt.ensure(qid)
+
     def state_fingerprint(self) -> Any:
         return self.rt.fingerprint()
 

@@ -60,3 +60,23 @@ def test_factories_are_loadable_by_the_contextcite_runner():
     assert callable(B.factory) and callable(B.sham_factory)
     import t34_contextcite as CC
     assert hasattr(CC, "_load_score_fn")
+
+
+def test_run_calls_prepare_before_the_first_fingerprint(tmp_path, monkeypatch):
+    import json, sys, types
+    import t34_contextcite as CC
+    calls = []
+    class Scorer:
+        def __init__(self): self.state = None
+        def prepare(self, qid): self.state = qid; calls.append(('prepare', qid))
+        def state_fingerprint(self): return self.state
+        def __call__(self, qid, v): return -1.0 - 0.1 * sum(v)
+    mod = types.ModuleType('fake_cc_scorer'); mod.factory = lambda: Scorer(); mod.sham_factory = lambda: Scorer()
+    monkeypatch.setitem(sys.modules, 'fake_cc_scorer', mod)
+    design = {'designs': {'q:1': CC.build_design('q:1', 3, n=8)}}
+    dp = tmp_path / 'design.json'; dp.write_text(json.dumps(design), encoding='utf-8')
+    out = tmp_path / 'attrib.jsonl'
+    rc = CC.main(['run', '--design', str(dp), '--score_module', 'fake_cc_scorer:factory', '--score_module_sham', 'fake_cc_scorer:sham_factory', '--out', str(out)])
+    assert rc == 0 and calls[:2] == [('prepare', 'q:1'), ('prepare', 'q:1')]
+    row = json.loads(out.read_text(encoding='utf-8').splitlines()[0])
+    assert row['qid'] == 'q:1' and not row.get('cache_pollution_detected')

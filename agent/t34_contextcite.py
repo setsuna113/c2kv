@@ -877,6 +877,13 @@ def _cmd_run(args: argparse.Namespace) -> int:
     with out.open("w", encoding="utf-8") as fh:
         for qid, design in designs:
             try:
+                # a scorer that keeps per-qid state must build it before the
+                # fingerprint is read, otherwise the lazy first call reads as
+                # pollution (None -> state); pure scorers have no prepare()
+                for fn in (score_fn, score_fn_sham):
+                    prep = getattr(fn, "prepare", None) if fn is not None else None
+                    if callable(prep):
+                        prep(qid)
                 row = run_attribution(qid, int(design["d"]), score_fn, n=args.n,
                                       score_fn_sham=score_fn_sham,
                                       state_fingerprint=getattr(score_fn, "state_fingerprint", None),
