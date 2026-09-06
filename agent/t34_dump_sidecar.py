@@ -245,6 +245,9 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
                              "t34_common.check_docs_against_witness against the "
                              "frozen witness table's per-doc sha256")
     parser.add_argument("--limit", type=int, default=0, help="debug: first N qids only")
+    parser.add_argument("--qids", default="",
+                        help="debug: comma-separated qids (must be battery rows); lets a "
+                             "smoke pick witness-covered C->W rows so --check is exercised")
     # harness plumbing — same defaults as agent/d_witness_select.py
     parser.add_argument("--model", default="/home/liuyancheng/c2kv/outputs_lyc/g_joint/fixed_joint")
     parser.add_argument("--base_model", default="/home/liuyancheng/c2kv/models/Qwen3-4B-Instruct-2507")
@@ -332,11 +335,18 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     frame = FrozenAssets(root).load()
     want = list(frame.c2kv_by_qid.keys())
+    if args.qids:
+        chosen = [q.strip() for q in args.qids.split(",") if q.strip()]
+        unknown = [q for q in chosen if q not in frame.c2kv_by_qid]
+        if unknown:
+            raise SystemExit(f"FATAL: --qids not in the frozen battery: {unknown[:3]}")
+        want = chosen
     if args.limit:
         want = want[: args.limit]
 
     import eval_agent_history_c2kv as HH  # noqa: PLC0415
     hargs = _harness_args(args)
+    hargs.qid_allowlist = set(want)   # start-up cost: only the frozen rows
     tokenizer = HH._load_tokenizer(hargs)
     examples, _ = HH._load_examples(hargs, tokenizer)
     by_qid = {e.qid: e for e in examples}

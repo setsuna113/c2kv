@@ -3636,7 +3636,19 @@ def _load_examples(args: argparse.Namespace, tokenizer: Any) -> tuple[List[Compr
     )
     selection_skips: Counter[str] = Counter()
     examples = []
+    # Opt-in qid allowlist (t34 drivers): the c2kv selection filter tokenises
+    # EVERY eval-split example through _build_history_chunks, which is the
+    # whole start-up cost of a driver that only needs a few hundred frozen
+    # rows.  Unset (the default) = the original behaviour, bit for bit.
+    import os as _os  # noqa: PLC0415
+    allow = getattr(args, "qid_allowlist", None)
+    if allow is None and _os.environ.get("C2KV_QID_ALLOWLIST"):
+        with open(_os.environ["C2KV_QID_ALLOWLIST"], encoding="utf-8") as fh:
+            allow = {line.strip() for line in fh if line.strip()}
+    allow = set(allow) if allow is not None else None
     for example in source:
+        if allow is not None and example.qid not in allow:
+            continue
         if args.selection_filter == "c2kv":
             _, _, _, _, skip_reason = _build_history_chunks(tokenizer, example, args)
             if skip_reason is not None:

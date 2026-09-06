@@ -147,3 +147,18 @@ def test_label_frame_keeps_deployable_and_gold_gated_columns_and_they_agree_on_1
     sub = frame.trigger_subset()
     assert all(r["parse_fail_fire"] == r["parse_fail_fire_gold_gated"] for r in sub)
     assert sum(1 for r in sub if r["parse_fail_fire"]) == 63
+
+
+def test_load_flip_table_accepts_raw_ksweep_rows(tmp_path):
+    import json
+    from t34_common import load_flip_table
+    p = tmp_path / 'sweep.jsonl'
+    rows = [
+        {'qid': 's:1', 'd_ksweep_k': 0, 'd_corr_doc_index': 0, 'tool_name_match': False, 'skipped': False},
+        {'qid': 's:1', 'd_ksweep_k': 2, 'd_corr_doc_index': 2, 'tool_name_match': True, 'skipped': False},
+        {'qid': 's:1', 'd_ksweep_k': 3, 'd_corr_doc_index': 3, 'tool_name_match': True, 'skipped': True},
+        {'qid': 's:2', 'k': 1, 'correct': True},
+    ]
+    p.write_text(chr(10).join(json.dumps(r) for r in rows) + chr(10), encoding='utf-8')
+    ft = load_flip_table(p)
+    assert ft == {'s:1': {0: False, 2: True}, 's:2': {1: True}}

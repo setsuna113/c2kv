@@ -294,6 +294,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     model = _load_model(eval_args, tokenizer, device)
 
     wanted = {r["qid"] for r in plan}
+    eval_args.qid_allowlist = set(wanted)   # start-up cost: only the frozen rows
     examples = {e.qid: e for e in _load_examples(eval_args, tokenizer)[0] if e.qid in wanted}
     done = resume_done(args.out)
     Path(args.out).parent.mkdir(parents=True, exist_ok=True)

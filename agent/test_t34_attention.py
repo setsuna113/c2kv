@@ -851,7 +851,8 @@ def test_recompute_self_check_counters_start_empty_and_reset():
     and identical' - and reset() must clear them between battery rows."""
     cap = A.AttentionRowCapture(simple_map())
     assert cap.recompute_max_abs_diff is None and cap.recompute_n_checked == 0
-    assert cap.recompute_tol == pytest.approx(1e-3)
+    assert cap.recompute_tol == pytest.approx(1e-2)
+    assert cap.recompute_max_abs_diff_fp32 is None
     cap.recompute_max_abs_diff, cap.recompute_n_checked = 0.5, 7
     cap.reset()
     assert cap.recompute_max_abs_diff is None and cap.recompute_n_checked == 0

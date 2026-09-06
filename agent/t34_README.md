@@ -33,16 +33,25 @@ PYTHONIOENCODING=utf-8 python -m pytest agent/test_t34_*.py agent/test_triggers.
 
 ## 1. Server-side inputs (produced ONCE on the NPU box, copied back)
 
+Start-up cost note: every server driver goes through the harness's `_load_examples`, whose
+`selection_filter == "c2kv"` tokenises EVERY eval-split example (tens of minutes). The t34
+drivers now set `hargs.qid_allowlist` to exactly the rows they use (opt-in attribute / env
+`C2KV_QID_ALLOWLIST=<file of qids>` in `eval_agent_history_c2kv._load_examples`; unset =
+the original behaviour), which brought the sidecar dump from >20 min to ~3 min.
+Server-side runs live in `~/c2kv-t34` (worktree of the runner's repo); helper env in
+`~/t34_logs/env.sh` (c2kv env + Ascend `set_env.sh` + `T34_CHIP`).
+
 | input | producer | consumed by |
 |---|---|---|
 | `results/t34/sidecar_{c2kv,full}.jsonl` — decoded grid-row plaintext of the KEPT blocks + query + tools + doc_lengths + `dropped_docs` (post-split history indices; add `--with_dropped_text` for `dropped_doc_texts`) | `agent/t34_dump_sidecar.py` (CPU, no forward) | triggers, localize, qrhead, cacheblend, extra_forward (AsymSpec, selfcheck), bench_signals (D*/R*), heads (CORA toolset split), selfreport, judge, cascade ceiling |
-| `results/t34/flip_table.jsonl` — `{qid, k, correct}` per (qid, block) from the D-line k-sweep (`~/bench_results/d_v2/`) | copy from server | localize / locate_score (flip-hit column), bench_signals (S1'/S2'/S3'), controls (placebo best-k) |
+| `results/t34/flip_table.jsonl` — per (qid, block) repair outcome from the D-line k-sweep. The server's RAW sweep file `~/bench_results/d_v2/d_ksweep_r2.jsonl` (928 rows over the 93 C->W qids, arm `raw_keepG_sweep`) is accepted as-is: `load_flip_table` reads `k = d_ksweep_k`, `correct = tool_name_match`, drops `skipped` rows (the reduced `{qid, k, correct}` form is accepted too) | copy from server (done 2026-09-06; sha in `results/t34/bench_classes.json`) | localize / locate_score (flip-hit column), bench_signals (S1'/S2'/S3'), controls (placebo best-k), contextcite report |
 | `results/t34/attn_{c2kv,full}.npz + .jsonl` — span-reduced attention masses for the 161-row subset, eager attention | `agent/t34_attention.py run-battery` | attention (Lookback / drift / retrieval-head ports), qrhead (`capture` sub-command runs its own prefill) |
 | `configs/t34/retrieval_heads_*.json` — head set from the needle detection (base / fixed_joint / ckpt-1088) | `agent/t34_retrieval_head.py detect` + `compare` + `head-set` | attention `locate` |
 | `results/t34/vericache_labels.jsonl` (+ `.repeat`) — first-divergence LABELS under the full prefix | `agent/t34_extra_forward.py vericache` | stratification axis only (never a feature) |
+| `results/t34/contextcite_attrib.jsonl` — ContextCite ablation table (raw_keepG multi-block restore + equal-length neutral sham) | `agent/t34_contextcite.py run --score_module t34_contextcite_bind:factory --score_module_sham t34_contextcite_bind:sham_factory` (NPU; `agent/t34_contextcite_bind.py`, env `T34_CC_*`; ≤ 2,996 design calls ×2 for sham over the 93 designs in `configs/t34/contextcite_design.json`) | contextcite `report` (label factory for §4.7 locators) |
 | `results/t34/probes_*_{c2kv,full}.jsonl` — VISTA P1–P4 / selfcheck generations (query-only override, ledger at the tail) | `agent/t34_probe_mode.py` | selfreport `score-probes` / `score-selfcheck` |
 | the t33 capture dir (`p0.steps.jsonl`, `*.hid.npz`) + `results/t34/lm_head_rows.npz` | runner's t33 capture; `agent/t34_heads.py dump-lm-head` | heads (ALIEN / MemGen), sequential `u` channel, extra_forward spread |
-| stage-2 table for the cascade — single-block slice-prefill + regenerate for ALL 161 rows (the frozen `d_corr.jsonl` covers the 93 C→W only, so its availability is the label) | D-line harness | cascade `sweep` with `p > 0` |
+| `results/t34/stage2_161.jsonl` — stage-2 table for the cascade: one raw_keepG splice at the gold-free `k_median = (n_docs-1)//2` + regenerate for ALL 161 trigger rows (the frozen `d_corr.jsonl` covers the 93 C→W only, so its availability is the label) | `agent/t34_stage2_driver.py` (NPU; the k-sweep primitive `d1_arms.ksweep_prefix_for_k`; ~11 s/row; smoke-tested 2 rows 2026-09-06) | cascade `sweep --expensive` with `p > 0` |
 | bench proxy request logs with `conv_id / turn / fp / action / match / diverged_now / …` (bench branch proxy, not this branch's 344-line copy) | bench face | bench_signals (triples, truncation, selfconv, equilibrium), sequential `esn`, selfreport `pagein-smoke`, triggers census |
 
 ## 2. Execution order (local unless marked NPU)
@@ -112,6 +121,8 @@ PYTHONIOENCODING=utf-8 python -m pytest agent/test_t34_*.py agent/test_triggers.
   (`t34_cascade.expects_call_from_tools`).
 * **repair + recover co-existence.** The guard lives on the bench branch
   (`tmp/bench-recover/benchmarks/arms.py`, not in this tree). The opt-in relaxation
-  (`Arm.allow_repair_recover=True` per cascade arm, default unchanged) is shipped as
-  `configs/t34/patches/bench_arms_allow_repair_recover.patch`; it applies cleanly with
-  `git apply --check` on the bench worktree and must be applied there by the bench owner.
+  (`Arm.allow_repair_recover=True` per cascade arm, default unchanged) is shipped as two
+  patch variants in `configs/t34/patches/`: `...bench-recover.patch` (base `tmp/bench-recover`)
+  and `...serve-align-141ed5a.patch` (base `task/bench-serve-align` @141ed5a, the tree the
+  server's `~/c2kv-bench` is on; `git apply --check` passes there, 2026-09-06). Neither is
+  applied: the bench owner applies the one matching their branch.

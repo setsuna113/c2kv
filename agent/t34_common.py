@@ -656,12 +656,31 @@ def check_docs_against_witness(docs: Dict[str, List[str]], frame: FrozenFrame) -
 
 
 def load_flip_table(path: Path) -> Dict[str, Dict[int, bool]]:
-    """Per-(qid, k) repair outcome dumped from the D-line k-sweep
-    (``~/bench_results/d_v2/`` on the server): lines ``{qid, k, correct}``.
+    """Per-(qid, k) repair outcome from the D-line k-sweep.  Two row shapes
+    are accepted:
+
+    * the reduced form ``{qid, k, correct}``;
+    * the RAW sweep rows the server holds (``~/bench_results/d_v2/
+      d_ksweep_r2.jsonl``: 928 rows over the 93 C->W qids, arm
+      ``raw_keepG_sweep``), where ``k`` is ``d_ksweep_k`` (== the block index
+      ``d_corr_doc_index`` on every row) and ``correct`` is ``tool_name_match``
+      -- the same reading ``agent/d_ksweep_analysis.py`` uses.  Rows flagged
+      ``skipped`` are dropped, as there.
+
     Returns qid -> {k: correct}."""
     out: Dict[str, Dict[int, bool]] = {}
     for r in load_jsonl(str(path)):
-        out.setdefault(r["qid"], {})[int(r["k"])] = bool(r.get("correct"))
+        if r.get("skipped"):
+            continue
+        if "k" in r:
+            k = int(r["k"])
+        elif r.get("d_ksweep_k") is not None or r.get("d_corr_doc_index") is not None:
+            k = int(r["d_ksweep_k"] if r.get("d_ksweep_k") is not None
+                    else r["d_corr_doc_index"])
+        else:
+            raise ValueError(f"flip table row without k / d_ksweep_k: {sorted(r)[:8]}")
+        correct = r["correct"] if "correct" in r else r.get("tool_name_match")
+        out.setdefault(r["qid"], {})[k] = bool(correct)
     return out
 
 

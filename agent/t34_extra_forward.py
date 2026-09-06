@@ -1567,6 +1567,11 @@ def _cmd_vericache(args: argparse.Namespace) -> int:
     cap_tokens = frame.cap_tokens()
     c2kv = frame.c2kv_by_qid
     qids = sorted(c2kv)
+    max_rows = int(getattr(args, "max_rows", 0) or 0)
+    if max_rows:
+        # smoke only: a truncated label file is stamped as such in the cost
+        # sidecar so it can never be mistaken for the 900-row pass
+        qids = qids[:max_rows]
     capture_index = load_capture_steps(Path(args.capture_steps)) if args.capture_steps else {}
 
     eval_args = SV._build_eval_args(args)
@@ -1574,6 +1579,7 @@ def _cmd_vericache(args: argparse.Namespace) -> int:
     eval_args.model = _resolve_model_checkpoint(eval_args.model)
     tokenizer = _load_tokenizer(eval_args)
     model = _load_model(eval_args, tokenizer, device)
+    eval_args.qid_allowlist = set(qids)   # start-up cost: only the frozen rows
     examples = {e.qid: e for e in _load_examples(eval_args, tokenizer)[0] if e.qid in set(qids)}
 
     out_path = Path(args.out)
@@ -1615,6 +1621,8 @@ def _cmd_vericache(args: argparse.Namespace) -> int:
             handle.write(json.dumps(row, ensure_ascii=False) + "\n")
         handle.close()
         cost = {"pass": pass_idx, "wall_sec": round(time.time() - t0, 2), "n_rows": len(qids),
+                "n_rows_frame": len(c2kv), "max_rows": max_rows,
+                "smoke_truncated": bool(max_rows and max_rows < len(c2kv)),
                 "booking": "OFFLINE ONLY -- never amortised into the online cost ledger"}
         (path.with_suffix(".cost.json")).write_text(
             json.dumps(cost, indent=1), encoding="utf-8")
@@ -1832,6 +1840,8 @@ def build_parser() -> argparse.ArgumentParser:
     v.add_argument("--battery_full", required=True)
     v.add_argument("--battery_c2kv", required=True)
     v.add_argument("--manifest", required=True)
+    v.add_argument("--max_rows", type=int, default=0,
+                   help="smoke only: first N qids; the cost json is stamped smoke_truncated")
     v.add_argument("--capture_steps", default=None,
                    help="t33 capture <arm>/p0.steps.jsonl (preferred id source)")
     v.add_argument("--out", required=True)

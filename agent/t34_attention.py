@@ -308,7 +308,7 @@ DEVIATIONS: List[Dict[str, str]] = [
         "what": "On the eager path the recomputed probabilities are compared against the kernel's own "
                 "returned attn_weights on every captured chunk; the running max |d| and the number of "
                 "checks go into every capture meta line (recompute_max_abs_diff / "
-                "recompute_n_checked), and a difference above recompute_tol=1e-3 raises the "
+                "recompute_n_checked), and a difference above recompute_tol=1e-2 (dtype-matched replica of the eager kernel; the fp32 gap is reported separately) raises the "
                 "'recompute_mismatch' error counter.",
         "why": "the recomputation deviation below is only safe if it reproduces the eager kernel's "
                "alpha; without this check a wrong post-RoPE query would make every downstream number "
@@ -762,7 +762,7 @@ class AttentionRowCapture:
         *,
         qrow_chunk: int = 16,
         capture_gist_path: bool = False,
-        recompute_tol: float = 1e-3,
+        recompute_tol: float = 1e-2,
         expected_batch_size: int = 1,
     ) -> None:
         if query_mode not in ("decode", "prefill_last_n"):
@@ -796,6 +796,7 @@ class AttentionRowCapture:
     def reset(self) -> None:
         """Clear the per-row buffers (call before each battery row)."""
         self.recompute_max_abs_diff: Optional[float] = None
+        self.recompute_max_abs_diff_fp32: Optional[float] = None
         self.recompute_n_checked = 0
         #: distinct shape-contract violation messages seen on this row (batch size
         #: / cache layout), so the meta line says WHY the capture is empty.
@@ -1011,14 +1012,35 @@ class AttentionRowCapture:
             probs = torch.nan_to_num(probs, nan=0.0)
             if ref_weights is not None:
                 sel = torch.as_tensor(rows[lo:hi], device=ref_weights.device)
-                ref = ref_weights[0].index_select(1, sel).to(torch.float32)
-                d = float((probs - ref.to(probs.device)).abs().max())
+                ref = ref_weights[0].index_select(1, sel).to(torch.float32).to(probs.device)
+                # (i) fp32 recompute vs the kernel: informational.  The eager kernel
+                # forms the logits in the MODEL dtype (bf16: ~3 significant digits,
+                # so logits of magnitude 10-30 carry ~0.05-0.1 absolute rounding)
+                # and rounds the fp32 softmax back to bf16, so this difference is
+                # dominated by dtype, not by construction (measured 0.07 on the
+                # NPU smoke with 4572/4572 rows over 1e-3).
+                d32 = float((probs - ref).abs().max())
+                if self.recompute_max_abs_diff_fp32 is None or d32 > self.recompute_max_abs_diff_fp32:
+                    self.recompute_max_abs_diff_fp32 = d32
+                # (ii) the ENFORCED check replicates the kernel's own dtype path
+                # (eager_attention_forward: bf16 matmul * scaling, fp32 softmax,
+                # cast back) on the same q/k, so what remains is accumulation-
+                # order noise; a construction error (wrong projection, wrong
+                # keys, wrong mask) still shows up as a large difference.
+                qm = qs[0, :, lo:hi, :]
+                km = keys[0]
+                km = km.repeat_interleave(n_rep, dim=0) if n_rep > 1 else km
+                lm = torch.matmul(qm, km.transpose(1, 2).to(qm.dtype)) * scale
+                lm = lm.masked_fill(~keep[None, :, :], float("-inf"))
+                pm = torch.softmax(lm, dim=-1, dtype=torch.float32).to(qm.dtype).to(torch.float32)
+                pm = torch.nan_to_num(pm, nan=0.0)
+                d = float((pm - ref).abs().max())
                 self.recompute_n_checked += 1
                 if self.recompute_max_abs_diff is None or d > self.recompute_max_abs_diff:
                     self.recompute_max_abs_diff = d
                 if d > self.recompute_tol:
                     self._bump_error("recompute_mismatch")
-                del ref, sel
+                del ref, sel, qm, km, lm, pm
             parts.append(reduce_probs(probs.cpu().numpy(), cid, did, self.key_map.n_docs))
             del logits, probs, q32
         del k32
@@ -2147,6 +2169,8 @@ def finalize_row(
         "gist_path_forwards": int(capture.gist_path_forwards),
         "recompute_max_abs_diff": (None if getattr(capture, "recompute_max_abs_diff", None) is None
                                    else float(capture.recompute_max_abs_diff)),
+        "recompute_max_abs_diff_fp32": (None if getattr(capture, "recompute_max_abs_diff_fp32", None) is None
+                                   else float(capture.recompute_max_abs_diff_fp32)),
         "recompute_n_checked": int(getattr(capture, "recompute_n_checked", 0) or 0),
         "capture_errors": dict(capture.errors),
         "query_rows": meta_rows,
@@ -2660,6 +2684,7 @@ def _cmd_run_battery(args: argparse.Namespace) -> int:
     model = _load_model(eval_args, tokenizer, device)
 
     writer = AttentionCaptureWriter(Path(args.out_dir), args.arm)
+    eval_args.qid_allowlist = set(subset)   # start-up cost: only the frozen rows
     examples = {e.qid: e for e in _load_examples(eval_args, tokenizer)[0] if e.qid in set(subset)}
     n_emit_bad = 0
     n_capture_errors = 0
@@ -2693,10 +2718,23 @@ def _cmd_run_battery(args: argparse.Namespace) -> int:
             finally:
                 cap.remove()
             gen_ids = row.get("generated_ids") or []
+            ids_source = "harness_generated_ids"
+            if not gen_ids:
+                # the harness row carries the decoded text only; re-tokenise it
+                # (decode->encode is not guaranteed to reproduce the emitted ids,
+                # so the source is stamped and the count is cross-checked against
+                # the harness's own generated_tokens)
+                gen_ids = list(tokenizer.encode(row.get("prediction") or "", add_special_tokens=False))
+                ids_source = "retokenized_prediction"
+            n_gen_harness = row.get("generated_tokens")
             arrays, meta = finalize_row(
                 cap, key_map, qid=qid, arm=args.arm, generated_ids=gen_ids,
                 decode_fn=lambda ids: tokenizer.decode(list(ids), skip_special_tokens=True),
                 prefix_meta=prefix, row_meta=row)
+            meta["generated_ids_source"] = ids_source
+            meta["n_generated_harness"] = None if n_gen_harness is None else int(n_gen_harness)
+            meta["n_generated_retokenized_matches_harness"] = (
+                None if n_gen_harness is None else bool(len(gen_ids) == int(n_gen_harness)))
             writer.add(qid, arrays, meta)
             if not meta["emit_index_check"]["ok"]:
                 n_emit_bad += 1
@@ -2786,8 +2824,11 @@ def build_parser() -> argparse.ArgumentParser:
     rb.add_argument("--ratio", type=int, default=8)
     rb.add_argument("--attn_impl", default="eager")
     rb.add_argument("--device_type", default="npu")
-    rb.add_argument("--query_mode", default="decode", choices=["decode", "prefill_last_n"])
-    rb.add_argument("--last_n", type=int, default=64)
+    rb.add_argument("--query_mode", default="prefill_last_n", choices=["decode", "prefill_last_n"],
+                    help="prefill_last_n + --last_n 1 (default) captures the prompt forward last "
+                         "row, which emits generated token 0; plain decode skips it and the "
+                         "emit_index convention check fails by construction (NPU smoke 2026-09-06)")
+    rb.add_argument("--last_n", type=int, default=1)
     rb.add_argument("--qrow_chunk", type=int, default=16)
     rb.add_argument("--max_rows", type=int, default=0)
     rb.set_defaults(fn=_cmd_run_battery)

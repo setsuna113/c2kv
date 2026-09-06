@@ -865,16 +865,32 @@ def _cmd_run(args: argparse.Namespace) -> int:
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     n_ok = n_bad = 0
+    wanted = {q.strip() for q in (args.qids or "").split(",") if q.strip()}
+    designs = sorted(payload["designs"].items())
+    if wanted:
+        unknown = wanted - {q for q, _ in designs}
+        if unknown:
+            raise SystemExit(f"--qids not in the design: {sorted(unknown)[:3]}")
+        designs = [(q, d) for q, d in designs if q in wanted]
+    if args.max_qids:
+        designs = designs[: int(args.max_qids)]
     with out.open("w", encoding="utf-8") as fh:
-        for qid, design in sorted(payload["designs"].items()):
+        for qid, design in designs:
             try:
                 row = run_attribution(qid, int(design["d"]), score_fn, n=args.n,
-                                      score_fn_sham=score_fn_sham)
+                                      score_fn_sham=score_fn_sham,
+                                      state_fingerprint=getattr(score_fn, "state_fingerprint", None),
+                                      sentinel_tol=float(args.sentinel_tol))
                 n_ok += 1
             except CachePollutionError as exc:
                 row = {"qid": qid, "cache_pollution_detected": True, "error": str(exc)}
                 n_bad += 1
+            except Exception as exc:  # noqa: BLE001 -- one bad row must not kill a 6000-call pass
+                row = {"qid": qid, "cache_pollution_detected": False, "scorer_error": repr(exc)}
+                n_bad += 1
+                print(f"[contextcite] {qid}: scorer error {exc!r}", file=sys.stderr)
             fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+            fh.flush()
     print(json.dumps({"out": str(out), "n_ok": n_ok, "n_polluted": n_bad}))
     return 0 if n_bad == 0 else 1
 
@@ -911,6 +927,12 @@ def build_parser() -> argparse.ArgumentParser:
                         "equal-length neutral-span arm); doubles the design calls and "
                         "supplies the attribution floor the card demands")
     r.add_argument("--n", type=int, default=32)
+    r.add_argument("--qids", default="", help="smoke: comma-separated subset of the design")
+    r.add_argument("--max_qids", type=int, default=0, help="smoke: first N designs only")
+    r.add_argument("--sentinel_tol", type=float, default=1e-9,
+                   help="|logp(v=0) first - last| above this = cache pollution.  Widen ONLY "
+                        "to a measured bf16 repeat-noise floor (t34_extra_forward vericache "
+                        "--repeat / t34_attention noise-floor), and record the value")
     r.add_argument("--out", required=True)
     r.set_defaults(func=_cmd_run)
 
