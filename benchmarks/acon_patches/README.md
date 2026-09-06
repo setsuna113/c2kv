@@ -38,6 +38,16 @@ from the virtual environment's `site-packages` directory. This task-local
 sparse installation deliberately stops exporting those two optional searcher
 families; its BM25 API and Lucene implementation are unchanged.
 
+Apply `0005-smolagents-error-feedback.patch` with
+`git apply --ignore-space-change` to the ACON checkout. The
+Smolagents action processor already extracts fenced Python before
+`SmolagentsEnv.step` executes it. If that execution raises, upstream returns
+the error but does not store it in `env.observation` or `env.trajectory`.
+Consequently the next prompt is rebuilt as an initial turn and the same task
+is sent again. The patch records the failed action and its actual executor
+error so the next model turn receives that feedback; it does not rewrite the
+action, supply missing tool arguments, or change the task prompt.
+
 Both runners then need only the served model name to NOT contain `gpt`,
 `o1`, `o3`, `o4` or `gemini` (those names are routed to the OpenAI / Gemini
 clients instead).  `c2kv-agent` is fine.

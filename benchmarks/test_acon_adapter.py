@@ -8,11 +8,13 @@ evaluation layout.
 from __future__ import annotations
 
 import json
+import importlib.util
 import os
 import runpy
 import shutil
 import subprocess
 import sys
+import types
 from pathlib import Path
 
 import pytest
@@ -101,6 +103,160 @@ def test_pyserini_sparse_patch_removes_only_dense_exports(tmp_path):
     assert "_impact_searcher" not in patched
     assert "_hnsw_searcher" not in patched
     assert patched.count("\n") == (prefix + source).count("\n") - 2
+
+
+def test_smolagents_execution_error_reaches_next_agent_turn(tmp_path, monkeypatch):
+    """The exact QA action must execute and its TypeError must become feedback."""
+    project_root = Path(__file__).resolve().parents[1]
+    default_acon_root = project_root.parent / "tmp" / "baselines" / "acon"
+    acon_root = Path(os.environ.get("ACON_ROOT", default_acon_root))
+    env_rel = Path("src/productive_agents/env/smolagents/env.py")
+    agent_rel = Path("src/productive_agents/agents/smolagents/agent.py")
+    if not (acon_root / env_rel).is_file():
+        pytest.skip("set ACON_ROOT to the pinned microsoft/acon checkout")
+
+    staged_root = tmp_path / "acon"
+    for source_rel in (env_rel, agent_rel):
+        target = staged_root / source_rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(acon_root / source_rel, target)
+    patch_path = (
+        project_root
+        / "benchmarks"
+        / "acon_patches"
+        / "0005-smolagents-error-feedback.patch"
+    )
+    subprocess.run(
+        ["git", "apply", "--ignore-space-change", str(patch_path)],
+        cwd=staged_root,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    class FakeExecutor:
+        def __init__(self, **_kwargs):
+            self.calls = []
+
+        def send_tools(self, _tools):
+            pass
+
+        def __call__(self, code):
+            self.calls.append(code)
+            raise TypeError(
+                "WikipediaRetrieverTool.forward() missing 1 required "
+                "positional argument: 'n_results'"
+            )
+
+    class FakeConfig:
+        verbose = False
+        max_interactions = 4
+
+    class FakeWikipediaTool:
+        name = "wikipedia_search"
+
+    class FakeFinalAnswerTool:
+        name = "final_answer"
+
+    class FakeActionProcessor:
+        def __init__(self, logger):
+            self.logger = logger
+
+    class FakePromptBuilder:
+        def __init__(self, prompt_dict=None, working_dir="."):
+            self.prompt_dict = prompt_dict or {}
+            self.working_dir = working_dir
+
+    def module(name, **attrs):
+        value = types.ModuleType(name)
+        for key, item in attrs.items():
+            setattr(value, key, item)
+        return value
+
+    stubs = {
+        "smolagents": module("smolagents", LocalPythonExecutor=FakeExecutor),
+        "smolagents.local_python_executor": module(
+            "smolagents.local_python_executor", fix_final_answer_code=lambda code: code
+        ),
+        "smolagents.utils": module(
+            "smolagents.utils",
+            parse_code_blobs=lambda code, _tags: code,
+            truncate_content=str,
+            extract_code_from_text=lambda *_args: "",
+        ),
+        "productive_agents": module("productive_agents"),
+        "productive_agents.env": module("productive_agents.env"),
+        "productive_agents.env.smolagents": module("productive_agents.env.smolagents"),
+        "productive_agents.env.base": module(
+            "productive_agents.env.base", BaseLanguageBasedEnv=object
+        ),
+        "productive_agents.env.smolagents.config": module(
+            "productive_agents.env.smolagents.config", SmolagentsEnvConfig=FakeConfig
+        ),
+        "productive_agents.env.smolagents.tool": module(
+            "productive_agents.env.smolagents.tool",
+            WikipediaRetrieverTool=FakeWikipediaTool,
+            FinalAnswerTool=FakeFinalAnswerTool,
+        ),
+        "productive_agents.utils": module(
+            "productive_agents.utils", all_seed=lambda _seed: None
+        ),
+        "productive_agents.agents": module("productive_agents.agents"),
+        "productive_agents.agents.smolagents": module(
+            "productive_agents.agents.smolagents"
+        ),
+        "productive_agents.agents.unified_agent": module(
+            "productive_agents.agents.unified_agent",
+            UnifiedAgent=object,
+            UnifiedPromptBuilder=FakePromptBuilder,
+            UnifiedActionProcessor=FakeActionProcessor,
+        ),
+    }
+    for name, value in stubs.items():
+        monkeypatch.setitem(sys.modules, name, value)
+
+    def load(name, path):
+        spec = importlib.util.spec_from_file_location(name, path)
+        assert spec is not None and spec.loader is not None
+        loaded = importlib.util.module_from_spec(spec)
+        monkeypatch.setitem(sys.modules, name, loaded)
+        spec.loader.exec_module(loaded)
+        return loaded
+
+    env_module = load("productive_agents.env.smolagents.env", staged_root / env_rel)
+    agent_module = load(
+        "productive_agents.agents.smolagents.agent", staged_root / agent_rel
+    )
+    captured_response = '''Thought: I will search the first question.
+
+```python
+yam_food_storage = wikipedia_search(query="where is the food stored in a yam plant?")
+print("Food storage in yam plant:", yam_food_storage)
+```'''
+    action = agent_module.SmolagentsActionProcessor(None).extract_action(
+        captured_response
+    )
+    assert action.startswith("yam_food_storage = wikipedia_search")
+    assert "```" not in action
+
+    env = env_module.SmolagentsEnv(config=FakeConfig())
+    env.reset(42, "captured QA task")
+    observation, reward, done, info = env.step(action)
+
+    assert env.python_executor.calls == [action]
+    assert "missing 1 required positional argument: 'n_results'" in observation
+    assert (reward, done, info["reason"]) == (0.0, False, "execution_error")
+    assert env.observation == observation
+    assert env.trajectory == [{
+        "action": action,
+        "observation": observation,
+        "reward": 0.0,
+        "done": False,
+        "info": info,
+    }]
+    builder = object.__new__(agent_module.SmolagentsPromptBuilder)
+    builder.env = env
+    assert builder.build_prompt(env, []) == observation
 
 
 def _write_jsonl(path: Path, rows):
