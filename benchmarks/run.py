@@ -51,10 +51,24 @@ def start_proxy(upstream: str, arm: str, port: int, log_dir: Path,
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
     for _ in range(100):
+        if proc.poll() is not None:
+            raise SystemExit(
+                f"proxy child exited rc={proc.returncode} on port {port} "
+                f"(see {log_dir / f'proxy_{arm}_{port}.out'})")
         try:
-            opener.open(f"http://127.0.0.1:{port}/health", timeout=2)
+            with opener.open(f"http://127.0.0.1:{port}/health", timeout=2) as resp:
+                ident = json.loads(resp.read())
+            # identity check: a bind-failed child leaves the port to whatever
+            # already holds it, and a stranger /health would otherwise pass —
+            # two matrix2 tau2 reruns silently rode orphaned proxies this way
+            if int(ident.get("pid", -1)) != proc.pid:
+                proc.terminate()
+                raise SystemExit(
+                    f"port {port} is held by pid {ident.get('pid')} "
+                    f"(arm {ident.get('arm')!r}), not our proxy child "
+                    f"{proc.pid} — refusing to run against a squatter")
             return proc, log_path
-        except OSError:
+        except (OSError, ValueError):
             time.sleep(0.2)
     proc.terminate()
     raise SystemExit(f"proxy did not come up on port {port}")

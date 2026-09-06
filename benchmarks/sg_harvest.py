@@ -163,7 +163,12 @@ def matrix2_harvest(json_out: str | None = None) -> dict:
             d = json.loads(summary.read_text())
             ta = d.get("textarm_summary") or {}
             note = ""
-            if ta:
+            if ta.get("textarm_requests") == 0 and arm != "full":
+                # zero textarm rows on a text-arm run means the accounting
+                # was never recorded (e.g. served by an orphaned proxy whose
+                # request log was lost) — print that, never "degenerate 0/0"
+                note = "textarm stats unrecorded (see summary provenance)"
+            elif ta:
                 note = (f"degenerate {ta.get('degenerate_requests')}/"
                         f"{ta.get('textarm_requests')}; compressor "
                         f"{ta.get('compressor_calls')} calls "
@@ -172,6 +177,12 @@ def matrix2_harvest(json_out: str | None = None) -> dict:
             metric = (f"reward {d.get('semantic_score')} ci{d.get('semantic_score_ci95')}"
                       if bench == "tau2" else f"sim {d.get('semantic_score')}")
             label = "τ²†CONTAMINATED" if bench == "tau2" else "TS"
+            if d.get("partial"):
+                # salvaged run killed mid-flight: never shrink the
+                # denominator silently (terminal-state semantics)
+                note = (f"PARTIAL {d.get('n')}/{d.get('n_total')} "
+                        f"(killed mid-run, offline re-eval)"
+                        + (f"; {note}" if note else ""))
             print(f"| {label} | {arm} | {MATRIX2_LABELS.get(arm, '')} "
                   f"| {d.get('n')} | {metric} | {note} |")
             report.setdefault(bench, {})[arm] = d
@@ -190,13 +201,20 @@ def matrix2_harvest(json_out: str | None = None) -> dict:
             if ta.get("degenerate_arm"):
                 bfcl_note = (f"DEGENERATE {ta.get('degenerate_requests')}"
                              f"/{ta.get('textarm_requests')}")
-            elif (arm.startswith("acon")
+            elif (arm == "acon_hist"
                   and not ta.get("history_compressed_requests")):
                 bfcl_note = "NEVER-COMPRESSED (full arm under acon label)"
-            elif ta:
+            elif (arm == "acon_obs"
+                  and not ta.get("compressor_calls")):
+                bfcl_note = ("compressor never fired (all tool outputs under "
+                             "T_obs — effectively full)")
+            elif ta and arm != "full":
                 bfcl_note = (f"compressor {ta.get('compressor_calls')} calls "
                              f"({ta.get('compressor_prompt_tokens')}+"
                              f"{ta.get('compressor_completion_tokens')} tok)")
+                if ta.get("degenerate_requests"):
+                    bfcl_note = (f"degenerate {ta.get('degenerate_requests')}/"
+                                 f"{ta.get('textarm_requests')}; {bfcl_note}")
             break
         score_files = sorted(
             (gorr / f"score/c2kv-{dashed}/multi_turn").glob("*score*.json"))
@@ -215,7 +233,8 @@ def matrix2_harvest(json_out: str | None = None) -> dict:
                     continue
                 d = json.loads(line)
                 if d.get("total_count") is not None:
-                    print(f"| BFCL | {arm} | {d['total_count']} | "
+                    print(f"| BFCL | {arm} | {MATRIX2_LABELS.get(arm, '')} | "
+                          f"{d['total_count']} | "
                           f"acc {round(d['accuracy'], 4)} "
                           f"({d['correct_count']}/{d['total_count']}) "
                           f"| {bfcl_note} |")

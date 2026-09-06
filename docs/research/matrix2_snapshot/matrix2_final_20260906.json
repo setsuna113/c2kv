@@ -1,0 +1,190 @@
+{
+  "tau2": {
+    "full": {
+      "n": 50,
+      "n_clusters": 50,
+      "semantic_score": 0.3,
+      "protocol_legal_rate": 1.0,
+      "ttft_sec_mean": null,
+      "wall_sec_mean": null,
+      "gist_tokens_mean": null,
+      "original_tokens_mean": null,
+      "ttft_sec_p50": null,
+      "ttft_sec_p95": null,
+      "wall_sec_p95": null,
+      "semantic_score_ci95": [
+        0.18,
+        0.42
+      ],
+      "arm": "full",
+      "benchmark": "tau2",
+      "backend": "sglang",
+      "model": "c2kv-agent",
+      "doc_packing": "turn",
+      "max_doc_length": 512,
+      "max_doc_num": 12,
+      "request_log": "/home/liuyancheng/bsa_results/matrix2/tau2_full_CONTAMINATED/logs/proxy_full_34301.jsonl"
+    },
+    "hiagent": {
+      "n": 50,
+      "n_clusters": 50,
+      "semantic_score": 0.3,
+      "protocol_legal_rate": 1.0,
+      "ttft_sec_mean": null,
+      "wall_sec_mean": null,
+      "gist_tokens_mean": null,
+      "original_tokens_mean": null,
+      "ttft_sec_p50": null,
+      "ttft_sec_p95": null,
+      "wall_sec_p95": null,
+      "semantic_score_ci95": [
+        0.18,
+        0.44
+      ],
+      "arm": "hiagent",
+      "benchmark": "tau2",
+      "backend": "sglang",
+      "model": "c2kv-agent",
+      "textarm_summary": {
+        "textarm_requests": 285,
+        "degenerate_requests": 285,
+        "degenerate_arm": true,
+        "compressor_calls": 0,
+        "compressor_prompt_tokens": 0,
+        "compressor_completion_tokens": 0,
+        "compressor_wall_sec": 0.0
+      },
+      "doc_packing": "turn",
+      "max_doc_length": 512,
+      "max_doc_num": 12,
+      "request_log": "/home/liuyancheng/bsa_results/matrix2/tau2_hiagent_CONTAMINATED_e8f647e/logs/proxy_hiagent_34302.jsonl",
+      "provenance_fix": "2026-09-06: the rerun's own proxy died on bind (port 34302 held by the 03:01 same-commit orphan; see logs/proxy_hiagent_34302.out) and the tau2 CLI was served by that orphan, whose request log lives in the quarantined tau2_hiagent_CONTAMINATED dir. Stats here were rebuilt from that log, window 2026-09-04 17:00-20:30 (the scored rerun). Serving proxy code = e8f647e, same commit the rerun intended (review-4 hiagent fix is inert on tau2: system present)."
+    },
+    "acon_hist": {
+      "n": 50,
+      "n_clusters": 50,
+      "semantic_score": 0.3,
+      "protocol_legal_rate": 1.0,
+      "ttft_sec_mean": null,
+      "wall_sec_mean": null,
+      "gist_tokens_mean": null,
+      "original_tokens_mean": null,
+      "ttft_sec_p50": null,
+      "ttft_sec_p95": null,
+      "wall_sec_p95": null,
+      "semantic_score_ci95": [
+        0.18,
+        0.42
+      ],
+      "arm": "acon_hist",
+      "benchmark": "tau2",
+      "backend": "sglang",
+      "model": "c2kv-agent",
+      "textarm_summary": {
+        "textarm_requests": 0,
+        "degenerate_requests": 0,
+        "degenerate_arm": false,
+        "history_compressed_requests": 0,
+        "compressor_calls": 0,
+        "compressor_prompt_tokens": 0,
+        "compressor_completion_tokens": 0,
+        "compressor_wall_sec": 0
+      },
+      "doc_packing": "turn",
+      "max_doc_length": 512,
+      "max_doc_num": 12,
+      "request_log": "/home/liuyancheng/bsa_results/matrix2/tau2_acon_hist_CONTAMINATED_141ed5a/logs/proxy_acon_hist_34313.jsonl",
+      "provenance_fix": "2026-09-06: the rerun's own proxy died on bind (port 34313 already held; logs/proxy_acon_hist_34313.out) and the CLI was served by an orphaned acon_hist proxy whose request log was deleted by the inter-attempt cleanup — per-request textarm stats are unrecoverable (zeros above are NOT measurements). Serving semantics verified indirectly: upstream :35010 prefills in the run window cap at 8192 new-tokens with a 4096-8192 sawtooth (17 batches >6000), i.e. history compression was active and consistent with the review-4 trigger (the pre-review-4 every-turn trigger would cap near ~4.5k)."
+    },
+    "acon_obs": {
+      "n": 50,
+      "n_clusters": 50,
+      "semantic_score": 0.32,
+      "protocol_legal_rate": 1.0,
+      "ttft_sec_mean": null,
+      "wall_sec_mean": null,
+      "gist_tokens_mean": null,
+      "original_tokens_mean": null,
+      "ttft_sec_p50": null,
+      "ttft_sec_p95": null,
+      "wall_sec_p95": null,
+      "semantic_score_ci95": [
+        0.2,
+        0.46
+      ],
+      "arm": "acon_obs",
+      "benchmark": "tau2",
+      "backend": "sglang",
+      "model": "c2kv-agent",
+      "textarm_summary": {
+        "textarm_requests": 905,
+        "degenerate_requests": 0,
+        "compressor_calls": 7,
+        "compressor_prompt_tokens": 31671,
+        "compressor_completion_tokens": 4992
+      },
+      "doc_packing": "turn",
+      "max_doc_length": 512,
+      "max_doc_num": 12,
+      "request_log": "/home/liuyancheng/bsa_results/matrix2/tau2_acon_obs_CONTAMINATED/logs/proxy_acon_obs_34304.jsonl"
+    }
+  },
+  "ts": {
+    "full": {
+      "n": 953,
+      "n_clusters": 953,
+      "semantic_score": 0.5485690718278835,
+      "protocol_legal_rate": null,
+      "ttft_sec_mean": null,
+      "wall_sec_mean": null,
+      "gist_tokens_mean": null,
+      "original_tokens_mean": null,
+      "ttft_sec_p50": null,
+      "ttft_sec_p95": null,
+      "wall_sec_p95": null,
+      "semantic_score_ci95": [
+        0.5239665045838559,
+        0.5732135774250002
+      ],
+      "benchmark": "toolsandbox",
+      "arm": "full",
+      "partial": true,
+      "n_total": 1032,
+      "n_missing_killed": 79,
+      "n_missing_no_conversation": 8,
+      "n_never_started": 71,
+      "salvage": {
+        "method": "offline re-evaluation (ExecutionContext.from_dict + scenario.evaluation.evaluate) of trajectories left by the killed tool_sandbox CLI; scored = dirs with conversation.json",
+        "run_dir": "/home/liuyancheng/bsa_results/matrix2/ts_full_e8f647e/agent_gpt-4o-2024-05-13_user_gpt-4o-2024-05-13_09_04_2026_11_43_31",
+        "killed": "2026-09-06 ~06:00 +0800, user decision (marathon degenerate loops, zero completions for 34h)",
+        "per_scenario_rows": "/home/liuyancheng/bsa_results/matrix2/ts_full_e8f647e/replayed_per_scenario.json"
+      },
+      "doc_packing": "turn",
+      "max_doc_length": 512,
+      "max_doc_num": 12,
+      "request_log": "logs/proxy_full_34305.jsonl"
+    }
+  },
+  "bfcl": {
+    "full": {
+      "accuracy": 0.395,
+      "correct_count": 79,
+      "total_count": 200
+    },
+    "hiagent": {
+      "accuracy": 0.01,
+      "correct_count": 2,
+      "total_count": 200
+    },
+    "acon_hist": {
+      "accuracy": 0.4,
+      "correct_count": 80,
+      "total_count": 200
+    },
+    "acon_obs": {
+      "accuracy": 0.375,
+      "correct_count": 75,
+      "total_count": 200
+    }
+  }
+}

@@ -59,6 +59,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -1056,6 +1057,17 @@ class ProxyHandler(BaseHTTPRequestHandler):
             if k in plan}
 
     def do_GET(self):
+        if self.path.startswith("/health"):
+            # local liveness + identity probe (NOT forwarded): start_proxy
+            # verifies the pid, so a port squatter can no longer impersonate
+            # our child. Two matrix2 tau2 reruns rode orphaned proxies for
+            # hours because their own bind-failed child left the port to
+            # whatever already held it and the old probe only checked "some
+            # HTTP server answered /health".
+            self._send_json(200, {"pid": os.getpid(),
+                                  "arm": None if ARM is None
+                                  else str(getattr(ARM, "name", ARM))})
+            return
         try:
             with _OPENER.open(f"{UPSTREAM}{self.path}", timeout=60) as resp:
                 body = resp.read()

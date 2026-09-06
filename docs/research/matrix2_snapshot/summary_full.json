@@ -1,0 +1,34 @@
+{
+  "n": 953,
+  "n_clusters": 953,
+  "semantic_score": 0.5485690718278835,
+  "protocol_legal_rate": null,
+  "ttft_sec_mean": null,
+  "wall_sec_mean": null,
+  "gist_tokens_mean": null,
+  "original_tokens_mean": null,
+  "ttft_sec_p50": null,
+  "ttft_sec_p95": null,
+  "wall_sec_p95": null,
+  "semantic_score_ci95": [
+    0.5239665045838559,
+    0.5732135774250002
+  ],
+  "benchmark": "toolsandbox",
+  "arm": "full",
+  "partial": true,
+  "n_total": 1032,
+  "n_missing_killed": 79,
+  "n_missing_no_conversation": 8,
+  "n_never_started": 71,
+  "salvage": {
+    "method": "offline re-evaluation (ExecutionContext.from_dict + scenario.evaluation.evaluate) of trajectories left by the killed tool_sandbox CLI; scored = dirs with conversation.json",
+    "run_dir": "/home/liuyancheng/bsa_results/matrix2/ts_full_e8f647e/agent_gpt-4o-2024-05-13_user_gpt-4o-2024-05-13_09_04_2026_11_43_31",
+    "killed": "2026-09-06 ~06:00 +0800, user decision (marathon degenerate loops, zero completions for 34h)",
+    "per_scenario_rows": "/home/liuyancheng/bsa_results/matrix2/ts_full_e8f647e/replayed_per_scenario.json"
+  },
+  "doc_packing": "turn",
+  "max_doc_length": 512,
+  "max_doc_num": 12,
+  "request_log": "logs/proxy_full_34305.jsonl"
+}

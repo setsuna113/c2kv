@@ -899,3 +899,25 @@ class TestCacheMissRecovery:
         for record in records:
             _ = proxy_mod._extract(record["role"], record["content"], 8)
         assert len(extracted) == 4  # 2 original + 2 refresh (cache dedups value)
+
+def test_health_is_local_identity_probe_never_upstream(monkeypatch):
+    """/health must answer with our own pid WITHOUT touching the upstream:
+    start_proxy uses the pid to refuse port squatters (two matrix2 tau2
+    reruns silently rode orphaned proxies when their bind-failed child
+    left the port to whatever already held it)."""
+    handler = proxy_mod.ProxyHandler.__new__(proxy_mod.ProxyHandler)
+    sent = {}
+    handler._send_json = lambda status, obj: sent.update(status=status,
+                                                         obj=obj)
+    handler.path = "/health"
+
+    class BoomOpener:
+        @staticmethod
+        def open(*_a, **_k):
+            raise AssertionError("/health must not be forwarded upstream")
+
+    monkeypatch.setattr(proxy_mod, "_OPENER", BoomOpener())
+    handler.do_GET()
+    import os
+    assert sent["status"] == 200
+    assert sent["obj"]["pid"] == os.getpid()
