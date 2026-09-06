@@ -828,6 +828,25 @@ def _iter_parquet_rows(path: Path) -> Iterator[Dict[str, Any]]:
             yield row
 
 
+def _iter_parquet_rows_at_positions(
+    path: Path, positions: Sequence[int]
+) -> Iterator[Tuple[int, Dict[str, Any]]]:
+    """Read selected physical parquet rows without materializing every row."""
+    if not positions:
+        return
+    import pyarrow.parquet as pq
+
+    try:
+        table = pq.read_table(path)
+    except Exception:
+        table = pq.ParquetFile(path).read()
+    ordered = sorted(positions)
+    selected = table.take(ordered)
+    for position, row in zip(ordered, selected.to_pylist()):
+        if isinstance(row, dict):
+            yield position, row
+
+
 def _iter_jsonl_rows(path: Path) -> Iterator[Dict[str, Any]]:
     files = [path] if path.is_file() else sorted(path.glob("*.jsonl"))
     if not files:
@@ -1184,6 +1203,53 @@ class QADocsJointSource(_StreamedJointSource):
         self.file_order_seed = file_order_seed
         self._cache = None
 
+    @staticmethod
+    def _keep_row_ids(
+        keep_qids: Optional[FrozenSet[str]], family: str
+    ) -> Optional[set[str]]:
+        if keep_qids is None:
+            return None
+        prefix = f"qa:{family}:"
+        return {qid[len(prefix):] for qid in keep_qids if qid.startswith(prefix)}
+
+    @staticmethod
+    def _longmagpie_positions_by_shard(
+        keep_qids: Optional[FrozenSet[str]],
+    ) -> Optional[Dict[str, set[int]]]:
+        if keep_qids is None:
+            return None
+        result: Dict[str, set[int]] = {}
+        prefix = "qa:longmagpie:"
+        for qid in keep_qids:
+            if not qid.startswith(prefix):
+                continue
+            shard, separator, row_text = qid[len(prefix):].rpartition(":")
+            try:
+                row_index = int(row_text)
+            except ValueError:
+                continue
+            if separator and shard:
+                result.setdefault(shard, set()).add(row_index)
+        return result
+
+    def _iter_wiki2_selected(
+        self, file: Path, keep_row_ids: Optional[set[str]]
+    ) -> Iterator[Tuple[int, Dict[str, Any]]]:
+        import pyarrow.parquet as pq
+
+        row_ids = pq.read_table(file, columns=["_id"]).column(0).to_pylist()
+        self.stats["2wiki_rows"] = len(row_ids)
+        if keep_row_ids is None:
+            positions = list(range(len(row_ids)))
+        else:
+            positions = [
+                index
+                for index, row_id in enumerate(row_ids)
+                if str(row_id) in keep_row_ids
+            ]
+        self.stats["2wiki_prefiltered_rows"] = len(positions)
+        yield from _iter_parquet_rows_at_positions(file, positions)
+
     def _iter_family(self, family: str) -> Iterator[JointExample]:
         if family == "longmagpie":
             # Per-file iteration: the qid embeds the shard stem and the row
@@ -1193,9 +1259,21 @@ class QADocsJointSource(_StreamedJointSource):
             files = _find_parquet_files(Path(self.longmagpie_path))
             if not files:
                 raise FileNotFoundError(f"No parquet files found under {self.longmagpie_path}")
+            positions_by_shard = self._longmagpie_positions_by_shard(self.keep_qids)
             for file in _apply_file_order_seed(files, self.file_order_seed):
-                for row_in_shard, row in enumerate(_iter_parquet_rows(file)):
-                    self.stats["longmagpie_rows"] += 1
+                import pyarrow.parquet as pq
+
+                self.stats["longmagpie_rows"] += pq.ParquetFile(file).metadata.num_rows
+                if positions_by_shard is None:
+                    selected_rows = enumerate(_iter_parquet_rows(file))
+                    self.stats["longmagpie_prefiltered_rows"] += pq.ParquetFile(
+                        file
+                    ).metadata.num_rows
+                else:
+                    positions = positions_by_shard.get(file.stem, set())
+                    self.stats["longmagpie_prefiltered_rows"] += len(positions)
+                    selected_rows = _iter_parquet_rows_at_positions(file, positions)
+                for row_in_shard, row in selected_rows:
                     example = longmagpie_row_to_example(row, row_in_shard, shard=file.stem)
                     if example is None:
                         # The dominant cause is a user message without a
@@ -1208,15 +1286,28 @@ class QADocsJointSource(_StreamedJointSource):
         if family == "hotpotqa":
             rows = _iter_jsonl_rows(Path(self.hotpotqa_path))
             converter = hotpotqa_row_to_example
+            keep_row_ids = self._keep_row_ids(self.keep_qids, "hotpotqa")
         else:
             files = _find_parquet_files(Path(self.wiki2_path), subdirs=())
             if not files:
                 raise FileNotFoundError(f"No parquet files found under {self.wiki2_path}")
             files = _apply_file_order_seed(files, self.file_order_seed)
-            rows = (row for file in files for row in _iter_parquet_rows(file))
+            keep_row_ids = self._keep_row_ids(self.keep_qids, "2wiki")
+            rows = (
+                row
+                for file in files
+                for _, row in self._iter_wiki2_selected(file, keep_row_ids)
+            )
             converter = wiki2_row_to_example
         for row_index, row in enumerate(rows):
-            self.stats[f"{family}_rows"] += 1
+            # 2Wiki row count is populated from the complete _id column in
+            # _iter_wiki2_selected; only selected rows reach this loop.
+            if family == "hotpotqa":
+                self.stats[f"{family}_rows"] += 1
+            row_id = str(row.get("_id") or row.get("id") or row_index)
+            if keep_row_ids is not None and row_id not in keep_row_ids:
+                self.stats[f"{family}_filtered_before_convert"] += 1
+                continue
             example = converter(row, row_index)
             if example is None:
                 self.stats[f"{family}_skipped"] += 1

@@ -601,6 +601,20 @@ def test_qa_source_counts_and_stats(tmp_path, fixtures):
         )
     )
     assert [example.qid for example in kept] == [qids[0]]
+    # The trainer resolves a frozen multi-source order through keep_qids.  The
+    # fast path must return exactly the same JointExample for every family,
+    # including LongMagpie's skipped-row-sensitive shard-local index.
+    by_qid = {example.qid: example for example in examples}
+    for selected_qid in (qids[0], qids[2], qids[3]):
+        kept_all = list(
+            QADocsJointSource(
+                hotpotqa_path=str(hotpotqa_path),
+                wiki2_path=str(wiki2_dir),
+                longmagpie_path=str(longmagpie_dir),
+                keep_qids=frozenset({selected_qid}),
+            )
+        )
+        assert kept_all == [by_qid[selected_qid]]
 
 
 def test_sources_reject_non_train_split(tmp_path, fixtures):

@@ -1084,7 +1084,17 @@ class JointDataset:
         # rows legitimately have none — but a silent mistrain risk worth a
         # counter in the manifest.
         tools_in_system_missing_tools = 0
-        for example in examples:
+        total_example_count = len(examples)
+        for example_index, example in enumerate(examples, 1):
+            if example_index == 1 or example_index % 1_000 == 0 or example_index == total_example_count:
+                logger.info(
+                    "JointDataset preprocessing progress: %d/%d examples "
+                    "(doc_mode=%s, tools_in_system=%s)",
+                    example_index,
+                    total_example_count,
+                    doc_mode,
+                    tools_in_system,
+                )
             meta: Dict[str, Any] = {}
             hybrid_tail_k = (
                 random.Random(f"{example.qid}:hybrid_tail").choice(tail_choices)
