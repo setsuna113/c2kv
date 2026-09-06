@@ -15,6 +15,7 @@ C2KV_RUN_CONFIG="${C2KV_RUN_CONFIG:-}"
 C2KV_TRAIN_MANIFEST="${C2KV_TRAIN_MANIFEST:-}"
 C2KV_QUERY_PROJ_OVERRIDE="${C2KV_QUERY_PROJ:-}"
 SETUP="${SETUP:-1}"
+SETUP_ONLY="${SETUP_ONLY:-0}"
 INSTALL_SYSTEM_DEPS="${INSTALL_SYSTEM_DEPS:-1}"
 RESUME="${RESUME:-1}"
 OVERWRITE="${OVERWRITE:-0}"
@@ -319,6 +320,11 @@ else
 fi
 ensure_host_libnuma
 ensure_host_cpp20_toolchain
+
+if [[ "$SETUP_ONLY" == "1" ]]; then
+  log "SETUP_ONLY=1: dependencies and benchmark venvs are ready; skip all GPU gates"
+  exit 0
+fi
 
 BASE_URL="http://$HOST:$PORT"
 export NO_PROXY="127.0.0.1,localhost"
