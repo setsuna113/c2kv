@@ -233,6 +233,12 @@ def _benchmark_prerequisites(result: PreflightResult, benchmark: str,
             "apply benchmarks/acon_patches/0001-openai-base-url-env.patch",
         )
         if benchmark == "acon_qa":
+            _append_marker(
+                result, "acon_qa_error_feedback_patch",
+                root / "src" / "productive_agents" / "env" / "smolagents" / "env.py",
+                "def _record_execution_error(",
+                "apply benchmarks/acon_patches/0005-smolagents-error-feedback.patch",
+            )
             _append_path(result, "acon_qa_runner",
                          root / "experiments" / "smolagents" / "run.py",
                          "ACON QA runner is required")

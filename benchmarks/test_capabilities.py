@@ -26,6 +26,10 @@ def _acon_qa_tree(tmp_path: Path) -> Path:
     marker.parent.mkdir(parents=True)
     marker.write_text("base_url = os.environ.get('ACON_OPENAI_BASE_URL')\n",
                       encoding="utf-8")
+    feedback = marker.parent / "env" / "smolagents" / "env.py"
+    feedback.parent.mkdir(parents=True)
+    feedback.write_text("def _record_execution_error(self, action, error):\n    pass\n",
+                        encoding="utf-8")
     data = root / "experiments" / "smolagents" / "data" / "nq_multi_8"
     data.mkdir(parents=True)
     (root / "experiments" / "smolagents" / "run.py").write_text("# runner\n",
@@ -155,6 +159,19 @@ def test_acon_qa_requires_patch_data_and_explicit_retriever_attestation(tmp_path
         features=[capabilities.ACON_QA_RETRIEVER_FEATURE], environ=_env(tmp_path),
     )
     assert allowed.ok
+
+
+def test_acon_qa_rejects_silent_execution_errors_even_with_retriever_ready(tmp_path):
+    acon = _acon_qa_tree(tmp_path)
+    env_file = acon / "src" / "productive_agents" / "env" / "smolagents" / "env.py"
+    env_file.write_text("# Legacy execution errors leave observation empty.\n",
+                        encoding="utf-8")
+    result = capabilities.preflight(
+        "acon_qa", "c2kv", "sglang",
+        options={"acon_dir": acon, "runner_python": sys.executable},
+        features=[capabilities.ACON_QA_RETRIEVER_FEATURE], environ=_env(tmp_path),
+    )
+    assert _codes(result) == {"acon_qa_error_feedback_patch"}
 
 
 def test_text_method_variants_are_warnings_not_static_success_claims(tmp_path):
