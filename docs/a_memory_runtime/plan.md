@@ -3,12 +3,31 @@
 ## 执行状态
 
 - 用户已于 **2026-09-07** 批准 A 线的实现与推理实验。
-- 当前处于 Phase 1 实现与 protocol smoke：旧基线已在独立 worktree 固定为 `681eab09ad66e4aed0ae9ccb8e368fdb191018e0`。共享 B CPU 接口来源 commit `b87f1806670438176e195bfe21127c1bb7935559`，仅取 event/packing 接口。
-- 当前**尚无 A 新机制的性能结果**。下文已有数字是现状证据或明确标为 `proposed` 的实验设计值。
+- 首批 official BFCL 开发 pilot `bfcl_dev4_v3` 已完成：固定 `multi_turn_base_0..3`，对比 `Full(training renderer) / legacy / protect`，共 12 个整题运行，在总 wall cap 1800 秒内结束。执行代码 commit `10a527eea637431b04153333313b8142360b76e5`；collector 为 `0be8413` + `e55a6ec`。
+- 旧基线在独立 worktree 固定为 `681eab09ad66e4aed0ae9ccb8e368fdb191018e0`。共享 CPU 接口固定取 B commit `b87f1806670438176e195bfe21127c1bb7935559` 的 event/packing 接口；A 后续兼容工作在 A 内部完成，不再向 B 发任务。
+- 当前只有下述 4-task 开发 pilot，全部标为 **preliminary, n=1**；尚无正式 held-out 或多 seed 结果。下文未来实验的数值仍按设计值解释。
 - 本次授权不自动扩展到训练、量化、draft–verify、广泛 hyperparameter search 或新的大规模研究方向。训练属于 B 线；若后续需要扩大计算范围，另行形成明确计划。
-- 初始有限协议：[protocol.json](../../benchmarks/memory_runtime/configs/protocol.json)。首批为 2 个真实可见 prefix × 8 种配置，最多 16 次模型请求，temperature=0、seed=0、max_tokens=512，不自动重跑。该阶段只验证接口，不给整题成功结论。
+- 初始有限协议：[protocol.json](../../../c2kv-a-runtime/benchmarks/memory_runtime/configs/protocol.json)。首批为 2 个真实可见 prefix × 8 种配置，最多 16 次模型请求，temperature=0、seed=0、max_tokens=512，不自动重跑。该阶段只验证接口，不给整题成功结论。
 - 首个工程预算点为 1536-token 等价 history cap（226492416 bytes），其中 workspace 子 cap 为 768-token 等价（113246208 bytes）；来自 live 1088 BF16 TP1 geometry 的 147456 bytes/token。配置值在首个模型请求前冻结，不按结果挑选。
-- 运行结果链接：`TBD`。
+- Protocol artifacts：[原始 4-request receipt](../../../c2kv-a-runtime/outputs/a_memory_runtime_20260907/protocol_v1/receipt.json)、[后续 12-request receipt](../../../c2kv-a-runtime/outputs/a_memory_runtime_20260907/protocol_remaining_v1/receipt.json)、[corrected CPU audit](../../../c2kv-a-runtime/outputs/a_memory_runtime_20260907/protocol_cpu_audit.json)。共 16 次真实生成，CPU audit 另增 0 次生成 / extraction；16/16 raw token parity 与 selected-view identity 通过。
+- Protocol 期间发现两项计数问题：`BatchEncoding` 的字段数被误当 token 数，以及 client 未投影 server 实际保留的 tool schema fields。原始 online raw/evidence/active-budget 字段无效，保留原日志；只引用 corrected CPU audit，不将它写成原 online enforcement 已有效。当前代码修复计数并逐请求验证 server byte geometry、tool profile 和 raw prompt tokens。
+- 整题启动时发现并修复 SDK ambient proxy 与端口归属检查问题。`bfcl_dev4_v1` 的请求未到达模型；`bfcl_dev4_v2` 绕过 A proxy，到达另一个既有 SGLang endpoint，产生 44 次生成，全部只计资源消耗，不计方法性能。原日志保留。[替代运行的有限修订](../../../c2kv-a-runtime/outputs/a_memory_runtime_20260907/infrastructure_amendment.json) 在 v3 首次请求前落盘；若 v3 再失败，停止而不自动创建下一版。
+
+### 首批整题结果与下一步
+
+| Arm | Official task pass | 范围 |
+|---|---:|---|
+| Full (training renderer) | 1/4 | preliminary, n=1 |
+| C2KV-legacy | 0/4 | preliminary, n=1 |
+| C2KV-protect | 0/4 | preliminary, n=1 |
+
+[完整 collection](../../../c2kv-a-runtime/outputs/a_memory_runtime_20260907/bfcl_dev4_v3/collection.json) 为 `valid`：三个 arm 的 task IDs、official scorer、result、task audit 与 proxy log 对齐。共 138 条正常请求；legacy/protect 共 63 条 runtime 请求全部通过 raw token parity、byte geometry 和预算校验。Full 唯一通过 `multi_turn_base_1`，两个压缩 arm 均未通过该题；本批没有观察到 protection 带来的整题成功恢复。
+
+两个 budgeted arm 使用相同 history cap，但 active history KV payload 峰值不同：legacy 为 33,619,968 bytes，protect 为 99,385,344 bytes，按已核对的 token 数与 server geometry 计算，不是全局 HBM 测量。两者也不是相同实际 resident bytes 的比较。legacy/protect 的失败轨迹更短，不能把它们较低的整体耗时解释成加速。
+
+[执行记录](../../../c2kv-a-runtime/outputs/a_memory_runtime_20260907/execution.json) 保存运行版本、实际计数、原始无效记录和采样设置的来源。official pilot 沿用 BFCL CLI 的 `temperature=0.001`，由当前源码确认，未作为独立 resolved request 字段捕获；未显式设置 generation seed。后续正式 matrix 必须把 resolved sampling 字段直接写入请求日志。
+
+已完成 `multi_turn_base_1` 的只读诊断：legacy 在 user turn 0 因缺少 `ls(a=True)` 的返回失败；protect 的 official 错误是最终 state mismatch，轨迹在 user turn 1 step 1 首次与 Full 分叉，完成 `cd` 后停止，未继续移动文件。该 protect 请求中当前 query 与最近完成的 `cd` call/result 已进入 evidence。现有轨迹不能确定停止的因果原因；下一步先检验 evidence 利用与提前终止，再为 retrieve-once/persistent 的整题开发比较冻结具体任务、配置和运行上限。当前有限运行已结束，不自动扩大任务集，也不把 CPU lease 测试当作 live persistence 收益。
 
 ## 目标与边界
 
@@ -46,6 +65,8 @@ A 负责运行时怎样使用记忆；B 负责与该运行布局匹配的历史�
 - B 在独立 worktree `../c2kv-b-history` 开发，并拥有共享的 `python/history_memory` CPU 接口与训练侧实现。
 - A 消费 B 提供的稳定 event / memory-view 数据合同；A 不复制训练 packer，B 不复制在线 controller。旧 checkpoint 阶段允许用 event-to-existing-turn-doc 映射保持现行输入分布。
 - 两个 worktree 通过接口样例与 schema 协调，不通过互相修改未完成代码来同步。
+
+已落盘的 A 实现入口为 [policy.py](../../../c2kv-a-runtime/benchmarks/memory_runtime/policy.py)（可见事件选择、预算、lease）、[adapter.py](../../../c2kv-a-runtime/benchmarks/memory_runtime/adapter.py)（gist/raw view 与预算核算）、[evidence.py](../../../c2kv-a-runtime/python/history_memory/evidence.py)（共享 evidence renderer）与 [tokenization.py](../../../c2kv-a-runtime/benchmarks/memory_runtime/tokenization.py)（serving tool schema 投影）。配置、协议 runner 与测试均位于 `benchmarks/memory_runtime/`；既有 proxy 和 benchmark runner 只保留接入与生命周期管理。
 
 ## 模块与共享接口
 
@@ -280,7 +301,7 @@ fixed-prefix/dev 另外记录：
 
 真实 rollout 成本和相同输入序列下的 serving cost 分开报告，避免把提前失败导致的短轨迹解释成加速。Full 使用合理增量/prefix cache，不能每步人为 full re-prefill。
 
-[benchmark README](../../benchmarks/README.md) 已说明 `tau2`、BFCL、ToolSandbox、ACEBench 当前无法可靠做 per-task cost join。正式 quality–cost claim 前，primary benchmark 必须补齐稳定 task/request correlation；在此之前，这些 benchmark 只报告 run-level cost，不把 run-level mean 与某个 task outcome 强行关联。ACON joined 数据也必须同时报告 `n_cost_joined` 分母。
+当前 BFCL adapter 已通过 `c2kv_eval_context.task_id` 与 `request_log_summary.task_costs` 提供显式 task/request join；首批 pilot 必须验证选定 task 的请求覆盖，不能只看 scorer 是否退出成功。[benchmark README](../../benchmarks/README.md) 中 BFCL 无法 join 的表述属于旧状态。其他 benchmark 在正式 quality–cost claim 前仍需分别验证 task/request correlation；未验证时只报告 run-level cost，不把 run-level mean 与某个 task outcome 强行关联。所有 joined 数据同时报告 `n_cost_joined` 分母。
 
 ## Dev/test 分离与 contamination
 
@@ -320,10 +341,11 @@ fixed-prefix/dev 另外记录：
 
 ## 可更新阶段清单
 
-- [ ] Phase 1：固定 1088 profile、绝对预算 \(B\)、matrix schema 与显式 session key。
+- [x] Phase 1：固定 1088 profile、首个绝对预算 \(B\)、protocol matrix schema 与显式 session key；正式 test matrix 仍待冻结。
 - [ ] Phase 1：完成六类最小 smoke，并验证无历史首轮等价与 view 重建参考路径。
-- [ ] Phase 1：补齐 primary benchmark 的 task/request/event/cache/cost 关联。
-- [ ] Phase 2：实现 `EventStore`、`BlockRef` 与 budgeted `ExactWorkspace`。
+- [x] Phase 1：验证 BFCL pilot 的 task/request/official score/cost 关联。
+- [ ] Phase 1：补齐 event/cache 生命周期与临时 extraction/recompute cost 的完整关联。
+- [x] Phase 2：实现 `EventStore`、`BlockRef` 与 budgeted `ExactWorkspace`，通过 CPU 测试与真实 prefix 协议验证。
 - [ ] Phase 2：完成 recent-raw 与 provenance-driven protection 的同预算 dev 比较。
 - [ ] Phase 3：实现一次 text evidence upgrade、有限 retry 与 suffix recompute。
 - [ ] Phase 3：实现 `EvidenceLease`，保存新 observation 并避免重复提交已执行动作。
