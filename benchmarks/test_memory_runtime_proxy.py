@@ -14,6 +14,19 @@ import proxy
 from arms import Arm, get_arm
 
 
+def test_wrong_raw_token_count_stops_future_requests(monkeypatch):
+    monkeypatch.setattr(proxy, "MEMORY_RUNTIME", object())
+    monkeypatch.setattr(proxy, "MEMORY_RUNTIME_BYTES_PER_KV_TOKEN", None)
+    monkeypatch.setattr(proxy, "MEMORY_RUNTIME_FATAL_ERROR", None)
+    counts = {"memory_runtime": {"bytes_per_kv_token": 147456, "total_raw_prompt_tokens": 2}}
+    normalized = {"cost": {"bytes_per_kv_token": 147456}, "usage": {"prompt_tokens": 4910}}
+    with pytest.raises(proxy.MemoryRuntimeError, match="raw tokenizer count"):
+        proxy._verify_memory_runtime_kv_bytes(counts, normalized)
+    assert counts["memory_runtime"]["raw_prompt_tokens_verified_by_backend"] is False
+    with pytest.raises(proxy.MemoryRuntimeError, match="raw tokenizer count"):
+        proxy._check_memory_runtime_fatal()
+
+
 def _counts():
     return {
         "system_raw": 1,

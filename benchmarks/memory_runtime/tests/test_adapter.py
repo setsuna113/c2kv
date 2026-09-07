@@ -1,6 +1,7 @@
 import copy
 import json
 import sys
+from types import SimpleNamespace
 from pathlib import Path
 
 import pytest
@@ -111,3 +112,20 @@ def test_explicit_attempt_is_required_and_tasks_do_not_share_state():
     runtime.apply(source, assembled, counts, context(), [])
     runtime.apply(source, assembled, counts, context(task="another"), [])
     assert len(runtime._states) == 2
+
+
+def test_real_token_counter_reads_batchencoding_input_ids(tmp_path, monkeypatch):
+    class Encoding(dict):
+        def __init__(self):
+            super().__init__(input_ids=list(range(41)), attention_mask=[1] * 41)
+            self.input_ids = self["input_ids"]
+
+    tokenizer = SimpleNamespace(apply_chat_template=lambda *a, **kw: Encoding())
+    monkeypatch.setitem(sys.modules, "transformers", SimpleNamespace(
+        AutoTokenizer=SimpleNamespace(from_pretrained=lambda *a, **kw: tokenizer)))
+    config = dict(mode="protect", run_id="test", bytes_per_kv_token=1,
+                  history_budget_bytes=100, workspace_budget_bytes=50)
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps(config), encoding="utf-8")
+    runtime = RuntimeAdapter.from_config(str(path), "local")
+    assert runtime._token_counter([{"role": "user", "content": "x"}], []) == 41

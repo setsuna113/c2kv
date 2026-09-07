@@ -422,6 +422,16 @@ def _verify_memory_runtime_kv_bytes(
     metadata["backend_bytes_per_kv_token"] = actual
     metadata["byte_geometry_verification"] = "verified"
     metadata["byte_geometry_verified_by_backend"] = True
+    if "total_raw_prompt_tokens" in metadata:
+        actual_raw = (normalized.get("usage") or {}).get("prompt_tokens")
+        expected_raw = metadata["total_raw_prompt_tokens"]
+        metadata["backend_raw_prompt_tokens"] = actual_raw
+        metadata["raw_prompt_tokens_verified_by_backend"] = actual_raw == expected_raw
+        if actual_raw != expected_raw:
+            error = f"raw tokenizer count disagrees with backend: {expected_raw} != {actual_raw}"
+            with _memory_runtime_verify_lock:
+                MEMORY_RUNTIME_FATAL_ERROR = error
+            raise MemoryRuntimeError(error)
 
 
 class CacheMiss(RuntimeError):

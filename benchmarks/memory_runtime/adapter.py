@@ -18,6 +18,7 @@ sys.path.insert(0, _shared_path)
 try:
     from history_memory.evidence import EVIDENCE_VERSION, evidence_message
     from history_memory.events import EventStore
+    from history_memory.packing import native_ids
     from .policy import ConversationMemory, PolicyInputError, RuntimeConfig
 finally:
     # python/agent is a different training package from the harness agent/
@@ -57,11 +58,9 @@ class RuntimeAdapter:
         tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, local_files_only=True)
 
         def count(messages, tools):
-            return len(tokenizer.apply_chat_template(
-                messages, tools=tools or None, tokenize=True,
-                add_generation_prompt=True, enable_thinking=False,
-                truncation=False,
-            ))
+            # Recent Transformers versions return BatchEncoding by default;
+            # its len() is the number of fields, not the token sequence length.
+            return len(native_ids(tokenizer, messages, tools=tools or None, generation=True))
 
         return cls(json.loads(Path(path).read_text(encoding="utf-8")), count)
 
