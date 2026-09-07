@@ -41,7 +41,7 @@ def main():
     if args.out.exists():
         raise SystemExit("Output already exists; this pilot does not rerun or resume")
     args.out.mkdir(parents=True)
-    run_id = "a_bfcl_dev4_20260907_v1"
+    run_id = "a_" + args.out.name
     task_ids = [f"multi_turn_base_{i}" for i in range(4)]
     variants = [("full", "full"), ("legacy", "c2kv4"), ("protect", "c2kv4")]
     commands = []
@@ -82,7 +82,11 @@ def main():
         manifest["active_variant"] = item["variant"]
         save(receipt_path, manifest)
         with (args.out / (item["variant"] + ".out")).open("w") as log:
-            proc = subprocess.Popen(item["argv"], stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+            environment = dict(os.environ)
+            bypass = ",".join(filter(None, [environment.get("NO_PROXY", environment.get("no_proxy", "")), "127.0.0.1", "localhost", "::1"]))
+            environment.update(NO_PROXY=bypass, no_proxy=bypass)
+            proc = subprocess.Popen(item["argv"], stdout=log, stderr=subprocess.STDOUT,
+                                    start_new_session=True, env=environment)
             try:
                 returncode = proc.wait(timeout=max(1, deadline - time.monotonic()))
             except subprocess.TimeoutExpired:
@@ -96,6 +100,13 @@ def main():
             manifest["status"] = "stopped_on_runner_error"
             save(receipt_path, manifest)
             raise SystemExit(f"BFCL runner failed for {item['variant']}: {returncode}")
+        request_logs = list((args.out / item["variant"] / "logs").glob("proxy_*.jsonl"))
+        requests = [json.loads(line) for path in request_logs for line in path.read_text().splitlines() if line.strip()]
+        observed_tasks = {row.get("eval_context", {}).get("task_id") for row in requests}
+        if not requests or not set(task_ids).issubset(observed_tasks):
+            manifest["status"] = "invalid_missing_model_requests"
+            save(receipt_path, manifest)
+            raise SystemExit("Official scores are invalid: selected tasks did not reach the model proxy")
         save(receipt_path, manifest)
     manifest["status"] = "completed"
     manifest.pop("active_variant", None)
