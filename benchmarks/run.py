@@ -54,7 +54,9 @@ def start_proxy(upstream: str, arm: str, port: int, log_dir: Path,
                 backend: str = "sglang", doc_packing: str = "turn",
                 max_doc_length: int = 512, max_doc_num: int = 12,
                 query_projection: str | None = None, witness_tokenizer: str = "",
-                python_bin: str | None = None):
+                python_bin: str | None = None,
+                memory_runtime_config: str = "", memory_tokenizer: str = "",
+                no_upstream_retries: bool = False):
     log_path = log_dir / f"proxy_{arm}_{port}.jsonl"
     out_handle = open(log_dir / f"proxy_{arm}_{port}.out", "w")
     command = [
@@ -73,6 +75,11 @@ def start_proxy(upstream: str, arm: str, port: int, log_dir: Path,
         command += ["--query-projection", query_projection]
     if witness_tokenizer:
         command += ["--witness-tokenizer", witness_tokenizer]
+    if memory_runtime_config:
+        command += ["--memory-runtime-config", memory_runtime_config,
+                    "--memory-tokenizer", memory_tokenizer]
+    if no_upstream_retries:
+        command += ["--no-upstream-retries"]
     proc = subprocess.Popen(
         command,
         stdout=out_handle,
@@ -124,6 +131,12 @@ def add_core_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--proxy-port", type=int, default=34100)
     parser.add_argument("--proxy-python", default=None,
                         help="proxy interpreter; use the serving environment for compatible checkpoint tokenizers")
+    parser.add_argument("--memory-runtime-config", default="",
+                        help="opt-in event-memory runtime config JSON")
+    parser.add_argument("--memory-tokenizer", default="",
+                        help="local tokenizer matching the active serving checkpoint")
+    parser.add_argument("--no-upstream-retries", action="store_true",
+                        help="fail a request instead of retrying transport or cache misses")
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--exact-out", action="store_true",
                         help="use the supplied output directory verbatim (matrix cells)")
@@ -268,7 +281,10 @@ def main(argv=None):
         max_doc_length=args.max_doc_length, max_doc_num=args.max_doc_num,
         query_projection=args.query_projection,
         witness_tokenizer=str(args.checkpoint or "") if get_arm(args.arm).gold_recovery else "",
-        python_bin=args.proxy_python)
+        python_bin=args.proxy_python,
+        memory_runtime_config=args.memory_runtime_config,
+        memory_tokenizer=args.memory_tokenizer or str(args.checkpoint or ""),
+        no_upstream_retries=args.no_upstream_retries)
     try:
         # every adapter owns its own "/v1" (adapters/base.py:v1) and its own
         # cwd; run.py hands over the bare proxy URL and nothing else

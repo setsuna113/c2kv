@@ -67,6 +67,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib
 import json
 import threading
 import time
@@ -238,6 +239,11 @@ class ExtractCache:
 CACHE = ExtractCache()
 ARM: Optional[Arm] = None
 BACKEND = None  # set in main()
+MEMORY_RUNTIME = None  # opt-in RuntimeAdapter, loaded in main()
+MEMORY_RUNTIME_BYTES_PER_KV_TOKEN: Optional[int] = None
+MEMORY_RUNTIME_FATAL_ERROR: Optional[str] = None
+_memory_runtime_verify_lock = threading.Lock()
+NO_UPSTREAM_RETRIES = False
 UPSTREAM = ""
 REQUEST_LOG_PATH = ""
 _log_lock = threading.Lock()
@@ -253,6 +259,169 @@ QUERY_PROJECTION = None
 MAX_DOC_LENGTH = 512
 MAX_DOC_NUM = 12
 DOC_PACKINGS = ("turn", "message")
+
+_MEMORY_RUNTIME_C2KV_MODES = frozenset(
+    {"legacy", "protect", "recover_once", "persistent"})
+_MEMORY_RUNTIME_FULL_MODES = frozenset({"no_gist", "full_shared"})
+_MEMORY_RUNTIME_FORBIDDEN_CONTROL_WORDS = (
+    "oracle", "recover", "gold", "witness", "repair", "history_kv", "historykv")
+
+
+class MemoryRuntimeError(RuntimeError):
+    """A-runtime contract failure; the request must not be retried."""
+
+    kind = "memory_runtime_error"
+
+
+def _load_memory_runtime(config_path: str, tokenizer_path: str):
+    """Load the runtime lazily so legacy proxy processes need no dependency."""
+    try:
+        module = importlib.import_module("benchmarks.memory_runtime.adapter")
+    except ModuleNotFoundError as error:
+        # ``run.py`` launches this file by path.  Some Python environments put
+        # only benchmarks/ (not the repository root) on sys.path, in which
+        # case the same package is reachable as memory_runtime.adapter.
+        if error.name not in {"benchmarks", "benchmarks.memory_runtime"}:
+            raise
+        module = importlib.import_module("memory_runtime.adapter")
+    return module.RuntimeAdapter.from_config(config_path, tokenizer_path)
+
+
+def _validate_memory_runtime_arm(runtime, arm: Arm) -> None:
+    """A modes deliberately reuse only the existing plain c2kv4/full arms."""
+    mode = getattr(runtime, "mode", None)
+    if mode in _MEMORY_RUNTIME_C2KV_MODES:
+        expected_arm = "c2kv4"
+    elif mode in _MEMORY_RUNTIME_FULL_MODES:
+        expected_arm = "full"
+    else:
+        raise MemoryRuntimeError(f"unsupported memory runtime mode: {mode!r}")
+
+    conflicts = [
+        name for name in (
+            "hybrid_top_k", "constrain_tools", "repair", "recover",
+            "text_policy", "history_kv", "kv_reuse", "gold_recovery",
+            "native_messages",
+        ) if getattr(arm, name, None)
+    ]
+    if arm.name != expected_arm or conflicts:
+        detail = f"; conflicting arm fields: {', '.join(conflicts)}" if conflicts else ""
+        raise MemoryRuntimeError(
+            f"memory runtime mode {mode!r} requires plain arm {expected_arm!r}, "
+            f"got {arm.name!r}{detail}")
+
+
+def _memory_runtime_payload_conflicts(payload: Dict[str, Any]) -> List[str]:
+    """Find client-supplied controls that would mix A with privileged paths."""
+    conflicts: List[str] = []
+
+    def inspect(mapping: Any, prefix: str) -> None:
+        if not isinstance(mapping, dict):
+            return
+        for key in mapping:
+            lowered = str(key).lower().replace("-", "_")
+            if lowered == "c2kv_kv_memory_hint" or (
+                    lowered.startswith("c2kv_")
+                    and any(word in lowered for word in
+                            _MEMORY_RUNTIME_FORBIDDEN_CONTROL_WORDS)):
+                conflicts.append(f"{prefix}{key}")
+
+    inspect(payload, "")
+    for index, message in enumerate(payload.get("messages") or []):
+        inspect(message, f"messages[{index}].")
+    return sorted(set(conflicts))
+
+
+def _memory_runtime_error_counts() -> Optional[Dict[str, Any]]:
+    if MEMORY_RUNTIME is None:
+        return None
+    return {"memory_runtime": {
+        "mode": getattr(MEMORY_RUNTIME, "mode", None),
+        "byte_geometry_verified_by_backend": False,
+    }}
+
+
+def _check_memory_runtime_fatal() -> None:
+    with _memory_runtime_verify_lock:
+        error = MEMORY_RUNTIME_FATAL_ERROR
+    if error:
+        raise MemoryRuntimeError(error)
+
+
+def _apply_memory_runtime(messages, assembled, counts, eval_context, tools):
+    """Invoke the stateful adapter and pin the proxy-visible count contract."""
+    if MEMORY_RUNTIME is None:
+        return assembled, counts
+    counts.setdefault("memory_runtime", {
+        "mode": getattr(MEMORY_RUNTIME, "mode", None),
+        "byte_geometry_verified_by_backend": False,
+    })
+    try:
+        assembled, counts = MEMORY_RUNTIME.apply(
+            messages, assembled, counts, eval_context, tools)
+    except MemoryRuntimeError:
+        raise
+    except (KeyError, TypeError, ValueError, RuntimeError) as error:
+        raise MemoryRuntimeError(str(error)) from error
+    if not isinstance(assembled, list) or not isinstance(counts, dict):
+        raise MemoryRuntimeError("RuntimeAdapter.apply must return (list, dict)")
+    metadata = counts.get("memory_runtime")
+    if not isinstance(metadata, dict):
+        raise MemoryRuntimeError("RuntimeAdapter.apply omitted counts['memory_runtime']")
+    mode = getattr(MEMORY_RUNTIME, "mode", None)
+    if metadata.get("mode") not in (None, mode):
+        raise MemoryRuntimeError("runtime metadata mode conflicts with the loaded adapter")
+    metadata["mode"] = mode
+    expected = metadata.get("bytes_per_kv_token")
+    if type(expected) is not int or expected <= 0:
+        raise MemoryRuntimeError(
+            "runtime metadata needs a positive integer bytes_per_kv_token")
+    # Only the backend observation below may set this true.
+    metadata["byte_geometry_verified_by_backend"] = False
+    return assembled, counts
+
+
+def _verify_memory_runtime_kv_bytes(
+        counts: Dict[str, Any], normalized: Dict[str, Any]) -> None:
+    """Latch the first server KV geometry and fail closed on disagreement."""
+    global MEMORY_RUNTIME_BYTES_PER_KV_TOKEN, MEMORY_RUNTIME_FATAL_ERROR
+    if MEMORY_RUNTIME is None:
+        return
+    metadata = counts["memory_runtime"]
+    expected = metadata["bytes_per_kv_token"]
+    actual = (normalized.get("cost") or {}).get("bytes_per_kv_token")
+    metadata["byte_geometry_verified_by_backend"] = False
+    if actual is None:
+        metadata["byte_geometry_verification"] = "pending_backend_cost"
+        return
+    if type(actual) is not int or actual <= 0:
+        error = f"backend returned invalid bytes_per_kv_token: {actual!r}"
+    else:
+        with _memory_runtime_verify_lock:
+            observed = MEMORY_RUNTIME_BYTES_PER_KV_TOKEN
+            if observed is None:
+                MEMORY_RUNTIME_BYTES_PER_KV_TOKEN = actual
+                observed = actual
+            if observed != actual:
+                MEMORY_RUNTIME_FATAL_ERROR = (
+                    "backend bytes_per_kv_token changed within the runtime: "
+                    f"{observed} != {actual}")
+            elif expected != actual:
+                MEMORY_RUNTIME_FATAL_ERROR = (
+                    "memory runtime bytes_per_kv_token disagrees with backend: "
+                    f"{expected} != {actual}")
+            error = MEMORY_RUNTIME_FATAL_ERROR
+    if error:
+        with _memory_runtime_verify_lock:
+            MEMORY_RUNTIME_FATAL_ERROR = MEMORY_RUNTIME_FATAL_ERROR or error
+            error = MEMORY_RUNTIME_FATAL_ERROR
+        metadata["byte_geometry_verification"] = "mismatch"
+        metadata["backend_bytes_per_kv_token"] = actual
+        metadata["byte_geometry_error"] = error
+        raise MemoryRuntimeError(error)
+    metadata["backend_bytes_per_kv_token"] = actual
+    metadata["byte_geometry_verification"] = "verified"
+    metadata["byte_geometry_verified_by_backend"] = True
 
 
 class CacheMiss(RuntimeError):
@@ -282,6 +451,10 @@ def _post_json(path: str, payload: Dict[str, Any],
     the SGLang stack reports many failures as HTTP 200 with error bodies —
     those are classified by the backend (BackendError), not here.
     """
+    if MEMORY_RUNTIME is not None or NO_UPSTREAM_RETRIES:
+        # This function also backs gist extraction and repair extraction.
+        # Freeze the complete transport attempt count, not only chat sends.
+        retries = 0
     body = json.dumps(payload).encode("utf-8")
     last: Optional[UpstreamError] = None
     for attempt in range(retries + 1):
@@ -1330,6 +1503,9 @@ class ProxyHandler(BaseHTTPRequestHandler):
             self._send_json(400, {"error": "invalid json"})
             return
         assert ARM is not None and BACKEND is not None
+        runtime_payload_conflicts = (
+            _memory_runtime_payload_conflicts(payload)
+            if MEMORY_RUNTIME is not None else [])
         eval_context = payload.pop("c2kv_eval_context", None)
         oracle = payload.pop("c2kv_oracle", None)
         self.eval_context = eval_context if isinstance(eval_context, dict) else {}
@@ -1340,11 +1516,23 @@ class ProxyHandler(BaseHTTPRequestHandler):
         turn = len(messages)
         text_stats: Optional[Dict[str, Any]] = None
         original_payload = payload
+        counts = _memory_runtime_error_counts()
         try:
+            if MEMORY_RUNTIME is not None:
+                _check_memory_runtime_fatal()
+                _validate_memory_runtime_arm(MEMORY_RUNTIME, ARM)
+                if runtime_payload_conflicts:
+                    raise MemoryRuntimeError(
+                        "memory runtime cannot be combined with client controls: "
+                        + ", ".join(runtime_payload_conflicts))
             if getattr(ARM, "text_policy", None):
                 payload, text_stats = _apply_text_arm(payload, ARM, conv)
                 messages = payload["messages"]
             messages_out, counts = _assemble(messages, ARM)
+            if MEMORY_RUNTIME is not None:
+                messages_out, counts = _apply_memory_runtime(
+                    messages, messages_out, counts, self.eval_context,
+                    payload.get("tools"))
             if text_stats is not None:
                 counts["textarm"] = text_stats
             repair_plan = plan_repair(messages, ARM, counts,
@@ -1371,7 +1559,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 BackendError) as error:
             kind = getattr(error, "kind",
                            "textarm_error" if ARM.text_policy else "assemble_error")
-            self._log_request(payload, None, None, status=kind,
+            self._log_request(payload, None, counts, status=kind,
                               error=str(error), fingerprint=fingerprint, conv=conv,
                               turn=turn)
             self._send_json(502, {"error": f"c2kv assembly failed: {error}"})
@@ -1396,7 +1584,10 @@ class ProxyHandler(BaseHTTPRequestHandler):
                              "kv_reuse": reuse_ctx})
             else:
                 out_payload = BACKEND.prepare_chat(staged, ARM, plan)
-            return _post_json(self.path, out_payload, 600), out_payload
+            return _post_json(
+                self.path, out_payload, 600,
+                retries=(0 if MEMORY_RUNTIME is not None or NO_UPSTREAM_RETRIES
+                         else 2)), out_payload
 
         def call_upstream(out_messages, plan):
             data_, _ = send_upstream(out_messages, plan)
@@ -1420,6 +1611,11 @@ class ProxyHandler(BaseHTTPRequestHandler):
                         original_payload, ARM, conv, data, text_stats, send_retrieved)
                     normalized = BACKEND.normalize_response(data)
             except CacheMiss:
+                if MEMORY_RUNTIME is not None or NO_UPSTREAM_RETRIES:
+                    # The caller owns the attempt budget.  With A enabled, a
+                    # transparent retry could also apply one lease decision
+                    # twice and make state/cost provenance ambiguous.
+                    raise
                 # Pool-evicted gists and/or an evicted repair span.  Three
                 # things are needed for the retry to be anything but a second
                 # identical miss:
@@ -1452,6 +1648,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
                     repair_plan = plan_gold_repair(
                         messages, ARM, counts, oracle, payload.get("tools"), messages_out, force=True)
                 data, normalized = call_upstream(messages_out, repair_plan)
+            _verify_memory_runtime_kv_bytes(counts, normalized)
         except (UpstreamError, BackendError, CacheMiss, RuntimeError, ValueError,
                 URLError, OSError) as error:
             kind = getattr(error, "kind", "upstream_error")
@@ -1542,6 +1739,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
             }
         )
         data["c2kv_proxy"].update(normalized["cost"])
+        if counts.get("memory_runtime") is not None:
+            data["c2kv_proxy"]["memory_runtime"] = counts["memory_runtime"]
         counts["repair_frame"] = _repair_frame_check(repair_plan, normalized)
         if counts.get("gold_recovery"):
             data["c2kv_proxy"]["gold_recovery"] = counts["gold_recovery"]
@@ -1652,7 +1851,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
                     if k in ("system_raw", "history_raw", "current_raw", "compressed")})
         row.update({k: counts.get(k) for k in
                     ("doc_packing", "n_docs", "dropped_docs", "repair_frame",
-                     "history_kv", "kv_reuse", "gold_recovery", "history_tensor_accounting")
+                     "history_kv", "kv_reuse", "gold_recovery",
+                     "history_tensor_accounting", "memory_runtime")
                     if k in counts})
         if counts.get("textarm") is not None:
             row["textarm"] = counts["textarm"]
@@ -1670,12 +1870,20 @@ class ProxyHandler(BaseHTTPRequestHandler):
 
 
 def main(argv=None):
-    global ARM, BACKEND, UPSTREAM, REQUEST_LOG_PATH
+    global ARM, BACKEND, MEMORY_RUNTIME, UPSTREAM, REQUEST_LOG_PATH
     global DOC_PACKING, MAX_DOC_LENGTH, MAX_DOC_NUM, QUERY_PROJECTION
     global WITNESS_TOKENIZER_PATH
+    global MEMORY_RUNTIME_BYTES_PER_KV_TOKEN, MEMORY_RUNTIME_FATAL_ERROR
+    global NO_UPSTREAM_RETRIES
     textarms.reset_state()  # fresh caches/state per proxy process
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--witness-tokenizer", default="")
+    parser.add_argument("--memory-runtime-config", default="",
+                        help="opt-in A runtime JSON config")
+    parser.add_argument("--memory-tokenizer", default="",
+                        help="local tokenizer used for A runtime budget accounting")
+    parser.add_argument("--no-upstream-retries", action="store_true",
+                        help="disable chat transport and CacheMiss retries")
     parser.add_argument("--upstream", required=True,
                         help="backend base URL, e.g. http://127.0.0.1:34000")
     parser.add_argument("--backend", default="sglang",
@@ -1701,11 +1909,26 @@ def main(argv=None):
                         help="turn packing: keep doc 0 + the last N-1 docs, drop "
                              "the rest; supplied by the checkpoint profile")
     args = parser.parse_args(argv)
+    if bool(args.memory_runtime_config) != bool(args.memory_tokenizer):
+        parser.error(
+            "--memory-runtime-config and --memory-tokenizer must be supplied together")
     DOC_PACKING = args.doc_packing
     MAX_DOC_LENGTH = int(args.max_doc_length)
     MAX_DOC_NUM = int(args.max_doc_num)
     QUERY_PROJECTION = args.query_projection
     ARM = get_arm(args.arm)
+    MEMORY_RUNTIME = None
+    MEMORY_RUNTIME_BYTES_PER_KV_TOKEN = None
+    MEMORY_RUNTIME_FATAL_ERROR = None
+    NO_UPSTREAM_RETRIES = bool(args.no_upstream_retries)
+    if args.memory_runtime_config:
+        MEMORY_RUNTIME = _load_memory_runtime(
+            args.memory_runtime_config, args.memory_tokenizer)
+        _validate_memory_runtime_arm(MEMORY_RUNTIME, ARM)
+        if args.reference or args.witness_tokenizer:
+            raise SystemExit(
+                "FATAL: memory runtime cannot be combined with "
+                "--reference or --witness-tokenizer")
     UPSTREAM = args.upstream.rstrip("/")
     REQUEST_LOG_PATH = args.request_log
     BACKEND = get_backend(args.backend, _post_json)
@@ -1718,7 +1941,9 @@ def main(argv=None):
         print(f"loaded reference: {len(STATE.recover.reference)} states "
               f"from {args.reference}", flush=True)
     server = ThreadingHTTPServer((args.host, args.port), ProxyHandler)
-    print(f"proxy backend={BACKEND.name} arm={ARM.name} doc_packing={DOC_PACKING} "
+    runtime_mode = getattr(MEMORY_RUNTIME, "mode", None)
+    print(f"proxy backend={BACKEND.name} arm={ARM.name} memory_runtime={runtime_mode} "
+          f"no_upstream_retries={NO_UPSTREAM_RETRIES} doc_packing={DOC_PACKING} "
           f"max_doc_length={MAX_DOC_LENGTH} max_doc_num={MAX_DOC_NUM} listening on "
           f"{args.host}:{args.port} -> {UPSTREAM}", flush=True)
     server.serve_forever()
