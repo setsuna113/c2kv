@@ -7,7 +7,7 @@
 - `utilization_probe_v1` 已完成：两处 task1 prefix × 六种布局，以及 task30 三处连续 prefix × protect/recover_once/persistent/no_gist，共 24 次 chat、8 次 extraction 请求；全部响应通过 raw token、byte geometry、tool profile 与 base query-projection 校验。执行 commit `e94777413fa7c46dbbe3174e0ff63931d8ac3386`，temperature=0.001/seed=0/max_tokens=512、不重试、不自动重跑。[完整响应与计数](../../../c2kv-a-runtime/outputs/a_memory_runtime_20260907/utilization_probe_v1/collection.json)。全部 view 在生成前保存；第三处连续 prefix 的 once/persistent 输入确实不同，前两处相同。后续 prefix 始终取捕获文件，不反馈生成动作，因此只解释局部 evidence 利用和 lease 行为，不计整题成功。
 - 首批 official BFCL 开发 pilot `bfcl_dev4_v3` 已完成：固定 `multi_turn_base_0..3`，对比 `Full(training renderer) / legacy / protect`，共 12 个整题运行，在总 wall cap 1800 秒内结束。执行代码 commit `10a527eea637431b04153333313b8142360b76e5`；collector 为 `0be8413` + `e55a6ec`。
 - 旧基线在独立 worktree 固定为 `681eab09ad66e4aed0ae9ccb8e368fdb191018e0`。共享 CPU 接口固定取 B commit `b87f1806670438176e195bfe21127c1bb7935559` 的 event/packing 接口；A 后续兼容工作在 A 内部完成，不再向 B 发任务。
-- 当前只有下述 4-task 开发 pilot，全部标为 **preliminary, n=1**；尚无正式 held-out 或多 seed 结果。下文未来实验的数值仍按设计值解释。
+- 当前已完成下面的 4-task 初始 pilot、2-task 六臂闭环比较，以及 fixed-prefix 诊断，全部标为 **preliminary, n=1**；尚无正式 held-out 或多 seed 结果。下文未来实验的数值仍按设计值解释。
 - 本次授权不自动扩展到训练、量化、draft–verify、广泛 hyperparameter search 或新的大规模研究方向。训练属于 B 线；若后续需要扩大计算范围，另行形成明确计划。
 - 初始有限协议：[protocol.json](../../../c2kv-a-runtime/benchmarks/memory_runtime/configs/protocol.json)。首批为 2 个真实可见 prefix × 8 种配置，最多 16 次模型请求，temperature=0、seed=0、max_tokens=512，不自动重跑。该阶段只验证接口，不给整题成功结论。
 - 首个工程预算点为 1536-token 等价 history cap（226492416 bytes），其中 workspace 子 cap 为 768-token 等价（113246208 bytes）；来自 live 1088 BF16 TP1 geometry 的 147456 bytes/token。配置值在首个模型请求前冻结，不按结果挑选。
@@ -29,7 +29,7 @@
 
 [执行记录](../../../c2kv-a-runtime/outputs/a_memory_runtime_20260907/execution.json) 保存运行版本、实际计数、原始无效记录和采样设置的来源。official pilot 沿用 BFCL CLI 的 `temperature=0.001`，由当前源码确认，未作为独立 resolved request 字段捕获；未显式设置 generation seed。后续正式 matrix 必须把 resolved sampling 字段直接写入请求日志。
 
-已完成 `multi_turn_base_1` 的只读诊断：legacy 在 user turn 0 因缺少 `ls(a=True)` 的返回失败；protect 的 official 错误是最终 state mismatch，轨迹在 user turn 1 step 1 首次与 Full 分叉，完成 `cd` 后停止，未继续移动文件。该 protect 请求中当前 query 与最近完成的 `cd` call/result 已进入 evidence。现有轨迹不能确定停止的因果原因；下一步先检验 evidence 利用与提前终止，再为 retrieve-once/persistent 的整题开发比较冻结具体任务、配置和运行上限。当前有限运行已结束，不自动扩大任务集，也不把 CPU lease 测试当作 live persistence 收益。
+初始 `multi_turn_base_1` 的只读诊断中，legacy 在 user turn 0 因缺少 `ls(a=True)` 的返回失败；protect 的 official 错误是最终 state mismatch，轨迹在 user turn 1 step 1 首次与 Full 分叉，完成 `cd` 后停止，未继续移动文件。该 protect 请求中当前 query 与最近完成的 `cd` call/result 已进入 evidence。这一发现推动了下面已完成的 evidence-utilization 与闭环开发比较。
 
 ### Evidence-utilization 诊断与闭环开发比较
 
@@ -39,7 +39,17 @@ task30 第三处连续 prefix 中，once 在同一 W 下选 `{m0,m3,m5,m7}`，pe
 
 前两处 once/persistent 的 forwarded payload 完全相同；第二处返回文字仍略有不同，native tool-call/stop 状态相同。显式 seed=0 在这次运行中不保证逐字复现，文字差异不归因于 persistence。collector 保存这两个输入相同的对照，不将它们当不同 seed 的独立样本。
 
-下一轮固定 `bfcl_lease_dev2_v1`，design=`lease-dev2`：`multi_turn_base_1` 与 `multi_turn_base_30` × Full(training)、legacy、protect、recover_once、persistent、no_gist，共最多 12 个整题，单 worker 串行、总 wall cap 1800 秒、temperature=0.001/seed=0/max_completion_tokens=4096、0 transport/SDK/cache-miss retries、不自动重跑。使用原 history B=226,492,416、workspace W=113,246,208、旧 policy commit `affe0e3`；NoGist 可将全部 B 用于 raw evidence。每臂独立 runtime state，全部请求保存 native 与 forwarded views。两题因前面的诊断而选，均为已暴露 dev；本轮不得声称 held-out、统计显著性或跨任务泛化。它回答局部停止现象和 lease 分配是否延续到真实任务闭环，并直接比较相同 B 下的 NoGist。Full 会在本轮同配置运行，原未显式 seed 的 v3 分数不混入配对分母。
+`bfcl_lease_dev2_v1` 已完成，design=`lease-dev2`，执行 commit `61507f16ef08eb3fe16e2e0f211bd4e4a4c47037`：`multi_turn_base_1` 与 `multi_turn_base_30` × Full(training)、legacy、protect、recover_once、persistent、no_gist，共 12 个整题，单 worker 串行，在总 wall cap 1800 秒内结束；temperature=0.001/seed=0/max_completion_tokens=4096、0 transport/SDK/cache-miss retries、无重跑。使用原 history B=226,492,416、workspace W=113,246,208、旧 policy commit `affe0e3`；NoGist 可将全部 B 用于 raw evidence。每臂独立 runtime state，全部请求保存 native 与 forwarded views。两题因前面的诊断而选，均为已暴露 dev；本轮不得声称 held-out、统计显著性或跨任务泛化。Full 在本轮同配置运行，原未显式 seed 的 v3 分数未混入配对分母。
+
+[完整配对结果](../../../c2kv-a-runtime/outputs/a_memory_runtime_20260907/bfcl_lease_dev2_v1/collection.json) 为 `valid`：Full 为 **1/2（preliminary, n=1）**；legacy、protect、recover_once、persistent、no_gist 各为 **0/2（preliminary, n=1）**。Full 唯一通过 task1，task30 在六臂均失败。共 84 条正常请求，60 条 runtime 请求全部通过预算、raw-token、byte geometry、tool profile 与显式 sampling 校验。当前未观察到整题恢复或 persistence 收益；较短的失败轨迹不计作加速。
+
+[实际 memory-carriage 检查](../../../c2kv-a-runtime/outputs/a_memory_runtime_20260907/bfcl_lease_dev2_v1/memory_inspection.json) 显示：12 个 arm/task 首次输入都与对应 Full forwarded input 完全相同；persistent 有 6 个后续请求携带 retained events，均确实出现在 forwarded evidence packet 中。由此已经验证 live 跨请求保留的工程行为，但不把它解释成任务收益。
+
+NoGist 在 task1 的首个任务相关 action 分歧是 user turn1/step1：成功 `cd(workspace)` 后停止，Full 则继续 `ls → mkdir → mv`。该点全部 `{m0,m1,m3,m5,m6,m7}` 仍在 evidence 中，包含原始当前指令；active/evidence 为 115,310,592 bytes，小于 B，且没有 budget skip/eviction。Official scorer 只报告 `instance_state_mismatch`，未提供 failure-turn 字段；turn1/step1 是 trace 诊断。这个失败发生在容量不足之前，不能解释为历史被预算截掉。
+
+[Full CPU 预算校准](../../../c2kv-a-runtime/outputs/a_memory_runtime_20260907/bfcl_lease_dev2_v1/full_budget_calibration.json) 对 24 个真实 Full requests 重建计数，全部与 server prompt tokens 一致，新增 0 chat / 0 extraction。全部 Full 原始历史均可放入同一 B；峰值为 1192 tokens / 175,767,552 bytes，低于 1536-token cap。校准与 memory inspection 的代码为 `2d69344`。因此本批是 renderer/执行能力开发诊断，尚未构成 Full 历史超出预算的 memory-pressure 测试。
+
+下一步进入原计划的同预算 raw-recency 对照：保留 Full 的正常对话呈现，按完整 event 选择 recent raw history；不把整个 history 变成单个 evidence JSON。应先用 CPU 验证“全部历史能放入 B 时与 Full 输入完全相同”，再从 Full raw-history 容量测量中选择确有 memory pressure 的开发样本与冻结预算。本轮不推广 active-query-raw，也不根据这两题的成败调 detector threshold；旧 lease 抢占当前 direct source 的优先级问题单独保留为待修项。
 
 本轮 1088 compatibility 的实际成本边界以 `adapter.py` 为准：共同 raw 部分为 system/tools 与旧 proxy 保留的当前 input suffix；在 tool response 后恢复的 current user query 也属于 evidence，计入 W 和 B，其 gist/raw overlap 同样计费。它尚未实现“整条 current user turn 都作为所有 arm 共同且免于 history cap 的 raw 输入”；下文目标协议与这个已执行边界分开解释。
 
@@ -361,12 +371,14 @@ fixed-prefix/dev 另外记录：
 
 - [x] Phase 1：固定 1088 profile、首个绝对预算 \(B\)、protocol matrix schema 与显式 session key；正式 test matrix 仍待冻结。
 - [ ] Phase 1：完成六类最小 smoke，并验证无历史首轮等价与 view 重建参考路径。
+- [x] Phase 1：在六臂、两个真实开发任务上验证首次 forwarded input 与 Full 完全相同。
 - [x] Phase 1：验证 BFCL pilot 的 task/request/official score/cost 关联。
 - [ ] Phase 1：补齐 event/cache 生命周期与临时 extraction/recompute cost 的完整关联。
 - [x] Phase 2：实现 `EventStore`、`BlockRef` 与 budgeted `ExactWorkspace`，通过 CPU 测试与真实 prefix 协议验证。
 - [ ] Phase 2：完成 recent-raw 与 provenance-driven protection 的同预算 dev 比较。
 - [ ] Phase 3：实现一次 text evidence upgrade、有限 retry 与 suffix recompute。
 - [ ] Phase 3：实现 `EvidenceLease`，保存新 observation 并避免重复提交已执行动作。
+- [x] Phase 3：完成 24-cell fixed-prefix 诊断和两题六臂 live rollout；验证 persistent 的 retained events 确实跨 request 出现在 forwarded packet。
 - [ ] Phase 3：完成 fixed-prefix diagnostic 与 live rollout；oracle evidence 仅留在 dev。
 - [ ] Phase 4：冻结 detector、retrieval cap、lease/release policy 与所有 reason codes。
 - [ ] Phase 5：锁定 held-out tasks/clusters 并完成 contamination/overlap 检查。
