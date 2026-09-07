@@ -32,6 +32,64 @@ def free_loopback_ports(count):
             reservation.close()
 
 
+def design_spec(name):
+    if name == "first-dev4":
+        return dict(
+            task_ids=[f"multi_turn_base_{i}" for i in range(4)],
+            variants=[("full", "full"), ("legacy", "c2kv4"), ("protect", "c2kv4")],
+            task_selection="first four numeric multi_turn_base IDs, without success filtering",
+            command_extra=[])
+    if name == "lease-dev2":
+        return dict(
+            task_ids=["multi_turn_base_1", "multi_turn_base_30"],
+            variants=[("full", "full"), ("legacy", "c2kv4"), ("protect", "c2kv4"),
+                      ("recover_once", "c2kv4"), ("persistent", "c2kv4"),
+                      ("no_gist", "full")],
+            task_selection=("two previously exposed development tasks chosen for "
+                            "layout/lease diagnostics; no held-out claim"),
+            command_extra=["--capture-request-views", "--bfcl-temperature", "0.001",
+                           "--bfcl-seed", "0"])
+    raise ValueError(f"Unknown pilot design: {name}")
+
+
+def require_utilization_gate(protocol_root):
+    directory = protocol_root / "utilization_probe_v1"
+    receipt = json.loads((directory / "receipt.json").read_text())
+    if (receipt.get("status") != "completed" or receipt.get("chat_attempts") != 24
+            or receipt.get("chat_completed") != 24
+            or receipt.get("lease_gate_passed") is not True):
+        raise SystemExit("Utilization/lease gate did not complete its frozen 24 cells")
+    cells = []
+    for path in directory.glob("*.json"):
+        row = json.loads(path.read_text())
+        if isinstance(row, dict) and isinstance(row.get("cell_id"), str):
+            cells.append(row)
+    if len(cells) != 24 or len({row["cell_id"] for row in cells}) != 24:
+        raise SystemExit("Utilization/lease gate lacks exactly 24 original cell JSON files")
+    for row in cells:
+        metadata = (row.get("counts") or {}).get("memory_runtime") or {}
+        if (row.get("status") != "completed"
+                or metadata.get("raw_prompt_tokens_verified_by_backend") is not True
+                or metadata.get("byte_geometry_verified_by_backend") is not True):
+            raise SystemExit("Utilization/lease cell lacks completed token/byte verification")
+    return directory / "receipt.json"
+
+
+def terminate_process_group(proc, grace_seconds=10):
+    try:
+        os.killpg(proc.pid, signal.SIGTERM)
+    except OSError:
+        pass
+    try:
+        return proc.wait(timeout=grace_seconds)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except OSError:
+            pass
+        return proc.wait()
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--upstream", required=True)
@@ -40,6 +98,8 @@ def main():
     parser.add_argument("--bench-python", required=True)
     parser.add_argument("--protocol-root", required=True, type=Path)
     parser.add_argument("--out", required=True, type=Path)
+    parser.add_argument("--design", choices=("first-dev4", "lease-dev2"),
+                        default="first-dev4")
     args = parser.parse_args()
     first = json.loads((args.protocol_root / "protocol_v1/receipt.json").read_text())
     remainder = json.loads((args.protocol_root / "protocol_remaining_v1/receipt.json").read_text())
@@ -53,12 +113,15 @@ def main():
     if any(not row["memory_runtime"]["byte_geometry_verified_by_backend"]
            for row in all_rows if row.get("memory_runtime")):
         raise SystemExit("Protocol gate lacks backend byte geometry verification")
+    utilization_receipt = (require_utilization_gate(args.protocol_root)
+                           if args.design == "lease-dev2" else None)
     if args.out.exists():
         raise SystemExit("Output already exists; this pilot does not rerun or resume")
     args.out.mkdir(parents=True)
     run_id = "a_" + args.out.name
-    task_ids = [f"multi_turn_base_{i}" for i in range(4)]
-    variants = [("full", "full"), ("legacy", "c2kv4"), ("protect", "c2kv4")]
+    design = design_spec(args.design)
+    task_ids = design["task_ids"]
+    variants = design["variants"]
     proxy_ports = free_loopback_ports(len(variants))
     commands = []
     for index, (name, arm) in enumerate(variants):
@@ -71,6 +134,7 @@ def main():
                    "--run-ids", ",".join(task_ids), "--no-upstream-retries",
                    "--proxy-python", args.proxy_python, "--proxy-port", str(proxy_ports[index]),
                    "--out", str(args.out / name), "--exact-out", "--run-name", run_id + "_" + name]
+        command += design["command_extra"]
         if name != "full":
             config = json.loads((HERE / f"configs/{name}.json").read_text())
             config["run_id"] = run_id + "_" + name
@@ -81,7 +145,7 @@ def main():
     manifest = dict(
         schema="a-runtime-bfcl-dev-pilot-v1", run_id=run_id,
         scope="development pilot; preliminary, n=1", task_ids=task_ids,
-        task_selection="first four numeric multi_turn_base IDs, without success filtering",
+        task_selection=design["task_selection"],
         variants=[name for name, _ in variants], maximum_tasks=12,
         maximum_wall_seconds=1800, automatic_reruns=0,
         sdk_retries=0, proxy_transport_retries=0, cache_miss_retries=0,
@@ -90,6 +154,13 @@ def main():
         protocol_receipts=[str(args.protocol_root / name / "receipt.json") for name in ["protocol_v1", "protocol_remaining_v1"]],
         commands=commands, status="frozen_before_first_official_request", results=[],
     )
+    if args.design == "lease-dev2":
+        manifest.update(
+            design="lease-dev2",
+            generation_request_sampling={
+                "temperature": 0.001, "seed": 0, "max_completion_tokens": 4096})
+        manifest["generation_sampling"] = "explicit request and forwarded sampling logged"
+        manifest["protocol_receipts"].append(str(utilization_receipt))
     receipt_path = args.out / "pilot.json"
     save(receipt_path, manifest)
     deadline = time.monotonic() + manifest["maximum_wall_seconds"]
@@ -106,8 +177,7 @@ def main():
             try:
                 returncode = proc.wait(timeout=max(1, deadline - time.monotonic()))
             except subprocess.TimeoutExpired:
-                os.killpg(proc.pid, signal.SIGTERM)
-                proc.wait(timeout=10)
+                terminate_process_group(proc)
                 manifest["status"] = "wall_budget_exhausted"
                 save(receipt_path, manifest)
                 raise SystemExit("Finite BFCL wall budget exhausted")
@@ -119,8 +189,22 @@ def main():
         request_logs = list((args.out / item["variant"] / "logs").glob("proxy_*.jsonl"))
         requests = [json.loads(line) for path in request_logs for line in path.read_text().splitlines() if line.strip()]
         observed_tasks = {row.get("eval_context", {}).get("task_id") for row in requests}
-        if not requests or not set(task_ids).issubset(observed_tasks):
-            manifest["status"] = "invalid_missing_model_requests"
+        invalid_requests = (not requests or not set(task_ids).issubset(observed_tasks))
+        if args.design == "lease-dev2":
+            invalid_requests = (not requests or observed_tasks != set(task_ids)
+                                or any(row.get("status") != "ok" for row in requests))
+        if invalid_requests:
+            manifest["status"] = ("invalid_missing_model_requests"
+                                  if args.design == "first-dev4"
+                                  else "invalid_request_coverage_or_runtime")
+            if args.design == "lease-dev2":
+                first_non_ok = next(
+                    (row for row in requests if row.get("status") != "ok"), None)
+                if first_non_ok is not None:
+                    manifest["first_non_ok_request"] = {
+                        "status": first_non_ok.get("status"),
+                        "error": first_non_ok.get("error"),
+                    }
             save(receipt_path, manifest)
             raise SystemExit("Official scores are invalid: selected tasks did not reach the model proxy")
         save(receipt_path, manifest)
