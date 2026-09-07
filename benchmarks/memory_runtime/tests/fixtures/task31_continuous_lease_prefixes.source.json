@@ -1,0 +1,83 @@
+{
+  "schema": "c2kv.memory_runtime.native_prefix_sequence_source.v1",
+  "fixture": "benchmarks/memory_runtime/tests/fixtures/task31_continuous_lease_prefixes.json",
+  "source_path": "c2kv/outputs/mechanism_20260906/bfcl_full8_native_capture_v1/attempt1/logs/request_capture_full_35201.jsonl",
+  "source_line_count": 124,
+  "task_id": "multi_turn_base_30",
+  "task_ordinal_one_based": 31,
+  "selection": {
+    "source_lines": [
+      103,
+      104,
+      105
+    ],
+    "contexts": [
+      {
+        "benchmark": "bfcl",
+        "task_id": "multi_turn_base_30",
+        "user_turn": 0,
+        "step": 2,
+        "attempt": 0
+      },
+      {
+        "benchmark": "bfcl",
+        "task_id": "multi_turn_base_30",
+        "user_turn": 0,
+        "step": 3,
+        "attempt": 0
+      },
+      {
+        "benchmark": "bfcl",
+        "task_id": "multi_turn_base_30",
+        "user_turn": 0,
+        "step": 4,
+        "attempt": 0
+      }
+    ],
+    "reason": "three consecutive exact native prefixes spanning retrieval then two later decisions under the current persistent-policy check",
+    "outcome_or_scorer_fields_used": false
+  },
+  "eligibility": [
+    "capture status is ok",
+    "original_request.body contains nonempty messages and tools",
+    "all tool results match a preceding assistant tool_call_id",
+    "each later prefix extends the previous prefix by one complete assistant/tool event",
+    "no gold, scorer result, hidden state, or future message was copied"
+  ],
+  "validation": {
+    "prefix_count": 3,
+    "message_counts": [
+      5,
+      7,
+      9
+    ],
+    "tool_definition_counts": [
+      32,
+      32,
+      32
+    ],
+    "missing_tool_call_ids": 0,
+    "unmatched_or_duplicate_tool_results": 0,
+    "synthetic_messages_added": 0,
+    "native_request_fields_copied": [
+      "max_completion_tokens",
+      "messages",
+      "model",
+      "store",
+      "temperature",
+      "tools"
+    ],
+    "candidate_event_id": "multi_turn_base_30:m1",
+    "candidate_source_indices": [
+      1,
+      2
+    ],
+    "bounded_policy_check": {
+      "setup": "persistent, history_budget_bytes=100, workspace_budget_bytes=100, lease_decisions=3, max_retrieved_events=2, unit additive event cost, adapter-derived fresh raw suffix",
+      "source_line_103": "retrieved_event_ids contains multi_turn_base_30:m1",
+      "source_line_104": "retained_event_ids contains multi_turn_base_30:m1",
+      "source_line_105": "retained_event_ids contains multi_turn_base_30:m1",
+      "scope": "fixture suitability check only; not measured serving behavior or an official outcome"
+    }
+  }
+}
