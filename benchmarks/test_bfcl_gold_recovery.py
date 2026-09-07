@@ -62,7 +62,8 @@ def _prefix_checker(decoded, ground_truth, test_entry):
 
 
 def _install_toy_handler(
-        monkeypatch, tmp_path, selector, choose_response, *, max_events=1):
+        monkeypatch, tmp_path, selector, choose_response, *, max_events=1,
+        no_upstream_retries=False):
     mapping = {}
     calls = []
 
@@ -192,6 +193,7 @@ def _install_toy_handler(
         gold_recovery=selector,
         task_audit_path=audit_path,
         bfcl_oracle_max_events=max_events,
+        no_upstream_retries=no_upstream_retries,
     )
     config = mapping["c2kv-test"]
     handler = config.model_handler(
@@ -202,6 +204,71 @@ def _install_toy_handler(
     )
     handler._gold_controller.prefix_checker = _prefix_checker
     return handler, calls, audit_path
+
+
+def test_no_upstream_retries_reaches_bfcl_client(monkeypatch, tmp_path):
+    real_run_bfcl = bfcl_adapter.run_bfcl
+    real_install_handler = bfcl_adapter.install_handler
+    run_kwargs = {}
+
+    def capture_run(*args, **kwargs):
+        del args
+        run_kwargs.update(kwargs)
+        return {}
+
+    monkeypatch.setattr(bfcl_adapter, "run_bfcl", capture_run)
+    ctx = bfcl_adapter.RunContext(
+        base_url="http://proxy",
+        user_base_url="http://upstream",
+        out_dir=tmp_path / "out",
+        model="served-model",
+        arm="full",
+        options={
+            "bfcl_dir": str(tmp_path),
+            "no_upstream_retries": True,
+        },
+    )
+    bfcl_adapter.run(ctx)
+    assert run_kwargs["no_upstream_retries"] is True
+
+    install_kwargs = {}
+
+    def capture_install(*args, **kwargs):
+        del args
+        install_kwargs.update(kwargs)
+
+    monkeypatch.setattr(bfcl_adapter, "run_bfcl", real_run_bfcl)
+    monkeypatch.setattr(bfcl_adapter, "install_handler", capture_install)
+    monkeypatch.setattr(
+        bfcl_adapter, "official_category_counts", lambda _: {"multi_turn_base": 1}
+    )
+    monkeypatch.setattr(bfcl_adapter, "run_cli", lambda _: None)
+    monkeypatch.setattr(bfcl_adapter, "summarize_audit", lambda _: {})
+    import terminal_check
+
+    monkeypatch.setattr(terminal_check, "check_bfcl", lambda *args, **kwargs: 0)
+    real_run_bfcl(
+        "http://proxy/v1",
+        mode="generate",
+        project_root=tmp_path / "bfcl",
+        no_upstream_retries=run_kwargs["no_upstream_retries"],
+    )
+    assert install_kwargs["no_upstream_retries"] is True
+
+    monkeypatch.setattr(bfcl_adapter, "install_handler", real_install_handler)
+    enabled, _, _ = _install_toy_handler(
+        monkeypatch,
+        tmp_path,
+        None,
+        lambda _: _response("ok"),
+        no_upstream_retries=install_kwargs["no_upstream_retries"],
+    )
+    assert enabled._build_client_kwargs()["max_retries"] == 0
+
+    default, _, _ = _install_toy_handler(
+        monkeypatch, tmp_path, None, lambda _: _response("ok")
+    )
+    assert "max_retries" not in default._build_client_kwargs()
 
 
 def _entry(task_id="multi_turn_base_7", turns=2):

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import time
@@ -84,6 +85,11 @@ def start_proxy(upstream: str, arm: str, port: int, log_dir: Path,
         command,
         stdout=out_handle,
         stderr=subprocess.STDOUT,
+        # The runtime sidecar uses only the CPU tokenizer. In an Ascend
+        # serving venv, torch otherwise auto-loads torch_npu and requires
+        # libhccl even though this process never constructs model tensors.
+        env=({**os.environ, "TORCH_DEVICE_BACKEND_AUTOLOAD": "0"}
+             if memory_runtime_config else None),
     )
     import urllib.request
 

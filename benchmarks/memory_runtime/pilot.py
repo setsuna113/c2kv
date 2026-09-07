@@ -465,6 +465,7 @@ def run_protocol(
     config_dir: Path,
     out_dir: Path,
     proxy_python: str,
+    completed_receipt: Path | None = None,
 ) -> dict[str, Any]:
     upstream = _validate_upstream(upstream)
     _nonempty_string(tokenizer, "--tokenizer")
@@ -483,6 +484,31 @@ def run_protocol(
             "contract_error",
             f"protocol matrix must contain exactly {MAX_CHAT_REQUESTS} requests, got {planned_requests}",
         )
+
+    prior = None
+    already_completed = 0
+    if completed_receipt is not None:
+        prior = _read_json(completed_receipt)
+        done = prior.get("request_receipts", [])
+        # Continue only after startup failed between complete variants. A
+        # failed or ambiguous model request is never resubmitted here.
+        expected_pairs = [(v.spec.name, c["case_id"]) for v in variants for c in cases]
+        observed_pairs = [(r["variant"], r["case_id"]) for r in done]
+        old_configs = {v["name"]: v.get("runtime") for v in prior.get("variants", [])}
+        new_configs = {v.spec.name: dict(v.config) if v.config is not None else None for v in variants}
+        if (prior.get("status") != "failed" or prior.get("run_id") != run_id
+                or prior.get("requests_attempted") != len(done)
+                or prior.get("responses_received") != len(done)
+                or not done or len(done) % len(cases)
+                or observed_pairs != expected_pairs[:len(done)]
+                or old_configs != new_configs
+                or not str(prior.get("error", {}).get("message", "")).startswith("proxy did not come up")):
+            raise PilotFailure("contract_error", "continuation requires complete leading variants and a startup-only failure")
+        already_completed = len(done)
+        variants = variants[already_completed // len(cases):]
+        planned_requests -= already_completed
+        if not planned_requests:
+            raise PilotFailure("contract_error", "no unattempted protocol requests remain")
 
     out_dir = out_dir.resolve()
     if out_dir.exists():
@@ -513,6 +539,9 @@ def run_protocol(
         },
         "request_budget": MAX_CHAT_REQUESTS,
         "planned_requests": planned_requests,
+        "completed_receipt": str(completed_receipt.resolve()) if completed_receipt else None,
+        "previously_completed_requests": already_completed,
+        "aggregate_planned_requests": planned_requests + already_completed,
         "requests_attempted": 0,
         "responses_received": 0,
         "fixture": {
@@ -673,6 +702,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--out", required=True, type=Path)
     parser.add_argument("--stage", required=True, choices=["protocol"])
     parser.add_argument("--proxy-python", required=True)
+    parser.add_argument("--completed-receipt", type=Path,
+                        help="continue only unattempted variants after a proxy startup failure")
     return parser
 
 
@@ -685,6 +716,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             config_dir=args.config_dir,
             out_dir=args.out,
             proxy_python=args.proxy_python,
+            completed_receipt=args.completed_receipt,
         )
     except PilotFailure as exc:
         print(f"FATAL [{exc.kind}]: {exc}", file=sys.stderr)

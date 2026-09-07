@@ -118,7 +118,8 @@ def install_handler(base_url: str, model: str = SERVED_MODEL,
                     handler_name: "str | None" = None,
                     gold_recovery: "str | None" = None,
                     task_audit_path: "Path | str | None" = None,
-                    bfcl_oracle_max_events: int = 1) -> None:
+                    bfcl_oracle_max_events: int = 1,
+                    no_upstream_retries: bool = False) -> None:
     # NOTE: default resolved at CALL time — binding the default to
     # MODEL_NAME at def time made monkeypatched names register the
     # wrong key (val20 evaluate failure)
@@ -147,11 +148,14 @@ def install_handler(base_url: str, model: str = SERVED_MODEL,
                     gold_recovery, bfcl_oracle_max_events, task_audit_path)
 
         def _build_client_kwargs(self):
-            return {
+            kwargs = {
                 "api_key": "EMPTY",
                 "base_url": base_url,
                 "timeout": httpx.Timeout(timeout=600.0, connect=8.0),
             }
+            if no_upstream_retries:
+                kwargs["max_retries"] = 0
+            return kwargs
 
         def inference(self, test_entry: dict, include_input_log: bool,
                       exclude_state_log: bool):
@@ -408,6 +412,9 @@ def run(ctx: RunContext) -> Dict[str, Any]:
         gold_recovery = get_arm(ctx.arm).gold_recovery
         num_threads = int(ctx.opt("num_workers", 1))
         oracle_max_events = int(ctx.opt("bfcl_oracle_max_events", 1))
+        no_upstream_retries = ctx.opt("no_upstream_retries", False)
+        if not isinstance(no_upstream_retries, bool):
+            raise ValueError("no_upstream_retries must be a bool")
         task_audit_path = (
             project_root / "task_audit" / f"{handler_key(ctx.arm)}.jsonl")
         summary = run_bfcl(
@@ -422,6 +429,7 @@ def run(ctx: RunContext) -> Dict[str, Any]:
             task_audit_path=task_audit_path,
             num_threads=num_threads,
             bfcl_oracle_max_events=oracle_max_events,
+            no_upstream_retries=no_upstream_retries,
         )
     finally:
         os.chdir(prev_cwd)
@@ -448,7 +456,8 @@ def run_bfcl(base_url: str, categories: str = "multi_turn_base",
              gold_recovery: "str | None" = None,
              task_audit_path: "Path | str | None" = None,
              num_threads: int = 1,
-             bfcl_oracle_max_events: int = 1) -> Dict[str, Any]:
+             bfcl_oracle_max_events: int = 1,
+             no_upstream_retries: bool = False) -> Dict[str, Any]:
     """Register the handler and drive the official generate/evaluate CLI
     in-process.
 
@@ -491,6 +500,7 @@ def run_bfcl(base_url: str, categories: str = "multi_turn_base",
             gold_recovery=gold_recovery,
             task_audit_path=audit_path,
             bfcl_oracle_max_events=bfcl_oracle_max_events,
+            no_upstream_retries=no_upstream_retries,
         )
         category_counts = official_category_counts(categories)
         ids: Optional[List[str]] = None
