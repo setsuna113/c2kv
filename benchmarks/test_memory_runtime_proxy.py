@@ -379,14 +379,14 @@ def test_kv_byte_mismatch_fails_closed_and_latches_runtime_error(
     assert len(runtime.calls) == 1
 
 
-def test_missing_backend_geometry_stays_explicitly_unverified(monkeypatch):
+def test_missing_backend_geometry_stops_the_runtime(monkeypatch):
     runtime = _Runtime(expected_bytes=147456)
     sent, _ = _drive(
         monkeypatch, runtime, get_arm("full"), _Backend(None), _payload(), [_body()])
-    assert sent[0][0] == 200
-    metadata = sent[0][1]["c2kv_proxy"]["memory_runtime"]
-    assert metadata["byte_geometry_verified_by_backend"] is False
-    assert metadata["byte_geometry_verification"] == "pending_backend_cost"
+    assert sent[0][0] == 502
+    assert "omitted bytes_per_kv_token" in sent[0][1]["error"]
+    with pytest.raises(proxy.MemoryRuntimeError, match="omitted bytes_per_kv_token"):
+        proxy._check_memory_runtime_fatal()
 
 
 def test_main_loads_runtime_flags_and_validates_mode_arm(monkeypatch):

@@ -392,9 +392,8 @@ def _verify_memory_runtime_kv_bytes(
     actual = (normalized.get("cost") or {}).get("bytes_per_kv_token")
     metadata["byte_geometry_verified_by_backend"] = False
     if actual is None:
-        metadata["byte_geometry_verification"] = "pending_backend_cost"
-        return
-    if type(actual) is not int or actual <= 0:
+        error = "backend omitted bytes_per_kv_token required for runtime budget verification"
+    elif type(actual) is not int or actual <= 0:
         error = f"backend returned invalid bytes_per_kv_token: {actual!r}"
     else:
         with _memory_runtime_verify_lock:
@@ -415,7 +414,7 @@ def _verify_memory_runtime_kv_bytes(
         with _memory_runtime_verify_lock:
             MEMORY_RUNTIME_FATAL_ERROR = MEMORY_RUNTIME_FATAL_ERROR or error
             error = MEMORY_RUNTIME_FATAL_ERROR
-        metadata["byte_geometry_verification"] = "mismatch"
+        metadata["byte_geometry_verification"] = "missing" if actual is None else "mismatch"
         metadata["backend_bytes_per_kv_token"] = actual
         metadata["byte_geometry_error"] = error
         raise MemoryRuntimeError(error)
