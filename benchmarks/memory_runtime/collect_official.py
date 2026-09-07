@@ -852,6 +852,9 @@ class Collector:
                 }
                 for task_id in task_ids
             ]
+        else:
+            for arm in arms.values():
+                arm["performance"] = None
         return {
             "schema": SCHEMA,
             "root": str(self.root),
