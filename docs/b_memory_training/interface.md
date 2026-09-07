@@ -47,12 +47,14 @@ packed = pack_memory(store, view, tokenizer, tools=visible_tools,
                      max_chunk_tokens=768, chunk_overlap=64)
 ```
 
-`MemoryView(gist_event_ids, raw_event_ids)` must cover every visible event.
+`MemoryView(gist_event_ids, raw_event_ids, evidence_event_ids=())` must cover every visible event.
 Unknown IDs, missing coverage and incomplete gist events are rejected. Explicit
 raw/gist overlap is allowed and counted. `select_view` retains instructions,
 the current user request, the event containing the latest message, pending
 calls and the requested number of latest complete tool events. Additional
-active bindings and recover/retain/evict decisions come from A. Release a raw
+active bindings and recover/retain/evict decisions come from A. Additional
+restored/pinned events outside that fixed workspace are marked as
+`evidence_event_ids`, a subset of `raw_event_ids`. Release a raw
 lease by omitting its ID on the next view; the event source remains unchanged.
 
 The encoder receives an immutable typed event envelope containing the original
@@ -60,11 +62,22 @@ roles and call/result IDs. It does not receive current workspace state, the
 target, future messages, or evaluator metadata. JSON object arguments are parsed
 once for rendering; the source snapshot keeps its original representation.
 Native Qwen templates omit call IDs, so the encoder envelope is necessary for
-parallel result association. Raw workspace messages retain original source
-order and use the native template. The native template's omission of raw call
-IDs remains a property of that base-model protocol; A must retain the structured
-messages for binding/recovery, and parallel-result protocol parity must be
-checked when connecting the actual adapters.
+parallel result association. `evidence.py` is copied unchanged from A and emits
+the shared `history-evidence-v1` packet. `raw_workspace_messages(store, view)`
+places that single user packet before the ordinary current/recent workspace,
+after leading system messages. Evidence-owned events appear only in the packet;
+the remaining native messages keep original source order. Packing uses
+system/tools prefix, gist KV, evidence packet, current raw, then the assistant
+generation prefix. The packet preserves call IDs, roles, arguments, results,
+completeness and source indices. It is included in token/budget accounting.
+
+The raw layout profile is `event-native-evidence-v1`. A's old 1088 compatibility
+layout retains its legacy current-message boundary and coarse turn gist. A
+complete evidence event can then overlap a result still present in current raw
+and with the old gist; A counts that duplication. This B layout does not change
+those legacy boundaries and does not claim strict layout parity with 1088.
+Only the evidence renderer is shared across those profiles. The new B/C
+checkpoints must use the event-native profile at training and serving time.
 
 Long events are split without dropping tokens. `EncoderChunk` records parent
 `event_id`, `part_index`, `source_indices`, and half-open source token offsets.

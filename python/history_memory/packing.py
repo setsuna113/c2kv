@@ -14,6 +14,7 @@ from typing import Any, Iterable, Mapping, Sequence
 from .events import EventStore, Message
 
 PACKING_VERSION = "history-event-v1"
+RAW_LAYOUT_PROFILE = "event-native-evidence-v1"
 
 
 class PackingBudgetError(ValueError):
@@ -24,15 +25,20 @@ class PackingBudgetError(ValueError):
 class MemoryView:
     gist_event_ids: tuple[str, ...]
     raw_event_ids: tuple[str, ...]
+    evidence_event_ids: tuple[str, ...] = ()
 
     def validate(self, store: EventStore) -> None:
         known = {event.event_id for event in store.events}
-        for ids in (self.gist_event_ids, self.raw_event_ids):
+        for ids in (self.gist_event_ids, self.raw_event_ids, self.evidence_event_ids):
             if len(ids) != len(set(ids)):
                 raise ValueError("Duplicate event within a memory view component")
         selected = set(self.gist_event_ids) | set(self.raw_event_ids)
         if selected != known:
             raise ValueError(f"View must cover exactly the visible events; missing={known - selected}, unknown={selected - known}")
+        if not set(self.evidence_event_ids) <= set(self.raw_event_ids):
+            raise ValueError("Evidence events must be a subset of raw events")
+        if any(store.event(event_id).kind == "instruction" for event_id in self.evidence_event_ids):
+            raise ValueError("System instructions must remain in the native prefix")
         for event_id in self.gist_event_ids:
             event = store.event(event_id)
             if not event.complete or event.kind == "instruction":
@@ -51,10 +57,10 @@ def select_view(
     """
     if recent_tool_events < 0:
         raise ValueError("recent_tool_events must be nonnegative")
-    raw = set(restored_event_ids) | set(pinned_event_ids)
-    for event_id in raw:
+    extra = set(restored_event_ids) | set(pinned_event_ids)
+    for event_id in extra:
         store.event(event_id)
-    raw.update(event.event_id for event in store.events if not event.complete or event.kind == "instruction")
+    raw = {event.event_id for event in store.events if not event.complete or event.kind == "instruction"}
     users = [event for event in store.events if event.kind == "user"]
     if users:
         raw.add(users[-1].event_id)
@@ -66,9 +72,12 @@ def select_view(
     )
     if recent_tool_events:
         raw.update(event.event_id for event in completed[-recent_tool_events:])
+    evidence = extra - raw
+    raw.update(extra)
     view = MemoryView(
         gist_event_ids=tuple(event.event_id for event in store.events if event.event_id not in raw),
         raw_event_ids=tuple(event.event_id for event in store.events if event.event_id in raw),
+        evidence_event_ids=tuple(event.event_id for event in store.events if event.event_id in evidence),
     )
     view.validate(store)
     return view
@@ -135,6 +144,29 @@ def event_encoder_messages(store: EventStore, event_id: str) -> tuple[dict[str, 
     return ({"role": "user", "content": json.dumps(envelope, ensure_ascii=False, separators=(",", ":"), allow_nan=False)},)
 
 
+def raw_workspace_messages(store: EventStore, view: MemoryView) -> tuple[dict[str, Any], ...]:
+    """Place A's shared evidence packet before the native current workspace.
+
+    Evidence-owned messages appear only inside that packet. System messages
+    remain at the front. The source store and independent event encodings are
+    unaffected by this presentation choice.
+    """
+    # The shared evidence module imports visible_message from this module.
+    from .evidence import evidence_message
+
+    view.validate(store)
+    native_events = set(view.raw_event_ids) - set(view.evidence_event_ids)
+    native_indices = sorted({index for event in store.events if event.event_id in native_events for index in event.source_indices})
+    messages = [visible_message(store.messages[index]) for index in native_indices]
+    evidence = evidence_message(store, view.evidence_event_ids)
+    if evidence is not None:
+        prefix_length = 0
+        while prefix_length < len(messages) and messages[prefix_length]["role"] == "system":
+            prefix_length += 1
+        messages.insert(prefix_length, evidence)
+    return tuple(messages)
+
+
 @dataclass(frozen=True)
 class EncoderChunk:
     event_id: str
@@ -187,6 +219,7 @@ class PackedMemory:
     workspace_input_ids: tuple[int, ...]
     raw_source_indices: tuple[int, ...]
     chunks: tuple[EncoderChunk, ...]
+    raw_layout_profile: str = RAW_LAYOUT_PROFILE
 
     def gist_layout(self, ratio: int) -> tuple[GistPlacement, ...]:
         """Match dynamic-interleave's source-span RoPE, not compressed offsets."""
@@ -241,7 +274,8 @@ def pack_memory(
     """Pack all selected content or raise; no first-plus-tail selection occurs.
 
     Chunks follow event source order regardless of the caller's ID ordering.
-    Raw events are restored in original message order. The system/tools prefix
+    Native raw events retain source order; restored events use A's evidence
+    packet before the current workspace. The system/tools prefix
     is separated at a verified native-template boundary; the model adapter
     inserts gist KV between this prefix and the exact workspace.
     """
@@ -253,7 +287,7 @@ def pack_memory(
     if max_chunks is not None and len(chunks) > max_chunks:
         raise PackingBudgetError(f"Complete events need {len(chunks)} chunks; budget is {max_chunks}")
     raw_indices = tuple(sorted({index for event in store.events if event.event_id in view.raw_event_ids for index in event.source_indices}))
-    raw_messages = [visible_message(store.messages[index]) for index in raw_indices]
+    raw_messages = list(raw_workspace_messages(store, view))
     if not raw_messages:
         raise ValueError("A decision view requires an observable raw message")
     full_ids = native_ids(tokenizer, raw_messages, tools=tools, generation=True)

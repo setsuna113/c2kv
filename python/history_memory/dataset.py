@@ -17,10 +17,10 @@ from pathlib import Path
 from typing import Any, Iterable, Iterator, Mapping, Protocol, Sequence, TypeAlias
 
 from .events import EventStore, Message
-from .packing import MemoryView, select_view
+from .packing import RAW_LAYOUT_PROFILE, MemoryView, select_view
 
 
-SCHEMA_VERSION = "history-memory-decision-v1"
+SCHEMA_VERSION = "history-memory-decision-v2"
 _REQUIRED_ROW_FIELDS = ("session_id", "source", "split", "task_id", "template_id")
 _GROUP_FIELDS = ("session_id", "task_id", "template_id")
 
@@ -331,8 +331,10 @@ class MemoryDecisionRecord:
                 for event in store.events
             ],
             "memory_view": {
+                "raw_layout_profile": RAW_LAYOUT_PROFILE,
                 "gist_event_ids": list(self.view.gist_event_ids),
                 "raw_event_ids": list(self.view.raw_event_ids),
+                "evidence_event_ids": list(self.view.evidence_event_ids),
             },
             "target": self.decision.target.to_dict(),
         }
