@@ -53,11 +53,12 @@ def start_proxy(upstream: str, arm: str, port: int, log_dir: Path,
                 record_reference: str = "", reference: str = "",
                 backend: str = "sglang", doc_packing: str = "turn",
                 max_doc_length: int = 512, max_doc_num: int = 12,
-                query_projection: str | None = None):
+                query_projection: str | None = None, witness_tokenizer: str = "",
+                python_bin: str | None = None):
     log_path = log_dir / f"proxy_{arm}_{port}.jsonl"
     out_handle = open(log_dir / f"proxy_{arm}_{port}.out", "w")
     command = [
-        sys.executable, str(HERE / "proxy.py"),
+        python_bin or sys.executable, str(HERE / "proxy.py"),
         "--upstream", upstream, "--arm", arm, "--backend", backend,
         "--port", str(port), "--request-log", str(log_path),
         "--doc-packing", doc_packing,
@@ -70,6 +71,8 @@ def start_proxy(upstream: str, arm: str, port: int, log_dir: Path,
         command += ["--reference", reference]
     if query_projection:
         command += ["--query-projection", query_projection]
+    if witness_tokenizer:
+        command += ["--witness-tokenizer", witness_tokenizer]
     proc = subprocess.Popen(
         command,
         stdout=out_handle,
@@ -119,6 +122,8 @@ def add_core_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--user-upstream", default="",
                         help="base URL for user-simulator/judge traffic (defaults to --upstream; only the agent arm proxy compresses)")
     parser.add_argument("--proxy-port", type=int, default=34100)
+    parser.add_argument("--proxy-python", default=None,
+                        help="proxy interpreter; use the serving environment for compatible checkpoint tokenizers")
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--exact-out", action="store_true",
                         help="use the supplied output directory verbatim (matrix cells)")
@@ -261,18 +266,25 @@ def main(argv=None):
         record_reference=args.record_reference, reference=args.reference,
         backend=args.backend, doc_packing=args.doc_packing,
         max_doc_length=args.max_doc_length, max_doc_num=args.max_doc_num,
-        query_projection=args.query_projection)
+        query_projection=args.query_projection,
+        witness_tokenizer=str(args.checkpoint or "") if get_arm(args.arm).gold_recovery else "",
+        python_bin=args.proxy_python)
     try:
         # every adapter owns its own "/v1" (adapters/base.py:v1) and its own
         # cwd; run.py hands over the bare proxy URL and nothing else
         ctx = build_context(args, request_log)
+        adapter_started = time.perf_counter()
         summary = ADAPTERS[args.benchmark].run(ctx)
+        adapter_wall_sec = time.perf_counter() - adapter_started
     finally:
         proxy_proc.terminate()
     summary["arm"] = args.arm
     summary["benchmark"] = args.benchmark
     summary["backend"] = args.backend
     summary["model"] = args.model
+    summary["runner_adapter_wall_sec"] = adapter_wall_sec
+    summary["runner_wall_scope"] = "adapter invocation including generation, tool execution and official scoring; excludes model server startup"
+    summary["num_workers"] = args.num_workers
     summary["checkpoint_profile"] = profile
     summary["preflight"] = preflight.as_dict()
     if get_arm(args.arm).text_policy:

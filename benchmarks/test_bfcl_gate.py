@@ -12,6 +12,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import terminal_check  # noqa: E402
+import textarms  # noqa: E402
 from adapters import bfcl_adapter  # noqa: E402
 
 
@@ -34,6 +35,84 @@ def test_embedded_cli_returns_to_run_evaluation(monkeypatch):
     bfcl_adapter.run_cli(["evaluate"])
     assert completed == ["generate", "evaluate"]
     assert sys.argv == original_argv
+
+
+def test_hiagent_native_response_matches_bfcl_fc_handler_contract(monkeypatch):
+    """A Subgoal content line coexists with a BFCL native function call."""
+    mapping = {}
+
+    class ModelConfig:
+        def __init__(self, **kwargs):
+            self.__dict__.update(kwargs)
+
+    class OpenAICompletionsHandler:
+        # Pinned bfcl_eval OpenAICompletionsHandler response contract. The
+        # real package is available only in the server's benchmark venv.
+        def _parse_query_response_FC(self, api_response):
+            message = api_response.choices[0].message
+            return {
+                "model_responses": [
+                    {call.function.name: call.function.arguments}
+                    for call in message.tool_calls
+                ],
+                "model_responses_message_for_chat_history": message,
+                "tool_call_ids": [call.id for call in message.tool_calls],
+                "input_token": api_response.usage.prompt_tokens,
+                "output_token": api_response.usage.completion_tokens,
+            }
+
+    package = ModuleType("bfcl_eval")
+    package.__path__ = []
+    constants = ModuleType("bfcl_eval.constants")
+    constants.__path__ = []
+    model_config = ModuleType("bfcl_eval.constants.model_config")
+    model_config.MODEL_CONFIG_MAPPING = mapping
+    model_config.ModelConfig = ModelConfig
+    handlers = ModuleType("bfcl_eval.model_handler")
+    handlers.__path__ = []
+    api_inference = ModuleType("bfcl_eval.model_handler.api_inference")
+    api_inference.__path__ = []
+    openai_completion = ModuleType(
+        "bfcl_eval.model_handler.api_inference.openai_completion")
+    openai_completion.OpenAICompletionsHandler = OpenAICompletionsHandler
+    openai_module = ModuleType("openai")
+    openai_module.OpenAI = object
+    httpx_module = ModuleType("httpx")
+    httpx_module.Timeout = lambda **kwargs: kwargs
+    for name, module in {
+        "bfcl_eval": package,
+        "bfcl_eval.constants": constants,
+        "bfcl_eval.constants.model_config": model_config,
+        "bfcl_eval.model_handler": handlers,
+        "bfcl_eval.model_handler.api_inference": api_inference,
+        "bfcl_eval.model_handler.api_inference.openai_completion": openai_completion,
+        "openai": openai_module,
+        "httpx": httpx_module,
+    }.items():
+        monkeypatch.setitem(sys.modules, name, module)
+
+    bfcl_adapter.install_handler(
+        "http://proxy/v1", handler_name="c2kv-hiagent-full")
+    config = mapping["c2kv-hiagent-full"]
+    handler = config.model_handler.__new__(config.model_handler)
+    message = SimpleNamespace(
+        content="Subgoal: inspect the workspace",
+        tool_calls=[SimpleNamespace(
+            id="call-1",
+            function=SimpleNamespace(name="ls", arguments='{"a": true}'))],
+    )
+    response = SimpleNamespace(
+        choices=[SimpleNamespace(message=message)],
+        usage=SimpleNamespace(prompt_tokens=11, completion_tokens=5),
+    )
+
+    parsed = handler._parse_query_response_FC(response)
+
+    assert config.is_fc_model is True
+    assert parsed["model_responses"] == [{"ls": '{"a": true}'}]
+    assert parsed["tool_call_ids"] == ["call-1"]
+    assert parsed["model_responses_message_for_chat_history"] is message
+    assert "Action:" not in textarms.HIAGENT_SUBGOAL_NOTE
 
 
 def _results(root: Path, handler: str, family: str, category: str, ids):
@@ -98,8 +177,9 @@ def test_run_bfcl_sets_official_root_before_import_and_writes_ids_there(
     monkeypatch.delenv("BFCL_PROJECT_ROOT", raising=False)
     seen = {"argv": []}
 
-    def install(base_url, model, handler_name):
+    def install(base_url, model, handler_name, **kwargs):
         seen["root_at_import"] = os.environ.get("BFCL_PROJECT_ROOT")
+        seen["install_kwargs"] = kwargs
 
     def check(expected, run_ids, **kwargs):
         seen["check"] = (expected, run_ids, kwargs)
@@ -132,6 +212,13 @@ def test_run_bfcl_sets_official_root_before_import_and_writes_ids_there(
     assert summary["n"] == summary["n_scored"] == 1
     assert summary["semantic_score"] == 1.0
     assert summary["bfcl_project_root"] == str(isolated.resolve())
+    assert summary["bfcl_oracle_max_events"] == 1
+    assert seen["install_kwargs"]["gold_recovery"] is None
+    assert seen["install_kwargs"]["bfcl_oracle_max_events"] == 1
+    assert seen["install_kwargs"]["task_audit_path"] == (
+        isolated.resolve() / "task_audit" / "c2kv-full.jsonl")
+    assert summary["task_telemetry_path"] == str(
+        isolated.resolve() / "task_audit" / "c2kv-full.jsonl")
     assert "BFCL_PROJECT_ROOT" not in os.environ
 
 
@@ -218,3 +305,41 @@ def test_generate_mode_does_not_claim_scored_tasks(tmp_path, monkeypatch):
     assert "n" not in summary and "n_scored" not in summary
     assert "semantic_score" not in summary
     assert argv == [bfcl_adapter.generate_argv("c2kv-hf", "multi_turn_base")]
+
+
+def test_run_bfcl_passes_opt_in_v3_budget_to_handler(tmp_path, monkeypatch):
+    seen = {}
+    monkeypatch.setattr(
+        bfcl_adapter, "install_handler",
+        lambda *args, **kwargs: seen.update(kwargs),
+    )
+    monkeypatch.setattr(
+        bfcl_adapter, "official_category_counts",
+        lambda category: {"multi_turn_base": 1},
+    )
+    monkeypatch.setattr(bfcl_adapter, "run_cli", lambda argv: None)
+    monkeypatch.setattr(terminal_check, "check_bfcl", lambda *args, **kwargs: 0)
+
+    summary = bfcl_adapter.run_bfcl(
+        "http://proxy/v1",
+        mode="generate",
+        project_root=tmp_path,
+        gold_recovery="witness",
+        bfcl_oracle_max_events=4,
+    )
+
+    assert seen["bfcl_oracle_max_events"] == 4
+    assert seen["gold_recovery"] == "witness"
+    assert summary["bfcl_oracle_kind"] == "bfcl_gold_turn_v3"
+    assert summary["bfcl_oracle_version"] == 3
+    assert summary["bfcl_oracle_variant"] == "event_budget_sensitivity"
+
+
+def test_run_bfcl_rejects_multi_event_budget_without_gold_arm(tmp_path):
+    with pytest.raises(ValueError, match="gold-recovery arm"):
+        bfcl_adapter.run_bfcl(
+            "http://proxy/v1",
+            mode="generate",
+            project_root=tmp_path,
+            bfcl_oracle_max_events=4,
+        )

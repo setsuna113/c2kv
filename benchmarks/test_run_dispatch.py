@@ -35,6 +35,7 @@ CLI_SURFACE = [
     ("--upstream", None, True),
     ("--user-upstream", "", False),
     ("--proxy-port", 34100, False),
+    ("--proxy-python", None, False),
     ("--out", None, True),
     ("--task-set", "airline", False),
     ("--tau2-num-trials", None, False),
@@ -42,6 +43,7 @@ CLI_SURFACE = [
     ("--tau2-timeout", None, False),
     ("--categories", "multi_turn_base", False),
     ("--run-ids", "", False),
+    ("--bfcl-oracle-max-events", 1, False),
     ("--num-workers", 4, False),
     ("--max-tasks", None, False),
     ("--run-name", "c2kv_run", False),
@@ -107,6 +109,13 @@ def test_cli_choices_and_types_are_unchanged():
     for flag in ("--proxy-port", "--num-workers", "--max-tasks", "--max-iter",
                  "--max-doc-length", "--max-doc-num"):
         assert actions[flag].type is int, flag
+    assert actions["--bfcl-oracle-max-events"].type is bfcl_adapter._positive_int
+
+
+def test_bfcl_event_budget_cli_requires_a_positive_integer():
+    with pytest.raises(SystemExit):
+        _args(["--benchmark", "bfcl", *BASE_ARGV,
+               "--bfcl-oracle-max-events", "0"])
 
 
 def test_registry_covers_every_adapter_module():
@@ -300,6 +309,8 @@ def test_toolsandbox_dispatch_splits_scenarios(monkeypatch):
     summary = toolsandbox_adapter.run(ctx)
     kw = calls["kwargs"]
     assert kw["scenarios"] == ["a", "b"]
+    assert kw["expected"] == 2
+    assert kw["expected_task_ids"] == ["a", "b"]
     assert kw["agent"] == toolsandbox_adapter.AGENT
     assert kw["user"] == toolsandbox_adapter.AGENT
     assert kw["user_base_url"] == "http://raw:35000"
@@ -314,20 +325,22 @@ def test_bfcl_dispatch_adds_v1_and_chdirs(monkeypatch, tmp_path):
     monkeypatch.setattr(bfcl_adapter.os, "chdir",
                         lambda path: seen.setdefault("cwds", []).append(str(path)))
     ctx = _ctx("bfcl", categories="memory", bfcl_dir=str(tmp_path),
-               run_ids="memory_1")
-    ctx.arm = "c2kv_repair"
+               run_ids="memory_1", num_workers=4, bfcl_oracle_max_events=3)
+    ctx.arm = "c2kv4_gold_witness"
     summary = bfcl_adapter.run(ctx)
     # the handler needs /v1; run.py hands over the bare URL
     assert calls["args"] == ("http://127.0.0.1:34100/v1",)
     assert calls["kwargs"]["categories"] == "memory"
     assert calls["kwargs"]["run_ids"] == "memory_1"
     assert calls["kwargs"]["project_root"] == ctx.out_dir.resolve()
+    assert calls["kwargs"]["num_threads"] == 4
+    assert calls["kwargs"]["bfcl_oracle_max_events"] == 3
     # underscores in an arm name would corrupt the result dir path
-    assert calls["kwargs"]["handler_name"] == "c2kv-c2kv-repair"
+    assert calls["kwargs"]["handler_name"] == "c2kv-c2kv4-gold-witness"
     assert seen["cwds"][0] == str(tmp_path)
     assert len(seen["cwds"]) == 2  # chdir in, chdir back (try/finally)
     assert bfcl_adapter.os.environ["BFCL_PROJECT_ROOT"] == "previous-root"
-    assert summary["cost_join"].startswith("not joinable:")
+    assert "request_log_summary.task_costs" in summary["cost_join"]
 
 
 def test_h200_matrix_delegates_to_generic_runner_with_smoke_flags():

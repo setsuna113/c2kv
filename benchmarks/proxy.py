@@ -71,6 +71,9 @@ import json
 import threading
 import time
 import uuid
+from dataclasses import replace
+from pathlib import Path
+import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Dict, List, Optional, Set, Tuple
 from urllib import request as urlrequest
@@ -85,6 +88,133 @@ import repair_policy
 import textarms
 from arms import Arm, get_arm, history_kv_spec, kv_reuse_spec  # type: ignore
 from backends import BackendError, get_backend  # type: ignore
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "agent"))
+from d_witness_core import select_k_star, witness_scores
+
+WITNESS_TOKENIZER = None
+WITNESS_TOKENIZER_PATH = ""
+
+
+def _witness_texts(records):
+    """Decode the exact standalone grid rows used by /c2kv/extract."""
+    global WITNESS_TOKENIZER
+    if WITNESS_TOKENIZER is None:
+        if not WITNESS_TOKENIZER_PATH:
+            raise ValueError("gold witness requires --witness-tokenizer")
+        from transformers import AutoTokenizer
+        WITNESS_TOKENIZER = AutoTokenizer.from_pretrained(
+            WITNESS_TOKENIZER_PATH, local_files_only=True)
+    texts = []
+    for item in records:
+        rendered = WITNESS_TOKENIZER.apply_chat_template(
+            [{"role": item["role"], "content": item["content"]}],
+            tokenize=False, add_generation_prompt=False, enable_thinking=False)
+        bos = WITNESS_TOKENIZER.bos_token
+        if bos and rendered.startswith(bos):
+            rendered = rendered[len(bos):]
+        ids = WITNESS_TOKENIZER.encode(rendered, add_special_tokens=False)
+        expected = int(item["record"]["original_seq_len"])
+        if len(ids) != expected:
+            raise ValueError(f"witness tokenization differs from extraction: {len(ids)} != {expected}")
+        texts.append(WITNESS_TOKENIZER.decode(ids, skip_special_tokens=False))
+    return texts
+
+
+def plan_gold_repair(messages, arm, counts, oracle, tools, out_messages, force=False):
+    """One frozen witness block for a benchmark-authorized failed turn.
+
+    Gold controls only selection. It never becomes model-visible text.
+    Raw KV is recomputed in context by repair_extract; this is not an
+    offload-transfer latency measurement.
+    """
+    if not oracle:
+        return None
+    oracle_kind = oracle.get("kind")
+    if not arm.gold_recovery or oracle_kind not in {
+            "bfcl_gold_turn_v1", "bfcl_gold_turn_v2", "bfcl_gold_turn_v3"}:
+        raise ValueError("privileged recovery payload requires a BFCL gold-recovery arm")
+    if oracle.get("selector") != arm.gold_recovery:
+        raise ValueError("oracle selector conflicts with the arm")
+    records = counts.get("compressed_records") or []
+    if not records:
+        counts["gold_recovery"] = {"status": "no_compressed_history"}
+        return None
+    values = oracle.get("values")
+    if not isinstance(values, list) or any(not isinstance(v, str) for v in values):
+        raise ValueError("witness values must be a list of strings")
+    # Keep v1/v2 selections separate in a long-lived proxy: a v2 retry may
+    # start at a different request step for the same task/turn.  v1 did not
+    # carry an explicit numeric version, so retain its implicit version 1.
+    oracle_version = oracle.get(
+        "version", {
+            "bfcl_gold_turn_v1": 1,
+            "bfcl_gold_turn_v2": 2,
+            "bfcl_gold_turn_v3": 3,
+        }[oracle_kind])
+    event = (str(oracle_kind), str(oracle_version),
+             str(oracle.get("task_id")), int(oracle["turn"]))
+    with STATE.lock:
+        chosen = STATE.gold_choices.get(event)
+    if chosen is None:
+        texts = _witness_texts(records)
+        df, scores = witness_scores(texts, values)
+        witness = select_k_star(texts, values)
+        index = witness
+        if arm.gold_recovery == "random" and witness is not None:
+            # Same token budget where possible; report absence of a match.
+            budget = records[witness]["record"]["original_seq_len"]
+            candidates = [i for i, r in enumerate(records)
+                          if r["record"]["original_seq_len"] == budget]
+            seed = int(_digest([event, "random-block-v1"]), 16)
+            index = candidates[seed % len(candidates)]
+        chosen = {
+            "content_key": (_content_key(records[index]["role"], records[index]["content"])
+                            if index is not None else None),
+            "witness_index": witness, "selected_index_at_trigger": index,
+            "scores": scores, "selector": arm.gold_recovery,
+            "candidate_count": len(records),
+        }
+        with STATE.lock:
+            chosen = STATE.gold_choices.setdefault(event, chosen)
+    if chosen["content_key"] is None:
+        counts["gold_recovery"] = {**chosen, "status": "no_literal_witness"}
+        return None
+    matches = [i for i, r in enumerate(records)
+               if _content_key(r["role"], r["content"]) == chosen["content_key"]]
+    if not matches:
+        counts["gold_recovery"] = {**chosen, "status": "selected_doc_no_longer_resident"}
+        return None
+    index = matches[0]
+    repair_arm = replace(arm, gold_recovery=None,
+                         repair={"policy": f"offset:{index}", "placement": "append_keep_ledger"})
+    cache_key = _digest([event, out_messages[:records[index]["out_index"] + 1], tools])
+    with STATE.lock:
+        plan = None if force else STATE.gold_plans.get(cache_key)
+    t0 = time.perf_counter()
+    cache_hit = plan is not None
+    if plan is None:
+        plan = plan_repair(messages, repair_arm, counts, tools=tools, out_messages=out_messages)
+        with STATE.lock:
+            STATE.gold_plans[cache_key] = plan
+    # The raw prefix can be unchanged while later tool steps append history.
+    # Reuse the KV entry, but resolve carrier insertion against this request.
+    plan = dict(plan)
+    plan["target_out_index"] = records[index]["out_index"]
+    if "current_start_out_index" in counts:
+        plan["current_start_out_index"] = counts["current_start_out_index"]
+    plan["doc_index"] = index
+    counts["gold_recovery"] = {
+        **chosen, "status": "appended", "selected_index": index,
+        "raw_kv_source": "full_context_recompute_from_text",
+        "raw_kv_cache_hit": cache_hit,
+        "recovery_extract_sec": (time.perf_counter() - t0) if not cache_hit else 0.0,
+        "recovery_block_tokens": plan.get("repair_block_tokens"),
+        "event_id": list(event),
+        "oracle_kind": oracle_kind,
+        "oracle_version": oracle_version,
+    }
+    return plan
 
 
 class ExtractCache:
@@ -570,6 +700,21 @@ def _assemble(messages: List[Dict[str, Any]], arm: Arm, timeout: int = 600):
     the logical-token cost column are computed from.  Raw token counts are
     NOT estimated here; physical numbers come from the backend's response.
     """
+    if arm.native_messages:
+        out = [dict(message) for message in messages]
+        return out, {
+            "system_raw": sum(m.get("role") == "system" for m in messages),
+            "history_raw": 0, "current_raw": len(messages), "compressed": 0,
+            "gist_tokens": 0, "original_tokens": 0, "n_gist_messages": 0,
+            "compressed_records": [], "doc_packing": "native", "n_docs": 0,
+            "dropped_docs": 0, "current_start_out_index": len(out),
+            # Native/full requests do not identify a packed-history candidate
+            # set, so these are intentionally N/A rather than false zeros.
+            "history_packed_original_tokens": None,
+            "history_dropped_original_tokens": None,
+            "history_packed_candidate_doc_count": None,
+            "history_retained_fraction": None,
+        }
     # raw-path training dialect: tool -> bare user message (_normal_chat_message:
     # {"role": "user", "content": str}); a missing system prompt gets the
     # training default injected
@@ -591,6 +736,13 @@ def _assemble(messages: List[Dict[str, Any]], arm: Arm, timeout: int = 600):
     packing = DOC_PACKING if arm.compress_history else "message"
     dropped_docs = 0
     n_docs = 0
+    # ``original_tokens`` remains the selected-history ledger for backwards
+    # compatibility.  Turn packing can discard fitted candidates after
+    # extraction, so keep an explicit pre-selection denominator alongside it.
+    history_packed_original_tokens = 0 if arm.compress_history else None
+    history_dropped_original_tokens = 0 if arm.compress_history else None
+    history_packed_candidate_doc_count = 0 if arm.compress_history else None
+    history_retained_fraction = None
 
     def _keep_raw(i: int, role: str) -> bool:
         return (
@@ -661,7 +813,22 @@ def _assemble(messages: List[Dict[str, Any]], arm: Arm, timeout: int = 600):
                     MAX_DOC_LENGTH,
                 ):
                     docs.append((text, record, doc["source_indices"]))
+            # Fit/extract precedes tail selection.  Count the already-returned
+            # record lengths here; never re-tokenize or re-extract merely for
+            # accounting.
+            history_packed_candidate_doc_count = len(docs)
+            history_packed_original_tokens = sum(
+                int(record.get("original_seq_len") or 0)
+                for _, record, _ in docs)
             docs, dropped_docs = _select_docs(docs, MAX_DOC_NUM)
+            selected_original_tokens = sum(
+                int(record.get("original_seq_len") or 0)
+                for _, record, _ in docs)
+            history_dropped_original_tokens = (
+                history_packed_original_tokens - selected_original_tokens)
+            if history_packed_original_tokens:
+                history_retained_fraction = (
+                    selected_original_tokens / history_packed_original_tokens)
         first_index = compressible[0][0] if compressible else None
         compressible_set = {i for i, _ in compressible}
         for i, message in enumerate(messages):
@@ -687,6 +854,14 @@ def _assemble(messages: List[Dict[str, Any]], arm: Arm, timeout: int = 600):
                 content = _render_action_dialect(message)
             record = _extract(role, content, arm.ratio, timeout)
             _emit_doc(role, content, record, [i])
+        # Message packing has no post-extract selection: its candidate and
+        # retained sets are the same selected-history ledger.
+        if arm.compress_history:
+            history_packed_original_tokens = original_tokens
+            history_dropped_original_tokens = 0
+            history_packed_candidate_doc_count = n_docs
+            if history_packed_original_tokens:
+                history_retained_fraction = 1.0
     counts = dict(message_counts)
     counts["gist_tokens"] = gist_tokens
     counts["original_tokens"] = original_tokens
@@ -695,6 +870,10 @@ def _assemble(messages: List[Dict[str, Any]], arm: Arm, timeout: int = 600):
     counts["doc_packing"] = packing
     counts["n_docs"] = n_docs
     counts["dropped_docs"] = dropped_docs
+    counts["history_packed_original_tokens"] = history_packed_original_tokens
+    counts["history_dropped_original_tokens"] = history_dropped_original_tokens
+    counts["history_packed_candidate_doc_count"] = history_packed_candidate_doc_count
+    counts["history_retained_fraction"] = history_retained_fraction
     # index in `out` where the current (raw) block starts: repair-only
     # messages for append placements are inserted right before it
     counts["current_start_out_index"] = len(out) - message_counts["current_raw"]
@@ -1092,6 +1271,8 @@ class ProxyState:
         # conversation_id -> server streaming-session id (physical-eviction
         # history-KV arms only)
         self.history_sessions: Dict[str, str] = {}
+        self.gold_choices = {}
+        self.gold_plans = {}
 
 
 STATE = ProxyState()
@@ -1149,6 +1330,9 @@ class ProxyHandler(BaseHTTPRequestHandler):
             self._send_json(400, {"error": "invalid json"})
             return
         assert ARM is not None and BACKEND is not None
+        eval_context = payload.pop("c2kv_eval_context", None)
+        oracle = payload.pop("c2kv_oracle", None)
+        self.eval_context = eval_context if isinstance(eval_context, dict) else {}
         start = time.perf_counter()
         messages = payload.get("messages") or []
         fingerprint = messages_fingerprint(messages)
@@ -1166,6 +1350,9 @@ class ProxyHandler(BaseHTTPRequestHandler):
             repair_plan = plan_repair(messages, ARM, counts,
                                      tools=payload.get("tools"),
                                      out_messages=messages_out)
+            if oracle:
+                repair_plan = plan_gold_repair(
+                    messages, ARM, counts, oracle, payload.get("tools"), messages_out)
             history_ctx = _history_kv_context(messages_out, counts, ARM)
             if history_ctx is not None:
                 if history_ctx["spec"]["persistent_session"]:
@@ -1261,6 +1448,9 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 repair_plan = plan_repair(messages, ARM, counts,
                                           tools=payload.get("tools"),
                                           out_messages=messages_out)
+                if oracle:
+                    repair_plan = plan_gold_repair(
+                        messages, ARM, counts, oracle, payload.get("tools"), messages_out, force=True)
                 data, normalized = call_upstream(messages_out, repair_plan)
         except (UpstreamError, BackendError, CacheMiss, RuntimeError, ValueError,
                 URLError, OSError) as error:
@@ -1342,6 +1532,10 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 "ratio": ARM.ratio,
                 "gist_tokens": counts["gist_tokens"],
                 "original_tokens": counts["original_tokens"],
+                "history_packed_original_tokens": counts["history_packed_original_tokens"],
+                "history_dropped_original_tokens": counts["history_dropped_original_tokens"],
+                "history_packed_candidate_doc_count": counts["history_packed_candidate_doc_count"],
+                "history_retained_fraction": counts["history_retained_fraction"],
                 "n_gist_messages": counts["n_gist_messages"],
                 "assemble_sec": round(assemble_sec, 4),
                 "wall_sec": round(total_sec, 4),
@@ -1349,6 +1543,21 @@ class ProxyHandler(BaseHTTPRequestHandler):
         )
         data["c2kv_proxy"].update(normalized["cost"])
         counts["repair_frame"] = _repair_frame_check(repair_plan, normalized)
+        if counts.get("gold_recovery"):
+            data["c2kv_proxy"]["gold_recovery"] = counts["gold_recovery"]
+        unit_bytes = (normalized.get("cost") or {}).get("bytes_per_kv_token")
+        if isinstance(unit_bytes, int) and unit_bytes > 0 and counts["gist_tokens"]:
+            repair_tokens = int((repair_plan or {}).get("repair_block_tokens") or 0)
+            counts["history_tensor_accounting"] = {
+                "bytes_per_kv_token": unit_bytes,
+                "full_equivalent_selected_history_bytes": counts["original_tokens"] * unit_bytes,
+                "before_recovery_bytes": counts["gist_tokens"] * unit_bytes,
+                "after_recovery_bytes": (counts["gist_tokens"] + repair_tokens) * unit_bytes,
+                "recovery_bytes": repair_tokens * unit_bytes,
+                "history_ratio_before": counts["original_tokens"] / counts["gist_tokens"],
+                "history_ratio_after": counts["original_tokens"] / (counts["gist_tokens"] + repair_tokens),
+                "scope": "history_KV_tensor_payload_only; excludes pool duplication, indexes and Python metadata",
+            }
         self._send_json(200, data)
         counts["wall_sec"] = round(total_sec, 4)
         self._log_request(payload, normalized, counts, recover=recover_flags,
@@ -1420,12 +1629,22 @@ class ProxyHandler(BaseHTTPRequestHandler):
             "n_tools": len(request.get("tools") or []),
             "gist_tokens": counts.get("gist_tokens"),
             "original_tokens": counts.get("original_tokens"),
+            "history_packed_original_tokens": counts.get("history_packed_original_tokens"),
+            "history_dropped_original_tokens": counts.get("history_dropped_original_tokens"),
+            "history_packed_candidate_doc_count": counts.get("history_packed_candidate_doc_count"),
+            "history_retained_fraction": counts.get("history_retained_fraction"),
             "n_gist_messages": counts.get("n_gist_messages"),
             "wall_sec": counts.get("wall_sec"),
             "error": error,
             "usage": (normalized or {}).get("usage"),
             "finish_reason": (normalized or {}).get("finish_reason"),
+            "n_native_tool_calls": len((normalized or {}).get("tool_calls") or []) if normalized else None,
+            "native_tool_names": [
+                (call.get("function") or {}).get("name")
+                for call in ((normalized or {}).get("tool_calls") or [])
+            ] if normalized else None,
         }
+        row["eval_context"] = getattr(self, "eval_context", {})
         if status != "ok":
             row["error_kind"] = status
         # raw-vs-compressed message-class breakdown
@@ -1433,7 +1652,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
                     if k in ("system_raw", "history_raw", "current_raw", "compressed")})
         row.update({k: counts.get(k) for k in
                     ("doc_packing", "n_docs", "dropped_docs", "repair_frame",
-                     "history_kv", "kv_reuse")
+                     "history_kv", "kv_reuse", "gold_recovery", "history_tensor_accounting")
                     if k in counts})
         if counts.get("textarm") is not None:
             row["textarm"] = counts["textarm"]
@@ -1453,8 +1672,10 @@ class ProxyHandler(BaseHTTPRequestHandler):
 def main(argv=None):
     global ARM, BACKEND, UPSTREAM, REQUEST_LOG_PATH
     global DOC_PACKING, MAX_DOC_LENGTH, MAX_DOC_NUM, QUERY_PROJECTION
+    global WITNESS_TOKENIZER_PATH
     textarms.reset_state()  # fresh caches/state per proxy process
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--witness-tokenizer", default="")
     parser.add_argument("--upstream", required=True,
                         help="backend base URL, e.g. http://127.0.0.1:34000")
     parser.add_argument("--backend", default="sglang",
@@ -1488,6 +1709,7 @@ def main(argv=None):
     UPSTREAM = args.upstream.rstrip("/")
     REQUEST_LOG_PATH = args.request_log
     BACKEND = get_backend(args.backend, _post_json)
+    WITNESS_TOKENIZER_PATH = args.witness_tokenizer
     STATE.reference_log_path = args.record_reference
     if args.reference:
         if not ARM.recover:

@@ -179,12 +179,10 @@ def collect(results_path: Path, domain: str = "airline") -> Dict[str, Any]:
 
     tools: List[Dict[str, Any]] = []
     try:
-        import tau2.registry as registry
+        from tau2.registry import registry
 
         env = registry.get_env_constructor(domain)()
-        tools = [
-            tool.openai_schema for tool in env.tools.get_tools().values()
-        ]
+        tools = [tool.openai_schema for tool in env.get_tools()]
     except Exception as error:  # noqa: BLE001 - protocol column degrades
         print(f"WARNING: tau2 tool pool unavailable ({error!r}); "
               "protocol column degrades to unknown", file=sys.stderr)
@@ -199,24 +197,35 @@ def collect(results_path: Path, domain: str = "airline") -> Dict[str, Any]:
             if m.get("role") == "assistant"
         ]
         first_violations = [
-            t["first_violation"] for t in turns if t["first_violation"]
+            t["first_violation"] for t in turns
+            if t["protocol_legal"] is False and t["first_violation"]
         ]
+        protocol_legal = None
+        if any(t["protocol_legal"] is False for t in turns):
+            protocol_legal = False
+        elif turns and all(t["protocol_legal"] is True for t in turns):
+            protocol_legal = True
         reward_info = sim.get("reward_info") or {}
         rows.append(
             {
                 "task_id": str(sim.get("task_id")),
                 "semantic_score": reward_info.get("reward"),
-                "protocol_legal": all(t["protocol_legal"] for t in turns) if turns else None,
+                "protocol_legal": protocol_legal,
                 "n_turns": len(turns),
                 "n_tool_calls": sum(t["n_tool_calls"] for t in turns),
                 "n_illegal_turns": len(first_violations),
+                "n_unknown_protocol_turns": sum(t["protocol_legal"] is None for t in turns),
                 "first_violation": first_violations[0] if first_violations else None,
                 "termination": sim.get("termination_reason"),
             }
         )
     from metrics import aggregate  # noqa: E402
 
-    return aggregate(rows, cluster_key="task_id")
+    summary = aggregate(rows, cluster_key="task_id")
+    summary["task_rows"] = rows
+    summary["protocol_evaluable_tasks"] = sum(row["protocol_legal"] is not None for row in rows)
+    summary["protocol_tool_pool_size"] = len(tools)
+    return summary
 
 
 def _task_tools(traj: Dict[str, Any]) -> List[Dict[str, Any]]:

@@ -20,6 +20,12 @@ def _tau2(tmp_path: Path) -> Path:
     return path
 
 
+def _bfcl(tmp_path: Path) -> Path:
+    path = tmp_path / "bfcl"
+    (path / "bfcl_eval" / "data").mkdir(parents=True)
+    return path
+
+
 def _acon_qa_tree(tmp_path: Path) -> Path:
     root = tmp_path / "acon"
     marker = root / "src" / "productive_agents" / "llm.py"
@@ -115,6 +121,37 @@ def test_compression_ratio_outside_profile_is_an_explicit_warning(tmp_path):
     assert "compression_ratio_out_of_training_profile" in {
         item.code for item in result.warnings
     }
+
+
+def test_multi_event_budget_requires_bfcl_gold_arm(tmp_path):
+    bfcl = _bfcl(tmp_path)
+    common = {
+        "runner_python": sys.executable,
+        "bfcl_dir": bfcl,
+        "bfcl_oracle_max_events": 4,
+    }
+    plain = capabilities.preflight(
+        "bfcl", "c2kv4", "sglang", options=common, environ=_env(tmp_path))
+    assert "bfcl_multi_event_gold_arm" in _codes(plain)
+
+    gold = capabilities.preflight(
+        "bfcl", "c2kv4_gold_witness", "sglang",
+        options=common, environ=_env(tmp_path),
+    )
+    assert gold.ok
+    assert gold.effective["bfcl_oracle_protocol"] == "bfcl_gold_turn_v3"
+    assert gold.effective["bfcl_oracle_max_events"] == "4"
+
+    tau2 = _tau2(tmp_path)
+    wrong_benchmark = capabilities.preflight(
+        "tau2", "c2kv4_gold_witness", "sglang",
+        options={
+            "runner_python": sys.executable,
+            "bfcl_oracle_max_events": 4,
+        },
+        environ=_env(tmp_path, TAU2_DIR=str(tau2)),
+    )
+    assert "bfcl_multi_event_gold_arm" in _codes(wrong_benchmark)
 
 
 def test_acebench_history_arms_are_rejected_until_normalizer_feature(tmp_path):

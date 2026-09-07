@@ -109,16 +109,17 @@ def protocol_columns_for_turn(
 ) -> Dict[str, Any]:
     """One row of the protocol column: legality, call count, first violation."""
     calls, broken = parse_tool_calls(message)
-    if calls and not tools:
+    if calls and not tools and not broken:
         # tool calls exist but no pool was advertised — legality is not
-        # computable, degrade to unknown rather than pass/fail
+        # computable, degrade to unknown rather than pass/fail. Broken
+        # syntax remains decidable even without the advertised schema.
         return {"n_tool_calls": len(calls), "protocol_legal": None,
                 "first_violation": "no_tool_pool"}
     violations = [
         _schema_violations(call["name"], call["arguments"], tools) for call in calls
     ]
     violations = [v for v in violations if v]
-    if not calls and broken:
+    if broken:
         violations.append("unterminated <tool_call> syntax")
     legal = not violations
     return {

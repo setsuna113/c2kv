@@ -108,6 +108,42 @@ def summarize(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
         "doc_packing": packings,
     }
     summary["mixed_query_proj"] = len(modes) > 1
+    summary["wall_sec_total"] = sum(walls)
+    summary["server_total_gpu_kv_bytes_max"] = max(
+        (r["total_gpu_kv_bytes"] for r in ok if isinstance(r.get("total_gpu_kv_bytes"), int)),
+        default=None)
+    summary["server_memory_scope"] = "process allocator snapshot including shared caches and concurrent requests"
+    recovery = [r["gold_recovery"] for r in ok if isinstance(r.get("gold_recovery"), dict)]
+    summary["gold_recovery_status_counts"] = dict(Counter(r.get("status") for r in recovery))
+    summary["recovery_extract_sec_total"] = sum(float(r.get("recovery_extract_sec") or 0) for r in recovery)
+    summary["recovery_events"] = len({tuple(r["event_id"]) for r in recovery
+                                     if r.get("status") == "appended" and r.get("event_id")})
+    tensor_rows = [r["history_tensor_accounting"] for r in ok
+                   if isinstance(r.get("history_tensor_accounting"), dict)]
+    if tensor_rows:
+        summary["history_tensor_accounting"] = {
+            "n_requests": len(tensor_rows),
+            "before_recovery_bytes_mean": _mean(r.get("before_recovery_bytes") for r in tensor_rows),
+            "after_recovery_bytes_mean": _mean(r.get("after_recovery_bytes") for r in tensor_rows),
+            "history_ratio_before_mean": _mean(r.get("history_ratio_before") for r in tensor_rows),
+            "history_ratio_after_mean": _mean(r.get("history_ratio_after") for r in tensor_rows),
+            "scope": tensor_rows[0]["scope"],
+        }
+    by_task = {}
+    for row in rows:
+        context = row.get("eval_context") or {}
+        task_id = context.get("task_id")
+        if task_id is not None:
+            by_task.setdefault(str(task_id), []).append(row)
+    if by_task:
+        summary["task_costs"] = {
+            key: {"n_requests": len(values),
+                  "n_errors": sum(r.get("status") != "ok" for r in values),
+                  "wall_sec_total": sum(float(r.get("wall_sec") or 0) for r in values),
+                  "prompt_tokens": sum(int((r.get("usage") or {}).get("prompt_tokens") or 0) for r in values),
+                  "completion_tokens": sum(int((r.get("usage") or {}).get("completion_tokens") or 0) for r in values)}
+            for key, values in by_task.items()
+        }
     return summary
 
 

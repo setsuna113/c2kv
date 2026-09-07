@@ -126,6 +126,11 @@ class TestAssemble:
         assert counts["system_raw"] == 1
         assert counts["current_raw"] == 1
         assert counts["compressed"] == 4
+        # Message packing never tail-selects: candidate == selected history.
+        assert counts["history_packed_original_tokens"] == counts["original_tokens"]
+        assert counts["history_dropped_original_tokens"] == 0
+        assert counts["history_packed_candidate_doc_count"] == counts["n_docs"]
+        assert counts["history_retained_fraction"] == 1.0
 
     def test_raw_message_breakdown_hybrid_k5(self, monkeypatch):
         monkeypatch.setattr(proxy_mod, "_extract", _extract_stub)
@@ -189,9 +194,16 @@ class TestAssemble:
 
     def test_full_arm_marks_nothing(self, monkeypatch):
         monkeypatch.setattr(proxy_mod, "_extract", _extract_stub)
-        out, counts = proxy_mod._assemble(_messages(), get_arm("full"), 0)
-        assert counts["gist_tokens"] == 0
-        assert all("c2kv_key_hash" not in m for m in out)
+        for arm in ("full", "full_native"):
+            out, counts = proxy_mod._assemble(_messages(), get_arm(arm), 0)
+            assert counts["gist_tokens"] == 0
+            assert all("c2kv_key_hash" not in m for m in out)
+            # Raw full has no packed candidate set, so it must not report
+            # zeros as an observed history denominator.
+            assert counts["history_packed_original_tokens"] is None
+            assert counts["history_dropped_original_tokens"] is None
+            assert counts["history_packed_candidate_doc_count"] is None
+            assert counts["history_retained_fraction"] is None
 
 
 class TestTurnPacking:
@@ -258,6 +270,11 @@ class TestTurnPacking:
         out, counts = proxy_mod._assemble(conv, get_arm("c2kv"), 0)
         docs = [m["content"] for m in out if "c2kv_key_hash" in m]
         assert len(docs) == 4 and counts["dropped_docs"] == 4
+        assert counts["history_packed_candidate_doc_count"] == 8
+        assert (counts["history_packed_original_tokens"]
+                == counts["original_tokens"] + counts["history_dropped_original_tokens"])
+        assert counts["history_dropped_original_tokens"] > 0
+        assert 0 < counts["history_retained_fraction"] < 1
         assert "q0" in docs[0]          # doc 0 anchor kept
         assert "q5" in docs[1] and "q7" in docs[3]  # last three
 
@@ -951,7 +968,7 @@ class _CountingSglang(TestBackends.FakeSglang):
                 "cost": {}}
 
 
-def _drive_chat(monkeypatch, backend, arm, payload, responses):
+def _drive_chat(monkeypatch, backend, arm, payload, responses, request_log_path=""):
     """Run the real ``ProxyHandler.do_POST`` once against fakes.
 
     ``responses`` is consumed one entry per upstream chat POST; each entry is
@@ -961,7 +978,7 @@ def _drive_chat(monkeypatch, backend, arm, payload, responses):
     monkeypatch.setattr(proxy_mod, "BACKEND", backend)
     monkeypatch.setattr(proxy_mod, "ARM", arm)
     monkeypatch.setattr(proxy_mod, "CACHE", proxy_mod.ExtractCache())
-    monkeypatch.setattr(proxy_mod, "REQUEST_LOG_PATH", "")
+    monkeypatch.setattr(proxy_mod, "REQUEST_LOG_PATH", request_log_path)
     posts = []
 
     def fake_post(path, body, timeout, retries=2):
@@ -978,6 +995,33 @@ def _drive_chat(monkeypatch, backend, arm, payload, responses):
     handler._send_json = lambda code, obj: sent.append((code, obj))
     handler.do_POST()
     return sent, posts
+
+
+def test_proxy_forwards_packed_history_accounting_to_response_and_log(tmp_path, monkeypatch):
+    backend = _CountingSglang()
+    monkeypatch.setattr(proxy_mod, "DOC_PACKING", "message")
+    request_log = tmp_path / "proxy.jsonl"
+    body = {
+        "choices": [{"message": {"content": "ok", "tool_calls": None},
+                     "finish_reason": "stop"}],
+        "usage": {}, "metadata": {"sglang_runtime": {}},
+    }
+    sent, _ = _drive_chat(
+        monkeypatch, backend, get_arm("c2kv"),
+        {"model": "m", "messages": _messages()}, [lambda: body],
+        request_log_path=str(request_log),
+    )
+    assert [code for code, _ in sent] == [200]
+    metadata = sent[0][1]["c2kv_proxy"]
+    row = json.loads(request_log.read_text(encoding="utf-8").strip())
+    for field in (
+        "history_packed_original_tokens", "history_dropped_original_tokens",
+        "history_packed_candidate_doc_count", "history_retained_fraction",
+    ):
+        assert row[field] == metadata[field]
+    assert metadata["history_packed_original_tokens"] == metadata["original_tokens"]
+    assert metadata["history_dropped_original_tokens"] == 0
+    assert metadata["history_retained_fraction"] == 1.0
 
 
 class TestFrameCheckWithoutClientSystem:

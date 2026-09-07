@@ -307,6 +307,12 @@ def _method_capabilities(result: PreflightResult, arm: str, backend: str,
         ))
         return
     spec = ARMS[arm]
+    if spec.gold_recovery:
+        result.requirements.append(Requirement(
+            code="gold_turn_oracle_benchmark", severity="error",
+            satisfied=benchmark == "bfcl" and backend == "sglang",
+            message="gold turn recovery currently requires BFCL with the SGLang backend",
+        ))
     try:
         spec.validate()
     except ValueError as error:
@@ -460,6 +466,26 @@ def preflight(benchmark: str, arm: str, backend: str = "sglang", *,
             message=f"unknown backend {backend!r}",
         ))
         return result
+
+    oracle_max_events = opts.get("bfcl_oracle_max_events", 1)
+    if (not isinstance(oracle_max_events, int)
+            or isinstance(oracle_max_events, bool)
+            or oracle_max_events <= 0):
+        result.requirements.append(Requirement(
+            code="bfcl_oracle_event_budget", severity="error", satisfied=False,
+            message="--bfcl-oracle-max-events must be a positive integer",
+        ))
+    elif oracle_max_events > 1:
+        gold_selector = (
+            ARMS[arm].gold_recovery if arm in ARMS else None)
+        result.requirements.append(Requirement(
+            code="bfcl_multi_event_gold_arm", severity="error",
+            satisfied=benchmark == "bfcl" and bool(gold_selector),
+            message=("--bfcl-oracle-max-events > 1 requires BFCL and a "
+                     "gold-recovery arm"),
+        ))
+        result.effective["bfcl_oracle_protocol"] = "bfcl_gold_turn_v3"
+        result.effective["bfcl_oracle_max_events"] = str(oracle_max_events)
 
     feature_set = frozenset(all_features)
     _method_capabilities(result, arm, backend, benchmark, profile, feature_set)

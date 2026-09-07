@@ -184,18 +184,19 @@ TRAINING_DEFAULT_SYSTEM_PROMPT = "You are a helpful assistant."
 
 HIAGENT_SUBGOAL_NOTE = """
 Note: A subgoal is a milestone goal that you need to complete in order to achieve the final goal.
-When there is an unfinished subgoal, you need to ground the given subgoal to corresponding executable actions for solving the given task in the following format: \"Action: {action}\".
-When there is no current subgoal or you believe the previous subgoal has been completed (based on past actions and observations), you need to output the next subgoal to be completed and its first action in the following format: \"Subgoal: {subgoal}\\nAction: {action}\".
+When there is an unfinished subgoal and another environment action is needed, continue it by issuing the corresponding native tool call.
+When there is no current subgoal or you believe the previous subgoal has been completed (based on past actions and observations), and another environment action is needed, put the next subgoal in assistant content as exactly one line in the format \"Subgoal: {subgoal}\" and issue its first action as a native tool call in the same response.
+When no environment action is needed because you can answer, finish, or must ask for clarification, reply naturally in assistant content without inventing a tool call or a Subgoal line.
 Instructions:
 1. You cannot output two subgoals consecutively.
 2. Subgoal must be one line of text and does not print any newline characters.
-3. Each subgoal must be followed by the execution of at least one valid action.
-4. Actions in this environment are tool calls: emit the tool call that executes the action (the Subgoal line goes in the message text alongside the tool call).
+3. Each declared subgoal must be accompanied in the same response by at least one valid native tool call.
+4. Every environment action must use the API's native function-calling interface in the structured tool_calls field. Do not serialize an action into assistant content.
 """
 
 HIAGENT_RETRIEVE_TOOL_NAME = "hiagent_retrieve"
 HIAGENT_RETRIEVAL_NOTE = """
-5. Detailed action-observation trajectories for completed subgoals are hidden. If a hidden trajectory is needed, call hiagent_retrieve with its one-based subgoal id. This is a context-retrieval action, not an environment action.
+5. Detailed action-observation trajectories for completed subgoals are hidden. If a hidden trajectory is needed, call hiagent_retrieve with its one-based subgoal id through the same native function-calling interface. This is a context-retrieval action, not an environment action. Do not serialize the retrieval request into assistant content.
 """
 
 # Paper §3.3, verbatim (the repo's summarize.py is a 2026 rebuild and is

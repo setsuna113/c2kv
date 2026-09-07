@@ -1,5 +1,10 @@
 # hf_server → SGLang c2kv fork 迁移记录
 
+> **2026-09-05 语义更正**：下面 2026-09-02 的 `gist` 启动建议已被
+> `docs/c2kv_semantics.md` §4 取代。`checkpoint-1088` 的参考配置使用
+> `--c2kv-query-proj base`；已知按 2026-08-09 之后本地训练代码训练的
+> checkpoint 才使用 `gist`。以 checkpoint 的训练来源和 profile 为准。
+>
 > **2026-09-02 更新**：serving 树改为 fork 分支 `task/c2kv-serve-align`
 > （基于雨晗 `c2kv-sglang-bfcl` @ 7de9e8105，已含本文件后面描述的 4 文件补丁，
 > `benchmarks/backends/sglang_patches/` 作废）。启动时加
