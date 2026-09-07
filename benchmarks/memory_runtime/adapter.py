@@ -12,6 +12,7 @@ import threading
 import time
 from pathlib import Path
 from typing import Any, Callable
+from .tokenization import TOOL_SCHEMA_PROFILE, serving_tools
 
 _shared_path = str(Path(__file__).resolve().parents[2] / "python")
 sys.path.insert(0, _shared_path)
@@ -60,7 +61,7 @@ class RuntimeAdapter:
         def count(messages, tools):
             # Recent Transformers versions return BatchEncoding by default;
             # its len() is the number of fields, not the token sequence length.
-            return len(native_ids(tokenizer, messages, tools=tools or None, generation=True))
+            return len(native_ids(tokenizer, messages, tools=serving_tools(tools), generation=True))
 
         return cls(json.loads(Path(path).read_text(encoding="utf-8")), count)
 
@@ -196,6 +197,7 @@ class RuntimeAdapter:
         selected_sources = {i for event_id in selected_ids for i in store.event(event_id).source_indices}
         metadata = {
             "version": RUNTIME_VERSION, "evidence_version": EVIDENCE_VERSION,
+            "tool_schema_profile": TOOL_SCHEMA_PROFILE, "c2kv_tools_dump_expected": "full",
             "mode": self.mode, "run_id": run_id, "task_id": task_id,
             "attempt_id": attempt, "decision_id": str(decision),
             "bytes_per_kv_token": self.bytes_per_kv_token,

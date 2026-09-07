@@ -15,15 +15,17 @@ sys.path.insert(0, str(HERE.parent))
 import proxy
 from arms import get_arm
 from memory_runtime.adapter import RuntimeAdapter
+from memory_runtime.tokenization import TOOL_SCHEMA_PROFILE, serving_tools
 from history_memory.packing import native_ids, visible_message
 
 
 def audit(root, tokenizer_path):
+    import transformers
     from transformers import AutoTokenizer
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, local_files_only=True)
 
     def count(messages, tools):
-        return len(native_ids(tokenizer, messages, tools=tools, generation=True))
+        return len(native_ids(tokenizer, messages, tools=serving_tools(tools), generation=True))
 
     results = []
     states = {}
@@ -80,6 +82,8 @@ def audit(root, tokenizer_path):
             ))
     passed = len(results) == 16 and all(r["raw_token_parity"] and r["selected_view_unchanged"] for r in results)
     return dict(schema="a-runtime-protocol-cpu-audit-v1", status="passed" if passed else "failed",
+                tokenizer_path=tokenizer_path, tokenizer_class=type(tokenizer).__name__,
+                transformers_version=transformers.__version__, tool_schema_profile=TOOL_SCHEMA_PROFILE,
                 generated_requests=16, additional_model_requests=0, additional_gist_extractions=0,
                 original_metadata_issue="len(BatchEncoding) counted fields instead of input_ids; original raw/evidence budget fields are invalid",
                 interpretation="CPU replay validates the executed views and corrected byte budgets; it does not retroactively validate the original online enforcement",

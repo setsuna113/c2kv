@@ -11,6 +11,7 @@ sys.path.insert(0, str(ROOT / "benchmarks"))
 from memory_runtime.adapter import RuntimeAdapter
 from history_memory.events import EventStore
 from history_memory.evidence import evidence_message
+from memory_runtime.tokenization import serving_tools
 
 
 def count(messages, tools):
@@ -129,3 +130,12 @@ def test_real_token_counter_reads_batchencoding_input_ids(tmp_path, monkeypatch)
     path.write_text(json.dumps(config), encoding="utf-8")
     runtime = RuntimeAdapter.from_config(str(path), "local")
     assert runtime._token_counter([{"role": "user", "content": "x"}], []) == 41
+
+
+def test_tool_tokenization_matches_declared_server_fields_without_mutating_source():
+    tools = [{"type": "function", "function": {"name": "lookup", "parameters": {"type": "object"},
+              "response": {"description": "Benchmark response schema is not sent to the model"}}}]
+    before = copy.deepcopy(tools)
+    assert serving_tools(tools) == [{"type": "function", "function": {
+        "description": None, "name": "lookup", "parameters": {"type": "object"}, "strict": False}}]
+    assert tools == before

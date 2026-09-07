@@ -422,6 +422,14 @@ def _verify_memory_runtime_kv_bytes(
     metadata["backend_bytes_per_kv_token"] = actual
     metadata["byte_geometry_verification"] = "verified"
     metadata["byte_geometry_verified_by_backend"] = True
+    if "c2kv_tools_dump_expected" in metadata:
+        observed_dump = (normalized.get("cost") or {}).get("c2kv_tools_dump")
+        metadata["backend_tools_dump"] = observed_dump
+        if observed_dump != metadata["c2kv_tools_dump_expected"]:
+            error = f"tool schema serialization disagrees with backend: {metadata['c2kv_tools_dump_expected']} != {observed_dump}"
+            with _memory_runtime_verify_lock:
+                MEMORY_RUNTIME_FATAL_ERROR = error
+            raise MemoryRuntimeError(error)
     if "total_raw_prompt_tokens" in metadata:
         actual_raw = (normalized.get("usage") or {}).get("prompt_tokens")
         expected_raw = metadata["total_raw_prompt_tokens"]
