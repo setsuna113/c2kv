@@ -17,8 +17,28 @@ from typing import Any, Iterable, Mapping
 
 SCHEMA = "a-runtime-bfcl-official-collection-v1"
 MANIFEST_SCHEMA = "a-runtime-bfcl-dev-pilot-v1"
-EXPECTED_VARIANTS = ("full", "legacy", "protect")
-EXPECTED_ARMS = {"full": "full", "legacy": "c2kv4", "protect": "c2kv4"}
+FIRST_DEV4_VARIANTS = ("full", "legacy", "protect")
+LEASE_DEV2_VARIANTS = (
+    "full", "legacy", "protect", "recover_once", "persistent", "no_gist",
+)
+LEASE_DEV2_TASK_IDS = ("multi_turn_base_1", "multi_turn_base_30")
+LEASE_DEV2_SAMPLING = {
+    "temperature": 0.001,
+    "seed": 0,
+    "max_completion_tokens": 4096,
+}
+EXPECTED_ARMS = {
+    "full": "full",
+    "legacy": "c2kv4",
+    "protect": "c2kv4",
+    "recover_once": "c2kv4",
+    "persistent": "c2kv4",
+    "no_gist": "full",
+}
+EXPECTED_HANDLERS = {
+    variant: "c2kv-full" if variant in {"full", "no_gist"} else "c2kv-c2kv4"
+    for variant in LEASE_DEV2_VARIANTS
+}
 CATEGORY = "multi_turn_base"
 
 
@@ -187,6 +207,21 @@ class Collector:
         return manifest
 
     def validate_manifest(self, manifest: Mapping[str, Any]) -> dict[str, Any]:
+        design = manifest.get("design")
+        if design in (None, "first-dev4"):
+            expected_variants = FIRST_DEV4_VARIANTS
+            expected_task_ids = None
+            expected_sampling = None
+        elif design == "lease-dev2":
+            expected_variants = LEASE_DEV2_VARIANTS
+            expected_task_ids = LEASE_DEV2_TASK_IDS
+            expected_sampling = LEASE_DEV2_SAMPLING
+        else:
+            self.error("manifest_contract", f"unknown pilot design {design!r}")
+            expected_variants = ()
+            expected_task_ids = None
+            expected_sampling = None
+
         run_id = manifest.get("run_id")
         if not isinstance(run_id, str) or not run_id:
             self.error("manifest_contract", "run_id must be a non-empty string")
@@ -202,21 +237,36 @@ class Collector:
             task_ids: list[str] = []
         else:
             task_ids = list(task_values)
-
-        variants_value = manifest.get("variants")
-        if not isinstance(variants_value, list) or variants_value != list(EXPECTED_VARIANTS):
+        if expected_task_ids is not None and task_ids != list(expected_task_ids):
             self.error(
                 "manifest_contract",
-                f"variants must be {list(EXPECTED_VARIANTS)!r}, got {variants_value!r}",
+                f"task_ids must be {list(expected_task_ids)!r}, got {task_ids!r}",
             )
 
-        planned = len(task_ids) * len(EXPECTED_VARIANTS)
+        variants_value = manifest.get("variants")
+        if not isinstance(variants_value, list) or variants_value != list(expected_variants):
+            self.error(
+                "manifest_contract",
+                f"variants must be {list(expected_variants)!r}, got {variants_value!r}",
+            )
+
+        planned = len(task_ids) * len(expected_variants)
         maximum_tasks = manifest.get("maximum_tasks")
         within_task_budget = _is_int(maximum_tasks) and planned <= maximum_tasks
+        if design == "lease-dev2":
+            within_task_budget = within_task_budget and planned == 12 and maximum_tasks == 12
         if not within_task_budget:
             self.error(
                 "task_budget",
                 f"planned task-arm pairs {planned} exceed invalid cap {maximum_tasks!r}",
+            )
+
+        generation_sampling = manifest.get("generation_request_sampling")
+        if expected_sampling is not None and generation_sampling != expected_sampling:
+            self.error(
+                "sampling_contract",
+                "generation_request_sampling must be "
+                f"{expected_sampling!r}, got {generation_sampling!r}",
             )
 
         retry_fields = (
@@ -241,21 +291,21 @@ class Collector:
                     continue
                 variant = item.get("variant")
                 argv = item.get("argv")
-                if variant in commands or variant not in EXPECTED_VARIANTS:
+                if variant in commands or variant not in expected_variants:
                     self.error("manifest_contract", f"invalid or duplicate command variant {variant!r}")
                     continue
                 if not isinstance(argv, list) or any(not isinstance(arg, str) for arg in argv):
                     self.error("manifest_contract", f"command {variant!r} argv must be a string list")
                     continue
                 commands[str(variant)] = list(argv)
-        if set(commands) != set(EXPECTED_VARIANTS):
+        if set(commands) != set(expected_variants):
             self.error(
                 "manifest_contract",
                 f"command coverage mismatch: found {sorted(commands)}",
             )
 
         command_checks: dict[str, bool] = {}
-        for variant in EXPECTED_VARIANTS:
+        for variant in expected_variants:
             argv = commands.get(variant, [])
             expected_arm = EXPECTED_ARMS[variant]
             checks = {
@@ -277,8 +327,8 @@ class Collector:
                 if isinstance(item, dict) and item.get("variant") not in result_map:
                     result_map[str(item.get("variant"))] = item.get("returncode")
         results_ok = (
-            set(result_map) == set(EXPECTED_VARIANTS)
-            and all(result_map[variant] == 0 for variant in EXPECTED_VARIANTS)
+            set(result_map) == set(expected_variants)
+            and all(result_map[variant] == 0 for variant in expected_variants)
         )
         if not results_ok:
             self.error("runner_results", f"expected one returncode 0 per variant, got {result_map}")
@@ -287,9 +337,13 @@ class Collector:
             "path": "pilot.json",
             "schema": manifest.get("schema"),
             "status": manifest.get("status"),
+            "design": design,
             "run_id": run_id,
             "task_ids": task_ids,
             "variants": manifest.get("variants"),
+            "expected_variants": list(expected_variants),
+            "generation_request_sampling": generation_sampling,
+            "expected_request_sampling": expected_sampling,
             "scope": manifest.get("scope"),
             "request_budget": {
                 "maximum_task_arm_pairs": maximum_tasks,
@@ -302,7 +356,7 @@ class Collector:
                 "zero_retry_budget": retry_budget_frozen,
                 "all_commands_no_upstream_retries": all(
                     "--no-upstream-retries" in commands.get(variant, [])
-                    for variant in EXPECTED_VARIANTS
+                    for variant in expected_variants
                 ),
                 "all_runner_results_ok": results_ok,
             },
@@ -310,11 +364,15 @@ class Collector:
         }
 
     def collect_arm(
-        self, variant: str, task_ids: list[str], run_id: str
+        self,
+        variant: str,
+        task_ids: list[str],
+        run_id: str,
+        expected_sampling: Mapping[str, Any] | None,
     ) -> dict[str, Any]:
         arm_root = self.root / variant
         expected_ids = set(task_ids)
-        handler = "c2kv-full" if variant == "full" else "c2kv-c2kv4"
+        handler = EXPECTED_HANDLERS[variant]
         paths: dict[str, str | None] = {
             "summary": None,
             "score": None,
@@ -431,7 +489,7 @@ class Collector:
             paths["proxy_log"] = _relative(proxy_path, self.root)
             proxy_rows = _read_jsonl(proxy_path)
             by_task = self._validate_proxy_rows(
-                proxy_rows, variant, expected_ids, runtime_config
+                proxy_rows, variant, expected_ids, runtime_config, expected_sampling
             )
         except (OSError, ValueError, json.JSONDecodeError) as error:
             self.error("proxy_log_invalid", str(error), variant)
@@ -511,6 +569,7 @@ class Collector:
         variant: str,
         expected_ids: set[str],
         runtime_config: Mapping[str, Any] | None,
+        expected_sampling: Mapping[str, Any] | None,
     ) -> dict[str, list[Mapping[str, Any]]]:
         by_task: defaultdict[str, list[Mapping[str, Any]]] = defaultdict(list)
         expected_arm = EXPECTED_ARMS[variant]
@@ -539,6 +598,28 @@ class Collector:
                 )
             if not _is_int(context.get("user_turn")) or not _is_int(context.get("step")):
                 raise ValueError(f"request row {index} lacks integer user_turn/step")
+
+            if expected_sampling is not None:
+                requested = row.get("sampling_request")
+                if requested != expected_sampling:
+                    raise ValueError(
+                        f"request row {index} sampling_request {requested!r} != "
+                        f"{dict(expected_sampling)!r}"
+                    )
+                forwarded = row.get("sampling_forwarded")
+                if (
+                    not isinstance(forwarded, list)
+                    or len(forwarded) != 1
+                    or not isinstance(forwarded[0], dict)
+                    or any(
+                        forwarded[0].get(key) != value
+                        for key, value in expected_sampling.items()
+                    )
+                ):
+                    raise ValueError(
+                        f"request row {index} sampling_forwarded does not preserve "
+                        f"{dict(expected_sampling)!r}: {forwarded!r}"
+                    )
 
             metadata = row.get("memory_runtime")
             if variant == "full":
@@ -610,7 +691,7 @@ class Collector:
             raise ValueError(
                 f"request row {row_index} active history exceeds frozen budget"
             )
-        if config["mode"] == "protect" and metadata["evidence_bytes"] > config[
+        if config["mode"] in {"protect", "recover_once", "persistent"} and metadata["evidence_bytes"] > config[
             "workspace_budget_bytes"
         ]:
             raise ValueError(
@@ -804,14 +885,19 @@ class Collector:
         manifest_report = self.validate_manifest(manifest)
         task_ids = manifest_report["task_ids"]
         run_id = manifest_report["run_id"]
+        expected_variants = tuple(manifest_report["expected_variants"])
+        expected_sampling = manifest_report["expected_request_sampling"]
         arms: dict[str, Any] = {}
         if task_ids and isinstance(run_id, str) and run_id:
-            for variant in EXPECTED_VARIANTS:
-                arms[variant] = self.collect_arm(variant, task_ids, run_id)
+            for variant in expected_variants:
+                arms[variant] = self.collect_arm(
+                    variant, task_ids, run_id, expected_sampling
+                )
 
         budget_configs = [
             arms.get(variant, {}).get("artifacts", {}).get("runtime_config")
-            for variant in ("legacy", "protect")
+            for variant in expected_variants
+            if variant != "full"
         ]
         if all(budget_configs):
             try:
@@ -828,26 +914,31 @@ class Collector:
     def _finish(
         self, manifest_report: Mapping[str, Any] | None, arms: Mapping[str, Any]
     ) -> dict[str, Any]:
-        valid = not self.errors and set(arms) == set(EXPECTED_VARIANTS) and all(
+        expected_variants = tuple(
+            manifest_report.get("expected_variants", []) if manifest_report else []
+        )
+        valid = not self.errors and set(arms) == set(expected_variants) and all(
             arm.get("valid") for arm in arms.values()
         )
         task_ids = list(manifest_report.get("task_ids", [])) if manifest_report else []
         paired = []
         if arms:
-            matched_sets = [set(arms[v].get("matched_task_ids", [])) for v in EXPECTED_VARIANTS]
+            matched_sets = [
+                set(arms[v].get("matched_task_ids", [])) for v in expected_variants
+            ]
             paired = sorted(set.intersection(*matched_sets)) if matched_sets else []
         performance = None
         task_matrix = None
         if valid:
             performance = {
-                variant: arms[variant]["performance"] for variant in EXPECTED_VARIANTS
+                variant: arms[variant]["performance"] for variant in expected_variants
             }
             task_matrix = [
                 {
                     "task_id": task_id,
                     "arms": {
                         variant: arms[variant]["performance"]["task_metrics"][task_id]
-                        for variant in EXPECTED_VARIANTS
+                        for variant in expected_variants
                     },
                 }
                 for task_id in task_ids
