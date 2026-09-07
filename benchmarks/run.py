@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import socket
 import subprocess
 import sys
 import time
@@ -50,6 +51,43 @@ assert all(module.NAME in ADAPTERS or name in getattr(module, "NAMES", ())
            for name, module in ADAPTERS.items())
 
 
+def _require_available_proxy_port(port: int) -> None:
+    """Fail before spawning when another process already owns the port."""
+    probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        probe.bind(("127.0.0.1", port))
+    except OSError as error:
+        raise SystemExit(
+            f"proxy port {port} is unavailable before startup: {error}"
+        ) from error
+    finally:
+        probe.close()
+
+
+def _terminate_owned_process(proc, timeout: float = 5.0) -> None:
+    """Terminate and reap only the process returned by this runner."""
+    poll = getattr(proc, "poll", None)
+    running = not callable(poll) or poll() is None
+    if running:
+        try:
+            proc.terminate()
+        except OSError:
+            pass
+    wait = getattr(proc, "wait", None)
+    if not callable(wait):
+        return
+    try:
+        wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        kill = getattr(proc, "kill", None)
+        if callable(kill):
+            try:
+                kill()
+            except OSError:
+                pass
+        wait(timeout=timeout)
+
+
 def start_proxy(upstream: str, arm: str, port: int, log_dir: Path,
                 record_reference: str = "", reference: str = "",
                 backend: str = "sglang", doc_packing: str = "turn",
@@ -58,8 +96,9 @@ def start_proxy(upstream: str, arm: str, port: int, log_dir: Path,
                 python_bin: str | None = None,
                 memory_runtime_config: str = "", memory_tokenizer: str = "",
                 no_upstream_retries: bool = False):
+    _require_available_proxy_port(port)
     log_path = log_dir / f"proxy_{arm}_{port}.jsonl"
-    out_handle = open(log_dir / f"proxy_{arm}_{port}.out", "w")
+    out_path = log_dir / f"proxy_{arm}_{port}.out"
     command = [
         python_bin or sys.executable, str(HERE / "proxy.py"),
         "--upstream", upstream, "--arm", arm, "--backend", backend,
@@ -81,31 +120,61 @@ def start_proxy(upstream: str, arm: str, port: int, log_dir: Path,
                     "--memory-tokenizer", memory_tokenizer]
     if no_upstream_retries:
         command += ["--no-upstream-retries"]
-    proc = subprocess.Popen(
-        command,
-        stdout=out_handle,
-        stderr=subprocess.STDOUT,
-        # The runtime sidecar uses only the CPU tokenizer. In an Ascend
-        # serving venv, torch otherwise auto-loads torch_npu and requires
-        # libhccl even though this process never constructs model tensors.
-        env=({**os.environ, "TORCH_DEVICE_BACKEND_AUTOLOAD": "0"}
-             if memory_runtime_config else None),
-    )
-    import urllib.request
+    out_handle = open(out_path, "w")
+    try:
+        proc = subprocess.Popen(
+            command,
+            stdout=out_handle,
+            stderr=subprocess.STDOUT,
+            # The runtime sidecar uses only the CPU tokenizer. In an Ascend
+            # serving venv, torch otherwise auto-loads torch_npu and requires
+            # libhccl even though this process never constructs model tensors.
+            env=({**os.environ, "TORCH_DEVICE_BACKEND_AUTOLOAD": "0"}
+                 if memory_runtime_config else None),
+        )
+    finally:
+        out_handle.close()
+    try:
+        import urllib.request
 
-    # never route the local health probe through an ambient http_proxy
-    # (an inherited proxy env once made every run.py launch fail its own
-    # gateway check)
-    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        # never route the local health probe through an ambient http_proxy
+        # (an inherited proxy env once made every run.py launch fail its own
+        # gateway check)
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
-    for _ in range(100):
-        try:
-            opener.open(f"http://127.0.0.1:{port}/health", timeout=2)
-            return proc, log_path
-        except OSError:
-            time.sleep(0.2)
-    proc.terminate()
-    raise SystemExit(f"proxy did not come up on port {port}")
+        for _ in range(100):
+            returncode = proc.poll()
+            if returncode is not None:
+                raise SystemExit(
+                    f"proxy exited during startup with code {returncode}; see {out_path}"
+                )
+            try:
+                with opener.open(
+                    f"http://127.0.0.1:{port}/health", timeout=2
+                ) as response:
+                    response.read()
+                # A stale listener must not satisfy readiness after our child
+                # has already failed its own bind.
+                time.sleep(0.05)
+                returncode = proc.poll()
+                if returncode is not None:
+                    raise SystemExit(
+                        f"proxy exited during startup with code {returncode}; "
+                        f"see {out_path}"
+                    )
+                return proc, log_path
+            except OSError:
+                returncode = proc.poll()
+                if returncode is not None:
+                    raise SystemExit(
+                        f"proxy exited during startup with code {returncode}; "
+                        f"see {out_path}"
+                    )
+                time.sleep(0.2)
+        raise SystemExit(f"proxy did not come up on port {port}")
+    except BaseException:
+        _terminate_owned_process(proc)
+        raise
 
 
 def _git_short_sha() -> str:
@@ -299,7 +368,7 @@ def main(argv=None):
         summary = ADAPTERS[args.benchmark].run(ctx)
         adapter_wall_sec = time.perf_counter() - adapter_started
     finally:
-        proxy_proc.terminate()
+        _terminate_owned_process(proxy_proc)
     summary["arm"] = args.arm
     summary["benchmark"] = args.benchmark
     summary["backend"] = args.backend

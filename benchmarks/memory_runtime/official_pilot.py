@@ -5,6 +5,7 @@ import argparse
 import json
 import os
 import signal
+import socket
 import subprocess
 import time
 from pathlib import Path
@@ -15,6 +16,20 @@ ROOT = HERE.parents[1]
 
 def save(path, value):
     path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
+
+
+def free_loopback_ports(count):
+    """Let the OS choose distinct ports; runner checks ownership again."""
+    reservations = []
+    try:
+        for _ in range(count):
+            reservation = socket.socket()
+            reservation.bind(("127.0.0.1", 0))
+            reservations.append(reservation)
+        return [reservation.getsockname()[1] for reservation in reservations]
+    finally:
+        for reservation in reservations:
+            reservation.close()
 
 
 def main():
@@ -44,6 +59,7 @@ def main():
     run_id = "a_" + args.out.name
     task_ids = [f"multi_turn_base_{i}" for i in range(4)]
     variants = [("full", "full"), ("legacy", "c2kv4"), ("protect", "c2kv4")]
+    proxy_ports = free_loopback_ports(len(variants))
     commands = []
     for index, (name, arm) in enumerate(variants):
         command = [args.bench_python, str(ROOT / "benchmarks/run.py"),
@@ -53,7 +69,7 @@ def main():
                    "--query-projection", "base", "--model", "c2kv-agent",
                    "--num-workers", "1", "--categories", "multi_turn_base",
                    "--run-ids", ",".join(task_ids), "--no-upstream-retries",
-                   "--proxy-python", args.proxy_python, "--proxy-port", str(35270 + index),
+                   "--proxy-python", args.proxy_python, "--proxy-port", str(proxy_ports[index]),
                    "--out", str(args.out / name), "--exact-out", "--run-name", run_id + "_" + name]
         if name != "full":
             config = json.loads((HERE / f"configs/{name}.json").read_text())
