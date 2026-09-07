@@ -259,3 +259,6 @@ Thumbs.db
 
 # Server-side scratch scripts (scp'd down for reference; not for commit)
 /scratch_server_extract/
+
+# Local B training paths and launch overrides.
+/configs/b_history_h200.env

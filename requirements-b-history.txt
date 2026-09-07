@@ -1,0 +1,10 @@
+# G H200 model/runtime versions; install the CUDA 13.0 torch wheel first on H200.
+torch==2.9.0
+transformers==5.8.0
+numpy==2.3.4
+# Source preparation and checkpoint loading used by the B entry point.
+pyarrow==25.0.1
+accelerate==1.14.0
+wandb==0.29.0
+# Bounded local validation, including the two-process Gloo test on Linux.
+pytest==9.1.1

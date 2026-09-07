@@ -179,7 +179,7 @@ def _decision_id(
     return "decision-" + hashlib.sha256(identity.encode("utf-8")).hexdigest()
 
 
-def _store_session_id(source: str, session_id: str) -> str:
+def event_store_session_id(source: str, session_id: str) -> str:
     """Namespace event identity when source families reuse session IDs."""
     return json.dumps([source, session_id], ensure_ascii=False, separators=(",", ":"))
 
@@ -237,7 +237,7 @@ def iter_decisions(row: Mapping[str, Any]) -> Iterator[Decision]:
         )
         visible_target = _model_visible_message(message)
         store = EventStore.from_messages(
-            _store_session_id(snapshot["source"], session_id), visible_prefix
+            event_store_session_id(snapshot["source"], session_id), visible_prefix
         )
         yield Decision(
             decision_id=_decision_id(
@@ -490,6 +490,7 @@ __all__ = [
     "MemoryDecisionRecord",
     "build_paired_records",
     "build_static_records",
+    "event_store_session_id",
     "iter_decisions",
     "read_jsonl_rows",
     "snapshot_and_validate_rows",

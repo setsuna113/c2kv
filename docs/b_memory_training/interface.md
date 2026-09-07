@@ -1,9 +1,11 @@
 # Shared history interface
 
 Implementation: `python/history_memory/` in the `task/b-history-training` worktree.
-This is a CPU data/packing contract. It is not wired into a trainer or serving
-backend yet. A owns retrieval, workspace budgets and evidence leases; B consumes
-the observable views produced by that policy.
+The CPU data/packing contract is consumed by `agent/train_history_memory.py`
+and the differentiable `history_memory.runtime.HistoryMemoryModel`. A owns
+retrieval, workspace budgets and evidence leases; B consumes the observable
+views produced by the frozen shared policy. The legacy serving profile remains
+separate from these newly trained event-native checkpoints.
 
 ## Immutable events
 
@@ -82,7 +84,7 @@ checkpoints must use the event-native profile at training and serving time.
 Long events are split without dropping tokens. `EncoderChunk` records parent
 `event_id`, `part_index`, `source_indices`, and half-open source token offsets.
 The overlap is part of encoder cost. Chunks currently split the event token
-stream; the model adapter must preserve their grouping and source mapping.
+stream; the tensor adapter preserves their grouping and source mapping.
 Exceeding `max_chunks`, `max_raw_tokens`, or a target budget raises
 `PackingBudgetError`; no partial target or first-plus-tail selection is emitted.
 
@@ -94,19 +96,27 @@ chronological. Dynamic-interleave positions use each source interval's end
 minus one, offset by system length and preceding encoded source lengths.
 Raw positions start after those source spans, not after the number of gist
 KV entries. Ordinary queries see the past prefix/gists and causal raw/target
-tokens. The tensor adapter should construct an equivalent efficient mask.
+tokens. The tensor adapter constructs the equivalent physical causal mask,
+independently of the source positions used by RoPE.
 
 `chunk.encoding_key(parameter_version=..., ratio=...)` includes exact encoder
 token IDs and excludes runtime position offsets. Cache pre-RoPE gist keys and
 rotate on placement. Advance the parameter version and release cached training
 graphs after every optimizer update. The packing module does not own or detach
-autograd graphs. Actual tensor gradients and train/serve projection parity need
-verification in the integration step.
+autograd graphs. `HistoryMemoryModel` shares differentiable extraction graphs
+within one forward batch, releases them after that batch, and advances the
+parameter version after each optimizer update. Native tokens use base QKV;
+only gist embedding/QKV parameters are trainable. CPU tests cover nonzero gist
+gradients, independent-versus-shared extraction gradient equivalence, source
+position placement, and checkpointed-versus-direct decoder execution. A serving
+adapter must consume this same projection and packing profile before these
+checkpoints can be evaluated through A0/A1.
 
 `pack_target(tokenizer, assistant_message)` returns a complete native assistant
 continuation. `training_sequence(packed, target_ids)` masks workspace labels
-with `-100` and labels only that continuation. The trainer must normalize token
-loss per decision and apply the matched decision weight.
+with `-100` and labels only that continuation. The trainer normalizes token
+loss per decision and applies the matched decision weight across accumulation
+and all DDP ranks.
 
 ## Dataset boundary
 
@@ -125,7 +135,20 @@ stateful planner must scope leases by `store.session_id` or reset on a session
 change. `build_paired_records(rows, planner, repetitions=1)` calls the planner
 once per decision, before repetition. The planner returns `LifecycleSelection`
 or a complete `MemoryView`, which is validated against the current prefix.
-The CLI exports static C records; it does not manufacture a lifecycle policy.
+The legacy `--input ... --output ...` CLI mode exports static C records.
+The `--output-dir` mode creates the paired prepared corpus from normalized rows
+or the G-source adapters in `sources.py`. It uses the copied fixed A policy,
+which receives only the visible prefix. The manifest records the tokenizer,
+packing and policy configuration, source exclusions, actual mixture, paired
+exposure counts, memory costs, and content digests of both corpus files.
 
-Token counters are not measurements of tensor bytes, HBM or wall time. Those
-measurements belong to the runtime/training integration and cost calibration.
+`PreparedCorpus(path, tokenizer, arm)` reconstructs and checks each arm's packed
+input without duplicating all session prefixes on disk. `training.py` supplies
+the DDP optimizer loop and checkpoints containing the frozen base, trainable
+FP32 gist weights, optimizer/scheduler, per-rank RNG, and exact data cursor.
+See [h200.md](h200.md) for source preparation, the two-arm launcher, packaging,
+and explicit resume commands.
+
+Preparation token/byte estimates are not measurements of HBM or wall time.
+Training additionally logs elapsed update time and CUDA peak allocation;
+end-to-end serving latency and residency still require the A0/A1 evaluation.
