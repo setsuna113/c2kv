@@ -63,11 +63,22 @@ def _positive_int(value: str) -> int:
     return parsed
 
 
+def _temperature(value: str) -> float:
+    parsed = float(value)
+    if not math.isfinite(parsed) or parsed < 0:
+        raise argparse.ArgumentTypeError("must be finite and nonnegative")
+    return parsed
+
+
 def add_arguments(parser) -> None:
     """BFCL-only CLI flags (shared ones live in run.py's core block)."""
     parser.add_argument("--categories", default="multi_turn_base")
     parser.add_argument("--run-ids", default="",
                         help="bfcl: comma-separated official case ids for a subset run")
+    parser.add_argument("--bfcl-temperature", type=_temperature, default=None,
+                        help="explicit generation temperature; otherwise official CLI default")
+    parser.add_argument("--bfcl-seed", type=int, default=None,
+                        help="explicit per-request generation seed")
     parser.add_argument(
         "--bfcl-oracle-max-events", type=_positive_int, default=1,
         help="bfcl gold arms: retry budget per task; 1 is the frozen v2 protocol",
@@ -91,7 +102,8 @@ def handler_key(arm: str) -> str:
 
 def generate_argv(handler_name: str, categories: str,
                   run_ids: Optional[List[str]] = None,
-                  num_threads: int = 1) -> List[str]:
+                  num_threads: int = 1,
+                  temperature: Optional[float] = None) -> List[str]:
     """``bfcl generate`` argv (PINNED; driven in-process by run_cli)."""
     if num_threads < 1:
         raise ValueError(f"BFCL num_threads must be positive, got {num_threads}")
@@ -101,6 +113,8 @@ def generate_argv(handler_name: str, categories: str,
     ]
     if run_ids:
         argv.append("--run-ids")
+    if temperature is not None:
+        argv += ["--temperature", str(temperature)]
     return argv
 
 
@@ -119,7 +133,8 @@ def install_handler(base_url: str, model: str = SERVED_MODEL,
                     gold_recovery: "str | None" = None,
                     task_audit_path: "Path | str | None" = None,
                     bfcl_oracle_max_events: int = 1,
-                    no_upstream_retries: bool = False) -> None:
+                    no_upstream_retries: bool = False,
+                    generation_seed: Optional[int] = None) -> None:
     # NOTE: default resolved at CALL time — binding the default to
     # MODEL_NAME at def time made monkeypatched names register the
     # wrong key (val20 evaluate failure)
@@ -242,6 +257,8 @@ def install_handler(base_url: str, model: str = SERVED_MODEL,
                 "store": False,
                 "max_completion_tokens": 4096,
             }
+            if generation_seed is not None:
+                kwargs["seed"] = generation_seed
             if inference_data.get("tools"):
                 kwargs["tools"] = inference_data["tools"]
             context = controller.request_context()
@@ -430,6 +447,8 @@ def run(ctx: RunContext) -> Dict[str, Any]:
             num_threads=num_threads,
             bfcl_oracle_max_events=oracle_max_events,
             no_upstream_retries=no_upstream_retries,
+            generation_temperature=ctx.opt("bfcl_temperature"),
+            generation_seed=ctx.opt("bfcl_seed"),
         )
     finally:
         os.chdir(prev_cwd)
@@ -457,7 +476,9 @@ def run_bfcl(base_url: str, categories: str = "multi_turn_base",
              task_audit_path: "Path | str | None" = None,
              num_threads: int = 1,
              bfcl_oracle_max_events: int = 1,
-             no_upstream_retries: bool = False) -> Dict[str, Any]:
+             no_upstream_retries: bool = False,
+             generation_temperature: Optional[float] = None,
+             generation_seed: Optional[int] = None) -> Dict[str, Any]:
     """Register the handler and drive the official generate/evaluate CLI
     in-process.
 
@@ -478,6 +499,10 @@ def run_bfcl(base_url: str, categories: str = "multi_turn_base",
     summaries deliberately contain no ``n_scored`` or ``semantic_score``."""
     if mode not in ("generate", "evaluate", "both"):
         raise ValueError(f"invalid BFCL mode: {mode}")
+    if generation_temperature is not None:
+        generation_temperature = _temperature(str(generation_temperature))
+    if generation_seed is not None and (not isinstance(generation_seed, int) or isinstance(generation_seed, bool)):
+        raise ValueError("generation_seed must be an integer or None")
     if (not isinstance(bfcl_oracle_max_events, int)
             or isinstance(bfcl_oracle_max_events, bool)
             or bfcl_oracle_max_events <= 0):
@@ -501,6 +526,7 @@ def run_bfcl(base_url: str, categories: str = "multi_turn_base",
             task_audit_path=audit_path,
             bfcl_oracle_max_events=bfcl_oracle_max_events,
             no_upstream_retries=no_upstream_retries,
+            generation_seed=generation_seed,
         )
         category_counts = official_category_counts(categories)
         ids: Optional[List[str]] = None
@@ -524,7 +550,8 @@ def run_bfcl(base_url: str, categories: str = "multi_turn_base",
         expected = sum(selected_counts.values())
         if mode in ("generate", "both"):
             run_cli(generate_argv(
-                handler_name, categories, ids, num_threads=num_threads))
+                handler_name, categories, ids, num_threads=num_threads,
+                temperature=generation_temperature))
         if mode in ("evaluate", "both"):
             run_cli(evaluate_argv(handler_name, categories, ids))
         import terminal_check  # noqa: E402  (sibling module, sys.path has parent)
@@ -544,6 +571,11 @@ def run_bfcl(base_url: str, categories: str = "multi_turn_base",
             "bfcl_project_root": str(project_root),
             "bfcl_num_threads": num_threads,
             "bfcl_oracle_max_events": bfcl_oracle_max_events,
+            "generation_requested": {
+                "temperature": generation_temperature, "seed": generation_seed,
+                "max_completion_tokens": 4096,
+                "scope": "explicit overrides; None preserves the existing default",
+            },
         }
         if mode == "generate":
             summary.update({"n_generated": expected, "scored": False})
@@ -591,6 +623,8 @@ def main(argv=None) -> None:
                         help="BFCL model key / result-dir name")
     parser.add_argument("--num-workers", type=int, default=1,
                         help="BFCL --num-threads value")
+    parser.add_argument("--bfcl-temperature", type=_temperature, default=None)
+    parser.add_argument("--bfcl-seed", type=int, default=None)
     parser.add_argument(
         "--bfcl-oracle-max-events", type=_positive_int, default=1,
         help="gold recovery retries per task; 1 keeps the frozen v2 protocol",
@@ -603,7 +637,9 @@ def main(argv=None) -> None:
                        run_ids=ids, model=args.model,
                        handler_name=args.handler_name,
                        num_threads=args.num_workers,
-                       bfcl_oracle_max_events=args.bfcl_oracle_max_events)
+                       bfcl_oracle_max_events=args.bfcl_oracle_max_events,
+                       generation_temperature=args.bfcl_temperature,
+                       generation_seed=args.bfcl_seed)
     print(json.dumps(summary, indent=2))
 
 

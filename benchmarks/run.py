@@ -95,7 +95,8 @@ def start_proxy(upstream: str, arm: str, port: int, log_dir: Path,
                 query_projection: str | None = None, witness_tokenizer: str = "",
                 python_bin: str | None = None,
                 memory_runtime_config: str = "", memory_tokenizer: str = "",
-                no_upstream_retries: bool = False):
+                no_upstream_retries: bool = False,
+                capture_request_views: bool = False):
     _require_available_proxy_port(port)
     log_path = log_dir / f"proxy_{arm}_{port}.jsonl"
     out_path = log_dir / f"proxy_{arm}_{port}.out"
@@ -120,6 +121,8 @@ def start_proxy(upstream: str, arm: str, port: int, log_dir: Path,
                     "--memory-tokenizer", memory_tokenizer]
     if no_upstream_retries:
         command += ["--no-upstream-retries"]
+    if capture_request_views:
+        command += ["--capture-request-views"]
     out_handle = open(out_path, "w")
     try:
         proc = subprocess.Popen(
@@ -215,6 +218,8 @@ def add_core_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--exact-out", action="store_true",
                         help="use the supplied output directory verbatim (matrix cells)")
+    parser.add_argument("--capture-request-views", action="store_true",
+                        help="record benchmark request messages/tools for exact prefix diagnostics")
     # shared by tau2 (--max-concurrency) and acebench (--num-threads)
     parser.add_argument("--num-workers", type=int, default=4)
     # shared by tau2 (--num-tasks) and acon_qa (--limit)
@@ -359,7 +364,8 @@ def main(argv=None):
         python_bin=args.proxy_python,
         memory_runtime_config=args.memory_runtime_config,
         memory_tokenizer=args.memory_tokenizer or str(args.checkpoint or ""),
-        no_upstream_retries=args.no_upstream_retries)
+        no_upstream_retries=args.no_upstream_retries,
+        capture_request_views=args.capture_request_views)
     try:
         # every adapter owns its own "/v1" (adapters/base.py:v1) and its own
         # cwd; run.py hands over the bare proxy URL and nothing else

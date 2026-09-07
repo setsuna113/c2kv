@@ -63,7 +63,7 @@ def _prefix_checker(decoded, ground_truth, test_entry):
 
 def _install_toy_handler(
         monkeypatch, tmp_path, selector, choose_response, *, max_events=1,
-        no_upstream_retries=False):
+        no_upstream_retries=False, generation_seed=None):
     mapping = {}
     calls = []
 
@@ -194,6 +194,7 @@ def _install_toy_handler(
         task_audit_path=audit_path,
         bfcl_oracle_max_events=max_events,
         no_upstream_retries=no_upstream_retries,
+        generation_seed=generation_seed,
     )
     config = mapping["c2kv-test"]
     handler = config.model_handler(
@@ -204,6 +205,19 @@ def _install_toy_handler(
     )
     handler._gold_controller.prefix_checker = _prefix_checker
     return handler, calls, audit_path
+
+
+def test_explicit_seed_reaches_model_request_without_changing_temperature(monkeypatch, tmp_path):
+    handler, calls, _ = _install_toy_handler(
+        monkeypatch, tmp_path, None, lambda kwargs: _response("observe"),
+        generation_seed=7,
+    )
+    handler._query_FC({"message": [{"role": "user", "content": "query"}], "tools": []})
+    assert calls[0]["seed"] == 7
+    assert calls[0]["temperature"] == 0.001
+    argv = bfcl_adapter.generate_argv("c2kv-test", "multi_turn_base", temperature=0.0)
+    assert argv[-2:] == ["--temperature", "0.0"]
+    assert "--temperature" not in bfcl_adapter.generate_argv("c2kv-test", "multi_turn_base")
 
 
 def test_no_upstream_retries_reaches_bfcl_client(monkeypatch, tmp_path):

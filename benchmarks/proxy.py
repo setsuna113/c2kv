@@ -244,8 +244,28 @@ MEMORY_RUNTIME_BYTES_PER_KV_TOKEN: Optional[int] = None
 MEMORY_RUNTIME_FATAL_ERROR: Optional[str] = None
 _memory_runtime_verify_lock = threading.Lock()
 NO_UPSTREAM_RETRIES = False
+CAPTURE_REQUEST_VIEWS = False
 UPSTREAM = ""
 REQUEST_LOG_PATH = ""
+
+SAMPLING_FIELDS = (
+    "temperature", "top_p", "top_k", "min_p", "seed", "max_tokens",
+    "max_completion_tokens", "frequency_penalty", "presence_penalty",
+    "repetition_penalty", "stop", "tool_choice", "parallel_tool_calls",
+    "response_format", "chat_template_kwargs",
+)
+
+
+def _sampling_fields(payload):
+    """Record explicit wire fields without guessing server-side defaults."""
+    return {key: payload[key] for key in SAMPLING_FIELDS if key in payload}
+
+
+def _captured_request_view(payload):
+    """Allowlist benchmark content only; never capture transport headers."""
+    view = {key: payload[key] for key in ("model", "messages", "tools") if key in payload}
+    view["sampling"] = _sampling_fields(payload)
+    return json.loads(json.dumps(view, ensure_ascii=False))
 _log_lock = threading.Lock()
 
 # --doc-packing / --max-doc-length / --max-doc-num (see module docstring and
@@ -1526,6 +1546,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
         eval_context = payload.pop("c2kv_eval_context", None)
         oracle = payload.pop("c2kv_oracle", None)
         self.eval_context = eval_context if isinstance(eval_context, dict) else {}
+        self.forwarded_sampling = []
+        self.forwarded_request_views = []
         start = time.perf_counter()
         messages = payload.get("messages") or []
         fingerprint = messages_fingerprint(messages)
@@ -1601,6 +1623,9 @@ class ProxyHandler(BaseHTTPRequestHandler):
                              "kv_reuse": reuse_ctx})
             else:
                 out_payload = BACKEND.prepare_chat(staged, ARM, plan)
+            self.forwarded_sampling.append(_sampling_fields(out_payload))
+            if CAPTURE_REQUEST_VIEWS:
+                self.forwarded_request_views.append(_captured_request_view(out_payload))
             return _post_json(
                 self.path, out_payload, 600,
                 retries=(0 if MEMORY_RUNTIME is not None or NO_UPSTREAM_RETRIES
@@ -1861,6 +1886,14 @@ class ProxyHandler(BaseHTTPRequestHandler):
             ] if normalized else None,
         }
         row["eval_context"] = getattr(self, "eval_context", {})
+        row["sampling_request"] = _sampling_fields(request)
+        row["sampling_forwarded"] = getattr(self, "forwarded_sampling", [])
+        row["sampling_scope"] = "explicit request fields; omitted server defaults are unknown"
+        if CAPTURE_REQUEST_VIEWS:
+            row["request_view"] = _captured_request_view(request)
+            row["forwarded_request_views"] = getattr(self, "forwarded_request_views", [])
+            row["response_view"] = ({key: normalized.get(key) for key in ("content", "tool_calls")}
+                                    if normalized else None)
         if status != "ok":
             row["error_kind"] = status
         # raw-vs-compressed message-class breakdown
@@ -1891,7 +1924,7 @@ def main(argv=None):
     global DOC_PACKING, MAX_DOC_LENGTH, MAX_DOC_NUM, QUERY_PROJECTION
     global WITNESS_TOKENIZER_PATH
     global MEMORY_RUNTIME_BYTES_PER_KV_TOKEN, MEMORY_RUNTIME_FATAL_ERROR
-    global NO_UPSTREAM_RETRIES
+    global NO_UPSTREAM_RETRIES, CAPTURE_REQUEST_VIEWS
     textarms.reset_state()  # fresh caches/state per proxy process
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--witness-tokenizer", default="")
@@ -1901,6 +1934,8 @@ def main(argv=None):
                         help="local tokenizer used for A runtime budget accounting")
     parser.add_argument("--no-upstream-retries", action="store_true",
                         help="disable chat transport and CacheMiss retries")
+    parser.add_argument("--capture-request-views", action="store_true",
+                        help="record allowlisted benchmark messages/tools and forwarded views")
     parser.add_argument("--upstream", required=True,
                         help="backend base URL, e.g. http://127.0.0.1:34000")
     parser.add_argument("--backend", default="sglang",
@@ -1938,6 +1973,7 @@ def main(argv=None):
     MEMORY_RUNTIME_BYTES_PER_KV_TOKEN = None
     MEMORY_RUNTIME_FATAL_ERROR = None
     NO_UPSTREAM_RETRIES = bool(args.no_upstream_retries)
+    CAPTURE_REQUEST_VIEWS = bool(args.capture_request_views)
     if args.memory_runtime_config:
         MEMORY_RUNTIME = _load_memory_runtime(
             args.memory_runtime_config, args.memory_tokenizer)
