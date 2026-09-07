@@ -330,6 +330,7 @@ BASE_URL="http://$HOST:$PORT"
 export NO_PROXY="127.0.0.1,localhost"
 export no_proxy="$NO_PROXY"
 export BFCL_DIR
+export BENCH_BFCL_DIR="$BFCL_DIR"
 export TAU2_DIR
 export TOOLSANDBOX_DIR
 export SERVED_MODEL_NAME
