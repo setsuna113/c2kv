@@ -41,6 +41,8 @@ task30 第三处连续 prefix 中，once 在同一 W 下选 `{m0,m3,m5,m7}`，pe
 
 下一轮固定 `bfcl_lease_dev2_v1`，design=`lease-dev2`：`multi_turn_base_1` 与 `multi_turn_base_30` × Full(training)、legacy、protect、recover_once、persistent、no_gist，共最多 12 个整题，单 worker 串行、总 wall cap 1800 秒、temperature=0.001/seed=0/max_completion_tokens=4096、0 transport/SDK/cache-miss retries、不自动重跑。使用原 history B=226,492,416、workspace W=113,246,208、旧 policy commit `affe0e3`；NoGist 可将全部 B 用于 raw evidence。每臂独立 runtime state，全部请求保存 native 与 forwarded views。两题因前面的诊断而选，均为已暴露 dev；本轮不得声称 held-out、统计显著性或跨任务泛化。它回答局部停止现象和 lease 分配是否延续到真实任务闭环，并直接比较相同 B 下的 NoGist。Full 会在本轮同配置运行，原未显式 seed 的 v3 分数不混入配对分母。
 
+本轮 1088 compatibility 的实际成本边界以 `adapter.py` 为准：共同 raw 部分为 system/tools 与旧 proxy 保留的当前 input suffix；在 tool response 后恢复的 current user query 也属于 evidence，计入 W 和 B，其 gist/raw overlap 同样计费。它尚未实现“整条 current user turn 都作为所有 arm 共同且免于 history cap 的 raw 输入”；下文目标协议与这个已执行边界分开解释。
+
 ## 目标与边界
 
 A 线的交付目标是：在固定基模和旧 checkpoint 上，做出一个能持续执行多轮任务的 C2KV 记忆运行系统，通过有界状态保护、局部补证据和跨步骤保留，减少 Full 原本能完成、压缩后却失败的任务，并测清实际内存与运行成本。
