@@ -4,7 +4,7 @@
 
 - 用户已于 **2026-09-07** 批准 A 线的实现与推理实验。
 - 用户随后设置持续目标“持续推进实验”。`utilization_capture_v1` 已完成一次 `multi_turn_base_1` Full 数据捕获：15 次生成、official 1/1（preliminary, n=1），temperature=0.001/seed=0/max_completion_tokens=4096；预定 turn0/step1 与 turn1/step1 两个 native prefixes 均已保存。它使用新的显式 sampling，不能当作 v3 的同配置重复。
-- 下一步固定 `utilization_probe_v1`：两处 task1 prefix × 六种布局，以及 task30 三处连续 prefix × protect/recover_once/persistent/no_gist，最多 24 次 chat、600 秒、temperature=0.001/seed=0/max_tokens=512、不重试、不自动重跑。全部 view 先用真实 tokenizer 组装并测量，在生成前保存；若 once/persistent 在连续 prefix 中始终相同，则跳过该组全部生成并记为退化设计。布局为 Full、Full 加完全相同的 protect evidence、legacy、protect、只保留该 evidence、将当前 user query 单独按原文呈现。只保留 evidence 的布局是去除 gist 的诊断，不是同预算 NoGist 主臂。后续 prefix 始终取捕获文件，不反馈生成动作，因此只解释局部 evidence 利用和 lease 行为，不计整题成功。
+- `utilization_probe_v1` 已完成：两处 task1 prefix × 六种布局，以及 task30 三处连续 prefix × protect/recover_once/persistent/no_gist，共 24 次 chat、8 次 extraction 请求；全部响应通过 raw token、byte geometry、tool profile 与 base query-projection 校验。执行 commit `e94777413fa7c46dbbe3174e0ff63931d8ac3386`，temperature=0.001/seed=0/max_tokens=512、不重试、不自动重跑。[完整响应与计数](../../../c2kv-a-runtime/outputs/a_memory_runtime_20260907/utilization_probe_v1/collection.json)。全部 view 在生成前保存；第三处连续 prefix 的 once/persistent 输入确实不同，前两处相同。后续 prefix 始终取捕获文件，不反馈生成动作，因此只解释局部 evidence 利用和 lease 行为，不计整题成功。
 - 首批 official BFCL 开发 pilot `bfcl_dev4_v3` 已完成：固定 `multi_turn_base_0..3`，对比 `Full(training renderer) / legacy / protect`，共 12 个整题运行，在总 wall cap 1800 秒内结束。执行代码 commit `10a527eea637431b04153333313b8142360b76e5`；collector 为 `0be8413` + `e55a6ec`。
 - 旧基线在独立 worktree 固定为 `681eab09ad66e4aed0ae9ccb8e368fdb191018e0`。共享 CPU 接口固定取 B commit `b87f1806670438176e195bfe21127c1bb7935559` 的 event/packing 接口；A 后续兼容工作在 A 内部完成，不再向 B 发任务。
 - 当前只有下述 4-task 开发 pilot，全部标为 **preliminary, n=1**；尚无正式 held-out 或多 seed 结果。下文未来实验的数值仍按设计值解释。
@@ -30,6 +30,16 @@
 [执行记录](../../../c2kv-a-runtime/outputs/a_memory_runtime_20260907/execution.json) 保存运行版本、实际计数、原始无效记录和采样设置的来源。official pilot 沿用 BFCL CLI 的 `temperature=0.001`，由当前源码确认，未作为独立 resolved request 字段捕获；未显式设置 generation seed。后续正式 matrix 必须把 resolved sampling 字段直接写入请求日志。
 
 已完成 `multi_turn_base_1` 的只读诊断：legacy 在 user turn 0 因缺少 `ls(a=True)` 的返回失败；protect 的 official 错误是最终 state mismatch，轨迹在 user turn 1 step 1 首次与 Full 分叉，完成 `cd` 后停止，未继续移动文件。该 protect 请求中当前 query 与最近完成的 `cd` call/result 已进入 evidence。现有轨迹不能确定停止的因果原因；下一步先检验 evidence 利用与提前终止，再为 retrieve-once/persistent 的整题开发比较冻结具体任务、配置和运行上限。当前有限运行已结束，不自动扩大任务集，也不把 CPU lease 测试当作 live persistence 收益。
+
+### Evidence-utilization 诊断与闭环开发比较
+
+`utilization_probe_v1` 的 task1 turn0/step1 中，Full、Full+E、protect、E-only、active-query-raw 都产生 native `ls(a=True)`，legacy 停止。turn1/step1 中，Full 产生 `ls`，Full+E 与 E-only 产生 `mkdir(archive)`；protect 和 active-query-raw 仅输出下一步计划后停止。E-only 使用与 protect 完全相同的 evidence，仅移除 gist；它是局部 gist-presence 诊断，不是完整的同预算 NoGist 主臂。该单次前缀对照支持继续检查 gist 条件下的 evidence 利用与 tool-output 格式，但不证明去掉 gist 已恢复整题，也不支持推广 active-query-raw 改动。全部结果为 **preliminary, n=1**。
+
+task30 第三处连续 prefix 中，once 在同一 W 下选 `{m0,m3,m5,m7}`，persistent 选 `{m0,m1,m3,m7}`。m1 是较旧的空 search result；m5 是后来的 `cat` error。persistent 先保留旧 lease，加入 m5 的整包成本为 132,710,400 bytes，超过 W=113,246,208，所以记录 `skipped_for_budget/direct_source`。这说明当前 lease 分配可能挤掉较新的相关证据；两臂最终都没有 native tool call，content 的 `Action: ls` 不计执行。下一版优先级是否应先满足当前 direct source、再用剩余空间保留旧 lease，留待这版闭环结果后决定，当前 policy commit 不变。
+
+前两处 once/persistent 的 forwarded payload 完全相同；第二处返回文字仍略有不同，native tool-call/stop 状态相同。显式 seed=0 在这次运行中不保证逐字复现，文字差异不归因于 persistence。collector 保存这两个输入相同的对照，不将它们当不同 seed 的独立样本。
+
+下一轮固定 `bfcl_lease_dev2_v1`，design=`lease-dev2`：`multi_turn_base_1` 与 `multi_turn_base_30` × Full(training)、legacy、protect、recover_once、persistent、no_gist，共最多 12 个整题，单 worker 串行、总 wall cap 1800 秒、temperature=0.001/seed=0/max_completion_tokens=4096、0 transport/SDK/cache-miss retries、不自动重跑。使用原 history B=226,492,416、workspace W=113,246,208、旧 policy commit `affe0e3`；NoGist 可将全部 B 用于 raw evidence。每臂独立 runtime state，全部请求保存 native 与 forwarded views。两题因前面的诊断而选，均为已暴露 dev；本轮不得声称 held-out、统计显著性或跨任务泛化。它回答局部停止现象和 lease 分配是否延续到真实任务闭环，并直接比较相同 B 下的 NoGist。Full 会在本轮同配置运行，原未显式 seed 的 v3 分数不混入配对分母。
 
 ## 目标与边界
 
