@@ -3,6 +3,8 @@
 ## 执行状态
 
 - 用户已于 **2026-09-07** 批准 A 线的实现与推理实验。
+- 用户随后设置持续目标“持续推进实验”。`utilization_capture_v1` 已完成一次 `multi_turn_base_1` Full 数据捕获：15 次生成、official 1/1（preliminary, n=1），temperature=0.001/seed=0/max_completion_tokens=4096；预定 turn0/step1 与 turn1/step1 两个 native prefixes 均已保存。它使用新的显式 sampling，不能当作 v3 的同配置重复。
+- 下一步固定 `utilization_probe_v1`：两处 task1 prefix × 六种布局，以及 task30 三处连续 prefix × protect/recover_once/persistent/no_gist，最多 24 次 chat、600 秒、temperature=0.001/seed=0/max_tokens=512、不重试、不自动重跑。全部 view 先用真实 tokenizer 组装并测量，在生成前保存；若 once/persistent 在连续 prefix 中始终相同，则跳过该组全部生成并记为退化设计。布局为 Full、Full 加完全相同的 protect evidence、legacy、protect、只保留该 evidence、将当前 user query 单独按原文呈现。只保留 evidence 的布局是去除 gist 的诊断，不是同预算 NoGist 主臂。后续 prefix 始终取捕获文件，不反馈生成动作，因此只解释局部 evidence 利用和 lease 行为，不计整题成功。
 - 首批 official BFCL 开发 pilot `bfcl_dev4_v3` 已完成：固定 `multi_turn_base_0..3`，对比 `Full(training renderer) / legacy / protect`，共 12 个整题运行，在总 wall cap 1800 秒内结束。执行代码 commit `10a527eea637431b04153333313b8142360b76e5`；collector 为 `0be8413` + `e55a6ec`。
 - 旧基线在独立 worktree 固定为 `681eab09ad66e4aed0ae9ccb8e368fdb191018e0`。共享 CPU 接口固定取 B commit `b87f1806670438176e195bfe21127c1bb7935559` 的 event/packing 接口；A 后续兼容工作在 A 内部完成，不再向 B 发任务。
 - 当前只有下述 4-task 开发 pilot，全部标为 **preliminary, n=1**；尚无正式 held-out 或多 seed 结果。下文未来实验的数值仍按设计值解释。
@@ -67,6 +69,10 @@ A 负责运行时怎样使用记忆；B 负责与该运行布局匹配的历史�
 - 两个 worktree 通过接口样例与 schema 协调，不通过互相修改未完成代码来同步。
 
 已落盘的 A 实现入口为 [policy.py](../../../c2kv-a-runtime/benchmarks/memory_runtime/policy.py)（可见事件选择、预算、lease）、[adapter.py](../../../c2kv-a-runtime/benchmarks/memory_runtime/adapter.py)（gist/raw view 与预算核算）、[evidence.py](../../../c2kv-a-runtime/python/history_memory/evidence.py)（共享 evidence renderer）与 [tokenization.py](../../../c2kv-a-runtime/benchmarks/memory_runtime/tokenization.py)（serving tool schema 投影）。配置、协议 runner 与测试均位于 `benchmarks/memory_runtime/`；既有 proxy 和 benchmark runner 只保留接入与生命周期管理。
+
+可共享 policy 的冻结版本是 commit `affe0e3bd29cce06beadd5a67b1e629f8ca77022` 下的 `benchmarks/memory_runtime/policy.py`，此后尚未改动该文件；依赖 Python stdlib 和 `history_memory.events` 的 CPU event 接口。`history_budget_bytes` 为 gist + 历史 raw/evidence 的总 B，`workspace_budget_bytes` 为其中 evidence 子 cap W；protect/once/persistent 用 min(B,W)，NoGist 可用整个 B，不能将两者相加。`cost_fn` 必须计完整 selected event packet 的实际 token/KV bytes，`visible_event_ids` 仅包含全部 source indices 已原样 raw 可见的 event；同一 decision key 重用要求输入不变，lease 不因此续期。sampling/capture 的新接入代码为 `3840abbc4aa53601fdc85311710f89bfeebbb044`。
+
+当前 `full_shared` prototype 实际把所有 event 标 raw-visible，因此不插入 auxiliary evidence，模型输入等同 Full(training)。它只作为 `Full-runtime-identity` sanity；尚不能代表下文正式 `Full-shared` 的辅助呈现对照。下一轮 dev probe 会显式固定相同 E，比较 Full 与 Full+E，避免拿 identity control 解释 renderer 效果。
 
 ## 模块与共享接口
 
