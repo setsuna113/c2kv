@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -128,6 +129,25 @@ def _kv_bytes(config: Any) -> int:
     return layers * kv_heads * head_dim * 2 * element_bytes
 
 
+def _progress_reporter():
+    """Report the actual preparation phase without changing corpus artifacts."""
+    started = time.monotonic()
+    last_report = started
+    last_phase = None
+
+    def report(values):
+        nonlocal last_report, last_phase
+        now = time.monotonic()
+        phase = values.get("phase")
+        if phase != last_phase or now - last_report >= 30:
+            print(json.dumps({"prepare_progress": dict(values),
+                              "elapsed_seconds": round(now - started, 2)}, ensure_ascii=False),
+                  file=sys.stderr, flush=True)
+            last_report, last_phase = now, phase
+
+    return report
+
+
 def _paired(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
     if args.output:
         parser.error("--output and --output-dir are mutually exclusive")
@@ -149,11 +169,14 @@ def _paired(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
 
     from transformers import AutoConfig, AutoTokenizer
 
+    progress = _progress_reporter()
+    progress({"phase": "load_tokenizer"})
     tokenizer = AutoTokenizer.from_pretrained(
         args.model_name_or_path, local_files_only=True
     )
     config = AutoConfig.from_pretrained(args.model_name_or_path, local_files_only=True)
     kv_bytes_per_token = args.kv_bytes_per_token or _kv_bytes(config)
+    progress({"phase": "load_sources"})
     rows = list(read_jsonl_rows(args.input or ()))
     loaded = load_g_sources(
         traces_path=args.traces_path,
@@ -207,6 +230,7 @@ def _paired(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
         kv_bytes_per_token=kv_bytes_per_token,
         source_audit=loaded.audit,
         allow_unchanged_b=args.allow_unchanged_b,
+        progress=progress,
     )
     print(
         json.dumps(

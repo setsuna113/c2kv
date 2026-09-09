@@ -16,9 +16,15 @@ import shutil
 from collections import Counter, OrderedDict, defaultdict
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any, Callable, Iterable, Mapping, Sequence
 
-from .dataset import Decision, event_store_session_id, iter_decisions, snapshot_and_validate_rows
+from .dataset import (
+    Decision,
+    event_store_session_id,
+    iter_decision_metadata,
+    iter_decisions,
+    snapshot_and_validate_rows,
+)
 from .evidence import EVIDENCE_VERSION
 from .events import EventStore
 from .packing import (
@@ -26,6 +32,7 @@ from .packing import (
     RAW_LAYOUT_PROFILE,
     MemoryView,
     PackedMemory,
+    PackingCache,
     PackingBudgetError,
     encode_event_chunks,
     native_ids,
@@ -307,6 +314,7 @@ def _history_components(
     max_chunk_tokens: int,
     chunk_overlap: int,
     tools: Sequence[Mapping[str, Any]],
+    cache: PackingCache | None = None,
 ) -> tuple[int, int]:
     """Return gist and charged raw tokens under the fixed current-input baseline.
 
@@ -318,7 +326,7 @@ def _history_components(
     """
     full_messages = raw_workspace_messages(store, view)
     full_tokens = len(
-        native_ids(tokenizer, full_messages, tools=tools, generation=True)
+        native_ids(tokenizer, full_messages, tools=tools, generation=True, cache=cache)
     )
     baseline_indices = {
         index
@@ -335,7 +343,7 @@ def _history_components(
         visible_message(store.messages[index]) for index in sorted(baseline_indices)
     ]
     baseline_tokens = (
-        len(native_ids(tokenizer, baseline_messages, tools=tools, generation=True))
+        len(native_ids(tokenizer, baseline_messages, tools=tools, generation=True, cache=cache))
         if baseline_messages
         else 0
     )
@@ -350,9 +358,75 @@ def _history_components(
             tokenizer,
             max_chunk_tokens=max_chunk_tokens,
             chunk_overlap=chunk_overlap,
+            cache=cache,
         ):
             gist_tokens += math.ceil(len(chunk.token_ids) / ratio)
     return gist_tokens, raw_tokens
+
+
+class _DecisionMeasurements:
+    """Reuse exact measurements within a decision and tokenization within a session.
+
+    Native prompt lengths are measured as complete rendered sequences. They
+    cannot be obtained by summing per-message lengths because evidence packets
+    and chat-template tokenization are not additive.
+    """
+
+    def __init__(self, decision: Decision, tokenizer: Any, packing: PackingConfig,
+                 cache: PackingCache) -> None:
+        self.decision = decision
+        self.tokenizer = tokenizer
+        self.packing = packing
+        self.cache = cache
+        self.tools = decision.tools
+        self._raw_lengths: dict[MemoryView, int] = {}
+        self._history: dict[MemoryView, tuple[int, dict[int, int]]] = {}
+        self._baseline_tokens: int | None = None
+        self._packed: dict[MemoryView, tuple[PackedMemory, tuple[int, ...], dict[str, Any]]] = {}
+
+    def raw_tokens(self, view: MemoryView) -> int:
+        if view not in self._raw_lengths:
+            self._raw_lengths[view] = len(native_ids(
+                self.tokenizer, raw_workspace_messages(self.decision.store, view),
+                tools=self.tools, generation=True, cache=self.cache,
+            ))
+        return self._raw_lengths[view]
+
+    def history_components(self, view: MemoryView, ratio: int) -> tuple[int, int]:
+        if view not in self._history:
+            store = self.decision.store
+            full_tokens = self.raw_tokens(view)
+            if self._baseline_tokens is None:
+                indices = {
+                    index for event in store.events if event.kind == "instruction"
+                    for index in event.source_indices
+                }
+                users = [event for event in store.events if event.kind == "user"]
+                if users:
+                    indices.add(max(users[-1].source_indices))
+                if store.messages:
+                    indices.add(len(store.messages) - 1)
+                messages = [visible_message(store.messages[index]) for index in sorted(indices)]
+                self._baseline_tokens = len(native_ids(
+                    self.tokenizer, messages, tools=self.tools, generation=True, cache=self.cache,
+                )) if messages else 0
+            raw_tokens = max(0, full_tokens - self._baseline_tokens)
+            gist_ids = set(view.gist_event_ids)
+            lengths = tuple(
+                len(chunk.token_ids)
+                for event in store.events if event.event_id in gist_ids
+                for chunk in encode_event_chunks(
+                    store, event.event_id, self.tokenizer,
+                    max_chunk_tokens=self.packing.max_chunk_tokens,
+                    chunk_overlap=self.packing.chunk_overlap, cache=self.cache,
+                )
+            )
+            self._history[view] = (raw_tokens, {
+                value: sum(math.ceil(length / value) for length in lengths)
+                for value in self.packing.ratios
+            })
+        raw_tokens, gist_by_ratio = self._history[view]
+        return gist_by_ratio[ratio], raw_tokens
 
 
 def _evidence_increment_tokens(
@@ -361,7 +435,10 @@ def _evidence_increment_tokens(
     candidate_view: MemoryView,
     tokenizer: Any,
     tools: Sequence[Mapping[str, Any]],
+    measurements: _DecisionMeasurements | None = None,
 ) -> int:
+    if measurements is not None:
+        return max(0, measurements.raw_tokens(candidate_view) - measurements.raw_tokens(base_view))
     base = native_ids(
         tokenizer,
         raw_workspace_messages(store, base_view),
@@ -382,16 +459,22 @@ def _pack_checked(
     view: MemoryView,
     tokenizer: Any,
     config: PackingConfig,
+    measurements: _DecisionMeasurements | None = None,
 ) -> tuple[PackedMemory, tuple[int, ...], dict[str, Any]]:
+    if measurements is not None and view in measurements._packed:
+        memory, target_ids, costs = measurements._packed[view]
+        return memory, target_ids, {key: dict(value) for key, value in costs.items()}
+    cache = measurements.cache if measurements is not None else None
     memory = pack_memory(
         decision.store,
         view,
         tokenizer,
-        tools=decision.tools,
+        tools=measurements.tools if measurements is not None else decision.tools,
         max_chunk_tokens=config.max_chunk_tokens,
         chunk_overlap=config.chunk_overlap,
         max_chunks=config.max_chunks,
         max_raw_tokens=config.max_system_tokens + config.max_workspace_tokens,
+        cache=cache,
     )
     if len(memory.system_input_ids) > config.max_system_tokens:
         raise PackingBudgetError(
@@ -407,7 +490,7 @@ def _pack_checked(
             f"Encoder chunks need {encoder_tokens} tokens; budget is {config.max_encoder_tokens}"
         )
     target_ids = pack_target(
-        tokenizer, decision.target, max_target_tokens=config.max_target_tokens
+        tokenizer, decision.target, max_target_tokens=config.max_target_tokens, cache=cache,
     )
     costs_by_ratio: dict[str, Any] = {}
     for ratio in config.ratios:
@@ -423,6 +506,10 @@ def _pack_checked(
             "target_tokens": len(target_ids),
             "sequence_tokens": sequence_tokens,
         }
+    if measurements is not None:
+        measurements._packed[view] = (memory, target_ids, {
+            key: dict(value) for key, value in costs_by_ratio.items()
+        })
     return memory, target_ids, costs_by_ratio
 
 
@@ -435,17 +522,21 @@ def _enforce_history_budget(
     *,
     kv_bytes_per_token: int,
     history_budget_bytes: int,
+    measurements: _DecisionMeasurements | None = None,
 ) -> None:
     for ratio in packing.ratios:
-        gist_tokens, historical_raw_tokens = _history_components(
-            decision.store,
-            view,
-            tokenizer,
-            ratio=ratio,
-            max_chunk_tokens=packing.max_chunk_tokens,
-            chunk_overlap=packing.chunk_overlap,
-            tools=decision.tools,
-        )
+        if measurements is not None:
+            gist_tokens, historical_raw_tokens = measurements.history_components(view, ratio)
+        else:
+            gist_tokens, historical_raw_tokens = _history_components(
+                decision.store,
+                view,
+                tokenizer,
+                ratio=ratio,
+                max_chunk_tokens=packing.max_chunk_tokens,
+                chunk_overlap=packing.chunk_overlap,
+                tools=decision.tools,
+            )
         history_tokens = gist_tokens + historical_raw_tokens
         history_bytes = history_tokens * kv_bytes_per_token
         costs_by_ratio[str(ratio)].update(
@@ -479,11 +570,20 @@ class PrefixLifecyclePlanner:
         self.policy_config = policy_config
         self.kv_bytes_per_token = kv_bytes_per_token
         self._memories: dict[str, ConversationMemory] = {}
+        self._packing_cache: PackingCache | None = None
+
+    def measurements(self, decision: Decision) -> _DecisionMeasurements:
+        """Keep event tokenization between prefixes, without caching policy state globally."""
+        if self._packing_cache is None or self._packing_cache.session_id != decision.store.session_id:
+            self._packing_cache = PackingCache(decision.store.session_id)
+        return _DecisionMeasurements(decision, self.tokenizer, self.packing, self._packing_cache)
 
     def __call__(
-        self, decision: Decision, static_view: MemoryView
+        self, decision: Decision, static_view: MemoryView,
+        *, measurements: _DecisionMeasurements | None = None,
     ) -> tuple[MemoryView, Mapping[str, Any]]:
         store = decision.store
+        measurements = measurements or self.measurements(decision)
         memory = self._memories.setdefault(
             store.session_id, ConversationMemory(store.session_id, self.policy_config)
         )
@@ -495,8 +595,9 @@ class PrefixLifecyclePlanner:
         cache: dict[tuple[str, ...], tuple[int, int, int, int]] = {}
 
         def measured(event_ids: tuple[str, ...]) -> tuple[int, int, int, int]:
+            requested_ids = set(event_ids)
             ordered = tuple(
-                event.event_id for event in store.events if event.event_id in set(event_ids)
+                event.event_id for event in store.events if event.event_id in requested_ids
             )
             if ordered not in cache:
                 view = select_view(
@@ -505,17 +606,10 @@ class PrefixLifecyclePlanner:
                     restored_event_ids=ordered,
                 )
                 evidence_tokens = _evidence_increment_tokens(
-                    store, static_view, view, self.tokenizer, decision.tools
+                    store, static_view, view, self.tokenizer, measurements.tools,
+                    measurements=measurements,
                 )
-                gist_tokens, historical_raw_tokens = _history_components(
-                    store,
-                    view,
-                    self.tokenizer,
-                    ratio=planning_ratio,
-                    max_chunk_tokens=self.packing.max_chunk_tokens,
-                    chunk_overlap=self.packing.chunk_overlap,
-                    tools=decision.tools,
-                )
+                gist_tokens, historical_raw_tokens = measurements.history_components(view, planning_ratio)
                 evidence_bytes = evidence_tokens * self.kv_bytes_per_token
                 history_bytes = (
                     gist_tokens + historical_raw_tokens
@@ -598,35 +692,46 @@ def prepare_paired_corpus(
     kv_bytes_per_token: int,
     source_audit: Mapping[str, int] | None = None,
     allow_unchanged_b: bool = False,
+    progress: Callable[[Mapping[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
     """Prepare matched arm rows and atomically publish a compact corpus."""
     packing = packing or PackingConfig()
     sampling = sampling or SamplingConfig()
     policy_config = policy_config or RuntimeConfig(mode="persistent")
+    if progress is not None:
+        progress({"phase": "validate_sources"})
     snapshots = snapshot_and_validate_rows(rows)
     audit: Counter[str] = Counter()
     bounded = _bounded_rows(snapshots, sampling, audit)
+    del snapshots
+    if progress is not None:
+        progress({"phase": "candidates", "sessions_total": len(bounded), "sessions_done": 0})
     decisions_by_session: list[tuple[_DecisionCandidate, ...]] = []
     for row in bounded:
         lightweight: list[_DecisionCandidate] = []
-        for decision in iter_decisions(row):
+        for decision in iter_decision_metadata(row):
             lightweight.append(
                 _DecisionCandidate(
                     decision_id=decision.decision_id,
-                    session_key=decision.store.session_id,
+                    session_key=decision.session_key,
                     source=decision.source,
                     source_message_index=decision.source_message_index,
                 )
             )
         decisions_by_session.append(tuple(lightweight))
+        if progress is not None:
+            progress({"phase": "candidates", "sessions_total": len(bounded),
+                      "sessions_done": len(decisions_by_session)})
     audit["observable_decisions_before_selection"] = sum(
         len(decisions) for decisions in decisions_by_session
     )
     selected_ids = _select_decision_ids(decisions_by_session, sampling, audit)
+    del decisions_by_session
     prepared: list[dict[str, Any]] = []
     used_session_indices: set[int] = set()
     presented_tokens = {"C": 0, "B": 0}
     resident_tokens = {"C": 0, "B": 0}
+    decisions_visited = 0
     for session_index, row in enumerate(bounded):
         # ConversationMemory caches prefix signatures for idempotency. Keep
         # that state through one session, then release it before the next.
@@ -634,11 +739,19 @@ def prepare_paired_corpus(
             tokenizer, packing, policy_config, kv_bytes_per_token=kv_bytes_per_token
         )
         for decision in iter_decisions(row):
+            decisions_visited += 1
+            if progress is not None:
+                progress({"phase": "planning", "sessions_total": len(bounded),
+                          "sessions_done": session_index, "decisions_visited": decisions_visited,
+                          "decisions_total": audit["observable_decisions_before_selection"],
+                          "paired_exposures_written": len(prepared),
+                          "presented_tokens": dict(presented_tokens)})
             static_view = select_view(
                 decision.store, recent_tool_events=packing.recent_tool_events
             )
+            measurements = planner.measurements(decision)
             try:
-                lifecycle_view, policy_metadata = planner(decision, static_view)
+                lifecycle_view, policy_metadata = planner(decision, static_view, measurements=measurements)
             except (BudgetExceeded, PackingBudgetError) as exc:
                 audit[f"decisions_policy_skipped.{type(exc).__name__}"] += 1
                 continue
@@ -647,10 +760,10 @@ def prepare_paired_corpus(
                 continue
             try:
                 c_memory, c_target, c_costs = _pack_checked(
-                    decision, static_view, tokenizer, packing
+                    decision, static_view, tokenizer, packing, measurements
                 )
                 b_memory, b_target, b_costs = _pack_checked(
-                    decision, lifecycle_view, tokenizer, packing
+                    decision, lifecycle_view, tokenizer, packing, measurements
                 )
                 _enforce_history_budget(
                     decision,
@@ -660,6 +773,7 @@ def prepare_paired_corpus(
                     c_costs,
                     kv_bytes_per_token=kv_bytes_per_token,
                     history_budget_bytes=policy_config.history_budget_bytes,
+                    measurements=measurements,
                 )
                 _enforce_history_budget(
                     decision,
@@ -669,13 +783,32 @@ def prepare_paired_corpus(
                     b_costs,
                     kv_bytes_per_token=kv_bytes_per_token,
                     history_budget_bytes=policy_config.history_budget_bytes,
+                    measurements=measurements,
                 )
             except (PackingBudgetError, ValueError) as exc:
                 audit[f"decision_pairs_skipped.{type(exc).__name__}"] += 1
                 continue
             if c_target != b_target:
                 raise AssertionError("Matched arms produced different targets")
+            # The cap skips exposures, not the remainder of the session. Later
+            # shorter or zero-gist decisions can still fit. Policy and packing
+            # validation above preserve the original state and audit precedence;
+            # their repeated tokenization/measurements have already been reused.
+            if all(
+                presented_tokens["C"] + c_costs[str(ratio)]["presented_encoder_tokens"]
+                > sampling.max_presented_tokens_per_arm
+                or presented_tokens["B"] + b_costs[str(ratio)]["presented_encoder_tokens"]
+                > sampling.max_presented_tokens_per_arm
+                for ratio in packing.ratios
+            ):
+                audit["decision_pairs_skipped_presented_token_cap"] += (
+                    sampling.repetitions * len(packing.ratios)
+                )
+                continue
             changed = static_view != lifecycle_view
+            target_sha256 = hashlib.sha256(
+                _canonical_json(decision.target_dict()).encode("utf-8")
+            ).hexdigest()
             emitted_for_decision = False
             for repetition_index in range(sampling.repetitions):
                 for ratio in packing.ratios:
@@ -713,9 +846,7 @@ def prepare_paired_corpus(
                             "ratio": ratio,
                             "weight": 1.0,
                             "repetition_index": repetition_index,
-                            "target_sha256": hashlib.sha256(
-                                _canonical_json(decision.target_dict()).encode("utf-8")
-                            ).hexdigest(),
+                            "target_sha256": target_sha256,
                             "arms": {
                                 "C": {
                                     "view": _view_dict(c_memory.view),
@@ -881,6 +1012,11 @@ def prepare_paired_corpus(
         if pending.exists():
             shutil.rmtree(pending)
         raise
+    if progress is not None:
+        progress({"phase": "written", "sessions_done": len(bounded),
+                  "sessions_total": len(bounded), "decisions_visited": decisions_visited,
+                  "paired_exposures_written": len(prepared),
+                  "presented_tokens": dict(presented_tokens)})
     return manifest
 
 

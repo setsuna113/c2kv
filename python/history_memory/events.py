@@ -58,13 +58,115 @@ class EventStore:
         return cls(session_id, snapshots, build_events(session_id, snapshots))
 
     def event(self, event_id: str) -> EventRecord:
-        for event in self.events:
-            if event.event_id == event_id:
-                return event
-        raise KeyError(f"Event is not in the visible prefix: {event_id}")
+        index = self.__dict__.get("_event_index")
+        if index is None:
+            index = {}
+            for event in self.events:
+                # Preserve the first-match behavior for manually constructed
+                # stores that contain duplicate event IDs.
+                index.setdefault(event.event_id, event)
+            object.__setattr__(self, "_event_index", index)
+        try:
+            return index[event_id]
+        except KeyError:
+            raise KeyError(f"Event is not in the visible prefix: {event_id}") from None
 
     def event_messages(self, event_id: str) -> tuple[Message, ...]:
         return tuple(self.messages[i] for i in self.event(event_id).source_indices)
+
+
+class EventStoreBuilder:
+    """Incrementally build immutable prefix snapshots without reparsing history."""
+
+    def __init__(self, session_id: str) -> None:
+        if not isinstance(session_id, str) or not session_id:
+            raise ValueError("An explicit nonempty session_id is required")
+        self.session_id = session_id
+        self._messages: list[Message] = []
+        self._events: list[EventRecord] = []
+        self._pending: dict[str, int] = {}
+
+    def append(self, raw: Message | Mapping[str, Any]) -> Message:
+        """Append one observable message and update only its affected event."""
+        message = raw if isinstance(raw, Message) else Message.from_dict(raw)
+        value = message.to_dict()
+        index = len(self._messages)
+        role = value["role"]
+
+        if role == "tool":
+            call_id = value.get("tool_call_id")
+            if not isinstance(call_id, str) or call_id not in self._pending:
+                raise ValueError(
+                    f"Unmatched or duplicate tool result at source index {index}"
+                )
+            event_index = self._pending[call_id]
+            event = self._events[event_index]
+            missing = tuple(
+                pending_id
+                for pending_id in event.missing_tool_call_ids
+                if pending_id != call_id
+            )
+            self._messages.append(message)
+            self._events[event_index] = EventRecord(
+                event_id=event.event_id,
+                kind=event.kind,
+                source_indices=event.source_indices + (index,),
+                complete=not missing,
+                tool_call_ids=event.tool_call_ids,
+                missing_tool_call_ids=missing,
+            )
+            del self._pending[call_id]
+            return message
+
+        calls = value.get("tool_calls")
+        call_ids: list[str] = []
+        if calls:
+            if role != "assistant" or not isinstance(calls, list):
+                raise ValueError(f"Invalid tool_calls at source index {index}")
+            for call in calls:
+                call_id = call.get("id") if isinstance(call, dict) else None
+                function = call.get("function") if isinstance(call, dict) else None
+                if not isinstance(call_id, str) or not call_id:
+                    raise ValueError(f"Missing tool call ID at source index {index}")
+                if call_id in call_ids or call_id in self._pending:
+                    raise ValueError(
+                        f"Ambiguous tool call ID at source index {index}: {call_id}"
+                    )
+                if not isinstance(function, dict) or not isinstance(
+                    function.get("name"), str
+                ):
+                    raise ValueError(f"Missing function name at source index {index}")
+                call_ids.append(call_id)
+        if value.get("function_call"):
+            raise ValueError("Legacy function_call requires an explicit source adapter")
+
+        kind = (
+            "tool_event"
+            if call_ids
+            else ("instruction" if role in {"system", "developer"} else role)
+        )
+        event = EventRecord(
+            event_id=f"{self.session_id}:m{index}",
+            kind=kind,
+            source_indices=(index,),
+            complete=not call_ids,
+            tool_call_ids=tuple(call_ids),
+            missing_tool_call_ids=tuple(call_ids),
+        )
+        self._messages.append(message)
+        self._events.append(event)
+        event_index = len(self._events) - 1
+        for call_id in call_ids:
+            self._pending[call_id] = event_index
+        return message
+
+    def snapshot(self) -> EventStore:
+        """Return an immutable store for the current observable prefix."""
+        return EventStore(
+            session_id=self.session_id,
+            messages=tuple(self._messages),
+            events=tuple(self._events),
+        )
 
 
 def build_events(
@@ -79,56 +181,7 @@ def build_events(
     more messages arrive. Repeated IDs after completion are allowed; an ID
     cannot be reused while a result is outstanding.
     """
-    if not isinstance(session_id, str) or not session_id:
-        raise ValueError("An explicit nonempty session_id is required")
-    drafts: list[dict[str, Any]] = []
-    pending: dict[str, int] = {}
-    for index, raw in enumerate(messages):
-        message = raw.to_dict() if isinstance(raw, Message) else Message.from_dict(raw).to_dict()
-        role = message["role"]
-        if role == "tool":
-            call_id = message.get("tool_call_id")
-            if not isinstance(call_id, str) or call_id not in pending:
-                raise ValueError(f"Unmatched or duplicate tool result at source index {index}")
-            draft = drafts[pending.pop(call_id)]
-            draft["source_indices"].append(index)
-            draft["missing"].remove(call_id)
-            continue
-
-        calls = message.get("tool_calls")
-        call_ids: list[str] = []
-        if calls:
-            if role != "assistant" or not isinstance(calls, list):
-                raise ValueError(f"Invalid tool_calls at source index {index}")
-            for call in calls:
-                call_id = call.get("id") if isinstance(call, dict) else None
-                function = call.get("function") if isinstance(call, dict) else None
-                if not isinstance(call_id, str) or not call_id:
-                    raise ValueError(f"Missing tool call ID at source index {index}")
-                if call_id in call_ids or call_id in pending:
-                    raise ValueError(f"Ambiguous tool call ID at source index {index}: {call_id}")
-                if not isinstance(function, dict) or not isinstance(function.get("name"), str):
-                    raise ValueError(f"Missing function name at source index {index}")
-                call_ids.append(call_id)
-        if message.get("function_call"):
-            raise ValueError("Legacy function_call requires an explicit source adapter")
-        kind = "tool_event" if call_ids else ("instruction" if role in {"system", "developer"} else role)
-        drafts.append({
-            "event_id": f"{session_id}:m{index}",
-            "kind": kind,
-            "source_indices": [index],
-            "tool_call_ids": call_ids,
-            "missing": set(call_ids),
-        })
-        for call_id in call_ids:
-            pending[call_id] = len(drafts) - 1
-
-    return tuple(
-        EventRecord(
-            event_id=draft["event_id"], kind=draft["kind"],
-            source_indices=tuple(draft["source_indices"]),
-            complete=not draft["missing"], tool_call_ids=tuple(draft["tool_call_ids"]),
-            missing_tool_call_ids=tuple(call_id for call_id in draft["tool_call_ids"] if call_id in draft["missing"]),
-        )
-        for draft in drafts
-    )
+    builder = EventStoreBuilder(session_id)
+    for raw in messages:
+        builder.append(raw)
+    return builder.snapshot().events

@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Iterator, Mapping, Protocol, Sequence, TypeAlias
 
-from .events import EventStore, Message
+from .events import EventStore, EventStoreBuilder, Message
 from .packing import RAW_LAYOUT_PROFILE, MemoryView, select_view
 
 
@@ -185,6 +185,21 @@ def event_store_session_id(source: str, session_id: str) -> str:
 
 
 @dataclass(frozen=True)
+class DecisionMetadata:
+    """Decision identity and ordering without an allocated prefix store."""
+
+    decision_id: str
+    session_id: str
+    session_key: str
+    source: str
+    split: str
+    task_id: str
+    template_id: str
+    decision_index: int
+    source_message_index: int
+
+
+@dataclass(frozen=True)
 class Decision:
     """One immutable next-assistant-action target and its observable prefix."""
 
@@ -213,6 +228,79 @@ class Decision:
         return self.target.to_dict()
 
 
+def _iter_decision_metadata_from_snapshot(
+    snapshot: Mapping[str, Any],
+) -> Iterator[DecisionMetadata]:
+    session_key = event_store_session_id(snapshot["source"], snapshot["session_id"])
+    decision_index = 0
+    for source_message_index, message in enumerate(snapshot["messages"]):
+        if not _is_decision_message(message):
+            continue
+        yield DecisionMetadata(
+            decision_id=_decision_id(
+                source=snapshot["source"],
+                session_id=snapshot["session_id"],
+                task_id=snapshot["task_id"],
+                template_id=snapshot["template_id"],
+                source_message_index=source_message_index,
+            ),
+            session_id=snapshot["session_id"],
+            session_key=session_key,
+            source=snapshot["source"],
+            split=snapshot["split"],
+            task_id=snapshot["task_id"],
+            template_id=snapshot["template_id"],
+            decision_index=decision_index,
+            source_message_index=source_message_index,
+        )
+        decision_index += 1
+
+
+def _iter_decision_inputs(
+    snapshot: Mapping[str, Any], *, include_store: bool
+) -> Iterator[tuple[DecisionMetadata, EventStore | None, Message]]:
+    """Validate each decision prefix once while preserving legacy error order."""
+    messages = snapshot["messages"]
+    metadata = tuple(_iter_decision_metadata_from_snapshot(snapshot))
+    builder = EventStoreBuilder(
+        event_store_session_id(snapshot["source"], snapshot["session_id"])
+    )
+    previous_target: Message | None = None
+    previous_target_index = -1
+
+    for item in metadata:
+        prefix_start = previous_target_index + 1
+        visible_tail = tuple(
+            _model_visible_message(messages[index])
+            for index in range(prefix_start, item.source_message_index)
+        )
+        visible_target = _model_visible_message(messages[item.source_message_index])
+
+        # EventStore.from_messages serialized the entire prefix before checking
+        # call/result bindings. Serialize the new suffix first to retain that
+        # failure order without repeating work for the already validated prefix.
+        tail = tuple(Message.from_dict(message) for message in visible_tail)
+        if previous_target is not None:
+            builder.append(previous_target)
+        for message in tail:
+            builder.append(message)
+        store = builder.snapshot() if include_store else None
+        target = Message.from_dict(visible_target)
+        yield item, store, target
+        previous_target = target
+        previous_target_index = item.source_message_index
+
+
+def iter_decision_metadata(row: Mapping[str, Any]) -> Iterator[DecisionMetadata]:
+    """Yield validated decision identities without allocating prefix stores."""
+    snapshot = _json_snapshot(dict(row))
+    _validate_row_shape(snapshot)
+    # Match iter_decisions validation of the immutable tools payload.
+    json.dumps(snapshot.get("tools") or [], ensure_ascii=False, allow_nan=False)
+    for metadata, _, _ in _iter_decision_inputs(snapshot, include_store=False):
+        yield metadata
+
+
 def iter_decisions(row: Mapping[str, Any]) -> Iterator[Decision]:
     """Yield every nonempty assistant message as a prefix-only decision.
 
@@ -222,43 +310,24 @@ def iter_decisions(row: Mapping[str, Any]) -> Iterator[Decision]:
     """
     snapshot = _json_snapshot(dict(row))
     _validate_row_shape(snapshot)
-    session_id = snapshot["session_id"]
-    messages = snapshot["messages"]
     tools_json = json.dumps(
         snapshot.get("tools") or [], ensure_ascii=False, allow_nan=False
     )
-    decision_index = 0
-    for source_message_index, message in enumerate(messages):
-        if not _is_decision_message(message):
-            continue
-        visible_prefix = tuple(
-            _model_visible_message(prefix_message)
-            for prefix_message in messages[:source_message_index]
-        )
-        visible_target = _model_visible_message(message)
-        store = EventStore.from_messages(
-            event_store_session_id(snapshot["source"], session_id), visible_prefix
-        )
+    for metadata, store, target in _iter_decision_inputs(snapshot, include_store=True):
+        assert store is not None
         yield Decision(
-            decision_id=_decision_id(
-                source=snapshot["source"],
-                session_id=session_id,
-                task_id=snapshot["task_id"],
-                template_id=snapshot["template_id"],
-                source_message_index=source_message_index,
-            ),
-            session_id=session_id,
-            source=snapshot["source"],
-            split=snapshot["split"],
-            task_id=snapshot["task_id"],
-            template_id=snapshot["template_id"],
-            decision_index=decision_index,
-            source_message_index=source_message_index,
+            decision_id=metadata.decision_id,
+            session_id=metadata.session_id,
+            source=metadata.source,
+            split=metadata.split,
+            task_id=metadata.task_id,
+            template_id=metadata.template_id,
+            decision_index=metadata.decision_index,
+            source_message_index=metadata.source_message_index,
             store=store,
-            target=Message.from_dict(visible_target),
+            target=target,
             tools_json=tools_json,
         )
-        decision_index += 1
 
 
 @dataclass(frozen=True)
@@ -484,6 +553,7 @@ def write_jsonl_records(
 
 __all__ = [
     "Decision",
+    "DecisionMetadata",
     "LifecyclePlan",
     "LifecyclePlanner",
     "LifecycleSelection",
@@ -491,6 +561,7 @@ __all__ = [
     "build_paired_records",
     "build_static_records",
     "event_store_session_id",
+    "iter_decision_metadata",
     "iter_decisions",
     "read_jsonl_rows",
     "snapshot_and_validate_rows",
