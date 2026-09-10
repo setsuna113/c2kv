@@ -20,6 +20,7 @@ from history_memory.preparation import (
 )
 from history_memory.sources import (
     SourceRowError,
+    adapt_hotpotqa_row,
     load_g_sources,
     normalize_openai_messages,
 )
@@ -112,6 +113,106 @@ def test_generic_missing_result_binding_is_unique_or_rejected():
     normalized = normalize_openai_messages(distinct, namespace="n", audit=audit)
     assert [message["tool_call_id"] for message in normalized[1:]] == ["b", "a"]
     assert audit["tool_result_ids_bound_by_unique_name"] == 2
+
+
+def test_hotpotqa_accepts_huggingface_context_struct_and_legacy_documents():
+    row = adapt_hotpotqa_row(
+        {
+            "id": "hp-context",
+            "context": {
+                "title": ["First title", "Second title"],
+                "sentences": [
+                    ["First sentence.", "Second sentence."],
+                    ["Another document."],
+                ],
+            },
+            "question": "Which document?",
+            "answer": "The first one.",
+        }
+    )
+    assert [message["content"] for message in row["messages"]] == [
+        "First title\nFirst sentence. Second sentence.",
+        "Second title\nAnother document.",
+        "Which document?",
+        "The first one.",
+    ]
+    assert row["source_metadata"]["normalized_message_sources"][:2] == [
+        {"field": "context", "title_index": 0, "sentences_index": 0},
+        {"field": "context", "title_index": 1, "sentences_index": 1},
+    ]
+
+    legacy = adapt_hotpotqa_row(
+        {
+            "_id": "hp-documents",
+            "documents": ["Legacy document"],
+            "question": "What?",
+            "answer": "Legacy.",
+        }
+    )
+    assert legacy["messages"][0]["content"] == "Legacy document"
+    assert legacy["source_metadata"]["normalized_message_sources"][0] == {
+        "field": "documents",
+        "index": 0,
+    }
+
+    with_empty_context = adapt_hotpotqa_row(
+        {
+            "id": "hp-empty-context",
+            "context": {
+                "title": ["", "Retained title"],
+                "sentences": [[], ["Retained sentence."]],
+            },
+            "question": "Retained?",
+            "answer": "Yes.",
+        }
+    )
+    assert with_empty_context["source_metadata"]["normalized_message_sources"][0] == {
+        "field": "context",
+        "title_index": 1,
+        "sentences_index": 1,
+    }
+
+    with pytest.raises(SourceRowError, match="invalid_hotpotqa_context"):
+        adapt_hotpotqa_row(
+            {
+                "id": "hp-mismatched-context",
+                "context": {"title": ["Only title"], "sentences": []},
+                "question": "Invalid?",
+                "answer": "Yes.",
+            }
+        )
+
+
+def test_toucan_limit_counts_multiturn_rows_after_subset_filter(tmp_path):
+    toucan = tmp_path / "toucan"
+    rows = [
+        {"uuid": "single-original", "subset_name": "single-turn-original"},
+        {"uuid": "single-diverse", "subset_name": "single-turn-diversify"},
+    ]
+    rows.extend(
+        {
+            "uuid": f"multi-{index}",
+            "subset_name": "multi-turn",
+            "tools": "[]",
+            "messages": json.dumps(
+                [
+                    {"role": "user", "content": f"Question {index}"},
+                    {"role": "assistant", "content": f"Answer {index}"},
+                ]
+            ),
+        }
+        for index in range(3)
+    )
+    _write_jsonl(toucan / "SFT" / "train.jsonl", rows)
+
+    loaded = load_g_sources(toucan_path=toucan, max_rows_per_source=2)
+
+    assert [row["session_id"] for row in loaded.rows] == ["multi-0", "multi-1"]
+    assert loaded.audit["toucan.rows_scanned"] == 5
+    assert loaded.audit["toucan.rows_seen"] == 4
+    assert loaded.audit["toucan.skipped.non_multiturn_subset"] == 2
+    assert loaded.audit["toucan.sessions_emitted"] == 2
+    assert loaded.audit["toucan.truncated_at_max_rows"] == 1
 
 
 def test_load_g_sources_runs_all_six_file_bridges_and_preserves_provenance(tmp_path):

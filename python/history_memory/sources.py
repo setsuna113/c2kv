@@ -2,8 +2,9 @@
 
 The old G training loaders render tool calls as text and relabel tool results
 as users.  These adapters read the same raw rows but emit visible OpenAI
-messages, preserving every existing role and call ID.  A deterministic ID is
-created only when a legacy source has no ID. Missing result IDs require a
+messages, preserving message roles and call IDs. Explicit OTel tool-response
+parts become tool messages, with the container role retained in provenance.
+A deterministic ID is created only when a legacy source has no ID. Missing result IDs require a
 unique binding; only Toucan opts into its source-defined list order. Every
 inferred binding is counted in the audit.
 """
@@ -367,6 +368,58 @@ def _benchmark_reason(benchmark: str) -> str | None:
     return None
 
 
+def _trace_messages(
+    value: Any, *, field: str, span_id: str, audit: MutableMapping[str, int]
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Decode explicit OTel tool responses, including user-role containers."""
+    raw_messages = _message_sequence(
+        value, field=field,
+        default_role="assistant" if field == "gen_ai.output.messages" else None,
+    )
+    messages: list[dict[str, Any]] = []
+    coordinates: list[dict[str, Any]] = []
+    for index, raw in enumerate(raw_messages):
+        coordinate = {"span_id": span_id, "field": field, "index": index}
+        parts = _message_parts(raw)
+        if any(isinstance(part, Mapping) and part.get("type") == "tool_call_response"
+               for part in parts):
+            if raw.get("role") not in {"user", "tool"}:
+                raise SourceRowError("invalid_tool_response_container")
+            if raw.get("content") not in (None, ""):
+                raise SourceRowError("ambiguous_tool_response_content")
+            for part_index, part in enumerate(parts):
+                if isinstance(part, Mapping) and part.get("type") == "tool_call_response":
+                    if "result" not in part:
+                        raise SourceRowError("missing_tool_response_result")
+                    result = part["result"]
+                    messages.append({
+                        "role": "tool", "tool_call_id": part.get("id"),
+                        "content": result if isinstance(result, str) else _json_key(result),
+                    })
+                    audit["trace_tool_response_parts_promoted"] = audit.get(
+                        "trace_tool_response_parts_promoted", 0
+                    ) + 1
+                else:
+                    messages.append({"role": raw.get("role"), "parts": [part]})
+                coordinates.append({**coordinate, "part_index": part_index,
+                                    "source_role": raw.get("role")})
+            continue
+        message = dict(raw)
+        # Some harnesses record blank assistant call text as this exact sentinel
+        # when replaying an output in the following span's input.
+        if raw.get("role") == "assistant" and _raw_tool_calls(raw):
+            content = _text_content(raw.get("content") if raw.get("content") is not None
+                                    else parts)
+            if content is None or content.strip() in {"", "(no content)"}:
+                message["content"] = ""
+                audit["trace_empty_call_text_normalized"] = audit.get(
+                    "trace_empty_call_text_normalized", 0
+                ) + 1
+        messages.append(message)
+        coordinates.append(coordinate)
+    return messages, coordinates
+
+
 def adapt_agent_trace_row(
     row: Mapping[str, Any],
     *,
@@ -405,18 +458,14 @@ def adapt_agent_trace_row(
         if raw_input is None or raw_output is None:
             counts["spans_missing_messages"] = counts.get("spans_missing_messages", 0) + 1
             continue
-        input_messages = _message_sequence(raw_input, field="gen_ai.input.messages")
-        output_messages = _message_sequence(
-            raw_output, field="gen_ai.output.messages", default_role="assistant"
+        input_messages, input_sources = _trace_messages(
+            raw_input, field="gen_ai.input.messages", span_id=span_identity, audit=counts
+        )
+        output_messages, output_sources = _trace_messages(
+            raw_output, field="gen_ai.output.messages", span_id=span_identity, audit=counts
         )
         normalized_input = normalize_openai_messages(input_messages, namespace=namespace)
-        complete_sources = [
-            {"span_id": span_identity, "field": "gen_ai.input.messages", "index": index}
-            for index in range(len(input_messages))
-        ] + [
-            {"span_id": span_identity, "field": "gen_ai.output.messages", "index": index}
-            for index in range(len(output_messages))
-        ]
+        complete_sources = [*input_sources, *output_sources]
         normalized_complete_sources: list[Any] = []
         normalized_complete = normalize_openai_messages(
             [*input_messages, *output_messages],
@@ -671,7 +720,42 @@ def adapt_hotpotqa_row(
     row_index: int = 0,
     audit: MutableMapping[str, int] | None = None,
 ) -> dict[str, Any]:
-    documents = _loads(row.get("documents", []), field="documents")
+    documents = _loads(row.get("documents"), field="documents")
+    source_metadata: dict[str, Any] = {}
+    if documents is None:
+        context = _loads(row.get("context"), field="context")
+        documents = []
+        if isinstance(context, Mapping):
+            titles = context.get("title")
+            sentence_groups = context.get("sentences")
+            if isinstance(titles, list) and isinstance(sentence_groups, list):
+                if len(titles) != len(sentence_groups):
+                    raise SourceRowError(
+                        "invalid_hotpotqa_context",
+                        f"title_count={len(titles)} sentence_group_count={len(sentence_groups)}",
+                    )
+                document_sources = []
+                for index, (title, sentences) in enumerate(zip(titles, sentence_groups)):
+                    body = (
+                        " ".join(str(sentence) for sentence in sentences)
+                        if isinstance(sentences, list)
+                        else str(sentences or "")
+                    )
+                    document = f"{title or ''}\n{body}".strip()
+                    if document:
+                        documents.append(document)
+                        document_sources.append(
+                            {
+                                "field": "context",
+                                "title_index": index,
+                                "sentences_index": index,
+                            }
+                        )
+                source_metadata["normalized_message_sources"] = [
+                    *document_sources,
+                    {"field": "question"},
+                    {"field": "answer"},
+                ]
     if not isinstance(documents, list):
         documents = [documents]
     row_id = str(row.get("_id") or row.get("id") or row_index)
@@ -681,6 +765,7 @@ def adapt_hotpotqa_row(
         documents=[str(document) for document in documents],
         question=row.get("question"),
         answer=row.get("answer"),
+        source_metadata=source_metadata,
     )
 
 
@@ -915,16 +1000,20 @@ def load_g_sources(
             accept("agent-llm-traces", raw, adapt_agent_trace_row)
 
     if toucan_path is not None:
-        seen = 0
+        eligible_seen = 0
         for _, _, raw in _iter_rows(
             toucan_path,
             subdirs=("SFT",),
             columns=("uuid", "subset_name", "tools", "messages"),
         ):
-            if max_rows_per_source is not None and seen >= max_rows_per_source:
+            audit["toucan.rows_scanned"] += 1
+            if raw.get("subset_name") != "multi-turn":
+                accept("toucan", raw, adapt_toucan_row)
+                continue
+            if max_rows_per_source is not None and eligible_seen >= max_rows_per_source:
                 audit["toucan.truncated_at_max_rows"] += 1
                 break
-            seen += 1
+            eligible_seen += 1
             accept("toucan", raw, adapt_toucan_row)
 
     if openswe_path is not None:

@@ -80,6 +80,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--qa-target-fraction", type=float, default=0.15)
     parser.add_argument("--sampling-seed", type=int, default=42)
+    parser.add_argument(
+        "--workers", type=int, default=1,
+        help="CPU worker processes for paired planning (default: 1)",
+    )
 
     parser.add_argument(
         "--policy-mode",
@@ -149,6 +153,8 @@ def _progress_reporter():
 
 
 def _paired(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
+    if args.workers < 1:
+        parser.error("--workers must be >= 1")
     if args.output:
         parser.error("--output and --output-dir are mutually exclusive")
     if not args.model_name_or_path:
@@ -231,6 +237,7 @@ def _paired(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
         source_audit=loaded.audit,
         allow_unchanged_b=args.allow_unchanged_b,
         progress=progress,
+        workers=args.workers,
     )
     print(
         json.dumps(

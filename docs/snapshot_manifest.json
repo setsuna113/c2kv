@@ -1,0 +1,12 @@
+{
+  "snapshot_branch": "snapshot/b-history-training-20260911",
+  "captured_at_utc": "2026-09-10T23:52:09.749005+00:00",
+  "source_branch": "task/b-history-training",
+  "source_head": "310ce35706dcf53072a2b508c653d687066ca6aa",
+  "source_file_sha256": {},
+  "omitted_untracked_roots": [],
+  "validation": "Captured Python changes parsed; source snapshot only; no runtime tests or experiments started.",
+  "publication_only_changes": {},
+  "public_parent": "14a71b0cccb415cfcbaa19fc38b28e3c18f5851a",
+  "history": "Squashed source snapshot; ongoing development history unchanged."
+}

@@ -11,12 +11,14 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import multiprocessing
 import os
 import shutil
-from collections import Counter, OrderedDict, defaultdict
+from collections import Counter, OrderedDict, defaultdict, deque
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Callable, Iterable, Mapping, Sequence
+from typing import Any, Callable, Iterable, Iterator, Mapping, Sequence
 
 from .dataset import (
     Decision,
@@ -144,6 +146,30 @@ class _DecisionCandidate:
     session_key: str
     source: str
     source_message_index: int
+
+
+@dataclass(frozen=True)
+class _PlannedDecision:
+    decision_ordinal: int
+    session_key: str
+    decision_id: str
+    decision_index: int
+    source_message_index: int
+    source: str
+    split: str
+    target_json_text: str
+    c_view: MemoryView
+    b_view: MemoryView
+    c_costs: Mapping[str, Mapping[str, Any]]
+    b_costs: Mapping[str, Mapping[str, Any]]
+    policy_metadata: Mapping[str, Any]
+
+
+@dataclass(frozen=True)
+class _SessionPlan:
+    decisions_visited: int
+    candidates: tuple[_PlannedDecision, ...]
+    audit: Mapping[str, int]
 
 
 def _canonical_json(value: Any) -> str:
@@ -681,6 +707,328 @@ def _packing_manifest(config: PackingConfig) -> dict[str, Any]:
     return value
 
 
+def _plan_decision(
+    decision: Decision,
+    decision_ordinal: int,
+    planner: PrefixLifecyclePlanner,
+    tokenizer: Any,
+    packing: PackingConfig,
+    policy_config: RuntimeConfig,
+    selected_ids: frozenset[str],
+    audit: Counter[str],
+    *,
+    kv_bytes_per_token: int,
+) -> _PlannedDecision | None:
+    """Advance one session-local policy decision and pack selected candidates."""
+    static_view = select_view(
+        decision.store, recent_tool_events=packing.recent_tool_events
+    )
+    measurements = planner.measurements(decision)
+    try:
+        lifecycle_view, policy_metadata = planner(
+            decision, static_view, measurements=measurements
+        )
+    except (BudgetExceeded, PackingBudgetError) as exc:
+        audit[f"decisions_policy_skipped.{type(exc).__name__}"] += 1
+        return None
+    if decision.decision_id not in selected_ids:
+        audit["decisions_advanced_but_not_selected"] += 1
+        return None
+    try:
+        c_memory, c_target, c_costs = _pack_checked(
+            decision, static_view, tokenizer, packing, measurements
+        )
+        b_memory, b_target, b_costs = _pack_checked(
+            decision, lifecycle_view, tokenizer, packing, measurements
+        )
+        _enforce_history_budget(
+            decision,
+            static_view,
+            tokenizer,
+            packing,
+            c_costs,
+            kv_bytes_per_token=kv_bytes_per_token,
+            history_budget_bytes=policy_config.history_budget_bytes,
+            measurements=measurements,
+        )
+        _enforce_history_budget(
+            decision,
+            lifecycle_view,
+            tokenizer,
+            packing,
+            b_costs,
+            kv_bytes_per_token=kv_bytes_per_token,
+            history_budget_bytes=policy_config.history_budget_bytes,
+            measurements=measurements,
+        )
+    except (PackingBudgetError, ValueError) as exc:
+        audit[f"decision_pairs_skipped.{type(exc).__name__}"] += 1
+        return None
+    if c_target != b_target:
+        raise AssertionError("Matched arms produced different targets")
+    return _PlannedDecision(
+        decision_ordinal=decision_ordinal,
+        session_key=decision.store.session_id,
+        decision_id=decision.decision_id,
+        decision_index=decision.decision_index,
+        source_message_index=decision.source_message_index,
+        source=decision.source,
+        split=decision.split,
+        target_json_text=decision.target.json_text,
+        c_view=c_memory.view,
+        b_view=b_memory.view,
+        c_costs=c_costs,
+        b_costs=b_costs,
+        policy_metadata=dict(policy_metadata),
+    )
+
+
+def _plan_session(
+    row: Mapping[str, Any],
+    tokenizer: Any,
+    packing: PackingConfig,
+    policy_config: RuntimeConfig,
+    selected_ids: frozenset[str],
+    *,
+    kv_bytes_per_token: int,
+) -> _SessionPlan:
+    # Policy state and tokenization caches intentionally live for one session.
+    planner = PrefixLifecyclePlanner(
+        tokenizer, packing, policy_config, kv_bytes_per_token=kv_bytes_per_token
+    )
+    audit: Counter[str] = Counter()
+    candidates: list[_PlannedDecision] = []
+    decisions_visited = 0
+    for decision_ordinal, decision in enumerate(iter_decisions(row)):
+        decisions_visited += 1
+        candidate = _plan_decision(
+            decision,
+            decision_ordinal,
+            planner,
+            tokenizer,
+            packing,
+            policy_config,
+            selected_ids,
+            audit,
+            kv_bytes_per_token=kv_bytes_per_token,
+        )
+        if candidate is not None:
+            candidates.append(candidate)
+    return _SessionPlan(
+        decisions_visited=decisions_visited,
+        candidates=tuple(candidates),
+        audit=dict(audit),
+    )
+
+
+_SESSION_WORKER_TOKENIZER: Any = None
+_SESSION_WORKER_PACKING: PackingConfig | None = None
+_SESSION_WORKER_POLICY_CONFIG: RuntimeConfig | None = None
+_SESSION_WORKER_SELECTED_IDS: frozenset[str] | None = None
+_SESSION_WORKER_KV_BYTES_PER_TOKEN: int | None = None
+
+
+def _initialize_session_worker(
+    tokenizer: Any,
+    packing: PackingConfig,
+    policy_config: RuntimeConfig,
+    selected_ids: frozenset[str],
+    kv_bytes_per_token: int,
+) -> None:
+    global _SESSION_WORKER_TOKENIZER
+    global _SESSION_WORKER_PACKING
+    global _SESSION_WORKER_POLICY_CONFIG
+    global _SESSION_WORKER_SELECTED_IDS
+    global _SESSION_WORKER_KV_BYTES_PER_TOKEN
+    _SESSION_WORKER_TOKENIZER = tokenizer
+    _SESSION_WORKER_PACKING = packing
+    _SESSION_WORKER_POLICY_CONFIG = policy_config
+    _SESSION_WORKER_SELECTED_IDS = selected_ids
+    _SESSION_WORKER_KV_BYTES_PER_TOKEN = kv_bytes_per_token
+
+
+def _plan_session_worker(row: Mapping[str, Any]) -> _SessionPlan:
+    if (
+        _SESSION_WORKER_PACKING is None
+        or _SESSION_WORKER_POLICY_CONFIG is None
+        or _SESSION_WORKER_SELECTED_IDS is None
+        or _SESSION_WORKER_KV_BYTES_PER_TOKEN is None
+    ):
+        raise RuntimeError("Session preparation worker was not initialized")
+    return _plan_session(
+        row,
+        _SESSION_WORKER_TOKENIZER,
+        _SESSION_WORKER_PACKING,
+        _SESSION_WORKER_POLICY_CONFIG,
+        _SESSION_WORKER_SELECTED_IDS,
+        kv_bytes_per_token=_SESSION_WORKER_KV_BYTES_PER_TOKEN,
+    )
+
+
+@contextmanager
+def _parallel_session_plans(
+    rows: Iterable[Mapping[str, Any]],
+    tokenizer: Any,
+    packing: PackingConfig,
+    policy_config: RuntimeConfig,
+    selected_ids: frozenset[str],
+    *,
+    kv_bytes_per_token: int,
+    workers: int,
+) -> Iterator[Iterator[_SessionPlan]]:
+    """Yield ordered session plans while keeping at most two tasks per worker."""
+    context = multiprocessing.get_context("spawn")
+    pool = context.Pool(
+        processes=workers,
+        initializer=_initialize_session_worker,
+        initargs=(
+            tokenizer,
+            packing,
+            policy_config,
+            selected_ids,
+            kv_bytes_per_token,
+        ),
+    )
+    pending: deque[Any] = deque()
+    row_iterator = iter(rows)
+    exhausted = False
+
+    def fill_pending() -> None:
+        nonlocal exhausted
+        while not exhausted and len(pending) < 2 * workers:
+            try:
+                row = next(row_iterator)
+            except StopIteration:
+                exhausted = True
+                break
+            pending.append(pool.apply_async(_plan_session_worker, (row,)))
+
+    def ordered_results() -> Iterator[_SessionPlan]:
+        while pending:
+            result = pending.popleft().get()
+            fill_pending()
+            yield result
+
+    completed = False
+    try:
+        fill_pending()
+        yield ordered_results()
+        completed = True
+    finally:
+        try:
+            if completed:
+                pool.close()
+            else:
+                pool.terminate()
+        finally:
+            pool.join()
+
+
+def _reduce_planned_decision(
+    candidate: _PlannedDecision,
+    session_index: int,
+    packing: PackingConfig,
+    sampling: SamplingConfig,
+    audit: Counter[str],
+    prepared: list[dict[str, Any]],
+    used_session_indices: set[int],
+    presented_tokens: dict[str, int],
+    resident_tokens: dict[str, int],
+) -> None:
+    # Keep this cap before target canonicalization: cap-skipped targets need not
+    # be hashable under the prepared-corpus canonical JSON contract.
+    if all(
+        presented_tokens["C"]
+        + candidate.c_costs[str(ratio)]["presented_encoder_tokens"]
+        > sampling.max_presented_tokens_per_arm
+        or presented_tokens["B"]
+        + candidate.b_costs[str(ratio)]["presented_encoder_tokens"]
+        > sampling.max_presented_tokens_per_arm
+        for ratio in packing.ratios
+    ):
+        audit["decision_pairs_skipped_presented_token_cap"] += (
+            sampling.repetitions * len(packing.ratios)
+        )
+        return
+    changed = candidate.c_view != candidate.b_view
+    target_sha256 = hashlib.sha256(
+        _canonical_json(json.loads(candidate.target_json_text)).encode("utf-8")
+    ).hexdigest()
+    emitted_for_decision = False
+    for repetition_index in range(sampling.repetitions):
+        for ratio in packing.ratios:
+            c_costs = candidate.c_costs[str(ratio)]
+            b_costs = candidate.b_costs[str(ratio)]
+            c_presented = c_costs["presented_encoder_tokens"]
+            b_presented = b_costs["presented_encoder_tokens"]
+            if (
+                presented_tokens["C"] + c_presented
+                > sampling.max_presented_tokens_per_arm
+                or presented_tokens["B"] + b_presented
+                > sampling.max_presented_tokens_per_arm
+            ):
+                audit["decision_pairs_skipped_presented_token_cap"] += 1
+                continue
+            presented_tokens["C"] += c_presented
+            presented_tokens["B"] += b_presented
+            resident_tokens["C"] += c_costs["resident_kv_tokens"]
+            resident_tokens["B"] += b_costs["resident_kv_tokens"]
+            if c_costs["gist_tokens"]:
+                audit["gist_bearing_pairs.arm.C"] += 1
+            if b_costs["gist_tokens"]:
+                audit["gist_bearing_pairs.arm.B"] += 1
+            emitted_for_decision = True
+            if changed:
+                audit["changed_view_pairs"] += 1
+            prepared.append(
+                {
+                    "schema_version": PREPARED_SCHEMA_VERSION,
+                    "session_index": session_index,
+                    "session_key": candidate.session_key,
+                    "decision_id": candidate.decision_id,
+                    "decision_index": candidate.decision_index,
+                    "source_message_index": candidate.source_message_index,
+                    "source": candidate.source,
+                    "split": candidate.split,
+                    "ratio": ratio,
+                    "weight": 1.0,
+                    "repetition_index": repetition_index,
+                    "target_sha256": target_sha256,
+                    "arms": {
+                        "C": {
+                            "view": _view_dict(candidate.c_view),
+                            "costs": c_costs,
+                        },
+                        "B": {
+                            "view": _view_dict(candidate.b_view),
+                            "costs": b_costs,
+                            "policy": candidate.policy_metadata,
+                        },
+                    },
+                }
+            )
+    if emitted_for_decision:
+        used_session_indices.add(session_index)
+        audit[
+            "changed_view_base_decisions"
+            if changed
+            else "identical_view_base_decisions"
+        ] += 1
+        audit["retrieved_event_selections"] += len(
+            candidate.policy_metadata.get("retrieved_event_ids", ())
+        )
+        audit["retained_event_selections"] += len(
+            candidate.policy_metadata.get("retained_event_ids", ())
+        )
+        audit["released_event_selections"] += len(
+            candidate.policy_metadata.get("expired_lease_event_ids", ())
+        ) + len(candidate.policy_metadata.get("revision_cancelled_event_ids", ()))
+        audit["protected_extra_event_selections"] += len(
+            set(candidate.policy_metadata.get("protected_event_ids", ()))
+            - set(candidate.c_view.raw_event_ids)
+        )
+
+
 def prepare_paired_corpus(
     rows: Iterable[Mapping[str, Any]],
     tokenizer: Any,
@@ -693,8 +1041,11 @@ def prepare_paired_corpus(
     source_audit: Mapping[str, int] | None = None,
     allow_unchanged_b: bool = False,
     progress: Callable[[Mapping[str, Any]], None] | None = None,
+    workers: int = 1,
 ) -> dict[str, Any]:
     """Prepare matched arm rows and atomically publish a compact corpus."""
+    if isinstance(workers, bool) or not isinstance(workers, int) or workers < 1:
+        raise ValueError("workers must be a positive integer")
     packing = packing or PackingConfig()
     sampling = sampling or SamplingConfig()
     policy_config = policy_config or RuntimeConfig(mode="persistent")
@@ -732,154 +1083,83 @@ def prepare_paired_corpus(
     presented_tokens = {"C": 0, "B": 0}
     resident_tokens = {"C": 0, "B": 0}
     decisions_visited = 0
-    for session_index, row in enumerate(bounded):
-        # ConversationMemory caches prefix signatures for idempotency. Keep
-        # that state through one session, then release it before the next.
-        planner = PrefixLifecyclePlanner(
-            tokenizer, packing, policy_config, kv_bytes_per_token=kv_bytes_per_token
-        )
-        for decision in iter_decisions(row):
-            decisions_visited += 1
-            if progress is not None:
-                progress({"phase": "planning", "sessions_total": len(bounded),
-                          "sessions_done": session_index, "decisions_visited": decisions_visited,
-                          "decisions_total": audit["observable_decisions_before_selection"],
-                          "paired_exposures_written": len(prepared),
-                          "presented_tokens": dict(presented_tokens)})
-            static_view = select_view(
-                decision.store, recent_tool_events=packing.recent_tool_events
+    if workers == 1:
+        for session_index, row in enumerate(bounded):
+            # ConversationMemory caches prefix signatures for idempotency. Keep
+            # that state through one session, then release it before the next.
+            planner = PrefixLifecyclePlanner(
+                tokenizer, packing, policy_config, kv_bytes_per_token=kv_bytes_per_token
             )
-            measurements = planner.measurements(decision)
-            try:
-                lifecycle_view, policy_metadata = planner(decision, static_view, measurements=measurements)
-            except (BudgetExceeded, PackingBudgetError) as exc:
-                audit[f"decisions_policy_skipped.{type(exc).__name__}"] += 1
-                continue
-            if decision.decision_id not in selected_ids:
-                audit["decisions_advanced_but_not_selected"] += 1
-                continue
-            try:
-                c_memory, c_target, c_costs = _pack_checked(
-                    decision, static_view, tokenizer, packing, measurements
-                )
-                b_memory, b_target, b_costs = _pack_checked(
-                    decision, lifecycle_view, tokenizer, packing, measurements
-                )
-                _enforce_history_budget(
+            for decision_ordinal, decision in enumerate(iter_decisions(row)):
+                decisions_visited += 1
+                if progress is not None:
+                    progress({"phase": "planning", "sessions_total": len(bounded),
+                              "sessions_done": session_index,
+                              "decisions_visited": decisions_visited,
+                              "decisions_total": audit["observable_decisions_before_selection"],
+                              "paired_exposures_written": len(prepared),
+                              "presented_tokens": dict(presented_tokens)})
+                candidate = _plan_decision(
                     decision,
-                    static_view,
+                    decision_ordinal,
+                    planner,
                     tokenizer,
                     packing,
-                    c_costs,
+                    policy_config,
+                    selected_ids,
+                    audit,
                     kv_bytes_per_token=kv_bytes_per_token,
-                    history_budget_bytes=policy_config.history_budget_bytes,
-                    measurements=measurements,
                 )
-                _enforce_history_budget(
-                    decision,
-                    lifecycle_view,
-                    tokenizer,
-                    packing,
-                    b_costs,
-                    kv_bytes_per_token=kv_bytes_per_token,
-                    history_budget_bytes=policy_config.history_budget_bytes,
-                    measurements=measurements,
-                )
-            except (PackingBudgetError, ValueError) as exc:
-                audit[f"decision_pairs_skipped.{type(exc).__name__}"] += 1
-                continue
-            if c_target != b_target:
-                raise AssertionError("Matched arms produced different targets")
-            # The cap skips exposures, not the remainder of the session. Later
-            # shorter or zero-gist decisions can still fit. Policy and packing
-            # validation above preserve the original state and audit precedence;
-            # their repeated tokenization/measurements have already been reused.
-            if all(
-                presented_tokens["C"] + c_costs[str(ratio)]["presented_encoder_tokens"]
-                > sampling.max_presented_tokens_per_arm
-                or presented_tokens["B"] + b_costs[str(ratio)]["presented_encoder_tokens"]
-                > sampling.max_presented_tokens_per_arm
-                for ratio in packing.ratios
-            ):
-                audit["decision_pairs_skipped_presented_token_cap"] += (
-                    sampling.repetitions * len(packing.ratios)
-                )
-                continue
-            changed = static_view != lifecycle_view
-            target_sha256 = hashlib.sha256(
-                _canonical_json(decision.target_dict()).encode("utf-8")
-            ).hexdigest()
-            emitted_for_decision = False
-            for repetition_index in range(sampling.repetitions):
-                for ratio in packing.ratios:
-                    c_presented = c_costs[str(ratio)]["presented_encoder_tokens"]
-                    b_presented = b_costs[str(ratio)]["presented_encoder_tokens"]
-                    if (
-                        presented_tokens["C"] + c_presented
-                        > sampling.max_presented_tokens_per_arm
-                        or presented_tokens["B"] + b_presented
-                        > sampling.max_presented_tokens_per_arm
-                    ):
-                        audit["decision_pairs_skipped_presented_token_cap"] += 1
-                        continue
-                    presented_tokens["C"] += c_presented
-                    presented_tokens["B"] += b_presented
-                    resident_tokens["C"] += c_costs[str(ratio)]["resident_kv_tokens"]
-                    resident_tokens["B"] += b_costs[str(ratio)]["resident_kv_tokens"]
-                    if c_costs[str(ratio)]["gist_tokens"]:
-                        audit["gist_bearing_pairs.arm.C"] += 1
-                    if b_costs[str(ratio)]["gist_tokens"]:
-                        audit["gist_bearing_pairs.arm.B"] += 1
-                    emitted_for_decision = True
-                    if changed:
-                        audit["changed_view_pairs"] += 1
-                    prepared.append(
-                        {
-                            "schema_version": PREPARED_SCHEMA_VERSION,
-                            "session_index": session_index,
-                            "session_key": decision.store.session_id,
-                            "decision_id": decision.decision_id,
-                            "decision_index": decision.decision_index,
-                            "source_message_index": decision.source_message_index,
-                            "source": decision.source,
-                            "split": decision.split,
-                            "ratio": ratio,
-                            "weight": 1.0,
-                            "repetition_index": repetition_index,
-                            "target_sha256": target_sha256,
-                            "arms": {
-                                "C": {
-                                    "view": _view_dict(c_memory.view),
-                                    "costs": c_costs[str(ratio)],
-                                },
-                                "B": {
-                                    "view": _view_dict(b_memory.view),
-                                    "costs": b_costs[str(ratio)],
-                                    "policy": policy_metadata,
-                                },
-                            },
-                        }
+                if candidate is not None:
+                    _reduce_planned_decision(
+                        candidate,
+                        session_index,
+                        packing,
+                        sampling,
+                        audit,
+                        prepared,
+                        used_session_indices,
+                        presented_tokens,
+                        resident_tokens,
                     )
-            if emitted_for_decision:
-                used_session_indices.add(session_index)
-                audit[
-                    "changed_view_base_decisions"
-                    if changed
-                    else "identical_view_base_decisions"
-                ] += 1
-                audit["retrieved_event_selections"] += len(
-                    policy_metadata.get("retrieved_event_ids", ())
-                )
-                audit["retained_event_selections"] += len(
-                    policy_metadata.get("retained_event_ids", ())
-                )
-                audit["released_event_selections"] += len(
-                    policy_metadata.get("expired_lease_event_ids", ())
-                ) + len(policy_metadata.get("revision_cancelled_event_ids", ()))
-                audit["protected_extra_event_selections"] += len(
-                    set(policy_metadata.get("protected_event_ids", ()))
-                    - set(static_view.raw_event_ids)
-                )
+    else:
+        with _parallel_session_plans(
+            bounded,
+            tokenizer,
+            packing,
+            policy_config,
+            selected_ids,
+            kv_bytes_per_token=kv_bytes_per_token,
+            workers=workers,
+        ) as session_plans:
+            for session_index, session_plan in enumerate(session_plans):
+                audit.update(session_plan.audit)
+                candidate_iterator = iter(session_plan.candidates)
+                candidate = next(candidate_iterator, None)
+                for decision_ordinal in range(session_plan.decisions_visited):
+                    decisions_visited += 1
+                    if progress is not None:
+                        progress({"phase": "planning", "sessions_total": len(bounded),
+                                  "sessions_done": session_index,
+                                  "decisions_visited": decisions_visited,
+                                  "decisions_total": audit["observable_decisions_before_selection"],
+                                  "paired_exposures_written": len(prepared),
+                                  "presented_tokens": dict(presented_tokens)})
+                    if candidate is not None and candidate.decision_ordinal == decision_ordinal:
+                        _reduce_planned_decision(
+                            candidate,
+                            session_index,
+                            packing,
+                            sampling,
+                            audit,
+                            prepared,
+                            used_session_indices,
+                            presented_tokens,
+                            resident_tokens,
+                        )
+                        candidate = next(candidate_iterator, None)
+                if candidate is not None:
+                    raise AssertionError("Session plan contains an invalid decision ordinal")
     if not prepared:
         raise ValueError("No paired decisions fit the requested sources and budgets")
     audit["gist_bearing_pairs.arm.C"] += 0

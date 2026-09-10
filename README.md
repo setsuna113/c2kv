@@ -2,24 +2,42 @@
 
 C2KV enables **independently prefilled text segments to be compressed into compact KV Cache representations** that can be correctly concatenated and recognized by downstream tasks. The core idea is to freeze the original model weights, introduce additional QKV Projection layers, and use C2KV as Memory Slots. Each text chunk is independently compressed into C2KV entries with properly repositioned RoPE (Rotary Position Embedding), so that multiple C2KV caches can be seamlessly stitched together for downstream inference.
 
-### Active development
+### A/B development snapshot — 2026-09-11
 
-`task/bdf-pilot` is the consolidation branch for experiment D, experiment G
-and the modular benchmark system. Serving lives in the separate
-`sglang-c2kv` repository on its corresponding `task/bdf-pilot` branch.
+This branch is a point-in-time source snapshot, captured at `2026-09-10T23:52:09.749005+00:00`.
+It is published separately from ongoing A/B development. Base source commit:
+`310ce35706dcf53072a2b508c653d687066ca6aa`. [Snapshot provenance](docs/snapshot_manifest.json) records
+the captured source files and publication scope.
 
-| Work | Entry points |
-|---|---|
-| D repair experiments | `agent/d_contract_driver.py`, `agent/d_ksweep_driver.py`, `agent/eval_agent_history_c2kv.py` |
-| G training and evaluation | `agent/train_joint_next_action_c2kv.py`, `start_h200.sh`, `agent/eval_history_dev_c2kv_h200.sh` |
-| Shared end-to-end evaluation | [`benchmarks/run.py`](benchmarks/run.py), [`benchmarks/README.md`](benchmarks/README.md) |
-| Server validation | [`benchmarks/ops/README.md`](benchmarks/ops/README.md) |
+**B: history-memory training.** B builds matched training data and trains
+compressed representations for multi-turn action/observation histories. The
+training comparison is static history views (arm C) versus lifecycle-aware
+views (arm B), with shared decision manifests. [A](https://github.com/setsuna113/c2kv/tree/snapshot/a-memory-runtime-20260911) owns runtime
+evidence selection, workspace allocation and evaluation.
 
-Read [`docs/c2kv_semantics.md`](docs/c2kv_semantics.md) before choosing a
-checkpoint's query-projection mode. The current local model fork and the
-original lowercase-qkv implementation use different query projections.
-Historical experiment data remains under `results/` and `inv_*/`; it is not
-an alternative serving implementation.
+Read in this order:
+
+1. [Shared events, views, packing and A/B interface](docs/b_memory_training/interface.md).
+2. [Training arms, packaging and H200 runbook](docs/b_memory_training/h200.md).
+3. [Training entry point](agent/train_history_memory.py).
+4. [Shared history-memory implementation](python/history_memory/).
+
+This snapshot includes the local source through `310ce35`, including
+ordered parallel preparation and the G-source layout/multi-turn sampling fixes.
+It records implementation progress, not the completion or quality of a training
+run. An earlier submitted job remains tied to its own submitted source/config;
+publishing this branch does not change that job or start another one.
+
+**Publication scope.** Source, configurations, tests and committed development
+documentation are included. Temporary directories, caches, datasets, checkpoints
+and untracked run artifacts are not included. Some experiment-document links into
+`outputs/` refer to local evidence archives and will not resolve on GitHub; this
+is a source-and-plan snapshot, not a complete experiment-artifact release.
+
+Publication-only machine paths use `/home/user/`; configure those paths
+for your environment. Live A/B source files were not modified.
+This snapshot is squashed onto an already-public parent; the source HEAD
+in the manifest identifies the local capture, not an earlier job version.
 
 ### Supported Models
 
