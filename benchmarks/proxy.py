@@ -67,14 +67,27 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib
 import json
 import threading
 import time
 import uuid
+from contextvars import ContextVar
+from dataclasses import replace
+from pathlib import Path
+import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Dict, List, Optional, Set, Tuple
 from urllib import request as urlrequest
 from urllib.error import HTTPError, URLError
+from memory_runtime.extraction_telemetry import (
+    ExtractionBudget, ExtractionBudgetExceeded, capture_extractions,
+    current_extraction_trace, extraction_sources, positive_extraction_limit,
+)
+from memory_runtime.generation_budget import (
+    GenerationBudget, GenerationBudgetExceeded, positive_generation_limit,
+)
+from memory_runtime.attempt_journal import AttemptJournal, attempt_journal_path
 
 # this proxy is always a local sidecar talking to 127.0.0.1 upstreams; an
 # ambient http_proxy env (login shells here carry one) must never intercept
@@ -86,30 +99,245 @@ import textarms
 from arms import Arm, get_arm, history_kv_spec, kv_reuse_spec  # type: ignore
 from backends import BackendError, get_backend  # type: ignore
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "agent"))
+from d_witness_core import select_k_star, witness_scores
+
+WITNESS_TOKENIZER = None
+WITNESS_TOKENIZER_PATH = ""
+
+
+def _witness_texts(records):
+    """Decode the exact standalone grid rows used by /c2kv/extract."""
+    global WITNESS_TOKENIZER
+    if WITNESS_TOKENIZER is None:
+        if not WITNESS_TOKENIZER_PATH:
+            raise ValueError("gold witness requires --witness-tokenizer")
+        from transformers import AutoTokenizer
+        WITNESS_TOKENIZER = AutoTokenizer.from_pretrained(
+            WITNESS_TOKENIZER_PATH, local_files_only=True)
+    texts = []
+    for item in records:
+        rendered = WITNESS_TOKENIZER.apply_chat_template(
+            [{"role": item["role"], "content": item["content"]}],
+            tokenize=False, add_generation_prompt=False, enable_thinking=False)
+        bos = WITNESS_TOKENIZER.bos_token
+        if bos and rendered.startswith(bos):
+            rendered = rendered[len(bos):]
+        ids = WITNESS_TOKENIZER.encode(rendered, add_special_tokens=False)
+        expected = int(item["record"]["original_seq_len"])
+        if len(ids) != expected:
+            raise ValueError(f"witness tokenization differs from extraction: {len(ids)} != {expected}")
+        texts.append(WITNESS_TOKENIZER.decode(ids, skip_special_tokens=False))
+    return texts
+
+
+def plan_gold_repair(messages, arm, counts, oracle, tools, out_messages, force=False):
+    """One frozen witness block for a benchmark-authorized failed turn.
+
+    Gold controls only selection. It never becomes model-visible text.
+    Raw KV is recomputed in context by repair_extract; this is not an
+    offload-transfer latency measurement.
+    """
+    if not oracle:
+        return None
+    oracle_kind = oracle.get("kind")
+    if not arm.gold_recovery or oracle_kind not in {
+            "bfcl_gold_turn_v1", "bfcl_gold_turn_v2", "bfcl_gold_turn_v3"}:
+        raise ValueError("privileged recovery payload requires a BFCL gold-recovery arm")
+    if oracle.get("selector") != arm.gold_recovery:
+        raise ValueError("oracle selector conflicts with the arm")
+    records = counts.get("compressed_records") or []
+    if not records:
+        counts["gold_recovery"] = {"status": "no_compressed_history"}
+        return None
+    values = oracle.get("values")
+    if not isinstance(values, list) or any(not isinstance(v, str) for v in values):
+        raise ValueError("witness values must be a list of strings")
+    # Keep v1/v2 selections separate in a long-lived proxy: a v2 retry may
+    # start at a different request step for the same task/turn.  v1 did not
+    # carry an explicit numeric version, so retain its implicit version 1.
+    oracle_version = oracle.get(
+        "version", {
+            "bfcl_gold_turn_v1": 1,
+            "bfcl_gold_turn_v2": 2,
+            "bfcl_gold_turn_v3": 3,
+        }[oracle_kind])
+    event = (str(oracle_kind), str(oracle_version),
+             str(oracle.get("task_id")), int(oracle["turn"]))
+    with STATE.lock:
+        chosen = STATE.gold_choices.get(event)
+    if chosen is None:
+        texts = _witness_texts(records)
+        df, scores = witness_scores(texts, values)
+        witness = select_k_star(texts, values)
+        index = witness
+        if arm.gold_recovery == "random" and witness is not None:
+            # Same token budget where possible; report absence of a match.
+            budget = records[witness]["record"]["original_seq_len"]
+            candidates = [i for i, r in enumerate(records)
+                          if r["record"]["original_seq_len"] == budget]
+            seed = int(_digest([event, "random-block-v1"]), 16)
+            index = candidates[seed % len(candidates)]
+        chosen = {
+            "content_key": (_content_key(records[index]["role"], records[index]["content"])
+                            if index is not None else None),
+            "witness_index": witness, "selected_index_at_trigger": index,
+            "scores": scores, "selector": arm.gold_recovery,
+            "candidate_count": len(records),
+        }
+        with STATE.lock:
+            chosen = STATE.gold_choices.setdefault(event, chosen)
+    if chosen["content_key"] is None:
+        counts["gold_recovery"] = {**chosen, "status": "no_literal_witness"}
+        return None
+    matches = [i for i, r in enumerate(records)
+               if _content_key(r["role"], r["content"]) == chosen["content_key"]]
+    if not matches:
+        counts["gold_recovery"] = {**chosen, "status": "selected_doc_no_longer_resident"}
+        return None
+    index = matches[0]
+    repair_arm = replace(arm, gold_recovery=None,
+                         repair={"policy": f"offset:{index}", "placement": "append_keep_ledger"})
+    cache_key = _digest([event, out_messages[:records[index]["out_index"] + 1], tools])
+    with STATE.lock:
+        plan = None if force else STATE.gold_plans.get(cache_key)
+    t0 = time.perf_counter()
+    cache_hit = plan is not None
+    if plan is None:
+        plan = plan_repair(messages, repair_arm, counts, tools=tools, out_messages=out_messages)
+        with STATE.lock:
+            STATE.gold_plans[cache_key] = plan
+    # The raw prefix can be unchanged while later tool steps append history.
+    # Reuse the KV entry, but resolve carrier insertion against this request.
+    plan = dict(plan)
+    plan["target_out_index"] = records[index]["out_index"]
+    if "current_start_out_index" in counts:
+        plan["current_start_out_index"] = counts["current_start_out_index"]
+    plan["doc_index"] = index
+    counts["gold_recovery"] = {
+        **chosen, "status": "appended", "selected_index": index,
+        "raw_kv_source": "full_context_recompute_from_text",
+        "raw_kv_cache_hit": cache_hit,
+        "recovery_extract_sec": (time.perf_counter() - t0) if not cache_hit else 0.0,
+        "recovery_block_tokens": plan.get("repair_block_tokens"),
+        "event_id": list(event),
+        "oracle_kind": oracle_kind,
+        "oracle_version": oracle_version,
+    }
+    return plan
+
 
 class ExtractCache:
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._cache: Dict[Tuple[str, str, int], Dict[str, Any]] = {}
+        self._cache: Dict[Tuple[str, str, int, str], Dict[str, Any]] = {}
 
     def get_or_put(
-        self, key: Tuple[str, str, int], producer, force: bool = False
+        self, key: Tuple[str, str, int, str], producer, force: bool = False
     ) -> Dict[str, Any]:
         """Memoised extract.  ``force=True`` re-runs the producer and
         overwrites the memo: it is the cache-miss recovery path, where the
         memoised record describes a pool entry the SERVER has already evicted,
         so returning it would re-send a dead ``key_hash`` and miss again."""
+        trace = current_extraction_trace()
+        if trace is None:
+            with self._lock:
+                if force or key not in self._cache:
+                    index = EXTRACTION_BUDGET.reserve()
+                    handle = _start_attempt("extraction", index)
+                    try:
+                        self._cache[key] = producer()
+                    except BaseException:
+                        _finish_attempt(handle, "failed")
+                        raise
+                    else:
+                        _finish_attempt(handle, "completed")
+                return self._cache[key]
+        started = time.perf_counter()
         with self._lock:
-            if force or key not in self._cache:
-                self._cache[key] = producer()
-            return self._cache[key]
+            cache_hit = not force and key in self._cache
+            produced_sec = 0.0
+            record = None
+            error_type = None
+            budget_attempt_index = None
+            producer_called = False
+            try:
+                if not cache_hit:
+                    budget_attempt_index = EXTRACTION_BUDGET.reserve()
+                    handle = _start_attempt("extraction", budget_attempt_index)
+                    producer_called = True
+                    produced_start = time.perf_counter()
+                    try:
+                        self._cache[key] = producer()
+                    except BaseException:
+                        _finish_attempt(handle, "failed")
+                        raise
+                    else:
+                        _finish_attempt(handle, "completed")
+                    finally:
+                        produced_sec = time.perf_counter() - produced_start
+                record = self._cache[key]
+                return record
+            except Exception as error:
+                error_type = type(error).__name__
+                raise
+            finally:
+                trace.record_lookup(
+                    key, cache_hit=cache_hit, force=force,
+                    lookup_wall_sec=time.perf_counter() - started,
+                    producer_wall_sec=produced_sec, result=record,
+                    error_type=error_type, producer_called=producer_called,
+                    budget_attempt_index=budget_attempt_index)
 
 
 CACHE = ExtractCache()
 ARM: Optional[Arm] = None
 BACKEND = None  # set in main()
+MEMORY_RUNTIME = None  # opt-in RuntimeAdapter, loaded in main()
+MEMORY_RUNTIME_BYTES_PER_KV_TOKEN: Optional[int] = None
+MEMORY_RUNTIME_FATAL_ERROR: Optional[str] = None
+_memory_runtime_verify_lock = threading.Lock()
+NO_UPSTREAM_RETRIES = False
+CAPTURE_REQUEST_VIEWS = False
+GENERATION_BUDGET = GenerationBudget(None)
+EXTRACTION_BUDGET = ExtractionBudget(None)
+ATTEMPT_JOURNAL = None
+_ATTEMPT_REQUEST = ContextVar("proxy_attempt_request", default=None)
 UPSTREAM = ""
 REQUEST_LOG_PATH = ""
+
+
+def _start_attempt(kind, index):
+    if ATTEMPT_JOURNAL is None:
+        return None
+    context = _ATTEMPT_REQUEST.get() or {}
+    return ATTEMPT_JOURNAL.start(
+        kind, index, context.get("request_id", uuid.uuid4().hex),
+        context.get("eval_context", {}))
+
+
+def _finish_attempt(handle, status, usage=None):
+    if handle is not None:
+        ATTEMPT_JOURNAL.finish(handle, status, usage=usage)
+
+SAMPLING_FIELDS = (
+    "temperature", "top_p", "top_k", "min_p", "seed", "max_tokens",
+    "max_completion_tokens", "frequency_penalty", "presence_penalty",
+    "repetition_penalty", "stop", "tool_choice", "parallel_tool_calls",
+    "response_format", "chat_template_kwargs",
+)
+
+
+def _sampling_fields(payload):
+    """Record explicit wire fields without guessing server-side defaults."""
+    return {key: payload[key] for key in SAMPLING_FIELDS if key in payload}
+
+
+def _captured_request_view(payload):
+    """Allowlist benchmark content only; never capture transport headers."""
+    view = {key: payload[key] for key in ("model", "messages", "tools") if key in payload}
+    view["sampling"] = _sampling_fields(payload)
+    return json.loads(json.dumps(view, ensure_ascii=False))
 _log_lock = threading.Lock()
 
 # --doc-packing / --max-doc-length / --max-doc-num (see module docstring and
@@ -123,6 +351,273 @@ QUERY_PROJECTION = None
 MAX_DOC_LENGTH = 512
 MAX_DOC_NUM = 12
 DOC_PACKINGS = ("turn", "message")
+
+_MEMORY_RUNTIME_C2KV_MODES = frozenset(
+    {"legacy", "protect", "recover_once", "persistent", "capacity_protect",
+     "capacity_exact_once", "capacity_exact_persistent"})
+_MEMORY_RUNTIME_FULL_MODES = frozenset(
+    {"no_gist", "full_shared", "raw_recency", "full_capacity_aux", "full_exact_shared",
+     "capacity_exact_no_gist"})
+_MEMORY_RUNTIME_FORBIDDEN_CONTROL_WORDS = (
+    "oracle", "recover", "gold", "witness", "repair", "history_kv", "historykv")
+
+
+class MemoryRuntimeError(RuntimeError):
+    """A-runtime contract failure; the request must not be retried."""
+
+    kind = "memory_runtime_error"
+
+    def __init__(self, message, *, kind=None):
+        super().__init__(message)
+        if kind is not None:
+            self.kind = kind
+
+
+def _load_memory_runtime(config_path: str, tokenizer_path: str):
+    """Load the runtime lazily so legacy proxy processes need no dependency."""
+    config = json.loads(Path(config_path).read_text(encoding="utf-8"))
+    module_name, class_name = (
+        ("phase4_policy", "Phase4RuntimeAdapter")
+        if isinstance(config, dict) and "phase4_policy" in config
+        else ("adapter", "RuntimeAdapter")
+    )
+    try:
+        module = importlib.import_module(f"benchmarks.memory_runtime.{module_name}")
+    except ModuleNotFoundError as error:
+        # ``run.py`` launches this file by path.  Some Python environments put
+        # only benchmarks/ (not the repository root) on sys.path, in which
+        # case the same package is reachable as memory_runtime.adapter.
+        if error.name not in {"benchmarks", "benchmarks.memory_runtime"}:
+            raise
+        module = importlib.import_module(f"memory_runtime.{module_name}")
+    return getattr(module, class_name).from_config(config_path, tokenizer_path)
+
+
+def _validate_memory_runtime_arm(runtime, arm: Arm) -> None:
+    """A modes deliberately reuse only the existing plain c2kv4/full arms."""
+    mode = getattr(runtime, "mode", None)
+    if mode in _MEMORY_RUNTIME_C2KV_MODES:
+        expected_arm = "c2kv4"
+    elif mode in _MEMORY_RUNTIME_FULL_MODES:
+        expected_arm = "full"
+    else:
+        raise MemoryRuntimeError(f"unsupported memory runtime mode: {mode!r}")
+
+    conflicts = [
+        name for name in (
+            "hybrid_top_k", "constrain_tools", "repair", "recover",
+            "text_policy", "history_kv", "kv_reuse", "gold_recovery",
+            "native_messages",
+        ) if getattr(arm, name, None)
+    ]
+    if arm.name != expected_arm or conflicts:
+        detail = f"; conflicting arm fields: {', '.join(conflicts)}" if conflicts else ""
+        raise MemoryRuntimeError(
+            f"memory runtime mode {mode!r} requires plain arm {expected_arm!r}, "
+            f"got {arm.name!r}{detail}")
+
+
+def _memory_runtime_payload_conflicts(payload: Dict[str, Any]) -> List[str]:
+    """Find client-supplied controls that would mix A with privileged paths."""
+    conflicts: List[str] = []
+
+    def inspect(mapping: Any, prefix: str) -> None:
+        if not isinstance(mapping, dict):
+            return
+        for key in mapping:
+            lowered = str(key).lower().replace("-", "_")
+            if lowered == "c2kv_kv_memory_hint" or (
+                    lowered.startswith("c2kv_")
+                    and any(word in lowered for word in
+                            _MEMORY_RUNTIME_FORBIDDEN_CONTROL_WORDS)):
+                conflicts.append(f"{prefix}{key}")
+
+    inspect(payload, "")
+    for index, message in enumerate(payload.get("messages") or []):
+        inspect(message, f"messages[{index}].")
+    return sorted(set(conflicts))
+
+
+def _memory_runtime_error_counts() -> Optional[Dict[str, Any]]:
+    if MEMORY_RUNTIME is None:
+        return None
+    return {"memory_runtime": {
+        "mode": getattr(MEMORY_RUNTIME, "mode", None),
+        "route_mode": getattr(MEMORY_RUNTIME, "route_mode", None),
+        "compression_policy": getattr(MEMORY_RUNTIME, "compression_policy", None),
+        "byte_geometry_verified_by_backend": False,
+    }}
+
+
+def _check_memory_runtime_fatal() -> None:
+    with _memory_runtime_verify_lock:
+        error = MEMORY_RUNTIME_FATAL_ERROR
+    if error:
+        raise MemoryRuntimeError(error)
+
+
+def _apply_memory_runtime(messages, assembled, counts, eval_context, tools, *, source_predictor=None):
+    """Invoke the stateful adapter and pin the proxy-visible count contract."""
+    if MEMORY_RUNTIME is None:
+        return assembled, counts
+    counts.setdefault("memory_runtime", {
+        "mode": getattr(MEMORY_RUNTIME, "mode", None),
+        "byte_geometry_verified_by_backend": False,
+    })
+    try:
+        options = {}
+        if getattr(MEMORY_RUNTIME, "source_needs_strategy", None) is not None:
+            options["source_predictor"] = source_predictor
+        if getattr(MEMORY_RUNTIME, "mode", None) == "raw_recency":
+            # Select original source messages before the training-compatible
+            # Full renderer inserts the system and normalizes tool actions.
+            options["render_full"] = lambda source: _assemble(source, get_arm("full"))
+        elif (getattr(MEMORY_RUNTIME, "mode", None) in {
+                "capacity_protect", "capacity_exact_once", "capacity_exact_persistent"}
+                or getattr(MEMORY_RUNTIME, "route_mode", None) == "ac_gist_static"):
+            options["render_compressed"] = lambda source: _assemble(source, get_arm("c2kv4"))
+        assembled, counts = MEMORY_RUNTIME.apply(
+            messages, assembled, counts, eval_context, tools, **options)
+    except MemoryRuntimeError:
+        raise
+    except (KeyError, TypeError, ValueError, RuntimeError) as error:
+        raise MemoryRuntimeError(str(error), kind=getattr(error, "kind", None)) from error
+    return _pin_memory_runtime_output(assembled, counts)
+
+
+def _pin_memory_runtime_output(assembled, counts):
+    if not isinstance(assembled, list) or not isinstance(counts, dict):
+        raise MemoryRuntimeError("RuntimeAdapter.apply must return (list, dict)")
+    metadata = counts.get("memory_runtime")
+    if not isinstance(metadata, dict):
+        raise MemoryRuntimeError("RuntimeAdapter.apply omitted counts['memory_runtime']")
+    mode = getattr(MEMORY_RUNTIME, "mode", None)
+    if metadata.get("mode") not in (None, mode):
+        raise MemoryRuntimeError("runtime metadata mode conflicts with the loaded adapter")
+    metadata["mode"] = mode
+    expected = metadata.get("bytes_per_kv_token")
+    if type(expected) is not int or expected <= 0:
+        raise MemoryRuntimeError(
+            "runtime metadata needs a positive integer bytes_per_kv_token")
+    # Only the backend observation below may set this true.
+    metadata["byte_geometry_verified_by_backend"] = False
+    return assembled, counts
+
+
+def _commit_memory_runtime_final(prepared, normalized, counts):
+    """Commit only the one normalized response that the proxy will return."""
+    commit_final = getattr(MEMORY_RUNTIME, "commit_final", None)
+    if not callable(commit_final):
+        return
+    metadata = counts.get("memory_runtime")
+    if not isinstance(metadata, dict):
+        raise MemoryRuntimeError("RuntimeAdapter omitted counts['memory_runtime']")
+    try:
+        metadata["phase4_final"] = commit_final(
+            prepared, normalized.get("tool_calls"))
+    except (KeyError, TypeError, ValueError, RuntimeError) as error:
+        raise MemoryRuntimeError(str(error)) from error
+
+
+def _prepare_memory_input(messages, eval_context, tools, *, source_predictor=None):
+    """Check Full capacity before any optional compression/extraction work."""
+    initial_arm = (get_arm("full") if getattr(MEMORY_RUNTIME, "always_compress", False)
+                   or getattr(MEMORY_RUNTIME, "mode", None)
+                   in {"capacity_protect", "capacity_exact_once", "capacity_exact_persistent"}
+                   else ARM)
+    assembled, counts = _assemble(messages, initial_arm)
+    return _apply_memory_runtime(messages, assembled, counts, eval_context, tools,
+                                 source_predictor=source_predictor)
+
+
+def _prepare_exact_memory_input(messages, eval_context, tools):
+    assembled, counts = _assemble(messages, get_arm("full"))
+    try:
+        assembled, counts, prepared = MEMORY_RUNTIME.prepare_exact(
+            messages, assembled, counts, eval_context, tools,
+            render_compressed=lambda source: _assemble(source, get_arm("c2kv4")))
+    except (KeyError, TypeError, ValueError, RuntimeError) as error:
+        raise MemoryRuntimeError(str(error), kind=getattr(error, "kind", None)) from error
+    assembled, counts = _pin_memory_runtime_output(assembled, counts)
+    return assembled, counts, prepared
+
+
+def _generation_summary(records):
+    """Account for every attempted generation, including an unknown failed call."""
+    fields = {"prompt_tokens", "completion_tokens", "total_tokens"}
+    fields.update(key for record in records for key in (record.get("usage") or {}))
+    totals = {}
+    for key in sorted(fields):
+        values = [(record.get("usage") or {}).get(key) for record in records]
+        totals[key] = (sum(values) if values and all(
+            type(value) in (int, float) for value in values) else None)
+    return {
+        "generation_attempts": len(records),
+        "generation_completed": sum(record["status"] == "completed" for record in records),
+        "generation_usage_total": totals,
+        "generation_upstream_wall_sec": sum(record.get("wall_sec", 0) for record in records),
+        "usage_scope": "standard usage and backend cost describe final generation; generation_usage_total includes all attempts; null means unknown",
+    }
+
+
+def _verify_memory_runtime_kv_bytes(
+        counts: Dict[str, Any], normalized: Dict[str, Any]) -> None:
+    """Latch the first server KV geometry and fail closed on disagreement."""
+    global MEMORY_RUNTIME_BYTES_PER_KV_TOKEN, MEMORY_RUNTIME_FATAL_ERROR
+    if MEMORY_RUNTIME is None:
+        return
+    metadata = counts["memory_runtime"]
+    expected = metadata["bytes_per_kv_token"]
+    actual = (normalized.get("cost") or {}).get("bytes_per_kv_token")
+    metadata["byte_geometry_verified_by_backend"] = False
+    if actual is None:
+        error = "backend omitted bytes_per_kv_token required for runtime budget verification"
+    elif type(actual) is not int or actual <= 0:
+        error = f"backend returned invalid bytes_per_kv_token: {actual!r}"
+    else:
+        with _memory_runtime_verify_lock:
+            observed = MEMORY_RUNTIME_BYTES_PER_KV_TOKEN
+            if observed is None:
+                MEMORY_RUNTIME_BYTES_PER_KV_TOKEN = actual
+                observed = actual
+            if observed != actual:
+                MEMORY_RUNTIME_FATAL_ERROR = (
+                    "backend bytes_per_kv_token changed within the runtime: "
+                    f"{observed} != {actual}")
+            elif expected != actual:
+                MEMORY_RUNTIME_FATAL_ERROR = (
+                    "memory runtime bytes_per_kv_token disagrees with backend: "
+                    f"{expected} != {actual}")
+            error = MEMORY_RUNTIME_FATAL_ERROR
+    if error:
+        with _memory_runtime_verify_lock:
+            MEMORY_RUNTIME_FATAL_ERROR = MEMORY_RUNTIME_FATAL_ERROR or error
+            error = MEMORY_RUNTIME_FATAL_ERROR
+        metadata["byte_geometry_verification"] = "missing" if actual is None else "mismatch"
+        metadata["backend_bytes_per_kv_token"] = actual
+        metadata["byte_geometry_error"] = error
+        raise MemoryRuntimeError(error)
+    metadata["backend_bytes_per_kv_token"] = actual
+    metadata["byte_geometry_verification"] = "verified"
+    metadata["byte_geometry_verified_by_backend"] = True
+    if "c2kv_tools_dump_expected" in metadata:
+        observed_dump = (normalized.get("cost") or {}).get("c2kv_tools_dump")
+        metadata["backend_tools_dump"] = observed_dump
+        if observed_dump != metadata["c2kv_tools_dump_expected"]:
+            error = f"tool schema serialization disagrees with backend: {metadata['c2kv_tools_dump_expected']} != {observed_dump}"
+            with _memory_runtime_verify_lock:
+                MEMORY_RUNTIME_FATAL_ERROR = error
+            raise MemoryRuntimeError(error)
+    if "total_raw_prompt_tokens" in metadata:
+        actual_raw = (normalized.get("usage") or {}).get("prompt_tokens")
+        expected_raw = metadata["total_raw_prompt_tokens"]
+        metadata["backend_raw_prompt_tokens"] = actual_raw
+        metadata["raw_prompt_tokens_verified_by_backend"] = actual_raw == expected_raw
+        if actual_raw != expected_raw:
+            error = f"raw tokenizer count disagrees with backend: {expected_raw} != {actual_raw}"
+            with _memory_runtime_verify_lock:
+                MEMORY_RUNTIME_FATAL_ERROR = error
+            raise MemoryRuntimeError(error)
 
 
 class CacheMiss(RuntimeError):
@@ -143,6 +638,20 @@ class UpstreamError(RuntimeError):
         self.body = body
 
 
+def _is_chat_path(path: str) -> bool:
+    return path.endswith("/v1/chat/completions") or path.endswith(
+        "/chat/completions"
+    )
+
+
+def _reserve_generation_attempt(path: str) -> Optional[int]:
+    if _is_chat_path(path):
+        context = _ATTEMPT_REQUEST.get() or {}
+        task_id = (context.get("eval_context") or {}).get("task_id")
+        return GENERATION_BUDGET.reserve(task_id)
+    return None
+
+
 def _post_json(path: str, payload: Dict[str, Any],
                timeout: int, retries: int = 2) -> Dict[str, Any]:
     """POST JSON to UPSTREAM, retrying 5xx/network failures with backoff.
@@ -152,6 +661,11 @@ def _post_json(path: str, payload: Dict[str, Any],
     the SGLang stack reports many failures as HTTP 200 with error bodies —
     those are classified by the backend (BackendError), not here.
     """
+    if (MEMORY_RUNTIME is not None or NO_UPSTREAM_RETRIES
+            or GENERATION_BUDGET.enabled or EXTRACTION_BUDGET.enabled):
+        # This function also backs gist extraction and repair extraction.
+        # Freeze the complete transport attempt count, not only chat sends.
+        retries = 0
     body = json.dumps(payload).encode("utf-8")
     last: Optional[UpstreamError] = None
     for attempt in range(retries + 1):
@@ -159,10 +673,15 @@ def _post_json(path: str, payload: Dict[str, Any],
             f"{UPSTREAM.rstrip('/')}{path}", data=body,
             headers={"Content-Type": "application/json"}, method="POST",
         )
+        index = _reserve_generation_attempt(path)
+        # A durable start precedes transport. It does not prove that the
+        # backend received the request if this process is killed next.
+        handle = _start_attempt("generation", index) if index is not None else None
         try:
             with _OPENER.open(req, timeout=timeout) as resp:
-                return json.loads(resp.read().decode("utf-8"))
+                result = json.loads(resp.read().decode("utf-8"))
         except HTTPError as error:
+            _finish_attempt(handle, "failed")
             text = ""
             try:
                 text = error.read().decode("utf-8", "replace")
@@ -179,7 +698,16 @@ def _post_json(path: str, payload: Dict[str, Any],
                 raise UpstreamError(error.code, text) from error
             last = UpstreamError(error.code, text)
         except (URLError, OSError) as error:
+            _finish_attempt(handle, "failed")
             last = UpstreamError(0, str(error))
+        except BaseException:
+            _finish_attempt(handle, "failed")
+            raise
+        else:
+            # Journal write errors must propagate without a transport retry.
+            _finish_attempt(handle, "completed", usage=(
+                result.get("usage") if isinstance(result, dict) else None))
+            return result
         if attempt < retries:
             time.sleep(2 ** (attempt + 1))
     assert last is not None
@@ -570,9 +1098,25 @@ def _assemble(messages: List[Dict[str, Any]], arm: Arm, timeout: int = 600):
     the logical-token cost column are computed from.  Raw token counts are
     NOT estimated here; physical numbers come from the backend's response.
     """
+    if arm.native_messages:
+        out = [dict(message) for message in messages]
+        return out, {
+            "system_raw": sum(m.get("role") == "system" for m in messages),
+            "history_raw": 0, "current_raw": len(messages), "compressed": 0,
+            "gist_tokens": 0, "original_tokens": 0, "n_gist_messages": 0,
+            "compressed_records": [], "doc_packing": "native", "n_docs": 0,
+            "dropped_docs": 0, "current_start_out_index": len(out),
+            # Native/full requests do not identify a packed-history candidate
+            # set, so these are intentionally N/A rather than false zeros.
+            "history_packed_original_tokens": None,
+            "history_dropped_original_tokens": None,
+            "history_packed_candidate_doc_count": None,
+            "history_retained_fraction": None,
+        }
     # raw-path training dialect: tool -> bare user message (_normal_chat_message:
     # {"role": "user", "content": str}); a missing system prompt gets the
     # training default injected
+    source_shift = int(not any(m.get("role") == "system" for m in messages))
     messages = [
         ({"role": "user", "content": _stringify_content(m)}
          if m.get("role") == "tool" else dict(m))
@@ -588,9 +1132,18 @@ def _assemble(messages: List[Dict[str, Any]], arm: Arm, timeout: int = 600):
     message_counts = {"system_raw": 0, "history_raw": 0, "current_raw": 0,
                       "compressed": 0}
     compressed_records: List[Dict[str, Any]] = []
+    track_fragments = bool(getattr(MEMORY_RUNTIME, "always_compress", False)) and arm.compress_history
+    packing_fragments = []
     packing = DOC_PACKING if arm.compress_history else "message"
     dropped_docs = 0
     n_docs = 0
+    # ``original_tokens`` remains the selected-history ledger for backwards
+    # compatibility.  Turn packing can discard fitted candidates after
+    # extraction, so keep an explicit pre-selection denominator alongside it.
+    history_packed_original_tokens = 0 if arm.compress_history else None
+    history_dropped_original_tokens = 0 if arm.compress_history else None
+    history_packed_candidate_doc_count = 0 if arm.compress_history else None
+    history_retained_fraction = None
 
     def _keep_raw(i: int, role: str) -> bool:
         return (
@@ -619,7 +1172,7 @@ def _assemble(messages: List[Dict[str, Any]], arm: Arm, timeout: int = 600):
             message_counts["current_raw"] += 1
 
     def _emit_doc(doc_role: str, doc_text: str, record: Dict[str, Any],
-                  source_indices: List[int]) -> None:
+                  source_indices: List[int], fragment_id=None) -> None:
         nonlocal gist_tokens, original_tokens, n_gist, n_docs
         gist_tokens += int(record.get("gist_len") or 0)
         original_tokens += int(record.get("original_seq_len") or 0)
@@ -638,6 +1191,7 @@ def _assemble(messages: List[Dict[str, Any]], arm: Arm, timeout: int = 600):
             "source_indices": list(source_indices),
             "out_index": len(out),
             "role": doc_role, "content": doc_text, "record": record,
+            **({"packing_fragment_id": fragment_id} if track_fragments else {}),
         })
         out.append(compressed)
 
@@ -655,19 +1209,42 @@ def _assemble(messages: List[Dict[str, Any]], arm: Arm, timeout: int = 600):
                 if item is not None:
                     normalized.append((i, item))
             for doc in _turn_docs(normalized):
-                for text, record in _fit_doc(
-                    doc["content"], arm.ratio,
-                    lambda role, text, ratio: _extract(role, text, ratio, timeout),
-                    MAX_DOC_LENGTH,
-                ):
-                    docs.append((text, record, doc["source_indices"]))
+                with extraction_sources([i - source_shift for i in doc["source_indices"]]):
+                    for text, record in _fit_doc(
+                        doc["content"], arm.ratio,
+                        lambda role, text, ratio: _extract(role, text, ratio, timeout),
+                        MAX_DOC_LENGTH,
+                    ):
+                        fragment_id = len(docs)
+                        if track_fragments:
+                            packing_fragments.append({
+                                "fragment_id": fragment_id,
+                                "source_indices": [i - source_shift for i in doc["source_indices"]],
+                                "encoder_input_tokens": int(record.get("original_seq_len") or 0),
+                            })
+                        docs.append((text, record, doc["source_indices"], fragment_id))
+            # Fit/extract precedes tail selection.  Count the already-returned
+            # record lengths here; never re-tokenize or re-extract merely for
+            # accounting.
+            history_packed_candidate_doc_count = len(docs)
+            history_packed_original_tokens = sum(
+                int(record.get("original_seq_len") or 0)
+                for _, record, _, _ in docs)
             docs, dropped_docs = _select_docs(docs, MAX_DOC_NUM)
+            selected_original_tokens = sum(
+                int(record.get("original_seq_len") or 0)
+                for _, record, _, _ in docs)
+            history_dropped_original_tokens = (
+                history_packed_original_tokens - selected_original_tokens)
+            if history_packed_original_tokens:
+                history_retained_fraction = (
+                    selected_original_tokens / history_packed_original_tokens)
         first_index = compressible[0][0] if compressible else None
         compressible_set = {i for i, _ in compressible}
         for i, message in enumerate(messages):
             if i == first_index:
-                for text, record, sources in docs:
-                    _emit_doc("user", text, record, sources)
+                for text, record, sources, fragment_id in docs:
+                    _emit_doc("user", text, record, sources, fragment_id)
                 continue
             if i in compressible_set:
                 continue
@@ -685,16 +1262,37 @@ def _assemble(messages: List[Dict[str, Any]], arm: Arm, timeout: int = 600):
                 # see _render_action_dialect: never extract the bare (null)
                 # content of a tool-call turn
                 content = _render_action_dialect(message)
-            record = _extract(role, content, arm.ratio, timeout)
-            _emit_doc(role, content, record, [i])
+            with extraction_sources([i - source_shift]):
+                record = _extract(role, content, arm.ratio, timeout)
+            fragment_id = len(packing_fragments)
+            if track_fragments:
+                packing_fragments.append({
+                    "fragment_id": fragment_id, "source_indices": [i - source_shift],
+                    "encoder_input_tokens": int(record.get("original_seq_len") or 0),
+                })
+            _emit_doc(role, content, record, [i], fragment_id)
+        # Message packing has no post-extract selection: its candidate and
+        # retained sets are the same selected-history ledger.
+        if arm.compress_history:
+            history_packed_original_tokens = original_tokens
+            history_dropped_original_tokens = 0
+            history_packed_candidate_doc_count = n_docs
+            if history_packed_original_tokens:
+                history_retained_fraction = 1.0
     counts = dict(message_counts)
     counts["gist_tokens"] = gist_tokens
     counts["original_tokens"] = original_tokens
     counts["n_gist_messages"] = n_gist
     counts["compressed_records"] = compressed_records
+    if track_fragments:
+        counts["history_packing_fragments"] = packing_fragments
     counts["doc_packing"] = packing
     counts["n_docs"] = n_docs
     counts["dropped_docs"] = dropped_docs
+    counts["history_packed_original_tokens"] = history_packed_original_tokens
+    counts["history_dropped_original_tokens"] = history_dropped_original_tokens
+    counts["history_packed_candidate_doc_count"] = history_packed_candidate_doc_count
+    counts["history_retained_fraction"] = history_retained_fraction
     # index in `out` where the current (raw) block starts: repair-only
     # messages for append placements are inserted right before it
     counts["current_start_out_index"] = len(out) - message_counts["current_raw"]
@@ -1092,6 +1690,8 @@ class ProxyState:
         # conversation_id -> server streaming-session id (physical-eviction
         # history-KV arms only)
         self.history_sessions: Dict[str, str] = {}
+        self.gold_choices = {}
+        self.gold_plans = {}
 
 
 STATE = ProxyState()
@@ -1133,11 +1733,80 @@ class ProxyHandler(BaseHTTPRequestHandler):
         pass
 
     def _is_chat(self) -> bool:
-        return self.path.endswith("/v1/chat/completions") or self.path.endswith(
-            "/chat/completions"
-        )
+        return _is_chat_path(self.path)
 
     def do_POST(self):
+        self.request_id = uuid.uuid4().hex
+        token = _ATTEMPT_REQUEST.set({"request_id": self.request_id, "eval_context": {}})
+        try:
+            self._do_post_scoped()
+        finally:
+            _ATTEMPT_REQUEST.reset(token)
+
+    def _do_post_scoped(self):
+        with GENERATION_BUDGET.request_scope() as budget_record:
+            self.generation_budget_record = budget_record
+            self._generation_budget_final = None
+            self._generation_budget_finalized = False
+            with EXTRACTION_BUDGET.request_scope() as extraction_budget_record:
+                self.extraction_budget_record = extraction_budget_record
+                self._extraction_budget_final = None
+                self._extraction_budget_finalized = False
+                with capture_extractions(
+                    enabled=MEMORY_RUNTIME is not None or CAPTURE_REQUEST_VIEWS
+                ) as trace:
+                    self.extraction_trace = trace
+                    self.forwarded_gist_keys = []
+                    self._do_post()
+
+    def _predict_source_needs(self, parent_payload, messages, expected_prompt_tokens, *, tools=None):
+        """Issue one budgeted auxiliary generation whose output is never executed."""
+        staged = {key: parent_payload[key] for key in
+                  ("model", "temperature", "seed", "top_p", "top_k") if key in parent_payload}
+        staged.update(messages=messages, stream=False,
+                      max_completion_tokens=MEMORY_RUNTIME.predictor_completion_token_cap,
+                      c2kv_use_gist_projection=False)
+        if tools is not None:
+            staged["tools"] = tools
+        out_payload = BACKEND.prepare_chat(staged, get_arm("full"), None)
+        attempts_before = self.generation_budget_record.attempt_count
+        lengths = (len(self.forwarded_sampling), len(self.forwarded_gist_keys),
+                   len(self.forwarded_request_views))
+        self.forwarded_sampling.append(_sampling_fields(out_payload))
+        self.forwarded_gist_keys.append([])
+        if CAPTURE_REQUEST_VIEWS:
+            self.forwarded_request_views.append(_captured_request_view(out_payload))
+        record = {"phase": "source_prediction", "status": "started", "discarded": False,
+                  "action_candidate": False, "submitted_to_executor": False,
+                  "backend_verified": False, "forwarded_request_index": lengths[0]}
+        started = time.perf_counter()
+        try:
+            data = _post_json(self.path, out_payload, 600, retries=0)
+            normalized = BACKEND.normalize_response(data)
+            record.update(status="completed", usage=normalized.get("usage"),
+                          cost=normalized.get("cost"), finish_reason=normalized.get("finish_reason"))
+            verification = {"memory_runtime": {
+                "bytes_per_kv_token": MEMORY_RUNTIME.bytes_per_kv_token,
+                "total_raw_prompt_tokens": expected_prompt_tokens}}
+            _verify_memory_runtime_kv_bytes(verification, normalized)
+            record["backend_verified"] = True
+            record["memory_runtime"] = verification["memory_runtime"]
+            if CAPTURE_REQUEST_VIEWS:
+                record["response_view"] = {key: normalized.get(key) for key in ("content", "tool_calls")}
+            return normalized
+        except Exception as error:
+            record.update(status="failed", error_type=type(error).__name__)
+            raise
+        finally:
+            if self.generation_budget_record.attempt_count > attempts_before:
+                record["wall_sec"] = time.perf_counter() - started
+                self.generation_records.append(record)
+            else:
+                del self.forwarded_sampling[lengths[0]:]
+                del self.forwarded_gist_keys[lengths[1]:]
+                del self.forwarded_request_views[lengths[2]:]
+
+    def _do_post(self):
         length = int(self.headers.get("Content-Length") or 0)
         raw = self.rfile.read(length)
         if not self._is_chat():
@@ -1149,6 +1818,27 @@ class ProxyHandler(BaseHTTPRequestHandler):
             self._send_json(400, {"error": "invalid json"})
             return
         assert ARM is not None and BACKEND is not None
+        runtime_payload_conflicts = (
+            _memory_runtime_payload_conflicts(payload)
+            if MEMORY_RUNTIME is not None else [])
+        eval_context = payload.pop("c2kv_eval_context", None)
+        oracle = payload.pop("c2kv_oracle", None)
+        self.eval_context = eval_context if isinstance(eval_context, dict) else {}
+        _ATTEMPT_REQUEST.get()["eval_context"] = self.eval_context
+        request_budget = GENERATION_BUDGET.current_request()
+        task_id = self.eval_context.get("task_id")
+        if (GENERATION_BUDGET.per_task_limit is not None and request_budget is not None
+                and isinstance(task_id, str) and task_id):
+            # Bind before packing/admission, which may terminate the task
+            # without issuing a generation request.
+            request_budget.task_id = task_id
+            request_budget.task_consumed_before = GENERATION_BUDGET.consumed_for_task(task_id)
+        self.forwarded_sampling = []
+        self.forwarded_request_views = []
+        self.generation_records = None
+        source_needs_active = getattr(MEMORY_RUNTIME, "source_needs_strategy", None) is not None
+        if source_needs_active:
+            self.generation_records = []
         start = time.perf_counter()
         messages = payload.get("messages") or []
         fingerprint = messages_fingerprint(messages)
@@ -1156,16 +1846,37 @@ class ProxyHandler(BaseHTTPRequestHandler):
         turn = len(messages)
         text_stats: Optional[Dict[str, Any]] = None
         original_payload = payload
+        counts = _memory_runtime_error_counts()
+        prepared_exact = None
         try:
+            if MEMORY_RUNTIME is not None:
+                _check_memory_runtime_fatal()
+                _validate_memory_runtime_arm(MEMORY_RUNTIME, ARM)
+                if runtime_payload_conflicts:
+                    raise MemoryRuntimeError(
+                        "memory runtime cannot be combined with client controls: "
+                        + ", ".join(runtime_payload_conflicts))
             if getattr(ARM, "text_policy", None):
                 payload, text_stats = _apply_text_arm(payload, ARM, conv)
                 messages = payload["messages"]
-            messages_out, counts = _assemble(messages, ARM)
+            if getattr(MEMORY_RUNTIME, "supports_exact_recovery", False):
+                self.generation_records = []
+                messages_out, counts, prepared_exact = _prepare_exact_memory_input(
+                    messages, self.eval_context, payload.get("tools"))
+            else:
+                messages_out, counts = _prepare_memory_input(
+                    messages, self.eval_context, payload.get("tools"),
+                    source_predictor=(lambda selected_messages, expected_tokens, **options:
+                        self._predict_source_needs(payload, selected_messages, expected_tokens, **options))
+                        if source_needs_active else None)
             if text_stats is not None:
                 counts["textarm"] = text_stats
             repair_plan = plan_repair(messages, ARM, counts,
                                      tools=payload.get("tools"),
                                      out_messages=messages_out)
+            if oracle:
+                repair_plan = plan_gold_repair(
+                    messages, ARM, counts, oracle, payload.get("tools"), messages_out)
             history_ctx = _history_kv_context(messages_out, counts, ARM)
             if history_ctx is not None:
                 if history_ctx["spec"]["persistent_session"]:
@@ -1184,10 +1895,17 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 BackendError) as error:
             kind = getattr(error, "kind",
                            "textarm_error" if ARM.text_policy else "assemble_error")
-            self._log_request(payload, None, None, status=kind,
+            generation_budget = self._finalize_generation_budget()
+            self._log_request(payload, None, counts, status=kind,
                               error=str(error), fingerprint=fingerprint, conv=conv,
                               turn=turn)
-            self._send_json(502, {"error": f"c2kv assembly failed: {error}"})
+            response = {"error": f"c2kv assembly failed: {error}"}
+            if generation_budget is not None:
+                response["generation_budget"] = generation_budget
+            extraction_budget = self._finalize_extraction_budget()
+            if extraction_budget is not None:
+                response["extraction_budget"] = extraction_budget
+            self._send_json(502, response)
             return
         assemble_sec = time.perf_counter() - start
 
@@ -1209,16 +1927,84 @@ class ProxyHandler(BaseHTTPRequestHandler):
                              "kv_reuse": reuse_ctx})
             else:
                 out_payload = BACKEND.prepare_chat(staged, ARM, plan)
-            return _post_json(self.path, out_payload, 600), out_payload
+            self.forwarded_sampling.append(_sampling_fields(out_payload))
+            self.forwarded_gist_keys.append([
+                message["c2kv_key_hash"] for message in out_payload.get("messages", [])
+                if message.get("c2kv_key_hash")])
+            if CAPTURE_REQUEST_VIEWS:
+                self.forwarded_request_views.append(_captured_request_view(out_payload))
+            return _post_json(
+                self.path, out_payload, 600,
+                retries=(0 if MEMORY_RUNTIME is not None or NO_UPSTREAM_RETRIES
+                         else 2)), out_payload
 
         def call_upstream(out_messages, plan):
-            data_, _ = send_upstream(out_messages, plan)
+            record = None
+            if prepared_exact is not None:
+                if len(self.generation_records) >= 2:
+                    raise MemoryRuntimeError("Exact recovery allows at most two generation attempts")
+            elif source_needs_active and any(record["phase"] == "action" for record in self.generation_records):
+                raise MemoryRuntimeError("Source-needs allows one final action generation per decision")
+            attempts_before = self.generation_budget_record.attempt_count
+            forwarded_lengths = (
+                len(self.forwarded_sampling),
+                len(self.forwarded_gist_keys),
+                len(self.forwarded_request_views),
+            )
+            upstream_started = time.perf_counter()
+
+            def rollback_unreserved_forward():
+                if self.generation_budget_record.attempt_count != attempts_before:
+                    return
+                sampling_len, gist_len, view_len = forwarded_lengths
+                del self.forwarded_sampling[sampling_len:]
+                del self.forwarded_gist_keys[gist_len:]
+                del self.forwarded_request_views[view_len:]
+
+            def record_reserved_attempt():
+                nonlocal record
+                if (self.generation_records is None or record is not None
+                        or self.generation_budget_record.attempt_count == attempts_before):
+                    return
+                record = {
+                    "phase": ("draft" if not self.generation_records else "regeneration")
+                             if prepared_exact is not None else "action",
+                    "status": "started", "discarded": False,
+                    "backend_verified": False,
+                    "forwarded_request_index": len(self.forwarded_sampling) - 1,
+                    "memory_runtime": json.loads(json.dumps(counts["memory_runtime"])),
+                }
+                self.generation_records.append(record)
+
             try:
-                return data_, BACKEND.normalize_response(data_)
+                data_, _ = send_upstream(out_messages, plan)
+                record_reserved_attempt()
+                normalized_ = BACKEND.normalize_response(data_)
+                if record is not None:
+                    record.update(status="completed", usage=normalized_.get("usage"),
+                                  cost=normalized_.get("cost"),
+                                  finish_reason=normalized_.get("finish_reason"))
+                    if CAPTURE_REQUEST_VIEWS:
+                        record["response_view"] = {key: normalized_.get(key)
+                                                   for key in ("content", "tool_calls")}
+                return data_, normalized_
             except BackendError as error:
+                rollback_unreserved_forward()
+                record_reserved_attempt()
+                if record is not None:
+                    record.update(status="failed", error_type=type(error).__name__)
                 if getattr(error, "kind", "") == "cache_miss":
                     raise CacheMiss(error.detail) from error
                 raise
+            except Exception as error:
+                rollback_unreserved_forward()
+                record_reserved_attempt()
+                if record is not None:
+                    record.update(status="failed", error_type=type(error).__name__)
+                raise
+            finally:
+                if record is not None:
+                    record["wall_sec"] = time.perf_counter() - upstream_started
 
         try:
             try:
@@ -1233,6 +2019,12 @@ class ProxyHandler(BaseHTTPRequestHandler):
                         original_payload, ARM, conv, data, text_stats, send_retrieved)
                     normalized = BACKEND.normalize_response(data)
             except CacheMiss:
+                if (MEMORY_RUNTIME is not None or NO_UPSTREAM_RETRIES
+                        or GENERATION_BUDGET.enabled):
+                    # The caller owns the attempt budget.  With A enabled, a
+                    # transparent retry could also apply one lease decision
+                    # twice and make state/cost provenance ambiguous.
+                    raise
                 # Pool-evicted gists and/or an evicted repair span.  Three
                 # things are needed for the retry to be anything but a second
                 # identical miss:
@@ -1261,16 +2053,49 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 repair_plan = plan_repair(messages, ARM, counts,
                                           tools=payload.get("tools"),
                                           out_messages=messages_out)
+                if oracle:
+                    repair_plan = plan_gold_repair(
+                        messages, ARM, counts, oracle, payload.get("tools"), messages_out, force=True)
                 data, normalized = call_upstream(messages_out, repair_plan)
+            _verify_memory_runtime_kv_bytes(counts, normalized)
+            if source_needs_active:
+                self.generation_records[-1]["backend_verified"] = True
+                self.generation_records[-1]["memory_runtime"] = json.loads(json.dumps(counts["memory_runtime"]))
+            if prepared_exact is not None:
+                self.generation_records[-1]["backend_verified"] = True
+                self.generation_records[-1]["memory_runtime"] = json.loads(
+                    json.dumps(counts["memory_runtime"]))
+                try:
+                    reconsidered = MEMORY_RUNTIME.reconsider(
+                        prepared_exact, normalized.get("tool_calls"))
+                except (KeyError, TypeError, ValueError, RuntimeError) as error:
+                    raise MemoryRuntimeError(str(error), kind=getattr(error, "kind", None)) from error
+                counts = reconsidered["counts"]
+                if reconsidered["regenerate"]:
+                    self.generation_records[-1]["discarded"] = True
+                    messages_out, counts = _pin_memory_runtime_output(
+                        reconsidered["messages"], counts)
+                    data, normalized = call_upstream(messages_out, None)
+                    _verify_memory_runtime_kv_bytes(counts, normalized)
+                    self.generation_records[-1]["backend_verified"] = True
+                    self.generation_records[-1]["memory_runtime"] = json.loads(
+                        json.dumps(counts["memory_runtime"]))
         except (UpstreamError, BackendError, CacheMiss, RuntimeError, ValueError,
                 URLError, OSError) as error:
             kind = getattr(error, "kind", "upstream_error")
             if isinstance(error, CacheMiss):
                 kind = "cache_miss"
+            generation_budget = self._finalize_generation_budget()
             self._log_request(payload, None, counts, status=kind,
                               error=str(error), fingerprint=fingerprint, conv=conv,
                               turn=turn, plan=self._slim_plan(repair_plan))
-            self._send_json(502, {"error": f"upstream failed: {error}"})
+            response = {"error": f"upstream failed: {error}"}
+            if generation_budget is not None:
+                response["generation_budget"] = generation_budget
+            extraction_budget = self._finalize_extraction_budget()
+            if extraction_budget is not None:
+                response["extraction_budget"] = extraction_budget
+            self._send_json(502, response)
             return
         total_sec = time.perf_counter() - start
 
@@ -1294,10 +2119,17 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 except (UpstreamError, BackendError, RuntimeError, ValueError,
                         URLError, OSError) as error:
                     kind = getattr(error, "kind", "recover_error")
+                    generation_budget = self._finalize_generation_budget()
                     self._log_request(payload, None, counts, status=kind,
                                       error=str(error), fingerprint=fingerprint,
                                       conv=conv, turn=turn, recover=recover_flags)
-                    self._send_json(502, {"error": f"c2kv recover failed: {error}"})
+                    response = {"error": f"c2kv recover failed: {error}"}
+                    if generation_budget is not None:
+                        response["generation_budget"] = generation_budget
+                    extraction_budget = self._finalize_extraction_budget()
+                    if extraction_budget is not None:
+                        response["extraction_budget"] = extraction_budget
+                    self._send_json(502, response)
                     return
                 ref = STATE.recover.reference.get(fingerprint)
                 action_b = action_canonical({
@@ -1315,6 +2147,25 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 })
                 data, normalized = data_b, normalized_b
                 total_sec = time.perf_counter() - start
+
+        if prepared_exact is not None:
+            try:
+                _commit_memory_runtime_final(prepared_exact, normalized, counts)
+                total_sec = time.perf_counter() - start
+            except (RuntimeError, ValueError, TypeError, KeyError) as error:
+                kind = getattr(error, "kind", "memory_runtime_error")
+                generation_budget = self._finalize_generation_budget()
+                self._log_request(payload, None, counts, status=kind,
+                                  error=str(error), fingerprint=fingerprint, conv=conv,
+                                  turn=turn, plan=self._slim_plan(repair_plan))
+                response = {"error": f"memory runtime finalization failed: {error}"}
+                if generation_budget is not None:
+                    response["generation_budget"] = generation_budget
+                extraction_budget = self._finalize_extraction_budget()
+                if extraction_budget is not None:
+                    response["extraction_budget"] = extraction_budget
+                self._send_json(502, response)
+                return
 
         # ---- reference recording (full-arm run, --record-reference) ----
         if STATE.reference_log_path:
@@ -1342,18 +2193,47 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 "ratio": ARM.ratio,
                 "gist_tokens": counts["gist_tokens"],
                 "original_tokens": counts["original_tokens"],
+                "history_packed_original_tokens": counts["history_packed_original_tokens"],
+                "history_dropped_original_tokens": counts["history_dropped_original_tokens"],
+                "history_packed_candidate_doc_count": counts["history_packed_candidate_doc_count"],
+                "history_retained_fraction": counts["history_retained_fraction"],
                 "n_gist_messages": counts["n_gist_messages"],
                 "assemble_sec": round(assemble_sec, 4),
                 "wall_sec": round(total_sec, 4),
             }
         )
         data["c2kv_proxy"].update(normalized["cost"])
+        if self.generation_records is not None:
+            data["c2kv_proxy"].update(_generation_summary(self.generation_records))
+        generation_budget = self._finalize_generation_budget()
+        if generation_budget is not None:
+            data["c2kv_proxy"]["generation_budget"] = generation_budget
+        extraction_budget = self._finalize_extraction_budget()
+        if extraction_budget is not None:
+            data["c2kv_proxy"]["extraction_budget"] = extraction_budget
+        if counts.get("memory_runtime") is not None:
+            data["c2kv_proxy"]["memory_runtime"] = counts["memory_runtime"]
         counts["repair_frame"] = _repair_frame_check(repair_plan, normalized)
-        self._send_json(200, data)
+        if counts.get("gold_recovery"):
+            data["c2kv_proxy"]["gold_recovery"] = counts["gold_recovery"]
+        unit_bytes = (normalized.get("cost") or {}).get("bytes_per_kv_token")
+        if isinstance(unit_bytes, int) and unit_bytes > 0 and counts["gist_tokens"]:
+            repair_tokens = int((repair_plan or {}).get("repair_block_tokens") or 0)
+            counts["history_tensor_accounting"] = {
+                "bytes_per_kv_token": unit_bytes,
+                "full_equivalent_selected_history_bytes": counts["original_tokens"] * unit_bytes,
+                "before_recovery_bytes": counts["gist_tokens"] * unit_bytes,
+                "after_recovery_bytes": (counts["gist_tokens"] + repair_tokens) * unit_bytes,
+                "recovery_bytes": repair_tokens * unit_bytes,
+                "history_ratio_before": counts["original_tokens"] / counts["gist_tokens"],
+                "history_ratio_after": counts["original_tokens"] / (counts["gist_tokens"] + repair_tokens),
+                "scope": "history_KV_tensor_payload_only; excludes pool duplication, indexes and Python metadata",
+            }
         counts["wall_sec"] = round(total_sec, 4)
         self._log_request(payload, normalized, counts, recover=recover_flags,
                           fingerprint=fingerprint, conv=conv, turn=turn,
                           plan=self._slim_plan(repair_plan))
+        self._send_json(200, data)
 
     @staticmethod
     def _slim_plan(plan):
@@ -1364,6 +2244,24 @@ class ProxyHandler(BaseHTTPRequestHandler):
             "expected_offset", "frame_delta", "frame_delta_status",
             "repair_block_tokens", "already_rotated")
             if k in plan}
+
+    def _finalize_generation_budget(self):
+        record = getattr(self, "generation_budget_record", None)
+        if record is None:
+            return None
+        if not getattr(self, "_generation_budget_finalized", False):
+            self._generation_budget_final = record.metadata()
+            self._generation_budget_finalized = True
+        return getattr(self, "_generation_budget_final", None)
+
+    def _finalize_extraction_budget(self):
+        record = getattr(self, "extraction_budget_record", None)
+        if record is None:
+            return None
+        if not getattr(self, "_extraction_budget_finalized", False):
+            self._extraction_budget_final = record.metadata()
+            self._extraction_budget_finalized = True
+        return getattr(self, "_extraction_budget_final", None)
 
     def do_GET(self):
         try:
@@ -1420,12 +2318,47 @@ class ProxyHandler(BaseHTTPRequestHandler):
             "n_tools": len(request.get("tools") or []),
             "gist_tokens": counts.get("gist_tokens"),
             "original_tokens": counts.get("original_tokens"),
+            "history_packed_original_tokens": counts.get("history_packed_original_tokens"),
+            "history_dropped_original_tokens": counts.get("history_dropped_original_tokens"),
+            "history_packed_candidate_doc_count": counts.get("history_packed_candidate_doc_count"),
+            "history_retained_fraction": counts.get("history_retained_fraction"),
             "n_gist_messages": counts.get("n_gist_messages"),
             "wall_sec": counts.get("wall_sec"),
             "error": error,
             "usage": (normalized or {}).get("usage"),
             "finish_reason": (normalized or {}).get("finish_reason"),
+            "n_native_tool_calls": len((normalized or {}).get("tool_calls") or []) if normalized else None,
+            "native_tool_names": [
+                (call.get("function") or {}).get("name")
+                for call in ((normalized or {}).get("tool_calls") or [])
+            ] if normalized else None,
         }
+        row["eval_context"] = getattr(self, "eval_context", {})
+        row["request_id"] = getattr(self, "request_id", None)
+        generation_records = getattr(self, "generation_records", None)
+        if generation_records is not None:
+            row["generation_trace"] = generation_records
+            row.update(_generation_summary(generation_records))
+        generation_budget = self._finalize_generation_budget()
+        if generation_budget is not None:
+            row["generation_budget"] = generation_budget
+        row["sampling_request"] = _sampling_fields(request)
+        row["sampling_forwarded"] = getattr(self, "forwarded_sampling", [])
+        row["sampling_scope"] = "explicit request fields; omitted server defaults are unknown"
+        extraction_trace = getattr(self, "extraction_trace", None)
+        if extraction_trace is not None:
+            row["extraction_telemetry"] = extraction_trace.snapshot(
+                block_refs=(counts.get("memory_runtime") or {}).get("block_refs", []),
+                forwarded_requests=getattr(self, "forwarded_gist_keys", []),
+                request_status=status)
+        extraction_budget = self._finalize_extraction_budget()
+        if extraction_budget is not None:
+            row["extraction_budget"] = extraction_budget
+        if CAPTURE_REQUEST_VIEWS:
+            row["request_view"] = _captured_request_view(request)
+            row["forwarded_request_views"] = getattr(self, "forwarded_request_views", [])
+            row["response_view"] = ({key: normalized.get(key) for key in ("content", "tool_calls")}
+                                    if normalized else None)
         if status != "ok":
             row["error_kind"] = status
         # raw-vs-compressed message-class breakdown
@@ -1433,7 +2366,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
                     if k in ("system_raw", "history_raw", "current_raw", "compressed")})
         row.update({k: counts.get(k) for k in
                     ("doc_packing", "n_docs", "dropped_docs", "repair_frame",
-                     "history_kv", "kv_reuse")
+                     "history_kv", "kv_reuse", "gold_recovery",
+                     "history_tensor_accounting", "memory_runtime")
                     if k in counts})
         if counts.get("textarm") is not None:
             row["textarm"] = counts["textarm"]
@@ -1451,10 +2385,29 @@ class ProxyHandler(BaseHTTPRequestHandler):
 
 
 def main(argv=None):
-    global ARM, BACKEND, UPSTREAM, REQUEST_LOG_PATH
+    global ARM, BACKEND, MEMORY_RUNTIME, UPSTREAM, REQUEST_LOG_PATH
     global DOC_PACKING, MAX_DOC_LENGTH, MAX_DOC_NUM, QUERY_PROJECTION
+    global WITNESS_TOKENIZER_PATH
+    global MEMORY_RUNTIME_BYTES_PER_KV_TOKEN, MEMORY_RUNTIME_FATAL_ERROR
+    global NO_UPSTREAM_RETRIES, CAPTURE_REQUEST_VIEWS, GENERATION_BUDGET, EXTRACTION_BUDGET
+    global ATTEMPT_JOURNAL
     textarms.reset_state()  # fresh caches/state per proxy process
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--witness-tokenizer", default="")
+    parser.add_argument("--memory-runtime-config", default="",
+                        help="opt-in A runtime JSON config")
+    parser.add_argument("--memory-tokenizer", default="",
+                        help="local tokenizer used for A runtime budget accounting")
+    parser.add_argument("--no-upstream-retries", action="store_true",
+                        help="disable chat transport and CacheMiss retries")
+    parser.add_argument("--capture-request-views", action="store_true",
+                        help="record allowlisted benchmark messages/tools and forwarded views")
+    parser.add_argument("--max-generation-attempts", type=positive_generation_limit,
+                        help="process-wide hard cap on chat generation network calls")
+    parser.add_argument("--max-generation-attempts-per-task", type=positive_generation_limit,
+                        help="hard cap on actual draft and regeneration calls per explicit task_id")
+    parser.add_argument("--max-extraction-attempts", type=positive_extraction_limit,
+                        help="process-wide hard cap on client extraction producers")
     parser.add_argument("--upstream", required=True,
                         help="backend base URL, e.g. http://127.0.0.1:34000")
     parser.add_argument("--backend", default="sglang",
@@ -1480,14 +2433,38 @@ def main(argv=None):
                         help="turn packing: keep doc 0 + the last N-1 docs, drop "
                              "the rest; supplied by the checkpoint profile")
     args = parser.parse_args(argv)
+    if bool(args.memory_runtime_config) != bool(args.memory_tokenizer):
+        parser.error(
+            "--memory-runtime-config and --memory-tokenizer must be supplied together")
     DOC_PACKING = args.doc_packing
     MAX_DOC_LENGTH = int(args.max_doc_length)
     MAX_DOC_NUM = int(args.max_doc_num)
     QUERY_PROJECTION = args.query_projection
     ARM = get_arm(args.arm)
+    MEMORY_RUNTIME = None
+    MEMORY_RUNTIME_BYTES_PER_KV_TOKEN = None
+    MEMORY_RUNTIME_FATAL_ERROR = None
+    NO_UPSTREAM_RETRIES = bool(args.no_upstream_retries)
+    CAPTURE_REQUEST_VIEWS = bool(args.capture_request_views)
+    GENERATION_BUDGET = GenerationBudget(
+        args.max_generation_attempts, per_task_limit=args.max_generation_attempts_per_task)
+    EXTRACTION_BUDGET = ExtractionBudget(args.max_extraction_attempts)
+    if args.memory_runtime_config:
+        MEMORY_RUNTIME = _load_memory_runtime(
+            args.memory_runtime_config, args.memory_tokenizer)
+        _validate_memory_runtime_arm(MEMORY_RUNTIME, ARM)
+        if args.reference or args.witness_tokenizer:
+            raise SystemExit(
+                "FATAL: memory runtime cannot be combined with "
+                "--reference or --witness-tokenizer")
     UPSTREAM = args.upstream.rstrip("/")
     REQUEST_LOG_PATH = args.request_log
+    # A distinct prefix keeps the append-only journal out of the existing
+    # proxy_*.jsonl request-log discovery used by the runner and collector.
+    ATTEMPT_JOURNAL = (AttemptJournal(attempt_journal_path(REQUEST_LOG_PATH))
+        if REQUEST_LOG_PATH else None)
     BACKEND = get_backend(args.backend, _post_json)
+    WITNESS_TOKENIZER_PATH = args.witness_tokenizer
     STATE.reference_log_path = args.record_reference
     if args.reference:
         if not ARM.recover:
@@ -1496,7 +2473,11 @@ def main(argv=None):
         print(f"loaded reference: {len(STATE.recover.reference)} states "
               f"from {args.reference}", flush=True)
     server = ThreadingHTTPServer((args.host, args.port), ProxyHandler)
-    print(f"proxy backend={BACKEND.name} arm={ARM.name} doc_packing={DOC_PACKING} "
+    runtime_mode = getattr(MEMORY_RUNTIME, "mode", None)
+    print(f"proxy backend={BACKEND.name} arm={ARM.name} memory_runtime={runtime_mode} "
+          f"no_upstream_retries={NO_UPSTREAM_RETRIES} doc_packing={DOC_PACKING} "
+          f"max_generation_attempts={GENERATION_BUDGET.limit} "
+          f"max_extraction_attempts={EXTRACTION_BUDGET.limit} "
           f"max_doc_length={MAX_DOC_LENGTH} max_doc_num={MAX_DOC_NUM} listening on "
           f"{args.host}:{args.port} -> {UPSTREAM}", flush=True)
     server.serve_forever()

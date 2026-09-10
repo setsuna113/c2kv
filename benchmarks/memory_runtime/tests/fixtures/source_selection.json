@@ -1,0 +1,68 @@
+{
+  "schema": "c2kv.memory_runtime.source_selection.v1",
+  "scope": "source selection provenance for protocol smoke; no task success claim",
+  "source_path": "c2kv/outputs/mechanism_20260906/bfcl_full8_native_capture_v1/attempt1/logs/request_capture_full_35201.jsonl",
+  "source_line_count": 124,
+  "selection_rule": {
+    "ordering": [
+      "numeric task_id suffix ascending",
+      "user_turn ascending",
+      "step ascending",
+      "attempt ascending",
+      "source_line ascending"
+    ],
+    "required_turn_classes": [
+      "first_user_turn",
+      "later_user_turn"
+    ],
+    "max_cases": 6,
+    "selected_case_count": 2,
+    "minimal_selection": "first valid case in each required turn class",
+    "outcome_or_full_success_fields_used": false
+  },
+  "eligibility": [
+    "capture status is ok",
+    "task_id is present",
+    "original_request.body.messages is a nonempty list",
+    "original_request.body.tools is a nonempty list",
+    "EventStore.from_messages accepts the visible prefix",
+    "every visible tool result matches a declared assistant tool_call_id"
+  ],
+  "selected": [
+    {
+      "case_id": "55c6ff1b-1576-43dc-a331-8e2e490ad590",
+      "task_id": "multi_turn_base_0",
+      "turn_class": "first_user_turn",
+      "user_turn": 0,
+      "step": 0,
+      "attempt": 0,
+      "source_line": 1,
+      "message_count": 1,
+      "tool_definition_count": 32,
+      "tool_event_count": 0,
+      "incomplete_tool_event_count": 0
+    },
+    {
+      "case_id": "c47765ae-043f-4598-8a96-004376a51b15",
+      "task_id": "multi_turn_base_0",
+      "turn_class": "later_user_turn",
+      "user_turn": 1,
+      "step": 0,
+      "attempt": 0,
+      "source_line": 8,
+      "message_count": 15,
+      "tool_definition_count": 32,
+      "tool_event_count": 6,
+      "incomplete_tool_event_count": 0
+    }
+  ],
+  "rejected_before_selection": [],
+  "validation": {
+    "event_store_constructor": "c2kv-b-history/python/history_memory/events.py:EventStore.from_messages",
+    "all_selected_prefixes_valid": true,
+    "unmatched_or_duplicate_tool_results": 0,
+    "missing_tool_call_ids": 0,
+    "synthetic_messages_added": 0,
+    "oracle_gold_label_fields_copied": 0
+  }
+}

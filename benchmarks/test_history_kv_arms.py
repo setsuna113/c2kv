@@ -277,20 +277,21 @@ class TestRepairExtractPath:
         assert prepared["chat_template_kwargs"] == {"enable_thinking": False}
         assert "session_params" not in prepared
 
-    def test_hint_mirrors_the_upstream_accounting(self):
+    def test_hint_leaves_active_accounting_to_the_scheduler(self):
         arm, ctx, post, prepared = self._prepare()
         kept = 312  # ceil(1000 * 0.312) from the fake server
         assert prepared["c2kv_kv_memory_hint"] == {
             "full_equivalent_history_tokens": 1000,
-            "active_history_kv_tokens": kept,
+            "active_history_kv_tokens": 0,
             "active_full_raw_tokens": 0,
             "active_c2kv_gist_tokens": 0,
-            "active_raw_repair_tokens": kept,
+            "active_raw_repair_tokens": 0,
             "history_kv_method": "snapkv_persistent",
             "estimated": False,
             "history_kv_backend": "repair_extract",
             "history_kv_requested_span_tokens": 1000,
             "history_kv_selected_token_count": kept,
+            "history_selection_metadata": None,
         }
 
     def test_first_turn_issues_no_extract(self):
@@ -358,7 +359,7 @@ class TestPhysicalEvictionPath:
             "persistent_session": False,
         }
         assert hint["estimated"] is True
-        assert hint["active_history_kv_tokens"] == 256
+        assert hint["active_history_kv_tokens"] == 0
         assert hint["full_equivalent_history_tokens"] == 0  # server overwrites
         assert "persistent_history_session" not in hint
         assert "session_params" not in prepared
@@ -493,7 +494,9 @@ class TestCostColumns:
             "history_kv_method": "snapkv_persistent",
             "history_kv_backend": "repair_extract",
             "full_equivalent_history_tokens": 1000,
+            "full_equivalent_history_tokens_source": "request_hint",
             "active_history_kv_tokens": 312,
+            "active_history_kv_tokens_source": "scheduler_runtime",
             "history_kv_requested_span_tokens": 1000,
             "history_kv_selected_token_count": 312,
             "source": "sglang_c2kv_runtime_injection",
@@ -504,6 +507,8 @@ class TestCostColumns:
         assert cost["history_kv_selected_tokens"] == 312
         assert cost["history_kv_span_tokens"] == 1000
         assert cost["history_kv_active_tokens"] == 312
+        assert cost["history_kv_active_tokens_source"] == "scheduler_runtime"
+        assert cost["history_kv_full_equivalent_tokens_source"] == "request_hint"
         assert cost["kv_resident_tokens"] == 10   # existing columns survive
 
     def test_physical_eviction_echo(self):

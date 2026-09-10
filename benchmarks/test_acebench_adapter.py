@@ -70,7 +70,7 @@ def test_vendored_patch_uses_structured_agent_history_only():
     # conversion applies only to the evaluated agent and scorer code is absent.
     assert "ACEBENCH_USER_BASE_URL" in patch
     assert "eval_main.py" not in patch
-    assert "not joinable" in B.COST_JOIN
+    assert "c2kv_eval_context.task_id" in B.COST_JOIN
 
 
 def test_generate_and_eval_commands_pin_protocol_knobs(tmp_path):

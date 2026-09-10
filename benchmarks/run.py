@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import socket
 import subprocess
 import sys
 import time
@@ -31,6 +33,9 @@ from adapters.base import RunContext  # noqa: E402
 from checkpoint_profile import ProfileError, resolve_checkpoint_profile  # noqa: E402
 from capabilities import run_preflight  # noqa: E402
 from arms import get_arm  # noqa: E402
+from memory_runtime.generation_budget import positive_generation_limit  # noqa: E402
+from memory_runtime.extraction_telemetry import positive_extraction_limit  # noqa: E402
+from memory_runtime.attempt_journal import attempt_journal_path, summarize_attempt_journal  # noqa: E402
 
 # --benchmark value -> adapter module.  Two names share acon_adapter (the
 # module dispatches on ctx.options["benchmark"]); add_arguments is called
@@ -49,15 +54,60 @@ assert all(module.NAME in ADAPTERS or name in getattr(module, "NAMES", ())
            for name, module in ADAPTERS.items())
 
 
+def _require_available_proxy_port(port: int) -> None:
+    """Fail before spawning when another process already owns the port."""
+    probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        probe.bind(("127.0.0.1", port))
+    except OSError as error:
+        raise SystemExit(
+            f"proxy port {port} is unavailable before startup: {error}"
+        ) from error
+    finally:
+        probe.close()
+
+
+def _terminate_owned_process(proc, timeout: float = 5.0) -> None:
+    """Terminate and reap only the process returned by this runner."""
+    poll = getattr(proc, "poll", None)
+    running = not callable(poll) or poll() is None
+    if running:
+        try:
+            proc.terminate()
+        except OSError:
+            pass
+    wait = getattr(proc, "wait", None)
+    if not callable(wait):
+        return
+    try:
+        wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        kill = getattr(proc, "kill", None)
+        if callable(kill):
+            try:
+                kill()
+            except OSError:
+                pass
+        wait(timeout=timeout)
+
+
 def start_proxy(upstream: str, arm: str, port: int, log_dir: Path,
                 record_reference: str = "", reference: str = "",
                 backend: str = "sglang", doc_packing: str = "turn",
                 max_doc_length: int = 512, max_doc_num: int = 12,
-                query_projection: str | None = None):
+                query_projection: str | None = None, witness_tokenizer: str = "",
+                python_bin: str | None = None,
+                memory_runtime_config: str = "", memory_tokenizer: str = "",
+                 no_upstream_retries: bool = False,
+                 capture_request_views: bool = False,
+                 max_generation_attempts: int | None = None,
+                 max_generation_attempts_per_task: int | None = None,
+                 max_extraction_attempts: int | None = None):
+    _require_available_proxy_port(port)
     log_path = log_dir / f"proxy_{arm}_{port}.jsonl"
-    out_handle = open(log_dir / f"proxy_{arm}_{port}.out", "w")
+    out_path = log_dir / f"proxy_{arm}_{port}.out"
     command = [
-        sys.executable, str(HERE / "proxy.py"),
+        python_bin or sys.executable, str(HERE / "proxy.py"),
         "--upstream", upstream, "--arm", arm, "--backend", backend,
         "--port", str(port), "--request-log", str(log_path),
         "--doc-packing", doc_packing,
@@ -70,26 +120,77 @@ def start_proxy(upstream: str, arm: str, port: int, log_dir: Path,
         command += ["--reference", reference]
     if query_projection:
         command += ["--query-projection", query_projection]
-    proc = subprocess.Popen(
-        command,
-        stdout=out_handle,
-        stderr=subprocess.STDOUT,
-    )
-    import urllib.request
+    if witness_tokenizer:
+        command += ["--witness-tokenizer", witness_tokenizer]
+    if memory_runtime_config:
+        command += ["--memory-runtime-config", memory_runtime_config,
+                    "--memory-tokenizer", memory_tokenizer]
+    if no_upstream_retries:
+        command += ["--no-upstream-retries"]
+    if capture_request_views:
+        command += ["--capture-request-views"]
+    if max_generation_attempts is not None:
+        command += ["--max-generation-attempts", str(max_generation_attempts)]
+    if max_generation_attempts_per_task is not None:
+        command += ["--max-generation-attempts-per-task",
+                    str(max_generation_attempts_per_task)]
+    if max_extraction_attempts is not None:
+        command += ["--max-extraction-attempts", str(max_extraction_attempts)]
+    out_handle = open(out_path, "w")
+    try:
+        proc = subprocess.Popen(
+            command,
+            stdout=out_handle,
+            stderr=subprocess.STDOUT,
+            # The runtime sidecar uses only the CPU tokenizer. In an Ascend
+            # serving venv, torch otherwise auto-loads torch_npu and requires
+            # libhccl even though this process never constructs model tensors.
+            env=({**os.environ, "TORCH_DEVICE_BACKEND_AUTOLOAD": "0"}
+                 if memory_runtime_config else None),
+        )
+    finally:
+        out_handle.close()
+    try:
+        import urllib.request
 
-    # never route the local health probe through an ambient http_proxy
-    # (an inherited proxy env once made every run.py launch fail its own
-    # gateway check)
-    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        # never route the local health probe through an ambient http_proxy
+        # (an inherited proxy env once made every run.py launch fail its own
+        # gateway check)
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
-    for _ in range(100):
-        try:
-            opener.open(f"http://127.0.0.1:{port}/health", timeout=2)
-            return proc, log_path
-        except OSError:
-            time.sleep(0.2)
-    proc.terminate()
-    raise SystemExit(f"proxy did not come up on port {port}")
+        for _ in range(100):
+            returncode = proc.poll()
+            if returncode is not None:
+                raise SystemExit(
+                    f"proxy exited during startup with code {returncode}; see {out_path}"
+                )
+            try:
+                with opener.open(
+                    f"http://127.0.0.1:{port}/health", timeout=2
+                ) as response:
+                    response.read()
+                # A stale listener must not satisfy readiness after our child
+                # has already failed its own bind.
+                time.sleep(0.05)
+                returncode = proc.poll()
+                if returncode is not None:
+                    raise SystemExit(
+                        f"proxy exited during startup with code {returncode}; "
+                        f"see {out_path}"
+                    )
+                return proc, log_path
+            except OSError:
+                returncode = proc.poll()
+                if returncode is not None:
+                    raise SystemExit(
+                        f"proxy exited during startup with code {returncode}; "
+                        f"see {out_path}"
+                    )
+                time.sleep(0.2)
+        raise SystemExit(f"proxy did not come up on port {port}")
+    except BaseException:
+        _terminate_owned_process(proc)
+        raise
 
 
 def _git_short_sha() -> str:
@@ -119,9 +220,28 @@ def add_core_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--user-upstream", default="",
                         help="base URL for user-simulator/judge traffic (defaults to --upstream; only the agent arm proxy compresses)")
     parser.add_argument("--proxy-port", type=int, default=34100)
+    parser.add_argument("--proxy-python", default=None,
+                        help="proxy interpreter; use the serving environment for compatible checkpoint tokenizers")
+    parser.add_argument("--memory-runtime-config", default="",
+                        help="opt-in event-memory runtime config JSON")
+    parser.add_argument("--memory-tokenizer", default="",
+                        help="local tokenizer matching the active serving checkpoint")
+    parser.add_argument("--no-upstream-retries", action="store_true",
+                        help="fail a request instead of retrying transport or cache misses")
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--exact-out", action="store_true",
                         help="use the supplied output directory verbatim (matrix cells)")
+    parser.add_argument("--capture-request-views", action="store_true",
+                        help="record benchmark request messages/tools for exact prefix diagnostics")
+    parser.add_argument("--max-generation-attempts", type=positive_generation_limit,
+                        help="process-wide hard cap on chat generation network calls")
+    parser.add_argument(
+        "--max-generation-attempts-per-task", type=positive_generation_limit,
+        help=("hard cap on chat generation network calls for each explicit "
+              "benchmark task identity"),
+    )
+    parser.add_argument("--max-extraction-attempts", type=positive_extraction_limit,
+                        help="process-wide hard cap on client extraction producers")
     # shared by tau2 (--max-concurrency) and acebench (--num-threads)
     parser.add_argument("--num-workers", type=int, default=4)
     # shared by tau2 (--num-tasks) and acon_qa (--limit)
@@ -261,18 +381,32 @@ def main(argv=None):
         record_reference=args.record_reference, reference=args.reference,
         backend=args.backend, doc_packing=args.doc_packing,
         max_doc_length=args.max_doc_length, max_doc_num=args.max_doc_num,
-        query_projection=args.query_projection)
+        query_projection=args.query_projection,
+        witness_tokenizer=str(args.checkpoint or "") if get_arm(args.arm).gold_recovery else "",
+        python_bin=args.proxy_python,
+        memory_runtime_config=args.memory_runtime_config,
+        memory_tokenizer=args.memory_tokenizer or str(args.checkpoint or ""),
+        no_upstream_retries=args.no_upstream_retries,
+        capture_request_views=args.capture_request_views,
+        max_generation_attempts=args.max_generation_attempts,
+        max_generation_attempts_per_task=args.max_generation_attempts_per_task,
+        max_extraction_attempts=args.max_extraction_attempts)
     try:
         # every adapter owns its own "/v1" (adapters/base.py:v1) and its own
         # cwd; run.py hands over the bare proxy URL and nothing else
         ctx = build_context(args, request_log)
+        adapter_started = time.perf_counter()
         summary = ADAPTERS[args.benchmark].run(ctx)
+        adapter_wall_sec = time.perf_counter() - adapter_started
     finally:
-        proxy_proc.terminate()
+        _terminate_owned_process(proxy_proc)
     summary["arm"] = args.arm
     summary["benchmark"] = args.benchmark
     summary["backend"] = args.backend
     summary["model"] = args.model
+    summary["runner_adapter_wall_sec"] = adapter_wall_sec
+    summary["runner_wall_scope"] = "adapter invocation including generation, tool execution and official scoring; excludes model server startup"
+    summary["num_workers"] = args.num_workers
     summary["checkpoint_profile"] = profile
     summary["preflight"] = preflight.as_dict()
     if get_arm(args.arm).text_policy:
@@ -342,6 +476,12 @@ def main(argv=None):
     summary["max_doc_length"] = args.max_doc_length
     summary["max_doc_num"] = args.max_doc_num
     summary["request_log"] = str(request_log)
+    journal_path = attempt_journal_path(request_log)
+    if journal_path.is_file():
+        summary["attempt_journal"] = {
+            "path": str(journal_path),
+            "accounting": summarize_attempt_journal(journal_path),
+        }
     if args.reference:
         summary["reference"] = args.reference
     if args.record_reference:

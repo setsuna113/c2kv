@@ -1,0 +1,242 @@
+{
+  "schema": "a-event-native-eval-policy-v2",
+  "policy_id": "a-exact-baseline-v1",
+  "policy": {
+    "history_budget_bytes": 113246208,
+    "lease_decisions": 3,
+    "max_retrieved_events": 1,
+    "workspace_budget_bytes": 113246208
+  },
+  "method_contract": {
+    "schema": "a-event-native-method-contract-v1",
+    "method_id": "a-event-native-exact-source-baseline-v1",
+    "module_versions": {
+      "benchmarks/memory_runtime/event_native_controls.py": {
+        "EVENT_NATIVE_CONTROL_VERSION": "a-event-native-finite-control-v1"
+      },
+      "benchmarks/memory_runtime/event_native_draft.py": {
+        "NATIVE_DRAFT_VERSION": "a-qwen-native-draft-v1"
+      },
+      "benchmarks/memory_runtime/event_native_exact_policy.py": {
+        "EVENT_NATIVE_EXACT_VERSION": "a-event-native-exact-source-v1",
+        "BUDGETED_GIST_LAYOUT": "event-native-budgeted-gist-v1"
+      },
+      "benchmarks/memory_runtime/event_native_policy.py": {
+        "EVENT_NATIVE_POLICY_VERSION": "event-native-policy-v1"
+      },
+      "benchmarks/memory_runtime/event_native_raw.py": {
+        "RAW_CONTROL_VERSION": "a-event-native-raw-control-v1"
+      },
+      "benchmarks/memory_runtime/exact_gap.py": {
+        "VERSION": "exact-source-gap-v2"
+      },
+      "benchmarks/memory_runtime/exact_policy.py": {
+        "EXACT_POLICY_VERSION": "exact-source-recovery-v1"
+      }
+    },
+    "source_allowlist": [
+      {
+        "path": "benchmarks/memory_runtime/event_native_controls.py",
+        "sha256": "f9a3729e61174d06fbe9362fc160fbadd4dc2d40ef9fb815d65afc44d4628ef0",
+        "role": "finite route definitions and controller selection"
+      },
+      {
+        "path": "benchmarks/memory_runtime/event_native_draft.py",
+        "sha256": "5fe4e8bed2119a58b8f0fab1d04e3721d518ed2f1ae393e3e583a4775532a21f",
+        "role": "native draft parsing before exact-source detection"
+      },
+      {
+        "path": "benchmarks/memory_runtime/event_native_eval_policy.py",
+        "sha256": "9802696650ff454999396575514ba1ff6567505beff6916345727a00924b5b48",
+        "role": "A parameter override and method admission"
+      },
+      {
+        "path": "benchmarks/memory_runtime/event_native_exact_policy.py",
+        "sha256": "4314bc81d8e81db89dbac7773e3b18211b6fe4b510dec2d8e7ab875693451176",
+        "role": "capacity gate, gist refill, and post-draft recovery"
+      },
+      {
+        "path": "benchmarks/memory_runtime/event_native_method_contract.py",
+        "sha256": "1193af978d99de8fa9974332019b49815606e7bc4c8f27a58227de0fbeeacc79",
+        "role": "method identity and behavior catalog"
+      },
+      {
+        "path": "benchmarks/memory_runtime/event_native_policy.py",
+        "sha256": "0a920d8be68d8d5cff69ac048ce257dca9897e600706507c8dcead1b0d0bfc42",
+        "role": "policy schema, token accounting, and packing interface"
+      },
+      {
+        "path": "benchmarks/memory_runtime/event_native_raw.py",
+        "sha256": "89f281ba50a0379ba0b21f1de01bf190759efc0841181a3e16645324493ddb29",
+        "role": "Full and NoGist representation and raw refill"
+      },
+      {
+        "path": "benchmarks/memory_runtime/event_native_step.py",
+        "sha256": "6ee93712212a9d80f95da257175b3f4f2ee0939b06b7619b5c95286495c85106",
+        "role": "one-regeneration orchestration and final-only response"
+      },
+      {
+        "path": "benchmarks/memory_runtime/exact_gap.py",
+        "sha256": "5f35f0def5e23b7be4186d84e8856d1a1ca1d9d00f95e30548a7f77f69851a8a",
+        "role": "exact-source detector and literal matching"
+      },
+      {
+        "path": "benchmarks/memory_runtime/exact_policy.py",
+        "sha256": "63e005d9b6e2e140859134cacafda0cd820889eba2b7348f1663d79cedb2345c",
+        "role": "one-event upgrade and evidence lease lifecycle"
+      },
+      {
+        "path": "benchmarks/memory_runtime/policy.py",
+        "sha256": "2378c290000c7eab3f43aa0d84b4b5cf6be152c34f14c7b412efbbf09266453c",
+        "role": "base protection, byte admission, and revision recognition"
+      }
+    ],
+    "behavior_catalog": {
+      "detector": {
+        "input": "observable EventStore, actual raw source indices, and one unsubmitted native draft",
+        "binding": "nonempty JSON-object argument string leaves; case-sensitive exact literal boundaries; JSON keys excluded",
+        "candidate": "all missing bindings must have one complete source each and resolve to the same event before source_cutoff",
+        "judges_action_correctness": false,
+        "pre_draft_lexical_retrieval": false,
+        "status_reasons": {
+          "no_op": [
+            "no_native_tool_calls",
+            "no_string_bindings",
+            "all_bindings_visible"
+          ],
+          "abstain": [
+            "malformed_arguments",
+            "missing_source",
+            "ambiguous_sources",
+            "multiple_source_events"
+          ],
+          "gap": [
+            "missing_unique_complete_source"
+          ]
+        },
+        "controller_status_reasons": {
+          "no_op": [
+            "recovery_disabled"
+          ],
+          "abstain": [
+            "draft_parse_error",
+            "budget_exhausted"
+          ]
+        }
+      },
+      "recovery": {
+        "max_events_per_upgrade": 1,
+        "max_regenerations_per_decision": 1,
+        "same_handle_same_source": "idempotent; no additional decision-clock tick",
+        "second_source_or_different_draft": "rejected",
+        "admission": "complete evidence packet must fit min(B,W), then actual representation and checkpoint limits",
+        "submitted_response": "only the final generation; discarded draft tool calls are never executed",
+        "cost": "all actual generation attempts are journaled; incomplete work retains unknown usage"
+      },
+      "protection_and_refill": {
+        "protection_order": [
+          "non-visible incomplete events and latest user",
+          "latest non-visible complete tool event",
+          "active exact leases in event order"
+        ],
+        "gist_refill_order": "first static gist event, then remaining static gist events by descending last source index",
+        "no_gist_refill_order": "after mandatory raw and shared evidence, descending last source index; skip candidates that do not fit",
+        "budget_skip_reasons": [
+          "recent_complete_tool",
+          "active_exact_lease"
+        ],
+        "gist_admission_reasons": [
+          "system_budget",
+          "workspace_token_budget",
+          "encoder_budget",
+          "workspace_byte_budget",
+          "model_logical_context",
+          "packing_budget_exceeded"
+        ],
+        "ratio_qualified_gist_admission_reasons": [
+          "physical_sequence_budget:{ratio}",
+          "history_byte_budget:{ratio}"
+        ],
+        "raw_admission_reasons": [
+          "history_budget",
+          "workspace_budget",
+          "sequence_budget"
+        ],
+        "diagnostic_detail_fields": [
+          "skipped_gist_refill_events[].detail",
+          "exact_recovery.parse_error",
+          "response.native_parse_reason"
+        ],
+        "diagnostic_detail_scope": "free-form parsing/exception detail; not an additional detector decision code"
+      },
+      "lease_release": {
+        "clock": "one tick per new decision, including Full-identity bypass; repeated decision is idempotent",
+        "acquisition": "persistent modes only, if lease_decisions is nonzero; expiry = acquisition decision + lease_decisions",
+        "expiry": "remove pin when current decision >= expiry; acquisition counts toward the lease duration",
+        "once": "no cross-decision lease; later base protection can independently select the same source",
+        "raw_visibility": "avoid duplicate evidence without refreshing or pausing expiry",
+        "revision": "a new latest-user event matching the fixed revision recognizer clears all exact leases",
+        "missing_or_incomplete_source": "drop the lease",
+        "budget_pressure": "skip a pin that does not fit this decision; preserve its original expiry",
+        "session_end": "runner.close releases generator cache; controller state remains isolated by session ID until finite process teardown",
+        "release_metadata_fields": [
+          "expired_lease_event_ids",
+          "revision_cancelled_event_ids",
+          "dropped_lease_event_ids"
+        ]
+      },
+      "routes": {
+        "full_original": {
+          "history_budget": "unused",
+          "workspace_budget": "unused",
+          "lease": false,
+          "recovery": false
+        },
+        "full_exact_shared": {
+          "history_budget": "auxiliary_gate_and_selection_only",
+          "workspace_budget": "evidence_limit",
+          "lease": true,
+          "recovery": true
+        },
+        "capacity_protect": {
+          "history_budget": "history_limit",
+          "workspace_budget": "evidence_limit",
+          "lease": false,
+          "recovery": false
+        },
+        "capacity_exact_once": {
+          "history_budget": "history_limit",
+          "workspace_budget": "evidence_limit",
+          "lease": false,
+          "recovery": true
+        },
+        "capacity_exact_persistent": {
+          "history_budget": "history_limit",
+          "workspace_budget": "evidence_limit",
+          "lease": true,
+          "recovery": true
+        },
+        "capacity_exact_no_gist": {
+          "history_budget": "history_limit",
+          "workspace_budget": "evidence_limit",
+          "lease": true,
+          "recovery": true
+        }
+      },
+      "excluded_routes": [
+        "event-native training-static",
+        "historical pre-draft lexical recovery",
+        "legacy 1088 proxy"
+      ],
+      "separate_run_contracts": [
+        "checkpoint weights and profile",
+        "event/packing/tokenizer interface",
+        "KV geometry and dtype",
+        "ratio and model context",
+        "decode/cache strategy",
+        "sampling and total run budget",
+        "task split and official scorer"
+      ]
+    }
+  }
+}

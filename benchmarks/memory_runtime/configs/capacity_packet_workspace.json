@@ -1,0 +1,11 @@
+{
+  "mode": "ac_packet_workspace",
+  "run_id": "a_packet_workspace_dev_v1",
+  "bytes_per_kv_token": 147456,
+  "history_budget_bytes": 113246208,
+  "workspace_budget_bytes": 113246208,
+  "lease_decisions": 3,
+  "max_retrieved_events": 1,
+  "compression_policy": "always-compress-v1",
+  "history_view_protocol": "fixed-budget-main"
+}

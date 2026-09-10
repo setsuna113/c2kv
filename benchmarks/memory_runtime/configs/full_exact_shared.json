@@ -1,0 +1,9 @@
+{
+  "mode": "full_exact_shared",
+  "run_id": "a_full_exact_shared_dev_v1",
+  "bytes_per_kv_token": 147456,
+  "history_budget_bytes": 113246208,
+  "workspace_budget_bytes": 113246208,
+  "lease_decisions": 3,
+  "max_retrieved_events": 1
+}

@@ -13,6 +13,7 @@ Two things this file protects:
 from __future__ import annotations
 
 import sys
+import json
 from pathlib import Path
 
 import pytest
@@ -74,7 +75,10 @@ def test_add_arguments_registers_only_that_adapters_flags():
     owned = {
         tau2_adapter: {"--task-set", "--tau2-num-trials", "--tau2-max-steps",
                        "--tau2-timeout"},
-        bfcl_adapter: {"--categories", "--run-ids"},
+        bfcl_adapter: {
+            "--categories", "--run-ids", "--bfcl-oracle-max-events",
+            "--bfcl-temperature", "--bfcl-seed",
+            "--bfcl-generation-max-tokens"},
         toolsandbox_adapter: {"--full", "--ts-scenarios", "--ts-agent", "--ts-user", "--toolsandbox-dir"},
         acon_adapter: {"--acon-dir", "--split", "--tag", "--task-ids"},
         acebench_adapter: {"--acebench-dir", "--acebench-category",
@@ -145,7 +149,8 @@ def test_tau2_default_python_is_this_interpreter():
 
 def test_bfcl_argv_is_byte_identical():
     assert bfcl_adapter.generate_argv("c2kv-full", "multi_turn_base") == [
-        "generate", "--model", "c2kv-full", "--test-category", "multi_turn_base"]
+        "generate", "--model", "c2kv-full", "--test-category", "multi_turn_base",
+        "--num-threads", "1"]
     assert bfcl_adapter.evaluate_argv("c2kv-full", "multi_turn_base") == [
         "evaluate", "--model", "c2kv-full", "--test-category", "multi_turn_base"]
 
@@ -156,10 +161,19 @@ def test_bfcl_subset_argv_uses_run_ids_then_partial_eval():
     # test_case_ids_to_generate.json); evaluate takes --partial-eval instead
     assert bfcl_adapter.generate_argv("c2kv-full", "memory", ids) == [
         "generate", "--model", "c2kv-full", "--test-category", "memory",
-        "--run-ids"]
+        "--num-threads", "1", "--run-ids"]
     assert bfcl_adapter.evaluate_argv("c2kv-full", "memory", ids) == [
         "evaluate", "--model", "c2kv-full", "--test-category", "memory",
         "--partial-eval"]
+
+
+def test_bfcl_generate_argv_forwards_worker_count_to_pinned_flag():
+    assert bfcl_adapter.generate_argv(
+        "c2kv-full", "multi_turn_base", num_threads=4)[-2:] == [
+            "--num-threads", "4"]
+    with pytest.raises(ValueError, match="must be positive"):
+        bfcl_adapter.generate_argv(
+            "c2kv-full", "multi_turn_base", num_threads=0)
 
 
 def test_bfcl_handler_key_dashes_the_arm():
@@ -194,6 +208,48 @@ def test_toolsandbox_env_splits_agent_and_user():
     assert env["OPENAI_BASE_URL"] == "http://127.0.0.1:34100/v1"
     assert env["TOOLSANDBOX_USER_BASE_URL"] == "http://127.0.0.1:35000/v1"
     assert env["NO_PROXY"] == "127.0.0.1,localhost"
+
+
+def test_toolsandbox_selected_scenarios_bind_exact_terminal_denominator(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    import os
+
+    selected = tmp_path / "selected-source"
+    selected.mkdir()
+    python = tmp_path / "selected-env" / "bin" / "python"
+    seen = {}
+    monkeypatch.setattr(toolsandbox_adapter.subprocess, "run", lambda *a, **k:
+                        SimpleNamespace(returncode=0))
+    monkeypatch.setattr(toolsandbox_adapter, "collect", lambda out, **kwargs:
+                        seen.update(kwargs) or {"n": 2})
+    toolsandbox_adapter.run_ts("http://agent", tmp_path / "out", scenarios=["a", "b"],
+                               expected=2, expected_task_ids=["a", "b"],
+                               benchmark_dir=selected, python=str(python))
+    assert seen["expected_task_ids"] == ["a", "b"]
+
+
+def test_toolsandbox_collect_rejects_a_missing_selected_scenario(tmp_path):
+    summary = tmp_path / "agent_mock" / "result_summary.json"
+    summary.parent.mkdir(parents=True)
+    summary.write_text(json.dumps({"per_scenario_results": [{
+        "name": "present", "traceback": None, "similarity": 1.0,
+        "milestone_similarity": 1.0, "minefield_similarity": 0.0,
+        "turn_count": 1,
+    }]}), encoding="utf-8")
+    with pytest.raises(SystemExit, match="missing=absent"):
+        toolsandbox_adapter.collect(tmp_path, expected_task_ids=["present", "absent"])
+
+
+def test_toolsandbox_collect_rejects_an_unexpected_scenario(tmp_path):
+    summary = tmp_path / "agent_mock" / "result_summary.json"
+    summary.parent.mkdir(parents=True)
+    summary.write_text(json.dumps({"per_scenario_results": [{
+        "name": "unexpected", "traceback": None, "similarity": 1.0,
+        "milestone_similarity": 1.0, "minefield_similarity": 0.0,
+        "turn_count": 1,
+    }]}), encoding="utf-8")
+    with pytest.raises(SystemExit, match="unexpected=unexpected"):
+        toolsandbox_adapter.collect(tmp_path, expected_task_ids=["present"])
 
 
 # ---- acon: `run.py` / `run_all.py` / `appworld evaluate` --------------------
@@ -259,11 +315,16 @@ def test_toolsandbox_uses_selected_environment_and_checkout(tmp_path, monkeypatc
 
 # ---- cost-join declarations -------------------------------------------------
 
-@pytest.mark.parametrize("module", [tau2_adapter, bfcl_adapter,
+@pytest.mark.parametrize("module", [tau2_adapter,
                                     toolsandbox_adapter, acebench_adapter])
 def test_unjoinable_adapters_declare_a_reason(module):
     assert module.COST_JOIN.startswith("not joinable: ")
     assert len(module.COST_JOIN) > len("not joinable: ")
+
+
+def test_bfcl_declares_explicit_task_cost_join():
+    assert "c2kv_eval_context.task_id" in bfcl_adapter.COST_JOIN
+    assert "request_log_summary.task_costs" in bfcl_adapter.COST_JOIN
 
 
 def test_base_module_is_importable_as_a_package_member():

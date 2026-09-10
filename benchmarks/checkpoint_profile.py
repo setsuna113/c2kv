@@ -589,6 +589,14 @@ def resolve_checkpoint_profile(
     if not config_path.is_file():
         raise ProfileError(f"checkpoint config.json not found: {config_path}")
     config = _json(config_path)
+    if (
+        config.get("history_memory_raw_layout") == "event-native-evidence-v1"
+        or config.get("history_memory_training_profile") == "history-event-base-query-v1"
+    ):
+        raise ProfileError(
+            "event-native checkpoints cannot use the legacy turn-packing serving path; "
+            "use benchmarks.memory_runtime.event_native for reference inference"
+        )
     explicit_modes = sum(bool(item) for item in (profile_path, reference_profile))
     if explicit_modes > 1:
         raise ProfileError("--profile and --reference-profile are mutually exclusive")

@@ -1,0 +1,81 @@
+{
+  "schema": "a-runtime-initial-protocol-v1",
+  "run_id": "a_protocol_20260907_v1",
+  "stage": "protocol",
+  "status": "frozen_before_first_model_request",
+  "purpose": "Interface and budget smoke; no official task-success claim",
+  "baseline_commit": "681eab09ad66e4aed0ae9ccb8e368fdb191018e0",
+  "shared_cpu_source_commit": "b87f1806670438176e195bfe21127c1bb7935559",
+  "upstream": "http://127.0.0.1:35160",
+  "checkpoint": "/home/user/checkpoints_upstream/checkpoint-1088",
+  "verified_server": {
+    "dtype": "bfloat16",
+    "tp_size": 1,
+    "context_length": 16384,
+    "c2kv_query_proj": "base",
+    "disable_radix_cache": false,
+    "disable_cuda_graph": true,
+    "enable_c2kv": true
+  },
+  "geometry": {
+    "num_hidden_layers": 36,
+    "num_key_value_heads": 8,
+    "head_dim": 128,
+    "bytes_per_element": 2,
+    "bytes_per_kv_token": 147456,
+    "source": "live checkpoint config and /get_server_info; read-only probe 2026-09-07"
+  },
+  "history_budget_tokens_design": 1536,
+  "workspace_budget_tokens_design": 768,
+  "history_budget_bytes": 226492416,
+  "workspace_budget_bytes": 113246208,
+  "budget_choice": "Fixed engineering smoke point: 12 legacy documents x 512 source tokens / 4. Workspace is a subcap. Not selected using arm outcomes.",
+  "variants": [
+    "full_native",
+    "full",
+    "legacy",
+    "protect",
+    "recover_once",
+    "persistent",
+    "no_gist",
+    "full_shared"
+  ],
+  "corpus": "benchmarks/memory_runtime/tests/fixtures/corpus.json",
+  "cases": 2,
+  "model_request_cap": 16,
+  "temperature": 0,
+  "seed": 0,
+  "max_tokens": 512,
+  "transport_retries": 0,
+  "cache_miss_retries": 0,
+  "automatic_reruns": 0,
+  "stop_on": [
+    "HTTP or backend error",
+    "runtime contract error",
+    "byte geometry mismatch",
+    "request cap"
+  ],
+  "claim_limits": [
+    "fixed observable-prefix generation only",
+    "no benchmark tool execution in this stage",
+    "no official task completion score",
+    "preliminary, n=1"
+  ],
+  "next_stage": {
+    "kind": "development official BFCL pilot",
+    "task_ids": [
+      "multi_turn_base_0",
+      "multi_turn_base_1",
+      "multi_turn_base_2",
+      "multi_turn_base_3"
+    ],
+    "initial_arms": [
+      "full",
+      "legacy",
+      "protect"
+    ],
+    "max_tasks": 12,
+    "require_protocol_pass": true,
+    "protocol": "freeze a separate concrete run manifest before starting; no success-based task selection"
+  }
+}

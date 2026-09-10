@@ -27,21 +27,49 @@ tree-sitter==0.21.3 + tree-sitter-java.
 from __future__ import annotations
 
 import argparse
+from copy import deepcopy
 import json
+import ipaddress
 import math
 import os
 import sys
 import time
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional
+from urllib.parse import urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from adapters.base import RunContext, v1  # noqa: E402
+from bfcl_gold_recovery import (  # noqa: E402
+    GoldRecoveryController,
+    MULTI_EVENT_ORACLE_KIND,
+    MULTI_EVENT_ORACLE_VERSION,
+    MultiEventGoldRecoveryController,
+    ORACLE_KIND,
+    ORACLE_VERSION,
+    TurnRetry,
+    summarize_audit,
+)
 
 NAME = "bfcl"
 MODEL_NAME = "c2kv-hf"  # BFCL handler key / result-dir name (stable layout)
 SERVED_MODEL = "c2kv-agent"  # default served model name at the endpoint
+
+
+def _positive_int(value: str) -> int:
+    parsed = int(value)
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("must be a positive integer")
+    return parsed
+
+
+def _temperature(value: str) -> float:
+    parsed = float(value)
+    if not math.isfinite(parsed) or parsed < 0:
+        raise argparse.ArgumentTypeError("must be finite and nonnegative")
+    return parsed
 
 
 def add_arguments(parser) -> None:
@@ -49,6 +77,18 @@ def add_arguments(parser) -> None:
     parser.add_argument("--categories", default="multi_turn_base")
     parser.add_argument("--run-ids", default="",
                         help="bfcl: comma-separated official case ids for a subset run")
+    parser.add_argument("--bfcl-temperature", type=_temperature, default=None,
+                        help="explicit generation temperature; otherwise official CLI default")
+    parser.add_argument("--bfcl-seed", type=int, default=None,
+                        help="explicit per-request generation seed")
+    parser.add_argument(
+        "--bfcl-generation-max-tokens", type=_positive_int, default=4096,
+        help="per-request max_completion_tokens; default preserves the official path",
+    )
+    parser.add_argument(
+        "--bfcl-oracle-max-events", type=_positive_int, default=1,
+        help="bfcl gold arms: retry budget per task; 1 is the frozen v2 protocol",
+    )
 
 
 def default_bfcl_dir() -> str:
@@ -67,11 +107,20 @@ def handler_key(arm: str) -> str:
 
 
 def generate_argv(handler_name: str, categories: str,
-                  run_ids: Optional[List[str]] = None) -> List[str]:
+                  run_ids: Optional[List[str]] = None,
+                  num_threads: int = 1,
+                  temperature: Optional[float] = None) -> List[str]:
     """``bfcl generate`` argv (PINNED; driven in-process by run_cli)."""
-    argv = ["generate", "--model", handler_name, "--test-category", categories]
+    if num_threads < 1:
+        raise ValueError(f"BFCL num_threads must be positive, got {num_threads}")
+    argv = [
+        "generate", "--model", handler_name, "--test-category", categories,
+        "--num-threads", str(num_threads),
+    ]
     if run_ids:
         argv.append("--run-ids")
+    if temperature is not None:
+        argv += ["--temperature", str(temperature)]
     return argv
 
 
@@ -86,11 +135,27 @@ def evaluate_argv(handler_name: str, categories: str,
 
 
 def install_handler(base_url: str, model: str = SERVED_MODEL,
-                    handler_name: "str | None" = None) -> None:
+                    handler_name: "str | None" = None,
+                    gold_recovery: "str | None" = None,
+                    task_audit_path: "Path | str | None" = None,
+                    bfcl_oracle_max_events: int = 1,
+                    no_upstream_retries: bool = False,
+                    generation_seed: Optional[int] = None,
+                    generation_max_tokens: int = 4096) -> None:
     # NOTE: default resolved at CALL time — binding the default to
     # MODEL_NAME at def time made monkeypatched names register the
     # wrong key (val20 evaluate failure)
     handler_name = handler_name or MODEL_NAME
+    if (not isinstance(bfcl_oracle_max_events, int)
+            or isinstance(bfcl_oracle_max_events, bool)
+            or bfcl_oracle_max_events <= 0):
+        raise ValueError("bfcl_oracle_max_events must be a positive integer")
+    if bfcl_oracle_max_events > 1 and gold_recovery is None:
+        raise ValueError("BFCL multi-event recovery requires a gold-recovery arm")
+    if (not isinstance(generation_max_tokens, int)
+            or isinstance(generation_max_tokens, bool)
+            or generation_max_tokens <= 0):
+        raise ValueError("generation_max_tokens must be a positive integer")
     import httpx
     from openai import OpenAI
     from bfcl_eval.constants.model_config import MODEL_CONFIG_MAPPING, ModelConfig
@@ -99,30 +164,139 @@ def install_handler(base_url: str, model: str = SERVED_MODEL,
     )
 
     class C2KVHandler(OpenAICompletionsHandler):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            if bfcl_oracle_max_events == 1:
+                self._gold_controller = GoldRecoveryController(
+                    gold_recovery, task_audit_path)
+            else:
+                self._gold_controller = MultiEventGoldRecoveryController(
+                    gold_recovery, bfcl_oracle_max_events, task_audit_path)
+
         def _build_client_kwargs(self):
-            return {
+            kwargs = {
                 "api_key": "EMPTY",
                 "base_url": base_url,
                 "timeout": httpx.Timeout(timeout=600.0, connect=8.0),
             }
+            if no_upstream_retries:
+                kwargs["max_retries"] = 0
+            host = urlsplit(base_url).hostname
+            try:
+                loopback = host == "localhost" or ipaddress.ip_address(host).is_loopback
+            except ValueError:
+                loopback = False
+            if loopback:
+                # A local inference endpoint must not be sent through an
+                # ambient HTTP_PROXY on the benchmark host.
+                kwargs["http_client"] = httpx.Client(trust_env=False)
+            return kwargs
+
+        def inference(self, test_entry: dict, include_input_log: bool,
+                      exclude_state_log: bool):
+            controller = self._gold_controller
+            guard = (controller.inference_lock
+                     if controller.selector is not None else nullcontext())
+            with guard:
+                state = controller.begin(test_entry)
+                original_test_entry = deepcopy(test_entry)
+                original_namespace = self.model_name_underline_replaced
+                try:
+                    if isinstance(controller, MultiEventGoldRecoveryController):
+                        active_retry_namespace = None
+                        while True:
+                            self.model_name_underline_replaced = (
+                                active_retry_namespace or original_namespace)
+                            next_retry_namespace = None
+                            try:
+                                result = super().inference(
+                                    deepcopy(original_test_entry),
+                                    include_input_log,
+                                    exclude_state_log,
+                                )
+                                controller.after_inference(self, result[1])
+                                return result
+                            except TurnRetry:
+                                next_retry_namespace = controller.begin_retry()
+                            finally:
+                                self.model_name_underline_replaced = original_namespace
+                                if active_retry_namespace is not None:
+                                    controller.cleanup_retry(active_retry_namespace)
+                            active_retry_namespace = next_retry_namespace
+                    else:
+                        try:
+                            working_entry = (deepcopy(original_test_entry)
+                                             if controller.selector is not None else test_entry)
+                            result = super().inference(
+                                working_entry, include_input_log, exclude_state_log)
+                            controller.after_inference(self, result[1])
+                        except TurnRetry:
+                            retry_namespace = controller.begin_retry()
+                            self.model_name_underline_replaced = retry_namespace
+                            try:
+                                result = super().inference(
+                                    deepcopy(original_test_entry),
+                                    include_input_log,
+                                    exclude_state_log,
+                                )
+                                controller.after_inference(self, result[1])
+                            finally:
+                                self.model_name_underline_replaced = original_namespace
+                                controller.cleanup_retry(retry_namespace)
+                        return result
+                except Exception as error:
+                    controller.record_handler_error(error)
+                    raise
+                finally:
+                    self.model_name_underline_replaced = original_namespace
+                    controller.write_audit()
+                    controller.clear()
+
+        def _add_next_turn_user_message_FC(
+                self, inference_data: dict, user_message: list[dict]) -> dict:
+            self._gold_controller.before_next_turn(self)
+            return super()._add_next_turn_user_message_FC(
+                inference_data, user_message)
+
+        def _parse_query_response_FC(self, api_response: Any) -> dict:
+            parsed = super()._parse_query_response_FC(api_response)
+            controller = getattr(self, "_gold_controller", None)
+            if controller is not None:
+                controller.record_parse(self, parsed)
+            return parsed
 
         def _query_FC(self, inference_data: dict):
+            controller = self._gold_controller
+            replay = controller.replay_response()
+            if replay is not None:
+                return replay
             kwargs = {
                 "messages": inference_data["message"],
                 "model": model,
                 "temperature": self.temperature,
                 "store": False,
-                "max_completion_tokens": 4096,
+                "max_completion_tokens": generation_max_tokens,
             }
+            if generation_seed is not None:
+                kwargs["seed"] = generation_seed
             if inference_data.get("tools"):
                 kwargs["tools"] = inference_data["tools"]
+            context = controller.request_context()
+            if context is not None:
+                extra_body: Dict[str, Any] = {"c2kv_eval_context": context}
+                oracle = controller.oracle_payload()
+                if oracle is not None:
+                    extra_body["c2kv_oracle"] = oracle
+                kwargs["extra_body"] = extra_body
             inference_data["inference_input_log"] = {
                 "message": repr(inference_data["message"]),
                 "tools": inference_data["tools"],
             }
             t0 = time.perf_counter()
             response = self.client.chat.completions.create(**kwargs)
-            return response, time.perf_counter() - t0
+            latency = time.perf_counter() - t0
+            controller.record_query(response, latency)
+            return response, latency
 
     MODEL_CONFIG_MAPPING[handler_name] = ModelConfig(
         model_name=model,
@@ -260,7 +434,8 @@ def run(ctx: RunContext) -> Dict[str, Any]:
     while keeping cwd in the checkout so the installed package data resolves.
     The handler expects an OpenAI base_url WITH ``/v1``.
 
-    No cost join: see ``COST_JOIN`` below.
+    Per-task proxy cost joins through ``c2kv_eval_context.task_id``; handler
+    end-to-end wall time is written separately under ``task_audit``.
     """
     project_root = ctx.out_dir.resolve()
     project_root.mkdir(parents=True, exist_ok=True)
@@ -269,6 +444,16 @@ def run(ctx: RunContext) -> Dict[str, Any]:
     os.environ["BFCL_PROJECT_ROOT"] = str(project_root)
     os.chdir(ctx.opt("bfcl_dir") or default_bfcl_dir())
     try:
+        from arms import get_arm
+
+        gold_recovery = get_arm(ctx.arm).gold_recovery
+        num_threads = int(ctx.opt("num_workers", 1))
+        oracle_max_events = int(ctx.opt("bfcl_oracle_max_events", 1))
+        no_upstream_retries = ctx.opt("no_upstream_retries", False)
+        if not isinstance(no_upstream_retries, bool):
+            raise ValueError("no_upstream_retries must be a bool")
+        task_audit_path = (
+            project_root / "task_audit" / f"{handler_key(ctx.arm)}.jsonl")
         summary = run_bfcl(
             v1(ctx.base_url),
             categories=ctx.opt("categories", "multi_turn_base"),
@@ -277,6 +462,14 @@ def run(ctx: RunContext) -> Dict[str, Any]:
             model=ctx.model,
             handler_name=handler_key(ctx.arm),
             project_root=project_root,
+            gold_recovery=gold_recovery,
+            task_audit_path=task_audit_path,
+            num_threads=num_threads,
+            bfcl_oracle_max_events=oracle_max_events,
+            no_upstream_retries=no_upstream_retries,
+            generation_temperature=ctx.opt("bfcl_temperature"),
+            generation_seed=ctx.opt("bfcl_seed"),
+            generation_max_tokens=ctx.opt("bfcl_generation_max_tokens", 4096),
         )
     finally:
         os.chdir(prev_cwd)
@@ -288,26 +481,26 @@ def run(ctx: RunContext) -> Dict[str, Any]:
     return summary
 
 
-# Why BFCL gets no per-task cost columns.  ``proxy.conversation_id`` shifts
-# once per entry: request 1 carries only question[0] (the data file's turn-0
-# user message), every later request also carries the FIRST ASSISTANT
-# MESSAGE (proxy.py:434-447).  That assistant message is the raw OpenAI
-# message object appended by _add_assistant_message_FC; the result file
-# stores only the decoded ``model_responses`` (base_handler.py:243-253), and
-# the verbatim wire payload is written only under ``--include-input-log``
-# (base_handler.py:219-225) — a flag the pinned generate argv does not pass.
-# Keying on the first id alone would attribute one request per entry, which
-# is a wrong cost column rather than a missing one.
-COST_JOIN = ("not joinable: the steady-state conversation id needs the first "
-             "assistant message verbatim, which the BFCL result file does not "
-             "store (see adapters/bfcl_adapter.py)")
+# Every real request carries an explicit BFCL task id.  reqlog aggregates it
+# into request_log_summary.task_costs, while task_audit measures end-to-end
+# handler wall time including tool execution and any privileged gold check.
+COST_JOIN = ("explicit c2kv_eval_context.task_id join available in "
+             "request_log_summary.task_costs")
 
 
 def run_bfcl(base_url: str, categories: str = "multi_turn_base",
              mode: str = "both", run_ids: "list[str] | str | None" = None,
              model: str = SERVED_MODEL,
              handler_name: str = MODEL_NAME,
-             project_root: "Path | str | None" = None) -> Dict[str, Any]:
+             project_root: "Path | str | None" = None,
+             gold_recovery: "str | None" = None,
+             task_audit_path: "Path | str | None" = None,
+             num_threads: int = 1,
+             bfcl_oracle_max_events: int = 1,
+             no_upstream_retries: bool = False,
+             generation_temperature: Optional[float] = None,
+             generation_seed: Optional[int] = None,
+             generation_max_tokens: int = 4096) -> Dict[str, Any]:
     """Register the handler and drive the official generate/evaluate CLI
     in-process.
 
@@ -328,6 +521,20 @@ def run_bfcl(base_url: str, categories: str = "multi_turn_base",
     summaries deliberately contain no ``n_scored`` or ``semantic_score``."""
     if mode not in ("generate", "evaluate", "both"):
         raise ValueError(f"invalid BFCL mode: {mode}")
+    if generation_temperature is not None:
+        generation_temperature = _temperature(str(generation_temperature))
+    if generation_seed is not None and (not isinstance(generation_seed, int) or isinstance(generation_seed, bool)):
+        raise ValueError("generation_seed must be an integer or None")
+    if (not isinstance(generation_max_tokens, int)
+            or isinstance(generation_max_tokens, bool)
+            or generation_max_tokens <= 0):
+        raise ValueError("generation_max_tokens must be a positive integer")
+    if (not isinstance(bfcl_oracle_max_events, int)
+            or isinstance(bfcl_oracle_max_events, bool)
+            or bfcl_oracle_max_events <= 0):
+        raise ValueError("bfcl_oracle_max_events must be a positive integer")
+    if bfcl_oracle_max_events > 1 and gold_recovery is None:
+        raise ValueError("BFCL multi-event recovery requires a gold-recovery arm")
     project_root = Path(
         project_root or os.environ.get("BFCL_PROJECT_ROOT") or Path.cwd()
     ).resolve()
@@ -335,7 +542,19 @@ def run_bfcl(base_url: str, categories: str = "multi_turn_base",
     previous_project_root = os.environ.get("BFCL_PROJECT_ROOT")
     os.environ["BFCL_PROJECT_ROOT"] = str(project_root)
     try:
-        install_handler(base_url, model=model, handler_name=handler_name)
+        audit_path = (Path(task_audit_path) if task_audit_path else
+                      project_root / "task_audit" / f"{handler_name}.jsonl")
+        install_handler(
+            base_url,
+            model=model,
+            handler_name=handler_name,
+            gold_recovery=gold_recovery,
+            task_audit_path=audit_path,
+            bfcl_oracle_max_events=bfcl_oracle_max_events,
+            no_upstream_retries=no_upstream_retries,
+            generation_seed=generation_seed,
+            generation_max_tokens=generation_max_tokens,
+        )
         category_counts = official_category_counts(categories)
         ids: Optional[List[str]] = None
         if run_ids:
@@ -357,7 +576,9 @@ def run_bfcl(base_url: str, categories: str = "multi_turn_base",
             selected_counts = category_counts
         expected = sum(selected_counts.values())
         if mode in ("generate", "both"):
-            run_cli(generate_argv(handler_name, categories, ids))
+            run_cli(generate_argv(
+                handler_name, categories, ids, num_threads=num_threads,
+                temperature=generation_temperature))
         if mode in ("evaluate", "both"):
             run_cli(evaluate_argv(handler_name, categories, ids))
         import terminal_check  # noqa: E402  (sibling module, sys.path has parent)
@@ -375,6 +596,13 @@ def run_bfcl(base_url: str, categories: str = "multi_turn_base",
             "benchmark": "bfcl", "categories": categories, "mode": mode,
             "n_total": expected,
             "bfcl_project_root": str(project_root),
+            "bfcl_num_threads": num_threads,
+            "bfcl_oracle_max_events": bfcl_oracle_max_events,
+            "generation_requested": {
+                "temperature": generation_temperature, "seed": generation_seed,
+                "max_completion_tokens": generation_max_tokens,
+                "scope": "explicit overrides; None preserves the existing default",
+            },
         }
         if mode == "generate":
             summary.update({"n_generated": expected, "scored": False})
@@ -383,6 +611,17 @@ def run_bfcl(base_url: str, categories: str = "multi_turn_base",
                 project_root, handler_name, selected_counts))
             if mode == "both":
                 summary["n_generated"] = expected
+        summary.update(summarize_audit(audit_path))
+        if gold_recovery is not None:
+            summary["gold_recovery_handler_concurrency"] = 1
+            if bfcl_oracle_max_events == 1:
+                summary["bfcl_oracle_kind"] = ORACLE_KIND
+                summary["bfcl_oracle_version"] = ORACLE_VERSION
+                summary["bfcl_oracle_variant"] = "frozen_single_event_v2"
+            else:
+                summary["bfcl_oracle_kind"] = MULTI_EVENT_ORACLE_KIND
+                summary["bfcl_oracle_version"] = MULTI_EVENT_ORACLE_VERSION
+                summary["bfcl_oracle_variant"] = "event_budget_sensitivity"
         return summary
     finally:
         if previous_project_root is None:
@@ -409,13 +648,29 @@ def main(argv=None) -> None:
                         help="served model name at the endpoint")
     parser.add_argument("--handler-name", default=MODEL_NAME,
                         help="BFCL model key / result-dir name")
+    parser.add_argument("--num-workers", type=int, default=1,
+                        help="BFCL --num-threads value")
+    parser.add_argument("--bfcl-temperature", type=_temperature, default=None)
+    parser.add_argument("--bfcl-seed", type=int, default=None)
+    parser.add_argument(
+        "--bfcl-generation-max-tokens", type=_positive_int, default=4096,
+    )
+    parser.add_argument(
+        "--bfcl-oracle-max-events", type=_positive_int, default=1,
+        help="gold recovery retries per task; 1 keeps the frozen v2 protocol",
+    )
     args = parser.parse_args(argv)
     # one code path: the CLI used to re-implement run() and had drifted
     # (evaluate got --run-ids instead of --partial-eval, no terminal gate)
     ids = [i.strip() for i in args.run_ids.split(",") if i.strip()] or None
     summary = run_bfcl(args.base_url, categories=args.categories, mode=args.mode,
                        run_ids=ids, model=args.model,
-                       handler_name=args.handler_name)
+                       handler_name=args.handler_name,
+                       num_threads=args.num_workers,
+                       bfcl_oracle_max_events=args.bfcl_oracle_max_events,
+                       generation_temperature=args.bfcl_temperature,
+                       generation_seed=args.bfcl_seed,
+                       generation_max_tokens=args.bfcl_generation_max_tokens)
     print(json.dumps(summary, indent=2))
 
 

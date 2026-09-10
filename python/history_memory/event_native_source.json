@@ -1,0 +1,14 @@
+{
+  "schema": "a-event-native-source-consumption-v1",
+  "source_commit": "ad277e785f6c09186ebabcf8d3bbd39b96d62f0f",
+  "copied_unchanged": [
+    "python/history_memory/packing.py",
+    "python/history_memory/runtime.py"
+  ],
+  "dependencies_already_identical": [
+    "python/history_memory/events.py",
+    "python/history_memory/evidence.py",
+    "python/models"
+  ],
+  "ownership": "A inference extension consumes the committed B packing and tensor runtime; no B worktree files are changed."
+}

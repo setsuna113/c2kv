@@ -349,7 +349,10 @@ class SglangBackend(Backend):
                 # eviction_range overwrites it with the server's own exact
                 # history token count
                 "full_equivalent_history_tokens": 0,
-                "active_history_kv_tokens": target,
+                # Active counters are server-owned measurements.  The target
+                # remains in history_kv_eviction until physical eviction
+                # reports the number of slots it actually kept.
+                "active_history_kv_tokens": 0,
                 "active_full_raw_tokens": 0,
                 "active_c2kv_gist_tokens": 0,
                 "history_kv_method": method,
@@ -376,10 +379,12 @@ class SglangBackend(Backend):
             out.append(message)
         hint = {
             "full_equivalent_history_tokens": span,
-            "active_history_kv_tokens": kept,
+            # The scheduler increments these counters after the repair block
+            # is actually installed.  Seeding them here counts it twice.
+            "active_history_kv_tokens": 0,
             "active_full_raw_tokens": 0,
             "active_c2kv_gist_tokens": 0,
-            "active_raw_repair_tokens": kept,
+            "active_raw_repair_tokens": 0,
             "history_kv_method": method,
             "estimated": False,
             # provenance beyond the upstream hint; the scheduler copies the
@@ -388,6 +393,7 @@ class SglangBackend(Backend):
             "history_kv_backend": "repair_extract",
             "history_kv_requested_span_tokens": span,
             "history_kv_selected_token_count": kept,
+            "history_selection_metadata": record.get("history_selection_metadata"),
         }
         return out, hint, session_id
 
@@ -513,10 +519,11 @@ class SglangBackend(Backend):
         hint = {
             # CacheBlend keeps the WHOLE span resident: the saving is compute
             "full_equivalent_history_tokens": span,
-            "active_history_kv_tokens": span,
+            # Resident counters are filled by the scheduler after injection.
+            "active_history_kv_tokens": 0,
             "active_full_raw_tokens": 0,
             "active_c2kv_gist_tokens": 0,
-            "active_raw_repair_tokens": span,
+            "active_raw_repair_tokens": 0,
             "active_recomputed_raw_tokens": int(recomputed or 0),
             "estimated": False,
             # provenance: the scheduler copies the whole hint into
@@ -605,7 +612,7 @@ class SglangBackend(Backend):
                     }} if isinstance(tool, dict) else tool
                     for tool in tools
                 ]
-        if repair_plan and arm.repair:
+        if repair_plan and (arm.repair or getattr(arm, "gold_recovery", None)):
             placement = str(repair_plan.get("placement") or "append_keep_ledger")
             key_hash = repair_plan["repair_key_hash"]
             index = repair_plan.get("target_out_index", repair_plan.get("message_index"))
@@ -664,10 +671,17 @@ class SglangBackend(Backend):
             "history_kv_runtime_status": report.get("history_kv_runtime_status")
             or physical.get("runtime_status"),
             "history_kv_full_equivalent_tokens": report.get("full_equivalent_history_tokens"),
+            "history_kv_full_equivalent_tokens_source": report.get(
+                "full_equivalent_history_tokens_source"
+            ),
             "history_kv_active_tokens": report.get("active_history_kv_tokens"),
+            "history_kv_active_tokens_source": report.get(
+                "active_history_kv_tokens_source"
+            ),
             # repair_extract path (echoed hint)
             "history_kv_span_tokens": report.get("history_kv_requested_span_tokens"),
             "history_kv_selected_tokens": report.get("history_kv_selected_token_count"),
+            "history_kv_selection": report.get("history_selection_metadata"),
             # physical path (measured by PhysicalHistoryKVEvictor)
             "history_kv_eviction_ok": physical.get("success"),
             "history_kv_eviction_error": physical.get("error") or None,
@@ -683,10 +697,9 @@ class SglangBackend(Backend):
     @staticmethod
     def _kv_reuse_cost(data: Dict[str, Any]) -> Dict[str, Any]:
         """The server's KV-reuse (CacheBlend) echo, flattened into cost
-        columns.  ``metadata.kv_memory_report`` carries the hint the proxy
-        sent (scheduler._init_c2kv_kv_memory_report copies it whole), and the
-        hint carries the SERVER's extract accounting (the proxy only relays
-        the repair_extract response).  ``cacheblend_recomputed_tokens`` /
+        columns.  ``metadata.kv_memory_report`` carries the extract provenance
+        from the proxy plus scheduler-owned resident counters.
+        ``cacheblend_recomputed_tokens`` /
         ``cacheblend_span_tokens`` are the compute-saving columns; resident
         KV is the whole span by construction."""
         report = ((data.get("metadata") or {}).get("kv_memory_report")) or {}
@@ -703,6 +716,9 @@ class SglangBackend(Backend):
         )
         columns = {k: report.get(k) for k in keys}
         columns["kv_reuse_active_tokens"] = report.get("active_history_kv_tokens")
+        columns["kv_reuse_active_tokens_source"] = report.get(
+            "active_history_kv_tokens_source"
+        )
         columns["kv_reuse_recomputed_tokens"] = report.get("active_recomputed_raw_tokens")
         return {k: v for k, v in columns.items() if v is not None}
 
@@ -744,6 +760,9 @@ class SglangBackend(Backend):
             raise BackendError("cache_miss", error_text)
         cost = {k: runtime[k] for k in (
             "kv_resident_tokens", "kv_peak_resident_tokens", "kv_pool_size",
+            "bytes_per_kv_token", "physical_main_kv_bytes", "physical_c2kv_pool_bytes",
+            "total_gpu_kv_bytes", "peak_total_gpu_kv_bytes", "page_size_tokens",
+            "physical_main_kv_slots", "physical_c2kv_pool_slots",
             # c2kv_query_proj = the server FLAG (one value per run; reqlog's
             # mixed-mode check keys on it); _effective / _source / _decode_
             # verified are the per-request provenance of the reconciled server

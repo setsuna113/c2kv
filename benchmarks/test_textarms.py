@@ -112,6 +112,18 @@ def test_hiagent_compresses_and_shrinks():
     assert stats2["n_compressor_calls"] == 0
 
 
+def test_hiagent_policy_uses_native_calls_and_allows_text_only_replies():
+    note = textarms.HIAGENT_SUBGOAL_NOTE
+    assert "Action:" not in note
+    assert '"Subgoal: {subgoal}"' in note
+    assert "structured tool_calls field" in note
+    assert "reply naturally in assistant content" in note
+
+    retrieval = textarms.HIAGENT_RETRIEVAL_NOTE
+    assert "native function-calling interface" in retrieval
+    assert "serialize the retrieval request into assistant content" in retrieval
+
+
 def test_hiagent_null_content_toolcall_reply_is_visible_degenerate():
     _reset()
     # BFCL FC shape: assistant replies carry tool_calls with null content —

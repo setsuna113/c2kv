@@ -248,8 +248,8 @@ class TestWire:
         hint = prepared["c2kv_kv_memory_hint"]
         # the whole span stays resident; the saving is compute
         assert hint["full_equivalent_history_tokens"] == 900
-        assert hint["active_history_kv_tokens"] == 900
-        assert hint["active_raw_repair_tokens"] == 900
+        assert hint["active_history_kv_tokens"] == 0
+        assert hint["active_raw_repair_tokens"] == 0
         assert hint["active_recomputed_raw_tokens"] == int(900 * 0.16)
         assert hint["kv_reuse_method"] == "cacheblend"
         assert hint["cacheblend_chunk_count"] == 2
@@ -330,6 +330,7 @@ class TestWire:
                     "kv_reuse_method": "cacheblend",
                     "kv_reuse_backend": "repair_extract",
                     "active_history_kv_tokens": 900,
+                    "active_history_kv_tokens_source": "scheduler_runtime",
                     "active_recomputed_raw_tokens": 144,
                     "cacheblend_span_tokens": 900,
                     "cacheblend_recomputed_tokens": 144,
@@ -345,6 +346,7 @@ class TestWire:
         assert cost["cacheblend_recomputed_tokens"] == 144
         assert cost["cacheblend_span_tokens"] == 900
         assert cost["kv_reuse_active_tokens"] == 900
+        assert cost["kv_reuse_active_tokens_source"] == "scheduler_runtime"
         assert cost["kv_reuse_recomputed_tokens"] == 144
         assert cost["cacheblend_cache_hit"] is False
         # a report without kv_reuse_method adds nothing

@@ -263,9 +263,17 @@ class Arm:
     #  "chunk_tokens"}.  kv_reuse_spec() fills the defaults and rejects
     # anything the server would refuse.
     kv_reuse: Optional[Dict[str, object]] = None
+    # Benchmark-owned turn-end correctness oracle. The proxy only selects
+    # and appends KV after an explicit privileged repair request.
+    gold_recovery: Optional[str] = None
+    native_messages: bool = False
     description: str = ""
 
     def validate(self) -> None:
+        if self.gold_recovery not in (None, "witness", "random"):
+            raise ValueError(f"unknown gold recovery selector {self.gold_recovery!r}")
+        if self.gold_recovery and (not self.compress_history or self.repair or self.recover):
+            raise ValueError("gold recovery requires plain gist compression")
         if self.history_kv:
             if self.compress_history or self.text_policy or self.repair or self.recover:
                 raise ValueError(
@@ -320,6 +328,34 @@ ARMS: Dict[str, Arm] = {
             compress_history=False,
             text_policy="hiagent",
             description="Compatibility alias for hiagent_summary; observation summarization only",
+        ),
+        Arm(
+            name="full_native", compress_history=False, native_messages=True,
+            description="Uncompressed original model with native chat messages and tool-call history",
+        ),
+        Arm(
+            name="c2kv4", compress_history=True, ratio=4,
+            description="C2KV history gist at nominal 4x before recovery",
+        ),
+        Arm(
+            name="c2kv4_gold_witness", compress_history=True, ratio=4,
+            gold_recovery="witness",
+            description="4x gist + BFCL turn-end gold detector + gold witness k* + one-turn append_keep_ledger retry",
+        ),
+        Arm(
+            name="c2kv8_gold_witness", compress_history=True, ratio=8,
+            gold_recovery="witness",
+            description="8x gist + BFCL turn-end gold detector + gold witness k* + one-turn append_keep_ledger retry",
+        ),
+        Arm(
+            name="c2kv4_gold_random", compress_history=True, ratio=4,
+            gold_recovery="random",
+            description="4x gist + identical gold trigger and retry, random history block control",
+        ),
+        Arm(
+            name="c2kv8_gold_random", compress_history=True, ratio=8,
+            gold_recovery="random",
+            description="8x gist + identical gold trigger and retry, random history block control",
         ),
         Arm(
             name="hiagent_summary",
@@ -572,6 +608,16 @@ ARMS: Dict[str, Arm] = {
         ),
     )
 }
+
+# Explicit nominal history budgets; keep historical r312 arms unchanged.
+for _method in ("h2o", "snapkv_persistent", "streamingllm", "pyramidkv"):
+    for _suffix, _retention in (("r250", 0.25), ("r125", 0.125)):
+        _name = f"history_kv_{_method}_{_suffix}"
+        ARMS[_name] = Arm(
+            name=_name, compress_history=False,
+            history_kv={"method": _method, "retention_ratio": _retention},
+            description=f"{_method} history KV at retention {_retention}; selection provenance must be read from server metadata",
+        )
 
 
 def get_arm(name: str) -> Arm:

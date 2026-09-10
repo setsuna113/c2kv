@@ -22,7 +22,8 @@ def _original():
 
 
 def _retrieval(ids):
-    return {"choices": [{"message": {"role": "assistant", "tool_calls": [
+    return {"choices": [{"message": {"role": "assistant",
+        "content": "Subgoal: compare the two accounts", "tool_calls": [
         {"id": "meta", "type": "function", "function": {
             "name": textarms.HIAGENT_RETRIEVE_TOOL_NAME,
             "arguments": json.dumps({"subgoal_ids": ids})}}]}}],
@@ -38,13 +39,20 @@ def test_retrieval_reveals_trajectory_and_charges_extra_generation(monkeypatch):
     assert "193" not in json.dumps(staged["messages"])
     assert staged["tools"][-1]["function"]["name"] == textarms.HIAGENT_RETRIEVE_TOOL_NAME
     sent = []
-    final = {"choices": [{"message": {"role": "assistant", "content": "A has 193."}}]}
+    final_call = {"id": "environment", "type": "function", "function": {
+        "name": "report_comparison", "arguments": json.dumps({"value": 193})}}
+    final = {"choices": [{"message": {"role": "assistant",
+        "content": "Subgoal: report the comparison",
+        "tool_calls": [final_call]}}]}
+
     def send(payload):
         sent.append(payload)
         return final
+
     result = proxy._hiagent_retrieval_loop(original, arm, "test", _retrieval([1]), stats, send)
     assert result == final
     assert len(sent) == 1 and "193" in json.dumps(sent[0]["messages"])
+    assert result["choices"][0]["message"]["tool_calls"] == [final_call]
     assert stats["retrieval_usage"] == {"calls": 1, "prompt_tokens": 71, "completion_tokens": 9}
     assert stats["retrieved_subgoals"] == [1]
     assert "tools" not in original

@@ -1,0 +1,9 @@
+{
+  "mode": "no_gist",
+  "run_id": "a_protocol_20260907_v1",
+  "bytes_per_kv_token": 147456,
+  "history_budget_bytes": 226492416,
+  "workspace_budget_bytes": 113246208,
+  "lease_decisions": 3,
+  "max_retrieved_events": 2
+}

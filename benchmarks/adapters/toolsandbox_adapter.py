@@ -97,6 +97,7 @@ def run(ctx: RunContext) -> Dict[str, Any]:
 
     No cost join: see ``COST_JOIN`` below.
     """
+    scenarios = split_scenarios(ctx.opt("ts_scenarios", ""))
     summary = run_ts(
         ctx.base_url, ctx.out_dir,
         test_mode=not ctx.options.get("full", False),
@@ -104,7 +105,11 @@ def run(ctx: RunContext) -> Dict[str, Any]:
         # the user simulator must NOT ride the arm proxy: route it to the
         # raw upstream endpoint (tau2 already does the same split)
         user_base_url=ctx.user_base_url,
-        scenarios=split_scenarios(ctx.opt("ts_scenarios", "")),
+        scenarios=scenarios,
+        # An explicit -s selection has a fixed denominator.  Do not let a
+        # missing result row silently turn a finite smoke into a smaller run.
+        expected=len(scenarios) if scenarios is not None else None,
+        expected_task_ids=scenarios,
         benchmark_dir=ctx.opt("toolsandbox_dir"), python=ctx.opt("bench_python"),
     )
     summary["cost_join"] = COST_JOIN
@@ -121,11 +126,21 @@ COST_JOIN = ("not joinable: result_summary.json holds per-scenario scores "
 
 
 def run_ts(base_url: str, out_dir: Path, test_mode: bool = True,
-           agent: str = AGENT, user: str = AGENT, expected: int = None,
-           benchmark_dir: Path = None, user_base_url: str = "",
-           scenarios: "list[str] | None" = None,
-           python: "str | None" = None) -> Dict[str, Any]:
+            agent: str = AGENT, user: str = AGENT, expected: int = None,
+            benchmark_dir: Path = None, user_base_url: str = "",
+            scenarios: "list[str] | None" = None,
+            expected_task_ids: "list[str] | None" = None,
+            python: "str | None" = None) -> Dict[str, Any]:
     """Run the CLI and collect ``result_summary.json``."""
+    if expected_task_ids is not None:
+        expected_task_ids = [str(task_id) for task_id in expected_task_ids]
+        if len(set(expected_task_ids)) != len(expected_task_ids):
+            raise ValueError("ToolSandbox expected_task_ids contains a duplicate scenario")
+        if expected is None:
+            expected = len(expected_task_ids)
+        elif expected != len(expected_task_ids):
+            raise ValueError(
+                "ToolSandbox expected count does not match expected_task_ids")
     ts_dir = (Path(benchmark_dir) if benchmark_dir else TS_DIR).resolve()
     out_dir = Path(out_dir).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -141,19 +156,20 @@ def run_ts(base_url: str, out_dir: Path, test_mode: bool = True,
     completed = subprocess.run(cmd, cwd=ts_dir, env=env)
     if completed.returncode != 0:
         raise SystemExit(f"FATAL: tool_sandbox CLI exited {completed.returncode}")
-    summary = collect(out_dir)
+    summary = (collect(out_dir, expected_task_ids=expected_task_ids)
+               if expected_task_ids is not None else collect(out_dir))
     # terminal-state check (acceptance 1): a scenario that never ran must
     # fail the run, not shrink the denominator
     n_scored = summary.get("n") if isinstance(summary, dict) else None
-    if expected is not None and n_scored is not None and n_scored < expected:
+    if expected is not None and n_scored != expected:
         raise SystemExit(
-            f"FATAL: ts terminal-state check failed: n_scored={n_scored} < n_total={expected}")
+            f"FATAL: ts terminal-state check failed: n_scored={n_scored} != n_total={expected}")
     if expected is not None:
         print(f"TERMINAL-STATE ts: n_scored={n_scored} n_total={expected}")
     return summary
 
 
-def collect(out_dir: Path) -> Dict[str, Any]:
+def collect(out_dir: Path, expected_task_ids: "list[str] | None" = None) -> Dict[str, Any]:
     summaries = sorted(out_dir.glob("agent_*/result_summary.json"))
     if not summaries:
         raise SystemExit(f"FATAL: no result_summary.json under {out_dir} — "
@@ -184,6 +200,19 @@ def collect(out_dir: Path) -> Dict[str, Any]:
         raise SystemExit(
             f"FATAL: ts terminal-state check failed: {len(crashed)} scenario(s) "
             f"crashed (traceback in result_summary): {', '.join(crashed[:10])}")
+    if expected_task_ids is not None:
+        expected_ids = {str(task_id) for task_id in expected_task_ids}
+        scored_ids = {str(row["task_id"]) for row in rows}
+        if scored_ids != expected_ids:
+            missing = sorted(expected_ids - scored_ids)
+            unexpected = sorted(scored_ids - expected_ids)
+            details = []
+            if missing:
+                details.append(f"missing={','.join(missing[:20])}")
+            if unexpected:
+                details.append(f"unexpected={','.join(unexpected[:20])}")
+            raise SystemExit(
+                "FATAL: ts terminal-state task-id check failed: " + "; ".join(details))
     return aggregate(rows, cluster_key="task_id")
 
 

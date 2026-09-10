@@ -1,0 +1,10 @@
+{
+  "schema": "a-event-native-eval-policy-v1",
+  "policy_id": "a-pre-b-always-compress-v1",
+  "policy": {
+    "history_budget_bytes": 113246208,
+    "lease_decisions": 3,
+    "max_retrieved_events": 1,
+    "workspace_budget_bytes": 113246208
+  }
+}
