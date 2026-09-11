@@ -34,6 +34,38 @@ def execute(path, *, resume=None, stop=-1, batch=2, accumulation=1, bf16=False):
     return {key: value.detach().clone() for key, value in model.state_dict().items()}, state
 
 
+def test_pretrained_export_keeps_native_eval_metadata(tmp_path):
+    """Exercise from_pretrained's config copy using a real tiny base checkpoint."""
+    from transformers import Qwen3Config, Qwen3ForCausalLM
+
+    base = tmp_path / "base"
+    Qwen3ForCausalLM(Qwen3Config(
+        vocab_size=128, hidden_size=32, intermediate_size=64, num_hidden_layers=2,
+        num_attention_heads=4, num_key_value_heads=2, head_dim=8,
+        max_position_embeddings=8192, eos_token_id=2,
+    )).save_pretrained(base)
+    entry.tiny_tokenizer().save_pretrained(base)
+    args = entry.arguments([
+        "--model_name_or_path", str(base), "--data_path", "unused",
+        "--output_dir", str(tmp_path / "train"), "--arm", "B", "--seed", "17",
+        "--device", "cpu", "--no-bf16", "--no-gradient_checkpointing",
+        "--attn_impl", "eager",
+    ])
+    model, tokenizer = entry.build_model(args, torch.device("cpu"))
+    exported = tmp_path / "exported"
+    model.save_pretrained(exported)
+    tokenizer.save_pretrained(exported)
+    config = json.loads((exported / "config.json").read_text())
+    assert config["history_memory_training_profile"] == "history-event-base-query-v1"
+    assert config["history_memory_packing_version"] == "history-event-v1"
+    assert config["history_memory_raw_layout"] == "event-native-evidence-v1"
+    assert config["history_memory_normal_query"] == "base"
+    assert config["history_memory_arm"] == "B"
+    assert config["history_memory_seed"] == 17
+    assert config["history_memory_trainable_dtype"] == "float32"
+    assert config["history_memory_supported_ratios"] == [4, 8]
+
+
 @pytest.mark.parametrize("bf16", [False, True])
 def test_interrupted_resume_matches_uninterrupted_weights_and_history(tmp_path, bf16):
     expected, expected_state = execute(tmp_path / "continuous", bf16=bf16)

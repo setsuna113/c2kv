@@ -152,3 +152,24 @@ and explicit resume commands.
 Preparation token/byte estimates are not measurements of HBM or wall time.
 Training additionally logs elapsed update time and CUDA peak allocation;
 end-to-end serving latency and residency still require the A0/A1 evaluation.
+
+## Native evaluation and checkpoint selection
+
+The B/C evaluation entry is `agent/eval_history_memory.py`; see
+[evaluation.md](evaluation.md) for the manifest and command. It delegates model
+generation and official full-task BFCL scoring to the A event-native runtime.
+The legacy `agent/eval_*.py` turn-grid evaluators are not compatible substitutes.
+
+Checkpoint selection uses official full-task success on one frozen development
+task set. B and C use identical candidate steps, task IDs, ratio, explicit A eval
+policy, decoding settings and execution caps. Each arm selects its highest dev
+score, with ties resolved toward the earlier training step. Training loss is
+diagnostic and never a selection metric. A held-out run evaluates one selected
+checkpoint per arm without selecting again; retain the predetermined training
+endpoint comparison separately from the dev-selected comparison.
+
+Evaluation is an explicit post-training command. Saving a checkpoint does not
+launch benchmark jobs. Native metadata must survive the actual saved
+`config.json` and agree with `trainer_state.json`; the runner rejects incompatible
+exports before starting a server. Development results do not certify a formal
+held-out split or prove absence of semantic contamination.
