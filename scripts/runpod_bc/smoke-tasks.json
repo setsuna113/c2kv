@@ -1,0 +1,57 @@
+{
+  "split": "dev",
+  "task": "pipeline smoke + timing only; first 8 ids of the frozen dev-128 in manifest order; NOT a selection input",
+  "seed": 42,
+  "n_total": 8,
+  "category": "multi_turn_base",
+  "categories": [
+    "multi_turn_base"
+  ],
+  "source_file": ".foreman/ref/bfcl_data/BFCL_v4_multi_turn_base.json",
+  "source_sha256": "1a21a995d06fd6f20ba55de7bced30ef953ec35e998f502ec2ecf4d66ef1c43a",
+  "ids": [
+    "multi_turn_base_1",
+    "multi_turn_base_101",
+    "multi_turn_base_103",
+    "multi_turn_base_104",
+    "multi_turn_base_105",
+    "multi_turn_base_106",
+    "multi_turn_base_108",
+    "multi_turn_base_113"
+  ],
+  "items": [
+    {
+      "id": "multi_turn_base_1",
+      "category": "multi_turn_base"
+    },
+    {
+      "id": "multi_turn_base_101",
+      "category": "multi_turn_base"
+    },
+    {
+      "id": "multi_turn_base_103",
+      "category": "multi_turn_base"
+    },
+    {
+      "id": "multi_turn_base_104",
+      "category": "multi_turn_base"
+    },
+    {
+      "id": "multi_turn_base_105",
+      "category": "multi_turn_base"
+    },
+    {
+      "id": "multi_turn_base_106",
+      "category": "multi_turn_base"
+    },
+    {
+      "id": "multi_turn_base_108",
+      "category": "multi_turn_base"
+    },
+    {
+      "id": "multi_turn_base_113",
+      "category": "multi_turn_base"
+    }
+  ],
+  "derived_from": "dev-tasks.json (bfcl_dev_v3_mt.json)"
+}
