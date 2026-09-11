@@ -134,6 +134,10 @@ def build_model(args, device):
                     source = getattr(layer.self_attn, f"{projection}_proj")
                     target = getattr(layer.self_attn, f"gist_{projection}_proj")
                     target.load_state_dict(source.state_dict())
+    # transformers 5.x from_pretrained(config=...) deep-copies the config, so the
+    # training metadata must be attached to the live model.config or the saved
+    # checkpoint loses it and resume rejects the checkpoint.
+    config = model.config
     config.history_memory_training_profile = TRAINING_PROFILE
     config.history_memory_packing_version = PACKING_VERSION
     config.history_memory_raw_layout = RAW_LAYOUT_PROFILE
