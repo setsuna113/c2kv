@@ -21,7 +21,7 @@ WINNER=$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); w=d["combi
 echo "$(stamp) winner step ${WINNER}; uploading winner + 1098 (model files only)"
 for step in "$WINNER" 1098; do
   "$HF" upload "$REPO" "$CK/checkpoint-${step}" "$PREFIX/checkpoint-${step}" --repo-type model \
-     --exclude "optimizer.pt" "rng-rank-*.pt" --commit-message "B/C history training arm ${ARM} seed 42: checkpoint-${step} ($( [[ $step == 1098 ]] && echo final-unevaluated || echo dev-selected-winner )), model files only" \
+     --exclude "optimizer.pt" --exclude "rng-rank-*.pt" --commit-message "B/C history training arm ${ARM} seed 42: checkpoint-${step} ($( [[ $step == 1098 ]] && echo final-unevaluated || echo dev-selected-winner )), model files only" \
      || { echo "$(stamp) UPLOAD FAILED checkpoint-${step}"; exit 1; }
 done
 mkdir -p "$EV/provenance-arm${ARM}"
