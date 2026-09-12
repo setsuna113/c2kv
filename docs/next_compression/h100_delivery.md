@@ -10,7 +10,7 @@ claimed here.
 | Variant | Training input | Supervision |
 | --- | --- | --- |
 | H0 | Prior C's frozen decision IDs and static recent-tool-one history view, repacked at 8/12 | Complete assistant continuation CE |
-| H1 | New source pool; gist-bearing decisions, batch-level action-type balancing, revision/post-tool/history-candidate priority; static history view | Same full CE |
+| H1 | New source pool; gist-bearing decisions, post-packing action-type balancing, revision/post-tool/history-candidate priority; static history view | Same full CE |
 | H2 | Same accepted decisions and targets as H1; frozen A S0 budgeted history controller | Same full CE |
 | H3 | Exactly H2's input and target | Positive full CE, argument-value token matches weighted 3, actual EOS tokens weighted 2 |
 | T0 | Full tool definitions encoded into gist; conversation and generic tool-call format stay raw | Complete assistant continuation CE |
@@ -23,6 +23,13 @@ non-tool response is labelled `terminal_stop`; intermediate prose is distinct.
 H3's EOS weighting marks continuation termination, not a semantic task-success
 label. Targets retain prose, tool names, arguments, delimiters, EOS and the
 native template's trailing tokens. Other variants keep every token's weight one.
+
+History type balancing uses candidates that successfully passed both static and
+A-view packing: one tool call, one intermediate non-tool response and one
+source-final response per admitted type group. Failed long candidates are
+replaced before balancing. Missing-type batches are audited and skipped; the
+final encoder-budget boundary may cut a batch short. Balancing before packing
+was rejected after its real corpus lost most tool-call targets.
 
 H0 preserves every distinct decision in the prior frozen corpus, including its
 no-gist examples. The prior odd final ratio exposure is completed into an 8/12

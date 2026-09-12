@@ -17,6 +17,7 @@ def main(argv=None):
     parser.add_argument("--data-root", required=True)
     parser.add_argument("--legacy-prepared", required=True)
     parser.add_argument("--preparation-code-archive", required=True)
+    parser.add_argument("--history-trio-code-archive", help="Override the actual preparation archive for H1/H2/H3")
     args = parser.parse_args(argv)
     root, legacy = Path(args.data_root), Path(args.legacy_prepared)
     old_manifest = json.loads((legacy / "manifest.json").read_text())
@@ -40,8 +41,10 @@ def main(argv=None):
         records = root / variant / manifest["records"]["path"]
         if sha256_file(records) != manifest["records"]["sha256"]:
             raise ValueError(f"Cannot freeze altered records: {variant}")
-        manifest["provenance"] = dict(preparation_code_archive_sha256=code_hash,
-                                      preparation_code_archive=Path(args.preparation_code_archive).name)
+        source_archive = (args.history_trio_code_archive if variant in {"H1", "H2", "H3"}
+                          and args.history_trio_code_archive else args.preparation_code_archive)
+        manifest["provenance"] = dict(preparation_code_archive_sha256=sha256_file(source_archive),
+                                      preparation_code_archive=Path(source_archive).name)
         if variant == "H0":
             if manifest["source_files"]["legacy_manifest_sha256"] != sha256_file(legacy / "manifest.json"):
                 raise ValueError("H0 legacy source manifest differs")

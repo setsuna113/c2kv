@@ -142,7 +142,7 @@ def prepare_group(rows, tokenizer, config, destination, source_files, args):
         audit["legacy_distinct_decisions_not_emitted"] = len(config.h0_decision_ids - emitted_ids)
     for variant, writer in writers.items():
         preparation = dict(config=resolved, batch_sessions=args.batch_sessions, cpu_processes=args.workers,
-                           selection_profile="legacy-frozen-decision-ids" if variant == "H0" else "source-round-robin-batch-action-balance-v1",
+                           selection_profile="legacy-frozen-decision-ids" if variant == "H0" else "source-round-robin-postpack-action-balance-v2",
                            budget_reference_variant=reference, max_presented_tokens=args.max_presented_tokens,
                            max_distinct_decisions=args.max_decisions,
                            render_profile="event-native-evidence-v1" if variant in {"H0", "H1"} else "a-event-native-s0-v1",
