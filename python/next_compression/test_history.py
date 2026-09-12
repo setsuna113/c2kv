@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+import next_compression.history as history_module
 from history_memory.dataset import iter_decisions
 from next_compression.history import (
     A_VIEW_SOURCE_SHA256,
@@ -141,6 +142,23 @@ def _row(*, session_id: str = "history-1", split: str = "train") -> dict:
     }
 
 
+def _balanced_row(*, session_id: str = "history-balanced") -> dict:
+    row = _row(session_id=session_id)
+    row["messages"].extend(
+        [
+            {"role": "user", "content": "Verify the committed value."},
+            _call("call-3", "lookup", {"key": "alpha"}),
+            {
+                "role": "tool",
+                "tool_call_id": "call-3",
+                "content": json.dumps({"value": "alpha-17"}),
+            },
+            {"role": "assistant", "content": "Verified."},
+        ]
+    )
+    return row
+
+
 def _wide_config(**overrides) -> HistoryPreparationConfig:
     values = dict(
         max_encoder_tokens=100_000,
@@ -158,7 +176,7 @@ def _wide_config(**overrides) -> HistoryPreparationConfig:
 
 
 def test_trio_is_paired_across_ratios_and_h3_keeps_positive_full_ce() -> None:
-    records, audit = prepare_history([_row()], TOKENIZER, _wide_config())
+    records, audit = prepare_history([_balanced_row()], TOKENIZER, _wide_config())
 
     by_variant = {
         variant: {(record["decision_id"], record["ratio"]): record for record in rows}
@@ -167,10 +185,11 @@ def test_trio_is_paired_across_ratios_and_h3_keeps_positive_full_ce() -> None:
     assert by_variant["H1"].keys() == by_variant["H2"].keys() == by_variant["H3"].keys()
     assert {ratio for _, ratio in by_variant["H1"]} == {8, 12}
     assert {row["metadata"]["decision_type"] for row in records["H1"]} == {
+        "non_tool_response",
         "terminal_stop",
         "tool_call",
     }
-    assert all(row["metadata"]["state_revision"] for row in records["H1"])
+    assert any(row["metadata"]["state_revision"] for row in records["H1"])
     assert any(row["metadata"]["post_tool"] for row in records["H1"])
 
     for key, h1 in by_variant["H1"].items():
@@ -187,8 +206,8 @@ def test_trio_is_paired_across_ratios_and_h3_keeps_positive_full_ce() -> None:
     assert tool_h3["metadata"]["target_weighting"]["matched_argument_value_count"] == 1
     assert tool_h3["metadata"]["target_weighting"]["argument_weighted_token_count"] > 0
     assert audit["complete"] == 1
-    assert audit["trio.decisions"] == 2
-    assert audit["H1.records"] == audit["H2.records"] == audit["H3.records"] == 4
+    assert audit["trio.decisions"] == 3
+    assert audit["H1.records"] == audit["H2.records"] == audit["H3.records"] == 6
 
 
 def test_a_view_keeps_cross_cutoff_tool_as_gist_and_raw() -> None:
@@ -208,7 +227,7 @@ def test_a_view_keeps_cross_cutoff_tool_as_gist_and_raw() -> None:
 
 def test_joint_failure_emits_no_partial_h1_h2_h3_rows() -> None:
     config = _wide_config(variants=("H1", "H2", "H3"), max_target_tokens=1)
-    records, audit = prepare_history([_row()], TOKENIZER, config)
+    records, audit = prepare_history([_balanced_row()], TOKENIZER, config)
 
     assert records == {"H1": [], "H2": [], "H3": []}
     assert sum(value for key, value in audit.items() if key.startswith("trio.skipped.")) > 0
@@ -217,7 +236,7 @@ def test_joint_failure_emits_no_partial_h1_h2_h3_rows() -> None:
 
 def test_h0_selection_is_independent_and_uses_static_recent_tool_one() -> None:
     first = _row(session_id="old-selected")
-    second = _row(session_id="not-old")
+    second = _balanced_row(session_id="not-old")
     first["history_variants"] = ["H0"]
     second["history_variants"] = ["H1", "H2", "H3"]
     records, _ = prepare_history([first, second], TOKENIZER, _wide_config())
@@ -342,19 +361,7 @@ def test_vendored_a_runtime_manifest_self_verifies() -> None:
 
 
 def test_type_balancing_equalizes_effective_tool_and_stop_mass() -> None:
-    tool_heavy = _row(session_id="balance")
-    tool_heavy["messages"].extend(
-        [
-            {"role": "user", "content": "Verify the committed value."},
-            _call("call-3", "lookup", {"key": "alpha"}),
-            {
-                "role": "tool",
-                "tool_call_id": "call-3",
-                "content": json.dumps({"value": "alpha-17"}),
-            },
-            {"role": "assistant", "content": "Verified."},
-        ]
-    )
+    tool_heavy = _balanced_row(session_id="balance")
     records, audit = prepare_history(
         [tool_heavy], TOKENIZER, _wide_config()
     )
@@ -375,6 +382,65 @@ def test_type_balancing_equalizes_effective_tool_and_stop_mass() -> None:
     assert audit["trio.balance_dropped.type.tool_call"] == 1
 
 
+def test_joint_pack_failure_refills_same_type_before_balancing(monkeypatch) -> None:
+    original = history_module._attempt_trio
+    attempted_tool_ids = []
+
+    def fail_first_tool(item, tokenizer, config):
+        if item.decision_type == "tool_call":
+            attempted_tool_ids.append(item.decision.decision_id)
+            if len(attempted_tool_ids) == 1:
+                return item, None, None, None, "PackingBudgetError"
+        return original(item, tokenizer, config)
+
+    monkeypatch.setattr(history_module, "_attempt_trio", fail_first_tool)
+    records, audit = prepare_history(
+        [_balanced_row(session_id="packing-refill")],
+        TOKENIZER,
+        _wide_config(),
+    )
+
+    accepted = {
+        kind: {
+            row["decision_id"]
+            for row in records["H1"]
+            if row["metadata"]["decision_type"] == kind
+        }
+        for kind in ("tool_call", "non_tool_response", "terminal_stop")
+    }
+    assert {kind: len(ids) for kind, ids in accepted.items()} == {
+        "tool_call": 1,
+        "non_tool_response": 1,
+        "terminal_stop": 1,
+    }
+    assert len(attempted_tool_ids) == 2
+    assert accepted["tool_call"] == {attempted_tool_ids[1]}
+    assert audit["trio.skipped.type.tool_call"] == 1
+    assert audit["trio.balance_attempted.type.tool_call"] == 2
+    assert audit["trio.balance_effective_quota_per_type"] == 1
+
+
+def test_missing_action_type_drops_unbalanced_batch_with_audit() -> None:
+    records, audit = prepare_history([_row()], TOKENIZER, _wide_config())
+
+    assert records["H1"] == records["H2"] == records["H3"] == []
+    assert audit["trio.balance_missing_type.non_tool_response"] == 1
+    assert audit["trio.balance_batches_dropped_missing_type"] == 1
+
+
+def test_explicit_ids_bypass_type_balancing_but_keep_joint_pack_gate() -> None:
+    decision_id = tuple(iter_decisions(_row()))[-1].decision_id
+    records, audit = prepare_history(
+        [_row()],
+        TOKENIZER,
+        _wide_config(h1_decision_ids=frozenset({decision_id})),
+    )
+
+    assert len(records["H1"]) == len(records["H2"]) == len(records["H3"]) == 2
+    assert {row["decision_id"] for row in records["H1"]} == {decision_id}
+    assert audit["trio.balance_bypassed_explicit_ids"] == 1
+
+
 def test_a_specific_history_byte_budget_does_not_filter_frozen_h0() -> None:
     decision_id = tuple(iter_decisions(_row()))[-1].decision_id
     config = _wide_config(
@@ -389,7 +455,10 @@ def test_a_specific_history_byte_budget_does_not_filter_frozen_h0() -> None:
 
 
 def test_cpu_workers_preserve_deterministic_records_and_audit() -> None:
-    rows = [_row(session_id="worker-a"), _row(session_id="worker-b")]
+    rows = [
+        _balanced_row(session_id="worker-a"),
+        _balanced_row(session_id="worker-b"),
+    ]
     serial_records, serial_audit = prepare_history(
         rows, TOKENIZER, _wide_config(workers=1)
     )

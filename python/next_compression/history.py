@@ -330,46 +330,17 @@ def _candidate(
     )
 
 
-def _balance_h1_candidates(
-    candidates: Sequence[_Candidate],
-    *,
-    explicit_selection: bool,
-    audit: Counter[str],
-) -> list[_Candidate]:
-    """Downsample action types while keeping high-value history cases first."""
+_BALANCED_TYPES = ("tool_call", "non_tool_response", "terminal_stop")
 
-    counts = Counter(candidate.decision_type for candidate in candidates)
-    for kind, count in counts.items():
-        audit[f"trio.before_balance.type.{kind}"] = count
-    if explicit_selection or len(counts) < 2:
-        audit["trio.balance_bypassed_explicit_ids"] += int(explicit_selection)
-        return list(candidates)
-    quota = min(counts.values())
 
-    def rank(candidate: _Candidate) -> tuple[int, int, int, str]:
-        stable = hashlib.sha256(candidate.decision.decision_id.encode("utf-8")).hexdigest()
-        return (
-            -int(candidate.state_revision),
-            -int(candidate.post_tool),
-            -int(candidate.history_dependency),
-            stable,
-        )
-
-    selected_ids: set[str] = set()
-    for kind in sorted(counts):
-        pool = sorted(
-            (candidate for candidate in candidates if candidate.decision_type == kind),
-            key=rank,
-        )
-        selected_ids.update(candidate.decision.decision_id for candidate in pool[:quota])
-        audit[f"trio.balance_dropped.type.{kind}"] += len(pool) - quota
-    balanced = [
-        candidate
-        for candidate in candidates
-        if candidate.decision.decision_id in selected_ids
-    ]
-    audit["trio.balance_quota_per_type"] = quota
-    return balanced
+def _candidate_rank(candidate: _Candidate) -> tuple[int, int, int, str]:
+    stable = hashlib.sha256(candidate.decision.decision_id.encode("utf-8")).hexdigest()
+    return (
+        -int(candidate.state_revision),
+        -int(candidate.post_tool),
+        -int(candidate.history_dependency),
+        stable,
+    )
 
 
 def _row_allows(row: Mapping[str, Any], variant: str) -> bool:
@@ -573,6 +544,176 @@ def _ordered_attempts(
         )
 
 
+def _audit_trio_attempt(
+    result: tuple[
+        _Candidate,
+        tuple[int, ...] | None,
+        PackedMemory | None,
+        _PreparedAView | None,
+        str | None,
+    ],
+    audit: Counter[str],
+) -> bool:
+    item, target_ids, h1_memory, h2, error_type = result
+    kind = item.decision_type
+    audit[f"trio.balance_attempted.type.{kind}"] += 1
+    if error_type is not None:
+        audit[f"trio.skipped.{error_type}"] += 1
+        audit[f"trio.skipped.source.{item.decision.source}"] += 1
+        audit[f"trio.skipped.type.{kind}"] += 1
+        return False
+    if target_ids is None or h1_memory is None or h2 is None:
+        raise AssertionError("A successful trio attempt must contain all paired inputs")
+    audit[f"trio.balance_joint_pack_success.type.{kind}"] += 1
+    return True
+
+
+def _attempt_until_successes(
+    candidates: Sequence[_Candidate],
+    *,
+    target: int | None,
+    tokenizer: Any,
+    config: HistoryPreparationConfig,
+    audit: Counter[str],
+) -> list[
+    tuple[
+        _Candidate,
+        tuple[int, ...] | None,
+        PackedMemory | None,
+        _PreparedAView | None,
+        str | None,
+    ]
+]:
+    """Probe ranked candidates until enough complete H1/H2/H3 rows fit."""
+
+    successes = []
+    attempted = 0
+    if target == 0:
+        audit[f"trio.balance_unattempted.type.{candidates[0].decision_type}"] += len(
+            candidates
+        ) if candidates else 0
+        return successes
+    while attempted < len(candidates) and (target is None or len(successes) < target):
+        width = 1 if config.workers == 1 else min(config.workers, len(candidates) - attempted)
+        wave = candidates[attempted : attempted + width]
+        attempted += len(wave)
+        for result in _ordered_attempts(wave, _attempt_trio, tokenizer, config):
+            if _audit_trio_attempt(result, audit):
+                if target is None or len(successes) < target:
+                    successes.append(result)
+                else:
+                    audit[
+                        f"trio.balance_parallel_success_overflow.type.{result[0].decision_type}"
+                    ] += 1
+    if candidates:
+        audit[f"trio.balance_unattempted.type.{candidates[0].decision_type}"] += (
+            len(candidates) - attempted
+        )
+    return successes
+
+
+def _prepare_balanced_trios(
+    candidates: Sequence[_Candidate],
+    *,
+    explicit_selection: bool,
+    tokenizer: Any,
+    config: HistoryPreparationConfig,
+    audit: Counter[str],
+) -> list[
+    tuple[
+        _Candidate,
+        tuple[int, ...] | None,
+        PackedMemory | None,
+        _PreparedAView | None,
+        str | None,
+    ]
+]:
+    """Balance action types after joint packing, refilling failed candidates."""
+
+    counts = Counter(candidate.decision_type for candidate in candidates)
+    for kind in _BALANCED_TYPES:
+        audit[f"trio.before_balance.type.{kind}"] = counts[kind]
+    if explicit_selection:
+        audit["trio.balance_bypassed_explicit_ids"] += 1
+        return _attempt_until_successes(
+            candidates,
+            target=None,
+            tokenizer=tokenizer,
+            config=config,
+            audit=audit,
+        )
+
+    missing = [kind for kind in _BALANCED_TYPES if counts[kind] == 0]
+    if missing:
+        for kind in missing:
+            audit[f"trio.balance_missing_type.{kind}"] += 1
+        for kind in _BALANCED_TYPES:
+            audit[f"trio.balance_dropped.type.{kind}"] += counts[kind]
+        audit["trio.balance_batches_dropped_missing_type"] += 1
+        audit["trio.balance_effective_quota_per_type"] = 0
+        return []
+
+    raw_quota = min(counts[kind] for kind in _BALANCED_TYPES)
+    audit["trio.balance_raw_quota_per_type"] = raw_quota
+    pools = {
+        kind: sorted(
+            (candidate for candidate in candidates if candidate.decision_type == kind),
+            key=_candidate_rank,
+        )
+        for kind in _BALANCED_TYPES
+    }
+    successful = {
+        "tool_call": _attempt_until_successes(
+            pools["tool_call"],
+            target=raw_quota,
+            tokenizer=tokenizer,
+            config=config,
+            audit=audit,
+        )
+    }
+    call_quota = len(successful["tool_call"])
+    if call_quota == 0:
+        audit["trio.balance_batches_dropped_no_packable_tool_call"] += 1
+    for kind in ("non_tool_response", "terminal_stop"):
+        successful[kind] = _attempt_until_successes(
+            pools[kind],
+            target=call_quota,
+            tokenizer=tokenizer,
+            config=config,
+            audit=audit,
+        )
+    effective_quota = min(len(successful[kind]) for kind in _BALANCED_TYPES)
+    audit["trio.balance_effective_quota_per_type"] = effective_quota
+    if effective_quota < raw_quota:
+        audit["trio.balance_batches_with_joint_pack_shortfall"] += 1
+
+    pack_targets = {
+        "tool_call": raw_quota,
+        "non_tool_response": call_quota,
+        "terminal_stop": call_quota,
+    }
+    selected: dict[str, Any] = {}
+    for kind in _BALANCED_TYPES:
+        audit[f"trio.balance_pack_target.type.{kind}"] += pack_targets[kind]
+        audit[f"trio.balance_pack_shortfall.type.{kind}"] += (
+            pack_targets[kind] - len(successful[kind])
+        )
+        audit[f"trio.balance_effective_shortfall.type.{kind}"] += (
+            raw_quota - effective_quota
+        )
+        audit[f"trio.balance_success_trimmed.type.{kind}"] += (
+            len(successful[kind]) - effective_quota
+        )
+        audit[f"trio.balance_dropped.type.{kind}"] += counts[kind] - effective_quota
+        for result in successful[kind][:effective_quota]:
+            selected[result[0].decision.decision_id] = result
+    return [
+        selected[candidate.decision.decision_id]
+        for candidate in candidates
+        if candidate.decision.decision_id in selected
+    ]
+
+
 def iter_history_records(
     rows: Iterable[Mapping[str, Any]],
     tokenizer: Any,
@@ -630,12 +771,6 @@ def iter_history_records(
                     else:
                         candidates.append(item)
 
-        candidates = _balance_h1_candidates(
-            candidates,
-            explicit_selection=config.h1_decision_ids is not None,
-            audit=audit,
-        )
-
         audit["workers"] = config.workers
         for item, target_ids, memory, error_type in _ordered_attempts(
             h0_candidates, _attempt_h0, tokenizer, config
@@ -674,15 +809,17 @@ def iter_history_records(
                 audit["H0.gist_tokens"] += memory.costs(ratio)["gist_tokens"]
                 yield "H0", record
 
-        for item, target_ids, h1_memory, h2, error_type in _ordered_attempts(
-            candidates, _attempt_trio, tokenizer, config
-        ):
+        trio_results = _prepare_balanced_trios(
+            candidates,
+            explicit_selection=config.h1_decision_ids is not None,
+            tokenizer=tokenizer,
+            config=config,
+            audit=audit,
+        )
+        for item, target_ids, h1_memory, h2, error_type in trio_results:
             decision = item.decision
             if error_type is not None:
-                audit[f"trio.skipped.{error_type}"] += 1
-                audit[f"trio.skipped.source.{decision.source}"] += 1
-                audit[f"trio.skipped.type.{item.decision_type}"] += 1
-                continue
+                raise AssertionError("Balanced trio results must contain only successes")
             assert target_ids is not None and h1_memory is not None and h2 is not None
             common_metadata = {
                 "preparation_version": HISTORY_PREPARATION_VERSION,
