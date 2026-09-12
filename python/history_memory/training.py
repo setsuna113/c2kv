@@ -84,7 +84,7 @@ def save_checkpoint(output_dir, wrapper, tokenizer, optimizer, scheduler, state,
         torch.save({"optimizer": optimizer.state_dict(), "scheduler": scheduler.state_dict(),
                     "master_parameters": master_parameters}, pending / "optimizer.pt")
         (pending / "trainer_state.json").write_text(json.dumps({**state, "contract": contract, "world_size": world_size,
-            "parameter_version": wrapper.parameter_version, "training_profile": TRAINING_PROFILE}, indent=2) + "\n", encoding="utf-8")
+            "parameter_version": wrapper.parameter_version, "training_profile": contract["profile"]}, indent=2) + "\n", encoding="utf-8")
     barrier()
     torch.save(rng_state(), pending / f"rng-rank-{rank}.pt")
     barrier()
@@ -101,7 +101,7 @@ def read_resume(checkpoint, contract, *, rank, world_size, optimizer, scheduler,
     state = json.loads((path / "trainer_state.json").read_text(encoding="utf-8"))
     if state["world_size"] != world_size or state["contract"] != contract:
         raise ValueError("Resume requires the same corpus, arm, seed, batch geometry, optimizer and planned schedule")
-    if state["training_profile"] != TRAINING_PROFILE:
+    if state["training_profile"] != contract["profile"]:
         raise ValueError("Checkpoint has a different training/serving profile")
     # Files are local checkpoints produced by this entry point, not external pickle data.
     saved = torch.load(path / "optimizer.pt", map_location="cpu", weights_only=False)
@@ -148,9 +148,29 @@ def train(wrapper, tokenizer, corpus, args, *, rank=0, world_size=1, device=None
         return 0.5 * (1 + math.cos(math.pi * min(1.0, progress)))
 
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_factor)
+    profile = getattr(
+        getattr(wrapper.base_model, "config", None),
+        "history_memory_training_profile",
+        TRAINING_PROFILE,
+    )
+    if not isinstance(profile, str) or not profile:
+        raise ValueError("Model config must declare a nonempty training profile")
     contract = {name: getattr(args, name) for name in ("arm", "seed", "per_device_batch_size", "gradient_accumulation_steps",
         "num_train_epochs", "learning_rate", "weight_decay", "warmup_ratio", "max_grad_norm", "bf16", "attn_impl")}
-    contract.update(corpus_identity=corpus_identity, planned_steps=planned_steps, profile=TRAINING_PROFILE)
+    contract.update(corpus_identity=corpus_identity, planned_steps=planned_steps, profile=profile)
+    extensions = getattr(args, "training_contract", None)
+    if extensions is not None:
+        if not isinstance(extensions, dict):
+            raise TypeError("args.training_contract must be a dictionary")
+        overlap = sorted(contract.keys() & extensions.keys())
+        if overlap:
+            raise ValueError(
+                f"Training contract extensions overlap built-in fields: {overlap}"
+            )
+        # Check this before the first update rather than discovering an
+        # unserializable provenance value while writing a checkpoint.
+        json.dumps(extensions, allow_nan=False)
+        contract.update(extensions)
     state = {"global_step": 0, "epoch": 0, "next_microbatch": 0, "counters": {}, "completed": False}
     if args.resume_from_checkpoint:
         state = read_resume(args.resume_from_checkpoint, contract, rank=rank, world_size=world_size,
@@ -169,7 +189,8 @@ def train(wrapper, tokenizer, corpus, args, *, rank=0, world_size=1, device=None
         import wandb
         run_id = args.wandb_run_id or state.get("wandb_run_id")
         wandb_run = wandb.init(project=args.wandb_project, entity=args.wandb_entity,
-            name=f"history_{args.arm}_s{args.seed}", config=contract, mode=args.wandb_mode,
+            name=getattr(args, "wandb_name", None) or f"history_{args.arm}_s{args.seed}",
+            config=contract, mode=args.wandb_mode,
             id=run_id, resume="allow" if run_id else None,
             dir=args.output_dir)
         state["wandb_run_id"] = wandb_run.id

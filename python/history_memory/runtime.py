@@ -33,6 +33,7 @@ class PreparedDecision:
     ratio: int
     weight: float = 1.0
     decision_id: str = ""
+    target_weights: tuple[float, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -167,7 +168,9 @@ class HistoryMemoryModel(nn.Module):
         }
 
         for decision in decisions:
-            memory, target_ids, ratio, weight = self._validate_decision(decision)
+            memory, target_ids, ratio, weight, target_weights = self._validate_decision(
+                decision
+            )
             placements = memory.gist_layout(ratio)
             encoded: list[_EncodedChunk] = []
             for placement in placements:
@@ -202,6 +205,7 @@ class HistoryMemoryModel(nn.Module):
                 target_ids,
                 past_key_values,
                 physical_past,
+                target_weights,
             )
             losses.append(decision_loss)
             weights.append(weight)
@@ -232,7 +236,13 @@ class HistoryMemoryModel(nn.Module):
 
     def _validate_decision(
         self, decision: Any
-    ) -> tuple[PackedMemory, tuple[int, ...], int, float]:
+    ) -> tuple[
+        PackedMemory,
+        tuple[int, ...],
+        int,
+        float,
+        tuple[float, ...] | None,
+    ]:
         try:
             memory = decision.memory
             raw_target_ids = decision.target_ids
@@ -263,7 +273,28 @@ class HistoryMemoryModel(nn.Module):
         weight = float(raw_weight)
         if not math.isfinite(weight) or weight < 0.0:
             raise ValueError("decision.weight must be finite and nonnegative")
-        return memory, target_ids, ratio, weight
+        raw_target_weights = getattr(decision, "target_weights", None)
+        target_weights = None
+        if raw_target_weights is not None:
+            if not isinstance(raw_target_weights, Sequence) or isinstance(
+                raw_target_weights, (str, bytes, bytearray)
+            ):
+                raise TypeError("decision.target_weights must be a weight sequence")
+            if len(raw_target_weights) != len(target_ids):
+                raise ValueError(
+                    "decision.target_weights must cover every supervised target token"
+                )
+            if any(
+                isinstance(value, bool) or not isinstance(value, Real)
+                for value in raw_target_weights
+            ):
+                raise TypeError("decision.target_weights must contain real numbers")
+            target_weights = tuple(float(value) for value in raw_target_weights)
+            if any(not math.isfinite(value) or value <= 0.0 for value in target_weights):
+                raise ValueError(
+                    "decision.target_weights must be finite and strictly positive"
+                )
+        return memory, target_ids, ratio, weight, target_weights
 
     def _encode_chunk(self, chunk: EncoderChunk, ratio: int) -> _EncodedChunk:
         device = self.base_model.model.embed_tokens.weight.device
@@ -385,6 +416,7 @@ class HistoryMemoryModel(nn.Module):
         target_ids: tuple[int, ...],
         past_key_values: DynamicCache | None,
         physical_past: int,
+        target_weights: tuple[float, ...] | None = None,
     ) -> torch.Tensor:
         device = self.base_model.model.embed_tokens.weight.device
         current_ids = memory.workspace_input_ids + target_ids
@@ -416,7 +448,17 @@ class HistoryMemoryModel(nn.Module):
             supervised_indices=supervised_indices,
         )
         labels = torch.tensor(target_ids, dtype=torch.long, device=prediction_logits.device)
-        return F.cross_entropy(prediction_logits.float(), labels, reduction="mean")
+        if target_weights is None:
+            return F.cross_entropy(prediction_logits.float(), labels, reduction="mean")
+        token_losses = F.cross_entropy(
+            prediction_logits.float(), labels, reduction="none"
+        )
+        weights = torch.tensor(
+            target_weights,
+            dtype=token_losses.dtype,
+            device=token_losses.device,
+        )
+        return (token_losses * weights).sum() / weights.sum()
 
     def _target_logits(
         self,

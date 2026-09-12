@@ -1,0 +1,119 @@
+{
+  "schema": "c2kv-a-runtime-vendor-v1",
+  "source_checkout": "../c2kv-a-runtime",
+  "captured_on": "2026-09-12",
+  "files": [
+    {
+      "upstream_path": "benchmarks/memory_runtime/__init__.py",
+      "upstream_sha256": "213f078952337ef5eabc02b92548427ab123c153aa8cf0082b101eee6653059e",
+      "vendored_path": "python/next_compression/vendor/a_runtime/__init__.py",
+      "vendored_sha256": "213f078952337ef5eabc02b92548427ab123c153aa8cf0082b101eee6653059e",
+      "only_change": "byte-identical"
+    },
+    {
+      "upstream_path": "benchmarks/memory_runtime/adapter.py",
+      "upstream_sha256": "636ceaf129f167a7ebe6a185eeab97cbf65956997dfe2bf90ce67cf30f525dd4",
+      "vendored_path": "python/next_compression/vendor/a_runtime/adapter.py",
+      "vendored_sha256": "b9295bb18b248928099481dfb980456e707cb9c49bdcb5242809622ac398dcdf",
+      "only_change": "package-relative history_memory import relocation"
+    },
+    {
+      "upstream_path": "benchmarks/memory_runtime/always_compress.py",
+      "upstream_sha256": "e67b4a097cbe2c56431e0b144779758e82c8e7bbfcdc3bb59a0afe7ad5ed84d6",
+      "vendored_path": "python/next_compression/vendor/a_runtime/always_compress.py",
+      "vendored_sha256": "e67b4a097cbe2c56431e0b144779758e82c8e7bbfcdc3bb59a0afe7ad5ed84d6",
+      "only_change": "byte-identical"
+    },
+    {
+      "upstream_path": "benchmarks/memory_runtime/event_native_always.py",
+      "upstream_sha256": "a53a7c6c5744298f647e6c5ed8650389ba89b638f2bab1de3bfc834ca83f0e04",
+      "vendored_path": "python/next_compression/vendor/a_runtime/event_native_always.py",
+      "vendored_sha256": "a53a7c6c5744298f647e6c5ed8650389ba89b638f2bab1de3bfc834ca83f0e04",
+      "only_change": "byte-identical"
+    },
+    {
+      "upstream_path": "benchmarks/memory_runtime/event_native_policy.py",
+      "upstream_sha256": "0a920d8be68d8d5cff69ac048ce257dca9897e600706507c8dcead1b0d0bfc42",
+      "vendored_path": "python/next_compression/vendor/a_runtime/event_native_policy.py",
+      "vendored_sha256": "5e5ce54d9d378532d92ba47e08e247ea5ed343d20054a69952785798b8bbce29",
+      "only_change": "package-relative history_memory import relocation"
+    },
+    {
+      "upstream_path": "benchmarks/memory_runtime/event_native_raw.py",
+      "upstream_sha256": "628b52e67875643f2804d8229ab130b731ce1007d87333045bf78e0d6e9fad4b",
+      "vendored_path": "python/next_compression/vendor/a_runtime/event_native_raw.py",
+      "vendored_sha256": "a0187282a9b8f7f6c8f7c4af6b048c5dd411b2dc79694a0f5d61245301b5c57f",
+      "only_change": "package-relative history_memory import relocation"
+    },
+    {
+      "upstream_path": "benchmarks/memory_runtime/event_native_s0_policy.py",
+      "upstream_sha256": "fbbc086f99453184ab8630912cc453edb66a2601272d7b2ba374fa2b4b94fab7",
+      "vendored_path": "python/next_compression/vendor/a_runtime/event_native_s0_policy.py",
+      "vendored_sha256": "b58f1210d5099918e6eb89d2979178e79dd09c07393cd5949e9ced4f884e08cf",
+      "only_change": "package-relative history_memory import relocation"
+    },
+    {
+      "upstream_path": "benchmarks/memory_runtime/failed_operation.py",
+      "upstream_sha256": "0488a6df1779dda03bb16c3555fe624e5d1983a966ee54bc6bc790fc48a32ab2",
+      "vendored_path": "python/next_compression/vendor/a_runtime/failed_operation.py",
+      "vendored_sha256": "0488a6df1779dda03bb16c3555fe624e5d1983a966ee54bc6bc790fc48a32ab2",
+      "only_change": "byte-identical"
+    },
+    {
+      "upstream_path": "benchmarks/memory_runtime/policy.py",
+      "upstream_sha256": "2378c290000c7eab3f43aa0d84b4b5cf6be152c34f14c7b412efbbf09266453c",
+      "vendored_path": "python/next_compression/vendor/a_runtime/policy.py",
+      "vendored_sha256": "20fe51fdfce18547abe32487c0d047f7d2a2dd1695d12524620f7289eb51778a",
+      "only_change": "package-relative history_memory import relocation"
+    },
+    {
+      "upstream_path": "benchmarks/memory_runtime/raw_reserve.py",
+      "upstream_sha256": "2650c22a042e35a1f585798f06be63fa4db29a4b344f8f6d8ab25c13abf43562",
+      "vendored_path": "python/next_compression/vendor/a_runtime/raw_reserve.py",
+      "vendored_sha256": "f4d14e004de07d9a20969e63d41bb8caad985d604065d17583689a012c7aaeb0",
+      "only_change": "package-relative history_memory import relocation"
+    },
+    {
+      "upstream_path": "benchmarks/memory_runtime/source_needs.py",
+      "upstream_sha256": "ff586d03a2af21c4c06e75b83fbb1f2d97e5ae5a28942a7411508c484836e5fc",
+      "vendored_path": "python/next_compression/vendor/a_runtime/source_needs.py",
+      "vendored_sha256": "fe7dbcde95633151a28d408e4624d3a482c36cffa34df6f801dd469ce5f05922",
+      "only_change": "package-relative history_memory import relocation"
+    },
+    {
+      "upstream_path": "benchmarks/memory_runtime/tokenization.py",
+      "upstream_sha256": "31f6cb265a4852f8cb3d43a2924f5b9c8974d05ecaa0018b1e089621530a96a0",
+      "vendored_path": "python/next_compression/vendor/a_runtime/tokenization.py",
+      "vendored_sha256": "31f6cb265a4852f8cb3d43a2924f5b9c8974d05ecaa0018b1e089621530a96a0",
+      "only_change": "byte-identical"
+    },
+    {
+      "upstream_path": "python/history_memory/__init__.py",
+      "upstream_sha256": "53d942ccb8d1f63efb7fbb53e280ebd70059fb1b45f29d98765fb3e3a723d2d8",
+      "vendored_path": "python/next_compression/vendor/a_runtime/history_memory/__init__.py",
+      "vendored_sha256": "53d942ccb8d1f63efb7fbb53e280ebd70059fb1b45f29d98765fb3e3a723d2d8",
+      "only_change": "byte-identical"
+    },
+    {
+      "upstream_path": "python/history_memory/events.py",
+      "upstream_sha256": "37df56087066d2eb373ce91de536ff3796f06829c40d266e56d834aab4235100",
+      "vendored_path": "python/next_compression/vendor/a_runtime/history_memory/events.py",
+      "vendored_sha256": "37df56087066d2eb373ce91de536ff3796f06829c40d266e56d834aab4235100",
+      "only_change": "byte-identical"
+    },
+    {
+      "upstream_path": "python/history_memory/evidence.py",
+      "upstream_sha256": "6e4ab7c7bd396963fa92fd4b17aa7b885380ba974a04d9186f3708b3bfbeee89",
+      "vendored_path": "python/next_compression/vendor/a_runtime/history_memory/evidence.py",
+      "vendored_sha256": "6e4ab7c7bd396963fa92fd4b17aa7b885380ba974a04d9186f3708b3bfbeee89",
+      "only_change": "byte-identical"
+    },
+    {
+      "upstream_path": "python/history_memory/packing.py",
+      "upstream_sha256": "2f697c4dda2f548ef6c5062b0559e9b8082684de2cb6174dddf142312bf490da",
+      "vendored_path": "python/next_compression/vendor/a_runtime/history_memory/packing.py",
+      "vendored_sha256": "2f697c4dda2f548ef6c5062b0559e9b8082684de2cb6174dddf142312bf490da",
+      "only_change": "byte-identical"
+    }
+  ]
+}
