@@ -47,10 +47,11 @@ can consume more total KV than T0 at the same nominal ratio.
 
 The tokenizer and all frozen base weights are shared. History and tool arms
 produce separate checkpoints. Checkpoints declare
-`next-compression-base-query-v1`; downstream A evaluation must explicitly
-support the recorded rendering profile and 8/12 ratios. This delivery's checks
-validate preparation and training, not official BFCL performance or replacement
-of checkpoint 1088.
+`next-compression-base-query-v1`. The included evaluator accepts this profile
+and uses A's event-native generator with the exact prepared history/tool views.
+It supports checkpoint selection on H100 without editing the older A server's
+profile gate. Official whole-task evaluation and replacement of checkpoint 1088
+remain separate from this bounded development selection.
 
 ## Bootstrap
 
@@ -166,6 +167,61 @@ outputs must be empty, while resume uses the existing variant output directory.
 After the smoke passes, remove the smoke-only `--max-steps`,
 `--stop-after-steps`, and `--wandb-mode disabled` selections and inspect the
 resulting uncapped two-epoch dry-run again before adding `--run`.
+
+## Evaluate, select, and return checkpoints
+
+Extract the separate selection-dev bundle alongside the training data. It has
+32 fixed decisions per variant, each rendered at both ratios 8 and 12. The
+selected Toucan sessions exclude the union of sessions in all six frozen
+training corpora. This is a small single-source development proxy, not official
+BFCL or a cross-dataset benchmark. History variants share decision IDs and
+targets; tool variants share their own decision IDs and targets. H2/H3 use the
+frozen A S0 selection and T0/T1 use their respective tool packing contracts.
+
+After training, inspect the finite evaluation queue:
+
+```bash
+"${PY}" agent/select_next_checkpoints.py \
+  --checkpoint-root /persistent/checkpoints/next-compression \
+  --dev-root /path/to/selection-dev-v1 \
+  --output-root /persistent/selection/next-compression \
+  --devices 0
+```
+
+Add `--run` to execute the printed plan. For multiple allocated free H100s,
+use `--devices 0,1`; each card evaluates one checkpoint at a time. The queue
+discovers actual saved milestones and loads each checkpoint once for both
+ratios. It generates 64 continuations per checkpoint, greedily, capped at 512
+new tokens each, and computes uniform full-target CE. The dry-run reports the
+actual total generation count; wall time needs measurement on the target H100.
+There is no automatic retry or overwrite of an existing output directory.
+
+Selection is within each variant and separately at ratios 8 and 12: strict
+ordered tool-name-and-arguments accuracy first, then lower false-call rate on
+non-call targets, then lower uniform CE, then earlier step. H3's training token
+weights do not affect evaluation CE. Tool calls are compared to structured gold
+calls. This measures a continuation from a fixed reference prefix, without
+executing tools; it does not measure closed-loop task success.
+
+The script exports the union of the ratio-8 winner, ratio-12 winner, and final
+saved checkpoint for every variant. Keeping the final checkpoint leaves it
+available for later whole-task evaluation even when the small dev set prefers
+an earlier milestone. Send back the **entire** directory printed as
+`return_directory`:
+
+```text
+return/
+  RETURN.json
+  plan.json
+  evaluations/
+  H0/checkpoint-N/ ... T1/checkpoint-N/
+```
+
+`RETURN.json` lists the selected paths, selection reasons, and scores. The
+checkpoint subdirectories contain lightweight FP32 gist exports, so no manual
+checkpoint choice or frozen-base upload is needed. Do not call these the final
+best A checkpoints or claim they replace 1088 before the compatible whole-task
+evaluation. Single-seed performance is preliminary, n=1.
 
 ## Checkpoints and lightweight exports
 

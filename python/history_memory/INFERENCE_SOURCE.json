@@ -1,0 +1,15 @@
+{
+  "schema": "c2kv-vendored-inference-source-v1",
+  "source_repository": "c2kv-a-runtime",
+  "source_commit": "296022d0b751a7610de645387388b1acf8d5d2d7",
+  "files": {
+    "python/history_memory/inference.py": {
+      "source_blob_sha1": "d9a27b047e8166927d4ba0a5596c5292aa31cf47",
+      "local_adaptation": "explicit legacy and next-compression checkpoint contract dispatch"
+    },
+    "python/history_memory/cache_trace.py": {
+      "source_blob_sha1": "cf09683a40b62d83f4fa842ea118f6de4fc3d3f5",
+      "local_adaptation": "none"
+    }
+  }
+}
