@@ -114,6 +114,9 @@ export PYTHONPATH="${REPO_ROOT}/python:${REPO_ROOT}/agent:${PYTHONPATH:-}"
   python/next_compression/test_inference.py \
   python/next_compression/test_selection.py \
   python/next_compression/test_selection_queue.py \
+  python/next_compression/test_full_eval_plan.py \
+  python/next_compression/test_benchmarks.py \
+  python/next_compression/test_live.py \
   python/history_memory/test_runtime.py \
   python/history_memory/test_training.py \
   -q

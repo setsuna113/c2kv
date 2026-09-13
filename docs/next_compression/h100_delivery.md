@@ -1,5 +1,11 @@
 # Next-compression H100 delivery
 
+For the newer full official benchmark workflow, give the H100 agent
+[`H100_AGENT.md`](H100_AGENT.md). That workflow inventories every saved
+checkpoint at both ratios, serves live multi-turn requests, and preserves all
+candidate exports. The small Toucan development selector described below remains
+a separate optional development check; it is not BFCL whole-task evaluation.
+
 This delivery trains `H0`, `H1`, `H2`, `H3`, `T0`, and `T1` from immutable
 pretokenized corpora at mixed ratios 8 and 12. The code and CPU fresh/resume
 contracts have been tested; no H100 training or throughput measurement is

@@ -1,0 +1,36 @@
+diff --git a/model_inference/multi_step/APIModel_agent.py b/model_inference/multi_step/APIModel_agent.py
+--- a/model_inference/multi_step/APIModel_agent.py
++++ b/model_inference/multi_step/APIModel_agent.py
+@@ -85,7 +85,7 @@ class APIAgent_step():
+         else:
+             raise ValueError(f"Unknown model name: {self.model_name}")
+ 
+-        self.client = OpenAI(base_url=base_url, api_key=api_key)
++        self.client = OpenAI(base_url=base_url, api_key=api_key, max_retries=0)
+         self.temperature = temperature
+         self.top_p = top_p
+         self.max_tokens = max_tokens
+diff --git a/model_inference/multi_turn/APIModel_agent.py b/model_inference/multi_turn/APIModel_agent.py
+--- a/model_inference/multi_turn/APIModel_agent.py
++++ b/model_inference/multi_turn/APIModel_agent.py
+@@ -66,7 +66,7 @@ class APIAgent_turn():
+         else:
+             raise ValueError(f"Unknown model name: {self.model_name}")
+ 
+-        self.client = OpenAI(base_url=base_url, api_key=api_key)
++        self.client = OpenAI(base_url=base_url, api_key=api_key, max_retries=0)
+         self.temperature = temperature
+         self.top_p = top_p
+         self.max_tokens = max_tokens
+diff --git a/model_inference/multi_turn/APIModel_user.py b/model_inference/multi_turn/APIModel_user.py
+--- a/model_inference/multi_turn/APIModel_user.py
++++ b/model_inference/multi_turn/APIModel_user.py
+@@ -100,7 +100,7 @@ class APIUSER():
+         else:
+             raise ValueError(f"Unknown model name: {self.model_name}")
+             
+-        self.client = OpenAI(base_url=base_url, api_key=api_key)
++        self.client = OpenAI(base_url=base_url, api_key=api_key, max_retries=0)
+         self.model_name = model_name
+         self.temperature = temperature
+         self.top_p = top_p

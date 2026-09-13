@@ -1,0 +1,361 @@
+{
+  "schema_version": 1,
+  "manifest_name": "next-compression-h100-full-benchmark-sources",
+  "created_date": "2026-09-13",
+  "scope": "Source, patch, task-selection, and scorer contracts for the H0-H3 and T0-T1 full-task H100 evaluation. This manifest does not authorize or launch evaluation.",
+  "evidence_basis": "Verified local repository files and local source checkouts only.",
+  "evaluation_profile": {
+    "arms": [
+      "H0",
+      "H1",
+      "H2",
+      "H3",
+      "T0",
+      "T1"
+    ],
+    "ratios": [
+      8,
+      12
+    ],
+    "benchmark_order": [
+      "bfcl",
+      "tau2",
+      "toolsandbox",
+      "acebench",
+      "appworld"
+    ],
+    "checkpoint_profile": "next-compression-base-query-v1"
+  },
+  "shared_runner_sources": [
+    "c2kv-next-training/benchmarks/adapters/base.py",
+    "c2kv-next-training/benchmarks/metrics.py",
+    "c2kv-next-training/benchmarks/terminal_check.py"
+  ],
+  "h100_runtime": {
+    "entrypoint": "c2kv-next-training/agent/run_next_benchmarks.py",
+    "vendored_benchmark_root": "c2kv-next-training/python/next_compression/vendor/benchmarks",
+    "runtime_validation_status": "pending",
+    "enumerator_status": "implemented_in_current_entrypoint_pending_runtime_validation",
+    "reference_adapter_policy": "The c2kv-next-training/benchmarks/adapters files below are evidence-only audit sources. Do not use them as the H100 runtime entrypoint."
+  },
+  "benchmarks": {
+    "bfcl": {
+      "source": {
+        "repository": "git@github.com:ShishirPatil/gorilla.git",
+        "revision": "6ea57973c7a6097fd7c5915698c54c17c5b1b6c8",
+        "revision_status": "pinned_in_local_h200_setup",
+        "project_root_within_checkout": "berkeley-function-call-leaderboard"
+      },
+      "audited_reference_adapter": {
+        "path": "c2kv-next-training/benchmarks/adapters/bfcl_adapter.py",
+        "status": "evidence_only_do_not_use_as_h100_entrypoint",
+        "callable": "run_bfcl",
+        "max_tokens": 4096
+      },
+      "full_task_selection": {
+        "argument": "multi_turn_base",
+        "local_contract_expected_count": 200,
+        "task_ids_sha256": null,
+        "task_ids_status": "enumerate_and_freeze_on_h100",
+        "enumerator": "For each name from bfcl_eval.utils.parse_test_category_argument([\"multi_turn_base\"]), call bfcl_eval.utils.load_dataset_entry(name, include_prereq=False, include_language_specific_hint=False) and collect entry[\"id\"] in official order."
+      },
+      "official_cli_contract": {
+        "generate": "bfcl generate --model <handler> --test-category multi_turn_base --num-threads <N>",
+        "evaluate": "bfcl evaluate --model <handler> --test-category multi_turn_base",
+        "subset_binding": "Generation subsets are written to <BFCL_PROJECT_ROOT>/test_case_ids_to_generate.json and enabled by the BFCL boolean --run-ids flag. Subset evaluation uses --partial-eval; this pinned evaluator does not accept IDs on --run-ids."
+      },
+      "official_scorer": "bfcl evaluate",
+      "user_simulator": {
+        "required": false
+      },
+      "patches": [],
+      "source_evidence": [
+        "c2kv-next-training/benchmarks/run_matrix_h200.sh",
+        "c2kv-next-training/scripts/runpod_bc/pod_eval_setup.sh",
+        "c2kv-next-training/benchmarks/adapters/bfcl_adapter.py",
+        "c2kv-a-runtime/experiments/history_system/multibench/manifests/delivery_20260914.execution_binding.json"
+      ]
+    },
+    "tau2": {
+      "source": {
+        "repository": "git@github.com:sierra-research/tau2-bench.git",
+        "revision": "a2c024725189473d2d7cea3a5cfdbcc67478e41f",
+        "revision_status": "pinned_in_local_h200_setup",
+        "project_root_within_checkout": "."
+      },
+      "audited_reference_adapter": {
+        "path": "c2kv-next-training/benchmarks/adapters/tau2_adapter.py",
+        "status": "evidence_only_do_not_use_as_h100_entrypoint",
+        "callable": "run",
+        "max_tokens": 4096
+      },
+      "full_task_selection": {
+        "domain": "airline",
+        "task_set_name": "airline",
+        "local_contract_expected_count": 50,
+        "task_ids_sha256": null,
+        "task_ids_status": "historical_reference_adapter_missing_enumerator; current_h100_entrypoint_implements_enumerator; runtime_validation_pending"
+      },
+      "official_cli_contract": {
+        "run": "python -m tau2.cli run --domain airline --task-set-name airline --agent-llm openai/<model> --agent-llm-args <agent-json> --user-llm openai/<model> --user-llm-args <user-json> --max-concurrency <N> --save-to <run-name> --auto-resume",
+        "evaluate": "python -m tau2.cli evaluate-trajs -o <simulation-directory> <simulation-directory>/results.json",
+        "decoding": {
+          "agent_temperature": 0.0,
+          "user_temperature": 0.0
+        }
+      },
+      "official_scorer": "python -m tau2.cli evaluate-trajs",
+      "user_simulator": {
+        "required": true,
+        "endpoint_contract": "Pass a raw full-mode OpenAI-compatible endpoint in --user-llm-args api_base. It must be independent from the compression arm proxy used in --agent-llm-args."
+      },
+      "patches": [],
+      "source_evidence": [
+        "c2kv-next-training/benchmarks/run_matrix_h200.sh",
+        "c2kv-next-training/benchmarks/adapters/tau2_adapter.py",
+        "c2kv-a-runtime/experiments/history_system/multibench/manifests/delivery_20260914.execution_binding.json"
+      ]
+    },
+    "toolsandbox": {
+      "source": {
+        "repository": "git@github.com:apple/ToolSandbox.git",
+        "revision": "165848b9a78cead7ca7fe7c89c688b58e6501219",
+        "revision_status": "pinned_in_local_h200_setup",
+        "project_root_within_checkout": "."
+      },
+      "audited_reference_adapter": {
+        "path": "c2kv-next-training/benchmarks/adapters/toolsandbox_adapter.py",
+        "status": "evidence_only_do_not_use_as_h100_entrypoint",
+        "callable": "run_ts",
+        "max_tokens": 4096
+      },
+      "full_task_selection": {
+        "cli_rule": "Omit both -t and -s to run the full suite.",
+        "local_contract_expected_count": null,
+        "task_ids_sha256": null,
+        "task_ids_status": "historical_reference_adapter_missing_full_enumerator; current_h100_entrypoint_implements_enumerator; runtime_validation_pending",
+        "test_mode_exclusion": "The -t result has n=3 but contains one base scenario and two perturbations; it is not the full benchmark column."
+      },
+      "official_cli_contract": {
+        "full_run": "tool_sandbox --user GPT_4_o_2024_05_13 --agent GPT_4_o_2024_05_13 -o <output-directory>",
+        "served_model_alias": "gpt-4o-2024-05-13"
+      },
+      "official_scorer": "ToolSandbox CLI result_summary.json",
+      "user_simulator": {
+        "required": true,
+        "agent_endpoint_env": "OPENAI_BASE_URL",
+        "user_endpoint_env": "TOOLSANDBOX_USER_BASE_URL",
+        "endpoint_contract": "TOOLSANDBOX_USER_BASE_URL must point to a raw full-mode endpoint independent from the arm proxy."
+      },
+      "patches": [
+        {
+          "path": "c2kv-next-training/python/next_compression/vendor/benchmarks/patches/toolsandbox/0001-openai-base-url-env.patch",
+          "sha256": "fbdaf1f919fabd10cbb98722b1e782a100c84088a3744de6fdaa474622923804",
+          "apply_from": "ToolSandbox checkout root",
+          "apply_command": "patch -p1 < 0001-openai-base-url-env.patch",
+          "purpose": "Route evaluated-agent and user-simulator clients to separate configurable endpoints."
+        },
+        {
+          "path": "c2kv-next-training/python/next_compression/vendor/benchmarks/patches/toolsandbox/0002-empty-tool-calls.patch",
+          "sha256": "2ad1d9a0881151f3a8a6f1e7952190c855a3f03041c28dd9fb2afeb001f2d711",
+          "apply_from": "ToolSandbox checkout root",
+          "apply_command": "patch -p1 < 0002-empty-tool-calls.patch",
+          "purpose": "Treat tool_calls: [] as a normal text response so message limits advance."
+        },
+        {
+          "path": "c2kv-next-training/python/next_compression/vendor/benchmarks/patches/toolsandbox/0003-openai-max-retries-zero.patch",
+          "sha256": "63bd4b17dff6e7aa48b5661c3a7362468247ffbc362fd19c39daf96b633824bc",
+          "apply_from": "ToolSandbox checkout root",
+          "apply_command": "git apply 0003-openai-max-retries-zero.patch",
+          "purpose": "Disable OpenAI SDK transport retries for both evaluated-agent and raw user-simulator clients."
+        }
+      ],
+      "source_evidence": [
+        "c2kv-next-training/benchmarks/run_matrix_h200.sh",
+        "c2kv-next-training/benchmarks/adapters/toolsandbox_adapter.py",
+        "c2kv-next-training/benchmarks/toolsandbox_patches/README.md"
+      ]
+    },
+    "acebench": {
+      "source": {
+        "repository": "https://github.com/ACEBench/ACEBench.git",
+        "revision": "56dd66cf6439b0d9655ee1b353e4cd745c6f664e",
+        "revision_status": "verified_local_checkout_pin",
+        "project_root_within_checkout": "."
+      },
+      "audited_reference_adapter": {
+        "path": "c2kv-next-training/benchmarks/adapters/acebench_adapter.py",
+        "status": "evidence_only_do_not_use_as_h100_entrypoint",
+        "callable": "run_acebench",
+        "max_tokens": 1200
+      },
+      "full_task_selection": {
+        "category": "agent",
+        "language": "en",
+        "resolved_test_names": [
+          "agent_multi_step",
+          "agent_multi_turn"
+        ],
+        "local_contract_expected_counts": {
+          "agent_multi_step": 20,
+          "agent_multi_turn": 30,
+          "total": 50
+        },
+        "task_ids_sha256": null,
+        "task_ids_status": "enumerate_and_freeze_on_h100",
+        "enumerator": "Load category.py:ACE_DATA_CATEGORY, expand the agent category, then collect row[\"id\"] from data_all/data_en/data_<test>.json in expanded-test and file order."
+      },
+      "official_cli_contract": {
+        "generate": "python generate.py --model <model> --category agent --language en --num-threads <N> --max-dialog-turns 40 --user-model <user-model> --temperature 0.0 --top-p 1.0 --max-tokens 1200",
+        "evaluate": "python eval_main.py --model <model> --category agent --language en"
+      },
+      "official_scorer": "python eval_main.py",
+      "user_simulator": {
+        "required": true,
+        "agent_endpoint_env": "ACEBENCH_AGENT_BASE_URL",
+        "agent_api_key_env": "ACEBENCH_AGENT_API_KEY",
+        "user_endpoint_env": "ACEBENCH_USER_BASE_URL",
+        "user_api_key_env": "ACEBENCH_USER_API_KEY",
+        "endpoint_contract": "ACEBENCH_USER_BASE_URL must point to a raw full-mode endpoint independent from ACEBENCH_AGENT_BASE_URL."
+      },
+      "patches": [
+        {
+          "path": "c2kv-next-training/python/next_compression/vendor/benchmarks/patches/acebench/0001-endpoint-env-and-model-registry.patch",
+          "sha256": "303b0bee047b4f25f72896ee3b685d32713971e734968c98ad528ef6547f370f",
+          "apply_from": "ACEBench checkout root",
+          "apply_command": "git apply --unidiff-zero 0001-endpoint-env-and-model-registry.patch",
+          "purpose": "Register arbitrary API model names, split agent and user endpoints, and preserve structured role history.",
+          "contains_all_role_history_changes": true,
+          "additional_role_history_patch_required": false,
+          "touched_role_history_paths": [
+            "model_inference/apimodel_inference.py",
+            "model_inference/inference_map.py",
+            "model_inference/multi_step/APIModel_agent.py",
+            "model_inference/multi_turn/APIModel_agent.py",
+            "model_inference/multi_turn/APIModel_user.py",
+            "model_inference/role_history.py"
+          ]
+        },
+        {
+          "path": "c2kv-next-training/python/next_compression/vendor/benchmarks/patches/acebench/0002-openai-max-retries-zero.patch",
+          "sha256": "f9d76659f9963e562137530c02b3612f42a0d226a4b3d4994ddd68fa8793f100",
+          "apply_from": "ACEBench checkout root",
+          "apply_command": "git apply 0002-openai-max-retries-zero.patch",
+          "purpose": "Disable OpenAI SDK transport retries for evaluated-agent and user-simulator clients."
+        }
+      ],
+      "required_env": {
+        "ACEBENCH_API_MODELS": "<served-model-name>",
+        "ACEBENCH_ROLE_HISTORY_V1": "1"
+      },
+      "source_evidence": [
+        "c2kv-next-training/benchmarks/adapters/acebench_adapter.py",
+        "c2kv-next-training/benchmarks/acebench_patches/README.md",
+        "c2kv-next-training/benchmarks/acebench_patches/0001-endpoint-env-and-model-registry.patch",
+        "c2kv-a-runtime/experiments/history_system/multibench/tests/test_native_acebench_adapter.py"
+      ]
+    },
+    "appworld": {
+      "source": {
+        "runner_repository": "https://github.com/microsoft/acon.git",
+        "runner_revision": "d63f9ae18959dc7215ff62899c94c5e8c56847ae",
+        "runner_revision_status": "verified_from_local_tmp/baselines/acon_checkout_and_selected_as_the_new_h100_pin; this_is_not_a_recovered_historical_npu_source_pin",
+        "runner_root_within_checkout": "experiments/appworld",
+        "appworld_distribution": "appworld==0.1.3.post1",
+        "appworld_distribution_status": "validated_in_local_patch_readme",
+        "appworld_source_repository": "StonyBrookNLP/appworld",
+        "appworld_source_revision": null,
+        "appworld_source_revision_status": "not_present_in_local_evidence; resolve_and_freeze_installed_package_and_data_identity_on_h100"
+      },
+      "audited_reference_adapter": {
+        "path": "c2kv-next-training/benchmarks/adapters/acon_adapter.py",
+        "status": "evidence_only_do_not_use_as_h100_entrypoint",
+        "callable": "run_appworld",
+        "max_tokens": 2048,
+        "max_iterations": 50,
+        "seed": 42
+      },
+      "full_task_selection": {
+        "split": "test_normal",
+        "local_contract_expected_count": 168,
+        "enumerator": "appworld.load_task_ids(\"test_normal\")",
+        "frozen_local_id_file": "c2kv-a-runtime/experiments/history_system/multibench/appworld_test_normal.txt",
+        "frozen_local_id_file_sha256": "c3af41497b6f2f0860a2ff8c09b335dca527e2cf48e59b4aabdb301b6b68db8f",
+        "h100_requirement": "Enumerate the installed H100 data and require exact ordered equality with the frozen local ID file before launch."
+      },
+      "official_cli_contract": {
+        "generate": "python run_all.py --split test_normal --model_name <model> --tag <tag> --max_iter 50 --seed 42",
+        "evaluate": "appworld evaluate <model-name-with-slashes-replaced>_<tag> test_normal",
+        "task_binding": "The adapter creates a private APPWORLD_ROOT and writes the same selected task list for generation and official scoring."
+      },
+      "official_scorer": "appworld evaluate using state-based unit tests",
+      "user_simulator": {
+        "required": false
+      },
+      "patches": [
+        {
+          "path": "c2kv-next-training/python/next_compression/vendor/benchmarks/patches/acon/0001-openai-base-url-env.patch",
+          "sha256": "316f5838a170be55619fca6eb2384671d3e66ce023aa07f3ded87b14e1a499d0",
+          "apply_from": "ACON checkout root",
+          "apply_command": "git apply 0001-openai-base-url-env.patch",
+          "purpose": "Read ACON_OPENAI_BASE_URL and ACON_OPENAI_API_KEY."
+        },
+        {
+          "path": "c2kv-next-training/python/next_compression/vendor/benchmarks/patches/acon/0002-unknown-api-cost.patch",
+          "sha256": "3628dc71861c60bb12fea40dc8cc6b55128bf8800d76378ab47a39b2549cb55d",
+          "apply_from": "ACON checkout root",
+          "apply_command": "git apply --ignore-whitespace 0002-unknown-api-cost.patch",
+          "purpose": "Record unknown local-model API cost as null while retaining token counts."
+        },
+        {
+          "path": "c2kv-next-training/python/next_compression/vendor/benchmarks/patches/acon/0005-smolagents-error-feedback.patch",
+          "sha256": "3407be9f722058c201f4928c01c8a8902d4bcba7ab245dda97b014320da126e2",
+          "apply_from": "ACON checkout root",
+          "apply_command": "git apply --ignore-space-change 0005-smolagents-error-feedback.patch",
+          "purpose": "Retain failed actions and executor errors in the next AppWorld prompt."
+        },
+        {
+          "path": "c2kv-next-training/python/next_compression/vendor/benchmarks/patches/acon/0006-openai-max-retries-zero.patch",
+          "sha256": "c97ae579c1a40e988cedfc0fac8348558c96a43f1c821a8238684504ce3c532a",
+          "apply_from": "ACON checkout root",
+          "apply_command": "git apply 0006-openai-max-retries-zero.patch",
+          "purpose": "Disable OpenAI SDK transport retries for the AppWorld vLLM client."
+        }
+      ],
+      "excluded_acon_patches": {
+        "paths": [
+          "c2kv-next-training/benchmarks/acon_patches/0003-bm25-lazy-imports.patch",
+          "c2kv-next-training/benchmarks/acon_patches/0004-pyserini-sparse-imports.patch"
+        ],
+        "reason": "These patches are for the ACON QA BM25 runner, not AppWorld."
+      },
+      "installation_contract": [
+        "Install appworld==0.1.3.post1 in the runner environment.",
+        "Run appworld install.",
+        "Run appworld download data.",
+        "Set APPWORLD_ROOT to the directory containing data/ or let the adapter create its private harness under the ACON AppWorld runner."
+      ],
+      "source_evidence": [
+        "tmp/baselines/acon/.git",
+        "c2kv-next-training/benchmarks/adapters/acon_adapter.py",
+        "c2kv-next-training/benchmarks/acon_patches/README.md",
+        "c2kv-a-runtime/experiments/history_system/multibench/appworld_test_normal.txt"
+      ]
+    }
+  },
+  "h100_freeze_requirements": [
+    "Resolve every repository checkout to the recorded full commit before applying patches.",
+    "Verify every applied patch against its recorded SHA256 and fail if it does not apply cleanly to the pinned checkout.",
+    "Enumerate the ordered full-task IDs from each installed pinned source, record the count and SHA256 in the H100 run manifest, and stop on duplicates or denominator drift.",
+    "Resolve and freeze the AppWorld installed package and downloaded data identity because the local evidence contains a distribution version but no AppWorld source/data commit.",
+    "Keep tau2, ToolSandbox, and ACEBench user simulators on an independent raw full-mode endpoint; only the evaluated agent uses the compression arm proxy.",
+    "Treat c2kv-a-runtime/experiments/history_system/multibench as a copied runtime snapshot, not as evidence of upstream repository revisions.",
+    "Require max_retries=0 at every OpenAI or LiteLLM client and max task retries=0; do not claim a zero-retry protocol from CLI flags alone."
+  ],
+  "historical_gaps_found_before_this_delivery": [
+    "The historical tau2 reference adapter had no pre-run task-ID enumerator; the current H100 entrypoint resolves it, with runtime validation pending.",
+    "The historical ToolSandbox reference adapter had no full-suite scenario enumerator or verified denominator; the current H100 entrypoint resolves enumeration, with runtime validation pending.",
+    "AppWorld still has no locally recorded upstream source/data commit; only appworld==0.1.3.post1 and the frozen test_normal ID file are verified. Resolve and freeze the installed package and downloaded data identity on H100.",
+    "c2kv-a-runtime/experiments/history_system/multibench/official_one_task.py covers tau2, ToolSandbox, ACEBench, and AppWorld one-task runs only; it is not a full five-benchmark runner and BFCL uses its separate native adapter."
+  ]
+}

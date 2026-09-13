@@ -1,0 +1,11 @@
+diff --git a/src/productive_agents/llm.py b/src/productive_agents/llm.py
+--- a/src/productive_agents/llm.py
++++ b/src/productive_agents/llm.py
+@@ -483,6 +483,7 @@ class vLLM(BaseLLMModel):
+             self.lora_name = self.lora_name.split("=")[0] # Take the first part for vLLM
+         if self.lora_name:
+             self.model_name = self.lora_name
++        self.client.max_retries = 0
+ 
+     def generate(self, prompt, n=1, max_tokens=2048, temperature=None, seed=None, **kwargs):
+         """Generate response using vLLM server"""

@@ -1,0 +1,22 @@
+diff --git a/tool_sandbox/roles/openai_api_agent.py b/tool_sandbox/roles/openai_api_agent.py
+--- a/tool_sandbox/roles/openai_api_agent.py
++++ b/tool_sandbox/roles/openai_api_agent.py
+@@ -41,6 +41,7 @@ class OpenAIAPIAgent(BaseRole):
+         self.openai_client: OpenAI = OpenAI(
+             base_url=os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1")
+         )
++        self.openai_client.max_retries = 0
+ 
+     def respond(self, ending_index: Optional[int] = None) -> None:
+         """Reads a List of messages and attempt to respond with a Message
+diff --git a/tool_sandbox/roles/openai_api_user.py b/tool_sandbox/roles/openai_api_user.py
+--- a/tool_sandbox/roles/openai_api_user.py
++++ b/tool_sandbox/roles/openai_api_user.py
+@@ -44,6 +44,7 @@ class OpenAIAPIUser(BaseRole):
+                 os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1"),
+             )
+         )
++        self.openai_client.max_retries = 0
+ 
+     def respond(self, ending_index: Optional[int] = None) -> None:
+         """Reads a List of messages and attempt to respond with a Message
