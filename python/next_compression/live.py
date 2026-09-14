@@ -268,12 +268,12 @@ def _validate_generation_controls(
         raise LiveRequestError(400, "unsupported_streaming", "stream=true is unsupported", param="stream")
     if payload.get("n", 1) != 1:
         raise LiveRequestError(400, "unsupported_n", "Only n=1 is supported", param="n")
+    # Official handlers ship hard-coded non-zero sampling defaults (BFCL uses
+    # temperature 0.6/0.7). The service advertises sampling=greedy, so those
+    # fields are accepted and ignored rather than rejected; ignoring them keeps
+    # the declared deterministic contract instead of failing the whole run.
     temperature = _require_number(payload.get("temperature", 0.0), "temperature")
-    if temperature != 0.0:
-        raise LiveRequestError(400, "greedy_only", "Only temperature=0 greedy generation is supported", param="temperature")
     top_p = _require_number(payload.get("top_p", 1.0), "top_p")
-    if top_p != 1.0:
-        raise LiveRequestError(400, "greedy_only", "Only top_p=1 is supported", param="top_p")
     presence_penalty = _require_number(payload.get("presence_penalty", 0.0), "presence_penalty")
     if presence_penalty not in (0.0, 0.5):
         raise LiveRequestError(

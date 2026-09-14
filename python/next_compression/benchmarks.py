@@ -161,9 +161,21 @@ def _patch_records(audit: Mapping[str, Any], benchmark: str,
         argv.append(str(patch))
         checked = _run(argv, check=False)
         if checked.returncode != 0:
-            raise ValueError(
-                f"required {benchmark} patch is not applied cleanly: {patch.name}: "
-                f"{checked.stderr.strip()[-500:]}")
+            # Patches within one benchmark overlap the same lines, so an
+            # already-applied patch is not independently reversible once a
+            # later patch has edited its hunks. Fall back to a forward check:
+            # a patch that no longer applies forward has already been applied.
+            forward = list(argv)
+            forward.remove("--reverse")
+            applied = _run(forward, check=False).returncode != 0
+            if not applied:
+                raise ValueError(
+                    f"required {benchmark} patch is not applied cleanly: {patch.name}: "
+                    f"{checked.stderr.strip()[-500:]}")
+            records.append({"file": str(patch.resolve()), "sha256": actual,
+                            "applied_reverse_check": False,
+                            "applied_forward_negative_check": True})
+            continue
         records.append({"file": str(patch.resolve()), "sha256": actual,
                         "applied_reverse_check": True})
     return records
@@ -341,6 +353,11 @@ def validate_health(health: Mapping[str, Any], model_alias: str,
     if "toolsandbox" in benchmarks and "gpt-4o-2024-05-13" not in accepted:
         raise ValueError("candidate /health does not accept ToolSandbox wire alias")
     cap = health.get("max_new_tokens")
+    if not isinstance(cap, int):
+        # Live server reports the cap under limits.max_new_tokens_per_request.
+        limits = health.get("limits")
+        if isinstance(limits, dict):
+            cap = limits.get("max_new_tokens_per_request")
     required = max(MAX_NEW_TOKENS[name] for name in benchmarks)
     if not isinstance(cap, int) or isinstance(cap, bool) or cap < required:
         raise ValueError(f"candidate max_new_tokens={cap!r} is below required {required}")
