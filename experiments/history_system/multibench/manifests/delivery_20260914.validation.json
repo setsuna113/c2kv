@@ -1,0 +1,86 @@
+{
+  "schema": "history-system-official-manifest-validation-v1",
+  "verified_at": "2026-09-13T18:46:09.060206+00:00",
+  "source_snapshot": {
+    "path": "/home/liuyancheng/c2kv-a-runtime-20260907/system_search/delivery_20260914/benchmark_sources",
+    "revision": "df641f65c09445469f61bfbd4d68e06af286f9f3",
+    "git_status": "clean_after_cohort_enumeration",
+    "working_tree_file_counts": {
+      "tau2": 1502,
+      "toolsandbox": 79,
+      "acebench": 126,
+      "acon": 808,
+      "appworld": 14696
+    }
+  },
+  "cohort_checks": {
+    "tau2": {
+      "selected": 6,
+      "source_airline_tasks": 50,
+      "ids_exist": true
+    },
+    "toolsandbox": {
+      "selected": 8,
+      "source_registry": 1032,
+      "ids_exist": true
+    },
+    "acebench": {
+      "selected": 8,
+      "source_agent_en": 50,
+      "ids_exist": true
+    },
+    "acon_appworld": {
+      "selected": 168,
+      "source_test_normal": 168,
+      "unique": 168,
+      "ids_exist": true,
+      "task_ids_sha256": "c3af41497b6f2f0860a2ff8c09b335dca527e2cf48e59b4aabdb301b6b68db8f"
+    }
+  },
+  "manifest_schema_validation": {
+    "status": "passed",
+    "manifests": 9,
+    "all190_denominator": 190
+  },
+  "cpu_tests": {
+    "official_one_task_and_suite_runner": {
+      "passed": 18,
+      "failed": 0
+    },
+    "single_task_harness_api": {
+      "passed": 10,
+      "failed": 0
+    }
+  },
+  "generation_caps": {
+    "tau2": {
+      "max_new_tokens": 4096,
+      "origin": "server_owned; official source omits token cap"
+    },
+    "toolsandbox": {
+      "max_new_tokens": 4096,
+      "origin": "server_owned; official source omits token cap"
+    },
+    "acon_appworld": {
+      "max_new_tokens": 2048,
+      "origin": "official source"
+    },
+    "acebench": {
+      "max_new_tokens": 1200,
+      "origin": "configured official adapter"
+    }
+  },
+  "execution": {
+    "model_calls": 0,
+    "official_scorer_calls": 0,
+    "benchmark_tasks_run": 0
+  },
+  "remaining_runtime_requirement": {
+    "raw_user_base_url": "http://127.0.0.1:35803/v1",
+    "status": "must_be_started_and_verified_by_dispatch_owner",
+    "required_model_aliases": [
+      "c2kv-c1000-r8-history-system-v2",
+      "gpt-4o-2024-05-13"
+    ]
+  }
+}

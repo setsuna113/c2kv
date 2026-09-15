@@ -1,0 +1,47 @@
+diff --git a/acebench/model_inference/multi_step/APIModel_agent.py b/acebench/model_inference/multi_step/APIModel_agent.py
+--- a/acebench/model_inference/multi_step/APIModel_agent.py
++++ b/acebench/model_inference/multi_step/APIModel_agent.py
+@@ -86,7 +86,7 @@ class APIModelAgent:
+         else:
+             raise ValueError(f"Unknown model name: {self.model_name}")
+ 
+-        self.client = OpenAI(base_url=base_url, api_key=api_key)
++        self.client = OpenAI(base_url=base_url, api_key=api_key, max_retries=0)
+         self.temperature = temperature
+         self.top_p = top_p
+         self.max_tokens = max_tokens
+diff --git a/acebench/model_inference/multi_turn/APIModel_agent.py b/acebench/model_inference/multi_turn/APIModel_agent.py
+--- a/acebench/model_inference/multi_turn/APIModel_agent.py
++++ b/acebench/model_inference/multi_turn/APIModel_agent.py
+@@ -67,7 +67,7 @@ class APIModelAgent:
+         else:
+             raise ValueError(f"Unknown model name: {self.model_name}")
+ 
+-        self.client = OpenAI(base_url=base_url, api_key=api_key)
++        self.client = OpenAI(base_url=base_url, api_key=api_key, max_retries=0)
+         self.temperature = temperature
+         self.top_p = top_p
+         self.max_tokens = max_tokens
+diff --git a/acebench/model_inference/multi_turn/APIModel_user.py b/acebench/model_inference/multi_turn/APIModel_user.py
+--- a/acebench/model_inference/multi_turn/APIModel_user.py
++++ b/acebench/model_inference/multi_turn/APIModel_user.py
+@@ -100,7 +100,7 @@ class APIModelUser:
+         else:
+             raise ValueError(f"Unknown model name: {self.model_name}")
+             
+-        self.client = OpenAI(base_url=base_url, api_key=api_key)
++        self.client = OpenAI(base_url=base_url, api_key=api_key, max_retries=0)
+         self.model_name = model_name
+         self.temperature = temperature
+         self.top_p = top_p
+diff --git a/acon/src/productive_agents/llm.py b/acon/src/productive_agents/llm.py
+--- a/acon/src/productive_agents/llm.py
++++ b/acon/src/productive_agents/llm.py
+@@ -476,6 +476,7 @@ class vLLM(BaseLLMModel):
+         self.client = OpenAI(
+             base_url=os.environ.get("ACON_OPENAI_BASE_URL", "http://localhost:8000/v1"),
+             api_key=os.environ.get("ACON_OPENAI_API_KEY", "token-abc"),
++            max_retries=0,
+         )
+         self.lora_name = lora_name
+         if self.lora_name and "=" in self.lora_name:

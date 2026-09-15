@@ -1,0 +1,55 @@
+[
+  {
+    "type": "function",
+    "function": {
+      "name": "search_contacts",
+      "description": "Search for a contact person based on provided arguments Each field has a search criteria of either\n1. Exact value matching\n2. Fuzzy string matching with a predefined threshold\nSearch results contains all contact entries that matched all criteria",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "is_self": {"description": "If the requested contact corresponds to the current user. Will be exact matched", "type": "boolean"},
+          "name": {"description": "Name of contact person, will be fuzzy matched", "type": "string"},
+          "person_id": {"description": "String format unique identifier for the contact person, will be exact matched", "type": "string"},
+          "phone_number": {"description": "Phone number of contact person, will be exact matched", "type": "string"},
+          "relationship": {"description": "Relationship between user and this contact, will be fuzzy matched", "type": "string"}
+        },
+        "required": []
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "get_cellular_service_status",
+      "description": "Request cellular service status",
+      "parameters": {"type": "object", "properties": {}, "required": []}
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "send_message_with_phone_number",
+      "description": "Send a message to a recipient using phone_number",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "content": {"description": "Message payload text", "type": "string"},
+          "phone_number": {"description": "String format phone number to send the message to", "type": "string"}
+        },
+        "required": ["phone_number", "content"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "set_cellular_service_status",
+      "description": "Enable / Disable cellular service",
+      "parameters": {
+        "type": "object",
+        "properties": {"on": {"description": "If we want to turn on cellular service", "type": "boolean"}},
+        "required": ["on"]
+      }
+    }
+  }
+]

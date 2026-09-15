@@ -1,0 +1,17 @@
+{
+  "schema": "history-system-wire-fixtures-v1",
+  "toolsandbox": {
+    "scenario": "send_message_with_contact_content_cellular_off_multiple_user_turn",
+    "conversation_source": "tmp/tracy-share-20260907/validation/official_c2kv_a2/toolsandbox/agent_gpt-4o-2024-05-13_user_gpt-4o-2024-05-13_09_07_2026_18_56_24/trajectories/send_message_with_contact_content_cellular_off_multiple_user_turn/conversation.json",
+    "conversation_sha256": "f287aa06cd0ba7c7a3b6b68b66a40cfde82a79905486d133a7391724507b67da",
+    "tools_source": "/home/liuyancheng/c2kv-integration-followup-20260905/deps/toolsandbox@165848b9a78cead7ca7fe7c89c688b58e6501219: OpenAIAPIAgent.get_available_tools -> convert_to_openai_tools",
+    "model_inference": "chat.completions.create(model, messages, tools)"
+  },
+  "acon_appworld": {
+    "task_id": "3d9a636_1",
+    "history_source": "tmp/tracy-share-20260907/validation/official_c2kv_a2/acon_appworld/appworld_harness/experiments/appworld/outputs/tracy-c2kv_official_c2kv_a2_acon_appworld_7e86263/test_normal/task_3d9a636_1/llm_history.json",
+    "history_sha256": "894f66c720f2f43dbc0245fea92cc9ac9845ceafb2eaba79f8c69b7e75bd2437",
+    "builder_source": "/home/liuyancheng/c2kv-integration-followup-20260905/deps/acon/src/productive_agents/llm.py",
+    "wire_defaults": {"max_tokens": 2048, "temperature": 0, "top_p": 1.0, "n": 1, "seed": 42, "presence_penalty": 0.5, "chat_template_kwargs": {"enable_thinking": false}}
+  }
+}

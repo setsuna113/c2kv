@@ -1,0 +1,148 @@
+{
+  "schema": "a-history-r002-predictive-repair-design-v1",
+  "status": "planned_implementation_in_progress_checkpoint_selected",
+  "plan": "docs/a_memory_runtime/iteration_plan.md",
+  "phase": "E0 and E1 predictive-repair transfer",
+  "historical_detector_protocol": {
+    "path": "../outputs/detector_main_table_20260907/protocol.json",
+    "sha256": "1505837e04769dd99004a21b996a0932a0f8ce64817a79c3f2d5b0112d48aa80",
+    "scope": "offline conditional tool-name detection and saved repair replay; not online whole-task evidence"
+  },
+  "data_plan": {
+    "path": "r002.data_plan.json",
+    "sha256": "5bd628a31bc5231ce7d8cd8042af6456aa5566b5756d9b6861a22d82c671bfcc"
+  },
+  "system_eval_manifest": {
+    "path": "r001.tasks.json",
+    "sha256": "9bca04418dace5294f1c3e5cfcf233c89a78679c3fcb4863ba12d4804794036b"
+  },
+  "fixed": {
+    "reference": "c0_bridge_memo_b0",
+    "checkpoint_profile": "C1000 history-event-base-query-v1; exact binding in configs/checkpoint.selected.json",
+    "ratio": 8,
+    "history_budget_bytes": 113246208,
+    "dtype": "bfloat16",
+    "temperature": 0,
+    "seed": 0,
+    "prefill_chunk_size": 256,
+    "common_context": 40960,
+    "generation_per_task_including_regeneration": 96,
+    "encoder_per_task": 1152,
+    "candidate_stage_wall_seconds": 21600,
+    "automatic_reruns": 0
+  },
+  "conditions": [
+    {
+      "id": "d0_c0_reference",
+      "gate": "No added predictive gate; preserve C0 reactive rules",
+      "repair": "none",
+      "status": "planned"
+    },
+    {
+      "id": "d1_random_event",
+      "gate": "Decision-key hash pseudorandom score with seed0 and probability0.2",
+      "repair": "r_event_v1",
+      "status": "planned"
+    },
+    {
+      "id": "d2_margin_event",
+      "gate": "First-name top2 logprob margin; frozen calibration low-tail threshold",
+      "repair": "r_event_v1",
+      "status": "planned"
+    },
+    {
+      "id": "d3_prefill_event",
+      "gate": "C1000 prefill logistic probe; frozen calibration threshold",
+      "repair": "r_event_v1",
+      "status": "planned_requires_feature_fit_export"
+    },
+    {
+      "id": "d4_memgen_event",
+      "gate": "C1000 MemGen logistic head with inherited sparsity objective; frozen calibration threshold",
+      "repair": "r_event_v1",
+      "status": "planned_requires_feature_fit_export"
+    }
+  ],
+  "decision_boundary": "All E1 gates apply after held draft and before any tool execution; Prefill features are sampled earlier but applied at this common boundary",
+  "online_gate": {
+    "target_calibration_fire_fraction": 0.2,
+    "actual_rate_may_differ": true,
+    "max_regeneration_per_decision": 1,
+    "cumulative_task_regeneration_cap": "ceil(0.2 * all_decisions_seen_in_task)",
+    "no_eval_topk": true,
+    "unavailable_score": "abstain and report missingness",
+    "numerical_threshold_source": "calibration groups only"
+  },
+  "repair": {
+    "id": "r_event_v1",
+    "source_pool": "Existing max12 complete-event metadata index; exclude raw-visible and superseded sources",
+    "query": "Current user goal plus held draft tool/argument fields; same recipe for all intervention conditions",
+    "ranker": "Deterministic deployable lexical ranking; source/config identity frozen before launch",
+    "unit": "One complete source event",
+    "budget_reallocation": [
+      "Remove lowest-priority nonmandatory gist-backed raw reserve/lexical placements",
+      "Release optional gists in existing priority order only as needed; keep minimum-gist and mandatory current protections",
+      "Recompute final B0 guard; otherwise abstain and submit held draft"
+    ],
+    "unchanged_input": "Do not regenerate",
+    "second_draft": "Submit only once, no recursive reconsideration",
+    "uses_online_gold": false
+  },
+  "label_contract": {
+    "source": "Offline official_prefix_check over saved decoded trajectory and ground truth",
+    "known_auto_label": "Prior turn prefix valid; current turn one model decision/decoded batch; complete non-infrastructure records; official prefix valid=correct, invalid=wrong",
+    "unknown": [
+      "Multiple model decisions in current turn",
+      "Earlier prefix invalid",
+      "Force-quit or incomplete records",
+      "Tool reported error without action-level correctness evidence"
+    ],
+    "no_terminal_backfill": true,
+    "labels_not_online": true
+  },
+  "required_head_exports": [
+    "head.npz or equivalent weights",
+    "feature_contract.json",
+    "fit_manifest.json",
+    "calibration.json"
+  ],
+  "next_structural_matrix": [
+    "deterministic source + full event",
+    "learned source + full event",
+    "same learned source + dependency packet"
+  ],
+  "current_execution_queue_changed": false,
+  "new_model_calls_from_plan_preparation": 0,
+  "checkpoint_ratio_prerequisite": "resolved: C1000/ratio8 selected from existing results per user instruction",
+  "checkpoint_binding": "experiments/history_system/configs/checkpoint.selected.json",
+  "label_revision": {
+    "version": "20260913-single-action-then-stop-v2",
+    "reason": "All 148 decisions in 12 completed tasks were unknown under the original single-model-decision rule",
+    "additional_label_kind": "single_action_then_stop_prefix_error",
+    "target": "short_segment_outcome_from_action_prefill",
+    "requirements": [
+      "previous turns official prefix valid",
+      "exactly one nonempty decoded action batch followed by one normal empty stop",
+      "complete one-to-one server and official step alignment",
+      "no decode failure or force quit"
+    ],
+    "stop_label": null,
+    "multi_action_turns": "unknown",
+    "not_a_claim_of_individual_tool_or_argument_error": true,
+    "sampling_and_group_splits_unchanged": true,
+    "original_coverage": "outputs/history_system_search/delivery_20260914/labels.initial_coverage.json",
+    "revised_coverage": "outputs/history_system_search/delivery_20260914/labels.segment_coverage.json",
+    "normal_stop_bridge": {
+      "server_status": "ok",
+      "native_parse_status": "text",
+      "tool_calls": [],
+      "finish_reason": "stop",
+      "official_representation": "Only the verified fixed plain-text decode-to-empty handler form; retain source fields/hash",
+      "exclude": [
+        "server malformed or failed generation",
+        "arbitrary handler decode error",
+        "force quit"
+      ]
+    }
+  }
+}

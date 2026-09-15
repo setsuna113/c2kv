@@ -1,0 +1,359 @@
+{
+  "schema": "a-history-r002-detector-data-plan-v1",
+  "status": "metadata_partition_only_no_labels_or_model_calls",
+  "role": "Prospective first data collection batch; not a claimed adequate training sample",
+  "sources": [
+    {
+      "path": "outputs/a_memory_runtime_20260912/selection_audit_v1/selection_audit.revision1.json",
+      "sha256": "22ead4dd5a8f7f2213c53e9dff5c08508d509e31ae18d32a70f2cff8fc675006"
+    },
+    {
+      "path": "experiments/history_system/configs/data_roles.json",
+      "sha256": "d1311857453158c7dc7db7f63d0d4a5075ef59080c78dc66581c93cc5dc6d38e"
+    },
+    {
+      "path": "experiments/history_system/configs/r001.tasks.json",
+      "sha256": "9bca04418dace5294f1c3e5cfcf233c89a78679c3fcb4863ba12d4804794036b"
+    }
+  ],
+  "selection_rule": "SHA256(a-history-r002-detector-data-v1:<row_ordinal>) ascending over known exposed groups minus R001 and protected groups; first20 train, next5 calibration; no outcome use",
+  "available_exposed_groups": 147,
+  "available_after_exclusion": 137,
+  "train_groups": [
+    {
+      "row_ordinal": 101,
+      "task_ids": [
+        "multi_turn_base_101",
+        "multi_turn_long_context_101"
+      ]
+    },
+    {
+      "row_ordinal": 58,
+      "task_ids": [
+        "multi_turn_base_58",
+        "multi_turn_long_context_58"
+      ]
+    },
+    {
+      "row_ordinal": 108,
+      "task_ids": [
+        "multi_turn_base_108",
+        "multi_turn_long_context_108"
+      ]
+    },
+    {
+      "row_ordinal": 90,
+      "task_ids": [
+        "multi_turn_base_90",
+        "multi_turn_long_context_90"
+      ]
+    },
+    {
+      "row_ordinal": 147,
+      "task_ids": [
+        "multi_turn_base_147",
+        "multi_turn_long_context_147"
+      ]
+    },
+    {
+      "row_ordinal": 67,
+      "task_ids": [
+        "multi_turn_base_67",
+        "multi_turn_long_context_67"
+      ]
+    },
+    {
+      "row_ordinal": 128,
+      "task_ids": [
+        "multi_turn_base_128",
+        "multi_turn_long_context_128"
+      ]
+    },
+    {
+      "row_ordinal": 81,
+      "task_ids": [
+        "multi_turn_base_81",
+        "multi_turn_long_context_81"
+      ]
+    },
+    {
+      "row_ordinal": 106,
+      "task_ids": [
+        "multi_turn_base_106",
+        "multi_turn_long_context_106"
+      ]
+    },
+    {
+      "row_ordinal": 83,
+      "task_ids": [
+        "multi_turn_base_83",
+        "multi_turn_long_context_83"
+      ]
+    },
+    {
+      "row_ordinal": 16,
+      "task_ids": [
+        "multi_turn_base_16",
+        "multi_turn_long_context_16"
+      ]
+    },
+    {
+      "row_ordinal": 46,
+      "task_ids": [
+        "multi_turn_base_46",
+        "multi_turn_long_context_46"
+      ]
+    },
+    {
+      "row_ordinal": 123,
+      "task_ids": [
+        "multi_turn_base_123",
+        "multi_turn_long_context_123"
+      ]
+    },
+    {
+      "row_ordinal": 187,
+      "task_ids": [
+        "multi_turn_base_187",
+        "multi_turn_long_context_187"
+      ]
+    },
+    {
+      "row_ordinal": 14,
+      "task_ids": [
+        "multi_turn_base_14",
+        "multi_turn_long_context_14"
+      ]
+    },
+    {
+      "row_ordinal": 55,
+      "task_ids": [
+        "multi_turn_base_55",
+        "multi_turn_long_context_55"
+      ]
+    },
+    {
+      "row_ordinal": 185,
+      "task_ids": [
+        "multi_turn_base_185",
+        "multi_turn_long_context_185"
+      ]
+    },
+    {
+      "row_ordinal": 125,
+      "task_ids": [
+        "multi_turn_base_125",
+        "multi_turn_long_context_125"
+      ]
+    },
+    {
+      "row_ordinal": 80,
+      "task_ids": [
+        "multi_turn_base_80",
+        "multi_turn_long_context_80"
+      ]
+    },
+    {
+      "row_ordinal": 86,
+      "task_ids": [
+        "multi_turn_base_86",
+        "multi_turn_long_context_86"
+      ]
+    }
+  ],
+  "calibration_groups": [
+    {
+      "row_ordinal": 82,
+      "task_ids": [
+        "multi_turn_base_82",
+        "multi_turn_long_context_82"
+      ]
+    },
+    {
+      "row_ordinal": 12,
+      "task_ids": [
+        "multi_turn_base_12",
+        "multi_turn_long_context_12"
+      ]
+    },
+    {
+      "row_ordinal": 180,
+      "task_ids": [
+        "multi_turn_base_180",
+        "multi_turn_long_context_180"
+      ]
+    },
+    {
+      "row_ordinal": 43,
+      "task_ids": [
+        "multi_turn_base_43",
+        "multi_turn_long_context_43"
+      ]
+    },
+    {
+      "row_ordinal": 176,
+      "task_ids": [
+        "multi_turn_base_176",
+        "multi_turn_long_context_176"
+      ]
+    }
+  ],
+  "remaining_development_pool_ordinals": [
+    192,
+    150,
+    159,
+    141,
+    172,
+    59,
+    103,
+    54,
+    104,
+    146,
+    166,
+    3,
+    85,
+    1,
+    70,
+    9,
+    160,
+    113,
+    91,
+    155,
+    51,
+    95,
+    38,
+    181,
+    39,
+    175,
+    110,
+    196,
+    56,
+    17,
+    52,
+    182,
+    133,
+    2,
+    18,
+    149,
+    77,
+    115,
+    37,
+    23,
+    129,
+    76,
+    21,
+    178,
+    114,
+    162,
+    145,
+    8,
+    30,
+    189,
+    135,
+    24,
+    71,
+    26,
+    179,
+    134,
+    165,
+    53,
+    44,
+    48,
+    174,
+    126,
+    10,
+    117,
+    183,
+    4,
+    157,
+    140,
+    99,
+    142,
+    143,
+    171,
+    154,
+    25,
+    173,
+    122,
+    68,
+    163,
+    151,
+    186,
+    124,
+    84,
+    42,
+    15,
+    45,
+    5,
+    118,
+    47,
+    75,
+    161,
+    177,
+    119,
+    195,
+    33,
+    97,
+    168,
+    69,
+    98,
+    66,
+    144,
+    65,
+    27,
+    96,
+    188,
+    89,
+    148,
+    197,
+    121,
+    35,
+    116,
+    13,
+    105
+  ],
+  "r002_evaluation_manifest": "r001.tasks.json",
+  "r002_evaluation_groups": [
+    0,
+    20,
+    40,
+    50,
+    60,
+    100,
+    120,
+    130,
+    170,
+    190
+  ],
+  "protected_promotion_release_groups": 53,
+  "counts": {
+    "train_groups": 20,
+    "train_task_variants": 40,
+    "calibration_groups": 5,
+    "calibration_task_variants": 10,
+    "evaluation_groups": 10,
+    "evaluation_task_variants": 20
+  },
+  "forbidden_label_rules": [
+    "Copy task-terminal failure onto every step as next-action error",
+    "Treat disagreement with Full as ground truth",
+    "Treat every tool error as an incorrect action",
+    "Use evaluator labels or future observations online"
+  ],
+  "required_label_fields": [
+    "task_id",
+    "group_ordinal",
+    "decision_key",
+    "prefix_hash",
+    "visible_input_hash",
+    "checkpoint_hash",
+    "label",
+    "label_kind",
+    "label_source",
+    "adjudication_reason"
+  ],
+  "unknown_policy": "Unverifiable next-action correctness remains null, with coverage reported. Supervised fitting waits for valid labels; margin/rule system evaluation does not.",
+  "training_split": "Fit only train groups; grouped inner validation selects inherited model hyperparameters. Calibration groups choose deployment thresholds, not family or model hyperparameters. R001 is development system evaluation, never independent final acceptance.",
+  "head_status": "not_fitted_or_exported",
+  "holdout_contents_read": false
+}

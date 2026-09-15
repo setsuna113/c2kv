@@ -1,0 +1,51 @@
+{
+  "schema": "history-system-mechanism-design-v1",
+  "status": "observable_features_original_split_coverage_measured_not_fitted_not_launched",
+  "parent": "d4_prefill_event_demand_extract",
+  "evidence": "outputs\\history_system_search\\delivery_20260914\\suites\\d4_tau2_f6_demand_v2\\task2_constraint_diagnostic.json",
+  "finding": "Latest user next-few-weeks constraint and recent empty tool results remain raw-visible; all 96 prefill scores abstained. Task0 text loop and task2 changing-date empty-search loop are distinct.",
+  "implemented": "Source-bound native action/outcome suffix features in prepared metadata; no gate, allocation, prompt or generation change.",
+  "next_experiments": [
+    {
+      "axis": "E0/E1 risk coverage",
+      "action": "Extract observable progress features on existing train/calibration task prefixes; compare coverage with frozen Prefill head without selecting thresholds on delivery tau2 outcomes.",
+      "decision": "Does it add failure-relevant state beyond Prefill confidence? Empty outcomes are features, not correctness labels."
+    },
+    {
+      "axis": "E1 intervention benefit",
+      "action": "Define a bounded candidate that chooses between event restoration and state/constraint-focused reallocation at the same B0; do not request another identical view when relevant constraint and latest evidence are already raw.",
+      "decision": "Use whole-task official quality plus compression and finite-cap failures; extra signal alone is not an algorithm win."
+    }
+  ],
+  "preserve": [
+    "C1000/ratio8",
+    "B0",
+    "96 generation and 1152 extraction caps",
+    "existing D4 and D5 frozen packages and queue",
+    "no model reruns"
+  ],
+  "validation": {
+    "cpu_tests_passed": 18,
+    "model_calls": 0
+  },
+  "source": {
+    "path": "experiments/history_system/runtime/benchmarks/memory_runtime/observable_progress.py",
+    "sha256": "d0ed0a7252b85d6ed39bee13b50811da1d864cabf341bbf0a03813b21eae7669"
+  },
+  "coverage_evidence": "outputs/history_system_search/r005/progress_coverage_v1/summary.json",
+  "coverage_summary": {
+    "train": {
+      "decisions": 420,
+      "nonzero_empty_suffix": 2,
+      "multi_empty_suffix": 0
+    },
+    "calibration": {
+      "decisions": 126,
+      "nonzero_empty_suffix": 0,
+      "multi_empty_suffix": 0
+    }
+  },
+  "coverage_decision": "Current BFCL calibration has no nonzero empty-result suffix; do not fit/calibrate a useful loop detector from these constant features. Preserve existing head. A separately declared task-family train/cal collection is needed for empty-search/state-loop coverage, excluding delivered tau2/ToolSandbox tasks; choose scope before launch.",
+  "next_data_inventory": "outputs/history_system_search/r010/appworld_data_inventory.json",
+  "collection_adapter_status": "Official train inventory exists; delivery worker explicitly rejects non-test_normal. Separate train/cal collector required; no new model collection launched."
+}

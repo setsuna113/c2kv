@@ -1,0 +1,60 @@
+{
+  "status": "ready_health_verified",
+  "ready": {
+    "accepted_aliases": [
+      "c2kv-c1000-r8-history-system-v2",
+      "gpt-4o-2024-05-13",
+      "d3_prefill_event"
+    ],
+    "bind": "http://127.0.0.1:35803",
+    "log_fields_only": [
+      "hashes",
+      "counts",
+      "byte_counts",
+      "model_names",
+      "status",
+      "latency_ms"
+    ],
+    "payload_transform": {
+      "only": "model",
+      "value": "c2kv-agent"
+    },
+    "pid": 3174298,
+    "proxy_environment_used_for_upstream": false,
+    "request_log": "/home/liuyancheng/c2kv-a-runtime-20260907/system_search/delivery_20260914/raw_user_alias_v2/requests.jsonl",
+    "schema": "history-system-raw-user-alias-v1",
+    "source_path": "/home/liuyancheng/c2kv-a-runtime-20260907/system_search/delivery_20260914/helpers/raw_user_alias_proxy.py",
+    "source_sha256": "573e7ef8bfe100acb1f0387bacee0d9c4c64e1d5c9ab3f9677783a05e1cc4510",
+    "upstream": "http://127.0.0.1:35220/v1",
+    "upstream_attempts_per_request": 1,
+    "upstream_model": "c2kv-agent"
+  },
+  "models": {
+    "object": "list",
+    "data": [
+      {
+        "id": "c2kv-c1000-r8-history-system-v2",
+        "object": "model",
+        "owned_by": "c2kv-local"
+      },
+      {
+        "id": "gpt-4o-2024-05-13",
+        "object": "model",
+        "owned_by": "c2kv-local"
+      },
+      {
+        "id": "d3_prefill_event",
+        "object": "model",
+        "owned_by": "c2kv-local"
+      },
+      {
+        "id": "c2kv-agent",
+        "object": "model",
+        "owned_by": "c2kv-local"
+      }
+    ]
+  },
+  "replaces_owned_alias_pid": 3140786,
+  "actual_upstream_checkpoint": "/home/liuyancheng/checkpoints_upstream/checkpoint-1088",
+  "model_calls": 0
+}

@@ -40,6 +40,9 @@ CLI_SURFACE = [
     ("--memory-tokenizer", "", False),
     ("--no-upstream-retries", False, False),
     ("--capture-request-views", False, False),
+    ("--max-generation-attempts", None, False),
+    ("--max-generation-attempts-per-task", None, False),
+    ("--max-extraction-attempts", None, False),
     ("--out", None, True),
     ("--task-set", "airline", False),
     ("--tau2-num-trials", None, False),
@@ -50,6 +53,7 @@ CLI_SURFACE = [
     ("--bfcl-oracle-max-events", 1, False),
     ("--bfcl-temperature", None, False),
     ("--bfcl-seed", None, False),
+    ("--bfcl-generation-max-tokens", 4096, False),
     ("--num-workers", 4, False),
     ("--max-tasks", None, False),
     ("--run-name", "c2kv_run", False),
@@ -57,6 +61,7 @@ CLI_SURFACE = [
     ("--record-reference", "", False),
     ("--reference", "", False),
     ("--backend", "sglang", False),
+    ("--native-hiagent-policy-sampling", "", False),
     ("--model", "c2kv-agent", False),
     ("--ts-scenarios", "", False),
     ("--ts-agent", "", False),
@@ -107,7 +112,7 @@ def test_cli_choices_and_types_are_unchanged():
     assert actions["--benchmark"].choices == list(run.ADAPTERS)
     assert set(actions["--benchmark"].choices) == {
         "tau2", "bfcl", "toolsandbox", "acon_appworld", "acon_qa", "acebench"}
-    assert actions["--backend"].choices == ["hfserver", "sglang"]
+    assert actions["--backend"].choices == ["hfserver", "sglang", "event_native_hiagent"]
     assert actions["--doc-packing"].choices == ["turn", "message"]
     assert actions["--acebench-language"].choices == ["en", "zh"]
     for flag in ("--out", "--acon-dir", "--acebench-dir"):
@@ -116,6 +121,35 @@ def test_cli_choices_and_types_are_unchanged():
                  "--max-doc-length", "--max-doc-num"):
         assert actions[flag].type is int, flag
     assert actions["--bfcl-oracle-max-events"].type is bfcl_adapter._positive_int
+    assert actions["--max-generation-attempts"].type is run.positive_generation_limit
+    assert actions["--max-generation-attempts-per-task"].type is run.positive_generation_limit
+    assert actions["--max-extraction-attempts"].type is run.nonnegative_extraction_limit
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "1.5", "none"])
+def test_generation_budget_cli_requires_a_positive_integer(value):
+    with pytest.raises(SystemExit):
+        _args(["--benchmark", "tau2", *BASE_ARGV,
+               "--max-generation-attempts", value])
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "1.5", "none"])
+def test_per_task_generation_budget_cli_requires_a_positive_integer(value):
+    with pytest.raises(SystemExit):
+        _args(["--benchmark", "tau2", *BASE_ARGV,
+               "--max-generation-attempts-per-task", value])
+
+
+@pytest.mark.parametrize("value", ["-1", "1.5", "none"])
+def test_extraction_budget_cli_requires_a_nonnegative_integer(value):
+    with pytest.raises(SystemExit):
+        _args(["--benchmark", "tau2", *BASE_ARGV,
+               "--max-extraction-attempts", value])
+
+
+def test_extraction_budget_cli_zero_forbids_all_producers():
+    args = _args(["--benchmark", "tau2", *BASE_ARGV, "--max-extraction-attempts", "0"])
+    assert args.max_extraction_attempts == 0
 
 
 def test_bfcl_event_budget_cli_requires_a_positive_integer():
@@ -331,7 +365,8 @@ def test_bfcl_dispatch_adds_v1_and_chdirs(monkeypatch, tmp_path):
     monkeypatch.setattr(bfcl_adapter.os, "chdir",
                         lambda path: seen.setdefault("cwds", []).append(str(path)))
     ctx = _ctx("bfcl", categories="memory", bfcl_dir=str(tmp_path),
-               run_ids="memory_1", num_workers=4, bfcl_oracle_max_events=3)
+               run_ids="memory_1", num_workers=4, bfcl_oracle_max_events=3,
+               bfcl_generation_max_tokens=768)
     ctx.arm = "c2kv4_gold_witness"
     summary = bfcl_adapter.run(ctx)
     # the handler needs /v1; run.py hands over the bare URL
@@ -341,6 +376,7 @@ def test_bfcl_dispatch_adds_v1_and_chdirs(monkeypatch, tmp_path):
     assert calls["kwargs"]["project_root"] == ctx.out_dir.resolve()
     assert calls["kwargs"]["num_threads"] == 4
     assert calls["kwargs"]["bfcl_oracle_max_events"] == 3
+    assert calls["kwargs"]["generation_max_tokens"] == 768
     # underscores in an arm name would corrupt the result dir path
     assert calls["kwargs"]["handler_name"] == "c2kv-c2kv4-gold-witness"
     assert seen["cwds"][0] == str(tmp_path)
@@ -441,6 +477,47 @@ def test_main_writes_the_summary_envelope(monkeypatch, tmp_path):
     assert written["cost_join"] == "joined: 4/4 tasks"
     assert "textarm_summary" not in written  # only for text arms
     assert seen["proc"].terminated is True
+
+
+def test_main_includes_durable_attempt_accounting(monkeypatch, tmp_path):
+    from memory_runtime.attempt_journal import AttemptJournal, attempt_journal_path
+
+    path = attempt_journal_path(tmp_path / "proxy.jsonl")
+    journal = AttemptJournal(path)
+    handle = journal.start("generation", 1, "r1", {"task_id": "task"})
+    journal.finish(handle, "completed", usage={"prompt_tokens": 4, "completion_tokens": 1})
+    journal.start("generation", 2, "r2", {"task_id": "task"})
+    _stub_run(monkeypatch, tmp_path, {"n": 1})
+    summary_path = tmp_path / "outdir_ab12cd3" / "summary_c2kv.json"
+    written = json.loads(summary_path.read_text(encoding="utf-8"))
+    accounting = written["attempt_journal"]["accounting"]
+    assert written["attempt_journal"]["path"] == str(path)
+    assert (accounting["started"], accounting["finished"], accounting["pending"]) == (2, 1, 1)
+    assert accounting["pending_token_accounting"] == "unknown"
+
+
+def test_main_passes_generation_budget_to_proxy(monkeypatch, tmp_path):
+    seen = _stub_run(
+        monkeypatch, tmp_path, {"n": 1},
+        extra_argv=("--max-generation-attempts", "7"),
+    )
+    assert seen["start"]["max_generation_attempts"] == 7
+
+
+def test_main_passes_per_task_generation_budget_to_proxy(monkeypatch, tmp_path):
+    seen = _stub_run(
+        monkeypatch, tmp_path, {"n": 1},
+        extra_argv=("--max-generation-attempts-per-task", "96"),
+    )
+    assert seen["start"]["max_generation_attempts_per_task"] == 96
+
+
+def test_main_passes_extraction_budget_to_proxy(monkeypatch, tmp_path):
+    seen = _stub_run(
+        monkeypatch, tmp_path, {"n": 1},
+        extra_argv=("--max-extraction-attempts", "5"),
+    )
+    assert seen["start"]["max_extraction_attempts"] == 5
 
 
 def test_main_sha_suffixes_run_name_and_out(monkeypatch, tmp_path):

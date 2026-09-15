@@ -1,0 +1,27 @@
+{
+  "schema": "a-history-system-task-manifest-v1",
+  "manifest_id": "r002_calibration_00",
+  "stage": "calibration",
+  "task_ids": [
+    "multi_turn_base_82",
+    "multi_turn_long_context_82",
+    "multi_turn_base_12",
+    "multi_turn_long_context_12",
+    "multi_turn_base_180",
+    "multi_turn_long_context_180",
+    "multi_turn_base_43",
+    "multi_turn_long_context_43",
+    "multi_turn_base_176",
+    "multi_turn_long_context_176"
+  ],
+  "group_ordinals": [
+    82,
+    12,
+    180,
+    43,
+    176
+  ],
+  "fixed_denominator": 10,
+  "selection": "Contiguous shard of the predeclared r002.data_plan group order, no outcome-based selection",
+  "automatic_reruns": 0
+}

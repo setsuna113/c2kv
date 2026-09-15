@@ -76,7 +76,9 @@ def test_add_arguments_registers_only_that_adapters_flags():
         tau2_adapter: {"--task-set", "--tau2-num-trials", "--tau2-max-steps",
                        "--tau2-timeout"},
         bfcl_adapter: {
-            "--categories", "--run-ids", "--bfcl-oracle-max-events"},
+            "--categories", "--run-ids", "--bfcl-oracle-max-events",
+            "--bfcl-temperature", "--bfcl-seed",
+            "--bfcl-generation-max-tokens"},
         toolsandbox_adapter: {"--full", "--ts-scenarios", "--ts-agent", "--ts-user", "--toolsandbox-dir"},
         acon_adapter: {"--acon-dir", "--split", "--tag", "--task-ids"},
         acebench_adapter: {"--acebench-dir", "--acebench-category",

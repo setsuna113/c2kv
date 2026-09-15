@@ -1,0 +1,33 @@
+{
+  "schema": "a-history-system-peer-completion-task-manifest-v1",
+  "manifest_id": "r001_peer_base10_completion",
+  "stage": "development_search",
+  "task_ids": [
+    "multi_turn_base_0",
+    "multi_turn_base_20",
+    "multi_turn_base_40",
+    "multi_turn_base_50",
+    "multi_turn_base_60",
+    "multi_turn_base_100",
+    "multi_turn_base_120",
+    "multi_turn_base_130",
+    "multi_turn_base_170",
+    "multi_turn_base_190"
+  ],
+  "group_ordinals": [
+    0,
+    20,
+    40,
+    50,
+    60,
+    100,
+    120,
+    130,
+    170,
+    190
+  ],
+  "selection": "The missing Base cells from the declared r001 mixed20 development-search manifest; no outcome filtering",
+  "full_r001_manifest": "experiments/history_system/configs/r001.tasks.json",
+  "fixed_denominator": 10,
+  "automatic_reruns": 0
+}

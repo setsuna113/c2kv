@@ -22,7 +22,7 @@ SCHEMA_VERSION = 1
 BENCHMARKS = frozenset(
     {"tau2", "bfcl", "toolsandbox", "acon_appworld", "acon_qa", "acebench"}
 )
-BACKENDS = frozenset({"sglang", "hfserver"})
+BACKENDS = frozenset({"sglang", "hfserver", "event_native_hiagent"})
 ACE_ROLE_HISTORY_FEATURE = "acebench_role_history_v1"
 CACHEBLEND_SERVER_FEATURE = "cacheblend_repair_extract_v1"
 ACON_QA_RETRIEVER_FEATURE = "acon_qa_retriever_v1"
@@ -386,7 +386,9 @@ def _method_capabilities(result: PreflightResult, arm: str, backend: str,
             "detail": "turn-doc chunks and per-request materialisation; not the upstream artifact runtime",
         })
 
-    if spec.text_policy in {"hiagent", "hiagent_summary", "hiagent_full"}:
+    if spec.text_policy in {
+        "hiagent", "hiagent_summary", "hiagent_full", "hiagent_envelope_only"
+    }:
         _append_warning(
             result, "hiagent_protocol_compliance_unverified",
             "the proxy injects the Subgoal protocol, but compression requires the model to emit recognizable Subgoal turns",
@@ -406,6 +408,15 @@ def _method_capabilities(result: PreflightResult, arm: str, backend: str,
             "name": "hiagent_trajectory_retrieval_v1",
             "status": "conditional",
             "detail": "full protocol is enabled only when the declared retrieval capability is supplied",
+        })
+    elif spec.text_policy == "hiagent_envelope_only":
+        result.variants.append({
+            "name": "hiagent_action_envelope_control_v1",
+            "status": "control",
+            "detail": (
+                "full original history plus Subgoal action protocol; summary "
+                "rewriting and Trajectory Retrieval are jointly absent"
+            ),
         })
 
     if spec.text_policy and spec.text_policy.startswith("acon_"):
@@ -467,6 +478,20 @@ def preflight(benchmark: str, arm: str, backend: str = "sglang", *,
         ))
         return result
 
+    if backend == "event_native_hiagent" or opts.get("native_hiagent_policy_sampling"):
+        result.requirements.append(Requirement(
+            code="native_hiagent_explicit_contract", severity="error",
+            satisfied=(backend == "event_native_hiagent" and benchmark == "bfcl"
+                       and arm in {
+                           "hiagent_full_native", "hiagent_envelope_only_native"
+                       }
+                       and bool(opts.get("native_hiagent_policy_sampling"))
+                       and opts.get("max_generation_attempts_per_task") == 96
+                       and opts.get("no_upstream_retries") is True
+                       and opts.get("capture_request_views") is True
+                       and not opts.get("memory_runtime_config")),
+            message="native HiAgent requires BFCL, its native arm, explicit sampling, shared 96 calls, captured traces and zero retries",
+        ))
     oracle_max_events = opts.get("bfcl_oracle_max_events", 1)
     if (not isinstance(oracle_max_events, int)
             or isinstance(oracle_max_events, bool)

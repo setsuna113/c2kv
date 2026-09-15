@@ -259,3 +259,9 @@ Thumbs.db
 
 # Server-side scratch scripts (scp'd down for reference; not for commit)
 /scratch_server_extract/
+
+# Local artifacts; the active algorithm is under experiments/history_system.
+/tmp/
+/releases/
+/reports/
+/experiments/history_system/search_state.json

@@ -1,0 +1,20 @@
+{
+  "schema": "history-system-mechanism-design-v1",
+  "status": "optional_runner_interface_implemented_cpu_validated_not_frozen_not_launched",
+  "evidence": "outputs/history_system_search/delivery_20260914/d4.task5_failure_task6_health.json",
+  "failure": "tau2 task5 client request timed out after 600s while draft followed by regeneration; draft attempt was about537s.",
+  "implementation": "EventNativeDecisionRunner optional recovery_request_budget_seconds. Before reconsideration, retain draft if remaining request budget <= last draft generation wall time; no recovery quota consumed.",
+  "estimate_scope": "Last draft wall is a heuristic, not a bound on the next view or a timeout guarantee. It does not solve slow first generation.",
+  "current_default": null,
+  "deployment_requirements": [
+    "Bind per-benchmark actual client request timeout in a new frozen suite; reserve measured frontend/serialization time",
+    "Keep original max_new_tokens, generation/extraction caps and same B0",
+    "Retain time-admission receipt, draft correctness and whole-task official outcome for selection"
+  ],
+  "frozen_runs_changed": false,
+  "tests": {
+    "focused_passed": 15,
+    "clock_fixture": "537s scripted generation against600s request budget; no physical sleep",
+    "legacy_step_test_limitation": "Old generic step fixtures lack hybrid history budget metadata and fail before generation; scheduling tests isolate that independent budget guard, real recovery/goal controller tests pass."
+  }
+}

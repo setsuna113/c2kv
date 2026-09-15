@@ -4,9 +4,14 @@ C2KV enables **independently prefilled text segments to be compressed into compa
 
 ### Active development
 
-`task/bdf-pilot` is the consolidation branch for experiment D, experiment G
-and the modular benchmark system. Serving lives in the separate
-`sglang-c2kv` repository on its corresponding `task/bdf-pilot` branch.
+The current A-line algorithm is **Prefill-guided event recovery (D3,
+C1000 / ratio8)**. Its active source, selected configuration, CPU checks and
+entry point are in [`experiments/history_system/`](experiments/history_system/README.md).
+Start there to read or run A. The top-level `python/`, `agent/` and
+`benchmarks/` retain the shared model, training and historical benchmark code.
+
+The existing D/G entry points are listed below. Serving for those experiments
+lives in the separate `sglang-c2kv` repository.
 
 | Work | Entry points |
 |---|---|

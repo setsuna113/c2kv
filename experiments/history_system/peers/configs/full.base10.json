@@ -1,0 +1,114 @@
+{
+  "schema": "a-history-system-peer-completion-config-v1",
+  "evaluation_stage": "development_search",
+  "sample_label": "preliminary, n=1",
+  "base_task_manifest": {
+    "path": "experiments/history_system/configs/r001.peer_missing.tasks.json",
+    "sha256": "08127f69714866bb1396148f21b0fcdf6f9dd2de26c350e405987d52acceca26"
+  },
+  "r001_task_manifest": {
+    "path": "experiments/history_system/configs/r001.tasks.json",
+    "sha256": "9bca04418dace5294f1c3e5cfcf233c89a78679c3fcb4863ba12d4804794036b"
+  },
+  "remote_scorer_lineage": {
+    "path": "outputs/history_system_search/r001/remote_lineage.json",
+    "sha256": "1625a43eaed0d205306074a52b05c74657d507f1bc7cece53c44a7cd42f6db7d"
+  },
+  "base_scorer_bindings": {
+    "bfcl_eval/data/BFCL_v4_multi_turn_base.json": {
+      "remote_sha256": "1a21a995d06fd6f20ba55de7bced30ef953ec35e998f502ec2ecf4d66ef1c43a",
+      "local_sha256": "1a21a995d06fd6f20ba55de7bced30ef953ec35e998f502ec2ecf4d66ef1c43a",
+      "local_lf_normalized_sha256": "1a21a995d06fd6f20ba55de7bced30ef953ec35e998f502ec2ecf4d66ef1c43a"
+    },
+    "bfcl_eval/data/possible_answer/BFCL_v4_multi_turn_base.json": {
+      "remote_sha256": "1fee67823b317571649177dd89d63969feaae4e810cc7448ee55ba797fb7c8fc",
+      "local_sha256": "1fee67823b317571649177dd89d63969feaae4e810cc7448ee55ba797fb7c8fc",
+      "local_lf_normalized_sha256": "1fee67823b317571649177dd89d63969feaae4e810cc7448ee55ba797fb7c8fc"
+    },
+    "bfcl_eval/eval_checker/multi_turn_eval/multi_turn_checker.py": {
+      "remote_sha256": "b3b787515eda3bf0e365e39634a8fc7f831763f010f716d35d86f96fd5aab1b5",
+      "local_sha256": "b3b787515eda3bf0e365e39634a8fc7f831763f010f716d35d86f96fd5aab1b5",
+      "local_lf_normalized_sha256": "b3b787515eda3bf0e365e39634a8fc7f831763f010f716d35d86f96fd5aab1b5"
+    }
+  },
+  "r001_scorer_bindings": {
+    "bfcl_eval/data/BFCL_v4_multi_turn_base.json": {
+      "remote_sha256": "1a21a995d06fd6f20ba55de7bced30ef953ec35e998f502ec2ecf4d66ef1c43a",
+      "local_sha256": "1a21a995d06fd6f20ba55de7bced30ef953ec35e998f502ec2ecf4d66ef1c43a",
+      "local_lf_normalized_sha256": "1a21a995d06fd6f20ba55de7bced30ef953ec35e998f502ec2ecf4d66ef1c43a"
+    },
+    "bfcl_eval/data/possible_answer/BFCL_v4_multi_turn_base.json": {
+      "remote_sha256": "1fee67823b317571649177dd89d63969feaae4e810cc7448ee55ba797fb7c8fc",
+      "local_sha256": "1fee67823b317571649177dd89d63969feaae4e810cc7448ee55ba797fb7c8fc",
+      "local_lf_normalized_sha256": "1fee67823b317571649177dd89d63969feaae4e810cc7448ee55ba797fb7c8fc"
+    },
+    "bfcl_eval/data/BFCL_v4_multi_turn_long_context.json": {
+      "remote_sha256": "78c3268c5cc8e97c0f4ec6c811b3b9a2bba14323b1830b7a874b06d822749324",
+      "local_sha256": "78c3268c5cc8e97c0f4ec6c811b3b9a2bba14323b1830b7a874b06d822749324",
+      "local_lf_normalized_sha256": "78c3268c5cc8e97c0f4ec6c811b3b9a2bba14323b1830b7a874b06d822749324"
+    },
+    "bfcl_eval/data/possible_answer/BFCL_v4_multi_turn_long_context.json": {
+      "remote_sha256": "e82aa0e839c39d23c64a05834f7ae024d7c9738ec21738ecee78dc876e3d0d18",
+      "local_sha256": "e82aa0e839c39d23c64a05834f7ae024d7c9738ec21738ecee78dc876e3d0d18",
+      "local_lf_normalized_sha256": "e82aa0e839c39d23c64a05834f7ae024d7c9738ec21738ecee78dc876e3d0d18"
+    },
+    "bfcl_eval/eval_checker/multi_turn_eval/multi_turn_checker.py": {
+      "remote_sha256": "b3b787515eda3bf0e365e39634a8fc7f831763f010f716d35d86f96fd5aab1b5",
+      "local_sha256": "b3b787515eda3bf0e365e39634a8fc7f831763f010f716d35d86f96fd5aab1b5",
+      "local_lf_normalized_sha256": "b3b787515eda3bf0e365e39634a8fc7f831763f010f716d35d86f96fd5aab1b5"
+    }
+  },
+  "reused_long_task_ids": [
+    "multi_turn_long_context_0",
+    "multi_turn_long_context_20",
+    "multi_turn_long_context_40",
+    "multi_turn_long_context_50",
+    "multi_turn_long_context_60",
+    "multi_turn_long_context_100",
+    "multi_turn_long_context_120",
+    "multi_turn_long_context_130",
+    "multi_turn_long_context_170",
+    "multi_turn_long_context_190"
+  ],
+  "template_patch": {
+    "remove_exactly": "    if design.get(\"evaluation_stage\") != \"independent_holdout\" or design.get(\"acceptance_parameters_frozen\") is not True:\n        raise ValueError(\"R5 requires frozen acceptance parameters before execution\")",
+    "add_exactly": "    if design.get(\"evaluation_stage\") != \"development_search\":\n        raise ValueError(\"peer completion requires development_search\")"
+  },
+  "method": "full",
+  "runner_kind": "baseline",
+  "candidate_id": "r001_peer_full_b500_greedy_mixed20",
+  "run_id": "r001_peer_full_b500_greedy_base10_v1",
+  "template_design_schema": "a-r5-full-manifest-template-development-design-v1",
+  "source_design": {
+    "path": "outputs/a_memory_runtime_20260912/native_full_b500_long20_v1/submitted/tmp/a_memory_runtime_20260912/native_full_b500_long20_v1/design.frozen.json",
+    "sha256": "2ae5dec32d1d1c2cef7a8619f2f97a9301f3b7cdfbb342b9df38e9d7d4b16b37"
+  },
+  "source_runner": {
+    "path": "outputs/a_memory_runtime_20260912/native_full_b500_long20_v1/submitted/tmp/a_memory_runtime_20260912/native_full_b500_long20_v1/native_full_long20_runner.py",
+    "sha256": "3a1efdfcccad31d5c089195c78383d9e00fa477bb29716de0a208abbd48704f5"
+  },
+  "audited_template": {
+    "path": "tmp/a_memory_runtime_20260913/r5_baseline_manifest_templates_v1/full_manifest_runner.py",
+    "sha256": "cd1e4601b50079f1b2c43c707c86c01f656f2c5d1d76f39d86826d5e20f4f413"
+  },
+  "template_cpu_validation": {
+    "path": "tmp/a_memory_runtime_20260913/r5_baseline_manifest_templates_v1/cpu.validation.json",
+    "sha256": "40e768755a71567e7477f3fca86d8d4d889d25a17fd81e07c2106f0b5ba7cbcb"
+  },
+  "reused_long_result_roots": [
+    "outputs/a_memory_runtime_20260912/native_full_b500_long20_v1/returned"
+  ],
+  "preview_defaults": {
+    "port_base": 38200
+  },
+  "resource_accounting": {
+    "b0_applies": false,
+    "system_active_history_reduction": "report only when compatible common/full H and active A metadata exists; do not infer compression from ratio=4",
+    "available_artifacts": [
+      "task_shards/<task_id>/server/steps.jsonl",
+      "task_shards/<task_id>/server.supervisor.json",
+      "task_shards/<task_id>/bfcl/official_summary.json"
+    ],
+    "preservation": "the audited runner preserves per-step/generation and allocator telemetry without rewriting it"
+  }
+}

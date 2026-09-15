@@ -1,0 +1,398 @@
+import os
+
+import torch
+import itertools
+from gist_args import ModelArgs
+from torch.utils.data import Sampler
+from transformers import DataCollatorWithPadding
+from transformers.trainer import Trainer
+from transformers.cache_utils import DynamicCache
+from typing import Any, Dict, List, Optional, Union, Iterator
+
+
+def _as_scalar_loss(loss: torch.Tensor) -> torch.Tensor:
+    if loss.dim() == 0:
+        return loss
+    return loss.mean()
+
+
+class TrainerDistillMixin:
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.distill_coef: float | None = kwargs["args"].gist_self_distill_coef
+        self.log_data: dict[str, list[torch.Tensor]] = {}
+        if self.distill_coef is not None:
+            assert 0. < self.distill_coef <= 1., "The self_distill_coef should be in (0, 1]!"
+            self.kl_loss = torch.nn.KLDivLoss(reduction="batchmean")
+            self.distill_temperature = kwargs["args"].gist_self_distill_temperature
+            self.log_data.update({"distill_loss": [], "label_loss": []})
+
+    def log(self, logs: dict[str, float], start_time: Optional[float] = None) -> None:
+        for loss_name, losses in self.log_data.items():
+            if len(losses) > 0:
+                loss_tensor = torch.stack(losses)
+                if hasattr(self, "_nested_gather"):
+                    loss_tensor = self._nested_gather(loss_tensor)
+                elif hasattr(self, "accelerator"):
+                    loss_tensor = self.accelerator.gather_for_metrics(loss_tensor)
+                loss = loss_tensor.mean().item()
+                logs[loss_name] = round(loss, 6)
+                self.log_data[loss_name] = []
+        super().log(logs, start_time)
+    
+    def apply_distill_loss(self, labels: torch.Tensor, label_loss: torch.Tensor,
+        teacher_logits: torch.Tensor, student_logits: torch.Tensor) -> torch.Tensor:
+        label_mask = labels != -100
+        distill_loss: torch.Tensor = self.kl_loss(
+            torch.log_softmax(student_logits[label_mask] / self.distill_temperature, dim=-1), 
+            torch.softmax(teacher_logits[label_mask] / self.distill_temperature, dim=-1)
+        ) * (self.distill_temperature ** 2)
+        self.log_data["distill_loss"].append(distill_loss.detach())
+        self.log_data["label_loss"].append(label_loss.detach())
+        loss = (1 - self.distill_coef) * label_loss + self.distill_coef * distill_loss
+        return loss
+
+
+class GistPretrainTrainer(TrainerDistillMixin, Trainer):
+    def __init__(self, *args, model_args: ModelArgs, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.model_args = model_args
+        gist_mode_args = model_args.gist_mode.split("-")
+        self.gist_chunk_size = list(map(int, gist_mode_args[0].split(",")))
+        self.gist_max_chunk_num = int(gist_mode_args[1])
+        self.gist_max_chunk_size = max(self.gist_chunk_size)
+        if self.model_args.gist_reconstruct_loss_coef is not None:
+            self.log_data.update({"compress_loss": []})
+
+    def compute_loss(
+        self,
+        model: torch.nn.Module,
+        inputs: dict[str, Union[torch.Tensor, Any]],
+        return_outputs: bool = False,
+        num_items_in_batch: Optional[torch.Tensor] = None
+    ):
+        """
+        Override the default compute_loss to process inputs 
+        """
+        batch_size, max_seq_len = inputs["input_ids"].shape
+        # sample a gist chunk size
+        min_seq_len = inputs["attention_mask"].sum(dim=1).min().item()
+        chunk_sizes = [size for size in self.gist_chunk_size if size < min_seq_len]
+        assert len(chunk_sizes) > 0, "The minimum sequence length is less than the gist chunk size!"
+        gist_chunk_size = chunk_sizes[min_seq_len % len(chunk_sizes)] # pseudo-random
+        # gist_chunk_size = max(chunk_sizes)
+        num_chunk = min((min_seq_len - 1) // gist_chunk_size, self.gist_max_chunk_num)
+        context_len = gist_chunk_size * num_chunk
+        if not self.model_args.enable_gist:
+            labels = inputs["input_ids"].clone()
+            labels[~inputs["attention_mask"].bool()] = -100
+            labels[:, :context_len] = -100
+            inputs["labels"] = labels
+            return super().compute_loss(model, inputs, return_outputs, num_items_in_batch)
+        if model.training and self.distill_coef is not None:
+            with torch.no_grad():
+                inputs_len = max_seq_len - context_len
+                self_distill_logits = model(logits_to_keep=inputs_len, use_cache=False, **inputs).logits
+        # split inputs_ids into context and input_ids
+        context_input_ids = inputs["input_ids"][:, :context_len].reshape((batch_size, num_chunk, gist_chunk_size))
+        inputs["context_input_ids"] = context_input_ids
+        inputs["input_ids"] = inputs["input_ids"][:, context_len:]
+        inputs["attention_mask"] = inputs["attention_mask"][:, context_len:].bool()
+        # prepare position_ids
+        position_ids = torch.arange(context_len, max_seq_len, dtype=torch.long, device=inputs["input_ids"].device)
+        inputs["position_ids"] = position_ids.unsqueeze(0).expand(batch_size, -1)
+        # prepare labels
+        labels = inputs["input_ids"].clone()
+        labels[~inputs["attention_mask"]] = -100
+        inputs["labels"] = labels
+        inputs["reconstruct_loss_coef"] = self.model_args.gist_reconstruct_loss_coef
+        loss, outputs = super().compute_loss(model, inputs, True, num_items_in_batch)
+        loss = _as_scalar_loss(loss)
+        if self.model_args.gist_reconstruct_loss_coef is not None:
+            self.log_data["compress_loss"].append(_as_scalar_loss(outputs["reconstruct_loss"]).detach())
+        return (loss, outputs) if return_outputs else loss
+    
+    def prediction_step(
+        self,
+        model: torch.nn.Module,
+        inputs: dict[str, Union[torch.Tensor, Any]],
+        prediction_loss_only: bool,
+        ignore_keys: Optional[list[str]] = None,
+    ) -> tuple[Optional[torch.Tensor], Optional[torch.Tensor], Optional[torch.Tensor]]:
+        attn_impl = model.model.config._attn_implementation
+        model.model.config._attn_implementation = "sdpa"
+        pred = super().prediction_step(model, inputs, prediction_loss_only, ignore_keys)
+        model.model.config._attn_implementation = attn_impl
+        return pred
+
+
+class GistSFTTrainer(Trainer):
+    def __init__(self, *args, model_args: ModelArgs, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.model_args = model_args
+        gist_mode_args = model_args.gist_mode.split("-")
+        self.gist_chunk_size = list(map(int, gist_mode_args[0].split(",")))
+        self.gist_max_chunk_num = int(gist_mode_args[1])
+        self.gist_max_chunk_size = max(self.gist_chunk_size)
+
+    def compute_loss(
+        self,
+        model: torch.nn.Module,
+        inputs: dict[str, Union[torch.Tensor, Any]],
+        return_outputs: bool = False,
+        num_items_in_batch: Optional[torch.Tensor] = None
+    ):
+        """
+        Override the default compute_loss to process inputs 
+        """
+        if not self.model_args.enable_gist:
+            return super().compute_loss(model, inputs, return_outputs, num_items_in_batch)
+        batch_size, max_seq_len = inputs["input_ids"].shape
+        # sample a gist chunk size
+        seq_lens = inputs["attention_mask"].sum(dim=1)
+        response_lens = (inputs["labels"] != -100).sum(dim=1)
+        min_prompt_len = (seq_lens - response_lens).min().item()
+        chunk_sizes = [size for size in self.gist_chunk_size if size < min_prompt_len]
+        assert len(chunk_sizes) > 0, "The minimum sequence length is less than the gist chunk size!"
+        gist_chunk_size = chunk_sizes[min_prompt_len % len(chunk_sizes)] # pseudo-random
+        # gist_chunk_size = max(chunk_sizes)
+        num_chunk = min((min_prompt_len - 1) // gist_chunk_size, self.gist_max_chunk_num)
+        context_len = gist_chunk_size * num_chunk
+        # split inputs_ids into context and input_ids
+        context_input_ids = inputs["input_ids"][:, :context_len].reshape((batch_size, num_chunk, gist_chunk_size))
+        inputs["context_input_ids"] = context_input_ids
+        inputs["input_ids"] = inputs["input_ids"][:, context_len:]
+        inputs["labels"] = inputs["labels"][:, context_len:]
+        inputs["attention_mask"] = inputs["attention_mask"][:, context_len:].bool()
+        # prepare position_ids
+        position_ids = torch.arange(context_len, max_seq_len, dtype=torch.long, device=inputs["input_ids"].device)
+        inputs["position_ids"] = position_ids.unsqueeze(0).expand(batch_size, -1)
+        loss_or_outputs = super().compute_loss(model, inputs, return_outputs, num_items_in_batch)
+        if return_outputs:
+            loss, outputs = loss_or_outputs
+            return _as_scalar_loss(loss), outputs
+        return _as_scalar_loss(loss_or_outputs)
+    
+    def prediction_step(
+        self,
+        model: torch.nn.Module,
+        inputs: dict[str, Union[torch.Tensor, Any]],
+        prediction_loss_only: bool,
+        ignore_keys: Optional[list[str]] = None,
+    ) -> tuple[Optional[torch.Tensor], Optional[torch.Tensor], Optional[torch.Tensor]]:
+        attn_impl = model.model.config._attn_implementation
+        model.model.config._attn_implementation = "sdpa"
+        pred = super().prediction_step(model, inputs, prediction_loss_only, ignore_keys)
+        model.model.config._attn_implementation = attn_impl
+        return pred
+
+
+class GistMultiDocTrainer(TrainerDistillMixin, Trainer):
+    def __init__(
+        self, *args,
+        max_doc_length: int,
+        model_args: ModelArgs,
+        **kwargs
+    ):
+        super().__init__(*args, **kwargs)
+        self.model_args = model_args
+        self.max_doc_length = max_doc_length
+        # realized presented tokens 累计(纯 python int; 见 _accumulate_presented_tokens)
+        self._presented_tokens = 0
+        self._presented_seeded = False
+        if self.model_args.gist_reconstruct_loss_coef is not None:
+            self.log_data.update({"compress_loss": []})
+
+    def _system_attn_impl(self) -> str:
+        attn_impl = getattr(self.model_args, "attn_impl", None)
+        if attn_impl in (None, "flex_attention"):
+            # flash_attention_2 needs the optional flash-attn binary; its
+            # prebuilt wheels require glibc>=2.32, unavailable on the offline
+            # CUDA image family here (2.31).  sdpa is the same causal math in
+            # pure torch; set C2KV_SYSTEM_ATTN_IMPL=flash_attention_2 on hosts
+            # where flash-attn is properly installed.
+            return os.environ.get("C2KV_SYSTEM_ATTN_IMPL", "sdpa")
+        return attn_impl
+
+    def _gist_attn_impl(self) -> str:
+        return getattr(self.model_args, "attn_impl", None) or "flex_attention"
+
+    @staticmethod
+    def _unwrap_model(model: torch.nn.Module) -> torch.nn.Module:
+        return model.module if hasattr(model, "module") else model
+
+    @classmethod
+    def _inner_model(cls, model: torch.nn.Module) -> torch.nn.Module:
+        unwrapped = cls._unwrap_model(model)
+        return unwrapped.model if hasattr(unwrapped, "model") else unwrapped
+
+    @torch.no_grad()
+    def _build_system_kv(
+        self, model, system_input_ids: torch.Tensor
+    ) -> tuple[DynamicCache, torch.Tensor, int]:
+        """Build a per-sample system KV cache from variable-length system prompts.
+
+        `system_input_ids` is right-padded with -100. We left-pad the real tokens to a
+        uniform width `L_sys` (= batch max real length) so the padded past length is the
+        same for every sample, keeping downstream position arithmetic scalar. Padded slots
+        are masked out via the returned 2-D `system_mask`.
+        """
+        unwrapped_model = self._unwrap_model(model)
+        inner_model = self._inner_model(model)
+        device = getattr(unwrapped_model, "device", None)
+        if device is None:
+            device = next(unwrapped_model.parameters()).device
+        system_input_ids = system_input_ids.to(device)
+        real_mask = system_input_ids != -100
+        real_lens = real_mask.sum(dim=1)
+        batch_size = system_input_ids.shape[0]
+        L_sys = int(real_lens.max().item())
+        pad_id = inner_model.config.pad_token_id
+        if pad_id is None:
+            pad_id = 0
+        left_ids = system_input_ids.new_full((batch_size, L_sys), pad_id)
+        system_mask = system_input_ids.new_zeros((batch_size, L_sys))
+        for i in range(batch_size):
+            n = int(real_lens[i].item())
+            if n == 0:
+                continue
+            left_ids[i, L_sys - n:] = system_input_ids[i][real_mask[i]]
+            system_mask[i, L_sys - n:] = 1
+        original_attn_impl = inner_model.config._attn_implementation
+        inner_model.config._attn_implementation = self._system_attn_impl()
+        was_training = unwrapped_model.training
+        unwrapped_model.eval()
+        outputs = model(left_ids, attention_mask=system_mask, use_cache=True, logits_to_keep=1)
+        inner_model.config._attn_implementation = original_attn_impl
+        if was_training:
+            unwrapped_model.train()
+        return outputs.past_key_values, system_mask, L_sys
+
+    def compute_loss(
+        self,
+        model: torch.nn.Module,
+        inputs: dict[str, Union[torch.Tensor, Any]],
+        return_outputs: bool = False,
+        num_items_in_batch: Optional[torch.Tensor] = None
+    ):
+        """
+        Override the default compute_loss to process inputs 
+        """
+        batch_size, doc_total_len = inputs['context_input_ids'].shape
+        assert self.model_args.enable_gist, (
+            "GistMultiDocTrainer currently requires enable_gist=True; "
+            "the vanilla multi-doc path was removed when dynamic system prompts were added."
+        )
+        assert self.distill_coef is None, (
+            "GistMultiDocTrainer does not currently support gist_self_distill_coef; "
+            "teacher logits are not built for dynamic system/context batches."
+        )
+        context_masks = inputs['context_input_ids'] != -100
+        if model.training:
+            # presented 口径剂量记账: 本 microbatch 经 gist 压缩的源文档 token 数
+            self._accumulate_presented_tokens(int(context_masks.sum().item()))
+        # build a per-sample system KV cache from variable-length system prompts
+        system_input_ids = inputs.pop('system_input_ids')
+        system_kv, system_mask, past_length = self._build_system_kv(model, system_input_ids)
+        # prepare inputs for gist inference. The dataset pads every document slot to
+        # max_doc_length, but dynamic-interleave builds masks with O(seq_len^2), so
+        # trim batch-local padding before calling generate_gist.
+        context_input_ids = inputs['context_input_ids'].reshape((batch_size, -1, self.max_doc_length))
+        doc_lengths = (context_input_ids != -100).sum(dim=2)
+        max_doc_active_length = int(doc_lengths.max().item()) if doc_lengths.numel() else 0
+        if 0 < max_doc_active_length < self.max_doc_length:
+            context_input_ids = context_input_ids[:, :, :max_doc_active_length]
+        inputs['context_input_ids'] = context_input_ids
+        inputs['past_key_values'] = system_kv
+        inputs['past_attention_mask'] = system_mask
+        active_lengths = inputs["attention_mask"].sum(dim=1)
+        max_active_length = int(active_lengths.max().item())
+        if 0 < max_active_length < inputs["input_ids"].shape[1]:
+            inputs["input_ids"] = inputs["input_ids"][:, :max_active_length]
+            inputs["attention_mask"] = inputs["attention_mask"][:, :max_active_length]
+            inputs["labels"] = inputs["labels"][:, :max_active_length]
+        input_length = inputs['input_ids'].shape[1]
+        position_ids = torch.arange(input_length, dtype=torch.long, device=inputs["input_ids"].device)
+        position_ids = position_ids.unsqueeze(0).repeat(batch_size, 1)
+        for i, seqlen in enumerate(context_masks.sum(dim=1).tolist()):
+            position_ids[i] += past_length + seqlen
+        inputs["position_ids"] = position_ids
+        label_mask = inputs["labels"] != -100
+        if label_mask.any():
+            first_label_positions = label_mask.float().argmax(dim=1)
+            first_label_position = int(first_label_positions[label_mask.any(dim=1)].min().item())
+            logits_start = max(0, first_label_position - 1)
+            if logits_start > 0:
+                inputs["labels"] = inputs["labels"][:, logits_start:]
+                inputs["logits_to_keep"] = input_length - logits_start
+        else:
+            raise ValueError(
+                "Batch has no supervised label tokens after preprocessing/truncation. "
+                f"input_length={input_length}, max_doc_length={self.max_doc_length}"
+            )
+        inputs["reconstruct_loss_coef"] = self.model_args.gist_reconstruct_loss_coef
+        self._inner_model(model).config._attn_implementation = self._gist_attn_impl()
+        loss, outputs = super().compute_loss(model, inputs, True, num_items_in_batch)
+        loss = _as_scalar_loss(loss)
+        label_token_count = int((inputs["labels"] != -100).sum().detach().cpu().item())
+        self.log_data.setdefault("label_tokens", []).append(
+            # labels are Long: force float32 so TrainerDistillMixin.log can
+            # mean() the stack (torch raises on Long mean).
+            inputs["labels"].new_tensor(float(label_token_count), dtype=torch.float32).detach()
+        )
+        if not torch.isfinite(loss):
+            raise FloatingPointError(
+                f"Non-finite loss detected: {loss.detach().float().item()}, "
+                f"label_tokens={label_token_count}, "
+                f"attn_impl={self._inner_model(model).config._attn_implementation}, "
+                f"max_doc_length={self.max_doc_length}, "
+                f"input_length={input_length}"
+            )
+        if model.training and not loss.requires_grad:
+            trainable = [
+                name for name, param in self._unwrap_model(model).named_parameters()
+                if param.requires_grad
+            ]
+            raise RuntimeError(
+                "Loss does not require grad even though supervised labels are present. "
+                f"label_tokens={label_token_count}, "
+                f"num_trainable_params={len(trainable)}, "
+                f"trainable_sample={trainable[:8]}"
+            )
+        if self.model_args.gist_reconstruct_loss_coef is not None and model.training:
+            self.log_data["compress_loss"].append(_as_scalar_loss(outputs["reconstruct_loss"]).detach())
+        return (loss, outputs) if return_outputs else loss
+
+    def _accumulate_presented_tokens(self, n_local: int) -> None:
+        """realized presented tokens 累计：每个 training microbatch 里经 gist 压缩
+        路径的源文档 token 数（context_input_ids 的非 -100 槽）。
+
+        纯 python int、无跨 rank 同步：各 rank 只数自己的 microbatch，× world_size
+        外推全局（各 rank 数据同分布，长程偏差可忽略；不引入 all-reduce）。
+        崩溃 resume 后从 log_history 最后一条恢复，保证跨 attempt 单调累计。"""
+        if not self._presented_seeded:
+            self._presented_seeded = True
+            state = getattr(self, "state", None)
+            for entry in reversed(getattr(state, "log_history", None) or []):
+                if "presented_tokens" in entry:
+                    self._presented_tokens = int(entry["presented_tokens"])
+                    break
+        self._presented_tokens += n_local * max(1, int(getattr(self.args, "world_size", 1)))
+
+    def log(self, logs: dict[str, float], start_time: Optional[float] = None) -> None:
+        # 随 log_history 每个 logging step 输出 presented_tokens 累计值
+        # (供 start_h200.sh select 阶段核对 realized/target 剂量)。
+        if self._presented_tokens > 0:
+            logs["presented_tokens"] = self._presented_tokens
+        super().log(logs, start_time)
+
+    def prediction_step(
+        self,
+        model: torch.nn.Module,
+        inputs: dict[str, Union[torch.Tensor, Any]],
+        prediction_loss_only: bool,
+        ignore_keys: Optional[list[str]] = None,
+    ) -> tuple[Optional[torch.Tensor], Optional[torch.Tensor], Optional[torch.Tensor]]:
+        self._inner_model(model).config._attn_implementation = self._gist_attn_impl()
+        pred = super().prediction_step(model, inputs, prediction_loss_only, ignore_keys)
+        return pred

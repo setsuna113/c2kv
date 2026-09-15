@@ -1,0 +1,1167 @@
+{
+  "schema": "a-history-system-r001-peer-sources-v1",
+  "status": "audited_reuse40_missing40_peer_base10_completion_ready_for_root_freeze_preview",
+  "evaluation_stage": "development_search",
+  "independent_holdout": false,
+  "sample_label": "preliminary, n=1",
+  "r001_manifest": {
+    "path": "experiments/history_system/configs/r001.tasks.json",
+    "sha256": "9bca04418dace5294f1c3e5cfcf233c89a78679c3fcb4863ba12d4804794036b",
+    "bytes": 1180
+  },
+  "base_completion_manifest": {
+    "path": "experiments/history_system/configs/r001.peer_missing.tasks.json",
+    "sha256": "08127f69714866bb1396148f21b0fcdf6f9dd2de26c350e405987d52acceca26",
+    "bytes": 795
+  },
+  "comparison_source": {
+    "path": "outputs/a_memory_runtime_20260913/native_b500_system_comparison_v2/comparison.compact.json",
+    "sha256": "31fb4d51d0dc96a189e0341ce528317623dce92990b9a46ed14d0d4861517513",
+    "bytes": 29221
+  },
+  "required_comparison_identity": {
+    "checkpoint": {
+      "training_arm": "B",
+      "parameter_version": 500,
+      "config_sha256": "0cd14ddcce24f3784d35807ababa3659861ad5bb155aa23504c34f2a4bd4779b",
+      "trainer_state_sha256": "a01efda259ce55a4626c1df849bfe8247de23838662882ef0e7e05eb47709d9a"
+    },
+    "sampling": {
+      "mode": "greedy",
+      "temperature": 0,
+      "seed": 0,
+      "max_completion_tokens": 4096
+    },
+    "official_scorer_files": {
+      "bfcl_eval/data/BFCL_v4_multi_turn_base.json": "1a21a995d06fd6f20ba55de7bced30ef953ec35e998f502ec2ecf4d66ef1c43a",
+      "bfcl_eval/data/possible_answer/BFCL_v4_multi_turn_base.json": "1fee67823b317571649177dd89d63969feaae4e810cc7448ee55ba797fb7c8fc",
+      "bfcl_eval/data/BFCL_v4_multi_turn_long_context.json": "78c3268c5cc8e97c0f4ec6c811b3b9a2bba14323b1830b7a874b06d822749324",
+      "bfcl_eval/data/possible_answer/BFCL_v4_multi_turn_long_context.json": "e82aa0e839c39d23c64a05834f7ae024d7c9738ec21738ecee78dc876e3d0d18",
+      "bfcl_eval/eval_checker/multi_turn_eval/multi_turn_checker.py": "b3b787515eda3bf0e365e39634a8fc7f831763f010f716d35d86f96fd5aab1b5"
+    },
+    "exact_ordered_task_manifest": "r001_mixed20",
+    "comparison_scope": "matched B500, greedy sampling, official scorer, and same fixed r001 manifest support a descriptive whole-system comparison",
+    "strict_causal_claim": false
+  },
+  "reuse_audit": {
+    "selected_group_ordinals": [
+      0,
+      20,
+      40,
+      50,
+      60,
+      100,
+      120,
+      130,
+      170,
+      190
+    ],
+    "total_method_task_cells": 80,
+    "validated_reused_long_cells": 40,
+    "missing_base_cells": 40,
+    "methods": {
+      "raw": {
+        "source_design": {
+          "path": "outputs/a_memory_runtime_20260912/native_raw_b500_long20_v1/submitted/tmp/a_memory_runtime_20260912/native_raw_b500_long20_importfix_v1/design.frozen.json",
+          "sha256": "33b6e1479212523846d2756ab40c89194db668f5f1c418f004268c61f2880589",
+          "bytes": 17383
+        },
+        "result_roots": [
+          "outputs/a_memory_runtime_20260912/native_raw_b500_long20_v1/returned",
+          "outputs/a_memory_runtime_20260912/native_raw_b500_remainder6_v1/returned"
+        ],
+        "long_reuse": {
+          "status": "complete_for_selected_r001_long10",
+          "sample_label": "preliminary, n=1",
+          "fixed_denominator": 10,
+          "validated_official_cells": 10,
+          "algorithm_successes": 5,
+          "algorithm_failures": 5,
+          "unknown": 0,
+          "cells": [
+            {
+              "task_id": "multi_turn_long_context_0",
+              "reuse_status": "reused_validated_official_result",
+              "outcome": "algorithm_failure",
+              "correct": false,
+              "sample_label": "preliminary, n=1",
+              "official_summary": {
+                "path": "outputs/a_memory_runtime_20260912/native_raw_b500_long20_v1/returned/task_shards/multi_turn_long_context_0/bfcl/official_summary.json",
+                "sha256": "3e08dd996bc5f8a1693345c7c48a17ad5235f65fb774799b3f07af0d76321896",
+                "bytes": 2102
+              },
+              "official_score_headers": [
+                {
+                  "path": "outputs/a_memory_runtime_20260912/native_raw_b500_long20_v1/returned/task_shards/multi_turn_long_context_0/bfcl/bfcl/score/c2kv-event-native-raw-native-s0-lexical-raw-reserve-failed-operation/multi_turn/BFCL_v4_multi_turn_long_context_score.json",
+                  "sha256": "62b9f0f454df6c03edc2b28c8f5537a6224cbcf182aeb18c09de47d35967ea76",
+                  "bytes": 123319,
+                  "status": "validated"
+                }
+              ]
+            },
+            {
+              "task_id": "multi_turn_long_context_20",
+              "reuse_status": "reused_validated_official_result",
+              "outcome": "algorithm_failure",
+              "correct": false,
+              "sample_label": "preliminary, n=1",
+              "official_summary": {
+                "path": "outputs/a_memory_runtime_20260912/native_raw_b500_long20_v1/returned/task_shards/multi_turn_long_context_20/bfcl/official_summary.json",
+                "sha256": "9872ad901032123d4cf0b8bfec419d32773201fe5b9d4171209befb2668e0a0f",
+                "bytes": 2105
+              },
+              "official_score_headers": [
+                {
+                  "path": "outputs/a_memory_runtime_20260912/native_raw_b500_long20_v1/returned/task_shards/multi_turn_long_context_20/bfcl/bfcl/score/c2kv-event-native-raw-native-s0-lexical-raw-reserve-failed-operation/multi_turn/BFCL_v4_multi_turn_long_context_score.json",
+                  "sha256": "0ed5b9aaf2ff048b2e0dcea4ef92c8dc7e4ba4529d2c395e612ab544510a659f",
+                  "bytes": 44131,
+                  "status": "validated"
+                }
+              ]
+            },
+            {
+              "task_id": "multi_turn_long_context_40",
+              "reuse_status": "reused_validated_official_result",
+              "outcome": "algorithm_failure",
+              "correct": false,
+              "sample_label": "preliminary, n=1",
+              "official_summary": {
+                "path": "outputs/a_memory_runtime_20260912/native_raw_b500_long20_v1/returned/task_shards/multi_turn_long_context_40/bfcl/official_summary.json",
+                "sha256": "7fc2a093bbd0cef40c1ad7a67d3903820003ad47cbd9febff70bc3746ad8daf6",
+                "bytes": 2105
+              },
+              "official_score_headers": [
+                {
+                  "path": "outputs/a_memory_runtime_20260912/native_raw_b500_long20_v1/returned/task_shards/multi_turn_long_context_40/bfcl/bfcl/score/c2kv-event-native-raw-native-s0-lexical-raw-reserve-failed-operation/multi_turn/BFCL_v4_multi_turn_long_context_score.json",
+                  "sha256": "c9004aa1e042cf1de8447b5f09002748b201d20e90ad811e5b7d1d127152a98f",
+                  "bytes": 74489,
+                  "status": "validated"
+                }
+              ]
+            },
+            {
+              "task_id": "multi_turn_long_context_50",
+              "reuse_status": "reused_validated_official_result",
+              "outcome": "algorithm_success",
+              "correct": true,
+              "sample_label": "preliminary, n=1",
+              "official_summary": {
+                "path": "outputs/a_memory_runtime_20260912/native_raw_b500_long20_v1/returned/task_shards/multi_turn_long_context_50/bfcl/official_summary.json",
+                "sha256": "1a67255d94ba324dbebc2ac3d1d5a2fd9c083daa1a8ff8ed3952d945c5e1c25d",
+                "bytes": 2105
+              },
+              "official_score_headers": [
+                {
+                  "path": "outputs/a_memory_runtime_20260912/native_raw_b500_long20_v1/returned/task_shards/multi_turn_long_context_50/bfcl/bfcl/score/c2kv-event-native-raw-native-s0-lexical-raw-reserve-failed-operation/multi_turn/BFCL_v4_multi_turn_long_context_score.json",
+                  "sha256": "92ab4990b62f1b6dfd7a6afa01877b87316d60d5e3a8c221330d83b7bf0696d5",
+                  "bytes": 56,
+                  "status": "validated"
+                }
+              ]
+            },
+            {
+              "task_id": "multi_turn_long_context_60",
+              "reuse_status": "reused_validated_official_result",
+              "outcome": "algorithm_failure",
+              "correct": false,
+              "sample_label": "preliminary, n=1",
+              "official_summary": {
+                "path": "outputs/a_memory_runtime_20260912/native_raw_b500_long20_v1/returned/task_shards/multi_turn_long_context_60/bfcl/official_summary.json",
+                "sha256": "fbe60f7f98a1372dcc26f097463d6081eaad9dbc784712c8d683dd8393a6ac82",
+                "bytes": 2105
+              },
+              "official_score_headers": [
+                {
+                  "path": "outputs/a_memory_runtime_20260912/native_raw_b500_long20_v1/returned/task_shards/multi_turn_long_context_60/bfcl/bfcl/score/c2kv-event-native-raw-native-s0-lexical-raw-reserve-failed-operation/multi_turn/BFCL_v4_multi_turn_long_context_score.json",
+                  "sha256": "47cd905ab46c75abff92ea38b1f9dfd983ec52f9f7ff6de7d24186c88ef82b2d",
+                  "bytes": 18116,
+                  "status": "validated"
+                }
+              ]
+            },
+            {
+              "task_id": "multi_turn_long_context_100",
+              "reuse_status": "reused_validated_official_result",
+              "outcome": "algorithm_success",
+              "correct": true,
+              "sample_label": "preliminary, n=1",
+              "official_summary": {
+                "path": "outputs/a_memory_runtime_20260912/native_raw_b500_long20_v1/returned/task_shards/multi_turn_long_context_100/bfcl/official_summary.json",
+                "sha256": "9c83d81e4499c8991ecfa2989c036e14fbbcdb5ebb231dc02be944df29844886",
+                "bytes": 2108
+              },
+              "official_score_headers": [
+                {
+                  "path": "outputs/a_memory_runtime_20260912/native_raw_b500_long20_v1/returned/task_shards/multi_turn_long_context_100/bfcl/bfcl/score/c2kv-event-native-raw-native-s0-lexical-raw-reserve-failed-operation/multi_turn/BFCL_v4_multi_turn_long_context_score.json",
+                  "sha256": "92ab4990b62f1b6dfd7a6afa01877b87316d60d5e3a8c221330d83b7bf0696d5",
+                  "bytes": 56,
+                  "status": "validated"
+                }
+              ]
+            },
+            {
+              "task_id": "multi_turn_long_context_120",
+              "reuse_status": "reused_validated_official_result",
+              "outcome": "algorithm_success",
+              "correct": true,
+              "sample_label": "preliminary, n=1",
+              "official_summary": {
+                "path": "outputs/a_memory_runtime_20260912/native_raw_b500_long20_v1/returned/task_shards/multi_turn_long_context_120/bfcl/official_summary.json",
+                "sha256": "a23f8d12152571c61ccb0e291912cb6216b14acd6364820a2b9f5d1fd2039c15",
+                "bytes": 2108
+              },
+              "official_score_headers": [
+                {
+                  "path": "outputs/a_memory_runtime_20260912/native_raw_b500_long20_v1/returned/task_shards/multi_turn_long_context_120/bfcl/bfcl/score/c2kv-event-native-raw-native-s0-lexical-raw-reserve-failed-operation/multi_turn/BFCL_v4_multi_turn_long_context_score.json",
+                  "sha256": "92ab4990b62f1b6dfd7a6afa01877b87316d60d5e3a8c221330d83b7bf0696d5",
+                  "bytes": 56,
+                  "status": "validated"
+                }
+              ]
+            },
+            {
+              "task_id": "multi_turn_long_context_130",
+              "reuse_status": "reused_validated_official_result",
+              "outcome": "algorithm_success",
+              "correct": true,
+              "sample_label": "preliminary, n=1",
+              "official_summary": {
+                "path": "outputs/a_memory_runtime_20260912/native_raw_b500_long20_v1/returned/task_shards/multi_turn_long_context_130/bfcl/official_summary.json",
+                "sha256": "cb41ffc82ff9705eccf1d3f1cd7395b191a98e7a270c92ea2a968f4b5a4d30c2",
+                "bytes": 2108
+              },
+              "official_score_headers": [
+                {
+                  "path": "outputs/a_memory_runtime_20260912/native_raw_b500_long20_v1/returned/task_shards/multi_turn_long_context_130/bfcl/bfcl/score/c2kv-event-native-raw-native-s0-lexical-raw-reserve-failed-operation/multi_turn/BFCL_v4_multi_turn_long_context_score.json",
+                  "sha256": "92ab4990b62f1b6dfd7a6afa01877b87316d60d5e3a8c221330d83b7bf0696d5",
+                  "bytes": 56,
+                  "status": "validated"
+                }
+              ]
+            },
+            {
+              "task_id": "multi_turn_long_context_170",
+              "reuse_status": "reused_validated_official_result",
+              "outcome": "algorithm_failure",
+              "correct": false,
+              "sample_label": "preliminary, n=1",
+              "official_summary": {
+                "path": "outputs/a_memory_runtime_20260912/native_raw_b500_remainder6_v1/returned/task_shards/multi_turn_long_context_170/bfcl/official_summary.json",
+                "sha256": "167c87c8cdd0d346d1f4e4b926e92b3e606b1fb320d70a1d5d8af2a7429fdd4b",
+                "bytes": 2120
+              },
+              "official_score_headers": [
+                {
+                  "path": "outputs/a_memory_runtime_20260912/native_raw_b500_remainder6_v1/returned/task_shards/multi_turn_long_context_170/bfcl/bfcl/score/c2kv-event-native-raw-native-s0-lexical-raw-reserve-failed-operation/multi_turn/BFCL_v4_multi_turn_long_context_score.json",
+                  "sha256": "4c2a028cfe531923e37f41691eccd4395c39abc17d2c4e30d8a41d3c7da24e02",
+                  "bytes": 110820,
+                  "status": "validated"
+                }
+              ]
+            },
+            {
+              "task_id": "multi_turn_long_context_190",
+              "reuse_status": "reused_validated_official_result",
+              "outcome": "algorithm_success",
+              "correct": true,
+              "sample_label": "preliminary, n=1",
+              "official_summary": {
+                "path": "outputs/a_memory_runtime_20260912/native_raw_b500_remainder6_v1/returned/task_shards/multi_turn_long_context_190/bfcl/official_summary.json",
+                "sha256": "b0a93c1ba73ddfbd524207c694ad63e1bdafd82873b49ef19e2b1ffb7754f2e1",
+                "bytes": 2120
+              },
+              "official_score_headers": [
+                {
+                  "path": "outputs/a_memory_runtime_20260912/native_raw_b500_remainder6_v1/returned/task_shards/multi_turn_long_context_190/bfcl/bfcl/score/c2kv-event-native-raw-native-s0-lexical-raw-reserve-failed-operation/multi_turn/BFCL_v4_multi_turn_long_context_score.json",
+                  "sha256": "92ab4990b62f1b6dfd7a6afa01877b87316d60d5e3a8c221330d83b7bf0696d5",
+                  "bytes": 56,
+                  "status": "validated"
+                }
+              ]
+            }
+          ]
+        },
+        "base_completion": {
+          "status": "missing_requires_new_run",
+          "fixed_denominator": 10,
+          "reusable_cells": 0,
+          "missing_cells": [
+            "multi_turn_base_0",
+            "multi_turn_base_20",
+            "multi_turn_base_40",
+            "multi_turn_base_50",
+            "multi_turn_base_60",
+            "multi_turn_base_100",
+            "multi_turn_base_120",
+            "multi_turn_base_130",
+            "multi_turn_base_170",
+            "multi_turn_base_190"
+          ],
+          "collection_behavior_before_completion": "all missing cells remain unknown; they are not algorithm failures and no incomplete-subset accuracy is promoted as the full-manifest score"
+        },
+        "peer_config": {
+          "path": "experiments/history_system/peers/configs/raw.base10.json",
+          "sha256": "435e9e15e71fc798204c60b1ddcc5db110f4adcd5144a9145a9f8d4478a5cb51",
+          "bytes": 6411
+        }
+      },
+      "text": {
+        "source_design": {
+          "path": "outputs/a_memory_runtime_20260913/native_text_b500_long20_metafix_v1/submitted/design.frozen.json",
+          "sha256": "3eb852e4313c648a9081a20294c3a3ed46d329d3f0f3cfa28f768a3ae9dc16f3",
+          "bytes": 14526
+        },
+        "result_roots": [
+          "outputs/a_memory_runtime_20260913/native_text_b500_long20_metafix_v1/returned"
+        ],
+        "long_reuse": {
+          "status": "complete_for_selected_r001_long10",
+          "sample_label": "preliminary, n=1",
+          "fixed_denominator": 10,
+          "validated_official_cells": 10,
+          "algorithm_successes": 3,
+          "algorithm_failures": 7,
+          "unknown": 0,
+          "cells": [
+            {
+              "task_id": "multi_turn_long_context_0",
+              "reuse_status": "reused_validated_official_result",
+              "outcome": "algorithm_failure",
+              "correct": false,
+              "sample_label": "preliminary, n=1",
+              "official_summary": {
+                "path": "outputs/a_memory_runtime_20260913/native_text_b500_long20_metafix_v1/returned/task_shards/multi_turn_long_context_0/bfcl/official_summary.json",
+                "sha256": "28055f19015cc90e9ca3c8011635d1b97e8c9566d87a71f8d1531e0fc1ae7b8b",
+                "bytes": 2138
+              },
+              "official_score_headers": [
+                {
+                  "path": "outputs/a_memory_runtime_20260913/native_text_b500_long20_metafix_v1/returned/task_shards/multi_turn_long_context_0/bfcl/bfcl/score/c2kv-event-native-text-summary-native-s0-lexical-raw-reserve-failed-operation/multi_turn/BFCL_v4_multi_turn_long_context_score.json",
+                  "sha256": "4267ba92dd72df796e2cc871dd163c60687036c3a228b8fe0bdbb28e2dc03a3f",
+                  "bytes": 130640,
+                  "status": "validated"
+                }
+              ]
+            },
+            {
+              "task_id": "multi_turn_long_context_20",
+              "reuse_status": "reused_validated_official_result",
+              "outcome": "algorithm_failure",
+              "correct": false,
+              "sample_label": "preliminary, n=1",
+              "official_summary": {
+                "path": "outputs/a_memory_runtime_20260913/native_text_b500_long20_metafix_v1/returned/task_shards/multi_turn_long_context_20/bfcl/official_summary.json",
+                "sha256": "b2881c1bb3c7c5708b4b4fcc4ca030fba5852a38a1bca3870ba8b4882ffea8d1",
+                "bytes": 2141
+              },
+              "official_score_headers": [
+                {
+                  "path": "outputs/a_memory_runtime_20260913/native_text_b500_long20_metafix_v1/returned/task_shards/multi_turn_long_context_20/bfcl/bfcl/score/c2kv-event-native-text-summary-native-s0-lexical-raw-reserve-failed-operation/multi_turn/BFCL_v4_multi_turn_long_context_score.json",
+                  "sha256": "5d2fe502532672cfb5c1223632073b96a8fa3572089d432b5ded00e6e13b9bd7",
+                  "bytes": 5333,
+                  "status": "validated"
+                }
+              ]
+            },
+            {
+              "task_id": "multi_turn_long_context_40",
+              "reuse_status": "reused_validated_official_result",
+              "outcome": "algorithm_failure",
+              "correct": false,
+              "sample_label": "preliminary, n=1",
+              "official_summary": {
+                "path": "outputs/a_memory_runtime_20260913/native_text_b500_long20_metafix_v1/returned/task_shards/multi_turn_long_context_40/bfcl/official_summary.json",
+                "sha256": "38f2cd6f79b2b0dd67e01e6835ad1be2c755baeba1d859b8008f27a64712cc63",
+                "bytes": 2141
+              },
+              "official_score_headers": [
+                {
+                  "path": "outputs/a_memory_runtime_20260913/native_text_b500_long20_metafix_v1/returned/task_shards/multi_turn_long_context_40/bfcl/bfcl/score/c2kv-event-native-text-summary-native-s0-lexical-raw-reserve-failed-operation/multi_turn/BFCL_v4_multi_turn_long_context_score.json",
+                  "sha256": "e61cbe85b632a14c96a0cd7162efffee94fde70666914f92a74d4bc8e4c05e36",
+                  "bytes": 75440,
+                  "status": "validated"
+                }
+              ]
+            },
+            {
+              "task_id": "multi_turn_long_context_50",
+              "reuse_status": "reused_validated_official_result",
+              "outcome": "algorithm_success",
+              "correct": true,
+              "sample_label": "preliminary, n=1",
+              "official_summary": {
+                "path": "outputs/a_memory_runtime_20260913/native_text_b500_long20_metafix_v1/returned/task_shards/multi_turn_long_context_50/bfcl/official_summary.json",
+                "sha256": "3f1bb2aa4d0c686b519714060704d5cdf9124bc24cb6760c8b19990139fe2cd3",
+                "bytes": 2141
+              },
+              "official_score_headers": [
+                {
+                  "path": "outputs/a_memory_runtime_20260913/native_text_b500_long20_metafix_v1/returned/task_shards/multi_turn_long_context_50/bfcl/bfcl/score/c2kv-event-native-text-summary-native-s0-lexical-raw-reserve-failed-operation/multi_turn/BFCL_v4_multi_turn_long_context_score.json",
+                  "sha256": "92ab4990b62f1b6dfd7a6afa01877b87316d60d5e3a8c221330d83b7bf0696d5",
+                  "bytes": 56,
+                  "status": "validated"
+                }
+              ]
+            },
+            {
+              "task_id": "multi_turn_long_context_60",
+              "reuse_status": "reused_validated_official_result",
+              "outcome": "algorithm_failure",
+              "correct": false,
+              "sample_label": "preliminary, n=1",
+              "official_summary": {
+                "path": "outputs/a_memory_runtime_20260913/native_text_b500_long20_metafix_v1/returned/task_shards/multi_turn_long_context_60/bfcl/official_summary.json",
+                "sha256": "21732a4e622115f7517261cba7a2d42cf319943a45b810021c5cd40d0517fb15",
+                "bytes": 2141
+              },
+              "official_score_headers": [
+                {
+                  "path": "outputs/a_memory_runtime_20260913/native_text_b500_long20_metafix_v1/returned/task_shards/multi_turn_long_context_60/bfcl/bfcl/score/c2kv-event-native-text-summary-native-s0-lexical-raw-reserve-failed-operation/multi_turn/BFCL_v4_multi_turn_long_context_score.json",
+                  "sha256": "77e9c3073c5ac4e5a7ca8477bb85dc941df2a2391584925a8547b7d4ede371a1",
+                  "bytes": 25948,
+                  "status": "validated"
+                }
+              ]
+            },
+            {
+              "task_id": "multi_turn_long_context_100",
+              "reuse_status": "reused_validated_official_result",
+              "outcome": "algorithm_failure",
+              "correct": false,
+              "sample_label": "preliminary, n=1",
+              "official_summary": {
+                "path": "outputs/a_memory_runtime_20260913/native_text_b500_long20_metafix_v1/returned/task_shards/multi_turn_long_context_100/bfcl/official_summary.json",
+                "sha256": "0d1240da039ee13590c931d614419019cd56181e1f7fcb51971e3115831685d5",
+                "bytes": 2144
+              },
+              "official_score_headers": [
+                {
+                  "path": "outputs/a_memory_runtime_20260913/native_text_b500_long20_metafix_v1/returned/task_shards/multi_turn_long_context_100/bfcl/bfcl/score/c2kv-event-native-text-summary-native-s0-lexical-raw-reserve-failed-operation/multi_turn/BFCL_v4_multi_turn_long_context_score.json",
+                  "sha256": "810be8a2b9c92a4fbf07ad4a9ee6b059751539e5cdea81cbd79b604e9c4a8598",
+                  "bytes": 823926,
+                  "status": "validated"
+                }
+              ]
+            },
+            {
+              "task_id": "multi_turn_long_context_120",
+              "reuse_status": "reused_validated_official_result",
+              "outcome": "algorithm_failure",
+              "correct": false,
+              "sample_label": "preliminary, n=1",
+              "official_summary": {
+                "path": "outputs/a_memory_runtime_20260913/native_text_b500_long20_metafix_v1/returned/task_shards/multi_turn_long_context_120/bfcl/official_summary.json",
+                "sha256": "a5f02af7593e0eb9d07ecc79052f40657f6d55ab90149b75c336086437ad73cb",
+                "bytes": 2144
+              },
+              "official_score_headers": [
+                {
+                  "path": "outputs/a_memory_runtime_20260913/native_text_b500_long20_metafix_v1/returned/task_shards/multi_turn_long_context_120/bfcl/bfcl/score/c2kv-event-native-text-summary-native-s0-lexical-raw-reserve-failed-operation/multi_turn/BFCL_v4_multi_turn_long_context_score.json",
+                  "sha256": "bc04ada538df17044632b70c583a7ff273f7ee55ee72196c5ecb3a414c65b6b5",
+                  "bytes": 646838,
+                  "status": "validated"
+                }
+              ]
+            },
+            {
+              "task_id": "multi_turn_long_context_130",
+              "reuse_status": "reused_validated_official_result",
+              "outcome": "algorithm_success",
+              "correct": true,
+              "sample_label": "preliminary, n=1",
+              "official_summary": {
+                "path": "outputs/a_memory_runtime_20260913/native_text_b500_long20_metafix_v1/returned/task_shards/multi_turn_long_context_130/bfcl/official_summary.json",
+                "sha256": "39014595cda43c0e0c9605299d4b59ea4b20832fded6b8c8ab77111acd240c2c",
+                "bytes": 2144
+              },
+              "official_score_headers": [
+                {
+                  "path": "outputs/a_memory_runtime_20260913/native_text_b500_long20_metafix_v1/returned/task_shards/multi_turn_long_context_130/bfcl/bfcl/score/c2kv-event-native-text-summary-native-s0-lexical-raw-reserve-failed-operation/multi_turn/BFCL_v4_multi_turn_long_context_score.json",
+                  "sha256": "92ab4990b62f1b6dfd7a6afa01877b87316d60d5e3a8c221330d83b7bf0696d5",
+                  "bytes": 56,
+                  "status": "validated"
+                }
+              ]
+            },
+            {
+              "task_id": "multi_turn_long_context_170",
+              "reuse_status": "reused_validated_official_result",
+              "outcome": "algorithm_failure",
+              "correct": false,
+              "sample_label": "preliminary, n=1",
+              "official_summary": {
+                "path": "outputs/a_memory_runtime_20260913/native_text_b500_long20_metafix_v1/returned/task_shards/multi_turn_long_context_170/bfcl/official_summary.json",
+                "sha256": "2f05e889adf803b62ba1ced5017e777f47bf3f827cf06a147725f86c80eeaa23",
+                "bytes": 2144
+              },
+              "official_score_headers": [
+                {
+                  "path": "outputs/a_memory_runtime_20260913/native_text_b500_long20_metafix_v1/returned/task_shards/multi_turn_long_context_170/bfcl/bfcl/score/c2kv-event-native-text-summary-native-s0-lexical-raw-reserve-failed-operation/multi_turn/BFCL_v4_multi_turn_long_context_score.json",
+                  "sha256": "4cd27d8e24c17a0bc04f672d6ea39164ca198e5fc78d586cb580703d2f1d49ce",
+                  "bytes": 130311,
+                  "status": "validated"
+                }
+              ]
+            },
+            {
+              "task_id": "multi_turn_long_context_190",
+              "reuse_status": "reused_validated_official_result",
+              "outcome": "algorithm_success",
+              "correct": true,
+              "sample_label": "preliminary, n=1",
+              "official_summary": {
+                "path": "outputs/a_memory_runtime_20260913/native_text_b500_long20_metafix_v1/returned/task_shards/multi_turn_long_context_190/bfcl/official_summary.json",
+                "sha256": "b3265cf1ec51b0947efbf77881fd7f86fce7895d15517dd57afa677b384f939b",
+                "bytes": 2144
+              },
+              "official_score_headers": [
+                {
+                  "path": "outputs/a_memory_runtime_20260913/native_text_b500_long20_metafix_v1/returned/task_shards/multi_turn_long_context_190/bfcl/bfcl/score/c2kv-event-native-text-summary-native-s0-lexical-raw-reserve-failed-operation/multi_turn/BFCL_v4_multi_turn_long_context_score.json",
+                  "sha256": "92ab4990b62f1b6dfd7a6afa01877b87316d60d5e3a8c221330d83b7bf0696d5",
+                  "bytes": 56,
+                  "status": "validated"
+                }
+              ]
+            }
+          ]
+        },
+        "base_completion": {
+          "status": "missing_requires_new_run",
+          "fixed_denominator": 10,
+          "reusable_cells": 0,
+          "missing_cells": [
+            "multi_turn_base_0",
+            "multi_turn_base_20",
+            "multi_turn_base_40",
+            "multi_turn_base_50",
+            "multi_turn_base_60",
+            "multi_turn_base_100",
+            "multi_turn_base_120",
+            "multi_turn_base_130",
+            "multi_turn_base_170",
+            "multi_turn_base_190"
+          ],
+          "collection_behavior_before_completion": "all missing cells remain unknown; they are not algorithm failures and no incomplete-subset accuracy is promoted as the full-manifest score"
+        },
+        "peer_config": {
+          "path": "experiments/history_system/peers/configs/text.base10.json",
+          "sha256": "f24f289660780fc3b6220e6cb6b91654d5e0a6b9968a6e4b639e9b1db4492440",
+          "bytes": 6416
+        }
+      },
+      "full": {
+        "source_design": {
+          "path": "outputs/a_memory_runtime_20260912/native_full_b500_long20_v1/submitted/tmp/a_memory_runtime_20260912/native_full_b500_long20_v1/design.frozen.json",
+          "sha256": "2ae5dec32d1d1c2cef7a8619f2f97a9301f3b7cdfbb342b9df38e9d7d4b16b37",
+          "bytes": 12801
+        },
+        "result_roots": [
+          "outputs/a_memory_runtime_20260912/native_full_b500_long20_v1/returned"
+        ],
+        "long_reuse": {
+          "status": "complete_for_selected_r001_long10",
+          "sample_label": "preliminary, n=1",
+          "fixed_denominator": 10,
+          "validated_official_cells": 10,
+          "algorithm_successes": 3,
+          "algorithm_failures": 7,
+          "unknown": 0,
+          "cells": [
+            {
+              "task_id": "multi_turn_long_context_0",
+              "reuse_status": "reused_validated_official_result",
+              "outcome": "algorithm_failure",
+              "correct": false,
+              "sample_label": "preliminary, n=1",
+              "official_summary": {
+                "path": "outputs/a_memory_runtime_20260912/native_full_b500_long20_v1/returned/task_shards/multi_turn_long_context_0/bfcl/official_summary.json",
+                "sha256": "59fe423a5923f4bf23ac73d72cfdee6cc2021278b936cff94709e9a8f2f68b1c",
+                "bytes": 2068
+              },
+              "official_score_headers": [
+                {
+                  "path": "outputs/a_memory_runtime_20260912/native_full_b500_long20_v1/returned/task_shards/multi_turn_long_context_0/bfcl/bfcl/score/c2kv-event-native-full-original/multi_turn/BFCL_v4_multi_turn_long_context_score.json",
+                  "sha256": "bb2d70e4ff81b7d26effe37bab9e10cdb383bbfb9e0fba98b44003723d538287",
+                  "bytes": 123380,
+                  "status": "validated"
+                }
+              ]
+            },
+            {
+              "task_id": "multi_turn_long_context_20",
+              "reuse_status": "reused_validated_official_result",
+              "outcome": "algorithm_success",
+              "correct": true,
+              "sample_label": "preliminary, n=1",
+              "official_summary": {
+                "path": "outputs/a_memory_runtime_20260912/native_full_b500_long20_v1/returned/task_shards/multi_turn_long_context_20/bfcl/official_summary.json",
+                "sha256": "c222624d790263e7e39e6be6ecea6a786393307202a046a65ff3e095671c47b6",
+                "bytes": 2071
+              },
+              "official_score_headers": [
+                {
+                  "path": "outputs/a_memory_runtime_20260912/native_full_b500_long20_v1/returned/task_shards/multi_turn_long_context_20/bfcl/bfcl/score/c2kv-event-native-full-original/multi_turn/BFCL_v4_multi_turn_long_context_score.json",
+                  "sha256": "92ab4990b62f1b6dfd7a6afa01877b87316d60d5e3a8c221330d83b7bf0696d5",
+                  "bytes": 56,
+                  "status": "validated"
+                }
+              ]
+            },
+            {
+              "task_id": "multi_turn_long_context_40",
+              "reuse_status": "reused_validated_official_result",
+              "outcome": "algorithm_failure",
+              "correct": false,
+              "sample_label": "preliminary, n=1",
+              "official_summary": {
+                "path": "outputs/a_memory_runtime_20260912/native_full_b500_long20_v1/returned/task_shards/multi_turn_long_context_40/bfcl/official_summary.json",
+                "sha256": "1fdb644eb7cbfd2ac4d7b42d044888d45761e0e65728376be234d64bf0bb8251",
+                "bytes": 2071
+              },
+              "official_score_headers": [
+                {
+                  "path": "outputs/a_memory_runtime_20260912/native_full_b500_long20_v1/returned/task_shards/multi_turn_long_context_40/bfcl/bfcl/score/c2kv-event-native-full-original/multi_turn/BFCL_v4_multi_turn_long_context_score.json",
+                  "sha256": "febaf58989e78d3d62e0662e9e44b836e0cc53f99ec21b48b8c694241359841b",
+                  "bytes": 74634,
+                  "status": "validated"
+                }
+              ]
+            },
+            {
+              "task_id": "multi_turn_long_context_50",
+              "reuse_status": "reused_validated_official_result",
+              "outcome": "algorithm_success",
+              "correct": true,
+              "sample_label": "preliminary, n=1",
+              "official_summary": {
+                "path": "outputs/a_memory_runtime_20260912/native_full_b500_long20_v1/returned/task_shards/multi_turn_long_context_50/bfcl/official_summary.json",
+                "sha256": "59ef1196444ff9d460384a4c0b3f74967559d0feaae8b316757def15156b475f",
+                "bytes": 2071
+              },
+              "official_score_headers": [
+                {
+                  "path": "outputs/a_memory_runtime_20260912/native_full_b500_long20_v1/returned/task_shards/multi_turn_long_context_50/bfcl/bfcl/score/c2kv-event-native-full-original/multi_turn/BFCL_v4_multi_turn_long_context_score.json",
+                  "sha256": "92ab4990b62f1b6dfd7a6afa01877b87316d60d5e3a8c221330d83b7bf0696d5",
+                  "bytes": 56,
+                  "status": "validated"
+                }
+              ]
+            },
+            {
+              "task_id": "multi_turn_long_context_60",
+              "reuse_status": "reused_validated_official_result",
+              "outcome": "algorithm_failure",
+              "correct": false,
+              "sample_label": "preliminary, n=1",
+              "official_summary": {
+                "path": "outputs/a_memory_runtime_20260912/native_full_b500_long20_v1/returned/task_shards/multi_turn_long_context_60/bfcl/official_summary.json",
+                "sha256": "a89bef50e1375f6d4437998b863a84498aca512bec10d88e3ea9d3e6aa92d259",
+                "bytes": 2071
+              },
+              "official_score_headers": [
+                {
+                  "path": "outputs/a_memory_runtime_20260912/native_full_b500_long20_v1/returned/task_shards/multi_turn_long_context_60/bfcl/bfcl/score/c2kv-event-native-full-original/multi_turn/BFCL_v4_multi_turn_long_context_score.json",
+                  "sha256": "35ddde471122a74484b37c9f9ddf94ad8b9109a60d26d18ff26a30f698f77a0d",
+                  "bytes": 18009,
+                  "status": "validated"
+                }
+              ]
+            },
+            {
+              "task_id": "multi_turn_long_context_100",
+              "reuse_status": "reused_validated_official_result",
+              "outcome": "algorithm_failure",
+              "correct": false,
+              "sample_label": "preliminary, n=1",
+              "official_summary": {
+                "path": "outputs/a_memory_runtime_20260912/native_full_b500_long20_v1/returned/task_shards/multi_turn_long_context_100/bfcl/official_summary.json",
+                "sha256": "1708c6d4f325517c2d0b289e6d2bb17a936a0d30c45328cd07924288fd0f17c3",
+                "bytes": 2074
+              },
+              "official_score_headers": [
+                {
+                  "path": "outputs/a_memory_runtime_20260912/native_full_b500_long20_v1/returned/task_shards/multi_turn_long_context_100/bfcl/bfcl/score/c2kv-event-native-full-original/multi_turn/BFCL_v4_multi_turn_long_context_score.json",
+                  "sha256": "5a22f4e38f3384aac76b5e63eafeba1b157f31cad9d8b8dd69ba77b775b3a39a",
+                  "bytes": 2892,
+                  "status": "validated"
+                }
+              ]
+            },
+            {
+              "task_id": "multi_turn_long_context_120",
+              "reuse_status": "reused_validated_official_result",
+              "outcome": "algorithm_failure",
+              "correct": false,
+              "sample_label": "preliminary, n=1",
+              "official_summary": {
+                "path": "outputs/a_memory_runtime_20260912/native_full_b500_long20_v1/returned/task_shards/multi_turn_long_context_120/bfcl/official_summary.json",
+                "sha256": "bc13acc0d647b00624ece7d61503135034228ec553cb893244361287cdaaa66c",
+                "bytes": 2074
+              },
+              "official_score_headers": [
+                {
+                  "path": "outputs/a_memory_runtime_20260912/native_full_b500_long20_v1/returned/task_shards/multi_turn_long_context_120/bfcl/bfcl/score/c2kv-event-native-full-original/multi_turn/BFCL_v4_multi_turn_long_context_score.json",
+                  "sha256": "c44633fb206f246a0a98107da592a6bb979cec78ae83b9b0d3ebe5dc9363d1d2",
+                  "bytes": 2886,
+                  "status": "validated"
+                }
+              ]
+            },
+            {
+              "task_id": "multi_turn_long_context_130",
+              "reuse_status": "reused_validated_official_result",
+              "outcome": "algorithm_success",
+              "correct": true,
+              "sample_label": "preliminary, n=1",
+              "official_summary": {
+                "path": "outputs/a_memory_runtime_20260912/native_full_b500_long20_v1/returned/task_shards/multi_turn_long_context_130/bfcl/official_summary.json",
+                "sha256": "6f6a09c9359c82a76c56fe1d12e1b3a81dbcfe018a22eb891887a0665ee95860",
+                "bytes": 2074
+              },
+              "official_score_headers": [
+                {
+                  "path": "outputs/a_memory_runtime_20260912/native_full_b500_long20_v1/returned/task_shards/multi_turn_long_context_130/bfcl/bfcl/score/c2kv-event-native-full-original/multi_turn/BFCL_v4_multi_turn_long_context_score.json",
+                  "sha256": "92ab4990b62f1b6dfd7a6afa01877b87316d60d5e3a8c221330d83b7bf0696d5",
+                  "bytes": 56,
+                  "status": "validated"
+                }
+              ]
+            },
+            {
+              "task_id": "multi_turn_long_context_170",
+              "reuse_status": "reused_validated_official_result",
+              "outcome": "algorithm_failure",
+              "correct": false,
+              "sample_label": "preliminary, n=1",
+              "official_summary": {
+                "path": "outputs/a_memory_runtime_20260912/native_full_b500_long20_v1/returned/task_shards/multi_turn_long_context_170/bfcl/official_summary.json",
+                "sha256": "83c89f893c67d90fd39f0c7f47fe572a988bd6a34bb7bd130c6a35fe5650a747",
+                "bytes": 2074
+              },
+              "official_score_headers": [
+                {
+                  "path": "outputs/a_memory_runtime_20260912/native_full_b500_long20_v1/returned/task_shards/multi_turn_long_context_170/bfcl/bfcl/score/c2kv-event-native-full-original/multi_turn/BFCL_v4_multi_turn_long_context_score.json",
+                  "sha256": "3f599679a95c45cd5d7da154c7265ac0dbffbeed86bacbd7836263706e5bbdf2",
+                  "bytes": 110605,
+                  "status": "validated"
+                }
+              ]
+            },
+            {
+              "task_id": "multi_turn_long_context_190",
+              "reuse_status": "reused_validated_official_result",
+              "outcome": "algorithm_failure",
+              "correct": false,
+              "sample_label": "preliminary, n=1",
+              "official_summary": {
+                "path": "outputs/a_memory_runtime_20260912/native_full_b500_long20_v1/returned/task_shards/multi_turn_long_context_190/bfcl/official_summary.json",
+                "sha256": "340aa9b44421ef482f966d8b8b5b9e5825525bc91fdb352455b50099ed4af387",
+                "bytes": 2074
+              },
+              "official_score_headers": [
+                {
+                  "path": "outputs/a_memory_runtime_20260912/native_full_b500_long20_v1/returned/task_shards/multi_turn_long_context_190/bfcl/bfcl/score/c2kv-event-native-full-original/multi_turn/BFCL_v4_multi_turn_long_context_score.json",
+                  "sha256": "e3336c4e2e4d6831f67bbaba391af95afa2922fdc83426d0d9119a744294806a",
+                  "bytes": 87563,
+                  "status": "validated"
+                }
+              ]
+            }
+          ]
+        },
+        "base_completion": {
+          "status": "missing_requires_new_run",
+          "fixed_denominator": 10,
+          "reusable_cells": 0,
+          "missing_cells": [
+            "multi_turn_base_0",
+            "multi_turn_base_20",
+            "multi_turn_base_40",
+            "multi_turn_base_50",
+            "multi_turn_base_60",
+            "multi_turn_base_100",
+            "multi_turn_base_120",
+            "multi_turn_base_130",
+            "multi_turn_base_170",
+            "multi_turn_base_190"
+          ],
+          "collection_behavior_before_completion": "all missing cells remain unknown; they are not algorithm failures and no incomplete-subset accuracy is promoted as the full-manifest score"
+        },
+        "peer_config": {
+          "path": "experiments/history_system/peers/configs/full.base10.json",
+          "sha256": "03f0346982d292b81d560563cc3a00280a0290723a8ea852604e6cd4782d1ae2",
+          "bytes": 6321
+        }
+      },
+      "hiagent": {
+        "source_design": {
+          "path": "outputs/a_memory_runtime_20260913/native_hiagent_b500_long20_interpreterfix_v1/submitted/tmp/a_memory_runtime_20260913/native_hiagent_b500_long20_interpreterfix_development_v1/design.frozen.json",
+          "sha256": "167f4f4f3f1e78c8b16e1bfa1800d4065a182d1f6da93dd81dcb01a9c850fcdb",
+          "bytes": 13488
+        },
+        "result_roots": [
+          "outputs/a_memory_runtime_20260913/native_hiagent_b500_long20_interpreterfix_v1/returned"
+        ],
+        "long_reuse": {
+          "status": "complete_for_selected_r001_long10",
+          "sample_label": "preliminary, n=1",
+          "fixed_denominator": 10,
+          "validated_official_cells": 10,
+          "algorithm_successes": 6,
+          "algorithm_failures": 4,
+          "unknown": 0,
+          "cells": [
+            {
+              "task_id": "multi_turn_long_context_0",
+              "reuse_status": "reused_validated_official_result",
+              "outcome": "algorithm_failure",
+              "correct": false,
+              "sample_label": "preliminary, n=1",
+              "official_summary": {
+                "path": "outputs/a_memory_runtime_20260913/native_hiagent_b500_long20_interpreterfix_v1/returned/task_shards/multi_turn_long_context_0/bfcl/official/summary_hiagent_full_native.json",
+                "sha256": "eef034666416b19c88d71ebc81a39ff28f22287e3c00dfc9bc594c79e2392454",
+                "bytes": 11045
+              },
+              "official_score_headers": [
+                {
+                  "path": "outputs/a_memory_runtime_20260913/native_hiagent_b500_long20_interpreterfix_v1/returned/task_shards/multi_turn_long_context_0/bfcl/official/score/c2kv-hiagent-full-native/multi_turn/BFCL_v4_multi_turn_long_context_score.json",
+                  "sha256": "3d081f367935aef949a155bede49d7459fed5fee447e270b2175fa1597b8ec44",
+                  "bytes": 80097,
+                  "status": "validated"
+                }
+              ]
+            },
+            {
+              "task_id": "multi_turn_long_context_20",
+              "reuse_status": "reused_validated_official_result",
+              "outcome": "algorithm_success",
+              "correct": true,
+              "sample_label": "preliminary, n=1",
+              "official_summary": {
+                "path": "outputs/a_memory_runtime_20260913/native_hiagent_b500_long20_interpreterfix_v1/returned/task_shards/multi_turn_long_context_20/bfcl/official/summary_hiagent_full_native.json",
+                "sha256": "e7b94609b312537fb28af79c17c20a122d7c06d0eee82820d31143e2a096932f",
+                "bytes": 11072
+              },
+              "official_score_headers": [
+                {
+                  "path": "outputs/a_memory_runtime_20260913/native_hiagent_b500_long20_interpreterfix_v1/returned/task_shards/multi_turn_long_context_20/bfcl/official/score/c2kv-hiagent-full-native/multi_turn/BFCL_v4_multi_turn_long_context_score.json",
+                  "sha256": "92ab4990b62f1b6dfd7a6afa01877b87316d60d5e3a8c221330d83b7bf0696d5",
+                  "bytes": 56,
+                  "status": "validated"
+                }
+              ]
+            },
+            {
+              "task_id": "multi_turn_long_context_40",
+              "reuse_status": "reused_validated_official_result",
+              "outcome": "algorithm_success",
+              "correct": true,
+              "sample_label": "preliminary, n=1",
+              "official_summary": {
+                "path": "outputs/a_memory_runtime_20260913/native_hiagent_b500_long20_interpreterfix_v1/returned/task_shards/multi_turn_long_context_40/bfcl/official/summary_hiagent_full_native.json",
+                "sha256": "8774d65d9fddc27eab4eb1ed58e6525deb6e8b19351a24795a1cebf4c2f8c0ba",
+                "bytes": 11069
+              },
+              "official_score_headers": [
+                {
+                  "path": "outputs/a_memory_runtime_20260913/native_hiagent_b500_long20_interpreterfix_v1/returned/task_shards/multi_turn_long_context_40/bfcl/official/score/c2kv-hiagent-full-native/multi_turn/BFCL_v4_multi_turn_long_context_score.json",
+                  "sha256": "92ab4990b62f1b6dfd7a6afa01877b87316d60d5e3a8c221330d83b7bf0696d5",
+                  "bytes": 56,
+                  "status": "validated"
+                }
+              ]
+            },
+            {
+              "task_id": "multi_turn_long_context_50",
+              "reuse_status": "reused_validated_official_result",
+              "outcome": "algorithm_success",
+              "correct": true,
+              "sample_label": "preliminary, n=1",
+              "official_summary": {
+                "path": "outputs/a_memory_runtime_20260913/native_hiagent_b500_long20_interpreterfix_v1/returned/task_shards/multi_turn_long_context_50/bfcl/official/summary_hiagent_full_native.json",
+                "sha256": "ccf4caee5a4a1c0871f3f2734195f167ed65ee01c3470816727c6e94ba1fbd9b",
+                "bytes": 11049
+              },
+              "official_score_headers": [
+                {
+                  "path": "outputs/a_memory_runtime_20260913/native_hiagent_b500_long20_interpreterfix_v1/returned/task_shards/multi_turn_long_context_50/bfcl/official/score/c2kv-hiagent-full-native/multi_turn/BFCL_v4_multi_turn_long_context_score.json",
+                  "sha256": "92ab4990b62f1b6dfd7a6afa01877b87316d60d5e3a8c221330d83b7bf0696d5",
+                  "bytes": 56,
+                  "status": "validated"
+                }
+              ]
+            },
+            {
+              "task_id": "multi_turn_long_context_60",
+              "reuse_status": "reused_validated_official_result",
+              "outcome": "algorithm_success",
+              "correct": true,
+              "sample_label": "preliminary, n=1",
+              "official_summary": {
+                "path": "outputs/a_memory_runtime_20260913/native_hiagent_b500_long20_interpreterfix_v1/returned/task_shards/multi_turn_long_context_60/bfcl/official/summary_hiagent_full_native.json",
+                "sha256": "48b42130b3369aa741bad5e24f6b2b0f1a05a40fbd54e81d0f26764c266683be",
+                "bytes": 11073
+              },
+              "official_score_headers": [
+                {
+                  "path": "outputs/a_memory_runtime_20260913/native_hiagent_b500_long20_interpreterfix_v1/returned/task_shards/multi_turn_long_context_60/bfcl/official/score/c2kv-hiagent-full-native/multi_turn/BFCL_v4_multi_turn_long_context_score.json",
+                  "sha256": "92ab4990b62f1b6dfd7a6afa01877b87316d60d5e3a8c221330d83b7bf0696d5",
+                  "bytes": 56,
+                  "status": "validated"
+                }
+              ]
+            },
+            {
+              "task_id": "multi_turn_long_context_100",
+              "reuse_status": "reused_validated_official_result",
+              "outcome": "algorithm_failure",
+              "correct": false,
+              "sample_label": "preliminary, n=1",
+              "official_summary": {
+                "path": "outputs/a_memory_runtime_20260913/native_hiagent_b500_long20_interpreterfix_v1/returned/task_shards/multi_turn_long_context_100/bfcl/official/summary_hiagent_full_native.json",
+                "sha256": "4049c41e53540f24891c7f1ece2e4a218a9c29fa8df8b9297e193581469e5385",
+                "bytes": 11096
+              },
+              "official_score_headers": [
+                {
+                  "path": "outputs/a_memory_runtime_20260913/native_hiagent_b500_long20_interpreterfix_v1/returned/task_shards/multi_turn_long_context_100/bfcl/official/score/c2kv-hiagent-full-native/multi_turn/BFCL_v4_multi_turn_long_context_score.json",
+                  "sha256": "f17e163a0cf8e11630fcf2b100fc85edd21fd3a1bffb40cb659f5b47def82af8",
+                  "bytes": 3262,
+                  "status": "validated"
+                }
+              ]
+            },
+            {
+              "task_id": "multi_turn_long_context_120",
+              "reuse_status": "reused_validated_official_result",
+              "outcome": "algorithm_failure",
+              "correct": false,
+              "sample_label": "preliminary, n=1",
+              "official_summary": {
+                "path": "outputs/a_memory_runtime_20260913/native_hiagent_b500_long20_interpreterfix_v1/returned/task_shards/multi_turn_long_context_120/bfcl/official/summary_hiagent_full_native.json",
+                "sha256": "d70bd07a76e20226f9784c06e7f7763141f97bda6b5ac3aaf7705d928c846f7f",
+                "bytes": 11096
+              },
+              "official_score_headers": [
+                {
+                  "path": "outputs/a_memory_runtime_20260913/native_hiagent_b500_long20_interpreterfix_v1/returned/task_shards/multi_turn_long_context_120/bfcl/official/score/c2kv-hiagent-full-native/multi_turn/BFCL_v4_multi_turn_long_context_score.json",
+                  "sha256": "fcb6875e7806355164840c717bdd848b0cfc3c0d54fb4b59c845a2bd50ea988a",
+                  "bytes": 3256,
+                  "status": "validated"
+                }
+              ]
+            },
+            {
+              "task_id": "multi_turn_long_context_130",
+              "reuse_status": "reused_validated_official_result",
+              "outcome": "algorithm_success",
+              "correct": true,
+              "sample_label": "preliminary, n=1",
+              "official_summary": {
+                "path": "outputs/a_memory_runtime_20260913/native_hiagent_b500_long20_interpreterfix_v1/returned/task_shards/multi_turn_long_context_130/bfcl/official/summary_hiagent_full_native.json",
+                "sha256": "21d054f4e063e768d9dacbbd6f6dbda4887535cbc6b03a465221a5c1dea9e3bb",
+                "bytes": 11095
+              },
+              "official_score_headers": [
+                {
+                  "path": "outputs/a_memory_runtime_20260913/native_hiagent_b500_long20_interpreterfix_v1/returned/task_shards/multi_turn_long_context_130/bfcl/official/score/c2kv-hiagent-full-native/multi_turn/BFCL_v4_multi_turn_long_context_score.json",
+                  "sha256": "92ab4990b62f1b6dfd7a6afa01877b87316d60d5e3a8c221330d83b7bf0696d5",
+                  "bytes": 56,
+                  "status": "validated"
+                }
+              ]
+            },
+            {
+              "task_id": "multi_turn_long_context_170",
+              "reuse_status": "reused_validated_official_result",
+              "outcome": "algorithm_success",
+              "correct": true,
+              "sample_label": "preliminary, n=1",
+              "official_summary": {
+                "path": "outputs/a_memory_runtime_20260913/native_hiagent_b500_long20_interpreterfix_v1/returned/task_shards/multi_turn_long_context_170/bfcl/official/summary_hiagent_full_native.json",
+                "sha256": "f643c2ac4c56a8717d04f72127b67403aa1f849b4725133f8e65e59ca528bdc3",
+                "bytes": 11106
+              },
+              "official_score_headers": [
+                {
+                  "path": "outputs/a_memory_runtime_20260913/native_hiagent_b500_long20_interpreterfix_v1/returned/task_shards/multi_turn_long_context_170/bfcl/official/score/c2kv-hiagent-full-native/multi_turn/BFCL_v4_multi_turn_long_context_score.json",
+                  "sha256": "92ab4990b62f1b6dfd7a6afa01877b87316d60d5e3a8c221330d83b7bf0696d5",
+                  "bytes": 56,
+                  "status": "validated"
+                }
+              ]
+            },
+            {
+              "task_id": "multi_turn_long_context_190",
+              "reuse_status": "reused_validated_official_result",
+              "outcome": "algorithm_failure",
+              "correct": false,
+              "sample_label": "preliminary, n=1",
+              "official_summary": {
+                "path": "outputs/a_memory_runtime_20260913/native_hiagent_b500_long20_interpreterfix_v1/returned/task_shards/multi_turn_long_context_190/bfcl/official/summary_hiagent_full_native.json",
+                "sha256": "f25c3420c92db5be20feb5eec6fc58c29353d9610fec8c234a50dd04674a823a",
+                "bytes": 11096
+              },
+              "official_score_headers": [
+                {
+                  "path": "outputs/a_memory_runtime_20260913/native_hiagent_b500_long20_interpreterfix_v1/returned/task_shards/multi_turn_long_context_190/bfcl/official/score/c2kv-hiagent-full-native/multi_turn/BFCL_v4_multi_turn_long_context_score.json",
+                  "sha256": "3bcba1deea9bfc549ccd6d0fe224e55132fd62859ae173123e6d783992f8d651",
+                  "bytes": 104942,
+                  "status": "validated"
+                }
+              ]
+            }
+          ]
+        },
+        "base_completion": {
+          "status": "missing_requires_new_run",
+          "fixed_denominator": 10,
+          "reusable_cells": 0,
+          "missing_cells": [
+            "multi_turn_base_0",
+            "multi_turn_base_20",
+            "multi_turn_base_40",
+            "multi_turn_base_50",
+            "multi_turn_base_60",
+            "multi_turn_base_100",
+            "multi_turn_base_120",
+            "multi_turn_base_130",
+            "multi_turn_base_170",
+            "multi_turn_base_190"
+          ],
+          "collection_behavior_before_completion": "all missing cells remain unknown; they are not algorithm failures and no incomplete-subset accuracy is promoted as the full-manifest score"
+        },
+        "peer_config": {
+          "path": "experiments/history_system/peers/configs/hiagent.base10.json",
+          "sha256": "8bccd1818ce541d850800a12b288cdfc5e02be220a50ca9119d8c929b5145302",
+          "bytes": 7262
+        }
+      }
+    }
+  },
+  "base_search_audit": {
+    "scope": "outputs/** files under exact selected multi_turn_base_<group> task-shard directories; official_summary.json and legacy official/summary_*.json names",
+    "selected_task_sharded_official_summaries_found": 0,
+    "matched_b500_greedy_official_cells_found": 0,
+    "incompatible_existing_base_witnesses": [
+      {
+        "path": "outputs/a_memory_runtime_20260907/bfcl_dev4_v3/pilot.json",
+        "sha256": "08215d9ce116bc925fe2c654b3609d81df9134d325b10ab3189385a52508fbcb",
+        "bytes": 4942,
+        "reason": "checkpoint-1088 and official BFCL generation defaults rather than the bound B500 greedy contract"
+      },
+      {
+        "path": "outputs/a_memory_runtime_20260910/full_screen_1088_v1/design.json",
+        "sha256": "43ad3fd445c68710ee63c24ef5cb4bd503cf01b382eea6c382143629f7aaf4be",
+        "bytes": 4953,
+        "reason": "checkpoint-1088 and temperature=0.001; only some selected Base IDs appear"
+      }
+    ],
+    "rule": "an incompatible Base artifact is not reused and a missing selected cell is not scored as failure"
+  },
+  "template_sources": {
+    "baseline": {
+      "bindings": {
+        "path": "tmp/a_memory_runtime_20260913/r5_baseline_manifest_templates_v1/source_bindings.json",
+        "sha256": "1a4301f0b2fbb78167efcc790828a56916c2d9a1bb439794e7f93e0bc7aa43e4",
+        "bytes": 1671
+      },
+      "cpu_validation": {
+        "path": "tmp/a_memory_runtime_20260913/r5_baseline_manifest_templates_v1/cpu.validation.json",
+        "sha256": "40e768755a71567e7477f3fca86d8d4d889d25a17fd81e07c2106f0b5ba7cbcb",
+        "bytes": 1378
+      }
+    },
+    "hiagent": {
+      "binding": {
+        "path": "tmp/a_memory_runtime_20260913/r5_hiagent_manifest_template_v1/source_binding.json",
+        "sha256": "73d3fb075ed9541f07f9d632c7628aec4c5fefa8d22c74232c02395f1d660ea1",
+        "bytes": 460
+      },
+      "cpu_validation": {
+        "path": "tmp/a_memory_runtime_20260913/r5_hiagent_manifest_template_v1/cpu.validation.json",
+        "sha256": "9762f0d626372df4f131fefce3974299f6b5128f58963a6bf33147373d499f29",
+        "bytes": 578
+      }
+    },
+    "derived_change": "each peer config binds one audited template and replaces only its R5 acceptance gate with an explicit development_search gate"
+  },
+  "resource_accounting": {
+    "rule": "resource fields remain method-specific evidence; absence of compatible H/A does not erase prompt-token or allocator evidence",
+    "hiagent": {
+      "system_active_history_reduction": "unknown because compatible common/full H and active A metadata is absent; ratio=4 is not realized 4x",
+      "available_evidence": [
+        {
+          "path": "outputs/a_memory_runtime_20260913/native_hiagent_b500_long20_interpreterfix_v1/returned/task_shards/multi_turn_long_context_20/server.supervisor.json",
+          "sha256": "4c2d20aa89ce1faf573a117e5a80a3557b41361fb6cb52a414eed66477580285",
+          "bytes": 5680,
+          "fields": [
+            "actor_journal_summary.finished_usage_totals",
+            "auxiliary_journal_summary.finished_usage_totals"
+          ]
+        },
+        {
+          "path": "outputs/a_memory_runtime_20260913/native_hiagent_b500_long20_interpreterfix_v1/returned/task_shards/multi_turn_long_context_20/server/hiagent_steps.jsonl",
+          "sha256": "6704be808c5b310fddde86db5aafa2154c57de4e9ca0129be3176d961ff027d4",
+          "bytes": 1377681,
+          "fields": [
+            "phase",
+            "runner_record.generation_trace[].usage.prompt_tokens",
+            "runner_record.generation_trace[].usage.completion_tokens",
+            "runner_record.generation_trace[].generation.stats.allocator_measurement.peak_allocated_bytes",
+            "runner_record.generation_trace[].generation.stats.allocator_measurement.peak_reserved_bytes"
+          ]
+        }
+      ],
+      "phase_rule": "actor and auxiliary prompt/completion totals and allocator peaks are reported separately; unknown totals remain unknown",
+      "b0_applies": false
+    },
+    "new_base_runs": "the hash-bound templates retain their existing phase, prompt-token, attempt-journal, controller/generation, and allocator telemetry; HiAgent receives no B0 contract"
+  },
+  "collection_contract": {
+    "when_complete": "combine the validated Long10 result roots with exactly one new Base10 returned root, then run collect_results.py against index.design.json and r001.tasks.json",
+    "before_complete": "collector output is allowed but the 10 Base outcomes stay unknown; no full-manifest official accuracy is emitted",
+    "commands": {
+      "raw": "python experiments/history_system/collect_results.py --candidate-root <raw-frozen-dir> --design <raw-frozen-dir>/index.design.json --task-manifest experiments/history_system/configs/r001.tasks.json --results-root outputs/a_memory_runtime_20260912/native_raw_b500_long20_v1/returned --results-root outputs/a_memory_runtime_20260912/native_raw_b500_remainder6_v1/returned --results-root <raw-new-base10-returned-root> --candidate-label r001_peer_raw_b500_greedy_mixed20 --json-out <raw-r001.json> --markdown-out <raw-r001.md>",
+      "text": "python experiments/history_system/collect_results.py --candidate-root <text-frozen-dir> --design <text-frozen-dir>/index.design.json --task-manifest experiments/history_system/configs/r001.tasks.json --results-root outputs/a_memory_runtime_20260913/native_text_b500_long20_metafix_v1/returned --results-root <text-new-base10-returned-root> --candidate-label r001_peer_text_b500_greedy_mixed20 --json-out <text-r001.json> --markdown-out <text-r001.md>",
+      "full": "python experiments/history_system/collect_results.py --candidate-root <full-frozen-dir> --design <full-frozen-dir>/index.design.json --task-manifest experiments/history_system/configs/r001.tasks.json --results-root outputs/a_memory_runtime_20260912/native_full_b500_long20_v1/returned --results-root <full-new-base10-returned-root> --candidate-label r001_peer_full_b500_greedy_mixed20 --json-out <full-r001.json> --markdown-out <full-r001.md>",
+      "hiagent": "python experiments/history_system/collect_results.py --candidate-root <hiagent-frozen-dir> --design <hiagent-frozen-dir>/index.design.json --task-manifest experiments/history_system/configs/r001.tasks.json --results-root outputs/a_memory_runtime_20260913/native_hiagent_b500_long20_interpreterfix_v1/returned --results-root <hiagent-new-base10-returned-root> --candidate-label r001_peer_hiagent_b500_greedy_mixed20 --json-out <hiagent-r001.json> --markdown-out <hiagent-r001.md>"
+    }
+  },
+  "wrapper_interface": {
+    "runner": {
+      "path": "experiments/history_system/peers/runner.py",
+      "sha256": "66a628a697609c8caebe9af6732fb5e6e3e547530628c9d642eff2149568dea8",
+      "bytes": 20777
+    },
+    "documentation": {
+      "path": "experiments/history_system/peers/README.md",
+      "sha256": "d2ae303ea2955c067563c751608bdcca500a008ba42f7b351a4e829827ed1d2b",
+      "bytes": 4635
+    },
+    "repo_root_interface": "pass --repo-root on preview, freeze, and run; every relative config binding is resolved and hash-checked under that root",
+    "freeze_is_self_contained": false,
+    "remote_dependency_roots": {
+      "raw": "outputs/a_memory_runtime_20260912/native_raw_b500_long20_v1/submitted",
+      "text": "outputs/a_memory_runtime_20260913/native_text_b500_long20_metafix_v1/submitted",
+      "full": "outputs/a_memory_runtime_20260912/native_full_b500_long20_v1/submitted",
+      "hiagent": "outputs/a_memory_runtime_20260913/native_hiagent_b500_long20_interpreterfix_v1/submitted"
+    },
+    "shared_remote_dependencies": [
+      "experiments/history_system/peers",
+      "experiments/history_system/configs/r001.tasks.json",
+      "experiments/history_system/configs/r001.peer_missing.tasks.json",
+      "outputs/history_system_search/r001/remote_lineage.json",
+      "tmp/a_memory_runtime_20260913/r5_baseline_manifest_templates_v1",
+      "tmp/a_memory_runtime_20260913/r5_hiagent_manifest_template_v1"
+    ],
+    "external_run_bindings": [
+      "B500 checkpoint",
+      "BFCL checkout",
+      "method interpreters",
+      "checked device and ports",
+      "HiAgent greedy0 policy-sampling file and source-root"
+    ],
+    "packaging_owner": "root"
+  }
+}

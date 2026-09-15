@@ -1,0 +1,27 @@
+{
+  "schema": "a-history-system-task-manifest-v1",
+  "manifest_id": "r002_train_01",
+  "stage": "train",
+  "task_ids": [
+    "multi_turn_base_67",
+    "multi_turn_long_context_67",
+    "multi_turn_base_128",
+    "multi_turn_long_context_128",
+    "multi_turn_base_81",
+    "multi_turn_long_context_81",
+    "multi_turn_base_106",
+    "multi_turn_long_context_106",
+    "multi_turn_base_83",
+    "multi_turn_long_context_83"
+  ],
+  "group_ordinals": [
+    67,
+    128,
+    81,
+    106,
+    83
+  ],
+  "fixed_denominator": 10,
+  "selection": "Contiguous shard of the predeclared r002.data_plan group order, no outcome-based selection",
+  "automatic_reruns": 0
+}

@@ -1,0 +1,85 @@
+{
+  "status": "prepared_not_frozen_or_uploaded",
+  "model_calls": 0,
+  "parent_sources": [
+    {
+      "path": "C:\\Users\\yl998\\Documents\\programming\\c2kv\\c2kv-a-runtime\\outputs\\history_system_search\\delivery_20260914\\suites\\d3_appworld_lane2_unstarted26_v1\\returned\\stage.json",
+      "sha256": "01ab877cccb169785b37e3febc2d986705b5f9bd3da333be83af57477762db82",
+      "bytes": 99171383
+    },
+    {
+      "path": "C:\\Users\\yl998\\Documents\\programming\\c2kv\\c2kv-a-runtime\\outputs\\history_system_search\\delivery_20260914\\suites\\d3_appworld_lane2_unstarted26_v1\\submitted\\tasks.json",
+      "sha256": "148126c18cc70cedeb7ad07f0c9c74561bdfac591d748f7eea3f809d172dacc7",
+      "bytes": 35101
+    }
+  ],
+  "parent_suite": "C:\\Users\\yl998\\Documents\\programming\\c2kv\\c2kv-a-runtime\\outputs\\history_system_search\\delivery_20260914\\suites\\d3_appworld_lane2_unstarted26_v1\\submitted\\suite.json",
+  "runtime_source": "C:\\Users\\yl998\\Documents\\programming\\c2kv\\c2kv-a-runtime\\outputs\\history_system_search\\delivery_20260914\\suites\\d3_appworld_lane2_unstarted26_v1\\submitted\\runtime",
+  "required_candidate_id": "d3_prefill_event",
+  "required_extraction_policy": "all-eligible",
+  "required_model_name": "d3_prefill_event",
+  "parent_task_ids": [
+    "b9c5c9a_2",
+    "b9c5c9a_3",
+    "90adc3f_1",
+    "90adc3f_2",
+    "90adc3f_3",
+    "c77c005_1",
+    "c77c005_2",
+    "c77c005_3",
+    "f323bae_1",
+    "f323bae_2",
+    "f323bae_3",
+    "13547f5_1",
+    "13547f5_2",
+    "13547f5_3",
+    "1150ed6_1",
+    "1150ed6_2",
+    "1150ed6_3",
+    "31dc501_1",
+    "31dc501_2",
+    "31dc501_3",
+    "59fae45_1",
+    "59fae45_2",
+    "59fae45_3",
+    "b6d1104_1",
+    "b6d1104_2",
+    "b6d1104_3"
+  ],
+  "selected_task_ids": [
+    "b9c5c9a_2",
+    "b9c5c9a_3",
+    "90adc3f_1",
+    "90adc3f_2",
+    "90adc3f_3",
+    "c77c005_1",
+    "c77c005_2",
+    "c77c005_3",
+    "f323bae_1",
+    "f323bae_2"
+  ],
+  "continuation_task_manifest": {
+    "path": "C:\\Users\\yl998\\Documents\\programming\\c2kv\\c2kv-a-runtime\\experiments\\history_system\\configs\\delivery_20260914.appworld_lane2_unstarted16.tasks.json",
+    "sha256": "a545fb97bfdbd9ecf519494e271868257c0710118000833dc6f8b6a7046119c5",
+    "bytes": 21661
+  },
+  "remaining_task_ids": [
+    "f323bae_3",
+    "13547f5_1",
+    "13547f5_2",
+    "13547f5_3",
+    "1150ed6_1",
+    "1150ed6_2",
+    "1150ed6_3",
+    "31dc501_1",
+    "31dc501_2",
+    "31dc501_3",
+    "59fae45_1",
+    "59fae45_2",
+    "59fae45_3",
+    "b6d1104_1",
+    "b6d1104_2",
+    "b6d1104_3"
+  ],
+  "next_step": "Freeze with parent runtime/configs, verify source identity and upload; only then bind parent delivery selection and enqueue. Keep attempted failures in parent scores."
+}

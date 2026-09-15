@@ -1,0 +1,21 @@
+{
+  "mode": "ac_native_dependency_packet_lexical_raw_reserve_failed_operation",
+  "run_id": "a_s1_dependency_packet_requested_full_events_spare_raw_1088_v1",
+  "bytes_per_kv_token": 147456,
+  "history_budget_bytes": 113246208,
+  "workspace_budget_bytes": 113246208,
+  "lease_decisions": 0,
+  "max_retrieved_events": 2,
+  "source_index_max_events": 12,
+  "predictor_prompt_token_cap": 2048,
+  "predictor_completion_token_cap": 256,
+  "dependency_packet_prompt_token_cap": 256,
+  "dependency_packet_max_entities": 4,
+  "dependency_packet_max_fields": 8,
+  "dependency_packet_max_atom_chars": 160,
+  "dependency_packet_max_arguments_chars": 256,
+  "dependency_packet_spare_raw_policy": "requested-full-events-v1",
+  "compression_policy": "always-compress-v1",
+  "history_view_protocol": "fixed-budget-main",
+  "latest_complete_tool_protection": "budgeted"
+}

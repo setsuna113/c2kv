@@ -1,0 +1,140 @@
+{
+  "schema": "a-history-multibench-task-manifest-v1",
+  "ordering": "listed",
+  "automatic_reruns": 0,
+  "fixed_denominator": 6,
+  "tasks": [
+    {
+      "schema": "history-system-official-task-v1",
+      "benchmark": "tau2",
+      "task_id": "0",
+      "task_key": "tau2_000_5feceb66ffc8",
+      "benchmark_dir": "/home/liuyancheng/c2kv-a-runtime-20260907/system_search/delivery_20260914/benchmark_sources/tau2",
+      "bench_python": "/home/liuyancheng/envs/bench312/bin/python",
+      "user_base_url": "http://127.0.0.1:35803/v1",
+      "max_new_tokens": 4096,
+      "source_binding": {
+        "components": [
+          {
+            "path": "/home/liuyancheng/c2kv-a-runtime-20260907/system_search/delivery_20260914/benchmark_sources/tau2",
+            "kind": "git",
+            "revision": "5ca4f080c5846a0b281365fd489fcf22d10791bd",
+            "required_clean": true
+          }
+        ]
+      },
+      "run_name": "delivery_20260914_tau2_airline_0",
+      "max_steps": 200
+    },
+    {
+      "schema": "history-system-official-task-v1",
+      "benchmark": "tau2",
+      "task_id": "2",
+      "task_key": "tau2_001_d4735e3a265e",
+      "benchmark_dir": "/home/liuyancheng/c2kv-a-runtime-20260907/system_search/delivery_20260914/benchmark_sources/tau2",
+      "bench_python": "/home/liuyancheng/envs/bench312/bin/python",
+      "user_base_url": "http://127.0.0.1:35803/v1",
+      "max_new_tokens": 4096,
+      "source_binding": {
+        "components": [
+          {
+            "path": "/home/liuyancheng/c2kv-a-runtime-20260907/system_search/delivery_20260914/benchmark_sources/tau2",
+            "kind": "git",
+            "revision": "5ca4f080c5846a0b281365fd489fcf22d10791bd",
+            "required_clean": true
+          }
+        ]
+      },
+      "run_name": "delivery_20260914_tau2_airline_2",
+      "max_steps": 200
+    },
+    {
+      "schema": "history-system-official-task-v1",
+      "benchmark": "tau2",
+      "task_id": "4",
+      "task_key": "tau2_002_4b227777d4dd",
+      "benchmark_dir": "/home/liuyancheng/c2kv-a-runtime-20260907/system_search/delivery_20260914/benchmark_sources/tau2",
+      "bench_python": "/home/liuyancheng/envs/bench312/bin/python",
+      "user_base_url": "http://127.0.0.1:35803/v1",
+      "max_new_tokens": 4096,
+      "source_binding": {
+        "components": [
+          {
+            "path": "/home/liuyancheng/c2kv-a-runtime-20260907/system_search/delivery_20260914/benchmark_sources/tau2",
+            "kind": "git",
+            "revision": "5ca4f080c5846a0b281365fd489fcf22d10791bd",
+            "required_clean": true
+          }
+        ]
+      },
+      "run_name": "delivery_20260914_tau2_airline_4",
+      "max_steps": 200
+    },
+    {
+      "schema": "history-system-official-task-v1",
+      "benchmark": "tau2",
+      "task_id": "5",
+      "task_key": "tau2_003_ef2d127de37b",
+      "benchmark_dir": "/home/liuyancheng/c2kv-a-runtime-20260907/system_search/delivery_20260914/benchmark_sources/tau2",
+      "bench_python": "/home/liuyancheng/envs/bench312/bin/python",
+      "user_base_url": "http://127.0.0.1:35803/v1",
+      "max_new_tokens": 4096,
+      "source_binding": {
+        "components": [
+          {
+            "path": "/home/liuyancheng/c2kv-a-runtime-20260907/system_search/delivery_20260914/benchmark_sources/tau2",
+            "kind": "git",
+            "revision": "5ca4f080c5846a0b281365fd489fcf22d10791bd",
+            "required_clean": true
+          }
+        ]
+      },
+      "run_name": "delivery_20260914_tau2_airline_5",
+      "max_steps": 200
+    },
+    {
+      "schema": "history-system-official-task-v1",
+      "benchmark": "tau2",
+      "task_id": "6",
+      "task_key": "tau2_004_e7f6c011776e",
+      "benchmark_dir": "/home/liuyancheng/c2kv-a-runtime-20260907/system_search/delivery_20260914/benchmark_sources/tau2",
+      "bench_python": "/home/liuyancheng/envs/bench312/bin/python",
+      "user_base_url": "http://127.0.0.1:35803/v1",
+      "max_new_tokens": 4096,
+      "source_binding": {
+        "components": [
+          {
+            "path": "/home/liuyancheng/c2kv-a-runtime-20260907/system_search/delivery_20260914/benchmark_sources/tau2",
+            "kind": "git",
+            "revision": "5ca4f080c5846a0b281365fd489fcf22d10791bd",
+            "required_clean": true
+          }
+        ]
+      },
+      "run_name": "delivery_20260914_tau2_airline_6",
+      "max_steps": 200
+    },
+    {
+      "schema": "history-system-official-task-v1",
+      "benchmark": "tau2",
+      "task_id": "9",
+      "task_key": "tau2_005_19581e27de7c",
+      "benchmark_dir": "/home/liuyancheng/c2kv-a-runtime-20260907/system_search/delivery_20260914/benchmark_sources/tau2",
+      "bench_python": "/home/liuyancheng/envs/bench312/bin/python",
+      "user_base_url": "http://127.0.0.1:35803/v1",
+      "max_new_tokens": 4096,
+      "source_binding": {
+        "components": [
+          {
+            "path": "/home/liuyancheng/c2kv-a-runtime-20260907/system_search/delivery_20260914/benchmark_sources/tau2",
+            "kind": "git",
+            "revision": "5ca4f080c5846a0b281365fd489fcf22d10791bd",
+            "required_clean": true
+          }
+        ]
+      },
+      "run_name": "delivery_20260914_tau2_airline_9",
+      "max_steps": 200
+    }
+  ]
+}

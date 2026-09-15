@@ -1,0 +1,7 @@
+{
+  "source_index_max_events": 12,
+  "predictor_prompt_token_cap": 2048,
+  "predictor_completion_token_cap": 256,
+  "latest_complete_tool_protection": "budgeted",
+  "observed_entity_slot_policy": "native-observed-entity-slot-v1"
+}

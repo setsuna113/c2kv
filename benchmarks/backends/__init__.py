@@ -5,10 +5,15 @@ from __future__ import annotations
 from typing import Callable
 
 from .base import Backend, BackendError
+from .event_native_hiagent import EventNativeHiAgentBackend
 from .hfserver import HfServerBackend
 from .sglang import SglangBackend
 
-BACKENDS = {"hfserver": HfServerBackend, "sglang": SglangBackend}
+BACKENDS = {
+    "event_native_hiagent": EventNativeHiAgentBackend,
+    "hfserver": HfServerBackend,
+    "sglang": SglangBackend,
+}
 
 
 def get_backend(name: str, post_json: Callable) -> Backend:

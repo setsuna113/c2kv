@@ -297,6 +297,7 @@ class Arm:
             raise ValueError(f"arm {self.name!r}: text_policy and KV compression are exclusive")
         text_policies = {
             "hiagent", "hiagent_summary", "hiagent_full",
+            "hiagent_envelope_only",
             "acon_hist", "acon_obs",
             "acon_hist_base", "acon_hist_ut", "acon_hist_ut_co",
             "acon_obs_base", "acon_obs_ut", "acon_obs_ut_co",
@@ -369,6 +370,25 @@ ARMS: Dict[str, Arm] = {
             text_policy="hiagent_full",
             required_capabilities=("hiagent_trajectory_retrieval_v1",),
             description="HiAgent full integrated variant: subgoal summaries plus proxy-intercepted Trajectory Retrieval; tool-native adaptation with no claim of reproducing the paper's benchmark numbers; requires hiagent_trajectory_retrieval_v1",
+        ),
+        Arm(
+            name="hiagent_full_native",
+            compress_history=False,
+            text_policy="hiagent_full",
+            required_capabilities=("hiagent_trajectory_retrieval_v1",),
+            native_messages=True,
+            description="Opt-in HiAgent full variant with native chat messages and tool-call history preserved after the existing summary and Trajectory Retrieval transform",
+        ),
+        Arm(
+            name="hiagent_envelope_only_native",
+            compress_history=False,
+            text_policy="hiagent_envelope_only",
+            native_messages=True,
+            description=(
+                "Opt-in native action-envelope control: preserve full original "
+                "history and the HiAgent Subgoal protocol, with no summaries or "
+                "Trajectory Retrieval; not a HiAgent full reproduction"
+            ),
         ),
         Arm(
             name="acon_hist",

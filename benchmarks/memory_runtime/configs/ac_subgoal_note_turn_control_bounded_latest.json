@@ -1,0 +1,17 @@
+{
+  "mode": "ac_native_needs_lexical_raw_reserve_failed_operation",
+  "run_id": "a_subgoal_note_turn_control_1088_v1",
+  "bytes_per_kv_token": 147456,
+  "history_budget_bytes": 113246208,
+  "workspace_budget_bytes": 113246208,
+  "lease_decisions": 0,
+  "max_retrieved_events": 2,
+  "source_index_max_events": 12,
+  "predictor_prompt_token_cap": 2048,
+  "predictor_completion_token_cap": 256,
+  "compression_policy": "always-compress-v1",
+  "history_view_protocol": "fixed-budget-main",
+  "latest_complete_tool_protection": "budgeted",
+  "history_organization": "turn",
+  "actor_prompt_protocol": "native-subgoal-note-v1"
+}

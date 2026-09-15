@@ -1,0 +1,118 @@
+{
+  "schema": "a-history-system-peer-completion-config-v1",
+  "evaluation_stage": "development_search",
+  "sample_label": "preliminary, n=1",
+  "base_task_manifest": {
+    "path": "experiments/history_system/configs/r001.peer_missing.tasks.json",
+    "sha256": "08127f69714866bb1396148f21b0fcdf6f9dd2de26c350e405987d52acceca26"
+  },
+  "r001_task_manifest": {
+    "path": "experiments/history_system/configs/r001.tasks.json",
+    "sha256": "9bca04418dace5294f1c3e5cfcf233c89a78679c3fcb4863ba12d4804794036b"
+  },
+  "remote_scorer_lineage": {
+    "path": "outputs/history_system_search/r001/remote_lineage.json",
+    "sha256": "1625a43eaed0d205306074a52b05c74657d507f1bc7cece53c44a7cd42f6db7d"
+  },
+  "base_scorer_bindings": {
+    "bfcl_eval/data/BFCL_v4_multi_turn_base.json": {
+      "remote_sha256": "1a21a995d06fd6f20ba55de7bced30ef953ec35e998f502ec2ecf4d66ef1c43a",
+      "local_sha256": "1a21a995d06fd6f20ba55de7bced30ef953ec35e998f502ec2ecf4d66ef1c43a",
+      "local_lf_normalized_sha256": "1a21a995d06fd6f20ba55de7bced30ef953ec35e998f502ec2ecf4d66ef1c43a"
+    },
+    "bfcl_eval/data/possible_answer/BFCL_v4_multi_turn_base.json": {
+      "remote_sha256": "1fee67823b317571649177dd89d63969feaae4e810cc7448ee55ba797fb7c8fc",
+      "local_sha256": "1fee67823b317571649177dd89d63969feaae4e810cc7448ee55ba797fb7c8fc",
+      "local_lf_normalized_sha256": "1fee67823b317571649177dd89d63969feaae4e810cc7448ee55ba797fb7c8fc"
+    },
+    "bfcl_eval/eval_checker/multi_turn_eval/multi_turn_checker.py": {
+      "remote_sha256": "b3b787515eda3bf0e365e39634a8fc7f831763f010f716d35d86f96fd5aab1b5",
+      "local_sha256": "b3b787515eda3bf0e365e39634a8fc7f831763f010f716d35d86f96fd5aab1b5",
+      "local_lf_normalized_sha256": "b3b787515eda3bf0e365e39634a8fc7f831763f010f716d35d86f96fd5aab1b5"
+    }
+  },
+  "r001_scorer_bindings": {
+    "bfcl_eval/data/BFCL_v4_multi_turn_base.json": {
+      "remote_sha256": "1a21a995d06fd6f20ba55de7bced30ef953ec35e998f502ec2ecf4d66ef1c43a",
+      "local_sha256": "1a21a995d06fd6f20ba55de7bced30ef953ec35e998f502ec2ecf4d66ef1c43a",
+      "local_lf_normalized_sha256": "1a21a995d06fd6f20ba55de7bced30ef953ec35e998f502ec2ecf4d66ef1c43a"
+    },
+    "bfcl_eval/data/possible_answer/BFCL_v4_multi_turn_base.json": {
+      "remote_sha256": "1fee67823b317571649177dd89d63969feaae4e810cc7448ee55ba797fb7c8fc",
+      "local_sha256": "1fee67823b317571649177dd89d63969feaae4e810cc7448ee55ba797fb7c8fc",
+      "local_lf_normalized_sha256": "1fee67823b317571649177dd89d63969feaae4e810cc7448ee55ba797fb7c8fc"
+    },
+    "bfcl_eval/data/BFCL_v4_multi_turn_long_context.json": {
+      "remote_sha256": "78c3268c5cc8e97c0f4ec6c811b3b9a2bba14323b1830b7a874b06d822749324",
+      "local_sha256": "78c3268c5cc8e97c0f4ec6c811b3b9a2bba14323b1830b7a874b06d822749324",
+      "local_lf_normalized_sha256": "78c3268c5cc8e97c0f4ec6c811b3b9a2bba14323b1830b7a874b06d822749324"
+    },
+    "bfcl_eval/data/possible_answer/BFCL_v4_multi_turn_long_context.json": {
+      "remote_sha256": "e82aa0e839c39d23c64a05834f7ae024d7c9738ec21738ecee78dc876e3d0d18",
+      "local_sha256": "e82aa0e839c39d23c64a05834f7ae024d7c9738ec21738ecee78dc876e3d0d18",
+      "local_lf_normalized_sha256": "e82aa0e839c39d23c64a05834f7ae024d7c9738ec21738ecee78dc876e3d0d18"
+    },
+    "bfcl_eval/eval_checker/multi_turn_eval/multi_turn_checker.py": {
+      "remote_sha256": "b3b787515eda3bf0e365e39634a8fc7f831763f010f716d35d86f96fd5aab1b5",
+      "local_sha256": "b3b787515eda3bf0e365e39634a8fc7f831763f010f716d35d86f96fd5aab1b5",
+      "local_lf_normalized_sha256": "b3b787515eda3bf0e365e39634a8fc7f831763f010f716d35d86f96fd5aab1b5"
+    }
+  },
+  "reused_long_task_ids": [
+    "multi_turn_long_context_0",
+    "multi_turn_long_context_20",
+    "multi_turn_long_context_40",
+    "multi_turn_long_context_50",
+    "multi_turn_long_context_60",
+    "multi_turn_long_context_100",
+    "multi_turn_long_context_120",
+    "multi_turn_long_context_130",
+    "multi_turn_long_context_170",
+    "multi_turn_long_context_190"
+  ],
+  "template_patch": {
+    "remove_exactly": "    if design.get(\"evaluation_stage\") != \"independent_holdout\" or design.get(\"acceptance_parameters_frozen\") is not True:\n        raise ValueError(\"R5 requires frozen acceptance parameters before execution\")",
+    "add_exactly": "    if design.get(\"evaluation_stage\") != \"development_search\":\n        raise ValueError(\"peer completion requires development_search\")"
+  },
+  "method": "hiagent",
+  "runner_kind": "hiagent",
+  "candidate_id": "r001_peer_hiagent_b500_greedy_mixed20",
+  "run_id": "r001_peer_hiagent_b500_greedy_base10_v1",
+  "template_design_schema": "a-r5-hiagent-manifest-template-development-design-v1",
+  "source_design": {
+    "path": "outputs/a_memory_runtime_20260913/native_hiagent_b500_long20_interpreterfix_v1/submitted/tmp/a_memory_runtime_20260913/native_hiagent_b500_long20_interpreterfix_development_v1/design.frozen.json",
+    "sha256": "167f4f4f3f1e78c8b16e1bfa1800d4065a182d1f6da93dd81dcb01a9c850fcdb"
+  },
+  "source_runner": {
+    "path": "outputs/a_memory_runtime_20260913/native_hiagent_b500_long20_interpreterfix_v1/submitted/tmp/a_memory_runtime_20260913/native_hiagent_b500_long20_interpreterfix_development_v1/native_hiagent_long20_runner.py",
+    "sha256": "e0b8222ba7c86102b7310adb6d9ce8e91939b5a17ecf4ac886b8b6a311902c6f"
+  },
+  "audited_template": {
+    "path": "tmp/a_memory_runtime_20260913/r5_hiagent_manifest_template_v1/hiagent_manifest_runner.py",
+    "sha256": "a03fcebb861bd7f48de38f73a1e4673a9f4b9674f2b8e6b636786e2fcb861930"
+  },
+  "template_cpu_validation": {
+    "path": "tmp/a_memory_runtime_20260913/r5_hiagent_manifest_template_v1/cpu.validation.json",
+    "sha256": "9762f0d626372df4f131fefce3974299f6b5128f58963a6bf33147373d499f29"
+  },
+  "reused_long_result_roots": [
+    "outputs/a_memory_runtime_20260913/native_hiagent_b500_long20_interpreterfix_v1/returned"
+  ],
+  "preview_defaults": {
+    "server_port_base": 38300,
+    "proxy_port_base": 38400
+  },
+  "resource_accounting": {
+    "b0_applies": false,
+    "system_active_history_reduction": "unknown: no compatible common/full H and active A metadata; do not synthesize H/A from ratio=4, request totals, or cache counters",
+    "available_artifacts": [
+      "task_shards/<task_id>/server/hiagent_steps.jsonl: phase plus per-generation usage.prompt_tokens/completion_tokens and generation stats",
+      "task_shards/<task_id>/server/actor_attempts.jsonl and auxiliary_attempts.jsonl: separate actor/auxiliary attempts and observed usage",
+      "task_shards/<task_id>/server.supervisor.json: actor_journal_summary and auxiliary_journal_summary finished_usage_totals",
+      "hiagent_steps.jsonl generation.stats.allocator_measurement: per-generation peak_allocated_bytes and peak_reserved_bytes"
+    ],
+    "peak_semantics": "absolute process allocator peak for generator.generate, including resident model weights and cache allocations; actor and auxiliary phases remain separate",
+    "missing_behavior": "unknown token fields stay unknown; zero is used only when a completed journal explicitly reports zero observed attempts/totals",
+    "preservation": "the audited HiAgent runner preserves phase, actor/auxiliary prompt-token, generation, cache, and allocator telemetry without adding B0"
+  }
+}

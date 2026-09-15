@@ -1,0 +1,396 @@
+{
+  "schema": "a-delivery-baseline-source-index-v1",
+  "generated_at": "2026-09-13T18:54:41+01:00",
+  "scope": {
+    "delivery": "2026-09-14 08:00 Europe/London",
+    "benchmarks": [
+      "bfcl",
+      "tau2",
+      "toolsandbox",
+      "acebench",
+      "acon_appworld"
+    ],
+    "checkpoint": {
+      "binding": "experiments/history_system/configs/checkpoint.selected.json",
+      "arm": "C",
+      "step": 1000,
+      "ratio": 8,
+      "comparison_status": "fixed_by_user; checkpoint comparison forbidden",
+      "c500": "excluded_by_user"
+    },
+    "single_seed_label": "preliminary, n=1",
+    "reuse_rule": "Legacy scores may be reported descriptively with their original checkpoint, cohort, scorer and denominator. They are not same-table causal baselines for C1000/r8 unless those fields match."
+  },
+  "canonical_runtime": {
+    "runner": "benchmarks/run.py",
+    "registry": {
+      "bfcl": "benchmarks/adapters/bfcl_adapter.py",
+      "tau2": "benchmarks/adapters/tau2_adapter.py",
+      "toolsandbox": "benchmarks/adapters/toolsandbox_adapter.py",
+      "acebench": "benchmarks/adapters/acebench_adapter.py",
+      "acon_appworld": "benchmarks/adapters/acon_adapter.py"
+    },
+    "documentation": "benchmarks/README.md",
+    "legacy_full_matrix_spec": "../outputs/integration-followup-20260905/matrix-full-1088.json",
+    "legacy_full_matrix_plan": "../outputs/integration-followup-20260905/matrix-full-1088-plan.json",
+    "legacy_full_matrix_status": {
+      "local_receipt": "../outputs/integration-followup-20260905/validation.json",
+      "planned_cells": 36,
+      "preflight_passed": 36,
+      "executed": false,
+      "npu_read_only_check_2026_09_13": "Only matrix_plan.json exists under /home/liuyancheng/c2kv-integration-followup-20260905/matrix-full-1088; no summary_*.json exists there."
+    }
+  },
+  "legacy_model": {
+    "served_model": "tracy-c2kv or c2kv-agent, depending on the archived run",
+    "base_tokenizer": "Qwen3-4B-Instruct-2507",
+    "checkpoint": "checkpoint-1088",
+    "checkpoint_profile_warning": "Reference reconstruction, not a complete as-trained record.",
+    "source": "../tmp/tracy-share-20260907/validation/index.json"
+  },
+  "latest_cross_method_table": {
+    "source": "../35_方法调研与detector清单_2026-09-07.md:54",
+    "source_kind": "report_table_only; underlying per-task raw bundle not found in root outputs, c2kv-a-runtime/outputs or tmp/tracy-share-20260907",
+    "cohort": "full-context-solvable selected subsets",
+    "label": "preliminary, n=1",
+    "denominators": {
+      "bfcl": 23,
+      "tau2": 6,
+      "acebench": 8,
+      "toolsandbox": 8
+    },
+    "scores": {
+      "full": {
+        "bfcl": 1.0,
+        "tau2": 1.0,
+        "acebench": 0.25,
+        "toolsandbox": 0.6969
+      },
+      "streamingllm_25pct": {
+        "bfcl": 0.174,
+        "tau2": 0.667,
+        "acebench": 0.125,
+        "toolsandbox": 0.6579
+      },
+      "h2o_25pct": {
+        "bfcl": 0.391,
+        "tau2": 0.8,
+        "acebench": 0.125,
+        "toolsandbox": 0.6306
+      },
+      "snapkv_25pct": {
+        "bfcl": 0.087,
+        "tau2": 1.0,
+        "acebench": 0.125,
+        "toolsandbox": 0.6457
+      },
+      "hiagent": {
+        "bfcl": 0.478,
+        "tau2": 0.667,
+        "acebench": 0.25,
+        "toolsandbox": 0.6577
+      },
+      "acon": {
+        "bfcl": 0.87,
+        "tau2": 0.667,
+        "acebench": 0.375,
+        "toolsandbox": 0.6967
+      },
+      "cacheblend": {
+        "bfcl": 0.0,
+        "tau2": 0.6,
+        "acebench": 0.125,
+        "toolsandbox": 0.6809
+      },
+      "c2kv_ratio4": {
+        "bfcl": 0.0,
+        "tau2": 0.4,
+        "acebench": 0.125,
+        "toolsandbox": 0.5439
+      },
+      "c2kv_ratio4_current_user_raw": {
+        "bfcl": 0.217,
+        "tau2": 0.833,
+        "acebench": 0.25,
+        "toolsandbox": 0.6709
+      }
+    },
+    "reuse_class": "descriptive_only",
+    "reason": "Selected on full-context success, excludes AppWorld, uses checkpoint-1088 and ratio 4 for C2KV rows, and no raw per-task bundle was found locally."
+  },
+  "benchmarks": {
+    "bfcl": {
+      "canonical": {
+        "cohort": "BFCL v4 multi_turn_base",
+        "args": [
+          "--benchmark",
+          "bfcl",
+          "--categories",
+          "multi_turn_base"
+        ],
+        "denominator": 200,
+        "denominator_source": "../29_sglang服务G与三评测任务书_2026-08-30.md:154",
+        "scorer": "official BFCL AST plus execution scorer; score JSON header supplies correct_count and total_count",
+        "model_generation": "official CLI defaults unless --bfcl-temperature is explicit; event-native adapter max_completion_tokens=4096"
+      },
+      "latest_raw_transport_smoke": {
+        "summary": "../tmp/tracy-share-20260907/validation/official_c2kv_a1/bfcl/summary_c2kv4.json",
+        "score": 0.0,
+        "n": 1,
+        "requests": 8,
+        "checkpoint": "checkpoint-1088",
+        "reuse_class": "transport_only"
+      },
+      "priority_missing_cell": "C1000/r8 current algorithm on official multi_turn_base with the frozen full-context comparator or a clearly fixed delivery subset.",
+      "cost_basis": {
+        "source": "../35_方法调研与detector清单_2026-09-07.md:72",
+        "observed": "F23 full=35.3 min/232 requests; old C2KV4=20.1 min/146 requests",
+        "derived_linear_projection_for_200": "full about 307 min; old C2KV4 about 175 min",
+        "confidence": "low; task lengths and concurrency are heterogeneous"
+      },
+      "native_transport": {
+        "status": "implemented_for_bfcl",
+        "evidence": [
+          "benchmarks/adapters/bfcl_adapter.py:286",
+          "experiments/history_system/runtime/benchmarks/memory_runtime/event_native_server.py:57"
+        ]
+      }
+    },
+    "tau2": {
+      "canonical": {
+        "cohort": "tau2 airline",
+        "args": [
+          "--benchmark",
+          "tau2",
+          "--task-set",
+          "airline"
+        ],
+        "denominator": 50,
+        "denominator_source": "../29_sglang服务G与三评测任务书_2026-08-30.md:157",
+        "scorer": "official tau2 reward from tau2.cli evaluate-trajs over results.json",
+        "agent_generation": {
+          "temperature": 0.0
+        },
+        "user_simulator_generation": {
+          "temperature": 0.0,
+          "route": "raw upstream"
+        },
+        "generation_source": "benchmarks/adapters/tau2_adapter.py:47"
+      },
+      "latest_raw_transport_smoke": {
+        "summary": "../tmp/tracy-share-20260907/validation/official_c2kv_a2/tau2/summary_c2kv4.json",
+        "command": "../tmp/tracy-share-20260907/validation/official_c2kv_a2/tau2/command.json",
+        "proxy_telemetry": "../tmp/tracy-share-20260907/validation/official_c2kv_a2/tau2/logs/proxy_c2kv4_39003.jsonl",
+        "score": 0.0,
+        "n": 1,
+        "requests": 4,
+        "checkpoint": "checkpoint-1088",
+        "reuse_class": "transport_only"
+      },
+      "wire_request_evidence": {
+        "verbatim_http_body_available": false,
+        "searched": [
+          "../tmp/tracy-share-20260907/validation/official_c2kv_a2/tau2",
+          "../outputs/integration-followup-20260905",
+          "../outputs/integration-20260905"
+        ],
+        "closest_sources": [
+          "../tmp/tracy-share-20260907/validation/official_c2kv_a2/tau2/command.json",
+          "benchmarks/adapters/tau2_adapter.py:47"
+        ],
+        "limitation": "Archived proxy JSONL retains hashes/counts/usage, not messages or tools. tau2 results.json was not copied into the migration bundle, and the adapter documents that the agent system message is not serialized in results.json."
+      },
+      "priority_missing_cell": "First add a real tau2-to-event-native context bridge, then run C1000/r8 on airline; old checkpoint-1088 scores are descriptive only.",
+      "cost_basis": {
+        "source": "../35_方法调研与detector清单_2026-09-07.md:86",
+        "observed": "Six-task C2KV plus current-user-raw run=46.0 min/216 requests; plain C2KV4 lifecycle telemetry missing",
+        "derived_linear_projection_for_50": "about 383 min for that old current-user-raw configuration",
+        "confidence": "low; not the current algorithm and not an end-to-end ETA"
+      },
+      "native_transport": {
+        "status": "missing",
+        "blocker": "event_native_server and EventNativeAPI only accept bfcl or acebench, and every request must carry exact c2kv_eval_context identity fields; the legacy tau2 adapter emits neither.",
+        "evidence": [
+          "experiments/history_system/runtime/benchmarks/memory_runtime/event_native_server.py:57",
+          "experiments/history_system/runtime/benchmarks/memory_runtime/event_native_api.py:31",
+          "experiments/history_system/runtime/benchmarks/memory_runtime/event_native_api.py:82"
+        ]
+      }
+    },
+    "toolsandbox": {
+      "canonical": {
+        "cohort": "ToolSandbox full suite",
+        "args": [
+          "--benchmark",
+          "toolsandbox",
+          "--full"
+        ],
+        "denominator": null,
+        "denominator_status": "not recorded in the local canonical docs or returned result bundles; enumerate the pinned checkout before launch and freeze the scenario IDs",
+        "scorer": "official ToolSandbox result_summary.json mean similarity",
+        "patch_pin": "apple/ToolSandbox@165848b9 with endpoint-role and empty-tool_calls patches",
+        "patch_source": "benchmarks/toolsandbox_patches/README.md:3",
+        "user_simulator_route": "raw upstream"
+      },
+      "latest_raw_transport_smoke": {
+        "summary": "../tmp/tracy-share-20260907/validation/official_c2kv_a2/toolsandbox/summary_c2kv4.json",
+        "command": "../tmp/tracy-share-20260907/validation/official_c2kv_a2/toolsandbox/command.json",
+        "conversation": "../tmp/tracy-share-20260907/validation/official_c2kv_a2/toolsandbox/agent_gpt-4o-2024-05-13_user_gpt-4o-2024-05-13_09_07_2026_18_56_24/trajectories/send_message_with_contact_content_cellular_off_multiple_user_turn/conversation.json",
+        "proxy_telemetry": "../tmp/tracy-share-20260907/validation/official_c2kv_a2/toolsandbox/logs/proxy_c2kv4_44725.jsonl",
+        "score": 0.8602277730039924,
+        "n": 1,
+        "requests": 15,
+        "checkpoint": "checkpoint-1088",
+        "reuse_class": "transport_only"
+      },
+      "wire_request_evidence": {
+        "verbatim_http_body_available": false,
+        "messages_available": true,
+        "messages_path": "../tmp/tracy-share-20260907/validation/official_c2kv_a2/toolsandbox/agent_gpt-4o-2024-05-13_user_gpt-4o-2024-05-13_09_07_2026_18_56_24/trajectories/send_message_with_contact_content_cellular_off_multiple_user_turn/conversation.json",
+        "generation_and_harness_path": "../tmp/tracy-share-20260907/validation/official_c2kv_a2/toolsandbox/command.json",
+        "tools_status": "Tool calls and tool outputs are present in conversation.json, but the full tool schema and generation parameters are not retained in one request record.",
+        "limitation": "Proxy telemetry stores only n_messages/n_tools and request hashes; a faithful native fixture must combine the official trajectory with the pinned ToolSandbox role implementation."
+      },
+      "priority_missing_cell": "Implement ToolSandbox agent-role native bridge, keep the user simulator on raw upstream, freeze the full-suite scenario list, then run C1000/r8.",
+      "cost_basis": {
+        "source": "../tmp/tracy-share-20260907/validation/official_c2kv_a2/toolsandbox/summary_c2kv4.json",
+        "observed": "One scenario=15 requests, request wall p50=3.7743 sec",
+        "derived_service_time_lower_bound": "56.6145 sec for that scenario",
+        "total_eta": null,
+        "reason": "full-suite denominator and end-to-end scenario wall time are not archived"
+      },
+      "native_transport": {
+        "status": "missing",
+        "blocker": "Legacy patched endpoint exists, but event_native namespace lacks toolsandbox and no adapter injects c2kv_eval_context while separating the user simulator.",
+        "evidence": [
+          "benchmarks/adapters/toolsandbox_adapter.py:77",
+          "experiments/history_system/runtime/benchmarks/memory_runtime/event_native_server.py:57"
+        ]
+      }
+    },
+    "acebench": {
+      "canonical": {
+        "cohort": "ACEBench agent/en = agent_multi_step plus agent_multi_turn",
+        "args": [
+          "--benchmark",
+          "acebench",
+          "--acebench-category",
+          "agent",
+          "--acebench-language",
+          "en"
+        ],
+        "denominator": 50,
+        "denominator_breakdown": {
+          "agent_multi_step": 20,
+          "agent_multi_turn": 30
+        },
+        "denominator_source": "../tmp/ace-role-history-v1/data_all/data_en/data_agent_multi_step.json and data_agent_multi_turn.json",
+        "scorer": "official ACEBench end-to-end accuracy and process accuracy",
+        "generation": {
+          "temperature": 0.0,
+          "top_p": 1.0,
+          "max_tokens": 1200,
+          "max_dialog_turns": 40
+        },
+        "generation_source": "benchmarks/adapters/acebench_adapter.py:401",
+        "protocol_deviations": "English only; evaluated agent and user simulator use the served model instead of the paper's gpt-4o user simulator; temperature 0 instead of 0.7."
+      },
+      "latest_raw_transport_smoke": {
+        "summary": "../tmp/tracy-share-20260907/validation/official_c2kv_a1/acebench/summary_c2kv4.json",
+        "command": "../tmp/tracy-share-20260907/validation/official_c2kv_a1/acebench/command.json",
+        "selected_input": "../tmp/tracy-share-20260907/validation/official_c2kv_a1/acebench/acebench_work/data_all/data_en/data_agent_multi_step.json",
+        "result": "../tmp/tracy-share-20260907/validation/official_c2kv_a1/acebench/acebench_work/result_all/result_en/tracy-c2kv/data_agent_multi_step_result.json",
+        "score": 1.0,
+        "n": 1,
+        "requests": 2,
+        "checkpoint": "checkpoint-1088",
+        "reuse_class": "transport_only"
+      },
+      "wire_request_evidence": {
+        "verbatim_http_body_available": false,
+        "input_tools_available": true,
+        "input_path": "../tmp/tracy-share-20260907/validation/official_c2kv_a1/acebench/acebench_work/data_all/data_en/data_agent_multi_step.json",
+        "message_builder_and_generation_path": "../tmp/tracy-share-20260907/validation/official_c2kv_a1/acebench/acebench_work/acebench_harness/model_inference/multi_step/APIModel_agent.py:98",
+        "limitation": "Input question/functions and generated process are archived, but the exact serialized HTTP request body was not logged."
+      },
+      "priority_missing_cell": "Finish the native-v1 ACE request bridge and run C1000/r8 on agent/en50; do not route the old textual-action profile through always-compress.",
+      "cost_basis": {
+        "source": "../tmp/tracy-share-20260907/validation/official_c2kv_a1/acebench/summary_c2kv4.json",
+        "observed": "One multi-step task=2 requests, request wall p50=5.3954 sec",
+        "derived_service_time_lower_bound": "10.7908 sec for that one task",
+        "total_eta": null,
+        "reason": "30 of 50 canonical tasks are multi-turn and the one-task smoke is not representative"
+      },
+      "native_transport": {
+        "status": "partial",
+        "ready": "ACE namespace and c2kv_eval_context injection patch exist.",
+        "blocker": "acebench-text-actions-v1 is explicitly rejected by always-compress; current delivery needs a native-v1 request path with matching messages/tools and identity.",
+        "evidence": [
+          "benchmarks/acebench_patches/0001-endpoint-env-and-model-registry.patch:551",
+          "experiments/history_system/runtime/benchmarks/memory_runtime/event_native_server.py:129"
+        ]
+      }
+    },
+    "acon_appworld": {
+      "canonical": {
+        "cohort": "AppWorld test_normal",
+        "args": [
+          "--benchmark",
+          "acon_appworld",
+          "--split",
+          "test_normal"
+        ],
+        "denominator": 168,
+        "denominator_source": "benchmarks/README.md:253 and ../outputs/integration-followup-20260905/followup-validation.json standalone.appworld.selection.source_count",
+        "scorer": "official appworld evaluate state-based unit tests; task pass/fail, with TGC/SGC aggregates",
+        "agent_max_iter": 50,
+        "seed": 42,
+        "generation_protocol": "Python code-action agent; legacy OpenAI request sends messages with tools=[] and tool documentation embedded in prompts"
+      },
+      "latest_raw_transport_smoke": {
+        "summary": "../tmp/tracy-share-20260907/validation/official_c2kv_a2/acon_appworld/summary_c2kv4.json",
+        "command": "../tmp/tracy-share-20260907/validation/official_c2kv_a2/acon_appworld/command.json",
+        "messages": "../tmp/tracy-share-20260907/validation/official_c2kv_a2/acon_appworld/appworld_harness/experiments/appworld/outputs/tracy-c2kv_official_c2kv_a2_acon_appworld_7e86263/test_normal/task_3d9a636_1/llm_history.json",
+        "score": 0.0,
+        "official_task_goal_completion": 0.0,
+        "official_scenario_goal_completion": 0.0,
+        "n": 1,
+        "requests": 3,
+        "wall_sec_mean": 43.4154,
+        "checkpoint": "checkpoint-1088",
+        "reuse_class": "transport_only"
+      },
+      "wire_request_evidence": {
+        "verbatim_http_body_available": false,
+        "messages_available": true,
+        "messages_path": "../tmp/tracy-share-20260907/validation/official_c2kv_a2/acon_appworld/appworld_harness/experiments/appworld/outputs/tracy-c2kv_official_c2kv_a2_acon_appworld_7e86263/test_normal/task_3d9a636_1/llm_history.json",
+        "generation_and_harness_path": "../tmp/tracy-share-20260907/validation/official_c2kv_a2/acon_appworld/command.json",
+        "config_path": "../tmp/tracy-share-20260907/validation/official_c2kv_a2/acon_appworld/appworld_harness/experiments/appworld/configs/base_config.yaml",
+        "tools_status": "Legacy request used tools=[]; API descriptions are textual prompt content, and llm_history.json contains the verbatim message history.",
+        "limitation": "No single retained file contains messages, tools and generation kwargs as a serialized HTTP request."
+      },
+      "priority_missing_cell": "Implement AppWorld code-action native bridge and run C1000/r8 on a frozen test_normal cohort; checkpoint-1088 AppWorld rows are training-contaminated and cannot be a clean quality baseline.",
+      "cost_basis": {
+        "source": "../tmp/tracy-share-20260907/validation/official_c2kv_a2/acon_appworld/summary_c2kv4.json",
+        "observed": "One task wall_sec_mean=43.4154 sec, 3 requests",
+        "derived_linear_projection_for_168": "7293.7872 sec, about 2.03 hours serial",
+        "confidence": "low; one failed smoke task and old checkpoint"
+      },
+      "native_transport": {
+        "status": "missing",
+        "blocker": "event_native namespace lacks acon_appworld; old ACON adapter sends textual Python-action messages without c2kv_eval_context and no native tools array.",
+        "evidence": [
+          "benchmarks/adapters/acon_adapter.py:517",
+          "experiments/history_system/runtime/benchmarks/memory_runtime/event_native_server.py:57"
+        ]
+      }
+    }
+  },
+  "global_gaps": [
+    "No legacy formal five-benchmark full matrix was executed: the 36-cell checkpoint-1088 matrix is a preflight-complete plan only.",
+    "No archived non-BFCL proxy log contains a verbatim HTTP body with messages, tools and generation settings together; proxy logs retain hashes/counts/usage.",
+    "tau2 has no archived message trajectory in the copied bundle; ToolSandbox and AppWorld have message histories; ACEBench has selected input/functions plus the message-builder source.",
+    "Current event_native accepts only bfcl/acebench and requires exact c2kv_eval_context. tau2, ToolSandbox and AppWorld need real native adapters; ACE needs native-v1 rather than the rejected textual always-compress profile.",
+    "The September 7 four-benchmark table is report-level, selected on full-context solvability, and has no AppWorld column; use it only as descriptive legacy context."
+  ]
+}

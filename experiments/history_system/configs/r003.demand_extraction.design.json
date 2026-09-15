@@ -1,0 +1,43 @@
+{
+  "schema": "history-system-candidate-design-v1",
+  "candidate_id": "d4_prefill_event_demand_extract",
+  "status": "launched_npu_retained_gist_path_verified_whole_task_pending",
+  "parent_candidate": "d3_prefill_event",
+  "checkpoint_binding": "experiments/history_system/configs/checkpoint.selected.json",
+  "controller": "outputs/history_system_search/r002/d3_prefill_event.controller_v1/controller.json",
+  "extraction_policy": "retained-gist",
+  "change": "Encode only chunks actually retained as gist in the current generation view; use existing CPU memo; never execute and discard unretained encoding work. Same policy for draft and one optional regeneration.",
+  "unchanged": [
+    "model and ratio",
+    "controller and calibrated Prefill head",
+    "source archive and selected gist/raw/bridge memory",
+    "B0",
+    "generation and extraction caps",
+    "harness/scorer and task IDs"
+  ],
+  "hypothesis": "Avoid wasting finite extraction budget without altering the selected model input; CPU tiny-model token/logprob parity verified, NPU whole-task parity/outcome not yet measured.",
+  "evidence": {
+    "path": "outputs\\history_system_search\\delivery_20260914\\tau2.extraction_waste_diagnostic.json",
+    "sha256": "a129d2a7d820fea14544b0714e8da28235386a9c0eae392c3cc8f9e41dea9c23"
+  },
+  "validation": "outputs/history_system_search/r001/validation.r003_demand_extraction_v1.json",
+  "real_cpu_model_tests": {
+    "test_file": "experiments/history_system/runtime/python/history_memory/test_unretained_compression.py",
+    "passed": 4,
+    "elapsed_seconds": 14.65
+  },
+  "first_evaluation": {
+    "benchmark": "tau2",
+    "manifest": "experiments/history_system/multibench/manifests/delivery_20260914.tau2_f6.json",
+    "fixed_denominator": 6,
+    "device_after_existing_run": 0,
+    "priority": "After D3 tau2 exits, before AppWorld lane1; fixes an actual missing-score failure without increasing caps",
+    "automatic_reruns": 0,
+    "suite": "d4_tau2_f6_demand_v2",
+    "launch_receipt": "outputs/history_system_search/delivery_20260914/suites/d4_tau2_f6_demand_v2/launch.json"
+  },
+  "recorded_at_utc": "2026-09-13T20:48:48.586252+00:00",
+  "npu_prefix_diagnostic": "outputs/history_system_search/delivery_20260914/suites/d4_tau2_f6_demand_v2/demand_prefix_diagnostic.json",
+  "first_task_outcome": "task0 generation cap exhausted after 80 completed decisions / 96 successful generations; 37 extractions and 0 unretained extractions; whole F6 still running",
+  "quality_limitation": "Removing unused encoding does not solve non-progress dialogue; D3/D4 workspace inputs differ from third decision onward."
+}

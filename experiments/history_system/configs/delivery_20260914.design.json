@@ -1,0 +1,205 @@
+{
+  "schema": "a-two-delivery-contract-v1",
+  "timezone": "Europe/London",
+  "checkpoint_binding": "experiments/history_system/configs/checkpoint.selected.json",
+  "near_term": {
+    "algorithm_due": "2026-09-14T08:00:00+01:00",
+    "report_due": "2026-09-14T09:00:00+01:00",
+    "benchmarks": [
+      "bfcl",
+      "tau2",
+      "toolsandbox",
+      "acebench",
+      "acon_appworld"
+    ],
+    "baseline_policy": "Reuse existing legacy results where available; identify dataset/scorer/model differences beside comparisons; do not rerun merely to obtain newer timestamps",
+    "algorithm_requirement": "Executable structural detector/recovery iteration with source/config binding, full-task official results and measured compression; never present an unimplemented design or nominal ratio as measured outcome",
+    "release_path": "releases/a_history_20260914",
+    "report_path": "reports/weekly/2026-09-14-history-system.md",
+    "result_path": "outputs/history_system_search/delivery_20260914",
+    "report_ready_target": "2026-09-14T08:45:00+01:00",
+    "readiness_evidence": "outputs/history_system_search/delivery_20260914/deadline_readiness.0700_london.json",
+    "current_completion": "Executable snapshot verified; full five-benchmark official score delivery incomplete due to terminal tau2 failures and ongoing AppWorld runs. Preserve missing cells and continue.",
+    "delivered": "outputs/history_system_search/delivery_20260914/delivery.0800.json",
+    "delivery_status": "partial_delivery_full_five_benchmark_requirement_unmet",
+    "selected_algorithm": "outputs\\history_system_search\\delivery_20260914\\algorithm.selected.json",
+    "report_policy": "One fixed ours versus external baselines only; internal variants excluded. Algorithm selection is complete for today; benchmark completion remains partial.",
+    "report_delivered": "outputs\\history_system_search\\delivery_20260914\\delivery.0900.json"
+  },
+  "final_system": {
+    "target_date_approximate": "2026-09-20",
+    "continue_iteration": true,
+    "deadline_is_not_cumulative_compute_cap": true,
+    "objective": "Usable C2KV hybrid history system with strong actual compression and whole-task quality against configured multi-turn history baselines",
+    "design_index": "M1-M8; E0-E5 mechanism plan remains active"
+  },
+  "resource_policy": {
+    "maximum_owned_npu_devices": 7,
+    "reserved_fixed_devices": [
+      7
+    ],
+    "only_idle_devices": true,
+    "preempt_others": false,
+    "cumulative_wall_limit": null,
+    "user_revision": "2026-09-14: user requires physical device7 released and unused"
+  },
+  "status": "executing",
+  "workstreams": [
+    {
+      "id": "delivery-baselines",
+      "outcome": "Five-benchmark canonical cohorts, reusable baseline sources and missing cells",
+      "status": "legacy_reused_full1088_appworld_official168_recovered"
+    },
+    {
+      "id": "delivery-features",
+      "outcome": "Actual generation risk features, optional hidden features, no-gold shadow parity",
+      "status": "head_fitted_calibrated_and_live"
+    },
+    {
+      "id": "delivery-recovery",
+      "outcome": "Risk-controlled source recovery before tool execution with real B0 and regeneration quota",
+      "status": "implemented_cpu_verified_including_text_events"
+    },
+    {
+      "id": "delivery-evaluate",
+      "outcome": "Frozen deployable variant and fixed-cohort official results across all configured benchmarks",
+      "status": "BFCL_TS_ACE_complete_tau2_terminal_with_missing_AppWorld_D3_D8_D9_running"
+    },
+    {
+      "id": "delivery-report",
+      "outcome": "Concrete algorithm description, pipeline and result tables generated from returned data",
+      "status": "single_selected_algorithm_report_rendered_lint_clean"
+    }
+  ],
+  "internal_targets": [
+    {
+      "time": "2026-09-13T23:00:00+01:00",
+      "outcome": "Freeze the validated algorithm candidate early enough for overnight official evaluation; exact readiness follows real implementation/CPU smoke"
+    },
+    {
+      "time": "2026-09-14T07:30:00+01:00",
+      "outcome": "Collect current official outputs and regenerate all source-linked tables; preserve still-running status where applicable"
+    },
+    {
+      "time": "2026-09-14T07:50:00+01:00",
+      "outcome": "Verify algorithm package and 08:00 delivery paths"
+    },
+    {
+      "time": "2026-09-14T08:45:00+01:00",
+      "outcome": "Report ready before the 09:00 meeting"
+    }
+  ],
+  "delivery_task_details": {
+    "delivery-baselines": {
+      "blocked_by": [],
+      "acceptance": "Each of the five benchmarks has canonical cohort and exact existing official-result sources or a verified missing cell; no smoke/full confusion",
+      "evidence": "configs/delivery_20260914.baseline_sources.json"
+    },
+    "delivery-features": {
+      "blocked_by": [],
+      "acceptance": "Signals come from real generated logits/hidden positions and shadow does not change generation; no model-name hardcoding",
+      "evidence": "active feature module, affected-path tests, exported feature schema"
+    },
+    "delivery-recovery": {
+      "blocked_by": [],
+      "acceptance": "Signal reaches reconsider before tool execution; one source-bound recovery can actually change assembled memory; B0 and shared generation quota verified",
+      "evidence": "opt-in controller, step wiring, trigger/admission/regeneration CPU receipts"
+    },
+    "delivery-detector-fit": {
+      "blocked_by": [
+        "delivery-features"
+      ],
+      "acceptance": "C1000 features from declared train/cal groups produce exported head and deployment threshold; report class/label coverage and preserve unknowns",
+      "evidence": "feature/label manifests, head weights, fit manifest, calibration",
+      "collector_queue": "experiments/history_system/configs/r001.candidates.json",
+      "first_real_features": "outputs/history_system_search/delivery_20260914/shadow.first_features.json",
+      "initial_coverage": "outputs/history_system_search/delivery_20260914/labels.initial_coverage.json",
+      "segment_coverage": "outputs/history_system_search/delivery_20260914/labels.segment_coverage.json",
+      "final_validation": "outputs/history_system_search/r002/prefill_head.snapshot32_cal10_v1/validation_receipt.json",
+      "controller": "outputs/history_system_search/r002/d3_prefill_event.controller_v1/controller.json"
+    },
+    "delivery-transport": {
+      "blocked_by": [],
+      "acceptance": "Current algorithm receives real harness message/history dialect for each benchmark and returns only the final action; official scorer and cohort preserved",
+      "evidence": "real request fixtures, adapter parity, per-benchmark official smoke"
+    },
+    "delivery-evaluate": {
+      "blocked_by": [
+        "delivery-features",
+        "delivery-recovery",
+        "delivery-transport"
+      ],
+      "acceptance": "Frozen algorithm runs official configured cohorts, records task denominators, actual history/full-input compression and total recovery costs; reused legacy sources remain identifiable",
+      "evidence": "frozen run bundles, manifests, official scores, compression receipts",
+      "dispatch": "experiments/history_system/multibench/dispatch_suite.py",
+      "bfcl_dispatch": "experiments/history_system/dispatch.py",
+      "first_d3_launch": "outputs/history_system_search/r001/r002_d3_prefill_event_mixed20_v1/launch.json"
+    },
+    "delivery-report": {
+      "blocked_by": [
+        "delivery-evaluate"
+      ],
+      "parallel_work": "Algorithm description and scripted table/pipeline structure can be prepared before complete evaluation",
+      "acceptance": "08:00 package exists and 09:00 meeting report is concretely readable; all numbers generated from sources, report_lint passes",
+      "evidence": "release directory, report Markdown/PDF if generated, source sidecar and lint result",
+      "renderer": "experiments/history_system/reporting/render_delivery.py"
+    }
+  },
+  "stage_continuation_policy": {
+    "trigger": "stage_wall_exhausted after terminal full-hash recovery",
+    "helper": "experiments/history_system/multibench/prepare_unstarted.py",
+    "eligible": "Only not_started_stage_wall_in_denominator tasks with no server/official artifacts",
+    "runtime": "Use parent submitted runtime, controller, model alias, extraction policy, checkpoint and limits; same candidate ID",
+    "denominator": "Parent attempted tasks plus exact unstarted continuation; all original lanes remain in total denominator",
+    "model_reruns": 0,
+    "queue": "D3 original four AppWorld lanes have terminal recovered parents; lane0/2/3 unstarted continuations running, lane1 unstarted30 uploaded queued. D8 and D9 running. Dispatch queued continuation only on newly released owned device."
+  },
+  "additional_metrics_contract": {
+    "collector": "experiments/history_system/reporting/extended_metrics.py",
+    "artifact": "reports/weekly/2026-09-14-history-system.metrics.json",
+    "quality": {
+      "BFCL Accuracy": "official correct tasks / original fixed task denominator; missing remains unknown",
+      "Correct": "official correct task count"
+    },
+    "detector": {
+      "positive_label": "Draft action error under a specified step-level evaluator; segment-level risk labels must be reported separately under their own name",
+      "trigger_rate": "head gate positives / evaluated decisions; distinguish gate trigger from actually admitted regeneration",
+      "precision": "TP/(TP+FP) on known joined draft-error labels",
+      "recall": "TP/(TP+FN)",
+      "f1": "2TP/(2TP+FP+FN)",
+      "fpr": "FP/(FP+TN)",
+      "required_evidence": "TP/FP/FN/TN, known label coverage, split, evaluator, task grouping, frozen head threshold; no task-to-step label substitution",
+      "current_status": "No joined delivery step correctness labels; classification cells null"
+    },
+    "recovery": {
+      "Recovery Success": "draft incorrect -> final correct / regenerated steps with incorrect draft and known pre/post labels",
+      "additional_harm_rate": "draft correct -> final incorrect / regenerated steps with correct draft and known pre/post labels",
+      "Regenerated Steps": "committed decisions with more than one generation attempt",
+      "Model Calls / Committed Step": "all observed generation attempts including discarded/failed attempts / committed decisions; extraction and simulator calls reported separately",
+      "current_label_status": "pre/post correctness labels not joined; missing is not zero",
+      "admission_breakdown": "Among observed triggered decisions: admitted allocation count, abstention reasons (budget/quota/source), unknown receipt count, regeneration attempted and committed. Admission is not recovery correctness."
+    },
+    "reference_drift": {
+      "definition_status": "Requires explicit paired-reference evaluator before use",
+      "scope": "same task, observable prefix, checkpoint and decoding; classify action/reference disagreement separately from actual action error",
+      "available_reference": "same_prefix_full_reference currently renders KV size only; it has no reference model action",
+      "authorization": "do not launch new reference generations merely to fill this optional metric"
+    },
+    "memory": [
+      "Aggregate history KV compression = sum same-prefix full-history bytes / sum final committed active-history bytes",
+      "Aggregate total-context KV compression including common system/current-input bytes",
+      "Complete-source-coverage slice and source-occurrence coverage alongside eviction-inclusive compression",
+      "Peak active-history logical KV bytes",
+      "Peak resident total logical KV bytes",
+      "Peak allocator allocated/reserved bytes during generator.generate, includes weights/workspaces; not whole-device process totals"
+    ],
+    "comparison": "Show baselines measured under matched cohort/model geometry/dtype/cache scope when available; legacy missing memory is NA. Same-prefix rendered Full KV is a sizing reference, not a measured peer process. Compare quality with memory; no claim of peer superiority from configured ratio.",
+    "timing": {
+      "inference_cumulative": "sum generator elapsed_sec including encoding/prefill/decode and all recovery attempts",
+      "decision_cumulative": "sum decision_runtime_seconds including controller work within recorded decision window",
+      "evaluation_stage_wall_span": "max(start+wall)-min(start) across frozen suite stages, not sum of parallel duration",
+      "pipeline_wall": "instrument named start/end milestones for preparation, dispatch, evaluation, detached scorer and collection; existing incomplete envelopes remain null; report scope and queue time separately"
+    },
+    "validation": "9 extended/detector metric tests passed; report_lint clean; no model reruns"
+  }
+}

@@ -1,0 +1,147 @@
+{
+  "round_id": "r001",
+  "candidates": [
+    {
+      "candidate_id": "c0_bridge_memo_b0",
+      "change": "Selected C0 on the mixed20 cohort with the pre-generation budget guard",
+      "units": [
+        "M1",
+        "M2",
+        "M3",
+        "M5",
+        "M7"
+      ]
+    },
+    {
+      "candidate_id": "c1_result_key_bridge_b0",
+      "change": "Add unique same-key required-consumer result scalar after the existing equality selector abstains",
+      "units": [
+        "M3",
+        "M5"
+      ]
+    },
+    {
+      "candidate_id": "c2_raw_warmup_b0",
+      "change": "Keep full raw history when it fits B0; otherwise use selected mixed history",
+      "units": [
+        "M2",
+        "M3"
+      ]
+    },
+    {
+      "candidate_id": "c3_result_key_raw_warmup_b0",
+      "change": "Combine result-key bridge and full-raw warmup",
+      "units": [
+        "M2",
+        "M3",
+        "M5"
+      ]
+    },
+    {
+      "candidate_id": "c4_stalled_operation_b0",
+      "change": "C3 plus source-linked stalled-operation cue with bounded raw-to-gist reallocation",
+      "units": [
+        "M2",
+        "M3",
+        "M4",
+        "M5",
+        "M6"
+      ]
+    },
+    {
+      "candidate_id": "p0_b500_r8",
+      "change": "Current C0 checkpoint-ratio selection: B500 ratio8",
+      "units": [
+        "M1",
+        "M2",
+        "M7"
+      ]
+    },
+    {
+      "candidate_id": "p0_c1000_r8",
+      "change": "Current C0 checkpoint-ratio selection: C1000 ratio8",
+      "units": [
+        "M1",
+        "M2",
+        "M7"
+      ]
+    },
+    {
+      "candidate_id": "p0_c1000_r4",
+      "change": "Current C0 checkpoint-ratio selection: C1000 ratio4",
+      "units": [
+        "M1",
+        "M2",
+        "M7"
+      ]
+    },
+    {
+      "candidate_id": "p0_c500_r8",
+      "change": "Current C0 checkpoint-ratio selection: C500 ratio8 pending original weight source",
+      "units": [
+        "M1",
+        "M2",
+        "M7"
+      ]
+    },
+    {
+      "candidate_id": "p0_c500_r4",
+      "change": "Current C0 checkpoint-ratio selection: C500 ratio4 pending original weight source",
+      "units": [
+        "M1",
+        "M2",
+        "M7"
+      ]
+    }
+  ],
+  "execution_queue": [
+    {
+      "candidate_id": "r002_calibration00_shadow_v1",
+      "physical_device": 4,
+      "port_base": 29500
+    },
+    {
+      "candidate_id": "r002_train00_shadow_v1",
+      "physical_device": 7,
+      "port_base": 29520
+    },
+    {
+      "candidate_id": "r002_train01_shadow_v1",
+      "physical_device": 0,
+      "fallback_devices": [
+        4,
+        7
+      ],
+      "port_base": 39740
+    },
+    {
+      "candidate_id": "r002_train02_shadow_v1",
+      "physical_device": 1,
+      "fallback_devices": [
+        4,
+        7
+      ],
+      "port_base": 39760
+    },
+    {
+      "candidate_id": "r002_train03_shadow_v1",
+      "physical_device": 4,
+      "fallback_devices": [
+        7,
+        0,
+        1
+      ],
+      "port_base": 39780
+    }
+  ],
+  "peer_execution_queue": [],
+  "queue_contract": "Current queue collects fixed train/calibration shards on selected C1000/ratio8 with shadow-only features, no checkpoint comparison. Device 4/7 lanes have verified ownership and existing service allowance; other idle devices may be added after occupancy verification. Completed historical work is never rerun. Unstarted legacy peer work awaits source audit.",
+  "deferred_peer_execution_queue": [
+    "hiagent",
+    "raw",
+    "text",
+    "full"
+  ],
+  "dispatch_enabled": false,
+  "dispatch_disabled_reason": "User requested cleanup of unfinished experiments and a fixed current algorithm; historical candidate and queue records are retained."
+}

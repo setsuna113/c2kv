@@ -1,0 +1,71 @@
+{
+  "schema": "history-system-official-manifest-index-v1",
+  "source_revision": "5ca4f080c5846a0b281365fd489fcf22d10791bd",
+  "files": {
+    "delivery_20260914.acebench_agent_en8.json": {
+      "sha256": "229fdd528e3e0755aca43c98da6f6d7be14488622dda09c9f9c8e7f062d732e5",
+      "bytes": 144089
+    },
+    "delivery_20260914.all190.json": {
+      "sha256": "e92c3456ab016a89550678730a7a5b8dfa985dd79520e348300ebf066fa6a98c",
+      "bytes": 457564
+    },
+    "delivery_20260914.appworld_test_normal.lane0of4.json": {
+      "sha256": "1dd9c2bb6da21081f5360748171ef18a603547b370a9ab98f30a33a5bab53190",
+      "bytes": 56605
+    },
+    "delivery_20260914.appworld_test_normal.lane1of4.json": {
+      "sha256": "3c87e7776d7a2f815f02731f7247c3373be090c7c1687a819caf3e788734d7b4",
+      "bytes": 56605
+    },
+    "delivery_20260914.appworld_test_normal.lane2of4.json": {
+      "sha256": "8652e83fe4e33e39d2082193d096361e509531c683ae3ede8df120140d51bb29",
+      "bytes": 56605
+    },
+    "delivery_20260914.appworld_test_normal.lane3of4.json": {
+      "sha256": "248a5c2700b159e18b3f262567e4210b8364a56141cc136f40da36cc9d559830",
+      "bytes": 56605
+    },
+    "delivery_20260914.appworld_test_normal_168.json": {
+      "sha256": "4b11376c8a5ebef975c3d358c0af436651a63981e0cf2a7d36df9a9849f3185e",
+      "bytes": 225950
+    },
+    "delivery_20260914.execution_binding.json": {
+      "sha256": "a01e661b5b9683628867997171c129aeda91014fbbcd777c3f9c12d4b4a4647e",
+      "bytes": 2160
+    },
+    "delivery_20260914.source_copy_receipt.json": {
+      "sha256": "2aa101d17ab5afaf9cce2ea4c168ad38e636d14018321c83c5afc7aa57b2af2b",
+      "bytes": 1022
+    },
+    "delivery_20260914.tau2_f6.json": {
+      "sha256": "5460fb19735d6c7f57736af1fc5bee64637dd30e3e414b3ce929ef5b0929936e",
+      "bytes": 5382
+    },
+    "delivery_20260914.toolsandbox_lex8.json": {
+      "sha256": "73609103c90fd4a3bbeec62acae59c9c369fbaa1294fdfce487bab9a0f445359",
+      "bytes": 82611
+    },
+    "delivery_20260914.validation.json": {
+      "sha256": "dd960d7f1acc3b4d177573af6ea9f66e41711276dfd281bb81dace4638b3e4e3",
+      "bytes": 2284
+    },
+    "delivery_20260914.retry0_alias.validation.json": {
+      "sha256": "f90d4a78f87fe79c27979b8eeb0b9ed1cb64e10ba961e5ca686d0d66d3c3e7e3",
+      "bytes": 1720
+    },
+    "delivery_20260914.toolsandbox_retry0.validation.json": {
+      "sha256": "64a19321aad1cd30aac00194d8d9db81e18bc33fb1029e16c0a69ff56662808b",
+      "bytes": 9116
+    },
+    "delivery_20260914.alias_v2.validation.json": {
+      "sha256": "4d70f1a1189dc017ef562b4f470db5aae7ef8deabbc860a2601b96937d585743",
+      "bytes": 1757
+    },
+    "delivery_20260914.acebench_agent_options.validation.json": {
+      "sha256": "8a7dce74499069247017c75211dfcab8f7c6da09d264c64278f7ddb6b04ba584",
+      "bytes": 16812
+    }
+  },
+  "latest_source_validation": "delivery_20260914.retry0_alias.validation.json"
+}

@@ -72,6 +72,7 @@ import json
 import threading
 import time
 import uuid
+from contextvars import ContextVar
 from dataclasses import replace
 from pathlib import Path
 import sys
@@ -79,6 +80,18 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Dict, List, Optional, Set, Tuple
 from urllib import request as urlrequest
 from urllib.error import HTTPError, URLError
+from urllib.parse import urlsplit
+from memory_runtime.extraction_telemetry import (
+    ExtractionBudget, ExtractionBudgetExceeded, capture_extractions,
+    current_extraction_trace, extraction_sources, nonnegative_extraction_limit,
+)
+from memory_runtime.generation_budget import (
+    GenerationBudget, GenerationBudgetExceeded, positive_generation_limit,
+)
+from memory_runtime.attempt_journal import AttemptJournal, attempt_journal_path
+from textarm_trace import (
+    TextarmTrace, current_textarm_phase, textarm_phase, textarm_trace_path,
+)
 
 # this proxy is always a local sidecar talking to 127.0.0.1 upstreams; an
 # ambient http_proxy env (login shells here carry one) must never intercept
@@ -89,6 +102,7 @@ import repair_policy
 import textarms
 from arms import Arm, get_arm, history_kv_spec, kv_reuse_spec  # type: ignore
 from backends import BackendError, get_backend  # type: ignore
+from backends.event_native_hiagent import NativeHiAgentBridgeClient  # type: ignore
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "agent"))
 from d_witness_core import select_k_star, witness_scores
@@ -221,32 +235,97 @@ def plan_gold_repair(messages, arm, counts, oracle, tools, out_messages, force=F
 class ExtractCache:
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._cache: Dict[Tuple[str, str, int], Dict[str, Any]] = {}
+        self._cache: Dict[Tuple[str, str, int, str], Dict[str, Any]] = {}
 
     def get_or_put(
-        self, key: Tuple[str, str, int], producer, force: bool = False
+        self, key: Tuple[str, str, int, str], producer, force: bool = False
     ) -> Dict[str, Any]:
         """Memoised extract.  ``force=True`` re-runs the producer and
         overwrites the memo: it is the cache-miss recovery path, where the
         memoised record describes a pool entry the SERVER has already evicted,
         so returning it would re-send a dead ``key_hash`` and miss again."""
+        trace = current_extraction_trace()
+        if trace is None:
+            with self._lock:
+                if force or key not in self._cache:
+                    index = EXTRACTION_BUDGET.reserve()
+                    handle = _start_attempt("extraction", index)
+                    try:
+                        self._cache[key] = producer()
+                    except BaseException:
+                        _finish_attempt(handle, "failed")
+                        raise
+                    else:
+                        _finish_attempt(handle, "completed")
+                return self._cache[key]
+        started = time.perf_counter()
         with self._lock:
-            if force or key not in self._cache:
-                self._cache[key] = producer()
-            return self._cache[key]
+            cache_hit = not force and key in self._cache
+            produced_sec = 0.0
+            record = None
+            error_type = None
+            budget_attempt_index = None
+            producer_called = False
+            try:
+                if not cache_hit:
+                    budget_attempt_index = EXTRACTION_BUDGET.reserve()
+                    handle = _start_attempt("extraction", budget_attempt_index)
+                    producer_called = True
+                    produced_start = time.perf_counter()
+                    try:
+                        self._cache[key] = producer()
+                    except BaseException:
+                        _finish_attempt(handle, "failed")
+                        raise
+                    else:
+                        _finish_attempt(handle, "completed")
+                    finally:
+                        produced_sec = time.perf_counter() - produced_start
+                record = self._cache[key]
+                return record
+            except Exception as error:
+                error_type = type(error).__name__
+                raise
+            finally:
+                trace.record_lookup(
+                    key, cache_hit=cache_hit, force=force,
+                    lookup_wall_sec=time.perf_counter() - started,
+                    producer_wall_sec=produced_sec, result=record,
+                    error_type=error_type, producer_called=producer_called,
+                    budget_attempt_index=budget_attempt_index)
 
 
 CACHE = ExtractCache()
 ARM: Optional[Arm] = None
 BACKEND = None  # set in main()
+NATIVE_HIAGENT_BRIDGE = None  # opt-in phase client, loaded in main()
 MEMORY_RUNTIME = None  # opt-in RuntimeAdapter, loaded in main()
 MEMORY_RUNTIME_BYTES_PER_KV_TOKEN: Optional[int] = None
 MEMORY_RUNTIME_FATAL_ERROR: Optional[str] = None
 _memory_runtime_verify_lock = threading.Lock()
 NO_UPSTREAM_RETRIES = False
 CAPTURE_REQUEST_VIEWS = False
+GENERATION_BUDGET = GenerationBudget(None)
+EXTRACTION_BUDGET = ExtractionBudget(None)
+ATTEMPT_JOURNAL = None
+TEXTARM_TRACE = None
+_ATTEMPT_REQUEST = ContextVar("proxy_attempt_request", default=None)
 UPSTREAM = ""
 REQUEST_LOG_PATH = ""
+
+
+def _start_attempt(kind, index):
+    if ATTEMPT_JOURNAL is None:
+        return None
+    context = _ATTEMPT_REQUEST.get() or {}
+    return ATTEMPT_JOURNAL.start(
+        kind, index, context.get("request_id", uuid.uuid4().hex),
+        context.get("eval_context", {}))
+
+
+def _finish_attempt(handle, status, usage=None):
+    if handle is not None:
+        ATTEMPT_JOURNAL.finish(handle, status, usage=usage)
 
 SAMPLING_FIELDS = (
     "temperature", "top_p", "top_k", "min_p", "seed", "max_tokens",
@@ -266,6 +345,51 @@ def _captured_request_view(payload):
     view = {key: payload[key] for key in ("model", "messages", "tools") if key in payload}
     view["sampling"] = _sampling_fields(payload)
     return json.loads(json.dumps(view, ensure_ascii=False))
+
+
+def _start_textarm_trace(handle, payload):
+    if TEXTARM_TRACE is None or handle is None:
+        return None
+    return TEXTARM_TRACE.start(
+        handle, current_textarm_phase(), _captured_request_view(payload))
+
+
+def _finish_textarm_transport_failure(
+        handle, started, error, *, http_status=None, failure_stage="transport"):
+    if handle is None:
+        return
+    TEXTARM_TRACE.finish(
+        handle, "failed", wall_sec=time.perf_counter() - started,
+        failure_stage=failure_stage, error_type=type(error).__name__,
+        http_status=http_status,
+    )
+
+
+def _finish_textarm_http_result(handle, started, result, *, http_status=None):
+    if handle is None:
+        return
+    raw_usage = result.get("usage") if isinstance(result, dict) else None
+    try:
+        normalized = BACKEND.normalize_response(result)
+        if not isinstance(normalized, dict):
+            raise TypeError("backend normalization did not return a mapping")
+    except Exception as error:
+        TEXTARM_TRACE.finish(
+            handle, "failed", usage=raw_usage,
+            wall_sec=time.perf_counter() - started,
+            failure_stage="backend_normalization", error_type=type(error).__name__,
+            error_kind=getattr(error, "kind", None),
+            error_detail=str(getattr(error, "detail", error))[:2000],
+            http_status=http_status,
+        )
+        return
+    TEXTARM_TRACE.finish(
+        handle, "completed",
+        response_view={key: normalized.get(key)
+                       for key in ("content", "tool_calls", "finish_reason")},
+        usage=normalized.get("usage"), cost=normalized.get("cost"),
+        wall_sec=time.perf_counter() - started, http_status=http_status,
+    )
 _log_lock = threading.Lock()
 
 # --doc-packing / --max-doc-length / --max-doc-num (see module docstring and
@@ -281,8 +405,11 @@ MAX_DOC_NUM = 12
 DOC_PACKINGS = ("turn", "message")
 
 _MEMORY_RUNTIME_C2KV_MODES = frozenset(
-    {"legacy", "protect", "recover_once", "persistent"})
-_MEMORY_RUNTIME_FULL_MODES = frozenset({"no_gist", "full_shared"})
+    {"legacy", "protect", "recover_once", "persistent", "capacity_protect",
+     "capacity_exact_once", "capacity_exact_persistent"})
+_MEMORY_RUNTIME_FULL_MODES = frozenset(
+    {"no_gist", "full_shared", "raw_recency", "full_capacity_aux", "full_exact_shared",
+     "capacity_exact_no_gist"})
 _MEMORY_RUNTIME_FORBIDDEN_CONTROL_WORDS = (
     "oracle", "recover", "gold", "witness", "repair", "history_kv", "historykv")
 
@@ -292,19 +419,30 @@ class MemoryRuntimeError(RuntimeError):
 
     kind = "memory_runtime_error"
 
+    def __init__(self, message, *, kind=None):
+        super().__init__(message)
+        if kind is not None:
+            self.kind = kind
+
 
 def _load_memory_runtime(config_path: str, tokenizer_path: str):
     """Load the runtime lazily so legacy proxy processes need no dependency."""
+    config = json.loads(Path(config_path).read_text(encoding="utf-8"))
+    module_name, class_name = (
+        ("phase4_policy", "Phase4RuntimeAdapter")
+        if isinstance(config, dict) and "phase4_policy" in config
+        else ("adapter", "RuntimeAdapter")
+    )
     try:
-        module = importlib.import_module("benchmarks.memory_runtime.adapter")
+        module = importlib.import_module(f"benchmarks.memory_runtime.{module_name}")
     except ModuleNotFoundError as error:
         # ``run.py`` launches this file by path.  Some Python environments put
         # only benchmarks/ (not the repository root) on sys.path, in which
         # case the same package is reachable as memory_runtime.adapter.
         if error.name not in {"benchmarks", "benchmarks.memory_runtime"}:
             raise
-        module = importlib.import_module("memory_runtime.adapter")
-    return module.RuntimeAdapter.from_config(config_path, tokenizer_path)
+        module = importlib.import_module(f"memory_runtime.{module_name}")
+    return getattr(module, class_name).from_config(config_path, tokenizer_path)
 
 
 def _validate_memory_runtime_arm(runtime, arm: Arm) -> None:
@@ -357,6 +495,8 @@ def _memory_runtime_error_counts() -> Optional[Dict[str, Any]]:
         return None
     return {"memory_runtime": {
         "mode": getattr(MEMORY_RUNTIME, "mode", None),
+        "route_mode": getattr(MEMORY_RUNTIME, "route_mode", None),
+        "compression_policy": getattr(MEMORY_RUNTIME, "compression_policy", None),
         "byte_geometry_verified_by_backend": False,
     }}
 
@@ -368,7 +508,7 @@ def _check_memory_runtime_fatal() -> None:
         raise MemoryRuntimeError(error)
 
 
-def _apply_memory_runtime(messages, assembled, counts, eval_context, tools):
+def _apply_memory_runtime(messages, assembled, counts, eval_context, tools, *, source_predictor=None):
     """Invoke the stateful adapter and pin the proxy-visible count contract."""
     if MEMORY_RUNTIME is None:
         return assembled, counts
@@ -377,12 +517,36 @@ def _apply_memory_runtime(messages, assembled, counts, eval_context, tools):
         "byte_geometry_verified_by_backend": False,
     })
     try:
+        options = {}
+        if getattr(MEMORY_RUNTIME, "source_needs_strategy", None) is not None:
+            options["source_predictor"] = source_predictor
+        if getattr(MEMORY_RUNTIME, "history_representation", None) == "text_summary":
+            from memory_runtime.summary_transport import render_summary
+            options["render_summary"] = lambda source: render_summary(
+                sys.modules[__name__], source, eval_context)
+        if getattr(MEMORY_RUNTIME, "mode", None) == "raw_recency":
+            # Select original source messages before the training-compatible
+            # Full renderer inserts the system and normalizes tool actions.
+            options["render_full"] = lambda source: _assemble(source, get_arm("full"))
+        elif (getattr(MEMORY_RUNTIME, "mode", None) in {
+                "capacity_protect", "capacity_exact_once", "capacity_exact_persistent"}
+                or getattr(MEMORY_RUNTIME, "route_mode", None) == "ac_gist_static"):
+            if getattr(MEMORY_RUNTIME, "history_organization", None) == "subgoal-v1":
+                options["render_compressed"] = lambda source: _assemble(
+                    source, get_arm("c2kv4"), doc_packing="subgoal",
+                    subgoal_session_id=str(eval_context["task_id"]))
+            else:
+                options["render_compressed"] = lambda source: _assemble(source, get_arm("c2kv4"))
         assembled, counts = MEMORY_RUNTIME.apply(
-            messages, assembled, counts, eval_context, tools)
+            messages, assembled, counts, eval_context, tools, **options)
     except MemoryRuntimeError:
         raise
     except (KeyError, TypeError, ValueError, RuntimeError) as error:
-        raise MemoryRuntimeError(str(error)) from error
+        raise MemoryRuntimeError(str(error), kind=getattr(error, "kind", None)) from error
+    return _pin_memory_runtime_output(assembled, counts)
+
+
+def _pin_memory_runtime_output(assembled, counts):
     if not isinstance(assembled, list) or not isinstance(counts, dict):
         raise MemoryRuntimeError("RuntimeAdapter.apply must return (list, dict)")
     metadata = counts.get("memory_runtime")
@@ -399,6 +563,125 @@ def _apply_memory_runtime(messages, assembled, counts, eval_context, tools):
     # Only the backend observation below may set this true.
     metadata["byte_geometry_verified_by_backend"] = False
     return assembled, counts
+
+
+def _commit_memory_runtime_final(prepared, normalized, counts):
+    """Commit only the one normalized response that the proxy will return."""
+    commit_final = getattr(MEMORY_RUNTIME, "commit_final", None)
+    if not callable(commit_final):
+        return
+    metadata = counts.get("memory_runtime")
+    if not isinstance(metadata, dict):
+        raise MemoryRuntimeError("RuntimeAdapter omitted counts['memory_runtime']")
+    try:
+        metadata["phase4_final"] = commit_final(
+            prepared, normalized.get("tool_calls"))
+    except (KeyError, TypeError, ValueError, RuntimeError) as error:
+        raise MemoryRuntimeError(str(error)) from error
+
+
+def _prepare_memory_input(messages, eval_context, tools, *, source_predictor=None):
+    """Check Full capacity before any optional compression/extraction work."""
+    initial_arm = (get_arm("full") if getattr(MEMORY_RUNTIME, "always_compress", False)
+                   or getattr(MEMORY_RUNTIME, "mode", None)
+                   in {"capacity_protect", "capacity_exact_once", "capacity_exact_persistent"}
+                   else ARM)
+    assembled, counts = _assemble(messages, initial_arm)
+    assembled = _apply_actor_prompt_protocol(assembled)
+    return _apply_memory_runtime(messages, assembled, counts, eval_context, tools,
+                                 source_predictor=source_predictor)
+
+
+def _apply_actor_prompt_protocol(assembled):
+    """Apply the explicitly configured actor protocol to the common input."""
+    protocol = getattr(MEMORY_RUNTIME, "actor_prompt_protocol", None)
+    if protocol is None:
+        return assembled
+    from textarms import HIAGENT_SUBGOAL_NOTE, HIAGENT_SUBGOAL_NOTE_V2
+    notes = {
+        "native-subgoal-note-v1": HIAGENT_SUBGOAL_NOTE,
+        "native-subgoal-note-v2": HIAGENT_SUBGOAL_NOTE_V2,
+    }
+    if protocol not in notes:
+        raise MemoryRuntimeError(f"unsupported actor prompt protocol: {protocol!r}")
+    note = notes[protocol].strip()
+    output = [dict(message) for message in assembled]
+    systems = [index for index, message in enumerate(output)
+               if message.get("role") == "system"]
+    if len(systems) != 1:
+        raise MemoryRuntimeError("Subgoal protocol requires exactly one system message")
+    index = systems[0]
+    content = output[index].get("content")
+    if not isinstance(content, str) or not content.strip():
+        raise MemoryRuntimeError("Subgoal protocol requires nonempty system content")
+    if content.rstrip().endswith(note):
+        raise MemoryRuntimeError("Subgoal protocol was already applied")
+    output[index]["content"] = content.rstrip() + "\n" + note
+    return output
+
+
+def _prepare_exact_memory_input(messages, eval_context, tools):
+    assembled, counts = _assemble(messages, get_arm("full"))
+    try:
+        assembled, counts, prepared = MEMORY_RUNTIME.prepare_exact(
+            messages, assembled, counts, eval_context, tools,
+            render_compressed=lambda source: _assemble(source, get_arm("c2kv4")))
+    except (KeyError, TypeError, ValueError, RuntimeError) as error:
+        raise MemoryRuntimeError(str(error), kind=getattr(error, "kind", None)) from error
+    assembled, counts = _pin_memory_runtime_output(assembled, counts)
+    return assembled, counts, prepared
+
+
+def _prepare_actor_evidence_input(messages, eval_context, tools):
+    assembled, counts = _assemble(messages, get_arm("full"))
+    try:
+        assembled, counts, prepared = MEMORY_RUNTIME.prepare_actor(
+            messages, assembled, counts, eval_context, tools,
+            render_compressed=lambda source: _assemble(source, get_arm("c2kv4")))
+    except (KeyError, TypeError, ValueError, RuntimeError) as error:
+        raise MemoryRuntimeError(str(error), kind=getattr(error, "kind", None)) from error
+    assembled, counts = _pin_memory_runtime_output(assembled, counts)
+    return assembled, counts, prepared
+
+
+def _generation_summary(records):
+    """Account for every attempted generation, including an unknown failed call."""
+    fields = {"prompt_tokens", "completion_tokens", "total_tokens"}
+    fields.update(key for record in records for key in (record.get("usage") or {}))
+    totals = {}
+    for key in sorted(fields):
+        values = [(record.get("usage") or {}).get(key) for record in records]
+        totals[key] = (sum(values) if values and all(
+            type(value) in (int, float) for value in values) else None)
+    wall_values = [record.get("wall_sec") for record in records]
+    wall_known = [value for value in wall_values
+                  if isinstance(value, (int, float)) and not isinstance(value, bool)]
+    aux = [record for record in records if record.get("phase") == "state_proposal"]
+    aux_usage = {}
+    for key in sorted(fields):
+        values = [(record.get("usage") or {}).get(key) for record in aux]
+        aux_usage[key] = (sum(values) if values and all(
+            type(value) in (int, float) for value in values) else None)
+    aux_walls = [record.get("wall_sec") for record in aux]
+    aux_known_walls = [value for value in aux_walls
+                       if isinstance(value, (int, float)) and not isinstance(value, bool)]
+    return {
+        "generation_attempts": len(records),
+        "generation_completed": sum(record["status"] == "completed" for record in records),
+        "generation_usage_total": totals,
+        "generation_upstream_wall_sec": (sum(wall_known)
+            if len(wall_known) == len(wall_values) else None),
+        "generation_upstream_wall_sec_known_lower_bound": sum(wall_known),
+        "generation_upstream_wall_sec_unknown_count": len(wall_values) - len(wall_known),
+        "aux_generation_attempts": len(aux),
+        "aux_generation_completed": sum(record["status"] == "completed" for record in aux),
+        "aux_generation_usage_total": aux_usage,
+        "aux_generation_upstream_wall_sec": (sum(aux_known_walls)
+            if aux and len(aux_known_walls) == len(aux_walls) else None),
+        "aux_generation_upstream_wall_sec_known_lower_bound": sum(aux_known_walls),
+        "aux_generation_upstream_wall_sec_unknown_count": len(aux_walls) - len(aux_known_walls),
+        "usage_scope": "standard usage and backend cost describe final generation; generation_usage_total includes all attempts; null means unknown",
+    }
 
 
 def _verify_memory_runtime_kv_bytes(
@@ -479,6 +762,20 @@ class UpstreamError(RuntimeError):
         self.body = body
 
 
+def _is_chat_path(path: str) -> bool:
+    return path.endswith("/v1/chat/completions") or path.endswith(
+        "/chat/completions"
+    )
+
+
+def _reserve_generation_attempt(path: str) -> Optional[int]:
+    if _is_chat_path(path):
+        context = _ATTEMPT_REQUEST.get() or {}
+        task_id = (context.get("eval_context") or {}).get("task_id")
+        return GENERATION_BUDGET.reserve(task_id)
+    return None
+
+
 def _post_json(path: str, payload: Dict[str, Any],
                timeout: int, retries: int = 2) -> Dict[str, Any]:
     """POST JSON to UPSTREAM, retrying 5xx/network failures with backoff.
@@ -488,21 +785,65 @@ def _post_json(path: str, payload: Dict[str, Any],
     the SGLang stack reports many failures as HTTP 200 with error bodies —
     those are classified by the backend (BackendError), not here.
     """
-    if MEMORY_RUNTIME is not None or NO_UPSTREAM_RETRIES:
+    if (MEMORY_RUNTIME is not None or NO_UPSTREAM_RETRIES
+            or GENERATION_BUDGET.enabled or EXTRACTION_BUDGET.enabled):
         # This function also backs gist extraction and repair extraction.
         # Freeze the complete transport attempt count, not only chat sends.
         retries = 0
     body = json.dumps(payload).encode("utf-8")
     last: Optional[UpstreamError] = None
     for attempt in range(retries + 1):
-        req = urlrequest.Request(
-            f"{UPSTREAM.rstrip('/')}{path}", data=body,
-            headers={"Content-Type": "application/json"}, method="POST",
-        )
+        index = _reserve_generation_attempt(path)
+        # A durable start precedes transport. It does not prove that the
+        # backend received the request if this process is killed next.
+        handle = _start_attempt("generation", index) if index is not None else None
+        try:
+            textarm_handle = (_start_textarm_trace(handle, payload)
+                              if _is_chat_path(path) else None)
+        except BaseException:
+            _finish_attempt(handle, "failed")
+            raise
+        transport_started = time.perf_counter()
+        transport_path = path
+        transport_body = body
+        bridge_envelope = None
+        try:
+            if NATIVE_HIAGENT_BRIDGE is not None and _is_chat_path(path):
+                if handle is None:
+                    raise RuntimeError(
+                        "native HiAgent bridge requires a durable attempt journal"
+                    )
+                request_context = _ATTEMPT_REQUEST.get() or {}
+                transport_path, bridge_envelope = (
+                    NATIVE_HIAGENT_BRIDGE.prepare_call(
+                        payload,
+                        parent_request_id=handle.request_id,
+                        official_eval_context=request_context.get("eval_context"),
+                        proxy_attempt_uid=handle.attempt_uid,
+                        phase=current_textarm_phase(),
+                    )
+                )
+                transport_body = json.dumps(bridge_envelope).encode("utf-8")
+            req = urlrequest.Request(
+                f"{UPSTREAM.rstrip('/')}{transport_path}", data=transport_body,
+                headers={"Content-Type": "application/json"}, method="POST",
+            )
+        except BaseException as error:
+            _finish_attempt(handle, "failed")
+            _finish_textarm_transport_failure(
+                textarm_handle, transport_started, error,
+                failure_stage="bridge_preparation",
+            )
+            raise
+        http_status = None
         try:
             with _OPENER.open(req, timeout=timeout) as resp:
-                return json.loads(resp.read().decode("utf-8"))
+                http_status = getattr(resp, "status", None)
+                result = json.loads(resp.read().decode("utf-8"))
         except HTTPError as error:
+            _finish_attempt(handle, "failed")
+            _finish_textarm_transport_failure(
+                textarm_handle, transport_started, error, http_status=error.code)
             text = ""
             try:
                 text = error.read().decode("utf-8", "replace")
@@ -519,7 +860,37 @@ def _post_json(path: str, payload: Dict[str, Any],
                 raise UpstreamError(error.code, text) from error
             last = UpstreamError(error.code, text)
         except (URLError, OSError) as error:
+            _finish_attempt(handle, "failed")
+            _finish_textarm_transport_failure(
+                textarm_handle, transport_started, error, http_status=0)
             last = UpstreamError(0, str(error))
+        except BaseException as error:
+            _finish_attempt(handle, "failed")
+            _finish_textarm_transport_failure(
+                textarm_handle, transport_started, error, http_status=http_status)
+            raise
+        else:
+            if bridge_envelope is not None:
+                try:
+                    result = NATIVE_HIAGENT_BRIDGE.validate_response(
+                        result, bridge_envelope
+                    )
+                except BaseException as error:
+                    _finish_attempt(handle, "failed")
+                    _finish_textarm_transport_failure(
+                        textarm_handle, transport_started, error,
+                        http_status=http_status,
+                        failure_stage="bridge_response_validation",
+                    )
+                    raise
+            # Journal write errors must propagate without a transport retry.
+            _finish_attempt(handle, "completed", usage=(
+                result.get("usage") if isinstance(result, dict) else None))
+            # Trace write errors likewise propagate after this single HTTP
+            # attempt and are never interpreted as a retryable transport error.
+            _finish_textarm_http_result(
+                textarm_handle, transport_started, result, http_status=http_status)
+            return result
         if attempt < retries:
             time.sleep(2 ** (attempt + 1))
     assert last is not None
@@ -724,6 +1095,90 @@ def _fit_doc(doc_text: str, ratio: int, extract_fn, max_doc_length: int,
     return out
 
 
+def _fit_subgoal_parts(parts: List[Dict[str, Any]], ratio: int, extract_fn,
+                       max_doc_length: int, depth: int = 0
+                       ) -> List[Tuple[str, Dict[str, Any], List[int]]]:
+    """Fit one subgoal while preserving the source provenance of turn parts.
+
+    Short adjacent parts remain one jointly encoded subgoal document.  When
+    that document is too long, split first at part boundaries so every fitted
+    fragment records only the source messages that were actually rendered into
+    it.  A single oversized part falls back to the legacy line splitter and
+    conservatively retains that part's source set for each of its fragments.
+    ``extract_fn`` receives the source set for every attempted extraction so
+    request telemetry follows the same provenance as retained fragments.
+    """
+    if not parts:
+        return []
+
+    doc_text = "\n\n".join(str(part["content"]) for part in parts)
+    source_indices: List[int] = []
+    seen_sources = set()
+    for part in parts:
+        for index in part["source_indices"]:
+            if index not in seen_sources:
+                source_indices.append(index)
+                seen_sources.add(index)
+    record = extract_fn("user", doc_text, ratio, source_indices)
+    length = int(record.get("original_seq_len") or 0)
+    if length <= max_doc_length or depth >= 6 or len(doc_text) < 8:
+        return [(doc_text, record, source_indices)]
+
+    chars_per_token = max(1.0, len(doc_text) / max(1, length))
+    budget = max(64, int(max_doc_length * chars_per_token * 0.9))
+    if len(parts) > 1:
+        batches: List[List[Dict[str, Any]]] = []
+        current: List[Dict[str, Any]] = []
+        current_length = 0
+        for part in parts:
+            part_length = len(str(part["content"]))
+            candidate_length = current_length + (2 if current else 0) + part_length
+            if current and candidate_length > budget:
+                batches.append(current)
+                current = []
+                current_length = 0
+            current.append(part)
+            current_length += (2 if current_length else 0) + part_length
+        if current:
+            batches.append(current)
+        if len(batches) <= 1:
+            half = len(parts) // 2
+            batches = [parts[:half], parts[half:]]
+        out: List[Tuple[str, Dict[str, Any], List[int]]] = []
+        for batch in batches:
+            out.extend(_fit_subgoal_parts(
+                batch, ratio, extract_fn, max_doc_length, depth + 1))
+        return out
+
+    pieces: List[str] = []
+    current = ""
+    for unit in _split_lines_keep(doc_text):
+        if current and len(current) + len(unit) > budget:
+            pieces.append(current)
+            current = ""
+        if len(unit) > budget:
+            if current:
+                pieces.append(current)
+                current = ""
+            for start in range(0, len(unit), budget):
+                pieces.append(unit[start:start + budget])
+            continue
+        current += unit
+    if current:
+        pieces.append(current)
+    if len(pieces) <= 1:
+        half = len(doc_text) // 2
+        pieces = [doc_text[:half], doc_text[half:]]
+    out = []
+    for piece in pieces:
+        if not piece.strip():
+            continue
+        out.extend(_fit_subgoal_parts(
+            [{"content": piece, "source_indices": source_indices}],
+            ratio, extract_fn, max_doc_length, depth + 1))
+    return out
+
+
 def _select_docs(docs: List[Any], max_doc_num: int) -> Tuple[List[Any], int]:
     """train_data_multiturn._select_history(policy="tail"): keep doc 0 (the
     session anchor) plus the last max_doc_num-1 docs; the rest are DROPPED,
@@ -900,7 +1355,8 @@ def _stringify_content(message: Dict[str, Any]) -> str:
     return "" if content is None else json.dumps(content, ensure_ascii=False)
 
 
-def _assemble(messages: List[Dict[str, Any]], arm: Arm, timeout: int = 600):
+def _assemble(messages: List[Dict[str, Any]], arm: Arm, timeout: int = 600, *,
+              doc_packing=None, subgoal_session_id="subgoal-renderer"):
     """Return (out_messages, counts).
 
     ``counts`` carries the message-class breakdown (system/hybrid-tail/
@@ -928,6 +1384,8 @@ def _assemble(messages: List[Dict[str, Any]], arm: Arm, timeout: int = 600):
     # raw-path training dialect: tool -> bare user message (_normal_chat_message:
     # {"role": "user", "content": str}); a missing system prompt gets the
     # training default injected
+    source_messages = messages
+    source_shift = int(not any(m.get("role") == "system" for m in messages))
     messages = [
         ({"role": "user", "content": _stringify_content(m)}
          if m.get("role") == "tool" else dict(m))
@@ -943,7 +1401,22 @@ def _assemble(messages: List[Dict[str, Any]], arm: Arm, timeout: int = 600):
     message_counts = {"system_raw": 0, "history_raw": 0, "current_raw": 0,
                       "compressed": 0}
     compressed_records: List[Dict[str, Any]] = []
-    packing = DOC_PACKING if arm.compress_history else "message"
+    track_fragments = bool(getattr(MEMORY_RUNTIME, "always_compress", False)) and arm.compress_history
+    packing_fragments = []
+    packing = (doc_packing or DOC_PACKING) if arm.compress_history else "message"
+    if packing not in {"message", "turn", "subgoal"}:
+        raise ValueError(f"Unsupported document packing: {packing}")
+    subgoal_ledger = None
+    subgoal_store = None
+    pending_sources = set()
+    fragment_groups = {}
+    if packing == "subgoal":
+        from history_memory.events import EventStore
+        from history_memory.subgoals import build_subgoal_ledger, group_subgoal_history
+        subgoal_store = EventStore.from_messages(subgoal_session_id, source_messages)
+        subgoal_ledger = build_subgoal_ledger(subgoal_store)
+        pending_sources = {index + source_shift for event in subgoal_store.events
+                           if not event.complete for index in event.source_indices}
     dropped_docs = 0
     n_docs = 0
     # ``original_tokens`` remains the selected-history ledger for backwards
@@ -959,6 +1432,7 @@ def _assemble(messages: List[Dict[str, Any]], arm: Arm, timeout: int = 600):
             not arm.compress_history
             or not (i < cutoff)
             or role == "system"
+            or i in pending_sources
             or bool(arm.hybrid_top_k and i >= cutoff - arm.hybrid_top_k)
         )
 
@@ -981,7 +1455,7 @@ def _assemble(messages: List[Dict[str, Any]], arm: Arm, timeout: int = 600):
             message_counts["current_raw"] += 1
 
     def _emit_doc(doc_role: str, doc_text: str, record: Dict[str, Any],
-                  source_indices: List[int]) -> None:
+                  source_indices: List[int], fragment_id=None) -> None:
         nonlocal gist_tokens, original_tokens, n_gist, n_docs
         gist_tokens += int(record.get("gist_len") or 0)
         original_tokens += int(record.get("original_seq_len") or 0)
@@ -1000,10 +1474,13 @@ def _assemble(messages: List[Dict[str, Any]], arm: Arm, timeout: int = 600):
             "source_indices": list(source_indices),
             "out_index": len(out),
             "role": doc_role, "content": doc_text, "record": record,
+            **({"packing_fragment_id": fragment_id} if track_fragments else {}),
+            **({"subgoal_group": fragment_groups[fragment_id]}
+               if fragment_id in fragment_groups else {}),
         })
         out.append(compressed)
 
-    if packing == "turn":
+    if packing in {"turn", "subgoal"}:
         # TRAINING format: normalize, pack per turn, split to fit, tail-select.
         compressible = [
             (i, m) for i, m in enumerate(messages)
@@ -1016,24 +1493,64 @@ def _assemble(messages: List[Dict[str, Any]], arm: Arm, timeout: int = 600):
                 item = _normalize_history_message(m)
                 if item is not None:
                     normalized.append((i, item))
-            for doc in _turn_docs(normalized):
-                for text, record in _fit_doc(
-                    doc["content"], arm.ratio,
-                    lambda role, text, ratio: _extract(role, text, ratio, timeout),
-                    MAX_DOC_LENGTH,
-                ):
-                    docs.append((text, record, doc["source_indices"]))
+            grouped_docs = _turn_docs(normalized)
+            if packing == "subgoal":
+                normalized_by_source = dict(normalized)
+                groups = group_subgoal_history(
+                    subgoal_store, cutoff - source_shift,
+                    [index - source_shift for index, _ in normalized], ledger=subgoal_ledger)
+                grouped_docs = []
+                for group in groups:
+                    indices = [index + source_shift for index in group.source_indices]
+                    parts = _turn_docs([(index, normalized_by_source[index]) for index in indices])
+                    if parts:
+                        grouped_docs.append({"parts": parts,
+                                             "subgoal_group": group.metadata()})
+            for doc in grouped_docs:
+                if packing == "subgoal":
+                    def extract_subgoal(role, text, ratio, sources):
+                        with extraction_sources([i - source_shift for i in sources]):
+                            return _extract(role, text, ratio, timeout)
+
+                    fitted = _fit_subgoal_parts(
+                        doc["parts"], arm.ratio, extract_subgoal,
+                        MAX_DOC_LENGTH,
+                    )
+                else:
+                    with extraction_sources([i - source_shift for i in doc["source_indices"]]):
+                        fitted = [
+                            (text, record, doc["source_indices"])
+                            for text, record in _fit_doc(
+                                doc["content"], arm.ratio,
+                                lambda role, text, ratio: _extract(
+                                    role, text, ratio, timeout),
+                                MAX_DOC_LENGTH,
+                            )
+                        ]
+                for text, record, fitted_sources in fitted:
+                    fragment_id = len(docs)
+                    if "subgoal_group" in doc:
+                        fragment_groups[fragment_id] = doc["subgoal_group"]
+                    if track_fragments:
+                        packing_fragments.append({
+                            "fragment_id": fragment_id,
+                            "source_indices": [i - source_shift for i in fitted_sources],
+                            "encoder_input_tokens": int(record.get("original_seq_len") or 0),
+                            **({"subgoal_group": doc["subgoal_group"]}
+                               if "subgoal_group" in doc else {}),
+                        })
+                    docs.append((text, record, fitted_sources, fragment_id))
             # Fit/extract precedes tail selection.  Count the already-returned
             # record lengths here; never re-tokenize or re-extract merely for
             # accounting.
             history_packed_candidate_doc_count = len(docs)
             history_packed_original_tokens = sum(
                 int(record.get("original_seq_len") or 0)
-                for _, record, _ in docs)
+                for _, record, _, _ in docs)
             docs, dropped_docs = _select_docs(docs, MAX_DOC_NUM)
             selected_original_tokens = sum(
                 int(record.get("original_seq_len") or 0)
-                for _, record, _ in docs)
+                for _, record, _, _ in docs)
             history_dropped_original_tokens = (
                 history_packed_original_tokens - selected_original_tokens)
             if history_packed_original_tokens:
@@ -1043,8 +1560,8 @@ def _assemble(messages: List[Dict[str, Any]], arm: Arm, timeout: int = 600):
         compressible_set = {i for i, _ in compressible}
         for i, message in enumerate(messages):
             if i == first_index:
-                for text, record, sources in docs:
-                    _emit_doc("user", text, record, sources)
+                for text, record, sources, fragment_id in docs:
+                    _emit_doc("user", text, record, sources, fragment_id)
                 continue
             if i in compressible_set:
                 continue
@@ -1062,8 +1579,15 @@ def _assemble(messages: List[Dict[str, Any]], arm: Arm, timeout: int = 600):
                 # see _render_action_dialect: never extract the bare (null)
                 # content of a tool-call turn
                 content = _render_action_dialect(message)
-            record = _extract(role, content, arm.ratio, timeout)
-            _emit_doc(role, content, record, [i])
+            with extraction_sources([i - source_shift]):
+                record = _extract(role, content, arm.ratio, timeout)
+            fragment_id = len(packing_fragments)
+            if track_fragments:
+                packing_fragments.append({
+                    "fragment_id": fragment_id, "source_indices": [i - source_shift],
+                    "encoder_input_tokens": int(record.get("original_seq_len") or 0),
+                })
+            _emit_doc(role, content, record, [i], fragment_id)
         # Message packing has no post-extract selection: its candidate and
         # retained sets are the same selected-history ledger.
         if arm.compress_history:
@@ -1077,7 +1601,11 @@ def _assemble(messages: List[Dict[str, Any]], arm: Arm, timeout: int = 600):
     counts["original_tokens"] = original_tokens
     counts["n_gist_messages"] = n_gist
     counts["compressed_records"] = compressed_records
+    if track_fragments:
+        counts["history_packing_fragments"] = packing_fragments
     counts["doc_packing"] = packing
+    if subgoal_ledger is not None:
+        counts["subgoal_organization"] = subgoal_ledger.metadata()
     counts["n_docs"] = n_docs
     counts["dropped_docs"] = dropped_docs
     counts["history_packed_original_tokens"] = history_packed_original_tokens
@@ -1202,10 +1730,11 @@ def _textarm_compress(payload: Dict[str, Any], meter=None) -> str:
     finish reason and non-empty content — HTTP-200-with-error-body and
     abort finishes are FAILURES (TextarmCompressorError), never empty
     summaries that would get cached for the rest of the conversation.
-    "length" is a NORMAL finish: the HiAgent summarizer decodes with
-    max_tokens~100 and works BY truncation.  ``meter`` (optional) receives
+    "length" is accepted by the existing local HiAgent port, whose
+    summarizer uses max_tokens=100.  ``meter`` (optional) receives
     the response usage block for cost accounting."""
-    data = _post_json("/v1/chat/completions", payload, 600)
+    with textarm_phase("compressor"):
+        data = _post_json("/v1/chat/completions", payload, 600)
     try:
         choice = (data.get("choices") or [{}])[0]
         finish = choice.get("finish_reason")
@@ -1246,7 +1775,12 @@ def _apply_text_arm(payload: Dict[str, Any], arm, conv: str,
         usage_acc["wall_sec"] += time.perf_counter() - t0
         return out
 
-    if arm.text_policy in ("hiagent", "hiagent_summary", "hiagent_full"):
+    if arm.text_policy == "hiagent_envelope_only":
+        if retrieve_subgoals:
+            raise ValueError("envelope-only control does not support trajectory retrieval")
+        out, stats = textarms.hiagent_envelope_only_transform(
+            messages, default_system=DEFAULT_SYSTEM_PROMPT)
+    elif arm.text_policy in ("hiagent", "hiagent_summary", "hiagent_full"):
         out, stats = textarms.hiagent_transform(
             messages, compress, _render_action_dialect, model=model,
             default_system=DEFAULT_SYSTEM_PROMPT,
@@ -1309,7 +1843,8 @@ def _hiagent_retrieval_loop(original_payload, arm, conv, data, stats, send):
         stats["n_compressor_calls"] += int(updated.get("n_compressor_calls") or 0)
         stats.update({key: value for key, value in updated.items()
                       if key not in ("compressor_usage", "n_compressor_calls")})
-        data = send(staged)
+        with textarm_phase("trajectory_retrieval_policy"):
+            data = send(staged)
 
 
 def plan_repair(messages: List[Dict[str, Any]], arm: Arm,
@@ -1524,11 +2059,187 @@ class ProxyHandler(BaseHTTPRequestHandler):
         pass
 
     def _is_chat(self) -> bool:
-        return self.path.endswith("/v1/chat/completions") or self.path.endswith(
-            "/chat/completions"
-        )
+        return _is_chat_path(self.path)
 
     def do_POST(self):
+        self.request_id = uuid.uuid4().hex
+        token = _ATTEMPT_REQUEST.set({"request_id": self.request_id, "eval_context": {}})
+        try:
+            self._do_post_scoped()
+        finally:
+            _ATTEMPT_REQUEST.reset(token)
+
+    def _do_post_scoped(self):
+        with GENERATION_BUDGET.request_scope() as budget_record:
+            self.generation_budget_record = budget_record
+            self._generation_budget_final = None
+            self._generation_budget_finalized = False
+            with EXTRACTION_BUDGET.request_scope() as extraction_budget_record:
+                self.extraction_budget_record = extraction_budget_record
+                self._extraction_budget_final = None
+                self._extraction_budget_finalized = False
+                with capture_extractions(
+                    enabled=MEMORY_RUNTIME is not None or CAPTURE_REQUEST_VIEWS
+                ) as trace:
+                    self.extraction_trace = trace
+                    self.forwarded_gist_keys = []
+                    self._do_post()
+
+    def _predict_source_needs(self, parent_payload, messages, expected_prompt_tokens, *, tools=None):
+        """Issue one budgeted auxiliary generation whose output is never executed."""
+        staged = {key: parent_payload[key] for key in
+                  ("model", "temperature", "seed", "top_p", "top_k") if key in parent_payload}
+        staged.update(messages=messages, stream=False,
+                      max_completion_tokens=MEMORY_RUNTIME.predictor_completion_token_cap,
+                      c2kv_use_gist_projection=False)
+        if tools is not None:
+            staged["tools"] = tools
+        out_payload = BACKEND.prepare_chat(staged, get_arm("full"), None)
+        attempts_before = self.generation_budget_record.attempt_count
+        lengths = (len(self.forwarded_sampling), len(self.forwarded_gist_keys),
+                   len(self.forwarded_request_views))
+        self.forwarded_sampling.append(_sampling_fields(out_payload))
+        self.forwarded_gist_keys.append([])
+        if CAPTURE_REQUEST_VIEWS:
+            self.forwarded_request_views.append(_captured_request_view(out_payload))
+        record = {"phase": "source_prediction", "status": "started", "discarded": False,
+                  "action_candidate": False, "submitted_to_executor": False,
+                  "backend_verified": False, "forwarded_request_index": lengths[0]}
+        started = time.perf_counter()
+        try:
+            data = _post_json(self.path, out_payload, 600, retries=0)
+            normalized = BACKEND.normalize_response(data)
+            record.update(status="completed", usage=normalized.get("usage"),
+                          cost=normalized.get("cost"), finish_reason=normalized.get("finish_reason"))
+            verification = {"memory_runtime": {
+                "bytes_per_kv_token": MEMORY_RUNTIME.bytes_per_kv_token,
+                "total_raw_prompt_tokens": expected_prompt_tokens}}
+            _verify_memory_runtime_kv_bytes(verification, normalized)
+            record["backend_verified"] = True
+            record["memory_runtime"] = verification["memory_runtime"]
+            if CAPTURE_REQUEST_VIEWS:
+                record["response_view"] = {key: normalized.get(key) for key in ("content", "tool_calls")}
+            return normalized
+        except Exception as error:
+            record.update(status="failed", error_type=type(error).__name__)
+            raise
+        finally:
+            if self.generation_budget_record.attempt_count > attempts_before:
+                record["wall_sec"] = time.perf_counter() - started
+                self.generation_records.append(record)
+            else:
+                del self.forwarded_sampling[lengths[0]:]
+                del self.forwarded_gist_keys[lengths[1]:]
+                del self.forwarded_request_views[lengths[2]:]
+
+    def _propose_typed_subgoal(self, actor_payload, held, counts):
+        """Return strict declaration content, or None on abstention/failure."""
+        from memory_runtime.typed_subgoal_proposal import (
+            action_sha256, build_payload, parse_proposal, should_trigger,
+            strict_candidate,
+        )
+        metadata = counts["memory_runtime"]
+        receipt = {
+            "policy": "post-action-internal-v1", "triggered": False,
+            "submitted_to_executor": False,
+        }
+        metadata["typed_subgoal_proposal"] = receipt
+        if not should_trigger(metadata, held):
+            receipt["status"] = "not_triggered"
+            return None
+        receipt["triggered"] = True
+        proposal_payload = build_payload(actor_payload, held)
+        held_hash = action_sha256(held)
+        receipt["held_action_sha256"] = held_hash
+        raw_messages = [row for row in proposal_payload["messages"]
+                        if not row.get("c2kv_key_hash")]
+        expected_prompt_tokens = MEMORY_RUNTIME._token_counter(
+            raw_messages, proposal_payload["tools"])
+        attempts_before = self.generation_budget_record.attempt_count
+        forwarded_index = len(self.forwarded_sampling)
+        self.forwarded_sampling.append(_sampling_fields(proposal_payload))
+        self.forwarded_gist_keys.append([
+            row["c2kv_key_hash"] for row in proposal_payload["messages"]
+            if row.get("c2kv_key_hash")])
+        if CAPTURE_REQUEST_VIEWS:
+            self.forwarded_request_views.append(_captured_request_view(proposal_payload))
+        record = {
+            "phase": "state_proposal", "status": "started", "discarded": False,
+            "action_candidate": False, "submitted_to_executor": False,
+            "backend_verified": False, "forwarded_request_index": forwarded_index,
+        }
+        started = time.perf_counter()
+        response = None
+        try:
+            response = _post_json(self.path, proposal_payload, 600, retries=0)
+            normalized = BACKEND.normalize_response(response)
+            record.update(status="completed", usage=normalized.get("usage"),
+                          cost=normalized.get("cost"),
+                          finish_reason=normalized.get("finish_reason"),
+                          backend_verified=True)
+            cost = normalized.get("cost") or {}
+            expected_gist = any(row.get("c2kv_key_hash")
+                                for row in proposal_payload["messages"])
+            geometry = {
+                "bytes_per_kv_token": cost.get("bytes_per_kv_token"),
+                "tools_dump": cost.get("c2kv_tools_dump"),
+                "gist_seen": cost.get("c2kv_gist_seen"),
+            }
+            geometry_ok = (
+                geometry["bytes_per_kv_token"] == MEMORY_RUNTIME.bytes_per_kv_token
+                and geometry["tools_dump"] == "full"
+                and geometry["gist_seen"] is expected_gist
+            )
+            receipt["backend_geometry"] = {**geometry, "expected_gist_seen": expected_gist,
+                                            "verified": geometry_ok}
+            record["backend_geometry_verified"] = geometry_ok
+            if not geometry_ok:
+                record["backend_verified"] = False
+                raise MemoryRuntimeError("Typed proposal backend geometry disagrees with request")
+            observed = (normalized.get("usage") or {}).get("prompt_tokens")
+            receipt.update(
+                expected_prompt_tokens=expected_prompt_tokens,
+                observed_prompt_tokens=observed,
+                prompt_token_parity=(observed == expected_prompt_tokens),
+                prompt_token_delta=(observed - expected_prompt_tokens
+                                    if type(observed) is int else None),
+            )
+            record["backend_verified"] = (
+                geometry_ok and receipt["prompt_token_parity"] is True)
+            choices = response.get("choices") if isinstance(response, dict) else None
+            if (not isinstance(choices, list) or len(choices) != 1
+                    or not isinstance(choices[0], dict)
+                    or not isinstance(choices[0].get("message"), dict)):
+                raise ValueError("Proposal response lacks one assistant message")
+            proposal = parse_proposal(choices[0]["message"])
+            candidate = strict_candidate(held, proposal)
+            receipt["status"] = proposal["status"]
+            if candidate is not None:
+                receipt["strict_parser_accepted"] = True
+                return candidate["content"]
+            else:
+                receipt["strict_parser_accepted"] = False
+        except Exception as error:
+            raw_usage = response.get("usage") if isinstance(response, dict) else None
+            record.update(status="failed", error_type=type(error).__name__)
+            if record.get("usage") is None:
+                record["usage"] = raw_usage
+            receipt.update(status="failed", failure_stage=(
+                "postprocess" if response is not None else "transport"),
+                           error_type=type(error).__name__)
+        finally:
+            if self.generation_budget_record.attempt_count > attempts_before:
+                record["wall_sec"] = time.perf_counter() - started
+                record["memory_runtime"] = json.loads(json.dumps(metadata))
+                self.generation_records.append(record)
+            else:
+                del self.forwarded_sampling[forwarded_index:]
+                del self.forwarded_gist_keys[forwarded_index:]
+                if CAPTURE_REQUEST_VIEWS:
+                    del self.forwarded_request_views[forwarded_index:]
+        return None
+
+    def _do_post(self):
         length = int(self.headers.get("Content-Length") or 0)
         raw = self.rfile.read(length)
         if not self._is_chat():
@@ -1546,16 +2257,37 @@ class ProxyHandler(BaseHTTPRequestHandler):
         eval_context = payload.pop("c2kv_eval_context", None)
         oracle = payload.pop("c2kv_oracle", None)
         self.eval_context = eval_context if isinstance(eval_context, dict) else {}
+        _ATTEMPT_REQUEST.get()["eval_context"] = self.eval_context
+        request_budget = GENERATION_BUDGET.current_request()
+        task_id = self.eval_context.get("task_id")
+        if (GENERATION_BUDGET.per_task_limit is not None and request_budget is not None
+                and isinstance(task_id, str) and task_id):
+            # Bind before packing/admission, which may terminate the task
+            # without issuing a generation request.
+            request_budget.task_id = task_id
+            request_budget.task_consumed_before = GENERATION_BUDGET.consumed_for_task(task_id)
         self.forwarded_sampling = []
         self.forwarded_request_views = []
+        self.generation_records = None
+        source_needs_active = getattr(MEMORY_RUNTIME, "source_needs_strategy", None) is not None
+        if source_needs_active:
+            self.generation_records = []
         start = time.perf_counter()
         messages = payload.get("messages") or []
+        proposal_policy = getattr(MEMORY_RUNTIME, "typed_subgoal_proposal_policy", None)
         fingerprint = messages_fingerprint(messages)
         conv = conversation_id(messages)
         turn = len(messages)
         text_stats: Optional[Dict[str, Any]] = None
         original_payload = payload
         counts = _memory_runtime_error_counts()
+        prepared_exact = None
+        prepared_actor = None
+        self.actor_original_request = None
+        self.actor_forwarded_payload = None
+        self.textarm_source_request_view = None
+        if CAPTURE_REQUEST_VIEWS and getattr(ARM, "text_policy", None):
+            self.textarm_source_request_view = _captured_request_view(payload)
         try:
             if MEMORY_RUNTIME is not None:
                 _check_memory_runtime_fatal()
@@ -1567,11 +2299,22 @@ class ProxyHandler(BaseHTTPRequestHandler):
             if getattr(ARM, "text_policy", None):
                 payload, text_stats = _apply_text_arm(payload, ARM, conv)
                 messages = payload["messages"]
-            messages_out, counts = _assemble(messages, ARM)
-            if MEMORY_RUNTIME is not None:
-                messages_out, counts = _apply_memory_runtime(
-                    messages, messages_out, counts, self.eval_context,
-                    payload.get("tools"))
+            if getattr(MEMORY_RUNTIME, "supports_actor_evidence", False):
+                self.generation_records = []
+                self.actor_original_request = json.loads(json.dumps(payload))
+                messages_out, counts, prepared_actor = _prepare_actor_evidence_input(
+                    messages, self.eval_context, payload.get("tools"))
+                payload = {**payload, "tools": prepared_actor.offered_tools}
+            elif getattr(MEMORY_RUNTIME, "supports_exact_recovery", False):
+                self.generation_records = []
+                messages_out, counts, prepared_exact = _prepare_exact_memory_input(
+                    messages, self.eval_context, payload.get("tools"))
+            else:
+                messages_out, counts = _prepare_memory_input(
+                    messages, self.eval_context, payload.get("tools"),
+                    source_predictor=(lambda selected_messages, expected_tokens, **options:
+                        self._predict_source_needs(payload, selected_messages, expected_tokens, **options))
+                        if source_needs_active else None)
             if text_stats is not None:
                 counts["textarm"] = text_stats
             repair_plan = plan_repair(messages, ARM, counts,
@@ -1598,10 +2341,17 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 BackendError) as error:
             kind = getattr(error, "kind",
                            "textarm_error" if ARM.text_policy else "assemble_error")
+            generation_budget = self._finalize_generation_budget()
             self._log_request(payload, None, counts, status=kind,
                               error=str(error), fingerprint=fingerprint, conv=conv,
                               turn=turn)
-            self._send_json(502, {"error": f"c2kv assembly failed: {error}"})
+            response = {"error": f"c2kv assembly failed: {error}"}
+            if generation_budget is not None:
+                response["generation_budget"] = generation_budget
+            extraction_budget = self._finalize_extraction_budget()
+            if extraction_budget is not None:
+                response["extraction_budget"] = extraction_budget
+            self._send_json(502, response)
             return
         assemble_sec = time.perf_counter() - start
 
@@ -1623,7 +2373,12 @@ class ProxyHandler(BaseHTTPRequestHandler):
                              "kv_reuse": reuse_ctx})
             else:
                 out_payload = BACKEND.prepare_chat(staged, ARM, plan)
+            if source_needs_active:
+                self.actor_forwarded_payload = json.loads(json.dumps(out_payload))
             self.forwarded_sampling.append(_sampling_fields(out_payload))
+            self.forwarded_gist_keys.append([
+                message["c2kv_key_hash"] for message in out_payload.get("messages", [])
+                if message.get("c2kv_key_hash")])
             if CAPTURE_REQUEST_VIEWS:
                 self.forwarded_request_views.append(_captured_request_view(out_payload))
             return _post_json(
@@ -1632,13 +2387,75 @@ class ProxyHandler(BaseHTTPRequestHandler):
                          else 2)), out_payload
 
         def call_upstream(out_messages, plan):
-            data_, _ = send_upstream(out_messages, plan)
+            record = None
+            if prepared_exact is not None:
+                if len(self.generation_records) >= 2:
+                    raise MemoryRuntimeError("Exact recovery allows at most two generation attempts")
+            elif prepared_actor is not None:
+                if len(self.generation_records) >= 2:
+                    raise MemoryRuntimeError("Actor evidence allows at most two generation attempts")
+            elif source_needs_active and any(record["phase"] == "action" for record in self.generation_records):
+                raise MemoryRuntimeError("Source-needs allows one final action generation per decision")
+            attempts_before = self.generation_budget_record.attempt_count
+            forwarded_lengths = (
+                len(self.forwarded_sampling),
+                len(self.forwarded_gist_keys),
+                len(self.forwarded_request_views),
+            )
+            upstream_started = time.perf_counter()
+
+            def rollback_unreserved_forward():
+                if self.generation_budget_record.attempt_count != attempts_before:
+                    return
+                sampling_len, gist_len, view_len = forwarded_lengths
+                del self.forwarded_sampling[sampling_len:]
+                del self.forwarded_gist_keys[gist_len:]
+                del self.forwarded_request_views[view_len:]
+
+            def record_reserved_attempt():
+                nonlocal record
+                if (self.generation_records is None or record is not None
+                        or self.generation_budget_record.attempt_count == attempts_before):
+                    return
+                record = {
+                    "phase": ("draft" if not self.generation_records else "regeneration")
+                             if prepared_exact is not None else "action",
+                    "status": "started", "discarded": False,
+                    "backend_verified": False,
+                    "forwarded_request_index": len(self.forwarded_sampling) - 1,
+                    "memory_runtime": json.loads(json.dumps(counts["memory_runtime"])),
+                }
+                self.generation_records.append(record)
+
             try:
-                return data_, BACKEND.normalize_response(data_)
+                data_, _ = send_upstream(out_messages, plan)
+                record_reserved_attempt()
+                normalized_ = BACKEND.normalize_response(data_)
+                if record is not None:
+                    record.update(status="completed", usage=normalized_.get("usage"),
+                                  cost=normalized_.get("cost"),
+                                  finish_reason=normalized_.get("finish_reason"))
+                    if CAPTURE_REQUEST_VIEWS:
+                        record["response_view"] = {key: normalized_.get(key)
+                                                   for key in ("content", "tool_calls")}
+                return data_, normalized_
             except BackendError as error:
+                rollback_unreserved_forward()
+                record_reserved_attempt()
+                if record is not None:
+                    record.update(status="failed", error_type=type(error).__name__)
                 if getattr(error, "kind", "") == "cache_miss":
                     raise CacheMiss(error.detail) from error
                 raise
+            except Exception as error:
+                rollback_unreserved_forward()
+                record_reserved_attempt()
+                if record is not None:
+                    record.update(status="failed", error_type=type(error).__name__)
+                raise
+            finally:
+                if record is not None:
+                    record["wall_sec"] = time.perf_counter() - upstream_started
 
         try:
             try:
@@ -1653,7 +2470,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
                         original_payload, ARM, conv, data, text_stats, send_retrieved)
                     normalized = BACKEND.normalize_response(data)
             except CacheMiss:
-                if MEMORY_RUNTIME is not None or NO_UPSTREAM_RETRIES:
+                if (MEMORY_RUNTIME is not None or NO_UPSTREAM_RETRIES
+                        or GENERATION_BUDGET.enabled):
                     # The caller owns the attempt budget.  With A enabled, a
                     # transparent retry could also apply one lease decision
                     # twice and make state/cost provenance ambiguous.
@@ -1691,15 +2509,60 @@ class ProxyHandler(BaseHTTPRequestHandler):
                         messages, ARM, counts, oracle, payload.get("tools"), messages_out, force=True)
                 data, normalized = call_upstream(messages_out, repair_plan)
             _verify_memory_runtime_kv_bytes(counts, normalized)
+            if source_needs_active:
+                self.generation_records[-1]["backend_verified"] = True
+                self.generation_records[-1]["memory_runtime"] = json.loads(json.dumps(counts["memory_runtime"]))
+            if prepared_actor is not None:
+                reconsidered = MEMORY_RUNTIME.reconsider_actor(prepared_actor, normalized)
+                if reconsidered is not None:
+                    self.generation_records[-1].update(phase="evidence_request", discarded=True,
+                        action_candidate=False, submitted_to_executor=False)
+                    messages_out, counts = _pin_memory_runtime_output(*reconsidered)
+                    payload = {**payload, "tools": prepared_actor.application_tools}
+                    data, normalized = call_upstream(messages_out, None)
+                    _verify_memory_runtime_kv_bytes(counts, normalized)
+                    from memory_runtime.native_source_needs import TOOL_NAME as evidence_tool_name
+                    if any(call.get("function", {}).get("name") == evidence_tool_name
+                           for call in normalized.get("tool_calls") or []):
+                        raise MemoryRuntimeError("Final action repeated the internal evidence request")
+                    self.generation_records[-1]["backend_verified"] = True
+                    self.generation_records[-1]["memory_runtime"] = json.loads(json.dumps(counts["memory_runtime"]))
+                self.generation_records[-1]["submitted_to_executor"] = True
+            if prepared_exact is not None:
+                self.generation_records[-1]["backend_verified"] = True
+                self.generation_records[-1]["memory_runtime"] = json.loads(
+                    json.dumps(counts["memory_runtime"]))
+                try:
+                    reconsidered = MEMORY_RUNTIME.reconsider(
+                        prepared_exact, normalized.get("tool_calls"))
+                except (KeyError, TypeError, ValueError, RuntimeError) as error:
+                    raise MemoryRuntimeError(str(error), kind=getattr(error, "kind", None)) from error
+                counts = reconsidered["counts"]
+                if reconsidered["regenerate"]:
+                    self.generation_records[-1]["discarded"] = True
+                    messages_out, counts = _pin_memory_runtime_output(
+                        reconsidered["messages"], counts)
+                    data, normalized = call_upstream(messages_out, None)
+                    _verify_memory_runtime_kv_bytes(counts, normalized)
+                    self.generation_records[-1]["backend_verified"] = True
+                    self.generation_records[-1]["memory_runtime"] = json.loads(
+                        json.dumps(counts["memory_runtime"]))
         except (UpstreamError, BackendError, CacheMiss, RuntimeError, ValueError,
                 URLError, OSError) as error:
             kind = getattr(error, "kind", "upstream_error")
             if isinstance(error, CacheMiss):
                 kind = "cache_miss"
+            generation_budget = self._finalize_generation_budget()
             self._log_request(payload, None, counts, status=kind,
                               error=str(error), fingerprint=fingerprint, conv=conv,
                               turn=turn, plan=self._slim_plan(repair_plan))
-            self._send_json(502, {"error": f"upstream failed: {error}"})
+            response = {"error": f"upstream failed: {error}"}
+            if generation_budget is not None:
+                response["generation_budget"] = generation_budget
+            extraction_budget = self._finalize_extraction_budget()
+            if extraction_budget is not None:
+                response["extraction_budget"] = extraction_budget
+            self._send_json(502, response)
             return
         total_sec = time.perf_counter() - start
 
@@ -1723,10 +2586,17 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 except (UpstreamError, BackendError, RuntimeError, ValueError,
                         URLError, OSError) as error:
                     kind = getattr(error, "kind", "recover_error")
+                    generation_budget = self._finalize_generation_budget()
                     self._log_request(payload, None, counts, status=kind,
                                       error=str(error), fingerprint=fingerprint,
                                       conv=conv, turn=turn, recover=recover_flags)
-                    self._send_json(502, {"error": f"c2kv recover failed: {error}"})
+                    response = {"error": f"c2kv recover failed: {error}"}
+                    if generation_budget is not None:
+                        response["generation_budget"] = generation_budget
+                    extraction_budget = self._finalize_extraction_budget()
+                    if extraction_budget is not None:
+                        response["extraction_budget"] = extraction_budget
+                    self._send_json(502, response)
                     return
                 ref = STATE.recover.reference.get(fingerprint)
                 action_b = action_canonical({
@@ -1744,6 +2614,41 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 })
                 data, normalized = data_b, normalized_b
                 total_sec = time.perf_counter() - start
+
+        if prepared_exact is not None:
+            try:
+                _commit_memory_runtime_final(prepared_exact, normalized, counts)
+                total_sec = time.perf_counter() - start
+            except (RuntimeError, ValueError, TypeError, KeyError) as error:
+                kind = getattr(error, "kind", "memory_runtime_error")
+                generation_budget = self._finalize_generation_budget()
+                self._log_request(payload, None, counts, status=kind,
+                                  error=str(error), fingerprint=fingerprint, conv=conv,
+                                  turn=turn, plan=self._slim_plan(repair_plan))
+                response = {"error": f"memory runtime finalization failed: {error}"}
+                if generation_budget is not None:
+                    response["generation_budget"] = generation_budget
+                extraction_budget = self._finalize_extraction_budget()
+                if extraction_budget is not None:
+                    response["extraction_budget"] = extraction_budget
+                self._send_json(502, response)
+                return
+
+        if proposal_policy is not None:
+            from memory_runtime.typed_subgoal_proposal import project_returned_declaration
+            held = {"role": "assistant", "content": normalized.get("content"),
+                    "tool_calls": normalized.get("tool_calls") or []}
+            declaration = self._propose_typed_subgoal(
+                self.actor_forwarded_payload, held, counts)
+            if declaration is not None:
+                if not project_returned_declaration(data, normalized, declaration):
+                    counts["memory_runtime"]["typed_subgoal_proposal"].update(
+                        status="failed", failure_stage="response_projection",
+                        returned_declaration=False)
+                else:
+                    counts["memory_runtime"]["typed_subgoal_proposal"][
+                        "returned_declaration"] = True
+            total_sec = time.perf_counter() - start
 
         # ---- reference recording (full-arm run, --record-reference) ----
         if STATE.reference_log_path:
@@ -1781,6 +2686,14 @@ class ProxyHandler(BaseHTTPRequestHandler):
             }
         )
         data["c2kv_proxy"].update(normalized["cost"])
+        if self.generation_records is not None:
+            data["c2kv_proxy"].update(_generation_summary(self.generation_records))
+        generation_budget = self._finalize_generation_budget()
+        if generation_budget is not None:
+            data["c2kv_proxy"]["generation_budget"] = generation_budget
+        extraction_budget = self._finalize_extraction_budget()
+        if extraction_budget is not None:
+            data["c2kv_proxy"]["extraction_budget"] = extraction_budget
         if counts.get("memory_runtime") is not None:
             data["c2kv_proxy"]["memory_runtime"] = counts["memory_runtime"]
         counts["repair_frame"] = _repair_frame_check(repair_plan, normalized)
@@ -1799,11 +2712,11 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 "history_ratio_after": counts["original_tokens"] / (counts["gist_tokens"] + repair_tokens),
                 "scope": "history_KV_tensor_payload_only; excludes pool duplication, indexes and Python metadata",
             }
-        self._send_json(200, data)
         counts["wall_sec"] = round(total_sec, 4)
         self._log_request(payload, normalized, counts, recover=recover_flags,
                           fingerprint=fingerprint, conv=conv, turn=turn,
                           plan=self._slim_plan(repair_plan))
+        self._send_json(200, data)
 
     @staticmethod
     def _slim_plan(plan):
@@ -1814,6 +2727,24 @@ class ProxyHandler(BaseHTTPRequestHandler):
             "expected_offset", "frame_delta", "frame_delta_status",
             "repair_block_tokens", "already_rotated")
             if k in plan}
+
+    def _finalize_generation_budget(self):
+        record = getattr(self, "generation_budget_record", None)
+        if record is None:
+            return None
+        if not getattr(self, "_generation_budget_finalized", False):
+            self._generation_budget_final = record.metadata()
+            self._generation_budget_finalized = True
+        return getattr(self, "_generation_budget_final", None)
+
+    def _finalize_extraction_budget(self):
+        record = getattr(self, "extraction_budget_record", None)
+        if record is None:
+            return None
+        if not getattr(self, "_extraction_budget_finalized", False):
+            self._extraction_budget_final = record.metadata()
+            self._extraction_budget_finalized = True
+        return getattr(self, "_extraction_budget_final", None)
 
     def do_GET(self):
         try:
@@ -1855,6 +2786,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
                      error=None, fingerprint=None, conv=None, turn=None, plan=None):
         if not REQUEST_LOG_PATH:
             return
+        if getattr(self, "actor_original_request", None) is not None:
+            request = self.actor_original_request
         counts = counts or {}
         recover = recover or {}
         row: Dict[str, Any] = {
@@ -1886,14 +2819,34 @@ class ProxyHandler(BaseHTTPRequestHandler):
             ] if normalized else None,
         }
         row["eval_context"] = getattr(self, "eval_context", {})
+        row["request_id"] = getattr(self, "request_id", None)
+        generation_records = getattr(self, "generation_records", None)
+        if generation_records is not None:
+            row["generation_trace"] = generation_records
+            row.update(_generation_summary(generation_records))
+        generation_budget = self._finalize_generation_budget()
+        if generation_budget is not None:
+            row["generation_budget"] = generation_budget
         row["sampling_request"] = _sampling_fields(request)
         row["sampling_forwarded"] = getattr(self, "forwarded_sampling", [])
         row["sampling_scope"] = "explicit request fields; omitted server defaults are unknown"
+        extraction_trace = getattr(self, "extraction_trace", None)
+        if extraction_trace is not None:
+            row["extraction_telemetry"] = extraction_trace.snapshot(
+                block_refs=(counts.get("memory_runtime") or {}).get("block_refs", []),
+                forwarded_requests=getattr(self, "forwarded_gist_keys", []),
+                request_status=status)
+        extraction_budget = self._finalize_extraction_budget()
+        if extraction_budget is not None:
+            row["extraction_budget"] = extraction_budget
         if CAPTURE_REQUEST_VIEWS:
             row["request_view"] = _captured_request_view(request)
             row["forwarded_request_views"] = getattr(self, "forwarded_request_views", [])
             row["response_view"] = ({key: normalized.get(key) for key in ("content", "tool_calls")}
                                     if normalized else None)
+        source_request_view = getattr(self, "textarm_source_request_view", None)
+        if source_request_view is not None:
+            row["textarm_source_request_view"] = source_request_view
         if status != "ok":
             row["error_kind"] = status
         # raw-vs-compressed message-class breakdown
@@ -1919,12 +2872,92 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 handle.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 
+def _configure_native_hiagent_bridge(
+    *,
+    backend_name,
+    arm,
+    policy_sampling_path,
+    max_generation_attempts_per_task,
+    no_upstream_retries,
+    capture_request_views,
+    request_log,
+    memory_runtime_config,
+    upstream,
+):
+    """Validate the complete opt-in boundary before the proxy can listen."""
+    if backend_name != "event_native_hiagent":
+        if policy_sampling_path:
+            raise ValueError(
+                "--native-hiagent-policy-sampling requires "
+                "--backend event_native_hiagent"
+            )
+        return None
+    arm_shape = (
+        getattr(arm, "name", None),
+        getattr(arm, "text_policy", None),
+        getattr(arm, "compress_history", None),
+        getattr(arm, "native_messages", None),
+    )
+    if arm_shape not in {
+        ("hiagent_full_native", "hiagent_full", False, True),
+        (
+            "hiagent_envelope_only_native",
+            "hiagent_envelope_only",
+            False,
+            True,
+        ),
+    }:
+        raise ValueError(
+            "--backend event_native_hiagent requires the exact "
+            "hiagent_full_native or hiagent_envelope_only_native arm"
+        )
+    if not policy_sampling_path:
+        raise ValueError(
+            "--backend event_native_hiagent requires explicit "
+            "--native-hiagent-policy-sampling"
+        )
+    if max_generation_attempts_per_task != 96:
+        raise ValueError(
+            "native HiAgent requires --max-generation-attempts-per-task 96"
+        )
+    if not no_upstream_retries:
+        raise ValueError("native HiAgent requires --no-upstream-retries")
+    if not request_log:
+        raise ValueError("native HiAgent requires --request-log for its attempt journal")
+    if not capture_request_views:
+        raise ValueError(
+            "native HiAgent requires --capture-request-views for its phase trace"
+        )
+    if memory_runtime_config:
+        raise ValueError(
+            "native HiAgent phase transport cannot be combined with a memory runtime"
+        )
+    parsed_upstream = urlsplit(upstream)
+    if (
+        parsed_upstream.scheme not in {"http", "https"}
+        or not parsed_upstream.netloc
+        or parsed_upstream.path not in {"", "/"}
+        or parsed_upstream.query
+        or parsed_upstream.fragment
+    ):
+        raise ValueError(
+            "native HiAgent --upstream must be a host-only HTTP URL; the bridge "
+            "endpoint already includes /v1"
+        )
+    return NativeHiAgentBridgeClient.from_policy_sampling_file(
+        policy_sampling_path,
+        max_calls_per_task=max_generation_attempts_per_task,
+    )
+
+
 def main(argv=None):
     global ARM, BACKEND, MEMORY_RUNTIME, UPSTREAM, REQUEST_LOG_PATH
+    global NATIVE_HIAGENT_BRIDGE
     global DOC_PACKING, MAX_DOC_LENGTH, MAX_DOC_NUM, QUERY_PROJECTION
     global WITNESS_TOKENIZER_PATH
     global MEMORY_RUNTIME_BYTES_PER_KV_TOKEN, MEMORY_RUNTIME_FATAL_ERROR
-    global NO_UPSTREAM_RETRIES, CAPTURE_REQUEST_VIEWS
+    global NO_UPSTREAM_RETRIES, CAPTURE_REQUEST_VIEWS, GENERATION_BUDGET, EXTRACTION_BUDGET
+    global ATTEMPT_JOURNAL, TEXTARM_TRACE
     textarms.reset_state()  # fresh caches/state per proxy process
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--witness-tokenizer", default="")
@@ -1932,14 +2965,22 @@ def main(argv=None):
                         help="opt-in A runtime JSON config")
     parser.add_argument("--memory-tokenizer", default="",
                         help="local tokenizer used for A runtime budget accounting")
+    parser.add_argument("--native-hiagent-policy-sampling", default="",
+                        help="explicit policy/retrieval sampling JSON for the opt-in native HiAgent bridge")
     parser.add_argument("--no-upstream-retries", action="store_true",
                         help="disable chat transport and CacheMiss retries")
     parser.add_argument("--capture-request-views", action="store_true",
                         help="record allowlisted benchmark messages/tools and forwarded views")
+    parser.add_argument("--max-generation-attempts", type=positive_generation_limit,
+                        help="process-wide hard cap on chat generation network calls")
+    parser.add_argument("--max-generation-attempts-per-task", type=positive_generation_limit,
+                        help="hard cap on actual draft and regeneration calls per explicit task_id")
+    parser.add_argument("--max-extraction-attempts", type=nonnegative_extraction_limit,
+                        help="process-wide hard cap on client extraction producers")
     parser.add_argument("--upstream", required=True,
                         help="backend base URL, e.g. http://127.0.0.1:34000")
     parser.add_argument("--backend", default="sglang",
-                        choices=["hfserver", "sglang"])
+                        choices=["event_native_hiagent", "hfserver", "sglang"])
     parser.add_argument("--arm", required=True)
     parser.add_argument("--port", type=int, required=True)
     parser.add_argument("--request-log", default="")
@@ -1974,6 +3015,23 @@ def main(argv=None):
     MEMORY_RUNTIME_FATAL_ERROR = None
     NO_UPSTREAM_RETRIES = bool(args.no_upstream_retries)
     CAPTURE_REQUEST_VIEWS = bool(args.capture_request_views)
+    GENERATION_BUDGET = GenerationBudget(
+        args.max_generation_attempts, per_task_limit=args.max_generation_attempts_per_task)
+    EXTRACTION_BUDGET = ExtractionBudget(args.max_extraction_attempts)
+    try:
+        NATIVE_HIAGENT_BRIDGE = _configure_native_hiagent_bridge(
+            backend_name=args.backend,
+            arm=ARM,
+            policy_sampling_path=args.native_hiagent_policy_sampling,
+            max_generation_attempts_per_task=args.max_generation_attempts_per_task,
+            no_upstream_retries=NO_UPSTREAM_RETRIES,
+            capture_request_views=CAPTURE_REQUEST_VIEWS,
+            request_log=args.request_log,
+            memory_runtime_config=args.memory_runtime_config,
+            upstream=args.upstream,
+        )
+    except (OSError, TypeError, ValueError, json.JSONDecodeError) as error:
+        parser.error(str(error))
     if args.memory_runtime_config:
         MEMORY_RUNTIME = _load_memory_runtime(
             args.memory_runtime_config, args.memory_tokenizer)
@@ -1984,6 +3042,12 @@ def main(argv=None):
                 "--reference or --witness-tokenizer")
     UPSTREAM = args.upstream.rstrip("/")
     REQUEST_LOG_PATH = args.request_log
+    # A distinct prefix keeps the append-only journal out of the existing
+    # proxy_*.jsonl request-log discovery used by the runner and collector.
+    ATTEMPT_JOURNAL = (AttemptJournal(attempt_journal_path(REQUEST_LOG_PATH))
+        if REQUEST_LOG_PATH else None)
+    TEXTARM_TRACE = (TextarmTrace(textarm_trace_path(REQUEST_LOG_PATH))
+        if CAPTURE_REQUEST_VIEWS and ARM.text_policy and REQUEST_LOG_PATH else None)
     BACKEND = get_backend(args.backend, _post_json)
     WITNESS_TOKENIZER_PATH = args.witness_tokenizer
     STATE.reference_log_path = args.record_reference
@@ -1997,6 +3061,8 @@ def main(argv=None):
     runtime_mode = getattr(MEMORY_RUNTIME, "mode", None)
     print(f"proxy backend={BACKEND.name} arm={ARM.name} memory_runtime={runtime_mode} "
           f"no_upstream_retries={NO_UPSTREAM_RETRIES} doc_packing={DOC_PACKING} "
+          f"max_generation_attempts={GENERATION_BUDGET.limit} "
+          f"max_extraction_attempts={EXTRACTION_BUDGET.limit} "
           f"max_doc_length={MAX_DOC_LENGTH} max_doc_num={MAX_DOC_NUM} listening on "
           f"{args.host}:{args.port} -> {UPSTREAM}", flush=True)
     server.serve_forever()

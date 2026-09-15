@@ -1,8 +1,19 @@
 diff --git a/model_inference/apimodel_inference.py b/model_inference/apimodel_inference.py
-index 091d470..3202ea1 100644
+index 091d470..e70a818 100644
 --- a/model_inference/apimodel_inference.py
 +++ b/model_inference/apimodel_inference.py
-@@ -37 +37,6 @@ class APIModelInference(BaseHandler):
+@@ -15,6 +15,7 @@ from model_inference.multi_turn.multi_turn_scene import Scene
+ from model_inference.multi_step.multi_step_scene import Mulit_Step_Scene
+ from model_inference.multi_step.APIModel_agent import APIAgent_step
+ from model_inference.multi_step.execution_role_step import EXECUTION_STEP
++from model_inference.role_history import agent_request, bind_execution_receipt, eval_context
+ 
+ SAVED_CLASS = {
+                 "BaseApi": ["wifi","logged_in"],
+@@ -34,7 +35,12 @@ class APIModelInference(BaseHandler):
+ 
+         load_dotenv()
+ 
 -        if "gpt" in self.model_name:
 +        if os.getenv("ACEBENCH_AGENT_BASE_URL"):
 +            # C2KV bench: single-turn inference is the evaluated agent too,
@@ -10,35 +21,151 @@ index 091d470..3202ea1 100644
 +            api_key = os.getenv("ACEBENCH_AGENT_API_KEY", "EMPTY")
 +            base_url = os.getenv("ACEBENCH_AGENT_BASE_URL")
 +        elif "gpt" in self.model_name:
-@@ -155 +160,4 @@ class APIModelInference(BaseHandler):
+             api_key = os.getenv("GPT_AGENT_API_KEY")
+             base_url = os.getenv("GPT_BASE_URL")
+         elif "deepseek-r1" in self.model_name:
+@@ -58,9 +64,9 @@ class APIModelInference(BaseHandler):
+             involved_classes = test_case["involved_classes"]
+             test_id = test_case["id"].split("_")[-1]
+             if "multi_turn" in category:
+-                result, process_list = self.multi_turn_inference(question, initial_config, functions, involved_classes, test_id, time)
++                result, process_list = self.multi_turn_inference(question, initial_config, functions, involved_classes, test_id, time, id)
+             elif "multi_step" in category:
+-                result, process_list = self.multi_step_inference(question, initial_config, functions, involved_classes, test_id, time)
++                result, process_list = self.multi_step_inference(question, initial_config, functions, involved_classes, test_id, time, id)
+             return result, process_list
+ 
+         else:
+@@ -103,13 +109,19 @@ class APIModelInference(BaseHandler):
+         attempt = 0
+         while attempt < 6:
+             try:
+-                response = self.client.chat.completions.create(
+-                    messages=message,
+-                    model=self.model_name,
+-                    temperature=self.temperature,
+-                    max_tokens=self.max_tokens,
+-                    top_p=self.top_p,
+-                )
++                kwargs = {
++                    "messages": message,
++                    "model": self.model_name,
++                    "temperature": self.temperature,
++                    "max_tokens": self.max_tokens,
++                    "top_p": self.top_p,
++                }
++                if os.getenv("ACEBENCH_AGENT_BASE_URL"):
++                    kwargs = agent_request(
++                        message, self.model_name, self.temperature,
++                        self.max_tokens, self.top_p, eval_context(id),
++                    )
++                response = self.client.chat.completions.create(**kwargs)
+                 result = response.choices[0].message.content
+ 
+                 if "deepseek-r1" in self.model_name:
+@@ -128,9 +140,14 @@ class APIModelInference(BaseHandler):
+         return result
+     
+ 
+-    def multi_turn_inference(self, question, initial_config, functions, involved_classes, test_id, time):
++    def multi_turn_inference(self, question, initial_config, functions, involved_classes, test_id, time, task_id):
+ 
+-        agent = APIAgent_turn(model_name=self.model_name, time=time, functions=functions, involved_class=involved_classes, language=self.language)
++        event_native_kwargs = ({
++            "temperature": self.temperature,
++            "top_p": self.top_p,
++            "max_tokens": self.max_tokens,
++        } if os.getenv("ACEBENCH_EVENT_NATIVE_V1") == "1" else {})
++        agent = APIAgent_turn(model_name=self.model_name, time=time, functions=functions, involved_class=involved_classes, language=self.language, task_id=task_id, **event_native_kwargs)
+         user = APIUSER(model_name=self.user_model, involved_class=involved_classes, language=self.language)
+         execution = EXECUTION(agent_model_name=self.model_name, initial_config=initial_config, involved_classes=involved_classes, test_id=test_id, language=self.language)
+ 
+@@ -152,7 +169,10 @@ class APIModelInference(BaseHandler):
+                     current_message = user.respond()
+                 elif last_recipient == "agent":
+                     inference_message = scene.get_inference_message()
 -                    current_message = agent.respond(inference_message)
 +                    agent_history = (message_history if
 +                                     os.getenv("ACEBENCH_ROLE_HISTORY_V1") == "1"
 +                                     else inference_message)
 +                    current_message = agent.respond(agent_history)
-@@ -202 +210,4 @@ class APIModelInference(BaseHandler):
+                 else:
+                     # Catch exceptions from execution.respond(message_history)
+                     inference_message = scene.get_inference_message()
+@@ -163,6 +183,7 @@ class APIModelInference(BaseHandler):
+                         if result_instance not in result_instance_list:
+                             result_instance_list.append(result_instance)
+ 
++                bind_execution_receipt(message_history, current_message)
+                 scene.add_dialogue(current_message)
+ 
+                 if index > 1 and "finish conversation" in current_message["message"]:
+@@ -184,8 +205,13 @@ class APIModelInference(BaseHandler):
+         return result_list, mile_stone
+     
+ 
+-    def multi_step_inference(self, question, initial_config, functions, involved_classes, test_id, time):
+-        agent = APIAgent_step(model_name=self.model_name, time=time, functions=functions)
++    def multi_step_inference(self, question, initial_config, functions, involved_classes, test_id, time, task_id):
++        event_native_kwargs = ({
++            "temperature": self.temperature,
++            "top_p": self.top_p,
++            "max_tokens": self.max_tokens,
++        } if os.getenv("ACEBENCH_EVENT_NATIVE_V1") == "1" else {})
++        agent = APIAgent_step(model_name=self.model_name, time=time, functions=functions, task_id=task_id, **event_native_kwargs)
+         scene = Mulit_Step_Scene(question = question, initial_state=initial_config, functions=functions, agent_role=agent, language=self.language)
+         execution = EXECUTION_STEP(agent_model_name=self.model_name, initial_config=initial_config, involved_classes=involved_classes, test_id=test_id, language=self.language)
+         message_history = scene.dialogue_history
+@@ -199,7 +225,10 @@ class APIModelInference(BaseHandler):
+                 last_sender = message_history[-1]["sender"]
+                 if index == 0 or last_sender == "execution":
+                     inference_message = scene.get_inference_message()
 -                    current_message = agent.respond(inference_message)
 +                    agent_history = (message_history if
 +                                     os.getenv("ACEBENCH_ROLE_HISTORY_V1") == "1"
 +                                     else inference_message)
 +                    current_message = agent.respond(agent_history)
+                 else:
+                     # Catch exceptions from execution.respond(message_history)
+                     current_message, result_instance = execution.respond(message_history)
+@@ -208,6 +237,7 @@ class APIModelInference(BaseHandler):
+                     if result_instance not in result_instance_list:
+                         result_instance_list.append(result_instance)
+ 
++                bind_execution_receipt(message_history, current_message)
+                 scene.add_dialogue(current_message)
+ 
+                 if index > 1 and "finish conversation" in current_message["message"]:
 diff --git a/model_inference/inference_map.py b/model_inference/inference_map.py
-index 942202b..139a9b3 100644
+index 942202b..484834f 100644
 --- a/model_inference/inference_map.py
 +++ b/model_inference/inference_map.py
-@@ -1,2 +1,7 @@
+@@ -1,6 +1,11 @@
 -from model_inference.common_inference import CommonInference
 +import os
  from model_inference.apimodel_inference import APIModelInference
-+
+ 
 +def _lazy_common_inference(*args, **kwargs):
 +    from model_inference.common_inference import CommonInference
 +    return CommonInference(*args, **kwargs)
 +
-@@ -36 +41 @@ inference_map_groups = {
++
+ 
+ inference_map_groups = {
+     APIModelInference: [
+@@ -33,7 +38,7 @@ inference_map_groups = {
+         "claude-3-5-sonnet-20241022",
+         "claude-3-haiku-20240307",
+     ],
 -    CommonInference: [
 +    _lazy_common_inference: [
-@@ -58,0 +64,8 @@ inference_map = {model: handler for handler, models in inference_map_groups.item
+         "gemini-1.5-pro",
+         "gemini-2.0-flash-exp",
+         "qwen2.5-7b-instruct-local",
+@@ -56,3 +61,11 @@ inference_map_groups = {
+ 
+ 
+ inference_map = {model: handler for handler, models in inference_map_groups.items() for model in models}
 +
 +# C2KV bench: model names served by an OpenAI-compatible endpoint (the arm
 +# proxy) are registered from the environment instead of this list, so the
@@ -48,12 +175,25 @@ index 942202b..139a9b3 100644
 +    if _name.strip():
 +        inference_map.setdefault(_name.strip(), APIModelInference)
 diff --git a/model_inference/multi_step/APIModel_agent.py b/model_inference/multi_step/APIModel_agent.py
-index 604575a..b45de8f 100644
+index 604575a..b52f12e 100644
 --- a/model_inference/multi_step/APIModel_agent.py
 +++ b/model_inference/multi_step/APIModel_agent.py
-@@ -4,0 +5 @@ import re
-+from model_inference.role_history import agent_messages
-@@ -68 +69,6 @@ class APIAgent_step():
+@@ -2,6 +2,7 @@
+ from openai import OpenAI
+ import os
+ import re 
++from model_inference.role_history import agent_messages, agent_request, eval_context
+ 
+ 
+ MULTI_TURN_AGENT_PROMPT_SYSTEM_ZH = """你是一个AI系统，你的角色为system，请根据给定的API说明和对话历史1..t，为角色system生成在步骤t+1中生成相应的内容。
+@@ -62,10 +63,15 @@ FOOD_SYSTEM_EN = """Below is the account information and passwords for different
+ 
+ class APIAgent_step():
+ 
+-    def __init__(self, model_name, time, functions, temperature=0.001, top_p=1, max_tokens=1000, language="zh") -> None:
++    def __init__(self, model_name, time, functions, temperature=0.001, top_p=1, max_tokens=1000, language="zh", task_id=None) -> None:
+         self.model_name = model_name.lower()
+         
 -        if "gpt" in self.model_name:
 +        if os.getenv("ACEBENCH_AGENT_BASE_URL"):
 +            # C2KV bench: the AGENT rides the arm proxy regardless of its
@@ -61,31 +201,116 @@ index 604575a..b45de8f 100644
 +            api_key = os.getenv("ACEBENCH_AGENT_API_KEY", "EMPTY")
 +            base_url = os.getenv("ACEBENCH_AGENT_BASE_URL")
 +        elif "gpt" in self.model_name:
-@@ -102 +108,12 @@ class APIAgent_step():
+             api_key = os.getenv("GPT_AGENT_API_KEY")
+             base_url = os.getenv("GPT_AGENT_BASE_URL")
+         elif "deepseek" in self.model_name:
+@@ -87,6 +93,7 @@ class APIAgent_step():
+         self.time = time
+         self.functions = functions
+         self.language = language
++        self.task_id = task_id
+ 
+ 
+     def respond(self, history) -> None:
+@@ -99,7 +106,15 @@ class APIAgent_step():
+             system_prompt = MULTI_TURN_AGENT_PROMPT_SYSTEM_EN.format(time = self.time)
+             user_prompt = MULTI_TURN_AGENT_PROMPT_USER_EN.format(functions = self.functions, history = history)
+ 
 -        if "o1" not in self.model_name:
 +        if isinstance(history, list):
 +            message = agent_messages(system_prompt, self.functions, history,
 +                                     language=self.language)
-+            response = self.client.chat.completions.create(
-+                messages=message,
-+                model=self.model_name,
-+                temperature=self.temperature,
-+                max_tokens=self.max_tokens,
-+                top_p=self.top_p,
-+            )
++            response = self.client.chat.completions.create(**agent_request(
++                message, self.model_name, self.temperature,
++                self.max_tokens, self.top_p, eval_context(self.task_id, history), history,
++            ))
 +            response = response.choices[0].message.content
 +        elif "o1" not in self.model_name:
-@@ -144 +161 @@ class APIAgent_step():
+             message = [
+                 {
+                     "role": "system",
+@@ -141,4 +156,4 @@ class APIAgent_step():
+             current_message["recipient"] = "user"
+         current_message["message"] = response
+ 
 -        return current_message
 \ No newline at end of file
 +        return current_message
+diff --git a/model_inference/multi_step/execution_role_step.py b/model_inference/multi_step/execution_role_step.py
+index 54d125b..99e977b 100644
+--- a/model_inference/multi_step/execution_role_step.py
++++ b/model_inference/multi_step/execution_role_step.py
+@@ -1,5 +1,6 @@
+ 
+ from model_inference.multi_step.multi_step_utils import *
++from model_inference.role_history import RECEIPT_VERSION, text_actions_enabled
+ import ast
+ 
+ 
+@@ -135,6 +136,15 @@ class EXECUTION_STEP():
+             function_call_list = self.decode_function_list(message)
+         except Exception as e:
+             current_message["message"] = "Please do not ask me any questions, use the known conditions to solve the problem"
++            if text_actions_enabled():
++                current_message["c2kv_acebench_execution"] = {
++                    "version": RECEIPT_VERSION,
++                    "decode_status": "error",
++                    "decoded_calls": None,
++                    "executor_status": "not_called",
++                    "executor_return_shape": None,
++                    "executor_return_count": None,
++                }
+             return current_message,{}  # Return error message when exception is caught
+ 
+         single_turn_execution_results, result_instances = (
+@@ -148,6 +158,20 @@ class EXECUTION_STEP():
+             )
+         )
+ 
++        if text_actions_enabled():
++            current_message["c2kv_acebench_execution"] = {
++                "version": RECEIPT_VERSION,
++                "decode_status": "ok",
++                "decoded_calls": (list(function_call_list)
++                                  if isinstance(function_call_list, list) else None),
++                "executor_status": "returned",
++                "executor_return_shape": (
++                    "list" if isinstance(single_turn_execution_results, list) else "non_list"),
++                "executor_return_count": (
++                    len(single_turn_execution_results)
++                    if isinstance(single_turn_execution_results, list) else None),
++            }
++
+     
+         parsed_results = []
+         for item in single_turn_execution_results:
+@@ -159,4 +183,4 @@ class EXECUTION_STEP():
+ 
+         current_message["message"] = parsed_results
+ 
+-        return current_message, result_instances
+\ No newline at end of file
++        return current_message, result_instances
 diff --git a/model_inference/multi_turn/APIModel_agent.py b/model_inference/multi_turn/APIModel_agent.py
-index d1ecfa9..27057a4 100644
+index d1ecfa9..99c87e4 100644
 --- a/model_inference/multi_turn/APIModel_agent.py
 +++ b/model_inference/multi_turn/APIModel_agent.py
-@@ -6,0 +7 @@ from model_inference.prompt_zh import TRAVEL_PROMPT_ZH, BASE_PROMPT_ZH
-+from model_inference.role_history import agent_messages
-@@ -49 +50,6 @@ class APIAgent_turn():
+@@ -4,6 +4,7 @@ import re
+ import ast
+ from model_inference.prompt_en import TRAVEL_PROMPT_EN, BASE_PROMPT_EN
+ from model_inference.prompt_zh import TRAVEL_PROMPT_ZH, BASE_PROMPT_ZH
++from model_inference.role_history import agent_messages, agent_request, eval_context
+ 
+ 
+ MULTI_TURN_AGENT_PROMPT_SYSTEM_ZH = """你是一个AI系统，你的角色为system，请根据给定的API说明和对话历史1..t，为角色system生成在步骤t+1中生成相应的内容。
+@@ -43,10 +44,15 @@ MULTI_TURN_AGENT_PROMPT_USER_EN = """Below is the list of APIs you can use:\n {f
+ 
+ class APIAgent_turn():
+ 
+-    def __init__(self, model_name, time, functions, involved_class, temperature=0.001, top_p=1, max_tokens=1000, language="zh") -> None:
++    def __init__(self, model_name, time, functions, involved_class, temperature=0.001, top_p=1, max_tokens=1000, language="zh", task_id=None) -> None:
+         self.model_name = model_name.lower()
+         
 -        if "gpt" in self.model_name:
 +        if os.getenv("ACEBENCH_AGENT_BASE_URL"):
 +            # C2KV bench: the AGENT rides the arm proxy regardless of its
@@ -93,21 +318,38 @@ index d1ecfa9..27057a4 100644
 +            api_key = os.getenv("ACEBENCH_AGENT_API_KEY", "EMPTY")
 +            base_url = os.getenv("ACEBENCH_AGENT_BASE_URL")
 +        elif "gpt" in self.model_name:
-@@ -206 +212,12 @@ class APIAgent_turn():
+             api_key = os.getenv("GPT_AGENT_API_KEY")
+             base_url = os.getenv("GPT_AGENT_BASE_URL")
+         elif "deepseek" in self.model_name:
+@@ -70,6 +76,7 @@ class APIAgent_turn():
+         self.involved_class = involved_class
+         self.language = language
+         self.model_name = model_name
++        self.task_id = task_id
+ 
+     def decode_function_list(self, result):
+         func = result
+@@ -203,7 +210,15 @@ class APIAgent_turn():
+             if "BaseApi" in self.involved_class:
+                 system_prompt += BASE_PROMPT_EN
+ 
 -        if "o1" not in self.model_name:
 +        if isinstance(history, list):
 +            message = agent_messages(system_prompt, self.functions, history,
 +                                     language=self.language)
-+            response = self.client.chat.completions.create(
-+                messages=message,
-+                model=self.model_name,
-+                temperature=self.temperature,
-+                max_tokens=self.max_tokens,
-+                top_p=self.top_p,
-+            )
++            response = self.client.chat.completions.create(**agent_request(
++                message, self.model_name, self.temperature,
++                self.max_tokens, self.top_p, eval_context(self.task_id, history), history,
++            ))
 +            response = response.choices[0].message.content
 +        elif "o1" not in self.model_name:
-@@ -252 +269 @@ class APIAgent_turn():
+             message = [
+                 {
+                     "role": "system",
+@@ -249,4 +264,4 @@ class APIAgent_turn():
+             current_message["recipient"] = "user"
+             current_message["message"] = response
+ 
 -        return current_message
 \ No newline at end of file
 +        return current_message
@@ -115,7 +357,10 @@ diff --git a/model_inference/multi_turn/APIModel_user.py b/model_inference/multi
 index cf32599..ce9199e 100644
 --- a/model_inference/multi_turn/APIModel_user.py
 +++ b/model_inference/multi_turn/APIModel_user.py
-@@ -82 +82,7 @@ class APIUSER():
+@@ -79,7 +79,13 @@ class APIUSER():
+     def __init__(self, model_name, involved_class, temperature=0.001, top_p=1, max_tokens=1000, language="zh") -> None:
+         
+         self.model_name = model_name.lower()
 -        if "gpt" in self.model_name:
 +        if os.getenv("ACEBENCH_USER_BASE_URL"):
 +            # C2KV bench: the USER SIMULATOR gets its own endpoint (the raw
@@ -124,21 +369,205 @@ index cf32599..ce9199e 100644
 +            api_key = os.getenv("ACEBENCH_USER_API_KEY", "EMPTY")
 +            base_url = os.getenv("ACEBENCH_USER_BASE_URL")
 +        elif "gpt" in self.model_name:
+             api_key = os.getenv("GPT_API_KEY")
+             base_url = os.getenv("GPT_BASE_URL")
+         elif "deepseek" in self.model_name:
+diff --git a/model_inference/multi_turn/execution_role.py b/model_inference/multi_turn/execution_role.py
+index 79c3fa8..82800c7 100644
+--- a/model_inference/multi_turn/execution_role.py
++++ b/model_inference/multi_turn/execution_role.py
+@@ -1,5 +1,6 @@
+ 
+ from model_inference.multi_turn.multi_turn_utils import *
++from model_inference.role_history import RECEIPT_VERSION, text_actions_enabled
+ 
+ import ast
+ 
+@@ -140,6 +141,20 @@ class EXECUTION():
+             language=self.language
+         )
+ 
++        if text_actions_enabled():
++            current_message["c2kv_acebench_execution"] = {
++                "version": RECEIPT_VERSION,
++                "decode_status": "ok",
++                "decoded_calls": (list(function_call_list)
++                                  if isinstance(function_call_list, list) else None),
++                "executor_status": "returned",
++                "executor_return_shape": (
++                    "list" if isinstance(single_turn_execution_results, list) else "non_list"),
++                "executor_return_count": (
++                    len(single_turn_execution_results)
++                    if isinstance(single_turn_execution_results, list) else None),
++            }
++
+         parsed_results = []
+         for item in single_turn_execution_results:
+             try:
+@@ -152,4 +167,4 @@ class EXECUTION():
+         current_message["recipient"] = "agent"
+         current_message["message"] = parsed_results
+ 
+-        return current_message, result_instances
+\ No newline at end of file
++        return current_message, result_instances
 diff --git a/model_inference/role_history.py b/model_inference/role_history.py
 new file mode 100644
-index 0000000..a11b876
+index 0000000..8f7abe3
 --- /dev/null
 +++ b/model_inference/role_history.py
-@@ -0,0 +1,35 @@
+@@ -0,0 +1,177 @@
 +"""Role-preserving OpenAI messages for ACEBench agent clients."""
 +
 +import json
++import os
++
++
++TEXT_ACTIONS_ENV = "ACEBENCH_TEXT_ACTIONS_V1"
++ROLE_HISTORY_ENV = "ACEBENCH_ROLE_HISTORY_V1"
++EVENT_NATIVE_ENV = "ACEBENCH_EVENT_NATIVE_V1"
++SOURCE_VERSION = "acebench-text-actions-v1"
++RECEIPT_VERSION = "acebench-execution-receipt-v1"
++RECEIPT_FIELDS = (
++    "version",
++    "agent_history_index",
++    "decode_status",
++    "decoded_calls",
++    "executor_status",
++    "executor_return_shape",
++    "executor_return_count",
++)
 +
 +
 +def _content(value):
 +    if isinstance(value, str):
 +        return value
 +    return json.dumps(value, ensure_ascii=False)
++
++
++def dialogue_coordinates(history):
++    """Return the stable agent-decision coordinate of a structured prefix."""
++    if not isinstance(history, list):
++        raise TypeError("ACEBench role history must be a list")
++    user_turn = -1
++    step = 0
++    for entry in history:
++        if not isinstance(entry, dict):
++            raise TypeError("ACEBench role history entries must be dictionaries")
++        sender = entry.get("sender")
++        if sender == "user":
++            user_turn += 1
++            step = 0
++        elif sender == "agent":
++            if user_turn < 0:
++                raise ValueError("ACEBench role history must start with a user turn")
++            step += 1
++        elif sender == "execution":
++            if user_turn < 0:
++                raise ValueError("ACEBench role history must start with a user turn")
++        else:
++            raise ValueError(f"unknown ACEBench dialogue sender: {sender!r}")
++    if user_turn < 0:
++        raise ValueError("ACEBench role history must contain a user turn")
++    return user_turn, step
++
++
++def eval_context(task_id, history=None):
++    """Build the exact identity consumed by C2KV benchmark endpoints."""
++    if not isinstance(task_id, str) or not task_id:
++        raise ValueError("ACEBench task_id must be a nonempty string")
++    user_turn, step = ((0, 0) if history is None
++                       else dialogue_coordinates(history))
++    return {
++        "benchmark": "acebench",
++        "task_id": task_id,
++        "user_turn": user_turn,
++        "step": step,
++        "attempt": 0,
++    }
++
++
++def text_actions_enabled():
++    """Return the explicit receipt bridge flag after checking its prerequisites."""
++    enabled = os.getenv(TEXT_ACTIONS_ENV) == "1"
++    if enabled and (os.getenv(ROLE_HISTORY_ENV) != "1"
++                    or os.getenv(EVENT_NATIVE_ENV) != "1"):
++        raise ValueError(
++            "ACEBENCH_TEXT_ACTIONS_V1 requires ACEBENCH_ROLE_HISTORY_V1=1 "
++            "and ACEBENCH_EVENT_NATIVE_V1=1"
++        )
++    return enabled
++
++
++def execution_receipts(history):
++    """Return source receipts for the current structured prefix, if any."""
++    if history is None:
++        return []
++    if not isinstance(history, list):
++        raise TypeError("ACEBench role history must be a list")
++    receipts = []
++    for history_index, entry in enumerate(history):
++        if not isinstance(entry, dict) or entry.get("sender") != "execution":
++            continue
++        receipt = entry.get("c2kv_acebench_execution")
++        if not isinstance(receipt, dict):
++            raise ValueError("ACEBench execution history requires a receipt")
++        if receipt.get("version") != RECEIPT_VERSION:
++            raise ValueError("ACEBench execution receipt version mismatch")
++        if receipt.get("execution_message_index") != history_index + 1:
++            raise ValueError("ACEBench execution receipt source index mismatch")
++        if (not isinstance(receipt.get("agent_history_index"), int)
++                or receipt["agent_history_index"] != history_index - 1):
++            raise ValueError("ACEBench execution receipt agent index mismatch")
++        copied = {field: receipt.get(field) for field in RECEIPT_FIELDS}
++        copied["execution_message_index"] = receipt["execution_message_index"]
++        receipts.append(copied)
++    return receipts
++
++
++def bind_execution_receipt(history, current_message):
++    """Bind a receipt to the scene index immediately before the observation appends."""
++    if not text_actions_enabled() or current_message.get("sender") != "execution":
++        return
++    receipt = current_message.get("c2kv_acebench_execution")
++    if not isinstance(receipt, dict):
++        raise ValueError("ACEBench execution observation omitted its receipt")
++    if not history or history[-1].get("sender") != "agent":
++        raise ValueError("ACEBench execution observation must follow an agent message")
++    receipt["agent_history_index"] = len(history) - 1
++    # `history` is about to receive this execution entry.  OpenAI source
++    # messages have a system prompt at index zero, hence history index + 1.
++    receipt["execution_message_index"] = len(history) + 1
++
++
++def agent_request(messages, model, temperature, max_tokens, top_p, context, history=None):
++    """Keep generic proxy kwargs, with an explicit event-native opt-in."""
++    kwargs = {
++        "messages": messages,
++        "model": model,
++        "temperature": temperature,
++        "max_tokens": max_tokens,
++        "top_p": top_p,
++        "extra_body": {"c2kv_eval_context": context},
++    }
++    if os.getenv("ACEBENCH_EVENT_NATIVE_V1") == "1":
++        if float(temperature) != 0.0 or float(top_p) != 1.0:
++            raise ValueError(
++                "ACEBENCH_EVENT_NATIVE_V1 requires temperature=0 and top_p=1"
++            )
++        kwargs.pop("max_tokens")
++        kwargs.pop("top_p")
++        kwargs.update(
++            max_completion_tokens=max_tokens,
++            store=False,
++            seed=0,
++        )
++    if text_actions_enabled():
++        kwargs["extra_body"]["c2kv_ace_source"] = {
++            "version": SOURCE_VERSION,
++            "receipts": execution_receipts(history),
++        }
++    return kwargs
 +
 +
 +def agent_messages(system_prompt, functions, history, language="en"):

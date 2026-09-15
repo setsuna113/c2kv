@@ -1,1 +1,4 @@
 *.sh text eol=lf
+
+# Selected runtime configuration has byte-bound release hashes.
+experiments/history_system/runtime/configs/*.json -text

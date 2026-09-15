@@ -1,0 +1,36 @@
+{
+  "schema": "history-system-candidate-design-v1",
+  "candidate_id": "d5_persistent_goal_demand",
+  "status": "completed_recovered_with_server_capacity_failures_not_selected",
+  "parent": "d4_prefill_event_demand_extract",
+  "goal_context_policy": "appworld-first-user-goal-raw-v1",
+  "extraction_policy": "retained-gist",
+  "controller": "outputs/history_system_search/r004/d5_persistent_goal.controller_v1/controller.json",
+  "change": "Protect original first-user task event and latest observation as distinct mandatory raw events under unchanged B0; use goal plus latest observation plus held draft in post-draft source ranking.",
+  "scope": "Fixed-task AppWorld dialect only; other benchmarks preserve existing goal-revision semantics.",
+  "checkpoint_binding": "experiments/history_system/configs/checkpoint.selected.json",
+  "evaluation": {
+    "manifest": "experiments/history_system/multibench/manifests/delivery_20260914.appworld_test_normal.lane0of4.json",
+    "fixed_denominator": 42,
+    "selection": "Existing lane0 order, not chosen by outcomes",
+    "baseline": "d3_appworld_lane0_v3",
+    "comparison": "Whole-system candidate, including demand extraction; no isolated causal attribution",
+    "queue": "After owned NPU1 D3 AppWorld lane0 exits; keep D4 tau2 and App lane1 queue unchanged",
+    "automatic_reruns": 0
+  },
+  "acceptance": [
+    "Goal and latest observation retain exact source provenance",
+    "Goal historical bytes remain charged to B0, not common input",
+    "No bypass on insufficient capacity",
+    "Whole-task official quality and measured compression decide subsequent selection"
+  ],
+  "validation": [
+    "outputs/history_system_search/r001/validation.r004_persistent_goal_v1.json",
+    "outputs/history_system_search/r004/d5_persistent_goal.controller_v1/fixture.validation.json"
+  ],
+  "frozen_suite": "outputs/history_system_search/delivery_20260914/suites/d5_appworld_goal_lane0_v1/freeze.json",
+  "upload_receipt": "outputs/history_system_search/delivery_20260914/suites/d5_appworld_goal_lane0_v1/upload.json",
+  "live_failure": "CapacityInfeasible at second decision in first inspected AppWorld task: mandatory history raw1701 tokens exceeds B0 even before gist; official harness records0. No claim of faster successful execution.",
+  "live_failure_evidence": "outputs/history_system_search/delivery_20260914/suites/d5_appworld_goal_lane0_v1/first_task_failure_diagnostic.json",
+  "next_design": "Replace unconditional full-user raw protection with source-bound budget-feasible task/goal representation; retain original B0, do not silently relaunch or mutate D5."
+}

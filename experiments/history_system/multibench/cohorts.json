@@ -1,0 +1,46 @@
+{
+  "schema": "history-system-delivery-cohorts-v1",
+  "tau2": {
+    "cohort": "airline-f6",
+    "task_ids": ["0", "2", "4", "5", "6", "9"],
+    "source": "../tmp/meeting_20260907/dispatch/tau2_exact_f6.py:22",
+    "num_trials": 1,
+    "max_retries": 0,
+    "max_steps": 200
+  },
+  "toolsandbox": {
+    "cohort": "lex8",
+    "task_ids": [
+      "add_contact_with_name_and_phone_number",
+      "cellular_off_3_distraction_tools_arg_description_scrambled",
+      "find_distance_with_location_name_3_distraction_tools_tool_name_scrambled",
+      "find_temperature_f_with_location_insufficient_information_alt_3_distraction_tools",
+      "remove_contact_by_phone_alt_3_distraction_tools_tool_description_scrambled",
+      "search_message_with_recency_oldest_multiple_user_turn",
+      "send_message_with_contact_content_cellular_off_3_distraction_tools_arg_type_scrambled",
+      "wifi_off_all_tools"
+    ],
+    "source": "../tmp/eval_20260906/selection_toolsandbox_lex8.json",
+    "registry_count": 1032
+  },
+  "acebench": {
+    "cohort": "agent-en8",
+    "task_ids": [
+      "agent_multi_step_0", "agent_multi_step_6", "agent_multi_step_12",
+      "agent_multi_step_19", "agent_multi_turn_0", "agent_multi_turn_10",
+      "agent_multi_turn_19", "agent_multi_turn_29"
+    ],
+    "source": "../tmp/eval_20260906/selection_acebench_agent8.json",
+    "category": "agent",
+    "language": "en"
+  },
+  "acon_appworld": {
+    "cohort": "test_normal",
+    "task_ids_file": "appworld_test_normal.txt",
+    "task_count": 168,
+    "task_ids_sha256": "c3af41497b6f2f0860a2ff8c09b335dca527e2cf48e59b4aabdb301b6b68db8f",
+    "source": "/home/liuyancheng/c2kv-integration-followup-20260905/deps/appworld/data/datasets/test_normal.txt",
+    "split": "test_normal",
+    "max_iter": 50
+  }
+}

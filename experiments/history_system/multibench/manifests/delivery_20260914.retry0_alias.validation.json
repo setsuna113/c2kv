@@ -1,0 +1,39 @@
+{
+  "source_revision": "5ca4f080c5846a0b281365fd489fcf22d10791bd",
+  "source_clean": true,
+  "retry_zero_files": {
+    "acebench/model_inference/multi_step/APIModel_agent.py": "24c2efc73178f1ebc215eb7bef5c204d26238a2621b84423dc00f6b9d684e4dd",
+    "acebench/model_inference/multi_turn/APIModel_agent.py": "942b58caafa78e0360a30bffa453c3ded02833dd4a2f9edeea67d7234484723d",
+    "acebench/model_inference/multi_turn/APIModel_user.py": "62b8235e0018849c6967c248c03d25e9d0b4f2512f575422f04d669c0d8607e7",
+    "acon/src/productive_agents/llm.py": "9aaea3e131d3bcb13fdfcb3420000a3db6afdc25a54d97c43117605717e53559"
+  },
+  "alias_ready": {
+    "accepted_aliases": [
+      "c2kv-c1000-r8-history-system-v2",
+      "gpt-4o-2024-05-13"
+    ],
+    "bind": "http://127.0.0.1:35803",
+    "log_fields_only": [
+      "hashes",
+      "counts",
+      "byte_counts",
+      "model_names",
+      "status",
+      "latency_ms"
+    ],
+    "payload_transform": {
+      "only": "model",
+      "value": "c2kv-agent"
+    },
+    "pid": 3140786,
+    "proxy_environment_used_for_upstream": false,
+    "request_log": "/home/liuyancheng/c2kv-a-runtime-20260907/system_search/delivery_20260914/raw_user_alias_v1/requests.jsonl",
+    "schema": "history-system-raw-user-alias-v1",
+    "source_path": "/home/liuyancheng/c2kv-a-runtime-20260907/system_search/delivery_20260914/helpers/raw_user_alias_proxy.py",
+    "source_sha256": "573e7ef8bfe100acb1f0387bacee0d9c4c64e1d5c9ab3f9677783a05e1cc4510",
+    "upstream": "http://127.0.0.1:35220/v1",
+    "upstream_attempts_per_request": 1,
+    "upstream_model": "c2kv-agent"
+  },
+  "alias_ready_sha256": "477979a4062b298d4cbcc8db6f68860d000f4c8248576d5e81aea8ebca424822"
+}

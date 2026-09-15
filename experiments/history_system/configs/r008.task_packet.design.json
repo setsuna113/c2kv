@@ -1,0 +1,19 @@
+{
+  "schema": "history-system-candidate-design-v1",
+  "candidate_id": "d8_budgeted_task_packet_demand",
+  "status": "frozen_uploaded_launched_not_completed",
+  "parent": "d5_persistent_goal_demand",
+  "goal_context_policy": "appworld-source-task-packet-v1",
+  "change": "Verbatim actual task and identity suffix from the official AppWorld first-user template; source character span/hash retained; existing B0 measures all derived workspace tokens. Unrecognized template or infeasible packet does not force full-goal raw retention.",
+  "budget": 113246208,
+  "checkpoint": "C1000/ratio8",
+  "extraction_policy": "retained-gist",
+  "tests_passed": 14,
+  "preflight": "outputs/history_system_search/r008/task_packet.preflight_v2.json",
+  "open_before_freeze": null,
+  "model_calls": 0,
+  "frozen_suite": "outputs/history_system_search/delivery_20260914/suites/d8_appworld_task_packet_lane0_v1/freeze.json",
+  "queue": "After D5 terminal on NPU1 port50000, or next verified idle owned card",
+  "priority": "Check packet plus minimum necessary raw/gist first; when feasible, optional context must not evict it. Recovery uses the same representation and budget measurement.",
+  "launch": "outputs\\history_system_search\\delivery_20260914\\suites\\d8_appworld_task_packet_lane0_v1\\launch.json"
+}

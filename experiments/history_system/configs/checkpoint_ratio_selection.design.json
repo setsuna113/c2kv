@@ -1,0 +1,124 @@
+{
+  "schema": "a-current-controller-checkpoint-ratio-selection-v1",
+  "status": "decided_from_existing_results_by_user_instruction",
+  "question": "Select checkpoint separately at ratio4 and ratio8 under the current C0 controller before fitting detector heads",
+  "current_reference": "c0_bridge_memo_b0",
+  "shortlist": [
+    {
+      "arm": "B",
+      "step": 500,
+      "reason": "Current C0 and best B family in historical selection"
+    },
+    {
+      "arm": "C",
+      "step": 500,
+      "reason": "Highest historical ratio8 dev128 count across all audited checkpoints"
+    },
+    {
+      "arm": "C",
+      "step": 1000,
+      "reason": "Highest combined-ratio count; earlier than tied C1098"
+    }
+  ],
+  "ratios": [
+    4,
+    8
+  ],
+  "tasks_manifest": "experiments/history_system/configs/r001.tasks.json",
+  "controller": "same-complete-event-reference-bridge-only-v1",
+  "history_budget_bytes": 113246208,
+  "fixed": "Current C0 runtime, greedy0/BF16/prefill256/common40960/memo-only; same official task/scorer lineage",
+  "matrix": [
+    {
+      "candidate_id": "c0_bridge_memo_b0",
+      "arm": "B",
+      "step": 500,
+      "ratio": 4,
+      "status": "existing_result_reuse_default_parity_passed",
+      "analysis": "outputs/history_system_search/r001/c0_bridge_memo_b0/analysis.json"
+    },
+    {
+      "candidate_id": "p0_b500_r8",
+      "arm": "B",
+      "step": 500,
+      "ratio": 8,
+      "status": "cancelled_by_user_redundant_comparison",
+      "launch": "outputs/history_system_search/r001/p0_b500_r8/launch.json",
+      "frozen_design": "outputs/history_system_search/r001/p0_b500_r8/submitted/design.json",
+      "cancellation": "outputs/history_system_search/r001/p0_b500_r8/cancel.result.json"
+    },
+    {
+      "candidate_id": "p0_c1000_r8",
+      "arm": "C",
+      "step": 1000,
+      "ratio": 8,
+      "status": "cancelled_by_user_redundant_comparison",
+      "launch": "outputs/history_system_search/r001/p0_c1000_r8/launch.json",
+      "frozen_design": "outputs/history_system_search/r001/p0_c1000_r8/submitted/design.json",
+      "cancellation": "outputs/history_system_search/r001/p0_c1000_r8/cancel.result.json"
+    },
+    {
+      "candidate_id": "p0_c500_r8",
+      "arm": "C",
+      "step": 500,
+      "ratio": 8,
+      "status": "excluded_by_user"
+    },
+    {
+      "candidate_id": "p0_c1000_r4",
+      "arm": "C",
+      "step": 1000,
+      "ratio": 4,
+      "status": "cancelled_before_launch",
+      "upload": "outputs/history_system_search/r001/p0_c1000_r4/upload.json",
+      "frozen_design": "outputs/history_system_search/r001/p0_c1000_r4/submitted/design.json"
+    },
+    {
+      "candidate_id": "p0_c500_r4",
+      "arm": "C",
+      "step": 500,
+      "ratio": 4,
+      "status": "excluded_by_user"
+    }
+  ],
+  "selection_rule": {
+    "per_ratio": "Maximize official correct count over the fixed20; preserve base/long paired gains and losses",
+    "ties": [
+      "Higher all-selected-task equal-weighted activated-receipt median H/A",
+      "Fewer total generation calls",
+      "Earlier checkpoint step",
+      "Lexicographic arm identifier"
+    ],
+    "cross_ratio": "Keep both per-ratio winners and compare measured quality/compression. Working default uses greatest official correct count; then the same resource tie-break. Ratio8 is not assumed superior from its nominal ratio.",
+    "scope": "Development operational selection, preliminary n=1; not global-best or final peer-parity claim",
+    "compression_tiebreak_field": "compression.metrics.task_equal.system_active_history_reduction.task_equal_weighted_activated_receipts.all_selected_task_weighted_median",
+    "compression_tiebreak_definition": "Give each task equal total weight across its activated H>0,A>0 receipts; use the resulting weighted median H/A, not the mean of task medians or the nominal gist ratio. Preserve coverage-loss and full-input metrics beside this selector.",
+    "superseded_by": "User instructed reuse historical equal scores and logical choice; selected C1000/ratio8 using ratio4 performance as tie-break. The planned new matrix is cancelled."
+  },
+  "resource_policy": {
+    "maximum_owned_npu_devices": 5,
+    "reserved_for_others": 3,
+    "cumulative_wall_limit": null,
+    "generation_per_task": 96,
+    "encoder_per_task": 1152,
+    "candidate_stage_wall_seconds": 21600,
+    "automatic_reruns": 0
+  },
+  "priority": "This selection precedes B500-specific detector fitting/calibration. Existing in-flight jobs remain unchanged; not-yet-started peer jobs follow the selection queue. Model-independent detector code and data metadata work can continue.",
+  "historical_audit": "outputs/history_system_search/checkpoint_ratio_selection_v1/historical_selection.audit.json",
+  "missing_checkpoint_source": {
+    "candidate": "C500",
+    "status": "blocked_source_missing",
+    "evidence": "outputs/history_system_search/checkpoint_ratio_selection_v1/c500_transfer/c500_source_audit.json",
+    "decision_effect": "Keep C500 historical result; never interpret missing weights as empirical loss. Complete available B500/C1000 comparison while checking original storage."
+  },
+  "cpu_validation": "outputs/history_system_search/checkpoint_ratio_selection_v1/cpu_validation.json",
+  "selected_checkpoint_binding": "experiments/history_system/configs/checkpoint.selected.json",
+  "selected": {
+    "arm": "C",
+    "step": 1000,
+    "ratio": 8
+  },
+  "new_model_comparison_cancelled": true,
+  "new_results_used_for_selection": false
+}

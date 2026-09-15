@@ -5,8 +5,8 @@ rewrites the request's history before it reaches the serving backend, and
 the compression/summarization calls go to the SAME served ckpt-1088
 endpoint (policy and compressor are the same model — the papers' own
 protocol: HiAgent §4.1 uses gpt-4-turbo for both roles, ACON §4.2 uses
-gpt-4.1 for both).  Cost columns must carry the compressor calls (one extra
-LLM call per turn); the standing asymmetry (C2KV is trained for its
+gpt-4.1 for both).  Cost columns must carry every actual compressor and
+internal retrieval generation; the standing asymmetry (C2KV is trained for its
 mechanism, these baselines are training-free here) is footnote material.
 
 Sources:
@@ -28,9 +28,11 @@ Sources:
   - User turns are NOT action-observation pairs: they survive verbatim in
     the output AND ride along in the summarizer input as "User:" lines
     (audit: a "$300 budget" constraint was silently dropped otherwise).
-  - Compressor decode per paper §4.1: max_tokens~100, stop "\n\n",
-    temperature 0, top_p 1; enable_thinking off (serving stack has no
-    reasoning parser).
+  - Paper §4.1 specifies temperature 0 and top_p 1. The existing port uses
+    max_tokens=100, stop "\n\n", and seed 42; these values are not specified
+    in arXiv:2408.09559v1's method, experiments, or appendix text. They are
+    local decode settings, not a verified paper contract. Thinking is off
+    because this serving stack has no reasoning parser.
   - Degeneration is VISIBLE: when no assistant content ever declares a
     Subgoal (e.g. pure tool-call replies), the arm is a passthrough and
     stats["degenerate"] is True.
@@ -192,6 +194,15 @@ Instructions:
 2. Subgoal must be one line of text and does not print any newline characters.
 3. Each declared subgoal must be accompanied in the same response by at least one valid native tool call.
 4. Every environment action must use the API's native function-calling interface in the structured tool_calls field. Do not serialize an action into assistant content.
+"""
+
+HIAGENT_SUBGOAL_NOTE_V2 = """
+Note: A subgoal is a milestone goal that you need to complete in order to achieve the final goal.
+Native subgoal response contract. Choose exactly one response form:
+NEW ACTION — When there is no current unfinished subgoal, or the previous subgoal is complete, and an environment action is needed, assistant content must be exactly one line in the format \"Subgoal: {subgoal}\" and the same response must issue the first action in the structured tool_calls field. Do not add an explanation, a blank line, or any other assistant content.
+CONTINUATION ACTION — When the current subgoal is unfinished and an environment action is needed, issue the next action in the structured tool_calls field without a Subgoal line.
+STOP / FINAL ANSWER / CLARIFICATION — Reply naturally without a Subgoal line and without inventing a tool call.
+Every environment action must use the API's native function-calling interface in the structured tool_calls field. Never serialize an action into assistant content.
 """
 
 HIAGENT_RETRIEVE_TOOL_NAME = "hiagent_retrieve"
@@ -394,6 +405,55 @@ def hiagent_transform(messages: List[Dict[str, Any]], compress: Compress,
     stats["raw_est_tokens"] = _est_tokens(raw_chars)
     stats["out_est_tokens"] = _est_tokens(out_chars)
     return out, stats
+
+
+def hiagent_envelope_only_transform(
+    messages: List[Dict[str, Any]],
+    default_system: str = TRAINING_DEFAULT_SYSTEM_PROMPT,
+) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    """Apply only HiAgent's native subgoal action envelope.
+
+    This opt-in control preserves every source history row and never invokes
+    a compressor.  It intentionally omits the trajectory-retrieval note: the
+    caller does not advertise or service ``hiagent_retrieve`` in this arm.
+    """
+    out = [dict(message) for message in messages]
+    for message in out:
+        if message.get("role") == "system":
+            message["content"] = (
+                _content_of(message).rstrip() + "\n" + HIAGENT_SUBGOAL_NOTE
+            )
+            break
+    else:
+        out.insert(
+            0,
+            {
+                "role": "system",
+                "content": (
+                    default_system.rstrip() + "\n" + HIAGENT_SUBGOAL_NOTE.strip()
+                ),
+            },
+        )
+
+    n_segments = sum(_subgoal_of(message) is not None for message in out)
+    raw_chars = _message_chars(out)
+    return out, {
+        "policy": "hiagent_envelope_only",
+        "variant": "envelope_only",
+        "n_compressor_calls": 0,
+        "n_segments": n_segments,
+        "n_summarized": 0,
+        "degenerate": bool(
+            n_segments == 0
+            and any(message.get("role") == "assistant" for message in out)
+        ),
+        "retrieved_subgoals": [],
+        "invalid_retrieval_subgoals": [],
+        "raw_chars": raw_chars,
+        "out_chars": raw_chars,
+        "raw_est_tokens": _est_tokens(raw_chars),
+        "out_est_tokens": _est_tokens(raw_chars),
+    }
 
 
 # ---- ACON --------------------------------------------------------------------

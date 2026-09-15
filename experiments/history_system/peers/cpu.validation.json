@@ -1,0 +1,130 @@
+{
+  "schema": "a-history-system-r001-peer-cpu-validation-v1",
+  "status": "passed_23_tests_and_four_base10_previews_no_model_scorer_network_or_launch",
+  "created_at_utc": "2026-09-13T13:26:22.409966+00:00",
+  "test": {
+    "command": "python -m pytest -q experiments/history_system/test_compression_metrics.py experiments/history_system/test_collect_results.py experiments/history_system/peers/test_runner.py",
+    "exit_code": 0,
+    "passed": 23,
+    "failed": 0
+  },
+  "previews": [
+    {
+      "method": "raw",
+      "config": {
+        "path": "experiments/history_system/peers/configs/raw.base10.json",
+        "sha256": "435e9e15e71fc798204c60b1ddcc5db110f4adcd5144a9145a9f8d4478a5cb51",
+        "bytes": 6411
+      },
+      "status": "passed_cpu_static_preview_no_model_or_scorer",
+      "preview_cells": 10,
+      "whole_task_denominator": 10,
+      "ordered_task_ids_sha256": "3c1ae42bd4d3697a987f68dea410f04b9c2bf66abfba882cd563121ebae2059d",
+      "model_requests": 0,
+      "scorer_calls": 0,
+      "network_calls": 0,
+      "launches": 0
+    },
+    {
+      "method": "text",
+      "config": {
+        "path": "experiments/history_system/peers/configs/text.base10.json",
+        "sha256": "f24f289660780fc3b6220e6cb6b91654d5e0a6b9968a6e4b639e9b1db4492440",
+        "bytes": 6416
+      },
+      "status": "passed_cpu_static_preview_no_model_or_scorer",
+      "preview_cells": 10,
+      "whole_task_denominator": 10,
+      "ordered_task_ids_sha256": "3c1ae42bd4d3697a987f68dea410f04b9c2bf66abfba882cd563121ebae2059d",
+      "model_requests": 0,
+      "scorer_calls": 0,
+      "network_calls": 0,
+      "launches": 0
+    },
+    {
+      "method": "full",
+      "config": {
+        "path": "experiments/history_system/peers/configs/full.base10.json",
+        "sha256": "03f0346982d292b81d560563cc3a00280a0290723a8ea852604e6cd4782d1ae2",
+        "bytes": 6321
+      },
+      "status": "passed_cpu_static_preview_no_model_or_scorer",
+      "preview_cells": 10,
+      "whole_task_denominator": 10,
+      "ordered_task_ids_sha256": "3c1ae42bd4d3697a987f68dea410f04b9c2bf66abfba882cd563121ebae2059d",
+      "model_requests": 0,
+      "scorer_calls": 0,
+      "network_calls": 0,
+      "launches": 0
+    },
+    {
+      "method": "hiagent",
+      "config": {
+        "path": "experiments/history_system/peers/configs/hiagent.base10.json",
+        "sha256": "8bccd1818ce541d850800a12b288cdfc5e02be220a50ca9119d8c929b5145302",
+        "bytes": 7262
+      },
+      "status": "passed_cpu_readonly_preview_no_model_scorer_or_network",
+      "preview_cells": 10,
+      "whole_task_denominator": 10,
+      "ordered_task_ids_sha256": "3c1ae42bd4d3697a987f68dea410f04b9c2bf66abfba882cd563121ebae2059d",
+      "model_requests": 0,
+      "scorer_calls": 0,
+      "network_calls": 0,
+      "launches": 0
+    }
+  ],
+  "sources": {
+    "runner": {
+      "path": "experiments/history_system/peers/runner.py",
+      "sha256": "66a628a697609c8caebe9af6732fb5e6e3e547530628c9d642eff2149568dea8",
+      "bytes": 20777
+    },
+    "documentation": {
+      "path": "experiments/history_system/peers/README.md",
+      "sha256": "d2ae303ea2955c067563c751608bdcca500a008ba42f7b351a4e829827ed1d2b",
+      "bytes": 4635
+    },
+    "peer_sources": {
+      "path": "experiments/history_system/configs/peer_sources.json",
+      "sha256": "5ce81b00e7fd371cf82516dcf240fd09709bd466c4d60a20d6893d56ea6085cd",
+      "bytes": 64372
+    },
+    "base_manifest": {
+      "path": "experiments/history_system/configs/r001.peer_missing.tasks.json",
+      "sha256": "08127f69714866bb1396148f21b0fcdf6f9dd2de26c350e405987d52acceca26",
+      "bytes": 795
+    },
+    "r001_manifest": {
+      "path": "experiments/history_system/configs/r001.tasks.json",
+      "sha256": "9bca04418dace5294f1c3e5cfcf233c89a78679c3fcb4863ba12d4804794036b",
+      "bytes": 1180
+    },
+    "baseline_template_cpu_validation": {
+      "path": "tmp/a_memory_runtime_20260913/r5_baseline_manifest_templates_v1/cpu.validation.json",
+      "sha256": "40e768755a71567e7477f3fca86d8d4d889d25a17fd81e07c2106f0b5ba7cbcb",
+      "bytes": 1378
+    },
+    "hiagent_template_cpu_validation": {
+      "path": "tmp/a_memory_runtime_20260913/r5_hiagent_manifest_template_v1/cpu.validation.json",
+      "sha256": "9762f0d626372df4f131fefce3974299f6b5128f58963a6bf33147373d499f29",
+      "bytes": 578
+    }
+  },
+  "assertions": {
+    "evaluation_stage": "development_search",
+    "independent_holdout_claim": false,
+    "template_source_change": "only the exact R5 acceptance gate is replaced by a development_search gate",
+    "validated_reused_long_cells": 40,
+    "missing_base_cells": 40,
+    "failed_freeze_preserves_partial_evidence": true,
+    "freeze_is_self_contained": false,
+    "resource_telemetry_preserved": true,
+    "hiagent_b0_applies": false,
+    "hiagent_system_active_history_reduction": "unknown_without_compatible_common_full_H_and_active_A"
+  },
+  "model_requests": 0,
+  "scorer_calls": 0,
+  "network_calls": 0,
+  "launches": 0
+}

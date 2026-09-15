@@ -1,0 +1,35 @@
+{
+  "schema": "a-idle-device-observation-binding-v1",
+  "source": "outputs/history_system_search/delivery_20260914/additional_devices.audit.json",
+  "authorization": "Use all idle NPU cards; never terminate or preempt existing services",
+  "devices": {
+    "0": {
+      "allowed_preexisting_pids": [
+        3956308,
+        3955148,
+        254349,
+        254895
+      ],
+      "minimum_free_hbm_mb": 22528
+    },
+    "1": {
+      "allowed_preexisting_pids": [
+        456280,
+        456889,
+        3026443,
+        3025356
+      ],
+      "minimum_free_hbm_mb": 22528
+    },
+    "5": {
+      "allowed_preexisting_pids": [],
+      "minimum_free_hbm_mb": 22528,
+      "verification": "Current npu-smi reports no running processes on NPU5, util0, HBM3433/65536; launch rechecks all fields. User allows any idle of8."
+    },
+    "3": {
+      "allowed_preexisting_pids": [],
+      "minimum_free_hbm_mb": 22528,
+      "verification": "2026-09-14 07:24 UTC: two npu-smi observations show no NPU3 processes, util0, HBM3430/65536. No readable benchmark/suite/torchrun process bound to device3. Launch rechecks occupancy and capacity."
+    }
+  }
+}

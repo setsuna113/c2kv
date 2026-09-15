@@ -1,0 +1,488 @@
+{
+  "schema": "a-history-multibench-task-manifest-v1",
+  "ordering": "listed",
+  "automatic_reruns": 0,
+  "fixed_denominator": 16,
+  "tasks": [
+    {
+      "schema": "history-system-official-task-v1",
+      "benchmark": "acon_appworld",
+      "task_id": "f323bae_3",
+      "task_key": "acon_appworld_110_08493b9b2a17",
+      "benchmark_dir": "/home/liuyancheng/c2kv-a-runtime-20260907/system_search/delivery_20260914/benchmark_sources/acon",
+      "bench_python": "/home/liuyancheng/c2kv-integration-followup-20260905/deps/venv-appworld/bin/python",
+      "user_base_url": "",
+      "max_new_tokens": 2048,
+      "source_binding": {
+        "components": [
+          {
+            "path": "/home/liuyancheng/c2kv-a-runtime-20260907/system_search/delivery_20260914/benchmark_sources/acon",
+            "kind": "git",
+            "revision": "5ca4f080c5846a0b281365fd489fcf22d10791bd",
+            "required_clean": true
+          },
+          {
+            "path": "/home/liuyancheng/c2kv-a-runtime-20260907/system_search/delivery_20260914/benchmark_sources/appworld",
+            "kind": "git",
+            "revision": "5ca4f080c5846a0b281365fd489fcf22d10791bd",
+            "required_clean": true
+          }
+        ]
+      },
+      "split": "test_normal",
+      "max_iter": 50,
+      "appworld_root": "/home/liuyancheng/c2kv-a-runtime-20260907/system_search/delivery_20260914/benchmark_sources/appworld",
+      "tag": "delivery_20260914_f323bae_3"
+    },
+    {
+      "schema": "history-system-official-task-v1",
+      "benchmark": "acon_appworld",
+      "task_id": "13547f5_1",
+      "task_key": "acon_appworld_111_b7448a883a2f",
+      "benchmark_dir": "/home/liuyancheng/c2kv-a-runtime-20260907/system_search/delivery_20260914/benchmark_sources/acon",
+      "bench_python": "/home/liuyancheng/c2kv-integration-followup-20260905/deps/venv-appworld/bin/python",
+      "user_base_url": "",
+      "max_new_tokens": 2048,
+      "source_binding": {
+        "components": [
+          {
+            "path": "/home/liuyancheng/c2kv-a-runtime-20260907/system_search/delivery_20260914/benchmark_sources/acon",
+            "kind": "git",
+            "revision": "5ca4f080c5846a0b281365fd489fcf22d10791bd",
+            "required_clean": true
+          },
+          {
+            "path": "/home/liuyancheng/c2kv-a-runtime-20260907/system_search/delivery_20260914/benchmark_sources/appworld",
+            "kind": "git",
+            "revision": "5ca4f080c5846a0b281365fd489fcf22d10791bd",
+            "required_clean": true
+          }
+        ]
+      },
+      "split": "test_normal",
+      "max_iter": 50,
+      "appworld_root": "/home/liuyancheng/c2kv-a-runtime-20260907/system_search/delivery_20260914/benchmark_sources/appworld",
+      "tag": "delivery_20260914_13547f5_1"
+    },
+    {
+      "schema": "history-system-official-task-v1",
+      "benchmark": "acon_appworld",
+      "task_id": "13547f5_2",
+      "task_key": "acon_appworld_112_819badf5ffad",
+      "benchmark_dir": "/home/liuyancheng/c2kv-a-runtime-20260907/system_search/delivery_20260914/benchmark_sources/acon",
+      "bench_python": "/home/liuyancheng/c2kv-integration-followup-20260905/deps/venv-appworld/bin/python",
+      "user_base_url": "",
+      "max_new_tokens": 2048,
+      "source_binding": {
+        "components": [
+          {
+            "path": "/home/liuyancheng/c2kv-a-runtime-20260907/system_search/delivery_20260914/benchmark_sources/acon",
+            "kind": "git",
+            "revision": "5ca4f080c5846a0b281365fd489fcf22d10791bd",
+            "required_clean": true
+          },
+          {
+            "path": "/home/liuyancheng/c2kv-a-runtime-20260907/system_search/delivery_20260914/benchmark_sources/appworld",
+            "kind": "git",
+            "revision": "5ca4f080c5846a0b281365fd489fcf22d10791bd",
+            "required_clean": true
+          }
+        ]
+      },
+      "split": "test_normal",
+      "max_iter": 50,
+      "appworld_root": "/home/liuyancheng/c2kv-a-runtime-20260907/system_search/delivery_20260914/benchmark_sources/appworld",
+      "tag": "delivery_20260914_13547f5_2"
+    },
+    {
+      "schema": "history-system-official-task-v1",
+      "benchmark": "acon_appworld",
+      "task_id": "13547f5_3",
+      "task_key": "acon_appworld_113_43f593ab7e4d",
+      "benchmark_dir": "/home/liuyancheng/c2kv-a-runtime-20260907/system_search/delivery_20260914/benchmark_sources/acon",
+      "bench_python": "/home/liuyancheng/c2kv-integration-followup-20260905/deps/venv-appworld/bin/python",
+      "user_base_url": "",
+      "max_new_tokens": 2048,
+      "source_binding": {
+        "components": [
+          {
+            "path": "/home/liuyancheng/c2kv-a-runtime-20260907/system_search/delivery_20260914/benchmark_sources/acon",
+            "kind": "git",
+            "revision": "5ca4f080c5846a0b281365fd489fcf22d10791bd",
+            "required_clean": true
+          },
+          {
+            "path": "/home/liuyancheng/c2kv-a-runtime-20260907/system_search/delivery_20260914/benchmark_sources/appworld",
+            "kind": "git",
+            "revision": "5ca4f080c5846a0b281365fd489fcf22d10791bd",
+            "required_clean": true
+          }
+        ]
+      },
+      "split": "test_normal",
+      "max_iter": 50,
+      "appworld_root": "/home/liuyancheng/c2kv-a-runtime-20260907/system_search/delivery_20260914/benchmark_sources/appworld",
+      "tag": "delivery_20260914_13547f5_3"
+    },
+    {
+      "schema": "history-system-official-task-v1",
+      "benchmark": "acon_appworld",
+      "task_id": "1150ed6_1",
+      "task_key": "acon_appworld_114_8d3ef559e528",
+      "benchmark_dir": "/home/liuyancheng/c2kv-a-runtime-20260907/system_search/delivery_20260914/benchmark_sources/acon",
+      "bench_python": "/home/liuyancheng/c2kv-integration-followup-20260905/deps/venv-appworld/bin/python",
+      "user_base_url": "",
+      "max_new_tokens": 2048,
+      "source_binding": {
+        "components": [
+          {
+            "path": "/home/liuyancheng/c2kv-a-runtime-20260907/system_search/delivery_20260914/benchmark_sources/acon",
+            "kind": "git",
+            "revision": "5ca4f080c5846a0b281365fd489fcf22d10791bd",
+            "required_clean": true
+          },
+          {
+            "path": "/home/liuyancheng/c2kv-a-runtime-20260907/system_search/delivery_20260914/benchmark_sources/appworld",
+            "kind": "git",
+            "revision": "5ca4f080c5846a0b281365fd489fcf22d10791bd",
+            "required_clean": true
+          }
+        ]
+      },
+      "split": "test_normal",
+      "max_iter": 50,
+      "appworld_root": "/home/liuyancheng/c2kv-a-runtime-20260907/system_search/delivery_20260914/benchmark_sources/appworld",
+      "tag": "delivery_20260914_1150ed6_1"
+    },
+    {
+      "schema": "history-system-official-task-v1",
+      "benchmark": "acon_appworld",
+      "task_id": "1150ed6_2",
+      "task_key": "acon_appworld_115_12c32910e110",
+      "benchmark_dir": "/home/liuyancheng/c2kv-a-runtime-20260907/system_search/delivery_20260914/benchmark_sources/acon",
+      "bench_python": "/home/liuyancheng/c2kv-integration-followup-20260905/deps/venv-appworld/bin/python",
+      "user_base_url": "",
+      "max_new_tokens": 2048,
+      "source_binding": {
+        "components": [
+          {
+            "path": "/home/liuyancheng/c2kv-a-runtime-20260907/system_search/delivery_20260914/benchmark_sources/acon",
+            "kind": "git",
+            "revision": "5ca4f080c5846a0b281365fd489fcf22d10791bd",
+            "required_clean": true
+          },
+          {
+            "path": "/home/liuyancheng/c2kv-a-runtime-20260907/system_search/delivery_20260914/benchmark_sources/appworld",
+            "kind": "git",
+            "revision": "5ca4f080c5846a0b281365fd489fcf22d10791bd",
+            "required_clean": true
+          }
+        ]
+      },
+      "split": "test_normal",
+      "max_iter": 50,
+      "appworld_root": "/home/liuyancheng/c2kv-a-runtime-20260907/system_search/delivery_20260914/benchmark_sources/appworld",
+      "tag": "delivery_20260914_1150ed6_2"
+    },
+    {
+      "schema": "history-system-official-task-v1",
+      "benchmark": "acon_appworld",
+      "task_id": "1150ed6_3",
+      "task_key": "acon_appworld_116_08057ce9b347",
+      "benchmark_dir": "/home/liuyancheng/c2kv-a-runtime-20260907/system_search/delivery_20260914/benchmark_sources/acon",
+      "bench_python": "/home/liuyancheng/c2kv-integration-followup-20260905/deps/venv-appworld/bin/python",
+      "user_base_url": "",
+      "max_new_tokens": 2048,
+      "source_binding": {
+        "components": [
+          {
+            "path": "/home/liuyancheng/c2kv-a-runtime-20260907/system_search/delivery_20260914/benchmark_sources/acon",
+            "kind": "git",
+            "revision": "5ca4f080c5846a0b281365fd489fcf22d10791bd",
+            "required_clean": true
+          },
+          {
+            "path": "/home/liuyancheng/c2kv-a-runtime-20260907/system_search/delivery_20260914/benchmark_sources/appworld",
+            "kind": "git",
+            "revision": "5ca4f080c5846a0b281365fd489fcf22d10791bd",
+            "required_clean": true
+          }
+        ]
+      },
+      "split": "test_normal",
+      "max_iter": 50,
+      "appworld_root": "/home/liuyancheng/c2kv-a-runtime-20260907/system_search/delivery_20260914/benchmark_sources/appworld",
+      "tag": "delivery_20260914_1150ed6_3"
+    },
+    {
+      "schema": "history-system-official-task-v1",
+      "benchmark": "acon_appworld",
+      "task_id": "31dc501_1",
+      "task_key": "acon_appworld_117_42441fb55066",
+      "benchmark_dir": "/home/liuyancheng/c2kv-a-runtime-20260907/system_search/delivery_20260914/benchmark_sources/acon",
+      "bench_python": "/home/liuyancheng/c2kv-integration-followup-20260905/deps/venv-appworld/bin/python",
+      "user_base_url": "",
+      "max_new_tokens": 2048,
+      "source_binding": {
+        "components": [
+          {
+            "path": "/home/liuyancheng/c2kv-a-runtime-20260907/system_search/delivery_20260914/benchmark_sources/acon",
+            "kind": "git",
+            "revision": "5ca4f080c5846a0b281365fd489fcf22d10791bd",
+            "required_clean": true
+          },
+          {
+            "path": "/home/liuyancheng/c2kv-a-runtime-20260907/system_search/delivery_20260914/benchmark_sources/appworld",
+            "kind": "git",
+            "revision": "5ca4f080c5846a0b281365fd489fcf22d10791bd",
+            "required_clean": true
+          }
+        ]
+      },
+      "split": "test_normal",
+      "max_iter": 50,
+      "appworld_root": "/home/liuyancheng/c2kv-a-runtime-20260907/system_search/delivery_20260914/benchmark_sources/appworld",
+      "tag": "delivery_20260914_31dc501_1"
+    },
+    {
+      "schema": "history-system-official-task-v1",
+      "benchmark": "acon_appworld",
+      "task_id": "31dc501_2",
+      "task_key": "acon_appworld_118_72a2bcfe049a",
+      "benchmark_dir": "/home/liuyancheng/c2kv-a-runtime-20260907/system_search/delivery_20260914/benchmark_sources/acon",
+      "bench_python": "/home/liuyancheng/c2kv-integration-followup-20260905/deps/venv-appworld/bin/python",
+      "user_base_url": "",
+      "max_new_tokens": 2048,
+      "source_binding": {
+        "components": [
+          {
+            "path": "/home/liuyancheng/c2kv-a-runtime-20260907/system_search/delivery_20260914/benchmark_sources/acon",
+            "kind": "git",
+            "revision": "5ca4f080c5846a0b281365fd489fcf22d10791bd",
+            "required_clean": true
+          },
+          {
+            "path": "/home/liuyancheng/c2kv-a-runtime-20260907/system_search/delivery_20260914/benchmark_sources/appworld",
+            "kind": "git",
+            "revision": "5ca4f080c5846a0b281365fd489fcf22d10791bd",
+            "required_clean": true
+          }
+        ]
+      },
+      "split": "test_normal",
+      "max_iter": 50,
+      "appworld_root": "/home/liuyancheng/c2kv-a-runtime-20260907/system_search/delivery_20260914/benchmark_sources/appworld",
+      "tag": "delivery_20260914_31dc501_2"
+    },
+    {
+      "schema": "history-system-official-task-v1",
+      "benchmark": "acon_appworld",
+      "task_id": "31dc501_3",
+      "task_key": "acon_appworld_119_779dbb28cbd0",
+      "benchmark_dir": "/home/liuyancheng/c2kv-a-runtime-20260907/system_search/delivery_20260914/benchmark_sources/acon",
+      "bench_python": "/home/liuyancheng/c2kv-integration-followup-20260905/deps/venv-appworld/bin/python",
+      "user_base_url": "",
+      "max_new_tokens": 2048,
+      "source_binding": {
+        "components": [
+          {
+            "path": "/home/liuyancheng/c2kv-a-runtime-20260907/system_search/delivery_20260914/benchmark_sources/acon",
+            "kind": "git",
+            "revision": "5ca4f080c5846a0b281365fd489fcf22d10791bd",
+            "required_clean": true
+          },
+          {
+            "path": "/home/liuyancheng/c2kv-a-runtime-20260907/system_search/delivery_20260914/benchmark_sources/appworld",
+            "kind": "git",
+            "revision": "5ca4f080c5846a0b281365fd489fcf22d10791bd",
+            "required_clean": true
+          }
+        ]
+      },
+      "split": "test_normal",
+      "max_iter": 50,
+      "appworld_root": "/home/liuyancheng/c2kv-a-runtime-20260907/system_search/delivery_20260914/benchmark_sources/appworld",
+      "tag": "delivery_20260914_31dc501_3"
+    },
+    {
+      "schema": "history-system-official-task-v1",
+      "benchmark": "acon_appworld",
+      "task_id": "59fae45_1",
+      "task_key": "acon_appworld_120_f5c20ec2d7dd",
+      "benchmark_dir": "/home/liuyancheng/c2kv-a-runtime-20260907/system_search/delivery_20260914/benchmark_sources/acon",
+      "bench_python": "/home/liuyancheng/c2kv-integration-followup-20260905/deps/venv-appworld/bin/python",
+      "user_base_url": "",
+      "max_new_tokens": 2048,
+      "source_binding": {
+        "components": [
+          {
+            "path": "/home/liuyancheng/c2kv-a-runtime-20260907/system_search/delivery_20260914/benchmark_sources/acon",
+            "kind": "git",
+            "revision": "5ca4f080c5846a0b281365fd489fcf22d10791bd",
+            "required_clean": true
+          },
+          {
+            "path": "/home/liuyancheng/c2kv-a-runtime-20260907/system_search/delivery_20260914/benchmark_sources/appworld",
+            "kind": "git",
+            "revision": "5ca4f080c5846a0b281365fd489fcf22d10791bd",
+            "required_clean": true
+          }
+        ]
+      },
+      "split": "test_normal",
+      "max_iter": 50,
+      "appworld_root": "/home/liuyancheng/c2kv-a-runtime-20260907/system_search/delivery_20260914/benchmark_sources/appworld",
+      "tag": "delivery_20260914_59fae45_1"
+    },
+    {
+      "schema": "history-system-official-task-v1",
+      "benchmark": "acon_appworld",
+      "task_id": "59fae45_2",
+      "task_key": "acon_appworld_121_18a089dcf760",
+      "benchmark_dir": "/home/liuyancheng/c2kv-a-runtime-20260907/system_search/delivery_20260914/benchmark_sources/acon",
+      "bench_python": "/home/liuyancheng/c2kv-integration-followup-20260905/deps/venv-appworld/bin/python",
+      "user_base_url": "",
+      "max_new_tokens": 2048,
+      "source_binding": {
+        "components": [
+          {
+            "path": "/home/liuyancheng/c2kv-a-runtime-20260907/system_search/delivery_20260914/benchmark_sources/acon",
+            "kind": "git",
+            "revision": "5ca4f080c5846a0b281365fd489fcf22d10791bd",
+            "required_clean": true
+          },
+          {
+            "path": "/home/liuyancheng/c2kv-a-runtime-20260907/system_search/delivery_20260914/benchmark_sources/appworld",
+            "kind": "git",
+            "revision": "5ca4f080c5846a0b281365fd489fcf22d10791bd",
+            "required_clean": true
+          }
+        ]
+      },
+      "split": "test_normal",
+      "max_iter": 50,
+      "appworld_root": "/home/liuyancheng/c2kv-a-runtime-20260907/system_search/delivery_20260914/benchmark_sources/appworld",
+      "tag": "delivery_20260914_59fae45_2"
+    },
+    {
+      "schema": "history-system-official-task-v1",
+      "benchmark": "acon_appworld",
+      "task_id": "59fae45_3",
+      "task_key": "acon_appworld_122_0dbfe3153ab7",
+      "benchmark_dir": "/home/liuyancheng/c2kv-a-runtime-20260907/system_search/delivery_20260914/benchmark_sources/acon",
+      "bench_python": "/home/liuyancheng/c2kv-integration-followup-20260905/deps/venv-appworld/bin/python",
+      "user_base_url": "",
+      "max_new_tokens": 2048,
+      "source_binding": {
+        "components": [
+          {
+            "path": "/home/liuyancheng/c2kv-a-runtime-20260907/system_search/delivery_20260914/benchmark_sources/acon",
+            "kind": "git",
+            "revision": "5ca4f080c5846a0b281365fd489fcf22d10791bd",
+            "required_clean": true
+          },
+          {
+            "path": "/home/liuyancheng/c2kv-a-runtime-20260907/system_search/delivery_20260914/benchmark_sources/appworld",
+            "kind": "git",
+            "revision": "5ca4f080c5846a0b281365fd489fcf22d10791bd",
+            "required_clean": true
+          }
+        ]
+      },
+      "split": "test_normal",
+      "max_iter": 50,
+      "appworld_root": "/home/liuyancheng/c2kv-a-runtime-20260907/system_search/delivery_20260914/benchmark_sources/appworld",
+      "tag": "delivery_20260914_59fae45_3"
+    },
+    {
+      "schema": "history-system-official-task-v1",
+      "benchmark": "acon_appworld",
+      "task_id": "b6d1104_1",
+      "task_key": "acon_appworld_123_ba97e03897b5",
+      "benchmark_dir": "/home/liuyancheng/c2kv-a-runtime-20260907/system_search/delivery_20260914/benchmark_sources/acon",
+      "bench_python": "/home/liuyancheng/c2kv-integration-followup-20260905/deps/venv-appworld/bin/python",
+      "user_base_url": "",
+      "max_new_tokens": 2048,
+      "source_binding": {
+        "components": [
+          {
+            "path": "/home/liuyancheng/c2kv-a-runtime-20260907/system_search/delivery_20260914/benchmark_sources/acon",
+            "kind": "git",
+            "revision": "5ca4f080c5846a0b281365fd489fcf22d10791bd",
+            "required_clean": true
+          },
+          {
+            "path": "/home/liuyancheng/c2kv-a-runtime-20260907/system_search/delivery_20260914/benchmark_sources/appworld",
+            "kind": "git",
+            "revision": "5ca4f080c5846a0b281365fd489fcf22d10791bd",
+            "required_clean": true
+          }
+        ]
+      },
+      "split": "test_normal",
+      "max_iter": 50,
+      "appworld_root": "/home/liuyancheng/c2kv-a-runtime-20260907/system_search/delivery_20260914/benchmark_sources/appworld",
+      "tag": "delivery_20260914_b6d1104_1"
+    },
+    {
+      "schema": "history-system-official-task-v1",
+      "benchmark": "acon_appworld",
+      "task_id": "b6d1104_2",
+      "task_key": "acon_appworld_124_7fea9fd90944",
+      "benchmark_dir": "/home/liuyancheng/c2kv-a-runtime-20260907/system_search/delivery_20260914/benchmark_sources/acon",
+      "bench_python": "/home/liuyancheng/c2kv-integration-followup-20260905/deps/venv-appworld/bin/python",
+      "user_base_url": "",
+      "max_new_tokens": 2048,
+      "source_binding": {
+        "components": [
+          {
+            "path": "/home/liuyancheng/c2kv-a-runtime-20260907/system_search/delivery_20260914/benchmark_sources/acon",
+            "kind": "git",
+            "revision": "5ca4f080c5846a0b281365fd489fcf22d10791bd",
+            "required_clean": true
+          },
+          {
+            "path": "/home/liuyancheng/c2kv-a-runtime-20260907/system_search/delivery_20260914/benchmark_sources/appworld",
+            "kind": "git",
+            "revision": "5ca4f080c5846a0b281365fd489fcf22d10791bd",
+            "required_clean": true
+          }
+        ]
+      },
+      "split": "test_normal",
+      "max_iter": 50,
+      "appworld_root": "/home/liuyancheng/c2kv-a-runtime-20260907/system_search/delivery_20260914/benchmark_sources/appworld",
+      "tag": "delivery_20260914_b6d1104_2"
+    },
+    {
+      "schema": "history-system-official-task-v1",
+      "benchmark": "acon_appworld",
+      "task_id": "b6d1104_3",
+      "task_key": "acon_appworld_125_17a87a367f70",
+      "benchmark_dir": "/home/liuyancheng/c2kv-a-runtime-20260907/system_search/delivery_20260914/benchmark_sources/acon",
+      "bench_python": "/home/liuyancheng/c2kv-integration-followup-20260905/deps/venv-appworld/bin/python",
+      "user_base_url": "",
+      "max_new_tokens": 2048,
+      "source_binding": {
+        "components": [
+          {
+            "path": "/home/liuyancheng/c2kv-a-runtime-20260907/system_search/delivery_20260914/benchmark_sources/acon",
+            "kind": "git",
+            "revision": "5ca4f080c5846a0b281365fd489fcf22d10791bd",
+            "required_clean": true
+          },
+          {
+            "path": "/home/liuyancheng/c2kv-a-runtime-20260907/system_search/delivery_20260914/benchmark_sources/appworld",
+            "kind": "git",
+            "revision": "5ca4f080c5846a0b281365fd489fcf22d10791bd",
+            "required_clean": true
+          }
+        ]
+      },
+      "split": "test_normal",
+      "max_iter": 50,
+      "appworld_root": "/home/liuyancheng/c2kv-a-runtime-20260907/system_search/delivery_20260914/benchmark_sources/appworld",
+      "tag": "delivery_20260914_b6d1104_3"
+    }
+  ]
+}

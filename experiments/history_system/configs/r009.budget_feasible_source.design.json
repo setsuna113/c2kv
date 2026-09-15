@@ -1,0 +1,58 @@
+{
+  "schema": "history-system-candidate-design-v1",
+  "candidate_id": "d9_budget_feasible_source",
+  "status": "frozen_uploaded_launched_not_completed",
+  "parent": "d8_appworld_task_packet_lane0_v1",
+  "mechanism": "E2/E3 joint source ranking and B0 admission",
+  "intervention": {
+    "source_admission_policy": "first_feasible_ranked_event_v1",
+    "behavior": "Try ranked eligible events in order against the unchanged original prepared view; admit the first feasible whole event; if all fail, abstain. No model calls during feasibility trials."
+  },
+  "preserved": [
+    "C1000/ratio8",
+    "B0=113246208",
+    "frozen detector threshold",
+    "one recovery generation per admitted decision",
+    "existing cumulative recovery quota",
+    "generation96/extraction1152 per task",
+    "task packet priority",
+    "original live frozen packages"
+  ],
+  "evidence": [
+    {
+      "path": "outputs\\history_system_search\\delivery_20260914\\suites\\d8_appworld_task_packet_lane0_v1\\first_task_loop_diagnostic.json",
+      "sha256": "f27afab8410ab49bcba26d4c3d14cf6231298288b2772a494fbc9b049bf0bd29"
+    }
+  ],
+  "validation": {
+    "tests_passed": 16,
+    "scope": "Recovery and task packet tests; new fallback routing tested with controlled admission outcomes",
+    "model_calls": 0
+  },
+  "remaining": [
+    "Finish fixed42 official evaluation",
+    "Audit whether feasible chosen sources contain action-relevant API/constraint evidence rather than prior failed drafts and error text",
+    "Develop source-bound sub-event dependencies for oversized useful sources; preserve B0 and quota rather than raising them"
+  ],
+  "claim": "Budget-feasibility starvation identified; quality benefit and loop recovery untested",
+  "preflight": "outputs/history_system_search/r009/source_admission.replay_v1.json",
+  "frozen_suite": "outputs\\history_system_search\\delivery_20260914\\suites\\d9_appworld_budget_feasible_lane0_v1\\freeze.json",
+  "launch": "outputs\\history_system_search\\delivery_20260914\\suites\\d9_appworld_budget_feasible_lane0_v1\\launch.json",
+  "live_validation": {
+    "source": {
+      "path": "outputs\\history_system_search\\delivery_20260914\\suites\\d9_appworld_budget_feasible_lane0_v1\\first_task_recovery_diagnostic.json",
+      "sha256": "f0beab2363f5bc7d79903d145e71d3e67cb186a5c1ed49f0ee8a134481290ecf"
+    },
+    "task_id": "3d9a636_1",
+    "official_score": 0.0,
+    "sample_label": "preliminary, n=1",
+    "decisions": 50,
+    "recovery_reasons": {
+      "prefill_score_below_threshold": 2,
+      "gate_triggered_event_admitted": 10,
+      "online_recovery_quota_exhausted": 38
+    },
+    "peak_history_bytes": 68419584,
+    "interpretation": "NPU allocation fallback works; first task still fails with prose/API loops. No quality improvement claim."
+  }
+}

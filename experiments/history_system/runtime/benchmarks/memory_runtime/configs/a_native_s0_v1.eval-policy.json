@@ -1,0 +1,10 @@
+{
+  "schema": "a-event-native-eval-policy-v1",
+  "policy_id": "a-native-s0-b0-no-lease-v1",
+  "policy": {
+    "history_budget_bytes": 113246208,
+    "workspace_budget_bytes": 113246208,
+    "lease_decisions": 0,
+    "max_retrieved_events": 2
+  }
+}

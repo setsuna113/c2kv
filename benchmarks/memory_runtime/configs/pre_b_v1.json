@@ -1,0 +1,165 @@
+{
+  "schema": "a-pre-b-official-design-v1",
+  "design": "pre-b-always-compress-v1",
+  "scope": "pre-B development only; preliminary, n=1; no held-out or formal-B claim",
+  "implementation_profile": "legacy-sglang-c2kv-always-compress-v1",
+  "compression_policy": "always-compress-v1",
+  "source_design": {
+    "design": "shared-exact-dev8",
+    "path": "benchmarks/memory_runtime/configs/shared_exact_dev8.json",
+    "sha256": "ae49c638f58862a2ea2d279c3f0c9863ea40b63cc9b9dc07ff408d247a8ddaa6"
+  },
+  "data_contract": {
+    "benchmark": "bfcl",
+    "category": "multi_turn_base",
+    "selection_manifest_path": "configs/bfcl_dev_v3_mt.json",
+    "selection_manifest_sha256": "2e837e05b6c782532e1136faeac73c251517a608e3fe07c27588234bdebf953b",
+    "official_source_file": ".foreman/ref/bfcl_data/BFCL_v4_multi_turn_base.json",
+    "official_source_sha256": "1a21a995d06fd6f20ba55de7bced30ef953ec35e998f502ec2ecf4d66ef1c43a",
+    "held_out": false,
+    "score_or_response_filtering": false
+  },
+  "scorer_contract": {
+    "implementation": "official BFCL evaluator from the explicitly bound BFCL checkout",
+    "mode": "both",
+    "category": "multi_turn_base",
+    "runtime_identity_required": true
+  },
+  "policy": {
+    "source": "benchmarks/memory_runtime/configs/a_exact_baseline_v1.eval-policy.json",
+    "source_sha256": "c6d1a14ef46a38491d84cbe38417293c649555a2a9ff2e37ed3ec1b3f52979f2",
+    "lease_decisions": 3,
+    "max_retrieved_events": 1,
+    "max_regenerations_per_decision": 1
+  },
+  "sampling": {
+    "temperature": 0.001,
+    "seed": 0,
+    "max_completion_tokens": 4096
+  },
+  "bytes_per_kv_token": 147456,
+  "budgets": {
+    "B0": 113246208,
+    "B1": 226492416
+  },
+  "task_ids": [
+    "multi_turn_base_16",
+    "multi_turn_base_105",
+    "multi_turn_base_122",
+    "multi_turn_base_157",
+    "multi_turn_base_165",
+    "multi_turn_base_172",
+    "multi_turn_base_188",
+    "multi_turn_base_192"
+  ],
+  "g460_task_ids": [
+    "multi_turn_base_16",
+    "multi_turn_base_105",
+    "multi_turn_base_122",
+    "multi_turn_base_157"
+  ],
+  "routes": {
+    "full": {"arm": "full", "canonical_mode": null, "config_source": null},
+    "ac_full_shared": {"arm": "full", "canonical_mode": "full_exact_shared", "config_source": "full_exact_shared"},
+    "ac_gist_static": {"arm": "c2kv4", "canonical_mode": "legacy", "config_source": "legacy"},
+    "ac_protect": {"arm": "c2kv4", "canonical_mode": "capacity_protect", "config_source": "protect"},
+    "ac_exact_once": {"arm": "c2kv4", "canonical_mode": "capacity_exact_once", "config_source": "capacity_exact_once"},
+    "ac_exact_persistent": {"arm": "c2kv4", "canonical_mode": "capacity_exact_persistent", "config_source": "capacity_exact_persistent"},
+    "raw_recency": {"arm": "full", "canonical_mode": "raw_recency", "config_source": "full_shared"},
+    "raw_exact_shared": {"arm": "full", "canonical_mode": "capacity_exact_no_gist", "config_source": "capacity_exact_no_gist"}
+  },
+  "conditional_candidate": {
+    "status": "pending_revision_choice",
+    "implementation_status": "not_implemented",
+    "selection_status": "not_selected",
+    "variant": null,
+    "reason": "P2 has not frozen a revision choice; no candidate route may be inferred from this design"
+  },
+  "provisional_selected_method": "ac_exact_persistent",
+  "selected_method_status": "provisional_p3_pending",
+  "profile_contracts": {
+    "checkpoint-1088": {
+      "checkpoint_name": "checkpoint-1088",
+      "query_projection": "base",
+      "doc_packing": "turn",
+      "max_doc_length": 512,
+      "max_doc_num": 12
+    },
+    "checkpoint-460": {
+      "checkpoint_name": "checkpoint-460",
+      "query_projection": "gist",
+      "doc_packing": "turn",
+      "max_doc_length": 768,
+      "max_doc_num": 16
+    }
+  },
+  "wall_allocation_seconds": {
+    "P0": 3600,
+    "P1": 7200,
+    "P2": 10800,
+    "P3": 93600,
+    "P4a": 28800,
+    "P4b": 28800
+  },
+  "maximum_model_wall_seconds": 172800,
+  "stages": {
+    "pre-b-p3": {
+      "stage": "P3",
+      "checkpoint_profile": "checkpoint-1088",
+      "budget": "B0",
+      "task_set": "task_ids",
+      "variants": ["full", "ac_full_shared", "ac_gist_static", "ac_protect", "ac_exact_once", "ac_exact_persistent", "raw_recency", "raw_exact_shared"],
+      "maximum_wall_seconds": 93600,
+      "maximum_generation_attempts_per_task": 96,
+      "maximum_generation_attempts_per_arm": 768,
+      "maximum_extraction_attempts_by_arm": {
+        "full": 0,
+        "ac_full_shared": 0,
+        "ac_gist_static": 9216,
+        "ac_protect": 9216,
+        "ac_exact_once": 9216,
+        "ac_exact_persistent": 9216,
+        "raw_recency": 0,
+        "raw_exact_shared": 0
+      }
+    },
+    "pre-b-p4a": {
+      "stage": "P4a",
+      "checkpoint_profile": "checkpoint-1088",
+      "budget": "B1",
+      "task_set": "task_ids",
+      "variants": ["selected_method", "raw_recency", "raw_exact_shared"],
+      "maximum_wall_seconds": 28800,
+      "maximum_generation_attempts_per_task": 96,
+      "maximum_generation_attempts_per_arm": 768,
+      "maximum_extraction_attempts_by_arm": {
+        "selected_method": 9216,
+        "raw_recency": 0,
+        "raw_exact_shared": 0
+      }
+    },
+    "pre-b-p4b": {
+      "stage": "P4b",
+      "checkpoint_profile": "checkpoint-460",
+      "budget": "B0",
+      "task_set": "g460_task_ids",
+      "variants": ["full", "selected_method", "raw_recency", "raw_exact_shared"],
+      "maximum_wall_seconds": 28800,
+      "maximum_generation_attempts_per_task": 96,
+      "maximum_generation_attempts_per_arm": 384,
+      "maximum_extraction_attempts_by_arm": {
+        "full": 0,
+        "selected_method": 6144,
+        "raw_recency": 0,
+        "raw_exact_shared": 0
+      }
+    }
+  },
+  "retry_contract": {
+    "automatic_reruns": 0,
+    "sdk_retries": 0,
+    "proxy_transport_retries": 0,
+    "cache_miss_retries": 0,
+    "budget_transfer_between_arms": false
+  }
+}

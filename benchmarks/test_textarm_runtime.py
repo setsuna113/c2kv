@@ -69,6 +69,89 @@ def test_nonexistent_retrieval_is_not_leaked_to_executor(monkeypatch):
                                       lambda payload: pytest.fail("invalid retrieval must not generate"))
 
 
+def test_hiagent_full_native_preserves_current_and_retrieved_tool_rows(monkeypatch):
+    textarms.reset_state()
+    summaries = []
+
+    def compress(payload, *args, **kwargs):
+        summaries.append(payload)
+        return "First account inspected."
+
+    monkeypatch.setattr(proxy, "_textarm_compress", compress)
+    source_tools = [{
+        "type": "function",
+        "function": {
+            "name": "inspect_account",
+            "description": "Inspect one account.",
+            "parameters": {
+                "type": "object",
+                "properties": {"account": {"type": "string"}},
+                "required": ["account"],
+            },
+        },
+    }]
+    messages = [
+        {"role": "system", "content": "System contract."},
+        {"role": "user", "content": "Compare the accounts."},
+        {"role": "assistant", "content": "Subgoal: inspect first account", "tool_calls": [{
+            "id": "call_first", "type": "function", "function": {
+                "name": "inspect_account", "arguments": '{"account":"first"}'},
+        }]},
+        {"role": "tool", "name": "inspect_account", "tool_call_id": "call_first",
+         "content": "first=193"},
+        {"role": "assistant", "content": "Subgoal: inspect second account", "tool_calls": [{
+            "id": "call_second", "type": "function", "function": {
+                "name": "inspect_account", "arguments": '{"account":"second"}'},
+        }]},
+        {"role": "tool", "name": "inspect_account", "tool_call_id": "call_second",
+         "content": "second=211"},
+        {"role": "user", "content": "Report the comparison."},
+    ]
+    original = {"model": "c2kv-agent", "messages": messages, "tools": source_tools}
+    original_snapshot = json.loads(json.dumps(original))
+    arm = get_arm("hiagent_full_native")
+
+    assert arm.text_policy == "hiagent_full"
+    assert arm.compress_history is False
+    assert arm.native_messages is True
+    assert get_arm("hiagent_full").native_messages is False
+
+    summarized, stats = proxy._apply_text_arm(original, arm, "test")
+    assembled, counts = proxy._assemble(summarized["messages"], arm)
+
+    assert len(summaries) == 1
+    assert stats["n_compressor_calls"] == 1
+    assert any(message.get("role") == "user"
+               and message.get("content") ==
+               "Subgoal 1: inspect first account\nSummary: First account inspected."
+               for message in assembled)
+    assert not any(message.get("tool_call_id") == "call_first" for message in assembled)
+    current_rows = [message for message in messages if message.get("tool_call_id") == "call_second"
+                    or any(call.get("id") == "call_second"
+                           for call in message.get("tool_calls") or [])]
+    current_start = next(index for index, message in enumerate(assembled)
+                         if any(call.get("id") == "call_second"
+                                for call in message.get("tool_calls") or []))
+    assert assembled[current_start:current_start + 2] == current_rows
+    assert assembled[-1] == messages[-1]
+    assert counts["doc_packing"] == "native"
+    assert counts["gist_tokens"] == 0
+    assert summarized["tools"][:-1] == source_tools
+    assert summarized["tools"][-1]["function"]["name"] == "hiagent_retrieve"
+
+    retrieved, retrieved_stats = proxy._apply_text_arm(
+        original, arm, "test", retrieve_subgoals=[1])
+    retrieved_assembled, retrieved_counts = proxy._assemble(retrieved["messages"], arm)
+    retrieved_start = next(index for index, message in enumerate(retrieved_assembled)
+                           if any(call.get("id") == "call_first"
+                                  for call in message.get("tool_calls") or []))
+    assert retrieved_assembled[retrieved_start:retrieved_start + 2] == messages[2:4]
+    assert retrieved_stats["retrieved_subgoals"] == [1]
+    assert retrieved_stats["n_compressor_calls"] == 0
+    assert retrieved_counts["doc_packing"] == "native"
+    assert original == original_snapshot
+
+
 @pytest.mark.parametrize("policy,mode,guideline", [
     ("acon_hist_ut_co", "hist", "ut_co"), ("acon_obs_ut", "obs", "ut"),
     ("acon_hist", "hist", "base")])

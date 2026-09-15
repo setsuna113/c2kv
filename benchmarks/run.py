@@ -14,6 +14,7 @@ before the proxy starts, and conflicting explicit overrides are rejected.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import socket
@@ -33,6 +34,9 @@ from adapters.base import RunContext  # noqa: E402
 from checkpoint_profile import ProfileError, resolve_checkpoint_profile  # noqa: E402
 from capabilities import run_preflight  # noqa: E402
 from arms import get_arm  # noqa: E402
+from memory_runtime.generation_budget import positive_generation_limit  # noqa: E402
+from memory_runtime.extraction_telemetry import nonnegative_extraction_limit  # noqa: E402
+from memory_runtime.attempt_journal import attempt_journal_path, summarize_attempt_journal  # noqa: E402
 
 # --benchmark value -> adapter module.  Two names share acon_adapter (the
 # module dispatches on ctx.options["benchmark"]); add_arguments is called
@@ -95,8 +99,12 @@ def start_proxy(upstream: str, arm: str, port: int, log_dir: Path,
                 query_projection: str | None = None, witness_tokenizer: str = "",
                 python_bin: str | None = None,
                 memory_runtime_config: str = "", memory_tokenizer: str = "",
-                no_upstream_retries: bool = False,
-                capture_request_views: bool = False):
+                 no_upstream_retries: bool = False,
+                 capture_request_views: bool = False,
+                 max_generation_attempts: int | None = None,
+                 max_generation_attempts_per_task: int | None = None,
+                 max_extraction_attempts: int | None = None,
+                 native_hiagent_policy_sampling: str = ""):
     _require_available_proxy_port(port)
     log_path = log_dir / f"proxy_{arm}_{port}.jsonl"
     out_path = log_dir / f"proxy_{arm}_{port}.out"
@@ -123,6 +131,15 @@ def start_proxy(upstream: str, arm: str, port: int, log_dir: Path,
         command += ["--no-upstream-retries"]
     if capture_request_views:
         command += ["--capture-request-views"]
+    if max_generation_attempts is not None:
+        command += ["--max-generation-attempts", str(max_generation_attempts)]
+    if max_generation_attempts_per_task is not None:
+        command += ["--max-generation-attempts-per-task",
+                    str(max_generation_attempts_per_task)]
+    if max_extraction_attempts is not None:
+        command += ["--max-extraction-attempts", str(max_extraction_attempts)]
+    if native_hiagent_policy_sampling:
+        command += ["--native-hiagent-policy-sampling", native_hiagent_policy_sampling]
     out_handle = open(out_path, "w")
     try:
         proc = subprocess.Popen(
@@ -133,7 +150,7 @@ def start_proxy(upstream: str, arm: str, port: int, log_dir: Path,
             # serving venv, torch otherwise auto-loads torch_npu and requires
             # libhccl even though this process never constructs model tensors.
             env=({**os.environ, "TORCH_DEVICE_BACKEND_AUTOLOAD": "0"}
-                 if memory_runtime_config else None),
+                 if memory_runtime_config or backend == "event_native_hiagent" else None),
         )
     finally:
         out_handle.close()
@@ -220,6 +237,15 @@ def add_core_arguments(parser: argparse.ArgumentParser) -> None:
                         help="use the supplied output directory verbatim (matrix cells)")
     parser.add_argument("--capture-request-views", action="store_true",
                         help="record benchmark request messages/tools for exact prefix diagnostics")
+    parser.add_argument("--max-generation-attempts", type=positive_generation_limit,
+                        help="process-wide hard cap on chat generation network calls")
+    parser.add_argument(
+        "--max-generation-attempts-per-task", type=positive_generation_limit,
+        help=("hard cap on chat generation network calls for each explicit "
+              "benchmark task identity"),
+    )
+    parser.add_argument("--max-extraction-attempts", type=nonnegative_extraction_limit,
+                        help="process-wide hard cap on client extraction producers")
     # shared by tau2 (--max-concurrency) and acebench (--num-threads)
     parser.add_argument("--num-workers", type=int, default=4)
     # shared by tau2 (--num-tasks) and acon_qa (--limit)
@@ -232,9 +258,11 @@ def add_core_arguments(parser: argparse.ArgumentParser) -> None:
                         help="recover arm: reference trajectory jsonl (from a "
                              "--record-reference full-arm run)")
     parser.add_argument("--backend", default="sglang",
-                        choices=["hfserver", "sglang"],
+                        choices=["hfserver", "sglang", "event_native_hiagent"],
                         help="serving stack behind the proxy (sglang is the "
                              "eval path; hfserver survives as contrast only)")
+    parser.add_argument("--native-hiagent-policy-sampling", default="",
+                        help="explicit native HiAgent policy/retrieval sampling JSON")
     parser.add_argument("--model", default="c2kv-agent",
                         help="served model name at the endpoint (any "
                              "OpenAI-compatible endpoint serves any name; "
@@ -313,10 +341,39 @@ def resolve_run_profile(args: argparse.Namespace) -> dict:
             key: getattr(args, key) for key in
             ("doc_packing", "max_doc_length", "max_doc_num", "query_projection")},
             "missing": ["checkpoint identity and training alignment are unverified"]}
-    profile = resolve_checkpoint_profile(
-        args.checkpoint, profile_path=args.checkpoint_profile,
-        reference_profile=args.reference_profile,
-        query_projection=args.query_projection, require_serving_e2e=True)
+    if args.backend == "event_native_hiagent":
+        if args.checkpoint_profile or args.reference_profile:
+            raise ProfileError(
+                "event-native HiAgent resolves config.json and trainer_state.json "
+                "directly; legacy checkpoint/reference profiles are unsupported"
+            )
+        from memory_runtime.event_native import inspect_checkpoint
+        try:
+            profile = inspect_checkpoint(args.checkpoint)
+        except (OSError, TypeError, ValueError) as exc:
+            raise ProfileError(f"invalid event-native checkpoint metadata: {exc}") from exc
+        profile["profile_kind"] = "event_native_checkpoint"
+        # Native messages bypass the legacy document packer.  These values
+        # preserve the runner's existing proxy CLI defaults without claiming
+        # that they describe the checkpoint's event-native packing contract.
+        profile["serving"] = {
+            "doc_packing": "turn",
+            "max_doc_length": 512,
+            "max_doc_num": 12,
+            "query_projection": None,
+        }
+        fingerprint_value = {
+            key: value for key, value in profile.items() if key != "checkpoint"
+        }
+        profile["profile_fingerprint"] = hashlib.sha256(json.dumps(
+            fingerprint_value, ensure_ascii=False, sort_keys=True,
+            separators=(",", ":"), allow_nan=False,
+        ).encode("utf-8")).hexdigest()
+    else:
+        profile = resolve_checkpoint_profile(
+            args.checkpoint, profile_path=args.checkpoint_profile,
+            reference_profile=args.reference_profile,
+            query_projection=args.query_projection, require_serving_e2e=True)
     if (args.expected_profile_fingerprint is not None
             and args.expected_profile_fingerprint != profile.get("profile_fingerprint")):
         raise ProfileError("resolved checkpoint profile differs from the planned profile fingerprint")
@@ -330,9 +387,30 @@ def resolve_run_profile(args: argparse.Namespace) -> dict:
     return profile
 
 
+def align_native_hiagent_sampling(args):
+    """Make the official handler and phase bridge describe the same decoding."""
+    if args.backend != "event_native_hiagent":
+        return
+    if not args.native_hiagent_policy_sampling:
+        raise ValueError("native HiAgent requires an explicit policy sampling file")
+    from native_hiagent_protocol import load_policy_sampling
+    sampling = load_policy_sampling(args.native_hiagent_policy_sampling)
+    for argument, field in (("bfcl_temperature", "temperature"),
+                            ("bfcl_seed", "seed"),
+                            ("bfcl_generation_max_tokens", "max_completion_tokens")):
+        value = getattr(args, argument)
+        if value is not None and value != sampling[field]:
+            raise ValueError(f"--{argument.replace('_', '-')} conflicts with native HiAgent sampling")
+        setattr(args, argument, sampling[field])
+
+
 def main(argv=None):
     parser = build_parser()
     args = parser.parse_args(argv)
+    try:
+        align_native_hiagent_sampling(args)
+    except (OSError, ValueError, TypeError) as exc:
+        parser.error(str(exc))
     try:
         profile = resolve_run_profile(args)
     except ProfileError as exc:
@@ -365,7 +443,11 @@ def main(argv=None):
         memory_runtime_config=args.memory_runtime_config,
         memory_tokenizer=args.memory_tokenizer or str(args.checkpoint or ""),
         no_upstream_retries=args.no_upstream_retries,
-        capture_request_views=args.capture_request_views)
+        capture_request_views=args.capture_request_views,
+        max_generation_attempts=args.max_generation_attempts,
+        max_generation_attempts_per_task=args.max_generation_attempts_per_task,
+        max_extraction_attempts=args.max_extraction_attempts,
+        native_hiagent_policy_sampling=args.native_hiagent_policy_sampling)
     try:
         # every adapter owns its own "/v1" (adapters/base.py:v1) and its own
         # cwd; run.py hands over the bare proxy URL and nothing else
@@ -451,6 +533,12 @@ def main(argv=None):
     summary["max_doc_length"] = args.max_doc_length
     summary["max_doc_num"] = args.max_doc_num
     summary["request_log"] = str(request_log)
+    journal_path = attempt_journal_path(request_log)
+    if journal_path.is_file():
+        summary["attempt_journal"] = {
+            "path": str(journal_path),
+            "accounting": summarize_attempt_journal(journal_path),
+        }
     if args.reference:
         summary["reference"] = args.reference
     if args.record_reference:

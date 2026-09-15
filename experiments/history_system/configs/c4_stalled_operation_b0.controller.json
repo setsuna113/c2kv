@@ -1,0 +1,9 @@
+{
+  "source_index_max_events": 12,
+  "predictor_prompt_token_cap": 2048,
+  "predictor_completion_token_cap": 256,
+  "latest_complete_tool_protection": "budgeted",
+  "observed_entity_slot_policy": "same-complete-event-result-key-bridge-v1",
+  "raw_warmup_policy": "full-history-if-fits-v1",
+  "stalled_operation_policy": "current-goal-stalled-operation-ledger-v1"
+}

@@ -1,0 +1,62 @@
+{
+  "schema": "history-system-multibench-execution-binding-v1",
+  "source_snapshot": "/home/liuyancheng/c2kv-a-runtime-20260907/system_search/delivery_20260914/benchmark_sources",
+  "source_revision": "5ca4f080c5846a0b281365fd489fcf22d10791bd",
+  "candidate_model_name": "c2kv-c1000-r8-history-system-v2",
+  "toolsandbox_wire_model_name": "gpt-4o-2024-05-13",
+  "raw_user_endpoint": {
+    "base_url": "http://127.0.0.1:35803/v1",
+    "status": "running_health_verified",
+    "required_served_model_names": [
+      "c2kv-c1000-r8-history-system-v2",
+      "gpt-4o-2024-05-13"
+    ],
+    "used_by": [
+      "tau2",
+      "toolsandbox",
+      "acebench"
+    ],
+    "actual_upstream_checkpoint": "/home/liuyancheng/checkpoints_upstream/checkpoint-1088",
+    "upstream_base_url": "http://127.0.0.1:35220/v1",
+    "upstream_model": "c2kv-agent",
+    "alias_pid": 3174298,
+    "payload_transform": "model field only; messages/tools unchanged; one attempt",
+    "accepted_aliases": [
+      "c2kv-c1000-r8-history-system-v2",
+      "gpt-4o-2024-05-13",
+      "d3_prefill_event"
+    ],
+    "validation": "delivery_20260914.alias_v2.validation.json"
+  },
+  "candidate_port_bases": {
+    "tau2_f6": 42000,
+    "toolsandbox_lex8": 42100,
+    "acebench_agent_en8": 42200,
+    "appworld_test_normal_lane0of4": 43000,
+    "appworld_test_normal_lane1of4": 43100,
+    "appworld_test_normal_lane2of4": 43200,
+    "appworld_test_normal_lane3of4": 43300,
+    "all190_serial_preview_only": 44000
+  },
+  "max_new_tokens": {
+    "tau2": 4096,
+    "toolsandbox": 4096,
+    "acon_appworld": 2048,
+    "acebench": 1200
+  },
+  "cap_provenance": {
+    "tau2": "official source omits a token cap; 4096 is the frozen server-owned algorithm cap",
+    "toolsandbox": "official source omits a token cap; 4096 is the frozen server-owned algorithm cap",
+    "acon_appworld": "official source sends max_tokens=2048",
+    "acebench": "configured adapter sends max_tokens=1200"
+  },
+  "appworld_sharding": {
+    "kind": "four_contiguous_order_preserving_lanes",
+    "tasks_per_lane": [
+      42,
+      42,
+      42,
+      42
+    ]
+  }
+}

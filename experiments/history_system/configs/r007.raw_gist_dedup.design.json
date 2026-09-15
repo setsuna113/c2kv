@@ -1,0 +1,38 @@
+{
+  "schema": "history-system-mechanism-design-v1",
+  "status": "completed_recovered_not_promoted",
+  "axis": "E3/E5 source-aware representation selection",
+  "evidence": "outputs/history_system_search/delivery_20260914/raw_gist_overlap.json",
+  "candidate": "raw-dominant representation: gist needed only for events whose full source set is not raw-covered",
+  "implementation_requirements": [
+    "Normalize each allocated whole event after raw selection: remove gist only if every source message in every retained chunk remains raw",
+    "Recompute packing, source coverage, positional layout and all B0 receipts; preserve derived messages and source identities",
+    "Apply the same normalization to post-draft recovery views, not only initial prepare",
+    "Release minimum-gist reservation only for fully raw-covered sources; do not drop unrepresented evidence to claim dedup",
+    "Retain demand extraction, selected C1000/ratio8 and original B0; measure effect on actual peak, pooled history KV and quality"
+  ],
+  "evaluation": "Original ToolSandbox lex8, same B0 and checkpoint; whole-system candidate includes demand extraction.",
+  "not_authorized_by_this_file": "No mutation/restart of in-flight D3/D4 or uploaded D5; root must freeze and dispatch a new queue entry under current resource contract",
+  "model_calls_in_analysis": 0,
+  "policy": "full-source-raw-dominant-v1",
+  "configuration_key": "representation_policy",
+  "implementation": "Normalize gist in shared _try_measure, using actual packed raw source coverage; recursively repack changed gist membership. Initial prepare and post-draft _admit both use this path. Reservation metadata updated under the new policy.",
+  "validation": {
+    "focused_cpu_tests_passed": 17,
+    "coverage": [
+      "fully raw source removes gist",
+      "partial raw source retains gist",
+      "recovery wrapper removes restored event gist",
+      "post-recovery metadata reflects actual packing",
+      "existing recovery and persistent-goal tests"
+    ],
+    "model_calls": 0
+  },
+  "candidate_id": "d7_raw_dominant_demand",
+  "frozen_suite": "outputs/history_system_search/delivery_20260914/suites/d7_toolsandbox_raw_dominant_v1/freeze.json",
+  "launch": "outputs/history_system_search/delivery_20260914/suites/d7_toolsandbox_raw_dominant_v1/launch.json",
+  "terminal_diagnostic": "outputs/history_system_search/delivery_20260914/d7.divergence_diagnostic.json",
+  "next_action": "No new standalone D7 sweeps or promotion; preserve implementation for integration when history boundaries or allocation change. Prioritize fine-grained useful recovery and intervention value. Preserve frozen runs and threshold.",
+  "investment_decision": "deprioritize_standalone_d7_keep_unselected_option",
+  "investment_evidence": "outputs/history_system_search/delivery_20260914/dedup_investment_audit.json"
+}

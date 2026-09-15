@@ -88,12 +88,11 @@ DEFAULT_MAX_DIALOG_TURNS = 40
 HEADER_KEYS = ("accuracy", "end_to_end_accuracy", "process_accuracy",
                "correct_count", "total_count")
 
-# The vendored patch emits one OpenAI message per structured ACEBench
-# dialogue entry. This makes the first task messages stable and lets the
-# proxy form history docs. Requests still carry no ACE task id, so a proxy
-# request-log row cannot be joined strictly to an official scorer row.
-COST_JOIN = ("not joinable: role-preserving history enables compression but "
-             "the agent request carries no ACE task-id metadata")
+# The pinned patch carries the complete official row ID and decision
+# coordinates. A cost join still requires the corresponding complete result
+# inventory; the user simulator is separate from evaluated-agent costs.
+COST_JOIN = ("patched evaluated-agent c2kv_eval_context.task_id joins official row ids; "
+             "require complete task/result coverage and account for the user simulator separately")
 
 
 def add_arguments(parser) -> None:

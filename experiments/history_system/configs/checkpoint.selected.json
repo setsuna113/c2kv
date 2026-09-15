@@ -1,0 +1,22 @@
+{
+  "status": "selected",
+  "path": "/home/liuyancheng/c2kv-b-final-20260912/checkpoints/b_history/arm-C/seed-42/checkpoint-1000",
+  "config_sha256": "15e14bfa5853ce7e74ef3cd6d65fc4b4411378c3111aebcfdc8ed272f5424655",
+  "selected_arm": "C",
+  "selected_step": 1000,
+  "ratio": 8,
+  "selection_basis": "User-directed logical tie-break from existing results; no new checkpoint comparison",
+  "historical_ratio8": {
+    "B500": 30,
+    "C1000": 30,
+    "denominator": 128
+  },
+  "historical_ratio4": {
+    "B500": 30,
+    "C1000": 34,
+    "denominator": 128
+  },
+  "sample_label": "preliminary, n=1",
+  "c500": "excluded_by_user",
+  "new_comparison_outcomes_used": false
+}
