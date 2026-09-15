@@ -265,3 +265,6 @@ Thumbs.db
 /releases/
 /reports/
 /experiments/history_system/search_state.json
+
+# Active A runtime includes model implementation, not model weights.
+!experiments/history_system/runtime/python/models/
