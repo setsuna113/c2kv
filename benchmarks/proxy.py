@@ -71,6 +71,7 @@ import json
 import threading
 import time
 import uuid
+from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Dict, List, Optional, Set, Tuple
 from urllib import request as urlrequest
@@ -85,24 +86,35 @@ import repair_policy
 import textarms
 from arms import Arm, get_arm, history_kv_spec, kv_reuse_spec  # type: ignore
 from backends import BackendError, get_backend  # type: ignore
+from measurement.telemetry import append_jsonl, canonical_sha256  # type: ignore
 
 
 class ExtractCache:
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._cache: Dict[Tuple[str, str, int], Dict[str, Any]] = {}
+        self._cache: Dict[Tuple[Any, ...], Dict[str, Any]] = {}
 
     def get_or_put(
-        self, key: Tuple[str, str, int], producer, force: bool = False
+        self, key: Tuple[Any, ...], producer, force: bool = False
     ) -> Dict[str, Any]:
         """Memoised extract.  ``force=True`` re-runs the producer and
         overwrites the memo: it is the cache-miss recovery path, where the
         memoised record describes a pool entry the SERVER has already evicted,
         so returning it would re-send a dead ``key_hash`` and miss again."""
+        return self.get_or_put_with_status(key, producer, force=force)[0]
+
+    def get_or_put_with_status(
+        self, key: Tuple[Any, ...], producer, force: bool = False
+    ) -> Tuple[Dict[str, Any], bool]:
         with self._lock:
-            if force or key not in self._cache:
+            hit = not force and key in self._cache
+            if not hit:
                 self._cache[key] = producer()
-            return self._cache[key]
+            return self._cache[key], hit
+
+    def clear(self) -> None:
+        with self._lock:
+            self._cache.clear()
 
 
 CACHE = ExtractCache()
@@ -110,7 +122,61 @@ ARM: Optional[Arm] = None
 BACKEND = None  # set in main()
 UPSTREAM = ""
 REQUEST_LOG_PATH = ""
+TELEMETRY_LOG_PATH = ""
+PREFIX_LOG_PATH = ""
 _log_lock = threading.Lock()
+_TRACE = threading.local()
+
+
+def _measurement_event(event_type: str, **fields: Any) -> None:
+    if not TELEMETRY_LOG_PATH:
+        return
+    row = {
+        "schema": "c2kv.proxy.telemetry.v1",
+        "event_type": event_type,
+        "unix_ns": time.time_ns(),
+        "request_id": getattr(_TRACE, "request_id", None),
+        "replay_prefix_id": getattr(_TRACE, "replay_prefix_id", None),
+        **fields,
+    }
+    pending = getattr(_TRACE, "pending_events", None)
+    if isinstance(pending, list):
+        pending.append(row)
+    else:
+        append_jsonl(TELEMETRY_LOG_PATH, row)
+
+
+def _flush_measurement_events() -> None:
+    pending = getattr(_TRACE, "pending_events", None)
+    if not isinstance(pending, list):
+        return
+    _TRACE.pending_events = []
+    for row in pending:
+        append_jsonl(TELEMETRY_LOG_PATH, row)
+
+
+@contextmanager
+def _phase(name: str):
+    previous = getattr(_TRACE, "phase", None)
+    _TRACE.phase = name
+    start_unix = time.time_ns()
+    start_perf = time.perf_counter_ns()
+    status = "ok"
+    error = None
+    try:
+        yield
+    except BaseException as exc:
+        status = "error"
+        error = f"{type(exc).__name__}: {exc}"
+        raise
+    finally:
+        duration = time.perf_counter_ns() - start_perf
+        _measurement_event(
+            "phase", phase=name, parent_phase=previous, status=status,
+            error=error, start_unix_ns=start_unix,
+            end_unix_ns=start_unix + duration, duration_ns=duration,
+        )
+        _TRACE.phase = previous
 
 # --doc-packing / --max-doc-length / --max-doc-num (see module docstring and
 # docs/c2kv_semantics.md).  DEFAULTS = the checkpoint-1088 training values
@@ -144,7 +210,7 @@ class UpstreamError(RuntimeError):
 
 
 def _post_json(path: str, payload: Dict[str, Any],
-               timeout: int, retries: int = 2) -> Dict[str, Any]:
+               timeout: int, retries: int = 2) -> Any:
     """POST JSON to UPSTREAM, retrying 5xx/network failures with backoff.
 
     4xx (except 429) are deterministic client errors and are not retried.
@@ -155,19 +221,50 @@ def _post_json(path: str, payload: Dict[str, Any],
     body = json.dumps(payload).encode("utf-8")
     last: Optional[UpstreamError] = None
     for attempt in range(retries + 1):
+        attempt_unix = time.time_ns()
+        attempt_perf = time.perf_counter_ns()
+        phase = getattr(_TRACE, "phase", "unclassified_upstream")
+        headers = {"Content-Type": "application/json"}
+        request_id = getattr(_TRACE, "request_id", None)
+        if request_id:
+            headers["X-C2KV-Measurement-Request-Id"] = str(request_id)
+            headers["X-C2KV-Measurement-Phase"] = str(phase)
         req = urlrequest.Request(
             f"{UPSTREAM.rstrip('/')}{path}", data=body,
-            headers={"Content-Type": "application/json"}, method="POST",
+            headers=headers, method="POST",
         )
         try:
             with _OPENER.open(req, timeout=timeout) as resp:
-                return json.loads(resp.read().decode("utf-8"))
+                raw_response = resp.read().decode("utf-8")
+                try:
+                    response = json.loads(raw_response) if raw_response else None
+                except json.JSONDecodeError:
+                    # SGLang administrative endpoints (/flush_cache and
+                    # /close_session) intentionally return plain text/empty.
+                    response = raw_response
+                duration = time.perf_counter_ns() - attempt_perf
+                _measurement_event(
+                    "upstream_attempt", phase=phase, attempt=attempt,
+                    start_unix_ns=attempt_unix,
+                    end_unix_ns=attempt_unix + duration, duration_ns=duration,
+                    path=path, http_status=resp.status, request=payload,
+                    response=response, error=None,
+                )
+                return response
         except HTTPError as error:
             text = ""
             try:
                 text = error.read().decode("utf-8", "replace")
             except OSError:
                 pass
+            duration = time.perf_counter_ns() - attempt_perf
+            _measurement_event(
+                "upstream_attempt", phase=phase, attempt=attempt,
+                start_unix_ns=attempt_unix,
+                end_unix_ns=attempt_unix + duration, duration_ns=duration,
+                path=path, http_status=error.code, request=payload,
+                response=text, error=f"HTTPError: {error}",
+            )
             if error.code < 500 and error.code != 429:
                 if error.code == 400 and "C2KV cache miss" in text:
                     # SGLang c2kv pool LRU eviction: the referenced gist is
@@ -180,8 +277,26 @@ def _post_json(path: str, payload: Dict[str, Any],
             last = UpstreamError(error.code, text)
         except (URLError, OSError) as error:
             last = UpstreamError(0, str(error))
+            duration = time.perf_counter_ns() - attempt_perf
+            _measurement_event(
+                "upstream_attempt", phase=phase, attempt=attempt,
+                start_unix_ns=attempt_unix,
+                end_unix_ns=attempt_unix + duration, duration_ns=duration,
+                path=path, http_status=0, request=payload,
+                response=None, error=f"{type(error).__name__}: {error}",
+            )
         if attempt < retries:
-            time.sleep(2 ** (attempt + 1))
+            delay = 2 ** (attempt + 1)
+            backoff_unix = time.time_ns()
+            backoff_perf = time.perf_counter_ns()
+            time.sleep(delay)
+            duration = time.perf_counter_ns() - backoff_perf
+            _measurement_event(
+                "phase", phase="upstream_retry_backoff", parent_phase=phase,
+                status="ok", error=None, start_unix_ns=backoff_unix,
+                end_unix_ns=backoff_unix + duration, duration_ns=duration,
+                attempt=attempt, configured_delay_sec=delay,
+            )
     assert last is not None
     raise last
 
@@ -198,9 +313,17 @@ def _extract(role: str, content: str, ratio: int, timeout: int = 600,
     # Qwen template renders tools into the system block)
     tools_key = _digest(tools or [])
     key = (role, _content_key(role, content), ratio, tools_key)
-    return CACHE.get_or_put(
-        key, lambda: BACKEND.extract(content, role, ratio, tools=tools),
-        force=force)
+    def produce():
+        with _phase("c2kv_extract"):
+            return BACKEND.extract(content, role, ratio, tools=tools)
+
+    record, hit = CACHE.get_or_put_with_status(key, produce, force=force)
+    _measurement_event(
+        "extract_cache", phase="c2kv_extract", cache_hit=hit, force=force,
+        role=role, content_sha256=_content_key(role, content), ratio=ratio,
+        record=record,
+    )
+    return record
 
 
 def _history_cutoff(messages: List[Dict[str, Any]]) -> int:
@@ -726,10 +849,10 @@ def _history_kv_context(out_messages: List[Dict[str, Any]],
     history normalized into the training dialect and packed into turn docs
     (``_normalize_history_message`` + ``_turn_docs``), joined into one span so
     a single budget covers the whole history exactly as upstream applies it.
-    ``history_message_count`` is instead a count of LEADING assembled
-    messages, which is what the physical-eviction path sends to the server
-    (system message included: the server's own range resolution starts at
-    message 0).
+    ``history_message_count`` is the end of the leading completed-history
+    range. ``history_start_message_count`` is the first non-system message;
+    the physical server resolves this half-open range so system/current KV
+    remain full.
     """
     spec = history_kv_spec(arm)
     if spec is None:
@@ -756,6 +879,7 @@ def _history_kv_context(out_messages: List[Dict[str, Any]],
         "system_text": "\n".join(part for part in system_parts if part),
         "history_text": history_text,
         "history_out_indices": history_indices,
+        "history_start_message_count": min(history_indices, default=cutoff),
         "history_message_count": cutoff,
         "current_start_out_index": cutoff,
         "n_history_messages": len(history_indices),
@@ -852,7 +976,8 @@ def _apply_text_arm(payload: Dict[str, Any], arm, conv: str,
 
     def compress(pl: Dict[str, Any]) -> str:
         t0 = time.perf_counter()
-        out = _textarm_compress(pl, meter=_meter)
+        with _phase("aux_compression"):
+            out = _textarm_compress(pl, meter=_meter)
         usage_acc["calls"] += 1
         usage_acc["wall_sec"] += time.perf_counter() - t0
         return out
@@ -862,7 +987,9 @@ def _apply_text_arm(payload: Dict[str, Any], arm, conv: str,
             messages, compress, _render_action_dialect, model=model,
             default_system=DEFAULT_SYSTEM_PROMPT,
             variant="full" if arm.text_policy == "hiagent_full" else "summary",
-            retrieve_subgoals=retrieve_subgoals)
+            retrieve_subgoals=retrieve_subgoals,
+            environment_action_format=(
+                "native_tool_call" if payload.get("tools") else "python_content"))
     else:
         parts = arm.text_policy.split("_", 2)
         if len(parts) < 2 or parts[0] != "acon" or parts[1] not in ("hist", "obs"):
@@ -972,9 +1099,10 @@ def plan_repair(messages: List[Dict[str, Any]], arm: Arm,
     if out_messages is None:
         raise ValueError("plan_repair needs the assembled out_messages")
     context = [_strip_c2kv_fields(m) for m in out_messages[:target_out_index + 1]]
-    span = BACKEND.repair_extract_messages(
-        messages=context, target_index=target_out_index, tools=tools,
-        source_doc_index=doc_index)
+    with _phase("repair_extract"):
+        span = BACKEND.repair_extract_messages(
+            messages=context, target_index=target_out_index, tools=tools,
+            source_doc_index=doc_index)
     # proxy-side ledger expectation (frame check): system block incl. tools
     # + Σ original_seq_len of the compressed docs before the target.  The
     # prologue is measured on the ASSEMBLED list, which is what the server
@@ -1092,9 +1220,27 @@ class ProxyState:
         # conversation_id -> server streaming-session id (physical-eviction
         # history-KV arms only)
         self.history_sessions: Dict[str, str] = {}
+        self.active_measurement_session: Optional[str] = None
 
 
 STATE = ProxyState()
+
+
+def _activate_measurement_session(session: str) -> None:
+    """Reset cross-episode state while preserving all within-episode reuse."""
+    if not getattr(BACKEND, "supports_episode_reset", False):
+        return
+    with STATE.lock:
+        if STATE.active_measurement_session == session:
+            return
+        with _phase("episode_setup"):
+            for session_id in sorted(set(STATE.history_sessions.values())):
+                BACKEND.close_history_session(session_id)
+            BACKEND.flush_cache(timeout=10)
+            STATE.history_sessions.clear()
+            CACHE.clear()
+            textarms.reset_state()
+            STATE.active_measurement_session = session
 
 
 def _history_session_id(conv: str) -> str:
@@ -1111,9 +1257,11 @@ def _history_session_id(conv: str) -> str:
       SHIFTS ONCE after a conversation grows past its first message (see
       conversation_id) — such a conversation opens two sessions, the second
       starting from an empty prefix;
-    * sessions are never closed, so they live until the server restarts.
-
-    Both limitations are documented in README "History-KV eviction arms".
+    * the paper harness supplies ``c2kv_measurement_session_id``; when that
+      stable case id changes, ``_activate_measurement_session`` closes these
+      sessions and flushes unrelated server KV before the next episode;
+    * callers without an episode id have no boundary signal, so their sessions
+      live until the server restarts.
     """
     with STATE.lock:
         session_id = STATE.history_sessions.get(conv)
@@ -1124,6 +1272,28 @@ def _history_session_id(conv: str) -> str:
     with STATE.lock:
         STATE.history_sessions.setdefault(conv, session_id)
         return STATE.history_sessions[conv]
+
+
+def _canonical_full_source(arm: Arm) -> bool:
+    """Whether the server-visible messages still contain exact Full text."""
+    return not bool(arm.text_policy)
+
+
+def _paper_history_message_boundary(
+    out_messages: List[Dict[str, Any]], counts: Dict[str, Any]
+) -> Tuple[int, int]:
+    """Return the non-system completed-history range for server tokenization."""
+    history_end = int(counts.get("current_start_out_index") or 0)
+    history_indices = [
+        index for index, message in enumerate(out_messages[:history_end])
+        if message.get("role") != "system"
+    ]
+    if not history_indices:
+        # The server's explicit empty-history contract is 0/0.  A boundary
+        # such as 1/1 would accidentally describe a protected system prefix
+        # as an empty compressible span and is rejected as invalid.
+        return 0, 0
+    return min(history_indices), history_end
 
 
 class ProxyHandler(BaseHTTPRequestHandler):
@@ -1138,6 +1308,17 @@ class ProxyHandler(BaseHTTPRequestHandler):
         )
 
     def do_POST(self):
+        request_start_unix = time.time_ns()
+        request_start_perf = time.perf_counter_ns()
+        _TRACE.request_id = (
+            self.headers.get("X-C2KV-Measurement-Request-Id") or uuid.uuid4().hex
+        )
+        _TRACE.replay_prefix_id = self.headers.get("X-C2KV-Replay-Prefix-Id")
+        _TRACE.phase = None
+        _TRACE.request_start_unix = request_start_unix
+        _TRACE.request_start_perf = request_start_perf
+        _TRACE.prefix_recorded = False
+        _TRACE.pending_events = []
         length = int(self.headers.get("Content-Length") or 0)
         raw = self.rfile.read(length)
         if not self._is_chat():
@@ -1146,40 +1327,64 @@ class ProxyHandler(BaseHTTPRequestHandler):
         try:
             payload = json.loads(raw.decode("utf-8"))
         except json.JSONDecodeError:
+            duration = time.perf_counter_ns() - request_start_perf
+            _measurement_event(
+                "request", status="invalid_json", start_unix_ns=request_start_unix,
+                end_unix_ns=request_start_unix + duration, duration_ns=duration,
+                request_raw=raw.decode("utf-8", "replace"), response=None,
+            )
+            _flush_measurement_events()
             self._send_json(400, {"error": "invalid json"})
             return
+        _TRACE.original_request = payload
         assert ARM is not None and BACKEND is not None
         start = time.perf_counter()
         messages = payload.get("messages") or []
         fingerprint = messages_fingerprint(messages)
-        conv = conversation_id(messages)
+        measurement_session = payload.get("c2kv_measurement_session_id")
+        conv = (_digest(["measurement_session", str(measurement_session)])
+                if measurement_session else conversation_id(messages))
         turn = len(messages)
         text_stats: Optional[Dict[str, Any]] = None
         original_payload = payload
+        if measurement_session:
+            try:
+                _activate_measurement_session(str(measurement_session))
+            except (RuntimeError, ValueError, URLError, OSError, UpstreamError,
+                    BackendError) as error:
+                kind = getattr(error, "kind", "episode_setup_error")
+                self._log_request(
+                    payload, None, None, status=kind, error=str(error),
+                    fingerprint=fingerprint, conv=conv, turn=turn)
+                self._send_json(502, {
+                    "error": f"episode boundary setup failed: {error}"})
+                return
         try:
-            if getattr(ARM, "text_policy", None):
-                payload, text_stats = _apply_text_arm(payload, ARM, conv)
-                messages = payload["messages"]
-            messages_out, counts = _assemble(messages, ARM)
-            if text_stats is not None:
-                counts["textarm"] = text_stats
-            repair_plan = plan_repair(messages, ARM, counts,
-                                     tools=payload.get("tools"),
-                                     out_messages=messages_out)
-            history_ctx = _history_kv_context(messages_out, counts, ARM)
-            if history_ctx is not None:
-                if history_ctx["spec"]["persistent_session"]:
-                    history_ctx["session_id"] = _history_session_id(conv)
-                counts["history_kv"] = {
-                    k: history_ctx[k] for k in
-                    ("method", "backend", "n_history_messages",
-                     "n_history_docs", "history_message_count")}
-            reuse_ctx = _kv_reuse_context(messages_out, counts, ARM)
-            if reuse_ctx is not None:
-                counts["kv_reuse"] = {
-                    k: reuse_ctx[k] for k in
-                    ("method", "chunking", "n_history_messages",
-                     "n_history_docs")}
+            with _phase("request_assembly"):
+                if getattr(ARM, "text_policy", None):
+                    payload, text_stats = _apply_text_arm(payload, ARM, conv)
+                    messages = payload["messages"]
+                messages_out, counts = _assemble(messages, ARM)
+                if text_stats is not None:
+                    counts["textarm"] = text_stats
+                repair_plan = plan_repair(messages, ARM, counts,
+                                         tools=payload.get("tools"),
+                                         out_messages=messages_out)
+                history_ctx = _history_kv_context(messages_out, counts, ARM)
+                if history_ctx is not None:
+                    if history_ctx["spec"]["persistent_session"]:
+                        history_ctx["session_id"] = _history_session_id(conv)
+                    counts["history_kv"] = {
+                        k: history_ctx[k] for k in
+                        ("method", "backend", "n_history_messages",
+                         "n_history_docs", "history_start_message_count",
+                         "history_message_count")}
+                reuse_ctx = _kv_reuse_context(messages_out, counts, ARM)
+                if reuse_ctx is not None:
+                    counts["kv_reuse"] = {
+                        k: reuse_ctx[k] for k in
+                        ("method", "chunking", "n_history_messages",
+                         "n_history_docs")}
         except (RuntimeError, ValueError, URLError, OSError, UpstreamError,
                 BackendError) as error:
             kind = getattr(error, "kind",
@@ -1191,28 +1396,54 @@ class ProxyHandler(BaseHTTPRequestHandler):
             return
         assemble_sec = time.perf_counter() - start
 
-        def send_upstream(out_messages, plan):
+        def send_upstream(out_messages, plan, phase="generation"):
             # prepare_chat must SEE the assembled messages: the sglang
             # backend attaches repair hashes to the (gist-marked) target
             # message — feeding it the raw payload made every rp-arm
             # request fail "repair target has no c2kv_key_hash"
-            staged = dict(payload)
-            staged["messages"] = out_messages
-            if QUERY_PROJECTION is not None and BACKEND.name == "sglang":
-                staged["c2kv_use_gist_projection"] = QUERY_PROJECTION == "gist"
-            if getattr(BACKEND, "wants_request_context", False):
-                # only backends that asked for it (base.Backend
-                # .wants_request_context); hfserver keeps its 3-arg signature
-                out_payload = BACKEND.prepare_chat(
-                    staged, ARM, plan,
-                    context={"conversation_id": conv, "history_kv": history_ctx,
-                             "kv_reuse": reuse_ctx})
-            else:
-                out_payload = BACKEND.prepare_chat(staged, ARM, plan)
-            return _post_json(self.path, out_payload, 600), out_payload
+            with _phase(phase):
+                staged = dict(payload)
+                # Proxy-only stable harness identity.  It keeps persistent KV
+                # and text-policy state on one case across turns but is not an
+                # OpenAI/SGLang request field.
+                staged.pop("c2kv_measurement_session_id", None)
+                staged["messages"] = out_messages
+                if QUERY_PROJECTION is not None and BACKEND.name == "sglang":
+                    staged["c2kv_use_gist_projection"] = QUERY_PROJECTION == "gist"
+                if getattr(BACKEND, "wants_request_context", False):
+                    # only backends that asked for it (base.Backend
+                    # .wants_request_context); hfserver keeps its 3-arg signature
+                    out_payload = BACKEND.prepare_chat(
+                        staged, ARM, plan,
+                        context={"conversation_id": conv, "history_kv": history_ctx,
+                                 "kv_reuse": reuse_ctx})
+                else:
+                    out_payload = BACKEND.prepare_chat(staged, ARM, plan)
+                if BACKEND.name == "sglang":
+                    # Measurement-only message boundaries.  The server owns
+                    # chat-template tokenization and resolves the exact token
+                    # span before annotated C2KV messages are removed.  This
+                    # metadata never enters the model prompt.
+                    history_start, history_end = _paper_history_message_boundary(
+                        out_messages, counts
+                    )
+                    hint = dict(out_payload.get("c2kv_kv_memory_hint") or {})
+                    hint["paper_measurement"] = {
+                        "history_start_message_count": history_start,
+                        "history_message_count": history_end,
+                        # C2KV and physical-eviction arms retain the original
+                        # message text, so the server can render an exact Full
+                        # denominator before applying its KV transform.  Text
+                        # arms have already replaced history with a summary;
+                        # their exact denominator only comes from the paired
+                        # recorded-Full replay row.
+                        "canonical_full_source": _canonical_full_source(ARM),
+                    }
+                    out_payload["c2kv_kv_memory_hint"] = hint
+                return _post_json(self.path, out_payload, 600), out_payload
 
-        def call_upstream(out_messages, plan):
-            data_, _ = send_upstream(out_messages, plan)
+        def call_upstream(out_messages, plan, phase="generation"):
+            data_, _ = send_upstream(out_messages, plan, phase=phase)
             try:
                 return data_, BACKEND.normalize_response(data_)
             except BackendError as error:
@@ -1228,7 +1459,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
                         nonlocal payload, messages_out
                         payload = staged
                         messages_out, _ = _assemble(staged["messages"], ARM)
-                        return send_upstream(messages_out, None)[0]
+                        return send_upstream(
+                            messages_out, None, phase="hiagent_retrieval_generation")[0]
                     data = _hiagent_retrieval_loop(
                         original_payload, ARM, conv, data, text_stats, send_retrieved)
                     normalized = BACKEND.normalize_response(data)
@@ -1290,7 +1522,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 repair_t0 = time.perf_counter()
                 try:
                     raw_out, _ = _assemble(messages, FULL_ASSEMBLY)
-                    data_b, normalized_b = call_upstream(raw_out, None)
+                    data_b, normalized_b = call_upstream(
+                        raw_out, None, phase="recovery_generation")
                 except (UpstreamError, BackendError, RuntimeError, ValueError,
                         URLError, OSError) as error:
                     kind = getattr(error, "kind", "recover_error")
@@ -1337,6 +1570,9 @@ class ProxyHandler(BaseHTTPRequestHandler):
         data.setdefault("c2kv_proxy", {})
         data["c2kv_proxy"].update(
             {
+                "request_id": _TRACE.request_id,
+                "replay_prefix_id": _TRACE.replay_prefix_id,
+                "measurement_session_id": measurement_session,
                 "backend": BACKEND.name,
                 "arm": ARM.name,
                 "ratio": ARM.ratio,
@@ -1349,11 +1585,15 @@ class ProxyHandler(BaseHTTPRequestHandler):
         )
         data["c2kv_proxy"].update(normalized["cost"])
         counts["repair_frame"] = _repair_frame_check(repair_plan, normalized)
-        self._send_json(200, data)
         counts["wall_sec"] = round(total_sec, 4)
         self._log_request(payload, normalized, counts, recover=recover_flags,
                           fingerprint=fingerprint, conv=conv, turn=turn,
-                          plan=self._slim_plan(repair_plan))
+                          plan=self._slim_plan(repair_plan), raw_response=data)
+        # Persist the complete request/prefix record before the harness can
+        # observe completion and tear this proxy process down.  _log_request
+        # freezes duration_ns before writing, so telemetry I/O is not charged
+        # to the model-side latency metric.
+        self._send_json(200, data)
 
     @staticmethod
     def _slim_plan(plan):
@@ -1402,11 +1642,13 @@ class ProxyHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _log_request(self, request, normalized, counts, recover=None, status="ok",
-                     error=None, fingerprint=None, conv=None, turn=None, plan=None):
-        if not REQUEST_LOG_PATH:
-            return
+                     error=None, fingerprint=None, conv=None, turn=None, plan=None,
+                     raw_response=None):
         counts = counts or {}
         recover = recover or {}
+        duration = time.perf_counter_ns() - getattr(
+            _TRACE, "request_start_perf", time.perf_counter_ns())
+        start_unix = getattr(_TRACE, "request_start_unix", time.time_ns())
         row: Dict[str, Any] = {
             "ts": time.time(),
             "backend": BACKEND.name if BACKEND else None,
@@ -1416,6 +1658,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
             "fp": fingerprint,
             "conv_id": conv,
             "turn": turn,
+            "request_id": getattr(_TRACE, "request_id", None),
             "n_messages": len(request.get("messages") or []),
             "n_tools": len(request.get("tools") or []),
             "gist_tokens": counts.get("gist_tokens"),
@@ -1445,13 +1688,51 @@ class ProxyHandler(BaseHTTPRequestHandler):
             row.update({f"repair_{k}": v for k, v in plan.items()})
         if recover:
             row.update({k: v for k, v in recover.items()})
-        with _log_lock:
-            with open(REQUEST_LOG_PATH, "a", encoding="utf-8") as handle:
-                handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+        if PREFIX_LOG_PATH and not getattr(_TRACE, "prefix_recorded", False):
+            replay_payload = getattr(_TRACE, "original_request", request)
+            append_jsonl(PREFIX_LOG_PATH, {
+                "schema": "c2kv.recorded_prefix.v1",
+                "event_type": "recorded_prefix",
+                "source_arm": ARM.name if ARM else None,
+                "source_status": status,
+                "source_error": error,
+                "prefix_id": getattr(_TRACE, "request_id", None),
+                "request_id": getattr(_TRACE, "request_id", None),
+                "recorded_unix_ns": time.time_ns(),
+                "conversation_id": conv,
+                "message_fingerprint": fingerprint,
+                "turn": turn,
+                "canonical_sha256": canonical_sha256(replay_payload),
+                "replay_payload": replay_payload,
+                "source_response": raw_response,
+            })
+            _TRACE.prefix_recorded = True
+        if REQUEST_LOG_PATH:
+            with _log_lock:
+                with open(REQUEST_LOG_PATH, "a", encoding="utf-8") as handle:
+                    handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+        server_measurement = cost.get("server_measurement")
+        _measurement_event(
+            "request", status=status, error=error,
+            start_unix_ns=start_unix, end_unix_ns=start_unix + duration,
+            duration_ns=duration,
+            backend=BACKEND.name if BACKEND else None,
+            arm=ARM.name if ARM else None,
+            message_fingerprint=fingerprint, conversation_id=conv, turn=turn,
+            request=getattr(_TRACE, "original_request", request),
+            transformed_request=request, response=raw_response,
+            usage=(normalized or {}).get("usage"),
+            finish_reason=(normalized or {}).get("finish_reason"),
+            counts=counts, cost=cost,
+            server_measurement=(server_measurement
+                                if isinstance(server_measurement, dict) else {}),
+        )
+        _flush_measurement_events()
 
 
 def main(argv=None):
     global ARM, BACKEND, UPSTREAM, REQUEST_LOG_PATH
+    global TELEMETRY_LOG_PATH, PREFIX_LOG_PATH
     global DOC_PACKING, MAX_DOC_LENGTH, MAX_DOC_NUM, QUERY_PROJECTION
     textarms.reset_state()  # fresh caches/state per proxy process
     parser = argparse.ArgumentParser(description=__doc__)
@@ -1462,6 +1743,10 @@ def main(argv=None):
     parser.add_argument("--arm", required=True)
     parser.add_argument("--port", type=int, required=True)
     parser.add_argument("--request-log", default="")
+    parser.add_argument("--telemetry-log", default="",
+                        help="append raw request/phase/upstream telemetry JSONL")
+    parser.add_argument("--record-prefixes", default="",
+                        help="append canonical uncompressed Full replay prefixes")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--record-reference", default="",
                         help="append a reference-trajectory row per request (full-arm run)")
@@ -1487,6 +1772,11 @@ def main(argv=None):
     ARM = get_arm(args.arm)
     UPSTREAM = args.upstream.rstrip("/")
     REQUEST_LOG_PATH = args.request_log
+    TELEMETRY_LOG_PATH = args.telemetry_log
+    PREFIX_LOG_PATH = args.record_prefixes
+    if PREFIX_LOG_PATH and ARM.name != "full":
+        raise SystemExit(
+            f"FATAL: --record-prefixes requires arm 'full', got {ARM.name!r}")
     BACKEND = get_backend(args.backend, _post_json)
     STATE.reference_log_path = args.record_reference
     if args.reference:

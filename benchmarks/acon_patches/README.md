@@ -48,6 +48,16 @@ is sent again. The patch records the failed action and its actual executor
 error so the next model turn receives that feedback; it does not rewrite the
 action, supply missing tool arguments, or change the task prompt.
 
+Apply `0006-appworld-final-step-and-errors.patch` with
+`git apply --ignore-space-change` to the ACON checkout. Upstream increments
+`num_interactions` and checks `>= max_interactions` before calling
+`world.execute`, so an AppWorld run configured for N iterations executes only
+N-1 actions. The patch executes and records the Nth action, marks an
+unsuccessful Nth action terminal afterwards, preserves execution-error actions
+in `appworld_trajectory.json`, and records the real terminal reason in
+`results.json`. It does not alter AppWorld state transitions or official
+evaluation.
+
 Both runners then need only the served model name to NOT contain `gpt`,
 `o1`, `o3`, `o4` or `gemini` (those names are routed to the OpenAI / Gemini
 clients instead).  `c2kv-agent` is fine.

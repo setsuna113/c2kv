@@ -132,6 +132,56 @@ def test_hiagent_null_content_toolcall_reply_is_visible_degenerate():
     assert len(out) == len(messages)
 
 
+def test_hiagent_python_content_actions_are_executable_and_segmented():
+    _reset()
+    first_action = "# Subgoal: inspect available apps\nprint('apps')"
+    second_action = "# Subgoal: complete the task\nprint('done')"
+    # This is the exact surface consumed by ACON's AppWorldActionProcessor and
+    # then passed to world.execute: the subgoal marker must itself be Python.
+    compile(first_action, "<appworld-action>", "exec")
+    messages = [
+        {"role": "system", "content": "write Python"},
+        {"role": "user", "content": "complete the task"},
+        {"role": "assistant", "content": first_action},
+        {"role": "user", "content": "apps output"},
+        {"role": "assistant", "content": second_action},
+        {"role": "user", "content": "continue"},
+    ]
+    out, stats = textarms.hiagent_transform(
+        messages, _fake_compress_ok, _action_dialect,
+        environment_action_format="python_content")
+    assert stats["environment_action_format"] == "python_content"
+    assert stats["n_segments"] == 2 and stats["n_summarized"] == 1
+    assert "# Subgoal: {subgoal}" in out[0]["content"]
+    assert "executable Python code in assistant content" in out[0]["content"]
+    assert "environment actions remain executable Python" not in out[0]["content"]
+    assert "Every environment action must use the API's native" not in out[0]["content"]
+
+    full_out, _ = textarms.hiagent_transform(
+        messages, _fake_compress_ok, _action_dialect, variant="full",
+        environment_action_format="python_content")
+    assert "environment actions remain executable Python" in full_out[0]["content"]
+
+
+def test_proxy_selects_hiagent_action_format_from_environment_tool_pool(monkeypatch):
+    import proxy as proxy_mod
+
+    seen = []
+
+    def fake_transform(messages, compress, action_dialect, **kwargs):
+        seen.append(kwargs["environment_action_format"])
+        return messages, {"n_compressor_calls": 0}
+
+    monkeypatch.setattr(textarms, "hiagent_transform", fake_transform)
+    arm = SimpleNamespace(text_policy="hiagent_summary")
+    base = {"model": "m", "messages": [{"role": "user", "content": "q"}]}
+    proxy_mod._apply_text_arm(base, arm, "appworld")
+    proxy_mod._apply_text_arm(
+        dict(base, tools=[{"type": "function", "function": {"name": "search"}}]),
+        arm, "bfcl")
+    assert seen == ["python_content", "native_tool_call"]
+
+
 def test_hiagent_user_in_summary_input():
     _reset()
     seen = {}

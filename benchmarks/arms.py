@@ -118,17 +118,6 @@ def history_kv_spec(arm: "Arm") -> Optional[Dict[str, Any]]:
     if not 0.0 <= float(spec["h2o_recent_fraction"]) <= 1.0:
         raise ValueError(
             f"arm {arm.name!r}: history_kv h2o_recent_fraction must be in [0, 1]")
-    if backend == "physical_eviction" and target is None:
-        # The physical path takes an ABSOLUTE budget: the scheduler reads
-        # config["target_tokens"] only (scheduler.py
-        # _select_history_kv_eviction_indices, mem_cache/history_kv_eviction.py
-        # PhysicalHistoryKVEvictor.evict) and never derives it from a ratio,
-        # and this proxy has no tokenizer with which to convert one.  See
-        # README "History-KV eviction arms".
-        raise ValueError(
-            f"arm {arm.name!r}: history_kv backend 'physical_eviction' needs an "
-            "absolute target_tokens (the server has no retention_ratio on that "
-            "path and the proxy has no tokenizer)")
     if spec["persistent_session"] and backend != "physical_eviction":
         raise ValueError(
             f"arm {arm.name!r}: history_kv persistent_session requires backend "
@@ -389,6 +378,12 @@ ARMS: Dict[str, Arm] = {
             description="all history as gist KV at 8x, current turn raw",
         ),
         Arm(
+            name="c2kv4",
+            compress_history=True,
+            ratio=4,
+            description="all history as gist KV at 4x, current turn raw",
+        ),
+        Arm(
             name="c2kv16",
             compress_history=True,
             ratio=16,
@@ -514,6 +509,64 @@ ARMS: Dict[str, Arm] = {
             description="PyramidKV history-KV eviction at retention 0.312; the "
                         "per-layer funnel budget is realised as a layer-union keep "
                         "set on one shared page table (server-side globalisation)",
+        ),
+        Arm(
+            name="history_kv_h2o_r25_persistent",
+            compress_history=False,
+            history_kv={
+                "method": "h2o",
+                "retention_ratio": 0.25,
+                "backend": "physical_eviction",
+                "persistent_session": True,
+            },
+            description=(
+                "H2O history-only persistent physical KV eviction at 25% "
+                "retention; system/current KV stay full and the compacted "
+                "cache is reused across turns"
+            ),
+        ),
+        Arm(
+            name="history_kv_snapkv_r25_persistent",
+            compress_history=False,
+            history_kv={
+                "method": "snapkv_persistent",
+                "retention_ratio": 0.25,
+                "backend": "physical_eviction",
+                "persistent_session": True,
+            },
+            description=(
+                "SnapKV history-only persistent physical KV eviction at 25% "
+                "retention; system/current KV stay full and the compacted "
+                "cache is reused across turns"
+            ),
+        ),
+        Arm(
+            name="history_kv_h2o_r125_persistent",
+            compress_history=False,
+            history_kv={
+                "method": "h2o",
+                "retention_ratio": 0.125,
+                "backend": "physical_eviction",
+                "persistent_session": True,
+            },
+            description=(
+                "H2O history-only persistent physical KV eviction at 12.5% "
+                "retention for the small-budget sweep"
+            ),
+        ),
+        Arm(
+            name="history_kv_snapkv_r125_persistent",
+            compress_history=False,
+            history_kv={
+                "method": "snapkv_persistent",
+                "retention_ratio": 0.125,
+                "backend": "physical_eviction",
+                "persistent_session": True,
+            },
+            description=(
+                "SnapKV history-only persistent physical KV eviction at 12.5% "
+                "retention for the small-budget sweep"
+            ),
         ),
         # KNOWN CONFOUND on both cd_* arms: constrain_tools=True makes the
         # sglang backend rewrite request.tools with _inline_refs ($refs

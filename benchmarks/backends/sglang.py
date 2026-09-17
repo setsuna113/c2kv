@@ -130,6 +130,7 @@ class SglangBackend(Backend):
     # the history-KV arms need the proxy's history/current split and its
     # per-conversation streaming-session id
     wants_request_context = True
+    supports_episode_reset = True
 
     def __init__(self, post_json):
         self._post_json = post_json  # (path, payload, timeout) -> dict
@@ -295,6 +296,21 @@ class SglangBackend(Backend):
                 f"{json.dumps(result)[:500]}")
         return session_id
 
+    def close_history_session(self, session_id: str, timeout: int = 60) -> None:
+        result = self._post_json(
+            "/close_session", {"session_id": session_id}, timeout)
+        if result not in (None, ""):
+            if isinstance(result, dict) and result.get("error"):
+                raise BackendError(
+                    "history_kv_session_failed",
+                    f"close_session failed for {session_id!r}: {result['error']}")
+
+    def flush_cache(self, timeout: int = 10) -> None:
+        result = self._post_json(f"/flush_cache?timeout={float(timeout)}", {}, timeout + 5)
+        if not isinstance(result, str) or not result.startswith("Cache flushed."):
+            raise BackendError(
+                "cache_flush_failed", f"unexpected /flush_cache response: {result!r}")
+
     # ---- history-KV request shaping ----
     @staticmethod
     def _history_kv_carrier(method: str, key_hash: str) -> Dict[str, Any]:
@@ -331,12 +347,16 @@ class SglangBackend(Backend):
 
         if str(spec["backend"]) == "physical_eviction":
             count = int(history["history_message_count"])
-            target = int(spec["target_tokens"])
+            start_count = int(
+                history.get("history_start_message_count", indices[0])
+            )
+            target = spec.get("target_tokens")
+            target = int(target) if target is not None else None
             eviction = {
                 "method": method,
                 # the server resolves the token range itself in its own frame
+                "history_start_message_count": start_count,
                 "history_message_count": count,
-                "target_tokens": target,
                 "retention_ratio": spec.get("retention_ratio"),
                 "history_kv_recent_window": int(spec["recent_window"]),
                 "history_kv_kernel_size": int(spec["kernel_size"]),
@@ -344,6 +364,8 @@ class SglangBackend(Backend):
                 "history_kv_h2o_recent_fraction": float(spec["h2o_recent_fraction"]),
                 "persistent_session": bool(session_id),
             }
+            if target is not None:
+                eviction["target_tokens"] = target
             hint: Dict[str, Any] = {
                 # left at 0 on purpose: serving_chat._resolve_history_kv_
                 # eviction_range overwrites it with the server's own exact
@@ -706,6 +728,88 @@ class SglangBackend(Backend):
         columns["kv_reuse_recomputed_tokens"] = report.get("active_recomputed_raw_tokens")
         return {k: v for k, v in columns.items() if v is not None}
 
+    @staticmethod
+    def _server_measurement(data: Dict[str, Any]) -> Dict[str, Any]:
+        """Preserve only explicit per-request lifecycle measurements.
+
+        Legacy ``kv_resident_tokens`` and ``kv_peak_resident_tokens`` are
+        scheduler-process allocator snapshots/high-water marks.  They are
+        intentionally not aliased to request lifecycle or generation-active
+        fields here.
+        """
+        metadata = data.get("metadata") or {}
+        if not isinstance(metadata, dict):
+            return {}
+        runtime = metadata.get("sglang_runtime") or {}
+        runtime = runtime if isinstance(runtime, dict) else {}
+        report = metadata.get("kv_memory_report") or {}
+        report = report if isinstance(report, dict) else {}
+        physical = report.get("history_kv_physical_eviction") or {}
+        physical = physical if isinstance(physical, dict) else {}
+
+        result: Dict[str, Any] = {}
+        for source in (
+            data.get("paper_measurement"), metadata.get("paper_measurement"),
+            metadata.get("c2kv_measurement"), metadata.get("measurement"),
+            runtime.get("paper_measurement"),
+            runtime.get("request_measurement"), runtime.get("measurement"),
+        ):
+            if isinstance(source, dict):
+                metrics = source.get("metrics")
+                if isinstance(metrics, dict):
+                    result.update(metrics)
+                token_counts = source.get("token_counts")
+                if isinstance(token_counts, dict):
+                    aliases = {
+                        "full_equivalent_history": "history_full_kv_tokens",
+                        "active_history_kv": "history_active_kv_tokens",
+                    }
+                    for source_key, target_key in aliases.items():
+                        if source_key in token_counts and target_key not in result:
+                            result[target_key] = token_counts[source_key]
+                result.update({key: value for key, value in source.items()
+                               if key != "metrics"})
+        for source_key, target_key in {
+            "nvml_process_start_bytes": "nvml_process_start_used_bytes",
+            "nvml_process_peak_bytes": "nvml_process_peak_used_bytes",
+            "nvml_process_end_bytes": "nvml_process_end_used_bytes",
+        }.items():
+            if source_key in result and target_key not in result:
+                result[target_key] = result[source_key]
+        keys = (
+            "request_peak_resident_kv_tokens", "request_peak_resident_kv_bytes",
+            "generation_active_kv_tokens", "generation_active_kv_bytes",
+            "whole_full_kv_tokens", "whole_active_kv_tokens",
+            "history_full_kv_tokens", "history_active_kv_tokens",
+            "temporary_extraction_recovery_peak_kv_tokens",
+            "temporary_extraction_recovery_peak_kv_bytes",
+            "torch_start_allocated_bytes", "torch_end_allocated_bytes",
+            "torch_peak_allocated_bytes", "torch_start_reserved_bytes",
+            "torch_end_reserved_bytes", "torch_peak_reserved_bytes",
+            "nvml_process_start_used_bytes", "nvml_process_end_used_bytes",
+            "nvml_process_peak_used_bytes", "nvml_process_peak_delta_bytes",
+            "prefill_duration_ns", "selection_compression_duration_ns",
+            "kv_transfer_injection_duration_ns", "decode_duration_ns",
+            "full_history_reprefill", "selection_query_tokens_observed",
+            "measurement_scope", "single_flight",
+        )
+        for key in keys:
+            if key not in result and key in runtime:
+                result[key] = runtime[key]
+        # Physical H2O/SnapKV has exact post-selection history counts even
+        # before the general lifecycle hook is available.
+        if "history_full_kv_tokens" not in result and physical.get("history_tokens") is not None:
+            result["history_full_kv_tokens"] = physical["history_tokens"]
+        if "history_active_kv_tokens" not in result and physical.get("kept_history_tokens") is not None:
+            result["history_active_kv_tokens"] = physical["kept_history_tokens"]
+        for key in (
+            "success", "runtime_status", "persistent_session",
+            "full_history_reprefill", "selection_query_tokens_observed",
+        ):
+            if key in physical:
+                result[f"history_kv_{key}"] = physical[key]
+        return result
+
     def normalize_response(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Response -> (content, tool_calls, finish_reason, usage, cost).
 
@@ -760,6 +864,9 @@ class SglangBackend(Backend):
             cost["finish_message"] = metadata["finish_message"]
         cost.update(self._history_kv_cost(data))
         cost.update(self._kv_reuse_cost(data))
+        measurement = self._server_measurement(data)
+        if measurement:
+            cost["server_measurement"] = measurement
         return {
             "content": message.get("content"),
             "tool_calls": message.get("tool_calls"),

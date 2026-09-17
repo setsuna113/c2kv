@@ -38,10 +38,74 @@ from typing import Any, Dict, List, Mapping, Optional
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from adapters.base import RunContext, v1  # noqa: E402
+from measurement.telemetry import HarnessTelemetry, current_episode  # noqa: E402
 
 NAME = "bfcl"
 MODEL_NAME = "c2kv-hf"  # BFCL handler key / result-dir name (stable layout)
 SERVED_MODEL = "c2kv-agent"  # default served model name at the endpoint
+HARNESS_TELEMETRY_PATH: Optional[Path] = None
+
+
+def _response_dict(response: Any) -> Any:
+    dump = getattr(response, "model_dump", None)
+    if callable(dump):
+        try:
+            return dump(mode="json")
+        except TypeError:
+            return dump()
+    return response if isinstance(response, (dict, list, str, int, float, bool, type(None))) else repr(response)
+
+
+def _proxy_request_id(response: Any) -> Optional[str]:
+    extra = getattr(response, "model_extra", None)
+    proxy = extra.get("c2kv_proxy") if isinstance(extra, dict) else None
+    if not isinstance(proxy, dict):
+        dumped = _response_dict(response)
+        proxy = dumped.get("c2kv_proxy") if isinstance(dumped, dict) else None
+    value = proxy.get("request_id") if isinstance(proxy, dict) else None
+    return str(value) if value else None
+
+
+def _install_timed_executor(telemetry: HarnessTelemetry) -> None:
+    """Wrap the symbol imported by BaseHandler, preserving BFCL state/order."""
+    import bfcl_eval.model_handler.base_handler as base_handler
+
+    current = base_handler.execute_multi_turn_func_call
+    original = getattr(current, "_c2kv_original_execute", current)
+
+    def timed_execute(func_call_list, *args, **kwargs):
+        if not func_call_list:
+            return original(func_call_list, *args, **kwargs)
+        results = []
+        involved_instances = {}
+        for index, action in enumerate(func_call_list):
+            start_unix = time.time_ns()
+            start_perf = time.perf_counter_ns()
+            error = None
+            try:
+                single_results, involved_instances = original(
+                    [action], *args, **kwargs)
+                outcome = single_results[0] if single_results else None
+                status = ("error" if isinstance(outcome, str)
+                          and outcome.startswith("Error during execution:") else "ok")
+                results.extend(single_results)
+            except BaseException as exc:
+                outcome = None
+                status = "error"
+                error = f"{type(exc).__name__}: {exc}"
+                raise
+            finally:
+                telemetry.record_action(
+                    action=action, outcome=outcome,
+                    start_unix_ns=start_unix,
+                    duration_ns=time.perf_counter_ns() - start_perf,
+                    action_index=index, status=status, error=error,
+                    metadata={"harness": "bfcl"},
+                )
+        return results, involved_instances
+
+    timed_execute._c2kv_original_execute = original  # type: ignore[attr-defined]
+    base_handler.execute_multi_turn_func_call = timed_execute
 
 
 def add_arguments(parser) -> None:
@@ -67,9 +131,16 @@ def handler_key(arm: str) -> str:
 
 
 def generate_argv(handler_name: str, categories: str,
-                  run_ids: Optional[List[str]] = None) -> List[str]:
+                  run_ids: Optional[List[str]] = None,
+                  num_threads: int = 1) -> List[str]:
     """``bfcl generate`` argv (PINNED; driven in-process by run_cli)."""
-    argv = ["generate", "--model", handler_name, "--test-category", categories]
+    if num_threads != 1:
+        raise ValueError(
+            "paper measurement requires BFCL num_threads=1 for single-flight telemetry")
+    argv = [
+        "generate", "--model", handler_name, "--test-category", categories,
+        "--num-threads", "1",
+    ]
     if run_ids:
         argv.append("--run-ids")
     return argv
@@ -97,6 +168,11 @@ def install_handler(base_url: str, model: str = SERVED_MODEL,
     from bfcl_eval.model_handler.api_inference.openai_completion import (
         OpenAICompletionsHandler,
     )
+    telemetry = HarnessTelemetry(
+        HARNESS_TELEMETRY_PATH or Path("measurement/harness_events.jsonl"),
+        "bfcl",
+    )
+    _install_timed_executor(telemetry)
 
     class C2KVHandler(OpenAICompletionsHandler):
         def _build_client_kwargs(self):
@@ -116,13 +192,45 @@ def install_handler(base_url: str, model: str = SERVED_MODEL,
             }
             if inference_data.get("tools"):
                 kwargs["tools"] = inference_data["tools"]
+            episode = current_episode()
+            if episode:
+                kwargs["extra_body"] = {
+                    "c2kv_measurement_session_id": episode["episode_id"],
+                }
             inference_data["inference_input_log"] = {
                 "message": repr(inference_data["message"]),
                 "tools": inference_data["tools"],
             }
-            t0 = time.perf_counter()
-            response = self.client.chat.completions.create(**kwargs)
-            return response, time.perf_counter() - t0
+            start_unix = time.time_ns()
+            start_perf = time.perf_counter_ns()
+            response = None
+            try:
+                response = self.client.chat.completions.create(**kwargs)
+            except BaseException as exc:
+                duration = time.perf_counter_ns() - start_perf
+                telemetry.record_decision(
+                    request_id=None, start_unix_ns=start_unix,
+                    duration_ns=duration, response=None,
+                    error=f"{type(exc).__name__}: {exc}",
+                )
+                raise
+            duration = time.perf_counter_ns() - start_perf
+            telemetry.record_decision(
+                request_id=_proxy_request_id(response),
+                start_unix_ns=start_unix, duration_ns=duration,
+                response=_response_dict(response),
+            )
+            return response, duration / 1e9
+
+        def inference(self, test_entry: dict, include_input_log: bool,
+                      exclude_state_log: bool):
+            episode_id = str(test_entry.get("id") or "unknown")
+            with telemetry.episode(
+                episode_id,
+                metadata={"category": episode_id.rsplit("_", 1)[0]},
+            ):
+                return super().inference(
+                    test_entry, include_input_log, exclude_state_log)
 
     MODEL_CONFIG_MAPPING[handler_name] = ModelConfig(
         model_name=model,
@@ -277,6 +385,7 @@ def run(ctx: RunContext) -> Dict[str, Any]:
             model=ctx.model,
             handler_name=handler_key(ctx.arm),
             project_root=project_root,
+            num_threads=int(ctx.opt("num_workers", 1)),
         )
     finally:
         os.chdir(prev_cwd)
@@ -307,7 +416,8 @@ def run_bfcl(base_url: str, categories: str = "multi_turn_base",
              mode: str = "both", run_ids: "list[str] | str | None" = None,
              model: str = SERVED_MODEL,
              handler_name: str = MODEL_NAME,
-             project_root: "Path | str | None" = None) -> Dict[str, Any]:
+             project_root: "Path | str | None" = None,
+             num_threads: int = 1) -> Dict[str, Any]:
     """Register the handler and drive the official generate/evaluate CLI
     in-process.
 
@@ -328,10 +438,12 @@ def run_bfcl(base_url: str, categories: str = "multi_turn_base",
     summaries deliberately contain no ``n_scored`` or ``semantic_score``."""
     if mode not in ("generate", "evaluate", "both"):
         raise ValueError(f"invalid BFCL mode: {mode}")
+    global HARNESS_TELEMETRY_PATH
     project_root = Path(
         project_root or os.environ.get("BFCL_PROJECT_ROOT") or Path.cwd()
     ).resolve()
     project_root.mkdir(parents=True, exist_ok=True)
+    HARNESS_TELEMETRY_PATH = project_root / "measurement" / "harness_events.jsonl"
     previous_project_root = os.environ.get("BFCL_PROJECT_ROOT")
     os.environ["BFCL_PROJECT_ROOT"] = str(project_root)
     try:
@@ -357,7 +469,8 @@ def run_bfcl(base_url: str, categories: str = "multi_turn_base",
             selected_counts = category_counts
         expected = sum(selected_counts.values())
         if mode in ("generate", "both"):
-            run_cli(generate_argv(handler_name, categories, ids))
+            run_cli(generate_argv(
+                handler_name, categories, ids, num_threads=num_threads))
         if mode in ("evaluate", "both"):
             run_cli(evaluate_argv(handler_name, categories, ids))
         import terminal_check  # noqa: E402  (sibling module, sys.path has parent)
@@ -375,6 +488,8 @@ def run_bfcl(base_url: str, categories: str = "multi_turn_base",
             "benchmark": "bfcl", "categories": categories, "mode": mode,
             "n_total": expected,
             "bfcl_project_root": str(project_root),
+            "harness_telemetry": str(HARNESS_TELEMETRY_PATH),
+            "num_threads": num_threads,
         }
         if mode == "generate":
             summary.update({"n_generated": expected, "scored": False})

@@ -145,7 +145,8 @@ def test_tau2_default_python_is_this_interpreter():
 
 def test_bfcl_argv_is_byte_identical():
     assert bfcl_adapter.generate_argv("c2kv-full", "multi_turn_base") == [
-        "generate", "--model", "c2kv-full", "--test-category", "multi_turn_base"]
+        "generate", "--model", "c2kv-full", "--test-category", "multi_turn_base",
+        "--num-threads", "1"]
     assert bfcl_adapter.evaluate_argv("c2kv-full", "multi_turn_base") == [
         "evaluate", "--model", "c2kv-full", "--test-category", "multi_turn_base"]
 
@@ -156,6 +157,7 @@ def test_bfcl_subset_argv_uses_run_ids_then_partial_eval():
     # test_case_ids_to_generate.json); evaluate takes --partial-eval instead
     assert bfcl_adapter.generate_argv("c2kv-full", "memory", ids) == [
         "generate", "--model", "c2kv-full", "--test-category", "memory",
+        "--num-threads", "1",
         "--run-ids"]
     assert bfcl_adapter.evaluate_argv("c2kv-full", "memory", ids) == [
         "evaluate", "--model", "c2kv-full", "--test-category", "memory",

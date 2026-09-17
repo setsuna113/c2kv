@@ -42,6 +42,7 @@ class Backend:
     # to backends that declare this, so a backend that never asked for it
     # keeps its 3-argument prepare_chat signature.
     wants_request_context: bool = False
+    supports_episode_reset: bool = False
 
     # ---- KV primitives ----
     def extract(self, text: str, role: str, ratio: int,
@@ -91,6 +92,14 @@ class Backend:
         """Open a streaming session that the physical-eviction history-KV
         arms need (the compacted KV must survive across turns).  Returns the
         session id the server acknowledged."""
+        raise NotImplementedError
+
+    def close_history_session(self, session_id: str, timeout: int = 60) -> None:
+        """Close one persistent streaming session at an episode boundary."""
+        raise NotImplementedError
+
+    def flush_cache(self, timeout: int = 10) -> None:
+        """Flush server prefix/C2KV caches between independent episodes."""
         raise NotImplementedError
 
     def kv_reuse_extract(self, history_docs: List[Dict[str, Any]],

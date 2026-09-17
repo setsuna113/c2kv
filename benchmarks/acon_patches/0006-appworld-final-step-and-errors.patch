@@ -1,0 +1,81 @@
+diff --git a/src/productive_agents/env/appworld/env.py b/src/productive_agents/env/appworld/env.py
+--- a/src/productive_agents/env/appworld/env.py
++++ b/src/productive_agents/env/appworld/env.py
+@@ -119,14 +119,6 @@ class AppWorldEnv(BaseLanguageBasedEnv):
+         """
+         self.num_interactions += 1
+         
+-        # Check for max interactions
+-        if self.num_interactions >= self.config.max_interactions:
+-            self.done = True
+-            self.observation = f"Maximum interactions ({self.config.max_interactions}) reached."
+-            self.reward = 0.0
+-            self.info = {"success": False, "reason": "max_interactions"}
+-            return self.observation, self.reward, self.done, self.info
+-        
+         try:
+             # Execute the code block
+             output = self._execute_code(action)
+@@ -143,10 +135,12 @@ class AppWorldEnv(BaseLanguageBasedEnv):
+                 # evaluation: dict = self.world.evaluate().to_dict()
+                 # self.info["evaluation"] = evaluation
+             else:
+-                self.done = False
++                # The Nth budgeted action must execute.  Upstream checked the
++                # limit before _execute_code(), so max_interactions=N ran N-1.
++                self.done = self.num_interactions >= self.config.max_interactions
+                 self.reward = 0.0
+                 self.observation = output
+-                self.info = {"success": False, "reason": "in_progress"}
++                self.info = {"success": False, "reason": "max_interactions" if self.done else "in_progress"}
+                 # self.info["evaluation"] = None
+             
+             # Record interaction
+@@ -155,7 +149,8 @@ class AppWorldEnv(BaseLanguageBasedEnv):
+                 "action": action,
+                 "output": output,
+                 "reward": self.reward,
+-                "done": self.done
++                "done": self.done,
++                "info": dict(self.info),
+             })
+             
+         except Exception as e:
+@@ -163,7 +158,19 @@ class AppWorldEnv(BaseLanguageBasedEnv):
+             self.logger.error(f"Error executing action: {e}")
+             self.observation = f"Error executing code: {str(e)}"
+             self.reward = -0.1  # Small penalty for errors
+-            self.done = False
+-            self.info = {"success": False, "reason": "execution_error", "error": str(e)}
++            self.done = self.num_interactions >= self.config.max_interactions
++            self.info = {"success": False, "reason": "execution_error", "error": str(e),
++                         "max_interactions_reached": self.done}
++            # Preserve failed actions too: they were sent to AppWorld and are
++            # part of the measured policy trajectory even when no state commit
++            # was made.
++            self.trajectory.append({
++                "step": self.num_interactions,
++                "action": action,
++                "output": self.observation,
++                "reward": self.reward,
++                "done": self.done,
++                "info": dict(self.info),
++            })
+         
+         return self.observation, self.reward, self.done, self.info
+diff --git a/experiments/appworld/run.py b/experiments/appworld/run.py
+--- a/experiments/appworld/run.py
++++ b/experiments/appworld/run.py
+@@ -150,6 +150,12 @@ def main(
+     
+     # Run the agent
+     results = agent.run(env, max_iter=max_iter)
++    # UnifiedAgent labels every env-signalled terminal state as
++    # "task_completed", including a failed interaction-budget terminal.
++    # Keep the runner metadata faithful; official AppWorld scoring remains
++    # state based and is run separately.
++    if results.get('done') and not results.get('success') and results.get('info', {}).get('reason'):
++        results['termination_reason'] = results['info']['reason']
+     
+     # Get token usage and cost information
+     token_summary = agent.get_token_usage_summary()

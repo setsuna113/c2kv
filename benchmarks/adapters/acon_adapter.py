@@ -74,6 +74,8 @@ KINDS = ("appworld", "qa")
 HISTORY_FILE = "llm_history.json"  # MemoryManager.dump_history (memory.py:199)
 BASE_URL_ENV = "ACON_OPENAI_BASE_URL"  # read by the patched productive_agents.llm.vLLM
 API_KEY_ENV = "ACON_OPENAI_API_KEY"
+APPWORLD_TELEMETRY_ENV = "C2KV_APPWORLD_TELEMETRY_PATH"
+APPWORLD_RUN_DIR_ENV = "C2KV_APPWORLD_RUN_DIR"
 
 QA_DATA_FOLDER = "data/nq_multi_8"  # ACON's shipped split, byte-for-byte
 QA_DEFAULT_SPLIT = "test"
@@ -81,6 +83,28 @@ QA_DEFAULT_MAX_ITER = 30  # experiments/smolagents/run.py CLI default
 APPWORLD_DEFAULT_SPLIT = "test_normal"  # ACON's evaluation split (paper §8.1)
 APPWORLD_DEFAULT_MAX_ITER = 50  # run_all.py default
 APPWORLD_SEED = 42  # run_all.py default (ACON §8.3 fixes seed 42)
+
+
+def validate_appworld_runner_patches(acon_dir: Path) -> None:
+    """Fail before generation when the two output-critical ACON fixes are absent."""
+    root = Path(acon_dir)
+    checks = {
+        root / "experiments" / "appworld" / "run.py": (
+            "API cost unavailable for this model", "0002-unknown-api-cost.patch"),
+        root / "src" / "productive_agents" / "env" / "appworld" / "env.py": (
+            "max_interactions_reached", "0006-appworld-final-step-and-errors.patch"),
+    }
+    missing = []
+    for path, (marker, patch_name) in checks.items():
+        try:
+            present = marker in path.read_text(encoding="utf-8")
+        except OSError:
+            present = False
+        if not present:
+            missing.append(f"{patch_name} ({path})")
+    if missing:
+        raise SystemExit("FATAL: ACON AppWorld checkout lacks required patches: "
+                         + "; ".join(missing))
 
 
 def add_arguments(parser) -> None:
@@ -120,6 +144,23 @@ def runner_env(base_url: str) -> Dict[str, str]:
         API_KEY_ENV: "EMPTY",
         "NO_PROXY": "127.0.0.1,localhost", "no_proxy": "127.0.0.1,localhost",
     }
+
+
+def appworld_runner_env(base_url: str, telemetry_path: Path,
+                        run_dir: Path) -> Dict[str, str]:
+    """Runner environment with a runtime-only ACON/AppWorld telemetry hook."""
+    env = runner_env(base_url)
+    benchmarks = Path(__file__).resolve().parents[1]
+    hook = benchmarks / "appworld_instrumentation"
+    pythonpath = [str(hook), str(benchmarks)]
+    if env.get("PYTHONPATH"):
+        pythonpath.append(env["PYTHONPATH"])
+    env.update({
+        "PYTHONPATH": os.pathsep.join(pythonpath),
+        APPWORLD_TELEMETRY_ENV: str(Path(telemetry_path).resolve()),
+        APPWORLD_RUN_DIR_ENV: str(Path(run_dir).resolve()),
+    })
+    return env
 
 
 def _terminal_check(benchmark: str, rows: List[Dict[str, Any]], expected: Optional[int]) -> None:
@@ -403,21 +444,58 @@ def run_appworld(base_url: str, out_dir: Path, acon_dir: Optional[Path] = None,
                  request_log: Optional[Path] = None) -> Dict[str, Any]:
     acon_dir = Path(acon_dir) if acon_dir else ACON_DIR
     python = python or sys.executable
+    validate_appworld_runner_patches(acon_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     run_root = prepare_appworld_run(acon_dir, out_dir, split, task_ids)
     cwd = run_root / "experiments" / "appworld"
-    env = {**runner_env(base_url), "APPWORLD_ROOT": str(cwd)}
+    run_dir = appworld_run_dir(run_root, model, tag, split)
+    telemetry_path = out_dir.resolve() / "measurement" / "harness_events.jsonl"
+    env = {
+        **appworld_runner_env(base_url, telemetry_path, run_dir),
+        "APPWORLD_ROOT": str(cwd),
+    }
     subprocess.run(appworld_command(python, model, tag, split, max_iter, task_ids),
                    cwd=cwd, env=env, check=True)
+    selected = json.loads((out_dir / "selected_tasks.json").read_text(encoding="utf-8"))
+    validate_appworld_telemetry(telemetry_path, selected["task_ids"])
     # official scorer (state-based unit tests); the runner's own success flag
     # is not a score
+    scorer_env = {**runner_env(base_url), "APPWORLD_ROOT": str(cwd)}
     subprocess.run(appworld_evaluate_command(_appworld_cli(python), model, tag, split),
-                   cwd=cwd, env=env, check=True)
-    expected = len(task_ids) if task_ids else appworld_split_size(python, split, cwd, env)
+                   cwd=cwd, env=scorer_env, check=True)
+    expected = (len(task_ids) if task_ids else
+                appworld_split_size(python, split, cwd, scorer_env))
     return collect_appworld(appworld_eval_path(run_root, model, tag, split),
-                            appworld_run_dir(run_root, model, tag, split),
+                            run_dir,
                             expected=expected, request_log=request_log,
-                            expected_ids=task_ids)
+                            expected_ids=task_ids, telemetry_path=telemetry_path)
+
+
+def validate_appworld_telemetry(path: Path, expected_ids: List[str]) -> None:
+    """Fail when runtime instrumentation missed any selected AppWorld task."""
+    path = Path(path)
+    if not path.is_file():
+        raise SystemExit(f"FATAL: AppWorld runner wrote no telemetry: {path}")
+    by_type: Dict[str, List[str]] = {
+        "episode_start": [], "episode_end": [], "decision": [], "tool_action": []}
+    try:
+        for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            if not line.strip():
+                continue
+            row = json.loads(line)
+            event_type = row.get("event_type")
+            episode_id = row.get("episode_id")
+            if event_type in by_type and episode_id is not None:
+                by_type[event_type].append(str(episode_id))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"FATAL: invalid AppWorld telemetry {path}: {exc}") from exc
+    wanted = set(map(str, expected_ids))
+    missing = {
+        event_type: sorted(wanted - set(ids))
+        for event_type, ids in by_type.items() if wanted - set(ids)
+    }
+    if missing:
+        raise SystemExit(f"FATAL: incomplete AppWorld telemetry {path}: {missing}")
 
 
 _TASK_SECTIONS = ("individual", "tasks", "per_task", "task_results", "results")
@@ -440,12 +518,10 @@ def _task_ok(record: Any) -> Optional[bool]:
 def appworld_per_task(data: Any) -> Dict[str, bool]:
     """Per-task pass/fail from the ``appworld evaluate`` JSON.
 
-    The AppWorld docs pin the content (per-task pass/fail, passes/fails
-    arrays, TGC/SGC aggregates) but this repo has not pinned the key names
-    against a live file, so the shapes recognised here are explicit and
-    anything else FAILS LOUDLY with the top-level keys — the first live run
-    then shows the exact layout and the fix is one entry in the two tuples
-    above, never a silent empty table."""
+    Live AppWorld output stores task records under ``individual`` and TGC/SGC
+    under ``aggregate``.  Legacy explicit shapes remain accepted; an unknown
+    shape fails with its top-level keys instead of producing an empty table.
+    """
     if isinstance(data, dict):
         for key in _TASK_SECTIONS:
             section = data.get(key)
@@ -475,7 +551,8 @@ def appworld_per_task(data: Any) -> Dict[str, bool]:
 def collect_appworld(eval_path: Path, run_dir: Path,
                      expected: Optional[int] = None,
                      request_log: Optional[Path] = None,
-                     expected_ids: Optional[List[str]] = None) -> Dict[str, Any]:
+                     expected_ids: Optional[List[str]] = None,
+                     telemetry_path: Optional[Path] = None) -> Dict[str, Any]:
     eval_path = Path(eval_path)
     if not eval_path.exists():
         raise SystemExit(f"FATAL: appworld evaluate wrote no {eval_path}")
@@ -509,6 +586,21 @@ def collect_appworld(eval_path: Path, run_dir: Path,
         summary["official_aggregate"] = scalars or data.get("aggregate")
     summary["evaluation_path"] = str(eval_path)
     summary["run_dir"] = str(run_dir)
+    if telemetry_path is not None:
+        artifacts = {}
+        for task_id in sorted(scored):
+            task_dir = appworld_task_dir(run_dir, task_id)
+            artifacts[task_id] = {
+                "task_dir": str(task_dir),
+                "llm_history": str(task_dir / HISTORY_FILE),
+                "appworld_trajectory": str(task_dir / "appworld_trajectory.json"),
+                "env_history": str(task_dir / "env_history.json"),
+                "results": str(task_dir / "results.json"),
+            }
+        summary["measurement"] = {
+            "harness_events": str(Path(telemetry_path)),
+            "raw_task_artifacts": artifacts,
+        }
     return summary
 
 

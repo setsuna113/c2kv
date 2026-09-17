@@ -132,6 +132,23 @@ class TestRegistry:
             history_kv={"method": "pyramid", "retention_ratio": 0.5},
         ))["method"] == "pyramidkv"
 
+    def test_paper_matrix_arms_are_explicit(self):
+        assert get_arm("c2kv4").compress_history
+        assert get_arm("c2kv4").ratio == 4
+        expected = {
+            "history_kv_h2o_r25_persistent": ("h2o", 0.25),
+            "history_kv_snapkv_r25_persistent": ("snapkv_persistent", 0.25),
+            "history_kv_h2o_r125_persistent": ("h2o", 0.125),
+            "history_kv_snapkv_r125_persistent": ("snapkv_persistent", 0.125),
+        }
+        for name, (method, ratio) in expected.items():
+            spec = history_kv_spec(get_arm(name))
+            assert spec["method"] == method
+            assert spec["retention_ratio"] == ratio
+            assert spec["backend"] == "physical_eviction"
+            assert spec["persistent_session"] is True
+            assert spec["target_tokens"] is None
+
     def test_existing_arms_untouched(self):
         for name, arm in ARMS.items():
             if name.startswith("history_kv_"):
@@ -148,8 +165,6 @@ class TestRegistry:
         {"method": "streamingllm", "retention_ratio": 0.3, "recent_window": 0},
         {"method": "streamingllm", "retention_ratio": 0.3, "backend": "client"},
         {"method": "streamingllm", "retention_ratio": 0.3, "typo": 1},
-        # physical eviction has no server-side retention ratio
-        {"method": "h2o", "retention_ratio": 0.3, "backend": "physical_eviction"},
         # a streaming session only exists on the physical path
         {"method": "h2o", "retention_ratio": 0.3, "persistent_session": True},
     ])
@@ -348,6 +363,7 @@ class TestPhysicalEvictionPath:
         hint = prepared["c2kv_kv_memory_hint"]
         assert hint["history_kv_eviction"] == {
             "method": "h2o",
+            "history_start_message_count": 1,
             "history_message_count": counts["current_start_out_index"],
             "target_tokens": 256,
             "retention_ratio": None,
@@ -362,6 +378,20 @@ class TestPhysicalEvictionPath:
         assert hint["full_equivalent_history_tokens"] == 0  # server overwrites
         assert "persistent_history_session" not in hint
         assert "session_params" not in prepared
+
+    def test_ratio_budget_is_sent_for_server_tokenization(self):
+        arm = get_arm("history_kv_h2o_r25_persistent")
+        out, counts, ctx = _context(_messages(), arm)
+        ctx["session_id"] = "sess-ratio"
+        prepared = SglangBackend(FakePost({})).prepare_chat(
+            {"messages": out}, arm, None, context={"history_kv": ctx})
+        hint = prepared["c2kv_kv_memory_hint"]
+        eviction = hint["history_kv_eviction"]
+        assert eviction["history_start_message_count"] == 1
+        assert eviction["history_message_count"] == counts["current_start_out_index"]
+        assert eviction["retention_ratio"] == 0.25
+        assert "target_tokens" not in eviction
+        assert hint["active_history_kv_tokens"] is None
 
     def test_persistent_session_rides_on_session_params(self):
         out, counts, ctx = _context(_messages(), self.SESSION_ARM)

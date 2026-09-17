@@ -48,6 +48,8 @@ CLI_SURFACE = [
     ("--full", False, False),
     ("--record-reference", "", False),
     ("--reference", "", False),
+    ("--telemetry-log", "", False),
+    ("--record-prefixes", "", False),
     ("--backend", "sglang", False),
     ("--model", "c2kv-agent", False),
     ("--ts-scenarios", "", False),
@@ -117,6 +119,59 @@ def test_registry_covers_every_adapter_module():
     # one module, two --benchmark names
     assert run.ADAPTERS["acon_qa"] is acon_adapter
     assert run.ADAPTERS["acon_appworld"] is acon_adapter
+
+
+def test_start_proxy_rejects_an_occupied_port_before_spawn(monkeypatch, tmp_path):
+    with run.socket.socket(run.socket.AF_INET, run.socket.SOCK_STREAM) as listener:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen()
+        port = listener.getsockname()[1]
+        monkeypatch.setattr(
+            run.subprocess, "Popen",
+            lambda *args, **kwargs: pytest.fail("must not spawn on an occupied port"),
+        )
+        with pytest.raises(SystemExit, match="already occupied"):
+            run.start_proxy("http://up", "full", port, tmp_path)
+
+
+def test_start_proxy_rejects_its_own_exited_child(monkeypatch, tmp_path):
+    class Exited:
+        def poll(self):
+            return 7
+
+    monkeypatch.setattr(run, "_assert_proxy_port_available", lambda port: None)
+    monkeypatch.setattr(run.subprocess, "Popen", lambda *a, **k: Exited())
+    with pytest.raises(SystemExit, match="exited with code 7"):
+        run.start_proxy("http://up", "full", 34100, tmp_path)
+
+
+def test_stop_process_kills_child_that_ignores_terminate():
+    class Stuck:
+        def __init__(self):
+            self.terminated = False
+            self.killed = False
+            self.waits = 0
+
+        def poll(self):
+            return 0 if self.killed else None
+
+        def terminate(self):
+            self.terminated = True
+
+        def wait(self, timeout=None):
+            self.waits += 1
+            if not self.killed:
+                raise run.subprocess.TimeoutExpired("proxy", timeout)
+            return 0
+
+        def kill(self):
+            self.killed = True
+
+    proc = Stuck()
+    run._stop_process(proc, timeout=0.01)
+    assert proc.terminated is True
+    assert proc.killed is True
+    assert proc.waits == 2
 
 
 # ---- RunContext plumbing ----------------------------------------------------
@@ -369,9 +424,19 @@ def test_cli_accepts_new_benchmarks():
 class _FakeProc:
     def __init__(self):
         self.terminated = False
+        self.killed = False
+
+    def poll(self):
+        return 0 if self.terminated or self.killed else None
 
     def terminate(self):
         self.terminated = True
+
+    def wait(self, timeout=None):
+        return 0
+
+    def kill(self):
+        self.killed = True
 
 
 def _stub_run(monkeypatch, tmp_path, summary, arm="c2kv", extra_argv=()):

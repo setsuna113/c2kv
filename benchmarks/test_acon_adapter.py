@@ -274,6 +274,119 @@ def test_runner_env_points_agent_at_proxy_v1(monkeypatch):
     assert env["NO_PROXY"] == "127.0.0.1,localhost"
 
 
+def test_appworld_runner_env_installs_runtime_telemetry(tmp_path):
+    events = tmp_path / "measurement" / "harness_events.jsonl"
+    run_dir = tmp_path / "tasks"
+    env = A.appworld_runner_env("http://127.0.0.1:34100", events, run_dir)
+    entries = env["PYTHONPATH"].split(os.pathsep)
+    assert Path(entries[0]).name == "appworld_instrumentation"
+    assert Path(entries[1]).name == "benchmarks"
+    assert env[A.APPWORLD_TELEMETRY_ENV] == str(events.resolve())
+    assert env[A.APPWORLD_RUN_DIR_ENV] == str(run_dir.resolve())
+
+
+def test_appworld_runtime_hook_records_joined_decision_action_and_episode(
+        tmp_path, monkeypatch):
+    class FakeCompletions:
+        last_extra_body = None
+
+        def create(self, *_args, **kwargs):
+            FakeCompletions.last_extra_body = kwargs.get("extra_body")
+            return types.SimpleNamespace(
+                model_extra={"c2kv_proxy": {"request_id": "proxy-request-7"}},
+                choices=[types.SimpleNamespace(
+                    message=types.SimpleNamespace(content="raw response"))],
+            )
+
+    class FakeWorld:
+        def execute(self, action):
+            return f"output:{action}"
+
+    class FakeEnv:
+        def __init__(self):
+            self.config = types.SimpleNamespace(max_interactions=3)
+            self.experiment_name = "fixture-experiment"
+            self.num_interactions = 1
+            self.world = FakeWorld()
+
+        def reset(self, seed=None, task_id=None, **_kwargs):
+            self.task_id = task_id
+            return "observation"
+
+        def close(self):
+            return None
+
+        def _clean_code(self, code):
+            return code.strip()
+
+        def _execute_code(self, code):
+            return self.world.execute(self._clean_code(code))
+
+    class FakeAgent:
+        def forward(self, _prompt):
+            response = FakeCompletions().create()
+            return types.SimpleNamespace(
+                action="print('committed')",
+                response=response.choices[0].message.content,
+            )
+
+    def module(name, **attrs):
+        value = types.ModuleType(name)
+        for key, item in attrs.items():
+            setattr(value, key, item)
+        return value
+
+    stubs = {
+        "productive_agents": module("productive_agents"),
+        "productive_agents.agents": module("productive_agents.agents"),
+        "productive_agents.agents.unified_agent": module(
+            "productive_agents.agents.unified_agent", UnifiedAgent=FakeAgent),
+        "productive_agents.env": module("productive_agents.env"),
+        "productive_agents.env.appworld": module("productive_agents.env.appworld"),
+        "productive_agents.env.appworld.env": module(
+            "productive_agents.env.appworld.env", AppWorldEnv=FakeEnv),
+        "openai": module("openai"),
+        "openai.resources": module("openai.resources"),
+        "openai.resources.chat": module("openai.resources.chat"),
+        "openai.resources.chat.completions": module(
+            "openai.resources.chat.completions", Completions=FakeCompletions),
+    }
+    for name, value in stubs.items():
+        monkeypatch.setitem(sys.modules, name, value)
+
+    events = tmp_path / "measurement" / "harness_events.jsonl"
+    task_root = tmp_path / "tasks"
+    monkeypatch.setenv(A.APPWORLD_TELEMETRY_ENV, str(events))
+    monkeypatch.setenv(A.APPWORLD_RUN_DIR_ENV, str(task_root))
+    hook_path = (Path(__file__).parent / "appworld_instrumentation"
+                 / "c2kv_appworld_hook.py")
+    spec = importlib.util.spec_from_file_location("fixture_appworld_hook", hook_path)
+    assert spec is not None and spec.loader is not None
+    hook = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(hook)
+    assert hook.install() is True
+
+    env = FakeEnv()
+    assert env.reset(task_id="task-7") == "observation"
+    decision = FakeAgent().forward([])
+    assert env._execute_code(f"  {decision.action}  ") == "output:print('committed')"
+    env.close()
+
+    rows = [json.loads(line) for line in events.read_text().splitlines()]
+    assert [row["event_type"] for row in rows] == [
+        "episode_start", "decision", "tool_action", "episode_end"]
+    action = rows[2]
+    assert action["episode_id"] == "task-7"
+    assert action["decision_request_id"] == "proxy-request-7"
+    assert action["action"] == "print('committed')"
+    assert action["outcome"] == "output:print('committed')"
+    assert rows[3]["status"] == "ok"
+    assert rows[0]["episode_metadata"]["raw_task_dir"] == str(
+        task_root / "task_task-7")
+    assert FakeCompletions.last_extra_body == {
+        "c2kv_measurement_session_id": "task-7"}
+
+
 def test_qa_command_uses_shipped_split_and_pins():
     cmd = A.qa_command("py", "c2kv-agent", "run_ab12", "test", 30, limit=5,
                        id_list_file=Path("/x/ids.txt"))
@@ -292,6 +405,159 @@ def test_appworld_command_and_experiment_name():
     assert cmd[-3:] == ["--task_ids", "t1", "t2"]
     # run_all.py: model_name.replace("/", "_") + "_" + tag
     assert A.appworld_experiment("org/model", "run_ab12") == "org_model_run_ab12"
+
+
+def test_appworld_required_patch_markers(tmp_path):
+    acon = tmp_path / "acon"
+    runner = acon / "experiments" / "appworld" / "run.py"
+    env = acon / "src" / "productive_agents" / "env" / "appworld" / "env.py"
+    runner.parent.mkdir(parents=True)
+    env.parent.mkdir(parents=True)
+    runner.write_text("print('API cost unavailable for this model')\n")
+    env.write_text("max_interactions_reached = True\n")
+    A.validate_appworld_runner_patches(acon)
+    env.write_text("# pristine upstream\n")
+    with pytest.raises(SystemExit, match="0006-appworld-final-step-and-errors.patch"):
+        A.validate_appworld_runner_patches(acon)
+
+
+def test_appworld_final_budgeted_action_executes_and_errors_are_recorded(tmp_path, monkeypatch):
+    project_root = Path(__file__).resolve().parents[1]
+    default_acon_root = project_root.parent / "tmp" / "baselines" / "acon"
+    acon_root = Path(os.environ.get("ACON_ROOT", default_acon_root))
+    source_rel = Path("src/productive_agents/env/appworld/env.py")
+    if not (acon_root / source_rel).is_file():
+        pytest.skip("set ACON_ROOT to the pinned microsoft/acon checkout")
+
+    staged_root = tmp_path / "acon"
+    staged_source = staged_root / source_rel
+    staged_source.parent.mkdir(parents=True)
+    shutil.copy2(acon_root / source_rel, staged_source)
+    patch_path = project_root / "benchmarks" / "acon_patches" / "0006-appworld-final-step-and-errors.patch"
+    subprocess.run(
+        ["git", "apply", "--ignore-space-change",
+         "--include=src/productive_agents/env/appworld/env.py", str(patch_path)],
+        cwd=staged_root, check=True, capture_output=True, text=True,
+    )
+
+    class FakeConfig:
+        verbose = True
+        experiment_name = "fixture"
+        max_interactions = 3
+
+    class FakeWorld:
+        def __init__(self):
+            self.actions = []
+
+        def execute(self, action):
+            self.actions.append(action)
+            if action == "raise_error()":
+                raise ValueError("fixture failure")
+            return f"output:{action}"
+
+        def task_completed(self):
+            return False
+
+    def module(name, **attrs):
+        value = types.ModuleType(name)
+        for key, item in attrs.items():
+            setattr(value, key, item)
+        return value
+
+    stubs = {
+        "productive_agents": module("productive_agents"),
+        "productive_agents.env": module("productive_agents.env"),
+        "productive_agents.env.appworld": module("productive_agents.env.appworld"),
+        "productive_agents.env.base": module("productive_agents.env.base", BaseLanguageBasedEnv=object),
+        "productive_agents.utils": module("productive_agents.utils", all_seed=lambda _seed: None),
+        "productive_agents.env.appworld.config": module(
+            "productive_agents.env.appworld.config", AppWorldEnvConfig=FakeConfig),
+        "appworld": module("appworld", AppWorld=object, load_task_ids=lambda _split: []),
+    }
+    for name, value in stubs.items():
+        monkeypatch.setitem(sys.modules, name, value)
+    spec = importlib.util.spec_from_file_location(
+        "productive_agents.env.appworld.env", staged_source)
+    assert spec is not None and spec.loader is not None
+    loaded = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, "productive_agents.env.appworld.env", loaded)
+    spec.loader.exec_module(loaded)
+
+    env_obj = loaded.AppWorldEnv(FakeConfig())
+    env_obj.world = FakeWorld()
+    assert env_obj.step("action_1") [2:] == (False, {"success": False, "reason": "in_progress"})
+    assert env_obj.step("action_2") [2:] == (False, {"success": False, "reason": "in_progress"})
+    _obs, _reward, done, info = env_obj.step("action_3")
+    assert done is True and info["reason"] == "max_interactions"
+    assert env_obj.world.actions == ["action_1", "action_2", "action_3"]
+    assert len(env_obj.trajectory) == 3
+    assert env_obj.trajectory[-1]["action"] == "action_3"
+
+    error_env = loaded.AppWorldEnv(FakeConfig())
+    error_env.world = FakeWorld()
+    _obs, reward, done, info = error_env.step("raise_error()")
+    assert (reward, done, info["reason"]) == (-0.1, False, "execution_error")
+    assert error_env.trajectory[0]["action"] == "raise_error()"
+    assert error_env.trajectory[0]["info"]["error"] == "fixture failure"
+
+
+def test_hiagent_python_subgoal_runs_through_real_appworld_action_parser(
+        monkeypatch):
+    """The AppWorld-specific HiAgent marker remains executable Python."""
+    project_root = Path(__file__).resolve().parents[1]
+    default_acon_root = project_root.parent / "tmp" / "baselines" / "acon"
+    acon_root = Path(os.environ.get("ACON_ROOT", default_acon_root))
+    source = (acon_root / "src" / "productive_agents" / "agents"
+              / "appworld" / "agent.py")
+    if not source.is_file():
+        pytest.skip("set ACON_ROOT to the pinned microsoft/acon checkout")
+
+    class PromptBuilder:
+        def __init__(self, prompt_dict=None, working_dir="."):
+            self.prompt_dict = prompt_dict or {}
+            self.working_dir = working_dir
+
+    class ActionProcessor:
+        def __init__(self, logger):
+            self.logger = logger
+
+    def module(name, **attrs):
+        value = types.ModuleType(name)
+        for key, item in attrs.items():
+            setattr(value, key, item)
+        return value
+
+    stubs = {
+        "productive_agents": module("productive_agents"),
+        "productive_agents.agents": module("productive_agents.agents"),
+        "productive_agents.agents.appworld": module(
+            "productive_agents.agents.appworld"),
+        "productive_agents.agents.unified_agent": module(
+            "productive_agents.agents.unified_agent",
+            UnifiedAgent=object, UnifiedPromptBuilder=PromptBuilder,
+            UnifiedActionProcessor=ActionProcessor),
+        "productive_agents.agents.utils": module(
+            "productive_agents.agents.utils", LLMOutput=object),
+        "productive_agents.agents.appworld.config": module(
+            "productive_agents.agents.appworld.config",
+            AppWorldAgentConfig=type("AppWorldAgentConfig", (), {})),
+    }
+    for name, value in stubs.items():
+        monkeypatch.setitem(sys.modules, name, value)
+    spec = importlib.util.spec_from_file_location(
+        "productive_agents.agents.appworld.agent", source)
+    assert spec is not None and spec.loader is not None
+    loaded = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(
+        sys.modules, "productive_agents.agents.appworld.agent", loaded)
+    spec.loader.exec_module(loaded)
+
+    response = "# Subgoal: inspect available apps\nresult = 6 * 7"
+    action = loaded.AppWorldActionProcessor(types.SimpleNamespace()).extract_action(
+        response)
+    namespace = {}
+    exec(compile(action, "<appworld-action>", "exec"), {}, namespace)
+    assert namespace["result"] == 42
 
 
 def test_output_paths_follow_runner_rules(tmp_path):
@@ -350,7 +616,13 @@ def test_collect_qa_missing_predictions_is_fatal(tmp_path):
 # ---- AppWorld collector -----------------------------------------------------
 
 def test_appworld_per_task_recognised_shapes():
-    by_dict = {"aggregate": {"tgc": 0.5}, "individual": {"t1": {"success": True}, "t2": {"success": False}}}
+    by_dict = {
+        "aggregate": {
+            "task_goal_completion": 0.5,
+            "scenario_goal_completion": 0.0,
+        },
+        "individual": {"t1": {"success": True}, "t2": {"success": False}},
+    }
     assert A.appworld_per_task(by_dict) == {"t1": True, "t2": False}
     by_bool = {"tasks": {"t1": True, "t2": False}}
     assert A.appworld_per_task(by_bool) == {"t1": True, "t2": False}
@@ -371,7 +643,10 @@ def test_collect_appworld_joins_runner_results(tmp_path):
     eval_path = tmp_path / "evaluations" / "test_normal.json"
     eval_path.parent.mkdir(parents=True)
     eval_path.write_text(json.dumps({
-        "tgc": 0.5, "sgc": 0.0,
+        "aggregate": {
+            "task_goal_completion": 0.5,
+            "scenario_goal_completion": 0.0,
+        },
         "individual": {"t1": {"success": True}, "t2": {"success": False}},
     }))
     run_dir = tmp_path / "outputs" / "m_t" / "test_normal"
@@ -384,7 +659,38 @@ def test_collect_appworld_joins_runner_results(tmp_path):
         {"success": True, "iterations": 50, "termination_reason": "max_iterations"}))
     summary = A.collect_appworld(eval_path, run_dir, expected=2)
     assert summary["n"] == 2 and summary["semantic_score"] == pytest.approx(0.5)
-    assert summary["official_aggregate"] == {"tgc": 0.5, "sgc": 0.0}
+    assert summary["official_aggregate"] == {
+        "task_goal_completion": 0.5,
+        "scenario_goal_completion": 0.0,
+    }
+
+
+def test_appworld_telemetry_gate_and_artifact_links(tmp_path):
+    events = tmp_path / "measurement" / "harness_events.jsonl"
+    rows = []
+    for event_type in ("episode_start", "decision", "tool_action", "episode_end"):
+        rows.append({"event_type": event_type, "episode_id": "t1"})
+    _write_jsonl(events, rows)
+    A.validate_appworld_telemetry(events, ["t1"])
+    with pytest.raises(SystemExit, match="incomplete AppWorld telemetry"):
+        A.validate_appworld_telemetry(events, ["t1", "t2"])
+
+    eval_path = tmp_path / "evaluations" / "test_normal.json"
+    eval_path.parent.mkdir(parents=True)
+    eval_path.write_text(json.dumps(
+        {"individual": {"t1": {"success": False}}}))
+    run_dir = tmp_path / "outputs" / "m_t" / "test_normal"
+    summary = A.collect_appworld(
+        eval_path, run_dir, expected=1, telemetry_path=events)
+    measurement = summary["measurement"]
+    assert measurement["harness_events"] == str(events)
+    links = measurement["raw_task_artifacts"]["t1"]
+    assert Path(links["llm_history"]).parts[-2:] == (
+        "task_t1", "llm_history.json")
+    assert Path(links["appworld_trajectory"]).parts[-2:] == (
+        "task_t1", "appworld_trajectory.json")
+    assert Path(links["env_history"]).parts[-2:] == (
+        "task_t1", "env_history.json")
 
 
 def test_collect_appworld_terminal_gate_and_missing_eval(tmp_path):

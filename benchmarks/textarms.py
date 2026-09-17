@@ -184,18 +184,35 @@ TRAINING_DEFAULT_SYSTEM_PROMPT = "You are a helpful assistant."
 
 HIAGENT_SUBGOAL_NOTE = """
 Note: A subgoal is a milestone goal that you need to complete in order to achieve the final goal.
-When there is an unfinished subgoal, you need to ground the given subgoal to corresponding executable actions for solving the given task in the following format: \"Action: {action}\".
-When there is no current subgoal or you believe the previous subgoal has been completed (based on past actions and observations), you need to output the next subgoal to be completed and its first action in the following format: \"Subgoal: {subgoal}\\nAction: {action}\".
+When there is an unfinished subgoal and another environment action is needed, continue it by issuing the corresponding native tool call.
+When there is no current subgoal or you believe the previous subgoal has been completed (based on past actions and observations), and another environment action is needed, put the next subgoal in assistant content as exactly one line in the format \"Subgoal: {subgoal}\" and issue its first action as a native tool call in the same response.
+When no environment action is needed because you can answer, finish, or must ask for clarification, reply naturally in assistant content without inventing a tool call or a Subgoal line.
 Instructions:
 1. You cannot output two subgoals consecutively.
 2. Subgoal must be one line of text and does not print any newline characters.
-3. Each subgoal must be followed by the execution of at least one valid action.
-4. Actions in this environment are tool calls: emit the tool call that executes the action (the Subgoal line goes in the message text alongside the tool call).
+3. Each declared subgoal must be accompanied in the same response by at least one valid native tool call.
+4. Every environment action must use the API's native function-calling interface in the structured tool_calls field. Do not serialize an action into assistant content.
+"""
+
+HIAGENT_PYTHON_ACTION_NOTE = """
+Note: A subgoal is a milestone goal that you need to complete in order to achieve the final goal.
+When there is an unfinished subgoal and another environment action is needed, continue it by writing the next executable Python code action in assistant content, using the benchmark's required format.
+When there is no current subgoal or you believe the previous subgoal has been completed (based on past actions and observations), and another environment action is needed, put the next subgoal in assistant content as exactly one Python comment line in the format "# Subgoal: {subgoal}", followed by its first executable Python code action in the same response.
+When no environment action is needed because you can answer, finish, or must ask for clarification, reply naturally in assistant content without inventing a Subgoal line.
+Instructions:
+1. You cannot output two subgoals consecutively.
+2. Subgoal must be one Python comment line and does not contain newline characters.
+3. Each declared subgoal must be accompanied in the same response by at least one valid executable Python code action.
+4. Every environment action must be executable Python code in assistant content. Do not use the structured tool_calls field for environment actions.
 """
 
 HIAGENT_RETRIEVE_TOOL_NAME = "hiagent_retrieve"
 HIAGENT_RETRIEVAL_NOTE = """
-5. Detailed action-observation trajectories for completed subgoals are hidden. If a hidden trajectory is needed, call hiagent_retrieve with its one-based subgoal id. This is a context-retrieval action, not an environment action.
+5. Detailed action-observation trajectories for completed subgoals are hidden. If a hidden trajectory is needed, call hiagent_retrieve with its one-based subgoal id through the same native function-calling interface. This is a context-retrieval action, not an environment action. Do not serialize the retrieval request into assistant content.
+"""
+
+HIAGENT_PYTHON_RETRIEVAL_NOTE = """
+5. Detailed action-observation trajectories for completed subgoals are hidden. If a hidden trajectory is needed, call hiagent_retrieve with its one-based subgoal id through the API's native function-calling interface. This internal context-retrieval call is not an environment action; environment actions remain executable Python in assistant content. Do not serialize the retrieval request into assistant content.
 """
 
 # Paper §3.3, verbatim (the repo's summarize.py is a 2026 rebuild and is
@@ -236,8 +253,9 @@ def _subgoal_of(message: Dict[str, Any]) -> Optional[str]:
     if (message.get("role") or "") != "assistant":
         return None
     text = _content_of(message).strip()
-    if text.startswith("Subgoal:"):
-        return text.split("\n", 1)[0][len("Subgoal:"):].strip()
+    for prefix in ("Subgoal:", "# Subgoal:"):
+        if text.startswith(prefix):
+            return text.split("\n", 1)[0][len(prefix):].strip()
     return None
 
 
@@ -304,6 +322,7 @@ def hiagent_transform(messages: List[Dict[str, Any]], compress: Compress,
                       default_system: str = TRAINING_DEFAULT_SYSTEM_PROMPT,
                       variant: str = "summary",
                       retrieve_subgoals: Optional[List[int]] = None,
+                      environment_action_format: str = "native_tool_call",
                       ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     """Subgoal-protocol note into the system message; segment history by
     assistant 'Subgoal:' declarations; completed segments become their
@@ -318,17 +337,25 @@ def hiagent_transform(messages: List[Dict[str, Any]], compress: Compress,
     """
     if variant not in ("summary", "full"):
         raise ValueError(f"unknown HiAgent variant {variant!r}")
+    if environment_action_format not in ("native_tool_call", "python_content"):
+        raise ValueError(
+            f"unknown HiAgent environment action format {environment_action_format!r}")
     requested = set(retrieve_subgoals or [])
     if any(isinstance(v, bool) or not isinstance(v, int) or v < 1
            for v in requested):
         raise ValueError("retrieve_subgoals must contain positive integer ids")
     if requested and variant != "full":
         raise ValueError("trajectory retrieval requires variant='full'")
-    note = HIAGENT_SUBGOAL_NOTE
+    note = (HIAGENT_SUBGOAL_NOTE if environment_action_format == "native_tool_call"
+            else HIAGENT_PYTHON_ACTION_NOTE)
     if variant == "full":
-        note = note.rstrip() + "\n" + HIAGENT_RETRIEVAL_NOTE.strip() + "\n"
+        retrieval_note = (HIAGENT_RETRIEVAL_NOTE
+                          if environment_action_format == "native_tool_call"
+                          else HIAGENT_PYTHON_RETRIEVAL_NOTE)
+        note = note.rstrip() + "\n" + retrieval_note.strip() + "\n"
     stats: Dict[str, Any] = {
         "policy": "hiagent", "variant": variant, "n_compressor_calls": 0,
+        "environment_action_format": environment_action_format,
     }
     messages = [dict(m) for m in messages]
     for m in messages:

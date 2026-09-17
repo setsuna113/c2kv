@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import socket
 import subprocess
 import sys
 import time
@@ -49,11 +50,36 @@ assert all(module.NAME in ADAPTERS or name in getattr(module, "NAMES", ())
            for name, module in ADAPTERS.items())
 
 
+def _assert_proxy_port_available(port: int) -> None:
+    """Fail before spawn when this run cannot own the proxy listen port."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        try:
+            probe.bind(("127.0.0.1", port))
+        except OSError as exc:
+            raise SystemExit(
+                f"proxy port 127.0.0.1:{port} is already occupied"
+            ) from exc
+
+
+def _stop_process(proc, timeout: float = 20.0) -> None:
+    """Bounded child teardown: terminate, then kill if it does not exit."""
+    if proc.poll() is not None:
+        return
+    proc.terminate()
+    try:
+        proc.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait(timeout=timeout)
+
+
 def start_proxy(upstream: str, arm: str, port: int, log_dir: Path,
                 record_reference: str = "", reference: str = "",
                 backend: str = "sglang", doc_packing: str = "turn",
                 max_doc_length: int = 512, max_doc_num: int = 12,
-                query_projection: str | None = None):
+                query_projection: str | None = None,
+                telemetry_log: str = "", record_prefixes: str = ""):
+    _assert_proxy_port_available(port)
     log_path = log_dir / f"proxy_{arm}_{port}.jsonl"
     out_handle = open(log_dir / f"proxy_{arm}_{port}.out", "w")
     command = [
@@ -70,11 +96,18 @@ def start_proxy(upstream: str, arm: str, port: int, log_dir: Path,
         command += ["--reference", reference]
     if query_projection:
         command += ["--query-projection", query_projection]
-    proc = subprocess.Popen(
-        command,
-        stdout=out_handle,
-        stderr=subprocess.STDOUT,
-    )
+    if telemetry_log:
+        command += ["--telemetry-log", str(telemetry_log)]
+    if record_prefixes:
+        command += ["--record-prefixes", str(record_prefixes)]
+    try:
+        proc = subprocess.Popen(
+            command,
+            stdout=out_handle,
+            stderr=subprocess.STDOUT,
+        )
+    finally:
+        out_handle.close()
     import urllib.request
 
     # never route the local health probe through an ambient http_proxy
@@ -83,12 +116,27 @@ def start_proxy(upstream: str, arm: str, port: int, log_dir: Path,
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
     for _ in range(100):
+        returncode = proc.poll()
+        if returncode is not None:
+            raise SystemExit(
+                f"proxy process exited with code {returncode} before readiness "
+                f"on port {port}"
+            )
         try:
-            opener.open(f"http://127.0.0.1:{port}/health", timeout=2)
+            with opener.open(
+                f"http://127.0.0.1:{port}/health", timeout=2
+            ):
+                pass
+            returncode = proc.poll()
+            if returncode is not None:
+                raise SystemExit(
+                    f"proxy process exited with code {returncode} during readiness "
+                    f"on port {port}"
+                )
             return proc, log_path
         except OSError:
             time.sleep(0.2)
-    proc.terminate()
+    _stop_process(proc)
     raise SystemExit(f"proxy did not come up on port {port}")
 
 
@@ -133,6 +181,10 @@ def add_core_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--reference", default="",
                         help="recover arm: reference trajectory jsonl (from a "
                              "--record-reference full-arm run)")
+    parser.add_argument("--telemetry-log", default="",
+                        help="raw model-side requests, attempts, phases and responses")
+    parser.add_argument("--record-prefixes", default="",
+                        help="Full arm: save exact common-prefix replay inputs")
     parser.add_argument("--backend", default="sglang",
                         choices=["hfserver", "sglang"],
                         help="serving stack behind the proxy (sglang is the "
@@ -261,14 +313,15 @@ def main(argv=None):
         record_reference=args.record_reference, reference=args.reference,
         backend=args.backend, doc_packing=args.doc_packing,
         max_doc_length=args.max_doc_length, max_doc_num=args.max_doc_num,
-        query_projection=args.query_projection)
+        query_projection=args.query_projection,
+        telemetry_log=args.telemetry_log, record_prefixes=args.record_prefixes)
     try:
         # every adapter owns its own "/v1" (adapters/base.py:v1) and its own
         # cwd; run.py hands over the bare proxy URL and nothing else
         ctx = build_context(args, request_log)
         summary = ADAPTERS[args.benchmark].run(ctx)
     finally:
-        proxy_proc.terminate()
+        _stop_process(proxy_proc)
     summary["arm"] = args.arm
     summary["benchmark"] = args.benchmark
     summary["backend"] = args.backend
