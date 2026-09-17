@@ -65,6 +65,12 @@ def _ratio_summary(pairs: List[tuple]) -> Dict[str, Any]:
 
 MEMORY_FIELDS = (
     "request_peak_resident_kv_tokens", "request_peak_resident_kv_bytes",
+    # Line items of the resident total (never subtracted from it): evictable
+    # prefix-cache slots at the decision chain's resident peak, and the
+    # chain-wide maximum of evictable slots.
+    "request_peak_cached_evictable_kv_tokens",
+    "request_peak_cached_evictable_kv_bytes",
+    "cached_evictable_kv_peak_tokens", "cached_evictable_kv_peak_bytes",
     "generation_active_kv_tokens", "generation_active_kv_bytes",
     "whole_full_kv_tokens", "whole_active_kv_tokens",
     "history_full_kv_tokens", "history_active_kv_tokens",
@@ -75,9 +81,16 @@ MEMORY_FIELDS = (
     "nvml_process_peak_used_bytes", "nvml_process_peak_delta_bytes",
 )
 
+# Reported at the sample where the resident total peaked; they follow the
+# resident peak across a decision chain instead of taking their own maximum.
+AT_RESIDENT_PEAK_FIELDS = (
+    "request_peak_cached_evictable_kv_tokens",
+    "request_peak_cached_evictable_kv_bytes",
+)
+
 PEAK_FIELDS = {
     field for field in MEMORY_FIELDS
-    if "peak" in field
+    if "peak" in field and field not in AT_RESIDENT_PEAK_FIELDS
 }
 
 
@@ -94,6 +107,15 @@ def _merge_server_measurement(target: Dict[str, Any], update: Dict[str, Any],
         "canonical_full_source",
     }
     additive_fields = {"denominator_tokenization_duration_ns"}
+    previous_resident = target.get("request_peak_resident_kv_bytes")
+    update_resident = update.get("request_peak_resident_kv_bytes")
+    takes_resident_peak = (
+        isinstance(update_resident, (int, float))
+        and not isinstance(update_resident, bool)
+        and (not isinstance(previous_resident, (int, float))
+             or isinstance(previous_resident, bool)
+             or update_resident > previous_resident)
+    )
     for key, value in update.items():
         if (key in additive_fields and isinstance(value, (int, float))
                 and not isinstance(value, bool)):
@@ -113,6 +135,9 @@ def _merge_server_measurement(target: Dict[str, Any], update: Dict[str, Any],
                            if isinstance(previous, (int, float)) else value)
         elif key in PEAK_FIELDS:
             continue
+        elif key in AT_RESIDENT_PEAK_FIELDS:
+            if takes_resident_peak or key not in target:
+                target[key] = value
         elif key in generation_fields:
             if generation_phase or key not in target:
                 target[key] = value
@@ -260,6 +285,26 @@ def aggregate(proxy_rows: List[Dict[str, Any]], harness_rows: List[Dict[str, Any
             "coverage": {"measured": len(values), "requests": len(requests)},
             **distribution(values),
         }
+    # The decision chain that holds the cell's resident peak, with its own
+    # line items, so the report can pair "how much of that peak was evictable
+    # cache" with the peak itself instead of mixing maxima across chains.
+    resident_peak_chain = None
+    for row in requests:
+        resident = server_value(row, "request_peak_resident_kv_bytes")
+        if not isinstance(resident, (int, float)) or isinstance(resident, bool):
+            continue
+        if resident_peak_chain is None or resident > resident_peak_chain["request_peak_resident_kv_bytes"]:
+            resident_peak_chain = {
+                "request_id": row.get("request_id"),
+                "request_peak_resident_kv_bytes": resident,
+                "request_peak_cached_evictable_kv_bytes": server_value(
+                    row, "request_peak_cached_evictable_kv_bytes"),
+                "cached_evictable_kv_peak_bytes": server_value(
+                    row, "cached_evictable_kv_peak_bytes"),
+                "generation_active_kv_bytes": server_value(
+                    row, "generation_active_kv_bytes"),
+            }
+    memory["resident_peak_chain"] = resident_peak_chain
 
     ratios = {}
     for scope in ("whole", "history"):

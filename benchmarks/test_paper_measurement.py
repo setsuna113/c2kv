@@ -59,6 +59,7 @@ def test_aggregate_uses_server_jsonl_and_reports_missing_coverage():
             "history_full_kv_tokens": 100,
             "history_active_kv_tokens": 25,
             "request_peak_resident_kv_tokens": 120,
+            "request_peak_resident_kv_bytes": 480,
             "denominator_tokenization_duration_ns": None,
         },
     }, {
@@ -102,9 +103,42 @@ def test_aggregate_uses_server_jsonl_and_reports_missing_coverage():
     assert result["memory"]["request_peak_resident_kv_tokens"]["coverage"] == {
         "measured": 1, "requests": 2}
     assert result["memory"]["request_peak_resident_kv_tokens"]["mean"] == 120
+    assert result["memory"]["resident_peak_chain"]["request_id"] == "r1"
+    assert result["memory"]["resident_peak_chain"]["request_peak_cached_evictable_kv_bytes"] is None
     assert result["memory"]["torch_peak_reserved_bytes"]["mean"] is None
     assert result["common_prefix_token_ratios"]["whole"]["ratio_of_sums"] == 0.4
     assert result["common_prefix_token_ratios"]["history"]["ratio_of_sums"] == 0.25
+
+
+def test_cached_evictable_follows_the_chain_resident_peak():
+    from benchmarks.measurement.aggregate import _merge_server_measurement
+    chain = {}
+    # Auxiliary compression call: its own prompt is the chain's resident peak;
+    # nothing was cached before it.
+    _merge_server_measurement(chain, {
+        "request_peak_resident_kv_bytes": 426_000_000,
+        "request_peak_cached_evictable_kv_bytes": 0,
+        "cached_evictable_kv_peak_bytes": 0,
+    }, "aux_compression")
+    # Generation after it: smaller own prompt, but the auxiliary request's KV
+    # is still resident as evictable cache, so the chain peak moves here.
+    _merge_server_measurement(chain, {
+        "request_peak_resident_kv_bytes": 456_000_000,
+        "request_peak_cached_evictable_kv_bytes": 426_000_000,
+        "cached_evictable_kv_peak_bytes": 426_000_000,
+    }, "generation")
+    assert chain["request_peak_resident_kv_bytes"] == 456_000_000
+    assert chain["request_peak_cached_evictable_kv_bytes"] == 426_000_000
+    assert chain["cached_evictable_kv_peak_bytes"] == 426_000_000
+    # A later, smaller request must not drag the at-peak line item with it.
+    _merge_server_measurement(chain, {
+        "request_peak_resident_kv_bytes": 60_000_000,
+        "request_peak_cached_evictable_kv_bytes": 5_000_000,
+        "cached_evictable_kv_peak_bytes": 5_000_000,
+    }, "generation")
+    assert chain["request_peak_resident_kv_bytes"] == 456_000_000
+    assert chain["request_peak_cached_evictable_kv_bytes"] == 426_000_000
+    assert chain["cached_evictable_kv_peak_bytes"] == 426_000_000
 
 
 def test_distribution_has_declared_linear_percentiles():

@@ -14,7 +14,7 @@
   "device": "cuda",
   "attention_backend": "flashinfer",
   "disable_cuda_graph": false,
-  "radix_cache_arms": ["full"],
+  "radix_cache_arms": ["full", "hiagent_full", "acon_hist_ut_co"],
   "context_length": 131072,
   "max_total_tokens": 131072,
   "chunked_prefill_size": 512,

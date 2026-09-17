@@ -26,14 +26,28 @@ is what the per-request telemetry attributes peaks to; it is a measurement
 constraint, not an algorithm requirement. The execution path is configured,
 not hard-coded: `attention_backend` (`flashinfer`), `disable_cuda_graph`
 (`false`; piecewise CUDA graph stays disabled), and `radix_cache_arms`
-(`["full"]`: Full keeps SGLang's cross-request prefix cache so its cross-turn
-prefill reuse is not charged to it; the compressed arms reuse KV through their
-own session mechanisms). All three are recorded in `config.resolved.json` and
-in each cell's `started.json`. Text arms with auxiliary calls (HiAgent, ACON)
-are not in `radix_cache_arms`: with the radix cache on, their measured
-resident KV peak also counts evictable cached entries from the auxiliary
-request (cuda-r9: ACON 456 MB vs 30 MB without), so enabling it there needs
-the telemetry to separate cached-evictable from in-use KV first.
+(`["full", "hiagent_full", "acon_hist_ut_co"]`: the text arms keep SGLang's
+cross-request prefix cache, so ordinary prefix reuse is not charged to them
+and the compute and cache left by their auxiliary calls are counted as
+incurred; the KV-compression arms reuse KV through their own session and gist
+mechanisms). All three are recorded in `config.resolved.json` and in each
+cell's `started.json`.
+
+Resident KV is reported as a total with line items, never as a total minus
+cache: `request_peak_resident_kv_bytes` is the decision-chain peak including
+auxiliary calls and the cache they leave behind (actual occupancy);
+`generation_active_kv_bytes` is the context the model actually used at
+generation; `request_peak_cached_evictable_kv_bytes` is the evictable
+prefix-cache share at that same peak and `cached_evictable_kv_peak_bytes` the
+chain-wide evictable maximum (`memory.resident_peak_chain` pairs the peak with
+its line items; the peak sample is the first one to reach the peak, so a
+finished request's KV that merely moved from protected to evictable cache is
+not reported as cache at the peak). Both are 0 when the radix cache is
+disabled. For reference, the synthetic ACON smoke decision chain peaked at
+426.6 MB with the radix cache off (the auxiliary compression request itself,
+`cuda-r8`) and 456.2 MB with it on (`cuda-r11`: 30.3 MB in use by the
+generation request plus 425.9 MB of the auxiliary request's cached KV); the
+last generation alone (30 MB) is not the chain peak (preliminary, n=1).
 
 The H2O/SnapKV implementation includes Tracy's current-tail query scoring before
 eviction, accumulation across prefill chunks, persistent position bookkeeping,

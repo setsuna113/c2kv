@@ -35,6 +35,9 @@ def write_comparison(output: Path, plan):
                        requests=nested(measured, "counts", "requests"),
                        committed_actions=nested(measured, "counts", "tool_actions"),
                        resident_kv_peak_bytes=nested(measured, "memory", "request_peak_resident_kv_bytes", "max"),
+                       # Line items of the resident total, reported alongside it:
+                       cached_evictable_kv_at_resident_peak_bytes=nested(measured, "memory", "resident_peak_chain", "request_peak_cached_evictable_kv_bytes"),
+                       cached_evictable_kv_peak_bytes=nested(measured, "memory", "cached_evictable_kv_peak_bytes", "max"),
                        generation_active_kv_peak_bytes=nested(measured, "memory", "generation_active_kv_bytes", "max"),
                        torch_allocated_peak_bytes=nested(measured, "memory", "torch_peak_allocated_bytes", "max"),
                        torch_reserved_peak_bytes=nested(measured, "memory", "torch_peak_reserved_bytes", "max"),

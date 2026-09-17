@@ -52,17 +52,17 @@ class PaperMatrixTest(unittest.TestCase):
         self.assertIn("--disable-cuda-graph", cmd)
         self.assertIn("--disable-piecewise-cuda-graph", cmd)
 
-    def test_shipped_config_serves_flashinfer_graph_and_radix_for_full_only(self):
+    def test_shipped_config_serves_flashinfer_graph_and_radix_for_text_arms(self):
         self.assertEqual(self.config["attention_backend"], "flashinfer")
         self.assertFalse(self.config["disable_cuda_graph"])
-        self.assertEqual(self.config["radix_cache_arms"], ["full"])
-        full = server_command(self.config, Path("sglang"), "full")
-        self.assertNotIn("--disable-radix-cache", full)
-        self.assertNotIn("--disable-cuda-graph", full)
+        text_arms = {"full", "hiagent_full", "acon_hist_ut_co"}
+        self.assertEqual(set(self.config["radix_cache_arms"]), text_arms)
         for row in cells(self.config):
-            if row["arm"] != "full":
-                self.assertIn("--disable-radix-cache",
-                              server_command(self.config, Path("sglang"), row["arm"]))
+            cmd = server_command(self.config, Path("sglang"), row["arm"])
+            self.assertNotIn("--disable-cuda-graph", cmd)
+            # Text arms keep SGLang's prefix cache; KV-compression arms reuse
+            # KV through their own session/gist mechanisms.
+            self.assertEqual("--disable-radix-cache" not in cmd, row["arm"] in text_arms)
 
     def test_radix_cache_is_per_arm_and_cuda_graph_is_a_config_toggle(self):
         config = dict(self.config, radix_cache_arms=["full"], disable_cuda_graph=False)
