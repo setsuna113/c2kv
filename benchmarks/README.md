@@ -1,5 +1,11 @@
 # Modular benchmark layer for C2KV / experiment D / experiment G
 
+For current B `next-compression-base-query-v1` checkpoints, use
+[`H100_AGENT.md`](../docs/next_compression/H100_AGENT.md) and
+`agent/run_next_benchmarks.py`. That frontend uses the same C2KV SGLang engine
+through its native-packed interface. This document describes the historical
+D/G arm driver and its legacy checkpoint-profile contract.
+
 > Read `docs/c2kv_semantics.md` first. It records where the paper, the
 > training checkpoint, this proxy and the SGLang server disagree, which
 > proxy/server switch covers each difference, and which numbers in this repo

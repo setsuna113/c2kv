@@ -1,18 +1,29 @@
-# H100 agent execution brief: full next-compression evaluation
+# B evaluation agent brief: next-compression on shared SGLang
 
 ## Assignment and boundaries
 
-Execute this repository's H100 evaluation delivery for the user's already
+Execute this repository's H100/H200 evaluation delivery for the user's already
 trained `next-compression-base-query-v1` checkpoints. The development machine
-only prepared and pushed code. It has not started your H100 jobs. Inspect the
+only prepared this code. It has not started your H100 jobs. Inspect the
 actual local environment, checkpoint directories, and GPU allocation first.
 Use a separate checkout for this evaluation code so any existing trainer process
 keeps its submitted source. Keep all existing training and evaluation artifacts. Do not retrain or change
 checkpoint config/profile fields to pass an older evaluation gate.
 
 The earlier `eval-v1` package evaluates 32 Toucan reference-prefix decisions;
-those are not BFCL whole tasks. Use the new live server and official benchmark
-entry for this assignment. Keep the previous dev results as development data.
+those are not BFCL whole tasks. Use `agent/serve_next_checkpoint.py` with its
+default `--backend sglang` and `agent/run_next_benchmarks.py` for this assignment.
+The frontend keeps B's training-aligned packing and calls the shared SGLang
+native-packed endpoint. `--backend native` is the explicit reference runtime.
+It is distinct from the historical `benchmarks/backends/hfserver.py`.
+Keep previous dev results as development data and previous live results labelled
+as native. Use a new result root for the SGLang run; do not relabel or combine
+earlier native cells with SGLang cells as one serving regime.
+
+`benchmarks/launch_sglang_h200.sh` and its legacy profile resolver are not this
+delivery's launch path. Do not modify a trained checkpoint to manufacture
+`c2kv_checkpoint_profile.json`, `run_config.json`, or `train_manifest_used.json`.
+The new launcher reads the actual checkpoint config and original corpus manifest.
 
 Evaluate all actually saved checkpoints in H0/H1/H2/H3/T0/T1 at both ratios
 8 and 12 on the complete selected BFCL split first. For each variant and ratio,
@@ -33,12 +44,14 @@ a small sample. Record the chosen domains/categories/split names explicitly;
 1. Use a persistent Linux filesystem. Locate the full saved checkpoints, the
    original `prepared/H0` ... `prepared/T1` training manifests, and the pinned
    base snapshot. The small selection-dev manifest is not a training manifest.
-2. Use `scripts/next_compression/bootstrap_h100.sh` if the previous training
-   environment is absent. Reuse a working training environment otherwise.
-   Keep benchmark-specific Python environments separate from the model server
-   environment; each official source controls its own dependencies.
+2. Use a working next-compression environment as `PY` for the frontend, tokenizer,
+   and benchmark driver. Keep it separate from `SGL_PY`, the engine interpreter.
+   Rebuild the exact shared SGLang source and create a fresh engine environment
+   using the commands below. Do not repair a copied virtualenv by pointing its
+   broken Python symlink at another interpreter. Benchmark-specific interpreters
+   remain separate; each official source controls its own dependencies.
 3. Inspect `nvidia-smi` and ownership. Only use cards allocated to this user and
-   free of other users' work. One model server per selected GPU is the starting
+   free of other users' work. One SGLang engine per selected GPU is the starting
    allocation; parallelize independent checkpoint/ratio cells across cards.
    Do not silently lower precision, context limits, or benchmark task counts
    to fit memory. Resolve any OOM and preserve the attempted run's evidence.
@@ -52,6 +65,47 @@ a small sample. Record the chosen domains/categories/split names explicitly;
 The selected full tracks are BFCL `multi_turn_base`, tau2 `airline`,
 all ToolSandbox scenarios, ACEBench `agent/en`, and AppWorld `test_normal`.
 Use `benchmark_sources.json` for verified upstream identities and required patches.
+
+### Rebuild the shared engine once
+
+From the evaluation checkout, choose new persistent directories:
+
+```bash
+python3 scripts/next_compression/rebuild_sglang_source.py \
+  --destination /persistent/src/sglang-next
+
+bash scripts/next_compression/install_sglang_env.sh \
+  --source-dir /persistent/src/sglang-next \
+  --venv-dir /persistent/venvs/sglang-next \
+  --platform cuda --python python3.11
+
+SGL_PY=/persistent/venvs/sglang-next/bin/python
+```
+
+The checked-in source manifest fixes both the upstream commit and the unified
+C2KV overlay. Reconstruction verifies the patch and source hashes; the launcher
+checks the reconstructed source before execution. A checkout at `task/bdf-pilot`,
+or even the baseline commit without this overlay, does not provide this interface.
+The installer refuses an existing destination virtualenv. Save its installation
+log and the generated source receipt with the evaluation evidence.
+
+After updating to the CUDA-enabled B revision, rebuild into a new empty source
+directory and create a new engine virtualenv. Do not reuse a source tree or
+environment reconstructed from the earlier bundle. Verify that the new source
+receipt contains the bundle hashes from the evaluation revision, and verify
+`import flashinfer` with `SGL_PY` before the device smoke. A missing FlashInfer
+installation is a setup failure; do not remove the explicit backend selection
+and accept a different automatically selected backend.
+The bundle keeps its original base revision and adds the CUDA loader cleanup
+and graph configuration fix as pinned overlay files. `manifest.json` records
+their source revision and paths under `cuda_execution`; a base commit match
+alone does not identify the updated source.
+
+H100 and H200 use `--platform cuda` / `--device cuda`. Ascend uses a separately
+prepared NPU environment with `--platform npu` / `--device npu`; the source bundle
+is shared, while the PyTorch/CANN/kernel dependencies are platform-specific.
+CPU transport tests are not CUDA/NPU execution evidence. Run the target-device
+smoke below before the full queue.
 
 ## Freeze the candidate matrix
 
@@ -84,11 +138,14 @@ untouched held-out estimate. Never repeat stage 1 just to fill a stage 2 table.
 
 For each scheduled checkpoint/ratio cell:
 
-- Start `agent/serve_next_checkpoint.py` with that full checkpoint, its original
-  training manifest, and the explicit ratio. Use the exact CLI shown by `--help`.
+- Start `agent/launch_next_sglang.py` with the full checkpoint and its original
+  training manifest, then `agent/serve_next_checkpoint.py` with the matching
+  checkpoint, manifest, explicit ratio, and `--sglang-url`. Use the exact CLI
+  shown by `--help`.
   Before sending benchmark requests, compare `/health` checkpoint path,
   config SHA256, training-manifest SHA256, variant, mode, and ratio against the
-  planned cell. Stop on a mismatch. The history and tool renderers are selected
+  planned cell. Also require `generation_backend=sglang` and inspect the verified
+  `serving_engine` binding. Stop on a mismatch. The history and tool renderers are selected
   from validated metadata. H2/H3
   preserve the frozen S0 preparation geometry; do not substitute the latest
   independently evolving A detector/controller.
@@ -119,29 +176,91 @@ both native tool-call responses and plain text/code responses. Verify official
 ToolSandbox agent/user routing, rather than assuming that setting one global
 `OPENAI_BASE_URL` separates those roles.
 
-### Live endpoint commands
+### Engine and frontend commands
 
 For one cell, set `CHECKPOINT`, `TRAIN_MANIFEST`, `RATIO`, `CELL_OUT`,
 `GPU`, and `REQUEST_CAP` from the frozen plan and actual allocation. Compute a
 finite request budget from the enumerated task counts and official turn limits;
-record it rather than using the 32-decision dev cap. Then start the server:
+record it rather than using the 32-decision dev cap. First inspect the engine
+plan; the command below prints JSON and does not start a model:
 
 ```bash
-CUDA_VISIBLE_DEVICES="${GPU}" "${PY}" agent/serve_next_checkpoint.py \
+CUDA_VISIBLE_DEVICES="${GPU}" "${SGL_PY}" agent/launch_next_sglang.py \
+  --python "${SGL_PY}" --sglang-source /persistent/src/sglang-next \
   --checkpoint "${CHECKPOINT}" --training-manifest "${TRAIN_MANIFEST}" \
+  --device cuda --dtype bfloat16 --host 127.0.0.1 --port 34010 \
+  --cuda-execution flashinfer-graph \
+  --served-model-name c2kv-next
+```
+
+Add `--run` to that command in an allocated session to start the engine in the
+foreground. Preserve its stdout/stderr as the cell's engine log. The launcher
+sets base query and `--weight-version next-compression:<config_sha256>` from the
+validated checkpoint. It accepts both single-file and sharded safetensors.
+Review the planned context, KV pool, and concurrency settings against the host;
+do not silently change frozen task or generation limits to make a cell fit.
+The CUDA default, `--cuda-execution flashinfer-graph`, explicitly selects the
+FlashInfer attention backend and enables decode CUDA graphs. It keeps overlap
+scheduling and piecewise CUDA graphs disabled, and it preserves this B
+evaluation's explicit no-radix policy. The initial launcher still uses
+`--max-running-requests 1` for the first device smoke. After that passes, choose
+and record a common concurrency setting for the full queue based on the host's
+capacity.
+
+For a diagnostic reference only, pass
+`--cuda-execution torch-native-eager`. That profile explicitly selects
+`torch_native` and disables CUDA graphs; do not obtain it by dropping the
+backend option and relying on automatic selection. This exact B bundle,
+next-compression checkpoint, and H100/H200 environment have not been
+hardware-tested in this update. The target-device smoke establishes that
+evidence; the source update alone is not a measured H100/H200 speedup.
+
+Once `/model_info` is ready, start the B frontend in another session using `PY`:
+
+```bash
+"${PY}" agent/serve_next_checkpoint.py \
+  --checkpoint "${CHECKPOINT}" --training-manifest "${TRAIN_MANIFEST}" \
+  --backend sglang --sglang-url http://127.0.0.1:34010 \
   --ratio "${RATIO}" --device cuda --dtype bfloat16 \
   --host 127.0.0.1 --port 34000 --output-dir "${CELL_OUT}/server" \
   --max-new-tokens 4096 --max-requests "${REQUEST_CAP}" \
   --mode compressed --model c2kv-next --model-alias gpt-4o-2024-05-13
 ```
 
-Ports and output directories must be unique for concurrently running cells.
-The server loads the checkpoint once and handles requests serially. Preserve
-its log and health binding. Use `--mode full` on another allocated GPU/port for
-the uncompressed user simulator. This uses the same base actor with no gist;
-record its actual checkpoint and keep that simulator binding fixed across all
-candidate runs. Add the same `--model-alias gpt-4o-2024-05-13` for ToolSandbox
-user traffic. Benchmark token limits still apply below the server cap.
+Both engine and frontend ports, and all output directories, must be unique for
+concurrent cells. The frontend loads the tokenizer and checkpoint metadata, not
+model weights. The engine loads the model once. Frontend requests have independent
+generation state and can enter SGLang scheduling concurrently. Stop strings are
+sent to the engine, including text/code benchmark stops.
+Before the CUDA smoke, inspect `/health.serving_engine.execution`, copied from
+the engine's `/server_info`: require `attention_backend=flashinfer`,
+`disable_cuda_graph=false`, `disable_piecewise_cuda_graph=true`,
+`disable_overlap_schedule=true`, `disable_radix_cache=true`, and `page_size=1`.
+Confirm `max_running_requests` matches the planned value. A missing or different
+field is a setup mismatch for the accelerated run; stop and fix the engine.
+Reference runs retain their actual execution settings in the same receipt.
+The current native reference also stops on the first matching substring,
+including a stop string inside one decoded token; the older reference only
+matched suffixes. Both current backends retain generated stop/EOS token IDs for
+usage accounting and trim the visible text in the frontend. Historical native
+results retain their original code identity.
+
+Preserve `server.json`, `requests.jsonl`, `sglang_http.jsonl`, and the engine log.
+The frontend's health response distinguishes SGLang and native reference runs;
+the official driver expects SGLang by default. A deliberate reference comparison
+uses `serve_next_checkpoint.py --backend native` and
+`run_next_benchmarks.py execute --expected-backend native`, with a separate result
+root. There is no automatic backend fallback or retry.
+
+Keep the independent uncompressed user simulator fixed across candidates. A
+`--mode full` frontend may use its own fixed SGLang engine and checkpoint; do not
+point it at the engine that is restarted for each candidate. Record its actual
+checkpoint and add `--model-alias gpt-4o-2024-05-13` for ToolSandbox user traffic.
+Benchmark token limits still apply below the frontend cap.
+
+If an existing `eval_h100.sh` still invokes only `serve_next_checkpoint.py`, update
+it to manage the engine and frontend above. Changing only its Python executable
+or pointing it at the legacy H200 launcher does not complete this migration.
 
 ### Official benchmark commands
 

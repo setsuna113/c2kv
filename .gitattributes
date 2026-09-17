@@ -4,3 +4,4 @@ python/next_compression/vendor/** -text whitespace=cr-at-eol
 
 # Unified-diff context retains upstream whitespace as patch data.
 python/next_compression/vendor/benchmarks/patches/**/*.patch -text -whitespace
+scripts/next_compression/sglang_bundle/overlay.patch -text -whitespace

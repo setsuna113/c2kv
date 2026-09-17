@@ -332,7 +332,12 @@ def fetch_health(endpoint: str, timeout: float = 30.0) -> dict[str, Any]:
 
 
 def validate_health(health: Mapping[str, Any], model_alias: str,
-                    benchmarks: Sequence[str]) -> None:
+                    benchmarks: Sequence[str], expected_backend: str = "sglang") -> None:
+    if health.get("generation_backend") != expected_backend:
+        raise ValueError(
+            f"candidate generation_backend={health.get('generation_backend')!r}; "
+            f"expected {expected_backend!r}"
+        )
     accepted = set(str(item) for item in health.get("accepted_model_aliases", [])
                    if isinstance(item, str))
     actor = health.get("model") or health.get("model_alias")
@@ -360,7 +365,9 @@ def _execution_command(manifest_path: Path, benchmark: str, endpoint: str,
 
 def build_plan(manifest_path: Path, endpoint: str, model_alias: str,
                output_dir: Path, benchmarks: Sequence[str] | None = None,
-               smoke_tasks: int | None = None) -> dict[str, Any]:
+               smoke_tasks: int | None = None, expected_backend: str = "sglang") -> dict[str, Any]:
+    if expected_backend not in {"sglang", "native"}:
+        raise ValueError("expected_backend must be sglang or native")
     manifest_path = Path(manifest_path).resolve()
     manifest = read_manifest(manifest_path)
     selected = parse_benchmarks(benchmarks or manifest["benchmark_order"])
@@ -389,6 +396,7 @@ def build_plan(manifest_path: Path, endpoint: str, model_alias: str,
         "schema": PLAN_SCHEMA, "manifest": str(manifest_path),
         "manifest_sha256": sha256_file(manifest_path),
         "endpoint": normalize_endpoint(endpoint), "model_alias": model_alias,
+        "expected_backend": expected_backend,
         "user_endpoint": manifest["user_endpoint"],
         "user_model_alias": manifest["user_model_alias"],
         "output_dir": str(output_dir), "benchmarks": selected,
@@ -432,7 +440,8 @@ def execute_plan(plan: Mapping[str, Any], *, run: bool) -> int:
     if result_path.exists():
         raise FileExistsError(f"automatic rerun disabled: {result_path}")
     health = fetch_health(str(plan["endpoint"]))
-    validate_health(health, str(plan["model_alias"]), list(plan["benchmarks"]))
+    validate_health(health, str(plan["model_alias"]), list(plan["benchmarks"]),
+                    str(plan.get("expected_backend", "sglang")))
     manifest = read_manifest(Path(plan["manifest"]))
     outcomes = []
     exit_code = 0

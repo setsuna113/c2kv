@@ -1,0 +1,128 @@
+{
+  "schema": "c2kv-next-sglang-source-v1",
+  "repository": "https://github.com/setsuna113/kvoffload-sglang-c2kv.git",
+  "base_revision": "8050362f0be5a70975bdc9811d7d515d0ef9098c",
+  "base_description": "task/final-system-integration with persistent-history attention fix",
+  "overlay": "overlay.patch",
+  "overlay_sha256": "19942124ef97619bf5ddbde43033f30dd0ba9e2ec61f8478bffcae550db21e79",
+  "capabilities": {
+    "native_endpoint": "/v1/c2kv/native_generate",
+    "native_capability_schema": "c2kv-native-packed-capability-v1",
+    "normal_query": "base",
+    "gist_parameter_dtype": "float32",
+    "packing_version": "history-event-v1",
+    "raw_layout_profile": "event-native-evidence-v1"
+  },
+  "files": [
+    {
+      "kind": "tracked",
+      "path": "python/sglang/srt/entrypoints/http_server.py",
+      "sha256": "3ca25988e47a14b98a50f414d6df7f34a7f821cda7d3c4e85f84ff6f2ad11a8b"
+    },
+    {
+      "kind": "tracked",
+      "path": "python/sglang/srt/entrypoints/openai/protocol.py",
+      "sha256": "43cc5b84bf8f42f014b76112a3b6609da7b5080387099dd775a083e4be747b9f"
+    },
+    {
+      "kind": "tracked",
+      "path": "python/sglang/srt/layers/sampler.py",
+      "sha256": "8907c749ce76ffd48bc4367e9774675712ff57f9a5bbc30e86de69361b327e96"
+    },
+    {
+      "kind": "tracked",
+      "path": "python/sglang/srt/managers/io_struct.py",
+      "sha256": "0973a478255a2c794509689f879fbcf233813466cf71ec3b48d82330d377ec97"
+    },
+    {
+      "kind": "tracked",
+      "path": "python/sglang/srt/managers/schedule_batch.py",
+      "sha256": "0afe155f86b1c6ddaf3428c620552f5fcbf8d365c58333e06af56614a021c5dc"
+    },
+    {
+      "kind": "tracked",
+      "path": "python/sglang/srt/managers/scheduler.py",
+      "sha256": "b7cdd6eb4e2ec89c54a2eaf426386b5be7b7b254879225df3237c9174495c2ea"
+    },
+    {
+      "kind": "tracked",
+      "path": "python/sglang/srt/managers/scheduler_output_processor_mixin.py",
+      "sha256": "f3bf049220bcf8c62061ef885faaf50d02a870456127e5d8a20e14412c801979"
+    },
+    {
+      "kind": "tracked",
+      "path": "python/sglang/srt/managers/tokenizer_communicator_mixin.py",
+      "sha256": "8917a55d9422bee92fc7520b612daa798ab604e363cdb0e338200c58545eaf6c"
+    },
+    {
+      "kind": "tracked",
+      "path": "python/sglang/srt/managers/tokenizer_manager.py",
+      "sha256": "53fef1a828df9247248549510bf87b535a04d5c33628246689f246f27ee19da4"
+    },
+    {
+      "kind": "tracked",
+      "path": "python/sglang/srt/model_executor/cuda_graph_runner.py",
+      "sha256": "a7df0dc45e21793d35b19caa862bec2791e8083c98e18b7a3214ce1eb080e478"
+    },
+    {
+      "kind": "tracked",
+      "path": "python/sglang/srt/model_executor/model_runner.py",
+      "sha256": "72ccd600df9c2727bde7360c6c61e52fca94c961a70ef18afe2596319064807e"
+    },
+    {
+      "kind": "tracked",
+      "path": "python/sglang/srt/models/qwen3.py",
+      "sha256": "231939548e57922bba94c518732f1431d6ed6e5780436d9773a32dd6ec40c709"
+    },
+    {
+      "kind": "tracked",
+      "path": "python/sglang/srt/server_args.py",
+      "sha256": "a60365ee8a9d50850218204ea63f267b7658ae69b25927ac64ef7694fd5de0b0"
+    },
+    {
+      "kind": "added",
+      "path": "python/sglang/srt/mem_cache/c2kv_exact_state.py",
+      "sha256": "d0356f0417ff674bd91af9253794cbba7212e814443cbc6b8a9e95ac26ab5386"
+    },
+    {
+      "kind": "added",
+      "path": "python/sglang/srt/mem_cache/c2kv_native_packed.py",
+      "sha256": "ce57dae8cadfda5d3331b45f79d604df27148a49c55cfd29fc11fdb092ad0cbe"
+    },
+    {
+      "kind": "added",
+      "path": "test/registered/unit/test_c2kv_exact_state.py",
+      "sha256": "79a032046b2987671ae494dba04d0560571b022d4e3e4cb9081c3fb7b21c936c"
+    },
+    {
+      "kind": "added",
+      "path": "test/registered/unit/test_c2kv_hidden_capture_mode.py",
+      "sha256": "7c8af9c97c27f4342a8645b65abb5dc74d3828753656f59b162ddb6211e5cc61"
+    },
+    {
+      "kind": "added",
+      "path": "test/registered/unit/test_c2kv_native_packed.py",
+      "sha256": "e9502d897d38aa66007a40a3d82242c0d8ee19210f16cb0efe9268dcef229083"
+    },
+    {
+      "kind": "added",
+      "path": "test/registered/unit/test_c2kv_strict_sampler.py",
+      "sha256": "72f1fafb4f930cfd3988d4f63b9f8f192cf3e6a05f1b08935624b1df0c4efe6a"
+    }
+  ],
+  "cuda_execution": {
+    "profile": "flashinfer-decode-graph-v1",
+    "attention_backend": "flashinfer",
+    "decode_cuda_graph": true,
+    "piecewise_cuda_graph": false,
+    "overlap_schedule": false,
+    "source_revision": "c2a8bfee544a6344e079cda23b80300c0f2a8d03",
+    "source_branch": "feat/c2kv-cuda-launch-profile",
+    "ported_paths": [
+      "python/sglang/srt/model_executor/model_runner.py",
+      "python/sglang/srt/model_executor/cuda_graph_runner.py"
+    ],
+    "loader_cleanup_revision": "1953ed7a23936a6f8a0e337977f0f5df49d249cb",
+    "scope": "CUDA execution only; preserve the existing B packing and inference contract"
+  }
+}

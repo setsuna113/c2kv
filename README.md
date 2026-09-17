@@ -2,11 +2,31 @@
 
 C2KV enables **independently prefilled text segments to be compressed into compact KV Cache representations** that can be correctly concatenated and recognized by downstream tasks. The core idea is to freeze the original model weights, introduce additional QKV Projection layers, and use C2KV as Memory Slots. Each text chunk is independently compressed into C2KV entries with properly repositioned RoPE (Rotary Position Embedding), so that multiple C2KV caches can be seamlessly stitched together for downstream inference.
 
-### Active development
+### Current B training and evaluation
 
-`task/bdf-pilot` is the consolidation branch for experiment D, experiment G
-and the modular benchmark system. Serving lives in the separate
-`sglang-c2kv` repository on its corresponding `task/bdf-pilot` branch.
+`task/next-compression-training` trains and evaluates the H0-H3 / T0-T1
+`next-compression-base-query-v1` checkpoints. The canonical evaluation handoff
+is [H100_AGENT.md](docs/next_compression/H100_AGENT.md), also applicable to H200.
+
+| Work | Entry point |
+|---|---|
+| Training | `agent/train_next_compression.py` |
+| Shared SGLang engine | `agent/launch_next_sglang.py` |
+| Training-aligned OpenAI frontend | `agent/serve_next_checkpoint.py --backend sglang --sglang-url ...` |
+| Official full-task evaluation | `agent/run_next_benchmarks.py` |
+
+The frontend preserves each checkpoint's training manifest and packing. It
+delegates model execution to the shared C2KV SGLang native-packed endpoint.
+`--backend native` explicitly selects the local reference implementation.
+The pinned SGLang source bundle travels with this repository; a branch name or
+an old serving environment alone does not identify the required implementation.
+
+### Historical D/G benchmark entry points
+
+The earlier `task/bdf-pilot` workflow below belongs to D/G checkpoints. Its
+checkpoint-profile resolver and launch script do not accept the new B training
+contract. Preserve these entries for their historical experiments; use the
+handoff above for next-compression checkpoints.
 
 | Work | Entry points |
 |---|---|

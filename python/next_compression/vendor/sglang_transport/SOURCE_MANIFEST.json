@@ -1,0 +1,27 @@
+{
+  "schema": "next-compression-sglang-transport-vendor-v1",
+  "source_checkout": "../c2kv-a-runtime/experiments/history_system/runtime",
+  "captured_on": "2026-09-17",
+  "files": [
+    {
+      "upstream_path": "python/history_memory/sglang_generator.py",
+      "upstream_sha256": "fc374df92df042df8166679d66a27b47c9d623c4138b395e3e27220f6f48eddb",
+      "vendored_path": "python/next_compression/vendor/sglang_transport/sglang_generator.py",
+      "vendored_sha256": "4178baa69d7ecbc8f1f49bb1c466f334cfb5fb9a3c75a6e9064d9a883017417b",
+      "only_changes": [
+        "import next-compression history_memory.packing for PackedMemory compatibility",
+        "allow a zero extraction budget for requests with no encoder chunks",
+        "reject native responses whose finish reason is not stop or length"
+      ]
+    },
+    {
+      "upstream_path": "python/history_memory/encoding_scope.py",
+      "upstream_sha256": "81036aba03bbdc054e7c9189922ff3cd4c42fda6cff16469a302f81a6b3a63ce",
+      "vendored_path": "python/next_compression/vendor/sglang_transport/encoding_scope.py",
+      "vendored_sha256": "6712143affb98807d14a92bd79f2977afe0665509f9eecc1eeaf3e977a3946ce",
+      "only_changes": [
+        "import next-compression history_memory.events for EventStore compatibility"
+      ]
+    }
+  ]
+}

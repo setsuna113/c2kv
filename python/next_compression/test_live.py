@@ -362,6 +362,7 @@ def test_tiny_real_checkpoint_serves_one_live_tool_request(tmp_path):
     service = LiveNextCompressionService.from_checkpoint(
         checkpoint,
         manifest_path,
+        backend="native",
         device="cpu",
         dtype="float32",
         ratio=8,

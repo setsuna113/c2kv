@@ -1,8 +1,9 @@
-"""Bounded OpenAI chat serving for one next-compression checkpoint.
+"""Training-aligned OpenAI frontend for one next-compression checkpoint.
 
 The live path rebuilds the same target-independent ``Decision`` and
 ``PackedMemory`` used by training.  It deliberately supports one checkpoint
-and one ratio per process; history and tool checkpoints are never composed.
+and one ratio per frontend; history and tool checkpoints are never composed.
+SGLang owns production inference. The native generator is an explicit reference.
 """
 
 from __future__ import annotations
@@ -14,6 +15,7 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass, fields
+from contextlib import nullcontext
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -841,7 +843,9 @@ def _stop_callback(tokenizer: Any, stops: Sequence[str]):
 
     def stopped(token_ids: tuple[int, ...]) -> bool:
         text = _decode(tokenizer, token_ids)
-        return any(text.endswith(stop) for stop in stops)
+        # Match the OpenAI/SGLang stop contract even when a token spans the
+        # stop string and additional text; the response is trimmed separately.
+        return any(stop in text for stop in stops)
 
     return stopped
 
@@ -909,7 +913,7 @@ def parse_native_response(text: str) -> ParsedNativeResponse:
 
 
 class LiveNextCompressionService:
-    """One loaded checkpoint, serialized generation, and finite work budget."""
+    """One checkpoint binding with a shared serving engine and finite work budget."""
 
     def __init__(
         self,
@@ -949,6 +953,9 @@ class LiveNextCompressionService:
         self.generator = generator
         self.tokenizer = tokenizer
         self.profile = dict(checkpoint_profile)
+        self.backend = self.profile.get("generation_backend", "native")
+        if self.backend not in {"sglang", "native"}:
+            raise ValueError("generation_backend must be sglang or native")
         self.binding = training_binding
         self.ratio = ratio
         self.mode = mode
@@ -960,6 +967,8 @@ class LiveNextCompressionService:
         self.max_requests = max_requests
         self.max_request_bytes = max_request_bytes
         self._lock = threading.Lock()
+        self._generation_lock = threading.Lock() if self.backend == "native" else nullcontext()
+        self._ledger_lock = threading.Lock()
         self._requests_started = 0
         self._requests_completed = 0
         self._requests_failed = 0
@@ -973,14 +982,31 @@ class LiveNextCompressionService:
         training_manifest: str | Path,
         **kwargs: Any,
     ) -> "LiveNextCompressionService":
-        from .inference import load_next_checkpoint
+        backend = kwargs.pop("backend", "sglang")
+        upstream = kwargs.pop("sglang_url", None)
+        journal_path = kwargs.pop("journal_path", None)
+        device, dtype = kwargs.pop("device"), kwargs.pop("dtype")
+        if backend == "sglang":
+            if not upstream:
+                raise ValueError("sglang_url is required for the SGLang backend")
+            from .sglang import load_sglang_checkpoint
 
-        generator, tokenizer, profile = load_next_checkpoint(
-            checkpoint,
-            device=kwargs.pop("device"),
-            dtype=kwargs.pop("dtype"),
-            decode_strategy="incremental",
-        )
+            generator, tokenizer, profile = load_sglang_checkpoint(
+                checkpoint, upstream=upstream, device=device, dtype=dtype,
+                max_new_tokens=kwargs["max_new_tokens"],
+                max_requests=kwargs["max_requests"], journal_path=journal_path,
+            )
+        elif backend == "native":
+            if upstream:
+                raise ValueError("sglang_url cannot be combined with the native reference")
+            from .inference import load_next_checkpoint
+
+            generator, tokenizer, profile = load_next_checkpoint(
+                checkpoint, device=device, dtype=dtype, decode_strategy="incremental",
+            )
+        else:
+            raise ValueError("backend must be sglang or native")
+        profile = {**profile, "generation_backend": backend}
         binding = load_training_binding(
             training_manifest,
             tokenizer=tokenizer,
@@ -991,6 +1017,8 @@ class LiveNextCompressionService:
     def _binding_metadata(self) -> dict[str, Any]:
         return {
             "protocol": LIVE_PROTOCOL,
+            "generation_backend": self.backend,
+            "serving_engine": self.profile.get("serving_engine"),
             "model": self.model,
             "accepted_model_aliases": list(self.accepted_models),
             "checkpoint": self.profile["checkpoint"],
@@ -1021,6 +1049,7 @@ class LiveNextCompressionService:
             }
         return {
             "status": "ok",
+            "max_new_tokens": self.max_new_tokens,
             **self._binding_metadata(),
             "limits": {
                 "max_new_tokens_per_request": self.max_new_tokens,
@@ -1035,8 +1064,9 @@ class LiveNextCompressionService:
                 "native_tool_calls": True,
                 "multiple_tool_calls": True,
                 "dual_checkpoint_composition": False,
-                "serialized_generation": True,
-                "request_local_cache_cleanup": True,
+                "serialized_generation": self.backend == "native",
+                "request_local_cache_cleanup": self.backend == "native",
+                "upstream_content_cache_reuse": self.backend == "sglang",
             },
             "counters": counters,
         }
@@ -1047,7 +1077,7 @@ class LiveNextCompressionService:
     def _write_ledger(self, record: Mapping[str, Any]) -> None:
         if self._ledger_path is None:
             return
-        with self._ledger_path.open("a", encoding="utf-8") as handle:
+        with self._ledger_lock, self._ledger_path.open("a", encoding="utf-8") as handle:
             handle.write(
                 json.dumps(record, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
                 + "\n"
@@ -1074,6 +1104,7 @@ class LiveNextCompressionService:
                 )
             self._requests_started += 1
             ordinal = self._requests_started
+        with self._generation_lock:
             request_id = f"chatcmpl-c2kv-{ordinal:08d}-{uuid.uuid4().hex[:12]}"
             try:
                 try:
@@ -1096,14 +1127,17 @@ class LiveNextCompressionService:
                         reason,
                         error_type="c2kv_model_failure",
                     ) from error
-                callback = _stop_callback(self.tokenizer, stops)
+                stop_options = (
+                    {"stop_strings": stops} if self.backend == "sglang"
+                    else {"token_prefix_stop": _stop_callback(self.tokenizer, stops)}
+                )
                 try:
                     with self.generator.decision_scope(session_id=None):
                         generation = self.generator.generate(
                             memory,
                             ratio=self.ratio,
                             max_new_tokens=max_new_tokens,
-                            token_prefix_stop=callback,
+                            **stop_options,
                             trace_context={
                                 "attempt_uid": request_id,
                                 "session_id": decision.store.session_id,
@@ -1195,8 +1229,9 @@ class LiveNextCompressionService:
                     },
                     "x_c2kv": x_c2kv,
                 }
-                self._requests_completed += 1
-                self._completion_tokens += completion_tokens
+                with self._lock:
+                    self._requests_completed += 1
+                    self._completion_tokens += completion_tokens
                 self._write_ledger(
                     {
                         "request_ordinal": ordinal,
@@ -1220,7 +1255,8 @@ class LiveNextCompressionService:
                 )
                 return response
             except BaseException as error:
-                self._requests_failed += 1
+                with self._lock:
+                    self._requests_failed += 1
                 self._write_ledger(
                     {
                         "request_ordinal": ordinal,
@@ -1238,7 +1274,7 @@ class LiveNextCompressionService:
 def make_http_server(
     service: LiveNextCompressionService, host: str, port: int
 ) -> ThreadingHTTPServer:
-    """Construct a local HTTP server; model work remains serialized by service."""
+    """Construct a local frontend; SGLang owns model scheduling."""
 
     if host != "127.0.0.1":
         raise ValueError("This server is intentionally bound to 127.0.0.1")

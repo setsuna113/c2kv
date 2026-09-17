@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Serve one frozen next-compression checkpoint through an OpenAI chat API."""
+"""Expose a frozen next-compression checkpoint through the shared SGLang engine."""
 
 from __future__ import annotations
 
@@ -18,7 +18,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--checkpoint", action="append", required=True)
     parser.add_argument("--training-manifest", action="append", required=True)
     parser.add_argument("--ratio", type=int, choices=(8, 12), required=True)
-    parser.add_argument("--device", default="cuda", choices=("cuda", "cpu"))
+    parser.add_argument("--backend", choices=("sglang", "native"), default="sglang",
+                        help="sglang is the evaluation backend; native is the local reference")
+    parser.add_argument("--sglang-url", help="bare shared engine URL, e.g. http://127.0.0.1:34010")
+    parser.add_argument("--device", default="cuda", choices=("cuda", "npu", "cpu"))
     parser.add_argument(
         "--dtype",
         default="bfloat16",
@@ -34,6 +37,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--model", default="c2kv-next")
     parser.add_argument("--model-alias", action="append", default=[])
     args = parser.parse_args(argv)
+    if args.backend == "sglang" and not args.sglang_url:
+        parser.error("--sglang-url is required for the default SGLang backend")
+    if args.backend == "native" and args.sglang_url:
+        parser.error("--sglang-url cannot be combined with --backend native")
+    if args.backend == "native" and args.device == "npu":
+        parser.error("the native reference supports cpu/cuda; use SGLang for npu")
     if len(args.checkpoint) != 1 or len(args.training_manifest) != 1:
         parser.error(
             "exactly one --checkpoint and one --training-manifest are required; "
@@ -58,6 +67,9 @@ def main(argv: list[str] | None = None) -> int:
         args.training_manifest,
         device=args.device,
         dtype=args.dtype,
+        backend=args.backend,
+        sglang_url=args.sglang_url,
+        journal_path=output_dir / "sglang_http.jsonl",
         ratio=args.ratio,
         mode=args.mode,
         model=args.model,

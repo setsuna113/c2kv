@@ -65,10 +65,14 @@ def test_dry_run_writes_plan_without_health_or_worker(tmp_path, monkeypatch):
 
 
 def test_health_requires_toolsandbox_wire_alias_and_cap():
-    health = {"status": "ready", "model": "candidate",
+    health = {"status": "ready", "model": "candidate", "generation_backend": "sglang",
               "accepted_model_aliases": ["candidate", "gpt-4o-2024-05-13"],
               "max_new_tokens": 4096}
     B.validate_health(health, "candidate", ["toolsandbox", "acebench"])
+    with pytest.raises(ValueError, match="generation_backend"):
+        B.validate_health({**health, "generation_backend": "native"}, "candidate", ["bfcl"])
+    B.validate_health({**health, "generation_backend": "native"}, "candidate", ["bfcl"],
+                      expected_backend="native")
     with pytest.raises(ValueError, match="ToolSandbox wire alias"):
         B.validate_health({**health, "accepted_model_aliases": ["candidate"]},
                           "candidate", ["toolsandbox"])
@@ -145,6 +149,7 @@ def test_execute_continues_after_independent_benchmark_failure(tmp_path, monkeyp
     monkeypatch.setattr(B, "fetch_health", lambda *_: {
         "status": "ready", "model": "candidate",
         "accepted_model_aliases": ["candidate"], "max_new_tokens": 4096,
+        "generation_backend": "sglang",
     })
     monkeypatch.setattr(B, "validate_benchmark_source", lambda *_: None)
     calls = []

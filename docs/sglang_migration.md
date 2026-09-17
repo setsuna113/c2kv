@@ -1,5 +1,11 @@
 # hf_server → SGLang c2kv fork 迁移记录
 
+> **当前 B next-compression 入口**：本页记录旧 D/G 迁移历史，下面的
+> branch、query projection 与 checkpoint gate 不适用于
+> `next-compression-base-query-v1`。新版评测见
+> [H100_AGENT.md](next_compression/H100_AGENT.md)：复用统一 SGLang 的
+> native-packed 接口，保留 B 的训练 packing，normal query 固定为 `base`。
+
 > **2026-09-02 更新**：serving 树改为 fork 分支 `task/c2kv-serve-align`
 > （基于雨晗 `c2kv-sglang-bfcl` @ 7de9e8105，已含本文件后面描述的 4 文件补丁，
 > `benchmarks/backends/sglang_patches/` 作废）。启动时加

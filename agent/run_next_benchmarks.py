@@ -72,7 +72,7 @@ def _execute(args: argparse.Namespace) -> int:
     selected = parse_benchmarks(args.benchmarks) if args.benchmarks else None
     plan = build_plan(args.manifest, args.endpoint, args.model_alias,
                       args.output_dir, benchmarks=selected,
-                      smoke_tasks=args.smoke_tasks)
+                      smoke_tasks=args.smoke_tasks, expected_backend=args.expected_backend)
     _print_plan(plan)
     return execute_plan(plan, run=args.run)
 
@@ -113,6 +113,8 @@ def build_parser() -> argparse.ArgumentParser:
                          help="evaluated candidate OpenAI /v1 endpoint")
     execute.add_argument("--model-alias", required=True,
                          help="candidate wire model alias advertised by /health")
+    execute.add_argument("--expected-backend", choices=("sglang", "native"), default="sglang",
+                         help="require this candidate backend; native is an explicit reference run")
     execute.add_argument("--benchmarks", default="",
                          help="comma-separated subset; omitted uses every frozen benchmark")
     execute.add_argument("--smoke-tasks", type=int,

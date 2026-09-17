@@ -1,0 +1,2539 @@
+diff --git a/python/sglang/srt/entrypoints/http_server.py b/python/sglang/srt/entrypoints/http_server.py
+index 7468a68..212f307 100644
+--- a/python/sglang/srt/entrypoints/http_server.py
++++ b/python/sglang/srt/entrypoints/http_server.py
+@@ -81,6 +81,7 @@ from sglang.srt.entrypoints.ollama.serving import OllamaServing
+ from sglang.srt.entrypoints.openai.protocol import (
+     C2KVExtractRequest,
+     C2KVExtractResponse,
++    C2KVNativePackedGenerateRequest,
+     C2KVRepairExtractRequest,
+     C2KVRepairExtractResponse,
+     ChatCompletionRequest,
+@@ -115,6 +116,7 @@ from sglang.srt.function_call.function_call_parser import FunctionCallParser
+ from sglang.srt.managers.io_struct import (
+     AbortReq,
+     AttachHiCacheStorageReqInput,
++    C2KVSegmentInfo,
+     CheckWeightsReqInput,
+     CloseSessionReqInput,
+     ConfigureLoggingReq,
+@@ -150,6 +152,21 @@ from sglang.srt.managers.io_struct import (
+     UpdateWeightVersionReqInput,
+     VertexGenerateReqInput,
+ )
++from sglang.srt.mem_cache.c2kv_native_packed import (
++    EXTRACTION_BUDGET_ERROR_CODE,
++    NATIVE_PACKED_CAPABILITY_SCHEMA,
++    NATIVE_PACKED_RESPONSE_SCHEMA,
++    NONFINITE_LOGITS_ERROR_CODE,
++    PACKING_VERSION as C2KV_NATIVE_PACKING_VERSION,
++    RAW_LAYOUT_PROFILE as C2KV_NATIVE_RAW_LAYOUT_PROFILE,
++    NativeGenerationOutputError,
++    canonical_model_binding,
++    extraction_budget_error_payload,
++    float16_roundtrip,
++    generation_output_error_payload,
++    plan_native_packed_request,
++    validate_native_generation_output,
++)
+ from sglang.srt.managers.multi_tokenizer_mixin import (
+     MultiTokenizerRouter,
+     TokenizerWorker,
+@@ -581,6 +598,7 @@ async def model_info():
+         "model_type": getattr(model_config.hf_config, "model_type", None),
+         "architectures": getattr(model_config.hf_config, "architectures", None),
+         "weight_version": _global_state.tokenizer_manager.server_args.weight_version,
++        "c2kv_native_packed": _c2kv_native_capability(),
+         # "hf_config": model_config.hf_config.to_dict(),
+     }
+     return result
+@@ -699,6 +717,417 @@ async def generate_request(obj: GenerateReqInput, request: Request):
+             return _create_error_response(e)
+ 
+ 
++def _c2kv_dtype_nbytes(dtype_name: str) -> int:
++    normalized = str(dtype_name).replace("torch.", "").lower()
++    if normalized in {"float64", "int64"}:
++        return 8
++    if normalized in {"float32", "int32"}:
++        return 4
++    if normalized in {"float16", "bfloat16", "int16"}:
++        return 2
++    if normalized in {
++        "float8_e4m3fn",
++        "float8_e5m2",
++        "fp8_e4m3",
++        "fp8_e5m2",
++        "int8",
++        "uint8",
++    }:
++        return 1
++    raise ValueError(f"Unsupported C2KV KV dtype for accounting: {dtype_name!r}")
++
++
++def _c2kv_native_capability() -> Dict[str, Any]:
++    tokenizer_manager = _global_state.tokenizer_manager
++    server_args = tokenizer_manager.server_args
++    model_config = tokenizer_manager.model_config
++    hf_config = getattr(model_config, "hf_text_config", None) or getattr(
++        model_config, "hf_config", None
++    )
++    dtype_name = str(getattr(model_config, "dtype", server_args.dtype)).replace(
++        "torch.", ""
++    )
++    configured_kv_dtype = str(getattr(server_args, "kv_cache_dtype", "auto"))
++    effective_kv_dtype = (
++        dtype_name if configured_kv_dtype in {"", "auto", "None"} else configured_kv_dtype
++    )
++    shadow_layer = getattr(server_args, "c2kv_shadow_feature_layer", None)
++    num_layers = int(getattr(model_config, "num_hidden_layers", 0))
++    normalized_shadow_layer = None
++    if shadow_layer is not None:
++        normalized_shadow_layer = (
++            int(shadow_layer) if int(shadow_layer) >= 0 else num_layers + int(shadow_layer)
++        )
++    model_binding = canonical_model_binding(
++        model_path=tokenizer_manager.model_path,
++        tokenizer_path=getattr(server_args, "tokenizer_path", None),
++        weight_version=getattr(server_args, "weight_version", None),
++        dtype=dtype_name,
++        kv_cache_dtype=effective_kv_dtype,
++        gist_parameter_dtype="float32",
++        gist_compute_dtype=dtype_name,
++        gist_type=getattr(server_args, "c2kv_gist_type", "dynamic-interleave"),
++        gist_param=getattr(server_args, "c2kv_gist_param", "qkv"),
++        gist_extra_embed_num=getattr(hf_config, "gist_extra_embed_num", 1),
++        gist_residual_type=getattr(hf_config, "gist_residual_type", "none"),
++        gist_overlap=getattr(hf_config, "gist_overlap", 0),
++        pic_enabled=bool(getattr(hf_config, "pic_enabled", False)),
++        pic_param=getattr(hf_config, "pic_param", "qkv"),
++        # The event-native endpoint always selects the frozen C1000 base-query
++        # path independently of the generic chat endpoint's server default.
++        query_projection="base",
++    )
++    num_kv_heads = int(getattr(model_config, "num_key_value_heads", 0))
++    head_dim = int(getattr(model_config, "head_dim", 0))
++    value_head_dim = int(getattr(model_config, "v_head_dim", head_dim))
++    kv_bytes_per_token = (
++        num_layers
++        * num_kv_heads
++        * (head_dim + value_head_dim)
++        * _c2kv_dtype_nbytes(effective_kv_dtype)
++    )
++    return {
++        "schema": NATIVE_PACKED_CAPABILITY_SCHEMA,
++        "enabled": bool(getattr(server_args, "enable_c2kv", False)),
++        "endpoint": "/v1/c2kv/native_generate",
++        "packing_version": C2KV_NATIVE_PACKING_VERSION,
++        "raw_layout_profile": C2KV_NATIVE_RAW_LAYOUT_PROFILE,
++        "model_binding": model_binding,
++        "parameter_version": model_binding["weight_version"],
++        "kv_bytes_per_token": kv_bytes_per_token,
++        "num_hidden_layers": num_layers,
++        "num_key_value_heads": num_kv_heads,
++        "head_dim": head_dim,
++        "value_head_dim": value_head_dim,
++        "shadow_feature_layer": normalized_shadow_layer,
++        "shadow_feature_readout": "decoder_layer_output",
++        "shadow_feature_stored_dtype": "float16",
++        "gist_parameter_dtype": "float32",
++        "gist_compute_dtype": dtype_name,
++        "base_query_enforced": True,
++        "exact_state": {
++            "schema": "c2kv-exact-backend-state-v1",
++            "enabled": os.environ.get("C2KV_ENABLE_EXACT_STATE") == "1",
++            "endpoint": "/v1/c2kv/exact_state",
++            "boundary": "completed_request_quiescent",
++        },
++        "server_default_query_projection": getattr(
++            server_args, "c2kv_query_proj", "base"
++        ),
++    }
++
++
++@app.post("/v1/c2kv/exact_state", response_class=SGLangORJSONResponse)
++async def v1_c2kv_exact_state(raw_request: Request):
++    """Snapshot an explicitly isolated engine; never replay a prompt."""
++    if os.environ.get("C2KV_ENABLE_EXACT_STATE") != "1":
++        return SGLangORJSONResponse({"error": "Exact state endpoint is disabled"}, status_code=403)
++    payload = await raw_request.json()
++    if not isinstance(payload, dict) or payload.get("operation") not in {"capture", "restore", "release"}:
++        return SGLangORJSONResponse({"error": "Invalid exact state operation"}, status_code=400)
++    result = await _global_state.tokenizer_manager.c2kv_exact_state(
++        payload["operation"], payload.get("snapshot_id")
++    )
++    if not result.success:
++        return SGLangORJSONResponse({"error": result.error}, status_code=409)
++    return SGLangORJSONResponse(result.state)
++
++
++@app.post("/v1/c2kv/native_generate", response_class=SGLangORJSONResponse)
++async def v1_c2kv_native_generate(
++    request: C2KVNativePackedGenerateRequest, raw_request: Request
++):
++    """Generate from exact event-native token IDs and cached gist chunks."""
++
++    try:
++        tokenizer_manager = _global_state.tokenizer_manager
++        capability = _c2kv_native_capability()
++        if not capability["enabled"]:
++            raise ValueError("C2KV native packed generation requires --enable-c2kv")
++        if capability["model_binding"]["pic_enabled"]:
++            raise ValueError(
++                "C2KV native packed generation requires gist compression, not PIC"
++            )
++        if request.max_extraction_calls < 0:
++            raise ValueError("max_extraction_calls must be nonnegative")
++        sampling_params = dict(request.sampling_params)
++        if sampling_params.get("n", 1) != 1:
++            raise ValueError("C2KV native packed generation supports only n=1")
++        if sampling_params.get("max_new_tokens", 0) <= 0:
++            raise ValueError("sampling_params.max_new_tokens must be positive")
++        sampling_params.setdefault("temperature", 0.0)
++        if float(sampling_params["temperature"]) != 0.0:
++            raise ValueError("C2KV native packed generation requires greedy decoding")
++
++        shadow_request = request.shadow_features
++        shadow_enabled = bool(
++            shadow_request is not None and shadow_request.get("enabled", True)
++        )
++        normalized_shadow_layer = capability["shadow_feature_layer"]
++        if shadow_enabled:
++            requested_layer = shadow_request.get("prefill_layer")
++            if type(requested_layer) is not int:
++                raise ValueError(
++                    "shadow_features.prefill_layer must be an integer when enabled"
++                )
++            num_layers = capability["num_hidden_layers"]
++            requested_normalized = (
++                requested_layer
++                if requested_layer >= 0
++                else num_layers + requested_layer
++            )
++            if requested_normalized != normalized_shadow_layer:
++                raise ValueError(
++                    "C2KV_NATIVE_SHADOW_LAYER_MISMATCH: requested layer "
++                    f"{requested_layer} resolves to {requested_normalized}, but "
++                    f"the server captures {normalized_shadow_layer}"
++                )
++
++        encoder_chunks = [chunk.model_dump() for chunk in request.encoder_chunks]
++        compression_chunks = [
++            chunk.model_dump() for chunk in request.compression_chunks
++        ]
++        plan = plan_native_packed_request(
++            system_input_ids=request.system_input_ids,
++            workspace_input_ids=request.workspace_input_ids,
++            encoder_chunks=encoder_chunks,
++            compression_chunks=compression_chunks,
++            model_binding=capability["model_binding"],
++            packing_version=request.packing_version,
++            raw_layout_profile=request.raw_layout_profile,
++            encoding_scope=request.encoding_scope,
++            compression_ratio=request.compression_ratio,
++        )
++
++        resolved: Dict[str, Dict[str, Any]] = {}
++        cache_hits = 0
++        cache_misses = 0
++        materialized_encoder_tokens = 0
++        scope_reused_encoder_tokens = 0
++        base_rid = request.rid or f"c2kv-native-{time.time_ns()}"
++        for index, chunk in enumerate(plan.unique_chunks):
++            result = await tokenizer_manager.c2kv_extract(
++                input_ids=list(chunk["token_ids"]),
++                input_text="",
++                compression_ratio=request.compression_ratio,
++                rid=f"{base_rid}:extract:{index}",
++                allow_cache_miss=cache_misses < request.max_extraction_calls,
++            )
++            if not result.success:
++                if isinstance(result.error, str) and result.error.startswith(
++                    EXTRACTION_BUDGET_ERROR_CODE + ":"
++                ):
++                    payload = extraction_budget_error_payload(
++                        message=result.error,
++                        requested_chunks=len(request.encoder_chunks)
++                        + len(request.compression_chunks),
++                        unique_chunks=len(plan.unique_chunks),
++                        cache_hits=cache_hits,
++                        cache_misses=cache_misses,
++                        max_extraction_calls=request.max_extraction_calls,
++                    )
++                    logger.error("[c2kv-native] request rejected: %s", result.error)
++                    return ORJSONResponse(
++                        payload, status_code=HTTPStatus.BAD_REQUEST
++                    )
++                raise ValueError(result.error)
++            if result.original_seq_len != len(chunk["token_ids"]):
++                raise ValueError(
++                    "C2KV native extraction returned an inconsistent source length: "
++                    f"{result.original_seq_len} != {len(chunk['token_ids'])}"
++                )
++            cache_hit = bool(result.cache_hit)
++            if cache_hit:
++                cache_hits += 1
++                scope_reused_encoder_tokens += len(chunk["token_ids"])
++            else:
++                cache_misses += 1
++                materialized_encoder_tokens += len(chunk["token_ids"])
++            resolved[chunk["handle"]] = {
++                "chunk_id": chunk["chunk_id"],
++                "handle": chunk["handle"],
++                "cache_key": result.key_hash,
++                "cache_hit": cache_hit,
++                "gist_len": result.gist_len,
++                "original_seq_len": result.original_seq_len,
++            }
++
++        segments = []
++        for handle, (token_start, token_end) in zip(
++            plan.selected_handles, plan.segment_boundaries
++        ):
++            segments.append(
++                C2KVSegmentInfo(
++                    key_hash=resolved[handle]["cache_key"],
++                    token_start=token_start,
++                    token_end=token_end,
++                    use_gist_projection=False,
++                )
++            )
++
++        generation_request = GenerateReqInput(
++            rid=base_rid,
++            input_ids=list(plan.logical_input_ids),
++            sampling_params=sampling_params,
++            return_logprob=True,
++            logprob_start_len=-1,
++            top_logprobs_num=0,
++            token_ids_logprob=None,
++            stream=False,
++            return_hidden_states=shadow_enabled,
++            c2kv_prompt_last_hidden_only=shadow_enabled,
++            c2kv_segments=segments,
++            c2kv_kv_memory_hint={},
++            # The selected C1000 checkpoint contract uses ordinary/base query
++            # projections after injected gist KV.
++            c2kv_use_gist_projection=False,
++        )
++        generated = await tokenizer_manager.generate_request(
++            generation_request, raw_request
++        ).__anext__()
++        meta_info = generated.get("meta_info") or {}
++        raw_output_ids = list(generated.get("output_ids") or [])
++        raw_logprobs = list(meta_info.get("output_token_logprobs") or [])
++        try:
++            output_ids, token_logprobs = validate_native_generation_output(
++                raw_output_ids, raw_logprobs
++            )
++        except NativeGenerationOutputError as error:
++            logger.error("[c2kv-native] generation failed: %s", error)
++            return ORJSONResponse(
++                generation_output_error_payload(
++                    error=error,
++                    rid=base_rid,
++                    session_id=request.session_id,
++                    generation_id=request.generation_id,
++                ),
++                status_code=HTTPStatus.BAD_REQUEST,
++            )
++
++        shadow_features = None
++        if shadow_enabled:
++            hidden_steps = meta_info.get("hidden_states") or []
++            if not hidden_steps:
++                raise ValueError(
++                    "C2KV native generation did not return the configured shadow feature"
++                )
++            prefill_state = hidden_steps[0]
++            if prefill_state and isinstance(prefill_state[0], list):
++                prefill_state = prefill_state[-1]
++            if not isinstance(prefill_state, list) or not prefill_state:
++                raise ValueError("C2KV native prompt_last hidden state is malformed")
++            logical_position = (
++                len(request.system_input_ids)
++                + sum(len(chunk.token_ids) for chunk in request.encoder_chunks)
++                + len(request.workspace_input_ids)
++                - 1
++            )
++            shadow_features = {
++                "schema": "event-native-shadow-features-v1",
++                "status": "captured",
++                "bindings": {
++                    "model": capability["model_binding"],
++                    "layer_indexing": "zero_based_decoder_layer_output",
++                },
++                "prefill": {
++                    "status": "captured",
++                    "reason": None,
++                    "layer": normalized_shadow_layer,
++                    "position": {
++                        "kind": "prompt_last",
++                        "logical_position": logical_position,
++                    },
++                    "readout": "decoder_layer_output",
++                    "stored_dtype": "float16",
++                    "hidden": float16_roundtrip(prefill_state),
++                },
++                "memgen": {
++                    "status": "disabled",
++                    "layer": None,
++                    "hidden": None,
++                },
++                "capture_errors": [],
++            }
++
++        kv_bytes_per_token = capability["kv_bytes_per_token"]
++        costs = dict(plan.costs)
++        costs.update(
++            {
++                "materialized_encoder_tokens": materialized_encoder_tokens,
++                "scope_reused_encoder_tokens": scope_reused_encoder_tokens,
++                "system_prefix_kv_logical_bytes": (
++                    costs["system_tokens"] * kv_bytes_per_token
++                ),
++                "gist_prefix_kv_logical_bytes": (
++                    costs["gist_prefix_kv_tokens"] * kv_bytes_per_token
++                ),
++                "raw_workspace_kv_logical_bytes": (
++                    costs["raw_workspace_kv_tokens"] * kv_bytes_per_token
++                ),
++                "resident_kv_logical_bytes": (
++                    costs["resident_kv_tokens"] * kv_bytes_per_token
++                ),
++                "kv_bytes_per_token": kv_bytes_per_token,
++            }
++        )
++        finish_reason_detail = meta_info.get("finish_reason")
++        finish_reason = (
++            finish_reason_detail.get("type")
++            if isinstance(finish_reason_detail, dict)
++            else finish_reason_detail
++        )
++
++        return orjson_response(
++            {
++                "schema": NATIVE_PACKED_RESPONSE_SCHEMA,
++                "rid": base_rid,
++                "session_id": request.session_id,
++                "generation_id": request.generation_id,
++                "output_ids": output_ids,
++                "text": generated.get("text", ""),
++                "token_logprobs": token_logprobs,
++                "finish_reason": finish_reason,
++                "finish_reason_detail": finish_reason_detail,
++                "encoder_chunks": [
++                    resolved[handle] for handle in plan.selected_handles
++                ],
++                "compression_chunks": [
++                    resolved[handle] for handle in plan.compression_handles
++                ],
++                "extraction": {
++                    "requested_chunks": len(request.encoder_chunks)
++                    + len(request.compression_chunks),
++                    "unique_chunks": len(plan.unique_chunks),
++                    "cache_hits": cache_hits,
++                    "cache_misses": cache_misses,
++                    "model_calls": cache_misses,
++                    "max_extraction_calls": request.max_extraction_calls,
++                },
++                "costs": costs,
++                "shadow_features": shadow_features,
++                "allocator": meta_info.get("kv_memory_report"),
++                "sglang_runtime": meta_info.get("sglang_runtime"),
++            }
++        )
++    except ValueError as error:
++        logger.error("[c2kv-native] request rejected: %s", error)
++        if str(error).startswith(NONFINITE_LOGITS_ERROR_CODE + ":"):
++            native_error = NativeGenerationOutputError(
++                NONFINITE_LOGITS_ERROR_CODE,
++                str(error).split(":", 1)[1].strip(),
++            )
++            return ORJSONResponse(
++                generation_output_error_payload(
++                    error=native_error,
++                    rid=request.rid,
++                    session_id=request.session_id,
++                    generation_id=request.generation_id,
++                ),
++                status_code=HTTPStatus.BAD_REQUEST,
++            )
++        return _create_error_response(error)
++
++
+ @app.api_route("/encode", methods=["POST", "PUT"])
+ async def encode_request(obj: EmbeddingReqInput, request: Request):
+     """Handle an embedding request."""
+diff --git a/python/sglang/srt/entrypoints/openai/protocol.py b/python/sglang/srt/entrypoints/openai/protocol.py
+index e84e4fb..cd6c203 100644
+--- a/python/sglang/srt/entrypoints/openai/protocol.py
++++ b/python/sglang/srt/entrypoints/openai/protocol.py
+@@ -1573,6 +1573,46 @@ class C2KVExtractRequest(BaseModel):
+     tools: Optional[List[Dict]] = None
+ 
+ 
++class C2KVNativePackedChunk(BaseModel):
++    """One exact encoder input in an event-native packed request."""
++
++    chunk_id: str
++    event_id: str
++    part_index: int
++    source_indices: List[int] = Field(default_factory=list)
++    source_token_start: int
++    source_token_end: int
++    token_ids: List[int]
++    handle: Optional[str] = None
++    # Required only when the chunk is selected for injection.
++    source_position_start: Optional[int] = None
++    gist_position_ids: Optional[List[int]] = None
++
++
++class C2KVNativePackedGenerateRequest(BaseModel):
++    """Exact-token event-native generation over cached C2KV gist chunks."""
++
++    schema_: Literal["c2kv-native-packed-generation-v1"] = Field(
++        alias="schema", default="c2kv-native-packed-generation-v1"
++    )
++    rid: Optional[str] = None
++    session_id: Optional[str] = None
++    generation_id: Optional[str] = None
++    packing_version: Literal["history-event-v1"] = "history-event-v1"
++    raw_layout_profile: Literal["event-native-evidence-v1"] = (
++        "event-native-evidence-v1"
++    )
++    encoding_scope: str
++    compression_ratio: int = 8
++    max_extraction_calls: int
++    system_input_ids: List[int] = Field(default_factory=list)
++    workspace_input_ids: List[int]
++    encoder_chunks: List[C2KVNativePackedChunk] = Field(default_factory=list)
++    compression_chunks: List[C2KVNativePackedChunk] = Field(default_factory=list)
++    sampling_params: Dict[str, Any]
++    shadow_features: Optional[Dict[str, Any]] = None
++
++
+ class C2KVExtractResponse(BaseModel):
+     """Response from a C2KV gist extraction."""
+ 
+diff --git a/python/sglang/srt/layers/sampler.py b/python/sglang/srt/layers/sampler.py
+index e947a48..f5cbedd 100644
+--- a/python/sglang/srt/layers/sampler.py
++++ b/python/sglang/srt/layers/sampler.py
+@@ -36,12 +36,44 @@ SYNC_TOKEN_IDS_ACROSS_TP = get_bool_env_var("SYNC_TOKEN_IDS_ACROSS_TP")
+ SGLANG_RETURN_ORIGINAL_LOGPROB = get_bool_env_var("SGLANG_RETURN_ORIGINAL_LOGPROB")
+ _CUSTOM_SAMPLER_FACTORIES: Dict[str, Callable[[], "Sampler"]] = {}
+ _BUILT_IN_SAMPLING_BACKENDS = {"flashinfer", "pytorch", "ascend"}
++C2KV_STRICT_NONFINITE_SAMPLING = "C2KV_STRICT_NONFINITE_SAMPLING"
++NONFINITE_LOGITS_ERROR_CODE = "C2KV_NATIVE_NONFINITE_LOGITS"
++
++
++def _raise_on_c2kv_nonfinite_logits(logits: torch.Tensor) -> None:
++    rows = logits.reshape(logits.shape[0], -1)
++    nan = torch.isnan(rows)
++    positive_infinity = torch.isposinf(rows)
++    has_finite_candidate = torch.any(torch.isfinite(rows), dim=1)
++    invalid_rows = (
++        torch.any(nan, dim=1)
++        | torch.any(positive_infinity, dim=1)
++        | ~has_finite_candidate
++    )
++    if not bool(torch.any(invalid_rows)):
++        return
++
++    batch_rows = int(invalid_rows.sum().item())
++    no_finite_candidate_rows = int((~has_finite_candidate).sum().item())
++    nan_values = int(nan.sum().item())
++    positive_infinity_values = int(positive_infinity.sum().item())
++    masked_negative_infinity_values = int(torch.isneginf(rows).sum().item())
++    raise ValueError(
++        f"{NONFINITE_LOGITS_ERROR_CODE}: invalid logits before sampling "
++        f"(batch_rows={batch_rows}, nan={nan_values}, "
++        f"posinf={positive_infinity_values}, "
++        f"no_finite_candidate_rows={no_finite_candidate_rows}, "
++        f"masked_neginf={masked_negative_infinity_values})"
++    )
+ 
+ 
+ class Sampler(nn.Module):
+     def __init__(self):
+         super().__init__()
+         self.use_nan_detection = get_global_server_args().enable_nan_detection
++        self.use_c2kv_strict_nonfinite_sampling = get_bool_env_var(
++            C2KV_STRICT_NONFINITE_SAMPLING
++        )
+         self.tp_sync_group = get_tp_group().device_group
+         if is_dp_attention_enabled():
+             self.tp_sync_group = get_attention_tp_group().device_group
+@@ -63,6 +95,11 @@ class Sampler(nn.Module):
+         if sampling_info.has_custom_logit_processor:
+             apply_custom_logit_processor(logits, sampling_info)
+ 
++        # C2KV evidence collection must retain a numerical failure as a failure.
++        # Never replace invalid logits or let argmax silently select token zero.
++        if self.use_c2kv_strict_nonfinite_sampling:
++            _raise_on_c2kv_nonfinite_logits(logits)
++
+         # Detect and handle NaN values in logits
+         if self.use_nan_detection and torch.any(torch.isnan(logits)):
+             logger.warning("Detected errors during sampling! NaN in the logits.")
+diff --git a/python/sglang/srt/managers/io_struct.py b/python/sglang/srt/managers/io_struct.py
+index 4625f9b..b88c7a3 100644
+--- a/python/sglang/srt/managers/io_struct.py
++++ b/python/sglang/srt/managers/io_struct.py
+@@ -248,6 +248,9 @@ class GenerateReqInput(BaseReq):
+     # Tri-state: True/False = explicit per-request override taken from a chat
+     # message field; None = unset -> ServerArgs.c2kv_query_proj decides.
+     c2kv_use_gist_projection: Optional[bool] = None
++    # Internal native-serving mode: retain the final prompt row from the
++    # configured auxiliary layer and suppress per-token decode hidden states.
++    c2kv_prompt_last_hidden_only: bool = False
+     min_dynamic_patch: Optional[int] = None
+     image_max_dynamic_patch: Optional[int] = None
+     video_max_dynamic_patch: Optional[int] = None
+@@ -384,6 +387,7 @@ class GenerateReqInput(BaseReq):
+             self.c2kv_segments is not None
+             or self.c2kv_kv_memory_hint is not None
+             or self.c2kv_use_gist_projection is not None
++            or self.c2kv_prompt_last_hidden_only
+         ):
+             raise ValueError("C2KV fields are not supported on batched requests")
+ 
+@@ -789,6 +793,7 @@ class TokenizedGenerateReqInput(BaseReq):
+     # Tri-state: True/False = explicit per-request override taken from a chat
+     # message field; None = unset -> ServerArgs.c2kv_query_proj decides.
+     c2kv_use_gist_projection: Optional[bool] = None
++    c2kv_prompt_last_hidden_only: bool = False
+ 
+ 
+ @dataclass
+@@ -2072,6 +2077,19 @@ class C2KVSegmentInfo:
+         self.repair_placement = repair_placement
+ 
+ 
++@dataclass
++class C2KVExactStateReqInput(BaseReq):
++    operation: str = "capture"
++    snapshot_id: Optional[str] = None
++
++
++@dataclass
++class C2KVExactStateReqOutput(BaseReq):
++    success: bool = True
++    error: str = ""
++    state: Dict[str, Any] = field(default_factory=dict)
++
++
+ @dataclass
+ class TokenizedExtractReqInput(BaseReq):
+     """Internal request type for a C2KV gist extraction job."""
+@@ -2079,6 +2097,9 @@ class TokenizedExtractReqInput(BaseReq):
+     input_ids: List[int] = field(default_factory=list)
+     input_text: str = ""
+     compression_ratio: int = 4
++    # A caller enforcing an extraction budget can still reuse an existing
++    # entry while forbidding this request from launching a new encoder pass.
++    allow_cache_miss: bool = True
+ 
+ 
+ @dataclass
+@@ -2088,6 +2109,7 @@ class C2KVExtractReqOutput(BaseReq):
+     key_hash: str = ""
+     gist_len: int = 0
+     original_seq_len: int = 0
++    cache_hit: bool = False
+     error: str = ""
+     success: bool = True
+ 
+diff --git a/python/sglang/srt/managers/schedule_batch.py b/python/sglang/srt/managers/schedule_batch.py
+index 62db842..a701c7e 100644
+--- a/python/sglang/srt/managers/schedule_batch.py
++++ b/python/sglang/srt/managers/schedule_batch.py
+@@ -594,6 +594,7 @@ class Req(ReqDllmMixin):
+         custom_logit_processor: Optional[str] = None,
+         require_reasoning: bool = False,
+         return_hidden_states: bool = False,
++        c2kv_prompt_last_hidden_only: bool = False,
+         return_routed_experts: bool = False,
+         eos_token_ids: Optional[Set[int]] = None,
+         bootstrap_host: Optional[str] = None,
+@@ -673,6 +674,7 @@ class Req(ReqDllmMixin):
+         self.sampling_params = sampling_params
+         self.custom_logit_processor = custom_logit_processor
+         self.return_hidden_states = return_hidden_states
++        self.c2kv_prompt_last_hidden_only = c2kv_prompt_last_hidden_only
+ 
+         # extra key for classifying the request (e.g. cache_salt)
+         if lora_id is not None:
+@@ -2640,17 +2642,7 @@ class ScheduleBatch(ScheduleBatchDisaggregationDecodeMixin):
+             spec_algorithm=self.spec_algorithm,
+             spec_info=self.spec_info,
+             hicache_consumer_index=self.hicache_consumer_index,
+-            capture_hidden_mode=(
+-                CaptureHiddenMode.FULL
+-                if self.return_hidden_states
+-                else (
+-                    getattr(
+-                        self.spec_info, "capture_hidden_mode", CaptureHiddenMode.NULL
+-                    )
+-                    if self.spec_info
+-                    else CaptureHiddenMode.NULL
+-                )
+-            ),
++            capture_hidden_mode=self.get_capture_hidden_mode(),
+             extend_input_logprob_token_ids=self.extend_input_logprob_token_ids,
+             is_prefill_only=self.is_prefill_only,
+             dimensions=self.dimensions,
+@@ -2669,6 +2661,26 @@ class ScheduleBatch(ScheduleBatchDisaggregationDecodeMixin):
+             c2kv_history_kv_eviction_configs=c2kv_history_kv_eviction_configs,
+         )
+ 
++    def get_capture_hidden_mode(self) -> CaptureHiddenMode:
++        """Return the mode passed from this scheduler batch to the model worker."""
++        if self.return_hidden_states:
++            if self.reqs and all(
++                getattr(req, "c2kv_prompt_last_hidden_only", False)
++                for req in self.reqs
++            ):
++                return (
++                    CaptureHiddenMode.LAST
++                    if self.forward_mode.is_extend()
++                    else CaptureHiddenMode.NULL
++                )
++            return CaptureHiddenMode.FULL
++
++        if self.spec_info:
++            return getattr(
++                self.spec_info, "capture_hidden_mode", CaptureHiddenMode.NULL
++            )
++        return CaptureHiddenMode.NULL
++
+     def copy(self):
+         # Only contain fields that will be used by process_batch_result.
+         # Shallow-copy the reqs list so that in-place mutations (filter_batch,
+@@ -2681,6 +2693,7 @@ class ScheduleBatch(ScheduleBatchDisaggregationDecodeMixin):
+             forward_mode=self.forward_mode,
+             out_cache_loc=self.out_cache_loc,
+             return_logprob=self.return_logprob,
++            return_hidden_states=self.return_hidden_states,
+             decoding_reqs=self.decoding_reqs,
+             spec_algorithm=self.spec_algorithm,
+             global_num_tokens=self.global_num_tokens,
+diff --git a/python/sglang/srt/managers/scheduler.py b/python/sglang/srt/managers/scheduler.py
+index 7c1b5a0..c29ed6b 100644
+--- a/python/sglang/srt/managers/scheduler.py
++++ b/python/sglang/srt/managers/scheduler.py
+@@ -92,6 +92,8 @@ from sglang.srt.managers.io_struct import (
+     BaseReq,
+     BatchTokenizedEmbeddingReqInput,
+     BatchTokenizedGenerateReqInput,
++    C2KVExactStateReqInput,
++    C2KVExactStateReqOutput,
+     CheckWeightsReqInput,
+     ClearHiCacheReqInput,
+     ClearHiCacheReqOutput,
+@@ -1320,6 +1322,7 @@ class Scheduler(
+                 (TokenizedGenerateReqInput, self.handle_generate_request),
+                 (TokenizedEmbeddingReqInput, self.handle_embedding_request),
+                 (TokenizedExtractReqInput, self.handle_extract_request),
++                (C2KVExactStateReqInput, self.handle_c2kv_exact_state),
+                 (
+                     TokenizedRepairExtractReqInput,
+                     self.handle_repair_extract_request,
+@@ -1391,6 +1394,20 @@ class Scheduler(
+             ]
+         )
+ 
++    def handle_c2kv_exact_state(self, recv_req):
++        from sglang.srt.mem_cache.c2kv_exact_state import ExactStateStore
++
++        try:
++            if not hasattr(self, "_c2kv_exact_state_store"):
++                self._c2kv_exact_state_store = ExactStateStore(self)
++            state = self._c2kv_exact_state_store.execute(
++                recv_req.operation, recv_req.snapshot_id
++            )
++            return C2KVExactStateReqOutput(state=state)
++        except Exception as error:
++            logger.exception("C2KV exact state operation failed")
++            return C2KVExactStateReqOutput(success=False, error=str(error))
++
+     def _abort_on_running_timeout(self):
+         # NOTE: this should be called before a batch is launched,
+         # as current spec-v1 still filters batch inside verify stage.
+@@ -1907,6 +1924,7 @@ class Scheduler(
+                 custom_logit_processor=recv_req.custom_logit_processor,
+                 require_reasoning=recv_req.require_reasoning,
+                 return_hidden_states=recv_req.return_hidden_states,
++                c2kv_prompt_last_hidden_only=recv_req.c2kv_prompt_last_hidden_only,
+                 return_routed_experts=recv_req.return_routed_experts,
+                 eos_token_ids=self.model_config.hf_eos_token_id,
+                 bootstrap_host=recv_req.bootstrap_host,
+@@ -2254,6 +2272,17 @@ class Scheduler(
+                 key_hash=key_hash,
+                 gist_len=existing.gist_len,
+                 original_seq_len=existing.original_seq_len,
++                cache_hit=True,
++            )
++
++        if not recv_req.allow_cache_miss:
++            return C2KVExtractReqOutput(
++                key_hash=key_hash,
++                error=(
++                    "C2KV_EXTRACTION_BUDGET_EXHAUSTED: the exact chunk is not "
++                    "cached and this request may not schedule another encoder pass"
++                ),
++                success=False,
+             )
+ 
+         expected_gist_len = (
+diff --git a/python/sglang/srt/managers/scheduler_output_processor_mixin.py b/python/sglang/srt/managers/scheduler_output_processor_mixin.py
+index f7e4be0..c4b3aae 100644
+--- a/python/sglang/srt/managers/scheduler_output_processor_mixin.py
++++ b/python/sglang/srt/managers/scheduler_output_processor_mixin.py
+@@ -614,16 +614,25 @@ class SchedulerOutputProcessorMixin:
+                         req.return_hidden_states
+                         and logits_output.hidden_states is not None
+                     ):
+-                        req.hidden_states.append(
+-                            logits_output.hidden_states[
+-                                hidden_state_offset : (
+-                                    hidden_state_offset := hidden_state_offset
+-                                    + len(req.origin_input_ids)
+-                                )
++                        prompt_last_only = getattr(
++                            req, "c2kv_prompt_last_hidden_only", False
++                        )
++                        if prompt_last_only and batch.get_capture_hidden_mode().is_last():
++                            selected_hidden_states = logits_output.hidden_states[
++                                i : i + 1
+                             ]
+-                            .cpu()
+-                            .clone()
+-                            .tolist()
++                        else:
++                            hidden_state_end = hidden_state_offset + len(
++                                req.origin_input_ids
++                            )
++                            selected_hidden_states = logits_output.hidden_states[
++                                hidden_state_offset:hidden_state_end
++                            ]
++                            hidden_state_offset = hidden_state_end
++                            if prompt_last_only:
++                                selected_hidden_states = selected_hidden_states[-1:]
++                        req.hidden_states.append(
++                            selected_hidden_states.cpu().clone().tolist()
+                         )
+ 
+                     if req.grammar is not None:
+@@ -828,7 +837,11 @@ class SchedulerOutputProcessorMixin:
+                 self._mamba_prefix_cache_update(req, batch, result, i)
+                 req.time_stats.set_last_decode_finish_time()
+                 self._handle_finished_req(req, i, logits_output)
+-                if req.return_hidden_states and logits_output.hidden_states is not None:
++                if (
++                    req.return_hidden_states
++                    and not getattr(req, "c2kv_prompt_last_hidden_only", False)
++                    and logits_output.hidden_states is not None
++                ):
+                     req.hidden_states.append(
+                         logits_output.hidden_states[i].cpu().clone().tolist()
+                     )
+@@ -886,7 +899,11 @@ class SchedulerOutputProcessorMixin:
+                             logits_output.next_token_token_ids_logprobs_idx[flat_idx]
+                         )
+ 
+-            if req.return_hidden_states and logits_output.hidden_states is not None:
++            if (
++                req.return_hidden_states
++                and not getattr(req, "c2kv_prompt_last_hidden_only", False)
++                and logits_output.hidden_states is not None
++            ):
+                 req.hidden_states.append(
+                     logits_output.hidden_states[i].cpu().clone().tolist()
+                 )
+@@ -1385,6 +1402,13 @@ class SchedulerOutputProcessorMixin:
+         for req in reqs:
+             if req is skip_req:
+                 continue
++            if getattr(req, "c2kv_requeued", False):
++                # An intermediate C2KV prefill round has no committed output
++                # token. Sending its empty output would nevertheless advance
++                # send_output_token_logprobs_offset to one via the generic
++                # prefill-only path below, dropping the first real generation
++                # logprob after the final round.
++                continue
+ 
+             if req.finished():
+                 if req.finished_output:
+diff --git a/python/sglang/srt/managers/tokenizer_communicator_mixin.py b/python/sglang/srt/managers/tokenizer_communicator_mixin.py
+index 1487a8d..aa83b18 100644
+--- a/python/sglang/srt/managers/tokenizer_communicator_mixin.py
++++ b/python/sglang/srt/managers/tokenizer_communicator_mixin.py
+@@ -26,6 +26,8 @@ from sglang.srt.managers.io_struct import (
+     AttachHiCacheStorageReqInput,
+     AttachHiCacheStorageReqOutput,
+     C2KVExtractReqOutput,
++    C2KVExactStateReqInput,
++    C2KVExactStateReqOutput,
+     C2KVRepairExtractReqOutput,
+     TokenizedExtractReqInput,
+     TokenizedRepairExtractReqInput,
+@@ -253,6 +255,9 @@ class TokenizerCommunicatorMixin:
+         self.c2kv_extract_communicator = _Communicator(
+             self.send_to_scheduler, server_args.dp_size
+         )
++        self.c2kv_exact_state_communicator = _Communicator(
++            self.send_to_scheduler, server_args.dp_size
++        )
+         self.c2kv_repair_extract_communicator = _Communicator(
+             self.send_to_scheduler, server_args.dp_size
+         )
+@@ -342,6 +347,10 @@ class TokenizerCommunicatorMixin:
+                     C2KVExtractReqOutput,
+                     self.c2kv_extract_communicator.handle_recv,
+                 ),
++                (
++                    C2KVExactStateReqOutput,
++                    self.c2kv_exact_state_communicator.handle_recv,
++                ),
+                 (
+                     C2KVRepairExtractReqOutput,
+                     self.c2kv_repair_extract_communicator.handle_recv,
+@@ -405,12 +414,19 @@ class TokenizerCommunicatorMixin:
+             await self.flush_cache_communicator(FlushCacheReqInput(timeout_s=timeout_s))
+         )[0]
+ 
++    async def c2kv_exact_state(self, operation, snapshot_id=None):
++        self.auto_create_handle_loop()
++        return (await self.c2kv_exact_state_communicator(
++            C2KVExactStateReqInput(operation=operation, snapshot_id=snapshot_id)
++        ))[0]
++
+     async def c2kv_extract(
+         self: TokenizerManager,
+         input_ids: list,
+         input_text: str,
+         compression_ratio: int = 4,
+         rid: Optional[str] = None,
++        allow_cache_miss: bool = True,
+     ) -> C2KVExtractReqOutput:
+         """Run C2KV gist extraction via the scheduler."""
+         import uuid
+@@ -421,6 +437,7 @@ class TokenizerCommunicatorMixin:
+             input_ids=input_ids,
+             input_text=input_text,
+             compression_ratio=compression_ratio,
++            allow_cache_miss=allow_cache_miss,
+         )
+         return (await self.c2kv_extract_communicator(req))[0]
+ 
+diff --git a/python/sglang/srt/managers/tokenizer_manager.py b/python/sglang/srt/managers/tokenizer_manager.py
+index c02203d..361244b 100644
+--- a/python/sglang/srt/managers/tokenizer_manager.py
++++ b/python/sglang/srt/managers/tokenizer_manager.py
+@@ -992,6 +992,9 @@ class TokenizerManager(TokenizerCommunicatorMixin, TokenizerManagerScoreMixin):
+                 c2kv_use_gist_projection=getattr(
+                     obj, "c2kv_use_gist_projection", None
+                 ),
++                c2kv_prompt_last_hidden_only=getattr(
++                    obj, "c2kv_prompt_last_hidden_only", False
++                ),
+             )
+         elif isinstance(obj, EmbeddingReqInput):
+             tokenized_obj = TokenizedEmbeddingReqInput(
+diff --git a/python/sglang/srt/mem_cache/c2kv_exact_state.py b/python/sglang/srt/mem_cache/c2kv_exact_state.py
+new file mode 100644
+index 0000000..b019c54
+--- /dev/null
++++ b/python/sglang/srt/mem_cache/c2kv_exact_state.py
+@@ -0,0 +1,251 @@
++"""Exact quiescent snapshots for an isolated, eager, single-worker T02 engine.
++
++Only allocated KV is model state. Completed native requests own no decoder KV;
++their gist pool remains live and is copied byte-for-byte, including positions,
++allocator ordering and LRU metadata. Unallocated backing bytes are not replayed.
++"""
++
++from __future__ import annotations
++
++import copy
++import dataclasses
++import hashlib
++import json
++import os
++import random
++import uuid
++from collections import OrderedDict
++
++import numpy as np
++import torch
++
++
++SCHEMA = "c2kv-exact-backend-state-v1"
++ALLOCATOR_FIELDS = ("free_pages", "release_pages", "is_not_in_free_group", "free_group")
++COUNTERS = (
++    "forward_ct", "forward_ct_decode", "batch_record_ct", "num_generated_tokens",
++    "num_retracted_reqs", "num_paused_reqs", "new_token_ratio",
++    "spec_num_accepted_tokens", "spec_num_forward_ct",
++    "spec_total_num_accepted_tokens", "spec_total_num_forward_ct",
++    "last_decode_stats_tic", "last_prefill_stats_tic", "last_prefill_tokens",
++    "last_gen_throughput", "last_input_throughput", "step_time_dict", "stats",
++    "_c2kv_runtime_peak_main_kv_slots", "_c2kv_runtime_peak_c2kv_pool_slots",
++    "_c2kv_runtime_peak_total_gpu_kv_bytes",
++)
++
++
++def _plain(value):
++    if isinstance(value, torch.Tensor):
++        tensor = value.detach().cpu().contiguous()
++        return {"dtype": str(tensor.dtype), "shape": list(tensor.shape),
++                "bytes_sha256": hashlib.sha256(tensor.view(torch.uint8).numpy().tobytes()).hexdigest()}
++    if isinstance(value, np.ndarray):
++        return {"dtype": str(value.dtype), "shape": list(value.shape),
++                "bytes_sha256": hashlib.sha256(value.tobytes()).hexdigest()}
++    if dataclasses.is_dataclass(value):
++        return _plain(dataclasses.asdict(value))
++    if isinstance(value, dict):
++        return {str(k): _plain(v) for k, v in value.items()}
++    if isinstance(value, (tuple, list)):
++        return [_plain(v) for v in value]
++    if isinstance(value, np.generic):
++        return value.item()
++    if value is None or isinstance(value, (str, int, float, bool)):
++        return value
++    raise TypeError(f"Unsupported exact-state value {type(value).__name__}")
++
++
++def _digest(value):
++    return hashlib.sha256(json.dumps(_plain(value), sort_keys=True,
++        separators=(",", ":"), allow_nan=False).encode()).hexdigest()
++
++
++def _tensor_bytes(value):
++    if isinstance(value, torch.Tensor):
++        return value.numel() * value.element_size()
++    if isinstance(value, np.ndarray):
++        return value.nbytes
++    if dataclasses.is_dataclass(value):
++        return sum(_tensor_bytes(getattr(value, f.name)) for f in dataclasses.fields(value))
++    if isinstance(value, dict):
++        return sum(_tensor_bytes(v) for v in value.values())
++    if isinstance(value, (tuple, list)):
++        return sum(_tensor_bytes(v) for v in value)
++    return 0
++
++
++def _clone(value, device="cpu"):
++    if isinstance(value, torch.Tensor):
++        return value.detach().to(device=device, copy=True)
++    if isinstance(value, dict):
++        return type(value)((k, _clone(v, device)) for k, v in value.items()) if type(value) in (dict, OrderedDict) else copy.deepcopy(value)
++    if isinstance(value, list):
++        return [_clone(v, device) for v in value]
++    if isinstance(value, tuple):
++        return tuple(_clone(v, device) for v in value)
++    return copy.deepcopy(value)
++
++
++def _allocator_state(allocator):
++    return {name: _clone(getattr(allocator, name)) for name in ALLOCATOR_FIELDS}
++
++
++def _restore_allocator(allocator, state):
++    for name, value in state.items():
++        setattr(allocator, name, _clone(value, allocator.device))
++
++
++class ExactStateStore:
++    """Bounded checkpoints; immutable host copies never alias live pools."""
++
++    def __init__(self, scheduler):
++        self.scheduler = scheduler
++        self.snapshots = {}
++        self.max_snapshots = int(os.environ.get("C2KV_EXACT_MAX_SNAPSHOTS", "128"))
++        self.max_host_bytes = int(os.environ.get("C2KV_EXACT_MAX_HOST_BYTES", str(4 * 1024**3)))
++        if self.max_snapshots <= 0 or self.max_host_bytes <= 0:
++            raise ValueError("Exact snapshot resource caps must be positive")
++
++    def _device_api(self):
++        device_type = torch.device(self.scheduler.c2kv_pool.device).type
++        if device_type == "cpu":
++            return None
++        api = getattr(torch, device_type, None)
++        if api is None or not all(hasattr(api, name) for name in ("synchronize", "get_rng_state", "set_rng_state")):
++            raise ValueError(f"Exact snapshot lacks RNG API for {device_type}")
++        return api
++
++    def _validate(self):
++        s = self.scheduler
++        args = s.server_args
++        if os.environ.get("C2KV_ENABLE_EXACT_STATE") != "1":
++            raise ValueError("Exact state requires C2KV_ENABLE_EXACT_STATE=1 on an isolated engine")
++        if s.c2kv_pool is None:
++            raise ValueError("Exact state requires a C2KV pool")
++        for name in ("tp_size", "dp_size", "pp_size"):
++            if getattr(args, name, 1) != 1:
++                raise ValueError(f"Exact state requires {name}=1")
++        for name in ("disable_radix_cache", "disable_overlap_schedule", "disable_cuda_graph"):
++            if getattr(args, name, False) is not True:
++                raise ValueError(f"Exact state requires {name}=True")
++        for name in ("enable_hierarchical_cache", "enable_hisparse", "enable_metrics", "enable_lora"):
++            if getattr(args, name, False):
++                raise ValueError(f"Exact state does not support {name}")
++        if getattr(args, "speculative_algorithm", None) is not None:
++            raise ValueError("Exact state requires ordinary autoregressive decoding")
++        if getattr(args, "disaggregation_mode", "null") not in (None, "null"):
++            raise ValueError("Exact state requires no disaggregation")
++        if not s.is_fully_idle():
++            raise ValueError("Exact snapshot/restore requires a fully idle scheduler")
++        if type(s.tree_cache).__name__ != "ChunkCache":
++            raise ValueError("Exact state supports only the no-prefix ChunkCache")
++        if s.token_to_kv_pool_allocator.available_size() != s.token_to_kv_pool_allocator.size:
++            raise ValueError("Completed actor still owns decoder KV; refusing an empty-state claim")
++        if len(s.req_to_token_pool.free_slots) != s.req_to_token_pool.size:
++            raise ValueError("Completed actor still owns a request slot")
++        if s.c2kv_pool._pin_counts:
++            raise ValueError("Completed actor still owns live gist pins")
++        if getattr(s.session_controller, "sessions", {}):
++            raise ValueError("Exact state does not support native persistent sessions")
++        api = self._device_api()
++        if api is not None:
++            api.synchronize()
++
++    def _read(self):
++        s = self.scheduler
++        pool = s.c2kv_pool
++        entries = []
++        for key, entry in pool._cache.items():
++            cloned_entry = copy.deepcopy(entry)
++            cloned_entry.token_indices = _clone(entry.token_indices)
++            entries.append((key, cloned_entry))
++        indices = torch.cat([entry.token_indices for _, entry in entries]) if entries else torch.empty(0, dtype=torch.int64)
++        device_indices = indices.to(pool.device)
++        kv = [(_clone(pool.kv_cache.get_key_buffer(pool.start_layer + layer)[device_indices]),
++               _clone(pool.kv_cache.get_value_buffer(pool.start_layer + layer)[device_indices]))
++              for layer in range(pool.num_layers)]
++        api = self._device_api()
++        return {
++            "actor_kv": {"decoder_kv": None, "entries": entries, "kv": kv},
++            "actor_positions": {"decoder_positions": None,
++                "indices": indices, "gist_positions": _clone(pool.position_buffer[device_indices])},
++            "backend_stats": {
++                "gist_allocator": _allocator_state(pool.allocator),
++                "main_allocator": _allocator_state(s.token_to_kv_pool_allocator),
++                "request_free_slots": copy.deepcopy(s.req_to_token_pool.free_slots),
++                "current_tokens": pool._current_tokens, "pin_counts": dict(pool._pin_counts),
++                "counters": {name: copy.deepcopy(getattr(s, name)) for name in COUNTERS if hasattr(s, name)},
++            },
++            "rng": {"python": random.getstate(), "numpy": np.random.get_state(),
++                "torch_cpu": torch.get_rng_state().clone(),
++                "torch_device": None if api is None else api.get_rng_state().cpu().clone()},
++        }
++
++    def _receipt(self, snapshot_id, state, operation):
++        return {"schema": SCHEMA, "snapshot_id": snapshot_id, "operation": operation,
++            "exact": True, "component_digests": {name: _digest(value) for name, value in state.items()},
++            "decoder_kv": None, "decoder_positions": None,
++            "gist_entries": len(state["actor_kv"]["entries"]),
++            "gist_tokens": state["backend_stats"]["current_tokens"],
++            "snapshot_tensor_bytes": _tensor_bytes(state),
++            "storage": "independent_cpu_tensor_copies",
++            "stats_scope": "scheduler_counters_and_allocated_kv_pools",
++            "excluded_telemetry": ["wall_clock", "framework_reserved_memory", "unallocated_backing_bytes"]}
++
++    def execute(self, operation, snapshot_id=None):
++        self._validate()
++        if operation == "capture":
++            if len(self.snapshots) >= self.max_snapshots:
++                raise ValueError("Exact snapshot count cap exhausted; release saved states")
++            snapshot_id = uuid.uuid4().hex
++            state = self._read()
++            receipt = self._receipt(snapshot_id, state, operation)
++            retained_bytes = sum(item[1]["snapshot_tensor_bytes"] for item in self.snapshots.values())
++            if retained_bytes + receipt["snapshot_tensor_bytes"] > self.max_host_bytes:
++                raise ValueError("Exact snapshot host tensor byte cap exhausted; release saved states")
++            self.snapshots[snapshot_id] = (state, receipt)
++            return receipt
++        if snapshot_id not in self.snapshots:
++            raise ValueError("Unknown exact snapshot ID")
++        state, receipt = self.snapshots[snapshot_id]
++        if operation == "release":
++            del self.snapshots[snapshot_id]
++            return {"schema": SCHEMA, "snapshot_id": snapshot_id, "operation": "release", "released": True}
++        if operation != "restore":
++            raise ValueError("Exact state operation must be capture, restore, or release")
++        s = self.scheduler
++        pool = s.c2kv_pool
++        indices = state["actor_positions"]["indices"].to(pool.device)
++        for layer, (key, value) in enumerate(state["actor_kv"]["kv"]):
++            pool.kv_cache.get_key_buffer(pool.start_layer + layer)[indices] = key.to(pool.device)
++            pool.kv_cache.get_value_buffer(pool.start_layer + layer)[indices] = value.to(pool.device)
++        pool.position_buffer[indices] = state["actor_positions"]["gist_positions"].to(pool.device)
++        pool._cache = OrderedDict()
++        for key, entry in state["actor_kv"]["entries"]:
++            restored_entry = copy.deepcopy(entry)
++            restored_entry.token_indices = entry.token_indices.to(device=pool.device, copy=True)
++            pool._cache[key] = restored_entry
++        stats = state["backend_stats"]
++        pool._current_tokens = stats["current_tokens"]
++        pool._pin_counts.clear()
++        pool._pin_counts.update(stats["pin_counts"])
++        _restore_allocator(pool.allocator, stats["gist_allocator"])
++        _restore_allocator(s.token_to_kv_pool_allocator, stats["main_allocator"])
++        s.req_to_token_pool.free_slots = copy.deepcopy(stats["request_free_slots"])
++        for name in COUNTERS:
++            if name in stats["counters"]:
++                setattr(s, name, copy.deepcopy(stats["counters"][name]))
++            elif hasattr(s, name):
++                delattr(s, name)
++        random.setstate(state["rng"]["python"])
++        np.random.set_state(state["rng"]["numpy"])
++        torch.set_rng_state(state["rng"]["torch_cpu"])
++        api = self._device_api()
++        if api is not None:
++            api.set_rng_state(state["rng"]["torch_device"])
++            api.synchronize()
++        verified = self._receipt(snapshot_id, self._read(), operation)
++        if verified["component_digests"] != receipt["component_digests"]:
++            raise RuntimeError("Live state differs after exact backend restoration")
++        verified["verified_from_live_state"] = True
++        return verified
+diff --git a/python/sglang/srt/mem_cache/c2kv_native_packed.py b/python/sglang/srt/mem_cache/c2kv_native_packed.py
+new file mode 100644
+index 0000000..9086786
+--- /dev/null
++++ b/python/sglang/srt/mem_cache/c2kv_native_packed.py
+@@ -0,0 +1,457 @@
++"""Pure contracts for event-native packed C2KV generation."""
++
++from __future__ import annotations
++
++import hashlib
++import json
++import math
++from dataclasses import dataclass
++from typing import Any, Iterable, Mapping, Sequence
++
++
++NATIVE_PACKED_REQUEST_SCHEMA = "c2kv-native-packed-generation-v1"
++NATIVE_PACKED_RESPONSE_SCHEMA = "c2kv-native-packed-generation-response-v1"
++NATIVE_PACKED_CAPABILITY_SCHEMA = "c2kv-native-packed-capability-v1"
++NATIVE_CHUNK_HANDLE_SCHEMA = "c2kv-native-chunk-handle-v1"
++NATIVE_EXTRACTION_FAILURE_SCHEMA = "c2kv-native-extraction-failure-v1"
++NATIVE_GENERATION_FAILURE_SCHEMA = "c2kv-native-generation-failure-v1"
++EXTRACTION_BUDGET_ERROR_CODE = "C2KV_EXTRACTION_BUDGET_EXHAUSTED"
++NONFINITE_LOGITS_ERROR_CODE = "C2KV_NATIVE_NONFINITE_LOGITS"
++INVALID_GENERATION_OUTPUT_ERROR_CODE = "C2KV_NATIVE_INVALID_GENERATION_OUTPUT"
++PACKING_VERSION = "history-event-v1"
++RAW_LAYOUT_PROFILE = "event-native-evidence-v1"
++
++
++@dataclass(frozen=True)
++class NativePackedPlan:
++    logical_input_ids: tuple[int, ...]
++    segment_boundaries: tuple[tuple[int, int], ...]
++    unique_chunks: tuple[Mapping[str, Any], ...]
++    selected_handles: tuple[str, ...]
++    compression_handles: tuple[str, ...]
++    costs: Mapping[str, int]
++
++
++class NativeGenerationOutputError(ValueError):
++    """A native generation result cannot be emitted as a successful response."""
++
++    def __init__(self, code: str, message: str):
++        super().__init__(f"{code}: {message}")
++        self.code = code
++
++
++def _token_ids(value: Iterable[Any], *, field: str, allow_empty: bool) -> tuple[int, ...]:
++    ids = tuple(value)
++    if not allow_empty and not ids:
++        raise ValueError(f"{field} must contain at least one token")
++    if any(type(token_id) is not int or token_id < 0 for token_id in ids):
++        raise ValueError(f"{field} must contain nonnegative integer token ids")
++    return ids
++
++
++def canonical_model_binding(
++    *,
++    model_path: str,
++    tokenizer_path: str | None,
++    weight_version: str | None,
++    dtype: str,
++    kv_cache_dtype: str,
++    gist_parameter_dtype: str,
++    gist_compute_dtype: str,
++    gist_type: str,
++    gist_param: str,
++    gist_extra_embed_num: int,
++    gist_residual_type: str,
++    gist_overlap: int,
++    pic_enabled: bool,
++    pic_param: str,
++    query_projection: str,
++) -> dict[str, Any]:
++    """Return the exact serving fields that bind cached gist tensors."""
++
++    return {
++        "model_path": str(model_path),
++        "tokenizer_path": None if tokenizer_path is None else str(tokenizer_path),
++        "weight_version": None if weight_version is None else str(weight_version),
++        "dtype": str(dtype),
++        "kv_cache_dtype": str(kv_cache_dtype),
++        "gist_parameter_dtype": str(gist_parameter_dtype),
++        "gist_compute_dtype": str(gist_compute_dtype),
++        "gist_type": str(gist_type),
++        "gist_param": str(gist_param),
++        "gist_extra_embed_num": int(gist_extra_embed_num),
++        "gist_residual_type": str(gist_residual_type),
++        "gist_overlap": int(gist_overlap),
++        "pic_enabled": bool(pic_enabled),
++        "pic_param": str(pic_param),
++        "query_projection": str(query_projection),
++    }
++
++
++def canonical_chunk_payload(
++    chunk: Mapping[str, Any],
++    *,
++    model_binding: Mapping[str, Any],
++    packing_version: str,
++    encoding_scope: str,
++    compression_ratio: int,
++) -> dict[str, Any]:
++    token_ids = _token_ids(
++        chunk.get("token_ids") or (), field="chunk.token_ids", allow_empty=False
++    )
++    source_indices = tuple(chunk.get("source_indices") or ())
++    if any(type(index) is not int or index < 0 for index in source_indices):
++        raise ValueError("chunk.source_indices must contain nonnegative integers")
++    required = ("chunk_id", "event_id", "part_index", "source_token_start", "source_token_end")
++    missing = [name for name in required if chunk.get(name) is None]
++    if missing:
++        raise ValueError(f"chunk is missing required fields: {', '.join(missing)}")
++    part_index = chunk["part_index"]
++    source_token_start = chunk["source_token_start"]
++    source_token_end = chunk["source_token_end"]
++    if type(part_index) is not int or part_index < 0:
++        raise ValueError("chunk.part_index must be a nonnegative integer")
++    if (
++        type(source_token_start) is not int
++        or type(source_token_end) is not int
++        or source_token_start < 0
++        or source_token_end <= source_token_start
++        or source_token_end - source_token_start != len(token_ids)
++    ):
++        raise ValueError(
++            "chunk source token bounds must be nonnegative and match token_ids length"
++        )
++    return {
++        "schema": NATIVE_CHUNK_HANDLE_SCHEMA,
++        "model_binding": dict(model_binding),
++        "packing_version": str(packing_version),
++        "encoding_scope": str(encoding_scope),
++        "compression_ratio": int(compression_ratio),
++        "chunk": {
++            "chunk_id": str(chunk["chunk_id"]),
++            "event_id": str(chunk["event_id"]),
++            "part_index": part_index,
++            "source_indices": list(source_indices),
++            "source_token_start": source_token_start,
++            "source_token_end": source_token_end,
++            "token_ids": list(token_ids),
++        },
++    }
++
++
++def canonical_chunk_handle(
++    chunk: Mapping[str, Any],
++    *,
++    model_binding: Mapping[str, Any],
++    packing_version: str,
++    encoding_scope: str,
++    compression_ratio: int,
++) -> str:
++    payload = canonical_chunk_payload(
++        chunk,
++        model_binding=model_binding,
++        packing_version=packing_version,
++        encoding_scope=encoding_scope,
++        compression_ratio=compression_ratio,
++    )
++    serialized = json.dumps(
++        payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
++    )
++    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
++
++
++def _normalize_chunk(
++    chunk: Mapping[str, Any],
++    *,
++    model_binding: Mapping[str, Any],
++    packing_version: str,
++    encoding_scope: str,
++    compression_ratio: int,
++) -> dict[str, Any]:
++    payload = canonical_chunk_payload(
++        chunk,
++        model_binding=model_binding,
++        packing_version=packing_version,
++        encoding_scope=encoding_scope,
++        compression_ratio=compression_ratio,
++    )
++    normalized = dict(payload["chunk"])
++    handle = canonical_chunk_handle(
++        chunk,
++        model_binding=model_binding,
++        packing_version=packing_version,
++        encoding_scope=encoding_scope,
++        compression_ratio=compression_ratio,
++    )
++    supplied_handle = chunk.get("handle")
++    if supplied_handle is not None and supplied_handle != handle:
++        raise ValueError(
++            f"C2KV_NATIVE_HANDLE_MISMATCH: chunk {normalized['chunk_id']!r} "
++            f"supplied {supplied_handle!r}, expected {handle!r}"
++        )
++    normalized["handle"] = handle
++    if chunk.get("source_position_start") is not None:
++        normalized["source_position_start"] = chunk["source_position_start"]
++    if chunk.get("gist_position_ids") is not None:
++        normalized["gist_position_ids"] = list(chunk["gist_position_ids"])
++    return normalized
++
++
++def plan_native_packed_request(
++    *,
++    system_input_ids: Sequence[int],
++    workspace_input_ids: Sequence[int],
++    encoder_chunks: Sequence[Mapping[str, Any]],
++    compression_chunks: Sequence[Mapping[str, Any]],
++    model_binding: Mapping[str, Any],
++    packing_version: str,
++    raw_layout_profile: str,
++    encoding_scope: str,
++    compression_ratio: int,
++) -> NativePackedPlan:
++    """Validate the native token frame and build existing C2KV segment spans."""
++
++    if packing_version != PACKING_VERSION:
++        raise ValueError(
++            f"Unsupported packing_version {packing_version!r}; expected {PACKING_VERSION!r}"
++        )
++    if raw_layout_profile != RAW_LAYOUT_PROFILE:
++        raise ValueError(
++            "Unsupported raw_layout_profile "
++            f"{raw_layout_profile!r}; expected {RAW_LAYOUT_PROFILE!r}"
++        )
++    if not encoding_scope:
++        raise ValueError("encoding_scope must be a nonempty string")
++    if type(compression_ratio) is not int or compression_ratio <= 0:
++        raise ValueError("compression_ratio must be a positive integer")
++
++    system_ids = _token_ids(
++        system_input_ids, field="system_input_ids", allow_empty=True
++    )
++    workspace_ids = _token_ids(
++        workspace_input_ids, field="workspace_input_ids", allow_empty=False
++    )
++    selected = [
++        _normalize_chunk(
++            chunk,
++            model_binding=model_binding,
++            packing_version=packing_version,
++            encoding_scope=encoding_scope,
++            compression_ratio=compression_ratio,
++        )
++        for chunk in encoder_chunks
++    ]
++    extras = [
++        _normalize_chunk(
++            chunk,
++            model_binding=model_binding,
++            packing_version=packing_version,
++            encoding_scope=encoding_scope,
++            compression_ratio=compression_ratio,
++        )
++        for chunk in compression_chunks
++    ]
++
++    cursor = len(system_ids)
++    logical_ids = list(system_ids)
++    segment_boundaries: list[tuple[int, int]] = []
++    gist_tokens = 0
++    for chunk in selected:
++        token_ids = tuple(chunk["token_ids"])
++        source_position_start = chunk.get("source_position_start")
++        if source_position_start != cursor:
++            raise ValueError(
++                "C2KV_NATIVE_SOURCE_POSITION_MISMATCH: "
++                f"chunk {chunk['chunk_id']!r} starts at {source_position_start!r}, "
++                f"expected {cursor}"
++            )
++        expected_positions = [
++            cursor + min(start + compression_ratio, len(token_ids)) - 1
++            for start in range(0, len(token_ids), compression_ratio)
++        ]
++        if chunk.get("gist_position_ids") != expected_positions:
++            raise ValueError(
++                "C2KV_NATIVE_GIST_POSITION_MISMATCH: "
++                f"chunk {chunk['chunk_id']!r} has {chunk.get('gist_position_ids')!r}, "
++                f"expected {expected_positions!r}"
++            )
++        logical_ids.extend(token_ids)
++        segment_boundaries.append((cursor, cursor + len(token_ids)))
++        cursor += len(token_ids)
++        gist_tokens += len(expected_positions)
++    logical_ids.extend(workspace_ids)
++
++    unique: dict[str, Mapping[str, Any]] = {}
++    # Match EventNativeGenerator's always-compress phase and keep selected
++    # chunks most-recent in the bounded pool before packed generation.
++    for chunk in [*extras, *selected]:
++        previous = unique.get(chunk["handle"])
++        if previous is not None and previous["token_ids"] != chunk["token_ids"]:
++            raise ValueError("A native chunk handle maps to conflicting token ids")
++        unique.setdefault(chunk["handle"], chunk)
++
++    presented_encoder_tokens = sum(len(chunk["token_ids"]) for chunk in selected)
++    resident_tokens = len(system_ids) + len(workspace_ids) + gist_tokens
++    return NativePackedPlan(
++        logical_input_ids=tuple(logical_ids),
++        segment_boundaries=tuple(segment_boundaries),
++        unique_chunks=tuple(unique.values()),
++        selected_handles=tuple(chunk["handle"] for chunk in selected),
++        compression_handles=tuple(chunk["handle"] for chunk in extras),
++        costs={
++            "system_tokens": len(system_ids),
++            "raw_tokens": len(workspace_ids),
++            "presented_encoder_tokens": presented_encoder_tokens,
++            "eligible_encoder_tokens": sum(
++                len(chunk["token_ids"]) for chunk in unique.values()
++            ),
++            "gist_tokens": gist_tokens,
++            "gist_prefix_kv_tokens": gist_tokens,
++            "raw_workspace_kv_tokens": len(workspace_ids),
++            "resident_kv_tokens": resident_tokens,
++        },
++    )
++
++
++def float16_roundtrip(values: Sequence[Any]) -> list[float]:
++    """IEEE-754 binary16 round-trip without importing the accelerator runtime."""
++
++    import struct
++
++    return [struct.unpack("e", struct.pack("e", float(value)))[0] for value in values]
++
++
++def validate_native_generation_output(
++    output_ids: Sequence[Any], raw_logprobs: Sequence[Any]
++) -> tuple[list[int], list[float]]:
++    """Fail closed before non-finite sampler output can become JSON null."""
++
++    try:
++        token_ids = list(_token_ids(output_ids, field="output_ids", allow_empty=True))
++    except (TypeError, ValueError) as error:
++        raise NativeGenerationOutputError(
++            INVALID_GENERATION_OUTPUT_ERROR_CODE, str(error)
++        ) from error
++    if len(raw_logprobs) != len(token_ids):
++        raise NativeGenerationOutputError(
++            INVALID_GENERATION_OUTPUT_ERROR_CODE,
++            "token/logprob counts disagree: "
++            f"{len(raw_logprobs)} != {len(token_ids)}",
++        )
++
++    token_logprobs: list[float] = []
++    for index, row in enumerate(raw_logprobs):
++        # orjson serializes non-finite floats as JSON null. Treat the exact v7
++        # shape as a numerical failure rather than generic malformed output.
++        if row is None:
++            raise NativeGenerationOutputError(
++                NONFINITE_LOGITS_ERROR_CODE,
++                f"output_token_logprobs[{index}] is null",
++            )
++        if not isinstance(row, Sequence) or isinstance(row, (str, bytes, bytearray)):
++            raise NativeGenerationOutputError(
++                INVALID_GENERATION_OUTPUT_ERROR_CODE,
++                f"output_token_logprobs[{index}] is not a sequence",
++            )
++        if not row or isinstance(row[0], bool) or not isinstance(row[0], (int, float)):
++            raise NativeGenerationOutputError(
++                NONFINITE_LOGITS_ERROR_CODE,
++                f"output_token_logprobs[{index}] is not numeric",
++            )
++        value = float(row[0])
++        if not math.isfinite(value):
++            raise NativeGenerationOutputError(
++                NONFINITE_LOGITS_ERROR_CODE,
++                f"output_token_logprobs[{index}] is not finite",
++            )
++        token_logprobs.append(value)
++    return token_ids, token_logprobs
++
++
++def generation_output_error_payload(
++    *, error: NativeGenerationOutputError, rid: str, session_id: str, generation_id: str
++) -> dict[str, Any]:
++    """Return a structured terminal receipt for invalid generation output."""
++
++    return {
++        "error": {"code": error.code, "message": str(error)},
++        "generation": {
++            "schema": NATIVE_GENERATION_FAILURE_SCHEMA,
++            "status": "failed",
++            "rid": rid,
++            "session_id": session_id,
++            "generation_id": generation_id,
++            "stage": "generation_output_validation",
++        },
++    }
++
++
++def extraction_budget_error_payload(
++    *,
++    message: str,
++    requested_chunks: int,
++    unique_chunks: int,
++    cache_hits: int,
++    cache_misses: int,
++    max_extraction_calls: int,
++) -> dict[str, Any]:
++    """Describe work completed before the next exact-cache miss was denied."""
++
++    if not isinstance(message, str) or not message.startswith(
++        EXTRACTION_BUDGET_ERROR_CODE + ":"
++    ):
++        raise ValueError("message is not an extraction-budget exhaustion error")
++    counts = {
++        "requested_chunks": requested_chunks,
++        "unique_chunks": unique_chunks,
++        "cache_hits": cache_hits,
++        "cache_misses": cache_misses,
++        "max_extraction_calls": max_extraction_calls,
++    }
++    if any(type(value) is not int or value < 0 for value in counts.values()):
++        raise ValueError("extraction failure counts must be nonnegative integers")
++    processed_chunks = cache_hits + cache_misses
++    if requested_chunks < unique_chunks or processed_chunks >= unique_chunks:
++        raise ValueError("extraction failure must stop before all unique chunks are processed")
++    if cache_misses != max_extraction_calls:
++        raise ValueError("extraction failure must consume the declared request budget")
++    return {
++        "error": {
++            "code": EXTRACTION_BUDGET_ERROR_CODE,
++            "message": message,
++        },
++        "extraction": {
++            "schema": NATIVE_EXTRACTION_FAILURE_SCHEMA,
++            "requested_chunks": requested_chunks,
++            "unique_chunks": unique_chunks,
++            "processed_chunks": processed_chunks,
++            "cache_hits": cache_hits,
++            "cache_misses": cache_misses,
++            "model_calls": cache_misses,
++            "max_extraction_calls": max_extraction_calls,
++            "failed_chunk_index": processed_chunks,
++        },
++    }
++
++
++__all__ = [
++    "EXTRACTION_BUDGET_ERROR_CODE",
++    "INVALID_GENERATION_OUTPUT_ERROR_CODE",
++    "NATIVE_EXTRACTION_FAILURE_SCHEMA",
++    "NATIVE_GENERATION_FAILURE_SCHEMA",
++    "NATIVE_PACKED_CAPABILITY_SCHEMA",
++    "NATIVE_PACKED_REQUEST_SCHEMA",
++    "NATIVE_PACKED_RESPONSE_SCHEMA",
++    "NONFINITE_LOGITS_ERROR_CODE",
++    "PACKING_VERSION",
++    "RAW_LAYOUT_PROFILE",
++    "NativePackedPlan",
++    "NativeGenerationOutputError",
++    "canonical_chunk_handle",
++    "canonical_model_binding",
++    "extraction_budget_error_payload",
++    "float16_roundtrip",
++    "generation_output_error_payload",
++    "plan_native_packed_request",
++    "validate_native_generation_output",
++]
+diff --git a/python/sglang/srt/model_executor/cuda_graph_runner.py b/python/sglang/srt/model_executor/cuda_graph_runner.py
+index 6a0dbe1..83e3a9e 100644
+--- a/python/sglang/srt/model_executor/cuda_graph_runner.py
++++ b/python/sglang/srt/model_executor/cuda_graph_runner.py
+@@ -680,6 +680,7 @@ class CudaGraphRunner:
+             enable_c2kv_query_projection=(
+                 getattr(model_runner.server_args, "enable_c2kv", False)
+                 and not getattr(model_runner.model, "full_length_pic", False)
++                and os.environ.get("C2KV_USE_GIST_QUERY_PROJECTION", "1") != "0"
+             ),
+             ne_token_table=(
+                 model_runner.token_table if self.use_ngram_embedding else None
+diff --git a/python/sglang/srt/model_executor/model_runner.py b/python/sglang/srt/model_executor/model_runner.py
+index 2af8ed7..37a8df9 100644
+--- a/python/sglang/srt/model_executor/model_runner.py
++++ b/python/sglang/srt/model_executor/model_runner.py
+@@ -1169,6 +1169,14 @@ class ModelRunner(ModelRunnerKVCacheMixin):
+         # To avoid conflict with memory_saver_adapter.region, empty_cache operation is now moved here.
+         if _is_npu:
+             torch.npu.empty_cache()
++        elif self.device == "cuda":
++            # Release temporary loader/module cycles before sizing the KV pool.
++            # FP32 tensors converted to BF16 can otherwise survive until an
++            # unrelated Python garbage-collection cycle.
++            import gc
++
++            gc.collect()
++            torch.cuda.empty_cache()
+         monkey_patch_vllm_parallel_state(reverse=True)
+ 
+         # Publish metadata to ModelExpress if running as seed source
+diff --git a/python/sglang/srt/models/qwen3.py b/python/sglang/srt/models/qwen3.py
+index 91a682d..e3f17b1 100644
+--- a/python/sglang/srt/models/qwen3.py
++++ b/python/sglang/srt/models/qwen3.py
+@@ -213,7 +213,11 @@ class Qwen3Attention(nn.Module):
+                 self.total_num_heads,
+                 self.total_num_kv_heads,
+                 bias=attention_bias,
+-                quant_config=quant_config,
++                # C1000 was trained with FP32 gist parameters.  Keep the
++                # checkpoint values in FP32 and cast only for the base model's
++                # mixed-precision compute, matching the native HF runtime.
++                params_dtype=(torch.float32 if not pic_enabled else None),
++                quant_config=(None if not pic_enabled else quant_config),
+                 tp_rank=attn_tp_rank,
+                 tp_size=attn_tp_size,
+                 prefix=add_prefix(c2kv_proj_name, prefix),
+@@ -315,7 +319,7 @@ class Qwen3Attention(nn.Module):
+                 "c2kv_use_gist_projection mask shape mismatch: "
+                 f"{tuple(mask.shape)} != {(qkv.shape[0],)}"
+             )
+-        qkv_gist, _ = self.gist_qkv_proj(hidden_states)
++        qkv_gist, _ = self._c2kv_project_gist_qkv(hidden_states)
+         sizes = [self.q_size, self.kv_size, self.kv_size]
+         base_parts = qkv.split(sizes, dim=-1)
+         gist_parts = qkv_gist.split(sizes, dim=-1)
+@@ -326,6 +330,18 @@ class Qwen3Attention(nn.Module):
+         ]
+         return torch.cat(merged, dim=-1)
+ 
++    def _c2kv_project_gist_qkv(self, hidden_states):
++        """Apply FP32-stored gist weights in the base compute dtype."""
++
++        projection = self.gist_qkv_proj
++        if projection.weight.dtype == hidden_states.dtype:
++            return projection(hidden_states)
++        with torch.autocast(
++            device_type=hidden_states.device.type,
++            dtype=hidden_states.dtype,
++        ):
++            return projection(hidden_states)
++
+     def forward_prepare_native(self, positions, hidden_states, forward_batch=None):
+         qkv = self._c2kv_project_qkv(hidden_states, forward_batch)
+         q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size], dim=-1)
+@@ -843,7 +859,7 @@ class Qwen3Attention(nn.Module):
+             [self.q_size, self.kv_size, self.kv_size], dim=-1
+         )
+ 
+-        qkv_gist, _ = self.gist_qkv_proj(gist_hidden)
++        qkv_gist, _ = self._c2kv_project_gist_qkv(gist_hidden)
+         q_gist, k_gist, v_gist = qkv_gist.split(
+             [self.q_size, self.kv_size, self.kv_size], dim=-1
+         )
+@@ -1165,7 +1181,9 @@ class Qwen3Model(Qwen2Model):
+             attention_bias=getattr(config, "attention_bias", False),
+         )
+         self.gist_embed_tokens = nn.Embedding(
+-            gist_cfg.gist_extra_embed_num, config.hidden_size
++            gist_cfg.gist_extra_embed_num,
++            config.hidden_size,
++            dtype=torch.float32,
+         )
+         self.prepare_gist_input = get_prepare_gist_input_func(gist_cfg)
+         return gist_cfg
+@@ -1240,6 +1258,28 @@ class Qwen3ForCausalLM(nn.Module):
+                 )
+             else:
+                 self.gist_cfg = self.model._init_c2kv(config, _server_args)
++            shadow_layer = getattr(_server_args, "c2kv_shadow_feature_layer", None)
++            if shadow_layer is not None:
++                num_layers = int(config.num_hidden_layers)
++                normalized_layer = (
++                    shadow_layer if shadow_layer >= 0 else num_layers + shadow_layer
++                )
++                # The fused residual path exposes the complete output of layer L
++                # immediately before layer L+1. D3 requests -2, which therefore
++                # maps to the final layer's input capture point.
++                if not 0 <= normalized_layer < num_layers - 1:
++                    raise ValueError(
++                        "--c2kv-shadow-feature-layer must resolve before the final "
++                        f"decoder layer; got {shadow_layer} for {num_layers} layers"
++                    )
++                if not self.pp_group.is_last_rank:
++                    raise ValueError(
++                        "C2KV native shadow feature capture does not support "
++                        "pipeline parallel serving"
++                    )
++                self.capture_aux_hidden_states = True
++                self.model.layers_to_capture = [normalized_layer + 1]
++                self.c2kv_shadow_feature_layer = normalized_layer
+ 
+     def get_input_embeddings(self) -> nn.Embedding:
+         return self.model.get_input_embeddings()
+@@ -1345,6 +1385,22 @@ class Qwen3ForCausalLM(nn.Module):
+             gist_mask:       (1, gist_len) bool
+             gist_position_ids: (1, gist_len) int64
+         """
++        autocast_active = bool(kwargs.pop("_c2kv_fp32_autocast_active", False))
++        base_dtype = self.model.embed_tokens.weight.dtype
++        gist_dtype = self.model.gist_embed_tokens.weight.dtype
++        if gist_dtype != base_dtype and not autocast_active:
++            with torch.autocast(
++                device_type=input_ids.device.type,
++                dtype=base_dtype,
++            ):
++                return self.generate_gist(
++                    input_ids,
++                    attention_mask,
++                    ratio=ratio,
++                    _c2kv_fp32_autocast_active=True,
++                    **kwargs,
++                )
++
+         block_mask, gist_mask, position_ids = self.model.prepare_gist_input(
+             input_ids, attention_mask, ratio=ratio
+         )
+@@ -1353,7 +1409,7 @@ class Qwen3ForCausalLM(nn.Module):
+ 
+         gist_embed = self.model.gist_embed_tokens(
+             torch.zeros((1, gist_len), dtype=torch.long, device=device)
+-        )
++        ).to(dtype=self.model.embed_tokens.weight.dtype)
+         inputs_embeds = torch.cat(
+             [self.model.embed_tokens(input_ids), gist_embed], dim=1
+         )
+diff --git a/python/sglang/srt/server_args.py b/python/sglang/srt/server_args.py
+index f313a9c..701f7a3 100644
+--- a/python/sglang/srt/server_args.py
++++ b/python/sglang/srt/server_args.py
+@@ -582,6 +582,9 @@ class ServerArgs:
+     # Lowercase qkv checkpoints from the paper/reference path use base query
+     # projections. "gist" remains an explicit local-fork A/B extension.
+     c2kv_query_proj: str = "base"
++    # Decoder-layer output exposed as event-native prompt_last. Negative values
++    # use Python indexing; None leaves intermediate capture disabled.
++    c2kv_shadow_feature_layer: Optional[int] = None
+     # How tool schemas are serialized into the chat template. "full" =
+     # `model_dump()`, i.e. pydantic defaults such as `"strict": false` are
+     # emitted (+4 tokens per tool with the Qwen3 template); this is what every
+@@ -784,6 +787,14 @@ class ServerArgs:
+             raise ValueError("--c2kv-max-tokens must be greater than 0.")
+         if self.c2kv_query_proj not in ("base", "gist"):
+             raise ValueError("--c2kv-query-proj must be 'base' or 'gist'.")
++        if (
++            self.c2kv_shadow_feature_layer is not None
++            and not self.enable_return_hidden_states
++        ):
++            raise ValueError(
++                "--c2kv-shadow-feature-layer requires "
++                "--enable-return-hidden-states."
++            )
+         from sglang.srt.mem_cache.c2kv_semantics import validate_gist_param
+ 
+         self.c2kv_gist_param = validate_gist_param(self.c2kv_gist_param)
+@@ -5289,6 +5300,15 @@ class ServerArgs:
+             "the first C2KV segment always use base. See "
+             "c2kv/c2kv_serving_semantics.md.",
+         )
++        parser.add_argument(
++            "--c2kv-shadow-feature-layer",
++            type=int,
++            default=ServerArgs.c2kv_shadow_feature_layer,
++            help=(
++                "Decoder-layer output returned as the event-native prompt_last "
++                "shadow feature. Negative values use Python layer indexing."
++            ),
++        )
+         parser.add_argument(
+             "--c2kv-tools-dump",
+             type=str,
+diff --git a/test/registered/unit/test_c2kv_exact_state.py b/test/registered/unit/test_c2kv_exact_state.py
+new file mode 100644
+index 0000000..ba3b22a
+--- /dev/null
++++ b/test/registered/unit/test_c2kv_exact_state.py
+@@ -0,0 +1,143 @@
++"""CPU tests exercise actual tensor restoration without importing a GPU server."""
++
++import dataclasses
++import importlib.util
++import random
++import sys
++from collections import Counter, OrderedDict
++from pathlib import Path
++from types import SimpleNamespace
++
++import numpy as np
++import pytest
++import torch
++
++
++_PATH = Path(__file__).resolve().parents[3] / "python/sglang/srt/mem_cache/c2kv_exact_state.py"
++_SPEC = importlib.util.spec_from_file_location("_c2kv_exact_state_test", _PATH)
++module = importlib.util.module_from_spec(_SPEC)
++sys.modules[_SPEC.name] = module
++_SPEC.loader.exec_module(module)
++
++
++@dataclasses.dataclass
++class Entry:
++    key_hash: str
++    token_indices: torch.Tensor
++    gist_len: int
++
++
++class Allocator:
++    device = "cpu"
++    size = 6
++
++    def __init__(self, free):
++        self.free_pages = torch.tensor(free)
++        self.release_pages = torch.tensor([], dtype=torch.int64)
++        self.is_not_in_free_group = True
++        self.free_group = []
++
++    def available_size(self):
++        return len(self.free_pages) + len(self.release_pages)
++
++
++def scheduler():
++    keys = [torch.arange(14, dtype=torch.float32).reshape(7, 1, 2)]
++    values = [keys[0] + 50]
++    pool = SimpleNamespace(
++        device="cpu", start_layer=0, num_layers=1,
++        kv_cache=SimpleNamespace(get_key_buffer=lambda i: keys[i], get_value_buffer=lambda i: values[i]),
++        position_buffer=torch.arange(7, dtype=torch.int64) * 3,
++        _cache=OrderedDict((name, Entry(name, torch.tensor([index]), 1)) for name, index in (("first", 2), ("second", 4))),
++        _current_tokens=2, _pin_counts=Counter(), allocator=Allocator([1, 3, 5, 6]),
++    )
++    return SimpleNamespace(
++        server_args=SimpleNamespace(disable_radix_cache=True, disable_overlap_schedule=True, disable_cuda_graph=True),
++        c2kv_pool=pool, tree_cache=type("ChunkCache", (), {})(),
++        req_to_token_pool=SimpleNamespace(size=2, free_slots=[1, 0]),
++        token_to_kv_pool_allocator=Allocator([6, 5, 4, 3, 2, 1]),
++        session_controller=SimpleNamespace(sessions={}), is_fully_idle=lambda: True,
++        forward_ct=8, _c2kv_runtime_peak_total_gpu_kv_bytes=200,
++    )
++
++
++def test_exact_restore_replaces_changed_kv_positions_lru_allocator_counters_rng(monkeypatch):
++    monkeypatch.setenv("C2KV_ENABLE_EXACT_STATE", "1")
++    s = scheduler()
++    store = module.ExactStateStore(s)
++    before = store.execute("capture")
++    expected_rng = (random.random(), float(np.random.rand()), torch.rand(3))
++    s.c2kv_pool.kv_cache.get_key_buffer(0).fill_(-11)
++    s.c2kv_pool.kv_cache.get_value_buffer(0).fill_(-12)
++    s.c2kv_pool.position_buffer.fill_(99)
++    s.c2kv_pool._cache.clear()
++    s.c2kv_pool._current_tokens = 0
++    s.c2kv_pool.allocator.free_pages = torch.arange(1, 7)
++    s.token_to_kv_pool_allocator.free_pages = torch.arange(1, 7)
++    s.req_to_token_pool.free_slots.reverse()
++    s.forward_ct = 90
++    s._c2kv_runtime_peak_total_gpu_kv_bytes = 400
++    after = store.execute("restore", before["snapshot_id"])
++    assert after["component_digests"] == before["component_digests"]
++    assert after["verified_from_live_state"] is True
++    assert after["decoder_kv"] is None
++    assert list(s.c2kv_pool._cache) == ["first", "second"]
++    assert s.c2kv_pool.kv_cache.get_key_buffer(0)[2].flatten().tolist() == [4, 5]
++    assert s.c2kv_pool.kv_cache.get_value_buffer(0)[4].flatten().tolist() == [58, 59]
++    assert s.c2kv_pool.position_buffer[4] == 12
++    assert s.c2kv_pool.allocator.free_pages.tolist() == [1, 3, 5, 6]
++    assert s.token_to_kv_pool_allocator.free_pages.tolist() == [6, 5, 4, 3, 2, 1]
++    assert s.forward_ct == 8
++    assert random.random() == expected_rng[0]
++    assert np.random.rand() == expected_rng[1]
++    assert torch.equal(torch.rand(3), expected_rng[2])
++    # Repeated restoration uses the original immutable CPU snapshot.
++    again = store.execute("restore", before["snapshot_id"])
++    assert again["component_digests"] == before["component_digests"]
++    store.execute("release", before["snapshot_id"])
++    with pytest.raises(ValueError, match="Unknown"):
++        store.execute("restore", before["snapshot_id"])
++
++
++@pytest.mark.parametrize("change,pattern", [
++    (lambda s: setattr(s.server_args, "disable_radix_cache", False), "disable_radix"),
++    (lambda s: setattr(s.server_args, "tp_size", 2), "tp_size"),
++    (lambda s: setattr(s, "is_fully_idle", lambda: False), "idle"),
++    (lambda s: setattr(s.token_to_kv_pool_allocator, "free_pages", torch.tensor([1])), "decoder KV"),
++    (lambda s: s.c2kv_pool._pin_counts.update({"first": 1}), "pins"),
++])
++def test_rejects_unrepresented_live_state(monkeypatch, change, pattern):
++    monkeypatch.setenv("C2KV_ENABLE_EXACT_STATE", "1")
++    s = scheduler()
++    change(s)
++    with pytest.raises(ValueError, match=pattern):
++        module.ExactStateStore(s).execute("capture")
++
++
++def test_snapshot_is_opt_in(monkeypatch):
++    monkeypatch.delenv("C2KV_ENABLE_EXACT_STATE", raising=False)
++    with pytest.raises(ValueError, match="C2KV_ENABLE_EXACT_STATE"):
++        module.ExactStateStore(scheduler()).execute("capture")
++
++
++def test_multiple_snapshots_restore_distinct_states_with_explicit_caps(monkeypatch):
++    monkeypatch.setenv("C2KV_ENABLE_EXACT_STATE", "1")
++    monkeypatch.setenv("C2KV_EXACT_MAX_SNAPSHOTS", "2")
++    s = scheduler()
++    store = module.ExactStateStore(s)
++    first = store.execute("capture")
++    s.c2kv_pool.kv_cache.get_key_buffer(0)[2].fill_(99)
++    second = store.execute("capture")
++    assert first["component_digests"]["actor_kv"] != second["component_digests"]["actor_kv"]
++    assert first["snapshot_tensor_bytes"] > 0
++    with pytest.raises(ValueError, match="count cap"):
++        store.execute("capture")
++    store.execute("restore", first["snapshot_id"])
++    assert s.c2kv_pool.kv_cache.get_key_buffer(0)[2].flatten().tolist() == [4, 5]
++    store.execute("restore", second["snapshot_id"])
++    assert s.c2kv_pool.kv_cache.get_key_buffer(0)[2].flatten().tolist() == [99, 99]
++    monkeypatch.setenv("C2KV_EXACT_MAX_HOST_BYTES", "1")
++    limited = module.ExactStateStore(s)
++    with pytest.raises(ValueError, match="host tensor byte cap"):
++        limited.execute("capture")
++    assert not limited.snapshots
+diff --git a/test/registered/unit/test_c2kv_hidden_capture_mode.py b/test/registered/unit/test_c2kv_hidden_capture_mode.py
+new file mode 100644
+index 0000000..a18fe91
+--- /dev/null
++++ b/test/registered/unit/test_c2kv_hidden_capture_mode.py
+@@ -0,0 +1,69 @@
++"""Regression tests for the native prompt-last scheduler batch contract."""
++
++from types import SimpleNamespace
++
++from sglang.srt.managers.schedule_batch import ScheduleBatch
++from sglang.srt.managers.scheduler_output_processor_mixin import (
++    SchedulerOutputProcessorMixin,
++)
++from sglang.srt.model_executor.forward_batch_info import (
++    CaptureHiddenMode,
++    ForwardMode,
++)
++
++
++def _batch(forward_mode, *prompt_last_flags, return_hidden_states=True):
++    return ScheduleBatch(
++        reqs=[
++            SimpleNamespace(c2kv_prompt_last_hidden_only=flag)
++            for flag in prompt_last_flags
++        ],
++        forward_mode=forward_mode,
++        return_hidden_states=return_hidden_states,
++    )
++
++
++def test_prompt_last_mode_survives_overlap_schedule_batch_copy():
++    batch = _batch(ForwardMode.EXTEND, True)
++
++    assert batch.get_capture_hidden_mode() == CaptureHiddenMode.LAST
++    assert batch.copy().get_capture_hidden_mode() == CaptureHiddenMode.LAST
++
++
++def test_prompt_last_capture_is_disabled_during_decode():
++    batch = _batch(ForwardMode.DECODE, True)
++
++    assert batch.get_capture_hidden_mode() == CaptureHiddenMode.NULL
++
++
++def test_mixed_hidden_state_consumers_keep_full_capture():
++    batch = _batch(ForwardMode.EXTEND, True, False)
++
++    assert batch.get_capture_hidden_mode() == CaptureHiddenMode.FULL
++
++
++def test_speculative_capture_mode_is_preserved_without_hidden_state_returns():
++    batch = _batch(ForwardMode.EXTEND, return_hidden_states=False)
++    batch.spec_info = SimpleNamespace(capture_hidden_mode=CaptureHiddenMode.LAST)
++
++    assert batch.get_capture_hidden_mode() == CaptureHiddenMode.LAST
++
++
++def test_intermediate_c2kv_round_does_not_advance_empty_output_offsets():
++    req = SimpleNamespace(
++        c2kv_requeued=True,
++        send_token_offset=0,
++        send_output_token_logprobs_offset=0,
++    )
++    scheduler = SimpleNamespace(
++        get_load=lambda: None,
++        dp_rank=0,
++        send_to_detokenizer=SimpleNamespace(send_output=lambda output: None),
++    )
++
++    SchedulerOutputProcessorMixin.stream_output_generation(
++        scheduler, [req], return_logprob=True
++    )
++
++    assert req.send_token_offset == 0
++    assert req.send_output_token_logprobs_offset == 0
+diff --git a/test/registered/unit/test_c2kv_native_packed.py b/test/registered/unit/test_c2kv_native_packed.py
+new file mode 100644
+index 0000000..2f86b82
+--- /dev/null
++++ b/test/registered/unit/test_c2kv_native_packed.py
+@@ -0,0 +1,314 @@
++"""CPU-only tests for exact event-native C2KV packing contracts."""
++
++from __future__ import annotations
++
++import importlib.util
++import os
++import sys
++
++import pytest
++
++
++_HERE = os.path.dirname(os.path.abspath(__file__))
++_PATH = os.path.normpath(
++    os.path.join(
++        _HERE,
++        "..",
++        "..",
++        "..",
++        "python",
++        "sglang",
++        "srt",
++        "mem_cache",
++        "c2kv_native_packed.py",
++    )
++)
++_SPEC = importlib.util.spec_from_file_location("c2kv_native_packed_under_test", _PATH)
++native = importlib.util.module_from_spec(_SPEC)
++sys.modules["c2kv_native_packed_under_test"] = native
++_SPEC.loader.exec_module(native)
++
++
++def _binding(**overrides):
++    values = {
++        "model_path": "/checkpoints/checkpoint-1000",
++        "tokenizer_path": None,
++        "weight_version": None,
++        "dtype": "bfloat16",
++        "kv_cache_dtype": "bfloat16",
++        "gist_parameter_dtype": "float32",
++        "gist_compute_dtype": "bfloat16",
++        "gist_type": "dynamic-interleave",
++        "gist_param": "qkv",
++        "gist_extra_embed_num": 1,
++        "gist_residual_type": "none",
++        "gist_overlap": 0,
++        "pic_enabled": False,
++        "pic_param": "qkv",
++        "query_projection": "base",
++    }
++    values.update(overrides)
++    return native.canonical_model_binding(**values)
++
++
++def _chunk(
++    chunk_id,
++    token_ids,
++    *,
++    source_position_start=None,
++    gist_position_ids=None,
++    handle=None,
++):
++    return {
++        "chunk_id": chunk_id,
++        "event_id": f"event-{chunk_id}",
++        "part_index": 0,
++        "source_indices": [2, 3],
++        "source_token_start": 0,
++        "source_token_end": len(token_ids),
++        "token_ids": list(token_ids),
++        "handle": handle,
++        "source_position_start": source_position_start,
++        "gist_position_ids": gist_position_ids,
++    }
++
++
++def _plan(*, encoder_chunks, compression_chunks=()):
++    return native.plan_native_packed_request(
++        system_input_ids=[101, 102],
++        workspace_input_ids=[901, 902],
++        encoder_chunks=encoder_chunks,
++        compression_chunks=compression_chunks,
++        model_binding=_binding(),
++        packing_version=native.PACKING_VERSION,
++        raw_layout_profile=native.RAW_LAYOUT_PROFILE,
++        encoding_scope="G:event-group-v1",
++        compression_ratio=4,
++    )
++
++
++def test_builds_exact_raw_layout_and_source_span_rope_positions():
++    first = _chunk(
++        "a",
++        range(10, 20),
++        source_position_start=2,
++        gist_position_ids=[5, 9, 11],
++    )
++    second = _chunk(
++        "b",
++        [20, 21, 22],
++        source_position_start=12,
++        gist_position_ids=[14],
++    )
++
++    plan = _plan(encoder_chunks=[first, second])
++
++    assert plan.logical_input_ids == (
++        101,
++        102,
++        *range(10, 20),
++        20,
++        21,
++        22,
++        901,
++        902,
++    )
++    assert plan.segment_boundaries == ((2, 12), (12, 15))
++    assert plan.costs == {
++        "system_tokens": 2,
++        "raw_tokens": 2,
++        "presented_encoder_tokens": 13,
++        "eligible_encoder_tokens": 13,
++        "gist_tokens": 4,
++        "gist_prefix_kv_tokens": 4,
++        "raw_workspace_kv_tokens": 2,
++        "resident_kv_tokens": 8,
++    }
++
++
++def test_extra_compression_chunks_are_materialized_but_not_injected():
++    selected = _chunk(
++        "selected",
++        [10, 11, 12, 13],
++        source_position_start=2,
++        gist_position_ids=[5],
++    )
++    extra = _chunk("eligible", [30, 31, 32])
++
++    plan = _plan(encoder_chunks=[selected], compression_chunks=[extra, selected])
++
++    assert plan.logical_input_ids == (101, 102, 10, 11, 12, 13, 901, 902)
++    assert len(plan.unique_chunks) == 2
++    assert plan.selected_handles == (plan.compression_handles[1],)
++    assert plan.costs["presented_encoder_tokens"] == 4
++    assert plan.costs["eligible_encoder_tokens"] == 7
++
++
++@pytest.mark.parametrize(
++    "change",
++    [
++        {"compression_ratio": 8},
++        {"encoding_scope": "current"},
++        {"model_binding": _binding(model_path="/different-checkpoint")},
++    ],
++)
++def test_handle_binds_ratio_scope_and_checkpoint(change):
++    chunk = _chunk("a", [10, 11, 12])
++    kwargs = {
++        "model_binding": _binding(),
++        "packing_version": native.PACKING_VERSION,
++        "encoding_scope": "G:event-group-v1",
++        "compression_ratio": 4,
++    }
++    reference = native.canonical_chunk_handle(chunk, **kwargs)
++    kwargs.update(change)
++    assert native.canonical_chunk_handle(chunk, **kwargs) != reference
++
++
++def test_handle_binds_full_chunk_metadata_and_tokens():
++    base = _chunk("a", [10, 11, 12])
++    kwargs = {
++        "model_binding": _binding(),
++        "packing_version": native.PACKING_VERSION,
++        "encoding_scope": "G:event-group-v1",
++        "compression_ratio": 4,
++    }
++    reference = native.canonical_chunk_handle(base, **kwargs)
++    for changed in (
++        {**base, "chunk_id": "b"},
++        {**base, "event_id": "different"},
++        {**base, "source_indices": [4]},
++        {**base, "token_ids": [10, 11, 13]},
++    ):
++        assert native.canonical_chunk_handle(changed, **kwargs) != reference
++
++
++def test_supplied_handle_and_placement_mismatches_fail_closed():
++    chunk = _chunk(
++        "a",
++        [10, 11, 12, 13],
++        source_position_start=3,
++        gist_position_ids=[5],
++        handle="not-the-canonical-handle",
++    )
++    with pytest.raises(ValueError, match="C2KV_NATIVE_HANDLE_MISMATCH"):
++        _plan(encoder_chunks=[chunk])
++
++    chunk["handle"] = None
++    with pytest.raises(ValueError, match="C2KV_NATIVE_SOURCE_POSITION_MISMATCH"):
++        _plan(encoder_chunks=[chunk])
++
++    chunk["source_position_start"] = 2
++    chunk["gist_position_ids"] = [4]
++    with pytest.raises(ValueError, match="C2KV_NATIVE_GIST_POSITION_MISMATCH"):
++        _plan(encoder_chunks=[chunk])
++
++
++def test_chunk_bounds_and_frozen_token_ids_fail_closed():
++    chunk = _chunk("a", [10, 11])
++    chunk["source_token_end"] = 3
++    with pytest.raises(ValueError, match="source token bounds"):
++        _plan(encoder_chunks=[chunk])
++
++    chunk = _chunk("a", [10, True])
++    with pytest.raises(ValueError, match="nonnegative integer token ids"):
++        _plan(encoder_chunks=[chunk])
++
++
++def test_shadow_values_use_ieee_binary16_storage_roundtrip():
++    assert native.float16_roundtrip([1.0001, -2.5]) == [1.0, -2.5]
++
++
++def test_generation_output_validation_accepts_finite_logprobs():
++    output_ids, logprobs = native.validate_native_generation_output(
++        [7, 8], [[-0.25, 7], [-1.5, 8]]
++    )
++
++    assert output_ids == [7, 8]
++    assert logprobs == [-0.25, -1.5]
++
++
++@pytest.mark.parametrize("value", [None, float("nan"), float("inf"), -float("inf")])
++def test_generation_output_validation_rejects_nonfinite_sampler_output(value):
++    row = value if value is None else [value, 0]
++    with pytest.raises(
++        native.NativeGenerationOutputError,
++        match=native.NONFINITE_LOGITS_ERROR_CODE,
++    ) as captured:
++        native.validate_native_generation_output([0], [row])
++
++    payload = native.generation_output_error_payload(
++        error=captured.value,
++        rid="rid-1",
++        session_id="session-1",
++        generation_id="generation-1",
++    )
++    assert payload["error"]["code"] == native.NONFINITE_LOGITS_ERROR_CODE
++    assert payload["generation"] == {
++        "schema": native.NATIVE_GENERATION_FAILURE_SCHEMA,
++        "status": "failed",
++        "rid": "rid-1",
++        "session_id": "session-1",
++        "generation_id": "generation-1",
++        "stage": "generation_output_validation",
++    }
++
++
++def test_v7_null_logprob_shape_fails_closed_without_rewriting_tokens():
++    output_ids = [0] * 4096
++    raw_logprobs = [None] * 4096
++
++    with pytest.raises(native.NativeGenerationOutputError) as captured:
++        native.validate_native_generation_output(output_ids, raw_logprobs)
++
++    assert captured.value.code == native.NONFINITE_LOGITS_ERROR_CODE
++    assert output_ids == [0] * 4096
++
++
++def test_extraction_budget_failure_reports_completed_work_before_denied_miss():
++    payload = native.extraction_budget_error_payload(
++        message=(
++            "C2KV_EXTRACTION_BUDGET_EXHAUSTED: the exact chunk is not cached "
++            "and this request may not schedule another encoder pass"
++        ),
++        requested_chunks=336,
++        unique_chunks=336,
++        cache_hits=44,
++        cache_misses=172,
++        max_extraction_calls=172,
++    )
++
++    assert payload["error"]["code"] == native.EXTRACTION_BUDGET_ERROR_CODE
++    assert payload["extraction"] == {
++        "schema": native.NATIVE_EXTRACTION_FAILURE_SCHEMA,
++        "requested_chunks": 336,
++        "unique_chunks": 336,
++        "processed_chunks": 216,
++        "cache_hits": 44,
++        "cache_misses": 172,
++        "model_calls": 172,
++        "max_extraction_calls": 172,
++        "failed_chunk_index": 216,
++    }
++
++
++@pytest.mark.parametrize(
++    "change",
++    [
++        {"message": "different error"},
++        {"cache_misses": 171},
++        {"cache_hits": 164},
++    ],
++)
++def test_extraction_budget_failure_rejects_inconsistent_partial_counts(change):
++    arguments = {
++        "message": "C2KV_EXTRACTION_BUDGET_EXHAUSTED: denied miss",
++        "requested_chunks": 336,
++        "unique_chunks": 336,
++        "cache_hits": 163,
++        "cache_misses": 172,
++        "max_extraction_calls": 172,
++    }
++    arguments.update(change)
++    with pytest.raises(ValueError):
++        native.extraction_budget_error_payload(**arguments)
+diff --git a/test/registered/unit/test_c2kv_strict_sampler.py b/test/registered/unit/test_c2kv_strict_sampler.py
+new file mode 100644
+index 0000000..bc6b8f6
+--- /dev/null
++++ b/test/registered/unit/test_c2kv_strict_sampler.py
+@@ -0,0 +1,122 @@
++"""CPU-only regression for strict C2KV sampler failure handling."""
++
++from __future__ import annotations
++
++import importlib.util
++import os
++import sys
++import types
++
++import pytest
++import torch
++
++
++_HERE = os.path.dirname(os.path.abspath(__file__))
++_PYTHON_ROOT = os.path.normpath(os.path.join(_HERE, "..", "..", "..", "python"))
++_SAMPLER_PATH = os.path.join(
++    _PYTHON_ROOT, "sglang", "srt", "layers", "sampler.py"
++)
++_NATIVE_PATH = os.path.join(
++    _PYTHON_ROOT, "sglang", "srt", "mem_cache", "c2kv_native_packed.py"
++)
++
++
++def _module(name, **values):
++    module = types.ModuleType(name)
++    module.__dict__.update(values)
++    return module
++
++
++def _load_sampler(monkeypatch):
++    native_spec = importlib.util.spec_from_file_location(
++        "sglang.srt.mem_cache.c2kv_native_packed", _NATIVE_PATH
++    )
++    native = importlib.util.module_from_spec(native_spec)
++    monkeypatch.setitem(
++        sys.modules, "sglang.srt.mem_cache.c2kv_native_packed", native
++    )
++    native_spec.loader.exec_module(native)
++
++    stubs = {
++        "sglang.srt.distributed": _module("distributed", get_tp_group=lambda: None),
++        "sglang.srt.layers.dp_attention": _module(
++            "dp_attention",
++            get_attention_tp_group=lambda: None,
++            is_dp_attention_enabled=lambda: False,
++        ),
++        "sglang.srt.layers.logits_processor": _module(
++            "logits_processor", LogitsProcessorOutput=type("LogitsProcessorOutput", (), {})
++        ),
++        "sglang.srt.layers.utils.hash": _module(
++            "hash", murmur_hash32=lambda *args, **kwargs: 0
++        ),
++        "sglang.srt.layers.utils.logprob": _module(
++            "logprob",
++            get_token_ids_logprobs=lambda *args, **kwargs: None,
++            get_top_logprobs=lambda *args, **kwargs: None,
++        ),
++        "sglang.srt.sampling.sampling_batch_info": _module(
++            "sampling_batch_info", SamplingBatchInfo=type("SamplingBatchInfo", (), {})
++        ),
++        "sglang.srt.sampling.sampling_params": _module(
++            "sampling_params", TOP_K_ALL=-1
++        ),
++        "sglang.srt.server_args": _module(
++            "server_args", get_global_server_args=lambda: None
++        ),
++        "sglang.srt.utils.common": _module(
++            "common",
++            crash_on_warnings=lambda: False,
++            get_bool_env_var=lambda _name: False,
++            is_cuda=lambda: False,
++            is_npu=lambda: False,
++        ),
++    }
++    for name, module in stubs.items():
++        monkeypatch.setitem(sys.modules, name, module)
++
++    spec = importlib.util.spec_from_file_location("c2kv_sampler_under_test", _SAMPLER_PATH)
++    sampler = importlib.util.module_from_spec(spec)
++    spec.loader.exec_module(sampler)
++    return sampler
++
++
++def test_strict_guard_accepts_finite_logits_and_masked_negative_infinity(monkeypatch):
++    sampler = _load_sampler(monkeypatch)
++    logits = torch.tensor([[1.0, -2.0, -float("inf")]], dtype=torch.float32)
++    before = logits.clone()
++
++    sampler._raise_on_c2kv_nonfinite_logits(logits)
++
++    assert torch.equal(logits, before)
++
++
++def test_strict_guard_fails_before_sampling_without_rewriting_logits(monkeypatch):
++    sampler = _load_sampler(monkeypatch)
++    logits = torch.tensor(
++        [[float("nan"), float("inf"), -float("inf"), 0.0]], dtype=torch.float32
++    )
++    before = logits.clone()
++
++    with pytest.raises(ValueError, match="C2KV_NATIVE_NONFINITE_LOGITS") as captured:
++        sampler._raise_on_c2kv_nonfinite_logits(logits)
++
++    assert "batch_rows=1" in str(captured.value)
++    assert "nan=1" in str(captured.value)
++    assert "posinf=1" in str(captured.value)
++    assert "masked_neginf=1" in str(captured.value)
++    assert torch.equal(torch.isnan(logits), torch.isnan(before))
++    assert torch.equal(torch.isposinf(logits), torch.isposinf(before))
++    assert torch.equal(torch.isneginf(logits), torch.isneginf(before))
++
++
++def test_strict_guard_rejects_row_without_finite_candidate(monkeypatch):
++    sampler = _load_sampler(monkeypatch)
++    logits = torch.tensor([[-float("inf"), -float("inf")]], dtype=torch.float32)
++    before = logits.clone()
++
++    with pytest.raises(ValueError, match="C2KV_NATIVE_NONFINITE_LOGITS") as captured:
++        sampler._raise_on_c2kv_nonfinite_logits(logits)
++
++    assert "no_finite_candidate_rows=1" in str(captured.value)
++    assert torch.equal(logits, before)
