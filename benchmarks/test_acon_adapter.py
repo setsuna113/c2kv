@@ -286,10 +286,12 @@ def test_runner_env_keeps_one_v1_when_given_an_openai_base_url():
 def test_appworld_runner_env_installs_runtime_telemetry(tmp_path):
     events = tmp_path / "measurement" / "harness_events.jsonl"
     run_dir = tmp_path / "tasks"
-    env = A.appworld_runner_env("http://127.0.0.1:34100", events, run_dir)
+    acon = tmp_path / "acon"
+    env = A.appworld_runner_env("http://127.0.0.1:34100", events, run_dir, acon)
     entries = env["PYTHONPATH"].split(os.pathsep)
     assert Path(entries[0]).name == "appworld_instrumentation"
     assert Path(entries[1]).name == "benchmarks"
+    assert entries[2] == str(acon.resolve() / "src")
     assert env[A.APPWORLD_TELEMETRY_ENV] == str(events.resolve())
     assert env[A.APPWORLD_RUN_DIR_ENV] == str(run_dir.resolve())
 
@@ -438,21 +440,46 @@ def test_appworld_required_patch_markers(tmp_path):
     acon = tmp_path / "acon"
     llm = acon / "src" / "productive_agents" / "llm.py"
     runner = acon / "experiments" / "appworld" / "run.py"
+    runner_all = runner.with_name("run_all.py")
     env = acon / "src" / "productive_agents" / "env" / "appworld" / "env.py"
     llm.parent.mkdir(parents=True)
     runner.parent.mkdir(parents=True)
     env.parent.mkdir(parents=True)
-    llm.write_text("base_url = os.environ.get('ACON_OPENAI_BASE_URL')\n")
+    complete_llm = (
+        "base_url = os.environ.get('ACON_OPENAI_BASE_URL')\n"
+        "logger.info(f'API pricing unavailable for model {model_name}')\n"
+        "return None\n"
+    )
+    llm.write_text(complete_llm)
     runner.write_text(
         "print('API cost unavailable for this model')\n"
         "value = token_summary.get('input_cost_usd') or 0\n"
+        "value = token_summary.get('output_cost_usd') or 0\n"
+        "value = token_summary.get('total_cost_usd') or 0\n"
+        "results['termination_reason'] = results['info']['reason']\n"
     )
-    env.write_text("max_interactions_reached = True\n")
+    runner_all.write_text(
+        "task_cost = token_info.get('total_cost_usd')\n"
+        "if total_cost is not None and total_cost > 0: pass\n"
+        "average_cost = total_cost / len(task_list) if total_cost is not None and task_list else None\n"
+    )
+    env.write_text(
+        "self.done = self.num_interactions >= self.config.max_interactions\n"
+        'info = {"max_interactions_reached": self.done, "info": dict(self.info)}\n'
+    )
     A.validate_appworld_runner_patches(acon)
+    complete_runner = runner.read_text()
+    runner.write_text(complete_runner.replace(
+        "token_summary.get('output_cost_usd') or 0",
+        "token_summary.get('output_cost_usd', 0)",
+    ))
+    with pytest.raises(SystemExit, match="0002-unknown-api-cost.patch"):
+        A.validate_appworld_runner_patches(acon)
+    runner.write_text(complete_runner)
     llm.write_text("base_url = 'http://localhost:8000/v1'\n")
     with pytest.raises(SystemExit, match="0001-openai-base-url-env.patch"):
         A.validate_appworld_runner_patches(acon)
-    llm.write_text("base_url = os.environ.get('ACON_OPENAI_BASE_URL')\n")
+    llm.write_text(complete_llm)
     env.write_text("# pristine upstream\n")
     with pytest.raises(SystemExit, match="0006-appworld-final-step-and-errors.patch"):
         A.validate_appworld_runner_patches(acon)

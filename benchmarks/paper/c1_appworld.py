@@ -395,7 +395,7 @@ def _run_official_harness(
     telemetry_path = official_out / "measurement" / "harness_events.jsonl"
     origin = _openai_origin(base_url)
     env = {
-        **acon.appworld_runner_env(origin, telemetry_path, run_dir),
+        **acon.appworld_runner_env(origin, telemetry_path, run_dir, acon_dir),
         "APPWORLD_ROOT": str(cwd),
     }
     timeout = float(config.get("c1", {}).get("task_timeout", 10800))

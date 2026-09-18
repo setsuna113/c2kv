@@ -93,10 +93,19 @@ def validate_appworld_runner_patches(acon_dir: Path) -> None:
             "ACON_OPENAI_BASE_URL", "0001-openai-base-url-env.patch"),
         root / "experiments" / "appworld" / "run.py": (
             ("API cost unavailable for this model",
-             "token_summary.get('input_cost_usd') or 0"),
+             "token_summary.get('input_cost_usd') or 0",
+             "token_summary.get('output_cost_usd') or 0",
+             "token_summary.get('total_cost_usd') or 0"),
+            "0002-unknown-api-cost.patch"),
+        root / "experiments" / "appworld" / "run_all.py": (
+            ("token_info.get('total_cost_usd')",
+             "total_cost is not None and total_cost > 0",
+             "total_cost is not None and task_list else None"),
             "0002-unknown-api-cost.patch"),
         root / "src" / "productive_agents" / "env" / "appworld" / "env.py": (
-            "max_interactions_reached", "0006-appworld-final-step-and-errors.patch"),
+            ("self.done = self.num_interactions >= self.config.max_interactions",
+             '"max_interactions_reached": self.done', '"info": dict(self.info)'),
+            "0006-appworld-final-step-and-errors.patch"),
     }
     missing = []
     for path, (markers, patch_name) in checks.items():
@@ -109,6 +118,20 @@ def validate_appworld_runner_patches(acon_dir: Path) -> None:
             present = False
         if not present:
             missing.append(f"{patch_name} ({path})")
+    llm_path = root / "src" / "productive_agents" / "llm.py"
+    try:
+        llm_text = llm_path.read_text(encoding="utf-8")
+    except OSError:
+        llm_text = ""
+    if "API pricing unavailable for model" not in llm_text or "return None" not in llm_text:
+        missing.append(f"0002-unknown-api-cost.patch ({llm_path})")
+    runner_path = root / "experiments" / "appworld" / "run.py"
+    try:
+        runner_text = runner_path.read_text(encoding="utf-8")
+    except OSError:
+        runner_text = ""
+    if "results['termination_reason'] = results['info']['reason']" not in runner_text:
+        missing.append(f"0006-appworld-final-step-and-errors.patch ({runner_path})")
     if missing:
         raise SystemExit("FATAL: ACON AppWorld checkout lacks required patches: "
                          + "; ".join(missing))
@@ -160,12 +183,16 @@ def runner_env(base_url: str) -> Dict[str, str]:
 
 
 def appworld_runner_env(base_url: str, telemetry_path: Path,
-                        run_dir: Path) -> Dict[str, str]:
+                        run_dir: Path, acon_dir: Optional[Path] = None) -> Dict[str, str]:
     """Runner environment with a runtime-only ACON/AppWorld telemetry hook."""
     env = runner_env(base_url)
     benchmarks = Path(__file__).resolve().parents[1]
     hook = benchmarks / "appworld_instrumentation"
     pythonpath = [str(hook), str(benchmarks)]
+    if acon_dir is not None:
+        # sitecustomize imports productive_agents before run_all.py can
+        # adjust sys.path inside the isolated harness.
+        pythonpath.append(str(Path(acon_dir).resolve() / "src"))
     if env.get("PYTHONPATH"):
         pythonpath.append(env["PYTHONPATH"])
     env.update({
@@ -464,7 +491,7 @@ def run_appworld(base_url: str, out_dir: Path, acon_dir: Optional[Path] = None,
     run_dir = appworld_run_dir(run_root, model, tag, split)
     telemetry_path = out_dir.resolve() / "measurement" / "harness_events.jsonl"
     env = {
-        **appworld_runner_env(base_url, telemetry_path, run_dir),
+        **appworld_runner_env(base_url, telemetry_path, run_dir, acon_dir),
         "APPWORLD_ROOT": str(cwd),
     }
     subprocess.run(appworld_command(python, model, tag, split, max_iter, task_ids),
