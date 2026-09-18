@@ -140,6 +140,8 @@ class TestRegistry:
             "history_kv_snapkv_r25_persistent": ("snapkv_persistent", 0.25),
             "history_kv_h2o_r125_persistent": ("h2o", 0.125),
             "history_kv_snapkv_r125_persistent": ("snapkv_persistent", 0.125),
+            "history_kv_pyramidkv_r25_persistent": ("pyramidkv", 0.25),
+            "history_kv_pyramidkv_r125_persistent": ("pyramidkv", 0.125),
         }
         for name, (method, ratio) in expected.items():
             spec = history_kv_spec(get_arm(name))
@@ -151,7 +153,7 @@ class TestRegistry:
 
     def test_existing_arms_untouched(self):
         for name, arm in ARMS.items():
-            if name.startswith("history_kv_"):
+            if name.startswith(("history_kv_", "gen_")):
                 continue
             assert arm.history_kv is None
             assert history_kv_spec(arm) is None

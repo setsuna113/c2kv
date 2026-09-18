@@ -20,10 +20,14 @@ class PaperMatrixTest(unittest.TestCase):
 
     def test_only_requested_methods_and_ratio(self):
         rows = cells(self.config)
-        self.assertEqual(len(rows), 28)
-        self.assertEqual(sum(row["group"] == "main" for row in rows), 21)
+        self.assertEqual(len(rows), 45)
+        self.assertEqual(sum(row["group"] == "main" for row in rows), 24)
         self.assertEqual({row["ratio"] for row in rows if row["method"] == "C2KV"}, {4})
-        self.assertEqual({row["method"] for row in rows}, {"Full", "HiAgent", "ACON", "C2KV", "H2O", "SnapKV", "C2KV+C1"})
+        self.assertEqual({row["method"] for row in rows}, {
+            "Full", "HiAgent", "ACON", "C2KV", "H2O", "SnapKV", "PyramidKV",
+            "AgentFold", "CommitKV", "AgentKV", "C2KV+C1",
+            "ACEBench Agent baseline", "ToolSandbox baseline",
+        })
         self.assertTrue(all(row["arm"].startswith("c2kv_c1_t02_r") for row in rows[-4:]))
         # The ratio-4 C1 ablation is restricted to bfcl_base and carries no benchmark list itself.
         r4 = [row for row in rows if row["arm"] == "c2kv_c1_t02_r4"]
@@ -36,7 +40,7 @@ class PaperMatrixTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             output = Path(temporary)
             plan, profile = prepare(self.config, output, output / "sglang")
-            self.assertEqual(len(plan), 28)
+            self.assertEqual(len(plan), 45)
             self.assertTrue(profile.is_file())
             for row in plan:
                 cmd = row["command"]
@@ -62,7 +66,8 @@ class PaperMatrixTest(unittest.TestCase):
     def test_shipped_config_serves_flashinfer_graph_and_radix_for_text_arms(self):
         self.assertEqual(self.config["attention_backend"], "flashinfer")
         self.assertFalse(self.config["disable_cuda_graph"])
-        text_arms = {"full", "hiagent_full", "acon_hist_ut_co"}
+        text_arms = {"full", "hiagent_full", "acon_hist_ut_co",
+                     "agentfold", "commitkv", "agentkv"}
         self.assertEqual(set(self.config["radix_cache_arms"]), text_arms)
         for row in cells(self.config):
             cmd = server_command(self.config, Path("sglang"), row["arm"])

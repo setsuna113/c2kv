@@ -52,6 +52,7 @@ CLI_SURFACE = [
     ("--record-prefixes", "", False),
     ("--backend", "sglang", False),
     ("--model", "c2kv-agent", False),
+    ("--model-family", "qwen3-4b", False),
     ("--ts-scenarios", "", False),
     ("--ts-agent", "", False),
     ("--ts-user", "", False),

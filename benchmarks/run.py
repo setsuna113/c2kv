@@ -79,7 +79,7 @@ def start_proxy(upstream: str, arm: str, port: int, log_dir: Path,
                 max_doc_length: int = 512, max_doc_num: int = 12,
                 query_projection: str | None = None,
                 telemetry_log: str = "", record_prefixes: str = "",
-                benchmark: str = ""):
+                benchmark: str = "", model_family: str = "qwen3-4b"):
     _assert_proxy_port_available(port)
     log_path = log_dir / f"proxy_{arm}_{port}.jsonl"
     out_handle = open(log_dir / f"proxy_{arm}_{port}.out", "w")
@@ -91,6 +91,7 @@ def start_proxy(upstream: str, arm: str, port: int, log_dir: Path,
         "--doc-packing", doc_packing,
         "--max-doc-length", str(max_doc_length),
         "--max-doc-num", str(max_doc_num),
+        "--model-family", model_family,
     ]
     if record_reference:
         command += ["--record-reference", record_reference]
@@ -197,6 +198,8 @@ def add_core_arguments(parser: argparse.ArgumentParser) -> None:
                              "tau2 agent/user LLMs and the BFCL handler "
                              "both use it; toolsandbox role keys are "
                              "separate, see --ts-agent)")
+    parser.add_argument("--model-family", default="qwen3-4b",
+                        help="model family contract for multi-turn history arms")
     parser.add_argument("--checkpoint", type=Path,
                         help="local checkpoint served by --upstream")
     parser.add_argument("--checkpoint-profile", type=Path,
@@ -317,7 +320,7 @@ def main(argv=None):
         max_doc_length=args.max_doc_length, max_doc_num=args.max_doc_num,
         query_projection=args.query_projection,
         telemetry_log=args.telemetry_log, record_prefixes=args.record_prefixes,
-        benchmark=args.benchmark)
+        benchmark=args.benchmark, model_family=args.model_family)
     try:
         # every adapter owns its own "/v1" (adapters/base.py:v1) and its own
         # cwd; run.py hands over the bare proxy URL and nothing else

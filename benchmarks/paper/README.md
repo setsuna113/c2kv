@@ -13,9 +13,12 @@ experiment or retrain the detector.
 | Bare C2KV | Arm C, checkpoint-1000, ratio **4** | Same | Same | Same | None |
 | H2O | Persistent history KV, retain 25% | Same | Same | Same | Retain 12.5% on each benchmark |
 | SnapKV | Persistent history KV, retain 25% | Same | Same | Same | Retain 12.5% on each benchmark |
+| PyramidKV | Persistent history KV, retain 25% | Same | Same | Same | Retain 12.5% on each benchmark |
+| AgentFold / CommitKV / AgentKV | Incremental append-only multi-turn history baselines | Same | Same | Same | None |
 | C2KV+C1 | H0 / C1000 / ratio8 / T02 risk / R1 | Same | Same | Same | None |
 
-The matrix contains 21 main cells and 6 sweep cells. The three C2KV+C1 cells
+The matrix contains 24 main cells, 9 sweep cells, 9 opponent cells and two
+explicit ACEBench-Agent/ToolSandbox Full baselines. The three C2KV+C1 cells
 run last. Bare C2KV remains ratio4; C2KV+C1 is ratio8 and is a final-system
 comparison, not a detector-only ablation. All actor and auxiliary generation
 calls use the same Qwen3-4B base weights through
@@ -47,7 +50,7 @@ is what the per-request telemetry attributes peaks to; it is a measurement
 constraint, not an algorithm requirement. The execution path is configured,
 not hard-coded: `attention_backend` (`flashinfer`), `disable_cuda_graph`
 (`false`; piecewise CUDA graph stays disabled), and `radix_cache_arms`
-(`["full", "hiagent_full", "acon_hist_ut_co"]`: the text arms keep SGLang's
+(`["full", "hiagent_full", "acon_hist_ut_co", "agentfold", "commitkv", "agentkv"]`: the text arms keep SGLang's
 cross-request prefix cache, so ordinary prefix reuse is not charged to them
 and the compute and cache left by their auxiliary calls are counted as
 incurred; the KV-compression arms reuse KV through their own session and gist

@@ -71,6 +71,7 @@ import json
 import threading
 import time
 import uuid
+from dataclasses import replace
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Dict, List, Optional, Set, Tuple
@@ -84,6 +85,7 @@ _OPENER = urlrequest.build_opener(urlrequest.ProxyHandler({}))
 
 import repair_policy
 import textarms
+import history_methods
 from arms import Arm, get_arm, history_kv_spec, kv_reuse_spec  # type: ignore
 from backends import BackendError, get_backend  # type: ignore
 from measurement.telemetry import append_jsonl, canonical_sha256  # type: ignore
@@ -187,6 +189,7 @@ def _phase(name: str):
 # but shifts every compression arm off its trained regime.
 DOC_PACKING = "turn"
 QUERY_PROJECTION = None
+MODEL_FAMILY = "qwen3-4b"
 MAX_DOC_LENGTH = 512
 MAX_DOC_NUM = 12
 DOC_PACKINGS = ("turn", "message")
@@ -1001,7 +1004,17 @@ def _apply_text_arm(payload: Dict[str, Any], arm, conv: str,
         usage_acc["wall_sec"] += time.perf_counter() - t0
         return out
 
-    if arm.text_policy in ("hiagent", "hiagent_summary", "hiagent_full"):
+    if arm.text_policy in history_methods.METHODS:
+        out, stats = history_methods.transform(
+            messages,
+            history_methods.state_for(conv),
+            arm.text_policy,
+            compress,
+            _render_action_dialect,
+            model=model,
+            model_family=MODEL_FAMILY,
+        )
+    elif arm.text_policy in ("hiagent", "hiagent_summary", "hiagent_full"):
         out, stats = textarms.hiagent_transform(
             messages, compress, _render_action_dialect, model=model,
             default_system=DEFAULT_SYSTEM_PROMPT,
@@ -1260,6 +1273,7 @@ def _activate_measurement_session(session: str) -> None:
             STATE.history_sessions.clear()
             CACHE.clear()
             textarms.reset_state()
+            history_methods.reset_state()
             STATE.active_measurement_session = session
 
 
@@ -1754,8 +1768,9 @@ class ProxyHandler(BaseHTTPRequestHandler):
 def main(argv=None):
     global ARM, BACKEND, UPSTREAM, BENCHMARK, REQUEST_LOG_PATH
     global TELEMETRY_LOG_PATH, PREFIX_LOG_PATH
-    global DOC_PACKING, MAX_DOC_LENGTH, MAX_DOC_NUM, QUERY_PROJECTION
+    global DOC_PACKING, MAX_DOC_LENGTH, MAX_DOC_NUM, QUERY_PROJECTION, MODEL_FAMILY
     textarms.reset_state()  # fresh caches/state per proxy process
+    history_methods.reset_state()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--upstream", required=True,
                         help="backend base URL, e.g. http://127.0.0.1:34000")
@@ -1777,6 +1792,15 @@ def main(argv=None):
                         help="reference jsonl to diff against (recover arms)")
     parser.add_argument("--query-projection", choices=["base", "gist"],
                         help="checkpoint query projection; raw-KV baselines always use base")
+    parser.add_argument(
+        "--model-family", default="qwen3-4b",
+        help="model family contract for AgentFold/CommitKV/AgentKV; these arms "
+             "only run with Qwen3-4B",
+    )
+    parser.add_argument(
+        "--history-kv-target-tokens", type=int, default=None,
+        help="resolved absolute history-KV allowance for Experiment-2 cells",
+    )
     parser.add_argument("--doc-packing", default=DOC_PACKING, choices=DOC_PACKINGS,
                         help="how compressed history is cut into docs: 'turn' = "
                              "the training format (default), 'message' = one doc "
@@ -1792,7 +1816,20 @@ def main(argv=None):
     MAX_DOC_LENGTH = int(args.max_doc_length)
     MAX_DOC_NUM = int(args.max_doc_num)
     QUERY_PROJECTION = args.query_projection
+    MODEL_FAMILY = args.model_family
     ARM = get_arm(args.arm)
+    if args.history_kv_target_tokens is not None:
+        if not ARM.history_kv:
+            raise ValueError(
+                "--history-kv-target-tokens requires a history-KV arm")
+        if args.history_kv_target_tokens < 1:
+            raise ValueError("--history-kv-target-tokens must be >= 1")
+        spec = dict(history_kv_spec(ARM) or {})
+        spec["target_tokens"] = int(args.history_kv_target_tokens)
+        spec["retention_ratio"] = None
+        ARM = replace(ARM, history_kv=spec)
+    if ARM.text_policy in history_methods.METHODS:
+        history_methods.require_model_family(MODEL_FAMILY)
     BENCHMARK = args.benchmark
     if ARM.native_controller:
         raise ValueError(

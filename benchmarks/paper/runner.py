@@ -102,7 +102,8 @@ def run_command(config, cell, directory, profile, stage="closed_loop"):
            "--benchmark", cell["adapter"], "--arm", cell["arm"],
            "--upstream", f"http://127.0.0.1:{config['server_port']}",
            "--proxy-port", str(config["proxy_port"]), "--backend", "sglang",
-           "--model", config["model"], "--checkpoint", config["checkpoint"],
+           "--model", config["model"], "--model-family",
+           config.get("model_family", "qwen3-4b"), "--checkpoint", config["checkpoint"],
            "--checkpoint-profile", str(profile), "--out", str(directory),
            "--exact-out", "--run-name", cell["cell_id"], "--num-workers", "1",
            "--telemetry-log", str(directory / "proxy_telemetry.jsonl"),
@@ -111,6 +112,13 @@ def run_command(config, cell, directory, profile, stage="closed_loop"):
         cmd += ["--record-prefixes", str(directory / "full_prefixes.jsonl")]
     if cell["adapter"] == "bfcl":
         cmd += ["--categories", cell["category"]]
+    elif cell["adapter"] == "acebench":
+        # Keep the matrix on ACEBench Agent rather than its fixed-call splits.
+        cmd += ["--acebench-category", cell.get("category") or "agent"]
+    elif cell["adapter"] == "toolsandbox":
+        # ToolSandbox owns its scenario/role defaults; do not inject ACON-only
+        # paths or iteration flags into its command line.
+        pass
     else:
         cmd += ["--acon-dir", config["acon_dir"], "--bench-python", config["appworld_python"],
                 "--split", config["appworld_split"], "--max-iter", str(config["appworld_max_iter"])]
@@ -138,10 +146,13 @@ def prepare(config, output, source):
             raise ValueError("The paper matrix excludes recovery and hybrid algorithms")
         if item["method"] == "C2KV" and (arm.ratio != 4 or item.get("ratio") != 4 or not arm.compress_history):
             raise ValueError("The selected bare C2KV arm must use ratio 4")
-        if item["method"] in ("H2O", "SnapKV"):
+        if item["method"] in ("H2O", "SnapKV", "PyramidKV"):
             spec = history_kv_spec(arm)
             if not spec["persistent_session"] or spec["retention_ratio"] != item["retention"]:
                 raise ValueError("Persistent history-KV budget differs from matrix")
+        if arm.text_policy in {"agentfold", "commitkv", "agentkv"}:
+            if config.get("model_family", "qwen3-4b") != "qwen3-4b":
+                raise ValueError("AgentFold/CommitKV/AgentKV require model_family=qwen3-4b")
     config = dict(config)
     config["sglang_source"] = str(source.resolve())
     resolved_path = output / "config.resolved.json"
@@ -316,7 +327,8 @@ def execute(config, plan, output, source, stages, selected, port_offset=0):
                                      "--backend", "sglang", "--port", str(config["proxy_port"]),
                                      "--doc-packing", config["doc_packing"],
                                      "--max-doc-length", str(config["max_doc_length"]),
-                                     "--max-doc-num", str(config["max_doc_num"]), "--query-projection", "base",
+                                      "--max-doc-num", str(config["max_doc_num"]), "--query-projection", "base",
+                                      "--model-family", config.get("model_family", "qwen3-4b"),
                                      "--request-log", str(directory / "proxy_requests.jsonl"),
                                      "--telemetry-log", str(directory / "proxy_telemetry.jsonl")]
                         proxy = subprocess.Popen(proxy_cmd, env=env, stdout=log, stderr=subprocess.STDOUT)

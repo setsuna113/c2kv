@@ -14,7 +14,14 @@
   "device": "cuda",
   "attention_backend": "flashinfer",
   "disable_cuda_graph": false,
-  "radix_cache_arms": ["full", "hiagent_full", "acon_hist_ut_co"],
+  "radix_cache_arms": [
+    "full",
+    "hiagent_full",
+    "acon_hist_ut_co",
+    "agentfold",
+    "commitkv",
+    "agentkv"
+  ],
   "context_length": 131072,
   "max_total_tokens": 131072,
   "chunked_prefill_size": 512,
@@ -38,20 +45,204 @@
     "task_timeout": 10800
   },
   "methods": [
-    {"method": "Full", "arm": "full", "group": "main"},
-    {"method": "HiAgent", "arm": "hiagent_full", "group": "main"},
-    {"method": "ACON", "arm": "acon_hist_ut_co", "group": "main"},
-    {"method": "C2KV", "arm": "c2kv4", "group": "main", "ratio": 4},
-    {"method": "H2O", "arm": "history_kv_h2o_r25_persistent", "group": "main", "retention": 0.25},
-    {"method": "SnapKV", "arm": "history_kv_snapkv_r25_persistent", "group": "main", "retention": 0.25},
-    {"method": "H2O", "arm": "history_kv_h2o_r125_persistent", "group": "sweep", "retention": 0.125},
-    {"method": "SnapKV", "arm": "history_kv_snapkv_r125_persistent", "group": "sweep", "retention": 0.125},
-    {"method": "C2KV+C1", "arm": "c2kv_c1_t02_r8", "group": "main", "ratio": 8},
-    {"method": "C2KV+C1", "arm": "c2kv_c1_t02_r4", "group": "ablation", "ratio": 4, "benchmarks": ["bfcl_base"]}
+    {
+      "method": "Full",
+      "arm": "full",
+      "group": "main",
+      "benchmarks": [
+        "bfcl_base",
+        "bfcl_long_context",
+        "appworld"
+      ]
+    },
+    {
+      "method": "HiAgent",
+      "arm": "hiagent_full",
+      "group": "main",
+      "benchmarks": [
+        "bfcl_base",
+        "bfcl_long_context",
+        "appworld"
+      ]
+    },
+    {
+      "method": "ACON",
+      "arm": "acon_hist_ut_co",
+      "group": "main",
+      "benchmarks": [
+        "bfcl_base",
+        "bfcl_long_context",
+        "appworld"
+      ]
+    },
+    {
+      "method": "C2KV",
+      "arm": "c2kv4",
+      "group": "main",
+      "ratio": 4,
+      "benchmarks": [
+        "bfcl_base",
+        "bfcl_long_context",
+        "appworld"
+      ]
+    },
+    {
+      "method": "H2O",
+      "arm": "history_kv_h2o_r25_persistent",
+      "group": "main",
+      "retention": 0.25,
+      "benchmarks": [
+        "bfcl_base",
+        "bfcl_long_context",
+        "appworld"
+      ]
+    },
+    {
+      "method": "SnapKV",
+      "arm": "history_kv_snapkv_r25_persistent",
+      "group": "main",
+      "retention": 0.25,
+      "benchmarks": [
+        "bfcl_base",
+        "bfcl_long_context",
+        "appworld"
+      ]
+    },
+    {
+      "method": "H2O",
+      "arm": "history_kv_h2o_r125_persistent",
+      "group": "sweep",
+      "retention": 0.125,
+      "benchmarks": [
+        "bfcl_base",
+        "bfcl_long_context",
+        "appworld"
+      ]
+    },
+    {
+      "method": "SnapKV",
+      "arm": "history_kv_snapkv_r125_persistent",
+      "group": "sweep",
+      "retention": 0.125,
+      "benchmarks": [
+        "bfcl_base",
+        "bfcl_long_context",
+        "appworld"
+      ]
+    },
+    {
+      "method": "PyramidKV",
+      "arm": "history_kv_pyramidkv_r25_persistent",
+      "group": "main",
+      "retention": 0.25,
+      "benchmarks": [
+        "bfcl_base",
+        "bfcl_long_context",
+        "appworld"
+      ]
+    },
+    {
+      "method": "PyramidKV",
+      "arm": "history_kv_pyramidkv_r125_persistent",
+      "group": "sweep",
+      "retention": 0.125,
+      "benchmarks": [
+        "bfcl_base",
+        "bfcl_long_context",
+        "appworld"
+      ]
+    },
+    {
+      "method": "AgentFold",
+      "arm": "agentfold",
+      "group": "opponent",
+      "benchmarks": [
+        "bfcl_base",
+        "bfcl_long_context",
+        "appworld"
+      ]
+    },
+    {
+      "method": "CommitKV",
+      "arm": "commitkv",
+      "group": "opponent",
+      "benchmarks": [
+        "bfcl_base",
+        "bfcl_long_context",
+        "appworld"
+      ]
+    },
+    {
+      "method": "AgentKV",
+      "arm": "agentkv",
+      "group": "opponent",
+      "benchmarks": [
+        "bfcl_base",
+        "bfcl_long_context",
+        "appworld"
+      ]
+    },
+    {
+      "method": "ACEBench Agent baseline",
+      "arm": "full",
+      "group": "baseline",
+      "benchmarks": [
+        "acebench_agent"
+      ]
+    },
+    {
+      "method": "ToolSandbox baseline",
+      "arm": "full",
+      "group": "baseline",
+      "benchmarks": [
+        "toolsandbox"
+      ]
+    },
+    {
+      "method": "C2KV+C1",
+      "arm": "c2kv_c1_t02_r8",
+      "group": "main",
+      "ratio": 8,
+      "benchmarks": [
+        "bfcl_base",
+        "bfcl_long_context",
+        "appworld"
+      ]
+    },
+    {
+      "method": "C2KV+C1",
+      "arm": "c2kv_c1_t02_r4",
+      "group": "ablation",
+      "ratio": 4,
+      "benchmarks": [
+        "bfcl_base"
+      ]
+    }
   ],
   "benchmarks": [
-    {"name": "bfcl_base", "adapter": "bfcl", "category": "multi_turn_base"},
-    {"name": "bfcl_long_context", "adapter": "bfcl", "category": "multi_turn_long_context"},
-    {"name": "appworld", "adapter": "acon_appworld"}
-  ]
+    {
+      "name": "bfcl_base",
+      "adapter": "bfcl",
+      "category": "multi_turn_base"
+    },
+    {
+      "name": "bfcl_long_context",
+      "adapter": "bfcl",
+      "category": "multi_turn_long_context"
+    },
+    {
+      "name": "appworld",
+      "adapter": "acon_appworld"
+    },
+    {
+      "name": "acebench_agent",
+      "adapter": "acebench",
+      "category": "agent"
+    },
+    {
+      "name": "toolsandbox",
+      "adapter": "toolsandbox"
+    }
+  ],
+  "model_family": "qwen3-4b"
 }

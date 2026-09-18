@@ -36,7 +36,7 @@ def test_append_final_arm_preserves_old_cells_and_completed_artifacts():
         completed.parent.mkdir(parents=True)
         completed.write_text('{"old_result": true}\n')
         new_plan, _ = prepare(config, output, output / "sglang")
-        assert [row["cell_id"] for row in new_plan[:24]] == [row["cell_id"] for row in old_plan]
+        assert [row["cell_id"] for row in new_plan[:len(old_plan)]] == [row["cell_id"] for row in old_plan]
         assert completed.read_text() == '{"old_result": true}\n'
         assert json.loads((output / "config.before_c1_extension.json").read_text())["methods"] == previous["methods"]
         assert all("benchmarks.paper.c1" in row["command"] for row in new_plan[-4:])

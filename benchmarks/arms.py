@@ -284,6 +284,7 @@ class Arm:
             "acon_hist", "acon_obs",
             "acon_hist_base", "acon_hist_ut", "acon_hist_ut_co",
             "acon_obs_base", "acon_obs_ut", "acon_obs_ut_co",
+            "agentfold", "commitkv", "agentkv",
         }
         if self.text_policy and self.text_policy not in text_policies:
             raise ValueError(f"arm {self.name!r}: unknown text_policy {self.text_policy!r}")
@@ -389,6 +390,33 @@ ARMS: Dict[str, Arm] = {
             compress_history=False,
             text_policy="acon_obs_ut_co",
             description="ACON observation compression with the paper Appendix D guideline after UT then compression-maximization (CO)",
+        ),
+        Arm(
+            name="agentfold",
+            compress_history=False,
+            text_policy="agentfold",
+            description=(
+                "AgentFold append-only multi-turn history baseline; closed turns "
+                "are folded incrementally and the active suffix stays raw"
+            ),
+        ),
+        Arm(
+            name="commitkv",
+            compress_history=False,
+            text_policy="commitkv",
+            description=(
+                "CommitKV append-only multi-turn history baseline; only turns "
+                "containing an action and tool feedback are committed"
+            ),
+        ),
+        Arm(
+            name="agentkv",
+            compress_history=False,
+            text_policy="agentkv",
+            description=(
+                "AgentKV append-only history baseline with at most one explicit "
+                "query-driven retrospective recovery"
+            ),
         ),
         Arm(
             name="c2kv",
@@ -587,6 +615,35 @@ ARMS: Dict[str, Arm] = {
                 "retention for the small-budget sweep"
             ),
         ),
+        Arm(
+            name="history_kv_pyramidkv_r25_persistent",
+            compress_history=False,
+            history_kv={
+                "method": "pyramidkv",
+                "retention_ratio": 0.25,
+                "backend": "physical_eviction",
+                "persistent_session": True,
+            },
+            description=(
+                "PyramidKV history-only persistent physical KV eviction at 25% "
+                "retention; its per-layer funnel is measured through the same "
+                "resident/active KV accounting as H2O and SnapKV"
+            ),
+        ),
+        Arm(
+            name="history_kv_pyramidkv_r125_persistent",
+            compress_history=False,
+            history_kv={
+                "method": "pyramidkv",
+                "retention_ratio": 0.125,
+                "backend": "physical_eviction",
+                "persistent_session": True,
+            },
+            description=(
+                "PyramidKV history-only persistent physical KV eviction at 12.5% "
+                "retention for the small-budget sweep"
+            ),
+        ),
         # KNOWN CONFOUND on both cd_* arms: constrain_tools=True makes the
         # sglang backend rewrite request.tools with _inline_refs ($refs
         # inlined, loose types mapped, unsupported keywords stripped) so
@@ -644,6 +701,28 @@ ARMS: Dict[str, Arm] = {
         ),
     )
 }
+
+# Experiment-2 NPU drivers use these names to select the backend and working
+# point.  The exact K/B token allowance is supplied by the cell launch (and
+# checked by the proxy); the placeholder keeps the arm registry typed and
+# prevents a missing registry entry from silently aliasing to SnapKV.
+for _method in ("h2o", "snapkv_persistent", "pyramidkv"):
+    for _suffix in ("k0", "k2", "b0", "b2"):
+        _name = f"gen_{_method}_{_suffix}"
+        ARMS[_name] = Arm(
+            name=_name,
+            compress_history=False,
+            history_kv={
+                "method": _method,
+                "target_tokens": 1,
+                "backend": "physical_eviction",
+                "persistent_session": True,
+            },
+            description=(
+                f"Experiment-2 {_method} absolute-budget arm {_suffix}; "
+                "the launch cell replaces target_tokens with its resolved K/B allowance"
+            ),
+        )
 
 
 def get_arm(name: str) -> Arm:
