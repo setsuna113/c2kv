@@ -585,6 +585,18 @@ class BFCLTaskEnvironment:
             self._force_quit = True
             self._finish_turn(force=True)
 
+    def commit_recorded_response(self, response: Mapping[str, Any]) -> None:
+        """Commit one response while replaying a recorded BFCL prefix.
+
+        A recorded row may correspond to a payload that was already opened by
+        the source driver.  Replay must consume that pending slot instead of
+        blindly calling ``next_payload()`` a second time.  For a fresh slot we
+        open it here and then commit the exact recorded response.
+        """
+        if not self._awaiting_response:
+            self.next_payload()
+        self.commit_response(response)
+
     def _finish_turn(self, *, force: bool = False) -> None:
         self.all_model_response.append(copy.deepcopy(self._current_turn_response))
         self._turn_index += 1

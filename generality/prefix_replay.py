@@ -232,8 +232,17 @@ def restore_bfcl_prefix(row: Mapping[str, Any], bindings: Any | None = None) -> 
         if env.finished:
             raise PrefixReplayIntegrityError("source prefix has actions after task end")
         before_turn = env.turn_index
-        env.next_payload()  # materialize the source decision before this action
-        env.commit_response(response_message(message))
+        # The source trace may have captured this already-open decision slot.
+        # Consume it directly; only open a new slot when the environment is
+        # idle.  Calling next_payload() unconditionally is what produced
+        # "Commit the outstanding BFCL response first" for turn-1/step-N.
+        commit_recorded = getattr(env, "commit_recorded_response", None)
+        if callable(commit_recorded):
+            commit_recorded(response_message(message))
+        else:
+            if not getattr(env, "_awaiting_response", False):
+                env.next_payload()
+            env.commit_response(response_message(message))
         produced = [m for m in env.inference_data.get("message", [])
                     if m.get("role") == "tool"]
         expected_calls = len(message.get("tool_calls") or [])
