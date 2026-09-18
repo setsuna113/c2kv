@@ -275,6 +275,20 @@ prompt text, so the shared tool-call schema column does not apply.
 Terminal-state gates: every task of the split / pin list / data file must
 be scored or the run fails.
 
+**AppWorld interface contract.** AppWorld itself documents function-calling,
+MCP, and interactive coding agents, but `acon_appworld` in this repository
+uses ACON's `experiments/appworld/run_all.py` code-action route. The assistant
+message is Python source in `content`; ACON's executor runs that source and
+the official score is produced afterwards by `appworld evaluate`. This path
+is therefore an ACON code-agent evaluation, not an AppWorld MCP or native
+function-calling evaluation. The shared Tracer parser only recognizes explicit
+`<tool_call>{name, arguments}</tool_call>` blocks; it does not turn arbitrary
+Python control flow into a structured list of API calls. The code draft is
+still retained as text for retrieval, and C1 risk uses the hidden-state,
+logprob, stop, and parse features. A real AppWorld smoke must show the code
+draft, at least one executed AppWorld action, and a numeric official scorer
+result before the matrix is accepted.
+
 Read before quoting:
 
 * **ACEBench needs the role-history patch for compression experiments.**
