@@ -6,7 +6,8 @@ import tempfile
 import pytest
 
 from benchmarks.arms import get_arm
-from benchmarks.paper.c1 import ARM, controller_oom_message, replay_task_id, selected_tasks, summarize_scores
+from benchmarks.paper.c1 import (ARM, controller_oom_message, controller_step_failure, replay_task_id,
+                                 selected_tasks, summarize_scores)
 from benchmarks.paper.runner import DEFAULT_CONFIG, prepare, server_command
 
 
@@ -87,3 +88,22 @@ def test_controller_oom_is_a_scored_zero_harness_failure(tmp_path):
     assert summary["n"] == 2 and summary["semantic_score"] == 0.5
     assert summary["n_harness_failures"] == 1
     assert summary["harness_failure_task_ids"] == ["multi_turn_long_context_100"]
+    assert summary["n_method_failures"] == 0
+
+
+def test_capacity_infeasible_is_a_scored_zero_method_failure(tmp_path):
+    shard = tmp_path / "task_shards" / "multi_turn_long_context_101"
+    (shard / "server").mkdir(parents=True)
+    rows = [{"status": "failed", "error": "{'type': 'CapacityInfeasible', 'message': "
+                                          "\"Native S0 mandatory raw input and minimum whole-event gist cannot fit\"}"}]
+    (shard / "server" / "steps.jsonl").write_text("".join(json.dumps(row) + "\n" for row in rows))
+    status, kind, message = controller_step_failure(shard)
+    assert (status, kind) == ("method_failure", "capacity_infeasible")
+    assert controller_oom_message(shard) is None
+    receipts = [{"task_id": "multi_turn_long_context_101", "status": status,
+                 "failure": {"kind": kind, "message": message},
+                 "unified_metrics": {"official_score": 0.0, status: kind}}]
+    summary = summarize_scores("bfcl_long_context", receipts)
+    assert summary["semantic_score"] == 0.0 and summary["n_method_failures"] == 1
+    assert summary["method_failure_task_ids"] == ["multi_turn_long_context_101"]
+    assert summary["n_harness_failures"] == 0
