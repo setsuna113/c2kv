@@ -319,10 +319,15 @@ class SessionTracerTask:
         parsed = parse_native_draft(feats["text"], call_id_prefix=f"d{self.decisions}")
         # NativeDraft.status: 'tool_calls' | 'text' (both parse) or 'malformed'
         parse_ok = parsed.status in ("tool_calls", "text")
+        # AppWorld/ACON is a code-action protocol: a non-empty Python draft is
+        # an executable action even though it intentionally contains no native
+        # <tool_call> block.  Treating it as STOP changes the frozen C1 feature
+        # semantics and makes retrieval label the draft as a terminal answer.
+        code_action = self.benchmark == "acon_appworld" and bool(feats["text"].strip())
         context = {
             "prefill_hidden": feats["prefill_hidden"],
             "draft_logprobs": feats["draft_logprobs"],
-            "is_stop": not parsed.tool_calls,
+            "is_stop": not parsed.tool_calls and not code_action,
             "parse_ok": parse_ok,
             "prefill_contract": self.prefill_contract,
             "goal": goal,
