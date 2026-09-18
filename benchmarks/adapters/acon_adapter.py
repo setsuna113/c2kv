@@ -86,9 +86,11 @@ APPWORLD_SEED = 42  # run_all.py default (ACON §8.3 fixes seed 42)
 
 
 def validate_appworld_runner_patches(acon_dir: Path) -> None:
-    """Fail before generation when the two output-critical ACON fixes are absent."""
+    """Fail before generation when an output-critical ACON patch is absent."""
     root = Path(acon_dir)
     checks = {
+        root / "src" / "productive_agents" / "llm.py": (
+            "ACON_OPENAI_BASE_URL", "0001-openai-base-url-env.patch"),
         root / "experiments" / "appworld" / "run.py": (
             "API cost unavailable for this model", "0002-unknown-api-cost.patch"),
         root / "src" / "productive_agents" / "env" / "appworld" / "env.py": (

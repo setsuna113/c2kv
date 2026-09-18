@@ -427,13 +427,20 @@ def test_appworld_command_and_experiment_name():
 
 def test_appworld_required_patch_markers(tmp_path):
     acon = tmp_path / "acon"
+    llm = acon / "src" / "productive_agents" / "llm.py"
     runner = acon / "experiments" / "appworld" / "run.py"
     env = acon / "src" / "productive_agents" / "env" / "appworld" / "env.py"
+    llm.parent.mkdir(parents=True)
     runner.parent.mkdir(parents=True)
     env.parent.mkdir(parents=True)
+    llm.write_text("base_url = os.environ.get('ACON_OPENAI_BASE_URL')\n")
     runner.write_text("print('API cost unavailable for this model')\n")
     env.write_text("max_interactions_reached = True\n")
     A.validate_appworld_runner_patches(acon)
+    llm.write_text("base_url = 'http://localhost:8000/v1'\n")
+    with pytest.raises(SystemExit, match="0001-openai-base-url-env.patch"):
+        A.validate_appworld_runner_patches(acon)
+    llm.write_text("base_url = os.environ.get('ACON_OPENAI_BASE_URL')\n")
     env.write_text("# pristine upstream\n")
     with pytest.raises(SystemExit, match="0006-appworld-final-step-and-errors.patch"):
         A.validate_appworld_runner_patches(acon)
