@@ -1627,7 +1627,9 @@ class EventNativeS0Controller:
         if len(names) != len(set(names)):
             raise PolicyInputError("Failed-operation observations require unique tool names")
         tools_json = _canonical_json(tools)
-        store = EventStore.from_messages(session_id, messages)
+        store = EventStore.from_messages(
+            session_id, messages, benchmark=self.benchmark
+        )
         message_json = tuple(message.json_text for message in store.messages)
         return session_id, decision_key, store, tools, tools_json, message_json
 

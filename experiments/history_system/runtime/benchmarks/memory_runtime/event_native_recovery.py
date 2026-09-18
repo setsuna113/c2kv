@@ -18,8 +18,10 @@ from .recovery.gate import _read_prefill_score
 from .recovery.source import rank_visible_source_events as _rank_visible_source_events
 
 
-def wrap_with_event_native_recovery(base: Any, config: Mapping[str, Any]):
-    return EventNativeRecoveryController(base, config)
+def wrap_with_event_native_recovery(
+    base: Any, config: Mapping[str, Any], *, benchmark: str | None = None
+):
+    return EventNativeRecoveryController(base, config, benchmark=benchmark)
 
 
 __all__ = [

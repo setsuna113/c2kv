@@ -22,9 +22,20 @@ def context_from_prepared(prepared, draft_tool_calls, draft_text, parse_error=No
 
     store = prepared._store
     users = [event for event in store.events if event.kind == "user"]
-    user_messages = [visible_message(message) for message in store.event_messages(users[-1].event_id)] if users else []
+    appworld = getattr(store, "benchmark", None) == "acon_appworld"
+    goal_event = users[0] if appworld and users else (users[-1] if users else None)
+    user_messages = [
+        visible_message(message)
+        for message in store.event_messages(goal_event.event_id)
+    ] if goal_event else []
     goal = "\n".join(str(message.get("content", "")) for message in user_messages)
-    completed = [event for event in store.events if event.kind == "tool_event" and event.complete]
+    if appworld:
+        completed = [
+            event for event in store.events
+            if event.complete and _is_appworld_code_action(store, event)
+        ]
+    else:
+        completed = [event for event in store.events if event.kind == "tool_event" and event.complete]
     latest = [visible_message(message) for message in store.event_messages(completed[-1].event_id)] if completed else []
     raw = [visible_message(store.messages[index]) for index in prepared.memory.raw_source_indices]
     # Previously appended spans are exact visible evidence, unlike gist.
@@ -34,6 +45,7 @@ def context_from_prepared(prepared, draft_tool_calls, draft_text, parse_error=No
     prefill = shadow.get("prefill") or {}
     captured = prefill.get("status") == "captured"
     logprobs = list(getattr(prepared, "_set_draft_logprobs", ()))
+    code_action = appworld and isinstance(draft_text, str) and bool(draft_text.strip())
     return {
         "schema": "recovery-selection-context-v1", "session_id": store.session_id,
         "decision_key": prepared.metadata["decision_key"], "goal": goal,
@@ -45,8 +57,25 @@ def context_from_prepared(prepared, draft_tool_calls, draft_text, parse_error=No
             "bindings": copy.deepcopy(shadow.get("bindings") or {})},
         "draft_logprobs": logprobs, "draft_text": draft_text,
         "draft_tool_calls": copy.deepcopy(list(draft_tool_calls)),
-        "parse_ok": parse_error is None, "is_stop": parse_error is None and not draft_tool_calls,
+        "parse_ok": parse_error is None,
+        "is_stop": parse_error is None and not draft_tool_calls and not code_action,
     }
+
+
+def _is_appworld_code_action(store, event):
+    """Recognize an observed assistant-code/user-observation pair."""
+    if event.kind != "tool_event" or event.tool_call_ids or len(event.source_indices) != 2:
+        return False
+    assistant, observation = (
+        store.messages[index].to_dict() for index in event.source_indices
+    )
+    return (
+        assistant.get("role") == "assistant"
+        and not assistant.get("tool_calls")
+        and isinstance(assistant.get("content"), str)
+        and bool(assistant["content"].strip())
+        and observation.get("role") == "user"
+    )
 
 
 def typed_parameters(calls):

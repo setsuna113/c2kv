@@ -42,7 +42,9 @@ class PreparedEventNativeRecovery:
 class EventNativeRecoveryController:
     """Wrap an event-native S0 controller with the fixed E1 R-event action."""
 
-    def __init__(self, base: Any, config: Mapping[str, Any]) -> None:
+    def __init__(
+        self, base: Any, config: Mapping[str, Any], *, benchmark: str | None = None
+    ) -> None:
         if not callable(getattr(base, "prepare", None)) or not callable(
             getattr(base, "reconsider", None)
         ):
@@ -50,6 +52,7 @@ class EventNativeRecoveryController:
                 "post-draft recovery requires an event-native controller"
             )
         self.base = base
+        self.benchmark = benchmark
         self.config = parse_recovery_config(config)
         self.policy_config = base.policy_config
         self.kv_bytes_per_token = base.kv_bytes_per_token
@@ -80,7 +83,9 @@ class EventNativeRecoveryController:
             return cached
         messages = payload.get("messages")
         tools = payload.get("tools") or []
-        store = EventStore.from_messages(session_id, messages)
+        store = EventStore.from_messages(
+            session_id, messages, benchmark=self.benchmark
+        )
         prepared = PreparedEventNativeRecovery(
             memory=base_prepared.memory,
             metadata=copy.deepcopy(base_prepared.metadata),
