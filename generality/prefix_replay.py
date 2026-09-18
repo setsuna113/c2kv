@@ -168,9 +168,11 @@ class ReplayedEnvironment:
     replayed_assistant_messages: int
     replayed_tool_messages: int
     previous_turn_valid: bool | None
+    pending_payload: dict[str, Any]
 
     def current_payload(self) -> dict[str, Any]:
-        return self.env.next_payload()
+        """Return the decision already opened and validated during restore."""
+        return copy.deepcopy(self.pending_payload)
 
 
 def restore_bfcl_prefix(row: Mapping[str, Any], bindings: Any | None = None) -> ReplayedEnvironment:
@@ -232,17 +234,8 @@ def restore_bfcl_prefix(row: Mapping[str, Any], bindings: Any | None = None) -> 
         if env.finished:
             raise PrefixReplayIntegrityError("source prefix has actions after task end")
         before_turn = env.turn_index
-        # The source trace may have captured this already-open decision slot.
-        # Consume it directly; only open a new slot when the environment is
-        # idle.  Calling next_payload() unconditionally is what produced
-        # "Commit the outstanding BFCL response first" for turn-1/step-N.
-        commit_recorded = getattr(env, "commit_recorded_response", None)
-        if callable(commit_recorded):
-            commit_recorded(response_message(message))
-        else:
-            if not getattr(env, "_awaiting_response", False):
-                env.next_payload()
-            env.commit_response(response_message(message))
+        env.next_payload()
+        env.commit_response(response_message(message))
         produced = [m for m in env.inference_data.get("message", [])
                     if m.get("role") == "tool"]
         expected_calls = len(message.get("tool_calls") or [])
@@ -288,6 +281,7 @@ def restore_bfcl_prefix(row: Mapping[str, Any], bindings: Any | None = None) -> 
         replayed_assistant_messages=len(assistants),
         replayed_tool_messages=len(tools),
         previous_turn_valid=env.previous_turn_valid(),
+        pending_payload=current,
     )
 
 

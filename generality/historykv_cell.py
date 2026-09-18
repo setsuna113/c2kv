@@ -208,11 +208,12 @@ def run_appworld_task(cell: dict, task_id: str, proxy_port: int) -> dict:
     started = time.monotonic()
     script = f"""
 import sys, os
+from pathlib import Path
 sys.path.insert(0, {str(PAPER)!r})
 from benchmarks.adapters import acon_adapter as acon
 summary = acon.run_appworld(
-    'http://127.0.0.1:{proxy_port}/v1', 'acon_appworld',
-    {cell['acon_dir']!r}, {cell['model_name']!r},
+    'http://127.0.0.1:{proxy_port}/v1', Path({str(out / 'appworld')!r}),
+    acon_dir=Path({cell['acon_dir']!r}), model={cell['model_name']!r},
     tag='gen', split='test_normal', max_iter=50,
     task_ids=['{task_id}'], python={cell['python_appworld']!r},
 )
