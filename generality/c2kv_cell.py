@@ -239,6 +239,15 @@ def run_task(cell: dict, task_ids: list[str], port: int, batch_dirname: str) -> 
     worker_env = env.copy()
     if cell["benchmark"] == "bfcl":
         worker_env["PYTHONPATH"] = str(RUNTIME)
+    elif cell["benchmark"] == "acon_appworld":
+        # event_native_appworld needs: controller_runtime (for the worker
+        # itself), benchmarks/ (for adapters/proxy imports), acon/src (for
+        # the ACON harness), and paper_harness/benchmarks (for proxy)
+        worker_env["PYTHONPATH"] = os.pathsep.join((
+            str(RUNTIME), str(RUNTIME / "benchmarks"),
+            "/home/liuyancheng/baselines/acon/src",
+            "/home/liuyancheng/c2kv-generality-20260918/src/paper_harness/benchmarks"))
+        worker_env["APPWORLD_ROOT"] = cell.get("appworld_root", "")
     server_log = (out / "controller.log").open("wb")
     worker_log = (out / "benchmark.log").open("wb")
     started = time.monotonic()
@@ -260,15 +269,33 @@ def run_task(cell: dict, task_ids: list[str], port: int, batch_dirname: str) -> 
             if time.monotonic() > deadline:
                 raise TimeoutError("controller readiness timeout")
             time.sleep(2)
-        worker = subprocess.Popen(
-            bfcl_worker_command(cell, task_ids, out, port), cwd=str(RUNTIME),
-            env=worker_env, stdout=worker_log, stderr=subprocess.STDOUT,
-            stdin=subprocess.DEVNULL, start_new_session=True,
-        )
-        rc = worker.wait(timeout=max(60, deadline - time.monotonic()))
-        if rc != 0:
-            raise RuntimeError(f"official worker exited rc={rc}")
-        healthy, bad = validate_chunk(out, task_ids)
+        if cell["benchmark"] == "acon_appworld":
+            # AppWorld: one task per worker invocation (event_native_appworld)
+            for task_id in task_ids:
+                worker = subprocess.Popen(
+                    appworld_worker_command(cell, task_id, out, port),
+                    cwd=str(RUNTIME),
+                    env=worker_env, stdout=worker_log, stderr=subprocess.STDOUT,
+                    stdin=subprocess.DEVNULL, start_new_session=True,
+                )
+                rc = worker.wait(timeout=max(60, deadline - time.monotonic()))
+                if rc != 0:
+                    raise RuntimeError(f"official worker exited rc={rc} for {task_id}")
+        else:
+            worker = subprocess.Popen(
+                bfcl_worker_command(cell, task_ids, out, port), cwd=str(RUNTIME),
+                env=worker_env, stdout=worker_log, stderr=subprocess.STDOUT,
+                stdin=subprocess.DEVNULL, start_new_session=True,
+            )
+            rc = worker.wait(timeout=max(60, deadline - time.monotonic()))
+            if rc != 0:
+                raise RuntimeError(f"official worker exited rc={rc}")
+        if cell["benchmark"] == "acon_appworld":
+            # AppWorld results are evaluation JSONs, not BFCL result rows;
+            # the worker's rc=0 + official_summary.json are the health check
+            healthy, bad = task_ids, []
+        else:
+            healthy, bad = validate_chunk(out, task_ids)
         status.update(status="completed" if not bad else "partial",
                       healthy=healthy, bad=bad,
                       wall_s=time.monotonic() - started)
@@ -345,6 +372,11 @@ def main(argv=None) -> int:
     task_ids = args.task_ids or cell["task_ids"]
     if args.max_tasks is not None:
         task_ids = task_ids[: args.max_tasks]
+
+    # AppWorld: the controller (single_task_harness_api) requires exactly one
+    # frozen task per server instance — chunk size must be 1
+    if cell["benchmark"] == "acon_appworld":
+        args.chunk = 1
 
     cell_dir = Path(cell["cell_dir"])
     progress = cell_dir / "progress.jsonl"
