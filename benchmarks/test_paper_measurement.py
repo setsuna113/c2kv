@@ -284,11 +284,57 @@ def test_replay_executes_canonical_prefixes_in_order(tmp_path, monkeypatch):
     result = replay_prefixes(
         prefixes, "http://localhost:1", output,
         source_run_id="full", target_run_id="h2o")
-    assert result == {"prefixes": 2, "completed": 2, "failed": 0}
+    assert result == {"prefixes": 2, "completed": 2, "failed": 0, "context_overflow": 0}
     assert seen == payloads
     rows = list(read_jsonl(output))
     assert [row["sequence"] for row in rows] == [0, 1]
     assert rows[0]["source_paper_measurement"]["metrics"]["whole_full_kv_tokens"] == 10
+
+
+def test_replay_tolerates_only_context_overflow_failures(tmp_path, monkeypatch):
+    from urllib.error import HTTPError
+    from benchmarks.measurement import replay as replay_mod
+    prefixes = tmp_path / "prefixes.jsonl"
+    output = tmp_path / "replay.jsonl"
+    payloads = [{"messages": [{"role": "user", "content": str(i)}]} for i in range(3)]
+    prefixes.write_text("".join(json.dumps({
+        "event_type": "recorded_prefix", "source_arm": "full",
+        "prefix_id": f"p{i}", "canonical_sha256": canonical_sha256(payload),
+        "replay_payload": payload, "source_response": {},
+    }) + "\n" for i, payload in enumerate(payloads)), encoding="utf-8")
+    overflow = json.dumps({"error": "upstream failed: upstream 400: {\"message\":\"The input (138202 tokens) "
+                           "is longer than the model's context length (131072 tokens).\"}"}).encode()
+    other = json.dumps({"error": "upstream failed: connection refused"}).encode()
+
+    class Ok:
+        status = 200
+        def __enter__(self): return self
+        def __exit__(self, *args): return False
+        def read(self): return json.dumps({"choices": []}).encode()
+
+    class Opener:
+        def __init__(self, bodies): self.bodies = list(bodies)
+        def open(self, request, timeout):
+            body = self.bodies.pop(0)
+            if body is None:
+                return Ok()
+            raise HTTPError(request.full_url, 502, "Bad Gateway", {}, __import__("io").BytesIO(body))
+
+    monkeypatch.setattr("benchmarks.measurement.replay._OPENER", Opener([None, overflow, overflow]))
+    result = replay_prefixes(prefixes, "http://localhost:1", output, source_run_id="full", target_run_id="x")
+    assert result == {"prefixes": 3, "completed": 1, "failed": 2, "context_overflow": 2}
+    # the CLI exits cleanly when every failure is a context overflow, and records the summary
+    monkeypatch.setattr("benchmarks.measurement.replay._OPENER", Opener([None, overflow, overflow]))
+    out2 = tmp_path / "replay2.jsonl"
+    replay_mod.main(["--prefixes", str(prefixes), "--base-url", "http://localhost:1", "--output", str(out2),
+                     "--source-run-id", "full", "--target-run-id", "x"])
+    assert json.loads((tmp_path / "replay_summary.json").read_text())["context_overflow"] == 2
+    # any other failure still fails the replay
+    monkeypatch.setattr("benchmarks.measurement.replay._OPENER", Opener([None, overflow, other]))
+    with pytest.raises(SystemExit, match="1 failed"):
+        replay_mod.main(["--prefixes", str(prefixes), "--base-url", "http://localhost:1",
+                         "--output", str(tmp_path / "replay3.jsonl"),
+                         "--source-run-id", "full", "--target-run-id", "x"])
 
 
 def test_bfcl_paper_measurement_rejects_concurrent_generator():

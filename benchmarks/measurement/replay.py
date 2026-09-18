@@ -34,6 +34,20 @@ def _paper_measurement(response: Any) -> Any:
     return next((value for value in candidates if isinstance(value, dict)), None)
 
 
+
+CONTEXT_OVERFLOW_MARKER = "is longer than the model's context length"
+
+
+def is_context_overflow(raw_response):
+    """A recorded Full prefix that does not fit the serving context under this arm.
+
+    The same prefixes fail in the closed-loop run (the harness marks the case
+    wrong), so a replay that fails only on them is complete: the failure is a
+    property of the arm at that context length, not of the replay.
+    """
+    text = raw_response if isinstance(raw_response, str) else json.dumps(raw_response or "")
+    return CONTEXT_OVERFLOW_MARKER in text
+
 def replay_prefixes(
     prefixes: "str | Path", base_url: str, output: "str | Path",
     *, source_run_id: str, target_run_id: str, timeout: int = 600,
@@ -44,6 +58,7 @@ def replay_prefixes(
         raise ValueError(f"no recorded_prefix rows in {prefixes}")
     completed = 0
     failed = 0
+    context_overflow = 0
     for sequence, row in enumerate(rows):
         if row.get("source_arm") != "full":
             raise ValueError(f"prefix {sequence} source_arm is not full")
@@ -105,9 +120,12 @@ def replay_prefixes(
         })
         if error is not None or status != 200:
             failed += 1
+            if is_context_overflow(raw_response):
+                context_overflow += 1
         else:
             completed += 1
-    return {"prefixes": len(rows), "completed": completed, "failed": failed}
+    return {"prefixes": len(rows), "completed": completed, "failed": failed,
+            "context_overflow": context_overflow}
 
 
 def main(argv=None) -> None:
@@ -125,9 +143,12 @@ def main(argv=None) -> None:
         timeout=args.timeout,
     )
     print(json.dumps(summary, sort_keys=True))
-    if summary["failed"]:
+    Path(args.output).with_name("replay_summary.json").write_text(
+        json.dumps(summary, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+    unexplained = summary["failed"] - summary["context_overflow"]
+    if unexplained:
         raise SystemExit(
-            f"prefix replay completed with {summary['failed']} failed requests")
+            f"prefix replay completed with {unexplained} failed requests")
 
 
 if __name__ == "__main__":
