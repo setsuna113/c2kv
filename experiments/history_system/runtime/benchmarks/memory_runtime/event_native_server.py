@@ -415,6 +415,8 @@ def _serve(args):
             manifest['s0_controller_contract'] = s0_contract
         controller = controller_factory(tokenizer, packing=runtime_packing['effective_packing'],
             policy=runtime_policy['effective_policy'], view_mode=args.view_mode, model_context=context,
+            **({'benchmark': args.benchmark}
+               if source_profile != 'acebench-text-actions-v1' else {}),
             **s0_kwargs,
             **({'compression_policy': compression_policy,
                 'history_view_protocol': history_view_protocol}

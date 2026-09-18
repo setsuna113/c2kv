@@ -184,6 +184,43 @@ class TestRegistry:
 # ------------------------------------------------------------ proxy split
 
 class TestProxySplit:
+    def test_appworld_task_packet_stays_raw_and_outside_physical_history(self, monkeypatch):
+        previous = proxy_mod.BENCHMARK
+        monkeypatch.setattr(
+            proxy_mod,
+            "_extract",
+            lambda role, content, ratio, timeout=600, tools=None, force=False: {
+                "key_hash": "gist-key",
+                "gist_len": 1,
+                "original_seq_len": len(content),
+            },
+        )
+        proxy_mod.BENCHMARK = "acon_appworld"
+        try:
+            messages = [
+                {"role": "system", "content": "sys"},
+                {"role": "user", "content": "APPWORLD TASK PACKET: " + "x" * 200},
+                {"role": "assistant", "content": "action-1"},
+                {"role": "user", "content": "observation"},
+                {"role": "assistant", "content": "action-2"},
+                {"role": "user", "content": "current"},
+            ]
+            compressed, counts = proxy_mod._assemble(messages, get_arm("c2kv4"))
+            task = next(m for m in compressed if m.get("content", "").startswith("APPWORLD TASK PACKET:"))
+            assert "c2kv_key_hash" not in task
+            task_index = compressed.index(task)
+            assert counts["task_packet_out_index"] == task_index
+
+            arm = get_arm("history_kv_h2o_r25_persistent")
+            out, physical_counts = proxy_mod._assemble(messages, arm)
+            context = proxy_mod._history_kv_context(out, physical_counts, arm)
+            assert context["history_out_indices"]
+            assert physical_counts["task_packet_out_index"] not in context["history_out_indices"]
+            assert context["history_start_message_count"] > physical_counts["task_packet_out_index"]
+            assert context["history_message_count"] == physical_counts["current_start_out_index"]
+        finally:
+            proxy_mod.BENCHMARK = previous
+
     def test_history_span_excludes_system_and_current(self):
         arm = get_arm("history_kv_h2o_r312")
         out, counts, ctx = _context(_messages(), arm)

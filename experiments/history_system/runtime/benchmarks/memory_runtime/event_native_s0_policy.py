@@ -120,6 +120,7 @@ class EventNativeS0Controller:
         policy: Mapping[str, Any],
         model_context: int | None = None,
         s0_config: Mapping[str, Any] | None = None,
+        benchmark: str = "bfcl",
     ) -> None:
         if not callable(getattr(tokenizer, "apply_chat_template", None)):
             raise TypeError("tokenizer must expose apply_chat_template")
@@ -143,6 +144,9 @@ class EventNativeS0Controller:
         self.policy = _json_snapshot(policy)
         self.model_context = model_context
         self.s0_config = self._parse_s0_config(s0_config)
+        if not isinstance(benchmark, str) or not benchmark:
+            raise ValueError("benchmark must be a nonempty string")
+        self.benchmark = benchmark
         self.encoding_scope = "current"
         self.protected_recovery_messages: Sequence[Mapping[str, Any]] = ()
         self._owner = object()
@@ -304,12 +308,22 @@ class EventNativeS0Controller:
         users = [event for event in store.events if event.kind == "user"]
         if users:
             mandatory_ids.add(users[-1].event_id)
+        task_packet_event = min(
+            users, key=lambda event: min(event.source_indices)
+        ) if users else None
+        if self.benchmark == "acon_appworld" and task_packet_event is not None:
+            mandatory_ids.add(task_packet_event.event_id)
 
         candidate_event_ids = tuple(
             event.event_id
             for event in store.events
             if event.complete
             and event.kind != "instruction"
+            and event.event_id != (
+                task_packet_event.event_id
+                if self.benchmark == "acon_appworld" and task_packet_event is not None
+                else None
+            )
             and any(index < cutoff for index in event.source_indices)
         )
         scope_plan = plan_encoding_scope(
@@ -923,6 +937,16 @@ class EventNativeS0Controller:
             "event_native_policy_version": EVENT_NATIVE_POLICY_VERSION,
             "policy_source_commit": POLICY_SOURCE_COMMIT,
             "session_id": store.session_id,
+            "benchmark": self.benchmark,
+            "task_packet_protection": (
+                "first_non_system_user_raw"
+                if self.benchmark == "acon_appworld" else "none"
+            ),
+            "task_packet_event_id": (
+                task_packet_event.event_id
+                if self.benchmark == "acon_appworld" and task_packet_event is not None
+                else None
+            ),
             "decision_key": decision_key,
             "decision_index": decision_index,
             "view_mode": NATIVE_S0_MODE,

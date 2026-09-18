@@ -298,6 +298,7 @@ def execute(config, plan, output, source, stages, selected, port_offset=0):
                             raise FileNotFoundError(prefixes)
                         proxy_cmd = [config["bench_python"], str(ROOT / "proxy.py"), "--upstream",
                                      f"http://127.0.0.1:{config['server_port']}", "--arm", cell["arm"],
+                                     "--benchmark", cell["adapter"],
                                      "--backend", "sglang", "--port", str(config["proxy_port"]),
                                      "--doc-packing", config["doc_packing"],
                                      "--max-doc-length", str(config["max_doc_length"]),

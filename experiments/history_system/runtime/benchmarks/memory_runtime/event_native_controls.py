@@ -127,6 +127,7 @@ def build_event_native_controller(
     compression_policy: str | None = None,
     history_view_protocol: str = "fixed-budget-main",
     s0_config: Mapping[str, Any] | None = None,
+    benchmark: str = "bfcl",
 ) -> Any:
     """Build a finite controller without importing the CLI/server module."""
 
@@ -143,7 +144,8 @@ def build_event_native_controller(
         controller = build_event_native_controller(
             tokenizer, view_mode=view_mode, packing=packing, policy=policy,
             model_context=model_context, compression_policy=compression_policy,
-            history_view_protocol=history_view_protocol, s0_config=config)
+            history_view_protocol=history_view_protocol, s0_config=config,
+            benchmark=benchmark)
         return GPRecoveryController(controller, detector, switches)
 
     if s0_config is not None and "post_draft_recovery" in s0_config:
@@ -161,6 +163,7 @@ def build_event_native_controller(
             compression_policy=compression_policy,
             history_view_protocol=history_view_protocol,
             s0_config=config,
+            benchmark=benchmark,
         )
         return wrap_with_event_native_recovery(controller, recovery_config)
 
@@ -173,7 +176,8 @@ def build_event_native_controller(
         controller = build_event_native_controller(
             tokenizer, view_mode=view_mode, packing=packing, policy=policy,
             model_context=model_context, compression_policy=compression_policy,
-            history_view_protocol=history_view_protocol, s0_config=config)
+            history_view_protocol=history_view_protocol, s0_config=config,
+            benchmark=benchmark)
         return wrap_with_raw_warmup(controller)
 
     if s0_config is not None and "stalled_operation_policy" in s0_config:
@@ -194,6 +198,7 @@ def build_event_native_controller(
             compression_policy=compression_policy,
             history_view_protocol=history_view_protocol,
             s0_config=config,
+            benchmark=benchmark,
         )
         return enable_stalled_operation(controller)
 
@@ -218,6 +223,7 @@ def build_event_native_controller(
             compression_policy=compression_policy,
             history_view_protocol=history_view_protocol,
             s0_config=config,
+            benchmark=benchmark,
         )
         return enable_compact_first_failure(controller)
 
@@ -267,6 +273,7 @@ def build_event_native_controller(
                     model_context=model_context,
                     s0_config=base_s0_config,
                     observed_entity_slot_policy=candidate_policy,
+                    benchmark=benchmark,
                 )
             if candidate_policy == MISSING_REQUIRED_REFERENCE_POLICY:
                 return RevisionObservedEntitySlotS0Controller(
@@ -276,6 +283,7 @@ def build_event_native_controller(
                     model_context=model_context,
                     s0_config=base_s0_config,
                     observed_entity_slot_revision_policy=candidate_policy,
+                    benchmark=benchmark,
                 )
             if candidate_policy == SAME_EVENT_REFERENCE_POLICY:
                 return SameEventReferenceS0Controller(
@@ -285,6 +293,7 @@ def build_event_native_controller(
                     model_context=model_context,
                     s0_config=base_s0_config,
                     same_event_reference_policy=candidate_policy,
+                    benchmark=benchmark,
                 )
             if candidate_policy == SAME_EVENT_BRIDGE_ONLY_POLICY:
                 return SameEventBridgeOnlyS0Controller(
@@ -294,6 +303,7 @@ def build_event_native_controller(
                     model_context=model_context,
                     s0_config=base_s0_config,
                     same_event_bridge_only_policy=candidate_policy,
+                    benchmark=benchmark,
                 )
             if candidate_policy == RESULT_KEY_BRIDGE_POLICY:
                 return ResultKeyBridgeS0Controller(
@@ -303,10 +313,12 @@ def build_event_native_controller(
                     model_context=model_context,
                     s0_config=base_s0_config,
                     result_key_bridge_policy=candidate_policy,
+                    benchmark=benchmark,
                 )
             raise ValueError("Unknown observed entity slot policy")
         return EventNativeS0Controller(tokenizer, packing=packing, policy=policy,
-            model_context=model_context, s0_config=s0_config)
+            model_context=model_context, s0_config=s0_config,
+            benchmark=benchmark)
     if view_mode in _EXACT_VIEW_MODES:
         return EventNativeExactController(
             tokenizer,

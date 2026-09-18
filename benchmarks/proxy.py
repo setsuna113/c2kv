@@ -121,6 +121,7 @@ CACHE = ExtractCache()
 ARM: Optional[Arm] = None
 BACKEND = None  # set in main()
 UPSTREAM = ""
+BENCHMARK = ""
 REQUEST_LOG_PATH = ""
 TELEMETRY_LOG_PATH = ""
 PREFIX_LOG_PATH = ""
@@ -704,6 +705,11 @@ def _assemble(messages: List[Dict[str, Any]], arm: Arm, timeout: int = 600):
     if not any(m.get("role") == "system" for m in messages):
         messages.insert(0, {"role": "system", "content": DEFAULT_SYSTEM_PROMPT})
     cutoff = _history_cutoff(messages)
+    task_packet_source_index = next(
+        (index for index, message in enumerate(messages)
+         if message.get("role") == "user"),
+        None,
+    ) if BENCHMARK == "acon_appworld" else None
     out: List[Dict[str, Any]] = []
     gist_tokens = 0
     original_tokens = 0
@@ -714,16 +720,19 @@ def _assemble(messages: List[Dict[str, Any]], arm: Arm, timeout: int = 600):
     packing = DOC_PACKING if arm.compress_history else "message"
     dropped_docs = 0
     n_docs = 0
+    task_packet_out_index: Optional[int] = None
 
     def _keep_raw(i: int, role: str) -> bool:
         return (
             not arm.compress_history
             or not (i < cutoff)
             or role == "system"
+            or i == task_packet_source_index
             or bool(arm.hybrid_top_k and i >= cutoff - arm.hybrid_top_k)
         )
 
     def _emit_raw(i: int, message: Dict[str, Any]) -> None:
+        nonlocal task_packet_out_index
         role = message.get("role") or "user"
         raw = dict(message)
         # training-dialect rendering applies to RAW assistant tool_calls
@@ -733,6 +742,8 @@ def _assemble(messages: List[Dict[str, Any]], arm: Arm, timeout: int = 600):
         if role == "assistant" and message.get("tool_calls"):
             raw["content"] = _render_action_dialect(message)
             raw.pop("tool_calls", None)
+        if i == task_packet_source_index:
+            task_packet_out_index = len(out)
         out.append(raw)
         if role == "system":
             message_counts["system_raw"] += 1
@@ -818,6 +829,8 @@ def _assemble(messages: List[Dict[str, Any]], arm: Arm, timeout: int = 600):
     counts["doc_packing"] = packing
     counts["n_docs"] = n_docs
     counts["dropped_docs"] = dropped_docs
+    counts["task_packet_source_index"] = task_packet_source_index
+    counts["task_packet_out_index"] = task_packet_out_index
     # index in `out` where the current (raw) block starts: repair-only
     # messages for append placements are inserted right before it
     counts["current_start_out_index"] = len(out) - message_counts["current_raw"]
@@ -861,9 +874,12 @@ def _history_kv_context(out_messages: List[Dict[str, Any]],
     system_parts: List[str] = []
     history_indices: List[int] = []
     indexed: List[Tuple[int, Dict[str, Any]]] = []
+    task_packet_out_index = counts.get("task_packet_out_index")
     for index, message in enumerate(out_messages[:cutoff]):
         if (message.get("role") or "user") == "system":
             system_parts.append(str(message.get("content") or ""))
+            continue
+        if index == task_packet_out_index:
             continue
         item = _normalize_history_message(message)
         if item is None:
@@ -907,9 +923,12 @@ def _kv_reuse_context(out_messages: List[Dict[str, Any]],
     system_parts: List[str] = []
     history_indices: List[int] = []
     indexed: List[Tuple[int, Dict[str, Any]]] = []
+    task_packet_out_index = counts.get("task_packet_out_index")
     for index, message in enumerate(out_messages[:cutoff]):
         if (message.get("role") or "user") == "system":
             system_parts.append(str(message.get("content") or ""))
+            continue
+        if index == task_packet_out_index:
             continue
         item = _normalize_history_message(message)
         if item is None:
@@ -998,7 +1017,8 @@ def _apply_text_arm(payload: Dict[str, Any], arm, conv: str,
         guideline = parts[2] if len(parts) > 2 else "base"
         out, stats = textarms.acon_transform(
             messages, compress, _render_action_dialect, conv,
-            mode=mode, model=model, guideline=guideline)
+            mode=mode, model=model, guideline=guideline,
+            preserve_task_packet=(BENCHMARK == "acon_appworld"))
     stats["compressor_usage"] = usage_acc
     staged = dict(payload)
     staged["messages"] = out
@@ -1287,6 +1307,7 @@ def _paper_history_message_boundary(
     history_indices = [
         index for index, message in enumerate(out_messages[:history_end])
         if message.get("role") != "system"
+        and index != counts.get("task_packet_out_index")
     ]
     if not history_indices:
         # The server's explicit empty-history contract is 0/0.  A boundary
@@ -1731,7 +1752,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
 
 
 def main(argv=None):
-    global ARM, BACKEND, UPSTREAM, REQUEST_LOG_PATH
+    global ARM, BACKEND, UPSTREAM, BENCHMARK, REQUEST_LOG_PATH
     global TELEMETRY_LOG_PATH, PREFIX_LOG_PATH
     global DOC_PACKING, MAX_DOC_LENGTH, MAX_DOC_NUM, QUERY_PROJECTION
     textarms.reset_state()  # fresh caches/state per proxy process
@@ -1740,6 +1761,8 @@ def main(argv=None):
                         help="backend base URL, e.g. http://127.0.0.1:34000")
     parser.add_argument("--backend", default="sglang",
                         choices=["hfserver", "sglang"])
+    parser.add_argument("--benchmark", default="",
+                        help="benchmark adapter namespace; AppWorld reserves its first user task packet")
     parser.add_argument("--arm", required=True)
     parser.add_argument("--port", type=int, required=True)
     parser.add_argument("--request-log", default="")
@@ -1770,6 +1793,7 @@ def main(argv=None):
     MAX_DOC_NUM = int(args.max_doc_num)
     QUERY_PROJECTION = args.query_projection
     ARM = get_arm(args.arm)
+    BENCHMARK = args.benchmark
     if ARM.native_controller:
         raise ValueError(
             "Native C1 requires benchmarks.paper.c1 and /v1/c2kv/native_generate; "
@@ -1791,7 +1815,7 @@ def main(argv=None):
         print(f"loaded reference: {len(STATE.recover.reference)} states "
               f"from {args.reference}", flush=True)
     server = ThreadingHTTPServer((args.host, args.port), ProxyHandler)
-    print(f"proxy backend={BACKEND.name} arm={ARM.name} doc_packing={DOC_PACKING} "
+    print(f"proxy backend={BACKEND.name} arm={ARM.name} benchmark={BENCHMARK or 'unspecified'} doc_packing={DOC_PACKING} "
           f"max_doc_length={MAX_DOC_LENGTH} max_doc_num={MAX_DOC_NUM} listening on "
           f"{args.host}:{args.port} -> {UPSTREAM}", flush=True)
     server.serve_forever()

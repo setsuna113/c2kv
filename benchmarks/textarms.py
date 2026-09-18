@@ -697,6 +697,7 @@ def _acompress_obs(observation: str, task: str, history: str, compress,
 def acon_transform(messages: List[Dict[str, Any]], compress: Compress,
                    action_dialect, conv: str, mode: str = "both",
                    model: str = "c2kv-agent", guideline: str = "base",
+                   preserve_task_packet: bool = False,
                    ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     """Apply one fixed ACON compression guideline. ``mode='obs'`` refines oversized tool
     observations in place; 'hist' replaces the covered prefix with the
@@ -738,6 +739,11 @@ def acon_transform(messages: List[Dict[str, Any]], compress: Compress,
     if mode in ("hist", "both"):
         system_msgs = [m for m in out if m.get("role") == "system"]
         nonsystem = [m for m in out if m.get("role") != "system"]
+        task_index = next(
+            (index for index, message in enumerate(nonsystem)
+             if message.get("role") == "user"),
+            None,
+        ) if preserve_task_packet else None
         k = ACON_PRESERVE_LAST_K_MESSAGES
         prefix, tail = ((nonsystem[:-k], nonsystem[-k:])
                         if len(nonsystem) > k else ([], nonsystem))
@@ -799,17 +805,25 @@ def acon_transform(messages: List[Dict[str, Any]], compress: Compress,
             # prompt (the task instruction) carrying the block — the
             # memory.py:481-498 shape — plus the preserved tail; the
             # folded prefix messages are dropped (that IS the compression)
-            placed = False
             rebuilt = list(system_msgs)
-            for m in prefix:
+            placed = False
+            if task_index is not None and task_index < len(prefix):
+                rebuilt.append(dict(prefix[task_index]))
+            for index, m in enumerate(prefix):
+                if task_index is not None and index == task_index:
+                    continue
                 if (not placed and m.get("role") == "user"
                         and not m.get("tool_calls")):
-                    rebuilt.append({"role": "user",
-                                    "content": _content_of(m) + block})
+                    if task_index is None:
+                        rebuilt.append({"role": "user",
+                                        "content": _content_of(m) + block})
                     placed = True
+            if task_index is not None and task_index < len(prefix):
+                rebuilt.append({"role": "user", "content": block.strip()})
+                placed = True
             for m in tail:
                 rebuilt.append(dict(m))
-            if not placed:  # no user instruction anywhere (should not happen)
+            if task_index is None and not placed:  # no user instruction anywhere (should not happen)
                 rebuilt.insert(len(system_msgs),
                                {"role": "user", "content": block.strip()})
             out = rebuilt
@@ -822,12 +836,20 @@ def acon_transform(messages: List[Dict[str, Any]], compress: Compress,
             block = (f"\n<HISTORY_SUMMARY>\n{prev_summary}\n</HISTORY_SUMMARY>")
             rebuilt = list(system_msgs)
             placed = False
-            for m in nonsystem[:covered_until]:
+            if task_index is not None and task_index < covered_until:
+                rebuilt.append(dict(nonsystem[task_index]))
+            for index, m in enumerate(nonsystem[:covered_until]):
+                if task_index is not None and index == task_index:
+                    continue
                 if (not placed and m.get("role") == "user"
                         and not m.get("tool_calls")):
-                    rebuilt.append({"role": "user",
-                                    "content": _content_of(m) + block})
+                    if task_index is None:
+                        rebuilt.append({"role": "user",
+                                        "content": _content_of(m) + block})
                     placed = True
+            if task_index is not None and task_index < covered_until:
+                rebuilt.append({"role": "user", "content": block.strip()})
+                placed = True
             if not placed:
                 rebuilt.append({"role": "user", "content": block.strip()})
             rebuilt.extend(dict(m) for m in new_msgs)

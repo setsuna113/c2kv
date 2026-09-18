@@ -332,6 +332,19 @@ def test_acon_hist_no_duplication_and_embeds_summary():
     assert any(m.get("content") == "done" for m in out3)
 
 
+def test_acon_appworld_task_packet_is_exact_and_summary_is_separate():
+    _reset()
+    messages = _acon_long_messages()
+    task = messages[1]["content"]
+    out, stats = textarms.acon_transform(
+        messages, _fake_compress_ok, _action_dialect, "appworld-task",
+        mode="hist", preserve_task_packet=True)
+    assert stats["history_compressed"] is True
+    users = [message for message in out if message.get("role") == "user"]
+    assert users[0]["content"] == task
+    assert any("<HISTORY_SUMMARY>" in message["content"] for message in users[1:])
+
+
 def test_acon_hist_below_threshold_passthrough_no_duplication():
     _reset()
     messages = _acon_messages(obs_len=100)

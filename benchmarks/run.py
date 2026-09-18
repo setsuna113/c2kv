@@ -78,7 +78,8 @@ def start_proxy(upstream: str, arm: str, port: int, log_dir: Path,
                 backend: str = "sglang", doc_packing: str = "turn",
                 max_doc_length: int = 512, max_doc_num: int = 12,
                 query_projection: str | None = None,
-                telemetry_log: str = "", record_prefixes: str = ""):
+                telemetry_log: str = "", record_prefixes: str = "",
+                benchmark: str = ""):
     _assert_proxy_port_available(port)
     log_path = log_dir / f"proxy_{arm}_{port}.jsonl"
     out_handle = open(log_dir / f"proxy_{arm}_{port}.out", "w")
@@ -86,6 +87,7 @@ def start_proxy(upstream: str, arm: str, port: int, log_dir: Path,
         sys.executable, str(HERE / "proxy.py"),
         "--upstream", upstream, "--arm", arm, "--backend", backend,
         "--port", str(port), "--request-log", str(log_path),
+        "--benchmark", benchmark,
         "--doc-packing", doc_packing,
         "--max-doc-length", str(max_doc_length),
         "--max-doc-num", str(max_doc_num),
@@ -314,7 +316,8 @@ def main(argv=None):
         backend=args.backend, doc_packing=args.doc_packing,
         max_doc_length=args.max_doc_length, max_doc_num=args.max_doc_num,
         query_projection=args.query_projection,
-        telemetry_log=args.telemetry_log, record_prefixes=args.record_prefixes)
+        telemetry_log=args.telemetry_log, record_prefixes=args.record_prefixes,
+        benchmark=args.benchmark)
     try:
         # every adapter owns its own "/v1" (adapters/base.py:v1) and its own
         # cwd; run.py hands over the bare proxy URL and nothing else
