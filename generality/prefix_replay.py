@@ -12,6 +12,7 @@ import hashlib
 import json
 import re
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 
@@ -113,6 +114,43 @@ def decision_position(decision_key: str) -> tuple[int, int]:
     return int(match.group(1)), int(match.group(2))
 
 
+def bind_source_trace(row: Mapping[str, Any], source_root: str | Path) -> dict[str, Any]:
+    """Bind a state to the source-collection prefix before its first decision.
+
+    Branch runs occur after source collection in the frozen actor journal.
+    Stop at the first target occurrence; never consume its draft or later
+    counterfactual branch responses when reconstructing the preceding state.
+    """
+    payload = prefix_payload(row)
+    paths = list(Path(source_root).glob(f"workers/*/tasks/*-{payload['task_id']}/actor/steps.jsonl"))
+    if len(paths) != 1:
+        raise PrefixReplayIntegrityError(f"expected one source actor trace, found {len(paths)}")
+    path = paths[0]
+    records = []
+    digest = hashlib.sha256()
+    found = False
+    with path.open(encoding="utf-8") as stream:
+        for line in stream:
+            record = json.loads(line)
+            if record.get("session_id") != payload["session_id"]:
+                raise PrefixReplayIntegrityError("source actor trace contains a different session")
+            if record.get("decision_key") == payload["decision_key"]:
+                found = True
+                break
+            if record.get("status") != "ok" or not isinstance(record.get("response"), Mapping):
+                raise PrefixReplayIntegrityError("source actor trace has an uncommitted decision")
+            compact = {key: record[key] for key in ("session_id", "decision_key", "response")}
+            records.append(compact)
+            digest.update((_canonical(compact) + "\n").encode("utf-8"))
+    if not found:
+        raise PrefixReplayIntegrityError("source decision is absent from actor trace")
+    result = copy.deepcopy(dict(row))
+    result["_recorded_prefix_steps"] = records
+    result["_source_trace"] = {"path": str(path), "prefix_sha256": digest.hexdigest(),
+                               "prior_decisions": len(records)}
+    return result
+
+
 def response_message(message: Mapping[str, Any]) -> dict[str, Any]:
     """Convert a recorded assistant message to BFCLTaskEnvironment input."""
     value = _raw_message(message)
@@ -211,61 +249,48 @@ def restore_bfcl_prefix(row: Mapping[str, Any], bindings: Any | None = None) -> 
                               namespace=f"prefix_replay_{payload['state_id'][:12]}")
     visible = payload["raw_visible"]
     target_turn, _ = decision_position(payload["decision_key"])
-    assistants = [m for m in visible if m.get("role") == "assistant"]
-    tools = [m for m in visible if m.get("role") == "tool"]
-    if not assistants and not tools and not payload["last_action_observation"]:
-        # A first decision after one or more empty BFCL turns has no action or
-        # observation to replay.  Advancing those empty turns is exact only in
-        # this empty-prefix case; any non-empty missing state remains unknown.
-        while env.turn_index < target_turn and not env.finished:
-            env._finish_turn()  # noqa: SLF001 - source row explicitly has no action
-    tool_index = 0
-    index = 0
-    # The source trace stores action-observation events, and may omit the
-    # assistant's final natural-language stop for a BFCL turn.  A user message
-    # therefore marks a turn boundary even when the preceding raw prefix ends
-    # with a tool observation.  Advance the official environment at that
-    # boundary instead of inventing a new model response.
-    while index < len(visible):
-        message = visible[index]
-        if message.get("role") != "assistant":
-            index += 1
-            continue
-        if env.finished:
-            raise PrefixReplayIntegrityError("source prefix has actions after task end")
-        before_turn = env.turn_index
-        env.next_payload()
-        env.commit_response(response_message(message))
-        produced = [m for m in env.inference_data.get("message", [])
-                    if m.get("role") == "tool"]
-        expected_calls = len(message.get("tool_calls") or [])
-        expected_slice = tools[tool_index:tool_index + expected_calls]
-        actual_slice = produced[-expected_calls:] if expected_calls else []
-        if len(actual_slice) != len(expected_slice) or any(
-                not _same_tool_response(e, a)
-                for e, a in zip(expected_slice, actual_slice)):
-            raise PrefixReplayIntegrityError(
-                f"environment observation differs for source state {payload['state_id']}")
-        tool_index += expected_calls
-        next_index = index + 1
-        while next_index < len(visible) and visible[next_index].get("role") == "tool":
-            next_index += 1
-        if (next_index < len(visible) and visible[next_index].get("role") == "user"
-                and env.turn_index == before_turn and not env.finished):
-            env._finish_turn()  # noqa: SLF001 - exact BFCL source-turn boundary
-        index = next_index
-    if tool_index != len(tools):
-        raise PrefixReplayIntegrityError("source prefix contains an orphan tool observation")
-    current = env.next_payload()
-    current_messages = [_semantic_message(m) for m in current["messages"]]
-    visible_messages = [_semantic_message(m) for m in payload["raw_visible"]]
-    found = any(
-        current_messages[offset:offset + len(visible_messages)] == visible_messages
-        for offset in range(len(current_messages) - len(visible_messages) + 1)
-    )
-    if not found:
+    trace = row.get("_recorded_prefix_steps")
+    if not isinstance(trace, list):
         raise PrefixReplayIntegrityError(
-            "official environment prefix does not equal q.raw_visible")
+            "recorded source trace is required; raw_visible is a compressed view, not an environment log")
+    replayed_assistants = 0
+    for record in trace:
+        current = env.next_payload()
+        if current["decision_key"] != record.get("decision_key"):
+            raise PrefixReplayIntegrityError("source trace decision order differs from official environment")
+        if record.get("session_id") != payload["session_id"]:
+            raise PrefixReplayIntegrityError("source trace session differs from source row")
+        env.commit_response(response_message(record["response"]))
+        replayed_assistants += 1
+    current = env.next_payload()
+    if current["decision_key"] != payload["decision_key"]:
+        raise PrefixReplayIntegrityError(
+            f"replay decision {current['decision_key']} != source {payload['decision_key']}")
+    full_messages = current["messages"]
+    source_messages = [m for m in full_messages if m.get("role") != "system"]
+    # Event IDs address original non-system message indices. A tool action event
+    # also owns the contiguous tool observations following its assistant message.
+    selected = []
+    selected_indices = set()
+    for source_id in payload["raw_source_ids"]:
+        prefix = payload["session_id"] + ":m"
+        if not source_id.startswith(prefix) or not source_id[len(prefix):].isdigit():
+            raise PrefixReplayIntegrityError("raw source event identity differs from source session")
+        index = int(source_id[len(prefix):])
+        if index >= len(source_messages):
+            raise PrefixReplayIntegrityError("raw source event index is outside reconstructed history")
+        indices = [index]
+        if source_messages[index].get("role") == "assistant":
+            following = index + 1
+            while following < len(source_messages) and source_messages[following].get("role") == "tool":
+                indices.append(following)
+                following += 1
+        selected_indices.update(indices)
+    selected = [source_messages[i] for i in sorted(selected_indices)]
+    if [_semantic_message(m) for m in selected] != [_semantic_message(m) for m in visible]:
+        raise PrefixReplayIntegrityError(
+            "reconstructed source events and tool observations do not equal q.raw_visible")
+    current_messages = [_semantic_message(m) for m in full_messages]
     goal = row.get("q", {}).get("goal")
     user_messages = [m for m in current_messages if m.get("role") == "user"]
     if not isinstance(goal, str) or not user_messages or user_messages[-1].get("content") != goal:
@@ -275,11 +300,19 @@ def restore_bfcl_prefix(row: Mapping[str, Any], bindings: Any | None = None) -> 
     if env.turn_index != turn:
         raise PrefixReplayIntegrityError(
             f"environment turn {env.turn_index} != source turn {turn}")
+    # The complete source log restores only the external environment/checker.
+    # The target model must never receive omitted raw history, including on
+    # later continuation decisions. Keep only system instructions and the
+    # recorded visible view in the append-only inference history.
+    projected = [copy.deepcopy(m) for m in full_messages if m.get("role") == "system"]
+    projected.extend(copy.deepcopy(visible))
+    env.inference_data["message"] = projected
+    current["messages"] = copy.deepcopy(projected)
     return ReplayedEnvironment(
         env=env, bindings=bindings, task=task, ground_truth=ground_truth,
         turn_index=turn, prefix_payload_sha256=payload["prefix_payload_sha256"],
-        replayed_assistant_messages=len(assistants),
-        replayed_tool_messages=len(tools),
+        replayed_assistant_messages=replayed_assistants,
+        replayed_tool_messages=sum(m.get("role") == "tool" for m in source_messages),
         previous_turn_valid=env.previous_turn_valid(),
         pending_payload=current,
     )
@@ -293,6 +326,6 @@ def official_current_turn(replayed: ReplayedEnvironment) -> dict[str, Any]:
     valid = result.get("valid")
     return {
         "turn_success": valid if type(valid) is bool else None,
-        "checker": result,
+        "checker": replayed.bindings.make_json_serializable(result),
         "status": "known" if type(valid) is bool else "unknown",
     }

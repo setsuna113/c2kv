@@ -15,6 +15,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+import uuid
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -39,6 +40,7 @@ sys.path.insert(0, "/home/liuyancheng/benchmarks/gorilla/berkeley-function-call-
 
 from prefix_replay import (  # noqa: E402
     PrefixReplayIntegrityError,
+    bind_source_trace,
     decision_position,
     official_current_turn,
     prefix_payload,
@@ -51,17 +53,19 @@ def _opener():
     return urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
 
-def _post(url: str, body: Mapping[str, Any], timeout: int = 3600) -> dict[str, Any]:
+def _post(url: str, body: Mapping[str, Any], timeout: int = 3600,
+          *, require_object: bool = True) -> Any:
     request = urllib.request.Request(
         url, data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
         headers={"Content-Type": "application/json"}, method="POST")
     try:
         with _opener().open(request, timeout=timeout) as response:
-            value = json.load(response)
+            raw = response.read()
+            value = json.loads(raw) if raw else None
     except urllib.error.HTTPError as error:
         detail = error.read().decode(errors="replace")[:2000]
         raise RuntimeError(f"POST {url} -> {error.code}: {detail}") from error
-    if not isinstance(value, dict):
+    if require_object and not isinstance(value, dict):
         raise RuntimeError(f"POST {url} returned a non-object")
     return value
 
@@ -107,6 +111,22 @@ def _canonical_session_messages(messages: list[dict[str, Any]]) -> list[dict[str
     return result
 
 
+def _history_message_span(messages: list[dict[str, Any]]) -> tuple[int, int]:
+    """Return completed history without splitting a trailing tool-result block.
+
+    Qwen's chat template encloses contiguous tool results in one user message.
+    The current observation block must remain intact outside the history span.
+    """
+    start = 0
+    while start < len(messages) and messages[start].get("role") == "system":
+        start += 1
+    end = max(0, len(messages) - 1)
+    if messages and messages[-1].get("role") == "tool":
+        while end > start and messages[end - 1].get("role") == "tool":
+            end -= 1
+    return start, max(start, end)
+
+
 class PersistentSGLangClient:
     """One fresh persistent session for one recorded source state."""
 
@@ -116,13 +136,16 @@ class PersistentSGLangClient:
         if self.base.endswith("/v1"):
             self.base = self.base[:-3]
         self.model = model
-        self.session_id = session_id
+        # Driver restarts can leave the previous engine session open.
+        self.session_id = f"{session_id}/instance-{uuid.uuid4().hex}"
         self.method = method
         self.target_tokens = target_tokens
         self.opened = False
 
-    def _post(self, path: str, body: Mapping[str, Any]) -> dict[str, Any]:
-        return _post(self.base + path, body)
+    def _post(self, path: str, body: Mapping[str, Any]) -> Any:
+        # SGLang opens with a JSON string and closes with an empty 200 body.
+        return _post(self.base + path, body,
+                     require_object=path not in ("/open_session", "/close_session"))
 
     def open(self) -> None:
         if self.opened:
@@ -144,9 +167,9 @@ class PersistentSGLangClient:
     def generate(self, payload: Mapping[str, Any], max_tokens: int) -> dict[str, Any]:
         self.open()
         messages = _canonical_session_messages(payload["messages"])
-        history_count = max(0, len(messages) - 1)
+        history_start, history_count = _history_message_span(messages)
         hint = {"persistent_history_session": {"enabled": True}}
-        if history_count > 1:
+        if history_count > history_start:
             hint.update({
                 "full_equivalent_history_tokens": 0,
                 "active_history_kv_tokens": self.target_tokens,
@@ -154,7 +177,7 @@ class PersistentSGLangClient:
                 "history_kv_method": self.method,
                 "history_kv_backend": "physical_eviction", "estimated": True,
                 "history_kv_eviction": {
-                    "method": self.method, "history_start_message_count": 1,
+                    "method": self.method, "history_start_message_count": history_start,
                     "history_message_count": history_count,
                     "target_tokens": self.target_tokens,
                     "history_kv_recent_window": 64,
@@ -198,7 +221,7 @@ class EventNativeControllerClient:
         body = {
             "model": self.model,
             "messages": _request_messages(payload["messages"]),
-            "tools": payload.get("tools") or [], "tool_choice": "auto",
+            "tools": payload.get("tools") or [],
             "temperature": 0, "max_completion_tokens": max_tokens,
             "store": False,
             "c2kv_eval_context": {
@@ -216,9 +239,9 @@ class EventNativeControllerClient:
         """Read the risk receipt written by the controller for one draft.
 
         C2KV exposes the detector score in its event-native ``steps.jsonl``
-        receipt rather than in the OpenAI response.  Matching on both task
-        and decision key prevents a concurrent calibration task from donating
-        a score to this row.
+        receipt rather than in the OpenAI response. State identity may be an
+        explicit calibration_state_id or the suffix of the controller session.
+        Legacy task/decision-only receipts are accepted only when unambiguous.
         """
         if self.steps_path is None or not self.steps_path.exists():
             return None
@@ -226,35 +249,53 @@ class EventNativeControllerClient:
             lines = self.steps_path.read_text(encoding="utf-8").splitlines()
         except OSError:
             return None
+        task_id = task_id if task_id is not None else self.task_id
+        state_id = state_id if state_id is not None else self.calibration_state_id
+        if task_id is None:
+            return None
+        expected_session = f"{self.benchmark}/{task_id}/attempt-0"
+        if state_id is not None:
+            expected_session += f"/{state_id}"
+        receipts = []
         for line in reversed(lines):
             try:
                 item = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            if item.get("decision_key") != decision_key:
+            if not isinstance(item, Mapping) or item.get("decision_key") != decision_key:
                 continue
-            if task_id is not None:
-                item_task_id = item.get("task_id")
-                item_session = item.get("session_id")
-                expected_session = f"bfcl/{task_id}/attempt-0"
-                if state_id:
-                    expected_session += f"/{state_id}"
-                if item_task_id != task_id and item_session != expected_session:
-                    continue
+            item_task_id = item.get("task_id")
+            item_session = item.get("session_id")
+            item_state_id = item.get("calibration_state_id")
+            if item_task_id is not None and item_task_id != task_id:
+                continue
+            if item_task_id is None and item_session != expected_session:
+                continue
+            if item_session is not None and item_session != expected_session:
+                continue
+            if item_state_id is not None and item_state_id != state_id:
+                continue
+            if state_id is not None and item_state_id is None and item_session != expected_session:
+                continue
             risk = item.get("risk")
             if isinstance(risk, Mapping):
                 score = risk.get("score")
-                return {"available": bool(risk.get("available")) and
-                        isinstance(score, (int, float)),
-                        "score": score if isinstance(score, (int, float)) else None,
-                        "source": "controller_steps_jsonl"}
+                receipts.append({"available": bool(risk.get("available")) and
+                                 isinstance(score, (int, float)),
+                                 "score": score if isinstance(score, (int, float)) else None,
+                                 "source": "controller_steps_jsonl"})
+                continue
             exact = item.get("exact_recovery")
             selection = exact.get("selection") if isinstance(exact, Mapping) else None
             score = selection.get("score") if isinstance(selection, Mapping) else None
             if isinstance(score, (int, float)):
-                return {"available": True, "score": score,
-                        "source": "controller_steps_jsonl.exact_recovery.selection"}
-        return None
+                receipts.append({"available": True, "score": score,
+                                 "source": "controller_steps_jsonl.exact_recovery.selection"})
+        if len(receipts) > 1:
+            return {"available": False, "score": None,
+                    "source": "controller_steps_jsonl",
+                    "reason": "ambiguous_risk_receipts", "matching_receipts": len(receipts)}
+        return receipts[0] if receipts else None
 
 
 def _choice(response: Mapping[str, Any]) -> dict[str, Any]:
@@ -265,6 +306,17 @@ def _choice(response: Mapping[str, Any]) -> dict[str, Any]:
     if not isinstance(message, Mapping):
         raise RuntimeError("response choice has no message")
     return copy.deepcopy(dict(message))
+
+
+def _parse_response_draft(response: Mapping[str, Any]) -> tuple[Any, dict[str, Any]]:
+    """Parse the same structured/native draft for detection and execution."""
+    from benchmarks.memory_runtime.event_native_draft import parse_native_draft
+    message = _choice(response)
+    canonical = _canonical_session_messages([message])[0]
+    text = canonical.get("content") or ""
+    parsed = parse_native_draft(
+        text, call_id_prefix=str(response.get("id") or "prefix_replay"))
+    return parsed, message
 
 
 def _features(response: Mapping[str, Any]) -> dict[str, Any]:
@@ -283,7 +335,7 @@ def _features(response: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _verify_history_backend(response: Mapping[str, Any], method: str,
-                            history_count: int) -> dict[str, Any]:
+                            history_count: int, *, continuation: bool = False) -> dict[str, Any]:
     """Require a real persistent physical-eviction receipt from SGLang."""
     report = ((response.get("metadata") or {}).get("kv_memory_report") or {})
     if not isinstance(report, Mapping) or not report:
@@ -291,16 +343,15 @@ def _verify_history_backend(response: Mapping[str, Any], method: str,
     eviction = report.get("history_kv_eviction") or {}
     physical = report.get("history_kv_physical_eviction") or {}
     actual_method = eviction.get("method") or report.get("history_kv_method")
-    if actual_method != method:
+    if history_count > 0 and actual_method != method:
         raise PrefixReplayIntegrityError(
             f"history method {actual_method!r} != requested {method!r}")
     if report.get("persistent_session_logical_prefix_tokens") is None:
         raise PrefixReplayIntegrityError("persistent session receipt is missing")
-    # The first request may have no completed history to evict. Every source
-    # calibration state here has an action/observation prefix, so a nontrivial
-    # state must report a physical eviction success.
-    if history_count > 1:
-        if eviction.get("persistent_continuation") is not True:
+    # The initial direct-prefix request creates a session; only subsequent
+    # requests can confirm continuation of its resident compressed state.
+    if history_count > 0:
+        if continuation and eviction.get("persistent_continuation") is not True:
             raise PrefixReplayIntegrityError("persistent continuation was not confirmed")
         if physical.get("success") is not True:
             raise PrefixReplayIntegrityError("physical history eviction was not confirmed")
@@ -317,11 +368,9 @@ def _verify_history_backend(response: Mapping[str, Any], method: str,
 
 
 def _risk_score(response: Mapping[str, Any], row: Mapping[str, Any], artifact: Any) -> dict[str, Any]:
-    from benchmarks.memory_runtime.event_native_draft import parse_native_draft
     feats = _features(response)
-    message = feats["message"]
-    text = message.get("content") or ""
-    parsed = parse_native_draft(text, call_id_prefix="prefix_replay")
+    parsed, message = _parse_response_draft(response)
+    text = parsed.text
     q = row["q"]
     prediction = artifact.predict_risk({
         "prefill_hidden": feats["prefill_hidden"],
@@ -339,7 +388,8 @@ def _risk_score(response: Mapping[str, Any], row: Mapping[str, Any], artifact: A
             "score": prediction.score if prediction.available else None,
             "feature_hidden_available": feats["prefill_hidden"] is not None,
             "draft_logprobs_count": len(feats["draft_logprobs"]),
-            "parse_status": parsed.status}
+            "parse_status": parsed.status,
+            "draft_protocol": "structured_tool_calls" if message.get("tool_calls") else "native_text"}
 
 
 def load_rows(path: str | Path, state_id: str | None = None,
@@ -356,12 +406,18 @@ def load_rows(path: str | Path, state_id: str | None = None,
 
 
 def _response_for_environment(response: Mapping[str, Any]) -> dict[str, Any]:
-    return response_message(_choice(response))
+    parsed, message = _parse_response_draft(response)
+    if message.get("tool_calls") and parsed.status == "tool_calls":
+        # Preserve the server's call IDs when its OpenAI parser supplied them.
+        return response_message(message)
+    return response_message({"role": "assistant", "content": parsed.content,
+                             "tool_calls": list(parsed.tool_calls)})
 
 
 def replay_one(row: Mapping[str, Any], args: argparse.Namespace,
                bindings: Any, artifact: Any) -> dict[str, Any]:
     source = prefix_payload(row)
+    row = bind_source_trace(row, getattr(args, "source_root", None) or Path(args.labels).parent.parent)
     replay = restore_bfcl_prefix(row, bindings)
     if replay.previous_turn_valid is not True:
         raise PrefixReplayIntegrityError(
@@ -387,19 +443,23 @@ def replay_one(row: Mapping[str, Any], args: argparse.Namespace,
     continuation = 0
     try:
         while True:
+            history_start, history_end = _history_message_span(payload["messages"])
+            completed_history_messages = history_end - history_start
             response = client.generate(payload, args.max_completion_tokens)
             if continuation == 0:
                 if args.backend != "c2kv":
                     first_risk = _risk_score(response, row, artifact)
                     backend_receipts.append(_verify_history_backend(
-                        response, client.method, max(0, len(payload["messages"]) - 1)))
+                        response, client.method, completed_history_messages,
+                        continuation=continuation > 0))
                 else:
                     first_risk = client.risk_for(
                         source["decision_key"], source.get("task_id"),
                         source.get("state_id"))
             elif args.backend != "c2kv":
                 backend_receipts.append(_verify_history_backend(
-                    response, client.method, max(0, len(payload["messages"]) - 1)))
+                    response, client.method, completed_history_messages,
+                    continuation=continuation > 0))
             replay.env.commit_response(_response_for_environment(response))
             if replay.env.finished or replay.env.turn_index > target_turn:
                 break
@@ -415,6 +475,8 @@ def replay_one(row: Mapping[str, Any], args: argparse.Namespace,
             "K_tokens": args.target_tokens, "recovery_disabled": True,
             "prefix_payload_sha256": source["prefix_payload_sha256"],
             "source_raw_source_ids": source.get("raw_source_ids"),
+            "source_trace": row["_source_trace"],
+            "model_history_view": "system_plus_recorded_raw_visible_then_append_only",
             "replayed_assistant_messages": replay.replayed_assistant_messages,
             "replayed_tool_messages": replay.replayed_tool_messages,
             "continuation_decisions": continuation, "risk": first_risk,
@@ -427,10 +489,18 @@ def replay_one(row: Mapping[str, Any], args: argparse.Namespace,
             "replay_protocol": "recorded_prefix_direct_then_current_turn_A0",
         }
     finally:
-        close = getattr(client, "close", None)
-        if callable(close):
-            close()
-        replay.env.close()
+        active_error = sys.exc_info()[1]
+        try:
+            close = getattr(client, "close", None)
+            if callable(close):
+                close()
+        except Exception:
+            # A dead engine can also reject close_session. Preserve the
+            # original generation failure rather than masking its cause.
+            if active_error is None:
+                raise
+        finally:
+            replay.env.close()
 
 
 def select_threshold(pairs: list[tuple[float, int]]) -> dict[str, Any]:
@@ -475,6 +545,8 @@ def main(argv: list[str] | None = None) -> int:
                         help="C2KV controller steps.jsonl used for risk receipts")
     parser.add_argument("--model", default="c2kv-agent")
     parser.add_argument("--labels", default=LABELS)
+    parser.add_argument("--source-root", default=None,
+                        help="frozen source root containing workers (default: labels parent parent)")
     parser.add_argument("--out", default=None)
     parser.add_argument("--state-id", default=None)
     parser.add_argument("--limit", type=int, default=None)

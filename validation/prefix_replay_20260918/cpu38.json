@@ -1,0 +1,534 @@
+[
+  {
+    "state_id": "7fcb9f4497cb9eb2e7e5b81805a0268dfac91af6e318ae48e829ef8aaa7c818a",
+    "task_id": "multi_turn_base_3",
+    "decision_key": "turn-1/step-2",
+    "status": "ok",
+    "actual": "turn-1/step-2",
+    "previous_turn_valid": true,
+    "source_trace": {
+      "path": "/home/liuyancheng/c2kv-evidence-sets-20260916/prepared_v8/workers/npu3/tasks/000-multi_turn_base_3/actor/steps.jsonl",
+      "prefix_sha256": "536b62f3e188038699af47c7da57ff47830ce8ead76c89ec12184dd81a90ce25",
+      "prior_decisions": 2
+    },
+    "model_messages": 3
+  },
+  {
+    "state_id": "e5ff05564af1ce558045d50d78764391718cdbc7baeb1527176160c82bc44521",
+    "task_id": "multi_turn_miss_func_43",
+    "decision_key": "turn-1/step-3",
+    "status": "ok",
+    "actual": "turn-1/step-3",
+    "previous_turn_valid": true,
+    "source_trace": {
+      "path": "/home/liuyancheng/c2kv-evidence-sets-20260916/prepared_v8/workers/npu1/tasks/001-multi_turn_miss_func_43/actor/steps.jsonl",
+      "prefix_sha256": "7f4173d3937a9ef850118e3d980c462e124514a8eef6dd9701aae225ab665901",
+      "prior_decisions": 3
+    },
+    "model_messages": 5
+  },
+  {
+    "state_id": "195cdcd8b32ffd3e0b58cffad9ad2a007711c0425c8ae9cef57f8e3bed897806",
+    "task_id": "multi_turn_base_68",
+    "decision_key": "turn-1/step-3",
+    "status": "ok",
+    "actual": "turn-1/step-3",
+    "previous_turn_valid": true,
+    "source_trace": {
+      "path": "/home/liuyancheng/c2kv-evidence-sets-20260916/prepared_v8/workers/npu6/tasks/002-multi_turn_base_68/actor/steps.jsonl",
+      "prefix_sha256": "744cae0aae5286ddc4912938f45222e47859b8c82f0701476f788c7781ed5b1a",
+      "prior_decisions": 3
+    },
+    "model_messages": 5
+  },
+  {
+    "state_id": "134aeec5e9774aee03f9e983ae5d96e8d85b88b0176777139cefd97e87e7675d",
+    "task_id": "multi_turn_base_68",
+    "decision_key": "turn-1/step-5",
+    "status": "ok",
+    "actual": "turn-1/step-5",
+    "previous_turn_valid": true,
+    "source_trace": {
+      "path": "/home/liuyancheng/c2kv-evidence-sets-20260916/prepared_v8/workers/npu6/tasks/002-multi_turn_base_68/actor/steps.jsonl",
+      "prefix_sha256": "5995b3d8ae95963be63abd59e2014a9e2ae86a9038f081c48de081cee7d07586",
+      "prior_decisions": 5
+    },
+    "model_messages": 9
+  },
+  {
+    "state_id": "1182aae6892e483aceebda66017d9c6c997f32f5563aa8e794b92956aabf3956",
+    "task_id": "multi_turn_base_186",
+    "decision_key": "turn-1/step-4",
+    "status": "ok",
+    "actual": "turn-1/step-4",
+    "previous_turn_valid": true,
+    "source_trace": {
+      "path": "/home/liuyancheng/c2kv-evidence-sets-20260916/prepared_v8/workers/npu2/tasks/004-multi_turn_base_186/actor/steps.jsonl",
+      "prefix_sha256": "196a3846f8bb09ebd88f8779cc9460e072484acb44e7670f446b984172f1f982",
+      "prior_decisions": 4
+    },
+    "model_messages": 5
+  },
+  {
+    "state_id": "90e4490e1647f1e33f74b26b8492053a7859bcc71a3e22720886bc204a435742",
+    "task_id": "multi_turn_miss_param_59",
+    "decision_key": "turn-1/step-4",
+    "status": "ok",
+    "actual": "turn-1/step-4",
+    "previous_turn_valid": true,
+    "source_trace": {
+      "path": "/home/liuyancheng/c2kv-evidence-sets-20260916/prepared_v8/workers/npu3/tasks/005-multi_turn_miss_param_59/actor/steps.jsonl",
+      "prefix_sha256": "902629cdd028aa216ae9f25af6be25843afc7aad78f0babe8d0aaab4cc4e8573",
+      "prior_decisions": 4
+    },
+    "model_messages": 7
+  },
+  {
+    "state_id": "3fe55efa49dacefef4bb839d63cec843bb5d9a0aa5d3f7a94db2d395713e3ed5",
+    "task_id": "multi_turn_miss_param_3",
+    "decision_key": "turn-1/step-2",
+    "status": "ok",
+    "actual": "turn-1/step-2",
+    "previous_turn_valid": true,
+    "source_trace": {
+      "path": "/home/liuyancheng/c2kv-evidence-sets-20260916/prepared_v8/workers/npu3/tasks/010-multi_turn_miss_param_3/actor/steps.jsonl",
+      "prefix_sha256": "f861d5d07f5815f4fc47aaad29b23e067cd57788167f73d0a1a04c211a5f2658",
+      "prior_decisions": 2
+    },
+    "model_messages": 3
+  },
+  {
+    "state_id": "60ee2dd9b5a20bc5f5bec3500438ede025a11134c7407a3efdb38d17038e2c9e",
+    "task_id": "multi_turn_long_context_43",
+    "decision_key": "turn-1/step-2",
+    "status": "ok",
+    "actual": "turn-1/step-2",
+    "previous_turn_valid": true,
+    "source_trace": {
+      "path": "/home/liuyancheng/c2kv-evidence-sets-20260916/prepared_v8/workers/npu0/tasks/011-multi_turn_long_context_43/actor/steps.jsonl",
+      "prefix_sha256": "e3a1de488cedb2fe7dca47333aab4b25451eb4c530fdff2e6c4f64b4784afcad",
+      "prior_decisions": 2
+    },
+    "model_messages": 3
+  },
+  {
+    "state_id": "f5179c5cf5acc40707d0f0a3c2ae29fdc49efcfab48da36f850583bb7023c40f",
+    "task_id": "multi_turn_long_context_43",
+    "decision_key": "turn-1/step-3",
+    "status": "ok",
+    "actual": "turn-1/step-3",
+    "previous_turn_valid": true,
+    "source_trace": {
+      "path": "/home/liuyancheng/c2kv-evidence-sets-20260916/prepared_v8/workers/npu0/tasks/011-multi_turn_long_context_43/actor/steps.jsonl",
+      "prefix_sha256": "6db5cdb3b1ac9fae133b9a5f53c64e50cd62ca73eba18ea2495f86feaf8c2e63",
+      "prior_decisions": 3
+    },
+    "model_messages": 5
+  },
+  {
+    "state_id": "3c75c1f484882b943a464d66ce071a175a97130bfba7329ec11f9383296e3f63",
+    "task_id": "multi_turn_miss_param_68",
+    "decision_key": "turn-1/step-5",
+    "status": "ok",
+    "actual": "turn-1/step-5",
+    "previous_turn_valid": true,
+    "source_trace": {
+      "path": "/home/liuyancheng/c2kv-evidence-sets-20260916/prepared_v8/workers/npu6/tasks/012-multi_turn_miss_param_68/actor/steps.jsonl",
+      "prefix_sha256": "3756be203721f3431325297d34c6f2b3625771a230c58ea2782dd3a0d868e8b2",
+      "prior_decisions": 5
+    },
+    "model_messages": 9
+  },
+  {
+    "state_id": "0913705fe3e866fb69db74a706b6372097bfb566f03efd4ad62ab7d716c82e0d",
+    "task_id": "multi_turn_miss_param_186",
+    "decision_key": "turn-1/step-4",
+    "status": "ok",
+    "actual": "turn-1/step-4",
+    "previous_turn_valid": true,
+    "source_trace": {
+      "path": "/home/liuyancheng/c2kv-evidence-sets-20260916/prepared_v8/workers/npu6/tasks/013-multi_turn_miss_param_186/actor/steps.jsonl",
+      "prefix_sha256": "623b45f9d135955bd5b0e736917ac2ac4f5daea6641694283fbdd13ff0102df5",
+      "prior_decisions": 4
+    },
+    "model_messages": 5
+  },
+  {
+    "state_id": "892ca1c063a321078bfd6ca202467cdbfb8e6e4312e9491d8d7c450a42bebd66",
+    "task_id": "multi_turn_miss_param_129",
+    "decision_key": "turn-1/step-1",
+    "status": "ok",
+    "actual": "turn-1/step-1",
+    "previous_turn_valid": true,
+    "source_trace": {
+      "path": "/home/liuyancheng/c2kv-evidence-sets-20260916/prepared_v8/workers/npu1/tasks/016-multi_turn_miss_param_129/actor/steps.jsonl",
+      "prefix_sha256": "fa25a8b521b7db7faff0d2253907852b77413672f4b762d827408e36485b8670",
+      "prior_decisions": 1
+    },
+    "model_messages": 1
+  },
+  {
+    "state_id": "1238f0fa63aeafac8f49797e56357f63218b59ebd8fe8e46f658b4fc04c1507a",
+    "task_id": "multi_turn_miss_param_129",
+    "decision_key": "turn-3/step-8",
+    "status": "ok",
+    "actual": "turn-3/step-8",
+    "previous_turn_valid": true,
+    "source_trace": {
+      "path": "/home/liuyancheng/c2kv-evidence-sets-20260916/prepared_v8/workers/npu1/tasks/016-multi_turn_miss_param_129/actor/steps.jsonl",
+      "prefix_sha256": "d9761c878daf997120a0eb97c31484bc5f75bbf78dd0015f7999f6be06893952",
+      "prior_decisions": 8
+    },
+    "model_messages": 5
+  },
+  {
+    "state_id": "085af4c7770ded28aed38bda789a7c184853b43d669ea2ad676c990425ae9882",
+    "task_id": "multi_turn_long_context_25",
+    "decision_key": "turn-2/step-5",
+    "status": "ok",
+    "actual": "turn-2/step-5",
+    "previous_turn_valid": false,
+    "source_trace": {
+      "path": "/home/liuyancheng/c2kv-evidence-sets-20260916/prepared_v8/workers/npu6/tasks/020-multi_turn_long_context_25/actor/steps.jsonl",
+      "prefix_sha256": "92b11dc27e396b4347923da9742082db6d5024b86df2dccce53072bca82f23c0",
+      "prior_decisions": 5
+    },
+    "model_messages": 5
+  },
+  {
+    "state_id": "6640532e1ba89af6d56bfdb907e9d558ad405849475b777f0f437e01ac37ad1a",
+    "task_id": "multi_turn_base_75",
+    "decision_key": "turn-1/step-3",
+    "status": "ok",
+    "actual": "turn-1/step-3",
+    "previous_turn_valid": true,
+    "source_trace": {
+      "path": "/home/liuyancheng/c2kv-evidence-sets-20260916/prepared_v8/workers/npu3/tasks/026-multi_turn_base_75/actor/steps.jsonl",
+      "prefix_sha256": "b313ef5bb7bdf5d5df45b07e648de160a72296a77532a80a22458ecd9c9f81a7",
+      "prior_decisions": 3
+    },
+    "model_messages": 5
+  },
+  {
+    "state_id": "4e57f2b962dbce2105f19e611dbc5c10b5bb7970457776c31c9b04bd1cac8c5f",
+    "task_id": "multi_turn_miss_func_129",
+    "decision_key": "turn-2/step-6",
+    "status": "ok",
+    "actual": "turn-2/step-6",
+    "previous_turn_valid": true,
+    "source_trace": {
+      "path": "/home/liuyancheng/c2kv-evidence-sets-20260916/prepared_v8/workers/npu4/tasks/027-multi_turn_miss_func_129/actor/steps.jsonl",
+      "prefix_sha256": "b84ab461d56e77b70682b8c896fb212ba1f827d3416203dad9b0247a4679fa3e",
+      "prior_decisions": 6
+    },
+    "model_messages": 7
+  },
+  {
+    "state_id": "819445eb1a163b65da36180e6ad58a92f36e1cee09b3bc53897af0df0912ae0b",
+    "task_id": "multi_turn_base_188",
+    "decision_key": "turn-1/step-3",
+    "status": "ok",
+    "actual": "turn-1/step-3",
+    "previous_turn_valid": true,
+    "source_trace": {
+      "path": "/home/liuyancheng/c2kv-evidence-sets-20260916/prepared_v8/workers/npu6/tasks/028-multi_turn_base_188/actor/steps.jsonl",
+      "prefix_sha256": "677ff24a9b0bab84e68deb507e0861855f818b045a4fcb46829becd2c10b35be",
+      "prior_decisions": 3
+    },
+    "model_messages": 5
+  },
+  {
+    "state_id": "6dd9c445c8369760ab4919bc08b482ee5533caf95609eb96785c8c8468cefb55",
+    "task_id": "multi_turn_long_context_3",
+    "decision_key": "turn-1/step-2",
+    "status": "ok",
+    "actual": "turn-1/step-2",
+    "previous_turn_valid": true,
+    "source_trace": {
+      "path": "/home/liuyancheng/c2kv-evidence-sets-20260916/prepared_v8/workers/npu3/tasks/031-multi_turn_long_context_3/actor/steps.jsonl",
+      "prefix_sha256": "dd059c397418a8fa31ae6d209725ee3530496d1aba923b76cfc40e06dc227b38",
+      "prior_decisions": 2
+    },
+    "model_messages": 3
+  },
+  {
+    "state_id": "5dcb3c7a40f34e3badb4eecbb5343040b1815fb19c3cdb28b8a74b94d47b2cd4",
+    "task_id": "multi_turn_miss_param_43",
+    "decision_key": "turn-1/step-2",
+    "status": "ok",
+    "actual": "turn-1/step-2",
+    "previous_turn_valid": true,
+    "source_trace": {
+      "path": "/home/liuyancheng/c2kv-evidence-sets-20260916/prepared_v8/workers/npu0/tasks/032-multi_turn_miss_param_43/actor/steps.jsonl",
+      "prefix_sha256": "cf451b3b0a8dac730e4f36c6b5395616d0777fdec56e818f891688966396f58e",
+      "prior_decisions": 2
+    },
+    "model_messages": 3
+  },
+  {
+    "state_id": "4a9b0e5d9580d18a9a3c112acabe2d2e651c10c05ac8b6e8ce5d8b99e48c50c7",
+    "task_id": "multi_turn_long_context_68",
+    "decision_key": "turn-2/step-12",
+    "status": "ok",
+    "actual": "turn-2/step-12",
+    "previous_turn_valid": true,
+    "source_trace": {
+      "path": "/home/liuyancheng/c2kv-evidence-sets-20260916/prepared_v8/workers/npu6/tasks/033-multi_turn_long_context_68/actor/steps.jsonl",
+      "prefix_sha256": "7c35ec59ac4fb39453e447835e05ec97fe08b3efb74be79b51e51606cddd74c9",
+      "prior_decisions": 12
+    },
+    "model_messages": 5
+  },
+  {
+    "state_id": "ad6fc520969a73cf9e5fb624ae6843897c55c72d54628d5740b3c6020576ee31",
+    "task_id": "multi_turn_long_context_186",
+    "decision_key": "turn-5/step-19",
+    "status": "ok",
+    "actual": "turn-5/step-19",
+    "previous_turn_valid": false,
+    "source_trace": {
+      "path": "/home/liuyancheng/c2kv-evidence-sets-20260916/prepared_v8/workers/npu4/tasks/035-multi_turn_long_context_186/actor/steps.jsonl",
+      "prefix_sha256": "fd88da72d7042d1e0b3c0ba08abc744c6b63619d1f2cd5e58b47b6c8198f833d",
+      "prior_decisions": 19
+    },
+    "model_messages": 7
+  },
+  {
+    "state_id": "40c3e8885245c0f52146061f43ba954545d3d63f3409cadb4591fe98b33ae505",
+    "task_id": "multi_turn_base_59",
+    "decision_key": "turn-1/step-4",
+    "status": "ok",
+    "actual": "turn-1/step-4",
+    "previous_turn_valid": true,
+    "source_trace": {
+      "path": "/home/liuyancheng/c2kv-evidence-sets-20260916/prepared_v8/workers/npu3/tasks/037-multi_turn_base_59/actor/steps.jsonl",
+      "prefix_sha256": "3b1478e0d34cec9f8bce8e6d4e121f89cd7273afa4cb7d34abd5d4ec8d31a54e",
+      "prior_decisions": 4
+    },
+    "model_messages": 7
+  },
+  {
+    "state_id": "0435dbcf61683f73dc9f792b134cd80d536d6a08cbe6c35c3643a395a65fae11",
+    "task_id": "multi_turn_base_59",
+    "decision_key": "turn-1/step-6",
+    "status": "ok",
+    "actual": "turn-1/step-6",
+    "previous_turn_valid": true,
+    "source_trace": {
+      "path": "/home/liuyancheng/c2kv-evidence-sets-20260916/prepared_v8/workers/npu3/tasks/037-multi_turn_base_59/actor/steps.jsonl",
+      "prefix_sha256": "942ec1e2dfd69397663c18c9803ecf7cfa362a49454baf404d8ce5c7f3949f87",
+      "prior_decisions": 6
+    },
+    "model_messages": 9
+  },
+  {
+    "state_id": "12de83cdc962ebae80e09490e82a6aeab59f7faab1cb46509cd8a2d0eccc604b",
+    "task_id": "multi_turn_miss_param_25",
+    "decision_key": "turn-1/step-5",
+    "status": "ok",
+    "actual": "turn-1/step-5",
+    "previous_turn_valid": true,
+    "source_trace": {
+      "path": "/home/liuyancheng/c2kv-evidence-sets-20260916/prepared_v8/workers/npu6/tasks/043-multi_turn_miss_param_25/actor/steps.jsonl",
+      "prefix_sha256": "d33974e647de009744480b504bb7247add5da562e387986e72ab4ce77bbbf2c6",
+      "prior_decisions": 5
+    },
+    "model_messages": 9
+  },
+  {
+    "state_id": "b533f915f6c869b5e55a9aeae7962388efc9a5d3cb3cb6b4e6a0609b3b7ef137",
+    "task_id": "multi_turn_miss_func_75",
+    "decision_key": "turn-1/step-2",
+    "status": "ok",
+    "actual": "turn-1/step-2",
+    "previous_turn_valid": true,
+    "source_trace": {
+      "path": "/home/liuyancheng/c2kv-evidence-sets-20260916/prepared_v8/workers/npu2/tasks/047-multi_turn_miss_func_75/actor/steps.jsonl",
+      "prefix_sha256": "cbac605825466b8dd25d27b6bfa47b1ece70523abb9ffc28446d379011971490",
+      "prior_decisions": 2
+    },
+    "model_messages": 3
+  },
+  {
+    "state_id": "186799a12461895376cfe91df0d19ee4c668ece4eade6a91f2a2254d0f1a4a48",
+    "task_id": "multi_turn_miss_func_75",
+    "decision_key": "turn-1/step-3",
+    "status": "ok",
+    "actual": "turn-1/step-3",
+    "previous_turn_valid": true,
+    "source_trace": {
+      "path": "/home/liuyancheng/c2kv-evidence-sets-20260916/prepared_v8/workers/npu2/tasks/047-multi_turn_miss_func_75/actor/steps.jsonl",
+      "prefix_sha256": "89385065da16cd833874ca42aabdfade3620c8ff8a303fbb538d31478958860e",
+      "prior_decisions": 3
+    },
+    "model_messages": 5
+  },
+  {
+    "state_id": "1b3520a5dc1d5aab0c49c40a6597357bcd48df9c1857429157d4e26fbbea3a28",
+    "task_id": "multi_turn_base_129",
+    "decision_key": "turn-2/step-6",
+    "status": "ok",
+    "actual": "turn-2/step-6",
+    "previous_turn_valid": true,
+    "source_trace": {
+      "path": "/home/liuyancheng/c2kv-evidence-sets-20260916/prepared_v8/workers/npu0/tasks/048-multi_turn_base_129/actor/steps.jsonl",
+      "prefix_sha256": "c5dbc7d7d7552554a18366b25e404069f83b9246e4079c1a6dabb3f4fcbbd14d",
+      "prior_decisions": 6
+    },
+    "model_messages": 7
+  },
+  {
+    "state_id": "ae2a2a337481250a6ada6a9fccfa99f4e597726f7360c297bf9897454e4884be",
+    "task_id": "multi_turn_miss_func_188",
+    "decision_key": "turn-1/step-3",
+    "status": "ok",
+    "actual": "turn-1/step-3",
+    "previous_turn_valid": true,
+    "source_trace": {
+      "path": "/home/liuyancheng/c2kv-evidence-sets-20260916/prepared_v8/workers/npu6/tasks/049-multi_turn_miss_func_188/actor/steps.jsonl",
+      "prefix_sha256": "607b935384e56b37bf29f8d26bfc1f9b4e77fd986b3ac914f5f805748d534bf5",
+      "prior_decisions": 3
+    },
+    "model_messages": 5
+  },
+  {
+    "state_id": "c9c7fb7a12391f226c7e51ac1ba50b6181b8683efa8a0c3c683333b1a0275d8f",
+    "task_id": "multi_turn_miss_func_25",
+    "decision_key": "turn-1/step-3",
+    "status": "ok",
+    "actual": "turn-1/step-3",
+    "previous_turn_valid": true,
+    "source_trace": {
+      "path": "/home/liuyancheng/c2kv-evidence-sets-20260916/prepared_v8/workers/npu0/tasks/052-multi_turn_miss_func_25/actor/steps.jsonl",
+      "prefix_sha256": "aa84c24545e04c04466694996d9b669ffe43dd1fc78a06dcc339f7a1e90b32ba",
+      "prior_decisions": 3
+    },
+    "model_messages": 5
+  },
+  {
+    "state_id": "9d396a7b3ed5e0e278bb3cbc7ee6d040ce074415e479660f299694aa4e4320be",
+    "task_id": "multi_turn_miss_func_59",
+    "decision_key": "turn-1/step-4",
+    "status": "ok",
+    "actual": "turn-1/step-4",
+    "previous_turn_valid": true,
+    "source_trace": {
+      "path": "/home/liuyancheng/c2kv-evidence-sets-20260916/prepared_v8/workers/npu2/tasks/057-multi_turn_miss_func_59/actor/steps.jsonl",
+      "prefix_sha256": "1800b2220911344a216cd059ec16bc27b9b46829412f3ea3f323e87c62ece28b",
+      "prior_decisions": 4
+    },
+    "model_messages": 7
+  },
+  {
+    "state_id": "3ed3d25209a9964f4f8af0a584b2124ba6fc9d1b030c7ef08dc5db42e60057a0",
+    "task_id": "multi_turn_miss_func_3",
+    "decision_key": "turn-1/step-7",
+    "status": "ok",
+    "actual": "turn-1/step-7",
+    "previous_turn_valid": true,
+    "source_trace": {
+      "path": "/home/liuyancheng/c2kv-evidence-sets-20260916/prepared_v8/workers/npu4/tasks/063-multi_turn_miss_func_3/actor/steps.jsonl",
+      "prefix_sha256": "5678dc47e05ef11dce0e965cb20dae79470503b99dfe423f2ba999ccb2d143fe",
+      "prior_decisions": 7
+    },
+    "model_messages": 7
+  },
+  {
+    "state_id": "a7e2e70b2a64cfffad5ac28f88098ffdb13d61f72c6b58e60a82eeb228dac579",
+    "task_id": "multi_turn_miss_func_3",
+    "decision_key": "turn-0/step-6",
+    "status": "ok",
+    "actual": "turn-0/step-6",
+    "previous_turn_valid": true,
+    "source_trace": {
+      "path": "/home/liuyancheng/c2kv-evidence-sets-20260916/prepared_v8/workers/npu4/tasks/063-multi_turn_miss_func_3/actor/steps.jsonl",
+      "prefix_sha256": "13113075c6c7a4372b5dcd9b732bb1bdc594d270725a61dc96be1f68d7117938",
+      "prior_decisions": 6
+    },
+    "model_messages": 9
+  },
+  {
+    "state_id": "7f709a44f31d4a4fcc58ee070706e016d91adb2b0971cfd12ee7179ec84ca80a",
+    "task_id": "multi_turn_base_43",
+    "decision_key": "turn-1/step-3",
+    "status": "ok",
+    "actual": "turn-1/step-3",
+    "previous_turn_valid": true,
+    "source_trace": {
+      "path": "/home/liuyancheng/c2kv-evidence-sets-20260916/prepared_v8/workers/npu6/tasks/064-multi_turn_base_43/actor/steps.jsonl",
+      "prefix_sha256": "0ffc23da783ade7a1d165c8382cc3b3a98b5d90d90c06aad808e25a080ce1333",
+      "prior_decisions": 3
+    },
+    "model_messages": 5
+  },
+  {
+    "state_id": "cc180572907db778fd4ca75bc96263249b813e7e4a7c65f5c4c8e1571a61bc26",
+    "task_id": "multi_turn_miss_func_68",
+    "decision_key": "turn-1/step-3",
+    "status": "ok",
+    "actual": "turn-1/step-3",
+    "previous_turn_valid": true,
+    "source_trace": {
+      "path": "/home/liuyancheng/c2kv-evidence-sets-20260916/prepared_v8/workers/npu6/tasks/065-multi_turn_miss_func_68/actor/steps.jsonl",
+      "prefix_sha256": "07c185484ddd905a61dc9e8f5733af31059f27412b170abef22f8a6634ac8c0a",
+      "prior_decisions": 3
+    },
+    "model_messages": 5
+  },
+  {
+    "state_id": "20c13dc388fac6a9ae4e094294f79a835dcac640c7fca4a666982fd11f706497",
+    "task_id": "multi_turn_base_25",
+    "decision_key": "turn-1/step-3",
+    "status": "ok",
+    "actual": "turn-1/step-3",
+    "previous_turn_valid": true,
+    "source_trace": {
+      "path": "/home/liuyancheng/c2kv-evidence-sets-20260916/prepared_v8/workers/npu2/tasks/072-multi_turn_base_25/actor/steps.jsonl",
+      "prefix_sha256": "ba5bb3d1ba1a80e17faac3b624480791f9291eb38b7aa3795d2ad5dce42776fa",
+      "prior_decisions": 3
+    },
+    "model_messages": 5
+  },
+  {
+    "state_id": "7af2d9fb727e395c4083000fca4d2deb2c63c50e56b99307c5012caaf4dde6c4",
+    "task_id": "multi_turn_base_25",
+    "decision_key": "turn-1/step-5",
+    "status": "ok",
+    "actual": "turn-1/step-5",
+    "previous_turn_valid": true,
+    "source_trace": {
+      "path": "/home/liuyancheng/c2kv-evidence-sets-20260916/prepared_v8/workers/npu2/tasks/072-multi_turn_base_25/actor/steps.jsonl",
+      "prefix_sha256": "ef3147a58df74b47a7b4c515494a801ebb22688adf3c3d9711e3fb66ec54bdd1",
+      "prior_decisions": 5
+    },
+    "model_messages": 9
+  },
+  {
+    "state_id": "069edfd6b9d9b63aed615f05b755f40e5a255798ab8f80f6dd082b319b4369f2",
+    "task_id": "multi_turn_miss_param_75",
+    "decision_key": "turn-1/step-2",
+    "status": "ok",
+    "actual": "turn-1/step-2",
+    "previous_turn_valid": true,
+    "source_trace": {
+      "path": "/home/liuyancheng/c2kv-evidence-sets-20260916/prepared_v8/workers/npu3/tasks/078-multi_turn_miss_param_75/actor/steps.jsonl",
+      "prefix_sha256": "989298ff27e86022d69d48ace7f4eea8665257b79b5b88799a1aa8ca75e2121c",
+      "prior_decisions": 2
+    },
+    "model_messages": 3
+  },
+  {
+    "state_id": "673f8751fda10d89bb0f2d9b1eed7539e874efda81a784e04fd59887d5b1f82f",
+    "task_id": "multi_turn_miss_param_188",
+    "decision_key": "turn-1/step-3",
+    "status": "ok",
+    "actual": "turn-1/step-3",
+    "previous_turn_valid": true,
+    "source_trace": {
+      "path": "/home/liuyancheng/c2kv-evidence-sets-20260916/prepared_v8/workers/npu4/tasks/079-multi_turn_miss_param_188/actor/steps.jsonl",
+      "prefix_sha256": "b57df5963a8a5513ce1e69e45e9c02475d6084e7d39a1dd3f958da38928406f2",
+      "prior_decisions": 3
+    },
+    "model_messages": 5
+  }
+]

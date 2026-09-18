@@ -461,7 +461,9 @@ class EventNativeAPI:
             raise EventNativeAPIError(
                 400, "non_json_request", "Visible request fields must be finite JSON"
             ) from error
-        return runner_payload, (task_id, user_turn, step), signature
+        # Calibration states may replay overlapping decisions of one task.
+        # Bind retry caching to the same full session identity as the runner.
+        return runner_payload, (session_id, user_turn, step), signature
 
     def _validate_source(self, payload, messages):
         """Validate the default native source; adapters opt in by subclassing."""
