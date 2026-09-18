@@ -268,10 +268,19 @@ def _write_jsonl(path: Path, rows):
 
 def test_runner_env_points_agent_at_proxy_v1(monkeypatch):
     monkeypatch.setenv("http_proxy", "http://corp:3128")
+    monkeypatch.setenv("HTTPS_PROXY", "http://corp:3129")
     env = A.runner_env("http://127.0.0.1:34100/")
     assert env[A.BASE_URL_ENV] == "http://127.0.0.1:34100/v1"
     assert env[A.API_KEY_ENV] == "EMPTY"
     assert env["NO_PROXY"] == "127.0.0.1,localhost"
+    for key in ("http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY",
+                "all_proxy", "ALL_PROXY"):
+        assert key not in env
+
+
+def test_runner_env_keeps_one_v1_when_given_an_openai_base_url():
+    env = A.runner_env("http://127.0.0.1:34100/v1")
+    assert env[A.BASE_URL_ENV] == "http://127.0.0.1:34100/v1"
 
 
 def test_appworld_runner_env_installs_runtime_telemetry(tmp_path):
@@ -434,7 +443,10 @@ def test_appworld_required_patch_markers(tmp_path):
     runner.parent.mkdir(parents=True)
     env.parent.mkdir(parents=True)
     llm.write_text("base_url = os.environ.get('ACON_OPENAI_BASE_URL')\n")
-    runner.write_text("print('API cost unavailable for this model')\n")
+    runner.write_text(
+        "print('API cost unavailable for this model')\n"
+        "value = token_summary.get('input_cost_usd') or 0\n"
+    )
     env.write_text("max_interactions_reached = True\n")
     A.validate_appworld_runner_patches(acon)
     llm.write_text("base_url = 'http://localhost:8000/v1'\n")

@@ -28,7 +28,8 @@ from typing import Any, Dict, Optional
 
 def v1(url: str) -> str:
     """OpenAI-compatible base url: exactly one ``/v1``, no trailing slash."""
-    return url.rstrip("/") + "/v1"
+    base = url.rstrip("/")
+    return base if base.endswith("/v1") else base + "/v1"
 
 
 @dataclass

@@ -34,9 +34,9 @@ diff --git a/experiments/appworld/run.py b/experiments/appworld/run.py
 -        print(f"Output Cost: ${token_summary.get('output_cost_usd', 0):.6f}")
 -        print(f"TOTAL COST: ${token_summary.get('total_cost_usd', 0):.6f}")
 +        if token_summary.get('total_cost_usd') is not None:
-+            print(f"Input Cost: ${token_summary.get('input_cost_usd', 0):.6f}")
-+            print(f"Output Cost: ${token_summary.get('output_cost_usd', 0):.6f}")
-+            print(f"TOTAL COST: ${token_summary.get('total_cost_usd', 0):.6f}")
++            print(f"Input Cost: ${(token_summary.get('input_cost_usd') or 0):.6f}")
++            print(f"Output Cost: ${(token_summary.get('output_cost_usd') or 0):.6f}")
++            print(f"TOTAL COST: ${(token_summary.get('total_cost_usd') or 0):.6f}")
 +        else:
 +            print("API cost unavailable for this model")
          print("="*50)

@@ -92,14 +92,19 @@ def validate_appworld_runner_patches(acon_dir: Path) -> None:
         root / "src" / "productive_agents" / "llm.py": (
             "ACON_OPENAI_BASE_URL", "0001-openai-base-url-env.patch"),
         root / "experiments" / "appworld" / "run.py": (
-            "API cost unavailable for this model", "0002-unknown-api-cost.patch"),
+            ("API cost unavailable for this model",
+             "token_summary.get('input_cost_usd') or 0"),
+            "0002-unknown-api-cost.patch"),
         root / "src" / "productive_agents" / "env" / "appworld" / "env.py": (
             "max_interactions_reached", "0006-appworld-final-step-and-errors.patch"),
     }
     missing = []
-    for path, (marker, patch_name) in checks.items():
+    for path, (markers, patch_name) in checks.items():
+        if isinstance(markers, str):
+            markers = (markers,)
         try:
-            present = marker in path.read_text(encoding="utf-8")
+            text = path.read_text(encoding="utf-8")
+            present = all(marker in text for marker in markers)
         except OSError:
             present = False
         if not present:
@@ -140,12 +145,18 @@ def _sanitize(name: str) -> str:
 def runner_env(base_url: str) -> Dict[str, str]:
     """Environment for either runner: the agent LLM endpoint is the arm proxy
     (the patched vLLM client appends nothing, so ``/v1`` is added here)."""
-    return {
+    env = {
         **os.environ,
         BASE_URL_ENV: v1(base_url),
         API_KEY_ENV: "EMPTY",
         "NO_PROXY": "127.0.0.1,localhost", "no_proxy": "127.0.0.1,localhost",
     }
+    for key in (
+        "http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY",
+        "all_proxy", "ALL_PROXY",
+    ):
+        env.pop(key, None)
+    return env
 
 
 def appworld_runner_env(base_url: str, telemetry_path: Path,

@@ -45,6 +45,7 @@ def test_v1_appends_exactly_one_suffix():
     assert v1("http://127.0.0.1:34100") == "http://127.0.0.1:34100/v1"
     assert v1("http://127.0.0.1:34100/") == "http://127.0.0.1:34100/v1"
     assert v1("http://h:1///") == "http://h:1/v1"
+    assert v1("http://127.0.0.1:34100/v1") == "http://127.0.0.1:34100/v1"
 
 
 def _ctx(**options):
