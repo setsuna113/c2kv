@@ -339,10 +339,18 @@ class SglangBackend(Backend):
         indices = [int(i) for i in history.get("history_out_indices") or []]
         session_id = history.get("session_id")
         if not indices or not history.get("history_text"):
-            # first turn of a conversation: nothing completed to compress.
-            # Upstream returns the current block unchanged and issues no
-            # extract; no hint is sent, so such a row simply carries no
-            # history_kv_* cost columns.
+            # The first turn has no completed history to evict, but a
+            # persistent session still needs the marker so the runtime drops
+            # raw decode KV before the next canonical append. Without it a
+            # legacy streaming slot retains the decode suffix and the next
+            # physical-eviction turn overwrites slot metadata around live
+            # allocator pages.
+            if session_id and str(spec["backend"]) == "physical_eviction":
+                return (
+                    list(messages),
+                    {"persistent_history_session": {"enabled": True}},
+                    session_id,
+                )
             return list(messages), None, session_id
 
         if str(spec["backend"]) == "physical_eviction":

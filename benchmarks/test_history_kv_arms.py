@@ -403,6 +403,25 @@ class TestPhysicalEvictionPath:
         assert hint["persistent_history_session"] == {"enabled": True}
         assert hint["history_kv_eviction"]["persistent_session"] is True
 
+    def test_persistent_first_turn_carries_session_marker(self):
+        arm = get_arm("history_kv_h2o_r25_persistent")
+        spec = history_kv_spec(arm)
+        messages, hint, session_id = SglangBackend(FakePost({}))._apply_history_kv(
+            [{"role": "user", "content": "first turn"}],
+            {
+                "spec": spec,
+                "history_out_indices": [],
+                "history_text": "",
+                "session_id": "sess-first",
+            },
+            None,
+        )
+        assert messages == [{"role": "user", "content": "first turn"}]
+        assert session_id == "sess-first"
+        assert hint == {
+            "persistent_history_session": {"enabled": True}
+        }
+
     def test_open_session_payload(self):
         post = FakePost({"/open_session": lambda p: p["session_id"]})
         assert SglangBackend(post).open_history_session("sess-2", timeout=300) == "sess-2"
