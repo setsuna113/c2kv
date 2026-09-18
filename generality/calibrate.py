@@ -379,7 +379,8 @@ def replay_one(row: Mapping[str, Any], args: argparse.Namespace,
         client = PersistentSGLangClient(
             args.engine_url, args.model,
             f"{source['session_id']}/replay-{args.backend}-{args.wp}-{source['state_id'][:8]}",
-            {"h2o": "h2o", "snapkv": "snapkv_persistent"}[args.backend],
+            {"h2o": "h2o", "snapkv": "snapkv_persistent",
+             "pyramidkv": "pyramidkv"}[args.backend],
             args.target_tokens)
     first_risk = None
     backend_receipts = []
@@ -467,7 +468,7 @@ def select_threshold(pairs: list[tuple[float, int]]) -> dict[str, Any]:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--backend", choices=("c2kv", "h2o", "snapkv"), required=True)
+    parser.add_argument("--backend", choices=("c2kv", "h2o", "snapkv", "pyramidkv"), required=True)
     parser.add_argument("--wp", choices=("K0", "K2"), required=True)
     parser.add_argument("--engine-url", required=True)
     parser.add_argument("--steps-path", default=None,

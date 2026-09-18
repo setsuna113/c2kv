@@ -180,7 +180,8 @@ class SessionTracerTask:
         self.session_id = f"{benchmark}/{task_id}/attempt-0{instance_nonce}"
         self.engine = EngineSession(
             engine_url, model_name, self.session_id,
-            "h2o" if cell["backend"] == "h2o" else "snapkv_persistent")
+            {"h2o": "h2o", "snapkv": "snapkv_persistent",
+             "pyramidkv": "pyramidkv"}[cell["backend"]])
         self.tokenizer = tokenizer
         self.risk = C1RiskArtifact(RISK_ARTIFACT)
         self.threshold = float(cell["threshold"])

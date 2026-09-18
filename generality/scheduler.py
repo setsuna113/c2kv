@@ -5,8 +5,8 @@ card at a time. Long benchmarks first (appworld, then bfcl_long, then bfcl
 base) — the order carries no adaptive meaning (thresholds/budgets are frozen
 before any closed-loop cell starts). Driver types:
   c2kv cells (all 3 conditions)      -> c2kv_cell.py   (controller path)
-  h2o/snapkv off conditions          -> historykv_cell.py (proxy path)
-  h2o/snapkv tracer cells            -> session_tracer_cell.py
+  H2O/SnapKV/PyramidKV off conditions -> historykv_cell.py (proxy path)
+  H2O/SnapKV/PyramidKV tracer cells  -> session_tracer_cell.py
 
 Progress/resume: every driver writes per-batch done.json; rerunning a cell
 skips completed batches. Infra failures keep receipts and are retried once by

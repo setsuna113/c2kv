@@ -1,4 +1,4 @@
-"""H2O/SnapKV off-condition cell driver (runs on ascend03).
+"""H2O/SnapKV/PyramidKV off-condition cell driver (runs on ascend03).
 
 Drives the paper-harness measurement proxy + official benchmark adapters
 against the long-lived NPU engine for the two bare-backend conditions:
@@ -33,14 +33,34 @@ ARM_OF = {
     ("snapkv", "K2", "recovery_off_same_initial"): "gen_snapkv_k2",
     ("snapkv", "K0", "compression_full_budget"): "gen_snapkv_b0",
     ("snapkv", "K2", "compression_full_budget"): "gen_snapkv_b2",
+    ("pyramidkv", "K0", "recovery_off_same_initial"): "gen_pyramidkv_k0",
+    ("pyramidkv", "K2", "recovery_off_same_initial"): "gen_pyramidkv_k2",
+    ("pyramidkv", "K0", "compression_full_budget"): "gen_pyramidkv_b0",
+    ("pyramidkv", "K2", "compression_full_budget"): "gen_pyramidkv_b2",
 }
+
+
+def target_tokens_for_cell(cell: dict) -> int:
+    """Resolve the absolute K/B target from the frozen cell contract."""
+    budget = cell.get("budget_tokens") or {}
+    key = "B" if cell["condition"] == "compression_full_budget" else "K"
+    try:
+        value = int(budget[key])
+    except (KeyError, TypeError, ValueError) as error:
+        raise ValueError(
+            f"cell {cell.get('cell_id')!r} has no resolved budget_tokens[{key!r}]"
+        ) from error
+    if value < 1:
+        raise ValueError(f"cell {cell.get('cell_id')!r} has invalid target {value}")
+    return value
 
 
 def _proxy_opener():
     return urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
 
-def start_proxy(arm: str, upstream: str, port: int, out: Path) -> subprocess.Popen:
+def start_proxy(arm: str, upstream: str, port: int, out: Path,
+                target_tokens: int) -> subprocess.Popen:
     (out / "logs").mkdir(parents=True, exist_ok=True)
     log = (out / "proxy.log").open("wb")
     env = os.environ.copy()
@@ -53,6 +73,7 @@ def start_proxy(arm: str, upstream: str, port: int, out: Path) -> subprocess.Pop
     proc = subprocess.Popen(
         [sys.executable, "-m", "benchmarks.proxy",
          "--upstream", upstream, "--arm", arm, "--backend", "sglang",
+          "--history-kv-target-tokens", str(target_tokens),
          "--port", str(port),
          "--request-log", str(out / "logs" / "proxy_requests.jsonl"),
          "--telemetry-log", str(out / "proxy_telemetry.jsonl")],
@@ -231,6 +252,7 @@ def main(argv=None) -> int:
     cell = json.loads(args.cell.read_text())
     arm = ARM_OF[(cell["backend"], cell["working_point"], cell["condition"])]
     cell["handler_name"] = f"c2kv-{arm.replace('_', '-')}"
+    target_tokens = target_tokens_for_cell(cell)
     upstream = cell["sglang_backend_url"].rstrip("/")
     proxy = None
     task_ids = args.task_ids or cell["task_ids"]
@@ -239,7 +261,8 @@ def main(argv=None) -> int:
     results = []
     progress = Path(cell["cell_dir"]) / "progress.jsonl"
     try:
-        proxy = start_proxy(arm, upstream, args.proxy_port, Path(cell["cell_dir"]))
+        proxy = start_proxy(
+            arm, upstream, args.proxy_port, Path(cell["cell_dir"]), target_tokens)
         for task_id in task_ids:
             if cell["benchmark"] == "bfcl":
                 result = run_bfcl_task(cell, task_id, args.proxy_port)

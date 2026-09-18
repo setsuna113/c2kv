@@ -36,12 +36,12 @@ The formal matrix must not start until the corresponding `threshold.json`
 has `ready_for_matrix: true`. The calibration smoke intentionally exits with
 status 2 because it never authorizes a matrix run.
 
-The closed-loop scheduler dispatches all three driver families:
+The closed-loop scheduler dispatches all four backend families:
 
 ```text
-c2kv cells                         -> c2kv_cell.py
-h2o/snapkv compression-only cells -> historykv_cell.py
-h2o/snapkv tracer cells           -> session_tracer_cell.py
+c2kv cells                              -> c2kv_cell.py
+h2o/snapkv/pyramidkv compression cells -> historykv_cell.py
+h2o/snapkv/pyramidkv tracer cells      -> session_tracer_cell.py
 ```
 
 At launch time the scheduler reads the frozen receipt from
@@ -52,7 +52,8 @@ missing or still `calibration_insufficient`. AppWorld uses the official
 keeps its persistent session alive for the batch; every task gets a separate
 worker output directory and an `official_summary.json`.
 
-After the six backend/working-point threshold receipts are ready, start the
+After the eight backend/working-point threshold receipts (including
+PyramidKV/K0 and PyramidKV/K2) are ready, start the
 matrix with:
 
 ```bash

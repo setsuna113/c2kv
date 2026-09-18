@@ -34,7 +34,7 @@ CONDITIONS = (
     "recovery_off_same_initial",   # same allocator and K as tracer, detector/recovery disabled
 )
 
-BACKENDS = ("c2kv", "h2o", "snapkv")
+BACKENDS = ("c2kv", "h2o", "snapkv", "pyramidkv")
 C2KV_RATIO = 4                     # fixed for every condition in this section
 
 BENCHMARKS = {

@@ -44,7 +44,7 @@ def resolve(k_history_bytes: int, wrapper_tokens: int) -> dict:
 
 
 def token_allowances(resolved: dict) -> dict:
-    """Token-domain caps used by the H2O/SnapKV adapters (target_tokens)."""
+    """Token-domain caps used by all history-KV adapters (target_tokens)."""
     per = design.KV_BYTES_PER_TOKEN
     return {
         "k_tokens": resolved["history_allowance_bytes"] // per,

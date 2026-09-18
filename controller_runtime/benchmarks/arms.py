@@ -619,6 +619,27 @@ for _method in ("h2o", "snapkv_persistent", "streamingllm", "pyramidkv"):
             description=f"{_method} history KV at retention {_retention}; selection provenance must be read from server metadata",
         )
 
+# Experiment-2 absolute-budget proxy arms.  The cell launcher passes the
+# resolved K/B token allowance at process start; the placeholder only makes
+# backend selection explicit and prevents a missing arm from aliasing SnapKV.
+for _method in ("h2o", "snapkv_persistent", "pyramidkv"):
+    for _suffix in ("k0", "k2", "b0", "b2"):
+        _name = f"gen_{_method}_{_suffix}"
+        ARMS[_name] = Arm(
+            name=_name,
+            compress_history=False,
+            history_kv={
+                "method": _method,
+                "target_tokens": 1,
+                "backend": "physical_eviction",
+                "persistent_session": True,
+            },
+            description=(
+                f"Experiment-2 {_method} absolute-budget arm {_suffix}; "
+                "target_tokens is replaced by the resolved cell K/B allowance"
+            ),
+        )
+
 
 def get_arm(name: str) -> Arm:
     try:

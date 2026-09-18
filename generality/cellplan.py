@@ -18,7 +18,7 @@ RESULTS = GENERATION_ROOT / "results"
 CONFIG = GENERATION_ROOT / "config"
 RMAX = json.loads((CONFIG / "rmax_measurement.json").read_text())
 
-BACKENDS = ("c2kv", "h2o", "snapkv")
+BACKENDS = ("c2kv", "h2o", "snapkv", "pyramidkv")
 WORKING_POINTS = ("K0", "K2")
 CONDITIONS = ("compression_full_budget", "tracer_history", "recovery_off_same_initial")
 BENCH_KEYS = ("bfcl_base", "bfcl_long_context", "appworld")
@@ -120,6 +120,10 @@ def cell_config(cell_id, backend, wp, condition, bench, manifest, bud) -> dict:
             "R_max": wp_b["recovery_allowance_bytes"],
             "B": wp_b["common_cap_bytes"],
         },
+        # All backends receive the same resolved K/R/B token contract.  The
+        # history-KV drivers use K or B as an absolute target_tokens value;
+        # Tracer uses the same object for admission and recovery accounting.
+        "budget_tokens": wp_b["kv_token_equivalents"],
         "caps": {
             "max_completion_tokens": 4096 if benchmark == "bfcl" else 2048,
             "generation_attempts_per_task": 96,
