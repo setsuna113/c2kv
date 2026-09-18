@@ -177,11 +177,11 @@ def prepare(config, output, source):
         if arm.native_controller:
             if (not is_c1_arm(arm.name) or item.get("ratio") != C1_ARMS[arm.name]
                     or arm.ratio != C1_ARMS[arm.name]
-                    or config.get("c1", {}).get("detector") != "t02_risk"
+                    or config.get("c1", {}).get("detector") not in {"t02_risk", "d3_hybrid"}
                     or config["c1"].get("selector_threshold") != 0.5
                     or config["c1"].get("history_variant") != "H0"
                     or config["c1"].get("recovery_rounds") != 1):
-                raise ValueError("The final system must use H0/C1000/ratio8/T02/R1 (ratio 4 only as its ablation)")
+                raise ValueError("The final system must use H0/C1000/ratio8/R1 with T02 or D3 hybrid (ratio 4 only as its ablation)")
             if item.get("benchmarks") and not set(item["benchmarks"]) <= {b["name"] for b in config["benchmarks"]}:
                 raise ValueError(f"Unknown benchmark restriction on {arm.name}: {item['benchmarks']}")
             continue

@@ -162,3 +162,119 @@ def test_run_task_accepts_short_no_feasible_candidates_without_efficiency_signal
 def test_run_task_still_rejects_unavailable_risk(tmp_path):
     with pytest.raises(RuntimeError, match="'detector_contract': False"):
         _run_finished_fixture(tmp_path, risk_available=False)
+
+
+@pytest.mark.parametrize("reason", ["no_feasible_complete_events", "empty_draft"])
+def test_d3_hybrid_accepts_pre_gate_abstention_without_a_score(tmp_path, reason):
+    task_out = tmp_path / reason
+    server = task_out / "server"
+    server.mkdir(parents=True)
+    (server / "steps.jsonl").write_text(
+        json.dumps({
+            "generation_trace": [{
+                "phase": "draft",
+                "status": "completed",
+                "generation": {"stats": {
+                    "backend": "sglang_c2kv_native_packed",
+                    "gist_tokens": 0,
+                    "workspace_tokens": 1,
+                }},
+            }],
+            "exact_recovery": {"status": "abstain", "reason": reason},
+        }) + "\n",
+        encoding="utf-8",
+    )
+    official = {"n_generated": 1, "n_scored": 1, "semantic_score": 1.0}
+
+    telemetry = run_c1.summarize_task(
+        "bfcl", "multi_turn_base_26", task_out, official, 1.0
+    )
+
+    assert telemetry["detector_calls"] == 0
+    assert telemetry["prefill_detector_scores"] == 0
+    assert telemetry["prefill_detector_unavailable"] == 0
+    assert all(
+        run_c1.functional_checks("proposed", "d3_hybrid", telemetry)["required"].values()
+    )
+
+
+def test_d3_hybrid_rejects_an_evaluated_but_unavailable_prefill_gate(tmp_path):
+    task_out = tmp_path / "unavailable"
+    server = task_out / "server"
+    server.mkdir(parents=True)
+    (server / "steps.jsonl").write_text(
+        json.dumps({
+            "generation_trace": [{
+                "phase": "draft",
+                "status": "completed",
+                "generation": {"stats": {
+                    "backend": "sglang_c2kv_native_packed",
+                    "gist_tokens": 0,
+                    "workspace_tokens": 1,
+                }},
+            }],
+            "exact_recovery": {
+                "status": "abstain",
+                "reason": "prefill_hidden_unavailable",
+                "gate": {
+                    "type": "prefill_linear_head",
+                    "triggered": False,
+                    "reason": "prefill_hidden_unavailable",
+                    "score": None,
+                },
+            },
+        }) + "\n",
+        encoding="utf-8",
+    )
+    official = {"n_generated": 1, "n_scored": 1, "semantic_score": 1.0}
+
+    telemetry = run_c1.summarize_task(
+        "bfcl", "multi_turn_base_26", task_out, official, 1.0
+    )
+    checks = run_c1.functional_checks("proposed", "d3_hybrid", telemetry)
+
+    assert telemetry["detector_calls"] == 1
+    assert telemetry["prefill_detector_scores"] == 0
+    assert telemetry["prefill_detector_unavailable"] == 1
+    assert checks["required"]["detector_contract"] is False
+
+
+def test_d3_hybrid_reports_native_repack_deltas_without_derived_append_claims(tmp_path):
+    task_out = tmp_path / "native-restore"
+    server = task_out / "server"
+    server.mkdir(parents=True)
+    (server / "steps.jsonl").write_text(
+        json.dumps({
+            "generation_trace": [],
+            "exact_recovery": {
+                "status": "recover",
+                "gate": {
+                    "type": "prefill_linear_head",
+                    "triggered": True,
+                    "reason": "prefill_score_at_or_above_threshold",
+                    "score": 0.999,
+                },
+                "restored_event": {
+                    "event_id": "event-3",
+                    "representation": "native_raw_event",
+                    "marginal_raw_prompt_tokens": 12,
+                    "marginal_raw_history_tokens": -4,
+                    "marginal_active_history_bytes": -128,
+                },
+            },
+        }) + "\n",
+        encoding="utf-8",
+    )
+    official = {"n_generated": 1, "n_scored": 1, "semantic_score": 1.0}
+
+    telemetry = run_c1.summarize_task(
+        "bfcl", "multi_turn_base_26", task_out, official, 1.0
+    )
+
+    assert telemetry["recovery_count"] == 1
+    assert telemetry["evidence_units_appended"] == 0
+    assert telemetry["raw_tokens_restored"] == 0
+    assert telemetry["native_raw_events_restored"] == 1
+    assert telemetry["native_raw_prompt_token_delta"] == 12
+    assert telemetry["native_raw_history_token_delta"] == -4
+    assert telemetry["native_active_history_byte_delta"] == -128

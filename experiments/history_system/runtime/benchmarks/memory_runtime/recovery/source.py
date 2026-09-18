@@ -17,9 +17,28 @@ from ..policy import (
 )
 
 
-def select_source_event(prepared: Any, draft_tool_calls: Any, *, draft_text: str):
+def select_source_event(
+    prepared: Any,
+    draft_tool_calls: Any,
+    *,
+    draft_text: str,
+    include_latest_complete_observation: bool = False,
+    explicit_revision_abstain: bool = True,
+    allow_empty_draft_query: bool = False,
+):
+    """Rank observable complete events for one held draft.
+
+    The optional switches are used by the D3 hybrid route.  Their defaults
+    intentionally preserve the frozen native D3 source policy.
+    """
+
     receipt = {
-        "policy": "current-goal-plus-held-draft-visible-event-lexical-v2",
+        "policy": (
+            "current-goal-plus-held-draft-plus-latest-complete-observation-"
+            "visible-event-lexical-v1"
+            if include_latest_complete_observation
+            else "current-goal-plus-held-draft-visible-event-lexical-v2"
+        ),
         "reason": "no_held_draft_query",
         "ranked_candidate_event_ids": [],
         "selected_event": None,
@@ -27,25 +46,47 @@ def select_source_event(prepared: Any, draft_tool_calls: Any, *, draft_text: str
         "draft_arguments_serialized_in_receipt": False,
         "draft_text_serialized_in_receipt": False,
         "uses_gold_future_or_tool_result": False,
-        "staleness_policy": "explicit-current-revision-abstain-v1",
+        "staleness_policy": (
+            "explicit-current-revision-abstain-v1"
+            if explicit_revision_abstain
+            else "revision-cancelled-events-only-v1"
+        ),
         "candidate_scope": (
             "complete non-instruction events before the live raw suffix"
         ),
         "fabricated_tool_execution": False,
+        "latest_complete_observation_in_query": False,
+        "latest_complete_observation_event_id": None,
     }
     calls = valid_tool_calls(draft_tool_calls)
     if not isinstance(draft_text, str):
         raise TypeError("draft_text must be a string")
-    if not draft_text.strip() and not calls:
+    if not draft_text.strip() and not calls and not allow_empty_draft_query:
         return None, receipt
     users = [event for event in prepared._store.events if event.kind == "user"]
     current_user = users[-1] if users else None
     if current_user is None:
         receipt["reason"] = "no_current_user_goal"
         return None, receipt
-    if _is_explicit_revision(prepared._store, current_user):
+    if explicit_revision_abstain and _is_explicit_revision(
+        prepared._store, current_user
+    ):
         receipt["reason"] = "current_goal_is_explicit_revision"
         return None, receipt
+
+    latest_observation = None
+    if include_latest_complete_observation:
+        completed = [
+            event
+            for event in prepared._store.events
+            if event.kind == "tool_event" and event.complete
+        ]
+        latest_observation = completed[-1] if completed else None
+        if latest_observation is not None:
+            receipt["latest_complete_observation_in_query"] = True
+            receipt["latest_complete_observation_event_id"] = (
+                latest_observation.event_id
+            )
 
     excluded = set(prepared.memory.view.raw_event_ids)
     excluded.update(prepared.memory.view.mandatory_raw_event_ids)
@@ -60,6 +101,11 @@ def select_source_event(prepared: Any, draft_tool_calls: Any, *, draft_text: str
         draft_tool_calls=calls,
         eligible=eligible,
         excluded=excluded,
+        latest_complete_observation_text=(
+            _event_text(prepared._store, latest_observation)
+            if latest_observation is not None
+            else ""
+        ),
     )
     receipt["ranked_candidate_event_ids"] = list(ranked)
     if not ranked:
@@ -96,10 +142,15 @@ def rank_visible_source_events(
     draft_tool_calls: list[dict[str, Any]],
     eligible: set[str],
     excluded: set[str],
+    latest_complete_observation_text: str = "",
 ) -> tuple[str, ...]:
     """Rank complete visible events without assuming a tool-call transport."""
 
-    query_parts = [_event_text(store, current_user), draft_text]
+    query_parts = [
+        _event_text(store, current_user),
+        draft_text,
+        latest_complete_observation_text,
+    ]
     exact_parts = []
     for call in draft_tool_calls:
         function = call["function"]

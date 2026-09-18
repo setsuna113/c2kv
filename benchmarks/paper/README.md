@@ -2,7 +2,7 @@
 
 This package runs the accepted portable benchmark through the independent
 `c2kv-paper` and `sglang-paper` worktrees. The final participant additionally
-uses the delivered native C1 T02 controller. Preparation does not start any
+uses D3 hybrid recovery through the delivered native C1 interface. Preparation does not start any
 experiment or retrain the detector.
 
 | Method | Main setting | BFCL base | BFCL long context | AppWorld | Small sweep |
@@ -15,7 +15,7 @@ experiment or retrain the detector.
 | SnapKV | Persistent history KV, retain 25% | Same | Same | Same | Retain 12.5% on each benchmark |
 | PyramidKV | Persistent history KV, retain 25% | Same | Same | Same | Retain 12.5% on each benchmark |
 | AgentFold / CommitKV / AgentKV | Incremental append-only multi-turn history baselines | Same | Same | Same | None |
-| C2KV+C1 | H0 / C1000 / ratio8 / T02 risk / R1 | Same | Same | Same | None |
+| C2KV+C1 | H0 / C1000 / ratio8 / D3 hybrid / R1 | Same | Same | Same | None |
 
 The matrix contains 24 main cells, 9 sweep cells, 9 opponent cells and two
 explicit ACEBench-Agent/ToolSandbox Full baselines. The three C2KV+C1 cells
@@ -27,22 +27,26 @@ projections. System, tools and current input are retained. The server uses base
 query projections, one active request, page size 1, and the same attention
 backend for every method.
 
-The final arm `c2kv_c1_t02_r8` directly reuses
-`experiments/history_system/run_c1.py` and its bundled T02 artifact from
-[C2KV PR #5](https://github.com/Tracy-ZYH/c2kv/pull/5). Its controller retains
-H0 gist/raw packing, the original B0 admission, RRF retrieval over observed
-archive, at most 24 retrieved units and 8 legal candidates, `tokens_1024`,
-strict risk > 0.5, and at most one append/regeneration per decision. Only the
-final draft reaches the official harness. Raw archive storage does not make
-all archived text visible to the actor. Content-addressed gist entries are
-reused; raw workspace/evidence follows the explicit controller policy.
-`Qwen3-Embedding-0.6B` is a separate local retrieval encoder that runs on the
-same CUDA device as the actor (`c1.embedding_device`); its measured time is
-included in the decision chain. Its directory is `c1.embedding_model`. On the
-local CPU the encoder alone took 10.9 s per BFCL decision and 86 s per AppWorld
-decision (c1-t02-cuda-r1, n=10 / n=2), which would have made the AppWorld C1
-cell the critical path of the whole matrix; the CUDA encoder is the normal
-deployment and keeps the C1 arm's latency attributable to the method.
+The stable arm IDs `c2kv_c1_t02_r8` and `c2kv_c1_t02_r4` retain their
+existing interfaces. The selected algorithm is recorded separately in
+`c1.detector` and each native profile: the default is now `d3_hybrid`.
+It uses goal + held draft + latest complete tool observation for lexical
+retrieval of complete events, excludes cancelled/visible events without a
+global explicit-revision abstain, and tries D3 B0 repacking in ranked order
+until one event fits. Trials do not commit memory changes. Empty text with
+no legal tool call abstains; the original Prefill head makes the final veto.
+Successful recovery restores one event as raw, possibly demoting unprotected
+raw or releasing optional gist, then regenerates once. The cumulative E1
+quota is disabled; the shared task generation limit remains enforced.
+Only the final draft reaches the official harness. The S0 bridge is retained.
+
+This is a new hybrid, not a reproduction of the original native D3 result.
+The default output root is `c2kv-paper-d3-hybrid-results`; use a fresh output
+root for the new algorithm. Existing T02 results must not be resumed as D3
+hybrid. Set `c1.detector` to `t02_risk` to retain the previous evidence-set
+algorithm; direct delivery also retains `--detector legacy_prefill`.
+Embedding settings remain compatible with the old configuration but the
+D3 hybrid lexical path does not load the embedding model.
 The generic chat proxy rejects this arm; it requires the native C1 endpoint.
 
 Single-flight serving (one running request, one worker, no overlap schedule)

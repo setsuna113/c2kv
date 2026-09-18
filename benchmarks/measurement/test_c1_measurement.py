@@ -9,6 +9,21 @@ from benchmarks.measurement.c1 import convert_run
 from benchmarks.measurement.telemetry import read_jsonl
 
 
+def test_native_prefill_gate_accounting_and_skipped_gate():
+    from benchmarks.measurement.c1 import _decision_metrics
+
+    record = {"exact_recovery": {"status": "recover", "gate": {
+        "type": "prefill_linear_head", "score": 0.999, "triggered": True}}}
+    metrics = _decision_metrics(record, [])
+    assert metrics["detector_calls"] == 1
+    assert metrics["detector_score_available"] is True
+    assert metrics["recovery_committed"] is True
+    record["exact_recovery"] = {"status": "abstain", "reason": "no_held_draft_query"}
+    metrics = _decision_metrics(record, [])
+    assert metrics["detector_calls"] == 0
+    assert metrics["detector_score_available"] is False
+
+
 def _write_jsonl(path, rows):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(

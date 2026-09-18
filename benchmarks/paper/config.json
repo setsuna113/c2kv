@@ -8,7 +8,7 @@
   "bfcl_dir": "/home/lyc/dev/c2kv-cuda-port/validation/bfcl",
   "acon_dir": "/home/lyc/dev/c2kv-paper-appworld-fixture/deps/acon",
   "appworld_root": "/home/lyc/dev/c2kv-paper-appworld-fixture/deps/appworld",
-  "output_root": "/home/lyc/dev/c2kv-paper-results",
+  "output_root": "/home/lyc/dev/c2kv-paper-d3-hybrid-results",
   "server_port": 34000,
   "proxy_port": 34100,
   "device": "cuda",
@@ -38,7 +38,7 @@
   "c1": {
     "embedding_model": "/home/lyc/dev/c2kv-selection-models/Qwen3-Embedding-0.6B",
     "embedding_device": "cuda",
-    "detector": "t02_risk",
+    "detector": "d3_hybrid",
     "selector_threshold": 0.5,
     "history_variant": "H0",
     "recovery_rounds": 1,

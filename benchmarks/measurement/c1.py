@@ -544,6 +544,11 @@ def _decision_metrics(
         if isinstance(check, Mapping)
     ] or [decision]
     selections = [_mapping(check.get("selection")) for check in checks]
+    native_gates = [
+        _mapping(check.get("gate")) for check in checks
+        if not _mapping(check.get("selection"))
+        and _mapping(check.get("gate")).get("type") == "prefill_linear_head"
+    ]
     gist_duration = 0
     gist_measured = 0
     for row in _deduplicate_server_rows(server_rows):
@@ -562,11 +567,13 @@ def _decision_metrics(
             trace.get("phase") == "regeneration" for trace in traces
         ),
         "generation_requests": len(traces),
-        "detector_calls": sum(
+        "detector_calls": len(native_gates) + sum(
             selection.get("selector") in {"risk", "legacy_prefill"}
             for selection in selections
         ),
         "detector_score_available": any(
+            _finite_number(gate.get("score")) is not None for gate in native_gates
+        ) or any(
             selection.get("available") is True
             and _finite_number(selection.get("score")) is not None
             for selection in selections

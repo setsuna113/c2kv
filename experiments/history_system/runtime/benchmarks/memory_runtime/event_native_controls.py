@@ -131,6 +131,41 @@ def build_event_native_controller(
 ) -> Any:
     """Build a finite controller without importing the CLI/server module."""
 
+    if s0_config is not None and "d3_hybrid_recovery" in s0_config:
+        from .recovery.hybrid import wrap_with_d3_hybrid_recovery
+
+        if s0_config["d3_hybrid_recovery"] is not True:
+            raise ValueError("d3_hybrid_recovery must be true when present")
+        if view_mode != NATIVE_S0_MODE:
+            raise ValueError(
+                "D3 hybrid recovery requires the current native S0 route"
+            )
+        if "gp_experiments" in s0_config:
+            raise ValueError(
+                "D3 hybrid recovery cannot be combined with gp_experiments"
+            )
+        config = dict(s0_config)
+        config.pop("d3_hybrid_recovery")
+        detector = config.pop("post_draft_recovery", None)
+        if detector is None:
+            raise ValueError(
+                "D3 hybrid recovery requires post_draft_recovery detector config"
+            )
+        controller = build_event_native_controller(
+            tokenizer,
+            view_mode=view_mode,
+            packing=packing,
+            policy=policy,
+            model_context=model_context,
+            compression_policy=compression_policy,
+            history_view_protocol=history_view_protocol,
+            s0_config=config,
+            benchmark=benchmark,
+        )
+        return wrap_with_d3_hybrid_recovery(
+            controller, detector, benchmark=benchmark
+        )
+
     if s0_config is not None and "gp_experiments" in s0_config:
         from .recovery.experiment import GPRecoveryController
 

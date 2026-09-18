@@ -139,6 +139,38 @@ class C1T02DeliveryTest(unittest.TestCase):
         self.assertEqual(profile["selector_artifact_binding"]["status"], "fixture_identity")
         self.assertEqual(len(self.binding_calls), 1)
 
+    def test_d3_hybrid_uses_native_recovery_without_gp_or_t02_claims(self):
+        controller, profile = self.build_profile(self.args(detector="d3_hybrid"))
+
+        self.assertIs(controller["d3_hybrid_recovery"], True)
+        self.assertNotIn("gp_experiments", controller)
+        recovery = controller["post_draft_recovery"]
+        self.assertEqual(recovery["gate"], "prefill_linear_head")
+        self.assertEqual(
+            recovery["prefill_head"]["artifact_sha256"], LEGACY_HEAD_SHA256
+        )
+        self.assertEqual(recovery["prefill_head"]["threshold"], LEGACY_HEAD_THRESHOLD)
+        self.assertEqual(profile["detector"], "d3_hybrid")
+        self.assertEqual(profile["algorithm"], "D3-hybrid complete-event raw recovery")
+        self.assertEqual(profile["selection_protocol"], "d3_hybrid_recovery_v1")
+        self.assertFalse(profile["new_c1_training_claimed"])
+        self.assertIsNone(profile["selector_artifact"])
+        self.assertIsNone(profile["selector_threshold"])
+        contract = profile["algorithm_contract"]
+        self.assertEqual(contract["candidate_order"], "candidate_first")
+        self.assertEqual(contract["presentation"], "complete_event_raw")
+        self.assertFalse(contract["cumulative_recovery_quota"])
+        self.assertEqual(contract["recovery_rounds_per_decision"], 1)
+        self.assertEqual(self.binding_calls, [])
+
+        with self.assertRaisesRegex(ValueError, "only used with --detector t02_risk"):
+            self.build_profile(
+                self.args(
+                    detector="d3_hybrid",
+                    selector_artifact=BUNDLED_ARTIFACT,
+                )
+            )
+
     def test_explicit_artifact_override_remains_supported(self):
         override = self.tmp_path / "override.json"
         override.write_bytes(BUNDLED_ARTIFACT.read_bytes())

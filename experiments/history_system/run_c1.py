@@ -49,13 +49,26 @@ SUMMARY_FIELDS = (
     "protocol_legal", "generation_calls", "detector_calls",
     "detector_trigger_count", "recovery_count", "successful_recovery_count",
     "evidence_units_appended", "raw_tokens_restored", "full_history_kv",
+    "native_raw_events_restored", "native_raw_prompt_token_delta",
+    "native_raw_history_token_delta", "native_active_history_byte_delta",
     "active_history_kv", "kv_retention", "compression_ratio",
     "generation_prefill_tokens", "recovery_prefill_tokens",
     "total_prefill_tokens", "wall_time", "native_generate_requests",
-    "prefill_detector_scores", "risk_detector_scores", "risk_detector_unavailable",
+    "prefill_detector_scores", "prefill_detector_unavailable",
+    "risk_detector_scores", "risk_detector_unavailable",
     "gist_tokens", "raw_workspace_tokens",
     "gist_cache_hits", "native_packing_present",
 )
+
+PREFILL_GATE_UNAVAILABLE_REASONS = frozenset({
+    "shadow_features_schema_unavailable",
+    "prefill_hidden_unavailable",
+    "prefill_layer_mismatch",
+    "prefill_position_mismatch",
+    "prefill_readout_mismatch",
+    "prefill_feature_dimension_mismatch",
+    "prefill_hidden_invalid",
+})
 
 
 def save(path: Path, value: Any) -> None:
@@ -173,13 +186,14 @@ def preflight_sglang_backend(
 
 
 def build_profile(args: argparse.Namespace) -> tuple[dict, dict]:
-    """Keep the compatibility detector distinct from the trained risk head."""
+    """Keep D3-hybrid, compatibility Prefill, and trained risk modes distinct."""
     if args.method == "c2kv_only":
         if args.selector_artifact is not None:
             raise ValueError("c2kv_only does not accept --selector-artifact")
         controller = evidence_sets._base_controller()
         controller.pop("post_draft_recovery", None)
         controller.pop("gp_experiments", None)
+        controller.pop("d3_hybrid_recovery", None)
         selected = current.load_config()
         actual = hashlib.sha256((args.checkpoint / "config.json").read_bytes()).hexdigest()
         if actual != selected["checkpoint_selection"]["config_sha256"]:
@@ -200,7 +214,7 @@ def build_profile(args: argparse.Namespace) -> tuple[dict, dict]:
             ).hexdigest(),
             "automatic_reruns": 0,
         }
-    if args.detector == "legacy_prefill" and args.selector_artifact is not None:
+    if args.detector != "t02_risk" and args.selector_artifact is not None:
         raise ValueError("--selector-artifact is only used with --detector t02_risk")
     artifact_path = None
     artifact_sha256 = None
@@ -211,31 +225,70 @@ def build_profile(args: argparse.Namespace) -> tuple[dict, dict]:
         artifact_sha256 = hashlib.sha256(artifact_path.read_bytes()).hexdigest()
         if args.selector_artifact is None and artifact_sha256 != DEFAULT_RISK_ARTIFACT_SHA256:
             raise ValueError("Bundled T02 C1 artifact differs from the evaluated release")
-    config, _ = evidence_sets.build_config(
-        history="H0",
-        selector="legacy_prefill" if args.detector == "legacy_prefill" else "risk",
-        selector_artifact=artifact_path,
-        selector_threshold=args.selector_threshold,
-        embedding_model=str(args.embedding_model.resolve()),
-        embedding_device=args.embedding_device,
-        semantic_query_overflow_policy="task_head_tail_preserve_draft_v1",
-    )
-    config["local_models"]["embedding"]["dtype"] = "bfloat16"
     artifact_binding = None
-    if artifact_path is not None:
-        config["selector_artifact"], artifact_binding = bind_risk_artifact(
-            config["selector_artifact"], args.checkpoint
+    if args.detector == "d3_hybrid":
+        controller = evidence_sets._base_controller()
+        recovery = controller.get("post_draft_recovery")
+        if not isinstance(recovery, Mapping) or recovery.get("gate") != "prefill_linear_head":
+            raise ValueError(
+                "d3_hybrid requires the frozen native post_draft_recovery Prefill head"
+            )
+        controller["d3_hybrid_recovery"] = True
+        controller.pop("gp_experiments", None)
+    else:
+        config, _ = evidence_sets.build_config(
+            history="H0",
+            selector="legacy_prefill" if args.detector == "legacy_prefill" else "risk",
+            selector_artifact=artifact_path,
+            selector_threshold=args.selector_threshold,
+            embedding_model=str(args.embedding_model.resolve()),
+            embedding_device=args.embedding_device,
+            semantic_query_overflow_policy="task_head_tail_preserve_draft_v1",
         )
-    controller = current._configure_controller(evidence_sets._base_controller(), config)
+        config["local_models"]["embedding"]["dtype"] = "bfloat16"
+        if artifact_path is not None:
+            config["selector_artifact"], artifact_binding = bind_risk_artifact(
+                config["selector_artifact"], args.checkpoint
+            )
+        controller = current._configure_controller(evidence_sets._base_controller(), config)
+        controller.pop("d3_hybrid_recovery", None)
     selected = current.load_config()
     actual = hashlib.sha256((args.checkpoint / "config.json").read_bytes()).hexdigest()
     if actual != selected["checkpoint_selection"]["config_sha256"]:
         raise ValueError("C1 delivery requires the selected C1000 checkpoint config; this detector is model-bound")
+    if args.detector == "d3_hybrid":
+        recovery = controller["post_draft_recovery"]
+        algorithm = "D3-hybrid complete-event raw recovery"
+        selection_protocol = "d3_hybrid_recovery_v1"
+        algorithm_contract = {
+            "candidate_order": "candidate_first",
+            "query": "goal_draft_latest_complete_tool_observation",
+            "empty_draft_guard": "empty_text_and_no_legal_tool_call_abstain",
+            "revision_policy": (
+                "exclude_revision_cancelled_without_global_explicit_revision_abstain"
+            ),
+            "admission": "first_feasible_complete_event_with_native_b0_repack",
+            "presentation": "complete_event_raw",
+            "gate": "frozen_prefill_linear_head_after_candidate_feasibility",
+            "gate_artifact_sha256": recovery["prefill_head"]["artifact_sha256"],
+            "gate_threshold": recovery["prefill_head"]["threshold"],
+            "cumulative_recovery_quota": False,
+            "recovery_rounds_per_decision": 1,
+        }
+    else:
+        algorithm = (
+            "C1 legacy Prefill compatibility"
+            if args.detector == "legacy_prefill"
+            else "C1 T02 risk"
+        )
+        selection_protocol = "evidence_sets_v1"
+        algorithm_contract = None
     return controller, {
         "schema": "c1-delivery-profile-v2",
         "method": "proposed",
         "detector": args.detector,
-        "algorithm": "C1 legacy Prefill compatibility" if args.detector == "legacy_prefill" else "C1 T02 risk",
+        "algorithm": algorithm,
+        "algorithm_contract": algorithm_contract,
         "new_c1_training_claimed": args.detector == "t02_risk",
         "selector_artifact": str(artifact_path.resolve()) if artifact_path else None,
         "selector_artifact_sha256": artifact_sha256,
@@ -243,7 +296,7 @@ def build_profile(args: argparse.Namespace) -> tuple[dict, dict]:
         "selector_threshold": args.selector_threshold if artifact_path else None,
         "checkpoint": str(args.checkpoint.resolve()),
         "checkpoint_config_sha256": actual,
-        "selection_protocol": "evidence_sets_v1",
+        "selection_protocol": selection_protocol,
         "history_variant": "H0",
         "ratio": effective_ratio(args, selected),
         "controller_sha256": hashlib.sha256(json.dumps(controller, sort_keys=True).encode()).hexdigest(),
@@ -435,6 +488,15 @@ def summarize_task(benchmark: str, task: str, task_out: Path, official: Mapping[
         and decision["selection"].get("score_semantics") == "current_turn_failure_risk"
     ]
     legacy_gates = [gate for gate in gates if gate.get("type") != "risk"]
+    prefill_evaluations = [
+        gate for gate in legacy_gates
+        if _number(gate.get("score")) is not None
+        or gate.get("reason") in PREFILL_GATE_UNAVAILABLE_REASONS
+    ]
+    prefill_unavailable = sum(
+        gate.get("reason") in PREFILL_GATE_UNAVAILABLE_REASONS
+        for gate in prefill_evaluations
+    )
     risk_scores = sum(
         selection.get("available") is True and _number(selection.get("score")) is not None
         for selection in risk_selections
@@ -442,6 +504,12 @@ def summarize_task(benchmark: str, task: str, task_out: Path, official: Mapping[
     risk_unavailable = sum(selection.get("available") is False for selection in risk_selections)
     recovery_rows = [
         decision for decision in decisions if decision.get("status") == "recover"
+    ]
+    restored_events = [
+        decision["restored_event"]
+        for decision in recovery_rows
+        if isinstance(decision.get("restored_event"), Mapping)
+        and decision["restored_event"].get("representation") == "native_raw_event"
     ]
     generation_calls = sum(
         1 for trace in traces if trace.get("status") in {"started", "pending", "completed", "failed"}
@@ -507,12 +575,25 @@ def summarize_task(benchmark: str, task: str, task_out: Path, official: Mapping[
         "normal_termination": official_row.get("normal_termination"),
         "protocol_legal": official_row.get("protocol_legal"),
         "generation_calls": generation_calls,
-        "detector_calls": len(legacy_gates) + len(risk_selections),
+        "detector_calls": len(prefill_evaluations) + len(risk_selections),
         "detector_trigger_count": sum(gate.get("triggered") is True for gate in gates),
         "recovery_count": len(recovery_rows),
         "successful_recovery_count": successful,
         "evidence_units_appended": sum(int(row.get("appended_unit_count") or 0) for row in recovery_rows),
         "raw_tokens_restored": int(restored),
+        "native_raw_events_restored": len(restored_events),
+        "native_raw_prompt_token_delta": int(sum(
+            _number(event.get("marginal_raw_prompt_tokens")) or 0.0
+            for event in restored_events
+        )),
+        "native_raw_history_token_delta": int(sum(
+            _number(event.get("marginal_raw_history_tokens")) or 0.0
+            for event in restored_events
+        )),
+        "native_active_history_byte_delta": int(sum(
+            _number(event.get("marginal_active_history_bytes")) or 0.0
+            for event in restored_events
+        )),
         "full_history_kv": full_bytes / kv_bytes_per_token if kv_bytes_per_token else None,
         "active_history_kv": active_bytes / kv_bytes_per_token if kv_bytes_per_token else None,
         "kv_retention": active_bytes / full_bytes if full_bytes else None,
@@ -522,7 +603,10 @@ def summarize_task(benchmark: str, task: str, task_out: Path, official: Mapping[
         "total_prefill_tokens": generation_prefill + recovery_prefill,
         "wall_time": wall_time,
         "native_generate_requests": len(native_stats),
-        "prefill_detector_scores": sum(_number(gate.get("score")) is not None for gate in legacy_gates),
+        "prefill_detector_scores": sum(
+            _number(gate.get("score")) is not None for gate in prefill_evaluations
+        ),
+        "prefill_detector_unavailable": prefill_unavailable,
         "risk_detector_scores": risk_scores,
         "risk_detector_unavailable": risk_unavailable,
         "gist_tokens": sum(int(stats.get("gist_tokens") or 0) for stats in native_stats),
@@ -559,6 +643,8 @@ def functional_checks(method: str, detector: str, telemetry: Mapping[str, Any]) 
                 if method == "c2kv_only"
                 else telemetry["risk_detector_unavailable"] == 0
                 if detector == "t02_risk"
+                else telemetry["prefill_detector_unavailable"] == 0
+                if detector == "d3_hybrid"
                 else telemetry["prefill_detector_scores"] > 0
             ),
         },
@@ -646,7 +732,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--sglang-backend-url", required=True)
     parser.add_argument("--embedding-model", type=Path, required=True)
     parser.add_argument("--embedding-device", default="cpu")
-    parser.add_argument("--detector", choices=("legacy_prefill", "t02_risk"), default="t02_risk")
+    parser.add_argument(
+        "--detector",
+        choices=("d3_hybrid", "legacy_prefill", "t02_risk"),
+        default="t02_risk",
+    )
     parser.add_argument("--selector-artifact", type=Path,
                         help="Override the bundled, evaluated T02 C1 risk artifact")
     parser.add_argument("--selector-threshold", type=float, default=0.5)

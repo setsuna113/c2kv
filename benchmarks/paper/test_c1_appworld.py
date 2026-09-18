@@ -94,8 +94,10 @@ def test_native_ready_url_is_normalized_once_for_acon():
         bridge._openai_origin("http://127.0.0.1:34401/v1/v1")
 
 
-def test_controller_command_binds_one_task_to_native_appworld_endpoint(tmp_path):
+@pytest.mark.parametrize("detector", ["t02_risk", "d3_hybrid"])
+def test_controller_command_binds_one_task_to_native_appworld_endpoint(tmp_path, detector):
     config = _config(tmp_path)
+    config["c1"]["detector"] = detector
     controller = tmp_path / "controller.json"
     controller.write_text(json.dumps({"post_draft_recovery": {}}), encoding="utf-8")
     command = bridge.controller_command(
@@ -104,7 +106,7 @@ def test_controller_command_binds_one_task_to_native_appworld_endpoint(tmp_path)
     assert command[command.index("--benchmark") + 1] == "acon_appworld"
     assert command[command.index("--source-profile") + 1] == "openai-single-task-v1"
     assert command[command.index("--task-ids") + 1] == "task-a"
-    assert command[command.index("--model-name") + 1] == "c1_t02_risk"
+    assert command[command.index("--model-name") + 1] == f"c1_{detector}"
     assert command[command.index("--port") + 1] == "34107"
     assert command[command.index("--sglang-backend-url") + 1] == config["upstream"]
     assert command[command.index("--out") + 1] == str(

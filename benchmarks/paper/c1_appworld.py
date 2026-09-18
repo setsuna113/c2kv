@@ -210,14 +210,15 @@ def _resolved_design(
         raise ValueError("config.c1 must be an object")
     if (
         design.get("ratio") != 8
-        or c1.get("detector", "t02_risk") != "t02_risk"
+        or c1.get("detector", "t02_risk") not in {"t02_risk", "d3_hybrid"}
         or float(c1.get("selector_threshold", 0.5)) != 0.5
         or c1.get("history_variant", "H0") != "H0"
         or c1.get("recovery_rounds", 1) != 1
     ):
-        raise ValueError("AppWorld C1 requires H0/C1000/ratio8/T02 threshold>0.5/R1")
-    design["candidate_id"] = "c1_t02_risk"
-    design["run_id_template"] = "paper_c1_t02_r8_appworld"
+        raise ValueError("AppWorld requires H0/C1000/ratio8/R1 with T02 or D3 hybrid")
+    detector = c1.get("detector", "t02_risk")
+    design["candidate_id"] = f"c1_{detector}"
+    design["run_id_template"] = f"paper_c1_{detector}_r8_appworld"
     design["runtime"].update(
         controller=str(controller_path.resolve()),
         sglang_backend_url=_sglang_upstream(config),
@@ -510,7 +511,9 @@ def run_task(
     metrics = run_c1.summarize_task(
         BENCHMARK, task_id, task_out, official, time.monotonic() - started,
     )
-    acceptance = run_c1.functional_checks("proposed", "t02_risk", metrics)
+    acceptance = run_c1.functional_checks(
+        "proposed", config.get("c1", {}).get("detector", "t02_risk"), metrics
+    )
     if not all(acceptance["required"].values()):
         raise RuntimeError(f"C1 AppWorld functional acceptance failed: {acceptance['required']}")
     metrics["appworld_execution_binding"] = binding

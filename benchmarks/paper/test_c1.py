@@ -24,6 +24,32 @@ def test_native_arm_requires_real_controller_and_keeps_bare_c2kv():
     assert "--enable-return-hidden-states" not in server_command(config, Path("sglang"), "full")
 
 
+def test_paper_delivery_uses_configured_detector_and_defaults_to_d3_hybrid(tmp_path):
+    config = json.loads(DEFAULT_CONFIG.read_text())
+    config["sglang_source"] = str(tmp_path / "sglang")
+    delivery = paper_c1.load_delivery()
+
+    configured = paper_c1.delivery_args(
+        config, "bfcl_base", tmp_path / "configured", ["multi_turn_base_0"], delivery
+    )
+    assert configured.detector == config["c1"].get("detector", "d3_hybrid")
+
+    without_detector = copy.deepcopy(config)
+    without_detector["c1"].pop("detector", None)
+    defaulted = paper_c1.delivery_args(
+        without_detector, "bfcl_base", tmp_path / "defaulted", ["multi_turn_base_0"], delivery
+    )
+    assert defaulted.detector == "d3_hybrid"
+
+    for detector in ("legacy_prefill", "t02_risk"):
+        legacy = copy.deepcopy(config)
+        legacy["c1"]["detector"] = detector
+        parsed = paper_c1.delivery_args(
+            legacy, "bfcl_base", tmp_path / detector, ["multi_turn_base_0"], delivery
+        )
+        assert parsed.detector == detector
+
+
 def test_append_final_arm_preserves_old_cells_and_completed_artifacts():
     config = json.loads(DEFAULT_CONFIG.read_text())
     previous = copy.deepcopy(config)

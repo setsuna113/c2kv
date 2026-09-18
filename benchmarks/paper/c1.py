@@ -1,6 +1,6 @@
-"""Paper-matrix orchestration for the delivered H0/C1000/T02/R1 controller.
+"""Paper-matrix orchestration for the selected H0/C1000/R1 controller.
 
-The delivered runtime owns packing, retrieval, risk scoring and regeneration.
+The delivered runtime owns packing, retrieval, detector scoring and regeneration.
 This module only selects the official tasks and connects their artifacts to the
 paper measurement contract.
 """
@@ -60,12 +60,14 @@ def load_delivery():
 
 def delivery_args(config, benchmark, output, task_ids, delivery):
     settings = config["c1"]
+    detector = settings.get("detector", "d3_hybrid")
     args = delivery.build_parser().parse_args([
         "--checkpoint", config["checkpoint"],
         "--sglang-backend-url", config.get("upstream") or f"http://127.0.0.1:{config['server_port']}",
         "--embedding-model", settings["embedding_model"],
         "--embedding-device", settings.get("embedding_device", "cpu"),
-        "--detector", "t02_risk", "--selector-threshold", "0.5",
+        "--detector", detector,
+        "--selector-threshold", str(settings.get("selector_threshold", 0.5)),
         "--benchmark-dir", config["bfcl_dir"],
         "--bfcl-python", config["bench_python"],
         "--sglang-root", config["sglang_source"],
@@ -133,7 +135,7 @@ def prepare_native(config, benchmark, directory, tasks, delivery):
     controller, profile = delivery.build_profile(args)
     profile.update(arm=ARM, benchmark=benchmark, task_ids=tasks,
                    paper_actor_model=config["model"],
-                   source_delivery="Tracy-ZYH/c2kv#5@6690cc1",
+                   source_delivery=delivery.source_revision(ROOT),
                    comparison=("final system ratio8; bare C2KV ratio4 is not a detector-only ablation"
                                if RATIO == 8 else
                                "ratio-4 ablation of the final system: same controller, same ratio as bare C2KV"))
