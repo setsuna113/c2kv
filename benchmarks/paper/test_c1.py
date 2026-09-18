@@ -6,7 +6,7 @@ import tempfile
 import pytest
 
 from benchmarks.arms import get_arm
-from benchmarks.paper.c1 import ARM, replay_task_id, selected_tasks
+from benchmarks.paper.c1 import ARM, controller_oom_message, replay_task_id, selected_tasks, summarize_scores
 from benchmarks.paper.runner import DEFAULT_CONFIG, prepare, server_command
 
 
@@ -63,3 +63,27 @@ def test_replay_keeps_official_task_identity_for_native_evidence_ids():
     rows = [{"replay_payload": {"c2kv_measurement_session_id": "multi_turn_base_26"}}] * 2
     assert replay_task_id(rows, "hashed-proxy-conversation") == "multi_turn_base_26"
     assert replay_task_id([{"replay_payload": {}}], "synthetic").startswith("replay_")
+
+
+def test_controller_oom_is_a_scored_zero_harness_failure(tmp_path):
+    shard = tmp_path / "task_shards" / "multi_turn_long_context_100"
+    (shard / "server").mkdir(parents=True)
+    assert controller_oom_message(shard) is None
+    rows = [
+        {"status": "completed", "error": None},
+        {"status": "failed", "error": "{'type': 'OutOfMemoryError', "
+                                      "'message': 'CUDA out of memory. Tried to allocate 6.00 GiB'}"},
+    ]
+    (shard / "server" / "steps.jsonl").write_text("".join(json.dumps(row) + "\n" for row in rows))
+    message = controller_oom_message(shard)
+    assert message and "OutOfMemoryError" in message
+    receipts = [
+        {"task_id": "a", "status": "completed", "unified_metrics": {"official_score": 1.0}},
+        {"task_id": "multi_turn_long_context_100", "status": "harness_failure",
+         "failure": {"kind": "cuda_oom", "message": message},
+         "unified_metrics": {"official_score": 0.0, "harness_failure": "cuda_oom"}},
+    ]
+    summary = summarize_scores("bfcl_long_context", receipts)
+    assert summary["n"] == 2 and summary["semantic_score"] == 0.5
+    assert summary["n_harness_failures"] == 1
+    assert summary["harness_failure_task_ids"] == ["multi_turn_long_context_100"]

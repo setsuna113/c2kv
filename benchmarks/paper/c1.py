@@ -100,9 +100,11 @@ def save(path, value):
 def summarize_scores(benchmark, receipts):
     if benchmark != "appworld":
         scores = [row["unified_metrics"]["official_score"] for row in receipts]
+        failures = [row["task_id"] for row in receipts if row.get("status") == "harness_failure"]
         return {"arm": ARM, "method": "C2KV+C1", "ratio": 8,
                 "n_scored": len(scores), "n": len(scores),
                 "semantic_score": sum(scores) / len(scores) if scores else None,
+                "n_harness_failures": len(failures), "harness_failure_task_ids": failures,
                 "task_rows": receipts, "result_status": "preliminary, n=1"}
     from .c1_appworld import summarize_scores as appworld_scores
     return appworld_scores(receipts)
@@ -134,17 +136,32 @@ def run_closed_loop(config, benchmark, directory, requested=None):
         receipt_path = task_root / "paper_task_result.json"
         if receipt_path.is_file():
             receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
-            if receipt.get("status") != "completed":
+            if receipt.get("status") not in ("completed", "harness_failure"):
                 raise RuntimeError(f"Task has a previous non-completed result; not rerunning {task}")
         else:
             if task_root.exists():
                 raise RuntimeError(f"Task already has execution evidence; not rerunning {task}")
             print(json.dumps({"arm": ARM, "task": task, "status": "running"}), flush=True)
-            if benchmark == "appworld":
-                from .c1_appworld import run_task
-                receipt, metrics = run_task(config, task, native, delivery, controller_path)
-            else:
-                receipt, metrics = delivery.run_task(args, task, controller_path)
+            try:
+                if benchmark == "appworld":
+                    from .c1_appworld import run_task
+                    receipt, metrics = run_task(config, task, native, delivery, controller_path)
+                else:
+                    receipt, metrics = delivery.run_task(args, task, controller_path)
+            except RuntimeError as error:
+                oom = controller_oom_message(task_root)
+                if oom is None:
+                    raise
+                # The controller process, not the model, ran out of GPU memory on
+                # this input.  Keep the evidence, score the task 0 and go on; the
+                # summary carries the count so the cell is never read as clean.
+                receipt = {"task_id": task, "status": "harness_failure",
+                           "failure": {"kind": "cuda_oom", "message": oom, "error": str(error)},
+                           "qualification": "harness failure: CUDA OOM in the C1 controller; "
+                                            "scored 0, not a model decision"}
+                metrics = {"official_score": 0.0, "harness_failure": "cuda_oom"}
+                print(json.dumps({"arm": ARM, "task": task, "status": "harness_failure",
+                                  "kind": "cuda_oom"}), flush=True)
             receipt["unified_metrics"] = metrics
             save(receipt_path, receipt)
         receipts.append(receipt)
@@ -152,6 +169,19 @@ def run_closed_loop(config, benchmark, directory, requested=None):
         save(native / "result.json", {"status": "running", "tasks": receipts})
     save(native / "result.json", {"status": "completed", "tasks": receipts})
     return native
+
+
+def controller_oom_message(task_root):
+    """The CUDA OOM message recorded by the controller's step journal, else None."""
+    steps = task_root / "server" / "steps.jsonl"
+    if not steps.is_file():
+        return None
+    for row in read_jsonl(steps):
+        error = row.get("error")
+        text = json.dumps(error) if isinstance(error, dict) else str(error or "")
+        if "OutOfMemoryError" in text:
+            return text[:2000]
+    return None
 
 
 def _controller_process(command, native, task, delivery):
