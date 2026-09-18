@@ -62,6 +62,21 @@ class SessionTracerProtocolTests(unittest.TestCase):
         self.assertFalse(risk.predict_risk.call_args.args[0]["is_stop"])
         self.assertEqual(len(parsed.tool_calls), 1)
 
+    def test_appworld_observation_is_available_to_retrieval_context(self):
+        task, risk = self.make_task("acon_appworld", ["print(next_step)"])
+        task.decide({
+            "messages": [
+                {"role": "system", "content": "Agent"},
+                {"role": "user", "content": "Find a contact"},
+                {"role": "assistant", "content": "print(old_step)"},
+                {"role": "user", "content": "Execution result: contact_id=123"},
+            ],
+            "c2kv_eval_context": {"task_id": "test", "user_turn": 1, "step": 1},
+        })
+        context = risk.predict_risk.call_args.args[0]
+        self.assertEqual(context["last_action_observation"][-1]["role"], "user")
+        self.assertIn("contact_id=123", context["last_action_observation"][-1]["content"])
+
     def test_appworld_risk_can_recover_and_regenerate(self):
         task, _ = self.make_task("acon_appworld", ["print(old_id)", "print(recovered_id)"], 0.9)
         evidence = [{"role": "user", "content": "Archived contact: recovered_id=123"}]
@@ -73,6 +88,14 @@ class SessionTracerProtocolTests(unittest.TestCase):
         self.assertEqual(task.engine.generate.call_count, 2)
         task.engine.reopen.assert_called_once()
         self.assertIn(evidence[0], task.engine.generate.call_args.args[0])
+
+    def test_appworld_worker_env_is_constructed_without_bfcl_branch(self):
+        env = driver.appworld_worker_env({
+            "acon_dir": "/tmp/acon", "appworld_root": "/tmp/appworld"})
+        self.assertEqual(env["APPWORLD_ROOT"], "/tmp/appworld")
+        self.assertIn("/tmp/acon/src", env["PYTHONPATH"])
+        self.assertNotIn("HTTP_PROXY", env)
+        self.assertNotIn("HTTPS_PROXY", env)
 
 
 if __name__ == "__main__":

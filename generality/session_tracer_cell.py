@@ -372,6 +372,21 @@ class SessionTracerTask:
         return f"turn-{ctx.get('user_turn')}/step-{ctx.get('step')}"
 
     def _last_action_observation(self, messages):
+        if self.benchmark == "acon_appworld":
+            # ACON's code-action environment returns execution feedback as a
+            # user message (assistant Python -> user observation), unlike
+            # OpenAI native tool calls.  Keep the task's first user message
+            # out, but expose recent code/observation pairs to retrieval.
+            first_user = next(
+                (index for index, message in enumerate(messages)
+                 if message.get("role") == "user"),
+                -1,
+            )
+            if first_user >= 0:
+                return [
+                    message for message in messages[first_user + 1:][-8:]
+                    if message.get("role") in ("assistant", "user", "tool")
+                ]
         obs = []
         for m in messages[-8:]:
             if m.get("role") in ("assistant", "tool"):
@@ -518,6 +533,21 @@ def run_server(cell, task_ids, port, out_dir):
     return server, tasks
 
 
+def appworld_worker_env(cell):
+    """Build the isolated environment for the ACON code-action worker."""
+    env = os.environ.copy()
+    env["PYTHONPATH"] = os.pathsep.join((
+        str(RUNTIME), str(RUNTIME / "benchmarks"),
+        str(Path(cell["acon_dir"]) / "src"),
+        str(GENERATION_ROOT / "src" / "paper_harness" / "benchmarks"),
+    ))
+    env["APPWORLD_ROOT"] = cell["appworld_root"]
+    env["no_proxy"] = env["NO_PROXY"] = "127.0.0.1,localhost"
+    for key in ("http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY"):
+        env.pop(key, None)
+    return env
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cell", type=Path, required=True)
@@ -570,15 +600,7 @@ def main(argv=None) -> int:
                 # persistent session-tracer server for the batch, but give
                 # every official worker its own output directory so the ACON
                 # harness cannot collide on existing results.
-                env["PYTHONPATH"] = os.pathsep.join((
-                    str(RUNTIME), str(RUNTIME / "benchmarks"),
-                    str(Path(cell["acon_dir"]) / "src"),
-                    str(GENERATION_ROOT / "src" / "paper_harness" / "benchmarks"),
-                ))
-                env["APPWORLD_ROOT"] = cell["appworld_root"]
-                env["no_proxy"] = env["NO_PROXY"] = "127.0.0.1,localhost"
-                for key in ("http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY"):
-                    env.pop(key, None)
+                env = appworld_worker_env(cell)
                 rc = 0
                 with (out / "benchmark.log").open("wb") as log:
                     for task_id in batch:
