@@ -6,8 +6,9 @@ import tempfile
 import pytest
 
 from benchmarks.arms import get_arm
+from benchmarks.paper import c1 as paper_c1
 from benchmarks.paper.c1 import (ARM, controller_oom_message, controller_step_failure, replay_task_id,
-                                 selected_tasks, summarize_scores)
+                                 selected_tasks, select_arm, summarize_scores)
 from benchmarks.paper.runner import DEFAULT_CONFIG, prepare, server_command
 
 
@@ -26,7 +27,7 @@ def test_native_arm_requires_real_controller_and_keeps_bare_c2kv():
 def test_append_final_arm_preserves_old_cells_and_completed_artifacts():
     config = json.loads(DEFAULT_CONFIG.read_text())
     previous = copy.deepcopy(config)
-    previous["methods"] = previous["methods"][:-1]
+    previous["methods"] = previous["methods"][:-2]   # drop the C1 system and its ratio-4 ablation
     previous.pop("c1")
     with tempfile.TemporaryDirectory() as temporary:
         output = Path(temporary)
@@ -38,7 +39,12 @@ def test_append_final_arm_preserves_old_cells_and_completed_artifacts():
         assert [row["cell_id"] for row in new_plan[:24]] == [row["cell_id"] for row in old_plan]
         assert completed.read_text() == '{"old_result": true}\n'
         assert json.loads((output / "config.before_c1_extension.json").read_text())["methods"] == previous["methods"]
-        assert all("benchmarks.paper.c1" in row["command"] for row in new_plan[-3:])
+        assert all("benchmarks.paper.c1" in row["command"] for row in new_plan[-4:])
+        r4 = next(row for row in new_plan if row["arm"] == "c2kv_c1_t02_r4")
+        command = list(r4["command"])
+        assert r4["benchmark"] == "bfcl_base"
+        assert command[command.index("--arm") + 1] == "c2kv_c1_t02_r4"
+        assert "--enable-return-hidden-states" in server_command(config, Path("sglang"), "c2kv_c1_t02_r4")
         # An algorithm change to a previous arm cannot masquerade as extension.
         changed = copy.deepcopy(config)
         changed["methods"][3]["ratio"] = 8
@@ -107,3 +113,16 @@ def test_capacity_infeasible_is_a_scored_zero_method_failure(tmp_path):
     assert summary["semantic_score"] == 0.0 and summary["n_method_failures"] == 1
     assert summary["method_failure_task_ids"] == ["multi_turn_long_context_101"]
     assert summary["n_harness_failures"] == 0
+
+
+def test_ratio4_ablation_binds_arm_and_ratio_for_summaries():
+    try:
+        assert select_arm("c2kv_c1_t02_r4") == ("c2kv_c1_t02_r4", 4)
+        summary = summarize_scores("bfcl_base", [
+            {"task_id": "a", "status": "completed", "unified_metrics": {"official_score": 1.0}}])
+        assert (summary["arm"], summary["ratio"]) == ("c2kv_c1_t02_r4", 4)
+        with pytest.raises(ValueError):
+            select_arm("c2kv_c1_t02_r16")
+    finally:
+        select_arm("c2kv_c1_t02_r8")
+    assert (paper_c1.ARM, paper_c1.RATIO) == ("c2kv_c1_t02_r8", 8)

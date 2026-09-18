@@ -46,7 +46,8 @@
     {"method": "SnapKV", "arm": "history_kv_snapkv_r25_persistent", "group": "main", "retention": 0.25},
     {"method": "H2O", "arm": "history_kv_h2o_r125_persistent", "group": "sweep", "retention": 0.125},
     {"method": "SnapKV", "arm": "history_kv_snapkv_r125_persistent", "group": "sweep", "retention": 0.125},
-    {"method": "C2KV+C1", "arm": "c2kv_c1_t02_r8", "group": "main", "ratio": 8}
+    {"method": "C2KV+C1", "arm": "c2kv_c1_t02_r8", "group": "main", "ratio": 8},
+    {"method": "C2KV+C1", "arm": "c2kv_c1_t02_r4", "group": "ablation", "ratio": 4, "benchmarks": ["bfcl_base"]}
   ],
   "benchmarks": [
     {"name": "bfcl_base", "adapter": "bfcl", "category": "multi_turn_base"},

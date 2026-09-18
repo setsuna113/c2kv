@@ -565,10 +565,11 @@ def summarize_scores(receipts: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         "task_goal_completion": task_goal_completion,
         "scenario_goal_completion": scenario_goal_completion,
     }
+    from . import c1 as paper_c1
     return {
-        "arm": "c2kv_c1_t02_r8",
+        "arm": paper_c1.ARM,
         "method": "C2KV+C1",
-        "ratio": 8,
+        "ratio": paper_c1.RATIO,
         "n_scored": len(rows),
         "n": len(rows),
         "semantic_score": (

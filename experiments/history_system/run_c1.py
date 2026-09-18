@@ -194,7 +194,7 @@ def build_profile(args: argparse.Namespace) -> tuple[dict, dict]:
             "checkpoint_config_sha256": actual,
             "selection_protocol": None,
             "history_variant": "H0",
-            "ratio": selected["ratio"],
+            "ratio": effective_ratio(args, selected),
             "controller_sha256": hashlib.sha256(
                 json.dumps(controller, sort_keys=True).encode()
             ).hexdigest(),
@@ -245,7 +245,7 @@ def build_profile(args: argparse.Namespace) -> tuple[dict, dict]:
         "checkpoint_config_sha256": actual,
         "selection_protocol": "evidence_sets_v1",
         "history_variant": "H0",
-        "ratio": selected["ratio"],
+        "ratio": effective_ratio(args, selected),
         "controller_sha256": hashlib.sha256(json.dumps(controller, sort_keys=True).encode()).hexdigest(),
         "automatic_reruns": 0,
     }
@@ -286,6 +286,12 @@ def _controller_endpoint(args: argparse.Namespace) -> str:
     return f"http://127.0.0.1:{args.port}"
 
 
+def effective_ratio(args: argparse.Namespace, selected: dict) -> int:
+    """The delivered ratio (8) unless --ratio asks for the other supported C0 ratio."""
+    ratio = getattr(args, "ratio", None)
+    return int(ratio) if ratio else int(selected["ratio"])
+
+
 def _model_name(args: argparse.Namespace) -> str:
     return "c2kv_only" if args.method == "c2kv_only" else f"c1_{args.detector}"
 
@@ -321,6 +327,7 @@ def portable_worker_command(args: argparse.Namespace, task: str, task_out: Path)
 
 def commands_for_task(args: argparse.Namespace, task: str, controller_path: Path) -> tuple[list[str], list[str]]:
     design = current.load_config()
+    design["ratio"] = effective_ratio(args, design)
     design["candidate_id"] = _model_name(args)
     design["run_id_template"] = design["candidate_id"]
     design["runtime"].update(controller=str(controller_path), sglang_backend_url=args.sglang_backend_url)
@@ -666,6 +673,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--port", type=int, default=38810)
     parser.add_argument("--task-timeout", type=int, default=3600)
+    parser.add_argument("--ratio", type=int, choices=sorted(runner.SUPPORTED_RATIOS), default=None,
+                        help="Override the delivered compression ratio with the other supported C0 ratio (ablation)")
     parser.add_argument("--preview", action="store_true", help="Print commands without model, harness, or network calls")
     return parser
 

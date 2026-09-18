@@ -15,13 +15,23 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG = Path(__file__).with_name("config.json")
 
 
+C1_ARMS = {"c2kv_c1_t02_r8": 8, "c2kv_c1_t02_r4": 4}   # native C1 controller arms and their ratios
+
+
+def is_c1_arm(arm):
+    return arm in C1_ARMS
+
+
 def cells(config):
-    rows = [dict(method, benchmark=bench["name"], adapter=bench["adapter"],
+    rows = [dict({k: v for k, v in method.items() if k != "benchmarks"},
+                 benchmark=bench["name"], adapter=bench["adapter"],
                  category=bench.get("category", ""),
                  cell_id=bench["name"] + "__" + method["arm"])
-            for bench in config["benchmarks"] for method in config["methods"]]
-    # Run the final system after every existing comparison/sweep cell.
-    return sorted(rows, key=lambda row: row["arm"] == "c2kv_c1_t02_r8")
+            for bench in config["benchmarks"] for method in config["methods"]
+            # an optional per-method benchmark list restricts an ablation to some benchmarks
+            if not method.get("benchmarks") or bench["name"] in method["benchmarks"]]
+    # Run the final system (and its ablations) after every existing comparison/sweep cell.
+    return sorted(rows, key=lambda row: is_c1_arm(row["arm"]))
 
 
 def server_command(config, source, arm=None):
@@ -58,7 +68,7 @@ def server_command(config, source, arm=None):
     cmd += ["--disable-piecewise-cuda-graph", "--disable-overlap-schedule",
             "--enable-streaming-session", "--host", "127.0.0.1",
             "--port", str(config["server_port"])]
-    if arm == "c2kv_c1_t02_r8":
+    if is_c1_arm(arm):
         cmd += ["--c2kv-shadow-feature-layer", "-2", "--enable-return-hidden-states"]
     return cmd
 
@@ -76,9 +86,10 @@ def with_port_offset(config, port_offset):
 
 
 def run_command(config, cell, directory, profile, stage="closed_loop"):
-    if cell["arm"] == "c2kv_c1_t02_r8":
+    if is_c1_arm(cell["arm"]):
         cmd = [config["bench_python"], "-m", "benchmarks.paper.c1",
                "--config", str(profile.parent / "config.resolved.json"),
+               "--arm", cell["arm"],
                "--benchmark", cell["benchmark"], "--stage", stage,
                "--upstream", f"http://127.0.0.1:{config['server_port']}",
                "--proxy-port", str(config["proxy_port"]),
@@ -113,12 +124,15 @@ def prepare(config, output, source):
     for item in config["methods"]:
         arm = get_arm(item["arm"])
         if arm.native_controller:
-            if (arm.name != "c2kv_c1_t02_r8" or item.get("ratio") != 8
+            if (not is_c1_arm(arm.name) or item.get("ratio") != C1_ARMS[arm.name]
+                    or arm.ratio != C1_ARMS[arm.name]
                     or config.get("c1", {}).get("detector") != "t02_risk"
                     or config["c1"].get("selector_threshold") != 0.5
                     or config["c1"].get("history_variant") != "H0"
                     or config["c1"].get("recovery_rounds") != 1):
-                raise ValueError("The final system must use H0/C1000/ratio8/T02/R1")
+                raise ValueError("The final system must use H0/C1000/ratio8/T02/R1 (ratio 4 only as its ablation)")
+            if item.get("benchmarks") and not set(item["benchmarks"]) <= {b["name"] for b in config["benchmarks"]}:
+                raise ValueError(f"Unknown benchmark restriction on {arm.name}: {item['benchmarks']}")
             continue
         if arm.repair or arm.recover or arm.hybrid_top_k:
             raise ValueError("The paper matrix excludes recovery and hybrid algorithms")
@@ -146,7 +160,7 @@ def prepare(config, output, source):
             additions = new_methods[len(old_methods):]
             append_only = (
                 unchanged == candidate and new_methods[:len(old_methods)] == old_methods
-                and additions and all(row["arm"] == "c2kv_c1_t02_r8" for row in additions)
+                and additions and all(is_c1_arm(row["arm"]) for row in additions)
                 and ("c1" not in existing or existing["c1"] == config.get("c1"))
             )
             if not append_only:
@@ -267,7 +281,7 @@ def execute(config, plan, output, source, stages, selected, port_offset=0):
                 "server_command": server_command(config, source, cell["arm"]),
                 "port_offset": port_offset,
                 "sglang_source": str(source), "time": time.time()}, indent=2))
-            telemetry_name = ("native_engine_telemetry.jsonl" if cell["arm"] == "c2kv_c1_t02_r8"
+            telemetry_name = ("native_engine_telemetry.jsonl" if is_c1_arm(cell["arm"])
                               else "server_telemetry.jsonl")
             env["C2KV_PAPER_TELEMETRY_LOG"] = str(directory / telemetry_name)
             with (directory / "server.log").open("w") as log:
@@ -284,7 +298,7 @@ def execute(config, plan, output, source, stages, selected, port_offset=0):
                 run_failure = None
                 try:
                     wait_server(server, config["server_port"])
-                    if cell["arm"] == "c2kv_c1_t02_r8":
+                    if is_c1_arm(cell["arm"]):
                         subprocess.run(run_command(config, cell, directory, profile_path, stage),
                                        check=True, env=env, cwd=ROOT.parent)
                     elif stage == "closed_loop":

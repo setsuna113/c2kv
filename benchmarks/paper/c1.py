@@ -23,7 +23,20 @@ import urllib.error
 from benchmarks.measurement.telemetry import append_jsonl, canonical_sha256, read_jsonl
 from benchmarks.measurement.replay import _paper_measurement
 
+ARMS = {"c2kv_c1_t02_r8": 8, "c2kv_c1_t02_r4": 4}   # final system and its ratio-4 ablation
 ARM = "c2kv_c1_t02_r8"
+RATIO = ARMS[ARM]
+
+
+def select_arm(arm):
+    """Bind this process to one native C1 arm (default: the final ratio-8 system)."""
+    global ARM, RATIO
+    if arm not in ARMS:
+        raise ValueError(f"Unknown native C1 arm {arm!r}; expected one of {sorted(ARMS)}")
+    ARM, RATIO = arm, ARMS[arm]
+    return ARM, RATIO
+
+
 ROOT = Path(__file__).resolve().parents[2]
 DELIVERY = ROOT / "experiments" / "history_system"
 OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
@@ -60,6 +73,7 @@ def delivery_args(config, benchmark, output, task_ids, delivery):
         "--port", str(config["proxy_port"]),
         "--task-timeout", str(settings["task_timeout"]),
         "--out", str(output),
+        "--ratio", str(RATIO),
     ])
     args.benchmark = "acon_appworld" if benchmark == "appworld" else "bfcl"
     args.task_id = list(task_ids)
@@ -102,7 +116,7 @@ def summarize_scores(benchmark, receipts):
         scores = [row["unified_metrics"]["official_score"] for row in receipts]
         failures = [row["task_id"] for row in receipts if row.get("status") == "harness_failure"]
         infeasible = [row["task_id"] for row in receipts if row.get("status") == "method_failure"]
-        return {"arm": ARM, "method": "C2KV+C1", "ratio": 8,
+        return {"arm": ARM, "method": "C2KV+C1", "ratio": RATIO,
                 "n_scored": len(scores), "n": len(scores),
                 "semantic_score": sum(scores) / len(scores) if scores else None,
                 "n_harness_failures": len(failures), "harness_failure_task_ids": failures,
@@ -120,7 +134,9 @@ def prepare_native(config, benchmark, directory, tasks, delivery):
     profile.update(arm=ARM, benchmark=benchmark, task_ids=tasks,
                    paper_actor_model=config["model"],
                    source_delivery="Tracy-ZYH/c2kv#5@6690cc1",
-                   comparison="final system ratio8; bare C2KV ratio4 is not a detector-only ablation")
+                   comparison=("final system ratio8; bare C2KV ratio4 is not a detector-only ablation"
+                               if RATIO == 8 else
+                               "ratio-4 ablation of the final system: same controller, same ratio as bare C2KV"))
     profile["sglang_backend_preflight"] = delivery.preflight_sglang_backend(args)
     controller_path = native / "controller.json"
     save(controller_path, controller)
@@ -320,6 +336,7 @@ def run_common_prefix(config, benchmark, directory, prefix_path):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, required=True)
+    parser.add_argument("--arm", choices=sorted(ARMS), default="c2kv_c1_t02_r8")
     parser.add_argument("--benchmark", choices=("bfcl_base", "bfcl_long_context", "appworld"), required=True)
     parser.add_argument("--stage", choices=("closed_loop", "common_prefix"), default="closed_loop")
     parser.add_argument("--out", type=Path, required=True)
@@ -329,6 +346,7 @@ def main(argv=None):
     parser.add_argument("--task-ids", help="comma-separated official IDs for a bounded smoke/subset")
     parser.add_argument("--prefixes", type=Path)
     args = parser.parse_args(argv)
+    select_arm(args.arm)
     config = json.loads(args.config.read_text(encoding="utf-8"))
     if args.upstream:
         config["upstream"] = args.upstream

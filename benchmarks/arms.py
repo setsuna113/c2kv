@@ -316,6 +316,14 @@ ARMS: Dict[str, Arm] = {
             description="Final H0/C1000/ratio8 C1 T02 risk controller with one R1 recovery",
         ),
         Arm(
+            name="c2kv_c1_t02_r4",
+            compress_history=True,
+            ratio=4,
+            query_projection="base",
+            native_controller="c1_t02",
+            description="Ablation: the same C1 T02 risk controller with one R1 recovery at ratio 4 (matches bare C2KV ratio 4)",
+        ),
+        Arm(
             name="hiagent",
             compress_history=False,
             text_policy="hiagent",
