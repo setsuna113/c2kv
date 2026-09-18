@@ -33,8 +33,13 @@ strict risk > 0.5, and at most one append/regeneration per decision. Only the
 final draft reaches the official harness. Raw archive storage does not make
 all archived text visible to the actor. Content-addressed gist entries are
 reused; raw workspace/evidence follows the explicit controller policy.
-`Qwen3-Embedding-0.6B` is a separate local retrieval encoder whose measured
-CPU time is included in the decision chain. Its directory is `c1.embedding_model`.
+`Qwen3-Embedding-0.6B` is a separate local retrieval encoder that runs on the
+same CUDA device as the actor (`c1.embedding_device`); its measured time is
+included in the decision chain. Its directory is `c1.embedding_model`. On the
+local CPU the encoder alone took 10.9 s per BFCL decision and 86 s per AppWorld
+decision (c1-t02-cuda-r1, n=10 / n=2), which would have made the AppWorld C1
+cell the critical path of the whole matrix; the CUDA encoder is the normal
+deployment and keeps the C1 arm's latency attributable to the method.
 The generic chat proxy rejects this arm; it requires the native C1 endpoint.
 
 Single-flight serving (one running request, one worker, no overlap schedule)
@@ -245,4 +250,11 @@ These are integration checks, not benchmark scores:
   exact decision/action ID joins, positive model/tool timings, and official
   scoring. This functional check used a two-action cap and scored zero;
   the formal configuration retains its 50-action cap.
+- C1 retrieval encoder on CUDA (`c1-t02-cuda-r2-cuda-embed/bfcl_base_cuda_embed`,
+  same server flags and task `multi_turn_base_26` as `c1-t02-cuda-r1/bfcl_base_r3`):
+  every decision-level metric is identical to the CPU-encoder run (11
+  generation calls, 5 detector calls, 1 trigger, 1 successful recovery, 1
+  evidence unit, 95 raw tokens restored, 38871/4220 generation/recovery
+  prefill tokens, official score 1.0); `c1_embed` 5.33 s -> 0.14 s per call,
+  task wall 157.6 s -> 58.0 s (functional check, preliminary, n=1).
 - The formal benchmark matrix has not been started.
