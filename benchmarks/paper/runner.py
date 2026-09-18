@@ -125,6 +125,49 @@ def run_command(config, cell, directory, profile, stage="closed_loop"):
     return cmd
 
 
+# Deployment fields whose change would alter what an existing cell measured.
+DEPLOYMENT_KEYS = ("model", "checkpoint", "device", "attention_backend", "disable_cuda_graph",
+                   "context_length", "max_total_tokens", "chunked_prefill_size", "mem_fraction_static",
+                   "c2kv_pool_fraction", "max_running_requests", "seed", "doc_packing", "max_doc_length",
+                   "max_doc_num", "query_projection", "appworld_split", "appworld_max_iter", "c1")
+
+
+def extension_problem(existing, config, source, output):
+    """Why an existing output root may NOT be extended with ``config``; None when it may.
+
+    An output root keeps its completed artifacts valid only if every cell it already
+    defined keeps the same algorithm and byte-identical server/run commands. Adding
+    cells (new arms, new benchmarks, reordered method lists, per-arm radix or
+    model-family flags for arms not yet run) is an extension; anything that touches an
+    existing cell is a different experiment and needs a new output directory.
+    """
+    old_cells = {row["cell_id"]: row for row in cells(existing)}
+    new_cells = {row["cell_id"]: row for row in cells(config)}
+    missing = sorted(set(old_cells) - set(new_cells))
+    if missing:
+        return f"cells removed: {missing[:3]}"
+    if not (set(new_cells) - set(old_cells)):
+        return "no new cells"
+    for key in DEPLOYMENT_KEYS:
+        if key == "c1" and existing.get("c1") is None:
+            continue   # the C1 block arrives with the first C1 cell; no old cell used it
+        if existing.get(key) != config.get(key):
+            return f"deployment field changed: {key}"
+    profile = output / "deployment_profile.json"
+    for cell_id, old in old_cells.items():
+        new = new_cells[cell_id]
+        for key in ("arm", "method", "ratio", "retention", "benchmark", "adapter", "category"):
+            if old.get(key) != new.get(key):
+                return f"{cell_id}: {key} changed"
+        if server_command(existing, source, old["arm"]) != server_command(config, source, new["arm"]):
+            return f"{cell_id}: server command changed"
+        for stage in ("closed_loop", "common_prefix"):
+            directory = output / stage / cell_id
+            if run_command(existing, old, directory, profile, stage) != run_command(config, new, directory, profile, stage):
+                return f"{cell_id}: {stage} command changed"
+    return None
+
+
 def prepare(config, output, source):
     from benchmarks.arms import get_arm, history_kv_spec
     if config["device"] != "cuda":
@@ -164,23 +207,13 @@ def prepare(config, output, source):
                 f"Existing output has an unreadable resolved config: {resolved_path}"
             ) from error
         if existing != config:
-            old_methods = existing.get("methods", [])
-            new_methods = config.get("methods", [])
-            unchanged = {k: v for k, v in existing.items() if k not in ("methods", "c1")}
-            candidate = {k: v for k, v in config.items() if k not in ("methods", "c1")}
-            additions = new_methods[len(old_methods):]
-            append_only = (
-                unchanged == candidate and new_methods[:len(old_methods)] == old_methods
-                and additions and all(is_c1_arm(row["arm"]) for row in additions)
-                and ("c1" not in existing or existing["c1"] == config.get("c1"))
-            )
-            if not append_only:
+            problem = extension_problem(existing, config, source, output)
+            if problem:
                 raise RuntimeError(
-                    f"Existing output was prepared with a different config: {resolved_path}"
+                    f"Existing output was prepared with a different config ({problem}): {resolved_path}"
                 )
-            previous = output / "config.before_c1_extension.json"
-            if not previous.exists():
-                previous.write_text(json.dumps(existing, indent=2) + "\n")
+            previous = output / f"config.before_extension.{int(time.time())}.json"
+            previous.write_text(json.dumps(existing, indent=2) + "\n")
     elif output.exists() and any(output.iterdir()):
         raise RuntimeError(
             f"Existing non-empty output has no resolved config: {output}"

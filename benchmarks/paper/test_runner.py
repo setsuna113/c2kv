@@ -7,7 +7,7 @@ from pathlib import Path
 from unittest import mock
 
 from benchmarks.paper import runner
-from benchmarks.paper.runner import (
+from benchmarks.paper.runner import (extension_problem, 
     DEFAULT_CONFIG, aggregate_results, cells, cleanup_cell_processes, execute,
     prepare, run_command, server_command,
 )
@@ -342,3 +342,68 @@ class PaperMatrixTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ExtensionRuleTest(unittest.TestCase):
+    """An output root may grow (new arms, new benchmarks, reordered methods, flags for
+    arms not yet run) but never change a cell it already defined."""
+
+    def setUp(self):
+        self.config = json.loads(DEFAULT_CONFIG.read_text())
+
+    def _old(self):
+        import copy
+        old = copy.deepcopy(self.config)
+        # the shape of the first matrix: fewer methods, no per-method benchmark lists,
+        # no model_family, radix cache for the three text arms only
+        old["methods"] = [dict((k, v) for k, v in m.items() if k != "benchmarks")
+                          for m in old["methods"] if m["group"] != "baseline" and m["arm"] in
+                          ("full", "hiagent_full", "acon_hist_ut_co", "c2kv4",
+                           "history_kv_h2o_r25_persistent", "history_kv_snapkv_r25_persistent",
+                           "c2kv_c1_t02_r8")]
+        old["benchmarks"] = [b for b in old["benchmarks"] if b["name"] in ("bfcl_base", "bfcl_long_context", "appworld")]
+        old.pop("model_family", None)
+        old["radix_cache_arms"] = ["full", "hiagent_full", "acon_hist_ut_co"]
+        return old
+
+    def test_growth_is_accepted_and_archived(self):
+        from benchmarks.paper.runner import extension_problem
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary)
+            old_plan, _ = prepare(self._old(), output, output / "sglang")
+            done = output / "closed_loop" / old_plan[0]["cell_id"] / "complete.json"
+            done.parent.mkdir(parents=True); done.write_text("{}\n")
+            self.assertIsNone(extension_problem(json.loads((output / "config.resolved.json").read_text()),
+                                                dict(self.config, sglang_source=str((output / "sglang").resolve())),
+                                                output / "sglang", output))
+            new_plan, _ = prepare(self.config, output, output / "sglang")
+            self.assertGreater(len(new_plan), len(old_plan))
+            self.assertTrue(set(r["cell_id"] for r in old_plan) <= set(r["cell_id"] for r in new_plan))
+            self.assertEqual(done.read_text(), "{}\n")
+            self.assertTrue(list(output.glob("config.before_extension.*.json")))
+            # old cells keep byte-identical commands
+            old_cmd = {r["cell_id"]: r["command"] for r in old_plan}
+            for row in new_plan:
+                if row["cell_id"] in old_cmd:
+                    self.assertEqual(row["command"], old_cmd[row["cell_id"]])
+
+    def test_touching_an_existing_cell_is_refused(self):
+        import copy
+        from benchmarks.paper.runner import extension_problem
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary)
+            prepare(self._old(), output, output / "sglang")
+            existing = json.loads((output / "config.resolved.json").read_text())
+            source = output / "sglang"
+            changed = copy.deepcopy(self.config)
+            changed["chunked_prefill_size"] = 256
+            self.assertIn("deployment field", extension_problem(existing, changed, source, output) or "")
+            changed = copy.deepcopy(self.config)
+            changed["radix_cache_arms"] = [a for a in changed["radix_cache_arms"] if a != "full"]
+            self.assertIn("server command changed", extension_problem(existing, changed, source, output) or "")
+            changed = copy.deepcopy(self.config)
+            changed["benchmarks"] = [b for b in changed["benchmarks"] if b["name"] != "appworld"]
+            self.assertIn("cells removed", extension_problem(existing, changed, source, output) or "")
+            self.assertEqual(extension_problem(existing, dict(existing), source, output), "no new cells")
+            with self.assertRaises(RuntimeError):
+                prepare(dict(self.config, chunked_prefill_size=256), output, output / "sglang")

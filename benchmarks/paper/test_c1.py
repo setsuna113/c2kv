@@ -38,7 +38,8 @@ def test_append_final_arm_preserves_old_cells_and_completed_artifacts():
         new_plan, _ = prepare(config, output, output / "sglang")
         assert [row["cell_id"] for row in new_plan[:len(old_plan)]] == [row["cell_id"] for row in old_plan]
         assert completed.read_text() == '{"old_result": true}\n'
-        assert json.loads((output / "config.before_c1_extension.json").read_text())["methods"] == previous["methods"]
+        archived = sorted(output.glob("config.before_extension.*.json"))
+        assert archived and json.loads(archived[-1].read_text())["methods"] == previous["methods"]
         assert all("benchmarks.paper.c1" in row["command"] for row in new_plan[-4:])
         r4 = next(row for row in new_plan if row["arm"] == "c2kv_c1_t02_r4")
         command = list(r4["command"])
