@@ -398,12 +398,19 @@ def _serve(args):
                 raise ValueError('s0-config requires the native S0 route')
             s0_kwargs['s0_config'] = s0_config
             manifest['s0_controller_contract'] = s0_contract
-        controller = controller_factory(tokenizer, packing=runtime_packing['effective_packing'],
-            policy=runtime_policy['effective_policy'], view_mode=args.view_mode, model_context=context,
+        controller_kwargs = dict(
+            packing=runtime_packing['effective_packing'],
+            policy=runtime_policy['effective_policy'],
+            view_mode=args.view_mode,
+            model_context=context,
             **s0_kwargs,
             **({'compression_policy': compression_policy,
                 'history_view_protocol': history_view_protocol}
-               if source_profile in ('native-v1', 'openai-single-task-v1') else {}))
+               if source_profile in ('native-v1', 'openai-single-task-v1') else {}),
+        )
+        if controller_factory is build_event_native_controller:
+            controller_kwargs['benchmark'] = args.benchmark
+        controller = controller_factory(tokenizer, **controller_kwargs)
         shadow_feature_config, shadow_contract = _shadow_feature_configuration(args, tokenizer)
         generator, profile = _build_generator(
             args,

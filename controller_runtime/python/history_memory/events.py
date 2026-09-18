@@ -47,15 +47,21 @@ class EventStore:
     session_id: str
     messages: tuple[Message, ...]
     events: tuple[EventRecord, ...]
+    benchmark: str | None = None
 
     @classmethod
     def from_messages(
-        cls, session_id: str, messages: Sequence[Mapping[str, Any]]
+        cls, session_id: str, messages: Sequence[Mapping[str, Any]],
+        *, benchmark: str | None = None,
     ) -> EventStore:
         if not isinstance(session_id, str) or not session_id:
             raise ValueError("An explicit nonempty session_id is required")
         snapshots = tuple(Message.from_dict(message) for message in messages)
-        return cls(session_id, snapshots, build_events(session_id, snapshots))
+        return cls(
+            session_id, snapshots,
+            build_events(session_id, snapshots, benchmark=benchmark),
+            benchmark,
+        )
 
     def event(self, event_id: str) -> EventRecord:
         for event in self.events:
@@ -68,7 +74,8 @@ class EventStore:
 
 
 def build_events(
-    session_id: str, messages: Sequence[Message | Mapping[str, Any]]
+    session_id: str, messages: Sequence[Message | Mapping[str, Any]],
+    *, benchmark: str | None = None,
 ) -> tuple[EventRecord, ...]:
     """Build stable source-index IDs, refusing ambiguous call/result bindings.
 
@@ -86,6 +93,32 @@ def build_events(
     for index, raw in enumerate(messages):
         message = raw.to_dict() if isinstance(raw, Message) else Message.from_dict(raw).to_dict()
         role = message["role"]
+        previous = None
+        if index:
+            previous = (
+                messages[index - 1].to_dict()
+                if isinstance(messages[index - 1], Message)
+                else dict(messages[index - 1])
+            )
+        if (
+            benchmark == "acon_appworld"
+            and role == "user"
+            and drafts
+            and drafts[-1]["kind"] == "assistant"
+            and drafts[-1]["source_indices"] == [index - 1]
+            and not drafts[-1]["tool_call_ids"]
+            and isinstance(previous, dict)
+            and isinstance(previous.get("content"), str)
+            and previous["content"].strip()
+        ):
+            # ACON/AppWorld executes assistant Python and returns its result as
+            # an ordinary user message.  Keep both immutable source messages
+            # and represent the pair as one completed action event; no native
+            # tool call IDs are introduced.
+            draft = drafts[-1]
+            draft["kind"] = "tool_event"
+            draft["source_indices"].append(index)
+            continue
         if role == "tool":
             call_id = message.get("tool_call_id")
             # ACEBench declares a text action followed by an execution observation.

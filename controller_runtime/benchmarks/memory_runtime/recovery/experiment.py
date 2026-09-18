@@ -32,10 +32,13 @@ class GPRecoveryController(EventNativeRecoveryController):
     makes their original source eligible for another recovery.
     """
 
-    def __init__(self, base, detector_config, switches, *, backends=None):
+    def __init__(
+        self, base, detector_config, switches, *, backends=None,
+        benchmark: str | None = None,
+    ):
         from .selection import prepare_selection_dependencies, load_candidate_scorer
 
-        super().__init__(base, detector_config)
+        super().__init__(base, detector_config, benchmark=benchmark)
         self.gp = parse_gp_config(switches)
         self.max_recovery_rounds = self.gp["R"]
         self.set_protocol = self.gp.get("selection_protocol") == "evidence_sets_v1"
@@ -78,7 +81,10 @@ class GPRecoveryController(EventNativeRecoveryController):
 
         clean_payload = dict(payload)
         explicit_turn = clean_payload.pop("user_turn_id", None)
-        store = EventStore.from_messages(clean_payload["session_id"], clean_payload["messages"])
+        store = EventStore.from_messages(
+            clean_payload["session_id"], clean_payload["messages"],
+            benchmark=self.benchmark,
+        )
         turn = self._user_turn(clean_payload, store, explicit_turn)
         state = self._packer._sessions.get(store.session_id)
         next_index = state.decision_index + 1 if state else 1

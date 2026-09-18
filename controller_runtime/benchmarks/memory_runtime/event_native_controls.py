@@ -127,6 +127,7 @@ def build_event_native_controller(
     compression_policy: str | None = None,
     history_view_protocol: str = "fixed-budget-main",
     s0_config: Mapping[str, Any] | None = None,
+    benchmark: str | None = None,
 ) -> Any:
     """Build a finite controller without importing the CLI/server module."""
 
@@ -143,8 +144,11 @@ def build_event_native_controller(
         controller = build_event_native_controller(
             tokenizer, view_mode=view_mode, packing=packing, policy=policy,
             model_context=model_context, compression_policy=compression_policy,
-            history_view_protocol=history_view_protocol, s0_config=config)
-        return GPRecoveryController(controller, detector, switches)
+            history_view_protocol=history_view_protocol, s0_config=config,
+            benchmark=benchmark)
+        return GPRecoveryController(
+            controller, detector, switches, benchmark=benchmark
+        )
 
     if s0_config is not None and "post_draft_recovery" in s0_config:
         from .event_native_recovery import wrap_with_event_native_recovery
@@ -161,8 +165,11 @@ def build_event_native_controller(
             compression_policy=compression_policy,
             history_view_protocol=history_view_protocol,
             s0_config=config,
+            benchmark=benchmark,
         )
-        return wrap_with_event_native_recovery(controller, recovery_config)
+        return wrap_with_event_native_recovery(
+            controller, recovery_config, benchmark=benchmark
+        )
 
     if s0_config is not None and "raw_warmup_policy" in s0_config:
         from .raw_warmup import RAW_WARMUP_POLICY, wrap_with_raw_warmup
@@ -173,7 +180,8 @@ def build_event_native_controller(
         controller = build_event_native_controller(
             tokenizer, view_mode=view_mode, packing=packing, policy=policy,
             model_context=model_context, compression_policy=compression_policy,
-            history_view_protocol=history_view_protocol, s0_config=config)
+            history_view_protocol=history_view_protocol, s0_config=config,
+            benchmark=benchmark)
         return wrap_with_raw_warmup(controller)
 
     if s0_config is not None and "stalled_operation_policy" in s0_config:
@@ -194,6 +202,7 @@ def build_event_native_controller(
             compression_policy=compression_policy,
             history_view_protocol=history_view_protocol,
             s0_config=config,
+            benchmark=benchmark,
         )
         return enable_stalled_operation(controller)
 
@@ -218,6 +227,7 @@ def build_event_native_controller(
             compression_policy=compression_policy,
             history_view_protocol=history_view_protocol,
             s0_config=config,
+            benchmark=benchmark,
         )
         return enable_compact_first_failure(controller)
 
