@@ -172,6 +172,7 @@ class SessionTracerTask:
     def __init__(self, engine_url, model_name, task_id, benchmark, cell, tokenizer,
                  instance_nonce="", models=None):
         self.cell = cell
+        self.benchmark = benchmark
         self.models = models
         # instance nonce keeps ids unique across driver restarts: a killed
         # driver leaves its engine session open, and /open_session refuses
