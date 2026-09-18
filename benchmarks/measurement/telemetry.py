@@ -14,7 +14,7 @@ import time
 import uuid
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Dict, Iterable, Iterator, Optional
+from typing import Any, Callable, Dict, Iterable, Iterator, Optional
 
 
 SCHEMA = "c2kv.measurement.event.v1"
@@ -68,16 +68,25 @@ class HarnessTelemetry:
     join each committed action to the complete proxy-side decision chain.
     """
 
-    def __init__(self, path: "str | os.PathLike[str]", benchmark: str):
+    def __init__(
+        self,
+        path: "str | os.PathLike[str]",
+        benchmark: str,
+        *,
+        unix_ns: Optional[Callable[[], int]] = None,
+        monotonic_ns: Optional[Callable[[], int]] = None,
+    ):
         self.path = str(path)
         self.benchmark = benchmark
+        self._unix_ns = unix_ns or time.time_ns
+        self._monotonic_ns = monotonic_ns or time.perf_counter_ns
 
     def _emit(self, event_type: str, **fields: Any) -> Dict[str, Any]:
         row = {
             "schema": SCHEMA,
             "event_type": event_type,
             "benchmark": self.benchmark,
-            "unix_ns": time.time_ns(),
+            "unix_ns": self._unix_ns(),
             **fields,
         }
         append_jsonl(self.path, row)
@@ -92,8 +101,8 @@ class HarnessTelemetry:
         }
         episode_token = _episode.set(value)
         decision_token = _last_decision.set(None)
-        start_perf = time.perf_counter_ns()
-        start_unix = time.time_ns()
+        start_perf = self._monotonic_ns()
+        start_unix = self._unix_ns()
         self._emit("episode_start", **value, start_unix_ns=start_unix)
         status = "ok"
         error = None
@@ -104,11 +113,11 @@ class HarnessTelemetry:
             error = f"{type(exc).__name__}: {exc}"
             raise
         finally:
-            end_unix = time.time_ns()
+            end_unix = self._unix_ns()
             self._emit(
                 "episode_end", **value, status=status, error=error,
                 start_unix_ns=start_unix, end_unix_ns=end_unix,
-                duration_ns=time.perf_counter_ns() - start_perf,
+                duration_ns=self._monotonic_ns() - start_perf,
             )
             _last_decision.reset(decision_token)
             _episode.reset(episode_token)

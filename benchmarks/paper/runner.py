@@ -16,10 +16,12 @@ DEFAULT_CONFIG = Path(__file__).with_name("config.json")
 
 
 def cells(config):
-    return [dict(method, benchmark=bench["name"], adapter=bench["adapter"],
+    rows = [dict(method, benchmark=bench["name"], adapter=bench["adapter"],
                  category=bench.get("category", ""),
                  cell_id=bench["name"] + "__" + method["arm"])
             for bench in config["benchmarks"] for method in config["methods"]]
+    # Run the final system after every existing comparison/sweep cell.
+    return sorted(rows, key=lambda row: row["arm"] == "c2kv_c1_t02_r8")
 
 
 def server_command(config, source, arm=None):
@@ -56,6 +58,8 @@ def server_command(config, source, arm=None):
     cmd += ["--disable-piecewise-cuda-graph", "--disable-overlap-schedule",
             "--enable-streaming-session", "--host", "127.0.0.1",
             "--port", str(config["server_port"])]
+    if arm == "c2kv_c1_t02_r8":
+        cmd += ["--c2kv-shadow-feature-layer", "-2", "--enable-return-hidden-states"]
     return cmd
 
 
@@ -71,7 +75,18 @@ def with_port_offset(config, port_offset):
                 proxy_port=config["proxy_port"] + port_offset)
 
 
-def run_command(config, cell, directory, profile):
+def run_command(config, cell, directory, profile, stage="closed_loop"):
+    if cell["arm"] == "c2kv_c1_t02_r8":
+        cmd = [config["bench_python"], "-m", "benchmarks.paper.c1",
+               "--config", str(profile.parent / "config.resolved.json"),
+               "--benchmark", cell["benchmark"], "--stage", stage,
+               "--upstream", f"http://127.0.0.1:{config['server_port']}",
+               "--proxy-port", str(config["proxy_port"]),
+               "--out", str(directory), "--num-workers", "1"]
+        if stage == "common_prefix":
+            cmd += ["--prefixes", str(profile.parent / "closed_loop" /
+                                      (cell["benchmark"] + "__full") / "full_prefixes.jsonl")]
+        return cmd
     cmd = [config["bench_python"], str(ROOT / "run.py"),
            "--benchmark", cell["adapter"], "--arm", cell["arm"],
            "--upstream", f"http://127.0.0.1:{config['server_port']}",
@@ -97,9 +112,17 @@ def prepare(config, output, source):
         raise ValueError("The paper benchmark uses CUDA")
     for item in config["methods"]:
         arm = get_arm(item["arm"])
+        if arm.native_controller:
+            if (arm.name != "c2kv_c1_t02_r8" or item.get("ratio") != 8
+                    or config.get("c1", {}).get("detector") != "t02_risk"
+                    or config["c1"].get("selector_threshold") != 0.5
+                    or config["c1"].get("history_variant") != "H0"
+                    or config["c1"].get("recovery_rounds") != 1):
+                raise ValueError("The final system must use H0/C1000/ratio8/T02/R1")
+            continue
         if arm.repair or arm.recover or arm.hybrid_top_k:
             raise ValueError("The paper matrix excludes recovery and hybrid algorithms")
-        if item["method"] == "C2KV" and (arm.ratio != 4 or not arm.compress_history):
+        if item["method"] == "C2KV" and (arm.ratio != 4 or item.get("ratio") != 4 or not arm.compress_history):
             raise ValueError("The selected bare C2KV arm must use ratio 4")
         if item["method"] in ("H2O", "SnapKV"):
             spec = history_kv_spec(arm)
@@ -116,9 +139,23 @@ def prepare(config, output, source):
                 f"Existing output has an unreadable resolved config: {resolved_path}"
             ) from error
         if existing != config:
-            raise RuntimeError(
-                f"Existing output was prepared with a different config: {resolved_path}"
+            old_methods = existing.get("methods", [])
+            new_methods = config.get("methods", [])
+            unchanged = {k: v for k, v in existing.items() if k not in ("methods", "c1")}
+            candidate = {k: v for k, v in config.items() if k not in ("methods", "c1")}
+            additions = new_methods[len(old_methods):]
+            append_only = (
+                unchanged == candidate and new_methods[:len(old_methods)] == old_methods
+                and additions and all(row["arm"] == "c2kv_c1_t02_r8" for row in additions)
+                and ("c1" not in existing or existing["c1"] == config.get("c1"))
             )
+            if not append_only:
+                raise RuntimeError(
+                    f"Existing output was prepared with a different config: {resolved_path}"
+                )
+            previous = output / "config.before_c1_extension.json"
+            if not previous.exists():
+                previous.write_text(json.dumps(existing, indent=2) + "\n")
     elif output.exists() and any(output.iterdir()):
         raise RuntimeError(
             f"Existing non-empty output has no resolved config: {output}"
@@ -230,7 +267,9 @@ def execute(config, plan, output, source, stages, selected, port_offset=0):
                 "server_command": server_command(config, source, cell["arm"]),
                 "port_offset": port_offset,
                 "sglang_source": str(source), "time": time.time()}, indent=2))
-            env["C2KV_PAPER_TELEMETRY_LOG"] = str(directory / "server_telemetry.jsonl")
+            telemetry_name = ("native_engine_telemetry.jsonl" if cell["arm"] == "c2kv_c1_t02_r8"
+                              else "server_telemetry.jsonl")
+            env["C2KV_PAPER_TELEMETRY_LOG"] = str(directory / telemetry_name)
             with (directory / "server.log").open("w") as log:
                 import socket
                 for port in (config["server_port"], config["proxy_port"]):
@@ -245,7 +284,10 @@ def execute(config, plan, output, source, stages, selected, port_offset=0):
                 run_failure = None
                 try:
                     wait_server(server, config["server_port"])
-                    if stage == "closed_loop":
+                    if cell["arm"] == "c2kv_c1_t02_r8":
+                        subprocess.run(run_command(config, cell, directory, profile_path, stage),
+                                       check=True, env=env, cwd=ROOT.parent)
+                    elif stage == "closed_loop":
                         # Rebuilt here so a runtime port offset reaches the harness;
                         # without an offset this equals the prepared cell["command"].
                         subprocess.run(run_command(config, cell, directory, profile_path),

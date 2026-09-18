@@ -285,6 +285,21 @@ def test_appworld_runner_env_installs_runtime_telemetry(tmp_path):
     assert env[A.APPWORLD_RUN_DIR_ENV] == str(run_dir.resolve())
 
 
+def test_appworld_request_id_prefers_proxy_and_falls_back_to_openai_id():
+    hook_path = (Path(__file__).parent / "appworld_instrumentation"
+                 / "c2kv_appworld_hook.py")
+    spec = importlib.util.spec_from_file_location("fixture_appworld_id_hook", hook_path)
+    assert spec is not None and spec.loader is not None
+    hook = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(hook)
+    assert hook._proxy_request_id(types.SimpleNamespace(
+        id="openai-id", model_extra={})) == "openai-id"
+    assert hook._proxy_request_id(types.SimpleNamespace(
+        id="openai-id",
+        model_extra={"c2kv_proxy": {"request_id": "proxy-id"}},
+    )) == "proxy-id"
+
+
 def test_appworld_runtime_hook_records_joined_decision_action_and_episode(
         tmp_path, monkeypatch):
     class FakeCompletions:
@@ -381,6 +396,9 @@ def test_appworld_runtime_hook_records_joined_decision_action_and_episode(
     assert action["action"] == "print('committed')"
     assert action["outcome"] == "output:print('committed')"
     assert rows[3]["status"] == "ok"
+    assert rows[1]["duration_ns"] > 0
+    assert rows[2]["duration_ns"] > 0
+    assert rows[3]["duration_ns"] > 0
     assert rows[0]["episode_metadata"]["raw_task_dir"] == str(
         task_root / "task_task-7")
     assert FakeCompletions.last_extra_body == {

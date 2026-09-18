@@ -252,6 +252,9 @@ class Arm:
     #  "chunk_tokens"}.  kv_reuse_spec() fills the defaults and rejects
     # anything the server would refuse.
     kv_reuse: Optional[Dict[str, object]] = None
+    # Native controllers own their full decision loop; the ordinary chat proxy
+    # must never interpret these as bare compression arms.
+    native_controller: Optional[str] = None
     description: str = ""
 
     def validate(self) -> None:
@@ -303,6 +306,14 @@ ARMS: Dict[str, Arm] = {
             name="full",
             compress_history=False,
             description="raw text history, no compression (upper reference)",
+        ),
+        Arm(
+            name="c2kv_c1_t02_r8",
+            compress_history=True,
+            ratio=8,
+            query_projection="base",
+            native_controller="c1_t02",
+            description="Final H0/C1000/ratio8 C1 T02 risk controller with one R1 recovery",
         ),
         Arm(
             name="hiagent",

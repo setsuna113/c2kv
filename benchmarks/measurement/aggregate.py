@@ -106,7 +106,12 @@ def _merge_server_measurement(target: Dict[str, Any], update: Dict[str, Any],
         "full_history_reprefill", "selection_query_tokens_observed",
         "canonical_full_source",
     }
-    additive_fields = {"denominator_tokenization_duration_ns"}
+    additive_fields = {"denominator_tokenization_duration_ns", "gist_generation_duration_ns"}
+    extraction_phase = (phase in {"c2kv_extract", "c2kv_repair_extract", "c1_gist_extraction"}
+                        or str(phase).endswith(":extraction"))
+    if extraction_phase and not isinstance(
+            update.get("gist_generation_duration_ns"), (int, float)):
+        target["gist_generation_measurement_incomplete"] = True
     previous_resident = target.get("request_peak_resident_kv_bytes")
     update_resident = update.get("request_peak_resident_kv_bytes")
     takes_resident_peak = (
@@ -241,7 +246,42 @@ def aggregate(proxy_rows: List[Dict[str, Any]], harness_rows: List[Dict[str, Any
             overhead = 0
         return max(0, duration - overhead)
 
+    def gist_duration_ns(row: Dict[str, Any]) -> Optional[float]:
+        value = server_value(row, "gist_generation_duration_ns")
+        incomplete = server_value(row, "gist_generation_measurement_incomplete")
+        if isinstance(value, (int, float)) and not isinstance(value, bool) and not incomplete:
+            return float(value)
+        # Older bare-C2KV runs measured the complete extraction RPC stage.
+        # Preserve that distinction in the coverage metadata below instead of
+        # pretending those historical rows contain engine-only kernel timing.
+        request_id = row.get("request_id")
+        extraction = [phase.get("duration_ns") for phase in phases
+                      if phase.get("request_id") == request_id
+                      and phase.get("phase") == "c2kv_extract"]
+        if extraction:
+            return sum(value for value in extraction if isinstance(value, (int, float)))
+        arm = str(row.get("arm") or "")
+        if (arm == "full" or arm.startswith(("hiagent", "acon_", "history_kv_", "cacheblend"))
+                or row.get("gist_generation_expected") is False):
+            return 0.0
+        # A measured cache-hit-only request has no new encoding work.
+        cache_rows = [phase for phase in proxy_rows if phase.get("event_type") == "extract_cache"
+                      and phase.get("request_id") == request_id]
+        if cache_rows and all(phase.get("cache_hit") is True for phase in cache_rows):
+            return 0.0
+        return None
+
+    def without_gist_ns(row: Dict[str, Any]) -> Optional[float]:
+        duration, gist = algorithm_duration_ns(row), gist_duration_ns(row)
+        if duration is None or gist is None:
+            return None
+        # Nested duplicate phases are a measurement error, not negative latency.
+        if gist > duration + 1_000_000:
+            raise ValueError(f"Gist duration exceeds decision duration for {row.get('request_id')}")
+        return max(0.0, duration - gist)
+
     associated_chain_ms = []
+    associated_chain_without_gist_ms = []
     commit_wall_ms = []
     joined = 0
     actions_by_request: Dict[str, List[Dict[str, Any]]] = {}
@@ -252,6 +292,7 @@ def aggregate(proxy_rows: List[Dict[str, Any]], harness_rows: List[Dict[str, Any
     for request_id, committed in actions_by_request.items():
         request = request_by_id.get(request_id)
         adjusted_duration = algorithm_duration_ns(request) if request else None
+        no_gist_duration = without_gist_ns(request) if request else None
         if adjusted_duration is not None:
             # Allocate one complete model-side decision chain equally across
             # the actions it committed. Repeating the allocation once per
@@ -259,6 +300,9 @@ def aggregate(proxy_rows: List[Dict[str, Any]], harness_rows: List[Dict[str, Any
             # by total committed actions, without adding external-tool time.
             allocation_ms = adjusted_duration / len(committed) / 1e6
             associated_chain_ms.extend([allocation_ms] * len(committed))
+        if no_gist_duration is not None:
+            associated_chain_without_gist_ms.extend(
+                [no_gist_duration / len(committed) / 1e6] * len(committed))
         for action in committed:
             if (request and request.get("start_unix_ns") is not None
                     and action.get("end_unix_ns") is not None):
@@ -369,6 +413,11 @@ def aggregate(proxy_rows: List[Dict[str, Any]], harness_rows: List[Dict[str, Any
     total_model_side_ns = sum(
         value for row in requests for value in [algorithm_duration_ns(row)]
         if value is not None)
+    gist_values = [gist_duration_ns(row) for row in requests]
+    no_gist_values = [without_gist_ns(row) for row in requests]
+    gist_complete = all(value is not None for value in no_gist_values)
+    total_without_gist_ns = sum(no_gist_values) if gist_complete else None
+    gist_generation_ns = sum(gist_values) if all(value is not None for value in gist_values) else None
     committed_actions = len(actions)
     zero_action_requests = [
         row for row in requests
@@ -383,11 +432,21 @@ def aggregate(proxy_rows: List[Dict[str, Any]], harness_rows: List[Dict[str, Any
             "server_events": len(server_rows),
         },
         "latency_ms": {
+            "default_reporting_policy": "exclude_gist_generation",
             "request": distribution(row.get("duration_ns") / 1e6 for row in requests
                                     if row.get("duration_ns") is not None),
             "request_algorithm": distribution(
                 value / 1e6 for row in requests
                 for value in [algorithm_duration_ns(row)] if value is not None),
+            "request_algorithm_excluding_gist": distribution(
+                value / 1e6 for value in no_gist_values if value is not None),
+            "gist_generation": {
+                **distribution(value / 1e6 for value in gist_values if value is not None),
+                "coverage": {"measured": sum(value is not None for value in gist_values),
+                             "requests": len(requests)},
+                "total_ns": gist_generation_ns,
+                "timing_scope": "engine gist generation; legacy fallback is recorded extraction RPC wall time",
+            },
             "measurement_denominator_tokenization": distribution(
                 value / 1e6 for row in requests
                 for value in [server_value(
@@ -407,12 +466,26 @@ def aggregate(proxy_rows: List[Dict[str, Any]], harness_rows: List[Dict[str, Any
                 "mean_ms": (total_model_side_ns / committed_actions / 1e6
                             if committed_actions else None),
             },
+            "complete_model_side_per_committed_action_excluding_gist": {
+                "definition": "complete model-side decision chain minus measured gist generation / committed actions",
+                "total_model_side_including_gist_ns": total_model_side_ns,
+                "gist_generation_ns": gist_generation_ns,
+                "total_model_side_ns": total_without_gist_ns,
+                "committed_actions": committed_actions,
+                "coverage_complete": gist_complete,
+                "mean_ms": (total_without_gist_ns / committed_actions / 1e6
+                            if gist_complete and committed_actions else None),
+            },
             "action_associated_model_side_allocation": {
                 "policy": (
                     "for a decision that commits k actions, divide its complete "
                     "model-side duration by k and emit that allocation k times"
                 ),
                 **distribution(associated_chain_ms),
+            },
+            "action_associated_model_side_allocation_excluding_gist": {
+                "policy": "divide the gist-excluded decision chain equally over its committed actions",
+                **distribution(associated_chain_without_gist_ms),
             },
             "zero_action_model_side": {
                 "requests": len(zero_action_requests),
@@ -430,6 +503,9 @@ def aggregate(proxy_rows: List[Dict[str, Any]], harness_rows: List[Dict[str, Any
             "prefix_replay_algorithm": distribution(
                 value / 1e6 for row in replay
                 for value in [algorithm_duration_ns(row)] if value is not None),
+            "prefix_replay_algorithm_excluding_gist": distribution(
+                value / 1e6 for row in replay
+                for value in [without_gist_ns(row)] if value is not None),
         },
         "memory": memory,
         "token_ratios": ratios,

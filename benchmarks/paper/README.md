@@ -1,9 +1,9 @@
 # Paper CUDA benchmarks
 
 This package runs the accepted portable benchmark through the independent
-`c2kv-paper` and `sglang-paper` worktrees. It does not import the A-line detector,
-router, recovery controller, or hybrid system. Preparation does not start any
-experiment.
+`c2kv-paper` and `sglang-paper` worktrees. The final participant additionally
+uses the delivered native C1 T02 controller. Preparation does not start any
+experiment or retrain the detector.
 
 | Method | Main setting | BFCL base | BFCL long context | AppWorld | Small sweep |
 | --- | --- | --- | --- | --- | --- |
@@ -13,13 +13,29 @@ experiment.
 | Bare C2KV | Arm C, checkpoint-1000, ratio **4** | Same | Same | Same | None |
 | H2O | Persistent history KV, retain 25% | Same | Same | Same | Retain 12.5% on each benchmark |
 | SnapKV | Persistent history KV, retain 25% | Same | Same | Same | Retain 12.5% on each benchmark |
+| C2KV+C1 | H0 / C1000 / ratio8 / T02 risk / R1 | Same | Same | Same | None |
 
-The matrix contains 18 main cells and 6 sweep cells. Bare C2KV has no ratio-8
-cell. All actor and auxiliary calls use the same Qwen3-4B base weights through
+The matrix contains 21 main cells and 6 sweep cells. The three C2KV+C1 cells
+run last. Bare C2KV remains ratio4; C2KV+C1 is ratio8 and is a final-system
+comparison, not a detector-only ablation. All actor and auxiliary generation
+calls use the same Qwen3-4B base weights through
 the same CUDA SGLang endpoint; only C2KV extraction uses the trained gist
 projections. System, tools and current input are retained. The server uses base
 query projections, one active request, page size 1, and the same attention
 backend for every method.
+
+The final arm `c2kv_c1_t02_r8` directly reuses
+`experiments/history_system/run_c1.py` and its bundled T02 artifact from
+[C2KV PR #5](https://github.com/Tracy-ZYH/c2kv/pull/5). Its controller retains
+H0 gist/raw packing, the original B0 admission, RRF retrieval over observed
+archive, at most 24 retrieved units and 8 legal candidates, `tokens_1024`,
+strict risk > 0.5, and at most one append/regeneration per decision. Only the
+final draft reaches the official harness. Raw archive storage does not make
+all archived text visible to the actor. Content-addressed gist entries are
+reused; raw workspace/evidence follows the explicit controller policy.
+`Qwen3-Embedding-0.6B` is a separate local retrieval encoder whose measured
+CPU time is included in the decision chain. Its directory is `c1.embedding_model`.
+The generic chat proxy rejects this arm; it requires the native C1 endpoint.
 
 Single-flight serving (one running request, one worker, no overlap schedule)
 is what the per-request telemetry attributes peaks to; it is a measurement
@@ -86,14 +102,17 @@ All large assets and results are in WSL Arch ext4:
 | AppWorld Python | `/home/lyc/dev/c2kv-paper-appworld-fixture/.venv/bin/python` |
 | AppWorld data root | `/home/lyc/dev/c2kv-paper-appworld-fixture/deps/appworld` |
 | Patched ACON harness | `/home/lyc/dev/c2kv-paper-appworld-fixture/deps/acon` |
-| Prepared matrix and commands | `/home/lyc/dev/c2kv-paper-prepared` |
+| C1 retrieval encoder | `/home/lyc/dev/c2kv-selection-models/Qwen3-Embedding-0.6B` |
+| Prepared matrix and commands | `/home/lyc/dev/c2kv-paper-prepared-c1` |
 
 The checkpoint originated at
 `npu:/home/liuyancheng/c2kv-b-final-20260912/checkpoints/b_history/arm-C/seed-42/checkpoint-1000`.
 It is already local; no new checkpoint download or training is needed. Its
-configuration supports ratios 4 and 8; the selected experiment uses only 4.
-The serving document budget is explicitly `turn / 1000 tokens / 1000 documents`,
+configuration supports ratios 4 and 8; bare C2KV uses 4 and the final C1 system
+uses 8. The generic proxy's serving document budget is explicitly
+`turn / 1000 tokens / 1000 documents`,
 so the old default of 12 documents cannot silently cut out long history.
+C1 uses its delivered native packing and B0 controller budgets.
 
 ## Commands
 
@@ -104,7 +123,7 @@ is for the experiment GPU. `smoke.py` supplies the smaller local laptop capacity
 
 ```bash
 PY=/home/lyc/dev/c2kv-cuda-port/venv-bench/bin/python
-$PY -m benchmarks.paper prepare --output /home/lyc/dev/c2kv-paper-prepared
+$PY -m benchmarks.paper prepare --output /home/lyc/dev/c2kv-paper-prepared-c1
 
 # Bounded synthetic integration check, separate from benchmark scores:
 $PY -m benchmarks.paper.smoke --output /home/lyc/dev/c2kv-paper-smoke/new-check
@@ -123,6 +142,9 @@ Compression activation and no-op requests remain visible in the raw logs.
 Use `--stage closed_loop` or `--stage common_prefix` to execute a stage separately.
 Each cell has its own server process and output directory. Completed cells are
 skipped; a partial cell is not silently restarted into its old results.
+The synthetic proxy smoke checks the original eight arms. Native C1 is checked
+through `benchmarks.paper.c1 --task-ids` against a running native-enabled CUDA
+server; the BFCL and AppWorld functional checks below use that actual path.
 
 Several single-GPU runners can share one output root on a multi-GPU host:
 `CUDA_VISIBLE_DEVICES=<i> ... run --cells <ids> --port-offset <10*i>`. The
@@ -147,13 +169,36 @@ sampled NVML process occupancy. Whole-context and history denominators are
 recorded separately; retention 25% of history does not mean 75% whole-context
 savings.
 
-Model-side latency includes assembly, compression, retrieval, transfer and all
-generation attempts. External tool execution and episode wall time have separate
+Raw model-side latency includes assembly, compression, retrieval, transfer and all
+generation attempts. The default paper latency column excludes measured gist
+generation, treating that stage as offline preparation; a parallel column keeps
+gist generation included. Actual episode wall-clock remains recorded unchanged.
+Gist time is measured for cache misses, never estimated from token counts, and
+is subtracted once per complete decision chain. Retrieval/embedding, detector,
+draft, regeneration, and data movement remain counted. Older logs can use their
+recorded extraction-RPC wall time, with that broader timing scope identified.
+External tool execution and episode wall time have separate
 events. Auxiliary HiAgent/ACON calls are included. The primary per-action cost
-uses the complete model-side time divided by committed actions. Raw events allow
+uses the complete model-side time minus gist generation divided by committed
+actions; its paired inclusive column uses the complete time. Raw events allow
 mean, p50, p95, p99, phase breakdowns, failure strata and alternative offline
 aggregation without new inference. Closed-loop resource consumption and
 compression cost on common recorded prefixes remain separate outputs.
+
+The offline `comparison.csv` exports both timing conventions:
+
+| Column | Meaning |
+| --- | --- |
+| `model_ms_per_committed_action` | Complete model-side time excluding gist generation, divided by committed actions |
+| `model_ms_per_committed_action_including_gist` | The same decision chains and action count, including gist generation |
+| `gist_generation_total_ms` | Measured gist generation time removed from the default column |
+
+Request mean/p95/p99 are also exported with both conventions. Gist exclusion
+changes time accounting only; extraction memory peaks remain in resident KV
+and process GPU measurements. AppWorld model/action/episode timers read the
+operating system's clocks, independently of AppWorld's frozen environment
+date. Standard OpenAI response IDs also join native decisions to executed
+actions when the client drops proxy-specific metadata.
 
 On the local WSL smoke device NVML does not provide per-process memory, so those
 fields remain null; torch allocated/reserved and resident KV are recorded.
@@ -186,4 +231,18 @@ These are integration checks, not benchmark scores:
   and answers byte-identical to the torch_native run (`cuda-r7`); the same
   with the radix cache enabled for every arm (`cuda-r9-flashinfer-graph-radix`)
   also passed, which is where the auxiliary-call inflation above was observed.
+- Native C1 completed `multi_turn_base_26` on CUDA with 10 decisions,
+  11 native generations and one real append/regeneration, with complete
+  logprobs and Prefill shadow capture. All 10 decision chains have measured
+  inclusive/exclusive gist timing. A real Full-prefix replay also completed.
+  Artifacts: `/home/lyc/dev/c2kv-paper-smoke/c1-t02-cuda-r1/bfcl_base_r3/`
+  and `common_prefix_r2/` (functional smoke, preliminary, n=1).
+- Bare C2KV's real cache-miss/cache-hit pair records positive gist generation
+  time on the miss and zero on the hit. Both timing columns are calculated
+  from those same requests in `c1-t02-cuda-r1/gist_dual_timing_r2/`.
+- Native C1 also completed the CUDA AppWorld path in
+  `c1-t02-cuda-r1/appworld_r4/`: two executed actions, returned observations,
+  exact decision/action ID joins, positive model/tool timings, and official
+  scoring. This functional check used a two-action cap and scored zero;
+  the formal configuration retains its 50-action cap.
 - The formal benchmark matrix has not been started.

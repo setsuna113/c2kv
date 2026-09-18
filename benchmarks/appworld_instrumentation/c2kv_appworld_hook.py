@@ -21,19 +21,39 @@ RUN_DIR_ENV = "C2KV_APPWORLD_RUN_DIR"
 _INSTALLED = False
 _response_request_id = contextvars.ContextVar(
     "c2kv_appworld_response_request_id", default=None)
+_clock_gettime_ns = getattr(time, "clock_gettime_ns", None)
+_clock_monotonic_raw = getattr(time, "CLOCK_MONOTONIC_RAW", None)
+_clock_realtime = getattr(time, "CLOCK_REALTIME", None)
+_fallback_monotonic_ns = time.perf_counter_ns
+_fallback_realtime_ns = time.time_ns
+
+
+def _monotonic_raw_ns() -> int:
+    if _clock_gettime_ns is not None and _clock_monotonic_raw is not None:
+        return _clock_gettime_ns(_clock_monotonic_raw)
+    return _fallback_monotonic_ns()
+
+
+def _realtime_ns() -> int:
+    if _clock_gettime_ns is not None and _clock_realtime is not None:
+        return _clock_gettime_ns(_clock_realtime)
+    return _fallback_realtime_ns()
 
 
 def _proxy_request_id(response: Any) -> Optional[str]:
-    """Return only the request id explicitly attached by the C2KV proxy."""
+    """Prefer the proxy join id, falling back to the OpenAI response id."""
     extra = getattr(response, "model_extra", None)
     if extra is None and isinstance(response, dict):
         extra = response
-    if not isinstance(extra, dict):
-        return None
-    proxy = extra.get("c2kv_proxy")
-    if not isinstance(proxy, dict) or not proxy.get("request_id"):
-        return None
-    return str(proxy["request_id"])
+    if isinstance(extra, dict):
+        proxy = extra.get("c2kv_proxy")
+        if isinstance(proxy, dict) and proxy.get("request_id"):
+            return str(proxy["request_id"])
+    response_id = (
+        response.get("id") if isinstance(response, dict)
+        else getattr(response, "id", None)
+    )
+    return str(response_id) if response_id else None
 
 
 def _close_episode(instance: Any, exc_info=(None, None, None)) -> None:
@@ -56,7 +76,9 @@ def install() -> bool:
     from productive_agents.agents.unified_agent import UnifiedAgent
     from productive_agents.env.appworld.env import AppWorldEnv
 
-    telemetry = HarnessTelemetry(path, "appworld")
+    telemetry = HarnessTelemetry(
+        path, "appworld", unix_ns=_realtime_ns, monotonic_ns=_monotonic_raw_ns,
+    )
 
     # ACON's vLLM.generate returns only message.content.  Capture the proxy id
     # from the OpenAI response before ACON discards model_extra.
@@ -117,14 +139,14 @@ def install() -> bool:
 
     def measured_execute(self, code):
         action = self._clean_code(code)
-        start_unix = time.time_ns()
-        start_perf = time.perf_counter_ns()
+        start_unix = _realtime_ns()
+        start_perf = _monotonic_raw_ns()
         try:
             outcome = self.world.execute(action)
         except BaseException as exc:
             telemetry.record_action(
                 action=action, outcome=None, start_unix_ns=start_unix,
-                duration_ns=time.perf_counter_ns() - start_perf,
+                duration_ns=_monotonic_raw_ns() - start_perf,
                 action_index=getattr(self, "num_interactions", None),
                 status="error", error=f"{type(exc).__name__}: {exc}",
                 metadata={"raw_action": code} if action != code else None,
@@ -132,7 +154,7 @@ def install() -> bool:
             raise
         telemetry.record_action(
             action=action, outcome=outcome, start_unix_ns=start_unix,
-            duration_ns=time.perf_counter_ns() - start_perf,
+            duration_ns=_monotonic_raw_ns() - start_perf,
             action_index=getattr(self, "num_interactions", None), status="ok",
             metadata={"raw_action": code} if action != code else None,
         )
@@ -140,15 +162,15 @@ def install() -> bool:
 
     def measured_forward(self, prompt):
         token = _response_request_id.set(None)
-        start_unix = time.time_ns()
-        start_perf = time.perf_counter_ns()
+        start_unix = _realtime_ns()
+        start_perf = _monotonic_raw_ns()
         try:
             output = original_forward(self, prompt)
         except BaseException as exc:
             telemetry.record_decision(
                 request_id=_response_request_id.get(),
                 start_unix_ns=start_unix,
-                duration_ns=time.perf_counter_ns() - start_perf,
+                duration_ns=_monotonic_raw_ns() - start_perf,
                 error=f"{type(exc).__name__}: {exc}",
             )
             raise
@@ -156,7 +178,7 @@ def install() -> bool:
             telemetry.record_decision(
                 request_id=_response_request_id.get(),
                 start_unix_ns=start_unix,
-                duration_ns=time.perf_counter_ns() - start_perf,
+                duration_ns=_monotonic_raw_ns() - start_perf,
                 response={
                     "raw_response": getattr(output, "response", None),
                     "action": getattr(output, "action", None),

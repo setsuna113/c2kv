@@ -238,6 +238,8 @@ data/
 models/
 !python/models/
 !python/models/npu_attention.py
+!experiments/history_system/runtime/python/models/
+!experiments/history_system/runtime/python/models/**
 checkpoints/
 outputs/
 output/

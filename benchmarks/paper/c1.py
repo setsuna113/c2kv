@@ -1,0 +1,304 @@
+"""Paper-matrix orchestration for the delivered H0/C1000/T02/R1 controller.
+
+The delivered runtime owns packing, retrieval, risk scoring and regeneration.
+This module only selects the official tasks and connects their artifacts to the
+paper measurement contract.
+"""
+from __future__ import annotations
+
+import argparse
+import copy
+import hashlib
+import importlib.util
+import json
+import os
+import re
+from pathlib import Path
+import subprocess
+import sys
+import time
+import urllib.request
+import urllib.error
+
+from benchmarks.measurement.telemetry import append_jsonl, canonical_sha256, read_jsonl
+from benchmarks.measurement.replay import _paper_measurement
+
+ARM = "c2kv_c1_t02_r8"
+ROOT = Path(__file__).resolve().parents[2]
+DELIVERY = ROOT / "experiments" / "history_system"
+OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+
+def load_delivery():
+    # The delivery's wrapper intentionally uses sibling modules, while its
+    # runtime executes in a separate process with its own benchmarks namespace.
+    directory = str(DELIVERY)
+    if directory not in sys.path:
+        sys.path.insert(0, directory)
+    import benchmarks
+    runtime_benchmarks = str(DELIVERY / "runtime" / "benchmarks")
+    if runtime_benchmarks not in benchmarks.__path__:
+        benchmarks.__path__.append(runtime_benchmarks)
+    spec = importlib.util.spec_from_file_location("paper_c1_delivery", DELIVERY / "run_c1.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def delivery_args(config, benchmark, output, task_ids, delivery):
+    settings = config["c1"]
+    args = delivery.build_parser().parse_args([
+        "--checkpoint", config["checkpoint"],
+        "--sglang-backend-url", config.get("upstream") or f"http://127.0.0.1:{config['server_port']}",
+        "--embedding-model", settings["embedding_model"],
+        "--embedding-device", settings.get("embedding_device", "cpu"),
+        "--detector", "t02_risk", "--selector-threshold", "0.5",
+        "--benchmark-dir", config["bfcl_dir"],
+        "--bfcl-python", config["bench_python"],
+        "--sglang-root", config["sglang_source"],
+        "--portable-root", str(ROOT),
+        "--port", str(config["proxy_port"]),
+        "--task-timeout", str(settings["task_timeout"]),
+        "--out", str(output),
+    ])
+    args.benchmark = "acon_appworld" if benchmark == "appworld" else "bfcl"
+    args.task_id = list(task_ids)
+    return args
+
+
+def selected_tasks(config, benchmark, requested=None):
+    if benchmark == "appworld":
+        from .c1_appworld import task_ids
+        available = task_ids(config)
+    else:
+        category = {"bfcl_base": "multi_turn_base", "bfcl_long_context": "multi_turn_long_context"}[benchmark]
+        data_dir = Path(config["bfcl_dir"]) / "bfcl_eval" / "data"
+        paths = list(data_dir.glob(f"BFCL_*_{category}.json"))
+        if len(paths) != 1:
+            raise ValueError(f"Expected one official {category} file in {data_dir}, found {paths}")
+        content = paths[0].read_text(encoding="utf-8")
+        try:
+            rows = json.loads(content)
+        except json.JSONDecodeError:
+            rows = [json.loads(line) for line in content.splitlines() if line.strip()]
+        available = [row["id"] for row in rows]
+    if len(available) != len(set(available)):
+        raise ValueError("Official task selection contains duplicate IDs")
+    if requested:
+        if len(requested) != len(set(requested)) or not set(requested) <= set(available):
+            raise ValueError("Requested tasks must be unique IDs in the official split")
+        return list(requested)
+    return available
+
+
+def save(path, value):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(value, indent=2, ensure_ascii=False, allow_nan=False) + "\n", encoding="utf-8")
+
+
+def summarize_scores(benchmark, receipts):
+    if benchmark != "appworld":
+        scores = [row["unified_metrics"]["official_score"] for row in receipts]
+        return {"arm": ARM, "method": "C2KV+C1", "ratio": 8,
+                "n_scored": len(scores), "n": len(scores),
+                "semantic_score": sum(scores) / len(scores) if scores else None,
+                "task_rows": receipts, "result_status": "preliminary, n=1"}
+    from .c1_appworld import summarize_scores as appworld_scores
+    return appworld_scores(receipts)
+
+
+def prepare_native(config, benchmark, directory, tasks, delivery):
+    native = directory / "native"
+    native.mkdir(parents=True, exist_ok=True)
+    args = delivery_args(config, benchmark, native, tasks, delivery)
+    controller, profile = delivery.build_profile(args)
+    profile.update(arm=ARM, benchmark=benchmark, task_ids=tasks,
+                   paper_actor_model=config["model"],
+                   source_delivery="Tracy-ZYH/c2kv#5@6690cc1",
+                   comparison="final system ratio8; bare C2KV ratio4 is not a detector-only ablation")
+    profile["sglang_backend_preflight"] = delivery.preflight_sglang_backend(args)
+    controller_path = native / "controller.json"
+    save(controller_path, controller)
+    save(native / "profile.json", profile)
+    return native, args, controller_path
+
+
+def run_closed_loop(config, benchmark, directory, requested=None):
+    delivery = load_delivery()
+    tasks = selected_tasks(config, benchmark, requested)
+    native, args, controller_path = prepare_native(config, benchmark, directory, tasks, delivery)
+    receipts = []
+    for task in tasks:
+        task_root = native / "task_shards" / task
+        receipt_path = task_root / "paper_task_result.json"
+        if receipt_path.is_file():
+            receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+            if receipt.get("status") != "completed":
+                raise RuntimeError(f"Task has a previous non-completed result; not rerunning {task}")
+        else:
+            if task_root.exists():
+                raise RuntimeError(f"Task already has execution evidence; not rerunning {task}")
+            print(json.dumps({"arm": ARM, "task": task, "status": "running"}), flush=True)
+            if benchmark == "appworld":
+                from .c1_appworld import run_task
+                receipt, metrics = run_task(config, task, native, delivery, controller_path)
+            else:
+                receipt, metrics = delivery.run_task(args, task, controller_path)
+            receipt["unified_metrics"] = metrics
+            save(receipt_path, receipt)
+        receipts.append(receipt)
+        save(directory / f"summary_{ARM}.json", summarize_scores(benchmark, receipts))
+        save(native / "result.json", {"status": "running", "tasks": receipts})
+    save(native / "result.json", {"status": "completed", "tasks": receipts})
+    return native
+
+
+def _controller_process(command, native, task, delivery):
+    task_root = native / "task_shards" / task
+    task_root.mkdir(parents=True, exist_ok=False)
+    env = dict(os.environ)
+    env["PYTHONPATH"] = os.pathsep.join((str(delivery.RUNTIME / "python"), str(delivery.RUNTIME)))
+    log = (task_root / "controller.log").open("w", encoding="utf-8")
+    process = subprocess.Popen(command, cwd=delivery.RUNTIME, env=env,
+                               stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+    ready = task_root / "server" / "ready.json"
+    try:
+        deadline = time.monotonic() + 600
+        while not ready.is_file():
+            if process.poll() is not None:
+                raise RuntimeError(f"C1 replay controller exited: {task_root / 'controller.log'}")
+            if time.monotonic() > deadline:
+                raise TimeoutError("C1 replay controller readiness timeout")
+            time.sleep(0.25)
+    except BaseException:
+        delivery.runner._stop_server(process, task_root / "server.supervisor.json")
+        log.close()
+        raise
+    return process, log, task_root
+
+
+def replay_task_id(rows, conversation):
+    """Keep official episode identity, which is also rendered in evidence IDs."""
+    identities = {row["replay_payload"].get("c2kv_measurement_session_id") for row in rows}
+    if len(identities) != 1:
+        raise ValueError("One recorded conversation has inconsistent episode identities")
+    identity = identities.pop()
+    if isinstance(identity, str) and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,159}", identity):
+        return identity
+    return "replay_" + hashlib.sha256(conversation.encode()).hexdigest()[:16]
+
+
+def run_common_prefix(config, benchmark, directory, prefix_path):
+    """Teacher-force recorded observations; never execute or score replay drafts."""
+    records = [row for row in read_jsonl(prefix_path) if row.get("event_type") == "recorded_prefix"]
+    if not records:
+        raise ValueError("No recorded Full prefixes")
+    groups = {}
+    for row in records:
+        if row.get("source_arm") != "full" or canonical_sha256(row["replay_payload"]) != row["canonical_sha256"]:
+            raise ValueError("Invalid recorded Full-prefix source")
+        key = row.get("conversation_id") or row["replay_payload"].get("c2kv_measurement_session_id")
+        if not key:
+            raise ValueError("C1 replay requires recorded conversation identity")
+        groups.setdefault(str(key), []).append(row)
+    delivery = load_delivery()
+    tasks = [replay_task_id(rows, key) for key, rows in groups.items()]
+    if len(tasks) != len(set(tasks)):
+        raise ValueError("Recorded conversations reuse an episode identity")
+    native, args, controller_path = prepare_native(config, benchmark, directory, tasks, delivery)
+    sequence = 0
+    for task, rows in zip(tasks, groups.values()):
+        if benchmark == "appworld":
+            from .c1_appworld import controller_command
+            command = controller_command(config, task, native, delivery, controller_path)
+        else:
+            command, _ = delivery.commands_for_task(args, task, controller_path)
+        process, log, task_root = _controller_process(command, native, task, delivery)
+        previous_user_turn, turn_step = None, -1
+        try:
+            for step, row in enumerate(rows):
+                payload = copy.deepcopy(row["replay_payload"])
+                payload["model"] = command[command.index("--model-name") + 1]
+                payload.pop("c2kv_measurement_session_id", None)
+                if benchmark != "appworld":
+                    # Adapt OpenAI transport aliases without changing the
+                    # recorded prompt or generation budget.
+                    if payload.get("stream") is False:
+                        payload.pop("stream")
+                    if "max_tokens" in payload:
+                        cap = payload.pop("max_tokens")
+                        if payload.get("max_completion_tokens", cap) != cap:
+                            raise ValueError("Conflicting recorded generation caps")
+                        payload["max_completion_tokens"] = cap
+                    payload.setdefault("store", False)
+                    user_turn = max(0, sum(m.get("role") == "user" for m in payload["messages"]) - 1)
+                    turn_step = turn_step + 1 if user_turn == previous_user_turn else 0
+                    previous_user_turn = user_turn
+                    payload["c2kv_eval_context"] = {
+                        "benchmark": "bfcl", "task_id": task, "attempt": 0,
+                        "user_turn": user_turn, "step": turn_step,
+                    }
+                request = urllib.request.Request(
+                    f"http://127.0.0.1:{config['proxy_port']}/v1/chat/completions",
+                    data=json.dumps(payload).encode(), headers={"Content-Type": "application/json"})
+                started = time.perf_counter_ns()
+                unix = time.time_ns()
+                try:
+                    with OPENER.open(request, timeout=config["c1"]["task_timeout"]) as response:
+                        result = json.load(response)
+                except urllib.error.HTTPError as error:
+                    detail = error.read().decode("utf-8", "replace")
+                    raise RuntimeError(f"C1 replay HTTP {error.code}: {detail}") from error
+                append_jsonl(directory / "prefix_replay.jsonl", {
+                    "schema": "c2kv.prefix_replay.v1", "event_type": "prefix_replay",
+                    "source_run_id": benchmark + "__full", "target_run_id": benchmark + "__" + ARM,
+                    "sequence": sequence, "prefix_id": row["prefix_id"],
+                    "canonical_sha256": row["canonical_sha256"], "native_task_id": task,
+                    "native_step": step, "request_id": result.get("id"),
+                    "start_unix_ns": unix, "duration_ns": time.perf_counter_ns() - started,
+                    "http_status": 200, "request": row["replay_payload"], "response": result,
+                    "source_paper_measurement": _paper_measurement(row.get("source_response")),
+                    "error": None, "teacher_forced": True, "external_actions_executed": 0,
+                })
+                sequence += 1
+        finally:
+            delivery.runner._stop_server(process, task_root / "server.supervisor.json")
+            log.close()
+    return native
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--config", type=Path, required=True)
+    parser.add_argument("--benchmark", choices=("bfcl_base", "bfcl_long_context", "appworld"), required=True)
+    parser.add_argument("--stage", choices=("closed_loop", "common_prefix"), default="closed_loop")
+    parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--upstream")
+    parser.add_argument("--proxy-port", type=int)
+    parser.add_argument("--num-workers", type=int, choices=(1,), default=1)
+    parser.add_argument("--task-ids", help="comma-separated official IDs for a bounded smoke/subset")
+    parser.add_argument("--prefixes", type=Path)
+    args = parser.parse_args(argv)
+    config = json.loads(args.config.read_text(encoding="utf-8"))
+    if args.upstream:
+        config["upstream"] = args.upstream
+    if args.proxy_port:
+        config["proxy_port"] = args.proxy_port
+    args.out.mkdir(parents=True, exist_ok=True)
+    if args.stage == "common_prefix":
+        if args.prefixes is None:
+            parser.error("common_prefix requires --prefixes")
+        native = run_common_prefix(config, args.benchmark, args.out, args.prefixes)
+    else:
+        native = run_closed_loop(config, args.benchmark, args.out,
+                                 args.task_ids.split(",") if args.task_ids else None)
+    from benchmarks.measurement.c1 import convert_run
+    conversion = convert_run(native, args.out, benchmark=args.benchmark, arm=ARM,
+                             replay=args.stage == "common_prefix")
+    save(args.out / "c1_conversion.json", conversion)
+    print(json.dumps({"arm": ARM, "status": "completed", "output": str(args.out)}), flush=True)
+
+
+if __name__ == "__main__":
+    main()

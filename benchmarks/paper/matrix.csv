@@ -23,3 +23,6 @@ appworld__history_kv_h2o_r25_persistent,appworld,H2O,history_kv_h2o_r25_persiste
 appworld__history_kv_snapkv_r25_persistent,appworld,SnapKV,history_kv_snapkv_r25_persistent,main,,0.25,acon_appworld,
 appworld__history_kv_h2o_r125_persistent,appworld,H2O,history_kv_h2o_r125_persistent,sweep,,0.125,acon_appworld,
 appworld__history_kv_snapkv_r125_persistent,appworld,SnapKV,history_kv_snapkv_r125_persistent,sweep,,0.125,acon_appworld,
+bfcl_base__c2kv_c1_t02_r8,bfcl_base,C2KV+C1,c2kv_c1_t02_r8,main,8,,bfcl,multi_turn_base
+bfcl_long_context__c2kv_c1_t02_r8,bfcl_long_context,C2KV+C1,c2kv_c1_t02_r8,main,8,,bfcl,multi_turn_long_context
+appworld__c2kv_c1_t02_r8,appworld,C2KV+C1,c2kv_c1_t02_r8,main,8,,acon_appworld,

@@ -20,16 +20,17 @@ class PaperMatrixTest(unittest.TestCase):
 
     def test_only_requested_methods_and_ratio(self):
         rows = cells(self.config)
-        self.assertEqual(len(rows), 24)
-        self.assertEqual(sum(row["group"] == "main" for row in rows), 18)
+        self.assertEqual(len(rows), 27)
+        self.assertEqual(sum(row["group"] == "main" for row in rows), 21)
         self.assertEqual({row["ratio"] for row in rows if row["method"] == "C2KV"}, {4})
-        self.assertEqual({row["method"] for row in rows}, {"Full", "HiAgent", "ACON", "C2KV", "H2O", "SnapKV"})
+        self.assertEqual({row["method"] for row in rows}, {"Full", "HiAgent", "ACON", "C2KV", "H2O", "SnapKV", "C2KV+C1"})
+        self.assertTrue(all(row["arm"] == "c2kv_c1_t02_r8" for row in rows[-3:]))
 
     def test_preparation_validates_registered_arms_and_full_prefix_source(self):
         with tempfile.TemporaryDirectory() as temporary:
             output = Path(temporary)
             plan, profile = prepare(self.config, output, output / "sglang")
-            self.assertEqual(len(plan), 24)
+            self.assertEqual(len(plan), 27)
             self.assertTrue(profile.is_file())
             for row in plan:
                 cmd = row["command"]

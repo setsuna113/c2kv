@@ -1770,6 +1770,11 @@ def main(argv=None):
     MAX_DOC_NUM = int(args.max_doc_num)
     QUERY_PROJECTION = args.query_projection
     ARM = get_arm(args.arm)
+    if ARM.native_controller:
+        raise ValueError(
+            "Native C1 requires benchmarks.paper.c1 and /v1/c2kv/native_generate; "
+            "it cannot run as a bare chat-proxy arm"
+        )
     UPSTREAM = args.upstream.rstrip("/")
     REQUEST_LOG_PATH = args.request_log
     TELEMETRY_LOG_PATH = args.telemetry_log

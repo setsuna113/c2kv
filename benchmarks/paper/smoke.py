@@ -21,12 +21,14 @@ def main(argv=None):
     parser.add_argument("--sglang-source", type=Path, default=ROOT.parent.parent / "sglang-paper")
     parser.add_argument("--cpu-offload-gb", type=float, default=0,
                         help="optional laptop-only weight offload for integration checks")
-    parser.add_argument("--arms", default="", help="comma-separated arms; empty checks all configured arms")
+    parser.add_argument("--arms", default="", help="comma-separated proxy arms; empty checks all configured proxy arms")
     parser.add_argument("--replay-prefixes", type=Path,
                         help="also validate a previously recorded Full prefix corpus")
     parser.add_argument("--validate-replay", action="store_true",
                         help="record a fresh Full source and replay it through every checked arm")
     args = parser.parse_args(argv)
+    if "c2kv_c1_t02_r8" in args.arms.split(","):
+        parser.error("Use benchmarks.paper.c1 --task-ids for the native C1 controller smoke")
     config = json.loads(args.config.read_text())
     config.update(max_total_tokens=8192, context_length=8192,
                   mem_fraction_static=0.85, c2kv_pool_fraction=0.01,
@@ -64,6 +66,8 @@ def main(argv=None):
             print("CUDA server ready", flush=True)
             for method in config["methods"]:
                 arm = method["arm"]
+                if arm == "c2kv_c1_t02_r8":
+                    continue
                 if args.arms and arm not in args.arms.split(","):
                     continue
                 directory = output / arm

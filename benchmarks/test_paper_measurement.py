@@ -38,6 +38,23 @@ def test_harness_events_join_decision_to_action_and_episode(tmp_path):
         "episode_start", "decision", "tool_action", "episode_end"}
 
 
+def test_harness_episode_accepts_unfrozen_clock_sources(tmp_path):
+    unix_values = iter((1_000, 1_100, 1_200, 1_300))
+    monotonic_values = iter((10, 35))
+    path = tmp_path / "clocked.jsonl"
+    telemetry = HarnessTelemetry(
+        path, "appworld",
+        unix_ns=lambda: next(unix_values),
+        monotonic_ns=lambda: next(monotonic_values),
+    )
+    with telemetry.episode("task-1"):
+        pass
+    rows = list(read_jsonl(path))
+    assert rows[-1]["duration_ns"] == 25
+    assert rows[-1]["start_unix_ns"] == 1_000
+    assert rows[-1]["end_unix_ns"] == 1_200
+
+
 def test_aggregate_uses_server_jsonl_and_reports_missing_coverage():
     proxy = [{
         "event_type": "request", "request_id": "r1",
