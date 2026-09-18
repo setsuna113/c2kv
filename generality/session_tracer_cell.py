@@ -257,7 +257,9 @@ class SessionTracerTask:
         messages = list(payload["messages"])
         tools = payload.get("tools") or []
         goal = next((m["content"] for m in messages if m.get("role") == "user"), "")
-        store = EventStore.from_messages(self.session_id, messages)
+        store = EventStore.from_messages(
+            self.session_id, messages, benchmark=self.benchmark
+        )
         eval_context = payload.get("c2kv_eval_context") or {}
         record = {
             "task_id": eval_context.get("task_id"),
