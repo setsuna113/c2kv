@@ -55,6 +55,11 @@ class EventNativeDecisionRunner:
                 raise ValueError('decision key reused with different visible input')
             return copy.deepcopy(cached[1])
         started = time.perf_counter()
+        recovery_disabled = payload.get('recovery_disabled') is True
+        controller_payload = {
+            key: value for key, value in payload.items()
+            if key != 'recovery_disabled'
+        }
         keep_session = False
         record = {
             'schema': 'a-event-native-exact-step-v1', 'status': 'started',
@@ -63,12 +68,13 @@ class EventNativeDecisionRunner:
             'generation_trace': [], 'exact_recovery': None, 'response': None,
             'controller_timing': {'prepare_seconds': None, 'reconsider_seconds': None},
             'decision_runtime_seconds': None,
+            'recovery_disabled': recovery_disabled,
             'scope': 'One unsubmitted decision; only response is executable, no tools or scorer were invoked.',
         }
         try:
             prepare_started = time.perf_counter()
             try:
-                prepared = self.controller.prepare(payload, ratio=self.ratio,
+                prepared = self.controller.prepare(controller_payload, ratio=self.ratio,
                                                    max_new_tokens=self.max_new_tokens)
             finally:
                 record['controller_timing']['prepare_seconds'] = time.perf_counter() - prepare_started
@@ -82,13 +88,28 @@ class EventNativeDecisionRunner:
                         session_id=key[0], decision_key=key[1],
                         shadow_features=(stats.get('shadow_features')
                                          if isinstance(stats, dict) else None))
-                reconsider_started = time.perf_counter()
-                try:
-                    reconsidered = self.controller.reconsider(
-                        prepared, list(draft.tool_calls), draft_text=draft.text,
-                        parse_error=draft.reason if draft.status == 'malformed' else None)
-                finally:
-                    record['controller_timing']['reconsider_seconds'] = time.perf_counter() - reconsider_started
+                if recovery_disabled:
+                    decision = {
+                        'schema': 'event-native-recovery-decision-v1',
+                        'recovery_enabled': False,
+                        'regenerate': False,
+                        'reason': 'recovery_disabled',
+                        'recovery_stage': 'disabled_for_calibration',
+                        'post_draft_exact_recovery_applied': False,
+                    }
+                    reconsidered = {
+                        'regenerate': False, 'memory': prepared.memory,
+                        'metadata': prepared.metadata, 'decision': decision,
+                    }
+                    record['controller_timing']['reconsider_seconds'] = 0.0
+                else:
+                    reconsider_started = time.perf_counter()
+                    try:
+                        reconsidered = self.controller.reconsider(
+                            prepared, list(draft.tool_calls), draft_text=draft.text,
+                            parse_error=draft.reason if draft.status == 'malformed' else None)
+                    finally:
+                        record['controller_timing']['reconsider_seconds'] = time.perf_counter() - reconsider_started
                 record['exact_recovery'] = copy.deepcopy(reconsidered['decision'])
                 rounds = []
                 max_rounds = getattr(self.controller, 'max_recovery_rounds', 1)

@@ -31,7 +31,9 @@ _REQUEST_FIELDS = frozenset({
     "c2kv_eval_context",
 })
 _CONTEXT_FIELDS = frozenset({"benchmark", "task_id", "user_turn", "step", "attempt"})
-_CALIBRATION_CONTEXT_FIELDS = _CONTEXT_FIELDS | {"calibration_state_id"}
+_CALIBRATION_CONTEXT_FIELDS = _CONTEXT_FIELDS | {
+    "calibration_state_id", "recovery_disabled",
+}
 _MESSAGE_FIELDS = frozenset({
     "role", "content", "name", "tool_call_id", "tool_calls", "reasoning_content"
 })
@@ -370,6 +372,11 @@ class EventNativeAPI:
             raise EventNativeAPIError(
                 400, "invalid_calibration_state_id",
                 "calibration_state_id must be a nonempty string")
+        recovery_disabled = context.get("recovery_disabled")
+        if recovery_disabled is not None and recovery_disabled is not True:
+            raise EventNativeAPIError(
+                400, "invalid_recovery_disabled",
+                "recovery_disabled must be true when supplied")
 
         messages = payload.get("messages")
         if (
@@ -439,6 +446,7 @@ class EventNativeAPI:
             "decision_key": decision_key,
             "messages": message_snapshot,
             "tools": tool_snapshot,
+            **({"recovery_disabled": True} if recovery_disabled is True else {}),
             **source_fields,
         }
         try:

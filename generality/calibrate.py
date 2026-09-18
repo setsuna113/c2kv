@@ -203,6 +203,7 @@ class EventNativeControllerClient:
             "c2kv_eval_context": {
                 "benchmark": self.benchmark, "task_id": self.task_id,
                 "user_turn": turn, "step": step, "attempt": 0,
+                "recovery_disabled": True,
                 **({"calibration_state_id": self.calibration_state_id}
                    if self.calibration_state_id else {}),
             },

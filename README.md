@@ -1,7 +1,8 @@
 This package uses exact recorded-prefix replay for T02 threshold calibration.
 
 The NPU copy is `/home/liuyancheng/c2kv-generality-20260918/src/generality`.
-The local delivery commit is `228afb1f3d63a07f8239b9283c5e07bfdc878fa0`.
+The local delivery commit is the commit containing this README; use
+`git rev-parse HEAD` to identify it after checkout.
 
 Calibration never reruns a task from turn zero. It restores each source row
 from the official `labels.json`, verifies the BFCL tool observations and
@@ -11,7 +12,10 @@ cannot be reconstructed are written as `unknown`; a threshold is emitted as
 `calibration_insufficient` unless both known classes are present.
 
 For C2KV, pass the controller's `steps.jsonl` so the detector score is read
-from the controller receipt rather than guessed from the OpenAI response:
+from the controller receipt rather than guessed from the OpenAI response.
+Each source state carries a distinct `calibration_state_id`, and the request
+sets the calibration-only `recovery_disabled: true`, so repeated states from
+one task cannot reuse the same event-native session or trigger regeneration.
 
 ```bash
 PY=/home/liuyancheng/envs/bench/bin/python
