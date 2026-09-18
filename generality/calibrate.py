@@ -24,6 +24,7 @@ CALIB = GENERATION_ROOT / "calibration"
 LABELS = "/home/liuyancheng/c2kv-evidence-sets-20260916/prepared_v8/run/labels.json"
 RISK_ARTIFACT = SRC / "c1_delivery" / "artifacts" / "c1_risk.t02_v1.json"
 THRESHOLD_GRID = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
+WORKING_POINT_TARGET_TOKENS = {"K0": 768, "K2": 1536}
 
 sys.path.insert(0, str(SRC / "generality"))
 sys.path.insert(0, str(SRC / "c1_delivery"))
@@ -478,11 +479,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--smoke", action="store_true",
                         help="run one state and never create a usable threshold")
-    parser.add_argument("--target-tokens", type=int, default=768)
+    parser.add_argument(
+        "--target-tokens", type=int, default=None,
+        help="override the working-point target (default: K0=768, K2=1536)")
     parser.add_argument("--max-completion-tokens", type=int, default=512)
     args = parser.parse_args(argv)
     if args.smoke:
         args.limit = 1
+    if args.target_tokens is None:
+        args.target_tokens = WORKING_POINT_TARGET_TOKENS[args.wp]
     rows = load_rows(args.labels, args.state_id, args.limit)
     out = Path(args.out) if args.out else CALIB / args.backend / args.wp
     out.mkdir(parents=True, exist_ok=True)
@@ -490,6 +495,7 @@ def main(argv: list[str] | None = None) -> int:
         "schema": "t02-recorded-prefix-calibration-v2",
         "method": "recorded_prefix_direct_then_current_turn_A0",
         "backend": args.backend, "working_point": args.wp,
+        "target_tokens": args.target_tokens,
         "state_ids": [row["state_id"] for row in rows],
         "whole_task_rerun": False, "recovery_disabled": True,
     }, indent=2) + "\n", encoding="utf-8")
@@ -534,6 +540,7 @@ def main(argv: list[str] | None = None) -> int:
     threshold = {**select_threshold(pairs), "smoke": bool(args.smoke),
                  "schema": "c2kv-generality-threshold-v2",
                  "backend": args.backend, "working_point": args.wp,
+                 "target_tokens": args.target_tokens,
                  "n_states": len(observations), "known_with_score": len(pairs)}
     (out / "threshold.json").write_text(
         json.dumps(threshold, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

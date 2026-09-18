@@ -539,6 +539,7 @@ def main(argv=None) -> int:
         server, batch_tasks = run_server(cell, batch, args.port_base, out)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
+        failed_tasks = []
         try:
             if cell["benchmark"] == "bfcl":
                 worker_cmd = [
@@ -559,7 +560,43 @@ def main(argv=None) -> int:
                                          stdout=log, stderr=subprocess.STDOUT,
                                          stdin=subprocess.DEVNULL)
             else:
-                raise SystemExit("appworld session-tracer worker pending")
+                # AppWorld is a one-task-per-invocation harness.  Keep one
+                # persistent session-tracer server for the batch, but give
+                # every official worker its own output directory so the ACON
+                # harness cannot collide on existing results.
+                env["PYTHONPATH"] = os.pathsep.join((
+                    str(RUNTIME), str(RUNTIME / "benchmarks"),
+                    str(Path(cell["acon_dir"]) / "src"),
+                    str(GENERATION_ROOT / "src" / "paper_harness" / "benchmarks"),
+                ))
+                env["APPWORLD_ROOT"] = cell["appworld_root"]
+                env["no_proxy"] = env["NO_PROXY"] = "127.0.0.1,localhost"
+                for key in ("http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY"):
+                    env.pop(key, None)
+                rc = 0
+                with (out / "benchmark.log").open("wb") as log:
+                    for task_id in batch:
+                        worker_out = out / "appworld_worker" / task_id
+                        worker_cmd = [
+                            cell["python_sgl"], "-m",
+                            "benchmarks.memory_runtime.event_native_appworld",
+                            "--server-manifest", str(out / "server" / "ready.json"),
+                            "--base-url", f"http://127.0.0.1:{args.port_base}/v1",
+                            "--acon-dir", cell["acon_dir"],
+                            "--appworld-root", cell["appworld_root"],
+                            "--bench-python", cell["python_appworld"],
+                            "--out", str(worker_out),
+                            "--task-id", task_id,
+                            "--max-iter", "50",
+                            "--max-wall-seconds", str(cell["caps"]["task_timeout"]),
+                        ]
+                        task_rc = subprocess.call(
+                            worker_cmd, cwd=str(RUNTIME), env=env,
+                            stdout=log, stderr=subprocess.STDOUT,
+                            stdin=subprocess.DEVNULL)
+                        if task_rc != 0:
+                            rc = task_rc if rc == 0 else rc
+                            failed_tasks.append(task_id)
             status = "completed" if rc == 0 else "failed"
         except Exception as error:
             rc, status = 1, f"failed:{type(error).__name__}"
@@ -570,7 +607,9 @@ def main(argv=None) -> int:
                 except Exception:
                     pass  # engine may have dropped it already
         (out / "done.json" if rc == 0 else out / "status.json").write_text(
-            json.dumps({"batch": batch[0], "n_tasks": len(batch), "status": status}, indent=2))
+            json.dumps({"batch": batch[0], "n_tasks": len(batch),
+                        "failed_tasks": failed_tasks if cell["benchmark"] != "bfcl" else [],
+                        "status": status}, indent=2))
         server.shutdown()
         print(json.dumps({"cell": cell["cell_id"], "batch": i, "status": status}), flush=True)
     return 0

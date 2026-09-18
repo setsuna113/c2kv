@@ -29,6 +29,34 @@ $PY "$SRC/calibrate.py" --backend c2kv --wp K0 \
 
 For H2O/SnapKV, use the persistent SGLang endpoint and omit
 `--steps-path`; the response hidden states and logprobs are used directly.
+When `--target-tokens` is omitted, calibration uses the resolved working-point
+target (`K0=768`, `K2=1536`); the selected value is recorded in
+`protocol.json` and `threshold.json`.
 The formal matrix must not start until the corresponding `threshold.json`
 has `ready_for_matrix: true`. The calibration smoke intentionally exits with
 status 2 because it never authorizes a matrix run.
+
+The closed-loop scheduler dispatches all three driver families:
+
+```text
+c2kv cells                         -> c2kv_cell.py
+h2o/snapkv compression-only cells -> historykv_cell.py
+h2o/snapkv tracer cells           -> session_tracer_cell.py
+```
+
+At launch time the scheduler reads the frozen receipt from
+`calibration/<backend>/<working_point>/threshold.json`, copies its numeric
+threshold into `cell_launch.json`, and refuses a tracer cell whose receipt is
+missing or still `calibration_insufficient`. AppWorld uses the official
+`event_native_appworld` worker one task at a time while the tracer controller
+keeps its persistent session alive for the batch; every task gets a separate
+worker output directory and an `official_summary.json`.
+
+After the six backend/working-point threshold receipts are ready, start the
+matrix with:
+
+```bash
+/home/liuyancheng/envs/sgl/bin/python \
+  /home/liuyancheng/c2kv-generality-20260918/src/generality/scheduler.py \
+  --cards 0 1 2 3 4 5 6 7
+```

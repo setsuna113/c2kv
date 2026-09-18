@@ -6,7 +6,7 @@ base) — the order carries no adaptive meaning (thresholds/budgets are frozen
 before any closed-loop cell starts). Driver types:
   c2kv cells (all 3 conditions)      -> c2kv_cell.py   (controller path)
   h2o/snapkv off conditions          -> historykv_cell.py (proxy path)
-  h2o/snapkv tracer cells            -> session_tracer_cell.py (pending build)
+  h2o/snapkv tracer cells            -> session_tracer_cell.py
 
 Progress/resume: every driver writes per-batch done.json; rerunning a cell
 skips completed batches. Infra failures keep receipts and are retried once by
@@ -27,8 +27,9 @@ SRC = GENERATION_ROOT / "src"
 LOGS = GENERATION_ROOT / "logs"
 RESULTS = GENERATION_ROOT / "results" / "closed_loop"
 PY_SGL = "/home/liuyancheng/envs/sgl/bin/python"
+TARGET_TOKENS = {"K0": 768, "K2": 1536}
 
-ENGINE_PORT = {0: 36200, 1: 36201, 2: 36202, 3: 36203, 4: 36204, 5: 36205, 7: 36207}
+ENGINE_PORT = {0: 36200, 1: 36201, 2: 36202, 3: 36203, 4: 36204, 5: 36205, 6: 36206, 7: 36207}
 
 # driver assignment per (backend, condition)
 def driver_for(backend: str, condition: str) -> str:
@@ -36,27 +37,53 @@ def driver_for(backend: str, condition: str) -> str:
         return "c2kv"
     if condition in ("recovery_off_same_initial", "compression_full_budget"):
         return "historykv_off"
-    return "session_tracer"          # not yet available; queued last
+    return "session_tracer"
 
 
-def cells_ready(backend: str, condition: str, benchmark: str) -> bool:
-    if backend in ("h2o", "snapkv"):
-        if condition == "tracer_history":
-            # session tracer needs its calibration threshold receipt AND the
-            # embedding backend wiring for RRF retrieval (last open item)
-            return False
-        # off conditions verified end-to-end on NPU 2026-09-18 (marker-only
-        # first hint + logs/ dir + per-task validation)
-        if benchmark == "appworld":
-            return False  # AppWorld attach still pending its smoke
+def calibration_receipt(cell: dict) -> tuple[Path, dict | None]:
+    """Return the frozen threshold receipt for a tracer cell.
+
+    Calibration is an input to a closed-loop cell, not an optional runtime
+    fallback.  Loading it here keeps the generated cell.json immutable while
+    making the launch manifest self-contained.
+    """
+    path = (GENERATION_ROOT / "calibration" / cell["backend"] /
+            cell["working_point"] / "threshold.json")
+    if not path.exists():
+        return path, None
+    try:
+        value = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return path, None
+    if (value.get("backend") != cell["backend"] or
+            value.get("working_point") != cell["working_point"] or
+            value.get("target_tokens") != TARGET_TOKENS[cell["working_point"]]):
+        return path, value
+    if value.get("ready_for_matrix") is not True:
+        return path, value
+    if (isinstance(value.get("threshold"), bool) or
+            not isinstance(value.get("threshold"), (int, float))):
+        return path, value
+    return path, value
+
+
+def calibration_is_ready(cell: dict, receipt: dict | None) -> bool:
+    return bool(receipt and receipt.get("ready_for_matrix") is True and
+                receipt.get("backend") == cell["backend"] and
+                receipt.get("working_point") == cell["working_point"] and
+                receipt.get("target_tokens") == TARGET_TOKENS[cell["working_point"]] and
+                not isinstance(receipt.get("threshold"), bool) and
+                isinstance(receipt.get("threshold"), (int, float)))
+
+
+def cells_ready(cell: dict) -> bool:
+    # AppWorld uses the same event-native worker as BFCL and performs its
+    # official scorer/summary validation per task.  It is therefore queued by
+    # the same scheduler once the code path is installed.
+    if cell["condition"] != "tracer_history":
         return True
-    if condition == "tracer_history":
-        # every tracer cell needs its calibrated threshold receipt first
-        return False
-    if benchmark == "appworld":
-        # AppWorld paths are enabled only after their smoke passes
-        return False
-    return True
+    _, receipt = calibration_receipt(cell)
+    return calibration_is_ready(cell, receipt)
 
 
 def enumerate_cells() -> list[dict]:
@@ -79,8 +106,7 @@ def queue_cells(cells: list[dict], only_ready: bool = True) -> list[dict]:
     def sort_key(c):
         return (BENCH_ORDER.get(c["benchmark_key"], 9),
                 COND_ORDER.get(c["condition"], 9))
-    ready = [c for c in cells
-             if not only_ready or cells_ready(c["backend"], c["condition"], c["benchmark_key"])]
+    ready = [c for c in cells if not only_ready or cells_ready(c)]
     return sorted(ready, key=sort_key)
 
 
@@ -97,6 +123,14 @@ def cell_done(cell: dict) -> bool:
 def launch_cell(cell: dict, card: int, port_offset: int) -> subprocess.Popen:
     driver = driver_for(cell["backend"], cell["condition"])
     cell = dict(cell)
+    if cell["condition"] == "tracer_history":
+        receipt_path, receipt = calibration_receipt(cell)
+        if not calibration_is_ready(cell, receipt):
+            raise RuntimeError(
+                f"tracer cell requires ready calibration receipt: {receipt_path}")
+        cell["threshold"] = receipt["threshold"]
+        cell["threshold_status"] = "calibrated"
+        cell["calibration_receipt"] = str(receipt_path)
     cell["sglang_backend_url"] = f"http://127.0.0.1:{ENGINE_PORT[card]}"
     cell_path = Path(cell["cell_dir"]) / "cell_launch.json"
     cell_path.write_text(json.dumps(cell, indent=2))
@@ -112,8 +146,13 @@ def launch_cell(cell: dict, card: int, port_offset: int) -> subprocess.Popen:
         cmd = [PY_SGL, str(SRC / "generality" / "historykv_cell.py"),
                "--cell", str(cell_path),
                "--proxy-port", str(37400 + port_offset * 20)]
+    elif driver == "session_tracer":
+        cmd = [PY_SGL, str(SRC / "generality" / "session_tracer_cell.py"),
+               "--cell", str(cell_path),
+               "--port-base", str(37500 + port_offset * 20)]
     else:
-        raise RuntimeError("session_tracer driver pending")
+        raise RuntimeError(f"unsupported cell driver: {driver}")
+    log.parent.mkdir(parents=True, exist_ok=True)
     stream = log.open("ab")
     return subprocess.Popen(cmd, cwd=str(GENERATION_ROOT), env=env,
                             stdout=stream, stderr=subprocess.STDOUT,
