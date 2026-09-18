@@ -284,10 +284,12 @@ is therefore an ACON code-agent evaluation, not an AppWorld MCP or native
 function-calling evaluation. The shared Tracer parser only recognizes explicit
 `<tool_call>{name, arguments}</tool_call>` blocks; it does not turn arbitrary
 Python control flow into a structured list of API calls. The code draft is
-still retained as text for retrieval, and C1 risk uses the hidden-state,
-logprob, stop, and parse features. A real AppWorld smoke must show the code
-draft, at least one executed AppWorld action, and a numeric official scorer
-result before the matrix is accepted.
+still retained as text for retrieval. For `acon_appworld`, a non-empty code
+draft is classified as an active action (not STOP) while C1 risk still uses
+the hidden-state, logprob, stop, and parse features; no Python-to-API parser is
+pretended. A real AppWorld smoke must show the code draft, at least one
+executed AppWorld action, and a numeric official scorer result before the
+matrix is accepted.
 
 Read before quoting:
 
