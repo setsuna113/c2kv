@@ -400,5 +400,22 @@ class C1T02DeliveryTest(unittest.TestCase):
         self.assertEqual(summary["prefill_detector_scores"], 0)
 
 
+def test_repair_summary_distinguishes_attempted_and_committed_recovery(tmp_path):
+    server = tmp_path / "server"
+    server.mkdir()
+    records = [{
+        "generation_trace": [{"phase": "regeneration", "status": "completed"}],
+        "exact_recovery": {"version": "c2kv-source-repair-v1", "status": "recover"},
+        "commit_validation": {"accepted": False, "fallback": "original",
+                              "selected_generation_index": 0},
+    }]
+    (server / "steps.jsonl").write_text(json.dumps(records[0]) + "\n", encoding="utf-8")
+    official = {"n": 1, "task_rows": [{"semantic_score": 0.0}]}
+    summary = run_c1.summarize_task("tau2", "0", tmp_path, official, 1.0)
+    assert summary["successful_recovery_count"] == 1
+    assert summary["repair_commit"]["accepted_regenerations"] == 0
+    assert summary["repair_commit"]["reverted_to_original"] == 1
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -27,13 +27,16 @@ from benchmarks.memory_runtime.acebench_runtime import (
 )
 from benchmarks.memory_runtime.always_compress import ALWAYS_COMPRESSION_POLICY
 from benchmarks.memory_runtime.attempt_journal import AttemptJournal
-from benchmarks.memory_runtime.candidate_algorithms import VARIANTS
+from benchmarks.memory_runtime.candidate_algorithms import REPAIR_VARIANTS, VARIANTS
 from benchmarks.memory_runtime.candidate_algorithms.controller import CandidateRecoveryController
+from benchmarks.memory_runtime.candidate_algorithms.repair_controller import RepairController
+from benchmarks.memory_runtime.candidate_algorithms.observations import operation_records
 from benchmarks.memory_runtime.event_native_always import NATIVE_S0_MODE
 from benchmarks.memory_runtime.event_native_api import make_server
 from benchmarks.memory_runtime.event_native_s0_policy import EventNativeS0Controller, S0_CONFIG_DEFAULTS
 from benchmarks.memory_runtime.event_native_tool import ToolRegionController, parse_native_tool_spec
 from benchmarks.memory_runtime.event_native_server import _route_kwargs
+from benchmarks.memory_runtime.acebench_source import parse_acebench_draft
 from benchmarks.memory_runtime.recovery.hybrid import D3HybridRecoveryController
 from benchmarks.memory_runtime.recovery.set_models import C1RiskArtifact
 from benchmarks.memory_runtime.tests.test_d3_hybrid_recovery import (
@@ -116,6 +119,59 @@ def test_real_ace_candidate_controller_preserves_exact_variant(variant):
     reconsidered = controller.reconsider(prepared, [], draft_text="Finish conversation")
     assert reconsidered["decision"]["variant"] == variant
     assert reconsidered["decision"]["selection"]["score"] == 0.2
+
+
+@pytest.mark.parametrize("variant", REPAIR_VARIANTS)
+def test_real_ace_repair_controller_needs_no_t02_artifact(variant):
+    controller = _controller({
+        **S0_CONFIG_DEFAULTS,
+        "candidate_algorithm": {"variant": variant},
+    })
+    assert isinstance(controller, RepairController)
+    assert isinstance(controller.base, EventNativeS0Controller)
+    prepared = controller.prepare(_payload(), ratio=8, max_new_tokens=8)
+    assert prepared.metadata["candidate_algorithm"]["schema"] == "c2kv-source-repair-v1"
+    assert prepared.metadata["route"]["baseline_identity"] == "c2kv-source-repair-v1:" + variant
+
+
+def test_real_ace_no_progress_reads_completed_receipt_before_repair():
+    action = "[Lookup(key=1)]"
+    result = '["Error during execution: missing key"]'
+    controller = _controller({
+        **S0_CONFIG_DEFAULTS,
+        "candidate_algorithm": {"variant": "no_progress"},
+    })
+    payload = {
+        "session_id": "acebench/agent_1", "decision_key": "turn-1/step-0",
+        "messages": [
+            {"role": "system", "content": "Use the visible APIs."},
+            {"role": "user", "content": "Look up key 1."},
+            {"role": "assistant", "content": action},
+            {"role": "tool", "tool_call_id": "acebench-execution-2", "content": result},
+        ],
+        "tools": [],
+        "c2kv_ace_source": {"version": "acebench-text-actions-v1", "receipts": [{
+            "version": "acebench-execution-receipt-v1",
+            "execution_message_index": 3,
+            "agent_history_index": 1,
+            "decode_status": "ok",
+            "decoded_calls": ["Lookup(key=1)"],
+            "executor_status": "returned",
+            "executor_return_shape": "list",
+            "executor_return_count": 1,
+        }]},
+    }
+    prepared = controller.prepare(payload, ratio=8, max_new_tokens=8)
+    records = operation_records(prepared._store)
+    assert len(records) == 1
+    assert records[0].tool == "Lookup"
+    assert records[0].failure_reported is True
+    draft = parse_acebench_draft(action, call_id_prefix="held")
+    decision = controller.reconsider(
+        prepared, list(draft.tool_calls), draft_text=action)["decision"]
+    assert decision["variant"] == "no_progress"
+    assert decision["proposal"]["reason"] == "draft_repeats_failed_operation"
+    assert decision["status"] == "recover"
 
 
 def test_ace_generate_forwards_compression_chunks_and_parses_action(tmp_path):

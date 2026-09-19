@@ -491,12 +491,17 @@ def _serve(args):
                             history_view_protocol))
         if isinstance(s0_config, dict) and 'candidate_algorithm' in s0_config:
             candidate = s0_config['candidate_algorithm']
+            from .candidate_algorithms import REPAIR_VARIANTS
+            if candidate['variant'] in REPAIR_VARIANTS:
+                version = 'c2kv-source-repair-v1'
+            else:
+                version = 'c2kv-paper-candidates-v1'
             manifest['candidate_algorithm'] = {
                 'variant': candidate['variant'], 'stable_call_ids': True,
                 'recovery_rounds_per_decision': 1,
             }
             manifest['route_contract'].update(
-                baseline_identity='c2kv-paper-candidates-v1:' + candidate['variant'],
+                baseline_identity=version + ':' + candidate['variant'],
                 recovery_enabled=True, max_generations_per_decision=2)
         shadow_feature_config, shadow_contract = _shadow_feature_configuration(args, tokenizer)
         generator, profile = _build_generator(

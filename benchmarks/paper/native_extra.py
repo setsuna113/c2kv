@@ -12,7 +12,7 @@ import time
 from collections.abc import Mapping
 
 from . import c1_appworld
-from .candidate_matrix import ARM_TO_VARIANT
+from .candidate_matrix import ARM_TO_VARIANT, REPAIR_VARIANTS
 from .process_lifecycle import run_owned
 
 
@@ -42,7 +42,8 @@ def arm_identity(config):
     if arm in ARM_TO_VARIANT:
         variant = ARM_TO_VARIANT[arm]
         return {"arm": arm, "ratio": 8, "method": "proposed",
-                "detector": "t02_risk", "candidate_algorithm": variant,
+                "detector": "disabled" if variant in REPAIR_VARIANTS else "t02_risk",
+                "candidate_algorithm": variant,
                 "model_name": f"c2kv_{variant}"}
     if arm in C1_RATIOS:
         settings = config.get("c1") or {}
@@ -98,14 +99,21 @@ def validate_ready_manifest(config, benchmark, task, ready_path, controller_path
     if variant is not None:
         route = manifest.get("route_contract") or {}
         artifact = candidate.get("risk_artifact") if isinstance(candidate, Mapping) else None
-        if (not isinstance(candidate, Mapping) or candidate.get("variant") != variant
-                or candidate.get("risk_threshold") != 0.5
-                or not isinstance(artifact, Mapping)
-                or artifact.get("model_kind") != "c1_risk_logistic"
-                or not isinstance(loaded_candidate, Mapping)
+        if variant in REPAIR_VARIANTS:
+            valid_config = (isinstance(candidate, Mapping)
+                            and dict(candidate) == {"variant": variant})
+            version = "c2kv-source-repair-v1"
+        else:
+            valid_config = (isinstance(candidate, Mapping)
+                            and candidate.get("variant") == variant
+                            and candidate.get("risk_threshold") == 0.5
+                            and isinstance(artifact, Mapping)
+                            and artifact.get("model_kind") == "c1_risk_logistic")
+            version = "c2kv-paper-candidates-v1"
+        if (not valid_config or not isinstance(loaded_candidate, Mapping)
                 or loaded_candidate.get("variant") != variant
                 or loaded_candidate.get("stable_call_ids") is not True
-                or route.get("baseline_identity") != "c2kv-paper-candidates-v1:" + variant
+                or route.get("baseline_identity") != version + ":" + variant
                 or route.get("recovery_enabled") is not True
                 or route.get("max_generations_per_decision") != 2):
             raise RuntimeError(f"Native {identity['arm']} candidate controller identity differs")

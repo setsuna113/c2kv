@@ -136,7 +136,7 @@ class AceEventNativeDecisionRunner(EventNativeDecisionRunner):
         # reconsideration; no additional model call is made here.
         draft = parse_ace_draft(
             decoded.text,
-            call_id_prefix=f"d{metadata['decision_index']}_{'r0' if phase == 'draft' else 'r1'}",
+            call_id_prefix=f"d{metadata['decision_index']}_{'r0' if phase == 'draft' or callable(getattr(self.controller, 'validate_commit', None)) else 'r1'}",
         )
         record['generation_trace'][-1]['native_draft'] = {
             'version': ACE_SOURCE_PROFILE, **asdict(draft),

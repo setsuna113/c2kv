@@ -176,7 +176,8 @@ def preflight_sglang_backend(
             and bool(capability.get("packing_version"))
         ),
     }
-    if args.method == "c2kv_native":
+    if args.method == "c2kv_native" or getattr(args, "candidate_algorithm", None) in {
+        "request_contract", "argument_binding", "no_progress"}:
         checks.pop("prefill_feature")
     if not all(checks.values()):
         raise RuntimeError(f"SGLang C1 capability check failed: {checks}")
@@ -419,7 +420,8 @@ def commands_for_task(args: argparse.Namespace, task: str, controller_path: Path
     if args.method == "c2kv_native":
         import native_bare
         design = native_bare.configure_design(design)
-    if args.method == "c2kv_only":
+    if args.method == "c2kv_only" or getattr(args, "candidate_algorithm", None) in {
+        "request_contract", "argument_binding", "no_progress"}:
         design["runtime"].pop("shadow_feature_config", None)
     temporary_controller = None
     if args.method != "c2kv_native" and not controller_path.is_file():
@@ -546,7 +548,8 @@ def summarize_task(benchmark: str, task: str, task_out: Path, official: Mapping[
     risk_unavailable = sum(selection.get("available") is False for selection in risk_selections)
     candidate_decisions = [
         decision for decision in decisions
-        if decision.get("version") == "c2kv-paper-candidates-v1"
+        if decision.get("version") in {
+            "c2kv-paper-candidates-v1", "c2kv-source-repair-v1"}
     ]
     candidate_traces = [
         trace for trace in traces
@@ -624,6 +627,8 @@ def summarize_task(benchmark: str, task: str, task_out: Path, official: Mapping[
     score = official_row.get("semantic_score")
     if score is None:
         score = official.get("semantic_score")
+    repair_commits = [record["commit_validation"] for record in records
+                      if isinstance(record.get("commit_validation"), Mapping)]
     return {
         "benchmark": benchmark, "task_id": task, "status": "completed",
         "official_score": score,
@@ -635,6 +640,19 @@ def summarize_task(benchmark: str, task: str, task_out: Path, official: Mapping[
         "detector_trigger_count": sum(gate.get("triggered") is True for gate in gates),
         "recovery_count": len(recovery_rows),
         "successful_recovery_count": successful,
+        **({"repair_commit": {
+            "checks": len(repair_commits),
+            "accepted_regenerations": sum(
+                row.get("accepted") is True
+                and isinstance(row.get("selected_generation_index"), int)
+                and row["selected_generation_index"] > 0 for row in repair_commits),
+            "reverted_to_original": sum(
+                row.get("accepted") is False and row.get("fallback") == "original"
+                for row in repair_commits),
+            "source_supported_abstentions": sum(
+                row.get("synthetic_abstention") is True for row in repair_commits),
+            "recovery_count_semantics": "attempted; does not imply revision accepted",
+        }} if repair_commits else {}),
         "evidence_units_appended": sum(int(row.get("appended_unit_count") or 0) for row in recovery_rows),
         "raw_tokens_restored": int(restored),
         "native_raw_events_restored": len(restored_events),
@@ -710,7 +728,12 @@ def functional_checks(method: str, detector: str, telemetry: Mapping[str, Any],
                       candidate_algorithm: str | None = None) -> dict:
     """Separate required runtime behavior from descriptive efficiency telemetry."""
 
-    if candidate_algorithm is not None:
+    repair_candidate = candidate_algorithm in {
+        "request_contract", "argument_binding", "no_progress"}
+    if repair_candidate:
+        detector_contract = (telemetry.get("risk_detector_scores", 0) == 0
+                             and telemetry.get("risk_detector_unavailable", 0) == 0)
+    elif candidate_algorithm is not None:
         detector_contract = (telemetry.get("risk_detector_scores", 0) > 0
                              and telemetry.get("risk_detector_unavailable", 0) == 0)
     elif method in {"c2kv_only", "c2kv_native"}:
@@ -725,8 +748,11 @@ def functional_checks(method: str, detector: str, telemetry: Mapping[str, Any],
         "candidate_decisions": telemetry.get("candidate_decisions") == telemetry.get("decision_count")
             and telemetry.get("candidate_decisions", 0) > 0,
         "candidate_variant": telemetry.get("candidate_variants") == [candidate_algorithm],
-        "risk_scores": telemetry.get("risk_detector_scores", 0) > 0,
-        "risk_available": telemetry.get("risk_detector_unavailable", 0) == 0,
+        **({"no_risk_scores": telemetry.get("risk_detector_scores", 0) == 0,
+            "no_risk_unavailable": telemetry.get("risk_detector_unavailable", 0) == 0}
+           if repair_candidate else {
+               "risk_scores": telemetry.get("risk_detector_scores", 0) > 0,
+               "risk_available": telemetry.get("risk_detector_unavailable", 0) == 0}),
         "ratio8": telemetry.get("candidate_ratio8") is True,
         "stable_call_ids": telemetry.get("candidate_stable_call_ids") is True,
         "budget_passed": telemetry.get("candidate_budget_passed") is True,
@@ -844,7 +870,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--candidate-algorithm",
-        choices=("static_t02", "turn_c1", "goal_rescue", "dependency_first"),
+        choices=("static_t02", "turn_c1", "goal_rescue", "dependency_first",
+                 "request_contract", "argument_binding", "no_progress"),
         default=None,
     )
     parser.add_argument("--selector-artifact", type=Path,
