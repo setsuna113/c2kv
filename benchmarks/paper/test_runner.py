@@ -23,6 +23,30 @@ class PaperMatrixTest(unittest.TestCase):
             if method["arm"] == "c2kv_native_r4":
                 method["arm"] = "c2kv4"
 
+    def test_exact_prefix_replay_is_rejected_before_starting_server(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            plan, _ = prepare(self.config, root, root / "engine")
+            with mock.patch.object(runner.subprocess, "Popen") as popen:
+                with self.assertRaisesRegex(RuntimeError, "exact_generated_prefix"):
+                    execute(self.config, plan, root, root / "engine",
+                            ["common_prefix"], {"bfcl_base__agentkv"})
+                popen.assert_not_called()
+            self.assertFalse((root / "common_prefix" / "bfcl_base__agentkv").exists())
+
+    def test_exact_prefix_replay_aggregation_reports_unsupported(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            plan, _ = prepare(self.config, root, root / "engine")
+            with mock.patch.object(runner.subprocess, "run") as run:
+                _, path = aggregate_results(self.config, plan, root, ["common_prefix"],
+                                            {"bfcl_base__agentkv", "bfcl_base__commitkv"})
+                run.assert_not_called()
+            receipt = json.loads(path.read_text())
+            self.assertEqual(receipt["counts"]["unsupported"], 2)
+            self.assertEqual(receipt["counts"]["missing"], 0)
+            self.assertTrue(all(row["status"] == "unsupported_protocol" for row in receipt["cells"]))
+
     def test_agentfold_hold_precedes_launch_and_preserves_history(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -370,7 +394,7 @@ class PaperMatrixTest(unittest.TestCase):
             coverage = json.loads(coverage_path.read_text())
             self.assertEqual(coverage["requested_stages"], ["closed_loop"])
             self.assertEqual(coverage["counts"], {
-                "requested": 1, "ready": 1, "missing": 0, "aggregated": 1})
+                "requested": 1, "ready": 1, "unsupported": 0, "missing": 0, "aggregated": 1})
             self.assertEqual(coverage["cells"][0]["status"], "aggregated")
 
             with self.assertRaisesRegex(RuntimeError, "slice is incomplete"):
