@@ -38,8 +38,11 @@ def test_embedded_cli_returns_to_run_evaluation(monkeypatch):
 
 def _results(root: Path, handler: str, family: str, category: str, ids):
     path = root / "result" / handler / family / f"BFCL_v4_{category}_result.json"
-    path.parent.mkdir(parents=True)
-    path.write_text("".join(json.dumps({"id": i}) + "\n" for i in ids), encoding="utf-8")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    rows = [item if isinstance(item, dict) else {"id": item, "result": []}
+            for item in ids]
+    path.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
+    return path
 
 
 def _score(root: Path, handler: str, family: str, category: str, header):
@@ -107,7 +110,8 @@ def test_run_bfcl_sets_official_root_before_import_and_writes_ids_there(
 
     monkeypatch.setattr(bfcl_adapter, "install_handler", install)
     monkeypatch.setattr(
-        bfcl_adapter, "official_category_counts", lambda category: {category: 99})
+        bfcl_adapter, "official_category_ids",
+        lambda category: {category: ["multi_turn_base_7"]})
     monkeypatch.setattr(bfcl_adapter, "run_cli", seen["argv"].append)
     monkeypatch.setattr(terminal_check, "check_bfcl", check)
     monkeypatch.setattr(
@@ -118,9 +122,11 @@ def test_run_bfcl_sets_official_root_before_import_and_writes_ids_there(
             "semantic_score": 1.0, "official_score_headers": [], "scored": True,
         })
 
+    _results(isolated, "c2kv-full", "multi_turn", "multi_turn_base",
+             ["multi_turn_base_7"])
     summary = bfcl_adapter.run_bfcl(
         "http://proxy/v1", categories="multi_turn_base",
-        run_ids=["multi_turn_base_7"],
+        run_ids=["multi_turn_base_7", "multi_turn_base_7"],
         handler_name="c2kv-full", project_root=isolated,
     )
 
@@ -204,8 +210,10 @@ def test_collect_score_summary_rejects_inconsistent_accuracy(tmp_path):
 def test_generate_mode_does_not_claim_scored_tasks(tmp_path, monkeypatch):
     monkeypatch.setattr(bfcl_adapter, "install_handler", lambda *args, **kwargs: None)
     monkeypatch.setattr(
-        bfcl_adapter, "official_category_counts",
-        lambda category: {"multi_turn_base": 1})
+        bfcl_adapter, "official_category_ids",
+        lambda category: {"multi_turn_base": ["multi_turn_base_0"]})
+    _results(tmp_path, "c2kv-hf", "multi_turn", "multi_turn_base",
+             ["multi_turn_base_0"])
     argv = []
     monkeypatch.setattr(bfcl_adapter, "run_cli", argv.append)
     monkeypatch.setattr(terminal_check, "check_bfcl", lambda *args, **kwargs: 0)
@@ -218,3 +226,131 @@ def test_generate_mode_does_not_claim_scored_tasks(tmp_path, monkeypatch):
     assert "n" not in summary and "n_scored" not in summary
     assert "semantic_score" not in summary
     assert argv == [bfcl_adapter.generate_argv("c2kv-hf", "multi_turn_base")]
+
+
+def test_check_bfcl_requires_valid_requested_rows(tmp_path):
+    _results(tmp_path, "c2kv-full", "memory", "memory", [
+        {"id": "memory_0", "result": []},
+        {"id": "memory_1", "traceback": "transport failed"},
+        {"id": "memory_2"},
+    ])
+    assert terminal_check.check_bfcl(
+        None, "memory_0,memory_1,memory_2", handler="c2kv-full",
+        category="memory", root=tmp_path,
+    ) == 1
+
+    _results(tmp_path, "c2kv-full", "memory", "memory", [
+        {"id": "memory_0", "result": []},
+        {"id": "memory_foreign", "result": []},
+    ])
+    assert terminal_check.check_bfcl(
+        None, "memory_0", handler="c2kv-full", category="memory",
+        root=tmp_path,
+    ) == 1
+
+
+def test_evaluate_only_snapshots_then_canonicalizes_latest_valid(tmp_path, monkeypatch):
+    ids = ["multi_turn_base_0", "multi_turn_base_1"]
+    result_path = _results(
+        tmp_path, "c2kv-hf", "multi_turn", "multi_turn_base", [
+            {"id": ids[0], "result": ["old"]},
+            {"id": ids[0], "result": ["new"]},
+            {"id": ids[1], "result": []},
+            {"id": ids[1], "traceback": "failed"},
+        ])
+    monkeypatch.setattr(bfcl_adapter, "install_handler", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        bfcl_adapter, "official_category_ids",
+        lambda category: {"multi_turn_base": ids})
+
+    calls = []
+
+    def run_cli(argv):
+        calls.append(argv)
+        assert argv[0] == "evaluate"
+        _score(tmp_path, "c2kv-hf", "multi_turn", "multi_turn_base", {
+            "accuracy": 0.0, "correct_count": 0, "total_count": 2})
+
+    monkeypatch.setattr(bfcl_adapter, "run_cli", run_cli)
+    summary = bfcl_adapter.run_bfcl(
+        "http://proxy/v1", mode="evaluate", project_root=tmp_path)
+
+    assert len(calls) == 1
+    canonical = [json.loads(line) for line in result_path.read_text().splitlines()]
+    assert canonical == [
+        {"id": ids[0], "result": ["new"]},
+        {"id": ids[1], "result": []},
+    ]
+    receipt = Path(summary["completion_ledger"]["round_receipts"][0])
+    raw = next((receipt.parent / "raw").rglob("*.json"))
+    assert len(raw.read_text().splitlines()) == 4
+    assert summary["completion_ledger"]["duplicate_rows"] == 2
+    assert summary["completion_ledger"]["invalid_rows"] == 1
+
+
+def test_default_does_not_refill_invalid_completion(tmp_path, monkeypatch):
+    ids = ["multi_turn_base_0", "multi_turn_base_1"]
+    monkeypatch.setattr(bfcl_adapter, "install_handler", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        bfcl_adapter, "official_category_ids",
+        lambda category: {"multi_turn_base": ids})
+    calls = []
+
+    def run_cli(argv):
+        calls.append(argv)
+        _results(tmp_path, "c2kv-hf", "multi_turn", "multi_turn_base", [
+            {"id": ids[0], "result": []},
+            {"id": ids[1], "traceback": "failed"},
+        ])
+
+    monkeypatch.setattr(bfcl_adapter, "run_cli", run_cli)
+    with pytest.raises(RuntimeError, match="lacks valid unique completions"):
+        bfcl_adapter.run_bfcl(
+            "http://proxy/v1", mode="both", project_root=tmp_path)
+    assert len(calls) == 1
+    assert calls[0][0] == "generate"
+
+
+def test_explicit_refill_preserves_prior_valid_and_restores_selection(
+        tmp_path, monkeypatch):
+    ids = ["multi_turn_base_0", "multi_turn_base_1"]
+    monkeypatch.setattr(bfcl_adapter, "install_handler", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        bfcl_adapter, "official_category_ids",
+        lambda category: {"multi_turn_base": ids})
+    calls = []
+
+    def run_cli(argv):
+        calls.append(argv)
+        if argv[0] == "generate" and len([call for call in calls if call[0] == "generate"]) == 1:
+            _results(tmp_path, "c2kv-hf", "multi_turn", "multi_turn_base", [
+                {"id": ids[0], "result": ["first"]},
+                {"id": ids[0], "result": ["duplicate"]},
+                {"id": ids[1], "traceback": "failed"},
+            ])
+        elif argv[0] == "generate":
+            assert json.loads((tmp_path / "test_case_ids_to_generate.json").read_text()) == {
+                "multi_turn_base": [ids[1]]}
+            # Simulate an official generator that overwrites the active file.
+            _results(tmp_path, "c2kv-hf", "multi_turn", "multi_turn_base", [
+                {"id": ids[1], "result": ["refilled"]},
+            ])
+        else:
+            assert json.loads((tmp_path / "test_case_ids_to_generate.json").read_text()) == {
+                "multi_turn_base": ids}
+            _score(tmp_path, "c2kv-hf", "multi_turn", "multi_turn_base", {
+                "accuracy": 0.0, "correct_count": 0, "total_count": 2})
+
+    monkeypatch.setattr(bfcl_adapter, "run_cli", run_cli)
+    summary = bfcl_adapter.run_bfcl(
+        "http://proxy/v1", mode="both", project_root=tmp_path,
+        max_refill_rounds=1)
+
+    assert [call[0] for call in calls] == ["generate", "generate", "evaluate"]
+    assert summary["completion_ledger"]["valid_unique"] == 2
+    assert summary["completion_ledger"]["remaining"] == []
+    assert summary["completion_ledger"]["refill_rounds_used"] == 1
+    assert len(summary["completion_ledger"]["round_receipts"]) == 2
+    rows = [json.loads(line) for line in next(
+        (tmp_path / "result" / "c2kv-hf").rglob("*.json")).read_text().splitlines()]
+    assert [row["id"] for row in rows] == ids

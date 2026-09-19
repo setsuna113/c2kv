@@ -42,6 +42,7 @@ CLI_SURFACE = [
     ("--tau2-timeout", None, False),
     ("--categories", "multi_turn_base", False),
     ("--run-ids", "", False),
+    ("--bfcl-refill-rounds", 0, False),
     ("--num-workers", 4, False),
     ("--max-tasks", None, False),
     ("--run-name", "c2kv_run", False),

@@ -91,6 +91,7 @@ def check_bfcl(expected, run_ids, handler: str = "c2kv-hf",
         print(f"FATAL: no bfcl result file under {pattern}")
         return 2
     got = set()
+    observed = set()
     with open(hits[-1], "r", encoding="utf-8") as handle:
         for line in handle:
             line = line.strip()
@@ -101,10 +102,24 @@ def check_bfcl(expected, run_ids, handler: str = "c2kv-hf",
             except json.JSONDecodeError:
                 continue
             if isinstance(row, dict) and row.get("id") is not None:
-                got.add(str(row["id"]))
+                task_id = str(row["id"])
+                observed.add(task_id)
+                # BFCL writes a traceback row when inference failed.  Such a
+                # row is retryable evidence, not a scored model completion.
+                # A model result may itself be empty or wrong and still be a
+                # valid scored-zero completion, so test key presence rather
+                # than the truthiness of ``result``.
+                if "result" in row and row.get("traceback") is None:
+                    got.add(task_id)
     if run_ids:
         # id-exact check when the caller pinned the id list
-        want = {r.strip() for r in run_ids.split(",") if r.strip()}
+        ordered = [r.strip() for r in run_ids.split(",") if r.strip()]
+        want = set(ordered)
+        foreign = sorted(observed - want)
+        if foreign:
+            print("FATAL: bfcl result file contains unrequested ids: "
+                  + ",".join(foreign[:20]))
+            return 1
         missing = sorted(want - got)
         return fail("bfcl", len(got & want), len(want), missing)
     # count-based otherwise (bfcl ids are category-prefixed, not numeric)

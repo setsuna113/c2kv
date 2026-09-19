@@ -30,6 +30,7 @@ import argparse
 import json
 import math
 import os
+import shutil
 import sys
 import time
 from pathlib import Path
@@ -113,6 +114,11 @@ def add_arguments(parser) -> None:
     parser.add_argument("--categories", default="multi_turn_base")
     parser.add_argument("--run-ids", default="",
                         help="bfcl: comma-separated official case ids for a subset run")
+    parser.add_argument(
+        "--bfcl-refill-rounds", type=int, default=0,
+        help=("explicit bounded extra generation rounds for missing/traceback "
+              "BFCL rows; disabled by default"),
+    )
 
 
 def default_bfcl_dir() -> str:
@@ -244,7 +250,7 @@ def install_handler(base_url: str, model: str = SERVED_MODEL,
     )
 
 
-def official_category_counts(category: str) -> Dict[str, int]:
+def official_category_ids(category: str) -> Dict[str, List[str]]:
     """Resolve a BFCL category/collection with the pinned official loader.
 
     A collection such as ``multi_turn`` is not a data filename. Memory and
@@ -267,17 +273,23 @@ def official_category_counts(category: str) -> Dict[str, int]:
             "BFCL format_sensitivity is non-scoring and cannot produce a scored summary"
         )
 
-    counts: Dict[str, int] = {}
+    selected: Dict[str, List[str]] = {}
     for name in concrete:
         entries = load_dataset_entry(
             name, include_prereq=False, include_language_specific_hint=False)
-        ids = [entry.get("id") for entry in entries if isinstance(entry, dict)]
-        if not ids or any(item is None for item in ids):
+        raw_ids = [entry.get("id") if isinstance(entry, dict) else None
+                   for entry in entries]
+        if not raw_ids or any(item is None for item in raw_ids):
             raise RuntimeError(f"BFCL category has no complete official id set: {name}")
-        if len(ids) != len(set(map(str, ids))):
+        ids = [str(item) for item in raw_ids]
+        if len(ids) != len(set(ids)):
             raise RuntimeError(f"BFCL category has duplicate official ids: {name}")
-        counts[name] = len(ids)
-    return counts
+        selected[name] = ids
+    return selected
+
+
+def official_category_counts(category: str) -> Dict[str, int]:
+    return {name: len(ids) for name, ids in official_category_ids(category).items()}
 
 
 def expected_count(category: str) -> int:
@@ -360,6 +372,146 @@ def collect_score_summary(project_root: "Path | str", handler_name: str,
     }
 
 
+def _result_path(project_root: Path, handler_name: str,
+                 category: str) -> Optional[Path]:
+    root = project_root / "result" / handler_name
+    hits = sorted(root.rglob(f"BFCL_v4_{category}_result.json")) if root.is_dir() else []
+    if len(hits) > 1:
+        raise RuntimeError(
+            f"expected at most one BFCL result file for {category} under {root}, "
+            f"found {len(hits)}")
+    return hits[0] if hits else None
+
+
+def _completion_ledger(project_root: Path, handler_name: str,
+                       selected_ids: Mapping[str, List[str]],
+                       prior: Optional[Mapping[str, Any]] = None) -> Dict[str, Any]:
+    """Canonical valid completions across the active official result files.
+
+    A valid result is requested, contains the official ``result`` key, and has
+    no traceback.  The result itself may be empty or wrong; that is a legal
+    model completion for the official scorer and must not be retried.
+    """
+    entries: Dict[str, List[Dict[str, Any]]] = {
+        task_id: [] for ids in selected_ids.values() for task_id in ids}
+    category_of = {
+        task_id: category for category, ids in selected_ids.items()
+        for task_id in ids}
+    if len(category_of) != sum(len(ids) for ids in selected_ids.values()):
+        raise ValueError("BFCL concrete categories contain overlapping task IDs")
+    if prior:
+        for task_id, row in prior["canonical"].items():
+            entries[task_id].append(dict(row))
+    foreign = []
+    invalid_rows = 0
+    paths: Dict[str, Path] = dict(prior["paths"]) if prior else {}
+    for category in selected_ids:
+        path = _result_path(project_root, handler_name, category)
+        if path is None:
+            continue
+        paths[category] = path
+        mtime_ns = path.stat().st_mtime_ns
+        for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            if not line.strip():
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                invalid_rows += 1
+                continue
+            if not isinstance(row, dict) or row.get("id") is None:
+                invalid_rows += 1
+                continue
+            task_id = str(row["id"])
+            if category_of.get(task_id) != category:
+                foreign.append({"task_id": task_id, "category": category,
+                                "path": str(path), "line": line_number})
+                continue
+            entries[task_id].append({
+                "task_id": task_id,
+                "category": category,
+                "valid": "result" in row and row.get("traceback") is None,
+                "path": str(path),
+                "line": line_number,
+                "mtime_ns": mtime_ns,
+                "row": row,
+            })
+            if "result" not in row or row.get("traceback") is not None:
+                invalid_rows += 1
+    if foreign:
+        shown = ", ".join(item["task_id"] for item in foreign[:20])
+        raise RuntimeError(f"BFCL result contains unrequested task IDs: {shown}")
+    canonical = {}
+    for task_id, rows in entries.items():
+        valid = [row for row in rows if row["valid"]]
+        if valid:
+            canonical[task_id] = max(
+                valid, key=lambda row: (row["mtime_ns"], row["path"], row["line"]))
+    requested = [task_id for ids in selected_ids.values() for task_id in ids]
+    remaining = [task_id for task_id in requested if task_id not in canonical]
+    return {
+        "requested": requested,
+        "valid_unique": list(canonical),
+        "remaining": remaining,
+        "duplicate_rows": sum(max(0, len(rows) - 1) for rows in entries.values()),
+        "invalid_rows": invalid_rows,
+        "canonical": canonical,
+        "paths": paths,
+    }
+
+
+def _snapshot_completion_round(project_root: Path, invocation_root: Path,
+                               round_index: int,
+                               ledger: Mapping[str, Any]) -> Path:
+    round_root = invocation_root / f"round-{round_index:03d}"
+    raw_root = round_root / "raw"
+    for path in ledger["paths"].values():
+        if not path.exists():
+            continue
+        relative = path.relative_to(project_root)
+        destination = raw_root / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(path, destination)
+    receipt = {
+        "schema": "c2kv.bfcl.completion-round.v1",
+        "round": round_index,
+        "requested": ledger["requested"],
+        "valid_unique": ledger["valid_unique"],
+        "remaining": ledger["remaining"],
+        "duplicate_rows": ledger["duplicate_rows"],
+        "invalid_rows": ledger["invalid_rows"],
+    }
+    receipt_path = round_root / "ledger.json"
+    receipt_path.parent.mkdir(parents=True, exist_ok=True)
+    receipt_path.write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
+    return receipt_path
+
+
+def _write_canonical_results(selected_ids: Mapping[str, List[str]],
+                             ledger: Mapping[str, Any]) -> None:
+    """Expose exactly one valid row per completed task to the official scorer."""
+    canonical = ledger["canonical"]
+    for category, task_ids in selected_ids.items():
+        path = ledger["paths"].get(category)
+        if path is None:
+            continue
+        rows = [canonical[task_id]["row"] for task_id in task_ids
+                if task_id in canonical]
+        temporary = path.with_suffix(path.suffix + ".tmp")
+        temporary.write_text(
+            "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows),
+            encoding="utf-8")
+        temporary.replace(path)
+
+
+def _write_selected_ids(project_root: Path,
+                        selected_ids: Mapping[str, List[str]]) -> None:
+    id_file = project_root / "test_case_ids_to_generate.json"
+    temporary = id_file.with_suffix(".json.tmp")
+    temporary.write_text(json.dumps(selected_ids), encoding="utf-8")
+    temporary.replace(id_file)
+
+
 def run(ctx: RunContext) -> Dict[str, Any]:
     """Adapter entry: run the official CLI from inside the gorilla checkout.
 
@@ -386,6 +538,7 @@ def run(ctx: RunContext) -> Dict[str, Any]:
             handler_name=handler_key(ctx.arm),
             project_root=project_root,
             num_threads=int(ctx.opt("num_workers", 1)),
+            max_refill_rounds=int(ctx.opt("bfcl_refill_rounds", 0)),
         )
     finally:
         os.chdir(prev_cwd)
@@ -417,7 +570,8 @@ def run_bfcl(base_url: str, categories: str = "multi_turn_base",
              model: str = SERVED_MODEL,
              handler_name: str = MODEL_NAME,
              project_root: "Path | str | None" = None,
-             num_threads: int = 1) -> Dict[str, Any]:
+             num_threads: int = 1,
+             max_refill_rounds: int = 0) -> Dict[str, Any]:
     """Register the handler and drive the official generate/evaluate CLI
     in-process.
 
@@ -438,6 +592,9 @@ def run_bfcl(base_url: str, categories: str = "multi_turn_base",
     summaries deliberately contain no ``n_scored`` or ``semantic_score``."""
     if mode not in ("generate", "evaluate", "both"):
         raise ValueError(f"invalid BFCL mode: {mode}")
+    if (not isinstance(max_refill_rounds, int)
+            or isinstance(max_refill_rounds, bool) or max_refill_rounds < 0):
+        raise ValueError("BFCL max_refill_rounds must be a non-negative integer")
     global HARNESS_TELEMETRY_PATH
     project_root = Path(
         project_root or os.environ.get("BFCL_PROJECT_ROOT") or Path.cwd()
@@ -448,35 +605,87 @@ def run_bfcl(base_url: str, categories: str = "multi_turn_base",
     os.environ["BFCL_PROJECT_ROOT"] = str(project_root)
     try:
         install_handler(base_url, model=model, handler_name=handler_name)
-        category_counts = official_category_counts(categories)
+        category_ids = official_category_ids(categories)
         ids: Optional[List[str]] = None
         if run_ids:
-            ids = ([i.strip() for i in run_ids.split(",") if i.strip()]
-                   if isinstance(run_ids, str) else list(run_ids))
-            if len(category_counts) != 1:
+            raw_ids = ([i.strip() for i in run_ids.split(",") if i.strip()]
+                       if isinstance(run_ids, str) else [str(i).strip() for i in run_ids])
+            # BFCL's boolean --run-ids flag reads a JSON list.  Normalize it
+            # once here so repeated CLI values cannot inflate the denominator.
+            ids = list(dict.fromkeys(item for item in raw_ids if item))
+            if len(category_ids) != 1:
                 raise ValueError(
                     "BFCL --run-ids requires one concrete category, not collection "
-                    f"{categories!r} -> {sorted(category_counts)}")
+                    f"{categories!r} -> {sorted(category_ids)}")
             if not ids:
                 raise ValueError("BFCL --run-ids resolved to an empty id list")
-            # atomic write: concurrent runs racing on one file truncated ids
-            id_file = project_root / "test_case_ids_to_generate.json"
-            tmp = id_file.with_suffix(".json.tmp")
-            tmp.write_text(json.dumps({categories: ids}), encoding="utf-8")
-            tmp.replace(id_file)
-            selected_counts = {next(iter(category_counts)): len(ids)}
+            category = next(iter(category_ids))
+            unknown = [task_id for task_id in ids
+                       if task_id not in set(category_ids[category])]
+            if unknown:
+                raise ValueError(
+                    "BFCL --run-ids contains IDs outside the official category: "
+                    + ",".join(unknown[:20]))
+            selected_ids = {category: ids}
+            _write_selected_ids(project_root, selected_ids)
         else:
-            selected_counts = category_counts
+            selected_ids = category_ids
+        selected_counts = {name: len(values) for name, values in selected_ids.items()}
         expected = sum(selected_counts.values())
+        completion = None
+        refill_receipts = []
+        invocation_root = (project_root / "measurement" / "bfcl_completion" /
+                           f"{time.time_ns()}-{os.getpid()}")
+        invocation_root.mkdir(parents=True, exist_ok=False)
         if mode in ("generate", "both"):
-            run_cli(generate_argv(
-                handler_name, categories, ids, num_threads=num_threads))
+            remaining = selected_ids
+            for round_index in range(max_refill_rounds + 1):
+                if round_index:
+                    _write_selected_ids(project_root, remaining)
+                use_subset = ids is not None or round_index > 0
+                run_cli(generate_argv(
+                    handler_name, categories,
+                    [task for values in remaining.values() for task in values]
+                    if use_subset else None,
+                    num_threads=num_threads))
+                completion = _completion_ledger(
+                    project_root, handler_name, selected_ids, prior=completion)
+                refill_receipts.append(str(_snapshot_completion_round(
+                    project_root, invocation_root, round_index, completion)))
+                _write_canonical_results(selected_ids, completion)
+                if not completion["remaining"]:
+                    break
+                if round_index == max_refill_rounds:
+                    raise RuntimeError(
+                        "BFCL generation lacks valid unique completions after "
+                        f"{round_index + 1} bounded round(s): "
+                        + ",".join(completion["remaining"][:20]))
+                remaining = {
+                    category: [task_id for task_id in task_ids
+                               if task_id in set(completion["remaining"])]
+                    for category, task_ids in selected_ids.items()
+                }
+                remaining = {category: task_ids for category, task_ids in remaining.items()
+                             if task_ids}
+        else:
+            completion = _completion_ledger(project_root, handler_name, selected_ids)
+            refill_receipts.append(str(_snapshot_completion_round(
+                project_root, invocation_root, 0, completion)))
+            if completion["remaining"]:
+                raise RuntimeError(
+                    "BFCL evaluation requires valid unique completions for: "
+                    + ",".join(completion["remaining"][:20]))
+            _write_canonical_results(selected_ids, completion)
+        # A refill temporarily narrows BFCL's global subset file.  Restore the
+        # original selection before evaluation so the official denominator
+        # cannot silently collapse to the final gap.
+        _write_selected_ids(project_root, selected_ids)
         if mode in ("evaluate", "both"):
             run_cli(evaluate_argv(handler_name, categories, ids))
         import terminal_check  # noqa: E402  (sibling module, sys.path has parent)
 
-        ids_str = ",".join(ids or [])
         for category, selected in selected_counts.items():
+            ids_str = ",".join(selected_ids[category])
             code = terminal_check.check_bfcl(
                 selected, ids_str, handler=handler_name,
                 category=category, root=project_root)
@@ -490,6 +699,15 @@ def run_bfcl(base_url: str, categories: str = "multi_turn_base",
             "bfcl_project_root": str(project_root),
             "harness_telemetry": str(HARNESS_TELEMETRY_PATH),
             "num_threads": num_threads,
+            "completion_ledger": {
+                "valid_unique": len(completion["valid_unique"]),
+                "duplicate_rows": completion["duplicate_rows"],
+                "invalid_rows": completion["invalid_rows"],
+                "remaining": completion["remaining"],
+                "max_refill_rounds": max_refill_rounds,
+                "refill_rounds_used": max(0, len(refill_receipts) - 1),
+                "round_receipts": refill_receipts,
+            },
         }
         if mode == "generate":
             summary.update({"n_generated": expected, "scored": False})
@@ -524,13 +742,15 @@ def main(argv=None) -> None:
                         help="served model name at the endpoint")
     parser.add_argument("--handler-name", default=MODEL_NAME,
                         help="BFCL model key / result-dir name")
+    parser.add_argument("--bfcl-refill-rounds", type=int, default=0)
     args = parser.parse_args(argv)
     # one code path: the CLI used to re-implement run() and had drifted
     # (evaluate got --run-ids instead of --partial-eval, no terminal gate)
     ids = [i.strip() for i in args.run_ids.split(",") if i.strip()] or None
     summary = run_bfcl(args.base_url, categories=args.categories, mode=args.mode,
                        run_ids=ids, model=args.model,
-                       handler_name=args.handler_name)
+                       handler_name=args.handler_name,
+                       max_refill_rounds=args.bfcl_refill_rounds)
     print(json.dumps(summary, indent=2))
 
 
