@@ -292,7 +292,7 @@ def test_stale_batch_done_is_revalidated_and_full_manifest_stamped(tmp_path, mon
             "task_id": task_id, "n": 1, "semantic_score": 0.0}))
         return 0
 
-    monkeypatch.setattr(driver.subprocess, "call", scored_worker)
+    monkeypatch.setattr(driver, "run_owned_worker", scored_worker)
     assert driver.main(["--cell", str(manifest)]) == 0
     assert list((cell_dir / "batches").glob("000_task_1.prior.*/done.json"))
     status = json.loads((cell_dir / "cell_status.json").read_text())
@@ -384,7 +384,7 @@ def test_appworld_driver_uses_one_server_per_worker_even_with_batch_ten(
         return 0
 
     monkeypatch.setattr(driver, "run_server", start_server)
-    monkeypatch.setattr(driver.subprocess, "call", scored_worker)
+    monkeypatch.setattr(driver, "run_owned_worker", scored_worker)
     assert driver.main(["--cell", str(manifest), "--batch", "10"]) == 0
     assert batches == [["task_1"], ["task_2"]]
     assert driver.completed_task_ids(cell_dir, "acon_appworld", ids) == set(ids)

@@ -48,6 +48,11 @@ except ImportError:  # Direct file launch on ascend03.
     from completion_contract import write_cell_status
 
 try:
+    from .process_lifecycle import defer_interrupts, interruptible, stop_owned_group
+except ImportError:  # Direct file launch on ascend03.
+    from process_lifecycle import defer_interrupts, interruptible, stop_owned_group
+
+try:
     from .candidate_cell import (
         VARIANTS as CANDIDATE_VARIANTS,
         candidate_cell_from_source,
@@ -512,8 +517,6 @@ def run_task(cell: dict, task_ids: list[str], port: int, batch_dirname: str) -> 
         status.update(status="completed" if not bad else "partial",
                       healthy=healthy, bad=bad,
                       wall_s=time.monotonic() - started)
-        _write(out / "done.json" if not bad else out / "status.json", status)
-        return status
     except Exception as error:  # infra failure: keep receipt, bisect at caller
         # The official BFCL worker can exit nonzero after writing valid rows.
         # Preserve those outputs so the caller retries only tasks that truly
@@ -535,28 +538,17 @@ def run_task(cell: dict, task_ids: list[str], port: int, batch_dirname: str) -> 
         _write(out / "status.json", status)
         return status
     finally:
-        for proc, name in ((worker, "worker"), (server, "server")):
-            if proc is None:
-                continue
-            try:
-                # kill the whole session group: controllers spawn --serve-child
-                # processes that must not outlive the parent and hold ports
-                try:
-                    os.killpg(os.getpgid(proc.pid), 15)
-                except OSError:
-                    if proc.poll() is None:
-                        proc.terminate()
-                try:
-                    proc.wait(timeout=20)
-                except subprocess.TimeoutExpired:
-                    try:
-                        os.killpg(os.getpgid(proc.pid), 9)
-                    except OSError:
-                        proc.kill()
-            except OSError:
-                pass
-        server_log.close()
-        worker_log.close()
+        with defer_interrupts():
+            for proc in (worker, server):
+                if proc is None:
+                    continue
+                # The leader may have exited while --serve-child still owns
+                # the group. Its Popen PID remains the group ID we created.
+                stop_owned_group(proc)
+            server_log.close()
+            worker_log.close()
+    _write(out / "done.json" if not bad else out / "status.json", status)
+    return status
 
 
 def load_cell(cell_json: Path) -> dict:
@@ -653,6 +645,7 @@ def _write_bfcl_completion(cell: dict, expected_task_ids: list[str]) -> dict:
     return completion
 
 
+@interruptible
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cell", type=Path, required=True, help="cell.json path")

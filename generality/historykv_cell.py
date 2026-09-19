@@ -25,9 +25,11 @@ from pathlib import Path
 try:
     from .completion_contract import appworld_done_invalidated, write_cell_status
     from .bfcl_results import bfcl_row_is_valid
+    from .process_lifecycle import interruptible, run_owned_worker, stop_owned_group
 except ImportError:  # Direct file launch on ascend03.
     from completion_contract import appworld_done_invalidated, write_cell_status
     from bfcl_results import bfcl_row_is_valid
+    from process_lifecycle import interruptible, run_owned_worker, stop_owned_group
 
 GENERATION_ROOT = Path("/home/liuyancheng/c2kv-generality-20260918")
 PAPER = GENERATION_ROOT / "src" / "paper_harness"
@@ -200,14 +202,7 @@ def start_proxy(arm: str, upstream: str, port: int, out: Path,
 
 
 def stop(proc: subprocess.Popen | None) -> None:
-    if proc is None or proc.poll() is not None:
-        return
-    proc.terminate()
-    try:
-        proc.wait(timeout=20)
-    except subprocess.TimeoutExpired:
-        proc.kill()
-        proc.wait(timeout=5)
+    stop_owned_group(proc)
 
 
 # infra signatures in benchmark.log: transient engine/proxy/harness trouble
@@ -334,7 +329,7 @@ print('SUMMARY:' + json.dumps(summary))
         env.pop(k, None)
     log_path = project_root.parent / "benchmark.log"
     with log_path.open("wb") as log:
-        rc = subprocess.call(
+        rc = run_owned_worker(
             [cell["python_bench"], "-c", script],
             cwd=str(PAPER), env=env, stdout=log, stderr=subprocess.STDOUT,
             stdin=subprocess.DEVNULL,
@@ -413,7 +408,7 @@ print('SUMMARY:' + json.dumps(summary, default=str))
         env.pop(k, None)
     log_path = attempt_root.parent / "benchmark.log"
     with log_path.open("wb") as log:
-        rc = subprocess.call(
+        rc = run_owned_worker(
             [cell["python_sgl"], "-c", inner],
             cwd=str(PAPER), env=env, stdout=log, stderr=subprocess.STDOUT,
             stdin=subprocess.DEVNULL,
@@ -522,7 +517,7 @@ print('SUMMARY:' + json.dumps(summary, default=str))
         env.pop(k, None)
     log_path = attempt_root.parent / "benchmark.log"
     with log_path.open("wb") as log:
-        rc = subprocess.call(
+        rc = run_owned_worker(
             [cell["python_sgl"], "-c", script],
             cwd=str(PAPER), env=env, stdout=log, stderr=subprocess.STDOUT,
             stdin=subprocess.DEVNULL,
@@ -539,6 +534,7 @@ print('SUMMARY:' + json.dumps(summary, default=str))
     return result
 
 
+@interruptible
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cell", type=Path, required=True)

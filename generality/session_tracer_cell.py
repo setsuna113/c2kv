@@ -42,9 +42,11 @@ os.environ["TORCH_DEVICE_BACKEND_AUTOLOAD"] = "0"
 try:
     from .bfcl_results import collect_bfcl_results
     from .completion_contract import write_cell_status
+    from .process_lifecycle import defer_interrupts, interruptible, run_owned_worker
 except ImportError:  # Direct file launch on ascend03.
     from bfcl_results import collect_bfcl_results
     from completion_contract import write_cell_status
+    from process_lifecycle import defer_interrupts, interruptible, run_owned_worker
 
 try:
     from . import design
@@ -661,14 +663,15 @@ class SessionTracerHTTPServer(ThreadingHTTPServer):
 
 
 def stop_server(server, thread, tasks):
-    server.shutdown()
-    server.server_close()
-    thread.join()
-    for task in tasks.values():
-        try:
-            task.engine.close()
-        except Exception:
-            pass  # The engine may have dropped the session already.
+    with defer_interrupts():
+        server.shutdown()
+        server.server_close()
+        thread.join()
+        for task in tasks.values():
+            try:
+                task.engine.close()
+            except Exception:
+                pass  # The engine may have dropped the session already.
 
 
 def appworld_worker_env(cell):
@@ -713,6 +716,7 @@ def completed_task_ids(cell_dir: Path, benchmark: str, expected: list[str]) -> s
     return completed
 
 
+@interruptible
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cell", type=Path, required=True)
@@ -764,9 +768,9 @@ def main(argv=None) -> int:
                 for k in ("http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY"):
                     env.pop(k, None)
                 with (out / "benchmark.log").open("wb") as log:
-                    rc = subprocess.call(worker_cmd, cwd=str(RUNTIME), env=env,
-                                         stdout=log, stderr=subprocess.STDOUT,
-                                         stdin=subprocess.DEVNULL)
+                    rc = run_owned_worker(worker_cmd, cwd=str(RUNTIME), env=env,
+                                          stdout=log, stderr=subprocess.STDOUT,
+                                          stdin=subprocess.DEVNULL)
             else:
                 # Ordinary ACON requests have no explicit task context. Bind
                 # one worker to one server-owned task and keep its own output.
@@ -788,7 +792,7 @@ def main(argv=None) -> int:
                             "--max-iter", "50",
                             "--max-wall-seconds", str(cell["caps"]["task_timeout"]),
                         ]
-                        task_rc = subprocess.call(
+                        task_rc = run_owned_worker(
                             worker_cmd, cwd=str(RUNTIME), env=env,
                             stdout=log, stderr=subprocess.STDOUT,
                             stdin=subprocess.DEVNULL)

@@ -88,7 +88,7 @@ def test_old_fc_handler_row_and_done_are_replaced_only_after_new_result(tmp_path
 
     cell = {"cell_dir": str(tmp_path), "model_name": "test-model",
             "handler_name": "test-handler", "python_bench": "python"}
-    with patch.object(driver.subprocess, "call", side_effect=fake_call):
+    with patch.object(driver, "run_owned_worker", side_effect=fake_call):
         receipt = driver.run_bfcl_task(cell, task_id, 37401)
 
     assert receipt["status"] == "completed"
@@ -127,7 +127,7 @@ def test_old_appworld_generation_error_done_is_replaced_only_after_new_result(tm
     cell = {"cell_dir": str(tmp_path), "acon_dir": "acon", "model_name": "model",
             "python_appworld": "python", "python_sgl": "python",
             "appworld_root": "appworld"}
-    with patch.object(driver.subprocess, "call", side_effect=fake_call):
+    with patch.object(driver, "run_owned_worker", side_effect=fake_call):
         receipt = driver.run_appworld_task(cell, task_id, 37401)
 
     assert receipt["status"] == "completed"
@@ -150,7 +150,7 @@ def test_appworld_empty_model_output_is_not_generation_error(tmp_path):
 
     assert appworld_done_healthy(out, task_id)
     cell = {"cell_dir": str(tmp_path)}
-    with patch.object(driver.subprocess, "call", side_effect=AssertionError("reran")):
+    with patch.object(driver, "run_owned_worker", side_effect=AssertionError("reran")):
         assert driver.run_appworld_task(cell, task_id, 37401) == done
 
 
