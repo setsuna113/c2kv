@@ -1,12 +1,31 @@
 """Check the assembled history representation immediately before generation."""
 from __future__ import annotations
 
+from .event_native_exact_policy import EventNativeExactController
+
 
 def history_budget_receipt(memory, metadata, controller, *, ratio, phase):
     policy = getattr(controller, "policy_config", None)
     unit = getattr(controller, "kv_bytes_per_token", None)
     common = metadata.get("common_raw_prompt_tokens")
-    if policy is None or type(unit) is not int or type(common) is not int:
+    if policy is None or type(unit) is not int:
+        raise ValueError("Hybrid search requires an explicit native history budget contract")
+    if isinstance(controller, EventNativeExactController):
+        # Exact controllers enforce their own history capacity during prepare and
+        # report Full-render common_live_tokens, not the S0 common-input boundary.
+        # AppWorld also reports a task-packet common value, but it has different
+        # accounting and must not select this S0 check.
+        if "common_raw_prompt_tokens" in metadata and type(common) is not int:
+            raise ValueError("Hybrid search requires an explicit native history budget contract")
+        return {
+            "schema": "a-hybrid-pre-generation-budget-v1", "phase": phase,
+            "status": "not_applicable", "errors": [],
+            "reason": "exact controller uses its own capacity accounting, not S0 common-input accounting",
+            "controller": type(controller).__name__,
+            "declared_active_history_bytes": metadata.get("actual_history_bytes"),
+            "kv_bytes_per_token": unit,
+        }
+    if type(common) is not int:
         raise ValueError("Hybrid search requires an explicit native history budget contract")
     costs = memory.costs(ratio)
     resident = costs["resident_kv_tokens"]

@@ -179,7 +179,7 @@ class EventNativeDecisionRunner:
         budget = history_budget_receipt(memory, metadata, self.controller,
                                        ratio=self.ratio, phase=phase)
         record.setdefault('pre_generation_budget_checks', []).append(budget)
-        if budget['status'] != 'passed':
+        if budget['status'] not in {'passed', 'not_applicable'}:
             raise ValueError('Pre-generation history budget rejected: ' + ', '.join(budget['errors']))
         if self.generation_calls >= self.max_generation_calls:
             raise RuntimeError('Finite generation-call cap exhausted before submission')

@@ -7,12 +7,16 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[3]
 sys.path[:0] = [str(ROOT), str(ROOT / "python")]
 
 from benchmarks.memory_runtime.event_native_s0_policy import EventNativeS0Controller
 from benchmarks.memory_runtime.event_native_controls import build_event_native_controller
+from benchmarks.memory_runtime.budget_guard import history_budget_receipt
 from benchmarks.memory_runtime.always_compress import ALWAYS_COMPRESSION_POLICY
+from benchmarks.memory_runtime.always_compress import CapacityInfeasible
 from benchmarks.memory_runtime.event_native_policy import (
     CURRENT_INPUT_BASELINE,
     HISTORY_BUDGET_DEFINITION,
@@ -175,3 +179,21 @@ def test_static_native_compression_keeps_appworld_task_packet_raw_and_common():
     assert prepared.metadata["actual_history_bytes"] <= 512
     assert prepared.metadata["same_prefix_full_reference"]["full_history_bytes"] <= 512
     assert prepared.memory.costs(4)["resident_kv_tokens"] > 512
+    assert type(prepared.metadata["common_raw_prompt_tokens"]) is int
+    receipt = history_budget_receipt(
+        prepared.memory, prepared.metadata, controller, ratio=4, phase="draft"
+    )
+    assert receipt["status"] == "not_applicable"
+
+    tight_policy = dict(policy, history_budget_bytes=1, workspace_budget_bytes=1)
+    tight_controller = build_event_native_controller(
+        Tokenizer(), packing=packing, policy=tight_policy,
+        view_mode="ac_gist_static", compression_policy=ALWAYS_COMPRESSION_POLICY,
+        benchmark="acon_appworld",
+    )
+    with pytest.raises(CapacityInfeasible):
+        tight_controller.prepare(
+            {"session_id": "appworld/tight", "decision_key": "d1",
+             "messages": messages, "tools": []},
+            ratio=4, max_new_tokens=8,
+        )
