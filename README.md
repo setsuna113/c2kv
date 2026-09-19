@@ -13,6 +13,30 @@ runtime fixes are copied into that subset only when an NPU launcher consumes
 them.  These source checkouts do not deploy or overwrite the detached running
 copies under `/home/liuyancheng/c2kv-generality-20260918/src/`.
 
+## Tool-definition and joint component studies
+
+`generality/tool_definition_study.py` runs the shared paper checkout's
+recorded-decision evaluator. `prepare` freezes messages, tool schemas and
+explicit gold calls; `evaluate` compares C2KV, StreamingLLM, H2O, SnapKV and
+PyramidKV while keeping history full. The launcher selects `npu:0`; use an
+operator-allocated visible NPU and a Python environment with `torch_npu`.
+Selection, budgets, parsing and scoring remain in the shared paper source.
+
+```bash
+python -m generality.tool_definition_study prepare --paper-root /path/to/paper \
+  --input /path/to/decisions.jsonl --checkpoint /path/to/T0/checkpoint \
+  --out /path/to/new-manifest
+python -m generality.tool_definition_study evaluate --paper-root /path/to/paper \
+  --manifest /path/to/new-manifest/manifest.json --checkpoint /path/to/T0/checkpoint \
+  --max-new-tokens 512 --out /path/to/new-results --dry-run
+```
+
+The shared `benchmarks.paper.tool_study` builder separately prepares the
+seven-cell closed-loop tool/history study. `generality/native_bare.py` accepts
+its `c2kv_c1_off_r8` arm through the existing shared controller path: initial
+S0 history allocation matches C1, with recovery disabled. This update has CPU
+launcher validation only; NPU hardware execution is not implied.
+
 ## HiAgent BFCL text-budget client on NPU
 
 `generality/paper_text_budget.py` launches one `hiagent_full_bN` BFCL client
