@@ -74,29 +74,31 @@ class PaperMatrixTest(unittest.TestCase):
 
     def test_only_requested_methods_and_ratio(self):
         rows = cells(self.config)
-        # The tool-context axis adds compressed-tool cells on top of the 63 raw-tool cells.
+        # The tool-context axis adds compressed-tool cells on top of the 65 raw-tool cells.
         raw = [row for row in rows if row["tool_context"] == "raw"]
-        self.assertEqual(len(raw), 63)
+        self.assertEqual(len(raw), 65)
         self.assertEqual(len(rows) - len(raw), 10)
-        self.assertEqual(sum(row["group"] == "main" for row in raw), 38)
+        self.assertEqual(sum(row["group"] == "main" for row in raw), 39)
         self.assertEqual({row["ratio"] for row in rows if row["method"] == "C2KV"}, {4})
         self.assertEqual({row["method"] for row in rows}, {
             "Full", "HiAgent", "ACON", "C2KV", "H2O", "SnapKV", "PyramidKV",
             "AgentFold", "CommitKV", "AgentKV", "C2KV+C1",
         })
-        self.assertTrue(all(row["arm"].startswith("c2kv_c1_t02_r") for row in rows[-4:]))
-        # The ratio-4 C1 ablation is restricted to bfcl_base and carries no benchmark list itself.
+        self.assertTrue(all(row["arm"].startswith("c2kv_c1_t02_r") for row in rows[-6:]))
+        # The ratio-4 C1 ablation adds ACEBench without changing older cells.
         r4 = [row for row in rows if row["arm"] == "c2kv_c1_t02_r4"]
-        self.assertEqual([row["cell_id"] for row in r4], ["bfcl_base__c2kv_c1_t02_r4"])
-        self.assertEqual(r4[0]["ratio"], 4)
-        self.assertNotIn("benchmarks", r4[0])
-        self.assertEqual(sum(row["arm"] == "c2kv_c1_t02_r8" for row in rows), 3)
+        self.assertEqual([row["cell_id"] for row in r4],
+                         ["bfcl_base__c2kv_c1_t02_r4", "acebench_agent__c2kv_c1_t02_r4"])
+        for row in r4:
+            self.assertEqual(row["ratio"], 4)
+            self.assertNotIn("benchmarks", row)
+        self.assertEqual(sum(row["arm"] == "c2kv_c1_t02_r8" for row in rows), 4)
 
     def test_preparation_validates_registered_arms_and_full_prefix_source(self):
         with tempfile.TemporaryDirectory() as temporary:
             output = Path(temporary)
             plan, profile = prepare(self.config, output, output / "sglang")
-            self.assertEqual(len(plan), 73)
+            self.assertEqual(len(plan), 75)
             self.assertTrue(profile.is_file())
             for row in plan:
                 cmd = row["command"]
@@ -148,13 +150,27 @@ class PaperMatrixTest(unittest.TestCase):
                     "agentfold", "commitkv", "agentkv"}
         for benchmark in ("acebench_agent", "toolsandbox"):
             actual = {row["arm"] for row in rows if row["benchmark"] == benchmark}
-            self.assertEqual(actual, expected)
+            self.assertEqual(actual, expected | ({"c2kv_c1_t02_r8", "c2kv_c1_t02_r4"}
+                                                 if benchmark == "acebench_agent" else set()))
         unsupported = {(row["benchmark"], row["arm"])
                        for row in self.config["unsupported_cells"]}
         self.assertEqual(unsupported, {
-            ("acebench_agent", "c2kv_c1_t02_r8"),
             ("toolsandbox", "c2kv_c1_t02_r8"),
         })
+        self.assertIn("end-to-end ToolSandbox C1 validation is pending",
+                      self.config["unsupported_cells"][0]["reason"])
+        ace_c1 = next(row for row in rows
+                      if row["cell_id"] == "acebench_agent__c2kv_c1_t02_r8")
+        command = run_command(self.config, ace_c1, Path("out/ace-c1"),
+                              Path("out/deployment_profile.json"))
+        self.assertEqual(command[command.index("--benchmark") + 1], "acebench_agent")
+        self.assertEqual(command[command.index("--arm") + 1], "c2kv_c1_t02_r8")
+        ace_r4 = next(row for row in rows
+                      if row["cell_id"] == "acebench_agent__c2kv_c1_t02_r4")
+        r4_command = run_command(self.config, ace_r4, Path("out/ace-c1-r4"),
+                                 Path("out/deployment_profile.json"))
+        self.assertEqual(r4_command[r4_command.index("--benchmark") + 1], "acebench_agent")
+        self.assertEqual(r4_command[r4_command.index("--arm") + 1], "c2kv_c1_t02_r4")
 
     def test_benchmark_commands_freeze_official_scope_and_single_flight(self):
         rows = cells(self.config)
@@ -703,7 +719,7 @@ class ExtensionRuleTest(unittest.TestCase):
                 if item["arm"] == "full":
                     item["method"] = "Full (renamed)"
                 if item["arm"] == "c2kv_c1_t02_r4":   # a genuine new cell, so the label check is reached
-                    item["benchmarks"] = ["bfcl_base", "bfcl_long_context"]
+                    item["benchmarks"] = ["bfcl_base", "bfcl_long_context", "acebench_agent"]
             self.assertIn("method changed", extension_problem(
                 json.loads((output / "config.resolved.json").read_text()), relabel, source, output) or "")
             with self.assertRaises(RuntimeError):

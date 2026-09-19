@@ -214,7 +214,8 @@
       "benchmarks": [
         "bfcl_base",
         "bfcl_long_context",
-        "appworld"
+        "appworld",
+        "acebench_agent"
       ]
     },
     {
@@ -223,7 +224,8 @@
       "group": "ablation",
       "ratio": 4,
       "benchmarks": [
-        "bfcl_base"
+        "bfcl_base",
+        "acebench_agent"
       ]
     }
   ],
@@ -264,14 +266,8 @@
     {
       "method": "C2KV+C1",
       "arm": "c2kv_c1_t02_r8",
-      "benchmark": "acebench_agent",
-      "reason": "native C1 paper controller has no ACEBench adapter"
-    },
-    {
-      "method": "C2KV+C1",
-      "arm": "c2kv_c1_t02_r8",
       "benchmark": "toolsandbox",
-      "reason": "native C1 paper controller has no ToolSandbox adapter"
+      "reason": "not enabled in the default matrix; official end-to-end ToolSandbox C1 validation is pending"
     }
   ],
   "tool_contexts": [
