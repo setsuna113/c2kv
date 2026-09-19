@@ -68,6 +68,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import signal
 import threading
 import time
 import uuid
@@ -127,6 +128,7 @@ ARM: Optional[Arm] = None
 BACKEND = None  # set in main()
 UPSTREAM = ""
 BENCHMARK = ""
+SHARED_ENGINE = False
 REQUEST_LOG_PATH = ""
 TELEMETRY_LOG_PATH = ""
 PREFIX_LOG_PATH = ""
@@ -1293,7 +1295,7 @@ class ProxyState:
     history-KV streaming sessions)."""
 
     def __init__(self):
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()
         self.recover: Optional[RecoverState] = None
         self.reference_log_path: str = ""
         # conversation_id -> server streaming-session id (physical-eviction
@@ -1305,6 +1307,17 @@ class ProxyState:
 STATE = ProxyState()
 
 
+def _close_owned_history_sessions() -> None:
+    """Close only streaming sessions opened by this proxy, preserving foreign work."""
+    with STATE.lock:
+        for session_id in sorted(set(STATE.history_sessions.values())):
+            BACKEND.close_history_session(session_id)
+            STATE.history_sessions = {
+                conv: owned for conv, owned in STATE.history_sessions.items()
+                if owned != session_id
+            }
+
+
 def _activate_measurement_session(session: str) -> None:
     """Reset cross-episode state while preserving all within-episode reuse."""
     if not getattr(BACKEND, "supports_episode_reset", False):
@@ -1313,10 +1326,12 @@ def _activate_measurement_session(session: str) -> None:
         if STATE.active_measurement_session == session:
             return
         with _phase("episode_setup"):
-            for session_id in sorted(set(STATE.history_sessions.values())):
-                BACKEND.close_history_session(session_id)
-            BACKEND.flush_cache(timeout=10)
-            STATE.history_sessions.clear()
+            _close_owned_history_sessions()
+            # /flush_cache is engine-wide and may fail or disrupt a different
+            # proxy's live session.  Shared history-KV cells use fresh unique
+            # session IDs and reset only this proxy's local state.
+            if not SHARED_ENGINE:
+                BACKEND.flush_cache(timeout=10)
             CACHE.clear()
             textarms.reset_state()
             history_methods.reset_state()
@@ -1341,7 +1356,8 @@ def _history_session_id(conv: str) -> str:
       starting from an empty prefix;
     * the paper harness supplies ``c2kv_measurement_session_id``; when that
       stable case id changes, ``_activate_measurement_session`` closes these
-      sessions and flushes unrelated server KV before the next episode;
+      sessions before the next episode (engine-wide flush only in exclusive
+      mode);
     * callers without an episode id have no boundary signal, so their sessions
       live until the server restarts.
     """
@@ -1394,10 +1410,37 @@ class ProxyHandler(BaseHTTPRequestHandler):
         )
 
     def do_POST(self):
+        if self.path == "/close_measurement_session":
+            with _EPISODE_REQUEST_LOCK:
+                return self._close_measurement_session()
         if self._is_chat():
             with _EPISODE_REQUEST_LOCK:
                 return self._do_POST_serialized()
         return self._do_POST_serialized()
+
+    def _close_measurement_session(self):
+        length = int(self.headers.get("Content-Length") or 0)
+        try:
+            payload = json.loads(self.rfile.read(length))
+        except (ValueError, TypeError):
+            self._send_json(400, {"error": "invalid JSON"})
+            return
+        session = payload.get("c2kv_measurement_session_id") if isinstance(payload, dict) else None
+        if not isinstance(session, str) or not session:
+            self._send_json(400, {"error": "c2kv_measurement_session_id is required"})
+            return
+        if session != STATE.active_measurement_session:
+            self._send_json(409, {"error": "measurement session is not active on this proxy"})
+            return
+        try:
+            _close_owned_history_sessions()
+        except (RuntimeError, ValueError, URLError, OSError, UpstreamError,
+                BackendError) as error:
+            self._send_json(502, {"error": f"owned session close failed: {error}"})
+            return
+        with STATE.lock:
+            STATE.active_measurement_session = None
+        self._send_json(200, {"closed_owned_sessions": True})
 
     def _do_POST_serialized(self):
         request_start_unix = time.time_ns()
@@ -1838,7 +1881,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
 
 def main(argv=None):
     global ARM, BACKEND, UPSTREAM, BENCHMARK, REQUEST_LOG_PATH
-    global TELEMETRY_LOG_PATH, PREFIX_LOG_PATH
+    global TELEMETRY_LOG_PATH, PREFIX_LOG_PATH, SHARED_ENGINE
     global DOC_PACKING, MAX_DOC_LENGTH, MAX_DOC_NUM, QUERY_PROJECTION, MODEL_FAMILY
     textarms.reset_state()  # fresh caches/state per proxy process
     history_methods.reset_state()
@@ -1854,6 +1897,8 @@ def main(argv=None):
     parser.add_argument("--arm", required=True)
     parser.add_argument("--port", type=int, required=True)
     parser.add_argument("--request-log", default="")
+    parser.add_argument("--shared-engine", action="store_true",
+                        help="keep episode reset local to this proxy; no engine-wide cache flush")
     parser.add_argument("--telemetry-log", default="",
                         help="append raw request/phase/upstream telemetry JSONL")
     parser.add_argument("--record-prefixes", default="",
@@ -1901,6 +1946,11 @@ def main(argv=None):
         spec["target_tokens"] = int(args.history_kv_target_tokens)
         spec["retention_ratio"] = None
         ARM = replace(ARM, history_kv=spec)
+    if args.shared_engine:
+        history_spec = history_kv_spec(ARM) if ARM.history_kv else None
+        if args.backend != "sglang" or not history_spec or not history_spec["persistent_session"]:
+            raise ValueError("--shared-engine requires a persistent SGLang history-KV arm")
+    SHARED_ENGINE = args.shared_engine
     if ARM.text_policy in history_methods.METHODS:
         history_methods.require_model_family(MODEL_FAMILY)
     BENCHMARK = args.benchmark
@@ -1933,7 +1983,22 @@ def main(argv=None):
     print(f"proxy backend={BACKEND.name} arm={ARM.name} benchmark={BENCHMARK or 'unspecified'} doc_packing={DOC_PACKING} "
           f"max_doc_length={MAX_DOC_LENGTH} max_doc_num={MAX_DOC_NUM} listening on "
           f"{args.host}:{args.port} -> {UPSTREAM}", flush=True)
-    server.serve_forever()
+    previous_sigterm = signal.getsignal(signal.SIGTERM)
+
+    def terminate(_signum, _frame):
+        raise SystemExit(128 + signal.SIGTERM)
+
+    signal.signal(signal.SIGTERM, terminate)
+    try:
+        server.serve_forever()
+    finally:
+        server.server_close()
+        try:
+            with _EPISODE_REQUEST_LOCK:
+                _close_owned_history_sessions()
+        except Exception as error:
+            print(f"proxy owned-session cleanup failed: {error}", flush=True)
+        signal.signal(signal.SIGTERM, previous_sigterm)
 
 
 if __name__ == "__main__":

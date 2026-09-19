@@ -10,6 +10,7 @@ import pytest
 from benchmarks.adapters import bfcl_adapter
 from benchmarks.arms import get_arm
 from benchmarks.backends.sglang import SglangBackend
+from benchmarks.backends.base import BackendError
 from benchmarks import proxy as proxy_mod
 from benchmarks.measurement.aggregate import aggregate, distribution
 from benchmarks.measurement.replay import replay_prefixes
@@ -373,6 +374,112 @@ def test_episode_boundary_closes_session_flushes_and_clears_local_state(monkeypa
     assert backend.flushes == 2
     assert state.history_sessions == {}
     assert resets == [True, True]
+
+
+def test_shared_episode_closes_only_owned_session_without_global_flush(monkeypatch):
+    class Backend:
+        supports_episode_reset = True
+        def __init__(self):
+            self.opened = []
+            self.closed = []
+            self.flushes = 0
+        def open_history_session(self, session_id):
+            self.opened.append(session_id)
+            return session_id
+        def close_history_session(self, session_id):
+            self.closed.append(session_id)
+        def flush_cache(self, timeout):
+            self.flushes += 1
+
+    backend = Backend()
+    state = proxy_mod.ProxyState()
+    monkeypatch.setattr(proxy_mod, "BACKEND", backend)
+    monkeypatch.setattr(proxy_mod, "STATE", state)
+    monkeypatch.setattr(proxy_mod, "SHARED_ENGINE", True)
+    proxy_mod._activate_measurement_session("probe")
+    engine_id = proxy_mod._history_session_id("probe-conversation")
+    assert engine_id != "probe" and engine_id.startswith("c2kv-bench-history-")
+    proxy_mod._activate_measurement_session("next-task")
+    assert backend.opened == backend.closed == [engine_id]
+    assert backend.flushes == 0
+    assert state.history_sessions == {}
+
+
+def test_proxy_close_endpoint_resolves_measurement_id_to_owned_engine_id(monkeypatch):
+    import threading
+    from http.server import ThreadingHTTPServer
+    from urllib.request import Request, urlopen
+
+    class Backend:
+        def __init__(self): self.closed = []
+        def close_history_session(self, session_id): self.closed.append(session_id)
+
+    backend = Backend()
+    state = proxy_mod.ProxyState()
+    state.active_measurement_session = "probe"
+    state.history_sessions["hashed-probe"] = "c2kv-bench-history-owned"
+    monkeypatch.setattr(proxy_mod, "BACKEND", backend)
+    monkeypatch.setattr(proxy_mod, "STATE", state)
+    server = ThreadingHTTPServer(("127.0.0.1", 0), proxy_mod.ProxyHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        request = Request(
+            f"http://127.0.0.1:{server.server_port}/close_measurement_session",
+            data=json.dumps({"c2kv_measurement_session_id": "probe"}).encode(),
+            headers={"Content-Type": "application/json"})
+        with urlopen(request, timeout=5) as response:
+            assert json.load(response) == {"closed_owned_sessions": True}
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+    assert backend.closed == ["c2kv-bench-history-owned"]
+    assert state.history_sessions == {}
+
+
+def test_proxy_sigterm_closes_last_owned_session(monkeypatch):
+    import signal
+
+    class Backend:
+        name = "sglang"
+        def __init__(self): self.closed = []
+        def close_history_session(self, session_id): self.closed.append(session_id)
+
+    backend = Backend()
+    state = proxy_mod.ProxyState()
+    monkeypatch.setattr(proxy_mod, "BACKEND", backend)
+    monkeypatch.setattr(proxy_mod, "STATE", state)
+    monkeypatch.setattr(proxy_mod, "get_backend", lambda name, post: backend)
+
+    class Server:
+        def __init__(self, address, handler): self.closed = False
+        def serve_forever(self):
+            state.history_sessions["conversation"] = "engine-session-last"
+            handler = signal.getsignal(signal.SIGTERM)
+            assert callable(handler)
+            handler(signal.SIGTERM, None)
+        def server_close(self): self.closed = True
+
+    monkeypatch.setattr(proxy_mod, "ThreadingHTTPServer", Server)
+    with pytest.raises(SystemExit):
+        proxy_mod.main([
+            "--upstream", "http://127.0.0.1:1", "--backend", "sglang",
+            "--arm", "gen_h2o_k0", "--port", "1",
+            "--history-kv-target-tokens", "8", "--shared-engine"])
+    assert backend.closed == ["engine-session-last"]
+
+
+def test_sglang_close_uses_exact_engine_session_id_and_checks_response():
+    calls = []
+    backend = SglangBackend(lambda path, payload, timeout:
+                            calls.append((path, payload, timeout)) or "")
+    backend.close_history_session("c2kv-bench-history-owned")
+    assert calls == [("/close_session",
+                      {"session_id": "c2kv-bench-history-owned"}, 60)]
+    backend = SglangBackend(lambda path, payload, timeout: {"error": "still open"})
+    with pytest.raises(BackendError, match="unexpected close_session response"):
+        backend.close_history_session("c2kv-bench-history-owned")
 
 
 @pytest.mark.parametrize("arm_name", [

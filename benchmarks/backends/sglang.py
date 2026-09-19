@@ -323,13 +323,13 @@ class SglangBackend(Backend):
         return session_id
 
     def close_history_session(self, session_id: str, timeout: int = 60) -> None:
+        """Close this proxy's exact engine session ID, not the harness episode ID."""
         result = self._post_json(
             "/close_session", {"session_id": session_id}, timeout)
         if result not in (None, ""):
-            if isinstance(result, dict) and result.get("error"):
-                raise BackendError(
-                    "history_kv_session_failed",
-                    f"close_session failed for {session_id!r}: {result['error']}")
+            raise BackendError(
+                "history_kv_session_failed",
+                f"unexpected close_session response for {session_id!r}: {result!r}")
 
     def flush_cache(self, timeout: int = 10) -> None:
         result = self._post_json(f"/flush_cache?timeout={float(timeout)}", {}, timeout + 5)
