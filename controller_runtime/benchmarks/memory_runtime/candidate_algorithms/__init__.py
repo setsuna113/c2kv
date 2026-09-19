@@ -2,3 +2,7 @@
 
 VARIANTS = ("static_t02", "turn_c1", "goal_rescue", "dependency_first")
 VERSION = "c2kv-paper-candidates-v1"
+
+# Keep the historical collection frozen for old profiles and callers.
+REPAIR_VARIANTS = ("request_contract", "argument_binding", "no_progress")
+ALL_VARIANTS = VARIANTS + REPAIR_VARIANTS

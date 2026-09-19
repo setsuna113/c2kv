@@ -235,7 +235,9 @@ def _checkpoint_eos_token_ids(checkpoint, tokenizer):
 
 
 def _sampling_params_for_benchmark(benchmark, view_mode=None):
-    if benchmark == 'acebench' and view_mode == 'ac_gist_static':
+    if benchmark == 'acebench' and view_mode in {
+        'ac_gist_static', 'ac_native_s0_lexical_raw_reserve_failed_operation',
+    }:
         return {'temperature': 0.001, 'top_p': 1.0}
     if benchmark == 'acon_appworld':
         # The frozen AppWorld actor uses these sampling fields. Thinking is
@@ -308,7 +310,9 @@ def _serve(args):
     s0_config, s0_contract = _read_s0_configuration(args)
     generation_backend = _validate_generation_backend(args, s0_config=s0_config)
     if (getattr(args, 'benchmark', None) == 'acebench'
-            and args.view_mode == 'ac_gist_static' and generation_backend != 'sglang'):
+            and args.view_mode in {'ac_gist_static',
+                                   'ac_native_s0_lexical_raw_reserve_failed_operation'}
+            and generation_backend != 'sglang'):
         raise ValueError('Native bare ACEBench requires SGLang for its source sampling contract')
     _validate_allocator_device(args)
     started = time.monotonic()
@@ -333,7 +337,8 @@ def _serve(args):
             raise ValueError('ACE textual source requires the acebench namespace')
         if args.view_mode == 'static':
             raise ValueError('ACE textual source has no training-static adapter')
-        if args.view_mode in NATIVE_ALWAYS_ROUTE_MODES and args.view_mode != 'ac_gist_static':
+        if (args.view_mode in NATIVE_ALWAYS_ROUTE_MODES and args.view_mode not in {
+                'ac_gist_static', 'ac_native_s0_lexical_raw_reserve_failed_operation'}):
             raise ValueError('Always-compress P0 supports only source_profile=native-v1')
     args.out.mkdir(parents=True, exist_ok=False)
     journal_path = args.out / 'attempts.jsonl'
@@ -428,19 +433,25 @@ def _serve(args):
             **({'compression_policy': compression_policy,
                 'history_view_protocol': history_view_protocol}
                if source_profile in ('native-v1', 'openai-single-task-v1')
-               or args.view_mode == 'ac_gist_static' else {}),
+               or args.view_mode in {'ac_gist_static',
+                                     'ac_native_s0_lexical_raw_reserve_failed_operation'} else {}),
         )
         if controller_factory is build_event_native_controller:
             controller_kwargs['benchmark'] = args.benchmark
         controller = controller_factory(tokenizer, **controller_kwargs)
         if isinstance(s0_config, dict) and 'candidate_algorithm' in s0_config:
             candidate = s0_config['candidate_algorithm']
+            from .candidate_algorithms import REPAIR_VARIANTS
+            if candidate['variant'] in REPAIR_VARIANTS:
+                version = 'c2kv-source-repair-v1'
+            else:
+                version = 'c2kv-paper-candidates-v1'
             manifest['candidate_algorithm'] = {
                 'variant': candidate['variant'], 'stable_call_ids': True,
                 'recovery_rounds_per_decision': 1,
             }
             manifest['route_contract'].update(
-                baseline_identity='c2kv-paper-candidates-v1:' + candidate['variant'],
+                baseline_identity=version + ':' + candidate['variant'],
                 recovery_enabled=True, max_generations_per_decision=2)
         shadow_feature_config, shadow_contract = _shadow_feature_configuration(args, tokenizer)
         generator, profile = _build_generator(
@@ -485,7 +496,8 @@ def _serve(args):
             **({'compression_policy': compression_policy,
                 'history_view_protocol': history_view_protocol}
                if source_profile in ('native-v1', 'openai-single-task-v1')
-               or args.view_mode == 'ac_gist_static' else {}),
+               or args.view_mode in {'ac_gist_static',
+                                     'ac_native_s0_lexical_raw_reserve_failed_operation'} else {}),
             **source_kwargs)
         if isinstance(s0_config, dict) and 'candidate_algorithm' in s0_config:
             api.route_contract = dict(manifest['route_contract'])

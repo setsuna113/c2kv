@@ -123,6 +123,7 @@ class EventNativeDecisionRunner:
                         record['controller_timing']['reconsider_seconds'] = time.perf_counter() - reconsider_started
                 record['exact_recovery'] = copy.deepcopy(reconsidered['decision'])
                 rounds = []
+                original_result, original_draft = result, draft
                 max_rounds = getattr(self.controller, 'max_recovery_rounds', 1)
                 checks = [copy.deepcopy(reconsidered['decision'])]
                 if hasattr(self.controller, 'max_recovery_rounds'):
@@ -153,12 +154,47 @@ class EventNativeDecisionRunner:
                     record['exact_recovery']['termination'] = (
                         reconsidered['decision']['reason'] if not reconsidered['regenerate']
                         else 'recovery_or_generation_limit')
+                commit_validator = getattr(self.controller, 'validate_commit', None)
+                if callable(commit_validator) and not recovery_disabled:
+                    commit_started = time.perf_counter_ns()
+                    verdict = commit_validator(
+                        prepared, list(draft.tool_calls), draft_text=draft.text,
+                        parse_error=draft.reason if draft.status == 'malformed' else None)
+                    if (verdict['accepted'] and draft.status == 'malformed'
+                            and original_draft.status != 'malformed'):
+                        verdict = {**verdict, 'accepted': False,
+                                   'reason': 'regeneration_parse_regression',
+                                   'fallback': 'original'}
+                    record['commit_validation'] = copy.deepcopy(verdict)
+                    record['controller_timing']['commit_validation_duration_ns'] = (
+                        time.perf_counter_ns() - commit_started)
+                    if not verdict['accepted']:
+                        record['generation_trace'][-1]['discarded'] = True
+                        if verdict['fallback'] == 'original':
+                            result, draft = original_result, original_draft
+                            record['generation_trace'][0]['discarded'] = False
+                            record['commit_validation']['selected_generation_index'] = 0
+                        elif verdict['fallback'] == 'stop':
+                            from .event_native_draft import NativeDraft
+                            text = ('I could not resolve the observed tool failure with a '
+                                    'supported action. Please clarify how to proceed.')
+                            if getattr(self.controller, 'benchmark', None) == 'acebench':
+                                text = 'Finish conversation'
+                            draft = NativeDraft(text, text, (), 'text',
+                                                'source_repair_commit_abstention')
+                            record['commit_validation']['selected_generation_index'] = None
+                            record['commit_validation']['synthetic_abstention'] = True
+                        else:
+                            raise ValueError('Unknown source repair commit fallback')
+                    else:
+                        record['commit_validation']['selected_generation_index'] = len(record['generation_trace']) - 1
                 record['response'] = {
                     'role': 'assistant', 'content': draft.content,
                     'tool_calls': list(draft.tool_calls),
                     'reasoning_content': draft.reasoning_content,
                     'native_parse_status': draft.status, 'native_parse_reason': draft.reason,
-                    'finish_reason': result.finish_reason,
+                    'finish_reason': ('stop' if record.get('commit_validation', {}).get('synthetic_abstention')
+                                      else result.finish_reason),
                 }
             record['session_cache_after'] = self.generator.session_cache_info()
             record['decision_runtime_seconds'] = time.perf_counter() - started
