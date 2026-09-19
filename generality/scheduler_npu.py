@@ -401,8 +401,9 @@ def may_share_engine(cell: dict, card: int, running: dict,
                   if running_card == card and str(other["cell_dir"]) not in active_dirs)
     if not active:
         return True
-    # historykv_off resets the engine-wide cache between episodes.  It must
-    # remain exclusive even with separate proxies and different task IDs.
+    # The shared proxy now closes only its owned sessions. Keep history-KV
+    # production exclusive until a two-proxy device validation is recorded;
+    # single-proxy correctness does not establish concurrent measurement parity.
     if (driver_for(cell["backend"], cell["condition"]) == "historykv_off" or
             any(driver_for(other["backend"], other["condition"]) == "historykv_off"
                 for other in active)):
