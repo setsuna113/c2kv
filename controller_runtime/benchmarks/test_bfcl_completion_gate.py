@@ -82,21 +82,43 @@ def test_terminal_method_and_context_failures_are_retained_for_official_zero(tmp
 
 
 def test_registered_fc_adapter_rejects_old_decode_error_but_keeps_model_text(tmp_path):
-    ids = ["multi_turn_base_0", "multi_turn_base_1"]
+    ids = [f"multi_turn_base_{index}" for index in range(4)]
+    valid_tool_text = '<tool_call>{"name":"lookup","arguments":{"city":"X"}}</tool_call>'
     old_error = {
-        "id": ids[0], "result": [["<tool_call>bad</tool_call>"]],
-        "inference_log": [{"step_0": [{"role": "handler_log",
-                                      "error": "'str' object has no attribute 'items'"}]}],
+        "id": ids[0], "result": [[valid_tool_text]],
+        "inference_log": [{"step_0": [
+            {"role": "assistant", "content": valid_tool_text},
+            {"role": "handler_log", "error": "'str' object has no attribute 'items'"},
+        ]}],
     }
     model_text = {"id": ids[1], "result": [["<tool_call>bad</tool_call>"]]}
+    native_final = {
+        "id": ids[2], "result": [[[ {"lookup": "{}"}, "The answer is ready." ]]],
+        "inference_log": [{"step_0": [
+            {"role": "assistant", "content": [{"lookup": "{}"}]},
+            {"role": "tool", "content": "ok"},
+        ], "step_1": [
+            {"role": "assistant", "content": "The answer is ready."},
+            {"role": "handler_log", "error": "'str' object has no attribute 'items'"},
+        ]}],
+    }
+    malformed_with_error = {
+        "id": ids[3], "result": [["<tool_call>bad</tool_call>"]],
+        "inference_log": [{"step_0": [
+            {"role": "assistant", "content": "<tool_call>bad</tool_call>"},
+            {"role": "handler_log", "error": "'str' object has no attribute 'items'"},
+        ]}],
+    }
     path = tmp_path / "result/c2kv-hf/multi_turn/BFCL_v4_multi_turn_base_result.json"
-    _write_jsonl(path, [old_error, model_text])
+    _write_jsonl(path, [old_error, model_text, native_final, malformed_with_error])
 
     receipt = bfcl_adapter._canonicalize_completions(
         tmp_path, "c2kv-hf", {"multi_turn_base": ids})
 
     assert receipt["remaining"] == [ids[0]]
     assert receipt["invalid_rows"] == 1
-    assert [json.loads(line) for line in path.read_text().splitlines()] == [model_text]
+    assert [json.loads(line) for line in path.read_text().splitlines()] == [
+        model_text, native_final, malformed_with_error]
     raw = next((Path(receipt["receipt"]).parent / "raw").rglob("*.json"))
-    assert [json.loads(line) for line in raw.read_text().splitlines()] == [old_error, model_text]
+    assert [json.loads(line) for line in raw.read_text().splitlines()] == [
+        old_error, model_text, native_final, malformed_with_error]
