@@ -56,6 +56,10 @@ class SGLangEventNativeError(RuntimeError):
     """One terminal upstream or response-contract failure."""
 
 
+class SGLangTransportError(SGLangEventNativeError):
+    """Ambiguous infrastructure failure; retry only from a fresh task boundary."""
+
+
 class SGLangExtractionBudgetExhausted(SGLangEventNativeError):
     """A verified upstream stop after consuming the remaining extraction budget."""
 
@@ -849,7 +853,8 @@ class SGLangEventNativeGenerator:
                     error.get("message") if isinstance(error, Mapping) else error
                 )
                 suffix = f": {message}" if isinstance(message, str) and message else ""
-                raise SGLangEventNativeError(
+                error_type = SGLangTransportError if status in {502, 503, 504} else SGLangEventNativeError
+                raise error_type(
                     f"SGLang native_generate returned HTTP {status}{suffix}"
                 )
             return response, status
@@ -881,7 +886,7 @@ class SGLangEventNativeGenerator:
             except OSError:
                 raw = b""
         except (OSError, TimeoutError) as error:
-            raise SGLangEventNativeError(f"{label} transport failed without retry") from error
+            raise SGLangTransportError(f"{label} transport failed without retry") from error
         if len(raw) > self.max_response_bytes:
             raise SGLangEventNativeError(f"{label} response exceeds the byte cap")
         try:
@@ -1483,6 +1488,7 @@ __all__ = [
     "RESPONSE_SCHEMA",
     "SESSION_CACHE_POLICY",
     "SGLangEventNativeError",
+    "SGLangTransportError",
     "SGLangExtractionBudgetExhausted",
     "SGLangEventNativeGenerationResult",
     "SGLangEventNativeGenerator",

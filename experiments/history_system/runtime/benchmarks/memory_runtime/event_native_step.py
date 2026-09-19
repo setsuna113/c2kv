@@ -9,6 +9,7 @@ from dataclasses import asdict
 from typing import Any
 
 from .attempt_journal import AttemptJournal
+from .always_compress import CapacityInfeasible
 from .event_native import memory_to_dict
 from .event_native_draft import NATIVE_DRAFT_VERSION, decode_native_generation
 
@@ -43,11 +44,14 @@ class EventNativeDecisionRunner:
         self.generation_calls = 0
         self._completed = {}
         self._terminal_error = None
+        self._failed_sessions = {}
 
     def run(self, payload: dict[str, Any]) -> dict[str, Any]:
         if self._terminal_error is not None:
             raise RuntimeError('This runner stopped after a terminal failure; automatic retry is disabled')
         key = (payload['session_id'], payload['decision_key'])
+        if key[0] in self._failed_sessions:
+            raise CapacityInfeasible(self._failed_sessions[key[0]])
         signature = json.dumps(payload, ensure_ascii=False, sort_keys=True, allow_nan=False)
         cached = self._completed.get(key)
         if cached is not None:
@@ -174,7 +178,12 @@ class EventNativeDecisionRunner:
             record['decision_runtime_seconds'] = record['decision_duration_ns'] / 1e9
             self._totals(record)
             # Store scalar diagnostics, not a traceback that could retain KV tensors.
-            self._terminal_error = copy.deepcopy(record['error'])
+            if isinstance(error, CapacityInfeasible):
+                record['failure_kind'] = 'method_failure'
+                record['failure_code'] = 'c2kv_capacity_infeasible'
+                self._failed_sessions[key[0]] = str(error)
+            else:
+                self._terminal_error = copy.deepcopy(record['error'])
             raise EventNativeStepError(str(error), record) from error
         finally:
             if not keep_session:
