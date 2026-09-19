@@ -224,14 +224,17 @@ def _resolved_design(
     ):
         raise ValueError("AppWorld requires H0/C1000/ratio8/R1 with T02 or D3 hybrid")
     detector = c1.get("detector", "t02_risk")
-    design["candidate_id"] = f"c1_{detector}"
-    design["run_id_template"] = f"paper_c1_{detector}_r8_appworld"
+    no_recovery = config.get("native_arm") == "c2kv_c1_off_r8"
+    design["candidate_id"] = "c2kv_only" if no_recovery else f"c1_{detector}"
+    design["run_id_template"] = f"paper_{design['candidate_id']}_r8_appworld"
     design["runtime"].update(
         controller=str(controller_path.resolve()),
         sglang_backend_url=_sglang_upstream(config),
         device="cpu",
         npu_allocator_metrics=False,
     )
+    if no_recovery:
+        design["runtime"].pop("shadow_feature_config", None)
     return design
 
 
@@ -531,7 +534,8 @@ def run_task(
         BENCHMARK, task_id, task_out, official, time.monotonic() - started,
     )
     acceptance = run_c1.functional_checks(
-        "c2kv_native" if config.get("native_arm") == "c2kv_native_r4" else "proposed",
+        ("c2kv_native" if config.get("native_arm") == "c2kv_native_r4" else
+         "c2kv_only" if config.get("native_arm") == "c2kv_c1_off_r8" else "proposed"),
         config.get("c1", {}).get("detector", "t02_risk"), metrics
     )
     if not all(acceptance["required"].values()):

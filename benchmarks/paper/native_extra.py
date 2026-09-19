@@ -39,6 +39,10 @@ def arm_identity(config):
         return {"arm": arm, "ratio": 4, "method": "c2kv_native",
                 "detector": "disabled", "candidate_algorithm": None,
                 "model_name": "c2kv_native_r4"}
+    if arm == "c2kv_c1_off_r8":
+        return {"arm": arm, "ratio": 8, "method": "c2kv_only",
+                "detector": "disabled", "candidate_algorithm": None,
+                "model_name": "c2kv_only"}
     if arm in ARM_TO_VARIANT:
         variant = ARM_TO_VARIANT[arm]
         return {"arm": arm, "ratio": 8, "method": "proposed",
@@ -111,6 +115,10 @@ def validate_ready_manifest(config, benchmark, task, ready_path, controller_path
             raise RuntimeError(f"Native {identity['arm']} candidate controller identity differs")
     elif candidate is not None or loaded_candidate is not None:
         raise RuntimeError(f"Native {identity['arm']} detector controller identity differs")
+    elif identity["method"] == "c2kv_only":
+        if any(key in controller for key in
+               ("post_draft_recovery", "gp_experiments", "d3_hybrid_recovery")):
+            raise RuntimeError(f"Native {identity['arm']} unexpectedly enables recovery")
     elif identity["detector"] == "d3_hybrid":
         recovery = controller.get("post_draft_recovery")
         if (controller.get("d3_hybrid_recovery") is not True
@@ -258,6 +266,8 @@ def server_command(config, benchmark, task, native, delivery, controller_path):
         design["candidate_id"] = identity["model_name"]
         design["run_id_template"] = f"paper_{identity['arm']}_{identity['detector']}"
         design["runtime"]["controller"] = str(Path(controller_path).resolve())
+        if identity["method"] == "c2kv_only":
+            design["runtime"].pop("shadow_feature_config", None)
     design["runtime"].update(
         sglang_backend_url=c1_appworld._sglang_upstream(config),
         device="cpu", npu_allocator_metrics=False,

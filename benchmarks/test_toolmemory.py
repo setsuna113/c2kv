@@ -213,12 +213,16 @@ def test_plan_hybrid_keeps_top_k_native_and_inserts_system_when_missing(tmp_path
     assert toolmemory.with_protocol_system(plan.messages, plan.protocol) == plan.messages  # idempotent
 
 
-def test_plan_without_tools_is_none_and_hybrid_over_catalog_fails(tmp_path):
+def test_plan_without_tools_is_none_and_small_catalog_is_all_native(tmp_path):
     mem = memory(tmp_path, "t0:r8:hybrid3")
     assert mem.plan({"messages": [{"role": "user", "content": "hi"}]}) is None
     assert mem.stats["skipped_no_tools"] == 1
-    with pytest.raises(toolmemory.ToolMemoryError, match="no_compressed_remainder"):
-        mem.plan({"messages": [{"role": "user", "content": "hi"}], "tools": TOOLS})
+    plan = mem.plan({"messages": [{"role": "user", "content": "hi"}], "tools": TOOLS})
+    assert plan.info["all_native"] is True
+    assert plan.info["n_native"] == len(TOOLS)
+    assert plan.chunks == [] and plan.records == [] and plan.carriers() == []
+    assert mem.stats["chunk_extracts"] == 0
+    assert all(toolmemory.tool_name(tool) in plan.protocol for tool in TOOLS)
 
 
 def test_extract_length_mismatch_is_rejected(tmp_path):

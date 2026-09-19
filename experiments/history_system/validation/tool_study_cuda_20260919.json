@@ -1,0 +1,199 @@
+{
+  "schema": "c2kv-paper-tool-study-cuda-functional-smoke-v1",
+  "status": "completed",
+  "created_utc": "2026-09-19T22:58:07.115167+00:00",
+  "claim_scope": "bounded CUDA functionality only; no statistical or quality claim",
+  "post_snapshot_builder_update": {
+    "path": "benchmarks/paper/tool_study.py",
+    "final_sha256": "87ce3bdc4c111226682fdf36e800c60b5d2e90b9e1fe4e0215ba7b2e4449da17",
+    "changes": "Require a separate output root and record the actual history checkpoint path in study metadata.",
+    "inference_runtime_changed": false,
+    "validation": "Final builder: 2 tests passed; actual paper runner prepare generated seven closed-loop cells and seven replay cells."
+  },
+  "source": {
+    "paper_base_head": "7feb8607983e4f460f4d77f2d7fceb1a36a6394c",
+    "paper_snapshot_head": "143b6475e57088e17e4dbae68e78004765244d5a",
+    "paper_manifest_sha256": "46e233416a3537c7d6e03f2b7eca22fafd503082adecd24230ab7c6e89ee4e84",
+    "paper_files_sha256": {
+      "benchmarks/paper/c1.py": "16df6358e7499da9dd21c996ceef9a0bcd745aeebe7eabcd57d5a6f1ff9526ad",
+      "benchmarks/paper/runner.py": "ab7fd305902c69950bdb8088309b5671678de55969b751f3e1bbb5b5df56fd63",
+      "benchmarks/paper/tool_study.py": "c66d2df3980d32a0bf6846cf46a1903dbff0bf1db700ec7319c9a8e17181ad2d",
+      "benchmarks/proxy.py": "e13b124ee158b25021c7337ce904c06ec64428dd595732e8be47435d38eae0a1",
+      "experiments/history_system/run_c1.py": "9b5a2cb79aaa20c2d496378a6ab0773582a7dbc2859f60814be1b8c0e46ae3bf",
+      "experiments/history_system/runtime/benchmarks/memory_runtime/event_native_tool.py": "fde014caa717fee4d9d79b9ab8632e4e5c33ba5ce468bd3cb0d31c0878417c82"
+    },
+    "engine_base_head": "e7b1f7e73eab3f0e59244379ecba24983bf1720e",
+    "engine_snapshot_head": "ec7c9ae82737d0a66082fb7d29f908b53321ed53",
+    "engine_manifest_sha256": "2cba99d7c5ba8264cc7112c97b543b9d3447d4062ff8c104d03a191de83fb042",
+    "snapshot_path": "/workspace/validation/tool-experiments-smoke-20260919-gpu1"
+  },
+  "device": {
+    "host_alias": "m1",
+    "gpu_index": 1,
+    "model_checkpoint": "/workspace/checkpoint-1000",
+    "tool_checkpoint": "/workspace/tool-merge-smoke-20260919/hf/T0/checkpoint-500",
+    "server_port": 34820
+  },
+  "cleanup": {
+    "owned_server_stopped": true,
+    "health_endpoint_after_stop": false,
+    "gpu1_memory_used_mib_after_stop": 0,
+    "source": "/workspace/validation/tool-experiments-smoke-20260919-gpu1/server_stopped.json"
+  },
+  "full_history_untouched_hybrid3": {
+    "qualification": "official BFCL closed-loop functional smoke; preliminary, n=1",
+    "task_id": "multi_turn_base_26",
+    "n_scored": 1,
+    "semantic_score": 0.0,
+    "proxy_requests": 31,
+    "tool_extract_events": 32,
+    "tool_gist_requests": 31,
+    "all_history_raw_by_proxy": true,
+    "path": "/workspace/validation/tool-experiments-smoke-20260919-gpu1/results/full__t0_r8_hybrid3",
+    "proxy_telemetry_sha256": "5a3a27e268e9d0b658b9e5440242f38935683067cc009f976143b4bb73cba666"
+  },
+  "joint_factorial": [
+    {
+      "arm": "c2kv_c1_off_r8",
+      "tool_memory": "t0:r8",
+      "stage": "closed_loop",
+      "qualification": "official BFCL closed-loop functional smoke; preliminary, n=1",
+      "task_id": "multi_turn_base_26",
+      "decisions": 21,
+      "generation_calls": 21,
+      "history_gist_decisions": 20,
+      "tool_gist_decisions": 21,
+      "tool_gist_chunks_first_decision": 18,
+      "actual_regenerations": 0,
+      "recovery_statuses": {
+        "no_op": 21
+      },
+      "semantic_score": 0.0,
+      "path": "/workspace/validation/tool-experiments-smoke-20260919-gpu1/results/c2kv_c1_off_r8__t0_r8",
+      "step_journal_sha256": "845618dd12522034314aced9a44da47cfdcbe93af1a643e96b49d1329d9e7e58"
+    },
+    {
+      "arm": "c2kv_c1_off_r8",
+      "tool_memory": "t0:r8:hybrid3",
+      "stage": "common_prefix",
+      "qualification": "teacher-forced exact Full request reconstructed from telemetry; no official score or external actions; preliminary, n=1",
+      "task_id": "multi_turn_base_26",
+      "decisions": 1,
+      "generation_calls": 1,
+      "history_gist_decisions": 1,
+      "tool_gist_decisions": 1,
+      "tool_gist_chunks_first_decision": 15,
+      "actual_regenerations": 0,
+      "recovery_statuses": {
+        "no_op": 1
+      },
+      "semantic_score": null,
+      "path": "/workspace/validation/tool-experiments-smoke-20260919-gpu1/results/c2kv_c1_off_r8__t0_r8_hybrid3",
+      "step_journal_sha256": "d004f87ed73463753b02c909003886e7ec21b2a042a06e9415ef2e5d13a36178"
+    },
+    {
+      "arm": "c2kv_c1_t02_r8",
+      "tool_memory": "t0:r8",
+      "stage": "common_prefix",
+      "qualification": "teacher-forced exact Full request reconstructed from telemetry; no official score or external actions; preliminary, n=1",
+      "task_id": "multi_turn_base_26",
+      "decisions": 1,
+      "generation_calls": 1,
+      "history_gist_decisions": 1,
+      "tool_gist_decisions": 1,
+      "tool_gist_chunks_first_decision": 18,
+      "actual_regenerations": 0,
+      "recovery_statuses": {
+        "abstain": 1
+      },
+      "semantic_score": null,
+      "path": "/workspace/validation/tool-experiments-smoke-20260919-gpu1/results/c2kv_c1_t02_r8__t0_r8",
+      "step_journal_sha256": "bbc5a631247e711bf85d746b94c084e4cc48b9f755ef4dfecf4b3cc3bc728a0e"
+    },
+    {
+      "arm": "c2kv_c1_t02_r8",
+      "tool_memory": "t0:r8:hybrid3",
+      "stage": "closed_loop",
+      "qualification": "official BFCL closed-loop functional smoke; preliminary, n=1",
+      "task_id": "multi_turn_base_26",
+      "decisions": 21,
+      "generation_calls": 26,
+      "history_gist_decisions": 20,
+      "tool_gist_decisions": 21,
+      "tool_gist_chunks_first_decision": 15,
+      "actual_regenerations": 5,
+      "recovery_statuses": {
+        "abstain": 16,
+        "recover": 5
+      },
+      "semantic_score": 0.0,
+      "path": "/workspace/validation/tool-experiments-smoke-20260919-gpu1/results/c2kv_c1_t02_r8__t0_r8_hybrid3__remote_path_fixed",
+      "step_journal_sha256": "b712a79eabad04935b65ed95c580f463c3689e35a5f81c415c39f8e0ba30bd7c"
+    }
+  ],
+  "shared_initial_controller": {
+    "equal_after_removing_recovery_only_fields": true,
+    "recovery_only_fields": [
+      "gp_experiments",
+      "post_draft_recovery"
+    ],
+    "on_controller": "/workspace/validation/tool-experiments-smoke-20260919-gpu1/results/c2kv_c1_t02_r8__t0_r8_hybrid3__remote_path_fixed/native/controller.json",
+    "off_controller": "/workspace/validation/tool-experiments-smoke-20260919-gpu1/results/c2kv_c1_off_r8__t0_r8/native/controller.json"
+  },
+  "one_prefix_source": {
+    "qualification": "exact Full input reconstructed from proxy telemetry; the original run did not enable --record-prefixes",
+    "source": "/workspace/validation/tool-experiments-smoke-20260919-gpu1/results/full__t0_r8_hybrid3/proxy_telemetry.jsonl",
+    "source_line": 62,
+    "source_sha256": "5a3a27e268e9d0b658b9e5440242f38935683067cc009f976143b4bb73cba666",
+    "captured_request_id": "e72a69fe207940e1b387d394e9c1b968",
+    "captured_messages": 6,
+    "captured_tools": 18,
+    "captured_payload_sha256": "53ec7c8d67af910d02923986ec8af3393443e700035ea87a48fa899a7125358a",
+    "output": "/workspace/validation/tool-experiments-smoke-20260919-gpu1/reconstructed_prefix_one.jsonl"
+  },
+  "forced_recovery_fixture": {
+    "schema": "t0-forced-regeneration-cuda-fixture-v1",
+    "qualification": "injected recovery decision; no C1 detector, official task, or score",
+    "status": "ok",
+    "generation_calls": 2,
+    "tool_chunks_stable": true,
+    "tool_anchor_offsets": [
+      [
+        [
+          55,
+          78
+        ],
+        [
+          80,
+          103
+        ]
+      ],
+      [
+        [
+          7,
+          30
+        ],
+        [
+          32,
+          55
+        ]
+      ]
+    ],
+    "tool_chunks": 2,
+    "draft_history_gist_chunks": 1,
+    "recovered_history_raw": true,
+    "paper_whole_full_kv_tokens": [
+      150,
+      150
+    ],
+    "source": "/workspace/validation/tool-experiments-smoke-20260919-gpu1",
+    "path": "/workspace/validation/tool-experiments-smoke-20260919-gpu1/forced_t0_regeneration_v6",
+    "receipt_sha256": "8f416d4ea738bc6202462a4500fc95c65925be19517c273ae957c4899971591f"
+  },
+  "limitations": [
+    "BFCL task26 is preliminary, n=1; these cells are functional checks, not quality estimates.",
+    "The OFF/hybrid3 and ON/uniform cells used one teacher-forced Full input reconstructed from proxy telemetry, without tool execution or official scoring.",
+    "No natural C1 regeneration occurred in either closed-loop cell; the two-call recovery check injected the recovery decision.",
+    "The first ON/hybrid3 attempt failed after a local-to-remote embedding-model path mismatch; the isolated config was corrected and a clean retry completed."
+  ]
+}

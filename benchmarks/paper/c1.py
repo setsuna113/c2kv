@@ -25,7 +25,7 @@ from benchmarks.measurement.replay import _paper_measurement
 from .candidate_matrix import ARM_TO_VARIANT
 from .process_lifecycle import defer_termination, unwind_on_termination
 
-ARMS = {"c2kv_c1_t02_r8": 8, "c2kv_c1_t02_r4": 4}   # final system and its ratio-4 ablation
+ARMS = {"c2kv_c1_t02_r8": 8, "c2kv_c1_t02_r4": 4, "c2kv_c1_off_r8": 8}
 ARMS["c2kv_native_r4"] = 4
 ARMS.update({arm: 8 for arm in ARM_TO_VARIANT})
 ARM = "c2kv_c1_t02_r8"
@@ -68,7 +68,8 @@ def delivery_args(config, benchmark, output, task_ids, delivery):
     if ARM in ARM_TO_VARIANT and benchmark not in {"bfcl_base", "acebench_agent"}:
         raise ValueError("candidate arms currently support bfcl_base and acebench_agent")
     command = [
-        "--method", "c2kv_native" if ARM == "c2kv_native_r4" else "proposed",
+        "--method", ("c2kv_native" if ARM == "c2kv_native_r4" else
+                     "c2kv_only" if ARM == "c2kv_c1_off_r8" else "proposed"),
         "--checkpoint", config["checkpoint"],
         "--sglang-backend-url", config.get("upstream") or f"http://127.0.0.1:{config['server_port']}",
         "--embedding-model", settings.get("embedding_model", "unused-native-bare"),
@@ -137,6 +138,8 @@ def save(path, value):
 
 
 def method_label():
+    if ARM == "c2kv_c1_off_r8":
+        return "C1 initial allocation (recovery off)"
     if ARM in ARM_TO_VARIANT:
         return f"C2KV {ARM_TO_VARIANT[ARM]}"
     return "C2KV" if ARM == "c2kv_native_r4" else "C2KV+C1"
@@ -172,6 +175,8 @@ def prepare_native(config, benchmark, directory, tasks, delivery):
                                "ratio-4 ablation of the final system: same controller, same ratio as bare C2KV"))
     if ARM == "c2kv_native_r4":
         profile["comparison"] = "Independent native static gist baseline; not a detector-only C1 ablation"
+    elif ARM == "c2kv_c1_off_r8":
+        profile["comparison"] = "Same C1 ratio8 initial history allocation, recovery disabled"
     elif ARM in ARM_TO_VARIANT:
         profile["comparison"] = "Explicit ratio-8 candidate; not a legacy C1 or D3 score"
     profile["sglang_backend_preflight"] = delivery.preflight_sglang_backend(args)

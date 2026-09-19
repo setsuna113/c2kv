@@ -30,7 +30,7 @@ DEFAULT_CONFIG = Path(__file__).with_name("config.json")
 # attribution is unchanged.
 ACEBENCH_MAX_RUNNING_REQUESTS = 2
 REFERENCE_ATTENTION_MEM_FRACTION = 0.65   # static pool cap for reference_attention arms (see server_command)
-C1_ARMS = {"c2kv_c1_t02_r8": 8, "c2kv_c1_t02_r4": 4}   # native C1 controller arms and their ratios
+C1_ARMS = {"c2kv_c1_t02_r8": 8, "c2kv_c1_t02_r4": 4, "c2kv_c1_off_r8": 8}
 BUDGET_TEXT_BENCHMARKS = {"bfcl_base", "bfcl_long_context", "acebench_agent"}
 
 EVENT_NATIVE_CHECKPOINT_MARKERS = {
