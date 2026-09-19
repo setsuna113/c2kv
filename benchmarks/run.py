@@ -85,7 +85,10 @@ def start_proxy(upstream: str, arm: str, port: int, log_dir: Path,
                 query_projection: str | None = None,
                 telemetry_log: str = "", record_prefixes: str = "",
                 benchmark: str = "", model_family: str = "qwen3-4b",
-                tool_memory: str = "", tool_checkpoint: str = ""):
+                tool_memory: str = "", tool_checkpoint: str = "",
+                tool_budget_tokens: int | None = None,
+                history_kv_target_tokens: int | None = None,
+                shared_engine: bool = False):
     _assert_proxy_port_available(port)
     log_path = log_dir / f"proxy_{arm}_{port}.jsonl"
     out_handle = open(log_dir / f"proxy_{arm}_{port}.out", "w")
@@ -101,6 +104,12 @@ def start_proxy(upstream: str, arm: str, port: int, log_dir: Path,
     ]
     if tool_memory:
         command += ["--tool-memory", tool_memory, "--tool-checkpoint", tool_checkpoint]
+        if tool_budget_tokens is not None:
+            command += ["--tool-budget-tokens", str(tool_budget_tokens)]
+    if history_kv_target_tokens is not None:
+        command += ["--history-kv-target-tokens", str(history_kv_target_tokens)]
+    if shared_engine:
+        command.append("--shared-engine")
     if record_reference:
         command += ["--record-reference", record_reference]
     if reference:
@@ -235,6 +244,12 @@ def add_core_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--tool-memory", default="",
                         help="tool-definition KV memory, orthogonal to --arm: '' = raw "
                              "tools; t0:r8 | t0:r12 | t0:r8:hybrid3 (benchmarks/toolmemory.py)")
+    parser.add_argument("--tool-budget-tokens", type=int,
+                        help="optional cap on resident tool-context tokens")
+    parser.add_argument("--history-kv-target-tokens", type=int,
+                        help="explicit absolute history budget for generation-budget arms")
+    parser.add_argument("--shared-engine", action="store_true",
+                        help="keep persistent-session resets local to this proxy")
     parser.add_argument("--tool-checkpoint", default="",
                         help="T0 checkpoint directory for --tool-memory (the served "
                              "endpoint must load it via --c2kv-tool-gist-weights)")
@@ -340,13 +355,24 @@ def main(argv=None):
         query_projection=args.query_projection,
         telemetry_log=args.telemetry_log, record_prefixes=args.record_prefixes,
         benchmark=args.benchmark, model_family=args.model_family,
-        tool_memory=args.tool_memory, tool_checkpoint=args.tool_checkpoint)
+        tool_memory=args.tool_memory, tool_checkpoint=args.tool_checkpoint,
+        tool_budget_tokens=args.tool_budget_tokens,
+        history_kv_target_tokens=args.history_kv_target_tokens,
+        shared_engine=args.shared_engine)
+    from toolmemory import parse_tool_memory_spec
+    previous_tool_context = os.environ.get("C2KV_TOOL_CONTEXT_ON")
+    os.environ["C2KV_TOOL_CONTEXT_ON"] = (
+        "1" if parse_tool_memory_spec(args.tool_memory) is not None else "0")
     try:
         # every adapter owns its own "/v1" (adapters/base.py:v1) and its own
         # cwd; run.py hands over the bare proxy URL and nothing else
         ctx = build_context(args, request_log)
         summary = ADAPTERS[args.benchmark].run(ctx)
     finally:
+        if previous_tool_context is None:
+            os.environ.pop("C2KV_TOOL_CONTEXT_ON", None)
+        else:
+            os.environ["C2KV_TOOL_CONTEXT_ON"] = previous_tool_context
         _stop_process(proxy_proc)
     summary["arm"] = args.arm
     summary["benchmark"] = args.benchmark

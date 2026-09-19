@@ -91,6 +91,29 @@ def test_server_command_is_native_bare(tmp_path, benchmark, namespace, profile):
         assert value("--max-new-tokens") == "1000"
 
 
+@pytest.mark.parametrize("benchmark", ["acebench_agent", "toolsandbox"])
+def test_tool_on_c1_uses_recovery_controller_and_tool_flags(tmp_path, benchmark):
+    config = _config(tmp_path)
+    config.update(native_arm="c2kv_c1_t02_r8", tool_memory="t0:r8",
+                  tool_checkpoint=str(tmp_path / "T0" / "checkpoint-500"),
+                  tool_budget_tokens=512)
+    config["c1"].update(detector="t02_risk", history_variant="H0",
+                        recovery_rounds=1)
+    root = Path(__file__).resolve().parents[2] / "experiments" / "history_system"
+    controller = tmp_path / "controller.json"
+    controller.write_text("{}", encoding="utf-8")
+    command = native_extra.server_command(
+        config, benchmark, "task_1", tmp_path / "native", root, controller)
+    def value(flag):
+        return command[command.index(flag) + 1]
+    assert value("--view-mode") == "ac_native_s0_lexical_raw_reserve_failed_operation"
+    assert value("--s0-config") == str(controller.resolve())
+    assert value("--model-name") == "c1_t02_risk"
+    assert value("--tool-memory") == "t0:r8"
+    assert value("--tool-checkpoint") == str(Path(config["tool_checkpoint"]).resolve())
+    assert value("--tool-budget-tokens") == "512"
+
+
 def test_ace_official_score_and_user_model_are_bound(tmp_path, monkeypatch):
     config = _config(tmp_path)
     task = "agent_multi_turn_1"
@@ -100,6 +123,7 @@ def test_ace_official_score_and_user_model_are_bound(tmp_path, monkeypatch):
 
     def run_acebench(*args, **kwargs):
         observed.update(kwargs)
+        observed["tool_context_env"] = __import__("os").environ.get("C2KV_TOOL_CONTEXT_ON")
         return {"n": 1, "semantic_score": 1.0,
                 "selection": {"sources": [{"selected_ids": [task]}]}}
 
@@ -111,11 +135,36 @@ def test_ace_official_score_and_user_model_are_bound(tmp_path, monkeypatch):
     assert observed["model"] == "c2kv_native_r4"
     assert observed["user_model"] == "c2kv-agent"
     assert official["task_rows"][0]["semantic_score"] == 1.0
+    assert observed["tool_context_env"] is None
     with mock.patch.object(acebench_adapter, "run_acebench", return_value={
         "n": 0, "semantic_score": 1.0, "selection": {"sources": []}}):
         with pytest.raises(RuntimeError, match="selection or scoring"):
             native_extra._run_official(config, "acebench_agent", task, output,
                                        "http://127.0.0.1:34100/v1", "c2kv_native_r4")
+
+
+def test_ace_tool_annotation_hook_is_enabled_only_during_on_harness(tmp_path, monkeypatch):
+    import os
+    from benchmarks.adapters import acebench_adapter
+
+    config = _config(tmp_path)
+    config["tool_memory"] = "t0:r8"
+    task = "agent_multi_turn_1"
+    output = tmp_path / "task"
+    (output / "acebench").mkdir(parents=True)
+    observed = []
+
+    def run_acebench(*args, **kwargs):
+        observed.append(os.environ.get("C2KV_TOOL_CONTEXT_ON"))
+        return {"n": 1, "semantic_score": 1.0,
+                "selection": {"sources": [{"selected_ids": [task]}]}}
+
+    monkeypatch.setattr(acebench_adapter, "run_acebench", run_acebench)
+    previous = os.environ.get("C2KV_TOOL_CONTEXT_ON")
+    native_extra._run_official(config, "acebench_agent", task, output,
+                               "http://127.0.0.1:34100/v1", "c1_t02_risk")
+    assert observed == ["1"]
+    assert os.environ.get("C2KV_TOOL_CONTEXT_ON") == previous
 
 
 def test_replay_requires_real_ace_receipts():

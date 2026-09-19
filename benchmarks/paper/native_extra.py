@@ -1,4 +1,4 @@
-"""Official ACEBench Agent and ToolSandbox tasks for native bare C2KV."""
+"""Official ACEBench Agent and ToolSandbox tasks for native C2KV."""
 from __future__ import annotations
 
 import copy
@@ -129,11 +129,15 @@ def replay_payload(payload, task, step):
 def server_command(config, benchmark, task, native, delivery, controller_path):
     if benchmark not in BENCHMARKS:
         raise ValueError(f"Unsupported native bare benchmark: {benchmark}")
-    from experiments.history_system.native_bare import configure_design
-
     delivery_root = c1_appworld._delivery_path(delivery)
-    design = json.loads((delivery_root / "configs" / "current_algorithm.json").read_text(encoding="utf-8"))
-    design = configure_design(design)
+    arm = config.get("native_arm", "c2kv_native_r4")
+    if arm == "c2kv_native_r4":
+        from experiments.history_system.native_bare import configure_design
+
+        design = json.loads((delivery_root / "configs" / "current_algorithm.json").read_text(encoding="utf-8"))
+        design = configure_design(design)
+    else:
+        design = c1_appworld._resolved_design(config, delivery_root, Path(controller_path))
     design["runtime"].update(
         sglang_backend_url=c1_appworld._sglang_upstream(config),
         device="cpu", npu_allocator_metrics=False,
@@ -144,7 +148,7 @@ def server_command(config, benchmark, task, native, delivery, controller_path):
         design["sampling"]["max_completion_tokens"] = 1000
     runner = c1_appworld._delivery_runner(delivery)
     runtime_name, source_profile = BENCHMARKS[benchmark]
-    return runner.server_command(
+    command = runner.server_command(
         design, task_id=_task_id(task),
         checkpoint=str(Path(config["checkpoint"]).resolve()),
         output=str(Path(native).resolve()),
@@ -152,6 +156,13 @@ def server_command(config, benchmark, task, native, delivery, controller_path):
         python=c1_appworld._controller_python(config),
         benchmark=runtime_name, source_profile=source_profile,
     )
+    if config.get("tool_memory"):
+        command.extend(["--tool-memory", str(config["tool_memory"])])
+        if config.get("tool_checkpoint"):
+            command.extend(["--tool-checkpoint", str(Path(config["tool_checkpoint"]).resolve())])
+        if config.get("tool_budget_tokens") is not None:
+            command.extend(["--tool-budget-tokens", str(config["tool_budget_tokens"])])
+    return command
 
 
 controller_command = server_command
@@ -163,7 +174,10 @@ def _run_official(config, benchmark, task, task_out, base_url, model):
         from benchmarks.adapters import acebench_adapter as ace
 
         old = os.environ.get("C2KV_ACE_NATIVE")
+        old_tool = os.environ.get("C2KV_TOOL_CONTEXT_ON")
         os.environ["C2KV_ACE_NATIVE"] = "1"
+        if config.get("tool_memory"):
+            os.environ["C2KV_TOOL_CONTEXT_ON"] = "1"
         try:
             summary = ace.run_acebench(
                 base_url, user_url, task_out / "acebench",
@@ -178,6 +192,10 @@ def _run_official(config, benchmark, task, task_out, base_url, model):
                 os.environ.pop("C2KV_ACE_NATIVE", None)
             else:
                 os.environ["C2KV_ACE_NATIVE"] = old
+            if old_tool is None:
+                os.environ.pop("C2KV_TOOL_CONTEXT_ON", None)
+            else:
+                os.environ["C2KV_TOOL_CONTEXT_ON"] = old_tool
         selected = summary.get("selection") or {}
         selected_ids = [value for source in selected.get("sources", [])
                         for value in source.get("selected_ids", [])]
@@ -255,7 +273,10 @@ def run_task(config, benchmark, task, native, delivery, controller_path):
     namespace = BENCHMARKS[benchmark][0]
     metrics = run_c1.summarize_task(namespace, task, task_out, official,
                                     time.monotonic() - started)
-    acceptance = run_c1.functional_checks("c2kv_native", "disabled", metrics)
+    arm = config.get("native_arm", "c2kv_native_r4")
+    method = "c2kv_native" if arm == "c2kv_native_r4" else "proposed"
+    detector = (config.get("c1") or {}).get("detector", "t02_risk")
+    acceptance = run_c1.functional_checks(method, detector, metrics)
     if not all(acceptance["required"].values()):
         raise RuntimeError(f"Native bare functional acceptance failed: {acceptance['required']}")
     return ({"task_id": task, "status": "completed", "official_summary": official,

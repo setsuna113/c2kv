@@ -244,7 +244,7 @@ def server_command(
     directory = Path(directory).resolve()
     runner = _delivery_runner(delivery)
     design = _resolved_design(config, delivery_root, Path(controller_path))
-    return runner.server_command(
+    command = runner.server_command(
         design,
         task_id=task_id,
         checkpoint=str(Path(str(config["checkpoint"])).resolve()),
@@ -254,6 +254,13 @@ def server_command(
         benchmark=BENCHMARK,
         source_profile=SOURCE_PROFILE,
     )
+    if config.get("tool_memory"):
+        command.extend(["--tool-memory", str(config["tool_memory"])])
+        if config.get("tool_checkpoint"):
+            command.extend(["--tool-checkpoint", str(Path(config["tool_checkpoint"]).resolve())])
+        if config.get("tool_budget_tokens") is not None:
+            command.extend(["--tool-budget-tokens", str(config["tool_budget_tokens"])])
+    return command
 
 
 # The paper replay path uses this name for the same one-task native endpoint.
@@ -406,6 +413,8 @@ def _run_official_harness(
         **acon.appworld_runner_env(origin, telemetry_path, run_dir, acon_dir),
         "APPWORLD_ROOT": str(cwd),
     }
+    if config.get("tool_memory"):
+        env["C2KV_TOOL_CONTEXT_ON"] = "1"
     timeout = float(config.get("c1", {}).get("task_timeout", 10800))
     run_owned(
         acon.appworld_command(python, model, tag, split, max_iter, [task_id]),

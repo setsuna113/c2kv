@@ -186,6 +186,8 @@ class EncoderChunk:
     source_token_start: int
     source_token_end: int
     token_ids: tuple[int, ...]
+    projection_set: str | None = None
+    compression_ratio: int | None = None
 
     def encoding_key(self, *, parameter_version: str | int, ratio: int) -> tuple[Any, ...]:
         """An exact-input key; the caller advances version after optimizer.step.
@@ -607,6 +609,8 @@ class PackedMemory:
     raw_source_indices: tuple[int, ...]
     chunks: tuple[EncoderChunk, ...]
     raw_layout_profile: str = RAW_LAYOUT_PROFILE
+    raw_tool_segments: tuple[dict[str, Any], ...] = ()
+    tool_gist_segments: tuple[dict[str, Any], ...] = ()
 
     def gist_layout(self, ratio: int) -> tuple[GistPlacement, ...]:
         """Match dynamic-interleave's source-span RoPE, not compressed offsets."""
@@ -616,7 +620,9 @@ class PackedMemory:
         placements = []
         for chunk in self.chunks:
             length = len(chunk.token_ids)
-            positions = tuple(offset + min(start + ratio, length) - 1 for start in range(0, length, ratio))
+            chunk_ratio = chunk.compression_ratio or ratio
+            positions = tuple(offset + min(start + chunk_ratio, length) - 1
+                              for start in range(0, length, chunk_ratio))
             placements.append(GistPlacement(chunk, offset, positions))
             offset += length
         return tuple(placements)
@@ -632,13 +638,45 @@ class PackedMemory:
             max(chunk.source_token_end for chunk in self.chunks if chunk.event_id == event_id)
             for event_id in {chunk.event_id for chunk in self.chunks}
         )
-        return {
+        anchored_chunks = [chunk for segment in self.tool_gist_segments
+                           for chunk in segment["chunks"]]
+        unique += sum(
+            max(chunk.source_token_end for chunk in anchored_chunks
+                if chunk.event_id == event_id)
+            for event_id in {chunk.event_id for chunk in anchored_chunks}
+        )
+        for segment in self.tool_gist_segments:
+            for chunk in segment["chunks"]:
+                chunk_ratio = chunk.compression_ratio or ratio
+                gist_tokens += (len(chunk.token_ids) + chunk_ratio - 1) // chunk_ratio
+                presented += len(chunk.token_ids)
+        removed_source = sum(segment["token_end"] - segment["token_start"]
+                             for segment in self.tool_gist_segments)
+        removed_source += sum(segment["token_end"] - segment["token_start"]
+                              for segment in self.raw_tool_segments)
+        retained_raw = sum(segment["token_len"] for segment in self.raw_tool_segments)
+        result = {
             "system_tokens": len(self.system_input_ids), "raw_tokens": len(self.workspace_input_ids),
             "gist_tokens": gist_tokens, "presented_encoder_tokens": presented,
             "encoder_overlap_tokens": presented - unique,
-            "resident_kv_tokens": len(self.system_input_ids) + len(self.workspace_input_ids) + gist_tokens,
+            "resident_kv_tokens": len(self.system_input_ids) + len(self.workspace_input_ids)
+                                  + gist_tokens - removed_source + retained_raw,
             "raw_gist_overlap_events": len(set(self.view.raw_event_ids) & set(self.view.gist_event_ids)),
         }
+        if self.tool_gist_segments:
+            result["anchored_tool_source_tokens"] = sum(
+                segment["token_end"] - segment["token_start"]
+                for segment in self.tool_gist_segments)
+            result["anchored_tool_gist_tokens"] = sum(
+                (len(chunk.token_ids) + (chunk.compression_ratio or ratio) - 1)
+                // (chunk.compression_ratio or ratio)
+                for segment in self.tool_gist_segments for chunk in segment["chunks"])
+        if self.raw_tool_segments:
+            result["raw_tool_source_tokens"] = sum(
+                segment["token_end"] - segment["token_start"]
+                for segment in self.raw_tool_segments)
+            result["raw_tool_resident_tokens"] = retained_raw
+        return result
 
     def causal_mask(self, ratio: int, *, target_tokens: int = 0) -> tuple[tuple[bool, ...], ...]:
         """Small CPU reference: ordinary queries see all memory and causal raw.

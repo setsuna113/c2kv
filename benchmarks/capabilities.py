@@ -12,6 +12,7 @@ from dataclasses import asdict, dataclass, field
 import os
 from pathlib import Path
 import shutil
+import subprocess
 import sys
 from typing import Any, Iterable, Mapping, MutableMapping, Optional
 
@@ -154,6 +155,28 @@ def _append_warning(result: PreflightResult, code: str, message: str) -> None:
                                            satisfied=True, message=message))
 
 
+def _acebench_tool_patch_installed(root: Path) -> bool:
+    base = root / "model_inference"
+    sites = (
+        (base / "role_history.py", "def tool_context_kwargs"),
+        (base / "apimodel_inference.py", "tool_context_kwargs(message, functions)"),
+        (base / "multi_step" / "APIModel_agent.py", "tool_context_kwargs(message, self.functions)"),
+        (base / "multi_turn" / "APIModel_agent.py", "tool_context_kwargs(message, self.functions)"),
+    )
+    return all(path.is_file() and marker in path.read_text(encoding="utf-8")
+               for path, marker in sites)
+
+
+def _acebench_tool_patch_applicable(root: Path, patch: Path) -> bool:
+    if _acebench_tool_patch_installed(root):
+        return True
+    if not root.is_dir() or not patch.is_file() or shutil.which("git") is None:
+        return False
+    result = subprocess.run(["git", "apply", "--check", str(patch)], cwd=root,
+                            capture_output=True, text=True)
+    return result.returncode == 0
+
+
 def _profile_value(profile: Optional[Mapping[str, Any]], key: str) -> Any:
     if not profile:
         return None
@@ -283,7 +306,9 @@ def _benchmark_prerequisites(result: PreflightResult, benchmark: str,
         # the legacy agent request otherwise remains one growing user string.
         # Verify the three concrete patch sites, so a stale endpoint-only
         # checkout cannot be made eligible merely by declaring the feature.
-        if arm != "full" and ACE_ROLE_HISTORY_FEATURE in features:
+        tool_context = str(options.get("tool_memory") or "").strip().lower() not in (
+            "", "none", "raw", "full")
+        if (arm != "full" and ACE_ROLE_HISTORY_FEATURE in features) or tool_context:
             _append_marker(
                 result, "acebench_role_history_helper",
                 root / "model_inference" / "role_history.py", "def agent_messages",
@@ -295,6 +320,23 @@ def _benchmark_prerequisites(result: PreflightResult, benchmark: str,
                     root / "model_inference" / test / "APIModel_agent.py", "agent_messages(",
                     "apply the ACEBench role-history agent patch",
                 )
+        if tool_context:
+            patch = (Path(__file__).resolve().parent / "acebench_patches" /
+                     "0002-visible-tool-spans.patch")
+            _append_path(result, "acebench_tool_span_patch", patch,
+                         "the source-span patch must be available for a private harness copy")
+            installed = _acebench_tool_patch_installed(root) if root.is_dir() else False
+            result.requirements.append(Requirement(
+                code="acebench_tool_span_patch_git", severity="error",
+                satisfied=installed or shutil.which("git") is not None,
+                message="git apply is required unless the ACEBench patch is already installed",
+            ))
+            result.requirements.append(Requirement(
+                code="acebench_tool_span_patch_applicable", severity="error",
+                satisfied=_acebench_tool_patch_applicable(root, patch),
+                message="the source-span patch must apply to the private ACEBench harness",
+                path=str(root),
+            ))
 
 
 def _method_capabilities(result: PreflightResult, arm: str, backend: str,

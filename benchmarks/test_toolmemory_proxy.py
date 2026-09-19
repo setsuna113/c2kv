@@ -153,6 +153,21 @@ def test_tool_memory_proxy_end_to_end(tmp_path):
         # tools-only request: no compressible remainder -> None, served raw
         bare = {"model": "c2kv-agent", "messages": [{"role": "user", "content": "hi"}]}
         assert _post(f"http://127.0.0.1:{proxy_port}/v1/chat/completions", bare)["c2kv_proxy"]["tool_memory"] is None
+        visible_doc = "{'api_name': 'search', 'parameters': []}"
+        second_doc = "{'api_name': 'update', 'parameters': []}"
+        inline_text = ("Write Python code.\n" + visible_doc + "\n" + second_doc +
+                       "\nReturn one statement.")
+        inline = {"model": "c2kv-agent", "messages": [
+            {"role": "user", "content": inline_text}],
+            toolmemory.TOOL_SPANS_FIELD: [{
+                "message_index": 0, "start": inline_text.index(visible_doc),
+                "end": inline_text.index(visible_doc) + len(visible_doc),
+                "source": "appworld.api_docs.show_api_doc"}, {
+                "message_index": 0, "start": inline_text.index(second_doc),
+                "end": inline_text.index(second_doc) + len(second_doc),
+                "source": "appworld.api_docs.show_api_doc"}],
+        }
+        assert _post(f"http://127.0.0.1:{proxy_port}/v1/chat/completions", inline)["choices"][0]["message"]["content"] == "ok"
     finally:
         process.terminate()
         try:
@@ -164,7 +179,7 @@ def test_tool_memory_proxy_end_to_end(tmp_path):
         upstream.server_close()
 
     # ---- extraction wire shape: exact token ids, tool projection set, ratio 8
-    assert len(_FakeSGLang.extracts) == 2, _FakeSGLang.extracts
+    assert len(_FakeSGLang.extracts) == 3, _FakeSGLang.extracts
     for extract in _FakeSGLang.extracts:
         assert extract["projection_set"] == "tool" and extract["compression_ratio"] == 8
         assert isinstance(extract["token_ids"], list) and all(isinstance(t, int) for t in extract["token_ids"])
@@ -174,7 +189,7 @@ def test_tool_memory_proxy_end_to_end(tmp_path):
     tokenizer = AutoTokenizer.from_pretrained(str(checkpoint), local_files_only=True)
     snapshots = [toolmemory.tool_snapshot(t) for t in TOOLS]
     remainder = [i for i in range(3) if i != 1]           # cancel_order is the native top-1
-    for extract, index in zip(_FakeSGLang.extracts, remainder):
+    for extract, index in zip(_FakeSGLang.extracts[:2], remainder):
         document = {"type": "tool_definition", "tool_index": index, "tool": snapshots[index]}
         expected = tokenizer.apply_chat_template(
             [{"role": "user", "content": toolmemory.document_envelope(document)}], tokenize=True,
@@ -193,22 +208,40 @@ def test_tool_memory_proxy_end_to_end(tmp_path):
     carriers = messages[1:3]
     assert [m["c2kv_key_hash"] for m in carriers] == [
         hashlib.sha256(json.dumps([e["token_ids"], 8, "tool"]).encode()).hexdigest()
-        for e in _FakeSGLang.extracts]
-    assert all(set(m) == {"role", "content", "c2kv_key_hash", "c2kv_ratio"} and m["content"] == "" for m in carriers)
+        for e in _FakeSGLang.extracts[:2]]
+    assert all(set(m) == {"role", "content", "c2kv_key_hash", "c2kv_ratio",
+                          "c2kv_region", "c2kv_source_token_count"}
+               and m["content"] == "" and m["c2kv_region"] == "tool"
+               and m["c2kv_source_token_count"] > 0 for m in carriers)
     assert messages[3] == {"role": "user", "content": "cancel_order 42 please"}
     boundary = chat["c2kv_kv_memory_hint"]["paper_measurement"]
     assert (boundary["history_start_message_count"], boundary["history_message_count"]) == (0, 0)
+    assert boundary["canonical_source_messages"] == payload["messages"]
+    assert boundary["canonical_source_tools"] == TOOLS
     # the bare request (no tools) only gets the proxy's usual default system
     # prompt; no protocol, no carriers, no c2kv_tools_in_prompt
     bare_messages = _FakeSGLang.chats[1]["messages"]
     assert bare_messages[-1] == {"role": "user", "content": "hi"} and len(bare_messages) == 2
     assert bare_messages[0]["role"] == "system" and toolmemory.TOOL_PROTOCOL_HEAD not in bare_messages[0]["content"]
     assert "c2kv_tools_in_prompt" not in _FakeSGLang.chats[1]
+    bare_boundary = _FakeSGLang.chats[1]["c2kv_kv_memory_hint"]["paper_measurement"]
+    assert "canonical_source_messages" not in bare_boundary
+    assert "canonical_source_tools" not in bare_boundary
+    inline_chat = _FakeSGLang.chats[2]
+    assert toolmemory.TOOL_SPANS_FIELD not in inline_chat
+    assert "c2kv_tools_in_prompt" not in inline_chat
+    inline_messages = inline_chat["messages"]
+    assert inline_messages[0]["content"] == proxy.DEFAULT_SYSTEM_PROMPT
+    assert inline_messages[1]["content"].startswith("Write Python code.\n")
+    assert inline_messages[1]["content"].endswith("\nReturn one statement.")
+    assert inline_messages[1]["content"].count("available in compressed memory") == 1
+    assert inline_messages[2]["c2kv_region"] == "tool"
+    assert inline_chat["c2kv_kv_memory_hint"]["paper_measurement"]["canonical_source_messages"] == inline["messages"]
 
     # ---- accounting
     assert info["n_tools"] == 3 and info["native_indices"] == [1] and info["native_names"] == ["cancel_order"]
     assert info["n_chunks"] == 2 and info["gist_tokens"] == sum(
-        (len(e["token_ids"]) + 7) // 8 for e in _FakeSGLang.extracts)
+        (len(e["token_ids"]) + 7) // 8 for e in _FakeSGLang.extracts[:2])
     assert info["raw_tool_prologue_tokens"] > info["resident_tool_tokens"] > 0
     rows = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines() if line.strip()]
     assert rows[0]["tool_memory"]["spec"] == "t0_r8_hybrid1" and rows[0]["status"] == "ok"
@@ -218,7 +251,7 @@ def test_tool_memory_refuses_budget_adapted_text_arms():
     """Budget-adapted arms preflight the raw actor payload (tool prologue
     included) through the server's chat budget renderer; the proxy refuses the
     combination before touching the checkpoint or the upstream."""
-    with pytest.raises(SystemExit, match="budget-adapted"):
+    with pytest.raises(SystemExit, match="ACON/HiAgent"):
         proxy.main([
             "--upstream", "http://127.0.0.1:1", "--backend", "sglang",
             "--arm", "hiagent_full_b4096", "--port", "1",

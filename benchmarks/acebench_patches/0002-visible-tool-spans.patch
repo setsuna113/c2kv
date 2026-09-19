@@ -1,0 +1,77 @@
+diff --git a/model_inference/role_history.py b/model_inference/role_history.py
+--- a/model_inference/role_history.py
++++ b/model_inference/role_history.py
+@@ -1,6 +1,16 @@
+ """Role-preserving OpenAI messages for ACEBench agent clients."""
+ 
+ import json
++import os
++
++from source_annotations import acebench_function_spans
++
++
++def tool_context_kwargs(messages, functions):
++    if os.getenv("C2KV_TOOL_CONTEXT_ON") != "1":
++        return {}
++    spans = acebench_function_spans(messages, functions)
++    return {"extra_body": {"c2kv_tool_spans_v1": spans}} if spans else {}
+ 
+ 
+ def _content(value):
+diff --git a/model_inference/apimodel_inference.py b/model_inference/apimodel_inference.py
+--- a/model_inference/apimodel_inference.py
++++ b/model_inference/apimodel_inference.py
+@@ -1,4 +1,5 @@
+ from model_inference.base_inference import BaseHandler
++from model_inference.role_history import tool_context_kwargs
+ 
+ 
+ from model_inference.prompt_zh import *
+@@ -114,6 +115,7 @@
+                     temperature=self.temperature,
+                     max_tokens=self.max_tokens,
+                     top_p=self.top_p,
++                    **tool_context_kwargs(message, functions),
+                 )
+                 result = response.choices[0].message.content
+ 
+diff --git a/model_inference/multi_step/APIModel_agent.py b/model_inference/multi_step/APIModel_agent.py
+--- a/model_inference/multi_step/APIModel_agent.py
++++ b/model_inference/multi_step/APIModel_agent.py
+@@ -2,7 +2,7 @@
+ from openai import OpenAI
+ import os
+ import re 
+-from model_inference.role_history import agent_messages
++from model_inference.role_history import agent_messages, tool_context_kwargs
+ 
+ 
+ MULTI_TURN_AGENT_PROMPT_SYSTEM_ZH = """你是一个AI系统，你的角色为system，请根据给定的API说明和对话历史1..t，为角色system生成在步骤t+1中生成相应的内容。
+@@ -114,6 +114,7 @@
+                 temperature=self.temperature,
+                 max_tokens=self.max_tokens,
+                 top_p=self.top_p,
++                **tool_context_kwargs(message, self.functions),
+             )
+             response = response.choices[0].message.content
+         elif "o1" not in self.model_name:
+diff --git a/model_inference/multi_turn/APIModel_agent.py b/model_inference/multi_turn/APIModel_agent.py
+--- a/model_inference/multi_turn/APIModel_agent.py
++++ b/model_inference/multi_turn/APIModel_agent.py
+@@ -4,7 +4,7 @@
+ import ast
+ from model_inference.prompt_en import TRAVEL_PROMPT_EN, BASE_PROMPT_EN
+ from model_inference.prompt_zh import TRAVEL_PROMPT_ZH, BASE_PROMPT_ZH
+-from model_inference.role_history import agent_messages
++from model_inference.role_history import agent_messages, tool_context_kwargs
+ 
+ 
+ MULTI_TURN_AGENT_PROMPT_SYSTEM_ZH = """你是一个AI系统，你的角色为system，请根据给定的API说明和对话历史1..t，为角色system生成在步骤t+1中生成相应的内容。
+@@ -218,6 +218,7 @@
+                 temperature=self.temperature,
+                 max_tokens=self.max_tokens,
+                 top_p=self.top_p,
++                **tool_context_kwargs(message, self.functions),
+             )
+             response = response.choices[0].message.content
+         elif "o1" not in self.model_name:

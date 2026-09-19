@@ -225,6 +225,9 @@ class SGLangEventNativeGenerator:
         max_new_tokens: int,
         max_generation_calls: int,
         max_extraction_calls: int,
+        max_tool_extraction_calls: int | None = None,
+        max_tool_repair_calls: int | None = None,
+        expected_tool_checkpoint_contract: Mapping[str, Any] | None = None,
         timeout_seconds: float,
         eos_token_ids: int | Sequence[int],
         eos_source: str,
@@ -256,6 +259,16 @@ class SGLangEventNativeGenerator:
         self.max_extraction_calls = _positive_int(
             max_extraction_calls, "max_extraction_calls"
         )
+        self.max_tool_extraction_calls = (
+            None if max_tool_extraction_calls is None else
+            _positive_int(max_tool_extraction_calls, "max_tool_extraction_calls"))
+        self.max_tool_repair_calls = (
+            None if max_tool_repair_calls is None else
+            _positive_int(max_tool_repair_calls, "max_tool_repair_calls"))
+        self.expected_tool_checkpoint_contract = (
+            None if expected_tool_checkpoint_contract is None else
+            _json_object(expected_tool_checkpoint_contract, "expected_tool_checkpoint_contract"))
+        self.tool_repair_calls = 0
         self.max_response_bytes = _positive_int(max_response_bytes, "max_response_bytes")
 
         sampling = _json_object(
@@ -277,8 +290,8 @@ class SGLangEventNativeGenerator:
         if sampling_profile == "acebench-agent-v1":
             if float(temperature) != 0.001 or sampling.get("top_p") != 1:
                 raise ValueError("ACEBench Agent requires temperature=0.001 and top_p=1")
-            if "seed" in sampling or "sampling_seed" in sampling or shadow_feature_config is not None:
-                raise ValueError("ACEBench Agent bare profile has no explicit seed or detector")
+            if "seed" in sampling or "sampling_seed" in sampling:
+                raise ValueError("ACEBench Agent profile has no explicit seed")
         elif float(temperature) != 0.0:
             raise ValueError("event-native D3/GP serving requires greedy temperature=0")
         self.sampling_profile = sampling_profile
@@ -292,6 +305,7 @@ class SGLangEventNativeGenerator:
 
         self._requests_submitted = 0
         self.extraction_calls_reserved = 0
+        self.tool_extraction_calls_reserved = 0
         self._model_binding: dict[str, Any] | None = None
         self._kv_bytes_per_token: int | None = None
         self._active_decision_scope: _DecisionScope | None = None
@@ -303,7 +317,7 @@ class SGLangEventNativeGenerator:
     def _exact_local_state(self) -> dict[str, Any]:
         session = self._session_cache
         scope = self._active_decision_scope
-        return {
+        state = {
             "session": None if session is None else {
                 "session_id": session.session_id, "generation": session.generation,
                 "handles": sorted(session.handles),
@@ -324,6 +338,11 @@ class SGLangEventNativeGenerator:
             "model_binding": copy.deepcopy(self._model_binding),
             "kv_bytes_per_token": self._kv_bytes_per_token,
         }
+        if self.max_tool_extraction_calls is not None:
+            state["tool_extraction_calls_reserved"] = self.tool_extraction_calls_reserved
+        if self.max_tool_repair_calls is not None:
+            state["tool_repair_calls"] = self.tool_repair_calls
+        return state
 
     def _exact_request(self, operation: str, snapshot_id: str | None = None) -> dict[str, Any]:
         response, status = self._read_json(Request(
@@ -397,6 +416,10 @@ class SGLangEventNativeGenerator:
                 setattr(scope, name, set(value) if name in {"session_handles", "retained_handles"} else value)
         self._requests_submitted = local["requests_submitted"]
         self.extraction_calls_reserved = local["extraction_calls_reserved"]
+        if "tool_extraction_calls_reserved" in local:
+            self.tool_extraction_calls_reserved = local["tool_extraction_calls_reserved"]
+        if "tool_repair_calls" in local:
+            self.tool_repair_calls = local["tool_repair_calls"]
         self.sampling_params = local["sampling_params"]
         self.last_generation_trace = local["last_generation_trace"]
         self.last_cache_lifecycle_trace = local["last_cache_lifecycle_trace"]
@@ -562,11 +585,12 @@ class SGLangEventNativeGenerator:
             scope.pending_stats = None
 
         self._ensure_model_info()
-        selected, extras = self._prepare_chunks(memory, ratio, compression_chunks)
+        selected, extras, anchored = self._prepare_chunks(memory, ratio, compression_chunks)
         logical_tokens = (
             len(memory.system_input_ids)
             + sum(len(item["token_ids"]) for item in selected)
             + len(memory.workspace_input_ids)
+            - sum(item["token_end"] - item["token_start"] for item in anchored)
         )
         if logical_tokens + requested_tokens > self.model_context:
             raise ValueError("logical packed prompt plus completion exceeds model_context")
@@ -604,7 +628,7 @@ class SGLangEventNativeGenerator:
             "encoding_scope": self.encoding_scope,
             "system_input_ids": list(memory.system_input_ids),
             "workspace_input_ids": list(memory.workspace_input_ids),
-            "encoder_chunks": selected,
+            "encoder_chunks": selected[:len(memory.chunks)],
             "compression_chunks": extras,
             "compression_ratio": ratio,
             "max_extraction_calls": remaining_extractions,
@@ -615,6 +639,13 @@ class SGLangEventNativeGenerator:
             },
             "shadow_features": shadow_request,
         }
+        if self.max_tool_extraction_calls is not None:
+            payload["max_tool_extraction_calls"] = (
+                self.max_tool_extraction_calls - getattr(self, "tool_extraction_calls_reserved", 0))
+        if memory.raw_tool_segments:
+            payload["raw_tool_segments"] = [dict(item) for item in memory.raw_tool_segments]
+        if anchored:
+            payload["tool_gist_segments"] = anchored
         if self.sampling_profile != "greedy-v1":
             payload["sampling_profile"] = self.sampling_profile
         outer_request_id = context.get("outer_request_id")
@@ -690,6 +721,18 @@ class SGLangEventNativeGenerator:
             raise SGLangEventNativeError(
                 "SGLang top-level model_path does not match expected_model_path"
             )
+        if self.expected_tool_checkpoint_contract is not None:
+            tool = native.get("tool_gist")
+            expected = self.expected_tool_checkpoint_contract
+            if not isinstance(tool, Mapping) or tool.get("enabled") is not True:
+                raise SGLangEventNativeError("SGLang tool gist projection is not enabled")
+            if tool.get("extract_projection_set") != "tool":
+                raise SGLangEventNativeError("SGLang tool gist projection set differs")
+            if tool.get("config_sha256") != expected.get("config_sha256"):
+                raise SGLangEventNativeError("SGLang tool checkpoint config hash differs")
+            source = tool.get("source")
+            if not isinstance(source, str) or Path(source).resolve() != Path(expected["checkpoint"]).resolve():
+                raise SGLangEventNativeError("SGLang tool checkpoint source differs")
         kv_bytes = _nonnegative_int(
             native.get("kv_bytes_per_token"), "kv_bytes_per_token"
         )
@@ -698,12 +741,58 @@ class SGLangEventNativeGenerator:
         self._model_binding = binding
         self._kv_bytes_per_token = kv_bytes
 
+    def repair_tool_span(self, input_ids: Sequence[int], *, span_start: int,
+                         span_end: int, method: str, target_tokens: int) -> dict[str, Any]:
+        """Extract one query-conditioned raw tool region with a separate cap."""
+        if method not in {"h2o", "snapkv"}:
+            raise ValueError("Raw tool repair method must be h2o or snapkv")
+        ids = _token_ids(input_ids, "input_ids", nonempty=True)
+        if (type(span_start) is not int or type(span_end) is not int
+                or not 0 <= span_start < span_end <= len(ids)):
+            raise ValueError("Tool span must be inside the exact logical prompt")
+        _positive_int(target_tokens, "target_tokens")
+        if target_tokens > span_end - span_start:
+            raise ValueError("Tool target cannot exceed its raw source")
+        if self.max_tool_repair_calls is not None and self.tool_repair_calls >= self.max_tool_repair_calls:
+            raise SGLangEventNativeError("Finite tool repair-call cap is exhausted")
+        self._ensure_model_info()
+        body = {
+            "input_ids": list(ids), "span_start": span_start, "span_end": span_end,
+            "position_offset": 0, "raw_kv_position_mode": "rotated",
+            "repair_mode": "history_kv_" + method,
+            "history_kv_method": method,
+            "history_kv_target_tokens": target_tokens,
+            "history_kv_recent_window": 64,
+            "history_kv_kernel_size": 5,
+            "history_kv_pooling": "avgpool",
+            "history_kv_h2o_recent_fraction": 0.5,
+        }
+        self.tool_repair_calls += 1
+        response, status = self._read_json(Request(
+            self.upstream + "/v1/c2kv/repair_extract",
+            data=_canonical_bytes(body),
+            headers={"Content-Type": "application/json"}, method="POST"),
+            label="SGLang tool repair_extract")
+        if status != 200 or not isinstance(response, Mapping) or response.get("success") is not True:
+            raise SGLangEventNativeError(f"Tool repair_extract failed: HTTP {status}")
+        key_hash = response.get("key_hash")
+        token_len = response.get("token_len")
+        if not isinstance(key_hash, str) or not key_hash or type(token_len) is not int:
+            raise SGLangEventNativeError("Tool repair_extract lacks a retained KV handle")
+        if not 0 < token_len <= target_tokens:
+            raise SGLangEventNativeError("Tool repair_extract exceeded the retained target")
+        if response.get("original_seq_len") != span_end - span_start:
+            raise SGLangEventNativeError("Tool repair_extract source length mismatch")
+        if response.get("history_kv_method") != method:
+            raise SGLangEventNativeError("Tool repair_extract method mismatch")
+        return dict(response)
+
     def _prepare_chunks(
         self,
         memory: PackedMemory,
         ratio: int,
         compression_chunks: Sequence[EncoderChunk] | None,
-    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
         placements = memory.gist_layout(ratio)
         selected = [
             self._chunk_payload(
@@ -714,6 +803,24 @@ class SGLangEventNativeGenerator:
             )
             for placement in placements
         ]
+        anchored = []
+        for segment in memory.tool_gist_segments:
+            start = segment["token_start"]
+            end = segment["token_end"]
+            cursor = start
+            rows = []
+            for chunk in segment["chunks"]:
+                chunk_ratio = chunk.compression_ratio or ratio
+                length = len(chunk.token_ids)
+                positions = tuple(cursor + min(offset + chunk_ratio, length) - 1
+                                  for offset in range(0, length, chunk_ratio))
+                rows.append(self._chunk_payload(
+                    chunk, ratio, source_position_start=cursor,
+                    gist_position_ids=positions))
+                cursor += length
+            anchored.append({"token_start": start, "token_end": end,
+                             "chunks": rows})
+            selected.extend(rows)
         selected_handles = {item["handle"] for item in selected}
         if len(selected_handles) != len(selected):
             raise ValueError("memory contains duplicate selected encoder chunks")
@@ -739,7 +846,7 @@ class SGLangEventNativeGenerator:
                 for handle, item in all_eligible.items()
                 if handle not in selected_handles
             ]
-        return selected, extras
+        return selected, extras, anchored
 
     def _chunk_payload(
         self,
@@ -760,6 +867,15 @@ class SGLangEventNativeGenerator:
             "source_token_end": chunk.source_token_end,
             "token_ids": list(token_ids),
         }
+        chunk_ratio = chunk.compression_ratio or ratio
+        if type(chunk_ratio) is not int or chunk_ratio <= 0:
+            raise ValueError("chunk.compression_ratio must be positive")
+        if chunk.projection_set is not None:
+            if chunk.projection_set not in {"tool", "history"}:
+                raise ValueError("chunk.projection_set is unsupported")
+            descriptor["projection_set"] = chunk.projection_set
+        if chunk.compression_ratio is not None:
+            descriptor["compression_ratio"] = chunk_ratio
         if not isinstance(chunk.event_id, str) or not chunk.event_id:
             raise ValueError("chunk.event_id must be a nonempty string")
         for name in ("part_index", "source_token_start", "source_token_end"):
@@ -777,7 +893,7 @@ class SGLangEventNativeGenerator:
             "model_binding": self._model_binding,
             "packing_version": PACKING_VERSION,
             "encoding_scope": self.encoding_scope,
-            "compression_ratio": ratio,
+            "compression_ratio": chunk_ratio,
             "chunk": canonical_chunk,
         }
         handle = hashlib.sha256(_canonical_bytes(handle_input)).hexdigest()
@@ -900,9 +1016,16 @@ class SGLangEventNativeGenerator:
         extraction = response.get("extraction")
         if not isinstance(extraction, Mapping):
             return
-        value = extraction.get("model_calls")
-        if type(value) is int and value >= 0:
-            self.extraction_calls_reserved += value
+        if self.max_tool_extraction_calls is None:
+            value = extraction.get("model_calls")
+            if type(value) is int and value >= 0:
+                self.extraction_calls_reserved += value
+            return
+        history = extraction.get("history_model_calls")
+        tool = extraction.get("tool_model_calls")
+        if type(history) is int and history >= 0 and type(tool) is int and tool >= 0:
+            self.extraction_calls_reserved += history
+            self.tool_extraction_calls_reserved += tool
 
     def _validate_extraction_budget_failure(
         self, response: Any, payload: Mapping[str, Any]
@@ -950,7 +1073,10 @@ class SGLangEventNativeGenerator:
             )
             for name in names
         }
-        rows = [*payload["encoder_chunks"], *payload["compression_chunks"]]
+        rows = [*payload["encoder_chunks"],
+                *(chunk for segment in payload.get("tool_gist_segments", ())
+                  for chunk in segment["chunks"]),
+                *payload["compression_chunks"]]
         handles = {row["handle"] for row in rows}
         if result["requested_chunks"] != len(rows):
             raise SGLangEventNativeError(
@@ -1060,6 +1186,7 @@ class SGLangEventNativeGenerator:
             response.get("extraction"),
             selected_rows + extra_rows,
             expected_max_extraction_calls=payload["max_extraction_calls"],
+            expected_max_tool_extraction_calls=payload.get("max_tool_extraction_calls"),
         )
         costs = self._validate_costs(response.get("costs"), memory, ratio)
         shadow = self._validate_shadow_features(
@@ -1115,6 +1242,9 @@ class SGLangEventNativeGenerator:
                 len(memory.system_input_ids)
                 + sum(len(chunk.token_ids) for chunk in memory.chunks)
                 + len(memory.workspace_input_ids)
+                + sum(sum(len(chunk.token_ids) for chunk in segment["chunks"])
+                      - (segment["token_end"] - segment["token_start"])
+                      for segment in memory.tool_gist_segments)
             ),
             "packed_encoder_tokens": costs["presented_encoder_tokens"],
             "materialized_encoder_tokens": extraction["materialized_encoder_tokens"],
@@ -1285,7 +1415,8 @@ class SGLangEventNativeGenerator:
                 raise SGLangEventNativeError(
                     f"response.{name}[{index}] original_seq_len mismatch"
                 )
-            if gist_len != (original + ratio - 1) // ratio:
+            chunk_ratio = expected.get("compression_ratio", ratio)
+            if gist_len != (original + chunk_ratio - 1) // chunk_ratio:
                 raise SGLangEventNativeError(
                     f"response.{name}[{index}] gist_len mismatch"
                 )
@@ -1305,6 +1436,7 @@ class SGLangEventNativeGenerator:
         rows: Sequence[Mapping[str, Any]],
         *,
         expected_max_extraction_calls: int,
+        expected_max_tool_extraction_calls: int | None = None,
     ) -> dict[str, Any]:
         if not isinstance(value, Mapping):
             raise SGLangEventNativeError("response.extraction must be an object")
@@ -1326,6 +1458,26 @@ class SGLangEventNativeGenerator:
             raise SGLangEventNativeError(
                 "response.extraction.max_extraction_calls mismatch"
             )
+        if expected_max_tool_extraction_calls is not None:
+            tool_limit = _optional_nonnegative_int(
+                value.get("max_tool_extraction_calls"),
+                "response.extraction.max_tool_extraction_calls")
+            if tool_limit != expected_max_tool_extraction_calls:
+                raise SGLangEventNativeError("Tool extraction cap echo mismatch")
+            history_calls = _nonnegative_int(
+                value.get("history_model_calls"),
+                "response.extraction.history_model_calls")
+            tool_calls = _nonnegative_int(
+                value.get("tool_model_calls"),
+                "response.extraction.tool_model_calls")
+            if history_calls + tool_calls != result["model_calls"]:
+                raise SGLangEventNativeError("Tool/history extraction accounting mismatch")
+            if (self.extraction_calls_reserved > self.max_extraction_calls or
+                    self.tool_extraction_calls_reserved > self.max_tool_extraction_calls):
+                raise SGLangEventNativeError("Separate extraction budget exceeded")
+            result.update(history_model_calls=history_calls,
+                          tool_model_calls=tool_calls,
+                          max_tool_extraction_calls=tool_limit)
         handles = {row["handle"] for row in rows}
         if result["requested_chunks"] != len(rows):
             raise SGLangEventNativeError("response.extraction.requested_chunks mismatch")
@@ -1388,6 +1540,15 @@ class SGLangEventNativeGenerator:
             "raw_workspace_kv_logical_bytes": expected["raw_tokens"] * kv_bytes,
             "resident_kv_logical_bytes": expected["resident_kv_tokens"] * kv_bytes,
         }
+        if memory.raw_tool_segments or memory.tool_gist_segments:
+            byte_expectations = {
+                "resident_kv_logical_bytes": expected["resident_kv_tokens"] * kv_bytes,
+            }
+            for name in ("raw_tool_source_tokens", "raw_tool_resident_tokens",
+                         "anchored_tool_source_tokens", "anchored_tool_gist_tokens"):
+                if name in expected and _nonnegative_int(value.get(name),
+                        f"response.costs.{name}") != expected[name]:
+                    raise SGLangEventNativeError(f"response.costs.{name} mismatch")
         for name, expected_value in byte_expectations.items():
             if result[name] != expected_value:
                 raise SGLangEventNativeError(f"response.costs.{name} mismatch")
@@ -1420,6 +1581,9 @@ class SGLangEventNativeGenerator:
                 len(memory.system_input_ids)
                 + sum(len(chunk.token_ids) for chunk in memory.chunks)
                 + len(memory.workspace_input_ids)
+                + sum(sum(len(chunk.token_ids) for chunk in segment["chunks"])
+                      - (segment["token_end"] - segment["token_start"])
+                      for segment in memory.tool_gist_segments)
                 - 1
             )
             if (

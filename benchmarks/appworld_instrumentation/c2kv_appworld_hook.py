@@ -14,13 +14,17 @@ import time
 from typing import Any, Optional
 
 from measurement.telemetry import HarnessTelemetry, current_episode
+from source_annotations import appworld_doc_spans, pure_appworld_doc_action
 
 
 TELEMETRY_ENV = "C2KV_APPWORLD_TELEMETRY_PATH"
 RUN_DIR_ENV = "C2KV_APPWORLD_RUN_DIR"
+TOOL_CONTEXT_ENV = "C2KV_TOOL_CONTEXT_ON"
 _INSTALLED = False
 _response_request_id = contextvars.ContextVar(
     "c2kv_appworld_response_request_id", default=None)
+_visible_doc_outputs = contextvars.ContextVar(
+    "c2kv_appworld_visible_doc_outputs", default=())
 _clock_gettime_ns = getattr(time, "clock_gettime_ns", None)
 _clock_monotonic_raw = getattr(time, "CLOCK_MONOTONIC_RAW", None)
 _clock_realtime = getattr(time, "CLOCK_REALTIME", None)
@@ -91,9 +95,15 @@ def install() -> bool:
 
         def measured_create(self, *args, **kwargs):
             episode = current_episode()
-            if episode is not None:
+            if episode is not None or os.environ.get(TOOL_CONTEXT_ENV) == "1":
                 extra_body = dict(kwargs.get("extra_body") or {})
-                extra_body["c2kv_measurement_session_id"] = episode["episode_id"]
+                if episode is not None:
+                    extra_body["c2kv_measurement_session_id"] = episode["episode_id"]
+                if os.environ.get(TOOL_CONTEXT_ENV) == "1":
+                    messages = kwargs.get("messages") or (args[0] if args else [])
+                    spans = appworld_doc_spans(messages, _visible_doc_outputs.get())
+                    if spans:
+                        extra_body["c2kv_tool_spans_v1"] = spans
                 kwargs["extra_body"] = extra_body
             response = original_create(self, *args, **kwargs)
             _response_request_id.set(_proxy_request_id(response))
@@ -108,6 +118,7 @@ def install() -> bool:
 
     def measured_reset(self, seed=None, task_id=None, **kwargs):
         _close_episode(self)
+        _visible_doc_outputs.set(())
         metadata = {
             "experiment_name": str(getattr(self, "experiment_name", "")),
             "max_interactions": getattr(getattr(self, "config", None),
@@ -139,6 +150,7 @@ def install() -> bool:
 
     def measured_execute(self, code):
         action = self._clean_code(code)
+        doc_source = pure_appworld_doc_action(action)
         start_unix = _realtime_ns()
         start_perf = _monotonic_raw_ns()
         try:
@@ -158,6 +170,8 @@ def install() -> bool:
             action_index=getattr(self, "num_interactions", None), status="ok",
             metadata={"raw_action": code} if action != code else None,
         )
+        if doc_source and isinstance(outcome, str) and outcome:
+            _visible_doc_outputs.set((*_visible_doc_outputs.get(), (doc_source, outcome)))
         return outcome
 
     def measured_forward(self, prompt):

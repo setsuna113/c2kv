@@ -441,6 +441,12 @@ def commands_for_task(args: argparse.Namespace, task: str, controller_path: Path
             temporary_controller.unlink(missing_ok=True)
     if "--s0-config" in server:
         server[server.index("--s0-config") + 1] = str(controller_path)
+    if args.tool_memory != "none":
+        server.extend(["--tool-memory", args.tool_memory])
+        if args.tool_checkpoint is not None:
+            server.extend(["--tool-checkpoint", str(args.tool_checkpoint.resolve())])
+        if args.tool_budget_tokens is not None:
+            server.extend(["--tool-budget-tokens", str(args.tool_budget_tokens)])
     task_out = args.out / "task_shards" / task
     if args.benchmark == "bfcl":
         worker = runner.worker_command(
@@ -858,11 +864,26 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--task-timeout", type=int, default=3600)
     parser.add_argument("--ratio", type=int, choices=sorted(runner.SUPPORTED_RATIOS), default=None,
                         help="Override the delivered compression ratio with the other supported C0 ratio (ablation)")
+    parser.add_argument("--tool-memory", default="none")
+    parser.add_argument("--tool-checkpoint", type=Path)
+    parser.add_argument("--tool-budget-tokens", type=int)
     parser.add_argument("--preview", action="store_true", help="Print commands without model, harness, or network calls")
     return parser
 
 
 def validate_args(args: argparse.Namespace) -> list[str]:
+    if args.tool_memory == "none":
+        if args.tool_checkpoint is not None or args.tool_budget_tokens is not None:
+            raise ValueError("Tool options require --tool-memory")
+    elif args.tool_memory.startswith("t0:"):
+        if args.tool_checkpoint is None or not (args.tool_checkpoint / "config.json").is_file():
+            raise ValueError("T0 tool memory requires a local --tool-checkpoint")
+    else:
+        raise ValueError(
+            "Global H2O/SnapKV selection across disjoint visible tool spans is not implemented"
+        )
+    if args.tool_budget_tokens is not None and args.tool_budget_tokens <= 0:
+        raise ValueError("--tool-budget-tokens must be positive")
     identities = _identities(args)
     _benchmark_dir(args)
     if args.task_timeout <= 0 or not 1 <= args.port <= 65535:

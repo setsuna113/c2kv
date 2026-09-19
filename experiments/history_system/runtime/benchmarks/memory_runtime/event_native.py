@@ -94,7 +94,17 @@ def memory_to_dict(memory: PackedMemory) -> dict[str, Any]:
     from .event_native_raw import RuntimeMemoryView
     schema = ('a-event-native-packed-input-v2' if isinstance(memory.view, RuntimeMemoryView)
               else 'a-event-native-packed-input-v1')
-    return {'schema': schema, **asdict(memory)}
+    value = {'schema': schema, **asdict(memory)}
+    if not memory.raw_tool_segments:
+        value.pop('raw_tool_segments')
+    if not memory.tool_gist_segments:
+        value.pop('tool_gist_segments')
+    for chunk in value['chunks']:
+        if chunk['projection_set'] is None:
+            chunk.pop('projection_set')
+        if chunk['compression_ratio'] is None:
+            chunk.pop('compression_ratio')
+    return value
 
 
 def memory_from_dict(value: Mapping[str, Any]) -> PackedMemory:
@@ -129,8 +139,23 @@ def memory_from_dict(value: Mapping[str, Any]) -> PackedMemory:
             event_id=chunk['event_id'], part_index=chunk['part_index'],
             source_indices=tuple(chunk['source_indices']),
             source_token_start=chunk['source_token_start'], source_token_end=chunk['source_token_end'],
-            token_ids=tuple(chunk['token_ids'])) for chunk in value['chunks']),
+            token_ids=tuple(chunk['token_ids']),
+            projection_set=chunk.get('projection_set'),
+            compression_ratio=chunk.get('compression_ratio')) for chunk in value['chunks']),
         raw_layout_profile=value['raw_layout_profile'],
+        raw_tool_segments=tuple(value.get('raw_tool_segments', ())),
+        tool_gist_segments=tuple({
+            **segment,
+            'chunks': tuple(EncoderChunk(
+                event_id=chunk['event_id'], part_index=chunk['part_index'],
+                source_indices=tuple(chunk['source_indices']),
+                source_token_start=chunk['source_token_start'],
+                source_token_end=chunk['source_token_end'],
+                token_ids=tuple(chunk['token_ids']),
+                projection_set=chunk.get('projection_set'),
+                compression_ratio=chunk.get('compression_ratio'))
+                for chunk in segment['chunks']),
+        } for segment in value.get('tool_gist_segments', ())),
     )
 
 

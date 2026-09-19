@@ -146,6 +146,16 @@ def test_acebench_declared_role_history_feature_requires_patched_files(tmp_path)
                                   options=options, environ=_env(tmp_path)).ok
 
 
+def test_acebench_tool_context_requires_applicable_private_harness_patch(tmp_path):
+    root = _acebench_tree(tmp_path, role_history=True)
+    result = capabilities.preflight(
+        "acebench", "full", "sglang",
+        options={"runner_python": sys.executable, "acebench_dir": root,
+                 "tool_memory": "t0:r8"}, environ=_env(tmp_path))
+    assert "acebench_tool_span_patch_applicable" in _codes(result)
+    assert "acebench_tool_span_patch" not in _codes(result)
+
+
 def test_acon_qa_requires_patch_data_and_explicit_retriever_attestation(tmp_path):
     acon = _acon_qa_tree(tmp_path)
     args = {"acon_dir": acon, "runner_python": sys.executable,

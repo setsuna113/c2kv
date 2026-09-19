@@ -68,6 +68,7 @@ class EventNativeAPI:
         benchmark: str = "bfcl",
         compression_policy: str | None = None,
         history_view_protocol: str = "fixed-budget-main",
+        tool_memory_contract: Mapping[str, Any] | None = None,
     ) -> None:
         if not callable(getattr(runner, "run", None)):
             raise TypeError("runner must expose run(payload)")
@@ -114,6 +115,12 @@ class EventNativeAPI:
         self.runtime_policy_contract = (
             copy.deepcopy(dict(runtime_policy_contract)) if runtime_policy_contract is not None else None
         )
+        self.tool_memory_contract = (
+            copy.deepcopy(dict(tool_memory_contract))
+            if tool_memory_contract is not None else None
+        )
+        if self.tool_memory_contract is not None:
+            self.request_fields = self.request_fields | {"c2kv_tool_spans_v1"}
         self.max_new_tokens = max_new_tokens
         self.allowed_task_ids = allowed
         self.max_decisions = max_decisions
@@ -162,6 +169,8 @@ class EventNativeAPI:
             "view_mode": self.view_mode,
             "route_contract": copy.deepcopy(self.route_contract),
             "runtime_policy_contract": copy.deepcopy(self.runtime_policy_contract),
+            **({"tool_memory_contract": copy.deepcopy(self.tool_memory_contract)}
+               if self.tool_memory_contract is not None else {}),
             "decode_strategy": getattr(getattr(self.runner, "generator", None), "decode_strategy", None),
             "session_cache_policy": getattr(getattr(self.runner, "generator", None), "session_cache_policy", None),
             "max_new_tokens": self.max_new_tokens,
@@ -439,6 +448,14 @@ class EventNativeAPI:
         ):
             raise EventNativeAPIError(400, "invalid_tools", "tools must be a list of objects")
         tool_snapshot = [copy.deepcopy(dict(tool)) for tool in tools]
+        source_tool_spans = None
+        if self.tool_memory_contract is not None and "c2kv_tool_spans_v1" in payload:
+            from .event_native_tool import shared_tool_catalog
+            try:
+                shared_tool_catalog().resolve_visible_tool_spans(payload)
+            except (TypeError, ValueError, RuntimeError) as error:
+                raise EventNativeAPIError(400, "invalid_tool_spans", str(error)) from error
+            source_tool_spans = copy.deepcopy(payload["c2kv_tool_spans_v1"])
 
         # Event IDs are rendered into exact evidence, so their session prefix
         # must be stable across independently hosted arm/run processes.  The
@@ -455,6 +472,8 @@ class EventNativeAPI:
             "tools": tool_snapshot,
             **source_fields,
         }
+        if source_tool_spans is not None:
+            runner_payload["c2kv_tool_spans_v1"] = source_tool_spans
         try:
             signature = json.dumps(
                 runner_payload,

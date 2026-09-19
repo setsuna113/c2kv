@@ -68,12 +68,20 @@ def tool_contexts(config):
         name = str(item.get("name") or "")
         if not name or name in contexts:
             raise ValueError(f"tool context name must be unique and not {RAW_TOOL_CONTEXT!r}: {item}")
-        if parse_tool_memory_spec(item.get("spec")) is None:
+        spec = parse_tool_memory_spec(item.get("spec"))
+        if spec is None:
             raise ValueError(f"tool context {name!r} needs a non-raw spec (e.g. t0:r8)")
+        if spec.encoder != "t0":
+            raise ValueError("Paper tool contexts currently support T0; global tool-region H2O/SnapKV is not implemented")
         if not item.get("checkpoint"):
-            raise ValueError(f"tool context {name!r} needs a T0 checkpoint directory")
+            raise ValueError(f"tool context {name!r} needs a tokenizer/checkpoint directory")
         contexts[name] = {"name": name, "spec": str(item["spec"]),
                           "checkpoint": str(item["checkpoint"])}
+        if item.get("budget_tokens") is not None:
+            budget = item["budget_tokens"]
+            if isinstance(budget, bool) or not isinstance(budget, int) or budget <= 0:
+                raise ValueError(f"tool context {name!r} budget_tokens must be positive")
+            contexts[name]["budget_tokens"] = budget
     return contexts
 
 
@@ -100,12 +108,45 @@ def cells(config):
                     row["cell_id"] += "__tools-" + context_name
                     row["tool_memory"] = context["spec"]
                     row["tool_checkpoint"] = context["checkpoint"]
+                    if context.get("budget_tokens") is not None:
+                        row["tool_budget_tokens"] = context["budget_tokens"]
                 rows.append(row)
     # Run the final system (and its ablations) after every existing comparison/sweep cell.
     return sorted(rows, key=lambda row: is_c1_arm(row["arm"]) or is_candidate_arm(row["arm"]))
 
 
-def server_command(config, source, arm=None, benchmark=None, tool_checkpoint=None):
+def with_tool_contexts(config, names, checkpoint=None):
+    """Add paired tool cells without rewriting existing raw cells or budgets."""
+    if not names:
+        if checkpoint:
+            raise ValueError("--tool-checkpoint requires --tool-contexts")
+        return config
+    from benchmarks.arms import get_arm
+
+    contexts = tool_contexts(config)
+    names = list(dict.fromkeys(names))
+    for name in names:
+        if name == RAW_TOOL_CONTEXT or name not in contexts:
+            raise ValueError(f"Unknown compressed tool context: {name!r}")
+    methods = []
+    for method in config["methods"]:
+        arm = get_arm(method["arm"])
+        if (arm.text_policy or "").startswith(("acon", "hiagent")):
+            methods.append(method)
+            continue
+        current = method.get("tool_contexts") or [RAW_TOOL_CONTEXT]
+        methods.append(dict(method, tool_contexts=list(dict.fromkeys([*current, *names]))))
+    result = dict(config, methods=methods)
+    if checkpoint:
+        result["tool_contexts"] = [
+            dict(context, checkpoint=str(checkpoint)) if context["name"] in names else context
+            for context in config.get("tool_contexts", [])
+        ]
+    return result
+
+
+def server_command(config, source, arm=None, benchmark=None, tool_checkpoint=None,
+                   tool_memory=None):
     """CUDA server flags for one cell.
 
     Single-flight serving (one running request, one worker, no overlap
@@ -155,7 +196,9 @@ def server_command(config, source, arm=None, benchmark=None, tool_checkpoint=Non
             "--port", str(config["server_port"])]
     if is_c1_arm(arm) or is_candidate_arm(arm):
         cmd += ["--c2kv-shadow-feature-layer", "-2", "--enable-return-hidden-states"]
-    if tool_checkpoint:
+    from benchmarks.toolmemory import parse_tool_memory_spec
+    tool_spec = parse_tool_memory_spec(tool_memory) if tool_memory is not None else None
+    if tool_checkpoint and (tool_spec is None or tool_spec.encoder == "t0"):
         # Second gist projection set for the tool-context cells only; raw-tool
         # cells keep their historical server command byte for byte.
         cmd += ["--c2kv-tool-gist-weights", str(tool_checkpoint)]
@@ -214,11 +257,6 @@ def with_hiagent_budget(config, budget):
 
 def run_command(config, cell, directory, profile, stage="closed_loop"):
     if is_native_arm(cell["arm"]):
-        if cell.get("tool_memory"):
-            raise ValueError(
-                f"{cell['cell_id']}: native cells do not take a tool context yet "
-                "(the delivered controller renders tools itself); list it under "
-                "unsupported_cells or drop the context")
         cmd = [config["bench_python"], "-m", "benchmarks.paper.c1",
                "--config", str(profile.parent / "config.resolved.json"),
                "--arm", cell["arm"],
@@ -226,6 +264,11 @@ def run_command(config, cell, directory, profile, stage="closed_loop"):
                "--upstream", f"http://127.0.0.1:{config['server_port']}",
                "--proxy-port", str(config["proxy_port"]),
                "--out", str(directory), "--num-workers", "1"]
+        if cell.get("tool_memory"):
+            cmd += ["--tool-memory", cell["tool_memory"],
+                    "--tool-checkpoint", cell["tool_checkpoint"]]
+            if cell.get("tool_budget_tokens") is not None:
+                cmd += ["--tool-budget-tokens", str(cell["tool_budget_tokens"])]
         if stage == "common_prefix":
             cmd += ["--prefixes", str(profile.parent / "closed_loop" /
                                       (cell["benchmark"] + "__full") / "full_prefixes.jsonl")]
@@ -246,6 +289,8 @@ def run_command(config, cell, directory, profile, stage="closed_loop"):
         cmd += ["--record-prefixes", str(directory / "full_prefixes.jsonl")]
     if cell.get("tool_memory"):
         cmd += ["--tool-memory", cell["tool_memory"], "--tool-checkpoint", cell["tool_checkpoint"]]
+        if cell.get("tool_budget_tokens") is not None:
+            cmd += ["--tool-budget-tokens", str(cell["tool_budget_tokens"])]
     if cell["adapter"] == "bfcl":
         cmd += ["--categories", cell["category"]]
     elif cell["adapter"] == "acebench":
@@ -315,8 +360,10 @@ def extension_problem(existing, config, source, output):
                 continue
             if old.get(key) != new.get(key):
                 return f"{cell_id}: {key} changed"
-        if (server_command(old_view, source, old["arm"], tool_checkpoint=old.get("tool_checkpoint"))
-                != server_command(config, source, new["arm"], tool_checkpoint=new.get("tool_checkpoint"))):
+        if (server_command(old_view, source, old["arm"], tool_checkpoint=old.get("tool_checkpoint"),
+                           tool_memory=old.get("tool_memory"))
+                != server_command(config, source, new["arm"], tool_checkpoint=new.get("tool_checkpoint"),
+                                  tool_memory=new.get("tool_memory"))):
             return f"{cell_id}: server command changed"
         for stage in ("closed_loop", "common_prefix"):
             directory = output / stage / cell_id
@@ -401,17 +448,11 @@ def prepare(config, output, source):
         for context_name in item.get("tool_contexts") or []:
             if context_name == RAW_TOOL_CONTEXT:
                 continue
-            if is_c1_arm(item["arm"]) or is_candidate_arm(item["arm"]):
+            text_policy = getattr(get_arm(item["arm"]), "text_policy", "") or ""
+            if text_policy.startswith(("acon", "hiagent")):
                 raise ValueError(
-                    f"{item['arm']} cannot take tool context {context_name!r}: native C1 "
-                    "cells do not support tool memory yet")
-            if getattr(get_arm(item["arm"]), "text_history_budget_tokens", None) is not None:
-                # The budget renderer (benchmarks.paper.budget_server) measures the
-                # raw chat prompt, tool prologue included; gist carriers are not
-                # part of that accounting.
-                raise ValueError(
-                    f"{item['arm']} cannot take tool context {context_name!r}: budget-adapted "
-                    "text arms measure the raw tool prologue")
+                    f"{item['arm']} cannot take tool context {context_name!r}: "
+                    "ACON/HiAgent tool-memory composition is outside the supported matrix")
     config = dict(config)
     config["sglang_source"] = str(source.resolve())
     resolved_path = output / "config.resolved.json"
@@ -585,7 +626,10 @@ def _guard_tool_context(cell):
     from benchmarks.toolmemory import load_tool_checkpoint_contract, parse_tool_memory_spec
 
     spec = parse_tool_memory_spec(cell["tool_memory"])
-    load_tool_checkpoint_contract(Path(cell["tool_checkpoint"]).expanduser(), spec)
+    if spec.encoder == "t0":
+        load_tool_checkpoint_contract(Path(cell["tool_checkpoint"]).expanduser(), spec)
+    elif not (Path(cell["tool_checkpoint"]).expanduser() / "tokenizer_config.json").is_file():
+        raise ValueError("Raw-KV tool memory requires the served tokenizer files")
 
 
 def _guard_method_actor(cell):
@@ -626,7 +670,7 @@ def execute(config, plan, output, source, stages, selected, port_offset=0):
             directory.mkdir(parents=True, exist_ok=True)
             (directory / "started.json").write_text(json.dumps({
                 "stage": stage, "cell": cell, "config": config,
-                "server_command": server_command(config, source, cell["arm"], cell["benchmark"], tool_checkpoint=cell.get("tool_checkpoint")),
+                "server_command": server_command(config, source, cell["arm"], cell["benchmark"], tool_checkpoint=cell.get("tool_checkpoint"), tool_memory=cell.get("tool_memory")),
                 "port_offset": port_offset,
                 "sglang_source": str(source), "time": time.time()}, indent=2))
             telemetry_name = ("native_engine_telemetry.jsonl" if is_native_arm(cell["arm"])
@@ -639,7 +683,7 @@ def execute(config, plan, output, source, stages, selected, port_offset=0):
                         if probe.connect_ex(("127.0.0.1", port)) == 0:
                             raise RuntimeError(f"Configured port {port} is already occupied")
                 # Own only this process group. Never stop another experiment's server.
-                server = subprocess.Popen(server_command(config, source, cell["arm"], cell["benchmark"], tool_checkpoint=cell.get("tool_checkpoint")), env=env,
+                server = subprocess.Popen(server_command(config, source, cell["arm"], cell["benchmark"], tool_checkpoint=cell.get("tool_checkpoint"), tool_memory=cell.get("tool_memory")), env=env,
                                           stdout=log, stderr=subprocess.STDOUT,
                                           start_new_session=True)
                 proxy = None
@@ -674,6 +718,8 @@ def execute(config, plan, output, source, stages, selected, port_offset=0):
                         if cell.get("tool_memory"):
                             proxy_cmd += ["--tool-memory", cell["tool_memory"],
                                           "--tool-checkpoint", cell["tool_checkpoint"]]
+                            if cell.get("tool_budget_tokens") is not None:
+                                proxy_cmd += ["--tool-budget-tokens", str(cell["tool_budget_tokens"])]
                         proxy = subprocess.Popen(proxy_cmd, env=env, stdout=log,
                                                  stderr=subprocess.STDOUT,
                                                  start_new_session=os.name == "posix")
@@ -823,6 +869,10 @@ def main(argv=None):
                         help="add budget-adapted ACON BFCL cells with this actor history cap")
     parser.add_argument("--hiagent-budget-tokens", type=int,
                         help="add budget-adapted HiAgent full BFCL cells with this actor history cap")
+    parser.add_argument("--tool-contexts", default="",
+                        help="add named tool contexts to history/recovery methods, preserving raw cells")
+    parser.add_argument("--tool-checkpoint", type=Path,
+                        help="checkpoint for contexts explicitly selected by --tool-contexts")
     parser.add_argument("--port-offset", type=int, default=0,
                         help="shift server/proxy ports for concurrent single-GPU runners on one host")
     args = parser.parse_args(argv)
@@ -831,6 +881,8 @@ def main(argv=None):
         config = with_candidate_methods(config, parse_candidate_arms(args.candidate_arms))
         config = with_acon_budget(config, args.acon_budget_tokens)
         config = with_hiagent_budget(config, args.hiagent_budget_tokens)
+        config = with_tool_contexts(config, list(filter(None, args.tool_contexts.split(","))),
+                                    args.tool_checkpoint)
     output = args.output or Path(config["output_root"])
     source = args.sglang_source.resolve()
     if args.action == "aggregate":

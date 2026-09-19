@@ -33,6 +33,11 @@ unchanged.
 
 Apply from the ACEBench checkout root:
 `git apply --unidiff-zero benchmarks/acebench_patches/0001-endpoint-env-and-model-registry.patch`
+Then apply `0002-visible-tool-spans.patch`. It passes exact intervals from the
+official `functions` argument to the proxy only when
+`C2KV_TOOL_CONTEXT_ON=1`. The adapter adds `benchmarks/` to `PYTHONPATH` for
+the source annotation helper. OFF requests retain their original messages and
+OpenAI call arguments; the official executor and scorer are unchanged.
 
 The adapter enables `ACEBENCH_ROLE_HISTORY_V1=1` and advertises capability
 `acebench_role_history_v1`; matrix preflight rejects non-full ACEBench arms

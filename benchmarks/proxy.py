@@ -364,20 +364,35 @@ def _tool_extract_tokens(token_ids: List[int], ratio: int,
 def _assemble_request(messages: List[Dict[str, Any]], arm: Arm, timeout: int = 600):
     """``_assemble`` plus the tool-memory transform of the current request.
 
-    Without ``--tool-memory`` (``_TRACE.tool_plan`` is None) this is exactly
-    ``_assemble``.  With it, the leading system message carries the explicit
-    tool protocol before assembly and the gist carriers are inserted right
-    after the system prefix afterwards, with every out-index in ``counts``
-    shifted (toolmemory.insert_carriers).  Every call site that re-assembles
-    a request (HiAgent retrieval, oracle recover) goes through here, so the
-    served layout is the same on every upstream attempt.
+    Without ``--tool-memory`` this is exactly ``_assemble``. Structured tool
+    carriers use the system prefix; source-annotated definitions are attached
+    to the assembled message (raw or retained history document) that contains
+    their placeholder. A source removed by history selection fails explicitly.
     """
     plan = getattr(_TRACE, "tool_plan", None)
-    if plan is not None:
+    if plan is not None and not isinstance(plan, toolmemory.ToolMemoryPlan):
+        raise toolmemory.ToolMemoryError(
+            "raw_kv_pending", "raw-KV tool selection needs final assembled-prompt extraction")
+    if plan is not None and plan.protocol:
         messages = toolmemory.with_protocol_system(messages, plan.protocol)
-    out, counts = _assemble(messages, arm, timeout)
+    anchors = plan.carrier_anchors if plan is not None else []
+    out, counts = _assemble(messages, arm, timeout,
+                            track_source_indices=bool(anchors))
     if plan is not None:
-        out, counts = toolmemory.insert_carriers(out, counts, plan.carriers())
+        source_out_indices = None
+        if anchors:
+            assembled_indices = counts.pop("_tool_source_out_indices")
+            source_out_indices = {}
+            for anchor in anchors:
+                rewritten_index = anchor["rewritten_message_index"]
+                if rewritten_index not in assembled_indices:
+                    raise toolmemory.ToolMemoryError(
+                        "tool_anchor_evicted",
+                        f"visible {anchor['source']} definition in message "
+                        f"{anchor['message_index']} has no retained history representation")
+                source_out_indices[anchor["message_index"]] = assembled_indices[rewritten_index]
+        out, counts = toolmemory.insert_carriers(
+            out, counts, plan.carriers(), source_out_indices=source_out_indices)
         counts["tool_memory"] = plan.info
     return out, counts
 
@@ -755,7 +770,8 @@ def _stringify_content(message: Dict[str, Any]) -> str:
     return "" if content is None else json.dumps(content, ensure_ascii=False)
 
 
-def _assemble(messages: List[Dict[str, Any]], arm: Arm, timeout: int = 600):
+def _assemble(messages: List[Dict[str, Any]], arm: Arm, timeout: int = 600,
+              *, track_source_indices: bool = False):
     """Return (out_messages, counts).
 
     ``counts`` carries the message-class breakdown (system/hybrid-tail/
@@ -784,7 +800,8 @@ def _assemble(messages: List[Dict[str, Any]], arm: Arm, timeout: int = 600):
          if m.get("role") == "tool" else dict(m))
         for m in messages
     ]
-    if not any(m.get("role") == "system" for m in messages):
+    added_system = not any(m.get("role") == "system" for m in messages)
+    if added_system:
         messages.insert(0, {"role": "system", "content": DEFAULT_SYSTEM_PROMPT})
         event_messages = [{"message_index": 0, "role": "system", "phase": "others"}] + [
             {**event, "message_index": event["message_index"] + 1} for event in event_messages]
@@ -805,6 +822,13 @@ def _assemble(messages: List[Dict[str, Any]], arm: Arm, timeout: int = 600):
     dropped_docs = 0
     n_docs = 0
     task_packet_out_index: Optional[int] = None
+    source_out_indices: Dict[int, int] = {}
+
+    def _track_source(internal_index: int, out_index: int) -> None:
+        if track_source_indices:
+            source_index = internal_index - int(added_system)
+            if source_index >= 0:
+                source_out_indices[source_index] = out_index
 
     def _keep_raw(i: int, role: str) -> bool:
         return (
@@ -828,6 +852,7 @@ def _assemble(messages: List[Dict[str, Any]], arm: Arm, timeout: int = 600):
             raw.pop("tool_calls", None)
         if i == task_packet_source_index:
             task_packet_out_index = len(out)
+        _track_source(i, len(out))
         out.append(raw)
         if role == "system":
             message_counts["system_raw"] += 1
@@ -857,6 +882,8 @@ def _assemble(messages: List[Dict[str, Any]], arm: Arm, timeout: int = 600):
             "out_index": len(out),
             "role": doc_role, "content": doc_text, "record": record,
         })
+        for source_index in source_indices:
+            _track_source(source_index, len(out))
         out.append(compressed)
 
     if packing == "turn":
@@ -920,6 +947,8 @@ def _assemble(messages: List[Dict[str, Any]], arm: Arm, timeout: int = 600):
     # index in `out` where the current (raw) block starts: repair-only
     # messages for append placements are inserted right before it
     counts["current_start_out_index"] = len(out) - message_counts["current_raw"]
+    if track_source_indices:
+        counts["_tool_source_out_indices"] = source_out_indices
     return out, counts
 
 
@@ -966,6 +995,8 @@ def _history_kv_context(out_messages: List[Dict[str, Any]],
             system_parts.append(str(message.get("content") or ""))
             continue
         if index == task_packet_out_index:
+            continue
+        if toolmemory.is_carrier(message):
             continue
         item = _normalize_history_message(message)
         if item is None:
@@ -1631,10 +1662,16 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 # tool list (HiAgent adds its retrieval tool) is what gets
                 # compressed; without --tool-memory this block is inert.
                 _TRACE.tool_plan = None
+                _TRACE.tool_canonical_source = None
                 if TOOL_MEMORY is not None:
+                    canonical_source = {
+                        "messages": toolmemory.tool_snapshot(payload.get("messages") or []),
+                        "tools": toolmemory.tool_snapshot(payload.get("tools") or []),
+                    }
                     with _phase("tool_memory"):
                         _TRACE.tool_plan = TOOL_MEMORY.plan(payload)
                     if _TRACE.tool_plan is not None:
+                        _TRACE.tool_canonical_source = canonical_source
                         payload = dict(payload, messages=_TRACE.tool_plan.messages)
                         messages = payload["messages"]
                 messages_out, counts = _assemble_request(messages, ARM)
@@ -1688,7 +1725,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
             # message — feeding it the raw payload made every rp-arm
             # request fail "repair target has no c2kv_key_hash"
             with _phase(phase):
-                staged = dict(payload)
+                staged = dict(toolmemory.strip_request_annotations(payload))
                 # Proxy-only stable harness identity.  It keeps persistent KV
                 # and text-policy state on one case across turns but is not an
                 # OpenAI/SGLang request field.
@@ -1698,7 +1735,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
                     # tools stay in the request for the server's tool-call
                     # parser; the template must not render them (the explicit
                     # protocol + gist carriers replace the <tools> prologue)
-                    staged["c2kv_tools_in_prompt"] = False
+                    staged = TOOL_MEMORY.stage_request(staged, _TRACE.tool_plan)
                     staged["messages"] = [
                         toolmemory.strip_carrier_fields(m) if toolmemory.is_carrier(m) else m
                         for m in out_messages]
@@ -1735,6 +1772,12 @@ class ProxyHandler(BaseHTTPRequestHandler):
                         # recorded-Full replay row.
                         "canonical_full_source": _canonical_full_source(ARM),
                     }
+                    canonical_source = getattr(_TRACE, "tool_canonical_source", None)
+                    if canonical_source is not None:
+                        hint["paper_measurement"].update({
+                            "canonical_source_messages": canonical_source["messages"],
+                            "canonical_source_tools": canonical_source["tools"],
+                        })
                     out_payload["c2kv_kv_memory_hint"] = hint
                     if getattr(ARM, "text_history_budget_tokens", None) is not None:
                         # Recheck the final wire payload, after every assembly and
@@ -2134,6 +2177,8 @@ def main(argv=None):
                         help="T0 checkpoint directory (tokenizer + config identity); "
                              "the server must serve its gist set via "
                              "--c2kv-tool-gist-weights")
+    parser.add_argument("--tool-budget-tokens", type=int,
+                        help="optional absolute raw-KV tool budget")
     args = parser.parse_args(argv)
     DOC_PACKING = args.doc_packing
     MAX_DOC_LENGTH = int(args.max_doc_length)
@@ -2175,32 +2220,23 @@ def main(argv=None):
     global TOOL_MEMORY
     tool_spec = toolmemory.parse_tool_memory_spec(args.tool_memory)
     if tool_spec is not None:
+        if tool_spec.encoder != "t0":
+            raise SystemExit("FATAL: tool memory currently supports T0; global tool-region H2O/SnapKV is not implemented")
         if not args.tool_checkpoint:
             raise SystemExit("FATAL: --tool-memory needs --tool-checkpoint <T0 dir>")
         if BACKEND.name != "sglang":
             raise SystemExit("FATAL: --tool-memory requires the sglang backend")
-        if ARM.history_kv or ARM.kv_reuse:
-            # The physical-eviction / KV-reuse arms resolve their history
-            # boundary from the rendered message list on the server; gist
-            # carriers inside that prefix are not accounted for there yet.
+        if (ARM.text_policy or "").startswith(("acon", "hiagent")):
             raise SystemExit(
-                f"FATAL: --tool-memory is not supported with arm {ARM.name!r} "
-                "(history_kv / kv_reuse boundary does not account for tool gist segments)")
-        if ARM.repair or ARM.recover:
-            raise SystemExit(
-                f"FATAL: --tool-memory is not supported with repair/recover arm {ARM.name!r}")
-        if getattr(ARM, "text_history_budget_tokens", None) is not None:
-            # Budget-adapted text arms preflight the raw actor payload through
-            # the server's chat budget renderer (tool prologue included) and
-            # map history provenance through plain _assemble; gist carriers
-            # would shift that layout.
-            raise SystemExit(
-                f"FATAL: --tool-memory is not supported with budget-adapted text arm {ARM.name!r}")
+                f"FATAL: --tool-memory is not supported with ACON/HiAgent arm {ARM.name!r}")
         from pathlib import Path as _Path
         TOOL_MEMORY = toolmemory.ToolMemory(
-            tool_spec, _Path(args.tool_checkpoint), _tool_extract_tokens)
+            tool_spec, _Path(args.tool_checkpoint), _tool_extract_tokens,
+            budget_tokens=args.tool_budget_tokens)
     elif args.tool_checkpoint:
         raise SystemExit("FATAL: --tool-checkpoint without --tool-memory")
+    elif args.tool_budget_tokens is not None:
+        raise SystemExit("FATAL: --tool-budget-tokens without --tool-memory")
     if ARM.name in {"agentfold", "commitkv", "agentkv"}:
         with _OPENER.open(UPSTREAM + "/model_info", timeout=10) as response:
             require_qwen3_4b(json.load(response))

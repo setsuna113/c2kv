@@ -113,6 +113,24 @@ def test_controller_command_binds_one_task_to_native_appworld_endpoint(tmp_path,
     assert command[command.index("--out") + 1] == str(
         (tmp_path / "native" / "task_shards" / "task-a" / "server").resolve()
     )
+    assert "--tool-memory" not in command
+
+
+def test_tool_on_controller_command_carries_separate_tool_checkpoint(tmp_path):
+    config = _config(tmp_path)
+    config["tool_memory"] = "t0:r8"
+    config["tool_checkpoint"] = str(tmp_path / "T0" / "checkpoint-500")
+    config["tool_budget_tokens"] = 512
+    (tmp_path / "controller.json").write_text("{}", encoding="utf-8")
+    command = bridge.controller_command(
+        config, "task-a", tmp_path / "native", DELIVERY,
+        tmp_path / "controller.json")
+    assert command[command.index("--view-mode") + 1] == (
+        "ac_native_s0_lexical_raw_reserve_failed_operation")
+    assert command[command.index("--tool-memory") + 1] == "t0:r8"
+    assert command[command.index("--tool-checkpoint") + 1] == str(
+        (tmp_path / "T0" / "checkpoint-500").resolve())
+    assert command[command.index("--tool-budget-tokens") + 1] == "512"
 
 
 def test_action_observations_execute_only_each_native_final_draft(tmp_path):

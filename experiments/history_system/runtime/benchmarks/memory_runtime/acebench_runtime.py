@@ -40,6 +40,7 @@ def describe_ace_source_contract():
             'full_original', 'capacity_protect', 'capacity_exact_once',
             'capacity_exact_persistent', 'full_exact_shared', 'capacity_exact_no_gist',
             'ac_gist_static',
+            'ac_native_s0_lexical_raw_reserve_failed_operation',
         ],
         'training_static_supported': False,
     }
@@ -78,7 +79,8 @@ class AceEventNativeAPI(EventNativeAPI):
         this source profile sets the real SGLang sampling in event_native_server.
         No official scene argument or response text is modified here.
         """
-        if self.view_mode != 'ac_gist_static':
+        if self.view_mode not in {'ac_gist_static',
+                                  'ac_native_s0_lexical_raw_reserve_failed_operation'}:
             return super().handle_chat(payload)
         if not isinstance(payload, Mapping):
             raise EventNativeAPIError(400, 'invalid_request', 'Request body must be an object')

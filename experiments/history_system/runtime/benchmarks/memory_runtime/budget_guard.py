@@ -10,7 +10,8 @@ def history_budget_receipt(memory, metadata, controller, *, ratio, phase):
     common = metadata.get("common_raw_prompt_tokens")
     if policy is None or type(unit) is not int:
         raise ValueError("Hybrid search requires an explicit native history budget contract")
-    if isinstance(controller, EventNativeExactController):
+    base_controller = getattr(controller, "inner", controller)
+    if isinstance(base_controller, EventNativeExactController):
         # Exact controllers enforce their own history capacity during prepare and
         # report Full-render common_live_tokens, not the S0 common-input boundary.
         # AppWorld also reports a task-packet common value, but it has different
@@ -28,7 +29,15 @@ def history_budget_receipt(memory, metadata, controller, *, ratio, phase):
     if type(common) is not int:
         raise ValueError("Hybrid search requires an explicit native history budget contract")
     costs = memory.costs(ratio)
-    resident = costs["resident_kv_tokens"]
+    history_gist_tokens = metadata.get("history_only_gist_tokens", costs["gist_tokens"])
+    if type(history_gist_tokens) is not int or history_gist_tokens > costs["gist_tokens"]:
+        raise ValueError("Invalid separate tool/history gist accounting")
+    resident = metadata.get("history_only_resident_kv_tokens", costs["resident_kv_tokens"])
+    if type(resident) is not int or resident < 0 or (
+        "history_only_resident_kv_tokens" not in metadata
+        and resident > costs["resident_kv_tokens"]
+    ):
+        raise ValueError("Invalid separate tool/history resident accounting")
     history_tokens = resident - common
     active = history_tokens * unit
     declared = metadata.get("actual_history_bytes")
@@ -46,9 +55,12 @@ def history_budget_receipt(memory, metadata, controller, *, ratio, phase):
         "history_budget_bytes": cap, "active_history_bytes": active,
         "declared_active_history_bytes": declared, "kv_bytes_per_token": unit,
         "common_prompt_tokens": common, "resident_prompt_tokens": resident,
+        **({"tool_resident_delta_tokens": costs["resident_kv_tokens"] - resident,
+            "combined_resident_prompt_tokens": costs["resident_kv_tokens"]}
+           if "history_only_resident_kv_tokens" in metadata else {}),
         "resident_prompt_kv_bytes": resident * unit,
-        "active_gist_bytes": costs["gist_tokens"] * unit,
-        "active_raw_and_derived_history_bytes": (history_tokens - costs["gist_tokens"]) * unit,
+        "active_gist_bytes": history_gist_tokens * unit,
+        "active_raw_and_derived_history_bytes": (history_tokens - history_gist_tokens) * unit,
         "scope": "Assembled BF16 KV representation at loaded-model geometry; excludes weights, allocator overhead and CPU/disk archives.",
         "all_derived_workspace_content_charged": True,
     }

@@ -2,8 +2,7 @@
 
 Raw-tool cells must stay byte-identical (ids, server and run commands) when
 tool contexts are added, tool-context cells must carry the T0 flags on both
-the server and the proxy side, and native controller arms must refuse the
-axis until they are wired.
+the server and the proxy side, including native recovery controllers.
 """
 from __future__ import annotations
 
@@ -106,14 +105,14 @@ def test_tool_context_validation():
         runner.cells(config)
 
 
-def test_native_arms_refuse_tool_contexts(tmp_path):
+def test_native_arms_receive_tool_contexts(tmp_path):
     config = _with_tool_context(_config(), arms=("c2kv_c1_t02_r8",))
-    with pytest.raises(ValueError, match="native C1"):
-        runner.prepare(config, tmp_path / "out", SOURCE)
+    runner.prepare(config, tmp_path / "out", SOURCE)
     cell = next(row for row in runner.cells(config)
                 if row["cell_id"] == "bfcl_base__c2kv_c1_t02_r8__tools-t0_r8")
-    with pytest.raises(ValueError, match="native cells"):
-        runner.run_command(config, cell, tmp_path, tmp_path / "profile.json")
+    command = runner.run_command(config, cell, tmp_path, tmp_path / "profile.json")
+    assert command[command.index("--tool-memory") + 1] == "t0:r8"
+    assert command[command.index("--tool-checkpoint") + 1] == cell["tool_checkpoint"]
 
 
 def test_budget_arms_refuse_tool_contexts(tmp_path):
@@ -121,12 +120,41 @@ def test_budget_arms_refuse_tool_contexts(tmp_path):
     through the server's chat budget renderer; the axis stays off them."""
     config = runner.with_hiagent_budget(_config(), 4096)
     config = _with_tool_context(config, arms=("hiagent_full_b4096",))
-    with pytest.raises(ValueError, match="budget-adapted"):
+    with pytest.raises(ValueError, match="ACON/HiAgent"):
         runner.prepare(config, tmp_path / "out", SOURCE)
     # the raw cell of the budget arm is untouched by the axis
     rows = [row for row in runner.cells(runner.with_hiagent_budget(_config(), 4096))
             if row["arm"] == "hiagent_full_b4096"]
     assert rows and all(row["tool_context"] == "raw" and "tool_memory" not in row for row in rows)
+
+
+def test_tool_overlay_preserves_old_cells_and_history_budgets():
+    base = _with_tool_context(_config())
+    extended = runner.with_tool_contexts(base, ["t0_r8"], "/restored/T0/checkpoint-1034")
+    assert runner.with_tool_contexts(base, []) is base
+    old = {row["cell_id"]: row for row in runner.cells(base) if row["tool_context"] == "raw"}
+    new = {row["cell_id"]: row for row in runner.cells(extended)}
+    assert all(new[key] == value for key, value in old.items())
+    for row in new.values():
+        if row["tool_context"] == "raw":
+            continue
+        assert not row["arm"].startswith(("hiagent", "acon"))
+        raw = old[row["benchmark"] + "__" + row["arm"]]
+        for field in ("history_budget_tokens", "ratio", "retention"):
+            assert row.get(field) == raw.get(field)
+        assert row["tool_checkpoint"] == "/restored/T0/checkpoint-1034"
+    assert "bfcl_base__c2kv_c1_t02_r8__tools-t0_r8" in new
+    assert "bfcl_base__history_kv_h2o_r25_persistent__tools-t0_r8" in new
+
+
+def test_tool_budget_reaches_native_and_proxy_commands():
+    config = _with_tool_context(_config(), arms=("full", "c2kv_c1_t02_r8"))
+    config["tool_contexts"][0]["budget_tokens"] = 128
+    for cell in runner.cells(config):
+        if not cell.get("tool_memory"):
+            continue
+        command = runner.run_command(config, cell, Path("/out/cell"), Path("/out/profile.json"))
+        assert command[command.index("--tool-budget-tokens") + 1] == "128"
 
 
 def test_prepare_writes_tool_context_column_and_commands(tmp_path):

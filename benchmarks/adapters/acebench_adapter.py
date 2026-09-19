@@ -83,6 +83,8 @@ USER_BASE_URL_ENV = "ACEBENCH_USER_BASE_URL"
 USER_API_KEY_ENV = "ACEBENCH_USER_API_KEY"
 MODELS_ENV = "ACEBENCH_API_MODELS"
 ROLE_HISTORY_ENV = "ACEBENCH_ROLE_HISTORY_V1"
+TOOL_CONTEXT_ENV = "C2KV_TOOL_CONTEXT_ON"
+TOOL_SPANS_PATCH = Path(__file__).resolve().parents[1] / "acebench_patches" / "0002-visible-tool-spans.patch"
 CAPABILITY_FEATURES = ("acebench_role_history_v1",)
 DEFAULT_CATEGORY = "agent"
 DEFAULT_LANGUAGE = "en"
@@ -129,7 +131,7 @@ def expand_categories(category: str, category_map: Dict[str, List[str]]) -> List
 
 def harness_env(base_url: str, user_base_url: str, model: str) -> Dict[str, str]:
     """Agent clients -> role history + arm proxy; simulator -> raw upstream."""
-    return {
+    env = {
         **os.environ,
         AGENT_BASE_URL_ENV: v1(base_url),
         AGENT_API_KEY_ENV: "EMPTY",
@@ -139,6 +141,11 @@ def harness_env(base_url: str, user_base_url: str, model: str) -> Dict[str, str]
         ROLE_HISTORY_ENV: "1",
         "NO_PROXY": "127.0.0.1,localhost", "no_proxy": "127.0.0.1,localhost",
     }
+    if os.environ.get(TOOL_CONTEXT_ENV) == "1":
+        benchmark_modules = str(Path(__file__).resolve().parents[1])
+        env["PYTHONPATH"] = os.pathsep.join(part for part in (
+            benchmark_modules, os.environ.get("PYTHONPATH", "")) if part)
+    return env
 
 
 def _task_id_list(value: str | None) -> List[str]:
@@ -259,6 +266,44 @@ def prepare_subset_harness(work: Path, acebench_dir: Path, category: str,
         "# Private finite-smoke category; official generator/scorer are unchanged.\n"
         f"ACE_DATA_CATEGORY = {{{category!r}: {list(selected_tests)!r}}}\n",
         encoding="utf-8")
+    return harness
+
+
+def _tool_spans_installed(harness: Path) -> bool:
+    source = Path(harness) / "model_inference"
+    checks = (
+        (source / "role_history.py", "def tool_context_kwargs"),
+        (source / "apimodel_inference.py", "tool_context_kwargs(message, functions)"),
+        (source / "multi_step" / "APIModel_agent.py", "tool_context_kwargs(message, self.functions)"),
+        (source / "multi_turn" / "APIModel_agent.py", "tool_context_kwargs(message, self.functions)"),
+    )
+    return all(path.is_file() and marker in path.read_text(encoding="utf-8")
+               for path, marker in checks)
+
+
+def prepare_tool_span_harness(work: Path, source: Path) -> Path:
+    """Apply the source-span patch to this run's private ACEBench code only."""
+    work, source = Path(work).resolve(), Path(source).resolve()
+    if source.is_relative_to(work):
+        harness = source  # prepare_subset_harness already made a private copy
+    else:
+        harness = work / "acebench_tool_harness"
+        if harness.exists():
+            raise SystemExit(f"FATAL: refusing to reuse existing ACEBench tool harness {harness}")
+        shutil.copytree(source, harness, ignore=shutil.ignore_patterns(
+            "data_all", "result_all", "score_all", "__pycache__", ".git"))
+    if _tool_spans_installed(harness):
+        return harness
+    if not TOOL_SPANS_PATCH.is_file():
+        raise SystemExit(f"FATAL: missing ACEBench tool source patch {TOOL_SPANS_PATCH}")
+    checked = subprocess.run(["git", "apply", "--check", str(TOOL_SPANS_PATCH)],
+                             cwd=harness, capture_output=True, text=True)
+    if checked.returncode:
+        raise SystemExit("FATAL: ACEBench tool source patch does not apply to the "
+                         f"private harness: {checked.stderr.strip()}")
+    subprocess.run(["git", "apply", str(TOOL_SPANS_PATCH)], cwd=harness, check=True)
+    if not _tool_spans_installed(harness):
+        raise SystemExit("FATAL: ACEBench tool source patch lacks required request sites")
     return harness
 
 
@@ -431,6 +476,8 @@ def run_acebench(base_url: str, user_base_url: str, out_dir: Path,
         selection = json.loads((work / "selected_tasks.json").read_text(encoding="utf-8"))
         selected_tests = [str(source["test"]) for source in selection["sources"]]
         harness = prepare_subset_harness(work, acebench_dir, category, selected_tests)
+    if os.environ.get(TOOL_CONTEXT_ENV) == "1":
+        harness = prepare_tool_span_harness(work, harness)
     env = harness_env(base_url, user_base_url, model)
     telemetry_path = Path(out_dir).resolve() / "measurement" / "harness_events.jsonl"
     env["C2KV_ACEBENCH_TELEMETRY"] = str(telemetry_path)

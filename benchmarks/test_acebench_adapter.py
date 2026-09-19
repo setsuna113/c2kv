@@ -46,7 +46,10 @@ def test_expand_categories_from_checkout(tmp_path):
 
 def test_harness_env_splits_agent_and_user(monkeypatch):
     monkeypatch.setenv("GPT_BASE_URL", "https://api.openai.com/v1")  # must not matter
+    monkeypatch.delenv(B.TOOL_CONTEXT_ENV, raising=False)
+    monkeypatch.delenv("PYTHONPATH", raising=False)
     env = B.harness_env("http://127.0.0.1:34100", "http://127.0.0.1:35000", "c2kv-agent")
+    assert "PYTHONPATH" not in env
     assert env[B.AGENT_BASE_URL_ENV] == "http://127.0.0.1:34100/v1"
     assert env[B.USER_BASE_URL_ENV] == "http://127.0.0.1:35000/v1"
     assert env[B.MODELS_ENV] == "c2kv-agent"
@@ -56,6 +59,8 @@ def test_harness_env_splits_agent_and_user(monkeypatch):
     # no separate user endpoint given: the simulator falls back to the SAME
     # url as the agent (standalone use), never to an OpenAI default
     assert B.harness_env("http://a", "", "m")[B.USER_BASE_URL_ENV] == "http://a/v1"
+    monkeypatch.setenv(B.TOOL_CONTEXT_ENV, "1")
+    assert str(Path(B.__file__).resolve().parents[1]) in B.harness_env("http://a", "", "m")["PYTHONPATH"]
 
 
 def test_vendored_patch_uses_structured_agent_history_only():
@@ -137,6 +142,29 @@ def test_subset_harness_remaps_category_without_changing_upstream_checkout(tmp_p
     assert (harness / "generate.py").read_text(encoding="utf-8") == "# upstream generator\n"
     assert "'agent': ['agent_multi_step']" in (harness / "category.py").read_text(encoding="utf-8")
     assert (root / "category.py").read_text(encoding="utf-8") == source_category
+
+
+def test_tool_span_harness_is_private_and_requires_complete_patch(tmp_path):
+    root = _checkout(tmp_path)
+    base = root / "model_inference"
+    (base / "multi_step").mkdir(parents=True)
+    (base / "multi_turn").mkdir(parents=True)
+    sites = (
+        (base / "role_history.py", "def tool_context_kwargs"),
+        (base / "apimodel_inference.py", "tool_context_kwargs(message, functions)"),
+        (base / "multi_step" / "APIModel_agent.py", "tool_context_kwargs(message, self.functions)"),
+        (base / "multi_turn" / "APIModel_agent.py", "tool_context_kwargs(message, self.functions)"),
+    )
+    for path, marker in sites:
+        path.write_text(marker + "\n", encoding="utf-8")
+    work = tmp_path / "out" / "acebench_work"
+    work.mkdir(parents=True)
+    harness = B.prepare_tool_span_harness(work, root)
+    assert harness != root and harness.is_relative_to(work)
+    assert B._tool_spans_installed(harness)
+    assert not (harness / "data_all").exists()
+    assert all(path.read_text(encoding="utf-8") == marker + "\n"
+               for path, marker in sites)
 
 
 def test_prepare_score_dir_matches_official_model_normalization(tmp_path):

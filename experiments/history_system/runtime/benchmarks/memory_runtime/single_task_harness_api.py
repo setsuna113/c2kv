@@ -66,6 +66,8 @@ class SingleTaskHarnessAPI(EventNativeAPI):
                  "presence_penalty", "frequency_penalty", "chat_template_kwargs",
                  "c2kv_eval_context", "tool_choice", "parallel_tool_calls", "n"}
         known.add("c2kv_measurement_session_id")
+        if self.tool_memory_contract is not None:
+            known.add("c2kv_tool_spans_v1")
         unknown = set(payload) - known
         if unknown:
             raise EventNativeAPIError(400, "unknown_field", f"Unsupported harness fields: {sorted(unknown)!r}")
@@ -142,7 +144,10 @@ class SingleTaskHarnessAPI(EventNativeAPI):
         mode = "tools" if tools else "text"
         if self._wire_mode is not None and mode != self._wire_mode:
             raise EventNativeAPIError(409, "task_protocol_changed", "Task changed between text and tool transport")
-        signature = json.dumps({"messages": messages, "tools": tools},
+        signature_input = {"messages": messages, "tools": tools}
+        if self.tool_memory_contract is not None and "c2kv_tool_spans_v1" in payload:
+            signature_input["c2kv_tool_spans_v1"] = payload["c2kv_tool_spans_v1"]
+        signature = json.dumps(signature_input,
                                ensure_ascii=False, sort_keys=True, allow_nan=False)
         identity = self._wire_identities.get(signature)
         if identity is None:
@@ -164,6 +169,8 @@ class SingleTaskHarnessAPI(EventNativeAPI):
                       "seed": 0,
                       "max_completion_tokens": self.max_new_tokens,
                       "c2kv_eval_context": identity}
+        if self.tool_memory_contract is not None and "c2kv_tool_spans_v1" in payload:
+            normalized["c2kv_tool_spans_v1"] = copy.deepcopy(payload["c2kv_tool_spans_v1"])
         # Validate before reserving an identity or changing the transport mode.
         self._validate_request(normalized)
         self._wire_identities.setdefault(signature, identity)

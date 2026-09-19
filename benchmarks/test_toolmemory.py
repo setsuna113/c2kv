@@ -194,7 +194,9 @@ def test_plan_uniform_compresses_every_tool_and_rewrites_system(tmp_path):
     assert all(c["role"] == "user" and c["content"] == "" and c["c2kv_ratio"] == 8 for c in carriers)
     assert [c["c2kv_key_hash"] for c in carriers] == [r["key_hash"] for r in plan.records]
     assert all(toolmemory.is_carrier(c) for c in carriers)
-    assert set(toolmemory.strip_carrier_fields(carriers[0])) == {"role", "content", "c2kv_key_hash", "c2kv_ratio"}
+    assert set(toolmemory.strip_carrier_fields(carriers[0])) == {
+        "role", "content", "c2kv_key_hash", "c2kv_ratio",
+        "c2kv_region", "c2kv_source_token_count"}
     # memo: the same documents extract once per ratio
     mem.plan(payload)
     assert mem.stats["chunk_extracts"] == 3 and mem.stats["chunk_cache_hits"] == 3

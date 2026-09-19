@@ -92,6 +92,12 @@ def parser():
                         help='Bare SGLang engine base URL, for example http://127.0.0.1:36100.')
     result.add_argument('--sglang-timeout-seconds', type=positive_seconds, default=10800.0,
                         help='Per-request timeout for the external SGLang engine.')
+    result.add_argument('--tool-memory', default='none',
+                        help='Optional visible tool representation: t0:r8, h2o:r8, or snapkv:r8.')
+    result.add_argument('--tool-checkpoint', type=Path,
+                        help='The separately trained T0 checkpoint, required by T0 tool memory.')
+    result.add_argument('--tool-budget-tokens', type=positive_int,
+                        help='Optional independent raw-tool retained-token cap.')
     result.add_argument('--max-wall-seconds', type=positive_seconds, required=True)
     result.add_argument('--device', default='cpu')
     result.add_argument('--no-raw-snapshot', action='store_true',
@@ -235,7 +241,9 @@ def _checkpoint_eos_token_ids(checkpoint, tokenizer):
 
 
 def _sampling_params_for_benchmark(benchmark, view_mode=None):
-    if benchmark == 'acebench' and view_mode == 'ac_gist_static':
+    if benchmark == 'acebench' and view_mode in {
+        'ac_gist_static', 'ac_native_s0_lexical_raw_reserve_failed_operation',
+    }:
         return {'temperature': 0.001, 'top_p': 1.0}
     if benchmark == 'acon_appworld':
         return {
@@ -256,6 +264,8 @@ def _build_generator(
     journal_path,
     s0_config,
     shadow_feature_config,
+    tool_spec=None,
+    tool_contract=None,
 ):
     backend = args.generation_backend
     if backend == 'native':
@@ -293,6 +303,12 @@ def _build_generator(
         max_new_tokens=args.max_new_tokens,
         max_generation_calls=args.max_generation_calls,
         max_extraction_calls=args.max_extraction_calls,
+        **({'max_tool_extraction_calls': tool_spec.max_chunks * args.max_generation_calls}
+           if tool_spec is not None and tool_spec.encoder == 't0' else {}),
+        **({'max_tool_repair_calls': tool_spec.max_chunks * args.max_generation_calls}
+           if tool_spec is not None and tool_spec.encoder != 't0' else {}),
+        **({'expected_tool_checkpoint_contract': tool_contract['checkpoint']}
+           if tool_contract is not None and 'checkpoint' in tool_contract else {}),
         timeout_seconds=args.sglang_timeout_seconds,
         eos_token_ids=eos_token_ids,
         eos_source=eos_source,
@@ -300,7 +316,9 @@ def _build_generator(
         sampling_params=sampling_params,
         **({'sampling_profile': 'acebench-agent-v1'}
            if getattr(args, 'benchmark', None) == 'acebench'
-           and getattr(args, 'view_mode', None) == 'ac_gist_static' else {}),
+           and getattr(args, 'view_mode', None) in {
+               'ac_gist_static', 'ac_native_s0_lexical_raw_reserve_failed_operation',
+           } else {}),
         shadow_feature_config=shadow_feature_config,
         encoding_scope=encoding_scope,
     )
@@ -310,7 +328,26 @@ def _build_generator(
 def _serve(args):
     s0_config, s0_contract = _read_s0_configuration(args)
     generation_backend = _validate_generation_backend(args, s0_config=s0_config)
-    if getattr(args, 'benchmark', None) == 'acebench' and args.view_mode == 'ac_gist_static' and generation_backend != 'sglang':
+    from .event_native_tool import parse_native_tool_spec
+    tool_spec = parse_native_tool_spec(getattr(args, 'tool_memory', None))
+    if tool_spec is not None and tool_spec.encoder != 't0':
+        raise ValueError(
+            'Global H2O/SnapKV selection across disjoint visible tool spans is not implemented'
+        )
+    if tool_spec is not None and generation_backend != 'sglang':
+        raise ValueError('Tool memory requires generation-backend=sglang')
+    if tool_spec is None and (getattr(args, 'tool_checkpoint', None) is not None
+                              or getattr(args, 'tool_budget_tokens', None) is not None):
+        raise ValueError('Tool options require --tool-memory')
+    if tool_spec is not None and tool_spec.encoder == 't0' and getattr(args, 'tool_checkpoint', None) is None:
+        raise ValueError('T0 tool memory requires --tool-checkpoint')
+    if tool_spec is not None and tool_spec.encoder != 't0' and getattr(args, 'tool_checkpoint', None) is not None:
+        raise ValueError('Raw-KV tool memory does not use --tool-checkpoint')
+    if tool_spec is not None and tool_spec.encoder != 't0' and tool_spec.layout != 'uniform':
+        raise ValueError('Raw-KV native tool memory currently requires a uniform catalog')
+    if getattr(args, 'benchmark', None) == 'acebench' and args.view_mode in {
+        'ac_gist_static', 'ac_native_s0_lexical_raw_reserve_failed_operation',
+    } and generation_backend != 'sglang':
         raise ValueError('Native bare ACEBench requires SGLang for its source sampling contract')
     _validate_allocator_device(args)
     started = time.monotonic()
@@ -335,7 +372,9 @@ def _serve(args):
             raise ValueError('ACE textual source requires the acebench namespace')
         if args.view_mode == 'static':
             raise ValueError('ACE textual source has no training-static adapter')
-        if args.view_mode in NATIVE_ALWAYS_ROUTE_MODES and args.view_mode != 'ac_gist_static':
+        if args.view_mode in NATIVE_ALWAYS_ROUTE_MODES and args.view_mode not in {
+            'ac_gist_static', 'ac_native_s0_lexical_raw_reserve_failed_operation',
+        }:
             raise ValueError('Always-compress P0 supports only source_profile=native-v1')
     args.out.mkdir(parents=True, exist_ok=False)
     journal_path = args.out / 'attempts.jsonl'
@@ -376,6 +415,19 @@ def _serve(args):
 
     try:
         profile = inspect_checkpoint(args.checkpoint)
+        tool_contract = None
+        if tool_spec is not None:
+            tool_contract = {'spec': tool_spec.as_dict(),
+                             'tool_budget_tokens': getattr(args, 'tool_budget_tokens', None)}
+            if tool_spec.encoder == 't0':
+                from .event_native_tool import shared_tool_catalog
+                tool_contract['checkpoint'] = shared_tool_catalog().load_tool_checkpoint_contract(
+                    args.tool_checkpoint, tool_spec)
+                history_tokenizer = args.checkpoint / 'tokenizer.json'
+                tool_tokenizer = args.tool_checkpoint / 'tokenizer.json'
+                if hashlib.sha256(history_tokenizer.read_bytes()).digest() != hashlib.sha256(tool_tokenizer.read_bytes()).digest():
+                    raise ValueError('T0 and history checkpoints use different tokenizers')
+            manifest['tool_memory_contract'] = tool_contract
         expected_bytes = validate_inference_byte_profile(profile, args.dtype)
         if args.ratio not in profile['declared_supported_ratios']:
             raise ValueError('ratio is absent from checkpoint contract')
@@ -448,7 +500,18 @@ def _serve(args):
             journal_path=journal_path,
             s0_config=s0_config,
             shadow_feature_config=shadow_feature_config,
+            tool_spec=tool_spec,
+            tool_contract=tool_contract,
         )
+        if tool_spec is not None:
+            generator._ensure_model_info()
+        if tool_spec is not None:
+            from .event_native_tool import ToolRegionController
+            controller = ToolRegionController(
+                controller, tokenizer, tool_spec, model_context=context,
+                generator=generator,
+                tool_budget_tokens=getattr(args, 'tool_budget_tokens', None),
+                tool_checkpoint_contract=tool_contract.get('checkpoint'))
         if shadow_contract is not None:
             manifest['shadow_feature_contract'] = shadow_contract
         if getattr(args, 'npu_allocator_metrics', False):
@@ -479,6 +542,7 @@ def _serve(args):
             allowed_task_ids=task_ids, max_decisions=args.max_decisions,
             deadline_monotonic=deadline, steps_path=args.out / 'steps.jsonl',
             runtime_policy_contract=runtime_policy,
+            tool_memory_contract=tool_contract,
             **({'compression_policy': compression_policy,
                 'history_view_protocol': history_view_protocol}
                if source_profile in ('native-v1', 'openai-single-task-v1')

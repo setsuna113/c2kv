@@ -40,7 +40,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 TOOL_MEMORY_SCHEMA = "c2kv.tool_memory.v1"
 RENDER_PROFILE = "next-compression-tool-explicit-protocol-v2"
 RANKER = "lexical-name4-text1-last-user-v1"
-ENCODERS = ("t0",)
+ENCODERS = ("t0", "h2o", "snapkv")
 LAYOUTS = ("uniform", "hybrid")
 SUPPORTED_RATIOS = (8, 12)
 # Marker on the carrier messages the proxy inserts; every proxy-side message
@@ -125,7 +125,7 @@ class ToolMemorySpec:
         }
 
 
-_SPEC_RE = re.compile(r"^(?P<encoder>t0):r(?P<ratio>\d+)(?::(?P<layout>uniform|hybrid(?P<k>\d+)))?$")
+_SPEC_RE = re.compile(r"^(?P<encoder>t0|h2o|snapkv):r(?P<ratio>\d+)(?::(?P<layout>uniform|hybrid(?P<k>\d+)))?$")
 
 
 def parse_tool_memory_spec(text: Optional[str]) -> Optional[ToolMemorySpec]:
@@ -217,6 +217,7 @@ def tool_search_text(tool: Mapping[str, Any]) -> str:
         tool.get("parameters", ""),
         tool.get("input_schema", ""),
         tool.get("schema", ""),
+        tool.get("text", ""),
     ]
     return " ".join(item if isinstance(item, str) else json.dumps(item, ensure_ascii=False)
                     for item in fields if item)
@@ -235,6 +236,109 @@ def query_text(messages: Sequence[Mapping[str, Any]]) -> str:
         if message.get("role") == "user":
             return message_text(message)
     return message_text(messages[-1]) if messages else ""
+
+
+TOOL_SPANS_FIELD = "c2kv_tool_spans_v1"
+INLINE_TOOL_PLACEHOLDER = "[Tool definition {identity} available in compressed memory]"
+
+
+@dataclass(frozen=True)
+class VisibleToolSpan:
+    """An exact, source-provided text interval already visible to the model."""
+
+    message_index: int
+    start: int
+    end: int
+    source: str
+    text: str
+
+
+def source_span_identity(span: VisibleToolSpan) -> str:
+    """Stable across turns when an observed definition moves in history."""
+    return hashlib.sha256((span.source + "\n" + span.text).encode("utf-8")).hexdigest()[:16]
+
+
+def source_span_placeholder(span: VisibleToolSpan) -> str:
+    return INLINE_TOOL_PLACEHOLDER.format(identity=source_span_identity(span))
+
+
+def visible_tool_snapshot(span: VisibleToolSpan) -> Dict[str, Any]:
+    """Use a visible JSON schema directly; preserve other docs as exact text."""
+    try:
+        value = json.loads(span.text)
+    except json.JSONDecodeError:
+        value = None
+    if isinstance(value, Mapping):
+        return tool_snapshot(value)
+    return {"source": span.source, "text": span.text}
+
+
+def strip_request_annotations(payload: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Remove proxy-private source annotations; preserve object identity if absent."""
+    if TOOL_SPANS_FIELD not in payload:
+        return payload
+    return {key: value for key, value in payload.items() if key != TOOL_SPANS_FIELD}
+
+
+def tool_visibility_status(payload: Mapping[str, Any]) -> str:
+    """One receipt value even when the compressor has nothing visible to do."""
+    if resolve_visible_tool_spans(payload):
+        return "visible_source_spans"
+    if payload.get("tools"):
+        return "structured_tools"
+    return "no_visible_definition"
+
+
+def resolve_visible_tool_spans(payload: Mapping[str, Any]) -> Tuple[VisibleToolSpan, ...]:
+    """Validate exact intervals supplied by the benchmark's source adapter.
+
+    There is deliberately no prompt-wide regex or gold/catalog lookup here.
+    An absent annotation means that no inline definition was observed.
+    """
+    annotations = payload.get(TOOL_SPANS_FIELD) or []
+    if not isinstance(annotations, list):
+        raise ToolMemoryError("tool_spans", f"{TOOL_SPANS_FIELD} must be a list")
+    messages = payload.get("messages") or []
+    if not isinstance(messages, list):
+        raise ToolMemoryError("tool_spans", "messages must be a list")
+    spans: List[VisibleToolSpan] = []
+    for item in annotations:
+        if not isinstance(item, Mapping):
+            raise ToolMemoryError("tool_spans", "each span must be an object")
+        index, start, end, source = (item.get("message_index"), item.get("start"),
+                                     item.get("end"), item.get("source"))
+        if any(isinstance(value, bool) or not isinstance(value, int)
+               for value in (index, start, end)):
+            raise ToolMemoryError("tool_spans", "message_index/start/end must be integers")
+        if not isinstance(source, str) or not source:
+            raise ToolMemoryError("tool_spans", "source must identify the official producer")
+        if not 0 <= index < len(messages):
+            raise ToolMemoryError("tool_spans", f"message_index {index} is outside messages")
+        content = messages[index].get("content")
+        if not isinstance(content, str) or not 0 <= start < end <= len(content):
+            raise ToolMemoryError("tool_spans", f"invalid text interval {index}:{start}:{end}")
+        spans.append(VisibleToolSpan(index, start, end, source, content[start:end]))
+    spans.sort(key=lambda span: (span.message_index, span.start, span.end))
+    for previous, current in zip(spans, spans[1:]):
+        if previous.message_index == current.message_index and previous.end > current.start:
+            raise ToolMemoryError("tool_spans", "source spans overlap")
+    return tuple(spans)
+
+
+def remove_visible_spans(messages: Sequence[Mapping[str, Any]],
+                         spans: Sequence[VisibleToolSpan],
+                         removed_indices: Sequence[int]) -> List[Dict[str, Any]]:
+    """Replace compressed intervals only; retain surrounding text verbatim."""
+    out = [dict(message) for message in messages]
+    removed = set(removed_indices)
+    for span_index in reversed(range(len(spans))):
+        if span_index not in removed:
+            continue
+        span = spans[span_index]
+        content = out[span.message_index]["content"]
+        out[span.message_index]["content"] = (
+            content[:span.start] + source_span_placeholder(span) + content[span.end:])
+    return out
 
 
 def _tokens(text: str) -> List[str]:
@@ -291,6 +395,8 @@ def with_protocol_system(messages: Sequence[Mapping[str, Any]], protocol: str) -
     """tools._native_tool_memory: append the protocol to the leading system
     message, or insert a new system message when there is none."""
     out = [dict(m) for m in messages]
+    if not protocol:
+        return out
     if out and out[0].get("role") == "system":
         content = out[0].get("content")
         if not isinstance(content, str):
@@ -320,6 +426,7 @@ class Chunk:
     source_token_start: int
     source_token_end: int
     token_ids: Tuple[int, ...]
+    catalog_index: int = -1
 
 
 def document_chunks(native_ids: Callable[[Sequence[Mapping[str, Any]]], Sequence[int]],
@@ -334,7 +441,8 @@ def document_chunks(native_ids: Callable[[Sequence[Mapping[str, Any]]], Sequence
         part_index = 0
         while start < len(ids):
             end = min(start + spec.chunk_tokens, len(ids))
-            chunks.append(Chunk(event_id, part_index, start, end, ids[start:end]))
+            chunks.append(Chunk(event_id, part_index, start, end, ids[start:end],
+                                int(document.get("tool_index", document_index))))
             if end == len(ids):
                 break
             start = end - spec.chunk_overlap
@@ -352,6 +460,137 @@ def document_chunks(native_ids: Callable[[Sequence[Mapping[str, Any]]], Sequence
 
 def expected_gist_len(token_count: int, ratio: int) -> int:
     return (token_count + ratio - 1) // ratio
+
+
+@dataclass
+class VisibleToolPlan:
+    """Pure catalog selection before any model or server extraction."""
+
+    spec: ToolMemorySpec
+    messages: List[Dict[str, Any]]
+    protocol: str
+    chunks: List[Chunk]
+    source_spans: Tuple[VisibleToolSpan, ...]
+    compressed_source_indices: Tuple[int, ...]
+    compressed_tool_indices: Tuple[int, ...]
+    carrier_anchors: List[Dict[str, Any]]
+    info: Dict[str, Any]
+
+
+def _isolated_content_tokens(tokenizer: Any, content: str) -> int:
+    envelope = ({"role": "user", "content": ""},)
+    rendered = ({"role": "user", "content": content},)
+    return max(0, len(tokenizer.native_ids(rendered)) - len(tokenizer.native_ids(envelope)))
+
+
+def enforce_tool_budget(plan: VisibleToolPlan | "ToolMemoryPlan",
+                        budget_tokens: Optional[int]) -> None:
+    """Cap total resident T0 tool slots; no cap means the frozen ratio policy."""
+    if budget_tokens is None:
+        return
+    if isinstance(budget_tokens, bool) or not isinstance(budget_tokens, int) or budget_tokens < 1:
+        raise ValueError("tool budget_tokens must be a positive integer")
+    resident = plan.info.get("resident_tool_tokens")
+    if resident is None:
+        raise ToolMemoryError("tool_budget", "raw-KV budget needs post-assembly token selection")
+    if int(resident) > budget_tokens:
+        raise ToolMemoryError("tool_budget",
+                              f"{resident} resident tool tokens exceed budget {budget_tokens}")
+
+
+def plan_visible_tool_memory(payload: Mapping[str, Any], spec: ToolMemorySpec,
+                             tokenizer: Any = None) -> Optional[VisibleToolPlan]:
+    """Plan one tool context from the request's *visible* definitions only.
+
+    Structured ``tools`` and adapter-provided exact text spans share one
+    catalog ranker and one global selection. T0 retains its training document
+    envelope and chunking. Raw-KV plans preserve original messages so the
+    final, query-bearing assembled prompt can be scored after history packing.
+    """
+    spec.validate()
+    tools = payload.get("tools") or []
+    if not isinstance(tools, list) or any(not isinstance(tool, Mapping) for tool in tools):
+        raise ToolMemoryError("tools", "tools must be a list of objects")
+    messages = list(payload.get("messages") or [])
+    if any(not isinstance(message, Mapping) for message in messages):
+        raise ToolMemoryError("messages", "messages must be a list of objects")
+    spans = resolve_visible_tool_spans(payload)
+    if not tools and not spans:
+        return None
+
+    snapshots = [tool_snapshot(tool) for tool in tools]
+    for span in spans:
+        snapshots.append(visible_tool_snapshot(span))
+    native = native_indices(snapshots, spec, messages)
+    native_set = set(native)
+    compressed = tuple(index for index in range(len(snapshots)) if index not in native_set)
+    if not compressed:
+        raise ToolMemoryError("no_compressed_remainder",
+                              f"hybrid top-{spec.top_k} keeps all {len(snapshots)} visible definitions native")
+    n_structured = len(tools)
+    compressed_tools = tuple(index for index in compressed if index < n_structured)
+    compressed_sources = tuple(index - n_structured for index in compressed if index >= n_structured)
+    anchors = [{
+        "catalog_index": n_structured + span_index,
+        "message_index": spans[span_index].message_index,
+        "start": spans[span_index].start,
+        "end": spans[span_index].end,
+        "source": spans[span_index].source,
+        "identity": source_span_identity(spans[span_index]),
+        "placeholder": source_span_placeholder(spans[span_index]),
+    } for span_index in compressed_sources]
+    if spec.encoder == "t0":
+        if tokenizer is None:
+            raise ValueError("T0 planning needs the checkpoint tokenizer")
+        native_tools = [snapshots[index] for index in native if index < n_structured]
+        protocol = protocol_block(native_tools) if n_structured else ""
+        rewritten = remove_visible_spans(messages, spans, compressed_sources)
+        if protocol:
+            rewritten = with_protocol_system(rewritten, protocol)
+            # Inserting a leading system message shifts source anchors.
+            if not messages or messages[0].get("role") != "system":
+                for anchor in anchors:
+                    anchor["rewritten_message_index"] = anchor["message_index"] + 1
+        chunks = document_chunks(tokenizer.native_ids,
+                                 t0_documents(snapshots, compressed), spec)
+        system_only = [m for m in messages if m.get("role") == "system"][:1] or [
+            {"role": "system", "content": ""}]
+        protocol_prefix = [m for m in rewritten if m.get("role") == "system"][:1]
+        protocol_tokens = (len(tokenizer.native_ids(protocol_prefix))
+                           - len(tokenizer.native_ids(system_only))) if protocol else 0
+        expected_gist_tokens = sum(expected_gist_len(len(chunk.token_ids), spec.ratio)
+                                   for chunk in chunks)
+        native_source_tokens = sum(_isolated_content_tokens(tokenizer, spans[index].text)
+                                   for index in range(len(spans)) if index not in compressed_sources)
+        resident_tool_tokens = protocol_tokens + expected_gist_tokens + native_source_tokens
+    else:
+        protocol = ""
+        rewritten = [dict(message) for message in messages]
+        chunks = []
+        protocol_tokens = expected_gist_tokens = native_source_tokens = resident_tool_tokens = None
+    for anchor in anchors:
+        anchor.setdefault("rewritten_message_index", anchor["message_index"])
+    info = {
+        "schema": TOOL_MEMORY_SCHEMA, "spec": spec.name, "encoder": spec.encoder,
+        "ratio": spec.ratio, "layout": spec.layout, "top_k": spec.top_k,
+        "ranker": RANKER, "render_profile": RENDER_PROFILE if spec.encoder == "t0" else "native-raw-kv",
+        "representation": "t0_gist" if spec.encoder == "t0" else "selected_raw_kv",
+        "action_protocol": "benchmark_original" if spans and not tools else "structured_tool_call",
+        "structured_tools_in_prompt": spec.encoder != "t0" or not tools,
+        "n_tools": len(snapshots), "n_structured_tools": n_structured,
+        "n_visible_source_spans": len(spans), "n_native": len(native),
+        "native_indices": list(native), "n_documents": len(compressed) if spec.encoder == "t0" else 0,
+        "n_chunks": len(chunks), "compressed_tool_indices": list(compressed_tools),
+        "compressed_source_indices": list(compressed_sources),
+        "source_status": "visible" if spans else ("structured_tools" if tools else "no_visible_definition"),
+        "carrier_anchors": anchors,
+        "protocol_prefix_tokens": protocol_tokens,
+        "expected_gist_tokens": expected_gist_tokens,
+        "native_source_tokens": native_source_tokens,
+        "resident_tool_tokens": resident_tool_tokens,
+    }
+    return VisibleToolPlan(spec, rewritten, protocol, chunks, spans,
+                           compressed_sources, compressed_tools, anchors, info)
 
 
 # ---------------------------------------------------------------------------
@@ -405,14 +644,20 @@ class ToolMemoryPlan:
     chunks: List[Chunk]
     records: List[Dict[str, Any]]            # one extract record per chunk (key_hash, gist_len, ...)
     info: Dict[str, Any]
+    carrier_anchors: List[Dict[str, Any]] = None
+    source_spans: Tuple[VisibleToolSpan, ...] = ()
 
     def carriers(self) -> List[Dict[str, Any]]:
+        anchors = {anchor["catalog_index"]: anchor for anchor in (self.carrier_anchors or [])}
         return [{
             "role": "user", "content": "",
             "c2kv_key_hash": record["key_hash"],
             "c2kv_ratio": self.spec.ratio,
+            "c2kv_region": "tool",
+            "c2kv_source_token_count": len(chunk.token_ids),
             CARRIER_MARK: {"event_id": chunk.event_id, "part_index": chunk.part_index,
-                           "source_tokens": len(chunk.token_ids), "gist_len": record["gist_len"]},
+                           "source_tokens": len(chunk.token_ids), "gist_len": record["gist_len"],
+                           "anchor": anchors.get(chunk.catalog_index)},
         } for chunk, record in zip(self.chunks, self.records)]
 
 
@@ -425,33 +670,94 @@ def strip_carrier_fields(message: Mapping[str, Any]) -> Dict[str, Any]:
     return {k: v for k, v in message.items() if k != CARRIER_MARK}
 
 
+def _carrier_identity(carrier: Mapping[str, Any]) -> Tuple[Any, ...]:
+    metadata = carrier.get(CARRIER_MARK) or {}
+    anchor = metadata.get("anchor") or {}
+    return (carrier.get("c2kv_key_hash"), metadata.get("event_id"),
+            metadata.get("part_index"), anchor.get("identity"))
+
+
 def insert_carriers(out_messages: List[Dict[str, Any]], counts: Dict[str, Any],
-                    carriers: Sequence[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
-    """Place carriers after the leading system message(s) of an assembled
-    message list and shift every out-index the proxy ledger keeps.  Idempotent."""
-    if not carriers or any(is_carrier(m) for m in out_messages):
+                    carriers: Sequence[Dict[str, Any]],
+                    source_out_indices: Optional[Mapping[int, int]] = None,
+                    ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    """Insert static catalog carriers at prefix and source docs at their event.
+
+    ``source_out_indices`` maps original source-message indices to assembled
+    output indices. It is required for inline source spans because history
+    assembly may merge, normalize, or insert messages. Existing carriers are
+    deduplicated by content and source identity; later visible docs can append.
+    """
+    if not carriers:
         return out_messages, counts
-    insert_at = 0
-    while insert_at < len(out_messages) and out_messages[insert_at].get("role") == "system":
-        insert_at += 1
-    shift = len(carriers)
-    out = out_messages[:insert_at] + [dict(c) for c in carriers] + out_messages[insert_at:]
+    existing = {_carrier_identity(message) for message in out_messages if is_carrier(message)}
+    pending = [carrier for carrier in carriers if _carrier_identity(carrier) not in existing]
+    if not pending:
+        return out_messages, counts
+    prefix_at = 0
+    while prefix_at < len(out_messages) and out_messages[prefix_at].get("role") == "system":
+        prefix_at += 1
+    placements: List[Tuple[int, Dict[str, Any]]] = []
+    for carrier in pending:
+        anchor = (carrier.get(CARRIER_MARK) or {}).get("anchor")
+        if anchor:
+            source_index = anchor["message_index"]
+            if source_out_indices is None or source_index not in source_out_indices:
+                raise ToolMemoryError("tool_anchor",
+                                      f"no assembled message index for source message {source_index}")
+            out_index = source_out_indices[source_index]
+            if not isinstance(out_index, int) or not 0 <= out_index < len(out_messages):
+                raise ToolMemoryError("tool_anchor", f"invalid assembled index {out_index}")
+            insert_at = out_index + 1
+        else:
+            insert_at = prefix_at
+        placements.append((insert_at, dict(carrier)))
+    by_index: Dict[int, List[Dict[str, Any]]] = {}
+    for insert_at, carrier in placements:
+        by_index.setdefault(insert_at, []).append(carrier)
+    out: List[Dict[str, Any]] = []
+    for index in range(len(out_messages) + 1):
+        out.extend(by_index.get(index, []))
+        if index < len(out_messages):
+            out.append(out_messages[index])
+    def shifted(index: int) -> int:
+        return index + sum(1 for insert_at, _ in placements if insert_at <= index)
     counts = dict(counts)
     for key in ("current_start_out_index", "task_packet_out_index"):
         value = counts.get(key)
-        if isinstance(value, int) and value >= insert_at:
-            counts[key] = value + shift
+        if isinstance(value, int):
+            counts[key] = shifted(value)
     records = []
     for record in counts.get("compressed_records") or []:
         record = dict(record)
         idx = record.get("out_index")
-        if isinstance(idx, int) and idx >= insert_at:
-            record["out_index"] = idx + shift
+        if isinstance(idx, int):
+            record["out_index"] = shifted(idx)
         records.append(record)
     if records:
         counts["compressed_records"] = records
-    counts["tool_memory_carriers"] = shift
-    counts["tool_memory_insert_at"] = insert_at
+    original_events = counts.get("history_kv_event_messages")
+    if original_events is not None:
+        if len(original_events) != len(out_messages) or any(
+            event.get("message_index") != index
+            for index, event in enumerate(original_events)
+        ):
+            raise ToolMemoryError("tool_event_alignment",
+                                  "history KV events must align with assembled messages")
+        event_messages = []
+        for index in range(len(out_messages) + 1):
+            for carrier in by_index.get(index, []):
+                event_messages.append({"message_index": len(event_messages),
+                                       "role": carrier.get("role") or "user",
+                                       "phase": "others"})
+            if index < len(out_messages):
+                event = dict(original_events[index])
+                event["message_index"] = len(event_messages)
+                event_messages.append(event)
+        counts["history_kv_event_messages"] = event_messages
+    counts["tool_memory_carriers"] = sum(1 for message in out if is_carrier(message))
+    counts["tool_memory_insert_at"] = min(insert_at for insert_at, _ in placements)
+    counts["tool_memory_insertions"] = [insert_at for insert_at, _ in placements]
     return out, counts
 
 
@@ -460,11 +766,19 @@ class ToolMemory:
 
     def __init__(self, spec: ToolMemorySpec, checkpoint: Path,
                  extract_tokens: Callable[[Sequence[int], int, str], Dict[str, Any]],
-                 tokenizer: Optional[NativeTokenizer] = None):
+                 tokenizer: Optional[NativeTokenizer] = None,
+                 budget_tokens: Optional[int] = None):
         spec.validate()
+        if budget_tokens is not None and (isinstance(budget_tokens, bool)
+                                          or not isinstance(budget_tokens, int)
+                                          or budget_tokens < 1):
+            raise ValueError("tool budget_tokens must be a positive integer")
         self.spec = spec
+        self.budget_tokens = budget_tokens
         self.checkpoint = Path(checkpoint)
-        self.contract = load_tool_checkpoint_contract(self.checkpoint, spec)
+        self.contract = (load_tool_checkpoint_contract(self.checkpoint, spec)
+                         if spec.encoder == "t0" else {"checkpoint": str(self.checkpoint),
+                                                        "config_sha256": ""})
         self.tokenizer = tokenizer or NativeTokenizer(self.checkpoint)
         self._extract_tokens = extract_tokens
         self._cache: Dict[Tuple[str, int, int], Dict[str, Any]] = {}
@@ -501,65 +815,57 @@ class ToolMemory:
         return plan
 
     # ---- the per-request transform ----
-    def plan(self, payload: Mapping[str, Any]) -> Optional[ToolMemoryPlan]:
-        """None when the request carries no tools (nothing to compress; the
-        request is then served unchanged and this is counted, never hidden)."""
+    def plan(self, payload: Mapping[str, Any]) -> Optional[ToolMemoryPlan | VisibleToolPlan]:
+        """Plan only definitions made visible by the current benchmark request."""
         self.stats["requests"] += 1
-        tools = payload.get("tools") or []
-        if not tools:
+        visible = plan_visible_tool_memory(payload, self.spec, self.tokenizer)
+        if visible is None:
             self.stats["skipped_no_tools"] += 1
             return None
-        if any(not isinstance(tool, Mapping) for tool in tools):
-            raise ToolMemoryError("tools", "tools must be a list of objects")
+        if self.spec.encoder != "t0":
+            # Raw-KV selectors need the final assembled prompt and its query.
+            # The proxy completes these plans after history packing.
+            self.stats["applied"] += 1
+            return visible
+        enforce_tool_budget(visible, self.budget_tokens)
         messages = list(payload.get("messages") or [])
-        snapshots = [tool_snapshot(tool) for tool in tools]
-        native = native_indices(snapshots, self.spec, messages)
-        remainder = [i for i in range(len(snapshots)) if i not in native]
-        if not remainder:
-            raise ToolMemoryError(
-                "no_compressed_remainder",
-                f"hybrid top-{self.spec.top_k} keeps all {len(snapshots)} tools native; "
-                "the request has nothing to compress")
-        native_tools = [snapshots[i] for i in native]
-        documents = t0_documents(snapshots, remainder)
-        protocol = protocol_block(native_tools)
-        rewritten = with_protocol_system(messages, protocol)
-        chunks = document_chunks(self.tokenizer.native_ids, documents, self.spec)
-        records = [self._extract(chunk) for chunk in chunks]
+        tools = payload.get("tools") or []
+        records = [self._extract(chunk) for chunk in visible.chunks]
         # Accounting for the paper's R_tool: the raw Qwen tool prologue vs the
         # protocol system prefix plus gist tokens.  Both measured on the same
         # tokenizer; the server's kv_resident_tokens remains the physical truth.
         system_only = [m for m in messages if m.get("role") == "system"][:1] or [
             {"role": "system", "content": ""}]
         raw_prologue = (len(self.tokenizer.native_ids(system_only, tools=[tool_snapshot(t) for t in tools]))
-                        - len(self.tokenizer.native_ids(system_only)))
-        protocol_prefix = [m for m in rewritten if m.get("role") == "system"][:1]
-        protocol_tokens = (len(self.tokenizer.native_ids(protocol_prefix))
-                           - len(self.tokenizer.native_ids(system_only)))
+                        - len(self.tokenizer.native_ids(system_only))) if tools else 0
+        raw_source = sum(_isolated_content_tokens(self.tokenizer, span.text)
+                         for span in visible.source_spans)
+        protocol_tokens = int(visible.info["protocol_prefix_tokens"])
         gist_tokens = sum(int(r["gist_len"]) for r in records)
-        presented = sum(len(c.token_ids) for c in chunks)
-        info = {
-            "schema": TOOL_MEMORY_SCHEMA, "spec": self.spec.name, "ratio": self.spec.ratio,
-            "layout": self.spec.layout, "top_k": self.spec.top_k, "ranker": RANKER,
-            "render_profile": RENDER_PROFILE,
-            "n_tools": len(snapshots), "n_native": len(native), "native_indices": list(native),
-            "native_names": [tool_name(snapshots[i]) for i in native],
-            "n_documents": len(documents), "n_chunks": len(chunks),
+        presented = sum(len(c.token_ids) for c in visible.chunks)
+        snapshots = [tool_snapshot(tool) for tool in tools] + [
+            visible_tool_snapshot(span) for span in visible.source_spans]
+        info = {**visible.info,
+            "native_names": [tool_name(snapshots[i]) for i in visible.info["native_indices"]],
             "presented_encoder_tokens": presented, "gist_tokens": gist_tokens,
             "raw_tool_prologue_tokens": raw_prologue,
+            "raw_visible_source_tokens": raw_source,
             "protocol_prefix_tokens": protocol_tokens,
-            "resident_tool_tokens": protocol_tokens + gist_tokens,
+            "resident_tool_tokens": visible.info["resident_tool_tokens"],
+            "budget_tokens": self.budget_tokens,
             "cache_hits": sum(1 for r in records if r.get("cache_hit")),
             "checkpoint": self.contract["checkpoint"],
             "checkpoint_config_sha256": self.contract["config_sha256"],
         }
         self.stats["applied"] += 1
-        return ToolMemoryPlan(self.spec, rewritten, protocol, chunks, records, info)
+        return ToolMemoryPlan(self.spec, visible.messages, visible.protocol,
+                              visible.chunks, records, info, visible.carrier_anchors,
+                              visible.source_spans)
 
     def stage_request(self, payload: Mapping[str, Any], plan: Optional[ToolMemoryPlan]) -> Dict[str, Any]:
         """Request-level fields for the upstream chat call (tools stay for the
         tool-call parser; the template must not render them)."""
-        out = dict(payload)
-        if plan is not None:
+        out = dict(strip_request_annotations(payload))
+        if plan is not None and plan.info.get("structured_tools_in_prompt") is False:
             out["c2kv_tools_in_prompt"] = False
         return out

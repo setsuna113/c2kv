@@ -87,6 +87,12 @@ def delivery_args(config, benchmark, output, task_ids, delivery):
         command += ["--candidate-algorithm", ARM_TO_VARIANT[ARM]]
     else:
         command += ["--detector", detector]
+    if config.get("tool_memory"):
+        command += ["--tool-memory", config["tool_memory"]]
+        if config.get("tool_checkpoint"):
+            command += ["--tool-checkpoint", config["tool_checkpoint"]]
+        if config.get("tool_budget_tokens") is not None:
+            command += ["--tool-budget-tokens", str(config["tool_budget_tokens"])]
     args = delivery.build_parser().parse_args(command)
     args.benchmark = "acon_appworld" if benchmark == "appworld" else "bfcl"
     args.task_id = list(task_ids)
@@ -467,10 +473,18 @@ def main(argv=None):
     parser.add_argument("--num-workers", type=int, choices=(1,), default=1)
     parser.add_argument("--task-ids", help="comma-separated official IDs for a bounded smoke/subset")
     parser.add_argument("--prefixes", type=Path)
+    parser.add_argument("--tool-memory", default="")
+    parser.add_argument("--tool-checkpoint", default="")
+    parser.add_argument("--tool-budget-tokens", type=int)
     args = parser.parse_args(argv)
     select_arm(args.arm)
     config = json.loads(args.config.read_text(encoding="utf-8"))
     config["native_arm"] = ARM
+    if args.tool_memory:
+        config["tool_memory"] = args.tool_memory
+        config["tool_checkpoint"] = args.tool_checkpoint
+        if args.tool_budget_tokens is not None:
+            config["tool_budget_tokens"] = args.tool_budget_tokens
     if args.upstream:
         config["upstream"] = args.upstream
     if args.proxy_port:
