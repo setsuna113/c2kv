@@ -352,7 +352,12 @@ def run_common_prefix(config, benchmark, directory, prefix_path):
                         result = json.load(response)
                 except urllib.error.HTTPError as error:
                     detail = error.read().decode("utf-8", "replace")
-                    failure = controller_step_failure(task_root) if error.code >= 500 else None
+                    failure = controller_step_failure(task_root)
+                    if error.code < 500 and not (
+                        error.code == 422 and failure is not None
+                        and failure[1] == "capacity_infeasible"
+                    ):
+                        failure = None
                     if failure is None:
                         raise RuntimeError(f"C1 replay HTTP {error.code}: {detail}") from error
                     # The same declared failures the closed loop scores as zero (CUDA OOM,
