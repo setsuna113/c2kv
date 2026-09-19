@@ -243,8 +243,12 @@ $PY -m benchmarks.paper run --output /home/lyc/dev/c2kv-paper-results
 $PY -m benchmarks.paper aggregate --output /home/lyc/dev/c2kv-paper-results
 ```
 
-`run` executes the closed-loop matrix, then actually replays each benchmark's
-Full recorded prefixes through every method. Replays preserve the recorded
+`run` executes the closed-loop matrix, then replays each benchmark's
+Full recorded prefixes through methods that support that protocol. AgentKV and
+CommitKV require their own exact generated-token prefix, so their Full-prefix
+replays are rejected before serving and marked `unsupported_protocol` during
+aggregation. Their closed-loop cost remains available under its own trajectory.
+Replays preserve the recorded
 inputs and order; they do not invent HiAgent subgoals or insert future answers.
 Compression activation and no-op requests remain visible in the raw logs.
 Use `--stage closed_loop` or `--stage common_prefix` to execute a stage separately.
@@ -260,6 +264,29 @@ offset shifts only the local server/proxy ports (recorded in `started.json`,
 not in the resolved config), so replays read the shared
 `closed_loop/<benchmark>__full/full_prefixes.jsonl` without copying; a
 `common_prefix` cell must start after that benchmark's Full cell is complete.
+
+For queue production, use the versioned worker rather than pod-local scripts:
+
+An `AUDIT_EXCLUSION.json` in a cell preserves the original outputs while
+excluding its old completion marker from official aggregation and replay-source
+selection. Keep the exclusion receipt and raw evidence; repair only its listed
+invalid or missing tasks in an explicit new output before rescoring. Do not
+remove the marker merely to reuse an old score.
+
+```bash
+python -m benchmarks.paper.worker 0 CONFIG.json RESULTS TODO \
+  --sglang-source ENGINE_CHECKOUT --port-offset 0
+```
+
+The queue format remains `todo.closed_loop.txt` / `todo.common_prefix.txt`,
+one `cell_id` or `cell_id|config|output` per line. Optional runner overlays follow
+`--extra-run-args` (for example `--candidate-arms all`). The worker owns a physical
+GPU UUID lock, refuses live compute on that GPU, and waits for both configured
+ports without killing their occupants. Each claim has a durable receipt under
+`TODO/worker_attempts`; failures stop for review and never silently reuse partial
+outputs. All cooperating workers must use this entrypoint; retire old launchers
+at cell boundaries. Matrix preparation is serialized per output root, JSON/CSV
+publication is atomic, and `started.json` is an exclusive cell claim.
 
 ## Measurements and offline use
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import io
 import json
 import os
 from pathlib import Path
@@ -13,6 +14,7 @@ import urllib.error
 import urllib.request
 
 from .candidate_matrix import ARM_TO_VARIANT, parse_candidate_arms, with_candidate_methods
+from .artifact_io import atomic_json, atomic_text, preparation_lock
 from .process_lifecycle import (defer_termination, run_owned, stop_owned_group,
                                 unwind_on_termination)
 
@@ -20,10 +22,11 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG = Path(__file__).with_name("config.json")
 
 
-# ACEBench Agent drives the user simulator against the raw upstream while the agent's
+# ACEBench Agent and ToolSandbox drive a user simulator against the raw upstream while the agent's
 # persistent history session still owns its request slot; with one slot the
 # simulator's request made the scheduler raise alloc_req_slots and die (H2O/SnapKV
-# ACEBench cells). The two clients never run concurrently, so per-request
+# ACEBench cells). Both adapters use the same persistent-slot topology. The
+# two clients are sequential, so per-request
 # attribution is unchanged.
 ACEBENCH_MAX_RUNNING_REQUESTS = 2
 REFERENCE_ATTENTION_MEM_FRACTION = 0.65   # static pool cap for reference_attention arms (see server_command)
@@ -181,7 +184,7 @@ def server_command(config, source, arm=None, benchmark=None, tool_checkpoint=Non
            "--mem-fraction-static", str(mem_fraction),
            "--context-length", str(config["context_length"]),
            "--max-total-tokens", str(config["max_total_tokens"]),
-           "--max-running-requests", str(ACEBENCH_MAX_RUNNING_REQUESTS if benchmark == "acebench_agent" else 1),
+           "--max-running-requests", str(ACEBENCH_MAX_RUNNING_REQUESTS if benchmark in {"acebench_agent", "toolsandbox"} else 1),
            "--page-size", "1",
            "--chunked-prefill-size", str(config["chunked_prefill_size"]),
            "--random-seed", str(config["seed"])]
@@ -374,6 +377,11 @@ def extension_problem(existing, config, source, output):
 
 
 def prepare(config, output, source):
+    with preparation_lock(output):
+        return _prepare_locked(config, output, source)
+
+
+def _prepare_locked(config, output, source):
     from benchmarks.arms import get_arm, history_kv_spec
     if config["device"] != "cuda":
         raise ValueError("The paper benchmark uses CUDA")
@@ -477,14 +485,13 @@ def prepare(config, output, source):
                 raise RuntimeError(
                     f"Existing output was prepared with a different config ({problem}): {resolved_path}"
                 )
-            previous = output / f"config.before_extension.{int(time.time())}.json"
-            previous.write_text(json.dumps(existing, indent=2) + "\n")
+            previous = output / f"config.before_extension.{time.time_ns()}.json"
+            atomic_json(previous, existing, exclusive=True)
     elif output.exists() and any(output.iterdir()):
         raise RuntimeError(
             f"Existing non-empty output has no resolved config: {output}"
         )
     output.mkdir(parents=True, exist_ok=True)
-    resolved_path.write_text(json.dumps(config, indent=2) + "\n")
     # This describes deployment, not a claim that the legacy packing was the training layout.
     profile = {"schema_version": 1, "profile_kind": "paper_deployment",
                "model": {"gist_param": "qkv", "gist_type": "dynamic-interleave"},
@@ -497,26 +504,30 @@ def prepare(config, output, source):
                    "serving": "accepted portable benchmark, explicit complete-history document budget"}}}
     profile["serving"]["compatible"] = True
     profile_path = output / "deployment_profile.json"
-    profile_path.write_text(json.dumps(profile, indent=2) + "\n")
     matrix = cells(config)
     ids = [row["cell_id"] for row in matrix]
     if len(ids) != len(set(ids)):
         raise ValueError("The paper matrix contains duplicate cell ids")
-    with (output / "matrix.csv").open("w", newline="", encoding="utf-8") as handle:
+    with io.StringIO(newline="") as handle:
         fields = ["cell_id", "benchmark", "method", "arm", "group", "ratio", "retention", "adapter", "category", "tool_context"]
         if any("history_budget_tokens" in row for row in matrix):
             fields.append("history_budget_tokens")
         writer = csv.DictWriter(handle, fieldnames=fields, extrasaction="ignore")
         writer.writeheader()
         writer.writerows(matrix)
+        matrix_csv = handle.getvalue()
     plan = []
     for cell in matrix:
         directory = output / "closed_loop" / cell["cell_id"]
         plan.append(dict(cell, command=run_command(config, cell, directory, profile_path),
                          replay_source=str(output / "closed_loop" / (cell["benchmark"] + "__full") / "full_prefixes.jsonl")))
-    (output / "commands.json").write_text(json.dumps(plan, indent=2) + "\n")
-    (output / "unsupported_cells.json").write_text(json.dumps(
-        config.get("unsupported_cells") or [], indent=2) + "\n")
+    # Validate/render everything before publication. Each file is complete for
+    # unlocked readers; concurrent prepare writers hold the same root lock.
+    atomic_json(profile_path, profile)
+    atomic_text(output / "matrix.csv", matrix_csv)
+    atomic_json(output / "commands.json", plan)
+    atomic_json(output / "unsupported_cells.json", config.get("unsupported_cells") or [])
+    atomic_json(resolved_path, config)
     return plan, profile_path
 
 
@@ -646,6 +657,13 @@ def _guard_method_actor(cell):
         )
 
 
+def _unsupported_stage(stage, cell):
+    if stage == "common_prefix" and cell["arm"] in {"agentkv", "commitkv"}:
+        return ("Full teacher-forced assistant actions violate exact_generated_prefix; "
+                "use this arm's closed_loop telemetry, labelled as its own trajectory")
+    return None
+
+
 def execute(config, plan, output, source, stages, selected, port_offset=0):
     config = with_port_offset(config, port_offset)
     profile_path = output / "deployment_profile.json"
@@ -662,7 +680,12 @@ def execute(config, plan, output, source, stages, selected, port_offset=0):
         for cell in plan:
             if selected and cell["cell_id"] not in selected:
                 continue
+            unsupported = _unsupported_stage(stage, cell)
+            if unsupported:
+                raise RuntimeError(f"Unsupported {stage} for {cell['arm']}: {unsupported}")
             directory = output / stage / cell["cell_id"]
+            if (directory / "AUDIT_EXCLUSION.json").exists():
+                raise RuntimeError(f"Audited invalid cell {directory}; preserve its evidence and use an explicit repair output")
             if (directory / "complete.json").exists():
                 continue
             if (directory / "started.json").exists():
@@ -671,11 +694,11 @@ def execute(config, plan, output, source, stages, selected, port_offset=0):
             _guard_checkpoint_serving_layout(config, cell)
             _guard_tool_context(cell)
             directory.mkdir(parents=True, exist_ok=True)
-            (directory / "started.json").write_text(json.dumps({
+            atomic_json(directory / "started.json", {
                 "stage": stage, "cell": cell, "config": config,
                 "server_command": server_command(config, source, cell["arm"], cell["benchmark"], tool_checkpoint=cell.get("tool_checkpoint"), tool_memory=cell.get("tool_memory")),
                 "port_offset": port_offset,
-                "sglang_source": str(source), "time": time.time()}, indent=2))
+                "sglang_source": str(source), "time": time.time()}, exclusive=True)
             telemetry_name = ("native_engine_telemetry.jsonl" if is_native_arm(cell["arm"])
                               else "server_telemetry.jsonl")
             env["C2KV_PAPER_TELEMETRY_LOG"] = str(directory / telemetry_name)
@@ -749,8 +772,7 @@ def execute(config, plan, output, source, stages, selected, port_offset=0):
                 if run_failure is not None:
                     _, error, traceback = run_failure
                     raise error.with_traceback(traceback)
-                (directory / "complete.json").write_text(
-                    json.dumps({"finished_at": time.time()}))
+                atomic_json(directory / "complete.json", {"finished_at": time.time()})
 
 
 def _selected_plan(plan, selected):
@@ -793,6 +815,18 @@ def aggregate_results(config, plan, output, stages, selected):
     for stage in stages:
         for cell in requested:
             directory = output / stage / cell["cell_id"]
+            unsupported = _unsupported_stage(stage, cell)
+            if (directory / "AUDIT_EXCLUSION.json").exists():
+                entries.append({"stage": stage, "cell_id": cell["cell_id"],
+                                "status": "audit_excluded",
+                                "reason": str(directory / "AUDIT_EXCLUSION.json"),
+                                "missing_artifacts": [], "measurement_summary": None})
+                continue
+            if unsupported:
+                entries.append({"stage": stage, "cell_id": cell["cell_id"],
+                                "status": "unsupported_protocol", "reason": unsupported,
+                                "missing_artifacts": [], "measurement_summary": None})
+                continue
             absent = [str(path) for path in
                       _required_aggregate_artifacts(stage, cell, directory)
                       if not path.is_file()]
@@ -818,6 +852,8 @@ def aggregate_results(config, plan, output, stages, selected):
         "requested_cells": sorted(selected) if selected else "all",
         "counts": {"requested": len(entries) + len(unknown) * len(stages),
                    "ready": sum(entry["status"] == "ready" for entry in entries),
+                   "unsupported": sum(entry["status"] == "unsupported_protocol" for entry in entries),
+                   "audit_excluded": sum(entry["status"] == "audit_excluded" for entry in entries),
                    "missing": len(missing), "aggregated": 0},
         "missing": missing,
         "cells": entries,
@@ -831,6 +867,8 @@ def aggregate_results(config, plan, output, stages, selected):
     aggregated = 0
     try:
         for entry in entries:
+            if entry["status"] in {"unsupported_protocol", "audit_excluded"}:
+                continue
             stage = entry["stage"]
             cell = next(cell for cell in requested
                         if cell["cell_id"] == entry["cell_id"])

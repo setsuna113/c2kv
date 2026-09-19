@@ -278,17 +278,28 @@ class EventNativeExactController:
             )
             if decision.selection.selected_event_ids:
                 raise RuntimeError("Full identity selected an auxiliary event")
-            raw = build_raw_control(
-                store,
-                self.tokenizer,
-                packing=self._raw_packing_mapping(),
-                policy=self.policy,
-                mode="full_original",
-                max_new_tokens=max_new_tokens,
-                tools=tools,
-            )
-            memory = raw.memory
-            self._require_model_context(memory, max_new_tokens)
+            try:
+                raw = build_raw_control(
+                    store,
+                    self.tokenizer,
+                    packing=self._raw_packing_mapping(),
+                    policy=self.policy,
+                    mode="full_original",
+                    max_new_tokens=max_new_tokens,
+                    tools=tools,
+                )
+                memory = raw.memory
+                self._require_model_context(memory, max_new_tokens)
+            except PackingBudgetError as error:
+                # With no eligible history, the bare route must keep all input
+                # raw. Exceeding its frozen capacity is one task's outcome,
+                # just like an infeasible minimum-gist view on later steps.
+                # Do not relabel arbitrary packing errors outside this branch.
+                if not self._requires_min_gist:
+                    raise
+                raise CapacityInfeasible(
+                    f"Mandatory raw view with no eligible gist exceeds frozen capacity: {error}"
+                ) from error
             base_metadata = copy.deepcopy(raw.metadata)
         else:
             policy_visible = frozenset(

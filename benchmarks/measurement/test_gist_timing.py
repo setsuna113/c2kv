@@ -58,3 +58,22 @@ def test_generation_zero_cannot_hide_unmeasured_extraction():
     requests.append({"event_type": "phase", "request_id": "a", "phase": "c2kv_extract", "duration_ns": 25_000_000})
     result = aggregate(requests, [], server_rows=server)
     assert result["latency_ms"]["gist_generation"]["total_ns"] == 25_000_000
+
+
+def test_replay_latency_excludes_prefixes_skipped_after_declared_failure():
+    replay = [
+        {"event_type": "prefix_replay", "replay_attempted": True,
+         "http_status": 200, "error": None, "duration_ns": 10_000_000},
+        {"event_type": "prefix_replay", "replay_attempted": True,
+         "http_status": 422, "error": "capacity", "duration_ns": 20_000_000},
+        {"event_type": "prefix_replay", "replay_attempted": False,
+         "http_status": None, "error": "task terminated", "duration_ns": None},
+    ]
+    result = aggregate([], [], replay_rows=replay)
+    assert result["counts"]["prefix_replays"] == 3
+    assert result["counts"]["prefix_replays_attempted"] == 2
+    assert result["counts"]["prefix_replays_successful"] == 1
+    assert result["counts"]["prefix_replays_failed_attempted"] == 1
+    assert result["counts"]["prefix_replays_unattempted"] == 1
+    assert result["latency_ms"]["prefix_replay"]["n"] == 2
+    assert result["latency_ms"]["prefix_replay"]["mean"] == 15

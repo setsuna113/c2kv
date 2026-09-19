@@ -23,6 +23,35 @@ class PaperMatrixTest(unittest.TestCase):
             if method["arm"] == "c2kv_native_r4":
                 method["arm"] = "c2kv4"
 
+    def test_exact_prefix_replay_is_rejected_before_starting_server(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            plan, _ = prepare(self.config, root, root / "engine")
+            with mock.patch.object(runner.subprocess, "Popen") as popen:
+                with self.assertRaisesRegex(RuntimeError, "exact_generated_prefix"):
+                    execute(self.config, plan, root, root / "engine",
+                            ["common_prefix"], {"bfcl_base__agentkv"})
+                popen.assert_not_called()
+            self.assertFalse((root / "common_prefix" / "bfcl_base__agentkv").exists())
+
+    def test_toolsandbox_simulator_has_a_slot_beside_persistent_actor(self):
+        for arm in ("history_kv_h2o_r25_persistent", "commitkv", "c2kv_native_r4"):
+            command = server_command(self.config, Path("engine"), arm, "toolsandbox")
+            self.assertEqual(command[command.index("--max-running-requests") + 1], "2")
+
+    def test_exact_prefix_replay_aggregation_reports_unsupported(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            plan, _ = prepare(self.config, root, root / "engine")
+            with mock.patch.object(runner.subprocess, "run") as run:
+                _, path = aggregate_results(self.config, plan, root, ["common_prefix"],
+                                            {"bfcl_base__agentkv", "bfcl_base__commitkv"})
+                run.assert_not_called()
+            receipt = json.loads(path.read_text())
+            self.assertEqual(receipt["counts"]["unsupported"], 2)
+            self.assertEqual(receipt["counts"]["missing"], 0)
+            self.assertTrue(all(row["status"] == "unsupported_protocol" for row in receipt["cells"]))
+
     def test_agentfold_hold_precedes_launch_and_preserves_history(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -157,7 +186,7 @@ class PaperMatrixTest(unittest.TestCase):
         for arm in ("full", "history_kv_h2o_r25_persistent", "agentkv"):
             ace = server_command(self.config, Path("sglang"), arm, "acebench_agent")
             self.assertEqual(ace[ace.index("--max-running-requests") + 1], str(ACEBENCH_MAX_RUNNING_REQUESTS))
-            for other in ("bfcl_base", "appworld", "toolsandbox", None):
+            for other in ("bfcl_base", "appworld", None):
                 cmd = server_command(self.config, Path("sglang"), arm, other)
                 self.assertEqual(cmd[cmd.index("--max-running-requests") + 1], "1")
 
@@ -376,7 +405,8 @@ class PaperMatrixTest(unittest.TestCase):
             coverage = json.loads(coverage_path.read_text())
             self.assertEqual(coverage["requested_stages"], ["closed_loop"])
             self.assertEqual(coverage["counts"], {
-                "requested": 1, "ready": 1, "missing": 0, "aggregated": 1})
+                "requested": 1, "ready": 1, "unsupported": 0, "audit_excluded": 0,
+                "missing": 0, "aggregated": 1})
             self.assertEqual(coverage["cells"][0]["status"], "aggregated")
 
             with self.assertRaisesRegex(RuntimeError, "slice is incomplete"):
@@ -521,8 +551,11 @@ class PaperMatrixTest(unittest.TestCase):
             for row, peak in ((plan[0], 115), (plan[3], 100)):
                 directory = output / "common_prefix" / row["cell_id"]
                 directory.mkdir(parents=True)
+                (directory / "complete.json").write_text("{}")
                 (directory / "measurement_summary.json").write_text(json.dumps({
-                    "memory": {"request_peak_resident_kv_bytes": {"max": peak}}}))
+                    "memory": {"request_peak_resident_kv_bytes": {"max": peak},
+                               "resident_peak_chain": {
+                                   "request_peak_c2kv_cache_accounting_available": True}}}))
             report = write_comparison(output, plan)
             compressed = next(row for row in report if row["arm"] == "c2kv4")
             self.assertAlmostEqual(compressed["resident_kv_peak_bytes_saving_vs_full_pct"], 100 * (1 - 100 / 115))
@@ -535,6 +568,7 @@ class PaperMatrixTest(unittest.TestCase):
             plan = cells(self.config)[1:2]
             directory = output / "common_prefix" / plan[0]["cell_id"]
             directory.mkdir(parents=True)
+            (directory / "complete.json").write_text("{}")
             (directory / "measurement_summary.json").write_text(json.dumps({
                 "token_ratios": {"whole": {"ratio_of_sums": None}},
                 "common_prefix_token_ratios": {"whole": {"ratio_of_sums": 0.7},
