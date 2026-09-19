@@ -307,6 +307,7 @@ class SGLangEventNativeGenerator:
         self.extraction_calls_reserved = 0
         self.tool_extraction_calls_reserved = 0
         self._model_binding: dict[str, Any] | None = None
+        self._tool_projection_identity: str | None = None
         self._kv_bytes_per_token: int | None = None
         self._active_decision_scope: _DecisionScope | None = None
         self._session_cache: _Session | None = None
@@ -338,6 +339,8 @@ class SGLangEventNativeGenerator:
             "model_binding": copy.deepcopy(self._model_binding),
             "kv_bytes_per_token": self._kv_bytes_per_token,
         }
+        if self._tool_projection_identity is not None:
+            state["tool_projection_identity"] = self._tool_projection_identity
         if self.max_tool_extraction_calls is not None:
             state["tool_extraction_calls_reserved"] = self.tool_extraction_calls_reserved
         if self.max_tool_repair_calls is not None:
@@ -424,6 +427,7 @@ class SGLangEventNativeGenerator:
         self.last_generation_trace = local["last_generation_trace"]
         self.last_cache_lifecycle_trace = local["last_cache_lifecycle_trace"]
         self._model_binding = local["model_binding"]
+        self._tool_projection_identity = local.get("tool_projection_identity")
         self._kv_bytes_per_token = local["kv_bytes_per_token"]
         receipt = self._exact_receipt(remote, self._exact_local_state())
         if receipt["component_digests"] != snapshot["component_digests"]:
@@ -733,6 +737,10 @@ class SGLangEventNativeGenerator:
             source = tool.get("source")
             if not isinstance(source, str) or Path(source).resolve() != Path(expected["checkpoint"]).resolve():
                 raise SGLangEventNativeError("SGLang tool checkpoint source differs")
+            identity = tool.get("identity")
+            if not isinstance(identity, str) or not identity:
+                raise SGLangEventNativeError("SGLang tool gist projection identity is missing")
+            self._tool_projection_identity = identity
         kv_bytes = _nonnegative_int(
             native.get("kv_bytes_per_token"), "kv_bytes_per_token"
         )
@@ -896,6 +904,10 @@ class SGLangEventNativeGenerator:
             "compression_ratio": chunk_ratio,
             "chunk": canonical_chunk,
         }
+        if chunk.projection_set == "tool":
+            if self._tool_projection_identity is None:
+                raise SGLangEventNativeError("SGLang tool gist projection identity is missing")
+            handle_input["projection_identity"] = self._tool_projection_identity
         handle = hashlib.sha256(_canonical_bytes(handle_input)).hexdigest()
         result = {**canonical_chunk, "handle": handle}
         if source_position_start is not None:

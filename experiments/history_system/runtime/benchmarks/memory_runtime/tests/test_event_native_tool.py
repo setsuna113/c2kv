@@ -2,11 +2,14 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+import importlib.util
 import json
+from pathlib import Path
 import pytest
+import sys
 from types import SimpleNamespace
 
-from history_memory.packing import MemoryView, PackedMemory
+from history_memory.packing import EncoderChunk, MemoryView, PackedMemory
 from history_memory.sglang_generator import SGLangEventNativeError, SGLangEventNativeGenerator
 from benchmarks.memory_runtime.attempt_journal import AttemptJournal
 from benchmarks.memory_runtime.event_native_step import EventNativeDecisionRunner
@@ -191,6 +194,7 @@ def test_t0_native_server_requires_the_loaded_tool_projection(tmp_path):
     native = {"model_binding": {"model_path": str(tmp_path)},
               "kv_bytes_per_token": 1,
               "tool_gist": {"enabled": True, "source": str(tool),
+                            "identity": "test-tool-projection-identity",
                             "config_sha256": "a" * 64,
                             "extract_projection_set": "tool"}}
     g = generator()
@@ -202,3 +206,42 @@ def test_t0_native_server_requires_the_loaded_tool_projection(tmp_path):
     other._read_json = g._read_json
     with pytest.raises(SGLangEventNativeError, match="config hash differs"):
         other._ensure_model_info()
+    native["tool_gist"]["config_sha256"] = "a" * 64
+    native["tool_gist"].pop("identity")
+    with pytest.raises(SGLangEventNativeError, match="projection identity is missing"):
+        other._ensure_model_info()
+
+
+def test_tool_chunk_handle_matches_the_engine_contract():
+    paper_root = Path(__file__).resolve().parents[6]
+    sources = [paper_root.parent / name / "python/sglang/srt/mem_cache/c2kv_native_packed.py"
+               for name in ("sglang-paper-tool-integration", "engine")]
+    engine_source = next((path for path in sources if path.is_file()), None)
+    if engine_source is None:
+        pytest.skip("shared SGLang engine source is not beside the paper checkout")
+    module_spec = importlib.util.spec_from_file_location("c2kv_engine_handle_contract_test", engine_source)
+    engine = importlib.util.module_from_spec(module_spec)
+    sys.modules[module_spec.name] = engine
+    module_spec.loader.exec_module(engine)
+
+    binding = {"model_path": "/checkpoint", "weight_version": "test"}
+    identity = "tool-projection-test-identity"
+    generator = object.__new__(SGLangEventNativeGenerator)
+    generator._model_binding = binding
+    generator._tool_projection_identity = identity
+    generator.encoding_scope = "current"
+    for projection, ratio in (("tool", 8), (None, 4)):
+        chunk = EncoderChunk(
+            event_id="visible-tool" if projection else "history-event",
+            part_index=0, source_indices=(0,), source_token_start=0,
+            source_token_end=4, token_ids=(11, 12, 13, 14),
+            projection_set=projection,
+            compression_ratio=ratio if projection else None,
+        )
+        client = generator._chunk_payload(chunk, ratio)
+        expected = engine.canonical_chunk_handle(
+            client, model_binding=binding, packing_version="history-event-v1",
+            encoding_scope="current", compression_ratio=ratio,
+            tool_binding={"enabled": True, "identity": identity} if projection else None,
+        )
+        assert client["handle"] == expected
