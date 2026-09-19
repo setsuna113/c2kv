@@ -1,8 +1,11 @@
 import json
+import hashlib
 from io import BytesIO
 from unittest.mock import patch
 
 from generality import historykv_cell as driver
+from generality import scheduler_npu as scheduler
+from generality.completion_contract import invalidate_appworld_done
 from generality.historykv_cell import (
     appworld_done_healthy, bfcl_row_healthy, cached_terminal,
     new_attempt_root, write_receipt,
@@ -136,6 +139,96 @@ def test_appworld_new_generation_error_is_not_healthy(tmp_path):
         "task_id": task_id, "status": "completed", "returncode": 0,
     }), encoding="utf-8")
     assert not appworld_done_healthy(out, task_id)
+
+
+def test_appworld_invalidation_matches_only_old_done_bytes(tmp_path):
+    task_id = "6b6ca61_3"
+    out = tmp_path / "tasks" / task_id
+    _appworld_result(out / "appworld", task_id, "max_interactions")
+    done = out / "done.json"
+    done.write_text(json.dumps({"task_id": task_id, "status": "completed",
+                                "returncode": 0}), encoding="utf-8")
+    assert appworld_done_healthy(out, task_id)
+    (out / "invalidated_done.json").write_text(json.dumps({
+        "sha256": hashlib.sha256(done.read_bytes()).hexdigest(),
+        "reason": "old proxy served a different arm",
+        "evidence": "proxy request receipt",
+    }), encoding="utf-8")
+    assert not appworld_done_healthy(out, task_id)
+    new_root = out / "attempts" / "new" / "appworld"
+    _appworld_result(new_root, task_id, "max_interactions")
+    done.write_text(json.dumps({"task_id": task_id, "status": "completed",
+                                "returncode": 0,
+                                "attempt_root": "attempts/new/appworld"}), encoding="utf-8")
+    assert appworld_done_healthy(out, task_id)
+    (tmp_path / "cell.json").write_text(json.dumps({"task_ids": [task_id]}))
+    second = invalidate_appworld_done(tmp_path, task_id,
+                                       "new attempt invalidated", "review receipt")
+    preserved = json.loads((out / "invalidated_done_history.jsonl").read_text())
+    assert json.loads(preserved["previous_raw"])["sha256"] != second["sha256"]
+    assert not appworld_done_healthy(out, task_id)
+
+
+def test_full_appworld_cell_writes_manifest_bound_completion(tmp_path):
+    task_id = "6b6ca61_3"
+    cell_dir = tmp_path / "cell"
+    out = cell_dir / "tasks" / task_id
+    _appworld_result(out / "appworld", task_id, "max_interactions")
+    (out / "done.json").write_text(json.dumps({
+        "task_id": task_id, "status": "completed", "returncode": 0}))
+    cell = {"cell_id": "history-full", "cell_dir": str(cell_dir),
+            "backend": "h2o", "working_point": "K0",
+            "condition": "recovery_off_same_initial", "benchmark": "appworld",
+            "task_ids": [task_id], "budget_tokens": {"K": 8},
+            "sglang_backend_url": "http://127.0.0.1:1"}
+    frozen = cell_dir / "cell.json"
+    frozen.write_text(json.dumps(cell))
+    launch = tmp_path / "launch.json"
+    launch.write_text(json.dumps(cell))
+
+    with (patch.object(driver, "resolve_free_port", return_value=37401),
+          patch.object(driver, "start_proxy", return_value=object()),
+          patch.object(driver, "stop")):
+        assert driver.main(["--cell", str(launch), "--max-tasks", "0"]) == 0
+
+    assert scheduler.cell_done(cell)
+    old_status = json.loads((cell_dir / "cell_status.json").read_text())
+    record = invalidate_appworld_done(cell_dir, task_id,
+                                      "old proxy served a different arm",
+                                      "proxy request receipt")
+    assert record["sha256"] == hashlib.sha256((out / "done.json").read_bytes()).hexdigest()
+    assert json.loads((out / "invalidated_done.json").read_text())["sha256"] == record["sha256"]
+    assert not scheduler.cell_done(cell)
+    assert not appworld_done_healthy(out, task_id)
+    (out / "invalidated_done.json").unlink()
+    assert not appworld_done_healthy(out, task_id)
+    assert invalidate_appworld_done(cell_dir, task_id,
+                                    "old proxy served a different arm",
+                                    "proxy request receipt") == record
+    assert len((cell_dir / "cell_invalidations.jsonl").read_text().splitlines()) == 1
+
+    with (patch.object(driver, "resolve_free_port", return_value=37401),
+          patch.object(driver, "start_proxy", return_value=object()),
+          patch.object(driver, "stop")):
+        assert driver.main(["--cell", str(launch), "--max-tasks", "0"]) == 0
+    assert json.loads((cell_dir / "cell_status.json").read_text())["status"] == "incomplete"
+    assert not scheduler.cell_done(cell)
+
+    new_root = out / "attempts" / "new" / "appworld"
+    _appworld_result(new_root, task_id, "max_interactions")
+    (out / "done.json").write_text(json.dumps({
+        "task_id": task_id, "status": "completed", "returncode": 0,
+        "attempt_root": "attempts/new/appworld"}))
+    with (patch.object(driver, "resolve_free_port", return_value=37401),
+          patch.object(driver, "start_proxy", return_value=object()),
+          patch.object(driver, "stop")):
+        assert driver.main(["--cell", str(launch), "--max-tasks", "0"]) == 0
+    new_status = json.loads((cell_dir / "cell_status.json").read_text())
+    assert new_status["cell_invalidation_sha256"] != old_status["cell_invalidation_sha256"]
+    assert scheduler.cell_done(cell)
+    history = [json.loads(line) for line in
+               (cell_dir / "cell_status_history.jsonl").read_text().splitlines()]
+    assert json.loads(history[0]["previous_raw"]) == old_status
 
 
 def test_appworld_stale_done_cannot_complete_cell(tmp_path):

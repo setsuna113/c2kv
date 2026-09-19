@@ -12,6 +12,7 @@ model calls. Per-task progress with resume for both BFCL and AppWorld.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import shutil
@@ -20,6 +21,11 @@ import sys
 import time
 import urllib.request
 from pathlib import Path
+
+try:
+    from .completion_contract import appworld_done_invalidated, write_cell_status
+except ImportError:  # Direct file launch on ascend03.
+    from completion_contract import appworld_done_invalidated, write_cell_status
 
 GENERATION_ROOT = Path("/home/liuyancheng/c2kv-generality-20260918")
 PAPER = GENERATION_ROOT / "src" / "paper_harness"
@@ -451,8 +457,19 @@ def appworld_result_healthy(root: Path, task_id: str) -> bool:
 def appworld_done_healthy(out: Path, task_id: str) -> bool:
     done = out / "done.json"
     try:
-        receipt = json.loads(done.read_text(encoding="utf-8"))
+        raw = done.read_bytes()
+        receipt = json.loads(raw)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return False
+    try:
+        invalidation = json.loads((out / "invalidated_done.json").read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
+        invalidation = None
+    done_sha256 = hashlib.sha256(raw).hexdigest()
+    if (isinstance(invalidation, dict)
+            and invalidation.get("sha256") == done_sha256):
+        return False
+    if appworld_done_invalidated(out, task_id, done_sha256):
         return False
     if (not isinstance(receipt, dict) or receipt.get("status") != "completed"
             or receipt.get("task_id") != task_id):
@@ -593,14 +610,14 @@ def main(argv=None) -> int:
     # infra failures (infra_error / failed_validation) keep it incomplete so
     # the scheduler requeues the cell for another infra retry — they are never
     # zero-scored and never silently dropped.
-    (Path(cell["cell_dir"]) / "cell_status.json").write_text(json.dumps({
+    write_cell_status(cell, {
         "cell_id": cell["cell_id"], "arm": arm,
         "status": "complete" if not pending else "incomplete",
         "n_completed": len(completed_ids), "n_terminal": len(terminal),
         "terminal_tasks": terminal, "pending_infra": pending,
         "n_total": len(expected_ids),
         "finished_at": time.time(),
-    }, indent=2))
+    })
     return 0
 
 

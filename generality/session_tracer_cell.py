@@ -25,6 +25,7 @@ from __future__ import annotations
 import argparse
 import copy
 import json
+import math
 import os
 import subprocess
 import sys
@@ -34,6 +35,13 @@ import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+
+try:
+    from .bfcl_results import collect_bfcl_results
+    from .completion_contract import write_cell_status
+except ImportError:  # Direct file launch on ascend03.
+    from bfcl_results import collect_bfcl_results
+    from completion_contract import write_cell_status
 
 try:
     from . import design
@@ -633,6 +641,30 @@ def appworld_worker_env(cell):
     return env
 
 
+def completed_task_ids(cell_dir: Path, benchmark: str, expected: list[str]) -> set[str]:
+    if benchmark == "bfcl":
+        return set(collect_bfcl_results(cell_dir, expected, fc_model=True)["valid_task_ids"])
+    completed = set()
+    for task_id in expected:
+        for path in (cell_dir / "batches").glob(
+                f"*/appworld_worker/{task_id}/official_summary.json"):
+            try:
+                summary = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            score = summary.get("semantic_score") if isinstance(summary, dict) else None
+            if (isinstance(summary, dict)
+                    and summary.get("schema") == "a-event-native-appworld-run-v1"
+                    and summary.get("status") == "completed"
+                    and summary.get("task_id") == task_id
+                    and summary.get("n") == 1
+                    and isinstance(score, (int, float)) and not isinstance(score, bool)
+                    and math.isfinite(score)):
+                completed.add(task_id)
+                break
+    return completed
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cell", type=Path, required=True)
@@ -646,16 +678,22 @@ def main(argv=None) -> int:
     budgets = json.loads((GENERATION_ROOT / "config" / "budgets_resolved.json").read_text())
     wp = budgets["working_points"][cell["working_point"]]
     cell["budget_tokens"] = wp["kv_token_equivalents"]
-    task_ids = cell["task_ids"]
+    expected_ids = cell["task_ids"]
+    if (not isinstance(expected_ids, list) or not expected_ids
+            or any(not isinstance(task_id, str) or not task_id for task_id in expected_ids)
+            or len(expected_ids) != len(set(expected_ids))):
+        raise ValueError("cell manifest must contain unique nonempty task IDs")
+    task_ids = expected_ids
     if args.max_tasks is not None:
         task_ids = task_ids[: args.max_tasks]
     for i in range(0, len(task_ids), args.batch):
         batch = task_ids[i:i + args.batch]
         out = Path(cell["cell_dir"]) / "batches" / f"{i:03d}_{batch[0]}"
-        if (out / "done.json").exists():
+        if (out / "done.json").exists() and set(batch) <= completed_task_ids(
+                Path(cell["cell_dir"]), cell["benchmark"], batch):
             continue
-        import shutil
-        shutil.rmtree(out, ignore_errors=True)
+        if out.exists():
+            os.replace(out, out.with_name(out.name + f".prior.{time.time_ns()}"))
         out.mkdir(parents=True)
         server, batch_tasks = run_server(cell, batch, args.port_base, out)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -725,6 +763,15 @@ def main(argv=None) -> int:
                         "status": status}, indent=2))
         server.shutdown()
         print(json.dumps({"cell": cell["cell_id"], "batch": i, "status": status}), flush=True)
+    completed = completed_task_ids(Path(cell["cell_dir"]), cell["benchmark"], expected_ids)
+    write_cell_status(cell, {
+        "cell_id": cell["cell_id"],
+        "status": "complete" if len(completed) == len(expected_ids) else "incomplete",
+        "n_completed": len(completed),
+        "n_retryable": len(expected_ids) - len(completed),
+        "n_total": len(expected_ids),
+        "finished_at": time.time(),
+    })
     return 0
 
 

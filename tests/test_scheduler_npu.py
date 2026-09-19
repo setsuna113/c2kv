@@ -10,6 +10,7 @@ import pytest
 
 from generality import scheduler_npu as scheduler
 from generality import scheduler as entry
+from generality.completion_contract import write_cell_status
 
 
 def cell(tmp_path, backend="h2o", benchmark="appworld"):
@@ -40,7 +41,10 @@ def test_production_hold_cannot_be_overridden_or_start_engines(tmp_path, monkeyp
 def test_completed_or_exhausted_cells_do_not_start_engines(tmp_path, monkeypatch, capsys):
     complete = cell(tmp_path, backend="fixture")
     complete["cell_id"] = "complete"
-    Path(complete["cell_dir"], "cell_status.json").write_text('{"status":"complete"}')
+    complete["task_ids"] = ["task_1"]
+    Path(complete["cell_dir"], "cell.json").write_text(json.dumps(complete))
+    write_cell_status(complete, {"cell_id": "complete", "status": "complete",
+                                 "n_completed": 1, "n_total": 1})
     exhausted = dict(complete, cell_id="exhausted", cell_dir=str(tmp_path / "exhausted"))
     Path(exhausted["cell_dir"]).mkdir()
     Path(exhausted["cell_dir"], "scheduler_attempts.json").write_text(
@@ -50,6 +54,28 @@ def test_completed_or_exhausted_cells_do_not_start_engines(tmp_path, monkeypatch
     monkeypatch.setattr(scheduler, "ensure_engines", lambda cards: pytest.fail("engine started"))
     assert scheduler.main(["--cards", "1"]) == 0
     assert json.loads(capsys.readouterr().out)["event"] == "scheduler_no_runnable_cells"
+
+
+def test_only_manifest_bound_complete_status_skips_driver(tmp_path):
+    complete = cell(tmp_path, backend="fixture")
+    complete["task_ids"] = ["task_1"]
+    manifest = Path(complete["cell_dir"], "cell.json")
+    manifest.write_text(json.dumps(complete))
+    status_path = manifest.with_name("cell_status.json")
+    status_path.write_text(json.dumps({"cell_id": complete["cell_id"],
+                                       "status": "complete", "n_completed": 1,
+                                       "n_total": 1}))
+    assert not scheduler.cell_done(complete)
+    write_cell_status(complete, {"cell_id": complete["cell_id"],
+                                 "status": "complete", "n_completed": 1,
+                                 "n_total": 1})
+    assert scheduler.cell_done(complete)
+    assert "completion_contract" in json.loads(status_path.read_text())
+    assert json.loads(status_path.with_name("cell_status_history.jsonl").read_text())[
+        "previous_raw"] == '{"cell_id": "' + complete["cell_id"] + '", "status": "complete", "n_completed": 1, "n_total": 1}'
+    changed = dict(complete, task_ids=["task_1", "task_2"])
+    manifest.write_text(json.dumps(changed))
+    assert not scheduler.cell_done(changed)
 
 
 def test_empty_card_list_is_rejected():

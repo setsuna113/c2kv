@@ -42,6 +42,11 @@ except ImportError:
         ordered_unique,
     )
 
+try:
+    from .completion_contract import write_cell_status
+except ImportError:  # Direct file launch on ascend03.
+    from completion_contract import write_cell_status
+
 GENERATION_ROOT = Path("/home/liuyancheng/c2kv-generality-20260918")
 C1_DELIVERY = GENERATION_ROOT / "src" / "c1_delivery"
 RUNTIME = GENERATION_ROOT / "src" / "generality" / "controller_runtime"
@@ -439,8 +444,9 @@ def prepare_cell_files(cell: dict, budgets: dict) -> dict:
                 # fields are part of the frozen experimental contract.
                 previous = dict(previous)
                 expected = dict(expected)
-                previous.pop("sglang_backend_url", None)
-                expected.pop("sglang_backend_url", None)
+                for transient in ("sglang_backend_url", "scheduler_port_slot"):
+                    previous.pop(transient, None)
+                    expected.pop(transient, None)
             if previous != expected:
                 raise ValueError(f"existing attempts use a different frozen {name}")
         return prepared
@@ -630,7 +636,7 @@ def main(argv=None) -> int:
 
     if cell["benchmark"] == "bfcl":
         completion = _write_bfcl_completion(cell, expected_task_ids)
-        _write(cell_dir / "cell_status.json", {
+        write_cell_status(cell, {
             "cell_id": cell["cell_id"],
             "status": (
                 "complete"
@@ -651,7 +657,7 @@ def main(argv=None) -> int:
         # Legacy terminal.json files are retained as evidence but do not
         # complete an unscored AppWorld task.
         retryable = len(expected_task_ids) - done
-        _write(cell_dir / "cell_status.json", {
+        write_cell_status(cell, {
             "cell_id": cell["cell_id"],
             "status": "complete" if retryable == 0 else "incomplete",
             "n_completed": done, "n_retryable": retryable,

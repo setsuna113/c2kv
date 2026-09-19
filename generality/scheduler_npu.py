@@ -26,6 +26,11 @@ import time
 from pathlib import Path
 from urllib.parse import urlparse
 
+try:
+    from .completion_contract import status_matches_manifest
+except ImportError:
+    from completion_contract import status_matches_manifest
+
 GENERATION_ROOT = Path("/home/liuyancheng/c2kv-generality-20260918")
 SRC = GENERATION_ROOT / "src"
 LOGS = GENERATION_ROOT / "logs"
@@ -162,8 +167,8 @@ def cell_done(cell: dict) -> bool:
     if not status.exists():
         return False
     try:
-        return json.loads(status.read_text()).get("status") == "complete"
-    except json.JSONDecodeError:
+        return status_matches_manifest(cell, json.loads(status.read_text()))
+    except (OSError, ValueError, TypeError):
         return False
 
 

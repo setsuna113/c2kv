@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import sys
+import json
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -12,6 +13,7 @@ sys.path[:0] = [str(ROOT), str(ROOT / "controller_runtime"),
                str(ROOT / "controller_runtime" / "python")]
 
 from generality import session_tracer_cell as driver
+from generality import scheduler_npu as scheduler
 
 
 def response(text, *, active_history=100, splice=True):
@@ -246,3 +248,50 @@ class SessionTracerProtocolTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_stale_batch_done_is_revalidated_and_full_manifest_stamped(tmp_path, monkeypatch):
+    config = tmp_path / "config"
+    config.mkdir()
+    (config / "budgets_resolved.json").write_text(json.dumps({
+        "working_points": {"K0": {"kv_token_equivalents": {"K": 8}}}}))
+    monkeypatch.setattr(driver, "GENERATION_ROOT", tmp_path)
+    cell_dir = tmp_path / "cell"
+    cell_dir.mkdir()
+    task_id = "task_1"
+    cell = {"cell_id": "tracer-1", "cell_dir": str(cell_dir),
+            "benchmark": "acon_appworld", "working_point": "K0",
+            "threshold": 0.5, "task_ids": [task_id],
+            "caps": {"task_timeout": 5}, "python_sgl": "python",
+            "python_appworld": "python", "acon_dir": "acon",
+            "appworld_root": "appworld"}
+    manifest = cell_dir / "cell.json"
+    manifest.write_text(json.dumps(cell))
+    old_out = cell_dir / "batches" / "000_task_1"
+    old_out.mkdir(parents=True)
+    (old_out / "done.json").write_text('{"status":"completed"}')
+
+    class Server:
+        def serve_forever(self):
+            pass
+
+        def shutdown(self):
+            pass
+
+    monkeypatch.setattr(driver, "run_server", lambda *args: (Server(), {}))
+
+    def scored_worker(command, **kwargs):
+        out = Path(command[command.index("--out") + 1])
+        out.mkdir(parents=True)
+        (out / "official_summary.json").write_text(json.dumps({
+            "schema": "a-event-native-appworld-run-v1", "status": "completed",
+            "task_id": task_id, "n": 1, "semantic_score": 0.0}))
+        return 0
+
+    monkeypatch.setattr(driver.subprocess, "call", scored_worker)
+    assert driver.main(["--cell", str(manifest)]) == 0
+    assert list((cell_dir / "batches").glob("000_task_1.prior.*/done.json"))
+    status = json.loads((cell_dir / "cell_status.json").read_text())
+    assert status["status"] == "complete"
+    assert status["n_completed"] == 1
+    assert scheduler.cell_done(cell)

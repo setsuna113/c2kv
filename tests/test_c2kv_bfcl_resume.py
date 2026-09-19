@@ -10,6 +10,7 @@ from unittest.mock import patch
 import pytest
 
 from generality.bfcl_results import collect_bfcl_results, completion_receipt
+from generality import scheduler_npu as scheduler
 
 
 def _result_file(cell_dir: Path, attempt: str) -> Path:
@@ -347,6 +348,7 @@ def test_main_refreshes_late_valid_row_before_recursive_retry(tmp_path):
     }
     cell_path = tmp_path / "cell.json"
     cell_path.write_text(json.dumps(cell), encoding="utf-8")
+    (cell_dir / "cell.json").write_text(json.dumps(cell), encoding="utf-8")
     budgets = tmp_path / "budgets.json"
     budgets.write_text("{}", encoding="utf-8")
     calls: list[list[str]] = []
@@ -380,6 +382,7 @@ def test_main_refreshes_late_valid_row_before_recursive_retry(tmp_path):
     status = json.loads((cell_dir / "cell_status.json").read_text())
     assert status["status"] == "complete"
     assert status["n_valid_unique"] == 2
+    assert scheduler.cell_done(cell)
 
 
 def test_appworld_marker_without_official_summary_does_not_complete_task(tmp_path):
