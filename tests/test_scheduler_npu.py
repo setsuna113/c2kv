@@ -83,6 +83,22 @@ def test_empty_card_list_is_rejected():
         scheduler.main(["--cards"])
 
 
+def test_card_list_is_required():
+    with pytest.raises(SystemExit, match="2"):
+        scheduler.main([])
+
+
+def test_unimplemented_extra_benchmark_routes_stay_held(tmp_path, monkeypatch):
+    monkeypatch.setattr(scheduler, "BLOCKED_BACKENDS", set())
+    monkeypatch.setattr(scheduler, "BLOCKED_CELL_KEYS", set())
+    for benchmark in ("toolsandbox", "acebench"):
+        assert scheduler.cell_blocked(cell(tmp_path, backend="c2kv", benchmark=benchmark))
+        tracer = cell(tmp_path, backend="h2o", benchmark=benchmark)
+        tracer["condition"] = "tracer_history"
+        assert scheduler.cell_blocked(tracer)
+        assert not scheduler.cell_blocked(cell(tmp_path, backend="h2o", benchmark=benchmark))
+
+
 def test_canonical_entry_delegates_and_runs_as_a_script():
     assert entry.main is scheduler.main
     assert entry.BLOCKED_BACKENDS is scheduler.BLOCKED_BACKENDS
@@ -136,6 +152,28 @@ def test_old_scheduler_process_is_detected(tmp_path, monkeypatch):
     (proc / "cmdline").write_bytes(b"/python\0src/generality/scheduler.py\0--cards\01\0")
     monkeypatch.setattr(scheduler, "SRC", cwd / "src")
     assert scheduler.other_scheduler_pids(proc_root) == [123456]
+
+
+def test_detached_event_native_server_blocks_startup(tmp_path, monkeypatch):
+    root = tmp_path / "root"
+    proc_root = tmp_path / "proc"
+    server = proc_root / "456"
+    server.mkdir(parents=True)
+    out = root / "results" / "closed_loop" / "appworld" / "cell" / "server"
+    command = f"/python\0-m\0benchmarks.memory_runtime.event_native_server\0--out\0{out}\0"
+    (server / "cmdline").write_bytes(command.encode())
+    (server / "stat").write_text("456 (python) " + " ".join(["S", "1"] + ["0"] * 17 + ["123"]))
+    monkeypatch.setattr(scheduler, "GENERATION_ROOT", root)
+    monkeypatch.setattr(scheduler, "RESULTS", root / "results" / "closed_loop")
+    assert scheduler.unmanaged_event_native_servers(proc_root) == [
+        {"pid": 456, "ppid": 1, "start_ticks": 123,
+         "out": str(out), "role": "supervisor"}]
+    driver = proc_root / "123"
+    driver.mkdir()
+    (driver / "cmdline").write_bytes(b"/python\0/src/generality/c2kv_cell.py\0")
+    (driver / "stat").write_text("123 (python) " + " ".join(["S", "1"] + ["0"] * 17 + ["55"]))
+    (server / "stat").write_text("456 (python) " + " ".join(["S", "123"] + ["0"] * 17 + ["123"]))
+    assert scheduler.unmanaged_event_native_servers(proc_root) == []
 
 
 def test_launch_limit_persists_across_scheduler_instances(tmp_path):
@@ -225,6 +263,7 @@ def test_orphan_card_respects_configured_capacity(tmp_path, monkeypatch):
     monkeypatch.setattr(scheduler, "queue_cells", lambda cells, only_ready: list(cells))
     orphan = {**task, "cell_dir": str(old)}
     monkeypatch.setattr(scheduler, "live_driver_assignments", lambda: {1: {str(old): orphan}})
+    monkeypatch.setattr(scheduler, "unmanaged_event_native_servers", lambda: [])
     monkeypatch.setattr(scheduler, "launch_cell", lambda c, card, slot:
                         observed.append((card, slot)) or SimpleNamespace(pid=42))
     def stop_loop(seconds):
@@ -239,7 +278,7 @@ def test_orphan_card_respects_configured_capacity(tmp_path, monkeypatch):
 
 def test_two_drivers_can_share_a_card_without_repeating_a_cell(tmp_path, monkeypatch):
     first = cell(tmp_path, backend="fixture")
-    first["condition"] = "tracer_history"
+    first["condition"] = "compression_full_budget"
     first["task_ids"] = ["first-task"]
     second = dict(first, cell_id="second", cell_dir=str(tmp_path / "second"))
     second["task_ids"] = ["second-task"]
@@ -250,6 +289,7 @@ def test_two_drivers_can_share_a_card_without_repeating_a_cell(tmp_path, monkeyp
     monkeypatch.setattr(scheduler, "enumerate_cells", lambda: [first, first, second])
     monkeypatch.setattr(scheduler, "queue_cells", lambda cells, only_ready: list(cells))
     monkeypatch.setattr(scheduler, "live_driver_assignments", lambda: {})
+    monkeypatch.setattr(scheduler, "unmanaged_event_native_servers", lambda: [])
     monkeypatch.setattr(scheduler, "launch_cell", lambda c, card, slot:
                         observed.append((c["cell_id"], card, slot)) or
                         SimpleNamespace(pid=len(observed)))
@@ -263,6 +303,37 @@ def test_two_drivers_can_share_a_card_without_repeating_a_cell(tmp_path, monkeyp
     assert observed == [(first["cell_id"], 1, 0), (second["cell_id"], 1, 1)]
 
 
+def test_max_cells_remains_bounded_after_queue_rederivation(tmp_path, monkeypatch):
+    first = cell(tmp_path, backend="fixture")
+    second = dict(first, cell_id="second", cell_dir=str(tmp_path / "second"))
+    Path(second["cell_dir"]).mkdir()
+    state = {"first_done": False, "launched": []}
+    monkeypatch.setattr(scheduler, "unmanaged_event_native_servers", lambda: [])
+    monkeypatch.setattr(scheduler, "live_driver_assignments", lambda: {})
+    monkeypatch.setattr(scheduler, "ensure_engines", lambda cards: None)
+    monkeypatch.setattr(scheduler, "engine_healthy", lambda card: True)
+    monkeypatch.setattr(scheduler, "enumerate_cells", lambda: [first, second])
+    monkeypatch.setattr(scheduler, "queue_cells", lambda cells, only_ready: list(cells))
+    monkeypatch.setattr(scheduler, "cell_done", lambda task:
+                        task["cell_id"] == first["cell_id"] and state["first_done"])
+    monkeypatch.setattr(scheduler, "attempt_count", lambda task: 0)
+    monkeypatch.setattr(scheduler, "reserve_attempt", lambda task: 1)
+    monkeypatch.setattr(scheduler.time, "sleep", lambda seconds: None)
+
+    def launch(task, card, slot):
+        state["launched"].append(task["cell_id"])
+        def poll():
+            state["first_done"] = True
+            return 0
+        return SimpleNamespace(pid=42, poll=poll, returncode=0)
+
+    monkeypatch.setattr(scheduler, "launch_cell", launch)
+    args = SimpleNamespace(cards=[1], include_pending=False, max_cells=1,
+                           max_drivers_per_card=1)
+    assert scheduler.run_scheduler(args) == 0
+    assert state["launched"] == [first["cell_id"]]
+
+
 def test_mixed_driver_protocols_and_overlapping_tasks_prevent_sharing(tmp_path):
     first = cell(tmp_path, backend="fixture")
     first["task_ids"] = ["task"]
@@ -271,7 +342,7 @@ def test_mixed_driver_protocols_and_overlapping_tasks_prevent_sharing(tmp_path):
     first["condition"] = second["condition"] = "tracer_history"
     assert not scheduler.may_share_engine(second, 1, {}, {1: {first["cell_dir"]: first}})
     second["task_ids"] = ["other-task"]
-    assert scheduler.may_share_engine(second, 1, {}, {1: {first["cell_dir"]: first}})
+    assert not scheduler.may_share_engine(second, 1, {}, {1: {first["cell_dir"]: first}})
     first["condition"] = "compression_full_budget"
     assert not scheduler.may_share_engine(second, 1, {}, {1: {first["cell_dir"]: first}})
     second["condition"] = "compression_full_budget"
@@ -283,6 +354,7 @@ def test_unhealthy_engine_is_not_restarted_under_a_live_driver(tmp_path, monkeyp
     launches = []
     monkeypatch.setattr(scheduler, "live_driver_assignments", lambda:
                         {1: {orphan["cell_dir"]: orphan}})
+    monkeypatch.setattr(scheduler, "unmanaged_event_native_servers", lambda: [])
     monkeypatch.setattr(scheduler, "ensure_engines", lambda cards: launches.append(cards))
     monkeypatch.setattr(scheduler, "engine_healthy", lambda card: False)
     monkeypatch.setattr(scheduler, "enumerate_cells", lambda: [])

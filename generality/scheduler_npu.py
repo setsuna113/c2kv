@@ -53,6 +53,19 @@ def driver_for(backend: str, condition: str) -> str:
     return "session_tracer"
 
 
+SUPPORTED_BENCHMARKS = {
+    "c2kv": {"bfcl_base", "bfcl_long_context", "appworld"},
+    "historykv_off": {"bfcl_base", "bfcl_long_context", "appworld",
+                      "toolsandbox", "acebench"},
+    "session_tracer": {"bfcl_base", "bfcl_long_context", "appworld"},
+}
+
+
+def driver_supports_cell(cell: dict) -> bool:
+    driver = driver_for(cell["backend"], cell["condition"])
+    return cell.get("benchmark_key") in SUPPORTED_BENCHMARKS[driver]
+
+
 def calibration_receipt(cell: dict) -> tuple[Path, dict | None]:
     """Return the frozen threshold receipt for a tracer cell.
 
@@ -105,6 +118,8 @@ BLOCKED_CELL_KEYS = {
 
 
 def cell_blocked(cell: dict) -> bool:
+    if not driver_supports_cell(cell):
+        return True
     if cell["backend"] in BLOCKED_BACKENDS:
         return True
     if (cell["backend"], cell.get("benchmark_key")) in BLOCKED_CELL_KEYS:
@@ -322,6 +337,74 @@ def live_cell_dirs() -> set[str]:
     return set().union(*(set(cells) for cells in live_driver_assignments().values()))
 
 
+def unmanaged_event_native_servers(proc_root: Path = Path("/proc")) -> list[dict]:
+    """Find project controllers without a live cell driver ancestor.
+
+    A detached event-native supervisor can keep its child and port alive after
+    the driver exits.  Its card cannot be safely assigned from driver scans.
+    The scheduler reports it and waits for an identity-checked cleanup; it
+    never sends signals or changes the retained attempt files.
+    """
+    try:
+        processes = list(proc_root.iterdir())
+    except OSError as error:
+        raise RuntimeError("Cannot inspect event-native server processes") from error
+    roots = ((RESULTS.resolve()), (GENERATION_ROOT / "validation").resolve())
+
+    def details(pid: int) -> tuple[list[str], int, int] | None:
+        proc = proc_root / str(pid)
+        try:
+            argv = [part.decode("utf-8", "replace") for part in
+                    (proc / "cmdline").read_bytes().split(b"\0") if part]
+            fields = (proc / "stat").read_text().rsplit(") ", 1)[1].split()
+            return argv, int(fields[1]), int(fields[19])
+        except (OSError, ValueError, IndexError):
+            return None  # process exited during the scan
+
+    def managed_by_driver(parent: int) -> bool:
+        visited = set()
+        while parent > 1 and parent not in visited:
+            visited.add(parent)
+            info = details(parent)
+            if info is None:
+                return False
+            argv, parent, _ = info
+            if any(arg.endswith(("/generality/c2kv_cell.py",
+                                   "/generality/historykv_cell.py",
+                                   "/generality/session_tracer_cell.py")) for arg in argv):
+                return True
+        return False
+
+    unmanaged = []
+    for proc in processes:
+        if not proc.name.isdigit():
+            continue
+        info = details(int(proc.name))
+        if info is None:
+            continue
+        argv, parent, start_ticks = info
+        if "-m" not in argv:
+            continue
+        index = argv.index("-m")
+        if (index + 1 >= len(argv) or
+                argv[index + 1] != "benchmarks.memory_runtime.event_native_server"):
+            continue
+        try:
+            out = argv[argv.index("--out") + 1]
+        except (ValueError, IndexError):
+            continue
+        path = Path(out).resolve()
+        if not any(os.path.commonpath((str(root), str(path))) == str(root)
+                   for root in roots):
+            continue
+        if managed_by_driver(parent):
+            continue
+        unmanaged.append({"pid": int(proc.name), "ppid": parent,
+                          "start_ticks": start_ticks, "out": out,
+                          "role": "child" if "--serve-child" in argv else "supervisor"})
+    return sorted(unmanaged, key=lambda row: row["pid"])
+
+
 def other_scheduler_pids(proc_root: Path = Path("/proc")) -> list[int]:
     """Find an older scheduler that did not acquire the new singleton lock."""
     try:
@@ -409,11 +492,12 @@ def may_share_engine(cell: dict, card: int, running: dict,
                   if running_card == card and str(other["cell_dir"]) not in active_dirs)
     if not active:
         return True
-    # Two persistent proxies passed CUDA/NPU budget and peer-close isolation
-    # checks. Mixed proxy/controller concurrency has not been validated.
+    # Only two persistent proxies passed budget and peer-close isolation.
+    # Controller/controller and mixed concurrency have not been validated.
     history_proxy = driver_for(cell["backend"], cell["condition"]) == "historykv_off"
-    if any((driver_for(other["backend"], other["condition"]) == "historykv_off")
-           != history_proxy for other in active):
+    if not history_proxy or any(
+            driver_for(other["backend"], other["condition"]) != "historykv_off"
+            for other in active):
         return False
     keys = task_keys(cell)
     if keys is None:
@@ -454,7 +538,7 @@ def reserve_attempt(cell: dict) -> int:
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--cards", type=int, nargs="*", default=[0, 1, 2, 3, 4, 5, 7])
+    parser.add_argument("--cards", type=int, nargs="+", required=True)
     parser.add_argument("--include-pending", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--max-cells", type=int, default=None)
@@ -484,11 +568,16 @@ def main(argv=None) -> int:
         older = other_scheduler_pids()
         if older:
             raise RuntimeError(f"Another generality scheduler is active: {older}")
+        if args.max_cells is not None:
+            args.allowed_cell_ids = {cell["cell_id"] for cell in preview}
         return run_scheduler(args)
 
 
 def run_scheduler(args) -> int:
 
+    unmanaged = unmanaged_event_native_servers()
+    if unmanaged:
+        raise RuntimeError(f"Unmanaged event-native servers block scheduler start: {unmanaged[:12]}")
     initial_live = live_driver_assignments()
     start_cards = [card for card in args.cards if card not in initial_live]
     if start_cards:
@@ -510,8 +599,18 @@ def run_scheduler(args) -> int:
     cells: list[dict] = []
     dropped: set[str] = set()
     engine_launch_at: dict[int, float] = {}
-    first_derivation = True
+    allowed_cell_ids = getattr(args, "allowed_cell_ids", None)
+    if args.max_cells is not None and allowed_cell_ids is None:
+        allowed_cell_ids = {cell["cell_id"] for cell in
+                            queue_cells(enumerate_cells(), only_ready=only_ready)[:args.max_cells]}
     while True:
+        unmanaged = unmanaged_event_native_servers()
+        if unmanaged:
+            print(json.dumps({"event": "unmanaged_event_native_servers",
+                              "count": len(unmanaged),
+                              "examples": unmanaged[:12]}), flush=True)
+            time.sleep(30)
+            continue
         for pid in list(running):
             proc, cell, card, slot = running[pid]
             if proc.poll() is not None:
@@ -553,13 +652,12 @@ def run_scheduler(args) -> int:
         # receipts unlock tracer cells without a scheduler restart
         if not cells:
             cells = queue_cells(enumerate_cells(), only_ready=only_ready)
-            if first_derivation and args.max_cells is not None:
-                cells = cells[: args.max_cells]
+            if allowed_cell_ids is not None:
+                cells = [cell for cell in cells if cell["cell_id"] in allowed_cell_ids]
             cells = [c for c in cells if not cell_done(c)
                      and str(c["cell_dir"]) not in live
                      and c["cell_id"] not in dropped
                      and attempt_count(c) < MAX_ATTEMPTS]
-            first_derivation = False
             if not cells and not running:
                 if live:
                     print(json.dumps({"event": "waiting_for_live_drivers",
