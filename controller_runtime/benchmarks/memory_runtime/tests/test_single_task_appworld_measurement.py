@@ -11,7 +11,7 @@ from benchmarks.memory_runtime.single_task_harness_api import SingleTaskHarnessA
 TASK_ID = "3d9a636_1"
 
 
-def _api(monkeypatch, benchmark="acon_appworld"):
+def _api(monkeypatch, benchmark="acon_appworld", captured=None):
     api = SingleTaskHarnessAPI.__new__(SingleTaskHarnessAPI)
     api.benchmark = benchmark
     api.run_id = "appworld-measurement-test"
@@ -22,7 +22,11 @@ def _api(monkeypatch, benchmark="acon_appworld"):
     api._wire_identities = {}
     api._wire_mode = None
     api._transport_receipts = {}
-    monkeypatch.setattr(EventNativeAPI, "handle_chat", lambda self, payload: payload)
+    def fake_handle_chat(self, payload):
+        if captured is not None:
+            captured["receipt"] = next(iter(self._transport_receipts.values())).copy()
+        return payload
+    monkeypatch.setattr(EventNativeAPI, "handle_chat", fake_handle_chat)
     return api
 
 
@@ -44,7 +48,8 @@ def _acon_request():
 
 
 def test_full_appworld_request_preserves_server_owned_identity(monkeypatch):
-    api = _api(monkeypatch)
+    captured = {}
+    api = _api(monkeypatch, captured=captured)
     normalized = api.handle_chat(_acon_request())
     assert normalized["c2kv_eval_context"] == {
         "benchmark": "acon_appworld",
@@ -57,6 +62,12 @@ def test_full_appworld_request_preserves_server_owned_identity(monkeypatch):
     assert normalized["temperature"] == 0
     assert normalized["seed"] == 0
     assert normalized["max_completion_tokens"] == 2048
+    assert captured["receipt"]["normalized_server_fields"] == {
+        "temperature": 0, "top_p": 1.0, "presence_penalty": 0.5,
+        "seed": 42, "chat_template_kwargs": {"enable_thinking": False},
+        "max_completion_tokens": 2048,
+    }
+    assert captured["receipt"]["normalized_away_fields"] == []
 
 
 @pytest.mark.parametrize(

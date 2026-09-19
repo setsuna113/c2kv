@@ -157,16 +157,29 @@ class SingleTaskHarnessAPI(EventNativeAPI):
                         "chat_template_kwargs")
             if key in payload
         }
+        effective_sampling = {
+            "temperature": 0, "seed": 0,
+            "max_completion_tokens": self.max_new_tokens,
+        }
+        if self.benchmark == "acon_appworld":
+            effective_sampling.update({
+                "top_p": 1.0, "presence_penalty": 0.5,
+                "seed": 42,
+                "chat_template_kwargs": {"enable_thinking": False},
+            })
+        retained_sampling_fields = (
+            ("temperature", "max_tokens", "max_completion_tokens",
+             "top_p", "seed", "presence_penalty", "chat_template_kwargs")
+            if self.benchmark == "acon_appworld"
+            else ("temperature", "max_tokens", "max_completion_tokens")
+        )
         self._transport_receipts[decision] = {
             "schema": "openai-single-task-normalization-v1",
             "client_sampling_fields": client_sampling,
-            "normalized_server_fields": {
-                "temperature": 0, "seed": 0,
-                "max_completion_tokens": self.max_new_tokens,
-            },
+            "normalized_server_fields": effective_sampling,
             "normalized_away_fields": sorted(
                 key for key in client_sampling
-                if key not in ("temperature", "max_tokens", "max_completion_tokens")
+                if key not in retained_sampling_fields
             ),
             "client_context_ignored": client_context is not None,
             "measurement_task_id_validated": "c2kv_measurement_session_id" in payload,

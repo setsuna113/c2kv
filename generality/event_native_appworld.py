@@ -23,17 +23,22 @@ SUPPORTED_SESSION_CACHE_POLICIES = {"external-sglang-content-addressed-chunks-v1
 
 
 def _is_greedy_sampling(sampling):
-    if not isinstance(sampling, dict) or set(sampling) - {"mode", "temperature", "seed", "top_p"}:
+    if not isinstance(sampling, dict) or set(sampling) - {
+            "mode", "temperature", "seed", "top_p", "presence_penalty"}:
         return False
     if sampling.get("mode", "greedy") != "greedy":
         return False
     temperature = sampling.get("temperature")
-    top_p = sampling.get("top_p", 1.0)
+    top_p = sampling.get("top_p")
+    presence_penalty = sampling.get("presence_penalty")
     seed = sampling.get("seed")
     if (type(temperature) not in (int, float)
-            or type(top_p) not in (int, float) or type(seed) is not int):
+            or type(top_p) not in (int, float)
+            or type(presence_penalty) not in (int, float)
+            or type(seed) is not int):
         return False
-    return temperature == 0.0 and top_p == 1.0 and seed == 0
+    return (temperature == 0.0 and top_p == 1.0
+            and presence_penalty == 0.5 and seed == 42)
 
 
 def _read_json(path: Path):

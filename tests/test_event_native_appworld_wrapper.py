@@ -5,6 +5,7 @@ import pytest
 
 from controller_runtime.benchmarks.memory_runtime import event_native_appworld
 from controller_runtime.benchmarks.memory_runtime import event_native_server
+from generality import design
 from generality import event_native_appworld as worker
 
 
@@ -20,14 +21,19 @@ def test_wrapper_launches_tracked_canonical_worker():
 
 
 @pytest.mark.parametrize("sampling,accepted", [
-    ({"mode": "greedy", "temperature": 0, "seed": 0}, True),
+    ({"mode": "greedy", "temperature": 0, "top_p": 1,
+      "presence_penalty": 0.5, "seed": 42}, True),
     (event_native_server._sampling_params_for_benchmark("acon_appworld"), True),
-    ({"temperature": 0.0, "seed": 0, "top_p": 1.0}, True),
-    ({"temperature": 0.001, "seed": 0}, False),
-    ({"temperature": 0.0, "seed": 42}, False),
-    ({"temperature": 0.0, "seed": 0, "presence_penalty": 0.5}, False),
-    ({"temperature": False, "seed": 0}, False),
-    ({"temperature": 0.0, "seed": False}, False),
+    ({"temperature": 0.0, "seed": 0}, False),
+    ({"temperature": 0.0, "seed": 42, "top_p": 1.0}, False),
+    ({"temperature": 0.0, "seed": 0, "top_p": 1.0,
+      "presence_penalty": 0.5}, False),
+    ({"temperature": 0.001, "seed": 42, "top_p": 1.0,
+      "presence_penalty": 0.5}, False),
+    ({"temperature": False, "seed": 42, "top_p": 1.0,
+      "presence_penalty": 0.5}, False),
+    ({"temperature": 0.0, "seed": False, "top_p": 1.0,
+      "presence_penalty": 0.5}, False),
 ])
 def test_worker_accepts_only_the_actual_greedy_sampling_contract(sampling, accepted):
     ready = {
@@ -43,3 +49,11 @@ def test_worker_accepts_only_the_actual_greedy_sampling_contract(sampling, accep
     else:
         with pytest.raises(ValueError, match="sampling contract"):
             worker.validate_server_identity(ready, health)
+
+
+def test_native_appworld_sampler_matches_frozen_actor_contract():
+    actual = event_native_server._sampling_params_for_benchmark("acon_appworld")
+    assert actual == {key: design.APPWORLD_SAMPLING[key]
+                      for key in ("temperature", "top_p", "presence_penalty", "seed")}
+    assert event_native_server._sampling_params_for_benchmark("bfcl") == {
+        "temperature": 0.0, "seed": 0}

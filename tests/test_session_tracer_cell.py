@@ -15,6 +15,7 @@ sys.path[:0] = [str(ROOT), str(ROOT / "controller_runtime"),
 
 from generality import session_tracer_cell as driver
 from generality import scheduler_npu as scheduler
+from generality import design
 
 
 def response(text, *, active_history=100, splice=True):
@@ -213,6 +214,21 @@ class SessionTracerProtocolTests(unittest.TestCase):
                          {"enabled": True})
         self.assertEqual(calls[3].args[1]["session_id"], "session-current")
 
+    def test_appworld_engine_request_uses_frozen_actor_sampling(self):
+        engine = driver.EngineSession(
+            "http://unused", "qwen", "session-current", "h2o",
+            sampling=driver._sampling_for_benchmark("acon_appworld"))
+        engine._post = Mock(side_effect=["session-current", response("action")])
+        engine.generate([{"role": "user", "content": "goal"}], [],
+                        max_tokens=2048, target_tokens=768, history_span=(1, 1))
+        body = engine._post.call_args_list[1].args[1]
+        assert {key: body[key] for key in (
+            "temperature", "top_p", "presence_penalty", "seed")} == {
+                key: design.APPWORLD_SAMPLING[key] for key in (
+                    "temperature", "top_p", "presence_penalty", "seed")}
+        assert body["chat_template_kwargs"] == {"enable_thinking": False}
+        assert body["max_completion_tokens"] == design.APPWORLD_MAX_COMPLETION_TOKENS
+
     def test_pyramid_request_selects_reference_attention_backend(self):
         engine = driver.EngineSession(
             "http://unused", "qwen", "session-current", "pyramidkv")
@@ -249,6 +265,37 @@ class SessionTracerProtocolTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_appworld_tracer_manifest_declares_actual_frozen_sampler(tmp_path, monkeypatch):
+    from benchmarks.memory_runtime.recovery import local_selection_models
+
+    monkeypatch.setitem(sys.modules, "transformers", SimpleNamespace(
+        AutoTokenizer=SimpleNamespace(from_pretrained=lambda _: object())))
+    monkeypatch.setitem(sys.modules, "evidence_sets", SimpleNamespace(
+        build_config=lambda **_: ({"local_models": {"embedding": {}}}, {})))
+    models = Mock()
+    monkeypatch.setattr(local_selection_models, "LocalSelectionModels",
+                        lambda _: models)
+    monkeypatch.setattr(driver, "SessionTracerTask", Mock())
+    cell = {
+        "benchmark": "acon_appworld", "backend": "h2o", "cell_id": "test",
+        "checkpoint": "unused", "embedding_model": "unused", "threshold": 0.6,
+        "sglang_backend_url": "http://unused", "model_name": "qwen",
+        "caps": {"max_completion_tokens": 2048,
+                 "generation_attempts_per_task": 2},
+        "budget_bytes": {"K": 1024, "B": 2048},
+    }
+    server, _ = driver.run_server(cell, ["task-1"], 0, tmp_path)
+    try:
+        ready = json.loads((tmp_path / "server" / "ready.json").read_text())
+        assert ready["sampling"] == {
+            "mode": "greedy",
+            **{key: design.APPWORLD_SAMPLING[key] for key in (
+                "temperature", "top_p", "presence_penalty", "seed")},
+        }
+    finally:
+        server.server_close()
 
 
 def test_stale_batch_done_is_revalidated_and_full_manifest_stamped(tmp_path, monkeypatch):

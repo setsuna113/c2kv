@@ -117,7 +117,8 @@ class EngineSession:
     """
 
     def __init__(self, base_url: str, model: str, session_id: str, method: str,
-                 recent_window: int = 64, kernel: int = 5, pooling: str = "avgpool"):
+                 recent_window: int = 64, kernel: int = 5, pooling: str = "avgpool",
+                 sampling: dict | None = None):
         self.base = base_url.rstrip("/")
         self.model = model
         self.session_id = session_id
@@ -125,6 +126,7 @@ class EngineSession:
         self.recent_window = recent_window
         self.kernel = kernel
         self.pooling = pooling
+        self.sampling = dict(sampling) if sampling is not None else {"temperature": 0}
         self.session_open = False
 
     def _post(self, path, body, timeout=10800):
@@ -196,7 +198,7 @@ class EngineSession:
                 },
             })
         body = {
-            "model": self.model, "messages": messages, "temperature": 0,
+            "model": self.model, "messages": messages,
             "max_completion_tokens": max_tokens, "store": False,
             "session_params": {"id": self.session_id},
             "logprobs": True, "top_logprobs": 1,
@@ -205,10 +207,18 @@ class EngineSession:
             "c2kv_kv_memory_hint": hint,
             "chat_template_kwargs": {"enable_thinking": False},
         }
+        body.update(self.sampling)
         if tools:
             body["tools"] = tools
             body["tool_choice"] = "auto"
         return self._post("/v1/chat/completions", body)
+
+
+def _sampling_for_benchmark(benchmark: str) -> dict:
+    if benchmark == "acon_appworld":
+        return {key: design.APPWORLD_SAMPLING[key]
+                for key in ("temperature", "top_p", "presence_penalty", "seed")}
+    return {"temperature": 0}
 
 
 class SessionTracerTask:
@@ -226,7 +236,8 @@ class SessionTracerTask:
         self.engine = EngineSession(
             engine_url, model_name, self.session_id,
             {"h2o": "h2o", "snapkv": "snapkv_persistent",
-             "pyramidkv": "pyramidkv"}[cell["backend"]])
+             "pyramidkv": "pyramidkv"}[cell["backend"]],
+            sampling=_sampling_for_benchmark(benchmark))
         self.tokenizer = tokenizer
         self.risk = C1RiskArtifact(RISK_ARTIFACT)
         self.threshold = float(cell["threshold"])
@@ -556,7 +567,9 @@ def run_server(cell, task_ids, port, out_dir):
         "max_new_tokens": cell["caps"]["max_completion_tokens"],
         "max_decisions": cell["caps"]["generation_attempts_per_task"] * len(task_ids),
         "max_generation_calls": cell["caps"]["generation_attempts_per_task"] * len(task_ids),
-        "sampling": {"mode": "greedy", "temperature": 0, "seed": 0},
+        "sampling": ({"mode": "greedy", **_sampling_for_benchmark(cell["benchmark"])}
+                     if cell["benchmark"] == "acon_appworld"
+                     else {"mode": "greedy", "temperature": 0, "seed": 0}),
         "checkpoint": {"path": cell["checkpoint"], "binding": "generality-session-tracer"},
         "route_contract": {"view_mode": "gen_session_tracer_history",
                            "legacy_1088_equivalent": False,

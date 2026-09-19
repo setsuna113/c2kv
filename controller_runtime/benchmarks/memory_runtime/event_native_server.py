@@ -237,6 +237,13 @@ def _checkpoint_eos_token_ids(checkpoint, tokenizer):
 def _sampling_params_for_benchmark(benchmark, view_mode=None):
     if benchmark == 'acebench' and view_mode == 'ac_gist_static':
         return {'temperature': 0.001, 'top_p': 1.0}
+    if benchmark == 'acon_appworld':
+        # The frozen AppWorld actor uses these sampling fields. Thinking is
+        # disabled by the shared chat-template packing path.
+        return {
+            'temperature': 0.0, 'top_p': 1.0,
+            'presence_penalty': 0.5, 'seed': 42,
+        }
     return {'temperature': 0.0, 'seed': 0}
 
 
