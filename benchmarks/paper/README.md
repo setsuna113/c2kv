@@ -346,3 +346,47 @@ These are integration checks, not benchmark scores:
   prefill tokens, official score 1.0); `c1_embed` 5.33 s -> 0.14 s per call,
   task wall 157.6 s -> 58.0 s (functional check, preliminary, n=1).
 - The formal benchmark matrix has not been started.
+# Budget-adapted ACON
+
+`acon_hist_ut_co_b768` is a separate budget adaptation of `acon_hist_ut_co`.
+The integer suffix is the maximum number of **actor-visible history tokens**
+at each decision; `b768` matches the 768-position history allowance used by B0.
+Other positive integer suffixes select other allowances. This is not a cap on
+the whole prompt, decode tokens, shared radix-cache residency, or compressor
+workspace. Report those memory and compute costs separately.
+
+The adapted policy retains ACON's `ut_co` guideline, rolling summary, original
+first user instruction, and last two non-system messages. It changes the
+compression trigger from the original character threshold to the rendered
+history allowance, and caps summary output to the remaining space. Each
+summary candidate and the final actor request are tokenized by the running
+SGLang server's actual chat renderer. System/tools/current input remain common
+raw context. A summary is always charged as history, including when it appears
+in a user-role message and no assistant message survives compression.
+
+At most three summary attempts are allowed per request. Required raw history
+that does not fit, or summaries that still exceed the cap, produce a typed
+`acon_history_budget_exceeded` method failure: no over-budget actor request and
+no raw-history truncation or fallback. BFCL retains and officially scores this
+terminal failure. Compressor/server/transport errors remain execution failures.
+Auxiliary compressor calls retain their `aux_compression` telemetry; the cap
+does not forbid them from reading a larger input. The request log records the
+budget receipt, final guard and exact actor-payload hash.
+
+Add distinct BFCL base/long-context cells to a **new output directory**:
+
+```bash
+python -m benchmarks.paper.runner prepare --config CONFIG.json \
+  --sglang-source ENGINE --output RESULTS --acon-budget-tokens 768
+python -m benchmarks.paper.runner run --config CONFIG.json \
+  --sglang-source ENGINE --output RESULTS --acon-budget-tokens 768 \
+  --stage closed_loop --cells bfcl_base__acon_hist_ut_co_b768
+```
+
+The runner uses `benchmarks.paper.budget_server`, a paper-owned SGLang launcher
+that adds a CPU-only `/v1/c2kv/chat_budget` endpoint. It uses the same serving
+instance and history-span resolver as generation, without scheduling model
+work. Both the paper root and `ENGINE/python` must be on `PYTHONPATH` (the runner
+sets them). Original ACON cells and their commands are unchanged; budget cells
+inherit their configured radix-cache choice. Direct `benchmarks/run.py` runs
+must point to this launcher rather than an unextended SGLang server.

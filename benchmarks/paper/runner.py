@@ -70,14 +70,17 @@ def server_command(config, source, arm=None, benchmark=None):
     each cell ran with.
     """
     from benchmarks.arms import get_arm, history_kv_spec
-    spec = history_kv_spec(get_arm(arm)) if arm is not None else None
+    resolved_arm = get_arm(arm) if arm is not None else None
+    spec = history_kv_spec(resolved_arm) if resolved_arm is not None else None
+    budget_acon = bool(resolved_arm and resolved_arm.text_history_budget_tokens is not None)
     reference_attention = bool(spec and spec["backend"] == "reference_attention")
     # The reference route keeps its history in method-owned tensors and attends with
     # eager SDPA; those temporaries live outside SGLang's static pool. Leave them
     # headroom (an AppWorld PyramidKV cell hit CUDA OOM at 46.8/47.4 GiB with 0.8).
     mem_fraction = (min(float(config["mem_fraction_static"]), REFERENCE_ATTENTION_MEM_FRACTION)
                     if reference_attention else config["mem_fraction_static"])
-    cmd = [config["server_python"], "-m", "sglang.launch_server",
+    module = "benchmarks.paper.budget_server" if budget_acon else "sglang.launch_server"
+    cmd = [config["server_python"], "-m", module,
            "--model-path", config["checkpoint"], "--served-model-name", config["model"],
            "--device", "cuda", "--dtype", "bfloat16", "--model-impl", "sglang",
            "--attention-backend", config["attention_backend"],
@@ -93,6 +96,8 @@ def server_command(config, source, arm=None, benchmark=None):
            "--chunked-prefill-size", str(config["chunked_prefill_size"]),
            "--random-seed", str(config["seed"])]
     radix_arms = set(config.get("radix_cache_arms") or ())
+    if budget_acon and "acon_hist_ut_co" in radix_arms:
+        radix_arms.add(arm)
     if reference_attention or ("*" not in radix_arms and arm not in radix_arms):
         cmd.append("--disable-radix-cache")
     if reference_attention or config.get("disable_cuda_graph", True):
@@ -115,6 +120,24 @@ def with_port_offset(config, port_offset):
         return config
     return dict(config, server_port=config["server_port"] + port_offset,
                 proxy_port=config["proxy_port"] + port_offset)
+
+
+def with_acon_budget(config, budget):
+    """Add distinct BFCL budget cells without rewriting original ACON results."""
+    if budget is None:
+        return config
+    from benchmarks.arms import get_arm
+    arm = get_arm(f"acon_hist_ut_co_b{budget}")
+    if any(method["arm"] == arm.name for method in config["methods"]):
+        raise ValueError(f"ACON budget arm already exists: {arm.name}")
+    benchmarks = [row["name"] for row in config["benchmarks"]
+                  if row["name"] in {"bfcl_base", "bfcl_long_context"}]
+    if not benchmarks:
+        raise ValueError("ACON budget overlay requires a BFCL benchmark")
+    return dict(config, methods=[*config["methods"], {
+        "method": "ACON-budget", "arm": arm.name, "group": "budget",
+        "history_budget_tokens": budget, "benchmarks": benchmarks,
+    }])
 
 
 def run_command(config, cell, directory, profile, stage="closed_loop"):
@@ -226,6 +249,12 @@ def prepare(config, output, source):
         raise ValueError("The paper benchmark uses CUDA")
     for item in config["methods"]:
         arm = get_arm(item["arm"])
+        if arm.text_history_budget_tokens is not None:
+            if (item.get("history_budget_tokens") != arm.text_history_budget_tokens
+                    or not set(item.get("benchmarks") or ()) <= {"bfcl_base", "bfcl_long_context"}
+                    or not item.get("benchmarks")):
+                raise ValueError("ACON budget cells require a matching token cap and explicit BFCL benchmarks")
+            continue
         if is_candidate_arm(arm.name):
             if (item.get("ratio") != 8 or arm.ratio != 8
                     or arm.native_controller != "candidate_" + ARM_TO_VARIANT[arm.name]
@@ -331,7 +360,10 @@ def prepare(config, output, source):
     if len(ids) != len(set(ids)):
         raise ValueError("The paper matrix contains duplicate cell ids")
     with (output / "matrix.csv").open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=["cell_id", "benchmark", "method", "arm", "group", "ratio", "retention", "adapter", "category"])
+        fields = ["cell_id", "benchmark", "method", "arm", "group", "ratio", "retention", "adapter", "category"]
+        if any("history_budget_tokens" in row for row in matrix):
+            fields.append("history_budget_tokens")
+        writer = csv.DictWriter(handle, fieldnames=fields)
         writer.writeheader()
         writer.writerows(matrix)
     plan = []
@@ -647,12 +679,15 @@ def main(argv=None):
     parser.add_argument("--cells", default="", help="comma-separated exact cell ids")
     parser.add_argument("--candidate-arms", default="",
                         help="explicit BFCL base candidates: all or comma-separated static_t02,turn_c1,goal_rescue,dependency_first")
+    parser.add_argument("--acon-budget-tokens", type=int,
+                        help="add budget-adapted ACON BFCL cells with this actor history cap")
     parser.add_argument("--port-offset", type=int, default=0,
                         help="shift server/proxy ports for concurrent single-GPU runners on one host")
     args = parser.parse_args(argv)
     config = json.loads(args.config.read_text())
     if args.action != "aggregate":
         config = with_candidate_methods(config, parse_candidate_arms(args.candidate_arms))
+        config = with_acon_budget(config, args.acon_budget_tokens)
     output = args.output or Path(config["output_root"])
     source = args.sglang_source.resolve()
     if args.action == "aggregate":

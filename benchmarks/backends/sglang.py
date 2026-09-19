@@ -136,6 +136,25 @@ class SglangBackend(Backend):
         self._post_json = post_json  # (path, payload, timeout) -> dict
 
     # ---- primitives ----
+    def count_chat_history_tokens(self, payload: Dict[str, Any],
+                                  history_start: int, history_end: int) -> Dict[str, Any]:
+        """Preflight the exact actor payload in the live server's chat renderer."""
+        request = dict(payload)
+        hint = dict(request.get("c2kv_kv_memory_hint") or {})
+        hint["paper_measurement"] = {
+            "history_start_message_count": history_start,
+            "history_message_count": history_end,
+            "canonical_full_source": False,
+        }
+        request["c2kv_kv_memory_hint"] = hint
+        result = self._post_json("/v1/c2kv/chat_budget", request, 60)
+        tokens = result.get("history_tokens") if isinstance(result, dict) else None
+        if (not isinstance(result, dict) or result.get("success") is not True
+                or result.get("server_tokenized") is not True
+                or isinstance(tokens, bool) or not isinstance(tokens, int) or tokens < 0):
+            raise BackendError("chat_budget_tokenize_failed", "invalid live chat budget receipt")
+        return result
+
     def count_extract_tokens(
         self,
         text: str,

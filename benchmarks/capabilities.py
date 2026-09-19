@@ -15,7 +15,7 @@ import shutil
 import sys
 from typing import Any, Iterable, Mapping, MutableMapping, Optional
 
-from arms import ARMS
+from arms import get_arm
 
 
 SCHEMA_VERSION = 1
@@ -300,19 +300,25 @@ def _benchmark_prerequisites(result: PreflightResult, benchmark: str,
 def _method_capabilities(result: PreflightResult, arm: str, backend: str,
                          benchmark: str, profile: Optional[Mapping[str, Any]],
                          features: frozenset[str]) -> None:
-    if arm not in ARMS:
+    try:
+        spec = get_arm(arm)
+    except SystemExit:
         result.requirements.append(Requirement(
             code="known_arm", severity="error", satisfied=False,
             message=f"unknown arm {arm!r}",
         ))
         return
-    spec = ARMS[arm]
-    try:
-        spec.validate()
     except ValueError as error:
         result.requirements.append(Requirement(
             code="valid_arm", severity="error", satisfied=False, message=str(error)))
         return
+
+    if spec.text_history_budget_tokens is not None:
+        result.requirements.append(Requirement(
+            code="acon_budget_sglang_backend", severity="error",
+            satisfied=backend == "sglang",
+            message="Budget-adapted ACON requires the SGLang chat budget renderer",
+        ))
 
     history_arm = bool(spec.compress_history or spec.kv_reuse or spec.text_policy)
     # This is deliberately a warning: an out-of-training compression ratio is

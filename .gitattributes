@@ -1,3 +1,5 @@
 *.sh text eol=lf
 # Dependency patches must apply to Linux source trees from Windows checkouts.
 *.patch text eol=lf
+# Keep the classifier byte-identical to the bundled Linux runtime copy.
+/benchmarks/bfcl_completion.py text eol=lf

@@ -86,6 +86,7 @@ _OPENER = urlrequest.build_opener(urlrequest.ProxyHandler({}))
 
 import repair_policy
 import textarms
+import acon_budget
 import history_methods
 import agentfold
 import raw_actor_history
@@ -1046,13 +1047,36 @@ def _apply_text_arm(payload: Dict[str, Any], arm, conv: str,
         usage_acc["wall_sec"] += time.perf_counter() - t0
         return out
 
-    if arm.text_policy == "agentfold":
+    if getattr(arm, "text_history_budget_tokens", None) is not None:
+        if BACKEND.name != "sglang":
+            raise ValueError("Budget-adapted ACON requires the SGLang chat budget renderer")
+
+        def measure(candidate, history_indices):
+            assembled, _ = _assemble(candidate, arm)
+            start, end = _acon_budget_boundary(candidate, assembled, history_indices)
+            staged = dict(payload, messages=assembled)
+            staged.pop("c2kv_measurement_session_id", None)
+            prepared = BACKEND.prepare_chat(staged, arm, None)
+            with _phase("budget_tokenization"):
+                receipt = BACKEND.count_chat_history_tokens(prepared, start, end)
+            return receipt["history_tokens"]
+
+        try:
+            out, stats = acon_budget.transform(
+                messages, compress, _render_action_dialect, conv,
+                model=model, budget_tokens=arm.text_history_budget_tokens,
+                history_cutoff=_history_cutoff(messages), measure=measure,
+                preserve_task_packet=(BENCHMARK == "acon_appworld"))
+        except acon_budget.BudgetExceeded as error:
+            error.receipt["compressor_usage"] = dict(usage_acc)
+            raise
+    elif arm.text_policy == "agentfold":
         staged, stats = agentfold.prepare(
             payload, agentfold.state_for(conv), code_actions=BENCHMARK == "acon_appworld")
         if staged is None:
             raise ValueError("AgentFold duplicate completed request must not rerun the actor")
         return staged, stats
-    if arm.text_policy in history_methods.METHODS:
+    elif arm.text_policy in history_methods.METHODS:
         out, stats = history_methods.transform(
             messages,
             history_methods.state_for(conv),
@@ -1334,6 +1358,7 @@ def _activate_measurement_session(session: str) -> None:
                 BACKEND.flush_cache(timeout=10)
             CACHE.clear()
             textarms.reset_state()
+            acon_budget.reset_state()
             history_methods.reset_state()
             agentfold.reset_state()
             raw_actor_history.reset_state()
@@ -1381,6 +1406,8 @@ def _paper_history_message_boundary(
     out_messages: List[Dict[str, Any]], counts: Dict[str, Any]
 ) -> Tuple[int, int]:
     """Return the non-system completed-history range for server tokenization."""
+    if "acon_budget_history_boundary" in counts:
+        return tuple(counts["acon_budget_history_boundary"])
     history_end = int(counts.get("current_start_out_index") or 0)
     history_indices = [
         index for index, message in enumerate(out_messages[:history_end])
@@ -1393,6 +1420,20 @@ def _paper_history_message_boundary(
         # as an empty compressible span and is rejected as invalid.
         return 0, 0
     return min(history_indices), history_end
+
+
+def _acon_budget_boundary(messages, assembled, history_indices):
+    """Map provenance through full assembly, including its default system prefix."""
+    offset = len(assembled) - len(messages)
+    expected_offset = 0 if any(m.get("role") == "system" for m in messages) else 1
+    if offset != expected_offset:
+        raise ValueError("ACON budget assembly changed the message layout")
+    indices = [index + offset for index in history_indices]
+    if not indices:
+        return 0, 0
+    if indices != list(range(indices[0], indices[-1] + 1)):
+        raise ValueError("ACON budget history must be a contiguous provenance span")
+    return indices[0], indices[-1] + 1
 
 
 _EPISODE_REQUEST_LOCK = threading.Lock()
@@ -1507,6 +1548,9 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 messages_out, counts = _assemble(messages, ARM)
                 if text_stats is not None:
                     counts["textarm"] = text_stats
+                    if getattr(ARM, "text_history_budget_tokens", None) is not None:
+                        counts["acon_budget_history_boundary"] = _acon_budget_boundary(
+                            messages, messages_out, text_stats["history_indices"])
                 repair_plan = plan_repair(messages, ARM, counts,
                                          tools=payload.get("tools"),
                                          out_messages=messages_out)
@@ -1529,6 +1573,14 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 BackendError) as error:
             kind = getattr(error, "kind",
                            "textarm_error" if ARM.text_policy else "assemble_error")
+            if isinstance(error, acon_budget.BudgetExceeded):
+                self._log_request(payload, None, {"textarm": error.receipt},
+                                  status=kind, error=str(error), fingerprint=fingerprint,
+                                  conv=conv, turn=turn)
+                self._send_json(422, {"error": {
+                    "code": kind, "type": "method_budget_failure",
+                    "message": str(error), "budget": error.receipt}})
+                return
             self._log_request(payload, None, None, status=kind,
                               error=str(error), fingerprint=fingerprint, conv=conv,
                               turn=turn)
@@ -1582,6 +1634,18 @@ class ProxyHandler(BaseHTTPRequestHandler):
                         "canonical_full_source": _canonical_full_source(ARM),
                     }
                     out_payload["c2kv_kv_memory_hint"] = hint
+                    if getattr(ARM, "text_history_budget_tokens", None) is not None:
+                        # Recheck the final wire payload, after every assembly and
+                        # backend transform. Never forward an over-budget actor.
+                        with _phase("budget_tokenization"):
+                            receipt = BACKEND.count_chat_history_tokens(
+                                out_payload, history_start, history_end)
+                        limit = ARM.text_history_budget_tokens
+                        if receipt["history_tokens"] > limit:
+                            raise BackendError("acon_budget_guard_mismatch",
+                                               "final actor payload exceeded the accepted ACON budget")
+                        text_stats["budget"]["final_guard"] = receipt
+                        text_stats["budget"]["actor_payload_sha256"] = canonical_sha256(out_payload)
                 return _post_json(self.path, out_payload, 600), out_payload
 
         def call_upstream(out_messages, plan, phase="generation"):
