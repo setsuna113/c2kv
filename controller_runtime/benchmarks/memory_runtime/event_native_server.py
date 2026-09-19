@@ -636,6 +636,8 @@ def _supervise(args, *, command=None):
     try:
         root = Path(__file__).resolve().parents[2]
         environment = os.environ.copy()
+        for name in ('OPENBLAS_NUM_THREADS', 'OMP_NUM_THREADS', 'MKL_NUM_THREADS'):
+            environment.setdefault(name, '8')
         source_paths = [str(root / 'python'), str(root)]
         inherited_path = environment.get('PYTHONPATH')
         if inherited_path:

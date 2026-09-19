@@ -199,6 +199,31 @@ def test_supervisor_preserves_dependency_overlay_after_owned_source_paths(tmp_pa
         (str(root / 'python'), str(root), inherited))
 
 
+@pytest.mark.parametrize('overrides, expected', [
+    ({}, {'OPENBLAS_NUM_THREADS': '8', 'OMP_NUM_THREADS': '8', 'MKL_NUM_THREADS': '8'}),
+    ({'OPENBLAS_NUM_THREADS': '2', 'OMP_NUM_THREADS': '3', 'MKL_NUM_THREADS': '4'},
+     {'OPENBLAS_NUM_THREADS': '2', 'OMP_NUM_THREADS': '3', 'MKL_NUM_THREADS': '4'}),
+])
+def test_supervisor_bounds_child_cpu_threads_without_overriding_parent(
+    tmp_path, monkeypatch, overrides, expected
+):
+    for name in expected:
+        monkeypatch.delenv(name, raising=False)
+    for name, value in overrides.items():
+        monkeypatch.setenv(name, value)
+    recorded = tmp_path / 'child-threads.json'
+    source = (
+        'import json, os, sys; from pathlib import Path; '
+        'names = ("OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS"); '
+        'Path(sys.argv[1]).write_text('
+        'json.dumps({name: os.environ.get(name) for name in names}), encoding="utf-8")'
+    )
+    args = SimpleNamespace(out=tmp_path / 'out', max_wall_seconds=10)
+    receipt = server._supervise(args, command=[sys.executable, '-c', source, str(recorded)])
+    assert receipt['status'] == 'completed'
+    assert json.loads(recorded.read_text(encoding='utf-8')) == expected
+
+
 def test_supervisor_does_not_spawn_after_deadline_expires_during_setup(
     tmp_path, monkeypatch
 ) -> None:
