@@ -126,7 +126,8 @@ def main(argv=None):
                 config = json.loads(config_path.read_text())
                 if stage == "common_prefix":
                     full = output / "closed_loop" / (cell.split("__", 1)[0] + "__full")
-                    if not (full / "complete.json").is_file():
+                    if (not (full / "complete.json").is_file()
+                            or (full / "AUDIT_EXCLUSION.json").exists()):
                         raise RuntimeError(f"Full replay source is incomplete: {full}")
                 wait_ports([int(config[key]) + args.port_offset for key in ("server_port", "proxy_port")])
                 command = [sys.executable, "-m", "benchmarks.paper", "run",
@@ -143,7 +144,8 @@ def main(argv=None):
                                        stdout=stream, stderr=subprocess.STDOUT)
                 if result.returncode:
                     raise RuntimeError(f"Cell exited {result.returncode}; see {log}")
-                if not (output / stage / cell / "complete.json").is_file():
+                if (not (output / stage / cell / "complete.json").is_file()
+                        or (output / stage / cell / "AUDIT_EXCLUSION.json").exists()):
                     raise RuntimeError(f"Cell returned without completion evidence: {cell}")
                 state.update(status="complete", finished_at=time.time(), log=str(log))
                 atomic_json(receipt, state)

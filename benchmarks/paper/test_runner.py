@@ -399,7 +399,8 @@ class PaperMatrixTest(unittest.TestCase):
             coverage = json.loads(coverage_path.read_text())
             self.assertEqual(coverage["requested_stages"], ["closed_loop"])
             self.assertEqual(coverage["counts"], {
-                "requested": 1, "ready": 1, "unsupported": 0, "missing": 0, "aggregated": 1})
+                "requested": 1, "ready": 1, "unsupported": 0, "audit_excluded": 0,
+                "missing": 0, "aggregated": 1})
             self.assertEqual(coverage["cells"][0]["status"], "aggregated")
 
             with self.assertRaisesRegex(RuntimeError, "slice is incomplete"):

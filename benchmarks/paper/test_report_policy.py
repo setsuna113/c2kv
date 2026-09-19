@@ -38,3 +38,22 @@ def test_report_uses_closed_loop_telemetry_for_exact_prefix_arm(tmp_path):
     row = write_comparison(tmp_path, [agent])[0]
     assert row["comparison_basis"] == "own_output_closed_loop"
     assert row["resident_kv_peak_bytes"] == 100
+
+
+def test_audit_exclusion_removes_stale_completed_score_and_csv(tmp_path):
+    cell = _cell(tmp_path, "closed_loop", "full")
+    assert len(write_comparison(tmp_path, [cell])) == 1
+    (tmp_path / "closed_loop" / cell["cell_id"] / "AUDIT_EXCLUSION.json").write_text(
+        json.dumps({"reason": "infrastructure failure misclassified as terminal"}))
+    assert write_comparison(tmp_path, [cell]) == []
+    assert (tmp_path / "comparison.csv").read_text() == ""
+
+
+def test_aggregation_records_audited_exclusion_without_recalculating_bad_cell(tmp_path):
+    from benchmarks.paper.runner import aggregate_results
+    cell = _cell(tmp_path, "closed_loop", "full")
+    (tmp_path / "closed_loop" / cell["cell_id"] / "AUDIT_EXCLUSION.json").write_text("{}")
+    aggregate_results({}, [cell], tmp_path, ["closed_loop"], set())
+    coverage = json.loads((tmp_path / "aggregation_coverage.json").read_text())
+    assert coverage["counts"]["audit_excluded"] == 1
+    assert coverage["counts"]["aggregated"] == 0

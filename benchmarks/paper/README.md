@@ -252,6 +252,12 @@ not in the resolved config), so replays read the shared
 
 For queue production, use the versioned worker rather than pod-local scripts:
 
+An `AUDIT_EXCLUSION.json` in a cell preserves the original outputs while
+excluding its old completion marker from official aggregation and replay-source
+selection. Keep the exclusion receipt and raw evidence; repair only its listed
+invalid or missing tasks in an explicit new output before rescoring. Do not
+remove the marker merely to reuse an old score.
+
 ```bash
 python -m benchmarks.paper.worker 0 CONFIG.json RESULTS TODO \
   --sglang-source ENGINE_CHECKOUT --port-offset 0

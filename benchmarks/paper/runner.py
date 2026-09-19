@@ -551,6 +551,8 @@ def execute(config, plan, output, source, stages, selected, port_offset=0):
             if unsupported:
                 raise RuntimeError(f"Unsupported {stage} for {cell['arm']}: {unsupported}")
             directory = output / stage / cell["cell_id"]
+            if (directory / "AUDIT_EXCLUSION.json").exists():
+                raise RuntimeError(f"Audited invalid cell {directory}; preserve its evidence and use an explicit repair output")
             if (directory / "complete.json").exists():
                 continue
             if (directory / "started.json").exists():
@@ -672,6 +674,12 @@ def aggregate_results(config, plan, output, stages, selected):
         for cell in requested:
             directory = output / stage / cell["cell_id"]
             unsupported = _unsupported_stage(stage, cell)
+            if (directory / "AUDIT_EXCLUSION.json").exists():
+                entries.append({"stage": stage, "cell_id": cell["cell_id"],
+                                "status": "audit_excluded",
+                                "reason": str(directory / "AUDIT_EXCLUSION.json"),
+                                "missing_artifacts": [], "measurement_summary": None})
+                continue
             if unsupported:
                 entries.append({"stage": stage, "cell_id": cell["cell_id"],
                                 "status": "unsupported_protocol", "reason": unsupported,
@@ -703,6 +711,7 @@ def aggregate_results(config, plan, output, stages, selected):
         "counts": {"requested": len(entries) + len(unknown) * len(stages),
                    "ready": sum(entry["status"] == "ready" for entry in entries),
                    "unsupported": sum(entry["status"] == "unsupported_protocol" for entry in entries),
+                   "audit_excluded": sum(entry["status"] == "audit_excluded" for entry in entries),
                    "missing": len(missing), "aggregated": 0},
         "missing": missing,
         "cells": entries,
@@ -716,7 +725,7 @@ def aggregate_results(config, plan, output, stages, selected):
     aggregated = 0
     try:
         for entry in entries:
-            if entry["status"] == "unsupported_protocol":
+            if entry["status"] in {"unsupported_protocol", "audit_excluded"}:
                 continue
             stage = entry["stage"]
             cell = next(cell for cell in requested

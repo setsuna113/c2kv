@@ -30,6 +30,7 @@ def write_comparison(output: Path, plan):
             directory = output / stage / cell["cell_id"]
             path = directory / "measurement_summary.json"
             if (not path.exists() or not (directory / "complete.json").is_file()
+                    or (directory / "AUDIT_EXCLUSION.json").exists()
                     or (stage == "common_prefix" and cell["arm"] in EXACT_OUTPUT_ARMS)):
                 continue
             measured = json.loads(path.read_text())
@@ -116,6 +117,9 @@ def write_comparison(output: Path, plan):
                 100 * (1 - actual / reference)
                 if actual is not None and reference is not None and reference > 0 else None)
     (output / "comparison.json").write_text(json.dumps(rows, indent=2) + "\n")
+    if not rows:
+        # Do not leave a stale CSV after an audit excludes the last row.
+        (output / "comparison.csv").write_text("", encoding="utf-8")
     if rows:
         with (output / "comparison.csv").open("w", newline="", encoding="utf-8") as handle:
             writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
