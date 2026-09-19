@@ -196,7 +196,9 @@ def test_orphan_card_respects_configured_capacity(tmp_path, monkeypatch):
     monkeypatch.setattr(scheduler, "live_driver_assignments", lambda: {1: {str(old): orphan}})
     monkeypatch.setattr(scheduler, "launch_cell", lambda c, card, slot:
                         observed.append((card, slot)) or SimpleNamespace(pid=42))
-    monkeypatch.setattr(scheduler.time, "sleep", lambda seconds: (_ for _ in ()).throw(StopIteration))
+    def stop_loop(seconds):
+        raise StopIteration
+    monkeypatch.setattr(scheduler.time, "sleep", stop_loop)
     args = SimpleNamespace(cards=[1, 2], include_pending=False, max_cells=1,
                            max_drivers_per_card=1)
     with pytest.raises(StopIteration):
@@ -220,7 +222,9 @@ def test_two_drivers_can_share_a_card_without_repeating_a_cell(tmp_path, monkeyp
     monkeypatch.setattr(scheduler, "launch_cell", lambda c, card, slot:
                         observed.append((c["cell_id"], card, slot)) or
                         SimpleNamespace(pid=len(observed)))
-    monkeypatch.setattr(scheduler.time, "sleep", lambda seconds: (_ for _ in ()).throw(StopIteration))
+    def stop_loop(seconds):
+        raise StopIteration
+    monkeypatch.setattr(scheduler.time, "sleep", stop_loop)
     args = SimpleNamespace(cards=[1], include_pending=False, max_cells=3,
                            max_drivers_per_card=2)
     with pytest.raises(StopIteration):
@@ -248,7 +252,9 @@ def test_unhealthy_engine_is_not_restarted_under_a_live_driver(tmp_path, monkeyp
     monkeypatch.setattr(scheduler, "engine_healthy", lambda card: False)
     monkeypatch.setattr(scheduler, "enumerate_cells", lambda: [])
     monkeypatch.setattr(scheduler.time, "monotonic", iter([0, 121]).__next__)
-    monkeypatch.setattr(scheduler.time, "sleep", lambda seconds: (_ for _ in ()).throw(StopIteration))
+    def stop_loop(seconds):
+        raise StopIteration
+    monkeypatch.setattr(scheduler.time, "sleep", stop_loop)
     args = SimpleNamespace(cards=[1], include_pending=False, max_cells=None,
                            max_drivers_per_card=2)
     with pytest.raises(StopIteration):
