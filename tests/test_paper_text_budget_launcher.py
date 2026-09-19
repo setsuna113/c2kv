@@ -14,7 +14,9 @@ from controller_runtime.benchmarks.bfcl_completion import completion_kind
 def _paper_root(root: Path) -> Path:
     for name in (
         "benchmarks/run.py", "benchmarks/arms.py", "benchmarks/proxy.py",
-        "benchmarks/hiagent_budget.py", "benchmarks/paper/budget_server.py",
+        "benchmarks/acon_budget.py", "benchmarks/hiagent_budget.py",
+        "benchmarks/adapters/acebench_adapter.py", "benchmarks/acebench_cli.py",
+        "benchmarks/paper/budget_server.py",
     ):
         path = root / name
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -46,6 +48,31 @@ def test_command_selects_explicit_bfcl_budget_cell(tmp_path, benchmark, category
     assert "sglang.launch_server" not in cmd
     assert "--device" not in cmd
     assert "--shared-engine" not in cmd
+
+
+@pytest.mark.parametrize("method,arm,features", [
+    ("acon", "acon_hist_ut_co_b768", "acebench_role_history_v1"),
+    ("hiagent", "hiagent_full_b768", "hiagent_trajectory_retrieval_v1,acebench_role_history_v1"),
+])
+def test_ace_agent_budget_command_preserves_python_action_route(tmp_path, method, arm, features):
+    args = _args(tmp_path, "acebench_agent")
+    args.method = method
+    args.acebench_dir = tmp_path / "acebench"
+    args.acebench_language = "en"
+    args.acebench_task_ids = "agent_multi_turn_1"
+    args.bench_python = "ace-python"
+    args.user_upstream = "http://127.0.0.1:36201"
+    args.max_tasks = None
+    cmd = launcher.command(args)
+    assert cmd[cmd.index("--benchmark") + 1] == "acebench"
+    assert cmd[cmd.index("--arm") + 1] == arm
+    assert cmd[cmd.index("--acebench-category") + 1] == "agent"
+    assert cmd[cmd.index("--acebench-task-ids") + 1] == "agent_multi_turn_1"
+    assert cmd[cmd.index("--bench-python") + 1] == "ace-python"
+    assert cmd[cmd.index("--user-upstream") + 1] == "http://127.0.0.1:36201"
+    assert cmd[cmd.index("--capability-features") + 1] == features
+    assert "--categories" not in cmd and "--run-ids" not in cmd
+    assert "--tool-memory" not in cmd
 
 
 def test_positive_budget_preflight_requires_server_tokenized_nonempty_history(monkeypatch):
@@ -103,6 +130,24 @@ def test_dry_run_does_not_contact_server_or_launch_client(monkeypatch, tmp_path,
     ])
     plan = json.loads(capsys.readouterr().out)
     assert plan["cell_id"] == "bfcl_long_context__hiagent_full_b768"
+    assert plan["live_budget_preflight"] == "skipped (dry-run)"
+
+
+def test_ace_acon_dry_run_builds_shared_budget_entry_without_launch(monkeypatch, tmp_path, capsys):
+    root = _paper_root(tmp_path / "paper")
+    monkeypatch.setattr(launcher, "validate_live_budget_server",
+                        lambda *args: pytest.fail("dry run must not contact the engine"))
+    monkeypatch.setattr(launcher.subprocess, "run", lambda *args, **kwargs: pytest.fail("must not launch"))
+    launcher.main([
+        "--paper-root", str(root), "--benchmark", "acebench_agent", "--method", "acon",
+        "--history-budget-tokens", "768", "--upstream", "http://127.0.0.1:36200",
+        "--proxy-port", "37400", "--out", str(tmp_path / "result"),
+        "--model", "gen-c1000", "--checkpoint", str(tmp_path / "checkpoint"),
+        "--acebench-dir", str(tmp_path / "acebench"), "--dry-run",
+    ])
+    plan = json.loads(capsys.readouterr().out)
+    assert plan["cell_id"] == "acebench_agent__acon_hist_ut_co_b768"
+    assert plan["command"][plan["command"].index("--benchmark") + 1] == "acebench"
     assert plan["live_budget_preflight"] == "skipped (dry-run)"
 
 
