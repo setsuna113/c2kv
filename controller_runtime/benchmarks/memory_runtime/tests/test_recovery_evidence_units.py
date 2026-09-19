@@ -7,6 +7,7 @@ import json
 import re
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -21,6 +22,7 @@ from benchmarks.memory_runtime.recovery.evidence_units import (  # noqa: E402
     render_units,
     unit_is_covered,
 )
+from benchmarks.memory_runtime.recovery.set_retrieval import supply_candidates  # noqa: E402
 from history_memory.events import EventStore  # noqa: E402
 
 
@@ -44,6 +46,51 @@ class OffsetTokenizer:
         if return_offsets_mapping:
             result["offset_mapping"] = offsets
         return result
+
+
+def test_empty_eligible_archive_skips_embedding_with_task_packet_present():
+    tokenizer = OffsetTokenizer()
+    store = EventStore.from_messages("first-appworld-decision", [
+        {"role": "system", "content": "Use the available tools."},
+        {"role": "user", "content": "Reset friends on venmo to match my phone."},
+    ])
+    catalog = build_catalog(store, tokenizer, "tokens_1024")
+    assert catalog  # The task packet is in the archive, but cannot be recovered.
+    prepared = SimpleNamespace(
+        _store=store,
+        metadata={"eligible_extraction": {"eligible_event_ids": []}},
+        memory=SimpleNamespace(raw_source_indices=()),
+        _gp_visible=[],
+    )
+    context = {
+        "goal": "Reset friends on venmo to match my phone.",
+        "last_action_observation": {},
+        "is_stop": False,
+        "parse_ok": True,
+        "draft_tool_calls": [],
+        "draft_text": "First action",
+    }
+
+    class NoModelCalls:
+        def embed_retrieval_queries(self, **kwargs):
+            pytest.fail("no eligible evidence should trigger query embedding")
+
+        def embed(self, **kwargs):
+            pytest.fail("no eligible evidence should trigger document embedding")
+
+    candidates, receipt = supply_candidates(
+        prepared, tokenizer,
+        {"U": "tokens_1024", "Q": "archive_rrf", "candidate_limit": 8},
+        context, lambda units: pytest.fail("no candidate can be admissible"),
+        NoModelCalls(),
+    )
+    assert candidates == []
+    assert receipt["n_archive_units"] == len(catalog)
+    assert receipt["n_retrieved"] == receipt["n_feasible"] == 0
+    assert receipt["retrieval"] == {
+        "query_mode": "archive_rrf", "routes": {}, "retrieved_ids": [],
+        "skipped_reason": "no_eligible_event_ids",
+    }
 
 
 class UnicodeByteTokenizer:

@@ -83,8 +83,14 @@ def supply_candidates(prepared, tokenizer, config, context, admissible, models=N
     """Scan past rejected candidates; optionally try fixed fine source windows."""
     store = prepared._store
     catalog = build_catalog(store, tokenizer, config["U"])
-    ranked, retrieval = retrieve_archive(catalog, context, config, models)
     eligible = set(prepared.metadata["eligible_extraction"]["eligible_event_ids"])
+    # No archive unit can survive the source check without an eligible event.
+    # Keep the full catalog count in the receipt, but avoid model inference.
+    ranked, retrieval = retrieve_archive(
+        catalog if eligible else [], context, config, models
+    )
+    if not eligible:
+        retrieval["skipped_reason"] = "no_eligible_event_ids"
     cancelled = set(prepared.metadata.get("revision_cancelled_event_ids") or ())
     raw = prepared.memory.raw_source_indices
     visible = list(prepared._gp_visible)
