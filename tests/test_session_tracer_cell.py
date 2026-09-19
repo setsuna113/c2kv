@@ -323,6 +323,73 @@ def test_appworld_worker_imports_paper_adapter_despite_runtime_name_collision(
     assert imported.stdout.strip() == "paper_harness"
 
 
+def test_appworld_identity_is_bound_to_one_server_task():
+    request = {"messages": [{"role": "user", "content": "task"}],
+               "c2kv_measurement_session_id": "task_1"}
+    normalized = driver.bind_appworld_task(request, "task_1", 2)
+    assert normalized["c2kv_eval_context"] == {
+        "benchmark": "acon_appworld", "task_id": "task_1",
+        "user_turn": 0, "step": 2, "attempt": 0}
+    assert "c2kv_eval_context" not in request
+    with unittest.TestCase().assertRaisesRegex(ValueError, "measurement task identity"):
+        driver.bind_appworld_task({**request, "c2kv_measurement_session_id": "task_2"},
+                                  "task_1", 0)
+    with unittest.TestCase().assertRaisesRegex(ValueError, "server-owned"):
+        driver.bind_appworld_task({**request, "c2kv_eval_context": {"task_id": "task_2"}},
+                                  "task_1", 0)
+
+
+def test_appworld_driver_uses_one_server_per_worker_even_with_batch_ten(
+        tmp_path, monkeypatch):
+    config = tmp_path / "config"
+    config.mkdir()
+    (config / "budgets_resolved.json").write_text(json.dumps({
+        "working_points": {"K0": {"kv_token_equivalents": {"K": 8}}}}))
+    monkeypatch.setattr(driver, "GENERATION_ROOT", tmp_path)
+    cell_dir = tmp_path / "cell"
+    cell_dir.mkdir()
+    ids = ["task_1", "task_2"]
+    cell = {"cell_id": "tracer-2", "cell_dir": str(cell_dir),
+            "benchmark": "acon_appworld", "working_point": "K0",
+            "threshold": 0.3, "task_ids": ids,
+            "caps": {"task_timeout": 5}, "python_sgl": "python",
+            "python_appworld": "python", "acon_dir": "acon",
+            "appworld_root": "appworld"}
+    manifest = cell_dir / "cell.json"
+    manifest.write_text(json.dumps(cell))
+
+    class Server:
+        def serve_forever(self):
+            pass
+
+        def shutdown(self):
+            pass
+
+        def server_close(self):
+            pass
+
+    batches = []
+
+    def start_server(_cell, batch, _port, _out):
+        batches.append(batch)
+        return Server(), {}
+
+    def scored_worker(command, **kwargs):
+        out = Path(command[command.index("--out") + 1])
+        out.mkdir(parents=True)
+        (out / "official_summary.json").write_text(json.dumps({
+            "schema": "a-event-native-appworld-run-v1", "status": "completed",
+            "task_id": command[command.index("--task-id") + 1],
+            "n": 1, "semantic_score": 0.0}))
+        return 0
+
+    monkeypatch.setattr(driver, "run_server", start_server)
+    monkeypatch.setattr(driver.subprocess, "call", scored_worker)
+    assert driver.main(["--cell", str(manifest), "--batch", "10"]) == 0
+    assert batches == [["task_1"], ["task_2"]]
+    assert driver.completed_task_ids(cell_dir, "acon_appworld", ids) == set(ids)
+
+
 def test_shutdown_waits_for_inflight_inference_before_session_close():
     import threading
     import urllib.request

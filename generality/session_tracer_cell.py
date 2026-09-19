@@ -86,6 +86,21 @@ def _history_message_span(messages):
     return start, max(start, end)
 
 
+def bind_appworld_task(payload, task_id, step):
+    """Bind ordinary ACON requests to the server's one frozen official task."""
+    if payload.get("c2kv_eval_context") is not None:
+        raise ValueError("AppWorld task identity is server-owned")
+    measurement_id = payload.get("c2kv_measurement_session_id")
+    if measurement_id is not None and measurement_id != task_id:
+        raise ValueError("AppWorld measurement task identity differs from server task")
+    normalized = dict(payload)
+    normalized["c2kv_eval_context"] = {
+        "benchmark": "acon_appworld", "task_id": task_id,
+        "user_turn": 0, "step": step, "attempt": 0,
+    }
+    return normalized
+
+
 class EngineSession:
     """Chat-completions client bound to one persistent streaming session.
 
@@ -494,6 +509,8 @@ class SessionTracerTask:
 
 def run_server(cell, task_ids, port, out_dir):
     """One controller server per batch, mirroring the frozen API contract."""
+    if cell["benchmark"] == "acon_appworld" and len(task_ids) != 1:
+        raise ValueError("AppWorld transport requires one frozen task per server")
     import uuid
     from transformers import AutoTokenizer
     tokenizer = AutoTokenizer.from_pretrained(cell["checkpoint"])
@@ -595,8 +612,17 @@ def run_server(cell, task_ids, port, out_dir):
                 return
             length = int(self.headers.get("Content-Length") or 0)
             payload = json.loads(self.rfile.read(length))
-            ctx = payload.get("c2kv_eval_context") or {}
-            task_id = ctx.get("task_id")
+            if cell["benchmark"] == "acon_appworld":
+                task_id = task_ids[0]
+                try:
+                    payload = bind_appworld_task(payload, task_id, tasks[task_id].decisions)
+                except ValueError as error:
+                    self._json(400, {"error": {"type": "task_identity_invalid",
+                                               "message": str(error)}})
+                    return
+            else:
+                ctx = payload.get("c2kv_eval_context") or {}
+                task_id = ctx.get("task_id")
             if task_id not in tasks:
                 self._json(400, {"error": {"type": "task_not_allowed"}})
                 return
@@ -708,8 +734,9 @@ def main(argv=None) -> int:
     task_ids = expected_ids
     if args.max_tasks is not None:
         task_ids = task_ids[: args.max_tasks]
-    for i in range(0, len(task_ids), args.batch):
-        batch = task_ids[i:i + args.batch]
+    batch_size = 1 if cell["benchmark"] == "acon_appworld" else args.batch
+    for i in range(0, len(task_ids), batch_size):
+        batch = task_ids[i:i + batch_size]
         out = Path(cell["cell_dir"]) / "batches" / f"{i:03d}_{batch[0]}"
         if (out / "done.json").exists() and set(batch) <= completed_task_ids(
                 Path(cell["cell_dir"]), cell["benchmark"], batch):
@@ -741,10 +768,8 @@ def main(argv=None) -> int:
                                          stdout=log, stderr=subprocess.STDOUT,
                                          stdin=subprocess.DEVNULL)
             else:
-                # AppWorld is a one-task-per-invocation harness.  Keep one
-                # persistent session-tracer server for the batch, but give
-                # every official worker its own output directory so the ACON
-                # harness cannot collide on existing results.
+                # Ordinary ACON requests have no explicit task context. Bind
+                # one worker to one server-owned task and keep its own output.
                 env = appworld_worker_env(cell)
                 rc = 0
                 with (out / "benchmark.log").open("wb") as log:
