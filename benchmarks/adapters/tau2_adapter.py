@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from paper.process_lifecycle import run_owned  # noqa: E402
 from metrics import aggregate, protocol_columns_for_turn  # noqa: E402
 
 from adapters.base import RunContext, v1  # noqa: E402
@@ -117,7 +118,7 @@ def run(ctx: RunContext) -> Dict[str, Any]:
     max_tasks = ctx.opt("max_tasks")
 
     env = harness_env()
-    subprocess.run(
+    run_owned(
         run_command(ctx.base_url, ctx.user_base_url, task_set, ctx.model,
                     ctx.opt("num_workers", 4), ctx.run_name,
                     max_tasks=max_tasks,
@@ -126,7 +127,7 @@ def run(ctx: RunContext) -> Dict[str, Any]:
                     timeout=ctx.opt("tau2_timeout")),
         cwd=tau2_dir, env=env, check=True)
     sims = tau2_dir / "data" / "simulations" / ctx.run_name
-    subprocess.run(evaluate_command(sims), cwd=tau2_dir, env=env, check=True)
+    run_owned(evaluate_command(sims), cwd=tau2_dir, env=env, check=True)
     updated = sims / "updated_results.json"
     if not updated.exists():
         raise SystemExit(f"FATAL: tau2 evaluation produced no {updated}")

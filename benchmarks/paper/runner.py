@@ -13,6 +13,7 @@ import urllib.error
 import urllib.request
 
 from .candidate_matrix import ARM_TO_VARIANT, parse_candidate_arms, with_candidate_methods
+from .process_lifecycle import run_owned, stop_owned_group, unwind_on_termination
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG = Path(__file__).with_name("config.json")
@@ -435,12 +436,15 @@ def cleanup_cell_processes(proxy, server):
     errors = []
     if proxy is not None:
         try:
-            proxy.terminate()
-            try:
-                proxy.wait(timeout=20)
-            except subprocess.TimeoutExpired:
-                proxy.kill()
-                proxy.wait()
+            if os.name == "posix" and isinstance(getattr(proxy, "pid", None), int):
+                stop_owned_group(proxy, timeout=20)
+            else:
+                proxy.terminate()
+                try:
+                    proxy.wait(timeout=20)
+                except subprocess.TimeoutExpired:
+                    proxy.kill()
+                    proxy.wait()
         except Exception as error:  # cleanup must continue to the server
             errors.append(("proxy", error))
 
@@ -557,13 +561,13 @@ def execute(config, plan, output, source, stages, selected, port_offset=0):
                     if get_arm(cell["arm"]).text_history_budget_tokens is not None:
                         require_budget_renderer(config["server_port"])
                     if is_native_arm(cell["arm"]):
-                        subprocess.run(run_command(config, cell, directory, profile_path, stage),
-                                       check=True, env=env, cwd=ROOT.parent)
+                        run_owned(run_command(config, cell, directory, profile_path, stage),
+                                  check=True, env=env, cwd=ROOT.parent)
                     elif stage == "closed_loop":
                         # Rebuilt here so a runtime port offset reaches the harness;
                         # without an offset this equals the prepared cell["command"].
-                        subprocess.run(run_command(config, cell, directory, profile_path),
-                                       check=True, env=env)
+                        run_owned(run_command(config, cell, directory, profile_path),
+                                  check=True, env=env)
                     else:
                         prefixes = Path(cell["replay_source"])
                         if not prefixes.is_file():
@@ -578,13 +582,15 @@ def execute(config, plan, output, source, stages, selected, port_offset=0):
                                       "--model-family", config.get("model_family", "qwen3-4b"),
                                      "--request-log", str(directory / "proxy_requests.jsonl"),
                                      "--telemetry-log", str(directory / "proxy_telemetry.jsonl")]
-                        proxy = subprocess.Popen(proxy_cmd, env=env, stdout=log, stderr=subprocess.STDOUT)
+                        proxy = subprocess.Popen(proxy_cmd, env=env, stdout=log,
+                                                 stderr=subprocess.STDOUT,
+                                                 start_new_session=os.name == "posix")
                         wait_server(proxy, config["proxy_port"])
-                        subprocess.run([config["bench_python"], "-m", "benchmarks.measurement.replay",
-                                        "--prefixes", str(prefixes), "--base-url", f"http://127.0.0.1:{config['proxy_port']}",
-                                        "--output", str(directory / "prefix_replay.jsonl"),
-                                        "--source-run-id", cell["benchmark"] + "__full",
-                                        "--target-run-id", cell["cell_id"]], check=True, env=env, cwd=ROOT.parent)
+                        run_owned([config["bench_python"], "-m", "benchmarks.measurement.replay",
+                                   "--prefixes", str(prefixes), "--base-url", f"http://127.0.0.1:{config['proxy_port']}",
+                                   "--output", str(directory / "prefix_replay.jsonl"),
+                                   "--source-run-id", cell["benchmark"] + "__full",
+                                   "--target-run-id", cell["cell_id"]], check=True, env=env, cwd=ROOT.parent)
                 except BaseException:
                     run_failure = sys.exc_info()
                 finally:
@@ -710,6 +716,7 @@ def aggregate_results(config, plan, output, stages, selected):
     return requested, coverage_path
 
 
+@unwind_on_termination
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=["prepare", "run", "aggregate"])

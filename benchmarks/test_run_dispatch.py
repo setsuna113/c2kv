@@ -337,7 +337,7 @@ def test_tau2_dispatch_passes_run_name_and_workers(monkeypatch, tmp_path):
 
         return _P()
 
-    monkeypatch.setattr(tau2_adapter.subprocess, "run", fake_run)
+    monkeypatch.setattr(tau2_adapter, "run_owned", fake_run)
     monkeypatch.setattr(tau2_adapter, "collect", lambda *a, **k: {"n": 1})
     monkeypatch.setattr(tau2_adapter, "TAU2_DIR", tmp_path)
     sims = tmp_path / "data" / "simulations" / "r_ab12"

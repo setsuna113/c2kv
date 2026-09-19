@@ -70,6 +70,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from paper.process_lifecycle import run_owned  # noqa: E402
 from metrics import aggregate  # noqa: E402
 
 from adapters.base import RunContext, v1  # noqa: E402
@@ -439,12 +440,12 @@ def run_acebench(base_url: str, user_base_url: str, out_dir: Path,
     if all(test.startswith("agent_") for test in tests):
         command = [python, str(Path(__file__).resolve().parents[1] / "acebench_cli.py"),
                    str(harness), *command[2:]]
-    subprocess.run(
+    run_owned(
         command,
         cwd=work, env=env, check=True)
     check_terminal(work, language, model, tests)
     prepare_score_dir(work, language, model)
-    subprocess.run(eval_command(python, harness, model, category, language),
+    run_owned(eval_command(python, harness, model, category, language),
                    cwd=work, env=env, check=True)
     summary = collect(work, language, model, tests)
     summary["user_model"] = user_model or model

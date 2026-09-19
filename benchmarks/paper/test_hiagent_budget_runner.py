@@ -125,7 +125,7 @@ def test_execute_checks_budget_renderer_before_harness(tmp_path, arm_name):
     plan, _ = runner.prepare(config, output, source)
     cell = next(row for row in plan if row["cell_id"] == "bfcl_base__" + arm_name)
     with mock.patch.object(runner.subprocess, "Popen", return_value=mock.Mock(pid=123)), \
-            mock.patch.object(runner.subprocess, "run") as harness, \
+            mock.patch.object(runner, "run_owned") as harness, \
             mock.patch.object(runner, "wait_server") as health, \
             mock.patch.object(runner, "require_budget_renderer") as renderer, \
             mock.patch.object(runner, "cleanup_cell_processes"), \

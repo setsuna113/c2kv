@@ -256,7 +256,7 @@ def test_toolsandbox_uses_selected_environment_and_checkout(tmp_path, monkeypatc
         (out / "scenario_manifest.json").write_text(
             json.dumps({"scenario_ids": ["one"], "expected": 1}))
         return SimpleNamespace(returncode=0)
-    monkeypatch.setattr(toolsandbox_adapter.subprocess, "run", fake_run)
+    monkeypatch.setattr(toolsandbox_adapter, "run_owned", fake_run)
     monkeypatch.setattr(toolsandbox_adapter, "collect",
                         lambda out: {"n": 1, "scenario_ids": ["one"]})
     toolsandbox_adapter.run_ts("http://agent", Path("out"),
