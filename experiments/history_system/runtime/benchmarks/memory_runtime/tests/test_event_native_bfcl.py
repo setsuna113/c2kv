@@ -298,6 +298,16 @@ def test_wall_cap_terminates_owned_child_and_writes_final_wall_receipt(
             self.returncode = -9
 
     monkeypatch.setattr(wrapper.subprocess, "Popen", Process)
+    group_signals = []
+    if wrapper.os.name == "posix":
+        def fake_killpg(pgid, signum):
+            assert pgid == Process.pid
+            group_signals.append(signum)
+            if signum == wrapper.signal.SIGTERM:
+                processes[0].terminated = True
+            else:
+                processes[0].killed = True
+        monkeypatch.setattr(wrapper.os, "killpg", fake_killpg)
     out = tmp_path / "run-output"
 
     with pytest.raises(SystemExit) as stopped:
@@ -315,6 +325,8 @@ def test_wall_cap_terminates_owned_child_and_writes_final_wall_receipt(
     assert process.kwargs["env"]["PYTHONPATH"] == str(Path(wrapper.__file__).resolve().parents[2])
     assert process.terminated is True
     assert process.killed is False
+    if wrapper.os.name == "posix":
+        assert group_signals == [wrapper.signal.SIGTERM]
     assert process.wait_calls == [pytest.approx(1.0), 5]
     final = json.loads((out / "final.json").read_text(encoding="utf-8"))
     assert final["status"] == "wall_cap_reached"
