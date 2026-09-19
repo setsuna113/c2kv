@@ -55,7 +55,7 @@ except ImportError:  # Direct file launch on ascend03.
 
 GENERATION_ROOT = Path("/home/liuyancheng/c2kv-generality-20260918")
 C1_DELIVERY = GENERATION_ROOT / "src" / "c1_delivery"
-RUNTIME = GENERATION_ROOT / "src" / "generality" / "controller_runtime"
+RUNTIME = Path(__file__).resolve().parents[1] / "controller_runtime"
 RISK_ARTIFACT = C1_DELIVERY / "artifacts" / "c1_risk.t02_v1.json"
 sys.path.insert(0, str(C1_DELIVERY))
 sys.path.insert(0, str(RUNTIME))
