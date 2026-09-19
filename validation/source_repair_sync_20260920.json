@@ -47,5 +47,9 @@
     "skipped": 1
   },
   "model_validation": "CUDA shared policy validation recorded in paper experiments/history_system/validation/source_repair_cuda_20260920.json; NPU model execution not run",
-  "existing_results": "Legacy candidate profiles and IDs retained; new variants use separate IDs and v2 delivery profiles"
+  "existing_results": "Legacy candidate profiles and IDs retained; new variants use separate IDs and v2 delivery profiles",
+  "merged_branch_cpu_validation": {
+    "runtime_selected_passed": 52,
+    "launcher_and_parallel_study_passed": 40
+  }
 }
