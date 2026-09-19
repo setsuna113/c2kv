@@ -16,6 +16,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from .event_native import EventStore
+from .always_compress import CapacityInfeasible
 from .event_native_controls import describe_event_native_route
 
 
@@ -126,6 +127,7 @@ class EventNativeAPI:
             tuple[str, int, int], tuple[str, dict[str, Any]]
         ] = {}
         self._terminal_failure: dict[str, str] | None = None
+        self._failed_tasks: set[str] = set()
 
     def health(self) -> dict[str, Any]:
         """Return only bounded operational state, without prompts or errors."""
@@ -185,6 +187,10 @@ class EventNativeAPI:
                 "Event-native generation stopped after a terminal runner failure",
             )
 
+        if identity[0] in self._failed_tasks:
+            raise EventNativeAPIError(422, "c2kv_capacity_infeasible",
+                                      "Task exceeds the declared memory capacity")
+
         cached = self._completed.get(identity)
         if cached is not None:
             if cached[0] != signature:
@@ -215,10 +221,16 @@ class EventNativeAPI:
             record = getattr(error, "record", None)
             if not isinstance(record, Mapping):
                 record = self._failure_record(runner_payload, error)
-            self._terminal_failure = {
-                "code": "runner_failed",
-                "type": type(error).__name__,
-            }
+            method_failure = isinstance(error, CapacityInfeasible) or isinstance(
+                error.__cause__, CapacityInfeasible
+            )
+            if method_failure:
+                self._failed_tasks.add(identity[0])
+            else:
+                self._terminal_failure = {
+                    "code": "runner_failed",
+                    "type": type(error).__name__,
+                }
             self._release_runner_cache()
             try:
                 self._append_step(record)
@@ -232,6 +244,11 @@ class EventNativeAPI:
                     "steps_write_failed",
                     "Failed to durably record the terminal runner trace",
                 ) from journal_error
+            if method_failure:
+                raise EventNativeAPIError(
+                    422, "c2kv_capacity_infeasible",
+                    "Task exceeds the declared memory capacity",
+                ) from error
             raise EventNativeAPIError(
                 500,
                 "runner_failed",

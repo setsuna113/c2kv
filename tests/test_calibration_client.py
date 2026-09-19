@@ -124,6 +124,18 @@ class CalibrationClientTests(unittest.TestCase):
             first.close()
             second.close()
 
+    def test_pyramidkv_requests_reference_attention(self):
+        client = calibrate.PersistentSGLangClient(
+            self.base + "/v1", "qwen", "bfcl/task/replay-state",
+            "pyramidkv", 768)
+        try:
+            client.generate(self.payload(), 128)
+        finally:
+            client.close()
+        hint = self.server.requests[1][1]["c2kv_kv_memory_hint"]
+        self.assertEqual(hint["history_kv_backend"], "reference_attention")
+        self.assertEqual(hint["history_kv_eviction"]["method"], "pyramidkv")
+
     def test_session_echo_mismatch_is_rejected(self):
         self.server.open_echo = "different-session"
         client = self.client()

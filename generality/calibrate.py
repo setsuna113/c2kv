@@ -175,7 +175,10 @@ class PersistentSGLangClient:
                 "active_history_kv_tokens": self.target_tokens,
                 "active_full_raw_tokens": 0, "active_c2kv_gist_tokens": 0,
                 "history_kv_method": self.method,
-                "history_kv_backend": "physical_eviction", "estimated": True,
+                "history_kv_backend": (
+                    "reference_attention" if self.method == "pyramidkv"
+                    else "physical_eviction"
+                ), "estimated": True,
                 "history_kv_eviction": {
                     "method": self.method, "history_start_message_count": history_start,
                     "history_message_count": history_count,
@@ -336,7 +339,7 @@ def _features(response: Mapping[str, Any]) -> dict[str, Any]:
 
 def _verify_history_backend(response: Mapping[str, Any], method: str,
                             history_count: int, *, continuation: bool = False) -> dict[str, Any]:
-    """Require a real persistent physical-eviction receipt from SGLang."""
+    """Require the persistent history backend selected for this method."""
     report = ((response.get("metadata") or {}).get("kv_memory_report") or {})
     if not isinstance(report, Mapping) or not report:
         raise PrefixReplayIntegrityError("SGLang response has no kv_memory_report")
@@ -355,13 +358,28 @@ def _verify_history_backend(response: Mapping[str, Any], method: str,
             raise PrefixReplayIntegrityError("persistent continuation was not confirmed")
         if physical.get("success") is not True:
             raise PrefixReplayIntegrityError("physical history eviction was not confirmed")
+        if method == "pyramidkv":
+            if (report.get("history_kv_backend") != "reference_attention"
+                    or report.get("history_kv_runtime_status") != "reference_attention_ok"
+                    or report.get("reference_attention_backend") != "torch_sdpa"):
+                raise PrefixReplayIntegrityError(
+                    "PyramidKV reference attention was not confirmed")
+            for key in ("reference_history_token_slots",
+                        "reference_history_resident_bytes"):
+                value = report.get(key)
+                if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+                    raise PrefixReplayIntegrityError(
+                        f"PyramidKV reference receipt lacks {key}")
     return {
         "method": actual_method,
+        "history_kv_backend": report.get("history_kv_backend"),
         "persistent_continuation": eviction.get("persistent_continuation"),
         "history_kv_eviction": dict(eviction) if isinstance(eviction, Mapping) else {},
         "history_kv_physical_eviction": dict(physical) if isinstance(physical, Mapping) else {},
         "active_history_kv_tokens": report.get("active_history_kv_tokens"),
         "full_equivalent_history_tokens": report.get("full_equivalent_history_tokens"),
+        "reference_history_token_slots": report.get("reference_history_token_slots"),
+        "reference_history_resident_bytes": report.get("reference_history_resident_bytes"),
         "persistent_session_logical_prefix_tokens": report.get(
             "persistent_session_logical_prefix_tokens"),
     }
