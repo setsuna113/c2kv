@@ -623,10 +623,26 @@ def run_server(cell, task_ids, port, out_dir):
                 "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
             })
 
-    server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    server = SessionTracerHTTPServer(("127.0.0.1", port), Handler)
     (out_dir / "server" / "ready.json").parent.mkdir(parents=True, exist_ok=True)
     (out_dir / "server" / "ready.json").write_text(json.dumps(manifest, indent=2))
     return server, tasks
+
+
+class SessionTracerHTTPServer(ThreadingHTTPServer):
+    # CPU inference must finish before interpreter teardown or session closure.
+    daemon_threads = False
+
+
+def stop_server(server, thread, tasks):
+    server.shutdown()
+    server.server_close()
+    thread.join()
+    for task in tasks.values():
+        try:
+            task.engine.close()
+        except Exception:
+            pass  # The engine may have dropped the session already.
 
 
 def appworld_worker_env(cell):
@@ -755,16 +771,11 @@ def main(argv=None) -> int:
         except Exception as error:
             rc, status = 1, f"failed:{type(error).__name__}"
         finally:
-            for task in batch_tasks.values():
-                try:
-                    task.engine.close()
-                except Exception:
-                    pass  # engine may have dropped it already
+            stop_server(server, thread, batch_tasks)
         (out / "done.json" if rc == 0 else out / "status.json").write_text(
             json.dumps({"batch": batch[0], "n_tasks": len(batch),
                         "failed_tasks": failed_tasks if cell["benchmark"] != "bfcl" else [],
                         "status": status}, indent=2))
-        server.shutdown()
         print(json.dumps({"cell": cell["cell_id"], "batch": i, "status": status}), flush=True)
     completed = completed_task_ids(Path(cell["cell_dir"]), cell["benchmark"], expected_ids)
     write_cell_status(cell, {

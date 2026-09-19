@@ -278,6 +278,9 @@ def test_stale_batch_done_is_revalidated_and_full_manifest_stamped(tmp_path, mon
         def shutdown(self):
             pass
 
+        def server_close(self):
+            pass
+
     monkeypatch.setattr(driver, "run_server", lambda *args: (Server(), {}))
 
     def scored_worker(command, **kwargs):
@@ -295,3 +298,50 @@ def test_stale_batch_done_is_revalidated_and_full_manifest_stamped(tmp_path, mon
     assert status["status"] == "complete"
     assert status["n_completed"] == 1
     assert scheduler.cell_done(cell)
+
+
+def test_shutdown_waits_for_inflight_inference_before_session_close():
+    import threading
+    import urllib.request
+    from http.server import BaseHTTPRequestHandler
+
+    entered = threading.Event()
+    release = threading.Event()
+    finished = threading.Event()
+    closed = threading.Event()
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            entered.set()
+            assert release.wait(5)
+            finished.set()
+            self.send_response(200)
+            self.end_headers()
+
+        def log_message(self, *args):
+            pass
+
+    class Engine:
+        def close(self):
+            assert finished.is_set()
+            closed.set()
+
+    server = driver.SessionTracerHTTPServer(('127.0.0.1', 0), Handler)
+    thread = threading.Thread(target=server.serve_forever)
+    thread.start()
+    def request():
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        with opener.open(f'http://127.0.0.1:{server.server_port}/', timeout=5):
+            pass
+    client = threading.Thread(target=request)
+    client.start()
+    assert entered.wait(5)
+    stopper = threading.Thread(target=driver.stop_server,
+        args=(server, thread, {'task': SimpleNamespace(engine=Engine())}))
+    stopper.start()
+    assert not closed.wait(0.1)
+    release.set()
+    client.join(5)
+    stopper.join(5)
+    assert not stopper.is_alive()
+    assert closed.is_set()
