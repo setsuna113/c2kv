@@ -18,6 +18,7 @@ except ImportError:
 
 
 RESULT_GLOB = "batches/*/bfcl_worker/bfcl/result/**/*.json"
+LEGACY_FC_DECODE_ERROR = "'str' object has no attribute 'items'"
 
 
 def ordered_unique(values: Iterable[str]) -> list[str]:
@@ -25,18 +26,38 @@ def ordered_unique(values: Iterable[str]) -> list[str]:
     return list(dict.fromkeys(value for value in values if value))
 
 
-def bfcl_row_is_valid(row: dict[str, Any]) -> bool:
+def has_legacy_fc_decode_error(row: dict[str, Any]) -> bool:
+    """Identify rows produced by the old FC handler's string/list mismatch."""
+    inference_log = row.get("inference_log")
+    if not isinstance(inference_log, list):
+        return False
+    for turn in inference_log:
+        if not isinstance(turn, dict):
+            continue
+        for key, entries in turn.items():
+            if not key.startswith("step_") or not isinstance(entries, list):
+                continue
+            if any(isinstance(entry, dict) and entry.get("role") == "handler_log"
+                   and entry.get("error") == LEGACY_FC_DECODE_ERROR
+                   for entry in entries):
+                return True
+    return False
+
+
+def bfcl_row_is_valid(row: dict[str, Any], *, fc_model: bool = False) -> bool:
     """Whether a row is terminal for the official scorer.
 
     An incorrect or empty model result, context overflow, or invalid HiAgent
     retrieval is scored as-is.  Other tracebacks and rows without ``result``
     are retryable execution failures.
     """
+    if fc_model and has_legacy_fc_decode_error(row):
+        return False
     return completion_kind(row) != "incomplete"
 
 
 def collect_bfcl_results(
-    cell_dir: Path, expected_task_ids: Iterable[str]
+    cell_dir: Path, expected_task_ids: Iterable[str], *, fc_model: bool = False
 ) -> dict[str, Any]:
     """Collect immutable attempts and resolve one canonical row per task.
 
@@ -80,7 +101,7 @@ def collect_bfcl_results(
                 "category": result_path.parent.name,
                 "mtime_ns": mtime_ns,
                 "line_number": line_number,
-                "valid": bfcl_row_is_valid(row),
+                "valid": bfcl_row_is_valid(row, fc_model=fc_model),
             })
 
     canonical: dict[str, dict[str, Any]] = {}
@@ -106,10 +127,15 @@ def collect_bfcl_results(
         if task_id in canonical and not canonical[task_id]["valid"]
     ]
     missing_task_ids = [task_id for task_id in expected if task_id not in canonical]
+    legacy_fc_decode_task_ids = [
+        task_id for task_id in expected
+        if fc_model and task_id in canonical
+        and has_legacy_fc_decode_error(canonical[task_id]["row"])
+    ]
     terminal_failures = {
         task_id: kind
         for task_id in expected
-        if task_id in canonical
+        if task_id in canonical and canonical[task_id]["valid"]
         if (kind := terminal_failure_kind(canonical[task_id]["row"])) is not None
     }
     refill_set = set(invalid_task_ids) | set(missing_task_ids)
@@ -124,6 +150,7 @@ def collect_bfcl_results(
         "valid_task_ids": valid_task_ids,
         "invalid_task_ids": invalid_task_ids,
         "missing_task_ids": missing_task_ids,
+        "legacy_fc_decode_task_ids": legacy_fc_decode_task_ids,
         "terminal_failures": terminal_failures,
         "refill_task_ids": refill_task_ids,
         "unexpected_task_ids": unexpected_task_ids,

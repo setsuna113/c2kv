@@ -19,6 +19,7 @@ import argparse
 import copy
 import hashlib
 import json
+import math
 import os
 import subprocess
 import sys
@@ -63,7 +64,7 @@ def _write(path: Path, value) -> None:
     path.write_text(json.dumps(value, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
-def build_controller_config(cell: dict) -> dict:
+def _controller_with_binding(cell: dict) -> tuple[dict, dict | None]:
     """T02 risk selector with the cell's calibrated threshold (fixed weights)."""
     if cell["condition"] == "tracer_history":
         config, _ = evidence_sets.build_config(
@@ -92,12 +93,17 @@ def build_controller_config(cell: dict) -> dict:
         assert (hashlib.sha256(RISK_ARTIFACT.read_bytes()).hexdigest()
                 == "18a11f73aa1f7d4b0add86eed66ae9e5e129ea4bdfbe0dfad23faf4f7d2fb4ab")
         assert gp["recovery_reserve_tokens"] == 0, gp["recovery_reserve_tokens"]
-        cell_dir = Path(cell["cell_dir"])
-        _write(cell_dir / "risk_artifact_binding.json", binding)
-        return controller
+        return controller, binding
     controller = evidence_sets._base_controller()
     controller.pop("post_draft_recovery", None)
     controller.pop("gp_experiments", None)
+    return controller, None
+
+
+def build_controller_config(cell: dict) -> dict:
+    controller, binding = _controller_with_binding(cell)
+    if binding is not None:
+        _write(Path(cell["cell_dir"]) / "risk_artifact_binding.json", binding)
     return controller
 
 
@@ -230,10 +236,38 @@ def validate_chunk(out: Path, task_ids: list[str]) -> tuple[list[str], list[str]
                 continue
             # Any valid official row completes the task.  Later traceback rows
             # cannot turn an already valid task back into a retry.
-            observed[task_id] = observed.get(task_id, False) or bfcl_row_is_valid(row)
+            observed[task_id] = observed.get(task_id, False) or bfcl_row_is_valid(
+                row, fc_model=True)
     healthy = [task_id for task_id in requested if observed.get(task_id, False)]
     bad = [task_id for task_id in requested if not observed.get(task_id, False)]
     return healthy, bad
+
+
+def validate_appworld_summary(out: Path, task_id: str) -> None:
+    path = out / "appworld_worker" / "official_summary.json"
+    try:
+        summary = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise RuntimeError(f"missing or invalid AppWorld summary for {task_id}") from error
+    score = summary.get("semantic_score") if isinstance(summary, dict) else None
+    if (not isinstance(summary, dict)
+            or summary.get("schema") != "a-event-native-appworld-run-v1"
+            or summary.get("status") != "completed"
+            or summary.get("task_id") != task_id
+            or summary.get("n") != 1
+            or not isinstance(score, (int, float)) or isinstance(score, bool)
+            or not math.isfinite(score)):
+        raise RuntimeError(f"AppWorld summary is not a scored completion for {task_id}")
+
+
+def appworld_task_completed(cell_dir: Path, task_id: str) -> bool:
+    for path in (cell_dir / "batches").glob("*/appworld_worker/official_summary.json"):
+        try:
+            validate_appworld_summary(path.parent.parent, task_id)
+        except RuntimeError:
+            continue
+        return True
+    return False
 
 
 def run_task(cell: dict, task_ids: list[str], port: int, batch_dirname: str) -> dict:
@@ -303,6 +337,7 @@ def run_task(cell: dict, task_ids: list[str], port: int, batch_dirname: str) -> 
                 rc = worker.wait(timeout=max(60, deadline - time.monotonic()))
                 if rc != 0:
                     raise RuntimeError(f"official worker exited rc={rc} for {task_id}")
+                validate_appworld_summary(out, task_id)
         else:
             worker = subprocess.Popen(
                 bfcl_worker_command(cell, task_ids, out, port), cwd=str(RUNTIME),
@@ -381,12 +416,38 @@ def load_cell(cell_json: Path) -> dict:
 
 def prepare_cell_files(cell: dict, budgets: dict) -> dict:
     cell_dir = Path(cell["cell_dir"])
-    _write(cell_dir / "controller.json", build_controller_config(cell))
-    _write(cell_dir / "eval_policy.json", build_eval_policy(cell, budgets))
-    cell["controller_path"] = str(cell_dir / "controller.json")
-    cell["eval_policy_path"] = str(cell_dir / "eval_policy.json")
-    _write(cell_dir / "cell.json", cell)
-    return cell
+    controller, binding = _controller_with_binding(cell)
+    policy = build_eval_policy(cell, budgets)
+    prepared = dict(cell)
+    prepared["controller_path"] = str(cell_dir / "controller.json")
+    prepared["eval_policy_path"] = str(cell_dir / "eval_policy.json")
+    frozen = {"controller.json": controller, "eval_policy.json": policy,
+              "cell.json": prepared}
+    if binding is not None:
+        frozen["risk_artifact_binding.json"] = binding
+
+    attempts = cell_dir / "batches"
+    if attempts.is_dir() and any(attempts.iterdir()):
+        for name, expected in frozen.items():
+            path = cell_dir / name
+            try:
+                previous = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as error:
+                raise ValueError(f"existing attempts require frozen {name}") from error
+            if name == "cell.json":
+                # Engine URL is allocated per scheduler run; all other cell
+                # fields are part of the frozen experimental contract.
+                previous = dict(previous)
+                expected = dict(expected)
+                previous.pop("sglang_backend_url", None)
+                expected.pop("sglang_backend_url", None)
+            if previous != expected:
+                raise ValueError(f"existing attempts use a different frozen {name}")
+        return prepared
+
+    for name, value in frozen.items():
+        _write(cell_dir / name, value)
+    return prepared
 
 
 def _attempt_name(task_ids: list[str]) -> str:
@@ -396,7 +457,7 @@ def _attempt_name(task_ids: list[str]) -> str:
 
 def _write_bfcl_completion(cell: dict, expected_task_ids: list[str]) -> dict:
     cell_dir = Path(cell["cell_dir"])
-    completion = collect_bfcl_results(cell_dir, expected_task_ids)
+    completion = collect_bfcl_results(cell_dir, expected_task_ids, fc_model=True)
     receipt = completion_receipt(completion)
     receipt["cell_id"] = cell["cell_id"]
     receipt["generated_at"] = time.time()
@@ -435,8 +496,12 @@ def main(argv=None) -> int:
     if args.max_attempts_per_task < 1:
         parser.error("--max-attempts-per-task must be at least 1")
     cell = load_cell(args.cell)
-    expected_task_ids = ordered_unique(cell["task_ids"])
-    cell["task_ids"] = expected_task_ids
+    expected_task_ids = cell["task_ids"]
+    if (not isinstance(expected_task_ids, list) or not expected_task_ids
+            or any(not isinstance(task_id, str) or not task_id
+                   for task_id in expected_task_ids)
+            or len(expected_task_ids) != len(set(expected_task_ids))):
+        raise ValueError("cell manifest must contain unique nonempty task IDs")
     requested_task_ids = ordered_unique(
         args.task_ids if args.task_ids is not None else expected_task_ids
     )
@@ -454,8 +519,8 @@ def main(argv=None) -> int:
         return 0
 
     budgets = json.loads(args.budgets.read_text())
-    # Always (re)materialize controller.json / eval_policy.json from the cell
-    # spec: regeneration is cheap and prevents stale configs after edits.
+    # Existing attempts freeze the controller, policy, and cell contract;
+    # prepare_cell_files rejects drift before writing any of them.
     cell = prepare_cell_files(cell, budgets)
     task_ids = requested_task_ids
     if args.max_tasks is not None:
@@ -505,7 +570,7 @@ def main(argv=None) -> int:
             # A timeout/nonzero worker may finish writing a valid row while
             # run_task is cleaning up its process group.  Refresh from disk
             # before every retry decision so that late output is not rerun.
-            refreshed = collect_bfcl_results(cell_dir, expected_task_ids)
+            refreshed = collect_bfcl_results(cell_dir, expected_task_ids, fc_model=True)
             valid_task_ids.update(refreshed["valid_task_ids"])
             chunk = [
                 task_id for task_id in chunk
@@ -515,7 +580,7 @@ def main(argv=None) -> int:
         else:
             chunk = [
                 task_id for task_id in chunk
-                if not (cell_dir / "tasks" / task_id / "done.json").exists()
+                if not appworld_task_completed(cell_dir, task_id)
                 and attempt_counts.get(task_id, 0) < args.max_attempts_per_task
             ]
         if not chunk:
@@ -581,16 +646,16 @@ def main(argv=None) -> int:
             "finished_at": time.time(),
         })
     else:
-        done = sum(1 for t in task_ids
-                   if (cell_dir / "tasks" / t / "done.json").exists())
+        done = sum(1 for t in expected_task_ids
+                   if appworld_task_completed(cell_dir, t))
         # Legacy terminal.json files are retained as evidence but do not
         # complete an unscored AppWorld task.
-        retryable = len(task_ids) - done
+        retryable = len(expected_task_ids) - done
         _write(cell_dir / "cell_status.json", {
             "cell_id": cell["cell_id"],
             "status": "complete" if retryable == 0 else "incomplete",
             "n_completed": done, "n_retryable": retryable,
-            "n_terminal": 0, "n_total": len(task_ids),
+            "n_terminal": 0, "n_total": len(expected_task_ids),
             "finished_at": time.time(),
         })
     return 0

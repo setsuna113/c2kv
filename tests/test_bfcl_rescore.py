@@ -3,6 +3,7 @@ import json
 import pytest
 
 from generality.bfcl_rescore import prepare
+from generality import rescore
 
 
 def write_attempt(cell, name, rows):
@@ -59,3 +60,26 @@ def test_incomplete_cell_cannot_publish_score_input(tmp_path):
     with pytest.raises(ValueError, match="requires 1 valid results"):
         prepare(cell, out)
     assert not out.exists()
+
+
+def test_old_fc_handler_decode_error_cannot_publish_score_input(tmp_path):
+    cell = tmp_path / "cell"
+    cell.mkdir()
+    task_id = "multi_turn_base_1"
+    (cell / "cell.json").write_text(json.dumps({"task_ids": [task_id]}))
+    write_attempt(cell, "old", [{
+        "id": task_id, "result": [["<tool_call>...</tool_call>"]],
+        "inference_log": [{"step_0": [{"role": "handler_log",
+                                      "error": "'str' object has no attribute 'items'"}]}],
+    }])
+    out = tmp_path / "score"
+
+    with pytest.raises(ValueError, match="requires 1 valid results"):
+        prepare(cell, out)
+    assert not out.exists()
+
+
+def test_legacy_rescore_entrypoint_requires_explicit_cell_and_output():
+    with pytest.raises(SystemExit) as error:
+        rescore.main([])
+    assert error.value.code == 2

@@ -19,7 +19,7 @@ def prepare(cell_dir: Path, output: Path) -> dict:
     task_ids = cell["task_ids"]
     if not task_ids or len(task_ids) != len(set(task_ids)):
         raise ValueError("Cell manifest must contain unique task IDs")
-    info = collect_bfcl_results(cell_dir, task_ids)
+    info = collect_bfcl_results(cell_dir, task_ids, fc_model=True)
     if info["refill_task_ids"]:
         raise ValueError(f"Cell requires {len(info['refill_task_ids'])} valid results before scoring")
     categories = {tid.rsplit("_", 1)[0] for tid in task_ids}

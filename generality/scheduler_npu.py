@@ -1,7 +1,8 @@
 """Production scheduler for the generality matrix (runs on ascend03).
 
-Binds cells to cards: one long-lived engine per card, one measured cell per
-card at a time. Long benchmarks first (appworld, then bfcl_long, then bfcl
+Binds cells to cards: one long-lived engine per card; one measured cell per
+card by default, with explicitly bounded concurrency for disjoint sessions.
+Long benchmarks first (appworld, then bfcl_long, then bfcl
 base) — the order carries no adaptive meaning (thresholds/budgets are frozen
 before any closed-loop cell starts). Driver types:
   c2kv cells (all 3 conditions)      -> c2kv_cell.py   (controller path)
@@ -9,18 +10,21 @@ before any closed-loop cell starts). Driver types:
   H2O/SnapKV/PyramidKV tracer cells  -> session_tracer_cell.py
 
 Progress/resume: every driver writes per-batch done.json; rerunning a cell
-skips completed batches. Infra failures keep receipts and are retried once by
-the monitor; model failures are terminal per-task records, never zero-scored.
+skips completed batches. At most six cell launches are recorded across
+scheduler restarts; model failures are terminal per-task records.
 """
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 import time
 from pathlib import Path
+from urllib.parse import urlparse
 
 GENERATION_ROOT = Path("/home/liuyancheng/c2kv-generality-20260918")
 SRC = GENERATION_ROOT / "src"
@@ -28,6 +32,10 @@ LOGS = GENERATION_ROOT / "logs"
 RESULTS = GENERATION_ROOT / "results" / "closed_loop"
 PY_SGL = "/home/liuyancheng/envs/sgl/bin/python"
 TARGET_TOKENS = {"K0": 768, "K2": 1536}
+MAX_ATTEMPTS = 6  # total cell launches, including the first, across restarts
+MAX_DRIVERS_PER_CARD = 2
+DRIVER_PORT_BASE = 45000
+DRIVER_PORT_STRIDE = 1000
 
 ENGINE_PORT = {0: 36200, 1: 36201, 2: 36202, 3: 36203, 4: 36204, 5: 36205, 6: 36206, 7: 36207}
 
@@ -76,19 +84,11 @@ def calibration_is_ready(cell: dict, receipt: dict | None) -> bool:
                 isinstance(receipt.get("threshold"), (int, float)))
 
 
-# pyramidkv verified on NPU 2026-09-19 (full task, no traceback, 39x
-# reference_attention_ok + pyramidkv_official_headwise evidence) — released.
-# pyramidkv x BFCL cells held back 2026-09-19: the engine aborts most
-# multi-turn BFCL requests with [finish_abort] PERSISTENT_HISTORY_SESSION_
-# UNAVAILABLE (~85% churn, receipts preserved); appworld pyramidkv cells
-# produce normally.  Re-enable when the engine session bug is fixed.
-# Production pause lifted for AppWorld 2026-09-19 (user directive): h2o/snapkv
-# zeros verified REAL (50-turn agent trajectories with genuine API actions; a
-# model-initiated complete_task(fail)) — valid data.  Still blocked:
-# - ALL bfcl panels: handler decode failure (2568/2599 empty responses, 0 correct)
-# - pyramidkv appworld: empty assistant content / "None" actions at B=3200
-#   (reference-path output rendering bug)
-BLOCKED_BACKENDS: set[str] = set()
+# Production is paused for all backends pending per-backend NPU validation and
+# audit of prior attempt receipts.  A scheduler restart or --include-pending
+# must not release the hold.  The narrower cell holds remain conservative
+# defaults for any later selective backend release.
+BLOCKED_BACKENDS: set[str] = {"c2kv", "h2o", "snapkv", "pyramidkv"}
 BLOCKED_CELL_KEYS = {
     ("pyramidkv", "bfcl_base"), ("pyramidkv", "bfcl_long_context"),
     ("pyramidkv", "appworld"),
@@ -99,12 +99,18 @@ BLOCKED_CELL_KEYS = {
 
 
 
-def cells_ready(cell: dict) -> bool:
+def cell_blocked(cell: dict) -> bool:
     if cell["backend"] in BLOCKED_BACKENDS:
-        return False
+        return True
     if (cell["backend"], cell.get("benchmark_key")) in BLOCKED_CELL_KEYS:
-        return False
+        return True
     if (cell["backend"], "*") in BLOCKED_CELL_KEYS:
+        return True
+    return False
+
+
+def cells_ready(cell: dict) -> bool:
+    if cell_blocked(cell):
         return False
     # AppWorld uses the same event-native worker as BFCL and performs its
     # official scorer/summary validation per task.  It is therefore queued by
@@ -137,8 +143,8 @@ def enumerate_cells() -> list[dict]:
 
 BENCH_ORDER = {"appworld": 0, "bfcl_long_context": 1, "bfcl_base": 2}
 COND_ORDER = {"tracer_history": 0, "compression_full_budget": 1, "recovery_off_same_initial": 2}
-# pyramidkv promoted to front per user 2026-09-19 (support fixed, now high priority)
-BACKEND_ORDER = {"pyramidkv": 0, "c2kv": 1, "h2o": 2, "snapkv": 3}
+# Preserve the existing priority choice from the canonical scheduler entry.
+BACKEND_ORDER = {"c2kv": 0, "h2o": 1, "snapkv": 2, "pyramidkv": 9}
 
 
 def queue_cells(cells: list[dict], only_ready: bool = True) -> list[dict]:
@@ -146,7 +152,8 @@ def queue_cells(cells: list[dict], only_ready: bool = True) -> list[dict]:
         return (BACKEND_ORDER.get(c["backend"], 5),
                 BENCH_ORDER.get(c["benchmark_key"], 9),
                 COND_ORDER.get(c["condition"], 9))
-    ready = [c for c in cells if not only_ready or cells_ready(c)]
+    ready = [c for c in cells if not cell_blocked(c)
+             and (not only_ready or cells_ready(c))]
     return sorted(ready, key=sort_key)
 
 
@@ -160,7 +167,11 @@ def cell_done(cell: dict) -> bool:
         return False
 
 
-def launch_cell(cell: dict, card: int, port_offset: int) -> subprocess.Popen:
+def launch_cell(cell: dict, card: int, slot: int) -> subprocess.Popen:
+    if cell_blocked(cell):
+        raise RuntimeError(f"Cell is held by scheduler policy: {cell['cell_id']}")
+    if not 0 <= slot < MAX_DRIVERS_PER_CARD:
+        raise ValueError(f"Invalid driver slot: {slot}")
     driver = driver_for(cell["backend"], cell["condition"])
     cell = dict(cell)
     if cell["condition"] == "tracer_history":
@@ -172,31 +183,44 @@ def launch_cell(cell: dict, card: int, port_offset: int) -> subprocess.Popen:
         cell["threshold_status"] = "calibrated"
         cell["calibration_receipt"] = str(receipt_path)
     cell["sglang_backend_url"] = f"http://127.0.0.1:{ENGINE_PORT[card]}"
-    cell_path = Path(cell["cell_dir"]) / "cell_launch.json"
-    cell_path.write_text(json.dumps(cell, indent=2))
+    cell["scheduler_port_slot"] = slot
+    # The process reads its own immutable manifest.  Reusing cell_launch.json
+    # would let a later failed launch rewrite a live driver's card identity.
+    launch_dir = Path(cell["cell_dir"]) / "cell_launch_attempts"
+    launch_dir.mkdir(parents=True, exist_ok=True)
+    cell_path = launch_dir / f"launch-{time.time_ns()}-{os.getpid()}.json"
+    with cell_path.open("x") as stream:
+        json.dump(cell, stream, indent=2)
     log = LOGS / f"cell_{cell['cell_id']}_c{card}.log"
+    port_base = DRIVER_PORT_BASE + (card * MAX_DRIVERS_PER_CARD + slot) * DRIVER_PORT_STRIDE
     env = os.environ.copy()
     if driver == "c2kv":
         env["ASCEND_RT_VISIBLE_DEVICES"] = str(card)   # controller-side torch_npu import safety
         cmd = [PY_SGL, str(SRC / "generality" / "c2kv_cell.py"),
                "--cell", str(cell_path), "--budgets",
                str(GENERATION_ROOT / "config" / "budgets_resolved.json"),
-               "--port-base", str(37000 + port_offset * 1000)]
+               "--port-base", str(port_base)]
     elif driver == "historykv_off":
         cmd = [PY_SGL, str(SRC / "generality" / "historykv_cell.py"),
                "--cell", str(cell_path),
-               "--proxy-port", str(37400 + port_offset * 20)]
+               "--proxy-port", str(port_base)]
     elif driver == "session_tracer":
         cmd = [PY_SGL, str(SRC / "generality" / "session_tracer_cell.py"),
                "--cell", str(cell_path),
-               "--port-base", str(38000 + port_offset * 20)]
+               "--port-base", str(port_base)]
     else:
         raise RuntimeError(f"unsupported cell driver: {driver}")
     log.parent.mkdir(parents=True, exist_ok=True)
-    stream = log.open("ab")
-    return subprocess.Popen(cmd, cwd=str(GENERATION_ROOT), env=env,
-                            stdout=stream, stderr=subprocess.STDOUT,
-                            stdin=subprocess.DEVNULL, start_new_session=True)
+    lock_dir = LOGS / "driver_locks"
+    lock_dir.mkdir(parents=True, exist_ok=True)
+    # Prevent duplicate driving of one cell across scheduler restarts while
+    # allowing explicitly configured concurrency on the shared engine.
+    cell_key = hashlib.sha256(str(Path(cell["cell_dir"]).resolve()).encode()).hexdigest()[:24]
+    cmd = ["flock", "-n", str(lock_dir / f"cell-{cell_key}.lock"), *cmd]
+    with log.open("ab") as stream:
+        return subprocess.Popen(cmd, cwd=str(GENERATION_ROOT), env=env,
+                                stdout=stream, stderr=subprocess.STDOUT,
+                                stdin=subprocess.DEVNULL, start_new_session=True)
 
 
 def ensure_engines(cards: list[int]) -> None:
@@ -232,34 +256,192 @@ def engine_healthy(card: int, timeout: float = 3.0) -> bool:
         return False
 
 
-def live_cell_dirs() -> set[str]:
-    """cell_dirs that already have a driver process (any scheduler run).
+def live_driver_assignments() -> dict[int, dict[str, dict]]:
+    """Read cell and card ownership from every live driver, including orphans.
 
-    Prevents double-driving one cell across scheduler restarts: orphaned
-    drivers from a previous run keep working on their cell; the new scheduler
-    skips those cells instead of launching a duplicate.
+    Unknown ownership is an error: treating a failed process scan as an empty
+    machine would allow another cell to start on an occupied card.
     """
-    import re
     try:
-        out = subprocess.run(
+        scan = subprocess.run(
             ["pgrep", "-af",
              "historykv_cell[.]py|c2kv_cell[.]py|session_tracer_cell[.]py"],
-            capture_output=True, text=True, timeout=10).stdout
-    except (subprocess.SubprocessError, OSError):
-        return set()
-    dirs = set()
-    for line in out.splitlines():
-        m = re.search(r"--cell (\S+)", line)
-        if not m:
+            capture_output=True, text=True, timeout=10,
+        )
+    except (subprocess.SubprocessError, OSError) as error:
+        raise RuntimeError("Cannot inspect live cell drivers") from error
+    if scan.returncode == 1 and not scan.stdout:
+        return {}
+    if scan.returncode != 0:
+        raise RuntimeError(f"Live driver scan failed: rc={scan.returncode}")
+    port_to_card = {port: card for card, port in ENGINE_PORT.items()}
+    assignments: dict[int, dict[str, dict]] = {}
+    for line in scan.stdout.splitlines():
+        process = re.match(r"\s*\d+\s+(\S+)", line)
+        if process is None:
+            raise RuntimeError(f"Cannot parse live driver process: {line[:160]}")
+        # pgrep also reports the `flock ... python driver.py` parent.  Count
+        # only the Python child, otherwise one cell consumes two slots.
+        if not Path(process.group(1)).name.startswith("python"):
+            continue
+        match = re.search(r"(?:^|\s)--cell(?:=|\s+)(\S+)", line)
+        if match is None:
+            raise RuntimeError(f"Live driver has no --cell manifest: {line[:160]}")
+        path = Path(match.group(1))
+        try:
+            cell = json.loads(path.read_text())
+            directory = Path(cell["cell_dir"])
+            port = urlparse(cell["sglang_backend_url"]).port
+            card = port_to_card[port]
+            slot = cell.get("scheduler_port_slot")
+            if slot is not None and (type(slot) is not int or
+                                     not 0 <= slot < MAX_DRIVERS_PER_CARD):
+                raise ValueError("invalid scheduler_port_slot")
+        except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError) as error:
+            raise RuntimeError(f"Cannot identify live driver card from {path}") from error
+        manifest = path.resolve()
+        cell_directory = directory.resolve()
+        if (manifest != cell_directory / "cell_launch.json" and
+                manifest.parent != cell_directory / "cell_launch_attempts"):
+            raise RuntimeError(f"Live driver manifest has mismatched cell_dir: {path}")
+        if str(directory) in assignments.setdefault(card, {}):
+            raise RuntimeError(f"Duplicate live drivers for cell: {directory}")
+        assignments[card][str(directory)] = cell
+    return assignments
+
+
+def live_cell_dirs() -> set[str]:
+    return set().union(*(set(cells) for cells in live_driver_assignments().values()))
+
+
+def other_scheduler_pids(proc_root: Path = Path("/proc")) -> list[int]:
+    """Find an older scheduler that did not acquire the new singleton lock."""
+    try:
+        processes = list(proc_root.iterdir())
+    except OSError as error:
+        raise RuntimeError("Cannot inspect scheduler processes") from error
+    expected = {(SRC / "generality" / name).resolve()
+                for name in ("scheduler.py", "scheduler_npu.py")}
+    found = []
+    for proc in processes:
+        if not proc.name.isdigit() or int(proc.name) == os.getpid():
             continue
         try:
-            manifest = json.loads(Path(m.group(1)).read_text())
-            d = manifest.get("cell_dir")
-            if d:
-                dirs.add(str(d))
-        except (OSError, json.JSONDecodeError):
+            argv = [part.decode("utf-8", "replace") for part in
+                    (proc / "cmdline").read_bytes().split(b"\0") if part]
+            cwd = (proc / "cwd").resolve()
+        except OSError:
+            continue  # process exited during the scan
+        for arg in argv[1:]:
+            if not arg.endswith(("generality/scheduler.py", "generality/scheduler_npu.py")):
+                continue
+            candidate = Path(arg)
+            if not candidate.is_absolute():
+                candidate = cwd / candidate
+            if candidate.resolve() in expected:
+                found.append(int(proc.name))
+                break
+    return sorted(found)
+
+
+def acquire_scheduler_lock():
+    import fcntl
+
+    LOGS.mkdir(parents=True, exist_ok=True)
+    stream = (LOGS / ".scheduler.lock").open("a+b")
+    try:
+        fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError as error:
+        stream.close()
+        raise RuntimeError("Another generality scheduler holds the singleton lock") from error
+    return stream
+
+
+def free_healthy_slots(cards: list[int], running: dict,
+                       occupied: dict[int, dict[str, dict]],
+                       max_drivers_per_card: int) -> list[tuple[int, int]]:
+    free = []
+    for card in cards:
+        known = {directory: manifest.get("scheduler_port_slot")
+                 for directory, manifest in occupied.get(card, {}).items()}
+        for proc, cell, running_card, slot in running.values():
+            if running_card == card and str(cell["cell_dir"]) not in known:
+                known[str(cell["cell_dir"])] = slot
+        slots = [slot for slot in known.values() if slot is not None]
+        if len(slots) != len(set(slots)):
+            raise RuntimeError(f"Multiple live drivers claim the same port slot on card {card}")
+        used = set(slots)
+        for slot in known.values():
+            if slot is None:
+                available = next((index for index in range(MAX_DRIVERS_PER_CARD)
+                                  if index not in used), None)
+                if available is not None:
+                    used.add(available)
+        if len(known) >= max_drivers_per_card:
             continue
-    return dirs
+        free.extend((card, slot) for slot in range(max_drivers_per_card)
+                    if slot not in used)
+    return free
+
+
+def task_keys(cell: dict) -> set[tuple[str, str]] | None:
+    ids = cell.get("task_ids")
+    benchmark = cell.get("benchmark_key")
+    if (not isinstance(benchmark, str) or not isinstance(ids, list)
+            or not ids or any(not isinstance(item, str) or not item for item in ids)):
+        return None
+    return {(benchmark, item) for item in ids}
+
+
+def may_share_engine(cell: dict, card: int, running: dict,
+                     occupied: dict[int, dict[str, dict]]) -> bool:
+    active = list(occupied.get(card, {}).values())
+    active_dirs = set(occupied.get(card, {}))
+    active.extend(other for _, other, running_card, _ in running.values()
+                  if running_card == card and str(other["cell_dir"]) not in active_dirs)
+    if not active:
+        return True
+    # historykv_off resets the engine-wide cache between episodes.  It must
+    # remain exclusive even with separate proxies and different task IDs.
+    if (driver_for(cell["backend"], cell["condition"]) == "historykv_off" or
+            any(driver_for(other["backend"], other["condition"]) == "historykv_off"
+                for other in active)):
+        return False
+    keys = task_keys(cell)
+    if keys is None:
+        return False
+    return all((other_keys := task_keys(other)) is not None and
+               keys.isdisjoint(other_keys) for other in active)
+
+
+def attempt_state_path(cell: dict) -> Path:
+    return Path(cell["cell_dir"]) / "scheduler_attempts.json"
+
+
+def attempt_count(cell: dict) -> int:
+    path = attempt_state_path(cell)
+    if not path.exists():
+        return 0
+    try:
+        state = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError) as error:
+        raise RuntimeError(f"Invalid scheduler attempt receipt: {path}") from error
+    count = state.get("launch_attempts")
+    if state.get("cell_id") != cell["cell_id"] or type(count) is not int or count < 0:
+        raise RuntimeError(f"Invalid scheduler attempt receipt: {path}")
+    return count
+
+
+def reserve_attempt(cell: dict) -> int:
+    count = attempt_count(cell) + 1
+    if count > MAX_ATTEMPTS:
+        raise RuntimeError(f"Cell exceeded scheduler attempt limit: {cell['cell_id']}")
+    path = attempt_state_path(cell)
+    temporary = path.with_name(path.name + f".{os.getpid()}.tmp")
+    temporary.write_text(json.dumps({"cell_id": cell["cell_id"],
+                                     "launch_attempts": count}) + "\n")
+    os.replace(temporary, path)
+    return count
 
 
 def main(argv=None) -> int:
@@ -268,13 +450,45 @@ def main(argv=None) -> int:
     parser.add_argument("--include-pending", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--max-cells", type=int, default=None)
+    parser.add_argument("--max-drivers-per-card", type=int, default=1,
+                        choices=range(1, MAX_DRIVERS_PER_CARD + 1))
     args = parser.parse_args(argv)
+    if (not args.cards or len(args.cards) != len(set(args.cards)) or
+            any(card not in ENGINE_PORT for card in args.cards)):
+        parser.error("--cards must contain at least one distinct supported card ID")
+    if args.max_cells is not None and args.max_cells < 0:
+        parser.error("--max-cells must be nonnegative")
+    if args.include_pending and not args.dry_run:
+        parser.error("--include-pending is only supported with --dry-run")
+    preview = queue_cells(enumerate_cells(), only_ready=not args.include_pending)
+    if args.max_cells is not None:
+        preview = preview[:args.max_cells]
+    preview = [cell for cell in preview if not cell_done(cell)
+               and attempt_count(cell) < MAX_ATTEMPTS]
+    if args.dry_run:
+        print(json.dumps({"event": "scheduler_dry_run", "cells":
+                          [cell["cell_id"] for cell in preview]}), flush=True)
+        return 0
+    if not preview:
+        print(json.dumps({"event": "scheduler_no_runnable_cells"}), flush=True)
+        return 0
+    with acquire_scheduler_lock():
+        older = other_scheduler_pids()
+        if older:
+            raise RuntimeError(f"Another generality scheduler is active: {older}")
+        return run_scheduler(args)
 
-    ensure_engines(args.cards)
+
+def run_scheduler(args) -> int:
+
+    initial_live = live_driver_assignments()
+    start_cards = [card for card in args.cards if card not in initial_live]
+    if start_cards:
+        ensure_engines(start_cards)
     # brief warmup wait for engines, then proceed with whatever is healthy;
     # the per-tick health loop handles cards that recover later
     deadline = time.monotonic() + 120
-    pending = set(args.cards)
+    pending = set(args.cards) - set(initial_live)
     while pending and time.monotonic() < deadline:
         pending = {c for c in pending if not engine_healthy(c)}
         if pending:
@@ -283,47 +497,50 @@ def main(argv=None) -> int:
         print(json.dumps({"event": "engines_not_ready", "cards": sorted(pending)}), flush=True)
 
     only_ready = not args.include_pending
-    running: dict[int, tuple[subprocess.Popen, dict]] = {}
-    port_offset = {card: i for i, card in enumerate(args.cards)}
+    running: dict[int, tuple[subprocess.Popen, dict, int, int]] = {}
     launched = 0
     cells: list[dict] = []
-    fail_counts: dict[str, int] = {}
     dropped: set[str] = set()
-    MAX_FAILS = 6
     engine_launch_at: dict[int, float] = {}
     first_derivation = True
     while True:
-        for card in list(running):
-            proc, cell = running[card]
+        for pid in list(running):
+            proc, cell, card, slot = running[pid]
             if proc.poll() is not None:
                 rc = proc.returncode
                 print(json.dumps({"event": "cell_exit", "cell": cell["cell_id"],
                                   "card": card, "rc": rc}), flush=True)
-                del running[card]
+                del running[pid]
                 if not cell_done(cell):
-                    fail_counts[cell["cell_id"]] = fail_counts.get(cell["cell_id"], 0) + 1
-                    if fail_counts[cell["cell_id"]] < MAX_FAILS:
+                    count = attempt_count(cell)
+                    if count < MAX_ATTEMPTS:
                         cells.append(cell)
                         print(json.dumps({"event": "cell_requeue",
-                                          "cell": cell["cell_id"], "fails": fail_counts[cell["cell_id"]]}), flush=True)
+                                          "cell": cell["cell_id"], "fails": count}), flush=True)
                     else:
                         dropped.add(cell["cell_id"])
                         print(json.dumps({"event": "cell_dropped_fastfail",
                                           "cell": cell["cell_id"],
-                                          "fails": fail_counts[cell["cell_id"]]}), flush=True)
-        # per-tick engine health: relaunch crashed engines (throttled), never
-        # bind a cell to a card whose engine is down or still booting
+                                          "fails": count}), flush=True)
+        live_by_card = live_driver_assignments()
+        live = set().union(*(set(cells) for cells in live_by_card.values()))
+        # A shared engine is never restarted under a live driver.  If it died,
+        # let the affected driver fail and preserve its evidence first.
         healthy = []
         for card in args.cards:
             if engine_healthy(card):
                 healthy.append(card)
+                continue
+            if (card in live_by_card or
+                    any(running_card == card for _, _, running_card, _ in running.values())):
+                print(json.dumps({"event": "engine_unhealthy_with_live_drivers",
+                                  "card": card}), flush=True)
                 continue
             now = time.monotonic()
             if now - engine_launch_at.get(card, -1e9) > 600:
                 engine_launch_at[card] = now
                 ensure_engines([card])
             print(json.dumps({"event": "engine_unhealthy", "card": card}), flush=True)
-        live = live_cell_dirs()
         # derive work when the queue runs dry; late-arriving calibration
         # receipts unlock tracer cells without a scheduler restart
         if not cells:
@@ -332,24 +549,46 @@ def main(argv=None) -> int:
                 cells = cells[: args.max_cells]
             cells = [c for c in cells if not cell_done(c)
                      and str(c["cell_dir"]) not in live
-                     and c["cell_id"] not in dropped]
+                     and c["cell_id"] not in dropped
+                     and attempt_count(c) < MAX_ATTEMPTS]
             first_derivation = False
             if not cells and not running:
+                if live:
+                    print(json.dumps({"event": "waiting_for_live_drivers",
+                                      "cards": sorted(live_by_card)}), flush=True)
+                    time.sleep(30)
+                    continue
                 break
-        while cells and len(running) < len(healthy):
-            cell = cells.pop(0)
+        index = 0
+        while index < len(cells):
+            cell = cells[index]
             if cell_done(cell):
+                cells.pop(index)
                 print(json.dumps({"event": "cell_skip_done", "cell": cell["cell_id"]}), flush=True)
                 continue
             if str(cell["cell_dir"]) in live:
+                cells.pop(index)
                 print(json.dumps({"event": "cell_skip_live", "cell": cell["cell_id"]}), flush=True)
                 continue
-            card = next(c for c in healthy if c not in running)
-            proc = launch_cell(cell, card, port_offset[card])
-            running[card] = (proc, cell)
+            free_slots = free_healthy_slots(
+                healthy, running, live_by_card, args.max_drivers_per_card)
+            assignment = next(((card, slot) for card, slot in free_slots
+                               if may_share_engine(cell, card, running, live_by_card)), None)
+            if assignment is None:
+                index += 1
+                continue
+            cells.pop(index)
+            card, slot = assignment
+            attempt = reserve_attempt(cell)
+            proc = launch_cell(cell, card, slot)
+            running[proc.pid] = (proc, cell, card, slot)
+            live.add(str(cell["cell_dir"]))
+            live_by_card.setdefault(card, {})[str(cell["cell_dir"])] = {
+                **cell, "scheduler_port_slot": slot}
             launched += 1
             print(json.dumps({"event": "cell_launch", "cell": cell["cell_id"],
-                              "card": card, "pid": proc.pid}), flush=True)
+                              "card": card, "slot": slot, "pid": proc.pid,
+                              "attempt": attempt}), flush=True)
         time.sleep(30)
     print(json.dumps({"event": "scheduler_done", "launched": launched}), flush=True)
     return 0

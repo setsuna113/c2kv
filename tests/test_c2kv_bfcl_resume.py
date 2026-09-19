@@ -7,6 +7,8 @@ import types
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from generality.bfcl_results import collect_bfcl_results, completion_receipt
 
 
@@ -104,6 +106,28 @@ def test_scored_failures_are_terminal_but_backend_failures_refill(tmp_path):
     assert result["canonical"]["overflow"]["row"] == rows[0]
 
 
+def test_fc_collector_refills_only_the_old_handler_decode_failure(tmp_path):
+    legacy = {
+        "id": "task_old", "result": [["<tool_call>...</tool_call>"]],
+        "inference_log": [{"step_0": [{"role": "handler_log",
+                                      "error": "'str' object has no attribute 'items'"}]}],
+    }
+    actor_failure = {
+        "id": "task_actor", "result": [["<tool_call>bad draft</tool_call>"]],
+        "inference_log": [{"step_0": [{"role": "handler_log",
+                                      "error": "invalid model tool syntax"}]}],
+    }
+    _write_rows(_result_file(tmp_path, "old"), [legacy, actor_failure])
+
+    fc = collect_bfcl_results(tmp_path, ["task_old", "task_actor"], fc_model=True)
+    prompting = collect_bfcl_results(tmp_path, ["task_old", "task_actor"])
+
+    assert fc["refill_task_ids"] == ["task_old"]
+    assert fc["legacy_fc_decode_task_ids"] == ["task_old"]
+    assert fc["valid_task_ids"] == ["task_actor"]
+    assert prompting["valid_task_ids"] == ["task_old", "task_actor"]
+
+
 def test_validate_chunk_deduplicates_and_rejects_foreign_or_malformed_rows(tmp_path):
     driver = _load_driver()
     result = (
@@ -195,7 +219,7 @@ def test_audit_only_writes_full_refill_manifest_without_preparing_runtime(tmp_pa
         "cell_id": "bfcl-test",
         "cell_dir": str(cell_dir),
         "benchmark": "bfcl",
-        "task_ids": ["task_a", "task_a", "task_b"],
+        "task_ids": ["task_a", "task_b"],
     }
     cell_path = tmp_path / "cell.json"
     cell_path.write_text(json.dumps(cell), encoding="utf-8")
@@ -218,6 +242,20 @@ def test_audit_only_writes_full_refill_manifest_without_preparing_runtime(tmp_pa
     refill = json.loads((cell_dir / "bfcl_refill.json").read_text())
     assert refill["task_ids"] == ["task_b"]
     assert refill["n_tasks"] == 1
+
+
+def test_audit_rejects_duplicate_frozen_ids_before_writing_receipts(tmp_path):
+    driver = _load_driver()
+    cell = {"cell_id": "duplicate", "cell_dir": str(tmp_path),
+            "benchmark": "bfcl", "task_ids": ["task_a", "task_a"]}
+    cell_path = tmp_path / "cell.json"
+    cell_path.write_text(json.dumps(cell), encoding="utf-8")
+
+    import pytest
+    with pytest.raises(ValueError, match="unique nonempty task IDs"):
+        driver.main(["--cell", str(cell_path), "--budgets", str(tmp_path / "none"),
+                     "--audit-results-only"])
+    assert not (tmp_path / "bfcl_completion.json").exists()
 
 
 def test_existing_attempt_directory_is_never_overwritten(tmp_path):
@@ -342,3 +380,131 @@ def test_main_refreshes_late_valid_row_before_recursive_retry(tmp_path):
     status = json.loads((cell_dir / "cell_status.json").read_text())
     assert status["status"] == "complete"
     assert status["n_valid_unique"] == 2
+
+
+def test_appworld_marker_without_official_summary_does_not_complete_task(tmp_path):
+    driver = _load_driver()
+    task_id = "appworld_task_1"
+    marker = tmp_path / "tasks" / task_id / "done.json"
+    marker.parent.mkdir(parents=True)
+    marker.write_text(json.dumps({"status": "completed"}), encoding="utf-8")
+    assert not driver.appworld_task_completed(tmp_path, task_id)
+
+    summary = tmp_path / "batches" / "first" / "appworld_worker" / "official_summary.json"
+    summary.parent.mkdir(parents=True)
+    summary.write_text(json.dumps({
+        "schema": "a-event-native-appworld-run-v1", "status": "completed",
+        "task_id": task_id, "n": 1, "semantic_score": 0.0,
+    }), encoding="utf-8")
+    assert driver.appworld_task_completed(tmp_path, task_id)
+
+
+def test_appworld_subset_status_uses_full_manifest(tmp_path):
+    driver = _load_driver()
+    cell_dir = tmp_path / "cell"
+    cell_dir.mkdir()
+    task_id = "appworld_task_1"
+    cell = {"cell_id": "appworld-subset", "cell_dir": str(cell_dir),
+            "benchmark": "acon_appworld", "task_ids": [task_id, "appworld_task_2"]}
+    manifest = tmp_path / "cell.json"
+    manifest.write_text(json.dumps(cell), encoding="utf-8")
+    budgets = tmp_path / "budgets.json"
+    budgets.write_text("{}", encoding="utf-8")
+
+    def run_task(cell_arg, task_ids, port, batch_name):
+        summary = (Path(cell_arg["cell_dir"]) / "batches" / batch_name
+                   / "appworld_worker" / "official_summary.json")
+        summary.parent.mkdir(parents=True)
+        summary.write_text(json.dumps({
+            "schema": "a-event-native-appworld-run-v1", "status": "completed",
+            "task_id": task_ids[0], "n": 1, "semantic_score": 0.0,
+        }), encoding="utf-8")
+        return {"status": "completed", "healthy": list(task_ids), "bad": []}
+
+    with (patch.object(driver, "prepare_cell_files", side_effect=lambda value, _: value),
+          patch.object(driver, "run_task", side_effect=run_task)):
+        driver.main(["--cell", str(manifest), "--budgets", str(budgets),
+                     "--task-ids", task_id, "--port-base", "44001"])
+
+    status = json.loads((cell_dir / "cell_status.json").read_text())
+    assert status["status"] == "incomplete"
+    assert status["n_total"] == 2
+    assert status["n_completed"] == 1
+
+
+def test_prepare_rejects_budget_drift_without_rewriting_frozen_files(tmp_path):
+    driver = _load_driver()
+    cell_dir = tmp_path / "cell"
+    cell = {
+        "cell_id": "budget-freeze", "cell_dir": str(cell_dir),
+        "condition": "recovery_off_same_initial", "working_point": "K0",
+        "sglang_backend_url": "http://127.0.0.1:8000",
+    }
+    budgets = {"working_points": {"K0": {
+        "history_allowance_bytes": 1024, "common_cap_bytes": 2048,
+    }}}
+    with patch.object(driver, "_controller_with_binding", return_value=({"controller": 1}, None)):
+        driver.prepare_cell_files(cell, budgets)
+        (cell_dir / "batches" / "first").mkdir(parents=True)
+        frozen = {name: (cell_dir / name).read_bytes() for name in
+                  ("cell.json", "controller.json", "eval_policy.json")}
+
+        changed = {"working_points": {"K0": {
+            "history_allowance_bytes": 2048, "common_cap_bytes": 2048,
+        }}}
+        with pytest.raises(ValueError, match="different frozen eval_policy.json"):
+            driver.prepare_cell_files(cell, changed)
+
+    assert {name: (cell_dir / name).read_bytes() for name in frozen} == frozen
+
+
+def test_prepare_rejects_threshold_drift_without_rewriting_frozen_files(tmp_path):
+    driver = _load_driver()
+    cell_dir = tmp_path / "cell"
+    cell = {
+        "cell_id": "threshold-freeze", "cell_dir": str(cell_dir),
+        "condition": "tracer_history", "working_point": "K0",
+        "threshold": 0.5, "sglang_backend_url": "http://127.0.0.1:8000",
+    }
+    budgets = {"working_points": {"K0": {
+        "history_allowance_bytes": 1024, "common_cap_bytes": 2048,
+    }}}
+
+    def configured(value):
+        return {"threshold": value["threshold"]}, {"bound_threshold": value["threshold"]}
+
+    with patch.object(driver, "_controller_with_binding", side_effect=configured):
+        driver.prepare_cell_files(cell, budgets)
+        (cell_dir / "batches" / "first").mkdir(parents=True)
+        frozen = {name: (cell_dir / name).read_bytes() for name in
+                  ("cell.json", "controller.json", "eval_policy.json",
+                   "risk_artifact_binding.json")}
+
+        with pytest.raises(ValueError, match="different frozen controller.json"):
+            driver.prepare_cell_files({**cell, "threshold": 0.6}, budgets)
+
+    assert {name: (cell_dir / name).read_bytes() for name in frozen} == frozen
+
+
+def test_prepare_matching_resume_preserves_frozen_bytes(tmp_path):
+    driver = _load_driver()
+    cell_dir = tmp_path / "cell"
+    cell = {
+        "cell_id": "matching-freeze", "cell_dir": str(cell_dir),
+        "condition": "recovery_off_same_initial", "working_point": "K0",
+        "sglang_backend_url": "http://127.0.0.1:8000",
+    }
+    budgets = {"working_points": {"K0": {
+        "history_allowance_bytes": 1024, "common_cap_bytes": 2048,
+    }}}
+    with patch.object(driver, "_controller_with_binding", return_value=({"controller": 1}, None)):
+        driver.prepare_cell_files(cell, budgets)
+        (cell_dir / "batches" / "first").mkdir(parents=True)
+        frozen = {name: (cell_dir / name).read_bytes() for name in
+                  ("cell.json", "controller.json", "eval_policy.json")}
+        resumed = driver.prepare_cell_files(
+            {**cell, "sglang_backend_url": "http://127.0.0.1:8001"}, budgets
+        )
+
+    assert resumed["sglang_backend_url"] == "http://127.0.0.1:8001"
+    assert {name: (cell_dir / name).read_bytes() for name in frozen} == frozen

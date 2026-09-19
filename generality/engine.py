@@ -40,6 +40,7 @@ def launch(card: int, port: int, tag: str, extra_args: list[str] | None = None) 
         "card": card, "port": port, "tag": tag, "pid": proc.pid,
         "log": str(log), "extra_args": extra_args or [],
         "launched_at": time.time(),
+        "process_start_ticks": _process_start_ticks(proc.pid),
     }
     (ENGINE_LOG_DIR / f"{tag}.launch.json").write_text(json.dumps(receipt, indent=2))
     return receipt
@@ -52,6 +53,37 @@ def _pid_alive(pid: int) -> bool:
         stat = Path(f"/proc/{pid}/stat").read_text()
         return stat.rsplit(")", 1)[1].split()[0] != "Z"
     except OSError:
+        return False
+
+
+def _process_start_ticks(pid: int) -> int | None:
+    try:
+        # /proc stat field 22; the command name may itself contain spaces.
+        return int(Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[19])
+    except (OSError, ValueError, IndexError):
+        return None
+
+
+def _owned_engine_group(pid: int, port: int, start_ticks: int | None) -> bool:
+    try:
+        if os.getsid(pid) != pid or os.getpgid(pid) != pid:
+            return False
+        if start_ticks is not None and _process_start_ticks(pid) != start_ticks:
+            return False
+        argv = Path(f"/proc/{pid}/cmdline").read_bytes().decode().split("\0")
+        return ("sglang.launch_server" in argv and
+                any(arg == f"--port={port}" or
+                    (arg == "--port" and index + 1 < len(argv) and argv[index + 1] == str(port))
+                    for index, arg in enumerate(argv)))
+    except (OSError, UnicodeError):
+        return False
+
+
+def _group_alive(pid: int) -> bool:
+    try:
+        os.killpg(pid, 0)
+        return True
+    except ProcessLookupError:
         return False
 
 
@@ -123,39 +155,23 @@ def stop(tag: str) -> dict:
         return {"stopped": False, "reason": "no_receipt"}
     receipt = json.loads(receipt_path.read_text())
     pid, port = receipt["pid"], receipt["port"]
-    killed = []
+    if not _owned_engine_group(pid, port, receipt.get("process_start_ticks")):
+        return {"stopped": False, "reason": "engine_identity_mismatch", "pid": pid}
+    # launch() creates a new session. Stop that verified group, including
+    # scheduler/detokenizer children, rather than pgrep in our own group.
     try:
-        os.kill(pid, signal.SIGTERM)
-        killed.append(pid)
-    except OSError:
-        pass
-    # scheduler/detokenizer children live in the same session group
-    try:
-        out = subprocess.run(
-            ["pgrep", "-g", "0", "-f", f"--port {port}"],
-            capture_output=True, text=True,
-        )
-    except OSError:
-        out = None
-    for line in (out.stdout.splitlines() if out else []):
-        try:
-            child = int(line)
-            os.kill(child, signal.SIGTERM)
-            killed.append(child)
-        except (OSError, ValueError):
-            pass
+        os.killpg(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return {"stopped": True, "signalled": [], "port": port, "tag": tag}
     deadline = time.monotonic() + 30
-    while time.monotonic() < deadline:
-        try:
-            os.kill(pid, 0)
-        except OSError:
-            break
+    while time.monotonic() < deadline and _group_alive(pid):
         time.sleep(1)
-    try:
-        os.kill(pid, signal.SIGKILL)
-    except OSError:
-        pass
-    return {"stopped": True, "signalled": killed, "port": port, "tag": tag}
+    if _group_alive(pid):
+        try:
+            os.killpg(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    return {"stopped": True, "signalled_group": pid, "port": port, "tag": tag}
 
 
 def npu_smi_snapshot(out_path: Path) -> dict:
