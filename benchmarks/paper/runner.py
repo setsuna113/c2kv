@@ -9,6 +9,7 @@ from pathlib import Path
 import subprocess
 import sys
 import time
+import urllib.error
 import urllib.request
 
 from .candidate_matrix import ARM_TO_VARIANT, parse_candidate_arms, with_candidate_methods
@@ -72,14 +73,14 @@ def server_command(config, source, arm=None, benchmark=None):
     from benchmarks.arms import get_arm, history_kv_spec
     resolved_arm = get_arm(arm) if arm is not None else None
     spec = history_kv_spec(resolved_arm) if resolved_arm is not None else None
-    budget_acon = bool(resolved_arm and resolved_arm.text_history_budget_tokens is not None)
+    budget_text = bool(resolved_arm and resolved_arm.text_history_budget_tokens is not None)
     reference_attention = bool(spec and spec["backend"] == "reference_attention")
     # The reference route keeps its history in method-owned tensors and attends with
     # eager SDPA; those temporaries live outside SGLang's static pool. Leave them
     # headroom (an AppWorld PyramidKV cell hit CUDA OOM at 46.8/47.4 GiB with 0.8).
     mem_fraction = (min(float(config["mem_fraction_static"]), REFERENCE_ATTENTION_MEM_FRACTION)
                     if reference_attention else config["mem_fraction_static"])
-    module = "benchmarks.paper.budget_server" if budget_acon else "sglang.launch_server"
+    module = "benchmarks.paper.budget_server" if budget_text else "sglang.launch_server"
     cmd = [config["server_python"], "-m", module,
            "--model-path", config["checkpoint"], "--served-model-name", config["model"],
            "--device", "cuda", "--dtype", "bfloat16", "--model-impl", "sglang",
@@ -96,7 +97,7 @@ def server_command(config, source, arm=None, benchmark=None):
            "--chunked-prefill-size", str(config["chunked_prefill_size"]),
            "--random-seed", str(config["seed"])]
     radix_arms = set(config.get("radix_cache_arms") or ())
-    if budget_acon and "acon_hist_ut_co" in radix_arms:
+    if budget_text and resolved_arm.text_policy in radix_arms:
         radix_arms.add(arm)
     if reference_attention or ("*" not in radix_arms and arm not in radix_arms):
         cmd.append("--disable-radix-cache")
@@ -136,6 +137,26 @@ def with_acon_budget(config, budget):
         raise ValueError("ACON budget overlay requires a BFCL benchmark")
     return dict(config, methods=[*config["methods"], {
         "method": "ACON-budget", "arm": arm.name, "group": "budget",
+        "history_budget_tokens": budget, "benchmarks": benchmarks,
+    }])
+
+
+def with_hiagent_budget(config, budget):
+    """Add distinct BFCL HiAgent budget cells without changing the original arm."""
+    if budget is None:
+        return config
+    if isinstance(budget, bool) or not isinstance(budget, int) or budget < 1:
+        raise ValueError("HiAgent budget tokens must be a positive integer")
+    from benchmarks.arms import get_arm
+    arm = get_arm(f"hiagent_full_b{budget}")
+    if any(method["arm"] == arm.name for method in config["methods"]):
+        raise ValueError(f"HiAgent budget arm already exists: {arm.name}")
+    benchmarks = [row["name"] for row in config["benchmarks"]
+                  if row["name"] in {"bfcl_base", "bfcl_long_context"}]
+    if not benchmarks:
+        raise ValueError("HiAgent budget overlay requires a BFCL benchmark")
+    return dict(config, methods=[*config["methods"], {
+        "method": "HiAgent-budget", "arm": arm.name, "group": "budget",
         "history_budget_tokens": budget, "benchmarks": benchmarks,
     }])
 
@@ -250,10 +271,11 @@ def prepare(config, output, source):
     for item in config["methods"]:
         arm = get_arm(item["arm"])
         if arm.text_history_budget_tokens is not None:
-            if (item.get("history_budget_tokens") != arm.text_history_budget_tokens
+            if (type(item.get("history_budget_tokens")) is not int
+                    or item["history_budget_tokens"] != arm.text_history_budget_tokens
                     or not set(item.get("benchmarks") or ()) <= {"bfcl_base", "bfcl_long_context"}
                     or not item.get("benchmarks")):
-                raise ValueError("ACON budget cells require a matching token cap and explicit BFCL benchmarks")
+                raise ValueError("Text budget cells require a matching token cap and explicit BFCL benchmarks")
             continue
         if is_candidate_arm(arm.name):
             if (item.get("ratio") != 8 or arm.ratio != 8
@@ -392,6 +414,22 @@ def wait_server(proc, port):
     raise TimeoutError("CUDA server health timeout")
 
 
+def require_budget_renderer(port):
+    """Verify that the ready server exposes the paper chat-budget route."""
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    try:
+        with opener.open(f"http://127.0.0.1:{port}/v1/c2kv/chat_budget", timeout=2):
+            pass
+    except urllib.error.HTTPError as error:
+        # A GET on the POST-only route must be rejected by the route itself.
+        if error.code == 405:
+            return
+        raise RuntimeError(f"Paper chat budget renderer is unavailable (HTTP {error.code})") from error
+    except OSError as error:
+        raise RuntimeError("Paper chat budget renderer is unavailable") from error
+    raise RuntimeError("Paper chat budget renderer accepted an unexpected GET")
+
+
 def cleanup_cell_processes(proxy, server):
     """Stop both owned children, collecting errors so server cleanup always runs."""
     errors = []
@@ -515,6 +553,9 @@ def execute(config, plan, output, source, stages, selected, port_offset=0):
                 run_failure = None
                 try:
                     wait_server(server, config["server_port"])
+                    from benchmarks.arms import get_arm
+                    if get_arm(cell["arm"]).text_history_budget_tokens is not None:
+                        require_budget_renderer(config["server_port"])
                     if is_native_arm(cell["arm"]):
                         subprocess.run(run_command(config, cell, directory, profile_path, stage),
                                        check=True, env=env, cwd=ROOT.parent)
@@ -681,6 +722,8 @@ def main(argv=None):
                         help="explicit BFCL base candidates: all or comma-separated static_t02,turn_c1,goal_rescue,dependency_first")
     parser.add_argument("--acon-budget-tokens", type=int,
                         help="add budget-adapted ACON BFCL cells with this actor history cap")
+    parser.add_argument("--hiagent-budget-tokens", type=int,
+                        help="add budget-adapted HiAgent full BFCL cells with this actor history cap")
     parser.add_argument("--port-offset", type=int, default=0,
                         help="shift server/proxy ports for concurrent single-GPU runners on one host")
     args = parser.parse_args(argv)
@@ -688,6 +731,7 @@ def main(argv=None):
     if args.action != "aggregate":
         config = with_candidate_methods(config, parse_candidate_arms(args.candidate_arms))
         config = with_acon_budget(config, args.acon_budget_tokens)
+        config = with_hiagent_budget(config, args.hiagent_budget_tokens)
     output = args.output or Path(config["output_root"])
     source = args.sglang_source.resolve()
     if args.action == "aggregate":

@@ -144,6 +144,8 @@ def completion_kind(row: Mapping, *, fc_model: bool = False) -> str:
         return "capacity_infeasible"
     if re.search(r"[\"']code[\"']\s*:\s*[\"']acon_history_budget_exceeded[\"']", text):
         return "acon_history_budget_exceeded"
+    if re.search(r"[\"']code[\"']\s*:\s*[\"']hiagent_history_budget_exceeded[\"']", text):
+        return "hiagent_history_budget_exceeded"
     # SGLang's explicit context admission error, also recognized by prefix replay.
     # BFCL embeds the OpenAI exception repr, which can escape the apostrophe.
     if re.search(r"The input \(\d+ tokens\) is longer than the model\\*'s context length \(\d+ tokens\)", text):

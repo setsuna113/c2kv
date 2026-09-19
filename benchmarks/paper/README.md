@@ -390,3 +390,30 @@ work. Both the paper root and `ENGINE/python` must be on `PYTHONPATH` (the runne
 sets them). Original ACON cells and their commands are unchanged; budget cells
 inherit their configured radix-cache choice. Direct `benchmarks/run.py` runs
 must point to this launcher rather than an unextended SGLang server.
+
+# Budget-adapted HiAgent
+
+`hiagent_full_b768` is a separate, tool-native adaptation of `hiagent_full`;
+the original arm and default matrix are unchanged. As with ACON, the positive
+integer suffix caps actor-visible history tokens at **every generation**,
+including retrieval continuations. System, tools and current input remain
+outside that history allowance. Auxiliary calls are metered separately,
+including their compute and resident KV costs.
+
+The adaptation follows HiAgent's subgoal protocol: completed subgoals overflow
+in official FIFO order while the current subgoal remains pinned. Subgoal IDs
+remain stable after eviction. A requested trajectory is revealed in full only
+when the resulting actor history fits the cap. Otherwise the retrieval tool
+returns `budget_unavailable` feedback so the actor can continue; this is not a
+terminal task failure. The actor request is checked against the SGLang-rendered
+history span before each generation, without truncating a trajectory or
+silently exceeding the cap. Admission also reserves space for the brief
+`budget_unavailable` feedback, so a denied retrieval can continue under the
+same cap when the fixed history floor fits. This is a tool-native adaptation,
+not a claim that the original HiAgent paper evaluated this budgeted setting.
+
+Add HiAgent BFCL base/long-context cells with `--hiagent-budget-tokens 768` on
+both `prepare` and `run`. It can be combined with `--acon-budget-tokens 768`;
+the two options add distinct cells and leave the default matrix unchanged.
+Budget cells use `benchmarks.paper.budget_server`, and the runner checks the
+`/v1/c2kv/chat_budget` route after server health before starting a cell.

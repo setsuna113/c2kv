@@ -315,9 +315,10 @@ def _method_capabilities(result: PreflightResult, arm: str, backend: str,
 
     if spec.text_history_budget_tokens is not None:
         result.requirements.append(Requirement(
-            code="acon_budget_sglang_backend", severity="error",
+            code=("hiagent_budget_sglang_backend" if spec.text_policy == "hiagent_full"
+                  else "acon_budget_sglang_backend"), severity="error",
             satisfied=backend == "sglang",
-            message="Budget-adapted ACON requires the SGLang chat budget renderer",
+            message="Budget-adapted text history requires the SGLang chat budget renderer",
         ))
 
     history_arm = bool(spec.compress_history or spec.kv_reuse or spec.text_policy)

@@ -262,11 +262,11 @@ class Arm:
 
     def validate(self) -> None:
         if self.text_history_budget_tokens is not None:
-            if (self.text_policy != "acon_hist_ut_co"
+            if (self.text_policy not in {"acon_hist_ut_co", "hiagent_full"}
                     or isinstance(self.text_history_budget_tokens, bool)
                     or not isinstance(self.text_history_budget_tokens, int)
                     or self.text_history_budget_tokens < 1):
-                raise ValueError("text history budget requires ACON hist ut_co and a positive token allowance")
+                raise ValueError("text history budget requires ACON hist ut_co or HiAgent full and a positive token allowance")
         if self.history_kv:
             if self.compress_history or self.text_policy or self.repair or self.recover:
                 raise ValueError(
@@ -785,6 +785,17 @@ for _method in ("h2o", "snapkv_persistent", "pyramidkv"):
 
 
 def get_arm(name: str) -> Arm:
+    prefix = "hiagent_full_b"
+    if name.startswith(prefix) and name[len(prefix):].isdigit():
+        budget = int(name[len(prefix):])
+        if str(budget) != name[len(prefix):]:
+            raise ValueError("HiAgent budget arm requires a canonical positive integer")
+        arm = Arm(name=name, compress_history=False,
+                  text_policy="hiagent_full", text_history_budget_tokens=budget,
+                  required_capabilities=("hiagent_trajectory_retrieval_v1",),
+                  description=f"Budget-adapted HiAgent full: at most {budget} rendered actor history tokens")
+        arm.validate()
+        return arm
     prefix = "acon_hist_ut_co_b"
     if name.startswith(prefix) and name[len(prefix):].isdigit():
         budget = int(name[len(prefix):])
