@@ -33,7 +33,7 @@ RUNTIME = HERE / "runtime"
 DEFAULT_RISK_ARTIFACT = HERE / "artifacts/c1_risk.t02_v1.json"
 DEFAULT_RISK_ARTIFACT_SHA256 = "18a11f73aa1f7d4b0add86eed66ae9e5e129ea4bdfbe0dfad23faf4f7d2fb4ab"
 BENCHMARKS = ("bfcl", "tau2", "toolsandbox")
-METHODS = ("proposed", "c2kv_only")
+METHODS = ("proposed", "c2kv_only", "c2kv_native")
 SOURCE_PROFILE = {
     "bfcl": "native-v1",
     "tau2": "openai-single-task-v1",
@@ -174,6 +174,8 @@ def preflight_sglang_backend(
             and bool(capability.get("packing_version"))
         ),
     }
+    if args.method == "c2kv_native":
+        checks.pop("prefill_feature")
     if not all(checks.values()):
         raise RuntimeError(f"SGLang C1 capability check failed: {checks}")
     return {
@@ -181,12 +183,21 @@ def preflight_sglang_backend(
         "checkpoint": str(expected_checkpoint),
         "checks": checks,
         "packing_version": capability["packing_version"],
-        "shadow_feature_layer": capability["shadow_feature_layer"],
+        "shadow_feature_layer": capability.get("shadow_feature_layer"),
     }
 
 
 def build_profile(args: argparse.Namespace) -> tuple[dict, dict]:
     """Keep D3-hybrid, compatibility Prefill, and trained risk modes distinct."""
+    if args.method == "c2kv_native":
+        import native_bare
+        if args.selector_artifact is not None or args.ratio != 4:
+            raise ValueError("Native bare C2KV requires ratio4 and no selector artifact")
+        actual = hashlib.sha256((args.checkpoint / "config.json").read_bytes()).hexdigest()
+        if actual != current.load_config()["checkpoint_selection"]["config_sha256"]:
+            raise ValueError("Native bare delivery requires the selected C1000 checkpoint")
+        return {}, dict(native_bare.profile(), checkpoint=str(args.checkpoint.resolve()),
+                        checkpoint_config_sha256=actual, automatic_reruns=0)
     if args.method == "c2kv_only":
         if args.selector_artifact is not None:
             raise ValueError("c2kv_only does not accept --selector-artifact")
@@ -346,6 +357,8 @@ def effective_ratio(args: argparse.Namespace, selected: dict) -> int:
 
 
 def _model_name(args: argparse.Namespace) -> str:
+    if args.method == "c2kv_native":
+        return "c2kv_native_r4"
     return "c2kv_only" if args.method == "c2kv_only" else f"c1_{args.detector}"
 
 
@@ -384,10 +397,13 @@ def commands_for_task(args: argparse.Namespace, task: str, controller_path: Path
     design["candidate_id"] = _model_name(args)
     design["run_id_template"] = design["candidate_id"]
     design["runtime"].update(controller=str(controller_path), sglang_backend_url=args.sglang_backend_url)
+    if args.method == "c2kv_native":
+        import native_bare
+        design = native_bare.configure_design(design)
     if args.method == "c2kv_only":
         design["runtime"].pop("shadow_feature_config", None)
     temporary_controller = None
-    if not controller_path.is_file():
+    if args.method != "c2kv_native" and not controller_path.is_file():
         # Preview validates the exact server argv without creating the requested
         # output directory. The runner reads the controller to validate backend
         # requirements, so give that read a short-lived identical copy.
@@ -408,7 +424,8 @@ def commands_for_task(args: argparse.Namespace, task: str, controller_path: Path
     finally:
         if temporary_controller is not None:
             temporary_controller.unlink(missing_ok=True)
-    server[server.index("--s0-config") + 1] = str(controller_path)
+    if "--s0-config" in server:
+        server[server.index("--s0-config") + 1] = str(controller_path)
     task_out = args.out / "task_shards" / task
     if args.benchmark == "bfcl":
         worker = runner.worker_command(
@@ -575,6 +592,7 @@ def summarize_task(benchmark: str, task: str, task_out: Path, official: Mapping[
         "normal_termination": official_row.get("normal_termination"),
         "protocol_legal": official_row.get("protocol_legal"),
         "generation_calls": generation_calls,
+        "decision_count": len(records),
         "detector_calls": len(prefill_evaluations) + len(risk_selections),
         "detector_trigger_count": sum(gate.get("triggered") is True for gate in gates),
         "recovery_count": len(recovery_rows),
@@ -640,13 +658,16 @@ def functional_checks(method: str, detector: str, telemetry: Mapping[str, Any]) 
             "native_generate_requests": telemetry["native_generate_requests"] > 0,
             "detector_contract": (
                 telemetry["detector_calls"] == 0
-                if method == "c2kv_only"
+                if method in {"c2kv_only", "c2kv_native"}
                 else telemetry["risk_detector_unavailable"] == 0
                 if detector == "t02_risk"
                 else telemetry["prefill_detector_unavailable"] == 0
                 if detector == "d3_hybrid"
                 else telemetry["prefill_detector_scores"] > 0
             ),
+            **({"no_recovery": telemetry.get("recovery_count", 0) == 0,
+                "one_generation_per_decision": telemetry.get("generation_calls") == telemetry.get("decision_count")}
+               if method == "c2kv_native" else {}),
         },
         "observed": {
             "native_packing_present": telemetry["native_packing_present"] is True,
@@ -726,7 +747,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--benchmark", choices=BENCHMARKS, default="bfcl")
     parser.add_argument(
         "--method", choices=METHODS, default="proposed",
-        help="proposed enables the selected detector/recovery; c2kv_only keeps identical native packing without detector/recovery",
+        help="proposed enables recovery; c2kv_only keeps the S0 initial policy without recovery; c2kv_native uses static native gist packing without S0",
     )
     parser.add_argument("--checkpoint", type=Path, required=True)
     parser.add_argument("--sglang-backend-url", required=True)
@@ -774,7 +795,7 @@ def validate_args(args: argparse.Namespace) -> list[str]:
     _benchmark_dir(args)
     if args.task_timeout <= 0 or not 1 <= args.port <= 65535:
         raise ValueError("task timeout and port must be valid positive values")
-    if not (args.embedding_model / "config.json").is_file():
+    if args.method != "c2kv_native" and not (args.embedding_model / "config.json").is_file():
         raise ValueError("embedding model must be a local model directory")
     if not (args.checkpoint / "config.json").is_file():
         raise ValueError("checkpoint must be a local model directory")

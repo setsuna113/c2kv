@@ -81,7 +81,7 @@
     },
     {
       "method": "C2KV",
-      "arm": "c2kv4",
+      "arm": "c2kv_native_r4",
       "group": "main",
       "ratio": 4,
       "benchmarks": [

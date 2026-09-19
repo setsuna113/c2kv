@@ -367,6 +367,7 @@ def build_event_native_controller(
             model_context=model_context,
             compression_policy=compression_policy,
             history_view_protocol=history_view_protocol,
+            benchmark=benchmark,
         )
     return EventNativeOnePassController(
         tokenizer,

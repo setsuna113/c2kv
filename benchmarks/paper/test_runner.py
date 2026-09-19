@@ -17,6 +17,11 @@ from benchmarks.paper.report import write_comparison
 class PaperMatrixTest(unittest.TestCase):
     def setUp(self):
         self.config = json.loads(DEFAULT_CONFIG.read_text())
+        # Preserve coverage of historical plan extension and the legacy guard.
+        # The new default native matrix is covered by test_native_bare.py.
+        for method in self.config["methods"]:
+            if method["arm"] == "c2kv_native_r4":
+                method["arm"] = "c2kv4"
 
     def test_agentfold_hold_precedes_launch_and_preserves_history(self):
         with tempfile.TemporaryDirectory() as temporary:

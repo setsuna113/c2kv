@@ -111,18 +111,21 @@ def main() -> None:
     from tool_sandbox.roles.openai_api_user import OpenAIAPIUser
     from tool_sandbox.roles import execution_environment
 
-    def route_role(role, url):
+    def route_role(role, url, model):
         original = role.__init__
 
         def routed(self):
             original(self)
-            self.model_name = os.environ["C2KV_TOOLSANDBOX_MODEL"]
+            self.model_name = model
             self.openai_client = OpenAI(api_key="EMPTY", base_url=url, timeout=600.0)
 
         role.__init__ = routed
 
-    route_role(OpenAIAPIAgent, os.environ["OPENAI_BASE_URL"])
-    route_role(OpenAIAPIUser, os.environ["TOOLSANDBOX_USER_BASE_URL"])
+    route_role(OpenAIAPIAgent, os.environ["OPENAI_BASE_URL"],
+               os.environ["C2KV_TOOLSANDBOX_MODEL"])
+    route_role(OpenAIAPIUser, os.environ["TOOLSANDBOX_USER_BASE_URL"],
+               os.environ.get("C2KV_TOOLSANDBOX_USER_MODEL",
+                              os.environ["C2KV_TOOLSANDBOX_MODEL"]))
     telemetry = HarnessTelemetry(os.environ["C2KV_TOOLSANDBOX_TELEMETRY"], "toolsandbox")
     install_instrumentation(telemetry, Scenario, Completions,
                             execution_environment, RoleType.AGENT)

@@ -27,6 +27,7 @@ ACEBENCH_VIEW_MODES = frozenset(
         "full_exact_shared",
         "capacity_exact_no_gist",
         "full_original",
+        "ac_gist_static",
     }
 )
 _ACEBENCH_EXACT_VIEW_MODES = ACEBENCH_VIEW_MODES - {"full_original"}
@@ -196,6 +197,8 @@ def build_acebench_controller(
     policy: Mapping[str, Any],
     view_mode: str,
     model_context: int | None = None,
+    compression_policy: str | None = None,
+    history_view_protocol: str = "fixed-budget-main",
 ) -> Any:
     """Build an ACE controller; training-static has no textual-action contract."""
 
@@ -210,6 +213,8 @@ def build_acebench_controller(
             policy=policy,
             mode=view_mode,
             model_context=model_context,
+            compression_policy=compression_policy,
+            history_view_protocol=history_view_protocol,
         )
     return AceEventNativeOnePassController(
         tokenizer,

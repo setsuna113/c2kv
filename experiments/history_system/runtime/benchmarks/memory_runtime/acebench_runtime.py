@@ -5,6 +5,7 @@ import copy
 import hashlib
 from dataclasses import asdict
 from pathlib import Path
+from collections.abc import Mapping
 
 from .event_native_api import EventNativeAPI, EventNativeAPIError, _REQUEST_FIELDS
 from .event_native_step import EventNativeDecisionRunner, EventNativeStepError
@@ -38,6 +39,7 @@ def describe_ace_source_contract():
         'supported_views': [
             'full_original', 'capacity_protect', 'capacity_exact_once',
             'capacity_exact_persistent', 'full_exact_shared', 'capacity_exact_no_gist',
+            'ac_gist_static',
         ],
         'training_static_supported': False,
     }
@@ -68,6 +70,48 @@ class AceEventNativeAPI(EventNativeAPI):
         except (TypeError, ValueError) as error:
             raise EventNativeAPIError(400, 'invalid_ace_source', str(error)) from error
         return {'c2kv_ace_source': copy.deepcopy(source)}
+
+    def handle_chat(self, payload):
+        """Accept only the pinned official ACE scene's actual actor sampling.
+
+        The base API's zero-temperature field is a transport validation value;
+        this source profile sets the real SGLang sampling in event_native_server.
+        No official scene argument or response text is modified here.
+        """
+        if self.view_mode != 'ac_gist_static':
+            return super().handle_chat(payload)
+        if not isinstance(payload, Mapping):
+            raise EventNativeAPIError(400, 'invalid_request', 'Request body must be an object')
+        if payload.get('temperature') != 0.001 or payload.get('top_p') != 1:
+            raise EventNativeAPIError(400, 'ace_sampling_mismatch',
+                                      'ACE scene requires temperature=0.001 and top_p=1')
+        if payload.get('max_tokens') != self.max_new_tokens or 'max_completion_tokens' in payload:
+            raise EventNativeAPIError(400, 'ace_sampling_mismatch',
+                                      'ACE scene completion cap differs from the native server')
+        if 'seed' in payload or payload.get('store') not in (None, False):
+            raise EventNativeAPIError(400, 'ace_sampling_mismatch',
+                                      'ACE scene must not set seed or store=True')
+        source_sampling = {'temperature': payload['temperature'],
+                           'top_p': payload['top_p'],
+                           'max_tokens': payload['max_tokens'], 'seed': None}
+        normalized = copy.deepcopy(dict(payload))
+        normalized.pop('max_tokens')
+        normalized.pop('top_p')
+        normalized['temperature'] = 0
+        normalized['max_completion_tokens'] = self.max_new_tokens
+        normalized['store'] = False
+        self._source_sampling = source_sampling
+        try:
+            return super().handle_chat(normalized)
+        finally:
+            self._source_sampling = None
+
+    def _append_step(self, record):
+        snapshot = copy.deepcopy(record)
+        sampling = getattr(self, '_source_sampling', None)
+        if sampling is not None:
+            snapshot['source_sampling'] = copy.deepcopy(sampling)
+        return super()._append_step(snapshot)
 
     def _openai_response(self, record):
         # Internal action parses are never offered to the official client as

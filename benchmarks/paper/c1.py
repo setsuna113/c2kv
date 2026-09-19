@@ -24,6 +24,7 @@ from benchmarks.measurement.telemetry import append_jsonl, canonical_sha256, rea
 from benchmarks.measurement.replay import _paper_measurement
 
 ARMS = {"c2kv_c1_t02_r8": 8, "c2kv_c1_t02_r4": 4}   # final system and its ratio-4 ablation
+ARMS["c2kv_native_r4"] = 4
 ARM = "c2kv_c1_t02_r8"
 RATIO = ARMS[ARM]
 
@@ -59,12 +60,13 @@ def load_delivery():
 
 
 def delivery_args(config, benchmark, output, task_ids, delivery):
-    settings = config["c1"]
+    settings = config.get("c1", {})
     detector = settings.get("detector", "d3_hybrid")
     args = delivery.build_parser().parse_args([
+        "--method", "c2kv_native" if ARM == "c2kv_native_r4" else "proposed",
         "--checkpoint", config["checkpoint"],
         "--sglang-backend-url", config.get("upstream") or f"http://127.0.0.1:{config['server_port']}",
-        "--embedding-model", settings["embedding_model"],
+        "--embedding-model", settings.get("embedding_model", "unused-native-bare"),
         "--embedding-device", settings.get("embedding_device", "cpu"),
         "--detector", detector,
         "--selector-threshold", str(settings.get("selector_threshold", 0.5)),
@@ -73,7 +75,7 @@ def delivery_args(config, benchmark, output, task_ids, delivery):
         "--sglang-root", config["sglang_source"],
         "--portable-root", str(ROOT),
         "--port", str(config["proxy_port"]),
-        "--task-timeout", str(settings["task_timeout"]),
+        "--task-timeout", str(settings.get("task_timeout", 10800)),
         "--out", str(output),
         "--ratio", str(RATIO),
     ])
@@ -83,6 +85,9 @@ def delivery_args(config, benchmark, output, task_ids, delivery):
 
 
 def selected_tasks(config, benchmark, requested=None):
+    if benchmark in {"acebench_agent", "toolsandbox"}:
+        from .native_extra import selected_tasks as extra_tasks
+        return extra_tasks(config, benchmark, requested)
     if benchmark == "appworld":
         from .c1_appworld import task_ids
         available = task_ids(config)
@@ -118,14 +123,16 @@ def summarize_scores(benchmark, receipts):
         scores = [row["unified_metrics"]["official_score"] for row in receipts]
         failures = [row["task_id"] for row in receipts if row.get("status") == "harness_failure"]
         infeasible = [row["task_id"] for row in receipts if row.get("status") == "method_failure"]
-        return {"arm": ARM, "method": "C2KV+C1", "ratio": RATIO,
+        return {"arm": ARM, "method": "C2KV" if ARM == "c2kv_native_r4" else "C2KV+C1", "ratio": RATIO,
                 "n_scored": len(scores), "n": len(scores),
                 "semantic_score": sum(scores) / len(scores) if scores else None,
                 "n_harness_failures": len(failures), "harness_failure_task_ids": failures,
                 "n_method_failures": len(infeasible), "method_failure_task_ids": infeasible,
                 "task_rows": receipts, "result_status": "preliminary, n=1"}
     from .c1_appworld import summarize_scores as appworld_scores
-    return appworld_scores(receipts)
+    result = appworld_scores(receipts)
+    result.update(arm=ARM, ratio=RATIO, method="C2KV" if ARM == "c2kv_native_r4" else "C2KV+C1")
+    return result
 
 
 def prepare_native(config, benchmark, directory, tasks, delivery):
@@ -139,6 +146,8 @@ def prepare_native(config, benchmark, directory, tasks, delivery):
                    comparison=("final system ratio8; bare C2KV ratio4 is not a detector-only ablation"
                                if RATIO == 8 else
                                "ratio-4 ablation of the final system: same controller, same ratio as bare C2KV"))
+    if ARM == "c2kv_native_r4":
+        profile["comparison"] = "Independent native static gist baseline; not a detector-only C1 ablation"
     profile["sglang_backend_preflight"] = delivery.preflight_sglang_backend(args)
     controller_path = native / "controller.json"
     save(controller_path, controller)
@@ -163,7 +172,10 @@ def run_closed_loop(config, benchmark, directory, requested=None):
                 raise RuntimeError(f"Task already has execution evidence; not rerunning {task}")
             print(json.dumps({"arm": ARM, "task": task, "status": "running"}), flush=True)
             try:
-                if benchmark == "appworld":
+                if benchmark in {"acebench_agent", "toolsandbox"}:
+                    from .native_extra import run_task
+                    receipt, metrics = run_task(config, benchmark, task, native, delivery, controller_path)
+                elif benchmark == "appworld":
                     from .c1_appworld import run_task
                     receipt, metrics = run_task(config, task, native, delivery, controller_path)
                 else:
@@ -190,6 +202,9 @@ def run_closed_loop(config, benchmark, directory, requested=None):
                 }
                 print(json.dumps({"arm": ARM, "task": task, "status": status, "kind": kind}),
                       flush=True)
+            if ARM == "c2kv_native_r4" and receipt.get("status") == "completed":
+                import native_bare
+                receipt["native_bare_route"] = native_bare.validate_manifest(task_root / "server" / "ready.json")
             receipt["unified_metrics"] = metrics
             save(receipt_path, receipt)
         receipts.append(receipt)
@@ -282,7 +297,10 @@ def run_common_prefix(config, benchmark, directory, prefix_path):
     native, args, controller_path = prepare_native(config, benchmark, directory, tasks, delivery)
     sequence = 0
     for task, rows in zip(tasks, groups.values()):
-        if benchmark == "appworld":
+        if benchmark in {"acebench_agent", "toolsandbox"}:
+            from .native_extra import controller_command
+            command = controller_command(config, benchmark, task, native, delivery, controller_path)
+        elif benchmark == "appworld":
             from .c1_appworld import controller_command
             command = controller_command(config, task, native, delivery, controller_path)
         else:
@@ -290,11 +308,14 @@ def run_common_prefix(config, benchmark, directory, prefix_path):
         process, log, task_root = _controller_process(command, native, task, delivery)
         previous_user_turn, turn_step = None, -1
         try:
+            if ARM == "c2kv_native_r4":
+                import native_bare
+                native_bare.validate_manifest(task_root / "server" / "ready.json")
             for step, row in enumerate(rows):
                 payload = copy.deepcopy(row["replay_payload"])
                 payload["model"] = command[command.index("--model-name") + 1]
                 payload.pop("c2kv_measurement_session_id", None)
-                if benchmark != "appworld":
+                if benchmark in {"bfcl_base", "bfcl_long_context"}:
                     # Adapt OpenAI transport aliases without changing the
                     # recorded prompt or generation budget.
                     if payload.get("stream") is False:
@@ -312,6 +333,9 @@ def run_common_prefix(config, benchmark, directory, prefix_path):
                         "benchmark": "bfcl", "task_id": task, "attempt": 0,
                         "user_turn": user_turn, "step": turn_step,
                     }
+                elif benchmark == "acebench_agent":
+                    from .native_extra import replay_payload
+                    payload = replay_payload(payload, task, step)
                 request = urllib.request.Request(
                     f"http://127.0.0.1:{config['proxy_port']}/v1/chat/completions",
                     data=json.dumps(payload).encode(), headers={"Content-Type": "application/json"})
@@ -345,7 +369,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--arm", choices=sorted(ARMS), default="c2kv_c1_t02_r8")
-    parser.add_argument("--benchmark", choices=("bfcl_base", "bfcl_long_context", "appworld"), required=True)
+    parser.add_argument("--benchmark", choices=("bfcl_base", "bfcl_long_context", "appworld", "acebench_agent", "toolsandbox"), required=True)
     parser.add_argument("--stage", choices=("closed_loop", "common_prefix"), default="closed_loop")
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--upstream")
@@ -356,6 +380,7 @@ def main(argv=None):
     args = parser.parse_args(argv)
     select_arm(args.arm)
     config = json.loads(args.config.read_text(encoding="utf-8"))
+    config["native_arm"] = ARM
     if args.upstream:
         config["upstream"] = args.upstream
     if args.proxy_port:

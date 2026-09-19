@@ -77,8 +77,7 @@ def _generation_backend_arguments(design: dict) -> list[str]:
     backend = runtime.get("generation_backend", "native")
     if backend not in {"native", "sglang"}:
         raise ValueError("runtime.generation_backend must be native or sglang")
-    controller_path = (ROOT / runtime["controller"]).resolve()
-    controller = read(controller_path)
+    controller = read((ROOT / runtime["controller"]).resolve()) if runtime.get("controller") else {}
     requires_sglang = (
         "post_draft_recovery" in controller or "gp_experiments" in controller
     )
@@ -246,10 +245,11 @@ def server_command(
     benchmark: str = "bfcl",
     source_profile: str | None = None,
 ) -> list[str]:
-    if benchmark not in {"bfcl", "tau2", "toolsandbox", "acon_appworld"}:
+    if benchmark not in {"bfcl", "tau2", "toolsandbox", "acon_appworld", "acebench"}:
         raise ValueError(f"unsupported C1 benchmark: {benchmark}")
     expected_source_profile = (
-        "native-v1" if benchmark == "bfcl" else "openai-single-task-v1"
+        "native-v1" if benchmark == "bfcl" else
+        "acebench-text-actions-v1" if benchmark == "acebench" else "openai-single-task-v1"
     )
     source_profile = source_profile or expected_source_profile
     if source_profile != expected_source_profile:
@@ -300,8 +300,6 @@ def server_command(
         str((ROOT / design["runtime"]["eval_policy"]).resolve()),
         "--eval-capacity",
         str((ROOT / design["runtime"]["eval_capacity"]).resolve()),
-        "--s0-config",
-        str((ROOT / design["runtime"]["controller"]).resolve()),
         "--max-wall-seconds",
         str(design["limits"]["server_wall_seconds_per_task"]),
         "--device",
@@ -315,6 +313,9 @@ def server_command(
         "--torch-threads",
         "4",
     ]
+    if design["runtime"].get("controller"):
+        index = command.index("--max-wall-seconds")
+        command[index:index] = ["--s0-config", str((ROOT / design["runtime"]["controller"]).resolve())]
     if design["runtime"].get("npu_allocator_metrics"):
         command.append("--npu-allocator-metrics")
     if design["runtime"].get("shadow_feature_config"):

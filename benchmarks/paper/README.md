@@ -10,7 +10,7 @@ experiment or retrain the detector.
 | Full | Full history | 200 tasks | 200 tasks | test_normal, 168 tasks | Agent multi-step + multi-turn | Full official suite | None |
 | HiAgent | Full subgoal summary and trajectory retrieval | Same | Same | Same | Same | Same | None |
 | ACON | History UT to CO guideline | Same | Same | Same | Same | Same | None |
-| Bare C2KV (legacy proxy; blocked for C1000) | Ratio **4**, training/serving packing mismatch | Historical diagnostic | Historical diagnostic | Stopped diagnostic | Blocked | Blocked | None |
+| Bare C2KV (`c2kv_native_r4`) | Native event packing, ratio **4**, no S0/detector/recovery | Native | Native | Native | Receipt-backed native | Native | None |
 | H2O | Persistent history KV, retain 25% | Same | Same | Same | Same | Same | Retain 12.5% on BFCL/AppWorld |
 | SnapKV | Persistent history KV, retain 25% | Same | Same | Same | Same | Same | Retain 12.5% on BFCL/AppWorld |
 | PyramidKV | Persistent history KV, retain 25% | Same | Same | Same | Same | Same | Retain 12.5% on BFCL/AppWorld |
@@ -22,7 +22,7 @@ The matrix contains 38 main cells, 9 sweep cells, 15 opponent cells and one
 ratio-4 C1 ablation. ACEBench uses the official `agent` category; ToolSandbox
 uses its full official suite with one process. The missing native C1 adapters
 are recorded in `unsupported_cells.json`, rather than emitted as runnable
-cells. The three main C2KV+C1 cells run last. The historical bare C2KV entry remains ratio4 but is blocked with the event-native C1000 checkpoint; C2KV+C1 is ratio8 and is a final-system
+cells. The three main C2KV+C1 cells run last. Bare C2KV now uses the separate `c2kv_native_r4` identity; the historical `c2kv4` proxy remains blocked with C1000. C2KV+C1 is ratio8 and is a final-system
 comparison, not a detector-only ablation. All actor and auxiliary generation
 calls use the same Qwen3-4B base weights through
 the same CUDA SGLang endpoint; only C2KV extraction uses the trained gist
@@ -167,10 +167,31 @@ checkpoint declaring `history-event-base-query-v1` / `history-event-v1` /
 `event-native-evidence-v1`. They are training/serving-mismatched diagnostics,
 not an evaluation of bare C2KV under its declared native input contract.
 The paper runner now refuses to start this combination. Historical artifacts
-remain readable. A native bare ratio4 evaluation must be registered separately;
-switching to C1 would also change its memory policy and recovery behavior.
+remain readable. The separately registered `c2kv_native_r4` arm uses
+`ac_gist_static` with native event packing and the native SGLang endpoint.
+It does not load S0, a detector, a retrieval encoder, or recovery; each decision
+has one generation. The existing `c2kv_only` mode remains an S0-without-recovery
+ablation and is not relabeled as this baseline. Native bare uses the explicit
+history/workspace byte and physical capacity limits recorded in its runtime
+profile; ratio4 is the gist extraction ratio, not a guarantee that all historical
+events fit or that whole-input memory is exactly one quarter. Capacity omissions
+and infeasibility remain recorded. This arm is not a detector-only C1 ablation.
 
-For AppWorld C1, the first-user task packet is fixed raw common input. It is
+New plans use this native arm. Existing frozen plans must add new native cells
+under the new name (or use a separate output root); never relabel or resume old
+`c2kv4` artifacts. The same `benchmarks.paper.c1` client can target a CUDA or NPU
+native engine with `--upstream`; the CUDA paper runner's engine launcher remains
+CUDA-specific. Updating the client does not update an already running engine.
+ACEBench uses execution receipts captured from the official decoder/executor,
+retains the actual scene sampler (`temperature=0.001`, `top_p=1`, 1000 completion
+tokens, no explicit request seed), and requires the engine capability
+`sampling_profiles` to include `acebench-agent-v1`. Other native methods retain
+their existing greedy profile. Old ACE Full prefixes without execution receipts
+cannot be replayed through this route; the client refuses to fabricate them.
+This implementation has local protocol/regression coverage; no new CUDA/NPU
+whole-task native-bare result is claimed by this source update.
+
+For AppWorld C1 and native bare, the first-user task packet is fixed raw common input. It is
 excluded from both the managed history B budget and the incremental evidence W
 budget, whose configured byte values remain unchanged. The metadata reports the
 task packet's marginal raw tokens and bytes separately from managed history and

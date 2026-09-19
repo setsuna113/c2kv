@@ -310,6 +310,14 @@ ARMS: Dict[str, Arm] = {
             description="raw text history, no compression (upper reference)",
         ),
         Arm(
+            name="c2kv_native_r4",
+            compress_history=True,
+            ratio=4,
+            query_projection="base",
+            native_controller="bare_event_native",
+            description="Native event-packed static gist compression, without S0 allocation, detector or recovery",
+        ),
+        Arm(
             name="c2kv_c1_t02_r8",
             compress_history=True,
             ratio=8,

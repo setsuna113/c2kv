@@ -233,7 +233,9 @@ def _checkpoint_eos_token_ids(checkpoint, tokenizer):
     return _validate_eos_token_ids(tokenizer.eos_token_id, source=source), source
 
 
-def _sampling_params_for_benchmark(benchmark):
+def _sampling_params_for_benchmark(benchmark, view_mode=None):
+    if benchmark == 'acebench' and view_mode == 'ac_gist_static':
+        return {'temperature': 0.001, 'top_p': 1.0}
     if benchmark == 'acon_appworld':
         return {
             'temperature': 0.0,
@@ -282,7 +284,7 @@ def _build_generator(
     # Match the frozen AppWorld actor request.  Packing already calls
     # apply_chat_template(..., enable_thinking=False); these are the remaining
     # generation fields that reach the native SGLang sampler.
-    sampling_params = _sampling_params_for_benchmark(getattr(args, 'benchmark', None))
+    sampling_params = _sampling_params_for_benchmark(getattr(args, 'benchmark', None), getattr(args, 'view_mode', None))
     generator = SGLangEventNativeGenerator(
         args.sglang_backend_url,
         expected_model_path=args.checkpoint.resolve(),
@@ -295,6 +297,9 @@ def _build_generator(
         eos_source=eos_source,
         journal_path=journal_path.with_name('sglang_http.jsonl'),
         sampling_params=sampling_params,
+        **({'sampling_profile': 'acebench-agent-v1'}
+           if getattr(args, 'benchmark', None) == 'acebench'
+           and getattr(args, 'view_mode', None) == 'ac_gist_static' else {}),
         shadow_feature_config=shadow_feature_config,
         encoding_scope=encoding_scope,
     )
@@ -304,6 +309,8 @@ def _build_generator(
 def _serve(args):
     s0_config, s0_contract = _read_s0_configuration(args)
     generation_backend = _validate_generation_backend(args, s0_config=s0_config)
+    if getattr(args, 'benchmark', None) == 'acebench' and args.view_mode == 'ac_gist_static' and generation_backend != 'sglang':
+        raise ValueError('Native bare ACEBench requires SGLang for its source sampling contract')
     _validate_allocator_device(args)
     started = time.monotonic()
     deadline = started + args.max_wall_seconds
@@ -327,7 +334,7 @@ def _serve(args):
             raise ValueError('ACE textual source requires the acebench namespace')
         if args.view_mode == 'static':
             raise ValueError('ACE textual source has no training-static adapter')
-        if args.view_mode in NATIVE_ALWAYS_ROUTE_MODES:
+        if args.view_mode in NATIVE_ALWAYS_ROUTE_MODES and args.view_mode != 'ac_gist_static':
             raise ValueError('Always-compress P0 supports only source_profile=native-v1')
     args.out.mkdir(parents=True, exist_ok=False)
     journal_path = args.out / 'attempts.jsonl'
@@ -349,7 +356,7 @@ def _serve(args):
         'sglang_backend_url': (
             args.sglang_backend_url if generation_backend == 'sglang' else None
         ),
-        'sampling': {'mode': 'greedy', 'temperature': 0, 'seed': 0},
+        'sampling': _sampling_params_for_benchmark(args.benchmark, args.view_mode),
         'attempt_journal': str(journal_path.resolve()),
         'sglang_http_journal': (
             str(journal_path.with_name('sglang_http.jsonl').resolve())
@@ -420,7 +427,8 @@ def _serve(args):
             **s0_kwargs,
             **({'compression_policy': compression_policy,
                 'history_view_protocol': history_view_protocol}
-               if source_profile in ('native-v1', 'openai-single-task-v1') else {}))
+               if source_profile in ('native-v1', 'openai-single-task-v1')
+               or args.view_mode == 'ac_gist_static' else {}))
         shadow_feature_config, shadow_contract = _shadow_feature_configuration(args, tokenizer)
         generator, profile = _build_generator(
             args,
@@ -463,7 +471,8 @@ def _serve(args):
             runtime_policy_contract=runtime_policy,
             **({'compression_policy': compression_policy,
                 'history_view_protocol': history_view_protocol}
-               if source_profile in ('native-v1', 'openai-single-task-v1') else {}),
+               if source_profile in ('native-v1', 'openai-single-task-v1')
+               or args.view_mode == 'ac_gist_static' else {}),
             **source_kwargs)
         server = make_server(api, host=args.host, port=args.port)
         server.timeout = 0.25

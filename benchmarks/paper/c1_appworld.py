@@ -208,6 +208,12 @@ def _resolved_design(
     c1 = config.get("c1", {})
     if not isinstance(c1, Mapping):
         raise ValueError("config.c1 must be an object")
+    if config.get("native_arm") == "c2kv_native_r4":
+        bare = _load_module(delivery / "native_bare.py", "native_bare")
+        design = bare.configure_design(design)
+        design["runtime"].update(sglang_backend_url=_sglang_upstream(config),
+                                 device="cpu", npu_allocator_metrics=False)
+        return design
     if (
         design.get("ratio") != 8
         or c1.get("detector", "t02_risk") not in {"t02_risk", "d3_hybrid"}
@@ -512,7 +518,8 @@ def run_task(
         BENCHMARK, task_id, task_out, official, time.monotonic() - started,
     )
     acceptance = run_c1.functional_checks(
-        "proposed", config.get("c1", {}).get("detector", "t02_risk"), metrics
+        "c2kv_native" if config.get("native_arm") == "c2kv_native_r4" else "proposed",
+        config.get("c1", {}).get("detector", "t02_risk"), metrics
     )
     if not all(acceptance["required"].values()):
         raise RuntimeError(f"C1 AppWorld functional acceptance failed: {acceptance['required']}")

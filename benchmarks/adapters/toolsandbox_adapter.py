@@ -124,7 +124,7 @@ def run_ts(base_url: str, out_dir: Path, test_mode: bool = True,
            benchmark_dir: Path = None, user_base_url: str = "",
            scenarios: "list[str] | None" = None,
            python: "str | None" = None, parallel: int = 1,
-           model: str = "c2kv-agent") -> Dict[str, Any]:
+           model: str = "c2kv-agent", user_model: "str | None" = None) -> Dict[str, Any]:
     """Run the CLI and collect ``result_summary.json``."""
     if parallel != 1:
         raise ValueError("instrumented ToolSandbox runs require parallel=1")
@@ -133,6 +133,7 @@ def run_ts(base_url: str, out_dir: Path, test_mode: bool = True,
     out_dir.mkdir(parents=True, exist_ok=True)
     env = harness_env(base_url, user_base_url)
     env["C2KV_TOOLSANDBOX_MODEL"] = model
+    env["C2KV_TOOLSANDBOX_USER_MODEL"] = user_model or model
     env["C2KV_TOOLSANDBOX_TELEMETRY"] = str(out_dir / "measurement" / "harness_events.jsonl")
     # The console script's directory is otherwise first on sys.path, and an
     # editable installation may silently import a different checkout.
@@ -146,6 +147,7 @@ def run_ts(base_url: str, out_dir: Path, test_mode: bool = True,
     (out_dir / "toolsandbox_protocol.json").write_text(json.dumps({
         "suite": "subset" if scenarios else "test" if test_mode else "full",
         "scenarios": scenarios, "parallel": int(parallel), "model": model,
+        "user_model": user_model or model,
         "agent_role": agent, "user_role": user, "source": str(ts_dir),
         "command": cmd, "measurement": "runtime_scenario_request_action_v1",
     }, indent=2) + "\n", encoding="utf-8")

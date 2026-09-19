@@ -28,6 +28,10 @@ def is_c1_arm(arm):
     return arm in C1_ARMS
 
 
+def is_native_arm(arm):
+    return is_c1_arm(arm) or arm == "c2kv_native_r4"
+
+
 def cells(config):
     rows = [dict({k: v for k, v in method.items() if k != "benchmarks"},
                  benchmark=bench["name"], adapter=bench["adapter"],
@@ -95,7 +99,7 @@ def with_port_offset(config, port_offset):
 
 
 def run_command(config, cell, directory, profile, stage="closed_loop"):
-    if is_c1_arm(cell["arm"]):
+    if is_native_arm(cell["arm"]):
         cmd = [config["bench_python"], "-m", "benchmarks.paper.c1",
                "--config", str(profile.parent / "config.resolved.json"),
                "--arm", cell["arm"],
@@ -203,6 +207,10 @@ def prepare(config, output, source):
         raise ValueError("The paper benchmark uses CUDA")
     for item in config["methods"]:
         arm = get_arm(item["arm"])
+        if arm.name == "c2kv_native_r4":
+            if item.get("ratio") != 4 or item["method"] != "C2KV":
+                raise ValueError("Native bare C2KV must use ratio4 and the C2KV label")
+            continue
         if arm.native_controller:
             if (not is_c1_arm(arm.name) or item.get("ratio") != C1_ARMS[arm.name]
                     or arm.ratio != C1_ARMS[arm.name]
@@ -428,7 +436,7 @@ def execute(config, plan, output, source, stages, selected, port_offset=0):
                 "server_command": server_command(config, source, cell["arm"]),
                 "port_offset": port_offset,
                 "sglang_source": str(source), "time": time.time()}, indent=2))
-            telemetry_name = ("native_engine_telemetry.jsonl" if is_c1_arm(cell["arm"])
+            telemetry_name = ("native_engine_telemetry.jsonl" if is_native_arm(cell["arm"])
                               else "server_telemetry.jsonl")
             env["C2KV_PAPER_TELEMETRY_LOG"] = str(directory / telemetry_name)
             with (directory / "server.log").open("w") as log:
@@ -445,7 +453,7 @@ def execute(config, plan, output, source, stages, selected, port_offset=0):
                 run_failure = None
                 try:
                     wait_server(server, config["server_port"])
-                    if is_c1_arm(cell["arm"]):
+                    if is_native_arm(cell["arm"]):
                         subprocess.run(run_command(config, cell, directory, profile_path, stage),
                                        check=True, env=env, cwd=ROOT.parent)
                     elif stage == "closed_loop":
