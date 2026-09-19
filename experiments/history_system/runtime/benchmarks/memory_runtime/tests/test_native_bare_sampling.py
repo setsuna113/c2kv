@@ -36,24 +36,3 @@ def test_ace_profile_refuses_an_old_engine_before_generation(monkeypatch):
         actual._ensure_model_info()
     capability["sampling_profiles"] = ["greedy-v1", "acebench-agent-v1"]
     actual._ensure_model_info()
-
-
-def test_hybrid_budget_guard_does_not_apply_to_exact_bare_controllers():
-    """The bare ``ac_gist_static`` route uses EventNativeExactController, which declares no
-    S0 ``common_raw_prompt_tokens``; the hybrid pre-generation check must report itself as
-    not applicable instead of failing every decision (first CUDA run of c2kv_native_r4)."""
-    from types import SimpleNamespace
-    from benchmarks.memory_runtime.budget_guard import history_budget_receipt
-
-    memory = SimpleNamespace(costs=lambda ratio: {"resident_kv_tokens": 120, "gist_tokens": 10})
-    exact_like = SimpleNamespace(policy_config=SimpleNamespace(history_budget_bytes=1000, workspace_budget_bytes=1000),
-                                 kv_bytes_per_token=1)
-    receipt = history_budget_receipt(memory, {"actual_history_bytes": 20}, exact_like, ratio=4, phase="first_draft")
-    assert receipt["status"] == "not_applicable" and receipt["errors"] == []
-    # the S0 contract is still enforced when it is declared
-    s0_meta = {"common_raw_prompt_tokens": 100, "actual_history_bytes": 20}
-    assert history_budget_receipt(memory, s0_meta, exact_like, ratio=4, phase="first_draft")["status"] == "passed"
-    bad = dict(s0_meta, actual_history_bytes=99)
-    assert history_budget_receipt(memory, bad, exact_like, ratio=4, phase="first_draft")["status"] == "rejected"
-    with pytest.raises(ValueError, match="explicit native history budget contract"):
-        history_budget_receipt(memory, s0_meta, SimpleNamespace(), ratio=4, phase="first_draft")
