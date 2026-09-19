@@ -25,6 +25,9 @@ class EngineLauncherTests(unittest.TestCase):
             f"ROOT={root / 'engine'}",
             1,
         )
+        # Exercise the fixture's locks without treating production engines as
+        # test-owned processes on hosts where real cards are already occupied.
+        source = source.replace("'sglang.launch_server'", f"'c2kv-test-engine-{root.name}'")
         source = source.split("source /usr/local/Ascend/cann-8.5.0/set_env.sh", 1)[0]
         self.launcher = root / "launch_engine.sh"
         self.launcher.write_text(source + "echo ready\nexec sleep 10\n")
