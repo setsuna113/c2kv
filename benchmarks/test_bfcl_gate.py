@@ -33,13 +33,14 @@ def test_completion_distinguishes_terminal_failures_from_infrastructure(message,
 
 
 def _legacy_fc_decode_row(task_id="multi_turn_base_0"):
+    tool_text = '<tool_call>{"name":"lookup","arguments":{"city":"X"}}</tool_call>'
     return {
         "id": task_id,
-        "result": [["<tool_call>{malformed actor text}</tool_call>"]],
-        "inference_log": [{"step_0": [{
-            "role": "handler_log",
-            "error": "'str' object has no attribute 'items'",
-        }]}],
+        "result": [[tool_text]],
+        "inference_log": [{"step_0": [
+            {"role": "assistant", "content": tool_text},
+            {"role": "handler_log", "error": "'str' object has no attribute 'items'"},
+        ]}],
     }
 
 
@@ -53,6 +54,30 @@ def test_fc_guard_rejects_only_legacy_handler_contract_error():
     assert completion_kind(malformed_actor, fc_model=True) == "model_output"
     assert completion_kind({"id": legacy["id"], "result": []},
                            fc_model=True) == "model_output"
+
+    native_final = {
+        "id": "multi_turn_base_164", "result": [[[ {"lookup": "{}"},
+            "The requested answer is ready." ]]],
+        "inference_log": [{"step_0": [
+            {"role": "assistant", "content": [{"lookup": "{}"}]},
+            {"role": "handler_log", "model_response_decoded": ["lookup()"]},
+            {"role": "tool", "content": "ok"},
+        ], "step_1": [
+            {"role": "assistant", "content": "The requested answer is ready."},
+            {"role": "handler_log", "error": "'str' object has no attribute 'items'"},
+        ]}],
+    }
+    assert completion_kind(native_final, fc_model=True) == "model_output"
+    assert bfcl_row_is_terminal(native_final, fc_model=True)
+
+    malformed_with_error = {
+        "id": legacy["id"], "result": [["<tool_call>bad</tool_call>"]],
+        "inference_log": [{"step_0": [
+            {"role": "assistant", "content": "<tool_call>bad</tool_call>"},
+            {"role": "handler_log", "error": "'str' object has no attribute 'items'"},
+        ]}],
+    }
+    assert completion_kind(malformed_with_error, fc_model=True) == "model_output"
 
 
 def test_fc_evaluate_refuses_old_handler_row_before_official_scorer(
