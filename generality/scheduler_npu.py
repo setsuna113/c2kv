@@ -317,7 +317,7 @@ def live_driver_assignments() -> dict[int, dict[str, dict]]:
             raise RuntimeError(f"Cannot identify live driver card from {path}") from error
         manifest = path.resolve()
         cell_directory = directory.resolve()
-        if (manifest != cell_directory / "cell_launch.json" and
+        if (manifest not in {cell_directory / "cell.json", cell_directory / "cell_launch.json"} and
                 manifest.parent != cell_directory / "cell_launch_attempts"):
             raise RuntimeError(f"Live driver manifest has mismatched cell_dir: {path}")
         if str(directory) in assignments.setdefault(card, {}):

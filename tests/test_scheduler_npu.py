@@ -150,6 +150,22 @@ def test_live_driver_scan_reserves_orphan_cards_and_fails_closed(tmp_path, monke
         scheduler.live_driver_assignments()
 
 
+def test_direct_driver_manifest_reserves_its_card(tmp_path, monkeypatch):
+    direct = cell(tmp_path)
+    path = Path(direct["cell_dir"]) / "cell.json"
+    path.write_text(json.dumps({**direct, "sglang_backend_url": "http://127.0.0.1:36203"}))
+    output = f"123 python session_tracer_cell.py --cell {path}\n"
+    monkeypatch.setattr(scheduler.subprocess, "run", lambda *a, **k:
+                        SimpleNamespace(returncode=0, stdout=output))
+    live = scheduler.live_driver_assignments()
+    assert list(live) == [3]
+    assert scheduler.free_healthy_slots([2, 3], {}, live, 1) == [(2, 0)]
+    path.write_text(json.dumps({**direct, "cell_dir": str(tmp_path / "wrong"),
+                                "sglang_backend_url": "http://127.0.0.1:36203"}))
+    with pytest.raises(RuntimeError, match="mismatched cell_dir"):
+        scheduler.live_driver_assignments()
+
+
 def test_old_scheduler_process_is_detected(tmp_path, monkeypatch):
     proc_root = tmp_path / "proc"
     proc = proc_root / "123456"
