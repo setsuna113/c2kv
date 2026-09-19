@@ -14,13 +14,14 @@ TASK_ID = "3d9a636_1"
 def _api(monkeypatch, benchmark="acon_appworld"):
     api = SingleTaskHarnessAPI.__new__(SingleTaskHarnessAPI)
     api.benchmark = benchmark
+    api.run_id = "appworld-measurement-test"
+    api.model_name = "gen_c2kv_K0_compression_full_budget"
     api.allowed_task_ids = frozenset({TASK_ID})
     api.max_new_tokens = 2048
     api.runner = SimpleNamespace(controller=SimpleNamespace(gp=object()), max_new_tokens=2048)
     api._wire_identities = {}
     api._wire_mode = None
     api._transport_receipts = {}
-    monkeypatch.setattr(EventNativeAPI, "_validate_request", lambda self, payload: None)
     monkeypatch.setattr(EventNativeAPI, "handle_chat", lambda self, payload: payload)
     return api
 
@@ -28,7 +29,7 @@ def _api(monkeypatch, benchmark="acon_appworld"):
 def _acon_request():
     # ACON vLLM.generate options plus c2kv_appworld_hook's extra_body.
     return {
-        "model": "c2kv-event-native",
+        "model": "gen_c2kv_K0_compression_full_budget",
         "messages": [{"role": "system", "content": "Use AppWorld APIs."},
                      {"role": "user", "content": "Complete the task."}],
         "max_tokens": 2048,
