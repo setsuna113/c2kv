@@ -22,10 +22,11 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG = Path(__file__).with_name("config.json")
 
 
-# ACEBench Agent drives the user simulator against the raw upstream while the agent's
+# ACEBench Agent and ToolSandbox drive a user simulator against the raw upstream while the agent's
 # persistent history session still owns its request slot; with one slot the
 # simulator's request made the scheduler raise alloc_req_slots and die (H2O/SnapKV
-# ACEBench cells). The two clients never run concurrently, so per-request
+# ACEBench cells). Both adapters use the same persistent-slot topology. The
+# two clients are sequential, so per-request
 # attribution is unchanged.
 ACEBENCH_MAX_RUNNING_REQUESTS = 2
 REFERENCE_ATTENTION_MEM_FRACTION = 0.65   # static pool cap for reference_attention arms (see server_command)
@@ -96,7 +97,7 @@ def server_command(config, source, arm=None, benchmark=None):
            "--mem-fraction-static", str(mem_fraction),
            "--context-length", str(config["context_length"]),
            "--max-total-tokens", str(config["max_total_tokens"]),
-           "--max-running-requests", str(ACEBENCH_MAX_RUNNING_REQUESTS if benchmark == "acebench_agent" else 1),
+           "--max-running-requests", str(ACEBENCH_MAX_RUNNING_REQUESTS if benchmark in {"acebench_agent", "toolsandbox"} else 1),
            "--page-size", "1",
            "--chunked-prefill-size", str(config["chunked_prefill_size"]),
            "--random-seed", str(config["seed"])]

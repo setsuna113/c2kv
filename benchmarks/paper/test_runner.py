@@ -34,6 +34,11 @@ class PaperMatrixTest(unittest.TestCase):
                 popen.assert_not_called()
             self.assertFalse((root / "common_prefix" / "bfcl_base__agentkv").exists())
 
+    def test_toolsandbox_simulator_has_a_slot_beside_persistent_actor(self):
+        for arm in ("history_kv_h2o_r25_persistent", "commitkv", "c2kv_native_r4"):
+            command = server_command(self.config, Path("engine"), arm, "toolsandbox")
+            self.assertEqual(command[command.index("--max-running-requests") + 1], "2")
+
     def test_exact_prefix_replay_aggregation_reports_unsupported(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -175,7 +180,7 @@ class PaperMatrixTest(unittest.TestCase):
         for arm in ("full", "history_kv_h2o_r25_persistent", "agentkv"):
             ace = server_command(self.config, Path("sglang"), arm, "acebench_agent")
             self.assertEqual(ace[ace.index("--max-running-requests") + 1], str(ACEBENCH_MAX_RUNNING_REQUESTS))
-            for other in ("bfcl_base", "appworld", "toolsandbox", None):
+            for other in ("bfcl_base", "appworld", None):
                 cmd = server_command(self.config, Path("sglang"), arm, other)
                 self.assertEqual(cmd[cmd.index("--max-running-requests") + 1], "1")
 
