@@ -6,8 +6,21 @@ def history_budget_receipt(memory, metadata, controller, *, ratio, phase):
     policy = getattr(controller, "policy_config", None)
     unit = getattr(controller, "kv_bytes_per_token", None)
     common = metadata.get("common_raw_prompt_tokens")
-    if policy is None or type(unit) is not int or type(common) is not int:
+    if policy is None or type(unit) is not int:
         raise ValueError("Hybrid search requires an explicit native history budget contract")
+    if type(common) is not int:
+        # Only the S0/hybrid controllers declare the common-input boundary this check is
+        # defined on.  The exact controllers (e.g. the bare ``ac_gist_static`` route) size
+        # their history through their own capacity gate and report the Full-render
+        # ``common_live_tokens`` instead, so the hybrid check does not apply to them.
+        return {
+            "schema": "a-hybrid-pre-generation-budget-v1", "phase": phase,
+            "status": "not_applicable", "errors": [],
+            "reason": "controller declares no S0 common-input accounting (common_raw_prompt_tokens)",
+            "controller": type(controller).__name__,
+            "declared_active_history_bytes": metadata.get("actual_history_bytes"),
+            "kv_bytes_per_token": unit,
+        }
     costs = memory.costs(ratio)
     resident = costs["resident_kv_tokens"]
     history_tokens = resident - common
