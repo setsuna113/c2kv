@@ -236,7 +236,9 @@ class EventNativeDecisionRunner:
         self.journal.finish(handle, 'completed', usage=usage)
         draft = decode_native_generation(
             self.tokenizer, result,
-            call_id_prefix=f"d{metadata['decision_index']}_r{len(record['generation_trace']) - 1}")
+            call_id_prefix=(f"d{metadata['decision_index']}_r0"
+                            if getattr(self.controller, 'stable_call_ids', False)
+                            else f"d{metadata['decision_index']}_r{len(record['generation_trace']) - 1}"))
         trace['native_draft'] = {'version': NATIVE_DRAFT_VERSION, **asdict(draft)}
         selection_observer = getattr(self.controller, 'observe_selection_draft', None)
         if callable(selection_observer):

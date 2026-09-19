@@ -138,6 +138,7 @@ def _read_s0_configuration(args):
 def _controller_requires_sglang(config):
     return isinstance(config, dict) and (
         'post_draft_recovery' in config or 'gp_experiments' in config
+        or 'candidate_algorithm' in config
     )
 
 
@@ -425,6 +426,15 @@ def _serve(args):
         if controller_factory is build_event_native_controller:
             controller_kwargs['benchmark'] = args.benchmark
         controller = controller_factory(tokenizer, **controller_kwargs)
+        if isinstance(s0_config, dict) and 'candidate_algorithm' in s0_config:
+            candidate = s0_config['candidate_algorithm']
+            manifest['candidate_algorithm'] = {
+                'variant': candidate['variant'], 'stable_call_ids': True,
+                'recovery_rounds_per_decision': 1,
+            }
+            manifest['route_contract'].update(
+                baseline_identity='c2kv-paper-candidates-v1:' + candidate['variant'],
+                recovery_enabled=True, max_generations_per_decision=2)
         shadow_feature_config, shadow_contract = _shadow_feature_configuration(args, tokenizer)
         generator, profile = _build_generator(
             args,
@@ -470,6 +480,8 @@ def _serve(args):
                if source_profile in ('native-v1', 'openai-single-task-v1')
                or args.view_mode == 'ac_gist_static' else {}),
             **source_kwargs)
+        if isinstance(s0_config, dict) and 'candidate_algorithm' in s0_config:
+            api.route_contract = dict(manifest['route_contract'])
         server = make_server(api, host=args.host, port=args.port)
         server.timeout = 0.25
         for signum in (signal.SIGINT, signal.SIGTERM):

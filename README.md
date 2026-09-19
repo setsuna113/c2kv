@@ -13,6 +13,27 @@ runtime fixes are copied into that subset only when an NPU launcher consumes
 them.  These source checkouts do not deploy or overwrite the detached running
 copies under `/home/liuyancheng/c2kv-generality-20260918/src/`.
 
+The four ratio-8 candidate algorithms are an explicit C2KV BFCL-base path,
+outside the ratio-4 generality matrix. Start from a
+`bfcl_base/c2kv/<working-point>/compression_full_budget/cell.json` source and
+pass `--candidate-algorithm` as one of `static_t02`, `turn_c1`, `goal_rescue`,
+or `dependency_first` to `generality/c2kv_cell.py`, together with the existing
+`--budgets`, `--sglang-backend-url`, and an unused `--port-base`. The driver
+creates a separate `candidate_algorithms/<variant>` cell under that working
+point, uses ratio 8 and the working point's `common_cap_bytes` for its shared
+history/workspace budget, and freezes the T02 threshold at 0.5. For example:
+
+```bash
+/home/liuyancheng/envs/sgl/bin/python /home/liuyancheng/c2kv-generality-20260918/src/generality/c2kv_cell.py \
+  --cell /home/liuyancheng/c2kv-generality-20260918/results/closed_loop/bfcl_base/c2kv/K0/compression_full_budget/cell.json \
+  --budgets /home/liuyancheng/c2kv-generality-20260918/config/budgets_resolved.json \
+  --candidate-algorithm static_t02 --sglang-backend-url http://127.0.0.1:36200 \
+  --port-base 62000 --max-tasks 1
+```
+
+The bundled candidate runtime and launcher have passed local CPU tests; this
+branch has not yet been deployed or validated on NPU hardware.
+
 BFCL completion is based on valid unique official result rows, not task marker
 counts. A wrong or empty model answer is valid; an execution traceback is not.
 `generality/c2kv_cell.py` resumes only the missing/invalid manifest IDs, preserves

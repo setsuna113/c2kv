@@ -47,6 +47,19 @@ try:
 except ImportError:  # Direct file launch on ascend03.
     from completion_contract import write_cell_status
 
+try:
+    from .candidate_cell import (
+        VARIANTS as CANDIDATE_VARIANTS,
+        candidate_cell_from_source,
+        controller_with_binding as candidate_controller_with_binding,
+    )
+except ImportError:  # Direct file launch on ascend03.
+    from candidate_cell import (
+        VARIANTS as CANDIDATE_VARIANTS,
+        candidate_cell_from_source,
+        controller_with_binding as candidate_controller_with_binding,
+    )
+
 GENERATION_ROOT = Path("/home/liuyancheng/c2kv-generality-20260918")
 C1_DELIVERY = GENERATION_ROOT / "src" / "c1_delivery"
 RUNTIME = GENERATION_ROOT / "src" / "generality" / "controller_runtime"
@@ -71,6 +84,14 @@ def _write(path: Path, value) -> None:
 
 def _controller_with_binding(cell: dict) -> tuple[dict, dict | None]:
     """T02 risk selector with the cell's calibrated threshold (fixed weights)."""
+    if cell["condition"] == "candidate_algorithm":
+        return candidate_controller_with_binding(
+            cell,
+            base_controller=evidence_sets._base_controller(),
+            selected=current.load_config(),
+            risk_artifact_path=RISK_ARTIFACT,
+            bind_risk_artifact=bind_risk_artifact,
+        )
     if cell["condition"] == "tracer_history":
         config, _ = evidence_sets.build_config(
             history="H0",
@@ -123,7 +144,7 @@ def build_eval_policy(cell: dict, budgets: dict) -> dict:
     if cell["condition"] == "tracer_history":
         policy["recovery_history_bytes"] = wp["common_cap_bytes"]
         policy["recovery_workspace_bytes"] = wp["common_cap_bytes"]
-    elif cell["condition"] == "compression_full_budget":
+    elif cell["condition"] in ("compression_full_budget", "candidate_algorithm"):
         # competitive control: the bare compressor may use the whole common cap
         policy["history_budget_bytes"] = wp["common_cap_bytes"]
         policy["workspace_budget_bytes"] = wp["common_cap_bytes"]
@@ -486,6 +507,10 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cell", type=Path, required=True, help="cell.json path")
     parser.add_argument("--budgets", type=Path, required=True, help="resolved budgets json")
+    parser.add_argument("--candidate-algorithm", choices=CANDIDATE_VARIANTS,
+                        help="explicit ratio-8 candidate run outside the legacy matrix")
+    parser.add_argument("--sglang-backend-url",
+                        help="existing engine URL for an explicit candidate run")
     parser.add_argument("--task-ids", nargs="*", default=None,
                         help="subset override; default: cell manifest")
     parser.add_argument("--port-base", type=int, default=37200)
@@ -505,6 +530,11 @@ def main(argv=None) -> int:
     if args.max_attempts_per_task < 1:
         parser.error("--max-attempts-per-task must be at least 1")
     cell = load_cell(args.cell)
+    if args.candidate_algorithm is not None:
+        cell = candidate_cell_from_source(
+            cell, args.candidate_algorithm, args.sglang_backend_url)
+    elif args.sglang_backend_url is not None:
+        parser.error("--sglang-backend-url requires --candidate-algorithm")
     expected_task_ids = cell["task_ids"]
     if (not isinstance(expected_task_ids, list) or not expected_task_ids
             or any(not isinstance(task_id, str) or not task_id

@@ -236,6 +236,8 @@ class SameEventBridgeOnlyS0Controller(EventNativeS0Controller):
         )
         metadata["same_event_reference"] = receipt
         metadata["derived_workspace_prefix_message_count"] = len(base_derived) + 1
+        if getattr(self, "preserve_candidate_derived_messages", False):
+            metadata["derived_workspace_prefix_messages"] = [message, *base_derived]
         metadata["compression_ratio"] = self._compression_ratio(
             metadata["same_prefix_full_reference"],
             measure,
