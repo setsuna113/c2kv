@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import sys
 import json
+import subprocess
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -298,6 +299,28 @@ def test_stale_batch_done_is_revalidated_and_full_manifest_stamped(tmp_path, mon
     assert status["status"] == "complete"
     assert status["n_completed"] == 1
     assert scheduler.cell_done(cell)
+
+
+def test_appworld_worker_imports_paper_adapter_despite_runtime_name_collision(
+        tmp_path, monkeypatch):
+    runtime = tmp_path / "controller_runtime"
+    runtime_adapter = runtime / "benchmarks" / "adapters"
+    runtime_adapter.mkdir(parents=True)
+    (runtime_adapter / "__init__.py").write_text("")
+    paper_adapter = tmp_path / "src" / "paper_harness" / "benchmarks" / "adapters"
+    paper_adapter.mkdir(parents=True)
+    (paper_adapter / "__init__.py").write_text("")
+    (paper_adapter / "acon_adapter.py").write_text("ORIGIN = 'paper_harness'\n")
+    monkeypatch.setattr(driver, "RUNTIME", runtime)
+    monkeypatch.setattr(driver, "GENERATION_ROOT", tmp_path)
+
+    env = driver.appworld_worker_env({
+        "acon_dir": str(tmp_path / "acon"), "appworld_root": str(tmp_path / "appworld")})
+    imported = subprocess.run(
+        [sys.executable, "-c", "from adapters import acon_adapter; "
+         "print(acon_adapter.ORIGIN)"],
+        cwd=runtime, env=env, text=True, capture_output=True, check=True)
+    assert imported.stdout.strip() == "paper_harness"
 
 
 def test_shutdown_waits_for_inflight_inference_before_session_close():

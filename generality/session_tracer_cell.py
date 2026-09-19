@@ -648,10 +648,13 @@ def stop_server(server, thread, tasks):
 def appworld_worker_env(cell):
     """Build the isolated environment for the ACON code-action worker."""
     env = os.environ.copy()
+    # The worker imports ``adapters.acon_adapter`` from paper_harness.
+    # controller_runtime/benchmarks also has an ``adapters`` package, so the
+    # paper harness must precede it on the worker's import path.
     env["PYTHONPATH"] = os.pathsep.join((
+        str(GENERATION_ROOT / "src" / "paper_harness" / "benchmarks"),
         str(RUNTIME), str(RUNTIME / "benchmarks"),
         str(Path(cell["acon_dir"]) / "src"),
-        str(GENERATION_ROOT / "src" / "paper_harness" / "benchmarks"),
     ))
     env["APPWORLD_ROOT"] = cell["appworld_root"]
     env["no_proxy"] = env["NO_PROXY"] = "127.0.0.1,localhost"
