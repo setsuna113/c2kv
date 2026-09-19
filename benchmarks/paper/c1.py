@@ -326,6 +326,11 @@ def run_common_prefix(config, benchmark, directory, prefix_path):
                             raise ValueError("Conflicting recorded generation caps")
                         payload["max_completion_tokens"] = cap
                     payload.setdefault("store", False)
+                    # Full recorded BFCL's harness sampling (temperature 0.001); the
+                    # native arm serves greedy only and its API rejects anything else.
+                    # Replay under the arm's own contract; the original payload is kept
+                    # verbatim in the prefix_replay row for traceability.
+                    payload["temperature"] = 0.0
                     user_turn = max(0, sum(m.get("role") == "user" for m in payload["messages"]) - 1)
                     turn_step = turn_step + 1 if user_turn == previous_user_turn else 0
                     previous_user_turn = user_turn
