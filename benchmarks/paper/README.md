@@ -14,7 +14,7 @@ experiment or retrain the detector.
 | H2O | Persistent history KV, retain 25% | Same | Same | Same | Same | Same | Retain 12.5% on BFCL/AppWorld |
 | SnapKV | Persistent history KV, retain 25% | Same | Same | Same | Same | Same | Retain 12.5% on BFCL/AppWorld |
 | PyramidKV | Persistent history KV, retain 25% | Same | Same | Same | Same | Same | Retain 12.5% on BFCL/AppWorld |
-| AgentFold | Joint actor folding and action; experiment Qwen3-4B weights | Same | Same | Same | Same | Same | None |
+| AgentFold (held) | Untrained-actor protocol diagnostic; excluded from method quality comparison | Held | Held | Held | Held | Held | None |
 | CommitKV / AgentKV | Resident KV selection, 2048-token launch budget | Same | Same | Same | Same | Same | None |
 | C2KV+C1 | H0 / C1000 / ratio8 / D3 hybrid / R1 | Same | Same | Same | Unsupported | Unsupported | None |
 
@@ -32,7 +32,19 @@ backend for ordinary methods. PyramidKV, CommitKV and AgentKV use the
 `reference_attention` route with PyTorch SDPA and method-owned resident KV.
 Their latency measures this reference implementation, not the authors' optimized
 serving kernels. AgentFold implements the inference folding protocol without
-the authors' trained actor weights. The 2048-token AgentKV allowance is a project
+the authors' trained actor weights. It is now held at paper-runner startup:
+the shared Qwen3-4B actor omitted required intermediate folding directives in
+the deployed diagnostic. The historical matrix entries and archived outputs
+remain readable, but these failures are not AgentFold quality results.
+Missing directives are not converted into no-fold actions or reminder retries.
+The [reference inference code](https://github.com/Alibaba-NLP/DeepResearch/blob/main/WebAgent/AgentFold/infer.py)
+requires intermediate directives but allows a final answer without one; the
+native-tool adapter preserves that final-answer exemption. AppWorld response
+content remains an executable action and does not receive that exemption.
+Restoring this comparison requires a compatible trained joint folding/action
+actor and explicit accounting for its parse-retry policy, as described in the
+[AgentFold method and training protocol](https://arxiv.org/html/2510.24699).
+The 2048-token AgentKV allowance is a project
 setting; CommitKV reports this absolute budget among its evaluated settings.
 `--history-kv-target-tokens` overrides either allowance at launch.
 

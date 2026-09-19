@@ -388,6 +388,17 @@ def _guard_checkpoint_serving_layout(config, cell):
         )
 
 
+def _guard_method_actor(cell):
+    if cell["arm"] == "agentfold":
+        raise RuntimeError(
+            "AgentFold is on hold in the paper matrix: the shared experiment "
+            "actor has no trained AgentFold joint folding/action policy. "
+            "The failed run is an untrained-actor protocol diagnostic, not a "
+            "method quality result. Missing intermediate directives must not "
+            "silently become no-fold actions or reminder retries."
+        )
+
+
 def execute(config, plan, output, source, stages, selected, port_offset=0):
     config = with_port_offset(config, port_offset)
     profile_path = output / "deployment_profile.json"
@@ -409,6 +420,7 @@ def execute(config, plan, output, source, stages, selected, port_offset=0):
                 continue
             if (directory / "started.json").exists():
                 raise RuntimeError(f"Partial cell {directory}; inspect it before explicitly selecting a new output directory")
+            _guard_method_actor(cell)
             _guard_checkpoint_serving_layout(config, cell)
             directory.mkdir(parents=True, exist_ok=True)
             (directory / "started.json").write_text(json.dumps({

@@ -47,8 +47,28 @@ def test_parallel_tool_batch_is_one_action_and_requires_all_feedback():
     agentfold.prepare({"messages": messages}, state)
     assert state.next_step == 1
     with pytest.raises(ValueError, match="exactly one"):
-        agentfold.finish(response("no directive"), state)
+        agentfold.finish(response(None, calls), state)
     assert state.steps[0]["end"] == 0
+
+
+def test_final_native_answer_does_not_require_another_fold():
+    state = agentfold.State(steps=[{"start": 0, "end": 0, "content": "observation"}])
+    original = copy.deepcopy(state.steps)
+    result = agentfold.finish(response("The answer is 42."), state)
+    assert result["choices"][0]["message"]["content"] == "The answer is 42."
+    assert state.steps == original
+
+
+def test_appworld_code_is_not_a_final_native_answer():
+    state = agentfold.State(steps=[{"start": 0, "end": 0, "content": "observation"}])
+    with pytest.raises(ValueError, match="exactly one"):
+        agentfold.finish(response("print(42)"), state, code_actions=True)
+
+
+def test_incomplete_fold_markup_is_not_a_final_answer():
+    state = agentfold.State(steps=[{"start": 0, "end": 0, "content": "observation"}])
+    with pytest.raises(ValueError, match="exactly one"):
+        agentfold.finish(response('<compress>{"compress_range": [0, 0]}'), state)
 
 
 def test_native_tool_ids_survive_multiple_turns_and_folded_raw_history_stays_hidden():

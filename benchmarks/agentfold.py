@@ -26,6 +26,7 @@ identifiers, constraints and observations. Choose the range yourself.
 Then perform the benchmark's normal action (native tool call or Python code)
 or answer normally. The compress block is internal and is not a tool action.
 Do not request or assume access to discarded original steps.
+A final answer without a tool action does not require a compress block.
 """
 
 
@@ -152,7 +153,14 @@ def finish(data, state, *, code_actions=False):
     content = message.get("content") or ""
     blocks = list(re.finditer(r"<compress>\s*(.*?)\s*</compress>", content, re.DOTALL))
     next_steps = copy.deepcopy(state.steps)
-    if state.steps:
+    # The reference actor may finish with an answer instead of another folded
+    # interaction. Native text without tool calls is the final-answer surface;
+    # AppWorld content is executable code and does not imply completion.
+    final_answer = (
+        bool(content.strip()) and not code_actions and not message.get("tool_calls")
+        and "<compress" not in content and "</compress" not in content
+    )
+    if state.steps and not (final_answer and not blocks):
         if len(blocks) != 1:
             raise ValueError("AgentFold actor must emit exactly one folding directive")
         directive = json.loads(blocks[0].group(1))
@@ -174,7 +182,7 @@ def finish(data, state, *, code_actions=False):
                 raise ValueError("AgentFold folding directive must precede AppWorld code")
         next_steps = [s for s in state.steps if s["end"] < start] + [
             {"start": start, "end": end, "content": summary.strip()}]
-    elif blocks:
+    elif not state.steps and blocks:
         raise ValueError("AgentFold cannot fold an empty history")
     content = re.sub(
         r"<compress>.*?</compress>", "", content, flags=re.DOTALL

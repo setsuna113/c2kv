@@ -18,6 +18,26 @@ class PaperMatrixTest(unittest.TestCase):
     def setUp(self):
         self.config = json.loads(DEFAULT_CONFIG.read_text())
 
+    def test_agentfold_hold_precedes_launch_and_preserves_history(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            output = root / "paper"
+            plan, _ = prepare(self.config, output, root / "sglang")
+            cell_id = "bfcl_base__agentfold"
+            with mock.patch.object(runner.subprocess, "Popen") as popen:
+                with self.assertRaisesRegex(RuntimeError, "AgentFold is on hold"):
+                    execute(self.config, plan, output, root / "sglang",
+                            ["closed_loop"], {cell_id})
+                popen.assert_not_called()
+            directory = output / "closed_loop" / cell_id
+            self.assertFalse(directory.exists())
+            directory.mkdir(parents=True)
+            (directory / "complete.json").write_text("{}")
+            with mock.patch.object(runner.subprocess, "Popen") as popen:
+                execute(self.config, plan, output, root / "sglang",
+                        ["closed_loop"], {cell_id})
+                popen.assert_not_called()
+
     def test_only_requested_methods_and_ratio(self):
         rows = cells(self.config)
         self.assertEqual(len(rows), 63)
