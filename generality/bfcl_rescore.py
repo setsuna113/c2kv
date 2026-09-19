@@ -36,6 +36,7 @@ def prepare(cell_dir: Path, output: Path) -> dict:
         "cell_dir": str(cell_dir.resolve()), "task_ids": task_ids,
         "category": category, "n_expected": len(task_ids),
         "duplicate_rows": info["duplicate_rows"],
+        "terminal_failures": info["terminal_failures"],
         "result_sha256": hashlib.sha256(result.read_bytes()).hexdigest(),
         "sources": {tid: info["canonical"][tid]["path"] for tid in task_ids},
     }

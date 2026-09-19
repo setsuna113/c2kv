@@ -11,6 +11,11 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any, Iterable
 
+try:
+    from .bfcl_completion import completion_kind, terminal_failure_kind
+except ImportError:
+    from bfcl_completion import completion_kind, terminal_failure_kind
+
 
 RESULT_GLOB = "batches/*/bfcl_worker/bfcl/result/**/*.json"
 
@@ -21,13 +26,13 @@ def ordered_unique(values: Iterable[str]) -> list[str]:
 
 
 def bfcl_row_is_valid(row: dict[str, Any]) -> bool:
-    """Whether a row is a completed official model output.
+    """Whether a row is terminal for the official scorer.
 
-    An incorrect or empty model result remains a valid scored output.  A
-    traceback, or a malformed row without the official ``result`` field, is a
-    retryable execution failure and must not silently become a zero score.
+    An incorrect or empty model result, context overflow, or invalid HiAgent
+    retrieval is scored as-is.  Other tracebacks and rows without ``result``
+    are retryable execution failures.
     """
-    return "result" in row and row.get("traceback") is None
+    return completion_kind(row) != "incomplete"
 
 
 def collect_bfcl_results(
@@ -101,6 +106,12 @@ def collect_bfcl_results(
         if task_id in canonical and not canonical[task_id]["valid"]
     ]
     missing_task_ids = [task_id for task_id in expected if task_id not in canonical]
+    terminal_failures = {
+        task_id: kind
+        for task_id in expected
+        if task_id in canonical
+        if (kind := terminal_failure_kind(canonical[task_id]["row"])) is not None
+    }
     refill_set = set(invalid_task_ids) | set(missing_task_ids)
     refill_task_ids = [task_id for task_id in expected if task_id in refill_set]
     unexpected_task_ids = sorted(set(by_task) - expected_set)
@@ -113,6 +124,7 @@ def collect_bfcl_results(
         "valid_task_ids": valid_task_ids,
         "invalid_task_ids": invalid_task_ids,
         "missing_task_ids": missing_task_ids,
+        "terminal_failures": terminal_failures,
         "refill_task_ids": refill_task_ids,
         "unexpected_task_ids": unexpected_task_ids,
         "expected_count": len(expected),

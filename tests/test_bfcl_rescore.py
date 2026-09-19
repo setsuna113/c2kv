@@ -30,6 +30,26 @@ def test_prepare_deduplicates_and_preserves_wrong_but_valid_result(tmp_path):
         prepare(cell, out)
 
 
+def test_prepare_preserves_terminal_traceback_for_official_scorer(tmp_path):
+    cell = tmp_path / "cell"
+    cell.mkdir()
+    task_id = "multi_turn_base_1"
+    (cell / "cell.json").write_text(json.dumps({"task_ids": [task_id]}))
+    failure = {
+        "id": task_id,
+        "result": "",
+        "traceback": "The input (138237 tokens) is longer than the model's context length (131072 tokens).",
+    }
+    write_attempt(cell, "first", [failure])
+
+    out = tmp_path / "score"
+    receipt = prepare(cell, out)
+    result_path = out / "result/c2kv-dedup/multi_turn/BFCL_v4_multi_turn_base_result.json"
+    assert json.loads(result_path.read_text(encoding="utf-8")) == failure
+    assert receipt["terminal_failures"] == {task_id: "context_overflow"}
+    assert json.loads((out / "dedup_manifest.json").read_text())["terminal_failures"] == receipt["terminal_failures"]
+
+
 def test_incomplete_cell_cannot_publish_score_input(tmp_path):
     cell = tmp_path / "cell"
     cell.mkdir()

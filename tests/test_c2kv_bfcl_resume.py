@@ -7,7 +7,7 @@ import types
 from pathlib import Path
 from unittest.mock import patch
 
-from generality.bfcl_results import collect_bfcl_results
+from generality.bfcl_results import collect_bfcl_results, completion_receipt
 
 
 def _result_file(cell_dir: Path, attempt: str) -> Path:
@@ -69,6 +69,39 @@ def test_collector_prefers_latest_valid_and_emits_complete_refill_order(tmp_path
     assert result["expected_rows"] == 5
     assert result["duplicate_rows"] == 3
     assert result["malformed_rows"] == 2
+
+
+def test_scored_failures_are_terminal_but_backend_failures_refill(tmp_path):
+    rows = [
+        {"id": "overflow", "result": "", "traceback":
+         "The input (138237 tokens) is longer than the model's context length (131072 tokens)."},
+        {"id": "missing_subgoal", "result": "", "traceback":
+         "HiAgent requested nonexistent completed subgoals"},
+        {"id": "repeated_retrieval", "result": "", "traceback":
+         "HiAgent requested an already revealed trajectory without advancing"},
+        {"id": "bad_gateway", "result": "", "traceback": "HTTP 502 Bad Gateway"},
+        {"id": "timeout", "result": "", "traceback": "request timed out"},
+        {"id": "engine_crash", "result": "", "traceback": "engine crashed"},
+        {"id": "no_result", "traceback":
+         "The input (138237 tokens) is longer than the model's context length (131072 tokens)."},
+    ]
+    _write_rows(_result_file(tmp_path, "attempt"), rows)
+    _write_rows(_result_file(tmp_path, "later"), [
+        {"id": "overflow", "result": "", "traceback": "HTTP 502 Bad Gateway"},
+    ])
+    expected = [row["id"] for row in rows] + ["never_started"]
+
+    result = collect_bfcl_results(tmp_path, expected)
+
+    assert result["valid_task_ids"] == expected[:3]
+    assert result["refill_task_ids"] == expected[3:]
+    assert result["terminal_failures"] == {
+        "overflow": "context_overflow",
+        "missing_subgoal": "hiagent_invalid_retrieval",
+        "repeated_retrieval": "hiagent_invalid_retrieval",
+    }
+    assert completion_receipt(result)["terminal_failures"] == result["terminal_failures"]
+    assert result["canonical"]["overflow"]["row"] == rows[0]
 
 
 def test_validate_chunk_deduplicates_and_rejects_foreign_or_malformed_rows(tmp_path):
