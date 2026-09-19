@@ -1,5 +1,53 @@
 # Paper CUDA benchmarks
 
+## Tool-definition and joint component experiments
+
+`python -m benchmarks.paper.tool_study --base-config <config.json>
+--tool-checkpoint <T0/checkpoint> --output-root <new-results> --out <joint.json>` writes a separate
+seven-cell configuration for the paper's context-type study. Run it with the
+existing paper runner. It contains three anchors (Full/Full, uniform-tool/Full,
+Full/compressed-history) and the four cells of uniform/hybrid tools crossed
+with recovery off/on. The builder fixes the learned `t02_risk` controller,
+threshold 0.5 and ratio8, independently of the historical default D3 matrix.
+
+`c2kv_c1_off_r8` routes to the delivered `c2kv_only` controller: it preserves
+the S0 initial history allocation and ratio of C1, and removes recovery. It is
+a component control, not the bare ratio4 C2KV baseline. Native tool top-k
+selection admits all tools when a catalog has at most k entries; receipts
+identify this all-native case and report zero compressed tool chunks.
+
+The recorded-decision study is separate from closed-loop task success:
+`python -m benchmarks.tool_definition.cli prepare` freezes the input records,
+and `evaluate` runs the five tool KV methods and selection ablations. See the
+CLI help for its manifest, checkpoint and device arguments. It uses the
+bundled model/runtime and never imports the separate training worktree.
+Selection-based tool baselines use a native prefill followed by headwise
+pruning; this does not claim reduced initial prefill or serving latency.
+
+Input JSONL rows carry `decision_id`, `messages`, `tools` and explicit
+`gold_tool_calls` (an empty list denotes a recorded no-call decision).
+`prepare --input <decisions.jsonl> --checkpoint <T0> --out <manifest-dir>`
+freezes all layouts at ratios 8 and 12 by default. Then run
+`evaluate --manifest <manifest-dir/manifest.json> --checkpoint <T0>
+--device cuda:0 --dtype bfloat16 --max-new-tokens <limit> --out <new-results>`.
+`--methods` and `--layouts` independently select the backend and allocation
+axes. Model weights, tokenizer, records and prompt identities are bound in
+the manifest. History is always full in this evaluator.
+
+`results.jsonl` contains each generated action and actual after-prefill KV
+accounting; `evaluation.json` groups strict ordered call accuracy and first
+tool-name accuracy over call decisions, and false-call rate over no-call
+decisions. `R_tool` is Full / retained marginal tool KV, including protocol
+tokens and native schemas. The marginal baseline is the same conversation
+without the tool protocol. Random top-k fixes the number of native schemas,
+not their token width; rows exceeding the hybrid allowance are marked and
+must not be described as an equal-memory control.
+
+Keep tool, history and whole-context resident KV separate. Equal remainder
+ratios do not make uniform and hybrid total memory equal: native schemas and
+protocol tokens count too. Use the measured per-layer KV budget and the same
+frozen sample cohort for memory comparisons.
+
 This package runs the accepted portable benchmark through the independent
 `c2kv-paper` and `sglang-paper` worktrees. The final participant additionally
 uses D3 hybrid recovery through the delivered native C1 interface. Preparation does not start any

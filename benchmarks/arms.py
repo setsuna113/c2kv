@@ -327,6 +327,14 @@ ARMS: Dict[str, Arm] = {
             description="Native event-packed static gist compression, without S0 allocation, detector or recovery",
         ),
         Arm(
+            name="c2kv_c1_off_r8",
+            compress_history=True,
+            ratio=8,
+            query_projection="base",
+            native_controller="c1_recovery_off",
+            description="C1 ratio8 initial allocation with recovery disabled; paired component ablation",
+        ),
+        Arm(
             name="c2kv_c1_t02_r8",
             compress_history=True,
             ratio=8,

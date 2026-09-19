@@ -546,9 +546,6 @@ def plan_visible_tool_memory(payload: Mapping[str, Any], spec: ToolMemorySpec,
     native = native_indices(snapshots, spec, messages)
     native_set = set(native)
     compressed = tuple(index for index in range(len(snapshots)) if index not in native_set)
-    if not compressed:
-        raise ToolMemoryError("no_compressed_remainder",
-                              f"hybrid top-{spec.top_k} keeps all {len(snapshots)} visible definitions native")
     n_structured = len(tools)
     compressed_tools = tuple(index for index in compressed if index < n_structured)
     compressed_sources = tuple(index - n_structured for index in compressed if index >= n_structured)
@@ -573,8 +570,9 @@ def plan_visible_tool_memory(payload: Mapping[str, Any], spec: ToolMemorySpec,
             if not messages or messages[0].get("role") != "system":
                 for anchor in anchors:
                     anchor["rewritten_message_index"] = anchor["message_index"] + 1
-        chunks = document_chunks(tokenizer.native_ids,
-                                 t0_documents(snapshots, compressed), spec)
+        chunks = (document_chunks(tokenizer.native_ids,
+                                  t0_documents(snapshots, compressed), spec)
+                  if compressed else [])
         system_only = [m for m in messages if m.get("role") == "system"][:1] or [
             {"role": "system", "content": ""}]
         protocol_prefix = [m for m in rewritten if m.get("role") == "system"][:1]
@@ -601,6 +599,7 @@ def plan_visible_tool_memory(payload: Mapping[str, Any], spec: ToolMemorySpec,
         "structured_tools_in_prompt": spec.encoder != "t0" or not tools,
         "n_tools": len(snapshots), "n_structured_tools": n_structured,
         "n_visible_source_spans": len(spans), "n_native": len(native),
+        "all_native": not compressed,
         "native_indices": list(native), "n_documents": len(compressed) if spec.encoder == "t0" else 0,
         "n_chunks": len(chunks), "compressed_tool_indices": list(compressed_tools),
         "compressed_source_indices": list(compressed_sources),

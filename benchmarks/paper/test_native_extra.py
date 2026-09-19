@@ -365,3 +365,16 @@ def test_replay_requires_real_ace_receipts():
     assert normalized["store"] is False
     assert "c2kv_measurement_session_id" not in normalized
     assert normalized["c2kv_eval_context"]["task_id"] == "agent_multi_turn_1"
+
+
+def test_replay_forwards_recorded_tool_spans_only_with_tool_memory():
+    payload = {"messages": [{"role": "system", "content": "system"},
+                            {"role": "user", "content": "question"}],
+               "temperature": 0.001, "top_p": 1, "max_tokens": 1000,
+               "c2kv_ace_source": {"version": "acebench-text-actions-v1", "receipts": []},
+               "c2kv_tool_spans_v1": [{"name": "tool", "start": 0, "end": 1}]}
+    raw = native_extra.replay_payload(payload, "agent_multi_turn_1", 0)
+    assert "c2kv_tool_spans_v1" not in raw
+    assert raw["messages"] == payload["messages"]
+    with_tools = native_extra.replay_payload(payload, "agent_multi_turn_1", 0, tool_memory=True)
+    assert with_tools["c2kv_tool_spans_v1"] == payload["c2kv_tool_spans_v1"]

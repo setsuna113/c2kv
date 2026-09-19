@@ -39,6 +39,10 @@ def arm_identity(config):
         return {"arm": arm, "ratio": 4, "method": "c2kv_native",
                 "detector": "disabled", "candidate_algorithm": None,
                 "model_name": "c2kv_native_r4"}
+    if arm == "c2kv_c1_off_r8":
+        return {"arm": arm, "ratio": 8, "method": "c2kv_only",
+                "detector": "disabled", "candidate_algorithm": None,
+                "model_name": "c2kv_only"}
     if arm in ARM_TO_VARIANT:
         variant = ARM_TO_VARIANT[arm]
         return {"arm": arm, "ratio": 8, "method": "proposed",
@@ -119,6 +123,10 @@ def validate_ready_manifest(config, benchmark, task, ready_path, controller_path
             raise RuntimeError(f"Native {identity['arm']} candidate controller identity differs")
     elif candidate is not None or loaded_candidate is not None:
         raise RuntimeError(f"Native {identity['arm']} detector controller identity differs")
+    elif identity["method"] == "c2kv_only":
+        if any(key in controller for key in
+               ("post_draft_recovery", "gp_experiments", "d3_hybrid_recovery")):
+            raise RuntimeError(f"Native {identity['arm']} unexpectedly enables recovery")
     elif identity["detector"] == "d3_hybrid":
         recovery = controller.get("post_draft_recovery")
         if (controller.get("d3_hybrid_recovery") is not True
@@ -212,8 +220,12 @@ def selected_tasks(config, benchmark, requested=None):
     return available
 
 
-def replay_payload(payload, task, step):
-    """Bind a recorded ACE prefix only when it carries real source receipts."""
+def replay_payload(payload, task, step, *, tool_memory=False):
+    """Bind a recorded ACE prefix only when it carries real source receipts.
+
+    Full records ``c2kv_tool_spans_v1`` for tool-context replays; a raw-tool
+    native server rejects that field, so it is forwarded only with tool memory.
+    """
     _task_id(task)
     if type(step) is not int or step < 0 or not isinstance(payload, Mapping):
         raise ValueError("ACEBench replay requires one nonnegative step and request object")
@@ -235,6 +247,8 @@ def replay_payload(payload, task, step):
     if result.get("stream") is False:
         result.pop("stream")
     result.pop("c2kv_measurement_session_id", None)
+    if not tool_memory:
+        result.pop("c2kv_tool_spans_v1", None)
     result["store"] = False
     result["c2kv_eval_context"] = {
         "benchmark": "acebench", "task_id": task,
@@ -260,6 +274,8 @@ def server_command(config, benchmark, task, native, delivery, controller_path):
         design["candidate_id"] = identity["model_name"]
         design["run_id_template"] = f"paper_{identity['arm']}_{identity['detector']}"
         design["runtime"]["controller"] = str(Path(controller_path).resolve())
+        if identity["method"] == "c2kv_only":
+            design["runtime"].pop("shadow_feature_config", None)
     design["runtime"].update(
         sglang_backend_url=c1_appworld._sglang_upstream(config),
         device="cpu", npu_allocator_metrics=False,
