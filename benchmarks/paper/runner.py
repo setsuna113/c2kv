@@ -28,6 +28,7 @@ DEFAULT_CONFIG = Path(__file__).with_name("config.json")
 ACEBENCH_MAX_RUNNING_REQUESTS = 2
 REFERENCE_ATTENTION_MEM_FRACTION = 0.65   # static pool cap for reference_attention arms (see server_command)
 C1_ARMS = {"c2kv_c1_t02_r8": 8, "c2kv_c1_t02_r4": 4}   # native C1 controller arms and their ratios
+BUDGET_TEXT_BENCHMARKS = {"bfcl_base", "bfcl_long_context", "acebench_agent"}
 
 EVENT_NATIVE_CHECKPOINT_MARKERS = {
     "history_memory_training_profile": "history-event-base-query-v1",
@@ -218,7 +219,7 @@ def with_port_offset(config, port_offset):
 
 
 def with_acon_budget(config, budget):
-    """Add distinct BFCL budget cells without rewriting original ACON results."""
+    """Add distinct budget cells without rewriting original ACON results."""
     if budget is None:
         return config
     from benchmarks.arms import get_arm
@@ -226,9 +227,9 @@ def with_acon_budget(config, budget):
     if any(method["arm"] == arm.name for method in config["methods"]):
         raise ValueError(f"ACON budget arm already exists: {arm.name}")
     benchmarks = [row["name"] for row in config["benchmarks"]
-                  if row["name"] in {"bfcl_base", "bfcl_long_context"}]
+                  if row["name"] in BUDGET_TEXT_BENCHMARKS]
     if not benchmarks:
-        raise ValueError("ACON budget overlay requires a BFCL benchmark")
+        raise ValueError("ACON budget overlay requires BFCL or ACEBench Agent")
     return dict(config, methods=[*config["methods"], {
         "method": "ACON-budget", "arm": arm.name, "group": "budget",
         "history_budget_tokens": budget, "benchmarks": benchmarks,
@@ -236,7 +237,7 @@ def with_acon_budget(config, budget):
 
 
 def with_hiagent_budget(config, budget):
-    """Add distinct BFCL HiAgent budget cells without changing the original arm."""
+    """Add distinct HiAgent budget cells without changing the original arm."""
     if budget is None:
         return config
     if isinstance(budget, bool) or not isinstance(budget, int) or budget < 1:
@@ -246,9 +247,9 @@ def with_hiagent_budget(config, budget):
     if any(method["arm"] == arm.name for method in config["methods"]):
         raise ValueError(f"HiAgent budget arm already exists: {arm.name}")
     benchmarks = [row["name"] for row in config["benchmarks"]
-                  if row["name"] in {"bfcl_base", "bfcl_long_context"}]
+                  if row["name"] in BUDGET_TEXT_BENCHMARKS]
     if not benchmarks:
-        raise ValueError("HiAgent budget overlay requires a BFCL benchmark")
+        raise ValueError("HiAgent budget overlay requires BFCL or ACEBench Agent")
     return dict(config, methods=[*config["methods"], {
         "method": "HiAgent-budget", "arm": arm.name, "group": "budget",
         "history_budget_tokens": budget, "benchmarks": benchmarks,
@@ -381,15 +382,17 @@ def prepare(config, output, source):
         if arm.text_history_budget_tokens is not None:
             if (type(item.get("history_budget_tokens")) is not int
                     or item["history_budget_tokens"] != arm.text_history_budget_tokens
-                    or not set(item.get("benchmarks") or ()) <= {"bfcl_base", "bfcl_long_context"}
+                    or not set(item.get("benchmarks") or ()) <= BUDGET_TEXT_BENCHMARKS
                     or not item.get("benchmarks")):
-                raise ValueError("Text budget cells require a matching token cap and explicit BFCL benchmarks")
+                raise ValueError("Text budget cells require a matching token cap and explicit supported benchmarks")
             continue
         if is_candidate_arm(arm.name):
             if (item.get("ratio") != 8 or arm.ratio != 8
                     or arm.native_controller != "candidate_" + ARM_TO_VARIANT[arm.name]
-                    or set(item.get("benchmarks") or ()) != {"bfcl_base"}):
-                raise ValueError("Candidate arms require native ratio8 and an explicit bfcl_base-only method")
+                    or not item.get("benchmarks")
+                    or not set(item["benchmarks"]) <= {"bfcl_base", "acebench_agent"}
+                    or not set(item["benchmarks"]) <= {b["name"] for b in config["benchmarks"]}):
+                raise ValueError("Candidate arms require native ratio8 and explicit BFCL base/ACEBench Agent methods")
             continue
         if arm.name == "c2kv_native_r4":
             if item.get("ratio") != 4 or item["method"] != "C2KV":
@@ -864,11 +867,13 @@ def main(argv=None):
     parser.add_argument("--stage", choices=["all", "closed_loop", "common_prefix"], default="all")
     parser.add_argument("--cells", default="", help="comma-separated exact cell ids")
     parser.add_argument("--candidate-arms", default="",
-                        help="explicit BFCL base candidates: all or comma-separated static_t02,turn_c1,goal_rescue,dependency_first")
+                        help="explicit candidates: all or comma-separated static_t02,turn_c1,goal_rescue,dependency_first")
+    parser.add_argument("--candidate-benchmarks", default="bfcl_base",
+                        help="candidate benchmark scope: bfcl_base (default), acebench_agent, or both comma-separated")
     parser.add_argument("--acon-budget-tokens", type=int,
-                        help="add budget-adapted ACON BFCL cells with this actor history cap")
+                        help="add budget-adapted ACON BFCL/ACEBench cells with this actor history cap")
     parser.add_argument("--hiagent-budget-tokens", type=int,
-                        help="add budget-adapted HiAgent full BFCL cells with this actor history cap")
+                        help="add budget-adapted HiAgent full BFCL/ACEBench cells with this actor history cap")
     parser.add_argument("--tool-contexts", default="",
                         help="add named tool contexts to history/recovery methods, preserving raw cells")
     parser.add_argument("--tool-checkpoint", type=Path,
@@ -878,7 +883,9 @@ def main(argv=None):
     args = parser.parse_args(argv)
     config = json.loads(args.config.read_text())
     if args.action != "aggregate":
-        config = with_candidate_methods(config, parse_candidate_arms(args.candidate_arms))
+        config = with_candidate_methods(
+            config, parse_candidate_arms(args.candidate_arms),
+            tuple(args.candidate_benchmarks.split(",")))
         config = with_acon_budget(config, args.acon_budget_tokens)
         config = with_hiagent_budget(config, args.hiagent_budget_tokens)
         config = with_tool_contexts(config, list(filter(None, args.tool_contexts.split(","))),

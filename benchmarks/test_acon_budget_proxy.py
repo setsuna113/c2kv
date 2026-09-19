@@ -37,7 +37,7 @@ def test_budget_matrix_uses_renderer_and_original_cache_policy(tmp_path):
     original = json.loads(DEFAULT_CONFIG.read_text())
     config = with_acon_budget(original, 768)
     added = [cell for cell in cells(config) if cell["arm"] == "acon_hist_ut_co_b768"]
-    assert {cell["benchmark"] for cell in added} == {"bfcl_base", "bfcl_long_context"}
+    assert {cell["benchmark"] for cell in added} == {"bfcl_base", "bfcl_long_context", "acebench_agent"}
     assert all(cell["history_budget_tokens"] == 768 for cell in added)
     command = server_command(config, Path("engine"), "acon_hist_ut_co_b768")
     assert command[2] == "benchmarks.paper.budget_server"

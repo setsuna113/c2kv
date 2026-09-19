@@ -129,7 +129,8 @@ def expand_categories(category: str, category_map: Dict[str, List[str]]) -> List
     return list(category_map.get(category, [category]))
 
 
-def harness_env(base_url: str, user_base_url: str, model: str) -> Dict[str, str]:
+def harness_env(base_url: str, user_base_url: str, model: str,
+                *, record_source: bool = False) -> Dict[str, str]:
     """Agent clients -> role history + arm proxy; simulator -> raw upstream."""
     env = {
         **os.environ,
@@ -145,6 +146,10 @@ def harness_env(base_url: str, user_base_url: str, model: str) -> Dict[str, str]
         benchmark_modules = str(Path(__file__).resolve().parents[1])
         env["PYTHONPATH"] = os.pathsep.join(part for part in (
             benchmark_modules, os.environ.get("PYTHONPATH", "")) if part)
+    if record_source:
+        env["C2KV_ACE_RECORD_SOURCE"] = "1"
+    else:
+        env.pop("C2KV_ACE_RECORD_SOURCE", None)
     return env
 
 
@@ -450,6 +455,7 @@ def run(ctx: RunContext) -> Dict[str, Any]:
         num_threads=ctx.opt("num_workers", 1),
         max_dialog_turns=ctx.opt("max_iter", DEFAULT_MAX_DIALOG_TURNS),
         task_ids=ctx.opt("acebench_task_ids", ""), max_tasks=ctx.opt("max_tasks"),
+        record_prefixes=ctx.opt("record_prefixes", ""),
         python=ctx.opt("bench_python"),
     )
     summary["cost_join"] = (COST_JOIN if all(c.startswith("agent_") for c in summary["categories"])
@@ -465,6 +471,7 @@ def run_acebench(base_url: str, user_base_url: str, out_dir: Path,
                  temperature: float = 0.0, top_p: float = 1.0,
                  max_tokens: int = 1200, task_ids: str = "",
                  max_tasks: Optional[int] = None,
+                 record_prefixes: str = "",
                  python: Optional[str] = None) -> Dict[str, Any]:
     acebench_dir = Path(acebench_dir) if acebench_dir else ACEBENCH_DIR
     python = python or sys.executable
@@ -478,7 +485,8 @@ def run_acebench(base_url: str, user_base_url: str, out_dir: Path,
         harness = prepare_subset_harness(work, acebench_dir, category, selected_tests)
     if os.environ.get(TOOL_CONTEXT_ENV) == "1":
         harness = prepare_tool_span_harness(work, harness)
-    env = harness_env(base_url, user_base_url, model)
+    env = harness_env(base_url, user_base_url, model,
+                      record_source=bool(record_prefixes))
     telemetry_path = Path(out_dir).resolve() / "measurement" / "harness_events.jsonl"
     env["C2KV_ACEBENCH_TELEMETRY"] = str(telemetry_path)
     command = generate_command(python, harness, model, category, language, num_threads,

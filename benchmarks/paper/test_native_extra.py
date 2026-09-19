@@ -1,4 +1,5 @@
 import json
+import hashlib
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -7,6 +8,7 @@ from unittest import mock
 import pytest
 
 from benchmarks.paper import native_extra
+from benchmarks.paper.candidate_matrix import VARIANT_TO_ARM
 
 
 def _config(tmp_path):
@@ -112,6 +114,171 @@ def test_tool_on_c1_uses_recovery_controller_and_tool_flags(tmp_path, benchmark)
     assert value("--tool-memory") == "t0:r8"
     assert value("--tool-checkpoint") == str(Path(config["tool_checkpoint"]).resolve())
     assert value("--tool-budget-tokens") == "512"
+
+
+@pytest.mark.parametrize("arm,detector,ratio,model,variant", [
+    ("c2kv_native_r4", "disabled", 4, "c2kv_native_r4", None),
+    ("c2kv_c1_t02_r8", "t02_risk", 8, "c1_t02_risk", None),
+    ("c2kv_c1_t02_r4", "t02_risk", 4, "c1_t02_risk", None),
+    ("c2kv_c1_t02_r8", "d3_hybrid", 8, "c1_d3_hybrid", None),
+    ("c2kv_c1_t02_r4", "d3_hybrid", 4, "c1_d3_hybrid", None),
+    *[(arm, "t02_risk", 8, f"c2kv_{variant}", variant)
+      for variant, arm in VARIANT_TO_ARM.items()],
+])
+def test_ace_closed_loop_and_replay_command_use_actual_arm(
+        tmp_path, arm, detector, ratio, model, variant):
+    config = _config(tmp_path)
+    config["native_arm"] = arm
+    config["c1"]["detector"] = detector
+    root = Path(__file__).resolve().parents[2] / "experiments" / "history_system"
+    controller = tmp_path / "controller.json"
+    controller.write_text("{}", encoding="utf-8")
+    command = native_extra.server_command(
+        config, "acebench_agent", "task_1", tmp_path / "native", root, controller)
+    replay = native_extra.controller_command(
+        config, "acebench_agent", "task_1", tmp_path / "native", root, controller)
+    assert replay == command
+    def value(flag):
+        return command[command.index(flag) + 1]
+    identity = native_extra.arm_identity(config)
+    assert identity["method"] == ("c2kv_native" if arm == "c2kv_native_r4" else "proposed")
+    assert identity["detector"] == ("disabled" if arm == "c2kv_native_r4"
+                                    else "t02_risk" if variant else detector)
+    assert identity["candidate_algorithm"] == variant
+    assert value("--ratio") == str(ratio)
+    assert value("--model-name") == model
+    assert value("--benchmark") == "acebench"
+    assert value("--source-profile") == "acebench-text-actions-v1"
+    if arm == "c2kv_native_r4":
+        assert value("--view-mode") == "ac_gist_static"
+        assert "--s0-config" not in command
+    else:
+        assert value("--view-mode") == "ac_native_s0_lexical_raw_reserve_failed_operation"
+        assert value("--s0-config") == str(controller.resolve())
+        assert arm in value("--run-id")
+
+
+@pytest.mark.parametrize("arm,detector,variant", [
+    ("c2kv_native_r4", "disabled", None),
+    ("c2kv_c1_t02_r4", "d3_hybrid", None),
+    *[(arm, "t02_risk", variant) for variant, arm in VARIANT_TO_ARM.items()],
+])
+def test_ace_official_task_acceptance_uses_actual_arm_identity(
+        tmp_path, monkeypatch, arm, detector, variant):
+    config = _config(tmp_path)
+    config["native_arm"] = arm
+    config["c1"]["detector"] = "d3_hybrid"
+    delivery = tmp_path / "delivery"
+    (delivery / "runtime").mkdir(parents=True)
+    seen = []
+
+    class FakeRunner:
+        def _stop_server(self, process, supervisor):
+            final = supervisor.parent / "server" / "final.json"
+            final.parent.mkdir()
+            final.write_text(json.dumps({"status": "ok", "journal_summary": {
+                "completed": 1, "failed": 0, "pending": 0}}), encoding="utf-8")
+
+    class FakeDelivery:
+        def summarize_task(self, *args):
+            return {"decision_count": 1}
+
+        def functional_checks(self, method, selected_detector, metrics, candidate):
+            seen.append((method, selected_detector, candidate, metrics))
+            return {"required": {"arm_identity": True}}
+
+    monkeypatch.setattr(native_extra, "server_command",
+                        lambda *args: [sys.executable, "--model-name", "test-model"])
+    monkeypatch.setattr(native_extra.c1_appworld, "_delivery_path", lambda _: delivery)
+    monkeypatch.setattr(native_extra.c1_appworld, "_delivery_runner", lambda _: FakeRunner())
+    monkeypatch.setattr(native_extra.c1_appworld, "_delivery_run_c1", lambda *_: FakeDelivery())
+    monkeypatch.setattr(native_extra.c1_appworld, "_wait_ready",
+                        lambda *args: {"base_url": "http://127.0.0.1:34100/v1"})
+    monkeypatch.setattr(native_extra, "_run_official",
+                        lambda *args: {"n": 1, "semantic_score": 1.0})
+    monkeypatch.setattr(native_extra, "validate_ready_manifest", lambda *args: None)
+    monkeypatch.setattr(native_extra.subprocess, "Popen",
+                        lambda *args, **kwargs: SimpleNamespace(returncode=0))
+    native_extra.run_task(config, "acebench_agent", "task_1", tmp_path / "native",
+                          delivery, tmp_path / "controller.json")
+    assert seen == [("c2kv_native" if arm == "c2kv_native_r4" else "proposed",
+                     detector, variant, {"decision_count": 1})]
+
+
+@pytest.mark.parametrize("arm,detector,variant", [
+    ("c2kv_native_r4", "disabled", None),
+    ("c2kv_c1_t02_r8", "t02_risk", None),
+    ("c2kv_c1_t02_r4", "d3_hybrid", None),
+    *[(arm, "t02_risk", variant) for variant, arm in VARIANT_TO_ARM.items()],
+])
+def test_ready_manifest_binds_loaded_controller_and_candidate_variant(
+        tmp_path, arm, detector, variant):
+    config = _config(tmp_path)
+    config["native_arm"] = arm
+    config["c1"]["detector"] = detector
+    identity = native_extra.arm_identity(config)
+    controller = tmp_path / "controller.json"
+    controller_config = (
+        {"candidate_algorithm": {"variant": variant, "risk_threshold": 0.5,
+                                 "risk_artifact": {"model_kind": "c1_risk_logistic"}}} if variant else
+        {"post_draft_recovery": {"gate": "prefill_linear_head"},
+         "d3_hybrid_recovery": True} if detector == "d3_hybrid" else
+        {"gp_experiments": {"set_selector": "risk", "selector_artifact": {
+            "model_kind": "c1_risk_logistic"}}})
+    controller.write_text(json.dumps(controller_config), encoding="utf-8")
+    route = ({"recovery_enabled": False, "max_generations_per_decision": 1}
+             if arm == "c2kv_native_r4" else
+             {"recovery_enabled": True, "max_generations_per_decision": 2,
+              "baseline_identity": f"c2kv-paper-candidates-v1:{variant}"}
+             if variant else {})
+    manifest = {
+        "schema": "a-event-native-server-v1", "status": "ready",
+        "benchmark": "acebench", "source_profile": "acebench-text-actions-v1",
+        "allowed_task_ids": ["task_1"], "model_name": identity["model_name"],
+        "view_mode": ("ac_gist_static" if arm == "c2kv_native_r4" else
+                      "ac_native_s0_lexical_raw_reserve_failed_operation"),
+        "ratio": identity["ratio"], "generation_backend": "sglang",
+        "route_contract": route,
+    }
+    if arm != "c2kv_native_r4":
+        manifest["s0_controller_contract"] = {
+            "source": str(controller.resolve()), "config": controller_config,
+            "sha256": hashlib.sha256(controller.read_bytes()).hexdigest(),
+        }
+    if variant:
+        manifest["candidate_algorithm"] = {"variant": variant, "stable_call_ids": True}
+    ready = tmp_path / "ready.json"
+    ready.write_text(json.dumps(manifest), encoding="utf-8")
+    native_extra.validate_ready_manifest(config, "acebench_agent", "task_1", ready, controller)
+    manifest["ratio"] = 99
+    ready.write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(RuntimeError, match="selected arm"):
+        native_extra.validate_ready_manifest(config, "acebench_agent", "task_1", ready, controller)
+    if arm != "c2kv_native_r4":
+        manifest["ratio"] = identity["ratio"]
+        manifest["s0_controller_contract"]["sha256"] = "0" * 64
+        ready.write_text(json.dumps(manifest), encoding="utf-8")
+        with pytest.raises(RuntimeError, match="different S0 controller"):
+            native_extra.validate_ready_manifest(config, "acebench_agent", "task_1", ready, controller)
+    if variant:
+        manifest["s0_controller_contract"]["sha256"] = hashlib.sha256(controller.read_bytes()).hexdigest()
+        manifest["candidate_algorithm"]["variant"] = "wrong_variant"
+        ready.write_text(json.dumps(manifest), encoding="utf-8")
+        with pytest.raises(RuntimeError, match="candidate controller identity"):
+            native_extra.validate_ready_manifest(config, "acebench_agent", "task_1", ready, controller)
+    elif arm != "c2kv_native_r4":
+        wrong = ({"gp_experiments": {"set_selector": "risk", "selector_artifact": {
+            "model_kind": "c1_risk_logistic"}}} if detector == "d3_hybrid" else
+                 {"post_draft_recovery": {"gate": "prefill_linear_head"},
+                  "d3_hybrid_recovery": True})
+        controller.write_text(json.dumps(wrong), encoding="utf-8")
+        manifest["s0_controller_contract"] = {
+            "source": str(controller.resolve()), "config": wrong,
+            "sha256": hashlib.sha256(controller.read_bytes()).hexdigest(),
+        }
+        ready.write_text(json.dumps(manifest), encoding="utf-8")
+        with pytest.raises(RuntimeError, match="detector controller identity"):
+            native_extra.validate_ready_manifest(config, "acebench_agent", "task_1", ready, controller)
 
 
 def test_ace_official_score_and_user_model_are_bound(tmp_path, monkeypatch):

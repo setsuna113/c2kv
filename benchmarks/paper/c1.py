@@ -65,8 +65,8 @@ def load_delivery():
 def delivery_args(config, benchmark, output, task_ids, delivery):
     settings = config.get("c1", {})
     detector = settings.get("detector", "d3_hybrid")
-    if ARM in ARM_TO_VARIANT and benchmark != "bfcl_base":
-        raise ValueError("candidate arms currently support bfcl_base only")
+    if ARM in ARM_TO_VARIANT and benchmark not in {"bfcl_base", "acebench_agent"}:
+        raise ValueError("candidate arms currently support bfcl_base and acebench_agent")
     command = [
         "--method", "c2kv_native" if ARM == "c2kv_native_r4" else "proposed",
         "--checkpoint", config["checkpoint"],
@@ -94,7 +94,8 @@ def delivery_args(config, benchmark, output, task_ids, delivery):
         if config.get("tool_budget_tokens") is not None:
             command += ["--tool-budget-tokens", str(config["tool_budget_tokens"])]
     args = delivery.build_parser().parse_args(command)
-    args.benchmark = "acon_appworld" if benchmark == "appworld" else "bfcl"
+    args.benchmark = ("acon_appworld" if benchmark == "appworld"
+                      else "acebench" if benchmark == "acebench_agent" else "bfcl")
     args.task_id = list(task_ids)
     return args
 
@@ -170,7 +171,7 @@ def prepare_native(config, benchmark, directory, tasks, delivery):
     if ARM == "c2kv_native_r4":
         profile["comparison"] = "Independent native static gist baseline; not a detector-only C1 ablation"
     elif ARM in ARM_TO_VARIANT:
-        profile["comparison"] = "Explicit ratio-8 BFCL candidate; not a legacy C1 or D3 score"
+        profile["comparison"] = "Explicit ratio-8 candidate; not a legacy C1 or D3 score"
     profile["sglang_backend_preflight"] = delivery.preflight_sglang_backend(args)
     controller_path = native / "controller.json"
     save(controller_path, controller)
@@ -317,6 +318,14 @@ def _controller_process(command, native, task, delivery):
 
 def replay_task_id(rows, conversation):
     """Keep official episode identity, which is also rendered in evidence IDs."""
+    if any("ace_official_task_id" in row for row in rows):
+        official_ids = [row.get("ace_official_task_id") for row in rows]
+        official_id = official_ids[0]
+        if (not isinstance(official_id, str)
+                or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", official_id)
+                or any(value != official_id for value in official_ids)):
+            raise ValueError("Recorded ACE prefixes require one consistent official task ID")
+        return official_id
     identities = {row["replay_payload"].get("c2kv_measurement_session_id") for row in rows}
     if len(identities) != 1:
         raise ValueError("One recorded conversation has inconsistent episode identities")
@@ -358,7 +367,11 @@ def run_common_prefix(config, benchmark, directory, prefix_path):
         process, log, task_root = _controller_process(command, native, task, delivery)
         previous_user_turn, turn_step = None, -1
         try:
-            if ARM == "c2kv_native_r4":
+            if benchmark in {"acebench_agent", "toolsandbox"}:
+                from .native_extra import validate_ready_manifest
+                validate_ready_manifest(config, benchmark, task,
+                                        task_root / "server" / "ready.json", controller_path)
+            elif ARM == "c2kv_native_r4":
                 import native_bare
                 native_bare.validate_manifest(task_root / "server" / "ready.json")
             for step, row in enumerate(rows):

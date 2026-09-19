@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -11,12 +12,110 @@ import time
 from collections.abc import Mapping
 
 from . import c1_appworld
+from .candidate_matrix import ARM_TO_VARIANT
 from .process_lifecycle import run_owned
 
 
 BENCHMARKS = {"acebench_agent": ("acebench", "acebench-text-actions-v1"),
               "toolsandbox": ("toolsandbox", "openai-single-task-v1")}
 TASK_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*\Z")
+C1_RATIOS = {"c2kv_c1_t02_r8": 8, "c2kv_c1_t02_r4": 4}
+
+
+def arm_identity(config):
+    """Resolve the actual native controller without relying on a benchmark label."""
+    arm = config.get("native_arm", "c2kv_native_r4")
+    if arm == "c2kv_native_r4":
+        return {"arm": arm, "ratio": 4, "method": "c2kv_native",
+                "detector": "disabled", "candidate_algorithm": None,
+                "model_name": "c2kv_native_r4"}
+    if arm in ARM_TO_VARIANT:
+        variant = ARM_TO_VARIANT[arm]
+        return {"arm": arm, "ratio": 8, "method": "proposed",
+                "detector": "t02_risk", "candidate_algorithm": variant,
+                "model_name": f"c2kv_{variant}"}
+    if arm in C1_RATIOS:
+        settings = config.get("c1") or {}
+        detector = settings.get("detector", "d3_hybrid")
+        if (detector not in {"t02_risk", "d3_hybrid"}
+                or settings.get("selector_threshold", 0.5) != 0.5
+                or settings.get("history_variant", "H0") != "H0"
+                or settings.get("recovery_rounds", 1) != 1):
+            raise ValueError("C1 ACEBench/ToolSandbox requires the H0/R1 frozen detector contract")
+        return {"arm": arm, "ratio": C1_RATIOS[arm], "method": "proposed",
+                "detector": detector, "candidate_algorithm": None,
+                "model_name": f"c1_{detector}"}
+    raise ValueError(f"Unsupported native ACEBench/ToolSandbox arm: {arm!r}")
+
+
+def validate_ready_manifest(config, benchmark, task, ready_path, controller_path):
+    """Reject a server whose loaded controller differs from the selected arm."""
+    identity = arm_identity(config)
+    ready_path = Path(ready_path)
+    manifest = json.loads(ready_path.read_text(encoding="utf-8"))
+    runtime_name, source_profile = BENCHMARKS[benchmark]
+    bare = identity["method"] == "c2kv_native"
+    expected_view = ("ac_gist_static" if bare else
+                     "ac_native_s0_lexical_raw_reserve_failed_operation")
+    if (manifest.get("schema") != "a-event-native-server-v1"
+            or manifest.get("status") != "ready"
+            or manifest.get("benchmark") != runtime_name
+            or manifest.get("source_profile") != source_profile
+            or manifest.get("allowed_task_ids") != [_task_id(task)]
+            or manifest.get("model_name") != identity["model_name"]
+            or manifest.get("view_mode") != expected_view
+            or manifest.get("ratio") != identity["ratio"]
+            or manifest.get("generation_backend") != "sglang"):
+        raise RuntimeError(f"Native {identity['arm']} ready manifest differs from its selected arm")
+    if bare:
+        from experiments.history_system.native_bare import validate_manifest
+
+        validate_manifest(ready_path)
+        return manifest
+    controller_path = Path(controller_path).resolve()
+    controller_bytes = controller_path.read_bytes()
+    controller = json.loads(controller_bytes)
+    loaded = manifest.get("s0_controller_contract")
+    if (not isinstance(controller, dict) or not isinstance(loaded, Mapping)
+            or loaded.get("source") != str(controller_path)
+            or loaded.get("sha256") != hashlib.sha256(controller_bytes).hexdigest()
+            or loaded.get("config") != controller):
+        raise RuntimeError(f"Native {identity['arm']} loaded a different S0 controller")
+    variant = identity["candidate_algorithm"]
+    candidate = controller.get("candidate_algorithm")
+    loaded_candidate = manifest.get("candidate_algorithm")
+    if variant is not None:
+        route = manifest.get("route_contract") or {}
+        artifact = candidate.get("risk_artifact") if isinstance(candidate, Mapping) else None
+        if (not isinstance(candidate, Mapping) or candidate.get("variant") != variant
+                or candidate.get("risk_threshold") != 0.5
+                or not isinstance(artifact, Mapping)
+                or artifact.get("model_kind") != "c1_risk_logistic"
+                or not isinstance(loaded_candidate, Mapping)
+                or loaded_candidate.get("variant") != variant
+                or loaded_candidate.get("stable_call_ids") is not True
+                or route.get("baseline_identity") != "c2kv-paper-candidates-v1:" + variant
+                or route.get("recovery_enabled") is not True
+                or route.get("max_generations_per_decision") != 2):
+            raise RuntimeError(f"Native {identity['arm']} candidate controller identity differs")
+    elif candidate is not None or loaded_candidate is not None:
+        raise RuntimeError(f"Native {identity['arm']} detector controller identity differs")
+    elif identity["detector"] == "d3_hybrid":
+        recovery = controller.get("post_draft_recovery")
+        if (controller.get("d3_hybrid_recovery") is not True
+                or not isinstance(recovery, Mapping)
+                or recovery.get("gate") != "prefill_linear_head"
+                or "gp_experiments" in controller):
+            raise RuntimeError(f"Native {identity['arm']} detector controller identity differs")
+    else:
+        gp = controller.get("gp_experiments")
+        artifact = gp.get("selector_artifact") if isinstance(gp, Mapping) else None
+        if (controller.get("d3_hybrid_recovery") is not None
+                or not isinstance(gp, Mapping) or gp.get("set_selector") != "risk"
+                or not isinstance(artifact, Mapping)
+                or artifact.get("model_kind") != "c1_risk_logistic"):
+            raise RuntimeError(f"Native {identity['arm']} detector controller identity differs")
+    return manifest
 
 
 def _task_id(value):
@@ -130,14 +229,18 @@ def server_command(config, benchmark, task, native, delivery, controller_path):
     if benchmark not in BENCHMARKS:
         raise ValueError(f"Unsupported native bare benchmark: {benchmark}")
     delivery_root = c1_appworld._delivery_path(delivery)
-    arm = config.get("native_arm", "c2kv_native_r4")
-    if arm == "c2kv_native_r4":
+    identity = arm_identity(config)
+    if identity["method"] == "c2kv_native":
         from experiments.history_system.native_bare import configure_design
 
         design = json.loads((delivery_root / "configs" / "current_algorithm.json").read_text(encoding="utf-8"))
         design = configure_design(design)
     else:
-        design = c1_appworld._resolved_design(config, delivery_root, Path(controller_path))
+        design = json.loads((delivery_root / "configs" / "current_algorithm.json").read_text(encoding="utf-8"))
+        design["ratio"] = identity["ratio"]
+        design["candidate_id"] = identity["model_name"]
+        design["run_id_template"] = f"paper_{identity['arm']}_{identity['detector']}"
+        design["runtime"]["controller"] = str(Path(controller_path).resolve())
     design["runtime"].update(
         sglang_backend_url=c1_appworld._sglang_upstream(config),
         device="cpu", npu_allocator_metrics=False,
@@ -256,6 +359,8 @@ def run_task(config, benchmark, task, native, delivery, controller_path):
                 start_new_session=os.name == "posix",
             )
             ready = c1_appworld._wait_ready(process, task_out / "server" / "ready.json", deadline)
+            validate_ready_manifest(config, benchmark, task,
+                                    task_out / "server" / "ready.json", controller_path)
             official = _run_official(config, benchmark, task, task_out,
                                      str(ready["base_url"]),
                                      command[command.index("--model-name") + 1])
@@ -273,12 +378,12 @@ def run_task(config, benchmark, task, native, delivery, controller_path):
     namespace = BENCHMARKS[benchmark][0]
     metrics = run_c1.summarize_task(namespace, task, task_out, official,
                                     time.monotonic() - started)
-    arm = config.get("native_arm", "c2kv_native_r4")
-    method = "c2kv_native" if arm == "c2kv_native_r4" else "proposed"
-    detector = (config.get("c1") or {}).get("detector", "t02_risk")
-    acceptance = run_c1.functional_checks(method, detector, metrics)
+    identity = arm_identity(config)
+    acceptance = run_c1.functional_checks(
+        identity["method"], identity["detector"], metrics,
+        identity["candidate_algorithm"])
     if not all(acceptance["required"].values()):
-        raise RuntimeError(f"Native bare functional acceptance failed: {acceptance['required']}")
+        raise RuntimeError(f"Native {identity['arm']} functional acceptance failed: {acceptance['required']}")
     return ({"task_id": task, "status": "completed", "official_summary": official,
              "unified_metrics": metrics,
              "qualification": "official single-task native event result"}, metrics)

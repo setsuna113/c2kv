@@ -29,6 +29,15 @@ from .event_native_costs import read_event_native_steps, summarize_event_native_
 GENERATION_BACKENDS = ('native', 'sglang')
 
 
+def _route_kwargs(source_profile, view_mode, compression_policy, history_view_protocol):
+    if (source_profile in ('native-v1', 'openai-single-task-v1')
+            or view_mode in {'ac_gist_static',
+                             'ac_native_s0_lexical_raw_reserve_failed_operation'}):
+        return {'compression_policy': compression_policy,
+                'history_view_protocol': history_view_protocol}
+    return {}
+
+
 def positive_int(value):
     parsed = int(value)
     if parsed <= 0:
@@ -478,10 +487,8 @@ def _serve(args):
             **({'benchmark': args.benchmark}
                if source_profile != 'acebench-text-actions-v1' else {}),
             **s0_kwargs,
-            **({'compression_policy': compression_policy,
-                'history_view_protocol': history_view_protocol}
-               if source_profile in ('native-v1', 'openai-single-task-v1')
-               or args.view_mode == 'ac_gist_static' else {}))
+            **_route_kwargs(source_profile, args.view_mode, compression_policy,
+                            history_view_protocol))
         if isinstance(s0_config, dict) and 'candidate_algorithm' in s0_config:
             candidate = s0_config['candidate_algorithm']
             manifest['candidate_algorithm'] = {
@@ -543,10 +550,8 @@ def _serve(args):
             deadline_monotonic=deadline, steps_path=args.out / 'steps.jsonl',
             runtime_policy_contract=runtime_policy,
             tool_memory_contract=tool_contract,
-            **({'compression_policy': compression_policy,
-                'history_view_protocol': history_view_protocol}
-               if source_profile in ('native-v1', 'openai-single-task-v1')
-               or args.view_mode == 'ac_gist_static' else {}),
+            **_route_kwargs(source_profile, args.view_mode, compression_policy,
+                            history_view_protocol),
             **source_kwargs)
         if isinstance(s0_config, dict) and 'candidate_algorithm' in s0_config:
             api.route_contract = dict(manifest['route_contract'])

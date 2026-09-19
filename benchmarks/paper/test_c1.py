@@ -9,7 +9,7 @@ import urllib.error
 import pytest
 
 from benchmarks.arms import get_arm
-from benchmarks.paper import c1 as paper_c1
+from benchmarks.paper import c1 as paper_c1, native_extra
 from benchmarks.paper.c1 import (ARM, controller_oom_message, controller_step_failure, replay_task_id,
                                  selected_tasks, select_arm, summarize_scores)
 from benchmarks.paper.runner import DEFAULT_CONFIG, prepare, server_command
@@ -101,6 +101,13 @@ def test_replay_keeps_official_task_identity_for_native_evidence_ids():
     rows = [{"replay_payload": {"c2kv_measurement_session_id": "multi_turn_base_26"}}] * 2
     assert replay_task_id(rows, "hashed-proxy-conversation") == "multi_turn_base_26"
     assert replay_task_id([{"replay_payload": {}}], "synthetic").startswith("replay_")
+    ace = [{"ace_official_task_id": "agent_multi_turn_1",
+            "replay_payload": {"c2kv_measurement_session_id": "acebench:multi_turn_1:abcdef"}}]
+    assert replay_task_id(ace, "ace-session") == "agent_multi_turn_1"
+    with pytest.raises(ValueError, match="consistent official task ID"):
+        replay_task_id([*ace, {"replay_payload": ace[0]["replay_payload"]}], "ace-session")
+    with pytest.raises(ValueError, match="consistent official task ID"):
+        replay_task_id([{"ace_official_task_id": "../other", "replay_payload": {}}], "ace-session")
 
 
 def test_controller_oom_is_a_scored_zero_harness_failure(tmp_path):
@@ -231,6 +238,52 @@ def test_prefix_replay_only_tolerates_capacity_for_its_task(tmp_path, monkeypatc
         assert rows[0]["failure"]["kind"] == "capacity_infeasible"
         assert rows[0]["native_task_id"] == task
     assert stopped == [True]
+
+
+def test_ace_replay_uses_recorded_official_id_and_checks_loaded_controller(tmp_path, monkeypatch):
+    task = "agent_multi_turn_1"
+    payload = {
+        "messages": [{"role": "system", "content": "Visible APIs"},
+                     {"role": "user", "content": "Use one API"}],
+        "temperature": 0.001, "top_p": 1, "max_tokens": 1000,
+        "c2kv_measurement_session_id": "acebench:multi_turn_1:abcdef",
+        "c2kv_ace_source": {"version": "acebench-text-actions-v1", "receipts": []},
+    }
+    prefix = {"event_type": "recorded_prefix", "source_arm": "full",
+              "ace_official_task_id": task, "conversation_id": "recorded-conversation",
+              "prefix_id": "prefix-1", "replay_payload": payload,
+              "canonical_sha256": canonical_sha256(payload)}
+    prefix_path = tmp_path / "prefix.jsonl"
+    prefix_path.write_text(json.dumps(prefix) + "\n", encoding="utf-8")
+    output = tmp_path / "run"
+    output.mkdir()
+    shard = output / "native" / "task_shards" / task
+    shard.mkdir(parents=True)
+    observed = {}
+    delivery = SimpleNamespace(runner=SimpleNamespace(_stop_server=lambda *_: None))
+    monkeypatch.setattr(paper_c1, "load_delivery", lambda: delivery)
+    monkeypatch.setattr(paper_c1, "prepare_native",
+                        lambda *_: (output / "native", object(), tmp_path / "controller.json"))
+    monkeypatch.setattr(paper_c1, "_controller_process",
+                        lambda *_: (object(), io.StringIO(), shard))
+    monkeypatch.setattr(native_extra, "controller_command",
+                        lambda *_: ["python", "--model-name", "c1_d3_hybrid"])
+    monkeypatch.setattr(native_extra, "validate_ready_manifest",
+                        lambda *args: observed.setdefault("ready", args))
+
+    class Opener:
+        def open(self, request, **_kwargs):
+            observed["payload"] = json.loads(request.data)
+            return io.StringIO('{"id":"replayed-step"}')
+
+    monkeypatch.setattr(paper_c1, "OPENER", Opener())
+    paper_c1.run_common_prefix({"proxy_port": 49001, "c1": {"task_timeout": 1}},
+                               "acebench_agent", output, prefix_path)
+    assert observed["ready"][2] == task
+    assert observed["ready"][3] == shard / "server" / "ready.json"
+    assert observed["payload"]["c2kv_eval_context"]["task_id"] == task
+    assert observed["payload"]["c2kv_ace_source"] == payload["c2kv_ace_source"]
+    assert list(read_jsonl(output / "prefix_replay.jsonl"))[0]["native_task_id"] == task
 
 
 def test_ratio4_ablation_binds_arm_and_ratio_for_summaries():

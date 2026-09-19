@@ -51,7 +51,7 @@ def test_hiagent_and_acon_overlays_have_distinct_cells_and_server_modes(tmp_path
     for arm_name, policy in (("acon_hist_ut_co_b768", "acon_hist_ut_co"),
                              ("hiagent_full_b512", "hiagent_full")):
         rows = [row for row in plan if row["arm"] == arm_name]
-        assert {row["benchmark"] for row in rows} == {"bfcl_base", "bfcl_long_context"}
+        assert {row["benchmark"] for row in rows} == {"bfcl_base", "bfcl_long_context", "acebench_agent"}
         assert all(row["cell_id"].endswith("__" + arm_name) for row in rows)
         assert all(row["history_budget_tokens"] == get_arm(arm_name).text_history_budget_tokens
                    for row in rows)
@@ -64,8 +64,34 @@ def test_hiagent_and_acon_overlays_have_distinct_cells_and_server_modes(tmp_path
         assert get_arm(arm_name).text_policy == policy
     for arm_name in ("hiagent_full", "acon_hist_ut_co"):
         assert runner.server_command(config, Path("engine"), arm_name)[2] == "sglang.launch_server"
+    for arm_name in ("acon_hist_ut_co_b768", "hiagent_full_b512"):
+        ace = next(row for row in plan if row["cell_id"] == "acebench_agent__" + arm_name)
+        command = ace["command"]
+        assert command[command.index("--benchmark") + 1] == "acebench"
+        assert command[command.index("--acebench-category") + 1] == "agent"
+        assert command[command.index("--arm") + 1] == arm_name
+        assert "acebench_role_history_v1" in command[command.index("--capability-features") + 1]
+        assert "--tool-memory" not in command
+        server = runner.server_command(config, Path("engine"), arm_name,
+                                       benchmark="acebench_agent")
+        assert server[2] == "benchmarks.paper.budget_server"
+        assert server[server.index("--max-running-requests") + 1] == "2"
     assert len(json.loads((profile.parent / "commands.json").read_text())) == len(plan)
     assert "history_budget_tokens" in (profile.parent / "matrix.csv").read_text().splitlines()[0]
+
+
+def test_budget_overlays_accept_ace_agent_without_bfcl():
+    original = _config()
+    original["benchmarks"] = [row for row in original["benchmarks"]
+                              if row["name"] == "acebench_agent"]
+    config = runner.with_hiagent_budget(runner.with_acon_budget(original, 768), 768)
+    assert [row["benchmarks"] for row in config["methods"][-2:]] == [
+        ["acebench_agent"], ["acebench_agent"]]
+    assert {row["cell_id"] for row in runner.cells(config)
+            if row["arm"].endswith("_b768")} == {
+        "acebench_agent__acon_hist_ut_co_b768",
+        "acebench_agent__hiagent_full_b768",
+    }
 
 
 @pytest.mark.parametrize("budget", [0, -1, True, 1.5, "768"])

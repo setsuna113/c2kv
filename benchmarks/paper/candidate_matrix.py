@@ -1,4 +1,4 @@
-"""Explicit paper-matrix overlay for the four ratio-8 BFCL candidate arms."""
+"""Explicit paper-matrix overlay for the four ratio-8 candidate arms."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ VARIANT_TO_ARM = {
     "dependency_first": "c2kv_dependency_first_r8",
 }
 ARM_TO_VARIANT = {arm: variant for variant, arm in VARIANT_TO_ARM.items()}
+SUPPORTED_BENCHMARKS = frozenset({"bfcl_base", "acebench_agent"})
 
 
 def parse_candidate_arms(value: str) -> tuple[str, ...]:
@@ -26,11 +27,16 @@ def parse_candidate_arms(value: str) -> tuple[str, ...]:
     return requested
 
 
-def with_candidate_methods(config: dict, variants: tuple[str, ...]) -> dict:
+def with_candidate_methods(config: dict, variants: tuple[str, ...],
+                           benchmarks: tuple[str, ...] = ("bfcl_base",)) -> dict:
     if not variants:
         return config
-    if "bfcl_base" not in {row["name"] for row in config["benchmarks"]}:
-        raise ValueError("candidate arms require the bfcl_base benchmark")
+    if (not benchmarks or len(benchmarks) != len(set(benchmarks))
+            or not set(benchmarks) <= SUPPORTED_BENCHMARKS):
+        raise ValueError("candidate benchmarks must be a nonempty subset of bfcl_base,acebench_agent")
+    configured = {row["name"] for row in config["benchmarks"]}
+    if not set(benchmarks) <= configured:
+        raise ValueError("candidate benchmarks must exist in the configured paper matrix")
     resolved = copy.deepcopy(config)
     existing = {row["arm"] for row in resolved["methods"]}
     for variant in variants:
@@ -42,6 +48,6 @@ def with_candidate_methods(config: dict, variants: tuple[str, ...]) -> dict:
             "arm": arm,
             "group": "candidate",
             "ratio": 8,
-            "benchmarks": ["bfcl_base"],
+            "benchmarks": list(benchmarks),
         })
     return resolved

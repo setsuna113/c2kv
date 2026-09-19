@@ -1626,6 +1626,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
             self._send_json(400, {"error": "invalid json"})
             return
         _TRACE.original_request = payload
+        _TRACE.ace_official_task_present = "c2kv_ace_official_task_id" in payload
+        _TRACE.ace_official_task_id = payload.get("c2kv_ace_official_task_id")
         assert ARM is not None and BACKEND is not None
         start = time.perf_counter()
         messages = payload.get("messages") or []
@@ -1726,6 +1728,10 @@ class ProxyHandler(BaseHTTPRequestHandler):
             # request fail "repair target has no c2kv_key_hash"
             with _phase(phase):
                 staged = dict(toolmemory.strip_request_annotations(payload))
+                # ACEBench Full-prefix receipts are replay provenance, not
+                # model inputs. Keep them in the recorded source only.
+                staged.pop("c2kv_ace_source", None)
+                staged.pop("c2kv_ace_official_task_id", None)
                 # Proxy-only stable harness identity.  It keeps persistent KV
                 # and text-policy state on one case across turns but is not an
                 # OpenAI/SGLang request field.
@@ -2075,8 +2081,9 @@ class ProxyHandler(BaseHTTPRequestHandler):
         if recover:
             row.update({k: v for k, v in recover.items()})
         if PREFIX_LOG_PATH and not getattr(_TRACE, "prefix_recorded", False):
-            replay_payload = getattr(_TRACE, "original_request", request)
-            append_jsonl(PREFIX_LOG_PATH, {
+            replay_payload = dict(getattr(_TRACE, "original_request", request))
+            replay_payload.pop("c2kv_ace_official_task_id", None)
+            prefix_row = {
                 "schema": "c2kv.recorded_prefix.v1",
                 "event_type": "recorded_prefix",
                 "source_arm": ARM.name if ARM else None,
@@ -2091,7 +2098,11 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 "canonical_sha256": canonical_sha256(replay_payload),
                 "replay_payload": replay_payload,
                 "source_response": raw_response,
-            })
+            }
+            official_task = getattr(_TRACE, "ace_official_task_id", None)
+            if getattr(_TRACE, "ace_official_task_present", False):
+                prefix_row["ace_official_task_id"] = official_task
+            append_jsonl(PREFIX_LOG_PATH, prefix_row)
             _TRACE.prefix_recorded = True
         if REQUEST_LOG_PATH:
             with _log_lock:

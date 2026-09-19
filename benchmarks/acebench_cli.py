@@ -22,6 +22,14 @@ def native_mode():
     return os.environ.get("C2KV_ACE_NATIVE") == "1"
 
 
+def record_source_mode():
+    return os.environ.get("C2KV_ACE_RECORD_SOURCE") == "1"
+
+
+def receipt_mode():
+    return native_mode() or record_source_mode()
+
+
 def inference_wrapper(fn):
     """Retain the complete official ID while upstream passes a suffix to scenes."""
     signature = inspect.signature(fn)
@@ -60,6 +68,7 @@ def task_wrapper(fn):
         task = (getattr(_local, "official_task", None) if native_mode()
                 else None) or str(bound.arguments["test_id"])
         _local.task, _local.session = task, f"acebench:{task}:{uuid.uuid4().hex}"
+        _local.source_official_task = getattr(_local, "official_task", None)
         _local.request = None
         _local.receipts = []
         _local.decision_keys = {}
@@ -75,6 +84,7 @@ def task_wrapper(fn):
             emit("episode_end", status=status, start_unix_ns=start_unix,
                  end_unix_ns=time.time_ns(), duration_ns=time.perf_counter_ns()-started)
             _local.task = _local.session = _local.request = None
+            _local.source_official_task = None
             _local.receipts = _local.decision_keys = None
     return wrapped
 
@@ -91,7 +101,14 @@ def decode_wrapper(fn):
                 receipt.update(decode_status="error", decoded_calls=None)
             raise
         if receipt is not None:
-            receipt.update(decode_status="ok", decoded_calls=list(decoded))
+            if native_mode():
+                receipt.update(decode_status="ok", decoded_calls=list(decoded))
+            elif isinstance(decoded, list) and all(isinstance(call, str) for call in decoded):
+                receipt.update(decode_status="ok", decoded_calls=list(decoded))
+            else:
+                # Recording must not consume a generator or change the
+                # official decoder's return value to inspect it.
+                receipt.update(decode_status="invalid", decoded_calls=None)
         return decoded
     return wrapped
 
@@ -130,14 +147,17 @@ def execution_wrapper(fn):
         status = "failed"
         receipt = None
         previous_receipt = getattr(_local, "execution_receipt", None)
-        if native_mode():
+        if receipt_mode():
             history = args[1] if len(args) > 1 else kwargs.get("history")
-            if not isinstance(history, list) or not history or history[-1].get("sender") != "agent":
+            valid_history = (isinstance(history, list) and bool(history)
+                             and isinstance(history[-1], dict)
+                             and history[-1].get("sender") == "agent")
+            if native_mode() and not valid_history:
                 raise RuntimeError("ACEBench execution has no official agent predecessor")
             receipt = {
                 "version": ACE_RECEIPT_VERSION,
-                "agent_history_index": len(history) - 1,
-                "execution_message_index": len(history) + 1,
+                "agent_history_index": len(history) - 1 if valid_history else None,
+                "execution_message_index": len(history) + 1 if valid_history else None,
                 "decode_status": "error",
                 "decoded_calls": None,
                 "executor_status": "not_called",
@@ -149,8 +169,12 @@ def execution_wrapper(fn):
             value = fn(*args, **kwargs)
             if receipt is not None:
                 message = value[0] if isinstance(value, tuple) and value else None
-                if not isinstance(message, dict) or message.get("sender") != "execution":
+                valid_message = (isinstance(message, dict)
+                                 and message.get("sender") == "execution")
+                if native_mode() and not valid_message:
                     raise RuntimeError("ACEBench official executor returned no execution message")
+                if not valid_message or not valid_history:
+                    receipt["decode_status"] = "invalid"
                 _local.receipts.append(receipt)
             status = "completed"
             return value
@@ -196,6 +220,12 @@ def request_wrapper(fn):
                 }
             else:
                 extra["c2kv_measurement_session_id"] = _local.session
+                if record_source_mode():
+                    official_task = getattr(_local, "source_official_task", None)
+                    extra["c2kv_ace_official_task_id"] = official_task
+                    extra["c2kv_ace_source"] = {
+                        "version": ACE_SOURCE_VERSION, "receipts": list(_local.receipts),
+                    }
             kwargs["extra_body"] = extra
         started, start_unix = time.perf_counter_ns(), time.time_ns()
         result = fn(resource, *args, **kwargs)
@@ -220,7 +250,7 @@ def main():
     from model_inference.multi_turn import execution_role as turn_execution
     from model_inference.multi_step import execution_role_step as step_execution
     from openai.resources.chat.completions import Completions
-    if native_mode():
+    if receipt_mode():
         module.APIModelInference.inference = inference_wrapper(module.APIModelInference.inference)
         install_native_receipts(turn_execution, step_execution)
     for name in ("multi_turn_inference", "multi_step_inference"):

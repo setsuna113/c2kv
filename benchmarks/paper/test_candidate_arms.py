@@ -11,7 +11,7 @@ from benchmarks.paper import c1, runner
 from benchmarks.paper.candidate_matrix import VARIANT_TO_ARM, parse_candidate_arms, with_candidate_methods
 
 
-def test_candidate_matrix_is_opt_in_and_bfcl_base_only(tmp_path):
+def test_candidate_matrix_defaults_to_bfcl_base_and_explicitly_adds_acebench(tmp_path):
     original = json.loads(runner.DEFAULT_CONFIG.read_text())
     assert parse_candidate_arms("") == ()
     assert with_candidate_methods(original, ()) is original
@@ -31,6 +31,21 @@ def test_candidate_matrix_is_opt_in_and_bfcl_base_only(tmp_path):
         if row["arm"] in VARIANT_TO_ARM.values():
             assert "benchmarks.paper.c1" in row["command"]
             assert row["command"][row["command"].index("--arm") + 1] == row["arm"]
+
+    ace = with_candidate_methods(original, parse_candidate_arms("all"),
+                                 ("bfcl_base", "acebench_agent"))
+    ace_rows = [row for row in runner.cells(ace) if row["arm"] in VARIANT_TO_ARM.values()]
+    assert len(ace_rows) == 8
+    assert {row["benchmark"] for row in ace_rows} == {"bfcl_base", "acebench_agent"}
+    assert all(row["ratio"] == 8 for row in ace_rows)
+    ace_plan, _ = runner.prepare(ace, tmp_path / "ace-paper", tmp_path / "sglang")
+    for row in ace_plan:
+        if row["arm"] in VARIANT_TO_ARM.values() and row["benchmark"] == "acebench_agent":
+            assert "benchmarks.paper.c1" in row["command"]
+            assert row["command"][row["command"].index("--arm") + 1] == row["arm"]
+            assert row["cell_id"] == f"acebench_agent__{row['arm']}"
+    with pytest.raises(ValueError, match="subset"):
+        with_candidate_methods(original, ("static_t02",), ("bfcl_long_context",))
 
 
 @pytest.mark.parametrize("variant,arm", VARIANT_TO_ARM.items())
@@ -83,7 +98,13 @@ def test_candidate_delivery_uses_ratio8_and_bound_artifact(tmp_path, monkeypatch
         bad_detector.detector = "d3_hybrid"
         with pytest.raises(ValueError, match="frozen T02"):
             delivery.build_profile(bad_detector)
-        with pytest.raises(ValueError, match="bfcl_base only"):
+        ace_args = c1.delivery_args(config, "acebench_agent", tmp_path / "out", [], delivery)
+        assert ace_args.benchmark == "acebench"
+        assert ace_args.candidate_algorithm == variant
+        ace_controller, ace_profile = delivery.build_profile(ace_args)
+        assert ace_controller["candidate_algorithm"]["variant"] == variant
+        assert ace_profile["candidate_algorithm"] == variant
+        with pytest.raises(ValueError, match="bfcl_base and acebench_agent"):
             c1.delivery_args(config, "bfcl_long_context", tmp_path / "out", [], delivery)
     finally:
         c1.select_arm(original_arm)

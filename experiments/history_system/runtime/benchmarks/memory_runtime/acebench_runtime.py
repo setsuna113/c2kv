@@ -127,9 +127,10 @@ class AceEventNativeAPI(EventNativeAPI):
 class AceEventNativeDecisionRunner(EventNativeDecisionRunner):
     """Reuse generation, journaling, and regeneration caps with an ACE parser."""
 
-    def _generate(self, memory, metadata, record, phase):
+    def _generate(self, memory, metadata, record, phase, *, compression_chunks=None):
         from .acebench_source import parse_ace_draft
-        result, decoded = super()._generate(memory, metadata, record, phase)
+        result, decoded = super()._generate(
+            memory, metadata, record, phase, compression_chunks=compression_chunks)
         # The inherited decoder preserves the complete raw generated text and
         # removes only terminal EOS. Its native parse is replaced before any
         # reconsideration; no additional model call is made here.
