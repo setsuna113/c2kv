@@ -406,12 +406,11 @@ def may_share_engine(cell: dict, card: int, running: dict,
                   if running_card == card and str(other["cell_dir"]) not in active_dirs)
     if not active:
         return True
-    # The shared proxy now closes only its owned sessions. Keep history-KV
-    # production exclusive until a two-proxy device validation is recorded;
-    # single-proxy correctness does not establish concurrent measurement parity.
-    if (driver_for(cell["backend"], cell["condition"]) == "historykv_off" or
-            any(driver_for(other["backend"], other["condition"]) == "historykv_off"
-                for other in active)):
+    # Two persistent proxies passed CUDA/NPU budget and peer-close isolation
+    # checks. Mixed proxy/controller concurrency has not been validated.
+    history_proxy = driver_for(cell["backend"], cell["condition"]) == "historykv_off"
+    if any((driver_for(other["backend"], other["condition"]) == "historykv_off")
+           != history_proxy for other in active):
         return False
     keys = task_keys(cell)
     if keys is None:

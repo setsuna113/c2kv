@@ -258,7 +258,7 @@ def test_two_drivers_can_share_a_card_without_repeating_a_cell(tmp_path, monkeyp
     assert observed == [(first["cell_id"], 1, 0), (second["cell_id"], 1, 1)]
 
 
-def test_engine_wide_reset_and_overlapping_tasks_prevent_sharing(tmp_path):
+def test_mixed_driver_protocols_and_overlapping_tasks_prevent_sharing(tmp_path):
     first = cell(tmp_path, backend="fixture")
     first["task_ids"] = ["task"]
     second = dict(first, cell_id="second", cell_dir=str(tmp_path / "second"))
@@ -266,6 +266,10 @@ def test_engine_wide_reset_and_overlapping_tasks_prevent_sharing(tmp_path):
     first["condition"] = second["condition"] = "tracer_history"
     assert not scheduler.may_share_engine(second, 1, {}, {1: {first["cell_dir"]: first}})
     second["task_ids"] = ["other-task"]
+    assert scheduler.may_share_engine(second, 1, {}, {1: {first["cell_dir"]: first}})
+    first["condition"] = "compression_full_budget"
+    assert not scheduler.may_share_engine(second, 1, {}, {1: {first["cell_dir"]: first}})
+    second["condition"] = "compression_full_budget"
     assert scheduler.may_share_engine(second, 1, {}, {1: {first["cell_dir"]: first}})
 
 
