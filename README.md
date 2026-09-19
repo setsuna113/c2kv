@@ -28,7 +28,7 @@ python -m generality.tool_definition_study prepare --paper-root /path/to/paper \
   --out /path/to/new-manifest
 python -m generality.tool_definition_study evaluate --paper-root /path/to/paper \
   --manifest /path/to/new-manifest/manifest.json --checkpoint /path/to/T0/checkpoint \
-  --out /path/to/new-results --dry-run
+  --max-new-tokens 512 --out /path/to/new-results --dry-run
 ```
 
 The shared `benchmarks.paper.tool_study` builder separately prepares the
