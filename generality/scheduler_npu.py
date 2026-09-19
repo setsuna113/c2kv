@@ -337,6 +337,41 @@ def live_cell_dirs() -> set[str]:
     return set().union(*(set(cells) for cells in live_driver_assignments().values()))
 
 
+def live_calibration_owners(proc_root: Path = Path("/proc")) -> dict[int, dict]:
+    """Identify only the staged C2KV launcher and its explicitly leased card."""
+    try:
+        processes = list(proc_root.iterdir())
+    except OSError as error:
+        raise RuntimeError("Cannot inspect calibration owners") from error
+    expected = (SRC / "generality" / "c2kv_calibration.py").resolve()
+    calibration_root = (GENERATION_ROOT / "calibration" / "c2kv").resolve()
+    port_to_card = {port: card for card, port in ENGINE_PORT.items()}
+    owners = {}
+    for proc in processes:
+        if not proc.name.isdigit():
+            continue
+        try:
+            argv = [part.decode("utf-8", "replace") for part in
+                    (proc / "cmdline").read_bytes().split(b"\0") if part]
+        except OSError:
+            continue
+        if "--run" not in argv or not any(
+                arg.endswith("/generality/c2kv_calibration.py") for arg in argv):
+            continue
+        try:
+            script = next(Path(arg).resolve() for arg in argv
+                          if arg.endswith("/generality/c2kv_calibration.py"))
+            out = Path(argv[argv.index("--out") + 1]).resolve()
+            url = argv[argv.index("--sglang-backend-url") + 1]
+            card = port_to_card[urlparse(url).port]
+            if script != expected or not out.is_relative_to(calibration_root):
+                raise ValueError("unexpected calibration source or output")
+        except (ValueError, IndexError, KeyError, TypeError) as error:
+            raise RuntimeError(f"Unverifiable C2KV calibration owner PID {proc.name}") from error
+        owners[int(proc.name)] = {"card": card, "out": str(out)}
+    return owners
+
+
 def unmanaged_event_native_servers(proc_root: Path = Path("/proc")) -> list[dict]:
     """Find project controllers without a live cell driver ancestor.
 
@@ -349,7 +384,9 @@ def unmanaged_event_native_servers(proc_root: Path = Path("/proc")) -> list[dict
         processes = list(proc_root.iterdir())
     except OSError as error:
         raise RuntimeError("Cannot inspect event-native server processes") from error
-    roots = ((RESULTS.resolve()), (GENERATION_ROOT / "validation").resolve())
+    roots = (RESULTS.resolve(), (GENERATION_ROOT / "validation").resolve(),
+             (GENERATION_ROOT / "calibration" / "c2kv").resolve())
+    calibration_owners = live_calibration_owners(proc_root)
 
     def details(pid: int) -> tuple[list[str], int, int] | None:
         proc = proc_root / str(pid)
@@ -361,10 +398,14 @@ def unmanaged_event_native_servers(proc_root: Path = Path("/proc")) -> list[dict
         except (OSError, ValueError, IndexError):
             return None  # process exited during the scan
 
-    def managed_by_driver(parent: int) -> bool:
+    def managed_by_driver(parent: int, server_out: Path) -> bool:
         visited = set()
         while parent > 1 and parent not in visited:
             visited.add(parent)
+            calibration = calibration_owners.get(parent)
+            if calibration is not None:
+                expected_out = Path(calibration["out"]) / "controller" / "server"
+                return server_out == expected_out
             info = details(parent)
             if info is None:
                 return False
@@ -397,7 +438,7 @@ def unmanaged_event_native_servers(proc_root: Path = Path("/proc")) -> list[dict
         if not any(os.path.commonpath((str(root), str(path))) == str(root)
                    for root in roots):
             continue
-        if managed_by_driver(parent):
+        if managed_by_driver(parent, path):
             continue
         unmanaged.append({"pid": int(proc.name), "ppid": parent,
                           "start_ticks": start_ticks, "out": out,
@@ -575,6 +616,10 @@ def main(argv=None) -> int:
 
 def run_scheduler(args) -> int:
 
+    calibration_cards = {owner["card"] for owner in live_calibration_owners().values()}
+    if calibration_cards.intersection(args.cards):
+        raise RuntimeError(
+            f"Active C2KV calibration owns requested cards: {sorted(calibration_cards.intersection(args.cards))}")
     unmanaged = unmanaged_event_native_servers()
     if unmanaged:
         raise RuntimeError(f"Unmanaged event-native servers block scheduler start: {unmanaged[:12]}")
@@ -604,6 +649,12 @@ def run_scheduler(args) -> int:
         allowed_cell_ids = {cell["cell_id"] for cell in
                             queue_cells(enumerate_cells(), only_ready=only_ready)[:args.max_cells]}
     while True:
+        calibration_cards = {owner["card"] for owner in live_calibration_owners().values()}
+        if calibration_cards.intersection(args.cards):
+            print(json.dumps({"event": "calibration_card_reserved",
+                              "cards": sorted(calibration_cards.intersection(args.cards))}), flush=True)
+            time.sleep(30)
+            continue
         unmanaged = unmanaged_event_native_servers()
         if unmanaged:
             print(json.dumps({"event": "unmanaged_event_native_servers",

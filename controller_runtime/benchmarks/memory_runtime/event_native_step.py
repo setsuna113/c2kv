@@ -93,6 +93,13 @@ class EventNativeDecisionRunner:
                         shadow_features=(stats.get('shadow_features')
                                          if isinstance(stats, dict) else None))
                 if recovery_disabled:
+                    risk_observer = getattr(self.controller, 'calibration_risk', None)
+                    if callable(risk_observer):
+                        risk = risk_observer(
+                            prepared, list(draft.tool_calls), draft_text=draft.text,
+                            parse_error=draft.reason if draft.status == 'malformed' else None)
+                        if risk is not None:
+                            record['risk'] = risk
                     decision = {
                         'schema': 'event-native-recovery-decision-v1',
                         'recovery_enabled': False,

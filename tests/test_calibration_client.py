@@ -399,6 +399,15 @@ class CalibrationRiskReceiptTests(unittest.TestCase):
         receipt = self.client(self.state_id).risk_for(self.decision_key)
         self.assertEqual(receipt["score"], 0.2)
 
+    def test_runner_receipt_proves_recovery_was_disabled(self):
+        self.write(self.record(
+            session_id=self.session_id + "/" + self.state_id,
+            recovery_disabled=True,
+            exact_recovery={"reason": "recovery_disabled"},
+        ))
+        receipt = self.client(self.state_id).risk_for(self.decision_key)
+        self.assertTrue(receipt["recovery_disabled_verified"])
+
     def test_explicit_task_mismatch_is_rejected_even_with_matching_session(self):
         self.write(self.record(task_id="other-task",
                                session_id=self.session_id + "/" + self.state_id))

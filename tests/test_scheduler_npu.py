@@ -13,6 +13,13 @@ from generality import scheduler as entry
 from generality.completion_contract import write_cell_status
 
 
+@pytest.fixture(autouse=True)
+def _no_live_calibration_on_windows(monkeypatch):
+    # Production owns /proc; local CPU tests supply explicit fake processes.
+    if sys.platform == "win32":
+        monkeypatch.setattr(scheduler, "live_calibration_owners", lambda *args: {})
+
+
 def cell(tmp_path, backend="h2o", benchmark="appworld"):
     directory = tmp_path / "cell"
     directory.mkdir(exist_ok=True)

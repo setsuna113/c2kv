@@ -93,37 +93,51 @@ def _controller_with_binding(cell: dict) -> tuple[dict, dict | None]:
             bind_risk_artifact=bind_risk_artifact,
         )
     if cell["condition"] == "tracer_history":
-        config, _ = evidence_sets.build_config(
-            history="H0",
-            selector="risk",
-            selector_artifact=RISK_ARTIFACT,
-            selector_threshold=float(cell["threshold"]),
-            embedding_model=cell["embedding_model"],
-            embedding_device="cpu",
-            semantic_query_overflow_policy="task_head_tail_preserve_draft_v1",
-        )
-        config["local_models"]["embedding"]["dtype"] = "bfloat16"
-        config["selector_artifact"], binding = bind_risk_artifact(
-            config["selector_artifact"], Path(cell["checkpoint"])
-        )
-        controller = current._configure_controller(evidence_sets._base_controller(), config)
-        # Hard gate: the D3-era post_draft_recovery section rides along in the
-        # shared base config but is provably inert under set_selector="risk"
-        # (_reconsider_sets only evaluates the legacy gate for legacy_prefill).
-        # Fail loudly if any of these bindings ever drift.
-        import hashlib
-        gp = controller["gp_experiments"]
-        assert gp["set_selector"] == "risk", gp["set_selector"]
-        assert gp["selection_protocol"] == "evidence_sets_v1", gp["selection_protocol"]
-        assert gp["selector_artifact"]["model_kind"] == "c1_risk_logistic"
-        assert (hashlib.sha256(RISK_ARTIFACT.read_bytes()).hexdigest()
-                == "18a11f73aa1f7d4b0add86eed66ae9e5e129ea4bdfbe0dfad23faf4f7d2fb4ab")
-        assert gp["recovery_reserve_tokens"] == 0, gp["recovery_reserve_tokens"]
-        return controller, binding
+        return _risk_controller_with_binding(cell, float(cell["threshold"]))
     controller = evidence_sets._base_controller()
     controller.pop("post_draft_recovery", None)
     controller.pop("gp_experiments", None)
     return controller, None
+
+
+def _risk_controller_with_binding(cell: dict, selector_threshold: float) -> tuple[dict, dict]:
+    """Construct the frozen risk head; calibration reads its score only."""
+    config, _ = evidence_sets.build_config(
+            history="H0",
+            selector="risk",
+            selector_artifact=RISK_ARTIFACT,
+            selector_threshold=selector_threshold,
+            embedding_model=cell["embedding_model"],
+            embedding_device="cpu",
+            semantic_query_overflow_policy="task_head_tail_preserve_draft_v1",
+    )
+    config["local_models"]["embedding"]["dtype"] = "bfloat16"
+    config["selector_artifact"], binding = bind_risk_artifact(
+        config["selector_artifact"], Path(cell["checkpoint"])
+    )
+    controller = current._configure_controller(evidence_sets._base_controller(), config)
+    # The legacy detector does not enter this frozen risk-selector path.
+    gp = controller["gp_experiments"]
+    assert gp["set_selector"] == "risk", gp["set_selector"]
+    assert gp["selection_protocol"] == "evidence_sets_v1", gp["selection_protocol"]
+    assert gp["selector_artifact"]["model_kind"] == "c1_risk_logistic"
+    assert (hashlib.sha256(RISK_ARTIFACT.read_bytes()).hexdigest()
+            == "18a11f73aa1f7d4b0add86eed66ae9e5e129ea4bdfbe0dfad23faf4f7d2fb4ab")
+    assert gp["recovery_reserve_tokens"] == 0, gp["recovery_reserve_tokens"]
+    return controller, binding
+
+
+def calibration_controller_config(cell: dict) -> tuple[dict, dict]:
+    """Build a risk-score-only controller without reading a calibrated threshold.
+
+    The required selector threshold of 1.0 is inert: calibration requests set
+    recovery_disabled, and the runner calls only the risk predictor.
+    """
+    if cell["backend"] != "c2kv" or cell["benchmark"] != "bfcl":
+        raise ValueError("C2KV calibration requires a C2KV BFCL cell")
+    if cell["condition"] != "tracer_history":
+        raise ValueError("C2KV calibration uses the tracer history view")
+    return _risk_controller_with_binding(cell, 1.0)
 
 
 def build_controller_config(cell: dict) -> dict:
@@ -155,7 +169,11 @@ def build_eval_policy(cell: dict, budgets: dict) -> dict:
     }
 
 
-def server_command(cell: dict, task_ids: list[str], out: Path, port: int) -> list[str]:
+def server_command(cell: dict, task_ids: list[str], out: Path, port: int,
+                   *, max_decisions: int | None = None,
+                   max_generation_calls: int | None = None,
+                   max_extraction_calls: int | None = None,
+                   max_wall_seconds: int | None = None) -> list[str]:
     design = current.load_config()
     caps = cell["caps"]
     command = [
@@ -175,13 +193,13 @@ def server_command(cell: dict, task_ids: list[str], out: Path, port: int) -> lis
         "--decode-strategy", design["decode_strategy"],
         "--prefill-chunk-size", str(design["prefill_chunk_size"]),
         "--task-ids", ",".join(task_ids),
-        "--max-decisions", str(caps["generation_attempts_per_task"] * len(task_ids)),
-        "--max-generation-calls", str(caps["generation_attempts_per_task"]),
-        "--max-extraction-calls", str(caps["extraction_calls_per_task"]),
+        "--max-decisions", str(max_decisions or caps["generation_attempts_per_task"] * len(task_ids)),
+        "--max-generation-calls", str(max_generation_calls or caps["generation_attempts_per_task"]),
+        "--max-extraction-calls", str(max_extraction_calls or caps["extraction_calls_per_task"]),
         "--eval-policy", str(cell["eval_policy_path"]),
         "--eval-capacity", str(C1_DELIVERY / "runtime/configs/eval_capacity.json"),
         "--s0-config", str(cell["controller_path"]),
-        "--max-wall-seconds", str(caps["task_timeout"]),
+        "--max-wall-seconds", str(max_wall_seconds or caps["task_timeout"]),
         "--device", "cpu",
         "--dtype", "bfloat16",
         "--generation-backend", "sglang",
@@ -192,6 +210,10 @@ def server_command(cell: dict, task_ids: list[str], out: Path, port: int) -> lis
         "--sglang-timeout-seconds", str(caps["task_timeout"]),
         "--no-raw-snapshot",
     ]
+    if cell["condition"] == "tracer_history":
+        # The frozen C1 risk head needs its exact prefill hidden-state contract.
+        command.extend(["--shadow-feature-config",
+                        str(RUNTIME / "configs" / "shadow_features.json")])
     return command
 
 

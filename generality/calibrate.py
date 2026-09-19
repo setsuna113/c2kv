@@ -293,7 +293,12 @@ class EventNativeControllerClient:
                 receipts.append({"available": bool(risk.get("available")) and
                                  isinstance(score, (int, float)),
                                  "score": score if isinstance(score, (int, float)) else None,
-                                 "source": "controller_steps_jsonl"})
+                                 "source": "controller_steps_jsonl",
+                                 "recovery_disabled_verified": (
+                                     item.get("recovery_disabled") is True and
+                                     isinstance(item.get("exact_recovery"), Mapping) and
+                                     item["exact_recovery"].get("reason") ==
+                                     "recovery_disabled")})
                 continue
             exact = item.get("exact_recovery")
             selection = exact.get("selection") if isinstance(exact, Mapping) else None
@@ -481,6 +486,11 @@ def replay_one(row: Mapping[str, Any], args: argparse.Namespace,
                     first_risk = client.risk_for(
                         source["decision_key"], source.get("task_id"),
                         source.get("state_id"))
+                    if first_risk is not None and (
+                            first_risk.get("source") != "controller_steps_jsonl" or
+                            first_risk.get("recovery_disabled_verified") is not True):
+                        raise PrefixReplayIntegrityError(
+                            "C2KV risk receipt did not prove recovery was disabled")
             elif args.backend != "c2kv":
                 backend_receipts.append(_verify_history_backend(
                     response, client.method, completed_history_messages,
