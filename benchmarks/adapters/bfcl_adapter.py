@@ -205,6 +205,15 @@ def install_handler(base_url: str, model: str = SERVED_MODEL,
                 "timeout": httpx.Timeout(timeout=600.0, connect=8.0),
             }
 
+        def _parse_query_response_FC(self, api_response):
+            parsed = super()._parse_query_response_FC(api_response)
+            # BFCL's FC decoder expects list[dict]. Its upstream parser
+            # returns assistant content instead when tool_calls is absent.
+            if parsed["model_responses"] is None or isinstance(
+                    parsed["model_responses"], str):
+                parsed["model_responses"] = []
+            return parsed
+
         def _query_FC(self, inference_data: dict):
             kwargs = {
                 "messages": inference_data["message"],
