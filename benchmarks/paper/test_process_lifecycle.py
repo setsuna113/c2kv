@@ -8,8 +8,11 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest import mock
 
-from benchmarks.paper.process_lifecycle import run_owned
+from benchmarks.paper import runner
+from benchmarks.paper.process_lifecycle import (run_owned, stop_owned_group,
+                                                termination_unwinds)
 
 
 class ProcessLifecycleTest(unittest.TestCase):
@@ -18,6 +21,85 @@ class ProcessLifecycleTest(unittest.TestCase):
                            check=True, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0)
         self.assertEqual(result.stdout, "ready\n")
+
+    @unittest.skipUnless(os.name == "posix", "POSIX process groups required")
+    def test_exited_leader_does_not_leave_term_ignoring_grandchild(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            pid_file = Path(temporary) / "grandchild.pid"
+            grandchild = (
+                "import os,signal,sys,time; "
+                "signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+                "open(sys.argv[1], 'w').write(str(os.getpid())); "
+                "time.sleep(60)"
+            )
+            child = (
+                "import subprocess,sys,time,os; "
+                f"subprocess.Popen([sys.executable, '-c', {grandchild!r}, sys.argv[1]])\n"
+                "while not os.path.exists(sys.argv[1]): time.sleep(0.01)"
+            )
+            process = subprocess.Popen([sys.executable, "-c", child, str(pid_file)],
+                                       start_new_session=True)
+            try:
+                self.assertEqual(process.wait(timeout=5), 0)
+                grandchild_pid = int(pid_file.read_text())
+                stop_owned_group(process, timeout=0.2)
+                self._assert_not_live(grandchild_pid)
+            finally:
+                if process.poll() is None:
+                    process.kill()
+                    process.wait(timeout=5)
+
+    @unittest.skipUnless(os.name == "posix", "POSIX process groups required")
+    def test_successful_run_owned_reaps_remaining_grandchild(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            pid_file = Path(temporary) / "grandchild.pid"
+            grandchild = (
+                "import os,sys,time; "
+                "open(sys.argv[1], 'w').write(str(os.getpid())); time.sleep(60)"
+            )
+            child = (
+                "import subprocess,sys,time,os; "
+                f"subprocess.Popen([sys.executable, '-c', {grandchild!r}, sys.argv[1]])\n"
+                "while not os.path.exists(sys.argv[1]): time.sleep(0.01)"
+            )
+            result = run_owned([sys.executable, "-c", child, str(pid_file)], check=True)
+            self.assertEqual(result.returncode, 0)
+            self._assert_not_live(int(pid_file.read_text()))
+
+    @unittest.skipUnless(os.name != "nt", "Signals under Windows differ")
+    def test_signal_during_proxy_cleanup_still_stops_server(self):
+        events = []
+
+        class Proxy:
+            def terminate(self):
+                events.append("proxy")
+                os.kill(os.getpid(), signal.SIGTERM)
+
+            def wait(self, timeout=None):
+                return 0
+
+        class Server:
+            pid = 34567891
+
+            def wait(self, timeout=None):
+                events.append("server")
+                return 0
+
+        with mock.patch.object(runner.os, "killpg", side_effect=lambda *_: None):
+            with self.assertRaises(SystemExit) as caught:
+                with termination_unwinds():
+                    runner.cleanup_cell_processes(Proxy(), Server())
+        self.assertEqual(caught.exception.code, 128 + signal.SIGTERM)
+        self.assertEqual(events, ["proxy", "server"])
+
+    def _assert_not_live(self, pid):
+        deadline = time.monotonic() + 5
+        while Path(f"/proc/{pid}/stat").exists():
+            if Path(f"/proc/{pid}/stat").read_text().split()[2] == "Z":
+                return
+            if time.monotonic() >= deadline:
+                self.fail(f"Owned descendant {pid} remains alive")
+            time.sleep(0.05)
 
     @unittest.skipUnless(os.name == "posix", "POSIX process groups required")
     def test_sigterm_unwinds_finally_and_stops_owned_descendants(self):
@@ -58,14 +140,8 @@ class ProcessLifecycleTest(unittest.TestCase):
                 os.kill(process.pid, signal.SIGTERM)
                 self.assertEqual(process.wait(timeout=10), 128 + signal.SIGTERM)
                 self.assertEqual(cleaned.read_text(), "cleaned")
-                deadline = time.monotonic() + 5
                 for pid in owned:
-                    while Path(f"/proc/{pid}/stat").exists():
-                        if Path(f"/proc/{pid}/stat").read_text().split()[2] == "Z":
-                            break
-                        if time.monotonic() >= deadline:
-                            self.fail(f"Owned descendant {pid} remains alive")
-                        time.sleep(0.05)
+                    self._assert_not_live(pid)
             finally:
                 if process.poll() is None:
                     process.kill()

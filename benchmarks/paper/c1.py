@@ -23,7 +23,7 @@ import urllib.error
 from benchmarks.measurement.telemetry import append_jsonl, canonical_sha256, read_jsonl
 from benchmarks.measurement.replay import _paper_measurement
 from .candidate_matrix import ARM_TO_VARIANT
-from .process_lifecycle import unwind_on_termination
+from .process_lifecycle import defer_termination, unwind_on_termination
 
 ARMS = {"c2kv_c1_t02_r8": 8, "c2kv_c1_t02_r4": 4}   # final system and its ratio-4 ablation
 ARMS["c2kv_native_r4"] = 4
@@ -196,7 +196,8 @@ def run_closed_loop(config, benchmark, directory, requested=None):
                     from .c1_appworld import run_task
                     receipt, metrics = run_task(config, task, native, delivery, controller_path)
                 else:
-                    receipt, metrics = delivery.run_task(args, task, controller_path)
+                    receipt, metrics = delivery.run_task(
+                        args, task, controller_path, termination_guard=defer_termination)
             except (RuntimeError, subprocess.CalledProcessError) as error:
                 failure = controller_step_failure(task_root)
                 if failure is None:

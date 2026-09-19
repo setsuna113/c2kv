@@ -76,7 +76,7 @@ def test_add_arguments_registers_only_that_adapters_flags():
     owned = {
         tau2_adapter: {"--task-set", "--tau2-num-trials", "--tau2-max-steps",
                        "--tau2-timeout"},
-        bfcl_adapter: {"--categories", "--run-ids"},
+        bfcl_adapter: {"--categories", "--run-ids", "--bfcl-refill-rounds"},
         toolsandbox_adapter: {"--full", "--ts-scenarios", "--ts-agent", "--ts-user",
                               "--ts-parallel", "--toolsandbox-dir"},
         acon_adapter: {"--acon-dir", "--split", "--tag", "--task-ids"},

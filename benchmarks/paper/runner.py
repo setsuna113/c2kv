@@ -13,7 +13,8 @@ import urllib.error
 import urllib.request
 
 from .candidate_matrix import ARM_TO_VARIANT, parse_candidate_arms, with_candidate_methods
-from .process_lifecycle import run_owned, stop_owned_group, unwind_on_termination
+from .process_lifecycle import (defer_termination, run_owned, stop_owned_group,
+                                unwind_on_termination)
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG = Path(__file__).with_name("config.json")
@@ -431,6 +432,7 @@ def require_budget_renderer(port):
     raise RuntimeError("Paper chat budget renderer accepted an unexpected GET")
 
 
+@defer_termination()
 def cleanup_cell_processes(proxy, server):
     """Stop both owned children, collecting errors so server cleanup always runs."""
     errors = []
