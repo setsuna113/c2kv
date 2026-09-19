@@ -348,6 +348,28 @@ def test_replay_requires_complete_controller_journal(tmp_path):
     paper_c1.validate_replay_finalization(tmp_path)
 
 
+def test_closed_loop_does_not_mask_cost_failure_as_capacity_failure(tmp_path, monkeypatch):
+    task = "multi_turn_base_164"
+    native = tmp_path / "native"
+    shard = native / "task_shards" / task
+
+    def failed_task(*_args, **_kwargs):
+        capacity_evidence(shard)
+        (shard / "server" / "final.json").write_text(json.dumps({
+            "status": "failed", "cost_summary_error": {"message": "prefix bytes mismatch"},
+        }))
+        raise RuntimeError("invalid cost inventory")
+
+    delivery = SimpleNamespace(run_task=failed_task)
+    monkeypatch.setattr(paper_c1, "load_delivery", lambda: delivery)
+    monkeypatch.setattr(paper_c1, "selected_tasks", lambda *_: [task])
+    monkeypatch.setattr(paper_c1, "prepare_native",
+                        lambda *_: (native, object(), tmp_path / "controller.json"))
+    with pytest.raises(RuntimeError, match="invalid cost inventory"):
+        paper_c1.run_closed_loop({}, "bfcl_base", tmp_path)
+    assert not (shard / "paper_task_result.json").exists()
+
+
 @pytest.mark.parametrize("captured", [None, False, [{"message_index": 0, "start": 0,
                                                      "end": 10_000, "source": "acebench_function_list"}]])
 def test_ace_tool_replay_rejects_missing_or_invalid_capture_before_server(
