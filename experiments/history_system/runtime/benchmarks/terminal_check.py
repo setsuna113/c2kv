@@ -22,6 +22,11 @@ import os
 import sys
 from pathlib import Path
 
+try:
+    from .bfcl_completion import bfcl_row_is_terminal
+except ImportError:
+    from bfcl_completion import bfcl_row_is_terminal
+
 TAU2_SIMS = (Path(os.environ.get("TAU2_DIR") or Path.home() / "benchmarks/tau2")
              / "data/simulations")
 TS_RESULTS = Path.home() / "bench_results"
@@ -104,7 +109,7 @@ def check_bfcl(expected, run_ids, handler: str = "c2kv-hf",
             if isinstance(row, dict) and row.get("id") is not None:
                 task_id = str(row["id"])
                 observed.add(task_id)
-                if "result" in row and row.get("traceback") is None:
+                if bfcl_row_is_terminal(row):
                     got.add(task_id)
     if run_ids:
         # id-exact check when the caller pinned the id list

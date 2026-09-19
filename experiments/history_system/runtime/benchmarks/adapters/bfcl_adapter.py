@@ -44,6 +44,7 @@ from urllib.parse import urlsplit
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from adapters.base import RunContext, v1  # noqa: E402
+from bfcl_completion import bfcl_row_is_terminal, terminal_failure_kind  # noqa: E402
 from bfcl_gold_recovery import (  # noqa: E402
     GoldRecoveryController,
     MULTI_EVENT_ORACLE_KIND,
@@ -609,7 +610,7 @@ def _canonicalize_completions(project_root: Path, handler_name: str,
             if category_of.get(task_id) != category:
                 foreign.append(task_id)
                 continue
-            valid = "result" in row and row.get("traceback") is None
+            valid = bfcl_row_is_terminal(row)
             entries[task_id].append({
                 "valid": valid, "mtime_ns": mtime_ns, "path": str(path),
                 "line": line_number, "row": row,
@@ -641,6 +642,9 @@ def _canonicalize_completions(project_root: Path, handler_name: str,
         "valid_unique": list(canonical), "remaining": remaining,
         "duplicate_rows": sum(max(0, len(rows) - 1) for rows in entries.values()),
         "invalid_rows": invalid_rows,
+        "terminal_failures": {task_id: terminal_failure_kind(item["row"])
+                              for task_id, item in canonical.items()
+                              if terminal_failure_kind(item["row"])},
     }
     receipt_path = receipt_root / "ledger.json"
     receipt_path.write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")

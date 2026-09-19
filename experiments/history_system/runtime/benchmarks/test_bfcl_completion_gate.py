@@ -60,3 +60,22 @@ def test_evaluate_only_uses_valid_unique_rows_and_preserves_raw(tmp_path, monkey
         2, ",".join(ids), handler="c2kv-hf", category="multi_turn_base",
         root=tmp_path,
     ) == 0
+
+
+def test_terminal_method_and_context_failures_are_retained_for_official_zero(tmp_path):
+    ids = ["multi_turn_base_0", "multi_turn_base_1", "multi_turn_base_2", "multi_turn_base_3"]
+    rows = [
+        {"id": ids[0], "result": "error", "traceback": "The input (138237 tokens) is longer than the model's context length (131072 tokens)."},
+        {"id": ids[1], "result": "error", "traceback": "HiAgent requested nonexistent completed subgoals: [1]"},
+        {"id": ids[2], "result": "error", "traceback": "HiAgent requested an already revealed trajectory without advancing"},
+        {"id": ids[3], "result": "error", "traceback": "upstream 502: Connection refused"},
+    ]
+    path = tmp_path / "result/c2kv-hf/multi_turn/BFCL_v4_multi_turn_base_result.json"
+    _write_jsonl(path, rows)
+    receipt = bfcl_adapter._canonicalize_completions(tmp_path, "c2kv-hf", {"multi_turn_base": ids})
+    assert receipt["remaining"] == [ids[3]]
+    assert set(receipt["terminal_failures"]) == set(ids[:3])
+    assert [json.loads(line) for line in path.read_text().splitlines()] == rows[:3]
+    assert terminal_check.check_bfcl(3, ",".join(ids[:3]), handler="c2kv-hf", root=tmp_path) == 0
+    raw = next((Path(receipt["receipt"]).parent / "raw").rglob("*.json"))
+    assert [json.loads(line) for line in raw.read_text().splitlines()] == rows

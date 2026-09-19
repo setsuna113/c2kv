@@ -39,6 +39,7 @@ from typing import Any, Dict, List, Mapping, Optional
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from adapters.base import RunContext, v1  # noqa: E402
+from bfcl_completion import bfcl_row_is_terminal, terminal_failure_kind  # noqa: E402
 from measurement.telemetry import HarnessTelemetry, current_episode  # noqa: E402
 
 NAME = "bfcl"
@@ -116,7 +117,7 @@ def add_arguments(parser) -> None:
                         help="bfcl: comma-separated official case ids for a subset run")
     parser.add_argument(
         "--bfcl-refill-rounds", type=int, default=0,
-        help=("explicit bounded extra generation rounds for missing/traceback "
+        help=("explicit bounded extra generation rounds for missing/incomplete "
               "BFCL rows; disabled by default"),
     )
 
@@ -388,9 +389,8 @@ def _completion_ledger(project_root: Path, handler_name: str,
                        prior: Optional[Mapping[str, Any]] = None) -> Dict[str, Any]:
     """Canonical valid completions across the active official result files.
 
-    A valid result is requested, contains the official ``result`` key, and has
-    no traceback.  The result itself may be empty or wrong; that is a legal
-    model completion for the official scorer and must not be retried.
+    Recognized terminal context/method failures remain official scored rows.
+    Missing outputs and unclassified transport/engine failures remain incomplete.
     """
     entries: Dict[str, List[Dict[str, Any]]] = {
         task_id: [] for ids in selected_ids.values() for task_id in ids}
@@ -430,13 +430,13 @@ def _completion_ledger(project_root: Path, handler_name: str,
             entries[task_id].append({
                 "task_id": task_id,
                 "category": category,
-                "valid": "result" in row and row.get("traceback") is None,
+                "valid": bfcl_row_is_terminal(row),
                 "path": str(path),
                 "line": line_number,
                 "mtime_ns": mtime_ns,
                 "row": row,
             })
-            if "result" not in row or row.get("traceback") is not None:
+            if not bfcl_row_is_terminal(row):
                 invalid_rows += 1
     if foreign:
         shown = ", ".join(item["task_id"] for item in foreign[:20])
@@ -457,6 +457,9 @@ def _completion_ledger(project_root: Path, handler_name: str,
         "invalid_rows": invalid_rows,
         "canonical": canonical,
         "paths": paths,
+        "terminal_failures": {task_id: terminal_failure_kind(item["row"])
+                              for task_id, item in canonical.items()
+                              if terminal_failure_kind(item["row"])},
     }
 
 
@@ -480,6 +483,7 @@ def _snapshot_completion_round(project_root: Path, invocation_root: Path,
         "remaining": ledger["remaining"],
         "duplicate_rows": ledger["duplicate_rows"],
         "invalid_rows": ledger["invalid_rows"],
+        "terminal_failures": ledger["terminal_failures"],
     }
     receipt_path = round_root / "ledger.json"
     receipt_path.parent.mkdir(parents=True, exist_ok=True)
@@ -704,6 +708,7 @@ def run_bfcl(base_url: str, categories: str = "multi_turn_base",
                 "duplicate_rows": completion["duplicate_rows"],
                 "invalid_rows": completion["invalid_rows"],
                 "remaining": completion["remaining"],
+                "terminal_failures": completion["terminal_failures"],
                 "max_refill_rounds": max_refill_rounds,
                 "refill_rounds_used": max(0, len(refill_receipts) - 1),
                 "round_receipts": refill_receipts,

@@ -13,6 +13,60 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import terminal_check  # noqa: E402
 from adapters import bfcl_adapter  # noqa: E402
+from bfcl_completion import completion_kind  # noqa: E402
+
+
+@pytest.mark.parametrize("message,kind", [
+    ("upstream 400: The input (138237 tokens) is longer than the model's context length (131072 tokens).", "context_overflow"),
+    ("upstream 400: The input (138237 tokens) is longer than the model\\'s context length (131072 tokens).", "context_overflow"),
+    ("HiAgent requested nonexistent completed subgoals: [1]", "hiagent_invalid_retrieval"),
+    ("HiAgent requested an already revealed trajectory without advancing", "hiagent_invalid_retrieval"),
+    ("upstream 502: Connection refused", "incomplete"),
+    ("TimeoutError: upstream timed out", "incomplete"),
+    ("AttributeError: 'NoneType' object has no attribute 'session_id'", "incomplete"),
+    ("ValueError: an unknown method implementation bug", "incomplete"),
+])
+def test_completion_distinguishes_terminal_failures_from_infrastructure(message, kind):
+    row = {"id": "multi_turn_base_0", "result": "error", "traceback": message}
+    assert completion_kind(row) == kind
+    assert completion_kind({"id": row["id"], "traceback": message}) == "incomplete"
+
+
+def test_known_failures_reach_official_scorer_unchanged_without_refill(tmp_path, monkeypatch):
+    ids = ["multi_turn_base_0", "multi_turn_base_1", "multi_turn_base_2"]
+    failures = [
+        "The input (138237 tokens) is longer than the model's context length (131072 tokens).",
+        "HiAgent requested nonexistent completed subgoals: [1]",
+        "HiAgent requested an already revealed trajectory without advancing",
+    ]
+    rows = [{"id": task, "result": "Error", "traceback": failure}
+            for task, failure in zip(ids, failures)]
+    path = _results(tmp_path, "c2kv-hf", "multi_turn", "multi_turn_base", rows)
+    monkeypatch.setattr(bfcl_adapter, "install_handler", lambda *args, **kwargs: None)
+    monkeypatch.setattr(bfcl_adapter, "official_category_ids", lambda category: {"multi_turn_base": ids})
+    calls = []
+
+    def official(argv):
+        calls.append(argv[0])
+        if argv[0] == "evaluate":
+            assert [json.loads(line) for line in path.read_text().splitlines()] == rows
+            _score(tmp_path, "c2kv-hf", "multi_turn", "multi_turn_base",
+                   {"accuracy": 0.0, "correct_count": 0, "total_count": 3})
+
+    monkeypatch.setattr(bfcl_adapter, "run_cli", official)
+    summary = bfcl_adapter.run_bfcl("http://proxy/v1", project_root=tmp_path)
+    assert calls == ["generate", "evaluate"]
+    assert summary["n_total"] == summary["n_scored"] == 3
+    assert summary["completion_ledger"]["remaining"] == []
+    assert set(summary["completion_ledger"]["terminal_failures"]) == set(ids)
+    assert summary["completion_ledger"]["refill_rounds_used"] == 0
+    assert summary["semantic_score"] == 0
+
+
+def test_shared_completion_classifier_matches_bundled_runtime():
+    root = Path(__file__).resolve().parents[1]
+    assert (root / "benchmarks/bfcl_completion.py").read_bytes() == (
+        root / "experiments/history_system/runtime/benchmarks/bfcl_completion.py").read_bytes()
 
 
 def test_embedded_cli_returns_to_run_evaluation(monkeypatch):
