@@ -119,6 +119,18 @@ class ToolRegionController:
                 visible["tools"] = []
         return visible
 
+    def _whole_full_tokens(self, payload: Mapping[str, Any]) -> int:
+        store = EventStore.from_messages(payload["session_id"], payload["messages"])
+        full_view = RuntimeMemoryView(
+            gist_event_ids=(),
+            raw_event_ids=tuple(event.event_id for event in store.events),
+            evidence_event_ids=(),
+            raw_control_layout="full-original-native-v1",
+        )
+        messages = render_raw_control_messages(store, full_view)
+        return len(native_ids(self.tokenizer, messages,
+                              tools=payload.get("tools"), generation=True))
+
     def _augment(self, memory: PackedMemory, plan: Any, payload: Mapping[str, Any], *,
                  ratio: int, max_new_tokens: int):
         if plan is None:
@@ -140,11 +152,12 @@ class ToolRegionController:
         by_catalog = {}
         for original, chunk in zip(plan.chunks, converted, strict=True):
             by_catalog.setdefault(original.catalog_index, []).append(chunk)
+        memory, locations = self._anchor_token_spans(memory, plan.carrier_anchors)
         anchored = []
         anchored_catalog = set()
         for anchor in plan.carrier_anchors:
             group = tuple(by_catalog[anchor["catalog_index"]])
-            location = self._placeholder_token_span(memory, anchor["placeholder"])
+            location = locations.get(anchor["catalog_index"])
             if location is None:
                 continue
             anchored.append({"token_start": location[0], "token_end": location[1],
@@ -170,35 +183,79 @@ class ToolRegionController:
             raise ValueError("Tool and history packing exceed the model context")
         return augmented
 
-    def _placeholder_token_span(self, memory: PackedMemory, placeholder: str):
-        raw_ids = tuple(memory.system_input_ids) + tuple(memory.workspace_input_ids)
-        text = self.tokenizer.decode(list(raw_ids), skip_special_tokens=False,
-                                     clean_up_tokenization_spaces=False)
-        start = text.find(placeholder)
-        if start < 0:
-            return None
-        if text.find(placeholder, start + 1) >= 0:
-            raise ValueError("A source tool anchor appears more than once in the packed prompt")
-        encoded = self.tokenizer(text, add_special_tokens=False,
-                                 return_offsets_mapping=True)
-        ids = tuple(encoded["input_ids"])
-        offsets = tuple(tuple(pair) for pair in encoded["offset_mapping"])
-        if ids != raw_ids:
-            raise ValueError("Cannot align source tool anchor to native tokens")
-        end = start + len(placeholder)
-        overlapping = [index for index, (left, right) in enumerate(offsets)
-                       if right > start and left < end]
-        if (not overlapping or offsets[overlapping[0]][0] != start
-                or offsets[overlapping[-1]][1] != end):
-            raise ValueError("Source tool anchor is not token-aligned")
-        token_start, token_end = overlapping[0], overlapping[-1] + 1
-        if token_start >= len(memory.system_input_ids):
-            offset = sum(len(chunk.token_ids) for chunk in memory.chunks)
-            token_start += offset
-            token_end += offset
-        elif token_end > len(memory.system_input_ids):
-            raise ValueError("Source tool anchor crosses the packed system boundary")
-        return token_start, token_end
+    def _anchor_token_spans(self, memory: PackedMemory, anchors):
+        """Isolate inline placeholders without removing neighboring source text.
+
+        A BPE token can cross an ACE/AppWorld JSON-string boundary. In that
+        case, encode the unchanged text on each side separately so the tool
+        replacement occupies whole tokens and every other character survives.
+        """
+        regions = {}
+        found = {}
+        for name in ("system_input_ids", "workspace_input_ids"):
+            original = tuple(getattr(memory, name))
+            text = self.tokenizer.decode(
+                list(original), skip_special_tokens=False,
+                clean_up_tokenization_spaces=False)
+            matches = []
+            for anchor in anchors:
+                placeholder = anchor["placeholder"]
+                start = text.find(placeholder)
+                if start < 0:
+                    continue
+                if text.find(placeholder, start + 1) >= 0:
+                    raise ValueError("A source tool anchor appears more than once in the packed prompt")
+                catalog_index = anchor["catalog_index"]
+                if catalog_index in found:
+                    raise ValueError("A source tool anchor crosses the packed system boundary")
+                found[catalog_index] = name
+                matches.append((start, start + len(placeholder), catalog_index, placeholder))
+            matches.sort()
+            if any(left[1] > right[0] for left, right in zip(matches, matches[1:])):
+                raise ValueError("Source tool anchors overlap")
+            if not matches:
+                regions[name] = (original, {})
+                continue
+            encoded = self.tokenizer(text, add_special_tokens=False,
+                                     return_offsets_mapping=True)
+            offsets = tuple(tuple(pair) for pair in encoded["offset_mapping"])
+            aligned = tuple(encoded["input_ids"]) == original
+            positions = {}
+            if aligned:
+                for start, end, catalog_index, _ in matches:
+                    overlap = [index for index, (left, right) in enumerate(offsets)
+                               if right > start and left < end]
+                    if (not overlap or offsets[overlap[0]][0] != start
+                            or offsets[overlap[-1]][1] != end):
+                        aligned = False
+                        break
+                    positions[catalog_index] = (overlap[0], overlap[-1] + 1)
+            if aligned:
+                regions[name] = (original, positions)
+                continue
+            pieces = []
+            cursor = 0
+            for start, end, catalog_index, placeholder in matches:
+                pieces.extend(self.tokenizer(text[cursor:start], add_special_tokens=False)["input_ids"])
+                token_start = len(pieces)
+                pieces.extend(self.tokenizer(placeholder, add_special_tokens=False)["input_ids"])
+                positions[catalog_index] = (token_start, len(pieces))
+                cursor = end
+            pieces.extend(self.tokenizer(text[cursor:], add_special_tokens=False)["input_ids"])
+            recoded = tuple(int(token) for token in pieces)
+            if self.tokenizer.decode(
+                    list(recoded), skip_special_tokens=False,
+                    clean_up_tokenization_spaces=False) != text:
+                raise ValueError("Cannot preserve source text while aligning tool anchors")
+            regions[name] = (recoded, positions)
+        system, system_positions = regions["system_input_ids"]
+        workspace, workspace_positions = regions["workspace_input_ids"]
+        offset = len(system) + sum(len(chunk.token_ids) for chunk in memory.chunks)
+        locations = dict(system_positions)
+        locations.update({index: (start + offset, end + offset)
+                          for index, (start, end) in workspace_positions.items()})
+        return replace(memory, system_input_ids=system,
+                       workspace_input_ids=workspace), locations
 
     def _raw_tool_memory(self, memory: PackedMemory, plan: Any,
                          payload: Mapping[str, Any]) -> PackedMemory:
@@ -339,6 +396,7 @@ class ToolRegionController:
         previous = self._original_tools.get(session_id)
         if previous is not None and previous != tools_json:
             raise ValueError("Tools changed within a session; use a new explicit session_id")
+        whole_full_tokens = self._whole_full_tokens(payload)
         plan = self._plan(payload)
         base = self.inner.prepare(
             self._controller_payload(payload, plan), ratio=ratio,
@@ -347,6 +405,7 @@ class ToolRegionController:
         memory = self._augment(base.memory, plan, payload, ratio=ratio,
                                max_new_tokens=max_new_tokens)
         metadata = copy.deepcopy(base.metadata)
+        metadata["paper_whole_full_kv_tokens"] = whole_full_tokens
         metadata["history_only_resident_kv_tokens"] = base.memory.costs(ratio)["resident_kv_tokens"]
         metadata["history_only_gist_tokens"] = base.memory.costs(ratio)["gist_tokens"]
         metadata["tool_memory"] = (
@@ -383,6 +442,8 @@ class ToolRegionController:
                                           ratio=prepared.ratio,
                                           max_new_tokens=prepared.max_new_tokens)
         result["metadata"] = copy.deepcopy(value["metadata"])
+        result["metadata"]["paper_whole_full_kv_tokens"] = prepared.metadata[
+            "paper_whole_full_kv_tokens"]
         result["metadata"]["history_only_resident_kv_tokens"] = value["memory"].costs(
             prepared.ratio)["resident_kv_tokens"]
         result["metadata"]["history_only_gist_tokens"] = value["memory"].costs(

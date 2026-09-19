@@ -566,6 +566,7 @@ class SGLangEventNativeGenerator:
         eos_token_id: int | Sequence[int] | None = None,
         trace_context: Mapping[str, Any] | None = None,
         compression_chunks: Sequence[EncoderChunk] | None = None,
+        paper_whole_full_kv_tokens: int | None = None,
     ) -> SGLangEventNativeGenerationResult:
         """Submit one exact packed decision.  A failure is terminal and unretried."""
 
@@ -578,6 +579,8 @@ class SGLangEventNativeGenerator:
             raise ValueError("max_new_tokens exceeds this adapter's finite cap")
         if trace_context is not None and not isinstance(trace_context, Mapping):
             raise TypeError("trace_context must be a mapping or None")
+        if paper_whole_full_kv_tokens is not None:
+            _positive_int(paper_whole_full_kv_tokens, "paper_whole_full_kv_tokens")
         if self._requests_submitted >= self.max_generation_calls:
             raise RuntimeError("SGLang generation cap exhausted; automatic retry is disabled")
 
@@ -643,6 +646,8 @@ class SGLangEventNativeGenerator:
             },
             "shadow_features": shadow_request,
         }
+        if paper_whole_full_kv_tokens is not None:
+            payload["paper_whole_full_kv_tokens"] = paper_whole_full_kv_tokens
         if self.max_tool_extraction_calls is not None:
             payload["max_tool_extraction_calls"] = (
                 self.max_tool_extraction_calls - getattr(self, "tool_extraction_calls_reserved", 0))

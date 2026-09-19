@@ -247,6 +247,11 @@ class EventNativeDecisionRunner:
         kwargs = {}
         if compression_chunks is not None:
             kwargs['compression_chunks'] = compression_chunks
+        whole_full_tokens = metadata.get('paper_whole_full_kv_tokens')
+        if whole_full_tokens is not None:
+            if type(whole_full_tokens) is not int or whole_full_tokens <= 0:
+                raise ValueError('paper_whole_full_kv_tokens must be a positive integer')
+            kwargs['paper_whole_full_kv_tokens'] = whole_full_tokens
         if getattr(self.generator, 'cache_trace_schema', None) == 'event-native-cache-trace-v1':
             kwargs['trace_context'] = {
                 'attempt_uid': handle.attempt_uid, 'session_id': record['session_id'],
