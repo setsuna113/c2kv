@@ -1,0 +1,82 @@
+"""Exercise the NPU launcher preflight without loading a model."""
+
+import os
+import select
+import shutil
+import socket
+import subprocess
+import tempfile
+import unittest
+from pathlib import Path
+
+
+@unittest.skipUnless(
+    os.name == "posix" and all(shutil.which(name) for name in ("bash", "flock", "ss", "pgrep")),
+    "requires Linux launcher tools",
+)
+class EngineLauncherTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        root = Path(self.temp.name)
+        source = (Path(__file__).resolve().parents[1] / "tools" / "launch_engine.sh").read_text()
+        source = source.replace(
+            "ROOT=/home/liuyancheng/c2kv-generality-20260918",
+            f"ROOT={root / 'engine'}",
+            1,
+        )
+        source = source.split("source /usr/local/Ascend/cann-8.5.0/set_env.sh", 1)[0]
+        self.launcher = root / "launch_engine.sh"
+        self.launcher.write_text(source + "echo ready\nexec sleep 10\n")
+
+    def run_launcher(self, card, port, *extra):
+        return subprocess.run(
+            ["bash", str(self.launcher), str(card), str(port), "test", *extra],
+            capture_output=True, text=True, timeout=5,
+        )
+
+    def test_second_launch_refuses_same_port_or_card(self):
+        first = subprocess.Popen(
+            ["bash", str(self.launcher), "5", "49125", "test"],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        )
+        try:
+            ready, _, _ = select.select([first.stdout], [], [], 5)
+            self.assertTrue(ready, first.poll())
+            self.assertEqual(first.stdout.readline().strip(), "ready")
+
+            same_port = self.run_launcher(4, 49125)
+            self.assertEqual(same_port.returncode, 75, same_port.stderr)
+            self.assertIn("port 49125", same_port.stderr)
+
+            same_card = self.run_launcher(5, 49126)
+            self.assertEqual(same_card.returncode, 75, same_card.stderr)
+            self.assertIn("card 5", same_card.stderr)
+        finally:
+            if first.poll() is None:
+                first.terminate()
+            first.communicate(timeout=5)
+
+    def test_preexisting_listener_is_rejected(self):
+        with socket.socket() as listener:
+            listener.bind(("127.0.0.1", 0))
+            listener.listen()
+            port = listener.getsockname()[1]
+            result = self.run_launcher(5, port)
+        self.assertEqual(result.returncode, 75, result.stderr)
+        self.assertIn("already has a listener", result.stderr)
+
+    def test_binding_arguments_cannot_change_after_lock_selection(self):
+        for card, port, extra in (
+            ("not-a-card", 49125, ()),
+            (5, "not-a-port", ()),
+            (5, 49125, ("--port", "49126")),
+            (5, 49125, ("--port=49126",)),
+            (5, 49125, ("--base-gpu-id", "0")),
+        ):
+            with self.subTest(card=card, port=port, extra=extra):
+                self.assertEqual(self.run_launcher(card, port, *extra).returncode, 64)
+
+
+if __name__ == "__main__":
+    unittest.main()

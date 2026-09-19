@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import signal
 import subprocess
 import time
@@ -44,21 +45,48 @@ def launch(card: int, port: int, tag: str, extra_args: list[str] | None = None) 
     return receipt
 
 
+def _pid_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+        # A zombie still answers kill(pid, 0), but cannot own a ready server.
+        stat = Path(f"/proc/{pid}/stat").read_text()
+        return stat.rsplit(")", 1)[1].split()[0] != "Z"
+    except OSError:
+        return False
+
+
+def _listener_in_session(port: int, pid: int) -> bool:
+    """Require the healthy listener to belong to the launched process group."""
+    try:
+        result = subprocess.run(
+            ["ss", "-H", "-ltnp", f"sport = :{port}"],
+            capture_output=True, text=True, timeout=3,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    if result.returncode != 0:
+        return False
+    for owner in re.findall(r"\bpid=(\d+)\b", result.stdout):
+        try:
+            if os.getsid(int(owner)) == pid:
+                return True
+        except OSError:
+            continue
+    return False
+
+
 def wait_ready(port: int, timeout_s: int = 600, *, pid: int | None = None) -> dict:
     opener = _no_proxy_opener()
     deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline:
+        if pid is not None and not _pid_alive(pid):
+            return {"ready": False, "reason": "process_exit"}
         try:
             with opener.open(f"http://127.0.0.1:{port}/health", timeout=5) as r:
-                if r.status == 200:
+                if r.status == 200 and (pid is None or _listener_in_session(port, pid)):
                     return {"ready": True, "elapsed_s": timeout_s - (deadline - time.monotonic())}
         except (urllib.error.URLError, OSError, TimeoutError):
             pass
-        if pid is not None:
-            try:
-                os.kill(pid, 0)
-            except OSError:
-                return {"ready": False, "reason": "process_exit"}
         time.sleep(5)
     return {"ready": False, "reason": "timeout"}
 
