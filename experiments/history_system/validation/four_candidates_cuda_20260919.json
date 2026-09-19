@@ -1,0 +1,573 @@
+{
+  "schema": "c2kv-four-candidates-cuda-smoke-v1",
+  "date": "2026-09-19",
+  "purpose": "Functional whole-task smoke, not comparative quality evaluation",
+  "result_status": "preliminary, n=1",
+  "task_ids": [
+    "multi_turn_base_26"
+  ],
+  "gpu": "NVIDIA GeForce RTX 4090 Laptop GPU",
+  "seed": 1,
+  "engine_root": "/home/lyc/dev/c2kv-four-candidates-smoke-20260919/engine",
+  "paper_root": "/home/lyc/dev/c2kv-four-candidates-smoke-20260919/paper",
+  "local_branch": "paper/benchmarks-cuda-20260917",
+  "configuration": {
+    "schema_version": 1,
+    "model": "c2kv-agent",
+    "checkpoint": "/home/lyc/dev/c2kv-cuda-port/checkpoint-1000",
+    "server_python": "/home/lyc/dev/c2kv-cuda-port/venv-sglang/bin/python",
+    "bench_python": "/home/lyc/dev/c2kv-cuda-port/venv-bench/bin/python",
+    "appworld_python": "/home/lyc/dev/c2kv-paper-appworld-fixture/.venv/bin/python",
+    "bfcl_dir": "/home/lyc/dev/c2kv-cuda-port/validation/bfcl",
+    "acon_dir": "/home/lyc/dev/c2kv-paper-appworld-fixture/deps/acon",
+    "appworld_root": "/home/lyc/dev/c2kv-paper-appworld-fixture/deps/appworld",
+    "output_root": "/home/lyc/dev/c2kv-four-candidates-smoke-20260919/results",
+    "server_port": 34620,
+    "proxy_port": 34621,
+    "device": "cuda",
+    "attention_backend": "flashinfer",
+    "disable_cuda_graph": false,
+    "radix_cache_arms": [
+      "full",
+      "hiagent_full",
+      "acon_hist_ut_co",
+      "agentfold"
+    ],
+    "context_length": 40960,
+    "max_total_tokens": 8192,
+    "chunked_prefill_size": 256,
+    "mem_fraction_static": 0.85,
+    "c2kv_pool_fraction": 0.05,
+    "max_running_requests": 1,
+    "seed": 1,
+    "doc_packing": "turn",
+    "max_doc_length": 1000,
+    "max_doc_num": 1000,
+    "query_projection": "base",
+    "appworld_split": "test_normal",
+    "appworld_max_iter": 50,
+    "c1": {
+      "embedding_model": "/home/lyc/dev/c2kv-selection-models/Qwen3-Embedding-0.6B",
+      "embedding_device": "cpu",
+      "detector": "d3_hybrid",
+      "selector_threshold": 0.5,
+      "history_variant": "H0",
+      "recovery_rounds": 1,
+      "task_timeout": 10800
+    },
+    "methods": [
+      {
+        "method": "Full",
+        "arm": "full",
+        "group": "main",
+        "benchmarks": [
+          "bfcl_base",
+          "bfcl_long_context",
+          "appworld",
+          "acebench_agent",
+          "toolsandbox"
+        ],
+        "tool_contexts": [
+          "raw",
+          "t0_r8",
+          "t0_r8_hybrid3"
+        ]
+      },
+      {
+        "method": "HiAgent",
+        "arm": "hiagent_full",
+        "group": "main",
+        "benchmarks": [
+          "bfcl_base",
+          "bfcl_long_context",
+          "appworld",
+          "acebench_agent",
+          "toolsandbox"
+        ]
+      },
+      {
+        "method": "ACON",
+        "arm": "acon_hist_ut_co",
+        "group": "main",
+        "benchmarks": [
+          "bfcl_base",
+          "bfcl_long_context",
+          "appworld",
+          "acebench_agent",
+          "toolsandbox"
+        ]
+      },
+      {
+        "method": "C2KV",
+        "arm": "c2kv_native_r4",
+        "group": "main",
+        "ratio": 4,
+        "benchmarks": [
+          "bfcl_base",
+          "bfcl_long_context",
+          "appworld",
+          "acebench_agent",
+          "toolsandbox"
+        ]
+      },
+      {
+        "method": "H2O",
+        "arm": "history_kv_h2o_r25_persistent",
+        "group": "main",
+        "retention": 0.25,
+        "benchmarks": [
+          "bfcl_base",
+          "bfcl_long_context",
+          "appworld",
+          "acebench_agent",
+          "toolsandbox"
+        ]
+      },
+      {
+        "method": "SnapKV",
+        "arm": "history_kv_snapkv_r25_persistent",
+        "group": "main",
+        "retention": 0.25,
+        "benchmarks": [
+          "bfcl_base",
+          "bfcl_long_context",
+          "appworld",
+          "acebench_agent",
+          "toolsandbox"
+        ]
+      },
+      {
+        "method": "H2O",
+        "arm": "history_kv_h2o_r125_persistent",
+        "group": "sweep",
+        "retention": 0.125,
+        "benchmarks": [
+          "bfcl_base",
+          "bfcl_long_context",
+          "appworld"
+        ]
+      },
+      {
+        "method": "SnapKV",
+        "arm": "history_kv_snapkv_r125_persistent",
+        "group": "sweep",
+        "retention": 0.125,
+        "benchmarks": [
+          "bfcl_base",
+          "bfcl_long_context",
+          "appworld"
+        ]
+      },
+      {
+        "method": "PyramidKV",
+        "arm": "history_kv_pyramidkv_r25_persistent",
+        "group": "main",
+        "retention": 0.25,
+        "benchmarks": [
+          "bfcl_base",
+          "bfcl_long_context",
+          "appworld",
+          "acebench_agent",
+          "toolsandbox"
+        ]
+      },
+      {
+        "method": "PyramidKV",
+        "arm": "history_kv_pyramidkv_r125_persistent",
+        "group": "sweep",
+        "retention": 0.125,
+        "benchmarks": [
+          "bfcl_base",
+          "bfcl_long_context",
+          "appworld"
+        ]
+      },
+      {
+        "method": "AgentFold",
+        "arm": "agentfold",
+        "group": "opponent",
+        "benchmarks": [
+          "bfcl_base",
+          "bfcl_long_context",
+          "appworld",
+          "acebench_agent",
+          "toolsandbox"
+        ]
+      },
+      {
+        "method": "CommitKV",
+        "arm": "commitkv",
+        "group": "opponent",
+        "benchmarks": [
+          "bfcl_base",
+          "bfcl_long_context",
+          "appworld",
+          "acebench_agent",
+          "toolsandbox"
+        ]
+      },
+      {
+        "method": "AgentKV",
+        "arm": "agentkv",
+        "group": "opponent",
+        "benchmarks": [
+          "bfcl_base",
+          "bfcl_long_context",
+          "appworld",
+          "acebench_agent",
+          "toolsandbox"
+        ]
+      },
+      {
+        "method": "C2KV+C1",
+        "arm": "c2kv_c1_t02_r8",
+        "group": "main",
+        "ratio": 8,
+        "benchmarks": [
+          "bfcl_base",
+          "bfcl_long_context",
+          "appworld"
+        ]
+      },
+      {
+        "method": "C2KV+C1",
+        "arm": "c2kv_c1_t02_r4",
+        "group": "ablation",
+        "ratio": 4,
+        "benchmarks": [
+          "bfcl_base"
+        ]
+      }
+    ],
+    "benchmarks": [
+      {
+        "name": "bfcl_base",
+        "adapter": "bfcl",
+        "category": "multi_turn_base"
+      },
+      {
+        "name": "bfcl_long_context",
+        "adapter": "bfcl",
+        "category": "multi_turn_long_context"
+      },
+      {
+        "name": "appworld",
+        "adapter": "acon_appworld"
+      },
+      {
+        "name": "acebench_agent",
+        "adapter": "acebench",
+        "category": "agent"
+      },
+      {
+        "name": "toolsandbox",
+        "adapter": "toolsandbox"
+      }
+    ],
+    "model_family": "qwen3-4b",
+    "acebench_dir": "/home/lyc/baselines/acebench",
+    "acebench_python": "/home/lyc/dev/c2kv-cuda-port/venv-bench/bin/python",
+    "acebench_language": "en",
+    "toolsandbox_dir": "/home/lyc/benchmarks/ToolSandbox",
+    "toolsandbox_python": "/home/lyc/dev/c2kv-cuda-port/venv-bench/bin/python",
+    "toolsandbox_suite": "full",
+    "toolsandbox_scenarios": [],
+    "unsupported_cells": [
+      {
+        "method": "C2KV+C1",
+        "arm": "c2kv_c1_t02_r8",
+        "benchmark": "acebench_agent",
+        "reason": "native C1 paper controller has no ACEBench adapter"
+      },
+      {
+        "method": "C2KV+C1",
+        "arm": "c2kv_c1_t02_r8",
+        "benchmark": "toolsandbox",
+        "reason": "native C1 paper controller has no ToolSandbox adapter"
+      }
+    ],
+    "tool_contexts": [
+      {
+        "name": "t0_r8",
+        "spec": "t0:r8",
+        "checkpoint": "/home/lyc/dev/c2kv-t0-selection/hf/T0/checkpoint-500",
+        "provenance": "T0 dev winner 2026-09-19 (ratio 8 and 12): strict tool-call 11/16, false-call 2/16, CE 0.729 on selection-dev-v1; HF Jasonning/c2kv T0/checkpoint-500; preliminary, n=1"
+      },
+      {
+        "name": "t0_r8_hybrid3",
+        "spec": "t0:r8:hybrid3",
+        "checkpoint": "/home/lyc/dev/c2kv-t0-selection/hf/T0/checkpoint-500",
+        "provenance": "same encoder; lexical top-3 schemas kept native (paper Section 3.2 allocation)"
+      }
+    ],
+    "sglang_source": "/home/lyc/dev/c2kv-four-candidates-smoke-20260919/engine"
+  },
+  "arms": [
+    {
+      "arm": "c2kv_static_t02_r8",
+      "variant": "static_t02",
+      "status": "completed",
+      "ratio": 8,
+      "decisions": 9,
+      "generation_attempts": 16,
+      "regenerated_decisions": 7,
+      "risk_scores": 9,
+      "recovery_reasons": {
+        "risk_not_above_threshold": 1,
+        "no_feasible_new_complete_event": 1,
+        "risk_triggered_complete_event_replaced": 7
+      },
+      "budget_checks_passed": 16,
+      "actual_call_ids_verified": true,
+      "functional_acceptance": {
+        "required": {
+          "native_generate_requests": true,
+          "detector_contract": true,
+          "candidate_decisions": true,
+          "candidate_variant": true,
+          "risk_scores": true,
+          "risk_available": true,
+          "ratio8": true,
+          "stable_call_ids": true,
+          "budget_passed": true
+        },
+        "observed": {
+          "native_packing_present": true,
+          "gist_cache_used": true,
+          "compression_ratio_gt_one": true
+        }
+      },
+      "official_score": 0.0,
+      "result_status": "preliminary, n=1",
+      "source_output": "/home/lyc/dev/c2kv-four-candidates-smoke-20260919/results_final/static_t02",
+      "profile_sha256": "c2ea95b15ae9530d0f34a6cd076b4bfd774e850c07ceb81382a1baa13eb0e34d",
+      "steps_sha256": "735a0ed9a7aeef132668f7dcfa7cae4b499178ac65c96532b8fa054796fdfdc9",
+      "official_summary_sha256": "27967321abed116452cadf0509a37c1b8f0cb655a7afa77def3fe7a7824f8391"
+    },
+    {
+      "arm": "c2kv_turn_c1_r8",
+      "variant": "turn_c1",
+      "status": "completed",
+      "ratio": 8,
+      "decisions": 32,
+      "generation_attempts": 54,
+      "regenerated_decisions": 22,
+      "risk_scores": 32,
+      "recovery_reasons": {
+        "risk_not_above_threshold": 10,
+        "risk_triggered_complete_event_replaced": 22
+      },
+      "budget_checks_passed": 54,
+      "actual_call_ids_verified": true,
+      "functional_acceptance": {
+        "required": {
+          "native_generate_requests": true,
+          "detector_contract": true,
+          "candidate_decisions": true,
+          "candidate_variant": true,
+          "risk_scores": true,
+          "risk_available": true,
+          "ratio8": true,
+          "stable_call_ids": true,
+          "budget_passed": true
+        },
+        "observed": {
+          "native_packing_present": true,
+          "gist_cache_used": true,
+          "compression_ratio_gt_one": true
+        }
+      },
+      "official_score": 0.0,
+      "result_status": "preliminary, n=1",
+      "source_output": "/home/lyc/dev/c2kv-four-candidates-smoke-20260919/results_final/turn_c1",
+      "profile_sha256": "99fe67493e740b789d60fbf13c6afcea5cc107d473505dac4f61c5d926d04188",
+      "steps_sha256": "939cf0478d5a57d657554af365238e2c45fb6e41cae253670fe21b9a70b491bc",
+      "official_summary_sha256": "8fa55c5211a6f5d8c128ba7c995db5faf40a72a1888242845a0d1adc81b14d4a"
+    },
+    {
+      "arm": "c2kv_goal_rescue_r8",
+      "variant": "goal_rescue",
+      "status": "completed",
+      "ratio": 8,
+      "decisions": 10,
+      "generation_attempts": 13,
+      "regenerated_decisions": 3,
+      "risk_scores": 10,
+      "recovery_reasons": {
+        "risk_not_above_threshold": 6,
+        "no_feasible_new_complete_event": 1,
+        "stop_completion_review": 3
+      },
+      "budget_checks_passed": 13,
+      "actual_call_ids_verified": true,
+      "functional_acceptance": {
+        "required": {
+          "native_generate_requests": true,
+          "detector_contract": true,
+          "candidate_decisions": true,
+          "candidate_variant": true,
+          "risk_scores": true,
+          "risk_available": true,
+          "ratio8": true,
+          "stable_call_ids": true,
+          "budget_passed": true
+        },
+        "observed": {
+          "native_packing_present": true,
+          "gist_cache_used": true,
+          "compression_ratio_gt_one": false
+        }
+      },
+      "official_score": 1.0,
+      "result_status": "preliminary, n=1",
+      "source_output": "/home/lyc/dev/c2kv-four-candidates-smoke-20260919/results_final/goal_rescue",
+      "profile_sha256": "4ffca4a99547a105ae33d3237629fa3d6ec665159d995ec649619eb90f290823",
+      "steps_sha256": "ff3a2eabb0346ec9e5e1425112d3ebbb86ccf859337443045d4d964939d2cee3",
+      "official_summary_sha256": "7c2d3ba8db99b9dd67d481a99456d41f96b65c9c3e2fab021d8240b9daf62fed"
+    },
+    {
+      "arm": "c2kv_dependency_first_r8",
+      "variant": "dependency_first",
+      "status": "completed",
+      "ratio": 8,
+      "decisions": 9,
+      "generation_attempts": 16,
+      "regenerated_decisions": 7,
+      "risk_scores": 9,
+      "recovery_reasons": {
+        "risk_not_above_threshold": 1,
+        "no_feasible_new_complete_event": 1,
+        "risk_triggered_complete_event_replaced": 7
+      },
+      "budget_checks_passed": 16,
+      "actual_call_ids_verified": true,
+      "functional_acceptance": {
+        "required": {
+          "native_generate_requests": true,
+          "detector_contract": true,
+          "candidate_decisions": true,
+          "candidate_variant": true,
+          "risk_scores": true,
+          "risk_available": true,
+          "ratio8": true,
+          "stable_call_ids": true,
+          "budget_passed": true
+        },
+        "observed": {
+          "native_packing_present": true,
+          "gist_cache_used": true,
+          "compression_ratio_gt_one": true
+        }
+      },
+      "official_score": 0.0,
+      "result_status": "preliminary, n=1",
+      "source_output": "/home/lyc/dev/c2kv-four-candidates-smoke-20260919/results_final/dependency_first",
+      "profile_sha256": "11f512531f87a3022d2c3c97a97d00ff48ee66299a0471c12b3e25ed37623da8",
+      "steps_sha256": "f5c74c85a4d2701028a49d85ea4d0136f65c51fcc1d96fa57ee117d76717e0e8",
+      "official_summary_sha256": "0c02a2696d6823a8bd45ece4598834770e2a8902040d627975145345fc804377"
+    }
+  ],
+  "cpu_validation": {
+    "runtime_targeted_passed": 60,
+    "paper_targeted_passed": 19,
+    "unrelated_existing_failure": {
+      "test": "test_event_native_bfcl.py::test_wall_cap_terminates_owned_child_and_writes_final_wall_receipt",
+      "reason": "HEAD POSIX fixture supplies fake pid 4321 without mocking os.killpg; ProcessLookupError",
+      "production_file_changed": false
+    }
+  },
+  "initial_smoke_failure": "ready/health route_contract mismatch before generation; fixed for candidate paths; original evidence retained in results/static_t02",
+  "engine_source": {
+    "origin_head": "ce13018725e218f2815c05bcbede3013cb0d1711",
+    "origin_status": " M c2kv/c2kv_serving_semantics.md\n M python/sglang/srt/entrypoints/http_server.py\n M python/sglang/srt/entrypoints/openai/protocol.py\n M python/sglang/srt/entrypoints/openai/serving_chat.py\n M python/sglang/srt/entrypoints/openai/utils.py\n M python/sglang/srt/managers/io_struct.py\n M python/sglang/srt/managers/scheduler.py\n M python/sglang/srt/managers/session_controller.py\n M python/sglang/srt/managers/tokenizer_communicator_mixin.py\n M python/sglang/srt/mem_cache/c2kv_native_packed.py\n M python/sglang/srt/mem_cache/c2kv_semantics.py\n M python/sglang/srt/model_executor/model_runner.py\n M python/sglang/srt/models/qwen3.py\n M python/sglang/srt/server_args.py\n?? test/registered/unit/test_c2kv_tool_gist.py\n?? test/registered/unit/test_session_cache_isolation.py",
+    "manifest_path": "/home/lyc/dev/c2kv-four-candidates-smoke-20260919/engine_source.json",
+    "manifest_sha256": "9546fdca7c613ac4e8354151e06a8b91e721921d8d891ccbde60e6335761618e"
+  },
+  "paper_source": {
+    "origin_head": "55a5c90c95497bed113de8d7f804201c3dac25a1",
+    "origin_status": [
+      " M benchmarks/README.md",
+      " M benchmarks/arms.py",
+      " M benchmarks/backends/base.py",
+      " M benchmarks/backends/sglang.py",
+      " M benchmarks/paper/README.md",
+      " M benchmarks/paper/c1.py",
+      " M benchmarks/paper/config.json",
+      " M benchmarks/paper/report.py",
+      " M benchmarks/paper/runner.py",
+      " M benchmarks/paper/test_runner.py",
+      " M benchmarks/proxy.py",
+      " M benchmarks/run.py",
+      " M benchmarks/test_run_dispatch.py",
+      " M experiments/history_system/run_c1.py",
+      " M experiments/history_system/runtime/benchmarks/memory_runtime/event_native_controls.py",
+      " M experiments/history_system/runtime/benchmarks/memory_runtime/event_native_server.py",
+      " M experiments/history_system/runtime/benchmarks/memory_runtime/event_native_step.py",
+      "?? benchmarks/paper/candidate_matrix.py",
+      "?? benchmarks/paper/test_candidate_arms.py",
+      "?? benchmarks/paper/test_tool_contexts.py",
+      "?? benchmarks/test_proxy_request_serialization.py",
+      "?? benchmarks/test_toolmemory.py",
+      "?? benchmarks/test_toolmemory_proxy.py",
+      "?? benchmarks/toolmemory.py",
+      "?? experiments/history_system/candidate_algorithms.py",
+      "?? experiments/history_system/runtime/benchmarks/memory_runtime/candidate_algorithms/",
+      "?? experiments/history_system/runtime/benchmarks/memory_runtime/tests/test_candidate_allocation.py",
+      "?? experiments/history_system/runtime/benchmarks/memory_runtime/tests/test_candidate_dependencies.py",
+      "?? experiments/history_system/runtime/benchmarks/memory_runtime/tests/test_candidate_recovery.py"
+    ],
+    "manifest_path": "/home/lyc/dev/c2kv-four-candidates-smoke-20260919/paper_source.json",
+    "manifest_sha256": "83d0078fc171ab63467a2cc5bd6de255fadd139ae77768491af014e91c507f0c"
+  },
+  "dependency_activation_smoke": {
+    "task_id": "multi_turn_base_100",
+    "selection_reason": "TradingBot has typed company/symbol dependencies; task 26 exercised fallback only",
+    "status": "completed",
+    "decisions": 17,
+    "decisions_with_admitted_packet": 16,
+    "functional_acceptance": {
+      "required": {
+        "native_generate_requests": true,
+        "detector_contract": true,
+        "candidate_decisions": true,
+        "candidate_variant": true,
+        "risk_scores": true,
+        "risk_available": true,
+        "ratio8": true,
+        "stable_call_ids": true,
+        "budget_passed": true
+      },
+      "observed": {
+        "native_packing_present": true,
+        "gist_cache_used": true,
+        "compression_ratio_gt_one": true
+      }
+    },
+    "source_output": "/home/lyc/dev/c2kv-four-candidates-smoke-20260919/results_dependency_activation/native/task_shards/multi_turn_base_100",
+    "steps_sha256": "db849ed87a3f4b09a69d8b2cf751e3bed9d23ecca090fc0d87e6e2cf3afa7611",
+    "official_score": 1.0,
+    "result_status": "preliminary, n=1"
+  },
+  "owned_server_cleanup": {
+    "pid": 3684,
+    "stopped": true
+  },
+  "tested_implementation_sha256": {
+    "benchmarks/paper/candidate_matrix.py": "17b48903233c126c3b116eb92b6d8f3f823f3065a857254be707e43d41bcf2eb",
+    "experiments/history_system/candidate_algorithms.py": "112d460b45293bd91e6ec183d889e0df9a0f7f996e89d73f8f1e591843354e80",
+    "experiments/history_system/runtime/benchmarks/memory_runtime/candidate_algorithms/__init__.py": "072a3b25df56ae30fe055f3f7872d7ad69a397067b418b6ad7f473e946292bfa",
+    "experiments/history_system/runtime/benchmarks/memory_runtime/candidate_algorithms/allocation.py": "ad75a90812111b77459d18d34ea9d2cb248cc95d8bca687277dd514e434c6c8c",
+    "experiments/history_system/runtime/benchmarks/memory_runtime/candidate_algorithms/controller.py": "a6659a99dba0aa242d0f857c09f495b85d956a9de087eee99a52e02e545800a3",
+    "experiments/history_system/runtime/benchmarks/memory_runtime/candidate_algorithms/dependencies.py": "6ffef4e7f58f9b45a3062777f4235888781b2316e545b4a4c7a19ca5ff9b9520",
+    "experiments/history_system/runtime/benchmarks/memory_runtime/candidate_algorithms/progress.py": "4ea19792ba652ea4c2fd3ee74aa416bfee95cdb4f9bc0e0b20734d8734e9dbc1",
+    "experiments/history_system/runtime/benchmarks/memory_runtime/candidate_algorithms/repacking.py": "7aaea1d98a223fc8474fdd96f28c6e74d7d3cf6f744cf30f2758f7d71e191412",
+    "benchmarks/arms.py": "d9f8e3275e86797a39e1af751034394d5626b0b7d00cd13aab5fa1f38f35f819",
+    "benchmarks/paper/c1.py": "1b890fa2818b666939faa66b68b846cbf88dfa4e76b5fdcf03098af90a376c59",
+    "benchmarks/paper/runner.py": "8237ba32457055ac143c91fd122579acf2393f8b8e67993165dcf0c2628628c8",
+    "experiments/history_system/run_c1.py": "ece05eebe2960102e0928add8ccaf1b275fdff9357cbbec6d4e82a5b5cf00fa4",
+    "experiments/history_system/runtime/benchmarks/memory_runtime/event_native_controls.py": "ad2d1e80fe8a2eaed8f7ea2f25a438913b8308f02565d0f3af336f94e03a5e57",
+    "experiments/history_system/runtime/benchmarks/memory_runtime/event_native_server.py": "cebc910ff9307dce81a89a5df493691c775dc91c07389390fd2e89f81bdf5e2d",
+    "experiments/history_system/runtime/benchmarks/memory_runtime/event_native_step.py": "cd9bd829429235023c4650b72c050e07fd7588d6d3fe483179fd50563bde6108",
+    "experiments/history_system/runtime/benchmarks/memory_runtime/same_event_bridge_only.py": "2a7652c5ba782e4450785896e4218b52e63626ea014bf3405e0c7d61eca66cc7"
+  }
+}

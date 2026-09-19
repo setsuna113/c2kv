@@ -22,9 +22,11 @@ import urllib.error
 
 from benchmarks.measurement.telemetry import append_jsonl, canonical_sha256, read_jsonl
 from benchmarks.measurement.replay import _paper_measurement
+from .candidate_matrix import ARM_TO_VARIANT
 
 ARMS = {"c2kv_c1_t02_r8": 8, "c2kv_c1_t02_r4": 4}   # final system and its ratio-4 ablation
 ARMS["c2kv_native_r4"] = 4
+ARMS.update({arm: 8 for arm in ARM_TO_VARIANT})
 ARM = "c2kv_c1_t02_r8"
 RATIO = ARMS[ARM]
 
@@ -62,13 +64,14 @@ def load_delivery():
 def delivery_args(config, benchmark, output, task_ids, delivery):
     settings = config.get("c1", {})
     detector = settings.get("detector", "d3_hybrid")
-    args = delivery.build_parser().parse_args([
+    if ARM in ARM_TO_VARIANT and benchmark != "bfcl_base":
+        raise ValueError("candidate arms currently support bfcl_base only")
+    command = [
         "--method", "c2kv_native" if ARM == "c2kv_native_r4" else "proposed",
         "--checkpoint", config["checkpoint"],
         "--sglang-backend-url", config.get("upstream") or f"http://127.0.0.1:{config['server_port']}",
         "--embedding-model", settings.get("embedding_model", "unused-native-bare"),
         "--embedding-device", settings.get("embedding_device", "cpu"),
-        "--detector", detector,
         "--selector-threshold", str(settings.get("selector_threshold", 0.5)),
         "--benchmark-dir", config["bfcl_dir"],
         "--bfcl-python", config["bench_python"],
@@ -78,7 +81,12 @@ def delivery_args(config, benchmark, output, task_ids, delivery):
         "--task-timeout", str(settings.get("task_timeout", 10800)),
         "--out", str(output),
         "--ratio", str(RATIO),
-    ])
+    ]
+    if ARM in ARM_TO_VARIANT:
+        command += ["--candidate-algorithm", ARM_TO_VARIANT[ARM]]
+    else:
+        command += ["--detector", detector]
+    args = delivery.build_parser().parse_args(command)
     args.benchmark = "acon_appworld" if benchmark == "appworld" else "bfcl"
     args.task_id = list(task_ids)
     return args
@@ -118,12 +126,18 @@ def save(path, value):
     path.write_text(json.dumps(value, indent=2, ensure_ascii=False, allow_nan=False) + "\n", encoding="utf-8")
 
 
+def method_label():
+    if ARM in ARM_TO_VARIANT:
+        return f"C2KV {ARM_TO_VARIANT[ARM]}"
+    return "C2KV" if ARM == "c2kv_native_r4" else "C2KV+C1"
+
+
 def summarize_scores(benchmark, receipts):
     if benchmark != "appworld":
         scores = [row["unified_metrics"]["official_score"] for row in receipts]
         failures = [row["task_id"] for row in receipts if row.get("status") == "harness_failure"]
         infeasible = [row["task_id"] for row in receipts if row.get("status") == "method_failure"]
-        return {"arm": ARM, "method": "C2KV" if ARM == "c2kv_native_r4" else "C2KV+C1", "ratio": RATIO,
+        return {"arm": ARM, "method": method_label(), "ratio": RATIO,
                 "n_scored": len(scores), "n": len(scores),
                 "semantic_score": sum(scores) / len(scores) if scores else None,
                 "n_harness_failures": len(failures), "harness_failure_task_ids": failures,
@@ -131,7 +145,7 @@ def summarize_scores(benchmark, receipts):
                 "task_rows": receipts, "result_status": "preliminary, n=1"}
     from .c1_appworld import summarize_scores as appworld_scores
     result = appworld_scores(receipts)
-    result.update(arm=ARM, ratio=RATIO, method="C2KV" if ARM == "c2kv_native_r4" else "C2KV+C1")
+    result.update(arm=ARM, ratio=RATIO, method=method_label())
     return result
 
 
@@ -148,6 +162,8 @@ def prepare_native(config, benchmark, directory, tasks, delivery):
                                "ratio-4 ablation of the final system: same controller, same ratio as bare C2KV"))
     if ARM == "c2kv_native_r4":
         profile["comparison"] = "Independent native static gist baseline; not a detector-only C1 ablation"
+    elif ARM in ARM_TO_VARIANT:
+        profile["comparison"] = "Explicit ratio-8 BFCL candidate; not a legacy C1 or D3 score"
     profile["sglang_backend_preflight"] = delivery.preflight_sglang_backend(args)
     controller_path = native / "controller.json"
     save(controller_path, controller)
