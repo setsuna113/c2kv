@@ -568,6 +568,24 @@ class ExtensionRuleTest(unittest.TestCase):
                 if row["cell_id"] in old_cmd:
                     self.assertEqual(row["command"], old_cmd[row["cell_id"]])
 
+    def test_engine_checkout_may_move_without_new_cells(self):
+        """Rolling deployments point the same matrix at a new sglang checkout; only the
+        recorded ``sglang_source`` differs, which is not an experiment change."""
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary)
+            plan_a, _ = prepare(self.config, output, output / "sglang-v3")
+            plan_b, _ = prepare(self.config, output, output / "sglang-v4")
+            self.assertEqual([r["cell_id"] for r in plan_a], [r["cell_id"] for r in plan_b])
+            resolved = json.loads((output / "config.resolved.json").read_text())
+            self.assertEqual(resolved["sglang_source"], str((output / "sglang-v4").resolve()))
+            self.assertTrue(list(output.glob("config.before_extension.*.json")))
+            # anything else still goes through the extension rule
+            import copy
+            changed = copy.deepcopy(self.config)
+            changed["chunked_prefill_size"] = 256
+            with self.assertRaisesRegex(RuntimeError, "different config"):
+                prepare(changed, output, output / "sglang-v4")
+
     def test_touching_an_existing_cell_is_refused(self):
         import copy
         from benchmarks.paper.runner import extension_problem

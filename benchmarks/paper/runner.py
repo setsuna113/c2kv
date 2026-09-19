@@ -270,7 +270,12 @@ def prepare(config, output, source):
                 f"Existing output has an unreadable resolved config: {resolved_path}"
             ) from error
         if existing != config:
-            problem = extension_problem(existing, config, source, output)
+            # ``sglang_source`` is where the engine is checked out, not part of the
+            # experiment: a rolling engine deployment may point an unchanged matrix
+            # at a new checkout. Each cell's started.json records the source it ran.
+            same_matrix = ({k: v for k, v in existing.items() if k != "sglang_source"}
+                           == {k: v for k, v in config.items() if k != "sglang_source"})
+            problem = None if same_matrix else extension_problem(existing, config, source, output)
             if problem:
                 raise RuntimeError(
                     f"Existing output was prepared with a different config ({problem}): {resolved_path}"
