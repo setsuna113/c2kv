@@ -136,6 +136,32 @@ class SglangBackend(Backend):
         self._post_json = post_json  # (path, payload, timeout) -> dict
 
     # ---- primitives ----
+    def count_extract_tokens(
+        self,
+        text: str,
+        role: str,
+        tools: Optional[List[Dict[str, Any]]] = None,
+    ) -> int:
+        payload = {
+            "text": text,
+            "role": role,
+            "chat_template_kwargs": {"enable_thinking": False},
+        }
+        if tools:
+            payload["tools"] = tools
+        result = self._post_json("/v1/c2kv/tokenize", payload, 60)
+        token_count = result.get("token_count")
+        if (not result.get("success", True)
+                or not isinstance(token_count, int)
+                or isinstance(token_count, bool)
+                or token_count < 1):
+            raise BackendError(
+                "extract_tokenize_failed",
+                f"c2kv tokenize failed: "
+                f"{result.get('error') or json.dumps(result)[:500]}",
+            )
+        return token_count
+
     def extract(self, text: str, role: str, ratio: int,
                 tools: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
         payload = {
@@ -345,15 +371,18 @@ class SglangBackend(Backend):
             # legacy streaming slot retains the decode suffix and the next
             # physical-eviction turn overwrites slot metadata around live
             # allocator pages.
-            if session_id and str(spec["backend"]) == "physical_eviction":
-                return (
-                    list(messages),
-                    {"persistent_history_session": {"enabled": True}},
-                    session_id,
-                )
+            if session_id and str(spec["backend"]) in {"physical_eviction", "reference_attention"}:
+                hint = {"persistent_history_session": {"enabled": True}}
+                if spec["backend"] == "reference_attention":
+                    hint.update({
+                        "history_kv_method": method,
+                        "history_kv_backend": "reference_attention",
+                        "history_kv_reference_config": dict(spec),
+                    })
+                return list(messages), hint, session_id
             return list(messages), None, session_id
 
-        if str(spec["backend"]) == "physical_eviction":
+        if str(spec["backend"]) in {"physical_eviction", "reference_attention"}:
             count = int(history["history_message_count"])
             start_count = int(
                 history.get("history_start_message_count", indices[0])
@@ -384,9 +413,11 @@ class SglangBackend(Backend):
                 "active_c2kv_gist_tokens": 0,
                 "history_kv_method": method,
                 "estimated": True,
-                "history_kv_backend": "physical_eviction",
+                "history_kv_backend": str(spec["backend"]),
                 "history_kv_eviction": eviction,
             }
+            if spec["backend"] == "reference_attention":
+                hint["history_kv_reference_config"] = dict(spec)
             if session_id:
                 hint["persistent_history_session"] = {"enabled": True}
             return list(messages), hint, session_id
@@ -691,6 +722,9 @@ class SglangBackend(Backend):
         columns = {
             "history_kv_method": report.get("history_kv_method") or physical.get("method"),
             "history_kv_backend": report.get("history_kv_backend"),
+            "reference_attention_backend": report.get("reference_attention_backend"),
+            "reference_history_token_slots": report.get("reference_history_token_slots"),
+            "reference_history_resident_bytes": report.get("reference_history_resident_bytes"),
             "history_kv_runtime_status": report.get("history_kv_runtime_status")
             or physical.get("runtime_status"),
             "history_kv_full_equivalent_tokens": report.get("full_equivalent_history_tokens"),
@@ -804,6 +838,14 @@ class SglangBackend(Backend):
         for key in keys:
             if key not in result and key in runtime:
                 result[key] = runtime[key]
+        if report.get("history_kv_backend") == "reference_attention":
+            for source_key, target_key in (
+                ("full_equivalent_history_tokens", "history_full_kv_tokens"),
+                ("active_history_kv_tokens", "history_active_kv_tokens"),
+                ("reference_history_resident_bytes", "reference_history_resident_bytes"),
+            ):
+                if target_key not in result and report.get(source_key) is not None:
+                    result[target_key] = report[source_key]
         # Physical H2O/SnapKV has exact post-selection history counts even
         # before the general lifecycle hook is available.
         if "history_full_kv_tokens" not in result and physical.get("history_tokens") is not None:

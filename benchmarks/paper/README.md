@@ -5,27 +5,42 @@ This package runs the accepted portable benchmark through the independent
 uses D3 hybrid recovery through the delivered native C1 interface. Preparation does not start any
 experiment or retrain the detector.
 
-| Method | Main setting | BFCL base | BFCL long context | AppWorld | Small sweep |
-| --- | --- | --- | --- | --- | --- |
-| Full | Full history | 200 tasks | 200 tasks | test_normal, 168 tasks | None |
-| HiAgent | Full subgoal summary and trajectory retrieval | Same | Same | Same | None |
-| ACON | History UT to CO guideline | Same | Same | Same | None |
-| Bare C2KV | Arm C, checkpoint-1000, ratio **4** | Same | Same | Same | None |
-| H2O | Persistent history KV, retain 25% | Same | Same | Same | Retain 12.5% on each benchmark |
-| SnapKV | Persistent history KV, retain 25% | Same | Same | Same | Retain 12.5% on each benchmark |
-| PyramidKV | Persistent history KV, retain 25% | Same | Same | Same | Retain 12.5% on each benchmark |
-| AgentFold / CommitKV / AgentKV | Incremental append-only multi-turn history baselines | Same | Same | Same | None |
-| C2KV+C1 | H0 / C1000 / ratio8 / D3 hybrid / R1 | Same | Same | Same | None |
+| Method | Main setting | BFCL base | BFCL long context | AppWorld | ACEBench Agent | ToolSandbox | Small sweep |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Full | Full history | 200 tasks | 200 tasks | test_normal, 168 tasks | Agent multi-step + multi-turn | Full official suite | None |
+| HiAgent | Full subgoal summary and trajectory retrieval | Same | Same | Same | Same | Same | None |
+| ACON | History UT to CO guideline | Same | Same | Same | Same | Same | None |
+| Bare C2KV (legacy proxy; blocked for C1000) | Ratio **4**, training/serving packing mismatch | Historical diagnostic | Historical diagnostic | Stopped diagnostic | Blocked | Blocked | None |
+| H2O | Persistent history KV, retain 25% | Same | Same | Same | Same | Same | Retain 12.5% on BFCL/AppWorld |
+| SnapKV | Persistent history KV, retain 25% | Same | Same | Same | Same | Same | Retain 12.5% on BFCL/AppWorld |
+| PyramidKV | Persistent history KV, retain 25% | Same | Same | Same | Same | Same | Retain 12.5% on BFCL/AppWorld |
+| AgentFold | Joint actor folding and action; experiment Qwen3-4B weights | Same | Same | Same | Same | Same | None |
+| CommitKV / AgentKV | Resident KV selection, 2048-token launch budget | Same | Same | Same | Same | Same | None |
+| C2KV+C1 | H0 / C1000 / ratio8 / D3 hybrid / R1 | Same | Same | Same | Unsupported | Unsupported | None |
 
-The matrix contains 24 main cells, 9 sweep cells, 9 opponent cells and two
-explicit ACEBench-Agent/ToolSandbox Full baselines. The three C2KV+C1 cells
-run last. Bare C2KV remains ratio4; C2KV+C1 is ratio8 and is a final-system
+The matrix contains 38 main cells, 9 sweep cells, 15 opponent cells and one
+ratio-4 C1 ablation. ACEBench uses the official `agent` category; ToolSandbox
+uses its full official suite with one process. The missing native C1 adapters
+are recorded in `unsupported_cells.json`, rather than emitted as runnable
+cells. The three main C2KV+C1 cells run last. The historical bare C2KV entry remains ratio4 but is blocked with the event-native C1000 checkpoint; C2KV+C1 is ratio8 and is a final-system
 comparison, not a detector-only ablation. All actor and auxiliary generation
 calls use the same Qwen3-4B base weights through
 the same CUDA SGLang endpoint; only C2KV extraction uses the trained gist
 projections. System, tools and current input are retained. The server uses base
 query projections, one active request, page size 1, and the same attention
-backend for every method.
+backend for ordinary methods. PyramidKV, CommitKV and AgentKV use the
+`reference_attention` route with PyTorch SDPA and method-owned resident KV.
+Their latency measures this reference implementation, not the authors' optimized
+serving kernels. AgentFold implements the inference folding protocol without
+the authors' trained actor weights. The 2048-token AgentKV allowance is a project
+setting; CommitKV reports this absolute budget among its evaluated settings.
+`--history-kv-target-tokens` overrides either allowance at launch.
+
+CommitKV and AgentKV keep the sampled actor output token stream across turns and
+append only the new observation. A structured tool-call echo may reuse that raw
+actor text only after its parsed call is semantically verified. The server checks
+the reused prefix token by token and fails closed on a mismatch instead of
+silently rebuilding a canonical full-history prefix.
 
 The stable arm IDs `c2kv_c1_t02_r8` and `c2kv_c1_t02_r4` retain their
 existing interfaces. The selected algorithm is recorded separately in
@@ -54,12 +69,14 @@ is what the per-request telemetry attributes peaks to; it is a measurement
 constraint, not an algorithm requirement. The execution path is configured,
 not hard-coded: `attention_backend` (`flashinfer`), `disable_cuda_graph`
 (`false`; piecewise CUDA graph stays disabled), and `radix_cache_arms`
-(`["full", "hiagent_full", "acon_hist_ut_co", "agentfold", "commitkv", "agentkv"]`: the text arms keep SGLang's
+(`["full", "hiagent_full", "acon_hist_ut_co", "agentfold"]`: the text arms keep SGLang's
 cross-request prefix cache, so ordinary prefix reuse is not charged to them
 and the compute and cache left by their auxiliary calls are counted as
 incurred; the KV-compression arms reuse KV through their own session and gist
 mechanisms). All three are recorded in `config.resolved.json` and in each
 cell's `started.json`.
+Reference-attention arms always disable CUDA graphs and radix cache because
+their per-request query capture and external KV tensors require eager execution.
 
 Resident KV is reported as a total with line items, never as a total minus
 cache: `request_peak_resident_kv_bytes` is the decision-chain peak including
@@ -114,6 +131,8 @@ All large assets and results are in WSL Arch ext4:
 | AppWorld Python | `/home/lyc/dev/c2kv-paper-appworld-fixture/.venv/bin/python` |
 | AppWorld data root | `/home/lyc/dev/c2kv-paper-appworld-fixture/deps/appworld` |
 | Patched ACON harness | `/home/lyc/dev/c2kv-paper-appworld-fixture/deps/acon` |
+| Patched ACEBench harness | `/home/lyc/baselines/acebench` (verify/stage before execution) |
+| Patched ToolSandbox harness | `/home/lyc/benchmarks/ToolSandbox` (verify/stage before execution) |
 | C1 retrieval encoder | `/home/lyc/dev/c2kv-selection-models/Qwen3-Embedding-0.6B` |
 | Prepared matrix and commands | `/home/lyc/dev/c2kv-paper-prepared-c1` |
 
@@ -125,6 +144,28 @@ uses 8. The generic proxy's serving document budget is explicitly
 `turn / 1000 tokens / 1000 documents`,
 so the old default of 12 documents cannot silently cut out long history.
 C1 uses its delivered native packing and B0 controller budgets.
+
+Turn-document packing checks the exact extractor template length through
+`/v1/c2kv/tokenize` before splitting or extracting. Deploy the matching SGLang
+endpoint with the proxy: an older server returns an error instead of receiving
+an oversized extraction request. Tokenization performs no GPU model work.
+
+The archived `c2kv4` proxy runs used that legacy turn-document layout with a
+checkpoint declaring `history-event-base-query-v1` / `history-event-v1` /
+`event-native-evidence-v1`. They are training/serving-mismatched diagnostics,
+not an evaluation of bare C2KV under its declared native input contract.
+The paper runner now refuses to start this combination. Historical artifacts
+remain readable. A native bare ratio4 evaluation must be registered separately;
+switching to C1 would also change its memory policy and recovery behavior.
+
+For AppWorld C1, the first-user task packet is fixed raw common input. It is
+excluded from both the managed history B budget and the incremental evidence W
+budget, whose configured byte values remain unchanged. The metadata reports the
+task packet's marginal raw tokens and bytes separately from managed history and
+total resident KV. The packet still counts toward total resident KV, workspace
+token, physical sequence, and model-context limits. Results that failed while
+charging the task packet to managed history use the older S0 accounting and
+must not be resumed or pooled with results produced under this scope.
 
 ## Commands
 
@@ -209,8 +250,8 @@ Request mean/p95/p99 are also exported with both conventions. Gist exclusion
 changes time accounting only; extraction memory peaks remain in resident KV
 and process GPU measurements. AppWorld model/action/episode timers read the
 operating system's clocks, independently of AppWorld's frozen environment
-date. Standard OpenAI response IDs also join native decisions to executed
-actions when the client drops proxy-specific metadata.
+date. ACEBench Agent and ToolSandbox require `c2kv_proxy.request_id`; a response
+without that proxy identity fails instead of entering the action denominator.
 
 On the local WSL smoke device NVML does not provide per-process memory, so those
 fields remain null; torch allocated/reserved and resident KV are recorded.

@@ -56,6 +56,7 @@ CLI_SURFACE = [
     ("--ts-scenarios", "", False),
     ("--ts-agent", "", False),
     ("--ts-user", "", False),
+    ("--ts-parallel", 1, False),
     ("--toolsandbox-dir", None, False),
     ("--doc-packing", None, False),
     ("--max-doc-length", None, False),
@@ -107,7 +108,7 @@ def test_cli_choices_and_types_are_unchanged():
     assert actions["--acebench-language"].choices == ["en", "zh"]
     for flag in ("--out", "--acon-dir", "--acebench-dir"):
         assert actions[flag].type is Path, flag
-    for flag in ("--proxy-port", "--num-workers", "--max-tasks", "--max-iter",
+    for flag in ("--proxy-port", "--num-workers", "--max-tasks", "--max-iter", "--ts-parallel",
                  "--max-doc-length", "--max-doc-num"):
         assert actions[flag].type is int, flag
 
@@ -259,13 +260,13 @@ def _ctx(benchmark, **options):
                       options=base)
 
 
-def _capture(monkeypatch, module, name):
+def _capture(monkeypatch, module, name, result=None):
     calls = {}
 
     def fake(*args, **kwargs):
         calls["args"] = args
         calls["kwargs"] = kwargs
-        return {"n": 0}
+        return {"n": 0} if result is None else dict(result)
 
     monkeypatch.setattr(module, name, fake)
     return calls
@@ -303,7 +304,12 @@ def test_acon_appworld_dispatch_overrides(monkeypatch, tmp_path):
 
 
 def test_acebench_dispatch_routes_user_simulator_to_raw_upstream(monkeypatch):
-    calls = _capture(monkeypatch, acebench_adapter, "run_acebench")
+    calls = _capture(
+        monkeypatch,
+        acebench_adapter,
+        "run_acebench",
+        {"n": 0, "categories": ["agent_multi_step", "agent_multi_turn"]},
+    )
     ctx = _ctx("acebench", num_workers=4, max_iter=None, acebench_category="",
                acebench_language="", user_model="", acebench_dir=None,
                bench_python="")
@@ -316,7 +322,7 @@ def test_acebench_dispatch_routes_user_simulator_to_raw_upstream(monkeypatch):
     assert kw["language"] == acebench_adapter.DEFAULT_LANGUAGE
     assert kw["user_model"] is None and kw["num_threads"] == 4
     assert kw["max_dialog_turns"] == acebench_adapter.DEFAULT_MAX_DIALOG_TURNS
-    assert summary["cost_join"].startswith("not joinable:")
+    assert summary["cost_join"] == acebench_adapter.COST_JOIN
 
 
 def test_tau2_dispatch_passes_run_name_and_workers(monkeypatch, tmp_path):
@@ -360,7 +366,9 @@ def test_toolsandbox_dispatch_splits_scenarios(monkeypatch):
     assert kw["user"] == toolsandbox_adapter.AGENT
     assert kw["user_base_url"] == "http://raw:35000"
     assert kw["test_mode"] is True
-    assert summary["cost_join"].startswith("not joinable:")
+    assert kw["parallel"] == 1
+    assert kw["model"] == "c2kv-agent"
+    assert summary["cost_join"].startswith("joinable:")
 
 
 def test_bfcl_dispatch_adds_v1_and_chdirs(monkeypatch, tmp_path):

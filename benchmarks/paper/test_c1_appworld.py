@@ -8,6 +8,7 @@ from unittest import mock
 
 import pytest
 
+from benchmarks.paper import c1 as driver
 from benchmarks.paper import c1_appworld as bridge
 
 
@@ -246,6 +247,86 @@ def test_official_scores_are_required_and_attached_to_aggregate():
     ]
     with pytest.raises(ValueError, match="official score"):
         bridge.summarize_scores([{"unified_metrics": {"task_id": "task-c"}}])
+
+
+def test_capacity_failure_is_scored_zero_and_driver_runs_next_task(tmp_path, monkeypatch):
+    native = tmp_path / "native"
+    native.mkdir()
+    controller_path = native / "controller.json"
+    controller_path.write_text("{}", encoding="utf-8")
+    tasks = ["scenarioa_1", "scenariob_1"]
+    completed_metrics = {
+        "task_id": tasks[1],
+        "official_score": 1.0,
+        "normal_termination": True,
+        "protocol_legal": None,
+    }
+    completed = {
+        "task_id": tasks[1],
+        "status": "completed",
+        "unified_metrics": completed_metrics,
+        "official_summary": {
+            "task_id": tasks[1],
+            "official_task_outcome": {"success": True, "difficulty": 1},
+        },
+    }
+    calls = []
+
+    def run_task(_config, task_id, *_args):
+        calls.append(task_id)
+        if task_id == tasks[0]:
+            raise RuntimeError("controller finalization failed")
+        return completed, completed_metrics
+
+    monkeypatch.setattr(driver, "load_delivery", lambda: object())
+    monkeypatch.setattr(driver, "selected_tasks", lambda *_args, **_kwargs: tasks)
+    monkeypatch.setattr(
+        driver,
+        "prepare_native",
+        lambda *_args, **_kwargs: (native, object(), controller_path),
+    )
+    monkeypatch.setattr(bridge, "run_task", run_task)
+    monkeypatch.setattr(
+        driver,
+        "controller_step_failure",
+        lambda task_root: (
+            ("method_failure", "capacity_infeasible", "CapacityInfeasible")
+            if task_root.name == tasks[0]
+            else None
+        ),
+    )
+
+    result = driver.run_closed_loop({}, "appworld", tmp_path / "run")
+
+    assert result == native
+    assert calls == tasks
+    first = json.loads(
+        (native / "task_shards" / tasks[0] / "paper_task_result.json").read_text()
+    )
+    assert first["status"] == "method_failure"
+    assert first["unified_metrics"] == {
+        "task_id": tasks[0],
+        "official_score": 0.0,
+        "normal_termination": False,
+        "protocol_legal": None,
+        "method_failure": "capacity_infeasible",
+    }
+    summary = json.loads((tmp_path / "run" / f"summary_{driver.ARM}.json").read_text())
+    assert summary["n"] == 2
+    assert summary["semantic_score"] == 0.5
+    assert summary["n_method_failures"] == 1
+    assert summary["method_failure_task_ids"] == [tasks[0]]
+    assert summary["n_harness_failures"] == 0
+    assert summary["task_rows"][0]["score_source"] == "method_failure_zero"
+    assert summary["task_rows"][1]["score_source"] == "official_appworld"
+
+    # A failed run from the pre-fix driver lacks metrics.task_id. It must remain
+    # resumable from the durable receipt rather than requiring the task to rerun.
+    del first["unified_metrics"]["task_id"]
+    resumed = bridge.summarize_scores([first, completed])
+    assert resumed["n"] == 2
+    assert resumed["n_official_scored"] == 1
+    assert resumed["method_failure_task_ids"] == [tasks[0]]
 
 
 def test_official_task_outcome_is_saved_with_audit_details(tmp_path):

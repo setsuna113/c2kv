@@ -86,6 +86,9 @@ _OPENER = urlrequest.build_opener(urlrequest.ProxyHandler({}))
 import repair_policy
 import textarms
 import history_methods
+import agentfold
+import raw_actor_history
+from model_identity import require_qwen3_4b
 from arms import Arm, get_arm, history_kv_spec, kv_reuse_spec  # type: ignore
 from backends import BackendError, get_backend  # type: ignore
 from measurement.telemetry import append_jsonl, canonical_sha256  # type: ignore
@@ -330,6 +333,12 @@ def _extract(role: str, content: str, ratio: int, timeout: int = 600,
     return record
 
 
+def _count_extract_tokens(role: str, content: str) -> int:
+    """Exact no-model preflight for the text the extractor will render."""
+    with _phase("c2kv_tokenize"):
+        return BACKEND.count_extract_tokens(content, role)
+
+
 def _history_cutoff(messages: List[Dict[str, Any]]) -> int:
     """Index where the current (raw) block starts.
 
@@ -470,18 +479,31 @@ def _split_lines_keep(text: str) -> List[str]:
 
 
 def _fit_doc(doc_text: str, ratio: int, extract_fn, max_doc_length: int,
-             depth: int = 0) -> List[Tuple[str, Dict[str, Any]]]:
-    """Extract ``doc_text``; if its template length exceeds ``max_doc_length``
-    split it (train_data_multiturn._split_message_to_fit: greedy line
-    accumulation against a char budget, then hard halves) and extract the
-    pieces.  Without a tokenizer the char budget is calibrated from the
-    first extract's own chars/token; every piece is verified by its extract
-    response, so the guarantee is exact, only the cut points are
-    approximate."""
-    record = extract_fn("user", doc_text, ratio)
-    length = int(record.get("original_seq_len") or 0)
-    if length <= max_doc_length or depth >= 6 or len(doc_text) < 8:
+             depth: int = 0, count_fn=None) -> List[Tuple[str, Dict[str, Any]]]:
+    """Preflight, split, then extract documents within ``max_doc_length``.
+
+    The character budget chooses cut points only.  The backend's tokenizer
+    checks the exact role/chat-template length before every extraction, so an
+    approximate cut can recurse but can never launch an oversized model pass.
+    """
+    count_fn = count_fn or _count_extract_tokens
+    length = int(count_fn("user", doc_text))
+    if length <= max_doc_length:
+        record = extract_fn("user", doc_text, ratio)
+        extracted_length = int(record.get("original_seq_len") or 0)
+        if extracted_length != length:
+            raise BackendError(
+                "extract_tokenize_mismatch",
+                f"preflight counted {length} tokens but extraction reported "
+                f"{extracted_length}",
+            )
         return [(doc_text, record)]
+    if len(doc_text) < 2:
+        raise BackendError(
+            "doc_packing_failed",
+            f"one-character document renders to {length} tokens, above "
+            f"max_doc_length={max_doc_length}",
+        )
     chars_per_token = max(1.0, len(doc_text) / max(1, length))
     budget = max(64, int(max_doc_length * chars_per_token * 0.9))
     pieces: List[str] = []
@@ -505,9 +527,12 @@ def _fit_doc(doc_text: str, ratio: int, extract_fn, max_doc_length: int,
         pieces = [doc_text[:half], doc_text[half:]]
     out: List[Tuple[str, Dict[str, Any]]] = []
     for piece in pieces:
-        if not piece.strip():
+        if not piece:
             continue
-        out.extend(_fit_doc(piece, ratio, extract_fn, max_doc_length, depth + 1))
+        out.extend(_fit_doc(
+            piece, ratio, extract_fn, max_doc_length, depth + 1,
+            count_fn=count_fn,
+        ))
     return out
 
 
@@ -700,6 +725,17 @@ def _assemble(messages: List[Dict[str, Any]], arm: Arm, timeout: int = 600):
     # raw-path training dialect: tool -> bare user message (_normal_chat_message:
     # {"role": "user", "content": str}); a missing system prompt gets the
     # training default injected
+    event_messages = []
+    seen_action = False
+    for index, message in enumerate(messages):
+        role = message.get("role") or "user"
+        phase = "others"
+        if role == "tool" or (BENCHMARK == "acon_appworld" and role == "user" and seen_action):
+            phase = "tool"
+        elif role == "assistant":
+            phase = "act"
+            seen_action = True
+        event_messages.append({"message_index": index, "role": role, "phase": phase})
     messages = [
         ({"role": "user", "content": _stringify_content(m)}
          if m.get("role") == "tool" else dict(m))
@@ -707,6 +743,8 @@ def _assemble(messages: List[Dict[str, Any]], arm: Arm, timeout: int = 600):
     ]
     if not any(m.get("role") == "system" for m in messages):
         messages.insert(0, {"role": "system", "content": DEFAULT_SYSTEM_PROMPT})
+        event_messages = [{"message_index": 0, "role": "system", "phase": "others"}] + [
+            {**event, "message_index": event["message_index"] + 1} for event in event_messages]
     cutoff = _history_cutoff(messages)
     task_packet_source_index = next(
         (index for index, message in enumerate(messages)
@@ -834,6 +872,8 @@ def _assemble(messages: List[Dict[str, Any]], arm: Arm, timeout: int = 600):
     counts["dropped_docs"] = dropped_docs
     counts["task_packet_source_index"] = task_packet_source_index
     counts["task_packet_out_index"] = task_packet_out_index
+    if arm.history_kv and not arm.compress_history:
+        counts["history_kv_event_messages"] = event_messages
     # index in `out` where the current (raw) block starts: repair-only
     # messages for append placements are inserted right before it
     counts["current_start_out_index"] = len(out) - message_counts["current_raw"]
@@ -1004,6 +1044,12 @@ def _apply_text_arm(payload: Dict[str, Any], arm, conv: str,
         usage_acc["wall_sec"] += time.perf_counter() - t0
         return out
 
+    if arm.text_policy == "agentfold":
+        staged, stats = agentfold.prepare(
+            payload, agentfold.state_for(conv), code_actions=BENCHMARK == "acon_appworld")
+        if staged is None:
+            raise ValueError("AgentFold duplicate completed request must not rerun the actor")
+        return staged, stats
     if arm.text_policy in history_methods.METHODS:
         out, stats = history_methods.transform(
             messages,
@@ -1274,6 +1320,8 @@ def _activate_measurement_session(session: str) -> None:
             CACHE.clear()
             textarms.reset_state()
             history_methods.reset_state()
+            agentfold.reset_state()
+            raw_actor_history.reset_state()
             STATE.active_measurement_session = session
 
 
@@ -1396,6 +1444,11 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 return
         try:
             with _phase("request_assembly"):
+                if ARM.name in {"agentfold", "commitkv", "agentkv"} and not measurement_session:
+                    raise ValueError(
+                        f"{ARM.name} requires c2kv_measurement_session_id for stable episode state")
+                if ARM.name in {"commitkv", "agentkv"}:
+                    messages = raw_actor_history.state_for(conv).prepare(messages)
                 if getattr(ARM, "text_policy", None):
                     payload, text_stats = _apply_text_arm(payload, ARM, conv)
                     messages = payload["messages"]
@@ -1463,6 +1516,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
                         out_messages, counts
                     )
                     hint = dict(out_payload.get("c2kv_kv_memory_hint") or {})
+                    if counts.get("history_kv_event_messages"):
+                        hint["history_kv_event_messages"] = counts["history_kv_event_messages"]
                     hint["paper_measurement"] = {
                         "history_start_message_count": history_start,
                         "history_message_count": history_end,
@@ -1489,6 +1544,13 @@ class ProxyHandler(BaseHTTPRequestHandler):
         try:
             try:
                 data, normalized = call_upstream(messages_out, repair_plan)
+                if ARM.name in {"commitkv", "agentkv"}:
+                    raw_actor_history.state_for(conv).commit(
+                        original_payload.get("messages") or [], data)
+                if ARM.text_policy == "agentfold":
+                    data = agentfold.finish(data, agentfold.state_for(conv),
+                                            code_actions=BENCHMARK == "acon_appworld")
+                    normalized = BACKEND.normalize_response(data)
                 if ARM.text_policy == "hiagent_full":
                     def send_retrieved(staged):
                         nonlocal payload, messages_out
@@ -1771,6 +1833,8 @@ def main(argv=None):
     global DOC_PACKING, MAX_DOC_LENGTH, MAX_DOC_NUM, QUERY_PROJECTION, MODEL_FAMILY
     textarms.reset_state()  # fresh caches/state per proxy process
     history_methods.reset_state()
+    agentfold.reset_state()
+    raw_actor_history.reset_state()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--upstream", required=True,
                         help="backend base URL, e.g. http://127.0.0.1:34000")
@@ -1844,6 +1908,11 @@ def main(argv=None):
         raise SystemExit(
             f"FATAL: --record-prefixes requires arm 'full', got {ARM.name!r}")
     BACKEND = get_backend(args.backend, _post_json)
+    if ARM.name in {"agentfold", "commitkv", "agentkv"}:
+        with _OPENER.open(UPSTREAM + "/model_info", timeout=10) as response:
+            require_qwen3_4b(json.load(response))
+    if ARM.name.startswith("gen_") and args.history_kv_target_tokens is None:
+        raise ValueError("generation budget arms require --history-kv-target-tokens; placeholder is not runnable")
     STATE.reference_log_path = args.record_reference
     if args.reference:
         if not ARM.recover:

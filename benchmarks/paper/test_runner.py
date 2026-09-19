@@ -20,13 +20,12 @@ class PaperMatrixTest(unittest.TestCase):
 
     def test_only_requested_methods_and_ratio(self):
         rows = cells(self.config)
-        self.assertEqual(len(rows), 45)
-        self.assertEqual(sum(row["group"] == "main" for row in rows), 24)
+        self.assertEqual(len(rows), 63)
+        self.assertEqual(sum(row["group"] == "main" for row in rows), 38)
         self.assertEqual({row["ratio"] for row in rows if row["method"] == "C2KV"}, {4})
         self.assertEqual({row["method"] for row in rows}, {
             "Full", "HiAgent", "ACON", "C2KV", "H2O", "SnapKV", "PyramidKV",
             "AgentFold", "CommitKV", "AgentKV", "C2KV+C1",
-            "ACEBench Agent baseline", "ToolSandbox baseline",
         })
         self.assertTrue(all(row["arm"].startswith("c2kv_c1_t02_r") for row in rows[-4:]))
         # The ratio-4 C1 ablation is restricted to bfcl_base and carries no benchmark list itself.
@@ -40,13 +39,75 @@ class PaperMatrixTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             output = Path(temporary)
             plan, profile = prepare(self.config, output, output / "sglang")
-            self.assertEqual(len(plan), 45)
+            self.assertEqual(len(plan), 63)
             self.assertTrue(profile.is_file())
             for row in plan:
                 cmd = row["command"]
                 self.assertEqual(cmd[cmd.index("--num-workers") + 1], "1")
                 self.assertEqual("--record-prefixes" in cmd, row["arm"] == "full")
                 self.assertEqual(Path(row["replay_source"]).parent.name, row["benchmark"] + "__full")
+            self.assertEqual(json.loads((output / "unsupported_cells.json").read_text()),
+                             self.config["unsupported_cells"])
+
+    def test_prepare_pins_original_opponent_runtime_contracts(self):
+        from dataclasses import replace
+        from benchmarks.arms import ARMS
+
+        cases = [
+            ("agentfold", replace(
+                ARMS["agentfold"], text_policy="length_summary_surrogate"),
+             "actor folding policy"),
+            ("commitkv", replace(
+                ARMS["commitkv"],
+                history_kv={**ARMS["commitkv"].history_kv, "target_tokens": 1024}),
+             "2048-token"),
+            ("agentkv", replace(
+                ARMS["agentkv"],
+                history_kv={**ARMS["agentkv"].history_kv, "backend": "physical_eviction"}),
+             "reference-attention"),
+            ("history_kv_pyramidkv_r25_persistent", replace(
+                ARMS["history_kv_pyramidkv_r25_persistent"],
+                history_kv={
+                    **ARMS["history_kv_pyramidkv_r25_persistent"].history_kv,
+                    "backend": "physical_eviction",
+                }),
+             "budget differs"),
+        ]
+        for arm_name, bad_arm, message in cases:
+            with self.subTest(arm=arm_name), tempfile.TemporaryDirectory() as temporary:
+                with mock.patch.dict(ARMS, {arm_name: bad_arm}):
+                    with self.assertRaisesRegex(ValueError, message):
+                        prepare(self.config, Path(temporary), Path(temporary) / "sglang")
+
+    def test_agent_and_toolsandbox_are_real_method_matrices(self):
+        rows = cells(self.config)
+        expected = {"full", "hiagent_full", "acon_hist_ut_co", "c2kv4",
+                    "history_kv_h2o_r25_persistent",
+                    "history_kv_snapkv_r25_persistent",
+                    "history_kv_pyramidkv_r25_persistent",
+                    "agentfold", "commitkv", "agentkv"}
+        for benchmark in ("acebench_agent", "toolsandbox"):
+            actual = {row["arm"] for row in rows if row["benchmark"] == benchmark}
+            self.assertEqual(actual, expected)
+        unsupported = {(row["benchmark"], row["arm"])
+                       for row in self.config["unsupported_cells"]}
+        self.assertEqual(unsupported, {
+            ("acebench_agent", "c2kv_c1_t02_r8"),
+            ("toolsandbox", "c2kv_c1_t02_r8"),
+        })
+
+    def test_benchmark_commands_freeze_official_scope_and_single_flight(self):
+        rows = cells(self.config)
+        profile = Path("out/deployment_profile.json")
+        ace = next(row for row in rows if row["cell_id"] == "acebench_agent__full")
+        ace_cmd = run_command(self.config, ace, Path("out/ace"), profile)
+        self.assertEqual(ace_cmd[ace_cmd.index("--acebench-category") + 1], "agent")
+        self.assertEqual(ace_cmd[ace_cmd.index("--acebench-language") + 1], "en")
+        self.assertIn("acebench_role_history_v1", ace_cmd[ace_cmd.index("--capability-features") + 1])
+        ts = next(row for row in rows if row["cell_id"] == "toolsandbox__full")
+        ts_cmd = run_command(self.config, ts, Path("out/ts"), profile)
+        self.assertIn("--full", ts_cmd)
+        self.assertEqual(ts_cmd[ts_cmd.index("--ts-parallel") + 1], "1")
 
     def test_cuda_command_is_single_flight(self):
         cmd = server_command(self.config, Path("sglang"))
@@ -66,12 +127,14 @@ class PaperMatrixTest(unittest.TestCase):
     def test_shipped_config_serves_flashinfer_graph_and_radix_for_text_arms(self):
         self.assertEqual(self.config["attention_backend"], "flashinfer")
         self.assertFalse(self.config["disable_cuda_graph"])
-        text_arms = {"full", "hiagent_full", "acon_hist_ut_co",
-                     "agentfold", "commitkv", "agentkv"}
+        from benchmarks.arms import get_arm, history_kv_spec
+        text_arms = {"full", "hiagent_full", "acon_hist_ut_co", "agentfold"}
         self.assertEqual(set(self.config["radix_cache_arms"]), text_arms)
         for row in cells(self.config):
             cmd = server_command(self.config, Path("sglang"), row["arm"])
-            self.assertNotIn("--disable-cuda-graph", cmd)
+            spec = history_kv_spec(get_arm(row["arm"]))
+            reference = bool(spec and spec["backend"] == "reference_attention")
+            self.assertEqual("--disable-cuda-graph" in cmd, reference)
             # Text arms keep SGLang's prefix cache; KV-compression arms reuse
             # KV through their own session/gist mechanisms.
             self.assertEqual("--disable-radix-cache" not in cmd, row["arm"] in text_arms)
@@ -127,6 +190,81 @@ class PaperMatrixTest(unittest.TestCase):
                 (f"http://127.0.0.1:{self.config['server_port']}",
                  f"http://127.0.0.1:{self.config['server_port'] + 10}"),
                 (str(self.config["proxy_port"]), str(self.config["proxy_port"] + 10))])
+
+    def test_execute_rejects_event_native_checkpoint_before_starting_legacy_arm(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            checkpoint = root / "checkpoint"
+            checkpoint.mkdir()
+            (checkpoint / "config.json").write_text(json.dumps({
+                "history_memory_training_profile": "history-event-base-query-v1",
+                "history_memory_packing_version": "history-event-v1",
+                "history_memory_raw_layout": "event-native-evidence-v1",
+            }))
+            config = dict(self.config, checkpoint=str(checkpoint))
+            output = root / "paper"
+            plan, _ = prepare(config, output, root / "sglang")
+            cell = next(row for row in plan
+                        if row["cell_id"] == "bfcl_base__c2kv4")
+            directory = output / "closed_loop" / cell["cell_id"]
+
+            with mock.patch.object(runner.subprocess, "Popen") as popen:
+                with self.assertRaisesRegex(
+                        RuntimeError,
+                        "Training/serving mismatch.*native event-packed base arm"):
+                    execute(config, [cell], output, root / "sglang",
+                            ["closed_loop"], {cell["cell_id"]})
+            popen.assert_not_called()
+            self.assertFalse(directory.exists())
+
+            # A completed historical cell is evidence, not a request to rerun the
+            # now-invalid serving path.  It must remain byte-for-byte untouched.
+            directory.mkdir(parents=True)
+            complete = directory / "complete.json"
+            complete.write_text('{"historical": true}\n')
+            with mock.patch.object(runner.subprocess, "Popen") as popen:
+                execute(config, [cell], output, root / "sglang",
+                        ["closed_loop"], {cell["cell_id"]})
+            popen.assert_not_called()
+            self.assertEqual(complete.read_text(), '{"historical": true}\n')
+
+    def test_unselected_legacy_arm_does_not_block_safe_event_native_cells(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            checkpoint = root / "checkpoint"
+            checkpoint.mkdir()
+            (checkpoint / "config.json").write_text(json.dumps({
+                "history_memory_training_profile": "history-event-base-query-v1",
+                "history_memory_packing_version": "history-event-v1",
+                "history_memory_raw_layout": "event-native-evidence-v1",
+            }))
+            config = dict(self.config, checkpoint=str(checkpoint))
+            output = root / "paper"
+            plan, _ = prepare(config, output, root / "sglang")
+            legacy = next(row for row in plan
+                          if row["cell_id"] == "bfcl_base__c2kv4")
+            safe_ids = {
+                "bfcl_base__full",
+                "bfcl_base__history_kv_h2o_r25_persistent",
+                "bfcl_base__c2kv_c1_t02_r8",
+            }
+
+            with mock.patch.object(
+                    runner.subprocess, "Popen",
+                    side_effect=lambda *_args, **_kwargs: mock.Mock(pid=123)) as popen, \
+                    mock.patch.object(runner.subprocess, "run"), \
+                    mock.patch.object(runner, "wait_server"), \
+                    mock.patch.object(runner, "cleanup_cell_processes"), \
+                    mock.patch("socket.socket") as socket_type:
+                socket_type.return_value.__enter__.return_value.connect_ex.return_value = 1
+                execute(config, plan, output, root / "sglang",
+                        ["closed_loop"], safe_ids)
+
+            self.assertEqual(popen.call_count, len(safe_ids))
+            self.assertFalse((output / "closed_loop" / legacy["cell_id"]).exists())
+            for cell_id in safe_ids:
+                self.assertTrue(
+                    (output / "closed_loop" / cell_id / "complete.json").is_file())
 
     def test_prepare_resume_requires_semantically_equal_resolved_config(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -213,6 +351,24 @@ class PaperMatrixTest(unittest.TestCase):
             coverage = json.loads(
                 (output / "aggregation_coverage.json").read_text())
             self.assertEqual(coverage["requested_stages"], ["common_prefix"])
+
+    def test_toolsandbox_quality_aggregation_requires_joinable_harness_artifacts(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary)
+            cell = next(row for row in cells(self.config)
+                        if row["cell_id"] == "toolsandbox__full")
+            directory = output / "closed_loop" / cell["cell_id"]
+            directory.mkdir(parents=True)
+            for name in ("complete.json", "proxy_telemetry.jsonl",
+                         "server_telemetry.jsonl", "summary_full.json"):
+                (directory / name).write_text("{}\n")
+            with self.assertRaisesRegex(RuntimeError, "slice is incomplete"):
+                aggregate_results(self.config, [cell], output,
+                                  ["closed_loop"], {cell["cell_id"]})
+            missing = json.loads((output / "aggregation_coverage.json").read_text())
+            paths = missing["missing"][0]["missing_artifacts"]
+            self.assertTrue(any(path.endswith("scenario_manifest.json") for path in paths))
+            self.assertTrue(any(path.endswith("harness_events.jsonl") for path in paths))
 
     def test_aggregate_cli_passes_exact_stage_and_cells(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -405,5 +561,46 @@ class ExtensionRuleTest(unittest.TestCase):
             changed["benchmarks"] = [b for b in changed["benchmarks"] if b["name"] != "appworld"]
             self.assertIn("cells removed", extension_problem(existing, changed, source, output) or "")
             self.assertEqual(extension_problem(existing, dict(existing), source, output), "no new cells")
+
+    def test_old_root_without_new_adapter_paths_and_label_renames(self):
+        """The 45-cell roots predate ``acebench_dir``/``toolsandbox_dir`` and labelled the
+        two Full baselines separately; the current code must still render their old
+        commands, and a label may change only while the cell has no artifacts."""
+        import copy
+        from benchmarks.paper.runner import extension_problem
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary)
+            source = output / "sglang"
+            old = self._old()
+            old["methods"] += [
+                {"method": "ACEBench Agent baseline", "arm": "full", "group": "baseline",
+                 "benchmarks": ["acebench_agent"]},
+                {"method": "ToolSandbox baseline", "arm": "full", "group": "baseline",
+                 "benchmarks": ["toolsandbox"]}]
+            old["benchmarks"] = self.config["benchmarks"]
+            for item in old["methods"]:
+                if item["arm"] == "c2kv_c1_t02_r8":   # C1 never had the new adapters' cells
+                    item["benchmarks"] = ["bfcl_base", "bfcl_long_context", "appworld"]
+            for key in ("acebench_dir", "acebench_python", "acebench_language",
+                        "toolsandbox_dir", "toolsandbox_python", "toolsandbox_suite",
+                        "toolsandbox_scenarios", "unsupported_cells"):
+                old.pop(key, None)
+            (output / "closed_loop").mkdir(parents=True)
+            (output / "config.resolved.json").write_text(json.dumps(old) + "\n")
+            new = dict(self.config, sglang_source=str(source.resolve()))
+            self.assertIsNone(extension_problem(old, new, source, output))
+            new_plan, _ = prepare(self.config, output, source)
+            labels = {r["cell_id"]: r["method"] for r in new_plan}
+            self.assertEqual(labels["acebench_agent__full"], "Full")
+            # once the relabelled cell has artifacts, its label is frozen
+            (output / "closed_loop" / "acebench_agent__full").mkdir()
+            relabel = copy.deepcopy(self.config)
+            for item in relabel["methods"]:
+                if item["arm"] == "full":
+                    item["method"] = "Full (renamed)"
+                if item["arm"] == "c2kv_c1_t02_r4":   # a genuine new cell, so the label check is reached
+                    item["benchmarks"] = ["bfcl_base", "bfcl_long_context"]
+            self.assertIn("method changed", extension_problem(
+                json.loads((output / "config.resolved.json").read_text()), relabel, source, output) or "")
             with self.assertRaises(RuntimeError):
                 prepare(dict(self.config, chunked_prefill_size=256), output, output / "sglang")

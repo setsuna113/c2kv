@@ -59,6 +59,7 @@ Usage (server):
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 import importlib.util
 import json
 import os
@@ -88,12 +89,9 @@ DEFAULT_MAX_DIALOG_TURNS = 40
 HEADER_KEYS = ("accuracy", "end_to_end_accuracy", "process_accuracy",
                "correct_count", "total_count")
 
-# The vendored patch emits one OpenAI message per structured ACEBench
-# dialogue entry. This makes the first task messages stable and lets the
-# proxy form history docs. Requests still carry no ACE task id, so a proxy
-# request-log row cannot be joined strictly to an official scorer row.
-COST_JOIN = ("not joinable: role-preserving history enables compression but "
-             "the agent request carries no ACE task-id metadata")
+# Agent runs use acebench_cli.py to bind official task, request and executor
+# identities. Normal/special splits have no agent executor instrumentation.
+COST_JOIN = "official task -> episode session -> proxy request -> executed action"
 
 
 def add_arguments(parser) -> None:
@@ -307,19 +305,32 @@ def score_path(work: Path, language: str, model: str, test: str) -> Path:
 
 
 def check_terminal(work: Path, language: str, model: str, tests: List[str]) -> None:
-    """Every id in every requested data file has a result row (the official
-    evaluator would otherwise raise on the length mismatch, and a partial
-    result file would shrink the denominator on a rerun)."""
+    """Result ids are an exact one-to-one match for the requested data ids."""
     for test in tests:
-        want = {str(r["id"]) for r in _jsonl(data_path(work, language, test))}
+        want_ids = [str(r["id"]) for r in _jsonl(data_path(work, language, test))]
         results = result_path(work, language, model, test)
-        got = {str(r["id"]) for r in _jsonl(results)} if results.exists() else set()
+        got_ids = [str(r["id"]) for r in _jsonl(results)] if results.exists() else []
+        want_counts = Counter(want_ids)
+        got_counts = Counter(got_ids)
+        duplicate_data = sorted(key for key, count in want_counts.items() if count != 1)
+        duplicate_results = sorted(key for key, count in got_counts.items() if count != 1)
+        want, got = set(want_counts), set(got_counts)
         missing = sorted(want - got)
+        extra = sorted(got - want)
         print(f"TERMINAL-STATE acebench/{test}: n_scored={len(want & got)} n_total={len(want)}")
-        if missing:
-            shown = ",".join(missing[:20])
-            more = f" (+{len(missing) - 20} more)" if len(missing) > 20 else ""
-            raise SystemExit(f"FATAL: acebench {test} has no result for: {shown}{more}")
+        problems = []
+        for label, values in (
+            ("duplicate data ids", duplicate_data),
+            ("duplicate result ids", duplicate_results),
+            ("missing result ids", missing),
+            ("unexpected result ids", extra),
+        ):
+            if values:
+                shown = ",".join(values[:20])
+                more = f" (+{len(values) - 20} more)" if len(values) > 20 else ""
+                problems.append(f"{label}: {shown}{more}")
+        if problems:
+            raise SystemExit(f"FATAL: acebench {test} terminal id mismatch; " + "; ".join(problems))
 
 
 def cluster_id(test: str, task_id: str) -> str:
@@ -395,7 +406,8 @@ def run(ctx: RunContext) -> Dict[str, Any]:
         task_ids=ctx.opt("acebench_task_ids", ""), max_tasks=ctx.opt("max_tasks"),
         python=ctx.opt("bench_python"),
     )
-    summary["cost_join"] = COST_JOIN
+    summary["cost_join"] = (COST_JOIN if all(c.startswith("agent_") for c in summary["categories"])
+                            else "not joinable: non-agent split")
     return summary
 
 
@@ -419,10 +431,16 @@ def run_acebench(base_url: str, user_base_url: str, out_dir: Path,
         selected_tests = [str(source["test"]) for source in selection["sources"]]
         harness = prepare_subset_harness(work, acebench_dir, category, selected_tests)
     env = harness_env(base_url, user_base_url, model)
+    telemetry_path = Path(out_dir).resolve() / "measurement" / "harness_events.jsonl"
+    env["C2KV_ACEBENCH_TELEMETRY"] = str(telemetry_path)
+    command = generate_command(python, harness, model, category, language, num_threads,
+                               max_dialog_turns, user_model or model, temperature, top_p,
+                               max_tokens)
+    if all(test.startswith("agent_") for test in tests):
+        command = [python, str(Path(__file__).resolve().parents[1] / "acebench_cli.py"),
+                   str(harness), *command[2:]]
     subprocess.run(
-        generate_command(python, harness, model, category, language, num_threads,
-                         max_dialog_turns, user_model or model, temperature, top_p,
-                         max_tokens),
+        command,
         cwd=work, env=env, check=True)
     check_terminal(work, language, model, tests)
     prepare_score_dir(work, language, model)
@@ -436,6 +454,7 @@ def run_acebench(base_url: str, user_base_url: str, out_dir: Path,
         summary["selection"] = json.loads(selection.read_text(encoding="utf-8"))
     summary["capability_features"] = list(CAPABILITY_FEATURES)
     summary["agent_history_protocol"] = "acebench_role_history_v1"
+    summary["harness_telemetry"] = str(telemetry_path)
     return summary
 
 

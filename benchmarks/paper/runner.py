@@ -17,6 +17,12 @@ DEFAULT_CONFIG = Path(__file__).with_name("config.json")
 
 C1_ARMS = {"c2kv_c1_t02_r8": 8, "c2kv_c1_t02_r4": 4}   # native C1 controller arms and their ratios
 
+EVENT_NATIVE_CHECKPOINT_MARKERS = {
+    "history_memory_training_profile": "history-event-base-query-v1",
+    "history_memory_packing_version": "history-event-v1",
+    "history_memory_raw_layout": "event-native-evidence-v1",
+}
+
 
 def is_c1_arm(arm):
     return arm in C1_ARMS
@@ -60,10 +66,13 @@ def server_command(config, source, arm=None):
            "--max-running-requests", "1", "--page-size", "1",
            "--chunked-prefill-size", str(config["chunked_prefill_size"]),
            "--random-seed", str(config["seed"])]
+    from benchmarks.arms import get_arm, history_kv_spec
+    spec = history_kv_spec(get_arm(arm)) if arm is not None else None
+    reference_attention = bool(spec and spec["backend"] == "reference_attention")
     radix_arms = set(config.get("radix_cache_arms") or ())
-    if "*" not in radix_arms and arm not in radix_arms:
+    if reference_attention or ("*" not in radix_arms and arm not in radix_arms):
         cmd.append("--disable-radix-cache")
-    if config.get("disable_cuda_graph", True):
+    if reference_attention or config.get("disable_cuda_graph", True):
         cmd.append("--disable-cuda-graph")
     cmd += ["--disable-piecewise-cuda-graph", "--disable-overlap-schedule",
             "--enable-streaming-session", "--host", "127.0.0.1",
@@ -107,18 +116,29 @@ def run_command(config, cell, directory, profile, stage="closed_loop"):
            "--checkpoint-profile", str(profile), "--out", str(directory),
            "--exact-out", "--run-name", cell["cell_id"], "--num-workers", "1",
            "--telemetry-log", str(directory / "proxy_telemetry.jsonl"),
-           "--capability-features", "hiagent_trajectory_retrieval_v1"]
+           "--capability-features",
+           "hiagent_trajectory_retrieval_v1,acebench_role_history_v1"]
     if cell["arm"] == "full":
         cmd += ["--record-prefixes", str(directory / "full_prefixes.jsonl")]
     if cell["adapter"] == "bfcl":
         cmd += ["--categories", cell["category"]]
     elif cell["adapter"] == "acebench":
         # Keep the matrix on ACEBench Agent rather than its fixed-call splits.
-        cmd += ["--acebench-category", cell.get("category") or "agent"]
+        cmd += ["--acebench-category", cell.get("category") or "agent",
+                "--acebench-language", config.get("acebench_language", "en"),
+                "--acebench-dir", config["acebench_dir"],
+                "--bench-python", config.get("acebench_python", config["bench_python"])]
     elif cell["adapter"] == "toolsandbox":
-        # ToolSandbox owns its scenario/role defaults; do not inject ACON-only
-        # paths or iteration flags into its command line.
-        pass
+        cmd += ["--toolsandbox-dir", config["toolsandbox_dir"],
+                "--bench-python", config.get("toolsandbox_python", config["bench_python"]),
+                "--ts-parallel", "1"]
+        scenarios = config.get("toolsandbox_scenarios") or []
+        if scenarios:
+            cmd += ["--ts-scenarios", ",".join(scenarios)]
+        elif config.get("toolsandbox_suite") == "full":
+            cmd.append("--full")
+        else:
+            raise ValueError("ToolSandbox paper cells require suite=full or explicit scenarios")
     else:
         cmd += ["--acon-dir", config["acon_dir"], "--bench-python", config["appworld_python"],
                 "--split", config["appworld_split"], "--max-iter", str(config["appworld_max_iter"])]
@@ -154,16 +174,25 @@ def extension_problem(existing, config, source, output):
         if existing.get(key) != config.get(key):
             return f"deployment field changed: {key}"
     profile = output / "deployment_profile.json"
+    # Keys the old config never had (paths for adapters added later) cannot have
+    # changed an old cell; fill them from the new config so the old command can
+    # still be rendered by the current code.
+    old_view = {**config, **existing}
     for cell_id, old in old_cells.items():
         new = new_cells[cell_id]
+        # ``method`` is the table label, not the algorithm: it may be renamed while
+        # the cell has no artifacts, after which it is frozen with them.
+        has_artifacts = any((output / stage / cell_id).exists() for stage in ("closed_loop", "common_prefix"))
         for key in ("arm", "method", "ratio", "retention", "benchmark", "adapter", "category"):
+            if key == "method" and not has_artifacts:
+                continue
             if old.get(key) != new.get(key):
                 return f"{cell_id}: {key} changed"
-        if server_command(existing, source, old["arm"]) != server_command(config, source, new["arm"]):
+        if server_command(old_view, source, old["arm"]) != server_command(config, source, new["arm"]):
             return f"{cell_id}: server command changed"
         for stage in ("closed_loop", "common_prefix"):
             directory = output / stage / cell_id
-            if run_command(existing, old, directory, profile, stage) != run_command(config, new, directory, profile, stage):
+            if run_command(old_view, old, directory, profile, stage) != run_command(config, new, directory, profile, stage):
                 return f"{cell_id}: {stage} command changed"
     return None
 
@@ -191,9 +220,35 @@ def prepare(config, output, source):
             raise ValueError("The selected bare C2KV arm must use ratio 4")
         if item["method"] in ("H2O", "SnapKV", "PyramidKV"):
             spec = history_kv_spec(arm)
-            if not spec["persistent_session"] or spec["retention_ratio"] != item["retention"]:
+            expected = {
+                "H2O": ("h2o", "physical_eviction"),
+                "SnapKV": ("snapkv_persistent", "physical_eviction"),
+                "PyramidKV": ("pyramidkv", "reference_attention"),
+            }[item["method"]]
+            if (spec is None or spec["method"] != expected[0]
+                    or spec["backend"] != expected[1]
+                    or not spec["persistent_session"]
+                    or spec["retention_ratio"] != item["retention"]
+                    or spec["target_tokens"] is not None):
                 raise ValueError("Persistent history-KV budget differs from matrix")
-        if arm.text_policy in {"agentfold", "commitkv", "agentkv"}:
+        if arm.name == "agentfold":
+            if item["method"] != "AgentFold" or arm.text_policy != "agentfold" or arm.history_kv:
+                raise ValueError("AgentFold paper cell must use the actor folding policy")
+        if arm.name in {"commitkv", "agentkv"}:
+            spec = history_kv_spec(arm)
+            expected_label = {"commitkv": "CommitKV", "agentkv": "AgentKV"}[arm.name]
+            if (item["method"] != expected_label or spec is None
+                    or spec["method"] != arm.name
+                    or spec["backend"] != "reference_attention"
+                    or spec["target_tokens"] != 2048
+                    or spec["retention_ratio"] is not None
+                    or not spec["persistent_session"]
+                    or arm.text_policy):
+                raise ValueError(
+                    f"{expected_label} paper cell must use its 2048-token "
+                    "persistent reference-attention runtime"
+                )
+        if arm.name in {"agentfold", "commitkv", "agentkv"}:
             if config.get("model_family", "qwen3-4b") != "qwen3-4b":
                 raise ValueError("AgentFold/CommitKV/AgentKV require model_family=qwen3-4b")
     config = dict(config)
@@ -234,6 +289,9 @@ def prepare(config, output, source):
     profile_path = output / "deployment_profile.json"
     profile_path.write_text(json.dumps(profile, indent=2) + "\n")
     matrix = cells(config)
+    ids = [row["cell_id"] for row in matrix]
+    if len(ids) != len(set(ids)):
+        raise ValueError("The paper matrix contains duplicate cell ids")
     with (output / "matrix.csv").open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=["cell_id", "benchmark", "method", "arm", "group", "ratio", "retention", "adapter", "category"])
         writer.writeheader()
@@ -244,6 +302,8 @@ def prepare(config, output, source):
         plan.append(dict(cell, command=run_command(config, cell, directory, profile_path),
                          replay_source=str(output / "closed_loop" / (cell["benchmark"] + "__full") / "full_prefixes.jsonl")))
     (output / "commands.json").write_text(json.dumps(plan, indent=2) + "\n")
+    (output / "unsupported_cells.json").write_text(json.dumps(
+        config.get("unsupported_cells") or [], indent=2) + "\n")
     return plan, profile_path
 
 
@@ -298,6 +358,36 @@ def cleanup_cell_processes(proxy, server):
         raise RuntimeError(f"Cell process cleanup failed: {detail}") from errors[0][1]
 
 
+def _guard_checkpoint_serving_layout(config, cell):
+    """Reject event-native checkpoints only on the legacy compression path."""
+    from benchmarks.arms import get_arm
+
+    arm = get_arm(cell["arm"])
+    if not arm.compress_history or arm.native_controller:
+        return
+
+    config_path = Path(config["checkpoint"]).expanduser() / "config.json"
+    try:
+        checkpoint_config = json.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise RuntimeError(
+            f"Cannot verify the legacy compression serving layout because checkpoint "
+            f"config.json is unavailable or invalid: {config_path}"
+        ) from error
+    event_native = {
+        key: value for key, value in EVENT_NATIVE_CHECKPOINT_MARKERS.items()
+        if checkpoint_config.get(key) == value
+    }
+    if event_native:
+        detail = ", ".join(f"{key}={value!r}" for key, value in event_native.items())
+        raise RuntimeError(
+            f"Training/serving mismatch for arm {arm.name!r}: the checkpoint declares "
+            f"event-native history ({detail}), but this arm uses legacy turn packing. "
+            "Use an implemented native event-packed base arm for this checkpoint; "
+            "do not substitute a C1 controller arm."
+        )
+
+
 def execute(config, plan, output, source, stages, selected, port_offset=0):
     config = with_port_offset(config, port_offset)
     profile_path = output / "deployment_profile.json"
@@ -315,11 +405,12 @@ def execute(config, plan, output, source, stages, selected, port_offset=0):
             if selected and cell["cell_id"] not in selected:
                 continue
             directory = output / stage / cell["cell_id"]
-            directory.mkdir(parents=True, exist_ok=True)
             if (directory / "complete.json").exists():
                 continue
             if (directory / "started.json").exists():
                 raise RuntimeError(f"Partial cell {directory}; inspect it before explicitly selecting a new output directory")
+            _guard_checkpoint_serving_layout(config, cell)
+            directory.mkdir(parents=True, exist_ok=True)
             (directory / "started.json").write_text(json.dumps({
                 "stage": stage, "cell": cell, "config": config,
                 "server_command": server_command(config, source, cell["arm"]),
@@ -407,8 +498,14 @@ def _required_aggregate_artifacts(stage, cell, directory):
         required.append(directory / f"summary_{cell['arm']}.json")
         if cell["arm"] == "full":
             required.append(directory / "full_prefixes.jsonl")
-        if cell["adapter"] == "acon_appworld":
+        if cell["adapter"] in {"acon_appworld", "acebench"}:
             required.append(directory / "measurement" / "harness_events.jsonl")
+        if cell["adapter"] == "toolsandbox":
+            required.extend([
+                directory / "scenario_manifest.json",
+                directory / "toolsandbox_protocol.json",
+                directory / "measurement" / "harness_events.jsonl",
+            ])
     else:
         required.append(directory / "prefix_replay.jsonl")
     return required

@@ -147,13 +147,13 @@ class TestRegistry:
             spec = history_kv_spec(get_arm(name))
             assert spec["method"] == method
             assert spec["retention_ratio"] == ratio
-            assert spec["backend"] == "physical_eviction"
+            assert spec["backend"] == ("reference_attention" if method == "pyramidkv" else "physical_eviction")
             assert spec["persistent_session"] is True
             assert spec["target_tokens"] is None
 
     def test_existing_arms_untouched(self):
         for name, arm in ARMS.items():
-            if name.startswith(("history_kv_", "gen_")):
+            if name.startswith(("history_kv_", "gen_")) or name in {"commitkv", "agentkv"}:
                 continue
             assert arm.history_kv is None
             assert history_kv_spec(arm) is None
@@ -188,6 +188,10 @@ class TestRegistry:
 class TestProxySplit:
     def test_appworld_task_packet_stays_raw_and_outside_physical_history(self, monkeypatch):
         previous = proxy_mod.BENCHMARK
+        monkeypatch.setattr(
+            proxy_mod, "_count_extract_tokens",
+            lambda _role, content: len(content),
+        )
         monkeypatch.setattr(
             proxy_mod,
             "_extract",
@@ -460,6 +464,21 @@ class TestPhysicalEvictionPath:
         assert hint == {
             "persistent_history_session": {"enabled": True}
         }
+
+    @pytest.mark.parametrize("name", ["commitkv", "agentkv"])
+    def test_reference_first_turn_initializes_decode_capture(self, name):
+        arm = get_arm(name)
+        spec = history_kv_spec(arm)
+        assert arm.text_policy is None
+        _, hint, _ = SglangBackend(FakePost({}))._apply_history_kv(
+            [{"role": "user", "content": "first turn"}],
+            {"spec": spec, "history_out_indices": [], "history_text": "",
+             "session_id": "reference-first"}, None,
+        )
+        assert hint["history_kv_reference_config"]["method"] == name
+        assert hint["history_kv_reference_config"]["target_tokens"] == 2048
+        assert hint["history_kv_backend"] == "reference_attention"
+        assert "history_kv_eviction" not in hint
 
     def test_open_session_payload(self):
         post = FakePost({"/open_session": lambda p: p["session_id"]})

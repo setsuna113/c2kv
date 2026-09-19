@@ -70,7 +70,7 @@ def test_vendored_patch_uses_structured_agent_history_only():
     # conversion applies only to the evaluated agent and scorer code is absent.
     assert "ACEBENCH_USER_BASE_URL" in patch
     assert "eval_main.py" not in patch
-    assert "not joinable" in B.COST_JOIN
+    assert "proxy request" in B.COST_JOIN
 
 
 def test_generate_and_eval_commands_pin_protocol_knobs(tmp_path):
@@ -153,12 +153,24 @@ def test_check_terminal_missing_ids_is_fatal(tmp_path):
                  [{"id": f"agent_multi_turn_{i}"} for i in range(3)])
     _write_jsonl(work / "result_all" / "result_en" / "m" / "data_agent_multi_turn_result.json",
                  [{"id": "agent_multi_turn_0"}, {"id": "agent_multi_turn_2"}])
-    with pytest.raises(SystemExit, match="agent_multi_turn_1"):
+    with pytest.raises(SystemExit, match="missing result ids: agent_multi_turn_1"):
         B.check_terminal(work, "en", "m", ["agent_multi_turn"])
     # complete -> passes silently
     _write_jsonl(work / "result_all" / "result_en" / "m" / "data_agent_multi_turn_result.json",
                  [{"id": f"agent_multi_turn_{i}"} for i in range(3)])
     B.check_terminal(work, "en", "m", ["agent_multi_turn"])
+
+
+def test_check_terminal_rejects_duplicate_and_unexpected_results(tmp_path):
+    work = tmp_path / "w"
+    _write_jsonl(work / "data_all" / "data_en" / "data_agent_multi_turn.json",
+                 [{"id": "agent_multi_turn_0"}, {"id": "agent_multi_turn_1"}])
+    _write_jsonl(work / "result_all" / "result_en" / "m" / "data_agent_multi_turn_result.json",
+                 [{"id": "agent_multi_turn_0"}, {"id": "agent_multi_turn_0"},
+                  {"id": "agent_multi_turn_1"}, {"id": "agent_multi_turn_extra"}])
+    with pytest.raises(SystemExit, match="duplicate result ids: agent_multi_turn_0") as error:
+        B.check_terminal(work, "en", "m", ["agent_multi_turn"])
+    assert "unexpected result ids: agent_multi_turn_extra" in str(error.value)
 
 
 # ---- score parsing ----------------------------------------------------------

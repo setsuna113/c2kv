@@ -12,6 +12,7 @@ Two things this file protects:
 """
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -76,7 +77,8 @@ def test_add_arguments_registers_only_that_adapters_flags():
         tau2_adapter: {"--task-set", "--tau2-num-trials", "--tau2-max-steps",
                        "--tau2-timeout"},
         bfcl_adapter: {"--categories", "--run-ids"},
-        toolsandbox_adapter: {"--full", "--ts-scenarios", "--ts-agent", "--ts-user", "--toolsandbox-dir"},
+        toolsandbox_adapter: {"--full", "--ts-scenarios", "--ts-agent", "--ts-user",
+                              "--ts-parallel", "--toolsandbox-dir"},
         acon_adapter: {"--acon-dir", "--split", "--tag", "--task-ids"},
         acebench_adapter: {"--acebench-dir", "--acebench-category",
                            "--acebench-language", "--acebench-task-ids", "--user-model"},
@@ -176,10 +178,10 @@ def test_bfcl_handler_key_dashes_the_arm():
 def test_toolsandbox_command_is_byte_identical(tmp_path):
     assert toolsandbox_adapter.cli_command(tmp_path) == [
         "tool_sandbox", "--user", "GPT_4_o_2024_05_13",
-        "--agent", "GPT_4_o_2024_05_13", "-o", str(tmp_path), "-t"]
+        "--agent", "GPT_4_o_2024_05_13", "-o", str(tmp_path), "-t", "-p", "1"]
     assert toolsandbox_adapter.cli_command(tmp_path, test_mode=False) == [
         "tool_sandbox", "--user", "GPT_4_o_2024_05_13",
-        "--agent", "GPT_4_o_2024_05_13", "-o", str(tmp_path)]
+        "--agent", "GPT_4_o_2024_05_13", "-o", str(tmp_path), "-p", "1"]
 
 
 def test_toolsandbox_subset_command_overrides_test_mode(tmp_path):
@@ -248,13 +250,20 @@ def test_toolsandbox_uses_selected_environment_and_checkout(tmp_path, monkeypatc
     python = tmp_path / "selected-env" / "bin" / "python"
     calls = []
     monkeypatch.setenv("PYTHONPATH", str(tmp_path / "stale-source"))
-    monkeypatch.setattr(toolsandbox_adapter.subprocess, "run", lambda cmd, **kw:
-                        calls.append((cmd, kw)) or SimpleNamespace(returncode=0))
-    monkeypatch.setattr(toolsandbox_adapter, "collect", lambda out: {"n": 1})
+    def fake_run(cmd, **kw):
+        calls.append((cmd, kw))
+        out = tmp_path / "out"
+        (out / "scenario_manifest.json").write_text(
+            json.dumps({"scenario_ids": ["one"], "expected": 1}))
+        return SimpleNamespace(returncode=0)
+    monkeypatch.setattr(toolsandbox_adapter.subprocess, "run", fake_run)
+    monkeypatch.setattr(toolsandbox_adapter, "collect",
+                        lambda out: {"n": 1, "scenario_ids": ["one"]})
     toolsandbox_adapter.run_ts("http://agent", Path("out"),
         benchmark_dir=selected, python=str(python), user_base_url="http://user")
     cmd, kwargs = calls[0]
-    assert cmd[0] == str(python.parent / "tool_sandbox")
+    assert cmd[:2] == [str(python), str(Path(toolsandbox_adapter.__file__).resolve().parents[1]
+                                       / "toolsandbox_cli.py")]
     assert cmd[cmd.index("-o") + 1] == str(tmp_path / "out")
     assert kwargs["env"]["PYTHONPATH"].split(os.pathsep)[0] == str(selected.resolve())
     assert kwargs["env"]["TOOLSANDBOX_USER_BASE_URL"] == "http://user/v1"
@@ -262,11 +271,16 @@ def test_toolsandbox_uses_selected_environment_and_checkout(tmp_path, monkeypatc
 
 # ---- cost-join declarations -------------------------------------------------
 
-@pytest.mark.parametrize("module", [tau2_adapter, bfcl_adapter,
-                                    toolsandbox_adapter, acebench_adapter])
+@pytest.mark.parametrize("module", [tau2_adapter, bfcl_adapter])
 def test_unjoinable_adapters_declare_a_reason(module):
     assert module.COST_JOIN.startswith("not joinable: ")
     assert len(module.COST_JOIN) > len("not joinable: ")
+
+
+def test_acebench_declares_the_instrumented_action_join():
+    assert acebench_adapter.COST_JOIN == (
+        "official task -> episode session -> proxy request -> executed action"
+    )
 
 
 def test_base_module_is_importable_as_a_package_member():

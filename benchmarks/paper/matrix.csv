@@ -38,8 +38,26 @@ appworld__history_kv_pyramidkv_r125_persistent,appworld,PyramidKV,history_kv_pyr
 appworld__agentfold,appworld,AgentFold,agentfold,opponent,,,acon_appworld,
 appworld__commitkv,appworld,CommitKV,commitkv,opponent,,,acon_appworld,
 appworld__agentkv,appworld,AgentKV,agentkv,opponent,,,acon_appworld,
-acebench_agent__full,acebench_agent,ACEBench Agent baseline,full,baseline,,,acebench,agent
-toolsandbox__full,toolsandbox,ToolSandbox baseline,full,baseline,,,toolsandbox,
+acebench_agent__full,acebench_agent,Full,full,main,,,acebench,agent
+acebench_agent__hiagent_full,acebench_agent,HiAgent,hiagent_full,main,,,acebench,agent
+acebench_agent__acon_hist_ut_co,acebench_agent,ACON,acon_hist_ut_co,main,,,acebench,agent
+acebench_agent__c2kv4,acebench_agent,C2KV,c2kv4,main,4,,acebench,agent
+acebench_agent__history_kv_h2o_r25_persistent,acebench_agent,H2O,history_kv_h2o_r25_persistent,main,,0.25,acebench,agent
+acebench_agent__history_kv_snapkv_r25_persistent,acebench_agent,SnapKV,history_kv_snapkv_r25_persistent,main,,0.25,acebench,agent
+acebench_agent__history_kv_pyramidkv_r25_persistent,acebench_agent,PyramidKV,history_kv_pyramidkv_r25_persistent,main,,0.25,acebench,agent
+acebench_agent__agentfold,acebench_agent,AgentFold,agentfold,opponent,,,acebench,agent
+acebench_agent__commitkv,acebench_agent,CommitKV,commitkv,opponent,,,acebench,agent
+acebench_agent__agentkv,acebench_agent,AgentKV,agentkv,opponent,,,acebench,agent
+toolsandbox__full,toolsandbox,Full,full,main,,,toolsandbox,
+toolsandbox__hiagent_full,toolsandbox,HiAgent,hiagent_full,main,,,toolsandbox,
+toolsandbox__acon_hist_ut_co,toolsandbox,ACON,acon_hist_ut_co,main,,,toolsandbox,
+toolsandbox__c2kv4,toolsandbox,C2KV,c2kv4,main,4,,toolsandbox,
+toolsandbox__history_kv_h2o_r25_persistent,toolsandbox,H2O,history_kv_h2o_r25_persistent,main,,0.25,toolsandbox,
+toolsandbox__history_kv_snapkv_r25_persistent,toolsandbox,SnapKV,history_kv_snapkv_r25_persistent,main,,0.25,toolsandbox,
+toolsandbox__history_kv_pyramidkv_r25_persistent,toolsandbox,PyramidKV,history_kv_pyramidkv_r25_persistent,main,,0.25,toolsandbox,
+toolsandbox__agentfold,toolsandbox,AgentFold,agentfold,opponent,,,toolsandbox,
+toolsandbox__commitkv,toolsandbox,CommitKV,commitkv,opponent,,,toolsandbox,
+toolsandbox__agentkv,toolsandbox,AgentKV,agentkv,opponent,,,toolsandbox,
 bfcl_base__c2kv_c1_t02_r8,bfcl_base,C2KV+C1,c2kv_c1_t02_r8,main,8,,bfcl,multi_turn_base
 bfcl_base__c2kv_c1_t02_r4,bfcl_base,C2KV+C1,c2kv_c1_t02_r4,ablation,4,,bfcl,multi_turn_base
 bfcl_long_context__c2kv_c1_t02_r8,bfcl_long_context,C2KV+C1,c2kv_c1_t02_r8,main,8,,bfcl,multi_turn_long_context

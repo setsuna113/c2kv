@@ -46,22 +46,25 @@ def add_arguments(parser) -> None:
                              "GPT_4_o_2024_05_13 -> openai_api_agent)")
     parser.add_argument("--ts-user", default="",
                         help="toolsandbox: user-simulator role key (same default)")
+    parser.add_argument("--ts-parallel", type=int, default=1, choices=[1],
+                        help="toolsandbox: fixed to one process for attributable telemetry")
 
 
 def cli_command(out_dir: Path, agent: str = AGENT, user: str = AGENT,
                 test_mode: bool = True,
                 scenarios: "list[str] | None" = None,
-                parallel: "str | None" = None) -> List[str]:
+                parallel: "str | int" = 1) -> List[str]:
     """``tool_sandbox`` argv (PINNED).  ``-s names...`` is the subset form
     (the CLI also takes ``-p`` for parallelism, from $TS_PARALLEL); ``-t``
     is test mode, and a subset run overrides it."""
+    if int(parallel) <= 0:
+        raise ValueError("ToolSandbox parallel must be positive")
     cmd = ["tool_sandbox", "--user", user, "--agent", agent, "-o", str(out_dir)]
     if scenarios:
         cmd += ["-s"] + list(scenarios)
-        if parallel:
-            cmd += ["-p", parallel]
     elif test_mode:
         cmd.append("-t")
+    cmd += ["-p", str(parallel)]
     return cmd
 
 
@@ -106,48 +109,69 @@ def run(ctx: RunContext) -> Dict[str, Any]:
         user_base_url=ctx.user_base_url,
         scenarios=split_scenarios(ctx.opt("ts_scenarios", "")),
         benchmark_dir=ctx.opt("toolsandbox_dir"), python=ctx.opt("bench_python"),
+        parallel=ctx.opt("ts_parallel", 1), model=ctx.model,
     )
     summary["cost_join"] = COST_JOIN
     return summary
 
 
-# Why ToolSandbox gets no per-task cost columns: ``result_summary.json`` is
-# the only artefact this adapter reads and it carries per-scenario SCORES
-# (similarity / milestone_similarity / minefield_similarity / turn_count,
-# tool_sandbox/cli/utils.py:196-208), no messages — so nothing here can
-# rebuild the message prefix ``proxy.conversation_id`` keys on.
-COST_JOIN = ("not joinable: result_summary.json holds per-scenario scores "
-             "only, no messages to key the request log by")
+COST_JOIN = ("joinable: toolsandbox_cli emits scenario/session/request/action "
+             "ids without changing official execution or scoring")
 
 
 def run_ts(base_url: str, out_dir: Path, test_mode: bool = True,
            agent: str = AGENT, user: str = AGENT, expected: int = None,
            benchmark_dir: Path = None, user_base_url: str = "",
            scenarios: "list[str] | None" = None,
-           python: "str | None" = None) -> Dict[str, Any]:
+           python: "str | None" = None, parallel: int = 1,
+           model: str = "c2kv-agent") -> Dict[str, Any]:
     """Run the CLI and collect ``result_summary.json``."""
+    if parallel != 1:
+        raise ValueError("instrumented ToolSandbox runs require parallel=1")
     ts_dir = (Path(benchmark_dir) if benchmark_dir else TS_DIR).resolve()
     out_dir = Path(out_dir).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
     env = harness_env(base_url, user_base_url)
+    env["C2KV_TOOLSANDBOX_MODEL"] = model
+    env["C2KV_TOOLSANDBOX_TELEMETRY"] = str(out_dir / "measurement" / "harness_events.jsonl")
     # The console script's directory is otherwise first on sys.path, and an
     # editable installation may silently import a different checkout.
     env["PYTHONPATH"] = os.pathsep.join(filter(None, (
         str(ts_dir.resolve()), env.get("PYTHONPATH"))))
     cmd = cli_command(out_dir, agent=agent, user=user, test_mode=test_mode,
                       scenarios=scenarios,
-                      parallel=os.environ.get("TS_PARALLEL"))
-    cmd[0] = str(Path(python or sys.executable).parent / "tool_sandbox")
+                      parallel=parallel)
+    cmd[:1] = [python or sys.executable,
+               str(Path(__file__).resolve().parents[1] / "toolsandbox_cli.py")]
+    (out_dir / "toolsandbox_protocol.json").write_text(json.dumps({
+        "suite": "subset" if scenarios else "test" if test_mode else "full",
+        "scenarios": scenarios, "parallel": int(parallel), "model": model,
+        "agent_role": agent, "user_role": user, "source": str(ts_dir),
+        "command": cmd, "measurement": "runtime_scenario_request_action_v1",
+    }, indent=2) + "\n", encoding="utf-8")
     completed = subprocess.run(cmd, cwd=ts_dir, env=env)
     if completed.returncode != 0:
         raise SystemExit(f"FATAL: tool_sandbox CLI exited {completed.returncode}")
     summary = collect(out_dir)
+    summary["protocol"] = json.loads((out_dir / "toolsandbox_protocol.json").read_text(encoding="utf-8"))
+    manifest_path = out_dir / "scenario_manifest.json"
+    if not manifest_path.is_file():
+        raise SystemExit("FATAL: ToolSandbox wrapper wrote no scenario_manifest.json")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    expected_ids = {str(value) for value in manifest.get("scenario_ids") or []}
+    scored_ids = {str(value) for value in summary.get("scenario_ids") or []}
+    if scored_ids != expected_ids:
+        missing = sorted(expected_ids - scored_ids)
+        extra = sorted(scored_ids - expected_ids)
+        raise SystemExit(
+            f"FATAL: ToolSandbox terminal-state mismatch: missing={missing[:10]} extra={extra[:10]}")
+    summary["scenario_manifest"] = manifest
     # terminal-state check (acceptance 1): a scenario that never ran must
     # fail the run, not shrink the denominator
     n_scored = summary.get("n") if isinstance(summary, dict) else None
-    if expected is not None and n_scored is not None and n_scored < expected:
+    if expected is not None and n_scored is not None and n_scored != expected:
         raise SystemExit(
-            f"FATAL: ts terminal-state check failed: n_scored={n_scored} < n_total={expected}")
+            f"FATAL: ts terminal-state check failed: n_scored={n_scored} != n_total={expected}")
     if expected is not None:
         print(f"TERMINAL-STATE ts: n_scored={n_scored} n_total={expected}")
     return summary
@@ -184,7 +208,9 @@ def collect(out_dir: Path) -> Dict[str, Any]:
         raise SystemExit(
             f"FATAL: ts terminal-state check failed: {len(crashed)} scenario(s) "
             f"crashed (traceback in result_summary): {', '.join(crashed[:10])}")
-    return aggregate(rows, cluster_key="task_id")
+    summary = aggregate(rows, cluster_key="task_id")
+    summary["scenario_ids"] = sorted(str(row["task_id"]) for row in rows)
+    return summary
 
 
 if __name__ == "__main__":

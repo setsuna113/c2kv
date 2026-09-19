@@ -72,6 +72,7 @@ MEMORY_FIELDS = (
     "request_peak_cached_evictable_kv_bytes",
     "cached_evictable_kv_peak_tokens", "cached_evictable_kv_peak_bytes",
     "generation_active_kv_tokens", "generation_active_kv_bytes",
+    "reference_history_resident_bytes",
     "whole_full_kv_tokens", "whole_active_kv_tokens",
     "history_full_kv_tokens", "history_active_kv_tokens",
     "temporary_extraction_recovery_peak_kv_tokens",
@@ -101,6 +102,7 @@ def _merge_server_measurement(target: Dict[str, Any], update: Dict[str, Any],
     }
     generation_fields = {
         "generation_active_kv_tokens", "generation_active_kv_bytes",
+        "reference_history_resident_bytes",
         "whole_full_kv_tokens", "whole_active_kv_tokens",
         "history_full_kv_tokens", "history_active_kv_tokens",
         "full_history_reprefill", "selection_query_tokens_observed",

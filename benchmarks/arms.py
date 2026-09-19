@@ -52,10 +52,10 @@ REPAIR_PLACEMENTS = ("append_keep_ledger", "append_tail", "in_place")
 # ``c2kv_eval.adapters.bfcl_history_kv_baselines.parse_args``.  The server
 # accepts the two aliases below and normalizes them the same way
 # (scheduler._build_history_kv_eviction_rounds, qwen3.generate_raw_repair_kv).
-HISTORY_KV_METHODS = ("streamingllm", "h2o", "snapkv_persistent", "pyramidkv")
+HISTORY_KV_METHODS = ("streamingllm", "h2o", "snapkv_persistent", "pyramidkv", "commitkv", "agentkv")
 HISTORY_KV_METHOD_ALIASES = {"snapkv": "snapkv_persistent", "pyramid": "pyramidkv"}
 # ``--runtime-history-kv-backend`` in the upstream runner.
-HISTORY_KV_BACKENDS = ("repair_extract", "physical_eviction")
+HISTORY_KV_BACKENDS = ("repair_extract", "physical_eviction", "reference_attention")
 HISTORY_KV_POOLINGS = ("avgpool", "maxpool")
 HISTORY_KV_DEFAULTS: Dict[str, Any] = {
     "backend": "repair_extract",
@@ -118,10 +118,10 @@ def history_kv_spec(arm: "Arm") -> Optional[Dict[str, Any]]:
     if not 0.0 <= float(spec["h2o_recent_fraction"]) <= 1.0:
         raise ValueError(
             f"arm {arm.name!r}: history_kv h2o_recent_fraction must be in [0, 1]")
-    if spec["persistent_session"] and backend != "physical_eviction":
+    if spec["persistent_session"] and backend not in {"physical_eviction", "reference_attention"}:
         raise ValueError(
             f"arm {arm.name!r}: history_kv persistent_session requires backend "
-            "'physical_eviction' (upstream run_history_kv_baselines.sh)")
+            "'physical_eviction' or 'reference_attention'")
     return spec
 
 
@@ -284,7 +284,8 @@ class Arm:
             "acon_hist", "acon_obs",
             "acon_hist_base", "acon_hist_ut", "acon_hist_ut_co",
             "acon_obs_base", "acon_obs_ut", "acon_obs_ut_co",
-            "agentfold", "commitkv", "agentkv",
+            "agentfold",
+            "length_summary_surrogate", "commit_summary_surrogate", "lexical_recovery_surrogate",
         }
         if self.text_policy and self.text_policy not in text_policies:
             raise ValueError(f"arm {self.name!r}: unknown text_policy {self.text_policy!r}")
@@ -396,27 +397,31 @@ ARMS: Dict[str, Arm] = {
             compress_history=False,
             text_policy="agentfold",
             description=(
-                "AgentFold append-only multi-turn history baseline; closed turns "
-                "are folded incrementally and the active suffix stays raw"
+                "AgentFold actor-directed range folding with experiment Qwen3-4B; "
+                "joint folding directive and action, without author-trained weights"
             ),
         ),
         Arm(
             name="commitkv",
             compress_history=False,
-            text_policy="commitkv",
-            description=(
-                "CommitKV append-only multi-turn history baseline; only turns "
-                "containing an action and tool feedback are committed"
-            ),
+            history_kv={
+                "method": "commitkv",
+                "target_tokens": 2048,
+                "backend": "reference_attention",
+                "persistent_session": True,
+            },
+            description="CommitKV paired pre/post commitment query windows and joint page retirement; 2048-token budget, overridable at launch",
         ),
         Arm(
             name="agentkv",
             compress_history=False,
-            text_policy="agentkv",
-            description=(
-                "AgentKV append-only history baseline with at most one explicit "
-                "query-driven retrospective recovery"
-            ),
+            history_kv={
+                "method": "agentkv",
+                "target_tokens": 2048,
+                "backend": "reference_attention",
+                "persistent_session": True,
+            },
+            description="AgentKV StageQ-SnapKV phase query buffers and per-head KV selection; project 2048-token budget, overridable at launch",
         ),
         Arm(
             name="c2kv",
@@ -621,11 +626,11 @@ ARMS: Dict[str, Arm] = {
             history_kv={
                 "method": "pyramidkv",
                 "retention_ratio": 0.25,
-                "backend": "physical_eviction",
+                "backend": "reference_attention",
                 "persistent_session": True,
             },
             description=(
-                "PyramidKV history-only persistent physical KV eviction at 25% "
+                "PyramidKV per-layer/head resident KV with reference attention at 25% "
                 "retention; its per-layer funnel is measured through the same "
                 "resident/active KV accounting as H2O and SnapKV"
             ),
@@ -636,11 +641,11 @@ ARMS: Dict[str, Arm] = {
             history_kv={
                 "method": "pyramidkv",
                 "retention_ratio": 0.125,
-                "backend": "physical_eviction",
+                "backend": "reference_attention",
                 "persistent_session": True,
             },
             description=(
-                "PyramidKV history-only persistent physical KV eviction at 12.5% "
+                "PyramidKV per-layer/head resident KV with reference attention at 12.5% "
                 "retention for the small-budget sweep"
             ),
         ),
@@ -702,6 +707,11 @@ ARMS: Dict[str, Arm] = {
     )
 }
 
+# Historical text surrogates are diagnostic methods, never aliases for papers.
+for _surrogate in ("length_summary_surrogate", "commit_summary_surrogate", "lexical_recovery_surrogate"):
+    ARMS[_surrogate] = Arm(name=_surrogate, compress_history=False,
+                          text_policy=_surrogate, description="Custom text surrogate; not an original paper algorithm")
+
 # Experiment-2 NPU drivers use these names to select the backend and working
 # point.  The exact K/B token allowance is supplied by the cell launch (and
 # checked by the proxy); the placeholder keeps the arm registry typed and
@@ -715,7 +725,7 @@ for _method in ("h2o", "snapkv_persistent", "pyramidkv"):
             history_kv={
                 "method": _method,
                 "target_tokens": 1,
-                "backend": "physical_eviction",
+                "backend": "reference_attention" if _method == "pyramidkv" else "physical_eviction",
                 "persistent_session": True,
             },
             description=(

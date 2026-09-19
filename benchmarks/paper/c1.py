@@ -181,7 +181,13 @@ def run_closed_loop(config, benchmark, directory, requested=None):
                                              "scored 0, not a model decision") if kind == "cuda_oom"
                            else ("method failure: the controller declared this input infeasible "
                                  "under its budget; scored 0")}
-                metrics = {"official_score": 0.0, status: kind}
+                metrics = {
+                    "task_id": task,
+                    "official_score": 0.0,
+                    "normal_termination": False,
+                    "protocol_legal": None,
+                    status: kind,
+                }
                 print(json.dumps({"arm": ARM, "task": task, "status": status, "kind": kind}),
                       flush=True)
             receipt["unified_metrics"] = metrics

@@ -18,9 +18,7 @@
     "full",
     "hiagent_full",
     "acon_hist_ut_co",
-    "agentfold",
-    "commitkv",
-    "agentkv"
+    "agentfold"
   ],
   "context_length": 131072,
   "max_total_tokens": 131072,
@@ -52,7 +50,9 @@
       "benchmarks": [
         "bfcl_base",
         "bfcl_long_context",
-        "appworld"
+        "appworld",
+        "acebench_agent",
+        "toolsandbox"
       ]
     },
     {
@@ -62,7 +62,9 @@
       "benchmarks": [
         "bfcl_base",
         "bfcl_long_context",
-        "appworld"
+        "appworld",
+        "acebench_agent",
+        "toolsandbox"
       ]
     },
     {
@@ -72,7 +74,9 @@
       "benchmarks": [
         "bfcl_base",
         "bfcl_long_context",
-        "appworld"
+        "appworld",
+        "acebench_agent",
+        "toolsandbox"
       ]
     },
     {
@@ -83,7 +87,9 @@
       "benchmarks": [
         "bfcl_base",
         "bfcl_long_context",
-        "appworld"
+        "appworld",
+        "acebench_agent",
+        "toolsandbox"
       ]
     },
     {
@@ -94,7 +100,9 @@
       "benchmarks": [
         "bfcl_base",
         "bfcl_long_context",
-        "appworld"
+        "appworld",
+        "acebench_agent",
+        "toolsandbox"
       ]
     },
     {
@@ -105,7 +113,9 @@
       "benchmarks": [
         "bfcl_base",
         "bfcl_long_context",
-        "appworld"
+        "appworld",
+        "acebench_agent",
+        "toolsandbox"
       ]
     },
     {
@@ -138,7 +148,9 @@
       "benchmarks": [
         "bfcl_base",
         "bfcl_long_context",
-        "appworld"
+        "appworld",
+        "acebench_agent",
+        "toolsandbox"
       ]
     },
     {
@@ -159,7 +171,9 @@
       "benchmarks": [
         "bfcl_base",
         "bfcl_long_context",
-        "appworld"
+        "appworld",
+        "acebench_agent",
+        "toolsandbox"
       ]
     },
     {
@@ -169,7 +183,9 @@
       "benchmarks": [
         "bfcl_base",
         "bfcl_long_context",
-        "appworld"
+        "appworld",
+        "acebench_agent",
+        "toolsandbox"
       ]
     },
     {
@@ -179,22 +195,8 @@
       "benchmarks": [
         "bfcl_base",
         "bfcl_long_context",
-        "appworld"
-      ]
-    },
-    {
-      "method": "ACEBench Agent baseline",
-      "arm": "full",
-      "group": "baseline",
-      "benchmarks": [
-        "acebench_agent"
-      ]
-    },
-    {
-      "method": "ToolSandbox baseline",
-      "arm": "full",
-      "group": "baseline",
-      "benchmarks": [
+        "appworld",
+        "acebench_agent",
         "toolsandbox"
       ]
     },
@@ -244,5 +246,26 @@
       "adapter": "toolsandbox"
     }
   ],
-  "model_family": "qwen3-4b"
+  "model_family": "qwen3-4b",
+  "acebench_dir": "/home/lyc/baselines/acebench",
+  "acebench_python": "/home/lyc/dev/c2kv-cuda-port/venv-bench/bin/python",
+  "acebench_language": "en",
+  "toolsandbox_dir": "/home/lyc/benchmarks/ToolSandbox",
+  "toolsandbox_python": "/home/lyc/dev/c2kv-cuda-port/venv-bench/bin/python",
+  "toolsandbox_suite": "full",
+  "toolsandbox_scenarios": [],
+  "unsupported_cells": [
+    {
+      "method": "C2KV+C1",
+      "arm": "c2kv_c1_t02_r8",
+      "benchmark": "acebench_agent",
+      "reason": "native C1 paper controller has no ACEBench adapter"
+    },
+    {
+      "method": "C2KV+C1",
+      "arm": "c2kv_c1_t02_r8",
+      "benchmark": "toolsandbox",
+      "reason": "native C1 paper controller has no ToolSandbox adapter"
+    }
+  ]
 }

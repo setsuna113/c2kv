@@ -64,7 +64,7 @@ def _post(url: str, payload: dict) -> dict:
         raise AssertionError(f"proxy returned HTTP {error.code}: {detail}") from error
 
 
-def test_agentfold_proxy_end_to_end(tmp_path):
+def test_length_summary_surrogate_proxy_end_to_end(tmp_path):
     _FakeUpstream.requests = []
     upstream = ThreadingHTTPServer(("127.0.0.1", _free_port()), _FakeUpstream)
     thread = threading.Thread(target=upstream.serve_forever, daemon=True)
@@ -76,7 +76,7 @@ def test_agentfold_proxy_end_to_end(tmp_path):
         sys.executable, str(proxy),
         "--upstream", f"http://127.0.0.1:{upstream.server_port}",
         "--backend", "hfserver", "--benchmark", "acebench",
-        "--arm", "agentfold", "--model-family", "qwen3-4b",
+        "--arm", "length_summary_surrogate", "--model-family", "qwen3-4b",
         "--port", str(proxy_port), "--request-log", str(log_path),
     ], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     try:
@@ -131,5 +131,5 @@ def test_agentfold_proxy_end_to_end(tmp_path):
         == "Continue with the result."
     ]
     assert forwarded
-    assert any("[agentfold granular memory unit]" in str(message.get("content"))
+    assert any("[length_summary_surrogate granular memory unit]" in str(message.get("content"))
                for message in forwarded[-1]["messages"])

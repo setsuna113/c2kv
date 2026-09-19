@@ -5,9 +5,9 @@ benchmark sends a growing transcript, but a method only folds newly closed
 turns into its state.  The raw transcript is retained as an external archive;
 it is never silently re-read as model input on the next request.
 
-These are text-level compatibility baselines for the CUDA experiment.  They
-are useful for comparing lifecycle and recovery policies through the existing
-OpenAI proxy, but they do not claim to reproduce a paper's private KV kernel.
+These are historical diagnostic text surrogates, not AgentFold, CommitKV or
+AgentKV implementations. Their explicit surrogate names must not be reported
+as results of those papers. AgentFold's actual protocol lives in agentfold.py.
 """
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 
-METHODS = ("agentfold", "commitkv", "agentkv")
+METHODS = ("length_summary_surrogate", "commit_summary_surrogate", "lexical_recovery_surrogate")
 MODEL_FAMILY = "qwen3-4b"
 MAX_RETROSPECTIVE_RECOVERIES = 1
 
@@ -164,11 +164,10 @@ def _summary_payload(method: str, level: str, rendered: str, model: str) -> Dict
 
 
 def _fold_level(method: str, turn: Sequence[Mapping[str, Any]]) -> str:
-    if method != "agentfold":
-        return "commit" if method == "commitkv" else "memory_unit"
+    if method != "length_summary_surrogate":
+        return "commit" if method == "commit_summary_surrogate" else "memory_unit"
     text_len = sum(len(_content(message)) for message in turn)
-    # AgentFold's learned choice is represented by the same two protocol
-    # levels, with a deterministic threshold so the baseline is reproducible.
+    # Diagnostic length heuristic only; this is not learned range folding.
     return "granular" if text_len <= 1200 else "deep"
 
 
@@ -241,7 +240,7 @@ def transform(
         state.raw_archive.append(copy.deepcopy(turn))
         state.turn_ids.add(tid)
         stats["processed_new_turns"] += 1
-        if method == "commitkv" and not _is_commit_turn(turn):
+        if method == "commit_summary_surrogate" and not _is_commit_turn(turn):
             # CommitKV does not retire an uncommitted turn.  Keep it in the
             # external archive and expose it as raw state below.
             state.compressed.append({"turn_id": tid, "raw": copy.deepcopy(turn),
@@ -271,7 +270,7 @@ def transform(
 
     # AgentKV's extra path is an explicit, bounded dereference of one archived
     # event.  It is query-driven and never replays more than one unit.
-    if method == "agentkv" and state.recovery_count < MAX_RETROSPECTIVE_RECOVERIES:
+    if method == "lexical_recovery_surrogate" and state.recovery_count < MAX_RETROSPECTIVE_RECOVERIES:
         query = _content(body[last_user]) if last_user is not None else ""
         query_words = _words(query)
         candidates: List[Tuple[int, int, str, List[Dict[str, Any]]]] = []
@@ -286,7 +285,7 @@ def transform(
             _, _, tid, turn = max(candidates)
             rendered_history.append({
                 "role": "user",
-                "content": "[agentkv retrospective recovery]\n" +
+                "content": "[lexical_recovery_surrogate retrospective recovery]\n" +
                            _render_turn(turn, action_dialect),
             })
             state.recovered_turn_ids.add(tid)

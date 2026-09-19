@@ -56,6 +56,22 @@ class Backend:
         tools must raise, not silently return a short length."""
         raise NotImplementedError
 
+    def count_extract_tokens(
+        self,
+        text: str,
+        role: str,
+        tools: Optional[List[Dict[str, Any]]] = None,
+    ) -> int:
+        """Count the exact role/chat-template tokens without model work.
+
+        A backend without this capability must fail before extraction; using
+        character counts here can send an oversized document to the model.
+        """
+        raise BackendError(
+            "extract_tokenize_unsupported",
+            f"backend {self.name!r} has no exact extraction-token preflight",
+        )
+
     def repair_extract(self, text: str, role: str, span_start: int,
                        span_end: Optional[int], position_offset: int,
                        source_doc_index: int) -> Dict[str, Any]:

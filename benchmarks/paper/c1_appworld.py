@@ -529,13 +529,56 @@ def run_task(
 
 
 def summarize_scores(receipts: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
-    """Aggregate only attached official per-task scores for the paper runner."""
+    """Aggregate official outcomes and the two declared scored-zero failures."""
     rows = []
     scenario_scores: dict[str, list[float]] = defaultdict(list)
+    method_failures = []
+    harness_failures = []
     for receipt in receipts:
         metrics = receipt.get("unified_metrics")
         if not isinstance(metrics, Mapping) or metrics.get("official_score") is None:
             raise ValueError("Every AppWorld C1 receipt requires an attached official score")
+        status = receipt.get("status")
+        if status in {"method_failure", "harness_failure"}:
+            expected_kind = {
+                "method_failure": "capacity_infeasible",
+                "harness_failure": "cuda_oom",
+            }[status]
+            failure = receipt.get("failure")
+            task_id = receipt.get("task_id")
+            metric_task_id = metrics.get("task_id")
+            if (
+                not isinstance(task_id, str)
+                or not task_id
+                or (metric_task_id is not None and metric_task_id != task_id)
+            ):
+                raise ValueError("AppWorld C1 failure receipt has no stable task identity")
+            if (
+                not isinstance(failure, Mapping)
+                or failure.get("kind") != expected_kind
+                or metrics.get(status) != expected_kind
+                or float(metrics["official_score"]) != 0.0
+            ):
+                raise ValueError("AppWorld C1 failure receipt does not match its scored-zero contract")
+            if receipt.get("official_summary") is not None:
+                raise ValueError("AppWorld C1 driver failure cannot claim an official scorer artifact")
+            scenario_id = _scenario_id(task_id)
+            scenario_scores[scenario_id].append(0.0)
+            (method_failures if status == "method_failure" else harness_failures).append(
+                task_id
+            )
+            rows.append({
+                "task_id": task_id,
+                "scenario_id": scenario_id,
+                "semantic_score": 0.0,
+                "official_success": None,
+                "difficulty": None,
+                "normal_termination": metrics.get("normal_termination", False),
+                "protocol_legal": metrics.get("protocol_legal"),
+                "score_source": f"{status}_zero",
+                "failure_kind": expected_kind,
+            })
+            continue
         official = receipt.get("official_summary")
         if not isinstance(official, Mapping):
             raise ValueError("Every AppWorld C1 receipt requires its official scorer artifact")
@@ -558,6 +601,8 @@ def summarize_scores(receipts: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
             "difficulty": outcome.get("difficulty"),
             "normal_termination": metrics.get("normal_termination"),
             "protocol_legal": metrics.get("protocol_legal"),
+            "score_source": "official_appworld",
+            "failure_kind": None,
         })
     strict_scores = [score for scores in scenario_scores.values() for score in scores]
     task_goal_completion = _percentage_average(strict_scores)
@@ -583,6 +628,15 @@ def summarize_scores(receipts: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         "scenario_goal_completion": scenario_goal_completion,
         "official_aggregate": official_aggregate,
         "official_grouping": "appworld.task.task_id_to_generator_id",
+        "n_method_failures": len(method_failures),
+        "method_failure_task_ids": method_failures,
+        "n_harness_failures": len(harness_failures),
+        "harness_failure_task_ids": harness_failures,
+        "n_official_scored": len(rows) - len(method_failures) - len(harness_failures),
+        "failure_score_policy": (
+            "capacity_infeasible method failures and CUDA OOM harness failures "
+            "are scored zero without claiming an official per-task outcome"
+        ),
         "task_rows": rows,
         "result_status": "preliminary, n=1",
         "official_scorer": "appworld evaluate (state-based unit tests)",

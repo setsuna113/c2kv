@@ -50,6 +50,7 @@ def test_pyramidkv_absolute_budget_reaches_chat_hint_and_cost_columns():
     )
     hint = prepared["c2kv_kv_memory_hint"]
     assert hint["history_kv_method"] == "pyramidkv"
+    assert hint["history_kv_backend"] == "reference_attention"
     assert hint["history_kv_eviction"]["target_tokens"] == 768
     assert hint["active_history_kv_tokens"] == 768
 
@@ -58,8 +59,11 @@ def test_pyramidkv_absolute_budget_reaches_chat_hint_and_cost_columns():
                      "finish_reason": "stop"}],
         "metadata": {"kv_memory_report": {
             "history_kv_method": "pyramidkv",
-            "history_kv_backend": "physical_eviction",
+            "history_kv_backend": "reference_attention",
             "active_history_kv_tokens": 768,
+            "reference_attention_backend": "torch_sdpa",
+            "reference_history_token_slots": 221184,
+            "reference_history_resident_bytes": 115015680,
             "full_equivalent_history_tokens": 2048,
             "history_kv_physical_eviction": {
                 "success": True,
@@ -74,3 +78,42 @@ def test_pyramidkv_absolute_budget_reaches_chat_hint_and_cost_columns():
     assert cost["history_kv_method"] == "pyramidkv"
     assert cost["history_kv_kept_tokens"] == 768
     assert cost["history_kv_freed_bytes"] == 123
+
+
+def test_reference_cost_keeps_measured_resident_storage():
+    cost = SglangBackend._history_kv_cost({"metadata": {"kv_memory_report": {
+        "history_kv_backend": "reference_attention",
+        "reference_attention_backend": "torch_sdpa",
+        "reference_history_token_slots": 321,
+        "reference_history_resident_bytes": 12345,
+    }}})
+    assert cost["reference_history_token_slots"] == 321
+    assert cost["reference_history_resident_bytes"] == 12345
+    assert cost["reference_attention_backend"] == "torch_sdpa"
+
+
+def test_event_roles_survive_tool_normalization(monkeypatch):
+    monkeypatch.setattr(proxy, "BENCHMARK", "bfcl")
+    messages = [
+        {"role": "user", "content": "task"},
+        {"role": "assistant", "content": "action"},
+        {"role": "tool", "content": "observation", "tool_call_id": "a"},
+    ]
+    assembled, counts = proxy._assemble(messages, get_arm("commitkv"))
+    assert assembled[-1]["role"] == "user"
+    assert counts["history_kv_event_messages"][-1] == {
+        "message_index": 3, "role": "tool", "phase": "tool"}
+    assert counts["history_kv_event_messages"][0]["role"] == "system"
+
+
+def test_reference_measurement_does_not_replace_external_history_with_zero_pool_slots():
+    data = {"metadata": {"kv_memory_report": {
+        "history_kv_backend": "reference_attention",
+        "active_history_kv_tokens": 123,
+        "full_equivalent_history_tokens": 500,
+        "reference_history_resident_bytes": 9876,
+        "history_kv_physical_eviction": {"kept_history_tokens": 0},
+    }}}
+    result = SglangBackend._server_measurement(data)
+    assert result["history_active_kv_tokens"] == 123
+    assert result["reference_history_resident_bytes"] == 9876

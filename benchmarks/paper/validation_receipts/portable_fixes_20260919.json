@@ -1,0 +1,141 @@
+{
+  "schema": "portable-fix-validation-v1",
+  "date": "2026-09-19",
+  "scope": "Functional correctness checks, not benchmark quality or performance claims.",
+  "cuda_reference": {
+    "device": "NVIDIA GeForce RTX 4090 Laptop GPU",
+    "tensor_status": "passed",
+    "model_status": "passed",
+    "methods": [
+      {
+        "arm": "agentkv",
+        "status": "passed",
+        "turns": 3,
+        "history_target_tokens": 64,
+        "completion_tokens": [
+          144,
+          144,
+          137
+        ]
+      },
+      {
+        "arm": "commitkv",
+        "status": "passed",
+        "turns": 3,
+        "history_target_tokens": 64,
+        "completion_tokens": [
+          144,
+          144,
+          144
+        ]
+      },
+      {
+        "arm": "history_kv_pyramidkv_r25_persistent",
+        "status": "passed",
+        "turns": 3,
+        "history_target_tokens": 64,
+        "completion_tokens": [
+          144,
+          144,
+          144
+        ]
+      }
+    ]
+  },
+  "npu_reference": {
+    "device": "Ascend910B3",
+    "tensor_status": "passed",
+    "model_status": "blocked_by_existing_resource_ownership",
+    "model_requests_completed": 0
+  },
+  "appworld_task_packet": {
+    "status": "passed",
+    "device_status": "passed",
+    "scope": "Controller/device smoke for one previously observed AppWorld prefix; not an AppWorld benchmark run or task score.",
+    "task_packet_tokens": 1694,
+    "history_budget_tokens": 768
+  },
+  "legacy_native_cuda": [
+    {
+      "assertions": {
+        "legacy_extract_matches_native_token_ids": true,
+        "native_reuses_legacy_cache_keys": true,
+        "runtime_layout_geometry_equal": true,
+        "first_generated_token_equal": true,
+        "first_generated_logprob_equal": true,
+        "base_query_projection": true
+      },
+      "token": {
+        "id": 785,
+        "text": "The",
+        "logprob": -1.5361946821212769
+      },
+      "layout": [
+        {
+          "gist_len": 12,
+          "original_seq_len": 47,
+          "kv_start": 1741,
+          "position_cursor": 1741,
+          "position_correction_after": 35
+        }
+      ]
+    },
+    {
+      "assertions": {
+        "legacy_extract_matches_native_token_ids": true,
+        "native_reuses_legacy_cache_keys": true,
+        "runtime_layout_geometry_equal": true,
+        "first_generated_token_equal": true,
+        "first_generated_logprob_equal": true,
+        "base_query_projection": true
+      },
+      "token": {
+        "id": 40,
+        "text": "I",
+        "logprob": -0.8490021228790283
+      },
+      "layout": [
+        {
+          "gist_len": 12,
+          "original_seq_len": 47,
+          "kv_start": 1741,
+          "position_cursor": 1741,
+          "position_correction_after": 35
+        },
+        {
+          "gist_len": 105,
+          "original_seq_len": 418,
+          "kv_start": 1753,
+          "position_cursor": 1788,
+          "position_correction_after": 348
+        }
+      ]
+    }
+  ],
+  "checkpoint_profile": {
+    "config_sha256": "15e14bfa5853ce7e74ef3cd6d65fc4b4411378c3111aebcfdc8ed272f5424655",
+    "history_memory_arm": "C",
+    "history_memory_corpus_identity": "265397616d308a0c3025a992f993b0ce57925437fce358c22771ca07a414473d",
+    "history_memory_normal_query": "base",
+    "history_memory_packing_version": "history-event-v1",
+    "history_memory_raw_layout": "event-native-evidence-v1",
+    "history_memory_training_profile": "history-event-base-query-v1"
+  },
+  "long_document_preflight": {
+    "input_template_tokens": 35775,
+    "max_doc_length": 1000,
+    "pieces": 43,
+    "maximum_extraction_input_tokens": 909,
+    "full_text_preserved": true,
+    "oversized_extraction_calls": 0,
+    "gpu_model_calls": 0,
+    "validation_scope": "Real checkpoint tokenizer and production packing; extractor replaced by a strict size assertion, not a quality or GPU-capacity test."
+  },
+  "remaining_limits": [
+    "NPU model-level cross-turn validation remains incomplete; existing jobs own the devices.",
+    "Reference Torch SDPA latency is not optimized-kernel performance.",
+    "CommitKV overlapping transitions and exact recovery append remain unsupported.",
+    "No corrected full AppWorld or BFCL quality rerun was performed.",
+    "The event-native checkpoint cannot be evaluated as a legacy turn-packed bare C2KV arm."
+  ]
+}

@@ -199,6 +199,15 @@ class TestTurnPacking:
     (train_data_multiturn._agent_history_turn_docs / _fit_reused_history),
     see docs/c2kv_semantics.md."""
 
+    @pytest.fixture(autouse=True)
+    def _exact_token_count_stub(self, monkeypatch):
+        # Unit fixture: one character is one exact token. Production uses the
+        # backend's dedicated role/chat-template tokenizer route.
+        monkeypatch.setattr(
+            proxy_mod, "_count_extract_tokens",
+            lambda _role, content: len(content),
+        )
+
     @staticmethod
     def _conv():
         return [
@@ -262,7 +271,14 @@ class TestTurnPacking:
         assert "q5" in docs[1] and "q7" in docs[3]  # last three
 
     def test_oversize_doc_is_split_and_verified(self, monkeypatch):
-        monkeypatch.setattr(proxy_mod, "_extract", _extract_stub)  # tokens == chars
+        extracted_lengths = []
+
+        def extract(role, content, ratio, timeout=0):
+            extracted_lengths.append(len(content))
+            assert len(content) <= 60
+            return _extract_stub(role, content, ratio, timeout)
+
+        monkeypatch.setattr(proxy_mod, "_extract", extract)  # tokens == chars
         monkeypatch.setattr(proxy_mod, "MAX_DOC_LENGTH", 60)
         long_answer = "\n".join(f"line {i} " + "x" * 20 for i in range(12))
         conv = [
@@ -274,6 +290,7 @@ class TestTurnPacking:
         out, counts = proxy_mod._assemble(conv, get_arm("c2kv"), 0)
         recs = counts["compressed_records"]
         assert len(recs) >= 3
+        assert extracted_lengths and max(extracted_lengths) <= 60
         assert all(r["record"]["original_seq_len"] <= 60 for r in recs)
         assert "".join(r["content"] for r in recs) == (
             "Previous turn\n[User query]\nq\n[Assistant output]\n" + long_answer)
@@ -575,6 +592,32 @@ class TestBackends:
     """Fake-backend tests for the backend abstraction + proxy repair
     planning (no HTTP, no torch)."""
 
+    def test_sglang_exact_count_uses_dedicated_tokenize_route(self):
+        from backends.sglang import SglangBackend
+
+        calls = []
+
+        def post(path, payload, timeout):
+            calls.append((path, payload, timeout))
+            return {"token_count": 35775, "success": True}
+
+        count = SglangBackend(post).count_extract_tokens(
+            "oversized document", "user")
+        assert count == 35775
+        assert calls == [("/v1/c2kv/tokenize", {
+            "text": "oversized document",
+            "role": "user",
+            "chat_template_kwargs": {"enable_thinking": False},
+        }, 60)]
+
+    def test_backend_without_exact_count_fails_before_extraction(self):
+        from backends import BackendError
+        from backends.hfserver import HfServerBackend
+
+        with pytest.raises(BackendError) as error:
+            HfServerBackend(None).count_extract_tokens("document", "user")
+        assert error.value.kind == "extract_tokenize_unsupported"
+
     class FakeSglang:
         name = "sglang"
         needs_repair_plan = True
@@ -589,6 +632,9 @@ class TestBackends:
                 "original_seq_len": len(text),
                 "success": True,
             }
+
+        def count_extract_tokens(self, text, role, tools=None):
+            return len(text)
 
         def repair_extract(self, text, role, span_start, span_end,
                            position_offset, source_doc_index):

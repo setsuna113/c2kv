@@ -29,7 +29,7 @@ class Tokenizer:
         return [ord(char) for char in text]
 
 
-def _controller():
+def _controller(*, history_budget_bytes=1_000_000, workspace_budget_bytes=1_000_000):
     return EventNativeS0Controller(
         Tokenizer(),
         packing={
@@ -40,8 +40,8 @@ def _controller():
             "max_target_tokens": 32, "max_sequence_tokens": 100_000,
         },
         policy={
-            "mode": "persistent", "history_budget_bytes": 1_000_000,
-            "workspace_budget_bytes": 1_000_000, "lease_decisions": 0,
+            "mode": "persistent", "history_budget_bytes": history_budget_bytes,
+            "workspace_budget_bytes": workspace_budget_bytes, "lease_decisions": 0,
             "max_retrieved_events": 2, "kv_bytes_per_token": 1,
             "source_commit": POLICY_SOURCE_COMMIT,
             "history_budget_definition": HISTORY_BUDGET_DEFINITION,
@@ -74,3 +74,48 @@ def test_first_appworld_user_is_mandatory_raw_event():
     assert prepared.metadata["task_packet_protection"] == "first_non_system_user_raw"
     assert prepared.metadata["task_packet_event_id"] == "appworld/task:m1"
     assert "appworld/task:m1" in prepared.metadata["mandatory_raw_event_ids"]
+
+
+def test_long_task_packet_is_fixed_common_input_outside_managed_budgets():
+    messages = [
+        {"role": "system", "content": "API schema"},
+        {"role": "user", "content": "APPWORLD TASK PACKET: " + "x" * 2_000},
+        {"role": "assistant", "content": "Ready."},
+        {"role": "user", "content": "Take the first action."},
+    ]
+    prepared = _controller(
+        history_budget_bytes=128,
+        workspace_budget_bytes=128,
+    ).prepare(
+        {
+            "session_id": "appworld/long-task-packet",
+            "decision_key": "d1",
+            "messages": copy.deepcopy(messages),
+            "tools": [],
+        },
+        ratio=4,
+        max_new_tokens=8,
+    )
+
+    metadata = prepared.metadata
+    row = metadata["per_ratio"]["4"]
+    assert metadata["task_packet_source_indices"] == [1]
+    assert metadata["task_packet_raw_tokens"] > 128
+    assert metadata["task_packet_raw_bytes"] == metadata["task_packet_raw_tokens"]
+    assert metadata["task_packet_accounting"] == {
+        "token_definition": (
+            "marginal tokens contributed by the AppWorld first-user task packet "
+            "within the rendered common input"
+        ),
+        "charged_to_history_budget": False,
+        "charged_to_workspace_budget": False,
+        "included_in_total_resident_kv": True,
+    }
+    assert 1 in metadata["common_input_source_indices"]
+    assert row["managed_history_bytes"] <= 128
+    assert row["managed_workspace_bytes"] <= 128
+    assert row["total_resident_kv_bytes"] > 128
+    assert metadata["actual_managed_history_bytes"] == row["managed_history_bytes"]
+    assert metadata["actual_total_resident_kv_bytes"] == row[
+        "total_resident_kv_bytes"
+    ]
