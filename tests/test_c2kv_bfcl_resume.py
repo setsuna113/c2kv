@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time
 import types
 from pathlib import Path
 from unittest.mock import patch
@@ -454,6 +455,134 @@ def test_appworld_subset_status_uses_full_manifest(tmp_path):
     assert status["status"] == "incomplete"
     assert status["n_total"] == 2
     assert status["n_completed"] == 1
+    score = json.loads((cell_dir / "appworld_score_summary.json").read_text())
+    assert score["score_denominator"] == 2
+    assert score["semantic_score"] is None
+    assert score["pending_task_ids"] == ["appworld_task_2"]
+
+
+def test_appworld_capacity_failure_scores_zero_and_next_worker_continues(
+        tmp_path, monkeypatch):
+    driver = _load_driver()
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1] / "controller_runtime"))
+    from benchmarks.memory_runtime.always_compress import CapacityInfeasible
+    from benchmarks.memory_runtime.attempt_journal import AttemptJournal
+    from benchmarks.memory_runtime.event_native_api import EventNativeAPI, EventNativeAPIError
+    from benchmarks.memory_runtime.event_native_step import EventNativeDecisionRunner
+
+    cell_dir = tmp_path / "cell"
+    cell_dir.mkdir()
+    tasks = ["too_large", "next_task"]
+    cell = {"cell_id": "appworld-capacity", "cell_dir": str(cell_dir),
+            "benchmark": "acon_appworld", "task_ids": tasks}
+    manifest = cell_dir / "cell.json"
+    manifest.write_text(json.dumps(cell), encoding="utf-8")
+    budgets = tmp_path / "budgets.json"
+    budgets.write_text("{}", encoding="utf-8")
+    calls = []
+
+    def run_task(cell_arg, task_ids, port, batch_name):
+        task_id = task_ids[0]
+        calls.append(task_id)
+        out = Path(cell_arg["cell_dir"]) / "batches" / batch_name
+        worker = out / "appworld_worker"
+        worker.mkdir(parents=True)
+        if task_id == tasks[0]:
+            server = out / "server"
+            server.mkdir()
+            (server / "ready.json").write_text(json.dumps({
+                "schema": "a-event-native-server-v1", "benchmark": "acon_appworld",
+                "allowed_task_ids": [task_id],
+            }), encoding="utf-8")
+
+            def fail_capacity(_payload, **_kwargs):
+                raise CapacityInfeasible("mandatory history exceeds budget")
+
+            runner = EventNativeDecisionRunner(
+                types.SimpleNamespace(prepare=fail_capacity),
+                types.SimpleNamespace(close_session=lambda: None,
+                                      session_cache_info=lambda: {}),
+                object(), ratio=4, max_new_tokens=1, max_generation_calls=3,
+                journal=AttemptJournal(server / "attempts.jsonl"),
+            )
+            api = EventNativeAPI(
+                runner, run_id="capacity-fixture", model_name="fixture",
+                benchmark="acon_appworld", view_mode="static", max_new_tokens=1,
+                allowed_task_ids=[task_id], max_decisions=3,
+                deadline_monotonic=time.monotonic() + 60,
+                steps_path=server / "steps.jsonl",
+            )
+            api._validate_request = lambda _request: (
+                {"session_id": f"acon_appworld/{task_id}/attempt-0",
+                 "decision_key": "turn-0/step-0", "messages": [], "tools": []},
+                (task_id, 0, 0), "fixture-signature",
+            )
+            with pytest.raises(EventNativeAPIError) as failed:
+                api.handle_chat({"task_id": task_id})
+            assert (failed.value.status_code, failed.value.code) == (
+                422, "c2kv_capacity_infeasible")
+            assert api.health()["terminal"] is False
+            summary = {"schema": "a-event-native-appworld-run-v1",
+                       "status": "failed:CalledProcessError", "task_id": task_id,
+                       "n": 0, "semantic_score": None}
+            result = {"status": "failed", "error": "official worker exited rc=1"}
+        else:
+            summary = {"schema": "a-event-native-appworld-run-v1",
+                       "status": "completed", "task_id": task_id,
+                       "n": 1, "semantic_score": 1.0}
+            result = {"status": "completed", "healthy": [task_id], "bad": []}
+        (worker / "official_summary.json").write_text(json.dumps(summary), encoding="utf-8")
+        return result
+
+    with (patch.object(driver, "prepare_cell_files", side_effect=lambda value, _: value),
+          patch.object(driver, "run_task", side_effect=run_task)):
+        assert driver.main(["--cell", str(manifest), "--budgets", str(budgets)]) == 0
+        assert driver.main(["--cell", str(manifest), "--budgets", str(budgets)]) == 0
+
+    assert calls == tasks
+    terminal = driver.appworld_method_failure_receipt(cell_dir, tasks[0])
+    assert terminal is not None and terminal["score_source"] == "method_failure_zero"
+    assert not driver.appworld_task_completed(cell_dir, tasks[0])
+    score = json.loads((cell_dir / "appworld_score_summary.json").read_text())
+    assert score["semantic_score"] == 0.5
+    assert score["score_denominator"] == 2
+    assert score["n_official_scored"] == 1
+    assert score["n_method_failures"] == 1
+    assert {row["task_id"]: row["score_source"] for row in score["task_rows"]} == {
+        tasks[0]: "method_failure_zero", tasks[1]: "official_appworld"}
+    status = json.loads((cell_dir / "cell_status.json").read_text())
+    assert status["status"] == "complete"
+    assert (status["n_completed"], status["n_terminal"], status["n_total"]) == (1, 1, 2)
+    assert scheduler.cell_done(cell)
+
+
+def test_appworld_method_failure_requires_typed_task_bound_evidence(tmp_path):
+    driver = _load_driver()
+    out = tmp_path / "batch"
+    server = out / "server"
+    server.mkdir(parents=True)
+    ready = {"schema": "a-event-native-server-v1", "benchmark": "acon_appworld",
+             "allowed_task_ids": ["task_a"]}
+    (server / "ready.json").write_text(json.dumps(ready), encoding="utf-8")
+    typed = {"schema": "a-event-native-exact-step-v1", "status": "failed",
+             "session_id": "acon_appworld/task_a/attempt-0",
+             "failure_kind": "method_failure",
+             "failure_code": "c2kv_capacity_infeasible"}
+    steps = server / "steps.jsonl"
+    for row in (
+        {**typed, "session_id": "acon_appworld/task_b/attempt-0"},
+        {**typed, "failure_code": "runner_failed"},
+        {"schema": typed["schema"], "status": "failed",
+         "session_id": typed["session_id"],
+         "error": {"message": "CapacityInfeasible mentioned by a 500 error"}},
+    ):
+        steps.write_text(json.dumps(row) + "\n", encoding="utf-8")
+        assert driver.appworld_method_failure_evidence(out, "task_a") is None
+    steps.write_text(json.dumps(typed) + "\n", encoding="utf-8")
+    assert driver.appworld_method_failure_evidence(out, "task_a") is not None
+    ready["allowed_task_ids"] = ["task_b"]
+    (server / "ready.json").write_text(json.dumps(ready), encoding="utf-8")
+    assert driver.appworld_method_failure_evidence(out, "task_a") is None
 
 
 def test_prepare_rejects_budget_drift_without_rewriting_frozen_files(tmp_path):

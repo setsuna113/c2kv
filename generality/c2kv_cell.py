@@ -291,7 +291,7 @@ def validate_chunk(out: Path, task_ids: list[str]) -> tuple[list[str], list[str]
     return healthy, bad
 
 
-def validate_appworld_summary(out: Path, task_id: str) -> None:
+def validate_appworld_summary(out: Path, task_id: str) -> dict:
     path = out / "appworld_worker" / "official_summary.json"
     try:
         summary = json.loads(path.read_text(encoding="utf-8"))
@@ -306,6 +306,7 @@ def validate_appworld_summary(out: Path, task_id: str) -> None:
             or not isinstance(score, (int, float)) or isinstance(score, bool)
             or not math.isfinite(score)):
         raise RuntimeError(f"AppWorld summary is not a scored completion for {task_id}")
+    return summary
 
 
 def appworld_task_completed(cell_dir: Path, task_id: str) -> bool:
@@ -316,6 +317,110 @@ def appworld_task_completed(cell_dir: Path, task_id: str) -> bool:
             continue
         return True
     return False
+
+
+def appworld_method_failure_evidence(out: Path, task_id: str) -> dict | None:
+    """Accept only a durable, task-bound capacity failure from our controller."""
+    ready_path = out / "server" / "ready.json"
+    steps_path = out / "server" / "steps.jsonl"
+    try:
+        ready = json.loads(ready_path.read_text(encoding="utf-8"))
+        if (ready.get("schema") != "a-event-native-server-v1"
+                or ready.get("benchmark") != "acon_appworld"
+                or ready.get("allowed_task_ids") != [task_id]):
+            return None
+        rows = [json.loads(line) for line in steps_path.read_text(encoding="utf-8").splitlines()
+                if line.strip()]
+    except (OSError, UnicodeError, json.JSONDecodeError, AttributeError):
+        return None
+    session_id = f"acon_appworld/{task_id}/attempt-0"
+    failures = [row for row in rows if isinstance(row, dict)
+                and row.get("schema") == "a-event-native-exact-step-v1"
+                and row.get("status") == "failed"
+                and row.get("session_id") == session_id
+                and row.get("failure_kind") == "method_failure"
+                and row.get("failure_code") == "c2kv_capacity_infeasible"]
+    if len(failures) != 1:
+        return None
+    try:
+        return {
+            "batch": out.name,
+            "server_ready_sha256": hashlib.sha256(ready_path.read_bytes()).hexdigest(),
+            "server_steps_sha256": hashlib.sha256(steps_path.read_bytes()).hexdigest(),
+            "decision_key": failures[0].get("decision_key"),
+        }
+    except OSError:
+        return None
+
+
+def appworld_method_failure_receipt(cell_dir: Path, task_id: str) -> dict | None:
+    path = cell_dir / "tasks" / task_id / "terminal.json"
+    try:
+        receipt = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if (not isinstance(receipt, dict)
+            or receipt.get("schema") != "c2kv-appworld-method-failure-v1"
+            or receipt.get("task_id") != task_id
+            or receipt.get("status") != "method_failure"
+            or receipt.get("failure_code") != "c2kv_capacity_infeasible"
+            or type(receipt.get("semantic_score")) not in (int, float)
+            or receipt.get("semantic_score") != 0.0
+            or receipt.get("score_source") != "method_failure_zero"
+            or receipt.get("official_summary") is not None):
+        return None
+    evidence = receipt.get("evidence")
+    batch = evidence.get("batch") if isinstance(evidence, dict) else None
+    if not isinstance(batch, str) or not batch or Path(batch).name != batch:
+        return None
+    return (receipt if evidence == appworld_method_failure_evidence(
+        cell_dir / "batches" / batch, task_id) else None)
+
+
+def appworld_score_summary(cell: dict) -> dict:
+    """Keep method-failure zeros in the frozen denominator without a fake scorer row."""
+    cell_dir = Path(cell["cell_dir"])
+    rows = []
+    pending = []
+    official = method_failures = 0
+    scored_by_task = {}
+    expected = set(cell["task_ids"])
+    for path in sorted((cell_dir / "batches").glob("*/appworld_worker/official_summary.json")):
+        try:
+            candidate = json.loads(path.read_text(encoding="utf-8"))
+            task_id = candidate.get("task_id") if isinstance(candidate, dict) else None
+            if isinstance(task_id, str) and task_id in expected and task_id not in scored_by_task:
+                scored_by_task[task_id] = validate_appworld_summary(path.parent.parent,
+                                                                     task_id)
+        except (OSError, json.JSONDecodeError, RuntimeError):
+            continue
+    for task_id in cell["task_ids"]:
+        scored = scored_by_task.get(task_id)
+        if scored is not None:
+            official += 1
+            rows.append({"task_id": task_id, "semantic_score": scored["semantic_score"],
+                         "score_source": "official_appworld"})
+        elif appworld_method_failure_receipt(cell_dir, task_id) is not None:
+            method_failures += 1
+            rows.append({"task_id": task_id, "semantic_score": 0.0,
+                         "score_source": "method_failure_zero",
+                         "failure_code": "c2kv_capacity_infeasible"})
+        else:
+            pending.append(task_id)
+    return {
+        "schema": "c2kv-appworld-score-summary-v1",
+        "cell_id": cell["cell_id"], "n_total": len(cell["task_ids"]),
+        "score_denominator": len(cell["task_ids"]),
+        "n_scored": len(rows), "n_official_scored": official,
+        "n_method_failures": method_failures,
+        "method_failure_task_ids": [row["task_id"] for row in rows
+                                    if row["score_source"] == "method_failure_zero"],
+        "pending_task_ids": pending,
+        "semantic_score": (sum(row["semantic_score"] for row in rows) / len(cell["task_ids"])
+                           if not pending else None),
+        "failure_score_policy": "capacity_infeasible method failures score zero without an official scorer outcome",
+        "task_rows": rows,
+    }
 
 
 def run_task(cell: dict, task_ids: list[str], port: int, batch_dirname: str) -> dict:
@@ -665,6 +770,7 @@ def main(argv=None) -> int:
             chunk = [
                 task_id for task_id in chunk
                 if not appworld_task_completed(cell_dir, task_id)
+                and appworld_method_failure_receipt(cell_dir, task_id) is None
                 and attempt_counts.get(task_id, 0) < args.max_attempts_per_task
             ]
         if not chunk:
@@ -674,9 +780,37 @@ def main(argv=None) -> int:
         port = next_port()
         name = _attempt_name(chunk)
         result = run_task(cell, chunk, port, name)
+        new_method_failure = False
+        if (cell["benchmark"] == "acon_appworld" and len(chunk) == 1
+                and result["status"] != "completed"
+                and not appworld_task_completed(cell_dir, chunk[0])):
+            evidence = appworld_method_failure_evidence(cell_dir / "batches" / name,
+                                                        chunk[0])
+            if evidence is not None:
+                terminal_path = cell_dir / "tasks" / chunk[0] / "terminal.json"
+                if terminal_path.exists():
+                    with (terminal_path.parent / "terminal_history.jsonl").open(
+                            "a", encoding="utf-8") as history:
+                        history.write(json.dumps({"preserved_at_ns": time.time_ns(),
+                            "previous_raw": terminal_path.read_text(encoding="utf-8")}) + "\n")
+                _write(terminal_path, {
+                    "schema": "c2kv-appworld-method-failure-v1",
+                    "task_id": chunk[0], "status": "method_failure",
+                    "failure_code": "c2kv_capacity_infeasible",
+                    "semantic_score": 0.0, "score_source": "method_failure_zero",
+                    "official_summary": None, "evidence": evidence,
+                })
+                result = {**result, "status": "method_failure",
+                          "terminal_kind": "method_failure",
+                          "failure_code": "c2kv_capacity_infeasible"}
+                new_method_failure = True
         with progress.open("a", encoding="utf-8") as stream:
             stream.write(json.dumps(result, ensure_ascii=False) + "\n")
         healthy = list(result.get("healthy") or [])
+        if new_method_failure:
+            print(json.dumps({"cell": cell["cell_id"], "task": chunk[0],
+                              "status": "method_failure"}), flush=True)
+            return
         if result["status"] == "completed":
             for task_id in healthy:
                 valid_task_ids.add(task_id)
@@ -730,16 +864,21 @@ def main(argv=None) -> int:
             "finished_at": time.time(),
         })
     else:
-        done = sum(1 for t in expected_task_ids
-                   if appworld_task_completed(cell_dir, t))
-        # Legacy terminal.json files are retained as evidence but do not
-        # complete an unscored AppWorld task.
-        retryable = len(expected_task_ids) - done
+        summary = appworld_score_summary(cell)
+        _write(cell_dir / "appworld_score_summary.json", summary)
+        done = summary["n_official_scored"]
+        terminal = summary["n_method_failures"]
+        retryable = len(summary["pending_task_ids"])
         write_cell_status(cell, {
             "cell_id": cell["cell_id"],
             "status": "complete" if retryable == 0 else "incomplete",
             "n_completed": done, "n_retryable": retryable,
-            "n_terminal": 0, "n_total": len(expected_task_ids),
+            "n_terminal": terminal,
+            "method_failure_task_ids": summary["method_failure_task_ids"],
+            "n_total": len(expected_task_ids),
+            "semantic_score": summary["semantic_score"],
+            "score_denominator": summary["score_denominator"],
+            "score_summary": str(cell_dir / "appworld_score_summary.json"),
             "finished_at": time.time(),
         })
     return 0
