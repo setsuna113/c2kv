@@ -1333,6 +1333,9 @@ class ProxyState:
 
     def __init__(self):
         self.lock = threading.Lock()
+        # Episode reset flushes global KV state. A chat request must finish
+        # before another thread can switch episodes or reuse its session.
+        self.request_lock = threading.Lock()
         self.recover: Optional[RecoverState] = None
         self.reference_log_path: str = ""
         # conversation_id -> server streaming-session id (physical-eviction
@@ -1431,6 +1434,10 @@ class ProxyHandler(BaseHTTPRequestHandler):
         )
 
     def do_POST(self):
+        with STATE.request_lock:
+            self._handle_post()
+
+    def _handle_post(self):
         request_start_unix = time.time_ns()
         request_start_perf = time.perf_counter_ns()
         _TRACE.request_id = (
