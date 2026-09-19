@@ -524,11 +524,72 @@ def test_prepare_matching_resume_preserves_frozen_bytes(tmp_path):
     with patch.object(driver, "_controller_with_binding", return_value=({"controller": 1}, None)):
         driver.prepare_cell_files(cell, budgets)
         (cell_dir / "batches" / "first").mkdir(parents=True)
+        # Historical source manifests did not include the two derived paths.
+        manifest_path = cell_dir / "cell.json"
+        historical = json.loads(manifest_path.read_text(encoding="utf-8"))
+        historical.pop("controller_path")
+        historical.pop("eval_policy_path")
+        manifest_path.write_text(json.dumps(historical), encoding="utf-8")
         frozen = {name: (cell_dir / name).read_bytes() for name in
                   ("cell.json", "controller.json", "eval_policy.json")}
         resumed = driver.prepare_cell_files(
-            {**cell, "sglang_backend_url": "http://127.0.0.1:8001"}, budgets
+            {**cell, "sglang_backend_url": "http://127.0.0.1:8001",
+             "scheduler_port_slot": 2}, budgets
         )
 
     assert resumed["sglang_backend_url"] == "http://127.0.0.1:8001"
+    assert {name: (cell_dir / name).read_bytes() for name in frozen} == frozen
+
+
+def test_prepare_checks_recorded_derived_config_paths(tmp_path):
+    driver = _load_driver()
+    cell_dir = tmp_path / "cell"
+    cell = {
+        "cell_id": "recorded-path-freeze", "cell_dir": str(cell_dir),
+        "condition": "recovery_off_same_initial", "working_point": "K0",
+    }
+    budgets = {"working_points": {"K0": {
+        "history_allowance_bytes": 1024, "common_cap_bytes": 2048,
+    }}}
+    with patch.object(driver, "_controller_with_binding", return_value=({"controller": 1}, None)):
+        driver.prepare_cell_files(cell, budgets)
+        (cell_dir / "batches" / "first").mkdir(parents=True)
+        for name, recorded in (("controller.json", "old_controller.json"),
+                               ("eval_policy.json", "old_eval_policy.json")):
+            (cell_dir / recorded).write_bytes((cell_dir / name).read_bytes())
+        manifest_path = cell_dir / "cell.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["controller_path"] = "old_controller.json"
+        manifest["eval_policy_path"] = "old_eval_policy.json"
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+        frozen = {name: (cell_dir / name).read_bytes() for name in
+                  ("cell.json", "controller.json", "eval_policy.json")}
+
+        driver.prepare_cell_files(cell, budgets)
+        (cell_dir / "old_controller.json").write_text('{"controller": 2}', encoding="utf-8")
+        with pytest.raises(ValueError, match="different frozen controller.json at recorded path"):
+            driver.prepare_cell_files(cell, budgets)
+
+    assert {name: (cell_dir / name).read_bytes() for name in frozen} == frozen
+
+
+def test_prepare_rejects_attempts_with_missing_frozen_config(tmp_path):
+    driver = _load_driver()
+    cell_dir = tmp_path / "cell"
+    cell = {
+        "cell_id": "missing-config-freeze", "cell_dir": str(cell_dir),
+        "condition": "recovery_off_same_initial", "working_point": "K0",
+    }
+    budgets = {"working_points": {"K0": {
+        "history_allowance_bytes": 1024, "common_cap_bytes": 2048,
+    }}}
+    with patch.object(driver, "_controller_with_binding", return_value=({"controller": 1}, None)):
+        driver.prepare_cell_files(cell, budgets)
+        (cell_dir / "batches" / "first").mkdir(parents=True)
+        (cell_dir / "controller.json").unlink()
+        frozen = {name: (cell_dir / name).read_bytes() for name in
+                  ("cell.json", "eval_policy.json")}
+        with pytest.raises(ValueError, match="existing attempts require frozen controller.json"):
+            driver.prepare_cell_files(cell, budgets)
+    assert not (cell_dir / "controller.json").exists()
     assert {name: (cell_dir / name).read_bytes() for name in frozen} == frozen

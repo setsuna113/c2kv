@@ -486,11 +486,34 @@ def prepare_cell_files(cell: dict, budgets: dict) -> dict:
             except (OSError, json.JSONDecodeError) as error:
                 raise ValueError(f"existing attempts require frozen {name}") from error
             if name == "cell.json":
-                # Engine URL is allocated per scheduler run; all other cell
-                # fields are part of the frozen experimental contract.
+                # Engine address/slot and paths to the separately verified
+                # controller/policy files are launch routing, not experiment
+                # inputs.  Older source manifests omitted the derived paths.
                 previous = dict(previous)
                 expected = dict(expected)
-                for transient in ("sglang_backend_url", "scheduler_port_slot"):
+                for path_field, frozen_name in (
+                    ("controller_path", "controller.json"),
+                    ("eval_policy_path", "eval_policy.json"),
+                ):
+                    recorded_path = previous.get(path_field)
+                    if recorded_path is not None:
+                        if not isinstance(recorded_path, str) or not recorded_path:
+                            raise ValueError(f"existing attempts have invalid frozen {path_field}")
+                        source = Path(recorded_path)
+                        if not source.is_absolute():
+                            source = cell_dir / source
+                        try:
+                            recorded = json.loads(source.read_text(encoding="utf-8"))
+                        except (OSError, json.JSONDecodeError) as error:
+                            raise ValueError(
+                                f"existing attempts require frozen {frozen_name} at recorded path"
+                            ) from error
+                        if recorded != frozen[frozen_name]:
+                            raise ValueError(
+                                f"existing attempts use a different frozen {frozen_name} at recorded path"
+                            )
+                for transient in ("sglang_backend_url", "scheduler_port_slot",
+                                  "controller_path", "eval_policy_path"):
                     previous.pop(transient, None)
                     expected.pop(transient, None)
             if previous != expected:
