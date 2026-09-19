@@ -87,6 +87,8 @@ def delivery_args(config, benchmark, output, task_ids, delivery):
         command += ["--candidate-algorithm", ARM_TO_VARIANT[ARM]]
     else:
         command += ["--detector", detector]
+        if ARM != "c2kv_native_r4" and detector in {"t02_risk", "legacy_prefill"}:
+            command += ["--embedding-batch-size", str(settings.get("embedding_batch_size", 1))]
     if config.get("tool_memory"):
         command += ["--tool-memory", config["tool_memory"]]
         if config.get("tool_checkpoint"):

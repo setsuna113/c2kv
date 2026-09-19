@@ -52,6 +52,13 @@ def test_paper_delivery_uses_configured_detector_and_defaults_to_d3_hybrid(tmp_p
             legacy, "bfcl_base", tmp_path / detector, ["multi_turn_base_0"], delivery
         )
         assert parsed.detector == detector
+        assert parsed.embedding_batch_size == 1
+
+    legacy["c1"]["embedding_batch_size"] = 2
+    parsed = paper_c1.delivery_args(
+        legacy, "bfcl_base", tmp_path / "batch2", ["multi_turn_base_0"], delivery
+    )
+    assert parsed.embedding_batch_size == 2
 
 
 def test_append_final_arm_preserves_old_cells_and_completed_artifacts():

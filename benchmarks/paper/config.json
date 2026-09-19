@@ -36,6 +36,7 @@
   "c1": {
     "embedding_model": "/home/lyc/dev/c2kv-selection-models/Qwen3-Embedding-0.6B",
     "embedding_device": "cuda",
+    "embedding_batch_size": 1,
     "detector": "d3_hybrid",
     "selector_threshold": 0.5,
     "history_variant": "H0",

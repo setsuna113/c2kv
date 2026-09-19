@@ -260,6 +260,9 @@ def build_profile(args: argparse.Namespace) -> tuple[dict, dict]:
         controller["d3_hybrid_recovery"] = True
         controller.pop("gp_experiments", None)
     else:
+        embedding_batch_size = getattr(args, "embedding_batch_size", 16)
+        if type(embedding_batch_size) is not int or embedding_batch_size < 1:
+            raise ValueError("embedding batch size must be a positive integer")
         config, _ = evidence_sets.build_config(
             history="H0",
             selector="legacy_prefill" if args.detector == "legacy_prefill" else "risk",
@@ -270,6 +273,7 @@ def build_profile(args: argparse.Namespace) -> tuple[dict, dict]:
             semantic_query_overflow_policy="task_head_tail_preserve_draft_v1",
         )
         config["local_models"]["embedding"]["dtype"] = "bfloat16"
+        config["local_models"]["embedding"]["batch_size"] = embedding_batch_size
         if artifact_path is not None:
             config["selector_artifact"], artifact_binding = bind_risk_artifact(
                 config["selector_artifact"], args.checkpoint
@@ -832,6 +836,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--sglang-backend-url", required=True)
     parser.add_argument("--embedding-model", type=Path)
     parser.add_argument("--embedding-device", default="cpu")
+    parser.add_argument("--embedding-batch-size", type=int, default=16)
     parser.add_argument(
         "--detector",
         choices=("d3_hybrid", "legacy_prefill", "t02_risk"),
@@ -894,6 +899,9 @@ def validate_args(args: argparse.Namespace) -> list[str]:
     _benchmark_dir(args)
     if args.task_timeout <= 0 or not 1 <= args.port <= 65535:
         raise ValueError("task timeout and port must be valid positive values")
+    embedding_batch_size = getattr(args, "embedding_batch_size", 16)
+    if type(embedding_batch_size) is not int or embedding_batch_size < 1:
+        raise ValueError("embedding batch size must be a positive integer")
     if (args.method != "c2kv_native" and getattr(args, "candidate_algorithm", None) is None
             and (args.embedding_model is None or not (args.embedding_model / "config.json").is_file())):
         raise ValueError("embedding model must be a local model directory")
