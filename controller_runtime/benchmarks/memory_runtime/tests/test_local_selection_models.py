@@ -370,6 +370,7 @@ def test_embedding_separates_query_document_and_caches_documents(monkeypatch):
     assert query and document == cached
     assert math.isclose(sum(value * value for value in query[0]), 1.0, rel_tol=1e-6)
     assert model.forward_calls == 2
+    assert model.forward_kwargs == [{"use_cache": False}, {"use_cache": False}]
     assert len([row for row in registry if row[0] == "embedding"]) == 1
 
     receipts = models.drain_receipts()
@@ -380,6 +381,27 @@ def test_embedding_separates_query_document_and_caches_documents(monkeypatch):
     assert receipts[-1]["usage"]["prompt_tokens"] == 0
     assert receipts[-1]["cost"] is None
     assert models.drain_receipts() == []
+
+
+def test_embedding_singleton_batch_preserves_vectors_without_kv_cache(monkeypatch):
+    registry = install_runtime(monkeypatch)
+    texts = ["short", "a longer document", "medium"]
+    regular = local.LocalSelectionModels({"embedding": {"batch_size": 16}})
+    singleton = local.LocalSelectionModels({"embedding": {"batch_size": 1}})
+
+    expected = regular.embed(texts=texts, purpose="document")
+    actual = singleton.embed(texts=texts, purpose="document")
+
+    assert actual == expected
+    models = instances(registry, "model_instance")
+    assert [model.forward_calls for model in models] == [1, 3]
+    assert all(
+        kwargs == {"use_cache": False}
+        for model in models for kwargs in model.forward_kwargs
+    )
+    tokenizers = instances(registry, "tokenizer_instance")
+    assert [len(rows) for rows, _ in tokenizers[0].pad_calls] == [3]
+    assert [len(rows) for rows, _ in tokenizers[1].pad_calls] == [1, 1, 1]
 
 
 def test_embedding_budget_error_never_requests_tokenizer_truncation(monkeypatch):
