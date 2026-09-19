@@ -1240,7 +1240,7 @@ class SGLangEventNativeGenerator:
         }
         unretained_reused = sum(row["cache_hit"] for row in extras_by_handle.values())
         kv_bytes = self.kv_bytes_per_token()
-        prefix_tokens = costs["system_tokens"] + costs["gist_tokens"]
+        prefix_tokens = costs["system_prefix_kv_tokens"] + costs["gist_prefix_kv_tokens"]
         prompt_resident_tokens = costs["resident_kv_tokens"]
         final_resident_tokens = prompt_resident_tokens + max(0, len(output_ids) - 1)
         generation_index = scope.generate_calls if scope is not None else 1
@@ -1270,8 +1270,8 @@ class SGLangEventNativeGenerator:
                 for handle in scope_reused
             ),
             "gist_tokens": costs["gist_tokens"],
-            "system_prefix_kv_tokens": costs["system_tokens"],
-            "gist_prefix_kv_tokens": costs["gist_tokens"],
+            "system_prefix_kv_tokens": costs["system_prefix_kv_tokens"],
+            "gist_prefix_kv_tokens": costs["gist_prefix_kv_tokens"],
             "system_prefix_kv_logical_bytes": costs["system_prefix_kv_logical_bytes"],
             "gist_prefix_kv_logical_bytes": costs["gist_prefix_kv_logical_bytes"],
             "resident_prefix_kv_tokens": prefix_tokens,
@@ -1558,7 +1558,22 @@ class SGLangEventNativeGenerator:
             "resident_kv_logical_bytes": expected["resident_kv_tokens"] * kv_bytes,
         }
         if memory.raw_tool_segments or memory.tool_gist_segments:
+            for name in ("system_prefix_kv_tokens", "gist_prefix_kv_tokens",
+                         "workspace_resident_kv_tokens"):
+                result[name] = _nonnegative_int(
+                    value.get(name), f"response.costs.{name}")
+            if result["gist_prefix_kv_tokens"] != expected["gist_tokens"]:
+                raise SGLangEventNativeError(
+                    "response.costs.gist_prefix_kv_tokens mismatch")
+            if sum(result[name] for name in (
+                    "system_prefix_kv_tokens", "gist_prefix_kv_tokens",
+                    "workspace_resident_kv_tokens")) != expected["resident_kv_tokens"]:
+                raise SGLangEventNativeError(
+                    "response.costs physical KV components do not equal resident_kv_tokens")
             byte_expectations = {
+                "system_prefix_kv_logical_bytes": result["system_prefix_kv_tokens"] * kv_bytes,
+                "gist_prefix_kv_logical_bytes": result["gist_prefix_kv_tokens"] * kv_bytes,
+                "raw_workspace_kv_logical_bytes": result["workspace_resident_kv_tokens"] * kv_bytes,
                 "resident_kv_logical_bytes": expected["resident_kv_tokens"] * kv_bytes,
             }
             for name in ("raw_tool_source_tokens", "raw_tool_resident_tokens",
@@ -1569,6 +1584,10 @@ class SGLangEventNativeGenerator:
         for name, expected_value in byte_expectations.items():
             if result[name] != expected_value:
                 raise SGLangEventNativeError(f"response.costs.{name} mismatch")
+        if not (memory.raw_tool_segments or memory.tool_gist_segments):
+            result["system_prefix_kv_tokens"] = expected["system_tokens"]
+            result["gist_prefix_kv_tokens"] = expected["gist_tokens"]
+            result["workspace_resident_kv_tokens"] = expected["raw_tokens"]
         return result
 
     def _validate_shadow_features(
