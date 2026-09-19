@@ -4,6 +4,15 @@ The NPU copy is `/home/liuyancheng/c2kv-generality-20260918/src/generality`.
 The local delivery commit is the commit containing this README; use
 `git rev-parse HEAD` to identify it after checkout.
 
+The shared serving and paper-controller source branch is
+`paper/benchmarks-cuda-20260917`; its name is historical and the device-neutral
+controller, protocol, and reference-KV changes apply to both CUDA and NPU.  This
+standalone repository's `experiment/generality-npu-20260919` branch carries the
+NPU launchers plus the bundled `controller_runtime` subset they import.  Shared
+runtime fixes are copied into that subset only when an NPU launcher consumes
+them.  These source checkouts do not deploy or overwrite the detached running
+copies under `/home/liuyancheng/c2kv-generality-20260918/src/`.
+
 Calibration never reruns a task from turn zero. It restores each source row
 from the official `labels.json`, verifies the BFCL tool observations and
 decision key, generates only the current-turn A0 continuation, and writes

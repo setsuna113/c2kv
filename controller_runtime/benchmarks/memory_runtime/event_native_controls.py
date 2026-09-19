@@ -277,6 +277,7 @@ def build_event_native_controller(
                     model_context=model_context,
                     s0_config=base_s0_config,
                     observed_entity_slot_policy=candidate_policy,
+                    benchmark=benchmark or "bfcl",
                 )
             if candidate_policy == MISSING_REQUIRED_REFERENCE_POLICY:
                 return RevisionObservedEntitySlotS0Controller(
@@ -286,6 +287,7 @@ def build_event_native_controller(
                     model_context=model_context,
                     s0_config=base_s0_config,
                     observed_entity_slot_revision_policy=candidate_policy,
+                    benchmark=benchmark or "bfcl",
                 )
             if candidate_policy == SAME_EVENT_REFERENCE_POLICY:
                 return SameEventReferenceS0Controller(
@@ -295,6 +297,7 @@ def build_event_native_controller(
                     model_context=model_context,
                     s0_config=base_s0_config,
                     same_event_reference_policy=candidate_policy,
+                    benchmark=benchmark or "bfcl",
                 )
             if candidate_policy == SAME_EVENT_BRIDGE_ONLY_POLICY:
                 return SameEventBridgeOnlyS0Controller(
@@ -304,6 +307,7 @@ def build_event_native_controller(
                     model_context=model_context,
                     s0_config=base_s0_config,
                     same_event_bridge_only_policy=candidate_policy,
+                    benchmark=benchmark or "bfcl",
                 )
             if candidate_policy == RESULT_KEY_BRIDGE_POLICY:
                 return ResultKeyBridgeS0Controller(
@@ -313,10 +317,17 @@ def build_event_native_controller(
                     model_context=model_context,
                     s0_config=base_s0_config,
                     result_key_bridge_policy=candidate_policy,
+                    benchmark=benchmark or "bfcl",
                 )
             raise ValueError("Unknown observed entity slot policy")
-        return EventNativeS0Controller(tokenizer, packing=packing, policy=policy,
-            model_context=model_context, s0_config=s0_config)
+        return EventNativeS0Controller(
+            tokenizer,
+            packing=packing,
+            policy=policy,
+            model_context=model_context,
+            s0_config=s0_config,
+            benchmark=benchmark or "bfcl",
+        )
     if view_mode in _EXACT_VIEW_MODES:
         return EventNativeExactController(
             tokenizer,

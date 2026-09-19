@@ -53,7 +53,7 @@ from .source_needs import (
 )
 
 
-EVENT_NATIVE_S0_VERSION = "a-event-native-s0-v1"
+EVENT_NATIVE_S0_VERSION = "a-event-native-s0-v2"
 ALWAYS_COMPRESS_GIST_LAYOUT = "event-native-always-compress-gist-v1"
 S0_CONFIG_DEFAULTS = {
     "source_index_max_events": 12,
@@ -120,6 +120,7 @@ class EventNativeS0Controller:
         policy: Mapping[str, Any],
         model_context: int | None = None,
         s0_config: Mapping[str, Any] | None = None,
+        benchmark: str = "bfcl",
     ) -> None:
         if not callable(getattr(tokenizer, "apply_chat_template", None)):
             raise TypeError("tokenizer must expose apply_chat_template")
@@ -143,6 +144,9 @@ class EventNativeS0Controller:
         self.policy = _json_snapshot(policy)
         self.model_context = model_context
         self.s0_config = self._parse_s0_config(s0_config)
+        if not isinstance(benchmark, str) or not benchmark:
+            raise ValueError("benchmark must be a nonempty string")
+        self.benchmark = benchmark
         self.encoding_scope = "current"
         self.protected_recovery_messages: Sequence[Mapping[str, Any]] = ()
         # Generality extension: while True, _try_measure admits against the
@@ -286,17 +290,44 @@ class EventNativeS0Controller:
         decision_index: int,
     ) -> PreparedEventNativeS0:
         cutoff = raw_source_cutoff([message.to_dict() for message in store.messages])
-        common_source_indices = {
+        baseline_common_source_indices = {
             index
             for event in store.events
             if event.kind == "instruction"
             for index in event.source_indices
         } | set(range(cutoff, len(store.messages)))
+        users = [event for event in store.events if event.kind == "user"]
+        task_packet_event = min(
+            users, key=lambda event: min(event.source_indices)
+        ) if users else None
+        task_packet_source_indices = (
+            set(task_packet_event.source_indices)
+            if self.benchmark == "acon_appworld" and task_packet_event is not None
+            else set()
+        )
+        common_source_indices = (
+            baseline_common_source_indices | task_packet_source_indices
+        )
         common_messages = [
             visible_message(store.messages[index])
             for index in sorted(common_source_indices)
         ]
         common_tokens = self._count(common_messages, tools) if common_messages else 0
+        common_without_task_packet = common_source_indices - task_packet_source_indices
+        common_without_task_packet_messages = [
+            visible_message(store.messages[index])
+            for index in sorted(common_without_task_packet)
+        ]
+        common_without_task_packet_tokens = (
+            self._count(common_without_task_packet_messages, tools)
+            if common_without_task_packet_messages
+            else 0
+        )
+        task_packet_raw_tokens = common_tokens - common_without_task_packet_tokens
+        if task_packet_raw_tokens < 0:
+            raise PolicyInputError(
+                "AppWorld task-packet marginal token count must be nonnegative"
+            )
 
         mandatory_ids = {
             event.event_id
@@ -305,15 +336,21 @@ class EventNativeS0Controller:
             or event.kind == "instruction"
             or bool(set(event.source_indices) & set(range(cutoff, len(store.messages))))
         }
-        users = [event for event in store.events if event.kind == "user"]
         if users:
             mandatory_ids.add(users[-1].event_id)
+        if self.benchmark == "acon_appworld" and task_packet_event is not None:
+            mandatory_ids.add(task_packet_event.event_id)
 
         candidate_event_ids = tuple(
             event.event_id
             for event in store.events
             if event.complete
             and event.kind != "instruction"
+            and event.event_id != (
+                task_packet_event.event_id
+                if self.benchmark == "acon_appworld" and task_packet_event is not None
+                else None
+            )
             and any(index < cutoff for index in event.source_indices)
         )
         scope_plan = plan_encoding_scope(
@@ -922,11 +959,36 @@ class EventNativeS0Controller:
         retained_unit_ids = list(dict.fromkeys(
             chunk.event_id for chunk in measure.memory.chunks
         ))
+        selected_ratio_cost = measure.per_ratio[str(ratio)]
         metadata = {
             "event_native_s0_version": EVENT_NATIVE_S0_VERSION,
             "event_native_policy_version": EVENT_NATIVE_POLICY_VERSION,
             "policy_source_commit": POLICY_SOURCE_COMMIT,
             "session_id": store.session_id,
+            "benchmark": self.benchmark,
+            "task_packet_protection": (
+                "first_non_system_user_raw"
+                if self.benchmark == "acon_appworld" else "none"
+            ),
+            "task_packet_event_id": (
+                task_packet_event.event_id
+                if self.benchmark == "acon_appworld" and task_packet_event is not None
+                else None
+            ),
+            "task_packet_source_indices": sorted(task_packet_source_indices),
+            "task_packet_raw_tokens": task_packet_raw_tokens,
+            "task_packet_raw_bytes": (
+                task_packet_raw_tokens * self.kv_bytes_per_token
+            ),
+            "task_packet_accounting": {
+                "token_definition": (
+                    "marginal tokens contributed by the AppWorld first-user task "
+                    "packet within the rendered common input"
+                ),
+                "charged_to_history_budget": False,
+                "charged_to_workspace_budget": False,
+                "included_in_total_resident_kv": bool(task_packet_source_indices),
+            },
             "decision_key": decision_key,
             "decision_index": decision_index,
             "view_mode": NATIVE_S0_MODE,
@@ -954,7 +1016,10 @@ class EventNativeS0Controller:
             "history_budget_definition": HISTORY_BUDGET_DEFINITION,
             "workspace_budget_definition": WORKSPACE_BUDGET_DEFINITION,
             "current_input_baseline": CURRENT_INPUT_BASELINE,
-            "s0_common_input_definition": "source instructions plus raw_source_cutoff suffix",
+            "s0_common_input_definition": (
+                "source instructions plus raw_source_cutoff suffix plus the AppWorld "
+                "first-user task packet"
+            ),
             "raw_source_cutoff": cutoff,
             "common_input_source_indices": sorted(common_source_indices),
             "common_raw_prompt_tokens": common_tokens,
@@ -1061,8 +1126,20 @@ class EventNativeS0Controller:
             "per_ratio": copy.deepcopy(measure.per_ratio),
             "raw_prompt_tokens": measure.raw_prompt_tokens,
             "actual_raw_history_tokens": measure.raw_history_tokens,
-            "actual_gist_tokens": measure.per_ratio[str(ratio)]["history_gist_tokens"],
-            "actual_history_bytes": measure.per_ratio[str(ratio)]["history_bytes"],
+            "actual_gist_tokens": selected_ratio_cost["history_gist_tokens"],
+            "actual_history_bytes": selected_ratio_cost["history_bytes"],
+            "actual_managed_history_tokens": selected_ratio_cost[
+                "managed_history_tokens"
+            ],
+            "actual_managed_history_bytes": selected_ratio_cost[
+                "managed_history_bytes"
+            ],
+            "actual_total_resident_kv_tokens": selected_ratio_cost[
+                "total_resident_kv_tokens"
+            ],
+            "actual_total_resident_kv_bytes": selected_ratio_cost[
+                "total_resident_kv_bytes"
+            ],
             "logical_sequence_tokens": measure.logical_sequence_tokens,
             "same_prefix_full_reference": full,
             "compression_ratio": compression_ratio,
@@ -1340,6 +1417,14 @@ class EventNativeS0Controller:
                 "history_raw_tokens": raw_history_tokens,
                 "history_total_tokens": history_tokens,
                 "history_bytes": history_bytes,
+                "managed_history_tokens": history_tokens,
+                "managed_history_bytes": history_bytes,
+                "managed_workspace_tokens": history_tokens,
+                "managed_workspace_bytes": history_bytes,
+                "total_resident_kv_tokens": costs["resident_kv_tokens"],
+                "total_resident_kv_bytes": (
+                    costs["resident_kv_tokens"] * self.kv_bytes_per_token
+                ),
                 "history_budget_bytes": history_cap,
                 "workspace_budget_bytes": workspace_cap,
                 "budget_mode": "recovery" if self.recovery_budget_mode else "initial",
@@ -1620,7 +1705,9 @@ class EventNativeS0Controller:
         if len(names) != len(set(names)):
             raise PolicyInputError("Failed-operation observations require unique tool names")
         tools_json = _canonical_json(tools)
-        store = EventStore.from_messages(session_id, messages)
+        store = EventStore.from_messages(
+            session_id, messages, benchmark=self.benchmark
+        )
         message_json = tuple(message.json_text for message in store.messages)
         return session_id, decision_key, store, tools, tools_json, message_json
 

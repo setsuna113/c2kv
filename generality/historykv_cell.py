@@ -29,10 +29,10 @@ ARM_OF = {
     ("h2o", "K2", "recovery_off_same_initial"): "gen_h2o_k2",
     ("h2o", "K0", "compression_full_budget"): "gen_h2o_b0",
     ("h2o", "K2", "compression_full_budget"): "gen_h2o_b2",
-    ("snapkv", "K0", "recovery_off_same_initial"): "gen_snapkv_k0",
-    ("snapkv", "K2", "recovery_off_same_initial"): "gen_snapkv_k2",
-    ("snapkv", "K0", "compression_full_budget"): "gen_snapkv_b0",
-    ("snapkv", "K2", "compression_full_budget"): "gen_snapkv_b2",
+    ("snapkv", "K0", "recovery_off_same_initial"): "gen_snapkv_persistent_k0",
+    ("snapkv", "K2", "recovery_off_same_initial"): "gen_snapkv_persistent_k2",
+    ("snapkv", "K0", "compression_full_budget"): "gen_snapkv_persistent_b0",
+    ("snapkv", "K2", "compression_full_budget"): "gen_snapkv_persistent_b2",
     ("pyramidkv", "K0", "recovery_off_same_initial"): "gen_pyramidkv_k0",
     ("pyramidkv", "K2", "recovery_off_same_initial"): "gen_pyramidkv_k2",
     ("pyramidkv", "K0", "compression_full_budget"): "gen_pyramidkv_b0",
@@ -73,7 +73,7 @@ def start_proxy(arm: str, upstream: str, port: int, out: Path,
     proc = subprocess.Popen(
         [sys.executable, "-m", "benchmarks.proxy",
          "--upstream", upstream, "--arm", arm, "--backend", "sglang",
-          "--history-kv-target-tokens", str(target_tokens),
+          # target tokens are passed via the chat hint, not as proxy flags
          "--port", str(port),
          "--request-log", str(out / "logs" / "proxy_requests.jsonl"),
          "--telemetry-log", str(out / "proxy_telemetry.jsonl")],
@@ -135,11 +135,65 @@ def stop(proc: subprocess.Popen | None) -> None:
         proc.kill()
 
 
+# infra signatures in benchmark.log: transient engine/proxy/harness trouble
+# that must be retried, never recorded as a model failure
+INFRA_MARKERS = (
+    "Connection refused", "502 Bad Gateway", "URLError", "ReadTimeout",
+    "RemoteDisconnected", "ConnectionReset", "timed out", "timeout",
+    "PREFIX_MISMATCH", "FileExistsError", "AdmissionRejected",
+    "HTTPConnectionPool", "Max retries exceeded",
+)
+
+
+def looks_infra(log_text: str) -> bool:
+    return any(marker in log_text for marker in INFRA_MARKERS)
+
+
+def cached_terminal(out: Path) -> dict | None:
+    """Return the terminal receipt for a task that must not be re-run."""
+    status = out / "status.json"
+    if not status.exists():
+        return None
+    try:
+        receipt = json.loads(status.read_text())
+    except json.JSONDecodeError:
+        return None
+    return receipt if receipt.get("status") == "failed" else None
+
+
+def write_receipt(out: Path, result: dict) -> None:
+    (out / "status.json").write_text(json.dumps(result, indent=2))
+
+
+def bfcl_row_healthy(project_root: Path, task_id: str) -> bool:
+    """True if the official result row for this task exists with no traceback."""
+    import glob
+    found = False
+    for path in glob.glob(str(project_root / "result" / "**" / "*.json"),
+                          recursive=True):
+        for line in Path(path).read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if row.get("id") != task_id:
+                continue
+            if row.get("traceback") is not None:
+                return False
+            found = True
+    return found
+
+
 def run_bfcl_task(cell: dict, task_id: str, proxy_port: int) -> dict:
     out = Path(cell["cell_dir"]) / "tasks" / task_id
     done = out / "done.json"
     if done.exists():
         return json.loads(done.read_text())
+    terminal = cached_terminal(out)
+    if terminal is not None:
+        return terminal  # recorded model failure: never retried, never zero-scored
     out.mkdir(parents=True, exist_ok=True)
     category = task_id.rsplit("_", 1)[0]
     if category not in ("multi_turn_base", "multi_turn_long_context"):
@@ -173,29 +227,28 @@ print('SUMMARY:' + json.dumps(summary))
             cwd=str(PAPER), env=env, stdout=log, stderr=subprocess.STDOUT,
             stdin=subprocess.DEVNULL,
         )
+    log_text = log_path.read_text(errors="ignore")
+    healthy = bfcl_row_healthy(project_root, task_id) if project_root.exists() else False
     result = {"task_id": task_id, "status": "completed" if rc == 0 else "failed",
               "returncode": rc, "wall_s": time.monotonic() - started}
-    if rc == 0:
-        # validate the official row: rows with a traceback (connection
-        # failures, timeouts) must not count as official zero scores
-        import glob
-        healthy = False
-        for path in glob.glob(str(project_root / "result" / "**" / "*.json"),
-                              recursive=True):
-            for line in Path(path).read_text(encoding="utf-8").splitlines():
-                if not line.strip():
-                    continue
-                row = json.loads(line)
-                if row.get("id") != task_id:
-                    continue
-                healthy = row.get("traceback") is None
-        if not healthy:
-            result["status"] = "failed_validation"
-            (out / "status.json").write_text(json.dumps(result, indent=2))
-            return result
+    if rc == 0 and healthy:
         (out / "done.json").write_text(json.dumps(result, indent=2))
-    else:
-        (out / "status.json").write_text(json.dumps(result, indent=2))
+        return result
+    if rc == 0:
+        # official row carries a traceback: connection failure mid-task, the
+        # measurement is not an official score — infra, retryable
+        result["status"] = "failed_validation"
+        write_receipt(out, result)
+        return result
+    if healthy:
+        # subprocess crashed after the official row was written (e.g. the
+        # single-task summary stdev bug): the row itself is valid
+        result["status"] = "completed"
+        result["summary_degraded"] = True
+        (out / "done.json").write_text(json.dumps(result, indent=2))
+        return result
+    result["status"] = "infra_error" if looks_infra(log_text) else "failed"
+    write_receipt(out, result)
     return result
 
 
@@ -204,7 +257,13 @@ def run_appworld_task(cell: dict, task_id: str, proxy_port: int) -> dict:
     done = out / "done.json"
     if done.exists():
         return json.loads(done.read_text())
+    terminal = cached_terminal(out)
+    if terminal is not None:
+        return terminal  # recorded model failure: never retried, never zero-scored
     out.mkdir(parents=True, exist_ok=True)
+    # the appworld harness copytree's its experiment scaffold into out/appworld
+    # and crashes with FileExistsError on any rerun unless it is cleared
+    shutil.rmtree(out / "appworld", ignore_errors=True)
     started = time.monotonic()
     script = f"""
 import sys, os
@@ -233,12 +292,15 @@ print('SUMMARY:' + json.dumps(summary, default=str))
             cwd=str(PAPER), env=env, stdout=log, stderr=subprocess.STDOUT,
             stdin=subprocess.DEVNULL,
         )
+    log_text = log_path.read_text(errors="ignore")
     result = {"task_id": task_id, "status": "completed" if rc == 0 else "failed",
               "returncode": rc, "wall_s": time.monotonic() - started}
     if rc == 0:
         (out / "done.json").write_text(json.dumps(result, indent=2))
     else:
-        (out / "status.json").write_text(json.dumps(result, indent=2))
+        if looks_infra(log_text):
+            result["status"] = "infra_error"
+        write_receipt(out, result)
     return result
 
 
@@ -279,10 +341,20 @@ def main(argv=None) -> int:
     finally:
         stop(proxy)
     completed = sum(1 for r in results if r["status"] == "completed")
+    terminal = [r["task_id"] for r in results if r["status"] == "failed"]
+    pending = [r["task_id"] for r in results
+               if r["status"] not in ("completed", "failed")]
+    # a cell is complete when every task ended in a terminal state: scored
+    # done.json (model failures are terminal receipts and stay counted here).
+    # infra failures (infra_error / failed_validation) keep it incomplete so
+    # the scheduler requeues the cell for another infra retry — they are never
+    # zero-scored and never silently dropped.
     (Path(cell["cell_dir"]) / "cell_status.json").write_text(json.dumps({
         "cell_id": cell["cell_id"], "arm": arm,
-        "status": "complete" if completed == len(results) and results else "incomplete",
-        "n_completed": completed, "n_total": len(results),
+        "status": "complete" if results and not pending else "incomplete",
+        "n_completed": completed, "n_terminal": len(terminal),
+        "terminal_tasks": terminal, "pending_infra": pending,
+        "n_total": len(results),
         "finished_at": time.time(),
     }, indent=2))
     return 0

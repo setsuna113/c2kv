@@ -55,7 +55,7 @@ REPAIR_PLACEMENTS = ("append_keep_ledger", "append_tail", "in_place")
 HISTORY_KV_METHODS = ("streamingllm", "h2o", "snapkv_persistent", "pyramidkv")
 HISTORY_KV_METHOD_ALIASES = {"snapkv": "snapkv_persistent", "pyramid": "pyramidkv"}
 # ``--runtime-history-kv-backend`` in the upstream runner.
-HISTORY_KV_BACKENDS = ("repair_extract", "physical_eviction")
+HISTORY_KV_BACKENDS = ("repair_extract", "physical_eviction", "reference_attention")
 HISTORY_KV_POOLINGS = ("avgpool", "maxpool")
 HISTORY_KV_DEFAULTS: Dict[str, Any] = {
     "backend": "repair_extract",
@@ -118,7 +118,7 @@ def history_kv_spec(arm: "Arm") -> Optional[Dict[str, Any]]:
     if not 0.0 <= float(spec["h2o_recent_fraction"]) <= 1.0:
         raise ValueError(
             f"arm {arm.name!r}: history_kv h2o_recent_fraction must be in [0, 1]")
-    if backend == "physical_eviction" and target is None:
+    if backend in {"physical_eviction", "reference_attention"} and target is None:
         # The physical path takes an ABSOLUTE budget: the scheduler reads
         # config["target_tokens"] only (scheduler.py
         # _select_history_kv_eviction_indices, mem_cache/history_kv_eviction.py
@@ -129,10 +129,10 @@ def history_kv_spec(arm: "Arm") -> Optional[Dict[str, Any]]:
             f"arm {arm.name!r}: history_kv backend 'physical_eviction' needs an "
             "absolute target_tokens (the server has no retention_ratio on that "
             "path and the proxy has no tokenizer)")
-    if spec["persistent_session"] and backend != "physical_eviction":
+    if spec["persistent_session"] and backend not in {"physical_eviction", "reference_attention"}:
         raise ValueError(
             f"arm {arm.name!r}: history_kv persistent_session requires backend "
-            "'physical_eviction' (upstream run_history_kv_baselines.sh)")
+            "'physical_eviction' or 'reference_attention'")
     return spec
 
 
@@ -631,7 +631,7 @@ for _method in ("h2o", "snapkv_persistent", "pyramidkv"):
             history_kv={
                 "method": _method,
                 "target_tokens": 1,
-                "backend": "physical_eviction",
+                "backend": "reference_attention" if _method == "pyramidkv" else "physical_eviction",
                 "persistent_session": True,
             },
             description=(

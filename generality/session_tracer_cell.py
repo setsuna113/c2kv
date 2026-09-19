@@ -1,4 +1,4 @@
-"""H2O/SnapKV + Tracer-History cell driver (runs on ascend03).
+"""H2O/SnapKV/PyramidKV + Tracer-History cell driver (runs on ascend03).
 
 Implements the same decision contract as the C2KV tracer path — draft ->
 fixed-weight T02 risk gate -> archive RRF retrieval -> bounded single-packet
@@ -35,6 +35,11 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+try:
+    from . import design
+except ImportError:  # Direct file launch on ascend03.
+    import design
+
 GENERATION_ROOT = Path("/home/liuyancheng/c2kv-generality-20260918")
 C1_DELIVERY = GENERATION_ROOT / "src" / "c1_delivery"
 RUNTIME = GENERATION_ROOT / "src" / "generality" / "controller_runtime"
@@ -56,6 +61,18 @@ from benchmarks.memory_runtime.recovery.evidence_units import render_units  # no
 
 def _opener():
     return urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+
+def _history_message_span(messages):
+    """Return completed history without splitting a trailing tool-result block."""
+    start = 0
+    while start < len(messages) and messages[start].get("role") == "system":
+        start += 1
+    end = max(0, len(messages) - 1)
+    if messages and messages[-1].get("role") == "tool":
+        while end > start and messages[end - 1].get("role") == "tool":
+            end -= 1
+    return start, max(start, end)
 
 
 class EngineSession:
@@ -112,18 +129,9 @@ class EngineSession:
             pass
         self.session_open = False
 
-    def reopen(self):
-        """Start a fresh session id. Used when a recovery admits evidence:
-        the regeneration becomes the NEW session's first request (no prefix
-        constraint), so the evidence-inserted view is committable verbatim;
-        every later request literally extends it (append-only holds)."""
-        self.close()
-        self.session_id = f"{self.session_id}r{int(time.time() * 1000) % 100000}"
+    def generate(self, messages, tools, *, max_tokens, target_tokens, history_span,
+                 recovery_append=False):
         self.ensure_session()
-
-    def generate(self, messages, tools, *, max_tokens, target_tokens, history_count):
-        self.ensure_session()
-        import json as _json
         self.last_request_digest = [
             {"role": m.get("role"), "tool_call_ids":
              [c.get("id") for c in (m.get("tool_calls") or [])],
@@ -132,17 +140,25 @@ class EngineSession:
             for m in messages]
         self.last_tools_count = len(tools or [])
         hint = {"persistent_history_session": {"enabled": True}}
-        if history_count > 1:
+        if recovery_append:
+            hint["persistent_history_session"]["recovery_append"] = {"enabled": True}
+        history_start, history_end = history_span
+        if history_end > history_start:
+            backend = (
+                "reference_attention"
+                if self.method == "pyramidkv"
+                else "physical_eviction"
+            )
             hint.update({
                 "full_equivalent_history_tokens": 0,
                 "active_history_kv_tokens": target_tokens,
                 "active_full_raw_tokens": 0, "active_c2kv_gist_tokens": 0,
                 "history_kv_method": self.method, "estimated": True,
-                "history_kv_backend": "physical_eviction",
+                "history_kv_backend": backend,
                 "history_kv_eviction": {
                     "method": self.method,
-                    "history_start_message_count": 1,
-                    "history_message_count": history_count,
+                    "history_start_message_count": history_start,
+                    "history_message_count": history_end,
                     "target_tokens": target_tokens,
                     "history_kv_recent_window": self.recent_window,
                     "history_kv_kernel_size": self.kernel,
@@ -159,6 +175,7 @@ class EngineSession:
             "return_hidden_states": True,
             "c2kv_return_full_hidden_states": True,
             "c2kv_kv_memory_hint": hint,
+            "chat_template_kwargs": {"enable_thinking": False},
         }
         if tools:
             body["tools"] = tools
@@ -188,8 +205,7 @@ class SessionTracerTask:
         b = cell["budget_tokens"]
         self.k_tokens, self.b_tokens = b["K"], b["B"]
         self.has_recovered = False
-        self.evidence_messages = []          # admitted packets, fixed anchor
-        self.evidence_anchor = None          # spine index after which they sit
+        self.evidence_insertions = []        # immutable (spine length, packet) pairs
         self.decisions = 0
         self.records = []
         self.prefill_contract = self.risk.artifact["feature_contract"]["prefill_contract"]
@@ -236,20 +252,61 @@ class SessionTracerTask:
                 return unit, {"retrieval": receipt}
         return None, {"retrieval": receipt, "reason": "top_unit_missing"}
 
-    def _admit(self, store, unit, messages):
+    def _active_history_tokens(self, report):
+        """Return the measured history amount used by the common B budget.
+
+        PyramidKV uses method-owned per-layer/head tensors.  Its engine report
+        converts their real token slots to full-model token equivalents; a
+        logical/canonical token count is not a valid substitute.
+        """
+        if not isinstance(report, dict):
+            return None
+        expected_backend = (
+            "reference_attention"
+            if self.engine.method == "pyramidkv"
+            else "physical_eviction"
+        )
+        if report.get("history_kv_backend") != expected_backend:
+            return None
+        if expected_backend == "reference_attention":
+            for key in ("reference_history_token_slots",
+                        "reference_history_resident_bytes"):
+                value = report.get(key)
+                if (not isinstance(value, int) or isinstance(value, bool)
+                        or value < 0):
+                    return None
+        active = report.get("active_history_kv_tokens")
+        if (not isinstance(active, int) or isinstance(active, bool) or active < 0):
+            return None
+        return active
+
+    def _admit(self, store, unit, messages, tools=None):
         rendered = render_units([unit], store, "quoted", "chronological")
-        base = len(native_ids(self.tokenizer, messages, generation=True))
-        with_packet = len(native_ids(self.tokenizer, [*messages, *rendered], generation=True))
+        base = len(native_ids(self.tokenizer, messages, tools=tools, generation=True))
+        with_packet = len(native_ids(
+            self.tokenizer, [*messages, *rendered], tools=tools, generation=True))
         packet_tokens = with_packet - base
-        current_active = int((self.last_kv_report or {}).get("active_history_kv_tokens") or 0)
-        total = current_active + packet_tokens
+        page_size = int(self.cell.get("page_size", design.NPU_PAGE_SIZE))
+        packet_resident = ((packet_tokens + page_size - 1) // page_size) * page_size
+        current_active = self._active_history_tokens(self.last_kv_report)
+        measured = current_active is not None
+        history_target = self.b_tokens - packet_resident
+        total = min(current_active, history_target) + packet_resident if measured else None
+        admitted = (measured and packet_tokens > 0 and
+                    packet_resident <= self.cell["budget_tokens"]["R"] and
+                    history_target > 0 and total <= self.b_tokens)
         receipt = {
-            "policy": "session-bounded-packet-v1",
+            "policy": "session-bounded-packet-v2",
             "packet_tokens": packet_tokens,
+            "packet_resident_tokens": packet_resident,
+            "page_size": page_size,
             "current_active_history_tokens": current_active,
             "total_after_admission": total,
             "b_tokens": self.b_tokens,
-            "status": "admitted" if total <= self.b_tokens and packet_tokens <= self.cell["budget_tokens"]["R"] else "admission_rejected",
+            "history_target_tokens": history_target,
+            "status": "admitted" if admitted else "admission_rejected",
+            "reason": None if admitted else (
+                "missing_measured_history" if not measured else "packet_budget_exceeded"),
         }
         return (rendered if receipt["status"] == "admitted" else None), receipt
 
@@ -290,24 +347,27 @@ class SessionTracerTask:
                 parts.append(f"<tool_call>\n{payload}\n</tool_call>")
             return {"role": "assistant", "content": "\n".join(p for p in parts if p)}
 
-        def canonical(body_messages, evidence):
-            """Canonical view: harness spine with admitted evidence FIXED
-            right after the user message of its recovery decision. The
-            position never moves, so every request literally extends the
-            previous one's rendered tokens (append-only session contract).
-            """
+        def canonical(body_messages):
+            """Keep every admitted packet at its original spine boundary."""
             spine = [normalize(m) for m in body_messages]
-            if self.evidence_anchor is None or not evidence:
-                return spine
-            i = min(self.evidence_anchor, len(spine) - 1)
-            return [*spine[:i + 1], *evidence, *spine[i + 1:]]
+            view = []
+            for count, message in enumerate(spine, 1):
+                view.append(message)
+                for anchor, packet in self.evidence_insertions:
+                    if anchor == count:
+                        view.extend(packet)
+            if any(anchor > len(spine) for anchor, _ in self.evidence_insertions):
+                raise ValueError("harness history cannot drop an admitted packet's anchor")
+            return view
 
-        def draft(phase, evidence=()):
-            view = canonical(messages, evidence)
+        def draft(phase, *, recovery_append=False, reserved_packet_tokens=0):
+            view = canonical(messages)
+            started = time.perf_counter()
             response = self.engine.generate(
                 view, tools, max_tokens=self.cell["caps"]["max_completion_tokens"],
                 target_tokens=target,
-                history_count=max(0, len(view) - 1))
+                history_span=_history_message_span(view),
+                recovery_append=recovery_append)
             feats = self._features(response)
             self.last_kv_report = feats["kv_report"]
             record["generation_trace"].append({
@@ -316,10 +376,32 @@ class SessionTracerTask:
                 "sglang_runtime": feats["runtime"],
                 "prefill_hidden_available": feats["prefill_hidden"] is not None,
                 "draft_logprobs_count": len(feats["draft_logprobs"]),
+                "request_wall_ms": (time.perf_counter() - started) * 1000,
+                "history_target_tokens": target,
+                "reserved_packet_tokens": reserved_packet_tokens,
             })
+            if recovery_append:
+                splice = feats["kv_report"].get(
+                    "persistent_session_generation_prefix_splice")
+                valid_splice = (
+                    isinstance(splice, dict)
+                    and splice.get("enabled") is True
+                    and splice.get("session_id") == self.engine.session_id
+                    and splice.get("full_history_reprefill_performed") is False
+                    and splice.get("scope") == "verified_generation_prefix_only"
+                    and isinstance(splice.get("generation_prefix_tokens"), int)
+                    and not isinstance(splice.get("generation_prefix_tokens"), bool)
+                    and splice["generation_prefix_tokens"] > 0
+                )
+                if not valid_splice:
+                    raise RuntimeError("engine did not confirm a resident-preserving recovery append")
+                retained = self._active_history_tokens(feats["kv_report"])
+                if (retained is None or
+                        retained + reserved_packet_tokens > self.b_tokens):
+                    raise RuntimeError("recovery has no valid measured common-budget receipt")
             return feats
 
-        feats = draft("draft", tuple(self.evidence_messages))
+        feats = draft("draft")
         parsed = parse_native_draft(feats["text"], call_id_prefix=f"d{self.decisions}")
         # NativeDraft.status: 'tool_calls' | 'text' (both parse) or 'malformed'
         parse_ok = parsed.status in ("tool_calls", "text")
@@ -340,28 +422,28 @@ class SessionTracerTask:
                                  for c in (parsed.tool_calls or [])],
             "last_action_observation": self._last_action_observation(messages),
         }
+        started = time.perf_counter()
         prediction = self.risk.predict_risk(context)
         record["risk"] = {"available": prediction.available, "score": prediction.score}
+        record["detector_wall_ms"] = (time.perf_counter() - started) * 1000
         recovery = {"status": "not_triggered"}
         if prediction.available and prediction.score is not None and prediction.score > self.threshold:
+            started = time.perf_counter()
             candidate, sel_meta = self._select_candidate(store, context)
+            record["retrieval_wall_ms"] = (time.perf_counter() - started) * 1000
             if candidate is not None:
-                plain_view = canonical(messages, ())
-                rendered, receipt = self._admit(store, candidate, plain_view)
+                plain_view = canonical(messages)
+                rendered, receipt = self._admit(store, candidate, plain_view, tools=tools)
                 recovery = {"status": "recover" if rendered else "admission_rejected",
                             "receipt": receipt, **sel_meta}
                 if rendered:
-                    self.evidence_messages.extend(rendered)
-                    # anchor: right after the trailing user message of THIS
-                    # decision (the evidence is presented with this query)
-                    self.evidence_anchor = len(messages) - 1
+                    self.evidence_insertions.append((len(messages), copy.deepcopy(rendered)))
                     self.has_recovered = True
-                    target = self.b_tokens
-                    # the regeneration view inserts evidence mid-sequence,
-                    # which can never extend the committed prefix: reopen the
-                    # session so it commits as a fresh first request
-                    self.engine.reopen()
-                    feats = draft("regeneration", tuple(self.evidence_messages))
+                    target = receipt["history_target_tokens"]
+                    # Only the previous generation header may be replaced;
+                    # serving preserves resident lossy KV and appends the packet.
+                    feats = draft("regeneration", recovery_append=True,
+                                  reserved_packet_tokens=receipt["packet_resident_tokens"])
                     parsed = parse_native_draft(feats["text"], call_id_prefix=f"r{self.decisions}")
             else:
                 recovery = {"status": "no_candidate", **sel_meta}
@@ -634,7 +716,7 @@ def main(argv=None) -> int:
         finally:
             for task in batch_tasks.values():
                 try:
-                    task.engine._post("/close_session", {"session_id": task.session_id})
+                    task.engine.close()
                 except Exception:
                     pass  # engine may have dropped it already
         (out / "done.json" if rc == 0 else out / "status.json").write_text(

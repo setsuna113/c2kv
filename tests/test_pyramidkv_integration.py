@@ -37,7 +37,7 @@ def test_absolute_budget_arms_are_registered_for_all_history_backends():
             arm = get_arm(f"gen_{method}_{suffix}")
             spec = history_kv_spec(arm)
             assert spec["method"] == method
-            assert spec["backend"] == "physical_eviction"
+            assert spec["backend"] == ("reference_attention" if method == "pyramidkv" else "physical_eviction")
             assert spec["persistent_session"] is True
             assert spec["target_tokens"] == 1  # launch override is explicit
             assert spec["retention_ratio"] is None
@@ -48,6 +48,8 @@ def test_session_tracer_does_not_alias_pyramidkv_to_snapkv():
     # free: constructing SessionTracerTask would load the NPU model.
     source = (ROOT / "generality" / "session_tracer_cell.py").read_text(encoding="utf-8")
     assert '"pyramidkv": "pyramidkv"' in source
+    assert 'if self.method == "pyramidkv"' in source
+    assert '"reference_attention"' in source
 
 
 def test_off_driver_uses_resolved_k_or_b_token_budget():
@@ -56,3 +58,9 @@ def test_off_driver_uses_resolved_k_or_b_token_budget():
     assert target_tokens_for_cell(base) == 768
     base["condition"] = "compression_full_budget"
     assert target_tokens_for_cell(base) == 2048
+
+
+def test_every_off_launcher_name_resolves_in_registry():
+    for (backend, _, _), arm_name in ARM_OF.items():
+        spec = history_kv_spec(get_arm(arm_name))
+        assert spec["method"] == ("snapkv_persistent" if backend == "snapkv" else backend)

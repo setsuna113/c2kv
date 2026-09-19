@@ -138,6 +138,18 @@ def metadata_after_admission(
         actual_raw_history_tokens=measure.raw_history_tokens,
         actual_gist_tokens=measure.per_ratio[str(ratio)]["history_gist_tokens"],
         actual_history_bytes=measure.per_ratio[str(ratio)]["history_bytes"],
+        actual_managed_history_tokens=measure.per_ratio[str(ratio)][
+            "managed_history_tokens"
+        ],
+        actual_managed_history_bytes=measure.per_ratio[str(ratio)][
+            "managed_history_bytes"
+        ],
+        actual_total_resident_kv_tokens=measure.per_ratio[str(ratio)][
+            "total_resident_kv_tokens"
+        ],
+        actual_total_resident_kv_bytes=measure.per_ratio[str(ratio)][
+            "total_resident_kv_bytes"
+        ],
         logical_sequence_tokens=measure.logical_sequence_tokens,
         per_ratio=copy.deepcopy(measure.per_ratio),
         raw_source_indices=list(measure.memory.raw_source_indices),
