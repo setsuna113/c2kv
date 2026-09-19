@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from paper.process_lifecycle import run_owned  # noqa: E402
 
 from adapters.base import RunContext, v1  # noqa: E402
 
@@ -151,7 +152,7 @@ def run_ts(base_url: str, out_dir: Path, test_mode: bool = True,
         "agent_role": agent, "user_role": user, "source": str(ts_dir),
         "command": cmd, "measurement": "runtime_scenario_request_action_v1",
     }, indent=2) + "\n", encoding="utf-8")
-    completed = subprocess.run(cmd, cwd=ts_dir, env=env)
+    completed = run_owned(cmd, cwd=ts_dir, env=env)
     if completed.returncode != 0:
         raise SystemExit(f"FATAL: tool_sandbox CLI exited {completed.returncode}")
     summary = collect(out_dir)

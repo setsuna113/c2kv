@@ -741,7 +741,8 @@ def functional_checks(method: str, detector: str, telemetry: Mapping[str, Any],
     }
 
 
-def run_task(args: argparse.Namespace, task: str, controller_path: Path) -> tuple[dict, dict]:
+def run_task(args: argparse.Namespace, task: str, controller_path: Path,
+             *, termination_guard=None) -> tuple[dict, dict]:
     server_command, worker_command = commands_for_task(args, task, controller_path)
     task_out = args.out / "task_shards" / task
     task_out.mkdir(parents=True)
@@ -780,10 +781,14 @@ def run_task(args: argparse.Namespace, task: str, controller_path: Path) -> tupl
             summary = json.loads(summary_path.read_text(encoding="utf-8"))
             _single_official_row(args.benchmark, summary)
     finally:
-        if worker is not None:
-            runner._stop_bfcl(worker, task_out / args.benchmark / "running.json")
-        if process is not None:
-            runner._stop_server(process, task_out / "server.supervisor.json")
+        from contextlib import nullcontext
+        with termination_guard() if termination_guard is not None else nullcontext():
+            try:
+                if worker is not None:
+                    runner._stop_bfcl(worker, task_out / args.benchmark / "running.json")
+            finally:
+                if process is not None:
+                    runner._stop_server(process, task_out / "server.supervisor.json")
     final_path = task_out / "server" / "final.json"
     final = json.loads(final_path.read_text(encoding="utf-8"))
     if (final.get("cost_summary_error") or final.get("status") == "failed"

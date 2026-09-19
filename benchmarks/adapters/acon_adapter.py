@@ -60,6 +60,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from paper.process_lifecycle import run_owned  # noqa: E402
 import proxy  # noqa: E402  (conversation_id only; import has no side effects)
 import reqlog  # noqa: E402
 from metrics import aggregate  # noqa: E402
@@ -343,7 +344,7 @@ def run_qa(base_url: str, out_dir: Path, acon_dir: Optional[Path] = None,
         id_list_file.write_text("\n".join(task_ids) + "\n", encoding="utf-8")
     cmd = qa_command(python, model, tag, split, max_iter, limit=limit,
                      id_list_file=id_list_file)
-    subprocess.run(cmd, cwd=cwd, env=runner_env(base_url), check=True)
+    run_owned(cmd, cwd=cwd, env=runner_env(base_url), check=True)
     return collect_qa(qa_run_dir(acon_dir, model, tag, split),
                       expected=qa_expected(acon_dir, split, limit, task_ids),
                       request_log=request_log)
@@ -437,7 +438,7 @@ def _appworld_cli(python: str) -> str:
 def appworld_split_size(python: str, split: str, cwd: Path, env: Dict[str, str]) -> int:
     code = ("import sys; from appworld import load_task_ids; "
             "print(len(load_task_ids(sys.argv[1])))")
-    proc = subprocess.run([python, "-c", code, split], cwd=cwd, env=env,
+    proc = run_owned([python, "-c", code, split], cwd=cwd, env=env,
                           capture_output=True, text=True)
     if proc.returncode != 0 or not proc.stdout.strip().isdigit():
         raise SystemExit(f"FATAL: cannot size AppWorld split {split!r} via "
@@ -508,14 +509,14 @@ def run_appworld(base_url: str, out_dir: Path, acon_dir: Optional[Path] = None,
         **appworld_runner_env(base_url, telemetry_path, run_dir, acon_dir),
         "APPWORLD_ROOT": str(cwd),
     }
-    subprocess.run(appworld_command(python, model, tag, split, max_iter, task_ids),
+    run_owned(appworld_command(python, model, tag, split, max_iter, task_ids),
                    cwd=cwd, env=env, check=True)
     selected = json.loads((out_dir / "selected_tasks.json").read_text(encoding="utf-8"))
     validate_appworld_telemetry(telemetry_path, selected["task_ids"])
     # official scorer (state-based unit tests); the runner's own success flag
     # is not a score
     scorer_env = {**runner_env(base_url), "APPWORLD_ROOT": str(cwd)}
-    subprocess.run(appworld_evaluate_command(_appworld_cli(python), model, tag, split),
+    run_owned(appworld_evaluate_command(_appworld_cli(python), model, tag, split),
                    cwd=cwd, env=scorer_env, check=True)
     expected = (len(task_ids) if task_ids else
                 appworld_split_size(python, split, cwd, scorer_env))

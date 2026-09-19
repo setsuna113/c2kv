@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import socket
 import subprocess
 import sys
@@ -32,6 +33,7 @@ from adapters.base import RunContext  # noqa: E402
 from checkpoint_profile import ProfileError, resolve_checkpoint_profile  # noqa: E402
 from capabilities import run_preflight  # noqa: E402
 from arms import get_arm  # noqa: E402
+from paper.process_lifecycle import stop_owned_group, unwind_on_termination  # noqa: E402
 
 # --benchmark value -> adapter module.  Two names share acon_adapter (the
 # module dispatches on ctx.options["benchmark"]); add_arguments is called
@@ -63,6 +65,9 @@ def _assert_proxy_port_available(port: int) -> None:
 
 def _stop_process(proc, timeout: float = 20.0) -> None:
     """Bounded child teardown: terminate, then kill if it does not exit."""
+    if isinstance(getattr(proc, "pid", None), int):
+        stop_owned_group(proc, timeout=timeout)
+        return
     if proc.poll() is not None:
         return
     proc.terminate()
@@ -111,6 +116,7 @@ def start_proxy(upstream: str, arm: str, port: int, log_dir: Path,
             command,
             stdout=out_handle,
             stderr=subprocess.STDOUT,
+            start_new_session=os.name == "posix",
         )
     finally:
         out_handle.close()
@@ -121,29 +127,32 @@ def start_proxy(upstream: str, arm: str, port: int, log_dir: Path,
     # gateway check)
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
-    for _ in range(100):
-        returncode = proc.poll()
-        if returncode is not None:
-            raise SystemExit(
-                f"proxy process exited with code {returncode} before readiness "
-                f"on port {port}"
-            )
-        try:
-            with opener.open(
-                f"http://127.0.0.1:{port}/health", timeout=2
-            ):
-                pass
+    try:
+        for _ in range(100):
             returncode = proc.poll()
             if returncode is not None:
                 raise SystemExit(
-                    f"proxy process exited with code {returncode} during readiness "
+                    f"proxy process exited with code {returncode} before readiness "
                     f"on port {port}"
                 )
-            return proc, log_path
-        except OSError:
-            time.sleep(0.2)
-    _stop_process(proc)
-    raise SystemExit(f"proxy did not come up on port {port}")
+            try:
+                with opener.open(
+                    f"http://127.0.0.1:{port}/health", timeout=2
+                ):
+                    pass
+                returncode = proc.poll()
+                if returncode is not None:
+                    raise SystemExit(
+                        f"proxy process exited with code {returncode} during readiness "
+                        f"on port {port}"
+                    )
+                return proc, log_path
+            except OSError:
+                time.sleep(0.2)
+        raise SystemExit(f"proxy did not come up on port {port}")
+    except BaseException:
+        _stop_process(proc)
+        raise
 
 
 def _git_short_sha() -> str:
@@ -298,6 +307,7 @@ def resolve_run_profile(args: argparse.Namespace) -> dict:
     return profile
 
 
+@unwind_on_termination
 def main(argv=None):
     parser = build_parser()
     args = parser.parse_args(argv)

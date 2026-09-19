@@ -46,7 +46,7 @@ def _write_jsonl(path, rows):
 def test_task_ids_uses_official_appworld_loader_and_configured_root(tmp_path):
     config = _config(tmp_path)
     completed = SimpleNamespace(stdout=json.dumps(["task-a", "task-b"]))
-    with mock.patch.object(bridge.subprocess, "run", return_value=completed) as run:
+    with mock.patch.object(bridge, "run_owned", return_value=completed) as run:
         assert bridge.task_ids(config) == ("task-a", "task-b")
     command = run.call_args.args[0]
     kwargs = run.call_args.kwargs

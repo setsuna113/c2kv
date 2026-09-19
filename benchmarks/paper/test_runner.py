@@ -221,7 +221,7 @@ class PaperMatrixTest(unittest.TestCase):
             def run(cmd, **_kwargs):
                 seen["run"] = cmd
 
-            with mock.patch.object(runner.subprocess, "Popen", side_effect=popen),                     mock.patch.object(runner.subprocess, "run", side_effect=run),                     mock.patch.object(runner, "wait_server"),                     mock.patch.object(runner, "cleanup_cell_processes"),                     mock.patch("socket.socket") as socket_type:
+            with mock.patch.object(runner.subprocess, "Popen", side_effect=popen),                     mock.patch.object(runner, "run_owned", side_effect=run),                     mock.patch.object(runner, "wait_server"),                     mock.patch.object(runner, "cleanup_cell_processes"),                     mock.patch("socket.socket") as socket_type:
                 socket_type.return_value.__enter__.return_value.connect_ex.return_value = 1
                 execute(self.config, [cell], output, output / "sglang",
                         ["closed_loop"], set(), port_offset=10)
@@ -304,7 +304,7 @@ class PaperMatrixTest(unittest.TestCase):
             with mock.patch.object(
                     runner.subprocess, "Popen",
                     side_effect=lambda *_args, **_kwargs: mock.Mock(pid=123)) as popen, \
-                    mock.patch.object(runner.subprocess, "run"), \
+                    mock.patch.object(runner, "run_owned"), \
                     mock.patch.object(runner, "wait_server"), \
                     mock.patch.object(runner, "cleanup_cell_processes"), \
                     mock.patch("socket.socket") as socket_type:
@@ -488,7 +488,7 @@ class PaperMatrixTest(unittest.TestCase):
 
             with mock.patch.dict(os.environ, {"CUDA_HOME": "/custom/cuda"}), \
                     mock.patch.object(runner.subprocess, "Popen", side_effect=popen), \
-                    mock.patch.object(runner.subprocess, "run"), \
+                    mock.patch.object(runner, "run_owned"), \
                     mock.patch.object(runner, "wait_server"), \
                     mock.patch.object(runner, "cleanup_cell_processes", side_effect=cleanup), \
                     mock.patch("socket.socket") as socket_type:
@@ -503,7 +503,7 @@ class PaperMatrixTest(unittest.TestCase):
             complete.unlink()
             (complete.parent / "started.json").unlink()
             with mock.patch.object(runner.subprocess, "Popen", side_effect=popen), \
-                    mock.patch.object(runner.subprocess, "run"), \
+                    mock.patch.object(runner, "run_owned"), \
                     mock.patch.object(runner, "wait_server"), \
                     mock.patch.object(runner, "cleanup_cell_processes",
                                       side_effect=RuntimeError("cleanup failed")), \

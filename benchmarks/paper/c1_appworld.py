@@ -20,6 +20,7 @@ from types import ModuleType
 from typing import Any, Mapping, Sequence
 
 from benchmarks.adapters import acon_adapter as acon
+from .process_lifecycle import run_owned
 
 
 BENCHMARK = "acon_appworld"
@@ -81,7 +82,7 @@ def task_ids(config: Mapping[str, Any]) -> tuple[str, ...]:
         "import json,sys; from appworld import load_task_ids; "
         "print(json.dumps(load_task_ids(sys.argv[1])))"
     )
-    process = subprocess.run(
+    process = run_owned(
         [python, "-c", code, split], cwd=cwd, env=_source_environment(config),
         check=True, capture_output=True, text=True,
     )
@@ -406,13 +407,13 @@ def _run_official_harness(
         "APPWORLD_ROOT": str(cwd),
     }
     timeout = float(config.get("c1", {}).get("task_timeout", 10800))
-    subprocess.run(
+    run_owned(
         acon.appworld_command(python, model, tag, split, max_iter, [task_id]),
         cwd=cwd, env=env, check=True, timeout=timeout,
     )
     acon.validate_appworld_telemetry(telemetry_path, [task_id])
     scorer_env = {**acon.runner_env(origin), "APPWORLD_ROOT": str(cwd)}
-    subprocess.run(
+    run_owned(
         acon.appworld_evaluate_command(acon._appworld_cli(python), model, tag, split),
         cwd=cwd, env=scorer_env, check=True, timeout=timeout,
     )

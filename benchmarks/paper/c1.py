@@ -23,6 +23,7 @@ import urllib.error
 from benchmarks.measurement.telemetry import append_jsonl, canonical_sha256, read_jsonl
 from benchmarks.measurement.replay import _paper_measurement
 from .candidate_matrix import ARM_TO_VARIANT
+from .process_lifecycle import defer_termination, unwind_on_termination
 
 ARMS = {"c2kv_c1_t02_r8": 8, "c2kv_c1_t02_r4": 4}   # final system and its ratio-4 ablation
 ARMS["c2kv_native_r4"] = 4
@@ -195,7 +196,8 @@ def run_closed_loop(config, benchmark, directory, requested=None):
                     from .c1_appworld import run_task
                     receipt, metrics = run_task(config, task, native, delivery, controller_path)
                 else:
-                    receipt, metrics = delivery.run_task(args, task, controller_path)
+                    receipt, metrics = delivery.run_task(
+                        args, task, controller_path, termination_guard=defer_termination)
             except (RuntimeError, subprocess.CalledProcessError) as error:
                 failure = controller_step_failure(task_root)
                 if failure is None:
@@ -234,8 +236,23 @@ def run_closed_loop(config, benchmark, directory, requested=None):
 # harness limit (the controller process ran out of GPU memory next to the
 # server); capacity_infeasible is the method's own admission decision (mandatory
 # raw input plus the minimum whole-event gist exceed its declared budget).
-TOLERATED_STEP_ERRORS = {"OutOfMemoryError": ("harness_failure", "cuda_oom"),
-                         "CapacityInfeasible": ("method_failure", "capacity_infeasible")}
+TOLERATED_STEP_ERRORS = {"OutOfMemoryError": ("harness_failure", "cuda_oom")}
+
+
+def _capacity_session_id(task_root):
+    """Bind a typed capacity failure to this task's per-task native server."""
+    try:
+        ready = json.loads((task_root / "server" / "ready.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if (not isinstance(ready, dict)
+            or ready.get("schema") != "a-event-native-server-v1"
+            or ready.get("status") != "ready"
+            or ready.get("allowed_task_ids") != [task_root.name]
+            or not isinstance(ready.get("benchmark"), str)
+            or not ready["benchmark"]):
+        return None
+    return f"{ready['benchmark']}/{task_root.name}/attempt-0"
 
 
 def controller_step_failure(task_root):
@@ -243,9 +260,19 @@ def controller_step_failure(task_root):
     steps = task_root / "server" / "steps.jsonl"
     if not steps.is_file():
         return None
+    capacity_session_id = _capacity_session_id(task_root)
     for row in read_jsonl(steps):
         error = row.get("error")
         text = json.dumps(error) if isinstance(error, dict) else str(error or "")
+        if (capacity_session_id is not None
+                and row.get("schema") == "a-event-native-exact-step-v1"
+                and row.get("status") == "failed"
+                and row.get("session_id") == capacity_session_id
+                and row.get("failure_kind") == "method_failure"
+                and row.get("failure_code") == "c2kv_capacity_infeasible"
+                and isinstance(error, dict)
+                and error.get("type") == "CapacityInfeasible"):
+            return "method_failure", "capacity_infeasible", text[:2000]
         for marker, (status, kind) in TOLERATED_STEP_ERRORS.items():
             if marker in text:
                 return status, kind, text[:2000]
@@ -427,6 +454,7 @@ def run_common_prefix(config, benchmark, directory, prefix_path):
     return native
 
 
+@unwind_on_termination
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, required=True)

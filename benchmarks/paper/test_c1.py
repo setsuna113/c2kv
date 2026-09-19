@@ -1,7 +1,10 @@
 import copy
+import io
 import json
 from pathlib import Path
 import tempfile
+from types import SimpleNamespace
+import urllib.error
 
 import pytest
 
@@ -10,6 +13,7 @@ from benchmarks.paper import c1 as paper_c1
 from benchmarks.paper.c1 import (ARM, controller_oom_message, controller_step_failure, replay_task_id,
                                  selected_tasks, select_arm, summarize_scores)
 from benchmarks.paper.runner import DEFAULT_CONFIG, prepare, server_command
+from benchmarks.measurement.telemetry import canonical_sha256, read_jsonl
 
 
 def test_native_arm_requires_real_controller_and_keeps_bare_c2kv():
@@ -124,12 +128,28 @@ def test_controller_oom_is_a_scored_zero_harness_failure(tmp_path):
     assert summary["n_method_failures"] == 0
 
 
+def capacity_evidence(shard, *, session_task=None):
+    task = shard.name
+    server = shard / "server"
+    server.mkdir(parents=True)
+    (server / "ready.json").write_text(json.dumps({
+        "schema": "a-event-native-server-v1", "status": "ready", "benchmark": "bfcl",
+        "allowed_task_ids": [task],
+    }))
+    row = {
+        "schema": "a-event-native-exact-step-v1", "status": "failed",
+        "session_id": f"bfcl/{session_task or task}/attempt-0",
+        "failure_kind": "method_failure", "failure_code": "c2kv_capacity_infeasible",
+        "error": {"type": "CapacityInfeasible", "message":
+                  "Native S0 mandatory raw input and minimum whole-event gist cannot fit"},
+    }
+    (server / "steps.jsonl").write_text(json.dumps(row) + "\n")
+    return row
+
+
 def test_capacity_infeasible_is_a_scored_zero_method_failure(tmp_path):
     shard = tmp_path / "task_shards" / "multi_turn_long_context_101"
-    (shard / "server").mkdir(parents=True)
-    rows = [{"status": "failed", "error": "{'type': 'CapacityInfeasible', 'message': "
-                                          "\"Native S0 mandatory raw input and minimum whole-event gist cannot fit\"}"}]
-    (shard / "server" / "steps.jsonl").write_text("".join(json.dumps(row) + "\n" for row in rows))
+    capacity_evidence(shard)
     status, kind, message = controller_step_failure(shard)
     assert (status, kind) == ("method_failure", "capacity_infeasible")
     assert controller_oom_message(shard) is None
@@ -140,6 +160,77 @@ def test_capacity_infeasible_is_a_scored_zero_method_failure(tmp_path):
     assert summary["semantic_score"] == 0.0 and summary["n_method_failures"] == 1
     assert summary["method_failure_task_ids"] == ["multi_turn_long_context_101"]
     assert summary["n_harness_failures"] == 0
+
+
+@pytest.mark.parametrize("change", ["transport", "transport_with_stale_code", "legacy_text",
+                                    "missing_code", "other_session", "other_ready_task", "runner_failed"])
+def test_capacity_marker_needs_typed_task_bound_failure(tmp_path, change):
+    shard = tmp_path / "task_shards" / "multi_turn_base_164"
+    row = capacity_evidence(shard)
+    ready_path = shard / "server" / "ready.json"
+    if change in {"transport", "transport_with_stale_code"}:
+        if change == "transport":
+            row.pop("failure_kind")
+            row.pop("failure_code")
+        row["error"] = {"type": "SGLangTransportError", "message":
+                        "SGLang native_generate returned HTTP 502: upstream said CapacityInfeasible"}
+    elif change == "legacy_text":
+        row["error"] = "{'type': 'CapacityInfeasible', 'message': 'cannot fit'}"
+    elif change == "missing_code":
+        row.pop("failure_code")
+    elif change == "other_session":
+        row["session_id"] = "bfcl/multi_turn_base_165/attempt-0"
+    elif change == "other_ready_task":
+        ready = json.loads(ready_path.read_text())
+        ready["allowed_task_ids"] = ["multi_turn_base_165"]
+        ready_path.write_text(json.dumps(ready))
+    else:
+        row["failure_kind"] = "runner_failed"
+    (shard / "server" / "steps.jsonl").write_text(json.dumps(row) + "\n")
+    assert controller_step_failure(shard) is None
+
+
+@pytest.mark.parametrize("session_task", ["multi_turn_base_164", "multi_turn_base_165"])
+def test_prefix_replay_only_tolerates_capacity_for_its_task(tmp_path, monkeypatch, session_task):
+    task = "multi_turn_base_164"
+    payload = {"messages": [{"role": "user", "content": "fixture"}],
+               "c2kv_measurement_session_id": task}
+    prefix = {"event_type": "recorded_prefix", "source_arm": "full",
+              "conversation_id": "fixture", "prefix_id": "prefix-1",
+              "replay_payload": payload, "canonical_sha256": canonical_sha256(payload)}
+    prefix_path = tmp_path / "prefix.jsonl"
+    prefix_path.write_text(json.dumps(prefix) + "\n")
+    native = tmp_path / "run" / "native"
+    shard = native / "task_shards" / task
+    capacity_evidence(shard, session_task=session_task)
+    stopped = []
+    delivery = SimpleNamespace(
+        commands_for_task=lambda *_args: (["python", "--model-name", "fixture"], []),
+        runner=SimpleNamespace(_stop_server=lambda *_args: stopped.append(True)),
+    )
+    monkeypatch.setattr(paper_c1, "load_delivery", lambda: delivery)
+    monkeypatch.setattr(paper_c1, "prepare_native", lambda *_args: (native, object(), tmp_path / "controller.json"))
+    monkeypatch.setattr(paper_c1, "_controller_process", lambda *_args: (object(), io.StringIO(), shard))
+
+    class FailingOpener:
+        def open(self, *_args, **_kwargs):
+            raise urllib.error.HTTPError("fixture", 422, "capacity", {}, io.BytesIO(b"capacity"))
+
+    monkeypatch.setattr(paper_c1, "OPENER", FailingOpener())
+    output = tmp_path / "run"
+    if session_task != task:
+        with pytest.raises(RuntimeError, match="C1 replay HTTP 422"):
+            paper_c1.run_common_prefix({"proxy_port": 49001, "c1": {"task_timeout": 1}},
+                                       "bfcl_base", output, prefix_path)
+        assert not (output / "prefix_replay.jsonl").exists()
+    else:
+        assert paper_c1.run_common_prefix({"proxy_port": 49001, "c1": {"task_timeout": 1}},
+                                          "bfcl_base", output, prefix_path) == native
+        rows = list(read_jsonl(output / "prefix_replay.jsonl"))
+        assert len(rows) == 1
+        assert rows[0]["failure"]["kind"] == "capacity_infeasible"
+        assert rows[0]["native_task_id"] == task
+    assert stopped == [True]
 
 
 def test_ratio4_ablation_binds_arm_and_ratio_for_summaries():

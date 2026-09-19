@@ -58,7 +58,7 @@ def test_toolsandbox_uses_official_resolver_and_checks_configured_subset(tmp_pat
         observed.update(command=command, kwargs=kwargs)
         return SimpleNamespace(stdout=json.dumps(["wifi_off", "get_wifi"]))
 
-    monkeypatch.setattr(native_extra.subprocess, "run", resolve)
+    monkeypatch.setattr(native_extra, "run_owned", resolve)
     assert native_extra.selected_tasks(config, "toolsandbox") == ["wifi_off", "get_wifi"]
     assert "resolve_scenarios" in observed["command"][2]
     assert observed["kwargs"]["cwd"] == Path(config["toolsandbox_dir"])

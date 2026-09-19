@@ -11,6 +11,7 @@ import time
 from collections.abc import Mapping
 
 from . import c1_appworld
+from .process_lifecycle import run_owned
 
 
 BENCHMARKS = {"acebench_agent": ("acebench", "acebench-text-actions-v1"),
@@ -58,7 +59,7 @@ def _toolsandbox_tasks(config):
     )
     env = os.environ.copy()
     env["PYTHONPATH"] = os.pathsep.join(filter(None, (str(source), env.get("PYTHONPATH"))))
-    completed = subprocess.run(
+    completed = run_owned(
         [config.get("toolsandbox_python", config["bench_python"]), "-c", script],
         cwd=source, env=env, check=True, capture_output=True, text=True,
     )
