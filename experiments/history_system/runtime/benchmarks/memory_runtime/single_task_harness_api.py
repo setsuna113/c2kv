@@ -100,15 +100,20 @@ class SingleTaskHarnessAPI(EventNativeAPI):
             self.benchmark != "acebench" or not isinstance(client_context, Mapping)
         ):
             raise EventNativeAPIError(400, "client_context_unsupported", "Task identity is server-owned")
-        measurement_task_id = payload.get("c2kv_measurement_session_id")
         server_task_id = next(iter(self.allowed_task_ids))
-        if measurement_task_id is not None and (
-            self.benchmark != "acon_appworld" or measurement_task_id != server_task_id
-        ):
-            raise EventNativeAPIError(
-                409, "task_identity_mismatch",
-                "Harness measurement task identity differs from the frozen server task",
-            )
+        measurement_task_id = None
+        if "c2kv_measurement_session_id" in payload:
+            measurement_task_id = payload["c2kv_measurement_session_id"]
+            if type(measurement_task_id) is not str or not measurement_task_id:
+                raise EventNativeAPIError(
+                    400, "invalid_measurement_session_id",
+                    "Harness measurement task identity must be a nonempty string",
+                )
+            if self.benchmark != "acon_appworld" or measurement_task_id != server_task_id:
+                raise EventNativeAPIError(
+                    409, "task_identity_mismatch",
+                    "Harness measurement task identity differs from the frozen server task",
+                )
         seed = payload.get("seed", 0)
         # tau2's orchestrator supplies a task seed through LLMConfig.set_seed.
         # Greedy generation stays bound to the server seed; retain the client value.
