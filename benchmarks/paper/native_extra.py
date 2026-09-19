@@ -204,8 +204,12 @@ def selected_tasks(config, benchmark, requested=None):
     return available
 
 
-def replay_payload(payload, task, step):
-    """Bind a recorded ACE prefix only when it carries real source receipts."""
+def replay_payload(payload, task, step, *, tool_memory=False):
+    """Bind a recorded ACE prefix only when it carries real source receipts.
+
+    Full records ``c2kv_tool_spans_v1`` for tool-context replays; a raw-tool
+    native server rejects that field, so it is forwarded only with tool memory.
+    """
     _task_id(task)
     if type(step) is not int or step < 0 or not isinstance(payload, Mapping):
         raise ValueError("ACEBench replay requires one nonnegative step and request object")
@@ -227,6 +231,8 @@ def replay_payload(payload, task, step):
     if result.get("stream") is False:
         result.pop("stream")
     result.pop("c2kv_measurement_session_id", None)
+    if not tool_memory:
+        result.pop("c2kv_tool_spans_v1", None)
     result["store"] = False
     result["c2kv_eval_context"] = {
         "benchmark": "acebench", "task_id": task,

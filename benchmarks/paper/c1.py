@@ -452,7 +452,8 @@ def run_common_prefix(config, benchmark, directory, prefix_path):
                     }
                 elif benchmark == "acebench_agent":
                     from .native_extra import replay_payload
-                    payload = replay_payload(payload, task, step)
+                    payload = replay_payload(payload, task, step,
+                                             tool_memory=bool(config.get("tool_memory")))
                 if payload.get("messages") != row["replay_payload"].get("messages"):
                     raise ValueError("Native replay changed the recorded Full message prefix")
                 sampling_receipt = replay_sampling_receipt(row["replay_payload"], payload)
