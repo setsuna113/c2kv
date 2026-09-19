@@ -600,10 +600,39 @@ def _child_command(args):
 def _hard_stop_owned_child(process):
     if process.poll() is None:
         if os.name == 'posix':
-            os.killpg(process.pid, signal.SIGKILL)
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
         else:
             process.kill()
     return process.wait(timeout=5)
+
+
+def _graceful_stop_owned_child(process):
+    if os.name == 'posix':
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+    elif process.poll() is None:
+        process.terminate()
+    try:
+        returncode = process.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        return _hard_stop_owned_child(process), True
+    # The session may outlive its leader if it spawned descendants.
+    if os.name == 'posix':
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    return returncode, False
+
+
+class _SupervisorInterrupted(BaseException):
+    def __init__(self, signum):
+        self.signum = signum
 
 
 def _supervise(args, *, command=None):
@@ -637,6 +666,15 @@ def _supervise(args, *, command=None):
     process = None
     status = 'failed'
     caught = None
+    old_handlers = {}
+    interrupted_signal = None
+
+    def request_interrupt(signum, _frame):
+        nonlocal interrupted_signal
+        if interrupted_signal is None and status != 'hard_wall_cutoff':
+            interrupted_signal = signum
+            raise _SupervisorInterrupted(signum)
+
     try:
         root = Path(__file__).resolve().parents[2]
         environment = os.environ.copy()
@@ -657,6 +695,8 @@ def _supervise(args, *, command=None):
                 'process_action': 'not_started',
             }
         else:
+            for signum in (signal.SIGINT, signal.SIGTERM):
+                old_handlers[signum] = signal.signal(signum, request_interrupt)
             process = subprocess.Popen(
                 child_command,
                 cwd=root,
@@ -690,23 +730,34 @@ def _supervise(args, *, command=None):
             else:
                 status = 'completed' if returncode == 0 else 'failed'
             receipt['child_returncode'] = returncode
+    except _SupervisorInterrupted as error:
+        status = 'interrupted'
+        receipt['interrupt_signal'] = signal.Signals(error.signum).name
     except BaseException as error:
         caught = error
         receipt['error'] = {'type': type(error).__name__, 'message': str(error)}
     finally:
-        if process is not None and process.poll() is None:
-            receipt['child_returncode'] = _hard_stop_owned_child(process)
-        if status == 'hard_wall_cutoff' and out.exists():
-            try:
-                receipt['cost_summary'] = _saved_cost_summary(out)
-            except Exception as error:
-                receipt['cost_summary_error'] = {'type': type(error).__name__, 'message': str(error)}
-        receipt.update(
-            status=status,
-            wall_seconds=time.monotonic() - started,
-            wall_seconds_final=True,
-        )
-        save_json(receipt_path, receipt)
+        try:
+            if status == 'interrupted' and process is not None:
+                returncode, forced = _graceful_stop_owned_child(process)
+                receipt['child_returncode'] = returncode
+                receipt['interrupt_forced_kill'] = forced
+            elif process is not None and process.poll() is None:
+                receipt['child_returncode'] = _hard_stop_owned_child(process)
+            if status == 'hard_wall_cutoff' and out.exists():
+                try:
+                    receipt['cost_summary'] = _saved_cost_summary(out)
+                except Exception as error:
+                    receipt['cost_summary_error'] = {'type': type(error).__name__, 'message': str(error)}
+            receipt.update(
+                status=status,
+                wall_seconds=time.monotonic() - started,
+                wall_seconds_final=True,
+            )
+            save_json(receipt_path, receipt)
+        finally:
+            for signum, previous in old_handlers.items():
+                signal.signal(signum, previous)
     if caught is not None:
         raise caught
     return receipt
