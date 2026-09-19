@@ -55,6 +55,7 @@ class C1T02DeliveryTest(unittest.TestCase):
         *,
         detector: str = "t02_risk",
         selector_artifact: Path | None = None,
+        embedding_batch_size: int = 16,
     ) -> argparse.Namespace:
         return argparse.Namespace(
             method="proposed",
@@ -64,6 +65,7 @@ class C1T02DeliveryTest(unittest.TestCase):
             checkpoint=self.checkpoint,
             embedding_model=self.embedding,
             embedding_device="cpu",
+            embedding_batch_size=embedding_batch_size,
         )
 
     def selected_config(self) -> dict:
@@ -119,6 +121,7 @@ class C1T02DeliveryTest(unittest.TestCase):
             ]
         )
         self.assertEqual(parsed.detector, "t02_risk")
+        self.assertEqual(parsed.embedding_batch_size, 16)
         self.assertEqual(
             hashlib.sha256(BUNDLED_ARTIFACT.read_bytes()).hexdigest(),
             BUNDLED_ARTIFACT_FILE_SHA256,
@@ -136,8 +139,32 @@ class C1T02DeliveryTest(unittest.TestCase):
             profile["selector_artifact_sha256"], BUNDLED_ARTIFACT_FILE_SHA256
         )
         self.assertEqual(profile["selector_threshold"], 0.5)
+        self.assertEqual(controller["gp_experiments"]["local_models"]["embedding"]["batch_size"], 16)
         self.assertEqual(profile["selector_artifact_binding"]["status"], "fixture_identity")
         self.assertEqual(len(self.binding_calls), 1)
+
+    def test_embedding_batch_size_only_changes_execution_config(self):
+        regular, regular_profile = self.build_profile(self.args())
+        singleton, singleton_profile = self.build_profile(
+            self.args(embedding_batch_size=1)
+        )
+        regular_embedding = regular["gp_experiments"]["local_models"]["embedding"]
+        singleton_embedding = singleton["gp_experiments"]["local_models"]["embedding"]
+        self.assertEqual(regular_embedding["batch_size"], 16)
+        self.assertEqual(singleton_embedding["batch_size"], 1)
+        self.assertEqual(
+            {key: value for key, value in regular_embedding.items() if key != "batch_size"},
+            {key: value for key, value in singleton_embedding.items() if key != "batch_size"},
+        )
+        regular["gp_experiments"]["local_models"]["embedding"].pop("batch_size")
+        singleton["gp_experiments"]["local_models"]["embedding"].pop("batch_size")
+        self.assertEqual(regular, singleton)
+        self.assertNotEqual(
+            regular_profile["controller_sha256"],
+            singleton_profile["controller_sha256"],
+        )
+        with self.assertRaisesRegex(ValueError, "embedding batch size"):
+            self.build_profile(self.args(embedding_batch_size=0))
 
     def test_d3_hybrid_uses_native_recovery_without_gp_or_t02_claims(self):
         controller, profile = self.build_profile(self.args(detector="d3_hybrid"))

@@ -733,7 +733,7 @@ class LocalSelectionModels:
                     bundle["device"],
                 )
                 with torch.inference_mode():
-                    hidden = model(**batch).last_hidden_state
+                    hidden = model(**batch, use_cache=False).last_hidden_state
                     mask = batch["attention_mask"]
                     if bool((mask[:, -1].sum() == mask.shape[0]).item()):
                         pooled = hidden[:, -1]

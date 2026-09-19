@@ -87,6 +87,8 @@ def delivery_args(config, benchmark, output, task_ids, delivery):
         command += ["--candidate-algorithm", ARM_TO_VARIANT[ARM]]
     else:
         command += ["--detector", detector]
+        if ARM != "c2kv_native_r4" and detector in {"t02_risk", "legacy_prefill"}:
+            command += ["--embedding-batch-size", str(settings.get("embedding_batch_size", 1))]
     args = delivery.build_parser().parse_args(command)
     args.benchmark = "acon_appworld" if benchmark == "appworld" else "bfcl"
     args.task_id = list(task_ids)
