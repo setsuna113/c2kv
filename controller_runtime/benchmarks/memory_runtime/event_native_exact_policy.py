@@ -13,8 +13,10 @@ from history_memory.packing import (
     PackedMemory,
     PackingBudgetError,
     encode_event_chunks,
+    native_ids,
     pack_memory,
     select_view,
+    visible_message,
 )
 
 from .always_compress import (
@@ -35,6 +37,7 @@ from .event_native_policy import (
     _canonical_json,
     _evidence_increment_tokens,
     _history_components,
+    _current_input_baseline_indices,
     _json_snapshot,
 )
 from .event_native_raw import RuntimeMemoryView, build_raw_control
@@ -131,6 +134,7 @@ class EventNativeExactController:
         model_context: int | None = None,
         compression_policy: str | None = None,
         history_view_protocol: str = "fixed-budget-main",
+        benchmark: str = "bfcl",
     ) -> None:
         if not callable(getattr(tokenizer, "apply_chat_template", None)):
             raise TypeError("tokenizer must expose apply_chat_template")
@@ -169,6 +173,7 @@ class EventNativeExactController:
         self.compression_policy = compression_policy
         self.history_view_protocol = history_view_protocol
         self.model_context = model_context
+        self.benchmark = benchmark
         self._owner = object()
         self._sessions: dict[str, _SessionState] = {}
 
@@ -208,6 +213,19 @@ class EventNativeExactController:
         static_view = select_view(
             store, recent_tool_events=self.packing.recent_tool_events
         )
+        task_packet = self._task_packet_event(store)
+        if task_packet is not None and task_packet.event_id not in static_view.raw_event_ids:
+            static_view = MemoryView(
+                gist_event_ids=tuple(
+                    event_id for event_id in static_view.gist_event_ids
+                    if event_id != task_packet.event_id
+                ),
+                raw_event_ids=_ordered_ids(
+                    store, (*static_view.raw_event_ids, task_packet.event_id)
+                ),
+                evidence_event_ids=static_view.evidence_event_ids,
+            )
+            static_view.validate(store)
         full_memory, full_history_tokens, full_history_bytes = self._measure_full(
             store, tools, max_new_tokens
         )
@@ -429,6 +447,34 @@ class EventNativeExactController:
             policy_visible,
             recovery_stage="first_draft",
         )
+        if task_packet is not None:
+            common_indices = set(_current_input_baseline_indices(store)) | set(
+                task_packet.source_indices
+            )
+            common_tokens = self._count_common(store, common_indices, tools)
+            without_packet = common_indices - set(task_packet.source_indices)
+            packet_tokens = common_tokens - self._count_common(
+                store, without_packet, tools
+            )
+            if packet_tokens < 0:
+                raise PolicyInputError("AppWorld task packet has negative marginal tokens")
+            extra_tokens = self._task_packet_extra_tokens(store, tools)
+            metadata.update(
+                benchmark=self.benchmark,
+                task_packet_protection="first_non_system_user_raw",
+                task_packet_event_id=task_packet.event_id,
+                task_packet_source_indices=list(task_packet.source_indices),
+                common_input_source_indices=sorted(common_indices),
+                common_raw_prompt_tokens=common_tokens,
+                task_packet_raw_tokens=packet_tokens,
+                task_packet_raw_bytes=packet_tokens * self.kv_bytes_per_token,
+                task_packet_common_extra_tokens=extra_tokens,
+                task_packet_accounting={
+                    "charged_to_history_budget": False,
+                    "charged_to_workspace_budget": False,
+                    "included_in_total_resident_kv": True,
+                },
+            )
         prepared = PreparedEventNativeExact(
             memory=memory,
             metadata=metadata,
@@ -1207,6 +1253,9 @@ class EventNativeExactController:
             chunk_overlap=self.packing.chunk_overlap,
             tools=tools,
         )
+        raw_history_tokens -= self._task_packet_extra_tokens(store, tools)
+        if raw_history_tokens < 0:
+            raise PolicyInputError("AppWorld task packet common input exceeds raw history")
         active_history_tokens = gist_tokens + raw_history_tokens
         active_history_bytes = active_history_tokens * self.kv_bytes_per_token
         full_prompt_tokens = len(full_memory.system_input_ids) + len(
@@ -1342,6 +1391,9 @@ class EventNativeExactController:
                 chunk_overlap=self.packing.chunk_overlap,
                 tools=tools,
             )
+            raw_tokens -= self._task_packet_extra_tokens(store, tools)
+            if raw_tokens < 0:
+                raise PolicyInputError("AppWorld task packet common input exceeds raw history")
             history_tokens = gist_tokens + raw_tokens
             history_bytes = history_tokens * self.kv_bytes_per_token
             if sequence_tokens > self.packing.max_sequence_tokens:
@@ -1389,7 +1441,39 @@ class EventNativeExactController:
             chunk_overlap=self.packing.chunk_overlap,
             tools=tools,
         )
+        raw_tokens -= self._task_packet_extra_tokens(store, tools)
+        if raw_tokens < 0:
+            raise PolicyInputError("AppWorld task packet common input exceeds raw history")
         return memory, raw_tokens, raw_tokens * self.kv_bytes_per_token
+
+    def _task_packet_event(self, store: EventStore) -> Any | None:
+        if self.route_mode != "ac_gist_static" or self.benchmark != "acon_appworld":
+            return None
+        users = [event for event in store.events if event.kind == "user"]
+        return min(users, key=lambda event: min(event.source_indices)) if users else None
+
+    def _task_packet_extra_tokens(
+        self, store: EventStore, tools: tuple[dict[str, Any], ...]
+    ) -> int:
+        task_packet = self._task_packet_event(store)
+        if task_packet is None:
+            return 0
+        baseline_indices = set(_current_input_baseline_indices(store))
+        extended_indices = baseline_indices | set(task_packet.source_indices)
+        extra = self._count_common(store, extended_indices, tools) - self._count_common(
+            store, baseline_indices, tools
+        )
+        if extra < 0:
+            raise PolicyInputError("AppWorld task packet common input has negative marginal tokens")
+        return extra
+
+    def _count_common(
+        self, store: EventStore, indices: set[int], tools: tuple[dict[str, Any], ...]
+    ) -> int:
+        if not indices:
+            return 0
+        messages = [visible_message(store.messages[index]) for index in sorted(indices)]
+        return len(native_ids(self.tokenizer, messages, tools=tools, generation=True))
 
     def _compose_metadata(
         self,

@@ -227,6 +227,7 @@ class SGLangEventNativeGenerator:
         encoding_scope: str = "current",
         journal_path: str | Path | None = None,
         sampling_params: Mapping[str, Any] | None = None,
+        sampling_profile: str = "greedy-v1",
         shadow_feature_config: "ShadowFeatureConfig | None" = None,
         max_response_bytes: int = 16 * 1024 * 1024,
         opener: Any | None = None,
@@ -267,8 +268,16 @@ class SGLangEventNativeGenerator:
         temperature = sampling.get("temperature", 0)
         if isinstance(temperature, bool) or not isinstance(temperature, (int, float)):
             raise ValueError("sampling_params.temperature must be numeric")
-        if float(temperature) != 0.0:
+        if sampling_profile not in {"greedy-v1", "acebench-agent-v1"}:
+            raise ValueError("Unknown native sampling profile")
+        if sampling_profile == "acebench-agent-v1":
+            if float(temperature) != 0.001 or sampling.get("top_p") != 1:
+                raise ValueError("ACEBench Agent requires temperature=0.001 and top_p=1")
+            if "seed" in sampling or "sampling_seed" in sampling or shadow_feature_config is not None:
+                raise ValueError("ACEBench Agent bare profile has no explicit seed or detector")
+        elif float(temperature) != 0.0:
             raise ValueError("event-native D3/GP serving requires greedy temperature=0")
+        self.sampling_profile = sampling_profile
         self.sampling_params = sampling
         self.shadow_feature_config = shadow_feature_config
 
@@ -602,6 +611,8 @@ class SGLangEventNativeGenerator:
             },
             "shadow_features": shadow_request,
         }
+        if self.sampling_profile != "greedy-v1":
+            payload["sampling_profile"] = self.sampling_profile
 
         request_index = self._requests_submitted + 1
         self._requests_submitted += 1
@@ -653,6 +664,9 @@ class SGLangEventNativeGenerator:
             raise SGLangEventNativeError(
                 "SGLang /model_info lacks c2kv_native_packed admission data"
             )
+        if (self.sampling_profile != "greedy-v1"
+                and self.sampling_profile not in native.get("sampling_profiles", [])):
+            raise SGLangEventNativeError("Engine does not support the requested native sampling profile")
         binding = _json_object(native.get("model_binding"), "model_binding")
         if not binding:
             raise SGLangEventNativeError("model_binding must not be empty")
