@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import os
+import signal
+import subprocess
 import sys
 import time
 import types
@@ -277,6 +279,60 @@ def test_supervisor_hard_stops_a_real_sleeping_owned_child(tmp_path) -> None:
     )
     assert persisted == receipt
     assert not out.exists()
+
+
+@pytest.mark.skipif(os.name != 'posix', reason='requires POSIX process groups')
+def test_supervisor_sigterm_reaps_its_owned_child(tmp_path) -> None:
+    out = tmp_path / 'model-server'
+    receipt_path = server._supervisor_path(out.resolve())
+    script = tmp_path / 'run_supervisor.py'
+    script.write_text('\n'.join((
+        'import sys',
+        'from pathlib import Path',
+        'from types import SimpleNamespace',
+        'from benchmarks.memory_runtime import event_native_server as server',
+        'args = SimpleNamespace(out=Path(sys.argv[1]), max_wall_seconds=30)',
+        "receipt = server._supervise(args, command=[sys.executable, '-c', 'import time; time.sleep(30)'])",
+        "raise SystemExit(0 if receipt['status'] == 'interrupted' else 3)",
+    )), encoding='utf-8')
+    root = Path(server.__file__).resolve().parents[2]
+    environment = os.environ.copy()
+    environment['PYTHONPATH'] = os.pathsep.join((str(root), environment.get('PYTHONPATH', '')))
+    supervisor = subprocess.Popen(
+        [sys.executable, str(script), str(out)], cwd=root,
+        env=environment, start_new_session=True,
+    )
+    child_pid = None
+    try:
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            if receipt_path.exists():
+                current = json.loads(receipt_path.read_text(encoding='utf-8'))
+                child_pid = current.get('child_pid')
+                if child_pid is not None:
+                    break
+            assert supervisor.poll() is None, 'supervisor exited before spawning child'
+            time.sleep(0.02)
+        assert child_pid is not None, 'supervisor did not spawn child'
+        os.kill(supervisor.pid, signal.SIGTERM)
+        assert supervisor.wait(timeout=10) == 0
+        receipt = json.loads(receipt_path.read_text(encoding='utf-8'))
+        assert receipt['status'] == 'interrupted'
+        assert receipt['interrupt_signal'] == 'SIGTERM'
+        assert receipt['interrupt_forced_kill'] is False
+        assert receipt['child_pid'] == child_pid
+        assert receipt['child_returncode'] != 0
+        with pytest.raises(ProcessLookupError):
+            os.kill(child_pid, 0)
+    finally:
+        if supervisor.poll() is None:
+            supervisor.kill()
+            supervisor.wait(timeout=5)
+        if child_pid is not None:
+            try:
+                os.killpg(child_pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
 
 
 def test_hard_cutoff_cost_inventory_preserves_pending_call_and_partial_step(tmp_path):

@@ -22,6 +22,20 @@ RUNTIME_ROOT = Path(__file__).resolve().parents[2]   # controller_runtime/
 SUPPORTED_SESSION_CACHE_POLICIES = {"external-sglang-content-addressed-chunks-v1"}
 
 
+def _is_greedy_sampling(sampling):
+    if not isinstance(sampling, dict) or set(sampling) - {"mode", "temperature", "seed", "top_p"}:
+        return False
+    if sampling.get("mode", "greedy") != "greedy":
+        return False
+    temperature = sampling.get("temperature")
+    top_p = sampling.get("top_p", 1.0)
+    seed = sampling.get("seed")
+    if (type(temperature) not in (int, float)
+            or type(top_p) not in (int, float) or type(seed) is not int):
+        return False
+    return temperature == 0.0 and top_p == 1.0 and seed == 0
+
+
 def _read_json(path: Path):
     return json.loads(path.read_text(encoding="utf-8"))
 
@@ -64,7 +78,7 @@ def validate_server_identity(ready, health):
         raise ValueError("endpoint frozen task IDs differ")
     if health.get("terminal") is not False:
         raise ValueError("endpoint is not available for a new run")
-    if ready.get("sampling") != {"mode": "greedy", "temperature": 0, "seed": 0}:
+    if not _is_greedy_sampling(ready.get("sampling")):
         raise ValueError("server sampling contract is unsupported")
 
 
