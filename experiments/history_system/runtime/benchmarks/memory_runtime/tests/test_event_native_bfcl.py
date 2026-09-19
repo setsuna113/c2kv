@@ -86,6 +86,25 @@ def test_validate_server_identity_accepts_matching_fresh_endpoint(policy) -> Non
     wrapper.validate_server_identity(ready, health)
 
 
+@pytest.mark.parametrize("sampling, accepted", [
+    ({"mode": "greedy", "temperature": 0, "seed": 0}, True),           # legacy constant
+    ({"temperature": 0.0, "seed": 0}, True),                           # what event_native_server writes for BFCL
+    ({"temperature": 0.0, "seed": 0, "top_p": 1.0}, True),
+    ({"temperature": 0.001, "top_p": 1.0}, False),                     # ACEBench profile is not greedy BFCL
+    ({"temperature": 0.0, "top_p": 1.0, "presence_penalty": 0.5, "seed": 42}, False),  # AppWorld profile
+    ({"temperature": 0.0, "seed": 1}, False),
+    (None, False),
+])
+def test_validate_server_identity_requires_greedy_bfcl_sampling(sampling, accepted) -> None:
+    ready = _ready()
+    ready["sampling"] = sampling
+    if accepted:
+        wrapper.validate_server_identity(ready, _health())
+    else:
+        with pytest.raises(ValueError, match="sampling contract"):
+            wrapper.validate_server_identity(ready, _health())
+
+
 @pytest.mark.parametrize('source', ['ready', 'health', 'both'])
 def test_bfcl_worker_rejects_other_benchmark_namespace(source):
     ready, health = _ready(), _health()

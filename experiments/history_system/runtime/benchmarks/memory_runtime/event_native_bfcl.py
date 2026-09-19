@@ -59,6 +59,28 @@ def task_category(task_ids):
     raise ValueError('BFCL requires a single supported category of explicit task IDs')
 
 
+def _is_greedy_sampling(sampling):
+    """BFCL native runs are greedy: temperature 0, seed 0, top_p 1 (if given), no penalties.
+
+    The server manifest records the sampling params it actually sends (since
+    the ACEBench sampling profile landed); the older constant form
+    ``{'mode': 'greedy', 'temperature': 0, 'seed': 0}`` stays accepted.
+    """
+    if not isinstance(sampling, dict):
+        return False
+    allowed = {'mode', 'temperature', 'seed', 'top_p'}
+    if set(sampling) - allowed:
+        return False
+    if sampling.get('mode', 'greedy') != 'greedy':
+        return False
+    try:
+        temperature = float(sampling.get('temperature'))
+        top_p = float(sampling.get('top_p', 1.0))
+    except (TypeError, ValueError):
+        return False
+    return temperature == 0.0 and sampling.get('seed') == 0 and top_p == 1.0
+
+
 def validate_server_identity(ready, health):
     if ready.get('schema') != 'a-event-native-server-v1' or ready.get('status') != 'ready':
         raise ValueError('a ready event-native server manifest is required')
@@ -91,7 +113,7 @@ def validate_server_identity(ready, health):
         raise ValueError('endpoint is not available for a new run')
     if health.get('decisions_reserved') != 0 or health.get('generation_calls_reserved') != 0:
         raise ValueError('endpoint already consumed decisions or generation calls; automatic rerun is disabled')
-    if ready.get('sampling') != {'mode': 'greedy', 'temperature': 0, 'seed': 0}:
+    if not _is_greedy_sampling(ready.get('sampling')):
         raise ValueError('server sampling contract is unsupported')
     if not isinstance(ready.get('checkpoint'), dict):
         raise ValueError('server manifest lacks checkpoint provenance')
