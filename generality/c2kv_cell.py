@@ -26,6 +26,21 @@ import time
 import urllib.request
 from pathlib import Path
 
+try:
+    from .bfcl_results import (
+        bfcl_row_is_valid,
+        collect_bfcl_results,
+        completion_receipt,
+        ordered_unique,
+    )
+except ImportError:
+    from bfcl_results import (
+        bfcl_row_is_valid,
+        collect_bfcl_results,
+        completion_receipt,
+        ordered_unique,
+    )
+
 GENERATION_ROOT = Path("/home/liuyancheng/c2kv-generality-20260918")
 C1_DELIVERY = GENERATION_ROOT / "src" / "c1_delivery"
 RUNTIME = GENERATION_ROOT / "src" / "generality" / "controller_runtime"
@@ -196,25 +211,28 @@ def validate_chunk(out: Path, task_ids: list[str]) -> tuple[list[str], list[str]
     traceback and must never be counted as an official zero score.
     """
     import glob
-    healthy, bad = [], []
-    seen = set()
+    requested = ordered_unique(task_ids)
+    requested_set = set(requested)
+    observed: dict[str, bool] = {}
     for path in glob.glob(str(out / "bfcl_worker" / "bfcl" / "result" / "**" / "*.json"),
                           recursive=True):
         for line in Path(path).read_text(encoding="utf-8").splitlines():
             if not line.strip():
                 continue
-            row = json.loads(line)
-            task_id = row.get("id")
-            if task_id is None:
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
                 continue
-            if row.get("traceback") is None:
-                healthy.append(task_id)
-            else:
-                bad.append(task_id)
-            seen.add(task_id)
-    for task_id in task_ids:
-        if task_id not in seen:
-            bad.append(task_id)
+            if not isinstance(row, dict):
+                continue
+            task_id = row.get("id")
+            if task_id not in requested_set:
+                continue
+            # Any valid official row completes the task.  Later traceback rows
+            # cannot turn an already valid task back into a retry.
+            observed[task_id] = observed.get(task_id, False) or bfcl_row_is_valid(row)
+    healthy = [task_id for task_id in requested if observed.get(task_id, False)]
+    bad = [task_id for task_id in requested if not observed.get(task_id, False)]
     return healthy, bad
 
 
@@ -227,10 +245,11 @@ def run_task(cell: dict, task_ids: list[str], port: int, batch_dirname: str) -> 
     bisect a poisoned chunk instead of letting one terminal task zero out the
     rest.
     """
-    import shutil
     out = Path(cell["cell_dir"]) / "batches" / batch_dirname
-    shutil.rmtree(out, ignore_errors=True)
-    out.mkdir(parents=True, exist_ok=True)
+    # Attempts are evidence.  Never reuse a name or remove an older attempt:
+    # retries legitimately produce duplicate raw rows which canonical rescore
+    # resolves without losing provenance.
+    out.mkdir(parents=True, exist_ok=False)
     env = os.environ.copy()
     env["PYTHONPATH"] = os.pathsep.join((str(RUNTIME / "python"), str(RUNTIME)))
     env["no_proxy"] = env["NO_PROXY"] = "127.0.0.1,localhost"
@@ -302,6 +321,21 @@ def run_task(cell: dict, task_ids: list[str], port: int, batch_dirname: str) -> 
         _write(out / "done.json" if not bad else out / "status.json", status)
         return status
     except Exception as error:  # infra failure: keep receipt, bisect at caller
+        # The official BFCL worker can exit nonzero after writing valid rows.
+        # Preserve those outputs so the caller retries only tasks that truly
+        # lack a completed official result.
+        if cell["benchmark"] == "bfcl":
+            healthy, bad = validate_chunk(out, task_ids)
+            if healthy:
+                status.update(
+                    status="partial" if bad else "completed",
+                    healthy=healthy,
+                    bad=bad,
+                    error=f"{type(error).__name__}: {error}",
+                    wall_s=time.monotonic() - started,
+                )
+                _write(out / "status.json", status)
+                return status
         status.update(status="failed", error=f"{type(error).__name__}: {error}",
                       wall_s=time.monotonic() - started)
         _write(out / "status.json", status)
@@ -352,6 +386,29 @@ def prepare_cell_files(cell: dict, budgets: dict) -> dict:
     return cell
 
 
+def _attempt_name(task_ids: list[str]) -> str:
+    digest = hashlib.sha256("\0".join(task_ids).encode("utf-8")).hexdigest()[:10]
+    return f"a{time.time_ns()}_p{os.getpid()}_{digest}"
+
+
+def _write_bfcl_completion(cell: dict, expected_task_ids: list[str]) -> dict:
+    cell_dir = Path(cell["cell_dir"])
+    completion = collect_bfcl_results(cell_dir, expected_task_ids)
+    receipt = completion_receipt(completion)
+    receipt["cell_id"] = cell["cell_id"]
+    receipt["generated_at"] = time.time()
+    _write(cell_dir / "bfcl_completion.json", receipt)
+    _write(cell_dir / "bfcl_refill.json", {
+        "schema": "generality-bfcl-refill-v1",
+        "cell_id": cell["cell_id"],
+        "task_ids": completion["refill_task_ids"],
+        "n_tasks": len(completion["refill_task_ids"]),
+        "source": "bfcl_completion.json",
+        "generated_at": receipt["generated_at"],
+    })
+    return completion
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cell", type=Path, required=True, help="cell.json path")
@@ -362,14 +419,42 @@ def main(argv=None) -> int:
     parser.add_argument("--chunk", type=int, default=8,
                         help="tasks per controller server instance")
     parser.add_argument("--max-tasks", type=int, default=None)
+    parser.add_argument(
+        "--max-attempts-per-task", type=int, default=4,
+        help="bounded attempts in this invocation, including the initial batch",
+    )
+    parser.add_argument(
+        "--audit-results-only", action="store_true",
+        help="write exact BFCL completion/refill manifests without launching work",
+    )
     args = parser.parse_args(argv)
 
+    if args.max_attempts_per_task < 1:
+        parser.error("--max-attempts-per-task must be at least 1")
     cell = load_cell(args.cell)
+    expected_task_ids = ordered_unique(cell["task_ids"])
+    cell["task_ids"] = expected_task_ids
+    requested_task_ids = ordered_unique(
+        args.task_ids if args.task_ids is not None else expected_task_ids
+    )
+    unexpected_requested = sorted(set(requested_task_ids) - set(expected_task_ids))
+    if unexpected_requested:
+        raise ValueError(
+            "requested task IDs are outside the frozen cell manifest: "
+            + ",".join(unexpected_requested)
+        )
+    if args.audit_results_only:
+        if cell["benchmark"] != "bfcl":
+            raise ValueError("--audit-results-only is supported only for BFCL cells")
+        completion = _write_bfcl_completion(cell, expected_task_ids)
+        print(json.dumps(completion_receipt(completion), ensure_ascii=False))
+        return 0
+
     budgets = json.loads(args.budgets.read_text())
     # Always (re)materialize controller.json / eval_policy.json from the cell
     # spec: regeneration is cheap and prevents stale configs after edits.
     cell = prepare_cell_files(cell, budgets)
-    task_ids = args.task_ids or cell["task_ids"]
+    task_ids = requested_task_ids
     if args.max_tasks is not None:
         task_ids = task_ids[: args.max_tasks]
 
@@ -381,6 +466,12 @@ def main(argv=None) -> int:
     cell_dir = Path(cell["cell_dir"])
     progress = cell_dir / "progress.jsonl"
     port_counter = [args.port_base]
+    attempt_counts = {task_id: 0 for task_id in task_ids}
+    valid_task_ids: set[str] = set()
+    if cell["benchmark"] == "bfcl":
+        completion = _write_bfcl_completion(cell, expected_task_ids)
+        valid_task_ids.update(completion["valid_task_ids"])
+        task_ids = [task_id for task_id in task_ids if task_id not in valid_task_ids]
 
     def next_port() -> int:
         """Monotonic port: the scheduler now gives each card 1000 ports, so
@@ -399,31 +490,44 @@ def main(argv=None) -> int:
     def run_chunk(chunk: list[str], depth: int) -> None:
         """Run a chunk; on failure or unhealthy tasks, bisect down to singles.
 
-        A single-task failure is recorded as a terminal receipt (model or
-        capacity failure kept in the denominator, never silently dropped and
-        never retried by this driver).
+        BFCL tracebacks and missing rows remain retryable; only a structured
+        official output completes a task.  Attempts in one invocation are
+        bounded by ``--max-attempts-per-task``.
         """
         if not chunk:
             return
-        # chunk-level resume: every task already carries a done/terminal
-        # marker -> skip (protocol: completed results are never re-run)
-        settled = {(cell_dir / "tasks" / t / f).exists()
-                   for t in chunk for f in ("done.json", "terminal.json")}
-        if settled == {True}:
-            return
-        chunk = [t for t in chunk
-                 if not (cell_dir / "tasks" / t / "done.json").exists()
-                 and not (cell_dir / "tasks" / t / "terminal.json").exists()]
+        # BFCL resumes from canonical official rows.  AppWorld keeps its
+        # existing per-task marker protocol.
+        if cell["benchmark"] == "bfcl":
+            # A timeout/nonzero worker may finish writing a valid row while
+            # run_task is cleaning up its process group.  Refresh from disk
+            # before every retry decision so that late output is not rerun.
+            refreshed = collect_bfcl_results(cell_dir, expected_task_ids)
+            valid_task_ids.update(refreshed["valid_task_ids"])
+            chunk = [
+                task_id for task_id in chunk
+                if task_id not in valid_task_ids
+                and attempt_counts.get(task_id, 0) < args.max_attempts_per_task
+            ]
+        else:
+            chunk = [
+                task_id for task_id in chunk
+                if not (cell_dir / "tasks" / task_id / "done.json").exists()
+                and not (cell_dir / "tasks" / task_id / "terminal.json").exists()
+            ]
         if not chunk:
             return
+        for task_id in chunk:
+            attempt_counts[task_id] = attempt_counts.get(task_id, 0) + 1
         port = next_port()
-        name = f"c{port_counter[0]:04d}_{chunk[0].rsplit('_', 1)[-1]}"
+        name = _attempt_name(chunk)
         result = run_task(cell, chunk, port, name)
         with progress.open("a", encoding="utf-8") as stream:
             stream.write(json.dumps(result, ensure_ascii=False) + "\n")
         healthy = list(result.get("healthy") or [])
         if result["status"] == "completed":
             for task_id in healthy:
+                valid_task_ids.add(task_id)
                 _write(cell_dir / "tasks" / task_id / "done.json",
                        {"task_id": task_id, "status": "completed"})
             print(json.dumps({"cell": cell["cell_id"], "chunk": len(chunk),
@@ -432,15 +536,19 @@ def main(argv=None) -> int:
         # partial or failed: bisect
         if len(chunk) == 1:
             task_id = chunk[0]
-            _write(cell_dir / "tasks" / task_id / "terminal.json",
-                   {"task_id": task_id, "status": "terminal",
+            marker = "retryable.json" if cell["benchmark"] == "bfcl" else "terminal.json"
+            _write(cell_dir / "tasks" / task_id / marker,
+                   {"task_id": task_id,
+                    "status": "retryable" if cell["benchmark"] == "bfcl" else "terminal",
                     "reason": result.get("error") or "unhealthy_result_rows",
                     "chunk_status": result["status"]})
             print(json.dumps({"cell": cell["cell_id"], "task": task_id,
-                              "status": "terminal_recorded"}), flush=True)
+                              "status": "retryable_recorded" if cell["benchmark"] == "bfcl"
+                              else "terminal_recorded"}), flush=True)
             return
         # healthy tasks inside a partial chunk still count
         for task_id in healthy:
+            valid_task_ids.add(task_id)
             _write(cell_dir / "tasks" / task_id / "done.json",
                    {"task_id": task_id, "status": "completed"})
         remainder = [t for t in chunk if t not in set(healthy)]
@@ -451,16 +559,34 @@ def main(argv=None) -> int:
     for i in range(0, len(task_ids), args.chunk):
         run_chunk(task_ids[i:i + args.chunk], 0)
 
-    done = sum(1 for t in task_ids
-               if (cell_dir / "tasks" / t / "done.json").exists())
-    terminal = sum(1 for t in task_ids
-                   if (cell_dir / "tasks" / t / "terminal.json").exists())
-    _write(cell_dir / "cell_status.json", {
-        "cell_id": cell["cell_id"],
-        "status": "complete" if done + terminal == len(task_ids) else "incomplete",
-        "n_completed": done, "n_terminal": terminal, "n_total": len(task_ids),
-        "finished_at": time.time(),
-    })
+    if cell["benchmark"] == "bfcl":
+        completion = _write_bfcl_completion(cell, expected_task_ids)
+        _write(cell_dir / "cell_status.json", {
+            "cell_id": cell["cell_id"],
+            "status": (
+                "complete"
+                if completion["valid_count"] == completion["expected_count"]
+                else "incomplete"
+            ),
+            "n_completed": completion["valid_count"],
+            "n_valid_unique": completion["valid_count"],
+            "n_retryable": len(completion["refill_task_ids"]),
+            "n_total": completion["expected_count"],
+            "raw_result_rows": completion["total_rows"],
+            "duplicate_result_rows": completion["duplicate_rows"],
+            "finished_at": time.time(),
+        })
+    else:
+        done = sum(1 for t in task_ids
+                   if (cell_dir / "tasks" / t / "done.json").exists())
+        terminal = sum(1 for t in task_ids
+                       if (cell_dir / "tasks" / t / "terminal.json").exists())
+        _write(cell_dir / "cell_status.json", {
+            "cell_id": cell["cell_id"],
+            "status": "complete" if done + terminal == len(task_ids) else "incomplete",
+            "n_completed": done, "n_terminal": terminal, "n_total": len(task_ids),
+            "finished_at": time.time(),
+        })
     return 0
 
 

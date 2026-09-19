@@ -13,6 +13,36 @@ runtime fixes are copied into that subset only when an NPU launcher consumes
 them.  These source checkouts do not deploy or overwrite the detached running
 copies under `/home/liuyancheng/c2kv-generality-20260918/src/`.
 
+BFCL completion is based on valid unique official result rows, not task marker
+counts. A wrong or empty model answer is valid; an execution traceback is not.
+`generality/c2kv_cell.py` resumes only the missing/invalid manifest IDs, preserves
+all raw attempts, and writes `bfcl_completion.json` plus the complete
+`bfcl_refill.json` list. `--audit-results-only` writes those receipts without
+starting inference. The normal cell invocation automatically skips valid rows,
+including rows produced before a worker failed. `--task-ids` restricts a refill
+without changing the full-cell completion denominator.
+Historical `cell_status.json` files marked complete are not automatically
+requeued by an old scheduler. Invoke the repaired `c2kv_cell.py` directly with
+the original `--cell`, `--budgets`, and allocated `--port-base` to refill such a
+cell; auditing alone does not change scheduler state or start work.
+
+Once every manifest ID has a valid row, offline scoring uses a new output
+directory and the same official BFCL adapter as the original worker:
+
+```bash
+python -m generality.bfcl_rescore --cell-dir /path/to/cell \
+  --out /path/to/new-rescore-output \
+  --benchmark-dir /path/to/berkeley-function-call-leaderboard --score
+```
+
+For the flat server installation, invoke `bfcl_rescore.py` directly from
+`src/generality`. This does not call the model. It retains canonical source
+paths and an input checksum, refuses incomplete cells and existing output
+directories, and publishes `official_summary.json` only after the official
+scorer's denominator check passes. The separate user-owned `rescore.py` is
+preserved; this entry point fixes the scorer module and result-layout mismatch
+without replacing that file.
+
 Calibration never reruns a task from turn zero. It restores each source row
 from the official `labels.json`, verifies the BFCL tool observations and
 decision key, generates only the current-turn A0 continuation, and writes
