@@ -17,6 +17,10 @@ def completion_kind(row: Mapping) -> str:
     if failure is None:
         return "model_output"
     text = failure if isinstance(failure, str) else json.dumps(failure, ensure_ascii=False)
+    # Only the server's explicit typed method failure is terminal. Generic
+    # runner failures and transport errors remain incomplete.
+    if re.search(r"[\"']code[\"']\s*:\s*[\"']c2kv_capacity_infeasible[\"']", text):
+        return "capacity_infeasible"
     # SGLang's explicit context admission error, also recognized by prefix replay.
     # BFCL embeds the OpenAI exception repr, which can escape the apostrophe.
     if re.search(r"The input \(\d+ tokens\) is longer than the model\\*'s context length \(\d+ tokens\)", text):
