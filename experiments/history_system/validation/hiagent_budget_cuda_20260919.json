@@ -1,0 +1,314 @@
+{
+  "schema": "hiagent-history-budget-cuda-smoke-v1",
+  "date": "2026-09-19",
+  "purpose": "Official BFCL functional smoke, size-selected FIFO replay, and targeted CUDA path fixtures; not a quality comparison",
+  "result_status": "preliminary, n=1",
+  "arm": "hiagent_full_b768",
+  "budget": {
+    "actor_history_tokens": 768,
+    "scope": "actor-visible history at each decision, including retrieved history; auxiliary workspace and physical peaks are separately metered"
+  },
+  "paper_source_commit": "2ab39c68923b19404deb7bc5a8267e1efc4e7b1b",
+  "source_output": "/home/lyc/dev/c2kv-hiagent-budget-smoke-20260919",
+  "engine_source": {
+    "snapshot": "/home/lyc/dev/c2kv-four-candidates-smoke-20260919/engine",
+    "snapshot_head": "676795ffc47dc80eb03a65532a0e2058cc5a66bd",
+    "origin_head": "ce13018725e218f2815c05bcbede3013cb0d1711",
+    "selected_sha256": {
+      "python/sglang/srt/entrypoints/http_server.py": "ff46ae74f86ce79552299ac202a6dcd1e59858894dd1ed3a61131f95a345278a",
+      "python/sglang/srt/entrypoints/openai/protocol.py": "b70e7a735b36879f73f4d361e089e932b00d9cef26a69b5ce2b7f9598b1d7e8c",
+      "python/sglang/srt/entrypoints/openai/serving_chat.py": "0238efecbdcb6170fc57b43ccc30833496ea55dbb287cbbefd97b3adfac96605",
+      "python/sglang/srt/managers/scheduler.py": "a1d857361a05db990e9065e86e8e1029417930c50a12811243991877768fb3cc",
+      "python/sglang/srt/model_executor/model_runner.py": "49c4f265d4bfb5c78649663cf34cd3d54562ddb1a9e8d0836c38a247bf41d3a4",
+      "python/sglang/srt/server_args.py": "4641bebb58dd4ded622b0138fa261a21d8a3f508ea9425c0c07a2c8d4bad3701"
+    },
+    "previous_manifest": "/home/lyc/dev/c2kv-four-candidates-smoke-20260919/engine_source.json",
+    "previous_manifest_sha256": "9546fdca7c613ac4e8354151e06a8b91e721921d8d891ccbde60e6335761618e"
+  },
+  "checkpoint": "/home/lyc/dev/c2kv-cuda-port/checkpoint-1000",
+  "server_seed": 42,
+  "gpu": "NVIDIA GeForce RTX 4090 Laptop GPU",
+  "closed_loop": {
+    "requests": 17,
+    "real_actor_calls": 17,
+    "injected_retrieval_decisions": 0,
+    "all_real_calls_under_budget": true,
+    "all_preflight_equal_actual_server_history": true,
+    "all_real_actor_payload_hashes_verified": true,
+    "max_history_tokens": 746,
+    "requests_with_fifo_eviction": 1,
+    "compressor_calls": 0,
+    "request_log_sha256": "1022bcc8748e33294b9e78c803981a18c453c1c7194dbe55d9389dfc0e616be1",
+    "telemetry_sha256": "38b7f1bf7e0d79680bc3a4821d62640d047ca15a3d12f8705476b1981dafb76f",
+    "task_ids": [
+      "multi_turn_base_26",
+      "multi_turn_base_100"
+    ],
+    "official_tasks_scored": 2,
+    "official_semantic_score": 1.0,
+    "correct_count": 2,
+    "result_status": "preliminary, n=1",
+    "summary_path": "/home/lyc/dev/c2kv-hiagent-budget-smoke-20260919/results/summary_hiagent_full_b768.json",
+    "summary_sha256": "e026ff70f927a26a15b6b90af48f54def6c910052eec54c729a9c9ddae4390eb"
+  },
+  "fifo_replay": {
+    "requests": 1,
+    "real_actor_calls": 1,
+    "injected_retrieval_decisions": 0,
+    "all_real_calls_under_budget": true,
+    "all_preflight_equal_actual_server_history": true,
+    "all_real_actor_payload_hashes_verified": true,
+    "max_history_tokens": 685,
+    "requests_with_fifo_eviction": 1,
+    "compressor_calls": 0,
+    "request_log_sha256": "ae1448deae3a17242cd5a0b6728917edab1b19ae22c5b340379569dad8b264c4",
+    "telemetry_sha256": "173d30eec541ad5554cca7d24d592f61da3715bd2ab78325f25a616fae7a656f",
+    "source_host": "m1",
+    "source_path": "/workspace/results/closed_loop/bfcl_base__full/full_prefixes.jsonl",
+    "source_task": "multi_turn_base_0",
+    "source_turn": 23,
+    "prefix_id": "de58330d4df24834a21916a7dc6923c6",
+    "selection_rule": "Previously selected by serialized history size, without correctness filtering; reused for FIFO validation",
+    "prefix_sha256": "461f58ef9270a0e6fcf93419164cbc129fc2a3c8a24e80aa1addfbe375886b39",
+    "budget_receipt": {
+      "limit": 768,
+      "history_before": 1060,
+      "history_after": 685,
+      "fixed_tokens": 0,
+      "reserved_feedback_tokens": 19,
+      "history_with_reserved_feedback": 704,
+      "reserve_passed": true,
+      "evicted_records": 6,
+      "attempts": 7,
+      "passed": true,
+      "final_guard": {
+        "success": true,
+        "history_tokens": 685,
+        "prompt_tokens": 5967,
+        "server_tokenized": true,
+        "history_start": 5249,
+        "history_end": 5934
+      },
+      "actor_payload_sha256": "c32f3101c373135e305dfd5501cfa49db36125d93a6db90ea7a60e69296a050d"
+    }
+  },
+  "cuda_path_fixtures": {
+    "purpose": "CUDA contract fixtures; forced retrieval decisions are not benchmark results.",
+    "cases": [
+      {
+        "case": "long_active_subgoal",
+        "status": "passed",
+        "history_tokens": 698,
+        "forced_retrieval_decisions": 0,
+        "real_actor_calls": 1,
+        "budget": {
+          "limit": 768,
+          "history_before": 1026,
+          "history_after": 698,
+          "fixed_tokens": 13,
+          "reserved_feedback_tokens": 19,
+          "history_with_reserved_feedback": 717,
+          "reserve_passed": true,
+          "evicted_records": 6,
+          "attempts": 7,
+          "passed": true,
+          "final_guard": {
+            "success": true,
+            "history_tokens": 698,
+            "prompt_tokens": 5980,
+            "server_tokenized": true,
+            "history_start": 5249,
+            "history_end": 5947
+          },
+          "actor_payload_sha256": "2e151272db312fc89c657de11f811a725879091bc143e33ffe38c7e24b820dd0"
+        },
+        "compressor_usage": {
+          "calls": 0,
+          "prompt_tokens": 0,
+          "completion_tokens": 0,
+          "wall_sec": 0.0
+        },
+        "retrieval_budget_denials": [],
+        "verification": {
+          "requests": 1,
+          "real_actor_calls": 1,
+          "injected_retrieval_decisions": 0,
+          "all_real_calls_under_budget": true,
+          "all_preflight_equal_actual_server_history": true,
+          "all_real_actor_payload_hashes_verified": true,
+          "max_history_tokens": 698,
+          "requests_with_fifo_eviction": 1,
+          "compressor_calls": 0,
+          "request_log_sha256": "ac5ba68883299b6c93f1309b63607d70c52ec19bfa2baa379cf30d897053b755",
+          "telemetry_sha256": "f9bbfbc1dcdedf6e5cf59467587e63b125158ce45a291f7e940ba6466a53fcf4"
+        }
+      },
+      {
+        "case": "retrieval_fits",
+        "status": "passed",
+        "history_tokens": 80,
+        "forced_retrieval_decisions": 1,
+        "real_actor_calls": 1,
+        "budget": {
+          "limit": 768,
+          "history_before": 80,
+          "history_after": 80,
+          "fixed_tokens": 67,
+          "reserved_feedback_tokens": 19,
+          "history_with_reserved_feedback": 99,
+          "reserve_passed": true,
+          "evicted_records": 0,
+          "attempts": 1,
+          "passed": true,
+          "final_guard": {
+            "success": true,
+            "history_tokens": 80,
+            "prompt_tokens": 660,
+            "server_tokenized": true,
+            "history_start": 542,
+            "history_end": 622
+          },
+          "actor_payload_sha256": "4f15dac239061d017e0b57591d24f8a3f742a15cc5270a507aad9600d1e91260"
+        },
+        "compressor_usage": {
+          "calls": 1,
+          "prompt_tokens": 226,
+          "completion_tokens": 22,
+          "wall_sec": 0.6940033549999498
+        },
+        "retrieval_budget_denials": [],
+        "verification": {
+          "requests": 1,
+          "real_actor_calls": 1,
+          "injected_retrieval_decisions": 1,
+          "all_real_calls_under_budget": true,
+          "all_preflight_equal_actual_server_history": true,
+          "all_real_actor_payload_hashes_verified": true,
+          "max_history_tokens": 80,
+          "requests_with_fifo_eviction": 0,
+          "compressor_calls": 1,
+          "request_log_sha256": "fc0b2c3337bde7e2d26c1ff9ecca36f1d97de1c5292c528d4d6557e89f59ca2c",
+          "telemetry_sha256": "715fad6927b7ec34f3e4e51781a5fc5905295ef0c6ced4065a01fc027ad01725"
+        }
+      },
+      {
+        "case": "retrieval_denied",
+        "status": "passed",
+        "history_tokens": 78,
+        "forced_retrieval_decisions": 1,
+        "real_actor_calls": 1,
+        "budget": {
+          "limit": 768,
+          "history_before": 2099,
+          "history_after": 78,
+          "fixed_tokens": 45,
+          "reserved_feedback_tokens": 0,
+          "history_with_reserved_feedback": 78,
+          "reserve_passed": true,
+          "evicted_records": 0,
+          "attempts": 1,
+          "passed": true,
+          "final_guard": {
+            "success": true,
+            "history_tokens": 78,
+            "prompt_tokens": 658,
+            "server_tokenized": true,
+            "history_start": 542,
+            "history_end": 620
+          },
+          "actor_payload_sha256": "09bbf8d4d7606e2d62d3438cca9b8304ce9883eb94b5514b052a82d766a92ffa"
+        },
+        "compressor_usage": {
+          "calls": 1,
+          "prompt_tokens": 2226,
+          "completion_tokens": 5,
+          "wall_sec": 0.584299635998832
+        },
+        "retrieval_budget_denials": [
+          {
+            "requested_subgoals": [
+              1
+            ],
+            "reason": "budget_unavailable",
+            "receipt": {
+              "policy": "hiagent",
+              "variant": "full",
+              "reason": "requested_full_trajectory_exceeds_budget",
+              "n_compressor_calls": 0,
+              "retrieved_subgoals": [
+                1
+              ],
+              "invalid_retrieval_subgoals": [],
+              "history_indices": [
+                1,
+                2,
+                3
+              ],
+              "budget": {
+                "limit": 768,
+                "history_before": 2080,
+                "history_after": 2067,
+                "fixed_tokens": 2067,
+                "reserved_feedback_tokens": 19,
+                "history_with_reserved_feedback": 2086,
+                "reserve_passed": false,
+                "evicted_records": 0,
+                "attempts": 0,
+                "passed": false
+              },
+              "compressor_usage": {
+                "calls": 0,
+                "prompt_tokens": 0,
+                "completion_tokens": 0,
+                "wall_sec": 0.0
+              }
+            }
+          }
+        ],
+        "verification": {
+          "requests": 1,
+          "real_actor_calls": 1,
+          "injected_retrieval_decisions": 1,
+          "all_real_calls_under_budget": true,
+          "all_preflight_equal_actual_server_history": true,
+          "all_real_actor_payload_hashes_verified": true,
+          "max_history_tokens": 78,
+          "requests_with_fifo_eviction": 0,
+          "compressor_calls": 1,
+          "request_log_sha256": "6b50b15943f021a82753283dafc0359dc19244559be3834e424d980d6fb17260",
+          "telemetry_sha256": "c2b5a220d31d5d7e3df767781be6704ceb411d2666d79dec693da5a5b1fd99fe"
+        }
+      }
+    ]
+  },
+  "tests": {
+    "windows_targeted": {
+      "passed": 185,
+      "skipped": 2,
+      "subtests_passed": 4
+    },
+    "wsl_real_bfcl_dependencies": {
+      "passed": 64,
+      "subtests_passed": 2
+    },
+    "npu_launcher_cpu": {
+      "passed": 25,
+      "end_to_end_run": false
+    }
+  },
+  "npu_launcher_implementation_commit": "efbecc0",
+  "owned_server_cleanup": {
+    "pid": 9458,
+    "stopped": true
+  },
+  "tested_implementation_sha256": {
+    "benchmarks/hiagent_budget.py": "7b0852d804f8e0976c34c3d30a0695b1755c9c72425728bd4fda1a0b8682cc52",
+    "benchmarks/proxy.py": "25032463d8d76ec942bee746deeddf83858151d175105fd1a9a027aa9d3372af",
+    "benchmarks/arms.py": "d0f8374e362a7a873cb265d7a038d022695726a5090fbf10815baecbe6ccd205",
+    "benchmarks/backends/sglang.py": "f28ade9ca5901a4b878986596358ff4fbce8481d044739e13325b7c5c915ff17",
+    "benchmarks/capabilities.py": "981767ad2e9f199d2711f0bbc8cebd8024b40652c96559353ef839c26f21005a",
+    "benchmarks/bfcl_completion.py": "8ac9848987b6ebb09382b99ea6c1637b35b5cc5dd5545f5b5905d4a0e018ab02",
+    "benchmarks/paper/runner.py": "57f562cf0c4c90b279dd04af02c7968dd625fffcac20a7dfdb72afac26eb3262",
+    "benchmarks/paper/budget_server.py": "d3228192a285431cd5e9f9b9a05514bcdb531ebff3e713bcead5a5526aa22220"
+  }
+}
