@@ -135,17 +135,17 @@ def test_controller_oom_is_a_scored_zero_harness_failure(tmp_path):
     assert summary["n_method_failures"] == 0
 
 
-def capacity_evidence(shard, *, session_task=None):
+def capacity_evidence(shard, *, session_task=None, benchmark="bfcl"):
     task = shard.name
     server = shard / "server"
     server.mkdir(parents=True)
     (server / "ready.json").write_text(json.dumps({
-        "schema": "a-event-native-server-v1", "status": "ready", "benchmark": "bfcl",
+        "schema": "a-event-native-server-v1", "status": "ready", "benchmark": benchmark,
         "allowed_task_ids": [task],
     }))
     row = {
-        "schema": "a-event-native-exact-step-v1", "status": "failed",
-        "session_id": f"bfcl/{session_task or task}/attempt-0",
+        "schema": "a-acebench-event-step-v1" if benchmark == "acebench" else "a-event-native-exact-step-v1", "status": "failed",
+        "session_id": f"{benchmark}/{session_task or task}/attempt-0",
         "failure_kind": "method_failure", "failure_code": "c2kv_capacity_infeasible",
         "error": {"type": "CapacityInfeasible", "message":
                   "Native S0 mandatory raw input and minimum whole-event gist cannot fit"},
@@ -167,6 +167,15 @@ def test_capacity_infeasible_is_a_scored_zero_method_failure(tmp_path):
     assert summary["semantic_score"] == 0.0 and summary["n_method_failures"] == 1
     assert summary["method_failure_task_ids"] == ["multi_turn_long_context_101"]
     assert summary["n_harness_failures"] == 0
+
+
+def test_ace_capacity_failure_uses_its_runtime_schema_and_task_identity(tmp_path):
+    shard = tmp_path / "task_shards" / "agent_multi_step_0"
+    row = capacity_evidence(shard, benchmark="acebench")
+    assert controller_step_failure(shard)[:2] == ("method_failure", "capacity_infeasible")
+    row["session_id"] = "acebench/agent_multi_step_1/attempt-0"
+    (shard / "server" / "steps.jsonl").write_text(json.dumps(row) + "\n")
+    assert controller_step_failure(shard) is None
 
 
 def test_earlier_declared_failure_does_not_classify_a_later_step(tmp_path):

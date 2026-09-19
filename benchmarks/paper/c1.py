@@ -275,7 +275,7 @@ def controller_step_failure(task_root):
         error = row.get("error")
         text = json.dumps(error) if isinstance(error, dict) else str(error or "")
         if (capacity_session_id is not None
-                and row.get("schema") == "a-event-native-exact-step-v1"
+                and row.get("schema") in {"a-event-native-exact-step-v1", "a-acebench-event-step-v1"}
                 and row.get("status") == "failed"
                 and row.get("session_id") == capacity_session_id
                 and row.get("failure_kind") == "method_failure"
