@@ -262,10 +262,13 @@ def run_task(cell: dict, task_ids: list[str], port: int, batch_dirname: str) -> 
         # event_native_appworld needs: controller_runtime (for the worker
         # itself), benchmarks/ (for adapters/proxy imports), acon/src (for
         # the ACON harness), and paper_harness/benchmarks (for proxy)
+        # event_native_appworld imports ``adapters.acon_adapter`` from the
+        # paper harness.  The controller runtime also has an ``adapters``
+        # package, so the harness directory must precede runtime/benchmarks.
         worker_env["PYTHONPATH"] = os.pathsep.join((
+            "/home/liuyancheng/c2kv-generality-20260918/src/paper_harness/benchmarks",
             str(RUNTIME), str(RUNTIME / "benchmarks"),
-            "/home/liuyancheng/baselines/acon/src",
-            "/home/liuyancheng/c2kv-generality-20260918/src/paper_harness/benchmarks"))
+            "/home/liuyancheng/baselines/acon/src"))
         worker_env["APPWORLD_ROOT"] = cell.get("appworld_root", "")
     server_log = (out / "controller.log").open("wb")
     worker_log = (out / "benchmark.log").open("wb")
@@ -513,7 +516,7 @@ def main(argv=None) -> int:
             chunk = [
                 task_id for task_id in chunk
                 if not (cell_dir / "tasks" / task_id / "done.json").exists()
-                and not (cell_dir / "tasks" / task_id / "terminal.json").exists()
+                and attempt_counts.get(task_id, 0) < args.max_attempts_per_task
             ]
         if not chunk:
             return
@@ -536,15 +539,16 @@ def main(argv=None) -> int:
         # partial or failed: bisect
         if len(chunk) == 1:
             task_id = chunk[0]
-            marker = "retryable.json" if cell["benchmark"] == "bfcl" else "terminal.json"
-            _write(cell_dir / "tasks" / task_id / marker,
+            # A worker exit without a scored task is not evidence of a model
+            # failure.  In particular, old AppWorld cells recorded the
+            # acon_adapter ImportError as terminal for every task.
+            _write(cell_dir / "tasks" / task_id / "retryable.json",
                    {"task_id": task_id,
-                    "status": "retryable" if cell["benchmark"] == "bfcl" else "terminal",
+                    "status": "retryable",
                     "reason": result.get("error") or "unhealthy_result_rows",
                     "chunk_status": result["status"]})
             print(json.dumps({"cell": cell["cell_id"], "task": task_id,
-                              "status": "retryable_recorded" if cell["benchmark"] == "bfcl"
-                              else "terminal_recorded"}), flush=True)
+                              "status": "retryable_recorded"}), flush=True)
             return
         # healthy tasks inside a partial chunk still count
         for task_id in healthy:
@@ -579,12 +583,14 @@ def main(argv=None) -> int:
     else:
         done = sum(1 for t in task_ids
                    if (cell_dir / "tasks" / t / "done.json").exists())
-        terminal = sum(1 for t in task_ids
-                       if (cell_dir / "tasks" / t / "terminal.json").exists())
+        # Legacy terminal.json files are retained as evidence but do not
+        # complete an unscored AppWorld task.
+        retryable = len(task_ids) - done
         _write(cell_dir / "cell_status.json", {
             "cell_id": cell["cell_id"],
-            "status": "complete" if done + terminal == len(task_ids) else "incomplete",
-            "n_completed": done, "n_terminal": terminal, "n_total": len(task_ids),
+            "status": "complete" if retryable == 0 else "incomplete",
+            "n_completed": done, "n_retryable": retryable,
+            "n_terminal": 0, "n_total": len(task_ids),
             "finished_at": time.time(),
         })
     return 0
