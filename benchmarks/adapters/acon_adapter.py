@@ -125,6 +125,8 @@ def validate_appworld_runner_patches(acon_dir: Path) -> None:
         llm_text = ""
     if "API pricing unavailable for model" not in llm_text or "return None" not in llm_text:
         missing.append(f"0002-unknown-api-cost.patch ({llm_path})")
+    if "# C2KV: generation failures must never become executable actions.\n            raise" not in llm_text:
+        missing.append(f"0007-propagate-generation-errors.patch ({llm_path})")
     runner_path = root / "experiments" / "appworld" / "run.py"
     try:
         runner_text = runner_path.read_text(encoding="utf-8")

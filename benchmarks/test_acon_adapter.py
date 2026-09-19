@@ -449,6 +449,7 @@ def test_appworld_required_patch_markers(tmp_path):
         "base_url = os.environ.get('ACON_OPENAI_BASE_URL')\n"
         "logger.info(f'API pricing unavailable for model {model_name}')\n"
         "return None\n"
+        "# C2KV: generation failures must never become executable actions.\n            raise\n"
     )
     llm.write_text(complete_llm)
     runner.write_text(
