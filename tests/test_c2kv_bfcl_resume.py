@@ -189,6 +189,7 @@ def test_nonzero_worker_exit_preserves_rows_and_retries_only_missing(tmp_path):
     def popen(*args, **kwargs):
         nonlocal calls
         calls += 1
+        assert kwargs["env"]["TORCH_DEVICE_BACKEND_AUTOLOAD"] == "0"
         out = tmp_path / "batches" / "attempt"
         if calls == 1:
             (out / "server").mkdir(parents=True, exist_ok=True)

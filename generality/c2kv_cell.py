@@ -290,6 +290,9 @@ def run_task(cell: dict, task_ids: list[str], port: int, batch_dirname: str) -> 
     # resolves without losing provenance.
     out.mkdir(parents=True, exist_ok=False)
     env = os.environ.copy()
+    # The controller is explicitly CPU-only; NPU execution belongs to the
+    # separate SGLang server and must not depend on this shell's CANN setup.
+    env["TORCH_DEVICE_BACKEND_AUTOLOAD"] = "0"
     env["PYTHONPATH"] = os.pathsep.join((str(RUNTIME / "python"), str(RUNTIME)))
     env["no_proxy"] = env["NO_PROXY"] = "127.0.0.1,localhost"
     for k in ("http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY"):
