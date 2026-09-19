@@ -10,7 +10,10 @@ from __future__ import annotations
 
 import argparse
 import copy
+import importlib
 import json
+import os
+import site
 import sys
 import time
 import urllib.error
@@ -19,6 +22,9 @@ import uuid
 from pathlib import Path
 from typing import Any, Mapping
 
+# Calibration runs its detector on CPU and calls the serving engine over HTTP.
+os.environ["TORCH_DEVICE_BACKEND_AUTOLOAD"] = "0"
+
 GENERATION_ROOT = Path("/home/liuyancheng/c2kv-generality-20260918")
 SRC = GENERATION_ROOT / "src"
 CALIB = GENERATION_ROOT / "calibration"
@@ -26,6 +32,7 @@ LABELS = "/home/liuyancheng/c2kv-evidence-sets-20260916/prepared_v8/run/labels.j
 RISK_ARTIFACT = SRC / "c1_delivery" / "artifacts" / "c1_risk.t02_v1.json"
 THRESHOLD_GRID = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
 WORKING_POINT_TARGET_TOKENS = {"K0": 768, "K2": 1536}
+DEFAULT_BFCL_SITE = Path("/home/liuyancheng/envs/bench/lib/python3.11/site-packages")
 
 sys.path.insert(0, str(SRC / "generality"))
 sys.path.insert(0, str(SRC / "c1_delivery"))
@@ -554,6 +561,27 @@ def select_threshold(pairs: list[tuple[float, int]]) -> dict[str, Any]:
     }
 
 
+def configure_bfcl_site(requested: str | None) -> dict[str, str | None]:
+    """Append BFCL providers without moving them ahead of SGL packages."""
+    path = Path(requested) if requested is not None else DEFAULT_BFCL_SITE
+    if path.is_dir():
+        site.addsitedir(str(path.resolve()))
+        source = "explicit" if requested is not None else "npu_default"
+        used_path = str(path.resolve())
+    elif requested is not None:
+        raise FileNotFoundError(f"Explicit BFCL site-packages path does not exist: {path}")
+    else:
+        source, used_path = "current_environment", None
+    try:
+        importlib.import_module("bfcl_eval.eval_checker.eval_runner")
+    except ImportError as error:
+        raise RuntimeError(
+            f"BFCL evaluator dependencies are unavailable after {source} "
+            f"site-packages setup ({used_path or path}): {error}"
+        ) from error
+    return {"source": source, "path": used_path}
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--backend", choices=("c2kv", "h2o", "snapkv", "pyramidkv"), required=True)
@@ -574,7 +602,11 @@ def main(argv: list[str] | None = None) -> int:
         "--target-tokens", type=int, default=None,
         help="override the working-point target (default: K0=768, K2=1536)")
     parser.add_argument("--max-completion-tokens", type=int, default=512)
+    parser.add_argument("--bfcl-site-packages", default=None,
+                        help="append BFCL provider packages after the current Python site; "
+                             "defaults to the NPU bench environment when present")
     args = parser.parse_args(argv)
+    bfcl_site = configure_bfcl_site(args.bfcl_site_packages)
     if args.smoke:
         args.limit = 1
     if args.target_tokens is None:
@@ -589,6 +621,8 @@ def main(argv: list[str] | None = None) -> int:
         "target_tokens": args.target_tokens,
         "state_ids": [row["state_id"] for row in rows],
         "whole_task_rerun": False, "recovery_disabled": True,
+        "bfcl_site_packages": bfcl_site["path"],
+        "bfcl_site_source": bfcl_site["source"],
     }, indent=2) + "\n", encoding="utf-8")
 
     from benchmarks.memory_runtime.recovery.set_models import C1RiskArtifact

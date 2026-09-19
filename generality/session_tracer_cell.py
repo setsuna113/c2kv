@@ -36,6 +36,9 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+# This driver runs CPU-side detector/retrieval and calls the NPU engine over HTTP.
+os.environ["TORCH_DEVICE_BACKEND_AUTOLOAD"] = "0"
+
 try:
     from .bfcl_results import collect_bfcl_results
     from .completion_contract import write_cell_status
