@@ -102,6 +102,7 @@ def start_proxy(arm: str, upstream: str, port: int, out: Path,
         proc = subprocess.Popen(
             [sys.executable, "-m", "benchmarks.proxy",
              "--upstream", upstream, "--arm", arm, "--backend", "sglang",
+             "--shared-engine",
              # generation arms carry a target_tokens placeholder; the resolved
              # per-cell K/B allowance must be passed explicitly (proxy.py contract)
              "--history-kv-target-tokens", str(target_tokens),
@@ -145,15 +146,17 @@ def start_proxy(arm: str, upstream: str, port: int, out: Path,
             with opener.open(req, timeout=180) as r:
                 body = json.load(r)
         finally:
-            # release the probe's engine session: a leaked one 400s the next
-            # cell's probe on the same engine
-            try:
-                opener.open(urllib.request.Request(
-                    f"http://127.0.0.1:{port}/close_session",
-                    data=json.dumps({"session_id": probe_sid}).encode(),
-                    headers={"Content-Type": "application/json"}), timeout=10)
-            except Exception:
-                pass
+            # The proxy maps probe_sid to a distinct generated engine session
+            # ID.  Ask the owning proxy to close that exact ID, not a raw
+            # /close_session passthrough with the harness ID.
+            close = urllib.request.Request(
+                f"http://127.0.0.1:{port}/close_measurement_session",
+                data=json.dumps({"c2kv_measurement_session_id": probe_sid}).encode(),
+                headers={"Content-Type": "application/json"})
+            with opener.open(close, timeout=20) as response:
+                closed = json.load(response)
+            if closed.get("closed_owned_sessions") is not True:
+                raise RuntimeError("proxy did not close its probe session")
         text = (body.get("choices") or [{}])[0].get("message", {}).get("content")
         if not text:
             raise RuntimeError("proxy probe returned no content; refusing to run cell")
@@ -193,9 +196,10 @@ def stop(proc: subprocess.Popen | None) -> None:
         return
     proc.terminate()
     try:
-        proc.wait(timeout=10)
+        proc.wait(timeout=20)
     except subprocess.TimeoutExpired:
         proc.kill()
+        proc.wait(timeout=5)
 
 
 # infra signatures in benchmark.log: transient engine/proxy/harness trouble

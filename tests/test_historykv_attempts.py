@@ -218,10 +218,15 @@ def test_proxy_retries_keep_separate_logs(tmp_path):
                     "request_id": payload["c2kv_measurement_session_id"],
                     "arm": "gen_h2o_k0"}) + "\n", encoding="utf-8")
                 return Reply(b'{"choices":[{"message":{"content":"OK"}}]}')
+            if request.full_url.endswith("/close_measurement_session"):
+                assert "--shared-engine" in calls[-1]["command"]
+                assert json.loads(request.data)["c2kv_measurement_session_id"].startswith("proxy-probe-")
+                return Reply(b'{"closed_owned_sessions":true}')
             return Reply(b"{}")
 
     def popen(command, **kwargs):
-        calls.append({"request_log": command[command.index("--request-log") + 1],
+        calls.append({"command": command,
+                      "request_log": command[command.index("--request-log") + 1],
                       "telemetry_log": command[command.index("--telemetry-log") + 1]})
         calls[-1]["request_log"] = driver.Path(calls[-1]["request_log"])
         return Process()
