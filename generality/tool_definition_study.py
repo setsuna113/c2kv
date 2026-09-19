@@ -1,7 +1,8 @@
 """Run the paper's recorded tool-definition study on NPU from shared source.
 
 Preparation, selection, budgets and scoring live in the paper checkout. This
-launcher supplies only the device and import path; it starts no serving engine.
+launcher supplies only the import path; evaluation targets an existing SGLang
+endpoint on NPU. It starts no model or serving engine.
 """
 from __future__ import annotations
 
@@ -21,10 +22,10 @@ def command(paper_root, python, action, forwarded):
         raise ValueError("Expected prepare or evaluate")
     result = [str(python), "-m", "benchmarks.tool_definition.cli", action, *forwarded]
     if action == "evaluate":
-        # One explicit device owner; forwarded device options cannot override it.
         if any(item == "--device" or item.startswith("--device=") for item in forwarded):
-            raise ValueError("The NPU launcher owns --device; use the paper CLI for other devices")
-        result += ["--device", "npu:0"]
+            raise ValueError("SGLang owns the device; pass --upstream for the running NPU server")
+        if not any(item == "--upstream" or item.startswith("--upstream=") for item in forwarded):
+            raise ValueError("Evaluation requires --upstream for the running NPU SGLang server")
     return result
 
 
