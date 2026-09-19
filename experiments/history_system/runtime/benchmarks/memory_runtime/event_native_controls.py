@@ -131,6 +131,33 @@ def build_event_native_controller(
 ) -> Any:
     """Build a finite controller without importing the CLI/server module."""
 
+    if s0_config is not None and "candidate_algorithm" in s0_config:
+        from .candidate_algorithms.allocation import CandidateAllocator
+        from .candidate_algorithms.controller import wrap_with_candidate_recovery
+        from .candidate_algorithms import VARIANTS
+        from .event_native_s0_policy import S0_CONFIG_DEFAULTS
+
+        if view_mode != NATIVE_S0_MODE:
+            raise ValueError("Candidate algorithms require the native controller transport")
+        config = dict(s0_config)
+        candidate = config.pop("candidate_algorithm")
+        if not isinstance(candidate, Mapping) or candidate.get("variant") not in VARIANTS:
+            raise ValueError("Invalid candidate_algorithm configuration")
+        if {"gp_experiments", "post_draft_recovery", "d3_hybrid_recovery"} & set(config):
+            raise ValueError("Candidate algorithms cannot stack legacy recovery wrappers")
+        if candidate["variant"] == "goal_rescue":
+            controller = build_event_native_controller(
+                tokenizer, packing=packing, policy=policy, view_mode=view_mode,
+                model_context=model_context, compression_policy=compression_policy,
+                history_view_protocol=history_view_protocol, s0_config=config,
+                benchmark=benchmark)
+        else:
+            controller = CandidateAllocator(
+                tokenizer, packing=packing, policy=policy, model_context=model_context,
+                s0_config={key: value for key, value in config.items() if key in S0_CONFIG_DEFAULTS},
+                benchmark=benchmark, variant=candidate["variant"])
+        return wrap_with_candidate_recovery(controller, candidate)
+
     if s0_config is not None and "d3_hybrid_recovery" in s0_config:
         from .recovery.hybrid import wrap_with_d3_hybrid_recovery
 

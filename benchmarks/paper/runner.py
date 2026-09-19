@@ -11,6 +11,8 @@ import sys
 import time
 import urllib.request
 
+from .candidate_matrix import ARM_TO_VARIANT, parse_candidate_arms, with_candidate_methods
+
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG = Path(__file__).with_name("config.json")
 
@@ -35,8 +37,12 @@ def is_c1_arm(arm):
     return arm in C1_ARMS
 
 
+def is_candidate_arm(arm):
+    return arm in ARM_TO_VARIANT
+
+
 def is_native_arm(arm):
-    return is_c1_arm(arm) or arm == "c2kv_native_r4"
+    return is_c1_arm(arm) or is_candidate_arm(arm) or arm == "c2kv_native_r4"
 
 
 def cells(config):
@@ -48,7 +54,7 @@ def cells(config):
             # an optional per-method benchmark list restricts an ablation to some benchmarks
             if not method.get("benchmarks") or bench["name"] in method["benchmarks"]]
     # Run the final system (and its ablations) after every existing comparison/sweep cell.
-    return sorted(rows, key=lambda row: is_c1_arm(row["arm"]))
+    return sorted(rows, key=lambda row: is_c1_arm(row["arm"]) or is_candidate_arm(row["arm"]))
 
 
 def server_command(config, source, arm=None, benchmark=None):
@@ -94,7 +100,7 @@ def server_command(config, source, arm=None, benchmark=None):
     cmd += ["--disable-piecewise-cuda-graph", "--disable-overlap-schedule",
             "--enable-streaming-session", "--host", "127.0.0.1",
             "--port", str(config["server_port"])]
-    if is_c1_arm(arm):
+    if is_c1_arm(arm) or is_candidate_arm(arm):
         cmd += ["--c2kv-shadow-feature-layer", "-2", "--enable-return-hidden-states"]
     return cmd
 
@@ -220,6 +226,12 @@ def prepare(config, output, source):
         raise ValueError("The paper benchmark uses CUDA")
     for item in config["methods"]:
         arm = get_arm(item["arm"])
+        if is_candidate_arm(arm.name):
+            if (item.get("ratio") != 8 or arm.ratio != 8
+                    or arm.native_controller != "candidate_" + ARM_TO_VARIANT[arm.name]
+                    or set(item.get("benchmarks") or ()) != {"bfcl_base"}):
+                raise ValueError("Candidate arms require native ratio8 and an explicit bfcl_base-only method")
+            continue
         if arm.name == "c2kv_native_r4":
             if item.get("ratio") != 4 or item["method"] != "C2KV":
                 raise ValueError("Native bare C2KV must use ratio4 and the C2KV label")
@@ -633,10 +645,14 @@ def main(argv=None):
     parser.add_argument("--output", type=Path)
     parser.add_argument("--stage", choices=["all", "closed_loop", "common_prefix"], default="all")
     parser.add_argument("--cells", default="", help="comma-separated exact cell ids")
+    parser.add_argument("--candidate-arms", default="",
+                        help="explicit BFCL base candidates: all or comma-separated static_t02,turn_c1,goal_rescue,dependency_first")
     parser.add_argument("--port-offset", type=int, default=0,
                         help="shift server/proxy ports for concurrent single-GPU runners on one host")
     args = parser.parse_args(argv)
     config = json.loads(args.config.read_text())
+    if args.action != "aggregate":
+        config = with_candidate_methods(config, parse_candidate_arms(args.candidate_arms))
     output = args.output or Path(config["output_root"])
     source = args.sglang_source.resolve()
     if args.action == "aggregate":
