@@ -162,6 +162,15 @@ def test_capacity_infeasible_is_a_scored_zero_method_failure(tmp_path):
     assert summary["n_harness_failures"] == 0
 
 
+def test_earlier_declared_failure_does_not_classify_a_later_step(tmp_path):
+    shard = tmp_path / "task_shards" / "multi_turn_base_164"
+    failed = capacity_evidence(shard)
+    with (shard / "server" / "steps.jsonl").open("a") as handle:
+        handle.write(json.dumps({"status": "completed", "error": None}) + "\n")
+    assert failed["status"] == "failed"
+    assert controller_step_failure(shard) is None
+
+
 @pytest.mark.parametrize("change", ["transport", "transport_with_stale_code", "legacy_text",
                                     "missing_code", "other_session", "other_ready_task", "runner_failed"])
 def test_capacity_marker_needs_typed_task_bound_failure(tmp_path, change):
@@ -194,6 +203,7 @@ def test_capacity_marker_needs_typed_task_bound_failure(tmp_path, change):
 def test_prefix_replay_only_tolerates_capacity_for_its_task(tmp_path, monkeypatch, session_task):
     task = "multi_turn_base_164"
     payload = {"messages": [{"role": "user", "content": "fixture"}],
+               "temperature": 0.001,
                "c2kv_measurement_session_id": task}
     prefix = {"event_type": "recorded_prefix", "source_arm": "full",
               "conversation_id": "fixture", "prefix_id": "prefix-1",
@@ -230,7 +240,52 @@ def test_prefix_replay_only_tolerates_capacity_for_its_task(tmp_path, monkeypatc
         assert len(rows) == 1
         assert rows[0]["failure"]["kind"] == "capacity_infeasible"
         assert rows[0]["native_task_id"] == task
+        assert rows[0]["replay_attempted"] is True
+        assert rows[0]["sampling_contract"]["source"]["temperature"] == 0.001
+        assert rows[0]["sampling_contract"]["target"]["temperature"] == 0.0
+        summary = json.loads((output / "replay_summary.json").read_text())
+        assert summary["declared_failure_tasks"] == 1
+        assert summary["attempted_prefixes"] == 1
+        assert summary["not_attempted_after_declared_failure"] == 0
     assert stopped == [True]
+
+
+def test_replay_distinguishes_failed_request_from_later_unattempted_prefix(tmp_path, monkeypatch):
+    task = "multi_turn_base_164"
+    payload = {"messages": [{"role": "user", "content": "fixture"}],
+               "temperature": 0.001, "c2kv_measurement_session_id": task}
+    prefixes = [{"event_type": "recorded_prefix", "source_arm": "full",
+                 "conversation_id": task, "prefix_id": f"prefix-{index}",
+                 "replay_payload": payload, "canonical_sha256": canonical_sha256(payload)}
+                for index in range(2)]
+    prefix_path = tmp_path / "prefixes.jsonl"
+    prefix_path.write_text("".join(json.dumps(row) + "\n" for row in prefixes))
+    native = tmp_path / "run" / "native"
+    shard = native / "task_shards" / task
+    capacity_evidence(shard)
+    delivery = SimpleNamespace(
+        commands_for_task=lambda *_args: (["python", "--model-name", "fixture"], []),
+        runner=SimpleNamespace(_stop_server=lambda *_args: None),
+    )
+    monkeypatch.setattr(paper_c1, "load_delivery", lambda: delivery)
+    monkeypatch.setattr(paper_c1, "prepare_native", lambda *_args: (native, object(), tmp_path / "controller.json"))
+    monkeypatch.setattr(paper_c1, "_controller_process", lambda *_args: (object(), io.StringIO(), shard))
+
+    class FailingOpener:
+        def open(self, *_args, **_kwargs):
+            raise urllib.error.HTTPError("fixture", 422, "capacity", {}, io.BytesIO(b"capacity"))
+
+    monkeypatch.setattr(paper_c1, "OPENER", FailingOpener())
+    output = tmp_path / "run"
+    paper_c1.run_common_prefix({"proxy_port": 49001, "c1": {"task_timeout": 1}},
+                               "bfcl_base", output, prefix_path)
+    rows = list(read_jsonl(output / "prefix_replay.jsonl"))
+    assert [row["replay_attempted"] for row in rows] == [True, False]
+    summary = json.loads((output / "replay_summary.json").read_text())
+    assert summary["failed"] == 2
+    assert summary["declared_failure_tasks"] == 1
+    assert summary["attempted_prefixes"] == 1
+    assert summary["not_attempted_after_declared_failure"] == 1
 
 
 def test_ratio4_ablation_binds_arm_and_ratio_for_summaries():

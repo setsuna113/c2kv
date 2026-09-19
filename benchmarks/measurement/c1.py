@@ -757,11 +757,40 @@ def convert_run(
             })
 
     all_engine_rows, engine_sources = _native_engine_rows(native_path, cell_path)
+    # A restarted cell can append several native attempts for the same
+    # deterministic outer_request_id. Only the server requests named by the
+    # surviving per-task step belong to its observed decision duration.
+    recorded_native_requests = {
+        (row.get("outer_request_id"), row.get("server_request_id"))
+        for row in raw_server_rows
+    }
     engine_rows = [
         row for row in all_engine_rows
-        if row.get("outer_request_id") in outer_ids
+        if (row.get("outer_request_id"), row.get("server_request_id"))
+        in recorded_native_requests
     ]
-    unmatched_engine_rows = len(all_engine_rows) - len(engine_rows)
+    unmatched_engine_rows = sum(
+        row.get("outer_request_id") not in outer_ids for row in all_engine_rows
+    )
+    unattributed_engine_rows = [
+        row for row in all_engine_rows
+        if row.get("outer_request_id") in outer_ids
+        and (row.get("outer_request_id"), row.get("server_request_id"))
+        not in recorded_native_requests
+    ]
+    stale_engine_rows = len(unattributed_engine_rows)
+    unattributed_durations = [
+        duration for row in unattributed_engine_rows
+        if (duration := _duration_ns(
+            _mapping(row.get("native_engine_event")).get("duration_ns")
+        )) is not None
+    ]
+    unattributed_gist = [
+        duration for row in unattributed_engine_rows
+        if (duration := _duration_ns(
+            _metrics(row.get("paper_measurement")).get("gist_generation_duration_ns")
+        )) is not None
+    ]
     server_rows = _deduplicate_server_rows([*raw_server_rows, *engine_rows])
     _apply_controller_denominators(server_rows)
     for row in harness_rows:
@@ -814,6 +843,19 @@ def convert_run(
         "rows": counts,
         "native_engine_telemetry_sources": engine_sources,
         "native_engine_rows_ignored_without_step": unmatched_engine_rows,
+        "native_engine_rows_ignored_without_native_request": stale_engine_rows,
+        "unattributed_native_engine_work": {
+            "server_requests": stale_engine_rows,
+            "server_request_duration_ns_sum": sum(unattributed_durations),
+            "server_request_duration_coverage": len(unattributed_durations),
+            "gist_generation_duration_ns_sum": sum(unattributed_gist),
+            "gist_generation_duration_coverage": len(unattributed_gist),
+            "accounting": (
+                "Preserved in raw native_engine_telemetry; excluded from the "
+                "surviving step's measured decision interval. These requests "
+                "may belong to an earlier cell attempt or an unrecorded failure."
+            ),
+        },
         "prefix_replay_enrichment": replay_enrichment,
         "replay_payload_available": False,
         "replay_note": (

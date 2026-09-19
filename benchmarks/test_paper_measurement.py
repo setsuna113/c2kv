@@ -143,19 +143,27 @@ def test_cached_evictable_follows_the_chain_resident_peak():
     _merge_server_measurement(chain, {
         "request_peak_resident_kv_bytes": 456_000_000,
         "request_peak_cached_evictable_kv_bytes": 426_000_000,
+        "request_peak_c2kv_cached_evictable_kv_bytes": 50_000_000,
+        "request_peak_c2kv_cache_accounting_available": True,
         "cached_evictable_kv_peak_bytes": 426_000_000,
     }, "generation")
     assert chain["request_peak_resident_kv_bytes"] == 456_000_000
     assert chain["request_peak_cached_evictable_kv_bytes"] == 426_000_000
+    assert chain["request_peak_c2kv_cached_evictable_kv_bytes"] == 50_000_000
+    assert chain["request_peak_c2kv_cache_accounting_available"] is True
     assert chain["cached_evictable_kv_peak_bytes"] == 426_000_000
     # A later, smaller request must not drag the at-peak line item with it.
     _merge_server_measurement(chain, {
         "request_peak_resident_kv_bytes": 60_000_000,
         "request_peak_cached_evictable_kv_bytes": 5_000_000,
+        "request_peak_c2kv_cached_evictable_kv_bytes": 0,
+        "request_peak_c2kv_cache_accounting_available": False,
         "cached_evictable_kv_peak_bytes": 5_000_000,
     }, "generation")
     assert chain["request_peak_resident_kv_bytes"] == 456_000_000
     assert chain["request_peak_cached_evictable_kv_bytes"] == 426_000_000
+    assert chain["request_peak_c2kv_cached_evictable_kv_bytes"] == 50_000_000
+    assert chain["request_peak_c2kv_cache_accounting_available"] is True
     assert chain["cached_evictable_kv_peak_bytes"] == 426_000_000
 
 

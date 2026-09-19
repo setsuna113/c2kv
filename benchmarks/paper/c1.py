@@ -256,12 +256,15 @@ def _capacity_session_id(task_root):
 
 
 def controller_step_failure(task_root):
-    """(status, kind, message) for a tolerated controller step error, else None."""
+    """(status, kind, message) for the latest failed controller step, else None."""
     steps = task_root / "server" / "steps.jsonl"
     if not steps.is_file():
         return None
     capacity_session_id = _capacity_session_id(task_root)
-    for row in read_jsonl(steps):
+    rows = list(read_jsonl(steps))
+    for row in rows[-1:]:
+        if row.get("status") != "failed":
+            return None
         error = row.get("error")
         text = json.dumps(error) if isinstance(error, dict) else str(error or "")
         if (capacity_session_id is not None
@@ -320,6 +323,18 @@ def replay_task_id(rows, conversation):
     return "replay_" + hashlib.sha256(conversation.encode()).hexdigest()[:16]
 
 
+def replay_sampling_receipt(source, target):
+    fields = ("temperature", "top_p", "seed", "max_tokens", "max_completion_tokens")
+    source_values = {key: source[key] for key in fields if key in source}
+    target_values = {key: target[key] for key in fields if key in target}
+    return {
+        "source": source_values,
+        "target": target_values,
+        "changed": source_values != target_values,
+        "policy": "recorded Full messages with the target arm's native sampling contract",
+    }
+
+
 def run_common_prefix(config, benchmark, directory, prefix_path):
     """Teacher-force recorded observations; never execute or score replay drafts."""
     records = [row for row in read_jsonl(prefix_path) if row.get("event_type") == "recorded_prefix"]
@@ -339,7 +354,9 @@ def run_common_prefix(config, benchmark, directory, prefix_path):
         raise ValueError("Recorded conversations reuse an episode identity")
     native, args, controller_path = prepare_native(config, benchmark, directory, tasks, delivery)
     sequence = 0
-    tolerated_failures = []   # (task, prefix_id, status, kind): the per-task server declared a tolerated failure
+    tolerated_failures = []   # (task, prefix_id, status, kind): failed replay prefixes
+    declared_failure_tasks = []  # one server-declared incident per task
+    unattempted_prefixes = 0
     for task, rows in zip(tasks, groups.values()):
         if benchmark in {"acebench_agent", "toolsandbox"}:
             from .native_extra import controller_command
@@ -385,6 +402,9 @@ def run_common_prefix(config, benchmark, directory, prefix_path):
                 elif benchmark == "acebench_agent":
                     from .native_extra import replay_payload
                     payload = replay_payload(payload, task, step)
+                if payload.get("messages") != row["replay_payload"].get("messages"):
+                    raise ValueError("Native replay changed the recorded Full message prefix")
+                sampling_receipt = replay_sampling_receipt(row["replay_payload"], payload)
                 request = urllib.request.Request(
                     f"http://127.0.0.1:{config['proxy_port']}/v1/chat/completions",
                     data=json.dumps(payload).encode(), headers={"Content-Type": "application/json"})
@@ -407,6 +427,8 @@ def run_common_prefix(config, benchmark, directory, prefix_path):
                     # CapacityInfeasible) end this task's server; record the prefix and the
                     # rest of the task as failed instead of losing the whole replay cell.
                     status, kind, message = failure
+                    declared_failure_tasks.append((task, status, kind))
+                    unattempted_prefixes += len(rows) - step - 1
                     for skipped, later in enumerate(rows[step:]):
                         append_jsonl(directory / "prefix_replay.jsonl", {
                             "schema": "c2kv.prefix_replay.v1", "event_type": "prefix_replay",
@@ -419,6 +441,8 @@ def run_common_prefix(config, benchmark, directory, prefix_path):
                             "http_status": error.code if skipped == 0 else None,
                             "request": later["replay_payload"], "response": None,
                             "source_paper_measurement": _paper_measurement(later.get("source_response")),
+                            "sampling_contract": (sampling_receipt if skipped == 0 else None),
+                            "replay_attempted": skipped == 0,
                             "error": detail if skipped == 0 else f"task server terminated after {kind}",
                             "failure": {"status": status, "kind": kind, "message": message},
                             "teacher_forced": True, "external_actions_executed": 0,
@@ -435,6 +459,8 @@ def run_common_prefix(config, benchmark, directory, prefix_path):
                     "start_unix_ns": unix, "duration_ns": time.perf_counter_ns() - started,
                     "http_status": 200, "request": row["replay_payload"], "response": result,
                     "source_paper_measurement": _paper_measurement(row.get("source_response")),
+                    "sampling_contract": sampling_receipt,
+                    "replay_attempted": True,
                     "error": None, "teacher_forced": True, "external_actions_executed": 0,
                 })
                 sequence += 1
@@ -447,7 +473,11 @@ def run_common_prefix(config, benchmark, directory, prefix_path):
     save(directory / "replay_summary.json", {
         "prefixes": len(records), "completed": len(records) - len(tolerated_failures),
         "failed": len(tolerated_failures), "failed_tasks": sorted({t for t, *_ in tolerated_failures}),
+        "declared_failure_tasks": len(declared_failure_tasks),
+        "attempted_prefixes": len(records) - unattempted_prefixes,
+        "not_attempted_after_declared_failure": unattempted_prefixes,
         "failure_kinds": kinds,
+        "failure_kind_units": "prefixes, including later prefixes not attempted after task failure",
         "policy": "prefixes of a task whose native server declared a tolerated failure (cuda_oom, "
                   "capacity_infeasible) are recorded as failed; any other error fails the cell",
     })

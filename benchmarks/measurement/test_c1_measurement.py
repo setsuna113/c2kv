@@ -199,6 +199,15 @@ def test_convert_run_joins_real_harness_and_deduplicates_native_requests(tmp_pat
         },
         {
             "schema_version": 1,
+            "outer_request_id": outer_one,
+            "server_request_id": "generation-from-earlier-cell-attempt:extract:0",
+            "phase": "draft:extraction",
+            "kind": "c2kv_extract",
+            "duration_ns": 2_000,
+            "metrics": {"gist_generation_duration_ns": 1_000},
+        },
+        {
+            "schema_version": 1,
             "outer_request_id": "warmup-not-a-step",
             "server_request_id": "warmup-request",
             "phase": "generation",
@@ -296,6 +305,9 @@ def test_convert_run_joins_real_harness_and_deduplicates_native_requests(tmp_pat
     }
     assert provenance["physical_engine_metrics_overridden"] is False
     assert receipt["native_engine_rows_ignored_without_step"] == 1
+    assert receipt["native_engine_rows_ignored_without_native_request"] == 1
+    assert receipt["unattributed_native_engine_work"]["server_request_duration_ns_sum"] == 2_000
+    assert receipt["unattributed_native_engine_work"]["gist_generation_duration_ns_sum"] == 1_000
 
     summary = aggregate(proxy, normalized_harness, server_rows=server)
     headline = summary["latency_ms"]["complete_model_side_per_committed_action"]

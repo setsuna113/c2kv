@@ -66,10 +66,12 @@ def _ratio_summary(pairs: List[tuple]) -> Dict[str, Any]:
 MEMORY_FIELDS = (
     "request_peak_resident_kv_tokens", "request_peak_resident_kv_bytes",
     # Line items of the resident total (never subtracted from it): evictable
-    # prefix-cache slots at the decision chain's resident peak, and the
-    # chain-wide maximum of evictable slots.
+    # radix-cache and C2KV LRU slots at the decision chain's resident peak,
+    # and the chain-wide maximum of evictable slots.
     "request_peak_cached_evictable_kv_tokens",
     "request_peak_cached_evictable_kv_bytes",
+    "request_peak_c2kv_cached_evictable_kv_tokens",
+    "request_peak_c2kv_cached_evictable_kv_bytes",
     "cached_evictable_kv_peak_tokens", "cached_evictable_kv_peak_bytes",
     "generation_active_kv_tokens", "generation_active_kv_bytes",
     "reference_history_resident_bytes",
@@ -87,6 +89,9 @@ MEMORY_FIELDS = (
 AT_RESIDENT_PEAK_FIELDS = (
     "request_peak_cached_evictable_kv_tokens",
     "request_peak_cached_evictable_kv_bytes",
+    "request_peak_c2kv_cached_evictable_kv_tokens",
+    "request_peak_c2kv_cached_evictable_kv_bytes",
+    "request_peak_c2kv_cache_accounting_available",
 )
 
 PEAK_FIELDS = {
@@ -345,12 +350,20 @@ def aggregate(proxy_rows: List[Dict[str, Any]], harness_rows: List[Dict[str, Any
                 "request_peak_resident_kv_bytes": resident,
                 "request_peak_cached_evictable_kv_bytes": server_value(
                     row, "request_peak_cached_evictable_kv_bytes"),
+                "request_peak_c2kv_cached_evictable_kv_bytes": server_value(
+                    row, "request_peak_c2kv_cached_evictable_kv_bytes"),
+                "request_peak_c2kv_cache_accounting_available": server_value(
+                    row, "request_peak_c2kv_cache_accounting_available"),
                 "cached_evictable_kv_peak_bytes": server_value(
                     row, "cached_evictable_kv_peak_bytes"),
                 "generation_active_kv_bytes": server_value(
                     row, "generation_active_kv_bytes"),
             }
     memory["resident_peak_chain"] = resident_peak_chain
+    memory["resident_kv_definition"] = (
+        "occupied main and C2KV KV slots plus live reference and temporary KV; "
+        "includes evictable cache entries, not allocated pool capacity"
+    )
 
     ratios = {}
     for scope in ("whole", "history"):
@@ -382,6 +395,16 @@ def aggregate(proxy_rows: List[Dict[str, Any]], harness_rows: List[Dict[str, Any
 
     replay_rows = replay_rows or []
     replay = [row for row in replay_rows if row.get("event_type") == "prefix_replay"]
+    attempted_replay = [
+        row for row in replay
+        if row.get("replay_attempted") is not False
+        and isinstance(row.get("duration_ns"), (int, float))
+        and not isinstance(row.get("duration_ns"), bool)
+    ]
+    successful_replay = [
+        row for row in attempted_replay
+        if row.get("http_status") == 200 and row.get("error") is None
+    ]
     common_prefix_ratios = {}
     for scope in ("whole", "history"):
         pairs = []
@@ -431,6 +454,10 @@ def aggregate(proxy_rows: List[Dict[str, Any]], harness_rows: List[Dict[str, Any
             "requests": len(requests), "phases": len(phases),
             "tool_actions": len(actions), "episodes": len(episodes),
             "joined_actions": joined, "prefix_replays": len(replay),
+            "prefix_replays_attempted": len(attempted_replay),
+            "prefix_replays_successful": len(successful_replay),
+            "prefix_replays_failed_attempted": len(attempted_replay) - len(successful_replay),
+            "prefix_replays_unattempted": len(replay) - len(attempted_replay),
             "server_events": len(server_rows),
         },
         "latency_ms": {
@@ -500,13 +527,13 @@ def aggregate(proxy_rows: List[Dict[str, Any]], harness_rows: List[Dict[str, Any
                                           if row.get("duration_ns") is not None),
             "episode_wall": distribution(row.get("duration_ns") / 1e6 for row in episodes
                                          if row.get("duration_ns") is not None),
-            "prefix_replay": distribution(row.get("duration_ns") / 1e6 for row in replay
+            "prefix_replay": distribution(row.get("duration_ns") / 1e6 for row in attempted_replay
                                           if row.get("duration_ns") is not None),
             "prefix_replay_algorithm": distribution(
-                value / 1e6 for row in replay
+                value / 1e6 for row in attempted_replay
                 for value in [algorithm_duration_ns(row)] if value is not None),
             "prefix_replay_algorithm_excluding_gist": distribution(
-                value / 1e6 for row in replay
+                value / 1e6 for row in attempted_replay
                 for value in [without_gist_ns(row)] if value is not None),
         },
         "memory": memory,
