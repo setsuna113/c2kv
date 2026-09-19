@@ -165,5 +165,12 @@ matrix with:
 ```bash
 /home/liuyancheng/envs/sgl/bin/python \
   /home/liuyancheng/c2kv-generality-20260918/src/generality/scheduler.py \
-  --cards 0 1 2 3 4 5 6 7
+  --cards 0 1 2 3 4 5 6 --max-drivers-per-card 2
 ```
+
+Use only currently owned, unreserved cards. Card 7 is not part of this
+deployment. Calibration and diagnostic tasks reserve their cards until they
+finish. Each card runs one SGLang engine; the scheduler permits two disjoint
+persistent proxy cells or two native compression cells. Recovery controllers
+and mixed driver families use an exclusive engine. Concurrent quality runs
+must not be used as isolated latency or peak-memory measurements.

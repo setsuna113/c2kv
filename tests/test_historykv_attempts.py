@@ -340,7 +340,10 @@ def test_proxy_retries_keep_separate_logs(tmp_path):
     assert (calls[1]["request_log"].parent / "proxy.log").exists()
 
 
-def test_production_holds_cannot_be_overridden():
+def test_production_holds_cannot_be_overridden(monkeypatch):
+    from generality import scheduler_npu
+    monkeypatch.setattr(scheduler_npu, "BLOCKED_BACKENDS",
+                        {"c2kv", "h2o", "snapkv", "pyramidkv"})
     from generality.scheduler_npu import cells_ready
     for backend in ("c2kv", "h2o", "snapkv", "pyramidkv"):
         for benchmark in ("bfcl_base", "bfcl_long_context"):
