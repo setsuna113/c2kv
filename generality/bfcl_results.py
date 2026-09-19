@@ -12,9 +12,9 @@ from pathlib import Path
 from typing import Any, Iterable
 
 try:
-    from .bfcl_completion import completion_kind, terminal_failure_kind
+    from .bfcl_completion import completion_kind, terminal_failure_kind, has_legacy_fc_decode_error
 except ImportError:
-    from bfcl_completion import completion_kind, terminal_failure_kind
+    from bfcl_completion import completion_kind, terminal_failure_kind, has_legacy_fc_decode_error
 
 
 RESULT_GLOB = "batches/*/bfcl_worker/bfcl/result/**/*.json"
@@ -24,24 +24,6 @@ LEGACY_FC_DECODE_ERROR = "'str' object has no attribute 'items'"
 def ordered_unique(values: Iterable[str]) -> list[str]:
     """Return unique nonempty task IDs while preserving manifest order."""
     return list(dict.fromkeys(value for value in values if value))
-
-
-def has_legacy_fc_decode_error(row: dict[str, Any]) -> bool:
-    """Identify rows produced by the old FC handler's string/list mismatch."""
-    inference_log = row.get("inference_log")
-    if not isinstance(inference_log, list):
-        return False
-    for turn in inference_log:
-        if not isinstance(turn, dict):
-            continue
-        for key, entries in turn.items():
-            if not key.startswith("step_") or not isinstance(entries, list):
-                continue
-            if any(isinstance(entry, dict) and entry.get("role") == "handler_log"
-                   and entry.get("error") == LEGACY_FC_DECODE_ERROR
-                   for entry in entries):
-                return True
-    return False
 
 
 def bfcl_row_is_valid(row: dict[str, Any], *, fc_model: bool = False) -> bool:

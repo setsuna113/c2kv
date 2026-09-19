@@ -110,7 +110,9 @@ def test_scored_failures_are_terminal_but_backend_failures_refill(tmp_path):
 def test_fc_collector_refills_only_the_old_handler_decode_failure(tmp_path):
     legacy = {
         "id": "task_old", "result": [["<tool_call>...</tool_call>"]],
-        "inference_log": [{"step_0": [{"role": "handler_log",
+        "inference_log": [{"step_0": [{"role": "assistant", "content":
+                                      '<tool_call>{"name":"lookup","arguments":{}}</tool_call>'},
+                                     {"role": "handler_log",
                                       "error": "'str' object has no attribute 'items'"}]}],
     }
     actor_failure = {
@@ -127,6 +129,24 @@ def test_fc_collector_refills_only_the_old_handler_decode_failure(tmp_path):
     assert fc["legacy_fc_decode_task_ids"] == ["task_old"]
     assert fc["valid_task_ids"] == ["task_actor"]
     assert prompting["valid_task_ids"] == ["task_old", "task_actor"]
+
+
+def test_fc_collector_preserves_plain_final_text_from_old_native_handler(tmp_path):
+    row = {"id": "task_final", "result": [["Here is the answer."]],
+           "inference_log": [{"step_0": [
+               {"role": "assistant", "content": "Here is the answer."},
+               {"role": "handler_log", "error": "'str' object has no attribute 'items'"}]}]}
+    _write_rows(_result_file(tmp_path, "old"), [row])
+    result = collect_bfcl_results(tmp_path, ["task_final"], fc_model=True)
+    assert result["valid_task_ids"] == ["task_final"]
+    assert result["refill_task_ids"] == []
+    assert result["canonical"]["task_final"]["row"] == row
+
+
+def test_driver_and_bundled_bfcl_completion_contracts_match():
+    root = Path(__file__).resolve().parents[1]
+    assert (root / "generality/bfcl_completion.py").read_text() == (
+        root / "controller_runtime/benchmarks/bfcl_completion.py").read_text()
 
 
 def test_validate_chunk_deduplicates_and_rejects_foreign_or_malformed_rows(tmp_path):
