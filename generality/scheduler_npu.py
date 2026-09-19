@@ -102,18 +102,11 @@ def calibration_is_ready(cell: dict, receipt: dict | None) -> bool:
                 isinstance(receipt.get("threshold"), (int, float)))
 
 
-# Production is paused for all backends pending per-backend NPU validation and
-# audit of prior attempt receipts.  A scheduler restart or --include-pending
-# must not release the hold.  The narrower cell holds remain conservative
-# defaults for any later selective backend release.
-BLOCKED_BACKENDS: set[str] = {"c2kv", "h2o", "snapkv", "pyramidkv"}
-BLOCKED_CELL_KEYS = {
-    ("pyramidkv", "bfcl_base"), ("pyramidkv", "bfcl_long_context"),
-    ("pyramidkv", "appworld"),
-    ("h2o", "bfcl_base"), ("h2o", "bfcl_long_context"),
-    ("snapkv", "bfcl_base"), ("snapkv", "bfcl_long_context"),
-    ("c2kv", "bfcl_base"), ("c2kv", "bfcl_long_context"),
-}
+# Device validation and the historical-result audit released these backends.
+# Tracer cells still require their own backend/working-point calibration.
+# Explicit holds remain available and cannot be bypassed by --include-pending.
+BLOCKED_BACKENDS: set[str] = set()
+BLOCKED_CELL_KEYS: set[tuple[str, str]] = set()
 
 
 
@@ -533,12 +526,20 @@ def may_share_engine(cell: dict, card: int, running: dict,
                   if running_card == card and str(other["cell_dir"]) not in active_dirs)
     if not active:
         return True
-    # Only two persistent proxies passed budget and peer-close isolation.
-    # Controller/controller and mixed concurrency have not been validated.
-    history_proxy = driver_for(cell["backend"], cell["condition"]) == "historykv_off"
-    if not history_proxy or any(
-            driver_for(other["backend"], other["condition"]) != "historykv_off"
-            for other in active):
+    # Two persistent proxies and two native compression controllers passed
+    # interleaved generation and peer-close isolation. Recovery and mixed
+    # driver families remain exclusive until separately validated.
+    def family(candidate):
+        driver = driver_for(candidate["backend"], candidate["condition"])
+        if driver == "historykv_off":
+            return "history_proxy"
+        if driver == "c2kv" and candidate["condition"] in (
+                "compression_full_budget", "recovery_off_same_initial"):
+            return "native_compression"
+        return None
+
+    own_family = family(cell)
+    if own_family is None or any(family(other) != own_family for other in active):
         return False
     keys = task_keys(cell)
     if keys is None:

@@ -31,6 +31,7 @@ def cell(tmp_path, backend="h2o", benchmark="appworld"):
 
 
 def test_production_hold_cannot_be_overridden_or_start_engines(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(scheduler, "BLOCKED_BACKENDS", {"c2kv", "h2o", "snapkv", "pyramidkv"})
     rows = [cell(tmp_path, backend=backend, benchmark=benchmark)
             for backend in scheduler.BLOCKED_BACKENDS
             for benchmark in ("appworld", "bfcl_base", "bfcl_long_context")]
@@ -233,6 +234,7 @@ def test_cell_driver_lock_and_port_are_isolated_across_slots(tmp_path, monkeypat
 
 
 def test_launch_boundary_refuses_a_held_cell(tmp_path, monkeypatch):
+    monkeypatch.setattr(scheduler, "BLOCKED_BACKENDS", {"h2o"})
     task = cell(tmp_path, backend="h2o")
     monkeypatch.setattr(scheduler.subprocess, "Popen", lambda *a, **k:
                         pytest.fail("driver started"))
@@ -354,6 +356,22 @@ def test_mixed_driver_protocols_and_overlapping_tasks_prevent_sharing(tmp_path):
     assert not scheduler.may_share_engine(second, 1, {}, {1: {first["cell_dir"]: first}})
     second["condition"] = "compression_full_budget"
     assert scheduler.may_share_engine(second, 1, {}, {1: {first["cell_dir"]: first}})
+
+
+def test_native_compression_shares_only_disjoint_tasks_without_recovery(tmp_path):
+    first = cell(tmp_path, backend="c2kv")
+    first["task_ids"] = ["task"]
+    second = dict(first, cell_id="second", cell_dir=str(tmp_path / "second"),
+                  benchmark_key="bfcl_base", task_ids=["other-task"])
+    occupied = {1: {first["cell_dir"]: first}}
+    assert scheduler.may_share_engine(second, 1, {}, occupied)
+    second.update(benchmark_key="appworld", task_ids=["task"])
+    assert not scheduler.may_share_engine(second, 1, {}, occupied)
+    second["task_ids"] = ["other-task"]
+    second["condition"] = "tracer_history"
+    assert not scheduler.may_share_engine(second, 1, {}, occupied)
+    second.update(backend="h2o", condition="compression_full_budget")
+    assert not scheduler.may_share_engine(second, 1, {}, occupied)
 
 
 def test_unhealthy_engine_is_not_restarted_under_a_live_driver(tmp_path, monkeypatch):
