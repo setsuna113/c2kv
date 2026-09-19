@@ -25,9 +25,12 @@ if str(RUNTIME / "benchmarks") not in benchmarks.__path__:
 from adapters import acebench_adapter  # noqa: E402
 from arms import get_arm  # noqa: E402
 from backends.sglang import SglangBackend  # noqa: E402
+from test_toolmemory import FakeTokenizer  # noqa: E402
 from benchmarks.memory_runtime.acebench_source import build_ace_event_store  # noqa: E402
 from benchmarks.paper.native_extra import replay_payload  # noqa: E402
 import proxy  # noqa: E402
+import source_annotations  # noqa: E402
+import toolmemory  # noqa: E402
 
 
 def _official_scene(monkeypatch, tmp_path, *, recording):
@@ -66,7 +69,8 @@ def _official_scene(monkeypatch, tmp_path, *, recording):
 
     request = hook.request_wrapper(create)
     resource = SimpleNamespace(_client=SimpleNamespace(base_url="http://agent/v1"))
-    initial = [{"role": "system", "content": "system"},
+    functions = [{"name": "Wifi", "description": "Read connectivity"}]
+    initial = [{"role": "system", "content": "ACE action syntax. APIs:\n" + json.dumps(functions)},
                {"role": "user", "content": "wifi"}]
     history = [{"sender": "user", "message": "wifi"},
                {"sender": "agent", "message": "[Wifi()]"}]
@@ -140,6 +144,9 @@ def test_recorded_full_prefix_keeps_receipt_and_strips_model_wire(tmp_path, monk
     recorded = dict(on_calls[1], **on_calls[1]["extra_body"])
     recorded.pop("extra_body")
     source = recorded["c2kv_ace_source"]
+    functions = [{"name": "Wifi", "description": "Read connectivity"}]
+    recorded["c2kv_tool_spans_v1"] = source_annotations.acebench_function_spans(
+        recorded["messages"], functions)
 
     def drive(payload, prefix):
         monkeypatch.setattr(proxy, "PREFIX_LOG_PATH", str(prefix) if prefix else "")
@@ -161,7 +168,11 @@ def test_recorded_full_prefix_keeps_receipt_and_strips_model_wire(tmp_path, monk
     row = json.loads((tmp_path / "prefixes.jsonl").read_text(encoding="utf-8"))
     assert row["ace_official_task_id"] == "agent_multi_turn_1"
     assert row["replay_payload"]["c2kv_ace_source"] == source
+    assert row["replay_payload"]["c2kv_tool_spans_v1"] == recorded["c2kv_tool_spans_v1"]
     assert "c2kv_ace_official_task_id" not in row["replay_payload"]
+    plan = toolmemory.plan_visible_tool_memory(
+        row["replay_payload"], toolmemory.parse_tool_memory_spec("t0:r8"), FakeTokenizer())
+    assert plan is not None and plan.info["n_visible_source_spans"] == 1
     replay = replay_payload(row["replay_payload"], row["ace_official_task_id"], 0)
     assert replay["c2kv_ace_source"] == source
     assert replay["c2kv_eval_context"]["task_id"] == "agent_multi_turn_1"

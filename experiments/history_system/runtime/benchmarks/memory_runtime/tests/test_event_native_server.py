@@ -57,6 +57,29 @@ def test_sglang_backend_arguments_reach_supervised_child(tmp_path):
     assert child.npu_allocator_metrics is False
 
 
+def test_tool_memory_arguments_reach_supervised_child_only_when_enabled(tmp_path):
+    argv = [
+        '--checkpoint', str(tmp_path / 'checkpoint'), '--out', str(tmp_path / 'out'),
+        '--run-id', 'tool-test', '--view-mode', 'static', '--ratio', '4',
+        '--max-new-tokens', '2', '--task-ids', 'synthetic-task', '--max-decisions', '1',
+        '--max-generation-calls', '1', '--max-wall-seconds', '30',
+        '--generation-backend', 'sglang', '--sglang-backend-url', 'http://127.0.0.1:36100',
+    ]
+    plain = server.parser().parse_args(argv)
+    plain_child = server._child_command(plain)
+    assert '--tool-memory' not in plain_child
+    assert '--tool-checkpoint' not in plain_child
+    assert '--tool-budget-tokens' not in plain_child
+    enabled = server.parser().parse_args(argv + [
+        '--tool-memory', 't0:r8', '--tool-checkpoint', str(tmp_path / 'tool-checkpoint'),
+        '--tool-budget-tokens', '256',
+    ])
+    child = server.parser().parse_args(server._child_command(enabled)[3:])
+    assert child.tool_memory == 't0:r8'
+    assert child.tool_checkpoint == (tmp_path / 'tool-checkpoint').resolve()
+    assert child.tool_budget_tokens == 256
+
+
 @pytest.mark.parametrize('entrypoint', [server._serve, server._supervise])
 def test_d3_controller_rejects_native_backend_before_output(tmp_path, entrypoint):
     controller = tmp_path / 'controller.json'

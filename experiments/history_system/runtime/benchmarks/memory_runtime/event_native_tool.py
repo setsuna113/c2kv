@@ -48,6 +48,13 @@ def parse_native_tool_spec(value: str | None):
     return shared_tool_catalog().parse_tool_memory_spec(value)
 
 
+def validate_ready_tool_contract(manifest: Mapping[str, Any], tool_memory: str | None,
+                                 checkpoint: str | Path | None = None,
+                                 budget_tokens: int | None = None) -> None:
+    shared_tool_catalog().validate_ready_tool_contract(
+        manifest, tool_memory, checkpoint, budget_tokens)
+
+
 class _TokenizerView:
     def __init__(self, tokenizer: Any):
         self.tokenizer = tokenizer

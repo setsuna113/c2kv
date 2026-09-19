@@ -14,6 +14,27 @@ from .telemetry import append_jsonl, canonical_sha256, read_jsonl
 
 
 _OPENER = urlrequest.build_opener(urlrequest.ProxyHandler({}))
+INLINE_TOOL_SOURCE_BENCHMARKS = {"acebench", "acebench_agent", "appworld"}
+
+
+def validate_tool_source_capture(payload: Dict[str, Any], benchmark: str) -> None:
+    """Require an explicit source observation before tool-ON replay.
+
+    An empty list means the producer observed no visible definition at that
+    decision. A missing or invalid field is an old/unusable source, not that
+    observation. Structured-tool benchmarks do not need inline annotations.
+    """
+    if benchmark not in INLINE_TOOL_SOURCE_BENCHMARKS:
+        return
+    if (not isinstance(payload, dict)
+            or not isinstance(payload.get("c2kv_tool_spans_v1"), list)):
+        raise ValueError(f"{benchmark} tool replay requires captured c2kv_tool_spans_v1")
+    from benchmarks.toolmemory import ToolMemoryError, resolve_visible_tool_spans
+
+    try:
+        resolve_visible_tool_spans(payload)
+    except ToolMemoryError as error:
+        raise ValueError(f"{benchmark} tool replay has invalid source spans: {error}") from error
 
 
 def chat_url(base_url: str) -> str:
@@ -51,11 +72,15 @@ def is_context_overflow(raw_response):
 def replay_prefixes(
     prefixes: "str | Path", base_url: str, output: "str | Path",
     *, source_run_id: str, target_run_id: str, timeout: int = 600,
+    tool_source_benchmark: str = "",
 ) -> Dict[str, int]:
     rows = [row for row in read_jsonl(prefixes)
             if row.get("event_type") == "recorded_prefix"]
     if not rows:
         raise ValueError(f"no recorded_prefix rows in {prefixes}")
+    if tool_source_benchmark:
+        for row in rows:
+            validate_tool_source_capture(row.get("replay_payload"), tool_source_benchmark)
     completed = 0
     failed = 0
     context_overflow = 0
@@ -136,11 +161,13 @@ def main(argv=None) -> None:
     parser.add_argument("--source-run-id", required=True)
     parser.add_argument("--target-run-id", required=True)
     parser.add_argument("--timeout", type=int, default=600)
+    parser.add_argument("--tool-source-benchmark", default="",
+                        choices=("", "acebench_agent", "appworld"))
     args = parser.parse_args(argv)
     summary = replay_prefixes(
         args.prefixes, args.base_url, args.output,
         source_run_id=args.source_run_id, target_run_id=args.target_run_id,
-        timeout=args.timeout,
+        timeout=args.timeout, tool_source_benchmark=args.tool_source_benchmark,
     )
     print(json.dumps(summary, sort_keys=True))
     Path(args.output).with_name("replay_summary.json").write_text(

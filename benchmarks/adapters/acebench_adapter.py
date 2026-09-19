@@ -142,7 +142,7 @@ def harness_env(base_url: str, user_base_url: str, model: str,
         ROLE_HISTORY_ENV: "1",
         "NO_PROXY": "127.0.0.1,localhost", "no_proxy": "127.0.0.1,localhost",
     }
-    if os.environ.get(TOOL_CONTEXT_ENV) == "1":
+    if os.environ.get(TOOL_CONTEXT_ENV) == "1" or record_source:
         benchmark_modules = str(Path(__file__).resolve().parents[1])
         env["PYTHONPATH"] = os.pathsep.join(part for part in (
             benchmark_modules, os.environ.get("PYTHONPATH", "")) if part)
@@ -476,6 +476,7 @@ def run_acebench(base_url: str, user_base_url: str, out_dir: Path,
     acebench_dir = Path(acebench_dir) if acebench_dir else ACEBENCH_DIR
     python = python or sys.executable
     tests = expand_categories(category, load_category_map(acebench_dir))
+    effective_tests = tests
     work = prepare_workdir(out_dir, acebench_dir, language=language, tests=tests,
                            task_ids=task_ids, max_tasks=max_tasks)
     harness = acebench_dir
@@ -483,7 +484,8 @@ def run_acebench(base_url: str, user_base_url: str, out_dir: Path,
         selection = json.loads((work / "selected_tasks.json").read_text(encoding="utf-8"))
         selected_tests = [str(source["test"]) for source in selection["sources"]]
         harness = prepare_subset_harness(work, acebench_dir, category, selected_tests)
-    if os.environ.get(TOOL_CONTEXT_ENV) == "1":
+        effective_tests = selected_tests
+    if os.environ.get(TOOL_CONTEXT_ENV) == "1" or record_prefixes:
         harness = prepare_tool_span_harness(work, harness)
     env = harness_env(base_url, user_base_url, model,
                       record_source=bool(record_prefixes))
@@ -492,17 +494,17 @@ def run_acebench(base_url: str, user_base_url: str, out_dir: Path,
     command = generate_command(python, harness, model, category, language, num_threads,
                                max_dialog_turns, user_model or model, temperature, top_p,
                                max_tokens)
-    if all(test.startswith("agent_") for test in tests):
+    if all(test.startswith("agent_") for test in effective_tests):
         command = [python, str(Path(__file__).resolve().parents[1] / "acebench_cli.py"),
                    str(harness), *command[2:]]
     run_owned(
         command,
         cwd=work, env=env, check=True)
-    check_terminal(work, language, model, tests)
+    check_terminal(work, language, model, effective_tests)
     prepare_score_dir(work, language, model)
     run_owned(eval_command(python, harness, model, category, language),
                    cwd=work, env=env, check=True)
-    summary = collect(work, language, model, tests)
+    summary = collect(work, language, model, effective_tests)
     summary["user_model"] = user_model or model
     summary["language"] = language
     selection = work / "selected_tasks.json"

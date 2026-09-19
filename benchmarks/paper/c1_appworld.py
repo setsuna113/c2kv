@@ -497,6 +497,9 @@ def run_task(
                 start_new_session=os.name == "posix",
             )
             ready = _wait_ready(process, task_out / "server" / "ready.json", deadline)
+            if config.get("tool_memory"):
+                from .native_extra import validate_tool_ready
+                validate_tool_ready(config, ready)
             official, telemetry_path, run_dir = _run_official_harness(
                 config, task_id, task_out, str(ready["base_url"]),
                 command[command.index("--model-name") + 1],

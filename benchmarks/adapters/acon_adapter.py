@@ -198,7 +198,8 @@ def runner_env(base_url: str) -> Dict[str, str]:
 
 
 def appworld_runner_env(base_url: str, telemetry_path: Path,
-                        run_dir: Path, acon_dir: Optional[Path] = None) -> Dict[str, str]:
+                        run_dir: Path, acon_dir: Optional[Path] = None,
+                        *, record_source: bool = False) -> Dict[str, str]:
     """Runner environment with a runtime-only ACON/AppWorld telemetry hook."""
     env = runner_env(base_url)
     benchmarks = Path(__file__).resolve().parents[1]
@@ -215,6 +216,10 @@ def appworld_runner_env(base_url: str, telemetry_path: Path,
         APPWORLD_TELEMETRY_ENV: str(Path(telemetry_path).resolve()),
         APPWORLD_RUN_DIR_ENV: str(Path(run_dir).resolve()),
     })
+    if record_source:
+        env["C2KV_APPWORLD_RECORD_SOURCE"] = "1"
+    else:
+        env.pop("C2KV_APPWORLD_RECORD_SOURCE", None)
     return env
 
 
@@ -496,7 +501,8 @@ def run_appworld(base_url: str, out_dir: Path, acon_dir: Optional[Path] = None,
                  max_iter: int = APPWORLD_DEFAULT_MAX_ITER,
                  task_ids: Optional[List[str]] = None,
                  python: Optional[str] = None,
-                 request_log: Optional[Path] = None) -> Dict[str, Any]:
+                 request_log: Optional[Path] = None,
+                 record_prefixes: str = "") -> Dict[str, Any]:
     acon_dir = Path(acon_dir) if acon_dir else ACON_DIR
     python = python or sys.executable
     validate_appworld_runner_patches(acon_dir)
@@ -506,7 +512,8 @@ def run_appworld(base_url: str, out_dir: Path, acon_dir: Optional[Path] = None,
     run_dir = appworld_run_dir(run_root, model, tag, split)
     telemetry_path = out_dir.resolve() / "measurement" / "harness_events.jsonl"
     env = {
-        **appworld_runner_env(base_url, telemetry_path, run_dir, acon_dir),
+        **appworld_runner_env(base_url, telemetry_path, run_dir, acon_dir,
+                              record_source=bool(record_prefixes)),
         "APPWORLD_ROOT": str(cwd),
     }
     run_owned(appworld_command(python, model, tag, split, max_iter, task_ids),
@@ -693,6 +700,7 @@ def run(ctx: RunContext) -> Dict[str, Any]:
     return run_appworld(ctx.base_url, ctx.out_dir,
                         split=ctx.opt("split", APPWORLD_DEFAULT_SPLIT),
                         max_iter=ctx.opt("max_iter", APPWORLD_DEFAULT_MAX_ITER),
+                        record_prefixes=ctx.opt("record_prefixes", ""),
                         **common)
 
 

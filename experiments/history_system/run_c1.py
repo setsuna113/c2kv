@@ -776,6 +776,12 @@ def run_task(args: argparse.Namespace, task: str, controller_path: Path,
                 if time.monotonic() >= deadline:
                     raise TimeoutError("Controller readiness timeout")
                 time.sleep(1)
+            if getattr(args, "tool_memory", "none") != "none":
+                from benchmarks.memory_runtime.event_native_tool import validate_ready_tool_contract
+                validate_ready_tool_contract(
+                    json.loads(ready_path.read_text(encoding="utf-8")),
+                    args.tool_memory, getattr(args, "tool_checkpoint", None),
+                    getattr(args, "tool_budget_tokens", None))
             with (task_out / "benchmark.log").open("w", encoding="utf-8") as bench_log:
                 worker = subprocess.Popen(
                     worker_command, cwd=RUNTIME, env=worker_env, stdout=bench_log,

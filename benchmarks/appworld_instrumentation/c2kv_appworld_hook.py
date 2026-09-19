@@ -20,6 +20,7 @@ from source_annotations import appworld_doc_spans, pure_appworld_doc_action
 TELEMETRY_ENV = "C2KV_APPWORLD_TELEMETRY_PATH"
 RUN_DIR_ENV = "C2KV_APPWORLD_RUN_DIR"
 TOOL_CONTEXT_ENV = "C2KV_TOOL_CONTEXT_ON"
+RECORD_SOURCE_ENV = "C2KV_APPWORLD_RECORD_SOURCE"
 _INSTALLED = False
 _response_request_id = contextvars.ContextVar(
     "c2kv_appworld_response_request_id", default=None)
@@ -95,15 +96,21 @@ def install() -> bool:
 
         def measured_create(self, *args, **kwargs):
             episode = current_episode()
-            if episode is not None or os.environ.get(TOOL_CONTEXT_ENV) == "1":
+            tool_context = os.environ.get(TOOL_CONTEXT_ENV) == "1"
+            record_source = os.environ.get(RECORD_SOURCE_ENV) == "1"
+            if episode is not None or tool_context or record_source:
                 extra_body = dict(kwargs.get("extra_body") or {})
                 if episode is not None:
                     extra_body["c2kv_measurement_session_id"] = episode["episode_id"]
-                if os.environ.get(TOOL_CONTEXT_ENV) == "1":
+                if tool_context or record_source:
                     messages = kwargs.get("messages") or (args[0] if args else [])
-                    spans = appworld_doc_spans(messages, _visible_doc_outputs.get())
-                    if spans:
-                        extra_body["c2kv_tool_spans_v1"] = spans
+                    try:
+                        spans = appworld_doc_spans(messages, _visible_doc_outputs.get())
+                    except Exception:
+                        if tool_context:
+                            raise
+                        spans = None  # Preserve a failed capture for replay rejection.
+                    extra_body["c2kv_tool_spans_v1"] = spans
                 kwargs["extra_body"] = extra_body
             response = original_create(self, *args, **kwargs)
             _response_request_id.set(_proxy_request_id(response))

@@ -250,6 +250,19 @@ def test_ready_manifest_binds_loaded_controller_and_candidate_variant(
     ready = tmp_path / "ready.json"
     ready.write_text(json.dumps(manifest), encoding="utf-8")
     native_extra.validate_ready_manifest(config, "acebench_agent", "task_1", ready, controller)
+    if arm == "c2kv_c1_t02_r4":
+        from benchmarks.toolmemory import parse_tool_memory_spec
+        config["tool_memory"] = "t0:r8"
+        config["tool_checkpoint"] = str(tmp_path / "tool-checkpoint")
+        with pytest.raises(RuntimeError, match="tool memory contract"):
+            native_extra.validate_ready_manifest(config, "acebench_agent", "task_1", ready, controller)
+        manifest["tool_memory_contract"] = {
+            "spec": parse_tool_memory_spec("t0:r8").as_dict(),
+            "tool_budget_tokens": None,
+            "checkpoint": {"checkpoint": config["tool_checkpoint"]},
+        }
+        ready.write_text(json.dumps(manifest), encoding="utf-8")
+        native_extra.validate_ready_manifest(config, "acebench_agent", "task_1", ready, controller)
     manifest["ratio"] = 99
     ready.write_text(json.dumps(manifest), encoding="utf-8")
     with pytest.raises(RuntimeError, match="selected arm"):

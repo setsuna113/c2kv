@@ -144,6 +144,43 @@ def test_subset_harness_remaps_category_without_changing_upstream_checkout(tmp_p
     assert (root / "category.py").read_text(encoding="utf-8") == source_category
 
 
+def test_bounded_agent_subset_checks_and_collects_only_selected_test(tmp_path, monkeypatch):
+    root = _checkout(tmp_path)
+    (root / "generate.py").write_text("# official generator fixture\n", encoding="utf-8")
+    (root / "eval_main.py").write_text("# official scorer fixture\n", encoding="utf-8")
+    source = root / "data_all" / "data_en"
+    for test in ("agent_multi_step", "agent_multi_turn"):
+        row = {"id": f"{test}_0"}
+        _write_jsonl(source / f"data_{test}.json", [row])
+        _write_jsonl(source / "possible_answer" / f"data_{test}.json", [row])
+    calls = []
+
+    def official_subprocess(command, *, cwd, env, check):
+        calls.append(command)
+        if len(calls) == 1:
+            assert Path(command[1]).name == "acebench_cli.py"
+            _write_jsonl(B.result_path(cwd, "en", "m", "agent_multi_step"),
+                         [{"id": "agent_multi_step_0"}])
+        else:
+            _write_jsonl(B.score_path(cwd, "en", "m", "agent_multi_step"),
+                         [{"end_to_end_accuracy": 1.0, "correct_count": 1,
+                           "total_count": 1}])
+
+    monkeypatch.setattr(B, "run_owned", official_subprocess)
+    summary = B.run_acebench(
+        "http://agent", "http://user", tmp_path / "out",
+        acebench_dir=root, category="agent", language="en", model="m",
+        task_ids="agent_multi_step_0", python="python")
+    assert len(calls) == 2
+    assert summary["n"] == 1
+    assert summary["categories"] == ["agent_multi_step"]
+    assert set(summary["per_category"]) == {"agent_multi_step"}
+    assert summary["selection"]["sources"][0]["selected_ids"] == [
+        "agent_multi_step_0"]
+    private = Path(summary["workdir"]) / "acebench_harness" / "category.py"
+    assert "'agent': ['agent_multi_step']" in private.read_text(encoding="utf-8")
+
+
 def test_tool_span_harness_is_private_and_requires_complete_patch(tmp_path):
     root = _checkout(tmp_path)
     base = root / "model_inference"

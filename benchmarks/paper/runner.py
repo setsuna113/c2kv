@@ -727,11 +727,14 @@ def execute(config, plan, output, source, stages, selected, port_offset=0):
                                                  stderr=subprocess.STDOUT,
                                                  start_new_session=os.name == "posix")
                         wait_server(proxy, config["proxy_port"])
-                        run_owned([config["bench_python"], "-m", "benchmarks.measurement.replay",
-                                   "--prefixes", str(prefixes), "--base-url", f"http://127.0.0.1:{config['proxy_port']}",
-                                   "--output", str(directory / "prefix_replay.jsonl"),
-                                   "--source-run-id", cell["benchmark"] + "__full",
-                                   "--target-run-id", cell["cell_id"]], check=True, env=env, cwd=ROOT.parent)
+                        replay_cmd = [config["bench_python"], "-m", "benchmarks.measurement.replay",
+                                      "--prefixes", str(prefixes), "--base-url", f"http://127.0.0.1:{config['proxy_port']}",
+                                      "--output", str(directory / "prefix_replay.jsonl"),
+                                      "--source-run-id", cell["benchmark"] + "__full",
+                                      "--target-run-id", cell["cell_id"]]
+                        if cell.get("tool_memory") and cell["benchmark"] in {"acebench_agent", "appworld"}:
+                            replay_cmd += ["--tool-source-benchmark", cell["benchmark"]]
+                        run_owned(replay_cmd, check=True, env=env, cwd=ROOT.parent)
                 except BaseException:
                     run_failure = sys.exc_info()
                 finally:

@@ -1,7 +1,7 @@
 diff --git a/model_inference/role_history.py b/model_inference/role_history.py
 --- a/model_inference/role_history.py
 +++ b/model_inference/role_history.py
-@@ -1,6 +1,16 @@
+@@ -1,6 +1,22 @@
  """Role-preserving OpenAI messages for ACEBench agent clients."""
  
  import json
@@ -11,10 +11,16 @@ diff --git a/model_inference/role_history.py b/model_inference/role_history.py
 +
 +
 +def tool_context_kwargs(messages, functions):
-+    if os.getenv("C2KV_TOOL_CONTEXT_ON") != "1":
++    if (os.getenv("C2KV_TOOL_CONTEXT_ON") != "1"
++            and os.getenv("C2KV_ACE_RECORD_SOURCE") != "1"):
 +        return {}
-+    spans = acebench_function_spans(messages, functions)
-+    return {"extra_body": {"c2kv_tool_spans_v1": spans}} if spans else {}
++    try:
++        spans = acebench_function_spans(messages, functions)
++    except Exception:
++        if os.getenv("C2KV_TOOL_CONTEXT_ON") == "1":
++            raise
++        spans = None  # A failed recording is not an empty visible catalog.
++    return {"extra_body": {"c2kv_tool_spans_v1": spans}}
  
  
  def _content(value):

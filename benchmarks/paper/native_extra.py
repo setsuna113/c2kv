@@ -22,6 +22,16 @@ TASK_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*\Z")
 C1_RATIOS = {"c2kv_c1_t02_r8": 8, "c2kv_c1_t02_r4": 4}
 
 
+def validate_tool_ready(config, manifest):
+    if not config.get("tool_memory"):
+        return
+    from benchmarks.toolmemory import validate_ready_tool_contract
+
+    validate_ready_tool_contract(
+        manifest, config["tool_memory"], config.get("tool_checkpoint"),
+        config.get("tool_budget_tokens"))
+
+
 def arm_identity(config):
     """Resolve the actual native controller without relying on a benchmark label."""
     arm = config.get("native_arm", "c2kv_native_r4")
@@ -67,6 +77,7 @@ def validate_ready_manifest(config, benchmark, task, ready_path, controller_path
             or manifest.get("ratio") != identity["ratio"]
             or manifest.get("generation_backend") != "sglang"):
         raise RuntimeError(f"Native {identity['arm']} ready manifest differs from its selected arm")
+    validate_tool_ready(config, manifest)
     if bare:
         from experiments.history_system.native_bare import validate_manifest
 

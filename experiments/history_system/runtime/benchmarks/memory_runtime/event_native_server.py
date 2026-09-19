@@ -654,6 +654,12 @@ def _child_command(args):
         command.extend(['--s0-config', str(args.s0_config.resolve())])
     if getattr(args, 'shadow_feature_config', None) is not None:
         command.extend(['--shadow-feature-config', str(args.shadow_feature_config.resolve())])
+    if getattr(args, 'tool_memory', 'none') not in (None, '', 'none'):
+        command.extend(['--tool-memory', args.tool_memory])
+        if getattr(args, 'tool_checkpoint', None) is not None:
+            command.extend(['--tool-checkpoint', str(args.tool_checkpoint.resolve())])
+        if getattr(args, 'tool_budget_tokens', None) is not None:
+            command.extend(['--tool-budget-tokens', str(args.tool_budget_tokens)])
     if getattr(args, 'generation_backend', 'native') == 'sglang':
         command.extend([
             '--sglang-backend-url', args.sglang_backend_url,

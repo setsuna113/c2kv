@@ -286,6 +286,57 @@ def test_ace_replay_uses_recorded_official_id_and_checks_loaded_controller(tmp_p
     assert list(read_jsonl(output / "prefix_replay.jsonl"))[0]["native_task_id"] == task
 
 
+@pytest.mark.parametrize("captured", [None, False, [{"message_index": 0, "start": 0,
+                                                     "end": 10_000, "source": "acebench_function_list"}]])
+def test_ace_tool_replay_rejects_missing_or_invalid_capture_before_server(
+        tmp_path, monkeypatch, captured):
+    payload = {"messages": [{"role": "system", "content": "Visible API"},
+                            {"role": "user", "content": "Use it"}],
+               "c2kv_measurement_session_id": "acebench:task:session",
+               "c2kv_ace_source": {"version": "acebench-text-actions-v1", "receipts": []}}
+    if captured is not None:
+        payload["c2kv_tool_spans_v1"] = captured
+    prefix = {"event_type": "recorded_prefix", "source_arm": "full",
+              "ace_official_task_id": "agent_task_1", "conversation_id": "conversation",
+              "replay_payload": payload, "canonical_sha256": canonical_sha256(payload)}
+    path = tmp_path / "prefix.jsonl"
+    path.write_text(json.dumps(prefix) + "\n", encoding="utf-8")
+    monkeypatch.setattr(paper_c1, "load_delivery",
+                        lambda: pytest.fail("server setup must not start"))
+    with pytest.raises(ValueError, match="tool replay"):
+        paper_c1.run_common_prefix({"tool_memory": "t0:r8"},
+                                   "acebench_agent", tmp_path, path)
+
+
+def test_ace_tool_replay_accepts_explicit_empty_capture_before_server(tmp_path, monkeypatch):
+    payload = {"messages": [{"role": "user", "content": "Proceed"}],
+               "c2kv_tool_spans_v1": [],
+               "c2kv_measurement_session_id": "acebench:task:session"}
+    prefix = {"event_type": "recorded_prefix", "source_arm": "full",
+              "ace_official_task_id": "agent_task_1", "conversation_id": "conversation",
+              "replay_payload": payload, "canonical_sha256": canonical_sha256(payload)}
+    path = tmp_path / "prefix.jsonl"
+    path.write_text(json.dumps(prefix) + "\n", encoding="utf-8")
+
+    class PassedCapture(Exception):
+        pass
+
+    monkeypatch.setattr(paper_c1, "load_delivery", lambda: (_ for _ in ()).throw(PassedCapture()))
+    with pytest.raises(PassedCapture):
+        paper_c1.run_common_prefix({"tool_memory": "t0:r8"},
+                                   "acebench_agent", tmp_path, path)
+
+
+@pytest.mark.parametrize("alias", ["none", "raw", "full"])
+def test_explicit_off_tool_alias_restores_unmodified_native_config(alias):
+    config = {"native_arm": "c2kv_c1_t02_r4", "tool_memory": "t0:r8",
+              "tool_checkpoint": "/old/T0", "tool_budget_tokens": 256}
+    paper_c1.apply_tool_cli(config, alias, "", None)
+    assert config == {"native_arm": "c2kv_c1_t02_r4"}
+    with pytest.raises(ValueError, match="active --tool-memory"):
+        paper_c1.apply_tool_cli(config, alias, "/orphan/T0", None)
+
+
 def test_ratio4_ablation_binds_arm_and_ratio_for_summaries():
     try:
         assert select_arm("c2kv_c1_t02_r4") == ("c2kv_c1_t02_r4", 4)

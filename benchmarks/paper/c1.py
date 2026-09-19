@@ -344,6 +344,9 @@ def run_common_prefix(config, benchmark, directory, prefix_path):
     for row in records:
         if row.get("source_arm") != "full" or canonical_sha256(row["replay_payload"]) != row["canonical_sha256"]:
             raise ValueError("Invalid recorded Full-prefix source")
+        if config.get("tool_memory") and benchmark in {"acebench_agent", "appworld"}:
+            from benchmarks.measurement.replay import validate_tool_source_capture
+            validate_tool_source_capture(row["replay_payload"], benchmark)
         key = row.get("conversation_id") or row["replay_payload"].get("c2kv_measurement_session_id")
         if not key:
             raise ValueError("C1 replay requires recorded conversation identity")
@@ -374,6 +377,10 @@ def run_common_prefix(config, benchmark, directory, prefix_path):
             elif ARM == "c2kv_native_r4":
                 import native_bare
                 native_bare.validate_manifest(task_root / "server" / "ready.json")
+            if config.get("tool_memory") and benchmark not in {"acebench_agent", "toolsandbox"}:
+                from .native_extra import validate_tool_ready
+                ready = json.loads((task_root / "server" / "ready.json").read_text(encoding="utf-8"))
+                validate_tool_ready(config, ready)
             for step, row in enumerate(rows):
                 payload = copy.deepcopy(row["replay_payload"])
                 payload["model"] = command[command.index("--model-name") + 1]
@@ -473,6 +480,23 @@ def run_common_prefix(config, benchmark, directory, prefix_path):
     return native
 
 
+def apply_tool_cli(config, tool_memory, tool_checkpoint, tool_budget_tokens):
+    from benchmarks.toolmemory import parse_tool_memory_spec
+
+    spec = parse_tool_memory_spec(tool_memory)
+    if spec is None:
+        if tool_checkpoint or tool_budget_tokens is not None:
+            raise ValueError("Tool options require active --tool-memory")
+        if tool_memory:
+            for key in ("tool_memory", "tool_checkpoint", "tool_budget_tokens"):
+                config.pop(key, None)
+        return
+    config["tool_memory"] = tool_memory
+    config["tool_checkpoint"] = tool_checkpoint
+    if tool_budget_tokens is not None:
+        config["tool_budget_tokens"] = tool_budget_tokens
+
+
 @unwind_on_termination
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
@@ -493,11 +517,7 @@ def main(argv=None):
     select_arm(args.arm)
     config = json.loads(args.config.read_text(encoding="utf-8"))
     config["native_arm"] = ARM
-    if args.tool_memory:
-        config["tool_memory"] = args.tool_memory
-        config["tool_checkpoint"] = args.tool_checkpoint
-        if args.tool_budget_tokens is not None:
-            config["tool_budget_tokens"] = args.tool_budget_tokens
+    apply_tool_cli(config, args.tool_memory, args.tool_checkpoint, args.tool_budget_tokens)
     if args.upstream:
         config["upstream"] = args.upstream
     if args.proxy_port:

@@ -11,8 +11,23 @@ from history_memory.sglang_generator import SGLangEventNativeError, SGLangEventN
 from benchmarks.memory_runtime.attempt_journal import AttemptJournal
 from benchmarks.memory_runtime.event_native_step import EventNativeDecisionRunner
 from benchmarks.memory_runtime.event_native_tool import (
-    ToolRegionController, parse_native_tool_spec,
+    ToolRegionController, parse_native_tool_spec, validate_ready_tool_contract,
 )
+
+
+def test_on_ready_requires_loaded_tool_contract(tmp_path):
+    checkpoint = tmp_path / "tool-checkpoint"
+    with pytest.raises(RuntimeError, match="tool memory contract"):
+        validate_ready_tool_contract({}, "t0:r8", checkpoint)
+    loaded = {"tool_memory_contract": {
+        "spec": parse_native_tool_spec("t0:r8").as_dict(),
+        "tool_budget_tokens": None,
+        "checkpoint": {"checkpoint": str(checkpoint)},
+    }}
+    validate_ready_tool_contract(loaded, "t0:r8", checkpoint)
+    validate_ready_tool_contract({}, None)
+    with pytest.raises(RuntimeError, match="checkpoint"):
+        validate_ready_tool_contract(loaded, "t0:r8", tmp_path / "wrong")
 
 
 class CharacterTokenizer:
