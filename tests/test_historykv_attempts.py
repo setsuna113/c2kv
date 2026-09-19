@@ -1,5 +1,9 @@
 import json
 import hashlib
+import os
+import subprocess
+import sys
+from pathlib import Path
 from io import BytesIO
 from unittest.mock import patch
 
@@ -38,6 +42,23 @@ def test_typed_method_failure_is_terminal_but_transport_is_not(tmp_path):
     ]:
         path.write_text(json.dumps({"id": "task_1", "result": [], "traceback": failure}))
         assert bfcl_row_healthy(tmp_path, "task_1") is expected
+
+
+def test_bfcl_validation_from_direct_file_entry_without_package_path(tmp_path):
+    result = tmp_path / "result"
+    result.mkdir()
+    (result / "row.json").write_text(json.dumps({"id": "task_1", "result": [[[]]]}))
+    env = {key: value for key, value in os.environ.items() if key != "PYTHONPATH"}
+    code = (
+        "import runpy,sys; from pathlib import Path; "
+        "sys.path.insert(0,str(Path(sys.argv[1]).parent)); "
+        "module=runpy.run_path(sys.argv[1]); "
+        "assert module['bfcl_row_healthy'](Path(sys.argv[2]),'task_1')"
+    )
+    check = subprocess.run([sys.executable, "-I", "-c", code,
+                            str(Path(driver.__file__).resolve()), str(tmp_path)],
+                           cwd=tmp_path, env=env, capture_output=True, text=True, timeout=20)
+    assert check.returncode == 0, check.stdout + check.stderr
 
 
 def test_old_fc_handler_row_and_done_are_replaced_only_after_new_result(tmp_path):

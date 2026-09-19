@@ -24,8 +24,10 @@ from pathlib import Path
 
 try:
     from .completion_contract import appworld_done_invalidated, write_cell_status
+    from .bfcl_results import bfcl_row_is_valid
 except ImportError:  # Direct file launch on ascend03.
     from completion_contract import appworld_done_invalidated, write_cell_status
+    from bfcl_results import bfcl_row_is_valid
 
 GENERATION_ROOT = Path("/home/liuyancheng/c2kv-generality-20260918")
 PAPER = GENERATION_ROOT / "src" / "paper_harness"
@@ -257,7 +259,6 @@ def write_done(out: Path, result: dict) -> None:
 
 def bfcl_row_healthy(project_root: Path, task_id: str) -> bool:
     """Accept complete output or an explicitly classified benchmark failure."""
-    from generality.bfcl_results import bfcl_row_is_valid
     for path in sorted((project_root / "result").glob("**/*.json")):
         for line in path.read_text(encoding="utf-8").splitlines():
             if not line.strip():
