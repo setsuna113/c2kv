@@ -296,6 +296,7 @@ def run_common_prefix(config, benchmark, directory, prefix_path):
         raise ValueError("Recorded conversations reuse an episode identity")
     native, args, controller_path = prepare_native(config, benchmark, directory, tasks, delivery)
     sequence = 0
+    tolerated_failures = []   # (task, prefix_id, status, kind): the per-task server declared a tolerated failure
     for task, rows in zip(tasks, groups.values()):
         if benchmark in {"acebench_agent", "toolsandbox"}:
             from .native_extra import controller_command
@@ -351,7 +352,32 @@ def run_common_prefix(config, benchmark, directory, prefix_path):
                         result = json.load(response)
                 except urllib.error.HTTPError as error:
                     detail = error.read().decode("utf-8", "replace")
-                    raise RuntimeError(f"C1 replay HTTP {error.code}: {detail}") from error
+                    failure = controller_step_failure(task_root) if error.code >= 500 else None
+                    if failure is None:
+                        raise RuntimeError(f"C1 replay HTTP {error.code}: {detail}") from error
+                    # The same declared failures the closed loop scores as zero (CUDA OOM,
+                    # CapacityInfeasible) end this task's server; record the prefix and the
+                    # rest of the task as failed instead of losing the whole replay cell.
+                    status, kind, message = failure
+                    for skipped, later in enumerate(rows[step:]):
+                        append_jsonl(directory / "prefix_replay.jsonl", {
+                            "schema": "c2kv.prefix_replay.v1", "event_type": "prefix_replay",
+                            "source_run_id": benchmark + "__full", "target_run_id": benchmark + "__" + ARM,
+                            "sequence": sequence, "prefix_id": later["prefix_id"],
+                            "canonical_sha256": later["canonical_sha256"], "native_task_id": task,
+                            "native_step": step + skipped, "request_id": None,
+                            "start_unix_ns": unix if skipped == 0 else None,
+                            "duration_ns": (time.perf_counter_ns() - started) if skipped == 0 else None,
+                            "http_status": error.code if skipped == 0 else None,
+                            "request": later["replay_payload"], "response": None,
+                            "source_paper_measurement": _paper_measurement(later.get("source_response")),
+                            "error": detail if skipped == 0 else f"task server terminated after {kind}",
+                            "failure": {"status": status, "kind": kind, "message": message},
+                            "teacher_forced": True, "external_actions_executed": 0,
+                        })
+                        tolerated_failures.append((task, later["prefix_id"], status, kind))
+                        sequence += 1
+                    break
                 append_jsonl(directory / "prefix_replay.jsonl", {
                     "schema": "c2kv.prefix_replay.v1", "event_type": "prefix_replay",
                     "source_run_id": benchmark + "__full", "target_run_id": benchmark + "__" + ARM,
@@ -367,6 +393,16 @@ def run_common_prefix(config, benchmark, directory, prefix_path):
         finally:
             delivery.runner._stop_server(process, task_root / "server.supervisor.json")
             log.close()
+    kinds = {}
+    for _, _, status, kind in tolerated_failures:
+        kinds[f"{status}/{kind}"] = kinds.get(f"{status}/{kind}", 0) + 1
+    save(directory / "replay_summary.json", {
+        "prefixes": len(records), "completed": len(records) - len(tolerated_failures),
+        "failed": len(tolerated_failures), "failed_tasks": sorted({t for t, *_ in tolerated_failures}),
+        "failure_kinds": kinds,
+        "policy": "prefixes of a task whose native server declared a tolerated failure (cuda_oom, "
+                  "capacity_infeasible) are recorded as failed; any other error fails the cell",
+    })
     return native
 
 

@@ -15,6 +15,12 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG = Path(__file__).with_name("config.json")
 
 
+# ACEBench Agent drives the user simulator against the raw upstream while the agent's
+# persistent history session still owns its request slot; with one slot the
+# simulator's request made the scheduler raise alloc_req_slots and die (H2O/SnapKV
+# ACEBench cells). The two clients never run concurrently, so per-request
+# attribution is unchanged.
+ACEBENCH_MAX_RUNNING_REQUESTS = 2
 REFERENCE_ATTENTION_MEM_FRACTION = 0.65   # static pool cap for reference_attention arms (see server_command)
 C1_ARMS = {"c2kv_c1_t02_r8": 8, "c2kv_c1_t02_r4": 4}   # native C1 controller arms and their ratios
 
@@ -45,7 +51,7 @@ def cells(config):
     return sorted(rows, key=lambda row: is_c1_arm(row["arm"]))
 
 
-def server_command(config, source, arm=None):
+def server_command(config, source, arm=None, benchmark=None):
     """CUDA server flags for one cell.
 
     Single-flight serving (one running request, one worker, no overlap
@@ -76,7 +82,8 @@ def server_command(config, source, arm=None):
            "--mem-fraction-static", str(mem_fraction),
            "--context-length", str(config["context_length"]),
            "--max-total-tokens", str(config["max_total_tokens"]),
-           "--max-running-requests", "1", "--page-size", "1",
+           "--max-running-requests", str(ACEBENCH_MAX_RUNNING_REQUESTS if benchmark == "acebench_agent" else 1),
+           "--page-size", "1",
            "--chunked-prefill-size", str(config["chunked_prefill_size"]),
            "--random-seed", str(config["seed"])]
     radix_arms = set(config.get("radix_cache_arms") or ())
@@ -444,7 +451,7 @@ def execute(config, plan, output, source, stages, selected, port_offset=0):
             directory.mkdir(parents=True, exist_ok=True)
             (directory / "started.json").write_text(json.dumps({
                 "stage": stage, "cell": cell, "config": config,
-                "server_command": server_command(config, source, cell["arm"]),
+                "server_command": server_command(config, source, cell["arm"], cell["benchmark"]),
                 "port_offset": port_offset,
                 "sglang_source": str(source), "time": time.time()}, indent=2))
             telemetry_name = ("native_engine_telemetry.jsonl" if is_native_arm(cell["arm"])
@@ -457,7 +464,7 @@ def execute(config, plan, output, source, stages, selected, port_offset=0):
                         if probe.connect_ex(("127.0.0.1", port)) == 0:
                             raise RuntimeError(f"Configured port {port} is already occupied")
                 # Own only this process group. Never stop another experiment's server.
-                server = subprocess.Popen(server_command(config, source, cell["arm"]), env=env,
+                server = subprocess.Popen(server_command(config, source, cell["arm"], cell["benchmark"]), env=env,
                                           stdout=log, stderr=subprocess.STDOUT,
                                           start_new_session=True)
                 proxy = None

@@ -89,6 +89,10 @@ mechanisms). All three are recorded in `config.resolved.json` and in each
 cell's `started.json`.
 Reference-attention arms always disable CUDA graphs and radix cache because
 their per-request query capture and external KV tensors require eager execution.
+ACEBench Agent cells serve with `--max-running-requests 2`: the user simulator talks to
+the raw upstream while a persistent history session still holds the agent's request
+slot; with one slot the scheduler died in `alloc_req_slots`. The two clients alternate,
+so per-request attribution is unchanged.
 They also cap `--mem-fraction-static` at 0.65 so the eager attention temporaries
 have headroom outside SGLang's static pool (an AppWorld PyramidKV cell ran out of
 GPU memory at 0.8).

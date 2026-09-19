@@ -146,6 +146,15 @@ class PaperMatrixTest(unittest.TestCase):
         h2o = server_command(self.config, Path("sglang"), "history_kv_h2o_r25_persistent")
         self.assertEqual(h2o[h2o.index("--mem-fraction-static") + 1], str(self.config["mem_fraction_static"]))
 
+    def test_acebench_cells_serve_two_request_slots(self):
+        from benchmarks.paper.runner import ACEBENCH_MAX_RUNNING_REQUESTS
+        for arm in ("full", "history_kv_h2o_r25_persistent", "agentkv"):
+            ace = server_command(self.config, Path("sglang"), arm, "acebench_agent")
+            self.assertEqual(ace[ace.index("--max-running-requests") + 1], str(ACEBENCH_MAX_RUNNING_REQUESTS))
+            for other in ("bfcl_base", "appworld", "toolsandbox", None):
+                cmd = server_command(self.config, Path("sglang"), arm, other)
+                self.assertEqual(cmd[cmd.index("--max-running-requests") + 1], "1")
+
     def test_cuda_command_is_single_flight(self):
         cmd = server_command(self.config, Path("sglang"))
         self.assertEqual(cmd[cmd.index("--device") + 1], "cuda")
