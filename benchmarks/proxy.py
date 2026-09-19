@@ -1379,6 +1379,9 @@ def _paper_history_message_boundary(
     return min(history_indices), history_end
 
 
+_EPISODE_REQUEST_LOCK = threading.Lock()
+
+
 class ProxyHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
@@ -1391,6 +1394,12 @@ class ProxyHandler(BaseHTTPRequestHandler):
         )
 
     def do_POST(self):
+        if self._is_chat():
+            with _EPISODE_REQUEST_LOCK:
+                return self._do_POST_serialized()
+        return self._do_POST_serialized()
+
+    def _do_POST_serialized(self):
         request_start_unix = time.time_ns()
         request_start_perf = time.perf_counter_ns()
         _TRACE.request_id = (
