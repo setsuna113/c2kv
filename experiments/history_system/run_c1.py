@@ -56,6 +56,8 @@ SUMMARY_FIELDS = (
     "total_prefill_tokens", "wall_time", "native_generate_requests",
     "prefill_detector_scores", "prefill_detector_unavailable",
     "risk_detector_scores", "risk_detector_unavailable",
+    "candidate_decisions", "candidate_variants", "candidate_ratio8",
+    "candidate_stable_call_ids", "candidate_budget_passed",
     "gist_tokens", "raw_workspace_tokens",
     "gist_cache_hits", "native_packing_present",
 )
@@ -189,6 +191,17 @@ def preflight_sglang_backend(
 
 def build_profile(args: argparse.Namespace) -> tuple[dict, dict]:
     """Keep D3-hybrid, compatibility Prefill, and trained risk modes distinct."""
+    if getattr(args, "candidate_algorithm", None) is not None:
+        import candidate_algorithms
+
+        return candidate_algorithms.build_profile(
+            args,
+            base_controller=evidence_sets._base_controller(),
+            selected=current.load_config(),
+            risk_artifact_path=DEFAULT_RISK_ARTIFACT,
+            risk_artifact_sha256=DEFAULT_RISK_ARTIFACT_SHA256,
+            bind_artifact=bind_risk_artifact,
+        )
     if args.method == "c2kv_native":
         import native_bare
         if args.selector_artifact is not None or args.ratio != 4:
@@ -357,6 +370,8 @@ def effective_ratio(args: argparse.Namespace, selected: dict) -> int:
 
 
 def _model_name(args: argparse.Namespace) -> str:
+    if getattr(args, "candidate_algorithm", None) is not None:
+        return f"c2kv_{args.candidate_algorithm}"
     if args.method == "c2kv_native":
         return "c2kv_native_r4"
     return "c2kv_only" if args.method == "c2kv_only" else f"c1_{args.detector}"
@@ -519,6 +534,19 @@ def summarize_task(benchmark: str, task: str, task_out: Path, official: Mapping[
         for selection in risk_selections
     )
     risk_unavailable = sum(selection.get("available") is False for selection in risk_selections)
+    candidate_decisions = [
+        decision for decision in decisions
+        if decision.get("version") == "c2kv-paper-candidates-v1"
+    ]
+    candidate_traces = [
+        trace for trace in traces
+        if isinstance(trace.get("controller"), Mapping)
+        and isinstance(trace["controller"].get("candidate_algorithm"), Mapping)
+    ]
+    budget_checks = [
+        check for record in records
+        for check in record.get("pre_generation_budget_checks", [])
+    ]
     recovery_rows = [
         decision for decision in decisions if decision.get("status") == "recover"
     ]
@@ -627,6 +655,24 @@ def summarize_task(benchmark: str, task: str, task_out: Path, official: Mapping[
         "prefill_detector_unavailable": prefill_unavailable,
         "risk_detector_scores": risk_scores,
         "risk_detector_unavailable": risk_unavailable,
+        "candidate_decisions": len(candidate_decisions),
+        "candidate_variants": sorted({
+            decision.get("variant") for decision in candidate_decisions
+            if isinstance(decision.get("variant"), str)
+        }),
+        "candidate_ratio8": bool(records) and all(record.get("ratio") == 8 for record in records)
+            and len(candidate_traces) == len(traces) and all(
+                trace["controller"].get("requested_ratio") == 8 for trace in candidate_traces
+            ),
+        "candidate_stable_call_ids": bool(candidate_traces)
+            and len(candidate_traces) == len(traces) and all(
+            trace["controller"]["candidate_algorithm"].get("stable_call_ids") is True
+            for trace in candidate_traces
+        ),
+        "candidate_budget_passed": bool(budget_checks)
+            and len(budget_checks) == len(traces) and all(
+            check.get("status") == "passed" for check in budget_checks
+        ),
         "gist_tokens": sum(int(stats.get("gist_tokens") or 0) for stats in native_stats),
         "raw_workspace_tokens": sum(int(stats.get("workspace_tokens") or 0) for stats in native_stats),
         "gist_cache_hits": sum(
@@ -650,21 +696,36 @@ def write_unified_summary(out: Path, rows: list[dict]) -> None:
         writer.writerows({key: row.get(key) for key in SUMMARY_FIELDS} for row in rows)
 
 
-def functional_checks(method: str, detector: str, telemetry: Mapping[str, Any]) -> dict:
+def functional_checks(method: str, detector: str, telemetry: Mapping[str, Any],
+                      candidate_algorithm: str | None = None) -> dict:
     """Separate required runtime behavior from descriptive efficiency telemetry."""
 
+    if candidate_algorithm is not None:
+        detector_contract = (telemetry.get("risk_detector_scores", 0) > 0
+                             and telemetry.get("risk_detector_unavailable", 0) == 0)
+    elif method in {"c2kv_only", "c2kv_native"}:
+        detector_contract = telemetry["detector_calls"] == 0
+    elif detector == "t02_risk":
+        detector_contract = telemetry["risk_detector_unavailable"] == 0
+    elif detector == "d3_hybrid":
+        detector_contract = telemetry["prefill_detector_unavailable"] == 0
+    else:
+        detector_contract = telemetry["prefill_detector_scores"] > 0
+    candidate_required = ({
+        "candidate_decisions": telemetry.get("candidate_decisions") == telemetry.get("decision_count")
+            and telemetry.get("candidate_decisions", 0) > 0,
+        "candidate_variant": telemetry.get("candidate_variants") == [candidate_algorithm],
+        "risk_scores": telemetry.get("risk_detector_scores", 0) > 0,
+        "risk_available": telemetry.get("risk_detector_unavailable", 0) == 0,
+        "ratio8": telemetry.get("candidate_ratio8") is True,
+        "stable_call_ids": telemetry.get("candidate_stable_call_ids") is True,
+        "budget_passed": telemetry.get("candidate_budget_passed") is True,
+    } if candidate_algorithm is not None else {})
     return {
         "required": {
             "native_generate_requests": telemetry["native_generate_requests"] > 0,
-            "detector_contract": (
-                telemetry["detector_calls"] == 0
-                if method in {"c2kv_only", "c2kv_native"}
-                else telemetry["risk_detector_unavailable"] == 0
-                if detector == "t02_risk"
-                else telemetry["prefill_detector_unavailable"] == 0
-                if detector == "d3_hybrid"
-                else telemetry["prefill_detector_scores"] > 0
-            ),
+            "detector_contract": detector_contract,
+            **candidate_required,
             **({"no_recovery": telemetry.get("recovery_count", 0) == 0,
                 "one_generation_per_decision": telemetry.get("generation_calls") == telemetry.get("decision_count")}
                if method == "c2kv_native" else {}),
@@ -732,7 +793,8 @@ def run_task(args: argparse.Namespace, task: str, controller_path: Path) -> tupl
     if journal.get("failed") or journal.get("pending") or not journal.get("completed"):
         raise RuntimeError(f"Model attempts failed, remain pending, or are missing; see {final_path}")
     telemetry = summarize_task(args.benchmark, task, task_out, summary, time.monotonic() - started)
-    acceptance = functional_checks(args.method, args.detector, telemetry)
+    acceptance = functional_checks(args.method, args.detector, telemetry,
+                                   getattr(args, "candidate_algorithm", None))
     required = acceptance["required"]
     if not all(required.values()):
         raise RuntimeError(f"C1 functional acceptance failed: {required}; see {task_out / 'server'}")
@@ -751,12 +813,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--checkpoint", type=Path, required=True)
     parser.add_argument("--sglang-backend-url", required=True)
-    parser.add_argument("--embedding-model", type=Path, required=True)
+    parser.add_argument("--embedding-model", type=Path)
     parser.add_argument("--embedding-device", default="cpu")
     parser.add_argument(
         "--detector",
         choices=("d3_hybrid", "legacy_prefill", "t02_risk"),
         default="t02_risk",
+    )
+    parser.add_argument(
+        "--candidate-algorithm",
+        choices=("static_t02", "turn_c1", "goal_rescue", "dependency_first"),
+        default=None,
     )
     parser.add_argument("--selector-artifact", type=Path,
                         help="Override the bundled, evaluated T02 C1 risk artifact")
@@ -795,7 +862,8 @@ def validate_args(args: argparse.Namespace) -> list[str]:
     _benchmark_dir(args)
     if args.task_timeout <= 0 or not 1 <= args.port <= 65535:
         raise ValueError("task timeout and port must be valid positive values")
-    if args.method != "c2kv_native" and not (args.embedding_model / "config.json").is_file():
+    if (args.method != "c2kv_native" and getattr(args, "candidate_algorithm", None) is None
+            and (args.embedding_model is None or not (args.embedding_model / "config.json").is_file())):
         raise ValueError("embedding model must be a local model directory")
     if not (args.checkpoint / "config.json").is_file():
         raise ValueError("checkpoint must be a local model directory")
