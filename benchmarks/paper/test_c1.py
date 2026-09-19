@@ -292,6 +292,11 @@ def test_ace_replay_uses_recorded_official_id_and_checks_loaded_controller(tmp_p
     output.mkdir()
     shard = output / "native" / "task_shards" / task
     shard.mkdir(parents=True)
+    (shard / "server").mkdir()
+    (shard / "server" / "final.json").write_text(json.dumps({
+        "status": "stopped", "journal_summary": {"completed": 1, "failed": 0, "pending": 0},
+        "cost_summary": {"generation_calls": 1},
+    }))
     observed = {}
     delivery = SimpleNamespace(runner=SimpleNamespace(_stop_server=lambda *_: None))
     monkeypatch.setattr(paper_c1, "load_delivery", lambda: delivery)
@@ -317,6 +322,30 @@ def test_ace_replay_uses_recorded_official_id_and_checks_loaded_controller(tmp_p
     assert observed["payload"]["c2kv_eval_context"]["task_id"] == task
     assert observed["payload"]["c2kv_ace_source"] == payload["c2kv_ace_source"]
     assert list(read_jsonl(output / "prefix_replay.jsonl"))[0]["native_task_id"] == task
+
+
+@pytest.mark.parametrize("declared_failure", [False, True])
+def test_replay_rejects_cost_failure_even_after_successful_responses(tmp_path, declared_failure):
+    (tmp_path / "server").mkdir()
+    (tmp_path / "server" / "final.json").write_text(json.dumps({
+        "status": "failed", "journal_summary": {"completed": 2, "failed": 0, "pending": 0},
+        "cost_summary_error": {"type": "ValueError", "message": "prefix bytes mismatch"},
+    }))
+    with pytest.raises(RuntimeError, match="cost finalization failed"):
+        paper_c1.validate_replay_finalization(tmp_path, declared_failure=declared_failure)
+
+
+def test_replay_requires_complete_controller_journal(tmp_path):
+    (tmp_path / "server").mkdir()
+    path = tmp_path / "server" / "final.json"
+    final = {"status": "stopped", "journal_summary": {"completed": 1, "pending": 1},
+             "cost_summary": {"generation_calls": 1}}
+    path.write_text(json.dumps(final))
+    with pytest.raises(RuntimeError, match="controller finalization failed"):
+        paper_c1.validate_replay_finalization(tmp_path)
+    final["journal_summary"]["pending"] = 0
+    path.write_text(json.dumps(final))
+    paper_c1.validate_replay_finalization(tmp_path)
 
 
 @pytest.mark.parametrize("captured", [None, False, [{"message_index": 0, "start": 0,
