@@ -13,7 +13,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import terminal_check  # noqa: E402
 from adapters import bfcl_adapter  # noqa: E402
-from bfcl_completion import bfcl_row_is_terminal, completion_kind  # noqa: E402
+from bfcl_completion import (  # noqa: E402
+    _complete_native_tool_calls, bfcl_row_is_terminal, completion_kind,
+)
 
 
 @pytest.mark.parametrize("message,kind", [
@@ -78,6 +80,21 @@ def test_fc_guard_rejects_only_legacy_handler_contract_error():
         ]}],
     }
     assert completion_kind(malformed_with_error, fc_model=True) == "model_output"
+
+
+@pytest.mark.parametrize("text", [
+    '<tool_call>{"name":"lookup","arguments":{"city":"X"}}</tool_call>',
+    'Thinking. <tool_call>{"name":"lookup","arguments":"{\\"city\\":\\"X\\"}"}</tool_call>',
+    'No tool is needed.',
+    '<tool_call>{"name":"lookup","arguments":{"city":"X"}',
+    '<tool_call>{"name":"lookup","arguments":{"city":"X","city":"Y"}}</tool_call>',
+    '<tool_call>{"name":"lookup","arguments":[]}</tool_call>',
+])
+def test_fc_guard_tool_block_evidence_matches_native_parser(text):
+    from experiments.history_system.runtime.benchmarks.memory_runtime.event_native_draft import parse_native_draft
+
+    assert _complete_native_tool_calls(text) == (
+        parse_native_draft(text, call_id_prefix="audit").status == "tool_calls")
 
 
 def test_fc_evaluate_refuses_old_handler_row_before_official_scorer(
