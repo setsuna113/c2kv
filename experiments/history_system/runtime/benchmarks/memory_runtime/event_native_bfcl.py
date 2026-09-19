@@ -73,12 +73,14 @@ def _is_greedy_sampling(sampling):
         return False
     if sampling.get('mode', 'greedy') != 'greedy':
         return False
-    try:
-        temperature = float(sampling.get('temperature'))
-        top_p = float(sampling.get('top_p', 1.0))
-    except (TypeError, ValueError):
+    temperature = sampling.get('temperature')
+    top_p = sampling.get('top_p', 1.0)
+    seed = sampling.get('seed')
+    if (type(temperature) not in (int, float)
+            or type(top_p) not in (int, float)
+            or type(seed) is not int):
         return False
-    return temperature == 0.0 and sampling.get('seed') == 0 and top_p == 1.0
+    return temperature == 0.0 and seed == 0 and top_p == 1.0
 
 
 def validate_server_identity(ready, health):
