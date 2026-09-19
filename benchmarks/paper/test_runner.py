@@ -515,8 +515,11 @@ class PaperMatrixTest(unittest.TestCase):
             for row, peak in ((plan[0], 115), (plan[3], 100)):
                 directory = output / "common_prefix" / row["cell_id"]
                 directory.mkdir(parents=True)
+                (directory / "complete.json").write_text("{}")
                 (directory / "measurement_summary.json").write_text(json.dumps({
-                    "memory": {"request_peak_resident_kv_bytes": {"max": peak}}}))
+                    "memory": {"request_peak_resident_kv_bytes": {"max": peak},
+                               "resident_peak_chain": {
+                                   "request_peak_c2kv_cache_accounting_available": True}}}))
             report = write_comparison(output, plan)
             compressed = next(row for row in report if row["arm"] == "c2kv4")
             self.assertAlmostEqual(compressed["resident_kv_peak_bytes_saving_vs_full_pct"], 100 * (1 - 100 / 115))
@@ -529,6 +532,7 @@ class PaperMatrixTest(unittest.TestCase):
             plan = cells(self.config)[1:2]
             directory = output / "common_prefix" / plan[0]["cell_id"]
             directory.mkdir(parents=True)
+            (directory / "complete.json").write_text("{}")
             (directory / "measurement_summary.json").write_text(json.dumps({
                 "token_ratios": {"whole": {"ratio_of_sums": None}},
                 "common_prefix_token_ratios": {"whole": {"ratio_of_sums": 0.7},

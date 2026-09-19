@@ -14,6 +14,16 @@ from .telemetry import append_jsonl, canonical_sha256, read_jsonl
 
 
 _OPENER = urlrequest.build_opener(urlrequest.ProxyHandler({}))
+EXACT_OUTPUT_ARMS = {"agentkv", "commitkv"}
+
+
+def validate_teacher_forced_target(target_run_id: str) -> None:
+    arm = target_run_id.rsplit("__", 1)[-1]
+    if arm in EXACT_OUTPUT_ARMS:
+        raise ValueError(
+            f"{arm} requires its own unchanged prior assistant output; "
+            "Full teacher-forced prefixes are incompatible with exact KV continuation"
+        )
 
 
 def chat_url(base_url: str) -> str:
@@ -52,6 +62,7 @@ def replay_prefixes(
     prefixes: "str | Path", base_url: str, output: "str | Path",
     *, source_run_id: str, target_run_id: str, timeout: int = 600,
 ) -> Dict[str, int]:
+    validate_teacher_forced_target(target_run_id)
     rows = [row for row in read_jsonl(prefixes)
             if row.get("event_type") == "recorded_prefix"]
     if not rows:
