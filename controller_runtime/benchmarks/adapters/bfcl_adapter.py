@@ -481,7 +481,8 @@ def _canonicalize_completions(project_root: Path, handler_name: str,
             if category_of.get(task_id) != category:
                 foreign.append(task_id)
                 continue
-            valid = bfcl_row_is_terminal(row)
+            # install_handler registers this adapter with is_fc_model=True.
+            valid = bfcl_row_is_terminal(row, fc_model=True)
             entries[task_id].append({
                 "valid": valid, "mtime_ns": mtime_ns, "path": str(path),
                 "line": line_number, "row": row,

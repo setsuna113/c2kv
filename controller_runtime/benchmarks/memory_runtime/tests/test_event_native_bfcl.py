@@ -11,6 +11,7 @@ import pytest
 
 from benchmarks.adapters import bfcl_adapter
 from benchmarks.memory_runtime import event_native_bfcl as wrapper
+from benchmarks.memory_runtime import event_native_server as server
 
 
 def _ready() -> dict:
@@ -84,6 +85,40 @@ def test_validate_server_identity_accepts_matching_fresh_endpoint(policy) -> Non
     ready, health = _ready(), _health()
     ready['session_cache_policy'] = health['session_cache_policy'] = policy
     wrapper.validate_server_identity(ready, health)
+
+
+@pytest.mark.parametrize("sampling, accepted", [
+    ({"mode": "greedy", "temperature": 0, "seed": 0}, True),
+    ({"temperature": 0.0, "seed": 0}, True),
+    ({"temperature": 0.0, "seed": 0, "top_p": 1.0}, True),
+    ({"temperature": 0.001, "top_p": 1.0}, False),
+    ({"temperature": 0.0, "top_p": 1.0, "presence_penalty": 0.5, "seed": 42}, False),
+    ({"temperature": 0.0, "seed": 1}, False),
+    ({"temperature": "0", "seed": 0}, False),
+    ({"temperature": False, "seed": 0}, False),
+    ({"temperature": 0.0, "seed": False}, False),
+    ({"temperature": 0.0, "seed": 0, "top_p": "1"}, False),
+    ({"temperature": 0.0, "seed": 0, "top_k": 1}, False),
+    (None, False),
+])
+def test_validate_server_identity_checks_actual_greedy_sampling(sampling, accepted):
+    ready = _ready()
+    ready["sampling"] = sampling
+    if accepted:
+        wrapper.validate_server_identity(ready, _health())
+    else:
+        with pytest.raises(ValueError, match="sampling contract"):
+            wrapper.validate_server_identity(ready, _health())
+
+
+def test_bfcl_worker_accepts_actual_server_sampling_without_loosening_ace():
+    ready = _ready()
+    ready["sampling"] = server._sampling_params_for_benchmark("bfcl")
+    wrapper.validate_server_identity(ready, _health())
+
+    ready["sampling"] = server._sampling_params_for_benchmark("acebench", "ac_gist_static")
+    with pytest.raises(ValueError, match="sampling contract"):
+        wrapper.validate_server_identity(ready, _health())
 
 
 @pytest.mark.parametrize('source', ['ready', 'health', 'both'])
