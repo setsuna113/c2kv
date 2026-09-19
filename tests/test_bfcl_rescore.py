@@ -69,7 +69,9 @@ def test_old_fc_handler_decode_error_cannot_publish_score_input(tmp_path):
     (cell / "cell.json").write_text(json.dumps({"task_ids": [task_id]}))
     write_attempt(cell, "old", [{
         "id": task_id, "result": [["<tool_call>...</tool_call>"]],
-        "inference_log": [{"step_0": [{"role": "handler_log",
+        "inference_log": [{"step_0": [{"role": "assistant", "content":
+                                      '<tool_call>{"name":"lookup","arguments":{}}</tool_call>'},
+                                     {"role": "handler_log",
                                       "error": "'str' object has no attribute 'items'"}]}],
     }])
     out = tmp_path / "score"

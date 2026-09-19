@@ -47,7 +47,9 @@ def test_old_fc_handler_row_and_done_are_replaced_only_after_new_result(tmp_path
     old_result.parent.mkdir(parents=True)
     old_result.write_text(json.dumps({
         "id": task_id, "result": [["<tool_call>...</tool_call>"]],
-        "inference_log": [{"step_0": [{"role": "handler_log",
+        "inference_log": [{"step_0": [{"role": "assistant", "content":
+                                      '<tool_call>{"name":"lookup","arguments":{}}</tool_call>'},
+                                     {"role": "handler_log",
                                       "error": "'str' object has no attribute 'items'"}]}],
     }), encoding="utf-8")
     old_done = {"task_id": task_id, "status": "completed", "returncode": 0}
