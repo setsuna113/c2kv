@@ -53,7 +53,8 @@ class SingleTaskHarnessAPI(EventNativeAPI):
         known = {"messages", "model", "tools", "temperature", "max_tokens",
                  "max_completion_tokens", "stream", "seed", "store", "top_p",
                  "presence_penalty", "frequency_penalty", "chat_template_kwargs",
-                 "c2kv_eval_context", "tool_choice", "parallel_tool_calls", "n"}
+                 "c2kv_eval_context", "c2kv_measurement_session_id",
+                 "tool_choice", "parallel_tool_calls", "n"}
         unknown = set(payload) - known
         if unknown:
             raise EventNativeAPIError(400, "unknown_field", f"Unsupported harness fields: {sorted(unknown)!r}")
@@ -88,6 +89,19 @@ class SingleTaskHarnessAPI(EventNativeAPI):
             self.benchmark != "acebench" or not isinstance(client_context, Mapping)
         ):
             raise EventNativeAPIError(400, "client_context_unsupported", "Task identity is server-owned")
+        server_task_id = next(iter(self.allowed_task_ids))
+        if "c2kv_measurement_session_id" in payload:
+            measurement_task_id = payload["c2kv_measurement_session_id"]
+            if type(measurement_task_id) is not str or not measurement_task_id:
+                raise EventNativeAPIError(
+                    400, "invalid_measurement_session_id",
+                    "Harness measurement task identity must be a nonempty string",
+                )
+            if self.benchmark != "acon_appworld" or measurement_task_id != server_task_id:
+                raise EventNativeAPIError(
+                    409, "task_identity_mismatch",
+                    "Harness measurement task identity differs from the frozen server task",
+                )
         seed = payload.get("seed", 0)
         # tau2's orchestrator supplies a task seed through LLMConfig.set_seed.
         # Greedy generation stays bound to the server seed; retain the client value.
@@ -121,7 +135,7 @@ class SingleTaskHarnessAPI(EventNativeAPI):
                 # source contract while step still advances on every decision.
                 user_turn = 0
             identity = {"benchmark": self.benchmark,
-                        "task_id": next(iter(self.allowed_task_ids)),
+                        "task_id": server_task_id,
                         "user_turn": user_turn, "step": len(self._wire_identities), "attempt": 0}
         normalized = {"messages": messages, "tools": tools,
                       "model": payload.get("model"),
@@ -155,6 +169,7 @@ class SingleTaskHarnessAPI(EventNativeAPI):
                 if key not in ("temperature", "max_tokens", "max_completion_tokens")
             ),
             "client_context_ignored": client_context is not None,
+            "measurement_task_id_validated": "c2kv_measurement_session_id" in payload,
             "task_identity_source": "server",
         }
         try:
