@@ -134,6 +134,18 @@ class PaperMatrixTest(unittest.TestCase):
         self.assertIn("--full", ts_cmd)
         self.assertEqual(ts_cmd[ts_cmd.index("--ts-parallel") + 1], "1")
 
+    def test_reference_attention_arms_get_static_pool_headroom(self):
+        from benchmarks.paper.runner import REFERENCE_ATTENTION_MEM_FRACTION
+        full = server_command(self.config, Path("sglang"), "full")
+        self.assertEqual(full[full.index("--mem-fraction-static") + 1], str(self.config["mem_fraction_static"]))
+        for arm in ("history_kv_pyramidkv_r25_persistent", "agentkv", "commitkv"):
+            cmd = server_command(self.config, Path("sglang"), arm)
+            self.assertEqual(cmd[cmd.index("--mem-fraction-static") + 1],
+                             str(min(float(self.config["mem_fraction_static"]), REFERENCE_ATTENTION_MEM_FRACTION)))
+            self.assertIn("--disable-cuda-graph", cmd)
+        h2o = server_command(self.config, Path("sglang"), "history_kv_h2o_r25_persistent")
+        self.assertEqual(h2o[h2o.index("--mem-fraction-static") + 1], str(self.config["mem_fraction_static"]))
+
     def test_cuda_command_is_single_flight(self):
         cmd = server_command(self.config, Path("sglang"))
         self.assertEqual(cmd[cmd.index("--device") + 1], "cuda")

@@ -15,6 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG = Path(__file__).with_name("config.json")
 
 
+REFERENCE_ATTENTION_MEM_FRACTION = 0.65   # static pool cap for reference_attention arms (see server_command)
 C1_ARMS = {"c2kv_c1_t02_r8": 8, "c2kv_c1_t02_r4": 4}   # native C1 controller arms and their ratios
 
 EVENT_NATIVE_CHECKPOINT_MARKERS = {
@@ -56,6 +57,14 @@ def server_command(config, source, arm=None):
     every arm) live in the config so the resolved config records exactly what
     each cell ran with.
     """
+    from benchmarks.arms import get_arm, history_kv_spec
+    spec = history_kv_spec(get_arm(arm)) if arm is not None else None
+    reference_attention = bool(spec and spec["backend"] == "reference_attention")
+    # The reference route keeps its history in method-owned tensors and attends with
+    # eager SDPA; those temporaries live outside SGLang's static pool. Leave them
+    # headroom (an AppWorld PyramidKV cell hit CUDA OOM at 46.8/47.4 GiB with 0.8).
+    mem_fraction = (min(float(config["mem_fraction_static"]), REFERENCE_ATTENTION_MEM_FRACTION)
+                    if reference_attention else config["mem_fraction_static"])
     cmd = [config["server_python"], "-m", "sglang.launch_server",
            "--model-path", config["checkpoint"], "--served-model-name", config["model"],
            "--device", "cuda", "--dtype", "bfloat16", "--model-impl", "sglang",
@@ -64,15 +73,12 @@ def server_command(config, source, arm=None):
            "--enable-c2kv", "--c2kv-gist-type", "dynamic-interleave",
            "--c2kv-gist-param", "qkv", "--c2kv-query-proj", "base",
            "--c2kv-pool-fraction", str(config["c2kv_pool_fraction"]),
-           "--mem-fraction-static", str(config["mem_fraction_static"]),
+           "--mem-fraction-static", str(mem_fraction),
            "--context-length", str(config["context_length"]),
            "--max-total-tokens", str(config["max_total_tokens"]),
            "--max-running-requests", "1", "--page-size", "1",
            "--chunked-prefill-size", str(config["chunked_prefill_size"]),
            "--random-seed", str(config["seed"])]
-    from benchmarks.arms import get_arm, history_kv_spec
-    spec = history_kv_spec(get_arm(arm)) if arm is not None else None
-    reference_attention = bool(spec and spec["backend"] == "reference_attention")
     radix_arms = set(config.get("radix_cache_arms") or ())
     if reference_attention or ("*" not in radix_arms and arm not in radix_arms):
         cmd.append("--disable-radix-cache")

@@ -89,6 +89,9 @@ mechanisms). All three are recorded in `config.resolved.json` and in each
 cell's `started.json`.
 Reference-attention arms always disable CUDA graphs and radix cache because
 their per-request query capture and external KV tensors require eager execution.
+They also cap `--mem-fraction-static` at 0.65 so the eager attention temporaries
+have headroom outside SGLang's static pool (an AppWorld PyramidKV cell ran out of
+GPU memory at 0.8).
 
 Resident KV is reported as a total with line items, never as a total minus
 cache: `request_peak_resident_kv_bytes` is the decision-chain peak including
