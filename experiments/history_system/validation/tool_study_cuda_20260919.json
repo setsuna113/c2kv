@@ -193,7 +193,7 @@
   "limitations": [
     "BFCL task26 is preliminary, n=1; these cells are functional checks, not quality estimates.",
     "The OFF/hybrid3 and ON/uniform cells used one teacher-forced Full input reconstructed from proxy telemetry, without tool execution or official scoring.",
-    "No natural C1 regeneration occurred in either closed-loop cell; the two-call recovery check injected the recovery decision.",
+    "The successful ON/hybrid3 closed-loop cell produced five natural C1 regenerations across 21 decisions (26 generation calls); the OFF/uniform cell produced none. The separate two-call fixture injected its recovery decision.",
     "The first ON/hybrid3 attempt failed after a local-to-remote embedding-model path mismatch; the isolated config was corrected and a clean retry completed."
   ]
 }
