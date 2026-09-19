@@ -13,6 +13,52 @@ runtime fixes are copied into that subset only when an NPU launcher consumes
 them.  These source checkouts do not deploy or overwrite the detached running
 copies under `/home/liuyancheng/c2kv-generality-20260918/src/`.
 
+## HiAgent BFCL text-budget client on NPU
+
+`generality/paper_text_budget.py` launches one `hiagent_full_bN` BFCL client
+from a shared paper checkout. It accepts `bfcl_base` or `bfcl_long_context`,
+maps them to the official BFCL categories, and keeps the budgeted result in a
+distinct output directory. The budget is a cap on the server-rendered actor
+history token span. The algorithm, budget guard, proxy, and BFCL adapter live
+in `--paper-root`; this NPU repository does not keep another copy of them.
+
+The NPU engine must be exclusively allocated to this BFCL cell for its entire
+run under its owner's card/port reservation; do not point `--upstream` at a
+server serving another experiment. The shared text-arm proxy flushes the
+engine-wide radix cache between BFCL episodes. The dedicated engine must use
+`python -m benchmarks.paper.budget_server` from the shared paper checkout
+with the existing NPU SGLang flags and both the paper root and SGLang
+`python/` directory on `PYTHONPATH`. A server started through
+`sglang.launch_server` lacks `/v1/c2kv/chat_budget` and is rejected before a
+BFCL client starts. This launcher does not start or stop the engine process
+and does not enter the generality scheduler or formal matrix.
+
+For an operator-selected free proxy port and separately owned budget server:
+
+```bash
+PAPER_ROOT=/path/to/shared-paper-checkout
+NPU_ROOT=/path/to/this-npu-checkout
+CKPT=/home/liuyancheng/c2kv-b-final-20260912/checkpoints/b_history/arm-C/seed-42/checkpoint-1000
+BFCL_DIR=/home/liuyancheng/benchmarks/gorilla/berkeley-function-call-leaderboard
+OUT=/path/to/new/hiagent-b768-bfcl-base
+: "${BUDGET_SERVER_URL:?set the exclusively allocated budget_server base URL}"
+
+/home/liuyancheng/envs/bench/bin/python "$NPU_ROOT/generality/paper_text_budget.py" \
+  --paper-root "$PAPER_ROOT" --benchmark bfcl_base \
+  --history-budget-tokens 768 --upstream "$BUDGET_SERVER_URL" \
+  --proxy-port 37490 --out "$OUT" --model gen-c1000 \
+  --checkpoint "$CKPT" --bfcl-dir "$BFCL_DIR" --dry-run
+```
+
+The dry run prints `bfcl_base__hiagent_full_b768` and the exact client command
+without contacting the NPU. Remove `--dry-run` only after the owned
+`budget_server` is live. The launcher then sends a non-generating request to
+`/v1/c2kv/chat_budget` and requires a positive, server-tokenized history span
+before running `benchmarks.run`. Use `--benchmark bfcl_long_context` for the
+other BFCL cell. `--run-ids` is an optional scoped run; omit it for the
+complete category. The checkpoint profile must be discoverable
+beside `--checkpoint`, or be passed explicitly with `--checkpoint-profile`.
+
 The four ratio-8 candidate algorithms are an explicit C2KV BFCL-base path,
 outside the ratio-4 generality matrix. Start from a
 `bfcl_base/c2kv/<working-point>/compression_full_budget/cell.json` source and
