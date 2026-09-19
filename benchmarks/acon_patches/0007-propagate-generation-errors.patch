@@ -1,0 +1,61 @@
+diff --git a/src/productive_agents/llm.py b/src/productive_agents/llm.py
+--- a/src/productive_agents/llm.py
++++ b/src/productive_agents/llm.py
+@@ -522,7 +522,8 @@ class vLLM(BaseLLMModel):
+             return completion.choices[0].message.content
+         except Exception as e:
+             logger.error(f"vLLM generation Error: {e}")
+-            return "None"
++            # C2KV: generation failures must never become executable actions.
++            raise
+ 
+ class vLLMLocal(BaseLLMModel):
+     def __init__(self, model_name, system_message=None, lora_path=None):
+diff --git a/src/productive_agents/agents/unified_agent.py b/src/productive_agents/agents/unified_agent.py
+--- a/src/productive_agents/agents/unified_agent.py
++++ b/src/productive_agents/agents/unified_agent.py
+@@ -17,6 +17,10 @@ from productive_agents.agents.base import BaseAgent, BasePromptBuilder
+ from productive_agents.agents.memory import MemoryManager
+ from productive_agents.agents.utils import LLMManager, LLMOutput
+ 
+ 
++class GenerationError(RuntimeError):
++    """A model request failed before the agent received an action."""
++
++
+ class UnifiedPromptBuilder(BasePromptBuilder):
+     """Unified prompt builder that can be specialized for different tasks."""
+@@ -245,7 +249,8 @@ class UnifiedAgent(BaseAgent):
+                 response = self._generate_with_fallback(prompt)
+         except Exception as e:
+             self.logger.error(f"Error generating response: {e}")
+-            response = f"Error: {e}"
++            # C2KV: distinguish a failed request from a generated action.
++            raise GenerationError(f"Model generation failed: {e}") from e
+         
+         if self.debug_mode:
+             self._debug_print(prompt, response)
+@@ -427,6 +432,7 @@ class UnifiedAgent(BaseAgent):
+             results['termination_reason'] = 'user_interrupted'
+             self.logger.info("Execution interrupted by user")
+         except Exception as e:
+-            results['termination_reason'] = 'error'
++            results['termination_reason'] = (
++                'generation_error' if isinstance(e, GenerationError) else 'error')
+             results['error'] = str(e)
+             self.logger.error(f"Error during execution: {e}")
+diff --git a/experiments/appworld/run.py b/experiments/appworld/run.py
+--- a/experiments/appworld/run.py
++++ b/experiments/appworld/run.py
+@@ -178,6 +178,11 @@ def main(
+     # Save environment trajectory
+     env.dump_history(output_dir)
+     
++    if results.get('termination_reason') == 'generation_error':
++        # Keep diagnostic artifacts, but abort before official scoring.
++        env.close()
++        raise RuntimeError(f"ACON generation failed: {results.get('error', 'unknown')}")
++
+     # Get and print token usage and cost information
+     token_summary = agent.get_token_usage_summary()
+     if token_summary:

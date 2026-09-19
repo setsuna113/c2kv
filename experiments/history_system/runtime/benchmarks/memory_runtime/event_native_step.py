@@ -61,6 +61,7 @@ class EventNativeDecisionRunner:
             return copy.deepcopy(cached[1])
         started_ns = time.perf_counter_ns()
         started_unix_ns = time.time_ns()
+        recovery_disabled = payload.get('recovery_disabled') is True
         keep_session = False
         outer_request_id = payload.get('outer_request_id')
         if not isinstance(outer_request_id, str) or not outer_request_id:
@@ -81,6 +82,7 @@ class EventNativeDecisionRunner:
             'decision_end_unix_ns': None,
             'decision_duration_ns': None,
             'decision_runtime_seconds': None,
+            'recovery_disabled': recovery_disabled,
             'scope': 'One unsubmitted decision; only response is executable, no tools or scorer were invoked.',
         }
         try:
@@ -91,6 +93,7 @@ class EventNativeDecisionRunner:
                 # enter controller field validation or selection semantics.
                 controller_payload = dict(payload)
                 controller_payload.pop('outer_request_id', None)
+                controller_payload.pop('recovery_disabled', None)
                 prepared = self.controller.prepare(
                     controller_payload,
                     ratio=self.ratio,
@@ -110,15 +113,38 @@ class EventNativeDecisionRunner:
                         session_id=key[0], decision_key=key[1],
                         shadow_features=(stats.get('shadow_features')
                                          if isinstance(stats, dict) else None))
-                reconsider_started = time.perf_counter_ns()
-                try:
-                    reconsidered = self.controller.reconsider(
-                        prepared, list(draft.tool_calls), draft_text=draft.text,
-                        parse_error=draft.reason if draft.status == 'malformed' else None)
-                finally:
-                    duration_ns = time.perf_counter_ns() - reconsider_started
-                    record['controller_timing']['reconsider_duration_ns'] = duration_ns
-                    record['controller_timing']['reconsider_seconds'] = duration_ns / 1e9
+                if recovery_disabled:
+                    risk_observer = getattr(self.controller, 'calibration_risk', None)
+                    if callable(risk_observer):
+                        risk = risk_observer(
+                            prepared, list(draft.tool_calls), draft_text=draft.text,
+                            parse_error=draft.reason if draft.status == 'malformed' else None)
+                        if risk is not None:
+                            record['risk'] = risk
+                    decision = {
+                        'schema': 'event-native-recovery-decision-v1',
+                        'recovery_enabled': False,
+                        'regenerate': False,
+                        'reason': 'recovery_disabled',
+                        'recovery_stage': 'disabled_for_calibration',
+                        'post_draft_exact_recovery_applied': False,
+                    }
+                    reconsidered = {
+                        'regenerate': False, 'memory': prepared.memory,
+                        'metadata': prepared.metadata, 'decision': decision,
+                    }
+                    record['controller_timing']['reconsider_duration_ns'] = 0
+                    record['controller_timing']['reconsider_seconds'] = 0.0
+                else:
+                    reconsider_started = time.perf_counter_ns()
+                    try:
+                        reconsidered = self.controller.reconsider(
+                            prepared, list(draft.tool_calls), draft_text=draft.text,
+                            parse_error=draft.reason if draft.status == 'malformed' else None)
+                    finally:
+                        duration_ns = time.perf_counter_ns() - reconsider_started
+                        record['controller_timing']['reconsider_duration_ns'] = duration_ns
+                        record['controller_timing']['reconsider_seconds'] = duration_ns / 1e9
                 record['exact_recovery'] = copy.deepcopy(reconsidered['decision'])
                 rounds = []
                 max_rounds = getattr(self.controller, 'max_recovery_rounds', 1)

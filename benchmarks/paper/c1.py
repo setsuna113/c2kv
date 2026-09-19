@@ -196,7 +196,7 @@ def run_closed_loop(config, benchmark, directory, requested=None):
                     receipt, metrics = run_task(config, task, native, delivery, controller_path)
                 else:
                     receipt, metrics = delivery.run_task(args, task, controller_path)
-            except RuntimeError as error:
+            except (RuntimeError, subprocess.CalledProcessError) as error:
                 failure = controller_step_failure(task_root)
                 if failure is None:
                     raise
@@ -312,6 +312,7 @@ def run_common_prefix(config, benchmark, directory, prefix_path):
         raise ValueError("Recorded conversations reuse an episode identity")
     native, args, controller_path = prepare_native(config, benchmark, directory, tasks, delivery)
     sequence = 0
+    tolerated_failures = []   # (task, prefix_id, status, kind): the per-task server declared a tolerated failure
     for task, rows in zip(tasks, groups.values()):
         if benchmark in {"acebench_agent", "toolsandbox"}:
             from .native_extra import controller_command
@@ -342,6 +343,11 @@ def run_common_prefix(config, benchmark, directory, prefix_path):
                             raise ValueError("Conflicting recorded generation caps")
                         payload["max_completion_tokens"] = cap
                     payload.setdefault("store", False)
+                    # Full recorded BFCL's harness sampling (temperature 0.001); the
+                    # native arm serves greedy only and its API rejects anything else.
+                    # Replay under the arm's own contract; the original payload is kept
+                    # verbatim in the prefix_replay row for traceability.
+                    payload["temperature"] = 0.0
                     user_turn = max(0, sum(m.get("role") == "user" for m in payload["messages"]) - 1)
                     turn_step = turn_step + 1 if user_turn == previous_user_turn else 0
                     previous_user_turn = user_turn
@@ -362,7 +368,37 @@ def run_common_prefix(config, benchmark, directory, prefix_path):
                         result = json.load(response)
                 except urllib.error.HTTPError as error:
                     detail = error.read().decode("utf-8", "replace")
-                    raise RuntimeError(f"C1 replay HTTP {error.code}: {detail}") from error
+                    failure = controller_step_failure(task_root)
+                    if error.code < 500 and not (
+                        error.code == 422 and failure is not None
+                        and failure[1] == "capacity_infeasible"
+                    ):
+                        failure = None
+                    if failure is None:
+                        raise RuntimeError(f"C1 replay HTTP {error.code}: {detail}") from error
+                    # The same declared failures the closed loop scores as zero (CUDA OOM,
+                    # CapacityInfeasible) end this task's server; record the prefix and the
+                    # rest of the task as failed instead of losing the whole replay cell.
+                    status, kind, message = failure
+                    for skipped, later in enumerate(rows[step:]):
+                        append_jsonl(directory / "prefix_replay.jsonl", {
+                            "schema": "c2kv.prefix_replay.v1", "event_type": "prefix_replay",
+                            "source_run_id": benchmark + "__full", "target_run_id": benchmark + "__" + ARM,
+                            "sequence": sequence, "prefix_id": later["prefix_id"],
+                            "canonical_sha256": later["canonical_sha256"], "native_task_id": task,
+                            "native_step": step + skipped, "request_id": None,
+                            "start_unix_ns": unix if skipped == 0 else None,
+                            "duration_ns": (time.perf_counter_ns() - started) if skipped == 0 else None,
+                            "http_status": error.code if skipped == 0 else None,
+                            "request": later["replay_payload"], "response": None,
+                            "source_paper_measurement": _paper_measurement(later.get("source_response")),
+                            "error": detail if skipped == 0 else f"task server terminated after {kind}",
+                            "failure": {"status": status, "kind": kind, "message": message},
+                            "teacher_forced": True, "external_actions_executed": 0,
+                        })
+                        tolerated_failures.append((task, later["prefix_id"], status, kind))
+                        sequence += 1
+                    break
                 append_jsonl(directory / "prefix_replay.jsonl", {
                     "schema": "c2kv.prefix_replay.v1", "event_type": "prefix_replay",
                     "source_run_id": benchmark + "__full", "target_run_id": benchmark + "__" + ARM,
@@ -378,6 +414,16 @@ def run_common_prefix(config, benchmark, directory, prefix_path):
         finally:
             delivery.runner._stop_server(process, task_root / "server.supervisor.json")
             log.close()
+    kinds = {}
+    for _, _, status, kind in tolerated_failures:
+        kinds[f"{status}/{kind}"] = kinds.get(f"{status}/{kind}", 0) + 1
+    save(directory / "replay_summary.json", {
+        "prefixes": len(records), "completed": len(records) - len(tolerated_failures),
+        "failed": len(tolerated_failures), "failed_tasks": sorted({t for t, *_ in tolerated_failures}),
+        "failure_kinds": kinds,
+        "policy": "prefixes of a task whose native server declared a tolerated failure (cuda_oom, "
+                  "capacity_infeasible) are recorded as failed; any other error fails the cell",
+    })
     return native
 
 

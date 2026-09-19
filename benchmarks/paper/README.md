@@ -104,6 +104,13 @@ mechanisms). All three are recorded in `config.resolved.json` and in each
 cell's `started.json`.
 Reference-attention arms always disable CUDA graphs and radix cache because
 their per-request query capture and external KV tensors require eager execution.
+ACEBench Agent cells serve with `--max-running-requests 2`: the user simulator talks to
+the raw upstream while a persistent history session still holds the agent's request
+slot; with one slot the scheduler died in `alloc_req_slots`. The two clients alternate,
+so per-request attribution is unchanged.
+They also cap `--mem-fraction-static` at 0.65 so the eager attention temporaries
+have headroom outside SGLang's static pool (an AppWorld PyramidKV cell ran out of
+GPU memory at 0.8).
 
 Resident KV is reported as a total with line items, never as a total minus
 cache: `request_peak_resident_kv_bytes` is the decision-chain peak including
@@ -354,3 +361,74 @@ These are integration checks, not benchmark scores:
   prefill tokens, official score 1.0); `c1_embed` 5.33 s -> 0.14 s per call,
   task wall 157.6 s -> 58.0 s (functional check, preliminary, n=1).
 - The formal benchmark matrix has not been started.
+# Budget-adapted ACON
+
+`acon_hist_ut_co_b768` is a separate budget adaptation of `acon_hist_ut_co`.
+The integer suffix is the maximum number of **actor-visible history tokens**
+at each decision; `b768` matches the 768-position history allowance used by B0.
+Other positive integer suffixes select other allowances. This is not a cap on
+the whole prompt, decode tokens, shared radix-cache residency, or compressor
+workspace. Report those memory and compute costs separately.
+
+The adapted policy retains ACON's `ut_co` guideline, rolling summary, original
+first user instruction, and last two non-system messages. It changes the
+compression trigger from the original character threshold to the rendered
+history allowance, and caps summary output to the remaining space. Each
+summary candidate and the final actor request are tokenized by the running
+SGLang server's actual chat renderer. System/tools/current input remain common
+raw context. A summary is always charged as history, including when it appears
+in a user-role message and no assistant message survives compression.
+
+At most three summary attempts are allowed per request. Required raw history
+that does not fit, or summaries that still exceed the cap, produce a typed
+`acon_history_budget_exceeded` method failure: no over-budget actor request and
+no raw-history truncation or fallback. BFCL retains and officially scores this
+terminal failure. Compressor/server/transport errors remain execution failures.
+Auxiliary compressor calls retain their `aux_compression` telemetry; the cap
+does not forbid them from reading a larger input. The request log records the
+budget receipt, final guard and exact actor-payload hash.
+
+Add distinct BFCL base/long-context cells to a **new output directory**:
+
+```bash
+python -m benchmarks.paper.runner prepare --config CONFIG.json \
+  --sglang-source ENGINE --output RESULTS --acon-budget-tokens 768
+python -m benchmarks.paper.runner run --config CONFIG.json \
+  --sglang-source ENGINE --output RESULTS --acon-budget-tokens 768 \
+  --stage closed_loop --cells bfcl_base__acon_hist_ut_co_b768
+```
+
+The runner uses `benchmarks.paper.budget_server`, a paper-owned SGLang launcher
+that adds a CPU-only `/v1/c2kv/chat_budget` endpoint. It uses the same serving
+instance and history-span resolver as generation, without scheduling model
+work. Both the paper root and `ENGINE/python` must be on `PYTHONPATH` (the runner
+sets them). Original ACON cells and their commands are unchanged; budget cells
+inherit their configured radix-cache choice. Direct `benchmarks/run.py` runs
+must point to this launcher rather than an unextended SGLang server.
+
+# Budget-adapted HiAgent
+
+`hiagent_full_b768` is a separate, tool-native adaptation of `hiagent_full`;
+the original arm and default matrix are unchanged. As with ACON, the positive
+integer suffix caps actor-visible history tokens at **every generation**,
+including retrieval continuations. System, tools and current input remain
+outside that history allowance. Auxiliary calls are metered separately,
+including their compute and resident KV costs.
+
+The adaptation follows HiAgent's subgoal protocol: completed subgoals overflow
+in official FIFO order while the current subgoal remains pinned. Subgoal IDs
+remain stable after eviction. A requested trajectory is revealed in full only
+when the resulting actor history fits the cap. Otherwise the retrieval tool
+returns `budget_unavailable` feedback so the actor can continue; this is not a
+terminal task failure. The actor request is checked against the SGLang-rendered
+history span before each generation, without truncating a trajectory or
+silently exceeding the cap. Admission also reserves space for the brief
+`budget_unavailable` feedback, so a denied retrieval can continue under the
+same cap when the fixed history floor fits. This is a tool-native adaptation,
+not a claim that the original HiAgent paper evaluated this budgeted setting.
+
+Add HiAgent BFCL base/long-context cells with `--hiagent-budget-tokens 768` on
+both `prepare` and `run`. It can be combined with `--acon-budget-tokens 768`;
+the two options add distinct cells and leave the default matrix unchanged.
+Budget cells use `benchmarks.paper.budget_server`, and the runner checks the
+`/v1/c2kv/chat_budget` route after server health before starting a cell.

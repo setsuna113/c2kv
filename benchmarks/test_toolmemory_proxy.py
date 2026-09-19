@@ -30,6 +30,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import toolmemory  # noqa: E402
+import proxy  # noqa: E402
 
 pytest.importorskip("transformers")
 
@@ -211,3 +212,14 @@ def test_tool_memory_proxy_end_to_end(tmp_path):
     assert info["raw_tool_prologue_tokens"] > info["resident_tool_tokens"] > 0
     rows = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines() if line.strip()]
     assert rows[0]["tool_memory"]["spec"] == "t0_r8_hybrid1" and rows[0]["status"] == "ok"
+
+
+def test_tool_memory_refuses_budget_adapted_text_arms():
+    """Budget-adapted arms preflight the raw actor payload (tool prologue
+    included) through the server's chat budget renderer; the proxy refuses the
+    combination before touching the checkpoint or the upstream."""
+    with pytest.raises(SystemExit, match="budget-adapted"):
+        proxy.main([
+            "--upstream", "http://127.0.0.1:1", "--backend", "sglang",
+            "--arm", "hiagent_full_b4096", "--port", "1",
+            "--tool-memory", "t0:r8", "--tool-checkpoint", "/nope"])

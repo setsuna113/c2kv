@@ -140,6 +140,27 @@ class PaperMatrixTest(unittest.TestCase):
         self.assertIn("--full", ts_cmd)
         self.assertEqual(ts_cmd[ts_cmd.index("--ts-parallel") + 1], "1")
 
+    def test_reference_attention_arms_get_static_pool_headroom(self):
+        from benchmarks.paper.runner import REFERENCE_ATTENTION_MEM_FRACTION
+        full = server_command(self.config, Path("sglang"), "full")
+        self.assertEqual(full[full.index("--mem-fraction-static") + 1], str(self.config["mem_fraction_static"]))
+        for arm in ("history_kv_pyramidkv_r25_persistent", "agentkv", "commitkv"):
+            cmd = server_command(self.config, Path("sglang"), arm)
+            self.assertEqual(cmd[cmd.index("--mem-fraction-static") + 1],
+                             str(min(float(self.config["mem_fraction_static"]), REFERENCE_ATTENTION_MEM_FRACTION)))
+            self.assertIn("--disable-cuda-graph", cmd)
+        h2o = server_command(self.config, Path("sglang"), "history_kv_h2o_r25_persistent")
+        self.assertEqual(h2o[h2o.index("--mem-fraction-static") + 1], str(self.config["mem_fraction_static"]))
+
+    def test_acebench_cells_serve_two_request_slots(self):
+        from benchmarks.paper.runner import ACEBENCH_MAX_RUNNING_REQUESTS
+        for arm in ("full", "history_kv_h2o_r25_persistent", "agentkv"):
+            ace = server_command(self.config, Path("sglang"), arm, "acebench_agent")
+            self.assertEqual(ace[ace.index("--max-running-requests") + 1], str(ACEBENCH_MAX_RUNNING_REQUESTS))
+            for other in ("bfcl_base", "appworld", "toolsandbox", None):
+                cmd = server_command(self.config, Path("sglang"), arm, other)
+                self.assertEqual(cmd[cmd.index("--max-running-requests") + 1], "1")
+
     def test_cuda_command_is_single_flight(self):
         cmd = server_command(self.config, Path("sglang"))
         self.assertEqual(cmd[cmd.index("--device") + 1], "cuda")
@@ -573,6 +594,24 @@ class ExtensionRuleTest(unittest.TestCase):
             for row in new_plan:
                 if row["cell_id"] in old_cmd:
                     self.assertEqual(row["command"], old_cmd[row["cell_id"]])
+
+    def test_engine_checkout_may_move_without_new_cells(self):
+        """Rolling deployments point the same matrix at a new sglang checkout; only the
+        recorded ``sglang_source`` differs, which is not an experiment change."""
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary)
+            plan_a, _ = prepare(self.config, output, output / "sglang-v3")
+            plan_b, _ = prepare(self.config, output, output / "sglang-v4")
+            self.assertEqual([r["cell_id"] for r in plan_a], [r["cell_id"] for r in plan_b])
+            resolved = json.loads((output / "config.resolved.json").read_text())
+            self.assertEqual(resolved["sglang_source"], str((output / "sglang-v4").resolve()))
+            self.assertTrue(list(output.glob("config.before_extension.*.json")))
+            # anything else still goes through the extension rule
+            import copy
+            changed = copy.deepcopy(self.config)
+            changed["chunked_prefill_size"] = 256
+            with self.assertRaisesRegex(RuntimeError, "different config"):
+                prepare(changed, output, output / "sglang-v4")
 
     def test_touching_an_existing_cell_is_refused(self):
         import copy

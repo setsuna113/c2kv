@@ -67,7 +67,7 @@ def test_raw_cells_are_unchanged_when_tool_contexts_are_added():
             assert (runner.run_command(base, old, Path("/out") / stage / cell_id, profile, stage)
                     == runner.run_command(extended, new, Path("/out") / stage / cell_id, profile, stage))
         assert (runner.server_command(base, SOURCE, old["arm"])
-                == runner.server_command(extended, SOURCE, new["arm"], new.get("tool_checkpoint")))
+                == runner.server_command(extended, SOURCE, new["arm"], tool_checkpoint=new.get("tool_checkpoint")))
     added = sorted(set(new_cells) - set(base_cells))
     benches = {"bfcl_base", "bfcl_long_context", "appworld", "acebench_agent", "toolsandbox"}
     assert added == sorted(f"{b}__{arm}__tools-t0_r8" for b in benches for arm in ("full", "hiagent_full"))
@@ -78,7 +78,7 @@ def test_tool_context_cells_carry_t0_flags_on_server_and_proxy():
     cell = next(row for row in runner.cells(config) if row["cell_id"] == "bfcl_base__full__tools-t0_r8")
     assert cell["tool_context"] == "t0_r8"
     assert cell["tool_memory"] == "t0:r8" and cell["tool_checkpoint"] == "/ckpt/T0/checkpoint-1034"
-    server = runner.server_command(config, SOURCE, cell["arm"], cell["tool_checkpoint"])
+    server = runner.server_command(config, SOURCE, cell["arm"], cell["benchmark"], tool_checkpoint=cell["tool_checkpoint"])
     assert server[server.index("--c2kv-tool-gist-weights") + 1] == "/ckpt/T0/checkpoint-1034"
     assert runner.server_command(config, SOURCE, "full") == server[:-2]
     command = runner.run_command(config, cell, Path("/out/closed_loop/x"), Path("/out/deployment_profile.json"))
@@ -114,6 +114,19 @@ def test_native_arms_refuse_tool_contexts(tmp_path):
                 if row["cell_id"] == "bfcl_base__c2kv_c1_t02_r8__tools-t0_r8")
     with pytest.raises(ValueError, match="native cells"):
         runner.run_command(config, cell, tmp_path, tmp_path / "profile.json")
+
+
+def test_budget_arms_refuse_tool_contexts(tmp_path):
+    """Budget-adapted text arms measure the raw prompt (tool prologue included)
+    through the server's chat budget renderer; the axis stays off them."""
+    config = runner.with_hiagent_budget(_config(), 4096)
+    config = _with_tool_context(config, arms=("hiagent_full_b4096",))
+    with pytest.raises(ValueError, match="budget-adapted"):
+        runner.prepare(config, tmp_path / "out", SOURCE)
+    # the raw cell of the budget arm is untouched by the axis
+    rows = [row for row in runner.cells(runner.with_hiagent_budget(_config(), 4096))
+            if row["arm"] == "hiagent_full_b4096"]
+    assert rows and all(row["tool_context"] == "raw" and "tool_memory" not in row for row in rows)
 
 
 def test_prepare_writes_tool_context_column_and_commands(tmp_path):

@@ -331,6 +331,30 @@ class GPRecoveryController(EventNativeRecoveryController):
             raise PolicyInputError("Selection features arrived before prepare")
         prepared._set_draft_logprobs = tuple(token_logprobs)
 
+    def calibration_risk(self, prepared, draft_tool_calls, *, draft_text,
+                         parse_error=None):
+        """Score a held draft without selecting, admitting, or recovering evidence."""
+        if not self.set_protocol or self.gp.get("set_selector") != "risk":
+            return None
+        key = (prepared._store.session_id, prepared.metadata["decision_key"])
+        if self._prepared.get(key) is not prepared:
+            raise PolicyInputError("Prepared decision belongs to another G--P controller")
+        if prepared._checked_result is not None:
+            raise PolicyInputError("Calibration risk requires an unreconsidered draft")
+        from .set_protocol import context_from_prepared
+
+        context = context_from_prepared(
+            prepared, draft_tool_calls, draft_text, parse_error)
+        prediction = self.trained_selector.model.predict_risk(context)
+        return {
+            "schema": "c2kv-calibration-risk-v1",
+            "available": prediction.available,
+            "score": prediction.score if prediction.available else None,
+            "reason": prediction.reason,
+            "missing_fields": list(prediction.missing_fields),
+            "score_semantics": "current_turn_failure_risk",
+        }
+
     def _reconsider_sets(self, prepared, draft_tool_calls, draft_text, parse_error, decision):
         from .set_protocol import context_from_prepared, build_legal_sets, context_digest
         from .set_retrieval import supply_candidates

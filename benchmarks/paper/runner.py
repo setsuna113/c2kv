@@ -9,6 +9,7 @@ from pathlib import Path
 import subprocess
 import sys
 import time
+import urllib.error
 import urllib.request
 
 from .candidate_matrix import ARM_TO_VARIANT, parse_candidate_arms, with_candidate_methods
@@ -17,6 +18,13 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG = Path(__file__).with_name("config.json")
 
 
+# ACEBench Agent drives the user simulator against the raw upstream while the agent's
+# persistent history session still owns its request slot; with one slot the
+# simulator's request made the scheduler raise alloc_req_slots and die (H2O/SnapKV
+# ACEBench cells). The two clients never run concurrently, so per-request
+# attribution is unchanged.
+ACEBENCH_MAX_RUNNING_REQUESTS = 2
+REFERENCE_ATTENTION_MEM_FRACTION = 0.65   # static pool cap for reference_attention arms (see server_command)
 C1_ARMS = {"c2kv_c1_t02_r8": 8, "c2kv_c1_t02_r4": 4}   # native C1 controller arms and their ratios
 
 EVENT_NATIVE_CHECKPOINT_MARKERS = {
@@ -95,7 +103,7 @@ def cells(config):
     return sorted(rows, key=lambda row: is_c1_arm(row["arm"]) or is_candidate_arm(row["arm"]))
 
 
-def server_command(config, source, arm=None, tool_checkpoint=None):
+def server_command(config, source, arm=None, benchmark=None, tool_checkpoint=None):
     """CUDA server flags for one cell.
 
     Single-flight serving (one running request, one worker, no overlap
@@ -107,7 +115,18 @@ def server_command(config, source, arm=None, tool_checkpoint=None):
     every arm) live in the config so the resolved config records exactly what
     each cell ran with.
     """
-    cmd = [config["server_python"], "-m", "sglang.launch_server",
+    from benchmarks.arms import get_arm, history_kv_spec
+    resolved_arm = get_arm(arm) if arm is not None else None
+    spec = history_kv_spec(resolved_arm) if resolved_arm is not None else None
+    budget_text = bool(resolved_arm and resolved_arm.text_history_budget_tokens is not None)
+    reference_attention = bool(spec and spec["backend"] == "reference_attention")
+    # The reference route keeps its history in method-owned tensors and attends with
+    # eager SDPA; those temporaries live outside SGLang's static pool. Leave them
+    # headroom (an AppWorld PyramidKV cell hit CUDA OOM at 46.8/47.4 GiB with 0.8).
+    mem_fraction = (min(float(config["mem_fraction_static"]), REFERENCE_ATTENTION_MEM_FRACTION)
+                    if reference_attention else config["mem_fraction_static"])
+    module = "benchmarks.paper.budget_server" if budget_text else "sglang.launch_server"
+    cmd = [config["server_python"], "-m", module,
            "--model-path", config["checkpoint"], "--served-model-name", config["model"],
            "--device", "cuda", "--dtype", "bfloat16", "--model-impl", "sglang",
            "--attention-backend", config["attention_backend"],
@@ -115,16 +134,16 @@ def server_command(config, source, arm=None, tool_checkpoint=None):
            "--enable-c2kv", "--c2kv-gist-type", "dynamic-interleave",
            "--c2kv-gist-param", "qkv", "--c2kv-query-proj", "base",
            "--c2kv-pool-fraction", str(config["c2kv_pool_fraction"]),
-           "--mem-fraction-static", str(config["mem_fraction_static"]),
+           "--mem-fraction-static", str(mem_fraction),
            "--context-length", str(config["context_length"]),
            "--max-total-tokens", str(config["max_total_tokens"]),
-           "--max-running-requests", "1", "--page-size", "1",
+           "--max-running-requests", str(ACEBENCH_MAX_RUNNING_REQUESTS if benchmark == "acebench_agent" else 1),
+           "--page-size", "1",
            "--chunked-prefill-size", str(config["chunked_prefill_size"]),
            "--random-seed", str(config["seed"])]
-    from benchmarks.arms import get_arm, history_kv_spec
-    spec = history_kv_spec(get_arm(arm)) if arm is not None else None
-    reference_attention = bool(spec and spec["backend"] == "reference_attention")
     radix_arms = set(config.get("radix_cache_arms") or ())
+    if budget_text and resolved_arm.text_policy in radix_arms:
+        radix_arms.add(arm)
     if reference_attention or ("*" not in radix_arms and arm not in radix_arms):
         cmd.append("--disable-radix-cache")
     if reference_attention or config.get("disable_cuda_graph", True):
@@ -151,6 +170,44 @@ def with_port_offset(config, port_offset):
         return config
     return dict(config, server_port=config["server_port"] + port_offset,
                 proxy_port=config["proxy_port"] + port_offset)
+
+
+def with_acon_budget(config, budget):
+    """Add distinct BFCL budget cells without rewriting original ACON results."""
+    if budget is None:
+        return config
+    from benchmarks.arms import get_arm
+    arm = get_arm(f"acon_hist_ut_co_b{budget}")
+    if any(method["arm"] == arm.name for method in config["methods"]):
+        raise ValueError(f"ACON budget arm already exists: {arm.name}")
+    benchmarks = [row["name"] for row in config["benchmarks"]
+                  if row["name"] in {"bfcl_base", "bfcl_long_context"}]
+    if not benchmarks:
+        raise ValueError("ACON budget overlay requires a BFCL benchmark")
+    return dict(config, methods=[*config["methods"], {
+        "method": "ACON-budget", "arm": arm.name, "group": "budget",
+        "history_budget_tokens": budget, "benchmarks": benchmarks,
+    }])
+
+
+def with_hiagent_budget(config, budget):
+    """Add distinct BFCL HiAgent budget cells without changing the original arm."""
+    if budget is None:
+        return config
+    if isinstance(budget, bool) or not isinstance(budget, int) or budget < 1:
+        raise ValueError("HiAgent budget tokens must be a positive integer")
+    from benchmarks.arms import get_arm
+    arm = get_arm(f"hiagent_full_b{budget}")
+    if any(method["arm"] == arm.name for method in config["methods"]):
+        raise ValueError(f"HiAgent budget arm already exists: {arm.name}")
+    benchmarks = [row["name"] for row in config["benchmarks"]
+                  if row["name"] in {"bfcl_base", "bfcl_long_context"}]
+    if not benchmarks:
+        raise ValueError("HiAgent budget overlay requires a BFCL benchmark")
+    return dict(config, methods=[*config["methods"], {
+        "method": "HiAgent-budget", "arm": arm.name, "group": "budget",
+        "history_budget_tokens": budget, "benchmarks": benchmarks,
+    }])
 
 
 def run_command(config, cell, directory, profile, stage="closed_loop"):
@@ -256,8 +313,8 @@ def extension_problem(existing, config, source, output):
                 continue
             if old.get(key) != new.get(key):
                 return f"{cell_id}: {key} changed"
-        if (server_command(old_view, source, old["arm"], old.get("tool_checkpoint"))
-                != server_command(config, source, new["arm"], new.get("tool_checkpoint"))):
+        if (server_command(old_view, source, old["arm"], tool_checkpoint=old.get("tool_checkpoint"))
+                != server_command(config, source, new["arm"], tool_checkpoint=new.get("tool_checkpoint"))):
             return f"{cell_id}: server command changed"
         for stage in ("closed_loop", "common_prefix"):
             directory = output / stage / cell_id
@@ -272,6 +329,13 @@ def prepare(config, output, source):
         raise ValueError("The paper benchmark uses CUDA")
     for item in config["methods"]:
         arm = get_arm(item["arm"])
+        if arm.text_history_budget_tokens is not None:
+            if (type(item.get("history_budget_tokens")) is not int
+                    or item["history_budget_tokens"] != arm.text_history_budget_tokens
+                    or not set(item.get("benchmarks") or ()) <= {"bfcl_base", "bfcl_long_context"}
+                    or not item.get("benchmarks")):
+                raise ValueError("Text budget cells require a matching token cap and explicit BFCL benchmarks")
+            continue
         if is_candidate_arm(arm.name):
             if (item.get("ratio") != 8 or arm.ratio != 8
                     or arm.native_controller != "candidate_" + ARM_TO_VARIANT[arm.name]
@@ -333,10 +397,19 @@ def prepare(config, output, source):
     tool_contexts(config)   # validates names, specs and checkpoint fields
     for item in config["methods"]:
         for context_name in item.get("tool_contexts") or []:
-            if context_name != RAW_TOOL_CONTEXT and (is_c1_arm(item["arm"]) or is_candidate_arm(item["arm"])):
+            if context_name == RAW_TOOL_CONTEXT:
+                continue
+            if is_c1_arm(item["arm"]) or is_candidate_arm(item["arm"]):
                 raise ValueError(
                     f"{item['arm']} cannot take tool context {context_name!r}: native C1 "
                     "cells do not support tool memory yet")
+            if getattr(get_arm(item["arm"]), "text_history_budget_tokens", None) is not None:
+                # The budget renderer (benchmarks.paper.budget_server) measures the
+                # raw chat prompt, tool prologue included; gist carriers are not
+                # part of that accounting.
+                raise ValueError(
+                    f"{item['arm']} cannot take tool context {context_name!r}: budget-adapted "
+                    "text arms measure the raw tool prologue")
     config = dict(config)
     config["sglang_source"] = str(source.resolve())
     resolved_path = output / "config.resolved.json"
@@ -348,7 +421,12 @@ def prepare(config, output, source):
                 f"Existing output has an unreadable resolved config: {resolved_path}"
             ) from error
         if existing != config:
-            problem = extension_problem(existing, config, source, output)
+            # ``sglang_source`` is where the engine is checked out, not part of the
+            # experiment: a rolling engine deployment may point an unchanged matrix
+            # at a new checkout. Each cell's started.json records the source it ran.
+            same_matrix = ({k: v for k, v in existing.items() if k != "sglang_source"}
+                           == {k: v for k, v in config.items() if k != "sglang_source"})
+            problem = None if same_matrix else extension_problem(existing, config, source, output)
             if problem:
                 raise RuntimeError(
                     f"Existing output was prepared with a different config ({problem}): {resolved_path}"
@@ -379,8 +457,10 @@ def prepare(config, output, source):
     if len(ids) != len(set(ids)):
         raise ValueError("The paper matrix contains duplicate cell ids")
     with (output / "matrix.csv").open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=["cell_id", "benchmark", "method", "arm", "group", "ratio", "retention", "adapter", "category", "tool_context"],
-                                extrasaction="ignore")
+        fields = ["cell_id", "benchmark", "method", "arm", "group", "ratio", "retention", "adapter", "category", "tool_context"]
+        if any("history_budget_tokens" in row for row in matrix):
+            fields.append("history_budget_tokens")
+        writer = csv.DictWriter(handle, fieldnames=fields, extrasaction="ignore")
         writer.writeheader()
         writer.writerows(matrix)
     plan = []
@@ -407,6 +487,22 @@ def wait_server(proc, port):
             pass
         time.sleep(1)
     raise TimeoutError("CUDA server health timeout")
+
+
+def require_budget_renderer(port):
+    """Verify that the ready server exposes the paper chat-budget route."""
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    try:
+        with opener.open(f"http://127.0.0.1:{port}/v1/c2kv/chat_budget", timeout=2):
+            pass
+    except urllib.error.HTTPError as error:
+        # A GET on the POST-only route must be rejected by the route itself.
+        if error.code == 405:
+            return
+        raise RuntimeError(f"Paper chat budget renderer is unavailable (HTTP {error.code})") from error
+    except OSError as error:
+        raise RuntimeError("Paper chat budget renderer is unavailable") from error
+    raise RuntimeError("Paper chat budget renderer accepted an unexpected GET")
 
 
 def cleanup_cell_processes(proxy, server):
@@ -524,7 +620,7 @@ def execute(config, plan, output, source, stages, selected, port_offset=0):
             directory.mkdir(parents=True, exist_ok=True)
             (directory / "started.json").write_text(json.dumps({
                 "stage": stage, "cell": cell, "config": config,
-                "server_command": server_command(config, source, cell["arm"], cell.get("tool_checkpoint")),
+                "server_command": server_command(config, source, cell["arm"], cell["benchmark"], tool_checkpoint=cell.get("tool_checkpoint")),
                 "port_offset": port_offset,
                 "sglang_source": str(source), "time": time.time()}, indent=2))
             telemetry_name = ("native_engine_telemetry.jsonl" if is_native_arm(cell["arm"])
@@ -537,13 +633,16 @@ def execute(config, plan, output, source, stages, selected, port_offset=0):
                         if probe.connect_ex(("127.0.0.1", port)) == 0:
                             raise RuntimeError(f"Configured port {port} is already occupied")
                 # Own only this process group. Never stop another experiment's server.
-                server = subprocess.Popen(server_command(config, source, cell["arm"], cell.get("tool_checkpoint")), env=env,
+                server = subprocess.Popen(server_command(config, source, cell["arm"], cell["benchmark"], tool_checkpoint=cell.get("tool_checkpoint")), env=env,
                                           stdout=log, stderr=subprocess.STDOUT,
                                           start_new_session=True)
                 proxy = None
                 run_failure = None
                 try:
                     wait_server(server, config["server_port"])
+                    from benchmarks.arms import get_arm
+                    if get_arm(cell["arm"]).text_history_budget_tokens is not None:
+                        require_budget_renderer(config["server_port"])
                     if is_native_arm(cell["arm"]):
                         subprocess.run(run_command(config, cell, directory, profile_path, stage),
                                        check=True, env=env, cwd=ROOT.parent)
@@ -711,12 +810,18 @@ def main(argv=None):
     parser.add_argument("--cells", default="", help="comma-separated exact cell ids")
     parser.add_argument("--candidate-arms", default="",
                         help="explicit BFCL base candidates: all or comma-separated static_t02,turn_c1,goal_rescue,dependency_first")
+    parser.add_argument("--acon-budget-tokens", type=int,
+                        help="add budget-adapted ACON BFCL cells with this actor history cap")
+    parser.add_argument("--hiagent-budget-tokens", type=int,
+                        help="add budget-adapted HiAgent full BFCL cells with this actor history cap")
     parser.add_argument("--port-offset", type=int, default=0,
                         help="shift server/proxy ports for concurrent single-GPU runners on one host")
     args = parser.parse_args(argv)
     config = json.loads(args.config.read_text())
     if args.action != "aggregate":
         config = with_candidate_methods(config, parse_candidate_arms(args.candidate_arms))
+        config = with_acon_budget(config, args.acon_budget_tokens)
+        config = with_hiagent_budget(config, args.hiagent_budget_tokens)
     output = args.output or Path(config["output_root"])
     source = args.sglang_source.resolve()
     if args.action == "aggregate":

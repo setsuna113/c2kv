@@ -1,0 +1,122 @@
+{
+  "schema": "acon-history-budget-cuda-smoke-v1",
+  "date": "2026-09-19",
+  "purpose": "Functional BFCL closed-loop and size-selected compression replay; not a quality comparison",
+  "result_status": "preliminary, n=1",
+  "arm": "acon_hist_ut_co_b768",
+  "budget": {
+    "actor_history_tokens": 768,
+    "scope": "actor history at each decision; auxiliary compute and physical peaks recorded separately"
+  },
+  "paper_source_commit": "35a3382f1a14b84c12c515c617358b9b765e568f",
+  "source_output": "/home/lyc/dev/c2kv-acon-budget-smoke-20260919",
+  "engine_source": {
+    "snapshot": "/home/lyc/dev/c2kv-four-candidates-smoke-20260919/engine",
+    "snapshot_head": "676795ffc47dc80eb03a65532a0e2058cc5a66bd",
+    "origin_head": "ce13018725e218f2815c05bcbede3013cb0d1711",
+    "selected_sha256": {
+      "python/sglang/srt/entrypoints/http_server.py": "ff46ae74f86ce79552299ac202a6dcd1e59858894dd1ed3a61131f95a345278a",
+      "python/sglang/srt/entrypoints/openai/protocol.py": "b70e7a735b36879f73f4d361e089e932b00d9cef26a69b5ce2b7f9598b1d7e8c",
+      "python/sglang/srt/entrypoints/openai/serving_chat.py": "0238efecbdcb6170fc57b43ccc30833496ea55dbb287cbbefd97b3adfac96605",
+      "python/sglang/srt/managers/scheduler.py": "a1d857361a05db990e9065e86e8e1029417930c50a12811243991877768fb3cc",
+      "python/sglang/srt/model_executor/model_runner.py": "49c4f265d4bfb5c78649663cf34cd3d54562ddb1a9e8d0836c38a247bf41d3a4",
+      "python/sglang/srt/server_args.py": "4641bebb58dd4ded622b0138fa261a21d8a3f508ea9425c0c07a2c8d4bad3701"
+    },
+    "previous_manifest": "/home/lyc/dev/c2kv-four-candidates-smoke-20260919/engine_source.json",
+    "previous_manifest_sha256": "9546fdca7c613ac4e8354151e06a8b91e721921d8d891ccbde60e6335761618e"
+  },
+  "checkpoint": "/home/lyc/dev/c2kv-cuda-port/checkpoint-1000",
+  "server_seed": 42,
+  "gpu": "NVIDIA GeForce RTX 4090 Laptop GPU",
+  "closed_loop": {
+    "requests": 17,
+    "all_under_budget": true,
+    "all_preflight_equal_actual_server_history": true,
+    "all_actor_payload_hashes_verified": true,
+    "history_max_tokens": 754,
+    "compressed_requests": 0,
+    "compressor_calls": 0,
+    "task_ids": [
+      "multi_turn_base_26",
+      "multi_turn_base_100"
+    ],
+    "official_tasks_scored": 2,
+    "official_semantic_score": 0.5,
+    "correct_count": 1,
+    "result_status": "preliminary, n=1",
+    "summary_path": "/home/lyc/dev/c2kv-acon-budget-smoke-20260919/results/summary_acon_hist_ut_co_b768.json",
+    "summary_sha256": "93e611632fa450e5e473e64a6d5b7b7f1e5a239fbba751cdaabc75bce2e69c3d",
+    "request_log_sha256": "6572bd38feedf46fc9d6104bbf97fc9bbfcd05e7d77093b60eb58e6424019b44"
+  },
+  "compression_replay": {
+    "requests": 1,
+    "all_under_budget": true,
+    "all_preflight_equal_actual_server_history": true,
+    "all_actor_payload_hashes_verified": true,
+    "history_max_tokens": 325,
+    "compressed_requests": 1,
+    "compressor_calls": 1,
+    "source_host": "m1",
+    "source_path": "/workspace/results/closed_loop/bfcl_base__full/full_prefixes.jsonl",
+    "source_task": "multi_turn_base_0",
+    "source_turn": 23,
+    "prefix_id": "de58330d4df24834a21916a7dc6923c6",
+    "selection_rule": "First successful Full prefix with serialized messages[:-2] length 6000..10000 characters and first-message length below 1200; no correctness filter",
+    "prefix_sha256": "461f58ef9270a0e6fcf93419164cbc129fc2a3c8a24e80aa1addfbe375886b39",
+    "budget_receipt": {
+      "limit": 768,
+      "history_before": 1060,
+      "history_after": 325,
+      "attempts": 1,
+      "passed": true,
+      "fixed_tokens": 170,
+      "final_guard": {
+        "success": true,
+        "history_tokens": 325,
+        "prompt_tokens": 5195,
+        "server_tokenized": true,
+        "history_start": 4837,
+        "history_end": 5162
+      },
+      "actor_payload_sha256": "22cfa8431d635c6c617f692167adc4d570204b04d544da87381101f57d1a9a6a"
+    },
+    "compressor_usage": {
+      "calls": 1,
+      "prompt_tokens": 1336,
+      "completion_tokens": 168,
+      "wall_sec": 4.8197498939998695
+    },
+    "replay_path": "/home/lyc/dev/c2kv-acon-budget-smoke-20260919/compression_replay/replay.jsonl",
+    "replay_sha256": "f5f6271acaa652fd960e168e75f626ee5a1ca38569891c491e47be9244d4e43a",
+    "helper_cleanup_note": "Replay and official summary succeeded; a helper called cleanup_cell_processes with no owned server and raised after terminating the proxy. Helper corrected; evidence verified without rerunning generation."
+  },
+  "tests": {
+    "windows_targeted": {
+      "passed": 124,
+      "skipped": 2,
+      "subtests_passed": 4
+    },
+    "wsl_real_bfcl_dependencies": {
+      "passed": 57,
+      "subtests_passed": 2
+    }
+  },
+  "owned_server_cleanup": {
+    "pid": 8166,
+    "stopped": true
+  },
+  "tested_implementation_sha256": {
+    "benchmarks/acon_budget.py": "5a420988d13d4af4305a22238cf785a5ee857258a9cbf98b43b859859ec922e5",
+    "benchmarks/proxy.py": "0cf16a76a6311ac1c80e47cdb9957bece358b0e92e74b001f3deba6fcd16d386",
+    "benchmarks/arms.py": "1d1cba31ef848c28962ed84631c913e4b9867f5cecf9c957d7e30d18e5f4c3b0",
+    "benchmarks/backends/sglang.py": "f28ade9ca5901a4b878986596358ff4fbce8481d044739e13325b7c5c915ff17",
+    "benchmarks/capabilities.py": "e03e4b3f2b01c52489166c1eb92dd78cc74ece0eae5ba0c8ece415564784454a",
+    "benchmarks/bfcl_completion.py": "6574acd4f355abd94187de76c1ca569fed3eca93e99bda85f7927aee8390e02e",
+    "benchmarks/paper/runner.py": "ad9fdc84df36d1fcc221ede62f7cdef361dee68201968eaba02a3594eb82a026",
+    "benchmarks/paper/budget_server.py": "d3228192a285431cd5e9f9b9a05514bcdb531ebff3e713bcead5a5526aa22220"
+  },
+  "prior_attempts": [
+    "/home/lyc/dev/c2kv-acon-budget-smoke-20260919-prepare-failed",
+    "/home/lyc/dev/c2kv-acon-budget-smoke-20260919-preflight-failed"
+  ]
+}

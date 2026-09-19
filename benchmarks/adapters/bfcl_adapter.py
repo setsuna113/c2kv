@@ -39,7 +39,9 @@ from typing import Any, Dict, List, Mapping, Optional
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from adapters.base import RunContext, v1  # noqa: E402
-from bfcl_completion import bfcl_row_is_terminal, terminal_failure_kind  # noqa: E402
+from bfcl_completion import (  # noqa: E402
+    bfcl_row_is_terminal, has_legacy_fc_decode_error, terminal_failure_kind,
+)
 from measurement.telemetry import HarnessTelemetry, current_episode  # noqa: E402
 
 NAME = "bfcl"
@@ -181,6 +183,22 @@ def install_handler(base_url: str, model: str = SERVED_MODEL,
     )
     _install_timed_executor(telemetry)
 
+    def normalize_native_calls(response):
+        # Preserve native JSON tool blocks when the engine has no FC parser.
+        # Malformed drafts remain model errors; never infer or repair arguments.
+        from experiments.history_system.runtime.benchmarks.memory_runtime.event_native_draft import parse_native_draft
+        for choice in response.choices:
+            message = choice.message
+            if message.tool_calls or not isinstance(message.content, str):
+                continue
+            draft = parse_native_draft(message.content, call_id_prefix=f"bfcl_native_{response.id}")
+            if draft.status == "tool_calls":
+                values = message.model_dump()
+                values.update(tool_calls=list(draft.tool_calls), content=draft.content or None)
+                choice.message = type(message).model_validate(values)
+                choice.finish_reason = "tool_calls"
+        return response
+
     class C2KVHandler(OpenAICompletionsHandler):
         def _build_client_kwargs(self):
             return {
@@ -188,6 +206,15 @@ def install_handler(base_url: str, model: str = SERVED_MODEL,
                 "base_url": base_url,
                 "timeout": httpx.Timeout(timeout=600.0, connect=8.0),
             }
+
+        def _parse_query_response_FC(self, api_response):
+            parsed = super()._parse_query_response_FC(api_response)
+            # BFCL's FC decoder expects list[dict]. Its upstream parser
+            # returns assistant content instead when tool_calls is absent.
+            if parsed["model_responses"] is None or isinstance(
+                    parsed["model_responses"], str):
+                parsed["model_responses"] = []
+            return parsed
 
         def _query_FC(self, inference_data: dict):
             kwargs = {
@@ -227,7 +254,7 @@ def install_handler(base_url: str, model: str = SERVED_MODEL,
                 start_unix_ns=start_unix, duration_ns=duration,
                 response=_response_dict(response),
             )
-            return response, duration / 1e9
+            return normalize_native_calls(response), duration / 1e9
 
         def inference(self, test_entry: dict, include_input_log: bool,
                       exclude_state_log: bool):
@@ -427,16 +454,19 @@ def _completion_ledger(project_root: Path, handler_name: str,
                 foreign.append({"task_id": task_id, "category": category,
                                 "path": str(path), "line": line_number})
                 continue
+            # install_handler registers this adapter with is_fc_model=True;
+            # the default shared classifier remains prompt-mode compatible.
+            valid = bfcl_row_is_terminal(row, fc_model=True)
             entries[task_id].append({
                 "task_id": task_id,
                 "category": category,
-                "valid": bfcl_row_is_terminal(row),
+                "valid": valid,
                 "path": str(path),
                 "line": line_number,
                 "mtime_ns": mtime_ns,
                 "row": row,
             })
-            if not bfcl_row_is_terminal(row):
+            if not valid:
                 invalid_rows += 1
     if foreign:
         shown = ", ".join(item["task_id"] for item in foreign[:20])
@@ -449,12 +479,18 @@ def _completion_ledger(project_root: Path, handler_name: str,
                 valid, key=lambda row: (row["mtime_ns"], row["path"], row["line"]))
     requested = [task_id for ids in selected_ids.values() for task_id in ids]
     remaining = [task_id for task_id in requested if task_id not in canonical]
+    legacy_fc_decode_task_ids = [
+        task_id for task_id in remaining
+        if any(has_legacy_fc_decode_error(item["row"])
+               for item in entries[task_id])
+    ]
     return {
         "requested": requested,
         "valid_unique": list(canonical),
         "remaining": remaining,
         "duplicate_rows": sum(max(0, len(rows) - 1) for rows in entries.values()),
         "invalid_rows": invalid_rows,
+        "legacy_fc_decode_task_ids": legacy_fc_decode_task_ids,
         "canonical": canonical,
         "paths": paths,
         "terminal_failures": {task_id: terminal_failure_kind(item["row"])
@@ -483,6 +519,7 @@ def _snapshot_completion_round(project_root: Path, invocation_root: Path,
         "remaining": ledger["remaining"],
         "duplicate_rows": ledger["duplicate_rows"],
         "invalid_rows": ledger["invalid_rows"],
+        "legacy_fc_decode_task_ids": ledger["legacy_fc_decode_task_ids"],
         "terminal_failures": ledger["terminal_failures"],
     }
     receipt_path = round_root / "ledger.json"
@@ -707,6 +744,7 @@ def run_bfcl(base_url: str, categories: str = "multi_turn_base",
                 "valid_unique": len(completion["valid_unique"]),
                 "duplicate_rows": completion["duplicate_rows"],
                 "invalid_rows": completion["invalid_rows"],
+                "legacy_fc_decode_task_ids": completion["legacy_fc_decode_task_ids"],
                 "remaining": completion["remaining"],
                 "terminal_failures": completion["terminal_failures"],
                 "max_refill_rounds": max_refill_rounds,

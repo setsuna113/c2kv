@@ -373,6 +373,11 @@ def install_handler(base_url: str, model: str = SERVED_MODEL,
 
         def _parse_query_response_FC(self, api_response: Any) -> dict:
             parsed = super()._parse_query_response_FC(api_response)
+            # BFCL's FC decoder expects list[dict]. Its upstream parser
+            # returns assistant content instead when tool_calls is absent.
+            if parsed["model_responses"] is None or isinstance(
+                    parsed["model_responses"], str):
+                parsed["model_responses"] = []
             controller = getattr(self, "_gold_controller", None)
             if controller is not None:
                 controller.record_parse(self, parsed)
@@ -610,7 +615,8 @@ def _canonicalize_completions(project_root: Path, handler_name: str,
             if category_of.get(task_id) != category:
                 foreign.append(task_id)
                 continue
-            valid = bfcl_row_is_terminal(row)
+            # install_handler registers this adapter with is_fc_model=True.
+            valid = bfcl_row_is_terminal(row, fc_model=True)
             entries[task_id].append({
                 "valid": valid, "mtime_ns": mtime_ns, "path": str(path),
                 "line": line_number, "row": row,

@@ -13,7 +13,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import terminal_check  # noqa: E402
 from adapters import bfcl_adapter  # noqa: E402
-from bfcl_completion import completion_kind  # noqa: E402
+from bfcl_completion import (  # noqa: E402
+    _complete_native_tool_calls, bfcl_row_is_terminal, completion_kind,
+)
 
 
 @pytest.mark.parametrize("message,kind", [
@@ -30,6 +32,90 @@ def test_completion_distinguishes_terminal_failures_from_infrastructure(message,
     row = {"id": "multi_turn_base_0", "result": "error", "traceback": message}
     assert completion_kind(row) == kind
     assert completion_kind({"id": row["id"], "traceback": message}) == "incomplete"
+
+
+def _legacy_fc_decode_row(task_id="multi_turn_base_0"):
+    tool_text = '<tool_call>{"name":"lookup","arguments":{"city":"X"}}</tool_call>'
+    return {
+        "id": task_id,
+        "result": [[tool_text]],
+        "inference_log": [{"step_0": [
+            {"role": "assistant", "content": tool_text},
+            {"role": "handler_log", "error": "'str' object has no attribute 'items'"},
+        ]}],
+    }
+
+
+def test_fc_guard_rejects_only_legacy_handler_contract_error():
+    legacy = _legacy_fc_decode_row()
+    assert completion_kind(legacy) == "model_output"  # prompt-mode default
+    assert completion_kind(legacy, fc_model=True) == "incomplete"
+    assert not bfcl_row_is_terminal(legacy, fc_model=True)
+
+    malformed_actor = {"id": legacy["id"], "result": legacy["result"]}
+    assert completion_kind(malformed_actor, fc_model=True) == "model_output"
+    assert completion_kind({"id": legacy["id"], "result": []},
+                           fc_model=True) == "model_output"
+
+    native_final = {
+        "id": "multi_turn_base_164", "result": [[[ {"lookup": "{}"},
+            "The requested answer is ready." ]]],
+        "inference_log": [{"step_0": [
+            {"role": "assistant", "content": [{"lookup": "{}"}]},
+            {"role": "handler_log", "model_response_decoded": ["lookup()"]},
+            {"role": "tool", "content": "ok"},
+        ], "step_1": [
+            {"role": "assistant", "content": "The requested answer is ready."},
+            {"role": "handler_log", "error": "'str' object has no attribute 'items'"},
+        ]}],
+    }
+    assert completion_kind(native_final, fc_model=True) == "model_output"
+    assert bfcl_row_is_terminal(native_final, fc_model=True)
+
+    malformed_with_error = {
+        "id": legacy["id"], "result": [["<tool_call>bad</tool_call>"]],
+        "inference_log": [{"step_0": [
+            {"role": "assistant", "content": "<tool_call>bad</tool_call>"},
+            {"role": "handler_log", "error": "'str' object has no attribute 'items'"},
+        ]}],
+    }
+    assert completion_kind(malformed_with_error, fc_model=True) == "model_output"
+
+
+@pytest.mark.parametrize("text", [
+    '<tool_call>{"name":"lookup","arguments":{"city":"X"}}</tool_call>',
+    'Thinking. <tool_call>{"name":"lookup","arguments":"{\\"city\\":\\"X\\"}"}</tool_call>',
+    'No tool is needed.',
+    '<tool_call>{"name":"lookup","arguments":{"city":"X"}',
+    '<tool_call>{"name":"lookup","arguments":{"city":"X","city":"Y"}}</tool_call>',
+    '<tool_call>{"name":"lookup","arguments":[]}</tool_call>',
+])
+def test_fc_guard_tool_block_evidence_matches_native_parser(text):
+    from experiments.history_system.runtime.benchmarks.memory_runtime.event_native_draft import parse_native_draft
+
+    assert _complete_native_tool_calls(text) == (
+        parse_native_draft(text, call_id_prefix="audit").status == "tool_calls")
+
+
+def test_fc_evaluate_refuses_old_handler_row_before_official_scorer(
+        tmp_path, monkeypatch):
+    task_id = "multi_turn_base_0"
+    path = _results(tmp_path, "c2kv-hf", "multi_turn", "multi_turn_base",
+                    [_legacy_fc_decode_row(task_id)])
+    original = path.read_bytes()
+    monkeypatch.setattr(bfcl_adapter, "install_handler", lambda *args, **kwargs: None)
+    monkeypatch.setattr(bfcl_adapter, "official_category_ids",
+                        lambda category: {"multi_turn_base": [task_id]})
+    monkeypatch.setattr(bfcl_adapter, "run_cli",
+                        lambda argv: pytest.fail("official scorer must not run"))
+
+    with pytest.raises(RuntimeError, match="evaluation requires valid unique completions"):
+        bfcl_adapter.run_bfcl("http://proxy/v1", mode="evaluate",
+                              project_root=tmp_path)
+
+    assert path.read_bytes() == original
+    receipt = next((tmp_path / "measurement" / "bfcl_completion").rglob("ledger.json"))
+    assert json.loads(receipt.read_text())["legacy_fc_decode_task_ids"] == [task_id]
 
 
 def test_known_failures_reach_official_scorer_unchanged_without_refill(tmp_path, monkeypatch):

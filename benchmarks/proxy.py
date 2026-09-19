@@ -68,6 +68,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import signal
 import threading
 import time
 import uuid
@@ -85,6 +86,8 @@ _OPENER = urlrequest.build_opener(urlrequest.ProxyHandler({}))
 
 import repair_policy
 import textarms
+import acon_budget
+import hiagent_budget
 import history_methods
 import agentfold
 import raw_actor_history
@@ -132,6 +135,7 @@ BACKEND = None  # set in main()
 TOOL_MEMORY: Optional["toolmemory.ToolMemory"] = None
 UPSTREAM = ""
 BENCHMARK = ""
+SHARED_ENGINE = False
 REQUEST_LOG_PATH = ""
 TELEMETRY_LOG_PATH = ""
 PREFIX_LOG_PATH = ""
@@ -1058,7 +1062,8 @@ def _textarm_compress(payload: Dict[str, Any], meter=None) -> str:
 
 
 def _apply_text_arm(payload: Dict[str, Any], arm, conv: str,
-                    retrieve_subgoals: Optional[List[int]] = None
+                    retrieve_subgoals: Optional[List[int]] = None,
+                    retrieval_feedback: Optional[str] = None
                     ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """Rewrite history per the arm's text policy (textarms.py) BEFORE
     assembly; the arm is full-mode downstream.  Compressor calls go
@@ -1083,13 +1088,48 @@ def _apply_text_arm(payload: Dict[str, Any], arm, conv: str,
         usage_acc["wall_sec"] += time.perf_counter() - t0
         return out
 
-    if arm.text_policy == "agentfold":
+    if getattr(arm, "text_history_budget_tokens", None) is not None:
+        if BACKEND.name != "sglang":
+            raise ValueError("Budget-adapted text history requires the SGLang chat budget renderer")
+
+        def measure(candidate, history_indices):
+            assembled, _ = _assemble(candidate, arm)
+            start, end = _text_budget_boundary(candidate, assembled, history_indices)
+            staged = dict(payload, messages=assembled)
+            if arm.text_policy == "hiagent_full":
+                staged["tools"] = list(payload.get("tools") or []) + [textarms.hiagent_retrieval_tool()]
+            staged.pop("c2kv_measurement_session_id", None)
+            prepared = BACKEND.prepare_chat(staged, arm, None)
+            with _phase("budget_tokenization"):
+                receipt = BACKEND.count_chat_history_tokens(prepared, start, end)
+            return receipt["history_tokens"]
+
+        try:
+            policy = hiagent_budget if arm.text_policy == "hiagent_full" else acon_budget
+            options = {}
+            if policy is hiagent_budget:
+                options.update(
+                    variant="full", retrieved_subgoals=retrieve_subgoals,
+                    retrieval_feedback=retrieval_feedback,
+                    default_system=DEFAULT_SYSTEM_PROMPT,
+                    environment_action_format=(
+                        "native_tool_call" if payload.get("tools") else "python_content"))
+            out, stats = policy.transform(
+                messages, compress, _render_action_dialect, conv,
+                model=model, budget_tokens=arm.text_history_budget_tokens,
+                history_cutoff=_history_cutoff(messages), measure=measure,
+                preserve_task_packet=(BENCHMARK == "acon_appworld"), **options)
+        except (acon_budget.BudgetExceeded, hiagent_budget.BudgetExceeded,
+                hiagent_budget.RetrievalBudgetExceeded) as error:
+            error.receipt["compressor_usage"] = dict(usage_acc)
+            raise
+    elif arm.text_policy == "agentfold":
         staged, stats = agentfold.prepare(
             payload, agentfold.state_for(conv), code_actions=BENCHMARK == "acon_appworld")
         if staged is None:
             raise ValueError("AgentFold duplicate completed request must not rerun the actor")
         return staged, stats
-    if arm.text_policy in history_methods.METHODS:
+    elif arm.text_policy in history_methods.METHODS:
         out, stats = history_methods.transform(
             messages,
             history_methods.state_for(conv),
@@ -1137,26 +1177,48 @@ def _hiagent_retrieval_loop(original_payload, arm, conv, data, stats, send):
     advancing; no meta-tool can leak into the benchmark's tool executor.
     """
     retrieved = set()
+    attempted = set()
+    budget_denials = []
     retrieval_usage = {"calls": 0, "prompt_tokens": 0, "completion_tokens": 0}
     for attempt in range(5):
         message = ((data.get("choices") or [{}])[0].get("message") or {})
         ids = textarms.hiagent_retrieval_request(message)
         if ids is None:
             stats["retrieval_usage"] = retrieval_usage
+            if getattr(arm, "text_history_budget_tokens", None) is not None:
+                stats["retrieval_budget_denials"] = budget_denials
             return data
         if attempt == 4:
             raise ValueError("HiAgent exceeded four internal trajectory retrieval rounds")
         if any((call.get("function") or {}).get("name") != textarms.HIAGENT_RETRIEVE_TOOL_NAME
                for call in message.get("tool_calls") or []):
             raise ValueError("HiAgent mixed internal retrieval and environment actions in one response")
-        if set(ids) <= retrieved:
+        if set(ids) <= attempted:
             raise ValueError("HiAgent requested an already revealed trajectory without advancing")
-        retrieved.update(ids)
+        attempted.update(ids)
         usage = data.get("usage") or {}
         retrieval_usage["calls"] += 1
         for key in ("prompt_tokens", "completion_tokens"):
             retrieval_usage[key] += int(usage.get(key) or 0)
-        staged, updated = _apply_text_arm(original_payload, arm, conv, sorted(retrieved))
+        requested = retrieved | set(ids)
+        try:
+            staged, updated = _apply_text_arm(original_payload, arm, conv, sorted(requested))
+        except hiagent_budget.RetrievalBudgetExceeded as error:
+            # An unavailable recovery is not a failed task. Keep the already
+            # admitted view and let the actor continue with explicit feedback.
+            for key, value in (error.receipt.get("compressor_usage") or {}).items():
+                stats.setdefault("compressor_usage", {}).setdefault(key, 0)
+                stats["compressor_usage"][key] += value
+            stats["n_compressor_calls"] += int(error.receipt.get("n_compressor_calls") or 0)
+            budget_denials.append({"requested_subgoals": sorted(set(ids)),
+                                   "reason": "budget_unavailable", "receipt": error.receipt})
+            # Admission reserves exactly this short, charged feedback surface.
+            # Requested IDs remain in telemetry rather than inflating the prompt.
+            feedback = hiagent_budget.BUDGET_UNAVAILABLE_FEEDBACK
+            staged, updated = _apply_text_arm(
+                original_payload, arm, conv, sorted(retrieved), retrieval_feedback=feedback)
+        else:
+            retrieved = requested
         if updated.get("invalid_retrieval_subgoals"):
             raise ValueError(f"HiAgent requested nonexistent completed subgoals: {updated['invalid_retrieval_subgoals']}")
         for key, value in (updated.get("compressor_usage") or {}).items():
@@ -1332,7 +1394,7 @@ class ProxyState:
     history-KV streaming sessions)."""
 
     def __init__(self):
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()
         self.recover: Optional[RecoverState] = None
         self.reference_log_path: str = ""
         # conversation_id -> server streaming-session id (physical-eviction
@@ -1344,6 +1406,17 @@ class ProxyState:
 STATE = ProxyState()
 
 
+def _close_owned_history_sessions() -> None:
+    """Close only streaming sessions opened by this proxy, preserving foreign work."""
+    with STATE.lock:
+        for session_id in sorted(set(STATE.history_sessions.values())):
+            BACKEND.close_history_session(session_id)
+            STATE.history_sessions = {
+                conv: owned for conv, owned in STATE.history_sessions.items()
+                if owned != session_id
+            }
+
+
 def _activate_measurement_session(session: str) -> None:
     """Reset cross-episode state while preserving all within-episode reuse."""
     if not getattr(BACKEND, "supports_episode_reset", False):
@@ -1352,12 +1425,16 @@ def _activate_measurement_session(session: str) -> None:
         if STATE.active_measurement_session == session:
             return
         with _phase("episode_setup"):
-            for session_id in sorted(set(STATE.history_sessions.values())):
-                BACKEND.close_history_session(session_id)
-            BACKEND.flush_cache(timeout=10)
-            STATE.history_sessions.clear()
+            _close_owned_history_sessions()
+            # /flush_cache is engine-wide and may fail or disrupt a different
+            # proxy's live session.  Shared history-KV cells use fresh unique
+            # session IDs and reset only this proxy's local state.
+            if not SHARED_ENGINE:
+                BACKEND.flush_cache(timeout=10)
             CACHE.clear()
             textarms.reset_state()
+            acon_budget.reset_state()
+            hiagent_budget.reset_state()
             history_methods.reset_state()
             agentfold.reset_state()
             raw_actor_history.reset_state()
@@ -1380,7 +1457,8 @@ def _history_session_id(conv: str) -> str:
       starting from an empty prefix;
     * the paper harness supplies ``c2kv_measurement_session_id``; when that
       stable case id changes, ``_activate_measurement_session`` closes these
-      sessions and flushes unrelated server KV before the next episode;
+      sessions before the next episode (engine-wide flush only in exclusive
+      mode);
     * callers without an episode id have no boundary signal, so their sessions
       live until the server restarts.
     """
@@ -1404,6 +1482,9 @@ def _paper_history_message_boundary(
     out_messages: List[Dict[str, Any]], counts: Dict[str, Any]
 ) -> Tuple[int, int]:
     """Return the non-system completed-history range for server tokenization."""
+    for key in ("text_budget_history_boundary", "acon_budget_history_boundary"):
+        if key in counts:
+            return tuple(counts[key])
     history_end = int(counts.get("current_start_out_index") or 0)
     history_indices = [
         index for index, message in enumerate(out_messages[:history_end])
@@ -1419,6 +1500,27 @@ def _paper_history_message_boundary(
     return min(history_indices), history_end
 
 
+def _text_budget_boundary(messages, assembled, history_indices):
+    """Map provenance through full assembly, including its default system prefix."""
+    offset = len(assembled) - len(messages)
+    expected_offset = 0 if any(m.get("role") == "system" for m in messages) else 1
+    if offset != expected_offset:
+        raise ValueError("Text budget assembly changed the message layout")
+    indices = [index + offset for index in history_indices]
+    if not indices:
+        return 0, 0
+    if indices != list(range(indices[0], indices[-1] + 1)):
+        raise ValueError("Text budget history must be a contiguous provenance span")
+    return indices[0], indices[-1] + 1
+
+
+# Existing ACON callers keep the same provenance mapping.
+_acon_budget_boundary = _text_budget_boundary
+
+
+_EPISODE_REQUEST_LOCK = threading.Lock()
+
+
 class ProxyHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
@@ -1431,6 +1533,39 @@ class ProxyHandler(BaseHTTPRequestHandler):
         )
 
     def do_POST(self):
+        if self.path == "/close_measurement_session":
+            with _EPISODE_REQUEST_LOCK:
+                return self._close_measurement_session()
+        if self._is_chat():
+            with _EPISODE_REQUEST_LOCK:
+                return self._do_POST_serialized()
+        return self._do_POST_serialized()
+
+    def _close_measurement_session(self):
+        length = int(self.headers.get("Content-Length") or 0)
+        try:
+            payload = json.loads(self.rfile.read(length))
+        except (ValueError, TypeError):
+            self._send_json(400, {"error": "invalid JSON"})
+            return
+        session = payload.get("c2kv_measurement_session_id") if isinstance(payload, dict) else None
+        if not isinstance(session, str) or not session:
+            self._send_json(400, {"error": "c2kv_measurement_session_id is required"})
+            return
+        if session != STATE.active_measurement_session:
+            self._send_json(409, {"error": "measurement session is not active on this proxy"})
+            return
+        try:
+            _close_owned_history_sessions()
+        except (RuntimeError, ValueError, URLError, OSError, UpstreamError,
+                BackendError) as error:
+            self._send_json(502, {"error": f"owned session close failed: {error}"})
+            return
+        with STATE.lock:
+            STATE.active_measurement_session = None
+        self._send_json(200, {"closed_owned_sessions": True})
+
+    def _do_POST_serialized(self):
         request_start_unix = time.time_ns()
         request_start_perf = time.perf_counter_ns()
         _TRACE.request_id = (
@@ -1505,6 +1640,9 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 messages_out, counts = _assemble_request(messages, ARM)
                 if text_stats is not None:
                     counts["textarm"] = text_stats
+                    if getattr(ARM, "text_history_budget_tokens", None) is not None:
+                        counts["text_budget_history_boundary"] = _text_budget_boundary(
+                            messages, messages_out, text_stats["history_indices"])
                 repair_plan = plan_repair(messages, ARM, counts,
                                          tools=payload.get("tools"),
                                          out_messages=messages_out)
@@ -1529,6 +1667,14 @@ class ProxyHandler(BaseHTTPRequestHandler):
                            "textarm_error" if ARM.text_policy else "assemble_error")
             if isinstance(error, toolmemory.ToolMemoryError):
                 kind = f"tool_memory_{error.kind}"
+            if isinstance(error, (acon_budget.BudgetExceeded, hiagent_budget.BudgetExceeded)):
+                self._log_request(payload, None, {"textarm": error.receipt},
+                                  status=kind, error=str(error), fingerprint=fingerprint,
+                                  conv=conv, turn=turn)
+                self._send_json(422, {"error": {
+                    "code": kind, "type": "method_budget_failure",
+                    "message": str(error), "budget": error.receipt}})
+                return
             self._log_request(payload, None, None, status=kind,
                               error=str(error), fingerprint=fingerprint, conv=conv,
                               turn=turn)
@@ -1590,6 +1736,21 @@ class ProxyHandler(BaseHTTPRequestHandler):
                         "canonical_full_source": _canonical_full_source(ARM),
                     }
                     out_payload["c2kv_kv_memory_hint"] = hint
+                    if getattr(ARM, "text_history_budget_tokens", None) is not None:
+                        # Recheck the final wire payload, after every assembly and
+                        # backend transform. Never forward an over-budget actor.
+                        with _phase("budget_tokenization"):
+                            receipt = BACKEND.count_chat_history_tokens(
+                                out_payload, history_start, history_end)
+                        limit = ARM.text_history_budget_tokens
+                        if receipt["history_tokens"] > limit:
+                            raise BackendError("text_budget_guard_mismatch",
+                                               "final actor payload exceeded the accepted history budget")
+                        text_stats["budget"]["final_guard"] = receipt
+                        text_stats["budget"]["actor_payload_sha256"] = canonical_sha256(out_payload)
+                        text_stats.setdefault("actor_budget_calls", []).append({
+                            "phase": phase, "limit": limit, "receipt": receipt,
+                            "actor_payload_sha256": canonical_sha256(out_payload)})
                 return _post_json(self.path, out_payload, 600), out_payload
 
         def call_upstream(out_messages, plan, phase="generation"):
@@ -1613,9 +1774,13 @@ class ProxyHandler(BaseHTTPRequestHandler):
                     normalized = BACKEND.normalize_response(data)
                 if ARM.text_policy == "hiagent_full":
                     def send_retrieved(staged):
-                        nonlocal payload, messages_out
+                        nonlocal payload, messages_out, counts
                         payload = staged
-                        messages_out, _ = _assemble_request(staged["messages"], ARM)
+                        messages_out, counts = _assemble_request(staged["messages"], ARM)
+                        counts["textarm"] = text_stats
+                        if getattr(ARM, "text_history_budget_tokens", None) is not None:
+                            counts["text_budget_history_boundary"] = _text_budget_boundary(
+                                staged["messages"], messages_out, text_stats["history_indices"])
                         return send_upstream(
                             messages_out, None, phase="hiagent_retrieval_generation")[0]
                     data = _hiagent_retrieval_loop(
@@ -1665,6 +1830,14 @@ class ProxyHandler(BaseHTTPRequestHandler):
         except (UpstreamError, BackendError, CacheMiss, RuntimeError, ValueError,
                 URLError, OSError, toolmemory.ToolMemoryError) as error:
             kind = getattr(error, "kind", "upstream_error")
+            if isinstance(error, (acon_budget.BudgetExceeded, hiagent_budget.BudgetExceeded)):
+                counts["textarm"] = dict(text_stats or {}, failed_budget=error.receipt)
+                self._log_request(payload, None, counts, status=kind, error=str(error),
+                                  fingerprint=fingerprint, conv=conv, turn=turn)
+                self._send_json(422, {"error": {
+                    "code": kind, "type": "method_budget_failure",
+                    "message": str(error), "budget": error.receipt}})
+                return
             if isinstance(error, CacheMiss):
                 kind = "cache_miss"
             self._log_request(payload, None, counts, status=kind,
@@ -1902,9 +2075,11 @@ class ProxyHandler(BaseHTTPRequestHandler):
 
 def main(argv=None):
     global ARM, BACKEND, UPSTREAM, BENCHMARK, REQUEST_LOG_PATH
-    global TELEMETRY_LOG_PATH, PREFIX_LOG_PATH
+    global TELEMETRY_LOG_PATH, PREFIX_LOG_PATH, SHARED_ENGINE
     global DOC_PACKING, MAX_DOC_LENGTH, MAX_DOC_NUM, QUERY_PROJECTION, MODEL_FAMILY
     textarms.reset_state()  # fresh caches/state per proxy process
+    acon_budget.reset_state()
+    hiagent_budget.reset_state()
     history_methods.reset_state()
     agentfold.reset_state()
     raw_actor_history.reset_state()
@@ -1918,6 +2093,8 @@ def main(argv=None):
     parser.add_argument("--arm", required=True)
     parser.add_argument("--port", type=int, required=True)
     parser.add_argument("--request-log", default="")
+    parser.add_argument("--shared-engine", action="store_true",
+                        help="keep episode reset local to this proxy; no engine-wide cache flush")
     parser.add_argument("--telemetry-log", default="",
                         help="append raw request/phase/upstream telemetry JSONL")
     parser.add_argument("--record-prefixes", default="",
@@ -1974,6 +2151,11 @@ def main(argv=None):
         spec["target_tokens"] = int(args.history_kv_target_tokens)
         spec["retention_ratio"] = None
         ARM = replace(ARM, history_kv=spec)
+    if args.shared_engine:
+        history_spec = history_kv_spec(ARM) if ARM.history_kv else None
+        if args.backend != "sglang" or not history_spec or not history_spec["persistent_session"]:
+            raise ValueError("--shared-engine requires a persistent SGLang history-KV arm")
+    SHARED_ENGINE = args.shared_engine
     if ARM.text_policy in history_methods.METHODS:
         history_methods.require_model_family(MODEL_FAMILY)
     BENCHMARK = args.benchmark
@@ -2007,6 +2189,13 @@ def main(argv=None):
         if ARM.repair or ARM.recover:
             raise SystemExit(
                 f"FATAL: --tool-memory is not supported with repair/recover arm {ARM.name!r}")
+        if getattr(ARM, "text_history_budget_tokens", None) is not None:
+            # Budget-adapted text arms preflight the raw actor payload through
+            # the server's chat budget renderer (tool prologue included) and
+            # map history provenance through plain _assemble; gist carriers
+            # would shift that layout.
+            raise SystemExit(
+                f"FATAL: --tool-memory is not supported with budget-adapted text arm {ARM.name!r}")
         from pathlib import Path as _Path
         TOOL_MEMORY = toolmemory.ToolMemory(
             tool_spec, _Path(args.tool_checkpoint), _tool_extract_tokens)
@@ -2029,7 +2218,22 @@ def main(argv=None):
           f"max_doc_length={MAX_DOC_LENGTH} max_doc_num={MAX_DOC_NUM} "
           f"tool_memory={TOOL_MEMORY.spec.name if TOOL_MEMORY else 'raw'} listening on "
           f"{args.host}:{args.port} -> {UPSTREAM}", flush=True)
-    server.serve_forever()
+    previous_sigterm = signal.getsignal(signal.SIGTERM)
+
+    def terminate(_signum, _frame):
+        raise SystemExit(128 + signal.SIGTERM)
+
+    signal.signal(signal.SIGTERM, terminate)
+    try:
+        server.serve_forever()
+    finally:
+        server.server_close()
+        try:
+            with _EPISODE_REQUEST_LOCK:
+                _close_owned_history_sessions()
+        except Exception as error:
+            print(f"proxy owned-session cleanup failed: {error}", flush=True)
+        signal.signal(signal.SIGTERM, previous_sigterm)
 
 
 if __name__ == "__main__":
