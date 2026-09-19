@@ -313,9 +313,10 @@ Read before quoting:
 
 ## Tool-definition memory axis (`--tool-memory`)
 
-Arms describe how the interaction history reaches the model; the tool catalog
-has always been rendered raw by the chat template. `benchmarks/toolmemory.py`
-adds the paper's second context type as an axis orthogonal to the arm:
+Arms describe how interaction history reaches the model. `benchmarks/toolmemory.py`
+plans the separate tool-definition context from structured request `tools` or
+exact spans that the ACEBench/AppWorld source adapters observed in the actor's
+messages. It does not add an unseen catalog or change the benchmark scorer:
 
 ```
 run.py ... --arm full --tool-memory t0:r8 --tool-checkpoint /path/T0/checkpoint-N
@@ -331,22 +332,31 @@ run.py ... --arm full --tool-memory t0:r8 --tool-checkpoint /path/T0/checkpoint-
   carry-back, extracted with `/v1/c2kv/extract` `token_ids` +
   `projection_set="tool"`. The server must serve the same checkpoint's gist
   set through `--c2kv-tool-gist-weights`.
-* The system message gets the explicit protocol block
+* For structured `tools`, the system message gets the explicit protocol block
   (`next-compression-tool-explicit-protocol-v2`), the request carries
-  `c2kv_tools_in_prompt=false` (tools stay for the server's tool-call parser),
-  and one carrier message per chunk (`c2kv_key_hash`, marked
-  `c2kv_tool_memory`) is inserted right after the system prefix, so the gists
-  land at the system-prefix boundary with source-span positions:
-  `system -> tool chunks -> workspace`, the training layout.
+  `c2kv_tools_in_prompt=false` (schemas stay available to the server's
+  tool-call parser), and gist carriers enter after the system prefix. For
+  inline ACEBench/AppWorld definitions, only the annotated text is replaced;
+  carriers stay at its source message and the original action dialect remains.
+  The proxy strips `c2kv_tool_spans_v1` before sending the model request.
 * Each request row logs `tool_memory` (tools, native indices, chunks,
   `presented_encoder_tokens`, `gist_tokens`, `raw_tool_prologue_tokens`,
   `protocol_prefix_tokens`, `resident_tool_tokens`); `R_tool` is
   `raw_tool_prologue_tokens / resident_tool_tokens` on the proxy tokenizer,
   while the server's `kv_resident_tokens` stays the physical truth.
-* Not supported yet: history-KV eviction / CacheBlend arms (their server-side
-  history boundary does not account for gist segments in the prefix), the
-  repair/recover arms, and the native C1 controller (it renders tools itself);
-  the proxy and the paper runner refuse those combinations.
+* A raw Full `--record-prefixes` run captures exact visible spans, including
+  an explicit empty list when none are visible. Tool-ON common-prefix replay
+  rejects older ACEBench/AppWorld prefixes that lack this capture. Without
+  `--tool-memory`, the annotation is removed before serving and the raw Full
+  model request is unchanged.
+* T0 can compose with persistent history-KV and the existing history
+  repair/recovery routes. The native C1 client also passes the tool policy to
+  its controller and checks the loaded policy in the ready manifest. The
+  default paper matrix pairs T0 only with Full; `--tool-contexts` explicitly
+  adds other non-text cells. ACON/HiAgent tool composition remains disabled.
+  `h2o:r8`/`snapkv:r8` tool-region selectors are parsed by the shared planner
+  but are not runnable through this proxy's global tool-region path yet; they
+  must not be reported as evaluated tool-memory arms.
 
 ## Arm registry
 

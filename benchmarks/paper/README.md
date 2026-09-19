@@ -16,7 +16,7 @@ experiment or retrain the detector.
 | PyramidKV | Persistent history KV, retain 25% | Same | Same | Same | Same | Same | Retain 12.5% on BFCL/AppWorld |
 | AgentFold (held) | Untrained-actor protocol diagnostic; excluded from method quality comparison | Held | Held | Held | Held | Held | None |
 | CommitKV / AgentKV | Resident KV selection, 2048-token launch budget | Same | Same | Same | Same | Same | None |
-| C2KV+C1 | H0 / C1000 / ratio8 / D3 hybrid / R1 | Same | Same | Same | Unsupported | Unsupported | None |
+| C2KV+C1 | H0 / C1000 / ratio8 / D3 hybrid / R1 | Same | Same | Same | Native C1 | Not enabled by default | Ratio-4 BFCL base and ACEBench |
 
 Tool contexts are a second, orthogonal axis (`config.json` `tool_contexts`
 + per-method `tool_contexts`): a cell `bench__arm__tools-<name>` runs the
@@ -24,7 +24,9 @@ same arm with the tool catalog compressed by the T0 encoder
 (`benchmarks/toolmemory.py`; server flag `--c2kv-tool-gist-weights`, proxy
 flags `--tool-memory`/`--tool-checkpoint`). Raw-tool cells keep their ids and
 commands byte for byte, so adding tool contexts is an extension of an
-existing output root. Native C1 cells do not take the axis yet. The shipped
+existing output root. The native C1 route accepts the tool policy and validates
+it against the server ready manifest; `--tool-contexts` adds selected tool
+contexts to non-text arms only when explicitly requested. The shipped
 config registers the T0 dev winner `checkpoint-500` (selection 2026-09-19 on
 `selection-dev-v1`: strict tool-call 11/16 at ratio 8 and 10/16 at ratio 12,
 false-call 2/16, uniform CE 0.73; steps 1000/1034 score 9/16 with lower CE
@@ -33,12 +35,16 @@ and `t0_r8_hybrid3` (lexical top-3 native) on the Full arm, i.e. ten extra
 cells for the "compressed tools x full history" rows of the paper's
 joint-context table.
 
-The matrix contains 38 main cells, 9 sweep cells, 15 opponent cells and one
-ratio-4 C1 ablation. ACEBench uses the official `agent` category; ToolSandbox
-uses its full official suite with one process. The missing native C1 adapters
-are recorded in `unsupported_cells.json`, rather than emitted as runnable
-cells. The three main C2KV+C1 cells run last. Bare C2KV now uses the separate `c2kv_native_r4` identity; the historical `c2kv4` proxy remains blocked with C1000. C2KV+C1 is ratio8 and is a final-system
-comparison, not a detector-only ablation. All actor and auxiliary generation
+The default matrix contains 39 main cells, 9 sweep cells, 15 opponent cells
+and two ratio-4 C1 ablations. ACEBench uses the official `agent` category;
+ToolSandbox uses its full official suite with one process. ACEBench C1 ratio-8
+and ratio-4 are configured cells. The native ToolSandbox adapter exists, but
+ToolSandbox C1 is not enabled in the default matrix because its official
+end-to-end path remains unvalidated; the reason is recorded in
+`unsupported_cells.json`. The four main C2KV+C1 cells run last. Bare C2KV
+uses the separate `c2kv_native_r4` identity; the historical `c2kv4` proxy
+remains blocked with C1000. C2KV+C1 ratio8 is a final-system comparison, not a
+detector-only ablation. All actor and auxiliary generation
 calls use the same Qwen3-4B base weights through
 the same CUDA SGLang endpoint; only C2KV extraction uses the trained gist
 projections. System, tools and current input are retained. The server uses base
@@ -204,6 +210,12 @@ under the new name (or use a separate output root); never relabel or resume old
 `c2kv4` artifacts. The same `benchmarks.paper.c1` client can target a CUDA or NPU
 native engine with `--upstream`; the CUDA paper runner's engine launcher remains
 CUDA-specific. Updating the client does not update an already running engine.
+Both backends use the shared paper benchmark and native controller source;
+deployment paths and device-specific launchers remain separate. The paper
+matrix now includes ACEBench C1 ratio8 and ratio4. The ACEBench native adapter
+selects the actual C1 arm and checks the server's ready manifest against its
+ratio, controller configuration, source profile and optional tool policy before
+serving. ToolSandbox uses the same native adapter, but has no default C1 cell.
 ACEBench uses execution receipts captured from the official decoder/executor,
 retains the actual scene sampler (`temperature=0.001`, `top_p=1`, 1000 completion
 tokens, no explicit request seed), and requires the engine capability
@@ -243,6 +255,14 @@ $PY -m benchmarks.paper run --output /home/lyc/dev/c2kv-paper-results
 $PY -m benchmarks.paper aggregate --output /home/lyc/dev/c2kv-paper-results
 ```
 
+The four ratio8 candidate algorithms are an explicit overlay. For example,
+`--candidate-arms all --candidate-benchmarks bfcl_base,acebench_agent` on
+both `prepare` and `run` adds `static_t02`, `turn_c1`, `goal_rescue` and
+`dependency_first` for those two benchmarks. The default candidate scope is
+BFCL base, and the default matrix has no candidate cells. Each candidate uses
+its own native arm identity and ready-manifest validation; this is a runnable
+configuration, not a claim of completed benchmark scores.
+
 `run` executes the closed-loop matrix, then replays each benchmark's
 Full recorded prefixes through methods that support that protocol. AgentKV and
 CommitKV require their own exact generated-token prefix, so their Full-prefix
@@ -279,9 +299,9 @@ python -m benchmarks.paper.worker 0 CONFIG.json RESULTS TODO \
 ```
 
 The queue format remains `todo.closed_loop.txt` / `todo.common_prefix.txt`,
-one `cell_id` or `cell_id|config|output` per line. Optional runner overlays follow
-`--extra-run-args` (for example `--candidate-arms all`). The worker owns a physical
-GPU UUID lock, refuses live compute on that GPU, and waits for both configured
+one `cell_id` or `cell_id|config|output` per line. Optional runner overlays
+follow `--extra-run-args` (for example, the candidate flags above). The worker
+owns a physical GPU UUID lock, refuses live compute on that GPU, and waits for both configured
 ports without killing their occupants. Each claim has a durable receipt under
 `TODO/worker_attempts`; failures stop for review and never silently reuse partial
 outputs. All cooperating workers must use this entrypoint; retire old launchers
@@ -415,7 +435,8 @@ Auxiliary compressor calls retain their `aux_compression` telemetry; the cap
 does not forbid them from reading a larger input. The request log records the
 budget receipt, final guard and exact actor-payload hash.
 
-Add distinct BFCL base/long-context cells to a **new output directory**:
+Add distinct BFCL base/long-context and ACEBench Agent cells to a **new output
+directory**:
 
 ```bash
 python -m benchmarks.paper.runner prepare --config CONFIG.json \
@@ -424,6 +445,9 @@ python -m benchmarks.paper.runner run --config CONFIG.json \
   --sglang-source ENGINE --output RESULTS --acon-budget-tokens 768 \
   --stage closed_loop --cells bfcl_base__acon_hist_ut_co_b768
 ```
+
+Select `acebench_agent__acon_hist_ut_co_b768` for the ACEBench cell; it uses
+the same actor-visible history allowance and the official ACEBench scorer.
 
 The runner uses `benchmarks.paper.budget_server`, a paper-owned SGLang launcher
 that adds a CPU-only `/v1/c2kv/chat_budget` endpoint. It uses the same serving
@@ -454,8 +478,10 @@ silently exceeding the cap. Admission also reserves space for the brief
 same cap when the fixed history floor fits. This is a tool-native adaptation,
 not a claim that the original HiAgent paper evaluated this budgeted setting.
 
-Add HiAgent BFCL base/long-context cells with `--hiagent-budget-tokens 768` on
+Add HiAgent BFCL base/long-context and ACEBench Agent cells with
+`--hiagent-budget-tokens 768` on
 both `prepare` and `run`. It can be combined with `--acon-budget-tokens 768`;
 the two options add distinct cells and leave the default matrix unchanged.
+Select `acebench_agent__hiagent_full_b768` for the ACEBench HiAgent cell.
 Budget cells use `benchmarks.paper.budget_server`, and the runner checks the
 `/v1/c2kv/chat_budget` route after server health before starting a cell.
