@@ -311,6 +311,43 @@ Read before quoting:
   (upstream default `gpt-4o`), `--temperature 0` (upstream 0.7), `en` only;
   ACON decoding options stay ACON's (`presence_penalty 0.5`, seed 42).
 
+## Tool-definition memory axis (`--tool-memory`)
+
+Arms describe how the interaction history reaches the model; the tool catalog
+has always been rendered raw by the chat template. `benchmarks/toolmemory.py`
+adds the paper's second context type as an axis orthogonal to the arm:
+
+```
+run.py ... --arm full --tool-memory t0:r8 --tool-checkpoint /path/T0/checkpoint-N
+```
+
+* `t0:r8` / `t0:r12` compress every tool definition with the T0 encoder at
+  that ratio (`uniform`); `t0:r8:hybrid3` keeps the lexical top-3 schemas
+  (ranker `lexical-name4-text1-last-user-v1`, ported from
+  `next_compression/exp1_tools.py`) as text and compresses the remainder.
+* The remainder is packed exactly like T0 training: one
+  `{"type":"tool_definition","tool_index":i,"tool":…}` document per tool,
+  rendered as a user message, cut into 768-token chunks with 64-token
+  carry-back, extracted with `/v1/c2kv/extract` `token_ids` +
+  `projection_set="tool"`. The server must serve the same checkpoint's gist
+  set through `--c2kv-tool-gist-weights`.
+* The system message gets the explicit protocol block
+  (`next-compression-tool-explicit-protocol-v2`), the request carries
+  `c2kv_tools_in_prompt=false` (tools stay for the server's tool-call parser),
+  and one carrier message per chunk (`c2kv_key_hash`, marked
+  `c2kv_tool_memory`) is inserted right after the system prefix, so the gists
+  land at the system-prefix boundary with source-span positions:
+  `system -> tool chunks -> workspace`, the training layout.
+* Each request row logs `tool_memory` (tools, native indices, chunks,
+  `presented_encoder_tokens`, `gist_tokens`, `raw_tool_prologue_tokens`,
+  `protocol_prefix_tokens`, `resident_tool_tokens`); `R_tool` is
+  `raw_tool_prologue_tokens / resident_tool_tokens` on the proxy tokenizer,
+  while the server's `kv_resident_tokens` stays the physical truth.
+* Not supported yet: history-KV eviction / CacheBlend arms (their server-side
+  history boundary does not account for gist segments in the prefix), the
+  repair/recover arms, and the native C1 controller (it renders tools itself);
+  the proxy and the paper runner refuse those combinations.
+
 ## Arm registry
 
 See `arms.py`. Arms are declarative: name, which history is compressed,

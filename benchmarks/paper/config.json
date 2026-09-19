@@ -53,6 +53,11 @@
         "appworld",
         "acebench_agent",
         "toolsandbox"
+      ],
+      "tool_contexts": [
+        "raw",
+        "t0_r8",
+        "t0_r8_hybrid3"
       ]
     },
     {
@@ -266,6 +271,20 @@
       "arm": "c2kv_c1_t02_r8",
       "benchmark": "toolsandbox",
       "reason": "native C1 paper controller has no ToolSandbox adapter"
+    }
+  ],
+  "tool_contexts": [
+    {
+      "name": "t0_r8",
+      "spec": "t0:r8",
+      "checkpoint": "/home/lyc/dev/c2kv-t0-selection/hf/T0/checkpoint-500",
+      "provenance": "T0 dev winner 2026-09-19 (ratio 8 and 12): strict tool-call 11/16, false-call 2/16, CE 0.729 on selection-dev-v1; HF Jasonning/c2kv T0/checkpoint-500; preliminary, n=1"
+    },
+    {
+      "name": "t0_r8_hybrid3",
+      "spec": "t0:r8:hybrid3",
+      "checkpoint": "/home/lyc/dev/c2kv-t0-selection/hf/T0/checkpoint-500",
+      "provenance": "same encoder; lexical top-3 schemas kept native (paper Section 3.2 allocation)"
     }
   ]
 }

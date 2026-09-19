@@ -56,6 +56,19 @@ class Backend:
         tools must raise, not silently return a short length."""
         raise NotImplementedError
 
+    def extract_tokens(self, token_ids: List[int], ratio: int,
+                       projection_set: str = "history") -> Dict[str, Any]:
+        """Compress one EXACT token sequence (no chat-template rendering) with
+        the named gist projection set; returns {key_hash, gist_len,
+        original_seq_len}.  Used by the tool-memory axis (benchmarks/toolmemory.py)
+        whose chunks are cut at the T0 training boundary.  A backend that
+        cannot address a projection set must raise, never fall back to the
+        history encoder."""
+        raise BackendError(
+            "extract_tokens_unsupported",
+            f"backend {self.name!r} cannot extract exact token chunks",
+        )
+
     def count_extract_tokens(
         self,
         text: str,

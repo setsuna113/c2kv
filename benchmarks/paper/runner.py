@@ -38,19 +38,64 @@ def is_native_arm(arm):
     return is_c1_arm(arm) or is_candidate_arm(arm) or arm == "c2kv_native_r4"
 
 
+RAW_TOOL_CONTEXT = "raw"
+
+
+def tool_contexts(config):
+    """name -> {name, spec, checkpoint}; ``raw`` (tools rendered by the chat
+    template, every historical cell) is always present and never configurable.
+
+    A tool context is the second, orthogonal axis of the matrix: the tool
+    catalog compressed by the T0 encoder (benchmarks/toolmemory.py) instead of
+    the history arm.  ``spec`` is a toolmemory spec string (``t0:r8``,
+    ``t0:r8:hybrid3``); ``checkpoint`` is the T0 directory the server loads
+    with ``--c2kv-tool-gist-weights`` and the proxy tokenizes with.
+    """
+    from benchmarks.toolmemory import parse_tool_memory_spec
+
+    contexts = {RAW_TOOL_CONTEXT: {"name": RAW_TOOL_CONTEXT, "spec": "", "checkpoint": ""}}
+    for item in config.get("tool_contexts") or []:
+        name = str(item.get("name") or "")
+        if not name or name in contexts:
+            raise ValueError(f"tool context name must be unique and not {RAW_TOOL_CONTEXT!r}: {item}")
+        if parse_tool_memory_spec(item.get("spec")) is None:
+            raise ValueError(f"tool context {name!r} needs a non-raw spec (e.g. t0:r8)")
+        if not item.get("checkpoint"):
+            raise ValueError(f"tool context {name!r} needs a T0 checkpoint directory")
+        contexts[name] = {"name": name, "spec": str(item["spec"]),
+                          "checkpoint": str(item["checkpoint"])}
+    return contexts
+
+
 def cells(config):
-    rows = [dict({k: v for k, v in method.items() if k != "benchmarks"},
-                 benchmark=bench["name"], adapter=bench["adapter"],
-                 category=bench.get("category", ""),
-                 cell_id=bench["name"] + "__" + method["arm"])
-            for bench in config["benchmarks"] for method in config["methods"]
+    contexts = tool_contexts(config)
+    rows = []
+    for bench in config["benchmarks"]:
+        for method in config["methods"]:
             # an optional per-method benchmark list restricts an ablation to some benchmarks
-            if not method.get("benchmarks") or bench["name"] in method["benchmarks"]]
+            if method.get("benchmarks") and bench["name"] not in method["benchmarks"]:
+                continue
+            # an optional per-method tool-context list adds compressed-tool cells;
+            # the default is the historical raw-tools cell only
+            for context_name in method.get("tool_contexts") or [RAW_TOOL_CONTEXT]:
+                if context_name not in contexts:
+                    raise ValueError(f"method {method['arm']!r} names unknown tool context {context_name!r}")
+                context = contexts[context_name]
+                row = dict({k: v for k, v in method.items() if k not in ("benchmarks", "tool_contexts")},
+                           benchmark=bench["name"], adapter=bench["adapter"],
+                           category=bench.get("category", ""),
+                           cell_id=bench["name"] + "__" + method["arm"],
+                           tool_context=context_name)
+                if context_name != RAW_TOOL_CONTEXT:
+                    row["cell_id"] += "__tools-" + context_name
+                    row["tool_memory"] = context["spec"]
+                    row["tool_checkpoint"] = context["checkpoint"]
+                rows.append(row)
     # Run the final system (and its ablations) after every existing comparison/sweep cell.
     return sorted(rows, key=lambda row: is_c1_arm(row["arm"]) or is_candidate_arm(row["arm"]))
 
 
-def server_command(config, source, arm=None):
+def server_command(config, source, arm=None, tool_checkpoint=None):
     """CUDA server flags for one cell.
 
     Single-flight serving (one running request, one worker, no overlap
@@ -89,6 +134,10 @@ def server_command(config, source, arm=None):
             "--port", str(config["server_port"])]
     if is_c1_arm(arm) or is_candidate_arm(arm):
         cmd += ["--c2kv-shadow-feature-layer", "-2", "--enable-return-hidden-states"]
+    if tool_checkpoint:
+        # Second gist projection set for the tool-context cells only; raw-tool
+        # cells keep their historical server command byte for byte.
+        cmd += ["--c2kv-tool-gist-weights", str(tool_checkpoint)]
     return cmd
 
 
@@ -106,6 +155,11 @@ def with_port_offset(config, port_offset):
 
 def run_command(config, cell, directory, profile, stage="closed_loop"):
     if is_native_arm(cell["arm"]):
+        if cell.get("tool_memory"):
+            raise ValueError(
+                f"{cell['cell_id']}: native cells do not take a tool context yet "
+                "(the delivered controller renders tools itself); list it under "
+                "unsupported_cells or drop the context")
         cmd = [config["bench_python"], "-m", "benchmarks.paper.c1",
                "--config", str(profile.parent / "config.resolved.json"),
                "--arm", cell["arm"],
@@ -128,8 +182,11 @@ def run_command(config, cell, directory, profile, stage="closed_loop"):
            "--telemetry-log", str(directory / "proxy_telemetry.jsonl"),
            "--capability-features",
            "hiagent_trajectory_retrieval_v1,acebench_role_history_v1"]
-    if cell["arm"] == "full":
+    if cell["arm"] == "full" and not cell.get("tool_memory"):
+        # Only the raw-tools Full cell records the canonical replay prefixes.
         cmd += ["--record-prefixes", str(directory / "full_prefixes.jsonl")]
+    if cell.get("tool_memory"):
+        cmd += ["--tool-memory", cell["tool_memory"], "--tool-checkpoint", cell["tool_checkpoint"]]
     if cell["adapter"] == "bfcl":
         cmd += ["--categories", cell["category"]]
     elif cell["adapter"] == "acebench":
@@ -193,12 +250,14 @@ def extension_problem(existing, config, source, output):
         # ``method`` is the table label, not the algorithm: it may be renamed while
         # the cell has no artifacts, after which it is frozen with them.
         has_artifacts = any((output / stage / cell_id).exists() for stage in ("closed_loop", "common_prefix"))
-        for key in ("arm", "method", "ratio", "retention", "benchmark", "adapter", "category"):
+        for key in ("arm", "method", "ratio", "retention", "benchmark", "adapter", "category",
+                    "tool_context", "tool_memory", "tool_checkpoint"):
             if key == "method" and not has_artifacts:
                 continue
             if old.get(key) != new.get(key):
                 return f"{cell_id}: {key} changed"
-        if server_command(old_view, source, old["arm"]) != server_command(config, source, new["arm"]):
+        if (server_command(old_view, source, old["arm"], old.get("tool_checkpoint"))
+                != server_command(config, source, new["arm"], new.get("tool_checkpoint"))):
             return f"{cell_id}: server command changed"
         for stage in ("closed_loop", "common_prefix"):
             directory = output / stage / cell_id
@@ -271,6 +330,13 @@ def prepare(config, output, source):
         if arm.name in {"agentfold", "commitkv", "agentkv"}:
             if config.get("model_family", "qwen3-4b") != "qwen3-4b":
                 raise ValueError("AgentFold/CommitKV/AgentKV require model_family=qwen3-4b")
+    tool_contexts(config)   # validates names, specs and checkpoint fields
+    for item in config["methods"]:
+        for context_name in item.get("tool_contexts") or []:
+            if context_name != RAW_TOOL_CONTEXT and (is_c1_arm(item["arm"]) or is_candidate_arm(item["arm"])):
+                raise ValueError(
+                    f"{item['arm']} cannot take tool context {context_name!r}: native C1 "
+                    "cells do not support tool memory yet")
     config = dict(config)
     config["sglang_source"] = str(source.resolve())
     resolved_path = output / "config.resolved.json"
@@ -313,7 +379,8 @@ def prepare(config, output, source):
     if len(ids) != len(set(ids)):
         raise ValueError("The paper matrix contains duplicate cell ids")
     with (output / "matrix.csv").open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=["cell_id", "benchmark", "method", "arm", "group", "ratio", "retention", "adapter", "category"])
+        writer = csv.DictWriter(handle, fieldnames=["cell_id", "benchmark", "method", "arm", "group", "ratio", "retention", "adapter", "category", "tool_context"],
+                                extrasaction="ignore")
         writer.writeheader()
         writer.writerows(matrix)
     plan = []
@@ -408,6 +475,17 @@ def _guard_checkpoint_serving_layout(config, cell):
         )
 
 
+def _guard_tool_context(cell):
+    """A tool-context cell must find a T0 encoder that matches its spec before
+    any server starts (same fail-early rule as the checkpoint layout guard)."""
+    if not cell.get("tool_memory"):
+        return
+    from benchmarks.toolmemory import load_tool_checkpoint_contract, parse_tool_memory_spec
+
+    spec = parse_tool_memory_spec(cell["tool_memory"])
+    load_tool_checkpoint_contract(Path(cell["tool_checkpoint"]).expanduser(), spec)
+
+
 def _guard_method_actor(cell):
     if cell["arm"] == "agentfold":
         raise RuntimeError(
@@ -442,10 +520,11 @@ def execute(config, plan, output, source, stages, selected, port_offset=0):
                 raise RuntimeError(f"Partial cell {directory}; inspect it before explicitly selecting a new output directory")
             _guard_method_actor(cell)
             _guard_checkpoint_serving_layout(config, cell)
+            _guard_tool_context(cell)
             directory.mkdir(parents=True, exist_ok=True)
             (directory / "started.json").write_text(json.dumps({
                 "stage": stage, "cell": cell, "config": config,
-                "server_command": server_command(config, source, cell["arm"]),
+                "server_command": server_command(config, source, cell["arm"], cell.get("tool_checkpoint")),
                 "port_offset": port_offset,
                 "sglang_source": str(source), "time": time.time()}, indent=2))
             telemetry_name = ("native_engine_telemetry.jsonl" if is_native_arm(cell["arm"])
@@ -458,7 +537,7 @@ def execute(config, plan, output, source, stages, selected, port_offset=0):
                         if probe.connect_ex(("127.0.0.1", port)) == 0:
                             raise RuntimeError(f"Configured port {port} is already occupied")
                 # Own only this process group. Never stop another experiment's server.
-                server = subprocess.Popen(server_command(config, source, cell["arm"]), env=env,
+                server = subprocess.Popen(server_command(config, source, cell["arm"], cell.get("tool_checkpoint")), env=env,
                                           stdout=log, stderr=subprocess.STDOUT,
                                           start_new_session=True)
                 proxy = None
@@ -487,6 +566,9 @@ def execute(config, plan, output, source, stages, selected, port_offset=0):
                                       "--model-family", config.get("model_family", "qwen3-4b"),
                                      "--request-log", str(directory / "proxy_requests.jsonl"),
                                      "--telemetry-log", str(directory / "proxy_telemetry.jsonl")]
+                        if cell.get("tool_memory"):
+                            proxy_cmd += ["--tool-memory", cell["tool_memory"],
+                                          "--tool-checkpoint", cell["tool_checkpoint"]]
                         proxy = subprocess.Popen(proxy_cmd, env=env, stdout=log, stderr=subprocess.STDOUT)
                         wait_server(proxy, config["proxy_port"])
                         subprocess.run([config["bench_python"], "-m", "benchmarks.measurement.replay",

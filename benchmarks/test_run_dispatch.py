@@ -62,6 +62,8 @@ CLI_SURFACE = [
     ("--doc-packing", None, False),
     ("--max-doc-length", None, False),
     ("--max-doc-num", None, False),
+    ("--tool-memory", "", False),
+    ("--tool-checkpoint", "", False),
     ("--checkpoint", None, False),
     ("--checkpoint-profile", None, False),
     ("--expected-profile-fingerprint", None, False),

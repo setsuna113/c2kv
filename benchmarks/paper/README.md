@@ -18,6 +18,21 @@ experiment or retrain the detector.
 | CommitKV / AgentKV | Resident KV selection, 2048-token launch budget | Same | Same | Same | Same | Same | None |
 | C2KV+C1 | H0 / C1000 / ratio8 / D3 hybrid / R1 | Same | Same | Same | Unsupported | Unsupported | None |
 
+Tool contexts are a second, orthogonal axis (`config.json` `tool_contexts`
++ per-method `tool_contexts`): a cell `bench__arm__tools-<name>` runs the
+same arm with the tool catalog compressed by the T0 encoder
+(`benchmarks/toolmemory.py`; server flag `--c2kv-tool-gist-weights`, proxy
+flags `--tool-memory`/`--tool-checkpoint`). Raw-tool cells keep their ids and
+commands byte for byte, so adding tool contexts is an extension of an
+existing output root. Native C1 cells do not take the axis yet. The shipped
+config registers the T0 dev winner `checkpoint-500` (selection 2026-09-19 on
+`selection-dev-v1`: strict tool-call 11/16 at ratio 8 and 10/16 at ratio 12,
+false-call 2/16, uniform CE 0.73; steps 1000/1034 score 9/16 with lower CE
+0.71; preliminary, n=1, a Toucan dev proxy, not BFCL) as `t0_r8` (uniform)
+and `t0_r8_hybrid3` (lexical top-3 native) on the Full arm, i.e. ten extra
+cells for the "compressed tools x full history" rows of the paper's
+joint-context table.
+
 The matrix contains 38 main cells, 9 sweep cells, 15 opponent cells and one
 ratio-4 C1 ablation. ACEBench uses the official `agent` category; ToolSandbox
 uses its full official suite with one process. The missing native C1 adapters

@@ -88,6 +88,7 @@ import textarms
 import history_methods
 import agentfold
 import raw_actor_history
+import toolmemory
 from model_identity import require_qwen3_4b
 from arms import Arm, get_arm, history_kv_spec, kv_reuse_spec  # type: ignore
 from backends import BackendError, get_backend  # type: ignore
@@ -125,6 +126,10 @@ class ExtractCache:
 CACHE = ExtractCache()
 ARM: Optional[Arm] = None
 BACKEND = None  # set in main()
+# Tool-definition memory (benchmarks/toolmemory.py): an axis orthogonal to
+# the arm.  None = tools rendered raw by the chat template (every arm's
+# historical behaviour).
+TOOL_MEMORY: Optional["toolmemory.ToolMemory"] = None
 UPSTREAM = ""
 BENCHMARK = ""
 REQUEST_LOG_PATH = ""
@@ -337,6 +342,40 @@ def _count_extract_tokens(role: str, content: str) -> int:
     """Exact no-model preflight for the text the extractor will render."""
     with _phase("c2kv_tokenize"):
         return BACKEND.count_extract_tokens(content, role)
+
+
+def _tool_extract_tokens(token_ids: List[int], ratio: int,
+                         projection_set: str) -> Dict[str, Any]:
+    """Tool-memory chunk extraction (exact token ids, tool projection set)."""
+    with _phase("c2kv_tool_extract"):
+        record = BACKEND.extract_tokens(token_ids, ratio, projection_set)
+    _measurement_event(
+        "tool_extract", phase="c2kv_tool_extract", ratio=ratio,
+        projection_set=projection_set, source_tokens=len(token_ids),
+        cache_hit=bool(record.get("cache_hit")), record=record,
+    )
+    return record
+
+
+def _assemble_request(messages: List[Dict[str, Any]], arm: Arm, timeout: int = 600):
+    """``_assemble`` plus the tool-memory transform of the current request.
+
+    Without ``--tool-memory`` (``_TRACE.tool_plan`` is None) this is exactly
+    ``_assemble``.  With it, the leading system message carries the explicit
+    tool protocol before assembly and the gist carriers are inserted right
+    after the system prefix afterwards, with every out-index in ``counts``
+    shifted (toolmemory.insert_carriers).  Every call site that re-assembles
+    a request (HiAgent retrieval, oracle recover) goes through here, so the
+    served layout is the same on every upstream attempt.
+    """
+    plan = getattr(_TRACE, "tool_plan", None)
+    if plan is not None:
+        messages = toolmemory.with_protocol_system(messages, plan.protocol)
+    out, counts = _assemble(messages, arm, timeout)
+    if plan is not None:
+        out, counts = toolmemory.insert_carriers(out, counts, plan.carriers())
+        counts["tool_memory"] = plan.info
+    return out, counts
 
 
 def _history_cutoff(messages: List[Dict[str, Any]]) -> int:
@@ -1370,6 +1409,7 @@ def _paper_history_message_boundary(
         index for index, message in enumerate(out_messages[:history_end])
         if message.get("role") != "system"
         and index != counts.get("task_packet_out_index")
+        and not toolmemory.is_carrier(message)
     ]
     if not history_indices:
         # The server's explicit empty-history contract is 0/0.  A boundary
@@ -1452,7 +1492,17 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 if getattr(ARM, "text_policy", None):
                     payload, text_stats = _apply_text_arm(payload, ARM, conv)
                     messages = payload["messages"]
-                messages_out, counts = _assemble(messages, ARM)
+                # Tool-definition memory runs after the text arm so the FINAL
+                # tool list (HiAgent adds its retrieval tool) is what gets
+                # compressed; without --tool-memory this block is inert.
+                _TRACE.tool_plan = None
+                if TOOL_MEMORY is not None:
+                    with _phase("tool_memory"):
+                        _TRACE.tool_plan = TOOL_MEMORY.plan(payload)
+                    if _TRACE.tool_plan is not None:
+                        payload = dict(payload, messages=_TRACE.tool_plan.messages)
+                        messages = payload["messages"]
+                messages_out, counts = _assemble_request(messages, ARM)
                 if text_stats is not None:
                     counts["textarm"] = text_stats
                 repair_plan = plan_repair(messages, ARM, counts,
@@ -1474,9 +1524,11 @@ class ProxyHandler(BaseHTTPRequestHandler):
                         ("method", "chunking", "n_history_messages",
                          "n_history_docs")}
         except (RuntimeError, ValueError, URLError, OSError, UpstreamError,
-                BackendError) as error:
+                BackendError, toolmemory.ToolMemoryError) as error:
             kind = getattr(error, "kind",
                            "textarm_error" if ARM.text_policy else "assemble_error")
+            if isinstance(error, toolmemory.ToolMemoryError):
+                kind = f"tool_memory_{error.kind}"
             self._log_request(payload, None, None, status=kind,
                               error=str(error), fingerprint=fingerprint, conv=conv,
                               turn=turn)
@@ -1496,6 +1548,14 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 # OpenAI/SGLang request field.
                 staged.pop("c2kv_measurement_session_id", None)
                 staged["messages"] = out_messages
+                if getattr(_TRACE, "tool_plan", None) is not None:
+                    # tools stay in the request for the server's tool-call
+                    # parser; the template must not render them (the explicit
+                    # protocol + gist carriers replace the <tools> prologue)
+                    staged["c2kv_tools_in_prompt"] = False
+                    staged["messages"] = [
+                        toolmemory.strip_carrier_fields(m) if toolmemory.is_carrier(m) else m
+                        for m in out_messages]
                 if QUERY_PROJECTION is not None and BACKEND.name == "sglang":
                     staged["c2kv_use_gist_projection"] = QUERY_PROJECTION == "gist"
                 if getattr(BACKEND, "wants_request_context", False):
@@ -1555,7 +1615,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
                     def send_retrieved(staged):
                         nonlocal payload, messages_out
                         payload = staged
-                        messages_out, _ = _assemble(staged["messages"], ARM)
+                        messages_out, _ = _assemble_request(staged["messages"], ARM)
                         return send_upstream(
                             messages_out, None, phase="hiagent_retrieval_generation")[0]
                     data = _hiagent_retrieval_loop(
@@ -1587,12 +1647,23 @@ class ProxyHandler(BaseHTTPRequestHandler):
                             and messages_out[idx].get("c2kv_key_hash")
                             and fresh.get("key_hash")):
                         messages_out[idx]["c2kv_key_hash"] = fresh["key_hash"]
+                tool_plan = getattr(_TRACE, "tool_plan", None)
+                if tool_plan is not None:
+                    # the tool gist entries can be evicted too: re-extract
+                    # every chunk (memo bypass) and refresh the carriers'
+                    # key hashes in place, in carrier order
+                    TOOL_MEMORY.refresh(tool_plan)
+                    fresh_carriers = iter(tool_plan.carriers())
+                    for idx, message in enumerate(messages_out):
+                        if toolmemory.is_carrier(message):
+                            messages_out[idx] = next(fresh_carriers)
+                    counts["tool_memory"] = tool_plan.info
                 repair_plan = plan_repair(messages, ARM, counts,
                                           tools=payload.get("tools"),
                                           out_messages=messages_out)
                 data, normalized = call_upstream(messages_out, repair_plan)
         except (UpstreamError, BackendError, CacheMiss, RuntimeError, ValueError,
-                URLError, OSError) as error:
+                URLError, OSError, toolmemory.ToolMemoryError) as error:
             kind = getattr(error, "kind", "upstream_error")
             if isinstance(error, CacheMiss):
                 kind = "cache_miss"
@@ -1618,7 +1689,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
             if recover_now:
                 repair_t0 = time.perf_counter()
                 try:
-                    raw_out, _ = _assemble(messages, FULL_ASSEMBLY)
+                    raw_out, _ = _assemble_request(messages, FULL_ASSEMBLY)
                     data_b, normalized_b = call_upstream(
                         raw_out, None, phase="recovery_generation")
                 except (UpstreamError, BackendError, RuntimeError, ValueError,
@@ -1678,6 +1749,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 "n_gist_messages": counts["n_gist_messages"],
                 "assemble_sec": round(assemble_sec, 4),
                 "wall_sec": round(total_sec, 4),
+                # tool-definition memory of this request (None = tools raw)
+                "tool_memory": counts.get("tool_memory"),
             }
         )
         data["c2kv_proxy"].update(normalized["cost"])
@@ -1773,7 +1846,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
                     if k in ("system_raw", "history_raw", "current_raw", "compressed")})
         row.update({k: counts.get(k) for k in
                     ("doc_packing", "n_docs", "dropped_docs", "repair_frame",
-                     "history_kv", "kv_reuse")
+                     "history_kv", "kv_reuse", "tool_memory")
                     if k in counts})
         if counts.get("textarm") is not None:
             row["textarm"] = counts["textarm"]
@@ -1875,6 +1948,15 @@ def main(argv=None):
     parser.add_argument("--max-doc-num", type=int, default=MAX_DOC_NUM,
                         help="turn packing: keep doc 0 + the last N-1 docs, drop "
                              "the rest; supplied by the checkpoint profile")
+    parser.add_argument("--tool-memory", default="",
+                        help="tool-definition KV memory spec, orthogonal to --arm: "
+                             "'' / none = raw tools (default); t0:r8, t0:r12, "
+                             "t0:r8:hybrid3 = T0 gist memory at that ratio, "
+                             "optionally keeping the lexical top-k schemas native")
+    parser.add_argument("--tool-checkpoint", default="",
+                        help="T0 checkpoint directory (tokenizer + config identity); "
+                             "the server must serve its gist set via "
+                             "--c2kv-tool-gist-weights")
     args = parser.parse_args(argv)
     DOC_PACKING = args.doc_packing
     MAX_DOC_LENGTH = int(args.max_doc_length)
@@ -1908,6 +1990,28 @@ def main(argv=None):
         raise SystemExit(
             f"FATAL: --record-prefixes requires arm 'full', got {ARM.name!r}")
     BACKEND = get_backend(args.backend, _post_json)
+    global TOOL_MEMORY
+    tool_spec = toolmemory.parse_tool_memory_spec(args.tool_memory)
+    if tool_spec is not None:
+        if not args.tool_checkpoint:
+            raise SystemExit("FATAL: --tool-memory needs --tool-checkpoint <T0 dir>")
+        if BACKEND.name != "sglang":
+            raise SystemExit("FATAL: --tool-memory requires the sglang backend")
+        if ARM.history_kv or ARM.kv_reuse:
+            # The physical-eviction / KV-reuse arms resolve their history
+            # boundary from the rendered message list on the server; gist
+            # carriers inside that prefix are not accounted for there yet.
+            raise SystemExit(
+                f"FATAL: --tool-memory is not supported with arm {ARM.name!r} "
+                "(history_kv / kv_reuse boundary does not account for tool gist segments)")
+        if ARM.repair or ARM.recover:
+            raise SystemExit(
+                f"FATAL: --tool-memory is not supported with repair/recover arm {ARM.name!r}")
+        from pathlib import Path as _Path
+        TOOL_MEMORY = toolmemory.ToolMemory(
+            tool_spec, _Path(args.tool_checkpoint), _tool_extract_tokens)
+    elif args.tool_checkpoint:
+        raise SystemExit("FATAL: --tool-checkpoint without --tool-memory")
     if ARM.name in {"agentfold", "commitkv", "agentkv"}:
         with _OPENER.open(UPSTREAM + "/model_info", timeout=10) as response:
             require_qwen3_4b(json.load(response))
@@ -1922,7 +2026,8 @@ def main(argv=None):
               f"from {args.reference}", flush=True)
     server = ThreadingHTTPServer((args.host, args.port), ProxyHandler)
     print(f"proxy backend={BACKEND.name} arm={ARM.name} benchmark={BENCHMARK or 'unspecified'} doc_packing={DOC_PACKING} "
-          f"max_doc_length={MAX_DOC_LENGTH} max_doc_num={MAX_DOC_NUM} listening on "
+          f"max_doc_length={MAX_DOC_LENGTH} max_doc_num={MAX_DOC_NUM} "
+          f"tool_memory={TOOL_MEMORY.spec.name if TOOL_MEMORY else 'raw'} listening on "
           f"{args.host}:{args.port} -> {UPSTREAM}", flush=True)
     server.serve_forever()
 

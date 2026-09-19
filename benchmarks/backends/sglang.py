@@ -182,6 +182,29 @@ class SglangBackend(Backend):
                 f"c2kv extract failed: {result.get('error') or json.dumps(result)[:500]}")
         return result
 
+    def extract_tokens(self, token_ids: List[int], ratio: int,
+                       projection_set: str = "history") -> Dict[str, Any]:
+        if projection_set not in ("history", "tool"):
+            raise BackendError(
+                "extract_failed", f"unknown projection set {projection_set!r}")
+        payload = {
+            "token_ids": [int(token_id) for token_id in token_ids],
+            "compression_ratio": int(ratio),
+            "projection_set": projection_set,
+        }
+        result = self._post_json("/v1/c2kv/extract", payload, 600)
+        if not result.get("success", True) or not result.get("key_hash"):
+            raise BackendError(
+                "extract_failed",
+                f"c2kv extract(token_ids, {projection_set}) failed: "
+                f"{result.get('error') or json.dumps(result)[:500]}")
+        if int(result.get("original_seq_len") or 0) != len(payload["token_ids"]):
+            raise BackendError(
+                "extract_failed",
+                "c2kv extract(token_ids) returned an inconsistent source length: "
+                f"{result.get('original_seq_len')} != {len(payload['token_ids'])}")
+        return result
+
     def repair_extract(self, text: str, role: str, span_start: int,
                        span_end: Optional[int], position_offset: int,
                        source_doc_index: int) -> Dict[str, Any]:

@@ -45,8 +45,11 @@ class PaperMatrixTest(unittest.TestCase):
 
     def test_only_requested_methods_and_ratio(self):
         rows = cells(self.config)
-        self.assertEqual(len(rows), 63)
-        self.assertEqual(sum(row["group"] == "main" for row in rows), 38)
+        # The tool-context axis adds compressed-tool cells on top of the 63 raw-tool cells.
+        raw = [row for row in rows if row["tool_context"] == "raw"]
+        self.assertEqual(len(raw), 63)
+        self.assertEqual(len(rows) - len(raw), 10)
+        self.assertEqual(sum(row["group"] == "main" for row in raw), 38)
         self.assertEqual({row["ratio"] for row in rows if row["method"] == "C2KV"}, {4})
         self.assertEqual({row["method"] for row in rows}, {
             "Full", "HiAgent", "ACON", "C2KV", "H2O", "SnapKV", "PyramidKV",
@@ -64,12 +67,15 @@ class PaperMatrixTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             output = Path(temporary)
             plan, profile = prepare(self.config, output, output / "sglang")
-            self.assertEqual(len(plan), 63)
+            self.assertEqual(len(plan), 73)
             self.assertTrue(profile.is_file())
             for row in plan:
                 cmd = row["command"]
                 self.assertEqual(cmd[cmd.index("--num-workers") + 1], "1")
-                self.assertEqual("--record-prefixes" in cmd, row["arm"] == "full")
+                # only the raw-tools Full cell records the canonical replay prefixes
+                self.assertEqual("--record-prefixes" in cmd,
+                                 row["arm"] == "full" and row["tool_context"] == "raw")
+                self.assertEqual("--tool-memory" in cmd, row["tool_context"] != "raw")
                 self.assertEqual(Path(row["replay_source"]).parent.name, row["benchmark"] + "__full")
             self.assertEqual(json.loads((output / "unsupported_cells.json").read_text()),
                              self.config["unsupported_cells"])
@@ -490,7 +496,7 @@ class PaperMatrixTest(unittest.TestCase):
     def test_offline_savings_use_actual_full_peak(self):
         with tempfile.TemporaryDirectory() as temporary:
             output = Path(temporary)
-            plan = cells(self.config)[:4]
+            plan = [row for row in cells(self.config) if row["tool_context"] == "raw"][:4]
             for row, peak in ((plan[0], 115), (plan[3], 100)):
                 directory = output / "common_prefix" / row["cell_id"]
                 directory.mkdir(parents=True)
