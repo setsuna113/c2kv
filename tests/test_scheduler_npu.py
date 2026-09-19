@@ -166,6 +166,11 @@ def test_cell_driver_lock_and_port_are_isolated_across_slots(tmp_path, monkeypat
     assert captured["command"][:2] == ["flock", "-n"]
     assert Path(captured["command"][2]).parent == tmp_path / "logs" / "driver_locks"
     assert Path(captured["command"][2]).name.startswith("cell-")
+    assert captured["command"][3:6] == [
+        "bash",
+        str(Path(scheduler.__file__).resolve().parents[1] / "tools" / "launch_cpu_controller.sh"),
+        scheduler.PY_SGL,
+    ]
     assert "--proxy-port" in captured["command"]
     assert captured["command"][captured["command"].index("--proxy-port") + 1] == "52000"
     manifest_path = Path(captured["command"][captured["command"].index("--cell") + 1])

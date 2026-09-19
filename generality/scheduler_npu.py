@@ -215,6 +215,9 @@ def launch_cell(cell: dict, card: int, slot: int) -> subprocess.Popen:
                "--port-base", str(port_base)]
     else:
         raise RuntimeError(f"unsupported cell driver: {driver}")
+    # Resolve through the active source release, not the runtime's src symlink.
+    cpu_launcher = Path(__file__).resolve().parents[1] / "tools" / "launch_cpu_controller.sh"
+    cmd = ["bash", str(cpu_launcher), *cmd]
     log.parent.mkdir(parents=True, exist_ok=True)
     lock_dir = LOGS / "driver_locks"
     lock_dir.mkdir(parents=True, exist_ok=True)
