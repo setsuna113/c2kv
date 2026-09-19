@@ -27,7 +27,13 @@ def test_candidate_cell_is_explicit_ratio8_and_isolated(tmp_path, variant):
         source, variant, "http://127.0.0.1:36200")
     assert result["ratio"] == 8
     assert result["candidate_algorithm"] == variant
-    assert result["threshold"] == 0.5
+    if variant in candidate_cell.REPAIR_VARIANTS:
+        assert "threshold" not in result
+        assert result["candidate_protocol"] == candidate_cell.REPAIR_VERSION
+        assert result["schema"] == "c2kv-generality-candidate-cell-v2"
+    else:
+        assert result["threshold"] == 0.5
+        assert result["schema"] == "c2kv-generality-candidate-cell-v1"
     assert result["candidate_source_cell_id"] == source["cell_id"]
     assert result["candidate_budget_source"] == "working_point.common_cap_bytes"
     assert result["cell_dir"].endswith(f"candidate_algorithms/{variant}") or result["cell_dir"].endswith(f"candidate_algorithms\\{variant}")
@@ -75,6 +81,28 @@ def test_candidate_controller_binds_pinned_artifact_and_strips_legacy(tmp_path, 
     assert controller["observed_entity_slot_policy"] == base["observed_entity_slot_policy"]
     assert not {"gp_experiments", "post_draft_recovery", "d3_hybrid_recovery"} & controller.keys()
     assert receipt["checkpoint"] == str(checkpoint)
+    assert "candidate_algorithm" not in base
+
+
+@pytest.mark.parametrize("variant", candidate_cell.REPAIR_VARIANTS)
+def test_repair_candidate_keeps_c1000_without_loading_t02(tmp_path, variant):
+    checkpoint = tmp_path / "checkpoint"
+    checkpoint.mkdir()
+    (checkpoint / "config.json").write_text("{}", encoding="utf-8")
+    cell = candidate_cell.candidate_cell_from_source(
+        source_cell(tmp_path), variant, "http://127.0.0.1:36200")
+    cell["checkpoint"] = str(checkpoint)
+    base = {"view_mode": "native_s0", "gp_experiments": {},
+            "post_draft_recovery": {}, "d3_hybrid_recovery": True}
+    controller, receipt = candidate_cell.controller_with_binding(
+        cell, base_controller=base,
+        selected={"checkpoint_selection": {"config_sha256":
+                  hashlib.sha256((checkpoint / "config.json").read_bytes()).hexdigest()}},
+        risk_artifact_path=tmp_path / "absent-risk-artifact.json",
+        bind_risk_artifact=lambda *_: pytest.fail("T02 binding must not run"))
+    assert controller == {"view_mode": "native_s0",
+                          "candidate_algorithm": {"variant": variant}}
+    assert receipt is None
     assert "candidate_algorithm" not in base
 
 

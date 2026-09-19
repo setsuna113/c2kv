@@ -170,4 +170,8 @@ class CandidateRecoveryController(EventNativeRecoveryController):
 
 
 def wrap_with_candidate_recovery(base, config):
+    from . import REPAIR_VARIANTS
+    if config.get("variant") in REPAIR_VARIANTS:
+        from .repair_controller import RepairController
+        return RepairController(base, config)
     return CandidateRecoveryController(base, config)

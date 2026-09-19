@@ -1,0 +1,55 @@
+{
+  "schema": "source-repair-npu-sync-v1",
+  "source_implementation_commit": "104b403",
+  "runtime_protocol": "c2kv-source-repair-v1",
+  "module_byte_parity": [
+    {
+      "module": "benchmarks/memory_runtime/candidate_algorithms/__init__.py",
+      "sha256": "04e3953d9164f4ad7f3c258a0d218c9a1e7325bf51dd4f49bd442b529a3466b9"
+    },
+    {
+      "module": "benchmarks/memory_runtime/candidate_algorithms/controller.py",
+      "sha256": "feb17723d70dd6a4b4b304f6d25c95f7f3cbb6da96f5bef5641af6213660e811"
+    },
+    {
+      "module": "benchmarks/memory_runtime/candidate_algorithms/repair_protocol.py",
+      "sha256": "a3d4ba5ebf4e0842f92bd198f1d43838115bb42dc3cd29992ba73708e28c9d0b"
+    },
+    {
+      "module": "benchmarks/memory_runtime/candidate_algorithms/repair_controller.py",
+      "sha256": "f8eee3dbbe847bdd0d9ca69d67dbb73edc3deca3dcfb2eb05fd506b4f3dd2f17"
+    },
+    {
+      "module": "benchmarks/memory_runtime/candidate_algorithms/observations.py",
+      "sha256": "3b14c80f6e71b477978b620a09a0e5aeb667df466277b3c60de04a671e711eec"
+    },
+    {
+      "module": "benchmarks/memory_runtime/candidate_algorithms/request_contract.py",
+      "sha256": "3ca82419d0dcbb57844cb14a48a9a771409200c5ad443876ab5246987219c4f9"
+    },
+    {
+      "module": "benchmarks/memory_runtime/candidate_algorithms/argument_binding.py",
+      "sha256": "597c2923822980f336ce41da3986bffc69b345dda14eb1f1921c7c410ff8b07f"
+    },
+    {
+      "module": "benchmarks/memory_runtime/candidate_algorithms/no_progress.py",
+      "sha256": "dcd5922934ba5b3d3d9a671ed6f1a88175c7b99636acca504c6a84a8aa9957a7"
+    }
+  ],
+  "adapted_files": [
+    "event_native_controls.py",
+    "event_native_server.py",
+    "event_native_step.py"
+  ],
+  "ace_receipt_routing": "controller integration covered by test_source_repair_ace_integration.py",
+  "cpu_validation": {
+    "passed": 87,
+    "skipped": 1
+  },
+  "model_validation": "CUDA shared policy validation recorded in paper experiments/history_system/validation/source_repair_cuda_20260920.json; NPU model execution not run",
+  "existing_results": "Legacy candidate profiles and IDs retained; new variants use separate IDs and v2 delivery profiles",
+  "merged_branch_cpu_validation": {
+    "runtime_selected_passed": 52,
+    "launcher_and_parallel_study_passed": 40
+  }
+}

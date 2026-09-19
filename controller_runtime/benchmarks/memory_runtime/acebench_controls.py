@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from types import MethodType
 from typing import Any
 
 from history_memory.events import EventStore
@@ -28,6 +29,7 @@ ACEBENCH_VIEW_MODES = frozenset(
         "capacity_exact_no_gist",
         "full_original",
         "ac_gist_static",
+        "ac_native_s0_lexical_raw_reserve_failed_operation",
     }
 )
 _ACEBENCH_EXACT_VIEW_MODES = ACEBENCH_VIEW_MODES - {"full_original"}
@@ -199,6 +201,7 @@ def build_acebench_controller(
     model_context: int | None = None,
     compression_policy: str | None = None,
     history_view_protocol: str = "fixed-budget-main",
+    s0_config: Mapping[str, Any] | None = None,
 ) -> Any:
     """Build an ACE controller; training-static has no textual-action contract."""
 
@@ -206,6 +209,23 @@ def build_acebench_controller(
         raise ValueError(
             f"ACEBench view_mode must be one of {sorted(ACEBENCH_VIEW_MODES)!r}"
         )
+    if view_mode == "ac_native_s0_lexical_raw_reserve_failed_operation":
+        from .event_native_controls import build_event_native_controller
+        from .event_native_s0_policy import EventNativeS0Controller
+
+        controller = build_event_native_controller(
+            tokenizer, packing=packing, policy=policy, view_mode=view_mode,
+            model_context=model_context, compression_policy=compression_policy,
+            history_view_protocol=history_view_protocol, s0_config=s0_config,
+            benchmark="acebench",
+        )
+        base = controller
+        while hasattr(base, "base"):
+            base = base.base
+        if not isinstance(base, EventNativeS0Controller):
+            raise TypeError("ACE C1 requires the delivered native S0 controller")
+        base._validate_request = MethodType(_validate_ace_request, base)
+        return controller
     if view_mode in _ACEBENCH_EXACT_VIEW_MODES:
         return AceEventNativeExactController(
             tokenizer,

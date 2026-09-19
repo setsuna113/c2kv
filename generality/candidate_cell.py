@@ -13,7 +13,10 @@ except ImportError:  # Direct file launch on ascend03.
     from design import T02_RISK_ARTIFACT_SHA256
 
 
-VARIANTS = ("static_t02", "turn_c1", "goal_rescue", "dependency_first")
+LEGACY_VARIANTS = ("static_t02", "turn_c1", "goal_rescue", "dependency_first")
+REPAIR_VARIANTS = ("request_contract", "argument_binding", "no_progress")
+VARIANTS = LEGACY_VARIANTS + REPAIR_VARIANTS
+REPAIR_VERSION = "c2kv-source-repair-v1"
 RATIO = 8
 RISK_THRESHOLD = 0.5
 RISK_ARTIFACT_SHA256 = T02_RISK_ARTIFACT_SHA256
@@ -34,7 +37,8 @@ def candidate_cell_from_source(source: dict, variant: str, backend_url: str) -> 
         raise ValueError("Candidates require an explicit SGLang backend URL")
     source_dir = Path(source["cell_dir"])
     cell = copy.deepcopy(source)
-    cell["schema"] = "c2kv-generality-candidate-cell-v1"
+    cell["schema"] = ("c2kv-generality-candidate-cell-v2"
+                      if variant in REPAIR_VARIANTS else "c2kv-generality-candidate-cell-v1")
     cell["cell_id"] = f"{source['cell_id']}__candidate_{variant}"
     cell["cell_dir"] = str(source_dir.parent / "candidate_algorithms" / variant)
     cell["condition"] = "candidate_algorithm"
@@ -42,8 +46,13 @@ def candidate_cell_from_source(source: dict, variant: str, backend_url: str) -> 
     cell["candidate_source_cell_id"] = source["cell_id"]
     cell["candidate_budget_source"] = "working_point.common_cap_bytes"
     cell["ratio"] = RATIO
-    cell["threshold"] = RISK_THRESHOLD
-    cell["threshold_status"] = "frozen_candidate"
+    if variant in REPAIR_VARIANTS:
+        cell.pop("threshold", None)
+        cell.pop("threshold_status", None)
+        cell["candidate_protocol"] = REPAIR_VERSION
+    else:
+        cell["threshold"] = RISK_THRESHOLD
+        cell["threshold_status"] = "frozen_candidate"
     cell["sglang_backend_url"] = backend_url.strip()
     cell.pop("controller_path", None)
     cell.pop("eval_policy_path", None)
@@ -61,23 +70,32 @@ def controller_with_binding(
     """Bind frozen T02 weights to the exact selected C1000 checkpoint."""
     if cell.get("candidate_algorithm") not in VARIANTS or cell.get("ratio") != RATIO:
         raise ValueError("Invalid ratio-8 candidate cell")
-    if cell.get("benchmark") != "bfcl" or cell.get("threshold") != RISK_THRESHOLD:
-        raise ValueError("Candidate cells require BFCL and frozen T02 threshold")
+    variant = cell["candidate_algorithm"]
+    if cell.get("benchmark") != "bfcl":
+        raise ValueError("Candidate cells require BFCL")
+    if variant in REPAIR_VARIANTS:
+        if cell.get("candidate_protocol") != REPAIR_VERSION or "threshold" in cell:
+            raise ValueError("Repair candidate requires the source-repair protocol without T02")
+    elif cell.get("threshold") != RISK_THRESHOLD:
+        raise ValueError("Candidate cells require the frozen T02 threshold")
     checkpoint = Path(cell["checkpoint"])
     config_sha256 = hashlib.sha256((checkpoint / "config.json").read_bytes()).hexdigest()
     expected = selected["checkpoint_selection"]["config_sha256"]
     if config_sha256 != expected:
         raise ValueError("Candidate checkpoint differs from selected C1000")
+    controller = copy.deepcopy(base_controller)
+    for key in ("gp_experiments", "post_draft_recovery", "d3_hybrid_recovery"):
+        controller.pop(key, None)
+    if variant in REPAIR_VARIANTS:
+        controller["candidate_algorithm"] = {"variant": variant}
+        return controller, None
     artifact_bytes = risk_artifact_path.read_bytes()
     if hashlib.sha256(artifact_bytes).hexdigest() != RISK_ARTIFACT_SHA256:
         raise ValueError("T02 risk artifact differs from evaluated release")
     artifact = json.loads(artifact_bytes)
     bound, binding = bind_risk_artifact(artifact, checkpoint)
-    controller = copy.deepcopy(base_controller)
-    for key in ("gp_experiments", "post_draft_recovery", "d3_hybrid_recovery"):
-        controller.pop(key, None)
     controller["candidate_algorithm"] = {
-        "variant": cell["candidate_algorithm"],
+        "variant": variant,
         "risk_artifact": bound,
         "risk_threshold": RISK_THRESHOLD,
     }
