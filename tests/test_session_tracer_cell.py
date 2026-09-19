@@ -272,8 +272,9 @@ def test_appworld_tracer_manifest_declares_actual_frozen_sampler(tmp_path, monke
 
     monkeypatch.setitem(sys.modules, "transformers", SimpleNamespace(
         AutoTokenizer=SimpleNamespace(from_pretrained=lambda _: object())))
+    build_config = Mock(return_value=({"local_models": {"embedding": {}}}, {}))
     monkeypatch.setitem(sys.modules, "evidence_sets", SimpleNamespace(
-        build_config=lambda **_: ({"local_models": {"embedding": {}}}, {})))
+        build_config=build_config))
     models = Mock()
     monkeypatch.setattr(local_selection_models, "LocalSelectionModels",
                         lambda _: models)
@@ -281,6 +282,7 @@ def test_appworld_tracer_manifest_declares_actual_frozen_sampler(tmp_path, monke
     cell = {
         "benchmark": "acon_appworld", "backend": "h2o", "cell_id": "test",
         "checkpoint": "unused", "embedding_model": "unused", "threshold": 0.6,
+        "embedding_device": "npu:0",
         "sglang_backend_url": "http://unused", "model_name": "qwen",
         "caps": {"max_completion_tokens": 2048,
                  "generation_attempts_per_task": 2},
@@ -288,6 +290,7 @@ def test_appworld_tracer_manifest_declares_actual_frozen_sampler(tmp_path, monke
     }
     server, _ = driver.run_server(cell, ["task-1"], 0, tmp_path)
     try:
+        assert build_config.call_args.kwargs["embedding_device"] == "npu:0"
         ready = json.loads((tmp_path / "server" / "ready.json").read_text())
         assert ready["sampling"] == {
             "mode": "greedy",

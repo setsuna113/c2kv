@@ -428,6 +428,38 @@ def appworld_score_summary(cell: dict) -> dict:
     }
 
 
+def _runtime_retrieval_cell(cell: dict, out: Path) -> dict:
+    """Record per-attempt retrieval placement without rewriting frozen inputs."""
+    overrides = {key: cell[key] for key in ("embedding_device", "embedding_batch_size")
+                 if key in cell}
+    if not overrides:
+        return cell
+    if cell["condition"] != "tracer_history":
+        raise ValueError("retrieval execution overrides require a tracer cell")
+    source = Path(cell["controller_path"])
+    frozen = source.read_bytes()
+    config = json.loads(frozen)
+    embedding = config["gp_experiments"]["local_models"]["embedding"]
+    if "embedding_device" in overrides:
+        embedding["device"] = overrides["embedding_device"]
+    if "embedding_batch_size" in overrides:
+        embedding["batch_size"] = overrides["embedding_batch_size"]
+    path = out / "effective_controller.json"
+    raw = (json.dumps(config, indent=2, ensure_ascii=False) + "\n").encode()
+    with path.open("xb") as stream:
+        stream.write(raw)
+    _write(out / "retrieval_execution.json", {
+        "frozen_controller": str(source),
+        "frozen_controller_sha256": hashlib.sha256(frozen).hexdigest(),
+        "effective_controller": str(path),
+        "effective_controller_sha256": hashlib.sha256(raw).hexdigest(),
+        "overrides": overrides,
+        "ascend_visible_devices": os.environ.get("ASCEND_RT_VISIBLE_DEVICES"),
+        "scope": "execution placement and microbatching only; model and input contract unchanged",
+    })
+    return {**cell, "controller_path": str(path)}
+
+
 def run_task(cell: dict, task_ids: list[str], port: int, batch_dirname: str) -> dict:
     """Run one chunk of tasks under a single controller server instance.
 
@@ -442,9 +474,10 @@ def run_task(cell: dict, task_ids: list[str], port: int, batch_dirname: str) -> 
     # retries legitimately produce duplicate raw rows which canonical rescore
     # resolves without losing provenance.
     out.mkdir(parents=True, exist_ok=False)
+    server_cell = _runtime_retrieval_cell(cell, out)
     env = os.environ.copy()
-    # The controller is explicitly CPU-only; NPU execution belongs to the
-    # separate SGLang server and must not depend on this shell's CANN setup.
+    # Load torch_npu only when the configured retrieval device requires it.
+    # The actor stays in the separate SGLang process.
     env["TORCH_DEVICE_BACKEND_AUTOLOAD"] = "0"
     env["PYTHONPATH"] = os.pathsep.join((str(RUNTIME / "python"), str(RUNTIME)))
     env["no_proxy"] = env["NO_PROXY"] = "127.0.0.1,localhost"
@@ -474,7 +507,7 @@ def run_task(cell: dict, task_ids: list[str], port: int, batch_dirname: str) -> 
     _write(out / "status.json", status)
     try:
         server = subprocess.Popen(
-            server_command(cell, task_ids, out, port), cwd=str(RUNTIME), env=env,
+            server_command(server_cell, task_ids, out, port), cwd=str(RUNTIME), env=env,
             stdout=server_log, stderr=subprocess.STDOUT,
             stdin=subprocess.DEVNULL, start_new_session=True,
         )
@@ -563,6 +596,10 @@ def load_cell(cell_json: Path) -> dict:
 
 
 def prepare_cell_files(cell: dict, budgets: dict) -> dict:
+    # Launch placement is recorded per attempt, outside the scientific freeze.
+    cell = dict(cell)
+    execution = {key: cell.pop(key) for key in ("embedding_device", "embedding_batch_size")
+                 if key in cell}
     cell_dir = Path(cell["cell_dir"])
     controller, binding = _controller_with_binding(cell)
     policy = build_eval_policy(cell, budgets)
@@ -615,11 +652,11 @@ def prepare_cell_files(cell: dict, budgets: dict) -> dict:
                     expected.pop(transient, None)
             if previous != expected:
                 raise ValueError(f"existing attempts use a different frozen {name}")
-        return prepared
+        return {**prepared, **execution}
 
     for name, value in frozen.items():
         _write(cell_dir / name, value)
-    return prepared
+    return {**prepared, **execution}
 
 
 def _attempt_name(task_ids: list[str]) -> str:

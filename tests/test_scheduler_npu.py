@@ -258,6 +258,28 @@ def test_launch_boundary_refuses_a_held_cell(tmp_path, monkeypatch):
         scheduler.launch_cell(task, card=1, slot=0)
 
 
+@pytest.mark.parametrize("backend", ["c2kv", "h2o"])
+def test_tracer_retrieval_is_bound_to_its_exclusive_engine_card(tmp_path, monkeypatch, backend):
+    task = cell(tmp_path, backend=backend)
+    task.update(condition="tracer_history", working_point="K0")
+    original = dict(task)
+    monkeypatch.setattr(scheduler, "LOGS", tmp_path / "logs")
+    monkeypatch.setattr(scheduler, "calibration_receipt", lambda cell:
+                        (tmp_path / "threshold.json", {"threshold": 0.6}))
+    monkeypatch.setattr(scheduler, "calibration_is_ready", lambda *args: True)
+    launches = []
+    monkeypatch.setattr(scheduler.subprocess, "Popen", lambda command, **kwargs:
+                        launches.append((command, kwargs)) or SimpleNamespace(pid=123))
+    scheduler.launch_cell(task, card=3, slot=0)
+    command, kwargs = launches[0]
+    manifest = json.loads(Path(command[command.index("--cell") + 1]).read_text())
+    assert manifest["sglang_backend_url"].endswith(":36203")
+    assert manifest["embedding_device"] == "npu:0"
+    assert manifest["embedding_batch_size"] == 1
+    assert kwargs["env"]["ASCEND_RT_VISIBLE_DEVICES"] == "3"
+    assert task == original
+
+
 def test_singleton_lock_refuses_second_scheduler(tmp_path, monkeypatch):
     state = {"held": False}
 

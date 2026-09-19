@@ -195,6 +195,10 @@ def launch_cell(cell: dict, card: int, slot: int) -> subprocess.Popen:
         cell["threshold"] = receipt["threshold"]
         cell["threshold_status"] = "calibrated"
         cell["calibration_receipt"] = str(receipt_path)
+        # Recovery owns this card exclusively. Keep BF16 retrieval on the same
+        # accelerator; CPU BF16 inference exceeds AppWorld's request timeout.
+        cell["embedding_device"] = "npu:0"
+        cell["embedding_batch_size"] = 1
     cell["sglang_backend_url"] = f"http://127.0.0.1:{ENGINE_PORT[card]}"
     cell["scheduler_port_slot"] = slot
     # The process reads its own immutable manifest.  Reusing cell_launch.json
@@ -207,8 +211,9 @@ def launch_cell(cell: dict, card: int, slot: int) -> subprocess.Popen:
     log = LOGS / f"cell_{cell['cell_id']}_c{card}.log"
     port_base = DRIVER_PORT_BASE + (card * MAX_DRIVERS_PER_CARD + slot) * DRIVER_PORT_STRIDE
     env = os.environ.copy()
+    if driver in {"c2kv", "session_tracer"}:
+        env["ASCEND_RT_VISIBLE_DEVICES"] = str(card)
     if driver == "c2kv":
-        env["ASCEND_RT_VISIBLE_DEVICES"] = str(card)   # controller-side torch_npu import safety
         cmd = [PY_SGL, str(SRC / "generality" / "c2kv_cell.py"),
                "--cell", str(cell_path), "--budgets",
                str(GENERATION_ROOT / "config" / "budgets_resolved.json"),

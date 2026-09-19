@@ -722,3 +722,39 @@ def test_prepare_rejects_attempts_with_missing_frozen_config(tmp_path):
             driver.prepare_cell_files(cell, budgets)
     assert not (cell_dir / "controller.json").exists()
     assert {name: (cell_dir / name).read_bytes() for name in frozen} == frozen
+
+
+def test_retrieval_device_override_preserves_freeze_and_records_effective_attempt(tmp_path, monkeypatch):
+    driver = _load_driver()
+    cell_dir = tmp_path / "cell"
+    cell = {"cell_id": "placement", "cell_dir": str(cell_dir),
+            "condition": "tracer_history", "working_point": "K0"}
+    budgets = {"working_points": {"K0": {
+        "history_allowance_bytes": 1024, "common_cap_bytes": 2048}}}
+    controller = {"gp_experiments": {"selector_threshold": 0.6, "local_models": {
+        "embedding": {"device": "cpu", "batch_size": 16,
+                      "dtype": "bfloat16", "model_name_or_path": "/frozen/model"}}}}
+    with patch.object(driver, "_controller_with_binding", return_value=(controller, None)):
+        driver.prepare_cell_files(cell, budgets)
+        (cell_dir / "batches" / "old_cpu").mkdir(parents=True)
+        frozen = {name: (cell_dir / name).read_bytes() for name in
+                  ("cell.json", "controller.json", "eval_policy.json")}
+        prepared = driver.prepare_cell_files(
+            {**cell, "embedding_device": "npu:0", "embedding_batch_size": 1}, budgets)
+    assert {name: (cell_dir / name).read_bytes() for name in frozen} == frozen
+    out = cell_dir / "batches" / "new_npu"
+    out.mkdir()
+    monkeypatch.setenv("ASCEND_RT_VISIBLE_DEVICES", "3")
+    runtime = driver._runtime_retrieval_cell(prepared, out)
+    effective = json.loads(Path(runtime["controller_path"]).read_text())
+    embedding = effective["gp_experiments"]["local_models"]["embedding"]
+    assert embedding.pop("device") == "npu:0"
+    assert embedding.pop("batch_size") == 1
+    embedding.update(device="cpu", batch_size=16)
+    assert effective == controller
+    sidecar = json.loads((out / "retrieval_execution.json").read_text())
+    assert sidecar["ascend_visible_devices"] == "3"
+    assert sidecar["frozen_controller_sha256"] != sidecar["effective_controller_sha256"]
+    assert {name: (cell_dir / name).read_bytes() for name in frozen} == frozen
+    with pytest.raises(FileExistsError):
+        driver._runtime_retrieval_cell(prepared, out)

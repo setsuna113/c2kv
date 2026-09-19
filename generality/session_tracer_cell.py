@@ -36,7 +36,7 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-# This driver runs CPU-side detector/retrieval and calls the NPU engine over HTTP.
+# Detector code stays on CPU; retrieval explicitly loads its configured backend.
 os.environ["TORCH_DEVICE_BACKEND_AUTOLOAD"] = "0"
 
 try:
@@ -533,10 +533,13 @@ def run_server(cell, task_ids, port, out_dir):
     gp_config, _ = _es.build_config(
         history="H0", selector="risk", selector_artifact=RISK_ARTIFACT,
         selector_threshold=float(cell["threshold"]),
-        embedding_model=cell["embedding_model"], embedding_device="cpu",
+        embedding_model=cell["embedding_model"],
+        embedding_device=cell.get("embedding_device", "cpu"),
         semantic_query_overflow_policy="task_head_tail_preserve_draft_v1",
     )
     gp_config["local_models"]["embedding"]["dtype"] = "bfloat16"
+    if "embedding_batch_size" in cell:
+        gp_config["local_models"]["embedding"]["batch_size"] = cell["embedding_batch_size"]
     from benchmarks.memory_runtime.recovery.local_selection_models import (
         LocalSelectionModels,
     )
