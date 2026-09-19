@@ -249,7 +249,14 @@ def test_official_scores_are_required_and_attached_to_aggregate():
         bridge.summarize_scores([{"unified_metrics": {"task_id": "task-c"}}])
 
 
-def test_capacity_failure_is_scored_zero_and_driver_runs_next_task(tmp_path, monkeypatch):
+@pytest.mark.parametrize("worker_error", [
+    RuntimeError("controller finalization failed"),
+    subprocess.CalledProcessError(1, ["python", "run_all.py"]),
+])
+@pytest.mark.parametrize("has_capacity_evidence", [True, False])
+def test_capacity_failure_is_scored_zero_and_driver_runs_next_task(
+    tmp_path, monkeypatch, worker_error, has_capacity_evidence,
+):
     native = tmp_path / "native"
     native.mkdir()
     controller_path = native / "controller.json"
@@ -275,7 +282,7 @@ def test_capacity_failure_is_scored_zero_and_driver_runs_next_task(tmp_path, mon
     def run_task(_config, task_id, *_args):
         calls.append(task_id)
         if task_id == tasks[0]:
-            raise RuntimeError("controller finalization failed")
+            raise worker_error
         return completed, completed_metrics
 
     monkeypatch.setattr(driver, "load_delivery", lambda: object())
@@ -291,11 +298,17 @@ def test_capacity_failure_is_scored_zero_and_driver_runs_next_task(tmp_path, mon
         "controller_step_failure",
         lambda task_root: (
             ("method_failure", "capacity_infeasible", "CapacityInfeasible")
-            if task_root.name == tasks[0]
+            if has_capacity_evidence and task_root.name == tasks[0]
             else None
         ),
     )
 
+    if not has_capacity_evidence:
+        with pytest.raises(type(worker_error)):
+            driver.run_closed_loop({}, "appworld", tmp_path / "run")
+        assert calls == tasks[:1]
+        assert not (native / "task_shards" / tasks[0] / "paper_task_result.json").exists()
+        return
     result = driver.run_closed_loop({}, "appworld", tmp_path / "run")
 
     assert result == native

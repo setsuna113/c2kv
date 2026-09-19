@@ -127,6 +127,15 @@ def validate_appworld_runner_patches(acon_dir: Path) -> None:
         missing.append(f"0002-unknown-api-cost.patch ({llm_path})")
     if "# C2KV: generation failures must never become executable actions.\n            raise" not in llm_text:
         missing.append(f"0007-propagate-generation-errors.patch ({llm_path})")
+    agent_path = root / "src" / "productive_agents" / "agents" / "unified_agent.py"
+    try:
+        agent_text = agent_path.read_text(encoding="utf-8")
+    except OSError:
+        agent_text = ""
+    if ("class GenerationError(RuntimeError):" not in agent_text
+            or "raise GenerationError(f\"Model generation failed: {e}\") from e" not in agent_text
+            or "'generation_error' if isinstance(e, GenerationError) else 'error'" not in agent_text):
+        missing.append(f"0007-propagate-generation-errors.patch ({agent_path})")
     runner_path = root / "experiments" / "appworld" / "run.py"
     try:
         runner_text = runner_path.read_text(encoding="utf-8")
@@ -134,6 +143,9 @@ def validate_appworld_runner_patches(acon_dir: Path) -> None:
         runner_text = ""
     if "results['termination_reason'] = results['info']['reason']" not in runner_text:
         missing.append(f"0006-appworld-final-step-and-errors.patch ({runner_path})")
+    if ("results.get('termination_reason') == 'generation_error'" not in runner_text
+            or "raise RuntimeError(f\"ACON generation failed: {results.get('error', 'unknown')}\")" not in runner_text):
+        missing.append(f"0007-propagate-generation-errors.patch ({runner_path})")
     if missing:
         raise SystemExit("FATAL: ACON AppWorld checkout lacks required patches: "
                          + "; ".join(missing))
@@ -612,6 +624,10 @@ def collect_appworld(eval_path: Path, run_dir: Path,
         agent = appworld_task_dir(run_dir, task_id) / "results.json"
         if agent.exists():
             rec = json.loads(agent.read_text(encoding="utf-8"))
+            if rec.get("termination_reason") == "generation_error":
+                raise SystemExit(
+                    f"FATAL: AppWorld task {task_id} has a generation error, not an official score"
+                )
             row.update({
                 "n_turns": rec.get("iterations"),
                 "termination": rec.get("termination_reason"),

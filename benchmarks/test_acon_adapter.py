@@ -8,7 +8,9 @@ evaluation layout.
 from __future__ import annotations
 
 import json
+import ast
 import importlib.util
+import logging
 import os
 import runpy
 import shutil
@@ -442,9 +444,11 @@ def test_appworld_required_patch_markers(tmp_path):
     runner = acon / "experiments" / "appworld" / "run.py"
     runner_all = runner.with_name("run_all.py")
     env = acon / "src" / "productive_agents" / "env" / "appworld" / "env.py"
+    unified = acon / "src" / "productive_agents" / "agents" / "unified_agent.py"
     llm.parent.mkdir(parents=True)
     runner.parent.mkdir(parents=True)
     env.parent.mkdir(parents=True)
+    unified.parent.mkdir(parents=True)
     complete_llm = (
         "base_url = os.environ.get('ACON_OPENAI_BASE_URL')\n"
         "logger.info(f'API pricing unavailable for model {model_name}')\n"
@@ -458,6 +462,8 @@ def test_appworld_required_patch_markers(tmp_path):
         "value = token_summary.get('output_cost_usd') or 0\n"
         "value = token_summary.get('total_cost_usd') or 0\n"
         "results['termination_reason'] = results['info']['reason']\n"
+        "if results.get('termination_reason') == 'generation_error':\n"
+        "raise RuntimeError(f\"ACON generation failed: {results.get('error', 'unknown')}\")\n"
     )
     runner_all.write_text(
         "task_cost = token_info.get('total_cost_usd')\n"
@@ -467,6 +473,11 @@ def test_appworld_required_patch_markers(tmp_path):
     env.write_text(
         "self.done = self.num_interactions >= self.config.max_interactions\n"
         'info = {"max_interactions_reached": self.done, "info": dict(self.info)}\n'
+    )
+    unified.write_text(
+        "class GenerationError(RuntimeError): pass\n"
+        "raise GenerationError(f\"Model generation failed: {e}\") from e\n"
+        "'generation_error' if isinstance(e, GenerationError) else 'error'\n"
     )
     A.validate_appworld_runner_patches(acon)
     complete_runner = runner.read_text()
@@ -484,6 +495,209 @@ def test_appworld_required_patch_markers(tmp_path):
     env.write_text("# pristine upstream\n")
     with pytest.raises(SystemExit, match="0006-appworld-final-step-and-errors.patch"):
         A.validate_appworld_runner_patches(acon)
+    env.write_text(
+        "self.done = self.num_interactions >= self.config.max_interactions\n"
+        'info = {"max_interactions_reached": self.done, "info": dict(self.info)}\n'
+    )
+    unified.write_text("response = f'Error: {e}'\n")
+    with pytest.raises(SystemExit, match="0007-propagate-generation-errors.patch"):
+        A.validate_appworld_runner_patches(acon)
+
+
+def test_appworld_generation_failure_aborts_before_scoring(tmp_path, monkeypatch):
+    project_root = Path(__file__).resolve().parents[1]
+    default_acon_root = project_root.parent / "tmp" / "baselines" / "acon"
+    acon_root = Path(os.environ.get("ACON_ROOT", default_acon_root))
+    sources = (
+        "src/productive_agents/llm.py",
+        "src/productive_agents/agents/unified_agent.py",
+        "experiments/appworld/run.py",
+    )
+    if any(not (acon_root / name).is_file() for name in sources):
+        pytest.skip("set ACON_ROOT to the pinned microsoft/acon checkout")
+
+    staged = tmp_path / "acon"
+    for name in sources:
+        target = staged / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(acon_root / name, target)
+    subprocess.run(
+        ["git", "apply", "--ignore-space-change",
+         str(project_root / "benchmarks" / "acon_patches"
+             / "0007-propagate-generation-errors.patch")],
+        cwd=staged, check=True, capture_output=True, text=True,
+    )
+
+    def method(source, class_name, name, namespace):
+        tree = ast.parse(source.read_text(encoding="utf-8"))
+        cls = next(node for node in tree.body
+                   if isinstance(node, ast.ClassDef) and node.name == class_name)
+        fn = next(node for node in cls.body
+                  if isinstance(node, ast.FunctionDef) and node.name == name)
+        fn.decorator_list = []
+        fn.returns = None
+        code = ast.fix_missing_locations(ast.Module(body=[fn], type_ignores=[]))
+        exec(compile(code, str(source), "exec"), namespace)
+        return namespace[name]
+
+    llm_path = staged / sources[0]
+    generate = method(llm_path, "vLLM", "generate", {"logger": logging.getLogger(__name__)})
+
+    class FakeLLM:
+        model_name = "c2kv-agent"
+        total_requests = 0
+
+        def __init__(self, create):
+            self.client = types.SimpleNamespace(
+                chat=types.SimpleNamespace(completions=types.SimpleNamespace(create=create)))
+
+        def _build_messages(self, prompt):
+            return [{"role": "user", "content": prompt}]
+
+        def get_model_options(self, **kwargs):
+            return {}
+
+    def failed_create(**kwargs):
+        raise ConnectionError("fixture transport failure")
+
+    with pytest.raises(ConnectionError, match="fixture transport failure"):
+        generate(FakeLLM(failed_create), "prompt")
+
+    def empty_create(**kwargs):
+        return types.SimpleNamespace(
+            choices=[types.SimpleNamespace(message=types.SimpleNamespace(content=""))],
+            usage=None,
+        )
+
+    assert generate(FakeLLM(empty_create), "prompt") == ""
+
+    unified_path = staged / sources[1]
+    unified_tree = ast.parse(unified_path.read_text(encoding="utf-8"))
+    error_class = next(node for node in unified_tree.body
+                       if isinstance(node, ast.ClassDef) and node.name == "GenerationError")
+    namespace = {"LLMOutput": types.SimpleNamespace}
+    exec(compile(ast.fix_missing_locations(ast.Module(
+        body=[error_class], type_ignores=[])), str(unified_path), "exec"), namespace)
+    forward = method(unified_path, "UnifiedAgent", "forward", namespace)
+    run_agent = method(unified_path, "UnifiedAgent", "run", namespace)
+    parsed = []
+    agent = types.SimpleNamespace(
+        llm_cache=None, debug_mode=False, logger=logging.getLogger(__name__),
+        _generate_with_fallback=lambda prompt: generate(FakeLLM(failed_create), prompt),
+        _process_response=lambda response: parsed.append(response),
+    )
+    with pytest.raises(namespace["GenerationError"], match="fixture transport failure"):
+        forward(agent, "prompt")
+    assert parsed == []
+    empty_agent = types.SimpleNamespace(
+        llm_cache=None, debug_mode=False, logger=logging.getLogger(__name__),
+        _generate_with_fallback=lambda prompt: generate(FakeLLM(empty_create), prompt),
+        _process_response=lambda response: parsed.append(response) or response,
+    )
+    assert forward(empty_agent, "prompt").response == ""
+    assert parsed == [""]
+    parsed.clear()
+
+    class FakeMemory:
+        do_history_optimization = False
+        do_observation_optimization = False
+
+        def add_user_prompt(self, prompt):
+            pass
+
+        def get_conversation_history(self, exclude_system):
+            return "prompt"
+
+    runner_agent = types.SimpleNamespace(
+        logger=logging.getLogger(__name__), debug_mode=False,
+        memory_manager=FakeMemory(), build_prompt=lambda env: "prompt",
+        forward=lambda prompt: forward(agent, prompt),
+    )
+
+    class FakeEnv:
+        instances = []
+
+        def __init__(self, config):
+            self.task = types.SimpleNamespace(instruction="fixture")
+            self.closed = False
+            self.instances.append(self)
+
+        def reset(self, task_id):
+            return "ready"
+
+        def step(self, action):
+            raise AssertionError("a transport error must never reach AppWorld.step")
+
+        def dump_history(self, output_dir):
+            (Path(output_dir) / "env_history.json").write_text("[]")
+
+        def close(self):
+            self.closed = True
+
+    class FakeAgent:
+        def __init__(self, **kwargs):
+            pass
+
+        def run(self, env, max_iter):
+            return run_agent(runner_agent, env, max_iter=max_iter)
+
+        def get_token_usage_summary(self):
+            return {}
+
+        def dump_history(self, output_dir):
+            (Path(output_dir) / "llm_history.json").write_text("[]")
+
+    class FakeAgentConfig:
+        __dataclass_fields__ = {"extra_config": object()}
+
+        def __init__(self, **kwargs):
+            pass
+
+    def module(name, **attrs):
+        value = types.ModuleType(name)
+        for key, item in attrs.items():
+            setattr(value, key, item)
+        return value
+
+    monkeypatch.setitem(sys.modules, "productive_agents", module("productive_agents"))
+    monkeypatch.setitem(sys.modules, "productive_agents.env", module("productive_agents.env"))
+    monkeypatch.setitem(sys.modules, "productive_agents.env.appworld", module(
+        "productive_agents.env.appworld", AppWorldEnv=FakeEnv,
+        AppWorldEnvConfig=lambda **kwargs: kwargs))
+    monkeypatch.setitem(sys.modules, "productive_agents.agents", module("productive_agents.agents"))
+    monkeypatch.setitem(sys.modules, "productive_agents.agents.appworld", module(
+        "productive_agents.agents.appworld", AppWorldAgent=FakeAgent,
+        AppWorldAgentConfig=FakeAgentConfig))
+    monkeypatch.setitem(sys.modules, "productive_agents.agents.appworld.config", module(
+        "productive_agents.agents.appworld.config", AppWorldAgentConfig=FakeAgentConfig))
+    run_module = runpy.run_path(str(staged / sources[2]))
+    out = tmp_path / "result"
+    with pytest.raises(RuntimeError, match="ACON generation failed"):
+        run_module["main"](
+            task_id="fixture_1", output_dir=str(out), exp_config={},
+            model_name="c2kv-agent", debug_mode=False,
+        )
+    assert json.loads((out / "results.json").read_text())["termination_reason"] == "generation_error"
+    assert (out / "llm_history.json").is_file()
+    assert (out / "env_history.json").is_file()
+    assert FakeEnv.instances[-1].closed
+
+
+def test_appworld_collector_rejects_generation_error_even_with_stale_score(tmp_path):
+    eval_path = tmp_path / "evaluation.json"
+    eval_path.write_text(json.dumps({
+        "individual": {"fixture_1": {"success": False}},
+    }), encoding="utf-8")
+    run_dir = tmp_path / "run"
+    task_dir = A.appworld_task_dir(run_dir, "fixture_1")
+    task_dir.mkdir(parents=True)
+    (task_dir / "results.json").write_text(json.dumps({
+        "termination_reason": "generation_error",
+        "error": "Model generation failed: fixture transport failure",
+    }), encoding="utf-8")
+    with pytest.raises(SystemExit, match="generation error, not an official score"):
+        A.collect_appworld(eval_path, run_dir, expected=1,
+                           expected_ids=["fixture_1"])
 
 
 def test_appworld_final_budgeted_action_executes_and_errors_are_recorded(tmp_path, monkeypatch):

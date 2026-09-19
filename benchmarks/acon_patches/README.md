@@ -58,6 +58,14 @@ in `appworld_trajectory.json`, and records the real terminal reason in
 `results.json`. It does not alter AppWorld state transitions or official
 evaluation.
 
+Apply `0007-propagate-generation-errors.patch` with
+`git apply --ignore-space-change` after `0006`. A raised model-request error
+now propagates through the agent instead of becoming the literal `None` or
+`Error: ...` action. ACON records `generation_error` with the partial task
+artifacts, then exits nonzero before the official scorer; the adapter rejects
+any scored artifact carrying that error. A successful request's response text,
+including an empty action, keeps the upstream model-output behavior.
+
 Both runners then need only the served model name to NOT contain `gpt`,
 `o1`, `o3`, `o4` or `gemini` (those names are routed to the OpenAI / Gemini
 clients instead).  `c2kv-agent` is fine.

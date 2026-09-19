@@ -180,7 +180,7 @@ def run_closed_loop(config, benchmark, directory, requested=None):
                     receipt, metrics = run_task(config, task, native, delivery, controller_path)
                 else:
                     receipt, metrics = delivery.run_task(args, task, controller_path)
-            except RuntimeError as error:
+            except (RuntimeError, subprocess.CalledProcessError) as error:
                 failure = controller_step_failure(task_root)
                 if failure is None:
                     raise
