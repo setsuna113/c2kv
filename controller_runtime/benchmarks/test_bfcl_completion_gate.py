@@ -4,8 +4,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from benchmarks import terminal_check
 from benchmarks.adapters import bfcl_adapter
+from benchmarks.bfcl_completion import _complete_native_tool_calls
 
 
 def _write_jsonl(path: Path, rows) -> None:
@@ -122,3 +125,17 @@ def test_registered_fc_adapter_rejects_old_decode_error_but_keeps_model_text(tmp
     raw = next((Path(receipt["receipt"]).parent / "raw").rglob("*.json"))
     assert [json.loads(line) for line in raw.read_text().splitlines()] == [
         old_error, model_text, native_final, malformed_with_error]
+
+
+@pytest.mark.parametrize("text", [
+    '<tool_call>{"name":"lookup","arguments":{"city":"X"}}</tool_call>',
+    'No tool is needed.',
+    '<tool_call>{"name":"lookup","arguments":{"city":"X"}',
+    '<tool_call>{"name":"lookup","arguments":{"city":"X","city":"Y"}}</tool_call>',
+    '<tool_call>{"name":"lookup","arguments":[]}</tool_call>',
+])
+def test_fc_guard_tool_block_evidence_matches_native_parser(text):
+    from benchmarks.memory_runtime.event_native_draft import parse_native_draft
+
+    assert _complete_native_tool_calls(text) == (
+        parse_native_draft(text, call_id_prefix="audit").status == "tool_calls")
