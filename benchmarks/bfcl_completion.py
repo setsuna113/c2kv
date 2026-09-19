@@ -10,7 +10,30 @@ import re
 from collections.abc import Mapping
 
 
-def completion_kind(row: Mapping) -> str:
+LEGACY_FC_DECODE_ERROR = "'str' object has no attribute 'items'"
+
+
+def has_legacy_fc_decode_error(row: Mapping) -> bool:
+    """Identify the old handler's decoded-string/FC-dict contract failure."""
+    inference_log = row.get("inference_log")
+    if not isinstance(inference_log, list):
+        return False
+    for turn in inference_log:
+        if not isinstance(turn, Mapping):
+            continue
+        for key, entries in turn.items():
+            if not isinstance(key, str) or not key.startswith("step_") or not isinstance(entries, list):
+                continue
+            if any(isinstance(entry, Mapping) and entry.get("role") == "handler_log"
+                   and entry.get("error") == LEGACY_FC_DECODE_ERROR
+                   for entry in entries):
+                return True
+    return False
+
+
+def completion_kind(row: Mapping, *, fc_model: bool = False) -> str:
+    if fc_model and has_legacy_fc_decode_error(row):
+        return "incomplete"
     if "result" not in row:
         return "incomplete"
     failure = row.get("traceback")
@@ -34,10 +57,10 @@ def completion_kind(row: Mapping) -> str:
     return "incomplete"
 
 
-def bfcl_row_is_terminal(row: Mapping) -> bool:
-    return completion_kind(row) != "incomplete"
+def bfcl_row_is_terminal(row: Mapping, *, fc_model: bool = False) -> bool:
+    return completion_kind(row, fc_model=fc_model) != "incomplete"
 
 
-def terminal_failure_kind(row: Mapping) -> str | None:
-    kind = completion_kind(row)
+def terminal_failure_kind(row: Mapping, *, fc_model: bool = False) -> str | None:
+    kind = completion_kind(row, fc_model=fc_model)
     return kind if kind not in {"incomplete", "model_output"} else None

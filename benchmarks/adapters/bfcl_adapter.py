@@ -39,7 +39,9 @@ from typing import Any, Dict, List, Mapping, Optional
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from adapters.base import RunContext, v1  # noqa: E402
-from bfcl_completion import bfcl_row_is_terminal, terminal_failure_kind  # noqa: E402
+from bfcl_completion import (  # noqa: E402
+    bfcl_row_is_terminal, has_legacy_fc_decode_error, terminal_failure_kind,
+)
 from measurement.telemetry import HarnessTelemetry, current_episode  # noqa: E402
 
 NAME = "bfcl"
@@ -452,16 +454,19 @@ def _completion_ledger(project_root: Path, handler_name: str,
                 foreign.append({"task_id": task_id, "category": category,
                                 "path": str(path), "line": line_number})
                 continue
+            # install_handler registers this adapter with is_fc_model=True;
+            # the default shared classifier remains prompt-mode compatible.
+            valid = bfcl_row_is_terminal(row, fc_model=True)
             entries[task_id].append({
                 "task_id": task_id,
                 "category": category,
-                "valid": bfcl_row_is_terminal(row),
+                "valid": valid,
                 "path": str(path),
                 "line": line_number,
                 "mtime_ns": mtime_ns,
                 "row": row,
             })
-            if not bfcl_row_is_terminal(row):
+            if not valid:
                 invalid_rows += 1
     if foreign:
         shown = ", ".join(item["task_id"] for item in foreign[:20])
@@ -474,12 +479,18 @@ def _completion_ledger(project_root: Path, handler_name: str,
                 valid, key=lambda row: (row["mtime_ns"], row["path"], row["line"]))
     requested = [task_id for ids in selected_ids.values() for task_id in ids]
     remaining = [task_id for task_id in requested if task_id not in canonical]
+    legacy_fc_decode_task_ids = [
+        task_id for task_id in remaining
+        if any(has_legacy_fc_decode_error(item["row"])
+               for item in entries[task_id])
+    ]
     return {
         "requested": requested,
         "valid_unique": list(canonical),
         "remaining": remaining,
         "duplicate_rows": sum(max(0, len(rows) - 1) for rows in entries.values()),
         "invalid_rows": invalid_rows,
+        "legacy_fc_decode_task_ids": legacy_fc_decode_task_ids,
         "canonical": canonical,
         "paths": paths,
         "terminal_failures": {task_id: terminal_failure_kind(item["row"])
@@ -508,6 +519,7 @@ def _snapshot_completion_round(project_root: Path, invocation_root: Path,
         "remaining": ledger["remaining"],
         "duplicate_rows": ledger["duplicate_rows"],
         "invalid_rows": ledger["invalid_rows"],
+        "legacy_fc_decode_task_ids": ledger["legacy_fc_decode_task_ids"],
         "terminal_failures": ledger["terminal_failures"],
     }
     receipt_path = round_root / "ledger.json"
@@ -732,6 +744,7 @@ def run_bfcl(base_url: str, categories: str = "multi_turn_base",
                 "valid_unique": len(completion["valid_unique"]),
                 "duplicate_rows": completion["duplicate_rows"],
                 "invalid_rows": completion["invalid_rows"],
+                "legacy_fc_decode_task_ids": completion["legacy_fc_decode_task_ids"],
                 "remaining": completion["remaining"],
                 "terminal_failures": completion["terminal_failures"],
                 "max_refill_rounds": max_refill_rounds,
