@@ -14,7 +14,10 @@ VARIANTS = ("static_t02", "turn_c1", "goal_rescue", "dependency_first")
 REPAIR_VARIANTS = ("request_contract", "argument_binding", "no_progress")
 GOAL_VARIANTS = ("goal_pending", "goal_source", "goal_progress", "goal_joint")
 GOAL_VERSION = "c2kv-goal-composition-v1"
-ALL_VARIANTS = VARIANTS + REPAIR_VARIANTS + GOAL_VARIANTS
+VERIFIED_VARIANTS = ("goal_verified", "pending_verified")
+VERIFIED_VERSION = "c2kv-verified-binding-v1"
+PROOF_REGISTRY_VERSION = "verified-binding-rules-v1"
+ALL_VARIANTS = VARIANTS + REPAIR_VARIANTS + GOAL_VARIANTS + VERIFIED_VARIANTS
 RATIO = 8
 
 
@@ -36,7 +39,7 @@ def build_profile(
     if getattr(args, "benchmark", "bfcl") not in {"bfcl", "acebench", "acon_appworld", "tau2"}:
         raise ValueError("candidate algorithms support BFCL, ACEBench Agent, AppWorld and tau2 only")
     if args.selector_artifact is not None:
-        if variant in VARIANTS or variant in GOAL_VARIANTS:
+        if variant in VARIANTS or variant in GOAL_VARIANTS or variant in VERIFIED_VARIANTS:
             raise ValueError("candidate algorithms use the bundled T02 risk artifact")
         raise ValueError("repair candidates do not use a selector artifact")
     ratio = int(args.ratio) if args.ratio is not None else int(selected["ratio"])
@@ -83,6 +86,8 @@ def build_profile(
         "variant": variant,
         "risk_artifact": bound_artifact,
         "risk_threshold": 0.5,
+        **({"proof_registry_version": PROOF_REGISTRY_VERSION}
+           if variant in VERIFIED_VARIANTS else {}),
     }
     profile = {
         "schema": "c2kv-candidate-delivery-profile-v1",
@@ -108,4 +113,8 @@ def build_profile(
     if variant in GOAL_VARIANTS:
         profile["schema"] = "c2kv-candidate-delivery-profile-v3"
         profile["selection_protocol"] = GOAL_VERSION
+    elif variant in VERIFIED_VARIANTS:
+        profile["schema"] = "c2kv-candidate-delivery-profile-v4"
+        profile["selection_protocol"] = VERIFIED_VERSION
+        profile["proof_registry_version"] = PROOF_REGISTRY_VERSION
     return controller, profile

@@ -441,7 +441,9 @@ $PY -m benchmarks.paper aggregate --output /home/lyc/dev/c2kv-paper-results
 The ratio8 candidate algorithms are an explicit overlay. For example,
 `--candidate-arms all --candidate-benchmarks bfcl_base,acebench_agent` on
 both `prepare` and `run` adds the four legacy candidates, three source-repair
-candidates, and four Goal-composition candidates for those benchmarks. The default candidate scope is
+candidates, and four Goal-composition candidates for those benchmarks. `all`
+retains this original eleven-arm scope; verified-binding candidates require
+their names explicitly. The default candidate scope is
 BFCL base, and the default matrix has no candidate cells. Each candidate uses
 its own native arm identity and ready-manifest validation; this is a runnable
 configuration, not a claim of completed benchmark scores.
@@ -470,6 +472,18 @@ and exact field correction. Source and Progress run only when original Goal
 does not recover. Joint gives Source precedence over Progress and never chains
 regenerations. All variants retain ratio8, B0, one regeneration per decision,
 and the shared 96-generation task limit.
+
+The verified-binding overlay is selected with
+`--candidate-arms goal_verified,pending_verified`. Its distinct
+`c2kv-verified-binding-v1` protocol uses ratio8, the frozen T02 risk artifact,
+Goal's initial allocation and recovery, and the same BFCL base/long-context,
+AppWorld, and ACEBench candidate benchmark axes. `goal_verified` applies a
+source-backed field correction only after original Goal abstains;
+`pending_verified` also retains the original Pending STOP review. The
+deterministic proof guard accepts only fields supported by an observed receipt
+and adds no regeneration. The v4 delivery profile and ready manifest record
+`proof_registry_version`; older profiles, arm IDs, and result schemas retain
+their original meaning. No benchmark result is implied by selecting these arms.
 
 Pending distinguishes lookup receipts from execution completion. Source admits
 whole producer/result groups, preserves deferred consumer chains until actual

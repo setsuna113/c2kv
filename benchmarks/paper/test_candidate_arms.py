@@ -9,7 +9,8 @@ import pytest
 from benchmarks.arms import get_arm
 from benchmarks.paper import c1, runner
 from benchmarks.paper.candidate_matrix import (
-    GOAL_VARIANTS, REPAIR_VARIANTS, VARIANT_TO_ARM, parse_candidate_arms,
+    GOAL_VARIANTS, LEGACY_VARIANTS, REPAIR_VARIANTS, VERIFIED_VARIANTS,
+    VARIANT_TO_ARM, parse_candidate_arms,
     with_candidate_methods,
 )
 
@@ -20,10 +21,12 @@ def test_candidate_matrix_defaults_to_bfcl_base_and_explicitly_adds_acebench(tmp
     assert with_candidate_methods(original, ()) is original
     assert not any(row["arm"] in VARIANT_TO_ARM.values() for row in runner.cells(original))
 
+    assert parse_candidate_arms("all") == LEGACY_VARIANTS
     augmented = with_candidate_methods(original, parse_candidate_arms("all"))
     assert original["methods"] != augmented["methods"]
-    assert len(runner.cells(augmented)) == len(runner.cells(original)) + len(VARIANT_TO_ARM)
-    for variant, arm in VARIANT_TO_ARM.items():
+    assert len(runner.cells(augmented)) == len(runner.cells(original)) + len(LEGACY_VARIANTS)
+    for variant in LEGACY_VARIANTS:
+        arm = VARIANT_TO_ARM[variant]
         rows = [row for row in runner.cells(augmented) if row["arm"] == arm]
         assert len(rows) == 1
         assert rows[0]["cell_id"] == f"bfcl_base__{arm}"
@@ -38,7 +41,7 @@ def test_candidate_matrix_defaults_to_bfcl_base_and_explicitly_adds_acebench(tmp
     ace = with_candidate_methods(original, parse_candidate_arms("all"),
                                  ("bfcl_base", "acebench_agent"))
     ace_rows = [row for row in runner.cells(ace) if row["arm"] in VARIANT_TO_ARM.values()]
-    assert len(ace_rows) == 2 * len(VARIANT_TO_ARM)
+    assert len(ace_rows) == 2 * len(LEGACY_VARIANTS)
     assert {row["benchmark"] for row in ace_rows} == {"bfcl_base", "acebench_agent"}
     assert all(row["ratio"] == 8 for row in ace_rows)
     ace_plan, _ = runner.prepare(ace, tmp_path / "ace-paper", tmp_path / "sglang")
@@ -55,6 +58,31 @@ def test_candidate_matrix_defaults_to_bfcl_base_and_explicitly_adds_acebench(tmp
         assert goal and goal[0]["benchmarks"] == ["bfcl_long_context", "appworld"]
     with pytest.raises(ValueError, match="subset"):
         with_candidate_methods(original, ("static_t02",), ("toolsandbox",))
+
+
+def test_verified_arms_require_named_opt_in_and_support_bfcl_appworld_ace(tmp_path):
+    original = json.loads(runner.DEFAULT_CONFIG.read_text())
+    assert not set(VERIFIED_VARIANTS) & set(parse_candidate_arms("all"))
+    selected = parse_candidate_arms("goal_verified,pending_verified")
+    assert selected == VERIFIED_VARIANTS
+    augmented = with_candidate_methods(
+        original, selected,
+        ("bfcl_base", "bfcl_long_context", "appworld", "acebench_agent"),
+    )
+    rows = [row for row in runner.cells(augmented)
+            if row["arm"] in {VARIANT_TO_ARM[v] for v in VERIFIED_VARIANTS}]
+    assert len(rows) == 8
+    assert {row["benchmark"] for row in rows} == {
+        "bfcl_base", "bfcl_long_context", "appworld", "acebench_agent"}
+    assert all(row["ratio"] == 8 for row in rows)
+    assert not any(row["arm"] in {VARIANT_TO_ARM[v] for v in VERIFIED_VARIANTS}
+                   for row in runner.cells(original))
+    plan, _ = runner.prepare(augmented, tmp_path / "verified", tmp_path / "sglang")
+    assert {row["cell_id"] for row in plan if row["arm"] in {
+        VARIANT_TO_ARM[v] for v in VERIFIED_VARIANTS}} == {
+        f"{benchmark}__{VARIANT_TO_ARM[variant]}"
+        for benchmark in ("bfcl_base", "bfcl_long_context", "appworld", "acebench_agent")
+        for variant in VERIFIED_VARIANTS}
 
 
 @pytest.mark.parametrize("variant,arm", [
@@ -92,14 +120,31 @@ def test_candidate_delivery_uses_ratio8_and_bound_artifact(tmp_path, monkeypatch
         controller, profile = delivery.build_profile(args)
         assert controller == {"view_mode": "native_s0", "candidate_algorithm": {
             "variant": variant, "risk_artifact": {"artifact": "t02", "bound": True},
-            "risk_threshold": 0.5}}
+            "risk_threshold": 0.5,
+            **({"proof_registry_version": "verified-binding-rules-v1"}
+               if variant in VERIFIED_VARIANTS else {})}}
         assert profile["candidate_algorithm"] == variant
-        assert profile["schema"] == ("c2kv-candidate-delivery-profile-v3"
+        assert profile["schema"] == ("c2kv-candidate-delivery-profile-v4"
+                                     if variant in VERIFIED_VARIANTS else
+                                     "c2kv-candidate-delivery-profile-v3"
                                      if variant in GOAL_VARIANTS else
                                      "c2kv-candidate-delivery-profile-v1")
-        assert profile["selection_protocol"] == ("c2kv-goal-composition-v1"
+        assert profile["selection_protocol"] == ("c2kv-verified-binding-v1"
+                                                  if variant in VERIFIED_VARIANTS else
+                                                  "c2kv-goal-composition-v1"
                                                   if variant in GOAL_VARIANTS else
                                                   "candidate_algorithm_v1")
+        if variant in VERIFIED_VARIANTS:
+            assert controller["candidate_algorithm"]["proof_registry_version"] == "verified-binding-rules-v1"
+            assert profile["proof_registry_version"] == "verified-binding-rules-v1"
+            without_proof = copy.deepcopy(controller)
+            del without_proof["candidate_algorithm"]["proof_registry_version"]
+            assert profile["controller_sha256"] != hashlib.sha256(
+                json.dumps(without_proof, sort_keys=True).encode("utf-8")
+            ).hexdigest()
+        else:
+            assert "proof_registry_version" not in controller["candidate_algorithm"]
+            assert "proof_registry_version" not in profile
         assert profile["selector_artifact_binding"]["checkpoint"] == str(checkpoint)
         assert profile["ratio"] == 8
         assert profile["automatic_reruns"] == 0
@@ -241,7 +286,7 @@ def test_repair_acceptance_does_not_require_t02_scores(tmp_path):
         "request_contract")["required"].values())
 
 
-@pytest.mark.parametrize("variant", GOAL_VARIANTS)
+@pytest.mark.parametrize("variant", GOAL_VARIANTS + VERIFIED_VARIANTS)
 def test_goal_acceptance_requires_frozen_risk_and_distinct_version(tmp_path, variant):
     delivery = c1.load_delivery()
     shard = tmp_path / "server"
@@ -249,7 +294,8 @@ def test_goal_acceptance_requires_frozen_risk_and_distinct_version(tmp_path, var
     record = {
         "ratio": 8,
         "exact_recovery": {
-            "version": "c2kv-goal-composition-v1", "variant": variant,
+            "version": ("c2kv-verified-binding-v1" if variant in VERIFIED_VARIANTS
+                        else "c2kv-goal-composition-v1"), "variant": variant,
             "status": "keep",
             "selection": {"selector": "risk", "score_semantics": "current_turn_failure_risk",
                           "available": True, "score": 0.2}},

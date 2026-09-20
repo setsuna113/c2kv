@@ -12,7 +12,10 @@ import time
 from collections.abc import Mapping
 
 from . import c1_appworld
-from .candidate_matrix import ARM_TO_VARIANT, GOAL_VARIANTS, REPAIR_VARIANTS
+from .candidate_matrix import ARM_TO_VARIANT, GOAL_VARIANTS, REPAIR_VARIANTS, VERIFIED_VARIANTS
+from experiments.history_system.candidate_algorithms import (
+    PROOF_REGISTRY_VERSION, VERIFIED_VERSION,
+)
 from .process_lifecycle import run_owned
 
 
@@ -113,12 +116,17 @@ def validate_ready_manifest(config, benchmark, task, ready_path, controller_path
                             and candidate.get("variant") == variant
                             and candidate.get("risk_threshold") == 0.5
                             and isinstance(artifact, Mapping)
-                            and artifact.get("model_kind") == "c1_risk_logistic")
-            version = ("c2kv-goal-composition-v1" if variant in GOAL_VARIANTS
+                            and artifact.get("model_kind") == "c1_risk_logistic"
+                            and (variant not in VERIFIED_VARIANTS
+                                 or candidate.get("proof_registry_version") == PROOF_REGISTRY_VERSION))
+            version = (VERIFIED_VERSION if variant in VERIFIED_VARIANTS else
+                       "c2kv-goal-composition-v1" if variant in GOAL_VARIANTS
                        else "c2kv-paper-candidates-v1")
         if (not valid_config or not isinstance(loaded_candidate, Mapping)
                 or loaded_candidate.get("variant") != variant
                 or loaded_candidate.get("stable_call_ids") is not True
+                or (variant in VERIFIED_VARIANTS
+                    and loaded_candidate.get("proof_registry_version") != PROOF_REGISTRY_VERSION)
                 or route.get("baseline_identity") != version + ":" + variant
                 or route.get("recovery_enabled") is not True
                 or route.get("max_generations_per_decision") != 2):

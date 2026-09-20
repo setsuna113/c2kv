@@ -176,7 +176,10 @@ class CandidateRecoveryController(EventNativeRecoveryController):
 
 
 def wrap_with_candidate_recovery(base, config):
-    from . import GOAL_VARIANTS, REPAIR_VARIANTS
+    from . import GOAL_VARIANTS, REPAIR_VARIANTS, VERIFIED_VARIANTS
+    if config.get("variant") in VERIFIED_VARIANTS:
+        from .verified_controller import VerifiedBindingController
+        return VerifiedBindingController(base, config)
     if config.get("variant") in GOAL_VARIANTS:
         from .goal_controller import GoalCompositionController
         return GoalCompositionController(base, config)

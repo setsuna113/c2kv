@@ -439,6 +439,22 @@ ARMS: Dict[str, Arm] = {
             description="Ratio-8 Goal backbone with pending, source and progress review",
         ),
         Arm(
+            name="c2kv_goal_verified_r8",
+            compress_history=True,
+            ratio=8,
+            query_projection="base",
+            native_controller="candidate_goal_verified",
+            description="Ratio-8 Goal backbone with verified-field binding repair",
+        ),
+        Arm(
+            name="c2kv_pending_verified_r8",
+            compress_history=True,
+            ratio=8,
+            query_projection="base",
+            native_controller="candidate_pending_verified",
+            description="Ratio-8 Goal Pending review with verified-field binding repair",
+        ),
+        Arm(
             name="hiagent",
             compress_history=False,
             text_policy="hiagent",

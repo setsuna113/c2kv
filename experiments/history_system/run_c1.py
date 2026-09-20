@@ -550,7 +550,7 @@ def summarize_task(benchmark: str, task: str, task_out: Path, official: Mapping[
         decision for decision in decisions
         if decision.get("version") in {
             "c2kv-paper-candidates-v1", "c2kv-source-repair-v1",
-            "c2kv-goal-composition-v1"}
+            "c2kv-goal-composition-v1", "c2kv-verified-binding-v1"}
     ]
     candidate_traces = [
         trace for trace in traces
@@ -873,7 +873,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--candidate-algorithm",
         choices=("static_t02", "turn_c1", "goal_rescue", "dependency_first",
                  "request_contract", "argument_binding", "no_progress",
-                 "goal_pending", "goal_source", "goal_progress", "goal_joint"),
+                 "goal_pending", "goal_source", "goal_progress", "goal_joint",
+                 "goal_verified", "pending_verified"),
         default=None,
     )
     parser.add_argument("--selector-artifact", type=Path,

@@ -8,7 +8,9 @@ from unittest import mock
 import pytest
 
 from benchmarks.paper import native_extra
-from benchmarks.paper.candidate_matrix import GOAL_VARIANTS, REPAIR_VARIANTS, VARIANT_TO_ARM
+from benchmarks.paper.candidate_matrix import (
+    GOAL_VARIANTS, REPAIR_VARIANTS, VERIFIED_VARIANTS, VARIANT_TO_ARM,
+)
 
 
 def _config(tmp_path):
@@ -223,7 +225,9 @@ def test_ready_manifest_binds_loaded_controller_and_candidate_variant(
     controller_config = (
         {"candidate_algorithm": {"variant": variant}} if variant in REPAIR_VARIANTS else
         {"candidate_algorithm": {"variant": variant, "risk_threshold": 0.5,
-                                 "risk_artifact": {"model_kind": "c1_risk_logistic"}}} if variant else
+                                 "risk_artifact": {"model_kind": "c1_risk_logistic"},
+                                 **({"proof_registry_version": "verified-binding-rules-v1"}
+                                    if variant in VERIFIED_VARIANTS else {})}} if variant else
         {"post_draft_recovery": {"gate": "prefill_linear_head"},
          "d3_hybrid_recovery": True} if detector == "d3_hybrid" else
         {"gp_experiments": {"set_selector": "risk", "selector_artifact": {
@@ -232,7 +236,7 @@ def test_ready_manifest_binds_loaded_controller_and_candidate_variant(
     route = ({"recovery_enabled": False, "max_generations_per_decision": 1}
              if arm == "c2kv_native_r4" else
              {"recovery_enabled": True, "max_generations_per_decision": 2,
-              "baseline_identity": f"{'c2kv-source-repair-v1' if variant in REPAIR_VARIANTS else 'c2kv-goal-composition-v1' if variant in GOAL_VARIANTS else 'c2kv-paper-candidates-v1'}:{variant}"}
+              "baseline_identity": f"{'c2kv-source-repair-v1' if variant in REPAIR_VARIANTS else 'c2kv-verified-binding-v1' if variant in VERIFIED_VARIANTS else 'c2kv-goal-composition-v1' if variant in GOAL_VARIANTS else 'c2kv-paper-candidates-v1'}:{variant}"}
              if variant else {})
     manifest = {
         "schema": "a-event-native-server-v1", "status": "ready",
@@ -249,10 +253,20 @@ def test_ready_manifest_binds_loaded_controller_and_candidate_variant(
             "sha256": hashlib.sha256(controller.read_bytes()).hexdigest(),
         }
     if variant:
-        manifest["candidate_algorithm"] = {"variant": variant, "stable_call_ids": True}
+        manifest["candidate_algorithm"] = {
+            "variant": variant, "stable_call_ids": True,
+            **({"proof_registry_version": "verified-binding-rules-v1"}
+               if variant in VERIFIED_VARIANTS else {}),
+        }
     ready = tmp_path / "ready.json"
     ready.write_text(json.dumps(manifest), encoding="utf-8")
     native_extra.validate_ready_manifest(config, "acebench_agent", "task_1", ready, controller)
+    if variant in VERIFIED_VARIANTS:
+        manifest["candidate_algorithm"]["proof_registry_version"] = "stale-proof-registry"
+        ready.write_text(json.dumps(manifest), encoding="utf-8")
+        with pytest.raises(RuntimeError, match="candidate controller identity"):
+            native_extra.validate_ready_manifest(config, "acebench_agent", "task_1", ready, controller)
+        manifest["candidate_algorithm"]["proof_registry_version"] = "verified-binding-rules-v1"
     if arm == "c2kv_c1_t02_r4":
         from benchmarks.toolmemory import parse_tool_memory_spec
         config["tool_memory"] = "t0:r8"
