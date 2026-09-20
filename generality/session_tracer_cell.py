@@ -43,11 +43,13 @@ try:
     from .bfcl_results import collect_bfcl_results
     from .completion_contract import write_cell_status
     from .process_lifecycle import defer_interrupts, interruptible, run_owned_worker
+    from .tau2_harness import completed_tau2_task, run_tau2_task
     from .upstream_liveness import UpstreamLiveness, UpstreamUnavailable
 except ImportError:  # Direct file launch on ascend03.
     from bfcl_results import collect_bfcl_results
     from completion_contract import write_cell_status
     from process_lifecycle import defer_interrupts, interruptible, run_owned_worker
+    from tau2_harness import completed_tau2_task, run_tau2_task
     from upstream_liveness import UpstreamLiveness, UpstreamUnavailable
 
 try:
@@ -101,6 +103,20 @@ def bind_appworld_task(payload, task_id, step):
     normalized["c2kv_eval_context"] = {
         "benchmark": "acon_appworld", "task_id": task_id,
         "user_turn": 0, "step": step, "attempt": 0,
+    }
+    return normalized
+
+
+def bind_tau2_task(payload, task_id, step):
+    """Bind an ordinary tau2 agent request to its server-owned task."""
+    if payload.get("c2kv_eval_context") is not None:
+        raise ValueError("tau2 task identity is server-owned")
+    normalized = dict(payload)
+    user_turn = max(0, sum(message.get("role") == "user" for message in
+                           payload.get("messages", []) if isinstance(message, dict)) - 1)
+    normalized["c2kv_eval_context"] = {
+        "benchmark": "tau2", "task_id": task_id,
+        "user_turn": user_turn, "step": step, "attempt": 0,
     }
     return normalized
 
@@ -524,8 +540,8 @@ class SessionTracerTask:
 
 def run_server(cell, task_ids, port, out_dir):
     """One controller server per batch, mirroring the frozen API contract."""
-    if cell["benchmark"] == "acon_appworld" and len(task_ids) != 1:
-        raise ValueError("AppWorld transport requires one frozen task per server")
+    if cell["benchmark"] in {"acon_appworld", "tau2"} and len(task_ids) != 1:
+        raise ValueError("Single-task transport requires one frozen task per server")
     import uuid
     from transformers import AutoTokenizer
     tokenizer = AutoTokenizer.from_pretrained(cell["checkpoint"])
@@ -640,6 +656,14 @@ def run_server(cell, task_ids, port, out_dir):
                     self._json(400, {"error": {"type": "task_identity_invalid",
                                                "message": str(error)}})
                     return
+            elif cell["benchmark"] == "tau2":
+                task_id = task_ids[0]
+                try:
+                    payload = bind_tau2_task(payload, task_id, tasks[task_id].decisions)
+                except ValueError as error:
+                    self._json(400, {"error": {"type": "task_identity_invalid",
+                                               "message": str(error)}})
+                    return
             else:
                 ctx = payload.get("c2kv_eval_context") or {}
                 task_id = ctx.get("task_id")
@@ -715,6 +739,10 @@ def appworld_worker_env(cell):
 def completed_task_ids(cell_dir: Path, benchmark: str, expected: list[str]) -> set[str]:
     if benchmark == "bfcl":
         return set(collect_bfcl_results(cell_dir, expected, fc_model=True)["valid_task_ids"])
+    if benchmark == "tau2":
+        return {task_id for task_id in expected if any(
+            completed_tau2_task(path, task_id) for path in
+            (cell_dir / "batches").glob(f"*/tau2_worker/{task_id}"))}
     completed = set()
     for task_id in expected:
         for path in (cell_dir / "batches").glob(
@@ -758,7 +786,7 @@ def main(argv=None) -> int:
     task_ids = expected_ids
     if args.max_tasks is not None:
         task_ids = task_ids[: args.max_tasks]
-    batch_size = 1 if cell["benchmark"] == "acon_appworld" else args.batch
+    batch_size = 1 if cell["benchmark"] in {"acon_appworld", "tau2"} else args.batch
     stopped_upstream = False
     for i in range(0, len(task_ids), batch_size):
         batch = task_ids[i:i + batch_size]
@@ -793,6 +821,14 @@ def main(argv=None) -> int:
                                           stdout=log, stderr=subprocess.STDOUT,
                                           stdin=subprocess.DEVNULL,
                                           monitor=UpstreamLiveness(cell["sglang_backend_url"]))
+            elif cell["benchmark"] == "tau2":
+                task_id = batch[0]
+                receipt = run_tau2_task(
+                    cell, task_id, f"http://127.0.0.1:{args.port_base}",
+                    cell["sglang_backend_url"], out / "tau2_worker" / task_id)
+                rc = 0 if receipt["status"] == "completed" else 1
+                if rc:
+                    failed_tasks.append(task_id)
             else:
                 # Ordinary ACON requests have no explicit task context. Bind
                 # one worker to one server-owned task and keep its own output.

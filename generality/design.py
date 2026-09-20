@@ -41,6 +41,7 @@ BENCHMARKS = {
     "bfcl_base": {"benchmark": "bfcl", "category": "multi_turn_base", "full_n": 200},
     "bfcl_long_context": {"benchmark": "bfcl", "category": "multi_turn_long_context", "full_n": 200},
     "appworld": {"benchmark": "acon_appworld", "split": "test_normal", "full_n": 168},
+    "tau2": {"benchmark": "tau2", "task_set": "airline", "split": "base", "full_n": 50},
 }
 
 # Detector-development groups excluded from the BFCL held-out main table
@@ -64,6 +65,8 @@ TASK_TIMEOUT_SECONDS = 10800
 T02_RISK_ARTIFACT_SHA256 = "18a11f73aa1f7d4b0add86eed66ae9e5e129ea4bdfbe0dfad23faf4f7d2fb4ab"
 THRESHOLD_GRID = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
 FALLBACK_THRESHOLD = 0.5
+TAU2_T02_THRESHOLDS = {"c2kv": 0.6, "h2o": 0.3,
+                       "snapkv": 0.3, "pyramidkv": 0.3}
 
 # NPU assets (verified 2026-09-18 on ascend03)
 ENGINE_MODEL_PATH = (

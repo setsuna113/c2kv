@@ -3,7 +3,8 @@
 Phase 3 of the generality handoff: enumerate official task IDs, build the
 full/held-out BFCL cohorts from the frozen detector-development groups, write
 budgets_resolved.json, matrix.csv, resolved_config.json and one cell.json per
-closed-loop cell. Thresholds start as pending_calibration everywhere.
+closed-loop cell. Tau2 T uses the frozen T02 thresholds; other tracer cells
+start as pending_calibration.
 """
 from __future__ import annotations
 
@@ -13,6 +14,14 @@ import os
 import subprocess
 from pathlib import Path
 
+try:
+    from .design import TAU2_T02_THRESHOLDS
+except ImportError:  # Direct file launch on ascend03.
+    try:
+        from generality.design import TAU2_T02_THRESHOLDS
+    except ImportError:
+        from design import TAU2_T02_THRESHOLDS
+
 GENERATION_ROOT = Path("/home/liuyancheng/c2kv-generality-20260918")
 RESULTS = GENERATION_ROOT / "results"
 CONFIG = GENERATION_ROOT / "config"
@@ -20,7 +29,7 @@ CONFIG = GENERATION_ROOT / "config"
 BACKENDS = ("c2kv", "h2o", "snapkv", "pyramidkv")
 WORKING_POINTS = ("K0", "K2")
 CONDITIONS = ("compression_full_budget", "tracer_history", "recovery_off_same_initial")
-BENCH_KEYS = ("bfcl_base", "bfcl_long_context", "appworld")
+BENCH_KEYS = ("bfcl_base", "bfcl_long_context", "appworld", "tau2")
 # ToolSandbox/ACEBench are opt-in planning scaffolds.  Generated cells inherit
 # the current K/R/B contract; their split and R_max applicability still need
 # a separate frozen benchmark protocol before production execution.
@@ -29,6 +38,10 @@ TS_SCENARIO_NAMES = "/home/liuyancheng/c2kv-generality-20260918/config/ts_scenar
 ACE_TASK_IDS = "/home/liuyancheng/c2kv-generality-20260918/config/ace_agent_task_ids.json"
 TS_REPO = "/home/liuyancheng/benchmarks/ToolSandbox"
 ACE_REPO = "/home/liuyancheng/c2kv-eval-20260906/deps/acebench"
+TAU2_REPO = str(Path.home() / "benchmarks" / "tau2")
+TAU2_PYTHON = str(Path.home() / "envs" / "bench312" / "bin" / "python")
+TAU2_TASK_SET = "airline"
+TAU2_SPLIT = "base"
 
 TRAIN_SOURCE_GROUPS = {13, 16, 37, 39, 51, 55, 56, 66, 81, 90, 101, 118, 126, 134, 142, 181, 182}
 CALIBRATION_GROUPS = {3, 25, 43, 59, 68, 75, 129, 186, 188}
@@ -63,6 +76,24 @@ def appworld_task_ids() -> list[str]:
     return json.loads(out.stdout.strip().splitlines()[-1])
 
 
+def tau2_task_ids() -> list[str]:
+    """Resolve the official tau2 task cohort with its installed interpreter."""
+    code = (
+        "import json; from tau2.run import get_tasks; "
+        f"print(json.dumps([str(task.id) for task in get_tasks({TAU2_TASK_SET!r}, {TAU2_SPLIT!r})]))"
+    )
+    out = subprocess.run(
+        [TAU2_PYTHON, "-c", code], cwd=TAU2_REPO,
+        capture_output=True, text=True, check=True,
+    )
+    ids = json.loads(out.stdout.strip().splitlines()[-1])
+    if (not isinstance(ids, list) or not ids or
+            any(not isinstance(task_id, str) or not task_id for task_id in ids) or
+            len(ids) != len(set(ids))):
+        raise ValueError("Official tau2 task selection must contain unique nonempty IDs")
+    return ids
+
+
 def build_manifests(benches=BENCH_KEYS) -> dict:
     selected = set(benches)
     manifests = {}
@@ -83,6 +114,14 @@ def build_manifests(benches=BENCH_KEYS) -> dict:
         ids = appworld_task_ids()
         manifests["appworld"] = {
             "benchmark": "acon_appworld", "split": "test_normal",
+            "full": ids, "heldout": ids, "excluded": [],
+            "n_full": len(ids), "n_heldout": len(ids),
+        }
+    if "tau2" in selected:
+        ids = tau2_task_ids()
+        manifests["tau2"] = {
+            "benchmark": "tau2", "task_set": TAU2_TASK_SET, "split": TAU2_SPLIT,
+            "benchmark_dir": TAU2_REPO,
             "full": ids, "heldout": ids, "excluded": [],
             "n_full": len(ids), "n_heldout": len(ids),
         }
@@ -166,6 +205,7 @@ def cell_config(cell_id, backend, wp, condition, bench, manifest, bud) -> dict:
         "python_sgl": "/home/liuyancheng/envs/sgl/bin/python",
         "python_bench": ("/home/liuyancheng/envs/benchts/bin/python"
                          if benchmark == "toolsandbox" else
+                         TAU2_PYTHON if benchmark == "tau2" else
                          "/home/liuyancheng/envs/bench/bin/python"),
         "python_appworld": "/home/liuyancheng/c2kv-integration-followup-20260905/deps/venv-appworld/bin/python",
         "benchmark_dir": manifest.get("benchmark_dir",
@@ -174,6 +214,14 @@ def cell_config(cell_id, backend, wp, condition, bench, manifest, bud) -> dict:
         "appworld_root": "/home/liuyancheng/c2kv-generality-20260918/archives/appworld_root_link",
         "sglang_backend_url": None,  # bound at launch by the scheduler
     }
+    if benchmark == "tau2":
+        cell.update(python_tau2=TAU2_PYTHON,
+                    tau2_task_set=manifest["task_set"],
+                    tau2_split=manifest["split"],
+                    upstream_model_name="gen-c1000")
+        if condition == "tracer_history":
+            cell["threshold"] = TAU2_T02_THRESHOLDS[backend]
+            cell["threshold_status"] = "frozen_t02"
     return cell
 
 
@@ -248,7 +296,7 @@ def main(argv=None) -> int:
                         "backend": backend, "budget": wp, "condition": condition,
                         "budget_bytes": json.dumps(cell["budget_bytes"]),
                         "n_expected": str(len(cell["task_ids"])),
-                        "threshold_status": "pending_calibration",
+                        "threshold_status": cell["threshold_status"],
                     }
 
     # Validate every output before writing anything.  Existing scored cells

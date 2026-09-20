@@ -46,6 +46,41 @@ def _cell_path(cellplan, bench="bfcl_base"):
 
 def test_import_and_default_plan_do_not_require_optional_manifests(cellplan):
     assert cellplan.main([]) == 0
+
+
+def test_tau2_adds_official_ids_to_all_tcr_conditions_without_changing_old_cells(
+    cellplan, monkeypatch,
+):
+    cellplan.main([])
+    old = _cell_path(cellplan).read_bytes()
+    monkeypatch.setattr(cellplan, "BENCH_KEYS", ("bfcl_base", "tau2"))
+    monkeypatch.setattr(cellplan, "BACKENDS", ("c2kv", "h2o", "snapkv", "pyramidkv"))
+    monkeypatch.setattr(cellplan, "WORKING_POINTS", ("K0", "K2"))
+    monkeypatch.setattr(cellplan, "CONDITIONS", (
+        "compression_full_budget", "tracer_history", "recovery_off_same_initial"))
+    monkeypatch.setattr(cellplan, "tau2_task_ids", lambda: ["0", "1"])
+
+    assert cellplan.main(["--benches", "tau2"]) == 0
+    manifest = json.loads((cellplan.GENERATION_ROOT / "manifests" / "tau2.json").read_text())
+    assert manifest["full"] == ["0", "1"]
+    assert manifest["task_set"] == "airline" and manifest["split"] == "base"
+    for backend in cellplan.BACKENDS:
+        for wp in cellplan.WORKING_POINTS:
+            for condition in cellplan.CONDITIONS:
+                cell_path = (cellplan.RESULTS / "closed_loop" / "tau2" / backend /
+                             wp / condition / "cell.json")
+                cell = json.loads(cell_path.read_text())
+                assert cell["benchmark"] == "tau2"
+                assert cell["task_ids"] == ["0", "1"]
+                assert cell["budget_tokens"] == cellplan.budgets()["working_points"][wp][
+                    "kv_token_equivalents"]
+                assert cell["python_tau2"] == cellplan.TAU2_PYTHON
+                if condition == "tracer_history":
+                    assert cell["threshold"] == (0.6 if backend == "c2kv" else 0.3)
+                    assert cell["threshold_status"] == "frozen_t02"
+                else:
+                    assert cell["threshold"] is None
+    assert _cell_path(cellplan).read_bytes() == old
     assert _cell_path(cellplan).exists()
     assert not _cell_path(cellplan, "toolsandbox").exists()
     assert cellplan.main([]) == 0

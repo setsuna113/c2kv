@@ -28,8 +28,10 @@ from urllib.parse import urlparse
 
 try:
     from .completion_contract import status_matches_manifest
+    from .design import TAU2_T02_THRESHOLDS
 except ImportError:
     from completion_contract import status_matches_manifest
+    from design import TAU2_T02_THRESHOLDS
 
 GENERATION_ROOT = Path("/home/liuyancheng/c2kv-generality-20260918")
 SRC = GENERATION_ROOT / "src"
@@ -76,10 +78,10 @@ def driver_for(backend: str, condition: str) -> str:
 
 
 SUPPORTED_BENCHMARKS = {
-    "c2kv": {"bfcl_base", "bfcl_long_context", "appworld"},
+    "c2kv": {"bfcl_base", "bfcl_long_context", "appworld", "tau2"},
     "historykv_off": {"bfcl_base", "bfcl_long_context", "appworld",
-                      "toolsandbox", "acebench"},
-    "session_tracer": {"bfcl_base", "bfcl_long_context", "appworld"},
+                      "toolsandbox", "acebench", "tau2"},
+    "session_tracer": {"bfcl_base", "bfcl_long_context", "appworld", "tau2"},
 }
 
 
@@ -152,6 +154,9 @@ def cells_ready(cell: dict) -> bool:
     # the same scheduler once the code path is installed.
     if cell["condition"] != "tracer_history":
         return True
+    if cell.get("benchmark_key") == "tau2":
+        return (cell.get("threshold") == TAU2_T02_THRESHOLDS[cell["backend"]]
+                and cell.get("threshold_status") == "frozen_t02")
     _, receipt = calibration_receipt(cell)
     return calibration_is_ready(cell, receipt)
 
@@ -176,7 +181,7 @@ def enumerate_cells() -> list[dict]:
     return rows
 
 
-BENCH_ORDER = {"appworld": 0, "bfcl_long_context": 1, "bfcl_base": 2}
+BENCH_ORDER = {"appworld": 0, "bfcl_long_context": 1, "bfcl_base": 2, "tau2": 3}
 COND_ORDER = {"tracer_history": 0, "compression_full_budget": 1, "recovery_off_same_initial": 2}
 # Preserve the existing priority choice from the canonical scheduler entry.
 BACKEND_ORDER = {"c2kv": 0, "h2o": 1, "snapkv": 2, "pyramidkv": 9}
@@ -212,13 +217,17 @@ def launch_cell(cell: dict, card: int, slot: int) -> subprocess.Popen:
     sources = selected_sources()
     cell["source_checkouts"] = sources
     if cell["condition"] == "tracer_history":
-        receipt_path, receipt = calibration_receipt(cell)
-        if not calibration_is_ready(cell, receipt):
-            raise RuntimeError(
-                f"tracer cell requires ready calibration receipt: {receipt_path}")
-        cell["threshold"] = receipt["threshold"]
-        cell["threshold_status"] = "calibrated"
-        cell["calibration_receipt"] = str(receipt_path)
+        if cell.get("benchmark_key") == "tau2":
+            if not cells_ready(cell):
+                raise RuntimeError("tau2 tracer cell requires its frozen T02 threshold")
+        else:
+            receipt_path, receipt = calibration_receipt(cell)
+            if not calibration_is_ready(cell, receipt):
+                raise RuntimeError(
+                    f"tracer cell requires ready calibration receipt: {receipt_path}")
+            cell["threshold"] = receipt["threshold"]
+            cell["threshold_status"] = "calibrated"
+            cell["calibration_receipt"] = str(receipt_path)
         # Recovery owns this card exclusively. Keep BF16 retrieval on the same
         # accelerator; CPU BF16 inference exceeds AppWorld's request timeout.
         cell["embedding_device"] = "npu:0"

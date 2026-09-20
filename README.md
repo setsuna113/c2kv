@@ -215,6 +215,45 @@ The formal matrix must not start until the corresponding `threshold.json`
 has `ready_for_matrix: true`. The calibration smoke intentionally exits with
 status 2 because it never authorizes a matrix run.
 
+## tau2 closed-loop matrix
+
+`python -m generality.cellplan --benches tau2` freezes the official
+`airline/base` task IDs into the same backend × working-point × condition
+matrix as BFCL and AppWorld. Each of C2KV, H2O, SnapKV and PyramidKV has
+`K0`/`K2` cells for `tracer_history` (T), `compression_full_budget` (C),
+and `recovery_off_same_initial` (R). T starts at K and can admit recovery up
+to B=K+R_max; C receives B without detector or recovery; R receives K
+without detector or recovery. The frozen T02 threshold is 0.6 for C2KV and
+0.3 for the other backends. These values live in the tau2 T `cell.json` and
+the scheduler verifies them without loading the historical calibration
+receipts; other benchmarks retain their calibration gate. Tau2 uses the same
+`budgets_resolved.json` as the existing matrix.
+
+The NPU launcher imports `benchmarks.adapters.tau2_adapter` from the shared
+paper checkout (`C2KV_PAPER_SOURCE`). The official tau2 CLI runs one frozen
+task per owned controller session with one trial, then `evaluate-trajs`
+scores its raw trajectory. Agent calls use the C2KV native controller or the
+selected history-KV/Tracer endpoint; tau2's user simulator calls the raw
+`gen-c1000` engine. Use the tau2 installation and interpreter recorded in
+`cell.json` (`tau2_dir`, `python_tau2`). The three driver routes are:
+
+```text
+c2kv × T/C/R                 -> generality.c2kv_cell
+h2o/snapkv/pyramidkv × C/R   -> generality.historykv_cell
+h2o/snapkv/pyramidkv × T     -> generality.session_tracer_cell
+```
+
+The scheduler reads those frozen cells and dispatches them with the same
+calibrated threshold gate as the other benchmarks. Each task keeps an
+`attempts/*/official/{results,updated_results}.json`,
+`tau2_protocol.json`, and a `done.json` only after official scoring and
+terminal checks. C2KV also writes `tau2_score_summary.json`; all routes
+write `cell_status.json`. A bounded diagnostic run may put
+`tau2_max_steps: 8` in a separate smoke cell; that cap is not a full
+benchmark result.
+The task-0 NPU functional-smoke receipts and source hashes are in
+[`validation/tau2_integration_20260920.json`](validation/tau2_integration_20260920.json).
+
 The closed-loop scheduler dispatches all four backend families:
 
 ```text
@@ -223,7 +262,7 @@ h2o/snapkv/pyramidkv compression cells -> historykv_cell.py
 h2o/snapkv/pyramidkv tracer cells      -> session_tracer_cell.py
 ```
 
-At launch time the scheduler reads the frozen receipt from
+For BFCL and AppWorld tracer cells, the scheduler reads the frozen receipt from
 `calibration/<backend>/<working_point>/threshold.json`, copies its numeric
 threshold into `cell_launch.json`, and refuses a tracer cell whose receipt is
 missing or still `calibration_insufficient`. AppWorld uses the official

@@ -49,9 +49,11 @@ except ImportError:  # Direct file launch on ascend03.
 
 try:
     from .process_lifecycle import defer_interrupts, interruptible, stop_owned_group, wait_owned_worker
+    from .tau2_harness import completed_tau2_task, run_tau2_task
     from .upstream_liveness import UpstreamLiveness, UpstreamUnavailable
 except ImportError:  # Direct file launch on ascend03.
     from process_lifecycle import defer_interrupts, interruptible, stop_owned_group, wait_owned_worker
+    from tau2_harness import completed_tau2_task, run_tau2_task
     from upstream_liveness import UpstreamLiveness, UpstreamUnavailable
 
 try:
@@ -326,6 +328,38 @@ def appworld_task_completed(cell_dir: Path, task_id: str) -> bool:
     return False
 
 
+def tau2_task_completed(cell_dir: Path, task_id: str) -> bool:
+    return any(completed_tau2_task(path, task_id) for path in
+               (cell_dir / "batches").glob(f"*/tau2_worker/{task_id}"))
+
+
+def tau2_score_summary(cell: dict) -> dict:
+    cell_dir = Path(cell["cell_dir"])
+    rows = []
+    pending = []
+    for task_id in cell["task_ids"]:
+        scored = None
+        for path in sorted((cell_dir / "batches").glob(
+                f"*/tau2_worker/{task_id}"), reverse=True):
+            if completed_tau2_task(path, task_id):
+                scored = json.loads((path / "done.json").read_text(encoding="utf-8"))
+                break
+        if scored is None:
+            pending.append(task_id)
+        else:
+            rows.append({"task_id": task_id, "semantic_score": scored["semantic_score"],
+                         "termination": scored["termination"],
+                         "score_source": "official_tau2"})
+    return {
+        "schema": "c2kv-tau2-score-summary-v1", "cell_id": cell["cell_id"],
+        "n_total": len(cell["task_ids"]), "n_official_scored": len(rows),
+        "pending_task_ids": pending,
+        "semantic_score": (sum(row["semantic_score"] for row in rows) / len(rows)
+                           if not pending else None),
+        "task_rows": rows,
+    }
+
+
 def cost_finalization(out: Path) -> dict:
     """Keep official task quality separate from the server's persisted costs."""
     final_path = out / "server" / "final.json"
@@ -549,7 +583,16 @@ def run_task(cell: dict, task_ids: list[str], port: int, batch_dirname: str) -> 
             if time.monotonic() > deadline:
                 raise TimeoutError("controller readiness timeout")
             time.sleep(2)
-        if cell["benchmark"] == "acon_appworld":
+        if cell["benchmark"] == "tau2":
+            if len(task_ids) != 1:
+                raise ValueError("tau2 requires one frozen task per controller server")
+            task_id = task_ids[0]
+            receipt = run_tau2_task(
+                cell, task_id, f"http://127.0.0.1:{port}",
+                cell["sglang_backend_url"], out / "tau2_worker" / task_id)
+            if receipt["status"] != "completed":
+                raise RuntimeError(f"official tau2 worker did not score {task_id}")
+        elif cell["benchmark"] == "acon_appworld":
             # AppWorld: one task per worker invocation (event_native_appworld)
             for task_id in task_ids:
                 worker = subprocess.Popen(
@@ -573,7 +616,11 @@ def run_task(cell: dict, task_ids: list[str], port: int, batch_dirname: str) -> 
                                        monitor=upstream_monitor)
             if rc != 0:
                 raise RuntimeError(f"official worker exited rc={rc}")
-        if cell["benchmark"] == "acon_appworld":
+        if cell["benchmark"] == "tau2":
+            healthy = [task_id for task_id in task_ids if completed_tau2_task(
+                out / "tau2_worker" / task_id, task_id)]
+            bad = [task_id for task_id in task_ids if task_id not in healthy]
+        elif cell["benchmark"] == "acon_appworld":
             # AppWorld results are evaluation JSONs, not BFCL result rows;
             # the worker's rc=0 + official_summary.json are the health check
             healthy, bad = task_ids, []
@@ -588,7 +635,14 @@ def run_task(cell: dict, task_ids: list[str], port: int, batch_dirname: str) -> 
         # The official BFCL worker can exit nonzero after writing valid rows.
         # Preserve those outputs so the caller retries only tasks that truly
         # lack a completed official result.
-        if cell["benchmark"] == "bfcl":
+        if cell["benchmark"] == "tau2":
+            healthy = [task_id for task_id in task_ids if completed_tau2_task(
+                out / "tau2_worker" / task_id, task_id)]
+            bad = [task_id for task_id in task_ids if task_id not in healthy]
+            status.update(status="partial" if healthy else "failed", healthy=healthy,
+                          bad=bad, error=f"{type(error).__name__}: {error}",
+                          wall_s=time.monotonic() - started)
+        elif cell["benchmark"] == "bfcl":
             healthy, bad = validate_chunk(out, task_ids)
             if healthy:
                 status.update(
@@ -781,9 +835,9 @@ def main(argv=None) -> int:
     if args.max_tasks is not None:
         task_ids = task_ids[: args.max_tasks]
 
-    # AppWorld: the controller (single_task_harness_api) requires exactly one
-    # frozen task per server instance — chunk size must be 1
-    if cell["benchmark"] == "acon_appworld":
+    # Ordinary OpenAI harness requests carry no task identity. Each server
+    # must therefore own one frozen official task.
+    if cell["benchmark"] in {"acon_appworld", "tau2"}:
         args.chunk = 1
 
     cell_dir = Path(cell["cell_dir"])
@@ -830,6 +884,12 @@ def main(argv=None) -> int:
             chunk = [
                 task_id for task_id in chunk
                 if task_id not in valid_task_ids
+                and attempt_counts.get(task_id, 0) < args.max_attempts_per_task
+            ]
+        elif cell["benchmark"] == "tau2":
+            chunk = [
+                task_id for task_id in chunk
+                if not tau2_task_completed(cell_dir, task_id)
                 and attempt_counts.get(task_id, 0) < args.max_attempts_per_task
             ]
         else:
@@ -880,6 +940,13 @@ def main(argv=None) -> int:
                 counts = {
                     "n_completed": completion["valid_count"],
                     "n_retryable": len(completion["refill_task_ids"]),
+                }
+            elif cell["benchmark"] == "tau2":
+                summary = tau2_score_summary(cell)
+                _write(cell_dir / "tau2_score_summary.json", summary)
+                counts = {
+                    "n_completed": summary["n_official_scored"],
+                    "n_retryable": len(summary["pending_task_ids"]),
                 }
             else:
                 summary = appworld_score_summary(cell)
@@ -950,6 +1017,20 @@ def main(argv=None) -> int:
             "n_total": completion["expected_count"],
             "raw_result_rows": completion["total_rows"],
             "duplicate_result_rows": completion["duplicate_rows"],
+            "finished_at": time.time(),
+        })
+    elif cell["benchmark"] == "tau2":
+        summary = tau2_score_summary(cell)
+        _write(cell_dir / "tau2_score_summary.json", summary)
+        write_cell_status(cell, {
+            "cell_id": cell["cell_id"],
+            "status": "complete" if not summary["pending_task_ids"] else "incomplete",
+            "n_completed": summary["n_official_scored"],
+            "n_retryable": len(summary["pending_task_ids"]),
+            "n_total": len(expected_task_ids),
+            "semantic_score": summary["semantic_score"],
+            "score_denominator": len(expected_task_ids),
+            "score_summary": str(cell_dir / "tau2_score_summary.json"),
             "finished_at": time.time(),
         })
     else:

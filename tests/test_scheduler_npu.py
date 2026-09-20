@@ -107,6 +107,33 @@ def test_unimplemented_extra_benchmark_routes_stay_held(tmp_path, monkeypatch):
         assert not scheduler.cell_blocked(cell(tmp_path, backend="h2o", benchmark=benchmark))
 
 
+@pytest.mark.parametrize("backend,threshold", [
+    ("c2kv", 0.6), ("h2o", 0.3), ("snapkv", 0.3), ("pyramidkv", 0.3),
+])
+def test_tau2_tracer_uses_frozen_threshold_without_calibration(
+        tmp_path, monkeypatch, backend, threshold):
+    task = cell(tmp_path, backend=backend, benchmark="tau2")
+    task.update(condition="tracer_history", threshold=threshold,
+                threshold_status="frozen_t02")
+    monkeypatch.setattr(scheduler, "calibration_receipt", lambda *_:
+                        pytest.fail("tau2 T must not read historical calibration"))
+    monkeypatch.setattr(scheduler, "LOGS", tmp_path / "logs")
+    assert scheduler.cells_ready(task)
+    captured = {}
+    monkeypatch.setattr(scheduler.subprocess, "Popen", lambda command, **kwargs:
+                        captured.update(command=command) or SimpleNamespace(pid=123))
+    scheduler.launch_cell(task, card=1, slot=0)
+    command = captured["command"]
+    manifest = json.loads(Path(command[command.index("--cell") + 1]).read_text())
+    assert manifest["threshold"] == threshold
+    assert manifest["threshold_status"] == "frozen_t02"
+    assert "calibration_receipt" not in manifest
+    wrong = {**task, "threshold": 0.5}
+    assert not scheduler.cells_ready(wrong)
+    with pytest.raises(RuntimeError, match="frozen T02 threshold"):
+        scheduler.launch_cell(wrong, card=1, slot=0)
+
+
 def test_canonical_entry_delegates_and_runs_as_a_script():
     assert entry.main is scheduler.main
     assert entry.BLOCKED_BACKENDS is scheduler.BLOCKED_BACKENDS

@@ -26,11 +26,13 @@ try:
     from .completion_contract import appworld_done_invalidated, write_cell_status
     from .bfcl_results import bfcl_row_is_valid
     from .process_lifecycle import interruptible, run_owned_worker, stop_owned_group
+    from .tau2_harness import completed_tau2_task, run_tau2_task
     from .upstream_liveness import UpstreamLiveness, UpstreamUnavailable
 except ImportError:  # Direct file launch on ascend03.
     from completion_contract import appworld_done_invalidated, write_cell_status
     from bfcl_results import bfcl_row_is_valid
     from process_lifecycle import interruptible, run_owned_worker, stop_owned_group
+    from tau2_harness import completed_tau2_task, run_tau2_task
     from upstream_liveness import UpstreamLiveness, UpstreamUnavailable
 
 GENERATION_ROOT = Path("/home/liuyancheng/c2kv-generality-20260918")
@@ -596,6 +598,10 @@ def main(argv=None) -> int:
                 elif cell["benchmark"] in ("toolsandbox", "acebench"):
                     result = _run_adapter_task(cell, task_id, proxy_port,
                                                cell["benchmark"])
+                elif cell["benchmark"] == "tau2":
+                    result = run_tau2_task(
+                        cell, task_id, f"http://127.0.0.1:{proxy_port}",
+                        upstream, cell_dir / "tasks" / task_id)
                 else:
                     result = run_appworld_task(cell, task_id, proxy_port)
             except UpstreamUnavailable as error:
@@ -620,6 +626,9 @@ def main(argv=None) -> int:
     elif cell["benchmark"] == "appworld":
         completed_ids = [task_id for task_id in expected_ids
                          if appworld_done_healthy(cell_dir / "tasks" / task_id, task_id)]
+    elif cell["benchmark"] == "tau2":
+        completed_ids = [task_id for task_id in expected_ids
+                         if completed_tau2_task(cell_dir / "tasks" / task_id, task_id)]
     else:
         completed_ids = [task_id for task_id in expected_ids
                          if (cell_dir / "tasks" / task_id / "done.json").exists()]
