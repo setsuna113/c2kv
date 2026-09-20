@@ -87,6 +87,51 @@ other BFCL cell. `--run-ids` is an optional scoped run; omit it for the
 complete category. The checkpoint profile must be discoverable
 beside `--checkpoint`, or be passed explicitly with `--checkpoint-profile`.
 
+## CommitKV and AgentKV paper history-KV budgets on NPU
+
+`generality/paper_history_kv_budget.py` forwards to the shared paper checkout's
+`benchmarks.paper.history_kv_client`. The paper config supplies the benchmark
+adapters and NPU paths; use a config whose `checkpoint`, `bench_python`, BFCL,
+ACEBench, AppWorld, and ToolSandbox paths refer to the intended NPU deployment.
+The shared client selects one configured `closed_loop` cell, retaining the
+original `commitkv` or `agentkv` arm and giving the budget its own cell ID and
+output directory. It does not start or stop the already owned NPU engine.
+These arms use the regular SGLang upstream and their shared
+`reference_attention` history-KV path; no `chat_budget` endpoint is needed.
+
+```bash
+PAPER_ROOT=/path/to/shared-paper-checkout
+NPU_ROOT=/path/to/this-npu-checkout
+NPU_CONFIG=/path/to/npu-paper-config.json
+OUT=/path/to/new/commitkv-b768
+
+/home/liuyancheng/envs/bench/bin/python "$NPU_ROOT/generality/paper_history_kv_budget.py" \
+  --paper-root "$PAPER_ROOT" --config "$NPU_CONFIG" \
+  --benchmark bfcl_base --history-kv-budget commitkv=768 \
+  --upstream http://127.0.0.1:36200 --proxy-port 37490 \
+  --out "$OUT" --dry-run
+```
+
+The dry run prints `bfcl_base__commitkv_b768` and the exact shared-paper client
+command without contacting the server or writing output. The same command with
+`agentkv=768` selects AgentKV. Every benchmark in the supplied paper config is
+available through `--benchmark`, including `bfcl_long_context`,
+`acebench_agent`, `appworld`, and `toolsandbox`. Supply `--checkpoint-profile`
+when no compatible profile is discoverable beside the configured checkpoint;
+`--bench-python` can override the config's client interpreter. Remove `--dry-run`
+only when the upstream and proxy port are reserved for this cell. The live run
+records `config.resolved.json`, `client_manifest.json`, `commands.json`, and
+`closed_loop/<cell_id>/started.json`; successful completion records
+`closed_loop/<cell_id>/complete.json`. A partial cell or different budget in the
+same output root requires inspection and a new output root. Full teacher-prefix
+replay is outside this entry point because it violates the methods'
+`exact_generated_prefix` contract.
+This entry point starts only the benchmark/proxy client. Setting
+`C2KV_PAPER_TELEMETRY` in that client does not enable telemetry on an already
+running server. Complete paper aggregation requires the upstream to emit an
+attributable `server_telemetry.jsonl` for this cell; a client run alone is not
+a complete measurement artifact.
+
 The four ratio-8 candidate algorithms are an explicit C2KV BFCL-base path,
 outside the ratio-4 generality matrix. Start from a
 `bfcl_base/c2kv/<working-point>/compression_full_budget/cell.json` source and
