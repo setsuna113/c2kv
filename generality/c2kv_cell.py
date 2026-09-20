@@ -324,8 +324,31 @@ def appworld_task_completed(cell_dir: Path, task_id: str) -> bool:
     return False
 
 
+def cost_finalization(out: Path) -> dict:
+    """Keep official task quality separate from the server's persisted costs."""
+    final_path = out / "server" / "final.json"
+    if not final_path.is_file():
+        return {"status": "unavailable", "reason": "missing_final_receipt"}
+    try:
+        final = json.loads(final_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return {"status": "failed", "reason": "invalid_final_receipt"}
+    if not isinstance(final, dict):
+        return {"status": "failed", "reason": "invalid_final_receipt"}
+    if final.get("cost_summary_error"):
+        return {"status": "failed", "reason": "cost_summary_error",
+                "error": final["cost_summary_error"]}
+    if not isinstance(final.get("cost_summary"), dict) or not final["cost_summary"]:
+        return {"status": "unavailable", "reason": "missing_cost_summary"}
+    return {"status": "valid"}
+
+
 def appworld_method_failure_evidence(out: Path, task_id: str) -> dict | None:
     """Accept only a durable, task-bound capacity failure from our controller."""
+    # A declared capacity failure may precede final.json, but it cannot hide
+    # an invalid final receipt or a persisted cost-summary failure.
+    if cost_finalization(out)["status"] == "failed":
+        return None
     ready_path = out / "server" / "ready.json"
     steps_path = out / "server" / "steps.jsonl"
     try:
@@ -493,8 +516,10 @@ def run_task(cell: dict, task_ids: list[str], port: int, batch_dirname: str) -> 
         # event_native_appworld imports ``adapters.acon_adapter`` from the
         # paper harness.  The controller runtime also has an ``adapters``
         # package, so the harness directory must precede runtime/benchmarks.
+        paper_source = Path(env.get("C2KV_PAPER_SOURCE")
+                            or GENERATION_ROOT / "src" / "paper_harness")
         worker_env["PYTHONPATH"] = os.pathsep.join((
-            "/home/liuyancheng/c2kv-generality-20260918/src/paper_harness/benchmarks",
+            str(paper_source / "benchmarks"),
             str(RUNTIME), str(RUNTIME / "benchmarks"),
             "/home/liuyancheng/baselines/acon/src"))
         worker_env["APPWORLD_ROOT"] = cell.get("appworld_root", "")
@@ -505,6 +530,7 @@ def run_task(cell: dict, task_ids: list[str], port: int, batch_dirname: str) -> 
     status = {"chunk": batch_dirname, "n_tasks": len(task_ids), "status": "started",
               "started_at": started}
     _write(out / "status.json", status)
+    healthy, bad = [], task_ids
     try:
         server = subprocess.Popen(
             server_command(server_cell, task_ids, out, port), cwd=str(RUNTIME), env=env,
@@ -564,12 +590,12 @@ def run_task(cell: dict, task_ids: list[str], port: int, batch_dirname: str) -> 
                     error=f"{type(error).__name__}: {error}",
                     wall_s=time.monotonic() - started,
                 )
-                _write(out / "status.json", status)
-                return status
-        status.update(status="failed", error=f"{type(error).__name__}: {error}",
-                      wall_s=time.monotonic() - started)
-        _write(out / "status.json", status)
-        return status
+            else:
+                status.update(status="failed", error=f"{type(error).__name__}: {error}",
+                              wall_s=time.monotonic() - started)
+        else:
+            status.update(status="failed", error=f"{type(error).__name__}: {error}",
+                          wall_s=time.monotonic() - started)
     finally:
         with defer_interrupts():
             for proc in (worker, server):
@@ -580,7 +606,9 @@ def run_task(cell: dict, task_ids: list[str], port: int, batch_dirname: str) -> 
                 stop_owned_group(proc)
             server_log.close()
             worker_log.close()
-    _write(out / "done.json" if not bad else out / "status.json", status)
+    status["cost_finalization"] = cost_finalization(out)
+    _write(out / "done.json" if not bad and status["cost_finalization"]["status"] == "valid"
+           else out / "status.json", status)
     return status
 
 

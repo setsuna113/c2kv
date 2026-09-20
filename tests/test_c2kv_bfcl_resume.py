@@ -234,6 +234,108 @@ def test_nonzero_worker_exit_preserves_rows_and_retries_only_missing(tmp_path):
     assert status["bad"] == ["task_b"]
 
 
+def test_valid_bfcl_row_preserved_when_server_cost_finalization_fails(tmp_path):
+    driver = _load_driver()
+    cell = {"benchmark": "bfcl", "cell_dir": str(tmp_path),
+            "caps": {"task_timeout": 1}}
+    out = tmp_path / "batches" / "attempt"
+
+    class FakeProcess:
+        def __init__(self, pid):
+            self.pid = pid
+
+        def poll(self):
+            return None
+
+        def wait(self, timeout=None):
+            return 0
+
+    server = FakeProcess(9001)
+    worker = FakeProcess(9002)
+    calls = 0
+
+    def popen(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            (out / "server").mkdir(parents=True)
+            (out / "server" / "ready.json").write_text("{}", encoding="utf-8")
+            return server
+        _write_rows(_result_file(tmp_path, "attempt"),
+                    [{"id": "task_a", "result": ["valid official row"]}])
+        return worker
+
+    def stop(proc):
+        if proc is server:
+            (out / "server" / "final.json").write_text(json.dumps({
+                "status": "failed", "cost_summary_error": {
+                    "type": "ValueError", "message": "invalid cost inventory"},
+            }), encoding="utf-8")
+
+    with (
+        patch.object(driver, "server_command", return_value=["server"]),
+        patch.object(driver, "bfcl_worker_command", return_value=["worker"]),
+        patch.object(driver.subprocess, "Popen", side_effect=popen),
+        patch.object(driver, "stop_owned_group", side_effect=stop),
+    ):
+        status = driver.run_task(cell, ["task_a"], 37201, "attempt")
+
+    assert status["status"] == "completed"
+    assert status["healthy"] == ["task_a"]
+    assert status["cost_finalization"] == {
+        "status": "failed", "reason": "cost_summary_error",
+        "error": {"type": "ValueError", "message": "invalid cost inventory"},
+    }
+    assert (out / "status.json").exists()
+    assert not (out / "done.json").exists()
+    assert driver.validate_chunk(out, ["task_a"]) == (["task_a"], [])
+
+
+def test_appworld_worker_uses_pinned_paper_source(tmp_path, monkeypatch):
+    driver = _load_driver()
+    paper = tmp_path / "paper-release"
+    monkeypatch.setenv("C2KV_PAPER_SOURCE", str(paper))
+    cell = {"benchmark": "acon_appworld", "cell_dir": str(tmp_path),
+            "caps": {"task_timeout": 1}}
+    out = tmp_path / "batches" / "attempt"
+    worker_env = None
+
+    class FakeProcess:
+        def __init__(self, rc):
+            self.rc = rc
+
+        def poll(self):
+            return None
+
+        def wait(self, timeout=None):
+            return self.rc
+
+    calls = 0
+
+    def popen(*args, **kwargs):
+        nonlocal calls, worker_env
+        calls += 1
+        if calls == 1:
+            (out / "server").mkdir(parents=True)
+            (out / "server" / "ready.json").write_text("{}", encoding="utf-8")
+            return FakeProcess(0)
+        worker_env = kwargs["env"]
+        return FakeProcess(1)
+
+    with (
+        patch.object(driver, "server_command", return_value=["server"]),
+        patch.object(driver, "appworld_worker_command", return_value=["worker"]),
+        patch.object(driver.subprocess, "Popen", side_effect=popen),
+        patch.object(driver, "stop_owned_group"),
+    ):
+        status = driver.run_task(cell, ["task_a"], 37201, "attempt")
+
+    assert worker_env is not None
+    assert worker_env["PYTHONPATH"].split(os.pathsep)[0] == str(paper / "benchmarks")
+    assert status["cost_finalization"] == {
+        "status": "unavailable", "reason": "missing_final_receipt"}
+
+
 def test_audit_only_writes_full_refill_manifest_without_preparing_runtime(tmp_path):
     driver = _load_driver()
     cell_dir = tmp_path / "cell"
@@ -583,6 +685,49 @@ def test_appworld_method_failure_requires_typed_task_bound_evidence(tmp_path):
     ready["allowed_task_ids"] = ["task_b"]
     (server / "ready.json").write_text(json.dumps(ready), encoding="utf-8")
     assert driver.appworld_method_failure_evidence(out, "task_a") is None
+
+
+def test_appworld_capacity_failure_cannot_hide_cost_finalization_error(tmp_path):
+    driver = _load_driver()
+    cell_dir = tmp_path / "cell"
+    cell = {"cell_id": "appworld-cost-error", "cell_dir": str(cell_dir),
+            "benchmark": "acon_appworld", "task_ids": ["task_a"]}
+    cell_dir.mkdir()
+    manifest = cell_dir / "cell.json"
+    manifest.write_text(json.dumps(cell), encoding="utf-8")
+    budgets = tmp_path / "budgets.json"
+    budgets.write_text("{}", encoding="utf-8")
+
+    def run_task(cell_arg, task_ids, port, batch_name):
+        out = Path(cell_arg["cell_dir"]) / "batches" / batch_name
+        server = out / "server"
+        server.mkdir(parents=True)
+        (server / "ready.json").write_text(json.dumps({
+            "schema": "a-event-native-server-v1", "benchmark": "acon_appworld",
+            "allowed_task_ids": task_ids,
+        }), encoding="utf-8")
+        (server / "steps.jsonl").write_text(json.dumps({
+            "schema": "a-event-native-exact-step-v1", "status": "failed",
+            "session_id": "acon_appworld/task_a/attempt-0",
+            "failure_kind": "method_failure",
+            "failure_code": "c2kv_capacity_infeasible",
+        }) + "\n", encoding="utf-8")
+        (server / "final.json").write_text(json.dumps({
+            "status": "failed", "cost_summary_error": {
+                "type": "ValueError", "message": "invalid cost inventory"},
+        }), encoding="utf-8")
+        return {"status": "failed", "error": "controller exited rc=1"}
+
+    with (patch.object(driver, "prepare_cell_files", side_effect=lambda value, _: value),
+          patch.object(driver, "run_task", side_effect=run_task)):
+        assert driver.main(["--cell", str(manifest), "--budgets", str(budgets),
+                            "--port-base", "44100"]) == 0
+
+    assert not list((cell_dir / "tasks").glob("*/terminal.json"))
+    assert driver.appworld_method_failure_receipt(cell_dir, "task_a") is None
+    score = json.loads((cell_dir / "appworld_score_summary.json").read_text())
+    assert score["semantic_score"] is None
+    assert score["pending_task_ids"] == ["task_a"]
 
 
 def test_prepare_rejects_budget_drift_without_rewriting_frozen_files(tmp_path):
