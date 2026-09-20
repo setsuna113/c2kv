@@ -21,6 +21,7 @@ from benchmarks.history_budget import HistoryKVBudget, parse_history_kv_budget
 from .artifact_io import atomic_json, atomic_text, preparation_lock
 from .process_lifecycle import (defer_termination, run_owned, stop_owned_group,
                                 unwind_on_termination)
+from .upstream_liveness import UpstreamLiveness, UpstreamUnavailable
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG = Path(__file__).with_name("config.json")
@@ -764,17 +765,19 @@ def execute(config, plan, output, source, stages, selected, port_offset=0):
                 run_failure = None
                 try:
                     wait_server(server, config["server_port"])
+                    upstream_monitor = UpstreamLiveness(
+                        f"http://127.0.0.1:{config['server_port']}", process=server)
                     from benchmarks.arms import get_arm
                     if get_arm(cell["arm"]).text_history_budget_tokens is not None:
                         require_budget_renderer(config["server_port"])
                     if is_native_arm(cell["arm"]):
                         run_owned(run_command(config, cell, directory, profile_path, stage),
-                                  check=True, env=env, cwd=ROOT.parent)
+                                  check=True, env=env, cwd=ROOT.parent, monitor=upstream_monitor)
                     elif stage == "closed_loop":
                         # Rebuilt here so a runtime port offset reaches the harness;
                         # without an offset this equals the prepared cell["command"].
                         run_owned(run_command(config, cell, directory, profile_path),
-                                  check=True, env=env)
+                                  check=True, env=env, monitor=upstream_monitor)
                     else:
                         prefixes = Path(cell["replay_source"])
                         if not prefixes.is_file():
@@ -806,9 +809,16 @@ def execute(config, plan, output, source, stages, selected, port_offset=0):
                                       "--target-run-id", cell["cell_id"]]
                         if cell.get("tool_memory") and cell["benchmark"] in {"acebench_agent", "appworld"}:
                             replay_cmd += ["--tool-source-benchmark", cell["benchmark"]]
-                        run_owned(replay_cmd, check=True, env=env, cwd=ROOT.parent)
+                        run_owned(replay_cmd, check=True, env=env, cwd=ROOT.parent,
+                                  monitor=upstream_monitor)
                 except BaseException:
                     run_failure = sys.exc_info()
+                    if isinstance(run_failure[1], UpstreamUnavailable):
+                        atomic_json(directory / "infra_failure.json", {
+                            "kind": "upstream_unavailable", "retryable": True,
+                            "error": str(run_failure[1]), "time": time.time(),
+                            "preserve_completed_tasks": True,
+                        })
                 finally:
                     try:
                         cleanup_cell_processes(proxy, server)

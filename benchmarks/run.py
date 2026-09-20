@@ -34,7 +34,8 @@ from checkpoint_profile import ProfileError, resolve_checkpoint_profile  # noqa:
 from capabilities import run_preflight  # noqa: E402
 from arms import get_arm  # noqa: E402
 from history_budget import HistoryKVBudget  # noqa: E402
-from paper.process_lifecycle import stop_owned_group, unwind_on_termination  # noqa: E402
+from paper.process_lifecycle import run_owned, stop_owned_group, unwind_on_termination  # noqa: E402
+from paper.upstream_liveness import UpstreamLiveness  # noqa: E402
 
 # --benchmark value -> adapter module.  Two names share acon_adapter (the
 # module dispatches on ctx.options["benchmark"]); add_arguments is called
@@ -467,5 +468,27 @@ def main(argv=None):
     print(json.dumps(summary, indent=2, ensure_ascii=False))
 
 
+@unwind_on_termination
+def supervised_cli(argv=None):
+    """Keep the official in-process adapter inside a supervised owned child.
+
+    BFCL catches ordinary request errors and continues its dataset loop. The
+    supervisor can stop that loop even while it waits on an HTTP retry or a
+    thread-pool future. The child's existing finally blocks still own cleanup.
+    """
+    argv = list(sys.argv[1:] if argv is None else argv)
+    parent_key = "C2KV_BENCH_SUPERVISOR_PID"
+    if os.environ.get(parent_key) == str(os.getppid()):
+        return main(argv)
+    args = build_parser().parse_args(argv)
+    env = dict(os.environ, **{parent_key: str(os.getpid())})
+    completed = run_owned(
+        [sys.executable, str(Path(__file__).resolve()), *argv], env=env,
+        monitor=UpstreamLiveness(args.upstream),
+    )
+    if completed.returncode:
+        raise SystemExit(completed.returncode)
+
+
 if __name__ == "__main__":
-    main()
+    supervised_cli()

@@ -22,7 +22,7 @@ import urllib.error
 
 from benchmarks.measurement.telemetry import append_jsonl, canonical_sha256, read_jsonl
 from benchmarks.measurement.replay import _paper_measurement
-from .candidate_matrix import ARM_TO_VARIANT
+from .candidate_matrix import ARM_TO_VARIANT, SUPPORTED_BENCHMARKS as CANDIDATE_BENCHMARKS
 from .process_lifecycle import defer_termination, unwind_on_termination
 
 ARMS = {"c2kv_c1_t02_r8": 8, "c2kv_c1_t02_r4": 4, "c2kv_c1_off_r8": 8}
@@ -65,7 +65,7 @@ def load_delivery():
 def delivery_args(config, benchmark, output, task_ids, delivery):
     settings = config.get("c1", {})
     detector = settings.get("detector", "d3_hybrid")
-    if ARM in ARM_TO_VARIANT and benchmark not in {"bfcl_base", "bfcl_long_context", "appworld", "acebench_agent"}:
+    if ARM in ARM_TO_VARIANT and benchmark not in CANDIDATE_BENCHMARKS:
         raise ValueError("candidate arms support bfcl_base, bfcl_long_context, appworld and acebench_agent")
     command = [
         "--method", ("c2kv_native" if ARM == "c2kv_native_r4" else

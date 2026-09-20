@@ -62,6 +62,14 @@ This package runs the accepted portable benchmark through the independent
 uses D3 hybrid recovery through the delivered native C1 interface. Preparation does not start any
 experiment or retrain the detector.
 
+The paper runner supervises its inference process throughout each cell. The
+standalone `benchmarks/run.py` CLI also supervises the upstream TCP endpoint.
+An owned engine exit or three consecutive connection refusals stops the owned
+harness instead of recording the remaining tasks as model failures. Existing
+task artifacts are preserved for explicit repair; no complete marker is written
+for the interrupted cell. Busy-endpoint timeouts and terminal method errors
+are not classified as engine death. Strict allocator checks stay enabled.
+
 | Method | Main setting | BFCL base | BFCL long context | AppWorld | ACEBench Agent | ToolSandbox | Small sweep |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | Full | Full history | 200 tasks | 200 tasks | test_normal, 168 tasks | Agent multi-step + multi-turn | Full official suite | None |

@@ -129,17 +129,35 @@ def stop_owned_group(process, timeout=75):
 
 
 def run_owned(command, *, check=False, timeout=None, capture_output=False,
-              text=False, **kwargs):
+              text=False, monitor=None, poll_interval=1.0, **kwargs):
     """Run a synchronous child in its own group and reap it on interruption."""
     if capture_output:
         if kwargs.get("stdout") is not None or kwargs.get("stderr") is not None:
             raise ValueError("stdout/stderr cannot be combined with capture_output")
         kwargs["stdout"] = subprocess.PIPE
         kwargs["stderr"] = subprocess.PIPE
+    if monitor is not None:
+        if poll_interval <= 0:
+            raise ValueError("poll_interval must be positive")
+        monitor()
     process = subprocess.Popen(command, start_new_session=os.name == "posix",
                                text=text, **kwargs)
     try:
-        stdout, stderr = process.communicate(timeout=timeout)
+        if monitor is None:
+            stdout, stderr = process.communicate(timeout=timeout)
+        else:
+            deadline = None if timeout is None else time.monotonic() + timeout
+            while True:
+                remaining = None if deadline is None else deadline - time.monotonic()
+                if remaining is not None and remaining <= 0:
+                    raise subprocess.TimeoutExpired(command, timeout)
+                interval = poll_interval if remaining is None else min(poll_interval, remaining)
+                try:
+                    stdout, stderr = process.communicate(timeout=interval)
+                    monitor()
+                    break
+                except subprocess.TimeoutExpired:
+                    monitor()
     except BaseException:
         stop_owned_group(process)
         raise
