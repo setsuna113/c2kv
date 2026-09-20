@@ -1,0 +1,134 @@
+{
+  "schema": "c2kv-blocker-repair-validation-v1",
+  "status": "cpu_regressions_passed_device_validation_incomplete",
+  "implementation_commits": {
+    "paper": "6376486fe99d6b486c78935406db727c55fb0183",
+    "npu": "9523f0e671c2746db5296d38fb1cabcbfc17d17d",
+    "engine": "ecb9c3970eec7c79f8831def4d6aed3494c4d371"
+  },
+  "source_architecture": {
+    "shared_paper_and_engine_branch": "paper/benchmarks-cuda-20260917",
+    "npu_launcher_and_bundled_runtime_branch": "experiment/generality-npu-20260919",
+    "npu_port": "Source-identity guards and typed decision-cap lifetime ported; existing NPU recovery-budget extensions preserved. Shared paper adapters/evaluator and shared engine apply on both devices."
+  },
+  "cpu_validation": [
+    {
+      "repository": "paper",
+      "tests": [
+        "benchmarks/tool_definition",
+        "benchmarks/test_tau2_adapter_integration.py",
+        "benchmarks/test_toolsandbox_terminal_failures.py",
+        "benchmarks/test_hiagent_budget_proxy.py",
+        "benchmarks/test_textarm_runtime.py",
+        "benchmarks/paper/test_native_extra.py"
+      ],
+      "passed": 97
+    },
+    {
+      "repository": "paper",
+      "tests": [
+        "benchmarks/paper/test_native_history_budget.py",
+        "benchmarks/test_history_budget.py"
+      ],
+      "passed": 47
+    },
+    {
+      "repository": "paper",
+      "tests": [
+        "experiments/history_system/test_history_budget.py",
+        "experiments/history_system/runtime/benchmarks/memory_runtime/tests/test_event_native_server.py"
+      ],
+      "passed": 29,
+      "skipped": 1,
+      "subtests_passed": 10
+    },
+    {
+      "repository": "paper",
+      "tests": [
+        "experiments/history_system/runtime/benchmarks/memory_runtime/tests/test_tool_source_identity.py"
+      ],
+      "passed": 5
+    },
+    {
+      "repository": "paper",
+      "tests": [
+        "benchmarks/paper/test_upstream_liveness.py"
+      ],
+      "passed": 5,
+      "skipped": 1
+    },
+    {
+      "repository": "npu",
+      "tests": [
+        "tests/test_c2kv_candidate_cell.py",
+        "controller_runtime/benchmarks/memory_runtime/tests/test_decision_cap_http_lifetime.py",
+        "controller_runtime/benchmarks/memory_runtime/tests/test_rendered_source_identity.py"
+      ],
+      "passed": 44
+    },
+    {
+      "repository": "engine",
+      "command": "wsl.exe -e /home/lyc/dev/c2kv-cuda-port/venv-sglang/bin/python -m pytest -q --tb=short test/registered/unit/test_reference_history_regressions.py test/registered/unit/test_persistent_history_lifecycle.py test/registered/unit/test_history_kv_selection.py test/registered/unit/test_agentkv_engine_pipeline.py test/registered/unit/test_commitkv_engine_integration.py test/registered/unit/test_commitkv.py test/registered/unit/test_streaming_session_timeout_ownership.py test/registered/unit/test_session_cache_isolation.py",
+      "tests": [
+        "test/registered/unit/test_reference_history_regressions.py",
+        "test/registered/unit/test_persistent_history_lifecycle.py",
+        "test/registered/unit/test_history_kv_selection.py",
+        "test/registered/unit/test_agentkv_engine_pipeline.py",
+        "test/registered/unit/test_commitkv_engine_integration.py",
+        "test/registered/unit/test_commitkv.py",
+        "test/registered/unit/test_streaming_session_timeout_ownership.py",
+        "test/registered/unit/test_session_cache_isolation.py"
+      ],
+      "passed": 174,
+      "skipped": 0,
+      "warnings": 1,
+      "hardware_validation": "not run"
+    }
+  ],
+  "validation_count_scope": "Individual test invocations; not benchmark tasks or device measurements.",
+  "device_validation": {
+    "cuda": "One isolated A1 engine service started. Two-turn probe failed before generation because the smoke selected a static policy with nonzero lease_decisions for S0. No hardware regression is claimed passed.",
+    "cuda_service_source": {
+      "paper": {
+        "kind": "paper",
+        "sha": "d3f0fe545cfa6029c279275160632adc4e10f319",
+        "path": "/workspace/validation/blocker-repair-20260920/paper-d3f0fe545cfa"
+      },
+      "engine": {
+        "kind": "engine",
+        "sha": "5a0f0d91db37b96134f72f5e6a7836c4cec1c395",
+        "path": "/workspace/validation/blocker-repair-20260920/engine-5a0f0d91db37"
+      }
+    },
+    "cuda_cleanup": {
+      "pid": 1247011,
+      "port_closed": true,
+      "gpu_free": true
+    },
+    "cuda_stop_reason": "User requested that m2 GPU0 not be occupied; no further device job was launched.",
+    "npu": "Not run during this repair. Shared tensor paths and bundled runtime were checked on CPU only."
+  },
+  "blockers": {
+    "A1": "Reject stale persistent continuation as a request-local error before KV ownership transfer; session is closed and server remains available.",
+    "A2": "Existing cleanup retained; added regression for the one uncommitted token.",
+    "A3": "Bound score-logit chunks and remove grouped-head key copies. Actual long AppWorld OOM rerun remains unvalidated.",
+    "A4": "Single-token causal reference decode uses grouped KV on CUDA/CPU; NPU keeps its expanded-head SDPA interface. Existing AppWorld max_iter=50 retained. Repetitive model output and real throughput remain unresolved.",
+    "A5": "Existing incomplete CommitKV transition fix retained; no result provenance merge performed.",
+    "A6": "Existing canonical BFCL echo fix 313c170 retained; old 199-task result and subset were not merged.",
+    "B1": "Decision cap returns typed HTTP rejection; explicit cap exhaustion becomes a task-local loss. Compression-induced model looping is not claimed fixed.",
+    "B2": "Explicit ACON budget failure becomes a task-local loss; generic infrastructure errors still fail the cell.",
+    "B3": "Invalid HiAgent retrieval gets bounded internal feedback; known actor failures are recorded per scenario, with usage and IDs retained.",
+    "B4_C4": "Exact tool-name fidelity is not repaired by these harness changes; the independent tool-interface work is not claimed delivered here.",
+    "B5": "Observable transcript identity is separate from dynamic tool rendering; nested GP recovery and monotone-source rejection tested.",
+    "B6": "Existing upstream-liveness supervisor retained and tested.",
+    "B7": "Preflight the configured controller Python against the served tokenizer; no environment or frozen configuration mutated.",
+    "C1": "Accept measured Full-equivalent no-op only when the allowance and every resident layer cover the Full prompt; cohort unchanged.",
+    "C2": "Preparation validates historical and gold tool-call JSON; exclusions retain IDs, reasons and hashes.",
+    "C3": "Flush per-request outputs and errors; resume identical frozen contracts; stop on unavailable upstream; incomplete cohorts publish no aggregate metrics.",
+    "C5": "Call-conditioned pool is unchanged and cannot estimate false-positive calls.",
+    "C6": "Decision/ratio/method/layout identity is used for resume; group-limit semantics made explicit.",
+    "D6": "Merged original paper commit 1719642251669b737dff3a89de8e840679bb351b and corresponding NPU history-budget implementation.",
+    "D1_D2_D3_D4_D5_D7_D8": "Storage retrieval, missing results, paused formal queues, benchmark floor, credentials and monitor operations were not changed by this code repair."
+  },
+  "production_deployment": "No active production source or formal experiment queue was changed."
+}
