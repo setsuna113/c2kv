@@ -135,5 +135,5 @@ helper to fit model weights. This leaves the 768-token method budget unchanged
 but makes those timings unsuitable for GPU-only performance comparison.
 The receipt is functional validation, not a full-benchmark quality table.
 The current receipt has 17 completed single-task cases. AppWorld's bare C2KV
-and Goal cases remain pending after host-memory exhaustion; sharing is held
-until these last two end-to-end cases complete.
+and Goal cases remain unvalidated after host-memory exhaustion. This delivery
+is shared with that explicit limitation; no further local tests are scheduled.
