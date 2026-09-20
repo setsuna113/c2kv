@@ -27,7 +27,11 @@ def test_candidate_cell_is_explicit_ratio8_and_isolated(tmp_path, variant):
         source, variant, "http://127.0.0.1:36200")
     assert result["ratio"] == 8
     assert result["candidate_algorithm"] == variant
-    if variant in candidate_cell.REPAIR_VARIANTS:
+    if variant in candidate_cell.GOAL_VARIANTS:
+        assert result["threshold"] == 0.5
+        assert result["candidate_protocol"] == candidate_cell.GOAL_VERSION
+        assert result["schema"] == "c2kv-generality-candidate-cell-v3"
+    elif variant in candidate_cell.REPAIR_VARIANTS:
         assert "threshold" not in result
         assert result["candidate_protocol"] == candidate_cell.REPAIR_VERSION
         assert result["schema"] == "c2kv-generality-candidate-cell-v2"
@@ -104,6 +108,63 @@ def test_repair_candidate_keeps_c1000_without_loading_t02(tmp_path, variant):
                           "candidate_algorithm": {"variant": variant}}
     assert receipt is None
     assert "candidate_algorithm" not in base
+
+
+@pytest.mark.parametrize("variant", candidate_cell.GOAL_VARIANTS)
+def test_goal_candidate_binds_frozen_t02_with_new_resume_identity(tmp_path, monkeypatch, variant):
+    checkpoint = tmp_path / "checkpoint"
+    checkpoint.mkdir()
+    (checkpoint / "config.json").write_text("{}", encoding="utf-8")
+    artifact_path = tmp_path / "risk.json"
+    artifact_path.write_text('{"model_kind":"c1_risk_logistic"}', encoding="utf-8")
+    monkeypatch.setattr(candidate_cell, "RISK_ARTIFACT_SHA256",
+                        hashlib.sha256(artifact_path.read_bytes()).hexdigest())
+    cell = candidate_cell.candidate_cell_from_source(
+        source_cell(tmp_path), variant, "http://127.0.0.1:36200")
+    cell["checkpoint"] = str(checkpoint)
+    base = {"view_mode": "native_s0", "gp_experiments": {},
+            "post_draft_recovery": {}, "d3_hybrid_recovery": True}
+    bound = {"model_kind": "c1_risk_logistic", "bound": True}
+    controller, receipt = candidate_cell.controller_with_binding(
+        cell, base_controller=base,
+        selected={"checkpoint_selection": {"config_sha256":
+                  hashlib.sha256((checkpoint / "config.json").read_bytes()).hexdigest()}},
+        risk_artifact_path=artifact_path,
+        bind_risk_artifact=lambda artifact, path: (bound, {"checkpoint": str(path)}))
+    assert controller == {"view_mode": "native_s0", "candidate_algorithm": {
+        "variant": variant, "risk_artifact": bound, "risk_threshold": 0.5}}
+    assert receipt == {"checkpoint": str(checkpoint)}
+    assert cell["cell_id"].endswith("__candidate_" + variant)
+    assert cell["candidate_protocol"] == candidate_cell.GOAL_VERSION
+    assert "candidate_algorithm" not in base
+
+
+def test_goal_candidate_requires_shadow_feature_launcher_config(tmp_path, monkeypatch):
+    monkeypatch.setitem(sys.modules, "current", types.SimpleNamespace())
+    monkeypatch.setitem(sys.modules, "evidence_sets", types.SimpleNamespace())
+    monkeypatch.setitem(sys.modules, "c1_artifact_binding", types.SimpleNamespace(
+        bind_risk_artifact=lambda artifact, checkpoint: (artifact, {})))
+    from generality import c2kv_cell
+
+    monkeypatch.setattr(c2kv_cell.current, "load_config", lambda: {
+        "route": "ac_native_s0_lexical_raw_reserve_failed_operation",
+        "compression_policy": "always-compress-v1",
+        "history_view_protocol": "fixed-budget-main",
+        "decode_strategy": "incremental", "prefill_chunk_size": 256,
+    }, raising=False)
+    common = {
+        "python_sgl": "python", "checkpoint": "/checkpoint", "cell_id": "candidate-test",
+        "model_name": "candidate-test", "benchmark": "bfcl", "ratio": 8,
+        "caps": {"max_completion_tokens": 128, "generation_attempts_per_task": 2,
+                 "extraction_calls_per_task": 4, "task_timeout": 60},
+        "eval_policy_path": "/eval.json", "controller_path": "/controller.json",
+        "sglang_backend_url": "http://127.0.0.1:36200",
+        "condition": "candidate_algorithm",
+    }
+    for variant in ("goal_joint", "goal_rescue", "no_progress"):
+        command = c2kv_cell.server_command(
+            {**common, "candidate_algorithm": variant}, ["task-1"], tmp_path, 36300)
+        assert ("--shadow-feature-config" in command) is (variant == "goal_joint")
 
 
 def test_candidate_policy_uses_same_common_cap_without_recovery_reserve(tmp_path, monkeypatch):

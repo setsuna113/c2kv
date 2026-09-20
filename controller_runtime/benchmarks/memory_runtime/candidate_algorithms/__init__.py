@@ -5,4 +5,6 @@ VERSION = "c2kv-paper-candidates-v1"
 
 # Keep the historical collection frozen for old profiles and callers.
 REPAIR_VARIANTS = ("request_contract", "argument_binding", "no_progress")
-ALL_VARIANTS = VARIANTS + REPAIR_VARIANTS
+GOAL_VARIANTS = ("goal_pending", "goal_source", "goal_progress", "goal_joint")
+GOAL_VERSION = "c2kv-goal-composition-v1"
+ALL_VARIANTS = VARIANTS + REPAIR_VARIANTS + GOAL_VARIANTS

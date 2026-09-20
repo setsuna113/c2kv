@@ -132,15 +132,26 @@ running server. Complete paper aggregation requires the upstream to emit an
 attributable `server_telemetry.jsonl` for this cell; a client run alone is not
 a complete measurement artifact.
 
-The four ratio-8 candidate algorithms are an explicit C2KV BFCL-base path,
+The ratio-8 candidate algorithms are an explicit C2KV BFCL-base path,
 outside the ratio-4 generality matrix. Start from a
 `bfcl_base/c2kv/<working-point>/compression_full_budget/cell.json` source and
 pass `--candidate-algorithm` as one of `static_t02`, `turn_c1`, `goal_rescue`,
-or `dependency_first` to `generality/c2kv_cell.py`, together with the existing
+`dependency_first`, `goal_pending`, `goal_source`, `goal_progress`, or
+`goal_joint` to `generality/c2kv_cell.py`, together with the existing
 `--budgets`, `--sglang-backend-url`, and an unused `--port-base`. The driver
 creates a separate `candidate_algorithms/<variant>` cell under that working
 point, uses ratio 8 and the working point's `common_cap_bytes` for its shared
 history/workspace budget, and freezes the T02 threshold at 0.5. For example:
+
+The four `goal_*` composition variants (excluding the original `goal_rescue`)
+use `c2kv-goal-composition-v1` and separate v3 cell identities. They preserve
+Goal's STOP/repeated-failure review and complete-event recovery priority.
+Pending augments completion review; Source adds atomic source packets and
+field binding; Progress reviews unchanged repeated reads; Joint combines
+them in Goal, Source, Progress order. Policies share one regeneration per
+decision and the existing task cap. Field-only commit corrections are logged
+separately from the original model generation and its cost. Existing candidate
+and source-repair cells retain their versions and result paths.
 
 ```bash
 /home/liuyancheng/envs/sgl/bin/python /home/liuyancheng/c2kv-generality-20260918/src/generality/c2kv_cell.py \

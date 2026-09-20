@@ -15,8 +15,10 @@ except ImportError:  # Direct file launch on ascend03.
 
 LEGACY_VARIANTS = ("static_t02", "turn_c1", "goal_rescue", "dependency_first")
 REPAIR_VARIANTS = ("request_contract", "argument_binding", "no_progress")
-VARIANTS = LEGACY_VARIANTS + REPAIR_VARIANTS
+GOAL_VARIANTS = ("goal_pending", "goal_source", "goal_progress", "goal_joint")
+VARIANTS = LEGACY_VARIANTS + REPAIR_VARIANTS + GOAL_VARIANTS
 REPAIR_VERSION = "c2kv-source-repair-v1"
+GOAL_VERSION = "c2kv-goal-composition-v1"
 RATIO = 8
 RISK_THRESHOLD = 0.5
 RISK_ARTIFACT_SHA256 = T02_RISK_ARTIFACT_SHA256
@@ -37,8 +39,11 @@ def candidate_cell_from_source(source: dict, variant: str, backend_url: str) -> 
         raise ValueError("Candidates require an explicit SGLang backend URL")
     source_dir = Path(source["cell_dir"])
     cell = copy.deepcopy(source)
-    cell["schema"] = ("c2kv-generality-candidate-cell-v2"
-                      if variant in REPAIR_VARIANTS else "c2kv-generality-candidate-cell-v1")
+    cell["schema"] = ("c2kv-generality-candidate-cell-v3"
+                      if variant in GOAL_VARIANTS else
+                      "c2kv-generality-candidate-cell-v2"
+                      if variant in REPAIR_VARIANTS else
+                      "c2kv-generality-candidate-cell-v1")
     cell["cell_id"] = f"{source['cell_id']}__candidate_{variant}"
     cell["cell_dir"] = str(source_dir.parent / "candidate_algorithms" / variant)
     cell["condition"] = "candidate_algorithm"
@@ -53,6 +58,8 @@ def candidate_cell_from_source(source: dict, variant: str, backend_url: str) -> 
     else:
         cell["threshold"] = RISK_THRESHOLD
         cell["threshold_status"] = "frozen_candidate"
+        if variant in GOAL_VARIANTS:
+            cell["candidate_protocol"] = GOAL_VERSION
     cell["sglang_backend_url"] = backend_url.strip()
     cell.pop("controller_path", None)
     cell.pop("eval_policy_path", None)
@@ -76,6 +83,9 @@ def controller_with_binding(
     if variant in REPAIR_VARIANTS:
         if cell.get("candidate_protocol") != REPAIR_VERSION or "threshold" in cell:
             raise ValueError("Repair candidate requires the source-repair protocol without T02")
+    elif variant in GOAL_VARIANTS:
+        if cell.get("candidate_protocol") != GOAL_VERSION or cell.get("threshold") != RISK_THRESHOLD:
+            raise ValueError("Goal candidate requires the frozen T02 contract")
     elif cell.get("threshold") != RISK_THRESHOLD:
         raise ValueError("Candidate cells require the frozen T02 threshold")
     checkpoint = Path(cell["checkpoint"])

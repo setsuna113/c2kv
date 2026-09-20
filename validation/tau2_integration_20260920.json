@@ -1,0 +1,607 @@
+{
+  "schema": "npu-tau2-integration-validation-v1",
+  "scope": "functional smoke on official airline/base task 0, n=1; not a full benchmark score",
+  "model_inference": true,
+  "status": "complete",
+  "complete_cells": 6,
+  "expected_cells": 6,
+  "methods": [
+    "c2kv",
+    "h2o"
+  ],
+  "conditions": [
+    "compression_full_budget",
+    "recovery_off_same_initial",
+    "tracer_history"
+  ],
+  "working_point": "K0",
+  "remote_evidence_root": "<NPU_HOME>/codex-tau2-integration-20260920",
+  "path_redaction": "<NPU_HOME> replaces the remote account home; artifact paths below are relative to each stage root",
+  "upstream": {
+    "port": 36206,
+    "served_model": "gen-c1000",
+    "owner_uid": 9008,
+    "checkpoint_suffix": "c2kv-b-final-20260912/checkpoints/b_history/arm-C/seed-42/checkpoint-1000",
+    "npu_card": 6,
+    "npu_memory_used_mb_at_t900_preflight": 27136,
+    "npu_memory_total_mb": 65536,
+    "ownership": "Existing service retained; test controllers use distinct local ports and sessions"
+  },
+  "source": {
+    "shared_paper_commit": "b0775f6e9aa308bbd284872b2562cc005edbf94c",
+    "npu_base_commit": "c858c30e5266a47073d2df520f81e377ffb632da",
+    "staged_t900_npu_tar_sha256": "888a475d374378bfe59b42015b85706820a34f945389e69bd95c70377e2283fe",
+    "staged_t900_paper_tar_sha256": "91abce982d90bd46676cb1c0c0cde4bcfdf661bf5282ed83bc199b3bbf1c5be6",
+    "staged_initial_npu_tar_sha256": "f01bca5720558a11f9470660a04cc9ae9b972595b919e1a774579b2452d33ad0",
+    "staged_initial_paper_tar_sha256": "ed8d2a780a51802580c07e05a7105c8198f919b9e5fdaf7f5c3789782af6a163",
+    "note": "Initial four C/R cells and timeout-limited T attempts used earlier isolated tar snapshots; final T900 uses current tau2 source atop NPU base c858c30. Later unrelated Goal commits are absent from these frozen snapshots."
+  },
+  "cpu_fixture": {
+    "model_inference": false,
+    "official_task_id": "0",
+    "routes": [
+      {
+        "condition": "C",
+        "official_scored": true,
+        "termination": "max_steps"
+      },
+      {
+        "condition": "R",
+        "official_scored": true,
+        "termination": "max_steps"
+      },
+      {
+        "condition": "T",
+        "official_scored": true,
+        "termination": "max_steps"
+      }
+    ]
+  },
+  "local_tests": {
+    "command": "uv run --no-project --with pytest python -m pytest -q tests/test_cellplan_preflight.py tests/test_scheduler_npu.py tests/test_tau2_harness.py tests/test_tau2_matrix.py tests/test_historykv_attempts.py tests/test_session_tracer_cell.py tests/test_c2kv_bfcl_resume.py tests/test_process_lifecycle.py",
+    "passed": 134,
+    "skipped": 4
+  },
+  "cells": [
+    {
+      "backend": "c2kv",
+      "condition": "compression_full_budget",
+      "cell_path": "cells/c2kv/compression_full_budget/cell.json",
+      "cell_status_path": "cells/c2kv/compression_full_budget/cell_status.json",
+      "cell_status": {
+        "status": "complete",
+        "n_completed": 1,
+        "n_retryable": 0,
+        "n_total": 1
+      },
+      "task_receipt_path": "cells/c2kv/compression_full_budget/batches/a1789900798757448270_p1864312_5feceb66ff/tau2_worker/0/done.json",
+      "task_receipt": {
+        "status": "completed",
+        "returncode": 0,
+        "semantic_score": 0.0,
+        "termination": "max_steps"
+      },
+      "official": {
+        "raw_path": "cells/c2kv/compression_full_budget/batches/a1789900798757448270_p1864312_5feceb66ff/tau2_worker/0/attempts/a1789900808764968230_191644e464234c6b83c4dc3ab18cd9a5/official/results.json",
+        "raw_sha256": "a1ebc1889e99c6ad95b5621263a4716c10a365fe398832bd786f9b72a9740a3f",
+        "scored_path": "cells/c2kv/compression_full_budget/batches/a1789900798757448270_p1864312_5feceb66ff/tau2_worker/0/attempts/a1789900808764968230_191644e464234c6b83c4dc3ab18cd9a5/official/updated_results.json",
+        "scored_sha256": "1a5d056f05c937ca546c75cf5222092658c4d48234b61641d6172f8bd2701b46"
+      },
+      "protocol_path": "cells/c2kv/compression_full_budget/batches/a1789900798757448270_p1864312_5feceb66ff/tau2_worker/0/attempts/a1789900808764968230_191644e464234c6b83c4dc3ab18cd9a5/tau2_protocol.json",
+      "protocol": {
+        "suite": "airline",
+        "split": "base",
+        "task_ids": [
+          "0"
+        ],
+        "num_trials": 1,
+        "max_steps": 8,
+        "timeout": 300,
+        "agent_max_tokens": 2048,
+        "agent_model": "gen_c2kv_K0_compression_full_budget",
+        "user_model": "gen-c1000",
+        "native": true
+      },
+      "measurement": {
+        "events_path": "cells/c2kv/compression_full_budget/batches/a1789900798757448270_p1864312_5feceb66ff/tau2_worker/0/attempts/a1789900808764968230_191644e464234c6b83c4dc3ab18cd9a5/measurement/harness_events.jsonl",
+        "sha256": "f2c92bd1988f056cadad03e030a12cc24a957fbafc8c6947e195631d7c0e6fa1",
+        "n_decisions": 4,
+        "n_decision_errors": 0,
+        "n_episode_ends": 1,
+        "n_episode_errors": 0
+      },
+      "cost_finalization": {
+        "status": "valid"
+      },
+      "batch_receipt_path": "cells/c2kv/compression_full_budget/batches/a1789900798757448270_p1864312_5feceb66ff/done.json",
+      "stage": "initial_source_snapshot",
+      "controller_steps": {
+        "path": "cells/c2kv/compression_full_budget/batches/a1789900798757448270_p1864312_5feceb66ff/server/steps.jsonl",
+        "sha256": "5eb36988370b910ca67ec9541bc08dc761bbcca6632c29b7960eb0d253db6a52",
+        "n_rows": 4
+      }
+    },
+    {
+      "backend": "c2kv",
+      "condition": "recovery_off_same_initial",
+      "cell_path": "cells/c2kv/recovery_off_same_initial/cell.json",
+      "cell_status_path": "cells/c2kv/recovery_off_same_initial/cell_status.json",
+      "cell_status": {
+        "status": "complete",
+        "n_completed": 1,
+        "n_retryable": 0,
+        "n_total": 1
+      },
+      "task_receipt_path": "cells/c2kv/recovery_off_same_initial/batches/a1789900999882579630_p1869496_5feceb66ff/tau2_worker/0/done.json",
+      "task_receipt": {
+        "status": "completed",
+        "returncode": 0,
+        "semantic_score": 0.0,
+        "termination": "max_steps"
+      },
+      "official": {
+        "raw_path": "cells/c2kv/recovery_off_same_initial/batches/a1789900999882579630_p1869496_5feceb66ff/tau2_worker/0/attempts/a1789901007891469290_54b681f159c248aa99736cd8bfbe73dc/official/results.json",
+        "raw_sha256": "43588404733c30d23c949e1fef5cca25fa9b47ea8d6773385a87684b5bd3202b",
+        "scored_path": "cells/c2kv/recovery_off_same_initial/batches/a1789900999882579630_p1869496_5feceb66ff/tau2_worker/0/attempts/a1789901007891469290_54b681f159c248aa99736cd8bfbe73dc/official/updated_results.json",
+        "scored_sha256": "b164aa96130aa15cd9b7aace618acf71e3d7a07badf3171934193987710d7fd4"
+      },
+      "protocol_path": "cells/c2kv/recovery_off_same_initial/batches/a1789900999882579630_p1869496_5feceb66ff/tau2_worker/0/attempts/a1789901007891469290_54b681f159c248aa99736cd8bfbe73dc/tau2_protocol.json",
+      "protocol": {
+        "suite": "airline",
+        "split": "base",
+        "task_ids": [
+          "0"
+        ],
+        "num_trials": 1,
+        "max_steps": 8,
+        "timeout": 300,
+        "agent_max_tokens": 2048,
+        "agent_model": "gen_c2kv_K0_recovery_off_same_initial",
+        "user_model": "gen-c1000",
+        "native": true
+      },
+      "measurement": {
+        "events_path": "cells/c2kv/recovery_off_same_initial/batches/a1789900999882579630_p1869496_5feceb66ff/tau2_worker/0/attempts/a1789901007891469290_54b681f159c248aa99736cd8bfbe73dc/measurement/harness_events.jsonl",
+        "sha256": "03d6a2537aa21f354f0d0a388cf69b05c7b4a06ea3b5f0295de46cd7e229f031",
+        "n_decisions": 4,
+        "n_decision_errors": 0,
+        "n_episode_ends": 1,
+        "n_episode_errors": 0
+      },
+      "cost_finalization": {
+        "status": "valid"
+      },
+      "batch_receipt_path": "cells/c2kv/recovery_off_same_initial/batches/a1789900999882579630_p1869496_5feceb66ff/done.json",
+      "stage": "initial_source_snapshot",
+      "controller_steps": {
+        "path": "cells/c2kv/recovery_off_same_initial/batches/a1789900999882579630_p1869496_5feceb66ff/server/steps.jsonl",
+        "sha256": "2c9a56dadee266c8b92489bca96e99bfb473206d48b4393500b8f5ad354a8de6",
+        "n_rows": 4
+      }
+    },
+    {
+      "backend": "c2kv",
+      "condition": "tracer_history",
+      "cell_path": "cells/c2kv/tracer_history/cell.json",
+      "cell_status_path": "cells/c2kv/tracer_history/cell_status.json",
+      "cell_status": {
+        "status": "complete",
+        "n_completed": 1,
+        "n_retryable": 0,
+        "n_total": 1
+      },
+      "task_receipt_path": "cells/c2kv/tracer_history/batches/a1789902656375887090_p1907780_5feceb66ff/tau2_worker/0/done.json",
+      "task_receipt": {
+        "status": "completed",
+        "returncode": 0,
+        "semantic_score": 0.0,
+        "termination": "max_steps"
+      },
+      "official": {
+        "raw_path": "cells/c2kv/tracer_history/batches/a1789902656375887090_p1907780_5feceb66ff/tau2_worker/0/attempts/a1789902666476446330_4f2ae58fbd054297b93905f1cf991171/official/results.json",
+        "raw_sha256": "09698484f9b0f59bc14f5f8fd9309e292cd151d06c7a01dac51a176d0f2dd10f",
+        "scored_path": "cells/c2kv/tracer_history/batches/a1789902656375887090_p1907780_5feceb66ff/tau2_worker/0/attempts/a1789902666476446330_4f2ae58fbd054297b93905f1cf991171/official/updated_results.json",
+        "scored_sha256": "09698484f9b0f59bc14f5f8fd9309e292cd151d06c7a01dac51a176d0f2dd10f"
+      },
+      "protocol_path": "cells/c2kv/tracer_history/batches/a1789902656375887090_p1907780_5feceb66ff/tau2_worker/0/attempts/a1789902666476446330_4f2ae58fbd054297b93905f1cf991171/tau2_protocol.json",
+      "protocol": {
+        "suite": "airline",
+        "split": "base",
+        "task_ids": [
+          "0"
+        ],
+        "num_trials": 1,
+        "max_steps": 8,
+        "timeout": 900,
+        "agent_max_tokens": 2048,
+        "agent_model": "gen_c2kv_K0_tracer_history",
+        "user_model": "gen-c1000",
+        "native": true
+      },
+      "measurement": {
+        "events_path": "cells/c2kv/tracer_history/batches/a1789902656375887090_p1907780_5feceb66ff/tau2_worker/0/attempts/a1789902666476446330_4f2ae58fbd054297b93905f1cf991171/measurement/harness_events.jsonl",
+        "sha256": "d695a9457e7a6b0dc1d0600a6e7e1805e810598b6ef4da66b9d567ab3e55e6b7",
+        "n_decisions": 4,
+        "n_decision_errors": 0,
+        "n_episode_ends": 1,
+        "n_episode_errors": 0
+      },
+      "cost_finalization": {
+        "status": "valid"
+      },
+      "batch_receipt_path": "cells/c2kv/tracer_history/batches/a1789902656375887090_p1907780_5feceb66ff/done.json",
+      "tracer": {
+        "threshold": 0.6,
+        "risk_scores": [
+          null,
+          null,
+          null,
+          null
+        ],
+        "exact_recovery_statuses": [
+          "recover",
+          "abstain",
+          "abstain",
+          "abstain"
+        ],
+        "n_recover_decisions": 1,
+        "n_recovery_rounds": 1,
+        "n_appended_units_in_rounds": 1,
+        "n_appended_units": 1,
+        "admitted_packet_tokens": [],
+        "admitted_packet_resident_tokens": []
+      },
+      "stage": "final_t900_npu_embedding",
+      "controller_steps": {
+        "path": "cells/c2kv/tracer_history/batches/a1789902656375887090_p1907780_5feceb66ff/server/steps.jsonl",
+        "sha256": "4e8da0643cdc310a5ef9e1854d418fbf8b48a4410fb0d088a216bad87e7e086e",
+        "n_rows": 4
+      }
+    },
+    {
+      "backend": "h2o",
+      "condition": "compression_full_budget",
+      "cell_path": "cells/h2o/compression_full_budget/cell.json",
+      "cell_status_path": "cells/h2o/compression_full_budget/cell_status.json",
+      "cell_status": {
+        "status": "complete",
+        "n_completed": 1,
+        "n_retryable": null,
+        "n_total": 1
+      },
+      "task_receipt_path": "cells/h2o/compression_full_budget/tasks/0/done.json",
+      "task_receipt": {
+        "status": "completed",
+        "returncode": 0,
+        "semantic_score": 0.0,
+        "termination": "max_steps"
+      },
+      "official": {
+        "raw_path": "cells/h2o/compression_full_budget/tasks/0/attempts/a1789900961933949010_df500ce565134d52a615d03dedd58080/official/results.json",
+        "raw_sha256": "476fc0dd2afc2218b841d2ea1486fef3c37eedf63ef91d6d4dab12e68d158992",
+        "scored_path": "cells/h2o/compression_full_budget/tasks/0/attempts/a1789900961933949010_df500ce565134d52a615d03dedd58080/official/updated_results.json",
+        "scored_sha256": "476fc0dd2afc2218b841d2ea1486fef3c37eedf63ef91d6d4dab12e68d158992"
+      },
+      "protocol_path": "cells/h2o/compression_full_budget/tasks/0/attempts/a1789900961933949010_df500ce565134d52a615d03dedd58080/tau2_protocol.json",
+      "protocol": {
+        "suite": "airline",
+        "split": "base",
+        "task_ids": [
+          "0"
+        ],
+        "num_trials": 1,
+        "max_steps": 8,
+        "timeout": 300,
+        "agent_max_tokens": 2048,
+        "agent_model": "gen_h2o_K0_compression_full_budget",
+        "user_model": "gen-c1000",
+        "native": false
+      },
+      "measurement": {
+        "events_path": "cells/h2o/compression_full_budget/tasks/0/attempts/a1789900961933949010_df500ce565134d52a615d03dedd58080/measurement/harness_events.jsonl",
+        "sha256": "9fc6086906cad24e08fe98ff33e07320572aea0dd479a57c5478eab7be02d22d",
+        "n_decisions": 4,
+        "n_decision_errors": 0,
+        "n_episode_ends": 1,
+        "n_episode_errors": 0
+      },
+      "stage": "initial_source_snapshot"
+    },
+    {
+      "backend": "h2o",
+      "condition": "recovery_off_same_initial",
+      "cell_path": "cells/h2o/recovery_off_same_initial/cell.json",
+      "cell_status_path": "cells/h2o/recovery_off_same_initial/cell_status.json",
+      "cell_status": {
+        "status": "complete",
+        "n_completed": 1,
+        "n_retryable": null,
+        "n_total": 1
+      },
+      "task_receipt_path": "cells/h2o/recovery_off_same_initial/tasks/0/done.json",
+      "task_receipt": {
+        "status": "completed",
+        "returncode": 0,
+        "semantic_score": 0.0,
+        "termination": "max_steps"
+      },
+      "official": {
+        "raw_path": "cells/h2o/recovery_off_same_initial/tasks/0/attempts/a1789900724901868080_7bb1cb86aedc420bbe2f19e433771edf/official/results.json",
+        "raw_sha256": "588f1a87864fa230beefbb91430f3752dfc4bbeafb9fd9f984518e74feb627db",
+        "scored_path": "cells/h2o/recovery_off_same_initial/tasks/0/attempts/a1789900724901868080_7bb1cb86aedc420bbe2f19e433771edf/official/updated_results.json",
+        "scored_sha256": "588f1a87864fa230beefbb91430f3752dfc4bbeafb9fd9f984518e74feb627db"
+      },
+      "protocol_path": "cells/h2o/recovery_off_same_initial/tasks/0/attempts/a1789900724901868080_7bb1cb86aedc420bbe2f19e433771edf/tau2_protocol.json",
+      "protocol": {
+        "suite": "airline",
+        "split": "base",
+        "task_ids": [
+          "0"
+        ],
+        "num_trials": 1,
+        "max_steps": 8,
+        "timeout": 300,
+        "agent_max_tokens": 2048,
+        "agent_model": "gen_h2o_K0_recovery_off_same_initial",
+        "user_model": "gen-c1000",
+        "native": false
+      },
+      "measurement": {
+        "events_path": "cells/h2o/recovery_off_same_initial/tasks/0/attempts/a1789900724901868080_7bb1cb86aedc420bbe2f19e433771edf/measurement/harness_events.jsonl",
+        "sha256": "529bb56e0c9327ab6602c42e8900bc27cd2711bdc381bb6963ddb00f3cf4efe3",
+        "n_decisions": 4,
+        "n_decision_errors": 0,
+        "n_episode_ends": 1,
+        "n_episode_errors": 0
+      },
+      "stage": "initial_source_snapshot"
+    },
+    {
+      "backend": "h2o",
+      "condition": "tracer_history",
+      "cell_path": "cells/h2o/tracer_history/cell.json",
+      "cell_status_path": "cells/h2o/tracer_history/cell_status.json",
+      "cell_status": {
+        "status": "complete",
+        "n_completed": 1,
+        "n_retryable": 0,
+        "n_total": 1
+      },
+      "task_receipt_path": "cells/h2o/tracer_history/batches/000_0/tau2_worker/0/done.json",
+      "task_receipt": {
+        "status": "completed",
+        "returncode": 0,
+        "semantic_score": 0.0,
+        "termination": "max_steps"
+      },
+      "official": {
+        "raw_path": "cells/h2o/tracer_history/batches/000_0/tau2_worker/0/attempts/a1789902478535590270_1e839c1a57ec428191241626f6df9d29/official/results.json",
+        "raw_sha256": "b763c224705c48023ba3a2cf26a4af9267ec97ead0e2c880ab6db248c19fc1af",
+        "scored_path": "cells/h2o/tracer_history/batches/000_0/tau2_worker/0/attempts/a1789902478535590270_1e839c1a57ec428191241626f6df9d29/official/updated_results.json",
+        "scored_sha256": "b763c224705c48023ba3a2cf26a4af9267ec97ead0e2c880ab6db248c19fc1af"
+      },
+      "protocol_path": "cells/h2o/tracer_history/batches/000_0/tau2_worker/0/attempts/a1789902478535590270_1e839c1a57ec428191241626f6df9d29/tau2_protocol.json",
+      "protocol": {
+        "suite": "airline",
+        "split": "base",
+        "task_ids": [
+          "0"
+        ],
+        "num_trials": 1,
+        "max_steps": 8,
+        "timeout": 900,
+        "agent_max_tokens": 2048,
+        "agent_model": "gen_h2o_K0_tracer_history",
+        "user_model": "gen-c1000",
+        "native": true
+      },
+      "measurement": {
+        "events_path": "cells/h2o/tracer_history/batches/000_0/tau2_worker/0/attempts/a1789902478535590270_1e839c1a57ec428191241626f6df9d29/measurement/harness_events.jsonl",
+        "sha256": "604eafaf2a516980805f5ac549bd46263dde63dbc6f455cbb66757a9333901b0",
+        "n_decisions": 4,
+        "n_decision_errors": 0,
+        "n_episode_ends": 1,
+        "n_episode_errors": 0
+      },
+      "tracer": {
+        "threshold": 0.3,
+        "risk_scores": [
+          0.19614820797149898,
+          0.5802840850927855,
+          0.08689280264153229,
+          0.059352275417533636
+        ],
+        "exact_recovery_statuses": [
+          "not_triggered",
+          "recover",
+          "not_triggered",
+          "not_triggered"
+        ],
+        "n_recover_decisions": 1,
+        "n_recovery_rounds": 0,
+        "n_appended_units_in_rounds": 0,
+        "n_appended_units": 0,
+        "admitted_packet_tokens": [
+          667
+        ],
+        "admitted_packet_resident_tokens": [
+          768
+        ]
+      },
+      "stage": "final_t900_npu_embedding",
+      "controller_steps": {
+        "path": "cells/h2o/tracer_history/batches/000_0/server/steps.jsonl",
+        "sha256": "f1120ce993159d42d8ed22743b3d40411ac972ba73879b18f53c8c8b0a9290af",
+        "n_rows": 4
+      }
+    }
+  ],
+  "retained_timeout_limited_t_attempts": [
+    {
+      "backend": "c2kv",
+      "condition": "tracer_history",
+      "cell_path": "cells/c2kv/tracer_history/cell.json",
+      "cell_status_path": "cells/c2kv/tracer_history/cell_status.json",
+      "cell_status": {
+        "status": "complete",
+        "n_completed": 1,
+        "n_retryable": 0,
+        "n_total": 1
+      },
+      "task_receipt_path": "cells/c2kv/tracer_history/batches/a1789901607214990730_p1882455_5feceb66ff/tau2_worker/0/done.json",
+      "task_receipt": {
+        "status": "completed",
+        "returncode": 0,
+        "semantic_score": 0.0,
+        "termination": "timeout"
+      },
+      "official": {
+        "raw_path": "cells/c2kv/tracer_history/batches/a1789901607214990730_p1882455_5feceb66ff/tau2_worker/0/attempts/a1789901617223793550_f4e7510e12db41cb85857a1ae7b7d06f/official/results.json",
+        "raw_sha256": "2ec061da86d7f44abbc2020607118974956c3b3e7b7d387c21f7b0085a2590ef",
+        "scored_path": "cells/c2kv/tracer_history/batches/a1789901607214990730_p1882455_5feceb66ff/tau2_worker/0/attempts/a1789901617223793550_f4e7510e12db41cb85857a1ae7b7d06f/official/updated_results.json",
+        "scored_sha256": "2ec061da86d7f44abbc2020607118974956c3b3e7b7d387c21f7b0085a2590ef"
+      },
+      "protocol_path": "cells/c2kv/tracer_history/batches/a1789901607214990730_p1882455_5feceb66ff/tau2_worker/0/attempts/a1789901617223793550_f4e7510e12db41cb85857a1ae7b7d06f/tau2_protocol.json",
+      "protocol": {
+        "suite": "airline",
+        "split": "base",
+        "task_ids": [
+          "0"
+        ],
+        "num_trials": 1,
+        "max_steps": 8,
+        "timeout": 300,
+        "agent_max_tokens": 2048,
+        "agent_model": "gen_c2kv_K0_tracer_history",
+        "user_model": "gen-c1000",
+        "native": true
+      },
+      "measurement": {
+        "events_path": "cells/c2kv/tracer_history/batches/a1789901607214990730_p1882455_5feceb66ff/tau2_worker/0/attempts/a1789901617223793550_f4e7510e12db41cb85857a1ae7b7d06f/measurement/harness_events.jsonl",
+        "sha256": "eae40029b2fbb54cc0114596d214ca7c121b0e286f56afa015a8c1b385b8946f",
+        "n_decisions": 2,
+        "n_decision_errors": 0,
+        "n_episode_ends": 1,
+        "n_episode_errors": 0
+      },
+      "cost_finalization": {
+        "status": "valid"
+      },
+      "batch_receipt_path": "cells/c2kv/tracer_history/batches/a1789901607214990730_p1882455_5feceb66ff/done.json",
+      "tracer": {
+        "threshold": 0.6,
+        "risk_scores": [
+          null,
+          null
+        ],
+        "exact_recovery_statuses": [
+          "recover",
+          "abstain"
+        ],
+        "n_recover_decisions": 1,
+        "n_recovery_rounds": 1,
+        "n_appended_units_in_rounds": 1,
+        "n_appended_units": 1,
+        "admitted_packet_tokens": [],
+        "admitted_packet_resident_tokens": []
+      },
+      "stage": "initial_t300_cpu_embedding",
+      "controller_steps": {
+        "path": "cells/c2kv/tracer_history/batches/a1789901607214990730_p1882455_5feceb66ff/server/steps.jsonl",
+        "sha256": "1eaad228c5e55767448ca835ebf153f3c3ad872daabe1546db6b8305c9a4c241",
+        "n_rows": 2
+      }
+    },
+    {
+      "backend": "h2o",
+      "condition": "tracer_history",
+      "cell_path": "cells/h2o/tracer_history/cell.json",
+      "cell_status_path": "cells/h2o/tracer_history/cell_status.json",
+      "cell_status": {
+        "status": "complete",
+        "n_completed": 1,
+        "n_retryable": 0,
+        "n_total": 1
+      },
+      "task_receipt_path": "cells/h2o/tracer_history/batches/000_0/tau2_worker/0/done.json",
+      "task_receipt": {
+        "status": "completed",
+        "returncode": 0,
+        "semantic_score": 0.0,
+        "termination": "timeout"
+      },
+      "official": {
+        "raw_path": "cells/h2o/tracer_history/batches/000_0/tau2_worker/0/attempts/a1789901692930622150_69874d295abd464fbc65fa754e811409/official/results.json",
+        "raw_sha256": "2134a2a1a4932457803ec55fa497722d4ac61aa113f781f77adbbd59d12fa593",
+        "scored_path": "cells/h2o/tracer_history/batches/000_0/tau2_worker/0/attempts/a1789901692930622150_69874d295abd464fbc65fa754e811409/official/updated_results.json",
+        "scored_sha256": "2134a2a1a4932457803ec55fa497722d4ac61aa113f781f77adbbd59d12fa593"
+      },
+      "protocol_path": "cells/h2o/tracer_history/batches/000_0/tau2_worker/0/attempts/a1789901692930622150_69874d295abd464fbc65fa754e811409/tau2_protocol.json",
+      "protocol": {
+        "suite": "airline",
+        "split": "base",
+        "task_ids": [
+          "0"
+        ],
+        "num_trials": 1,
+        "max_steps": 8,
+        "timeout": 300,
+        "agent_max_tokens": 2048,
+        "agent_model": "gen_h2o_K0_tracer_history",
+        "user_model": "gen-c1000",
+        "native": true
+      },
+      "measurement": {
+        "events_path": "cells/h2o/tracer_history/batches/000_0/tau2_worker/0/attempts/a1789901692930622150_69874d295abd464fbc65fa754e811409/measurement/harness_events.jsonl",
+        "sha256": "3013a3c28a9b99d4840420734876dfbb18888ea7ef2e2c24cfecda1210f2f1a0",
+        "n_decisions": 2,
+        "n_decision_errors": 0,
+        "n_episode_ends": 1,
+        "n_episode_errors": 0
+      },
+      "tracer": {
+        "threshold": 0.3,
+        "risk_scores": [
+          0.19614820797149898,
+          0.5802840850927855
+        ],
+        "exact_recovery_statuses": [
+          "not_triggered",
+          "recover"
+        ],
+        "n_recover_decisions": 1,
+        "n_recovery_rounds": 0,
+        "n_appended_units_in_rounds": 0,
+        "n_appended_units": 0,
+        "admitted_packet_tokens": [
+          673
+        ],
+        "admitted_packet_resident_tokens": [
+          768
+        ]
+      },
+      "stage": "initial_t300_cpu_embedding",
+      "controller_steps": {
+        "path": "cells/h2o/tracer_history/batches/000_0/server/steps.jsonl",
+        "sha256": "fc7f363a64e4590af71f79aa58be4c57ffbab13996091ccf869b5c80fabe9142",
+        "n_rows": 2
+      }
+    }
+  ],
+  "cleanup": {
+    "isolated_controller_proxy_ports_listening": 0,
+    "isolated_stage_processes": 0,
+    "established_connections_to_original_upstream_at_check": 0,
+    "original_upstream_health_http_status": 200,
+    "original_upstream_retained": true,
+    "other_production_drivers_untouched": true
+  },
+  "post_merge_validation": {
+    "upstream_npu_commit": "45b9511",
+    "tau2_implementation_commit": "ce9163b",
+    "command": "../.venv/Scripts/python.exe -m pytest -q tests/test_cellplan_preflight.py tests/test_scheduler_npu.py tests/test_tau2_harness.py tests/test_tau2_matrix.py tests/test_historykv_attempts.py tests/test_session_tracer_cell.py tests/test_c2kv_bfcl_resume.py tests/test_process_lifecycle.py tests/test_c2kv_candidate_cell.py",
+    "passed": 160,
+    "skipped": 4,
+    "scope": "CPU regression after merging concurrent Goal changes; model smoke remains attributed to the frozen source snapshots above."
+  }
+}

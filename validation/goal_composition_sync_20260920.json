@@ -1,0 +1,71 @@
+{
+  "schema": "c2kv-goal-composition-npu-sync-v1",
+  "status": "passed",
+  "paper_integrated_code_commit": "caec76136f93ac7d738a615744ede3669009d761",
+  "npu_implementation_commit": "f6c336b1b368b10ac37a673ce49246a723009e1d",
+  "variants": [
+    "goal_pending",
+    "goal_source",
+    "goal_progress",
+    "goal_joint"
+  ],
+  "protocol": "c2kv-goal-composition-v1",
+  "runtime_lf_normalized_sha256": {
+    "candidate_algorithms/__init__.py": "e3a102b66b7aa7d5fbd6afaad8ac85f4b2747fe0f226a9964aa90b815eb21650",
+    "candidate_algorithms/allocation.py": "ad75a90812111b77459d18d34ea9d2cb248cc95d8bca687277dd514e434c6c8c",
+    "candidate_algorithms/argument_binding.py": "597c2923822980f336ce41da3986bffc69b345dda14eb1f1921c7c410ff8b07f",
+    "candidate_algorithms/controller.py": "13e671672e6b68457d8be933fd5eb5ae72aaba52c7917f093c829f4cdb9471f7",
+    "candidate_algorithms/dependencies.py": "6ffef4e7f58f9b45a3062777f4235888781b2316e545b4a4c7a19ca5ff9b9520",
+    "candidate_algorithms/goal_commit.py": "9f46b4b69d6988e76298049ec607392be4b2180d9959faec80baef0940979edd",
+    "candidate_algorithms/goal_controller.py": "06f69ddbb885ae6ea46426b2a1a7c115420e346d2c3d6fe766c0645bfedef143",
+    "candidate_algorithms/goal_pending.py": "9af106f50b855b54421050a60927914ae9b15805228c87e115fd5fa84df7d26c",
+    "candidate_algorithms/goal_progress.py": "7fa0d94fdd181013c66d9573a9e26ffa01710d9cf8c7c343598fb579d346d06b",
+    "candidate_algorithms/goal_protocol.py": "359a58f922c9bef9fc6c68b813bea22ea27bb8db970ecf13f5474f3da336d5ea",
+    "candidate_algorithms/goal_source.py": "7665e0402d883fcab09e255943bcee3688aaa1b7c3f0fdfc52517669e15947cb",
+    "candidate_algorithms/no_progress.py": "dcd5922934ba5b3d3d9a671ed6f1a88175c7b99636acca504c6a84a8aa9957a7",
+    "candidate_algorithms/observations.py": "3b14c80f6e71b477978b620a09a0e5aeb667df466277b3c60de04a671e711eec",
+    "candidate_algorithms/progress.py": "4ea19792ba652ea4c2fd3ee74aa416bfee95cdb4f9bc0e0b20734d8734e9dbc1",
+    "candidate_algorithms/repacking.py": "7aaea1d98a223fc8474fdd96f28c6e74d7d3cf6f744cf30f2758f7d71e191412",
+    "candidate_algorithms/repair_controller.py": "f8eee3dbbe847bdd0d9ca69d67dbb73edc3deca3dcfb2eb05fd506b4f3dd2f17",
+    "candidate_algorithms/repair_protocol.py": "a3d4ba5ebf4e0842f92bd198f1d43838115bb42dc3cd29992ba73708e28c9d0b",
+    "candidate_algorithms/request_contract.py": "3ca82419d0dcbb57844cb14a48a9a771409200c5ad443876ab5246987219c4f9",
+    "recovery/source.py": "86e69511205c132675b80261b5aaec3bd20780b03eef31d21e838f3c43bbfd77"
+  },
+  "device_specific_entrypoints_preserved": [
+    "event_native_controls.py",
+    "event_native_server.py",
+    "event_native_step.py"
+  ],
+  "npu_cpu_validation": [
+    {
+      "scope": "NPU bundled runtime Goal and legacy candidate/source repair",
+      "passed": 83
+    },
+    {
+      "scope": "NPU launcher, calibration, BFCL resume",
+      "passed": 54
+    },
+    {
+      "scope": "NPU source selector default compatibility",
+      "passed": 26
+    }
+  ],
+  "npu_hardware_execution": false,
+  "shared_algorithm_cuda_receipt": "experiments/history_system/validation/goal_composition_cuda_20260920.json in the paper branch",
+  "cuda_scope": [
+    "BFCL base official single-task closed loop for four new arms and old Goal anchor",
+    "Four injected-held, fixed-low-risk fixtures with actual CUDA regeneration and tokenizer"
+  ],
+  "semantic_negative_observations": [
+    {
+      "variant": "goal_source",
+      "observation": "The admitted three-count source review still generated mean([5,10,7]) instead of using the observed 3,16,60. The evidence/commit plumbing passed; this fixture did not demonstrate successful numeric repair."
+    },
+    {
+      "variant": "goal_joint",
+      "observation": "Source won the shared slot, but its ordinal guard rejected the generated action and retained the original held get_flight_cost. This fixture demonstrates arbitration and fallback, not a successful ordinal repair."
+    }
+  ],
+  "in_flight_jobs_modified": false,
+  "original_results_modified": false
+}
