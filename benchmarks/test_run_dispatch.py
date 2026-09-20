@@ -37,9 +37,13 @@ CLI_SURFACE = [
     ("--proxy-port", 34100, False),
     ("--out", None, True),
     ("--task-set", "airline", False),
+    ("--benchmark-dir", None, False),
+    ("--tau2-task-split", "base", False),
+    ("--tau2-task-ids", "", False),
     ("--tau2-num-trials", None, False),
     ("--tau2-max-steps", None, False),
     ("--tau2-timeout", None, False),
+    ("--tau2-agent-max-tokens", 4096, False),
     ("--categories", "multi_turn_base", False),
     ("--run-ids", "", False),
     ("--bfcl-refill-rounds", 0, False),
@@ -334,31 +338,24 @@ def test_acebench_dispatch_routes_user_simulator_to_raw_upstream(monkeypatch):
 def test_tau2_dispatch_passes_run_name_and_workers(monkeypatch, tmp_path):
     seen = {}
 
-    def fake_run(cmd, **kwargs):
-        seen.setdefault("cmds", []).append(cmd)
+    def fake_run(*args, **kwargs):
+        seen["args"] = args
+        seen["kwargs"] = kwargs
+        return {"n": 1}
 
-        class _P:
-            returncode = 0
-
-        return _P()
-
-    monkeypatch.setattr(tau2_adapter, "run_owned", fake_run)
-    monkeypatch.setattr(tau2_adapter, "collect", lambda *a, **k: {"n": 1})
+    monkeypatch.setattr(tau2_adapter, "run_tau2", fake_run)
     monkeypatch.setattr(tau2_adapter, "TAU2_DIR", tmp_path)
-    sims = tmp_path / "data" / "simulations" / "r_ab12"
-    sims.mkdir(parents=True)
-    (sims / "updated_results.json").write_text("{}", encoding="utf-8")
-    sys.modules.pop("terminal_check", None)
-    import terminal_check
-
-    monkeypatch.setattr(terminal_check, "check_tau2", lambda *a, **k: 0)
-    ctx = _ctx("tau2", task_set="mock_domain", num_workers=7, max_tasks=3)
+    ctx = _ctx("tau2", task_set="airline", tau2_task_ids="11,19",
+               tau2_task_split="base", num_workers=7, max_tasks=2,
+               bench_python="/venv/python")
     summary = tau2_adapter.run(ctx)
-    run_cmd = seen["cmds"][0]
-    assert run_cmd[run_cmd.index("--max-concurrency") + 1] == "7"
-    assert run_cmd[run_cmd.index("--save-to") + 1] == "r_ab12"
-    assert run_cmd[run_cmd.index("--num-tasks") + 1] == "3"
-    assert summary["cost_join"].startswith("not joinable:")
+    assert seen["args"] == (ctx.base_url, ctx.user_base_url, ctx.out_dir)
+    assert seen["kwargs"]["num_workers"] == 7
+    assert seen["kwargs"]["run_name"] == "r_ab12"
+    assert seen["kwargs"]["task_ids"] == ["11", "19"]
+    assert seen["kwargs"]["max_tasks"] == 2
+    assert seen["kwargs"]["python"] == "/venv/python"
+    assert summary == {"n": 1}
 
 
 def test_toolsandbox_dispatch_splits_scenarios(monkeypatch):

@@ -37,7 +37,7 @@ def test_bare_native_dispatch_is_separate_from_historical_proxy(native_config, t
     plan, _ = runner.prepare(native_config, tmp_path / "plan", tmp_path / "sglang")
     bare_cells = [row for row in plan if row["method"] == "C2KV"]
     assert {row["benchmark"] for row in bare_cells} == {
-        "bfcl_base", "bfcl_long_context", "appworld", "acebench_agent", "toolsandbox"}
+        "bfcl_base", "bfcl_long_context", "appworld", "acebench_agent", "toolsandbox", "tau2"}
     assert all(row["arm"] == arm.name and "benchmarks.paper.c1" in row["command"]
                for row in bare_cells)
 

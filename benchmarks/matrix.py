@@ -79,6 +79,7 @@ def _append_adapter_path_options(command: list[str], options: Mapping[str, Any])
     for option, flag in (("acon_dir", "--acon-dir"),
                          ("acebench_dir", "--acebench-dir"),
                          ("toolsandbox_dir", "--toolsandbox-dir"),
+                         ("tau2_dir", "--benchmark-dir"),
                          ("bench_python", "--bench-python")):
         value = options.get(option)
         if value in (None, ""):

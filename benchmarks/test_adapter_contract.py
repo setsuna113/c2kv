@@ -74,8 +74,9 @@ def test_add_arguments_registers_only_that_adapters_flags():
     import argparse
 
     owned = {
-        tau2_adapter: {"--task-set", "--tau2-num-trials", "--tau2-max-steps",
-                       "--tau2-timeout"},
+        tau2_adapter: {"--benchmark-dir", "--task-set", "--tau2-task-split", "--tau2-task-ids",
+                       "--tau2-num-trials", "--tau2-max-steps", "--tau2-timeout",
+                       "--tau2-agent-max-tokens"},
         bfcl_adapter: {"--categories", "--run-ids", "--bfcl-refill-rounds"},
         toolsandbox_adapter: {"--full", "--ts-scenarios", "--ts-agent", "--ts-user",
                               "--ts-parallel", "--toolsandbox-dir"},
@@ -271,10 +272,14 @@ def test_toolsandbox_uses_selected_environment_and_checkout(tmp_path, monkeypatc
 
 # ---- cost-join declarations -------------------------------------------------
 
-@pytest.mark.parametrize("module", [tau2_adapter, bfcl_adapter])
+@pytest.mark.parametrize("module", [bfcl_adapter])
 def test_unjoinable_adapters_declare_a_reason(module):
     assert module.COST_JOIN.startswith("not joinable: ")
     assert len(module.COST_JOIN) > len("not joinable: ")
+
+
+def test_tau2_cost_join_uses_official_task_identity():
+    assert tau2_adapter.COST_JOIN.startswith("joinable: ")
 
 
 def test_acebench_declares_the_instrumented_action_join():

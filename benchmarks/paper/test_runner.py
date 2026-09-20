@@ -73,7 +73,8 @@ class PaperMatrixTest(unittest.TestCase):
                 popen.assert_not_called()
 
     def test_only_requested_methods_and_ratio(self):
-        rows = cells(self.config)
+        rows = [row for row in cells(self.config) if row["benchmark"] != "tau2"]
+        # Preserve the historical matrix while tau2 extends it independently.
         # The tool-context axis adds compressed-tool cells on top of the 65 raw-tool cells.
         raw = [row for row in rows if row["tool_context"] == "raw"]
         self.assertEqual(len(raw), 65)
@@ -98,7 +99,7 @@ class PaperMatrixTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             output = Path(temporary)
             plan, profile = prepare(self.config, output, output / "sglang")
-            self.assertEqual(len(plan), 75)
+            self.assertEqual(len([row for row in plan if row["benchmark"] != "tau2"]), 75)
             self.assertTrue(profile.is_file())
             for row in plan:
                 cmd = row["command"]

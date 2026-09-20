@@ -21,7 +21,7 @@ VARIANT_TO_ARM = {
 REPAIR_VARIANTS = frozenset({"request_contract", "argument_binding", "no_progress"})
 GOAL_VARIANTS = ("goal_pending", "goal_source", "goal_progress", "goal_joint")
 ARM_TO_VARIANT = {arm: variant for variant, arm in VARIANT_TO_ARM.items()}
-SUPPORTED_BENCHMARKS = frozenset({"bfcl_base", "bfcl_long_context", "appworld", "acebench_agent"})
+SUPPORTED_BENCHMARKS = frozenset({"bfcl_base", "bfcl_long_context", "appworld", "acebench_agent", "tau2"})
 
 
 def parse_candidate_arms(value: str) -> tuple[str, ...]:
