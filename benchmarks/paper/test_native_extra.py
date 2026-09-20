@@ -8,7 +8,7 @@ from unittest import mock
 import pytest
 
 from benchmarks.paper import native_extra
-from benchmarks.paper.candidate_matrix import VARIANT_TO_ARM
+from benchmarks.paper.candidate_matrix import REPAIR_VARIANTS, VARIANT_TO_ARM
 
 
 def _config(tmp_path):
@@ -142,7 +142,7 @@ def test_ace_closed_loop_and_replay_command_use_actual_arm(
         return command[command.index(flag) + 1]
     identity = native_extra.arm_identity(config)
     assert identity["method"] == ("c2kv_native" if arm == "c2kv_native_r4" else "proposed")
-    assert identity["detector"] == ("disabled" if arm == "c2kv_native_r4"
+    assert identity["detector"] == ("disabled" if arm == "c2kv_native_r4" or variant in REPAIR_VARIANTS
                                     else "t02_risk" if variant else detector)
     assert identity["candidate_algorithm"] == variant
     assert value("--ratio") == str(ratio)
@@ -161,7 +161,8 @@ def test_ace_closed_loop_and_replay_command_use_actual_arm(
 @pytest.mark.parametrize("arm,detector,variant", [
     ("c2kv_native_r4", "disabled", None),
     ("c2kv_c1_t02_r4", "d3_hybrid", None),
-    *[(arm, "t02_risk", variant) for variant, arm in VARIANT_TO_ARM.items()],
+    *[(arm, "disabled" if variant in REPAIR_VARIANTS else "t02_risk", variant)
+      for variant, arm in VARIANT_TO_ARM.items()],
 ])
 def test_ace_official_task_acceptance_uses_actual_arm_identity(
         tmp_path, monkeypatch, arm, detector, variant):
@@ -209,7 +210,8 @@ def test_ace_official_task_acceptance_uses_actual_arm_identity(
     ("c2kv_native_r4", "disabled", None),
     ("c2kv_c1_t02_r8", "t02_risk", None),
     ("c2kv_c1_t02_r4", "d3_hybrid", None),
-    *[(arm, "t02_risk", variant) for variant, arm in VARIANT_TO_ARM.items()],
+    *[(arm, "disabled" if variant in REPAIR_VARIANTS else "t02_risk", variant)
+      for variant, arm in VARIANT_TO_ARM.items()],
 ])
 def test_ready_manifest_binds_loaded_controller_and_candidate_variant(
         tmp_path, arm, detector, variant):
@@ -219,6 +221,7 @@ def test_ready_manifest_binds_loaded_controller_and_candidate_variant(
     identity = native_extra.arm_identity(config)
     controller = tmp_path / "controller.json"
     controller_config = (
+        {"candidate_algorithm": {"variant": variant}} if variant in REPAIR_VARIANTS else
         {"candidate_algorithm": {"variant": variant, "risk_threshold": 0.5,
                                  "risk_artifact": {"model_kind": "c1_risk_logistic"}}} if variant else
         {"post_draft_recovery": {"gate": "prefill_linear_head"},
@@ -229,7 +232,7 @@ def test_ready_manifest_binds_loaded_controller_and_candidate_variant(
     route = ({"recovery_enabled": False, "max_generations_per_decision": 1}
              if arm == "c2kv_native_r4" else
              {"recovery_enabled": True, "max_generations_per_decision": 2,
-              "baseline_identity": f"c2kv-paper-candidates-v1:{variant}"}
+              "baseline_identity": f"{'c2kv-source-repair-v1' if variant in REPAIR_VARIANTS else 'c2kv-paper-candidates-v1'}:{variant}"}
              if variant else {})
     manifest = {
         "schema": "a-event-native-server-v1", "status": "ready",

@@ -312,13 +312,27 @@ $PY -m benchmarks.paper run --output /home/lyc/dev/c2kv-paper-results
 $PY -m benchmarks.paper aggregate --output /home/lyc/dev/c2kv-paper-results
 ```
 
-The four ratio8 candidate algorithms are an explicit overlay. For example,
+The ratio8 candidate algorithms are an explicit overlay. For example,
 `--candidate-arms all --candidate-benchmarks bfcl_base,acebench_agent` on
-both `prepare` and `run` adds `static_t02`, `turn_c1`, `goal_rescue` and
-`dependency_first` for those two benchmarks. The default candidate scope is
+both `prepare` and `run` adds the four legacy candidates plus the three source
+repair candidates for those two benchmarks. The default candidate scope is
 BFCL base, and the default matrix has no candidate cells. Each candidate uses
 its own native arm identity and ready-manifest validation; this is a runnable
 configuration, not a claim of completed benchmark scores.
+
+Select only the new candidates with
+`--candidate-arms request_contract,argument_binding,no_progress`. They share
+the existing C1 initial allocation and use independent `RepairPolicy` modules
+(`propose` and `validate`) through `RepairContext`, `RepairProposal`, and
+`GuardVerdict`. Their `c2kv-source-repair-v1` contract does not load T02 or its
+shadow features. Source packets must pass the existing B0 admission check;
+each decision permits at most one regeneration. Commit validation can retain
+the original draft or abstain from an unchanged failed action. Both generated
+drafts remain in the cost ledger; `repair_commit` reports accepted revisions,
+reversions, and source-supported abstentions separately from attempted recovery.
+Natural-language completion and ambiguous dependencies use source-backed model
+review; deterministic guards cover only explicitly supported violations.
+Legacy candidate IDs, profiles, and result schemas keep their original meaning.
 
 `run` executes the closed-loop matrix, then replays each benchmark's
 Full recorded prefixes through methods that support that protocol. AgentKV and

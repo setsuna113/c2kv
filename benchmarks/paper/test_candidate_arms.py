@@ -8,7 +8,9 @@ import pytest
 
 from benchmarks.arms import get_arm
 from benchmarks.paper import c1, runner
-from benchmarks.paper.candidate_matrix import VARIANT_TO_ARM, parse_candidate_arms, with_candidate_methods
+from benchmarks.paper.candidate_matrix import (
+    REPAIR_VARIANTS, VARIANT_TO_ARM, parse_candidate_arms, with_candidate_methods,
+)
 
 
 def test_candidate_matrix_defaults_to_bfcl_base_and_explicitly_adds_acebench(tmp_path):
@@ -19,7 +21,7 @@ def test_candidate_matrix_defaults_to_bfcl_base_and_explicitly_adds_acebench(tmp
 
     augmented = with_candidate_methods(original, parse_candidate_arms("all"))
     assert original["methods"] != augmented["methods"]
-    assert len(runner.cells(augmented)) == len(runner.cells(original)) + 4
+    assert len(runner.cells(augmented)) == len(runner.cells(original)) + len(VARIANT_TO_ARM)
     for variant, arm in VARIANT_TO_ARM.items():
         rows = [row for row in runner.cells(augmented) if row["arm"] == arm]
         assert len(rows) == 1
@@ -35,7 +37,7 @@ def test_candidate_matrix_defaults_to_bfcl_base_and_explicitly_adds_acebench(tmp
     ace = with_candidate_methods(original, parse_candidate_arms("all"),
                                  ("bfcl_base", "acebench_agent"))
     ace_rows = [row for row in runner.cells(ace) if row["arm"] in VARIANT_TO_ARM.values()]
-    assert len(ace_rows) == 8
+    assert len(ace_rows) == 2 * len(VARIANT_TO_ARM)
     assert {row["benchmark"] for row in ace_rows} == {"bfcl_base", "acebench_agent"}
     assert all(row["ratio"] == 8 for row in ace_rows)
     ace_plan, _ = runner.prepare(ace, tmp_path / "ace-paper", tmp_path / "sglang")
@@ -48,7 +50,10 @@ def test_candidate_matrix_defaults_to_bfcl_base_and_explicitly_adds_acebench(tmp
         with_candidate_methods(original, ("static_t02",), ("bfcl_long_context",))
 
 
-@pytest.mark.parametrize("variant,arm", VARIANT_TO_ARM.items())
+@pytest.mark.parametrize("variant,arm", [
+    (variant, arm) for variant, arm in VARIANT_TO_ARM.items()
+    if variant not in REPAIR_VARIANTS
+])
 def test_candidate_delivery_uses_ratio8_and_bound_artifact(tmp_path, monkeypatch, variant, arm):
     original_arm = c1.ARM
     try:
@@ -110,6 +115,46 @@ def test_candidate_delivery_uses_ratio8_and_bound_artifact(tmp_path, monkeypatch
         c1.select_arm(original_arm)
 
 
+@pytest.mark.parametrize("variant", sorted(REPAIR_VARIANTS))
+def test_repair_delivery_has_no_t02_dependency(tmp_path, monkeypatch, variant):
+    arm = VARIANT_TO_ARM[variant]
+    original_arm = c1.ARM
+    try:
+        c1.select_arm(arm)
+        delivery = c1.load_delivery()
+        config = json.loads(runner.DEFAULT_CONFIG.read_text())
+        checkpoint = tmp_path / "checkpoint"
+        checkpoint.mkdir()
+        (checkpoint / "config.json").write_text("{}", encoding="utf-8")
+        config.update(checkpoint=str(checkpoint), sglang_source=str(tmp_path / "sglang"))
+        args = c1.delivery_args(config, "bfcl_base", tmp_path / "out", [], delivery)
+        selected = {"ratio": 8, "checkpoint_selection": {
+            "config_sha256": hashlib.sha256(b"{}").hexdigest()}}
+        monkeypatch.setattr(delivery.current, "load_config", lambda: selected)
+        monkeypatch.setattr(delivery.evidence_sets, "_base_controller", lambda: {
+            "view_mode": "native_s0", "gp_experiments": {},
+            "post_draft_recovery": {}, "d3_hybrid_recovery": True})
+        monkeypatch.setattr(delivery, "DEFAULT_RISK_ARTIFACT", tmp_path / "absent.json")
+        monkeypatch.setattr(delivery, "bind_risk_artifact",
+                            lambda *_: pytest.fail("T02 binding must not run"))
+        controller, profile = delivery.build_profile(args)
+        assert controller == {"view_mode": "native_s0",
+                              "candidate_algorithm": {"variant": variant}}
+        assert profile["schema"] == "c2kv-candidate-delivery-profile-v2"
+        assert profile["selection_protocol"] == "c2kv-source-repair-v1"
+        assert profile["ratio"] == 8
+        assert profile["checkpoint_config_sha256"] == selected["checkpoint_selection"]["config_sha256"]
+        assert not any(key.startswith("selector_") for key in profile)
+        assert profile["automatic_reruns"] == 0
+        assert c1.delivery_args(config, "acebench_agent", tmp_path / "out", [], delivery).benchmark == "acebench"
+        bad_ratio = copy.copy(args)
+        bad_ratio.ratio = 4
+        with pytest.raises(ValueError, match="ratio 8"):
+            delivery.build_profile(bad_ratio)
+    finally:
+        c1.select_arm(original_arm)
+
+
 def test_candidate_acceptance_reads_durable_step_contract(tmp_path):
     delivery = c1.load_delivery()
     shard = tmp_path / "server"
@@ -142,3 +187,58 @@ def test_candidate_acceptance_reads_durable_step_contract(tmp_path):
         "static_t02")["required"].values())
     assert not all(delivery.functional_checks(
         "proposed", "t02_risk", telemetry, "turn_c1")["required"].values())
+
+
+def test_repair_acceptance_does_not_require_t02_scores(tmp_path):
+    delivery = c1.load_delivery()
+    shard = tmp_path / "server"
+    shard.mkdir()
+    record = {
+        "ratio": 8,
+        "exact_recovery": {"version": "c2kv-source-repair-v1",
+                           "variant": "request_contract", "status": "keep"},
+        "pre_generation_budget_checks": [{"status": "passed"}],
+        "generation_trace": [{
+            "status": "completed", "phase": "draft",
+            "controller": {"requested_ratio": 8,
+                           "candidate_algorithm": {"stable_call_ids": True}},
+            "generation": {"stats": {"backend": "sglang_c2kv_native_packed",
+                                     "gist_tokens": 3, "workspace_tokens": 2}},
+        }],
+    }
+    (shard / "steps.jsonl").write_text(json.dumps(record) + "\n", encoding="utf-8")
+    telemetry = delivery.summarize_task(
+        "bfcl", "multi_turn_base_0", tmp_path,
+        {"n_scored": 1, "n_generated": 1, "semantic_score": 1.0}, 1.0)
+    required = delivery.functional_checks(
+        "proposed", "t02_risk", telemetry, "request_contract")["required"]
+    assert all(required.values()), required
+    assert telemetry["risk_detector_scores"] == 0
+    assert not all(delivery.functional_checks(
+        "proposed", "t02_risk", dict(telemetry, risk_detector_scores=1),
+        "request_contract")["required"].values())
+
+
+def test_repair_server_command_omits_shadow_feature_setup(tmp_path, monkeypatch):
+    original_arm = c1.ARM
+    try:
+        c1.select_arm(VARIANT_TO_ARM["request_contract"])
+        delivery = c1.load_delivery()
+        config = json.loads(runner.DEFAULT_CONFIG.read_text())
+        config["checkpoint"] = str(tmp_path / "checkpoint")
+        config["sglang_source"] = str(tmp_path / "sglang")
+        args = c1.delivery_args(config, "bfcl_base", tmp_path / "out", [], delivery)
+        controller_path = tmp_path / "controller.json"
+        controller_path.write_text("{}", encoding="utf-8")
+        monkeypatch.setattr(delivery.current, "load_config", lambda: {
+            "ratio": 8, "runtime": {"shadow_feature_config": "risk.json"}})
+        seen = []
+        monkeypatch.setattr(delivery.runner, "server_command",
+                            lambda design, **_: seen.append(design) or ["--s0-config", "placeholder"])
+        monkeypatch.setattr(delivery.runner, "worker_command", lambda *_args, **_kwargs: [])
+        monkeypatch.setattr(delivery, "_benchmark_dir", lambda _args: tmp_path)
+        server, _ = delivery.commands_for_task(args, "multi_turn_base_0", controller_path)
+        assert server == ["--s0-config", str(controller_path)]
+        assert "shadow_feature_config" not in seen[0]["runtime"]
+    finally:
+        c1.select_arm(original_arm)

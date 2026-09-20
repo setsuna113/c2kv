@@ -1,4 +1,4 @@
-"""Explicit paper-matrix overlay for the four ratio-8 candidate arms."""
+"""Explicit paper-matrix overlay for ratio-8 candidate arms."""
 
 from __future__ import annotations
 
@@ -10,7 +10,11 @@ VARIANT_TO_ARM = {
     "turn_c1": "c2kv_turn_c1_r8",
     "goal_rescue": "c2kv_goal_rescue_r8",
     "dependency_first": "c2kv_dependency_first_r8",
+    "request_contract": "c2kv_request_contract_r8",
+    "argument_binding": "c2kv_argument_binding_r8",
+    "no_progress": "c2kv_no_progress_r8",
 }
+REPAIR_VARIANTS = frozenset({"request_contract", "argument_binding", "no_progress"})
 ARM_TO_VARIANT = {arm: variant for variant, arm in VARIANT_TO_ARM.items()}
 SUPPORTED_BENCHMARKS = frozenset({"bfcl_base", "acebench_agent"})
 

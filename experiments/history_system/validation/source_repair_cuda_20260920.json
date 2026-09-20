@@ -1,0 +1,853 @@
+{
+  "schema": "source-repair-cuda-validation-v1",
+  "status": "functional_validation_passed",
+  "source_commit": "0ca55898a259357e7c7d90f71c2e235c43712e36",
+  "implementation_commit": "104b403",
+  "runtime_protocol": "c2kv-source-repair-v1",
+  "device": "NVIDIA GeForce RTX 4090 Laptop GPU",
+  "checkpoint": "/home/lyc/dev/c2kv-cuda-port/checkpoint-1000",
+  "checkpoint_config_sha256": "15e14bfa5853ce7e74ef3cd6d65fc4b4411378c3111aebcfdc8ed272f5424655",
+  "engine_source_commit": "e7b1f7e73eab3f0e59244379ecba24983bf1720e",
+  "algorithm_source_sha256": {
+    "experiments/history_system/candidate_algorithms.py": "473e30de1688af3a5d5e60be664557448176424dc2180ae4ad82616df31d25dd",
+    "experiments/history_system/run_c1.py": "ef20cc71012b8106888580bf3600fc9b63ef7bb842a152573a715ebec2a0a43e",
+    "experiments/history_system/runtime/benchmarks/memory_runtime/acebench_runtime.py": "9ff462d698c6387cac7528241939ebdf99abcca3fa959eae090baca962de6c6e",
+    "experiments/history_system/runtime/benchmarks/memory_runtime/candidate_algorithms/__init__.py": "04e3953d9164f4ad7f3c258a0d218c9a1e7325bf51dd4f49bd442b529a3466b9",
+    "experiments/history_system/runtime/benchmarks/memory_runtime/candidate_algorithms/allocation.py": "ad75a90812111b77459d18d34ea9d2cb248cc95d8bca687277dd514e434c6c8c",
+    "experiments/history_system/runtime/benchmarks/memory_runtime/candidate_algorithms/argument_binding.py": "597c2923822980f336ce41da3986bffc69b345dda14eb1f1921c7c410ff8b07f",
+    "experiments/history_system/runtime/benchmarks/memory_runtime/candidate_algorithms/controller.py": "feb17723d70dd6a4b4b304f6d25c95f7f3cbb6da96f5bef5641af6213660e811",
+    "experiments/history_system/runtime/benchmarks/memory_runtime/candidate_algorithms/dependencies.py": "6ffef4e7f58f9b45a3062777f4235888781b2316e545b4a4c7a19ca5ff9b9520",
+    "experiments/history_system/runtime/benchmarks/memory_runtime/candidate_algorithms/no_progress.py": "dcd5922934ba5b3d3d9a671ed6f1a88175c7b99636acca504c6a84a8aa9957a7",
+    "experiments/history_system/runtime/benchmarks/memory_runtime/candidate_algorithms/observations.py": "3b14c80f6e71b477978b620a09a0e5aeb667df466277b3c60de04a671e711eec",
+    "experiments/history_system/runtime/benchmarks/memory_runtime/candidate_algorithms/progress.py": "4ea19792ba652ea4c2fd3ee74aa416bfee95cdb4f9bc0e0b20734d8734e9dbc1",
+    "experiments/history_system/runtime/benchmarks/memory_runtime/candidate_algorithms/repacking.py": "7aaea1d98a223fc8474fdd96f28c6e74d7d3cf6f744cf30f2758f7d71e191412",
+    "experiments/history_system/runtime/benchmarks/memory_runtime/candidate_algorithms/repair_controller.py": "f8eee3dbbe847bdd0d9ca69d67dbb73edc3deca3dcfb2eb05fd506b4f3dd2f17",
+    "experiments/history_system/runtime/benchmarks/memory_runtime/candidate_algorithms/repair_protocol.py": "a3d4ba5ebf4e0842f92bd198f1d43838115bb42dc3cd29992ba73708e28c9d0b",
+    "experiments/history_system/runtime/benchmarks/memory_runtime/candidate_algorithms/request_contract.py": "3ca82419d0dcbb57844cb14a48a9a771409200c5ad443876ab5246987219c4f9",
+    "experiments/history_system/runtime/benchmarks/memory_runtime/event_native_controls.py": "7b951ce0b68bb177a96fa197baf4a8d6bfd0c05e5ae2bd8cc6539604d6c10081",
+    "experiments/history_system/runtime/benchmarks/memory_runtime/event_native_server.py": "9642e69a9a50d0d9dcd6bbe8ce9417b309b97b142e57ad29ac58db530e56d342",
+    "experiments/history_system/runtime/benchmarks/memory_runtime/event_native_step.py": "3edc532e477f2d384d9391fbe22e0d650072e5c5820d2863ad0bfef41745bf36"
+  },
+  "published_tree_algorithm_parity": {
+    "experiments/history_system/candidate_algorithms.py": true,
+    "experiments/history_system/run_c1.py": true,
+    "experiments/history_system/runtime/benchmarks/memory_runtime/acebench_runtime.py": true,
+    "experiments/history_system/runtime/benchmarks/memory_runtime/candidate_algorithms/__init__.py": true,
+    "experiments/history_system/runtime/benchmarks/memory_runtime/candidate_algorithms/allocation.py": true,
+    "experiments/history_system/runtime/benchmarks/memory_runtime/candidate_algorithms/argument_binding.py": true,
+    "experiments/history_system/runtime/benchmarks/memory_runtime/candidate_algorithms/controller.py": true,
+    "experiments/history_system/runtime/benchmarks/memory_runtime/candidate_algorithms/dependencies.py": true,
+    "experiments/history_system/runtime/benchmarks/memory_runtime/candidate_algorithms/no_progress.py": true,
+    "experiments/history_system/runtime/benchmarks/memory_runtime/candidate_algorithms/observations.py": true,
+    "experiments/history_system/runtime/benchmarks/memory_runtime/candidate_algorithms/progress.py": true,
+    "experiments/history_system/runtime/benchmarks/memory_runtime/candidate_algorithms/repacking.py": true,
+    "experiments/history_system/runtime/benchmarks/memory_runtime/candidate_algorithms/repair_controller.py": true,
+    "experiments/history_system/runtime/benchmarks/memory_runtime/candidate_algorithms/repair_protocol.py": true,
+    "experiments/history_system/runtime/benchmarks/memory_runtime/candidate_algorithms/request_contract.py": true,
+    "experiments/history_system/runtime/benchmarks/memory_runtime/event_native_controls.py": true,
+    "experiments/history_system/runtime/benchmarks/memory_runtime/event_native_server.py": true,
+    "experiments/history_system/runtime/benchmarks/memory_runtime/event_native_step.py": true
+  },
+  "harness_integration": "Latest parallel tool-study changes merged; 54 merged-tree entry tests passed. CUDA algorithm files match by hash.",
+  "cpu_tests": {
+    "runtime_policies_controller_ace_legacy": 60,
+    "paper_entry_and_tool_study_after_merge": 54,
+    "delivery_and_summary": 12
+  },
+  "official_bfcl_smokes": [
+    {
+      "arm": "c2kv_argument_binding_r8",
+      "task_id": "multi_turn_base_26",
+      "qualification": "functional smoke; preliminary, n=1",
+      "n_scored": 1,
+      "semantic_score": 1.0,
+      "harness_failures": 0,
+      "method_failures": 0,
+      "decisions": 10,
+      "generation_calls": 10,
+      "recovery_attempts": 0,
+      "all_budget_checks_passed": true,
+      "commit_reviews": [
+        {
+          "schema": "c2kv-source-repair-v1",
+          "variant": "argument_binding",
+          "accepted": true,
+          "reason": "no_source_supported_guard",
+          "fallback": "original",
+          "selected_generation_index": 0
+        },
+        {
+          "schema": "c2kv-source-repair-v1",
+          "variant": "argument_binding",
+          "accepted": true,
+          "reason": "no_source_supported_guard",
+          "fallback": "original",
+          "selected_generation_index": 0
+        },
+        {
+          "schema": "c2kv-source-repair-v1",
+          "variant": "argument_binding",
+          "accepted": true,
+          "reason": "no_source_supported_guard",
+          "fallback": "original",
+          "selected_generation_index": 0
+        },
+        {
+          "schema": "c2kv-source-repair-v1",
+          "variant": "argument_binding",
+          "accepted": true,
+          "reason": "no_source_supported_guard",
+          "fallback": "original",
+          "selected_generation_index": 0
+        },
+        {
+          "schema": "c2kv-source-repair-v1",
+          "variant": "argument_binding",
+          "accepted": true,
+          "reason": "no_source_supported_guard",
+          "fallback": "original",
+          "selected_generation_index": 0
+        },
+        {
+          "schema": "c2kv-source-repair-v1",
+          "variant": "argument_binding",
+          "accepted": true,
+          "reason": "no_source_supported_guard",
+          "fallback": "original",
+          "selected_generation_index": 0
+        },
+        {
+          "schema": "c2kv-source-repair-v1",
+          "variant": "argument_binding",
+          "accepted": true,
+          "reason": "no_source_supported_guard",
+          "fallback": "original",
+          "selected_generation_index": 0
+        },
+        {
+          "schema": "c2kv-source-repair-v1",
+          "variant": "argument_binding",
+          "accepted": true,
+          "reason": "no_source_supported_guard",
+          "fallback": "original",
+          "selected_generation_index": 0
+        },
+        {
+          "schema": "c2kv-source-repair-v1",
+          "variant": "argument_binding",
+          "accepted": true,
+          "reason": "no_source_supported_guard",
+          "fallback": "original",
+          "selected_generation_index": 0
+        },
+        {
+          "schema": "c2kv-source-repair-v1",
+          "variant": "argument_binding",
+          "accepted": true,
+          "reason": "no_source_supported_guard",
+          "fallback": "original",
+          "selected_generation_index": 0
+        }
+      ],
+      "summary_path": "\\\\wsl.localhost\\Arch\\home\\lyc\\dev\\c2kv-source-repair-smoke-20260920\\results\\c2kv_argument_binding_r8__raw\\summary_c2kv_argument_binding_r8.json",
+      "summary_sha256": "9c2df7cfb2ca28914b06391285e3905de1cf49a24fc05a076db9898830fd0c81",
+      "steps": [
+        {
+          "path": "\\\\wsl.localhost\\Arch\\home\\lyc\\dev\\c2kv-source-repair-smoke-20260920\\results\\c2kv_argument_binding_r8__raw\\native\\task_shards\\multi_turn_base_26\\server\\steps.jsonl",
+          "sha256": "7814bfc39d3f981c6e8485379c5ec03ab5506362e660973306d05452f239c57d"
+        }
+      ]
+    },
+    {
+      "arm": "c2kv_no_progress_r8",
+      "task_id": "multi_turn_base_26",
+      "qualification": "functional smoke; preliminary, n=1",
+      "n_scored": 1,
+      "semantic_score": 1.0,
+      "harness_failures": 0,
+      "method_failures": 0,
+      "decisions": 10,
+      "generation_calls": 10,
+      "recovery_attempts": 0,
+      "all_budget_checks_passed": true,
+      "commit_reviews": [
+        {
+          "schema": "c2kv-source-repair-v1",
+          "variant": "no_progress",
+          "accepted": true,
+          "reason": "no_source_supported_guard",
+          "fallback": "original",
+          "selected_generation_index": 0
+        },
+        {
+          "schema": "c2kv-source-repair-v1",
+          "variant": "no_progress",
+          "accepted": true,
+          "reason": "no_source_supported_guard",
+          "fallback": "original",
+          "selected_generation_index": 0
+        },
+        {
+          "schema": "c2kv-source-repair-v1",
+          "variant": "no_progress",
+          "accepted": true,
+          "reason": "no_source_supported_guard",
+          "fallback": "original",
+          "selected_generation_index": 0
+        },
+        {
+          "schema": "c2kv-source-repair-v1",
+          "variant": "no_progress",
+          "accepted": true,
+          "reason": "no_source_supported_guard",
+          "fallback": "original",
+          "selected_generation_index": 0
+        },
+        {
+          "schema": "c2kv-source-repair-v1",
+          "variant": "no_progress",
+          "accepted": true,
+          "reason": "no_source_supported_guard",
+          "fallback": "original",
+          "selected_generation_index": 0
+        },
+        {
+          "schema": "c2kv-source-repair-v1",
+          "variant": "no_progress",
+          "accepted": true,
+          "reason": "no_source_supported_guard",
+          "fallback": "original",
+          "selected_generation_index": 0
+        },
+        {
+          "schema": "c2kv-source-repair-v1",
+          "variant": "no_progress",
+          "accepted": true,
+          "reason": "no_source_supported_guard",
+          "fallback": "original",
+          "selected_generation_index": 0
+        },
+        {
+          "schema": "c2kv-source-repair-v1",
+          "variant": "no_progress",
+          "accepted": true,
+          "reason": "no_source_supported_guard",
+          "fallback": "original",
+          "selected_generation_index": 0
+        },
+        {
+          "schema": "c2kv-source-repair-v1",
+          "variant": "no_progress",
+          "accepted": true,
+          "reason": "no_source_supported_guard",
+          "fallback": "original",
+          "selected_generation_index": 0
+        },
+        {
+          "schema": "c2kv-source-repair-v1",
+          "variant": "no_progress",
+          "accepted": true,
+          "reason": "no_source_supported_guard",
+          "fallback": "original",
+          "selected_generation_index": 0
+        }
+      ],
+      "summary_path": "\\\\wsl.localhost\\Arch\\home\\lyc\\dev\\c2kv-source-repair-smoke-20260920\\results\\c2kv_no_progress_r8__raw\\summary_c2kv_no_progress_r8.json",
+      "summary_sha256": "9d5ae54fa1a99a855c9d75129a31af7bfcc76b7992f709ee2a80391e4ecd9840",
+      "steps": [
+        {
+          "path": "\\\\wsl.localhost\\Arch\\home\\lyc\\dev\\c2kv-source-repair-smoke-20260920\\results\\c2kv_no_progress_r8__raw\\native\\task_shards\\multi_turn_base_26\\server\\steps.jsonl",
+          "sha256": "003acbeb71e3ceac7f500c2017b0c4b4abefe48c0837ca43cc562bad5643ee7c"
+        }
+      ]
+    },
+    {
+      "arm": "c2kv_request_contract_r8",
+      "task_id": "multi_turn_base_26",
+      "qualification": "functional smoke; preliminary, n=1",
+      "n_scored": 1,
+      "semantic_score": 0.0,
+      "harness_failures": 0,
+      "method_failures": 0,
+      "decisions": 7,
+      "generation_calls": 11,
+      "recovery_attempts": 4,
+      "all_budget_checks_passed": true,
+      "commit_reviews": [
+        {
+          "schema": "c2kv-source-repair-v1",
+          "variant": "request_contract",
+          "accepted": true,
+          "reason": "no_source_supported_guard",
+          "fallback": "original",
+          "selected_generation_index": 0
+        },
+        {
+          "schema": "c2kv-source-repair-v1",
+          "variant": "request_contract",
+          "accepted": true,
+          "reason": "no_proven_contract_violation",
+          "fallback": "original",
+          "selected_generation_index": 1
+        },
+        {
+          "schema": "c2kv-source-repair-v1",
+          "variant": "request_contract",
+          "accepted": true,
+          "reason": "no_source_supported_guard",
+          "fallback": "original",
+          "selected_generation_index": 0
+        },
+        {
+          "schema": "c2kv-source-repair-v1",
+          "variant": "request_contract",
+          "accepted": true,
+          "reason": "same_action",
+          "fallback": "original",
+          "selected_generation_index": 1
+        },
+        {
+          "schema": "c2kv-source-repair-v1",
+          "variant": "request_contract",
+          "accepted": true,
+          "reason": "no_source_supported_guard",
+          "fallback": "original",
+          "selected_generation_index": 0
+        },
+        {
+          "schema": "c2kv-source-repair-v1",
+          "variant": "request_contract",
+          "accepted": true,
+          "reason": "same_action",
+          "fallback": "original",
+          "selected_generation_index": 1
+        },
+        {
+          "schema": "c2kv-source-repair-v1",
+          "variant": "request_contract",
+          "accepted": true,
+          "reason": "same_action",
+          "fallback": "original",
+          "selected_generation_index": 1
+        }
+      ],
+      "summary_path": "\\\\wsl.localhost\\Arch\\home\\lyc\\dev\\c2kv-source-repair-smoke-20260920\\results\\c2kv_request_contract_r8__raw\\summary_c2kv_request_contract_r8.json",
+      "summary_sha256": "51f048f6b8a23ef3511197f8afce36175b4c191c3d2a5d226d6c24b2a2031a3e",
+      "steps": [
+        {
+          "path": "\\\\wsl.localhost\\Arch\\home\\lyc\\dev\\c2kv-source-repair-smoke-20260920\\results\\c2kv_request_contract_r8__raw\\native\\task_shards\\multi_turn_base_26\\server\\steps.jsonl",
+          "sha256": "e479545a81223be07e9f3864f1b054ff82415e8a6dd375d5d22088b6ea70ba1c"
+        }
+      ]
+    }
+  ],
+  "request_contract_negative_observation": {
+    "task": "multi_turn_base_26",
+    "decision": "turn-0/step-1",
+    "held_action": "ls(a=True)",
+    "regenerated_action": "STOP",
+    "preceding_observation": "cd(folder='temporary') failed; directory did not exist",
+    "interpretation": "Review removed a diagnostic action after a failed prerequisite. Retained negative result; no quality claim or result-driven rerun."
+  },
+  "active_cuda_fixtures": {
+    "schema": "source-repair-injected-held-cuda-fixtures-v1",
+    "status": "passed",
+    "qualification": "functional smoke, not a benchmark score",
+    "injected_held_draft_generation_cost": 0,
+    "started_unix_seconds": 1789859382.9152088,
+    "snapshot": "/home/lyc/dev/c2kv-source-repair-smoke-20260920",
+    "upstream": "http://127.0.0.1:34920",
+    "checkpoint": "/home/lyc/dev/c2kv-cuda-port/checkpoint-1000",
+    "checkpoint_config_sha256": "15e14bfa5853ce7e74ef3cd6d65fc4b4411378c3111aebcfdc8ed272f5424655",
+    "snapshot_provenance": {
+      "paper_commit": "7d1df1743d5c3d49cc7b0fe1216d6c847e452cbf",
+      "engine_commit": "b4b917000bc73671880d603ac7b8d7eb1e91f0c0",
+      "paper_source_manifest": "/home/lyc/dev/c2kv-source-repair-smoke-20260920/paper_source.json",
+      "engine_source_manifest": "/home/lyc/dev/c2kv-source-repair-smoke-20260920/engine_source.json"
+    },
+    "model_info": {
+      "model_path": "/home/lyc/dev/c2kv-cuda-port/checkpoint-1000",
+      "tokenizer_path": "/home/lyc/dev/c2kv-cuda-port/checkpoint-1000",
+      "is_generation": true,
+      "preferred_sampling_params": null,
+      "weight_version": "default",
+      "has_image_understanding": false,
+      "has_audio_understanding": false,
+      "model_type": "qwen3",
+      "architectures": [
+        "Qwen3ForCausalLM"
+      ],
+      "model_dimensions": {
+        "hidden_size": 2560,
+        "intermediate_size": 9728,
+        "num_hidden_layers": 36,
+        "num_attention_heads": 32,
+        "num_key_value_heads": 8,
+        "head_dim": 128,
+        "vocab_size": 151936
+      },
+      "c2kv_native_packed": {
+        "schema": "c2kv-native-packed-capability-v1",
+        "enabled": true,
+        "endpoint": "/v1/c2kv/native_generate",
+        "packing_version": "history-event-v1",
+        "raw_layout_profile": "event-native-evidence-v1",
+        "model_binding": {
+          "model_path": "/home/lyc/dev/c2kv-cuda-port/checkpoint-1000",
+          "tokenizer_path": "/home/lyc/dev/c2kv-cuda-port/checkpoint-1000",
+          "weight_version": "default",
+          "dtype": "bfloat16",
+          "kv_cache_dtype": "bfloat16",
+          "gist_parameter_dtype": "float32",
+          "gist_compute_dtype": "bfloat16",
+          "gist_type": "dynamic-interleave",
+          "gist_param": "qkv",
+          "gist_extra_embed_num": 1,
+          "gist_residual_type": "embed-mean",
+          "gist_overlap": 0,
+          "pic_enabled": false,
+          "pic_param": "qkv",
+          "query_projection": "base"
+        },
+        "tool_gist": {
+          "enabled": false,
+          "source": null,
+          "identity": null,
+          "metadata": null
+        },
+        "parameter_version": "default",
+        "kv_bytes_per_token": 147456,
+        "num_hidden_layers": 36,
+        "num_key_value_heads": 8,
+        "head_dim": 128,
+        "value_head_dim": 128,
+        "shadow_feature_layer": 34,
+        "shadow_feature_readout": "decoder_layer_output",
+        "shadow_feature_stored_dtype": "float16",
+        "gist_parameter_dtype": "float32",
+        "gist_compute_dtype": "bfloat16",
+        "base_query_enforced": true,
+        "sampling_profiles": [
+          "greedy-v1",
+          "acebench-agent-v1"
+        ],
+        "server_default_query_projection": "base"
+      }
+    },
+    "fixtures": [
+      {
+        "variant": "request_contract",
+        "status": "passed",
+        "scope": "injected held draft, source-backed proposal, one real CUDA regeneration; no benchmark score",
+        "fixture_claim": "Prior completed order, current completed deposit, held STOP.",
+        "visible_prefix_sha256": "e91ba4b8ca784be2e20f2c3044788e57273c8d317e559e9a0685ffde6faa4ec2",
+        "injected_held_draft": {
+          "status": "text",
+          "text": "The requested deposit is complete.",
+          "tool_calls": [],
+          "model_generation_calls": 0
+        },
+        "proposal": {
+          "version": "c2kv-source-repair-v1",
+          "variant": "request_contract",
+          "status": "recover",
+          "reason": "request_contract_review",
+          "regeneration_allowed": true,
+          "upgrade_count": 1,
+          "decision_index": 1,
+          "selection": {
+            "selector": "policy_evidence",
+            "selected_ids": []
+          },
+          "limits": {
+            "one_regeneration_per_decision": true,
+            "task_generation_limit": 96,
+            "online_cumulative_quota_applied": false
+          },
+          "proposal": {
+            "version": "current-request-contract-v1",
+            "status": "source_review",
+            "request_event_id": "injected-source-repair-fixture/request_contract:m4",
+            "result_source_indices": [
+              6
+            ],
+            "omitted_operation_count": 0,
+            "held_action_kind": "stop",
+            "completion": "unknown",
+            "semantic_verification": "model_review"
+          },
+          "guard": {
+            "current_request_event_id": "injected-source-repair-fixture/request_contract:m4",
+            "held_calls": []
+          },
+          "proposal_state_sha256": "a4f4e4c48d0d5c752d4cd36618520f77bd4cd89c11875edeeb445070413c1465",
+          "allocation": {
+            "policy": "candidate-budgeted-replacement-v1",
+            "status": "admitted",
+            "candidate_event_id": null,
+            "demoted_raw_event_ids": [
+              "injected-source-repair-fixture/request_contract:m2"
+            ],
+            "released_gist_event_ids": [],
+            "raw_gist_exclusive": true,
+            "b0_rechecked_after_all_changes": true,
+            "derived_workspace_messages": 1
+          }
+        },
+        "budget": {
+          "initial": {
+            "schema": "a-hybrid-pre-generation-budget-v1",
+            "phase": "injected_held_draft_no_generation",
+            "status": "passed",
+            "errors": [],
+            "history_budget_bytes": 113246208,
+            "active_history_bytes": 18284544,
+            "declared_active_history_bytes": 18284544,
+            "kv_bytes_per_token": 147456,
+            "common_prompt_tokens": 234,
+            "resident_prompt_tokens": 358,
+            "resident_prompt_kv_bytes": 52789248,
+            "active_gist_bytes": 4718592,
+            "active_raw_and_derived_history_bytes": 13565952,
+            "scope": "Assembled BF16 KV representation at loaded-model geometry; excludes weights, allocator overhead and CPU/disk archives.",
+            "all_derived_workspace_content_charged": true
+          },
+          "regeneration": {
+            "schema": "a-hybrid-pre-generation-budget-v1",
+            "phase": "regeneration",
+            "status": "passed",
+            "errors": [],
+            "history_budget_bytes": 113246208,
+            "active_history_bytes": 42024960,
+            "declared_active_history_bytes": 42024960,
+            "kv_bytes_per_token": 147456,
+            "common_prompt_tokens": 234,
+            "resident_prompt_tokens": 519,
+            "resident_prompt_kv_bytes": 76529664,
+            "active_gist_bytes": 2211840,
+            "active_raw_and_derived_history_bytes": 39813120,
+            "scope": "Assembled BF16 KV representation at loaded-model geometry; excludes weights, allocator overhead and CPU/disk archives.",
+            "all_derived_workspace_content_charged": true
+          }
+        },
+        "actual_cuda_generation": {
+          "http_journal": "/home/lyc/dev/c2kv-source-repair-smoke-20260920/active_fixtures.request_contract.http.jsonl",
+          "http_journal_sha256": "6fd7c727296a4e23dd722b5874591cfc1fd85d97615fc299595ac6876fb67ef4",
+          "http_completed_responses": 1,
+          "generated_tokens": 14,
+          "extracted_chunks": 2,
+          "backend": "sglang_c2kv_native_packed",
+          "resident_prefix_kv_tokens": 225,
+          "finish_reason": "stop",
+          "decoded_text": "The requested deposit of 20 to account A is complete.",
+          "parsed_status": "text",
+          "parsed_reason": "no_native_tool_calls",
+          "parsed_tool_calls": []
+        },
+        "commit_verdict": {
+          "schema": "c2kv-source-repair-v1",
+          "variant": "request_contract",
+          "accepted": true,
+          "reason": "same_action",
+          "fallback": "original"
+        },
+        "selected_action_source": "regeneration",
+        "cuda_generation_completed": 1,
+        "benchmark_score_claimed": false
+      },
+      {
+        "variant": "argument_binding",
+        "status": "passed",
+        "scope": "injected held draft, source-backed proposal, one real CUDA regeneration; no benchmark score",
+        "fixture_claim": "Current literal recipient typo; retain source-grounded account_id.",
+        "visible_prefix_sha256": "b1fe3704798ec057737e6c19c4759509728ae73a83d9130f84c9395f9be6972b",
+        "injected_held_draft": {
+          "status": "tool_calls",
+          "text": "<tool_call>{\"name\":\"send_transfer\",\"arguments\":{\"recipient_id\":\"recipient-4813\",\"account_id\":\"account-9100\"}}</tool_call>",
+          "tool_calls": [
+            {
+              "id": "injected_held_argument_binding_0",
+              "type": "function",
+              "function": {
+                "name": "send_transfer",
+                "arguments": "{\"recipient_id\":\"recipient-4813\",\"account_id\":\"account-9100\"}"
+              }
+            }
+          ],
+          "model_generation_calls": 0
+        },
+        "proposal": {
+          "version": "c2kv-source-repair-v1",
+          "variant": "argument_binding",
+          "status": "recover",
+          "reason": "argument_binding_review",
+          "regeneration_allowed": true,
+          "upgrade_count": 1,
+          "decision_index": 1,
+          "selection": {
+            "selector": "policy_evidence",
+            "selected_ids": []
+          },
+          "limits": {
+            "one_regeneration_per_decision": true,
+            "task_generation_limit": 96,
+            "online_cumulative_quota_applied": false
+          },
+          "proposal": {
+            "version": "source-argument-binding-v1",
+            "status": "source_review",
+            "request_event_id": "injected-source-repair-fixture/argument_binding:m4",
+            "result_source_indices": [
+              3
+            ],
+            "explicit_conflict_count": 1,
+            "grounded_held_field_count": 1,
+            "arithmetic_review": false,
+            "same_batch_dependency_review": false,
+            "omitted_result_count": 0,
+            "semantic_verification": "model_review"
+          },
+          "guard": {
+            "grounded_held_fields": [
+              {
+                "call_index": 0,
+                "tool": "send_transfer",
+                "path": [
+                  "account_id"
+                ],
+                "value": "account-9100",
+                "source": "tool_result",
+                "result_source_index": 3,
+                "observation_version": 1
+              }
+            ]
+          },
+          "proposal_state_sha256": "f74962e63d9b7c76f508afe7f55f02709418ac845144fed012b2d8740f2de1e2",
+          "allocation": {
+            "policy": "candidate-budgeted-replacement-v1",
+            "status": "admitted",
+            "candidate_event_id": null,
+            "demoted_raw_event_ids": [],
+            "released_gist_event_ids": [],
+            "raw_gist_exclusive": true,
+            "b0_rechecked_after_all_changes": true,
+            "derived_workspace_messages": 1
+          }
+        },
+        "budget": {
+          "initial": {
+            "schema": "a-hybrid-pre-generation-budget-v1",
+            "phase": "injected_held_draft_no_generation",
+            "status": "passed",
+            "errors": [],
+            "history_budget_bytes": 113246208,
+            "active_history_bytes": 5898240,
+            "declared_active_history_bytes": 5898240,
+            "kv_bytes_per_token": 147456,
+            "common_prompt_tokens": 260,
+            "resident_prompt_tokens": 300,
+            "resident_prompt_kv_bytes": 44236800,
+            "active_gist_bytes": 2211840,
+            "active_raw_and_derived_history_bytes": 3686400,
+            "scope": "Assembled BF16 KV representation at loaded-model geometry; excludes weights, allocator overhead and CPU/disk archives.",
+            "all_derived_workspace_content_charged": true
+          },
+          "regeneration": {
+            "schema": "a-hybrid-pre-generation-budget-v1",
+            "phase": "regeneration",
+            "status": "passed",
+            "errors": [],
+            "history_budget_bytes": 113246208,
+            "active_history_bytes": 57802752,
+            "declared_active_history_bytes": 57802752,
+            "kv_bytes_per_token": 147456,
+            "common_prompt_tokens": 260,
+            "resident_prompt_tokens": 652,
+            "resident_prompt_kv_bytes": 96141312,
+            "active_gist_bytes": 589824,
+            "active_raw_and_derived_history_bytes": 57212928,
+            "scope": "Assembled BF16 KV representation at loaded-model geometry; excludes weights, allocator overhead and CPU/disk archives.",
+            "all_derived_workspace_content_charged": true
+          }
+        },
+        "actual_cuda_generation": {
+          "http_journal": "/home/lyc/dev/c2kv-source-repair-smoke-20260920/active_fixtures.argument_binding.http.jsonl",
+          "http_journal_sha256": "c9bceeba0c7d962f569be59889f09b22c6d726091d437079dce3e8a0ad5cf150",
+          "http_completed_responses": 1,
+          "generated_tokens": 38,
+          "extracted_chunks": 1,
+          "backend": "sglang_c2kv_native_packed",
+          "resident_prefix_kv_tokens": 219,
+          "finish_reason": "stop",
+          "decoded_text": "<tool_call>\n{\"name\": \"send_transfer\", \"arguments\": {\"recipient_id\": \"recipient-4812\", \"account_id\": \"account-9100\"}}\n</tool_call>",
+          "parsed_status": "tool_calls",
+          "parsed_reason": "complete_native_calls",
+          "parsed_tool_calls": [
+            {
+              "id": "fixture_argument_binding_r1_0",
+              "type": "function",
+              "function": {
+                "name": "send_transfer",
+                "arguments": "{\"recipient_id\":\"recipient-4812\",\"account_id\":\"account-9100\"}"
+              }
+            }
+          ]
+        },
+        "commit_verdict": {
+          "schema": "c2kv-source-repair-v1",
+          "variant": "argument_binding",
+          "accepted": true,
+          "reason": "source_bindings_preserved",
+          "fallback": "original"
+        },
+        "selected_action_source": "regeneration",
+        "cuda_generation_completed": 1,
+        "benchmark_score_claimed": false
+      },
+      {
+        "variant": "no_progress",
+        "status": "passed",
+        "scope": "injected held draft, source-backed proposal, one real CUDA regeneration; no benchmark score",
+        "fixture_claim": "Latest explicit nontransient execution error, held exact retry.",
+        "visible_prefix_sha256": "a461110e06f8830db3ef723a92cb9d82113e6b5e6066bcc0c47c7a3e444c9744",
+        "injected_held_draft": {
+          "status": "tool_calls",
+          "text": "<tool_call>{\"name\":\"lookup_record\",\"arguments\":{\"record_id\":\"record-164\"}}</tool_call>",
+          "tool_calls": [
+            {
+              "id": "injected_held_no_progress_0",
+              "type": "function",
+              "function": {
+                "name": "lookup_record",
+                "arguments": "{\"record_id\":\"record-164\"}"
+              }
+            }
+          ],
+          "model_generation_calls": 0
+        },
+        "proposal": {
+          "version": "c2kv-source-repair-v1",
+          "variant": "no_progress",
+          "status": "recover",
+          "reason": "draft_repeats_failed_operation",
+          "regeneration_allowed": true,
+          "upgrade_count": 1,
+          "decision_index": 1,
+          "selection": {
+            "selector": "policy_evidence",
+            "selected_ids": []
+          },
+          "limits": {
+            "one_regeneration_per_decision": true,
+            "task_generation_limit": 96,
+            "online_cumulative_quota_applied": false
+          },
+          "proposal": {
+            "version": "source-no-progress-v1",
+            "status": "prepared",
+            "reason": "draft_repeats_failed_operation",
+            "current_request_event_id": "injected-source-repair-fixture/no_progress:m1",
+            "observed_sources": [
+              {
+                "event_id": "injected-source-repair-fixture/no_progress:m2",
+                "event_source_indices": [
+                  2,
+                  3
+                ],
+                "call_source_index": 2,
+                "result_source_index": 3,
+                "observation_version": 1,
+                "tool_call_id": "lookup-1"
+              }
+            ],
+            "source_state_sha256": "24216cbf09a095e8800961e9b1499325cca8b324816c45e02e931d669ec6431e",
+            "goal_completion": "unknown",
+            "packet_tokens": 247
+          },
+          "guard": {
+            "reject_unchanged_failed_exact_call": true,
+            "source_state_sha256": "24216cbf09a095e8800961e9b1499325cca8b324816c45e02e931d669ec6431e"
+          },
+          "proposal_state_sha256": "46a9ce38f254452001d63c2a0559f7207f4599bce5c4b967b120b6bebfd1a84f",
+          "allocation": {
+            "policy": "candidate-budgeted-replacement-v1",
+            "status": "admitted",
+            "candidate_event_id": null,
+            "demoted_raw_event_ids": [],
+            "released_gist_event_ids": [],
+            "raw_gist_exclusive": true,
+            "b0_rechecked_after_all_changes": true,
+            "derived_workspace_messages": 1
+          }
+        },
+        "budget": {
+          "initial": {
+            "schema": "a-hybrid-pre-generation-budget-v1",
+            "phase": "injected_held_draft_no_generation",
+            "status": "passed",
+            "errors": [],
+            "history_budget_bytes": 113246208,
+            "active_history_bytes": 8994816,
+            "declared_active_history_bytes": 8994816,
+            "kv_bytes_per_token": 147456,
+            "common_prompt_tokens": 165,
+            "resident_prompt_tokens": 226,
+            "resident_prompt_kv_bytes": 33325056,
+            "active_gist_bytes": 2359296,
+            "active_raw_and_derived_history_bytes": 6635520,
+            "scope": "Assembled BF16 KV representation at loaded-model geometry; excludes weights, allocator overhead and CPU/disk archives.",
+            "all_derived_workspace_content_charged": true
+          },
+          "regeneration": {
+            "schema": "a-hybrid-pre-generation-budget-v1",
+            "phase": "regeneration",
+            "status": "passed",
+            "errors": [],
+            "history_budget_bytes": 113246208,
+            "active_history_bytes": 42762240,
+            "declared_active_history_bytes": 42762240,
+            "kv_bytes_per_token": 147456,
+            "common_prompt_tokens": 165,
+            "resident_prompt_tokens": 455,
+            "resident_prompt_kv_bytes": 67092480,
+            "active_gist_bytes": 0,
+            "active_raw_and_derived_history_bytes": 42762240,
+            "scope": "Assembled BF16 KV representation at loaded-model geometry; excludes weights, allocator overhead and CPU/disk archives.",
+            "all_derived_workspace_content_charged": true
+          }
+        },
+        "actual_cuda_generation": {
+          "http_journal": "/home/lyc/dev/c2kv-source-repair-smoke-20260920/active_fixtures.no_progress.http.jsonl",
+          "http_journal_sha256": "50596187b63c2a8acba6cff152814f83b5ece64f9362f83dc92eb85f7a4a4566",
+          "http_completed_responses": 1,
+          "generated_tokens": 80,
+          "extracted_chunks": 0,
+          "backend": "sglang_c2kv_native_packed",
+          "resident_prefix_kv_tokens": 146,
+          "finish_reason": "stop",
+          "decoded_text": "The operation failed with the error \"invalid record id\". This suggests that `record-164` might not be a valid record ID or there could be a typo. \n\nTo proceed, I should verify the correctness of the record ID. Could you please confirm if `record-164` is the correct record ID or if there's a possibility of a typo or alternative identifier?",
+          "parsed_status": "text",
+          "parsed_reason": "no_native_tool_calls",
+          "parsed_tool_calls": []
+        },
+        "commit_verdict": {
+          "schema": "c2kv-source-repair-v1",
+          "variant": "no_progress",
+          "accepted": true,
+          "reason": "stop_is_legal",
+          "fallback": "original"
+        },
+        "selected_action_source": "regeneration",
+        "cuda_generation_completed": 1,
+        "benchmark_score_claimed": false
+      }
+    ],
+    "finished_unix_seconds": 1789859387.2311015
+  },
+  "owned_server_stopped": {
+    "port": 34920,
+    "healthy": false
+  },
+  "npu_model_validation": "not run; source and CPU integration checked separately",
+  "scope": "No detector retraining, full benchmark launch, production restart, or historical result replacement."
+}
