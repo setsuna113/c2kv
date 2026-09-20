@@ -46,8 +46,11 @@ def test_candidate_matrix_defaults_to_bfcl_base_and_explicitly_adds_acebench(tmp
             assert "benchmarks.paper.c1" in row["command"]
             assert row["command"][row["command"].index("--arm") + 1] == row["arm"]
             assert row["cell_id"] == f"acebench_agent__{row['arm']}"
+    long_app = with_candidate_methods(original, ("goal_rescue",), ("bfcl_long_context", "appworld"))
+    goal = [row for row in long_app["methods"] if row["arm"] == VARIANT_TO_ARM["goal_rescue"]]
+    assert goal and goal[0]["benchmarks"] == ["bfcl_long_context", "appworld"]
     with pytest.raises(ValueError, match="subset"):
-        with_candidate_methods(original, ("static_t02",), ("bfcl_long_context",))
+        with_candidate_methods(original, ("static_t02",), ("toolsandbox",))
 
 
 @pytest.mark.parametrize("variant,arm", [
@@ -109,8 +112,16 @@ def test_candidate_delivery_uses_ratio8_and_bound_artifact(tmp_path, monkeypatch
         ace_controller, ace_profile = delivery.build_profile(ace_args)
         assert ace_controller["candidate_algorithm"]["variant"] == variant
         assert ace_profile["candidate_algorithm"] == variant
-        with pytest.raises(ValueError, match="bfcl_base and acebench_agent"):
-            c1.delivery_args(config, "bfcl_long_context", tmp_path / "out", [], delivery)
+        long_args = c1.delivery_args(config, "bfcl_long_context", tmp_path / "out", [], delivery)
+        assert long_args.benchmark == "bfcl"
+        assert long_args.candidate_algorithm == variant
+        app_args = c1.delivery_args(config, "appworld", tmp_path / "out", [], delivery)
+        assert app_args.benchmark == "acon_appworld"
+        app_controller, app_profile = delivery.build_profile(app_args)
+        assert app_controller["candidate_algorithm"]["variant"] == variant
+        assert app_profile["candidate_algorithm"] == variant
+        with pytest.raises(ValueError, match="candidate arms support"):
+            c1.delivery_args(config, "toolsandbox", tmp_path / "out", [], delivery)
     finally:
         c1.select_arm(original_arm)
 

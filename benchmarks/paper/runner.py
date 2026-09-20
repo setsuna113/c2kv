@@ -13,7 +13,10 @@ import time
 import urllib.error
 import urllib.request
 
-from .candidate_matrix import ARM_TO_VARIANT, parse_candidate_arms, with_candidate_methods
+from .candidate_matrix import (
+    ARM_TO_VARIANT, SUPPORTED_BENCHMARKS as CANDIDATE_BENCHMARKS,
+    parse_candidate_arms, with_candidate_methods,
+)
 from benchmarks.history_budget import HistoryKVBudget, parse_history_kv_budget
 from .artifact_io import atomic_json, atomic_text, preparation_lock
 from .process_lifecycle import (defer_termination, run_owned, stop_owned_group,
@@ -32,7 +35,7 @@ DEFAULT_CONFIG = Path(__file__).with_name("config.json")
 ACEBENCH_MAX_RUNNING_REQUESTS = 2
 REFERENCE_ATTENTION_MEM_FRACTION = 0.65   # static pool cap for reference_attention arms (see server_command)
 C1_ARMS = {"c2kv_c1_t02_r8": 8, "c2kv_c1_t02_r4": 4, "c2kv_c1_off_r8": 8}
-BUDGET_TEXT_BENCHMARKS = {"bfcl_base", "bfcl_long_context", "acebench_agent"}
+BUDGET_TEXT_BENCHMARKS = {"bfcl_base", "bfcl_long_context", "appworld", "acebench_agent"}
 
 EVENT_NATIVE_CHECKPOINT_MARKERS = {
     "history_memory_training_profile": "history-event-base-query-v1",
@@ -240,7 +243,7 @@ def with_acon_budget(config, budget):
     benchmarks = [row["name"] for row in config["benchmarks"]
                   if row["name"] in BUDGET_TEXT_BENCHMARKS]
     if not benchmarks:
-        raise ValueError("ACON budget overlay requires BFCL or ACEBench Agent")
+        raise ValueError("ACON budget overlay requires BFCL, AppWorld or ACEBench Agent")
     return dict(config, methods=[*config["methods"], {
         "method": "ACON-budget", "arm": arm.name, "group": "budget",
         "history_budget_tokens": budget, "benchmarks": benchmarks,
@@ -260,7 +263,7 @@ def with_hiagent_budget(config, budget):
     benchmarks = [row["name"] for row in config["benchmarks"]
                   if row["name"] in BUDGET_TEXT_BENCHMARKS]
     if not benchmarks:
-        raise ValueError("HiAgent budget overlay requires BFCL or ACEBench Agent")
+        raise ValueError("HiAgent budget overlay requires BFCL, AppWorld or ACEBench Agent")
     return dict(config, methods=[*config["methods"], {
         "method": "HiAgent-budget", "arm": arm.name, "group": "budget",
         "history_budget_tokens": budget, "benchmarks": benchmarks,
@@ -442,9 +445,10 @@ def _prepare_locked(config, output, source):
             if (item.get("ratio") != 8 or arm.ratio != 8
                     or arm.native_controller != "candidate_" + ARM_TO_VARIANT[arm.name]
                     or not item.get("benchmarks")
-                    or not set(item["benchmarks"]) <= {"bfcl_base", "acebench_agent"}
+                    or not set(item["benchmarks"]) <= CANDIDATE_BENCHMARKS
                     or not set(item["benchmarks"]) <= {b["name"] for b in config["benchmarks"]}):
-                raise ValueError("Candidate arms require native ratio8 and explicit BFCL base/ACEBench Agent methods")
+                raise ValueError("Candidate arms require native ratio8 and explicit supported benchmarks "
+                                 "(" + ",".join(sorted(CANDIDATE_BENCHMARKS)) + ")")
             continue
         if arm.name == "c2kv_native_r4":
             if item.get("ratio") != 4 or item["method"] != "C2KV":
@@ -955,7 +959,8 @@ def main(argv=None):
     parser.add_argument("--candidate-arms", default="",
                         help="explicit candidates: all or comma-separated static_t02,turn_c1,goal_rescue,dependency_first")
     parser.add_argument("--candidate-benchmarks", default="bfcl_base",
-                        help="candidate benchmark scope: bfcl_base (default), acebench_agent, or both comma-separated")
+                        help="candidate benchmark scope, comma-separated subset of "
+                             "bfcl_base (default), bfcl_long_context, appworld, acebench_agent")
     parser.add_argument("--acon-budget-tokens", type=int,
                         help="add budget-adapted ACON BFCL/ACEBench cells with this actor history cap")
     parser.add_argument("--hiagent-budget-tokens", type=int,
