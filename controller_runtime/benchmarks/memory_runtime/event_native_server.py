@@ -441,8 +441,13 @@ def _serve(args):
         controller = controller_factory(tokenizer, **controller_kwargs)
         if isinstance(s0_config, dict) and 'candidate_algorithm' in s0_config:
             candidate = s0_config['candidate_algorithm']
-            from .candidate_algorithms import GOAL_VARIANTS, GOAL_VERSION, REPAIR_VARIANTS
-            if candidate['variant'] in GOAL_VARIANTS:
+            from .candidate_algorithms import (
+                GOAL_VARIANTS, GOAL_VERSION, REPAIR_VARIANTS,
+                VERIFIED_VARIANTS, VERIFIED_VERSION,
+            )
+            if candidate['variant'] in VERIFIED_VARIANTS:
+                version = VERIFIED_VERSION
+            elif candidate['variant'] in GOAL_VARIANTS:
                 version = GOAL_VERSION
             elif candidate['variant'] in REPAIR_VARIANTS:
                 version = 'c2kv-source-repair-v1'
@@ -452,6 +457,9 @@ def _serve(args):
                 'variant': candidate['variant'], 'stable_call_ids': True,
                 'recovery_rounds_per_decision': 1,
             }
+            if candidate['variant'] in VERIFIED_VARIANTS:
+                from .candidate_algorithms.verified_binding import PROOF_REGISTRY_VERSION
+                manifest['candidate_algorithm']['proof_registry_version'] = PROOF_REGISTRY_VERSION
             manifest['route_contract'].update(
                 baseline_identity=version + ':' + candidate['variant'],
                 recovery_enabled=True, max_generations_per_decision=2)

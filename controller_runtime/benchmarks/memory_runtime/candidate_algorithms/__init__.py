@@ -7,4 +7,6 @@ VERSION = "c2kv-paper-candidates-v1"
 REPAIR_VARIANTS = ("request_contract", "argument_binding", "no_progress")
 GOAL_VARIANTS = ("goal_pending", "goal_source", "goal_progress", "goal_joint")
 GOAL_VERSION = "c2kv-goal-composition-v1"
-ALL_VARIANTS = VARIANTS + REPAIR_VARIANTS + GOAL_VARIANTS
+VERIFIED_VARIANTS = ("goal_verified", "pending_verified")
+VERIFIED_VERSION = "c2kv-verified-binding-v1"
+ALL_VARIANTS = VARIANTS + REPAIR_VARIANTS + GOAL_VARIANTS + VERIFIED_VARIANTS

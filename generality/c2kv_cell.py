@@ -60,6 +60,7 @@ try:
     from .candidate_cell import (
         VARIANTS as CANDIDATE_VARIANTS,
         GOAL_VARIANTS,
+        VERIFIED_VARIANTS,
         candidate_cell_from_source,
         controller_with_binding as candidate_controller_with_binding,
     )
@@ -67,6 +68,7 @@ except ImportError:  # Direct file launch on ascend03.
     from candidate_cell import (
         VARIANTS as CANDIDATE_VARIANTS,
         GOAL_VARIANTS,
+        VERIFIED_VARIANTS,
         candidate_cell_from_source,
         controller_with_binding as candidate_controller_with_binding,
     )
@@ -222,7 +224,7 @@ def server_command(cell: dict, task_ids: list[str], out: Path, port: int,
         "--no-raw-snapshot",
     ]
     if (cell["condition"] == "tracer_history"
-            or cell.get("candidate_algorithm") in GOAL_VARIANTS):
+            or cell.get("candidate_algorithm") in GOAL_VARIANTS + VERIFIED_VARIANTS):
         # The frozen C1 risk head needs its exact prefill hidden-state contract.
         command.extend(["--shadow-feature-config",
                         str(RUNTIME / "configs" / "shadow_features.json")])

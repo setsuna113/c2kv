@@ -137,7 +137,7 @@ outside the ratio-4 generality matrix. Start from a
 `bfcl_base/c2kv/<working-point>/compression_full_budget/cell.json` source and
 pass `--candidate-algorithm` as one of `static_t02`, `turn_c1`, `goal_rescue`,
 `dependency_first`, `goal_pending`, `goal_source`, `goal_progress`, or
-`goal_joint` to `generality/c2kv_cell.py`, together with the existing
+`goal_joint`, `goal_verified`, or `pending_verified` to `generality/c2kv_cell.py`, together with the existing
 `--budgets`, `--sglang-backend-url`, and an unused `--port-base`. The driver
 creates a separate `candidate_algorithms/<variant>` cell under that working
 point, uses ratio 8 and the working point's `common_cap_bytes` for its shared
@@ -152,6 +152,15 @@ them in Goal, Source, Progress order. Policies share one regeneration per
 decision and the existing task cap. Field-only commit corrections are logged
 separately from the original model generation and its cost. Existing candidate
 and source-repair cells retain their versions and result paths.
+
+The two verified variants use separate v4 cells, `c2kv-verified-binding-v1`,
+and the pinned `verified-binding-rules-v1` registry. They retain the original
+Goal or Pending recovery and only correct a declared field after Goal abstains
+and the selected commit is accepted. The `propose/apply/validate` interface
+requires a current literal span or an observed list path, preserves all other
+arguments and transport IDs, and adds no model generation. Ambiguous, stale,
+or unsupported bindings leave the selected calls unchanged. Historical Source
+and Joint behavior is preserved for reproducing old results.
 
 ```bash
 /home/liuyancheng/envs/sgl/bin/python /home/liuyancheng/c2kv-generality-20260918/src/generality/c2kv_cell.py \

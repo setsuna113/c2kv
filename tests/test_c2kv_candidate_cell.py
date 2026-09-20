@@ -27,7 +27,12 @@ def test_candidate_cell_is_explicit_ratio8_and_isolated(tmp_path, variant):
         source, variant, "http://127.0.0.1:36200")
     assert result["ratio"] == 8
     assert result["candidate_algorithm"] == variant
-    if variant in candidate_cell.GOAL_VARIANTS:
+    if variant in candidate_cell.VERIFIED_VARIANTS:
+        assert result["threshold"] == 0.5
+        assert result["candidate_protocol"] == candidate_cell.VERIFIED_VERSION
+        assert result["proof_registry_version"] == candidate_cell.PROOF_REGISTRY_VERSION
+        assert result["schema"] == "c2kv-generality-candidate-cell-v4"
+    elif variant in candidate_cell.GOAL_VARIANTS:
         assert result["threshold"] == 0.5
         assert result["candidate_protocol"] == candidate_cell.GOAL_VERSION
         assert result["schema"] == "c2kv-generality-candidate-cell-v3"
@@ -110,7 +115,7 @@ def test_repair_candidate_keeps_c1000_without_loading_t02(tmp_path, variant):
     assert "candidate_algorithm" not in base
 
 
-@pytest.mark.parametrize("variant", candidate_cell.GOAL_VARIANTS)
+@pytest.mark.parametrize("variant", candidate_cell.GOAL_VARIANTS + candidate_cell.VERIFIED_VARIANTS)
 def test_goal_candidate_binds_frozen_t02_with_new_resume_identity(tmp_path, monkeypatch, variant):
     checkpoint = tmp_path / "checkpoint"
     checkpoint.mkdir()
@@ -131,15 +136,19 @@ def test_goal_candidate_binds_frozen_t02_with_new_resume_identity(tmp_path, monk
                   hashlib.sha256((checkpoint / "config.json").read_bytes()).hexdigest()}},
         risk_artifact_path=artifact_path,
         bind_risk_artifact=lambda artifact, path: (bound, {"checkpoint": str(path)}))
-    assert controller == {"view_mode": "native_s0", "candidate_algorithm": {
-        "variant": variant, "risk_artifact": bound, "risk_threshold": 0.5}}
+    expected = {"variant": variant, "risk_artifact": bound, "risk_threshold": 0.5}
+    if variant in candidate_cell.VERIFIED_VARIANTS:
+        expected["proof_registry_version"] = candidate_cell.PROOF_REGISTRY_VERSION
+    assert controller == {"view_mode": "native_s0", "candidate_algorithm": expected}
     assert receipt == {"checkpoint": str(checkpoint)}
     assert cell["cell_id"].endswith("__candidate_" + variant)
-    assert cell["candidate_protocol"] == candidate_cell.GOAL_VERSION
+    assert cell["candidate_protocol"] == (candidate_cell.VERIFIED_VERSION
+        if variant in candidate_cell.VERIFIED_VARIANTS else candidate_cell.GOAL_VERSION)
     assert "candidate_algorithm" not in base
 
 
-def test_goal_candidate_requires_shadow_feature_launcher_config(tmp_path, monkeypatch):
+@pytest.mark.parametrize("variant", ("goal_pending",) + candidate_cell.VERIFIED_VARIANTS)
+def test_goal_candidate_requires_shadow_feature_launcher_config(tmp_path, monkeypatch, variant):
     monkeypatch.setitem(sys.modules, "current", types.SimpleNamespace())
     monkeypatch.setitem(sys.modules, "evidence_sets", types.SimpleNamespace())
     monkeypatch.setitem(sys.modules, "c1_artifact_binding", types.SimpleNamespace(
@@ -161,10 +170,10 @@ def test_goal_candidate_requires_shadow_feature_launcher_config(tmp_path, monkey
         "sglang_backend_url": "http://127.0.0.1:36200",
         "condition": "candidate_algorithm",
     }
-    for variant in ("goal_joint", "goal_rescue", "no_progress"):
+    for selected in (variant, "goal_rescue", "no_progress"):
         command = c2kv_cell.server_command(
-            {**common, "candidate_algorithm": variant}, ["task-1"], tmp_path, 36300)
-        assert ("--shadow-feature-config" in command) is (variant == "goal_joint")
+            {**common, "candidate_algorithm": selected}, ["task-1"], tmp_path, 36300)
+        assert ("--shadow-feature-config" in command) is (selected == variant)
 
 
 def test_candidate_policy_uses_same_common_cap_without_recovery_reserve(tmp_path, monkeypatch):
@@ -208,3 +217,14 @@ def test_candidate_cli_selects_variant_before_any_inference(tmp_path, monkeypatc
     assert seen[0][0]["ratio"] == 8
     assert seen[0][1] == ["multi_turn_base_0"]
     assert "valid_count" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("variant", candidate_cell.VERIFIED_VARIANTS)
+def test_verified_cell_rejects_stale_registry_before_checkpoint_or_inference(tmp_path, variant):
+    cell = candidate_cell.candidate_cell_from_source(
+        source_cell(tmp_path), variant, "http://127.0.0.1:36200")
+    cell["proof_registry_version"] = "stale-proof-rules"
+    with pytest.raises(ValueError, match="proof registry"):
+        candidate_cell.controller_with_binding(
+            cell, base_controller={}, selected={},
+            risk_artifact_path=tmp_path / "unused.json", bind_risk_artifact=None)
