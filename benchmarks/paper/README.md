@@ -377,8 +377,8 @@ $PY -m benchmarks.paper aggregate --output /home/lyc/dev/c2kv-paper-results
 
 The ratio8 candidate algorithms are an explicit overlay. For example,
 `--candidate-arms all --candidate-benchmarks bfcl_base,acebench_agent` on
-both `prepare` and `run` adds the four legacy candidates plus the three source
-repair candidates for those two benchmarks. The default candidate scope is
+both `prepare` and `run` adds the four legacy candidates, three source-repair
+candidates, and four Goal-composition candidates for those benchmarks. The default candidate scope is
 BFCL base, and the default matrix has no candidate cells. Each candidate uses
 its own native arm identity and ready-manifest validation; this is a runnable
 configuration, not a claim of completed benchmark scores.
@@ -396,6 +396,25 @@ reversions, and source-supported abstentions separately from attempted recovery.
 Natural-language completion and ambiguous dependencies use source-backed model
 review; deterministic guards cover only explicitly supported violations.
 Legacy candidate IDs, profiles, and result schemas keep their original meaning.
+
+Select the Goal-based candidates explicitly with
+`--candidate-arms goal_pending,goal_source,goal_progress,goal_joint`.
+Their `c2kv-goal-composition-v1` protocol and v3 delivery profiles retain
+Goal's C1 initial view, frozen T02 weights, STOP review, and complete-event
+recovery. `GoalCompositionController` owns priority and the shared budget;
+policy modules implement `propose`/`validate`, the Pending review supplement,
+and exact field correction. Source and Progress run only when original Goal
+does not recover. Joint gives Source precedence over Progress and never chains
+regenerations. All variants retain ratio8, B0, one regeneration per decision,
+and the shared 96-generation task limit.
+
+Pending distinguishes lookup receipts from execution completion. Source admits
+whole producer/result groups, preserves deferred consumer chains until actual
+producer observations, and corrects only explicitly grounded fields. Progress
+reviews same-turn repeated reads with no new observed evidence or state change;
+its new STOP outputs revert to the original read. New `commit_transform` receipts
+separate deterministic field changes from generated text and model cost. Old
+profiles and result directories are not reinterpreted or resumed as new variants.
 
 `run` executes the closed-loop matrix, then replays each benchmark's
 Full recorded prefixes through methods that support that protocol. AgentKV and

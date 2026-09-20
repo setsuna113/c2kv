@@ -12,7 +12,9 @@ from typing import Any, Callable
 
 VARIANTS = ("static_t02", "turn_c1", "goal_rescue", "dependency_first")
 REPAIR_VARIANTS = ("request_contract", "argument_binding", "no_progress")
-ALL_VARIANTS = VARIANTS + REPAIR_VARIANTS
+GOAL_VARIANTS = ("goal_pending", "goal_source", "goal_progress", "goal_joint")
+GOAL_VERSION = "c2kv-goal-composition-v1"
+ALL_VARIANTS = VARIANTS + REPAIR_VARIANTS + GOAL_VARIANTS
 RATIO = 8
 
 
@@ -34,7 +36,7 @@ def build_profile(
     if getattr(args, "benchmark", "bfcl") not in {"bfcl", "acebench", "acon_appworld"}:
         raise ValueError("candidate algorithms support BFCL, ACEBench Agent and AppWorld only")
     if args.selector_artifact is not None:
-        if variant in VARIANTS:
+        if variant in VARIANTS or variant in GOAL_VARIANTS:
             raise ValueError("candidate algorithms use the bundled T02 risk artifact")
         raise ValueError("repair candidates do not use a selector artifact")
     ratio = int(args.ratio) if args.ratio is not None else int(selected["ratio"])
@@ -103,4 +105,7 @@ def build_profile(
         ).hexdigest(),
         "automatic_reruns": 0,
     }
+    if variant in GOAL_VARIANTS:
+        profile["schema"] = "c2kv-candidate-delivery-profile-v3"
+        profile["selection_protocol"] = GOAL_VERSION
     return controller, profile

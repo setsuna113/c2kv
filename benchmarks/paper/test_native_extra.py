@@ -8,7 +8,7 @@ from unittest import mock
 import pytest
 
 from benchmarks.paper import native_extra
-from benchmarks.paper.candidate_matrix import REPAIR_VARIANTS, VARIANT_TO_ARM
+from benchmarks.paper.candidate_matrix import GOAL_VARIANTS, REPAIR_VARIANTS, VARIANT_TO_ARM
 
 
 def _config(tmp_path):
@@ -232,7 +232,7 @@ def test_ready_manifest_binds_loaded_controller_and_candidate_variant(
     route = ({"recovery_enabled": False, "max_generations_per_decision": 1}
              if arm == "c2kv_native_r4" else
              {"recovery_enabled": True, "max_generations_per_decision": 2,
-              "baseline_identity": f"{'c2kv-source-repair-v1' if variant in REPAIR_VARIANTS else 'c2kv-paper-candidates-v1'}:{variant}"}
+              "baseline_identity": f"{'c2kv-source-repair-v1' if variant in REPAIR_VARIANTS else 'c2kv-goal-composition-v1' if variant in GOAL_VARIANTS else 'c2kv-paper-candidates-v1'}:{variant}"}
              if variant else {})
     manifest = {
         "schema": "a-event-native-server-v1", "status": "ready",

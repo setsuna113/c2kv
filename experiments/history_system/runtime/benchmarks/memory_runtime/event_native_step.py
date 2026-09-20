@@ -214,6 +214,18 @@ class EventNativeDecisionRunner:
                             raise ValueError('Unknown source repair commit fallback')
                     else:
                         record['commit_validation']['selected_generation_index'] = len(record['generation_trace']) - 1
+                finalize = getattr(self.controller, 'finalize_commit', None)
+                if callable(finalize) and not recovery_disabled and draft.status != 'malformed':
+                    finalize_started = time.perf_counter_ns()
+                    calls, receipt = finalize(prepared, draft.tool_calls)
+                    record['commit_transform'] = copy.deepcopy(receipt)
+                    if receipt.get('changed'):
+                        from .candidate_algorithms.goal_commit import corrected_draft
+                        draft = corrected_draft(draft, calls, benchmark=self.controller.benchmark)
+                        record['commit_transform']['committed_text'] = draft.text
+                        record['commit_transform']['model_generation_unmodified'] = True
+                    record['controller_timing']['commit_transform_duration_ns'] = (
+                        time.perf_counter_ns() - finalize_started)
                 record['response'] = {
                     'role': 'assistant', 'content': draft.content,
                     'tool_calls': list(draft.tool_calls),

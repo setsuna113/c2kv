@@ -491,8 +491,10 @@ def _serve(args):
                             history_view_protocol))
         if isinstance(s0_config, dict) and 'candidate_algorithm' in s0_config:
             candidate = s0_config['candidate_algorithm']
-            from .candidate_algorithms import REPAIR_VARIANTS
-            if candidate['variant'] in REPAIR_VARIANTS:
+            from .candidate_algorithms import GOAL_VARIANTS, GOAL_VERSION, REPAIR_VARIANTS
+            if candidate['variant'] in GOAL_VARIANTS:
+                version = GOAL_VERSION
+            elif candidate['variant'] in REPAIR_VARIANTS:
                 version = 'c2kv-source-repair-v1'
             else:
                 version = 'c2kv-paper-candidates-v1'

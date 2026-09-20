@@ -9,7 +9,8 @@ import pytest
 from benchmarks.arms import get_arm
 from benchmarks.paper import c1, runner
 from benchmarks.paper.candidate_matrix import (
-    REPAIR_VARIANTS, VARIANT_TO_ARM, parse_candidate_arms, with_candidate_methods,
+    GOAL_VARIANTS, REPAIR_VARIANTS, VARIANT_TO_ARM, parse_candidate_arms,
+    with_candidate_methods,
 )
 
 
@@ -46,9 +47,12 @@ def test_candidate_matrix_defaults_to_bfcl_base_and_explicitly_adds_acebench(tmp
             assert "benchmarks.paper.c1" in row["command"]
             assert row["command"][row["command"].index("--arm") + 1] == row["arm"]
             assert row["cell_id"] == f"acebench_agent__{row['arm']}"
-    long_app = with_candidate_methods(original, ("goal_rescue",), ("bfcl_long_context", "appworld"))
-    goal = [row for row in long_app["methods"] if row["arm"] == VARIANT_TO_ARM["goal_rescue"]]
-    assert goal and goal[0]["benchmarks"] == ["bfcl_long_context", "appworld"]
+    long_app = with_candidate_methods(original, ("goal_rescue", "goal_joint"),
+                                      ("bfcl_long_context", "appworld"))
+    for variant in ("goal_rescue", "goal_joint"):
+        goal = [row for row in long_app["methods"]
+                if row["arm"] == VARIANT_TO_ARM[variant]]
+        assert goal and goal[0]["benchmarks"] == ["bfcl_long_context", "appworld"]
     with pytest.raises(ValueError, match="subset"):
         with_candidate_methods(original, ("static_t02",), ("toolsandbox",))
 
@@ -90,6 +94,13 @@ def test_candidate_delivery_uses_ratio8_and_bound_artifact(tmp_path, monkeypatch
             "variant": variant, "risk_artifact": {"artifact": "t02", "bound": True},
             "risk_threshold": 0.5}}
         assert profile["candidate_algorithm"] == variant
+        assert profile["schema"] == ("c2kv-candidate-delivery-profile-v3"
+                                     if variant in GOAL_VARIANTS else
+                                     "c2kv-candidate-delivery-profile-v1")
+        assert profile["selection_protocol"] == ("c2kv-goal-composition-v1"
+                                                  if variant in GOAL_VARIANTS else
+                                                  "candidate_algorithm_v1")
+        assert profile["selector_artifact_binding"]["checkpoint"] == str(checkpoint)
         assert profile["ratio"] == 8
         assert profile["automatic_reruns"] == 0
         assert "candidate_algorithm" not in base
@@ -230,6 +241,40 @@ def test_repair_acceptance_does_not_require_t02_scores(tmp_path):
         "request_contract")["required"].values())
 
 
+@pytest.mark.parametrize("variant", GOAL_VARIANTS)
+def test_goal_acceptance_requires_frozen_risk_and_distinct_version(tmp_path, variant):
+    delivery = c1.load_delivery()
+    shard = tmp_path / "server"
+    shard.mkdir()
+    record = {
+        "ratio": 8,
+        "exact_recovery": {
+            "version": "c2kv-goal-composition-v1", "variant": variant,
+            "status": "keep",
+            "selection": {"selector": "risk", "score_semantics": "current_turn_failure_risk",
+                          "available": True, "score": 0.2}},
+        "pre_generation_budget_checks": [{"status": "passed"}],
+        "generation_trace": [{
+            "status": "completed", "phase": "draft",
+            "controller": {"requested_ratio": 8,
+                           "candidate_algorithm": {"stable_call_ids": True}},
+            "generation": {"stats": {"backend": "sglang_c2kv_native_packed",
+                                     "gist_tokens": 3, "workspace_tokens": 2}},
+        }],
+    }
+    (shard / "steps.jsonl").write_text(json.dumps(record) + "\n", encoding="utf-8")
+    telemetry = delivery.summarize_task(
+        "bfcl", "multi_turn_base_0", tmp_path,
+        {"n_scored": 1, "n_generated": 1, "semantic_score": 1.0}, 1.0)
+    required = delivery.functional_checks("proposed", "t02_risk", telemetry, variant)["required"]
+    assert all(required.values()), required
+    assert telemetry["risk_detector_scores"] == 1
+    missing_risk = delivery.functional_checks(
+        "proposed", "t02_risk", dict(telemetry, risk_detector_scores=0),
+        variant)["required"]
+    assert missing_risk["risk_scores"] is False
+
+
 def test_repair_server_command_omits_shadow_feature_setup(tmp_path, monkeypatch):
     original_arm = c1.ARM
     try:
@@ -251,5 +296,29 @@ def test_repair_server_command_omits_shadow_feature_setup(tmp_path, monkeypatch)
         server, _ = delivery.commands_for_task(args, "multi_turn_base_0", controller_path)
         assert server == ["--s0-config", str(controller_path)]
         assert "shadow_feature_config" not in seen[0]["runtime"]
+    finally:
+        c1.select_arm(original_arm)
+
+
+def test_goal_server_command_keeps_shadow_feature_setup(tmp_path, monkeypatch):
+    original_arm = c1.ARM
+    try:
+        c1.select_arm(VARIANT_TO_ARM["goal_joint"])
+        delivery = c1.load_delivery()
+        config = json.loads(runner.DEFAULT_CONFIG.read_text())
+        config.update(checkpoint=str(tmp_path / "checkpoint"),
+                      sglang_source=str(tmp_path / "sglang"))
+        args = c1.delivery_args(config, "bfcl_base", tmp_path / "out", [], delivery)
+        controller_path = tmp_path / "controller.json"
+        controller_path.write_text("{}", encoding="utf-8")
+        monkeypatch.setattr(delivery.current, "load_config", lambda: {
+            "ratio": 8, "runtime": {"shadow_feature_config": "risk.json"}})
+        seen = []
+        monkeypatch.setattr(delivery.runner, "server_command",
+                            lambda design, **_: seen.append(design) or ["--s0-config", "placeholder"])
+        monkeypatch.setattr(delivery.runner, "worker_command", lambda *_args, **_kwargs: [])
+        monkeypatch.setattr(delivery, "_benchmark_dir", lambda _args: tmp_path)
+        delivery.commands_for_task(args, "multi_turn_base_0", controller_path)
+        assert seen[0]["runtime"]["shadow_feature_config"] == "risk.json"
     finally:
         c1.select_arm(original_arm)

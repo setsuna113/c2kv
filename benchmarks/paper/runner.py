@@ -967,7 +967,10 @@ def main(argv=None):
     parser.add_argument("--stage", choices=["all", "closed_loop", "common_prefix"], default="all")
     parser.add_argument("--cells", default="", help="comma-separated exact cell ids")
     parser.add_argument("--candidate-arms", default="",
-                        help="explicit candidates: all or comma-separated static_t02,turn_c1,goal_rescue,dependency_first")
+                        help="explicit candidates: all or comma-separated "
+                             "static_t02,turn_c1,goal_rescue,dependency_first,"
+                             "request_contract,argument_binding,no_progress,"
+                             "goal_pending,goal_source,goal_progress,goal_joint")
     parser.add_argument("--candidate-benchmarks", default="bfcl_base",
                         help="candidate benchmark scope, comma-separated subset of "
                              "bfcl_base (default), bfcl_long_context, appworld, acebench_agent")

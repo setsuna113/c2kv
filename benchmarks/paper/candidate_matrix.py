@@ -13,8 +13,13 @@ VARIANT_TO_ARM = {
     "request_contract": "c2kv_request_contract_r8",
     "argument_binding": "c2kv_argument_binding_r8",
     "no_progress": "c2kv_no_progress_r8",
+    "goal_pending": "c2kv_goal_pending_r8",
+    "goal_source": "c2kv_goal_source_r8",
+    "goal_progress": "c2kv_goal_progress_r8",
+    "goal_joint": "c2kv_goal_joint_r8",
 }
 REPAIR_VARIANTS = frozenset({"request_contract", "argument_binding", "no_progress"})
+GOAL_VARIANTS = ("goal_pending", "goal_source", "goal_progress", "goal_joint")
 ARM_TO_VARIANT = {arm: variant for variant, arm in VARIANT_TO_ARM.items()}
 SUPPORTED_BENCHMARKS = frozenset({"bfcl_base", "bfcl_long_context", "appworld", "acebench_agent"})
 
