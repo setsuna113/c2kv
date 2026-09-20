@@ -22,6 +22,8 @@ from .artifact_io import atomic_json, atomic_text, preparation_lock
 from .process_lifecycle import (defer_termination, run_owned, stop_owned_group,
                                 unwind_on_termination)
 from .upstream_liveness import UpstreamLiveness, UpstreamUnavailable
+from .task_subsets import (finish_subset, is_subset, select_subset_cells,
+                           subset_metadata, with_task_subsets)
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG = Path(__file__).with_name("config.json")
@@ -128,6 +130,8 @@ def cells(config):
                         row["tool_budget_tokens"] = context["budget_tokens"]
                 rows.append(row)
     # Run the final system (and its ablations) after every existing comparison/sweep cell.
+    if "task_subsets" in config:
+        rows = select_subset_cells(rows, config["task_subsets"])
     return sorted(rows, key=lambda row: is_c1_arm(row["arm"]) or is_candidate_arm(row["arm"]))
 
 
@@ -304,6 +308,9 @@ def history_kv_budget_args(cell):
 
 
 def run_command(config, cell, directory, profile, stage="closed_loop"):
+    if is_subset(cell) and (stage != "closed_loop" or is_native_arm(cell["arm"])
+                            or cell["adapter"] not in {"bfcl", "acon_appworld"}):
+        raise ValueError("Task subsets require closed_loop non-native BFCL/AppWorld cells")
     if is_native_arm(cell["arm"]):
         cmd = [config["bench_python"], "-m", "benchmarks.paper.c1",
                "--config", str(profile.parent / "config.resolved.json"),
@@ -342,6 +349,8 @@ def run_command(config, cell, directory, profile, stage="closed_loop"):
             cmd += ["--tool-budget-tokens", str(cell["tool_budget_tokens"])]
     if cell["adapter"] == "bfcl":
         cmd += ["--categories", cell["category"]]
+        if is_subset(cell):
+            cmd += ["--run-ids", ",".join(cell["task_ids"])]
     elif cell["adapter"] == "tau2":
         from .tau2 import adapter_args
         cmd += adapter_args(config)
@@ -365,6 +374,8 @@ def run_command(config, cell, directory, profile, stage="closed_loop"):
     else:
         cmd += ["--acon-dir", config["acon_dir"], "--bench-python", config["appworld_python"],
                 "--split", config["appworld_split"], "--max-iter", str(config["appworld_max_iter"])]
+        if is_subset(cell):
+            cmd += ["--task-ids", ",".join(cell["task_ids"])]
     return cmd
 
 
@@ -384,6 +395,8 @@ def extension_problem(existing, config, source, output):
     model-family flags for arms not yet run) is an extension; anything that touches an
     existing cell is a different experiment and needs a new output directory.
     """
+    if existing.get("task_subsets") != config.get("task_subsets"):
+        return "task subset scope changed; use a new output directory"
     old_cells = {row["cell_id"]: row for row in cells(existing)}
     new_cells = {row["cell_id"]: row for row in cells(config)}
     missing = sorted(set(old_cells) - set(new_cells))
@@ -516,6 +529,7 @@ def _prepare_locked(config, output, source):
                 raise ValueError(
                     f"{item['arm']} cannot take tool context {context_name!r}: "
                     "ACON/HiAgent tool-memory composition is outside the supported matrix")
+    matrix = cells(config)   # validate task scope before writing any prepared artifacts
     config = dict(config)
     config["sglang_source"] = str(source.resolve())
     resolved_path = output / "config.resolved.json"
@@ -556,7 +570,6 @@ def _prepare_locked(config, output, source):
                    "serving": "accepted portable benchmark, explicit complete-history document budget"}}}
     profile["serving"]["compatible"] = True
     profile_path = output / "deployment_profile.json"
-    matrix = cells(config)
     ids = [row["cell_id"] for row in matrix]
     if len(ids) != len(set(ids)):
         raise ValueError("The paper matrix contains duplicate cell ids")
@@ -564,6 +577,8 @@ def _prepare_locked(config, output, source):
         fields = ["cell_id", "benchmark", "method", "arm", "group", "ratio", "retention", "adapter", "category", "tool_context"]
         if any("history_budget_tokens" in row for row in matrix):
             fields.append("history_budget_tokens")
+        if any(is_subset(row) for row in matrix):
+            fields.extend(["result_scope", "expected_subset_n", "whole_cell_score"])
         writer = csv.DictWriter(handle, fieldnames=fields, extrasaction="ignore")
         writer.writeheader()
         writer.writerows(matrix)
@@ -710,6 +725,8 @@ def _guard_method_actor(cell):
 
 
 def _unsupported_stage(stage, cell):
+    if stage != "closed_loop" and is_subset(cell):
+        return "repair subsets support closed_loop only; common-prefix replay is a separate cohort"
     if stage == "common_prefix" and cell["arm"] in {"agentkv", "commitkv"}:
         return ("Full teacher-forced assistant actions violate exact_generated_prefix; "
                 "use this arm's closed_loop telemetry, labelled as its own trajectory")
@@ -717,6 +734,12 @@ def _unsupported_stage(stage, cell):
 
 
 def execute(config, plan, output, source, stages, selected, port_offset=0):
+    _, unknown = _selected_plan(plan, selected)
+    if any(is_subset(cell) for cell in plan):
+        if unknown:
+            raise ValueError(f"Unknown task subset cells: {unknown}")
+        if any(stage != "closed_loop" for stage in stages):
+            raise ValueError("Task subsets require --stage closed_loop")
     config = with_port_offset(config, port_offset)
     profile_path = output / "deployment_profile.json"
     env = dict(os.environ)
@@ -746,6 +769,9 @@ def execute(config, plan, output, source, stages, selected, port_offset=0):
             _guard_checkpoint_serving_layout(config, cell)
             _guard_tool_context(cell)
             directory.mkdir(parents=True, exist_ok=True)
+            if is_subset(cell):
+                atomic_json(directory / "task_subset.json",
+                            subset_metadata(cell["cell_id"], cell["task_ids"]))
             atomic_json(directory / "started.json", {
                 "stage": stage, "cell": cell, "config": config,
                 "server_command": server_command(config, source, cell["arm"], cell["benchmark"], tool_checkpoint=cell.get("tool_checkpoint"), tool_memory=cell.get("tool_memory")),
@@ -834,7 +860,8 @@ def execute(config, plan, output, source, stages, selected, port_offset=0):
                 if run_failure is not None:
                     _, error, traceback = run_failure
                     raise error.with_traceback(traceback)
-                atomic_json(directory / "complete.json", {"finished_at": time.time()})
+                scope = finish_subset(cell, directory) if is_subset(cell) else {}
+                atomic_json(directory / "complete.json", {"finished_at": time.time(), **scope})
 
 
 def _selected_plan(plan, selected):
@@ -871,6 +898,11 @@ def _required_aggregate_artifacts(stage, cell, directory):
 def aggregate_results(config, plan, output, stages, selected):
     """Aggregate exactly the requested matrix slice and emit its coverage."""
     requested, unknown = _selected_plan(plan, selected)
+    if any(is_subset(cell, output / stage / cell["cell_id"])
+           for stage in stages for cell in requested):
+        raise RuntimeError("Repair subset scores are not whole-cell scores: merge preserved and "
+                           "repaired raw outcomes in a new directory and officially reevaluate "
+                           "the complete cohort before table aggregation")
     coverage_path = output / "aggregation_coverage.json"
     entries = []
     missing = []
@@ -969,6 +1001,10 @@ def main(argv=None):
     parser.add_argument("--output", type=Path)
     parser.add_argument("--stage", choices=["all", "closed_loop", "common_prefix"], default="all")
     parser.add_argument("--cells", default="", help="comma-separated exact cell ids")
+    parser.add_argument("--task-subset", action="append", default=[], metavar="CELL=id,...",
+                        help="repair only these task IDs; repeat for multiple non-native BFCL/AppWorld cells")
+    parser.add_argument("--task-subset-file", type=Path,
+                        help="JSON mapping exact CELL IDs to task ID lists; requires a separate output root")
     parser.add_argument("--candidate-arms", default="",
                         help="explicit candidates: all or comma-separated "
                              "static_t02,turn_c1,goal_rescue,dependency_first,"
@@ -991,6 +1027,8 @@ def main(argv=None):
                         help="shift server/proxy ports for concurrent single-GPU runners on one host")
     args = parser.parse_args(argv)
     config = json.loads(args.config.read_text())
+    if args.action == "aggregate" and (args.task_subset or args.task_subset_file):
+        parser.error("aggregate reads the frozen task scope; task-subset options are for prepare/run")
     if args.action != "aggregate":
         config = with_candidate_methods(
             config, parse_candidate_arms(args.candidate_arms),
@@ -1001,6 +1039,9 @@ def main(argv=None):
             config = with_history_kv_budget(config, *parse_history_kv_budget(value))
         config = with_tool_contexts(config, list(filter(None, args.tool_contexts.split(","))),
                                     args.tool_checkpoint)
+        config = with_task_subsets(config, args.task_subset, args.task_subset_file)
+        if args.action == "run" and "task_subsets" in config and args.stage != "closed_loop":
+            parser.error("Task subsets require --stage closed_loop")
     output = args.output or Path(config["output_root"])
     source = args.sglang_source.resolve()
     if args.action == "aggregate":
@@ -1009,7 +1050,8 @@ def main(argv=None):
     else:
         plan, _ = prepare(config, output, source)
     if args.action == "prepare":
-        print(json.dumps({"matrix": str(output / "matrix.csv"), "closed_loop_cells": len(plan), "replay_cells": len(plan)}, indent=2))
+        print(json.dumps({"matrix": str(output / "matrix.csv"), "closed_loop_cells": len(plan),
+                          "replay_cells": sum(not is_subset(cell) for cell in plan)}, indent=2))
     elif args.action == "run":
         stages = ["closed_loop", "common_prefix"] if args.stage == "all" else [args.stage]
         execute(config, plan, output, source, stages, set(filter(None, args.cells.split(","))),

@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 from .runner import is_native_arm
+from .task_subsets import is_subset
 
 
 EXACT_OUTPUT_ARMS = {"agentkv", "commitkv"}
@@ -30,6 +31,7 @@ def write_comparison(output: Path, plan):
             directory = output / stage / cell["cell_id"]
             path = directory / "measurement_summary.json"
             if (not path.exists() or not (directory / "complete.json").is_file()
+                    or is_subset(cell, directory)
                     or (directory / "AUDIT_EXCLUSION.json").exists()
                     or (stage == "common_prefix" and cell["arm"] in EXACT_OUTPUT_ARMS)):
                 continue

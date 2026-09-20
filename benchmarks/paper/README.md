@@ -1,5 +1,33 @@
 # Paper CUDA benchmarks
 
+## Repairing selected tasks
+
+Use a **new output root** to repair only audited infrastructure failures and
+missing IDs. For non-native BFCL and AppWorld cells, `prepare` and `run` accept
+repeatable `--task-subset CELL=id,...` or `--task-subset-file subsets.json`,
+where the JSON is a mapping from exact matrix cell IDs to lists of task IDs.
+The plan contains only those cells; `--cells` may further select among them.
+Run it with `--stage closed_loop`. Native controllers, other adapters and
+common-prefix replay do not support this entry point.
+
+```bash
+python -m benchmarks.paper run --config config.pod.json \
+  --sglang-source /workspace/engine-fix --output /workspace/results-repair \
+  --stage closed_loop --task-subset-file subsets.json
+```
+
+The resolved config and per-cell `task_subset.json`, `started.json`, summary
+and `complete.json` retain the exact cohort. Completion means those selected
+tasks are complete. Their `semantic_score` and AppWorld official aggregates
+describe **only that subset**; table aggregation refuses them as whole cells.
+Preserve valid old terminal outcomes, including real model failures. In a new
+isolated evaluation directory, combine preserved and repaired raw outcomes by
+task ID, verify the complete expected ID set with no duplicates, and rerun the
+official evaluator. BFCL supports offline `mode=evaluate`; AppWorld requires
+the full task artifacts and official `appworld evaluate`, including scenario
+aggregation. Never average partial scenario scores. Retain per-task source
+provenance and keep latency/cost from different code versions separate.
+
 ## tau2 matrix cells
 
 `tau2` is a benchmark axis of the existing paper matrix. It uses the same
