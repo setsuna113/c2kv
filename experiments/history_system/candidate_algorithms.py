@@ -31,8 +31,8 @@ def build_profile(
         raise ValueError(f"unknown candidate algorithm: {variant!r}")
     if args.method != "proposed":
         raise ValueError("--candidate-algorithm requires --method proposed")
-    if getattr(args, "benchmark", "bfcl") not in {"bfcl", "acebench", "acon_appworld"}:
-        raise ValueError("candidate algorithms support BFCL, ACEBench Agent and AppWorld only")
+    if getattr(args, "benchmark", "bfcl") not in {"bfcl", "acebench", "acon_appworld", "tau2"}:
+        raise ValueError("candidate algorithms support BFCL, ACEBench Agent, AppWorld and tau2 only")
     if args.selector_artifact is not None:
         if variant in VARIANTS:
             raise ValueError("candidate algorithms use the bundled T02 risk artifact")

@@ -68,7 +68,7 @@ def test_raw_cells_are_unchanged_when_tool_contexts_are_added():
         assert (runner.server_command(base, SOURCE, old["arm"])
                 == runner.server_command(extended, SOURCE, new["arm"], tool_checkpoint=new.get("tool_checkpoint")))
     added = sorted(set(new_cells) - set(base_cells))
-    benches = {"bfcl_base", "bfcl_long_context", "appworld", "acebench_agent", "toolsandbox"}
+    benches = {"bfcl_base", "bfcl_long_context", "appworld", "acebench_agent", "toolsandbox", "tau2"}
     assert added == sorted(f"{b}__{arm}__tools-t0_r8" for b in benches for arm in ("full", "hiagent_full"))
 
 
@@ -165,7 +165,7 @@ def test_prepare_writes_tool_context_column_and_commands(tmp_path):
     assert any(line.startswith("bfcl_base__full__tools-t0_r8,") and line.endswith(",t0_r8") for line in rows)
     commands = json.loads((tmp_path / "out" / "commands.json").read_text())
     tool_cells = [c for c in commands if c["cell_id"].endswith("__tools-t0_r8")]
-    assert len(tool_cells) == 5 and all("--tool-memory" in c["command"] for c in tool_cells)
+    assert len(tool_cells) == len(config["benchmarks"]) and all("--tool-memory" in c["command"] for c in tool_cells)
 
 
 def test_guard_tool_context_checks_the_checkpoint_contract(tmp_path):

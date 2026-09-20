@@ -51,7 +51,7 @@ def test_hiagent_and_acon_overlays_have_distinct_cells_and_server_modes(tmp_path
     for arm_name, policy in (("acon_hist_ut_co_b768", "acon_hist_ut_co"),
                              ("hiagent_full_b512", "hiagent_full")):
         rows = [row for row in plan if row["arm"] == arm_name]
-        assert {row["benchmark"] for row in rows} == {"bfcl_base", "bfcl_long_context", "acebench_agent"}
+        assert {row["benchmark"] for row in rows} == {"bfcl_base", "bfcl_long_context", "acebench_agent", "appworld", "tau2"}
         assert all(row["cell_id"].endswith("__" + arm_name) for row in rows)
         assert all(row["history_budget_tokens"] == get_arm(arm_name).text_history_budget_tokens
                    for row in rows)

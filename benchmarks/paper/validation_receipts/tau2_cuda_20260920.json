@@ -1,0 +1,210 @@
+{
+  "schema": "tau2-benchmark-integration-cuda-smoke-v1",
+  "hardware": "NVIDIA GeForce RTX 4090 Laptop GPU",
+  "engine_commit": "d1a2269b7",
+  "tau2_commit": "a2c024725189473d2d7cea3a5cfdbcc67478e41f",
+  "checkpoint": "<CUDA_HOME>/dev/c2kv-cuda-port/checkpoint-1000",
+  "source_snapshot": "<CUDA_HOME>/dev/c2kv-tau2-smoke-20260920/paper",
+  "config": "<CUDA_HOME>/dev/c2kv-tau2-smoke-20260920/config.json",
+  "task_ids": [
+    "0"
+  ],
+  "max_steps": 8,
+  "automatic_retries": 0,
+  "cells": [
+    {
+      "stage": "closed_loop",
+      "arm": "full",
+      "path": "<CUDA_HOME>/dev/c2kv-tau2-smoke-20260920/results-v3/closed_loop/tau2__full",
+      "requests": {
+        "n_requests": 4,
+        "n_ok": 4,
+        "n_error": 0,
+        "error_kinds": {},
+        "n_conversations": 1,
+        "n_docs_mean": 0.0,
+        "n_docs_max": 0,
+        "compressed_requests": 0,
+        "dropped_requests": 0,
+        "dropped_share": 0.0,
+        "dropped_docs_mean": 0.0,
+        "dropped_docs_max": 0,
+        "wall_p50": 4.1405,
+        "wall_p90": 7.3678,
+        "gist_tokens_total": 0,
+        "original_tokens_total": 0,
+        "logical_over_gist": null,
+        "kv_resident_p50": 6959.0,
+        "c2kv_query_proj": [
+          "base"
+        ],
+        "effective_query_proj_counts": {
+          "base": 4
+        },
+        "doc_packing": [
+          "message"
+        ],
+        "mixed_query_proj": false
+      },
+      "n": 1,
+      "semantic_score": 0.0,
+      "qualification": "functional smoke, max_steps=8; preliminary, n=1",
+      "harness_events": {
+        "episode_start": 1,
+        "decision": 4,
+        "tool_action": 2,
+        "episode_end": 1
+      }
+    },
+    {
+      "stage": "closed_loop",
+      "arm": "c2kv_native_r4",
+      "path": "<CUDA_HOME>/dev/c2kv-tau2-smoke-20260920/results-v3/closed_loop/tau2__c2kv_native_r4",
+      "native_metrics": {
+        "benchmark": "tau2",
+        "task_id": "0",
+        "status": "completed",
+        "official_score": 0.0,
+        "normal_termination": false,
+        "protocol_legal": null,
+        "generation_calls": 4,
+        "decision_count": 4,
+        "detector_calls": 0,
+        "detector_trigger_count": 0,
+        "recovery_count": 0,
+        "successful_recovery_count": 0,
+        "evidence_units_appended": 0,
+        "raw_tokens_restored": 0,
+        "native_raw_events_restored": 0,
+        "native_raw_prompt_token_delta": 0,
+        "native_raw_history_token_delta": 0,
+        "native_active_history_byte_delta": 0,
+        "full_history_kv": 1081.0,
+        "active_history_kv": 363.0,
+        "kv_retention": 0.33580018501387604,
+        "compression_ratio": 2.9779614325068873,
+        "generation_prefill_tokens": 20128.0,
+        "recovery_prefill_tokens": 0.0,
+        "total_prefill_tokens": 20128.0,
+        "wall_time": 54.91434145200037,
+        "native_generate_requests": 4,
+        "prefill_detector_scores": 0,
+        "prefill_detector_unavailable": 0,
+        "risk_detector_scores": 0,
+        "risk_detector_unavailable": 0,
+        "candidate_decisions": 0,
+        "candidate_variants": [],
+        "candidate_ratio8": false,
+        "candidate_stable_call_ids": false,
+        "candidate_budget_passed": false,
+        "gist_tokens": 363,
+        "raw_workspace_tokens": 453,
+        "gist_cache_hits": 9,
+        "native_packing_present": true
+      },
+      "n": 1,
+      "semantic_score": 0.0,
+      "qualification": "functional smoke, max_steps=8; preliminary, n=1",
+      "harness_events": {
+        "episode_start": 1,
+        "decision": 4,
+        "episode_end": 1
+      }
+    },
+    {
+      "stage": "closed_loop",
+      "arm": "history_kv_h2o_r25_persistent",
+      "path": "<CUDA_HOME>/dev/c2kv-tau2-smoke-20260920/results-v3/closed_loop/tau2__history_kv_h2o_r25_persistent",
+      "requests": {
+        "n_requests": 3,
+        "n_ok": 3,
+        "n_error": 0,
+        "error_kinds": {},
+        "n_conversations": 1,
+        "n_docs_mean": 0.0,
+        "n_docs_max": 0,
+        "compressed_requests": 0,
+        "dropped_requests": 0,
+        "dropped_share": 0.0,
+        "dropped_docs_mean": 0.0,
+        "dropped_docs_max": 0,
+        "wall_p50": 2.7988,
+        "wall_p90": 4.8654,
+        "gist_tokens_total": 0,
+        "original_tokens_total": 0,
+        "logical_over_gist": null,
+        "kv_resident_p50": 5151.0,
+        "c2kv_query_proj": [
+          "base"
+        ],
+        "effective_query_proj_counts": {
+          "base": 3
+        },
+        "doc_packing": [
+          "message"
+        ],
+        "mixed_query_proj": false
+      },
+      "n": 1,
+      "semantic_score": 1.0,
+      "qualification": "functional smoke, max_steps=8; preliminary, n=1",
+      "harness_events": {
+        "episode_start": 1,
+        "decision": 3,
+        "tool_action": 1,
+        "episode_end": 1
+      }
+    },
+    {
+      "stage": "common_prefix",
+      "arm": "c2kv_native_r4",
+      "path": "<CUDA_HOME>/dev/c2kv-tau2-smoke-20260920/results-v3/common_prefix/tau2__c2kv_native_r4",
+      "prefixes": 4,
+      "completed": 4,
+      "failed": 0,
+      "harness_events": {}
+    },
+    {
+      "stage": "common_prefix",
+      "arm": "history_kv_h2o_r25_persistent",
+      "path": "<CUDA_HOME>/dev/c2kv-tau2-smoke-20260920/results-v3/common_prefix/tau2__history_kv_h2o_r25_persistent",
+      "prefixes": 4,
+      "completed": 4,
+      "failed": 0
+    }
+  ],
+  "artifact_sha256": {
+    "<CUDA_HOME>/dev/c2kv-tau2-smoke-20260920/results-v3/closed_loop/tau2__full/summary_full.json": "4c378782042dd55fd86f9ab6de0dc942dbd95b339991106fe5d93fc1b2008606",
+    "<CUDA_HOME>/dev/c2kv-tau2-smoke-20260920/results-v3/closed_loop/tau2__c2kv_native_r4/summary_c2kv_native_r4.json": "97a3de82e971a7bfdafeb7b3c7c85bb70ec4f22be5c043d511518bb41e809922",
+    "<CUDA_HOME>/dev/c2kv-tau2-smoke-20260920/results-v3/closed_loop/tau2__history_kv_h2o_r25_persistent/summary_history_kv_h2o_r25_persistent.json": "15e4553b9dcc5c8dbd8555cea604817035c64624b51c079dc92072f631352faa",
+    "<CUDA_HOME>/dev/c2kv-tau2-smoke-20260920/results-v3/common_prefix/tau2__c2kv_native_r4/prefix_replay.jsonl": "52c1e76794e513f34f0aefb195e2b747e9576d44f1ab712217c298af91444915",
+    "<CUDA_HOME>/dev/c2kv-tau2-smoke-20260920/results-v3/common_prefix/tau2__history_kv_h2o_r25_persistent/prefix_replay.jsonl": "6caaf3171348dcb9a3ee48f61a7be9cdf3041e6c84b8456e1ba329f2bbff4786"
+  },
+  "preserved_failed_attempts": [
+    {
+      "path": "<CUDA_HOME>/dev/c2kv-tau2-smoke-20260920/results",
+      "reason": "missing checkout CLI option; fixed"
+    },
+    {
+      "path": "<CUDA_HOME>/dev/c2kv-tau2-smoke-20260920/results-v2",
+      "reason": "Full exceeded laptop KV capacity; discovered and disabled harness/transport retries; native initial source snapshot lacked git metadata"
+    }
+  ],
+  "cpu_validation": {
+    "passed": 289,
+    "skipped": 8,
+    "subtests_passed": 4,
+    "command": ".venv/Scripts/python.exe -m pytest c2kv-paper/benchmarks/paper c2kv-paper/benchmarks/test_matrix.py c2kv-paper/benchmarks/test_capabilities.py c2kv-paper/benchmarks/test_run_dispatch.py c2kv-paper/benchmarks/test_adapter_contract.py c2kv-paper/benchmarks/test_tau2_adapter_integration.py -q"
+  },
+  "post_smoke_validation": "Final adapter revalidated all saved official outcomes, single-episode telemetry and exact Full prefix coverage; later changes only expose generic completion cap and strengthen decision-error rejection.",
+  "paper_base_commit": "221c6704396b5fc5ab1087b6bfdb9ce69fdaac10",
+  "integration_source_sha256": {
+    "benchmarks/adapters/tau2_adapter.py": "03c2e635d76b7eac1fe80c82b0cfe539f442aee842e6a2336b4309f5192bd50e",
+    "benchmarks/tau2_instrumentation/c2kv_tau2_hook.py": "bb73604a1ca4e0f81e5b2b620681e3a2b628b1b1a034c4c7738af238c4dd79a1",
+    "benchmarks/paper/tau2.py": "0db2ca65387befa0ce21d9b7dc4079f1dbfc8a4fb32abb359b7dcd2625879c79",
+    "benchmarks/paper/c1.py": "662d7c382060da21b39ecf258c0af205a44696b98994ca715030f526b77bd29d",
+    "benchmarks/paper/native_extra.py": "30bc8f7e7db89dc4946809282de15b8544678175a62f0909780ad8253b8719e8",
+    "benchmarks/paper/runner.py": "0d14da6088eb662c34a20de3aebe525c3a2a0f618e665b2a1839a6b023d72470"
+  },
+  "path_redaction": "CUDA_HOME denotes the private home directory on the validation host; artifact hashes refer to the original files. Configure tau2_dir and tau2_python before running the template configuration."
+}

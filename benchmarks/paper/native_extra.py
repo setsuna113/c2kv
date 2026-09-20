@@ -17,7 +17,8 @@ from .process_lifecycle import run_owned
 
 
 BENCHMARKS = {"acebench_agent": ("acebench", "acebench-text-actions-v1"),
-              "toolsandbox": ("toolsandbox", "openai-single-task-v1")}
+              "toolsandbox": ("toolsandbox", "openai-single-task-v1"),
+              "tau2": ("tau2", "openai-single-task-v1")}
 TASK_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*\Z")
 C1_RATIOS = {"c2kv_c1_t02_r8": 8, "c2kv_c1_t02_r4": 4}
 
@@ -208,6 +209,9 @@ def selected_tasks(config, benchmark, requested=None):
         available = _ace_tasks(config)
     elif benchmark == "toolsandbox":
         available = _toolsandbox_tasks(config)
+    elif benchmark == "tau2":
+        from .tau2 import selected_tasks as tau2_tasks
+        available = tau2_tasks(config)
     else:
         raise ValueError(f"Unsupported native bare benchmark: {benchmark}")
     if not available or len(available) != len(set(available)):
@@ -308,7 +312,25 @@ controller_command = server_command
 
 def _run_official(config, benchmark, task, task_out, base_url, model):
     user_url = c1_appworld._sglang_upstream(config)
-    if benchmark == "acebench_agent":
+    if benchmark == "tau2":
+        from benchmarks.adapters.tau2_adapter import run_tau2
+        from .tau2 import options
+
+        settings = options(config)
+        settings.pop("max_tasks")
+        settings["task_ids"] = [task]
+        summary = run_tau2(
+            base_url, user_url, task_out / "tau2",
+            tau2_dir=Path(config["tau2_dir"]),
+            python=config.get("tau2_python", config["bench_python"]),
+            run_name="paper_" + hashlib.sha256(str(task_out.resolve()).encode()).hexdigest()[:20],
+            model=model, user_model=config["model"], native=True, **settings,
+        )
+        if summary.get("n") != 1 or summary.get("task_ids") != [task]:
+            raise RuntimeError("Official tau2 did not score the frozen task")
+        namespace = "tau2"
+        scorer = "tau2 evaluate-trajs reward_info.reward"
+    elif benchmark == "acebench_agent":
         from benchmarks.adapters import acebench_adapter as ace
 
         old = os.environ.get("C2KV_ACE_NATIVE")
@@ -358,11 +380,14 @@ def _run_official(config, benchmark, task, task_out, base_url, model):
     score = summary.get("semantic_score")
     if type(score) not in (int, float):
         raise RuntimeError("Official harness did not return one numeric semantic score")
+    normal_termination = True
+    if benchmark == "tau2":
+        normal_termination = summary["task_rows"][0]["termination"] in {"agent_stop", "user_stop"}
     official = {
         "schema": "paper-native-extra-official-task-v1",
         "benchmark": namespace, "task_id": task, "official_scorer": scorer,
         "n": 1, "task_rows": [{"task_id": task, "semantic_score": float(score),
-                               "normal_termination": True, "protocol_legal": None}],
+                               "normal_termination": normal_termination, "protocol_legal": None}],
         "adapter_summary": summary,
     }
     out = task_out / namespace / "official_summary.json"

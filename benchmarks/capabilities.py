@@ -203,7 +203,10 @@ def _benchmark_prerequisites(result: PreflightResult, benchmark: str,
                  "the interpreter used to invoke benchmarks/run.py must exist")
 
     if benchmark == "tau2":
-        root = _path_option(options, environ, "tau2_dir", "TAU2_DIR",
+        tau_options = dict(options)
+        if _nonempty(options, "benchmark_dir"):
+            tau_options["tau2_dir"] = options["benchmark_dir"]
+        root = _path_option(tau_options, environ, "tau2_dir", "TAU2_DIR",
                             home / "benchmarks" / "tau2")
         _append_path(result, "tau2_checkout", root,
                      "tau2 checkout is required", kind="dir")

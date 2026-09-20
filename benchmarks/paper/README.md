@@ -1,5 +1,40 @@
 # Paper CUDA benchmarks
 
+## tau2 matrix cells
+
+`tau2` is a benchmark axis of the existing paper matrix. It uses the same
+history arms, native controllers, tool contexts and explicit budget overlays
+as the other benchmarks. CUDA and NPU load this shared algorithm source;
+`benchmarks.adapters.tau2_adapter` owns only official task selection, harness
+execution, scoring and measurement. The default task set is `airline`, split
+`base`, one trial per task. Configure `tau2_dir`, `tau2_python`, `tau2_task_set`,
+`tau2_task_split` and optional `tau2_task_ids`, `tau2_max_tasks`,
+`tau2_max_steps`, `tau2_timeout` in the paper JSON. The checkout's own resolver
+validates IDs; paths and selection are retained in the resolved run configuration.
+The validated official checkout (`a2c024725189473d2d7cea3a5cfdbcc67478e41f`)
+requires Python 3.12 or 3.13; install it in the configured `tau2_python`
+environment, independently of the SGLang and paper-runner environments.
+
+For example, select `tau2__full` with the paper runner's `closed_loop` stage,
+then select `tau2__c2kv_native_r4` with `common_prefix`. Raw Full records exact
+agent wire requests in `full_prefixes.jsonl`. Replay teacher-forces those
+prefixes without running the user simulator, tools or official scorer again.
+Closed-loop quality and common-prefix costs remain separate. CommitKV and
+AgentKV retain their existing exact-output restriction on teacher-forced replay;
+AgentFold retains its existing actor-compatibility hold.
+
+Only the agent endpoint receives the memory algorithm. The simulator uses the
+raw upstream, and agent/user models are independently named. The tau2 harness
+logs task episodes, agent decisions and executed agent tools under
+`measurement/harness_events.jsonl`; native mode binds identity at the single-task
+server. The adapter preserves `official/results.json` and
+`official/updated_results.json`, rejects missing/duplicate/unscored tasks, and
+does not resume a previous simulation under a fresh run's telemetry.
+Task and transport retries are explicitly disabled. Official re-evaluation runs
+without the runtime telemetry hook. The [CUDA integration receipt](validation_receipts/tau2_cuda_20260920.json)
+records bounded official-task smoke tests for Full, native C2KV and H2O, plus
+common-prefix replay; these are functional checks, not full-suite quality results.
+
 ## Tool-definition and joint component experiments
 
 `python -m benchmarks.paper.tool_study --base-config <config.json>
@@ -96,17 +131,17 @@ config registers the T0 dev winner `checkpoint-500` (selection 2026-09-19 on
 `selection-dev-v1`: strict tool-call 11/16 at ratio 8 and 10/16 at ratio 12,
 false-call 2/16, uniform CE 0.73; steps 1000/1034 score 9/16 with lower CE
 0.71; preliminary, n=1, a Toucan dev proxy, not BFCL) as `t0_r8` (uniform)
-and `t0_r8_hybrid3` (lexical top-3 native) on the Full arm, i.e. ten extra
+and `t0_r8_hybrid3` (lexical top-3 native) on the Full arm, i.e. twelve extra
 cells for the "compressed tools x full history" rows of the paper's
 joint-context table.
 
-The default matrix contains 39 main cells, 9 sweep cells, 15 opponent cells
+The default matrix contains 47 main cells, 9 sweep cells, 18 opponent cells
 and two ratio-4 C1 ablations. ACEBench uses the official `agent` category;
 ToolSandbox uses its full official suite with one process. ACEBench C1 ratio-8
 and ratio-4 are configured cells. The native ToolSandbox adapter exists, but
 ToolSandbox C1 is not enabled in the default matrix because its official
 end-to-end path remains unvalidated; the reason is recorded in
-`unsupported_cells.json`. The four main C2KV+C1 cells run last. Bare C2KV
+`unsupported_cells.json`. The five main C2KV+C1 cells run last. Bare C2KV
 uses the separate `c2kv_native_r4` identity; the historical `c2kv4` proxy
 remains blocked with C1000. C2KV+C1 ratio8 is a final-system comparison, not a
 detector-only ablation. All actor and auxiliary generation

@@ -75,7 +75,7 @@ def delivery_args(config, benchmark, output, task_ids, delivery):
         "--embedding-model", settings.get("embedding_model", "unused-native-bare"),
         "--embedding-device", settings.get("embedding_device", "cpu"),
         "--selector-threshold", str(settings.get("selector_threshold", 0.5)),
-        "--benchmark-dir", config["bfcl_dir"],
+        "--benchmark-dir", config.get("bfcl_dir", config.get("tau2_dir", "")),
         "--bfcl-python", config["bench_python"],
         "--sglang-root", config["sglang_source"],
         "--portable-root", str(ROOT),
@@ -98,13 +98,14 @@ def delivery_args(config, benchmark, output, task_ids, delivery):
             command += ["--tool-budget-tokens", str(config["tool_budget_tokens"])]
     args = delivery.build_parser().parse_args(command)
     args.benchmark = ("acon_appworld" if benchmark == "appworld"
-                      else "acebench" if benchmark == "acebench_agent" else "bfcl")
+                      else "acebench" if benchmark == "acebench_agent"
+                      else "tau2" if benchmark == "tau2" else "bfcl")
     args.task_id = list(task_ids)
     return args
 
 
 def selected_tasks(config, benchmark, requested=None):
-    if benchmark in {"acebench_agent", "toolsandbox"}:
+    if benchmark in {"acebench_agent", "toolsandbox", "tau2"}:
         from .native_extra import selected_tasks as extra_tasks
         return extra_tasks(config, benchmark, requested)
     if benchmark == "appworld":
@@ -203,7 +204,7 @@ def run_closed_loop(config, benchmark, directory, requested=None):
                 raise RuntimeError(f"Task already has execution evidence; not rerunning {task}")
             print(json.dumps({"arm": ARM, "task": task, "status": "running"}), flush=True)
             try:
-                if benchmark in {"acebench_agent", "toolsandbox"}:
+                if benchmark in {"acebench_agent", "toolsandbox", "tau2"}:
                     from .native_extra import run_task
                     receipt, metrics = run_task(config, benchmark, task, native, delivery, controller_path)
                 elif benchmark == "appworld":
@@ -400,13 +401,15 @@ def run_common_prefix(config, benchmark, directory, prefix_path):
     tasks = [replay_task_id(rows, key) for key, rows in groups.items()]
     if len(tasks) != len(set(tasks)):
         raise ValueError("Recorded conversations reuse an episode identity")
+    if benchmark == "tau2" and set(tasks) != set(selected_tasks(config, benchmark)):
+        raise ValueError("tau2 replay must cover exactly the selected official task identities")
     native, args, controller_path = prepare_native(config, benchmark, directory, tasks, delivery)
     sequence = 0
     tolerated_failures = []   # (task, prefix_id, status, kind): failed replay prefixes
     declared_failure_tasks = []  # one server-declared incident per task
     unattempted_prefixes = 0
     for task, rows in zip(tasks, groups.values()):
-        if benchmark in {"acebench_agent", "toolsandbox"}:
+        if benchmark in {"acebench_agent", "toolsandbox", "tau2"}:
             from .native_extra import controller_command
             command = controller_command(config, benchmark, task, native, delivery, controller_path)
         elif benchmark == "appworld":
@@ -417,14 +420,14 @@ def run_common_prefix(config, benchmark, directory, prefix_path):
         process, log, task_root = _controller_process(command, native, task, delivery)
         previous_user_turn, turn_step = None, -1
         try:
-            if benchmark in {"acebench_agent", "toolsandbox"}:
+            if benchmark in {"acebench_agent", "toolsandbox", "tau2"}:
                 from .native_extra import validate_ready_manifest
                 validate_ready_manifest(config, benchmark, task,
                                         task_root / "server" / "ready.json", controller_path)
             elif ARM == "c2kv_native_r4":
                 import native_bare
                 native_bare.validate_manifest(task_root / "server" / "ready.json")
-            if config.get("tool_memory") and benchmark not in {"acebench_agent", "toolsandbox"}:
+            if config.get("tool_memory") and benchmark not in {"acebench_agent", "toolsandbox", "tau2"}:
                 from .native_extra import validate_tool_ready
                 ready = json.loads((task_root / "server" / "ready.json").read_text(encoding="utf-8"))
                 validate_tool_ready(config, ready)
@@ -565,7 +568,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--arm", choices=sorted(ARMS), default="c2kv_c1_t02_r8")
-    parser.add_argument("--benchmark", choices=("bfcl_base", "bfcl_long_context", "appworld", "acebench_agent", "toolsandbox"), required=True)
+    parser.add_argument("--benchmark", choices=("bfcl_base", "bfcl_long_context", "appworld", "acebench_agent", "toolsandbox", "tau2"), required=True)
     parser.add_argument("--stage", choices=("closed_loop", "common_prefix"), default="closed_loop")
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--upstream")

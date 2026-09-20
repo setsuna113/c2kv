@@ -36,7 +36,7 @@ DEFAULT_CONFIG = Path(__file__).with_name("config.json")
 ACEBENCH_MAX_RUNNING_REQUESTS = 2
 REFERENCE_ATTENTION_MEM_FRACTION = 0.65   # static pool cap for reference_attention arms (see server_command)
 C1_ARMS = {"c2kv_c1_t02_r8": 8, "c2kv_c1_t02_r4": 4, "c2kv_c1_off_r8": 8}
-BUDGET_TEXT_BENCHMARKS = {"bfcl_base", "bfcl_long_context", "appworld", "acebench_agent"}
+BUDGET_TEXT_BENCHMARKS = {"bfcl_base", "bfcl_long_context", "appworld", "acebench_agent", "tau2"}
 
 EVENT_NATIVE_CHECKPOINT_MARKERS = {
     "history_memory_training_profile": "history-event-base-query-v1",
@@ -196,7 +196,7 @@ def server_command(config, source, arm=None, benchmark=None, tool_checkpoint=Non
            "--mem-fraction-static", str(mem_fraction),
            "--context-length", str(config["context_length"]),
            "--max-total-tokens", str(config["max_total_tokens"]),
-           "--max-running-requests", str(ACEBENCH_MAX_RUNNING_REQUESTS if benchmark in {"acebench_agent", "toolsandbox"} else 1),
+           "--max-running-requests", str(ACEBENCH_MAX_RUNNING_REQUESTS if benchmark in {"acebench_agent", "toolsandbox", "tau2"} else 1),
            "--page-size", "1",
            "--chunked-prefill-size", str(config["chunked_prefill_size"]),
            "--random-seed", str(config["seed"])]
@@ -342,6 +342,9 @@ def run_command(config, cell, directory, profile, stage="closed_loop"):
             cmd += ["--tool-budget-tokens", str(cell["tool_budget_tokens"])]
     if cell["adapter"] == "bfcl":
         cmd += ["--categories", cell["category"]]
+    elif cell["adapter"] == "tau2":
+        from .tau2 import adapter_args
+        cmd += adapter_args(config)
     elif cell["adapter"] == "acebench":
         # Keep the matrix on ACEBench Agent rather than its fixed-call splits.
         cmd += ["--acebench-category", cell.get("category") or "agent",
@@ -852,7 +855,7 @@ def _required_aggregate_artifacts(stage, cell, directory):
         required.append(directory / f"summary_{cell['arm']}.json")
         if cell["arm"] == "full":
             required.append(directory / "full_prefixes.jsonl")
-        if cell["adapter"] in {"acon_appworld", "acebench"}:
+        if cell["adapter"] in {"acon_appworld", "acebench", "tau2"}:
             required.append(directory / "measurement" / "harness_events.jsonl")
         if cell["adapter"] == "toolsandbox":
             required.extend([
@@ -970,7 +973,7 @@ def main(argv=None):
                         help="explicit candidates: all or comma-separated static_t02,turn_c1,goal_rescue,dependency_first")
     parser.add_argument("--candidate-benchmarks", default="bfcl_base",
                         help="candidate benchmark scope, comma-separated subset of "
-                             "bfcl_base (default), bfcl_long_context, appworld, acebench_agent")
+                             "bfcl_base (default), bfcl_long_context, appworld, acebench_agent, tau2")
     parser.add_argument("--acon-budget-tokens", type=int,
                         help="add budget-adapted ACON BFCL/ACEBench cells with this actor history cap")
     parser.add_argument("--hiagent-budget-tokens", type=int,
