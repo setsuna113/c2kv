@@ -16,6 +16,7 @@ Usage (benchts venv on the server):
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import os
@@ -199,6 +200,41 @@ COST_JOIN = ("joinable: toolsandbox_cli emits scenario/session/request/action "
              "ids without changing official execution or scoring")
 
 
+def _invalid_retrieval_scenarios(out_dir: Path) -> set[str]:
+    """Join typed proxy failures to official scenario names through the harness."""
+    from measurement.telemetry import read_jsonl
+
+    events = out_dir / "measurement" / "harness_events.jsonl"
+    if not events.is_file():
+        return set()
+    by_conversation = {}
+    for row in read_jsonl(events):
+        if row.get("event_type") != "episode_start":
+            continue
+        instance = row.get("episode_instance_id")
+        scenario = row.get("episode_id")
+        if not isinstance(instance, str) or not isinstance(scenario, str):
+            continue
+        key = hashlib.sha256(json.dumps(
+            ["measurement_session", instance], ensure_ascii=False,
+            sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+        by_conversation[key] = scenario
+    latest = {}
+    for path in sorted((out_dir / "logs").glob("proxy_*.jsonl")):
+        for row in read_jsonl(path):
+            scenario = by_conversation.get(row.get("conv_id"))
+            if scenario:
+                latest[scenario] = (row.get("status"), str(row.get("error") or ""))
+    return {scenario for scenario, (status, error) in latest.items()
+            if status in {"textarm_error", "upstream_error"} and any(marker in error for marker in (
+                "HiAgent requested nonexistent completed subgoals",
+                "HiAgent requested an already revealed trajectory without advancing",
+                "HiAgent exceeded four internal trajectory retrieval rounds",
+                "HiAgent mixed internal retrieval and environment actions",
+                "malformed hiagent_retrieve subgoal_ids",
+            ))}
+
+
 def reject_rapidapi_http_failures(out_dir: Path) -> None:
     path = Path(out_dir) / "measurement" / "rapidapi_http_status.jsonl"
     if not path.exists():
@@ -311,23 +347,39 @@ def collect(out_dir: Path) -> Dict[str, Any]:
 
     rows: List[Dict[str, Any]] = []
     crashed: List[str] = []
+    task_failures: List[str] = []
+    proxy_failures = _invalid_retrieval_scenarios(out_dir)
     seen_ids: set[str] = set()
     for path in summaries:
         data = json.loads(path.read_text(encoding="utf-8"))
         for scenario in data.get("per_scenario_results") or []:
             if not isinstance(scenario, dict):
                 raise SystemExit("FATAL: ToolSandbox official scenario result is not an object")
-            if scenario.get("traceback"):
-                # a crashed scenario FAILS the run — _mean used to skip
-                # these None rows and the upstream recorded a silent 0
-                crashed.append(str(scenario.get("name")))
-                continue
             scenario_id = scenario.get("name")
             if not isinstance(scenario_id, str) or not scenario_id:
                 raise SystemExit("FATAL: ToolSandbox official scenario result has no name")
             if scenario_id in seen_ids:
                 raise SystemExit(f"FATAL: duplicate ToolSandbox official scenario: {scenario_id}")
             seen_ids.add(scenario_id)
+            traceback = scenario.get("traceback")
+            if traceback:
+                # A request for nonexistent completed history is an actor
+                # action, while an arbitrary 502 or runner crash is not.
+                if any(marker in str(traceback) for marker in (
+                    "HiAgent requested nonexistent completed subgoals",
+                    "HiAgent requested an already revealed trajectory without advancing",
+                    "HiAgent exceeded four internal trajectory retrieval rounds",
+                    "HiAgent mixed internal retrieval and environment actions",
+                    "malformed hiagent_retrieve subgoal_ids",
+                )) or (scenario_id in proxy_failures and "502" in str(traceback)):
+                    task_failures.append(scenario_id)
+                    rows.append({"task_id": scenario_id, "semantic_score": 0.0,
+                                 "official_similarity": None,
+                                 "task_failure_kind": "hiagent_invalid_retrieval",
+                                 "protocol_legal": None})
+                else:
+                    crashed.append(scenario_id)
+                continue
             similarity = scenario.get("similarity")
             if (type(similarity) not in (int, float)
                     or not math.isfinite(float(similarity))):
@@ -348,6 +400,7 @@ def collect(out_dir: Path) -> Dict[str, Any]:
             f"crashed (traceback in result_summary): {', '.join(crashed[:10])}")
     summary = aggregate(rows, cluster_key="task_id")
     summary["scenario_ids"] = sorted(str(row["task_id"]) for row in rows)
+    summary["task_failures"] = {"hiagent_invalid_retrieval": sorted(task_failures)}
     return summary
 
 

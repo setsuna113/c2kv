@@ -1189,6 +1189,8 @@ def _apply_text_arm(payload: Dict[str, Any], arm, conv: str,
             retrieve_subgoals=retrieve_subgoals,
             environment_action_format=(
                 "native_tool_call" if payload.get("tools") else "python_content"))
+        if retrieval_feedback:
+            out.append(hiagent_budget._feedback_message(retrieval_feedback))
     else:
         parts = arm.text_policy.split("_", 2)
         if len(parts) < 2 or parts[0] != "acon" or parts[1] not in ("hist", "obs"):
@@ -1260,9 +1262,22 @@ def _hiagent_retrieval_loop(original_payload, arm, conv, data, stats, send):
             staged, updated = _apply_text_arm(
                 original_payload, arm, conv, sorted(retrieved), retrieval_feedback=feedback)
         else:
-            retrieved = requested
-        if updated.get("invalid_retrieval_subgoals"):
-            raise ValueError(f"HiAgent requested nonexistent completed subgoals: {updated['invalid_retrieval_subgoals']}")
+            retrieved = set(updated.get("retrieved_subgoals", sorted(requested)))
+        invalid = updated.get("invalid_retrieval_subgoals") or []
+        if invalid:
+            # Keep the invalid model action visible in request telemetry, but
+            # let the actor repair it within the existing four-round limit.
+            stats.setdefault("invalid_retrieval_attempts", []).append({
+                "requested_subgoals": sorted(set(ids)),
+                "invalid_subgoals": sorted(invalid),
+            })
+            for key, value in (updated.get("compressor_usage") or {}).items():
+                stats.setdefault("compressor_usage", {}).setdefault(key, 0)
+                stats["compressor_usage"][key] += value
+            stats["n_compressor_calls"] += int(updated.get("n_compressor_calls") or 0)
+            staged, updated = _apply_text_arm(
+                original_payload, arm, conv, sorted(retrieved),
+                retrieval_feedback=hiagent_budget.INVALID_SUBGOAL_FEEDBACK)
         for key, value in (updated.get("compressor_usage") or {}).items():
             stats.setdefault("compressor_usage", {}).setdefault(key, 0)
             stats["compressor_usage"][key] += value

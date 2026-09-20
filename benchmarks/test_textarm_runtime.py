@@ -56,9 +56,18 @@ def test_nonexistent_retrieval_is_not_leaked_to_executor(monkeypatch):
     original = _original()
     arm = get_arm("hiagent_full")
     _, stats = proxy._apply_text_arm(original, arm, "test")
-    with pytest.raises(ValueError, match="nonexistent"):
-        proxy._hiagent_retrieval_loop(original, arm, "test", _retrieval([99]), stats,
-                                      lambda payload: pytest.fail("invalid retrieval must not generate"))
+    sent = []
+    final = {"choices": [{"message": {"role": "assistant", "content": "Continue."}}]}
+    def send(payload):
+        sent.append(payload)
+        return final
+    assert proxy._hiagent_retrieval_loop(
+        original, arm, "test", _retrieval([99]), stats, send) is final
+    assert len(sent) == 1
+    assert "subgoal_unavailable" in json.dumps(sent[0]["messages"])
+    assert "account A secret detail" not in json.dumps(sent[0]["messages"])
+    assert stats["invalid_retrieval_attempts"] == [{
+        "requested_subgoals": [99], "invalid_subgoals": [99]}]
 
 
 @pytest.mark.parametrize("policy,mode,guideline", [

@@ -29,6 +29,12 @@ from .event_native_costs import read_event_native_steps, summarize_event_native_
 GENERATION_BACKENDS = ('native', 'sglang')
 
 
+def _stop_for_health(health):
+    # A finite decision cap is a task outcome. Keep serving its typed 429
+    # until the official harness finishes or the owner stops this process.
+    return health['terminal'] and health['terminal_reason'] != 'decision_cap_reached'
+
+
 def _route_kwargs(source_profile, view_mode, compression_policy, history_view_protocol):
     if (source_profile in ('native-v1', 'openai-single-task-v1')
             or view_mode in {'ac_gist_static',
@@ -583,7 +589,7 @@ def _serve(args):
                           'ready_file': str((args.out / 'ready.json').resolve())}), flush=True)
         while not stop_requested and time.monotonic() < deadline:
             health = api.health()
-            if health['terminal'] or health['decisions_reserved'] >= args.max_decisions:
+            if _stop_for_health(health):
                 break
             server.handle_request()
         health = api.health()

@@ -207,6 +207,7 @@ def test_ace_official_task_acceptance_uses_actual_arm_identity(
 
     monkeypatch.setattr(native_extra, "server_command",
                         lambda *args: [sys.executable, "--model-name", "test-model"])
+    monkeypatch.setattr(native_extra, "_preflight_controller_tokenizer", lambda *args: None)
     monkeypatch.setattr(native_extra.c1_appworld, "_delivery_path", lambda _: delivery)
     monkeypatch.setattr(native_extra.c1_appworld, "_delivery_runner", lambda _: FakeRunner())
     monkeypatch.setattr(native_extra.c1_appworld, "_delivery_run_c1", lambda *_: FakeDelivery())
@@ -221,6 +222,26 @@ def test_ace_official_task_acceptance_uses_actual_arm_identity(
                           delivery, tmp_path / "controller.json")
     assert seen == [("c2kv_native" if arm == "c2kv_native_r4" else "proposed",
                      detector, variant, {"decision_count": 1})]
+
+
+def test_native_controller_preflight_uses_controller_python_not_bench_python(
+        tmp_path, monkeypatch):
+    config = _config(tmp_path)
+    config["bench_python"] = "/venv-benchts/bin/python"
+    config["c1_runtime"] = {"controller_python": "/venv-native/bin/python"}
+    called = {}
+
+    def check(command, **kwargs):
+        called.update(command=command, kwargs=kwargs)
+        return SimpleNamespace(returncode=1, stderr="untagged enum ModelWrapper")
+
+    monkeypatch.setattr(native_extra, "run_owned", check)
+    with pytest.raises(RuntimeError, match="untagged enum ModelWrapper"):
+        native_extra._preflight_controller_tokenizer(
+            native_extra.c1_appworld._controller_python(config), config["checkpoint"])
+    assert called["command"][0] == "/venv-native/bin/python"
+    assert called["command"][-1] == config["checkpoint"]
+    assert called["kwargs"]["capture_output"] is True
 
 
 @pytest.mark.parametrize("arm,detector,variant", [
