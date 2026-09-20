@@ -154,7 +154,6 @@ def run_owned(command, *, check=False, timeout=None, capture_output=False,
                 interval = poll_interval if remaining is None else min(poll_interval, remaining)
                 try:
                     stdout, stderr = process.communicate(timeout=interval)
-                    monitor()
                     break
                 except subprocess.TimeoutExpired:
                     monitor()

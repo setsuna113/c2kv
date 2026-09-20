@@ -58,6 +58,17 @@ def test_monitored_child_preserves_complete_stdout_and_timeout():
                   timeout=.1, monitor=mock.Mock(), poll_interval=.03)
 
 
+def test_completed_worker_is_not_reclassified_by_later_engine_exit():
+    # Once the worker returned all outputs successfully, a later service exit
+    # cannot turn those completed task outcomes into infrastructure failures.
+    monitor = mock.Mock(side_effect=[None, UpstreamUnavailable("later exit")])
+    result = run_owned([sys.executable, "-c", "print('complete')"],
+                       capture_output=True, text=True, monitor=monitor,
+                       poll_interval=5)
+    assert result.returncode == 0 and result.stdout == "complete\n"
+    assert monitor.call_count == 1
+
+
 @pytest.mark.skipif(os.name != "posix", reason="Owned process groups need POSIX")
 def test_server_exit_preserves_first_result_and_stops_remaining_tasks(tmp_path):
     first = tmp_path / "first.json"
