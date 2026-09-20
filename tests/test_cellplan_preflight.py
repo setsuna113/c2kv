@@ -1,7 +1,10 @@
 import csv
+import hashlib
 import importlib.util
 import json
+import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -16,6 +19,7 @@ def cellplan(tmp_path, monkeypatch):
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     monkeypatch.setattr(module, "GENERATION_ROOT", tmp_path)
+    monkeypatch.setattr(module, "EXPERIMENT_ROOT", tmp_path)
     monkeypatch.setattr(module, "RESULTS", tmp_path / "results")
     monkeypatch.setattr(module, "CONFIG", tmp_path / "config")
     monkeypatch.setattr(module, "BACKENDS", ("c2kv",))
@@ -42,6 +46,22 @@ def cellplan(tmp_path, monkeypatch):
 def _cell_path(cellplan, bench="bfcl_base"):
     return (cellplan.RESULTS / "closed_loop" / bench / "c2kv" / "K0" /
             "compression_full_budget" / "cell.json")
+
+
+def _toolsandbox_cohort(cellplan, tmp_path, monkeypatch):
+    ids = [f"scenario_{index:03d}_3_distraction_tools" for index in range(129)]
+    registry = tmp_path / "ts.json"
+    registry.write_text(json.dumps({"full": ids, "test": []}))
+    monkeypatch.setattr(cellplan, "TS_SCENARIO_NAMES", str(registry))
+    cohort = tmp_path / "three_distraction_tools_129.json"
+    cohort.write_text(json.dumps({
+        "suite": "three_distraction_tools_129", "scenario_count": len(ids),
+        "scenario_ids": ids,
+        "scenario_ids_sha256": hashlib.sha256(
+            ("\n".join(ids) + "\n").encode()).hexdigest(),
+    }))
+    monkeypatch.setenv("C2KV_TOOLSANDBOX_COHORT_FILE", str(cohort))
+    return ids
 
 
 def test_import_and_default_plan_do_not_require_optional_manifests(cellplan):
@@ -102,21 +122,93 @@ def test_incremental_panel_preserves_calibrated_cell_and_counts(cellplan, tmp_pa
     done = cell_path.parent / "tasks" / "multi_turn_base_1" / "done.json"
     done.parent.mkdir(parents=True)
     done.write_text('{"status": "completed"}')
-    ts_path = tmp_path / "ts.json"
-    ts_path.write_text(json.dumps({"full": ["scenario_a", "scenario_b"], "test": []}))
-    monkeypatch.setattr(cellplan, "TS_SCENARIO_NAMES", str(ts_path))
+    ids = _toolsandbox_cohort(cellplan, tmp_path, monkeypatch)
 
     assert cellplan.main(["--benches", "toolsandbox"]) == 0
     assert json.loads(cell_path.read_text()) == existing
     assert done.read_text() == '{"status": "completed"}'
     resolved = json.loads((tmp_path / "config" / "resolved_config.json").read_text())
     assert resolved["n_cells"] == 2
-    assert resolved["n_task_executions"] == 3
+    assert resolved["n_task_executions"] == 1 + len(ids)
+    manifest = json.loads((tmp_path / "manifests" / "toolsandbox.json").read_text())
+    assert manifest["full"] == ids
+    assert manifest["n_full"] == 129
     with (tmp_path / "matrix.csv").open(newline="") as stream:
         rows = list(csv.DictReader(stream))
     assert {row["benchmark"] for row in rows} == {"bfcl_base", "toolsandbox"}
     assert next(row for row in rows if row["benchmark"] == "bfcl_base")[
         "threshold_status"] == "calibrated"
+
+
+def test_fresh_root_builds_129_matrix_without_touching_old_full_manifest(
+        cellplan, tmp_path, monkeypatch, capsys):
+    from generality import scheduler_npu
+
+    frozen = tmp_path
+    fresh = tmp_path / "fresh_experiment"
+    old_manifest = frozen / "manifests" / "toolsandbox.json"
+    old_manifest.parent.mkdir()
+    old_manifest.write_text('{"n_full": 1032, "source": "historical_full"}')
+    old_bytes = old_manifest.read_bytes()
+    ids = _toolsandbox_cohort(cellplan, tmp_path, monkeypatch)
+    paper = tmp_path / "paper_checkout"
+    ts_repo = tmp_path / "official_toolsandbox"
+    paper.mkdir()
+    ts_repo.mkdir()
+    monkeypatch.setenv("C2KV_PAPER_SOURCE", str(paper))
+    monkeypatch.setenv("C2KV_TOOLSANDBOX_SOURCE", str(ts_repo))
+    monkeypatch.setattr(cellplan, "TS_REPO", str(ts_repo))
+    monkeypatch.setattr(cellplan, "EXPERIMENT_ROOT", fresh)
+    monkeypatch.setattr(cellplan, "RESULTS", fresh / "results")
+    monkeypatch.setattr(cellplan, "CONFIG", fresh / "config")
+    monkeypatch.setattr(cellplan, "BACKENDS", ("c2kv", "h2o", "snapkv", "pyramidkv"))
+    monkeypatch.setattr(cellplan, "WORKING_POINTS", ("K0", "K2"))
+    monkeypatch.setattr(cellplan, "CONDITIONS", (
+        "compression_full_budget", "tracer_history", "recovery_off_same_initial"))
+
+    assert cellplan.main(["--benches", "toolsandbox"]) == 0
+    assert old_manifest.read_bytes() == old_bytes
+    new_manifest = json.loads((fresh / "manifests" / "toolsandbox.json").read_text())
+    assert new_manifest["full"] == ids and new_manifest["n_full"] == 129
+    assert new_manifest["benchmark_dir"] == str(ts_repo)
+    with (fresh / "matrix.csv").open(newline="") as stream:
+        rows = list(csv.DictReader(stream))
+    assert len(rows) == 24 and {row["n_expected"] for row in rows} == {"129"}
+    assert not (frozen / "matrix.csv").exists()
+
+    monkeypatch.setattr(scheduler_npu, "EXPERIMENT_ROOT", fresh)
+    monkeypatch.setattr(scheduler_npu, "RESULTS", fresh / "results" / "closed_loop")
+    monkeypatch.setattr(scheduler_npu, "LOGS", fresh / "logs")
+    monkeypatch.setattr(scheduler_npu, "ENGINE_PORT",
+                        dict(scheduler_npu.DEFAULT_ENGINE_PORT))
+    assert len(scheduler_npu.enumerate_cells()) == 24
+    capsys.readouterr()
+    assert scheduler_npu.main(["--cards", "7", "--engine-port", "36470",
+                               "--dry-run", "--include-pending"]) == 0
+    queued = json.loads(capsys.readouterr().out)
+    assert len(queued["cells"]) == 24
+    assert scheduler_npu.ENGINE_PORT[7] == 36470
+    assert scheduler_npu.known_engine_ports()[36207] == 7
+    assert scheduler_npu.known_engine_ports()[36470] == 7
+
+
+def test_experiment_root_environment_moves_outputs_only(tmp_path):
+    root = Path(__file__).resolve().parents[1]
+    fresh = tmp_path / "new_results"
+    env = {**os.environ, "C2KV_GENERALITY_EXPERIMENT_ROOT": str(fresh)}
+    result = subprocess.run(
+        [sys.executable, "-c",
+         "import json; from generality import cellplan, scheduler_npu; "
+         "print(json.dumps([str(cellplan.EXPERIMENT_ROOT), "
+         "str(cellplan.CONFIG), str(scheduler_npu.RESULTS), "
+         "str(cellplan.GENERATION_ROOT)]))"],
+        cwd=root, env=env, capture_output=True, text=True, check=True,
+    )
+    experiment, config, results, frozen = json.loads(result.stdout.strip())
+    assert experiment == str(fresh)
+    assert config == str(fresh / "config")
+    assert results == str(fresh / "results" / "closed_loop")
+    assert frozen != experiment
 
 
 def test_conflict_preflight_leaves_all_outputs_unchanged(cellplan, tmp_path, monkeypatch):
@@ -127,9 +219,7 @@ def test_conflict_preflight_leaves_all_outputs_unchanged(cellplan, tmp_path, mon
     existing = json.loads(cell_path.read_text())
     existing["budget_bytes"]["B"] += 1
     cell_path.write_text(json.dumps(existing))
-    ts_path = tmp_path / "ts.json"
-    ts_path.write_text(json.dumps({"full": ["scenario_a"], "test": []}))
-    monkeypatch.setattr(cellplan, "TS_SCENARIO_NAMES", str(ts_path))
+    _toolsandbox_cohort(cellplan, tmp_path, monkeypatch)
 
     with pytest.raises(RuntimeError, match="existing cell contract differs"):
         cellplan.main(["--benches", "bfcl_base", "toolsandbox"])

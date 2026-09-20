@@ -274,6 +274,59 @@ benchmark result.
 The task-0 NPU functional-smoke receipts and source hashes are in
 [`validation/tau2_integration_20260920.json`](validation/tau2_integration_20260920.json).
 
+## ToolSandbox 129 closed-loop matrix
+
+Integration testing is complete; no full-cohort evaluation is running or
+authorized by this handoff. Reuse the [84 preserved scenario artifacts](validation/toolsandbox_preserved_84_20260920.json)
+instead of repeating inference. The [45 remaining IDs](validation/toolsandbox_remaining_45_20260920.json)
+are an inventory, not a launch request. The partial artifacts do not constitute
+a 129-scenario aggregate score; the last 60 saved contexts need only official
+CPU scoring if their numeric summary is required. Retained prefixes exclude
+both interrupted scenario attempts. Use only card 6 for any subsequently
+authorized work in this task; card 7 is excluded.
+
+`generality/cellplan.py --benches toolsandbox` selects the 129 official
+`_3_distraction_tools` scenarios frozen in the shared paper checkout's
+`benchmarks/toolsandbox_suites/three_distraction_tools_129.json`. The NPU
+routes C2KV, H2O, SnapKV and PyramidKV through the existing K0/K2 ×
+Tracer-history (T), compression-full-budget (C) and recovery-off (R) matrix.
+This integration covers the raw tool context; it does not configure T0 tool
+memory. T uses the existing backend/working-point calibration receipts, while
+C and R use the frozen B and K budgets respectively. The agent uses its cell
+arm and the ToolSandbox user simulator uses the raw engine endpoint. A task
+counts only after the official CLI produces a valid score for its frozen ID.
+
+Use a separate experiment root because the historical root contains a
+different ToolSandbox manifest. The override moves outputs, logs and scheduler
+locks; the frozen R_max measurement, budgets and calibration inputs still come
+from `/home/liuyancheng/c2kv-generality-20260918`. The paper and ToolSandbox
+checkouts are explicit sources, not copies inferred from the output root.
+Keep the private credential file outside the repository; it must contain one
+literal `RAPID_API_KEY=...` assignment. `TOOLSANDBOX_ENV_FILE` is read only by
+the official ToolSandbox worker when it needs that external-tool credential.
+
+```bash
+EXP=/home/liuyancheng/c2kv-toolsandbox-129-20260920
+export C2KV_GENERALITY_EXPERIMENT_ROOT="$EXP"
+export C2KV_GENERALITY_SOURCE="$EXP/npu"
+export C2KV_PAPER_SOURCE="$EXP/paper"
+export C2KV_TOOLSANDBOX_SOURCE="$EXP/ToolSandbox"
+export TOOLSANDBOX_ENV_FILE=/absolute/path/to/private/toolsandbox.env
+
+/home/liuyancheng/envs/sgl/bin/python "$EXP/npu/generality/cellplan.py" \
+  --benches toolsandbox
+/home/liuyancheng/envs/sgl/bin/python "$EXP/npu/generality/scheduler.py" \
+  --cards 6 --engine-port 36470 --dry-run --include-pending
+```
+
+The dry run lists pending cells without starting inference. `--engine-port`
+is optional for a single card; omit it to use the scheduler's existing port
+map. If the engine uses a different SGLang checkout, set
+`C2KV_SGLANG_SOURCE` to that checkout before planning and scheduling. Planning
+and scheduler enumeration do not imply that the full 129-task matrix has run.
+The six-cell NPU functional-smoke evidence is in
+[`validation/toolsandbox_integration_20260920.json`](validation/toolsandbox_integration_20260920.json).
+
 The closed-loop scheduler dispatches all four backend families:
 
 ```text

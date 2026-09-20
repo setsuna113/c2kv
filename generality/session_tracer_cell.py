@@ -44,12 +44,24 @@ try:
     from .completion_contract import write_cell_status
     from .process_lifecycle import defer_interrupts, interruptible, run_owned_worker
     from .tau2_harness import completed_tau2_task, run_tau2_task
+    from .toolsandbox_harness import (
+        completed_task as completed_toolsandbox_task,
+        official_result as toolsandbox_official_result,
+        score_summary as toolsandbox_score_summary,
+        worker_command as toolsandbox_worker_command,
+    )
     from .upstream_liveness import UpstreamLiveness, UpstreamUnavailable
 except ImportError:  # Direct file launch on ascend03.
     from bfcl_results import collect_bfcl_results
     from completion_contract import write_cell_status
     from process_lifecycle import defer_interrupts, interruptible, run_owned_worker
     from tau2_harness import completed_tau2_task, run_tau2_task
+    from toolsandbox_harness import (
+        completed_task as completed_toolsandbox_task,
+        official_result as toolsandbox_official_result,
+        score_summary as toolsandbox_score_summary,
+        worker_command as toolsandbox_worker_command,
+    )
     from upstream_liveness import UpstreamLiveness, UpstreamUnavailable
 
 try:
@@ -116,6 +128,24 @@ def bind_tau2_task(payload, task_id, step):
                            payload.get("messages", []) if isinstance(message, dict)) - 1)
     normalized["c2kv_eval_context"] = {
         "benchmark": "tau2", "task_id": task_id,
+        "user_turn": user_turn, "step": step, "attempt": 0,
+    }
+    return normalized
+
+
+def bind_toolsandbox_task(payload, task_id, step):
+    """Bind an ordinary ToolSandbox agent request to its frozen scenario."""
+    if payload.get("c2kv_eval_context") is not None:
+        raise ValueError("ToolSandbox task identity is server-owned")
+    measurement_id = payload.get("c2kv_measurement_session_id")
+    if measurement_id is not None and (not isinstance(measurement_id, str)
+                                    or not measurement_id):
+        raise ValueError("ToolSandbox measurement session ID must be nonempty")
+    normalized = dict(payload)
+    user_turn = max(0, sum(message.get("role") == "user" for message in
+                           payload.get("messages", []) if isinstance(message, dict)) - 1)
+    normalized["c2kv_eval_context"] = {
+        "benchmark": "toolsandbox", "task_id": task_id,
         "user_turn": user_turn, "step": step, "attempt": 0,
     }
     return normalized
@@ -540,7 +570,7 @@ class SessionTracerTask:
 
 def run_server(cell, task_ids, port, out_dir):
     """One controller server per batch, mirroring the frozen API contract."""
-    if cell["benchmark"] in {"acon_appworld", "tau2"} and len(task_ids) != 1:
+    if cell["benchmark"] in {"acon_appworld", "tau2", "toolsandbox"} and len(task_ids) != 1:
         raise ValueError("Single-task transport requires one frozen task per server")
     import uuid
     from transformers import AutoTokenizer
@@ -664,6 +694,15 @@ def run_server(cell, task_ids, port, out_dir):
                     self._json(400, {"error": {"type": "task_identity_invalid",
                                                "message": str(error)}})
                     return
+            elif cell["benchmark"] == "toolsandbox":
+                task_id = task_ids[0]
+                try:
+                    payload = bind_toolsandbox_task(
+                        payload, task_id, tasks[task_id].decisions)
+                except ValueError as error:
+                    self._json(400, {"error": {"type": "task_identity_invalid",
+                                               "message": str(error)}})
+                    return
             else:
                 ctx = payload.get("c2kv_eval_context") or {}
                 task_id = ctx.get("task_id")
@@ -685,13 +724,19 @@ def run_server(cell, task_ids, port, out_dir):
             message = {"role": "assistant", "content": parsed.text}
             if parsed.tool_calls:
                 message["tool_calls"] = parsed.tool_calls
-            self._json(200, {
-                "id": f"gen-{record['decision_key']}", "object": "chat.completion",
+            request_id = (f"gen-{task.session_id}/{record['decision_key']}"
+                          if cell["benchmark"] == "toolsandbox" else
+                          f"gen-{record['decision_key']}")
+            response = {
+                "id": request_id, "object": "chat.completion",
                 "created": int(time.time()), "model": payload.get("model"),
                 "choices": [{"index": 0, "finish_reason": "tool_calls" if parsed.tool_calls else "stop",
                              "message": message}],
                 "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
-            })
+            }
+            if cell["benchmark"] == "toolsandbox":
+                response["c2kv_proxy"] = {"request_id": request_id}
+            self._json(200, response)
 
     server = SessionTracerHTTPServer(("127.0.0.1", port), Handler)
     (out_dir / "server" / "ready.json").parent.mkdir(parents=True, exist_ok=True)
@@ -743,6 +788,9 @@ def completed_task_ids(cell_dir: Path, benchmark: str, expected: list[str]) -> s
         return {task_id for task_id in expected if any(
             completed_tau2_task(path, task_id) for path in
             (cell_dir / "batches").glob(f"*/tau2_worker/{task_id}"))}
+    if benchmark == "toolsandbox":
+        return {task_id for task_id in expected
+                if completed_toolsandbox_task(cell_dir, task_id)}
     completed = set()
     for task_id in expected:
         for path in (cell_dir / "batches").glob(
@@ -786,7 +834,7 @@ def main(argv=None) -> int:
     task_ids = expected_ids
     if args.max_tasks is not None:
         task_ids = task_ids[: args.max_tasks]
-    batch_size = 1 if cell["benchmark"] in {"acon_appworld", "tau2"} else args.batch
+    batch_size = 1 if cell["benchmark"] in {"acon_appworld", "tau2", "toolsandbox"} else args.batch
     stopped_upstream = False
     for i in range(0, len(task_ids), batch_size):
         batch = task_ids[i:i + batch_size]
@@ -829,6 +877,30 @@ def main(argv=None) -> int:
                 rc = 0 if receipt["status"] == "completed" else 1
                 if rc:
                     failed_tasks.append(task_id)
+            elif cell["benchmark"] == "toolsandbox":
+                task_id = batch[0]
+                paper = Path(os.environ.get("C2KV_PAPER_SOURCE",
+                    GENERATION_ROOT / "src" / "paper_harness"))
+                env = os.environ.copy()
+                env["PYTHONPATH"] = os.pathsep.join((str(paper), str(paper / "benchmarks")))
+                env["no_proxy"] = env["NO_PROXY"] = "127.0.0.1,localhost"
+                # ToolSandbox's official external tools need the host HTTP
+                # proxy; NO_PROXY keeps both local model endpoints direct.
+                with (out / "benchmark.log").open("wb") as log:
+                    rc = run_owned_worker(
+                        toolsandbox_worker_command(
+                            cell, task_id, f"http://127.0.0.1:{args.port_base}/v1",
+                            cell["sglang_backend_url"].rstrip("/") + "/v1",
+                            out / "toolsandbox_worker" / task_id),
+                        cwd=str(Path(__file__).resolve().parents[1]), env=env,
+                        stdout=log, stderr=subprocess.STDOUT,
+                        stdin=subprocess.DEVNULL,
+                        monitor=UpstreamLiveness(cell["sglang_backend_url"]))
+                if rc or toolsandbox_official_result(
+                        out / "toolsandbox_worker" / task_id / "official_summary.json",
+                        task_id) is None:
+                    failed_tasks.append(task_id)
+                    rc = rc or 1
             else:
                 # Ordinary ACON requests have no explicit task context. Bind
                 # one worker to one server-owned task and keep its own output.
@@ -872,6 +944,14 @@ def main(argv=None) -> int:
         if stopped_upstream:
             break
     completed = completed_task_ids(Path(cell["cell_dir"]), cell["benchmark"], expected_ids)
+    score_fields = {}
+    if cell["benchmark"] == "toolsandbox":
+        summary = toolsandbox_score_summary(cell)
+        summary_path = Path(cell["cell_dir"]) / "toolsandbox_score_summary.json"
+        summary_path.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
+        score_fields = {"semantic_score": summary["semantic_score"],
+                        "score_denominator": summary["score_denominator"],
+                        "score_summary": str(summary_path)}
     write_cell_status(cell, {
         "cell_id": cell["cell_id"],
         "status": "complete" if len(completed) == len(expected_ids) else "incomplete",
@@ -879,6 +959,7 @@ def main(argv=None) -> int:
         "n_completed": len(completed),
         "n_retryable": len(expected_ids) - len(completed),
         "n_total": len(expected_ids),
+        **score_fields,
         "finished_at": time.time(),
     })
     return 1 if stopped_upstream else 0

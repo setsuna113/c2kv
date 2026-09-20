@@ -28,6 +28,7 @@ class EngineLauncherTests(unittest.TestCase):
         # Exercise the fixture's locks without treating production engines as
         # test-owned processes on hosts where real cards are already occupied.
         source = source.replace("'sglang.launch_server'", f"'c2kv-test-engine-{root.name}'")
+        self.full_source = source
         source = source.split("source /usr/local/Ascend/cann-8.5.0/set_env.sh", 1)[0]
         self.launcher = root / "launch_engine.sh"
         self.launcher.write_text(source + "echo ready\nexec sleep 10\n")
@@ -79,6 +80,42 @@ class EngineLauncherTests(unittest.TestCase):
         ):
             with self.subTest(card=card, port=port, extra=extra):
                 self.assertEqual(self.run_launcher(card, port, *extra).returncode, 64)
+
+    def test_tool_call_parser_default_and_explicit_override(self):
+        source = self.full_source.replace(
+            "source /usr/local/Ascend/cann-8.5.0/set_env.sh", "")
+        source = source.replace("source /usr/local/Ascend/nnal/atb/set_env.sh", "")
+        source = source.replace(
+            "exec /home/liuyancheng/envs/sgl/bin/python -m sglang.launch_server \\",
+            "printf '%s\\n' \\",
+        )
+        launcher = Path(self.temp.name) / "parser_launcher.sh"
+        launcher.write_text(source)
+        with socket.socket() as unused:
+            unused.bind(("127.0.0.1", 0))
+            port = unused.getsockname()[1]
+
+        def launched_args(*extra):
+            env = os.environ.copy()
+            env.pop("TOOL_CALL_PARSER", None)
+            result = subprocess.run(
+                ["bash", str(launcher), "5", str(port), "test", *extra],
+                capture_output=True, text=True, timeout=5, env=env,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            return result.stdout.splitlines()
+
+        default = launched_args()
+        self.assertEqual(default.count("--tool-call-parser"), 1)
+        self.assertEqual(default[default.index("--tool-call-parser") + 1], "qwen25")
+
+        explicit = launched_args("--tool-call-parser", "custom")
+        self.assertEqual(explicit.count("--tool-call-parser"), 1)
+        self.assertEqual(explicit[explicit.index("--tool-call-parser") + 1], "custom")
+
+        equals_form = launched_args("--tool-call-parser=custom")
+        self.assertNotIn("--tool-call-parser", equals_form)
+        self.assertEqual(equals_form.count("--tool-call-parser=custom"), 1)
 
 
 if __name__ == "__main__":

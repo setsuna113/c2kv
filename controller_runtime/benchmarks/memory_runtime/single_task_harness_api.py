@@ -97,7 +97,8 @@ class SingleTaskHarnessAPI(EventNativeAPI):
                     400, "invalid_measurement_session_id",
                     "Harness measurement task identity must be a nonempty string",
                 )
-            if self.benchmark != "acon_appworld" or measurement_task_id != server_task_id:
+            if not (self.benchmark == "toolsandbox" or
+                    self.benchmark == "acon_appworld" and measurement_task_id == server_task_id):
                 raise EventNativeAPIError(
                     409, "task_identity_mismatch",
                     "Harness measurement task identity differs from the frozen server task",
@@ -182,7 +183,9 @@ class SingleTaskHarnessAPI(EventNativeAPI):
                 if key not in retained_sampling_fields
             ),
             "client_context_ignored": client_context is not None,
-            "measurement_task_id_validated": "c2kv_measurement_session_id" in payload,
+            "measurement_task_id_validated": (
+                self.benchmark == "acon_appworld" and "c2kv_measurement_session_id" in payload),
+            "measurement_session_id_accepted": "c2kv_measurement_session_id" in payload,
             "task_identity_source": "server",
         }
         try:

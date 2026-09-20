@@ -13,11 +13,15 @@ if (( CARD > 7 || PORT < 1 || PORT > 65535 )); then
   echo "engine launch refused: card or port is out of range" >&2
   exit 64
 fi
+PARSER_ARGS=(--tool-call-parser "${TOOL_CALL_PARSER:-qwen25}")
 for arg in "$@"; do
   case "$arg" in
     --port|--port=*|--base-gpu-id|--base-gpu-id=*)
       echo "engine launch refused: extra arguments cannot override card or port" >&2
       exit 64
+      ;;
+    --tool-call-parser|--tool-call-parser=*)
+      PARSER_ARGS=()
       ;;
   esac
 done
@@ -66,6 +70,7 @@ export C2KV_PAPER_TELEMETRY=1
 export C2KV_PAPER_TELEMETRY_LOG=$ROOT/logs/engines/${TAG}_server_telemetry.jsonl
 exec /home/liuyancheng/envs/sgl/bin/python -m sglang.launch_server \
   --model-path "$CKPT" --served-model-name gen-c1000 --model-impl sglang \
+  "${PARSER_ARGS[@]}" \
   --device npu --attention-backend ascend --dtype bfloat16 \
   --enable-c2kv --c2kv-gist-type dynamic-interleave --c2kv-gist-param qkv \
   --c2kv-query-proj base --c2kv-pool-fraction 0.05 \

@@ -1,6 +1,7 @@
 import json
 import hashlib
 import os
+import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -9,6 +10,7 @@ from unittest.mock import patch
 
 from generality import historykv_cell as driver
 from generality import scheduler_npu as scheduler
+from generality import toolsandbox_harness
 from generality.completion_contract import invalidate_appworld_done
 from generality.historykv_cell import (
     appworld_done_healthy, bfcl_row_healthy, cached_terminal,
@@ -165,17 +167,45 @@ def test_toolsandbox_nested_worker_installs_signal_unwind(tmp_path):
             "model_name": "model", "sglang_backend_url": "http://127.0.0.1:1"}
 
     def fake_call(command, **kwargs):
-        script = command[-1]
-        assert "from process_lifecycle import interruptible" in script
-        assert "@interruptible" in script
+        assert command[0] == cell["python_sgl"]
+        assert Path(command[1]).resolve() == Path(toolsandbox_harness.__file__).resolve()
+        assert command[command.index("--task-id") + 1] == "scenario_1"
         assert kwargs["env"]["PYTHONPATH"].split(os.pathsep)[0] == str(
             Path(driver.__file__).resolve().parent)
-        compile(script, "<toolsandbox-worker>", "exec")
+        official = Path(command[command.index("--out") + 1]) / "official_summary.json"
+        official.parent.mkdir(parents=True)
+        official.write_text(json.dumps({
+            "schema": toolsandbox_harness.SCHEMA,
+            "task_id": "scenario_1", "n": 1, "semantic_score": 0.5,
+            "official_scorer": "tool_sandbox official CLI",
+            "adapter_summary": {
+                "n": 1, "scenario_ids": ["scenario_1"],
+                "scenario_manifest": {"scenario_ids": ["scenario_1"]},
+            },
+        }), encoding="utf-8")
         return 0
 
     with patch.object(driver, "run_owned_worker", side_effect=fake_call):
         result = driver._run_adapter_task(cell, "scenario_1", 37401, "toolsandbox")
     assert result["status"] == "completed"
+
+    # Exercise the launched worker module's entrypoint, not an obsolete inline
+    # source string: TERM must unwind the inner adapter's finally block.
+    unwound = []
+
+    def interrupted_run(*_args):
+        try:
+            signal.raise_signal(signal.SIGTERM)
+        finally:
+            unwound.append(True)
+
+    args = ["--task-id", "scenario_1", "--base-url", "http://agent/v1",
+            "--user-base-url", "http://raw/v1", "--out", str(tmp_path),
+            "--benchmark-dir", "toolsandbox", "--bench-python", "python",
+            "--model", "model"]
+    with patch.object(toolsandbox_harness, "run_task", side_effect=interrupted_run):
+        assert toolsandbox_harness.main(args) == 128 + signal.SIGTERM
+    assert unwound == [True]
 
 
 def test_appworld_empty_model_output_is_not_generation_error(tmp_path):
