@@ -27,7 +27,10 @@ RISK_THRESHOLD = 0.5
 RISK_ARTIFACT_SHA256 = T02_RISK_ARTIFACT_SHA256
 
 
-def candidate_cell_from_source(source: dict, variant: str, backend_url: str) -> dict:
+def candidate_cell_from_source(
+    source: dict, variant: str, backend_url: str,
+    history_budget_tokens: int | None = None,
+) -> dict:
     """Derive a separate, resumable cell from an existing BFCL B-budget manifest."""
     if variant not in VARIANTS:
         raise ValueError("Unknown candidate algorithm")
@@ -40,6 +43,9 @@ def candidate_cell_from_source(source: dict, variant: str, backend_url: str) -> 
         raise ValueError("Candidates require a frozen ratio-4 source cell")
     if not isinstance(backend_url, str) or not backend_url.strip():
         raise ValueError("Candidates require an explicit SGLang backend URL")
+    if history_budget_tokens is not None and (
+            type(history_budget_tokens) is not int or history_budget_tokens <= 0):
+        raise ValueError("history_budget_tokens must be a positive integer")
     source_dir = Path(source["cell_dir"])
     cell = copy.deepcopy(source)
     cell["schema"] = ("c2kv-generality-candidate-cell-v4"
@@ -56,6 +62,13 @@ def candidate_cell_from_source(source: dict, variant: str, backend_url: str) -> 
     cell["candidate_source_cell_id"] = source["cell_id"]
     cell["candidate_budget_source"] = "working_point.common_cap_bytes"
     cell["ratio"] = RATIO
+    if history_budget_tokens is not None:
+        suffix = f"b{history_budget_tokens}"
+        cell["cell_id"] += f"__{suffix}"
+        cell["cell_dir"] = str(Path(cell["cell_dir"]) / suffix)
+        cell["model_name"] = f"{source.get('model_name', source['cell_id'])}__candidate_{variant}__{suffix}"
+        cell["history_budget_tokens"] = history_budget_tokens
+        cell["candidate_budget_source"] = "explicit.native_history_budget_tokens"
     if variant in REPAIR_VARIANTS:
         cell.pop("threshold", None)
         cell.pop("threshold_status", None)

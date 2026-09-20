@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import sys
 import types
+from pathlib import Path
 
 import pytest
 
@@ -48,6 +50,147 @@ def test_candidate_cell_is_explicit_ratio8_and_isolated(tmp_path, variant):
     assert result["cell_dir"].endswith(f"candidate_algorithms/{variant}") or result["cell_dir"].endswith(f"candidate_algorithms\\{variant}")
     assert result["cell_dir"] != source["cell_dir"]
     assert source["ratio"] == 4 and source["sglang_backend_url"] is None
+
+
+def _checkpoint_with_geometry(path, *, declared_bytes=147456):
+    from controller_runtime.benchmarks.memory_runtime.event_native import EXPECTED_PROFILE
+
+    path.mkdir()
+    config = {
+        **EXPECTED_PROFILE,
+        "model_type": "qwen3", "architectures": ["Qwen3ForCausalLM"],
+        "history_memory_supported_ratios": [4, 8],
+        "gist_token_id": 1, "vocab_size": 10,
+        "num_hidden_layers": 36, "num_key_value_heads": 8, "head_dim": 128,
+        "history_memory_policy": {"kv_bytes_per_token": declared_bytes},
+    }
+    (path / "config.json").write_text(json.dumps(config), encoding="utf-8")
+
+
+def test_explicit_native_budget_has_independent_cell_policy_and_profile(tmp_path, monkeypatch):
+    monkeypatch.setitem(sys.modules, "current", types.SimpleNamespace())
+    monkeypatch.setitem(sys.modules, "evidence_sets", types.SimpleNamespace())
+    monkeypatch.setitem(sys.modules, "c1_artifact_binding", types.SimpleNamespace(
+        bind_risk_artifact=lambda artifact, checkpoint: (artifact, {})))
+    from generality import c2kv_cell
+
+    checkpoint = tmp_path / "checkpoint"
+    _checkpoint_with_geometry(checkpoint)
+    source = source_cell(tmp_path) | {
+        "checkpoint": str(checkpoint), "model_name": "gen_c2kv_K0_compression_full_budget",
+    }
+    legacy = candidate_cell.candidate_cell_from_source(
+        source, "goal_pending", "http://127.0.0.1:36200")
+    explicit = candidate_cell.candidate_cell_from_source(
+        source, "goal_pending", "http://127.0.0.1:36200", 768)
+    another = candidate_cell.candidate_cell_from_source(
+        source, "goal_pending", "http://127.0.0.1:36200", 1024)
+    assert legacy["cell_id"] == source["cell_id"] + "__candidate_goal_pending"
+    assert "history_budget_tokens" not in legacy
+    assert explicit["cell_id"] == legacy["cell_id"] + "__b768"
+    assert another["cell_id"] == legacy["cell_id"] + "__b1024"
+    assert len({legacy["cell_dir"], explicit["cell_dir"], another["cell_dir"]}) == 3
+    assert explicit["model_name"].endswith("__candidate_goal_pending__b768")
+    assert explicit["candidate_budget_source"] == "explicit.native_history_budget_tokens"
+
+    monkeypatch.setattr(c2kv_cell, "_controller_with_binding", lambda cell: ({}, None))
+    budgets = {"working_points": {"K0": {
+        "history_allowance_bytes": 100, "common_cap_bytes": 300}}}
+    prepared = c2kv_cell.prepare_cell_files(explicit, budgets)
+    profile = prepared["native_history_budget"]
+    policy_path = Path(prepared["cell_dir"]) / "eval_policy.json"
+    policy = json.loads(policy_path.read_text())
+    frozen_cell = json.loads((Path(prepared["cell_dir"]) / "cell.json").read_text())
+    assert profile["schema"] == "c2kv-native-history-budget-override-v1"
+    assert profile["requested_tokens"] == 768
+    assert profile["kv_bytes_per_token"] == 147456
+    assert profile["history_budget_bytes"] == 768 * 147456
+    assert profile["workspace_budget_bytes"] == 768 * 147456
+    assert profile["base_history_budget_bytes"] == 300
+    assert policy["policy_id"] == "generality-" + explicit["cell_id"]
+    assert policy["policy"]["history_budget_bytes"] == 768 * 147456
+    assert policy["policy"]["workspace_budget_bytes"] == 768 * 147456
+    assert profile["eval_policy"] == policy
+    assert frozen_cell["native_history_budget"] == profile
+    assert profile["override_eval_policy_sha256"] == hashlib.sha256(
+        policy_path.read_bytes()).hexdigest()
+    assert profile["override_policy_sha256"] == c2kv_cell._json_sha256(policy)
+    assert profile["base_eval_policy_source"] == "virtual_working_point_candidate_policy"
+    legacy_policy = c2kv_cell.build_eval_policy(legacy, budgets)
+    assert profile["base_eval_policy_sha256"] == hashlib.sha256(
+        c2kv_cell._json_file_bytes(legacy_policy)).hexdigest()
+    from controller_runtime.benchmarks.memory_runtime.event_native_eval_policy import load_eval_policy
+    assert load_eval_policy(policy_path) == policy
+    monkeypatch.setattr(c2kv_cell.current, "load_config", lambda: {
+        "route": "ac_native_s0_lexical_raw_reserve_failed_operation",
+        "compression_policy": "always-compress-v1",
+        "history_view_protocol": "fixed-budget-main",
+        "decode_strategy": "incremental", "prefill_chunk_size": 256,
+    }, raising=False)
+    launch_cell = prepared | {
+        "python_sgl": "python", "caps": {
+            "max_completion_tokens": 128, "generation_attempts_per_task": 2,
+            "extraction_calls_per_task": 4, "task_timeout": 60},
+    }
+    command = c2kv_cell.server_command(launch_cell, ["multi_turn_base_0"],
+                                       tmp_path / "attempt", 36300)
+    assert command[command.index("--eval-policy") + 1] == str(policy_path)
+    assert command[command.index("--model-name") + 1] == prepared["model_name"]
+    assert explicit["cell_id"] in command[command.index("--run-id") + 1]
+    assert legacy_policy["policy"]["history_budget_bytes"] == 300
+
+
+@pytest.mark.parametrize("budget", [0, -1, True, 768.0, "768"])
+def test_candidate_rejects_invalid_explicit_native_budget(tmp_path, budget):
+    with pytest.raises(ValueError, match="positive integer"):
+        candidate_cell.candidate_cell_from_source(
+            source_cell(tmp_path), "goal_pending", "http://127.0.0.1:36200", budget)
+
+
+def test_geometry_mismatch_rejected_before_writing_explicit_cell(tmp_path, monkeypatch):
+    monkeypatch.setitem(sys.modules, "current", types.SimpleNamespace())
+    monkeypatch.setitem(sys.modules, "evidence_sets", types.SimpleNamespace())
+    monkeypatch.setitem(sys.modules, "c1_artifact_binding", types.SimpleNamespace(
+        bind_risk_artifact=lambda artifact, checkpoint: (artifact, {})))
+    from generality import c2kv_cell
+
+    checkpoint = tmp_path / "checkpoint"
+    _checkpoint_with_geometry(checkpoint, declared_bytes=123)
+    cell = candidate_cell.candidate_cell_from_source(
+        source_cell(tmp_path) | {"checkpoint": str(checkpoint)},
+        "goal_pending", "http://127.0.0.1:36200", 768)
+    with pytest.raises(ValueError, match="different byte contract"):
+        c2kv_cell.prepare_cell_files(cell, {"working_points": {"K0": {
+            "history_allowance_bytes": 100, "common_cap_bytes": 300}}})
+    assert not Path(cell["cell_dir"]).exists()
+
+
+def test_explicit_budget_cli_keeps_candidate_result_identity(tmp_path, monkeypatch):
+    monkeypatch.setitem(sys.modules, "current", types.SimpleNamespace())
+    monkeypatch.setitem(sys.modules, "evidence_sets", types.SimpleNamespace())
+    monkeypatch.setitem(sys.modules, "c1_artifact_binding", types.SimpleNamespace(
+        bind_risk_artifact=lambda artifact, checkpoint: (artifact, {})))
+    from generality import c2kv_cell
+
+    seen = []
+    monkeypatch.setattr(c2kv_cell, "load_cell", lambda path: source_cell(tmp_path))
+    monkeypatch.setattr(c2kv_cell, "_write_bfcl_completion",
+                        lambda cell, task_ids: seen.append((cell, task_ids)) or {"valid_count": 0})
+    monkeypatch.setattr(c2kv_cell, "completion_receipt", lambda completion: completion)
+    args = ["--cell", str(tmp_path / "source.json"),
+            "--budgets", str(tmp_path / "budgets.json"),
+            "--candidate-algorithm", "goal_pending",
+            "--sglang-backend-url", "http://127.0.0.1:36200",
+            "--history-budget-tokens", "768", "--audit-results-only"]
+    assert c2kv_cell.main(args) == 0
+    assert seen[0][0]["cell_id"].endswith("__candidate_goal_pending__b768")
+    assert seen[0][0]["history_budget_tokens"] == 768
+    with pytest.raises(SystemExit):
+        c2kv_cell.main(["--cell", "source.json", "--budgets", "budgets.json",
+                        "--history-budget-tokens", "768"])
+    with pytest.raises(SystemExit):
+        c2kv_cell.main(args[:args.index("--history-budget-tokens")] +
+                       ["--history-budget-tokens", "0", "--audit-results-only"])
 
 
 @pytest.mark.parametrize("change", [
