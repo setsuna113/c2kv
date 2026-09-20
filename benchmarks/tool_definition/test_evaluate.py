@@ -6,6 +6,7 @@ import pytest
 from types import SimpleNamespace
 
 from benchmarks.tool_definition import evaluate as module
+from benchmarks.tool_definition.core import FULL_CONTROL_POLICY
 from benchmarks.tool_definition.evaluate import (_http_result, _measured_kv,
                                                  _outcome_http)
 
@@ -58,7 +59,10 @@ def test_http_result_uses_measured_full_anchor_and_flags_exceeded_budget():
     assert row["resident_kv_tokens_by_layer"] == [67, 65]
 
 
-def test_evaluate_stages_full_history_through_shared_http_adapter(tmp_path, monkeypatch):
+@pytest.mark.parametrize("interface_policy", ("none", "schema"))
+def test_evaluate_stages_full_history_through_shared_http_adapter(
+    tmp_path, monkeypatch, interface_policy,
+):
     messages = [{"role": "user", "content": "earlier turn"},
                 {"role": "user", "content": "choose a tool"}]
     tools = [{"type": "function", "function": {"name": "search", "parameters": {}}},
@@ -79,10 +83,18 @@ def test_evaluate_stages_full_history_through_shared_http_adapter(tmp_path, monk
                      "native_indices": native, "resident_kv_tokens": costs[layout],
                      "base_prompt_tokens_without_tool_protocol": 30}
             for layout, native in natives.items()}
+    if interface_policy == "schema":
+        for record in pair.values():
+            record["interface_policy"] = "schema"
+            record["interface_render_profile"] = module.toolmemory.INTERFACE_RENDER_PROFILE
+            record["full_control_policy"] = FULL_CONTROL_POLICY
     manifest_path = tmp_path / "manifest.json"
     manifest_path.write_text("{}", encoding="utf-8")
     monkeypatch.setattr(module, "read_manifest", lambda *_: (
-        {"checkpoint": {"config_sha256": "frozen-config"}}, {("d", 8): pair}))
+        {"checkpoint": {"config_sha256": "frozen-config"},
+         "interface_policy": interface_policy,
+         **({"full_control_policy": FULL_CONTROL_POLICY}
+            if interface_policy == "schema" else {})}, {("d", 8): pair}))
     monkeypatch.setattr(module, "_source_rows", lambda *_: {"d": source})
     sent = []
 
@@ -152,14 +164,16 @@ def test_evaluate_stages_full_history_through_shared_http_adapter(tmp_path, monk
                                            "c2kv_key_hash": "hash"})
             staged["messages"].extend(payload["messages"])
             staged["case"] = {"method": "c2kv" if self.spec.encoder == "t0" else self.spec.encoder,
-                              "layout": layout, "target": target_resident_tokens}
+                              "layout": layout, "target": target_resident_tokens,
+                              "spec_interface_policy": self.spec.interface_policy}
             return staged, SimpleNamespace(info={"native_indices": native})
 
     monkeypatch.setattr(module, "SglangClient", FakeClient)
     monkeypatch.setattr(module.toolmemory, "ToolMemory", FakeAdapter)
     report = module.evaluate(manifest_path, tmp_path, tmp_path / "out",
                              upstream="http://localhost:30000", max_new_tokens=32,
-                             methods=("c2kv", "h2o"))
+                             methods=("c2kv", "h2o"),
+                             interface_policy=interface_policy)
     rows = [json.loads(line) for line in (tmp_path / "out" / "results.jsonl").read_text(
         encoding="utf-8").splitlines()]
     assert report["result_rows"] == len(rows) == len(sent) == 8
@@ -169,6 +183,9 @@ def test_evaluate_stages_full_history_through_shared_http_adapter(tmp_path, monk
     assert next(row for row in rows if row["layout"] == "full")["R_tool"] == 1
     assert next(row for row in rows if row["method"] == "h2o" and row["layout"] == "random")[
         "budget_status"] == "exceeds_allowance"
+    assert sent[0]["case"]["spec_interface_policy"] == "none"
+    assert all(request["case"]["spec_interface_policy"] == interface_policy
+               for request in sent[1:])
     assert sent[0]["c2kv_kv_memory_hint"]["paper_measurement"]["history_message_count"] == 2
     assert sent[1]["c2kv_kv_memory_hint"]["paper_measurement"]["history_message_count"] == 3
     assert all(request["c2kv_kv_memory_hint"]["paper_measurement"][

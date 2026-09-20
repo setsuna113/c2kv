@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from benchmarks.tool_definition.core import (full_tool_spans, pack_layout,
+from benchmarks import toolmemory
+from benchmarks.tool_definition.core import (FULL_CONTROL_POLICY, full_tool_spans, pack_layout,
                                              random_rank, retrieval_layout)
 
 
@@ -67,3 +68,41 @@ def test_retrieval_only_fits_matched_total_kv_allowance_and_spans_partition_tool
     assert spans[-1][1] <= len(full["memory"]["system_input_ids"])
     assert random_rank(4, seed=42, decision_id=row["decision_id"]) == random_rank(
         4, seed=42, decision_id=row["decision_id"])
+
+
+def test_schema_interface_preserves_complete_t0_chunks_and_top_k_native_schemas():
+    row, tokenizer = decision([]), CharacterTokenizer()
+    original = pack_layout(row, tokenizer, layout="hybrid", ratio=8, k=1)
+    schema = pack_layout(row, tokenizer, layout="hybrid", ratio=8, k=1,
+                         interface_policy="schema")
+    assert schema["interface_policy"] == "schema"
+    assert schema["interface_render_profile"] == toolmemory.INTERFACE_RENDER_PROFILE
+    assert schema["full_control_policy"] == FULL_CONTROL_POLICY
+    assert "interface_render_profile" not in original
+    assert schema["native_indices"] == original["native_indices"]
+    assert schema["memory"]["chunks"] == original["memory"]["chunks"]
+    assert schema["memory"]["workspace_input_ids"] == original["memory"]["workspace_input_ids"]
+    assert schema["resident_kv_tokens"] > original["resident_kv_tokens"]
+    protocol = "".join(chr(token - 1) for token in schema["memory"]["system_input_ids"])
+    assert "# Executable tool interfaces" in protocol
+    for index in range(len(row["tools"])):
+        assert row["tools"][index]["function"]["name"] in protocol
+    retrieved = retrieval_layout(row, tokenizer, ratio=8,
+                                 allowance_tokens=schema["resident_kv_tokens"], k=1,
+                                 interface_policy="schema")
+    assert retrieved["interface_policy"] == "schema"
+    assert retrieved["interface_render_profile"] == toolmemory.INTERFACE_RENDER_PROFILE
+    assert retrieved["resident_kv_tokens"] <= schema["resident_kv_tokens"]
+
+
+def test_schema_policy_keeps_full_control_identical_to_original_raw_catalog():
+    row, tokenizer = decision([]), CharacterTokenizer()
+    original = pack_layout(row, tokenizer, layout="full", ratio=8)
+    schema = pack_layout(row, tokenizer, layout="full", ratio=8,
+                         interface_policy="schema")
+    assert schema["interface_policy"] == "schema"
+    assert schema["interface_render_profile"] == toolmemory.INTERFACE_RENDER_PROFILE
+    assert schema["full_control_policy"] == FULL_CONTROL_POLICY
+    assert schema["native_indices"] == original["native_indices"]
+    assert schema["memory"] == original["memory"]
+    assert schema["resident_kv_tokens"] == original["resident_kv_tokens"]

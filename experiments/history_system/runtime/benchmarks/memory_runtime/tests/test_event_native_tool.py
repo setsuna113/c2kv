@@ -139,6 +139,62 @@ class RecordingGenerator:
         pass
 
 
+@pytest.mark.parametrize("method", ["streamingllm", "h2o", "snapkv", "pyramidkv"])
+def test_schema_policy_keeps_native_interfaces_through_recovery(method):
+    tokenizer = CharacterTokenizer()
+    inner = HistoryController(tokenizer)
+    calls = []
+    generator = RecordingGenerator()
+
+    def repair(ids, **kwargs):
+        calls.append(kwargs)
+        return {"key_hash": "raw-tool-handle", "token_len": kwargs["target_tokens"]}
+
+    generator.repair_tool_span = repair
+    controller = ToolRegionController(
+        inner, tokenizer, parse_native_tool_spec(f"{method}:r8:hybrid1:schema"),
+        model_context=20000, generator=generator)
+    tools = [{"type": "function", "function": {
+        "name": name, "description": (name + " description ") * 40,
+        "parameters": {"type": "object", "properties": {"path": {"type": "string"}},
+                       "required": ["path"], "additionalProperties": False}}}
+        for name in ("cp", "ls")]
+    payload = {"session_id": "protected-tools", "tools": tools,
+               "messages": [{"role": "system", "content": "Use APIs."},
+                            {"role": "user", "content": "cp a file"}]}
+    prepared = controller.prepare(payload, ratio=8, max_new_tokens=4)
+    assert inner.seen[0]["tools"] == []
+    assert len(calls) == 1
+    call = calls[0]
+    protocol_tokens = prepared.memory.system_input_ids[call["span_start"]:call["span_end"]]
+    protected = tokenizer.decode([token for index, token in enumerate(protocol_tokens)
+                                  if index not in call["selectable_relative_indices"]])
+    assert '"name":"cp"' in protected and '"name":"ls"' in protected
+    assert '"required":["path"]' in protected
+    assert prepared.metadata["tool_memory"]["resident_tool_tokens"] == call["target_tokens"]
+    recovered = controller.reconsider(prepared, [], draft_text="retry")
+    assert len(calls) == 2 and calls[1] == calls[0]
+    assert recovered["memory"].raw_tool_segments == prepared.memory.raw_tool_segments
+
+
+def test_t0_schema_policy_preserves_original_encoder_chunks_and_charges_interfaces():
+    tokenizer = CharacterTokenizer()
+    payload = {"session_id": "t0-interfaces", "tools": [{"type": "function", "function": {
+        "name": "cp", "description": "copy files", "parameters": {
+            "type": "object", "properties": {"source": {"type": "string"}},
+            "required": ["source"]}}}], "messages": [
+                {"role": "system", "content": "Use APIs."},
+                {"role": "user", "content": "Copy the file."}]}
+    prepared = []
+    for spec in ("t0:r8", "t0:r8:schema"):
+        controller = ToolRegionController(HistoryController(tokenizer), tokenizer,
+            parse_native_tool_spec(spec), model_context=10000, generator=RecordingGenerator())
+        prepared.append(controller.prepare(payload, ratio=8, max_new_tokens=4))
+    assert prepared[0].memory.chunks == prepared[1].memory.chunks
+    assert prepared[1].memory.costs(8)["resident_kv_tokens"] > prepared[0].memory.costs(8)["resident_kv_tokens"]
+    assert '"required":["source"]' in tokenizer.decode(prepared[1].memory.system_input_ids)
+
+
 def test_source_tool_carrier_survives_native_recovery_and_final_trace(tmp_path):
     tokenizer = CharacterTokenizer()
     inner = HistoryController(tokenizer)
@@ -481,3 +537,27 @@ def test_tool_chunk_handle_matches_the_engine_contract():
             tool_binding={"enabled": True, "identity": identity} if projection else None,
         )
         assert client["handle"] == expected
+
+
+@pytest.mark.parametrize("spec", ["t0:r8:hybrid2:schema", "h2o:r8:hybrid2:schema"])
+def test_native_source_topk_is_protected_even_without_encoder_work(spec):
+    tokenizer = BoundaryMergingTokenizer()
+    inner = HistoryController(tokenizer)
+    definition = "opaque_api(x) => execute exactly"
+    content = "Visible: " + definition
+    payload = {"session_id": "native-source", "messages": [
+        {"role": "system", "content": content},
+        {"role": "user", "content": "Execute"}], "tools": [],
+        "c2kv_tool_spans_v1": [{"message_index": 0, "start": len("Visible: "),
+            "end": len(content), "source": "appworld_api_docs"}]}
+    controller = ToolRegionController(inner, tokenizer, parse_native_tool_spec(spec),
+        model_context=10000, generator=RecordingGenerator())
+    prepared = controller.prepare(payload, ratio=8, max_new_tokens=4)
+    assert definition in prepared.plan.protocol
+    assert prepared.plan.info["n_native_source_interface_copies"] == 1
+    assert not prepared.memory.raw_tool_segments and not prepared.memory.chunks
+    assert prepared.metadata["tool_memory"]["resident_tool_tokens"] > len(definition)
+    if spec.startswith("h2o"):
+        assert prepared.plan.info["selection_backend"] == "raw_full_no_repair"
+        assert prepared.plan.info["retained_source_span_count"] == 1
+        assert prepared.plan.info["raw_source_fallback_count"] == 0

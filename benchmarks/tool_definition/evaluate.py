@@ -11,7 +11,7 @@ from typing import Any, Mapping
 
 from benchmarks import toolmemory
 from benchmarks.backends.sglang import SglangBackend
-from .core import canonical_calls, parse_calls, sha256_file
+from .core import FULL_CONTROL_POLICY, canonical_calls, parse_calls, sha256_file
 from .prepare import LAYOUTS, SCHEMA
 
 METHODS = ("c2kv", "streamingllm", "h2o", "snapkv", "pyramidkv")
@@ -22,6 +22,15 @@ def read_manifest(path: Path, checkpoint: Path) -> tuple[dict[str, Any], dict[tu
     manifest = json.loads(path.read_text(encoding="utf-8"))
     if manifest.get("schema") != SCHEMA or manifest.get("purpose") != "recorded_next_action_tool_definition":
         raise ValueError("not a recorded tool-definition manifest")
+    interface_policy = manifest.get("interface_policy", "none")
+    toolmemory.ToolMemorySpec(ratio=8, interface_policy=interface_policy).validate()
+    if interface_policy == "schema":
+        if manifest.get("interface_render_profile") != toolmemory.INTERFACE_RENDER_PROFILE:
+            raise ValueError("prepared tool interface render profile differs from this evaluator")
+        if manifest.get("full_control_policy") != FULL_CONTROL_POLICY:
+            raise ValueError("prepared Full control policy differs from this evaluator")
+    elif "interface_render_profile" in manifest or "full_control_policy" in manifest:
+        raise ValueError("default tool interface policy must not declare a render profile or Full control policy")
     if manifest["checkpoint"]["config_sha256"] != sha256_file(checkpoint / "config.json"):
         raise ValueError("T0 checkpoint config differs from preparation")
     model_files = manifest["checkpoint"].get("model_files_sha256")
@@ -59,6 +68,16 @@ def read_manifest(path: Path, checkpoint: Path) -> tuple[dict[str, Any], dict[tu
             record = json.loads(line)
             if record.get("schema") != SCHEMA or record.get("layout") not in LAYOUTS:
                 raise ValueError("invalid tool-definition record")
+            if record.get("interface_policy", "none") != interface_policy:
+                raise ValueError("recorded tool interface policy differs from manifest")
+            if (interface_policy == "schema" and
+                    record.get("interface_render_profile") != toolmemory.INTERFACE_RENDER_PROFILE):
+                raise ValueError("recorded tool interface render profile differs from manifest")
+            if interface_policy == "schema" and record.get("full_control_policy") != FULL_CONTROL_POLICY:
+                raise ValueError("recorded Full control policy differs from manifest")
+            if interface_policy == "none" and ("interface_render_profile" in record or
+                                               "full_control_policy" in record):
+                raise ValueError("recorded tool interface render profile or Full control policy differs from manifest")
             key = (record["decision_id"], record["ratio"])
             layouts = groups.setdefault(key, {})
             if record["layout"] in layouts:
@@ -270,6 +289,12 @@ def _http_result(record: Mapping[str, Any], *, method: str, layout: str,
         "schema": "c2kv-paper-tool-definition-result-v2",
         "decision_id": record["decision_id"], "source": record["source"],
         "ratio": record["ratio"], "method": method, "layout": layout,
+        **({"interface_policy": record["interface_policy"]}
+           if "interface_policy" in record else {}),
+        **({"interface_render_profile": record["interface_render_profile"]}
+           if "interface_render_profile" in record else {}),
+        **({"full_control_policy": record["full_control_policy"]}
+           if "full_control_policy" in record else {}),
         "k": record["k"], "seed": record["seed"],
         "prompt_sha256": record["prompt_sha256"],
         "gold_tool_calls": gold,
@@ -339,13 +364,16 @@ def _http_summaries(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def evaluate(manifest_path: Path, checkpoint: Path, output: Path, *, upstream: str,
              max_new_tokens: int, model: str | None = None,
              methods: tuple[str, ...] = METHODS, layouts: tuple[str, ...] = LAYOUTS,
-             limit: int | None = None) -> dict[str, Any]:
+             limit: int | None = None,
+             interface_policy: str = "none") -> dict[str, Any]:
     """Evaluate every method through one SGLang server and its tool-memory adapter."""
     if max_new_tokens < 1 or not methods or any(item not in METHODS for item in methods):
         raise ValueError("invalid methods or max_new_tokens")
     if not layouts or any(item not in LAYOUTS for item in layouts):
         raise ValueError("unknown or empty layout set")
     manifest, groups = read_manifest(manifest_path, checkpoint.resolve())
+    if interface_policy != manifest.get("interface_policy", "none"):
+        raise ValueError("evaluation interface policy differs from prepared manifest")
     sources = _source_rows(manifest)
     if output.exists():
         raise FileExistsError(output)
@@ -371,6 +399,10 @@ def evaluate(manifest_path: Path, checkpoint: Path, output: Path, *, upstream: s
                 raw_sink.write(json.dumps({
                     "decision_id": record["decision_id"], "ratio": record["ratio"],
                     "method": method, "layout": layout, "response": response,
+                    **({"interface_render_profile": record["interface_render_profile"]}
+                       if "interface_render_profile" in record else {}),
+                    **({"full_control_policy": record["full_control_policy"]}
+                       if "full_control_policy" in record else {}),
                 }, ensure_ascii=False, separators=(",", ":"), allow_nan=False) + "\n")
                 raw_sink.flush()
 
@@ -380,6 +412,8 @@ def evaluate(manifest_path: Path, checkpoint: Path, output: Path, *, upstream: s
                 payload = {"model": model_id, "messages": source["messages"],
                            "tools": source["tools"], "temperature": 0,
                            "max_tokens": max_new_tokens, "stream": False}
+                # Full is measured as the original raw catalog, even when the
+                # paired compressed layouts protect executable interfaces.
                 full_spec = toolmemory.ToolMemorySpec(ratio=pair["full"]["ratio"])
                 full_adapter_key = ("c2kv", "full", pair["full"]["ratio"])
                 if full_adapter_key not in adapters:
@@ -408,6 +442,7 @@ def evaluate(manifest_path: Path, checkpoint: Path, output: Path, *, upstream: s
                             ratio=record["ratio"], layout=spec_layout,
                             top_k=record["k"] if spec_layout == "hybrid" else 0,
                             encoder="t0" if method == "c2kv" else method,
+                            interface_policy=interface_policy,
                         )
                         adapter_key = (method, layout, record["ratio"])
                         if adapter_key not in adapters:
@@ -454,6 +489,11 @@ def evaluate(manifest_path: Path, checkpoint: Path, output: Path, *, upstream: s
             "server_checkpoint_identity": "tool_config_matched_weights_unverified",
             "max_new_tokens": max_new_tokens,
             "methods": list(methods), "layouts": list(layouts), "limit": limit,
+            **({"interface_policy": interface_policy} if interface_policy != "none" else {}),
+            **({"interface_render_profile": toolmemory.INTERFACE_RENDER_PROFILE}
+               if interface_policy == "schema" else {}),
+            **({"full_control_policy": FULL_CONTROL_POLICY}
+               if interface_policy == "schema" else {}),
             "result_rows": len(rows), "results_sha256": sha256_file(rows_path),
             "raw_responses_sha256": sha256_file(raw_responses_path),
             "grouped_metrics": _http_summaries(rows),
@@ -473,6 +513,11 @@ def evaluate(manifest_path: Path, checkpoint: Path, output: Path, *, upstream: s
             "server_model_info": server_model_info,
             "server_checkpoint_identity": "tool_config_matched_weights_unverified",
             "methods": list(methods), "layouts": list(layouts), "limit": limit,
+            **({"interface_policy": interface_policy} if interface_policy != "none" else {}),
+            **({"interface_render_profile": toolmemory.INTERFACE_RENDER_PROFILE}
+               if interface_policy == "schema" else {}),
+            **({"full_control_policy": FULL_CONTROL_POLICY}
+               if interface_policy == "schema" else {}),
             "result_rows": len(rows),
             "results_sha256": sha256_file(rows_path) if rows_path.exists() else None,
             "raw_responses_sha256": (sha256_file(raw_responses_path)

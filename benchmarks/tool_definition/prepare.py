@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from benchmarks import toolmemory
-from .core import (canonical_calls, full_tool_spans, pack_layout,
+from .core import (FULL_CONTROL_POLICY, canonical_calls, full_tool_spans, pack_layout,
                    retrieval_layout, runtime_modules, sha256_file)
 
 SCHEMA = "c2kv-paper-tool-definition-recorded-v1"
@@ -14,7 +14,8 @@ LAYOUTS = ("full", "uniform", "hybrid", "random", "retrieval")
 
 
 def prepare(input_path: Path, checkpoint: Path, output: Path, *, k: int = 3,
-            seed: int = 42, ratios: tuple[int, ...] = (8, 12)) -> dict[str, Any]:
+            seed: int = 42, ratios: tuple[int, ...] = (8, 12),
+            interface_policy: str = "none") -> dict[str, Any]:
     input_path, checkpoint, output = input_path.resolve(), checkpoint.resolve(), output.resolve()
     if not input_path.is_file():
         raise FileNotFoundError(input_path)
@@ -22,6 +23,7 @@ def prepare(input_path: Path, checkpoint: Path, output: Path, *, k: int = 3,
         raise FileExistsError(output)
     if k < 1 or not ratios or any(ratio not in (8, 12) for ratio in ratios):
         raise ValueError("k must be positive and T0 ratios must be 8 or 12")
+    toolmemory.ToolMemorySpec(ratio=ratios[0], interface_policy=interface_policy).validate()
     if not (checkpoint / "tokenizer.json").is_file():
         raise ValueError("T0 checkpoint needs tokenizer.json for a portable token identity")
     for ratio in ratios:
@@ -53,13 +55,18 @@ def prepare(input_path: Path, checkpoint: Path, output: Path, *, k: int = 3,
                 base_prompt_tokens = len(native_ids(tokenizer, row["messages"], generation=True))
                 decisions += 1
                 for ratio in ratios:
-                    full = pack_layout(row, tokenizer, layout="full", ratio=ratio, k=k, seed=seed)
+                    full = pack_layout(row, tokenizer, layout="full", ratio=ratio, k=k,
+                                       seed=seed, interface_policy=interface_policy)
                     full["tool_token_spans"] = [list(span) for span in full_tool_spans(row, tokenizer, ratio=ratio)]
-                    uniform = pack_layout(row, tokenizer, layout="uniform", ratio=ratio, k=k, seed=seed)
-                    hybrid = pack_layout(row, tokenizer, layout="hybrid", ratio=ratio, k=k, seed=seed)
-                    random = pack_layout(row, tokenizer, layout="random", ratio=ratio, k=k, seed=seed)
+                    uniform = pack_layout(row, tokenizer, layout="uniform", ratio=ratio, k=k,
+                                          seed=seed, interface_policy=interface_policy)
+                    hybrid = pack_layout(row, tokenizer, layout="hybrid", ratio=ratio, k=k,
+                                         seed=seed, interface_policy=interface_policy)
+                    random = pack_layout(row, tokenizer, layout="random", ratio=ratio, k=k,
+                                         seed=seed, interface_policy=interface_policy)
                     retrieval = retrieval_layout(row, tokenizer, ratio=ratio,
-                                                 allowance_tokens=hybrid["resident_kv_tokens"], k=k)
+                                                 allowance_tokens=hybrid["resident_kv_tokens"], k=k,
+                                                 interface_policy=interface_policy)
                     for record in (full, uniform, hybrid, random, retrieval):
                         record["schema"] = SCHEMA
                         record["input_line"] = line_number
@@ -86,6 +93,10 @@ def prepare(input_path: Path, checkpoint: Path, output: Path, *, k: int = 3,
             "records": {"path": "records.jsonl", "sha256": sha256_file(records_path),
                         "bytes": records_path.stat().st_size, "count": count},
         }
+        if interface_policy != "none":
+            manifest["interface_policy"] = interface_policy
+            manifest["interface_render_profile"] = toolmemory.INTERFACE_RENDER_PROFILE
+            manifest["full_control_policy"] = FULL_CONTROL_POLICY
         (output / "manifest.json").write_text(
             json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         return manifest
