@@ -1,0 +1,174 @@
+{
+  "schema": "c2kv-verified-binding-delivery-validation-v1",
+  "status": "cpu_passed_cuda_incomplete",
+  "paper_integrated_code_commit": "a03e306919fcfb74d5a29cf811bca6aad1c57163",
+  "npu_integrated_code_commit": "9847c7d17a3facaf9c8f9f7c4f424b0f0391bb4a",
+  "paper_implementation_commit": "28ff50a016af8333266c9654fc93f99804136ddd",
+  "npu_implementation_commit": "281245161b766b780eb365c2f856321321798f7c",
+  "engine_commit_tested": "210d93ff3db309dd19f9270c12c10cf3effb036c",
+  "variants": [
+    "goal_verified",
+    "pending_verified"
+  ],
+  "protocol": "c2kv-verified-binding-v1",
+  "proof_registry_version": "verified-binding-rules-v1",
+  "runtime_lf_normalized_sha256": {
+    "candidate_algorithms/__init__.py": "53c869cce33bc6dc735be4aba6f8fdfaa1c9d5de867b54ef614ea75e03fb432a",
+    "candidate_algorithms/allocation.py": "ad75a90812111b77459d18d34ea9d2cb248cc95d8bca687277dd514e434c6c8c",
+    "candidate_algorithms/argument_binding.py": "597c2923822980f336ce41da3986bffc69b345dda14eb1f1921c7c410ff8b07f",
+    "candidate_algorithms/controller.py": "92a0e4fb4ecc8d4d6d83dd8d301b39f2446090cb2ee3150fd5fb2abff6c767a1",
+    "candidate_algorithms/dependencies.py": "6ffef4e7f58f9b45a3062777f4235888781b2316e545b4a4c7a19ca5ff9b9520",
+    "candidate_algorithms/goal_commit.py": "9f46b4b69d6988e76298049ec607392be4b2180d9959faec80baef0940979edd",
+    "candidate_algorithms/goal_controller.py": "06f69ddbb885ae6ea46426b2a1a7c115420e346d2c3d6fe766c0645bfedef143",
+    "candidate_algorithms/goal_pending.py": "9af106f50b855b54421050a60927914ae9b15805228c87e115fd5fa84df7d26c",
+    "candidate_algorithms/goal_progress.py": "7fa0d94fdd181013c66d9573a9e26ffa01710d9cf8c7c343598fb579d346d06b",
+    "candidate_algorithms/goal_protocol.py": "359a58f922c9bef9fc6c68b813bea22ea27bb8db970ecf13f5474f3da336d5ea",
+    "candidate_algorithms/goal_source.py": "7665e0402d883fcab09e255943bcee3688aaa1b7c3f0fdfc52517669e15947cb",
+    "candidate_algorithms/no_progress.py": "dcd5922934ba5b3d3d9a671ed6f1a88175c7b99636acca504c6a84a8aa9957a7",
+    "candidate_algorithms/observations.py": "3b14c80f6e71b477978b620a09a0e5aeb667df466277b3c60de04a671e711eec",
+    "candidate_algorithms/progress.py": "4ea19792ba652ea4c2fd3ee74aa416bfee95cdb4f9bc0e0b20734d8734e9dbc1",
+    "candidate_algorithms/repacking.py": "7aaea1d98a223fc8474fdd96f28c6e74d7d3cf6f744cf30f2758f7d71e191412",
+    "candidate_algorithms/repair_controller.py": "f8eee3dbbe847bdd0d9ca69d67dbb73edc3deca3dcfb2eb05fd506b4f3dd2f17",
+    "candidate_algorithms/repair_protocol.py": "a3d4ba5ebf4e0842f92bd198f1d43838115bb42dc3cd29992ba73708e28c9d0b",
+    "candidate_algorithms/request_contract.py": "3ca82419d0dcbb57844cb14a48a9a771409200c5ad443876ab5246987219c4f9",
+    "candidate_algorithms/verified_binding.py": "1ecda543b91999b425825dfc8c3563b8eef235bb40a86b7299ac72a700f98b9c",
+    "candidate_algorithms/verified_controller.py": "53ed495e50c47df1db61e1afaf62d177a31d7f93f23bc160e2db5edf61789301"
+  },
+  "cpu_validation": [
+    {
+      "scope": "Shared runtime policy/controller and legacy Goal, source, candidate recovery, ACE seams",
+      "passed": 88
+    },
+    {
+      "scope": "Post-merge paper arms, profile, ready, C1, AppWorld, runner and tau2 routing",
+      "passed": 170,
+      "subtests_passed": 4
+    },
+    {
+      "scope": "Post-merge NPU launcher, BFCL resume and bundled verified runtime",
+      "passed": 82
+    }
+  ],
+  "cpu_count_note": "Execution counts across overlapping shared-code tests, not scientific trials.",
+  "environment_limited_checks": [
+    "test_run_c1_multibench.py lacks required Linux checkpoint/tau2 fixture paths in this Windows checkout; excluded from passed checks"
+  ],
+  "compatibility": {
+    "old_profiles_unchanged": true,
+    "old_results_unchanged": true,
+    "old_source_and_joint_behavior_unchanged": true,
+    "legacy_all_arm_count": 11,
+    "new_arms_require_named_opt_in": true,
+    "in_flight_jobs_modified": false
+  },
+  "cuda": {
+    "status": "cuda_validation_incomplete",
+    "attempts": [
+      {
+        "root": "/home/lyc/dev/c2kv-verified-binding-smoke-20260920",
+        "source_inventory_sha256": "f3b015de24b7df034dd0b8a2b384b40dc27bd35161b9b622b41545291e42bb94",
+        "status": "incomplete",
+        "completed_decisions": 6,
+        "failed_decisions": 1,
+        "errors": [
+          {
+            "type": "SGLangTransportError",
+            "message": "SGLang /v1/c2kv/native_generate transport failed without retry"
+          }
+        ],
+        "model_configuration": {
+          "mem_fraction_static": 0.85,
+          "c2kv_pool_fraction": 0.05,
+          "cpu_offload_gb": 0,
+          "max_total_tokens": 8192
+        },
+        "server_log": "/home/lyc/dev/c2kv-verified-binding-smoke-20260920/server.log",
+        "server_log_sha256": "cf06b15c152bd31d9325ec82c65385dd2075af82da8db7e74d03775f7b7dc2ed",
+        "owned_service_stopped": true,
+        "benchmark_quality_score_claimed": false
+      },
+      {
+        "root": "/home/lyc/dev/c2kv-verified-binding-smoke-20260920-retry1",
+        "source_inventory_sha256": "bffef35fd9f9a693bd9afedf77364e7bdb8f0fb65c32cf1cfa43b15e7c002468",
+        "status": "startup_failed",
+        "completed_decisions": 0,
+        "failed_decisions": 0,
+        "errors": [],
+        "model_configuration": {
+          "mem_fraction_static": 0.75,
+          "c2kv_pool_fraction": 0.01,
+          "cpu_offload_gb": 0,
+          "max_total_tokens": 8192
+        },
+        "server_log": "/home/lyc/dev/c2kv-verified-binding-smoke-20260920-retry1/server.log",
+        "server_log_sha256": "f834f370b7e487b3c9f4d1f760f268364086fffd7e184cc6839654c578b0ad21",
+        "owned_service_stopped": true,
+        "benchmark_quality_score_claimed": false
+      },
+      {
+        "root": "/home/lyc/dev/c2kv-verified-binding-smoke-20260920-retry2",
+        "source_inventory_sha256": "a7fac6bc212907b7a92ae362b94d562c8ba1ba2dcafb94cb69a069c0ae564e46",
+        "status": "startup_failed",
+        "completed_decisions": 0,
+        "failed_decisions": 0,
+        "errors": [],
+        "model_configuration": {
+          "mem_fraction_static": 0.9,
+          "c2kv_pool_fraction": 0.01,
+          "cpu_offload_gb": 0,
+          "max_total_tokens": 8192
+        },
+        "server_log": "/home/lyc/dev/c2kv-verified-binding-smoke-20260920-retry2/server.log",
+        "server_log_sha256": "079004e9333fae1975873cd74ec76e16c90606c241a09c8bd32ff93c7c0ede5a",
+        "owned_service_stopped": true,
+        "benchmark_quality_score_claimed": false
+      },
+      {
+        "root": "/home/lyc/dev/c2kv-verified-binding-smoke-20260920-retry3",
+        "source_inventory_sha256": "acf8390a8e1f5ae16a12500b9793680d50590b87de3a3715c812b1fd3db56db6",
+        "status": "incomplete",
+        "completed_decisions": 1,
+        "failed_decisions": 1,
+        "errors": [
+          {
+            "type": "SGLangEventNativeError",
+            "message": "SGLang native_generate returned HTTP 400: Mismatched Tensor on argument #1 when calling: `__call__(mX: Tensor([n0, n1, 2560], bfloat16), mW: Tensor([2560], bfloat16), mY: Tensor([n0, n1, 2560], bfloat16), B: int32, N: int32, eps: float32)`, expected device_type=cuda"
+          }
+        ],
+        "model_configuration": {
+          "mem_fraction_static": 0.85,
+          "c2kv_pool_fraction": 0.01,
+          "cpu_offload_gb": 3,
+          "max_total_tokens": 8192
+        },
+        "server_log": "/home/lyc/dev/c2kv-verified-binding-smoke-20260920-retry3/server.log",
+        "server_log_sha256": "dab640420afae1ee2c590a43cacf3bfc691accaace6a79477e5aee348505fd93",
+        "owned_service_stopped": true,
+        "benchmark_quality_score_claimed": false
+      }
+    ],
+    "initial_stall": {
+      "status": "incomplete_stopped",
+      "reason": "No progress at decision 7 for more than five minutes",
+      "completed_decisions": 6,
+      "completed_decision_statuses": [
+        "ok"
+      ],
+      "debug_stack": "cuMemcpyDtoHAsync_v2 -> cudaMemcpyAsync -> at::native::copy_kernel_cuda",
+      "gpu_memory_used_mib_during_stall": 15693,
+      "gpu_utilization_percent": 100,
+      "host_swap_pressure_observed": false,
+      "root_cause_proven": false,
+      "retry_hypothesis": "Reduce physical pool reservation to leave more headroom on the shared display GPU",
+      "quality_score_claimed": false
+    },
+    "next_required": "Available CUDA memory; CPU offload is incompatible with the current native gist path",
+    "pending_verified_model_test_completed": false,
+    "proof_cuda_fixtures_executed": false,
+    "cleanup": {
+      "owned_cuda_services_stopped": true,
+      "remaining_model_processes": []
+    }
+  },
+  "npu_hardware_execution": false
+}
