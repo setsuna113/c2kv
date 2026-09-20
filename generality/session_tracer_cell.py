@@ -43,10 +43,12 @@ try:
     from .bfcl_results import collect_bfcl_results
     from .completion_contract import write_cell_status
     from .process_lifecycle import defer_interrupts, interruptible, run_owned_worker
+    from .upstream_liveness import UpstreamLiveness, UpstreamUnavailable
 except ImportError:  # Direct file launch on ascend03.
     from bfcl_results import collect_bfcl_results
     from completion_contract import write_cell_status
     from process_lifecycle import defer_interrupts, interruptible, run_owned_worker
+    from upstream_liveness import UpstreamLiveness, UpstreamUnavailable
 
 try:
     from . import design
@@ -757,6 +759,7 @@ def main(argv=None) -> int:
     if args.max_tasks is not None:
         task_ids = task_ids[: args.max_tasks]
     batch_size = 1 if cell["benchmark"] == "acon_appworld" else args.batch
+    stopped_upstream = False
     for i in range(0, len(task_ids), batch_size):
         batch = task_ids[i:i + batch_size]
         out = Path(cell["cell_dir"]) / "batches" / f"{i:03d}_{batch[0]}"
@@ -788,7 +791,8 @@ def main(argv=None) -> int:
                 with (out / "benchmark.log").open("wb") as log:
                     rc = run_owned_worker(worker_cmd, cwd=str(RUNTIME), env=env,
                                           stdout=log, stderr=subprocess.STDOUT,
-                                          stdin=subprocess.DEVNULL)
+                                          stdin=subprocess.DEVNULL,
+                                          monitor=UpstreamLiveness(cell["sglang_backend_url"]))
             else:
                 # Ordinary ACON requests have no explicit task context. Bind
                 # one worker to one server-owned task and keep its own output.
@@ -813,13 +817,15 @@ def main(argv=None) -> int:
                         task_rc = run_owned_worker(
                             worker_cmd, cwd=str(RUNTIME), env=env,
                             stdout=log, stderr=subprocess.STDOUT,
-                            stdin=subprocess.DEVNULL)
+                            stdin=subprocess.DEVNULL,
+                            monitor=UpstreamLiveness(cell["sglang_backend_url"]))
                         if task_rc != 0:
                             rc = task_rc if rc == 0 else rc
                             failed_tasks.append(task_id)
             status = "completed" if rc == 0 else "failed"
         except Exception as error:
             rc, status = 1, f"failed:{type(error).__name__}"
+            stopped_upstream = isinstance(error, UpstreamUnavailable)
         finally:
             stop_server(server, thread, batch_tasks)
         (out / "done.json" if rc == 0 else out / "status.json").write_text(
@@ -827,16 +833,19 @@ def main(argv=None) -> int:
                         "failed_tasks": failed_tasks if cell["benchmark"] != "bfcl" else [],
                         "status": status}, indent=2))
         print(json.dumps({"cell": cell["cell_id"], "batch": i, "status": status}), flush=True)
+        if stopped_upstream:
+            break
     completed = completed_task_ids(Path(cell["cell_dir"]), cell["benchmark"], expected_ids)
     write_cell_status(cell, {
         "cell_id": cell["cell_id"],
         "status": "complete" if len(completed) == len(expected_ids) else "incomplete",
+        **({"stop_reason": "upstream_unavailable"} if stopped_upstream else {}),
         "n_completed": len(completed),
         "n_retryable": len(expected_ids) - len(completed),
         "n_total": len(expected_ids),
         "finished_at": time.time(),
     })
-    return 0
+    return 1 if stopped_upstream else 0
 
 
 if __name__ == "__main__":

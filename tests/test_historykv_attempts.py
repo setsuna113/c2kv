@@ -14,6 +14,7 @@ from generality.historykv_cell import (
     appworld_done_healthy, bfcl_row_healthy, cached_terminal,
     new_attempt_root, write_receipt,
 )
+from generality.upstream_liveness import UpstreamUnavailable
 
 
 def test_retry_preserves_existing_outputs_and_receipt(tmp_path):
@@ -101,7 +102,8 @@ def test_old_fc_handler_row_and_done_are_replaced_only_after_new_result(tmp_path
         return 0
 
     cell = {"cell_dir": str(tmp_path), "model_name": "test-model",
-            "handler_name": "test-handler", "python_bench": "python"}
+            "handler_name": "test-handler", "python_bench": "python",
+            "sglang_backend_url": "http://127.0.0.1:1"}
     with patch.object(driver, "run_owned_worker", side_effect=fake_call):
         receipt = driver.run_bfcl_task(cell, task_id, 37401)
 
@@ -140,7 +142,7 @@ def test_old_appworld_generation_error_done_is_replaced_only_after_new_result(tm
 
     cell = {"cell_dir": str(tmp_path), "acon_dir": "acon", "model_name": "model",
             "python_appworld": "python", "python_sgl": "python",
-            "appworld_root": "appworld"}
+            "appworld_root": "appworld", "sglang_backend_url": "http://127.0.0.1:1"}
     with patch.object(driver, "run_owned_worker", side_effect=fake_call):
         receipt = driver.run_appworld_task(cell, task_id, 37401)
 
@@ -325,6 +327,48 @@ def test_subset_settlement_uses_frozen_manifest(tmp_path):
     assert status["n_total"] == 2
     assert status["n_completed"] == 1
     assert status["pending_infra"] == ["multi_turn_base_2"]
+
+
+def test_engine_loss_stops_cell_and_preserves_prior_bfcl_row(tmp_path):
+    cell_dir = tmp_path / "cell"
+    cell_dir.mkdir()
+    task_ids = ["multi_turn_base_1", "multi_turn_base_2", "multi_turn_base_3"]
+    first_row = (cell_dir / "tasks" / task_ids[0] / "bfcl" / "result"
+                 / "model" / "multi_turn" / "row.json")
+    first_row.parent.mkdir(parents=True)
+    first_row.write_text(json.dumps({"id": task_ids[0], "result": [[[]]]}),
+                         encoding="utf-8")
+    cell = {"cell_id": "engine-loss", "cell_dir": str(cell_dir),
+            "backend": "h2o", "working_point": "K0",
+            "condition": "recovery_off_same_initial", "benchmark": "bfcl",
+            "task_ids": task_ids, "budget_tokens": {"K": 8},
+            "sglang_backend_url": "http://127.0.0.1:1"}
+    manifest = cell_dir / "cell.json"
+    manifest.write_text(json.dumps(cell), encoding="utf-8")
+    called = []
+
+    def run_task(_cell, task_id, _port):
+        called.append(task_id)
+        if task_id == task_ids[1]:
+            raise UpstreamUnavailable("engine exited")
+        return {"task_id": task_id, "status": "completed"}
+
+    with (patch.object(driver, "resolve_free_port", return_value=37401),
+          patch.object(driver, "start_proxy", return_value=object()),
+          patch.object(driver, "stop"),
+          patch.object(driver, "run_bfcl_task", side_effect=run_task)):
+        assert driver.main(["--cell", str(manifest)]) == 1
+
+    assert called == task_ids[:2]
+    assert json.loads(first_row.read_text())["id"] == task_ids[0]
+    interrupted = json.loads((cell_dir / "tasks" / task_ids[1] / "status.json").read_text())
+    assert interrupted["kind"] == "upstream_unavailable"
+    assert not (cell_dir / "tasks" / task_ids[1] / "done.json").exists()
+    status = json.loads((cell_dir / "cell_status.json").read_text())
+    assert status["status"] == "incomplete"
+    assert status["stop_reason"] == "upstream_unavailable"
+    assert status["n_completed"] == 1
+    assert status["pending_infra"] == task_ids[1:]
 
 
 def test_proxy_retries_keep_separate_logs(tmp_path):

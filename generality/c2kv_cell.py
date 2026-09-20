@@ -48,9 +48,11 @@ except ImportError:  # Direct file launch on ascend03.
     from completion_contract import write_cell_status
 
 try:
-    from .process_lifecycle import defer_interrupts, interruptible, stop_owned_group
+    from .process_lifecycle import defer_interrupts, interruptible, stop_owned_group, wait_owned_worker
+    from .upstream_liveness import UpstreamLiveness, UpstreamUnavailable
 except ImportError:  # Direct file launch on ascend03.
-    from process_lifecycle import defer_interrupts, interruptible, stop_owned_group
+    from process_lifecycle import defer_interrupts, interruptible, stop_owned_group, wait_owned_worker
+    from upstream_liveness import UpstreamLiveness, UpstreamUnavailable
 
 try:
     from .candidate_cell import (
@@ -539,7 +541,9 @@ def run_task(cell: dict, task_ids: list[str], port: int, batch_dirname: str) -> 
         )
         ready = out / "server" / "ready.json"
         deadline = time.monotonic() + cell["caps"]["task_timeout"] * len(task_ids)
+        upstream_monitor = UpstreamLiveness(cell["sglang_backend_url"])
         while not ready.exists():
+            upstream_monitor()
             if server.poll() is not None:
                 raise RuntimeError(f"controller exited rc={server.returncode}")
             if time.monotonic() > deadline:
@@ -554,7 +558,8 @@ def run_task(cell: dict, task_ids: list[str], port: int, batch_dirname: str) -> 
                     env=worker_env, stdout=worker_log, stderr=subprocess.STDOUT,
                     stdin=subprocess.DEVNULL, start_new_session=True,
                 )
-                rc = worker.wait(timeout=max(60, deadline - time.monotonic()))
+                rc = wait_owned_worker(worker, timeout=max(60, deadline - time.monotonic()),
+                                       monitor=upstream_monitor)
                 if rc != 0:
                     raise RuntimeError(f"official worker exited rc={rc} for {task_id}")
                 validate_appworld_summary(out, task_id)
@@ -564,7 +569,8 @@ def run_task(cell: dict, task_ids: list[str], port: int, batch_dirname: str) -> 
                 env=worker_env, stdout=worker_log, stderr=subprocess.STDOUT,
                 stdin=subprocess.DEVNULL, start_new_session=True,
             )
-            rc = worker.wait(timeout=max(60, deadline - time.monotonic()))
+            rc = wait_owned_worker(worker, timeout=max(60, deadline - time.monotonic()),
+                                       monitor=upstream_monitor)
             if rc != 0:
                 raise RuntimeError(f"official worker exited rc={rc}")
         if cell["benchmark"] == "acon_appworld":
@@ -576,7 +582,9 @@ def run_task(cell: dict, task_ids: list[str], port: int, batch_dirname: str) -> 
         status.update(status="completed" if not bad else "partial",
                       healthy=healthy, bad=bad,
                       wall_s=time.monotonic() - started)
-    except Exception as error:  # infra failure: keep receipt, bisect at caller
+    except Exception as error:  # infra failure: preserve healthy rows before retry
+        if isinstance(error, UpstreamUnavailable):
+            status["infra_failure_kind"] = "upstream_unavailable"
         # The official BFCL worker can exit nonzero after writing valid rows.
         # Preserve those outputs so the caller retries only tasks that truly
         # lack a completed official result.
@@ -865,6 +873,29 @@ def main(argv=None) -> int:
         with progress.open("a", encoding="utf-8") as stream:
             stream.write(json.dumps(result, ensure_ascii=False) + "\n")
         healthy = list(result.get("healthy") or [])
+        if result.get("infra_failure_kind") == "upstream_unavailable":
+            valid_task_ids.update(healthy)
+            if cell["benchmark"] == "bfcl":
+                completion = _write_bfcl_completion(cell, expected_task_ids)
+                counts = {
+                    "n_completed": completion["valid_count"],
+                    "n_retryable": len(completion["refill_task_ids"]),
+                }
+            else:
+                summary = appworld_score_summary(cell)
+                _write(cell_dir / "appworld_score_summary.json", summary)
+                counts = {
+                    "n_completed": summary["n_official_scored"],
+                    "n_terminal": summary["n_method_failures"],
+                    "n_retryable": len(summary["pending_task_ids"]),
+                }
+            write_cell_status(cell, {
+                "cell_id": cell["cell_id"], "status": "incomplete",
+                "stop_reason": "upstream_unavailable", "error": result.get("error"),
+                "n_total": len(expected_task_ids), **counts,
+                "finished_at": time.time(),
+            })
+            raise UpstreamUnavailable(result.get("error") or "Inference service disappeared")
         if new_method_failure:
             print(json.dumps({"cell": cell["cell_id"], "task": chunk[0],
                               "status": "method_failure"}), flush=True)

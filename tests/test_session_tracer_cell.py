@@ -16,6 +16,7 @@ sys.path[:0] = [str(ROOT), str(ROOT / "controller_runtime"),
 from generality import session_tracer_cell as driver
 from generality import scheduler_npu as scheduler
 from generality import design
+from generality.upstream_liveness import UpstreamUnavailable
 
 
 def response(text, *, active_history=100, splice=True):
@@ -315,7 +316,7 @@ def test_stale_batch_done_is_revalidated_and_full_manifest_stamped(tmp_path, mon
             "threshold": 0.5, "task_ids": [task_id],
             "caps": {"task_timeout": 5}, "python_sgl": "python",
             "python_appworld": "python", "acon_dir": "acon",
-            "appworld_root": "appworld"}
+            "appworld_root": "appworld", "sglang_backend_url": "http://127.0.0.1:1"}
     manifest = cell_dir / "cell.json"
     manifest.write_text(json.dumps(cell))
     old_out = cell_dir / "batches" / "000_task_1"
@@ -418,7 +419,7 @@ def test_appworld_driver_uses_one_server_per_worker_even_with_batch_ten(
             "threshold": 0.3, "task_ids": ids,
             "caps": {"task_timeout": 5}, "python_sgl": "python",
             "python_appworld": "python", "acon_dir": "acon",
-            "appworld_root": "appworld"}
+            "appworld_root": "appworld", "sglang_backend_url": "http://127.0.0.1:1"}
     manifest = cell_dir / "cell.json"
     manifest.write_text(json.dumps(cell))
 
@@ -452,6 +453,65 @@ def test_appworld_driver_uses_one_server_per_worker_even_with_batch_ten(
     assert driver.main(["--cell", str(manifest), "--batch", "10"]) == 0
     assert batches == [["task_1"], ["task_2"]]
     assert driver.completed_task_ids(cell_dir, "acon_appworld", ids) == set(ids)
+
+
+def test_engine_loss_stops_next_batch_and_keeps_completed_appworld_output(
+        tmp_path, monkeypatch):
+    config = tmp_path / "config"
+    config.mkdir()
+    (config / "budgets_resolved.json").write_text(json.dumps({
+        "working_points": {"K0": {"kv_token_equivalents": {"K": 8}}}}))
+    monkeypatch.setattr(driver, "GENERATION_ROOT", tmp_path)
+    cell_dir = tmp_path / "cell"
+    cell_dir.mkdir()
+    task_ids = ["task_1", "task_2", "task_3"]
+    cell = {"cell_id": "tracer-engine-loss", "cell_dir": str(cell_dir),
+            "benchmark": "acon_appworld", "working_point": "K0",
+            "threshold": 0.3, "task_ids": task_ids,
+            "caps": {"task_timeout": 5}, "python_sgl": "python",
+            "python_appworld": "python", "acon_dir": "acon",
+            "appworld_root": "appworld", "sglang_backend_url": "http://127.0.0.1:1"}
+    manifest = cell_dir / "cell.json"
+    manifest.write_text(json.dumps(cell), encoding="utf-8")
+
+    class Server:
+        def serve_forever(self):
+            pass
+
+        def shutdown(self):
+            pass
+
+        def server_close(self):
+            pass
+
+    called = []
+
+    def worker(command, **_kwargs):
+        task_id = command[command.index("--task-id") + 1]
+        called.append(task_id)
+        if task_id == task_ids[1]:
+            raise UpstreamUnavailable("engine exited")
+        out = Path(command[command.index("--out") + 1])
+        out.mkdir(parents=True)
+        (out / "official_summary.json").write_text(json.dumps({
+            "schema": "a-event-native-appworld-run-v1", "status": "completed",
+            "task_id": task_id, "n": 1, "semantic_score": 0.0,
+        }), encoding="utf-8")
+        return 0
+
+    monkeypatch.setattr(driver, "run_server", lambda *_args: (Server(), {}))
+    monkeypatch.setattr(driver, "run_owned_worker", worker)
+    assert driver.main(["--cell", str(manifest)]) == 1
+
+    assert called == task_ids[:2]
+    assert driver.completed_task_ids(cell_dir, "acon_appworld", task_ids) == {task_ids[0]}
+    assert not (cell_dir / "batches" / "002_task_3").exists()
+    interrupted = json.loads((cell_dir / "batches" / "001_task_2" / "status.json").read_text())
+    assert interrupted["status"] == "failed:UpstreamUnavailable"
+    status = json.loads((cell_dir / "cell_status.json").read_text())
+    assert status["status"] == "incomplete"
+    assert status["stop_reason"] == "upstream_unavailable"
+    assert status["n_completed"] == 1
 
 
 def test_shutdown_waits_for_inflight_inference_before_session_close():

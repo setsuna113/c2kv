@@ -26,10 +26,12 @@ try:
     from .completion_contract import appworld_done_invalidated, write_cell_status
     from .bfcl_results import bfcl_row_is_valid
     from .process_lifecycle import interruptible, run_owned_worker, stop_owned_group
+    from .upstream_liveness import UpstreamLiveness, UpstreamUnavailable
 except ImportError:  # Direct file launch on ascend03.
     from completion_contract import appworld_done_invalidated, write_cell_status
     from bfcl_results import bfcl_row_is_valid
     from process_lifecycle import interruptible, run_owned_worker, stop_owned_group
+    from upstream_liveness import UpstreamLiveness, UpstreamUnavailable
 
 GENERATION_ROOT = Path("/home/liuyancheng/c2kv-generality-20260918")
 PAPER = Path(os.environ.get("C2KV_PAPER_SOURCE",
@@ -236,6 +238,7 @@ def cached_terminal(out: Path) -> dict | None:
 
 
 def write_receipt(out: Path, result: dict) -> None:
+    out.mkdir(parents=True, exist_ok=True)
     previous = out / "status.json"
     if previous.exists():
         with (out / "status_history.jsonl").open("a", encoding="utf-8") as history:
@@ -334,6 +337,7 @@ print('SUMMARY:' + json.dumps(summary))
             [cell["python_bench"], "-c", script],
             cwd=str(PAPER), env=env, stdout=log, stderr=subprocess.STDOUT,
             stdin=subprocess.DEVNULL,
+            monitor=UpstreamLiveness(cell["sglang_backend_url"]),
         )
     log_text = log_path.read_text(errors="ignore")
     healthy = bfcl_row_healthy(project_root, task_id) if project_root.exists() else False
@@ -413,6 +417,7 @@ print('SUMMARY:' + json.dumps(summary, default=str))
             [cell["python_sgl"], "-c", inner],
             cwd=str(PAPER), env=env, stdout=log, stderr=subprocess.STDOUT,
             stdin=subprocess.DEVNULL,
+            monitor=UpstreamLiveness(cell["sglang_backend_url"]),
         )
     log_text = log_path.read_text(errors="ignore")
     result = {"task_id": task_id, "status": "completed" if rc == 0 else "failed",
@@ -522,6 +527,7 @@ print('SUMMARY:' + json.dumps(summary, default=str))
             [cell["python_sgl"], "-c", script],
             cwd=str(PAPER), env=env, stdout=log, stderr=subprocess.STDOUT,
             stdin=subprocess.DEVNULL,
+            monitor=UpstreamLiveness(cell["sglang_backend_url"]),
         )
     log_text = log_path.read_text(errors="ignore")
     result = {"task_id": task_id, "status": "completed" if rc == 0 else "failed",
@@ -572,14 +578,21 @@ def main(argv=None) -> int:
                           "cell_dir": str(cell_dir), "arm": arm}), flush=True)
     try:
         proxy = start_proxy(arm, upstream, proxy_port, cell_dir, target_tokens)
+        stopped_upstream = False
         for task_id in task_ids:
-            if cell["benchmark"] == "bfcl":
-                result = run_bfcl_task(cell, task_id, proxy_port)
-            elif cell["benchmark"] in ("toolsandbox", "acebench"):
-                result = _run_adapter_task(cell, task_id, proxy_port,
-                                           cell["benchmark"])
-            else:
-                result = run_appworld_task(cell, task_id, proxy_port)
+            try:
+                if cell["benchmark"] == "bfcl":
+                    result = run_bfcl_task(cell, task_id, proxy_port)
+                elif cell["benchmark"] in ("toolsandbox", "acebench"):
+                    result = _run_adapter_task(cell, task_id, proxy_port,
+                                               cell["benchmark"])
+                else:
+                    result = run_appworld_task(cell, task_id, proxy_port)
+            except UpstreamUnavailable as error:
+                result = {"task_id": task_id, "status": "infra_error",
+                          "kind": "upstream_unavailable", "error": str(error)}
+                write_receipt(cell_dir / "tasks" / task_id, result)
+                stopped_upstream = True
             results.append(result)
             with progress.open("a", encoding="utf-8") as stream:
                 stream.write(json.dumps(result, ensure_ascii=False) + "\n")
@@ -587,6 +600,8 @@ def main(argv=None) -> int:
             print(json.dumps({"cell": cell["cell_id"], "arm": arm, "task": task_id,
                               "status": result["status"], "done": done,
                               "total": len(task_ids)}), flush=True)
+            if stopped_upstream:
+                break
     finally:
         stop(proxy)
     if cell["benchmark"] == "bfcl":
@@ -611,12 +626,13 @@ def main(argv=None) -> int:
     write_cell_status(cell, {
         "cell_id": cell["cell_id"], "arm": arm,
         "status": "complete" if not pending else "incomplete",
+        **({"stop_reason": "upstream_unavailable"} if stopped_upstream else {}),
         "n_completed": len(completed_ids), "n_terminal": len(terminal),
         "terminal_tasks": terminal, "pending_infra": pending,
         "n_total": len(expected_ids),
         "finished_at": time.time(),
     })
-    return 0
+    return 1 if stopped_upstream else 0
 
 
 if __name__ == "__main__":

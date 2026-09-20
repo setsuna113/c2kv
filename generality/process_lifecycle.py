@@ -121,10 +121,30 @@ def stop_owned_group(proc: subprocess.Popen | None, *, grace_seconds: float = 20
             proc.wait(timeout=5)
 
 
-def run_owned_worker(command, **kwargs) -> int:
+def wait_owned_worker(proc, *, timeout=None, monitor=None, poll_interval=1.0) -> int:
+    """Wait with a bounded liveness check; the caller owns final cleanup."""
+    if monitor is None:
+        return proc.wait(timeout=timeout)
+    deadline = None if timeout is None else time.monotonic() + timeout
+    while True:
+        code = proc.poll()
+        if code is not None:
+            return code
+        monitor()
+        remaining = None if deadline is None else deadline - time.monotonic()
+        if remaining is not None and remaining <= 0:
+            raise subprocess.TimeoutExpired(proc.args, timeout)
+        interval = poll_interval if remaining is None else min(poll_interval, remaining)
+        try:
+            return proc.wait(timeout=interval)
+        except subprocess.TimeoutExpired:
+            pass
+
+
+def run_owned_worker(command, *, monitor=None, **kwargs) -> int:
     """Wait for a benchmark worker and always reap its own session group."""
     proc = subprocess.Popen(command, start_new_session=True, **kwargs)
     try:
-        return proc.wait()
+        return wait_owned_worker(proc, monitor=monitor)
     finally:
         stop_owned_group(proc)

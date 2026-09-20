@@ -12,6 +12,7 @@ import pytest
 
 from generality.bfcl_results import collect_bfcl_results, completion_receipt
 from generality import scheduler_npu as scheduler
+from generality.upstream_liveness import UpstreamUnavailable
 
 
 def _result_file(cell_dir: Path, attempt: str) -> Path:
@@ -184,6 +185,7 @@ def test_nonzero_worker_exit_preserves_rows_and_retries_only_missing(tmp_path):
         "benchmark": "bfcl",
         "cell_dir": str(tmp_path),
         "caps": {"task_timeout": 1},
+        "sglang_backend_url": "http://127.0.0.1:1",
     }
 
     class FakeProcess:
@@ -237,7 +239,7 @@ def test_nonzero_worker_exit_preserves_rows_and_retries_only_missing(tmp_path):
 def test_valid_bfcl_row_preserved_when_server_cost_finalization_fails(tmp_path):
     driver = _load_driver()
     cell = {"benchmark": "bfcl", "cell_dir": str(tmp_path),
-            "caps": {"task_timeout": 1}}
+            "caps": {"task_timeout": 1}, "sglang_backend_url": "http://127.0.0.1:1"}
     out = tmp_path / "batches" / "attempt"
 
     class FakeProcess:
@@ -296,7 +298,7 @@ def test_appworld_worker_uses_pinned_paper_source(tmp_path, monkeypatch):
     paper = tmp_path / "paper-release"
     monkeypatch.setenv("C2KV_PAPER_SOURCE", str(paper))
     cell = {"benchmark": "acon_appworld", "cell_dir": str(tmp_path),
-            "caps": {"task_timeout": 1}}
+            "caps": {"task_timeout": 1}, "sglang_backend_url": "http://127.0.0.1:1"}
     out = tmp_path / "batches" / "attempt"
     worker_env = None
 
@@ -507,6 +509,45 @@ def test_main_refreshes_late_valid_row_before_recursive_retry(tmp_path):
     assert status["status"] == "complete"
     assert status["n_valid_unique"] == 2
     assert scheduler.cell_done(cell)
+
+
+def test_engine_loss_stops_bisection_and_preserves_valid_bfcl_row(tmp_path):
+    driver = _load_driver()
+    cell_dir = tmp_path / "cell"
+    cell_dir.mkdir()
+    cell = {"cell_id": "bfcl-engine-loss", "cell_dir": str(cell_dir),
+            "benchmark": "bfcl", "task_ids": ["task_a", "task_b", "task_c"]}
+    manifest = cell_dir / "cell.json"
+    manifest.write_text(json.dumps(cell), encoding="utf-8")
+    budgets = tmp_path / "budgets.json"
+    budgets.write_text("{}", encoding="utf-8")
+    calls = []
+
+    def interrupted_run(cell_arg, task_ids, _port, batch_name):
+        calls.append(list(task_ids))
+        _write_rows(_result_file(Path(cell_arg["cell_dir"]), batch_name), [
+            {"id": "task_a", "result": ["valid before interruption"]},
+        ])
+        return {"status": "partial", "healthy": ["task_a"],
+                "bad": ["task_b", "task_c"],
+                "infra_failure_kind": "upstream_unavailable",
+                "error": "UpstreamUnavailable: engine exited"}
+
+    with (patch.object(driver, "prepare_cell_files", side_effect=lambda value, _: value),
+          patch.object(driver, "run_task", side_effect=interrupted_run)):
+        with pytest.raises(UpstreamUnavailable, match="engine exited"):
+            driver.main(["--cell", str(manifest), "--budgets", str(budgets),
+                         "--chunk", "3", "--port-base", "44200"])
+
+    assert calls == [["task_a", "task_b", "task_c"]]
+    status = json.loads((cell_dir / "cell_status.json").read_text())
+    assert status["status"] == "incomplete"
+    assert status["stop_reason"] == "upstream_unavailable"
+    assert status["n_completed"] == 1
+    assert status["n_retryable"] == 2
+    assert json.loads((cell_dir / "bfcl_refill.json").read_text())["task_ids"] == [
+        "task_b", "task_c"]
+    assert not list((cell_dir / "tasks").glob("*/terminal.json"))
 
 
 def test_appworld_marker_without_official_summary_does_not_complete_task(tmp_path):
