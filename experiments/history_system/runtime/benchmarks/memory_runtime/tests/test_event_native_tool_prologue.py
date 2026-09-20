@@ -9,13 +9,14 @@ import pytest
 from benchmarks.memory_runtime.event_native_api import EventNativeAPI, EventNativeAPIError
 
 
-def _api(tmp_path):
+def _api(tmp_path, *, tool_memory_contract=None):
     return EventNativeAPI(
         SimpleNamespace(run=lambda payload: None),
         run_id="test", model_name="actor", view_mode="static",
         max_new_tokens=16, allowed_task_ids=["1"], max_decisions=1,
         deadline_monotonic=time.monotonic() + 60,
         steps_path=tmp_path / "steps.jsonl", benchmark="tau2",
+        tool_memory_contract=tool_memory_contract,
     )
 
 
@@ -64,3 +65,9 @@ def test_native_tool_prologue_preserves_no_tools_and_rejects_invalid_schema(tmp_
     with pytest.raises(EventNativeAPIError) as failed:
         api._validate_request(_request([{"type": "function"}]))
     assert (failed.value.status_code, failed.value.code) == (400, "invalid_tools")
+
+
+def test_tool_memory_keeps_original_catalog_as_algorithm_input(tmp_path):
+    request = _request([{"type": "function", "function": {"name": "lookup"}}])
+    runner_payload, _, _ = _api(tmp_path, tool_memory_contract={})._validate_request(request)
+    assert runner_payload["tools"] == request["tools"]
