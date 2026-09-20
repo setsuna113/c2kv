@@ -426,6 +426,7 @@ class PreparedEventNativeOnePass:
 @dataclass
 class _OnePassSessionState:
     message_json: tuple[str, ...]
+    source_prefix: tuple[str, ...]
     tools_json: str
     decision_index: int
     decisions: dict[str, tuple[tuple[Any, ...], PreparedEventNativeOnePass]]
@@ -471,7 +472,8 @@ class EventNativeOnePassController:
         session_id, decision_key, store, tools, tools_json, message_json = (
             self._validate_request(payload, ratio, max_new_tokens)
         )
-        signature = (message_json, tools_json, ratio, max_new_tokens)
+        source_prefix = store.source_prefix if store.source_prefix is not None else message_json
+        signature = (source_prefix, message_json, tools_json, ratio, max_new_tokens)
         state = self._sessions.get(session_id)
         if state is not None:
             if state.tools_json != tools_json:
@@ -479,7 +481,7 @@ class EventNativeOnePassController:
                     "Tools changed within a session; use a new explicit session_id"
                 )
             EventNativeController._validate_monotone_prefix(
-                state.message_json, message_json
+                state.source_prefix, source_prefix
             )
             cached = state.decisions.get(decision_key)
             if cached is not None:
@@ -545,6 +547,7 @@ class EventNativeOnePassController:
         decisions[decision_key] = (signature, prepared)
         self._sessions[session_id] = _OnePassSessionState(
             message_json=message_json,
+            source_prefix=source_prefix,
             tools_json=tools_json,
             decision_index=decision_index,
             decisions=decisions,

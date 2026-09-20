@@ -14,7 +14,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Mapping
 
-from history_memory.events import EventStore
+from history_memory.events import EventStore, RenderedMessages
 from history_memory.packing import (
     EncoderChunk, PackedMemory, native_ids, raw_workspace_messages, visible_message,
 )
@@ -114,7 +114,7 @@ class ToolRegionController:
         catalog = shared_tool_catalog()
         visible = dict(catalog.strip_request_annotations(payload))
         if plan is not None and self.spec.encoder == "t0":
-            visible["messages"] = plan.messages
+            visible["messages"] = RenderedMessages(plan.messages, source=payload["messages"])
             if visible.get("tools"):
                 visible["tools"] = []
         return visible
