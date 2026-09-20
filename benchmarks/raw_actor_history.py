@@ -38,7 +38,7 @@ class RawActorHistory:
             result[index].pop("tool_calls", None)
         return result
 
-    def commit(self, source_messages, response):
+    def commit(self, source_messages, response, *, benchmark=None):
         receipt = (response.get("metadata") or {}).get("persistent_history_session") or {}
         if receipt.get("continuation_mode") != "exact_generated_prefix":
             raise ValueError("Exact KV method requires an exact-generated-prefix serving receipt")
@@ -46,6 +46,10 @@ class RawActorHistory:
         if not isinstance(raw_text, str):
             raise ValueError("Exact KV serving receipt lacks raw generated text")
         message = response["choices"][0]["message"]
+        if benchmark == "bfcl":
+            from benchmarks.bfcl_response import normalize_native_message
+
+            message = normalize_native_message(message, response["id"])
         index = len(source_messages)
         if index in self.turns:
             raise ValueError("Exact KV conversation cannot overwrite a committed actor turn")

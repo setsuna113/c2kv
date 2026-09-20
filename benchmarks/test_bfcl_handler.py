@@ -92,6 +92,28 @@ class C2KVBFCLHandlerTests(unittest.TestCase):
             self.handler.decode_ast(parsed["model_responses"], None, False),
             [{"lookup": {"city": "X"}}])
 
+    def test_native_handler_echo_preserves_exact_kv_continuation(self):
+        from benchmarks.raw_actor_history import RawActorHistory
+
+        text = 'I will inspect the file.\n<tool_call>{"name":"head","arguments":{"file_name":"report.txt","lines":1}}</tool_call>'
+        response = _completion(text)
+        source = [{"role": "user", "content": "Read the first line."}]
+        wire = response.model_dump()
+        wire["metadata"] = {"persistent_history_session": {
+            "continuation_mode": "exact_generated_prefix", "generated_text": text}}
+        state = RawActorHistory()
+        state.commit(source, wire, benchmark="bfcl")
+        self.handler.client = SimpleNamespace(chat=SimpleNamespace(
+            completions=SimpleNamespace(create=lambda **kwargs: response)))
+        normalized, _ = self.handler._query_FC({"message": source, "tools": []})
+        parsed = self.handler._parse_query_response_FC(normalized)
+        history = self.handler._add_assistant_message_FC({"message": list(source)}, parsed)
+        echo = history["message"][-1].model_dump()
+        self.assertEqual(echo["content"], "I will inspect the file.")
+        restored = state.prepare([*source, echo, {"role": "tool", "content": "First line"}])
+        self.assertEqual(restored[1]["content"], text)
+        self.assertNotIn("tool_calls", restored[1])
+
 
 if __name__ == "__main__":
     unittest.main()
