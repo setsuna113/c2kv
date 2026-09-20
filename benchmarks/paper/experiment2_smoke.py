@@ -49,7 +49,7 @@ def main(argv=None):
     parser.add_argument("--arms", default="full,c2kv_native_r4,c2kv_goal_rescue_r8",
                         help="comma-separated configured arms, or all")
     parser.add_argument("--task-id", default="multi_turn_base_26")
-    parser.add_argument("--cpu-offload-gb", type=float, default=0,
+    parser.add_argument("--cpu-offload-gb", type=int, default=0,
                         help="optional laptop-only weight offload; the formal runner is unchanged")
     args = parser.parse_args(argv)
     config = json.loads(args.config.read_text(encoding="utf-8"))
