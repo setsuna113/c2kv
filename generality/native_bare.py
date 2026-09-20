@@ -27,7 +27,8 @@ def command(args):
         result += ["--prefixes", str(args.prefixes.resolve())]
     if getattr(args, "tool_memory", None):
         result += ["--tool-memory", args.tool_memory]
-        if getattr(args, "tool_checkpoint", None) is not None:
+        if (args.tool_memory.startswith("t0:")
+                and getattr(args, "tool_checkpoint", None) is not None):
             result += ["--tool-checkpoint", str(args.tool_checkpoint.resolve())]
         if getattr(args, "tool_budget_tokens", None) is not None:
             result += ["--tool-budget-tokens", str(args.tool_budget_tokens)]

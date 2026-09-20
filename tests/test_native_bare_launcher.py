@@ -44,6 +44,23 @@ def test_native_client_tool_on_uses_shared_paper_source(tmp_path):
     assert "sglang.launch_server" not in argv
 
 
+def test_native_client_schema_policy_is_forwarded_for_c2kv(tmp_path):
+    marker = tmp_path / "experiments/history_system/native_bare.py"
+    marker.parent.mkdir(parents=True)
+    marker.write_text("")
+    for spec in ("t0:r8:hybrid3:schema", "h2o:r8:hybrid3:schema"):
+        args = Namespace(paper_root=tmp_path, python="python", config=tmp_path / "pod.json",
+                         benchmark="bfcl_base", upstream="http://127.0.0.1:36203",
+                         proxy_port=37490, out=tmp_path / "schema-interface", stage="closed_loop",
+                         task_ids=None, prefixes=None, arm="c2kv_native_r4",
+                         tool_memory=spec, tool_checkpoint=tmp_path / "T0",
+                         tool_budget_tokens=None)
+        argv = command(args)
+        assert argv[argv.index("--tool-memory") + 1] == spec
+        assert argv[argv.index("--arm") + 1] == "c2kv_native_r4"
+        assert ("--tool-checkpoint" in argv) == spec.startswith("t0:")
+
+
 def test_native_tool_dry_run_does_not_start_a_process(tmp_path, monkeypatch, capsys):
     marker = tmp_path / "experiments/history_system/native_bare.py"
     marker.parent.mkdir(parents=True)
@@ -62,3 +79,26 @@ def test_native_tool_dry_run_does_not_start_a_process(tmp_path, monkeypatch, cap
     receipt = json.loads(capsys.readouterr().out)
     assert receipt["engine_preflight"] == "skipped (dry-run)"
     assert receipt["command"][receipt["command"].index("--tool-memory") + 1] == "t0:r8"
+
+
+def test_native_schema_launcher_executes_from_shared_paper_root(tmp_path, monkeypatch):
+    paper = tmp_path / "shared-paper"
+    marker = paper / "experiments/history_system/native_bare.py"
+    marker.parent.mkdir(parents=True)
+    marker.write_text("", encoding="utf-8")
+    calls = []
+    monkeypatch.setattr(native_bare.subprocess, "run",
+                        lambda argv, **kwargs: calls.append((argv, kwargs)))
+    monkeypatch.setattr("sys.argv", ["native_bare.py", "--paper-root", str(paper),
+                                  "--config", str(tmp_path / "pod.json"),
+                                  "--benchmark", "bfcl_base", "--upstream",
+                                  "http://127.0.0.1:36203", "--proxy-port", "37490",
+                                  "--out", str(tmp_path / "out"),
+                                  "--tool-memory", "h2o:r8:hybrid3:schema"])
+    native_bare.main()
+    argv, kwargs = calls.pop()
+    assert not calls
+    assert argv[:3] == [native_bare.sys.executable, "-m", "benchmarks.paper.c1"]
+    assert "--tool-checkpoint" not in argv
+    assert kwargs["cwd"] == paper
+    assert kwargs["env"]["PYTHONPATH"].split(native_bare.os.pathsep)[0] == str(paper)

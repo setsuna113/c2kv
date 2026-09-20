@@ -1,7 +1,8 @@
-"""NPU reference-history cell using the shared paper ON/OFF path.
+"""NPU tool-context cell using the shared paper ON/OFF path.
 
 The engine is already owned by the caller. This launcher invokes the paper
 benchmark/proxy code directly; it contains no H2O, SnapKV or T0 algorithm copy.
+The optional schema interface policy is a suffix of the shared tool spec.
 """
 from __future__ import annotations
 
@@ -17,6 +18,9 @@ from urllib.request import ProxyHandler, Request, build_opener
 
 
 CELL_PART = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*\Z")
+TOOL_SPEC = re.compile(
+    r"(?:t0|streamingllm|h2o|snapkv|pyramidkv):r(?:8|12)"
+    r"(?::(?:uniform|hybrid[1-9][0-9]*))?(?::schema)?\Z")
 BENCHMARKS = {
     "bfcl_base": ("bfcl", ("--categories", "multi_turn_base")),
     "bfcl_long_context": ("bfcl", ("--categories", "multi_turn_long_context")),
@@ -36,23 +40,29 @@ def validate_paper_root(root: Path) -> Path:
     return root
 
 
-def cell_id(benchmark: str, arm: str, target_tokens: int,
+def cell_id(benchmark: str, arm: str, target_tokens: int | None,
             tool_memory: str) -> str:
     if benchmark not in BENCHMARKS:
         raise ValueError(f"Unsupported official benchmark: {benchmark!r}")
     for name, value in (("benchmark", benchmark), ("arm", arm)):
         if not CELL_PART.fullmatch(value):
             raise ValueError(f"Invalid {name}: {value!r}")
-    if not arm.startswith("gen_") or not arm.endswith(("_k0", "_k2", "_b0", "_b2")):
-        raise ValueError("NPU reference-history cells require an absolute-budget gen_* arm")
-    if type(target_tokens) is not int or target_tokens <= 0:
-        raise ValueError("--history-target-tokens must be the parent cell's positive K/B budget")
-    if tool_memory not in {"", "none"} and not re.fullmatch(
-            r"t0:r[0-9]+(?::hybrid[0-9]+)?", tool_memory):
-        raise ValueError("This NPU launcher supports T0 tool memory only")
+    if target_tokens is None:
+        if arm.startswith("gen_"):
+            raise ValueError("generation-budget arms require --history-target-tokens")
+    elif type(target_tokens) is not int or target_tokens <= 0:
+        raise ValueError("--history-target-tokens must be positive")
+    elif arm == "full":
+        raise ValueError("Full history has no history-KV budget")
+    if tool_memory not in {"", "none"} and not TOOL_SPEC.fullmatch(tool_memory):
+        raise ValueError("Unsupported tool-memory spec")
+    if (tool_memory.startswith(("streamingllm:", "h2o:", "snapkv:", "pyramidkv:"))
+            and not tool_memory.endswith(":schema") and arm != "full"):
+        raise ValueError("Raw-KV tool memory with non-Full history requires :schema")
     label = ("raw" if tool_memory in {"", "none"}
              else "tools-" + tool_memory.replace(":", "_"))
-    return f"{benchmark}__{arm}__history{target_tokens}__{label}"
+    history = f"__history{target_tokens}" if target_tokens is not None else ""
+    return f"{benchmark}__{arm}{history}__{label}"
 
 
 def command(args: argparse.Namespace, benchmark_args=()) -> list[str]:
@@ -69,18 +79,19 @@ def command(args: argparse.Namespace, benchmark_args=()) -> list[str]:
         "--num-workers", "1", "--backend", "sglang",
         "--model", args.model,
         "--checkpoint", str(args.checkpoint.resolve()),
-        "--history-kv-target-tokens", str(args.history_target_tokens),
+        *(["--history-kv-target-tokens", str(args.history_target_tokens)]
+          if args.history_target_tokens is not None else []),
         "--shared-engine",
         "--run-name", identity,
         "--telemetry-log", str(output / "proxy_telemetry.jsonl"),
     ]
     if args.tool_memory not in {"", "none"}:
         if args.tool_checkpoint is None:
-            raise ValueError("T0 tool memory requires --tool-checkpoint")
+            raise ValueError("Tool memory requires --tool-checkpoint (T0 weights or raw-KV tokenizer)")
         result.extend(["--tool-memory", args.tool_memory,
                        "--tool-checkpoint", str(args.tool_checkpoint.resolve())])
     elif args.tool_checkpoint is not None or args.tool_budget_tokens is not None:
-        raise ValueError("Tool checkpoint/budget requires T0 tool memory")
+        raise ValueError("Tool checkpoint/budget requires active tool memory")
     if args.tool_budget_tokens is not None:
         if args.tool_budget_tokens <= 0:
             raise ValueError("--tool-budget-tokens must be positive")
@@ -95,7 +106,8 @@ def command(args: argparse.Namespace, benchmark_args=()) -> list[str]:
 
 
 def validate_live_engine(upstream: str, checkpoint: Path,
-                         tool_checkpoint: Path | None = None) -> dict:
+                         tool_checkpoint: Path | None = None,
+                         tool_memory: str = "t0:r8") -> dict:
     opener = build_opener(ProxyHandler({}))
     with opener.open(Request(upstream.rstrip("/") + "/model_info", method="GET"),
                      timeout=15) as response:
@@ -103,14 +115,15 @@ def validate_live_engine(upstream: str, checkpoint: Path,
     native = info.get("c2kv_native_packed") if isinstance(info, dict) else None
     binding = native.get("model_binding") if isinstance(native, dict) else None
     tool = native.get("tool_gist") if isinstance(native, dict) else None
+    needs_projection = tool_checkpoint is not None and tool_memory.startswith("t0:")
     expected_hash = (hashlib.sha256((tool_checkpoint / "config.json").read_bytes()).hexdigest()
-                     if tool_checkpoint is not None else None)
+                     if needs_projection else None)
     problems = []
     if not isinstance(native, dict) or native.get("enabled") is not True:
         problems.append("native packed generation is unavailable")
     if not isinstance(binding, dict) or Path(binding.get("model_path", "")).resolve() != checkpoint.resolve():
         problems.append("history checkpoint binding differs")
-    if tool_checkpoint is not None:
+    if needs_projection:
         if (not isinstance(tool, dict) or tool.get("enabled") is not True
                 or tool.get("extract_projection_set") != "tool"):
             problems.append("T0 tool projection is unavailable")
@@ -121,7 +134,7 @@ def validate_live_engine(upstream: str, checkpoint: Path,
         raise RuntimeError("NPU engine readiness failed: " + "; ".join(problems))
     return {"history_checkpoint": str(checkpoint.resolve()),
             **({"tool_checkpoint": str(tool_checkpoint.resolve()),
-                "tool_config_sha256": expected_hash}
+                **({"tool_config_sha256": expected_hash} if needs_projection else {})}
                if tool_checkpoint is not None else {})}
 
 
@@ -131,7 +144,8 @@ def main(argv=None) -> None:
     parser.add_argument("--python", default=sys.executable)
     parser.add_argument("--benchmark", choices=tuple(BENCHMARKS), required=True)
     parser.add_argument("--arm", required=True)
-    parser.add_argument("--history-target-tokens", type=int, required=True)
+    parser.add_argument("--history-target-tokens", type=int,
+                        help="absolute history-KV capacity; required for gen_* arms")
     parser.add_argument("--upstream", required=True)
     parser.add_argument("--user-upstream", default="")
     parser.add_argument("--proxy-port", type=int, required=True)
@@ -157,7 +171,8 @@ def main(argv=None) -> None:
                           "command": cmd, "engine_preflight": "skipped (dry-run)"}, indent=2))
         return
     validate_live_engine(args.upstream, args.checkpoint,
-                         args.tool_checkpoint if args.tool_memory not in {"", "none"} else None)
+                         args.tool_checkpoint if args.tool_memory not in {"", "none"} else None,
+                         args.tool_memory)
     env = dict(os.environ)
     env["PYTHONPATH"] = str(root) + os.pathsep + env.get("PYTHONPATH", "")
     subprocess.run(cmd, cwd=root, env=env, check=True)

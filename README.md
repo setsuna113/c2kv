@@ -41,6 +41,26 @@ its `c2kv_c1_off_r8` arm through the existing shared controller path: initial
 S0 history allocation matches C1, with recovery disabled. This update has CPU
 launcher validation only; NPU hardware execution is not implied.
 
+The tool-interface policy is opt-in: use `--interface-policy schema` for both
+recorded-decision prepare/evaluate, or append `:schema` to a joint tool spec
+such as `t0:r8:hybrid3:schema` or `h2o:r8:uniform:schema`. It preserves raw
+executable schema fields separately from compressed documentation and charges
+their resident KV. The shared paper prepare/evaluate manifest and every schema
+record pin `interface_render_profile=tool-schema-split-v3`: compressed layouts
+keep each executable interface once and compress only documentation prose;
+selected native tools retain their full schema once. The Full control keeps
+its original raw input, identified by `full_control_policy=unmodified_full_v1`.
+Earlier schema manifests and results must be prepared again for this profile.
+Checkpoints and default cells retain their existing meaning.
+`native_bare.py` and `tool_context_cell.py` consume this policy from
+`--paper-root`; use the matching shared serving source, including sparse tool
+repair support. The standalone NPU runtime does not duplicate that algorithm.
+Opaque tool source text is retained in full as a measured fallback.
+Persistent raw-tool refresh preserves history state only within an unchanged
+catalog/system source frame. Dynamic T0 hybrid prefixes are not supported with
+persistent AgentKV/CommitKV history. Native C2KV history uses its independent
+request path. Page-size-128 replacement is CPU-tested, not NPU hardware-tested.
+
 ## HiAgent BFCL text-budget client on NPU
 
 `generality/paper_text_budget.py` launches one `hiagent_full_bN` BFCL client

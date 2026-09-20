@@ -55,15 +55,51 @@ def test_reference_tool_cell_delegates_both_algorithms_to_paper(tmp_path):
     assert raw[raw.index("--out") + 1].endswith("__raw")
 
 
-def test_reference_launcher_rejects_raw_tool_method_and_uses_unique_identity(tmp_path):
+def test_reference_launcher_requires_schema_policy_for_raw_kv_joint_history(tmp_path):
     args = _args(tmp_path)
     args.tool_memory = "h2o:r8"
-    with pytest.raises(ValueError, match="T0 tool memory only"):
+    with pytest.raises(ValueError, match="requires :schema"):
         cell.command(args)
     assert cell.cell_id("appworld", "gen_h2o_k0", 768, "t0:r8") != (
         cell.cell_id("appworld", "gen_h2o_k0", 768, "t0:r12"))
     assert cell.cell_id("bfcl_base", "gen_h2o_k0", 768, "none") != (
         cell.cell_id("bfcl_long_context", "gen_h2o_k0", 768, "none"))
+
+
+@pytest.mark.parametrize("arm,spec", [
+    ("full", "t0:r8:hybrid3:schema"),
+    ("history_kv_h2o_r25_persistent", "h2o:r8:hybrid3:schema"),
+    ("c2kv4", "t0:r8:hybrid3:schema"),
+    ("acon_hist_ut_co", "h2o:r8:hybrid3:schema"),
+    ("hiagent_full", "t0:r8:hybrid3:schema"),
+])
+def test_schema_interface_routes_shared_paper_arm_without_budget(tmp_path, arm, spec):
+    args = _args(tmp_path)
+    args.arm = arm
+    args.history_target_tokens = None
+    args.tool_memory = spec
+    argv = cell.command(args)
+    assert argv[argv.index("--arm") + 1] == arm
+    assert argv[argv.index("--tool-memory") + 1] == spec
+    assert "--history-kv-target-tokens" not in argv
+    assert argv[argv.index("--out") + 1].endswith(
+        f"bfcl_base__{arm}__tools-{spec.replace(':', '_')}")
+
+
+def test_default_off_full_arm_preserves_raw_command_and_gen_budget(tmp_path):
+    args = _args(tmp_path)
+    args.arm = "full"
+    args.history_target_tokens = None
+    args.tool_memory = "none"
+    args.tool_checkpoint = None
+    argv = cell.command(args)
+    assert "--tool-memory" not in argv
+    assert "--tool-checkpoint" not in argv
+    assert "--history-kv-target-tokens" not in argv
+    assert argv[argv.index("--out") + 1].endswith("bfcl_base__full__raw")
+    args.arm = "gen_h2o_k0"
+    with pytest.raises(ValueError, match="require --history-target-tokens"):
+        cell.command(args)
 
 
 def test_live_readiness_checks_actual_tool_projection_without_generation(tmp_path, monkeypatch):
@@ -102,6 +138,33 @@ def test_live_readiness_checks_actual_tool_projection_without_generation(tmp_pat
         cell.validate_live_engine(args.upstream, args.checkpoint, args.tool_checkpoint)
 
 
+def test_raw_kv_schema_requires_only_served_history_binding(tmp_path, monkeypatch):
+    args = _args(tmp_path)
+    info = {"c2kv_native_packed": {
+        "enabled": True,
+        "model_binding": {"model_path": str(args.checkpoint)},
+        "tool_gist": {"enabled": False},
+    }}
+
+    class Response:
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            return False
+        def read(self):
+            return json.dumps(info).encode()
+
+    class Opener:
+        def open(self, request, timeout):
+            return Response()
+
+    monkeypatch.setattr(cell, "build_opener", lambda *args: Opener())
+    receipt = cell.validate_live_engine(args.upstream, args.checkpoint,
+                                        args.tool_checkpoint, "h2o:r8:hybrid3:schema")
+    assert receipt["tool_checkpoint"] == str(args.tool_checkpoint.resolve())
+    assert "tool_config_sha256" not in receipt
+
+
 def test_dry_run_is_local_and_uses_shared_checkout(tmp_path, monkeypatch, capsys):
     for relative in ("benchmarks/run.py", "benchmarks/proxy.py",
                      "benchmarks/toolmemory.py", "benchmarks/arms.py"):
@@ -124,6 +187,27 @@ def test_dry_run_is_local_and_uses_shared_checkout(tmp_path, monkeypatch, capsys
     assert observed["engine_preflight"] == "skipped (dry-run)"
     assert observed["command"][-4:] == ["--categories", "multi_turn_base",
                                         "--run-ids", "multi_turn_base_0"]
+
+
+def test_schema_full_dry_run_does_not_require_history_budget(tmp_path, monkeypatch, capsys):
+    for relative in ("benchmarks/run.py", "benchmarks/proxy.py",
+                     "benchmarks/toolmemory.py", "benchmarks/arms.py"):
+        path = tmp_path / "paper" / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("", encoding="utf-8")
+    monkeypatch.setattr(cell, "validate_live_engine",
+                        lambda *args: pytest.fail("dry run contacted the engine"))
+    args = _args(tmp_path)
+    cell.main(["--paper-root", str(tmp_path / "paper"),
+               "--benchmark", args.benchmark, "--arm", "full",
+               "--upstream", args.upstream, "--proxy-port", str(args.proxy_port),
+               "--out", str(args.out), "--model", args.model,
+               "--checkpoint", str(args.checkpoint),
+               "--tool-memory", "h2o:r8:hybrid3:schema",
+               "--tool-checkpoint", str(args.tool_checkpoint), "--dry-run"])
+    observed = json.loads(capsys.readouterr().out)
+    assert observed["cell_id"] == "bfcl_base__full__tools-h2o_r8_hybrid3_schema"
+    assert "--history-kv-target-tokens" not in observed["command"]
 
 
 @pytest.mark.parametrize("benchmark,adapter,fixed", [
