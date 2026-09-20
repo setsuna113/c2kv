@@ -1421,6 +1421,12 @@
       "artifacts_preserved": true
     },
     {
+      "run": "smoke-appworld-serial",
+      "cell_id": "appworld__c2kv_native_r4",
+      "error": "143",
+      "artifacts_preserved": true
+    },
+    {
       "run": "smoke-appworld-small",
       "cell_id": "appworld__c2kv_native_r4",
       "error": "143",
@@ -1456,5 +1462,5 @@
     "appworld__c2kv_native_r4"
   ],
   "functional_matrix_complete": false,
-  "resource_interruption_note": "The first AppWorld native attempt and reduced-pool retry were stopped when host RAM/virtual memory was exhausted and WSL stopped accepting commands. These stopped attempts are not passing tests."
+  "resource_interruption_note": "AppWorld native attempts with the original pool, a reduced pool, and serial weight loading were stopped when host RAM/virtual memory was exhausted. WSL also stopped accepting commands during the first attempt. These stopped attempts are not passing tests."
 }
