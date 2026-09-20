@@ -19,7 +19,8 @@ from pathlib import Path
 from . import design
 
 ROOT = Path(design.GENERATION_ROOT)
-LAUNCHER = ROOT / "tools" / "launch_engine.sh"
+LAUNCHER = Path(os.environ.get("C2KV_GENERALITY_SOURCE",
+                              Path(__file__).resolve().parents[1])) / "tools" / "launch_engine.sh"
 ENGINE_LOG_DIR = ROOT / "logs" / "engines"
 
 

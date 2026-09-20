@@ -61,6 +61,20 @@ def test_bfcl_validation_from_direct_file_entry_without_package_path(tmp_path):
     assert check.returncode == 0, check.stdout + check.stderr
 
 
+def test_direct_historykv_driver_binds_paper_checkout_from_environment(tmp_path):
+    env = os.environ.copy()
+    env["C2KV_PAPER_SOURCE"] = str(tmp_path / "full_paper")
+    code = ("import runpy,sys; from pathlib import Path; "
+            "sys.path.insert(0,str(Path(sys.argv[1]).parent)); "
+            "module=runpy.run_path(sys.argv[1]); "
+            "print(module['PAPER'])")
+    result = subprocess.run([sys.executable, "-I", "-c", code,
+                             str(Path(driver.__file__).resolve())],
+                            cwd=tmp_path, env=env, capture_output=True, text=True,
+                            timeout=20, check=True)
+    assert result.stdout.strip() == str(tmp_path / "full_paper")
+
+
 def test_old_fc_handler_row_and_done_are_replaced_only_after_new_result(tmp_path):
     task_id = "multi_turn_base_1"
     out = tmp_path / "tasks" / task_id

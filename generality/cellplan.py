@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import csv
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -177,7 +178,8 @@ def cell_config(cell_id, backend, wp, condition, bench, manifest, bud) -> dict:
 
 
 def serving_provenance() -> dict:
-    checkout = GENERATION_ROOT / "src" / "sglang-gen"
+    checkout = Path(os.environ.get("C2KV_SGLANG_SOURCE",
+                                   GENERATION_ROOT / "src" / "sglang-gen")).resolve()
     def git(*args: str) -> str:
         result = subprocess.run(
             ["git", "-C", str(checkout), *args], capture_output=True,

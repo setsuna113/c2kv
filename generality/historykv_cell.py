@@ -32,7 +32,8 @@ except ImportError:  # Direct file launch on ascend03.
     from process_lifecycle import interruptible, run_owned_worker, stop_owned_group
 
 GENERATION_ROOT = Path("/home/liuyancheng/c2kv-generality-20260918")
-PAPER = GENERATION_ROOT / "src" / "paper_harness"
+PAPER = Path(os.environ.get("C2KV_PAPER_SOURCE",
+                            GENERATION_ROOT / "src" / "paper_harness")).resolve()
 
 ARM_OF = {
     ("h2o", "K0", "recovery_off_same_initial"): "gen_h2o_k0",

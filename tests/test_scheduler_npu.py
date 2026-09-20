@@ -178,6 +178,24 @@ def test_old_scheduler_process_is_detected(tmp_path, monkeypatch):
     assert scheduler.other_scheduler_pids(proc_root) == [123456]
 
 
+def test_old_and_pinned_release_schedulers_are_both_detected(tmp_path, monkeypatch):
+    proc_root = tmp_path / "proc"
+    legacy = tmp_path / "legacy" / "src" / "generality" / "scheduler.py"
+    release = tmp_path / "release" / "generality" / "scheduler_npu.py"
+    for script in (legacy, release):
+        script.parent.mkdir(parents=True)
+        script.write_text("# fixture")
+    monkeypatch.setattr(scheduler, "SRC", legacy.parents[1])
+    monkeypatch.setenv("C2KV_GENERALITY_SOURCE", str(release.parents[1]))
+    for pid, script in ((123456, legacy), (234567, release)):
+        proc = proc_root / str(pid)
+        proc.mkdir(parents=True)
+        (proc / "cmdline").write_bytes(
+            b"python\0" + script.as_posix().encode() + b"\0--cards\01\0")
+        (proc / "cwd").mkdir()
+    assert scheduler.other_scheduler_pids(proc_root) == [123456, 234567]
+
+
 def test_detached_event_native_server_blocks_startup(tmp_path, monkeypatch):
     root = tmp_path / "root"
     proc_root = tmp_path / "proc"
@@ -247,6 +265,120 @@ def test_cell_driver_lock_and_port_are_isolated_across_slots(tmp_path, monkeypat
     assert captured["command"][2] == first_lock
     assert json.loads(manifest_path.read_text())["scheduler_port_slot"] == 1
     assert json.loads(second_path.read_text())["scheduler_port_slot"] == 0
+
+
+@pytest.mark.parametrize("backend,condition,driver_name", [
+    ("c2kv", "compression_full_budget", "c2kv_cell.py"),
+    ("h2o", "compression_full_budget", "historykv_cell.py"),
+    ("h2o", "tracer_history", "session_tracer_cell.py"),
+])
+def test_launch_manifest_and_command_bind_complete_sources(
+        tmp_path, monkeypatch, backend, condition, driver_name):
+    sources = {name: tmp_path / name for name in ("generality", "paper", "sglang")}
+    for name, marker in (("generality", "generality/scheduler_npu.py"),
+                         ("paper", "benchmarks/proxy.py"),
+                         ("sglang", "python/sglang/__init__.py")):
+        path = sources[name] / marker
+        path.parent.mkdir(parents=True)
+        path.write_text("# fixture")
+    for name, source in sources.items():
+        monkeypatch.setenv(f"C2KV_{'SGLANG' if name == 'sglang' else name.upper()}_SOURCE",
+                           str(source))
+    task = cell(tmp_path, backend=backend)
+    task["condition"] = condition
+    monkeypatch.setattr(scheduler, "LOGS", tmp_path / "logs")
+    if condition == "tracer_history":
+        monkeypatch.setattr(scheduler, "calibration_receipt", lambda cell:
+                            (tmp_path / "threshold.json", {"threshold": 0.6}))
+        monkeypatch.setattr(scheduler, "calibration_is_ready", lambda *args: True)
+    captured = {}
+    monkeypatch.setattr(scheduler.subprocess, "Popen", lambda command, **kwargs:
+                        captured.update(command=command, kwargs=kwargs) or
+                        SimpleNamespace(pid=123))
+    scheduler.launch_cell(task, card=3, slot=0)
+    command, kwargs = captured["command"], captured["kwargs"]
+    manifest = json.loads(Path(command[command.index("--cell") + 1]).read_text())
+    assert manifest["source_checkouts"] == {name: str(path) for name, path in sources.items()}
+    assert str(sources["generality"] / "generality" / driver_name) in command
+    assert command[4] == str(sources["generality"] / "tools" / "launch_cpu_controller.sh")
+    assert kwargs["env"]["C2KV_PAPER_SOURCE"] == str(sources["paper"])
+    assert kwargs["env"]["C2KV_SGLANG_SOURCE"] == str(sources["sglang"])
+    assert task.get("source_checkouts") is None
+
+
+def test_invalid_explicit_source_fails_before_manifest(tmp_path, monkeypatch):
+    monkeypatch.setenv("C2KV_PAPER_SOURCE", str(tmp_path / "missing"))
+    task = cell(tmp_path)
+    monkeypatch.setattr(scheduler.subprocess, "Popen", lambda *a, **k:
+                        pytest.fail("driver started"))
+    with pytest.raises(RuntimeError, match="Invalid C2KV_PAPER_SOURCE"):
+        scheduler.launch_cell(task, card=1, slot=0)
+    assert not list(Path(task["cell_dir"]).glob("cell_launch_attempts/*.json"))
+
+
+def test_pinned_engine_source_must_match_live_port(tmp_path, monkeypatch):
+    checkout = tmp_path / "sglang"
+    (checkout / "python" / "sglang").mkdir(parents=True)
+    monkeypatch.setenv("C2KV_SGLANG_SOURCE", str(checkout))
+    proc_root = tmp_path / "proc"
+    proc = proc_root / "123"
+    proc.mkdir(parents=True)
+    (proc / "cmdline").write_bytes(
+        b"python\0-m\0sglang.launch_server\0--port\0" + b"36203\0")
+    environment = proc / "environ"
+    environment.write_bytes(b"PYTHONPATH=/old/engine/python\0")
+    assert not scheduler.engine_source_matches(3, proc_root)
+    environment.write_bytes(f"PYTHONPATH={checkout / 'python'}\0".encode())
+    assert scheduler.engine_source_matches(3, proc_root)
+    (proc / "cmdline").write_bytes(
+        b"python\0-m\0sglang.launch_server\0--port\0" + b"36204\0")
+    assert not scheduler.engine_source_matches(3, proc_root)
+
+
+def test_healthy_old_engine_is_left_for_manual_migration(tmp_path, monkeypatch, capsys):
+    checkout = tmp_path / "sglang"
+    (checkout / "python" / "sglang").mkdir(parents=True)
+    monkeypatch.setenv("C2KV_SGLANG_SOURCE", str(checkout))
+    monkeypatch.setattr(scheduler, "engine_source_matches", lambda card: False)
+    monkeypatch.setattr(scheduler.subprocess, "Popen", lambda *args, **kwargs:
+                        pytest.fail("old engine must not be replaced here"))
+
+    class Reply:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+    monkeypatch.setattr("urllib.request.build_opener", lambda *args:
+                        SimpleNamespace(open=lambda *args, **kwargs: Reply()))
+    scheduler.ensure_engines([3])
+    event = json.loads(capsys.readouterr().out)
+    assert event["event"] == "engine_source_migration_pending"
+    assert event["expected"] == str(checkout)
+
+
+def test_vacant_engine_uses_release_launcher_and_same_source_pin(tmp_path, monkeypatch):
+    release = tmp_path / "release"
+    engine = tmp_path / "engine"
+    (release / "generality").mkdir(parents=True)
+    (release / "generality" / "scheduler_npu.py").write_text("# fixture")
+    (engine / "python" / "sglang").mkdir(parents=True)
+    monkeypatch.setenv("C2KV_GENERALITY_SOURCE", str(release))
+    monkeypatch.setenv("C2KV_SGLANG_SOURCE", str(engine))
+    monkeypatch.setattr(scheduler, "LOGS", tmp_path / "logs")
+    (tmp_path / "logs" / "engines").mkdir(parents=True)
+    monkeypatch.setattr("urllib.request.build_opener", lambda *args:
+                        SimpleNamespace(open=lambda *args, **kwargs:
+                                        (_ for _ in ()).throw(OSError("vacant"))))
+    captured = {}
+    monkeypatch.setattr(scheduler.subprocess, "Popen", lambda command, **kwargs:
+                        captured.update(command=command, kwargs=kwargs))
+    scheduler.ensure_engines([3])
+    assert captured["command"][1] == str(release / "tools" / "launch_engine.sh")
+    assert captured["kwargs"]["env"]["C2KV_SGLANG_SOURCE"] == str(engine)
 
 
 def test_launch_boundary_refuses_a_held_cell(tmp_path, monkeypatch):
