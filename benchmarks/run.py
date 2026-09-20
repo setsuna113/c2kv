@@ -57,6 +57,10 @@ assert all(module.NAME in ADAPTERS or name in getattr(module, "NAMES", ())
 def _assert_proxy_port_available(port: int) -> None:
     """Fail before spawn when this run cannot own the proxy listen port."""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        if os.name == "posix":
+            # Match HTTPServer's reuse policy: a previous cell's TIME_WAIT
+            # sockets do not prevent a new listener on this otherwise free port.
+            probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             probe.bind(("127.0.0.1", port))
         except OSError as exc:
