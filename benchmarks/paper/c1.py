@@ -23,6 +23,8 @@ import urllib.error
 from benchmarks.measurement.telemetry import append_jsonl, canonical_sha256, read_jsonl
 from benchmarks.measurement.replay import _paper_measurement
 from .candidate_matrix import ARM_TO_VARIANT, SUPPORTED_BENCHMARKS as CANDIDATE_BENCHMARKS
+from benchmarks.arms import get_arm
+from benchmarks.native_history_budget import NativeHistoryBudget
 from .process_lifecycle import defer_termination, unwind_on_termination
 
 ARMS = {"c2kv_c1_t02_r8": 8, "c2kv_c1_t02_r4": 4, "c2kv_c1_off_r8": 8}
@@ -91,6 +93,12 @@ def delivery_args(config, benchmark, output, task_ids, delivery):
         command += ["--detector", detector]
         if ARM != "c2kv_native_r4" and detector in {"t02_risk", "legacy_prefill"}:
             command += ["--embedding-batch-size", str(settings.get("embedding_batch_size", 1))]
+    if "native_history_budget_tokens" in config:
+        budget = NativeHistoryBudget(config["native_history_budget_tokens"])
+        budget.validate_arm(get_arm(ARM))
+        if benchmark not in {"bfcl_base", "bfcl_long_context"}:
+            raise ValueError("Native history budget sweep currently supports BFCL only")
+        command += budget.cli_args()
     if benchmark == "tau2":
         command += ["--tau2-dir", config["tau2_dir"],
                     "--tau2-python", config.get("tau2_python", config["bench_python"]),
@@ -190,6 +198,11 @@ def prepare_native(config, benchmark, directory, tasks, delivery):
         profile["comparison"] = "Same C1 ratio8 initial history allocation, recovery disabled"
     elif ARM in ARM_TO_VARIANT:
         profile["comparison"] = "Explicit ratio-8 candidate; not a legacy C1 or D3 score"
+    previous_profile = native / "profile.json"
+    if previous_profile.is_file():
+        previous = json.loads(previous_profile.read_text(encoding="utf-8"))
+        if previous.get("native_history_budget") != profile.get("native_history_budget"):
+            raise ValueError("Native history budget changed; use a separate cell output directory")
     profile["sglang_backend_preflight"] = delivery.preflight_sglang_backend(args)
     controller_path = native / "controller.json"
     save(controller_path, controller)
@@ -589,10 +602,17 @@ def main(argv=None):
     parser.add_argument("--tool-memory", default="")
     parser.add_argument("--tool-checkpoint", default="")
     parser.add_argument("--tool-budget-tokens", type=int)
+    parser.add_argument("--history-budget-tokens", type=int)
     args = parser.parse_args(argv)
     select_arm(args.arm)
     config = json.loads(args.config.read_text(encoding="utf-8"))
     config["native_arm"] = ARM
+    if args.history_budget_tokens is not None:
+        budget = NativeHistoryBudget(args.history_budget_tokens)
+        budget.validate_arm(get_arm(ARM))
+        if args.benchmark not in {"bfcl_base", "bfcl_long_context"}:
+            parser.error("Native history budget sweep currently supports BFCL only")
+        config["native_history_budget_tokens"] = budget.target_tokens
     apply_tool_cli(config, args.tool_memory, args.tool_checkpoint, args.tool_budget_tokens)
     if args.upstream:
         config["upstream"] = args.upstream

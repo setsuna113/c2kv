@@ -18,6 +18,7 @@ from .candidate_matrix import (
     parse_candidate_arms, with_candidate_methods,
 )
 from benchmarks.history_budget import HistoryKVBudget, parse_history_kv_budget
+from benchmarks.native_history_budget import NativeHistoryBudget, parse_native_history_budget
 from benchmarks.toolsandbox_suite import THREE_DISTRACTION_TOOLS_129, selected_scenarios
 from .artifact_io import atomic_json, atomic_text, preparation_lock
 from .process_lifecycle import (defer_termination, run_owned, stop_owned_group,
@@ -122,6 +123,10 @@ def cells(config):
                     if arm.history_kv:
                         budget = HistoryKVBudget(method["history_budget_tokens"])
                         budget.apply(arm)
+                        row["cell_id"] = bench["name"] + "__" + budget.variant_name(arm.name)
+                    elif arm.native_controller:
+                        budget = NativeHistoryBudget(method["history_budget_tokens"])
+                        budget.validate_arm(arm)
                         row["cell_id"] = bench["name"] + "__" + budget.variant_name(arm.name)
                 if context_name != RAW_TOOL_CONTEXT:
                     row["cell_id"] += "__tools-" + context_name
@@ -295,6 +300,28 @@ def with_history_kv_budget(config, arm_name, target_tokens):
     return dict(config, methods=[*config["methods"], variant])
 
 
+def with_native_history_budget(config, arm_name, target_tokens):
+    """Add a BFCL native capacity variant, preserving the fixed-budget release."""
+    from benchmarks.arms import get_arm
+    budget = NativeHistoryBudget(target_tokens)
+    budget.validate_arm(get_arm(arm_name))
+    templates = [method for method in config["methods"]
+                 if method["arm"] == arm_name and "history_budget_tokens" not in method]
+    if len(templates) != 1:
+        raise ValueError(f"Native history budget requires one configured base arm: {arm_name}")
+    if any(method["arm"] == arm_name and method.get("history_budget_tokens") == target_tokens
+           for method in config["methods"]):
+        raise ValueError(f"Native budget cell already exists: {budget.variant_name(arm_name)}")
+    configured = {b["name"] for b in config["benchmarks"]}
+    scope = set(templates[0].get("benchmarks") or configured)
+    benchmarks = sorted(scope & configured & {"bfcl_base", "bfcl_long_context"})
+    if not benchmarks:
+        raise ValueError("Native history budget sweep currently requires BFCL")
+    variant = dict(templates[0], group="budget", history_budget_tokens=target_tokens,
+                   benchmarks=benchmarks)
+    return dict(config, methods=[*config["methods"], variant])
+
+
 def history_kv_budget_args(cell):
     """Use one resolved capacity on both closed-loop and replay proxy paths."""
     if "history_budget_tokens" not in cell:
@@ -320,6 +347,8 @@ def run_command(config, cell, directory, profile, stage="closed_loop"):
                "--upstream", f"http://127.0.0.1:{config['server_port']}",
                "--proxy-port", str(config["proxy_port"]),
                "--out", str(directory), "--num-workers", "1"]
+        if "history_budget_tokens" in cell:
+            cmd += NativeHistoryBudget(cell["history_budget_tokens"]).cli_args()
         if cell.get("tool_memory"):
             cmd += ["--tool-memory", cell["tool_memory"],
                     "--tool-checkpoint", cell["tool_checkpoint"]]
@@ -460,7 +489,13 @@ def _prepare_locked(config, output, source):
             continue
         explicit_budget = item.get("history_budget_tokens")
         if "history_budget_tokens" in item:
-            arm = HistoryKVBudget(explicit_budget).apply(arm)
+            if arm.native_controller:
+                NativeHistoryBudget(explicit_budget).validate_arm(arm)
+                if (not item.get("benchmarks") or
+                        not set(item["benchmarks"]) <= {"bfcl_base", "bfcl_long_context"}):
+                    raise ValueError("Native history budget sweep currently requires explicit BFCL scope")
+            else:
+                arm = HistoryKVBudget(explicit_budget).apply(arm)
         if is_candidate_arm(arm.name):
             if (item.get("ratio") != 8 or arm.ratio != 8
                     or arm.native_controller != "candidate_" + ARM_TO_VARIANT[arm.name]
@@ -1023,6 +1058,8 @@ def main(argv=None):
                         help="add budget-adapted HiAgent full BFCL/ACEBench cells with this actor history cap")
     parser.add_argument("--history-kv-budget", action="append", default=[], metavar="ARM=TOKENS",
                         help="add a history-KV capacity cell, e.g. commitkv=768; repeat for a sweep")
+    parser.add_argument("--native-history-budget", action="append", default=[], metavar="ARM=TOKENS",
+                        help="add a native C2KV BFCL history-capacity cell; repeat for a sweep")
     parser.add_argument("--tool-contexts", default="",
                         help="add named tool contexts to history/recovery methods, preserving raw cells")
     parser.add_argument("--tool-checkpoint", type=Path,
@@ -1041,6 +1078,8 @@ def main(argv=None):
         config = with_hiagent_budget(config, args.hiagent_budget_tokens)
         for value in args.history_kv_budget:
             config = with_history_kv_budget(config, *parse_history_kv_budget(value))
+        for value in args.native_history_budget:
+            config = with_native_history_budget(config, *parse_native_history_budget(value))
         config = with_tool_contexts(config, list(filter(None, args.tool_contexts.split(","))),
                                     args.tool_checkpoint)
         config = with_task_subsets(config, args.task_subset, args.task_subset_file)
