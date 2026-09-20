@@ -135,6 +135,11 @@ def test_old_appworld_generation_error_done_is_replaced_only_after_new_result(tm
     assert not appworld_done_healthy(out, task_id)
 
     def fake_call(*args, **kwargs):
+        script = args[0][-1]
+        assert "from process_lifecycle import interruptible" in script
+        assert "@interruptible" in script
+        assert kwargs["env"]["PYTHONPATH"].split(os.pathsep)[0] == str(
+            Path(driver.__file__).resolve().parent)
         attempts = list((out / "attempts").glob("*"))
         assert len(attempts) == 1
         _appworld_result(attempts[0] / "appworld", task_id, "max_interactions")
@@ -152,6 +157,25 @@ def test_old_appworld_generation_error_done_is_replaced_only_after_new_result(tm
     assert "vLLM generation Error:" in (out / "benchmark.log").read_text()
     history = json.loads((out / "done_history.jsonl").read_text().splitlines()[0])
     assert json.loads(history["previous_raw"]) == old_done
+
+
+def test_toolsandbox_nested_worker_installs_signal_unwind(tmp_path):
+    cell = {"cell_dir": str(tmp_path), "benchmark_dir": "toolsandbox",
+            "python_sgl": "python", "python_bench": "python",
+            "model_name": "model", "sglang_backend_url": "http://127.0.0.1:1"}
+
+    def fake_call(command, **kwargs):
+        script = command[-1]
+        assert "from process_lifecycle import interruptible" in script
+        assert "@interruptible" in script
+        assert kwargs["env"]["PYTHONPATH"].split(os.pathsep)[0] == str(
+            Path(driver.__file__).resolve().parent)
+        compile(script, "<toolsandbox-worker>", "exec")
+        return 0
+
+    with patch.object(driver, "run_owned_worker", side_effect=fake_call):
+        result = driver._run_adapter_task(cell, "scenario_1", 37401, "toolsandbox")
+    assert result["status"] == "completed"
 
 
 def test_appworld_empty_model_output_is_not_generation_error(tmp_path):

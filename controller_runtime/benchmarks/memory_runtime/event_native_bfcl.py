@@ -15,6 +15,14 @@ from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 from urllib.request import ProxyHandler, Request, build_opener
 
+# This module runs both from the source tree and a deployed generality/
+# controller_runtime layout. Bind the shared signal-unwind helper in either.
+_generality = Path(__file__).resolve().parents[3]
+if (_generality / 'generality' / 'process_lifecycle.py').is_file():
+    _generality /= 'generality'
+sys.path.insert(0, str(_generality))
+from process_lifecycle import interruptible
+
 from .bfcl_overlap_admission import (
     QUESTION_FILENAME, official_question_path, validate_overlap_admission,
 )
@@ -184,6 +192,7 @@ def stop_child(process):
         process.wait(timeout=5)
 
 
+@interruptible
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--server-manifest', type=Path)
@@ -275,4 +284,4 @@ def main(argv=None):
 
 
 if __name__ == '__main__':
-    main()
+    raise SystemExit(main())

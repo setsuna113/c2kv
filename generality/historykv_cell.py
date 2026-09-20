@@ -384,14 +384,19 @@ def _run_adapter_task(cell: dict, task_id: str, proxy_port: int,
         inner = f"""
 import sys, json
 sys.path.insert(0, {str(PAPER)!r})
+from process_lifecycle import interruptible
 from benchmarks.adapters import toolsandbox_adapter as ts
-summary = ts.run_ts(
-    'http://127.0.0.1:{proxy_port}/v1', {str(attempt_root)!r},
-    test_mode=False, scenarios=['{task_id}'],
-    benchmark_dir={cell['benchmark_dir']!r},
-    python={cell['python_bench']!r},
-    user_base_url='{upstream}/v1', model={cell['model_name']!r})
-print('SUMMARY:' + json.dumps(summary, default=str))
+@interruptible
+def main():
+    summary = ts.run_ts(
+        'http://127.0.0.1:{proxy_port}/v1', {str(attempt_root)!r},
+        test_mode=False, scenarios=['{task_id}'],
+        benchmark_dir={cell['benchmark_dir']!r},
+        python={cell['python_bench']!r},
+        user_base_url='{upstream}/v1', model={cell['model_name']!r})
+    print('SUMMARY:' + json.dumps(summary, default=str))
+    return 0
+raise SystemExit(main())
 """
     else:
         inner = f"""
@@ -407,7 +412,7 @@ print('SUMMARY:' + json.dumps(summary, default=str))
 """
     started = time.monotonic()
     env = os.environ.copy()
-    env["PYTHONPATH"] = str(PAPER)
+    env["PYTHONPATH"] = os.pathsep.join((str(Path(__file__).resolve().parent), str(PAPER)))
     env["no_proxy"] = env["NO_PROXY"] = "127.0.0.1,localhost"
     for k in ("http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY"):
         env.pop(k, None)
@@ -505,18 +510,23 @@ def run_appworld_task(cell: dict, task_id: str, proxy_port: int) -> dict:
 import sys, os
 from pathlib import Path
 sys.path.insert(0, {str(PAPER)!r})
+from process_lifecycle import interruptible
 from benchmarks.adapters import acon_adapter as acon
-summary = acon.run_appworld(
-    'http://127.0.0.1:{proxy_port}/v1', Path({str(attempt_root)!r}),
-    acon_dir=Path({cell['acon_dir']!r}), model={cell['model_name']!r},
-    tag='gen', split='test_normal', max_iter=50,
-    task_ids=['{task_id}'], python={cell['python_appworld']!r},
-)
 import json
-print('SUMMARY:' + json.dumps(summary, default=str))
+@interruptible
+def main():
+    summary = acon.run_appworld(
+        'http://127.0.0.1:{proxy_port}/v1', Path({str(attempt_root)!r}),
+        acon_dir=Path({cell['acon_dir']!r}), model={cell['model_name']!r},
+        tag='gen', split='test_normal', max_iter=50,
+        task_ids=['{task_id}'], python={cell['python_appworld']!r},
+    )
+    print('SUMMARY:' + json.dumps(summary, default=str))
+    return 0
+raise SystemExit(main())
 """
     env = os.environ.copy()
-    env["PYTHONPATH"] = str(PAPER)
+    env["PYTHONPATH"] = os.pathsep.join((str(Path(__file__).resolve().parent), str(PAPER)))
     env["APPWORLD_ROOT"] = cell["appworld_root"]
     env["no_proxy"] = env["NO_PROXY"] = "127.0.0.1,localhost"
     for k in ("http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY"):

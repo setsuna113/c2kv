@@ -18,6 +18,12 @@ from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 from urllib.request import ProxyHandler, Request, build_opener
 
+try:
+    from .process_lifecycle import interruptible
+except ImportError:  # Direct file launch through the runtime wrapper.
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from process_lifecycle import interruptible
+
 RUNTIME_ROOT = Path(__file__).resolve().parents[2]   # controller_runtime/
 SUPPORTED_SESSION_CACHE_POLICIES = {"external-sglang-content-addressed-chunks-v1"}
 
@@ -112,6 +118,7 @@ def run_appworld_task(base_url, acon_dir, appworld_root, bench_python, task_id,
     return summary
 
 
+@interruptible
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--server-manifest", type=Path, required=True)
