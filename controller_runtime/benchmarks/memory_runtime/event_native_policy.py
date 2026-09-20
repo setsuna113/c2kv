@@ -126,6 +126,7 @@ class _PackingConfig:
 @dataclass
 class _SessionState:
     message_json: tuple[str, ...]
+    source_prefix: tuple[str, ...]
     tools_json: str
     decision_index: int
     policy_memory: ConversationMemory | None
@@ -208,7 +209,8 @@ class EventNativeController:
         tools_json = _canonical_json(tools)
         store = EventStore.from_messages(session_id, raw_messages)
         message_json = tuple(message.json_text for message in store.messages)
-        signature = (message_json, tools_json, ratio, max_new_tokens)
+        source_prefix = store.source_prefix if store.source_prefix is not None else message_json
+        signature = (source_prefix, message_json, tools_json, ratio, max_new_tokens)
 
         state = self._sessions.get(session_id)
         if state is not None:
@@ -216,7 +218,7 @@ class EventNativeController:
                 raise PolicyInputError(
                     "Tools changed within a session; use a new explicit session_id"
                 )
-            self._validate_monotone_prefix(state.message_json, message_json)
+            self._validate_monotone_prefix(state.source_prefix, source_prefix)
             cached = state.decisions.get(decision_key)
             if cached is not None:
                 old_signature, prepared = cached
@@ -289,6 +291,7 @@ class EventNativeController:
         decisions[decision_key] = (signature, _copy_prepared(prepared))
         self._sessions[session_id] = _SessionState(
             message_json=message_json,
+            source_prefix=source_prefix,
             tools_json=tools_json,
             decision_index=decision_index,
             policy_memory=(
