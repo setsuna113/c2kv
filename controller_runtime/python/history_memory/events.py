@@ -42,12 +42,26 @@ class EventRecord:
     missing_tool_call_ids: tuple[str, ...] = ()
 
 
+class RenderedMessages(list):
+    """Internal rendered view with an immutable observable source identity.
+
+    Tool layout can change between decisions while the source transcript only
+    grows. This in-process carrier is not an accepted JSON request field.
+    Controllers still bind decision caches to the actual rendered messages.
+    """
+
+    def __init__(self, rendered, *, source):
+        super().__init__(Message.from_dict(message).to_dict() for message in rendered)
+        self.source_prefix = tuple(Message.from_dict(message).json_text for message in source)
+
+
 @dataclass(frozen=True)
 class EventStore:
     session_id: str
     messages: tuple[Message, ...]
     events: tuple[EventRecord, ...]
     benchmark: str | None = None
+    source_prefix: tuple[str, ...] | None = None
 
     @classmethod
     def from_messages(
@@ -61,6 +75,7 @@ class EventStore:
             session_id, snapshots,
             build_events(session_id, snapshots, benchmark=benchmark),
             benchmark,
+            messages.source_prefix if isinstance(messages, RenderedMessages) else None,
         )
 
     def event(self, event_id: str) -> EventRecord:

@@ -86,6 +86,7 @@ class PreparedEventNativeS0:
 @dataclass
 class _SessionState:
     message_json: tuple[str, ...]
+    source_prefix: tuple[str, ...]
     tools_json: str
     decision_index: int
     decisions: dict[str, tuple[tuple[Any, ...], PreparedEventNativeS0]]
@@ -170,7 +171,9 @@ class EventNativeS0Controller:
         protected_signature = _canonical_json(
             tuple(self.protected_recovery_messages)
         )
+        source_prefix = store.source_prefix if store.source_prefix is not None else message_json
         signature = (
+            source_prefix,
             message_json,
             tools_json,
             ratio,
@@ -187,7 +190,7 @@ class EventNativeS0Controller:
                     "encoding_scope changed within a session; use a new explicit session_id"
                 )
             EventNativeController._validate_monotone_prefix(
-                state.message_json, message_json
+                state.source_prefix, source_prefix
             )
             cached = state.decisions.get(decision_key)
             if cached is not None:
@@ -211,6 +214,7 @@ class EventNativeS0Controller:
         decisions[decision_key] = (signature, prepared)
         self._sessions[session_id] = _SessionState(
             message_json=message_json,
+            source_prefix=source_prefix,
             tools_json=tools_json,
             decision_index=decision_index,
             decisions=decisions,

@@ -187,10 +187,85 @@ def build_eval_policy(cell: dict, budgets: dict) -> dict:
         # competitive control: the bare compressor may use the whole common cap
         policy["history_budget_bytes"] = wp["common_cap_bytes"]
         policy["workspace_budget_bytes"] = wp["common_cap_bytes"]
-    return {
+    base = {
         "schema": "a-event-native-eval-policy-v1",
         "policy_id": f"generality-{cell['cell_id']}",
         "policy": policy,
+    }
+    if "history_budget_tokens" not in cell:
+        return base
+    override = cell.get("native_history_budget")
+    if override is None:
+        override = native_history_budget_profile(cell, budgets, base)
+    elif override.get("requested_tokens") != cell["history_budget_tokens"]:
+        raise ValueError("native history budget profile differs from the cell")
+    return copy.deepcopy(override["eval_policy"])
+
+
+def _json_sha256(value: dict) -> str:
+    encoded = json.dumps(value, ensure_ascii=False, sort_keys=True,
+                         separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _json_file_bytes(value: dict) -> bytes:
+    return (json.dumps(value, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
+
+
+def native_history_budget_profile(cell: dict, budgets: dict, base: dict | None = None) -> dict:
+    """Bind an explicit token cap to this checkpoint's verified KV geometry."""
+    tokens = cell.get("history_budget_tokens")
+    if type(tokens) is not int or tokens <= 0:
+        raise ValueError("history_budget_tokens must be a positive integer")
+    if (cell.get("condition") != "candidate_algorithm"
+            or cell.get("benchmark") != "bfcl" or cell.get("ratio") != 8):
+        raise ValueError("native history budget requires a ratio-8 BFCL candidate cell")
+    root = str(Path(__file__).resolve().parents[1])
+    if root not in sys.path:
+        sys.path.insert(0, root)
+    from controller_runtime.benchmarks.memory_runtime.event_native import (
+        inspect_checkpoint, validate_inference_byte_profile,
+    )
+
+    checkpoint = Path(cell["checkpoint"])
+    checkpoint_config_sha256 = hashlib.sha256(
+        (checkpoint / "config.json").read_bytes()).hexdigest()
+    checkpoint_profile = inspect_checkpoint(checkpoint)
+    bytes_per_token = validate_inference_byte_profile(checkpoint_profile, "bfloat16")
+    budget_bytes = tokens * bytes_per_token
+    if base is None:
+        base_cell = dict(cell)
+        base_cell.pop("history_budget_tokens")
+        base_cell.pop("native_history_budget", None)
+        base = build_eval_policy(base_cell, budgets)
+    legacy_id = f"{cell['candidate_source_cell_id']}__candidate_{cell['candidate_algorithm']}"
+    base = copy.deepcopy(base)
+    base["policy_id"] = f"generality-{legacy_id}"
+    base["policy"]["history_budget_bytes"] = budgets["working_points"][
+        cell["working_point"]]["common_cap_bytes"]
+    base["policy"]["workspace_budget_bytes"] = base["policy"]["history_budget_bytes"]
+    override = copy.deepcopy(base)
+    override["policy_id"] = f"generality-{cell['cell_id']}"
+    override["policy"]["history_budget_bytes"] = budget_bytes
+    override["policy"]["workspace_budget_bytes"] = budget_bytes
+    return {
+        "schema": "c2kv-native-history-budget-override-v1",
+        "requested_tokens": tokens,
+        "kv_bytes_per_token": bytes_per_token,
+        "inference_dtype": "bfloat16",
+        "history_budget_bytes": budget_bytes,
+        "workspace_budget_bytes": budget_bytes,
+        "checkpoint_config_sha256": checkpoint_config_sha256,
+        "base_policy_id": base["policy_id"],
+        "base_history_budget_bytes": base["policy"]["history_budget_bytes"],
+        "base_workspace_budget_bytes": base["policy"]["workspace_budget_bytes"],
+        "base_eval_policy_path": None,
+        "base_eval_policy_source": "virtual_working_point_candidate_policy",
+        "base_eval_policy_sha256": hashlib.sha256(_json_file_bytes(base)).hexdigest(),
+        "override_eval_policy_path": str(Path(cell["cell_dir"]) / "eval_policy.json"),
+        "override_eval_policy_sha256": hashlib.sha256(_json_file_bytes(override)).hexdigest(),
+        "override_policy_sha256": _json_sha256(override),
+        "eval_policy": override,
     }
 
 
@@ -747,6 +822,8 @@ def prepare_cell_files(cell: dict, budgets: dict) -> dict:
     execution = {key: cell.pop(key) for key in ("embedding_device", "embedding_batch_size")
                  if key in cell}
     cell_dir = Path(cell["cell_dir"])
+    if "history_budget_tokens" in cell:
+        cell["native_history_budget"] = native_history_budget_profile(cell, budgets)
     controller, binding = _controller_with_binding(cell)
     policy = build_eval_policy(cell, budgets)
     prepared = dict(cell)
@@ -801,7 +878,12 @@ def prepare_cell_files(cell: dict, budgets: dict) -> dict:
         return {**prepared, **execution}
 
     for name, value in frozen.items():
-        _write(cell_dir / name, value)
+        if name == "eval_policy.json" and "history_budget_tokens" in cell:
+            # Match the recorded file-byte hash on Windows and on ascend03.
+            cell_dir.mkdir(parents=True, exist_ok=True)
+            (cell_dir / name).write_bytes(_json_file_bytes(value))
+        else:
+            _write(cell_dir / name, value)
     return {**prepared, **execution}
 
 
@@ -835,6 +917,8 @@ def main(argv=None) -> int:
     parser.add_argument("--budgets", type=Path, required=True, help="resolved budgets json")
     parser.add_argument("--candidate-algorithm", choices=CANDIDATE_VARIANTS,
                         help="explicit ratio-8 candidate run outside the legacy matrix")
+    parser.add_argument("--history-budget-tokens", type=int,
+                        help="explicit native history/workspace cap for a candidate cell")
     parser.add_argument("--sglang-backend-url",
                         help="existing engine URL for an explicit candidate run")
     parser.add_argument("--task-ids", nargs="*", default=None,
@@ -855,10 +939,15 @@ def main(argv=None) -> int:
 
     if args.max_attempts_per_task < 1:
         parser.error("--max-attempts-per-task must be at least 1")
+    if args.history_budget_tokens is not None and args.history_budget_tokens <= 0:
+        parser.error("--history-budget-tokens must be positive")
     cell = load_cell(args.cell)
+    if args.history_budget_tokens is not None and args.candidate_algorithm is None:
+        parser.error("--history-budget-tokens requires --candidate-algorithm")
     if args.candidate_algorithm is not None:
         cell = candidate_cell_from_source(
-            cell, args.candidate_algorithm, args.sglang_backend_url)
+            cell, args.candidate_algorithm, args.sglang_backend_url,
+            history_budget_tokens=args.history_budget_tokens)
     elif args.sglang_backend_url is not None:
         parser.error("--sglang-backend-url requires --candidate-algorithm")
     expected_task_ids = cell["task_ids"]

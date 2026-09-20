@@ -182,6 +182,15 @@ arguments and transport IDs, and adds no model generation. Ambiguous, stale,
 or unsupported bindings leave the selected calls unchanged. Historical Source
 and Joint behavior is preserved for reproducing old results.
 
+For an explicit native history budget on a BFCL-base ratio-8 candidate, add
+`--history-budget-tokens N` to the same launcher command. The NPU driver
+converts `N` with the checkpoint's validated KV geometry and writes equal
+history/workspace byte caps to the frozen `eval_policy.json`. Each explicit
+budget has its own `__bN` cell ID, `bN` result directory, model name, and
+`native_history_budget` profile in `cell.json`. An explicit `b768` is separate
+from the original result; omitting the option retains the original identity
+and working-point `common_cap_bytes` policy.
+
 ```bash
 /home/liuyancheng/envs/sgl/bin/python /home/liuyancheng/c2kv-generality-20260918/src/generality/c2kv_cell.py \
   --cell /home/liuyancheng/c2kv-generality-20260918/results/closed_loop/bfcl_base/c2kv/K0/compression_full_budget/cell.json \
