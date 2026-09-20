@@ -12,7 +12,7 @@ VARIANT_TO_ARM = {
     "dependency_first": "c2kv_dependency_first_r8",
 }
 ARM_TO_VARIANT = {arm: variant for variant, arm in VARIANT_TO_ARM.items()}
-SUPPORTED_BENCHMARKS = frozenset({"bfcl_base", "acebench_agent"})
+SUPPORTED_BENCHMARKS = frozenset({"bfcl_base", "bfcl_long_context", "appworld", "acebench_agent"})
 
 
 def parse_candidate_arms(value: str) -> tuple[str, ...]:
@@ -33,7 +33,8 @@ def with_candidate_methods(config: dict, variants: tuple[str, ...],
         return config
     if (not benchmarks or len(benchmarks) != len(set(benchmarks))
             or not set(benchmarks) <= SUPPORTED_BENCHMARKS):
-        raise ValueError("candidate benchmarks must be a nonempty subset of bfcl_base,acebench_agent")
+        raise ValueError("candidate benchmarks must be a nonempty subset of "
+                         + ",".join(sorted(SUPPORTED_BENCHMARKS)))
     configured = {row["name"] for row in config["benchmarks"]}
     if not set(benchmarks) <= configured:
         raise ValueError("candidate benchmarks must exist in the configured paper matrix")

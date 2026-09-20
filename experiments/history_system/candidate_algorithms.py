@@ -31,8 +31,8 @@ def build_profile(
         raise ValueError("--candidate-algorithm requires --method proposed")
     if args.detector != "t02_risk":
         raise ValueError("candidate algorithms use the frozen T02 risk detector")
-    if getattr(args, "benchmark", "bfcl") not in {"bfcl", "acebench"}:
-        raise ValueError("candidate algorithms currently support BFCL and ACEBench Agent only")
+    if getattr(args, "benchmark", "bfcl") not in {"bfcl", "acebench", "acon_appworld"}:
+        raise ValueError("candidate algorithms support BFCL, ACEBench Agent and AppWorld only")
     if args.selector_artifact is not None:
         raise ValueError("candidate algorithms use the bundled T02 risk artifact")
     if args.selector_threshold != 0.5:

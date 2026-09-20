@@ -65,8 +65,8 @@ def load_delivery():
 def delivery_args(config, benchmark, output, task_ids, delivery):
     settings = config.get("c1", {})
     detector = settings.get("detector", "d3_hybrid")
-    if ARM in ARM_TO_VARIANT and benchmark not in {"bfcl_base", "acebench_agent"}:
-        raise ValueError("candidate arms currently support bfcl_base and acebench_agent")
+    if ARM in ARM_TO_VARIANT and benchmark not in {"bfcl_base", "bfcl_long_context", "appworld", "acebench_agent"}:
+        raise ValueError("candidate arms support bfcl_base, bfcl_long_context, appworld and acebench_agent")
     command = [
         "--method", "c2kv_native" if ARM == "c2kv_native_r4" else "proposed",
         "--checkpoint", config["checkpoint"],
