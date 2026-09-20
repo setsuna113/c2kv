@@ -33,14 +33,14 @@ import hashlib
 import json
 import re
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 TOOL_MEMORY_SCHEMA = "c2kv.tool_memory.v1"
 RENDER_PROFILE = "next-compression-tool-explicit-protocol-v2"
 RANKER = "lexical-name4-text1-last-user-v1"
-ENCODERS = ("t0", "h2o", "snapkv")
+ENCODERS = ("t0", "streamingllm", "h2o", "snapkv", "pyramidkv")
 LAYOUTS = ("uniform", "hybrid")
 SUPPORTED_RATIOS = (8, 12)
 # Marker on the carrier messages the proxy inserts; every proxy-side message
@@ -125,7 +125,7 @@ class ToolMemorySpec:
         }
 
 
-_SPEC_RE = re.compile(r"^(?P<encoder>t0|h2o|snapkv):r(?P<ratio>\d+)(?::(?P<layout>uniform|hybrid(?P<k>\d+)))?$")
+_SPEC_RE = re.compile(r"^(?P<encoder>t0|streamingllm|h2o|snapkv|pyramidkv):r(?P<ratio>\d+)(?::(?P<layout>uniform|hybrid(?P<k>\d+)))?$")
 
 
 def parse_tool_memory_spec(text: Optional[str]) -> Optional[ToolMemorySpec]:
@@ -497,6 +497,8 @@ class VisibleToolPlan:
     compressed_tool_indices: Tuple[int, ...]
     carrier_anchors: List[Dict[str, Any]]
     info: Dict[str, Any]
+    raw_schema_spans: Tuple[Dict[str, Any], ...] = ()
+    assembled_schema_spans: Optional[Tuple[Dict[str, Any], ...]] = None
 
 
 def _isolated_content_tokens(tokenizer: Any, content: str) -> int:
@@ -521,7 +523,9 @@ def enforce_tool_budget(plan: VisibleToolPlan | "ToolMemoryPlan",
 
 
 def plan_visible_tool_memory(payload: Mapping[str, Any], spec: ToolMemorySpec,
-                             tokenizer: Any = None) -> Optional[VisibleToolPlan]:
+                             tokenizer: Any = None, *,
+                             native_override: Optional[Sequence[int]] = None,
+                             retrieval_only: bool = False) -> Optional[VisibleToolPlan]:
     """Plan one tool context from the request's *visible* definitions only.
 
     Structured ``tools`` and adapter-provided exact text spans share one
@@ -543,7 +547,10 @@ def plan_visible_tool_memory(payload: Mapping[str, Any], spec: ToolMemorySpec,
     snapshots = [tool_snapshot(tool) for tool in tools]
     for span in spans:
         snapshots.append(visible_tool_snapshot(span))
-    native = native_indices(snapshots, spec, messages)
+    native = (native_indices(snapshots, spec, messages) if native_override is None
+              else tuple(sorted(int(index) for index in native_override)))
+    if len(set(native)) != len(native) or any(index < 0 or index >= len(snapshots) for index in native):
+        raise ValueError("native tool indices must be unique catalog indices")
     native_set = set(native)
     compressed = tuple(index for index in range(len(snapshots)) if index not in native_set)
     n_structured = len(tools)
@@ -572,7 +579,7 @@ def plan_visible_tool_memory(payload: Mapping[str, Any], spec: ToolMemorySpec,
                     anchor["rewritten_message_index"] = anchor["message_index"] + 1
         chunks = (document_chunks(tokenizer.native_ids,
                                   t0_documents(snapshots, compressed), spec)
-                  if compressed else [])
+                  if compressed and not retrieval_only else [])
         system_only = [m for m in messages if m.get("role") == "system"][:1] or [
             {"role": "system", "content": ""}]
         protocol_prefix = [m for m in rewritten if m.get("role") == "system"][:1]
@@ -836,16 +843,22 @@ class ToolMemory:
         return plan
 
     # ---- the per-request transform ----
-    def plan(self, payload: Mapping[str, Any]) -> Optional[ToolMemoryPlan | VisibleToolPlan]:
+    def plan(self, payload: Mapping[str, Any], *,
+             native_override: Optional[Sequence[int]] = None,
+             retrieval_only: bool = False,
+             target_resident_tokens: Optional[int] = None) -> Optional[ToolMemoryPlan | VisibleToolPlan]:
         """Plan only definitions made visible by the current benchmark request."""
         self.stats["requests"] += 1
-        visible = plan_visible_tool_memory(payload, self.spec, self.tokenizer)
+        visible = plan_visible_tool_memory(payload, self.spec, self.tokenizer,
+                                           native_override=native_override,
+                                           retrieval_only=retrieval_only)
         if visible is None:
             self.stats["skipped_no_tools"] += 1
             return None
         if self.spec.encoder != "t0":
-            # Raw-KV selectors need the final assembled prompt and its query.
-            # The proxy completes these plans after history packing.
+            if retrieval_only:
+                raise ValueError("retrieval-only is a native-schema control, not a raw KV method")
+            self._prepare_raw_plan(payload, visible, target_resident_tokens)
             self.stats["applied"] += 1
             return visible
         enforce_tool_budget(visible, self.budget_tokens)
@@ -883,10 +896,115 @@ class ToolMemory:
                               visible.chunks, records, info, visible.carrier_anchors,
                               visible.source_spans)
 
-    def stage_request(self, payload: Mapping[str, Any], plan: Optional[ToolMemoryPlan]) -> Dict[str, Any]:
+    def _prepare_raw_plan(self, payload: Mapping[str, Any], plan: VisibleToolPlan,
+                          target_resident_tokens: Optional[int]) -> None:
+        """Describe raw schemas; the serving tokenizer owns their KV positions."""
+        tools = list(payload.get("tools") or [])
+        original = list(payload.get("messages") or [])
+        protocol = protocol_block(tools) if tools else ""
+        plan.protocol = protocol
+        plan.messages = with_protocol_system(original, protocol)
+        shift = int(bool(protocol) and (not original or original[0].get("role") != "system"))
+        spans = []
+        if protocol:
+            content = plan.messages[0]["content"]
+            start = content.rfind(protocol)
+            if start < 0:
+                raise ToolMemoryError("raw_protocol", "the complete native catalog protocol is missing")
+            plan.info["tool_protocol_span"] = {"message_index": 0, "start": start,
+                                                "end": start + len(protocol), "text": protocol}
+            cursor = start + len(TOOL_PROTOCOL_HEAD)
+            for index, tool in enumerate(tools):
+                text = json.dumps(tool, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+                cursor += 1  # protocol_block puts a newline before each schema.
+                spans.append({"schema_index": index, "message_index": 0,
+                              "start": cursor, "end": cursor + len(text), "text": text})
+                cursor += len(text)
+        for index, source in enumerate(plan.source_spans):
+            spans.append({"schema_index": len(tools) + index,
+                          "message_index": source.message_index + shift,
+                          "start": source.start, "end": source.end, "text": source.text})
+        for span in spans:
+            content = plan.messages[span["message_index"]].get("content")
+            if not isinstance(content, str) or content[span["start"]:span["end"]] != span["text"]:
+                raise ToolMemoryError("raw_schema_span", "raw schema no longer matches its source")
+        plan.raw_schema_spans = tuple(spans)
+        # Use the same T0 packing calculation as the existing tool-memory path;
+        # no model or alternate generation implementation is involved.
+        reference = plan_visible_tool_memory(
+            payload, replace(self.spec, encoder="t0"), self.tokenizer,
+            native_override=plan.info["native_indices"])
+        matched = (len(self.tokenizer.native_ids(reference.messages, generation=True))
+                   + int(reference.info["expected_gist_tokens"]))
+        if target_resident_tokens is not None:
+            matched = int(target_resident_tokens)
+        if matched < 1:
+            raise ValueError("target_resident_tokens must be positive")
+        plan.info.update({"structured_tools_in_prompt": not bool(tools),
+                          "render_profile": RENDER_PROFILE if tools else "benchmark_original",
+                          "target_resident_tokens_per_layer": matched,
+                          "budget_tokens": self.budget_tokens,
+                          "selection_backend": "sglang_reference_attention",
+                          "history_policy": "full"})
+
+    def prepare_full_history_request(self, payload: Mapping[str, Any], *,
+                                     native_override: Optional[Sequence[int]] = None,
+                                     retrieval_only: bool = False,
+                                     target_resident_tokens: Optional[int] = None) -> tuple:
+        """Shared request adapter for recorded decisions with uncompressed history."""
+        plan = self.plan(payload, native_override=native_override,
+                         retrieval_only=retrieval_only,
+                         target_resident_tokens=target_resident_tokens)
+        out = dict(payload)
+        if plan is not None:
+            out["messages"] = plan.messages
+            if isinstance(plan, ToolMemoryPlan):
+                anchors = {anchor["message_index"]: anchor["rewritten_message_index"]
+                           for anchor in (plan.carrier_anchors or [])}
+                out["messages"], _ = insert_carriers(
+                    plan.messages, {}, plan.carriers(), source_out_indices=anchors or None)
+                out["messages"] = [strip_carrier_fields(message) if is_carrier(message)
+                                   else message for message in out["messages"]]
+        out = self.stage_request(out, plan)
+        out["chat_template_kwargs"] = {**dict(out.get("chat_template_kwargs") or {}),
+                                       "enable_thinking": False}
+        out["c2kv_use_gist_projection"] = False
+        return out, plan
+
+    def stage_request(self, payload: Mapping[str, Any],
+                       plan: Optional[ToolMemoryPlan | VisibleToolPlan]) -> Dict[str, Any]:
         """Request-level fields for the upstream chat call (tools stay for the
         tool-call parser; the template must not render them)."""
         out = dict(strip_request_annotations(payload))
         if plan is not None and plan.info.get("structured_tools_in_prompt") is False:
             out["c2kv_tools_in_prompt"] = False
+        if isinstance(plan, VisibleToolPlan):
+            out["c2kv_tools_in_prompt"] = False
+            # Offsets are validated again on the final assembled messages. Raw
+            # schemas cannot silently migrate into a compressed history block.
+            schema_spans = (plan.assembled_schema_spans if plan.assembled_schema_spans is not None
+                            else plan.raw_schema_spans)
+            for span in schema_spans:
+                messages = out.get("messages") or []
+                index = span["message_index"]
+                content = messages[index].get("content") if index < len(messages) else None
+                if not isinstance(content, str) or content[span["start"]:span["end"]] != span["text"]:
+                    raise ToolMemoryError("raw_schema_assembly", "history assembly moved a raw tool schema")
+            hint = dict(out.get("c2kv_kv_memory_hint") or {})
+            hint["tool_kv_eviction"] = {
+                "method": self.spec.encoder,
+                "schema_spans": list(schema_spans),
+                "protected_schema_indices": list(plan.info["native_indices"]),
+                "target_resident_tokens_per_layer": plan.info["target_resident_tokens_per_layer"],
+                "recent_window": 64 if self.spec.encoder == "pyramidkv" else 16,
+                "kernel_size": 5 if self.spec.encoder == "pyramidkv" else 7,
+                "pooling": "maxpool" if self.spec.encoder == "snapkv" else "avgpool",
+                "h2o_recent_fraction": 0.5,
+            }
+            if self.budget_tokens is not None:
+                hint["tool_kv_eviction"]["max_resident_tool_tokens"] = self.budget_tokens
+            if "tool_protocol_span" in plan.info:
+                hint["tool_kv_eviction"]["tool_protocol_span"] = plan.info["tool_protocol_span"]
+            out["c2kv_kv_memory_hint"] = hint
+            out["c2kv_use_gist_projection"] = False
         return out

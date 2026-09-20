@@ -354,9 +354,14 @@ run.py ... --arm full --tool-memory t0:r8 --tool-checkpoint /path/T0/checkpoint-
   its controller and checks the loaded policy in the ready manifest. The
   default paper matrix pairs T0 only with Full; `--tool-contexts` explicitly
   adds other non-text cells. ACON/HiAgent tool composition remains disabled.
-  `h2o:r8`/`snapkv:r8` tool-region selectors are parsed by the shared planner
-  but are not runnable through this proxy's global tool-region path yet; they
-  must not be reported as evaluated tool-memory arms.
+  `streamingllm:r8`, `h2o:r8`, `snapkv:r8`, and `pyramidkv:r8` select raw
+  schema KV through the same SGLang endpoint with the Full history arm.
+  The proxy sends exact schema character spans and protected native indices;
+  the server resolves token positions, selects per-layer/head KV, and runs
+  the final prompt token after selection. History remains raw. These methods
+  require the shared engine's tool-KV reference-attention implementation.
+  Their total resident allowance follows the corresponding T0 layout, while
+  actual generation-start KV and selection receipts come from the server.
 
 ## Arm registry
 

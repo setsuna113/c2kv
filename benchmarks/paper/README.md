@@ -19,17 +19,26 @@ identify this all-native case and report zero compressed tool chunks.
 The recorded-decision study is separate from closed-loop task success:
 `python -m benchmarks.tool_definition.cli prepare` freezes the input records,
 and `evaluate` runs the five tool KV methods and selection ablations. See the
-CLI help for its manifest, checkpoint and device arguments. It uses the
-bundled model/runtime and never imports the separate training worktree.
-Selection-based tool baselines use a native prefill followed by headwise
-pruning; this does not claim reduced initial prefill or serving latency.
+CLI help for its manifest, checkpoint and `--upstream` arguments. Generation
+uses the same SGLang tool-memory runtime as the joint study; this client only
+freezes inputs, sends requests and scores returned actions. Selection-based
+tool baselines use native prefill followed by headwise pruning and a final
+prompt-token forward pass. This does not reduce initial prefill work.
+Only schema-interior tokens are eligible for eviction; history, protocol
+scaffolding, selected native schemas and tokens crossing schema boundaries
+remain resident. H2O accumulates attention over all prefill queries before
+the held-out final prompt token; SnapKV observes the last 16 such queries.
+The runtime receipt records that query range and verifies that the first
+action token is generated after selection.
+The server must enable `C2KV_PAPER_TELEMETRY=1` to return actual generation-start
+KV measurements; the paper runner already sets this environment variable.
 
 Input JSONL rows carry `decision_id`, `messages`, `tools` and explicit
 `gold_tool_calls` (an empty list denotes a recorded no-call decision).
 `prepare --input <decisions.jsonl> --checkpoint <T0> --out <manifest-dir>`
 freezes all layouts at ratios 8 and 12 by default. Then run
 `evaluate --manifest <manifest-dir/manifest.json> --checkpoint <T0>
---device cuda:0 --dtype bfloat16 --max-new-tokens <limit> --out <new-results>`.
+--upstream http://localhost:30000 --max-new-tokens <limit> --out <new-results>`.
 `--methods` and `--layouts` independently select the backend and allocation
 axes. Model weights, tokenizer, records and prompt identities are bound in
 the manifest. History is always full in this evaluator.

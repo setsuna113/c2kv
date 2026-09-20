@@ -189,22 +189,6 @@ def retrieval_layout(row: Mapping[str, Any], tokenizer: Any, *, ratio: int,
     return result
 
 
-def deserialize_memory(value: Mapping[str, Any]):
-    _, EncoderChunk, MemoryView, PackedMemory, _ = runtime_modules()
-    view = MemoryView(**{key: tuple(value["view"].get(key, ())) for key in
-                         ("gist_event_ids", "raw_event_ids", "evidence_event_ids")})
-    chunks = tuple(EncoderChunk(
-        str(chunk["event_id"]), int(chunk["part_index"]),
-        tuple(chunk["source_indices"]), int(chunk["source_token_start"]),
-        int(chunk["source_token_end"]), tuple(chunk["token_ids"]),
-        chunk.get("projection_set"), chunk.get("compression_ratio"),
-    ) for chunk in value["chunks"])
-    return PackedMemory(view, tuple(value["system_input_ids"]),
-                        tuple(value["workspace_input_ids"]),
-                        tuple(value["raw_source_indices"]), chunks,
-                        value.get("raw_layout_profile", "event-native-evidence-v1"))
-
-
 def full_tool_spans(row: Mapping[str, Any], tokenizer: Any, *, ratio: int) -> tuple[tuple[int, int], ...]:
     """Partition the native catalog region by tool in original catalog order."""
     tools = row["tools"]

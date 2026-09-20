@@ -370,15 +370,13 @@ def _assemble_request(messages: List[Dict[str, Any]], arm: Arm, timeout: int = 6
     their placeholder. A source removed by history selection fails explicitly.
     """
     plan = getattr(_TRACE, "tool_plan", None)
-    if plan is not None and not isinstance(plan, toolmemory.ToolMemoryPlan):
-        raise toolmemory.ToolMemoryError(
-            "raw_kv_pending", "raw-KV tool selection needs final assembled-prompt extraction")
     if plan is not None and plan.protocol:
         messages = toolmemory.with_protocol_system(messages, plan.protocol)
-    anchors = plan.carrier_anchors if plan is not None else []
+    anchors = plan.carrier_anchors if isinstance(plan, toolmemory.ToolMemoryPlan) else []
+    raw_schema_plan = isinstance(plan, toolmemory.VisibleToolPlan)
     out, counts = _assemble(messages, arm, timeout,
-                            track_source_indices=bool(anchors))
-    if plan is not None:
+                            track_source_indices=bool(anchors) or raw_schema_plan)
+    if isinstance(plan, toolmemory.ToolMemoryPlan):
         source_out_indices = None
         if anchors:
             assembled_indices = counts.pop("_tool_source_out_indices")
@@ -393,6 +391,12 @@ def _assemble_request(messages: List[Dict[str, Any]], arm: Arm, timeout: int = 6
                 source_out_indices[anchor["message_index"]] = assembled_indices[rewritten_index]
         out, counts = toolmemory.insert_carriers(
             out, counts, plan.carriers(), source_out_indices=source_out_indices)
+        counts["tool_memory"] = plan.info
+    elif plan is not None:
+        assembled_indices = counts.pop("_tool_source_out_indices")
+        plan.assembled_schema_spans = tuple(
+            {**span, "message_index": assembled_indices[span["message_index"]]}
+            for span in plan.raw_schema_spans)
         counts["tool_memory"] = plan.info
     return out, counts
 
@@ -1747,6 +1751,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
                         for m in out_messages]
                 if QUERY_PROJECTION is not None and BACKEND.name == "sglang":
                     staged["c2kv_use_gist_projection"] = QUERY_PROJECTION == "gist"
+                if isinstance(getattr(_TRACE, "tool_plan", None), toolmemory.VisibleToolPlan):
+                    staged["c2kv_use_gist_projection"] = False
                 if getattr(BACKEND, "wants_request_context", False):
                     # only backends that asked for it (base.Backend
                     # .wants_request_context); hfserver keeps its 3-arg signature
@@ -2231,8 +2237,8 @@ def main(argv=None):
     global TOOL_MEMORY
     tool_spec = toolmemory.parse_tool_memory_spec(args.tool_memory)
     if tool_spec is not None:
-        if tool_spec.encoder != "t0":
-            raise SystemExit("FATAL: tool memory currently supports T0; global tool-region H2O/SnapKV is not implemented")
+        if tool_spec.encoder != "t0" and ARM.name != "full":
+            raise SystemExit("FATAL: raw tool KV selection currently requires Full history; the joint history study uses T0")
         if not args.tool_checkpoint:
             raise SystemExit("FATAL: --tool-memory needs --tool-checkpoint <T0 dir>")
         if BACKEND.name != "sglang":

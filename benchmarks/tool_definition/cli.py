@@ -19,12 +19,12 @@ def main(argv=None):
     prep.add_argument("--k", type=int, default=3)
     prep.add_argument("--seed", type=int, default=42)
     prep.add_argument("--ratios", default="8,12")
-    ev = commands.add_parser("evaluate", help="Generate next actions from one frozen T0 base")
+    ev = commands.add_parser("evaluate", help="Evaluate next actions through one SGLang server")
     ev.add_argument("--manifest", type=Path, required=True)
     ev.add_argument("--checkpoint", type=Path, required=True)
     ev.add_argument("--out", type=Path, required=True)
-    ev.add_argument("--device", required=True)
-    ev.add_argument("--dtype", default="bfloat16", choices=("bfloat16", "float16", "float32"))
+    ev.add_argument("--upstream", required=True, help="SGLang HTTP base URL")
+    ev.add_argument("--model", help="SGLang model id; inferred when the server exposes one")
     ev.add_argument("--max-new-tokens", type=int, required=True)
     ev.add_argument("--methods", default="c2kv,streamingllm,h2o,snapkv,pyramidkv")
     ev.add_argument("--layouts", default="full,uniform,hybrid,random,retrieval")
@@ -37,7 +37,7 @@ def main(argv=None):
     else:
         from .evaluate import evaluate
         result = evaluate(args.manifest, args.checkpoint, args.out,
-                          device=args.device, dtype=args.dtype,
+                          upstream=args.upstream, model=args.model,
                           max_new_tokens=args.max_new_tokens,
                           methods=tuple(filter(None, args.methods.split(","))),
                           layouts=tuple(filter(None, args.layouts.split(","))),
