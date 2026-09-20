@@ -275,7 +275,7 @@
   "acebench_language": "en",
   "toolsandbox_dir": "/home/lyc/benchmarks/ToolSandbox",
   "toolsandbox_python": "/home/lyc/dev/c2kv-cuda-port/venv-bench/bin/python",
-  "toolsandbox_suite": "full",
+  "toolsandbox_suite": "three_distraction_tools_129",
   "toolsandbox_scenarios": [],
   "unsupported_cells": [
     {

@@ -8,6 +8,7 @@ from unittest import mock
 import pytest
 
 from benchmarks.paper import native_extra
+from benchmarks.toolsandbox_suite import THREE_DISTRACTION_TOOLS_129, load_named_suite
 from benchmarks.paper.candidate_matrix import GOAL_VARIANTS, REPAIR_VARIANTS, VARIANT_TO_ARM
 
 
@@ -68,6 +69,20 @@ def test_toolsandbox_uses_official_resolver_and_checks_configured_subset(tmp_pat
     assert native_extra.selected_tasks(config, "toolsandbox") == ["get_wifi"]
     with pytest.raises(ValueError, match="official split"):
         native_extra.selected_tasks(config, "toolsandbox", ["missing"])
+
+
+def test_toolsandbox_named_suite_is_validated_against_official_resolver(tmp_path, monkeypatch):
+    config = _config(tmp_path)
+    config["toolsandbox_suite"] = THREE_DISTRACTION_TOOLS_129
+    Path(config["toolsandbox_dir"]).mkdir()
+    ids = load_named_suite(THREE_DISTRACTION_TOOLS_129)["scenario_ids"]
+    monkeypatch.setattr(native_extra, "run_owned", lambda *args, **kwargs:
+                        SimpleNamespace(stdout=json.dumps(ids + ["outside_cohort"])))
+    assert native_extra.selected_tasks(config, "toolsandbox") == ids
+    monkeypatch.setattr(native_extra, "run_owned", lambda *args, **kwargs:
+                        SimpleNamespace(stdout=json.dumps(ids[:-1])))
+    with pytest.raises(ValueError, match="official IDs"):
+        native_extra.selected_tasks(config, "toolsandbox")
 
 
 @pytest.mark.parametrize("benchmark,namespace,profile", [

@@ -14,6 +14,7 @@ from collections.abc import Mapping
 from . import c1_appworld
 from .candidate_matrix import ARM_TO_VARIANT, GOAL_VARIANTS, REPAIR_VARIANTS
 from .process_lifecycle import run_owned
+from benchmarks.toolsandbox_suite import selected_scenarios
 
 
 BENCHMARKS = {"acebench_agent": ("acebench", "acebench-text-actions-v1"),
@@ -174,12 +175,9 @@ def _ace_tasks(config):
 def _toolsandbox_tasks(config):
     """Ask the installed official resolver for exactly the configured suite."""
     source = Path(config["toolsandbox_dir"]).resolve()
-    scenarios = config.get("toolsandbox_scenarios") or []
-    if scenarios and (not isinstance(scenarios, list) or
-                      any(not isinstance(item, str) for item in scenarios)):
-        raise ValueError("toolsandbox_scenarios must be a list of names")
-    if not scenarios and config.get("toolsandbox_suite") != "full":
-        raise ValueError("ToolSandbox paper suite requires full or explicit scenarios")
+    scenarios = selected_scenarios(
+        config.get("toolsandbox_suite"), config.get("toolsandbox_scenarios"),
+        require_paper_suite=True)
     script = (
         "import json; from tool_sandbox.cli import resolve_scenarios; "
         "print(json.dumps(sorted(resolve_scenarios(desired_scenario_names=None, "
@@ -198,8 +196,8 @@ def _toolsandbox_tasks(config):
     if not isinstance(available, list):
         raise RuntimeError("Official ToolSandbox resolver returned no scenario list")
     available = [_task_id(item) for item in available]
-    if scenarios:
-        if len(scenarios) != len(set(scenarios)) or not set(scenarios) <= set(available):
+    if scenarios is not None:
+        if not set(scenarios) <= set(available):
             raise ValueError("Configured ToolSandbox scenarios are not unique official IDs")
         return list(scenarios)
     return available

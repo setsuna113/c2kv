@@ -183,7 +183,9 @@ class PaperMatrixTest(unittest.TestCase):
         self.assertIn("acebench_role_history_v1", ace_cmd[ace_cmd.index("--capability-features") + 1])
         ts = next(row for row in rows if row["cell_id"] == "toolsandbox__full")
         ts_cmd = run_command(self.config, ts, Path("out/ts"), profile)
-        self.assertIn("--full", ts_cmd)
+        self.assertEqual(ts_cmd[ts_cmd.index("--ts-suite") + 1],
+                         "three_distraction_tools_129")
+        self.assertEqual(len(ts_cmd[ts_cmd.index("--ts-scenarios") + 1].split(",")), 129)
         self.assertEqual(ts_cmd[ts_cmd.index("--ts-parallel") + 1], "1")
 
     def test_reference_attention_arms_get_static_pool_headroom(self):

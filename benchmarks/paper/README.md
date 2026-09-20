@@ -165,7 +165,17 @@ joint-context table.
 
 The default matrix contains 47 main cells, 9 sweep cells, 18 opponent cells
 and two ratio-4 C1 ablations. ACEBench uses the official `agent` category;
-ToolSandbox uses its full official suite with one process. ACEBench C1 ratio-8
+ToolSandbox defaults to the frozen `three_distraction_tools_129` suite with one process.
+Its worker defaults to `POLARS_MAX_THREADS=4`; an explicitly set value takes priority.
+For a private RapidAPI key file, set `TOOLSANDBOX_ENV_FILE` before running the paper
+runner; the file contains one `RAPID_API_KEY=...` assignment. An existing
+`RAPID_API_KEY` environment variable takes priority:
+
+```bash
+export TOOLSANDBOX_ENV_FILE="$HOME/.config/toolsandbox/rapidapi.env"
+```
+
+ACEBench C1 ratio-8
 and ratio-4 are configured cells. The native ToolSandbox adapter exists, but
 ToolSandbox C1 is not enabled in the default matrix because its official
 end-to-end path remains unvalidated; the reason is recorded in

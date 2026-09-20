@@ -18,11 +18,13 @@ def _api(monkeypatch, benchmark="acon_appworld"):
     api.model_name = "gen_c2kv_K0_compression_full_budget"
     api.allowed_task_ids = frozenset({TASK_ID})
     api.max_new_tokens = 2048
+    api.tool_memory_contract = None
     api.runner = SimpleNamespace(controller=SimpleNamespace(gp=object()), max_new_tokens=2048)
     api._wire_identities = {}
     api._wire_mode = None
     api._transport_receipts = {}
     monkeypatch.setattr(EventNativeAPI, "handle_chat", lambda self, payload: payload)
+    monkeypatch.setattr(EventNativeAPI, "_validate_request", lambda self, payload: None)
     return api
 
 
@@ -94,3 +96,43 @@ def test_appworld_without_measurement_metadata_uses_server_identity(monkeypatch)
     request = _acon_request()
     request.pop("c2kv_measurement_session_id")
     assert api.handle_chat(request)["c2kv_eval_context"]["task_id"] == TASK_ID
+
+
+def test_toolsandbox_opaque_measurement_session_keeps_frozen_task_identity(monkeypatch):
+    api = _api(monkeypatch, benchmark="toolsandbox")
+    request = _acon_request()
+    request.pop("chat_template_kwargs")
+    request["presence_penalty"] = 0
+    request["seed"] = 0
+    request["c2kv_measurement_session_id"] = "opaque-scenario-run-927"
+    normalized = api.handle_chat(request)
+    assert normalized["c2kv_eval_context"]["task_id"] == TASK_ID
+    assert "c2kv_measurement_session_id" not in normalized
+
+
+@pytest.mark.parametrize("measurement", [None, "", 7])
+def test_toolsandbox_rejects_invalid_measurement_session(monkeypatch, measurement):
+    api = _api(monkeypatch, benchmark="toolsandbox")
+    request = _acon_request()
+    request.pop("chat_template_kwargs")
+    request["presence_penalty"] = 0
+    request["seed"] = 0
+    request["c2kv_measurement_session_id"] = measurement
+    with pytest.raises(EventNativeAPIError) as error:
+        api.handle_chat(request)
+    assert error.value.code == "invalid_measurement_session_id"
+
+
+def test_native_tool_sandbox_response_has_explicit_join_identity(monkeypatch):
+    api = _api(monkeypatch, benchmark="toolsandbox")
+    record = {
+        "status": "ok", "outer_request_id": "c1-native-request-4",
+        "response": {"role": "assistant", "content": "Done.",
+                     "tool_calls": [], "finish_reason": "stop"},
+        "generation_usage_total": {
+            "prompt_tokens": 10, "completion_tokens": 2, "total_tokens": 12,
+        },
+    }
+    response = api._openai_response(record)
+    assert response["c2kv_proxy"]["request_id"] == record["outer_request_id"]
+    assert response["id"] == record["outer_request_id"]

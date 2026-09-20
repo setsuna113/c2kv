@@ -13,8 +13,10 @@ Two things this file protects:
 from __future__ import annotations
 
 import json
+import io
 import sys
 from pathlib import Path
+from urllib.error import HTTPError
 
 import pytest
 
@@ -78,7 +80,7 @@ def test_add_arguments_registers_only_that_adapters_flags():
                        "--tau2-num-trials", "--tau2-max-steps", "--tau2-timeout",
                        "--tau2-agent-max-tokens"},
         bfcl_adapter: {"--categories", "--run-ids", "--bfcl-refill-rounds"},
-        toolsandbox_adapter: {"--full", "--ts-scenarios", "--ts-agent", "--ts-user",
+        toolsandbox_adapter: {"--full", "--ts-scenarios", "--ts-suite", "--ts-agent", "--ts-user",
                               "--ts-parallel", "--toolsandbox-dir"},
         acon_adapter: {"--acon-dir", "--split", "--tag", "--task-ids"},
         acebench_adapter: {"--acebench-dir", "--acebench-category",
@@ -202,6 +204,200 @@ def test_toolsandbox_env_splits_agent_and_user():
     assert env["NO_PROXY"] == "127.0.0.1,localhost"
 
 
+def test_toolsandbox_polars_worker_threads_default_and_override(monkeypatch):
+    monkeypatch.delenv("POLARS_MAX_THREADS", raising=False)
+    assert toolsandbox_adapter.harness_env("http://agent")["POLARS_MAX_THREADS"] == "4"
+    monkeypatch.setenv("POLARS_MAX_THREADS", "2")
+    assert toolsandbox_adapter.harness_env("http://agent")["POLARS_MAX_THREADS"] == "2"
+
+
+def test_toolsandbox_parser_preflight_checks_both_endpoints(monkeypatch):
+    calls = []
+    def server_info(endpoint):
+        calls.append(endpoint)
+        if endpoint == "http://controller":
+            return {"schema": "a-event-native-api-health-v1"}
+        return {"model_path": "model", "tp_size": 1, "tool_call_parser": None}
+    monkeypatch.setattr(toolsandbox_adapter, "_server_info", server_info)
+    with pytest.raises(RuntimeError, match="user simulator.*--tool-call-parser qwen25"):
+        toolsandbox_adapter.require_sglang_tool_parser(
+            "http://controller", "http://sglang")
+    assert calls == ["http://controller", "http://sglang"]
+
+
+def test_toolsandbox_parser_preflight_accepts_enabled_and_unknown_servers(monkeypatch):
+    calls = []
+    def server_info(endpoint):
+        calls.append(endpoint)
+        if endpoint == "http://sglang":
+            return {"model_path": "model", "tp_size": 1,
+                    "tool_call_parser": "qwen25"}
+        return {"tool_call_parser": None}  # not identifiable as SGLang
+    monkeypatch.setattr(toolsandbox_adapter, "_server_info", server_info)
+    toolsandbox_adapter.require_sglang_tool_parser("http://sglang/v1", "http://sglang")
+    assert calls == ["http://sglang"]
+    toolsandbox_adapter.require_sglang_tool_parser("http://other")
+    assert calls[-1] == "http://other"
+
+
+def test_toolsandbox_server_info_probe_uses_root_path_and_timeout(monkeypatch):
+    class FakeOpener:
+        def open(self, request, timeout):
+            assert request.full_url == "http://agent/server_info"
+            assert timeout == 3
+            return io.BytesIO(json.dumps({"model_path": "model", "tp_size": 1,
+                                           "tool_call_parser": "qwen25"}).encode())
+    monkeypatch.setattr(toolsandbox_adapter, "_SERVER_INFO_OPENER", FakeOpener())
+    assert toolsandbox_adapter._server_info("http://agent/v1") == {
+        "model_path": "model", "tp_size": 1, "tool_call_parser": "qwen25"}
+
+
+def test_toolsandbox_parser_preflight_skips_missing_server_info(monkeypatch):
+    class MissingInfo:
+        def open(self, request, timeout):
+            raise HTTPError(request.full_url, 404, "missing", None, None)
+    monkeypatch.setattr(toolsandbox_adapter, "_SERVER_INFO_OPENER", MissingInfo())
+    toolsandbox_adapter.require_sglang_tool_parser("http://controller",
+                                                   "http://unknown")
+
+
+def test_toolsandbox_reads_only_rapidapi_key_from_private_file(tmp_path, monkeypatch):
+    private = tmp_path / "rapidapi.env"
+    private.write_text("OTHER=value\nexport RAPID_API_KEY='private-test-value'\n",
+                       encoding="utf-8")
+    monkeypatch.delenv("RAPID_API_KEY", raising=False)
+    monkeypatch.setenv("TOOLSANDBOX_ENV_FILE", str(private))
+    env = toolsandbox_adapter.harness_env("http://agent")
+    assert env["RAPID_API_KEY"] == "private-test-value"
+    assert "OTHER" not in env
+    assert "TOOLSANDBOX_ENV_FILE" not in env
+
+
+def test_toolsandbox_existing_rapidapi_key_takes_priority_without_file_read(tmp_path, monkeypatch):
+    monkeypatch.setenv("RAPID_API_KEY", "inherited-test-value")
+    monkeypatch.setenv("TOOLSANDBOX_ENV_FILE", str(tmp_path / "missing.env"))
+    env = toolsandbox_adapter.harness_env("http://agent")
+    assert env["RAPID_API_KEY"] == "inherited-test-value"
+
+
+def test_toolsandbox_credential_file_is_parsed_as_text_only(tmp_path, monkeypatch):
+    private = tmp_path / "rapidapi.env"
+    marker = tmp_path / "must-not-exist"
+    private.write_text(f"RAPID_API_KEY=$(touch {marker})\n", encoding="utf-8")
+    monkeypatch.delenv("RAPID_API_KEY", raising=False)
+    monkeypatch.setenv("TOOLSANDBOX_ENV_FILE", str(private))
+    assert toolsandbox_adapter.harness_env("http://agent")["RAPID_API_KEY"] == (
+        f"$(touch {marker})")
+    assert not marker.exists()
+
+
+def test_toolsandbox_protocol_omits_private_credential(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    private = tmp_path / "rapidapi.env"
+    private.write_text("RAPID_API_KEY=private-test-value\n", encoding="utf-8")
+    monkeypatch.delenv("RAPID_API_KEY", raising=False)
+    monkeypatch.setenv("TOOLSANDBOX_ENV_FILE", str(private))
+    source = tmp_path / "ToolSandbox"
+    source.mkdir()
+    out = tmp_path / "out"
+    def fake_run(cmd, **kwargs):
+        (out / "scenario_manifest.json").write_text(
+            json.dumps({"scenario_ids": ["one"], "expected": 1}), encoding="utf-8")
+        assert kwargs["env"]["RAPID_API_KEY"] == "private-test-value"
+        return SimpleNamespace(returncode=0)
+    monkeypatch.setattr(toolsandbox_adapter, "run_owned", fake_run)
+    monkeypatch.setattr(toolsandbox_adapter, "collect",
+                        lambda output: {"n": 1, "scenario_ids": ["one"]})
+    toolsandbox_adapter.run_ts("http://agent", out, scenarios=["one"], benchmark_dir=source)
+    protocol = (out / "toolsandbox_protocol.json").read_text(encoding="utf-8")
+    assert "private-test-value" not in protocol
+    assert str(private) not in protocol
+
+
+@pytest.mark.parametrize("status", [401, 403, 429, 500, None])
+def test_toolsandbox_collect_rejects_rapidapi_infrastructure_failure(tmp_path, status):
+    measurement = tmp_path / "measurement"
+    measurement.mkdir()
+    (measurement / "rapidapi_http_status.jsonl").write_text(json.dumps({
+        "event_type": "rapidapi_http", "host": "example.rapidapi.com",
+        "status_code": status,
+    }) + "\n", encoding="utf-8")
+    with pytest.raises(SystemExit, match="RapidAPI"):
+        toolsandbox_adapter.collect(tmp_path)
+
+
+@pytest.mark.parametrize("status", [200, 400, 404])
+def test_toolsandbox_allows_non_infrastructure_tool_http_status(tmp_path, status):
+    measurement = tmp_path / "measurement"
+    measurement.mkdir()
+    (measurement / "rapidapi_http_status.jsonl").write_text(json.dumps({
+        "event_type": "rapidapi_http", "host": "example.rapidapi.com",
+        "status_code": status,
+    }) + "\n", encoding="utf-8")
+    toolsandbox_adapter.reject_rapidapi_http_failures(tmp_path)
+
+
+def test_toolsandbox_run_rejects_rapidapi_failure_before_score_collection(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    source = tmp_path / "ToolSandbox"
+    source.mkdir()
+    def fake_run(cmd, **kwargs):
+        path = tmp_path / "out" / "measurement" / "rapidapi_http_status.jsonl"
+        path.parent.mkdir(parents=True)
+        path.write_text(json.dumps({"event_type": "rapidapi_http",
+                                    "host": "example.rapidapi.com", "status_code": 403}) + "\n",
+                        encoding="utf-8")
+        return SimpleNamespace(returncode=0)
+    monkeypatch.setattr(toolsandbox_adapter, "run_owned", fake_run)
+    monkeypatch.setattr(toolsandbox_adapter, "collect",
+                        lambda out: pytest.fail("score collection must not run"))
+    with pytest.raises(SystemExit, match="RapidAPI infrastructure HTTP failure"):
+        toolsandbox_adapter.run_ts("http://agent", tmp_path / "out",
+                                    scenarios=["one"], benchmark_dir=source)
+
+
+@pytest.mark.parametrize("similarity", [None, float("nan"), float("inf"), "0.5"])
+def test_toolsandbox_collect_rejects_missing_or_nonfinite_official_score(tmp_path, similarity):
+    result = tmp_path / "agent_run" / "result_summary.json"
+    result.parent.mkdir()
+    result.write_text(json.dumps({"per_scenario_results": [
+        {"name": "one", "similarity": similarity},
+    ]}), encoding="utf-8")
+    with pytest.raises(SystemExit, match="official similarity is unavailable"):
+        toolsandbox_adapter.collect(tmp_path)
+
+
+def test_toolsandbox_collect_rejects_duplicate_official_scenario(tmp_path):
+    result = tmp_path / "agent_run" / "result_summary.json"
+    result.parent.mkdir()
+    result.write_text(json.dumps({"per_scenario_results": [
+        {"name": "one", "similarity": 0.4},
+        {"name": "one", "similarity": 0.8},
+    ]}), encoding="utf-8")
+    with pytest.raises(SystemExit, match="duplicate ToolSandbox official scenario"):
+        toolsandbox_adapter.collect(tmp_path)
+
+
+def test_toolsandbox_run_rejects_scored_denominator_mismatch(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    source = tmp_path / "ToolSandbox"
+    source.mkdir()
+    out = tmp_path / "out"
+    def fake_run(cmd, **kwargs):
+        (out / "scenario_manifest.json").write_text(
+            json.dumps({"scenario_ids": ["one"], "expected": 1}), encoding="utf-8")
+        return SimpleNamespace(returncode=0)
+    monkeypatch.setattr(toolsandbox_adapter, "run_owned", fake_run)
+    monkeypatch.setattr(toolsandbox_adapter, "collect",
+                        lambda output: {"n": 2, "scenario_ids": ["one"]})
+    with pytest.raises(SystemExit, match="n_scored=2 n_total=1"):
+        toolsandbox_adapter.run_ts("http://agent", out, scenarios=["one"],
+                                    benchmark_dir=source)
+
+
 # ---- acon: `run.py` / `run_all.py` / `appworld evaluate` --------------------
 
 def test_acon_qa_command_is_byte_identical():
@@ -268,6 +464,23 @@ def test_toolsandbox_uses_selected_environment_and_checkout(tmp_path, monkeypatc
     assert cmd[cmd.index("-o") + 1] == str(tmp_path / "out")
     assert kwargs["env"]["PYTHONPATH"].split(os.pathsep)[0] == str(selected.resolve())
     assert kwargs["env"]["TOOLSANDBOX_USER_BASE_URL"] == "http://user/v1"
+
+
+def test_toolsandbox_rejects_official_manifest_that_differs_from_selected_ids(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    selected = tmp_path / "ToolSandbox"
+    selected.mkdir()
+    def fake_run(cmd, **kwargs):
+        (tmp_path / "out" / "scenario_manifest.json").write_text(
+            json.dumps({"scenario_ids": ["other"], "expected": 1}), encoding="utf-8")
+        return SimpleNamespace(returncode=0)
+    monkeypatch.setattr(toolsandbox_adapter, "run_owned", fake_run)
+    monkeypatch.setattr(toolsandbox_adapter, "collect",
+                        lambda out: {"n": 1, "scenario_ids": ["other"]})
+    with pytest.raises(SystemExit, match="resolver differed"):
+        toolsandbox_adapter.run_ts("http://agent", tmp_path / "out",
+                                    scenarios=["selected"], benchmark_dir=selected)
 
 
 # ---- cost-join declarations -------------------------------------------------
