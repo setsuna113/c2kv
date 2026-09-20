@@ -17,7 +17,7 @@
   "proxy_port": 34100,
   "device": "cuda",
   "attention_backend": "flashinfer",
-  "disable_cuda_graph": false,
+  "disable_cuda_graph": true,
   "radix_cache_arms": ["full", "hiagent_full", "acon_hist_ut_co"],
   "context_length": 131072,
   "max_total_tokens": 131072,

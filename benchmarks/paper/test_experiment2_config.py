@@ -30,6 +30,7 @@ def test_experiment2_config_resolves_only_original_budget_cells(tmp_path):
     assert {cell["arm"] for cell in plan} == ARMS
     assert all(cell["tool_context"] == "raw" for cell in plan)
     assert config["device"] == "cuda"
+    assert config["disable_cuda_graph"] is True
     assert config["checkpoint"].endswith("/selected-C1000/checkpoint-1000")
     assert config["c1"] == {"task_timeout": 10800}
 
