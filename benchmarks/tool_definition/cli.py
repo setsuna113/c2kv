@@ -28,7 +28,10 @@ def main(argv=None):
     ev.add_argument("--max-new-tokens", type=int, required=True)
     ev.add_argument("--methods", default="c2kv,streamingllm,h2o,snapkv,pyramidkv")
     ev.add_argument("--layouts", default="full,uniform,hybrid,random,retrieval")
-    ev.add_argument("--limit", type=int)
+    ev.add_argument("--limit", type=int,
+                    help="First N sorted (decision_id, ratio) groups; a decision with two ratios occupies two groups")
+    ev.add_argument("--resume", action="store_true",
+                    help="Continue an output directory with the identical frozen run contract")
     args = parser.parse_args(argv)
     if args.command == "prepare":
         result = prepare(args.input, args.checkpoint, args.out,
@@ -41,7 +44,7 @@ def main(argv=None):
                           max_new_tokens=args.max_new_tokens,
                           methods=tuple(filter(None, args.methods.split(","))),
                           layouts=tuple(filter(None, args.layouts.split(","))),
-                          limit=args.limit)
+                          limit=args.limit, resume=args.resume)
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return result
 

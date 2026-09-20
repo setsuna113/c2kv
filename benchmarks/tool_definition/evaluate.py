@@ -3,11 +3,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import traceback
 import urllib.error
 import urllib.request
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Iterable, Iterator, Mapping
 
 from benchmarks import toolmemory
 from benchmarks.backends.sglang import SglangBackend
@@ -15,6 +16,10 @@ from .core import canonical_calls, parse_calls, sha256_file
 from .prepare import LAYOUTS, SCHEMA
 
 METHODS = ("c2kv", "streamingllm", "h2o", "snapkv", "pyramidkv")
+
+
+class UpstreamUnavailable(RuntimeError):
+    """The inference service cannot accept further requests."""
 
 
 def read_manifest(path: Path, checkpoint: Path) -> tuple[dict[str, Any], dict[tuple[str, int], dict[str, dict]]]:
@@ -52,6 +57,13 @@ def read_manifest(path: Path, checkpoint: Path) -> tuple[dict[str, Any], dict[tu
         raise ValueError("records must sit next to manifest")
     if records_path.stat().st_size != info["bytes"] or sha256_file(records_path) != info["sha256"]:
         raise ValueError("recorded decisions differ from manifest hash/size")
+    qualification = manifest.get("qualification")
+    if qualification is not None:
+        excluded_path = (path.parent / qualification["path"]).resolve()
+        if (excluded_path.parent != path.parent or not excluded_path.is_file() or
+                excluded_path.stat().st_size != qualification["bytes"] or
+                sha256_file(excluded_path) != qualification["sha256"]):
+            raise ValueError("qualified exclusions differ from manifest")
     groups: dict[tuple[str, int], dict[str, dict]] = {}
     count = 0
     with records_path.open("r", encoding="utf-8") as handle:
@@ -101,7 +113,12 @@ class SglangClient:
                 result = json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as error:
             detail = error.read().decode("utf-8", errors="replace")
-            raise RuntimeError(f"SGLang {path} returned HTTP {error.code}: {detail[:1000]}") from error
+            message = f"SGLang {path} returned HTTP {error.code}: {detail[:1000]}"
+            if error.code in {502, 503, 504}:
+                raise UpstreamUnavailable(message) from error
+            raise RuntimeError(message) from error
+        except (urllib.error.URLError, TimeoutError, ConnectionError) as error:
+            raise UpstreamUnavailable(f"SGLang {path} is unavailable: {error}") from error
         if not isinstance(result, dict):
             raise ValueError(f"SGLang {path} returned a non-object JSON body")
         return result
@@ -228,7 +245,13 @@ def _measured_kv(response: Mapping[str, Any], normalized: Mapping[str, Any],
             raise ValueError(f"SGLang response lacks successful {method} tool-KV receipt")
         if eviction.get("history_untouched") is not True:
             raise ValueError("tool-KV eviction changed the Full history")
-        if eviction.get("first_token_after_selection") is not True:
+        no_op = eviction.get("no_op") is True
+        if no_op:
+            full_prompt = eviction.get("full_prompt_tokens")
+            if (type(full_prompt) is not int or full_prompt <= 0 or
+                    target is None or target < full_prompt):
+                raise ValueError("tool-KV no-op lacks a full-prompt matched allowance")
+        elif eviction.get("first_token_after_selection") is not True:
             raise ValueError("first action token was not generated after tool-KV selection")
         per_layer = eviction.get("resident_tokens_by_layer")
         if (not isinstance(per_layer, list) or not per_layer or
@@ -237,12 +260,15 @@ def _measured_kv(response: Mapping[str, Any], normalized: Mapping[str, Any],
         if (type(eviction.get("logical_kv_bytes")) is not int or
                 eviction["logical_kv_bytes"] <= 0):
             raise ValueError("tool-KV receipt lacks logical KV bytes")
+        if no_op and any(value != full_prompt for value in per_layer):
+            raise ValueError("tool-KV no-op did not retain the Full prompt")
         if target is not None and eviction.get("target_resident_tokens_per_layer") != target:
             raise ValueError("SGLang applied a different matched total-KV allowance")
     return {"server_measurement": measurement,
             "generation_active_kv_tokens": active,
             "generation_active_kv_bytes": active_bytes,
             "tool_kv_eviction": eviction,
+            "full_equivalent_no_op": bool(eviction and eviction.get("no_op") is True),
             "resident_kv_tokens_by_layer": per_layer}
 
 
@@ -298,7 +324,7 @@ def _http_result(record: Mapping[str, Any], *, method: str, layout: str,
     }
 
 
-def _http_summaries(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _http_summaries(rows: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
     groups: dict[tuple[str, str, int], dict[str, Any]] = {}
     for row in rows:
         key = (row["method"], row["layout"], row["ratio"])
@@ -336,18 +362,42 @@ def _http_summaries(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return result
 
 
+def _append_jsonl(handle: Any, value: Mapping[str, Any]) -> None:
+    handle.write(json.dumps(value, ensure_ascii=False,
+                            separators=(",", ":"), allow_nan=False) + "\n")
+    handle.flush()
+    os.fsync(handle.fileno())
+
+
+def _iter_jsonl(path: Path) -> Iterator[dict[str, Any]]:
+    if not path.is_file():
+        raise ValueError(f"resume output lacks {path.name}")
+    with path.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            if line.strip():
+                yield json.loads(line)
+
+
+def _row_key(row: Mapping[str, Any]) -> tuple[str, int, str, str]:
+    return row["decision_id"], row["ratio"], row["method"], row["layout"]
+
+
 def evaluate(manifest_path: Path, checkpoint: Path, output: Path, *, upstream: str,
              max_new_tokens: int, model: str | None = None,
              methods: tuple[str, ...] = METHODS, layouts: tuple[str, ...] = LAYOUTS,
-             limit: int | None = None) -> dict[str, Any]:
-    """Evaluate every method through one SGLang server and its tool-memory adapter."""
-    if max_new_tokens < 1 or not methods or any(item not in METHODS for item in methods):
+             limit: int | None = None, resume: bool = False) -> dict[str, Any]:
+    """Evaluate each frozen request; resume only under the identical run contract."""
+    if (max_new_tokens < 1 or not methods or len(set(methods)) != len(methods)
+            or any(item not in METHODS for item in methods)):
         raise ValueError("invalid methods or max_new_tokens")
-    if not layouts or any(item not in LAYOUTS for item in layouts):
-        raise ValueError("unknown or empty layout set")
-    manifest, groups = read_manifest(manifest_path, checkpoint.resolve())
+    if not layouts or len(set(layouts)) != len(layouts) or any(item not in LAYOUTS for item in layouts):
+        raise ValueError("unknown, repeated, or empty layout set")
+    if limit is not None and limit < 1:
+        raise ValueError("limit must be positive")
+    manifest_path, checkpoint = manifest_path.resolve(), checkpoint.resolve()
+    manifest, groups = read_manifest(manifest_path, checkpoint)
     sources = _source_rows(manifest)
-    if output.exists():
+    if output.exists() and not resume:
         raise FileExistsError(output)
     client = SglangClient(upstream)
     model_id = client.model_id(model)
@@ -358,128 +408,228 @@ def evaluate(manifest_path: Path, checkpoint: Path, output: Path, *, upstream: s
             tool_gist.get("config_sha256") != manifest["checkpoint"]["config_sha256"] or
             not tool_gist.get("identity")):
         raise ValueError("SGLang tool gist is absent or its config differs from frozen T0")
-    output.mkdir(parents=True)
-    rows_path = output / "results.jsonl"
-    raw_responses_path = output / "raw_responses.jsonl"
-    rows: list[dict[str, Any]] = []
+    selected = {key: groups[key] for key in sorted(groups)[:limit]}
+    source_files = {
+        "benchmarks/tool_definition/evaluate.py": Path(__file__),
+        "benchmarks/tool_definition/core.py": Path(__file__).with_name("core.py"),
+        "benchmarks/tool_definition/prepare.py": Path(__file__).with_name("prepare.py"),
+        "benchmarks/toolmemory.py": Path(toolmemory.__file__),
+        "benchmarks/backends/sglang.py": Path(__file__).resolve().parents[1] / "backends" / "sglang.py",
+    }
+    contract = {
+        "schema": "c2kv-paper-tool-definition-run-contract-v1",
+        "manifest_sha256": sha256_file(manifest_path),
+        "checkpoint_config_sha256": manifest["checkpoint"]["config_sha256"],
+        "checkpoint_model_files_sha256": manifest["checkpoint"]["model_files_sha256"],
+        "upstream": upstream, "server_model": model_id,
+        "server_model_info": server_model_info,
+        "client_source_sha256": {name: sha256_file(path) for name, path in source_files.items()},
+        "max_new_tokens": max_new_tokens,
+        "methods": list(methods), "layouts": list(layouts), "limit": limit,
+        "selected_decision_ratio_groups": len(selected),
+        "selected_unique_decisions": len({key[0] for key in selected}),
+    }
+    contract_hash = hashlib.sha256(json.dumps(
+        contract, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+        allow_nan=False).encode("utf-8")).hexdigest()
+    contract["evaluation_config_sha256"] = contract_hash
+    contract_path = output / "run_contract.json"
+    rows_path, raw_path, errors_path = (
+        output / "results.jsonl", output / "raw_responses.jsonl", output / "errors.jsonl")
+    expected_by_pair = {
+        key: {(key[0], key[1], method, layout)
+              for method in methods for layout in layouts
+              if method == "c2kv" or layout not in {"full", "retrieval"}}
+        for key in selected
+    }
+    expected = set().union(*expected_by_pair.values()) if expected_by_pair else set()
+    if output.exists():
+        if not contract_path.is_file() or json.loads(contract_path.read_text(encoding="utf-8")) != contract:
+            raise ValueError("resume run contract differs from frozen manifest, model, or request config")
+        if not raw_path.is_file():
+            raise ValueError("resume output lacks raw_responses.jsonl")
+        rows_count, errors_count = 0, 0
+        done: set[tuple[str, int, str, str]] = set()
+        full_cache: dict[tuple[str, int, str, str], dict[str, Any]] = {}
+        for row in _iter_jsonl(rows_path):
+            key = _row_key(row)
+            if (row.get("evaluation_config_sha256") != contract_hash or
+                    row.get("schema") != "c2kv-paper-tool-definition-result-v2" or
+                    key not in expected or key in done or
+                    row.get("prompt_sha256") != selected[key[:2]][key[3]]["prompt_sha256"]):
+                raise ValueError(f"resume results contain mismatched or duplicate request {key}")
+            done.add(key)
+            rows_count += 1
+            if key[2:] == ("c2kv", "full"):
+                full_cache[key] = row["raw_response"]
+        for error in _iter_jsonl(errors_path):
+            key = _row_key(error)
+            if (error.get("evaluation_config_sha256") != contract_hash or
+                    (key not in expected and key != (key[0], key[1], "c2kv", "full")) or
+                    key[:2] not in selected):
+                raise ValueError("resume errors differ from the run contract")
+            errors_count += 1
+        full_cache = {key: response for key, response in full_cache.items()
+                      if not expected_by_pair[key[:2]] <= done}
+    else:
+        output.mkdir(parents=True)
+        contract_path.write_text(json.dumps(contract, ensure_ascii=False, indent=2) + "\n",
+                                 encoding="utf-8")
+        for path in (rows_path, raw_path, errors_path):
+            path.touch()
+        rows_count, errors_count, done, full_cache = 0, 0, set(), {}
     adapters: dict[tuple[str, str, int], toolmemory.ToolMemory] = {}
+    failure: BaseException | None = None
     try:
-        with (rows_path.open("w", encoding="utf-8") as sink,
-              raw_responses_path.open("w", encoding="utf-8") as raw_sink):
+        with (rows_path.open("a", encoding="utf-8") as sink,
+              raw_path.open("a", encoding="utf-8") as raw_sink,
+              errors_path.open("a", encoding="utf-8") as error_sink):
+            def record_error(record: Mapping[str, Any], method: str, layout: str,
+                             phase: str, exc: Exception) -> None:
+                nonlocal errors_count
+                item = {
+                    "schema": "c2kv-paper-tool-definition-error-v1",
+                    "decision_id": record["decision_id"], "ratio": record["ratio"],
+                    "method": method, "layout": layout,
+                    "evaluation_config_sha256": contract_hash,
+                    "phase": phase, "error_type": type(exc).__name__, "error": str(exc),
+                }
+                _append_jsonl(error_sink, item)
+                errors_count += 1
+
             def record_response(record: Mapping[str, Any], method: str, layout: str,
                                 response: dict[str, Any]) -> None:
-                raw_sink.write(json.dumps({
+                _append_jsonl(raw_sink, {
                     "decision_id": record["decision_id"], "ratio": record["ratio"],
-                    "method": method, "layout": layout, "response": response,
-                }, ensure_ascii=False, separators=(",", ":"), allow_nan=False) + "\n")
-                raw_sink.flush()
+                    "method": method, "layout": layout,
+                    "evaluation_config_sha256": contract_hash, "response": response,
+                })
 
-            for key in sorted(groups)[:limit]:
-                pair = groups[key]
+            for key, pair in selected.items():
+                requested = expected_by_pair[key]
+                if requested <= done:
+                    continue
                 source = _verified_source(pair["full"], sources)
                 payload = {"model": model_id, "messages": source["messages"],
                            "tools": source["tools"], "temperature": 0,
                            "max_tokens": max_new_tokens, "stream": False}
-                full_spec = toolmemory.ToolMemorySpec(ratio=pair["full"]["ratio"])
-                full_adapter_key = ("c2kv", "full", pair["full"]["ratio"])
-                if full_adapter_key not in adapters:
-                    adapters[full_adapter_key] = toolmemory.ToolMemory(
-                        full_spec, checkpoint, client.backend.extract_tokens)
-                full_staged, full_plan = adapters[full_adapter_key].prepare_full_history_request(
-                    payload, native_override=list(range(len(source["tools"]))),
-                    retrieval_only=True)
-                if full_plan is None:
-                    raise ValueError(f"tool-memory adapter produced no Full plan for {key}")
-                full_staged = _paper_measurement_request(
-                    full_staged, full_staged["messages"], source["tools"], full=True)
-                full_response = client.post_json("/v1/chat/completions", full_staged)
-                record_response(pair["full"], "c2kv", "full", full_response)
-                full_normalized = client.backend.normalize_response(full_response)
-                full_measurement = _measured_kv(full_response, full_normalized, "c2kv", None)
-                if list(full_plan.info["native_indices"]) != pair["full"]["native_indices"]:
-                    raise ValueError(f"Full native tool indices differ from frozen layout for {key}")
+                full_key = (key[0], key[1], "c2kv", "full")
+                cached_full = full_cache.pop(full_key, None)
+                try:
+                    full_spec = toolmemory.ToolMemorySpec(ratio=pair["full"]["ratio"])
+                    full_adapter_key = ("c2kv", "full", pair["full"]["ratio"])
+                    if full_adapter_key not in adapters:
+                        adapters[full_adapter_key] = toolmemory.ToolMemory(
+                            full_spec, checkpoint, client.backend.extract_tokens)
+                    full_staged, full_plan = adapters[full_adapter_key].prepare_full_history_request(
+                        payload, native_override=list(range(len(source["tools"]))),
+                        retrieval_only=True)
+                    if full_plan is None:
+                        raise ValueError(f"tool-memory adapter produced no Full plan for {key}")
+                    full_staged = _paper_measurement_request(
+                        full_staged, full_staged["messages"], source["tools"], full=True)
+                    if cached_full is None:
+                        full_response = client.post_json("/v1/chat/completions", full_staged)
+                        record_response(pair["full"], "c2kv", "full", full_response)
+                        full_normalized = client.backend.normalize_response(full_response)
+                    else:
+                        full_response = cached_full
+                        full_normalized = client.backend.normalize_response(full_response)
+                    full_measurement = _measured_kv(full_response, full_normalized, "c2kv", None)
+                    if list(full_plan.info["native_indices"]) != pair["full"]["native_indices"]:
+                        raise ValueError(f"Full native tool indices differ from frozen layout for {key}")
+                except Exception as exc:
+                    record_error(pair["full"], "c2kv", "full", "full_anchor", exc)
+                    if isinstance(exc, UpstreamUnavailable):
+                        raise
+                    continue
                 for method in methods:
                     for layout in layouts:
-                        if method != "c2kv" and layout in {"full", "retrieval"}:
+                        request_key = (key[0], key[1], method, layout)
+                        if request_key not in expected or request_key in done:
                             continue
                         record = pair[layout]
-                        spec_layout = "hybrid" if layout in {"hybrid", "random"} else "uniform"
-                        spec = toolmemory.ToolMemorySpec(
-                            ratio=record["ratio"], layout=spec_layout,
-                            top_k=record["k"] if spec_layout == "hybrid" else 0,
-                            encoder="t0" if method == "c2kv" else method,
-                        )
-                        adapter_key = (method, layout, record["ratio"])
-                        if adapter_key not in adapters:
-                            adapters[adapter_key] = toolmemory.ToolMemory(
-                                spec, checkpoint, client.backend.extract_tokens)
-                        adapter = adapters[adapter_key]
-                        override = (list(range(len(source["tools"]))) if layout == "full" else
-                                    record["native_indices"] if layout in {"random", "retrieval"} else None)
-                        target = (pair["hybrid"]["resident_kv_tokens"]
-                                  if layout in {"random", "retrieval"} else
-                                  pair["uniform"]["resident_kv_tokens"] if method != "c2kv" and layout == "uniform" else
-                                  pair["hybrid"]["resident_kv_tokens"] if method != "c2kv" else None)
-                        if method == "c2kv" and layout == "full":
-                            response, normalized, plan = full_response, full_normalized, full_plan
-                        else:
-                            staged, plan = adapter.prepare_full_history_request(
-                                payload, native_override=override,
-                                retrieval_only=layout in {"full", "retrieval"},
-                                target_resident_tokens=target)
-                            if plan is None:
-                                raise ValueError(f"tool-memory adapter produced no plan for {key}/{method}/{layout}")
-                            staged = _paper_measurement_request(
-                                staged, full_staged["messages"], source["tools"],
-                                full=method != "c2kv")
-                            response = client.post_json("/v1/chat/completions", staged)
-                            record_response(record, method, layout, response)
-                            normalized = client.backend.normalize_response(response)
-                        result = _http_result(record, method=method, layout=layout,
-                                              response=response, normalized=normalized,
-                                              plan=plan, target=target,
-                                              full_active_tokens=full_measurement["generation_active_kv_tokens"],
-                                              full_active_bytes=full_measurement["generation_active_kv_bytes"])
-                        sink.write(json.dumps(result, ensure_ascii=False,
-                                              separators=(",", ":"), allow_nan=False) + "\n")
-                        sink.flush()
-                        rows.append(result)
-        report = {
-            "schema": "c2kv-paper-tool-definition-evaluation-v2",
-            "status": "completed", "transport": "sglang_http",
-            "manifest_sha256": sha256_file(manifest_path.resolve()),
-            "checkpoint_config_sha256": manifest["checkpoint"]["config_sha256"],
-            "upstream": upstream, "server_model": model_id,
-            "server_model_info": server_model_info,
-            "server_checkpoint_identity": "tool_config_matched_weights_unverified",
-            "max_new_tokens": max_new_tokens,
-            "methods": list(methods), "layouts": list(layouts), "limit": limit,
-            "result_rows": len(rows), "results_sha256": sha256_file(rows_path),
-            "raw_responses_sha256": sha256_file(raw_responses_path),
-            "grouped_metrics": _http_summaries(rows),
-            "kv_measurement": "SGLang predecode resident token-equivalents and bytes (including reference-position metadata); raw eviction receipt preserves per-layer counts and logical KV bytes",
-            "result_scope": "recorded next-action proxy; no tool execution or official task success",
-        }
-        (output / "evaluation.json").write_text(
-            json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        return report
+                        try:
+                            spec_layout = "hybrid" if layout in {"hybrid", "random"} else "uniform"
+                            spec = toolmemory.ToolMemorySpec(
+                                ratio=record["ratio"], layout=spec_layout,
+                                top_k=record["k"] if spec_layout == "hybrid" else 0,
+                                encoder="t0" if method == "c2kv" else method,
+                            )
+                            adapter_key = (method, layout, record["ratio"])
+                            if adapter_key not in adapters:
+                                adapters[adapter_key] = toolmemory.ToolMemory(
+                                    spec, checkpoint, client.backend.extract_tokens)
+                            adapter = adapters[adapter_key]
+                            override = (list(range(len(source["tools"]))) if layout == "full" else
+                                        record["native_indices"] if layout in {"random", "retrieval"} else None)
+                            target = (pair["hybrid"]["resident_kv_tokens"]
+                                      if layout in {"random", "retrieval"} else
+                                      pair["uniform"]["resident_kv_tokens"] if method != "c2kv" and layout == "uniform" else
+                                      pair["hybrid"]["resident_kv_tokens"] if method != "c2kv" else None)
+                            if method == "c2kv" and layout == "full":
+                                response, normalized, plan = full_response, full_normalized, full_plan
+                            else:
+                                staged, plan = adapter.prepare_full_history_request(
+                                    payload, native_override=override,
+                                    retrieval_only=layout in {"full", "retrieval"},
+                                    target_resident_tokens=target)
+                                if plan is None:
+                                    raise ValueError(f"tool-memory adapter produced no plan for {key}/{method}/{layout}")
+                                staged = _paper_measurement_request(
+                                    staged, full_staged["messages"], source["tools"],
+                                    full=method != "c2kv")
+                                response = client.post_json("/v1/chat/completions", staged)
+                                record_response(record, method, layout, response)
+                                normalized = client.backend.normalize_response(response)
+                            result = _http_result(record, method=method, layout=layout,
+                                                  response=response, normalized=normalized,
+                                                  plan=plan, target=target,
+                                                  full_active_tokens=full_measurement["generation_active_kv_tokens"],
+                                                  full_active_bytes=full_measurement["generation_active_kv_bytes"])
+                            result["evaluation_config_sha256"] = contract_hash
+                            _append_jsonl(sink, result)
+                            rows_count += 1
+                            done.add(request_key)
+                        except Exception as exc:
+                            record_error(record, method, layout, "request", exc)
+                            if isinstance(exc, UpstreamUnavailable):
+                                raise
     except BaseException as exc:
-        failure = {
-            "schema": "c2kv-paper-tool-definition-evaluation-v2",
-            "status": "failed", "transport": "sglang_http",
-            "manifest_sha256": sha256_file(manifest_path.resolve()),
-            "checkpoint_config_sha256": manifest["checkpoint"]["config_sha256"],
-            "upstream": upstream, "server_model": model_id,
-            "server_model_info": server_model_info,
-            "server_checkpoint_identity": "tool_config_matched_weights_unverified",
-            "methods": list(methods), "layouts": list(layouts), "limit": limit,
-            "result_rows": len(rows),
-            "results_sha256": sha256_file(rows_path) if rows_path.exists() else None,
-            "raw_responses_sha256": (sha256_file(raw_responses_path)
-                                     if raw_responses_path.exists() else None),
-            "error": "".join(traceback.format_exception_only(type(exc), exc)).strip(),
-            "result_scope": "incomplete; no grouped metrics are valid",
-        }
-        (output / "evaluation.json").write_text(
-            json.dumps(failure, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        raise
+        failure = exc
+    unresolved = expected - done
+    coverage: dict[tuple[str, str, int], dict[str, Any]] = {}
+    for decision_id, ratio, method, layout in expected:
+        item = coverage.setdefault((method, layout, ratio), {
+            "method": method, "layout": layout, "ratio": ratio,
+            "expected_rows": 0, "result_rows": 0,
+        })
+        item["expected_rows"] += 1
+        item["result_rows"] += int((decision_id, ratio, method, layout) in done)
+    report = {
+        "schema": "c2kv-paper-tool-definition-evaluation-v2",
+        "status": ("interrupted" if isinstance(failure, UpstreamUnavailable) else
+                   "failed" if failure is not None else
+                   "completed" if not unresolved else "completed_with_errors"),
+        "transport": "sglang_http", **contract,
+        "server_checkpoint_identity": "tool_config_matched_weights_unverified",
+        "server_identity_scope": "queried_model_and_capability_metadata; engine_source_revision_unverified",
+        "expected_rows": len(expected), "result_rows": rows_count,
+        "unresolved_rows": len(unresolved), "request_error_events": errors_count,
+        "group_coverage": [coverage[key] for key in sorted(coverage)],
+        "results_sha256": sha256_file(rows_path),
+        "raw_responses_sha256": sha256_file(raw_path),
+        "errors_sha256": sha256_file(errors_path),
+        "grouped_metrics": _http_summaries(_iter_jsonl(rows_path)) if not unresolved else [],
+        "grouped_metrics_scope": ("complete_cohort" if not unresolved else
+                                  "unavailable_until_all_requests_succeed"),
+        "kv_measurement": "SGLang predecode resident token-equivalents and bytes (including reference-position metadata); raw eviction receipt preserves per-layer counts and logical KV bytes",
+        "result_scope": "recorded next-action proxy; no tool execution or official task success",
+    }
+    if failure is not None:
+        report["error"] = "".join(traceback.format_exception_only(type(failure), failure)).strip()
+    (output / "evaluation.json").write_text(
+        json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    if failure is not None:
+        raise failure
+    return report

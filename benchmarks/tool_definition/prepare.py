@@ -13,6 +13,28 @@ SCHEMA = "c2kv-paper-tool-definition-recorded-v1"
 LAYOUTS = ("full", "uniform", "hybrid", "random", "retrieval")
 
 
+def qualification_error(row: dict[str, Any]) -> str | None:
+    """Reject calls the chat server cannot parse before freezing a cohort."""
+    if "gold_tool_calls" not in row:
+        return "missing_gold_tool_calls"
+    try:
+        canonical_calls(row["gold_tool_calls"])
+    except (ValueError, TypeError, KeyError) as exc:
+        return f"invalid_gold_tool_calls: {exc}"
+    messages = row.get("messages")
+    if not isinstance(messages, list):
+        return "invalid_messages: expected a list"
+    for index, message in enumerate(messages):
+        if not isinstance(message, dict):
+            return f"invalid_messages: message {index} is not an object"
+        if message.get("tool_calls") is not None:
+            try:
+                canonical_calls(message["tool_calls"])
+            except (ValueError, TypeError, KeyError) as exc:
+                return f"invalid_history_tool_calls: message {index}: {exc}"
+    return None
+
+
 def prepare(input_path: Path, checkpoint: Path, output: Path, *, k: int = 3,
             seed: int = 42, ratios: tuple[int, ...] = (8, 12)) -> dict[str, Any]:
     input_path, checkpoint, output = input_path.resolve(), checkpoint.resolve(), output.resolve()
@@ -32,10 +54,13 @@ def prepare(input_path: Path, checkpoint: Path, output: Path, *, k: int = 3,
     tokenizer = toolmemory.NativeTokenizer(checkpoint)._load()
     output.mkdir(parents=True)
     records_path = output / "records.jsonl"
-    count, decisions = 0, 0
+    excluded_path = output / "excluded.jsonl"
+    count, decisions, excluded = 0, 0, 0
     seen: set[str] = set()
     try:
-        with input_path.open("r", encoding="utf-8") as source, records_path.open("w", encoding="utf-8") as sink:
+        with (input_path.open("r", encoding="utf-8") as source,
+              records_path.open("w", encoding="utf-8") as sink,
+              excluded_path.open("w", encoding="utf-8") as excluded_sink):
             for line_number, line in enumerate(source, 1):
                 if not line.strip():
                     continue
@@ -46,9 +71,14 @@ def prepare(input_path: Path, checkpoint: Path, output: Path, *, k: int = 3,
                 if decision_id in seen:
                     raise ValueError(f"Duplicate decision_id: {decision_id}")
                 seen.add(decision_id)
-                if "gold_tool_calls" not in row:
-                    raise ValueError(f"Input row {line_number} lacks recorded gold_tool_calls")
-                canonical_calls(row["gold_tool_calls"])
+                reason = qualification_error(row)
+                if reason is not None:
+                    excluded_sink.write(json.dumps({
+                        "decision_id": decision_id, "input_line": line_number,
+                        "reason": reason,
+                    }, ensure_ascii=False, separators=(",", ":")) + "\n")
+                    excluded += 1
+                    continue
                 _, _, _, _, native_ids = runtime_modules()
                 base_prompt_tokens = len(native_ids(tokenizer, row["messages"], generation=True))
                 decisions += 1
@@ -83,6 +113,12 @@ def prepare(input_path: Path, checkpoint: Path, output: Path, *, k: int = 3,
             "selector": {"ranker": toolmemory.RANKER, "k": k, "seed": seed},
             "ratios": list(ratios), "layouts": list(LAYOUTS),
             "decisions": decisions,
+            "qualification": {
+                "excluded": excluded,
+                "path": "excluded.jsonl",
+                "sha256": sha256_file(excluded_path),
+                "bytes": excluded_path.stat().st_size,
+            },
             "records": {"path": "records.jsonl", "sha256": sha256_file(records_path),
                         "bytes": records_path.stat().st_size, "count": count},
         }
@@ -92,6 +128,8 @@ def prepare(input_path: Path, checkpoint: Path, output: Path, *, k: int = 3,
     except BaseException:
         if records_path.exists():
             records_path.unlink()
+        if excluded_path.exists():
+            excluded_path.unlink()
         if output.exists() and not any(output.iterdir()):
             output.rmdir()
         raise
