@@ -18,9 +18,12 @@ copies under `/home/liuyancheng/c2kv-generality-20260918/src/`.
 `generality/tool_definition_study.py` runs the shared paper checkout's
 recorded-decision evaluator. `prepare` freezes messages, tool schemas and
 explicit gold calls; `evaluate` compares C2KV, StreamingLLM, H2O, SnapKV and
-PyramidKV while keeping history full. The launcher selects `npu:0`; use an
-operator-allocated visible NPU and a Python environment with `torch_npu`.
-Selection, budgets, parsing and scoring remain in the shared paper source.
+PyramidKV while keeping history full. Evaluation uses the same SGLang
+tool-memory endpoint as the joint study; the server owns its NPU device.
+The client does not load an HF model. Selection and physical KV accounting
+run in the shared serving engine; parsing and scoring stay in the paper source.
+Start the engine with `C2KV_PAPER_TELEMETRY=1`; the evaluator requires measured
+generation-start KV and will reject responses without it.
 
 ```bash
 python -m generality.tool_definition_study prepare --paper-root /path/to/paper \
@@ -28,7 +31,8 @@ python -m generality.tool_definition_study prepare --paper-root /path/to/paper \
   --out /path/to/new-manifest
 python -m generality.tool_definition_study evaluate --paper-root /path/to/paper \
   --manifest /path/to/new-manifest/manifest.json --checkpoint /path/to/T0/checkpoint \
-  --max-new-tokens 512 --out /path/to/new-results --dry-run
+  --upstream http://localhost:30000 --max-new-tokens 512 \
+  --out /path/to/new-results --dry-run
 ```
 
 The shared `benchmarks.paper.tool_study` builder separately prepares the
