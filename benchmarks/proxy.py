@@ -68,7 +68,9 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+from pathlib import Path
 import signal
+import sys
 import threading
 import time
 import uuid
@@ -77,6 +79,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Dict, List, Optional, Set, Tuple
 from urllib import request as urlrequest
 from urllib.error import HTTPError, URLError
+
+# Direct sidecar launches need the shared BFCL/native parser package as well
+# as the sibling modules available from this script's own directory.
+if not __package__:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 # this proxy is always a local sidecar talking to 127.0.0.1 upstreams; an
 # ambient http_proxy env (login shells here carry one) must never intercept
@@ -1822,7 +1829,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 data, normalized = call_upstream(messages_out, repair_plan)
                 if ARM.name in {"commitkv", "agentkv"}:
                     raw_actor_history.state_for(conv).commit(
-                        original_payload.get("messages") or [], data)
+                        original_payload.get("messages") or [], data, benchmark=BENCHMARK)
                 if ARM.text_policy == "agentfold":
                     data = agentfold.finish(data, agentfold.state_for(conv),
                                             code_actions=BENCHMARK == "acon_appworld")

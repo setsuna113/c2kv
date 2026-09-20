@@ -17,6 +17,7 @@ from urllib.request import ProxyHandler, Request, build_opener
 import pytest
 
 from benchmarks.model_identity import QWEN3_4B
+from benchmarks.bfcl_response import normalize_native_message
 
 
 RAW_ONE = '<tool_call>{"name":"lookup","arguments":{"b":2,"a":1}}</tool_call>'
@@ -43,6 +44,7 @@ class _ReferenceUpstream(BaseHTTPRequestHandler):
     chats = []
     sessions = []
     model_info_requests = 0
+    native_text_output = False
 
     def log_message(self, *_args):
         return
@@ -101,6 +103,8 @@ class _ReferenceUpstream(BaseHTTPRequestHandler):
             {"role": "assistant", "content": "done"},
         ][turn - 1]
         raw = [RAW_ONE, RAW_TWO, "done"][turn - 1]
+        if self.__class__.native_text_output:
+            messages = {"role": "assistant", "content": raw, "tool_calls": []}
         _reply(self, {
             "id": f"chat-{turn}",
             "object": "chat.completion",
@@ -131,12 +135,14 @@ def _post(opener, url: str, payload: dict, *, expected_status=200) -> dict:
 
 
 @pytest.mark.parametrize("arm_name", ["commitkv", "agentkv"])
+@pytest.mark.parametrize("native_text_output", [False, True])
 def test_exact_history_three_turn_wire_replays_raw_text_and_rejects_mismatch(
-        tmp_path, arm_name):
+        tmp_path, arm_name, native_text_output):
     _ReferenceUpstream.paths = []
     _ReferenceUpstream.chats = []
     _ReferenceUpstream.sessions = []
     _ReferenceUpstream.model_info_requests = 0
+    _ReferenceUpstream.native_text_output = native_text_output
     upstream = ThreadingHTTPServer(("127.0.0.1", _free_port()), _ReferenceUpstream)
     threading.Thread(target=upstream.serve_forever, daemon=True).start()
 
@@ -146,7 +152,7 @@ def test_exact_history_three_turn_wire_replays_raw_text_and_rejects_mismatch(
         str(Path(__file__).with_name("proxy.py")),
         "--upstream", f"http://127.0.0.1:{upstream.server_port}",
         "--backend", "sglang",
-        "--benchmark", "acebench",
+        "--benchmark", "bfcl" if native_text_output else "acebench",
         "--arm", arm_name,
         "--model-family", "qwen3-4b",
         "--port", str(proxy_port),
@@ -177,9 +183,11 @@ def test_exact_history_three_turn_wire_replays_raw_text_and_rejects_mismatch(
         assert messages == first_source
 
         echo_one = copy.deepcopy(first["choices"][0]["message"])
+        if native_text_output:
+            echo_one = normalize_native_message(echo_one, first["id"])
         echo_one["tool_calls"][0]["function"]["arguments"] = '{ "a": 1, "b": 2 }'
         messages += [echo_one, {
-            "role": "tool", "tool_call_id": "call-1", "content": "lookup-result",
+            "role": "tool", "tool_call_id": echo_one["tool_calls"][0]["id"], "content": "lookup-result",
         }]
         second_source = copy.deepcopy(messages)
         second = _post(opener, url, {
@@ -189,9 +197,11 @@ def test_exact_history_three_turn_wire_replays_raw_text_and_rejects_mismatch(
         assert messages == second_source
 
         echo_two = copy.deepcopy(second["choices"][0]["message"])
+        if native_text_output:
+            echo_two = normalize_native_message(echo_two, second["id"])
         echo_two["tool_calls"][0]["function"]["arguments"] = '{ "ok" : true }'
         messages += [echo_two, {
-            "role": "tool", "tool_call_id": "call-2", "content": "finish-result",
+            "role": "tool", "tool_call_id": echo_two["tool_calls"][0]["id"], "content": "finish-result",
         }]
         third_source = copy.deepcopy(messages)
         third = _post(opener, url, {

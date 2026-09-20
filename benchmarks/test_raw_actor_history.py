@@ -3,6 +3,7 @@ import copy
 import pytest
 
 from benchmarks.raw_actor_history import RawActorHistory
+from benchmarks.bfcl_response import normalize_native_message
 
 
 def response(message, text):
@@ -40,3 +41,46 @@ def test_modified_action_and_missing_receipt_are_rejected():
     with pytest.raises(ValueError, match="unchanged"):
         state.prepare([*source, {"role": "assistant", "content": "changed"}])
     assert state.prepare([*source, {"role": "assistant", "content": "answer"}])[1]["content"] == "answer"
+
+
+@pytest.mark.parametrize("text", [
+    'I will inspect the file.\n\n<tool_call>\n{"name":"head","arguments":{"file_name":"report.txt","lines":1}}\n</tool_call>',
+    '<tool_call>{"name":"head","arguments":{"lines":1}}</tool_call>\n'
+    '<tool_call>{"name":"sort","arguments":{}}</tool_call>',
+])
+def test_bfcl_native_echo_restores_raw_text_and_rejects_changed_actions(text):
+    state = RawActorHistory()
+    source = [{"role": "user", "content": "task"}]
+    message = {"role": "assistant", "content": text, "tool_calls": []}
+    reply = dict(response(message, text), id="fixture-response")
+    frozen = copy.deepcopy(reply)
+    state.commit(source, reply, benchmark="bfcl")
+    echo = normalize_native_message(message, reply["id"])
+    assert echo["tool_calls"][0]["id"] == "bfcl_native_fixture-response_0"
+    prepared = state.prepare([*source, echo, {"role": "tool", "content": "result"}])
+    assert prepared[1] == {"role": "assistant", "content": text}
+    assert reply == frozen
+    for field, value in (("content", "Changed prose"), ("id", "different-id"),
+                         ("name", "different_tool"), ("arguments", '{"lines":2}')):
+        changed = copy.deepcopy(echo)
+        if field == "content":
+            changed[field] = value
+        elif field == "id":
+            changed["tool_calls"][0][field] = value
+        else:
+            changed["tool_calls"][0]["function"][field] = value
+        with pytest.raises(ValueError, match="unchanged"):
+            state.prepare([*source, changed])
+
+
+def test_bfcl_malformed_draft_is_not_repaired_and_other_benchmarks_keep_raw_echo():
+    text = '<tool_call>{"name":"head","arguments":{"lines":1}}'
+    message = {"role": "assistant", "content": text}
+    assert normalize_native_message(message, "r") == message
+    text += '</tool_call>'
+    message = dict(message, content=text)
+    state = RawActorHistory()
+    state.commit([], dict(response(message, text), id="r"), benchmark="acebench")
+    assert state.prepare([message]) == [message]
+    with pytest.raises(ValueError, match="unchanged"):
+        state.prepare([normalize_native_message(message, "r")])

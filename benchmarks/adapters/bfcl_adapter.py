@@ -186,15 +186,13 @@ def install_handler(base_url: str, model: str = SERVED_MODEL,
     def normalize_native_calls(response):
         # Preserve native JSON tool blocks when the engine has no FC parser.
         # Malformed drafts remain model errors; never infer or repair arguments.
-        from experiments.history_system.runtime.benchmarks.memory_runtime.event_native_draft import parse_native_draft
+        from benchmarks.bfcl_response import normalize_native_message
         for choice in response.choices:
             message = choice.message
             if message.tool_calls or not isinstance(message.content, str):
                 continue
-            draft = parse_native_draft(message.content, call_id_prefix=f"bfcl_native_{response.id}")
-            if draft.status == "tool_calls":
-                values = message.model_dump()
-                values.update(tool_calls=list(draft.tool_calls), content=draft.content or None)
+            values = normalize_native_message(message.model_dump(), response.id)
+            if values.get("tool_calls"):
                 choice.message = type(message).model_validate(values)
                 choice.finish_reason = "tool_calls"
         return response
