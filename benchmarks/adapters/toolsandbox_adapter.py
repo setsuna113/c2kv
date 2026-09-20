@@ -17,20 +17,63 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import subprocess
 import sys
+from urllib.request import ProxyHandler, Request, build_opener
 from pathlib import Path
 from typing import Any, Dict, List
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from paper.process_lifecycle import run_owned  # noqa: E402
+from toolsandbox_suite import (  # noqa: E402
+    THREE_DISTRACTION_TOOLS_129, load_named_suite, selected_scenarios,
+)
 
 from adapters.base import RunContext, v1  # noqa: E402
 
 NAME = "toolsandbox"
 TS_DIR = Path(os.environ.get("TS_DIR") or Path.home() / "benchmarks" / "ToolSandbox")
 AGENT = "GPT_4_o_2024_05_13"  # openai_api_agent/openai_api_user role keys
+_SERVER_INFO_OPENER = build_opener(ProxyHandler({}))
+
+
+def _server_info(base_url: str) -> dict[str, Any] | None:
+    """Read optional SGLang launch settings without going through host proxies."""
+    root = base_url.rstrip("/")
+    if root.endswith("/v1"):
+        root = root[:-3]
+    try:
+        request = Request(root + "/server_info", headers={"Accept": "application/json"})
+        with _SERVER_INFO_OPENER.open(request, timeout=3) as response:
+            info = json.load(response)
+    except (OSError, ValueError, UnicodeError):
+        return None
+    return info if isinstance(info, dict) else None
+
+
+def require_sglang_tool_parser(base_url: str, user_base_url: str = "") -> None:
+    """Reject an identifiable SGLang endpoint that cannot emit tool calls."""
+    checked: set[str] = set()
+    for role, endpoint in (("agent", base_url), ("user simulator", user_base_url)):
+        if not endpoint:
+            continue
+        endpoint = endpoint.rstrip("/")
+        if endpoint.endswith("/v1"):
+            endpoint = endpoint[:-3]
+        if endpoint in checked:
+            continue
+        checked.add(endpoint)
+        info = _server_info(endpoint)
+        if not isinstance(info, dict) or not {
+            "model_path", "tp_size", "tool_call_parser"
+        }.issubset(info):
+            continue
+        if not info["tool_call_parser"]:
+            raise RuntimeError(
+                f"ToolSandbox preflight: SGLang {role} endpoint has tool_call_parser "
+                "disabled; restart it with --tool-call-parser qwen25")
 
 
 def add_arguments(parser) -> None:
@@ -42,6 +85,8 @@ def add_arguments(parser) -> None:
     parser.add_argument("--ts-scenarios", default="",
                         help="toolsandbox: comma-separated scenario names "
                              "for subset runs (-s); overrides --full")
+    parser.add_argument("--ts-suite", default="",
+                        help=f"toolsandbox: frozen named suite ({THREE_DISTRACTION_TOOLS_129})")
     parser.add_argument("--ts-agent", default="",
                         help="toolsandbox: agent role key (default "
                              "GPT_4_o_2024_05_13 -> openai_api_agent)")
@@ -78,14 +123,42 @@ def split_scenarios(raw) -> "list[str] | None":
     return [s for s in items if s] or None
 
 
+def _rapid_api_key_from_file(path: str) -> str:
+    """Read one literal RAPID_API_KEY assignment without evaluating the file."""
+    try:
+        lines = Path(path).expanduser().read_text(encoding="utf-8-sig").splitlines()
+    except (OSError, UnicodeError):
+        raise RuntimeError("ToolSandbox credential file could not be read") from None
+    matches = []
+    for line in lines:
+        assignment = line.strip()
+        if assignment.startswith("export "):
+            assignment = assignment[len("export "):].lstrip()
+        name, separator, value = assignment.partition("=")
+        if separator and name.strip() == "RAPID_API_KEY":
+            value = value.strip()
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+                value = value[1:-1]
+            matches.append(value)
+    if len(matches) != 1 or not matches[0]:
+        raise ValueError("ToolSandbox credential file requires one nonempty RAPID_API_KEY")
+    return matches[0]
+
+
 def harness_env(base_url: str, user_base_url: str = "") -> Dict[str, str]:
     """``user_base_url`` (default: the raw upstream endpoint) routes the
     user simulator OUT of the arm proxy via TOOLSANDBOX_USER_BASE_URL —
     the patched openai_api_user role reads it.  Routing the simulator
     through the compression arm made every historical TS number an
     agent+user joint degradation (audit BLOCKER)."""
+    env = os.environ.copy()
+    # Polars reads this when the official ToolSandbox worker starts.
+    env.setdefault("POLARS_MAX_THREADS", "4")
+    credential_file = env.pop("TOOLSANDBOX_ENV_FILE", None)
+    if not env.get("RAPID_API_KEY") and credential_file:
+        env["RAPID_API_KEY"] = _rapid_api_key_from_file(credential_file)
     return {
-        **os.environ,
+        **env,
         "OPENAI_API_KEY": "EMPTY",
         "OPENAI_API_KEY_USER": "EMPTY",
         "OPENAI_BASE_URL": v1(base_url),
@@ -101,14 +174,20 @@ def run(ctx: RunContext) -> Dict[str, Any]:
 
     No cost join: see ``COST_JOIN`` below.
     """
+    explicit = split_scenarios(ctx.opt("ts_scenarios", ""))
+    suite = ctx.opt("ts_suite", "")
+    if suite == THREE_DISTRACTION_TOOLS_129 and explicit is not None:
+        if explicit != selected_scenarios(suite):
+            raise ValueError("ToolSandbox explicit scenarios differ from named suite")
+    scenarios = selected_scenarios(suite, explicit)
     summary = run_ts(
         ctx.base_url, ctx.out_dir,
-        test_mode=not ctx.options.get("full", False),
+        test_mode=not (ctx.options.get("full", False) or suite == "full"),
         agent=ctx.opt("ts_agent", AGENT), user=ctx.opt("ts_user", AGENT),
         # the user simulator must NOT ride the arm proxy: route it to the
         # raw upstream endpoint (tau2 already does the same split)
         user_base_url=ctx.user_base_url,
-        scenarios=split_scenarios(ctx.opt("ts_scenarios", "")),
+        scenarios=scenarios, suite=suite,
         benchmark_dir=ctx.opt("toolsandbox_dir"), python=ctx.opt("bench_python"),
         parallel=ctx.opt("ts_parallel", 1), model=ctx.model,
     )
@@ -120,15 +199,40 @@ COST_JOIN = ("joinable: toolsandbox_cli emits scenario/session/request/action "
              "ids without changing official execution or scoring")
 
 
+def reject_rapidapi_http_failures(out_dir: Path) -> None:
+    path = Path(out_dir) / "measurement" / "rapidapi_http_status.jsonl"
+    if not path.exists():
+        return
+    failures = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            raise SystemExit("FATAL: ToolSandbox RapidAPI HTTP status log is invalid") from None
+        status = row.get("status_code") if isinstance(row, dict) else None
+        if (not isinstance(row, dict) or row.get("event_type") != "rapidapi_http"
+                or type(row.get("host")) is not str or type(status) is not int):
+            raise SystemExit("FATAL: ToolSandbox RapidAPI HTTP status is unavailable")
+        if status in (401, 403, 429) or status >= 500:
+            failures.append((row["host"], status))
+    if failures:
+        raise SystemExit("FATAL: ToolSandbox RapidAPI infrastructure HTTP failure: "
+                         + ", ".join(f"{host}={status}" for host, status in failures[:10]))
+
+
 def run_ts(base_url: str, out_dir: Path, test_mode: bool = True,
            agent: str = AGENT, user: str = AGENT, expected: int = None,
            benchmark_dir: Path = None, user_base_url: str = "",
            scenarios: "list[str] | None" = None,
+           suite: str = "",
            python: "str | None" = None, parallel: int = 1,
            model: str = "c2kv-agent", user_model: "str | None" = None) -> Dict[str, Any]:
     """Run the CLI and collect ``result_summary.json``."""
     if parallel != 1:
         raise ValueError("instrumented ToolSandbox runs require parallel=1")
+    if suite == THREE_DISTRACTION_TOOLS_129 and scenarios != selected_scenarios(suite):
+        raise ValueError("ToolSandbox named suite IDs differ from frozen cohort")
+    require_sglang_tool_parser(base_url, user_base_url)
     ts_dir = (Path(benchmark_dir) if benchmark_dir else TS_DIR).resolve()
     out_dir = Path(out_dir).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -145,8 +249,13 @@ def run_ts(base_url: str, out_dir: Path, test_mode: bool = True,
                       parallel=parallel)
     cmd[:1] = [python or sys.executable,
                str(Path(__file__).resolve().parents[1] / "toolsandbox_cli.py")]
+    cohort = load_named_suite(suite) if suite == THREE_DISTRACTION_TOOLS_129 else None
     (out_dir / "toolsandbox_protocol.json").write_text(json.dumps({
         "suite": "subset" if scenarios else "test" if test_mode else "full",
+        "named_suite": suite or None,
+        "cohort": ({key: cohort[key] for key in
+                    ("source_checkout_head", "scenario_count", "scenario_ids_sha256")}
+                   if cohort is not None else None),
         "scenarios": scenarios, "parallel": int(parallel), "model": model,
         "user_model": user_model or model,
         "agent_role": agent, "user_role": user, "source": str(ts_dir),
@@ -155,23 +264,35 @@ def run_ts(base_url: str, out_dir: Path, test_mode: bool = True,
     completed = run_owned(cmd, cwd=ts_dir, env=env)
     if completed.returncode != 0:
         raise SystemExit(f"FATAL: tool_sandbox CLI exited {completed.returncode}")
+    reject_rapidapi_http_failures(out_dir)
     summary = collect(out_dir)
     summary["protocol"] = json.loads((out_dir / "toolsandbox_protocol.json").read_text(encoding="utf-8"))
     manifest_path = out_dir / "scenario_manifest.json"
     if not manifest_path.is_file():
         raise SystemExit("FATAL: ToolSandbox wrapper wrote no scenario_manifest.json")
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    expected_ids = {str(value) for value in manifest.get("scenario_ids") or []}
-    scored_ids = {str(value) for value in summary.get("scenario_ids") or []}
-    if scored_ids != expected_ids:
+    resolved_ids = [str(value) for value in manifest.get("scenario_ids") or []]
+    expected_ids = set(resolved_ids)
+    scored_list = summary.get("scenario_ids") or []
+    scored_ids = set(scored_list)
+    if len(expected_ids) != len(resolved_ids) or manifest.get("expected") != len(resolved_ids):
+        raise SystemExit("FATAL: ToolSandbox resolver manifest has duplicate or missing IDs")
+    if scenarios is not None and expected_ids != set(scenarios):
+        raise SystemExit("FATAL: official ToolSandbox resolver differed from selected scenario IDs")
+    if scored_ids != expected_ids or len(scored_list) != len(expected_ids):
         missing = sorted(expected_ids - scored_ids)
         extra = sorted(scored_ids - expected_ids)
         raise SystemExit(
-            f"FATAL: ToolSandbox terminal-state mismatch: missing={missing[:10]} extra={extra[:10]}")
+            f"FATAL: ToolSandbox terminal-state mismatch: missing={missing[:10]} "
+            f"extra={extra[:10]} scored={len(scored_list)} expected={len(expected_ids)}")
     summary["scenario_manifest"] = manifest
     # terminal-state check (acceptance 1): a scenario that never ran must
     # fail the run, not shrink the denominator
     n_scored = summary.get("n") if isinstance(summary, dict) else None
+    if type(n_scored) is not int or n_scored != len(resolved_ids):
+        raise SystemExit(
+            f"FATAL: ts terminal-state check failed: n_scored={n_scored} "
+            f"n_total={len(resolved_ids)}")
     if expected is not None and n_scored is not None and n_scored != expected:
         raise SystemExit(
             f"FATAL: ts terminal-state check failed: n_scored={n_scored} != n_total={expected}")
@@ -181,6 +302,7 @@ def run_ts(base_url: str, out_dir: Path, test_mode: bool = True,
 
 
 def collect(out_dir: Path) -> Dict[str, Any]:
+    reject_rapidapi_http_failures(out_dir)
     summaries = sorted(out_dir.glob("agent_*/result_summary.json"))
     if not summaries:
         raise SystemExit(f"FATAL: no result_summary.json under {out_dir} — "
@@ -189,19 +311,32 @@ def collect(out_dir: Path) -> Dict[str, Any]:
 
     rows: List[Dict[str, Any]] = []
     crashed: List[str] = []
+    seen_ids: set[str] = set()
     for path in summaries:
         data = json.loads(path.read_text(encoding="utf-8"))
         for scenario in data.get("per_scenario_results") or []:
+            if not isinstance(scenario, dict):
+                raise SystemExit("FATAL: ToolSandbox official scenario result is not an object")
             if scenario.get("traceback"):
                 # a crashed scenario FAILS the run — _mean used to skip
                 # these None rows and the upstream recorded a silent 0
                 crashed.append(str(scenario.get("name")))
                 continue
+            scenario_id = scenario.get("name")
+            if not isinstance(scenario_id, str) or not scenario_id:
+                raise SystemExit("FATAL: ToolSandbox official scenario result has no name")
+            if scenario_id in seen_ids:
+                raise SystemExit(f"FATAL: duplicate ToolSandbox official scenario: {scenario_id}")
+            seen_ids.add(scenario_id)
+            similarity = scenario.get("similarity")
+            if (type(similarity) not in (int, float)
+                    or not math.isfinite(float(similarity))):
+                raise SystemExit(f"FATAL: ToolSandbox official similarity is unavailable: {scenario_id}")
             rows.append({
-                "task_id": scenario.get("name"),
+                "task_id": scenario_id,
                 # official semantic column: dialogue similarity to the
                 # reference (milestone-weighted); minefield = violations
-                "semantic_score": scenario.get("similarity"),
+                "semantic_score": similarity,
                 "milestone_similarity": scenario.get("milestone_similarity"),
                 "minefield_similarity": scenario.get("minefield_similarity"),
                 "turn_count": scenario.get("turn_count"),

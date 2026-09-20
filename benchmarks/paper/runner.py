@@ -18,6 +18,7 @@ from .candidate_matrix import (
     parse_candidate_arms, with_candidate_methods,
 )
 from benchmarks.history_budget import HistoryKVBudget, parse_history_kv_budget
+from benchmarks.toolsandbox_suite import THREE_DISTRACTION_TOOLS_129, selected_scenarios
 from .artifact_io import atomic_json, atomic_text, preparation_lock
 from .process_lifecycle import (defer_termination, run_owned, stop_owned_group,
                                 unwind_on_termination)
@@ -364,13 +365,15 @@ def run_command(config, cell, directory, profile, stage="closed_loop"):
         cmd += ["--toolsandbox-dir", config["toolsandbox_dir"],
                 "--bench-python", config.get("toolsandbox_python", config["bench_python"]),
                 "--ts-parallel", "1"]
-        scenarios = config.get("toolsandbox_scenarios") or []
-        if scenarios:
+        explicit = config.get("toolsandbox_scenarios") or []
+        suite = config.get("toolsandbox_suite")
+        scenarios = selected_scenarios(suite, explicit, require_paper_suite=True)
+        if suite == THREE_DISTRACTION_TOOLS_129 and not explicit:
+            cmd += ["--ts-suite", suite]
+        if scenarios is not None:
             cmd += ["--ts-scenarios", ",".join(scenarios)]
-        elif config.get("toolsandbox_suite") == "full":
-            cmd.append("--full")
         else:
-            raise ValueError("ToolSandbox paper cells require suite=full or explicit scenarios")
+            cmd.append("--full")
     else:
         cmd += ["--acon-dir", config["acon_dir"], "--bench-python", config["appworld_python"],
                 "--split", config["appworld_split"], "--max-iter", str(config["appworld_max_iter"])]

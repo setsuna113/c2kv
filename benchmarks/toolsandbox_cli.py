@@ -6,12 +6,46 @@ installed instrumentation; the paper runner explicitly selects parallel=1.
 """
 from __future__ import annotations
 
+import json
 import os
 import sys
 import time
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from measurement.telemetry import HarnessTelemetry, current_episode, last_decision_id
+
+
+def install_rapidapi_http_status(rapidapi_tools, output: Path) -> None:
+    """Observe only ToolSandbox's RapidAPI GETs, without changing their payloads."""
+    requests_module = rapidapi_tools.requests
+    original_get = requests_module.get
+    output = Path(output)
+    output.parent.mkdir(parents=True, exist_ok=True)
+
+    def record(host, status):
+        with output.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps({"event_type": "rapidapi_http", "host": host,
+                                     "status_code": status}) + "\n")
+
+    class ModuleRequestsProxy:
+        def __getattr__(self, name):
+            return getattr(requests_module, name)
+
+        def get(self, *args, **kwargs):
+            url = kwargs.get("url", args[0] if args else "")
+            host = urlsplit(str(url)).hostname or "unknown"
+            kwargs.setdefault("timeout", 30)
+            try:
+                response = original_get(*args, **kwargs)
+            except Exception:
+                record(host, None)
+                raise
+            status = getattr(response, "status_code", None)
+            record(host, status if type(status) is int else None)
+            return response
+
+    rapidapi_tools.requests = ModuleRequestsProxy()
 
 
 def response_request_id(response):
@@ -110,6 +144,7 @@ def main() -> None:
     from tool_sandbox.roles.openai_api_agent import OpenAIAPIAgent
     from tool_sandbox.roles.openai_api_user import OpenAIAPIUser
     from tool_sandbox.roles import execution_environment
+    from tool_sandbox.tools import rapid_api_search_tools
 
     def route_role(role, url, model):
         original = role.__init__
@@ -127,13 +162,16 @@ def main() -> None:
                os.environ.get("C2KV_TOOLSANDBOX_USER_MODEL",
                               os.environ["C2KV_TOOLSANDBOX_MODEL"]))
     telemetry = HarnessTelemetry(os.environ["C2KV_TOOLSANDBOX_TELEMETRY"], "toolsandbox")
+    install_rapidapi_http_status(
+        rapid_api_search_tools,
+        Path(os.environ["C2KV_TOOLSANDBOX_TELEMETRY"]).with_name("rapidapi_http_status.jsonl"),
+    )
     install_instrumentation(telemetry, Scenario, Completions,
                             execution_environment, RoleType.AGENT)
     from tool_sandbox import cli
     original_resolve = cli.resolve_scenarios
 
     def resolve_and_record(*args, **kwargs):
-        import json
         scenarios = original_resolve(*args, **kwargs)
         root = Path(os.environ["C2KV_TOOLSANDBOX_TELEMETRY"]).parents[1]
         (root / "scenario_manifest.json").write_text(json.dumps({

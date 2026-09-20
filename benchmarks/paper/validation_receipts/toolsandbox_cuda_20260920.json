@@ -1,0 +1,144 @@
+{
+  "schema": "toolsandbox-cuda-functional-smoke-v1",
+  "qualification": "preliminary, n=1",
+  "scope": {
+    "benchmark": "toolsandbox",
+    "purpose": "Functional CUDA validation of one official ToolSandbox scenario and three common-prefix replay arms",
+    "closed_loop_scenarios": 1,
+    "cuda_129_scenario_cohort_completed": false,
+    "c2kv_native_closed_loop_completed": false,
+    "replay_scores_are_official_scenario_scores": false
+  },
+  "stage_root": "/workspace/validation/toolsandbox-129-c3c6baf6-e66ad7d6",
+  "checkpoint": "/workspace/checkpoint-1000",
+  "engine_source": "/workspace/validation/cuda-round2-engine-210d93ff",
+  "source_provenance": {
+    "stage_receipt": "stage_receipt.json",
+    "stage_receipt_sha256": "d4091f0d814703e7f0a462c5613f093c756aa2ed111795e25764de69fbfe9655",
+    "toolsandbox_source_checkout_head": "165848b9a78cead7ca7fe7c89c688b58e6501219",
+    "toolsandbox_source_note": "Locally imported official source checkout; this identifier is not asserted to resolve in the public upstream repository.",
+    "toolsandbox_two_patch_diff_sha256": "30505a28fdfd355b27b7d178925cd4d9a753b777c897e8146b66b6327ab81a5e",
+    "toolsandbox_archive_sha256": "e66ad7d6579047d79595f92a75e429bc9c9b4d13d5dcc269bc2eb254ce403cd1",
+    "paper_archive_sha256": "c3c6baf6cf329e7adfdd58e53a94e7aa9217c0af94349e3d05b3086aae1145d4",
+    "paper_overlay_archive_sha256": "e1672f168ca99fe1a6d8c628e661bc20211d158e84a48afd22db39defd2b9030",
+    "paper_overlay_files_sha256": {
+      "benchmarks/adapters/toolsandbox_adapter.py": "c8a2f3ee4d3b86ddfe5de7fa1465de39b76c417ab27c782798892da2a448cff9",
+      "benchmarks/test_adapter_contract.py": "3e26278af4f2180f0f58d15b5766eb36690c6cd85457108c97c602297dad64c9",
+      "benchmarks/toolsandbox_patches/README.md": "2ca1e50a85696d12a821bf8567eadf636a9cf5731d2bc2fdb5b6805a8dfb5caf"
+    },
+    "paper_overlay_readme_note": "The hash identifies the frozen M2 staged README before the local validation-receipt link was added.",
+    "paper_stage_git_snapshot": {
+      "commit": "230979179a76c277263a768e78455122c66c7aef",
+      "branch": "stage-snapshot",
+      "tracked_files": 978,
+      "clean_after_run": true,
+      "meaning": "Local M2 snapshot of the staged paper tar plus overlay; not the upstream paper base commit"
+    },
+    "isolated_bench_runtime": {
+      "python": "/workspace/validation/toolsandbox-129-c3c6baf6-e66ad7d6/venv-benchts/bin/python",
+      "openai": "1.17.0",
+      "httpx": "0.27.2",
+      "offline_agent_and_user_client_construction_passed": true,
+      "npu_reference_python": "/home/liuyancheng/envs/benchts/bin/python"
+    }
+  },
+  "full_closed_loop": {
+    "gpu_uuid": "GPU-2eadf6ad-aae1-9dea-4e91-92593afc8cb9",
+    "plan": "cuda_plan_smoke_gpu3_retry1.json",
+    "plan_sha256": "c5eebbae7744e2945502c9aedda6edfcfaf8430427aae69aabc385864f2e6f8f",
+    "scenario_id": "add_contact_with_name_and_phone_number_3_distraction_tools",
+    "scenario_manifest": "full-smoke-gpu3-retry1/scenario_manifest.json",
+    "scenario_manifest_sha256": "938b66261f634fa01c031fcc7698aabe64a515ba55ddcb004df255e6ab2770f4",
+    "summary": "full-smoke-gpu3-retry1/summary_full.json",
+    "summary_sha256": "c006f3636ed782b9361390dd23e2f9e73e9d6e78021f38b526579f3b69da900a",
+    "summary_n": 1,
+    "summary_n_clusters": 1,
+    "summary_semantic_score": 0.8516338717095078,
+    "agent_requests": {
+      "n_requests": 6,
+      "n_ok": 6,
+      "n_error": 0
+    },
+    "qualification": "preliminary, n=1; one official scenario only"
+  },
+  "common_prefix_source": {
+    "path": "full-smoke-gpu3-retry1/full_prefixes.jsonl",
+    "count": 6,
+    "sha256": "6ae03c26287ab3c8ac8230bb5a400fdaf3ba13afd038aa0d0f8a98b1c358766f",
+    "identity_check": "All six recorded_prefix payloads passed canonical_sha256 validation; every replay command references this exact path"
+  },
+  "common_prefix_replays": {
+    "replay_gpu_uuid": "GPU-5b33d665-26a7-5f38-b15f-f2616530c8bc",
+    "qualification": "preliminary, n=1 source scenario; six common prefixes per arm; functional completion counts, not official end-to-end scores",
+    "arms": [
+      {
+        "arm": "full",
+        "summary": "replay-smoke-gpu3-retry1-full/replay_summary.json",
+        "summary_sha256": "bf95ec0f3d5df50cf851c7455b4bd6678e9f4eff4be40fe1781277774ae5887f",
+        "prefixes": 6,
+        "completed": 6,
+        "failed": 0,
+        "context_overflow": 0,
+        "execution_status": "completed in cuda_supervisor_smoke_gpu3_retry1_replays/status.json"
+      },
+      {
+        "arm": "c2kv_native_r4",
+        "summary": "replay-smoke-gpu3-retry1-c2kv_native_r4-gitfix1/replay_summary.json",
+        "summary_sha256": "dad23badd433e7278962a869985d24d4076d28058bde6f2dc2f4ce54d1bd84de",
+        "prefixes": 6,
+        "completed": 6,
+        "failed": 0,
+        "declared_failure_tasks": 0,
+        "execution_status": "completed in cuda_remaining_smoke_gitfix1/status.json"
+      },
+      {
+        "arm": "history_kv_h2o_r25_persistent",
+        "summary": "replay-smoke-gpu3-retry1-history_kv_h2o_r25_persistent/replay_summary.json",
+        "summary_sha256": "bf95ec0f3d5df50cf851c7455b4bd6678e9f4eff4be40fe1781277774ae5887f",
+        "prefixes": 6,
+        "completed": 6,
+        "failed": 0,
+        "context_overflow": 0,
+        "execution_status": "completed in cuda_remaining_smoke_gitfix1/status.json"
+      }
+    ],
+    "final_plan": "cuda_plan_smoke_remaining_gitfix1.json",
+    "final_plan_sha256": "698aea209b2b029f0d5869b284dc8d37b47279cde7117c725d4827c6c6339b26",
+    "remaining_supervisor_sha256": "13784b76f64a8c5142d2d2afb2006d7152284573e26e1980f7c1c4d78d79fbec",
+    "final_status_path": "cuda_remaining_smoke_gitfix1/status.json",
+    "final_status_sha256": "989da07b105c505aa214a3fe9226b917650aae5eae25201544d89dfc147a79c0",
+    "final_status_value": "completed"
+  },
+  "excluded_failed_attempts": [
+    {
+      "status": "cuda_supervisor_smoke_gpu3/status.json",
+      "reason": "ToolSandbox client construction failed with openai 1.17.0 and httpx 0.28.1 (unexpected proxies argument); no result selected"
+    },
+    {
+      "status": "cuda_supervisor_smoke_gpu3_retry1/status.json",
+      "reason": "Supervisor port-release probe mistook TIME_WAIT for a live listener; its already-completed Full official output is the retained source, while the orchestration failure is excluded"
+    },
+    {
+      "status": "cuda_supervisor_smoke_gpu3_retry1_replays/status.json",
+      "reason": "The staged paper tar initially had no Git metadata; its completed Full replay is retained, while the failed native attempt is excluded in favor of the separate gitfix1 output"
+    }
+  ],
+  "cleanup_observation": {
+    "checked_at_utc": "2026-09-20T19:24:31.681330+00:00",
+    "owned_server_and_proxy_pids_checked": [
+      1133734,
+      1145537,
+      1146522,
+      1146614,
+      1149944,
+      1151040,
+      1151953
+    ],
+    "owned_server_and_proxy_pids_alive": [],
+    "ports_34920_34921": "free",
+    "replay_gpu1_compute_pids": [],
+    "replay_gpu1_memory_used_mib": 1,
+    "source_gpu3_later_compute_pid": "1989408",
+    "source_gpu3_later_process_attribution": "unattributed; no supervisor-owned server or proxy PID remained"
+  }
+}

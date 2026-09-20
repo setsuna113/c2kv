@@ -28,6 +28,16 @@ like `null`: upstream otherwise appends no messages, so its message-count
 limit never advances and the scenario loops indefinitely. The patch changes
 only this response-shape normalization; prompts and scoring remain unchanged.
 
+The validated ToolSandbox bench environment uses `openai==1.17.0` and
+`httpx==0.27.2`. The OpenAI client passes the `proxies` argument during
+construction; `httpx==0.28.1` rejects it before a scenario can run. The CUDA
+isolated bench venv pins `httpx==0.27.2`, matching the NPU bench runtime. Its
+stage receipt records both versions and an offline construction check for the
+agent and user simulator clients.
+
+The one-scenario CUDA functional smoke and its three same-prefix replays are
+recorded in [the CUDA validation receipt](../paper/validation_receipts/toolsandbox_cuda_20260920.json).
+
 TS test-mode's "n=3" is ONE base scenario (`send_message_with_contact_
 content_cellular_off`) plus two perturbations (distractor tools / scrambled
 arg descriptions) — not three independent tasks; only the full suite is a
