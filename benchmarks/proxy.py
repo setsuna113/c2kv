@@ -72,7 +72,6 @@ import signal
 import threading
 import time
 import uuid
-from dataclasses import replace
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Dict, List, Optional, Set, Tuple
@@ -94,6 +93,7 @@ import raw_actor_history
 import toolmemory
 from model_identity import require_qwen3_4b
 from arms import Arm, get_arm, history_kv_spec, kv_reuse_spec  # type: ignore
+from history_budget import HistoryKVBudget
 from backends import BackendError, get_backend  # type: ignore
 from measurement.telemetry import append_jsonl, canonical_sha256  # type: ignore
 
@@ -2173,7 +2173,7 @@ def main(argv=None):
     )
     parser.add_argument(
         "--history-kv-target-tokens", type=int, default=None,
-        help="resolved absolute history-KV allowance for Experiment-2 cells",
+        help="absolute history-KV allowance, resolved through the shared budget interface",
     )
     parser.add_argument("--doc-packing", default=DOC_PACKING, choices=DOC_PACKINGS,
                         help="how compressed history is cut into docs: 'turn' = "
@@ -2204,15 +2204,7 @@ def main(argv=None):
     MODEL_FAMILY = args.model_family
     ARM = get_arm(args.arm)
     if args.history_kv_target_tokens is not None:
-        if not ARM.history_kv:
-            raise ValueError(
-                "--history-kv-target-tokens requires a history-KV arm")
-        if args.history_kv_target_tokens < 1:
-            raise ValueError("--history-kv-target-tokens must be >= 1")
-        spec = dict(history_kv_spec(ARM) or {})
-        spec["target_tokens"] = int(args.history_kv_target_tokens)
-        spec["retention_ratio"] = None
-        ARM = replace(ARM, history_kv=spec)
+        ARM = HistoryKVBudget(args.history_kv_target_tokens).apply(ARM)
     if args.shared_engine:
         history_spec = history_kv_spec(ARM) if ARM.history_kv else None
         if args.backend != "sglang" or not history_spec or not history_spec["persistent_session"]:

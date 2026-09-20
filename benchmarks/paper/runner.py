@@ -14,6 +14,7 @@ import urllib.error
 import urllib.request
 
 from .candidate_matrix import ARM_TO_VARIANT, parse_candidate_arms, with_candidate_methods
+from benchmarks.history_budget import HistoryKVBudget, parse_history_kv_budget
 from .artifact_io import atomic_json, atomic_text, preparation_lock
 from .process_lifecycle import (defer_termination, run_owned, stop_owned_group,
                                 unwind_on_termination)
@@ -108,6 +109,13 @@ def cells(config):
                            category=bench.get("category", ""),
                            cell_id=bench["name"] + "__" + method["arm"],
                            tool_context=context_name)
+                if "history_budget_tokens" in method:
+                    from benchmarks.arms import get_arm
+                    arm = get_arm(method["arm"])
+                    if arm.history_kv:
+                        budget = HistoryKVBudget(method["history_budget_tokens"])
+                        budget.apply(arm)
+                        row["cell_id"] = bench["name"] + "__" + budget.variant_name(arm.name)
                 if context_name != RAW_TOOL_CONTEXT:
                     row["cell_id"] += "__tools-" + context_name
                     row["tool_memory"] = context["spec"]
@@ -259,6 +267,38 @@ def with_hiagent_budget(config, budget):
     }])
 
 
+def with_history_kv_budget(config, arm_name, target_tokens):
+    """Add a capacity variant through the shared history-KV budget interface."""
+    from benchmarks.arms import get_arm
+    budget = HistoryKVBudget(target_tokens)
+    budget.apply(get_arm(arm_name))
+    templates = [method for method in config["methods"]
+                 if method["arm"] == arm_name and "history_budget_tokens" not in method]
+    if len(templates) != 1:
+        raise ValueError(f"History-KV budget requires one configured base arm: {arm_name}")
+    if any(method["arm"] == arm_name and method.get("history_budget_tokens") == target_tokens
+           for method in config["methods"]):
+        raise ValueError(f"History-KV budget cell already exists: {budget.variant_name(arm_name)}")
+    variant = dict(templates[0], group="budget", history_budget_tokens=target_tokens)
+    # Absolute capacity overrides fractional retention; never label it with
+    # the base arm's old retention ratio in a matrix or comparison table.
+    variant.pop("retention", None)
+    return dict(config, methods=[*config["methods"], variant])
+
+
+def history_kv_budget_args(cell):
+    """Use one resolved capacity on both closed-loop and replay proxy paths."""
+    if "history_budget_tokens" not in cell:
+        return []
+    from benchmarks.arms import get_arm
+    arm = get_arm(cell["arm"])
+    if arm.text_history_budget_tokens is not None:
+        return []  # Text budgets are encoded by their separate arm interface.
+    budget = HistoryKVBudget(cell["history_budget_tokens"])
+    budget.apply(arm)
+    return budget.cli_args()
+
+
 def run_command(config, cell, directory, profile, stage="closed_loop"):
     if is_native_arm(cell["arm"]):
         cmd = [config["bench_python"], "-m", "benchmarks.paper.c1",
@@ -288,6 +328,7 @@ def run_command(config, cell, directory, profile, stage="closed_loop"):
            "--telemetry-log", str(directory / "proxy_telemetry.jsonl"),
            "--capability-features",
            "hiagent_trajectory_retrieval_v1,acebench_role_history_v1"]
+    cmd += history_kv_budget_args(cell)
     if cell["arm"] == "full" and not cell.get("tool_memory"):
         # Only the raw-tools Full cell records the canonical replay prefixes.
         cmd += ["--record-prefixes", str(directory / "full_prefixes.jsonl")]
@@ -359,7 +400,7 @@ def extension_problem(existing, config, source, output):
         # the cell has no artifacts, after which it is frozen with them.
         has_artifacts = any((output / stage / cell_id).exists() for stage in ("closed_loop", "common_prefix"))
         for key in ("arm", "method", "ratio", "retention", "benchmark", "adapter", "category",
-                    "tool_context", "tool_memory", "tool_checkpoint"):
+                    "tool_context", "tool_memory", "tool_checkpoint", "history_budget_tokens"):
             if key == "method" and not has_artifacts:
                 continue
             if old.get(key) != new.get(key):
@@ -394,6 +435,9 @@ def _prepare_locked(config, output, source):
                     or not item.get("benchmarks")):
                 raise ValueError("Text budget cells require a matching token cap and explicit supported benchmarks")
             continue
+        explicit_budget = item.get("history_budget_tokens")
+        if "history_budget_tokens" in item:
+            arm = HistoryKVBudget(explicit_budget).apply(arm)
         if is_candidate_arm(arm.name):
             if (item.get("ratio") != 8 or arm.ratio != 8
                     or arm.native_controller != "candidate_" + ARM_TO_VARIANT[arm.name]
@@ -431,8 +475,8 @@ def _prepare_locked(config, output, source):
             if (spec is None or spec["method"] != expected[0]
                     or spec["backend"] != expected[1]
                     or not spec["persistent_session"]
-                    or spec["retention_ratio"] != item["retention"]
-                    or spec["target_tokens"] is not None):
+                    or spec["retention_ratio"] != item.get("retention")
+                    or spec["target_tokens"] != explicit_budget):
                 raise ValueError("Persistent history-KV budget differs from matrix")
         if arm.name == "agentfold":
             if item["method"] != "AgentFold" or arm.text_policy != "agentfold" or arm.history_kv:
@@ -443,12 +487,12 @@ def _prepare_locked(config, output, source):
             if (item["method"] != expected_label or spec is None
                     or spec["method"] != arm.name
                     or spec["backend"] != "reference_attention"
-                    or spec["target_tokens"] != 2048
+                    or spec["target_tokens"] != (explicit_budget if explicit_budget is not None else 2048)
                     or spec["retention_ratio"] is not None
                     or not spec["persistent_session"]
                     or arm.text_policy):
                 raise ValueError(
-                    f"{expected_label} paper cell must use its 2048-token "
+                    f"{expected_label} paper cell must use its explicit budget or default 2048-token "
                     "persistent reference-attention runtime"
                 )
         if arm.name in {"agentfold", "commitkv", "agentkv"}:
@@ -741,6 +785,7 @@ def execute(config, plan, output, source, stages, selected, port_offset=0):
                                       "--model-family", config.get("model_family", "qwen3-4b"),
                                      "--request-log", str(directory / "proxy_requests.jsonl"),
                                      "--telemetry-log", str(directory / "proxy_telemetry.jsonl")]
+                        proxy_cmd += history_kv_budget_args(cell)
                         if cell.get("tool_memory"):
                             proxy_cmd += ["--tool-memory", cell["tool_memory"],
                                           "--tool-checkpoint", cell["tool_checkpoint"]]
@@ -915,6 +960,8 @@ def main(argv=None):
                         help="add budget-adapted ACON BFCL/ACEBench cells with this actor history cap")
     parser.add_argument("--hiagent-budget-tokens", type=int,
                         help="add budget-adapted HiAgent full BFCL/ACEBench cells with this actor history cap")
+    parser.add_argument("--history-kv-budget", action="append", default=[], metavar="ARM=TOKENS",
+                        help="add a history-KV capacity cell, e.g. commitkv=768; repeat for a sweep")
     parser.add_argument("--tool-contexts", default="",
                         help="add named tool contexts to history/recovery methods, preserving raw cells")
     parser.add_argument("--tool-checkpoint", type=Path,
@@ -929,6 +976,8 @@ def main(argv=None):
             tuple(args.candidate_benchmarks.split(",")))
         config = with_acon_budget(config, args.acon_budget_tokens)
         config = with_hiagent_budget(config, args.hiagent_budget_tokens)
+        for value in args.history_kv_budget:
+            config = with_history_kv_budget(config, *parse_history_kv_budget(value))
         config = with_tool_contexts(config, list(filter(None, args.tool_contexts.split(","))),
                                     args.tool_checkpoint)
     output = args.output or Path(config["output_root"])

@@ -40,7 +40,7 @@ def write_comparison(output: Path, plan):
             ratios = "common_prefix_token_ratios" if stage == "common_prefix" else "token_ratios"
             score_path = directory / ("summary_" + cell["arm"] + ".json")
             scores = json.loads(score_path.read_text()) if score_path.exists() else {}
-            row = {key: cell.get(key) for key in ("cell_id", "benchmark", "method", "arm", "group", "ratio", "retention", "tool_context")}
+            row = {key: cell.get(key) for key in ("cell_id", "benchmark", "method", "arm", "group", "ratio", "retention", "tool_context", "history_budget_tokens")}
             row.update(stage=stage, result_status="preliminary, n=1",
                        comparison_basis=("own_output_closed_loop" if stage == "closed_loop"
                                          else "Full_teacher_forced_prefix_target_policy"),

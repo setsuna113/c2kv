@@ -33,6 +33,7 @@ from adapters.base import RunContext  # noqa: E402
 from checkpoint_profile import ProfileError, resolve_checkpoint_profile  # noqa: E402
 from capabilities import run_preflight  # noqa: E402
 from arms import get_arm  # noqa: E402
+from history_budget import HistoryKVBudget  # noqa: E402
 from paper.process_lifecycle import stop_owned_group, unwind_on_termination  # noqa: E402
 
 # --benchmark value -> adapter module.  Two names share acon_adapter (the
@@ -247,7 +248,7 @@ def add_core_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--tool-budget-tokens", type=int,
                         help="optional cap on resident tool-context tokens")
     parser.add_argument("--history-kv-target-tokens", type=int,
-                        help="explicit absolute history budget for generation-budget arms")
+                        help="absolute history-KV capacity; preserves the registered method and backend")
     parser.add_argument("--shared-engine", action="store_true",
                         help="keep persistent-session resets local to this proxy")
     parser.add_argument("--tool-checkpoint", default="",
@@ -326,6 +327,11 @@ def resolve_run_profile(args: argparse.Namespace) -> dict:
 def main(argv=None):
     parser = build_parser()
     args = parser.parse_args(argv)
+    if args.history_kv_target_tokens is not None:
+        try:
+            HistoryKVBudget(args.history_kv_target_tokens).apply(get_arm(args.arm))
+        except ValueError as exc:
+            parser.error(str(exc))
     try:
         profile = resolve_run_profile(args)
     except ProfileError as exc:
@@ -377,6 +383,8 @@ def main(argv=None):
     summary["arm"] = args.arm
     summary["benchmark"] = args.benchmark
     summary["backend"] = args.backend
+    if args.history_kv_target_tokens is not None:
+        summary["history_budget_tokens"] = args.history_kv_target_tokens
     summary["model"] = args.model
     summary["checkpoint_profile"] = profile
     summary["preflight"] = preflight.as_dict()

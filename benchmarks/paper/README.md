@@ -72,7 +72,7 @@ experiment or retrain the detector.
 | SnapKV | Persistent history KV, retain 25% | Same | Same | Same | Same | Same | Retain 12.5% on BFCL/AppWorld |
 | PyramidKV | Persistent history KV, retain 25% | Same | Same | Same | Same | Same | Retain 12.5% on BFCL/AppWorld |
 | AgentFold (held) | Untrained-actor protocol diagnostic; excluded from method quality comparison | Held | Held | Held | Held | Held | None |
-| CommitKV / AgentKV | Resident KV selection, 2048-token launch budget | Same | Same | Same | Same | Same | None |
+| CommitKV / AgentKV | Resident KV selection, 2048-token default | Same | Same | Same | Same | Same | Explicit history-KV budget cells |
 | C2KV+C1 | H0 / C1000 / ratio8 / D3 hybrid / R1 | Same | Same | Same | Native C1 | Not enabled by default | Ratio-4 BFCL base and ACEBench |
 
 Tool contexts are a second, orthogonal axis (`config.json` `tool_contexts`
@@ -125,6 +125,61 @@ actor and explicit accounting for its parse-retry policy, as described in the
 The 2048-token AgentKV allowance is a project
 setting; CommitKV reports this absolute budget among its evaluated settings.
 `--history-kv-target-tokens` overrides either allowance at launch.
+
+History-KV capacity sweeps use the device-neutral
+`benchmarks.history_budget.HistoryKVBudget` interface. It resolves the
+registered `Arm.history_kv` to an absolute token allowance without changing
+the method, selector settings, backend, or persistent-session protocol.
+The paper planner and proxy use this same interface; CUDA and NPU do not
+implement separate budget policies. Text-summary allowances and learned gist
+ratios are separate contracts and are rejected by this history-KV interface.
+
+Add independent cells with the repeatable `--history-kv-budget ARM=TOKENS`
+option on both `prepare` and `run`, for example:
+
+```bash
+python -m benchmarks.paper prepare --config CONFIG.json \
+  --sglang-source ENGINE --output RESULTS \
+  --history-kv-budget commitkv=768 --history-kv-budget commitkv=1024 \
+  --history-kv-budget agentkv=768
+python -m benchmarks.paper run --config CONFIG.json \
+  --sglang-source ENGINE --output RESULTS \
+  --history-kv-budget commitkv=768 --history-kv-budget commitkv=1024 \
+  --history-kv-budget agentkv=768 --stage closed_loop \
+  --cells bfcl_base__commitkv_b768,bfcl_base__commitkv_b1024,bfcl_base__agentkv_b768
+```
+
+The original `bfcl_base__commitkv` / `bfcl_base__agentkv` cells retain their
+2048-token defaults and unchanged commands. A budget cell keeps `arm=commitkv`
+or `arm=agentkv` but carries `history_budget_tokens` and an `_bN` cell suffix;
+optional tool-context suffixes follow it. The planner inherits the configured
+base arm's benchmark scope, and resolved JSON, matrix CSV, run summaries, and
+comparison tables retain the explicit allowance. Multiple budget cells use
+separate result directories. Existing results cannot be resumed as a different
+budget. Do not interpret the allowance as a measured compression ratio.
+
+For an existing CUDA or NPU upstream, the shared single-cell client reuses
+the same planner and benchmark adapters without launching an engine:
+
+```bash
+python -m benchmarks.paper.history_kv_client --config DEVICE_CONFIG.json \
+  --benchmark bfcl_base --history-kv-budget commitkv=768 \
+  --upstream http://127.0.0.1:36200 --proxy-port 37490 \
+  --out NEW_RESULTS --dry-run
+```
+
+The config must contain the deployment's checkpoint, interpreter, and benchmark
+paths. The NPU repository's `generality/paper_history_kv_budget.py` is a thin
+wrapper over this client. A live client records official results and proxy
+telemetry. Full paper aggregation additionally needs the upstream's per-cell
+`server_telemetry.jsonl`; enabling telemetry in the client environment does not
+reconfigure an already running server.
+
+The same API accepts other configured history-KV arms. An absolute allowance
+replaces their retention fraction in the new cell while leaving the original
+fractional cell unchanged. The reference backend and exact-generated-prefix
+requirements for CommitKV/AgentKV still apply at every capacity: use
+`closed_loop`; their Full teacher-prefix replay remains unsupported.
 
 CommitKV and AgentKV keep the sampled actor output token stream across turns and
 append only the new observation. A structured tool-call echo may reuse that raw
