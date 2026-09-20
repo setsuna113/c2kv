@@ -8,6 +8,7 @@ task identity and capture agent-only telemetry for the paper matrix.
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import math
 import shutil
@@ -217,7 +218,9 @@ def _official_tool_schemas(tau2_dir: Path, python: str, domain: str) -> List[Dic
 
 
 def _terminal_results(path: Path, expected_ids: List[str], trials: int,
-                      *, require_reward: bool = True) -> List[Dict[str, Any]]:
+                      *, require_reward: bool = True,
+                      task_failures: Optional[Dict[str, str]] = None,
+                      inspect_failures: bool = False) -> List[Dict[str, Any]]:
     if not path.is_file():
         raise RuntimeError(f"tau2 produced no {path}")
     data = json.loads(path.read_text(encoding="utf-8"))
@@ -237,9 +240,10 @@ def _terminal_results(path: Path, expected_ids: List[str], trials: int,
         termination = row.get("termination_reason")
         if not isinstance(termination, str) or not termination:
             raise RuntimeError(f"tau2 task {row['task_id']} has no terminal reason")
-        if termination == "infrastructure_error":
+        if (termination == "infrastructure_error" and not inspect_failures
+                and row["task_id"] not in (task_failures or {})):
             raise RuntimeError(f"tau2 task {row['task_id']} ended with infrastructure_error")
-        if require_reward:
+        if require_reward and row["task_id"] not in (task_failures or {}):
             reward = (row.get("reward_info") or {}).get("reward")
             if type(reward) not in (int, float) or not math.isfinite(float(reward)):
                 raise RuntimeError(f"tau2 task {row['task_id']} lacks a finite official reward")
@@ -272,7 +276,8 @@ def _validate_recorded_prefixes(path: Path, expected_ids: List[str]) -> None:
             f"recorded={sorted(ids)}")
 
 
-def _validate_harness_events(path: Path, expected_ids: List[str], trials: int = 1) -> None:
+def _validate_harness_events(path: Path, expected_ids: List[str], trials: int = 1,
+                             task_failures: Optional[Dict[str, str]] = None) -> None:
     """Every official task trial must execute once with agent decisions."""
     from measurement.telemetry import read_jsonl
 
@@ -290,12 +295,50 @@ def _validate_harness_events(path: Path, expected_ids: List[str], trials: int = 
         raise RuntimeError(
             f"tau2 official task retry or missing episode: starts={dict(starts)} "
             f"ends={dict(ends)} expected={dict(expected)}")
+    allowed = set(task_failures or {})
     if (set(decisions) != set(expected_ids) or
-            any(row.get("status") != "ok" for row in rows
-                if row.get("event_type") == "episode_end") or
-            any(row.get("error") for row in rows
-                if row.get("event_type") == "decision")):
+            any(row.get("status") != "ok" and row.get("episode_id") not in allowed
+                for row in rows if row.get("event_type") == "episode_end") or
+            any(row.get("error") and row.get("episode_id") not in allowed
+                for row in rows if row.get("event_type") == "decision")):
         raise RuntimeError("tau2 official episode had no agent decision or ended in error")
+
+
+def _declared_task_failures(out_dir: Path, rows: List[Dict[str, Any]],
+                            trials: int) -> Dict[str, str]:
+    """Only explicit method/budget codes may turn tau2's generic error into a task loss."""
+    from measurement.telemetry import read_jsonl
+
+    failed = {str(row["task_id"]) for row in rows
+              if row.get("termination_reason") == "infrastructure_error"}
+    if not failed:
+        return {}
+    if trials != 1:
+        return {}  # The proxy's task identity cannot disambiguate trials.
+    events = out_dir / "measurement" / "harness_events.jsonl"
+    if not events.is_file():
+        return {}
+    errors = {str(row.get("episode_id")): str(row.get("error"))
+              for row in read_jsonl(events) if row.get("event_type") == "decision"
+              and row.get("error")}
+    declared: Dict[str, str] = {}
+    # Proxy logs hash measurement_session instead of recording the raw task ID.
+    session_ids = {hashlib.sha256(json.dumps(
+        ["measurement_session", task], ensure_ascii=False, sort_keys=True,
+        separators=(",", ":")).encode("utf-8")).hexdigest(): task
+                   for task in failed}
+    for path in (out_dir / "logs").glob("proxy_*.jsonl"):
+        for row in read_jsonl(path):
+            task = session_ids.get(row.get("conv_id"))
+            if (task in failed and task in errors
+                    and row.get("status") == "acon_history_budget_exceeded"):
+                declared[task] = "acon_history_budget_exceeded"
+    # Native single-task servers return this exact API code with HTTP 429.
+    # Generic 429, HTTP 502 or connection refusal never proves model exhaustion.
+    for task in failed:
+        if task in errors and "decision_cap_reached" in errors[task]:
+            declared[task] = "decision_cap_reached"
+    return declared
 
 
 def run_tau2(base_url: str, user_base_url: str, out_dir: Path, *,
@@ -355,15 +398,24 @@ def run_tau2(base_url: str, user_base_url: str, out_dir: Path, *,
         json.dumps(protocol, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     env = harness_env(tau2_dir, out_dir, native=native)
     run_owned(command, cwd=tau2_dir, env=env, check=True)
+    official = out_dir / "official"
+    official.mkdir(parents=True, exist_ok=True)
+    if (sims / "results.json").is_file():
+        shutil.copy2(sims / "results.json", official / "results.json")
     raw_rows = _terminal_results(sims / "results.json", selected, trials,
-                                 require_reward=False)
+                                 require_reward=False, inspect_failures=True)
+    task_failures = _declared_task_failures(out_dir, raw_rows, trials)
+    _terminal_results(sims / "results.json", selected, trials,
+                      require_reward=False, task_failures=task_failures)
     _validate_harness_events(
-        out_dir / "measurement" / "harness_events.jsonl", selected, trials)
+        out_dir / "measurement" / "harness_events.jsonl", selected, trials,
+        task_failures=task_failures)
     # Re-scoring consumes saved trajectories; it is not another model episode.
     run_owned(evaluate_command(sims, python=python), cwd=tau2_dir,
               env=harness_env(tau2_dir), check=True)
     updated = sims / "updated_results.json"
-    scored_rows = _terminal_results(updated, selected, trials)
+    scored_rows = _terminal_results(updated, selected, trials,
+                                   task_failures=task_failures)
     raw_terminal = sorted((str(row["task_id"]), str(row.get("trial")),
                            row["termination_reason"]) for row in raw_rows)
     scored_terminal = sorted((str(row["task_id"]), str(row.get("trial")),
@@ -371,15 +423,14 @@ def run_tau2(base_url: str, user_base_url: str, out_dir: Path, *,
     if raw_terminal != scored_terminal:
         raise RuntimeError("tau2 re-evaluation changed task/trial terminal identity")
     tools = _official_tool_schemas(tau2_dir, python, domain_for_task_set(task_set))
-    summary = collect(updated, domain=domain_for_task_set(task_set), tools=tools)
+    summary = collect(updated, domain=domain_for_task_set(task_set), tools=tools,
+                      task_failures=task_failures)
     if summary["n"] != len(selected) * trials:
         raise RuntimeError("tau2 collected row count differs from selected task-trials")
     if record_prefixes:
         _validate_recorded_prefixes(Path(record_prefixes), selected)
     summary.update(task_ids=selected, protocol=protocol, cost_join=COST_JOIN)
-    official = out_dir / "official"
-    official.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(sims / "results.json", official / "results.json")
+    summary["task_failures"] = task_failures
     shutil.copy2(updated, official / "updated_results.json")
     return summary
 
@@ -389,7 +440,8 @@ COST_JOIN = ("joinable: tau2 instrumentation adds the official task ID to "
 
 
 def collect(results_path: Path, domain: str = "airline",
-            tools: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+            tools: Optional[List[Dict[str, Any]]] = None,
+            task_failures: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
     """Parse a tau2 results.json into unified rows.
 
     Verified against real trajectory files: simulations[i].messages carry
@@ -430,11 +482,15 @@ def collect(results_path: Path, domain: str = "airline",
             protocol_legal = False
         elif turns and all(t["protocol_legal"] is True for t in turns):
             protocol_legal = True
+        task_id = str(sim.get("task_id"))
+        failure = (task_failures or {}).get(task_id)
         rows.append(
             {
-                "task_id": str(sim.get("task_id")),
+                "task_id": task_id,
                 "trial": sim.get("trial"),
-                "semantic_score": reward_info.get("reward"),
+                "semantic_score": 0.0 if failure else reward_info.get("reward"),
+                "official_reward": reward_info.get("reward"),
+                "task_failure_kind": failure,
                 "protocol_legal": protocol_legal,
                 "n_turns": len(turns),
                 "n_tool_calls": sum(t["n_tool_calls"] for t in turns),

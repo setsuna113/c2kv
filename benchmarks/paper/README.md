@@ -277,6 +277,33 @@ comparison tables retain the explicit allowance. Multiple budget cells use
 separate result directories. Existing results cannot be resumed as a different
 budget. Do not interpret the allowance as a measured compression ratio.
 
+Native C2KV allocation/recovery uses a separate capacity contract through
+`benchmarks.native_history_budget.NativeHistoryBudget`. The repeatable
+`--native-history-budget ARM=TOKENS` adds BFCL base/long-context cells without
+changing the gist ratio, recovery policy, detector threshold, or generation
+limits. For the selected Pending policy:
+
+```bash
+python -m benchmarks.paper prepare --config CONFIG.json \
+  --sglang-source ENGINE --output NEW_RESULTS \
+  --candidate-arms goal_pending \
+  --native-history-budget c2kv_goal_pending_r8=256 \
+  --native-history-budget c2kv_goal_pending_r8=2048
+```
+
+Use the same options with `run --stage closed_loop` and select
+`--cells bfcl_base__c2kv_goal_pending_r8_b256,bfcl_base__c2kv_goal_pending_r8_b2048`.
+The original `bfcl_base__c2kv_goal_pending_r8` remains the fixed-budget release.
+Even an explicit 768-token setting receives its own `_b768` identity. The native
+delivery converts the allowance to BF16 KV bytes using the checkpoint geometry,
+sets both history and workspace caps in a per-cell policy file, and records the
+base and derived policy provenance in `native/profile.json`. Draft and recovery
+share that policy; recovered raw history remains charged to the same cap.
+An explicit sweep may exceed the old B0 allowance without rewriting its frozen
+policy. No option preserves the original policy and commands. Capacity failure
+remains a method outcome, not an infrastructure retry. Bare `c2kv_native_r4` and
+non-BFCL native sweep paths are not supported by this interface.
+
 For an existing CUDA or NPU upstream, the shared single-cell client reuses
 the same planner and benchmark adapters without launching an engine:
 

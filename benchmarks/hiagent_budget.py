@@ -31,6 +31,7 @@ Compress = Callable[[Dict[str, Any]], str]
 _LOCK = threading.Lock()
 _SUMMARY_CACHE: Dict[str, str] = {}
 BUDGET_UNAVAILABLE_FEEDBACK = "budget_unavailable: continue without trajectory retrieval."
+INVALID_SUBGOAL_FEEDBACK = "subgoal_unavailable: continue without trajectory retrieval."
 
 
 class BudgetExceeded(RuntimeError):
@@ -309,11 +310,14 @@ def transform(messages: List[Message], compress: Compress, action_dialect,
         actual = _count(measure, candidate, indices)
         if variant != "full" or feedback is not None:
             return actual, actual
-        reserved = list(candidate)
         insertion = indices[-1] + 1 if indices else len(systems) + int(task_index is not None)
-        reserved.insert(insertion, _feedback_message(BUDGET_UNAVAILABLE_FEEDBACK))
         reserve_indices = list(range(indices[0], insertion + 1)) if indices else [insertion]
-        return actual, _count(measure, reserved, reserve_indices)
+        reserves = []
+        for message in (BUDGET_UNAVAILABLE_FEEDBACK, INVALID_SUBGOAL_FEEDBACK):
+            reserved = list(candidate)
+            reserved.insert(insertion, _feedback_message(message))
+            reserves.append(_count(measure, reserved, reserve_indices))
+        return actual, max(reserves)
 
     all_retained = set(range(len(records)))
     # Before is the complete unsummarized source history. The floor renderer

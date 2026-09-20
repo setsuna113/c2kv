@@ -145,8 +145,9 @@ class ConversationMemory:
             )
 
         message_json = tuple(message.json_text for message in store.messages)
-        self._validate_monotone_prefix(message_json)
-        signature = (message_json, tuple(sorted(visible)))
+        source_prefix = store.source_prefix if store.source_prefix is not None else message_json
+        self._validate_monotone_prefix(source_prefix)
+        signature = (source_prefix, message_json, tuple(sorted(visible)))
         cached = self._decisions.get(decision_key)
         if cached is not None:
             old_signature, selection = cached
@@ -311,7 +312,7 @@ class ConversationMemory:
         )
 
         # Commit state only after the complete decision has passed all checks.
-        self._known_message_json = message_json
+        self._known_message_json = source_prefix
         self._decision_index = decision_index
         self._last_user_event_id = current_user.event_id if current_user else None
         self._leases = leases

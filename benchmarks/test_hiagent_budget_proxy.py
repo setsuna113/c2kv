@@ -54,6 +54,33 @@ def test_retrieval_denied_then_actor_continues_and_failed_trial_is_metered(monke
     assert len(calls) == 2
 
 
+def test_nonexistent_completed_subgoal_gets_bounded_internal_feedback(monkeypatch):
+    arm = get_arm("hiagent_full_b768")
+    calls = []
+    final = {"choices": [{"message": {"content": "I will continue the task."}}]}
+
+    def apply(payload, arm, conv, ids=None, retrieval_feedback=None):
+        calls.append((ids, retrieval_feedback))
+        assert ids == ([1] if retrieval_feedback is None else [])
+        return {"messages": [{"role": "user", "content": retrieval_feedback or "task"}]}, {
+            "retrieved_subgoals": [],
+            "invalid_retrieval_subgoals": [1] if retrieval_feedback is None else [],
+            "n_compressor_calls": 0, "compressor_usage": {},
+        }
+
+    monkeypatch.setattr(proxy, "_apply_text_arm", apply)
+    stats = {"n_compressor_calls": 0, "compressor_usage": {}}
+    response = proxy._hiagent_retrieval_loop(
+        {}, arm, "episode", retrieval([1]), stats, lambda staged:
+        final if "subgoal_unavailable" in staged["messages"][-1]["content"]
+        else pytest.fail("missing internal feedback"))
+    assert response is final
+    assert calls == [([1], None), ([], hiagent_budget.INVALID_SUBGOAL_FEEDBACK)]
+    assert stats["invalid_retrieval_attempts"] == [{
+        "requested_subgoals": [1], "invalid_subgoals": [1]}]
+    assert stats["retrieval_usage"]["calls"] == 1
+
+
 def test_token_preflight_includes_internal_tool_and_original_is_unchanged(monkeypatch):
     sent = []
     def post(path, payload, timeout):
@@ -129,6 +156,54 @@ def test_handler_rebuilds_boundary_and_guards_each_retrieval(monkeypatch, tmp_pa
     calls = row["textarm"]["actor_budget_calls"]
     assert [r["phase"] for r in calls] == ["generation", "hiagent_retrieval_generation"]
     assert [r["actor_payload_sha256"] for r in calls] == [proxy.canonical_sha256(w) for w in wires]
+
+
+def test_invalid_retrieval_feedback_and_evidence_reach_request_log(monkeypatch, tmp_path):
+    arm = get_arm("hiagent_full")
+    monkeypatch.setattr(proxy, "ARM", arm)
+    monkeypatch.setattr(proxy, "BENCHMARK", "toolsandbox")
+    monkeypatch.setattr(proxy, "REQUEST_LOG_PATH", str(tmp_path / "requests.jsonl"))
+    monkeypatch.setattr(proxy, "PREFIX_LOG_PATH", None)
+    monkeypatch.setattr(proxy, "TELEMETRY_LOG_PATH", None)
+    monkeypatch.setattr(proxy.STATE, "recover", None)
+    monkeypatch.setattr(proxy.STATE, "reference_log_path", None)
+    sent = []
+
+    def post(path, payload, timeout):
+        sent.append(copy.deepcopy(payload))
+        if len(sent) == 1:
+            return retrieval([1])
+        return {"choices": [{"finish_reason": "stop", "message": {
+            "role": "assistant", "content": "I can proceed."}}], "usage": {"prompt_tokens": 100}}
+
+    def apply(payload, arm, conv, ids=None, retrieval_feedback=None):
+        invalid = ids == [1]
+        messages = [{"role": "user", "content": "task"}]
+        if retrieval_feedback:
+            messages.append({"role": "user", "content": retrieval_feedback})
+        return dict(payload, messages=messages), {
+            "retrieved_subgoals": [], "invalid_retrieval_subgoals": [1] if invalid else [],
+            "n_compressor_calls": 0, "compressor_usage": {},
+        }
+
+    monkeypatch.setattr(proxy, "BACKEND", SglangBackend(post))
+    monkeypatch.setattr(proxy, "_post_json", post)
+    monkeypatch.setattr(proxy, "_apply_text_arm", apply)
+    body = json.dumps({"model": "model", "messages": [{"role": "user", "content": "task"}]}).encode()
+    handler = proxy.ProxyHandler.__new__(proxy.ProxyHandler)
+    handler.path = "/v1/chat/completions"
+    handler.headers = {"Content-Length": str(len(body))}
+    handler.rfile = io.BytesIO(body)
+    response = {}
+    handler._send_json = lambda code, obj: response.update(code=code, obj=obj)
+    handler.do_POST()
+    assert response["code"] == 200
+    assert len(sent) == 2 and "subgoal_unavailable" in json.dumps(sent[1]["messages"])
+    assert response["obj"]["choices"][0]["message"]["content"] == "I can proceed."
+    row = json.loads((tmp_path / "requests.jsonl").read_text())
+    assert row["textarm"]["invalid_retrieval_attempts"] == [{
+        "requested_subgoals": [1], "invalid_subgoals": [1]}]
+    assert row["textarm"]["retrieval_usage"]["calls"] == 1
 
 
 def test_fixed_floor_is_terminal_but_retrieval_denial_is_not():

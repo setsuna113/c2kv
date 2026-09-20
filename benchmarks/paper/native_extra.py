@@ -10,6 +10,7 @@ import re
 import subprocess
 import time
 from collections.abc import Mapping
+from functools import lru_cache
 
 from . import c1_appworld
 from .candidate_matrix import ARM_TO_VARIANT, GOAL_VARIANTS, REPAIR_VARIANTS, VERIFIED_VARIANTS
@@ -317,6 +318,25 @@ def server_command(config, benchmark, task, native, delivery, controller_path):
 controller_command = server_command
 
 
+@lru_cache(maxsize=8)
+def _preflight_controller_tokenizer(python: str, checkpoint: str) -> None:
+    """Check the controller interpreter against the served tokenizer before launch."""
+    script = (
+        "import sys; from transformers import AutoTokenizer; "
+        "tok=AutoTokenizer.from_pretrained(sys.argv[1], local_files_only=True); "
+        "tok.encode('tokenizer preflight')"
+    )
+    try:
+        result = run_owned([python, "-c", script, checkpoint],
+                           capture_output=True, text=True)
+    except OSError as error:
+        raise RuntimeError(f"Native controller Python is unavailable: {python}") from error
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"Native controller Python {python} cannot load the served tokenizer "
+            f"from {checkpoint}: {(result.stderr or '').strip()[-1000:]}")
+
+
 def _run_official(config, benchmark, task, task_out, base_url, model):
     user_url = c1_appworld._sglang_upstream(config)
     if benchmark == "tau2":
@@ -405,6 +425,9 @@ def _run_official(config, benchmark, task, task_out, base_url, model):
 def run_task(config, benchmark, task, native, delivery, controller_path):
     """Run one official task against a one-task native event server."""
     task = _task_id(task)
+    _preflight_controller_tokenizer(
+        c1_appworld._controller_python(config),
+        str(Path(config["checkpoint"]).resolve()))
     command = server_command(config, benchmark, task, native, delivery, controller_path)
     delivery_root = c1_appworld._delivery_path(delivery)
     runtime = delivery_root / "runtime"

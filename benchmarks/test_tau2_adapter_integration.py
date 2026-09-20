@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import importlib.util
+import hashlib
 import json
 import sys
 import types
@@ -154,6 +155,62 @@ def test_harness_events_reject_restarted_or_failed_official_trial(tmp_path):
     path.write_text("\n".join(map(json.dumps, rows)) + "\n", encoding="utf-8")
     with pytest.raises(RuntimeError, match="ended in error"):
         tau2._validate_harness_events(path, ["11"])
+
+
+def test_typed_method_guard_keeps_completed_tau2_scores_and_failed_task(tmp_path):
+    from benchmarks.measurement.telemetry import append_jsonl
+
+    measurement = tmp_path / "measurement" / "harness_events.jsonl"
+    for task, status in (("11", "ok"), ("19", "error")):
+        append_jsonl(measurement, {"event_type": "episode_start", "episode_id": task})
+        append_jsonl(measurement, {"event_type": "decision", "episode_id": task,
+                                    "error": "APIError: budget" if task == "19" else None})
+        append_jsonl(measurement, {"event_type": "episode_end", "episode_id": task,
+                                    "status": status})
+    append_jsonl(tmp_path / "logs" / "proxy_acon_34100.jsonl", {
+        "conv_id": hashlib.sha256(b'["measurement_session","19"]').hexdigest(),
+        "status": "acon_history_budget_exceeded"})
+    rows = [_result("11", 1.0), _result("19", termination="infrastructure_error")]
+    result = tmp_path / "results.json"
+    result.write_text(json.dumps({"simulations": rows}), encoding="utf-8")
+    parsed = tau2._terminal_results(result, ["11", "19"], 1,
+                                    require_reward=False, inspect_failures=True)
+    failures = tau2._declared_task_failures(tmp_path, parsed, 1)
+    assert failures == {"19": "acon_history_budget_exceeded"}
+    tau2._terminal_results(result, ["11", "19"], 1, task_failures=failures)
+    tau2._validate_harness_events(measurement, ["11", "19"], task_failures=failures)
+    scores = tau2.collect(result, tools=[], task_failures=failures)
+    assert scores["n"] == 2 and scores["semantic_score"] == 0.5
+    assert scores["task_rows"][1]["official_reward"] is None
+    assert scores["task_rows"][1]["task_failure_kind"] == "acon_history_budget_exceeded"
+
+
+def test_untyped_tau2_502_remains_incomplete(tmp_path):
+    from benchmarks.measurement.telemetry import append_jsonl
+
+    append_jsonl(tmp_path / "measurement" / "harness_events.jsonl", {
+        "event_type": "decision", "episode_id": "19", "error": "HTTP 502 connection refused"})
+    append_jsonl(tmp_path / "logs" / "proxy_acon_34100.jsonl", {
+        "conv_id": hashlib.sha256(b'["measurement_session","19"]').hexdigest(),
+        "status": "upstream_error"})
+    rows = [_result("19", termination="infrastructure_error")]
+    assert tau2._declared_task_failures(tmp_path, rows, 1) == {}
+    result = tmp_path / "results.json"
+    result.write_text(json.dumps({"simulations": rows}), encoding="utf-8")
+    with pytest.raises(RuntimeError, match="infrastructure_error"):
+        tau2._terminal_results(result, ["19"], 1)
+
+
+def test_native_decision_cap_requires_exact_typed_error(tmp_path):
+    from benchmarks.measurement.telemetry import append_jsonl
+
+    event = tmp_path / "measurement" / "harness_events.jsonl"
+    append_jsonl(event, {"event_type": "decision", "episode_id": "19",
+                         "error": "APIStatusError: decision_cap_reached"})
+    rows = [_result("19", termination="infrastructure_error")]
+    assert tau2._declared_task_failures(tmp_path, rows, 1) == {
+        "19": "decision_cap_reached"}
+    assert tau2._declared_task_failures(tmp_path, rows, 2) == {}
 
 
 @pytest.mark.parametrize("native", [False, True])
