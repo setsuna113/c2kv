@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from benchmarks.adapters import bfcl_adapter
+from benchmarks.adapters.base import RunContext
 
 
 def _completion(content, tool_calls=None):
@@ -20,6 +21,21 @@ def _completion(content, tool_calls=None):
         }],
         "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
     })
+
+
+def test_bench_entry_disables_sdk_retries_by_default(tmp_path, monkeypatch):
+    seen = {}
+
+    def run_bfcl(*args, **kwargs):
+        seen.update(kwargs)
+        return {}
+
+    monkeypatch.setattr(bfcl_adapter, "run_bfcl", run_bfcl)
+    bfcl_adapter.run(RunContext(
+        base_url="http://127.0.0.1:19876", user_base_url="", out_dir=tmp_path,
+        model="c2kv-agent", arm="full", options={"bfcl_dir": str(tmp_path)},
+    ))
+    assert seen["no_upstream_retries"] is True
 
 
 def test_registered_fc_handler_normalizes_no_call_for_real_bfcl(
