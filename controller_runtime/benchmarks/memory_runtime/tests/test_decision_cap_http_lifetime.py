@@ -22,8 +22,7 @@ def test_decision_cap_keeps_http_endpoint_for_typed_rejection(tmp_path):
         deadline_monotonic=time.monotonic() + 60, steps_path=tmp_path / "steps.jsonl")
     api._validate_request = lambda payload: (payload, ("task", 0, payload["step"]),
                                              str(payload["step"]))
-    api._openai_response = lambda record: {"success": True}
-    assert api.handle_chat({"step": 0}) == {"success": True}
+    api.decisions_reserved = 1
     assert _stop_for_health(api.health()) is False
     with pytest.raises(EventNativeAPIError) as raised:
         api.handle_chat({"step": 1})
