@@ -154,6 +154,9 @@ def completion_kind(row: Mapping, *, fc_model: bool = False) -> str:
     if any(marker in text for marker in (
         "HiAgent requested nonexistent completed subgoals",
         "HiAgent requested an already revealed trajectory without advancing",
+        "HiAgent exceeded four internal trajectory retrieval rounds",
+        "HiAgent mixed internal retrieval and environment actions",
+        "malformed hiagent_retrieve subgoal_ids",
     )):
         return "hiagent_invalid_retrieval"
     return "incomplete"
