@@ -44,6 +44,28 @@ DRIVER_PORT_STRIDE = 1000
 
 ENGINE_PORT = {0: 36200, 1: 36201, 2: 36202, 3: 36203, 4: 36204, 5: 36205, 6: 36206, 7: 36207}
 
+
+def selected_sources() -> dict[str, str]:
+    """Pin one launch to immutable checkouts before writing its manifest."""
+    defaults = {
+        "generality": Path(__file__).resolve().parents[1],
+        "paper": SRC / "paper_harness",
+        "sglang": SRC / "sglang-gen",
+    }
+    variables = {
+        "generality": "C2KV_GENERALITY_SOURCE",
+        "paper": "C2KV_PAPER_SOURCE",
+        "sglang": "C2KV_SGLANG_SOURCE",
+    }
+    sources = {key: Path(os.environ.get(variables[key], default)).resolve()
+               for key, default in defaults.items()}
+    required = {"generality": "generality/scheduler_npu.py",
+                "paper": "benchmarks", "sglang": "python/sglang"}
+    for key, marker in required.items():
+        if variables[key] in os.environ and not (sources[key] / marker).exists():
+            raise RuntimeError(f"Invalid {variables[key]}: {sources[key] / marker}")
+    return {key: str(path) for key, path in sources.items()}
+
 # driver assignment per (backend, condition)
 def driver_for(backend: str, condition: str) -> str:
     if backend == "c2kv":
@@ -187,6 +209,8 @@ def launch_cell(cell: dict, card: int, slot: int) -> subprocess.Popen:
         raise ValueError(f"Invalid driver slot: {slot}")
     driver = driver_for(cell["backend"], cell["condition"])
     cell = dict(cell)
+    sources = selected_sources()
+    cell["source_checkouts"] = sources
     if cell["condition"] == "tracer_history":
         receipt_path, receipt = calibration_receipt(cell)
         if not calibration_is_ready(cell, receipt):
@@ -211,25 +235,28 @@ def launch_cell(cell: dict, card: int, slot: int) -> subprocess.Popen:
     log = LOGS / f"cell_{cell['cell_id']}_c{card}.log"
     port_base = DRIVER_PORT_BASE + (card * MAX_DRIVERS_PER_CARD + slot) * DRIVER_PORT_STRIDE
     env = os.environ.copy()
+    env.update({"C2KV_GENERALITY_SOURCE": sources["generality"],
+                "C2KV_PAPER_SOURCE": sources["paper"],
+                "C2KV_SGLANG_SOURCE": sources["sglang"]})
     if driver in {"c2kv", "session_tracer"}:
         env["ASCEND_RT_VISIBLE_DEVICES"] = str(card)
     if driver == "c2kv":
-        cmd = [PY_SGL, str(SRC / "generality" / "c2kv_cell.py"),
+        cmd = [PY_SGL, str(Path(sources["generality"]) / "generality" / "c2kv_cell.py"),
                "--cell", str(cell_path), "--budgets",
                str(GENERATION_ROOT / "config" / "budgets_resolved.json"),
                "--port-base", str(port_base)]
     elif driver == "historykv_off":
-        cmd = [PY_SGL, str(SRC / "generality" / "historykv_cell.py"),
+        cmd = [PY_SGL, str(Path(sources["generality"]) / "generality" / "historykv_cell.py"),
                "--cell", str(cell_path),
                "--proxy-port", str(port_base)]
     elif driver == "session_tracer":
-        cmd = [PY_SGL, str(SRC / "generality" / "session_tracer_cell.py"),
+        cmd = [PY_SGL, str(Path(sources["generality"]) / "generality" / "session_tracer_cell.py"),
                "--cell", str(cell_path),
                "--port-base", str(port_base)]
     else:
         raise RuntimeError(f"unsupported cell driver: {driver}")
     # Resolve through the active source release, not the runtime's src symlink.
-    cpu_launcher = Path(__file__).resolve().parents[1] / "tools" / "launch_cpu_controller.sh"
+    cpu_launcher = Path(sources["generality"]) / "tools" / "launch_cpu_controller.sh"
     cmd = ["bash", str(cpu_launcher), *cmd]
     log.parent.mkdir(parents=True, exist_ok=True)
     lock_dir = LOGS / "driver_locks"
@@ -247,11 +274,17 @@ def launch_cell(cell: dict, card: int, slot: int) -> subprocess.Popen:
 def ensure_engines(cards: list[int]) -> None:
     import urllib.request
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    sources = selected_sources()
     for card in cards:
         port = ENGINE_PORT[card]
         try:
             with opener.open(f"http://127.0.0.1:{port}/health", timeout=3) as r:
                 if r.status == 200:
+                    if engine_source_matches(card):
+                        continue
+                    print(json.dumps({"event": "engine_source_migration_pending",
+                                      "card": card, "port": port,
+                                      "expected": sources["sglang"]}), flush=True)
                     continue
         except OSError:
             pass
@@ -259,12 +292,50 @@ def ensure_engines(cards: list[int]) -> None:
         log = LOGS / "engines" / f"{tag}.log"
         with log.open("ab") as stream:
             subprocess.Popen(
-                ["bash", str(GENERATION_ROOT / "tools" / "launch_engine.sh"),
+                ["bash", str(Path(sources["generality"]) / "tools" / "launch_engine.sh"),
                  str(card), str(port), tag, "--max-running-requests", "4"],
+                env={**os.environ, "C2KV_SGLANG_SOURCE": sources["sglang"]},
                 stdout=stream, stderr=subprocess.STDOUT,
                 stdin=subprocess.DEVNULL, start_new_session=True,
             )
         print(f"engine launch: card {card} port {port}")
+
+
+def engine_source_matches(card: int, proc_root: Path = Path("/proc")) -> bool:
+    """Only reuse a live engine when its Python import source matches the pin."""
+    configured = os.environ.get("C2KV_SGLANG_SOURCE")
+    if not configured:
+        return True  # preserve the existing unpinned runtime contract
+    expected = str(Path(configured).resolve() / "python")
+    matches = []
+    try:
+        processes = list(proc_root.iterdir())
+    except OSError:
+        return False
+    for proc in processes:
+        if not proc.name.isdigit():
+            continue
+        try:
+            argv = [part.decode("utf-8", "replace") for part in
+                    (proc / "cmdline").read_bytes().split(b"\0") if part]
+        except OSError:
+            continue  # unrelated process exited during the scan
+        if "sglang.launch_server" not in argv:
+            continue
+        port = str(ENGINE_PORT[card])
+        if not any(arg == f"--port={port}" or
+                   (arg == "--port" and index + 1 < len(argv) and
+                    argv[index + 1] == port)
+                   for index, arg in enumerate(argv)):
+            continue
+        try:
+            environment = (proc / "environ").read_bytes().split(b"\0")
+        except OSError:
+            return False
+        paths = [part.decode("utf-8", "replace")[len("PYTHONPATH="):]
+                 for part in environment if part.startswith(b"PYTHONPATH=")]
+        matches.append(paths == [expected])
+    return len(matches) == 1 and matches[0]
 
 
 def engine_healthy(card: int, timeout: float = 3.0) -> bool:
@@ -272,7 +343,7 @@ def engine_healthy(card: int, timeout: float = 3.0) -> bool:
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     try:
         with opener.open(f"http://127.0.0.1:{ENGINE_PORT[card]}/health", timeout=timeout) as r:
-            return r.status == 200
+            return r.status == 200 and engine_source_matches(card)
     except OSError:
         return False
 
@@ -341,7 +412,8 @@ def live_calibration_owners(proc_root: Path = Path("/proc")) -> dict[int, dict]:
         processes = list(proc_root.iterdir())
     except OSError as error:
         raise RuntimeError("Cannot inspect calibration owners") from error
-    expected = (SRC / "generality" / "c2kv_calibration.py").resolve()
+    expected = {(root / "generality" / "c2kv_calibration.py").resolve()
+                for root in (SRC, Path(selected_sources()["generality"]))}
     calibration_root = (GENERATION_ROOT / "calibration" / "c2kv").resolve()
     port_to_card = {port: card for card, port in ENGINE_PORT.items()}
     owners = {}
@@ -362,7 +434,7 @@ def live_calibration_owners(proc_root: Path = Path("/proc")) -> dict[int, dict]:
             out = Path(argv[argv.index("--out") + 1]).resolve()
             url = argv[argv.index("--sglang-backend-url") + 1]
             card = port_to_card[urlparse(url).port]
-            if script != expected or not out.is_relative_to(calibration_root):
+            if script not in expected or not out.is_relative_to(calibration_root):
                 raise ValueError("unexpected calibration source or output")
         except (ValueError, IndexError, KeyError, TypeError) as error:
             raise RuntimeError(f"Unverifiable C2KV calibration owner PID {proc.name}") from error
@@ -450,7 +522,8 @@ def other_scheduler_pids(proc_root: Path = Path("/proc")) -> list[int]:
         processes = list(proc_root.iterdir())
     except OSError as error:
         raise RuntimeError("Cannot inspect scheduler processes") from error
-    expected = {(SRC / "generality" / name).resolve()
+    expected = {(root / "generality" / name).resolve()
+                for root in (SRC, Path(selected_sources()["generality"]))
                 for name in ("scheduler.py", "scheduler_npu.py")}
     found = []
     for proc in processes:

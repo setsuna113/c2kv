@@ -61,7 +61,7 @@ export no_proxy=127.0.0.1,localhost
 export NO_PROXY=127.0.0.1,localhost
 export PYTHONUNBUFFERED=1
 export ASCEND_RT_VISIBLE_DEVICES=$CARD
-export PYTHONPATH=$ROOT/src/sglang-gen/python
+export PYTHONPATH="${C2KV_SGLANG_SOURCE:-$ROOT/src/sglang-gen}/python"
 export C2KV_PAPER_TELEMETRY=1
 export C2KV_PAPER_TELEMETRY_LOG=$ROOT/logs/engines/${TAG}_server_telemetry.jsonl
 exec /home/liuyancheng/envs/sgl/bin/python -m sglang.launch_server \

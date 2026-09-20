@@ -138,3 +138,17 @@ def test_serving_provenance_reads_checkout_head_and_dirty_state(tmp_path, monkey
     assert clean["worktree_dirty"] is False
     (checkout / "source.py").write_text("VALUE = 2\n")
     assert cellplan.serving_provenance()["worktree_dirty"] is True
+    pinned = tmp_path / "full_engine"
+    pinned.mkdir()
+    subprocess.run(["git", "-C", str(pinned), "init", "-q"], check=True)
+    subprocess.run(["git", "-C", str(pinned), "config", "user.name", "Test"], check=True)
+    subprocess.run(["git", "-C", str(pinned), "config", "user.email",
+                    "cellplan-test@example.invalid"], check=True)
+    (pinned / "source.py").write_text("VALUE = 3\n")
+    subprocess.run(["git", "-C", str(pinned), "add", "source.py"], check=True)
+    subprocess.run(["git", "-C", str(pinned), "commit", "-qm", "Pin test"], check=True)
+    monkeypatch.setenv("C2KV_SGLANG_SOURCE", str(pinned))
+    selected = cellplan.serving_provenance()
+    assert selected["checkout"] == str(pinned)
+    assert selected["commit"] != clean["commit"]
+    assert selected["worktree_dirty"] is False

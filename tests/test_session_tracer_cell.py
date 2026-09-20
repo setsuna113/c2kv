@@ -372,6 +372,20 @@ def test_appworld_worker_imports_paper_adapter_despite_runtime_name_collision(
         cwd=runtime, env=env, text=True, capture_output=True, check=True)
     assert imported.stdout.strip() == "paper_harness"
 
+    pinned = tmp_path / "full_paper"
+    pinned_adapter = pinned / "benchmarks" / "adapters"
+    pinned_adapter.mkdir(parents=True)
+    (pinned_adapter / "__init__.py").write_text("")
+    (pinned_adapter / "acon_adapter.py").write_text("ORIGIN = 'full_paper'\n")
+    monkeypatch.setenv("C2KV_PAPER_SOURCE", str(pinned))
+    pinned_env = driver.appworld_worker_env({
+        "acon_dir": str(tmp_path / "acon"), "appworld_root": str(tmp_path / "appworld")})
+    pinned_import = subprocess.run(
+        [sys.executable, "-c", "from adapters import acon_adapter; "
+         "print(acon_adapter.ORIGIN)"],
+        cwd=runtime, env=pinned_env, text=True, capture_output=True, check=True)
+    assert pinned_import.stdout.strip() == "full_paper"
+
 
 def test_appworld_identity_is_bound_to_one_server_task():
     request = {"messages": [{"role": "user", "content": "task"}],
