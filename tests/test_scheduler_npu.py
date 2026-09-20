@@ -96,15 +96,21 @@ def test_card_list_is_required():
         scheduler.main([])
 
 
-def test_unimplemented_extra_benchmark_routes_stay_held(tmp_path, monkeypatch):
+def test_toolsandbox_tcr_routes_are_supported_while_ace_extra_routes_stay_held(
+        tmp_path, monkeypatch):
     monkeypatch.setattr(scheduler, "BLOCKED_BACKENDS", set())
     monkeypatch.setattr(scheduler, "BLOCKED_CELL_KEYS", set())
-    for benchmark in ("toolsandbox", "acebench"):
-        assert scheduler.cell_blocked(cell(tmp_path, backend="c2kv", benchmark=benchmark))
-        tracer = cell(tmp_path, backend="h2o", benchmark=benchmark)
-        tracer["condition"] = "tracer_history"
-        assert scheduler.cell_blocked(tracer)
-        assert not scheduler.cell_blocked(cell(tmp_path, backend="h2o", benchmark=benchmark))
+    for backend in ("c2kv", "h2o", "snapkv", "pyramidkv"):
+        for condition in ("compression_full_budget", "tracer_history",
+                          "recovery_off_same_initial"):
+            ts = cell(tmp_path, backend=backend, benchmark="toolsandbox")
+            ts["condition"] = condition
+            assert not scheduler.cell_blocked(ts)
+    assert scheduler.cell_blocked(cell(tmp_path, backend="c2kv", benchmark="acebench"))
+    tracer = cell(tmp_path, backend="h2o", benchmark="acebench")
+    tracer["condition"] = "tracer_history"
+    assert scheduler.cell_blocked(tracer)
+    assert not scheduler.cell_blocked(cell(tmp_path, backend="h2o", benchmark="acebench"))
 
 
 @pytest.mark.parametrize("backend,threshold", [
@@ -146,6 +152,7 @@ def test_canonical_entry_delegates_and_runs_as_a_script():
 
 
 def test_live_driver_scan_reserves_orphan_cards_and_fails_closed(tmp_path, monkeypatch):
+    monkeypatch.setattr(scheduler, "EXPERIMENT_ROOT", tmp_path)
     first = cell(tmp_path)
     path = Path(first["cell_dir"]) / "cell_launch.json"
     path.write_text(json.dumps({**first, "sglang_backend_url": "http://127.0.0.1:36203"}))
@@ -178,6 +185,7 @@ def test_live_driver_scan_reserves_orphan_cards_and_fails_closed(tmp_path, monke
 
 
 def test_direct_driver_manifest_reserves_its_card(tmp_path, monkeypatch):
+    monkeypatch.setattr(scheduler, "EXPERIMENT_ROOT", tmp_path)
     direct = cell(tmp_path)
     path = Path(direct["cell_dir"]) / "cell.json"
     path.write_text(json.dumps({**direct, "sglang_backend_url": "http://127.0.0.1:36203"}))
@@ -190,6 +198,40 @@ def test_direct_driver_manifest_reserves_its_card(tmp_path, monkeypatch):
     path.write_text(json.dumps({**direct, "cell_dir": str(tmp_path / "wrong"),
                                 "sglang_backend_url": "http://127.0.0.1:36203"}))
     with pytest.raises(RuntimeError, match="mismatched cell_dir"):
+        scheduler.live_driver_assignments()
+
+
+def test_live_driver_scan_ignores_other_experiment_roots_before_manifest_read(
+        tmp_path, monkeypatch):
+    experiment_root = tmp_path / "experiment"
+    experiment_root.mkdir()
+    monkeypatch.setattr(scheduler, "EXPERIMENT_ROOT", experiment_root)
+    own = cell(experiment_root)
+    own_manifest = Path(own["cell_dir"]) / "cell.json"
+    own_manifest.write_text(json.dumps({**own, "sglang_backend_url": "http://127.0.0.1:36203"}))
+
+    # A lexical prefix is not a directory boundary. Neither foreign manifest
+    # may be opened, including the one with an unknown local engine port.
+    prefix_root = tmp_path / "experiment-old"
+    prefix_root.mkdir()
+    malformed_foreign = prefix_root / "cell.json"
+    malformed_foreign.write_text("{")
+    other_root = tmp_path / "other"
+    other_root.mkdir()
+    foreign = cell(other_root)
+    foreign_manifest = Path(foreign["cell_dir"]) / "cell.json"
+    foreign_manifest.write_text(json.dumps({
+        **foreign, "sglang_backend_url": "http://127.0.0.1:65534"}))
+    output = (f"123 python historykv_cell.py --cell {malformed_foreign}\n"
+              f"124 python historykv_cell.py --cell {foreign_manifest}\n"
+              f"125 python historykv_cell.py --cell {own_manifest}\n")
+    monkeypatch.setattr(scheduler.subprocess, "run", lambda *a, **k:
+                        SimpleNamespace(returncode=0, stdout=output))
+
+    assert scheduler.live_driver_assignments() == {3: {own["cell_dir"]: json.loads(own_manifest.read_text())}}
+
+    own_manifest.write_text("{")
+    with pytest.raises(RuntimeError, match="Cannot identify live driver card"):
         scheduler.live_driver_assignments()
 
 

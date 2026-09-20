@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import time
 from dataclasses import asdict
@@ -60,14 +61,20 @@ class EventNativeDecisionRunner:
             return copy.deepcopy(cached[1])
         started = time.perf_counter()
         recovery_disabled = payload.get('recovery_disabled') is True
+        outer_request_id = payload.get('outer_request_id')
+        if not isinstance(outer_request_id, str) or not outer_request_id:
+            material = json.dumps([key[0], key[1]], ensure_ascii=False,
+                                  separators=(',', ':')).encode('utf-8')
+            outer_request_id = 'c1-local-' + hashlib.sha256(material).hexdigest()
         controller_payload = {
             key: value for key, value in payload.items()
-            if key != 'recovery_disabled'
+            if key not in {'recovery_disabled', 'outer_request_id'}
         }
         keep_session = False
         record = {
             'schema': 'a-event-native-exact-step-v1', 'status': 'started',
             'session_id': key[0], 'decision_key': key[1],
+            'outer_request_id': outer_request_id,
             'ratio': self.ratio, 'max_new_tokens': self.max_new_tokens,
             'generation_trace': [], 'exact_recovery': None, 'response': None,
             'controller_timing': {'prepare_seconds': None, 'reconsider_seconds': None},

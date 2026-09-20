@@ -34,9 +34,13 @@ except ImportError:
     from design import TAU2_T02_THRESHOLDS
 
 GENERATION_ROOT = Path("/home/liuyancheng/c2kv-generality-20260918")
+# Keep frozen calibration/budget inputs under GENERATION_ROOT. An opt-in root
+# isolates matrix manifests, cell results, logs and scheduler locks.
+EXPERIMENT_ROOT = Path(os.environ.get(
+    "C2KV_GENERALITY_EXPERIMENT_ROOT", GENERATION_ROOT))
 SRC = GENERATION_ROOT / "src"
-LOGS = GENERATION_ROOT / "logs"
-RESULTS = GENERATION_ROOT / "results" / "closed_loop"
+LOGS = EXPERIMENT_ROOT / "logs"
+RESULTS = EXPERIMENT_ROOT / "results" / "closed_loop"
 PY_SGL = "/home/liuyancheng/envs/sgl/bin/python"
 TARGET_TOKENS = {"K0": 768, "K2": 1536}
 MAX_ATTEMPTS = 6  # total cell launches, including the first, across restarts
@@ -44,7 +48,15 @@ MAX_DRIVERS_PER_CARD = 2
 DRIVER_PORT_BASE = 45000
 DRIVER_PORT_STRIDE = 1000
 
-ENGINE_PORT = {0: 36200, 1: 36201, 2: 36202, 3: 36203, 4: 36204, 5: 36205, 6: 36206, 7: 36207}
+DEFAULT_ENGINE_PORT = {0: 36200, 1: 36201, 2: 36202, 3: 36203,
+                       4: 36204, 5: 36205, 6: 36206, 7: 36207}
+ENGINE_PORT = dict(DEFAULT_ENGINE_PORT)
+
+
+def known_engine_ports() -> dict[int, int]:
+    """Recognize both legacy and selected isolated engine endpoints."""
+    return {**{port: card for card, port in DEFAULT_ENGINE_PORT.items()},
+            **{port: card for card, port in ENGINE_PORT.items()}}
 
 
 def selected_sources() -> dict[str, str]:
@@ -78,10 +90,10 @@ def driver_for(backend: str, condition: str) -> str:
 
 
 SUPPORTED_BENCHMARKS = {
-    "c2kv": {"bfcl_base", "bfcl_long_context", "appworld", "tau2"},
+    "c2kv": {"bfcl_base", "bfcl_long_context", "appworld", "toolsandbox", "tau2"},
     "historykv_off": {"bfcl_base", "bfcl_long_context", "appworld",
                       "toolsandbox", "acebench", "tau2"},
-    "session_tracer": {"bfcl_base", "bfcl_long_context", "appworld", "tau2"},
+    "session_tracer": {"bfcl_base", "bfcl_long_context", "appworld", "toolsandbox", "tau2"},
 }
 
 
@@ -275,7 +287,7 @@ def launch_cell(cell: dict, card: int, slot: int) -> subprocess.Popen:
     cell_key = hashlib.sha256(str(Path(cell["cell_dir"]).resolve()).encode()).hexdigest()[:24]
     cmd = ["flock", "-n", str(lock_dir / f"cell-{cell_key}.lock"), *cmd]
     with log.open("ab") as stream:
-        return subprocess.Popen(cmd, cwd=str(GENERATION_ROOT), env=env,
+        return subprocess.Popen(cmd, cwd=str(EXPERIMENT_ROOT), env=env,
                                 stdout=stream, stderr=subprocess.STDOUT,
                                 stdin=subprocess.DEVNULL, start_new_session=True)
 
@@ -375,7 +387,8 @@ def live_driver_assignments() -> dict[int, dict[str, dict]]:
         return {}
     if scan.returncode != 0:
         raise RuntimeError(f"Live driver scan failed: rc={scan.returncode}")
-    port_to_card = {port: card for card, port in ENGINE_PORT.items()}
+    experiment_root = EXPERIMENT_ROOT.resolve()
+    port_to_card = None
     assignments: dict[int, dict[str, dict]] = {}
     for line in scan.stdout.splitlines():
         process = re.match(r"\s*\d+\s+(\S+)", line)
@@ -389,6 +402,11 @@ def live_driver_assignments() -> dict[int, dict[str, dict]]:
         if match is None:
             raise RuntimeError(f"Live driver has no --cell manifest: {line[:160]}")
         path = Path(match.group(1))
+        manifest = path.resolve()
+        if not manifest.is_relative_to(experiment_root):
+            continue
+        if port_to_card is None:
+            port_to_card = known_engine_ports()
         try:
             cell = json.loads(path.read_text())
             directory = Path(cell["cell_dir"])
@@ -400,7 +418,6 @@ def live_driver_assignments() -> dict[int, dict[str, dict]]:
                 raise ValueError("invalid scheduler_port_slot")
         except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError) as error:
             raise RuntimeError(f"Cannot identify live driver card from {path}") from error
-        manifest = path.resolve()
         cell_directory = directory.resolve()
         if (manifest not in {cell_directory / "cell.json", cell_directory / "cell_launch.json"} and
                 manifest.parent != cell_directory / "cell_launch_attempts"):
@@ -424,7 +441,7 @@ def live_calibration_owners(proc_root: Path = Path("/proc")) -> dict[int, dict]:
     expected = {(root / "generality" / "c2kv_calibration.py").resolve()
                 for root in (SRC, Path(selected_sources()["generality"]))}
     calibration_root = (GENERATION_ROOT / "calibration" / "c2kv").resolve()
-    port_to_card = {port: card for card, port in ENGINE_PORT.items()}
+    port_to_card = known_engine_ports()
     owners = {}
     for proc in processes:
         if not proc.name.isdigit():
@@ -463,7 +480,9 @@ def unmanaged_event_native_servers(proc_root: Path = Path("/proc")) -> list[dict
         processes = list(proc_root.iterdir())
     except OSError as error:
         raise RuntimeError("Cannot inspect event-native server processes") from error
-    roots = (RESULTS.resolve(), (GENERATION_ROOT / "validation").resolve(),
+    roots = (RESULTS.resolve(),
+             (GENERATION_ROOT / "results" / "closed_loop").resolve(),
+             (GENERATION_ROOT / "validation").resolve(),
              (GENERATION_ROOT / "calibration" / "c2kv").resolve())
     calibration_owners = live_calibration_owners(proc_root)
 
@@ -668,6 +687,8 @@ def reserve_attempt(cell: dict) -> int:
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cards", type=int, nargs="+", required=True)
+    parser.add_argument("--engine-port", type=int, default=None,
+                        help="existing isolated engine port; requires one card")
     parser.add_argument("--include-pending", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--max-cells", type=int, default=None)
@@ -677,6 +698,11 @@ def main(argv=None) -> int:
     if (not args.cards or len(args.cards) != len(set(args.cards)) or
             any(card not in ENGINE_PORT for card in args.cards)):
         parser.error("--cards must contain at least one distinct supported card ID")
+    if args.engine_port is not None:
+        if (len(args.cards) != 1 or not 1024 <= args.engine_port <= 65535
+                or args.engine_port in DEFAULT_ENGINE_PORT.values()):
+            parser.error("--engine-port requires one card and a distinct valid port")
+        ENGINE_PORT[args.cards[0]] = args.engine_port
     if args.max_cells is not None and args.max_cells < 0:
         parser.error("--max-cells must be nonnegative")
     if args.include_pending and not args.dry_run:
@@ -686,6 +712,11 @@ def main(argv=None) -> int:
         preview = preview[:args.max_cells]
     preview = [cell for cell in preview if not cell_done(cell)
                and attempt_count(cell) < MAX_ATTEMPTS]
+    if EXPERIMENT_ROOT != GENERATION_ROOT and any(
+            cell.get("benchmark_key") == "toolsandbox" for cell in preview):
+        for name in ("C2KV_PAPER_SOURCE", "C2KV_TOOLSANDBOX_SOURCE"):
+            if not os.environ.get(name):
+                parser.error(f"fresh ToolSandbox matrix requires {name}")
     if args.dry_run:
         print(json.dumps({"event": "scheduler_dry_run", "cells":
                           [cell["cell_id"] for cell in preview]}), flush=True)

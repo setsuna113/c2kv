@@ -9,6 +9,7 @@ start as pending_calibration.
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 import os
 import subprocess
@@ -23,8 +24,12 @@ except ImportError:  # Direct file launch on ascend03.
         from design import TAU2_T02_THRESHOLDS
 
 GENERATION_ROOT = Path("/home/liuyancheng/c2kv-generality-20260918")
-RESULTS = GENERATION_ROOT / "results"
-CONFIG = GENERATION_ROOT / "config"
+# Only planned outputs move. Frozen archives, R_max measurement and calibration
+# remain inputs from GENERATION_ROOT when a new experiment is planned.
+EXPERIMENT_ROOT = Path(os.environ.get(
+    "C2KV_GENERALITY_EXPERIMENT_ROOT", GENERATION_ROOT))
+RESULTS = EXPERIMENT_ROOT / "results"
+CONFIG = EXPERIMENT_ROOT / "config"
 
 BACKENDS = ("c2kv", "h2o", "snapkv", "pyramidkv")
 WORKING_POINTS = ("K0", "K2")
@@ -35,8 +40,10 @@ BENCH_KEYS = ("bfcl_base", "bfcl_long_context", "appworld", "tau2")
 # a separate frozen benchmark protocol before production execution.
 EXTRA_BENCH_KEYS = ("toolsandbox", "acebench")
 TS_SCENARIO_NAMES = "/home/liuyancheng/c2kv-generality-20260918/config/ts_scenario_names.json"
+TS_COHORT_FILE = "benchmarks/toolsandbox_suites/three_distraction_tools_129.json"
 ACE_TASK_IDS = "/home/liuyancheng/c2kv-generality-20260918/config/ace_agent_task_ids.json"
-TS_REPO = "/home/liuyancheng/benchmarks/ToolSandbox"
+TS_REPO = os.environ.get("C2KV_TOOLSANDBOX_SOURCE",
+                         "/home/liuyancheng/benchmarks/ToolSandbox")
 ACE_REPO = "/home/liuyancheng/c2kv-eval-20260906/deps/acebench"
 TAU2_REPO = str(Path.home() / "benchmarks" / "tau2")
 TAU2_PYTHON = str(Path.home() / "envs" / "bench312" / "bin" / "python")
@@ -94,6 +101,33 @@ def tau2_task_ids() -> list[str]:
     return ids
 
 
+def toolsandbox_cohort() -> dict:
+    paper = Path(os.environ.get(
+        "C2KV_PAPER_SOURCE", GENERATION_ROOT / "src" / "paper_harness"))
+    path = Path(os.environ.get("C2KV_TOOLSANDBOX_COHORT_FILE",
+                               paper / TS_COHORT_FILE)).resolve()
+    source = json.loads(path.read_text(encoding="utf-8"))
+    ids = source.get("scenario_ids") if isinstance(source, dict) else None
+    if (not isinstance(source, dict)
+            or source.get("suite") != "three_distraction_tools_129"
+            or source.get("scenario_count") != 129
+            or not isinstance(ids, list) or len(ids) != 129
+            or len(ids) != len(set(ids))
+            or any(not isinstance(task_id, str)
+                   or not task_id.endswith("_3_distraction_tools") for task_id in ids)):
+        raise ValueError("ToolSandbox cohort must freeze 129 unique official 3-distraction scenarios")
+    digest = hashlib.sha256(("\n".join(ids) + "\n").encode("utf-8")).hexdigest()
+    if source.get("scenario_ids_sha256") != digest:
+        raise ValueError("ToolSandbox cohort ID hash differs from the frozen manifest")
+    registry = json.loads(Path(TS_SCENARIO_NAMES).read_text(encoding="utf-8"))
+    official = registry.get("full") if isinstance(registry, dict) else None
+    if not isinstance(official, list) or not set(ids) <= set(official):
+        raise ValueError("ToolSandbox cohort contains IDs outside the official resolver")
+    return {"scenario_ids": ids, "scenario_ids_sha256": digest,
+            "cohort_file": str(path), "source_checkout_head":
+            source.get("source_checkout_head")}
+
+
 def build_manifests(benches=BENCH_KEYS) -> dict:
     selected = set(benches)
     manifests = {}
@@ -126,13 +160,16 @@ def build_manifests(benches=BENCH_KEYS) -> dict:
             "n_full": len(ids), "n_heldout": len(ids),
         }
     if "toolsandbox" in selected:
-        ts_names = json.loads(Path(TS_SCENARIO_NAMES).read_text())
+        cohort = toolsandbox_cohort()
         manifests["toolsandbox"] = {
-            "benchmark": "toolsandbox", "source": "resolve_scenarios(None, DEFAULT)",
+            "benchmark": "toolsandbox", "source": "three_distraction_tools_129",
             "benchmark_dir": TS_REPO,
-            "full": ts_names["full"], "heldout": ts_names["full"], "excluded": [],
-            "n_full": len(ts_names["full"]), "n_heldout": len(ts_names["full"]),
-            "official_test_split": ts_names["test"],
+            "full": cohort["scenario_ids"], "heldout": cohort["scenario_ids"],
+            "excluded": [], "n_full": len(cohort["scenario_ids"]),
+            "n_heldout": len(cohort["scenario_ids"]),
+            "cohort_file": cohort["cohort_file"],
+            "scenario_ids_sha256": cohort["scenario_ids_sha256"],
+            "source_checkout_head": cohort["source_checkout_head"],
         }
     if "acebench" in selected:
         ace_ids = json.loads(Path(ACE_TASK_IDS).read_text())
@@ -147,7 +184,8 @@ def build_manifests(benches=BENCH_KEYS) -> dict:
 
 def budgets(rmax: dict | None = None) -> dict:
     if rmax is None:
-        rmax = json.loads((CONFIG / "rmax_measurement.json").read_text())
+        rmax = json.loads((GENERATION_ROOT / "config" /
+                           "rmax_measurement.json").read_text())
     r_max = rmax["recovery_allowance_bytes"]
     return {
         "schema": "c2kv-generality-budgets-v1",
@@ -275,6 +313,10 @@ def main(argv=None) -> int:
                              "ToolSandbox/ACEBench panels are opt-in")
     args = parser.parse_args(argv)
     benches = tuple(dict.fromkeys(args.benches))
+    if EXPERIMENT_ROOT != GENERATION_ROOT and "toolsandbox" in benches:
+        for name in ("C2KV_PAPER_SOURCE", "C2KV_TOOLSANDBOX_SOURCE"):
+            if not os.environ.get(name):
+                parser.error(f"fresh ToolSandbox matrix requires {name}")
     manifests = build_manifests(benches)
     bud = budgets()
     serving = serving_provenance()
@@ -304,7 +346,7 @@ def main(argv=None) -> int:
     # matches this plan; changed budgets or task manifests require a new run.
     _require_same(CONFIG / "budgets_resolved.json", bud)
     for key, manifest in manifests.items():
-        _require_same(GENERATION_ROOT / "manifests" / f"{key}.json", manifest)
+        _require_same(EXPERIMENT_ROOT / "manifests" / f"{key}.json", manifest)
     for cell_id, proposed in planned_cells.items():
         cell_dir = Path(proposed["cell_dir"])
         cell_path = cell_dir / "cell.json"
@@ -318,7 +360,7 @@ def main(argv=None) -> int:
         planned_rows[cell_id]["threshold_status"] = existing.get(
             "threshold_status", "pending_calibration")
 
-    matrix_path = GENERATION_ROOT / "matrix.csv"
+    matrix_path = EXPERIMENT_ROOT / "matrix.csv"
     existing_rows = _matrix_rows(matrix_path)
     merged_rows = {}
     for row in existing_rows:
@@ -354,7 +396,10 @@ def main(argv=None) -> int:
                            "the current checkout at planning time",
         "serving": serving,
         "controller": {
-            "runtime": "/home/liuyancheng/c2kv-generality-20260918/src/generality/controller_runtime",
+            "runtime": (str(Path(os.environ.get(
+                "C2KV_GENERALITY_SOURCE", Path(__file__).resolve().parents[1])) /
+                "controller_runtime") if EXPERIMENT_ROOT != GENERATION_ROOT else
+                "/home/liuyancheng/c2kv-generality-20260918/src/generality/controller_runtime"),
             "base": "c2kv-c1-t02-delivery@a08a4a4-lineage runtime",
             "patches": [
                 "optional recovery_history_bytes/recovery_workspace_bytes eval-policy "
@@ -395,12 +440,12 @@ def main(argv=None) -> int:
     # Commit the already validated plan.  Existing cell.json files are never
     # rewritten, including their calibrated threshold fields.
     CONFIG.mkdir(parents=True, exist_ok=True)
-    (GENERATION_ROOT / "manifests").mkdir(parents=True, exist_ok=True)
+    (EXPERIMENT_ROOT / "manifests").mkdir(parents=True, exist_ok=True)
     cells_dir.mkdir(parents=True, exist_ok=True)
     if not (CONFIG / "budgets_resolved.json").exists():
         (CONFIG / "budgets_resolved.json").write_text(json.dumps(bud, indent=2) + "\n")
     for key, manifest in manifests.items():
-        path = GENERATION_ROOT / "manifests" / f"{key}.json"
+        path = EXPERIMENT_ROOT / "manifests" / f"{key}.json"
         if not path.exists():
             path.write_text(json.dumps(manifest, indent=2) + "\n")
     for cell in planned_cells.values():

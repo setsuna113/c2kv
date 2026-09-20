@@ -2,13 +2,13 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import ipaddress
 import json
 import math
 import os
 import socket
 import time
-import uuid
 from collections.abc import Mapping, Sequence
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
@@ -281,6 +281,10 @@ class EventNativeAPI:
                 "Runner returned a non-object record",
             )
 
+        if "outer_request_id" not in record:
+            record = dict(record)
+            record["outer_request_id"] = runner_payload["outer_request_id"]
+
         try:
             self._append_step(record)
         except Exception as error:
@@ -461,6 +465,8 @@ class EventNativeAPI:
         runner_payload = {
             "session_id": session_id,
             "decision_key": decision_key,
+            "outer_request_id": self._outer_request_id(
+                session_id=session_id, user_turn=user_turn, step=step),
             "messages": message_snapshot,
             "tools": tool_snapshot,
             **({"recovery_disabled": True} if recovery_disabled is True else {}),
@@ -481,6 +487,14 @@ class EventNativeAPI:
         # Calibration states may replay overlapping decisions of one task.
         # Bind retry caching to the same full session identity as the runner.
         return runner_payload, (session_id, user_turn, step), signature
+
+    def _outer_request_id(self, *, session_id: str, user_turn: int, step: int) -> str:
+        """Bind one measured request to the server-owned session and decision."""
+        material = json.dumps(
+            [self.run_id, self.benchmark, session_id, user_turn, step, 0],
+            ensure_ascii=False, separators=(",", ":"),
+        ).encode("utf-8")
+        return "c1-" + hashlib.sha256(material).hexdigest()
 
     def _validate_source(self, payload, messages):
         """Validate the default native source; adapters opt in by subclassing."""
@@ -521,10 +535,11 @@ class EventNativeAPI:
             "reasoning_content": final.get("reasoning_content"),
         }
         return {
-            "id": f"chatcmpl-{uuid.uuid4().hex}",
+            "id": record["outer_request_id"],
             "object": "chat.completion",
             "created": int(time.time()),
             "model": self.model_name,
+            "c2kv_proxy": {"request_id": record["outer_request_id"]},
             "choices": [{
                 "index": 0,
                 "message": message,

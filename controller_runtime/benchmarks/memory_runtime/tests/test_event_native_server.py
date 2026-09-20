@@ -15,6 +15,11 @@ from types import SimpleNamespace
 import pytest
 
 from benchmarks.memory_runtime import event_native_server as server
+from benchmarks.memory_runtime.attempt_journal import AttemptJournal
+from benchmarks.memory_runtime.event_native_exact_policy import EventNativeExactController
+from benchmarks.memory_runtime.event_native_step import (
+    EventNativeDecisionRunner, EventNativeStepError,
+)
 
 
 def test_allocator_flag_is_opt_in_and_reaches_child(tmp_path):
@@ -360,3 +365,41 @@ def test_hard_cutoff_cost_inventory_preserves_pending_call_and_partial_step(tmp_
     assert summary['source_attempts'][0]['phase'] == 'unrecorded'
     actual = summary['costs']['actual_model_work']['target_input_tokens']
     assert actual['strict_total'] is None and actual['unknown_calls'] == 1
+
+
+def test_step_keeps_outer_request_id_out_of_actual_policy_input(tmp_path):
+    validator = object.__new__(EventNativeExactController)
+    validator.packing = SimpleNamespace(ratios=(8,), max_target_tokens=32)
+
+    class Controller:
+        def prepare(self, payload, *, ratio, max_new_tokens):
+            validator._validate_request(payload, ratio, max_new_tokens)
+            raise RuntimeError('actual policy validation accepted semantic payload')
+
+    class Generator:
+        def close_session(self):
+            return None
+
+        def session_cache_info(self):
+            return {'status': 'empty'}
+
+    runner = EventNativeDecisionRunner(
+        Controller(), Generator(), object(), ratio=8, max_new_tokens=16,
+        max_generation_calls=1,
+        journal=AttemptJournal(tmp_path / 'attempts.jsonl'),
+    )
+    payload = {
+        'session_id': 'toolsandbox/task/attempt-0',
+        'decision_key': 'turn-0/step-0',
+        'outer_request_id': 'c1-join-id',
+        'messages': [{'role': 'user', 'content': 'hello'}],
+        'tools': [],
+    }
+
+    with pytest.raises(
+        EventNativeStepError,
+        match='actual policy validation accepted semantic payload',
+    ) as stopped:
+        runner.run(payload)
+
+    assert stopped.value.record['outer_request_id'] == 'c1-join-id'

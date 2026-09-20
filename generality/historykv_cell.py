@@ -27,12 +27,20 @@ try:
     from .bfcl_results import bfcl_row_is_valid
     from .process_lifecycle import interruptible, run_owned_worker, stop_owned_group
     from .tau2_harness import completed_tau2_task, run_tau2_task
+    from .toolsandbox_harness import (
+        official_result as toolsandbox_official_result,
+        worker_command as toolsandbox_worker_command,
+    )
     from .upstream_liveness import UpstreamLiveness, UpstreamUnavailable
 except ImportError:  # Direct file launch on ascend03.
     from completion_contract import appworld_done_invalidated, write_cell_status
     from bfcl_results import bfcl_row_is_valid
     from process_lifecycle import interruptible, run_owned_worker, stop_owned_group
     from tau2_harness import completed_tau2_task, run_tau2_task
+    from toolsandbox_harness import (
+        official_result as toolsandbox_official_result,
+        worker_command as toolsandbox_worker_command,
+    )
     from upstream_liveness import UpstreamLiveness, UpstreamUnavailable
 
 GENERATION_ROOT = Path("/home/liuyancheng/c2kv-generality-20260918")
@@ -375,7 +383,9 @@ def _run_adapter_task(cell: dict, task_id: str, proxy_port: int,
     out = Path(cell["cell_dir"]) / "tasks" / task_id
     done = out / "done.json"
     if done.exists():
-        return json.loads(done.read_text())
+        if (benchmark != "toolsandbox"
+                or toolsandbox_task_result(out, task_id) is not None):
+            return json.loads(done.read_text())
     terminal = cached_terminal(out)
     if terminal is not None:
         return terminal  # recorded model failure: never retried, never zero-scored
@@ -383,23 +393,10 @@ def _run_adapter_task(cell: dict, task_id: str, proxy_port: int,
     attempt_root = new_attempt_root(out, benchmark)
     upstream = cell["sglang_backend_url"].rstrip("/")
     if benchmark == "toolsandbox":
-        inner = f"""
-import sys, json
-sys.path.insert(0, {str(PAPER)!r})
-from process_lifecycle import interruptible
-from benchmarks.adapters import toolsandbox_adapter as ts
-@interruptible
-def main():
-    summary = ts.run_ts(
-        'http://127.0.0.1:{proxy_port}/v1', {str(attempt_root)!r},
-        test_mode=False, scenarios=['{task_id}'],
-        benchmark_dir={cell['benchmark_dir']!r},
-        python={cell['python_bench']!r},
-        user_base_url='{upstream}/v1', model={cell['model_name']!r})
-    print('SUMMARY:' + json.dumps(summary, default=str))
-    return 0
-raise SystemExit(main())
-"""
+        worker_out = attempt_root / "toolsandbox_worker" / task_id
+        worker_cmd = toolsandbox_worker_command(
+            cell, task_id, f"http://127.0.0.1:{proxy_port}/v1",
+            upstream + "/v1", worker_out)
     else:
         inner = f"""
 import sys, json
@@ -412,16 +409,18 @@ summary = ace.run_acebench(
     python={cell['python_bench']!r})
 print('SUMMARY:' + json.dumps(summary, default=str))
 """
+        worker_cmd = [cell["python_sgl"], "-c", inner]
     started = time.monotonic()
     env = os.environ.copy()
     env["PYTHONPATH"] = os.pathsep.join((str(Path(__file__).resolve().parent), str(PAPER)))
     env["no_proxy"] = env["NO_PROXY"] = "127.0.0.1,localhost"
-    for k in ("http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY"):
-        env.pop(k, None)
+    if benchmark != "toolsandbox":
+        for k in ("http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY"):
+            env.pop(k, None)
     log_path = attempt_root.parent / "benchmark.log"
     with log_path.open("wb") as log:
         rc = run_owned_worker(
-            [cell["python_sgl"], "-c", inner],
+            worker_cmd,
             cwd=str(PAPER), env=env, stdout=log, stderr=subprocess.STDOUT,
             stdin=subprocess.DEVNULL,
             monitor=UpstreamLiveness(cell["sglang_backend_url"]),
@@ -429,12 +428,70 @@ print('SUMMARY:' + json.dumps(summary, default=str))
     log_text = log_path.read_text(errors="ignore")
     result = {"task_id": task_id, "status": "completed" if rc == 0 else "failed",
               "returncode": rc, "wall_s": time.monotonic() - started}
-    if rc == 0:
+    if benchmark == "toolsandbox":
+        official = toolsandbox_official_result(
+            worker_out / "official_summary.json", task_id)
+        if rc == 0 and official is not None:
+            result["semantic_score"] = official["semantic_score"]
+            result["official_summary"] = str(
+                (worker_out / "official_summary.json").relative_to(out))
+        else:
+            result["status"] = ("infra_error" if looks_infra(log_text)
+                                else "failed_validation")
+    if result["status"] == "completed":
         (out / "done.json").write_text(json.dumps(result, indent=2))
     else:
-        result["status"] = "infra_error" if looks_infra(log_text) else "failed_validation"
+        if benchmark != "toolsandbox":
+            result["status"] = ("infra_error" if looks_infra(log_text)
+                                else "failed_validation")
         write_receipt(out, result)
     return result
+
+
+def toolsandbox_task_result(out: Path, task_id: str) -> dict | None:
+    """A completed task requires its exact official scorer output."""
+    try:
+        receipt = json.loads((out / "done.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(receipt, dict):
+        return None
+    source = receipt.get("official_summary")
+    if (receipt.get("task_id") != task_id or receipt.get("status") != "completed"
+            or not isinstance(source, str) or not source):
+        return None
+    relative = Path(source)
+    if relative.is_absolute() or ".." in relative.parts:
+        return None
+    official = toolsandbox_official_result(out / relative, task_id)
+    if official is None or receipt.get("semantic_score") != official["semantic_score"]:
+        return None
+    return official
+
+
+def toolsandbox_score_summary(cell: dict) -> dict:
+    """Aggregate only validated official scores over the frozen task set."""
+    cell_dir = Path(cell["cell_dir"])
+    rows = []
+    pending = []
+    for task_id in cell["task_ids"]:
+        task_dir = cell_dir / "tasks" / task_id
+        official = toolsandbox_task_result(task_dir, task_id)
+        if official is None:
+            pending.append(task_id)
+            continue
+        receipt = json.loads((task_dir / "done.json").read_text(encoding="utf-8"))
+        rows.append({"task_id": task_id,
+                     "semantic_score": official["semantic_score"],
+                     "source": str(task_dir / receipt["official_summary"])})
+    return {
+        "schema": "generality-toolsandbox-score-summary-v1",
+        "cell_id": cell["cell_id"], "n_total": len(cell["task_ids"]),
+        "n_official_scored": len(rows), "pending_task_ids": pending,
+        "semantic_score": (sum(row["semantic_score"] for row in rows)
+                           / len(cell["task_ids"]) if not pending else None),
+        "score_denominator": len(cell["task_ids"]), "task_rows": rows,
+    }
 
 
 def appworld_attempt_status(root: Path, task_id: str) -> bool | None:
@@ -629,6 +686,10 @@ def main(argv=None) -> int:
     elif cell["benchmark"] == "tau2":
         completed_ids = [task_id for task_id in expected_ids
                          if completed_tau2_task(cell_dir / "tasks" / task_id, task_id)]
+    elif cell["benchmark"] == "toolsandbox":
+        completed_ids = [task_id for task_id in expected_ids
+                         if toolsandbox_task_result(cell_dir / "tasks" / task_id,
+                                                    task_id) is not None]
     else:
         completed_ids = [task_id for task_id in expected_ids
                          if (cell_dir / "tasks" / task_id / "done.json").exists()]
@@ -642,6 +703,14 @@ def main(argv=None) -> int:
     # infra failures (infra_error / failed_validation) keep it incomplete so
     # the scheduler requeues the cell for another infra retry — they are never
     # zero-scored and never silently dropped.
+    score_fields = {}
+    if cell["benchmark"] == "toolsandbox":
+        summary = toolsandbox_score_summary(cell)
+        summary_path = cell_dir / "toolsandbox_score_summary.json"
+        summary_path.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
+        score_fields = {"semantic_score": summary["semantic_score"],
+                        "score_denominator": summary["score_denominator"],
+                        "score_summary": str(summary_path)}
     write_cell_status(cell, {
         "cell_id": cell["cell_id"], "arm": arm,
         "status": "complete" if not pending else "incomplete",
@@ -649,6 +718,7 @@ def main(argv=None) -> int:
         "n_completed": len(completed_ids), "n_terminal": len(terminal),
         "terminal_tasks": terminal, "pending_infra": pending,
         "n_total": len(expected_ids),
+        **score_fields,
         "finished_at": time.time(),
     })
     return 1 if stopped_upstream else 0

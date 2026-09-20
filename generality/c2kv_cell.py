@@ -50,10 +50,22 @@ except ImportError:  # Direct file launch on ascend03.
 try:
     from .process_lifecycle import defer_interrupts, interruptible, stop_owned_group, wait_owned_worker
     from .tau2_harness import completed_tau2_task, run_tau2_task
+    from .toolsandbox_harness import (
+        completed_task as completed_toolsandbox_task,
+        official_result as toolsandbox_official_result,
+        score_summary as toolsandbox_score_summary,
+        worker_command as toolsandbox_worker_command,
+    )
     from .upstream_liveness import UpstreamLiveness, UpstreamUnavailable
 except ImportError:  # Direct file launch on ascend03.
     from process_lifecycle import defer_interrupts, interruptible, stop_owned_group, wait_owned_worker
     from tau2_harness import completed_tau2_task, run_tau2_task
+    from toolsandbox_harness import (
+        completed_task as completed_toolsandbox_task,
+        official_result as toolsandbox_official_result,
+        score_summary as toolsandbox_score_summary,
+        worker_command as toolsandbox_worker_command,
+    )
     from upstream_liveness import UpstreamLiveness, UpstreamUnavailable
 
 try:
@@ -546,6 +558,13 @@ def run_task(cell: dict, task_ids: list[str], port: int, batch_dirname: str) -> 
     for k in ("http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY"):
         env.pop(k, None)
     worker_env = env.copy()
+    if cell["benchmark"] == "toolsandbox":
+        # Official ToolSandbox calls RapidAPI through the host proxy. Local
+        # agent/user endpoints stay direct via NO_PROXY; only the worker gets
+        # these external-network proxy settings, not the controller server.
+        for key in ("http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY"):
+            if key in os.environ:
+                worker_env[key] = os.environ[key]
     if cell["benchmark"] == "bfcl":
         worker_env["PYTHONPATH"] = str(RUNTIME)
     elif cell["benchmark"] == "acon_appworld":
@@ -595,6 +614,25 @@ def run_task(cell: dict, task_ids: list[str], port: int, batch_dirname: str) -> 
                 cell["sglang_backend_url"], out / "tau2_worker" / task_id)
             if receipt["status"] != "completed":
                 raise RuntimeError(f"official tau2 worker did not score {task_id}")
+        elif cell["benchmark"] == "toolsandbox":
+            if len(task_ids) != 1:
+                raise ValueError("ToolSandbox requires one frozen task per controller server")
+            task_id = task_ids[0]
+            worker = subprocess.Popen(
+                toolsandbox_worker_command(
+                    cell, task_id, f"http://127.0.0.1:{port}/v1",
+                    cell["sglang_backend_url"].rstrip("/") + "/v1",
+                    out / "toolsandbox_worker" / task_id),
+                cwd=str(Path(__file__).resolve().parents[1]),
+                env=worker_env, stdout=worker_log, stderr=subprocess.STDOUT,
+                stdin=subprocess.DEVNULL, start_new_session=True,
+            )
+            rc = wait_owned_worker(worker, timeout=max(60, deadline - time.monotonic()),
+                                   monitor=upstream_monitor)
+            if rc != 0 or toolsandbox_official_result(
+                    out / "toolsandbox_worker" / task_id / "official_summary.json",
+                    task_id) is None:
+                raise RuntimeError(f"official ToolSandbox worker did not score {task_id}")
         elif cell["benchmark"] == "acon_appworld":
             # AppWorld: one task per worker invocation (event_native_appworld)
             for task_id in task_ids:
@@ -623,6 +661,11 @@ def run_task(cell: dict, task_ids: list[str], port: int, batch_dirname: str) -> 
             healthy = [task_id for task_id in task_ids if completed_tau2_task(
                 out / "tau2_worker" / task_id, task_id)]
             bad = [task_id for task_id in task_ids if task_id not in healthy]
+        elif cell["benchmark"] == "toolsandbox":
+            healthy = [task_id for task_id in task_ids if toolsandbox_official_result(
+                out / "toolsandbox_worker" / task_id / "official_summary.json",
+                task_id) is not None]
+            bad = [task_id for task_id in task_ids if task_id not in healthy]
         elif cell["benchmark"] == "acon_appworld":
             # AppWorld results are evaluation JSONs, not BFCL result rows;
             # the worker's rc=0 + official_summary.json are the health check
@@ -641,6 +684,14 @@ def run_task(cell: dict, task_ids: list[str], port: int, batch_dirname: str) -> 
         if cell["benchmark"] == "tau2":
             healthy = [task_id for task_id in task_ids if completed_tau2_task(
                 out / "tau2_worker" / task_id, task_id)]
+            bad = [task_id for task_id in task_ids if task_id not in healthy]
+            status.update(status="partial" if healthy else "failed", healthy=healthy,
+                          bad=bad, error=f"{type(error).__name__}: {error}",
+                          wall_s=time.monotonic() - started)
+        elif cell["benchmark"] == "toolsandbox":
+            healthy = [task_id for task_id in task_ids if toolsandbox_official_result(
+                out / "toolsandbox_worker" / task_id / "official_summary.json",
+                task_id) is not None]
             bad = [task_id for task_id in task_ids if task_id not in healthy]
             status.update(status="partial" if healthy else "failed", healthy=healthy,
                           bad=bad, error=f"{type(error).__name__}: {error}",
@@ -840,7 +891,7 @@ def main(argv=None) -> int:
 
     # Ordinary OpenAI harness requests carry no task identity. Each server
     # must therefore own one frozen official task.
-    if cell["benchmark"] in {"acon_appworld", "tau2"}:
+    if cell["benchmark"] in {"acon_appworld", "tau2", "toolsandbox"}:
         args.chunk = 1
 
     cell_dir = Path(cell["cell_dir"])
@@ -895,6 +946,12 @@ def main(argv=None) -> int:
                 if not tau2_task_completed(cell_dir, task_id)
                 and attempt_counts.get(task_id, 0) < args.max_attempts_per_task
             ]
+        elif cell["benchmark"] == "toolsandbox":
+            chunk = [
+                task_id for task_id in chunk
+                if not completed_toolsandbox_task(cell_dir, task_id)
+                and attempt_counts.get(task_id, 0) < args.max_attempts_per_task
+            ]
         else:
             chunk = [
                 task_id for task_id in chunk
@@ -947,6 +1004,13 @@ def main(argv=None) -> int:
             elif cell["benchmark"] == "tau2":
                 summary = tau2_score_summary(cell)
                 _write(cell_dir / "tau2_score_summary.json", summary)
+                counts = {
+                    "n_completed": summary["n_official_scored"],
+                    "n_retryable": len(summary["pending_task_ids"]),
+                }
+            elif cell["benchmark"] == "toolsandbox":
+                summary = toolsandbox_score_summary(cell)
+                _write(cell_dir / "toolsandbox_score_summary.json", summary)
                 counts = {
                     "n_completed": summary["n_official_scored"],
                     "n_retryable": len(summary["pending_task_ids"]),
@@ -1034,6 +1098,20 @@ def main(argv=None) -> int:
             "semantic_score": summary["semantic_score"],
             "score_denominator": len(expected_task_ids),
             "score_summary": str(cell_dir / "tau2_score_summary.json"),
+            "finished_at": time.time(),
+        })
+    elif cell["benchmark"] == "toolsandbox":
+        summary = toolsandbox_score_summary(cell)
+        _write(cell_dir / "toolsandbox_score_summary.json", summary)
+        write_cell_status(cell, {
+            "cell_id": cell["cell_id"],
+            "status": "complete" if not summary["pending_task_ids"] else "incomplete",
+            "n_completed": summary["n_official_scored"],
+            "n_retryable": len(summary["pending_task_ids"]),
+            "n_total": len(expected_task_ids),
+            "semantic_score": summary["semantic_score"],
+            "score_denominator": summary["score_denominator"],
+            "score_summary": str(cell_dir / "toolsandbox_score_summary.json"),
             "finished_at": time.time(),
         })
     else:

@@ -1,0 +1,569 @@
+{
+  "schema": "npu-toolsandbox-integration-validation-v1",
+  "scope": "six single-scenario functional smoke cells, preliminary n=1 per cell; not a 129-scenario benchmark result or a method comparison",
+  "status": "complete",
+  "model_inference": true,
+  "complete_cells": 6,
+  "expected_cells": 6,
+  "methods": [
+    "c2kv",
+    "h2o"
+  ],
+  "conditions": [
+    "tracer_history",
+    "compression_full_budget",
+    "recovery_off_same_initial"
+  ],
+  "working_point": "K0",
+  "official_scenario_id": "add_reminder_content_and_date_and_time_multiple_user_turn_3_distraction_tools",
+  "remote_evidence_root": "<NPU_HOME>/c2kv-toolsandbox-129-20260920",
+  "path_redaction": "<NPU_HOME> replaces the remote account home; cell artifact paths are relative to remote_evidence_root",
+  "source": {
+    "toolsandbox_source_checkout_head": "165848b9a78cead7ca7fe7c89c688b58e6501219",
+    "toolsandbox_source_note": "Locally imported official source checkout; this identifier is not asserted to resolve in the public upstream repository.",
+    "run_source_files": [
+      {
+        "path": "npu/tools/launch_engine.sh",
+        "sha256": "b1fd251126df97b7978068f081b7e56dc822efe78b3cb1b00d7a568c329124be"
+      },
+      {
+        "path": "npu/generality/toolsandbox_harness.py",
+        "sha256": "abaa629af78a0f625217df2d607a004f0b3ff43c98d69d5d427efd92b430df07"
+      },
+      {
+        "path": "npu/controller_runtime/benchmarks/memory_runtime/event_native_step.py",
+        "sha256": "07159fdec60e44288e78785615b46d6951e8db902ded76f4081408cc650b122b"
+      },
+      {
+        "path": "paper/benchmarks/adapters/toolsandbox_adapter.py",
+        "sha256": "705f6652c84c613c34ac836bd6083769e453575d1154a819323113a5e8048576"
+      },
+      {
+        "path": "paper/benchmarks/toolsandbox_cli.py",
+        "sha256": "a5fa7c61aeb3ffd12c3dadfb4a3d64699fd83d0ebc75d88bf8b4db6047193b0d"
+      },
+      {
+        "path": "paper/benchmarks/toolsandbox_suites/three_distraction_tools_129.json",
+        "sha256": "5718da289d3a5dc7b056f8bd5104c7148da761d3748095fe31395c970619ca96"
+      }
+    ],
+    "full_arm_source_receipt": {
+      "path": "full-129-cpu4/source_receipt.json",
+      "sha256": "245871c5c2d7fdf61649c8ff9c1b487185aa793cb3ea31a510808341029262e9"
+    },
+    "shared_algorithm": {
+      "scope": "candidate_algorithms source files in paper and NPU checkouts, CRLF normalized to LF",
+      "all_equal": true,
+      "file_count": 18,
+      "local_snapshot_sha256": "7a6915935fbfa37889cd7fe6fc74e12997fd6f11634b321d1141de0c92db54f9",
+      "files": [
+        {
+          "file": "__init__.py",
+          "normalized_sha256": "e3a102b66b7aa7d5fbd6afaad8ac85f4b2747fe0f226a9964aa90b815eb21650"
+        },
+        {
+          "file": "allocation.py",
+          "normalized_sha256": "ad75a90812111b77459d18d34ea9d2cb248cc95d8bca687277dd514e434c6c8c"
+        },
+        {
+          "file": "argument_binding.py",
+          "normalized_sha256": "597c2923822980f336ce41da3986bffc69b345dda14eb1f1921c7c410ff8b07f"
+        },
+        {
+          "file": "controller.py",
+          "normalized_sha256": "13e671672e6b68457d8be933fd5eb5ae72aaba52c7917f093c829f4cdb9471f7"
+        },
+        {
+          "file": "dependencies.py",
+          "normalized_sha256": "6ffef4e7f58f9b45a3062777f4235888781b2316e545b4a4c7a19ca5ff9b9520"
+        },
+        {
+          "file": "goal_commit.py",
+          "normalized_sha256": "9f46b4b69d6988e76298049ec607392be4b2180d9959faec80baef0940979edd"
+        },
+        {
+          "file": "goal_controller.py",
+          "normalized_sha256": "06f69ddbb885ae6ea46426b2a1a7c115420e346d2c3d6fe766c0645bfedef143"
+        },
+        {
+          "file": "goal_pending.py",
+          "normalized_sha256": "9af106f50b855b54421050a60927914ae9b15805228c87e115fd5fa84df7d26c"
+        },
+        {
+          "file": "goal_progress.py",
+          "normalized_sha256": "7fa0d94fdd181013c66d9573a9e26ffa01710d9cf8c7c343598fb579d346d06b"
+        },
+        {
+          "file": "goal_protocol.py",
+          "normalized_sha256": "359a58f922c9bef9fc6c68b813bea22ea27bb8db970ecf13f5474f3da336d5ea"
+        },
+        {
+          "file": "goal_source.py",
+          "normalized_sha256": "7665e0402d883fcab09e255943bcee3688aaa1b7c3f0fdfc52517669e15947cb"
+        },
+        {
+          "file": "no_progress.py",
+          "normalized_sha256": "dcd5922934ba5b3d3d9a671ed6f1a88175c7b99636acca504c6a84a8aa9957a7"
+        },
+        {
+          "file": "observations.py",
+          "normalized_sha256": "3b14c80f6e71b477978b620a09a0e5aeb667df466277b3c60de04a671e711eec"
+        },
+        {
+          "file": "progress.py",
+          "normalized_sha256": "4ea19792ba652ea4c2fd3ee74aa416bfee95cdb4f9bc0e0b20734d8734e9dbc1"
+        },
+        {
+          "file": "repacking.py",
+          "normalized_sha256": "7aaea1d98a223fc8474fdd96f28c6e74d7d3cf6f744cf30f2758f7d71e191412"
+        },
+        {
+          "file": "repair_controller.py",
+          "normalized_sha256": "f8eee3dbbe847bdd0d9ca69d67dbb73edc3deca3dcfb2eb05fd506b4f3dd2f17"
+        },
+        {
+          "file": "repair_protocol.py",
+          "normalized_sha256": "a3d4ba5ebf4e0842f92bd198f1d43838115bb42dc3cd29992ba73708e28c9d0b"
+        },
+        {
+          "file": "request_contract.py",
+          "normalized_sha256": "3ca82419d0dcbb57844cb14a48a9a771409200c5ad443876ab5246987219c4f9"
+        }
+      ]
+    }
+  },
+  "source_preflight": {
+    "ok": true,
+    "artifact": {
+      "path": "full-129-cpu4/preflight.json",
+      "sha256": "10de03ec62bc529623595ba7e6d85c81e8761bd224b025aa1f3e717b75cd47eb"
+    },
+    "requirements_satisfied": 6,
+    "requirements_total": 6,
+    "requirement_codes": [
+      "runner_python",
+      "toolsandbox_checkout",
+      "toolsandbox_agent_endpoint_patch",
+      "toolsandbox_user_endpoint_patch",
+      "toolsandbox_agent_empty_tool_calls_patch",
+      "toolsandbox_user_empty_tool_calls_patch"
+    ],
+    "scope": "checkout, interpreter, and two official ToolSandbox compatibility patches; preflight alone does not establish benchmark completion"
+  },
+  "provider_evidence": {
+    "scope": "one observed external provider call in separate two-scenario Full protocol smoke; no assertion about other providers",
+    "provider": "currency-converter18.p.rapidapi.com",
+    "http_status": 200,
+    "observed_calls": 1,
+    "local_functional_smoke_receipt_sha256": "f8dba9b5e478a7c8dd4056875df9ecc60cd68164faa5fc3b5ca00d4399fccbc9",
+    "summary": {
+      "path": "protocol-smoke/summary_full.json",
+      "sha256": "9a1f256aca46a5374760834983ce890824ab0a4186fbeef75fa7d65a6a2b6c89"
+    },
+    "harness_events": {
+      "path": "protocol-smoke/measurement/harness_events.jsonl",
+      "sha256": "c541163896d6d5c080e1979bbf43ab7ed148bafbff412cc8d95e391524b6477b"
+    }
+  },
+  "engine": {
+    "port": 36470,
+    "max_running_requests": 4,
+    "tool_call_parser": "qwen",
+    "launch_receipt": {
+      "path": "owned_engine-slots4.json",
+      "sha256": "db96637cbf7b15d3e0b4c8c42b34bf4ab31020177c1279dd6adb7e30ebced644"
+    }
+  },
+  "planner_validation_only": {
+    "artifact": {
+      "path": "matrix.csv",
+      "sha256": "64572aa1d948c01df5c61bb9940d6962e1656120b6c94ed42e4cc23b4774311e"
+    },
+    "planned_cells": 24,
+    "scenarios_per_cell": 129,
+    "status": "enumerated, not run"
+  },
+  "cells": [
+    {
+      "backend": "c2kv",
+      "condition": "tracer_history",
+      "working_point": "K0",
+      "cell_id": "toolsandbox_smoke__c2kv__K0__tracer_history",
+      "official": {
+        "scenario_id": "add_reminder_content_and_date_and_time_multiple_user_turn_3_distraction_tools",
+        "semantic_score": 0.0,
+        "denominator": 1,
+        "summary": {
+          "path": "smoke/toolsandbox/raw/K0/c2kv/tracer_history/batches/a1789926431947994930_p2379913_50906877e4/toolsandbox_worker/add_reminder_content_and_date_and_time_multiple_user_turn_3_distraction_tools/official_summary.json",
+          "sha256": "4f4cc92efdab768d4c2998a7b850bc7235606c3c4c4b3560b7def7b3507cb7bf"
+        }
+      },
+      "measurement": {
+        "agent_decisions": 2,
+        "generation_attempts": 3,
+        "executed_tool_actions": 0,
+        "recovery_rounds": 1,
+        "recovery_detail_counts": {
+          "no_feasible_evidence_sets": 1,
+          "selected_source_units_appended": 1
+        },
+        "request_id_join": {
+          "method": "exact_outer_request_id",
+          "matched": 2,
+          "decision_ids_unique": true,
+          "tool_actions_bound_to_decisions": 0
+        },
+        "harness_events": {
+          "path": "smoke/toolsandbox/raw/K0/c2kv/tracer_history/batches/a1789926431947994930_p2379913_50906877e4/toolsandbox_worker/add_reminder_content_and_date_and_time_multiple_user_turn_3_distraction_tools/measurement/harness_events.jsonl",
+          "sha256": "14f7857bf623167ceb37fe20e3f54fc29e2370c8ab455a89d657427323d4e74a"
+        },
+        "decision_trace": {
+          "path": "smoke/toolsandbox/raw/K0/c2kv/tracer_history/batches/a1789926431947994930_p2379913_50906877e4/server/steps.jsonl",
+          "sha256": "6362be479364aefaf75a16bba2aa7ca88dad0d5a518088061974a8cb7ce7d7fb"
+        }
+      },
+      "cell_manifest": {
+        "path": "smoke/toolsandbox/raw/K0/c2kv/tracer_history/cell.json",
+        "sha256": "6517ccea7537761a5a8bbc1414981413d6046c4bb3e5327955f64a986262789a"
+      },
+      "cell_status": {
+        "path": "smoke/toolsandbox/raw/K0/c2kv/tracer_history/cell_status.json",
+        "sha256": "be834225e35fe7028691f5708f69a50cd7e3c528f54407946df6c2deecb2790e"
+      },
+      "score_summary": {
+        "path": "smoke/toolsandbox/raw/K0/c2kv/tracer_history/toolsandbox_score_summary.json",
+        "sha256": "a419589975ddf35e8f65d206e602f4f75ee499903cb00e1b4351814213d89efc"
+      },
+      "excluded_attempts": [
+        {
+          "path": "smoke/toolsandbox/raw/K0/c2kv/tracer_history/batches/a1789923727102958160_p2326385_50906877e4",
+          "reason": "not_selected_by_official_score_summary"
+        },
+        {
+          "path": "smoke/toolsandbox/raw/K0/c2kv/tracer_history/batches/a1789923873283344000_p2329431_50906877e4",
+          "reason": "not_selected_by_official_score_summary"
+        },
+        {
+          "path": "smoke/toolsandbox/raw/K0/c2kv/tracer_history/batches/a1789926090544578970_p2373088_50906877e4",
+          "reason": "not_selected_by_official_score_summary"
+        }
+      ]
+    },
+    {
+      "backend": "c2kv",
+      "condition": "compression_full_budget",
+      "working_point": "K0",
+      "cell_id": "toolsandbox_smoke__c2kv__K0__compression_full_budget",
+      "official": {
+        "scenario_id": "add_reminder_content_and_date_and_time_multiple_user_turn_3_distraction_tools",
+        "semantic_score": 0.0,
+        "denominator": 1,
+        "summary": {
+          "path": "smoke/toolsandbox/raw/K0/c2kv/compression_full_budget/batches/a1789926517075579030_p2381759_50906877e4/toolsandbox_worker/add_reminder_content_and_date_and_time_multiple_user_turn_3_distraction_tools/official_summary.json",
+          "sha256": "e013a561451129dbd6fa317ee07da8fcf99bacdb5f92c152d79fd0fd5ed63972"
+        }
+      },
+      "measurement": {
+        "agent_decisions": 2,
+        "generation_attempts": 2,
+        "executed_tool_actions": 0,
+        "recovery_rounds": 0,
+        "recovery_detail_counts": {
+          "native_s0_single_generation": 2
+        },
+        "request_id_join": {
+          "method": "exact_outer_request_id",
+          "matched": 2,
+          "decision_ids_unique": true,
+          "tool_actions_bound_to_decisions": 0
+        },
+        "harness_events": {
+          "path": "smoke/toolsandbox/raw/K0/c2kv/compression_full_budget/batches/a1789926517075579030_p2381759_50906877e4/toolsandbox_worker/add_reminder_content_and_date_and_time_multiple_user_turn_3_distraction_tools/measurement/harness_events.jsonl",
+          "sha256": "6405cc4e6ca27d097583be65f5f3c43897d469403b65c1f88fedb93a05557d59"
+        },
+        "decision_trace": {
+          "path": "smoke/toolsandbox/raw/K0/c2kv/compression_full_budget/batches/a1789926517075579030_p2381759_50906877e4/server/steps.jsonl",
+          "sha256": "f0cdc9f35dc76d2ff53e04dc52e985cbb382ecf4360a650a239f36f498b47b0f"
+        }
+      },
+      "cell_manifest": {
+        "path": "smoke/toolsandbox/raw/K0/c2kv/compression_full_budget/cell.json",
+        "sha256": "83023fdd5c17e447ca874b6a72c4ea1a1c4d6277f40e6d4255e2ff967620015d"
+      },
+      "cell_status": {
+        "path": "smoke/toolsandbox/raw/K0/c2kv/compression_full_budget/cell_status.json",
+        "sha256": "a2fc4bd2645a1af7cd939eae5de62c14dc1e9353b8a5aa3a3cfa0f4c50cbfb9d"
+      },
+      "score_summary": {
+        "path": "smoke/toolsandbox/raw/K0/c2kv/compression_full_budget/toolsandbox_score_summary.json",
+        "sha256": "13878791a7f49ad851a5b7a1bacb19226422ce0f33112c891a55b3a082f3376b"
+      },
+      "excluded_attempts": []
+    },
+    {
+      "backend": "c2kv",
+      "condition": "recovery_off_same_initial",
+      "working_point": "K0",
+      "cell_id": "toolsandbox_smoke__c2kv__K0__recovery_off_same_initial",
+      "official": {
+        "scenario_id": "add_reminder_content_and_date_and_time_multiple_user_turn_3_distraction_tools",
+        "semantic_score": 0.0,
+        "denominator": 1,
+        "summary": {
+          "path": "smoke/toolsandbox/raw/K0/c2kv/recovery_off_same_initial/batches/a1789927490740689880_p2409454_50906877e4/toolsandbox_worker/add_reminder_content_and_date_and_time_multiple_user_turn_3_distraction_tools/official_summary.json",
+          "sha256": "f0eb10cb43c67d96603a649a45bcbdfa602d612440494ef6744bda13387a9ab6"
+        }
+      },
+      "measurement": {
+        "agent_decisions": 2,
+        "generation_attempts": 2,
+        "executed_tool_actions": 0,
+        "recovery_rounds": 0,
+        "recovery_detail_counts": {
+          "native_s0_single_generation": 2
+        },
+        "request_id_join": {
+          "method": "exact_outer_request_id",
+          "matched": 2,
+          "decision_ids_unique": true,
+          "tool_actions_bound_to_decisions": 0
+        },
+        "harness_events": {
+          "path": "smoke/toolsandbox/raw/K0/c2kv/recovery_off_same_initial/batches/a1789927490740689880_p2409454_50906877e4/toolsandbox_worker/add_reminder_content_and_date_and_time_multiple_user_turn_3_distraction_tools/measurement/harness_events.jsonl",
+          "sha256": "12e84b05c3e3ae3136e5f4ca8bc6055b1546f6c37fe30a98cf9f815054ec07a9"
+        },
+        "decision_trace": {
+          "path": "smoke/toolsandbox/raw/K0/c2kv/recovery_off_same_initial/batches/a1789927490740689880_p2409454_50906877e4/server/steps.jsonl",
+          "sha256": "755e4455222df672b1254e9eadc1a6c333b7deae05ecef05bef32cc551a6f9bf"
+        }
+      },
+      "cell_manifest": {
+        "path": "smoke/toolsandbox/raw/K0/c2kv/recovery_off_same_initial/cell.json",
+        "sha256": "5fcb1f1e3d2408460c5b4690089cff099c35d3f54b31b42182eb019d2901b03b"
+      },
+      "cell_status": {
+        "path": "smoke/toolsandbox/raw/K0/c2kv/recovery_off_same_initial/cell_status.json",
+        "sha256": "bd5b916a13d7caaeb1e9c720aa80757c859b9ccaf731592bbbad4ba39272b44e"
+      },
+      "score_summary": {
+        "path": "smoke/toolsandbox/raw/K0/c2kv/recovery_off_same_initial/toolsandbox_score_summary.json",
+        "sha256": "d42d790553f4c01194293bd419fdc551c476fbb164004fe72d88b2f70b76a993"
+      },
+      "excluded_attempts": [
+        {
+          "path": "smoke/toolsandbox/raw/K0/c2kv/recovery_off_same_initial/batches/a1789926551937755700_p2382740_50906877e4",
+          "reason": "not_selected_by_official_score_summary"
+        }
+      ]
+    },
+    {
+      "backend": "h2o",
+      "condition": "tracer_history",
+      "working_point": "K0",
+      "cell_id": "toolsandbox_smoke__h2o__K0__tracer_history",
+      "official": {
+        "scenario_id": "add_reminder_content_and_date_and_time_multiple_user_turn_3_distraction_tools",
+        "semantic_score": 0.0,
+        "denominator": 1,
+        "summary": {
+          "path": "smoke/toolsandbox/raw/K0/h2o/tracer_history/batches/000_add_reminder_content_and_date_and_time_multiple_user_turn_3_distraction_tools/toolsandbox_worker/add_reminder_content_and_date_and_time_multiple_user_turn_3_distraction_tools/official_summary.json",
+          "sha256": "041589b3a196f28f17c9d6ece705ce39822311ff23f1c986e4b3b8f858cc0536"
+        }
+      },
+      "measurement": {
+        "agent_decisions": 15,
+        "generation_attempts": 17,
+        "executed_tool_actions": 0,
+        "recovery_rounds": 2,
+        "recovery_detail_counts": {
+          "admission_rejected": 1,
+          "recover": 2,
+          "not_triggered": 12
+        },
+        "request_id_join": {
+          "method": "exact_session_decision_suffix",
+          "matched": 15,
+          "decision_ids_unique": true,
+          "tool_actions_bound_to_decisions": 0
+        },
+        "harness_events": {
+          "path": "smoke/toolsandbox/raw/K0/h2o/tracer_history/batches/000_add_reminder_content_and_date_and_time_multiple_user_turn_3_distraction_tools/toolsandbox_worker/add_reminder_content_and_date_and_time_multiple_user_turn_3_distraction_tools/measurement/harness_events.jsonl",
+          "sha256": "2702c34399680bcbad873cabd58b88e75a2cb5b980fb53070664e7fe85ac52cf"
+        },
+        "decision_trace": {
+          "path": "smoke/toolsandbox/raw/K0/h2o/tracer_history/batches/000_add_reminder_content_and_date_and_time_multiple_user_turn_3_distraction_tools/server/steps.jsonl",
+          "sha256": "03a67eff0d28609bc2d1ded04faf6680bef90eac8caa62363b1d6be896eee689"
+        }
+      },
+      "cell_manifest": {
+        "path": "smoke/toolsandbox/raw/K0/h2o/tracer_history/cell.json",
+        "sha256": "860611b4537bb3f19ca198af3bb2e083530a6d27b0e441496017e3171e7d581a"
+      },
+      "cell_status": {
+        "path": "smoke/toolsandbox/raw/K0/h2o/tracer_history/cell_status.json",
+        "sha256": "df5d3c7d32226fdaff0cacc5c4348d2ab365ef341000002ef6b0ea2713f61038"
+      },
+      "score_summary": {
+        "path": "smoke/toolsandbox/raw/K0/h2o/tracer_history/toolsandbox_score_summary.json",
+        "sha256": "cfe5bd876069a21b01ce6c73cda0cbbf05c4bc216fac482ae6f3e298657a951b"
+      },
+      "excluded_attempts": [
+        {
+          "path": "smoke/toolsandbox/raw/K0/h2o/tracer_history/batches/000_add_reminder_content_and_date_and_time_multiple_user_turn_3_distraction_tools.prior.1789928191208198810",
+          "reason": "not_selected_by_official_score_summary"
+        }
+      ]
+    },
+    {
+      "backend": "h2o",
+      "condition": "compression_full_budget",
+      "working_point": "K0",
+      "cell_id": "toolsandbox_smoke__h2o__K0__compression_full_budget",
+      "official": {
+        "scenario_id": "add_reminder_content_and_date_and_time_multiple_user_turn_3_distraction_tools",
+        "semantic_score": 1.0,
+        "denominator": 1,
+        "summary": {
+          "path": "smoke/toolsandbox/raw/K0/h2o/compression_full_budget/tasks/add_reminder_content_and_date_and_time_multiple_user_turn_3_distraction_tools/attempts/a1789928322933372430_131fd2b665f543cda95339da03722c82/toolsandbox/toolsandbox_worker/add_reminder_content_and_date_and_time_multiple_user_turn_3_distraction_tools/official_summary.json",
+          "sha256": "e0909947bbd28828a4628a16c51a8d28c552eab5fefac22a8412d32e16b836b8"
+        }
+      },
+      "measurement": {
+        "agent_decisions": 5,
+        "generation_attempts": 5,
+        "executed_tool_actions": 2,
+        "recovery_rounds": 0,
+        "recovery_detail_counts": {
+          "condition": "compression_full_budget"
+        },
+        "request_id_join": {
+          "method": "exact_proxy_request_id_excluding_probe",
+          "matched": 5,
+          "decision_ids_unique": true,
+          "tool_actions_bound_to_decisions": 2
+        },
+        "harness_events": {
+          "path": "smoke/toolsandbox/raw/K0/h2o/compression_full_budget/tasks/add_reminder_content_and_date_and_time_multiple_user_turn_3_distraction_tools/attempts/a1789928322933372430_131fd2b665f543cda95339da03722c82/toolsandbox/toolsandbox_worker/add_reminder_content_and_date_and_time_multiple_user_turn_3_distraction_tools/measurement/harness_events.jsonl",
+          "sha256": "fa6efd8c2ae068d14a3378d98fe55c0804157bee17ab19da9166864c280dd980"
+        },
+        "decision_trace": {
+          "path": "smoke/toolsandbox/raw/K0/h2o/compression_full_budget/proxy_attempts/a1789928320676221160_aa27653855c9437f8aaa4d619e9601af/proxy_requests.jsonl",
+          "sha256": "26016b8cdea1be9324ea7789cc5b89a680145e7a9fb152c08f3f87e655fdf786"
+        }
+      },
+      "cell_manifest": {
+        "path": "smoke/toolsandbox/raw/K0/h2o/compression_full_budget/cell.json",
+        "sha256": "7ad5b6d41ac12cceb9e1b477f22d14821ac3ff448316cc7ade9fca8e844d4149"
+      },
+      "cell_status": {
+        "path": "smoke/toolsandbox/raw/K0/h2o/compression_full_budget/cell_status.json",
+        "sha256": "dee7ad4c106cfa4cc3e3f24999f271cd6f45b178545ba1f49d538f8f6bc3f4a2"
+      },
+      "score_summary": {
+        "path": "smoke/toolsandbox/raw/K0/h2o/compression_full_budget/toolsandbox_score_summary.json",
+        "sha256": "c142303ae188d2be96e84ca222d926e9cb6f0259e9a446a437cdc6bac1dd2a39"
+      },
+      "excluded_attempts": []
+    },
+    {
+      "backend": "h2o",
+      "condition": "recovery_off_same_initial",
+      "working_point": "K0",
+      "cell_id": "toolsandbox_smoke__h2o__K0__recovery_off_same_initial",
+      "official": {
+        "scenario_id": "add_reminder_content_and_date_and_time_multiple_user_turn_3_distraction_tools",
+        "semantic_score": 1.0,
+        "denominator": 1,
+        "summary": {
+          "path": "smoke/toolsandbox/raw/K0/h2o/recovery_off_same_initial/tasks/add_reminder_content_and_date_and_time_multiple_user_turn_3_distraction_tools/attempts/a1789928481054567010_bf2fef50fa4e4a5d95099c0e7a5bb89b/toolsandbox/toolsandbox_worker/add_reminder_content_and_date_and_time_multiple_user_turn_3_distraction_tools/official_summary.json",
+          "sha256": "8718793846bee702b24f31c23f5556ebd417292464ad3c24f510f10e538dba08"
+        }
+      },
+      "measurement": {
+        "agent_decisions": 5,
+        "generation_attempts": 5,
+        "executed_tool_actions": 2,
+        "recovery_rounds": 0,
+        "recovery_detail_counts": {
+          "condition": "recovery_off_same_initial"
+        },
+        "request_id_join": {
+          "method": "exact_proxy_request_id_excluding_probe",
+          "matched": 5,
+          "decision_ids_unique": true,
+          "tool_actions_bound_to_decisions": 2
+        },
+        "harness_events": {
+          "path": "smoke/toolsandbox/raw/K0/h2o/recovery_off_same_initial/tasks/add_reminder_content_and_date_and_time_multiple_user_turn_3_distraction_tools/attempts/a1789928481054567010_bf2fef50fa4e4a5d95099c0e7a5bb89b/toolsandbox/toolsandbox_worker/add_reminder_content_and_date_and_time_multiple_user_turn_3_distraction_tools/measurement/harness_events.jsonl",
+          "sha256": "faa5ba440221cee58b3cf59e66078723d231c80486f20392b36b49e519d84613"
+        },
+        "decision_trace": {
+          "path": "smoke/toolsandbox/raw/K0/h2o/recovery_off_same_initial/proxy_attempts/a1789928478819333640_5c6b54e04cf34c16ac9c7e9d444baaa7/proxy_requests.jsonl",
+          "sha256": "d1c547baad7d6795b5f038dce9c1f0bcfbfad1d0bb9e4e185d240a53ffcde1b1"
+        }
+      },
+      "cell_manifest": {
+        "path": "smoke/toolsandbox/raw/K0/h2o/recovery_off_same_initial/cell.json",
+        "sha256": "549edba0d0f221baa8aa6bb4faac938914d6a0290ffe0c57c42f92cbf3b3e5b2"
+      },
+      "cell_status": {
+        "path": "smoke/toolsandbox/raw/K0/h2o/recovery_off_same_initial/cell_status.json",
+        "sha256": "371b9c4eb0ebc1d144d315c3e4be681216e7f3705bc1a9c626dcd1a59dcdf046"
+      },
+      "score_summary": {
+        "path": "smoke/toolsandbox/raw/K0/h2o/recovery_off_same_initial/toolsandbox_score_summary.json",
+        "sha256": "8fe3a75e5bf61456d0267964b01c6782c8cfadde64226a56bd17ccff0b2e6519"
+      },
+      "excluded_attempts": [
+        {
+          "path": "smoke/toolsandbox/raw/K0/h2o/recovery_off_same_initial/proxy_attempts/a1789928357712100760_7a084fa1d24f42da9ed63ceb4f0b0005",
+          "reason": "proxy_attempt_not_joined_to_official_decisions"
+        },
+        {
+          "path": "smoke/toolsandbox/raw/K0/h2o/recovery_off_same_initial/tasks/add_reminder_content_and_date_and_time_multiple_user_turn_3_distraction_tools/attempts/a1789928359944387980_120b86e8504a4d718da6edbb6d45d777",
+          "reason": "task_attempt_not_selected_by_official_score_summary"
+        }
+      ]
+    }
+  ],
+  "excluded_prior_attempts_total": 7,
+  "local_validation_input_sha256": "b6ca0c8ed89f8f360e18ae8228e0aeb01981254934479edbeeec8f3c28177c22",
+  "scheduler_scope_regression": {
+    "behavior": "Ignore manifests outside EXPERIMENT_ROOT before reading cell ownership; retain errors for malformed owned manifests.",
+    "validation": "tests/test_scheduler_npu.py: 36 passed",
+    "production_hotfix": {
+      "path": "<NPU_HOME>/c2kv-generality-20260918/releases/shared-generality-6f019c7ae/generality/scheduler_npu.py",
+      "before_sha256": "9151ee0ed2308890d6846debacccd1123960cbcd60b9f4bf4395e234463e1142",
+      "after_sha256": "953669b32bd8a0451a6e109da020752074430d5194f7046c7e99498a9377b187",
+      "activation": {
+        "old_scheduler_pid": 2446920,
+        "new_scheduler_pid": 2449493,
+        "argv": [
+          "/home/liuyancheng/envs/sgl/bin/python",
+          "-u",
+          "tools/launch_shared_scheduler.py",
+          "--cards",
+          "0",
+          "1",
+          "2",
+          "3",
+          "4",
+          "5",
+          "6",
+          "--max-drivers-per-card",
+          "2"
+        ],
+        "scope_regression_passed": true,
+        "signals": [
+          {
+            "pid": 2446920,
+            "signal": "SIGTERM"
+          }
+        ],
+        "engines_or_drivers_signalled": false,
+        "time": 1789929356.3494334
+      },
+      "note": "Production release uses GENERATION_ROOT; the integration checkout supports its explicit EXPERIMENT_ROOT override."
+    }
+  }
+}
