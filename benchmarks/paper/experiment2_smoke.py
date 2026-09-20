@@ -49,6 +49,8 @@ def main(argv=None):
     parser.add_argument("--arms", default="full,c2kv_native_r4,c2kv_goal_rescue_r8",
                         help="comma-separated configured arms, or all")
     parser.add_argument("--task-id", default="multi_turn_base_26")
+    parser.add_argument("--cpu-offload-gb", type=float, default=0,
+                        help="optional laptop-only weight offload; the formal runner is unchanged")
     args = parser.parse_args(argv)
     config = json.loads(args.config.read_text(encoding="utf-8"))
     source = args.sglang_source.resolve()
@@ -85,6 +87,8 @@ def main(argv=None):
         env["C2KV_PAPER_TELEMETRY_LOG"] = str(directory / telemetry)
         command = smoke_command(config, cell, directory, profile, args.task_id)
         server_command = runner.server_command(config, source, cell["arm"], "bfcl_base")
+        if args.cpu_offload_gb:
+            server_command += ["--cpu-offload-gb", str(args.cpu_offload_gb)]
         record = {"cell_id": cell["cell_id"], "arm": cell["arm"],
                   "command": command, "server_command": server_command, "status": "running"}
         receipt["cells"].append(record)
