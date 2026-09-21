@@ -211,6 +211,14 @@ two-field flight routes/fare conditions. The real six-field BFCL booking API
 is supported for completed-duplicate filtering, not missing-argument synthesis.
 Classification and source evidence are logged for offline coverage analysis.
 
+Select the opt-in `static_verified_v2` candidate directly with
+`--candidate-algorithm static_verified_v2`. It uses the same v6 cell protocol,
+Static-T02 initial view, event-recovery backbone, ratio 8, frozen T02 threshold,
+and B0 task limits. Its `verified_binding_v2` commit stage binds both
+`verified-binding-relations-v2` and the unchanged
+`verified-binding-rules-v1` base registry. It adds no generation or model
+workspace and has its own candidate result directory.
+
 For an explicit native history budget on a BFCL-base ratio-8 candidate, add
 `--history-budget-tokens N` to the same launcher command. The NPU driver
 converts `N` with the checkpoint's validated KV geometry and writes equal

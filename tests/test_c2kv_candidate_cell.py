@@ -74,8 +74,7 @@ def test_candidate_cell_is_explicit_ratio8_and_isolated(tmp_path, variant):
         assert result["schema"] == "c2kv-generality-candidate-cell-v1"
     if variant not in candidate_cell.STATIC_VARIANTS + candidate_cell.STATIC_EXTENSION_VARIANTS:
         assert "initial_view" not in result and "recovery_backbone" not in result
-    elif (variant not in candidate_cell.VERIFIED_STATIC_VARIANTS
-          and variant != "static_verified"):
+    elif "proof_registry_version" not in candidate_cell.static_contract(variant):
         assert "proof_registry_version" not in result
     assert result["candidate_source_cell_id"] == source["cell_id"]
     assert result["candidate_budget_source"] == "working_point.common_cap_bytes"
@@ -111,7 +110,7 @@ def test_static_extension_contracts_are_explicit_and_versioned():
                          "version": candidate_cell.STATIC_INITIAL_VIEW_VERSION},
     }
     assert candidate_cell.STATIC_EXTENSION_VARIANTS == (
-        "static_verified", "static_action_ledger")
+        "static_verified", "static_action_ledger", "static_verified_v2")
     assert candidate_cell.STATIC_EXTENSION_VERSION == "c2kv-static-extension-v1"
     assert candidate_cell.static_contract("static_verified") == {
         **common,
@@ -124,6 +123,64 @@ def test_static_extension_contracts_are_explicit_and_versioned():
         "action_ledger_version": "static-action-ledger-v1",
         "action_rules_version": "action-ledger-rules-v1",
     }
+    assert candidate_cell.static_contract("static_verified_v2") == {
+        **common,
+        "commit_policy": "verified_binding_v2",
+        "proof_registry_version": candidate_cell.RELATIONAL_PROOF_REGISTRY_VERSION,
+        "base_proof_registry_version": candidate_cell.PROOF_REGISTRY_VERSION,
+    }
+
+
+def test_static_verified_v2_cell_and_controller_bind_the_relational_contract(
+        tmp_path, monkeypatch):
+    variant = "static_verified_v2"
+    checkpoint = tmp_path / "checkpoint"
+    checkpoint.mkdir()
+    (checkpoint / "config.json").write_text("{}", encoding="utf-8")
+    artifact_path = tmp_path / "risk.json"
+    artifact_path.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(
+        candidate_cell, "RISK_ARTIFACT_SHA256",
+        hashlib.sha256(artifact_path.read_bytes()).hexdigest())
+    cell = candidate_cell.candidate_cell_from_source(
+        source_cell(tmp_path) | {"checkpoint": str(checkpoint)},
+        variant, "http://127.0.0.1:36200")
+    controller, _ = candidate_cell.controller_with_binding(
+        cell, base_controller={"view_mode": "native_s0"},
+        selected={"checkpoint_selection": {"config_sha256": hashlib.sha256(
+            (checkpoint / "config.json").read_bytes()).hexdigest()}},
+        risk_artifact_path=artifact_path,
+        bind_risk_artifact=lambda artifact, path: ({"bound": True}, {}))
+
+    contract = candidate_cell.static_contract(variant)
+    assert cell["schema"] == "c2kv-generality-candidate-cell-v6"
+    assert cell["candidate_protocol"] == candidate_cell.STATIC_EXTENSION_VERSION
+    assert cell["ratio"] == 8 and cell["threshold"] == 0.5
+    assert {key: cell[key] for key in contract} == contract
+    assert controller["candidate_algorithm"] == {
+        "variant": variant,
+        "risk_artifact": {"bound": True},
+        "risk_threshold": 0.5,
+        **contract,
+    }
+
+
+@pytest.mark.parametrize("field", [
+    "commit_policy", "proof_registry_version", "base_proof_registry_version",
+])
+@pytest.mark.parametrize("replacement", [None, "stale-version"])
+def test_static_verified_v2_rejects_missing_or_stale_contract_before_checkpoint(
+        tmp_path, field, replacement):
+    cell = candidate_cell.candidate_cell_from_source(
+        source_cell(tmp_path), "static_verified_v2", "http://127.0.0.1:36200")
+    if replacement is None:
+        cell.pop(field)
+    else:
+        cell[field] = replacement
+    with pytest.raises(ValueError, match="matching version and contract"):
+        candidate_cell.controller_with_binding(
+            cell, base_controller={}, selected={},
+            risk_artifact_path=tmp_path / "unused.json", bind_risk_artifact=None)
 
 
 @pytest.mark.parametrize("variant", candidate_cell.VARIANTS)

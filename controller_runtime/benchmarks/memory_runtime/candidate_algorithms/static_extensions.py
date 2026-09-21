@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import copy
-from dataclasses import asdict
+from dataclasses import asdict, replace
 
 from . import STATIC_EXTENSION_VARIANTS, STATIC_EXTENSION_VERSION
 from .controller import CandidateRecoveryController, memory_signature
@@ -17,6 +17,15 @@ from ..recovery.gate import canonical
 def extension_fields(variant):
     if variant not in STATIC_EXTENSION_VARIANTS:
         raise ValueError("Unknown Static extension")
+    if variant == "static_verified_v2":
+        from .relational_binding import PROOF_REGISTRY_VERSION as RELATIONAL_VERSION
+        return {
+            "recovery_backbone": "static_t02",
+            "initial_view": copy.deepcopy(STATIC_INITIAL_VIEW),
+            "commit_policy": "verified_binding_v2",
+            "proof_registry_version": RELATIONAL_VERSION,
+            "base_proof_registry_version": PROOF_REGISTRY_VERSION,
+        }
     return {
         "recovery_backbone": "static_t02",
         "initial_view": copy.deepcopy(STATIC_INITIAL_VIEW),
@@ -43,7 +52,11 @@ def build_static_extension(tokenizer, *, candidate, packing, policy,
     base = build_initial_view_allocator(
         tokenizer, initial_view=STATIC_INITIAL_VIEW, packing=packing, policy=policy,
         model_context=model_context, s0_config=s0_config, benchmark=benchmark)
-    cls = StaticVerifiedController if candidate["variant"] == "static_verified" else StaticActionLedgerController
+    cls = {
+        "static_verified": StaticVerifiedController,
+        "static_action_ledger": StaticActionLedgerController,
+        "static_verified_v2": StaticVerifiedV2Controller,
+    }[candidate["variant"]]
     return cls(base, candidate)
 
 
@@ -175,6 +188,36 @@ class StaticVerifiedController(StaticExtensionController):
             "status": "verified_binding_committed" if verdict.accepted else "binding_verification_rejected",
             "proposal": proposal.to_receipt(), "verification": receipt,
             "accepted": verdict.accepted, "reason": verdict.reason}
+
+
+class StaticVerifiedV2Controller(StaticVerifiedController):
+    """Keep legacy eligibility; prove new relations against the final selected calls."""
+
+    def __init__(self, base, config, *, risk_model=None, binding_policy=None,
+                 relation_policy=None):
+        from .relational_binding import Policy
+        self.relation_policy = Policy() if relation_policy is None else relation_policy
+        super().__init__(base, config, risk_model=risk_model, binding_policy=binding_policy)
+
+    def _finalize_selected(self, prepared, calls):
+        base_calls, base_receipt = super()._finalize_selected(prepared, calls)
+        # A recovered draft can differ from the held draft used by legacy rules.
+        # Rebuild the proof context from the actual selected, legacy-checked calls.
+        context = replace(prepared._static_extension_context,
+                          draft_tool_calls=tuple(copy.deepcopy(base_calls)),
+                          draft_text="", parse_error=None)
+        proposal = self.relation_policy.propose(context)
+        details = {"status": base_receipt["status"], "base_verification": base_receipt,
+                   "relational_verification": {"status": "no_verified_relation"}}
+        if proposal is None:
+            return base_calls, details
+        corrected, receipt = self.relation_policy.apply(context, proposal, base_calls)
+        verdict = self.relation_policy.validate(context, proposal, corrected)
+        details.update(
+            status="relational_binding_committed" if verdict.accepted else "relational_binding_rejected",
+            relational_verification={"proposal": proposal.to_receipt(), "verification": receipt,
+                                     "accepted": verdict.accepted, "reason": verdict.reason})
+        return (tuple(corrected) if verdict.accepted else base_calls), details
 
 
 class StaticActionLedgerController(StaticExtensionController):

@@ -25,13 +25,15 @@ STATIC_BACKBONES = {
 }
 VERIFIED_STATIC_VARIANTS = ("goal_verified_static", "pending_verified_static")
 STATIC_VARIANTS = tuple(STATIC_BACKBONES)
-STATIC_EXTENSION_VARIANTS = ("static_verified", "static_action_ledger")
+STATIC_EXTENSION_VARIANTS = (
+    "static_verified", "static_action_ledger", "static_verified_v2")
 VARIANTS = (LEGACY_VARIANTS + REPAIR_VARIANTS + GOAL_VARIANTS + VERIFIED_VARIANTS
             + STATIC_VARIANTS + STATIC_EXTENSION_VARIANTS)
 REPAIR_VERSION = "c2kv-source-repair-v1"
 GOAL_VERSION = "c2kv-goal-composition-v1"
 VERIFIED_VERSION = "c2kv-verified-binding-v1"
 PROOF_REGISTRY_VERSION = "verified-binding-rules-v1"
+RELATIONAL_PROOF_REGISTRY_VERSION = "verified-binding-relations-v2"
 STATIC_VERSION = "c2kv-initial-view-composition-v1"
 STATIC_EXTENSION_VERSION = "c2kv-static-extension-v1"
 STATIC_INITIAL_VIEW_VERSION = "c2kv-static-initial-view-v1"
@@ -47,6 +49,15 @@ CANDIDATE_SOURCE_PANELS = frozenset({
 
 def static_contract(variant: str) -> dict:
     if variant in STATIC_EXTENSION_VARIANTS:
+        if variant == "static_verified_v2":
+            return {
+                "recovery_backbone": "static_t02",
+                "initial_view": {
+                    "policy": "static_gist", "version": STATIC_INITIAL_VIEW_VERSION},
+                "commit_policy": "verified_binding_v2",
+                "proof_registry_version": RELATIONAL_PROOF_REGISTRY_VERSION,
+                "base_proof_registry_version": PROOF_REGISTRY_VERSION,
+            }
         contract = {
             "recovery_backbone": "static_t02",
             "initial_view": {"policy": "static_gist", "version": STATIC_INITIAL_VIEW_VERSION},
