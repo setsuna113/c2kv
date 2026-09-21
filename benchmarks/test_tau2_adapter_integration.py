@@ -85,6 +85,7 @@ def test_run_tau2_scores_exact_official_task_and_routes_user_raw(monkeypatch, tm
         native=True, model="served")
     assert summary["n"] == 1
     assert summary["task_ids"] == ["11"]
+    assert summary["protocol"]["user_simulator_transport_retries"] == 1
     assert summary["task_rows"][0]["semantic_score"] == 1.0
     assert (out / "official" / "updated_results.json").is_file()
     run, options = next((command, opts) for command, opts in commands if "run" in command)
@@ -383,8 +384,12 @@ def test_hook_records_code_stripped_litellm_error_as_structured_telemetry(
     llm_utils = types.ModuleType("tau2.utils.llm_utils")
     llm_utils.completion = lambda *_args, **_kwargs: None
     llm_agent = types.ModuleType("tau2.agent.llm_agent")
+    user_simulator = types.ModuleType("tau2.user.user_simulator")
+    user_simulator.generate = lambda *_args, **_kwargs: None
+    calls = []
 
     def fail_generate(**_kwargs):
+        calls.append(1)
         raise LiteLLMError("The finite event-native decision cap is exhausted")
 
     llm_agent.generate = fail_generate
@@ -402,6 +407,8 @@ def test_hook_records_code_stripped_litellm_error_as_structured_telemetry(
         "tau2.environment.environment": types.ModuleType("tau2.environment.environment"),
         "tau2.runner": types.ModuleType("tau2.runner"),
         "tau2.runner.batch": batch,
+        "tau2.user": types.ModuleType("tau2.user"),
+        "tau2.user.user_simulator": user_simulator,
         "tau2.utils": types.ModuleType("tau2.utils"),
         "tau2.utils.llm_utils": llm_utils,
     }
@@ -416,6 +423,7 @@ def test_hook_records_code_stripped_litellm_error_as_structured_telemetry(
     assert hook.install()
     with pytest.raises(LiteLLMError):
         batch.run_single_task(None, types.SimpleNamespace(id="9"))
+    assert len(calls) == 1
     rows = [json.loads(line) for line in events.read_text(encoding="utf-8").splitlines()]
     decision = next(row for row in rows if row["event_type"] == "decision")
     assert decision["error"] == {
@@ -424,6 +432,149 @@ def test_hook_records_code_stripped_litellm_error_as_structured_telemetry(
         "status_code": 429,
         "api_error_code": None,
     }
+
+
+def _run_user_retry_fixture(monkeypatch, tmp_path, generate):
+    events = tmp_path / "events.jsonl"
+
+    class Environment:
+        def get_response(self, message):
+            return message
+
+    llm_utils = types.ModuleType("tau2.utils.llm_utils")
+    llm_utils.completion = lambda *_args, **_kwargs: None
+    llm_agent = types.ModuleType("tau2.agent.llm_agent")
+    llm_agent.generate = lambda *_args, **_kwargs: None
+    user_simulator = types.ModuleType("tau2.user.user_simulator")
+    user_simulator.generate = generate
+    batch = types.ModuleType("tau2.runner.batch")
+
+    def run_single_task(_config, _task, **_kwargs):
+        return user_simulator.generate(
+            call_name="user_simulator_response", model="openai/user")
+
+    batch.run_single_task = run_single_task
+    modules = {
+        "tau2": types.ModuleType("tau2"),
+        "tau2.agent": types.ModuleType("tau2.agent"),
+        "tau2.agent.llm_agent": llm_agent,
+        "tau2.environment": types.ModuleType("tau2.environment"),
+        "tau2.environment.environment": types.ModuleType("tau2.environment.environment"),
+        "tau2.runner": types.ModuleType("tau2.runner"),
+        "tau2.runner.batch": batch,
+        "tau2.user": types.ModuleType("tau2.user"),
+        "tau2.user.user_simulator": user_simulator,
+        "tau2.utils": types.ModuleType("tau2.utils"),
+        "tau2.utils.llm_utils": llm_utils,
+    }
+    modules["tau2.environment.environment"].Environment = Environment
+    for name, value in modules.items():
+        monkeypatch.setitem(sys.modules, name, value)
+    monkeypatch.setenv("C2KV_TAU2_TELEMETRY_PATH", str(events))
+    hook_path = Path(__file__).resolve().parent / "tau2_instrumentation" / "c2kv_tau2_hook.py"
+    spec = importlib.util.spec_from_file_location(
+        "fixture_tau2_hook_user_retry_" + tmp_path.name, hook_path)
+    hook = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(hook)
+    assert hook.install()
+    return batch, events
+
+
+def _transport_error(*, status_code=500):
+    protocol_type = type(
+        "RemoteProtocolError", (RuntimeError,), {"__module__": "httpx"})
+    connection_type = type("APIConnectionError", (RuntimeError,), {"__module__": "openai"})
+    connection = connection_type("Connection error")
+    connection.__cause__ = protocol_type("Server disconnected without a response")
+    outer_type = type(
+        "InternalServerError", (RuntimeError,), {"__module__": "litellm.exceptions"})
+    outer = outer_type("litellm transport failure")
+    outer.__cause__ = connection
+    if status_code is not None:
+        outer.status_code = status_code
+    return outer
+
+
+def test_user_simulator_retries_one_transient_transport_failure_and_logs_it(
+        monkeypatch, tmp_path):
+    calls = []
+
+    def generate(**_kwargs):
+        calls.append(1)
+        if len(calls) == 1:
+            raise _transport_error()
+        return "user response"
+
+    batch, events = _run_user_retry_fixture(monkeypatch, tmp_path, generate)
+    assert batch.run_single_task(None, types.SimpleNamespace(id="25")) == "user response"
+    assert len(calls) == 2
+    rows = [json.loads(line) for line in events.read_text(encoding="utf-8").splitlines()]
+    retry = [row for row in rows if row["event_type"] == "user_simulator_retry"]
+    assert len(retry) == 1
+    assert retry[0]["episode_id"] == "25"
+    assert retry[0]["retry_index"] == retry[0]["retry_limit"] == 1
+    assert retry[0]["transport_cause"] == {
+        "module": "openai", "exception_type": "APIConnectionError"}
+    assert retry[0]["error"]["message"] == "litellm transport failure"
+    assert rows[-1]["event_type"] == "episode_end" and rows[-1]["status"] == "ok"
+
+
+def test_user_simulator_second_transport_failure_is_not_retried(
+        monkeypatch, tmp_path):
+    calls = []
+
+    def generate(**_kwargs):
+        calls.append(1)
+        raise _transport_error()
+
+    batch, events = _run_user_retry_fixture(monkeypatch, tmp_path, generate)
+    with pytest.raises(RuntimeError, match="litellm transport failure"):
+        batch.run_single_task(None, types.SimpleNamespace(id="25"))
+    assert len(calls) == 2
+    rows = [json.loads(line) for line in events.read_text(encoding="utf-8").splitlines()]
+    assert sum(row["event_type"] == "user_simulator_retry" for row in rows) == 1
+    assert rows[-1]["event_type"] == "episode_end"
+    assert rows[-1]["status"] == "error"
+    assert "litellm transport failure" in rows[-1]["error"]
+
+
+def test_user_simulator_cancellation_with_transport_cause_is_not_retried(
+        monkeypatch, tmp_path):
+    calls = []
+    cancellation = KeyboardInterrupt("cancelled")
+    cancellation.__cause__ = _transport_error()
+
+    def generate(**_kwargs):
+        calls.append(1)
+        raise cancellation
+
+    batch, events = _run_user_retry_fixture(monkeypatch, tmp_path, generate)
+    with pytest.raises(KeyboardInterrupt, match="cancelled"):
+        batch.run_single_task(None, types.SimpleNamespace(id="25"))
+    assert len(calls) == 1
+    rows = [json.loads(line) for line in events.read_text(encoding="utf-8").splitlines()]
+    assert all(row["event_type"] != "user_simulator_retry" for row in rows)
+
+
+@pytest.mark.parametrize("error", [
+    RuntimeError("model failure"),
+    _transport_error(status_code=400),
+    _transport_error(status_code=429),
+])
+def test_user_simulator_does_not_retry_nontransport_or_http_failures(
+        monkeypatch, tmp_path, error):
+    calls = []
+
+    def generate(**_kwargs):
+        calls.append(1)
+        raise error
+
+    batch, events = _run_user_retry_fixture(monkeypatch, tmp_path, generate)
+    with pytest.raises(type(error)):
+        batch.run_single_task(None, types.SimpleNamespace(id="25"))
+    assert len(calls) == 1
+    rows = [json.loads(line) for line in events.read_text(encoding="utf-8").splitlines()]
+    assert all(row["event_type"] != "user_simulator_retry" for row in rows)
 
 
 @pytest.mark.parametrize("native", [False, True])
@@ -441,6 +592,8 @@ def test_hook_adds_task_identity_only_to_proxy_agent_and_records_episode(
     llm_utils.completion = lambda *_args, **kwargs: calls.append(kwargs) or types.SimpleNamespace(id="req-1")
     llm_agent = types.ModuleType("tau2.agent.llm_agent")
     llm_agent.generate = lambda **kwargs: llm_utils.completion(**kwargs) or None
+    user_simulator = types.ModuleType("tau2.user.user_simulator")
+    user_simulator.generate = lambda **kwargs: llm_utils.completion(**kwargs) or None
     batch = types.ModuleType("tau2.runner.batch")
 
     def run_single_task(_config, task, **_kwargs):
@@ -462,6 +615,8 @@ def test_hook_adds_task_identity_only_to_proxy_agent_and_records_episode(
         "tau2.environment.environment": types.ModuleType("tau2.environment.environment"),
         "tau2.runner": types.ModuleType("tau2.runner"),
         "tau2.runner.batch": batch,
+        "tau2.user": types.ModuleType("tau2.user"),
+        "tau2.user.user_simulator": user_simulator,
         "tau2.utils": types.ModuleType("tau2.utils"),
         "tau2.utils.llm_utils": llm_utils,
     }

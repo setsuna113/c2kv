@@ -409,6 +409,43 @@ class SglangBackend(Backend):
                 "history_kv_session_failed",
                 f"unexpected close_session response for {session_id!r}: {result!r}")
 
+    def abort_history_request(self, request_id: str, session_id: str,
+                              timeout: float = 60.0) -> Dict[str, Any]:
+        """Abort one lost-response generation and wait for session release.
+
+        The lifecycle endpoint is deliberately a single, non-retried request:
+        repeating an abort cannot recover an unknown cleanup outcome.  A valid
+        response is the engine's acknowledgement that both the exact request
+        and its persistent session reached a terminal state.
+        """
+        result = self._post_json(
+            "/abort_request",
+            {
+                "rid": request_id,
+                "session_id": session_id,
+                "wait_for_completion": True,
+                "close_session": True,
+                "timeout": float(timeout),
+            },
+            int(timeout) + 5,
+            retries=0,
+        )
+        if not isinstance(result, dict):
+            raise BackendError(
+                "history_kv_cleanup_failed",
+                f"abort_request returned no lifecycle receipt: {result!r}")
+        request_status = result.get("request_status")
+        session_status = result.get("session_status")
+        if (result.get("rid") != request_id
+                or result.get("session_id") != session_id
+                or request_status not in {"aborted", "completed", "not_found"}
+                or session_status not in {"closed", "not_found"}):
+            raise BackendError(
+                "history_kv_cleanup_failed",
+                "abort_request did not acknowledge the exact terminal request/session: "
+                + json.dumps(result, sort_keys=True)[:500])
+        return result
+
     def flush_cache(self, timeout: int = 10) -> None:
         result = self._post_json(f"/flush_cache?timeout={float(timeout)}", {}, timeout + 5)
         if not isinstance(result, str) or not result.startswith("Cache flushed."):

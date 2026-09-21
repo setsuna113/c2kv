@@ -1,0 +1,584 @@
+{
+  "schema": "c2kv-transport-prompt-repair-validation-v1",
+  "created_utc": "2026-09-21T14:35:09.767409+00:00",
+  "engine_commit": "e2b3b7ec049a810a7ccea2039dd1b1c7b3d69224",
+  "paper_base_commit": "fbdae3fa40ab548d97a9185c65979f5ffd276f67",
+  "source_sha256": {
+    "benchmarks/adapters/bfcl_adapter.py": "e0ae3e258956cd09a15b308d518a8ef33f949f197d9b8c64c36bb3fb56e15481",
+    "benchmarks/adapters/tau2_adapter.py": "c056e7cc045f323d0f08d9f311199d70aeca94b5beab0b83874ea66cec7badf7",
+    "benchmarks/backends/sglang.py": "dcadf299721346cb8e2fcc1949c56a2266078c21ed79e461e346547c23431b3b",
+    "benchmarks/paper/runner.py": "24b5f81e2bfef315cd371505a16542530ad668d043344c2ea8c8f8e1592a239b",
+    "benchmarks/paper/test_runner.py": "8e71bad3e2b6b3c63bab21de8abfa7b2616e888d4b9e37f7ba957909a39e6a05",
+    "benchmarks/proxy.py": "658bf9a2c8ee553bb437cb8b1913571a0af8b37f7b2513264ed0e36c84f37335",
+    "benchmarks/run.py": "99d089fdb6132179769910d4cfdda5d5c8a94b29808cc5fd4d1d3a9240fb2154",
+    "benchmarks/tau2_instrumentation/c2kv_tau2_hook.py": "14ffdfef54b573453f89365c647063505b3061c9dbd938c14d7c6117a339d045",
+    "benchmarks/test_bfcl_gate.py": "23c66d539c155692c828782e2209cba8644e1db22b8847b9f3afa7cedbcd6798",
+    "benchmarks/test_bfcl_handler.py": "e38f8ae9fe19de78452e2b8edecefcece49d32f33ba988620295f87ec93195ca",
+    "benchmarks/test_proxy_session_retry.py": "ca2b6fe14afa1ee5754790ef183c4401e29f2a595c1c3fde81bbbd00b0762af2",
+    "benchmarks/test_run_dispatch.py": "89791b8c0b0bc2775cf2cf19533599e4e21e3612e1618b62a0117462f79bed31",
+    "benchmarks/test_sdk_retry_boundaries.py": "9a68ce38744db41f18caa350a1b8c7597da1431b64b9dc2e98a83985ba3647c2",
+    "benchmarks/test_tau2_adapter_integration.py": "968ce2f2e0121df74231cea99da3e8b754743b340d5d73e1645d4721a4deb25a"
+  },
+  "fixes": [
+    "BFCL SDK does not retry an uncertain persistent generation; every engine attempt has a stable rid.",
+    "Timeout cleanup verifies exact rid/session and awaits scheduler terminal state and session release; unknown cleanup remains infrastructure failure.",
+    "A weak live-request registry prevents a late completion from recreating closed session tracking.",
+    "BFCL task refill uses a new episode_instance_id; no full-history reset or retry within a failed attempt.",
+    "Explicit generation_timeout is available for persistent cells; the absent-field default remains 600 seconds.",
+    "One user-simulator-only transport retry preserves the original error; agent generation, tool execution, cap errors and cancellation are not retried.",
+    "Final structured assistant tool calls survive prompt processing; raw schema span resolution follows the same final-message handling.",
+    "A grouped tool-result history boundary excludes only synthetic EOS/whitespace whose preceding tokens exactly match the full prompt."
+  ],
+  "persistent_proxy_evidence": {
+    "schema": "c2kv.persistent-proxy-validation.v1",
+    "created_at_utc": "2026-09-21T14:30:13.143847+00:00",
+    "scope": {
+      "worktree": "scratchpad/blocker_repair_20260920/paper",
+      "git_head_before_integration": "fbdae3fa40ab548d97a9185c65979f5ffd276f67",
+      "behavior": [
+        "persistent generation transport timeout is never resubmitted",
+        "cleanup targets one exact rid and session_id and requires matching terminal acknowledgement",
+        "same BFCL attempt remains terminal; a bounded refill uses a fresh episode_instance_id",
+        "frozen configs retain the 600-second default; explicit generation_timeout is routed only to persistent cells"
+      ]
+    },
+    "original_box4_evidence": {
+      "host": "box4",
+      "remote_path": "/workspace/results-b768bl/closed_loop/bfcl_long_context__commitkv_b768/proxy_telemetry.jsonl",
+      "event_type": "upstream_attempt",
+      "attempt": 0,
+      "http_status": 0,
+      "error": "TimeoutError: timed out",
+      "rows": [
+        {
+          "line": 4821,
+          "duration_ns": 600061128240
+        },
+        {
+          "line": 5441,
+          "duration_ns": 600100682439
+        },
+        {
+          "line": 5561,
+          "duration_ns": 600100702580
+        },
+        {
+          "line": 6085,
+          "duration_ns": 600072273497
+        },
+        {
+          "line": 6161,
+          "duration_ns": 600100649747
+        },
+        {
+          "line": 6509,
+          "duration_ns": 600101071914
+        }
+      ],
+      "interpretation": "all six original failures reached the old 600-second proxy socket deadline"
+    },
+    "sdk_boundary": {
+      "openai_version": "3.16.2",
+      "observed_sdk_default_max_retries": 2,
+      "bfcl_configured_max_retries": 0,
+      "actual_mock_transport_cases": [
+        {
+          "failure": "timeout",
+          "submitted_requests": 1
+        },
+        {
+          "failure": "http_502",
+          "submitted_requests": 1
+        }
+      ],
+      "test": "benchmarks/test_sdk_retry_boundaries.py::test_agent_sdk_does_not_repost_failed_generation"
+    },
+    "focused_test": {
+      "cwd": "scratchpad/blocker_repair_20260920/paper",
+      "command": "uv run --no-project --with pytest --with httpx --with openai python -m pytest -q -rs benchmarks/test_proxy_session_retry.py benchmarks/test_run_dispatch.py benchmarks/paper/test_runner.py benchmarks/test_bfcl_gate.py benchmarks/test_bfcl_handler.py benchmarks/test_sdk_retry_boundaries.py",
+      "result": {
+        "passed": 107,
+        "skipped": 5,
+        "subtests_passed": 4,
+        "exit_code": 0
+      },
+      "skip_reason": "BFCL installation unavailable: No module named 'bfcl_eval'",
+      "note": "The BFCL SDK timeout/502 retry cases ran in test_sdk_retry_boundaries.py and were not skipped."
+    },
+    "source_sha256": {
+      "benchmarks/adapters/bfcl_adapter.py": "e0ae3e258956cd09a15b308d518a8ef33f949f197d9b8c64c36bb3fb56e15481",
+      "benchmarks/backends/sglang.py": "dcadf299721346cb8e2fcc1949c56a2266078c21ed79e461e346547c23431b3b",
+      "benchmarks/paper/runner.py": "24b5f81e2bfef315cd371505a16542530ad668d043344c2ea8c8f8e1592a239b",
+      "benchmarks/proxy.py": "658bf9a2c8ee553bb437cb8b1913571a0af8b37f7b2513264ed0e36c84f37335",
+      "benchmarks/run.py": "99d089fdb6132179769910d4cfdda5d5c8a94b29808cc5fd4d1d3a9240fb2154",
+      "benchmarks/paper/test_runner.py": "8e71bad3e2b6b3c63bab21de8abfa7b2616e888d4b9e37f7ba957909a39e6a05",
+      "benchmarks/test_bfcl_gate.py": "23c66d539c155692c828782e2209cba8644e1db22b8847b9f3afa7cedbcd6798",
+      "benchmarks/test_bfcl_handler.py": "e38f8ae9fe19de78452e2b8edecefcece49d32f33ba988620295f87ec93195ca",
+      "benchmarks/test_proxy_session_retry.py": "ca2b6fe14afa1ee5754790ef183c4401e29f2a595c1c3fde81bbbd00b0762af2",
+      "benchmarks/test_run_dispatch.py": "89791b8c0b0bc2775cf2cf19533599e4e21e3612e1618b62a0117462f79bed31",
+      "benchmarks/test_sdk_retry_boundaries.py": "9a68ce38744db41f18caa350a1b8c7597da1431b64b9dc2e98a83985ba3647c2"
+    }
+  },
+  "tau2_user_simulator_evidence": {
+    "schema": "tau2-user-simulator-retry-validation-v1",
+    "created_utc": "2026-09-21T14:23:41.731103+00:00",
+    "source": {
+      "paper_base_commit": "fbdae3fa40ab548d97a9185c65979f5ffd276f67",
+      "npu_base_commit": "6f9e840d9457f4fe43dbeea4aa279a8b33e56c22",
+      "hook_path": "scratchpad/blocker_repair_20260920/paper/benchmarks/tau2_instrumentation/c2kv_tau2_hook.py",
+      "hook_sha256": "14ffdfef54b573453f89365c647063505b3061c9dbd938c14d7c6117a339d045",
+      "probe_script": "scratchpad/blocker_repair_20260920/device_20260921/tau2_user_sim_retry_real_sdk_probe.py",
+      "probe_script_sha256": "1b88c2e5251d53a34dc0fff0d75183b0fae3adedea9d64d533612be003c4a797",
+      "readonly_evidence_script": "scratchpad/blocker_repair_20260920/device_20260921/tau2_task25_readonly_evidence.py",
+      "readonly_evidence_script_sha256": "60b616af172e5a44125f48f0edef9f9a10614bc5810cb308128c6b147460024a"
+    },
+    "original_task25": {
+      "host": "box4",
+      "official_result": "/workspace/results-t2fix/closed_loop/tau2__c2kv_c1_t02_r8.infra.1/native/task_shards/25/tau2/official/results.json",
+      "harness_events": "/workspace/results-t2fix/closed_loop/tau2__c2kv_c1_t02_r8.infra.1/native/task_shards/25/tau2/measurement/harness_events.jsonl",
+      "source_in_traceback": "/workspace/validation/paper-p8-dc75a5a/benchmarks/tau2_instrumentation/c2kv_tau2_hook.py",
+      "task_id": "25",
+      "termination_reason": "infrastructure_error",
+      "agent_decision_events_before_failure": 2,
+      "litellm_error_type": "InternalServerError",
+      "transport_chain": [
+        "openai.APIConnectionError",
+        "httpx.RemoteProtocolError"
+      ],
+      "transport_message": "Server disconnected without sending a response.",
+      "readonly_command": "Get-Content -Raw 'scratchpad/blocker_repair_20260920/device_20260921/tau2_task25_readonly_evidence.py' | wsl.exe -e ssh -i <VAST_SSH_IDENTITY> -p 11296 -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new root@ssh1.vast.ai python3 -"
+    },
+    "real_sdk_probe": {
+      "host": "box4",
+      "python": "/workspace/venv-tau2/bin/python",
+      "command": "Get-Content -Raw 'scratchpad/blocker_repair_20260920/device_20260921/tau2_user_sim_retry_real_sdk_probe.py' | wsl.exe -e ssh -i <VAST_SSH_IDENTITY> -p 11296 -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new root@ssh1.vast.ai /workspace/venv-tau2/bin/python -",
+      "remote_file_writes": 0,
+      "gpu_or_model_requests": 0,
+      "litellm_num_retries": 0,
+      "server_requests": 2,
+      "hook_retry_events": 1,
+      "status": "passed",
+      "response_content": "recovered",
+      "outer_error": {
+        "exception_type": "InternalServerError",
+        "status_code": 500,
+        "api_error_code": null,
+        "message": "litellm.InternalServerError: InternalServerError: OpenAIException - Connection error."
+      },
+      "transport_cause": {
+        "module": "openai",
+        "exception_type": "APIConnectionError"
+      }
+    },
+    "focused_validation": {
+      "paper_command": ".venv/Scripts/python.exe -m pytest -q benchmarks/test_tau2_adapter_integration.py",
+      "paper_result": {
+        "passed": 29,
+        "failed": 0
+      },
+      "npu_command": ".venv/Scripts/python.exe -m pytest -q tests/test_tau2_harness.py",
+      "npu_result": {
+        "passed": 23,
+        "failed": 0
+      }
+    },
+    "cap_counter_evidence": {
+      "source_root": "/workspace/results-p4xt/closed_loop/tau2__c2kv_pending_verified_r8/native/task_shards",
+      "task5": {
+        "generation_starts": 96,
+        "unique_request_ids": 95,
+        "duplicate_request_id": "[\"tau2/5/attempt-0\",\"turn-0/step-0\"]",
+        "terminal_cap": "generation_cap_reached"
+      },
+      "task9": {
+        "generation_starts": 96,
+        "unique_request_ids": 96,
+        "terminal_cap": "decision_cap_reached"
+      },
+      "interpretation": "generation_cap_reached limits backend generation reservations, including regeneration within one decision; decision_cap_reached limits event-native decision requests. The codes remain intentionally distinct."
+    }
+  },
+  "tool_prompt_before": {
+    "source_sha256": "630c74ba4dd3fe427adf279e55994c4fbb3c318e5e8238438fd10a9c6a070376",
+    "tokenizer_sha256": "be75606093db2094d7cd20f3c2f385c212750648bd6ea4fb2bf507a6a4c55506",
+    "scope": "CPU request rendering and token-boundary validation; no model generation",
+    "cases": [
+      {
+        "decision_id": "decision-ec5ad1575bdce2f925b97b2aab34061e7593a5871f77af015f799363065ef2bc",
+        "checks": [
+          {
+            "method": "streamingllm",
+            "layout": "uniform",
+            "ratio": 8,
+            "prompt_tokens": 8161,
+            "history_tokens": 4013,
+            "status": "failed",
+            "error": "ValueError: TOOL_KV_RENDERED_PROMPT_TOKEN_MISMATCH",
+            "last_message_role": "user",
+            "last_message_tool_calls": 0
+          }
+        ]
+      },
+      {
+        "decision_id": "decision-225e8fec1f47719509181cc1cc8a24db8e18fe1fb7241ac813a2e303f142bc46",
+        "checks": [
+          {
+            "method": "full",
+            "layout": "full",
+            "ratio": 8,
+            "prompt_tokens": 1838,
+            "status": "failed",
+            "error": "ValueError: Paper measurement history prefix is absent from the final prompt",
+            "last_message_role": "tool",
+            "last_message_tool_calls": 0
+          }
+        ]
+      }
+    ]
+  },
+  "tool_prompt_after": {
+    "source_sha256": "9313b0149498dd4e6be7d10f86d2bdd5b7771b0a12dc5c9d4e815902731739fc",
+    "tokenizer_sha256": "be75606093db2094d7cd20f3c2f385c212750648bd6ea4fb2bf507a6a4c55506",
+    "scope": "CPU request rendering and token-boundary validation; no model generation",
+    "cases": [
+      {
+        "decision_id": "decision-ec5ad1575bdce2f925b97b2aab34061e7593a5871f77af015f799363065ef2bc",
+        "checks": [
+          {
+            "method": "streamingllm",
+            "layout": "uniform",
+            "ratio": 8,
+            "prompt_tokens": 8329,
+            "history_tokens": 4013,
+            "status": "passed",
+            "last_message_role": "assistant",
+            "last_message_tool_calls": 1
+          },
+          {
+            "method": "h2o",
+            "layout": "uniform",
+            "ratio": 8,
+            "prompt_tokens": 8329,
+            "history_tokens": 4013,
+            "status": "passed",
+            "last_message_role": "assistant",
+            "last_message_tool_calls": 1
+          },
+          {
+            "method": "snapkv",
+            "layout": "uniform",
+            "ratio": 8,
+            "prompt_tokens": 8329,
+            "history_tokens": 4013,
+            "status": "passed",
+            "last_message_role": "assistant",
+            "last_message_tool_calls": 1
+          },
+          {
+            "method": "pyramidkv",
+            "layout": "uniform",
+            "ratio": 8,
+            "prompt_tokens": 8329,
+            "history_tokens": 4013,
+            "status": "passed",
+            "last_message_role": "assistant",
+            "last_message_tool_calls": 1
+          },
+          {
+            "method": "streamingllm",
+            "layout": "hybrid",
+            "ratio": 8,
+            "prompt_tokens": 8329,
+            "history_tokens": 4013,
+            "status": "passed",
+            "last_message_role": "assistant",
+            "last_message_tool_calls": 1
+          },
+          {
+            "method": "h2o",
+            "layout": "hybrid",
+            "ratio": 8,
+            "prompt_tokens": 8329,
+            "history_tokens": 4013,
+            "status": "passed",
+            "last_message_role": "assistant",
+            "last_message_tool_calls": 1
+          },
+          {
+            "method": "snapkv",
+            "layout": "hybrid",
+            "ratio": 8,
+            "prompt_tokens": 8329,
+            "history_tokens": 4013,
+            "status": "passed",
+            "last_message_role": "assistant",
+            "last_message_tool_calls": 1
+          },
+          {
+            "method": "pyramidkv",
+            "layout": "hybrid",
+            "ratio": 8,
+            "prompt_tokens": 8329,
+            "history_tokens": 4013,
+            "status": "passed",
+            "last_message_role": "assistant",
+            "last_message_tool_calls": 1
+          },
+          {
+            "method": "streamingllm",
+            "layout": "random",
+            "ratio": 8,
+            "prompt_tokens": 8329,
+            "history_tokens": 4013,
+            "status": "passed",
+            "last_message_role": "assistant",
+            "last_message_tool_calls": 1
+          },
+          {
+            "method": "h2o",
+            "layout": "random",
+            "ratio": 8,
+            "prompt_tokens": 8329,
+            "history_tokens": 4013,
+            "status": "passed",
+            "last_message_role": "assistant",
+            "last_message_tool_calls": 1
+          },
+          {
+            "method": "snapkv",
+            "layout": "random",
+            "ratio": 8,
+            "prompt_tokens": 8329,
+            "history_tokens": 4013,
+            "status": "passed",
+            "last_message_role": "assistant",
+            "last_message_tool_calls": 1
+          },
+          {
+            "method": "pyramidkv",
+            "layout": "random",
+            "ratio": 8,
+            "prompt_tokens": 8329,
+            "history_tokens": 4013,
+            "status": "passed",
+            "last_message_role": "assistant",
+            "last_message_tool_calls": 1
+          },
+          {
+            "method": "streamingllm",
+            "layout": "uniform",
+            "ratio": 12,
+            "prompt_tokens": 8329,
+            "history_tokens": 4013,
+            "status": "passed",
+            "last_message_role": "assistant",
+            "last_message_tool_calls": 1
+          },
+          {
+            "method": "h2o",
+            "layout": "uniform",
+            "ratio": 12,
+            "prompt_tokens": 8329,
+            "history_tokens": 4013,
+            "status": "passed",
+            "last_message_role": "assistant",
+            "last_message_tool_calls": 1
+          },
+          {
+            "method": "snapkv",
+            "layout": "uniform",
+            "ratio": 12,
+            "prompt_tokens": 8329,
+            "history_tokens": 4013,
+            "status": "passed",
+            "last_message_role": "assistant",
+            "last_message_tool_calls": 1
+          },
+          {
+            "method": "pyramidkv",
+            "layout": "uniform",
+            "ratio": 12,
+            "prompt_tokens": 8329,
+            "history_tokens": 4013,
+            "status": "passed",
+            "last_message_role": "assistant",
+            "last_message_tool_calls": 1
+          },
+          {
+            "method": "streamingllm",
+            "layout": "hybrid",
+            "ratio": 12,
+            "prompt_tokens": 8329,
+            "history_tokens": 4013,
+            "status": "passed",
+            "last_message_role": "assistant",
+            "last_message_tool_calls": 1
+          },
+          {
+            "method": "h2o",
+            "layout": "hybrid",
+            "ratio": 12,
+            "prompt_tokens": 8329,
+            "history_tokens": 4013,
+            "status": "passed",
+            "last_message_role": "assistant",
+            "last_message_tool_calls": 1
+          },
+          {
+            "method": "snapkv",
+            "layout": "hybrid",
+            "ratio": 12,
+            "prompt_tokens": 8329,
+            "history_tokens": 4013,
+            "status": "passed",
+            "last_message_role": "assistant",
+            "last_message_tool_calls": 1
+          },
+          {
+            "method": "pyramidkv",
+            "layout": "hybrid",
+            "ratio": 12,
+            "prompt_tokens": 8329,
+            "history_tokens": 4013,
+            "status": "passed",
+            "last_message_role": "assistant",
+            "last_message_tool_calls": 1
+          },
+          {
+            "method": "streamingllm",
+            "layout": "random",
+            "ratio": 12,
+            "prompt_tokens": 8329,
+            "history_tokens": 4013,
+            "status": "passed",
+            "last_message_role": "assistant",
+            "last_message_tool_calls": 1
+          },
+          {
+            "method": "h2o",
+            "layout": "random",
+            "ratio": 12,
+            "prompt_tokens": 8329,
+            "history_tokens": 4013,
+            "status": "passed",
+            "last_message_role": "assistant",
+            "last_message_tool_calls": 1
+          },
+          {
+            "method": "snapkv",
+            "layout": "random",
+            "ratio": 12,
+            "prompt_tokens": 8329,
+            "history_tokens": 4013,
+            "status": "passed",
+            "last_message_role": "assistant",
+            "last_message_tool_calls": 1
+          },
+          {
+            "method": "pyramidkv",
+            "layout": "random",
+            "ratio": 12,
+            "prompt_tokens": 8329,
+            "history_tokens": 4013,
+            "status": "passed",
+            "last_message_role": "assistant",
+            "last_message_tool_calls": 1
+          }
+        ]
+      },
+      {
+        "decision_id": "decision-225e8fec1f47719509181cc1cc8a24db8e18fe1fb7241ac813a2e303f142bc46",
+        "checks": [
+          {
+            "method": "full",
+            "layout": "full",
+            "ratio": 8,
+            "prompt_tokens": 1838,
+            "history_tokens": 325,
+            "status": "passed",
+            "last_message_role": "tool",
+            "last_message_tool_calls": 0
+          },
+          {
+            "method": "full",
+            "layout": "full",
+            "ratio": 12,
+            "prompt_tokens": 1838,
+            "history_tokens": 325,
+            "status": "passed",
+            "last_message_role": "tool",
+            "last_message_tool_calls": 0
+          }
+        ]
+      }
+    ]
+  },
+  "raw_evidence": {
+    "box4_new_holds_20260921.json": {
+      "path": "scratchpad/blocker_repair_20260920/device_20260921/box4_new_holds_20260921.json",
+      "sha256": "9c8eb63e7e41c860eb8e9f427c1ae53e8b0bd6768d2b5953fa295ef82f38a898"
+    },
+    "m2_new_holds_20260921.json": {
+      "path": "scratchpad/blocker_repair_20260920/device_20260921/m2_new_holds_20260921.json",
+      "sha256": "de8939d4e928437845666adfd1bb95515721af9f002b6cc7498b6d3fc9572f9d"
+    },
+    "m2_tool_failed_inputs.json": {
+      "path": "scratchpad/blocker_repair_20260920/device_20260921/m2_tool_failed_inputs.json",
+      "sha256": "3a4efba86fb186f7491c8a037f6769cb6575bdde19bb237fbc60ed6ab29fe77f"
+    },
+    "persistent_proxy_validation.json": {
+      "path": "scratchpad/blocker_repair_20260920/device_20260921/persistent_proxy_validation.json",
+      "sha256": "b2fa36315222466d81b8dc47ec218a71c288732d4f6afec20d1770089b08a140"
+    },
+    "tau2_user_sim_retry_validation.json": {
+      "path": "scratchpad/blocker_repair_20260920/device_20260921/tau2_user_sim_retry_validation.json",
+      "sha256": "d4e9fae72247549c31f3c2f0a4ce0d902efaad789bdfc478510f908253b2c146"
+    },
+    "tool_boundaries_replay.json": {
+      "path": "scratchpad/blocker_repair_20260920/device_20260921/tool_boundaries_replay.json",
+      "sha256": "e116bcda0de4d958cf5a4ea77eb81160c14c03fba86e015a729c721a88431b30"
+    }
+  },
+  "integration_validation": [
+    {
+      "suite": "Engine acknowledged lifecycle, HTTP, prompt, session ownership, composition and exact reference continuation",
+      "tests": [
+        "test_acknowledged_abort_lifecycle.py",
+        "test_acknowledged_abort_http.py",
+        "test_chat_prompt_boundaries.py",
+        "test_streaming_session_timeout_ownership.py",
+        "test_persistent_history_lifecycle.py",
+        "test_c2kv_composition.py",
+        "test_reference_decode_persistent_stream.py"
+      ],
+      "passed": 164,
+      "failed": 0
+    },
+    {
+      "suite": "Tool eviction and prompt unit tests",
+      "passed": 19,
+      "skipped": 1,
+      "skip_resolution": "The optional checkpoint tokenizer test subsequently passed with C2KV_TOOL_TEST_TOKENIZER set to the frozen m2 tokenizer."
+    },
+    {
+      "suite": "Paper integrated proxy, runner, BFCL, SDK, tau2, measurement and native extra tests",
+      "passed": 262,
+      "skipped": 13,
+      "subtests_passed": 4,
+      "skip_reason": "5 BFCL installation tests plus 8 OpenAI SDK tests unavailable in root CPU environment. The SDK cases passed separately in the dependency-equipped focused suite recorded above."
+    }
+  ],
+  "unchanged_contract": {
+    "decision_cap": 96,
+    "generation_call_cap": 96,
+    "cap_codes": "generation_cap_reached limits backend generation reservations, including regeneration within one decision; decision_cap_reached limits event-native decision requests. The codes remain intentionally distinct.",
+    "method_budgets_changed": false,
+    "method_algorithms_changed": false
+  },
+  "remaining_validation": [
+    "Original long BFCL tasks were not rerun with a model; bounded CPU lifecycle checks do not prove long-task completion or latency.",
+    "Tool prompt validation replayed all 26 originally failing request configurations without generation; no official score rows were backfilled.",
+    "No GPU/NPU model service was started or changed; existing run artifacts and HOLD files remain frozen."
+  ],
+  "published_metadata_note": "Machine-local path prefixes and SSH identity paths are anonymized in this published receipt. The original private validation files retain exact commands and paths; recorded evidence hashes are unchanged."
+}

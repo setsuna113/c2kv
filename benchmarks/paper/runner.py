@@ -342,6 +342,20 @@ def history_kv_budget_args(cell):
     return budget.cli_args()
 
 
+def persistent_generation_timeout_args(config, cell):
+    """Apply an explicit long deadline only to persistent history sessions."""
+    from benchmarks.arms import get_arm, history_kv_spec
+
+    spec = history_kv_spec(get_arm(cell["arm"]))
+    if not spec or not spec["persistent_session"] or "generation_timeout" not in config:
+        return []
+    timeout = config["generation_timeout"]
+    if (isinstance(timeout, bool) or not isinstance(timeout, (int, float))
+            or not 0 < float(timeout) < float("inf")):
+        raise ValueError("generation_timeout must be finite and positive")
+    return ["--generation-timeout", str(timeout)]
+
+
 def run_command(config, cell, directory, profile, stage="closed_loop"):
     if is_subset(cell) and (stage != "closed_loop" or is_native_arm(cell["arm"])
                             or cell["adapter"] not in {"bfcl", "acon_appworld"}):
@@ -378,6 +392,7 @@ def run_command(config, cell, directory, profile, stage="closed_loop"):
            "--capability-features",
            "hiagent_trajectory_retrieval_v1,acebench_role_history_v1"]
     cmd += history_kv_budget_args(cell)
+    cmd += persistent_generation_timeout_args(config, cell)
     if cell["arm"] == "full" and not cell.get("tool_memory"):
         # Only the raw-tools Full cell records the canonical replay prefixes.
         cmd += ["--record-prefixes", str(directory / "full_prefixes.jsonl")]
@@ -423,7 +438,8 @@ def run_command(config, cell, directory, profile, stage="closed_loop"):
 DEPLOYMENT_KEYS = ("model", "checkpoint", "device", "attention_backend", "disable_cuda_graph",
                    "context_length", "max_total_tokens", "chunked_prefill_size", "mem_fraction_static",
                    "c2kv_pool_fraction", "max_running_requests", "seed", "doc_packing", "max_doc_length",
-                   "max_doc_num", "query_projection", "appworld_split", "appworld_max_iter", "c1")
+                   "max_doc_num", "query_projection", "appworld_split", "appworld_max_iter",
+                   "generation_timeout", "c1")
 
 
 def extension_problem(existing, config, source, output):
@@ -881,9 +897,10 @@ def execute(config, plan, output, source, stages, selected, port_offset=0):
                                      "--max-doc-length", str(config["max_doc_length"]),
                                       "--max-doc-num", str(config["max_doc_num"]), "--query-projection", "base",
                                       "--model-family", config.get("model_family", "qwen3-4b"),
-                                     "--request-log", str(directory / "proxy_requests.jsonl"),
-                                     "--telemetry-log", str(directory / "proxy_telemetry.jsonl")]
+                                      "--request-log", str(directory / "proxy_requests.jsonl"),
+                                      "--telemetry-log", str(directory / "proxy_telemetry.jsonl")]
                         proxy_cmd += history_kv_budget_args(cell)
+                        proxy_cmd += persistent_generation_timeout_args(config, cell)
                         if cell.get("tool_memory"):
                             proxy_cmd += ["--tool-memory", cell["tool_memory"],
                                           "--tool-checkpoint", cell["tool_checkpoint"]]

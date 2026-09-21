@@ -92,6 +92,25 @@ class C2KVBFCLHandlerTests(unittest.TestCase):
             self.handler.decode_ast(parsed["model_responses"], None, False),
             [{"lookup": {"city": "X"}}])
 
+    def test_client_disables_sdk_retries_and_outlives_proxy_cleanup(self):
+        kwargs = self.handler._build_client_kwargs()
+        self.assertEqual(kwargs["max_retries"], 0)
+        self.assertEqual(kwargs["timeout"].read, 690.0)
+
+    def test_refill_attempt_uses_unique_episode_instance(self):
+        response = _completion("done")
+        seen = []
+        self.handler.client = SimpleNamespace(chat=SimpleNamespace(
+            completions=SimpleNamespace(create=lambda **kwargs: (
+                seen.append(kwargs) or response))))
+        with patch.object(bfcl_adapter, "current_episode", return_value={
+                "episode_id": "multi_turn_long_context_101",
+                "episode_instance_id": "attempt-uuid-2"}):
+            self.handler._query_FC({"message": [], "tools": []})
+        self.assertEqual(
+            seen[0]["extra_body"]["c2kv_measurement_session_id"],
+            "attempt-uuid-2")
+
     def test_native_handler_echo_preserves_exact_kv_continuation(self):
         from benchmarks.raw_actor_history import RawActorHistory
 

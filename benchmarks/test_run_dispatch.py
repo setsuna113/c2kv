@@ -72,6 +72,7 @@ CLI_SURFACE = [
     ("--tool-budget-tokens", None, False),
     ("--history-kv-target-tokens", None, False),
     ("--shared-engine", False, False),
+    ("--generation-timeout", 600.0, False),
     ("--checkpoint", None, False),
     ("--checkpoint-profile", None, False),
     ("--expected-profile-fingerprint", None, False),
@@ -120,8 +121,9 @@ def test_cli_choices_and_types_are_unchanged():
     for flag in ("--out", "--acon-dir", "--acebench-dir"):
         assert actions[flag].type is Path, flag
     for flag in ("--proxy-port", "--num-workers", "--max-tasks", "--max-iter", "--ts-parallel",
-                 "--max-doc-length", "--max-doc-num"):
+                  "--max-doc-length", "--max-doc-num"):
         assert actions[flag].type is int, flag
+    assert actions["--generation-timeout"].type is float
 
 
 def test_registry_covers_every_adapter_module():

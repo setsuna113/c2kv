@@ -90,7 +90,8 @@ def start_proxy(upstream: str, arm: str, port: int, log_dir: Path,
                 tool_memory: str = "", tool_checkpoint: str = "",
                 tool_budget_tokens: int | None = None,
                 history_kv_target_tokens: int | None = None,
-                shared_engine: bool = False):
+                shared_engine: bool = False,
+                generation_timeout: float = 600.0):
     _assert_proxy_port_available(port)
     log_path = log_dir / f"proxy_{arm}_{port}.jsonl"
     out_handle = open(log_dir / f"proxy_{arm}_{port}.out", "w")
@@ -103,6 +104,7 @@ def start_proxy(upstream: str, arm: str, port: int, log_dir: Path,
         "--max-doc-length", str(max_doc_length),
         "--max-doc-num", str(max_doc_num),
         "--model-family", model_family,
+        "--generation-timeout", str(generation_timeout),
     ]
     if tool_memory:
         command += ["--tool-memory", tool_memory, "--tool-checkpoint", tool_checkpoint]
@@ -252,6 +254,10 @@ def add_core_arguments(parser: argparse.ArgumentParser) -> None:
                         help="absolute history-KV capacity; preserves the registered method and backend")
     parser.add_argument("--shared-engine", action="store_true",
                         help="keep persistent-session resets local to this proxy")
+    parser.add_argument(
+        "--generation-timeout", type=float, default=600.0,
+        help="outer deadline in seconds for one model generation request",
+    )
     parser.add_argument("--tool-checkpoint", default="",
                         help="T0 checkpoint directory for --tool-memory (the served "
                              "endpoint must load it via --c2kv-tool-gist-weights)")
@@ -365,7 +371,8 @@ def main(argv=None):
         tool_memory=args.tool_memory, tool_checkpoint=args.tool_checkpoint,
         tool_budget_tokens=args.tool_budget_tokens,
         history_kv_target_tokens=args.history_kv_target_tokens,
-        shared_engine=args.shared_engine)
+        shared_engine=args.shared_engine,
+        generation_timeout=args.generation_timeout)
     from toolmemory import parse_tool_memory_spec
     previous_tool_context = os.environ.get("C2KV_TOOL_CONTEXT_ON")
     os.environ["C2KV_TOOL_CONTEXT_ON"] = (

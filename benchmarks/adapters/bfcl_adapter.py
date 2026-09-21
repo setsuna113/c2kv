@@ -165,13 +165,34 @@ def evaluate_argv(handler_name: str, categories: str,
     return argv
 
 
+def client_kwargs(base_url: str, request_timeout: float = 600.0) -> Dict[str, Any]:
+    """OpenAI SDK boundary for one non-retriable persistent generation."""
+    import httpx
+
+    return {
+        "api_key": "EMPTY",
+        "base_url": base_url,
+        # Leave a bounded grace after the proxy's upstream deadline so it can
+        # obtain the engine's request/session cleanup acknowledgement.
+        "timeout": httpx.Timeout(timeout=request_timeout + 90.0, connect=8.0),
+        "max_retries": 0,
+    }
+
+
+def active_measurement_session_id() -> Optional[str]:
+    episode = current_episode()
+    if not episode:
+        return None
+    return str(episode["episode_instance_id"])
+
+
 def install_handler(base_url: str, model: str = SERVED_MODEL,
-                    handler_name: "str | None" = None) -> None:
+                    handler_name: "str | None" = None,
+                    request_timeout: float = 600.0) -> None:
     # NOTE: default resolved at CALL time — binding the default to
     # MODEL_NAME at def time made monkeypatched names register the
     # wrong key (val20 evaluate failure)
     handler_name = handler_name or MODEL_NAME
-    import httpx
     from openai import OpenAI
     from bfcl_eval.constants.model_config import MODEL_CONFIG_MAPPING, ModelConfig
     from bfcl_eval.model_handler.api_inference.openai_completion import (
@@ -199,11 +220,7 @@ def install_handler(base_url: str, model: str = SERVED_MODEL,
 
     class C2KVHandler(OpenAICompletionsHandler):
         def _build_client_kwargs(self):
-            return {
-                "api_key": "EMPTY",
-                "base_url": base_url,
-                "timeout": httpx.Timeout(timeout=600.0, connect=8.0),
-            }
+            return client_kwargs(base_url, request_timeout)
 
         def _parse_query_response_FC(self, api_response):
             parsed = super()._parse_query_response_FC(api_response)
@@ -224,10 +241,12 @@ def install_handler(base_url: str, model: str = SERVED_MODEL,
             }
             if inference_data.get("tools"):
                 kwargs["tools"] = inference_data["tools"]
-            episode = current_episode()
-            if episode:
+            measurement_session = active_measurement_session_id()
+            if measurement_session:
                 kwargs["extra_body"] = {
-                    "c2kv_measurement_session_id": episode["episode_id"],
+                    # A bounded refill of the same task is a new attempt and
+                    # must not inherit the failed attempt's persistent KV.
+                    "c2kv_measurement_session_id": measurement_session,
                 }
             inference_data["inference_input_log"] = {
                 "message": repr(inference_data["message"]),
@@ -578,6 +597,7 @@ def run(ctx: RunContext) -> Dict[str, Any]:
             project_root=project_root,
             num_threads=int(ctx.opt("num_workers", 1)),
             max_refill_rounds=int(ctx.opt("bfcl_refill_rounds", 0)),
+            request_timeout=float(ctx.opt("generation_timeout", 600.0)),
         )
     finally:
         os.chdir(prev_cwd)
@@ -610,7 +630,8 @@ def run_bfcl(base_url: str, categories: str = "multi_turn_base",
              handler_name: str = MODEL_NAME,
              project_root: "Path | str | None" = None,
              num_threads: int = 1,
-             max_refill_rounds: int = 0) -> Dict[str, Any]:
+             max_refill_rounds: int = 0,
+             request_timeout: float = 600.0) -> Dict[str, Any]:
     """Register the handler and drive the official generate/evaluate CLI
     in-process.
 
@@ -643,7 +664,11 @@ def run_bfcl(base_url: str, categories: str = "multi_turn_base",
     previous_project_root = os.environ.get("BFCL_PROJECT_ROOT")
     os.environ["BFCL_PROJECT_ROOT"] = str(project_root)
     try:
-        install_handler(base_url, model=model, handler_name=handler_name)
+        if not 0 < request_timeout < float("inf"):
+            raise ValueError("BFCL request_timeout must be finite and positive")
+        install_handler(
+            base_url, model=model, handler_name=handler_name,
+            request_timeout=request_timeout)
         category_ids = official_category_ids(categories)
         ids: Optional[List[str]] = None
         if run_ids:

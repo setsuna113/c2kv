@@ -144,6 +144,8 @@ TOOL_MEMORY: Optional["toolmemory.ToolMemory"] = None
 UPSTREAM = ""
 BENCHMARK = ""
 SHARED_ENGINE = False
+GENERATION_TIMEOUT = 600.0
+SESSION_CLEANUP_TIMEOUT = 60.0
 REQUEST_LOG_PATH = ""
 TELEMETRY_LOG_PATH = ""
 PREFIX_LOG_PATH = ""
@@ -315,6 +317,13 @@ def _post_json(path: str, payload: Dict[str, Any],
                 path=path, http_status=0, request=payload,
                 response=None, error=f"{type(error).__name__}: {error}",
             )
+            if isinstance(session, dict) and session.get("id"):
+                request_id = payload.get("rid")
+                if not isinstance(request_id, str) or not request_id:
+                    raise UpstreamError(
+                        0, "persistent generation transport failed without a stable rid") from error
+                _fail_history_episode(
+                    request_id, str(session["id"]), transport_error=error)
         if attempt < retries:
             delay = 2 ** (attempt + 1)
             backoff_unix = time.time_ns()
@@ -1569,6 +1578,7 @@ class ProxyState:
         # history-KV arms only)
         self.history_sessions: Dict[str, str] = {}
         self.active_measurement_session: Optional[str] = None
+        self.failed_measurement_session: Optional[str] = None
 
 
 STATE = ProxyState()
@@ -1591,6 +1601,10 @@ def _activate_measurement_session(session: str) -> None:
         return
     with STATE.lock:
         if STATE.active_measurement_session == session:
+            if STATE.failed_measurement_session == session:
+                raise BackendError(
+                    "history_kv_episode_failed",
+                    "persistent history episode is terminal after a lost generation response")
             return
         with _phase("episode_setup"):
             _close_owned_history_sessions()
@@ -1607,6 +1621,40 @@ def _activate_measurement_session(session: str) -> None:
             agentfold.reset_state()
             raw_actor_history.reset_state()
             STATE.active_measurement_session = session
+            STATE.failed_measurement_session = None
+
+
+def _fail_history_episode(request_id: str, session_id: str,
+                          transport_error: BaseException) -> None:
+    """Resolve one unknown generation outcome without replaying its prompt."""
+    with STATE.lock:
+        STATE.failed_measurement_session = STATE.active_measurement_session
+    try:
+        receipt = BACKEND.abort_history_request(
+            request_id, session_id, timeout=SESSION_CLEANUP_TIMEOUT)
+    except (RuntimeError, ValueError, URLError, OSError, UpstreamError,
+            BackendError) as cleanup_error:
+        _measurement_event(
+            "persistent_session_cleanup", phase=getattr(_TRACE, "phase", None),
+            status="unresolved", server_request_id=request_id,
+            session_id=session_id,
+            transport_error=f"{type(transport_error).__name__}: {transport_error}",
+            error=f"{type(cleanup_error).__name__}: {cleanup_error}",
+        )
+        raise UpstreamError(
+            0, f"persistent generation outcome unknown and cleanup failed: {cleanup_error}") \
+            from transport_error
+    with STATE.lock:
+        STATE.history_sessions = {
+            conv: owned for conv, owned in STATE.history_sessions.items()
+            if owned != session_id
+        }
+    _measurement_event(
+        "persistent_session_cleanup", phase=getattr(_TRACE, "phase", None),
+        status="terminal", server_request_id=request_id, session_id=session_id,
+        transport_error=f"{type(transport_error).__name__}: {transport_error}",
+        receipt=receipt, error=None,
+    )
 
 
 def _history_session_id(conv: str) -> str:
@@ -1960,6 +2008,11 @@ class ProxyHandler(BaseHTTPRequestHandler):
                             "canonical_source_tools": canonical_source["tools"],
                         })
                     out_payload["c2kv_kv_memory_hint"] = hint
+                    if isinstance(out_payload.get("session_params"), dict) \
+                            and out_payload["session_params"].get("id"):
+                        # The engine lifecycle API uses this attempt id to
+                        # distinguish a lost response from any later refill.
+                        out_payload["rid"] = str(_TRACE.request_id)
                     if getattr(ARM, "text_history_budget_tokens", None) is not None:
                         # Recheck the final wire payload, after every assembly and
                         # backend transform. Never forward an over-budget actor.
@@ -1975,7 +2028,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
                         text_stats.setdefault("actor_budget_calls", []).append({
                             "phase": phase, "limit": limit, "receipt": receipt,
                             "actor_payload_sha256": canonical_sha256(out_payload)})
-                return _post_json(self.path, out_payload, 600), out_payload
+                return _post_json(
+                    self.path, out_payload, GENERATION_TIMEOUT), out_payload
 
         def call_upstream(out_messages, plan, phase="generation"):
             data_, _ = send_upstream(out_messages, plan, phase=phase)
@@ -2309,7 +2363,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
 
 def main(argv=None):
     global ARM, BACKEND, UPSTREAM, BENCHMARK, REQUEST_LOG_PATH
-    global TELEMETRY_LOG_PATH, PREFIX_LOG_PATH, SHARED_ENGINE
+    global TELEMETRY_LOG_PATH, PREFIX_LOG_PATH, SHARED_ENGINE, GENERATION_TIMEOUT
     global DOC_PACKING, MAX_DOC_LENGTH, MAX_DOC_NUM, QUERY_PROJECTION, MODEL_FAMILY
     textarms.reset_state()  # fresh caches/state per proxy process
     acon_budget.reset_state()
@@ -2329,6 +2383,10 @@ def main(argv=None):
     parser.add_argument("--request-log", default="")
     parser.add_argument("--shared-engine", action="store_true",
                         help="keep episode reset local to this proxy; no engine-wide cache flush")
+    parser.add_argument(
+        "--generation-timeout", type=float, default=GENERATION_TIMEOUT,
+        help="outer deadline in seconds for one model generation request",
+    )
     parser.add_argument("--telemetry-log", default="",
                         help="append raw request/phase/upstream telemetry JSONL")
     parser.add_argument("--record-prefixes", default="",
@@ -2384,6 +2442,9 @@ def main(argv=None):
         if args.backend != "sglang" or not history_spec or not history_spec["persistent_session"]:
             raise ValueError("--shared-engine requires a persistent SGLang history-KV arm")
     SHARED_ENGINE = args.shared_engine
+    if not 0 < args.generation_timeout < float("inf"):
+        raise ValueError("--generation-timeout must be finite and positive")
+    GENERATION_TIMEOUT = float(args.generation_timeout)
     if ARM.text_policy in history_methods.METHODS:
         history_methods.require_model_family(MODEL_FAMILY)
     BENCHMARK = args.benchmark

@@ -16,6 +16,7 @@ from adapters import bfcl_adapter  # noqa: E402
 from bfcl_completion import (  # noqa: E402
     _complete_native_tool_calls, bfcl_row_is_terminal, completion_kind,
 )
+from measurement.telemetry import HarnessTelemetry  # noqa: E402
 
 
 @pytest.mark.parametrize("message,kind", [
@@ -241,8 +242,9 @@ def test_run_bfcl_sets_official_root_before_import_and_writes_ids_there(
     monkeypatch.delenv("BFCL_PROJECT_ROOT", raising=False)
     seen = {"argv": []}
 
-    def install(base_url, model, handler_name):
+    def install(base_url, model, handler_name, request_timeout):
         seen["root_at_import"] = os.environ.get("BFCL_PROJECT_ROOT")
+        seen["request_timeout"] = request_timeout
 
     def check(expected, run_ids, **kwargs):
         seen["check"] = (expected, run_ids, kwargs)
@@ -268,9 +270,11 @@ def test_run_bfcl_sets_official_root_before_import_and_writes_ids_there(
         "http://proxy/v1", categories="multi_turn_base",
         run_ids=["multi_turn_base_7", "multi_turn_base_7"],
         handler_name="c2kv-full", project_root=isolated,
+        request_timeout=10800,
     )
 
     assert seen["root_at_import"] == str(isolated.resolve())
+    assert seen["request_timeout"] == 10800
     assert not (shared / "test_case_ids_to_generate.json").exists()
     assert json.loads((isolated / "test_case_ids_to_generate.json").read_text()) == {
         "multi_turn_base": ["multi_turn_base_7"]}
@@ -459,9 +463,17 @@ def test_explicit_refill_preserves_prior_valid_and_restores_selection(
         bfcl_adapter, "official_category_ids",
         lambda category: {"multi_turn_base": ids})
     calls = []
+    attempt_ids = []
+    telemetry = HarnessTelemetry(tmp_path / "attempts.jsonl", "bfcl")
 
     def run_cli(argv):
         calls.append(argv)
+        if argv[0] == "generate":
+            # BFCL enters this context inside handler.inference.  Repeating the
+            # same official task in a refill must still create a new engine
+            # session boundary.
+            with telemetry.episode(ids[1]):
+                attempt_ids.append(bfcl_adapter.active_measurement_session_id())
         if argv[0] == "generate" and len([call for call in calls if call[0] == "generate"]) == 1:
             _results(tmp_path, "c2kv-hf", "multi_turn", "multi_turn_base", [
                 {"id": ids[0], "result": ["first"]},
@@ -491,6 +503,8 @@ def test_explicit_refill_preserves_prior_valid_and_restores_selection(
     assert summary["completion_ledger"]["remaining"] == []
     assert summary["completion_ledger"]["refill_rounds_used"] == 1
     assert len(summary["completion_ledger"]["round_receipts"]) == 2
+    assert len(attempt_ids) == 2
+    assert attempt_ids[0] != attempt_ids[1]
     rows = [json.loads(line) for line in next(
         (tmp_path / "result" / "c2kv-hf").rglob("*.json")).read_text().splitlines()]
     assert [row["id"] for row in rows] == ids

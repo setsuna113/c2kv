@@ -9,12 +9,13 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from benchmarks import acebench_cli
+from adapters.bfcl_adapter import client_kwargs as bfcl_client_kwargs
 from appworld_instrumentation.c2kv_appworld_hook import disable_sdk_retries
 from toolsandbox_cli import role_client_kwargs
 
 
 @pytest.mark.parametrize("failure", ["timeout", "502"])
-@pytest.mark.parametrize("harness", ["appworld", "acebench", "toolsandbox"])
+@pytest.mark.parametrize("harness", ["appworld", "acebench", "toolsandbox", "bfcl"])
 def test_agent_sdk_does_not_repost_failed_generation(monkeypatch, harness, failure):
     openai = pytest.importorskip("openai")
     try:
@@ -32,7 +33,11 @@ def test_agent_sdk_does_not_repost_failed_generation(monkeypatch, harness, failu
 
     http_client = http_transport.Client(transport=http_transport.MockTransport(respond))
     base_url = "http://127.0.0.1:19876/v1"
-    if harness == "toolsandbox":
+    if harness == "bfcl":
+        client = openai.OpenAI(
+            **bfcl_client_kwargs(base_url), http_client=http_client)
+        send = client.chat.completions.create
+    elif harness == "toolsandbox":
         kwargs = role_client_kwargs(base_url, agent=True)
         client = openai.OpenAI(**kwargs, http_client=http_client)
         send = client.chat.completions.create

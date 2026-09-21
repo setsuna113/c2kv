@@ -112,6 +112,24 @@ class PaperMatrixTest(unittest.TestCase):
             self.assertEqual(json.loads((output / "unsupported_cells.json").read_text()),
                              self.config["unsupported_cells"])
 
+    def test_explicit_generation_timeout_only_reaches_persistent_history_cells(self):
+        config = dict(self.config, generation_timeout=1200)
+        rows = cells(config)
+        profile = Path("out/deployment_profile.json")
+        persistent = next(row for row in rows if row["cell_id"] == "bfcl_base__commitkv")
+        ordinary = next(row for row in rows if row["cell_id"] == "bfcl_base__full")
+
+        default_cmd = run_command(
+            self.config, persistent, Path("out/default-persistent"), profile)
+        persistent_cmd = run_command(config, persistent, Path("out/persistent"), profile)
+        ordinary_cmd = run_command(config, ordinary, Path("out/ordinary"), profile)
+
+        # An existing frozen config keeps benchmarks.run's 600-second default.
+        self.assertNotIn("--generation-timeout", default_cmd)
+        self.assertEqual(
+            persistent_cmd[persistent_cmd.index("--generation-timeout") + 1], "1200")
+        self.assertNotIn("--generation-timeout", ordinary_cmd)
+
     def test_prepare_pins_original_opponent_runtime_contracts(self):
         from dataclasses import replace
         from benchmarks.arms import ARMS

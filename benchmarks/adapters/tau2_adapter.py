@@ -408,6 +408,7 @@ def run_tau2(base_url: str, user_base_url: str, out_dir: Path, *,
                 "agent_max_tokens": agent_max_tokens,
                 "agent_model": model, "user_model": user_model or model,
                 "agent_base_url": v1(base_url), "user_base_url": v1(user_base_url),
+                "user_simulator_transport_retries": 1,
                 "source": str(tau2_dir), "python": python, "command": command,
                 "native": native, "record_prefixes": str(record_prefixes) if record_prefixes else None}
     (out_dir / "tau2_protocol.json").write_text(
