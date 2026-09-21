@@ -1,5 +1,6 @@
 """Single-task tau2 integration at the official artifact seam."""
 import json
+import os
 import sys
 import types
 from pathlib import Path
@@ -94,6 +95,7 @@ def test_one_task_uses_shared_adapter_with_split_endpoints_and_official_reward(t
         assert command[0] == cell["python_tau2"]
         assert "from benchmarks.adapters.tau2_adapter import run_tau2" in command[2]
         assert kwargs["cwd"] == cell["paper_root"]
+        assert kwargs["env"]["PYTHONPATH"].split(os.pathsep)[0] == cell["paper_root"]
         request = json.loads(Path(command[4]).read_text(encoding="utf-8"))
         calls.append(request)
         _write_official(cell, request)

@@ -8,6 +8,8 @@ from pathlib import Path
 from io import BytesIO
 from unittest.mock import patch
 
+import pytest
+
 from generality import historykv_cell as driver
 from generality import scheduler_npu as scheduler
 from generality import toolsandbox_harness
@@ -95,6 +97,7 @@ def test_old_fc_handler_row_and_done_are_replaced_only_after_new_result(tmp_path
     assert not driver.existing_bfcl_result(out, task_id)
 
     def fake_call(*args, **kwargs):
+        assert "request_timeout=600," in args[0][2]
         attempts = list((out / "attempts").glob("*"))
         assert len(attempts) == 1
         result = attempts[0] / "bfcl" / "result" / "model" / "multi_turn" / "row.json"
@@ -114,6 +117,34 @@ def test_old_fc_handler_row_and_done_are_replaced_only_after_new_result(tmp_path
     history = json.loads((out / "done_history.jsonl").read_text().splitlines()[0])
     assert json.loads(history["previous_raw"]) == old_done
     assert json.loads((out / "done.json").read_text())["status"] == "completed"
+
+
+def test_bfcl_uses_explicit_generation_timeout(tmp_path):
+    task_id = "multi_turn_base_1"
+    cell = {"cell_dir": str(tmp_path), "model_name": "test-model",
+            "handler_name": "test-handler", "python_bench": "python",
+            "sglang_backend_url": "http://127.0.0.1:1",
+            "generation_timeout": 37.5}
+
+    def fake_call(command, **_kwargs):
+        assert "request_timeout=37.5," in command[2]
+        out = next((tmp_path / "tasks" / task_id / "attempts").glob("*")) / "bfcl"
+        result = out / "result" / "model" / "multi_turn" / "row.json"
+        result.parent.mkdir(parents=True)
+        result.write_text(json.dumps({"id": task_id, "result": [[[]]]}),
+                          encoding="utf-8")
+        return 0
+
+    with patch.object(driver, "run_owned_worker", side_effect=fake_call):
+        result = driver.run_bfcl_task(cell, task_id, 37401)
+    assert result["status"] == "completed"
+
+
+@pytest.mark.parametrize("value", [0, -1, float("nan"), float("inf"), True, "600", None])
+def test_generation_timeout_must_be_finite_positive(value):
+    with pytest.raises(ValueError, match="finite positive"):
+        driver.generation_timeout_for_cell({"generation_timeout": value})
+    assert driver.generation_timeout_for_cell({}) == 600
 
 
 def _appworld_result(root, task_id, reason):
@@ -464,9 +495,13 @@ def test_proxy_retries_keep_separate_logs(tmp_path):
         driver.start_proxy("gen_h2o_k0", "http://127.0.0.1:1", 37401, tmp_path, 8)
         first = calls[0]["request_log"]
         first_text = first.read_text()
-        driver.start_proxy("gen_h2o_k0", "http://127.0.0.1:1", 37402, tmp_path, 8)
+        driver.start_proxy(
+            "gen_h2o_k0", "http://127.0.0.1:1", 37402, tmp_path, 8,
+            generation_timeout=37.5)
 
     assert calls[0]["request_log"] != calls[1]["request_log"]
+    assert calls[0]["command"][calls[0]["command"].index("--generation-timeout") + 1] == "600"
+    assert calls[1]["command"][calls[1]["command"].index("--generation-timeout") + 1] == "37.5"
     assert calls[0]["telemetry_log"] != calls[1]["telemetry_log"]
     assert first.read_text() == first_text
     assert (first.parent / "proxy.log").exists()

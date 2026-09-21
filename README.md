@@ -13,6 +13,16 @@ runtime fixes are copied into that subset only when an NPU launcher consumes
 them.  These source checkouts do not deploy or overwrite the detached running
 copies under `/home/liuyancheng/c2kv-generality-20260918/src/`.
 
+The 2026-09-21 transport and prompt-boundary repair requires the paired shared
+paper and engine revisions recorded in
+`validation/transport_prompt_blockers_20260921.json`. Persistent request timeout
+cleanup waits for engine acknowledgement; BFCL refill uses a new attempt identity.
+The shared tau2 hook retries a user-simulator connection failure once and records
+the first error. Structured assistant tool calls and grouped tool-result history
+boundaries are preserved by the shared engine. NPU consumes those same modules;
+the standalone launcher does not duplicate them. This delivery has CPU and real
+SDK transport validation, without an NPU model run.
+
 ## Tool-definition and joint component studies
 
 `generality/tool_definition_study.py` runs the shared paper checkout's

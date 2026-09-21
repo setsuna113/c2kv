@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 import shutil
 import subprocess
@@ -78,6 +79,23 @@ def target_tokens_for_cell(cell: dict) -> int:
     return value
 
 
+def _validated_generation_timeout(value) -> int | float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError("generation_timeout must be a finite positive number")
+    try:
+        valid = math.isfinite(value) and value > 0
+    except OverflowError:
+        valid = False
+    if not valid:
+        raise ValueError("generation_timeout must be a finite positive number")
+    return value
+
+
+def generation_timeout_for_cell(cell: dict) -> int | float:
+    """Resolve the shared proxy/server deadline without changing old cells."""
+    return _validated_generation_timeout(cell.get("generation_timeout", 600))
+
+
 def _proxy_opener():
     return urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
@@ -108,8 +126,10 @@ def resolve_free_port(base: int, out: Path, arm: str) -> int:
 
 
 def start_proxy(arm: str, upstream: str, port: int, out: Path,
-                target_tokens: int) -> subprocess.Popen:
+                target_tokens: int,
+                generation_timeout: int | float = 600) -> subprocess.Popen:
     import uuid
+    _validated_generation_timeout(generation_timeout)
     attempt_dir = out / "proxy_attempts" / f"a{time.time_ns()}_{uuid.uuid4().hex}"
     attempt_dir.mkdir(parents=True, exist_ok=False)
     log_path = attempt_dir / "proxy.log"
@@ -129,6 +149,7 @@ def start_proxy(arm: str, upstream: str, port: int, out: Path,
              # generation arms carry a target_tokens placeholder; the resolved
              # per-cell K/B allowance must be passed explicitly (proxy.py contract)
              "--history-kv-target-tokens", str(target_tokens),
+             "--generation-timeout", str(generation_timeout),
              "--port", str(port),
              "--request-log", str(request_log),
              "--telemetry-log", str(attempt_dir / "proxy_telemetry.jsonl")],
@@ -321,6 +342,7 @@ def run_bfcl_task(cell: dict, task_id: str, proxy_port: int) -> dict:
     if category not in ("multi_turn_base", "multi_turn_long_context"):
         raise ValueError(f"cannot derive BFCL category from task id: {task_id}")
     project_root = new_attempt_root(out, "bfcl")
+    generation_timeout = generation_timeout_for_cell(cell)
     started = time.monotonic()
     script = f"""
 import sys
@@ -331,6 +353,7 @@ summary = run_bfcl(
     categories='{category}', mode='both', run_ids=['{task_id}'],
     model={cell['model_name']!r}, handler_name={cell['handler_name']!r},
     project_root={str(project_root)!r}, num_threads=1,
+    request_timeout={generation_timeout!r},
 )
 import json
 print('SUMMARY:' + json.dumps(summary))
@@ -629,6 +652,7 @@ def main(argv=None) -> int:
     arm = ARM_OF[(cell["backend"], cell["working_point"], cell["condition"])]
     cell["handler_name"] = f"c2kv-{arm.replace('_', '-')}"
     target_tokens = target_tokens_for_cell(cell)
+    generation_timeout = generation_timeout_for_cell(cell)
     upstream = cell["sglang_backend_url"].rstrip("/")
     proxy = None
     task_ids = args.task_ids if args.task_ids is not None else expected_ids
@@ -646,7 +670,9 @@ def main(argv=None) -> int:
                           "requested": args.proxy_port, "using": proxy_port,
                           "cell_dir": str(cell_dir), "arm": arm}), flush=True)
     try:
-        proxy = start_proxy(arm, upstream, proxy_port, cell_dir, target_tokens)
+        proxy = start_proxy(
+            arm, upstream, proxy_port, cell_dir, target_tokens,
+            generation_timeout=generation_timeout)
         stopped_upstream = False
         for task_id in task_ids:
             try:

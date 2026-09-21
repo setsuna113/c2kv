@@ -1,0 +1,36 @@
+{
+  "schema": "c2kv-npu-transport-prompt-repair-validation-v1",
+  "created_utc": "2026-09-21T14:35:37.407279+00:00",
+  "shared_engine_commit": "e2b3b7ec049a810a7ccea2039dd1b1c7b3d69224",
+  "shared_paper_commit": "b0f4924ec7186a4196fe609030ad18dea1c3fc90",
+  "shared_source_branch": "paper/benchmarks-cuda-20260917",
+  "npu_base_commit": "6f9e840d9457f4fe43dbeea4aa279a8b33e56c22",
+  "paper_validation_path": "experiments/history_system/validation/transport_prompt_blockers_20260921.json",
+  "paper_validation_sha256": "1e8173a55379c672374a005257836284dbe587d71cf7bbcb0a4318cb6b308f41",
+  "source_sha256": {
+    "generality/historykv_cell.py": "3a469a33f215e1238ef620c0b7f7a06e6aadf7ed889856104d8cd4c5e0b786ff",
+    "tests/test_historykv_attempts.py": "fab48672a4d053974688511b0753da80deff66a20a898908fa363257837275cd",
+    "tests/test_tau2_harness.py": "105e106f6e3ab313ed1ee347b9062fb3ce3d2bc8a758cedfd6fd4e2425d10081"
+  },
+  "shared_paths": {
+    "generality/tau2_harness.py": "paper benchmarks.adapters.tau2_adapter and tau2_instrumentation hook",
+    "generality/tool_definition_study.py": "paper tool_definition evaluator and shared engine prompt resolver",
+    "generality/historykv_cell.py": "paper proxy, backend, BFCL adapter, and shared engine lifecycle"
+  },
+  "launcher_change": "Forward the same finite positive optional cell generation_timeout to proxy and BFCL SDK; absent value remains 600.",
+  "validation": [
+    {
+      "command": "python -m pytest -q tests/test_tau2_harness.py",
+      "passed": 23
+    },
+    {
+      "command": "python -m pytest -q tests/test_historykv_attempts.py",
+      "passed": 24
+    },
+    {
+      "command": "python -m pytest -q tests/test_tool_definition_study.py",
+      "passed": 1
+    }
+  ],
+  "scope": "CPU launcher/shared-source contract checks; no NPU model execution or deployment; budgets and frozen runs unchanged."
+}
