@@ -1,0 +1,107 @@
+{
+  "schema": "c2kv-tau2-decision-cap-transport-validation-v1",
+  "original": {
+    "source": "box4:/workspace/results-p4xt/closed_loop/tau2__c2kv_pending_verified_r8/HOLD_decision_cap_2.txt",
+    "task": "9",
+    "steps_count": 96,
+    "steps_ok": 96,
+    "journal": {
+      "schema": "a-runtime-attempt-journal-v1",
+      "started": 96,
+      "finished": 96,
+      "completed": 96,
+      "failed": 0,
+      "pending": 0,
+      "pending_attempts": [],
+      "pending_token_accounting": "unknown",
+      "attempt_count_scope": {
+        "generation": "reserved chat transport attempts; backend receipt is not established",
+        "extraction": "reserved client producer invocations, not general HTTP attempts"
+      },
+      "finished_with_usage": 96,
+      "finished_usage_totals": {
+        "prompt_tokens": 558352,
+        "completion_tokens": 3829,
+        "total_tokens": 562181
+      },
+      "finished_usage_observed_attempts": {
+        "prompt_tokens": 96,
+        "completion_tokens": 96,
+        "total_tokens": 96
+      },
+      "usage_totals_scope": "sums of observed usage fields only, not total run cost; absent fields and pending attempt usage are unknown",
+      "finished_status_scope": "completed means HTTP JSON or producer returned; it does not mean backend semantic success or scorer success",
+      "truncated_tail": false,
+      "by_kind": {
+        "extraction": {
+          "started": 0,
+          "finished": 0,
+          "completed": 0,
+          "failed": 0,
+          "pending": 0
+        },
+        "generation": {
+          "started": 96,
+          "finished": 96,
+          "completed": 96,
+          "failed": 0,
+          "pending": 0
+        }
+      }
+    },
+    "caps": {
+      "run_id": "paper_c2kv_pending_verified_r8_t02_risk__9",
+      "benchmark": "tau2",
+      "allowed_task_ids": [
+        "9"
+      ],
+      "max_decisions": 96,
+      "max_generation_calls": 96
+    }
+  },
+  "sdk_probe_before": {
+    "exception_type": "RateLimitError",
+    "message": "litellm.RateLimitError: RateLimitError: OpenAIException - The finite event-native decision cap is exhausted",
+    "status_code": 429,
+    "api_error_code": "429",
+    "actual_class": "RateLimitError"
+  },
+  "sdk_probe_after": {
+    "exception_type": "RateLimitError",
+    "message": "litellm.RateLimitError: RateLimitError: OpenAIException - The finite event-native decision cap is exhausted",
+    "status_code": 429,
+    "api_error_code": "decision_cap_reached"
+  },
+  "sdk_probe_scope": "Actual box4 LiteLLM against a loopback HTTP 429 stub using patched exception extractor; no model invocation.",
+  "fix": {
+    "caps_unchanged": true,
+    "structured_transport_error": true,
+    "durable_task_bound_budget_rejection": true,
+    "message_only_429_fallback_requires_server_evidence": true,
+    "numeric_http_code_alias_is_not_semantic_code": true,
+    "clean_cost_and_matching_final_terminal_reason_required": true,
+    "outcome": "Explicit task-local budget failure scored zero; official reward retained separately; next task continues."
+  },
+  "gpu_or_npu_used": false,
+  "full_benchmark_rerun": false,
+  "old_hold_reclassified": false,
+  "base_commit": "b2a82cbbed74a768d3c33893db964b57ad4c5f29",
+  "checks": [
+    {
+      "scope": "NPU runtime cap, failure isolation, HTTP server, tau2 worker and matrix finalization",
+      "passed": 82,
+      "skipped": 1,
+      "skip_reason": "POSIX process group test on Windows"
+    }
+  ],
+  "source_sha256": {
+    "controller_runtime/benchmarks/memory_runtime/event_native_api.py": "83ca744e1a705b75b9909542569a3df6b615b60f45bec087a0b947d23dc41e5f",
+    "controller_runtime/benchmarks/memory_runtime/tests/test_generation_cap.py": "c88dc4f52a90a359de98a9e579748935abc1e791ba9b403c4a9e3df29af8ba8a",
+    "generality/c2kv_cell.py": "e3731d4d8f9748a5f69988ebd249e67c2c3708644980521ba258f3d9e384f14e",
+    "generality/tau2_harness.py": "dc5d86ef1ad8e8899b24731c7c2776341653abd975560b6654a3a621496a6d52",
+    "tests/test_tau2_harness.py": "acc8846693654a934a659597cfcd59657895b15ff82d888d46722781c1d75f14",
+    "tests/test_tau2_matrix.py": "1a5c3bd0ba68867a50e98df59fe22a9283dd082b7e5277aad04779b4af83886f"
+  },
+  "shared_paper_commit": "dc75a5a94ac6ee420c8f36d14ec7954ef9fd4a3d",
+  "npu_port": "Mirrored server rejection journal; explicit native_server_dir to shared paper adapter; matching final terminal reason and clean cost journal required."
+}

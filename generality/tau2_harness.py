@@ -36,6 +36,8 @@ from benchmarks.adapters.tau2_adapter import run_tau2
 request = json.loads(request_path.read_text(encoding="utf-8"))
 request["out_dir"] = Path(request["out_dir"])
 request["tau2_dir"] = Path(request["tau2_dir"])
+if request.get("native_server_dir") is not None:
+    request["native_server_dir"] = Path(request["native_server_dir"])
 summary = run_tau2(**request)
 summary_path.write_text(json.dumps(summary, ensure_ascii=False, allow_nan=False),
                         encoding="utf-8")
@@ -193,7 +195,8 @@ def _success_receipt(output_root: Path, path: Path, task_id: str,
 
 
 def run_tau2_task(cell: dict, task_id: str, agent_base_url: str,
-                  user_base_url: str, output_root: Path | str) -> dict:
+                  user_base_url: str, output_root: Path | str,
+                  *, native_server_dir: Path | str | None = None) -> dict:
     """Run a pinned single task; keep official files for exact resume checks.
 
     ``output_root`` is the per-task directory. The caller owns the agent proxy
@@ -202,6 +205,10 @@ def run_tau2_task(cell: dict, task_id: str, agent_base_url: str,
     if not isinstance(task_id, str) or not task_id:
         raise ValueError("task_id must be a nonempty string")
     output_root = Path(output_root).resolve()
+    if native_server_dir is not None:
+        native_server_dir = Path(native_server_dir).resolve()
+        if not native_server_dir.is_dir():
+            raise ValueError("native_server_dir must be the existing controller server directory")
     existing = _completed_attempt(output_root, task_id)
     if existing is not None:
         return _success_receipt(output_root, existing[0], task_id, existing[1])
@@ -232,6 +239,8 @@ def run_tau2_task(cell: dict, task_id: str, agent_base_url: str,
         "max_steps": cell.get("tau2_max_steps"),
         "timeout": cell.get("tau2_timeout"),
     }
+    if native_server_dir is not None:
+        request["native_server_dir"] = str(native_server_dir)
     (attempt / "request.json").write_text(
         json.dumps(request, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     env = os.environ.copy()

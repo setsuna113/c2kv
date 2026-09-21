@@ -55,8 +55,8 @@ def test_c2kv_worker_uses_single_task_agent_endpoint_and_raw_user_endpoint(
     monkeypatch.setattr(driver.subprocess, "Popen", start_server)
     seen = []
 
-    def run_task(cell, task_id, agent, user, out):
-        seen.append((task_id, agent, user, out))
+    def run_task(cell, task_id, agent, user, out, *, native_server_dir=None):
+        seen.append((task_id, agent, user, out, native_server_dir))
         return {"status": "completed"}
 
     monkeypatch.setattr(driver, "run_tau2_task", run_task)
@@ -65,7 +65,8 @@ def test_c2kv_worker_uses_single_task_agent_endpoint_and_raw_user_endpoint(
     assert result["status"] == "completed"
     assert result["healthy"] == ["0"]
     assert seen == [("0", "http://127.0.0.1:45001", "http://raw:36200",
-                     tmp_path / "batches" / "one" / "tau2_worker" / "0")]
+                     tmp_path / "batches" / "one" / "tau2_worker" / "0",
+                     tmp_path / "batches" / "one" / "server")]
 
 
 @pytest.mark.parametrize("problem", (None, "missing", "pending", "failed", "server_failed"))
@@ -78,7 +79,7 @@ def test_typed_tau2_live_batch_requires_clean_final_journal(tmp_path, monkeypatc
     monkeypatch.setattr(driver, "stop_owned_group", lambda proc: None)
     monkeypatch.setattr(driver, "UpstreamLiveness", lambda url: lambda: None)
     monkeypatch.setattr(driver, "completed_tau2_task", lambda out, task_id: True)
-    monkeypatch.setattr(driver, "run_tau2_task", lambda *args: {
+    monkeypatch.setattr(driver, "run_tau2_task", lambda *args, **kwargs: {
         "status": "completed", "task_failure_kind": "generation_cap_reached"})
 
     class Process:
@@ -103,8 +104,20 @@ def test_typed_tau2_live_batch_requires_clean_final_journal(tmp_path, monkeypatc
                 "api_health": {
                     "allowed_task_ids": ["0"],
                     "terminal_reason": "generation_cap_reached",
-                    "generation_calls_reserved": 2, "max_generation_calls": 2},
+                        "generation_calls_reserved": 2, "max_generation_calls": 2},
             }), encoding="utf-8")
+            (server / "ready.json").write_text(json.dumps({
+                "schema": "a-event-native-server-v1", "status": "ready",
+                "benchmark": "tau2", "allowed_task_ids": ["0"], "run_id": "test-run",
+                "max_generation_calls": 2,
+            }), encoding="utf-8")
+            (server / "budget_rejections.jsonl").write_text(json.dumps({
+                "schema": "a-event-native-budget-rejection-v1", "run_id": "test-run",
+                "task_id": "0", "session_id": "tau2/0/attempt-0",
+                "decision_key": "d96", "status_code": 429,
+                "code": "generation_cap_reached",
+                "generation_calls_reserved": 2, "max_generation_calls": 2,
+            }) + "\n", encoding="utf-8")
         return Process()
 
     monkeypatch.setattr(driver.subprocess, "Popen", start_server)

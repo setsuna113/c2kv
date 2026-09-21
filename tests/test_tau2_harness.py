@@ -56,6 +56,19 @@ def _write_summary(command, *, task_id="7", termination="agent_stop", reward=0.0
 def _write_typed_final(batch: Path, code: str, *, pending=0, failed=0):
     server = batch / "server"
     server.mkdir(parents=True, exist_ok=True)
+    (server / "ready.json").write_text(json.dumps({
+        "schema": "a-event-native-server-v1", "status": "ready",
+        "benchmark": "tau2", "allowed_task_ids": ["7"], "run_id": "test-run",
+        "max_generation_calls": 2, "max_decisions": 2,
+    }), encoding="utf-8")
+    used_key, cap_key = (("decisions_reserved", "max_decisions")
+                         if code == "decision_cap_reached" else
+                         ("generation_calls_reserved", "max_generation_calls"))
+    (server / "budget_rejections.jsonl").write_text(json.dumps({
+        "schema": "a-event-native-budget-rejection-v1", "run_id": "test-run",
+        "task_id": "7", "session_id": "tau2/7/attempt-0", "decision_key": "d96",
+        "status_code": 429, "code": code, used_key: 2, cap_key: 2,
+    }) + "\n", encoding="utf-8")
     (server / "final.json").write_text(json.dumps({
         "status": "stopped",
         "cost_summary": {"recorded": True},
@@ -106,6 +119,7 @@ def test_one_task_uses_shared_adapter_with_split_endpoints_and_official_reward(t
     assert calls[0]["user_model"] == "gen-c1000"
     assert calls[0]["agent_max_tokens"] == 2048
     assert calls[0]["python"] == cell["python_tau2"]
+    assert "native_server_dir" not in calls[0]
     assert receipt["status"] == again["status"] == "completed"
     assert receipt["semantic_score"] == 0.0
     assert receipt["termination"] == "agent_stop"
@@ -120,6 +134,8 @@ def test_native_controller_uses_native_tau2_transport_and_frozen_cap(tmp_path):
                 caps={"max_completion_tokens": 1536},
                 upstream_model_name="raw-model")
     seen = []
+    server_dir = tmp_path / "batch" / "server"
+    server_dir.mkdir(parents=True)
 
     def fake_worker(command, **_kwargs):
         request = json.loads(Path(command[4]).read_text(encoding="utf-8"))
@@ -130,10 +146,22 @@ def test_native_controller_uses_native_tau2_transport_and_frozen_cap(tmp_path):
 
     with patch.object(harness, "run_owned_worker", side_effect=fake_worker):
         harness.run_tau2_task(cell, "7", "http://127.0.0.1:1",
-                              "http://127.0.0.1:2", tmp_path / "task")
+                              "http://127.0.0.1:2", tmp_path / "task",
+                              native_server_dir=server_dir)
     assert seen[0]["native"] is True
     assert seen[0]["agent_max_tokens"] == 1536
     assert seen[0]["user_model"] == "raw-model"
+    assert seen[0]["native_server_dir"] == str(server_dir.resolve())
+    assert 'request["native_server_dir"] = Path(request["native_server_dir"])' in (
+        harness._WORKER)
+
+
+def test_native_server_dir_must_be_explicit_existing_directory(tmp_path):
+    cell = _cell(tmp_path)
+    with pytest.raises(ValueError, match="existing controller server directory"):
+        harness.run_tau2_task(
+            cell, "7", "http://127.0.0.1:1", "http://127.0.0.1:2",
+            tmp_path / "task", native_server_dir=tmp_path / "missing-server")
 
 
 def test_receipt_alone_does_not_complete_unscored_task(tmp_path):
@@ -318,7 +346,9 @@ def test_typed_budget_failure_requires_matching_adapter_evidence(tmp_path, chang
     assert not harness.completed_tau2_task(out, "7")
 
 
-@pytest.mark.parametrize("problem", ("missing", "pending", "failed", "server_failed"))
+@pytest.mark.parametrize("problem", (
+    "missing", "pending", "failed", "server_failed",
+    "rejection_missing", "rejection_mismatch"))
 def test_typed_budget_resume_requires_clean_final_journal(tmp_path, problem):
     cell = _cell(tmp_path)
     cell_dir = tmp_path / "cell"
@@ -344,6 +374,13 @@ def test_typed_budget_resume_requires_clean_final_journal(tmp_path, problem):
             final = json.loads(path.read_text(encoding="utf-8"))
             final["status"] = "failed"
             path.write_text(json.dumps(final), encoding="utf-8")
+        elif problem == "rejection_missing":
+            (batch / "server" / "budget_rejections.jsonl").unlink()
+        elif problem == "rejection_mismatch":
+            path = batch / "server" / "budget_rejections.jsonl"
+            rejection = json.loads(path.read_text(encoding="utf-8"))
+            rejection["task_id"] = "8"
+            path.write_text(json.dumps(rejection) + "\n", encoding="utf-8")
 
     sys.modules.setdefault("current", types.SimpleNamespace())
     sys.modules.setdefault("evidence_sets", types.SimpleNamespace())

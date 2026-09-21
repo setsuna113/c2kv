@@ -543,11 +543,21 @@ def typed_tau2_budget_cost_finalization(out: Path, task_id: str, code: str) -> d
         return existing
     try:
         final = json.loads((out / "server" / "final.json").read_text(encoding="utf-8"))
+        ready = json.loads((out / "server" / "ready.json").read_text(encoding="utf-8"))
+        rejections = [json.loads(line) for line in
+                      (out / "server" / "budget_rejections.jsonl").read_text(
+                          encoding="utf-8").splitlines() if line.strip()]
     except (OSError, ValueError):
         return {"status": "failed", "reason": "invalid_final_receipt"}
     journal = final.get("journal_summary")
     health = final.get("api_health")
     if (final.get("status") != "stopped"
+            or not isinstance(ready, dict) or not rejections
+            or not isinstance(rejections[-1], dict)
+            or ready.get("schema") != "a-event-native-server-v1"
+            or ready.get("status") != "ready" or ready.get("benchmark") != "tau2"
+            or ready.get("allowed_task_ids") != [task_id]
+            or not isinstance(ready.get("run_id"), str) or not ready["run_id"]
             or not isinstance(journal, dict) or not isinstance(health, dict)
             or journal.get("schema") != "a-runtime-attempt-journal-v1"
             or type(journal.get("started")) is not int
@@ -557,13 +567,25 @@ def typed_tau2_budget_cost_finalization(out: Path, task_id: str, code: str) -> d
             or health.get("allowed_task_ids") != [task_id]
             or health.get("terminal_reason") != code):
         return {"status": "failed", "reason": "unverified_typed_budget_final"}
+    rejection = rejections[-1]
+    if (rejection.get("schema") != "a-event-native-budget-rejection-v1"
+            or rejection.get("run_id") != ready["run_id"]
+            or rejection.get("task_id") != task_id
+            or rejection.get("session_id") != f"tau2/{task_id}/attempt-0"
+            or rejection.get("status_code") != 429 or rejection.get("code") != code):
+        return {"status": "failed", "reason": "unverified_typed_budget_rejection"}
     if code == "generation_cap_reached":
         used, cap = health.get("generation_calls_reserved"), health.get("max_generation_calls")
+        rejection_used, rejection_cap = (
+            rejection.get("generation_calls_reserved"), rejection.get("max_generation_calls"))
     elif code == "decision_cap_reached":
         used, cap = health.get("decisions_reserved"), health.get("max_decisions")
+        rejection_used, rejection_cap = (
+            rejection.get("decisions_reserved"), rejection.get("max_decisions"))
     else:
         return {"status": "failed", "reason": "unknown_typed_budget_code"}
-    if type(used) is not int or type(cap) is not int or cap <= 0 or used != cap:
+    if (type(used) is not int or type(cap) is not int or cap <= 0 or used != cap
+            or rejection_used != used or rejection_cap != cap):
         return {"status": "failed", "reason": "unverified_typed_budget_cap"}
     return {"status": "valid"}
 
@@ -787,7 +809,8 @@ def run_task(cell: dict, task_ids: list[str], port: int, batch_dirname: str) -> 
             task_id = task_ids[0]
             receipt = run_tau2_task(
                 cell, task_id, f"http://127.0.0.1:{port}",
-                cell["sglang_backend_url"], out / "tau2_worker" / task_id)
+                cell["sglang_backend_url"], out / "tau2_worker" / task_id,
+                native_server_dir=out / "server")
             if receipt["status"] != "completed":
                 raise RuntimeError(f"official tau2 worker did not score {task_id}")
             tau2_budget_failure = receipt.get("task_failure_kind")
