@@ -495,6 +495,14 @@ ARMS: Dict[str, Arm] = {
             description="Ratio-8 Static-T02 with verified-field commits on abstention",
         ),
         Arm(
+            name="c2kv_static_verified_v2_r8",
+            compress_history=True,
+            ratio=8,
+            query_projection="base",
+            native_controller="candidate_static_verified_v2",
+            description="Ratio-8 Static-T02 with legacy proofs and final selected-call source relations",
+        ),
+        Arm(
             name="c2kv_static_action_ledger_r8",
             compress_history=True,
             ratio=8,

@@ -26,6 +26,7 @@ VARIANT_TO_ARM = {
     "pending_verified_static": "c2kv_pending_verified_static_r8",
     "static_verified": "c2kv_static_verified_r8",
     "static_action_ledger": "c2kv_static_action_ledger_r8",
+    "static_verified_v2": "c2kv_static_verified_v2_r8",
 }
 REPAIR_VARIANTS = frozenset({"request_contract", "argument_binding", "no_progress"})
 GOAL_VARIANTS = ("goal_pending", "goal_source", "goal_progress", "goal_joint")

@@ -408,7 +408,7 @@ def test_ready_manifest_binds_loaded_controller_and_candidate_variant(
         ready.write_text(json.dumps(manifest), encoding="utf-8")
         with pytest.raises(RuntimeError, match="candidate controller identity"):
             native_extra.validate_ready_manifest(config, benchmark, "task_1", ready, controller)
-        manifest["candidate_algorithm"]["proof_registry_version"] = "verified-binding-rules-v1"
+        manifest["candidate_algorithm"]["proof_registry_version"] = initial_view_fields(variant).get("proof_registry_version", "verified-binding-rules-v1")
     if arm == "c2kv_c1_t02_r4":
         from benchmarks.toolmemory import parse_tool_memory_spec
         config["tool_memory"] = "t0:r8"

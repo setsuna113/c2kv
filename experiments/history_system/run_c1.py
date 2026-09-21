@@ -909,7 +909,7 @@ def build_parser() -> argparse.ArgumentParser:
                  "goal_pending", "goal_source", "goal_progress", "goal_joint",
                  "goal_verified", "pending_verified", "goal_static", "pending_static",
                  "goal_verified_static", "pending_verified_static",
-                 "static_verified", "static_action_ledger"),
+                 "static_verified", "static_action_ledger", "static_verified_v2"),
         default=None,
     )
     parser.add_argument("--selector-artifact", type=Path,

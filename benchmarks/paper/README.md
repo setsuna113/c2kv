@@ -558,6 +558,21 @@ within the current request. Unsupported or ambiguous obligations and results
 leave the Static decision unchanged. These are opt-in implementations, not
 new benchmark results; historical arm identities and `all` remain unchanged.
 
+Select `--candidate-arms static_verified_v2` for the independent
+`c2kv_static_verified_v2_r8` arm. It preserves the original Static-T02 allocation
+and event recovery, and the legacy proof eligibility from `static_verified`.
+The additional `verified-binding-relations-v2` registry checks the final selected
+calls, including regenerated calls, against the observable full prefix. Its
+three supported relations are a mean of deduplicated per-file `wc` results,
+message receipt ID to the receiver of the still-latest message, and a nested
+credit-card number to its unique catalog key. Only proved argument fields change;
+call count, tools, order and unrelated arguments remain unchanged. Ambiguous,
+stale or invalidated sources preserve the selected call. This adds no generation
+or model workspace. Profiles and ready manifests separately bind
+`commit_policy=verified_binding_v2`, the new registry and
+`base_proof_registry_version=verified-binding-rules-v1`.
+The legacy `static_verified` arm and default `all` expansion are unchanged.
+
 ActionLedger v1 deliberately has a finite grammar. Missing-action witnesses
 cover explicit recipient IDs plus quoted message bodies, account funding with
 an ISO currency, and literal two-field flight routes with optional structured

@@ -15,7 +15,7 @@ from benchmarks.memory_runtime.candidate_algorithms import STATIC_EXTENSION_VARI
 from benchmarks.memory_runtime.candidate_algorithms.allocation import CandidateAllocator
 from benchmarks.memory_runtime.candidate_algorithms.controller import CandidateRecoveryController
 from benchmarks.memory_runtime.candidate_algorithms.static_extensions import (
-    StaticVerifiedController, StaticActionLedgerController, extension_fields,
+    StaticVerifiedController, StaticActionLedgerController, StaticVerifiedV2Controller, extension_fields,
 )
 from benchmarks.memory_runtime.event_native_controls import build_event_native_controller
 from benchmarks.memory_runtime.event_native_server import _candidate_ready_contract
@@ -40,7 +40,9 @@ def controller(variant="static_verified", *, score=0.1, tokenizer=None, **kwargs
     geometry = {**packing(), "ratios": [8]}
     base = CandidateAllocator(tokenizer or Tokenizer(), packing=geometry,
                               policy=policy(4096), variant="static_t02")
-    cls = StaticVerifiedController if variant == "static_verified" else StaticActionLedgerController
+    cls = {"static_verified": StaticVerifiedController,
+           "static_action_ledger": StaticActionLedgerController,
+           "static_verified_v2": StaticVerifiedV2Controller}[variant]
     return cls(base, config(variant), risk_model=Risk(score), **kwargs)
 
 
@@ -101,8 +103,9 @@ def proof_payload():
         _tools(("set_budget_limit", {"access_token": "string", "budget_limit": "number"})))
 
 
-def test_real_verified_field_proof_changes_only_the_abstained_selected_call():
-    c = controller()
+@pytest.mark.parametrize("variant", ["static_verified", "static_verified_v2"])
+def test_real_verified_field_proof_changes_only_the_abstained_selected_call(variant):
+    c = controller(variant)
     p = c.prepare(proof_payload(), ratio=8, max_new_tokens=32)
     calls = [_call("set_budget_limit", {"access_token": "wrong", "budget_limit": 1500})]
     result = c.reconsider(p, calls, draft_text="call")
@@ -164,9 +167,10 @@ def run_drafts(variant, data, texts, tmp_path):
     return runner.run(data)
 
 
-def test_runner_preserves_generated_text_and_cost_when_verified_commit_changes(tmp_path):
+@pytest.mark.parametrize("variant", ["static_verified", "static_verified_v2"])
+def test_runner_preserves_generated_text_and_cost_when_verified_commit_changes(tmp_path, variant):
     text = '<tool_call>{"name":"set_budget_limit","arguments":{"access_token":"wrong","budget_limit":1500}}</tool_call>'
-    record = run_drafts("static_verified", proof_payload(), [text], tmp_path)
+    record = run_drafts(variant, proof_payload(), [text], tmp_path)
     assert record["generation_completed"] == 1
     assert record["generation_trace"][0]["native_draft"]["text"] == text
     assert json.loads(record["response"]["tool_calls"][0]["function"]["arguments"])["access_token"] == "ABCDE12345"

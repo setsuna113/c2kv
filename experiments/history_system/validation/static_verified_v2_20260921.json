@@ -1,0 +1,584 @@
+{
+  "schema": "c2kv-static-verified-v2-validation-v1",
+  "created_at": "2026-09-21T18:17:38.908264+00:00",
+  "variant": "static_verified_v2",
+  "arm": "c2kv_static_verified_v2_r8",
+  "paper_base": "30d70b4aca0fa32d14529311bf156f8ee0cfe1c2",
+  "npu_base": "47210e887fd2eca569be1ae36938eb1497b2938c",
+  "tests": {
+    "paper_entry": {
+      "passed": 155,
+      "files": [
+        "benchmarks/paper/test_candidate_arms.py",
+        "benchmarks/paper/test_native_extra.py"
+      ]
+    },
+    "paper_legacy_runtime": {
+      "passed": 55,
+      "files": [
+        "test_verified_binding.py",
+        "test_verified_controller.py",
+        "test_action_ledger.py",
+        "test_candidate_allocation.py",
+        "test_candidate_recovery.py"
+      ]
+    },
+    "paper_shared_integration": {
+      "passed": 75,
+      "files": [
+        "test_relational_binding.py",
+        "test_relational_recorded_prefixes.py",
+        "test_static_verified_v2_commit.py",
+        "test_static_extensions.py",
+        "test_initial_view_composition.py"
+      ]
+    },
+    "npu_entry": {
+      "passed": 157,
+      "files": [
+        "tests/test_c2kv_candidate_cell.py"
+      ]
+    },
+    "npu_shared_integration": {
+      "passed": 75,
+      "files": [
+        "test_relational_binding.py",
+        "test_relational_recorded_prefixes.py",
+        "test_static_verified_v2_commit.py",
+        "test_static_extensions.py",
+        "test_initial_view_composition.py"
+      ]
+    }
+  },
+  "legacy_contracts": {
+    "status": "passed",
+    "paper_base": "30d70b4",
+    "npu_base": "47210e8",
+    "legacy_variants": [
+      {
+        "variant": "static_t02",
+        "paper_profile_controller_identical": true,
+        "npu_cell_controller_identical": true
+      },
+      {
+        "variant": "turn_c1",
+        "paper_profile_controller_identical": true,
+        "npu_cell_controller_identical": true
+      },
+      {
+        "variant": "goal_rescue",
+        "paper_profile_controller_identical": true,
+        "npu_cell_controller_identical": true
+      },
+      {
+        "variant": "dependency_first",
+        "paper_profile_controller_identical": true,
+        "npu_cell_controller_identical": true
+      },
+      {
+        "variant": "request_contract",
+        "paper_profile_controller_identical": true,
+        "npu_cell_controller_identical": true
+      },
+      {
+        "variant": "argument_binding",
+        "paper_profile_controller_identical": true,
+        "npu_cell_controller_identical": true
+      },
+      {
+        "variant": "no_progress",
+        "paper_profile_controller_identical": true,
+        "npu_cell_controller_identical": true
+      },
+      {
+        "variant": "goal_pending",
+        "paper_profile_controller_identical": true,
+        "npu_cell_controller_identical": true
+      },
+      {
+        "variant": "goal_source",
+        "paper_profile_controller_identical": true,
+        "npu_cell_controller_identical": true
+      },
+      {
+        "variant": "goal_progress",
+        "paper_profile_controller_identical": true,
+        "npu_cell_controller_identical": true
+      },
+      {
+        "variant": "goal_joint",
+        "paper_profile_controller_identical": true,
+        "npu_cell_controller_identical": true
+      },
+      {
+        "variant": "goal_verified",
+        "paper_profile_controller_identical": true,
+        "npu_cell_controller_identical": true
+      },
+      {
+        "variant": "pending_verified",
+        "paper_profile_controller_identical": true,
+        "npu_cell_controller_identical": true
+      },
+      {
+        "variant": "goal_static",
+        "paper_profile_controller_identical": true,
+        "npu_cell_controller_identical": true
+      },
+      {
+        "variant": "pending_static",
+        "paper_profile_controller_identical": true,
+        "npu_cell_controller_identical": true
+      },
+      {
+        "variant": "goal_verified_static",
+        "paper_profile_controller_identical": true,
+        "npu_cell_controller_identical": true
+      },
+      {
+        "variant": "pending_verified_static",
+        "paper_profile_controller_identical": true,
+        "npu_cell_controller_identical": true
+      },
+      {
+        "variant": "static_verified",
+        "paper_profile_controller_identical": true,
+        "npu_cell_controller_identical": true
+      },
+      {
+        "variant": "static_action_ledger",
+        "paper_profile_controller_identical": true,
+        "npu_cell_controller_identical": true
+      }
+    ],
+    "new_cross_platform_contracts_identical": true
+  },
+  "shared_source_sha256_normalized_lf": {
+    "candidate_algorithms/__init__.py": "1d50c6dc5179076fc340d61618d325762a506566d1c5106801f02bb14b05b660",
+    "candidate_algorithms/static_extensions.py": "aa8d160091a20559e737b917f0c75d27e264c5bc35d0861c33590fa1df7aba21",
+    "candidate_algorithms/relational_binding.py": "60ab1d0b481f0b818de423585eeb377ecb4138a6932d92303bb046d0c78450da",
+    "tests/test_static_extensions.py": "3718b2e62535889cd8135c06da74d915376e45b02a8df8a6565a1b1bcb13147e",
+    "tests/test_static_verified_v2_commit.py": "ffc96d909344b5d01e7081a678c51f4afc0111da9533bcce33c58fa807741252",
+    "tests/test_relational_binding.py": "b2dac3676dc968e14f25673ed830f40f17f1cab79e731f4378725ac4bcdc62b1",
+    "tests/test_relational_recorded_prefixes.py": "86afd0a975aab1312a36873962383b62f15d1b2b9f54d7a69dca4dc0a2b28571",
+    "tests/fixtures/static_verified_v2/recorded_prefixes.json": "817fcca7b7f8c7293d477c5625695486b1107a55db79c9007d672983f1dbe640"
+  },
+  "recorded_prefix_proofs": [
+    {
+      "id": "base_15_turn4_step0",
+      "source": {
+        "artifact": "scratchpad/static_extension_delivery_20260921/action_ledger/static_verified_source_cases.json",
+        "task_id": "multi_turn_base_15",
+        "cell": {
+          "turn": 4,
+          "step": 0
+        },
+        "prefix_boundary": "before_held_decision",
+        "transformation": "Retain source user, assistant, and tool rows; omit handler_log rows; translate each recorded assistant content entry to one native tool_call and bind the adjacent recorded tool row with a provenance-derived call ID."
+      },
+      "proposal": {
+        "request_event_id": "multi_turn_base_15/recorded-prefix:m24",
+        "held_signature": "sha256:eecd4af46d1cc69e0912c5ea551fc2d6d193b4c839f9243ab0ce84019c75d94e",
+        "prefix_source_index": 24,
+        "proofs": [
+          {
+            "kind": "mean_from_wc_results",
+            "request_event_id": "multi_turn_base_15/recorded-prefix:m24",
+            "held_signature": "sha256:eecd4af46d1cc69e0912c5ea551fc2d6d193b4c839f9243ab0ce84019c75d94e",
+            "call_index": 0,
+            "tool": "mean",
+            "field_path": [
+              "numbers"
+            ],
+            "before": [
+              5,
+              10,
+              7
+            ],
+            "after": [
+              3,
+              16,
+              60
+            ],
+            "producers": [
+              {
+                "producer_event_id": "multi_turn_base_15/recorded-prefix:m13",
+                "producer_call_signature_id": "sha256:710e4a07aa8d0775cc0b2872d03fde5766a6540a8f57193d13226677c961edf0",
+                "producer_result_source_index": 14,
+                "producer_observation_version": 1,
+                "producer_result_path": [
+                  "count"
+                ],
+                "observed_value": 3
+              },
+              {
+                "producer_event_id": "multi_turn_base_15/recorded-prefix:m15",
+                "producer_call_signature_id": "sha256:fe884780c7e8654f948bb7b7854aefc228dd985e1f9b20d2208bf2eaae5cc5d9",
+                "producer_result_source_index": 16,
+                "producer_observation_version": 1,
+                "producer_result_path": [
+                  "count"
+                ],
+                "observed_value": 16
+              },
+              {
+                "producer_event_id": "multi_turn_base_15/recorded-prefix:m19",
+                "producer_call_signature_id": "sha256:fe884780c7e8654f948bb7b7854aefc228dd985e1f9b20d2208bf2eaae5cc5d9",
+                "producer_result_source_index": 20,
+                "producer_observation_version": 2,
+                "producer_result_path": [
+                  "count"
+                ],
+                "observed_value": 16
+              },
+              {
+                "producer_event_id": "multi_turn_base_15/recorded-prefix:m17",
+                "producer_call_signature_id": "sha256:feb7b0f588620961289b79a754f9d39bc64eb35d4c7e55949a6f826413c601bc",
+                "producer_result_source_index": 18,
+                "producer_observation_version": 1,
+                "producer_result_path": [
+                  "count"
+                ],
+                "observed_value": 60
+              },
+              {
+                "producer_event_id": "multi_turn_base_15/recorded-prefix:m21",
+                "producer_call_signature_id": "sha256:feb7b0f588620961289b79a754f9d39bc64eb35d4c7e55949a6f826413c601bc",
+                "producer_result_source_index": 22,
+                "producer_observation_version": 2,
+                "producer_result_path": [
+                  "count"
+                ],
+                "observed_value": 60
+              }
+            ],
+            "related_user_event_id": "multi_turn_base_15/recorded-prefix:m12"
+          }
+        ],
+        "version": "relational-binding-v1",
+        "proof_registry_version": "verified-binding-relations-v2"
+      },
+      "receipt": {
+        "version": "relational-binding-v1",
+        "proof_registry_version": "verified-binding-relations-v2",
+        "status": "applied",
+        "proofs": [
+          {
+            "kind": "mean_from_wc_results",
+            "request_event_id": "multi_turn_base_15/recorded-prefix:m24",
+            "held_signature": "sha256:eecd4af46d1cc69e0912c5ea551fc2d6d193b4c839f9243ab0ce84019c75d94e",
+            "call_index": 0,
+            "tool": "mean",
+            "field_path": [
+              "numbers"
+            ],
+            "before": [
+              5,
+              10,
+              7
+            ],
+            "after": [
+              3,
+              16,
+              60
+            ],
+            "producers": [
+              {
+                "producer_event_id": "multi_turn_base_15/recorded-prefix:m13",
+                "producer_call_signature_id": "sha256:710e4a07aa8d0775cc0b2872d03fde5766a6540a8f57193d13226677c961edf0",
+                "producer_result_source_index": 14,
+                "producer_observation_version": 1,
+                "producer_result_path": [
+                  "count"
+                ],
+                "observed_value": 3
+              },
+              {
+                "producer_event_id": "multi_turn_base_15/recorded-prefix:m15",
+                "producer_call_signature_id": "sha256:fe884780c7e8654f948bb7b7854aefc228dd985e1f9b20d2208bf2eaae5cc5d9",
+                "producer_result_source_index": 16,
+                "producer_observation_version": 1,
+                "producer_result_path": [
+                  "count"
+                ],
+                "observed_value": 16
+              },
+              {
+                "producer_event_id": "multi_turn_base_15/recorded-prefix:m19",
+                "producer_call_signature_id": "sha256:fe884780c7e8654f948bb7b7854aefc228dd985e1f9b20d2208bf2eaae5cc5d9",
+                "producer_result_source_index": 20,
+                "producer_observation_version": 2,
+                "producer_result_path": [
+                  "count"
+                ],
+                "observed_value": 16
+              },
+              {
+                "producer_event_id": "multi_turn_base_15/recorded-prefix:m17",
+                "producer_call_signature_id": "sha256:feb7b0f588620961289b79a754f9d39bc64eb35d4c7e55949a6f826413c601bc",
+                "producer_result_source_index": 18,
+                "producer_observation_version": 1,
+                "producer_result_path": [
+                  "count"
+                ],
+                "observed_value": 60
+              },
+              {
+                "producer_event_id": "multi_turn_base_15/recorded-prefix:m21",
+                "producer_call_signature_id": "sha256:feb7b0f588620961289b79a754f9d39bc64eb35d4c7e55949a6f826413c601bc",
+                "producer_result_source_index": 22,
+                "producer_observation_version": 2,
+                "producer_result_path": [
+                  "count"
+                ],
+                "observed_value": 60
+              }
+            ],
+            "related_user_event_id": "multi_turn_base_15/recorded-prefix:m12"
+          }
+        ],
+        "reason": "verified_relations_preserved",
+        "request_event_id": "multi_turn_base_15/recorded-prefix:m24",
+        "prefix_source_index": 24,
+        "held_signature": "sha256:eecd4af46d1cc69e0912c5ea551fc2d6d193b4c839f9243ab0ce84019c75d94e"
+      },
+      "original_calls": [
+        {
+          "id": "b15-held-t4-s0-c0",
+          "type": "function",
+          "function": {
+            "name": "mean",
+            "arguments": "{\"numbers\":[5,10,7]}"
+          }
+        }
+      ],
+      "corrected_calls": [
+        {
+          "id": "b15-held-t4-s0-c0",
+          "type": "function",
+          "function": {
+            "name": "mean",
+            "arguments": "{\"numbers\":[3,16,60]}"
+          }
+        }
+      ]
+    },
+    {
+      "id": "base_149_turn4_step0",
+      "source": {
+        "artifact": "scratchpad/static_extension_delivery_20260921/action_ledger/static_verified_source_cases.json",
+        "task_id": "multi_turn_base_149",
+        "cell": {
+          "turn": 4,
+          "step": 0
+        },
+        "prefix_boundary": "before_held_decision",
+        "transformation": "Retain source user, assistant, and tool rows; omit handler_log rows; translate each recorded assistant content entry to one native tool_call and bind the adjacent recorded tool row with a provenance-derived call ID."
+      },
+      "proposal": {
+        "request_event_id": "multi_turn_base_149/recorded-prefix:m28",
+        "held_signature": "sha256:3409ea8db6f6e6f990fa5c7aa8ac6c3a1dfcd804b53547f23669dd4eaede95b2",
+        "prefix_source_index": 28,
+        "proofs": [
+          {
+            "kind": "delete_receiver_from_message_receipt",
+            "request_event_id": "multi_turn_base_149/recorded-prefix:m28",
+            "held_signature": "sha256:3409ea8db6f6e6f990fa5c7aa8ac6c3a1dfcd804b53547f23669dd4eaede95b2",
+            "call_index": 0,
+            "tool": "delete_message",
+            "field_path": [
+              "receiver_id"
+            ],
+            "before": "USR001",
+            "after": "USR003",
+            "producers": [
+              {
+                "producer_event_id": "multi_turn_base_149/recorded-prefix:m21",
+                "producer_call_signature_id": "sha256:379912af7792b6cd6406b42c8eb2a669a032fadd072be800beeab29dbf3e7510",
+                "producer_result_source_index": 22,
+                "producer_observation_version": 1,
+                "producer_result_path": [
+                  "message_id",
+                  "new_id"
+                ],
+                "observed_value": 67410
+              }
+            ],
+            "related_user_event_id": null
+          }
+        ],
+        "version": "relational-binding-v1",
+        "proof_registry_version": "verified-binding-relations-v2"
+      },
+      "receipt": {
+        "version": "relational-binding-v1",
+        "proof_registry_version": "verified-binding-relations-v2",
+        "status": "applied",
+        "proofs": [
+          {
+            "kind": "delete_receiver_from_message_receipt",
+            "request_event_id": "multi_turn_base_149/recorded-prefix:m28",
+            "held_signature": "sha256:3409ea8db6f6e6f990fa5c7aa8ac6c3a1dfcd804b53547f23669dd4eaede95b2",
+            "call_index": 0,
+            "tool": "delete_message",
+            "field_path": [
+              "receiver_id"
+            ],
+            "before": "USR001",
+            "after": "USR003",
+            "producers": [
+              {
+                "producer_event_id": "multi_turn_base_149/recorded-prefix:m21",
+                "producer_call_signature_id": "sha256:379912af7792b6cd6406b42c8eb2a669a032fadd072be800beeab29dbf3e7510",
+                "producer_result_source_index": 22,
+                "producer_observation_version": 1,
+                "producer_result_path": [
+                  "message_id",
+                  "new_id"
+                ],
+                "observed_value": 67410
+              }
+            ],
+            "related_user_event_id": null
+          }
+        ],
+        "reason": "verified_relations_preserved",
+        "request_event_id": "multi_turn_base_149/recorded-prefix:m28",
+        "prefix_source_index": 28,
+        "held_signature": "sha256:3409ea8db6f6e6f990fa5c7aa8ac6c3a1dfcd804b53547f23669dd4eaede95b2"
+      },
+      "original_calls": [
+        {
+          "id": "b149-held-t4-s0-c0",
+          "type": "function",
+          "function": {
+            "name": "delete_message",
+            "arguments": "{\"receiver_id\":\"USR001\"}"
+          }
+        }
+      ],
+      "corrected_calls": [
+        {
+          "id": "b149-held-t4-s0-c0",
+          "type": "function",
+          "function": {
+            "name": "delete_message",
+            "arguments": "{\"receiver_id\":\"USR003\"}"
+          }
+        }
+      ]
+    },
+    {
+      "id": "base_180_turn1_step2",
+      "source": {
+        "artifact": "scratchpad/static_extension_delivery_20260921/action_ledger/static_verified_case180.json",
+        "task_id": "multi_turn_base_180",
+        "cell": {
+          "turn": 1,
+          "step": 2
+        },
+        "prefix_boundary": "before_held_decision",
+        "transformation": "Retain source user, assistant, and tool rows; omit handler_log rows; translate each recorded assistant content entry to one native tool_call and bind the adjacent recorded tool row with a provenance-derived call ID."
+      },
+      "proposal": {
+        "request_event_id": "multi_turn_base_180/recorded-prefix:m6",
+        "held_signature": "sha256:4967cac0456977f525a3caa82bcefa062ef25ddc221adcc994529c6c27edcd1d",
+        "prefix_source_index": 10,
+        "proofs": [
+          {
+            "kind": "card_key_from_card_number",
+            "request_event_id": "multi_turn_base_180/recorded-prefix:m6",
+            "held_signature": "sha256:4967cac0456977f525a3caa82bcefa062ef25ddc221adcc994529c6c27edcd1d",
+            "call_index": 0,
+            "tool": "book_flight",
+            "field_path": [
+              "card_id"
+            ],
+            "before": "1234-5678-9876-5432",
+            "after": "main_card",
+            "producers": [
+              {
+                "producer_event_id": "multi_turn_base_180/recorded-prefix:m9",
+                "producer_call_signature_id": "sha256:2e3b70fe1fc907646ebeb17804a9587ae558ee09bbc9d43ff33645a031cc2a9c",
+                "producer_result_source_index": 10,
+                "producer_observation_version": 1,
+                "producer_result_path": [
+                  "credit_card_list",
+                  "main_card",
+                  "card_number"
+                ],
+                "observed_value": "1234-5678-9876-5432"
+              }
+            ],
+            "related_user_event_id": null
+          }
+        ],
+        "version": "relational-binding-v1",
+        "proof_registry_version": "verified-binding-relations-v2"
+      },
+      "receipt": {
+        "version": "relational-binding-v1",
+        "proof_registry_version": "verified-binding-relations-v2",
+        "status": "applied",
+        "proofs": [
+          {
+            "kind": "card_key_from_card_number",
+            "request_event_id": "multi_turn_base_180/recorded-prefix:m6",
+            "held_signature": "sha256:4967cac0456977f525a3caa82bcefa062ef25ddc221adcc994529c6c27edcd1d",
+            "call_index": 0,
+            "tool": "book_flight",
+            "field_path": [
+              "card_id"
+            ],
+            "before": "1234-5678-9876-5432",
+            "after": "main_card",
+            "producers": [
+              {
+                "producer_event_id": "multi_turn_base_180/recorded-prefix:m9",
+                "producer_call_signature_id": "sha256:2e3b70fe1fc907646ebeb17804a9587ae558ee09bbc9d43ff33645a031cc2a9c",
+                "producer_result_source_index": 10,
+                "producer_observation_version": 1,
+                "producer_result_path": [
+                  "credit_card_list",
+                  "main_card",
+                  "card_number"
+                ],
+                "observed_value": "1234-5678-9876-5432"
+              }
+            ],
+            "related_user_event_id": null
+          }
+        ],
+        "reason": "verified_relations_preserved",
+        "request_event_id": "multi_turn_base_180/recorded-prefix:m6",
+        "prefix_source_index": 10,
+        "held_signature": "sha256:4967cac0456977f525a3caa82bcefa062ef25ddc221adcc994529c6c27edcd1d"
+      },
+      "original_calls": [
+        {
+          "id": "b180-held-t1-s2-c0",
+          "type": "function",
+          "function": {
+            "name": "book_flight",
+            "arguments": "{\"access_token\":\"abc123xyz\",\"card_id\":\"1234-5678-9876-5432\",\"travel_date\":\"2026-10-12\",\"travel_from\":\"LAX\",\"travel_to\":\"JFK\",\"travel_class\":\"business\"}"
+          }
+        }
+      ],
+      "corrected_calls": [
+        {
+          "id": "b180-held-t1-s2-c0",
+          "type": "function",
+          "function": {
+            "name": "book_flight",
+            "arguments": "{\"access_token\":\"abc123xyz\",\"card_id\":\"main_card\",\"travel_class\":\"business\",\"travel_date\":\"2026-10-12\",\"travel_from\":\"LAX\",\"travel_to\":\"JFK\"}"
+          }
+        }
+      ]
+    }
+  ],
+  "validation_scope": "CPU policy and final-commit integration on three visible recorded prefixes; no task completion scores",
+  "cuda_model_smoke_run": false,
+  "npu_model_smoke_run": false,
+  "hardware_status": "Read-only GPU checks found all four GPUs occupied on each of m2 and m4; no jobs changed",
+  "full_evaluation_started": false
+}

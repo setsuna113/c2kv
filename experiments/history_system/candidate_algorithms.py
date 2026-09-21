@@ -17,6 +17,7 @@ GOAL_VERSION = "c2kv-goal-composition-v1"
 VERIFIED_VARIANTS = ("goal_verified", "pending_verified")
 VERIFIED_VERSION = "c2kv-verified-binding-v1"
 PROOF_REGISTRY_VERSION = "verified-binding-rules-v1"
+RELATIONAL_PROOF_REGISTRY_VERSION = "verified-binding-relations-v2"
 INITIAL_VIEW_BACKBONES = {
     "goal_static": "goal_rescue", "pending_static": "goal_pending",
     "goal_verified_static": "goal_verified",
@@ -25,7 +26,7 @@ INITIAL_VIEW_BACKBONES = {
 INITIAL_VIEW_VARIANTS = tuple(INITIAL_VIEW_BACKBONES)
 INITIAL_VIEW_VERSION = "c2kv-initial-view-composition-v1"
 INITIAL_VIEW_POLICY_VERSION = "c2kv-static-initial-view-v1"
-STATIC_EXTENSION_VARIANTS = ("static_verified", "static_action_ledger")
+STATIC_EXTENSION_VARIANTS = ("static_verified", "static_action_ledger", "static_verified_v2")
 STATIC_EXTENSION_VERSION = "c2kv-static-extension-v1"
 ALL_VARIANTS = (VARIANTS + REPAIR_VARIANTS + GOAL_VARIANTS + VERIFIED_VARIANTS
                 + INITIAL_VIEW_VARIANTS + STATIC_EXTENSION_VARIANTS)
@@ -35,6 +36,14 @@ RATIO = 8
 def initial_view_fields(variant: str) -> dict[str, Any]:
     """Describe only opt-in compositions; keep historical contracts byte-stable."""
     if variant in STATIC_EXTENSION_VARIANTS:
+        if variant == "static_verified_v2":
+            return {
+                "recovery_backbone": "static_t02",
+                "initial_view": {"policy": "static_gist", "version": INITIAL_VIEW_POLICY_VERSION},
+                "commit_policy": "verified_binding_v2",
+                "proof_registry_version": RELATIONAL_PROOF_REGISTRY_VERSION,
+                "base_proof_registry_version": PROOF_REGISTRY_VERSION,
+            }
         return {
             "recovery_backbone": "static_t02",
             "initial_view": {"policy": "static_gist", "version": INITIAL_VIEW_POLICY_VERSION},

@@ -1,0 +1,761 @@
+{
+  "fixture_version": "c2kv-recorded-prefixes-v1",
+  "cases": [
+    {
+      "id": "base_15_turn4_step0",
+      "session_id": "multi_turn_base_15/recorded-prefix",
+      "decision_key": "turn-4/step-0",
+      "source": {
+        "artifact": "scratchpad/static_extension_delivery_20260921/action_ledger/static_verified_source_cases.json",
+        "task_id": "multi_turn_base_15",
+        "cell": {
+          "turn": 4,
+          "step": 0
+        },
+        "prefix_boundary": "before_held_decision",
+        "transformation": "Retain source user, assistant, and tool rows; omit handler_log rows; translate each recorded assistant content entry to one native tool_call and bind the adjacent recorded tool row with a provenance-derived call ID."
+      },
+      "messages": [
+        {
+          "role": "user",
+          "content": "I'm embarking on a new data analysis project that's as thrilling as scripting the next great story. Let's start by producing a file named 'DataSet1.csv' to hold all our initial bursts of raw data."
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "b15-t0-s0-c0",
+              "type": "function",
+              "function": {
+                "name": "touch",
+                "arguments": "{\"file_name\":\"DataSet1.csv\"}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "b15-t0-s0-c0",
+          "content": "None"
+        },
+        {
+          "role": "assistant",
+          "content": ""
+        },
+        {
+          "role": "user",
+          "content": "Infuse 'DataSet1.csv' with some preliminary numbers for our initial analytical exploration, just like adding depth to a character's backstory. Here are the data 'Student | Math | Computer Science Alice | 5 | 9 Bob | 10 | 7'. You should copy as it is and split by line each each row"
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "b15-t1-s0-c0",
+              "type": "function",
+              "function": {
+                "name": "echo",
+                "arguments": "{\"content\":\"Student | Math | Computer Science\\nAlice | 5 | 9\\nBob | 10 | 7\",\"file_name\":\"DataSet1.csv\"}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "b15-t1-s0-c0",
+          "content": "None"
+        },
+        {
+          "role": "assistant",
+          "content": ""
+        },
+        {
+          "role": "user",
+          "content": "Picture this: you're reading the last entry of 'DataSet1.csv' could you give me a glimpse to gauge the data's current health?"
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "b15-t2-s0-c0",
+              "type": "function",
+              "function": {
+                "name": "tail",
+                "arguments": "{\"file_name\":\"DataSet1.csv\",\"lines\":1}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "b15-t2-s0-c0",
+          "content": "{\"last_lines\": \"Bob | 10 | 7\"}"
+        },
+        {
+          "role": "assistant",
+          "content": ""
+        },
+        {
+          "role": "user",
+          "content": "Provide a summary of the lines, words, and characters in the previous file. It's crucial, like measuring the script's length, to grasp the scope of our data narrative."
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "b15-t3-s0-c0",
+              "type": "function",
+              "function": {
+                "name": "wc",
+                "arguments": "{\"file_name\":\"DataSet1.csv\",\"mode\":\"l\"}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "b15-t3-s0-c0",
+          "content": "{\"count\": 3, \"type\": \"lines\"}"
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "b15-t3-s1-c0",
+              "type": "function",
+              "function": {
+                "name": "wc",
+                "arguments": "{\"file_name\":\"DataSet1.csv\",\"mode\":\"w\"}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "b15-t3-s1-c0",
+          "content": "{\"count\": 16, \"type\": \"words\"}"
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "b15-t3-s2-c0",
+              "type": "function",
+              "function": {
+                "name": "wc",
+                "arguments": "{\"file_name\":\"DataSet1.csv\",\"mode\":\"c\"}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "b15-t3-s2-c0",
+          "content": "{\"count\": 60, \"type\": \"characters\"}"
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "b15-t3-s3-c0",
+              "type": "function",
+              "function": {
+                "name": "wc",
+                "arguments": "{\"file_name\":\"DataSet1.csv\",\"mode\":\"w\"}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "b15-t3-s3-c0",
+          "content": "{\"count\": 16, \"type\": \"words\"}"
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "b15-t3-s4-c0",
+              "type": "function",
+              "function": {
+                "name": "wc",
+                "arguments": "{\"file_name\":\"DataSet1.csv\",\"mode\":\"c\"}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "b15-t3-s4-c0",
+          "content": "{\"count\": 60, \"type\": \"characters\"}"
+        },
+        {
+          "role": "assistant",
+          "content": ""
+        },
+        {
+          "role": "user",
+          "content": "Could you compute the average of the three numerical value obtained? Just for my personal use."
+        }
+      ],
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "wc",
+            "description": "Count the number of lines, words, or characters in a file of any extension from the current directory.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "file_name": {
+                  "type": "string",
+                  "description": "Name of the file in the current directory."
+                },
+                "mode": {
+                  "type": "string",
+                  "description": "Mode of operation: l for lines, w for words, or c for characters.",
+                  "enum": [
+                    "l",
+                    "w",
+                    "c"
+                  ],
+                  "default": "l"
+                }
+              },
+              "required": [
+                "file_name"
+              ]
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "mean",
+            "description": "Calculate the mean of a list of numbers.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "numbers": {
+                  "type": "array",
+                  "description": "List of numbers to calculate the mean of.",
+                  "items": {
+                    "type": "number"
+                  }
+                }
+              },
+              "required": [
+                "numbers"
+              ]
+            }
+          }
+        }
+      ],
+      "draft_tool_calls": [
+        {
+          "id": "b15-held-t4-s0-c0",
+          "type": "function",
+          "function": {
+            "name": "mean",
+            "arguments": "{\"numbers\":[5,10,7]}"
+          }
+        }
+      ]
+    },
+    {
+      "id": "base_149_turn4_step0",
+      "session_id": "multi_turn_base_149/recorded-prefix",
+      "decision_key": "turn-4/step-0",
+      "source": {
+        "artifact": "scratchpad/static_extension_delivery_20260921/action_ledger/static_verified_source_cases.json",
+        "task_id": "multi_turn_base_149",
+        "cell": {
+          "turn": 4,
+          "step": 0
+        },
+        "prefix_boundary": "before_held_decision",
+        "transformation": "Retain source user, assistant, and tool rows; omit handler_log rows; translate each recorded assistant content entry to one native tool_call and bind the adjacent recorded tool row with a provenance-derived call ID."
+      },
+      "messages": [
+        {
+          "role": "user",
+          "content": "Hi there! I've noticed Zeta Corp's stocks have been slipping more than I'd like. Would you be able to pull up their stock information for a quick review and also make sure it's no longer on my watchlist?"
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "b149-t0-s0-c0",
+              "type": "function",
+              "function": {
+                "name": "get_symbol_by_name",
+                "arguments": "{\"name\":\"Zeta Corp\"}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "b149-t0-s0-c0",
+          "content": "{\"symbol\": \"ZETA\"}"
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "b149-t0-s1-c0",
+              "type": "function",
+              "function": {
+                "name": "get_stock_info",
+                "arguments": "{\"symbol\":\"ZETA\"}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "b149-t0-s1-c0",
+          "content": "{\"price\": 150.0, \"percent_change\": -0.5, \"volume\": 1.0, \"MA(5)\": 151.0, \"MA(20)\": 152.0}"
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "b149-t0-s2-c0",
+              "type": "function",
+              "function": {
+                "name": "get_watchlist",
+                "arguments": "{}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "b149-t0-s2-c0",
+          "content": "{\"watchlist\": [\"NVDA\", \"ZETA\"]}"
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "b149-t0-s3-c0",
+              "type": "function",
+              "function": {
+                "name": "remove_stock_from_watchlist",
+                "arguments": "{\"symbol\":\"ZETA\"}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "b149-t0-s3-c0",
+          "content": "{\"status\": \"Stock ZETA removed from watchlist successfully.\"}"
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "b149-t0-s4-c0",
+              "type": "function",
+              "function": {
+                "name": "get_stock_info",
+                "arguments": "{\"symbol\":\"ZETA\"}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "b149-t0-s4-c0",
+          "content": "{\"price\": 150.0, \"percent_change\": -0.5, \"volume\": 1.0, \"MA(5)\": 151.0, \"MA(20)\": 152.0}"
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "b149-t0-s5-c0",
+              "type": "function",
+              "function": {
+                "name": "get_watchlist",
+                "arguments": "{}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "b149-t0-s5-c0",
+          "content": "{\"watchlist\": [\"NVDA\"]}"
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "b149-t0-s6-c0",
+              "type": "function",
+              "function": {
+                "name": "remove_stock_from_watchlist",
+                "arguments": "{\"symbol\":\"ZETA\"}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "b149-t0-s6-c0",
+          "content": "{\"error\": \"Stock ZETA not found in watchlist.\"}"
+        },
+        {
+          "role": "assistant",
+          "content": ""
+        },
+        {
+          "role": "user",
+          "content": "Could you compile a list of all the stocks currently on my watchlist? I'm aiming to get a better grip on my portfolio management."
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "b149-t1-s0-c0",
+              "type": "function",
+              "function": {
+                "name": "get_watchlist",
+                "arguments": "{}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "b149-t1-s0-c0",
+          "content": "{\"watchlist\": [\"NVDA\"]}"
+        },
+        {
+          "role": "assistant",
+          "content": ""
+        },
+        {
+          "role": "user",
+          "content": "I think it would be wise to let my friend know about the changes I'm making, specifically regarding Zeta Corp. Please send a note to my friend's user ID USR003 stating, 'I've decided to drop those dipping stocks from my line-up.' My user id is 'USR002'."
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "b149-t2-s0-c0",
+              "type": "function",
+              "function": {
+                "name": "send_message",
+                "arguments": "{\"receiver_id\":\"USR003\",\"message\":\"I've decided to drop those dipping stocks from my line-up.\"}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "b149-t2-s0-c0",
+          "content": "{\"sent_status\": true, \"message_id\": {\"new_id\": 67410}, \"message\": \"Message sent to 'USR003' successfully.\"}"
+        },
+        {
+          "role": "assistant",
+          "content": ""
+        },
+        {
+          "role": "user",
+          "content": "Would you mind showing me any recent messages I've sent?"
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "b149-t3-s0-c0",
+              "type": "function",
+              "function": {
+                "name": "view_messages_sent",
+                "arguments": "{}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "b149-t3-s0-c0",
+          "content": "{\"messages\": {\"USR001\": [[\"My name is John. I want to connect.\"]], \"USR003\": [\"I've decided to drop those dipping stocks from my line-up.\"]}}"
+        },
+        {
+          "role": "assistant",
+          "content": ""
+        },
+        {
+          "role": "user",
+          "content": "My friend mentioned something quite irrelevant and outdated in one of the messages. Can you help me by delete message id: 67410?"
+        }
+      ],
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "send_message",
+            "description": "Send a message to a user.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "receiver_id": {
+                  "type": "string",
+                  "description": "User ID of the user to send the message to."
+                },
+                "message": {
+                  "type": "string",
+                  "description": "Message to be sent."
+                }
+              },
+              "required": [
+                "receiver_id",
+                "message"
+              ]
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "view_messages_sent",
+            "description": "View all historical messages sent by the current user.",
+            "parameters": {
+              "type": "object",
+              "properties": {},
+              "required": []
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "delete_message",
+            "description": "Delete the latest message sent to a receiver.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "receiver_id": {
+                  "type": "string",
+                  "description": "User ID of the receiver whose latest message will be deleted."
+                }
+              },
+              "required": [
+                "receiver_id"
+              ]
+            }
+          }
+        }
+      ],
+      "draft_tool_calls": [
+        {
+          "id": "b149-held-t4-s0-c0",
+          "type": "function",
+          "function": {
+            "name": "delete_message",
+            "arguments": "{\"receiver_id\":\"USR001\"}"
+          }
+        }
+      ]
+    },
+    {
+      "id": "base_180_turn1_step2",
+      "session_id": "multi_turn_base_180/recorded-prefix",
+      "decision_key": "turn-1/step-2",
+      "source": {
+        "artifact": "scratchpad/static_extension_delivery_20260921/action_ledger/static_verified_case180.json",
+        "task_id": "multi_turn_base_180",
+        "cell": {
+          "turn": 1,
+          "step": 2
+        },
+        "prefix_boundary": "before_held_decision",
+        "transformation": "Retain source user, assistant, and tool rows; omit handler_log rows; translate each recorded assistant content entry to one native tool_call and bind the adjacent recorded tool row with a provenance-derived call ID."
+      },
+      "messages": [
+        {
+          "role": "user",
+          "content": "I need to cap my travel expenses at 20,000 RMB. Sort out everything to make sure this limit is correctly set up. Around it to have tenth and hundredth digit. Like 12.34 as the input. My access token is abc123xyz if you need."
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "b180-t0-s0-c0",
+              "type": "function",
+              "function": {
+                "name": "compute_exchange_rate",
+                "arguments": "{\"base_currency\":\"RMB\",\"target_currency\":\"USD\",\"value\":20000}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "b180-t0-s0-c0",
+          "content": "{\"exchanged_value\": 2857.14}"
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "b180-t0-s1-c0",
+              "type": "function",
+              "function": {
+                "name": "set_budget_limit",
+                "arguments": "{\"access_token\":\"abc123xyz\",\"budget_limit\":2857.14}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "b180-t0-s1-c0",
+          "content": "{\"budget_limit\": 2857.14}"
+        },
+        {
+          "role": "assistant",
+          "content": ""
+        },
+        {
+          "role": "user",
+          "content": "With my budget arranged, just double check the flight cost so that I know it's ok. Then, I want to book a business class ticket going from LAX to JFK on October 12th 2026. Charge it to my main credit card and ensure it stays within my budget plans."
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "b180-t1-s0-c0",
+              "type": "function",
+              "function": {
+                "name": "get_flight_cost",
+                "arguments": "{\"travel_class\":\"business\",\"travel_date\":\"2026-10-12\",\"travel_from\":\"LAX\",\"travel_to\":\"JFK\"}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "b180-t1-s0-c0",
+          "content": "{\"travel_cost_list\": [2400.0]}"
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "b180-t1-s1-c0",
+              "type": "function",
+              "function": {
+                "name": "get_all_credit_cards",
+                "arguments": "{}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "b180-t1-s1-c0",
+          "content": "{\"credit_card_list\": {\"main_card\": {\"card_number\": \"1234-5678-9876-5432\", \"expiry_date\": \"12/26\", \"cardholder_name\": \"Michael Zhang\", \"balance\": 50000.0}}}"
+        }
+      ],
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "get_all_credit_cards",
+            "description": "Get all registered credit cards.",
+            "parameters": {
+              "type": "object",
+              "properties": {},
+              "required": []
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "book_flight",
+            "description": "Book a flight given the travel information. From and To should be airport codes in IATA format.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "access_token": {
+                  "type": "string",
+                  "description": "The access token obtained from authentication."
+                },
+                "card_id": {
+                  "type": "string",
+                  "description": "The ID of the credit card to use for the booking."
+                },
+                "travel_date": {
+                  "type": "string",
+                  "description": "The date of travel in YYYY-MM-DD format."
+                },
+                "travel_from": {
+                  "type": "string",
+                  "description": "The departing airport code."
+                },
+                "travel_to": {
+                  "type": "string",
+                  "description": "The arriving airport code."
+                },
+                "travel_class": {
+                  "type": "string",
+                  "description": "The class of travel.",
+                  "enum": [
+                    "economy",
+                    "business",
+                    "first"
+                  ]
+                }
+              },
+              "required": [
+                "access_token",
+                "card_id",
+                "travel_date",
+                "travel_from",
+                "travel_to",
+                "travel_class"
+              ]
+            }
+          }
+        }
+      ],
+      "draft_tool_calls": [
+        {
+          "id": "b180-held-t1-s2-c0",
+          "type": "function",
+          "function": {
+            "name": "book_flight",
+            "arguments": "{\"access_token\":\"abc123xyz\",\"card_id\":\"1234-5678-9876-5432\",\"travel_date\":\"2026-10-12\",\"travel_from\":\"LAX\",\"travel_to\":\"JFK\",\"travel_class\":\"business\"}"
+          }
+        }
+      ]
+    }
+  ]
+}

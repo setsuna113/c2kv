@@ -183,8 +183,9 @@ def test_candidate_delivery_uses_ratio8_and_bound_artifact(tmp_path, monkeypatch
                                                   if variant in GOAL_VARIANTS else
                                                   "candidate_algorithm_v1")
         if variant in VERIFIED_VARIANTS or initial_view_fields(variant).get("proof_registry_version"):
-            assert controller["candidate_algorithm"]["proof_registry_version"] == "verified-binding-rules-v1"
-            assert profile["proof_registry_version"] == "verified-binding-rules-v1"
+            expected_proof = initial_view_fields(variant).get("proof_registry_version", "verified-binding-rules-v1")
+            assert controller["candidate_algorithm"]["proof_registry_version"] == expected_proof
+            assert profile["proof_registry_version"] == expected_proof
             without_proof = copy.deepcopy(controller)
             del without_proof["candidate_algorithm"]["proof_registry_version"]
             assert profile["controller_sha256"] != hashlib.sha256(
