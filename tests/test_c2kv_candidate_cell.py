@@ -22,6 +22,21 @@ def source_cell(tmp_path):
     }
 
 
+def toolsandbox_source_cell(tmp_path):
+    source = source_cell(tmp_path)
+    task_ids = [f"scenario_{index}_3_distraction_tools" for index in range(129)]
+    source.update(
+        cell_id="toolsandbox__c2kv__K0__compression_full_budget",
+        cell_dir=str(tmp_path / "toolsandbox" / "c2kv" / "K0" /
+                     "compression_full_budget"),
+        benchmark="toolsandbox", benchmark_key="toolsandbox",
+        task_ids=task_ids, heldout_task_ids=task_ids[:],
+        budget_bytes={"K": 100, "R_max": 200, "B": 300},
+        budget_tokens={"K": 768, "R": 256, "B": 1024},
+    )
+    return source
+
+
 @pytest.mark.parametrize("variant", candidate_cell.VARIANTS)
 def test_candidate_cell_is_explicit_ratio8_and_isolated(tmp_path, variant):
     source = source_cell(tmp_path)
@@ -69,6 +84,25 @@ def test_existing_static_contracts_keep_their_exact_fields():
         "recovery_backbone": "goal_rescue", "initial_view": expected_view}
     assert candidate_cell.static_contract("pending_static") == {
         "recovery_backbone": "goal_pending", "initial_view": expected_view}
+
+
+@pytest.mark.parametrize("variant", candidate_cell.VARIANTS)
+def test_toolsandbox_candidate_preserves_source_task_and_budget_identity(tmp_path, variant):
+    source = toolsandbox_source_cell(tmp_path)
+    result = candidate_cell.candidate_cell_from_source(
+        source, variant, "http://127.0.0.1:36200")
+    assert result["benchmark"] == result["benchmark_key"] == "toolsandbox"
+    assert result["candidate_source_cell_id"] == source["cell_id"]
+    assert result["task_ids"] == source["task_ids"]
+    assert result["heldout_task_ids"] == source["heldout_task_ids"]
+    assert result["budget_bytes"] == source["budget_bytes"]
+    assert result["budget_tokens"] == source["budget_tokens"]
+    assert result["ratio"] == 8
+    assert "history_budget_tokens" not in result
+    assert result["candidate_budget_source"] == "working_point.common_cap_bytes"
+    assert result["cell_id"] == source["cell_id"] + f"__candidate_{variant}"
+    assert Path(result["cell_dir"]).parts[-2:] == ("candidate_algorithms", variant)
+    assert source["ratio"] == 4 and source["sglang_backend_url"] is None
 
 
 @pytest.mark.parametrize("variant, backbone", [
@@ -241,6 +275,102 @@ def test_candidate_cell_rejects_unselected_source_panels(tmp_path, change):
     with pytest.raises(ValueError):
         candidate_cell.candidate_cell_from_source(
             source, "static_t02", "http://127.0.0.1:36200")
+
+
+@pytest.mark.parametrize("change", [
+    {"benchmark_key": "bfcl_base"},
+    {"benchmark": "bfcl"},
+    {"backend": "h2o"},
+    {"condition": "tracer_history"},
+    {"ratio": 8},
+])
+def test_toolsandbox_candidate_rejects_mismatched_source_identity(tmp_path, change):
+    with pytest.raises(ValueError):
+        candidate_cell.candidate_cell_from_source(
+            toolsandbox_source_cell(tmp_path) | change,
+            "pending_verified", "http://127.0.0.1:36200")
+
+
+def test_toolsandbox_candidate_rejects_explicit_native_budget(tmp_path):
+    with pytest.raises(ValueError, match="ToolSandbox candidates use the source B-budget"):
+        candidate_cell.candidate_cell_from_source(
+            toolsandbox_source_cell(tmp_path), "pending_verified",
+            "http://127.0.0.1:36200", 768)
+
+
+@pytest.mark.parametrize("variant", ("pending_verified", "pending_verified_static"))
+def test_toolsandbox_candidate_prepares_proof_budget_and_worker_route(
+        tmp_path, monkeypatch, variant):
+    monkeypatch.setitem(sys.modules, "current", types.SimpleNamespace())
+    monkeypatch.setitem(sys.modules, "evidence_sets", types.SimpleNamespace())
+    monkeypatch.setitem(sys.modules, "c1_artifact_binding", types.SimpleNamespace(
+        bind_risk_artifact=lambda artifact, checkpoint: (artifact, {})))
+    from generality import c2kv_cell
+
+    checkpoint = tmp_path / "checkpoint"
+    _checkpoint_with_geometry(checkpoint)
+    artifact_path = tmp_path / "risk.json"
+    artifact_path.write_text('{"model_kind":"c1_risk_logistic"}', encoding="utf-8")
+    monkeypatch.setattr(candidate_cell, "RISK_ARTIFACT_SHA256",
+                        hashlib.sha256(artifact_path.read_bytes()).hexdigest())
+    monkeypatch.setattr(c2kv_cell, "RISK_ARTIFACT", artifact_path)
+    monkeypatch.setattr(c2kv_cell.evidence_sets, "_base_controller", lambda: {
+        "view_mode": "native_s0", "gp_experiments": {},
+        "post_draft_recovery": {}, "d3_hybrid_recovery": True,
+    }, raising=False)
+    monkeypatch.setattr(c2kv_cell, "bind_risk_artifact",
+                        lambda artifact, path: (artifact | {"bound": True},
+                                                {"checkpoint": str(path)}))
+    monkeypatch.setattr(c2kv_cell.current, "load_config", lambda: {
+        "checkpoint_selection": {"config_sha256": hashlib.sha256(
+            (checkpoint / "config.json").read_bytes()).hexdigest()},
+        "route": "ac_native_s0_lexical_raw_reserve_failed_operation",
+        "compression_policy": "always-compress-v1",
+        "history_view_protocol": "fixed-budget-main",
+        "decode_strategy": "incremental", "prefill_chunk_size": 256,
+    }, raising=False)
+    source = toolsandbox_source_cell(tmp_path) | {
+        "checkpoint": str(checkpoint), "model_name": "toolsandbox-model",
+    }
+    cell = candidate_cell.candidate_cell_from_source(
+        source, variant, "http://127.0.0.1:36200")
+    budgets = {"working_points": {"K0": {
+        "history_allowance_bytes": 100, "common_cap_bytes": 300}}}
+    prepared = c2kv_cell.prepare_cell_files(cell, budgets)
+    cell_dir = Path(prepared["cell_dir"])
+    controller = json.loads((cell_dir / "controller.json").read_text())
+    policy = json.loads((cell_dir / "eval_policy.json").read_text())
+    assert controller["candidate_algorithm"]["variant"] == variant
+    assert controller["candidate_algorithm"]["proof_registry_version"] == (
+        candidate_cell.PROOF_REGISTRY_VERSION)
+    assert controller["candidate_algorithm"]["risk_artifact"]["bound"] is True
+    assert not {"gp_experiments", "post_draft_recovery", "d3_hybrid_recovery"} & controller.keys()
+    assert prepared["proof_registry_version"] == candidate_cell.PROOF_REGISTRY_VERSION
+    assert "native_history_budget" not in prepared
+    assert policy["policy"]["history_budget_bytes"] == 300
+    assert policy["policy"]["workspace_budget_bytes"] == 300
+    assert json.loads((cell_dir / "risk_artifact_binding.json").read_text()) == {
+        "checkpoint": str(checkpoint)}
+    launch = prepared | {"python_sgl": "python", "python_bench": "bench-python",
+                         "benchmark_dir": "/toolsandbox", "caps": {
+                             "max_completion_tokens": 128,
+                             "generation_attempts_per_task": 2,
+                             "extraction_calls_per_task": 4, "task_timeout": 60}}
+    task_id = source["task_ids"][0]
+    command = c2kv_cell.server_command(launch, [task_id], tmp_path / "attempt", 36300)
+    assert command[command.index("--benchmark") + 1] == "toolsandbox"
+    assert command[command.index("--source-profile") + 1] == "openai-single-task-v1"
+    assert command[command.index("--task-ids") + 1] == task_id
+    assert command[command.index("--eval-policy") + 1] == str(cell_dir / "eval_policy.json")
+    assert "--shadow-feature-config" in command
+    worker = c2kv_cell.toolsandbox_worker_command(
+        launch, task_id, "http://127.0.0.1:36300/v1",
+        "http://127.0.0.1:36200/v1", tmp_path / "worker")
+    assert worker[worker.index("--task-id") + 1] == task_id
+    assert worker[worker.index("--model") + 1] == prepared["model_name"]
+    summary = c2kv_cell.toolsandbox_score_summary(prepared)
+    assert summary["n_total"] == summary["score_denominator"] == 129
+    assert summary["pending_task_ids"] == source["task_ids"]
 
 
 def test_candidate_controller_binds_pinned_artifact_and_strips_legacy(tmp_path, monkeypatch):

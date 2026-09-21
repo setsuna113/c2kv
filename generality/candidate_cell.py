@@ -35,6 +35,9 @@ STATIC_INITIAL_VIEW_VERSION = "c2kv-static-initial-view-v1"
 RATIO = 8
 RISK_THRESHOLD = 0.5
 RISK_ARTIFACT_SHA256 = T02_RISK_ARTIFACT_SHA256
+CANDIDATE_SOURCE_PANELS = frozenset({
+    ("bfcl", "bfcl_base"), ("toolsandbox", "toolsandbox"),
+})
 
 
 def static_contract(variant: str) -> dict:
@@ -51,12 +54,13 @@ def candidate_cell_from_source(
     source: dict, variant: str, backend_url: str,
     history_budget_tokens: int | None = None,
 ) -> dict:
-    """Derive a separate, resumable cell from an existing BFCL B-budget manifest."""
+    """Derive a separate, resumable cell from a supported B-budget manifest."""
     if variant not in VARIANTS:
         raise ValueError("Unknown candidate algorithm")
-    if (source.get("backend") != "c2kv" or source.get("benchmark") != "bfcl"
-            or source.get("benchmark_key") != "bfcl_base"):
-        raise ValueError("Candidates require a C2KV BFCL base source cell")
+    if (source.get("backend") != "c2kv"
+            or (source.get("benchmark"), source.get("benchmark_key"))
+            not in CANDIDATE_SOURCE_PANELS):
+        raise ValueError("Candidates require a C2KV BFCL base or ToolSandbox source cell")
     if source.get("condition") != "compression_full_budget":
         raise ValueError("Candidates require the B-budget compression_full_budget source cell")
     if source.get("ratio") != 4:
@@ -66,6 +70,9 @@ def candidate_cell_from_source(
     if history_budget_tokens is not None and (
             type(history_budget_tokens) is not int or history_budget_tokens <= 0):
         raise ValueError("history_budget_tokens must be a positive integer")
+    if source.get("benchmark") == "toolsandbox" and history_budget_tokens is not None:
+        raise ValueError("ToolSandbox candidates use the source B-budget; "
+                         "explicit history_budget_tokens is unsupported")
     source_dir = Path(source["cell_dir"])
     cell = copy.deepcopy(source)
     cell["schema"] = ("c2kv-generality-candidate-cell-v5"
@@ -124,8 +131,8 @@ def controller_with_binding(
     if cell.get("candidate_algorithm") not in VARIANTS or cell.get("ratio") != RATIO:
         raise ValueError("Invalid ratio-8 candidate cell")
     variant = cell["candidate_algorithm"]
-    if cell.get("benchmark") != "bfcl":
-        raise ValueError("Candidate cells require BFCL")
+    if (cell.get("benchmark"), cell.get("benchmark_key")) not in CANDIDATE_SOURCE_PANELS:
+        raise ValueError("Candidate cells require BFCL base or ToolSandbox")
     if variant in REPAIR_VARIANTS:
         if cell.get("candidate_protocol") != REPAIR_VERSION or "threshold" in cell:
             raise ValueError("Repair candidate requires the source-repair protocol without T02")
