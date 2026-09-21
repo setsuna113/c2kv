@@ -76,7 +76,7 @@ def test_new_arms_require_named_opt_in_and_support_bfcl_appworld_ace(tmp_path, v
     )
     rows = [row for row in runner.cells(augmented)
             if row["arm"] in {VARIANT_TO_ARM[v] for v in variants}]
-    assert len(rows) == 8
+    assert len(rows) == 4 * len(variants)
     assert {row["benchmark"] for row in rows} == {
         "bfcl_base", "bfcl_long_context", "appworld", "acebench_agent"}
     assert all(row["ratio"] == 8 for row in rows)
@@ -144,7 +144,7 @@ def test_candidate_delivery_uses_ratio8_and_bound_artifact(tmp_path, monkeypatch
                                                   "c2kv-goal-composition-v1"
                                                   if variant in GOAL_VARIANTS else
                                                   "candidate_algorithm_v1")
-        if variant in VERIFIED_VARIANTS:
+        if variant in VERIFIED_VARIANTS or initial_view_fields(variant).get("proof_registry_version"):
             assert controller["candidate_algorithm"]["proof_registry_version"] == "verified-binding-rules-v1"
             assert profile["proof_registry_version"] == "verified-binding-rules-v1"
             without_proof = copy.deepcopy(controller)

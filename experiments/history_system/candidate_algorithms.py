@@ -17,7 +17,11 @@ GOAL_VERSION = "c2kv-goal-composition-v1"
 VERIFIED_VARIANTS = ("goal_verified", "pending_verified")
 VERIFIED_VERSION = "c2kv-verified-binding-v1"
 PROOF_REGISTRY_VERSION = "verified-binding-rules-v1"
-INITIAL_VIEW_BACKBONES = {"goal_static": "goal_rescue", "pending_static": "goal_pending"}
+INITIAL_VIEW_BACKBONES = {
+    "goal_static": "goal_rescue", "pending_static": "goal_pending",
+    "goal_verified_static": "goal_verified",
+    "pending_verified_static": "pending_verified",
+}
 INITIAL_VIEW_VARIANTS = tuple(INITIAL_VIEW_BACKBONES)
 INITIAL_VIEW_VERSION = "c2kv-initial-view-composition-v1"
 INITIAL_VIEW_POLICY_VERSION = "c2kv-static-initial-view-v1"
@@ -32,6 +36,8 @@ def initial_view_fields(variant: str) -> dict[str, Any]:
     return {
         "recovery_backbone": INITIAL_VIEW_BACKBONES[variant],
         "initial_view": {"policy": "static_gist", "version": INITIAL_VIEW_POLICY_VERSION},
+        **({"proof_registry_version": PROOF_REGISTRY_VERSION}
+           if INITIAL_VIEW_BACKBONES[variant] in VERIFIED_VARIANTS else {}),
     }
 
 

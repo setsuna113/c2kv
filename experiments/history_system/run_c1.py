@@ -907,7 +907,8 @@ def build_parser() -> argparse.ArgumentParser:
         choices=("static_t02", "turn_c1", "goal_rescue", "dependency_first",
                  "request_contract", "argument_binding", "no_progress",
                  "goal_pending", "goal_source", "goal_progress", "goal_joint",
-                 "goal_verified", "pending_verified", "goal_static", "pending_static"),
+                 "goal_verified", "pending_verified", "goal_static", "pending_static",
+                 "goal_verified_static", "pending_verified_static"),
         default=None,
     )
     parser.add_argument("--selector-artifact", type=Path,
