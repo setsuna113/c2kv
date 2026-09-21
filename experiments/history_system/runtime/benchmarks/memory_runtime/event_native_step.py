@@ -22,6 +22,10 @@ class EventNativeStepError(RuntimeError):
         self.record = record
 
 
+class GenerationCallCapExceeded(RuntimeError):
+    """The finite generation budget ended before another model submission."""
+
+
 class EventNativeDecisionRunner:
     """Keep the draft private and journal each actual call before submission.
 
@@ -257,6 +261,9 @@ class EventNativeDecisionRunner:
                 record['failure_code'] = 'c2kv_capacity_infeasible'
                 self._failed_sessions[key[0]] = str(error)
             else:
+                if isinstance(error, GenerationCallCapExceeded):
+                    record['failure_kind'] = 'budget_exhausted'
+                    record['failure_code'] = 'generation_cap_reached'
                 self._terminal_error = copy.deepcopy(record['error'])
             raise EventNativeStepError(str(error), record) from error
         finally:
@@ -276,7 +283,7 @@ class EventNativeDecisionRunner:
         if budget['status'] not in {'passed', 'not_applicable'}:
             raise ValueError('Pre-generation history budget rejected: ' + ', '.join(budget['errors']))
         if self.generation_calls >= self.max_generation_calls:
-            raise RuntimeError('Finite generation-call cap exhausted before submission')
+            raise GenerationCallCapExceeded('Finite generation-call cap exhausted before submission')
         request_id = json.dumps([record['session_id'], record['decision_key']], separators=(',', ':'))
         trace = {
             'phase': phase, 'status': 'started', 'discarded': False,

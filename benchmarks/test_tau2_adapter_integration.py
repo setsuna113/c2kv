@@ -201,16 +201,50 @@ def test_untyped_tau2_502_remains_incomplete(tmp_path):
         tau2._terminal_results(result, ["19"], 1)
 
 
-def test_native_decision_cap_requires_exact_typed_error(tmp_path):
+@pytest.mark.parametrize("code", ["decision_cap_reached", "generation_cap_reached"])
+def test_native_decision_cap_requires_exact_typed_error(tmp_path, code):
     from benchmarks.measurement.telemetry import append_jsonl
 
     event = tmp_path / "measurement" / "harness_events.jsonl"
     append_jsonl(event, {"event_type": "decision", "episode_id": "19",
-                         "error": "APIStatusError: decision_cap_reached"})
+                         "error": "APIStatusError: " + code})
     rows = [_result("19", termination="infrastructure_error")]
     assert tau2._declared_task_failures(tmp_path, rows, 1) == {
-        "19": "decision_cap_reached"}
+        "19": code}
     assert tau2._declared_task_failures(tmp_path, rows, 2) == {}
+
+
+def test_generation_cap_task_is_counted_without_masking_official_reward(tmp_path):
+    from benchmarks.measurement.telemetry import append_jsonl
+
+    events = tmp_path / "measurement" / "harness_events.jsonl"
+    for task in ("5", "6"):
+        append_jsonl(events, {"event_type": "episode_start", "episode_id": task})
+        append_jsonl(events, {"event_type": "decision", "episode_id": task,
+                             "error": "APIStatusError: generation_cap_reached" if task == "5" else None})
+        append_jsonl(events, {"event_type": "episode_end", "episode_id": task,
+                             "status": "error" if task == "5" else "ok"})
+    path = tmp_path / "results.json"
+    rows = [_result("5", termination="infrastructure_error"), _result("6", 1.0)]
+    path.write_text(json.dumps({"simulations": rows}), encoding="utf-8")
+    failures = tau2._declared_task_failures(tmp_path, rows, 1)
+    tau2._terminal_results(path, ["5", "6"], 1, task_failures=failures)
+    tau2._validate_harness_events(events, ["5", "6"], task_failures=failures)
+    collected = tau2.collect(path, tools=[], task_failures=failures)
+    assert collected["n"] == 2
+    assert [row["semantic_score"] for row in collected["task_rows"]] == [0.0, 1.0]
+    assert collected["task_rows"][0]["official_reward"] is None
+    assert collected["task_rows"][0]["task_failure_kind"] == "generation_cap_reached"
+
+
+def test_legacy_untyped_generation_cap_is_not_reclassified(tmp_path):
+    from benchmarks.measurement.telemetry import append_jsonl
+
+    append_jsonl(tmp_path / "measurement" / "harness_events.jsonl", {
+        "event_type": "decision", "episode_id": "5",
+        "error": "RuntimeError: Finite generation-call cap exhausted before submission"})
+    assert tau2._declared_task_failures(
+        tmp_path, [_result("5", termination="infrastructure_error")], 1) == {}
 
 
 @pytest.mark.parametrize("native", [False, True])

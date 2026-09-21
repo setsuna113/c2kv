@@ -248,6 +248,85 @@ def test_native_controller_preflight_uses_controller_python_not_bench_python(
     assert called["kwargs"]["capture_output"] is True
 
 
+@pytest.mark.parametrize("final_error", [None, "cost_summary_error", "pending_journal"])
+def test_tau2_generation_cap_preserves_cost_and_requires_clean_final_journal(
+        tmp_path, monkeypatch, final_error):
+    config = _config(tmp_path)
+    task = "5"
+    delivery = tmp_path / "delivery"
+    (delivery / "runtime").mkdir(parents=True)
+    native = tmp_path / "native"
+    official = {"n": 1, "task_rows": [{"task_id": task,
+                                        "termination_reason": "infrastructure_error"}]}
+    cost = {"prompt_tokens": 12500, "completion_tokens": 450}
+
+    class FakeRunner:
+        def _stop_server(self, _process, supervisor):
+            final = {"status": "stopped", "journal_summary": {
+                "completed": 96, "failed": 0,
+                "pending": 1 if final_error == "pending_journal" else 0}}
+            if final_error == "cost_summary_error":
+                final["cost_summary_error"] = "cost aggregation failed"
+            path = supervisor.parent / "server" / "final.json"
+            path.write_text(json.dumps(final), encoding="utf-8")
+
+    class FakeDelivery:
+        def summarize_task(self, *_args):
+            return {"task_id": task, "decision_count": 95,
+                    "official_score": None, "normal_termination": False,
+                    "cost": dict(cost)}
+
+        def functional_checks(self, *_args):
+            raise AssertionError("truncated capped task must not run functional checks")
+
+    def run_official(_config, _benchmark, _task, task_out, _base_url, _model):
+        server = task_out / "server"
+        server.mkdir()
+        (server / "ready.json").write_text(json.dumps({
+            "schema": "a-event-native-server-v1", "status": "ready", "benchmark": "tau2",
+            "allowed_task_ids": [task],
+        }), encoding="utf-8")
+        (server / "steps.jsonl").write_text(json.dumps({
+            "schema": "a-event-native-exact-step-v1", "status": "failed",
+            "session_id": f"tau2/{task}/attempt-0",
+            "failure_kind": "budget_exhausted", "failure_code": "generation_cap_reached",
+            "generation_trace": [],
+            "error": {"type": "GenerationCallCapExceeded",
+                      "message": "Finite generation-call cap exhausted before submission"},
+        }) + "\n", encoding="utf-8")
+        return official
+
+    monkeypatch.setattr(native_extra, "_preflight_controller_tokenizer", lambda *_: None)
+    monkeypatch.setattr(native_extra, "server_command",
+                        lambda *_: [sys.executable, "--model-name", "test-model"])
+    monkeypatch.setattr(native_extra.c1_appworld, "_delivery_path", lambda _: delivery)
+    monkeypatch.setattr(native_extra.c1_appworld, "_delivery_runner", lambda _: FakeRunner())
+    monkeypatch.setattr(native_extra.c1_appworld, "_delivery_run_c1", lambda *_: FakeDelivery())
+    monkeypatch.setattr(native_extra.c1_appworld, "_wait_ready",
+                        lambda *_: {"base_url": "http://127.0.0.1:34100/v1"})
+    monkeypatch.setattr(native_extra, "validate_ready_manifest", lambda *_: None)
+    monkeypatch.setattr(native_extra, "_run_official", run_official)
+    monkeypatch.setattr(native_extra.subprocess, "Popen",
+                        lambda *_, **__: SimpleNamespace(returncode=0))
+
+    if final_error is not None:
+        with pytest.raises(RuntimeError, match="finalization failed"):
+            native_extra.run_task(config, "tau2", task, native, delivery,
+                                  tmp_path / "controller.json")
+        return
+
+    receipt, metrics = native_extra.run_task(config, "tau2", task, native, delivery,
+                                             tmp_path / "controller.json")
+    assert receipt["status"] == "method_failure"
+    assert receipt["failure"]["kind"] == "generation_cap_reached"
+    assert receipt["official_summary"] == official
+    assert receipt["unified_metrics"] == metrics
+    assert "not an official reward" in receipt["qualification"]
+    assert metrics["official_score"] == 0.0
+    assert metrics["method_failure"] == "generation_cap_reached"
+    assert metrics["decision_count"] == 95 and metrics["cost"] == cost
+
+
 @pytest.mark.parametrize("arm,detector,variant", [
     ("c2kv_native_r4", "disabled", None),
     ("c2kv_c1_t02_r8", "t02_risk", None),

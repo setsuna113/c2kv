@@ -246,12 +246,17 @@ def run_closed_loop(config, benchmark, directory, requested=None):
                         args, task, controller_path, termination_guard=defer_termination)
             except (RuntimeError, subprocess.CalledProcessError) as error:
                 final_path = task_root / "server" / "final.json"
-                if (final_path.is_file()
-                        and json.loads(final_path.read_text(encoding="utf-8")).get("cost_summary_error")):
+                final = json.loads(final_path.read_text(encoding="utf-8")) if final_path.is_file() else {}
+                if final.get("cost_summary_error"):
                     raise
                 failure = controller_step_failure(task_root)
                 if failure is None:
                     raise
+                if failure[1] == "generation_cap_reached":
+                    journal = final.get("journal_summary") or {}
+                    if (not final or final.get("status") == "failed" or journal.get("failed")
+                            or journal.get("pending") or not journal.get("completed")):
+                        raise
                 # Keep the evidence, score the task 0 and go on; the summary
                 # carries the counts so the cell is never read as clean.
                 status, kind, message = failure
@@ -259,6 +264,9 @@ def run_closed_loop(config, benchmark, directory, requested=None):
                            "failure": {"kind": kind, "message": message, "error": str(error)},
                            "qualification": ("harness failure: CUDA OOM in the C1 controller; "
                                              "scored 0, not a model decision") if kind == "cuda_oom"
+                           else ("declared generation-call budget exhausted; scored 0 as a "
+                                 "task-local budget failure, not an official reward")
+                           if kind == "generation_cap_reached"
                            else ("method failure: the controller declared this input infeasible "
                                  "under its budget; scored 0")}
                 metrics = {
@@ -286,11 +294,13 @@ def run_closed_loop(config, benchmark, directory, requested=None):
 # harness limit (the controller process ran out of GPU memory next to the
 # server); capacity_infeasible is the method's own admission decision (mandatory
 # raw input plus the minimum whole-event gist exceed its declared budget).
+# Generation-call exhaustion is matched by typed, task-bound evidence below,
+# never by an error-message substring.
 TOLERATED_STEP_ERRORS = {"OutOfMemoryError": ("harness_failure", "cuda_oom")}
 
 
 def _capacity_session_id(task_root):
-    """Bind a typed capacity failure to this task's per-task native server."""
+    """Bind a typed budget failure to this task's per-task native server."""
     try:
         ready = json.loads((task_root / "server" / "ready.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -317,6 +327,14 @@ def controller_step_failure(task_root):
             return None
         error = row.get("error")
         text = json.dumps(error) if isinstance(error, dict) else str(error or "")
+        if (capacity_session_id is not None
+                and row.get("schema") == "a-event-native-exact-step-v1"
+                and row.get("session_id") == capacity_session_id
+                and row.get("failure_kind") == "budget_exhausted"
+                and row.get("failure_code") == "generation_cap_reached"
+                and isinstance(error, dict)
+                and error.get("type") == "GenerationCallCapExceeded"):
+            return "method_failure", "generation_cap_reached", text[:2000]
         if (capacity_session_id is not None
                 and row.get("schema") in {"a-event-native-exact-step-v1", "a-acebench-event-step-v1"}
                 and row.get("status") == "failed"

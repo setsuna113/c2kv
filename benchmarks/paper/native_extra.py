@@ -475,6 +475,16 @@ def run_task(config, benchmark, task, native, delivery, controller_path):
     namespace = BENCHMARKS[benchmark][0]
     metrics = run_c1.summarize_task(namespace, task, task_out, official,
                                     time.monotonic() - started)
+    from .c1 import controller_step_failure
+    failure = controller_step_failure(task_out)
+    if failure and failure[1] == "generation_cap_reached":
+        metrics.update(official_score=0.0, normal_termination=False,
+                       method_failure="generation_cap_reached")
+        return ({"task_id": task, "status": "method_failure",
+                 "failure": {"kind": failure[1], "message": failure[2]},
+                 "official_summary": official, "unified_metrics": metrics,
+                 "qualification": "declared generation-call budget exhausted; scored 0 as a "
+                                  "task-local budget failure, not an official reward"}, metrics)
     identity = arm_identity(config)
     acceptance = run_c1.functional_checks(
         identity["method"], identity["detector"], metrics,

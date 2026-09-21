@@ -1,0 +1,77 @@
+{
+  "schema": "c2kv-tau2-generation-cap-validation-v1",
+  "base_commit": "188e074b3eafac1540b383268cac70a264c2a769",
+  "original": {
+    "source_root": "/workspace/results-p4x/closed_loop/tau2__c2kv_pending_verified_r8",
+    "caps": {
+      "max_decisions": 96,
+      "max_generation_calls": 96,
+      "max_wall_seconds": 10800.0
+    },
+    "completed_decisions": 95,
+    "completed_generations": 96,
+    "last_step": {
+      "schema": "a-event-native-exact-step-v1",
+      "status": "failed",
+      "session_id": "tau2/5/attempt-0",
+      "decision_key": "turn-0/step-95",
+      "error": {
+        "type": "RuntimeError",
+        "message": "Finite generation-call cap exhausted before submission"
+      },
+      "generation_attempts": 0,
+      "generation_completed": 0
+    }
+  },
+  "fix": {
+    "typed_exception": "GenerationCallCapExceeded",
+    "api_code": "generation_cap_reached",
+    "http_status": 429,
+    "budget_unchanged": true,
+    "generation_calls_include_recovery": true,
+    "new_task_outcome": "explicit task-local budget failure, semantic score 0; official reward retained separately",
+    "old_untyped_hold_reclassified": false,
+    "cost_finalization_required": true
+  },
+  "checks": [
+    {
+      "cwd": "paper",
+      "tests": [
+        "benchmarks/test_tau2_adapter_integration.py",
+        "benchmarks/paper/test_c1.py",
+        "benchmarks/paper/test_native_extra.py"
+      ],
+      "passed": 153
+    },
+    {
+      "cwd": "paper/experiments/history_system/runtime",
+      "tests": [
+        "benchmarks/memory_runtime/tests/test_generation_cap.py",
+        "benchmarks/memory_runtime/tests/test_event_native_server.py",
+        "benchmarks/memory_runtime/tests/test_budget_guard.py"
+      ],
+      "passed": 36,
+      "skipped": 1,
+      "skip_reason": "POSIX process-group test on Windows"
+    }
+  ],
+  "validation_scope": [
+    "Real localhost HTTP API with a synthetic generator: draft plus recovery exhausts calls before decision cap; repeated 429, no extra generator attempt, durable error, cache cleanup.",
+    "Two-task synthetic dispatch: capped first task has qualified zero, second completes; foreign task, untyped error and invalid cost journal do not become scored budget failures."
+  ],
+  "gpu_or_npu_used": false,
+  "full_benchmark_rerun": false,
+  "source_sha256": {
+    "benchmarks/adapters/tau2_adapter.py": "b1f75413d3b4846a90f70e865b44c8a65009f3cae98a7dd77689ebc853711f3b",
+    "benchmarks/paper/README.md": "aa71ccf5b4488af6ee635ca8ff023061655f494c55413de77219fb81fcc4bbf9",
+    "benchmarks/paper/c1.py": "7f2662c6b1315c870d0ffd1a51b655b6b21c670142399b1de13216b577e78482",
+    "benchmarks/paper/native_extra.py": "9870360450023bdc3431509b11e3de9e146551e76796bfb1a96f8bfc603c6dec",
+    "benchmarks/paper/test_c1.py": "2b750e27bc08bcb5e8eefe8d626abfcb802b0023710d2beac9807c06bc7e97fc",
+    "benchmarks/paper/test_native_extra.py": "184a86ce6952d148396ac239fd8c80e0938871a2447fe9fee7336068dfbfe2b4",
+    "benchmarks/test_tau2_adapter_integration.py": "d3d23cb3ef6c4404a330536afbb01f6871740b632eebe2f28a872c9abcd381af",
+    "experiments/history_system/runtime/benchmarks/memory_runtime/event_native_api.py": "c132f180c74468caa962f642163c968693338544e909e70e980da3d465b6226b",
+    "experiments/history_system/runtime/benchmarks/memory_runtime/event_native_server.py": "c881cc4182201bd7658dd4c1427ba725da3c2f1f34b8283b6713b2e0472d214d",
+    "experiments/history_system/runtime/benchmarks/memory_runtime/event_native_step.py": "f9a0d1348e433f828d4a8afc332ab196ab59fd592e66e44d68c0ac85002e539c",
+    "experiments/history_system/runtime/benchmarks/memory_runtime/tests/test_generation_cap.py": "6fc568ba34fe677ea746744bdf44a711a323b35212e32ed6c0af9d8473572e0e"
+  }
+}

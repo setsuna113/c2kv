@@ -583,6 +583,13 @@ does not recover. Joint gives Source precedence over Progress and never chains
 regenerations. All variants retain ratio8, B0, one regeneration per decision,
 and the shared 96-generation task limit.
 
+This generation limit includes recovery calls and can precede tau2's official
+`max_steps`. Exhaustion returns the typed `generation_cap_reached` API error;
+the paper runner records a task-local budget failure with score zero and keeps
+dispatching subsequent tasks. The official reward and termination are retained
+separately, and no extra model call is submitted. Older untyped HTTP 500 / HOLD
+artifacts remain incomplete and are not automatically rescored by this change.
+
 The verified-binding overlay is selected with
 `--candidate-arms goal_verified,pending_verified`. Its distinct
 `c2kv-verified-binding-v1` protocol uses ratio8, the frozen T02 risk artifact,

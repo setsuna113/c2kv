@@ -333,11 +333,13 @@ def _declared_task_failures(out_dir: Path, rows: List[Dict[str, Any]],
             if (task in failed and task in errors
                     and row.get("status") == "acon_history_budget_exceeded"):
                 declared[task] = "acon_history_budget_exceeded"
-    # Native single-task servers return this exact API code with HTTP 429.
+    # Native single-task servers return these exact API codes with HTTP 429.
     # Generic 429, HTTP 502 or connection refusal never proves model exhaustion.
     for task in failed:
-        if task in errors and "decision_cap_reached" in errors[task]:
-            declared[task] = "decision_cap_reached"
+        for code in ("decision_cap_reached", "generation_cap_reached"):
+            if task in errors and code in errors[task]:
+                declared[task] = code
+                break
     return declared
 
 

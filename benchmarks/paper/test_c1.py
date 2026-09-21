@@ -161,6 +161,102 @@ def capacity_evidence(shard, *, session_task=None, benchmark="bfcl"):
     return row
 
 
+def generation_cap_evidence(shard, *, session_task=None):
+    task = shard.name
+    server = shard / "server"
+    server.mkdir(parents=True)
+    (server / "ready.json").write_text(json.dumps({
+        "schema": "a-event-native-server-v1", "status": "ready", "benchmark": "tau2",
+        "allowed_task_ids": [task],
+    }))
+    row = {
+        "schema": "a-event-native-exact-step-v1", "status": "failed",
+        "session_id": f"tau2/{session_task or task}/attempt-0",
+        "failure_kind": "budget_exhausted", "failure_code": "generation_cap_reached",
+        "error": {"type": "GenerationCallCapExceeded",
+                  "message": "Finite generation-call cap exhausted before submission"},
+    }
+    (server / "steps.jsonl").write_text(json.dumps(row) + "\n")
+    (server / "final.json").write_text(json.dumps({
+        "status": "stopped", "journal_summary": {"completed": 96, "failed": 0, "pending": 0},
+    }) + "\n")
+    return row
+
+
+@pytest.mark.parametrize("change", [
+    None, "other_session", "unknown_error", "not_failed", "final_pending",
+    "final_failed", "final_status_failed", "final_missing", "cost_summary_error",
+])
+def test_tau2_generation_cap_is_task_local_only_for_bound_typed_failure(
+        tmp_path, monkeypatch, change):
+    cell = tmp_path / "cell"
+    native = cell / "native"
+    native.mkdir(parents=True)
+    calls = []
+    monkeypatch.setattr(paper_c1, "load_delivery", lambda: object())
+    monkeypatch.setattr(paper_c1, "selected_tasks", lambda *_args: ["5", "6"])
+    monkeypatch.setattr(paper_c1, "prepare_native",
+                        lambda *_args: (native, None, tmp_path / "controller.json"))
+
+    def run_task(_config, _benchmark, task, _native, _delivery, _controller):
+        calls.append(task)
+        shard = native / "task_shards" / task
+        shard.mkdir(parents=True)
+        if task == "6":
+            metrics = {"task_id": task, "official_score": 1.0, "normal_termination": True}
+            return {"task_id": task, "status": "completed", "unified_metrics": metrics}, metrics
+        row = generation_cap_evidence(shard)
+        if change == "other_session":
+            row["session_id"] = "tau2/another-task/attempt-0"
+        elif change == "unknown_error":
+            row.pop("failure_kind")
+            row.pop("failure_code")
+            row["error"] = {"type": "RuntimeError", "message": "unknown runtime failure"}
+        elif change == "not_failed":
+            row["status"] = "ok"
+        (shard / "server" / "steps.jsonl").write_text(json.dumps(row) + "\n")
+        final_path = shard / "server" / "final.json"
+        if change == "final_missing":
+            final_path.unlink()
+        elif change in {"final_pending", "final_failed", "final_status_failed",
+                        "cost_summary_error"}:
+            final = json.loads(final_path.read_text())
+            if change == "final_pending":
+                final["journal_summary"]["pending"] = 1
+            elif change == "final_failed":
+                final["journal_summary"]["failed"] = 1
+            elif change == "final_status_failed":
+                final["status"] = "failed"
+            else:
+                final["cost_summary_error"] = "cost aggregation failed"
+            final_path.write_text(json.dumps(final) + "\n")
+        raise RuntimeError("tau2 task 5 ended with infrastructure_error")
+
+    monkeypatch.setattr(native_extra, "run_task", run_task)
+    if change is not None:
+        with pytest.raises(RuntimeError, match="infrastructure_error"):
+            paper_c1.run_closed_loop({}, "tau2", cell)
+        assert calls == ["5"]
+        assert not (native / "task_shards" / "5" / "paper_task_result.json").exists()
+        assert not (native / "task_shards" / "6").exists()
+        return
+
+    assert paper_c1.run_closed_loop({}, "tau2", cell) == native
+    assert calls == ["5", "6"]
+    capped = json.loads((native / "task_shards" / "5" / "paper_task_result.json").read_text())
+    completed = json.loads((native / "task_shards" / "6" / "paper_task_result.json").read_text())
+    assert capped["status"] == "method_failure"
+    assert capped["failure"]["kind"] == "generation_cap_reached"
+    assert capped["unified_metrics"]["official_score"] == 0.0
+    assert "not an official reward" in capped["qualification"]
+    assert completed["status"] == "completed"
+    summary = json.loads((cell / f"summary_{paper_c1.ARM}.json").read_text())
+    assert summary["n"] == 2 and summary["semantic_score"] == 0.5
+    assert summary["n_method_failures"] == 1
+    assert summary["method_failure_task_ids"] == ["5"]
+    assert json.loads((native / "result.json").read_text())["status"] == "completed"
+
+
 def test_capacity_infeasible_is_a_scored_zero_method_failure(tmp_path):
     shard = tmp_path / "task_shards" / "multi_turn_long_context_101"
     capacity_evidence(shard)
