@@ -182,6 +182,25 @@ arguments and transport IDs, and adds no model generation. Ambiguous, stale,
 or unsupported bindings leave the selected calls unchanged. Historical Source
 and Joint behavior is preserved for reproducing old results.
 
+The independent `static_verified` and `static_action_ledger` variants use v6
+cells and `c2kv-static-extension-v1`. Select them explicitly through the same
+`--candidate-algorithm` option. They preserve Static-T02 initial allocation and
+event recovery, rather than composing Static allocation with Goal/Pending.
+`static_verified` uses frozen field proofs only after Static abstains, with no
+extra generation or model workspace. `static_action_ledger` adds a versioned
+source-backed action policy: ready-action STOP review must fit the original B0
+without raw/gist eviction and retain the one-regeneration limit; final commits
+must match the proved action, and completed exact duplicate side effects are
+filtered. Unknown obligations, conditions, schemas and receipts retain Static
+behavior. The cell, frozen controller and ready manifest bind all policy
+versions and reject mismatches. Existing cells and result identities remain
+unchanged. This implements opt-in candidates and does not report new scores.
+ActionLedger v1's omission grammar is deliberately narrow: explicit message
+recipient IDs with quoted bodies, funding with ISO currency, and literal
+two-field flight routes/fare conditions. The real six-field BFCL booking API
+is supported for completed-duplicate filtering, not missing-argument synthesis.
+Classification and source evidence are logged for offline coverage analysis.
+
 For an explicit native history budget on a BFCL-base ratio-8 candidate, add
 `--history-budget-tokens N` to the same launcher command. The NPU driver
 converts `N` with the checkpoint's validated KV geometry and writes equal

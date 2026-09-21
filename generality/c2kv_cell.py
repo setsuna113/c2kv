@@ -72,6 +72,8 @@ try:
     from .candidate_cell import (
         VARIANTS as CANDIDATE_VARIANTS,
         GOAL_VARIANTS,
+        STATIC_EXTENSION_VARIANTS,
+        STATIC_EXTENSION_VERSION,
         STATIC_VARIANTS,
         STATIC_VERSION,
         VERIFIED_STATIC_VARIANTS,
@@ -84,6 +86,8 @@ except ImportError:  # Direct file launch on ascend03.
     from candidate_cell import (
         VARIANTS as CANDIDATE_VARIANTS,
         GOAL_VARIANTS,
+        STATIC_EXTENSION_VARIANTS,
+        STATIC_EXTENSION_VERSION,
         STATIC_VARIANTS,
         STATIC_VERSION,
         VERIFIED_STATIC_VARIANTS,
@@ -118,7 +122,7 @@ def _write(path: Path, value) -> None:
 def validate_static_ready_manifest(cell: dict, ready_path: Path) -> None:
     """Bind a static-view attempt to the frozen controller loaded by the server."""
     variant = cell.get("candidate_algorithm")
-    if variant not in STATIC_VARIANTS:
+    if variant not in STATIC_VARIANTS + STATIC_EXTENSION_VARIANTS:
         return
     controller_path = Path(cell["controller_path"]).resolve()
     try:
@@ -131,10 +135,25 @@ def validate_static_ready_manifest(cell: dict, ready_path: Path) -> None:
     candidate = ready.get("candidate_algorithm")
     route = ready.get("route_contract")
     contract = static_contract(variant)
+    version = (STATIC_EXTENSION_VERSION if variant in STATIC_EXTENSION_VARIANTS
+               else STATIC_VERSION)
+    controller_candidate = controller.get("candidate_algorithm")
+    if variant in STATIC_EXTENSION_VARIANTS:
+        if (cell.get("schema") != "c2kv-generality-candidate-cell-v6"
+                or cell.get("candidate_protocol") != STATIC_EXTENSION_VERSION
+                or cell.get("ratio") != 8
+                or cell.get("threshold") != 0.5
+                or any(cell.get(key) != value for key, value in contract.items())
+                or not isinstance(controller_candidate, dict)
+                or controller_candidate.get("variant") != variant
+                or controller_candidate.get("risk_threshold") != 0.5
+                or any(controller_candidate.get(key) != value
+                       for key, value in contract.items())):
+            raise RuntimeError("static candidate ready manifest differs from frozen controller")
     if variant in VERIFIED_STATIC_VARIANTS:
         if (cell.get("proof_registry_version") != contract["proof_registry_version"]
-                or not isinstance(controller.get("candidate_algorithm"), dict)
-                or controller["candidate_algorithm"].get("proof_registry_version")
+                or not isinstance(controller_candidate, dict)
+                or controller_candidate.get("proof_registry_version")
                 != contract["proof_registry_version"]):
             raise RuntimeError("static candidate ready manifest differs from frozen controller")
     if (not isinstance(loaded, dict) or not isinstance(candidate, dict)
@@ -146,7 +165,7 @@ def validate_static_ready_manifest(cell: dict, ready_path: Path) -> None:
             or candidate.get("variant") != variant
             or candidate.get("stable_call_ids") is not True
             or any(candidate.get(key) != value for key, value in contract.items())
-            or route.get("baseline_identity") != STATIC_VERSION + ":" + variant
+            or route.get("baseline_identity") != version + ":" + variant
             or route.get("recovery_enabled") is not True
             or route.get("max_generations_per_decision") != 2):
         raise RuntimeError("static candidate ready manifest differs from frozen controller")
@@ -356,7 +375,9 @@ def server_command(cell: dict, task_ids: list[str], out: Path, port: int,
         "--no-raw-snapshot",
     ]
     if (cell["condition"] == "tracer_history"
-            or cell.get("candidate_algorithm") in GOAL_VARIANTS + VERIFIED_VARIANTS + STATIC_VARIANTS):
+            or cell.get("candidate_algorithm") in (
+                GOAL_VARIANTS + VERIFIED_VARIANTS + STATIC_VARIANTS
+                + STATIC_EXTENSION_VARIANTS)):
         # The frozen C1 risk head needs its exact prefill hidden-state contract.
         command.extend(["--shadow-feature-config",
                         str(RUNTIME / "configs" / "shadow_features.json")])

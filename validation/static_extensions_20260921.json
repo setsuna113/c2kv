@@ -1,0 +1,429 @@
+{
+  "schema": "c2kv-static-extension-validation-v1",
+  "recorded_at": "2026-09-21T13:05:26.010950+00:00",
+  "status": "implementation_and_targeted_CPU_checks_passed",
+  "variants": [
+    "static_verified",
+    "static_action_ledger"
+  ],
+  "arms": [
+    "c2kv_static_verified_r8",
+    "c2kv_static_action_ledger_r8"
+  ],
+  "protocol": "c2kv-static-extension-v1",
+  "ratio": 8,
+  "risk_threshold": 0.5,
+  "recovery_backbone": "static_t02",
+  "contract": {
+    "initial_view": "Original Static-T02 raw/gist partition",
+    "event_recovery": "Original Static-T02 has priority and is unchanged",
+    "verified_commit": "Frozen verified-binding-rules-v1 only after Static abstention",
+    "ledger_version": "static-action-ledger-v1",
+    "ledger_rules": "action-ledger-rules-v1",
+    "ledger_review": "Explicit ready obligation, one unused regeneration, B0 without eviction",
+    "ledger_commit": "Exact proved action or original STOP; exact completed duplicates removed",
+    "regeneration_limit": "At most one per decision under existing shared task cap",
+    "unsupported": "Preserve original Static decision and record classification",
+    "default_all": "Original eleven variants, new names require explicit opt-in"
+  },
+  "scope": {
+    "ready_grammar": [
+      "explicit recipient ID and quoted message",
+      "account funding with explicit ISO currency",
+      "literal two-field flight route with optional structured fare condition"
+    ],
+    "real_six_field_bfcl_booking": "Completed-duplicate filtering only; no missing-argument synthesis",
+    "bfcl_booking_fixture": "Observable request and recorded call arguments; receipt constructed using actual API format",
+    "not_claimed": "Broad natural-language obligation coverage or task-score gains"
+  },
+  "compatibility": {
+    "status": "passed",
+    "paper_base": "dc75a5a",
+    "npu_base": "7af6b8b",
+    "legacy_variants": [
+      {
+        "variant": "static_t02",
+        "paper_profile_controller_identical": true,
+        "npu_cell_controller_identical": true
+      },
+      {
+        "variant": "turn_c1",
+        "paper_profile_controller_identical": true,
+        "npu_cell_controller_identical": true
+      },
+      {
+        "variant": "goal_rescue",
+        "paper_profile_controller_identical": true,
+        "npu_cell_controller_identical": true
+      },
+      {
+        "variant": "dependency_first",
+        "paper_profile_controller_identical": true,
+        "npu_cell_controller_identical": true
+      },
+      {
+        "variant": "request_contract",
+        "paper_profile_controller_identical": true,
+        "npu_cell_controller_identical": true
+      },
+      {
+        "variant": "argument_binding",
+        "paper_profile_controller_identical": true,
+        "npu_cell_controller_identical": true
+      },
+      {
+        "variant": "no_progress",
+        "paper_profile_controller_identical": true,
+        "npu_cell_controller_identical": true
+      },
+      {
+        "variant": "goal_pending",
+        "paper_profile_controller_identical": true,
+        "npu_cell_controller_identical": true
+      },
+      {
+        "variant": "goal_source",
+        "paper_profile_controller_identical": true,
+        "npu_cell_controller_identical": true
+      },
+      {
+        "variant": "goal_progress",
+        "paper_profile_controller_identical": true,
+        "npu_cell_controller_identical": true
+      },
+      {
+        "variant": "goal_joint",
+        "paper_profile_controller_identical": true,
+        "npu_cell_controller_identical": true
+      },
+      {
+        "variant": "goal_verified",
+        "paper_profile_controller_identical": true,
+        "npu_cell_controller_identical": true
+      },
+      {
+        "variant": "pending_verified",
+        "paper_profile_controller_identical": true,
+        "npu_cell_controller_identical": true
+      },
+      {
+        "variant": "goal_static",
+        "paper_profile_controller_identical": true,
+        "npu_cell_controller_identical": true
+      },
+      {
+        "variant": "pending_static",
+        "paper_profile_controller_identical": true,
+        "npu_cell_controller_identical": true
+      },
+      {
+        "variant": "goal_verified_static",
+        "paper_profile_controller_identical": true,
+        "npu_cell_controller_identical": true
+      },
+      {
+        "variant": "pending_verified_static",
+        "paper_profile_controller_identical": true,
+        "npu_cell_controller_identical": true
+      }
+    ],
+    "new_cross_platform_contracts_identical": true
+  },
+  "shared_algorithm_modules": [
+    {
+      "file": "__init__.py",
+      "normalized_sha256": "c9092ad911ce32e70d1e0469f98cc6fbf8ad9f398f5223c818c8431b7a83ac9b"
+    },
+    {
+      "file": "action_ledger.py",
+      "normalized_sha256": "24844a4313b56546f01c0df670fae7b6bfa970712b7eb43d69a598a981e4d03c"
+    },
+    {
+      "file": "allocation.py",
+      "normalized_sha256": "ad75a90812111b77459d18d34ea9d2cb248cc95d8bca687277dd514e434c6c8c"
+    },
+    {
+      "file": "argument_binding.py",
+      "normalized_sha256": "597c2923822980f336ce41da3986bffc69b345dda14eb1f1921c7c410ff8b07f"
+    },
+    {
+      "file": "controller.py",
+      "normalized_sha256": "92a0e4fb4ecc8d4d6d83dd8d301b39f2446090cb2ee3150fd5fb2abff6c767a1"
+    },
+    {
+      "file": "dependencies.py",
+      "normalized_sha256": "6ffef4e7f58f9b45a3062777f4235888781b2316e545b4a4c7a19ca5ff9b9520"
+    },
+    {
+      "file": "goal_commit.py",
+      "normalized_sha256": "9f46b4b69d6988e76298049ec607392be4b2180d9959faec80baef0940979edd"
+    },
+    {
+      "file": "goal_controller.py",
+      "normalized_sha256": "06f69ddbb885ae6ea46426b2a1a7c115420e346d2c3d6fe766c0645bfedef143"
+    },
+    {
+      "file": "goal_pending.py",
+      "normalized_sha256": "9af106f50b855b54421050a60927914ae9b15805228c87e115fd5fa84df7d26c"
+    },
+    {
+      "file": "goal_progress.py",
+      "normalized_sha256": "7fa0d94fdd181013c66d9573a9e26ffa01710d9cf8c7c343598fb579d346d06b"
+    },
+    {
+      "file": "goal_protocol.py",
+      "normalized_sha256": "359a58f922c9bef9fc6c68b813bea22ea27bb8db970ecf13f5474f3da336d5ea"
+    },
+    {
+      "file": "goal_source.py",
+      "normalized_sha256": "7665e0402d883fcab09e255943bcee3688aaa1b7c3f0fdfc52517669e15947cb"
+    },
+    {
+      "file": "initial_view.py",
+      "normalized_sha256": "ec7a6341a900a564e51aa74a45f20223ad549ce96c913b04444951e43bec7b6a"
+    },
+    {
+      "file": "no_progress.py",
+      "normalized_sha256": "dcd5922934ba5b3d3d9a671ed6f1a88175c7b99636acca504c6a84a8aa9957a7"
+    },
+    {
+      "file": "observations.py",
+      "normalized_sha256": "3b14c80f6e71b477978b620a09a0e5aeb667df466277b3c60de04a671e711eec"
+    },
+    {
+      "file": "progress.py",
+      "normalized_sha256": "4ea19792ba652ea4c2fd3ee74aa416bfee95cdb4f9bc0e0b20734d8734e9dbc1"
+    },
+    {
+      "file": "repacking.py",
+      "normalized_sha256": "7aaea1d98a223fc8474fdd96f28c6e74d7d3cf6f744cf30f2758f7d71e191412"
+    },
+    {
+      "file": "repair_controller.py",
+      "normalized_sha256": "f8eee3dbbe847bdd0d9ca69d67dbb73edc3deca3dcfb2eb05fd506b4f3dd2f17"
+    },
+    {
+      "file": "repair_protocol.py",
+      "normalized_sha256": "a3d4ba5ebf4e0842f92bd198f1d43838115bb42dc3cd29992ba73708e28c9d0b"
+    },
+    {
+      "file": "request_contract.py",
+      "normalized_sha256": "3ca82419d0dcbb57844cb14a48a9a771409200c5ad443876ab5246987219c4f9"
+    },
+    {
+      "file": "static_commit.py",
+      "normalized_sha256": "a371d73530e7ad88cfe63a4042ffb32f3c747715508b84a4532a377248ec1cb4"
+    },
+    {
+      "file": "static_extensions.py",
+      "normalized_sha256": "d385f5108ff85df6afa93748d40a76f7a8e8f5dc976a8dae9dec7e9c5de992b5"
+    },
+    {
+      "file": "verified_binding.py",
+      "normalized_sha256": "1ecda543b91999b425825dfc8c3563b8eef235bb40a86b7299ac72a700f98b9c"
+    },
+    {
+      "file": "verified_controller.py",
+      "normalized_sha256": "53ed495e50c47df1db61e1afaf62d177a31d7f93f23bc160e2db5edf61789301"
+    }
+  ],
+  "source_files": {
+    "paper": [
+      {
+        "file": "benchmarks/arms.py",
+        "normalized_sha256": "ad22e6f96ae4b491ec9284b862d94770c1b9b1bf74fb905e07fd6c91d98005c3"
+      },
+      {
+        "file": "benchmarks/paper/candidate_matrix.py",
+        "normalized_sha256": "2085ff9b4a148e307dda89b4b525c1e869c4273383fef4d4ad8f0a11cbe89f3e"
+      },
+      {
+        "file": "benchmarks/paper/native_extra.py",
+        "normalized_sha256": "f3b6d0766a825b79a13f9e25785869c4ca39447f1c84a13cc31d16f7154c79b1"
+      },
+      {
+        "file": "benchmarks/paper/runner.py",
+        "normalized_sha256": "8c388c6c7a41831e062b06f4190ec69de7f3596f0443d1230d75a37148f9593e"
+      },
+      {
+        "file": "benchmarks/paper/test_candidate_arms.py",
+        "normalized_sha256": "aaefc7b6c932b73c3665b289a22045d3462b24ae3b596bbd79325ca87faf3783"
+      },
+      {
+        "file": "benchmarks/paper/test_native_extra.py",
+        "normalized_sha256": "89d92973be08a61ac50a93946dae3f64e69b46e1df1b133399ff4de2ef61a690"
+      },
+      {
+        "file": "experiments/history_system/candidate_algorithms.py",
+        "normalized_sha256": "ce62175bfc73711e1f834ba5ead883a2e23065090a5870bb958d7ad476819704"
+      },
+      {
+        "file": "experiments/history_system/run_c1.py",
+        "normalized_sha256": "1330e90b8717fe3e5d4e00306861cf9917620369fb2995ec4eba7afbb03a0acf"
+      },
+      {
+        "file": "experiments/history_system/runtime/benchmarks/memory_runtime/candidate_algorithms/__init__.py",
+        "normalized_sha256": "c9092ad911ce32e70d1e0469f98cc6fbf8ad9f398f5223c818c8431b7a83ac9b"
+      },
+      {
+        "file": "experiments/history_system/runtime/benchmarks/memory_runtime/candidate_algorithms/action_ledger.py",
+        "normalized_sha256": "24844a4313b56546f01c0df670fae7b6bfa970712b7eb43d69a598a981e4d03c"
+      },
+      {
+        "file": "experiments/history_system/runtime/benchmarks/memory_runtime/candidate_algorithms/static_commit.py",
+        "normalized_sha256": "a371d73530e7ad88cfe63a4042ffb32f3c747715508b84a4532a377248ec1cb4"
+      },
+      {
+        "file": "experiments/history_system/runtime/benchmarks/memory_runtime/candidate_algorithms/static_extensions.py",
+        "normalized_sha256": "d385f5108ff85df6afa93748d40a76f7a8e8f5dc976a8dae9dec7e9c5de992b5"
+      },
+      {
+        "file": "experiments/history_system/runtime/benchmarks/memory_runtime/event_native_controls.py",
+        "normalized_sha256": "f00748d87e629954b675a5e7b4d8d69b1c5337d547fe703f08e31460f068d481"
+      },
+      {
+        "file": "experiments/history_system/runtime/benchmarks/memory_runtime/event_native_server.py",
+        "normalized_sha256": "ec541d851a88cded135773ef86880a520834b554431bbc4e5757c27e848845e8"
+      },
+      {
+        "file": "experiments/history_system/runtime/benchmarks/memory_runtime/event_native_step.py",
+        "normalized_sha256": "17ea5cac5bcded64073e6943ec46960084212145f2bc4a365ae38479dbcd1ae3"
+      },
+      {
+        "file": "experiments/history_system/runtime/benchmarks/memory_runtime/tests/test_action_ledger.py",
+        "normalized_sha256": "7c1e281fab528630075eb7e64ef047fb4aa922ea013b56fbe458892982bd99fb"
+      },
+      {
+        "file": "experiments/history_system/runtime/benchmarks/memory_runtime/tests/test_static_extensions.py",
+        "normalized_sha256": "a4bbc8dec1805ab96b19e564fb98017fd04db2ea6aef78572d8b6719ff14e186"
+      }
+    ],
+    "npu": [
+      {
+        "file": "controller_runtime/benchmarks/memory_runtime/candidate_algorithms/__init__.py",
+        "normalized_sha256": "c9092ad911ce32e70d1e0469f98cc6fbf8ad9f398f5223c818c8431b7a83ac9b"
+      },
+      {
+        "file": "controller_runtime/benchmarks/memory_runtime/candidate_algorithms/action_ledger.py",
+        "normalized_sha256": "24844a4313b56546f01c0df670fae7b6bfa970712b7eb43d69a598a981e4d03c"
+      },
+      {
+        "file": "controller_runtime/benchmarks/memory_runtime/candidate_algorithms/static_commit.py",
+        "normalized_sha256": "a371d73530e7ad88cfe63a4042ffb32f3c747715508b84a4532a377248ec1cb4"
+      },
+      {
+        "file": "controller_runtime/benchmarks/memory_runtime/candidate_algorithms/static_extensions.py",
+        "normalized_sha256": "d385f5108ff85df6afa93748d40a76f7a8e8f5dc976a8dae9dec7e9c5de992b5"
+      },
+      {
+        "file": "controller_runtime/benchmarks/memory_runtime/event_native_controls.py",
+        "normalized_sha256": "ff5673d2525df40d2209038c19efbd40f45a1eb2a7f1a574bbfddf0bf454e3e8"
+      },
+      {
+        "file": "controller_runtime/benchmarks/memory_runtime/event_native_server.py",
+        "normalized_sha256": "8ddb1a0ae5b991ef66d89ac6eba62f24ab47aea04fff58989b568757cad8a3d2"
+      },
+      {
+        "file": "controller_runtime/benchmarks/memory_runtime/event_native_step.py",
+        "normalized_sha256": "94ba5a523fcdfbcdf61dce76e6d2d601811cf4323b431ca9af5a25da40e47bd6"
+      },
+      {
+        "file": "controller_runtime/benchmarks/memory_runtime/tests/test_action_ledger.py",
+        "normalized_sha256": "7c1e281fab528630075eb7e64ef047fb4aa922ea013b56fbe458892982bd99fb"
+      },
+      {
+        "file": "controller_runtime/benchmarks/memory_runtime/tests/test_static_extensions.py",
+        "normalized_sha256": "a4bbc8dec1805ab96b19e564fb98017fd04db2ea6aef78572d8b6719ff14e186"
+      },
+      {
+        "file": "generality/c2kv_cell.py",
+        "normalized_sha256": "10ec0b5831d6e41a3d0e2ff45d4a3219be3af5c6ab77cbf7c90573475a749532"
+      },
+      {
+        "file": "generality/candidate_cell.py",
+        "normalized_sha256": "84e3b9046386e17875fb01c9a01b3791473a7ee957223762d260949bcf019559"
+      },
+      {
+        "file": "tests/test_c2kv_candidate_cell.py",
+        "normalized_sha256": "e629220ef1cd35ec1fe0e421521cb52c945a683e1da7791f03d14c0a80c4485d"
+      }
+    ]
+  },
+  "CPU_checks": [
+    {
+      "checkout": "paper",
+      "root": "benchmarks/paper",
+      "files": [
+        "test_candidate_arms.py",
+        "test_native_extra.py",
+        "test_native_history_budget.py"
+      ],
+      "passed": 168,
+      "failed": 0
+    },
+    {
+      "checkout": "paper",
+      "root": "experiments/history_system/runtime/benchmarks/memory_runtime/tests",
+      "files": [
+        "test_candidate_allocation.py",
+        "test_candidate_recovery.py",
+        "test_goal_composition.py",
+        "test_verified_binding.py",
+        "test_verified_controller.py",
+        "test_initial_view_composition.py",
+        "test_event_native_server.py"
+      ],
+      "passed": 94,
+      "skipped": 1,
+      "failed": 0,
+      "skip_reason": "POSIX process groups unavailable on Windows"
+    },
+    {
+      "checkout": "paper",
+      "root": "experiments/history_system/runtime/benchmarks/memory_runtime/tests",
+      "files": [
+        "test_action_ledger.py",
+        "test_static_extensions.py"
+      ],
+      "passed": 36,
+      "failed": 0
+    },
+    {
+      "checkout": "npu",
+      "root": "tests",
+      "files": [
+        "test_c2kv_candidate_cell.py"
+      ],
+      "passed": 141,
+      "failed": 0
+    },
+    {
+      "checkout": "npu",
+      "root": "controller_runtime/benchmarks/memory_runtime/tests",
+      "files": [
+        "test_action_ledger.py",
+        "test_static_extensions.py",
+        "test_verified_controller.py",
+        "test_initial_view_composition.py"
+      ],
+      "passed": 68,
+      "failed": 0
+    }
+  ],
+  "review": {
+    "integration": "Independent read-only review found no blocking issue",
+    "policy_fixes": [
+      "Complete authorization grammar for missing actions",
+      "Actual BFCL schema and typed success receipts",
+      "Conflicting success and later cancellation protection",
+      "Explicit repeat and recipient-name versus ID protection"
+    ]
+  },
+  "hardware": {
+    "CUDA_executed": false,
+    "NPU_executed": false,
+    "full_evaluations_started": 0
+  },
+  "running_experiments": "No source replacement, restart or resource mutation",
+  "quality_claim": "Implementation and CPU functional validation only; no new benchmark result"
+}
