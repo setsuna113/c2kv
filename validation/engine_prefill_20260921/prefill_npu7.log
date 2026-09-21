@@ -1,0 +1,9 @@
+/home/liuyancheng/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/liuyancheng/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0/aarch64-linux/ascend_ops_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/liuyancheng/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/liuyancheng/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0/aarch64-linux/ascend_ops_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+{"device": "npu:0", "dtype": "torch.bfloat16", "long_prefill": {"duration_s": 0.029258068650960922, "first_sdpa_call": {"k_batch_stride": 0, "k_shape": [4, 1, 32896, 128], "mask_batch_stride": 0, "mask_shape": [4, 1, 15, 32896], "q_shape": [4, 1, 15, 128], "v_batch_stride": 0, "v_shape": [4, 1, 32896, 128]}, "history_len": 32768, "kv_heads": 8, "normal_len": 128, "peak_allocated_delta_bytes": 110978560, "q_heads": 32, "q_len": 64, "sdpa_calls": 40}, "q_gt_one_headwise": {"kv_heads": 2, "max_abs_error_vs_cpu_float32": 0.004255056381225586, "mean_abs_error_vs_cpu_float32": 0.0006124208448454738, "q_heads": 8, "q_len": 5}}

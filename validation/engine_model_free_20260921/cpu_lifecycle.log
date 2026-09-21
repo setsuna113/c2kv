@@ -1,0 +1,20 @@
+........................................................................ [ 78%]
+....................                                                     [100%]
+=============================== warnings summary ===============================
+../../../envs/c2kv/lib/python3.11/site-packages/_pytest/config/__init__.py:1464
+  /home/liuyancheng/envs/c2kv/lib/python3.11/site-packages/_pytest/config/__init__.py:1464: PytestConfigWarning: Unknown config option: asyncio_mode
+  
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+../../../envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58
+../../../envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58
+  /home/liuyancheng/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0 owner does not match the current owner.
+    warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+
+../../../envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58
+../../../envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58
+  /home/liuyancheng/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0/aarch64-linux/ascend_ops_install.info owner does not match the current owner.
+    warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+92 passed, 5 warnings in 22.28s

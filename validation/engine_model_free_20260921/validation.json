@@ -1,0 +1,70 @@
+{
+  "scope": "Model-free NPU validation of the shared engine blocker repair; no model, server, or benchmark harness was launched",
+  "host": "npu (ascend03)",
+  "connection": "Windows ssh npu via ProxyJump lyc2; BatchMode=yes, ConnectTimeout=10, IdentityFile=C:\\Users\\yl998\\.ssh\\id_ed25519_lyc2",
+  "source": {
+    "validated_commit": "258b1ee00a46183f2ac5c5fbd750c4196ffbc2c4",
+    "contains_fix_commit": "ecb9c3970",
+    "remote_isolated_checkout": "/home/liuyancheng/c2kv-generality-20260918/validation/engine-blocker-repair-258b1ee00-npu7",
+    "snapshot_method": "git clone --shared from the old remote engine source, then fetch a local git bundle and checkout 258b1ee00 detached in the isolated validation directory",
+    "unchanged_running_source": "/home/liuyancheng/c2kv-generality-20260918/src/sglang-commitkv-e87afd73a at e87afd73a112de28ae2d0aa3e3df61daf6c86df2",
+    "tracked_diff_in_isolated_checkout": "empty",
+    "sha256_in_remote_checkout": {
+      "python/sglang/srt/mem_cache/history_kv_reference.py": "2b361fe3b26a0224900243c9eb4587786bb52da1944b29191a84b4af4f798a33",
+      "python/sglang/srt/models/qwen3.py": "36cad3354aa262e2631ec3f46b5d470073208492138e8ee14fd7144047d40c76",
+      "benchmark/bench_reference_history.py": "03a5559cba2597b63080976f1aec3abd2860da8346f969b83107c2b98ce69075",
+      "test/registered/unit/test_persistent_history_lifecycle.py": "f9caf5f226a564367f98b4c927fd9a9fb30276f4f592fb853a36a04e920f4143",
+      "scripts/c2kv/check_npu_c2kv_attention.py": "7a63dc463d9a8649a645cccd89ae7363cf6bcbb4158aed3be518269216098c5a"
+    }
+  },
+  "environment": {
+    "cann_setup": "source /usr/local/Ascend/cann-8.5.0/set_env.sh",
+    "python": "/home/liuyancheng/envs/c2kv/bin/python",
+    "torch": "2.9.0+cpu",
+    "torch_npu": "2.9.0rc1",
+    "pytest": "9.1.1",
+    "npu_smi": "25.5.0",
+    "visible_device": "ASCEND_RT_VISIBLE_DEVICES=7",
+    "device_state": "NPU 7 had no running processes immediately before the device checks; after the checks npu-smi showed 0% memory usage rate and 0% AICore usage. Cards 0-6 were not used."
+  },
+  "command_context": "Run on npu in the isolated remote checkout after sourcing CANN; both device commands used timeout 180s and ASCEND_RT_VISIBLE_DEVICES=7.",
+  "checks": [
+    {
+      "command": "/home/liuyancheng/envs/c2kv/bin/python -m pytest -q test/registered/unit/test_persistent_history_lifecycle.py > cpu_lifecycle.log 2>&1",
+      "exit_code": 0,
+      "result": "92 passed, 5 warnings in 22.28s",
+      "artifact": "cpu_lifecycle.log",
+      "device_use": "CPU only; includes the long-history scoring regression introduced with ecb9c3970"
+    },
+    {
+      "command": "timeout 180s env ASCEND_RT_VISIBLE_DEVICES=7 /home/liuyancheng/envs/c2kv/bin/python benchmark/bench_reference_history.py --device npu --history 4470 --iters 16 > reference_npu7.log 2>&1",
+      "exit_code": 0,
+      "result": {
+        "masked_vs_decode_causal_max_abs_error": 0.0,
+        "masked_ms_per_decode_layer": 0.3610157873481512,
+        "decode_causal_ms_per_decode_layer": 0.2545176539570093,
+        "history": 4470,
+        "iters": 16
+      },
+      "artifact": "reference_npu7.log"
+    },
+    {
+      "command": "timeout 180s env ASCEND_RT_VISIBLE_DEVICES=7 /home/liuyancheng/envs/c2kv/bin/python scripts/c2kv/check_npu_c2kv_attention.py --device npu:0 --seq-len 512 --ratio 16 > c2kv_attention_npu7.log 2>&1",
+      "exit_code": 0,
+      "result": {
+        "dense_self_check_max_abs_error": 0.0,
+        "npu_prompt_flash_attention_max_abs_error": 0.015625,
+        "npu_prompt_flash_attention_mean_abs_error": 0.000226335,
+        "npu_fusion_attention_max_abs_error": 0.015625,
+        "npu_fusion_attention_mean_abs_error": 0.0002266
+      },
+      "artifact": "c2kv_attention_npu7.log",
+      "interpretation": "Both Ascend attention kernels returned outputs compared with the dense BF16 reference; the script reports errors but does not enforce a tolerance."
+    }
+  ],
+  "limitations": [
+    "This is a model-free compatibility and parity check, not a closed-loop or model-loading evaluation.",
+    "torch_npu emitted CANN directory owner mismatch warnings; imports and checks completed.",
+    "The local Windows working tree uses CRLF for some files, so SHA256 values above describe the tested remote LF checkout. The validated Git commit identifies the canonical tracked source."
+  ]
+}

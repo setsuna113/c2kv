@@ -1,0 +1,12 @@
+/home/liuyancheng/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/liuyancheng/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0/aarch64-linux/ascend_ops_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/liuyancheng/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0 owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+/home/liuyancheng/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0/aarch64-linux/ascend_ops_install.info owner does not match the current owner.
+  warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+shape: q=(1, 32, 544, 128), k=(1, 8, 544, 128), mask=(1, 1, 544, 544), keep=132864
+dense_self_check: max_abs_error=0, mean_abs_error=0, cosine_similarity=1.00012898
+npu_prompt_flash_attention: max_abs_error=0.015625, mean_abs_error=0.000226335, cosine_similarity=1.00012577
+npu_fusion_attention: max_abs_error=0.015625, mean_abs_error=0.0002266, cosine_similarity=1.00012565

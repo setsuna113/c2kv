@@ -1,0 +1,70 @@
+{
+  "scope": "Model-free NPU validation of KV-head-grouped reference prefill in engine commit 9b6a6fa1c",
+  "host": "npu (ascend03)",
+  "validated_commit": "9b6a6fa1c01e4e2807d5d0bb4094f5e1a86504fa",
+  "base_commit": "258b1ee00a46183f2ac5c5fbd750c4196ffbc2c4",
+  "remote_isolated_checkout": "/home/liuyancheng/c2kv-generality-20260918/validation/engine-prefill-9b6a6fa1c-npu7",
+  "snapshot_method": "git clone --shared from the prior isolated 258b1ee00 validation checkout; fetch local git bundle and checkout 9b6a6fa1c detached. Tracked diff remained empty.",
+  "source_sha256_in_remote_checkout": {
+    "python/sglang/srt/mem_cache/history_kv_reference.py": "b728f934b1297870750372f47fc600f94037f7489d613016324a7012f8b87743",
+    "test/registered/unit/test_reference_history_regressions.py": "456fd4715cc42398af8dffd738675954e83e38d6260542238d1e0635169603da",
+    "cpu_bootstrap.py": "badd73eecd9335bcd68107bff01355daaca8b288ce37589fcf5c36f428d62e5d",
+    "prefill_probe.py": "401de6452d73b55ba6fff452e374972c15c2c970661a58157e45aebbe8f2fc6a"
+  },
+  "environment": {
+    "cann_setup": "source /usr/local/Ascend/cann-8.5.0/set_env.sh",
+    "python": "/home/liuyancheng/envs/c2kv/bin/python",
+    "torch": "2.9.0+cpu",
+    "torch_npu": "2.9.0rc1",
+    "physical_device": 7,
+    "visible_device_setting": "ASCEND_RT_VISIBLE_DEVICES=7",
+    "device_state": "NPU 7 showed 0% memory usage rate and 0% AICore usage immediately before and after the probe."
+  },
+  "checks": [
+    {
+      "command": "source /usr/local/Ascend/cann-8.5.0/set_env.sh && cd /home/liuyancheng/c2kv-generality-20260918/validation/engine-prefill-9b6a6fa1c-npu7 && timeout 120s /home/liuyancheng/envs/c2kv/bin/python -m pytest -q test/registered/unit/test_reference_history_regressions.py test/registered/unit/test_history_kv_reference.py > cpu_prefill.log 2>&1",
+      "exit_code": 1,
+      "result": "Collection failed before tests: the shared c2kv environment lacks pybase64, imported by SGLang's top-level package.",
+      "artifact": "cpu_prefill.log"
+    },
+    {
+      "command": "source /usr/local/Ascend/cann-8.5.0/set_env.sh && cd /home/liuyancheng/c2kv-generality-20260918/validation/engine-prefill-9b6a6fa1c-npu7 && timeout 120s /home/liuyancheng/envs/c2kv/bin/python cpu_bootstrap.py > cpu_prefill_bootstrap.log 2>&1",
+      "exit_code": 0,
+      "result": "11 passed, 5 warnings in 7.73s",
+      "artifact": "cpu_prefill_bootstrap.log",
+      "bootstrap_scope": "Runs those same two original test files after registering only the sglang.srt.mem_cache package paths, avoiding unrelated top-level SGLang imports. No source or tests were edited."
+    },
+    {
+      "command": "source /usr/local/Ascend/cann-8.5.0/set_env.sh && cd /home/liuyancheng/c2kv-generality-20260918/validation/engine-prefill-9b6a6fa1c-npu7 && timeout 180s env ASCEND_RT_VISIBLE_DEVICES=7 /home/liuyancheng/envs/c2kv/bin/python prefill_probe.py > prefill_npu7.log 2>&1",
+      "exit_code": 0,
+      "artifact": "prefill_npu7.log",
+      "q_gt_one_headwise": {
+        "q_len": 5,
+        "q_heads": 8,
+        "kv_heads": 2,
+        "comparison": "Independent per-query-head CPU float32 masked attention with different canonical positions for each KV head",
+        "max_abs_error": 0.004255056381225586,
+        "mean_abs_error": 0.0006124208448454738
+      },
+      "long_prefill": {
+        "history_len": 32768,
+        "normal_len": 128,
+        "q_len": 64,
+        "q_heads": 32,
+        "kv_heads": 8,
+        "sdpa_calls": 40,
+        "first_query_shape": [4, 1, 15, 128],
+        "first_key_shape": [4, 1, 32896, 128],
+        "first_mask_shape": [4, 1, 15, 32896],
+        "key_value_mask_group_strides": [0, 0, 0],
+        "peak_allocated_delta_bytes": 110978560,
+        "duration_s": 0.029258068650960922
+      }
+    }
+  ],
+  "limits": [
+    "The probe uses synthetic tensors and does not load a model or run a benchmark episode.",
+    "The timing is a single model-free probe, not a performance claim.",
+    "torch_npu emitted CANN owner mismatch warnings; tests and NPU probe completed."
+  ]
+}

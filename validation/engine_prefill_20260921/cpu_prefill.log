@@ -1,0 +1,64 @@
+
+==================================== ERRORS ====================================
+____ ERROR collecting registered/unit/test_reference_history_regressions.py ____
+ImportError while importing test module '/home/liuyancheng/c2kv-generality-20260918/validation/engine-prefill-9b6a6fa1c-npu7/test/registered/unit/test_reference_history_regressions.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+../../../envs/c2kv/lib/python3.11/importlib/__init__.py:126: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+test/registered/unit/test_reference_history_regressions.py:14: in <module>
+    from sglang.srt.mem_cache.history_kv_reference import (  # noqa: E402
+python/sglang/__init__.py:29: in <module>
+    from sglang.lang.api import (
+python/sglang/lang/api.py:7: in <module>
+    from sglang.lang.backend.base_backend import BaseBackend
+python/sglang/lang/backend/base_backend.py:5: in <module>
+    from sglang.lang.interpreter import StreamExecutor
+python/sglang/lang/interpreter.py:35: in <module>
+    from sglang.utils import (
+python/sglang/utils.py:24: in <module>
+    import pybase64
+E   ModuleNotFoundError: No module named 'pybase64'
+________ ERROR collecting registered/unit/test_history_kv_reference.py _________
+ImportError while importing test module '/home/liuyancheng/c2kv-generality-20260918/validation/engine-prefill-9b6a6fa1c-npu7/test/registered/unit/test_history_kv_reference.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+../../../envs/c2kv/lib/python3.11/importlib/__init__.py:126: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+test/registered/unit/test_history_kv_reference.py:10: in <module>
+    from sglang.srt.mem_cache.history_kv_reference import (  # noqa: E402
+python/sglang/__init__.py:29: in <module>
+    from sglang.lang.api import (
+python/sglang/lang/api.py:7: in <module>
+    from sglang.lang.backend.base_backend import BaseBackend
+python/sglang/lang/backend/base_backend.py:5: in <module>
+    from sglang.lang.interpreter import StreamExecutor
+python/sglang/lang/interpreter.py:35: in <module>
+    from sglang.utils import (
+python/sglang/utils.py:24: in <module>
+    import pybase64
+E   ModuleNotFoundError: No module named 'pybase64'
+=============================== warnings summary ===============================
+../../../envs/c2kv/lib/python3.11/site-packages/_pytest/config/__init__.py:1464
+  /home/liuyancheng/envs/c2kv/lib/python3.11/site-packages/_pytest/config/__init__.py:1464: PytestConfigWarning: Unknown config option: asyncio_mode
+  
+    self._warn_or_fail_if_strict(f"Unknown config option: {key}\n")
+
+../../../envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58
+../../../envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58
+  /home/liuyancheng/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0 owner does not match the current owner.
+    warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+
+../../../envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58
+../../../envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58
+  /home/liuyancheng/envs/c2kv/lib/python3.11/site-packages/torch_npu/utils/collect_env.py:58: UserWarning: Warning: The /usr/local/Ascend/cann-8.5.0/aarch64-linux/ascend_ops_install.info owner does not match the current owner.
+    warnings.warn(f"Warning: The {path} owner does not match the current owner.")
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+ERROR test/registered/unit/test_reference_history_regressions.py
+ERROR test/registered/unit/test_history_kv_reference.py
+!!!!!!!!!!!!!!!!!!! Interrupted: 2 errors during collection !!!!!!!!!!!!!!!!!!!!
+5 warnings, 2 errors in 10.26s
