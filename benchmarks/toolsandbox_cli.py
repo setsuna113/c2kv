@@ -136,6 +136,13 @@ def install_instrumentation(telemetry, scenario_class, completions_class,
     execution_module.respond_to_messages_set_all_order_permutations = measured_execute
 
 
+def role_client_kwargs(url: str, *, agent: bool) -> dict:
+    kwargs = {"api_key": "EMPTY", "base_url": url, "timeout": 600.0}
+    if agent:
+        kwargs["max_retries"] = 0
+    return kwargs
+
+
 def main() -> None:
     from openai import OpenAI
     from openai.resources.chat.completions import Completions
@@ -146,18 +153,18 @@ def main() -> None:
     from tool_sandbox.roles import execution_environment
     from tool_sandbox.tools import rapid_api_search_tools
 
-    def route_role(role, url, model):
+    def route_role(role, url, model, *, agent=False):
         original = role.__init__
 
         def routed(self):
             original(self)
             self.model_name = model
-            self.openai_client = OpenAI(api_key="EMPTY", base_url=url, timeout=600.0)
+            self.openai_client = OpenAI(**role_client_kwargs(url, agent=agent))
 
         role.__init__ = routed
 
     route_role(OpenAIAPIAgent, os.environ["OPENAI_BASE_URL"],
-               os.environ["C2KV_TOOLSANDBOX_MODEL"])
+               os.environ["C2KV_TOOLSANDBOX_MODEL"], agent=True)
     route_role(OpenAIAPIUser, os.environ["TOOLSANDBOX_USER_BASE_URL"],
                os.environ.get("C2KV_TOOLSANDBOX_USER_MODEL",
                               os.environ["C2KV_TOOLSANDBOX_MODEL"]))

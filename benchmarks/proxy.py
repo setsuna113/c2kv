@@ -234,13 +234,19 @@ class UpstreamError(RuntimeError):
 
 def _post_json(path: str, payload: Dict[str, Any],
                timeout: int, retries: int = 2) -> Any:
-    """POST JSON to UPSTREAM, retrying 5xx/network failures with backoff.
+    """POST JSON with bounded retries except for session generation.
 
     4xx (except 429) are deterministic client errors and are not retried.
+    A session generation can commit KV before its response is lost. Without
+    server-side idempotency, replaying that request would append the old
+    prefix to an advanced session. Surface its first failure to the owner.
     The final failure raises UpstreamError with the upstream body.  Note
     the SGLang stack reports many failures as HTTP 200 with error bodies —
     those are classified by the backend (BackendError), not here.
     """
+    session = payload.get("session_params")
+    if isinstance(session, dict) and session.get("id"):
+        retries = 0
     body = json.dumps(payload).encode("utf-8")
     last: Optional[UpstreamError] = None
     for attempt in range(retries + 1):

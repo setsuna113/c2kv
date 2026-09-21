@@ -693,7 +693,7 @@ def run(ctx: RunContext) -> Dict[str, Any]:
         gold_recovery = get_arm(ctx.arm).gold_recovery
         num_threads = int(ctx.opt("num_workers", 1))
         oracle_max_events = int(ctx.opt("bfcl_oracle_max_events", 1))
-        no_upstream_retries = ctx.opt("no_upstream_retries", False)
+        no_upstream_retries = ctx.opt("no_upstream_retries", True)
         if not isinstance(no_upstream_retries, bool):
             raise ValueError("no_upstream_retries must be a bool")
         task_audit_path = (

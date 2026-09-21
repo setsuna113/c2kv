@@ -61,6 +61,11 @@ def _proxy_request_id(response: Any) -> Optional[str]:
     return str(response_id) if response_id else None
 
 
+def disable_sdk_retries(resource: Any) -> None:
+    """Make a stateful agent request a single SDK transport attempt."""
+    resource._client.max_retries = 0
+
+
 def _close_episode(instance: Any, exc_info=(None, None, None)) -> None:
     context = getattr(instance, "_c2kv_episode_context", None)
     if context is None:
@@ -98,6 +103,9 @@ def install() -> bool:
             episode = current_episode()
             tool_context = os.environ.get(TOOL_CONTEXT_ENV) == "1"
             record_source = os.environ.get(RECORD_SOURCE_ENV) == "1"
+            if episode is not None:
+                # A lost reply may follow a committed stateful generation.
+                disable_sdk_retries(self)
             if episode is not None or tool_context or record_source:
                 extra_body = dict(kwargs.get("extra_body") or {})
                 if episode is not None:
