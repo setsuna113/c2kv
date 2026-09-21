@@ -1,0 +1,318 @@
+{
+  "schema": "c2kv-initial-view-composition-validation-v1",
+  "recorded_at": "2026-09-21T00:14:03.931017+00:00",
+  "status": "implementation_and_targeted_CPU_checks_passed_CUDA_pending_resource",
+  "variants": {
+    "goal_static": "goal_rescue",
+    "pending_static": "goal_pending"
+  },
+  "arms": [
+    "c2kv_goal_static_r8",
+    "c2kv_pending_static_r8"
+  ],
+  "protocol": "c2kv-initial-view-composition-v1",
+  "initial_view": {
+    "policy": "static_gist",
+    "version": "c2kv-static-initial-view-v1"
+  },
+  "contracts": {
+    "allocator": "Existing Static-T02 allocator selected through an explicit initial-view factory",
+    "recovery": "Delegate existing Goal/Pending controllers including Pending final commit handling",
+    "ratio": 8,
+    "risk_threshold": 0.5,
+    "risk_artifact": "frozen T02",
+    "budget": "B0 and existing per-task generation cap",
+    "regeneration_limit": "At most one per decision",
+    "identity": "Separate profile/cell/controller hashes and ready-manifest checks",
+    "default_all": "Existing eleven variants; both new variants require explicit opt-in",
+    "behavior_scope": "Same recovery code, but changed initial views can change drafts and later trajectories"
+  },
+  "source_revisions": {
+    "paper_implementation": "58b4ef1d12bf9afe6affb94cae5f68fc64db5aed",
+    "paper_integrated_source": "783526b9bbbccd6c89b7f07d4c2f24d768d82995",
+    "npu_implementation": "8e1f2e9786cd364272099399bcfdfaa88c0d0a2a",
+    "npu_integrated_source": "70a1cdf154c5e1db550b5175eb092709473c281a",
+    "engine_staged": "ecb9c3970eec7c79f8831def4d6aed3494c4d371",
+    "engine_changed_by_this_task": false
+  },
+  "legacy_profile_and_controller_parity": {
+    "base": "0ecbb44",
+    "legacy_variants": [
+      {
+        "variant": "static_t02",
+        "controller_and_profile_identical": true
+      },
+      {
+        "variant": "turn_c1",
+        "controller_and_profile_identical": true
+      },
+      {
+        "variant": "goal_rescue",
+        "controller_and_profile_identical": true
+      },
+      {
+        "variant": "dependency_first",
+        "controller_and_profile_identical": true
+      },
+      {
+        "variant": "request_contract",
+        "controller_and_profile_identical": true
+      },
+      {
+        "variant": "argument_binding",
+        "controller_and_profile_identical": true
+      },
+      {
+        "variant": "no_progress",
+        "controller_and_profile_identical": true
+      },
+      {
+        "variant": "goal_pending",
+        "controller_and_profile_identical": true
+      },
+      {
+        "variant": "goal_source",
+        "controller_and_profile_identical": true
+      },
+      {
+        "variant": "goal_progress",
+        "controller_and_profile_identical": true
+      },
+      {
+        "variant": "goal_joint",
+        "controller_and_profile_identical": true
+      },
+      {
+        "variant": "goal_verified",
+        "controller_and_profile_identical": true
+      },
+      {
+        "variant": "pending_verified",
+        "controller_and_profile_identical": true
+      }
+    ],
+    "status": "passed"
+  },
+  "shared_algorithm_parity": {
+    "status": "passed",
+    "modules": [
+      {
+        "file": "__init__.py",
+        "normalized_sha256": "e87f57c26d96589f7822747733ba4f0672c0a486c18a5a10ce293c8b06b02eb2"
+      },
+      {
+        "file": "allocation.py",
+        "normalized_sha256": "ad75a90812111b77459d18d34ea9d2cb248cc95d8bca687277dd514e434c6c8c"
+      },
+      {
+        "file": "argument_binding.py",
+        "normalized_sha256": "597c2923822980f336ce41da3986bffc69b345dda14eb1f1921c7c410ff8b07f"
+      },
+      {
+        "file": "controller.py",
+        "normalized_sha256": "92a0e4fb4ecc8d4d6d83dd8d301b39f2446090cb2ee3150fd5fb2abff6c767a1"
+      },
+      {
+        "file": "dependencies.py",
+        "normalized_sha256": "6ffef4e7f58f9b45a3062777f4235888781b2316e545b4a4c7a19ca5ff9b9520"
+      },
+      {
+        "file": "goal_commit.py",
+        "normalized_sha256": "9f46b4b69d6988e76298049ec607392be4b2180d9959faec80baef0940979edd"
+      },
+      {
+        "file": "goal_controller.py",
+        "normalized_sha256": "06f69ddbb885ae6ea46426b2a1a7c115420e346d2c3d6fe766c0645bfedef143"
+      },
+      {
+        "file": "goal_pending.py",
+        "normalized_sha256": "9af106f50b855b54421050a60927914ae9b15805228c87e115fd5fa84df7d26c"
+      },
+      {
+        "file": "goal_progress.py",
+        "normalized_sha256": "7fa0d94fdd181013c66d9573a9e26ffa01710d9cf8c7c343598fb579d346d06b"
+      },
+      {
+        "file": "goal_protocol.py",
+        "normalized_sha256": "359a58f922c9bef9fc6c68b813bea22ea27bb8db970ecf13f5474f3da336d5ea"
+      },
+      {
+        "file": "goal_source.py",
+        "normalized_sha256": "7665e0402d883fcab09e255943bcee3688aaa1b7c3f0fdfc52517669e15947cb"
+      },
+      {
+        "file": "initial_view.py",
+        "normalized_sha256": "b71bef6aaad393cdd052e35089cf37eb0792ed1a96b72f22823b48e64fa682e9"
+      },
+      {
+        "file": "no_progress.py",
+        "normalized_sha256": "dcd5922934ba5b3d3d9a671ed6f1a88175c7b99636acca504c6a84a8aa9957a7"
+      },
+      {
+        "file": "observations.py",
+        "normalized_sha256": "3b14c80f6e71b477978b620a09a0e5aeb667df466277b3c60de04a671e711eec"
+      },
+      {
+        "file": "progress.py",
+        "normalized_sha256": "4ea19792ba652ea4c2fd3ee74aa416bfee95cdb4f9bc0e0b20734d8734e9dbc1"
+      },
+      {
+        "file": "repacking.py",
+        "normalized_sha256": "7aaea1d98a223fc8474fdd96f28c6e74d7d3cf6f744cf30f2758f7d71e191412"
+      },
+      {
+        "file": "repair_controller.py",
+        "normalized_sha256": "f8eee3dbbe847bdd0d9ca69d67dbb73edc3deca3dcfb2eb05fd506b4f3dd2f17"
+      },
+      {
+        "file": "repair_protocol.py",
+        "normalized_sha256": "a3d4ba5ebf4e0842f92bd198f1d43838115bb42dc3cd29992ba73708e28c9d0b"
+      },
+      {
+        "file": "request_contract.py",
+        "normalized_sha256": "3ca82419d0dcbb57844cb14a48a9a771409200c5ad443876ab5246987219c4f9"
+      },
+      {
+        "file": "verified_binding.py",
+        "normalized_sha256": "1ecda543b91999b425825dfc8c3563b8eef235bb40a86b7299ac72a700f98b9c"
+      },
+      {
+        "file": "verified_controller.py",
+        "normalized_sha256": "53ed495e50c47df1db61e1afaf62d177a31d7f93f23bc160e2db5edf61789301"
+      }
+    ]
+  },
+  "CPU_checks": [
+    {
+      "checkout": "paper",
+      "files": [
+        "benchmarks/paper/test_candidate_arms.py",
+        "benchmarks/paper/test_native_extra.py",
+        "benchmarks/paper/test_native_history_budget.py",
+        "benchmarks/paper/test_c1.py",
+        "benchmarks/paper/test_d3_hybrid_config.py",
+        "benchmarks/paper/test_native_bare.py",
+        "benchmarks/paper/test_task_subsets.py",
+        "benchmarks/paper/test_runner.py"
+      ],
+      "passed": 193,
+      "subtests_passed": 17,
+      "failed": 0
+    },
+    {
+      "checkout": "paper",
+      "files": [
+        "experiments/history_system/runtime/benchmarks/memory_runtime/tests/test_initial_view_composition.py",
+        "experiments/history_system/runtime/benchmarks/memory_runtime/tests/test_candidate_allocation.py",
+        "experiments/history_system/runtime/benchmarks/memory_runtime/tests/test_candidate_recovery.py",
+        "experiments/history_system/runtime/benchmarks/memory_runtime/tests/test_goal_composition.py",
+        "experiments/history_system/runtime/benchmarks/memory_runtime/tests/test_verified_controller.py",
+        "experiments/history_system/runtime/benchmarks/memory_runtime/tests/test_event_native_server.py",
+        "experiments/history_system/runtime/benchmarks/memory_runtime/tests/test_event_native_tool_prologue.py"
+      ],
+      "passed": 75,
+      "skipped": 1,
+      "failed": 0,
+      "skip_reason": "requires POSIX process groups"
+    },
+    {
+      "checkout": "npu",
+      "files": [
+        "tests/test_c2kv_candidate_cell.py",
+        "tests/test_c2kv_calibration_plan.py",
+        "tests/test_calibration_controller.py",
+        "tests/test_calibration_bfcl_site.py"
+      ],
+      "passed": 75,
+      "failed": 0
+    },
+    {
+      "checkout": "npu",
+      "files": [
+        "controller_runtime/benchmarks/memory_runtime/tests/test_initial_view_composition.py",
+        "controller_runtime/benchmarks/memory_runtime/tests/test_candidate_allocation.py",
+        "controller_runtime/benchmarks/memory_runtime/tests/test_candidate_recovery.py",
+        "controller_runtime/benchmarks/memory_runtime/tests/test_goal_composition.py",
+        "controller_runtime/benchmarks/memory_runtime/tests/test_verified_controller.py",
+        "controller_runtime/benchmarks/memory_runtime/tests/test_event_native_server.py",
+        "controller_runtime/benchmarks/memory_runtime/tests/test_event_native_tool_prologue.py"
+      ],
+      "passed": 71,
+      "skipped": 1,
+      "failed": 0,
+      "skip_reason": "requires POSIX process groups"
+    }
+  ],
+  "test_execution": "python -m pytest <listed files> -q -rs; overlapping runs are not added together",
+  "additional_known_failure": {
+    "base": "bbe2b13",
+    "test": "tests/test_c2kv_bfcl_resume.py::test_driver_and_bundled_bfcl_completion_contracts_match",
+    "files": [
+      {
+        "path": "generality/bfcl_completion.py",
+        "unchanged_from_base": true,
+        "sha256": "8ac9848987b6ebb09382b99ea6c1637b35b5cc5dd5545f5b5905d4a0e018ab02"
+      },
+      {
+        "path": "controller_runtime/benchmarks/bfcl_completion.py",
+        "unchanged_from_base": true,
+        "sha256": "41ce2410872338b8ddf24542432b3d25a078ccebdb33248e4fd0e104860ca254"
+      }
+    ],
+    "status": "preexisting_unmodified_failure_not_hidden_or_fixed_here",
+    "cause": "Driver and bundled BFCL completion failure classifications already differ",
+    "broader_run": {
+      "passed": 89,
+      "failed": 1
+    }
+  },
+  "review": {
+    "independent_review": "passed after frozen-config regression fix",
+    "fixed": "Filter S0 configuration to accepted defaults before Static allocator construction",
+    "coverage": [
+      "Real frozen controller config",
+      "Static first-view parity",
+      "B0 and raw/gist exclusivity",
+      "Goal STOP recovery",
+      "Pending review and final commit delegation",
+      "cached decision identity",
+      "legacy profile/controller parity",
+      "profile/manifest mismatch rejection"
+    ]
+  },
+  "CUDA": {
+    "status": "not_run_no_free_owned_device",
+    "engine_started": false,
+    "model_generations": 0,
+    "resource_check": "m1: all four cards occupied by production workers; m2: all four cards occupied",
+    "launch_guard": "Refused launch while GPU0 occupied; no owned engine or benchmark process created",
+    "staged_sources": {
+      "paper": {
+        "revision": "783526b9bbbccd6c89b7f07d4c2f24d768d82995",
+        "path": "/workspace/validation/goal-static-view-20260921/paper-783526b9bbbc"
+      },
+      "engine": {
+        "revision": "ecb9c3970eec7c79f8831def4d6aed3494c4d371",
+        "path": "/workspace/validation/goal-static-view-20260921/engine-ecb9c3970eec"
+      }
+    },
+    "bounded_plan": {
+      "benchmark": "bfcl_base",
+      "task_ids": [
+        "multi_turn_base_26"
+      ],
+      "arms": [
+        "c2kv_goal_static_r8",
+        "c2kv_pending_static_r8"
+      ],
+      "full_run": false
+    },
+    "prepared_driver": "scratchpad/initial_view_impl_20260921/cuda_smoke.py",
+    "prepared_driver_sha256": "5a4b408840d4da9d4f8bd517652a64a376c43b18019f70f577afbf21efb21d2f"
+  },
+  "NPU_hardware": {
+    "executed": false
+  },
+  "quality_claim": "No new benchmark score or quality improvement claimed",
+  "running_experiments": "Preserved; isolated source checkouts, no job restarts or source replacement"
+}
