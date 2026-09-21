@@ -51,7 +51,7 @@ def test_hiagent_and_acon_overlays_have_distinct_cells_and_server_modes(tmp_path
     for arm_name, policy in (("acon_hist_ut_co_b768", "acon_hist_ut_co"),
                              ("hiagent_full_b512", "hiagent_full")):
         rows = [row for row in plan if row["arm"] == arm_name]
-        assert {row["benchmark"] for row in rows} == {"bfcl_base", "bfcl_long_context", "acebench_agent", "appworld", "tau2"}
+        assert {row["benchmark"] for row in rows} == {"bfcl_base", "bfcl_long_context", "acebench_agent", "appworld", "tau2", "toolsandbox"}
         assert all(row["cell_id"].endswith("__" + arm_name) for row in rows)
         assert all(row["history_budget_tokens"] == get_arm(arm_name).text_history_budget_tokens
                    for row in rows)
@@ -80,18 +80,31 @@ def test_hiagent_and_acon_overlays_have_distinct_cells_and_server_modes(tmp_path
     assert "history_budget_tokens" in (profile.parent / "matrix.csv").read_text().splitlines()[0]
 
 
-def test_budget_overlays_accept_ace_agent_without_bfcl():
+@pytest.mark.parametrize("benchmark", ["acebench_agent", "toolsandbox"])
+def test_budget_overlays_accept_simulator_benchmarks_without_bfcl(tmp_path, benchmark):
     original = _config()
     original["benchmarks"] = [row for row in original["benchmarks"]
-                              if row["name"] == "acebench_agent"]
+                              if row["name"] == benchmark]
+    original["methods"] = [row for row in original["methods"]
+                           if row["arm"] in {"acon_hist_ut_co", "hiagent_full"}]
     config = runner.with_hiagent_budget(runner.with_acon_budget(original, 768), 768)
     assert [row["benchmarks"] for row in config["methods"][-2:]] == [
-        ["acebench_agent"], ["acebench_agent"]]
+        [benchmark], [benchmark]]
     assert {row["cell_id"] for row in runner.cells(config)
             if row["arm"].endswith("_b768")} == {
-        "acebench_agent__acon_hist_ut_co_b768",
-        "acebench_agent__hiagent_full_b768",
+        f"{benchmark}__acon_hist_ut_co_b768",
+        f"{benchmark}__hiagent_full_b768",
     }
+    plan, _ = runner.prepare(config, tmp_path / "output", tmp_path / "engine")
+    for row in plan:
+        if not row["arm"].endswith("_b768"):
+            continue
+        command = row["command"]
+        assert command[command.index("--arm") + 1] == row["arm"]
+        server = runner.server_command(config, tmp_path / "engine", row["arm"],
+                                       benchmark=benchmark)
+        assert server[2] == "benchmarks.paper.budget_server"
+        assert server[server.index("--max-running-requests") + 1] == "2"
 
 
 @pytest.mark.parametrize("budget", [0, -1, True, 1.5, "768"])
