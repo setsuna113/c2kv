@@ -67,9 +67,11 @@ def load_delivery():
 def delivery_args(config, benchmark, output, task_ids, delivery):
     settings = config.get("c1", {})
     detector = settings.get("detector", "d3_hybrid")
-    benchmark_dir = config["tau2_dir"] if benchmark == "tau2" else config["bfcl_dir"]
+    benchmark_dir = (config["tau2_dir"] if benchmark == "tau2" else
+                     config["toolsandbox_dir"] if benchmark == "toolsandbox" else
+                     config["bfcl_dir"])
     if ARM in ARM_TO_VARIANT and benchmark not in CANDIDATE_BENCHMARKS:
-        raise ValueError("candidate arms support bfcl_base, bfcl_long_context, appworld and acebench_agent")
+        raise ValueError("candidate arms support " + ", ".join(sorted(CANDIDATE_BENCHMARKS)))
     command = [
         "--method", ("c2kv_native" if ARM == "c2kv_native_r4" else
                      "c2kv_only" if ARM == "c2kv_c1_off_r8" else "proposed"),
@@ -108,6 +110,12 @@ def delivery_args(config, benchmark, output, task_ids, delivery):
             command += ["--tau2-task-id", task_id]
         if config.get("tau2_max_steps") is not None:
             command += ["--tau2-max-steps", str(config["tau2_max_steps"])]
+    elif benchmark == "toolsandbox":
+        command += ["--toolsandbox-dir", config["toolsandbox_dir"],
+                    "--toolsandbox-python", config.get("toolsandbox_python", config["bench_python"]),
+                    "--user-base-url", config.get("upstream") or f"http://127.0.0.1:{config['server_port']}"]
+        for task_id in task_ids:
+            command += ["--ts-scenario", task_id]
     if config.get("tool_memory"):
         command += ["--tool-memory", config["tool_memory"]]
         if config.get("tool_checkpoint"):
@@ -117,7 +125,7 @@ def delivery_args(config, benchmark, output, task_ids, delivery):
     args = delivery.build_parser().parse_args(command)
     args.benchmark = ("acon_appworld" if benchmark == "appworld"
                       else "acebench" if benchmark == "acebench_agent"
-                      else "tau2" if benchmark == "tau2" else "bfcl")
+                      else benchmark if benchmark in {"tau2", "toolsandbox"} else "bfcl")
     args.task_id = list(task_ids)
     return args
 

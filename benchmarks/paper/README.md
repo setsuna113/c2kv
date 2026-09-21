@@ -551,6 +551,13 @@ BFCL base, and the default matrix has no candidate cells. Each candidate uses
 its own native arm identity and ready-manifest validation; this is a runnable
 configuration, not a claim of completed benchmark scores.
 
+ToolSandbox uses the same candidate controllers through its official single-task
+adapter. For example, `--candidate-arms pending_verified --candidate-benchmarks
+toolsandbox` selects `toolsandbox__c2kv_pending_verified_r8` with the existing
+B-budget. It retains a separate identity from native-r4 and C1; enabling this
+route does not complete or replace their historical results. Explicit native
+history-token budget sweeps remain BFCL-only.
+
 Select only the new candidates with
 `--candidate-arms request_contract,argument_binding,no_progress`. They share
 the existing C1 initial allocation and use independent `RepairPolicy` modules

@@ -3,6 +3,7 @@
 import copy
 import hashlib
 import json
+from pathlib import Path
 
 import pytest
 
@@ -16,6 +17,38 @@ from benchmarks.paper.candidate_matrix import (
     VARIANT_TO_ARM, parse_candidate_arms,
     with_candidate_methods,
 )
+
+
+def test_toolsandbox_candidate_prepare_preserves_named_method_and_scenarios(tmp_path):
+    original = json.loads(runner.DEFAULT_CONFIG.read_text())
+    original["benchmarks"] = [row for row in original["benchmarks"]
+                              if row["name"] == "toolsandbox"]
+    original["methods"] = []
+    config = with_candidate_methods(original, ("pending_verified",), ("toolsandbox",))
+    plan, _ = runner.prepare(config, tmp_path / "paper", tmp_path / "engine")
+    assert len(plan) == 1
+    row = plan[0]
+    assert row["cell_id"] == "toolsandbox__c2kv_pending_verified_r8"
+    assert row["ratio"] == 8
+    assert "benchmarks.paper.c1" in row["command"]
+    assert row["command"][row["command"].index("--benchmark") + 1] == "toolsandbox"
+    assert original["methods"] == []
+
+    old_arm = c1.ARM
+    try:
+        c1.select_arm(row["arm"])
+        config.pop("bfcl_dir")
+        config["sglang_source"] = str(tmp_path / "engine")
+        config["toolsandbox_python"] = "/venv-toolsandbox/bin/python"
+        args = c1.delivery_args(config, "toolsandbox", tmp_path / "native",
+                                ["wifi_off", "get_wifi"], c1.load_delivery())
+        assert args.benchmark == "toolsandbox"
+        assert args.ts_scenario == ["wifi_off", "get_wifi"]
+        assert args.toolsandbox_python == "/venv-toolsandbox/bin/python"
+        assert args.benchmark_dir == args.toolsandbox_dir == Path(config["toolsandbox_dir"])
+        assert args.candidate_algorithm == "pending_verified"
+    finally:
+        c1.select_arm(old_arm)
 
 
 def test_candidate_matrix_defaults_to_bfcl_base_and_explicitly_adds_acebench(tmp_path):
@@ -60,7 +93,7 @@ def test_candidate_matrix_defaults_to_bfcl_base_and_explicitly_adds_acebench(tmp
                 if row["arm"] == VARIANT_TO_ARM[variant]]
         assert goal and goal[0]["benchmarks"] == ["bfcl_long_context", "appworld"]
     with pytest.raises(ValueError, match="subset"):
-        with_candidate_methods(original, ("static_t02",), ("toolsandbox",))
+        with_candidate_methods(original, ("static_t02",), ("unknown_benchmark",))
 
 
 @pytest.mark.parametrize("variants", [VERIFIED_VARIANTS, INITIAL_VIEW_VARIANTS])
@@ -196,8 +229,13 @@ def test_candidate_delivery_uses_ratio8_and_bound_artifact(tmp_path, monkeypatch
         app_controller, app_profile = delivery.build_profile(app_args)
         assert app_controller["candidate_algorithm"]["variant"] == variant
         assert app_profile["candidate_algorithm"] == variant
-        with pytest.raises(ValueError, match="candidate arms support"):
-            c1.delivery_args(config, "toolsandbox", tmp_path / "out", [], delivery)
+        ts_args = c1.delivery_args(config, "toolsandbox", tmp_path / "out", ["wifi_off"], delivery)
+        assert ts_args.benchmark == "toolsandbox"
+        assert ts_args.toolsandbox_dir == Path(config["toolsandbox_dir"])
+        assert ts_args.ts_scenario == ["wifi_off"]
+        ts_controller, ts_profile = delivery.build_profile(ts_args)
+        assert ts_controller == controller
+        assert ts_profile["candidate_algorithm"] == variant
     finally:
         c1.select_arm(original_arm)
 

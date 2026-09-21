@@ -1077,7 +1077,7 @@ def main(argv=None):
                              "require named opt-in")
     parser.add_argument("--candidate-benchmarks", default="bfcl_base",
                         help="candidate benchmark scope, comma-separated subset of "
-                             "bfcl_base (default), bfcl_long_context, appworld, acebench_agent, tau2")
+                             "bfcl_base (default), bfcl_long_context, appworld, acebench_agent, tau2, toolsandbox")
     parser.add_argument("--acon-budget-tokens", type=int,
                         help="add budget-adapted ACON BFCL/ACEBench cells with this actor history cap")
     parser.add_argument("--hiagent-budget-tokens", type=int,

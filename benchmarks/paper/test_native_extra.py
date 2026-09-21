@@ -255,8 +255,9 @@ def test_native_controller_preflight_uses_controller_python_not_bench_python(
     *[(arm, "disabled" if variant in REPAIR_VARIANTS else "t02_risk", variant)
       for variant, arm in VARIANT_TO_ARM.items()],
 ])
+@pytest.mark.parametrize("benchmark", ["acebench_agent", "toolsandbox"])
 def test_ready_manifest_binds_loaded_controller_and_candidate_variant(
-        tmp_path, arm, detector, variant):
+        tmp_path, arm, detector, variant, benchmark):
     config = _config(tmp_path)
     config["native_arm"] = arm
     config["c1"]["detector"] = detector
@@ -281,7 +282,8 @@ def test_ready_manifest_binds_loaded_controller_and_candidate_variant(
              if variant else {})
     manifest = {
         "schema": "a-event-native-server-v1", "status": "ready",
-        "benchmark": "acebench", "source_profile": "acebench-text-actions-v1",
+        "benchmark": native_extra.BENCHMARKS[benchmark][0],
+        "source_profile": native_extra.BENCHMARKS[benchmark][1],
         "allowed_task_ids": ["task_1"], "model_name": identity["model_name"],
         "view_mode": ("ac_gist_static" if arm == "c2kv_native_r4" else
                       "ac_native_s0_lexical_raw_reserve_failed_operation"),
@@ -302,49 +304,49 @@ def test_ready_manifest_binds_loaded_controller_and_candidate_variant(
         }
     ready = tmp_path / "ready.json"
     ready.write_text(json.dumps(manifest), encoding="utf-8")
-    native_extra.validate_ready_manifest(config, "acebench_agent", "task_1", ready, controller)
+    native_extra.validate_ready_manifest(config, benchmark, "task_1", ready, controller)
     if variant in INITIAL_VIEW_VARIANTS:
         for field in ("initial_view", "recovery_backbone"):
             original = manifest["candidate_algorithm"].pop(field)
             ready.write_text(json.dumps(manifest), encoding="utf-8")
             with pytest.raises(RuntimeError, match="candidate controller identity"):
-                native_extra.validate_ready_manifest(config, "acebench_agent", "task_1", ready, controller)
+                native_extra.validate_ready_manifest(config, benchmark, "task_1", ready, controller)
             manifest["candidate_algorithm"][field] = original
     if variant in VERIFIED_VARIANTS or initial_view_fields(variant).get("proof_registry_version"):
         manifest["candidate_algorithm"]["proof_registry_version"] = "stale-proof-registry"
         ready.write_text(json.dumps(manifest), encoding="utf-8")
         with pytest.raises(RuntimeError, match="candidate controller identity"):
-            native_extra.validate_ready_manifest(config, "acebench_agent", "task_1", ready, controller)
+            native_extra.validate_ready_manifest(config, benchmark, "task_1", ready, controller)
         manifest["candidate_algorithm"]["proof_registry_version"] = "verified-binding-rules-v1"
     if arm == "c2kv_c1_t02_r4":
         from benchmarks.toolmemory import parse_tool_memory_spec
         config["tool_memory"] = "t0:r8"
         config["tool_checkpoint"] = str(tmp_path / "tool-checkpoint")
         with pytest.raises(RuntimeError, match="tool memory contract"):
-            native_extra.validate_ready_manifest(config, "acebench_agent", "task_1", ready, controller)
+            native_extra.validate_ready_manifest(config, benchmark, "task_1", ready, controller)
         manifest["tool_memory_contract"] = {
             "spec": parse_tool_memory_spec("t0:r8").as_dict(),
             "tool_budget_tokens": None,
             "checkpoint": {"checkpoint": config["tool_checkpoint"]},
         }
         ready.write_text(json.dumps(manifest), encoding="utf-8")
-        native_extra.validate_ready_manifest(config, "acebench_agent", "task_1", ready, controller)
+        native_extra.validate_ready_manifest(config, benchmark, "task_1", ready, controller)
     manifest["ratio"] = 99
     ready.write_text(json.dumps(manifest), encoding="utf-8")
     with pytest.raises(RuntimeError, match="selected arm"):
-        native_extra.validate_ready_manifest(config, "acebench_agent", "task_1", ready, controller)
+        native_extra.validate_ready_manifest(config, benchmark, "task_1", ready, controller)
     if arm != "c2kv_native_r4":
         manifest["ratio"] = identity["ratio"]
         manifest["s0_controller_contract"]["sha256"] = "0" * 64
         ready.write_text(json.dumps(manifest), encoding="utf-8")
         with pytest.raises(RuntimeError, match="different S0 controller"):
-            native_extra.validate_ready_manifest(config, "acebench_agent", "task_1", ready, controller)
+            native_extra.validate_ready_manifest(config, benchmark, "task_1", ready, controller)
     if variant:
         manifest["s0_controller_contract"]["sha256"] = hashlib.sha256(controller.read_bytes()).hexdigest()
         manifest["candidate_algorithm"]["variant"] = "wrong_variant"
         ready.write_text(json.dumps(manifest), encoding="utf-8")
         with pytest.raises(RuntimeError, match="candidate controller identity"):
-            native_extra.validate_ready_manifest(config, "acebench_agent", "task_1", ready, controller)
+            native_extra.validate_ready_manifest(config, benchmark, "task_1", ready, controller)
     elif arm != "c2kv_native_r4":
         wrong = ({"gp_experiments": {"set_selector": "risk", "selector_artifact": {
             "model_kind": "c1_risk_logistic"}}} if detector == "d3_hybrid" else
@@ -357,7 +359,7 @@ def test_ready_manifest_binds_loaded_controller_and_candidate_variant(
         }
         ready.write_text(json.dumps(manifest), encoding="utf-8")
         with pytest.raises(RuntimeError, match="detector controller identity"):
-            native_extra.validate_ready_manifest(config, "acebench_agent", "task_1", ready, controller)
+            native_extra.validate_ready_manifest(config, benchmark, "task_1", ready, controller)
 
 
 def test_ace_official_score_and_user_model_are_bound(tmp_path, monkeypatch):

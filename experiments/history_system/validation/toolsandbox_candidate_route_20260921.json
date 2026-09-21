@@ -1,0 +1,44 @@
+{
+  "schema": "c2kv-toolsandbox-candidate-route-validation-v1",
+  "status": "routing_implemented_cpu_validated_no_device_or_full_benchmark_run",
+  "base_commit": "4396973fd25fe00c6f33c91225ffa52d46638e35",
+  "repository": "paper",
+  "source_sha256": {
+    "benchmarks/paper/README.md": "6407fca8b4e3f97a1194811d1a7fb89e12dac1ed1245cbcfc576a1ac295d3581",
+    "benchmarks/paper/c1.py": "1849040e30ff80db45cb05c8d0c5ef2b4085fa257909ae179e2eb67b11db769d",
+    "benchmarks/paper/candidate_matrix.py": "c3bd28fcc68e0eb3ad87c6799c596cd3a64466d8fa713b5193134918f46f3c71",
+    "benchmarks/paper/runner.py": "d61cdfbbe606560e2436eee7ca21582f25dd6116c2f4e7131f30bf0978847cc7",
+    "benchmarks/paper/test_candidate_arms.py": "abdcc1ab5885f6bd6b4cfb99490c79bd0d234e08f83e4bf04c11f92339fd819b",
+    "benchmarks/paper/test_native_extra.py": "3116ce80a88f6672fb980f3bfcdc53555a4e8bd94f9bbaa317568b53b07e30d7",
+    "experiments/history_system/candidate_algorithms.py": "581bd650eca978eb373526324450c303391fb11120864e4f21b3392e3b408eb2"
+  },
+  "validation": {
+    "command": [
+      "python",
+      "-m",
+      "pytest",
+      "-q",
+      "--tb=short",
+      "benchmarks/paper/test_candidate_arms.py",
+      "benchmarks/paper/test_native_extra.py"
+    ],
+    "passed": 128,
+    "failed": 0
+  },
+  "contract": {
+    "benchmark": "toolsandbox",
+    "ratio": 8,
+    "budget": "existing_source_B_budget",
+    "example_variant": "pending_verified",
+    "algorithm_changed": false,
+    "scenario_identity_preserved": true,
+    "controller_and_proof_identity_validated": true,
+    "explicit_native_history_token_budget_enabled": false,
+    "cuda_npu_port": "Shared paper runtime and NPU candidate factory route to existing ToolSandbox adapter; no duplicated controller algorithm."
+  },
+  "limitations": [
+    "CPU interface tests do not establish model behavior or complete ToolSandbox results.",
+    "Existing native-r4, C1 and candidate results remain separate method identities.",
+    "Old failed roots and paused evaluation queues were not modified."
+  ]
+}

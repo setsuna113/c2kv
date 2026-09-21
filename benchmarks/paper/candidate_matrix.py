@@ -31,7 +31,9 @@ VERIFIED_VARIANTS = ("goal_verified", "pending_verified")
 LEGACY_VARIANTS = tuple(variant for variant in VARIANT_TO_ARM
                         if variant not in VERIFIED_VARIANTS + INITIAL_VIEW_VARIANTS)
 ARM_TO_VARIANT = {arm: variant for variant, arm in VARIANT_TO_ARM.items()}
-SUPPORTED_BENCHMARKS = frozenset({"bfcl_base", "bfcl_long_context", "appworld", "acebench_agent", "tau2"})
+SUPPORTED_BENCHMARKS = frozenset({
+    "bfcl_base", "bfcl_long_context", "appworld", "acebench_agent", "tau2", "toolsandbox",
+})
 
 
 def parse_candidate_arms(value: str) -> tuple[str, ...]:
