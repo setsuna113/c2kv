@@ -19,6 +19,8 @@ def main(argv=None):
     prep.add_argument("--k", type=int, default=3)
     prep.add_argument("--seed", type=int, default=42)
     prep.add_argument("--ratios", default="8,12")
+    prep.add_argument("--interface-policy", choices=("none", "schema"), default="none",
+                      help="opt-in raw executable interfaces with prose-only compressed definitions")
     ev = commands.add_parser("evaluate", help="Evaluate next actions through one SGLang server")
     ev.add_argument("--manifest", type=Path, required=True)
     ev.add_argument("--checkpoint", type=Path, required=True)
@@ -32,11 +34,14 @@ def main(argv=None):
                     help="First N sorted (decision_id, ratio) groups; a decision with two ratios occupies two groups")
     ev.add_argument("--resume", action="store_true",
                     help="Continue an output directory with the identical frozen run contract")
+    ev.add_argument("--interface-policy", choices=("none", "schema"), default="none",
+                    help="must match the policy frozen by prepare")
     args = parser.parse_args(argv)
     if args.command == "prepare":
         result = prepare(args.input, args.checkpoint, args.out,
                          k=args.k, seed=args.seed,
-                         ratios=tuple(int(item) for item in args.ratios.split(",")))
+                         ratios=tuple(int(item) for item in args.ratios.split(",")),
+                         interface_policy=args.interface_policy)
     else:
         from .evaluate import evaluate
         result = evaluate(args.manifest, args.checkpoint, args.out,
@@ -44,7 +49,8 @@ def main(argv=None):
                           max_new_tokens=args.max_new_tokens,
                           methods=tuple(filter(None, args.methods.split(","))),
                           layouts=tuple(filter(None, args.layouts.split(","))),
-                          limit=args.limit, resume=args.resume)
+                          limit=args.limit, resume=args.resume,
+                          interface_policy=args.interface_policy)
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return result
 

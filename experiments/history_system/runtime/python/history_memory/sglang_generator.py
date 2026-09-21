@@ -755,10 +755,13 @@ class SGLangEventNativeGenerator:
         self._kv_bytes_per_token = kv_bytes
 
     def repair_tool_span(self, input_ids: Sequence[int], *, span_start: int,
-                         span_end: int, method: str, target_tokens: int) -> dict[str, Any]:
+                         span_end: int, method: str, target_tokens: int,
+                         selectable_relative_indices: Sequence[int] | None = None) -> dict[str, Any]:
         """Extract one query-conditioned raw tool region with a separate cap."""
-        if method not in {"h2o", "snapkv"}:
-            raise ValueError("Raw tool repair method must be h2o or snapkv")
+        allowed = ({"h2o", "snapkv"} if selectable_relative_indices is None else
+                   {"streamingllm", "h2o", "snapkv", "pyramidkv"})
+        if method not in allowed:
+            raise ValueError("Unsupported raw tool repair method")
         ids = _token_ids(input_ids, "input_ids", nonempty=True)
         if (type(span_start) is not int or type(span_end) is not int
                 or not 0 <= span_start < span_end <= len(ids)):
@@ -780,6 +783,17 @@ class SGLangEventNativeGenerator:
             "history_kv_pooling": "avgpool",
             "history_kv_h2o_recent_fraction": 0.5,
         }
+        if selectable_relative_indices is not None:
+            indices = list(selectable_relative_indices)
+            if (any(type(index) is not int or not 0 <= index < span_end - span_start
+                    for index in indices) or indices != sorted(set(indices))):
+                raise ValueError("Tool selectable indices must be unique sorted offsets")
+            if target_tokens < span_end - span_start - len(indices):
+                raise ValueError("Tool target cannot evict protected interface tokens")
+            body["history_kv_selectable_relative_indices"] = indices
+            body["history_kv_pooling"] = "maxpool" if method == "snapkv" else "avgpool"
+            body["history_kv_recent_window"] = 64 if method == "pyramidkv" else 16
+            body["history_kv_kernel_size"] = 5 if method == "pyramidkv" else 7
         self.tool_repair_calls += 1
         response, status = self._read_json(Request(
             self.upstream + "/v1/c2kv/repair_extract",
@@ -792,11 +806,14 @@ class SGLangEventNativeGenerator:
         token_len = response.get("token_len")
         if not isinstance(key_hash, str) or not key_hash or type(token_len) is not int:
             raise SGLangEventNativeError("Tool repair_extract lacks a retained KV handle")
-        if not 0 < token_len <= target_tokens:
+        physical_limit = span_end - span_start if method == "pyramidkv" else target_tokens
+        if not 0 < token_len <= physical_limit:
             raise SGLangEventNativeError("Tool repair_extract exceeded the retained target")
-        if response.get("original_seq_len") != span_end - span_start:
+        if response.get("original_seq_len") != len(ids):
             raise SGLangEventNativeError("Tool repair_extract source length mismatch")
-        if response.get("history_kv_method") != method:
+        if (response.get("span_start"), response.get("span_end")) != (span_start, span_end):
+            raise SGLangEventNativeError("Tool repair_extract span mismatch")
+        if response.get("history_kv_method") not in {method, "snapkv_persistent" if method == "snapkv" else method}:
             raise SGLangEventNativeError("Tool repair_extract method mismatch")
         return dict(response)
 

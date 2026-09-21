@@ -379,7 +379,8 @@ def _serve(args):
     generation_backend = _validate_generation_backend(args, s0_config=s0_config)
     from .event_native_tool import parse_native_tool_spec
     tool_spec = parse_native_tool_spec(getattr(args, 'tool_memory', None))
-    if tool_spec is not None and tool_spec.encoder != 't0':
+    if (tool_spec is not None and tool_spec.encoder != 't0'
+            and tool_spec.interface_policy != 'schema'):
         raise ValueError(
             'Global H2O/SnapKV selection across disjoint visible tool spans is not implemented'
         )
@@ -392,7 +393,8 @@ def _serve(args):
         raise ValueError('T0 tool memory requires --tool-checkpoint')
     if tool_spec is not None and tool_spec.encoder != 't0' and getattr(args, 'tool_checkpoint', None) is not None:
         raise ValueError('Raw-KV tool memory does not use --tool-checkpoint')
-    if tool_spec is not None and tool_spec.encoder != 't0' and tool_spec.layout != 'uniform':
+    if (tool_spec is not None and tool_spec.encoder != 't0' and tool_spec.layout != 'uniform'
+            and tool_spec.interface_policy != 'schema'):
         raise ValueError('Raw-KV native tool memory currently requires a uniform catalog')
     if getattr(args, 'benchmark', None) == 'acebench' and args.view_mode in {
         'ac_gist_static', 'ac_native_s0_lexical_raw_reserve_failed_operation',

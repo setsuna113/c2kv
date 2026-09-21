@@ -12,13 +12,19 @@ from pathlib import Path
 
 
 def joint_config(base, *, tool_checkpoint, benchmarks=("bfcl_base",),
-                 tool_ratio=8, top_k=3, tool_budget_tokens=None, output_root=None):
+                 tool_ratio=8, top_k=3, tool_budget_tokens=None, output_root=None,
+                 interface_policy="none"):
     from benchmarks.toolmemory import parse_tool_memory_spec
 
-    uniform = f"t0:r{tool_ratio}"
-    hybrid = f"{uniform}:hybrid{top_k}"
+    suffix = ":schema" if interface_policy == "schema" else ""
+    if interface_policy not in {"none", "schema"}:
+        raise ValueError("Unknown tool interface policy")
+    uniform = f"t0:r{tool_ratio}{suffix}"
+    hybrid = f"t0:r{tool_ratio}:hybrid{top_k}{suffix}"
     parse_tool_memory_spec(uniform)
     parse_tool_memory_spec(hybrid)
+    uniform_name = "uniform_schema" if interface_policy == "schema" else "uniform"
+    hybrid_name = "hybrid_schema" if interface_policy == "schema" else "hybrid"
     if not str(tool_checkpoint):
         raise ValueError("A T0 tool checkpoint is required")
     available = {row["name"] for row in base["benchmarks"]}
@@ -34,25 +40,30 @@ def joint_config(base, *, tool_checkpoint, benchmarks=("bfcl_base",),
     result.setdefault("c1", {}).update(detector="t02_risk", selector_threshold=0.5,
                                        history_variant="H0", recovery_rounds=1)
     result["tool_contexts"] = [
-        {"name": "uniform", "spec": uniform, "checkpoint": str(tool_checkpoint)},
-        {"name": "hybrid", "spec": hybrid, "checkpoint": str(tool_checkpoint)},
+        {"name": uniform_name, "spec": uniform, "checkpoint": str(tool_checkpoint)},
+        {"name": hybrid_name, "spec": hybrid, "checkpoint": str(tool_checkpoint)},
     ]
+    if interface_policy == "schema":
+        for context in result["tool_contexts"]:
+            context["provenance"] = (
+                "opt-in schema interface policy; T0 compressed definitions remain complete "
+                "and unmodified while every remaining tool has a raw executable interface")
     if tool_budget_tokens is not None:
         for context in result["tool_contexts"]:
             context["budget_tokens"] = tool_budget_tokens
     result["methods"] = [
         {"method": "Full", "arm": "full", "group": "tool_history_anchor",
-         "tool_contexts": ["raw", "uniform"]},
+         "tool_contexts": ["raw", uniform_name]},
         {"method": "C1 initial allocation (recovery off)", "arm": "c2kv_c1_off_r8",
          "group": "tool_history_factorial", "ratio": 8,
-         "tool_contexts": ["raw", "uniform", "hybrid"]},
+         "tool_contexts": ["raw", uniform_name, hybrid_name]},
         {"method": "C1 T02 recovery", "arm": "c2kv_c1_t02_r8",
          "group": "tool_history_factorial", "ratio": 8,
-         "tool_contexts": ["uniform", "hybrid"]},
+         "tool_contexts": [uniform_name, hybrid_name]},
     ]
     result["tool_history_study"] = {
         "schema": "paper-tool-history-factorial-v1",
-        "tool_factor": ["uniform", "hybrid"],
+        "tool_factor": [uniform_name, hybrid_name],
         "history_factor": ["c2kv_c1_off_r8", "c2kv_c1_t02_r8"],
         "fixed_initial_history_policy": "S0/H0/ratio8",
         "history_checkpoint": result["checkpoint"],
@@ -61,6 +72,8 @@ def joint_config(base, *, tool_checkpoint, benchmarks=("bfcl_base",),
         "tool_allocation_comparison": "hybrid retains additional native schemas; equal ratio is not equal resident KV",
         "claim_scope": "paired component effects and interaction on the same official task cohort",
     }
+    if interface_policy != "none":
+        result["tool_history_study"]["interface_policy"] = interface_policy
     return result
 
 
@@ -72,6 +85,7 @@ def main(argv=None):
     parser.add_argument("--tool-ratio", type=int, default=8)
     parser.add_argument("--top-k", type=int, default=3)
     parser.add_argument("--tool-budget-tokens", type=int)
+    parser.add_argument("--interface-policy", choices=("none", "schema"), default="none")
     parser.add_argument("--output-root", required=True,
                         help="Separate results directory for the seven-cell study")
     parser.add_argument("--out", type=Path, required=True)
@@ -81,7 +95,8 @@ def main(argv=None):
                           benchmarks=tuple(args.benchmarks.split(",")),
                           tool_ratio=args.tool_ratio, top_k=args.top_k,
                           tool_budget_tokens=args.tool_budget_tokens,
-                          output_root=args.output_root)
+                          output_root=args.output_root,
+                          interface_policy=args.interface_policy)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     with args.out.open("x", encoding="utf-8") as handle:
         json.dump(config, handle, ensure_ascii=False, indent=2)

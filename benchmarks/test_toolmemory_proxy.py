@@ -36,6 +36,8 @@ pytest.importorskip("transformers")
 
 SNAPSHOTS = sorted(glob.glob(os.path.expanduser(
     "~/.cache/huggingface/hub/models--Qwen--Qwen3-4B-Instruct-2507/snapshots/*/tokenizer.json")))
+if os.environ.get("C2KV_REAL_TOKENIZER_CHECKPOINT"):
+    SNAPSHOTS = [str(Path(os.environ["C2KV_REAL_TOKENIZER_CHECKPOINT"]) / "tokenizer.json")]
 pytestmark = pytest.mark.skipif(not SNAPSHOTS, reason="pinned Qwen3-4B tokenizer snapshot not cached")
 
 
@@ -48,6 +50,7 @@ def _free_port() -> int:
 class _FakeSGLang(BaseHTTPRequestHandler):
     extracts = []
     chats = []
+    cache_miss_once = False
 
     def log_message(self, *_args):
         return
@@ -72,6 +75,16 @@ class _FakeSGLang(BaseHTTPRequestHandler):
                          "original_seq_len": len(ids), "cache_hit": False, "success": True})
             return
         self.__class__.chats.append(payload)
+        if self.__class__.cache_miss_once:
+            self.__class__.cache_miss_once = False
+            self._reply({
+                "id": "fake", "object": "chat.completion",
+                "choices": [{"index": 0, "message": {"role": "assistant", "content": ""},
+                             "finish_reason": "abort"}],
+                "metadata": {"sglang_runtime": {
+                    "c2kv_injection_error": "C2KV_CACHE_MISS: evicted test entry"}},
+            })
+            return
         self._reply({
             "id": "fake", "object": "chat.completion",
             "choices": [{"index": 0, "message": {"role": "assistant", "content": "ok"},
@@ -95,7 +108,8 @@ def _tool_checkpoint(tmp_path):
     snapshot = Path(SNAPSHOTS[0]).parent
     checkpoint = tmp_path / "checkpoint-1034"
     checkpoint.mkdir()
-    for name in ("tokenizer.json", "tokenizer_config.json", "vocab.json", "merges.txt"):
+    for name in ("tokenizer.json", "tokenizer_config.json", "chat_template.jinja",
+                 "vocab.json", "merges.txt"):
         if (snapshot / name).exists():
             shutil.copy2(snapshot / name, checkpoint / name)
     (checkpoint / "config.json").write_text(json.dumps({
@@ -256,3 +270,53 @@ def test_tool_memory_refuses_budget_adapted_text_arms():
             "--upstream", "http://127.0.0.1:1", "--backend", "sglang",
             "--arm", "hiagent_full_b4096", "--port", "1",
             "--tool-memory", "t0:r8", "--tool-checkpoint", "/nope"])
+
+
+def test_raw_schema_cache_miss_retries_without_t0_carriers(tmp_path):
+    """An evicted raw-tool request retries even though it has no T0 carriers."""
+    _FakeSGLang.extracts = []
+    _FakeSGLang.chats = []
+    _FakeSGLang.cache_miss_once = True
+    upstream = ThreadingHTTPServer(("127.0.0.1", _free_port()), _FakeSGLang)
+    threading.Thread(target=upstream.serve_forever, daemon=True).start()
+    checkpoint = _tool_checkpoint(tmp_path)
+    proxy_port = _free_port()
+    process = subprocess.Popen([
+        sys.executable, str(Path(__file__).with_name("proxy.py")),
+        "--upstream", f"http://127.0.0.1:{upstream.server_port}",
+        "--backend", "sglang", "--benchmark", "bfcl", "--arm", "full",
+        "--port", str(proxy_port), "--request-log", str(tmp_path / "proxy.jsonl"),
+        "--tool-memory", "h2o:r8:uniform:schema", "--tool-checkpoint", str(checkpoint),
+    ], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    try:
+        deadline = time.time() + 60
+        while time.time() < deadline:
+            if process.poll() is not None:
+                raise AssertionError(f"proxy exited during startup: {process.stdout.read()}")
+            try:
+                with socket.create_connection(("127.0.0.1", proxy_port), timeout=1):
+                    break
+            except OSError:
+                time.sleep(0.05)
+        else:
+            raise AssertionError("proxy did not become ready")
+        answer = _post(f"http://127.0.0.1:{proxy_port}/v1/chat/completions", {
+            "model": "c2kv-agent", "tools": TOOLS,
+            "messages": [{"role": "system", "content": "You are a booking agent."},
+                         {"role": "user", "content": "cancel_order 42 please"}],
+        })
+        assert answer["choices"][0]["message"]["content"] == "ok"
+        assert answer["c2kv_proxy"]["tool_memory"]["spec"] == "h2o_r8_schema"
+        assert len(_FakeSGLang.chats) == 2
+        assert _FakeSGLang.chats[0]["c2kv_kv_memory_hint"]["tool_kv_eviction"] == (
+            _FakeSGLang.chats[1]["c2kv_kv_memory_hint"]["tool_kv_eviction"])
+    finally:
+        process.terminate()
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=5)
+        upstream.shutdown()
+        upstream.server_close()
+        _FakeSGLang.cache_miss_once = False

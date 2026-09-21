@@ -72,6 +72,8 @@ existing paper runner. It contains three anchors (Full/Full, uniform-tool/Full,
 Full/compressed-history) and the four cells of uniform/hybrid tools crossed
 with recovery off/on. The builder fixes the learned `t02_risk` controller,
 threshold 0.5 and ratio8, independently of the historical default D3 matrix.
+`--interface-policy schema` creates separate `uniform_schema` and
+`hybrid_schema` cells and records the policy in the generated configuration.
 
 `c2kv_c1_off_r8` routes to the delivered `c2kv_only` controller: it preserves
 the S0 initial history allocation and ratio of C1, and removes recovery. It is
@@ -84,11 +86,22 @@ The recorded-decision study is separate from closed-loop task success:
 and `evaluate` runs the five tool KV methods and selection ablations. See the
 CLI help for its manifest, checkpoint and `--upstream` arguments. Generation
 uses the same SGLang tool-memory runtime as the joint study; this client only
-freezes inputs, sends requests and scores returned actions. Selection-based
-tool baselines use native prefill followed by headwise pruning and a final
+freezes inputs, sends requests and scores returned actions.
+Use `--interface-policy schema` on both `prepare` and `evaluate` to freeze
+and verify that interface choice in the manifest and every recorded layout.
+Schema manifests and records also pin `interface_render_profile` to
+`tool-schema-split-v3`. Each executable interface is retained once. T0 encodes
+only descriptive annotations for compressed tools; selected native tools keep
+their full definition once. Opaque source definitions stay full and are not
+also compressed. This changes the encoder input representation without
+retraining the checkpoint; benchmark effectiveness must be measured anew.
+The raw-interface cost is counted in resident KV. Earlier additive-schema
+manifests must be prepared again; their results cannot be reused as v3.
+Selection-based tool baselines use native prefill followed by headwise pruning and a final
 prompt-token forward pass. This does not reduce initial prefill work.
-Only schema-interior tokens are eligible for eviction; history, protocol
-scaffolding, selected native schemas and tokens crossing schema boundaries
+With `:schema`, only descriptive annotation value tokens are eligible for
+eviction. History, executable schema fields, protocol scaffolding, selected
+native schemas and tokens crossing annotation boundaries
 remain resident. H2O accumulates attention over all prefill queries before
 the held-out final prompt token; SnapKV observes the last 16 such queries.
 The runtime receipt records that query range and verifies that the first
@@ -162,6 +175,35 @@ false-call 2/16, uniform CE 0.73; steps 1000/1034 score 9/16 with lower CE
 and `t0_r8_hybrid3` (lexical top-3 native) on the Full arm, i.e. twelve extra
 cells for the "compressed tools x full history" rows of the paper's
 joint-context table.
+
+The opt-in `:schema` tool interface policy has separate context names and
+provenance in `config.json`: `t0_r8_hybrid3_schema` and
+`h2o_r8_hybrid3_schema`. Select either with `--tool-contexts`; the runner
+adds cells across Full, text-history, history-KV, and native C2KV arms while
+preserving every default cell. The top-3 native schemas stay complete once;
+with T0, each remaining tool keeps a raw executable interface and only its
+descriptive annotations are compressed. The H2O context selects
+raw tool KV and uses the configured checkpoint directory as a tokenizer source;
+it does not load
+tool-gist projection weights. These opt-in
+cells have no measured result in the shipped matrix.
+
+Schema-protected raw-tool selection composes with text, gist, physical-KV and
+reference-attention history through the shared tool adapter. For persistent
+AgentKV/CommitKV sessions, a fixed catalog and system prefix permit a changed
+raw-tool selection to replace its resident KV while preserving the existing
+history state. A changed catalog or source prefix is rejected instead of
+silently refilling history. Query-dependent T0 hybrid selection can change
+that source prefix and is not supported with these persistent reference-history
+sessions; native C2KV history reconstructs each request and supports that case.
+An unchanged T0 uniform catalog keeps its existing carrier identities.
+
+The recorded-decision study's Full control keeps the original uncompressed
+input without duplicate interface copies. Protected copies are charged to the
+compressed layouts. Rebuild schema manifests after a control-contract change;
+do not reuse older Full denominators. NPU page-aligned tool replacement has
+CPU coverage at page size 128; CUDA smoke does not establish NPU hardware
+execution or benchmark quality.
 
 The default matrix contains 47 main cells, 9 sweep cells, 18 opponent cells
 and two ratio-4 C1 ablations. ACEBench uses the official `agent` category;

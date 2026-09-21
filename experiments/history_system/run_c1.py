@@ -962,9 +962,15 @@ def validate_args(args: argparse.Namespace) -> list[str]:
         if args.tool_checkpoint is None or not (args.tool_checkpoint / "config.json").is_file():
             raise ValueError("T0 tool memory requires a local --tool-checkpoint")
     else:
-        raise ValueError(
-            "Global H2O/SnapKV selection across disjoint visible tool spans is not implemented"
-        )
+        from benchmarks.memory_runtime.event_native_tool import parse_native_tool_spec
+
+        spec = parse_native_tool_spec(args.tool_memory)
+        if spec is None or spec.encoder == "t0" or spec.interface_policy != "schema":
+            raise ValueError(
+                "Global H2O/SnapKV selection across disjoint visible tool spans is not implemented"
+            )
+        if args.tool_checkpoint is not None:
+            raise ValueError("Raw-KV tool memory does not use --tool-checkpoint")
     if args.tool_budget_tokens is not None and args.tool_budget_tokens <= 0:
         raise ValueError("--tool-budget-tokens must be positive")
     identities = _identities(args)

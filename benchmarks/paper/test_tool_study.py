@@ -48,3 +48,23 @@ def test_recovery_off_routes_to_existing_initial_allocation_ablation(tmp_path):
         assert getattr(off, key) == getattr(on, key)
     assert get_arm("c2kv_c1_off_r8").native_controller == "c1_recovery_off"
     assert native_extra.arm_identity({"native_arm": "c2kv_c1_off_r8"})["method"] == "c2kv_only"
+
+
+def test_joint_study_schema_policy_is_separate_and_bound_to_every_tool_cell(tmp_path):
+    base = json.loads(runner.DEFAULT_CONFIG.read_text())
+    legacy = joint_config(base, tool_checkpoint="/checkpoints/T0")
+    assert "interface_policy" not in legacy["tool_history_study"]
+    config = joint_config(base, tool_checkpoint="/checkpoints/T0",
+                          interface_policy="schema")
+    assert config["tool_history_study"]["interface_policy"] == "schema"
+    assert {context["name"] for context in config["tool_contexts"]} == {
+        "uniform_schema", "hybrid_schema"}
+    assert all(context["spec"].endswith(":schema") and
+               "schema interface policy" in context["provenance"]
+               for context in config["tool_contexts"])
+    rows = runner.cells(config)
+    assert len(rows) == 7
+    assert {row["tool_interface_policy"] for row in rows if row.get("tool_memory")} == {"schema"}
+    assert {row["cell_id"] for row in rows}.isdisjoint(
+        {row["cell_id"] for row in runner.cells(legacy) if row.get("tool_memory")})
+    runner.prepare(config, tmp_path / "prepared", tmp_path / "engine")

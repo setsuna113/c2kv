@@ -297,6 +297,18 @@
       "spec": "t0:r8:hybrid3",
       "checkpoint": "/home/lyc/dev/c2kv-t0-selection/hf/T0/checkpoint-500",
       "provenance": "same encoder; lexical top-3 schemas kept native (paper Section 3.2 allocation)"
+    },
+    {
+      "name": "t0_r8_hybrid3_schema",
+      "spec": "t0:r8:hybrid3:schema",
+      "checkpoint": "/home/lyc/dev/c2kv-t0-selection/hf/T0/checkpoint-500",
+      "provenance": "opt-in schema interface policy: keep the top-3 native schemas and add the complete raw interface for every remaining tool alongside unchanged T0 compressed documents; no measured result implied"
+    },
+    {
+      "name": "h2o_r8_hybrid3_schema",
+      "spec": "h2o:r8:hybrid3:schema",
+      "checkpoint": "/home/lyc/dev/c2kv-t0-selection/hf/T0/checkpoint-500",
+      "provenance": "opt-in schema interface policy with H2O raw-KV selection; checkpoint path supplies the tokenizer only; no measured result implied"
     }
   ],
   "tau2_dir": "/path/to/tau2",

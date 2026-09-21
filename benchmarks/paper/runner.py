@@ -84,12 +84,13 @@ def tool_contexts(config):
         spec = parse_tool_memory_spec(item.get("spec"))
         if spec is None:
             raise ValueError(f"tool context {name!r} needs a non-raw spec (e.g. t0:r8)")
-        if spec.encoder != "t0":
-            raise ValueError("Paper tool contexts currently support T0; global tool-region H2O/SnapKV is not implemented")
+        if spec.encoder != "t0" and spec.interface_policy != "schema":
+            raise ValueError("Raw-KV tool contexts require the explicit schema interface policy")
         if not item.get("checkpoint"):
             raise ValueError(f"tool context {name!r} needs a tokenizer/checkpoint directory")
         contexts[name] = {"name": name, "spec": str(item["spec"]),
-                          "checkpoint": str(item["checkpoint"])}
+                          "checkpoint": str(item["checkpoint"]),
+                          "interface_policy": spec.interface_policy}
         if item.get("budget_tokens") is not None:
             budget = item["budget_tokens"]
             if isinstance(budget, bool) or not isinstance(budget, int) or budget <= 0:
@@ -131,6 +132,8 @@ def cells(config):
                 if context_name != RAW_TOOL_CONTEXT:
                     row["cell_id"] += "__tools-" + context_name
                     row["tool_memory"] = context["spec"]
+                    if context["interface_policy"] != "none":
+                        row["tool_interface_policy"] = context["interface_policy"]
                     row["tool_checkpoint"] = context["checkpoint"]
                     if context.get("budget_tokens") is not None:
                         row["tool_budget_tokens"] = context["budget_tokens"]
@@ -157,11 +160,13 @@ def with_tool_contexts(config, names, checkpoint=None):
     methods = []
     for method in config["methods"]:
         arm = get_arm(method["arm"])
-        if (arm.text_policy or "").startswith(("acon", "hiagent")):
+        current = method.get("tool_contexts") or [RAW_TOOL_CONTEXT]
+        text_arm = (arm.text_policy or "").startswith(("acon", "hiagent"))
+        allowed = [name for name in names if not text_arm or contexts[name]["interface_policy"] == "schema"]
+        if not allowed:
             methods.append(method)
             continue
-        current = method.get("tool_contexts") or [RAW_TOOL_CONTEXT]
-        methods.append(dict(method, tool_contexts=list(dict.fromkeys([*current, *names]))))
+        methods.append(dict(method, tool_contexts=list(dict.fromkeys([*current, *allowed]))))
     result = dict(config, methods=methods)
     if checkpoint:
         result["tool_contexts"] = [
@@ -350,8 +355,9 @@ def run_command(config, cell, directory, profile, stage="closed_loop"):
         if "history_budget_tokens" in cell:
             cmd += NativeHistoryBudget(cell["history_budget_tokens"]).cli_args()
         if cell.get("tool_memory"):
-            cmd += ["--tool-memory", cell["tool_memory"],
-                    "--tool-checkpoint", cell["tool_checkpoint"]]
+            cmd += ["--tool-memory", cell["tool_memory"]]
+            if cell["tool_memory"].startswith("t0:"):
+                cmd += ["--tool-checkpoint", cell["tool_checkpoint"]]
             if cell.get("tool_budget_tokens") is not None:
                 cmd += ["--tool-budget-tokens", str(cell["tool_budget_tokens"])]
         if stage == "common_prefix":
@@ -435,6 +441,18 @@ def extension_problem(existing, config, source, output):
     if missing:
         return f"cells removed: {missing[:3]}"
     if not (set(new_cells) - set(old_cells)):
+        # Registering an opt-in context without selecting it changes config
+        # metadata, but cannot change any existing cell or its command.
+        old_contexts = {item["name"]: item for item in existing.get("tool_contexts") or []}
+        new_contexts = {item["name"]: item for item in config.get("tool_contexts") or []}
+        if (old_contexts != new_contexts
+                and all(new_contexts.get(name) == item for name, item in old_contexts.items())
+                and {key: value for key, value in existing.items()
+                     if key not in {"tool_contexts", "sglang_source"}}
+                    == {key: value for key, value in config.items()
+                        if key not in {"tool_contexts", "sglang_source"}}
+                and all(old_cells[cell_id] == new_cells[cell_id] for cell_id in old_cells)):
+            return None
         return "no new cells"
     for key in DEPLOYMENT_KEYS:
         if key == "c1" and existing.get("c1") is None:
@@ -452,7 +470,8 @@ def extension_problem(existing, config, source, output):
         # the cell has no artifacts, after which it is frozen with them.
         has_artifacts = any((output / stage / cell_id).exists() for stage in ("closed_loop", "common_prefix"))
         for key in ("arm", "method", "ratio", "retention", "benchmark", "adapter", "category",
-                    "tool_context", "tool_memory", "tool_checkpoint", "history_budget_tokens"):
+                    "tool_context", "tool_memory", "tool_checkpoint", "tool_interface_policy",
+                    "history_budget_tokens"):
             if key == "method" and not has_artifacts:
                 continue
             if old.get(key) != new.get(key):
@@ -557,16 +576,17 @@ def _prepare_locked(config, output, source):
         if arm.name in {"agentfold", "commitkv", "agentkv"}:
             if config.get("model_family", "qwen3-4b") != "qwen3-4b":
                 raise ValueError("AgentFold/CommitKV/AgentKV require model_family=qwen3-4b")
-    tool_contexts(config)   # validates names, specs and checkpoint fields
+    resolved_contexts = tool_contexts(config)   # validates names, specs and checkpoint fields
     for item in config["methods"]:
         for context_name in item.get("tool_contexts") or []:
             if context_name == RAW_TOOL_CONTEXT:
                 continue
             text_policy = getattr(get_arm(item["arm"]), "text_policy", "") or ""
-            if text_policy.startswith(("acon", "hiagent")):
+            if (text_policy.startswith(("acon", "hiagent"))
+                    and resolved_contexts[context_name]["interface_policy"] != "schema"):
                 raise ValueError(
                     f"{item['arm']} cannot take tool context {context_name!r}: "
-                    "ACON/HiAgent tool-memory composition is outside the supported matrix")
+                    "ACON/HiAgent require the schema interface policy")
     matrix = cells(config)   # validate task scope before writing any prepared artifacts
     config = dict(config)
     config["sglang_source"] = str(source.resolve())
@@ -613,6 +633,8 @@ def _prepare_locked(config, output, source):
         raise ValueError("The paper matrix contains duplicate cell ids")
     with io.StringIO(newline="") as handle:
         fields = ["cell_id", "benchmark", "method", "arm", "group", "ratio", "retention", "adapter", "category", "tool_context"]
+        if any("tool_interface_policy" in row for row in matrix):
+            fields.append("tool_interface_policy")
         if any("history_budget_tokens" in row for row in matrix):
             fields.append("history_budget_tokens")
         if any(is_subset(row) for row in matrix):

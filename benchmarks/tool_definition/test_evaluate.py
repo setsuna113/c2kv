@@ -6,6 +6,7 @@ import pytest
 from types import SimpleNamespace
 
 from benchmarks.tool_definition import evaluate as module
+from benchmarks.tool_definition.core import FULL_CONTROL_POLICY
 from benchmarks.tool_definition.evaluate import (_http_result, _measured_kv,
                                                  _outcome_http)
 
@@ -82,7 +83,10 @@ def test_http_result_uses_measured_full_anchor_and_flags_exceeded_budget():
     assert row["resident_kv_tokens_by_layer"] == [67, 65]
 
 
-def test_evaluate_stages_full_history_through_shared_http_adapter(tmp_path, monkeypatch):
+@pytest.mark.parametrize("interface_policy", ("none", "schema"))
+def test_evaluate_stages_full_history_through_shared_http_adapter(
+    tmp_path, monkeypatch, interface_policy,
+):
     messages = [{"role": "user", "content": "earlier turn"},
                 {"role": "user", "content": "choose a tool"}]
     tools = [{"type": "function", "function": {"name": "search", "parameters": {}}},
@@ -103,12 +107,23 @@ def test_evaluate_stages_full_history_through_shared_http_adapter(tmp_path, monk
                      "native_indices": native, "resident_kv_tokens": costs[layout],
                      "base_prompt_tokens_without_tool_protocol": 30}
             for layout, native in natives.items()}
+    if interface_policy == "schema":
+        for record in pair.values():
+            record["interface_policy"] = "schema"
+            record["interface_render_profile"] = module.toolmemory.INTERFACE_RENDER_PROFILE
+            record["full_control_policy"] = FULL_CONTROL_POLICY
     manifest_path = tmp_path / "manifest.json"
     manifest_path.write_text("{}", encoding="utf-8")
+    frozen_manifest = {
+        "checkpoint": {"config_sha256": "frozen-config",
+                       "model_files_sha256": {"model.safetensors": "weight-hash"}},
+        **({"interface_policy": "schema",
+            "interface_render_profile": module.toolmemory.INTERFACE_RENDER_PROFILE,
+            "full_control_policy": FULL_CONTROL_POLICY}
+           if interface_policy == "schema" else {}),
+    }
     monkeypatch.setattr(module, "read_manifest", lambda *_: (
-        {"checkpoint": {"config_sha256": "frozen-config",
-                        "model_files_sha256": {"model.safetensors": "weight-hash"}}},
-        {("d", 8): pair}))
+        frozen_manifest, {("d", 8): pair}))
     monkeypatch.setattr(module, "_source_rows", lambda *_: {"d": source})
     sent = []
     failures = {}
@@ -187,7 +202,8 @@ def test_evaluate_stages_full_history_through_shared_http_adapter(tmp_path, monk
                                            "c2kv_key_hash": "hash"})
             staged["messages"].extend(payload["messages"])
             staged["case"] = {"method": "c2kv" if self.spec.encoder == "t0" else self.spec.encoder,
-                              "layout": layout, "target": target_resident_tokens}
+                              "layout": layout, "target": target_resident_tokens,
+                              "spec_interface_policy": self.spec.interface_policy}
             return staged, SimpleNamespace(info={"native_indices": native})
 
     monkeypatch.setattr(module, "SglangClient", FakeClient)
@@ -195,7 +211,7 @@ def test_evaluate_stages_full_history_through_shared_http_adapter(tmp_path, monk
     failures[("h2o", "hybrid")] = RuntimeError("bad request")
     report = module.evaluate(manifest_path, tmp_path, tmp_path / "out",
                              upstream="http://localhost:30000", max_new_tokens=32,
-                             methods=("c2kv", "h2o"))
+                             methods=("c2kv", "h2o"), interface_policy=interface_policy)
     assert report["status"] == "completed_with_errors"
     assert report["result_rows"] == 7
     assert report["grouped_metrics"] == []
@@ -205,38 +221,75 @@ def test_evaluate_stages_full_history_through_shared_http_adapter(tmp_path, monk
     failures.clear()
     report = module.evaluate(manifest_path, tmp_path, tmp_path / "out",
                              upstream="http://localhost:30000", max_new_tokens=32,
-                             methods=("c2kv", "h2o"), resume=True)
+                             methods=("c2kv", "h2o"), resume=True,
+                             interface_policy=interface_policy)
     rows = [json.loads(line) for line in (tmp_path / "out" / "results.jsonl").read_text(
         encoding="utf-8").splitlines()]
     assert report["status"] == "completed"
     assert report["result_rows"] == len(rows) == 8
     assert report["selected_unique_decisions"] == 1
     assert report["selected_decision_ratio_groups"] == 1
-    assert set(report["client_source_sha256"]) == {
+    expected_sources = {
         "benchmarks/tool_definition/evaluate.py", "benchmarks/tool_definition/core.py",
         "benchmarks/tool_definition/prepare.py", "benchmarks/toolmemory.py",
         "benchmarks/backends/sglang.py"}
+    if interface_policy == "schema":
+        expected_sources.update(("benchmarks/toolinterface.py", "benchmarks/toolmemory_joint.py"))
+        assert report["interface_render_profile"] == module.toolmemory.INTERFACE_RENDER_PROFILE
+        assert report["full_control_policy"] == FULL_CONTROL_POLICY
+    else:
+        assert "interface_render_profile" not in report
+        assert "full_control_policy" not in report
+    assert set(report["client_source_sha256"]) == expected_sources
+    raw_rows = [json.loads(line) for line in (tmp_path / "out" / "raw_responses.jsonl").read_text(
+        encoding="utf-8").splitlines()]
+    assert all(row.get("interface_policy", "none") == interface_policy for row in raw_rows)
+    if interface_policy == "schema":
+        assert all(row.get("full_control_policy") == FULL_CONTROL_POLICY for row in raw_rows)
+    else:
+        assert all("full_control_policy" not in row for row in raw_rows)
     assert "engine_source_revision_unverified" in report["server_identity_scope"]
     assert len(sent) == 9
     assert report["server_model_info"]["c2kv_native_packed"]["tool_gist"]["identity"] == "tool-id"
     assert all(row["outcome"]["strict_ordered_call_correct"] for row in rows)
     assert all(row["full_generation_active_kv_tokens"] == 100 for row in rows)
+    assert all(row.get("interface_policy", "none") == interface_policy for row in rows)
     assert next(row for row in rows if row["layout"] == "full")["R_tool"] == 1
     assert next(row for row in rows if row["method"] == "h2o" and row["layout"] == "random")[
         "budget_status"] == "exceeds_allowance"
+    assert sent[0]["case"]["spec_interface_policy"] == "none"
+    assert all(request["case"]["spec_interface_policy"] == interface_policy
+               for request in sent[1:])
     assert sent[0]["c2kv_kv_memory_hint"]["paper_measurement"]["history_message_count"] == 2
     assert sent[1]["c2kv_kv_memory_hint"]["paper_measurement"]["history_message_count"] == 3
     assert all(request["c2kv_kv_memory_hint"]["paper_measurement"][
         "canonical_source_messages"] == sent[0]["messages"] for request in sent)
+    with pytest.raises(ValueError, match="evaluation interface policy differs"):
+        module.evaluate(manifest_path, tmp_path, tmp_path / "out",
+                        upstream="http://localhost:30000", max_new_tokens=32,
+                        methods=("c2kv", "h2o"), resume=True,
+                        interface_policy="none" if interface_policy == "schema" else "schema")
+    if interface_policy == "schema":
+        original_sha256_file = module.sha256_file
+        with monkeypatch.context() as patcher:
+            patcher.setattr(module, "sha256_file", lambda path: (
+                "changed-toolinterface-source" if path.name == "toolinterface.py" else
+                original_sha256_file(path)))
+            with pytest.raises(ValueError, match="resume run contract differs"):
+                module.evaluate(manifest_path, tmp_path, tmp_path / "out",
+                                upstream="http://localhost:30000", max_new_tokens=32,
+                                methods=("c2kv", "h2o"), resume=True,
+                                interface_policy="schema")
     with pytest.raises(ValueError, match="run contract differs"):
         module.evaluate(manifest_path, tmp_path, tmp_path / "out",
                         upstream="http://localhost:30000", max_new_tokens=64,
-                        methods=("c2kv", "h2o"), resume=True)
+                        methods=("c2kv", "h2o"), resume=True,
+                        interface_policy=interface_policy)
     failures[("h2o", "hybrid")] = module.UpstreamUnavailable("server exited")
     with pytest.raises(module.UpstreamUnavailable):
         module.evaluate(manifest_path, tmp_path, tmp_path / "interrupted",
                         upstream="http://localhost:30000", max_new_tokens=32,
-                        methods=("c2kv", "h2o"))
+                        methods=("c2kv", "h2o"), interface_policy=interface_policy)
     interrupted = json.loads((tmp_path / "interrupted" / "evaluation.json").read_text(
         encoding="utf-8"))
     assert interrupted["status"] == "interrupted"
@@ -246,7 +299,8 @@ def test_evaluate_stages_full_history_through_shared_http_adapter(tmp_path, monk
     failures.clear()
     resumed = module.evaluate(manifest_path, tmp_path, tmp_path / "interrupted",
                               upstream="http://localhost:30000", max_new_tokens=32,
-                              methods=("c2kv", "h2o"), resume=True)
+                              methods=("c2kv", "h2o"), resume=True,
+                              interface_policy=interface_policy)
     assert resumed["status"] == "completed" and resumed["result_rows"] == 8
 
     reject_malformed_history[0] = True
@@ -260,14 +314,12 @@ def test_evaluate_stages_full_history_through_shared_http_adapter(tmp_path, monk
                          "prompt_sha256": bad_fingerprint}
                 for layout, record in pair.items()}
     monkeypatch.setattr(module, "read_manifest", lambda *_: (
-        {"checkpoint": {"config_sha256": "frozen-config",
-                        "model_files_sha256": {"model.safetensors": "weight-hash"}}},
-        {("bad-history", 8): bad_pair, ("d", 8): pair}))
+        frozen_manifest, {("bad-history", 8): bad_pair, ("d", 8): pair}))
     monkeypatch.setattr(module, "_source_rows", lambda *_: {
         "bad-history": bad_source, "d": source})
     malformed = module.evaluate(manifest_path, tmp_path, tmp_path / "malformed",
                                 upstream="http://localhost:30000", max_new_tokens=32,
-                                methods=("c2kv", "h2o"))
+                                methods=("c2kv", "h2o"), interface_policy=interface_policy)
     assert malformed["status"] == "completed_with_errors"
     assert malformed["result_rows"] == 8
     assert malformed["expected_rows"] == 16
