@@ -155,7 +155,7 @@ def pack_layout(
         interfaces = toolmemory.executable_interfaces(
             snapshots, (), remaining, native, len(snapshots), spec)
         protocol, _ = toolmemory.protocol_with_interfaces(
-            native_tools, interfaces, structured=True)
+            native_tools, interfaces, structured=True, label_indices=True)
         prefix, workspace = _render(messages, native_tools, tokenizer, protocol=protocol)
     else:
         prefix, workspace = _render(messages, native_tools, tokenizer)
@@ -163,7 +163,9 @@ def pack_layout(
     if compressed:
         source_chunks = toolmemory.document_chunks(
             lambda value: native_ids(tokenizer, value),
-            toolmemory.t0_documents(snapshots, compressed), spec,
+            (toolmemory.description_documents(snapshots, compressed)
+             if interface_policy == "schema" else
+             toolmemory.t0_documents(snapshots, compressed)), spec,
         )
         chunks = tuple(EncoderChunk(chunk.event_id, chunk.part_index, (),
                                     chunk.source_token_start, chunk.source_token_end,

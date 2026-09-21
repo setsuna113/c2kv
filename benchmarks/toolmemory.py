@@ -40,7 +40,8 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 try:
-    from toolinterface import InterfaceCopy, interface_copy
+    from toolinterface import (InterfaceCopy, compact_tool, description_document,
+                               interface_copy, json_string_value_spans, tool_prose)
 except ModuleNotFoundError:
     # The history runtime imports this file by path under a synthetic module
     # name, without adding benchmarks/ to sys.path.
@@ -54,7 +55,11 @@ except ModuleNotFoundError:
     sys.modules[_interface_name] = _interface_module
     _interface_spec.loader.exec_module(_interface_module)
     InterfaceCopy = _interface_module.InterfaceCopy
+    compact_tool = _interface_module.compact_tool
+    description_document = _interface_module.description_document
     interface_copy = _interface_module.interface_copy
+    json_string_value_spans = _interface_module.json_string_value_spans
+    tool_prose = _interface_module.tool_prose
 
 TOOL_MEMORY_SCHEMA = "c2kv.tool_memory.v1"
 RENDER_PROFILE = "next-compression-tool-explicit-protocol-v2"
@@ -66,7 +71,8 @@ SUPPORTED_RATIOS = (8, 12)
 # walker that classifies history must skip messages carrying it.
 CARRIER_MARK = "c2kv_tool_memory"
 INTERFACE_BLOCK_HEAD = "\n# Executable tool interfaces\n"
-INTERFACE_RENDER_PROFILE = "tool-schema-catalog-frame-v2"
+INTERFACE_RENDER_PROFILE = "tool-schema-split-v3"
+DESCRIPTION_DOCUMENT_PROFILE = "tool-description-only-v1"
 
 # next_compression/tools.py TOOL_PROTOCOL_HEAD / TOOL_PROTOCOL_TAIL, verbatim.
 TOOL_PROTOCOL_HEAD = (
@@ -151,6 +157,7 @@ class ToolMemorySpec:
         if self.interface_policy != "none":
             result["interface_policy"] = self.interface_policy
             result["interface_render_profile"] = INTERFACE_RENDER_PROFILE
+            result["description_document_profile"] = DESCRIPTION_DOCUMENT_PROFILE
         return result
 
 
@@ -379,17 +386,20 @@ def resolve_visible_tool_spans(payload: Mapping[str, Any]) -> Tuple[VisibleToolS
 
 def remove_visible_spans(messages: Sequence[Mapping[str, Any]],
                          spans: Sequence[VisibleToolSpan],
-                         removed_indices: Sequence[int]) -> List[Dict[str, Any]]:
+                         removed_indices: Sequence[int], *,
+                         placeholder_indices: Optional[Sequence[int]] = None) -> List[Dict[str, Any]]:
     """Replace compressed intervals only; retain surrounding text verbatim."""
     out = [dict(message) for message in messages]
     removed = set(removed_indices)
+    placeholders = removed if placeholder_indices is None else set(placeholder_indices)
     for span_index in reversed(range(len(spans))):
         if span_index not in removed:
             continue
         span = spans[span_index]
         content = out[span.message_index]["content"]
+        replacement = source_span_placeholder(span) if span_index in placeholders else ""
         out[span.message_index]["content"] = (
-            content[:span.start] + source_span_placeholder(span) + content[span.end:])
+            content[:span.start] + replacement + content[span.end:])
     return out
 
 
@@ -430,6 +440,13 @@ def t0_documents(snapshots: Sequence[Any], indices: Sequence[int]) -> Tuple[Dict
                  for index in indices)
 
 
+def description_documents(snapshots: Sequence[Any],
+                          indices: Sequence[int]) -> Tuple[Dict[str, Any], ...]:
+    """Versioned T0 inputs: prose and positional binding metadata only."""
+    return tuple(document for index in indices
+                 if (document := description_document(snapshots[index], int(index))) is not None)
+
+
 def protocol_block(native_tools: Sequence[Any]) -> str:
     schemas = "".join("\n" + json.dumps(tool, ensure_ascii=False, separators=(",", ":"),
                                         allow_nan=False)
@@ -440,24 +457,17 @@ def protocol_block(native_tools: Sequence[Any]) -> str:
 def executable_interfaces(snapshots: Sequence[Any], spans: Sequence[VisibleToolSpan],
                           compressed: Sequence[int], native: Sequence[int], n_structured: int,
                           spec: ToolMemorySpec) -> Dict[int, InterfaceCopy]:
-    """Protect catalog interfaces and full native source docs in the system.
-
-    Structured catalog interfaces have a stable source frame across hybrid
-    selections. Native definitions still remain full; their compact interface
-    copies are deliberate, separately counted raw overhead.
-    """
+    """Render each compressed interface, and each moved source, exactly once."""
     if spec.interface_policy != "schema":
         return {}
     copies = {
         index: interface_copy(
             snapshots[index],
             source_text=spans[index - n_structured].text if index >= n_structured else None)
-        for index in sorted(set(compressed) | set(range(n_structured)))
+        for index in compressed
     }
     for index in native:
         if index >= n_structured:
-            # A top-k source span may later be removed by history selection.
-            # Its full visible document must remain available independently.
             copies[index] = InterfaceCopy(spans[index - n_structured].text, True,
                                           "native_source_full")
     return dict(sorted(copies.items()))
@@ -465,7 +475,7 @@ def executable_interfaces(snapshots: Sequence[Any], spans: Sequence[VisibleToolS
 
 def protocol_with_interfaces(native_tools: Sequence[Any],
                              copies: Mapping[int, InterfaceCopy], *,
-                             structured: bool) -> Tuple[str, Tuple[Dict[str, Any], ...]]:
+                             structured: bool, label_indices: bool = False) -> Tuple[str, Tuple[Dict[str, Any], ...]]:
     """Build protocol text and character intervals for its protected copies."""
     base = protocol_block(native_tools) if structured else ""
     if not copies:
@@ -476,6 +486,8 @@ def protocol_with_interfaces(native_tools: Sequence[Any],
     intervals = []
     for index, copy in copies.items():
         prefix += "\n"
+        if label_indices:
+            prefix += f"[tool_index:{index}]\n"
         start = len(prefix)
         prefix += copy.text
         intervals.append({"catalog_index": index, "start": start, "end": len(prefix),
@@ -645,6 +657,18 @@ def plan_visible_tool_memory(payload: Mapping[str, Any], spec: ToolMemorySpec,
         snapshots.append(visible_tool_snapshot(span))
     native = (native_indices(snapshots, spec, messages) if native_override is None
               else tuple(sorted(int(index) for index in native_override)))
+    opaque = []
+    if spec.interface_policy == "schema":
+        # Unknown producer formats have no safe interface/prose split. Keep
+        # their original source intact and never send it through the encoder.
+        for source_index, span in enumerate(spans):
+            try:
+                parsed = json.loads(span.text)
+            except (TypeError, ValueError):
+                parsed = None
+            if compact_tool(parsed) is None:
+                opaque.append(len(tools) + source_index)
+        native = tuple(sorted(set(native) | set(opaque)))
     if len(set(native)) != len(native) or any(index < 0 or index >= len(snapshots) for index in native):
         raise ValueError("native tool indices must be unique catalog indices")
     native_set = set(native)
@@ -654,6 +678,12 @@ def plan_visible_tool_memory(payload: Mapping[str, Any], spec: ToolMemorySpec,
     compressed_sources = tuple(index - n_structured for index in compressed if index >= n_structured)
     interfaces = executable_interfaces(snapshots, spans, compressed, native,
                                         n_structured, spec)
+    documents = (description_documents(snapshots, compressed)
+                 if spec.interface_policy == "schema" else t0_documents(snapshots, compressed))
+    document_indices = {int(document["tool_index"]) for document in documents}
+    anchored_sources = (tuple(index for index in compressed_sources
+                              if n_structured + index in document_indices)
+                        if spec.interface_policy == "schema" else compressed_sources)
     anchors = [{
         "catalog_index": n_structured + span_index,
         "message_index": spans[span_index].message_index,
@@ -662,23 +692,27 @@ def plan_visible_tool_memory(payload: Mapping[str, Any], spec: ToolMemorySpec,
         "source": spans[span_index].source,
         "identity": source_span_identity(spans[span_index]),
         "placeholder": source_span_placeholder(spans[span_index]),
-    } for span_index in compressed_sources]
+    } for span_index in anchored_sources]
     if spec.encoder == "t0":
         if tokenizer is None:
             raise ValueError("T0 planning needs the checkpoint tokenizer")
         native_tools = [snapshots[index] for index in native if index < n_structured]
         protocol, interface_intervals = protocol_with_interfaces(
-            native_tools, interfaces, structured=bool(n_structured))
-        rewritten = remove_visible_spans(messages, spans, compressed_sources)
+            native_tools, interfaces, structured=bool(n_structured),
+            label_indices=spec.interface_policy == "schema")
+        removed_sources = (tuple(range(len(spans))) if spec.interface_policy == "schema"
+                           else compressed_sources)
+        rewritten = remove_visible_spans(
+            messages, spans, removed_sources,
+            placeholder_indices=(anchored_sources if spec.interface_policy == "schema" else None))
         if protocol:
             rewritten = with_protocol_system(rewritten, protocol)
             # Inserting a leading system message shifts source anchors.
             if not messages or messages[0].get("role") != "system":
                 for anchor in anchors:
                     anchor["rewritten_message_index"] = anchor["message_index"] + 1
-        chunks = (document_chunks(tokenizer.native_ids,
-                                  t0_documents(snapshots, compressed), spec)
-                  if compressed and not retrieval_only else [])
+        chunks = (document_chunks(tokenizer.native_ids, documents, spec)
+                  if documents and not retrieval_only else [])
         system_only = [m for m in messages if m.get("role") == "system"][:1] or [
             {"role": "system", "content": ""}]
         protocol_prefix = [m for m in rewritten if m.get("role") == "system"][:1]
@@ -687,7 +721,10 @@ def plan_visible_tool_memory(payload: Mapping[str, Any], spec: ToolMemorySpec,
         if interfaces:
             baseline_protocol = protocol_block(native_tools) if n_structured else ""
             baseline_messages = with_protocol_system(
-                remove_visible_spans(messages, spans, compressed_sources), baseline_protocol)
+                remove_visible_spans(
+                    messages, spans, removed_sources,
+                    placeholder_indices=(anchored_sources if spec.interface_policy == "schema" else None)),
+                baseline_protocol)
             baseline_prefix = [m for m in baseline_messages if m.get("role") == "system"][:1] or [
                 {"role": "system", "content": ""}]
             interface_copy_tokens = (len(tokenizer.native_ids(protocol_prefix))
@@ -697,8 +734,9 @@ def plan_visible_tool_memory(payload: Mapping[str, Any], spec: ToolMemorySpec,
         interface_spans = locate_interface_spans(rewritten, protocol, interface_intervals)
         expected_gist_tokens = sum(expected_gist_len(len(chunk.token_ids), spec.ratio)
                                    for chunk in chunks)
-        native_source_tokens = sum(_isolated_content_tokens(tokenizer, spans[index].text)
-                                   for index in range(len(spans)) if index not in compressed_sources)
+        native_source_tokens = (0 if spec.interface_policy == "schema" else
+                                sum(_isolated_content_tokens(tokenizer, spans[index].text)
+                                    for index in range(len(spans)) if index not in compressed_sources))
         resident_tool_tokens = protocol_tokens + expected_gist_tokens + native_source_tokens
     else:
         protocol = ""
@@ -715,6 +753,8 @@ def plan_visible_tool_memory(payload: Mapping[str, Any], spec: ToolMemorySpec,
         "interface_policy": spec.interface_policy,
         **({"interface_render_profile": INTERFACE_RENDER_PROFILE}
            if spec.interface_policy == "schema" else {}),
+        **({"description_document_profile": DESCRIPTION_DOCUMENT_PROFILE}
+           if spec.interface_policy == "schema" else {}),
         "ranker": RANKER, "render_profile": RENDER_PROFILE if spec.encoder == "t0" else "native-raw-kv",
         "representation": "t0_gist" if spec.encoder == "t0" else "selected_raw_kv",
         "action_protocol": "benchmark_original" if spans and not tools else "structured_tool_call",
@@ -722,7 +762,7 @@ def plan_visible_tool_memory(payload: Mapping[str, Any], spec: ToolMemorySpec,
         "n_tools": len(snapshots), "n_structured_tools": n_structured,
         "n_visible_source_spans": len(spans), "n_native": len(native),
         "all_native": not compressed,
-        "native_indices": list(native), "n_documents": len(compressed) if spec.encoder == "t0" else 0,
+        "native_indices": list(native), "n_documents": len(documents) if spec.encoder == "t0" else 0,
         "n_chunks": len(chunks), "compressed_tool_indices": list(compressed_tools),
         "compressed_source_indices": list(compressed_sources),
         "source_status": "visible" if spans else ("structured_tools" if tools else "no_visible_definition"),
@@ -733,9 +773,10 @@ def plan_visible_tool_memory(payload: Mapping[str, Any], spec: ToolMemorySpec,
         "resident_tool_tokens": resident_tool_tokens,
         "interface_copy_tokens": interface_copy_tokens,
         "n_protected_interfaces": len(interfaces),
-        "n_interface_fallbacks": sum(copy.reason == "opaque_full" for copy in interfaces.values()),
-        "interface_fallback_indices": [index for index, copy in interfaces.items()
-                                       if copy.reason == "opaque_full"],
+        "n_interface_fallbacks": len(opaque) + sum(
+            copy.reason == "opaque_full" for copy in interfaces.values()),
+        "interface_fallback_indices": sorted(set(opaque) | {
+            index for index, copy in interfaces.items() if copy.reason == "opaque_full"}),
         "n_native_source_interface_copies": sum(
             copy.reason == "native_source_full" for copy in interfaces.values()),
         "native_source_interface_copy_indices": [index for index, copy in interfaces.items()
@@ -926,41 +967,90 @@ def prepare_raw_tool_plan(payload: Mapping[str, Any], plan: VisibleToolPlan,
         visible_tool_snapshot(span) for span in plan.source_spans]
     native = set(plan.info["native_indices"])
     compressed = tuple(index for index in range(len(snapshots)) if index not in native)
-    interfaces = executable_interfaces(snapshots, plan.source_spans,
-                                        compressed, tuple(sorted(native)), len(tools), spec)
+    if spec.interface_policy == "schema":
+        # The structured protocol is the sole full structured copy. Source
+        # definitions move into the same system frame exactly once; their
+        # prose values alone are eligible for raw-KV selection.
+        interfaces = {
+            len(tools) + index: InterfaceCopy(source.text, True,
+                "native_source_full" if len(tools) + index in native else "raw_source_full")
+            for index, source in enumerate(plan.source_spans)
+        }
+        rewritten_original = remove_visible_spans(
+            original, plan.source_spans, tuple(range(len(plan.source_spans))),
+            placeholder_indices=())
+    else:
+        interfaces = executable_interfaces(snapshots, plan.source_spans,
+                                            compressed, tuple(sorted(native)), len(tools), spec)
+        rewritten_original = original
     protocol, interface_intervals = protocol_with_interfaces(
-        tools, interfaces, structured=bool(tools))
+        tools, interfaces, structured=bool(tools),
+        label_indices=spec.interface_policy == "schema")
     plan.protocol = protocol
-    plan.messages = with_protocol_system(original, protocol)
-    plan.interface_spans = locate_interface_spans(
+    plan.messages = with_protocol_system(rewritten_original, protocol)
+    all_interface_spans = locate_interface_spans(
         plan.messages, protocol, interface_intervals)
-    baseline = with_protocol_system(original, protocol_block(tools) if tools else "")
+    plan.interface_spans = (tuple(span for span in all_interface_spans
+                                  if span["catalog_index"] in native)
+                            if spec.interface_policy == "schema" else all_interface_spans)
+    baseline = with_protocol_system(rewritten_original, protocol_block(tools) if tools else "")
     baseline_prefix = (baseline[:1] if baseline and baseline[0].get("role") == "system"
                        else [{"role": "system", "content": ""}])
     plan.info["interface_copy_tokens"] = (
         len(tokenizer.native_ids(plan.messages[:1]))
         - len(tokenizer.native_ids(baseline_prefix))) if interfaces else 0
     plan.info["protected_interface_spans"] = list(plan.interface_spans)
-    shift = int(bool(protocol) and (not original or original[0].get("role") != "system"))
     spans = []
-    if tools:
+    full_structured_spans = []
+    if protocol:
         content = plan.messages[0]["content"]
         start = content.rfind(protocol)
         if start < 0:
-            raise ToolMemoryError("raw_protocol", "the complete native catalog protocol is missing")
+            raise ToolMemoryError("raw_protocol", "the tool protocol is missing")
         plan.info["tool_protocol_span"] = {"message_index": 0, "start": start,
                                             "end": start + len(protocol), "text": protocol}
+    if tools:
         cursor = start + len(TOOL_PROTOCOL_HEAD)
         for index, tool in enumerate(tools):
             text = json.dumps(tool, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
             cursor += 1  # protocol_block puts a newline before each schema.
-            spans.append({"schema_index": index, "message_index": 0,
-                          "start": cursor, "end": cursor + len(text), "text": text})
+            full_structured_spans.append({"schema_index": index, "message_index": 0,
+                                          "start": cursor, "end": cursor + len(text),
+                                          "text": text})
+            if spec.interface_policy == "schema":
+                paths = {tuple(item["path"]) for item in tool_prose(tool)}
+                for value_span in json_string_value_spans(text, paths):
+                    spans.append({"schema_index": index, "message_index": 0,
+                                  "start": cursor + value_span["start"],
+                                  "end": cursor + value_span["end"],
+                                  "text": value_span["text"]})
+            else:
+                spans.append({"schema_index": index, "message_index": 0,
+                              "start": cursor, "end": cursor + len(text), "text": text})
             cursor += len(text)
-    for index, source in enumerate(plan.source_spans):
-        spans.append({"schema_index": len(tools) + index,
-                      "message_index": source.message_index + shift,
-                      "start": source.start, "end": source.end, "text": source.text})
+    if spec.interface_policy == "schema":
+        for source_span in all_interface_spans:
+            index = source_span["catalog_index"]
+            if index in native:
+                continue
+            paths = {tuple(item["path"]) for item in tool_prose(snapshots[index])}
+            for value_span in json_string_value_spans(source_span["text"], paths):
+                spans.append({"schema_index": index, "message_index": 0,
+                              "start": source_span["start"] + value_span["start"],
+                              "end": source_span["start"] + value_span["end"],
+                              "text": value_span["text"]})
+    else:
+        shift = int(bool(protocol) and (not original or original[0].get("role") != "system"))
+        for index, source in enumerate(plan.source_spans):
+            spans.append({"schema_index": len(tools) + index,
+                          "message_index": source.message_index + shift,
+                          "start": source.start, "end": source.end, "text": source.text})
+    if spec.interface_policy == "schema" and tools and not spans:
+        # The engine requires an exact schema span to issue an eviction receipt.
+        # With no selectable prose, full structured schemas are protected and
+        # the engine reports its supported all-protected no-op.
+        spans.extend(full_structured_spans)
+        plan.info["raw_noop_schema_indices"] = list(range(len(tools)))
     for span in spans:
         content = plan.messages[span["message_index"]].get("content")
         if not isinstance(content, str) or content[span["start"]:span["end"]] != span["text"]:
@@ -1163,11 +1253,14 @@ class ToolMemory:
                 out["c2kv_use_gist_projection"] = False
                 return out
             hint = dict(out.get("c2kv_kv_memory_hint") or {})
+            protected_schema_indices = (set(plan.info["native_indices"])
+                                        | set(plan.info.get("raw_noop_schema_indices") or ()))
+            spanned_schema_indices = {span["schema_index"] for span in schema_spans}
             hint["tool_kv_eviction"] = {
                 "method": self.spec.encoder,
                 "schema_spans": list(schema_spans),
-                "protected_schema_indices": [index for index in plan.info["native_indices"]
-                                             if index in {span["schema_index"] for span in schema_spans}],
+                "protected_schema_indices": sorted(protected_schema_indices
+                                                   & spanned_schema_indices),
                 **({"protected_interface_spans": list(plan.interface_spans)}
                    if self.spec.interface_policy == "schema" else {}),
                 "target_resident_tokens_per_layer": plan.info["target_resident_tokens_per_layer"],

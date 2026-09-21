@@ -463,7 +463,7 @@ def _text_source_tool_plan(payload: Dict[str, Any], arm: Arm):
         return payload, None
     stripped = dict(payload)
     stripped["messages"] = toolmemory.remove_visible_spans(
-        payload["messages"], plan.source_spans, plan.info["compressed_source_indices"])
+        payload["messages"], plan.source_spans, range(len(plan.source_spans)))
     stripped.pop(toolmemory.TOOL_SPANS_FIELD, None)
     return stripped, plan
 
@@ -479,14 +479,16 @@ def _finish_text_source_tool_plan(payload: Dict[str, Any], plan):
         raise toolmemory.ToolMemoryError("interface_assembly", "protected tool protocol is missing")
     delta = new_start - old_start
     if isinstance(plan, toolmemory.VisibleToolPlan):
-        structured = plan.info["n_structured_tools"]
+        def in_protocol(span):
+            return (span["message_index"] == 0 and span["start"] >= old_start
+                    and span["end"] <= old_start + len(plan.protocol))
         plan.info["pre_text_source_omitted_schema_indices"] = sorted(
             set(plan.info.get("pre_text_source_omitted_schema_indices") or ())
             | {span["schema_index"] for span in plan.raw_schema_spans
-               if span["schema_index"] >= structured})
+               if not in_protocol(span)})
         plan.raw_schema_spans = tuple(
             {**span, "start": span["start"] + delta, "end": span["end"] + delta}
-            for span in plan.raw_schema_spans if span["schema_index"] < structured)
+            for span in plan.raw_schema_spans if in_protocol(span))
         if "tool_protocol_span" in plan.info:
             span = plan.info["tool_protocol_span"]
             plan.info["tool_protocol_span"] = {

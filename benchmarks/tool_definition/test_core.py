@@ -70,7 +70,7 @@ def test_retrieval_only_fits_matched_total_kv_allowance_and_spans_partition_tool
         4, seed=42, decision_id=row["decision_id"])
 
 
-def test_schema_interface_preserves_complete_t0_chunks_and_top_k_native_schemas():
+def test_schema_interface_encodes_only_prose_and_keeps_top_k_native_once():
     row, tokenizer = decision([]), CharacterTokenizer()
     original = pack_layout(row, tokenizer, layout="hybrid", ratio=8, k=1)
     schema = pack_layout(row, tokenizer, layout="hybrid", ratio=8, k=1,
@@ -80,13 +80,18 @@ def test_schema_interface_preserves_complete_t0_chunks_and_top_k_native_schemas(
     assert schema["full_control_policy"] == FULL_CONTROL_POLICY
     assert "interface_render_profile" not in original
     assert schema["native_indices"] == original["native_indices"]
-    assert schema["memory"]["chunks"] == original["memory"]["chunks"]
+    assert schema["memory"]["chunks"] != original["memory"]["chunks"]
+    for chunk in schema["memory"]["chunks"]:
+        text = "".join(chr(token - 1) for token in chunk["token_ids"])
+        assert 'tool_description' in text
+        assert '"parameters"' not in text
+        assert '"name"' not in text
     assert schema["memory"]["workspace_input_ids"] == original["memory"]["workspace_input_ids"]
-    assert schema["resident_kv_tokens"] > original["resident_kv_tokens"]
     protocol = "".join(chr(token - 1) for token in schema["memory"]["system_input_ids"])
     assert "# Executable tool interfaces" in protocol
     for index in range(len(row["tools"])):
-        assert row["tools"][index]["function"]["name"] in protocol
+        name = row["tools"][index]["function"]["name"]
+        assert protocol.count('"name":"' + name + '"') == 1
     retrieved = retrieval_layout(row, tokenizer, ratio=8,
                                  allowance_tokens=schema["resident_kv_tokens"], k=1,
                                  interface_policy="schema")

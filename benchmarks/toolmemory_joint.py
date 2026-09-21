@@ -203,7 +203,10 @@ def prepare_joint_raw_tool_history(
     selectable: set[int] = set()
     source_spans = []
     for span in staged_hint.get("schema_spans") or []:
-        if int(span["schema_index"]) >= n_structured:
+        inside_protocol = (int(span["message_index"]) == int(protocol["message_index"])
+                           and int(span["start"]) >= int(protocol["start"])
+                           and int(span["end"]) <= int(protocol["end"]))
+        if not inside_protocol:
             source_spans.append(span)
             continue
         if int(span["schema_index"]) in native:

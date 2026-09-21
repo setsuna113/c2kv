@@ -1,6 +1,7 @@
 """Joint raw tool/history requests carry one independent KV policy each."""
 from __future__ import annotations
 
+import json
 import sys
 import os
 from pathlib import Path
@@ -38,7 +39,8 @@ class CharacterTokenizer:
 
 
 def _fixture(tmp_path, method="h2o", *, native=False, tool_turn=False,
-             visible_source=False, system="Follow instructions.", query="Lookup now"):
+             visible_source=False, source_text=None, system="Follow instructions.",
+             query="Lookup now"):
     tokenizer = CharacterTokenizer()
     tool = {"type": "function", "function": {
         "name": "lookup", "description": "long prose " * 20,
@@ -56,11 +58,11 @@ def _fixture(tmp_path, method="h2o", *, native=False, tool_turn=False,
                 "name": "lookup", "arguments": '{"key":"old"}'}}]}
         messages.insert(3, {"role": "tool", "tool_call_id": "call-1",
                             "content": "old result"})
-    if visible_source:
-        source = "run_tool(source: str) -> result; keep this executable signature"
+    if visible_source or source_text is not None:
+        source = source_text or "run_tool(source: str) -> result; keep this executable signature"
         messages[-1]["content"] += "\n" + source
     payload = {"tools": [tool], "messages": messages}
-    if visible_source:
+    if visible_source or source_text is not None:
         payload[toolmemory.TOOL_SPANS_FIELD] = [{
             "message_index": len(messages) - 1,
             "start": messages[-1]["content"].index(source),
@@ -163,7 +165,7 @@ def test_non_joint_history_keeps_tool_hint_after_backend_shaping(tmp_path):
     assert "history_kv_eviction" in prepared["c2kv_kv_memory_hint"]
 
 
-def test_non_joint_c2kv_history_remaps_visible_source_after_gist_carrier(tmp_path):
+def test_non_joint_c2kv_history_keeps_relocated_source_in_protocol(tmp_path):
     _, plan, staged, _, backend, _ = _fixture(tmp_path, visible_source=True)
     staged["messages"] = list(staged["messages"])
     staged["messages"].insert(1, {"role": "user", "content": "",
@@ -178,9 +180,13 @@ def test_non_joint_c2kv_history_remaps_visible_source_after_gist_carrier(tmp_pat
                           constrain_tools=False, repair=False)
     prepared = backend.prepare_chat(staged, arm, None)
     remapped = prepared["c2kv_kv_memory_hint"]["tool_kv_eviction"]
-    source = next(span for span in remapped["schema_spans"] if span["schema_index"] == 1)
-    assert source["message_index"] == len(staged["messages"]) - 2
-    assert staged["messages"][-1]["content"][source["start"]:source["end"]] == source["text"]
+    source = next(span for span in remapped["protected_interface_spans"]
+                  if span["catalog_index"] == 1)
+    assert source["message_index"] == 0
+    assert staged["messages"][0]["content"][source["start"]:source["end"]] == source["text"]
+    assert staged["messages"][0]["content"].count(source["text"]) == 1
+    assert source["text"] not in staged["messages"][-1]["content"]
+    assert all(span["schema_index"] != 1 for span in remapped["schema_spans"])
     assert remapped["tool_protocol_span"]["message_index"] == 0
 
 
@@ -206,20 +212,58 @@ def test_joint_handles_assistant_tool_calls_with_null_content(tmp_path):
     assert final["messages"][1]["c2kv_region"] == "tool"
 
 
-def test_joint_counts_retained_opaque_source_outside_protocol_once(tmp_path):
+def test_joint_counts_relocated_opaque_source_in_protocol_once(tmp_path):
     owner, plan, staged, prepared, backend, calls = _fixture(
         tmp_path, visible_source=True)
     final = toolmemory_joint.prepare_joint_raw_tool_history(
         staged, prepared, plan, owner.tokenizer, backend)
     audit = final["c2kv_kv_memory_hint"]["joint_tool_memory"]
-    assert audit["retained_source_span_count"] == 1
-    assert audit["retained_source_tool_tokens"] > 0
-    assert audit["raw_source_fallback_count"] == 1
-    assert audit["resident_tool_tokens_accounting"] == "pre_history_eviction_upper_bound"
+    source = plan.source_spans[0].text
+    assert plan.protocol.count(source) == 1
+    assert source not in final["messages"][-1]["content"]
+    assert audit["retained_source_span_count"] == 0
+    assert audit["retained_source_tool_tokens"] == 0
+    assert audit["raw_source_fallback_count"] == 0
+    assert audit["resident_tool_tokens_accounting"] == "exact"
     assert audit["active_tool_protocol_tokens"] == audit["selected_protocol_tokens"]
-    assert audit["resident_tool_tokens"] == (
-        audit["selected_protocol_tokens"] + audit["retained_source_tool_tokens"])
+    assert audit["resident_tool_tokens"] == audit["selected_protocol_tokens"]
     assert len(calls) == 1
+
+
+def test_joint_selects_migrated_source_prose_with_structured_prose(tmp_path):
+    source_prose = "Source-only explanation " * 20
+    parameter_prose = "Source query annotation " * 20
+    source = json.dumps({"name": "source_lookup", "description": source_prose,
+                         "parameters": {"type": "object", "properties": {
+                             "query": {"type": "string", "description": parameter_prose}}}},
+                        separators=(",", ":"))
+    owner, plan, staged, prepared, backend, calls = _fixture(
+        tmp_path, source_text=source)
+    hint = staged["c2kv_kv_memory_hint"]["tool_kv_eviction"]
+    source_spans = [span for span in hint["schema_spans"] if span["schema_index"] == 1]
+    assert {json.loads(span["text"]) for span in source_spans} == {
+        source_prose, parameter_prose}
+    assert all(span["message_index"] == 0 for span in source_spans)
+    assert plan.protocol.count(source) == 1
+    assert source not in staged["messages"][-1]["content"]
+
+    final = toolmemory_joint.prepare_joint_raw_tool_history(
+        staged, prepared, plan, owner.tokenizer, backend)
+    assert len(calls) == 1
+    _, repair = calls[0]
+    selectable = set(repair["history_kv_selectable_relative_indices"])
+    rendered = owner.tokenizer.apply_chat_template(
+        plan.messages, tokenize=False, add_generation_prompt=True)
+    for prose in (source_prose, parameter_prose, "long prose " * 20):
+        start = rendered.index(prose) - repair["span_start"]
+        assert set(range(start, start + len(prose))) <= selectable
+    name = '"name":"source_lookup"'
+    start = rendered.index(name) - repair["span_start"]
+    assert not set(range(start, start + len(name))) & selectable
+    audit = final["c2kv_kv_memory_hint"]["joint_tool_memory"]
+    assert audit["selectable_protocol_tokens"] == len(selectable)
+    assert audit["retained_source_span_count"] == 0
+    assert audit["raw_source_fallback_count"] == 0
 
 
 def test_joint_keeps_repair_extract_history_carrier_independent(tmp_path):
@@ -323,8 +367,7 @@ def test_joint_real_qwen_token_frame(gist_history):
     assert calls and final["messages"][1]["c2kv_source_token_count"] > 0
 
 
-@pytest.mark.parametrize("retained_source", [False, True])
-def test_joint_source_only_protocol_remains_raw_and_counted(tmp_path, retained_source):
+def test_joint_source_only_protocol_remains_raw_and_counted(tmp_path):
     tokenizer = CharacterTokenizer()
     signature = "run_tool(path: str) -> result"
     content = "Current request: " + signature
@@ -342,11 +385,7 @@ def test_joint_source_only_protocol_remains_raw_and_counted(tmp_path, retained_s
     plan = owner.plan(payload)
     plan.info["joint_history_assembly"] = True
     plan.info["joint_tool_target_tokens_per_layer"] = plan.info["matched_resident_tool_tokens"]
-    staged_messages = [dict(message) for message in plan.messages]
-    if not retained_source:
-        staged_messages[3]["content"] = "Current request"
-        plan.assembled_schema_spans = ()
-    staged = owner.stage_request({"messages": staged_messages, "tools": []}, plan)
+    staged = owner.stage_request({"messages": plan.messages, "tools": []}, plan)
     arm = SimpleNamespace(name="history", history_kv={"method": "h2o"},
                           kv_reuse=None, constrain_tools=False, repair=False)
     history = {"spec": {"method": "h2o", "backend": "physical_eviction",
@@ -362,9 +401,12 @@ def test_joint_source_only_protocol_remains_raw_and_counted(tmp_path, retained_s
         staged, prepared, plan, tokenizer, backend)
     audit = final["c2kv_kv_memory_hint"]["joint_tool_memory"]
     assert plan.protocol in final["messages"][0]["content"]
+    assert final["messages"][0]["content"].count(signature) == 1
+    assert signature not in final["messages"][-1]["content"]
     assert "tool_kv_eviction" not in final["c2kv_kv_memory_hint"]
     assert audit["selection_backend"] == "raw_full_no_repair"
     assert audit["active_tool_protocol_tokens"] > 0
-    assert audit["retained_source_span_count"] == int(retained_source)
-    assert audit["resident_tool_tokens"] == (
-        audit["active_tool_protocol_tokens"] + audit["retained_source_tool_tokens"])
+    assert audit["retained_source_span_count"] == 0
+    assert audit["retained_source_tool_tokens"] == 0
+    assert audit["resident_tool_tokens_accounting"] == "exact"
+    assert audit["resident_tool_tokens"] == audit["active_tool_protocol_tokens"]

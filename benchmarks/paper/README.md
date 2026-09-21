@@ -90,14 +90,18 @@ freezes inputs, sends requests and scores returned actions.
 Use `--interface-policy schema` on both `prepare` and `evaluate` to freeze
 and verify that interface choice in the manifest and every recorded layout.
 Schema manifests and records also pin `interface_render_profile` to
-`tool-schema-catalog-frame-v2`. Every structured tool keeps a compact raw
-interface, including a top-k native tool whose full schema is retained too.
-The interface cost is counted in resident KV. Earlier schema manifests without
-this profile must be prepared again; their results cannot be reused as v2.
+`tool-schema-split-v3`. Each executable interface is retained once. T0 encodes
+only descriptive annotations for compressed tools; selected native tools keep
+their full definition once. Opaque source definitions stay full and are not
+also compressed. This changes the encoder input representation without
+retraining the checkpoint; benchmark effectiveness must be measured anew.
+The raw-interface cost is counted in resident KV. Earlier additive-schema
+manifests must be prepared again; their results cannot be reused as v3.
 Selection-based tool baselines use native prefill followed by headwise pruning and a final
 prompt-token forward pass. This does not reduce initial prefill work.
-Only schema-interior tokens are eligible for eviction; history, protocol
-scaffolding, selected native schemas and tokens crossing schema boundaries
+With `:schema`, only descriptive annotation value tokens are eligible for
+eviction. History, executable schema fields, protocol scaffolding, selected
+native schemas and tokens crossing annotation boundaries
 remain resident. H2O accumulates attention over all prefill queries before
 the held-out final prompt token; SnapKV observes the last 16 such queries.
 The runtime receipt records that query range and verifies that the first
@@ -176,9 +180,9 @@ The opt-in `:schema` tool interface policy has separate context names and
 provenance in `config.json`: `t0_r8_hybrid3_schema` and
 `h2o_r8_hybrid3_schema`. Select either with `--tool-contexts`; the runner
 adds cells across Full, text-history, history-KV, and native C2KV arms while
-preserving every default cell. The top-3 native schemas stay complete and also
-carry compact raw interfaces; with T0, each remaining tool keeps its complete
-compressed definition and a raw executable interface. The H2O context selects
+preserving every default cell. The top-3 native schemas stay complete once;
+with T0, each remaining tool keeps a raw executable interface and only its
+descriptive annotations are compressed. The H2O context selects
 raw tool KV and uses the configured checkpoint directory as a tokenizer source;
 it does not load
 tool-gist projection weights. These opt-in

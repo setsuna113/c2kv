@@ -1,4 +1,4 @@
-"""Executable tool interfaces remain raw while full definitions follow each encoder."""
+"""Schema split keeps execution data once and encodes descriptive prose only."""
 from __future__ import annotations
 
 import copy
@@ -13,45 +13,37 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import toolinterface  # noqa: E402
 import toolmemory  # noqa: E402
-from test_toolmemory import FakeTokenizer, TOOLS, memory, write_t0_checkpoint  # noqa: E402
+from test_toolmemory import TOOLS, memory  # noqa: E402
 
 
 @pytest.mark.parametrize("encoder", toolmemory.ENCODERS)
-@pytest.mark.parametrize("layout", ["", ":uniform", ":hybrid1"])
-def test_schema_policy_is_opt_in_and_has_distinct_identity(encoder, layout):
-    default = toolmemory.parse_tool_memory_spec(f"{encoder}:r8{layout}")
-    protected = toolmemory.parse_tool_memory_spec(f"{encoder}:r8{layout}:schema")
-    assert default.interface_policy == "none"
-    assert protected.interface_policy == "schema"
-    assert protected.name == default.name + "_schema"
-    assert protected.as_dict()["interface_policy"] == "schema"
-    assert "interface_policy" not in default.as_dict()
-    assert default.name == (f"{encoder}_r8_hybrid1" if layout == ":hybrid1"
-                            else f"{encoder}_r8")
+def test_schema_profile_is_versioned_and_default_is_untouched(encoder):
+    default = toolmemory.parse_tool_memory_spec(f"{encoder}:r8:hybrid1")
+    split = toolmemory.parse_tool_memory_spec(f"{encoder}:r8:hybrid1:schema")
+    assert default.name + "_schema" == split.name
+    assert "interface_render_profile" not in default.as_dict()
+    assert "description_document_profile" not in default.as_dict()
+    assert split.as_dict()["interface_render_profile"] == "tool-schema-split-v3"
+    assert split.as_dict()["description_document_profile"] == "tool-description-only-v1"
 
 
-def test_schema_walk_preserves_executable_keys_literals_and_extensions():
-    schema = {
-        "type": "object", "title": "annotation", "description": "annotation",
-        "examples": [{"description": "annotation"}],
-        "properties": {
-            "description": {"type": "string", "description": "annotation"},
-            "title": {"type": "string", "default": {"description": "literal"}},
-            "examples": {"type": "array", "items": {"type": "string", "title": "annotation"}},
-            "mode": {"enum": [{"description": "literal", "title": "literal"}],
-                     "const": {"examples": ["literal"]}},
-            "nested": {"$ref": "#/$defs/Nested"},
-        },
-        "required": ["description", "title", "examples"],
-        "$defs": {"Nested": {"type": "object", "properties": {
-            "value": {"type": "integer", "description": "annotation"}}}},
-        "oneOf": [{"required": ["description"]}, {"required": ["title"]}],
-        "x-executable": {"description": "extension literal"},
-    }
-    tool = {"type": "function", "function": {"name": "act", "description": "prose",
+def test_schema_walk_retains_literals_and_binds_only_prose_to_compact_tree():
+    schema = {"type": "object", "title": "Input", "description": "Choose carefully",
+              "examples": [{"description": "literal example"}], "properties": {
+                  "description": {"type": "string", "description": "User message"},
+                  "title": {"type": "string", "default": {"description": "literal default"}},
+                  "mode": {"enum": [{"description": "literal enum"}],
+                           "const": {"title": "literal const"}},
+                  "nested": {"$ref": "#/$defs/Nested"}},
+              "required": ["description", "title"], "$defs": {"Nested": {
+                  "type": "object", "properties": {"value": {
+                      "type": "integer", "description": "Nested meaning"}}}},
+              "x-executable": {"description": "extension literal"}}
+    tool = {"type": "function", "function": {"name": "act", "description": "Do work",
                                            "strict": True, "parameters": schema}}
     original = copy.deepcopy(tool)
     compact = toolinterface.compact_tool(tool)
+    document = toolinterface.description_document(tool, 7)
     assert tool == original
     assert compact["function"]["name"] == "act"
     assert compact["function"]["strict"] is True
@@ -59,174 +51,204 @@ def test_schema_walk_preserves_executable_keys_literals_and_extensions():
     params = compact["function"]["parameters"]
     assert params["required"] == schema["required"]
     assert set(params["properties"]) == set(schema["properties"])
-    assert params["properties"]["title"]["default"] == {"description": "literal"}
+    assert params["properties"]["title"]["default"] == {"description": "literal default"}
     assert params["properties"]["mode"]["enum"] == schema["properties"]["mode"]["enum"]
     assert params["properties"]["mode"]["const"] == schema["properties"]["mode"]["const"]
-    assert params["properties"]["nested"]["$ref"] == "#/$defs/Nested"
-    assert params["$defs"]["Nested"]["properties"]["value"] == {"type": "integer"}
-    assert params["x-executable"] == {"description": "extension literal"}
+    assert params["examples"] == schema["examples"]
+    assert params["x-executable"] == schema["x-executable"]
+    assert document["tool_index"] == 7
+    assert {item["text"] for item in document["annotations"]} == {
+        "Do work", "Input", "Choose carefully", "User message", "Nested meaning"}
+    assert all(all(isinstance(step, int) for step in item["address"])
+               for item in document["annotations"])
+    assert "act" not in json.dumps(document)
+    assert "literal default" not in json.dumps(document)
+    # An address is resolved through the retained compact tree, after prose
+    # fields were removed; its ordinal never depends on removed siblings.
+    for item in document["annotations"]:
+        node = compact
+        for step in item["address"]:
+            node = list(node.values())[step] if isinstance(node, dict) else node[step]
+        assert item["field"] not in node
 
 
-def test_t0_schema_keeps_original_encoder_chunks_and_counts_copy_once(tmp_path):
+def test_json_span_scanner_distinguishes_identical_annotation_and_literal_values():
+    tool = {"name": "act", "description": "first", "parameters": {"type": "object",
+            "properties": {"description": {"type": "string", "description": "first"},
+                           "mode": {"default": {"description": "first"}}}}}
+    text = json.dumps(tool, indent=2)
+    paths = {tuple(item["path"]) for item in toolinterface.tool_prose(tool)}
+    spans = toolinterface.json_string_value_spans(text, paths)
+    assert len(spans) == 2
+    assert all(text[span["start"]:span["end"]] == '"first"' for span in spans)
+    assert {tuple(span["path"]) for span in spans} == {
+        ("description",), ("parameters", "properties", "description", "description")}
+
+
+def test_t0_split_uses_prose_documents_and_native_once(tmp_path):
     payload = {"messages": [{"role": "user", "content": "get_weather Paris"}],
                "tools": copy.deepcopy(TOOLS)}
     baseline = memory(tmp_path / "baseline", "t0:r8:hybrid1").plan(payload)
-    protected_memory = memory(tmp_path / "protected", "t0:r8:hybrid1:schema")
-    protected = protected_memory.plan(payload)
+    owner = memory(tmp_path / "split", "t0:r8:hybrid1:schema")
+    split = owner.plan(payload)
     assert payload["tools"] == TOOLS
-    assert protected.info["native_indices"] == baseline.info["native_indices"] == [2]
-    assert [chunk.token_ids for chunk in protected.chunks] == [
-        chunk.token_ids for chunk in baseline.chunks]
-    assert [chunk.event_id for chunk in protected.chunks] == [
-        chunk.event_id for chunk in baseline.chunks]
-    assert protected.info["n_protected_interfaces"] == len(TOOLS)
-    assert {span["catalog_index"] for span in protected.interface_spans} == {0, 1, 2}
-    assert protected.info["interface_copy_tokens"] > 0
-    assert protected.info["resident_tool_tokens"] == (
-        protected.info["protocol_prefix_tokens"] + protected.info["gist_tokens"])
-    assert protected.info["resident_tool_tokens"] > baseline.info["resident_tool_tokens"]
-    assert protected.protocol.count('"name":"get_weather"') == 2
-    for span in protected.interface_spans:
-        content = protected.messages[span["message_index"]]["content"]
-        assert content[span["start"]:span["end"]] == span["text"]
-    protected_memory.plan(payload)
-    assert protected_memory.stats["chunk_extracts"] == len(protected.chunks)
-    assert protected_memory.stats["chunk_cache_hits"] == len(protected.chunks)
+    assert split.info["native_indices"] == baseline.info["native_indices"] == [2]
+    assert split.info["n_documents"] == 2
+    assert split.info["n_protected_interfaces"] == 2
+    assert {span["catalog_index"] for span in split.interface_spans} == {0, 1}
+    assert split.protocol.count('"name":"get_weather"') == 1
+    assert split.protocol.count('"name":"book_flight"') == 1
+    assert "Book a flight" not in split.protocol
+    assert split.chunks != baseline.chunks
+    assert all(chunk.catalog_index in {0, 1} for chunk in split.chunks)
+    assert "[tool_index:0]" in split.protocol
+    assert "[tool_index:1]" in split.protocol
+    for span in split.interface_spans:
+        assert split.messages[span["message_index"]]["content"][
+            span["start"]:span["end"]] == span["text"]
+    owner.plan(payload)
+    assert owner.stats["chunk_cache_hits"] == len(split.chunks)
 
 
-def test_t0_schema_budget_includes_interface_before_extraction(tmp_path):
-    payload = {"messages": [{"role": "user", "content": "weather"}], "tools": TOOLS}
-    spec = toolmemory.parse_tool_memory_spec("t0:r8:schema")
-    pure = toolmemory.plan_visible_tool_memory(payload, spec, FakeTokenizer())
-    checkpoint = write_t0_checkpoint(tmp_path / "ckpt")
-    called = []
-    def observed(*args):
-        called.append(args)
-        raise AssertionError("budget should fail before extract")
-    owner = toolmemory.ToolMemory(spec, checkpoint, observed, FakeTokenizer(),
-                                  budget_tokens=pure.info["resident_tool_tokens"] - 1)
-    with pytest.raises(toolmemory.ToolMemoryError, match="tool_budget"):
-        owner.plan(payload)
-    assert called == []
+def test_no_prose_makes_no_t0_document_or_gist(tmp_path):
+    tool = {"type": "function", "function": {"name": "act", "parameters": {
+        "type": "object", "properties": {"x": {"type": "integer", "default": 3}}}}}
+    assert toolmemory.description_documents([tool], [0]) == ()
+    plan = memory(tmp_path, "t0:r8:schema").plan({
+        "messages": [{"role": "user", "content": "act"}], "tools": [tool]})
+    assert plan.info["n_documents"] == 0
+    assert plan.chunks == []
+    assert plan.records == []
+    assert plan.info["gist_tokens"] == 0
+    assert plan.protocol.count('"name":"act"') == 1
 
 
-def test_visible_source_is_compacted_or_preserved_with_exact_offsets(tmp_path):
+def test_blank_and_non_string_annotations_stay_raw_without_empty_gist(tmp_path):
+    tool = {"type": "function", "title": {"literal": 1}, "function": {
+        "name": "act", "description": "  ", "parameters": {
+            "type": "object", "description": "\n", "properties": {
+                "x": {"type": "integer", "title": ["literal"]}}}}}
+    assert toolinterface.compact_tool(tool) == tool
+    assert toolinterface.description_document(tool, 0) is None
+    plan = memory(tmp_path, "t0:r8:schema").plan({
+        "messages": [{"role": "user", "content": "act"}], "tools": [tool]})
+    assert plan.chunks == []
+    assert plan.records == []
+
+
+def test_source_without_prose_moves_once_without_placeholder_or_gist(tmp_path):
+    doc = json.dumps({"name": "lookup", "parameters": {"type": "object",
+                      "properties": {"id": {"type": "integer"}}}})
+    plan = memory(tmp_path, "t0:r8:schema").plan(_source_payload(doc))
+    assert plan.info["n_documents"] == 0
+    assert plan.chunks == []
+    assert plan.protocol.count('"name":"lookup"') == 1
+    assert "[Tool definition" not in plan.messages[1]["content"]
+    assert doc not in plan.messages[1]["content"]
+
+
+def test_opaque_structured_tool_is_full_once_and_not_encoded(tmp_path):
+    tool = {"api_name": "opaque_api", "description": "Producer-specific prose",
+            "parameters": [{"name": "id", "type": "integer"}]}
+    plan = memory(tmp_path, "t0:r8:schema").plan({
+        "messages": [{"role": "user", "content": "opaque_api"}], "tools": [tool]})
+    assert plan.info["n_documents"] == 0
+    assert plan.info["n_interface_fallbacks"] == 1
+    assert plan.info["interface_fallback_indices"] == [0]
+    assert plan.protocol.count('"api_name":"opaque_api"') == 1
+    assert plan.chunks == []
+
+
+def _source_payload(*docs):
+    content = "Before\n" + "\nBetween\n".join(docs) + "\nAfter"
+    annotations = []
+    cursor = 0
+    for doc in docs:
+        start = content.index(doc, cursor)
+        annotations.append({"message_index": 0, "start": start,
+                            "end": start + len(doc), "source": "producer"})
+        cursor = start + len(doc)
+    return {"messages": [{"role": "user", "content": content}],
+            toolmemory.TOOL_SPANS_FIELD: annotations}
+
+
+def test_source_moves_once_and_opaque_fallback_has_no_gist(tmp_path):
     known = json.dumps({"name": "search", "description": "long prose", "parameters": {
-        "type": "object", "properties": {"q": {"type": "string", "description": "long prose"}},
-        "required": ["q"]}})
+        "type": "object", "properties": {"q": {"type": "string",
+                                               "description": "query prose"}}}})
     opaque = "search(query: str) -> records; execute with Python"
-    content = f"Before\n{known}\nBetween\n{opaque}\nAfter"
-    payload = {"messages": [{"role": "user", "content": content}],
-               toolmemory.TOOL_SPANS_FIELD: [
-                   {"message_index": 0, "start": content.index(known),
-                    "end": content.index(known) + len(known), "source": "producer"},
-                   {"message_index": 0, "start": content.index(opaque),
-                    "end": content.index(opaque) + len(opaque), "source": "producer"}]}
-    class StrictTokenizer(FakeTokenizer):
-        def native_ids(self, messages, **kwargs):
-            assert messages, "native_ids requires a nonempty message list"
-            return super().native_ids(messages, **kwargs)
-    plan = memory(tmp_path, "t0:r8:schema", tokenizer=StrictTokenizer()).plan(payload)
-    assert plan.info["n_protected_interfaces"] == 2
+    plan = memory(tmp_path, "t0:r8:schema").plan(_source_payload(known, opaque))
+    assert plan.info["native_indices"] == [1]
     assert plan.info["n_interface_fallbacks"] == 1
     assert plan.info["interface_fallback_indices"] == [1]
-    assert opaque in [span["text"] for span in plan.interface_spans]
-    assert "long prose" not in next(span["text"] for span in plan.interface_spans
-                                    if span["catalog_index"] == 0)
+    assert plan.info["n_documents"] == 1
+    assert {chunk.catalog_index for chunk in plan.chunks} == {0}
+    assert known not in plan.protocol
+    assert "long prose" not in plan.protocol
+    assert plan.protocol.count(opaque) == 1
+    assert known not in plan.messages[1]["content"]
+    assert opaque not in plan.messages[1]["content"]
     assert "Before\n" in plan.messages[1]["content"]
     assert "\nBetween\n" in plan.messages[1]["content"]
-    assert plan.chunks[0].catalog_index == 0
-    for span in plan.interface_spans:
-        assert plan.messages[span["message_index"]]["content"][
-            span["start"]:span["end"]] == span["text"]
-
-
-def test_public_raw_adapter_matches_proxy_owner_without_checkpoint_state(tmp_path):
-    payload = {"messages": [{"role": "user", "content": "get_weather Paris"}],
-               "tools": TOOLS}
-    spec = toolmemory.parse_tool_memory_spec("h2o:r8:hybrid1:schema")
-    pure = toolmemory.plan_visible_tool_memory(payload, spec)
-    prepared = toolmemory.prepare_raw_tool_plan(payload, pure, FakeTokenizer(),
-                                                 budget_tokens=1000)
-    owner = memory(tmp_path, "h2o:r8:hybrid1:schema")
-    owned = owner.plan(payload)
-    assert prepared is pure
-    assert prepared.messages == owned.messages
-    assert prepared.raw_schema_spans == owned.raw_schema_spans
-    assert prepared.interface_spans == owned.interface_spans
-    assert prepared.info["matched_resident_tool_tokens"] == (
-        owned.info["matched_resident_tool_tokens"])
-    assert prepared.info["budget_tokens"] == 1000
+    assert plan.messages[1]["content"].count("[Tool definition") == 1
 
 
 @pytest.mark.parametrize("encoder", ["t0", "h2o"])
-def test_native_source_topk_has_full_protected_copy_when_history_drops_source(tmp_path, encoder):
-    doc = json.dumps({"name": "lookup", "description": "Execution detail must survive",
+def test_native_source_is_full_once_after_relocation(tmp_path, encoder):
+    doc = json.dumps({"name": "lookup", "description": "Execution detail",
                       "parameters": {"type": "object", "properties": {
-                          "query": {"type": "string"}}, "required": ["query"]}})
-    content = "Available: " + doc + "\nUse lookup."
-    payload = {"messages": [{"role": "user", "content": content}],
-               toolmemory.TOOL_SPANS_FIELD: [{"message_index": 0,
-                   "start": len("Available: "), "end": len("Available: ") + len(doc),
-                   "source": "producer"}]}
+                          "query": {"type": "string"}}}})
     owner = memory(tmp_path / encoder, f"{encoder}:r8:hybrid1:schema")
-    plan = owner.plan(payload)
+    plan = owner.plan(_source_payload(doc))
     assert plan.info["native_indices"] == [0]
-    assert plan.info["n_protected_interfaces"] == 1
-    assert plan.info["n_native_source_interface_copies"] == 1
-    assert plan.info["native_source_interface_copy_indices"] == [0]
-    assert plan.info["n_interface_fallbacks"] == 0
-    assert plan.info["all_native"] is True
+    assert plan.protocol.count(doc) == 1
+    assert doc not in plan.messages[1]["content"]
     assert plan.interface_spans[0]["copy_reason"] == "native_source_full"
-    assert plan.interface_spans[0]["text"] == doc
-    assert "Execution detail must survive" in plan.protocol
-    assert plan.messages[1]["content"] == content
-    # The source's original message can disappear in a later history view;
-    # the protected system copy is complete without it.
-    assert plan.messages[0]["content"].count(doc) == 1
-    if encoder == "t0":
-        assert plan.chunks == []
-        assert plan.info["resident_tool_tokens"] == (
-            plan.info["protocol_prefix_tokens"] + plan.info["native_source_tokens"])
-    else:
-        request = owner.stage_request({**payload, "messages": plan.messages}, plan)
-        hint = request["c2kv_kv_memory_hint"]["tool_kv_eviction"]
-        assert hint["protected_interface_spans"][0]["text"] == doc
-        assert hint["protected_schema_indices"] == [0]
-        assert hint["schema_spans"][0]["text"] == doc
+    assert plan.chunks == []
 
 
 @pytest.mark.parametrize("method", ["streamingllm", "h2o", "snapkv", "pyramidkv"])
-def test_raw_schema_keeps_full_spans_evictable_and_protects_copy(tmp_path, method):
+def test_raw_structured_once_and_only_prose_value_spans(tmp_path, method):
     payload = {"tools": copy.deepcopy(TOOLS),
                "messages": [{"role": "user", "content": "get_weather Paris"}]}
-    owner = memory(tmp_path, f"{method}:r8:hybrid1:schema")
-    request, plan = owner.prepare_full_history_request(payload)
+    request, plan = memory(tmp_path, f"{method}:r8:hybrid1:schema").prepare_full_history_request(payload)
     hint = request["c2kv_kv_memory_hint"]["tool_kv_eviction"]
-    assert hint["protected_schema_indices"] == [2]
+    assert plan.protocol.count('"name":"get_weather"') == 1
+    assert plan.info["interface_copy_tokens"] == 0
+    assert plan.interface_spans == ()
     assert len(hint["schema_spans"]) == len(TOOLS)
-    assert {span["catalog_index"] for span in hint["protected_interface_spans"]} == {0, 1, 2}
-    assert plan.info["n_protected_interfaces"] == len(TOOLS)
-    assert plan.info["matched_resident_tool_tokens"] > 0
-    assert plan.info["target_resident_tokens_per_layer"] > 0
-    for span in [*hint["schema_spans"], *hint["protected_interface_spans"]]:
+    assert {span["schema_index"] for span in hint["schema_spans"]} == set(range(len(TOOLS)))
+    assert hint["protected_schema_indices"] == [2]
+    for span in hint["schema_spans"]:
         content = request["messages"][span["message_index"]]["content"]
         assert content[span["start"]:span["end"]] == span["text"]
-    assert all("description" in span["text"] for span in hint["schema_spans"])
-    assert all("Book a flight" not in span["text"] for span in hint["protected_interface_spans"])
-    assert request["tools"] == TOOLS
+        assert json.loads(span["text"]) in {
+            "Book a flight", "Cancel an order", "Weather for a city"}
 
 
-def test_raw_hybrid_source_protocol_is_stable_when_native_tool_changes(tmp_path):
-    owner = memory(tmp_path, "h2o:r8:hybrid1:schema")
-    plans = []
-    for query in ("book_flight", "get_weather"):
-        plans.append(owner.plan({"tools": copy.deepcopy(TOOLS),
-                                 "messages": [{"role": "user", "content": query}]}))
-    assert plans[0].info["native_indices"] != plans[1].info["native_indices"]
-    assert plans[0].protocol == plans[1].protocol
-    assert plans[0].info["interface_render_profile"] == toolmemory.INTERFACE_RENDER_PROFILE
-    assert plans[0].info["interface_copy_tokens"] > 0
+def test_raw_source_once_and_only_description_values_selectable(tmp_path):
+    doc = json.dumps({"name": "lookup", "description": "Find records", "parameters": {
+        "type": "object", "properties": {"q": {"type": "string",
+                                               "description": "Search query"}}}})
+    payload = _source_payload(doc)
+    request, plan = memory(tmp_path, "h2o:r8:schema").prepare_full_history_request(payload)
+    hint = request["c2kv_kv_memory_hint"]["tool_kv_eviction"]
+    assert plan.protocol.count(doc) == 1
+    assert doc not in request["messages"][1]["content"]
+    assert len(hint["schema_spans"]) == 2
+    assert {json.loads(span["text"]) for span in hint["schema_spans"]} == {
+        "Find records", "Search query"}
+    assert all(span["message_index"] == 0 for span in hint["schema_spans"])
+    assert hint["tool_protocol_span"]["text"] == plan.protocol
+
+
+def test_default_none_keeps_full_document_and_protocol(tmp_path):
+    plan = memory(tmp_path, "t0:r8:hybrid1").plan({
+        "messages": [{"role": "user", "content": "get_weather"}], "tools": TOOLS})
+    assert plan.protocol == toolmemory.protocol_block([TOOLS[2]])
+    assert [chunk.catalog_index for chunk in plan.chunks] == [0, 1]
+    assert all("tool" in document and document["type"] == "tool_definition"
+               for document in toolmemory.t0_documents(TOOLS, [0, 1]))
 
 
 def test_path_import_finds_sibling_helper_without_benchmarks_on_sys_path():

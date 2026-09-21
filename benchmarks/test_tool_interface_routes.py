@@ -1,6 +1,7 @@
 """Schema interface survives the paper proxy's history-method request paths."""
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -37,6 +38,35 @@ def _stage(memory, payload, arm, monkeypatch):
     return request, plan, counts
 
 
+def _wire(tool):
+    return json.dumps(tool, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+
+
+def _assert_structured_catalog_once(request, tools, native_indices, *, t0):
+    system = request["messages"][0]["content"]
+    actor = "\n".join(message.get("content") or "" for message in request["messages"])
+    for index, tool in enumerate(tools):
+        full = _wire(tool)
+        expected = (full if not t0 or index in native_indices else
+                    toolmemory.interface_copy(tool).text)
+        assert system.count(expected) == actor.count(expected) == 1
+        if t0 and index not in native_indices and expected != full:
+            assert full not in actor
+
+
+def _assert_source_moved_once(request, doc, *, t0):
+    system = request["messages"][0]["content"]
+    actor = "\n".join(message.get("content") or "" for message in request["messages"])
+    if t0:
+        compact = toolmemory.interface_copy(json.loads(doc)).text
+        assert actor.count(compact) == system.count(compact) == 1
+        assert doc not in actor
+    else:
+        assert actor.count(doc) == system.count(doc) == 1
+    assert all(doc not in (message.get("content") or "")
+               for message in request["messages"][1:])
+
+
 @pytest.mark.parametrize("arm_name", ["acon_hist_ut_co", "hiagent_full"])
 @pytest.mark.parametrize("spec", ["t0:r8:hybrid3:schema", "h2o:r8:hybrid3:schema"])
 def test_schema_interface_is_preserved_after_text_policy(
@@ -69,19 +99,25 @@ def test_schema_interface_is_preserved_after_text_policy(
     assert request["tools"] == transformed["tools"]
     assert request["c2kv_tools_in_prompt"] is False
     assert plan.info["interface_policy"] == "schema"
-    assert plan.info["n_protected_interfaces"] >= 1
     assert counts["tool_memory"]["spec"].endswith("_schema")
     system = request["messages"][0]["content"]
-    assert "# Executable tool interfaces" in system
+    _assert_structured_catalog_once(request, transformed["tools"],
+                                    plan.info["native_indices"], t0=spec.startswith("t0:"))
     if spec.startswith("t0:"):
+        assert "# Executable tool interfaces" in system
+        assert plan.info["n_protected_interfaces"] == (
+            len(transformed["tools"]) - len(plan.info["native_indices"]))
         assert any("c2kv_key_hash" in msg for msg in request["messages"])
     else:
+        assert "# Executable tool interfaces" not in system
         hint = request["c2kv_kv_memory_hint"]["tool_kv_eviction"]
         assert hint["method"] == "h2o"
-        assert len(hint["protected_interface_spans"]) >= 1
-        for span in hint["protected_interface_spans"]:
+        assert hint["protected_interface_spans"] == []
+        assert hint["schema_spans"]
+        for span in hint["schema_spans"]:
             text = request["messages"][span["message_index"]]["content"]
             assert text[span["start"]:span["end"]] == span["text"]
+            assert '"parameters"' not in span["text"]
 
 
 @pytest.mark.parametrize("arm_name", ["full", "c2kv4", "history_kv_h2o_r25_persistent"])
@@ -99,14 +135,15 @@ def test_schema_interface_survives_history_assembly(tmp_path, monkeypatch, arm_n
     selected = memory(tmp_path, "t0:r8:hybrid1:schema", FakeTokenizer())
     request, plan, counts = _stage(selected, source, get_arm(arm_name), monkeypatch)
     assert request["c2kv_tools_in_prompt"] is False
-    assert plan.info["n_protected_interfaces"] == len(TOOLS)
+    assert plan.info["n_protected_interfaces"] == len(TOOLS) - len(plan.info["native_indices"])
     assert any("c2kv_key_hash" in message for message in request["messages"])
     assert "# Executable tool interfaces" in request["messages"][0]["content"]
+    _assert_structured_catalog_once(request, TOOLS, plan.info["native_indices"], t0=True)
     assert counts["tool_memory"]["spec"] == "t0_r8_hybrid1_schema"
 
 
 @pytest.mark.parametrize("spec", ["t0:r8:schema", "h2o:r8:schema"])
-def test_dropped_source_keeps_protected_interface_and_t0_full_chunks(
+def test_dropped_source_keeps_one_interface_and_t0_prose_chunks(
     tmp_path, monkeypatch, spec,
 ):
     payload, doc = _annotated_source()
@@ -124,10 +161,17 @@ def test_dropped_source_keeps_protected_interface_and_t0_full_chunks(
     request = owner.stage_request({**payload, "messages": assembled}, plan)
     assert counts["dropped_docs"] > 0
     assert "# Executable tool interfaces" in request["messages"][0]["content"]
-    assert doc not in request["messages"][0]["content"]
+    _assert_source_moved_once(request, doc, t0=spec.startswith("t0:"))
     if spec.startswith("t0:"):
         assert counts["tool_memory"]["source_prefix_fallback_indices"] == [0]
         assert len(plan.chunks) == len(plan.records)
+        prose = toolmemory.description_document(json.loads(doc), 0)
+        assert prose is not None
+        assert [annotation["text"] for annotation in prose["annotations"]] == [
+            "Full unchanged execution details"]
+        expected = toolmemory.document_chunks(owner.tokenizer.native_ids, (prose,), owner.spec)
+        assert [chunk.token_ids for chunk in plan.chunks] == [
+            chunk.token_ids for chunk in expected]
         assert [message["c2kv_key_hash"] for message in request["messages"]
                 if message.get("c2kv_region") == "tool"] == [
                     record["key_hash"] for record in plan.records]
@@ -136,14 +180,16 @@ def test_dropped_source_keeps_protected_interface_and_t0_full_chunks(
                        (message for message in request["messages"]
                         if message.get("c2kv_region") == "tool"), plan.chunks))
     else:
-        assert counts["tool_memory"]["omitted_history_schema_indices"] == [0]
-        assert plan.assembled_schema_spans == ()
-        assert "tool_kv_eviction" not in request.get("c2kv_kv_memory_hint", {})
-        assert plan.info["raw_tool_eviction"] == "skipped_no_retained_schema"
+        assert counts["tool_memory"]["omitted_history_schema_indices"] == []
+        hint = request["c2kv_kv_memory_hint"]["tool_kv_eviction"]
+        assert {span["schema_index"] for span in hint["schema_spans"]} == {0}
+        assert all(span["message_index"] == 0 and
+                   span["text"] == '"Full unchanged execution details"'
+                   for span in hint["schema_spans"])
 
 
 def test_rewritten_source_retains_raw_interface_but_not_stale_offsets(tmp_path, monkeypatch):
-    payload, _ = _annotated_source()
+    payload, doc = _annotated_source()
     monkeypatch.setattr(proxy, "DOC_PACKING", "turn")
     monkeypatch.setattr(proxy, "MAX_DOC_NUM", 100)
     monkeypatch.setattr(proxy, "_count_extract_tokens", lambda role, text: len(text))
@@ -156,10 +202,13 @@ def test_rewritten_source_retains_raw_interface_but_not_stale_offsets(tmp_path, 
     assembled, counts = proxy._assemble_request(plan.messages, get_arm("c2kv4"))
     request = owner.stage_request({**payload, "messages": assembled}, plan)
     assert counts["dropped_docs"] == 0
-    assert counts["tool_memory"]["omitted_history_schema_indices"] == [0]
+    assert counts["tool_memory"]["omitted_history_schema_indices"] == []
     assert plan.info["native_source_interface_copy_indices"] == [0]
     assert "tool_kv_eviction" not in request.get("c2kv_kv_memory_hint", {})
-    assert "Full unchanged execution details" in request["messages"][0]["content"]
+    assert plan.assembled_schema_spans == ()
+    assert len(plan.interface_spans) == 1
+    assert plan.interface_spans[0]["text"] == doc
+    _assert_source_moved_once(request, doc, t0=False)
 
 
 def test_joint_history_kv_uses_tool_only_target_and_retained_schema_indices(tmp_path, monkeypatch):
@@ -182,8 +231,8 @@ def test_joint_history_kv_uses_tool_only_target_and_retained_schema_indices(tmp_
     assert "history_kv_event_messages" in counts
 
 
-def test_dropped_top_k_source_does_not_protect_an_unseen_schema(tmp_path, monkeypatch):
-    payload, _ = _annotated_source()
+def test_moved_top_k_source_protects_interface_without_evicting_it(tmp_path, monkeypatch):
+    payload, doc = _annotated_source()
     payload["tools"] = TOOLS
     monkeypatch.setattr(proxy, "DOC_PACKING", "turn")
     monkeypatch.setattr(proxy, "MAX_DOC_NUM", 1)
@@ -198,10 +247,13 @@ def test_dropped_top_k_source_does_not_protect_an_unseen_schema(tmp_path, monkey
     assembled, counts = proxy._assemble_request(plan.messages, get_arm("c2kv4"))
     request = owner.stage_request({**payload, "messages": assembled}, plan)
     hint = request["c2kv_kv_memory_hint"]["tool_kv_eviction"]
-    assert counts["tool_memory"]["omitted_history_schema_indices"] == [len(TOOLS)]
+    assert counts["tool_memory"]["omitted_history_schema_indices"] == []
     assert {span["schema_index"] for span in hint["schema_spans"]} == set(range(len(TOOLS)))
     assert hint["protected_schema_indices"] == []
-    assert "Full unchanged execution details" in request["messages"][0]["content"]
+    assert {span["catalog_index"] for span in hint["protected_interface_spans"]} == {
+        len(TOOLS)}
+    _assert_source_moved_once(request, doc, t0=False)
+    _assert_structured_catalog_once(request, TOOLS, plan.info["native_indices"], t0=False)
 
 
 @pytest.mark.parametrize("arm_name", ["acon_hist_ut_co", "hiagent_full"])
@@ -232,7 +284,7 @@ def test_text_summary_plans_annotated_tools_before_rewriting_history(
     request = owner.stage_request({**finished, "messages": assembled}, plan)
     actor_content = "\n".join(message.get("content") or ""
                               for message in request["messages"])
-    assert doc not in actor_content
+    _assert_source_moved_once(request, doc, t0=spec.startswith("t0:"))
     assert "# Executable tool interfaces" in request["messages"][0]["content"]
     assert counts["tool_memory"]["source_history_order"] == "tool_documents_before_text_history"
     assert counts["tool_memory"]["source_history_placement"] == (
@@ -251,6 +303,7 @@ def test_text_summary_plans_annotated_tools_before_rewriting_history(
             "compressed_source_chunks_at_prefix" if spec.startswith("t0:")
             else "protected_interfaces_at_prefix")
         assert retry_request["messages"][0]["content"].count("# Executable tool interfaces") == 1
+        _assert_source_moved_once(retry_request, doc, t0=spec.startswith("t0:"))
     if spec.startswith("t0:"):
         assert counts["tool_memory"]["n_source_prefix_fallbacks"] == 1
         assert any(message.get("c2kv_region") == "tool" for message in request["messages"])
@@ -258,6 +311,10 @@ def test_text_summary_plans_annotated_tools_before_rewriting_history(
                 if message.get("c2kv_region") == "tool"] == [
                     record["key_hash"] for record in plan.records]
     else:
-        assert counts["tool_memory"]["n_omitted_history_schemas"] == 1
-        assert all(span["schema_index"] < plan.info["n_structured_tools"]
+        assert counts["tool_memory"]["n_omitted_history_schemas"] == 0
+        source_index = plan.info["n_structured_tools"]
+        assert any(span["schema_index"] == source_index and span["message_index"] == 0
                    for span in plan.assembled_schema_spans)
+        assert all(span["text"] == '"Full unchanged execution details"'
+                   for span in plan.assembled_schema_spans
+                   if span["schema_index"] == source_index)

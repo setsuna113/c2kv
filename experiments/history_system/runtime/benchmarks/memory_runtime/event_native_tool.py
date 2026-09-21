@@ -293,10 +293,12 @@ class ToolRegionController:
             raise ValueError("Protected tool protocol has no native tokens")
         start, end = protocol_indices[0], protocol_indices[-1] + 1
         message_start = plan.messages[0]["content"].rfind(plan.protocol)
-        native = set(plan.info["native_indices"])
+        native = (set(plan.info["native_indices"])
+                  | set(plan.info.get("raw_noop_schema_indices") or ()))
         selectable = set()
         for span in plan.raw_schema_spans:
-            if span["schema_index"] >= len(payload.get("tools") or []):
+            if (span["message_index"] != 0 or span["start"] < message_start
+                    or span["end"] > message_start + len(plan.protocol)):
                 continue
             if span["schema_index"] in native:
                 continue
