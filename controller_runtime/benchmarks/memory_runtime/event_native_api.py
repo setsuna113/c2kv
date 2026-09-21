@@ -18,6 +18,7 @@ from urllib.parse import urlsplit
 from .event_native import EventStore
 from .always_compress import CapacityInfeasible
 from .event_native_controls import describe_event_native_route
+from .tokenization import serving_tools
 
 
 _REQUEST_FIELDS = frozenset({
@@ -454,6 +455,12 @@ class EventNativeAPI:
         ):
             raise EventNativeAPIError(400, "invalid_tools", "tools must be a list of objects")
         tool_snapshot = [copy.deepcopy(dict(tool)) for tool in tools]
+        try:
+            # Match the full SGLang chat-template tool prologue without
+            # changing the source request or its original tool definitions.
+            model_tools = serving_tools(tool_snapshot) or []
+        except (KeyError, TypeError, ValueError) as error:
+            raise EventNativeAPIError(400, "invalid_tools", str(error)) from error
 
         # Event IDs are rendered into exact evidence, so their session prefix
         # must be stable across independently hosted arm/run processes.  The
@@ -468,7 +475,7 @@ class EventNativeAPI:
             "outer_request_id": self._outer_request_id(
                 session_id=session_id, user_turn=user_turn, step=step),
             "messages": message_snapshot,
-            "tools": tool_snapshot,
+            "tools": model_tools,
             **({"recovery_disabled": True} if recovery_disabled is True else {}),
             **source_fields,
         }
