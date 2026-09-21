@@ -310,7 +310,7 @@ def test_ready_manifest_binds_loaded_controller_and_candidate_variant(
             with pytest.raises(RuntimeError, match="candidate controller identity"):
                 native_extra.validate_ready_manifest(config, "acebench_agent", "task_1", ready, controller)
             manifest["candidate_algorithm"][field] = original
-    if variant in VERIFIED_VARIANTS:
+    if variant in VERIFIED_VARIANTS or initial_view_fields(variant).get("proof_registry_version"):
         manifest["candidate_algorithm"]["proof_registry_version"] = "stale-proof-registry"
         ready.write_text(json.dumps(manifest), encoding="utf-8")
         with pytest.raises(RuntimeError, match="candidate controller identity"):

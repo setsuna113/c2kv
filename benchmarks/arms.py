@@ -471,6 +471,22 @@ ARMS: Dict[str, Arm] = {
             description="Ratio-8 static initial view with unchanged Goal Pending review",
         ),
         Arm(
+            name="c2kv_goal_verified_static_r8",
+            compress_history=True,
+            ratio=8,
+            query_projection="base",
+            native_controller="candidate_goal_verified_static",
+            description="Ratio-8 static initial view with Goal recovery and verified-field commits",
+        ),
+        Arm(
+            name="c2kv_pending_verified_static_r8",
+            compress_history=True,
+            ratio=8,
+            query_projection="base",
+            native_controller="candidate_pending_verified_static",
+            description="Ratio-8 static initial view with Pending review and verified-field commits",
+        ),
+        Arm(
             name="hiagent",
             compress_history=False,
             text_policy="hiagent",

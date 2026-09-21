@@ -191,7 +191,8 @@ def _candidate_ready_contract(candidate):
             initial_view=copy.deepcopy(candidate['initial_view']),
             recovery_backbone=candidate['recovery_backbone'],
         )
-    if variant in VERIFIED_VARIANTS:
+    if (variant in VERIFIED_VARIANTS
+            or candidate.get('recovery_backbone') in VERIFIED_VARIANTS):
         from .candidate_algorithms.verified_binding import PROOF_REGISTRY_VERSION
         identity['proof_registry_version'] = PROOF_REGISTRY_VERSION
     return identity, version + ':' + variant

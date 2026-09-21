@@ -9,6 +9,7 @@ from . import (
     INITIAL_VIEW_BACKBONES,
     INITIAL_VIEW_POLICY_VERSION,
     INITIAL_VIEW_VERSION,
+    VERIFIED_VARIANTS,
 )
 from .allocation import CandidateAllocator
 from .controller import wrap_with_candidate_recovery
@@ -34,6 +35,10 @@ def validate_initial_view_config(candidate: Mapping[str, Any]) -> str:
         raise ValueError(
             f"{variant} requires initial_view={STATIC_INITIAL_VIEW!r}"
         )
+    if backbone in VERIFIED_VARIANTS:
+        from .verified_binding import PROOF_REGISTRY_VERSION
+        if candidate.get("proof_registry_version") != PROOF_REGISTRY_VERSION:
+            raise ValueError(f"{variant} requires the frozen proof registry version")
     if "risk_artifact" not in candidate:
         raise ValueError(f"{variant} requires risk_artifact")
     threshold = candidate.get("risk_threshold")
