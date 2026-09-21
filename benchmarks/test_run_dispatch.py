@@ -454,14 +454,15 @@ class _FakeProc:
         self.killed = True
 
 
-def _stub_run(monkeypatch, tmp_path, summary, arm="c2kv", extra_argv=()):
+def _stub_run(monkeypatch, tmp_path, summary, arm="c2kv", extra_argv=(),
+              request_rows=None):
     """main() with the proxy stubbed out and one adapter replaced."""
     proc = _FakeProc()
     log = tmp_path / "proxy.jsonl"
-    log.write_text(json.dumps({"status": "ok", "conv_id": "a", "wall_sec": 1.0,
-                               "n_docs": 3, "dropped_docs": 0,
-                               "c2kv_query_proj": "gist"}) + "\n",
-                   encoding="utf-8")
+    rows = request_rows or [{"status": "ok", "conv_id": "a", "wall_sec": 1.0,
+                             "n_docs": 3, "dropped_docs": 0,
+                             "c2kv_query_proj": "gist"}]
+    log.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
     seen = {}
 
     def fake_start_proxy(upstream, arm_, port, log_dir, **kwargs):
@@ -523,6 +524,17 @@ def test_main_text_arm_adds_textarm_summary(monkeypatch, tmp_path):
     written = json.loads((tmp_path / "outdir_ab12cd3" / "summary_hiagent.json")
                          .read_text(encoding="utf-8"))
     assert written["textarm_summary"]["textarm_requests"] == 0
+
+
+def test_main_text_arm_surfaces_duplicate_retrieval_outputs(monkeypatch, tmp_path):
+    _stub_run(monkeypatch, tmp_path, {"n": 0}, arm="hiagent", request_rows=[{
+        "status": "ok", "conv_id": "a", "wall_sec": 1.0,
+        "n_docs": 0, "dropped_docs": 0,
+        "textarm": {"duplicate_retrieval_attempts": [{}, {}]},
+    }])
+    written = json.loads((tmp_path / "outdir_ab12cd3" / "summary_hiagent.json")
+                         .read_text(encoding="utf-8"))
+    assert written["textarm_summary"]["duplicate_retrieval_attempts"] == 2
 
 
 def test_main_records_reference_flags_in_the_summary(monkeypatch, tmp_path):

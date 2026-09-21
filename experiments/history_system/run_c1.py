@@ -205,12 +205,12 @@ def _build_profile_unbudgeted(args: argparse.Namespace) -> tuple[dict, dict]:
         )
     if args.method == "c2kv_native":
         import native_bare
-        if args.selector_artifact is not None or args.ratio != 4:
-            raise ValueError("Native bare C2KV requires ratio4 and no selector artifact")
+        if args.selector_artifact is not None or args.ratio not in (4, 8):
+            raise ValueError("Native bare C2KV requires ratio4 or ratio8 and no selector artifact")
         actual = hashlib.sha256((args.checkpoint / "config.json").read_bytes()).hexdigest()
         if actual != current.load_config()["checkpoint_selection"]["config_sha256"]:
             raise ValueError("Native bare delivery requires the selected C1000 checkpoint")
-        return {}, dict(native_bare.profile(), checkpoint=str(args.checkpoint.resolve()),
+        return {}, dict(native_bare.profile(args.ratio), checkpoint=str(args.checkpoint.resolve()),
                         checkpoint_config_sha256=actual, automatic_reruns=0)
     if args.method == "c2kv_only":
         if args.selector_artifact is not None:
@@ -338,7 +338,7 @@ def _history_budget_override(args: argparse.Namespace, design: dict | None = Non
     if tokens is None:
         return None
     if args.method == "c2kv_native":
-        raise ValueError("--history-budget-tokens does not support c2kv_native_r4 static packing")
+        raise ValueError("--history-budget-tokens does not support native bare static packing")
     if args.benchmark != "bfcl":
         raise ValueError("--history-budget-tokens currently supports BFCL only")
     import history_budget
@@ -402,7 +402,8 @@ def _model_name(args: argparse.Namespace) -> str:
     if getattr(args, "candidate_algorithm", None) is not None:
         return f"c2kv_{args.candidate_algorithm}"
     if args.method == "c2kv_native":
-        return "c2kv_native_r4"
+        import native_bare
+        return native_bare.arm_for_ratio(args.ratio)
     return "c2kv_only" if args.method == "c2kv_only" else f"c1_{args.detector}"
 
 
@@ -451,7 +452,7 @@ def commands_for_task(args: argparse.Namespace, task: str, controller_path: Path
     design["runtime"].update(controller=str(controller_path), sglang_backend_url=args.sglang_backend_url)
     if args.method == "c2kv_native":
         import native_bare
-        design = native_bare.configure_design(design)
+        design = native_bare.configure_design(design, args.ratio)
     if args.method == "c2kv_only" or getattr(args, "candidate_algorithm", None) in {
         "request_contract", "argument_binding", "no_progress"}:
         design["runtime"].pop("shadow_feature_config", None)
@@ -840,6 +841,9 @@ def run_task(args: argparse.Namespace, task: str, controller_path: Path,
                 if time.monotonic() >= deadline:
                     raise TimeoutError("Controller readiness timeout")
                 time.sleep(1)
+            if args.method == "c2kv_native":
+                import native_bare
+                native_bare.validate_manifest(ready_path, args.ratio)
             if getattr(args, "tool_memory", "none") != "none":
                 from benchmarks.memory_runtime.event_native_tool import validate_ready_tool_contract
                 validate_ready_tool_contract(
@@ -954,7 +958,7 @@ def validate_args(args: argparse.Namespace) -> list[str]:
     if budget_tokens is not None and (type(budget_tokens) is not int or budget_tokens <= 0):
         raise ValueError("--history-budget-tokens must be a positive integer")
     if budget_tokens is not None and args.method == "c2kv_native":
-        raise ValueError("--history-budget-tokens does not support c2kv_native_r4 static packing")
+        raise ValueError("--history-budget-tokens does not support native bare static packing")
     if budget_tokens is not None and args.benchmark != "bfcl":
         raise ValueError("--history-budget-tokens currently supports BFCL only")
     if args.tool_memory == "none":

@@ -25,10 +25,11 @@ from benchmarks.measurement.replay import _paper_measurement
 from .candidate_matrix import ARM_TO_VARIANT, SUPPORTED_BENCHMARKS as CANDIDATE_BENCHMARKS
 from benchmarks.arms import get_arm
 from benchmarks.native_history_budget import NativeHistoryBudget
+from experiments.history_system.native_bare import ARM_RATIOS as NATIVE_RATIOS
 from .process_lifecycle import defer_termination, unwind_on_termination
 
 ARMS = {"c2kv_c1_t02_r8": 8, "c2kv_c1_t02_r4": 4, "c2kv_c1_off_r8": 8}
-ARMS["c2kv_native_r4"] = 4
+ARMS.update(NATIVE_RATIOS)
 ARMS.update({arm: 8 for arm in ARM_TO_VARIANT})
 ARM = "c2kv_c1_t02_r8"
 RATIO = ARMS[ARM]
@@ -73,7 +74,7 @@ def delivery_args(config, benchmark, output, task_ids, delivery):
     if ARM in ARM_TO_VARIANT and benchmark not in CANDIDATE_BENCHMARKS:
         raise ValueError("candidate arms support " + ", ".join(sorted(CANDIDATE_BENCHMARKS)))
     command = [
-        "--method", ("c2kv_native" if ARM == "c2kv_native_r4" else
+        "--method", ("c2kv_native" if ARM in NATIVE_RATIOS else
                      "c2kv_only" if ARM == "c2kv_c1_off_r8" else "proposed"),
         "--checkpoint", config["checkpoint"],
         "--sglang-backend-url", config.get("upstream") or f"http://127.0.0.1:{config['server_port']}",
@@ -93,7 +94,7 @@ def delivery_args(config, benchmark, output, task_ids, delivery):
         command += ["--candidate-algorithm", ARM_TO_VARIANT[ARM]]
     else:
         command += ["--detector", detector]
-        if ARM != "c2kv_native_r4" and detector in {"t02_risk", "legacy_prefill"}:
+        if ARM not in NATIVE_RATIOS and detector in {"t02_risk", "legacy_prefill"}:
             command += ["--embedding-batch-size", str(settings.get("embedding_batch_size", 1))]
     if "native_history_budget_tokens" in config:
         budget = NativeHistoryBudget(config["native_history_budget_tokens"])
@@ -169,7 +170,7 @@ def method_label():
         return "C1 initial allocation (recovery off)"
     if ARM in ARM_TO_VARIANT:
         return f"C2KV {ARM_TO_VARIANT[ARM]}"
-    return "C2KV" if ARM == "c2kv_native_r4" else "C2KV+C1"
+    return "C2KV" if ARM in NATIVE_RATIOS else "C2KV+C1"
 
 
 def summarize_scores(benchmark, receipts):
@@ -200,7 +201,7 @@ def prepare_native(config, benchmark, directory, tasks, delivery):
                    comparison=("final system ratio8; bare C2KV ratio4 is not a detector-only ablation"
                                if RATIO == 8 else
                                "ratio-4 ablation of the final system: same controller, same ratio as bare C2KV"))
-    if ARM == "c2kv_native_r4":
+    if ARM in NATIVE_RATIOS:
         profile["comparison"] = "Independent native static gist baseline; not a detector-only C1 ablation"
     elif ARM == "c2kv_c1_off_r8":
         profile["comparison"] = "Same C1 ratio8 initial history allocation, recovery disabled"
@@ -209,6 +210,8 @@ def prepare_native(config, benchmark, directory, tasks, delivery):
     previous_profile = native / "profile.json"
     if previous_profile.is_file():
         previous = json.loads(previous_profile.read_text(encoding="utf-8"))
+        if any(previous.get(key) != profile.get(key) for key in ("arm", "method", "ratio")):
+            raise ValueError("Native arm or ratio changed; use a separate cell output directory")
         if previous.get("native_history_budget") != profile.get("native_history_budget"):
             raise ValueError("Native history budget changed; use a separate cell output directory")
     profile["sglang_backend_preflight"] = delivery.preflight_sglang_backend(args)
@@ -279,9 +282,9 @@ def run_closed_loop(config, benchmark, directory, requested=None):
                 }
                 print(json.dumps({"arm": ARM, "task": task, "status": status, "kind": kind}),
                       flush=True)
-            if ARM == "c2kv_native_r4" and receipt.get("status") == "completed":
+            if ARM in NATIVE_RATIOS and receipt.get("status") == "completed":
                 import native_bare
-                receipt["native_bare_route"] = native_bare.validate_manifest(task_root / "server" / "ready.json")
+                receipt["native_bare_route"] = native_bare.validate_manifest(task_root / "server" / "ready.json", RATIO)
             receipt["unified_metrics"] = metrics
             save(receipt_path, receipt)
         receipts.append(receipt)
@@ -478,9 +481,9 @@ def run_common_prefix(config, benchmark, directory, prefix_path):
                 from .native_extra import validate_ready_manifest
                 validate_ready_manifest(config, benchmark, task,
                                         task_root / "server" / "ready.json", controller_path)
-            elif ARM == "c2kv_native_r4":
+            elif ARM in NATIVE_RATIOS:
                 import native_bare
-                native_bare.validate_manifest(task_root / "server" / "ready.json")
+                native_bare.validate_manifest(task_root / "server" / "ready.json", RATIO)
             if config.get("tool_memory") and benchmark not in {"acebench_agent", "toolsandbox", "tau2"}:
                 from .native_extra import validate_tool_ready
                 ready = json.loads((task_root / "server" / "ready.json").read_text(encoding="utf-8"))

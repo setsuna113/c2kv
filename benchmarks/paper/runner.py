@@ -19,6 +19,7 @@ from .candidate_matrix import (
 )
 from benchmarks.history_budget import HistoryKVBudget, parse_history_kv_budget
 from benchmarks.native_history_budget import NativeHistoryBudget, parse_native_history_budget
+from experiments.history_system.native_bare import ARM_RATIOS as NATIVE_RATIOS, arm_for_ratio
 from benchmarks.toolsandbox_suite import THREE_DISTRACTION_TOOLS_129, selected_scenarios
 from .artifact_io import atomic_json, atomic_text, preparation_lock
 from .process_lifecycle import (defer_termination, run_owned, stop_owned_group,
@@ -60,7 +61,18 @@ def is_candidate_arm(arm):
 
 
 def is_native_arm(arm):
-    return is_c1_arm(arm) or is_candidate_arm(arm) or arm == "c2kv_native_r4"
+    return is_c1_arm(arm) or is_candidate_arm(arm) or arm in NATIVE_RATIOS
+
+
+def with_native_ratios(config, ratios):
+    """Add explicit bare-native variants without relabelling frozen ratio4 cells."""
+    methods = list(config["methods"])
+    for ratio in ratios:
+        arm = arm_for_ratio(ratio)
+        if not any(method["arm"] == arm for method in methods):
+            methods.append({"method": "C2KV", "arm": arm,
+                            "group": "native_ratio", "ratio": ratio})
+    return dict(config, methods=methods)
 
 
 RAW_TOOL_CONTEXT = "raw"
@@ -542,9 +554,9 @@ def _prepare_locked(config, output, source):
                 raise ValueError("Candidate arms require native ratio8 and explicit supported benchmarks "
                                  "(" + ",".join(sorted(CANDIDATE_BENCHMARKS)) + ")")
             continue
-        if arm.name == "c2kv_native_r4":
-            if item.get("ratio") != 4 or item["method"] != "C2KV":
-                raise ValueError("Native bare C2KV must use ratio4 and the C2KV label")
+        if arm.name in NATIVE_RATIOS:
+            if item.get("ratio") != NATIVE_RATIOS[arm.name] or item["method"] != "C2KV":
+                raise ValueError("Native bare C2KV must use its registered ratio and the C2KV label")
             continue
         if arm.native_controller:
             if (not is_c1_arm(arm.name) or item.get("ratio") != C1_ARMS[arm.name]
@@ -1104,6 +1116,8 @@ def main(argv=None):
                         help="add a history-KV capacity cell, e.g. commitkv=768; repeat for a sweep")
     parser.add_argument("--native-history-budget", action="append", default=[], metavar="ARM=TOKENS",
                         help="add a native C2KV BFCL history-capacity cell; repeat for a sweep")
+    parser.add_argument("--native-ratio", action="append", type=int, choices=(4, 8), default=[],
+                        help="add an explicit bare native C2KV ratio (e.g. 8); defaults stay unchanged")
     parser.add_argument("--tool-contexts", default="",
                         help="add named tool contexts to history/recovery methods, preserving raw cells")
     parser.add_argument("--tool-checkpoint", type=Path,
@@ -1115,6 +1129,7 @@ def main(argv=None):
     if args.action == "aggregate" and (args.task_subset or args.task_subset_file):
         parser.error("aggregate reads the frozen task scope; task-subset options are for prepare/run")
     if args.action != "aggregate":
+        config = with_native_ratios(config, args.native_ratio)
         config = with_candidate_methods(
             config, parse_candidate_arms(args.candidate_arms),
             tuple(args.candidate_benchmarks.split(",")))

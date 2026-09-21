@@ -62,9 +62,19 @@ Apply `0007-propagate-generation-errors.patch` with
 `git apply --ignore-space-change` after `0006`. A raised model-request error
 now propagates through the agent instead of becoming the literal `None` or
 `Error: ...` action. ACON records `generation_error` with the partial task
-artifacts, then exits nonzero before the official scorer; the adapter rejects
-any scored artifact carrying that error. A successful request's response text,
-including an empty action, keeps the upstream model-output behavior.
+artifacts. A successful request's response text, including an empty action,
+keeps the upstream model-output behavior.
+
+Apply `0008-isolate-appworld-generation-failures.patch` with
+`git apply --unidiff-zero --ignore-space-change` after `0007`. It upgrades the persisted
+AppWorld error to a typed task exception, catches only that exception at the
+`run_all.py` task boundary, records one auditable infrastructure receipt, and
+continues with the remaining selected tasks. It never retries the failed model
+request or task. Unexpected exceptions still terminate the runner. The paper
+adapter withholds the full-cell semantic score whenever such a receipt exists;
+the completed-task slice is reported separately as partial diagnostics, never
+as a clean method score. Existing ACON checkouts with `0007` already applied
+must apply `0008` before reuse.
 
 Both runners then need only the served model name to NOT contain `gpt`,
 `o1`, `o3`, `o4` or `gemini` (those names are routed to the OpenAI / Gemini

@@ -468,13 +468,18 @@ def test_appworld_required_patch_markers(tmp_path):
         "value = token_summary.get('output_cost_usd') or 0\n"
         "value = token_summary.get('total_cost_usd') or 0\n"
         "results['termination_reason'] = results['info']['reason']\n"
+        "class AppWorldGenerationError(RuntimeError): pass\n"
         "if results.get('termination_reason') == 'generation_error':\n"
-        "raise RuntimeError(f\"ACON generation failed: {results.get('error', 'unknown')}\")\n"
+        "    raise AppWorldGenerationError(\n"
+        "        f\"ACON generation failed: {results.get('error', 'unknown')}\")\n"
     )
     runner_all.write_text(
         "task_cost = token_info.get('total_cost_usd')\n"
         "if total_cost is not None and total_cost > 0: pass\n"
         "average_cost = total_cost / len(task_list) if total_cost is not None and task_list else None\n"
+        "try:\n    pass\nexcept AppWorldGenerationError as exc:\n    pass\n"
+        "receipt = {\"failed_request_retries\": 0}\n"
+        "status = 'completed_with_infrastructure_failures'\n"
     )
     env.write_text(
         "self.done = self.num_interactions >= self.config.max_interactions\n"
@@ -509,8 +514,17 @@ def test_appworld_required_patch_markers(tmp_path):
     with pytest.raises(SystemExit, match="0007-propagate-generation-errors.patch"):
         A.validate_appworld_runner_patches(acon)
 
+    unified.write_text(
+        "class GenerationError(RuntimeError): pass\n"
+        "raise GenerationError(f\"Model generation failed: {e}\") from e\n"
+        "'generation_error' if isinstance(e, GenerationError) else 'error'\n"
+    )
+    runner_all.write_text("# old run_all without task isolation\n")
+    with pytest.raises(SystemExit, match="0008-isolate-appworld-generation-failures.patch"):
+        A.validate_appworld_runner_patches(acon)
 
-def test_appworld_generation_failure_aborts_before_scoring(tmp_path, monkeypatch):
+
+def test_appworld_generation_failure_is_typed_before_scoring(tmp_path, monkeypatch):
     project_root = Path(__file__).resolve().parents[1]
     default_acon_root = project_root.parent / "tmp" / "baselines" / "acon"
     acon_root = Path(os.environ.get("ACON_ROOT", default_acon_root))
@@ -518,6 +532,7 @@ def test_appworld_generation_failure_aborts_before_scoring(tmp_path, monkeypatch
         "src/productive_agents/llm.py",
         "src/productive_agents/agents/unified_agent.py",
         "experiments/appworld/run.py",
+        "experiments/appworld/run_all.py",
     )
     if any(not (acon_root / name).is_file() for name in sources):
         pytest.skip("set ACON_ROOT to the pinned microsoft/acon checkout")
@@ -531,6 +546,12 @@ def test_appworld_generation_failure_aborts_before_scoring(tmp_path, monkeypatch
         ["git", "apply", "--ignore-space-change",
          str(project_root / "benchmarks" / "acon_patches"
              / "0007-propagate-generation-errors.patch")],
+        cwd=staged, check=True, capture_output=True, text=True,
+    )
+    subprocess.run(
+        ["git", "apply", "--unidiff-zero", "--ignore-space-change",
+         str(project_root / "benchmarks" / "acon_patches"
+             / "0008-isolate-appworld-generation-failures.patch")],
         cwd=staged, check=True, capture_output=True, text=True,
     )
 
@@ -678,15 +699,150 @@ def test_appworld_generation_failure_aborts_before_scoring(tmp_path, monkeypatch
         "productive_agents.agents.appworld.config", AppWorldAgentConfig=FakeAgentConfig))
     run_module = runpy.run_path(str(staged / sources[2]))
     out = tmp_path / "result"
-    with pytest.raises(RuntimeError, match="ACON generation failed"):
+    with pytest.raises(RuntimeError, match="ACON generation failed") as error:
         run_module["main"](
             task_id="fixture_1", output_dir=str(out), exp_config={},
             model_name="c2kv-agent", debug_mode=False,
         )
+    assert type(error.value).__name__ == "AppWorldGenerationError"
     assert json.loads((out / "results.json").read_text())["termination_reason"] == "generation_error"
     assert (out / "llm_history.json").is_file()
     assert (out / "env_history.json").is_file()
     assert FakeEnv.instances[-1].closed
+
+
+def test_appworld_runner_isolates_one_generation_failure_and_continues(
+        tmp_path, monkeypatch):
+    project_root = Path(__file__).resolve().parents[1]
+    default_acon_root = project_root.parent / "tmp" / "baselines" / "acon"
+    acon_root = Path(os.environ.get("ACON_ROOT", default_acon_root))
+    sources = (
+        "src/productive_agents/llm.py",
+        "src/productive_agents/agents/unified_agent.py",
+        "experiments/appworld/run.py",
+        "experiments/appworld/run_all.py",
+    )
+    if any(not (acon_root / name).is_file() for name in sources):
+        pytest.skip("set ACON_ROOT to the pinned microsoft/acon checkout")
+    staged = tmp_path / "acon"
+    for name in sources:
+        target = staged / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(acon_root / name, target)
+    for patch_name in (
+        "0007-propagate-generation-errors.patch",
+        "0008-isolate-appworld-generation-failures.patch",
+    ):
+        apply_args = ["git", "apply", "--ignore-space-change"]
+        if patch_name.startswith("0008-"):
+            apply_args.append("--unidiff-zero")
+        subprocess.run(
+            [*apply_args,
+             str(project_root / "benchmarks" / "acon_patches" / patch_name)],
+            cwd=staged, check=True, capture_output=True, text=True,
+        )
+
+    run_path = staged / "experiments" / "appworld" / "run.py"
+    run_tree = ast.parse(run_path.read_text(encoding="utf-8"))
+    error_node = next(
+        node for node in run_tree.body
+        if isinstance(node, ast.ClassDef) and node.name == "AppWorldGenerationError"
+    )
+    error_scope = {}
+    exec(compile(ast.Module(body=[error_node], type_ignores=[]), str(run_path), "exec"),
+         error_scope)
+    generation_error = error_scope["AppWorldGenerationError"]
+    calls = []
+
+    def fake_main(task_id, output_dir, **kwargs):
+        calls.append(task_id)
+        task_dir = Path(output_dir)
+        task_dir.mkdir(parents=True, exist_ok=True)
+        if task_id == "timeout":
+            (task_dir / "results.json").write_text(json.dumps({
+                "task_id": task_id,
+                "termination_reason": "generation_error",
+                "error": "Model generation failed: Request timed out",
+            }), encoding="utf-8")
+            raise generation_error("ACON generation failed: Request timed out")
+        if task_id == "unexpected":
+            raise ValueError("fixture unexpected failure")
+        (task_dir / "results.json").write_text(json.dumps({
+            "task_id": task_id, "termination_reason": "task_completed",
+            "success": True,
+        }), encoding="utf-8")
+        return {"success": True, "termination_reason": "task_completed",
+                "token_usage": {}}
+
+    class FakeProgress:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def add_task(self, *args, **kwargs):
+            return "progress"
+
+        def update(self, *args, **kwargs):
+            pass
+
+        def advance(self, *args, **kwargs):
+            pass
+
+    run_module = types.ModuleType("run")
+    run_module.AppWorldGenerationError = generation_error
+    run_module.main = fake_main
+    rich = types.ModuleType("rich")
+    progress = types.ModuleType("rich.progress")
+    progress.Progress = FakeProgress
+    for name in ("SpinnerColumn", "BarColumn", "TextColumn",
+                 "TimeElapsedColumn", "TimeRemainingColumn"):
+        setattr(progress, name, lambda *args, **kwargs: None)
+    monkeypatch.setitem(sys.modules, "run", run_module)
+    monkeypatch.setitem(sys.modules, "rich", rich)
+    monkeypatch.setitem(sys.modules, "rich.progress", progress)
+    monkeypatch.chdir(tmp_path)
+    runner = runpy.run_path(
+        str(staged / "experiments" / "appworld" / "run_all.py"),
+        run_name="acon_run_all_fixture",
+    )
+
+    monkeypatch.setattr(sys, "argv", [
+        "run_all.py", "--split", "test_normal", "--model_name", "c2kv-agent",
+        "--tag", "isolation", "--task_ids", "timeout", "success",
+    ])
+    runner["main_runner"]()
+    assert calls == ["timeout", "success"]
+    run_dir = (tmp_path / "outputs" / "c2kv-agent_isolation" / "test_normal")
+    summary = json.loads((run_dir / "experiment_summary.json").read_text())
+    assert summary["run_status"] == "completed_with_infrastructure_failures"
+    assert summary["success_rate"] is None
+    assert summary["partial_completed_task_success_rate"] == 1.0
+    assert "timeout" not in summary["failed_tasks"]
+    assert summary["infrastructure_failures"] == [{
+        "task_id": "timeout",
+        "failure_type": "generation_error",
+        "error_type": "AppWorldGenerationError",
+        "error": "Model generation failed: Request timed out",
+        "results_path": str((run_dir / "task_timeout" / "results.json").resolve()),
+        "task_attempts": 1,
+        "failed_request_retries": 0,
+    }]
+    assert A.appworld_runner_failures(run_dir, ["timeout", "success"])[0][
+        "failed_request_retries"] == 0
+
+    calls.clear()
+    monkeypatch.setattr(sys, "argv", [
+        "run_all.py", "--split", "test_normal", "--model_name", "c2kv-agent",
+        "--tag", "unexpected", "--task_ids", "unexpected", "never-started",
+    ])
+    with pytest.raises(ValueError, match="fixture unexpected failure"):
+        runner["main_runner"]()
+    assert calls == ["unexpected"]
 
 
 def test_appworld_collector_rejects_generation_error_even_with_stale_score(tmp_path):
@@ -704,6 +860,53 @@ def test_appworld_collector_rejects_generation_error_even_with_stale_score(tmp_p
     with pytest.raises(SystemExit, match="generation error, not an official score"):
         A.collect_appworld(eval_path, run_dir, expected=1,
                            expected_ids=["fixture_1"])
+
+
+def test_appworld_collector_returns_audited_partial_without_method_score(tmp_path):
+    eval_path = tmp_path / "evaluation.json"
+    eval_path.write_text(json.dumps({
+        "aggregate": {"task_goal_completion": 0.5},
+        "individual": {
+            "timeout": {"success": False},
+            "success": {"success": True},
+        },
+    }), encoding="utf-8")
+    run_dir = tmp_path / "run"
+    timeout_dir = A.appworld_task_dir(run_dir, "timeout")
+    success_dir = A.appworld_task_dir(run_dir, "success")
+    timeout_dir.mkdir(parents=True)
+    success_dir.mkdir(parents=True)
+    (timeout_dir / "results.json").write_text(json.dumps({
+        "termination_reason": "generation_error",
+        "error": "Model generation failed: Request timed out",
+    }), encoding="utf-8")
+    (success_dir / "results.json").write_text(json.dumps({
+        "termination_reason": "task_completed", "success": True, "iterations": 2,
+    }), encoding="utf-8")
+    failures = [{
+        "task_id": "timeout", "failure_type": "generation_error",
+        "error_type": "AppWorldGenerationError",
+        "error": "Model generation failed: Request timed out",
+        "results_path": str(timeout_dir / "results.json"),
+        "task_attempts": 1, "failed_request_retries": 0,
+    }]
+    summary = A.collect_appworld(
+        eval_path, run_dir, expected=2, expected_ids=["timeout", "success"],
+        infrastructure_failures=failures,
+    )
+    assert summary["result_status"] == "completed_with_infrastructure_failures"
+    assert summary["score_valid"] is False
+    assert summary["semantic_score"] is None
+    assert summary["partial_completed_task_semantic_score"] == 1.0
+    assert summary["n_official_scored"] == 1
+    assert summary["n_infrastructure_failures"] == 1
+    assert summary["official_aggregate"] is None
+    assert summary["official_aggregate_unfiltered"] == {
+        "task_goal_completion": 0.5,
+    }
+    failed = next(row for row in summary["task_rows"] if row["task_id"] == "timeout")
+    assert failed["semantic_score"] is None
+    assert failed["result_status"] == "infrastructure_failure"
 
 
 def test_appworld_final_budgeted_action_executes_and_errors_are_recorded(tmp_path, monkeypatch):

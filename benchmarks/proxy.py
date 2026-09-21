@@ -1342,8 +1342,31 @@ def _hiagent_retrieval_loop(original_payload, arm, conv, data, stats, send):
     """
     retrieved = set()
     attempted = set()
+    unavailable_reasons = {}
     budget_denials = []
     retrieval_usage = {"calls": 0, "prompt_tokens": 0, "completion_tokens": 0}
+
+    def record_duplicate(requested_now):
+        revealed = sorted(requested_now & retrieved)
+        unavailable = sorted(requested_now - retrieved)
+        reasons = {unavailable_reasons.get(value) for value in unavailable}
+        if not unavailable:
+            feedback = hiagent_budget.ALREADY_REVEALED_FEEDBACK
+            reason = "already_revealed"
+        elif "budget_unavailable" in reasons:
+            feedback = hiagent_budget.BUDGET_UNAVAILABLE_FEEDBACK
+            reason = "budget_unavailable"
+        else:
+            feedback = hiagent_budget.INVALID_SUBGOAL_FEEDBACK
+            reason = "subgoal_unavailable"
+        stats.setdefault("duplicate_retrieval_attempts", []).append({
+            "requested_subgoals": sorted(requested_now),
+            "already_revealed_subgoals": revealed,
+            "unavailable_subgoals": unavailable,
+            "feedback_reason": reason,
+        })
+        return feedback
+
     for attempt in range(5):
         message = ((data.get("choices") or [{}])[0].get("message") or {})
         ids = textarms.hiagent_retrieval_request(message)
@@ -1352,18 +1375,34 @@ def _hiagent_retrieval_loop(original_payload, arm, conv, data, stats, send):
             if getattr(arm, "text_history_budget_tokens", None) is not None:
                 stats["retrieval_budget_denials"] = budget_denials
             return data
-        if attempt == 4:
-            raise ValueError("HiAgent exceeded four internal trajectory retrieval rounds")
         if any((call.get("function") or {}).get("name") != textarms.HIAGENT_RETRIEVE_TOOL_NAME
                for call in message.get("tool_calls") or []):
             raise ValueError("HiAgent mixed internal retrieval and environment actions in one response")
-        if set(ids) <= attempted:
-            raise ValueError("HiAgent requested an already revealed trajectory without advancing")
-        attempted.update(ids)
         usage = data.get("usage") or {}
         retrieval_usage["calls"] += 1
         for key in ("prompt_tokens", "completion_tokens"):
             retrieval_usage[key] += int(usage.get(key) or 0)
+        stats["retrieval_usage"] = dict(retrieval_usage)
+        requested_now = set(ids)
+        duplicate = requested_now <= attempted
+        if attempt == 4:
+            if duplicate:
+                record_duplicate(requested_now)
+            raise ValueError("HiAgent exceeded four internal trajectory retrieval rounds")
+        if duplicate:
+            feedback = record_duplicate(requested_now)
+            staged, updated = _apply_text_arm(
+                original_payload, arm, conv, sorted(retrieved),
+                retrieval_feedback=feedback)
+            for key, value in (updated.get("compressor_usage") or {}).items():
+                stats.setdefault("compressor_usage", {}).setdefault(key, 0)
+                stats["compressor_usage"][key] += value
+            stats["n_compressor_calls"] += int(updated.get("n_compressor_calls") or 0)
+            stats.update({key: value for key, value in updated.items()
+                          if key not in ("compressor_usage", "n_compressor_calls")})
+            data = send(staged)
+            continue
+        attempted.update(ids)
         requested = retrieved | set(ids)
         try:
             staged, updated = _apply_text_arm(original_payload, arm, conv, sorted(requested))
@@ -1376,6 +1415,8 @@ def _hiagent_retrieval_loop(original_payload, arm, conv, data, stats, send):
             stats["n_compressor_calls"] += int(error.receipt.get("n_compressor_calls") or 0)
             budget_denials.append({"requested_subgoals": sorted(set(ids)),
                                    "reason": "budget_unavailable", "receipt": error.receipt})
+            for value in requested_now - retrieved:
+                unavailable_reasons[value] = "budget_unavailable"
             # Admission reserves exactly this short, charged feedback surface.
             # Requested IDs remain in telemetry rather than inflating the prompt.
             feedback = hiagent_budget.BUDGET_UNAVAILABLE_FEEDBACK
@@ -1391,6 +1432,8 @@ def _hiagent_retrieval_loop(original_payload, arm, conv, data, stats, send):
                 "requested_subgoals": sorted(set(ids)),
                 "invalid_subgoals": sorted(invalid),
             })
+            for value in invalid:
+                unavailable_reasons[value] = "subgoal_unavailable"
             for key, value in (updated.get("compressor_usage") or {}).items():
                 stats.setdefault("compressor_usage", {}).setdefault(key, 0)
                 stats["compressor_usage"][key] += value

@@ -1,0 +1,94 @@
+diff --git a/experiments/appworld/run.py b/experiments/appworld/run.py
+index 198dbf8..dacd616 100644
+--- a/experiments/appworld/run.py
++++ b/experiments/appworld/run.py
+@@ -18,0 +19,4 @@ from productive_agents.agents.appworld import AppWorldAgent, AppWorldAgentConfig
++class AppWorldGenerationError(RuntimeError):
++    """One task lost its model response and has no valid method outcome."""
++
++
+@@ -181 +185,2 @@ def main(
+-        raise RuntimeError(f"ACON generation failed: {results.get('error', 'unknown')}")
++        raise AppWorldGenerationError(
++            f"ACON generation failed: {results.get('error', 'unknown')}")
+diff --git a/experiments/appworld/run_all.py b/experiments/appworld/run_all.py
+index 588bd8a..8a31b65 100644
+--- a/experiments/appworld/run_all.py
++++ b/experiments/appworld/run_all.py
+@@ -18 +18 @@ from typing import List, Dict, Any
+-from run import main
++from run import AppWorldGenerationError, main
+@@ -21,0 +22,27 @@ from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn, TimeEl
++def run_task_isolated(task_id: str, output_dir: str, **kwargs):
++    """Run one task once and turn only typed generation failures into audit data."""
++    try:
++        return main(task_id=task_id, output_dir=output_dir, **kwargs), None
++    except AppWorldGenerationError as exc:
++        results_path = Path(output_dir) / "results.json"
++        try:
++            result = json.loads(results_path.read_text(encoding="utf-8"))
++        except (OSError, json.JSONDecodeError) as artifact_error:
++            raise RuntimeError(
++                f"generation failure for {task_id} lacks a valid results.json"
++            ) from artifact_error
++        if result.get("termination_reason") != "generation_error":
++            raise RuntimeError(
++                f"generation failure for {task_id} lacks typed task evidence"
++            ) from exc
++        return None, {
++            "task_id": task_id,
++            "failure_type": "generation_error",
++            "error_type": type(exc).__name__,
++            "error": result.get("error") or str(exc),
++            "results_path": str(results_path.resolve()),
++            "task_attempts": 1,
++            "failed_request_retries": 0,
++        }
++
++
+@@ -176,0 +204 @@ def main_runner():
++    infrastructure_failures = []
+@@ -195 +223 @@ def main_runner():
+-            result = main(
++            result, infrastructure_failure = run_task_isolated(
+@@ -207,0 +236,6 @@ def main_runner():
++            if infrastructure_failure is not None:
++                infrastructure_failures.append(infrastructure_failure)
++                print(f"Task {task_id} infrastructure failure: generation_error")
++                # Debug mode runs exactly one task and never retries it.
++                break
++
+@@ -250 +284 @@ def main_runner():
+-                result = main(
++                result, infrastructure_failure = run_task_isolated(
+@@ -262,0 +297,6 @@ def main_runner():
++                if infrastructure_failure is not None:
++                    infrastructure_failures.append(infrastructure_failure)
++                    print(f"Task {task_id} infrastructure failure: generation_error")
++                    progress.advance(pb, 1)
++                    continue
++
+@@ -300 +340,5 @@ def main_runner():
+-    print(f"Success rate: {len(successful_tasks)/len(task_list)*100:.1f}%")
++    print(f"Infrastructure failures: {len(infrastructure_failures)}")
++    if infrastructure_failures:
++        print("Success rate: unavailable (infrastructure failures are unscored)")
++    else:
++        print(f"Success rate: {len(successful_tasks)/len(task_list)*100:.1f}%")
+@@ -321,0 +366,5 @@ def main_runner():
++        'run_status': (
++            'completed_with_infrastructure_failures'
++            if infrastructure_failures else 'completed'
++        ),
++        'infrastructure_failures': infrastructure_failures,
+@@ -327 +376,9 @@ def main_runner():
+-        'success_rate': len(successful_tasks)/len(task_list),
++        'success_rate': (
++            None if infrastructure_failures
++            else len(successful_tasks) / len(task_list)
++        ),
++        'partial_completed_task_success_rate': (
++            len(successful_tasks) / (len(task_list) - len(infrastructure_failures))
++            if infrastructure_failures and len(task_list) > len(infrastructure_failures)
++            else None
++        ),

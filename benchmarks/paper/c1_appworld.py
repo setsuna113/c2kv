@@ -6,6 +6,8 @@ server is created per frozen AppWorld task identity.
 """
 from __future__ import annotations
 
+from experiments.history_system.native_bare import ARM_RATIOS as NATIVE_RATIOS
+
 import hashlib
 import importlib.util
 import json
@@ -209,9 +211,9 @@ def _resolved_design(
     c1 = config.get("c1", {})
     if not isinstance(c1, Mapping):
         raise ValueError("config.c1 must be an object")
-    if config.get("native_arm") == "c2kv_native_r4":
+    if config.get("native_arm") in NATIVE_RATIOS:
         bare = _load_module(delivery / "native_bare.py", "native_bare")
-        design = bare.configure_design(design)
+        design = bare.configure_design(design, NATIVE_RATIOS[config["native_arm"]])
         design["runtime"].update(sglang_backend_url=_sglang_upstream(config),
                                  device="cpu", npu_allocator_metrics=False)
         return design
@@ -500,6 +502,10 @@ def run_task(
                 start_new_session=os.name == "posix",
             )
             ready = _wait_ready(process, task_out / "server" / "ready.json", deadline)
+            if config.get("native_arm") in NATIVE_RATIOS:
+                from experiments.history_system.native_bare import validate_manifest
+                validate_manifest(task_out / "server" / "ready.json",
+                                  NATIVE_RATIOS[config["native_arm"]])
             if config.get("tool_memory"):
                 from .native_extra import validate_tool_ready
                 validate_tool_ready(config, ready)
@@ -534,7 +540,7 @@ def run_task(
         BENCHMARK, task_id, task_out, official, time.monotonic() - started,
     )
     acceptance = run_c1.functional_checks(
-        ("c2kv_native" if config.get("native_arm") == "c2kv_native_r4" else
+        ("c2kv_native" if config.get("native_arm") in NATIVE_RATIOS else
          "c2kv_only" if config.get("native_arm") == "c2kv_c1_off_r8" else "proposed"),
         config.get("c1", {}).get("detector", "t02_risk"), metrics
     )

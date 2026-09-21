@@ -234,6 +234,36 @@ def test_native_decision_cap_rejects_text_or_incomplete_client_error(tmp_path, e
     assert tau2._declared_task_failures(tmp_path, rows, 1) == {}
 
 
+@pytest.mark.parametrize("change", [None, "wrong_type", "wrong_status", "unknown_code",
+                                     "wrong_task", "no_native_server"])
+def test_native_agent_context_overflow_is_a_narrow_task_failure(tmp_path, change):
+    from benchmarks.measurement.telemetry import append_jsonl
+
+    error = {"exception_type": "ContextWindowExceededError",
+             "message": "bounded fixture", "status_code": 400,
+             "api_error_code": None}
+    if change == "wrong_type":
+        error["exception_type"] = "InternalServerError"
+    elif change == "wrong_status":
+        error["status_code"] = 500
+    elif change == "unknown_code":
+        error["api_error_code"] = "unknown_context_error"
+    append_jsonl(tmp_path / "measurement" / "harness_events.jsonl", {
+        "event_type": "decision", "episode_id": "44", "error": error})
+    server = tmp_path / "server"
+    server.mkdir()
+    (server / "ready.json").write_text(json.dumps({
+        "schema": "a-event-native-server-v1", "status": "ready",
+        "benchmark": "tau2", "allowed_task_ids": ["other" if change == "wrong_task" else "44"],
+        "run_id": "run-fixture",
+    }), encoding="utf-8")
+    rows = [_result("44", termination="infrastructure_error")]
+    native_server = None if change == "no_native_server" else server
+    expected = {} if change is not None else {"44": "context_overflow"}
+    assert tau2._declared_task_failures(
+        tmp_path, rows, 1, native_server_dir=native_server) == expected
+
+
 def test_code_stripped_client_error_defers_to_task_bound_server_evidence(tmp_path):
     from benchmarks.measurement.telemetry import append_jsonl
 

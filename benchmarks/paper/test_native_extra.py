@@ -199,8 +199,10 @@ def test_ace_official_task_acceptance_uses_actual_arm_identity(
         def _stop_server(self, process, supervisor):
             final = supervisor.parent / "server" / "final.json"
             final.parent.mkdir()
-            final.write_text(json.dumps({"status": "ok", "journal_summary": {
-                "completed": 1, "failed": 0, "pending": 0}}), encoding="utf-8")
+            final.write_text(json.dumps({"status": "stopped", "journal_summary": {
+                "schema": "a-runtime-attempt-journal-v1", "started": 1,
+                "completed": 1, "failed": 0, "pending": 0},
+                "cost_summary": {"generation_attempts": 1}}), encoding="utf-8")
 
     class FakeDelivery:
         def summarize_task(self, *args):
@@ -265,8 +267,10 @@ def test_tau2_generation_cap_preserves_cost_and_requires_clean_final_journal(
     class FakeRunner:
         def _stop_server(self, _process, supervisor):
             final = {"status": "stopped", "journal_summary": {
+                "schema": "a-runtime-attempt-journal-v1", "started": 96,
                 "completed": 96, "failed": 0,
-                "pending": 1 if final_error == "pending_journal" else 0}}
+                "pending": 1 if final_error == "pending_journal" else 0},
+                "cost_summary": {"generation_attempts": 96}}
             final["api_health"] = {"terminal_reason":
                 "budget_rejection_write_failed" if final_error == "terminal_error" else code}
             if final_error == "cost_summary_error":
@@ -337,6 +341,90 @@ def test_tau2_generation_cap_preserves_cost_and_requires_clean_final_journal(
     assert metrics["official_score"] == 0.0
     assert metrics["method_failure"] == code
     assert metrics["decision_count"] == 95 and metrics["cost"] == cost
+
+
+@pytest.mark.parametrize("benchmark,completed,failure_code", [
+    ("tau2", 82, "context_overflow"),
+    ("toolsandbox", 0, "c2kv_capacity_infeasible"),
+])
+def test_native_task_failure_preserves_clean_cost_and_skips_functional_checks(
+        tmp_path, monkeypatch, benchmark, completed, failure_code):
+    config = _config(tmp_path)
+    task = "44" if benchmark == "tau2" else "capacity_scenario"
+    delivery = tmp_path / "delivery"
+    (delivery / "runtime").mkdir(parents=True)
+    native = tmp_path / "native"
+
+    class FakeRunner:
+        def _stop_server(self, _process, supervisor):
+            final = {
+                "status": "stopped",
+                "journal_summary": {
+                    "schema": "a-runtime-attempt-journal-v1",
+                    "started": completed, "completed": completed,
+                    "failed": 0, "pending": 0,
+                },
+                "api_health": {"terminal": False, "terminal_reason": None},
+                "cost_summary": {"generation_attempts": completed},
+            }
+            (supervisor.parent / "server" / "final.json").write_text(
+                json.dumps(final), encoding="utf-8")
+
+    class FakeDelivery:
+        def summarize_task(self, *_args):
+            return {"task_id": task, "decision_count": completed,
+                    "official_score": None, "normal_termination": False,
+                    "cost": {"generation_attempts": completed}}
+
+        def functional_checks(self, *_args):
+            raise AssertionError("typed task failure must not run functional checks")
+
+    def run_official(_config, _benchmark, _task, task_out, _base_url, _model):
+        server = task_out / "server"
+        server.mkdir()
+        (server / "ready.json").write_text(json.dumps({
+            "schema": "a-event-native-server-v1", "status": "ready",
+            "benchmark": benchmark, "allowed_task_ids": [task],
+            "run_id": "typed-fixture",
+        }), encoding="utf-8")
+        if benchmark == "toolsandbox":
+            (server / "steps.jsonl").write_text(json.dumps({
+                "schema": "a-event-native-exact-step-v1", "status": "failed",
+                "session_id": f"toolsandbox/{task}/attempt-0",
+                "decision_key": "turn-0/step-0", "outer_request_id": "request-fixture",
+                "failure_kind": "method_failure",
+                "failure_code": "c2kv_capacity_infeasible",
+                "error": {"type": "CapacityInfeasible", "message": "cannot fit"},
+                "response": None,
+            }) + "\n", encoding="utf-8")
+            failures = {"hiagent_invalid_retrieval": [],
+                        "c2kv_capacity_infeasible": [task]}
+        else:
+            failures = {task: "context_overflow"}
+        return {"n": 1, "task_rows": [{"task_id": task,
+                                         "termination": "infrastructure_error"}],
+                "adapter_summary": {"task_failures": failures}}
+
+    monkeypatch.setattr(native_extra, "_preflight_controller_tokenizer", lambda *_: None)
+    monkeypatch.setattr(native_extra, "server_command",
+                        lambda *_: [sys.executable, "--model-name", "test-model"])
+    monkeypatch.setattr(native_extra.c1_appworld, "_delivery_path", lambda _: delivery)
+    monkeypatch.setattr(native_extra.c1_appworld, "_delivery_runner", lambda _: FakeRunner())
+    monkeypatch.setattr(native_extra.c1_appworld, "_delivery_run_c1", lambda *_: FakeDelivery())
+    monkeypatch.setattr(native_extra.c1_appworld, "_wait_ready",
+                        lambda *_: {"base_url": "http://127.0.0.1:34100/v1"})
+    monkeypatch.setattr(native_extra, "validate_ready_manifest", lambda *_: None)
+    monkeypatch.setattr(native_extra, "_run_official", run_official)
+    monkeypatch.setattr(native_extra.subprocess, "Popen",
+                        lambda *_, **__: SimpleNamespace(returncode=0))
+
+    receipt, metrics = native_extra.run_task(
+        config, benchmark, task, native, delivery, tmp_path / "controller.json")
+    expected = "context_overflow" if benchmark == "tau2" else "capacity_infeasible"
+    assert receipt["status"] == "method_failure"
+    assert receipt["failure"]["kind"] == expected
+    assert metrics["method_failure"] == expected
+    assert metrics["cost"] == {"generation_attempts": completed}
 
 
 @pytest.mark.parametrize("arm,detector,variant", [

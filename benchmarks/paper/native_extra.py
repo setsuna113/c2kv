@@ -12,6 +12,7 @@ import time
 from collections.abc import Mapping
 from functools import lru_cache
 
+from experiments.history_system.native_bare import ARM_RATIOS as NATIVE_RATIOS
 from . import c1_appworld
 from .candidate_matrix import ARM_TO_VARIANT, GOAL_VARIANTS, REPAIR_VARIANTS, VERIFIED_VARIANTS
 from experiments.history_system.candidate_algorithms import (
@@ -43,10 +44,10 @@ def validate_tool_ready(config, manifest):
 def arm_identity(config):
     """Resolve the actual native controller without relying on a benchmark label."""
     arm = config.get("native_arm", "c2kv_native_r4")
-    if arm == "c2kv_native_r4":
-        return {"arm": arm, "ratio": 4, "method": "c2kv_native",
+    if arm in NATIVE_RATIOS:
+        return {"arm": arm, "ratio": NATIVE_RATIOS[arm], "method": "c2kv_native",
                 "detector": "disabled", "candidate_algorithm": None,
-                "model_name": "c2kv_native_r4"}
+                "model_name": arm}
     if arm == "c2kv_c1_off_r8":
         return {"arm": arm, "ratio": 8, "method": "c2kv_only",
                 "detector": "disabled", "candidate_algorithm": None,
@@ -94,7 +95,7 @@ def validate_ready_manifest(config, benchmark, task, ready_path, controller_path
     if bare:
         from experiments.history_system.native_bare import validate_manifest
 
-        validate_manifest(ready_path)
+        validate_manifest(ready_path, identity["ratio"])
         return manifest
     controller_path = Path(controller_path).resolve()
     controller_bytes = controller_path.read_bytes()
@@ -288,7 +289,7 @@ def server_command(config, benchmark, task, native, delivery, controller_path):
         from experiments.history_system.native_bare import configure_design
 
         design = json.loads((delivery_root / "configs" / "current_algorithm.json").read_text(encoding="utf-8"))
-        design = configure_design(design)
+        design = configure_design(design, identity["ratio"])
     else:
         design = json.loads((delivery_root / "configs" / "current_algorithm.json").read_text(encoding="utf-8"))
         design["ratio"] = identity["ratio"]
@@ -409,6 +410,7 @@ def _run_official(config, benchmark, task, task_out, base_url, model):
             scenarios=[task], benchmark_dir=Path(config["toolsandbox_dir"]),
             python=config.get("toolsandbox_python", config["bench_python"]),
             parallel=1, model=model, user_model=config["model"], expected=1,
+            native_server_dir=task_out / "server",
         )
         if summary.get("n") != 1 or summary.get("scenario_ids") != [task]:
             raise RuntimeError("Official ToolSandbox did not score the frozen scenario")
@@ -430,6 +432,20 @@ def _run_official(config, benchmark, task, task_out, base_url, model):
     out = task_out / namespace / "official_summary.json"
     out.write_text(json.dumps(official, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     return official
+
+
+def _official_task_failure(official, task):
+    summary = official.get("adapter_summary") if isinstance(official, Mapping) else None
+    failures = summary.get("task_failures") if isinstance(summary, Mapping) else None
+    if not isinstance(failures, Mapping):
+        return None
+    direct = failures.get(task)
+    if direct in {"decision_cap_reached", "generation_cap_reached", "context_overflow"}:
+        return direct
+    capacity = failures.get("c2kv_capacity_infeasible")
+    if capacity == [task]:
+        return "c2kv_capacity_infeasible"
+    return None
 
 
 def run_task(config, benchmark, task, native, delivery, controller_path):
@@ -470,9 +486,19 @@ def run_task(config, benchmark, task, native, delivery, controller_path):
     final_path = task_out / "server" / "final.json"
     final = json.loads(final_path.read_text(encoding="utf-8"))
     journal = final.get("journal_summary") or {}
-    if (final.get("status") == "failed" or final.get("cost_summary_error")
-            or journal.get("failed") or journal.get("pending")
-            or not journal.get("completed") or process.returncode != 0):
+    adapter_failure = _official_task_failure(official, task)
+    started_count = journal.get("started")
+    completed = journal.get("completed")
+    zero_generation_failure = adapter_failure in {
+        "context_overflow", "c2kv_capacity_infeasible"}
+    if (final.get("status") != "stopped" or final.get("cost_summary_error")
+            or journal.get("schema") != "a-runtime-attempt-journal-v1"
+            or type(started_count) is not int or type(completed) is not int
+            or started_count != completed or completed < 0
+            or journal.get("failed") != 0 or journal.get("pending") != 0
+            or (not zero_generation_failure and completed == 0)
+            or not isinstance(final.get("cost_summary"), Mapping)
+            or not final["cost_summary"] or process.returncode != 0):
         raise RuntimeError(f"Native bare controller finalization failed; see {final_path}")
     run_c1 = c1_appworld._delivery_run_c1(delivery, runner)
     namespace = BENCHMARKS[benchmark][0]
@@ -490,6 +516,29 @@ def run_task(config, benchmark, task, native, delivery, controller_path):
                  "official_summary": official, "unified_metrics": metrics,
                  "qualification": "declared native task budget exhausted; scored 0 as a "
                                   "task-local budget failure, not an official reward"}, metrics)
+    if adapter_failure == "context_overflow":
+        health = final.get("api_health") or {}
+        if (failure is not None or health.get("terminal") is not False
+                or health.get("terminal_reason") is not None):
+            raise RuntimeError(f"Native context-overflow finalization failed; see {final_path}")
+        metrics.update(official_score=0.0, normal_termination=False,
+                       method_failure="context_overflow")
+        return ({"task_id": task, "status": "method_failure",
+                 "failure": {"kind": "context_overflow",
+                             "message": "agent input exceeded the served model context"},
+                 "official_summary": official, "unified_metrics": metrics,
+                 "qualification": "typed task-bound agent context overflow; scored 0 as a "
+                                  "task-local method failure, not an official reward"}, metrics)
+    if adapter_failure == "c2kv_capacity_infeasible":
+        if not failure or failure[1] != "capacity_infeasible":
+            raise RuntimeError(f"Native capacity finalization failed; see {final_path}")
+        metrics.update(official_score=0.0, normal_termination=False,
+                       method_failure="capacity_infeasible")
+        return ({"task_id": task, "status": "method_failure",
+                 "failure": {"kind": "capacity_infeasible", "message": failure[2]},
+                 "official_summary": official, "unified_metrics": metrics,
+                 "qualification": "declared native capacity failure; scored 0 as a "
+                                  "task-local method failure, not an official reward"}, metrics)
     identity = arm_identity(config)
     acceptance = run_c1.functional_checks(
         identity["method"], identity["detector"], metrics,

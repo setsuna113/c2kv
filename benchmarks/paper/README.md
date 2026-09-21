@@ -1,5 +1,16 @@
 # Paper CUDA benchmarks
 
+## Explicit bare-native ratios
+
+`prepare` and `run --native-ratio 8` add `c2kv_native_r8` to a new output root;
+existing ratio4 cells and default method lists retain their identity. A custom
+method entry can equivalently use `method: C2KV`, `arm: c2kv_native_r8`, `ratio: 8`.
+Both ratios use `ac_gist_static` with no S0 allocation, detector or recovery.
+The profile, server model name, ready manifest and closed-loop/replay commands
+bind the selected ratio across BFCL, AppWorld, ACEBench, ToolSandbox and tau2.
+Generation and decision budgets are unchanged. The NPU wrapper
+`generality/native_bare.py --arm c2kv_native_r8` uses this same implementation.
+
 ## Repairing selected tasks
 
 Use a **new output root** to repair only audited infrastructure failures and

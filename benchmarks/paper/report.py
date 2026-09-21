@@ -42,8 +42,16 @@ def write_comparison(output: Path, plan):
             ratios = "common_prefix_token_ratios" if stage == "common_prefix" else "token_ratios"
             score_path = directory / ("summary_" + cell["arm"] + ".json")
             scores = json.loads(score_path.read_text()) if score_path.exists() else {}
+            infrastructure_failures = int(scores.get("n_infrastructure_failures") or 0)
+            score_valid = scores.get("score_valid")
+            result_status = "preliminary, n=1"
+            if score_valid is False or infrastructure_failures:
+                result_status = (
+                    scores.get("result_status")
+                    or "needs_review_infrastructure_failure"
+                )
             row = {key: cell.get(key) for key in ("cell_id", "benchmark", "method", "arm", "group", "ratio", "retention", "tool_context", "history_budget_tokens")}
-            row.update(stage=stage, result_status="preliminary, n=1",
+            row.update(stage=stage, result_status=result_status,
                        comparison_basis=("own_output_closed_loop" if stage == "closed_loop"
                                          else "Full_teacher_forced_prefix_target_policy"),
                        sampling_contract=("target_greedy_overrides_recorded_Full_temperature"
@@ -61,9 +69,14 @@ def write_comparison(output: Path, plan):
                            if nested(conversion, "unattributed_native_engine_work",
                                      "server_request_duration_ns_sum") is not None else None),
                        semantic_score=scores.get("semantic_score"),
+                       score_valid=score_valid,
+                       n_infrastructure_failures=infrastructure_failures,
+                       infrastructure_failure_task_ids=scores.get(
+                           "infrastructure_failure_task_ids"),
                        appworld_task_goal_completion=nested(scores, "official_aggregate", "task_goal_completion"),
                        appworld_scenario_goal_completion=nested(scores, "official_aggregate", "scenario_goal_completion"),
-                       scored_tasks=scores.get("n_scored", scores.get("n")),
+                       scored_tasks=scores.get(
+                           "n_official_scored", scores.get("n_scored", scores.get("n"))),
                        requests=nested(measured, "counts", "requests"),
                        replay_attempted_prefixes=nested(measured, "counts", "prefix_replays_attempted"),
                        replay_successful_prefixes=nested(measured, "counts", "prefix_replays_successful"),

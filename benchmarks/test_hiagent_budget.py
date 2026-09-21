@@ -289,6 +289,24 @@ def test_full_arm_reserves_denial_feedback_before_admitting_initial_view():
                for m in continuation)
 
 
+def test_full_arm_reserves_already_revealed_feedback():
+    messages = [
+        {"role": "user", "content": "task"},
+        {"role": "assistant", "content": "Subgoal: first"},
+        {"role": "tool", "content": "R" * 30},
+        {"role": "assistant", "content": "Subgoal: current"},
+        {"role": "user", "content": "CURRENT"},
+    ]
+    _, initial = _call(messages, budget=1000, variant="full", retrieved=[1])
+    continued, feedback = _call(
+        messages, budget=1000, variant="full",
+        retrieved=[1], feedback=hiagent_budget.ALREADY_REVEALED_FEEDBACK)
+
+    assert initial["budget"]["history_with_reserved_feedback"] >= feedback["budget"]["history_after"]
+    assert any(hiagent_budget.ALREADY_REVEALED_FEEDBACK in str(message.get("content"))
+               for message in continued)
+
+
 def test_full_arm_fails_initially_if_feedback_reserve_floor_does_not_fit():
     messages = [{"role": "user", "content": "CURRENT"}]
     with pytest.raises(hiagent_budget.BudgetExceeded) as raised:

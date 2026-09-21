@@ -206,6 +206,57 @@ def test_invalid_retrieval_feedback_and_evidence_reach_request_log(monkeypatch, 
     assert row["textarm"]["retrieval_usage"]["calls"] == 1
 
 
+def test_retrieval_limit_error_log_keeps_fifth_usage_and_duplicate_evidence(
+        monkeypatch, tmp_path):
+    arm = get_arm("hiagent_full")
+    monkeypatch.setattr(proxy, "ARM", arm)
+    monkeypatch.setattr(proxy, "BENCHMARK", "toolsandbox")
+    monkeypatch.setattr(proxy, "REQUEST_LOG_PATH", str(tmp_path / "requests.jsonl"))
+    monkeypatch.setattr(proxy, "PREFIX_LOG_PATH", None)
+    monkeypatch.setattr(proxy, "TELEMETRY_LOG_PATH", None)
+    monkeypatch.setattr(proxy.STATE, "recover", None)
+    monkeypatch.setattr(proxy.STATE, "reference_log_path", None)
+    sent = []
+
+    def post(path, payload, timeout):
+        sent.append(copy.deepcopy(payload))
+        return retrieval([1])
+
+    def apply(payload, arm, conv, ids=None, retrieval_feedback=None):
+        messages = [{"role": "user", "content": retrieval_feedback or "task"}]
+        return dict(payload, messages=messages), {
+            "retrieved_subgoals": list(ids or []),
+            "invalid_retrieval_subgoals": [],
+            "n_compressor_calls": 0,
+            "compressor_usage": {},
+            "degenerate": False,
+        }
+
+    monkeypatch.setattr(proxy, "BACKEND", SglangBackend(post))
+    monkeypatch.setattr(proxy, "_post_json", post)
+    monkeypatch.setattr(proxy, "_apply_text_arm", apply)
+    body = json.dumps({
+        "model": "model", "messages": [{"role": "user", "content": "task"}]
+    }).encode()
+    handler = proxy.ProxyHandler.__new__(proxy.ProxyHandler)
+    handler.path = "/v1/chat/completions"
+    handler.headers = {"Content-Length": str(len(body))}
+    handler.rfile = io.BytesIO(body)
+    response = {}
+    handler._send_json = lambda code, obj: response.update(code=code, obj=obj)
+
+    handler.do_POST()
+
+    assert response["code"] == 502
+    assert len(sent) == 5  # initial response plus four bounded internal sends
+    row = json.loads((tmp_path / "requests.jsonl").read_text())
+    assert row["textarm"]["retrieval_usage"] == {
+        "calls": 5, "prompt_tokens": 355, "completion_tokens": 45}
+    assert len(row["textarm"]["duplicate_retrieval_attempts"]) == 4
+    assert all(item["feedback_reason"] == "already_revealed"
+               for item in row["textarm"]["duplicate_retrieval_attempts"])
+
+
 def test_fixed_floor_is_terminal_but_retrieval_denial_is_not():
     assert completion_kind({"result": [], "traceback": json.dumps({"error": {
         "code": "hiagent_history_budget_exceeded"}})}) == "hiagent_history_budget_exceeded"

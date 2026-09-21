@@ -349,7 +349,18 @@ def _declared_task_failures(out_dir: Path, rows: List[Dict[str, Any]],
             elif client_code is None and native_server_dir is not None:
                 from native_budget_failure import native_budget_failure
                 code = native_budget_failure(Path(native_server_dir), task)
+        elif (native_server_dir is not None and isinstance(error, dict)
+              and error.get("exception_type") == "ContextWindowExceededError"
+              and error.get("status_code") == 400
+              and error.get("api_error_code") in {None, "context_window_exceeded"}):
+            # This event is emitted only around LLMAgent.generate, so a raw
+            # user-simulator overflow cannot be reclassified as an agent loss.
+            from native_budget_failure import native_server_task
+            if native_server_task(Path(native_server_dir), task, "tau2"):
+                code = "context_overflow"
         if code in allowed_budget_codes:
+            declared[task] = code
+        elif code == "context_overflow":
             declared[task] = code
     return declared
 

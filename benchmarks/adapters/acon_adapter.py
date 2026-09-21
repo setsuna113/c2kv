@@ -145,8 +145,18 @@ def validate_appworld_runner_patches(acon_dir: Path) -> None:
     if "results['termination_reason'] = results['info']['reason']" not in runner_text:
         missing.append(f"0006-appworld-final-step-and-errors.patch ({runner_path})")
     if ("results.get('termination_reason') == 'generation_error'" not in runner_text
-            or "raise RuntimeError(f\"ACON generation failed: {results.get('error', 'unknown')}\")" not in runner_text):
+            or "class AppWorldGenerationError(RuntimeError):" not in runner_text
+            or "raise AppWorldGenerationError(" not in runner_text):
         missing.append(f"0007-propagate-generation-errors.patch ({runner_path})")
+    runner_all_path = root / "experiments" / "appworld" / "run_all.py"
+    try:
+        runner_all_text = runner_all_path.read_text(encoding="utf-8")
+    except OSError:
+        runner_all_text = ""
+    if ("except AppWorldGenerationError as exc:" not in runner_all_text
+            or '"failed_request_retries": 0' not in runner_all_text
+            or "'completed_with_infrastructure_failures'" not in runner_all_text):
+        missing.append(f"0008-isolate-appworld-generation-failures.patch ({runner_all_path})")
     if missing:
         raise SystemExit("FATAL: ACON AppWorld checkout lacks required patches: "
                          + "; ".join(missing))
@@ -428,6 +438,55 @@ def appworld_run_dir(acon_dir: Path, model: str, tag: str, split: str) -> Path:
             / appworld_experiment(model, tag) / split)
 
 
+def appworld_runner_failures(run_dir: Path,
+                             expected_ids: List[str]) -> List[Dict[str, Any]]:
+    """Validate the runner's typed task-level infrastructure receipts."""
+    summary_path = Path(run_dir) / "experiment_summary.json"
+    try:
+        summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"FATAL: invalid AppWorld runner summary {summary_path}: {exc}") from exc
+    if summary.get("total_tasks") != len(expected_ids):
+        raise SystemExit("FATAL: AppWorld runner summary task count differs from selection")
+    failures = summary.get("infrastructure_failures")
+    if not isinstance(failures, list):
+        raise SystemExit("FATAL: AppWorld runner summary lacks infrastructure_failures")
+    expected = set(map(str, expected_ids))
+    seen = set()
+    validated = []
+    for failure in failures:
+        task_id = str(failure.get("task_id")) if isinstance(failure, dict) else ""
+        if (not task_id or task_id not in expected or task_id in seen
+                or failure.get("failure_type") != "generation_error"
+                or failure.get("error_type") != "AppWorldGenerationError"
+                or failure.get("task_attempts") != 1
+                or failure.get("failed_request_retries") != 0):
+            raise SystemExit("FATAL: invalid AppWorld generation-failure receipt")
+        results_path = appworld_task_dir(run_dir, task_id) / "results.json"
+        try:
+            result = json.loads(results_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise SystemExit(f"FATAL: invalid AppWorld task receipt {results_path}: {exc}") from exc
+        if result.get("termination_reason") != "generation_error":
+            raise SystemExit(f"FATAL: AppWorld task {task_id} lacks generation_error evidence")
+        seen.add(task_id)
+        validated.append({
+            "task_id": task_id,
+            "failure_type": "generation_error",
+            "error_type": failure.get("error_type"),
+            "error": result.get("error") or failure.get("error"),
+            "results_path": str(results_path),
+            "task_attempts": 1,
+            "failed_request_retries": 0,
+        })
+    wanted_status = (
+        "completed_with_infrastructure_failures" if validated else "completed"
+    )
+    if summary.get("run_status") != wanted_status:
+        raise SystemExit("FATAL: AppWorld runner summary status contradicts its failures")
+    return validated
+
+
 def appworld_eval_path(acon_dir: Path, model: str, tag: str, split: str) -> Path:
     """``appworld evaluate`` output, relative to APPWORLD_ROOT (= the runner
     cwd): ``experiments/outputs/<experiment>/evaluations/<split>.json``."""
@@ -519,7 +578,14 @@ def run_appworld(base_url: str, out_dir: Path, acon_dir: Optional[Path] = None,
     run_owned(appworld_command(python, model, tag, split, max_iter, task_ids),
                    cwd=cwd, env=env, check=True)
     selected = json.loads((out_dir / "selected_tasks.json").read_text(encoding="utf-8"))
-    validate_appworld_telemetry(telemetry_path, selected["task_ids"])
+    infrastructure_failures = appworld_runner_failures(
+        run_dir, selected["task_ids"]
+    )
+    validate_appworld_telemetry(
+        telemetry_path,
+        selected["task_ids"],
+        infrastructure_failure_ids=[item["task_id"] for item in infrastructure_failures],
+    )
     # official scorer (state-based unit tests); the runner's own success flag
     # is not a score
     scorer_env = {**runner_env(base_url), "APPWORLD_ROOT": str(cwd)}
@@ -530,10 +596,15 @@ def run_appworld(base_url: str, out_dir: Path, acon_dir: Optional[Path] = None,
     return collect_appworld(appworld_eval_path(run_root, model, tag, split),
                             run_dir,
                             expected=expected, request_log=request_log,
-                            expected_ids=task_ids, telemetry_path=telemetry_path)
+                            expected_ids=selected["task_ids"], telemetry_path=telemetry_path,
+                            infrastructure_failures=infrastructure_failures)
 
 
-def validate_appworld_telemetry(path: Path, expected_ids: List[str]) -> None:
+def validate_appworld_telemetry(
+    path: Path,
+    expected_ids: List[str],
+    infrastructure_failure_ids: Optional[List[str]] = None,
+) -> None:
     """Fail when runtime instrumentation missed any selected AppWorld task."""
     path = Path(path)
     if not path.is_file():
@@ -552,9 +623,17 @@ def validate_appworld_telemetry(path: Path, expected_ids: List[str]) -> None:
     except (OSError, json.JSONDecodeError) as exc:
         raise SystemExit(f"FATAL: invalid AppWorld telemetry {path}: {exc}") from exc
     wanted = set(map(str, expected_ids))
+    infrastructure_failures = set(map(str, infrastructure_failure_ids or []))
+    if not infrastructure_failures <= wanted:
+        raise SystemExit("FATAL: AppWorld telemetry failure IDs differ from selection")
     missing = {
-        event_type: sorted(wanted - set(ids))
-        for event_type, ids in by_type.items() if wanted - set(ids)
+        event_type: sorted(
+            (wanted - infrastructure_failures if event_type == "tool_action" else wanted)
+            - set(ids)
+        )
+        for event_type, ids in by_type.items()
+        if ((wanted - infrastructure_failures if event_type == "tool_action" else wanted)
+            - set(ids))
     }
     if missing:
         raise SystemExit(f"FATAL: incomplete AppWorld telemetry {path}: {missing}")
@@ -614,25 +693,33 @@ def collect_appworld(eval_path: Path, run_dir: Path,
                      expected: Optional[int] = None,
                      request_log: Optional[Path] = None,
                      expected_ids: Optional[List[str]] = None,
-                     telemetry_path: Optional[Path] = None) -> Dict[str, Any]:
+                     telemetry_path: Optional[Path] = None,
+                     infrastructure_failures: Optional[List[Dict[str, Any]]] = None,
+                     ) -> Dict[str, Any]:
     eval_path = Path(eval_path)
     if not eval_path.exists():
         raise SystemExit(f"FATAL: appworld evaluate wrote no {eval_path}")
     data = json.loads(eval_path.read_text(encoding="utf-8"))
     rows: List[Dict[str, Any]] = []
     scored = appworld_per_task(data)
+    failures = {
+        str(item["task_id"]): item for item in (infrastructure_failures or [])
+    }
     if expected_ids is not None and set(scored) != set(expected_ids):
         raise SystemExit("FATAL: AppWorld scored task IDs differ from selected tasks")
     if expected is not None and len(scored) != expected:
         raise SystemExit(f"FATAL: AppWorld n_scored={len(scored)} != n_total={expected}")
     for task_id, ok in sorted(scored.items()):
         row: Dict[str, Any] = {"task_id": task_id,
-                               "semantic_score": 1.0 if ok else 0.0,
+                               "semantic_score": (
+                                   None if task_id in failures else 1.0 if ok else 0.0
+                               ),
                                "protocol_legal": None}  # code-action agent
         agent = appworld_task_dir(run_dir, task_id) / "results.json"
         if agent.exists():
             rec = json.loads(agent.read_text(encoding="utf-8"))
-            if rec.get("termination_reason") == "generation_error":
+            if (rec.get("termination_reason") == "generation_error"
+                    and task_id not in failures):
                 raise SystemExit(
                     f"FATAL: AppWorld task {task_id} has a generation error, not an official score"
                 )
@@ -641,15 +728,51 @@ def collect_appworld(eval_path: Path, run_dir: Path,
                 "termination": rec.get("termination_reason"),
                 "agent_reported_success": rec.get("success"),
             })
+        if task_id in failures:
+            row.update({
+                "result_status": "infrastructure_failure",
+                "failure_type": "generation_error",
+                "score_source": None,
+            })
+        else:
+            row.update({"result_status": "completed", "score_source": "official_appworld"})
         rows.append(row)
     _terminal_check("acon_appworld", rows, expected)
     report = cost_join(rows, lambda tid: appworld_task_dir(run_dir, tid),
                        request_log)
     summary = aggregate(rows, cluster_key="task_id")
+    partial_semantic_score = summary.get("semantic_score")
+    partial_ci95 = summary.get("semantic_score_ci95")
+    if failures:
+        # The completed-task slice remains useful for debugging, but it is not
+        # a full-cell method score and must not populate the canonical field.
+        summary["semantic_score"] = None
+        summary["semantic_score_ci95"] = [None, None]
+        summary["partial_completed_task_semantic_score"] = partial_semantic_score
+        summary["partial_completed_task_semantic_score_ci95"] = partial_ci95
+        summary["result_status"] = "completed_with_infrastructure_failures"
+        summary["score_valid"] = False
+    else:
+        summary["result_status"] = "completed"
+        summary["score_valid"] = True
+    summary["n_official_scored"] = len(rows) - len(failures)
+    summary["n_infrastructure_failures"] = len(failures)
+    summary["infrastructure_failure_task_ids"] = sorted(failures)
+    summary["infrastructure_failures"] = [failures[key] for key in sorted(failures)]
+    summary["failure_score_policy"] = (
+        "generation failures are infrastructure receipts, are not retried, and are "
+        "excluded from method scoring; any completed-task score is partial only"
+    )
+    summary["task_rows"] = rows
     summary.update(reqlog.cost_summary(rows, report))
     if isinstance(data, dict):
         scalars = {k: v for k, v in data.items() if not isinstance(v, (dict, list))}
-        summary["official_aggregate"] = scalars or data.get("aggregate")
+        official_aggregate = scalars or data.get("aggregate")
+        if failures:
+            summary["official_aggregate"] = None
+            summary["official_aggregate_unfiltered"] = official_aggregate
+        else:
+            summary["official_aggregate"] = official_aggregate
     summary["evaluation_path"] = str(eval_path)
     summary["run_dir"] = str(run_dir)
     if telemetry_path is not None:

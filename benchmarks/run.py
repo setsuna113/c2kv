@@ -435,6 +435,8 @@ def main(argv=None):
                                            for t in ta_rows),
             "retrieval_completion_tokens": sum(int((t.get("retrieval_usage") or {}).get("completion_tokens") or 0)
                                                for t in ta_rows),
+            "duplicate_retrieval_attempts": sum(
+                len(t.get("duplicate_retrieval_attempts") or []) for t in ta_rows),
         }
         if (get_arm(args.arm).text_policy.startswith("acon_hist") and ta_rows
                 and compressed_requests == 0):

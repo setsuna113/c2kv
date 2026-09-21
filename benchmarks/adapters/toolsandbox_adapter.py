@@ -262,7 +262,8 @@ def run_ts(base_url: str, out_dir: Path, test_mode: bool = True,
            scenarios: "list[str] | None" = None,
            suite: str = "",
            python: "str | None" = None, parallel: int = 1,
-           model: str = "c2kv-agent", user_model: "str | None" = None) -> Dict[str, Any]:
+           model: str = "c2kv-agent", user_model: "str | None" = None,
+           native_server_dir: "Path | None" = None) -> Dict[str, Any]:
     """Run the CLI and collect ``result_summary.json``."""
     if parallel != 1:
         raise ValueError("instrumented ToolSandbox runs require parallel=1")
@@ -301,7 +302,8 @@ def run_ts(base_url: str, out_dir: Path, test_mode: bool = True,
     if completed.returncode != 0:
         raise SystemExit(f"FATAL: tool_sandbox CLI exited {completed.returncode}")
     reject_rapidapi_http_failures(out_dir)
-    summary = collect(out_dir)
+    summary = (collect(out_dir) if native_server_dir is None else
+               collect(out_dir, native_server_dir=Path(native_server_dir)))
     summary["protocol"] = json.loads((out_dir / "toolsandbox_protocol.json").read_text(encoding="utf-8"))
     manifest_path = out_dir / "scenario_manifest.json"
     if not manifest_path.is_file():
@@ -337,7 +339,7 @@ def run_ts(base_url: str, out_dir: Path, test_mode: bool = True,
     return summary
 
 
-def collect(out_dir: Path) -> Dict[str, Any]:
+def collect(out_dir: Path, native_server_dir: "Path | None" = None) -> Dict[str, Any]:
     reject_rapidapi_http_failures(out_dir)
     summaries = sorted(out_dir.glob("agent_*/result_summary.json"))
     if not summaries:
@@ -348,6 +350,7 @@ def collect(out_dir: Path) -> Dict[str, Any]:
     rows: List[Dict[str, Any]] = []
     crashed: List[str] = []
     task_failures: List[str] = []
+    capacity_failures: List[str] = []
     proxy_failures = _invalid_retrieval_scenarios(out_dir)
     seen_ids: set[str] = set()
     for path in summaries:
@@ -365,7 +368,19 @@ def collect(out_dir: Path) -> Dict[str, Any]:
             if traceback:
                 # A request for nonexistent completed history is an actor
                 # action, while an arbitrary 502 or runner crash is not.
-                if any(marker in str(traceback) for marker in (
+                capacity_failure = None
+                if native_server_dir is not None:
+                    from native_budget_failure import native_capacity_failure
+                    capacity_failure = native_capacity_failure(
+                        Path(native_server_dir), scenario_id, "toolsandbox")
+                if (capacity_failure == "c2kv_capacity_infeasible"
+                        and scenario.get("exception_type") == "UnprocessableEntityError"):
+                    capacity_failures.append(scenario_id)
+                    rows.append({"task_id": scenario_id, "semantic_score": 0.0,
+                                 "official_similarity": None,
+                                 "task_failure_kind": capacity_failure,
+                                 "protocol_legal": None})
+                elif any(marker in str(traceback) for marker in (
                     "HiAgent requested nonexistent completed subgoals",
                     "HiAgent requested an already revealed trajectory without advancing",
                     "HiAgent exceeded four internal trajectory retrieval rounds",
@@ -401,6 +416,8 @@ def collect(out_dir: Path) -> Dict[str, Any]:
     summary = aggregate(rows, cluster_key="task_id")
     summary["scenario_ids"] = sorted(str(row["task_id"]) for row in rows)
     summary["task_failures"] = {"hiagent_invalid_retrieval": sorted(task_failures)}
+    if capacity_failures:
+        summary["task_failures"]["c2kv_capacity_infeasible"] = sorted(capacity_failures)
     return summary
 
 
