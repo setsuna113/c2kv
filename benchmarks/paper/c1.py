@@ -252,10 +252,11 @@ def run_closed_loop(config, benchmark, directory, requested=None):
                 failure = controller_step_failure(task_root)
                 if failure is None:
                     raise
-                if failure[1] == "generation_cap_reached":
+                if failure[1] in {"decision_cap_reached", "generation_cap_reached"}:
                     journal = final.get("journal_summary") or {}
                     if (not final or final.get("status") == "failed" or journal.get("failed")
-                            or journal.get("pending") or not journal.get("completed")):
+                            or journal.get("pending") or not journal.get("completed")
+                            or (final.get("api_health") or {}).get("terminal_reason") != failure[1]):
                         raise
                 # Keep the evidence, score the task 0 and go on; the summary
                 # carries the counts so the cell is never read as clean.
@@ -264,9 +265,9 @@ def run_closed_loop(config, benchmark, directory, requested=None):
                            "failure": {"kind": kind, "message": message, "error": str(error)},
                            "qualification": ("harness failure: CUDA OOM in the C1 controller; "
                                              "scored 0, not a model decision") if kind == "cuda_oom"
-                           else ("declared generation-call budget exhausted; scored 0 as a "
+                           else ("declared native task budget exhausted; scored 0 as a "
                                  "task-local budget failure, not an official reward")
-                           if kind == "generation_cap_reached"
+                           if kind in {"decision_cap_reached", "generation_cap_reached"}
                            else ("method failure: the controller declared this input infeasible "
                                  "under its budget; scored 0")}
                 metrics = {
@@ -317,6 +318,10 @@ def _capacity_session_id(task_root):
 
 def controller_step_failure(task_root):
     """(status, kind, message) for the latest failed controller step, else None."""
+    from benchmarks.native_budget_failure import native_budget_failure
+    code = native_budget_failure(task_root / "server", task_root.name)
+    if code is not None:
+        return "method_failure", code, "Native server durably recorded a task budget rejection"
     steps = task_root / "server" / "steps.jsonl"
     if not steps.is_file():
         return None

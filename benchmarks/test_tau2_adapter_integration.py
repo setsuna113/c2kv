@@ -202,16 +202,96 @@ def test_untyped_tau2_502_remains_incomplete(tmp_path):
 
 
 @pytest.mark.parametrize("code", ["decision_cap_reached", "generation_cap_reached"])
-def test_native_decision_cap_requires_exact_typed_error(tmp_path, code):
+def test_native_decision_cap_requires_structured_429_error(tmp_path, code):
     from benchmarks.measurement.telemetry import append_jsonl
 
     event = tmp_path / "measurement" / "harness_events.jsonl"
     append_jsonl(event, {"event_type": "decision", "episode_id": "19",
-                         "error": "APIStatusError: " + code})
+                         "error": {"exception_type": "APIStatusError", "message": "failed",
+                                   "status_code": 429, "api_error_code": code}})
     rows = [_result("19", termination="infrastructure_error")]
     assert tau2._declared_task_failures(tmp_path, rows, 1) == {
         "19": code}
     assert tau2._declared_task_failures(tmp_path, rows, 2) == {}
+
+
+@pytest.mark.parametrize("error", [
+    "APIStatusError: decision_cap_reached",
+    {"exception_type": "APIStatusError", "message": "decision_cap_reached",
+     "status_code": 429, "api_error_code": None},
+    {"exception_type": "APIStatusError", "message": "failed",
+     "status_code": 500, "api_error_code": "decision_cap_reached"},
+    {"exception_type": "APIStatusError", "message": "failed",
+     "status_code": 429, "api_error_code": "untrusted_cap"},
+])
+def test_native_decision_cap_rejects_text_or_incomplete_client_error(tmp_path, error):
+    from benchmarks.measurement.telemetry import append_jsonl
+
+    append_jsonl(tmp_path / "measurement" / "harness_events.jsonl", {
+        "event_type": "decision", "episode_id": "19", "error": error})
+    rows = [_result("19", termination="infrastructure_error")]
+    assert tau2._declared_task_failures(tmp_path, rows, 1) == {}
+
+
+def test_code_stripped_client_error_defers_to_task_bound_server_evidence(tmp_path):
+    from benchmarks.measurement.telemetry import append_jsonl
+
+    hook_path = Path(__file__).resolve().parent / "tau2_instrumentation" / "c2kv_tau2_hook.py"
+    spec = importlib.util.spec_from_file_location("fixture_tau2_hook_status_alias", hook_path)
+    hook = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(hook)
+
+    error = RuntimeError("The finite event-native decision cap is exhausted")
+    error.status_code = 429
+    error.code = "429"
+    details = hook._exception_details(error)
+    assert details == {
+        "exception_type": "RuntimeError",
+        "message": "The finite event-native decision cap is exhausted",
+        "status_code": 429,
+        "api_error_code": None,
+    }
+    append_jsonl(tmp_path / "measurement" / "harness_events.jsonl", {
+        "event_type": "decision", "episode_id": "19",
+        "error": details})
+    server = tmp_path / "server"
+    server.mkdir()
+    (server / "ready.json").write_text(json.dumps({
+        "schema": "a-event-native-server-v1",
+        "status": "ready",
+        "benchmark": "tau2",
+        "allowed_task_ids": ["19"],
+        "run_id": "run-fixture",
+        "max_decisions": 96,
+    }), encoding="utf-8")
+    (server / "budget_rejections.jsonl").write_text(json.dumps({
+        "schema": "a-event-native-budget-rejection-v1",
+        "run_id": "run-fixture",
+        "task_id": "19",
+        "session_id": "tau2/19/attempt-0",
+        "status_code": 429,
+        "code": "decision_cap_reached",
+        "max_decisions": 96,
+        "decisions_reserved": 96,
+    }) + "\n", encoding="utf-8")
+    rows = [_result("19", termination="infrastructure_error")]
+    assert tau2._declared_task_failures(
+        tmp_path, rows, 1, native_server_dir=server) == {
+            "19": "decision_cap_reached"}
+
+    append_jsonl(tmp_path / "measurement" / "harness_events.jsonl", {
+        "event_type": "decision", "episode_id": "19", "error": {
+            "exception_type": "APIStatusError", "message": "failed",
+            "status_code": 500, "api_error_code": None}})
+    assert tau2._declared_task_failures(
+        tmp_path, rows, 1, native_server_dir=server) == {}
+
+    append_jsonl(tmp_path / "measurement" / "harness_events.jsonl", {
+        "event_type": "decision", "episode_id": "19", "error": {
+            "exception_type": "APIStatusError", "message": "failed",
+            "status_code": 429, "api_error_code": "untrusted_cap"}})
+    assert tau2._declared_task_failures(
+        tmp_path, rows, 1, native_server_dir=server) == {}
 
 
 def test_generation_cap_task_is_counted_without_masking_official_reward(tmp_path):
@@ -221,7 +301,10 @@ def test_generation_cap_task_is_counted_without_masking_official_reward(tmp_path
     for task in ("5", "6"):
         append_jsonl(events, {"event_type": "episode_start", "episode_id": task})
         append_jsonl(events, {"event_type": "decision", "episode_id": task,
-                             "error": "APIStatusError: generation_cap_reached" if task == "5" else None})
+                             "error": ({"exception_type": "APIStatusError", "message": "failed",
+                                        "status_code": 429,
+                                        "api_error_code": "generation_cap_reached"}
+                                       if task == "5" else None)})
         append_jsonl(events, {"event_type": "episode_end", "episode_id": task,
                              "status": "error" if task == "5" else "ok"})
     path = tmp_path / "results.json"
@@ -245,6 +328,102 @@ def test_legacy_untyped_generation_cap_is_not_reclassified(tmp_path):
         "error": "RuntimeError: Finite generation-call cap exhausted before submission"})
     assert tau2._declared_task_failures(
         tmp_path, [_result("5", termination="infrastructure_error")], 1) == {}
+
+
+def test_hook_extracts_only_bounded_structured_exception_status_and_code():
+    hook_path = Path(__file__).resolve().parent / "tau2_instrumentation" / "c2kv_tau2_hook.py"
+    spec = importlib.util.spec_from_file_location("fixture_tau2_hook_errors", hook_path)
+    hook = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(hook)
+
+    response = types.SimpleNamespace(
+        status_code=429,
+        headers={"authorization": "must-not-be-recorded"},
+        request={"body": "must-not-be-recorded"},
+        json=lambda: {"error": {"code": "decision_cap_reached",
+                                "message": "safe message"}})
+    error = RuntimeError("outer failure")
+    error.response = response
+    error.code = "429"
+    details = hook._exception_details(error)
+    assert details == {"exception_type": "RuntimeError", "message": "outer failure",
+                       "status_code": 429, "api_error_code": "decision_cap_reached"}
+    assert "headers" not in details and "body" not in details and "request" not in details
+
+    stripped = RuntimeError("The finite event-native decision cap is exhausted")
+    stripped.status_code = 429
+    assert hook._exception_details(stripped)["api_error_code"] is None
+
+    unknown = RuntimeError("unknown")
+    unknown.status_code = 429
+    unknown.code = "untrusted_cap"
+    assert hook._exception_details(unknown)["api_error_code"] == "untrusted_cap"
+
+    cause = RuntimeError("inner")
+    cause.status_code = 429
+    cause.body = {"error": {"code": "generation_cap_reached"}}
+    outer = RuntimeError("outer")
+    outer.__cause__ = cause
+    assert hook._exception_details(outer) == {
+        "exception_type": "RuntimeError", "message": "outer",
+        "status_code": 429, "api_error_code": "generation_cap_reached"}
+
+
+def test_hook_records_code_stripped_litellm_error_as_structured_telemetry(
+        monkeypatch, tmp_path):
+    events = tmp_path / "events.jsonl"
+
+    class LiteLLMError(RuntimeError):
+        status_code = 429
+
+    class Environment:
+        def get_response(self, message):
+            return message
+
+    llm_utils = types.ModuleType("tau2.utils.llm_utils")
+    llm_utils.completion = lambda *_args, **_kwargs: None
+    llm_agent = types.ModuleType("tau2.agent.llm_agent")
+
+    def fail_generate(**_kwargs):
+        raise LiteLLMError("The finite event-native decision cap is exhausted")
+
+    llm_agent.generate = fail_generate
+    batch = types.ModuleType("tau2.runner.batch")
+
+    def run_single_task(_config, _task, **_kwargs):
+        llm_agent.generate(call_name="agent_response", model="openai/served")
+
+    batch.run_single_task = run_single_task
+    modules = {
+        "tau2": types.ModuleType("tau2"),
+        "tau2.agent": types.ModuleType("tau2.agent"),
+        "tau2.agent.llm_agent": llm_agent,
+        "tau2.environment": types.ModuleType("tau2.environment"),
+        "tau2.environment.environment": types.ModuleType("tau2.environment.environment"),
+        "tau2.runner": types.ModuleType("tau2.runner"),
+        "tau2.runner.batch": batch,
+        "tau2.utils": types.ModuleType("tau2.utils"),
+        "tau2.utils.llm_utils": llm_utils,
+    }
+    modules["tau2.environment.environment"].Environment = Environment
+    for name, value in modules.items():
+        monkeypatch.setitem(sys.modules, name, value)
+    monkeypatch.setenv("C2KV_TAU2_TELEMETRY_PATH", str(events))
+    hook_path = Path(__file__).resolve().parent / "tau2_instrumentation" / "c2kv_tau2_hook.py"
+    spec = importlib.util.spec_from_file_location("fixture_tau2_hook_failure", hook_path)
+    hook = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(hook)
+    assert hook.install()
+    with pytest.raises(LiteLLMError):
+        batch.run_single_task(None, types.SimpleNamespace(id="9"))
+    rows = [json.loads(line) for line in events.read_text(encoding="utf-8").splitlines()]
+    decision = next(row for row in rows if row["event_type"] == "decision")
+    assert decision["error"] == {
+        "exception_type": "LiteLLMError",
+        "message": "The finite event-native decision cap is exhausted",
+        "status_code": 429,
+        "api_error_code": None,
+    }
 
 
 @pytest.mark.parametrize("native", [False, True])

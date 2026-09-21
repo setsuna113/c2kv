@@ -1,0 +1,117 @@
+{
+  "schema": "c2kv-tau2-decision-cap-transport-validation-v1",
+  "original": {
+    "source": "box4:/workspace/results-p4xt/closed_loop/tau2__c2kv_pending_verified_r8/HOLD_decision_cap_2.txt",
+    "task": "9",
+    "steps_count": 96,
+    "steps_ok": 96,
+    "journal": {
+      "schema": "a-runtime-attempt-journal-v1",
+      "started": 96,
+      "finished": 96,
+      "completed": 96,
+      "failed": 0,
+      "pending": 0,
+      "pending_attempts": [],
+      "pending_token_accounting": "unknown",
+      "attempt_count_scope": {
+        "generation": "reserved chat transport attempts; backend receipt is not established",
+        "extraction": "reserved client producer invocations, not general HTTP attempts"
+      },
+      "finished_with_usage": 96,
+      "finished_usage_totals": {
+        "prompt_tokens": 558352,
+        "completion_tokens": 3829,
+        "total_tokens": 562181
+      },
+      "finished_usage_observed_attempts": {
+        "prompt_tokens": 96,
+        "completion_tokens": 96,
+        "total_tokens": 96
+      },
+      "usage_totals_scope": "sums of observed usage fields only, not total run cost; absent fields and pending attempt usage are unknown",
+      "finished_status_scope": "completed means HTTP JSON or producer returned; it does not mean backend semantic success or scorer success",
+      "truncated_tail": false,
+      "by_kind": {
+        "extraction": {
+          "started": 0,
+          "finished": 0,
+          "completed": 0,
+          "failed": 0,
+          "pending": 0
+        },
+        "generation": {
+          "started": 96,
+          "finished": 96,
+          "completed": 96,
+          "failed": 0,
+          "pending": 0
+        }
+      }
+    },
+    "caps": {
+      "run_id": "paper_c2kv_pending_verified_r8_t02_risk__9",
+      "benchmark": "tau2",
+      "allowed_task_ids": [
+        "9"
+      ],
+      "max_decisions": 96,
+      "max_generation_calls": 96
+    }
+  },
+  "sdk_probe_before": {
+    "exception_type": "RateLimitError",
+    "message": "litellm.RateLimitError: RateLimitError: OpenAIException - The finite event-native decision cap is exhausted",
+    "status_code": 429,
+    "api_error_code": "429",
+    "actual_class": "RateLimitError"
+  },
+  "sdk_probe_after": {
+    "exception_type": "RateLimitError",
+    "message": "litellm.RateLimitError: RateLimitError: OpenAIException - The finite event-native decision cap is exhausted",
+    "status_code": 429,
+    "api_error_code": "decision_cap_reached"
+  },
+  "sdk_probe_scope": "Actual box4 LiteLLM against a loopback HTTP 429 stub using patched exception extractor; no model invocation.",
+  "fix": {
+    "caps_unchanged": true,
+    "structured_transport_error": true,
+    "durable_task_bound_budget_rejection": true,
+    "message_only_429_fallback_requires_server_evidence": true,
+    "numeric_http_code_alias_is_not_semantic_code": true,
+    "clean_cost_and_matching_final_terminal_reason_required": true,
+    "outcome": "Explicit task-local budget failure scored zero; official reward retained separately; next task continues."
+  },
+  "gpu_or_npu_used": false,
+  "full_benchmark_rerun": false,
+  "old_hold_reclassified": false,
+  "base_commit": "86f6e8ac5b5c8743f457cecab366e23adc219622",
+  "checks": [
+    {
+      "scope": "tau2 adapter, measurement, paper dispatch and 96-success HTTP continuation integration",
+      "passed": 208,
+      "skipped": 0
+    },
+    {
+      "scope": "runtime generation cap, failure isolation, HTTP server",
+      "passed": 37,
+      "skipped": 1,
+      "skip_reason": "POSIX process group test on Windows"
+    }
+  ],
+  "source_sha256": {
+    "benchmarks/adapters/tau2_adapter.py": "15cee6a5a8a0bdae3e8ced400ff993d133f16c9648859dd87aafcebb2d7fc947",
+    "benchmarks/measurement/telemetry.py": "a826c46525c72e6ea142d5a57fa79845d9fc3d5e3f73e38912b5c0f60e0b26dd",
+    "benchmarks/paper/c1.py": "69255a7cee29a525a76726e6e9bde4fd21ddeb0f2978fbe1785daa26c7915234",
+    "benchmarks/paper/native_extra.py": "7971c6b3494a3ffee4c7c34c2cf802d36033a6217de5e9e987f6239966f8f092",
+    "benchmarks/paper/test_c1.py": "96b1eb0f385dfeb4aea18b30f72392a7b25a7c8e3825720d1d249b08cc582f55",
+    "benchmarks/paper/test_native_extra.py": "6eaa3c457073bf6dc3d452c6a661757e7a650c44298d00b2f2ba8bb3bfc12f63",
+    "benchmarks/tau2_instrumentation/c2kv_tau2_hook.py": "3923f71995414a386a4fc9d142740d2030fd0d5a8624a9f2cb02e5baa9a8847a",
+    "benchmarks/test_tau2_adapter_integration.py": "70bf6ffb4792ad2d0d40d1bc8e9108e24b2d3bebece89386af5160f5232eada2",
+    "experiments/history_system/runtime/benchmarks/memory_runtime/event_native_api.py": "4ce4f4b82ad381b3e6bd7218ff6eb3eb26b96f514c6fbca453015c5be6de50ec",
+    "experiments/history_system/runtime/benchmarks/memory_runtime/tests/test_event_native_server.py": "01c27fd9e8d462e7ba23d4d1bc1eeb3a07407afca34b09d469c85853fc3785f0",
+    "experiments/history_system/runtime/benchmarks/memory_runtime/tests/test_generation_cap.py": "c88dc4f52a90a359de98a9e579748935abc1e791ba9b403c4a9e3df29af8ba8a",
+    "benchmarks/native_budget_failure.py": "f60b39028cd6baf1843a4825db0d82a47d7c990bfb3629edf16509f829d363cf",
+    "benchmarks/paper/test_native_budget_failure.py": "5744218c7d72524f3adc7ad7cb22b3452fea31e0724de743cc4b70b7a4ebfcf8"
+  }
+}

@@ -358,7 +358,8 @@ def _run_official(config, benchmark, task, task_out, base_url, model):
             tau2_dir=Path(config["tau2_dir"]),
             python=config.get("tau2_python", config["bench_python"]),
             run_name="paper_" + hashlib.sha256(str(task_out.resolve()).encode()).hexdigest()[:20],
-            model=model, user_model=config["model"], native=True, **settings,
+            model=model, user_model=config["model"], native=True,
+            native_server_dir=task_out / "server", **settings,
         )
         if summary.get("n") != 1 or summary.get("task_ids") != [task]:
             raise RuntimeError("Official tau2 did not score the frozen task")
@@ -477,13 +478,15 @@ def run_task(config, benchmark, task, native, delivery, controller_path):
                                     time.monotonic() - started)
     from .c1 import controller_step_failure
     failure = controller_step_failure(task_out)
-    if failure and failure[1] == "generation_cap_reached":
+    if failure and failure[1] in {"decision_cap_reached", "generation_cap_reached"}:
+        if (final.get("api_health") or {}).get("terminal_reason") != failure[1]:
+            raise RuntimeError(f"Native budget finalization failed; see {final_path}")
         metrics.update(official_score=0.0, normal_termination=False,
-                       method_failure="generation_cap_reached")
+                       method_failure=failure[1])
         return ({"task_id": task, "status": "method_failure",
                  "failure": {"kind": failure[1], "message": failure[2]},
                  "official_summary": official, "unified_metrics": metrics,
-                 "qualification": "declared generation-call budget exhausted; scored 0 as a "
+                 "qualification": "declared native task budget exhausted; scored 0 as a "
                                   "task-local budget failure, not an official reward"}, metrics)
     identity = arm_identity(config)
     acceptance = run_c1.functional_checks(

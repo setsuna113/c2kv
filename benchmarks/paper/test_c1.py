@@ -179,13 +179,14 @@ def generation_cap_evidence(shard, *, session_task=None):
     (server / "steps.jsonl").write_text(json.dumps(row) + "\n")
     (server / "final.json").write_text(json.dumps({
         "status": "stopped", "journal_summary": {"completed": 96, "failed": 0, "pending": 0},
+        "api_health": {"terminal_reason": "generation_cap_reached"},
     }) + "\n")
     return row
 
 
 @pytest.mark.parametrize("change", [
     None, "other_session", "unknown_error", "not_failed", "final_pending",
-    "final_failed", "final_status_failed", "final_missing", "cost_summary_error",
+    "final_failed", "final_status_failed", "final_missing", "cost_summary_error", "terminal_error",
 ])
 def test_tau2_generation_cap_is_task_local_only_for_bound_typed_failure(
         tmp_path, monkeypatch, change):
@@ -219,12 +220,14 @@ def test_tau2_generation_cap_is_task_local_only_for_bound_typed_failure(
         if change == "final_missing":
             final_path.unlink()
         elif change in {"final_pending", "final_failed", "final_status_failed",
-                        "cost_summary_error"}:
+                        "cost_summary_error", "terminal_error"}:
             final = json.loads(final_path.read_text())
             if change == "final_pending":
                 final["journal_summary"]["pending"] = 1
             elif change == "final_failed":
                 final["journal_summary"]["failed"] = 1
+            elif change == "terminal_error":
+                final["api_health"]["terminal_reason"] = "budget_rejection_write_failed"
             elif change == "final_status_failed":
                 final["status"] = "failed"
             else:

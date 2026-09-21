@@ -122,6 +122,16 @@ def test_recovery_uses_last_call_then_next_decision_gets_repeatable_http_429(
         assert steps[1]["generation_attempts"] == 0
         attempts = [json.loads(line) for line in (tmp_path / "attempts.jsonl").read_text().splitlines()]
         assert len([row for row in attempts if row.get("status") == "started"]) == 2
+        rejections = [json.loads(line) for line in
+                      (tmp_path / "budget_rejections.jsonl").read_text().splitlines()]
+        assert len(rejections) == 2
+        assert all(row["schema"] == "a-event-native-budget-rejection-v1"
+                   and row["run_id"] == "cap-test" and row["task_id"] == "task"
+                   and row["session_id"] == "task" and row["decision_key"] == "d1"
+                   and row["status_code"] == 429
+                   and row["code"] == "generation_cap_reached"
+                   and row["generation_calls_reserved"] == row["max_generation_calls"] == 2
+                   for row in rejections)
     finally:
         server.shutdown()
         thread.join(timeout=5)
@@ -152,3 +162,32 @@ def test_generation_cap_requires_exception_type_and_durable_step(tmp_path, monke
     assert (failed.value.status_code, failed.value.code) == (500, "runner_failed")
     assert ordinary.health()["terminal_reason"] == "runner_failed"
     assert event_native_server._stop_for_health(ordinary.health()) is True
+
+
+def test_decision_cap_records_97th_rejection_without_changing_cap(tmp_path):
+    runner = SimpleNamespace(run=lambda payload: {"status": "ok"}, close=lambda: None,
+                             generation_calls=0, max_generation_calls=96)
+    api = _api(tmp_path, runner, max_decisions=96)
+    for index in range(96):
+        assert api.handle_chat({"decision_key": f"d{index}"}) == {"status": "ok"}
+    with pytest.raises(EventNativeAPIError) as failed:
+        api.handle_chat({"decision_key": "d96"})
+    assert (failed.value.status_code, failed.value.code) == (429, "decision_cap_reached")
+    row = json.loads((tmp_path / "budget_rejections.jsonl").read_text().strip())
+    assert row["task_id"] == row["session_id"] == "task"
+    assert row["decision_key"] == "d96"
+    assert row["decisions_reserved"] == row["max_decisions"] == 96
+    assert row["generation_calls_reserved"] == 0
+
+
+def test_budget_rejection_write_failure_is_infrastructure_500(tmp_path, monkeypatch):
+    api = _api(tmp_path, SimpleNamespace(run=lambda payload: {"status": "ok"},
+                                         close=lambda: None), max_decisions=1)
+    api.decisions_reserved = 1
+    monkeypatch.setattr(api, "_append_record",
+                        lambda path, record: (_ for _ in ()).throw(OSError("disk")))
+    with pytest.raises(EventNativeAPIError) as failed:
+        api.handle_chat({"decision_key": "d1"})
+    assert (failed.value.status_code, failed.value.code) == (
+        500, "budget_rejection_write_failed")
+    assert api.health()["terminal_reason"] == "budget_rejection_write_failed"

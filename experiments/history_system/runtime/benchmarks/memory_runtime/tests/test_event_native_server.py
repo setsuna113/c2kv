@@ -35,7 +35,9 @@ def test_decision_cap_keeps_typed_api_response_available(tmp_path):
         run_id="test", model_name="model", view_mode="static", max_new_tokens=1,
         allowed_task_ids=["task"], max_decisions=1,
         deadline_monotonic=time.monotonic() + 60, steps_path=tmp_path / "steps.jsonl")
-    api._validate_request = lambda payload: (payload, ("task", 0, payload["step"]),
+    api._validate_request = lambda payload: (
+        dict(payload, session_id="task", decision_key=str(payload["step"]),
+             outer_request_id=str(payload["step"])), ("task", 0, payload["step"]),
                                              str(payload["step"]))
     api.decisions_reserved = 1
     assert server._stop_for_health(api.health()) is False

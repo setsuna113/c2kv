@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import contextvars
 import os
+import re
 import time
+from collections.abc import Mapping
 from typing import Any
 
 from measurement.telemetry import HarnessTelemetry
@@ -19,6 +21,83 @@ NATIVE_ENV = "C2KV_TAU2_NATIVE"
 _task_id = contextvars.ContextVar("c2kv_tau2_task_id", default=None)
 _proxy_request_id = contextvars.ContextVar("c2kv_tau2_proxy_request_id", default=None)
 _installed = False
+_ERROR_CODE = re.compile(r"[A-Za-z0-9_.:-]{1,128}\Z")
+
+
+def _safe_getattr(value: Any, name: str) -> Any:
+    try:
+        return getattr(value, name, None)
+    except Exception:
+        return None
+
+
+def _error_code(value: Any) -> str | None:
+    """Read only a bounded API code from a decoded error object."""
+    if not isinstance(value, Mapping):
+        return None
+    candidates = [value.get("code")]
+    nested = value.get("error")
+    if isinstance(nested, Mapping):
+        candidates.append(nested.get("code"))
+    for candidate in candidates:
+        if isinstance(candidate, str) and _ERROR_CODE.fullmatch(candidate):
+            return candidate
+    return None
+
+
+def _exception_details(error: BaseException) -> dict[str, Any]:
+    """Capture status/code without serializing request data, headers, or bodies."""
+    status_code = None
+    mapped_codes = []
+    direct_codes = []
+    current: BaseException | None = error
+    seen = set()
+    for _ in range(4):
+        if current is None or id(current) in seen:
+            break
+        seen.add(id(current))
+        status = _safe_getattr(current, "status_code")
+        if status_code is None and type(status) is int and 100 <= status <= 599:
+            status_code = status
+        direct_code = _safe_getattr(current, "code")
+        if isinstance(direct_code, str) and _ERROR_CODE.fullmatch(direct_code):
+            direct_codes.append(direct_code)
+        sources = [_safe_getattr(current, "body"), _safe_getattr(current, "response")]
+        response = sources[-1]
+        response_status = _safe_getattr(response, "status_code")
+        if status_code is None and type(response_status) is int and 100 <= response_status <= 599:
+            status_code = response_status
+        if response is not None and not isinstance(response, Mapping):
+            decode = _safe_getattr(response, "json")
+            if callable(decode):
+                try:
+                    sources.append(decode())
+                except Exception:
+                    pass
+        for source in sources:
+            code = _error_code(source)
+            if code is not None:
+                mapped_codes.append(code)
+        current = current.__cause__ or current.__context__
+    codes = mapped_codes + direct_codes
+    api_error_code = next(
+        (code for code in codes
+         if not (code.isdigit() and status_code is not None
+                 and int(code) == status_code)),
+        None,
+    )
+    try:
+        message = str(error)
+    except Exception:
+        message = type(error).__name__
+    if len(message) > 2000:
+        message = message[:1997] + "..."
+    return {
+        "exception_type": type(error).__name__,
+        "message": message,
+        "status_code": status_code,
+        "api_error_code": api_error_code,
+    }
 
 
 def _request_id(response: Any) -> str | None:
@@ -88,7 +167,7 @@ def install() -> bool:
             result = original_generate(*args, **kwargs)
             return result
         except BaseException as exc:
-            error = f"{type(exc).__name__}: {exc}"
+            error = _exception_details(exc)
             raise
         finally:
             telemetry.record_decision(

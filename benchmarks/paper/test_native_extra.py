@@ -248,9 +248,10 @@ def test_native_controller_preflight_uses_controller_python_not_bench_python(
     assert called["kwargs"]["capture_output"] is True
 
 
-@pytest.mark.parametrize("final_error", [None, "cost_summary_error", "pending_journal"])
+@pytest.mark.parametrize("final_error", [None, "cost_summary_error", "pending_journal", "terminal_error"])
+@pytest.mark.parametrize("code", ["decision_cap_reached", "generation_cap_reached"])
 def test_tau2_generation_cap_preserves_cost_and_requires_clean_final_journal(
-        tmp_path, monkeypatch, final_error):
+        tmp_path, monkeypatch, final_error, code):
     config = _config(tmp_path)
     task = "5"
     delivery = tmp_path / "delivery"
@@ -265,6 +266,8 @@ def test_tau2_generation_cap_preserves_cost_and_requires_clean_final_journal(
             final = {"status": "stopped", "journal_summary": {
                 "completed": 96, "failed": 0,
                 "pending": 1 if final_error == "pending_journal" else 0}}
+            final["api_health"] = {"terminal_reason":
+                "budget_rejection_write_failed" if final_error == "terminal_error" else code}
             if final_error == "cost_summary_error":
                 final["cost_summary_error"] = "cost aggregation failed"
             path = supervisor.parent / "server" / "final.json"
@@ -284,7 +287,7 @@ def test_tau2_generation_cap_preserves_cost_and_requires_clean_final_journal(
         server.mkdir()
         (server / "ready.json").write_text(json.dumps({
             "schema": "a-event-native-server-v1", "status": "ready", "benchmark": "tau2",
-            "allowed_task_ids": [task],
+            "allowed_task_ids": [task], "run_id": "test-cap", "max_decisions": 96,
         }), encoding="utf-8")
         (server / "steps.jsonl").write_text(json.dumps({
             "schema": "a-event-native-exact-step-v1", "status": "failed",
@@ -294,6 +297,14 @@ def test_tau2_generation_cap_preserves_cost_and_requires_clean_final_journal(
             "error": {"type": "GenerationCallCapExceeded",
                       "message": "Finite generation-call cap exhausted before submission"},
         }) + "\n", encoding="utf-8")
+        if code == "decision_cap_reached":
+            (server / "steps.jsonl").write_text(json.dumps({"status": "ok"}) + "\n")
+            (server / "budget_rejections.jsonl").write_text(json.dumps({
+                "schema": "a-event-native-budget-rejection-v1", "run_id": "test-cap",
+                "task_id": task, "session_id": f"tau2/{task}/attempt-0",
+                "code": code, "status_code": 429, "decisions_reserved": 96,
+                "max_decisions": 96,
+            }) + "\n")
         return official
 
     monkeypatch.setattr(native_extra, "_preflight_controller_tokenizer", lambda *_: None)
@@ -318,12 +329,12 @@ def test_tau2_generation_cap_preserves_cost_and_requires_clean_final_journal(
     receipt, metrics = native_extra.run_task(config, "tau2", task, native, delivery,
                                              tmp_path / "controller.json")
     assert receipt["status"] == "method_failure"
-    assert receipt["failure"]["kind"] == "generation_cap_reached"
+    assert receipt["failure"]["kind"] == code
     assert receipt["official_summary"] == official
     assert receipt["unified_metrics"] == metrics
     assert "not an official reward" in receipt["qualification"]
     assert metrics["official_score"] == 0.0
-    assert metrics["method_failure"] == "generation_cap_reached"
+    assert metrics["method_failure"] == code
     assert metrics["decision_count"] == 95 and metrics["cost"] == cost
 
 

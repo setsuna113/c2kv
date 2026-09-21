@@ -305,7 +305,8 @@ def _validate_harness_events(path: Path, expected_ids: List[str], trials: int = 
 
 
 def _declared_task_failures(out_dir: Path, rows: List[Dict[str, Any]],
-                            trials: int) -> Dict[str, str]:
+                            trials: int,
+                            native_server_dir: Optional[Path] = None) -> Dict[str, str]:
     """Only explicit method/budget codes may turn tau2's generic error into a task loss."""
     from measurement.telemetry import read_jsonl
 
@@ -318,7 +319,7 @@ def _declared_task_failures(out_dir: Path, rows: List[Dict[str, Any]],
     events = out_dir / "measurement" / "harness_events.jsonl"
     if not events.is_file():
         return {}
-    errors = {str(row.get("episode_id")): str(row.get("error"))
+    errors = {str(row.get("episode_id")): row.get("error")
               for row in read_jsonl(events) if row.get("event_type") == "decision"
               and row.get("error")}
     declared: Dict[str, str] = {}
@@ -334,12 +335,22 @@ def _declared_task_failures(out_dir: Path, rows: List[Dict[str, Any]],
                     and row.get("status") == "acon_history_budget_exceeded"):
                 declared[task] = "acon_history_budget_exceeded"
     # Native single-task servers return these exact API codes with HTTP 429.
-    # Generic 429, HTTP 502 or connection refusal never proves model exhaustion.
+    # Generic 429, message text, HTTP 502 or connection refusal never proves
+    # model exhaustion. LiteLLM may omit the response code, in which case only
+    # the separately validated server journal may supply the task-bound code.
+    allowed_budget_codes = {"decision_cap_reached", "generation_cap_reached"}
     for task in failed:
-        for code in ("decision_cap_reached", "generation_cap_reached"):
-            if task in errors and code in errors[task]:
-                declared[task] = code
-                break
+        error = errors.get(task)
+        code = None
+        if isinstance(error, dict) and error.get("status_code") == 429:
+            client_code = error.get("api_error_code")
+            if client_code in allowed_budget_codes:
+                code = client_code
+            elif client_code is None and native_server_dir is not None:
+                from native_budget_failure import native_budget_failure
+                code = native_budget_failure(Path(native_server_dir), task)
+        if code in allowed_budget_codes:
+            declared[task] = code
     return declared
 
 
@@ -351,7 +362,8 @@ def run_tau2(base_url: str, user_base_url: str, out_dir: Path, *,
              task_ids: Optional[List[str]] = None, max_tasks: Optional[int] = None,
              num_workers: int = 1, num_trials: Optional[int] = 1,
              max_steps: Optional[int] = None, timeout: Optional[int] = None,
-             record_prefixes: str = "", agent_max_tokens: int = 4096) -> Dict[str, Any]:
+             record_prefixes: str = "", agent_max_tokens: int = 4096,
+             native_server_dir: Optional[Path] = None) -> Dict[str, Any]:
     """Run and score an official tau2 selection through separate agent/user endpoints.
 
     ``native`` disables proxy-only session metadata for the single-task native
@@ -376,6 +388,8 @@ def run_tau2(base_url: str, user_base_url: str, out_dir: Path, *,
         task_ids=task_ids, max_tasks=max_tasks)
     if native and len(selected) != 1:
         raise ValueError("tau2 native controller requires exactly one selected task")
+    if native_server_dir is not None and not native:
+        raise ValueError("tau2 native_server_dir requires native=True")
     sims = tau2_dir / "data" / "simulations" / run_name
     if sims.exists() and any(sims.iterdir()):
         raise FileExistsError(
@@ -406,7 +420,8 @@ def run_tau2(base_url: str, user_base_url: str, out_dir: Path, *,
         shutil.copy2(sims / "results.json", official / "results.json")
     raw_rows = _terminal_results(sims / "results.json", selected, trials,
                                  require_reward=False, inspect_failures=True)
-    task_failures = _declared_task_failures(out_dir, raw_rows, trials)
+    task_failures = _declared_task_failures(
+        out_dir, raw_rows, trials, native_server_dir=native_server_dir)
     _terminal_results(sims / "results.json", selected, trials,
                       require_reward=False, task_failures=task_failures)
     _validate_harness_events(

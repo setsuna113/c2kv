@@ -190,10 +190,7 @@ class EventNativeAPI:
         runner_payload, identity, signature = self._validate_request(payload)
         if self._terminal_failure is not None:
             if self._terminal_failure["code"] == "generation_cap_reached":
-                raise EventNativeAPIError(
-                    429, "generation_cap_reached",
-                    "The finite event-native generation-call cap is exhausted",
-                )
+                self._reject_budget("generation_cap_reached", runner_payload, identity[0])
             raise EventNativeAPIError(
                 503,
                 "terminal_failure",
@@ -221,11 +218,7 @@ class EventNativeAPI:
                 "The finite event-native deadline has expired",
             )
         if self.decisions_reserved >= self.max_decisions:
-            raise EventNativeAPIError(
-                429,
-                "decision_cap_reached",
-                "The finite event-native decision cap is exhausted",
-            )
+            self._reject_budget("decision_cap_reached", runner_payload, identity[0])
 
         self.decisions_reserved += 1
         try:
@@ -266,10 +259,7 @@ class EventNativeAPI:
                     "Task exceeds the declared memory capacity",
                 ) from error
             if generation_cap_failure:
-                raise EventNativeAPIError(
-                    429, "generation_cap_reached",
-                    "The finite event-native generation-call cap is exhausted",
-                ) from error
+                self._reject_budget("generation_cap_reached", runner_payload, identity[0])
             raise EventNativeAPIError(
                 500,
                 "runner_failed",
@@ -579,14 +569,42 @@ class EventNativeAPI:
             "usage": usage_snapshot,
         }
 
+    def _reject_budget(self, code: str, payload: Mapping[str, Any], task_id: str) -> None:
+        health = self.health()
+        record = {
+            "schema": "a-event-native-budget-rejection-v1", "run_id": self.run_id,
+            "task_id": task_id, "session_id": payload["session_id"],
+            "decision_key": payload["decision_key"],
+            "outer_request_id": payload["outer_request_id"],
+            "status_code": 429, "code": code, "recorded_unix_ns": time.time_ns(),
+            **{key: health[key] for key in (
+                "decisions_reserved", "max_decisions", "generation_calls_reserved",
+                "max_generation_calls")},
+        }
+        try:
+            self._append_record(self.steps_path.with_name("budget_rejections.jsonl"), record)
+        except Exception as error:
+            self._terminal_failure = {"code": "budget_rejection_write_failed",
+                                      "type": type(error).__name__}
+            raise EventNativeAPIError(500, "budget_rejection_write_failed",
+                                      "Failed to durably record the budget rejection") from error
+        message = ("The finite event-native decision cap is exhausted"
+                   if code == "decision_cap_reached" else
+                   "The finite event-native generation-call cap is exhausted")
+        raise EventNativeAPIError(429, code, message)
+
     def _append_step(self, record: Mapping[str, Any]) -> None:
+        self._append_record(self.steps_path, record)
+
+    @staticmethod
+    def _append_record(path: Path, record: Mapping[str, Any]) -> None:
         encoded = (
             json.dumps(record, ensure_ascii=True, separators=(",", ":"), allow_nan=False)
             + "\n"
         ).encode("utf-8")
-        self.steps_path.parent.mkdir(parents=True, exist_ok=True)
+        path.parent.mkdir(parents=True, exist_ok=True)
         flags = os.O_APPEND | os.O_CREAT | os.O_WRONLY | getattr(os, "O_BINARY", 0)
-        descriptor = os.open(self.steps_path, flags, 0o600)
+        descriptor = os.open(path, flags, 0o600)
         try:
             remaining = memoryview(encoded)
             while remaining:

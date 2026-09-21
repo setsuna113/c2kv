@@ -129,7 +129,7 @@ class HarnessTelemetry:
         start_unix_ns: int,
         duration_ns: int,
         response: Any = None,
-        error: Optional[str] = None,
+        error: Any = None,
     ) -> str:
         decision_id = request_id or f"client-{uuid.uuid4().hex}"
         _last_decision.set(decision_id)
