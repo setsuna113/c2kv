@@ -17,7 +17,13 @@ LEGACY_VARIANTS = ("static_t02", "turn_c1", "goal_rescue", "dependency_first")
 REPAIR_VARIANTS = ("request_contract", "argument_binding", "no_progress")
 GOAL_VARIANTS = ("goal_pending", "goal_source", "goal_progress", "goal_joint")
 VERIFIED_VARIANTS = ("goal_verified", "pending_verified")
-STATIC_BACKBONES = {"goal_static": "goal_rescue", "pending_static": "goal_pending"}
+STATIC_BACKBONES = {
+    "goal_static": "goal_rescue",
+    "pending_static": "goal_pending",
+    "goal_verified_static": "goal_verified",
+    "pending_verified_static": "pending_verified",
+}
+VERIFIED_STATIC_VARIANTS = ("goal_verified_static", "pending_verified_static")
 STATIC_VARIANTS = tuple(STATIC_BACKBONES)
 VARIANTS = LEGACY_VARIANTS + REPAIR_VARIANTS + GOAL_VARIANTS + VERIFIED_VARIANTS + STATIC_VARIANTS
 REPAIR_VERSION = "c2kv-source-repair-v1"
@@ -32,10 +38,13 @@ RISK_ARTIFACT_SHA256 = T02_RISK_ARTIFACT_SHA256
 
 
 def static_contract(variant: str) -> dict:
-    return {
+    contract = {
         "recovery_backbone": STATIC_BACKBONES[variant],
         "initial_view": {"policy": "static_gist", "version": STATIC_INITIAL_VIEW_VERSION},
     }
+    if variant in VERIFIED_STATIC_VARIANTS:
+        contract["proof_registry_version"] = PROOF_REGISTRY_VERSION
+    return contract
 
 
 def candidate_cell_from_source(
@@ -127,6 +136,9 @@ def controller_with_binding(
             raise ValueError("Verified candidate requires frozen T02 and proof registry")
     elif variant in STATIC_VARIANTS:
         contract = static_contract(variant)
+        if (variant in VERIFIED_STATIC_VARIANTS
+                and cell.get("proof_registry_version") != PROOF_REGISTRY_VERSION):
+            raise ValueError("Verified static candidate requires proof registry")
         if (cell.get("schema") != "c2kv-generality-candidate-cell-v5"
                 or cell.get("candidate_protocol") != STATIC_VERSION
                 or cell.get("threshold") != RISK_THRESHOLD

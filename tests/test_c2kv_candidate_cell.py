@@ -33,7 +33,7 @@ def test_candidate_cell_is_explicit_ratio8_and_isolated(tmp_path, variant):
         assert result["threshold"] == 0.5
         assert result["candidate_protocol"] == candidate_cell.STATIC_VERSION
         assert result["schema"] == "c2kv-generality-candidate-cell-v5"
-        assert {key: result[key] for key in ("recovery_backbone", "initial_view")} == (
+        assert {key: result[key] for key in candidate_cell.static_contract(variant)} == (
             candidate_cell.static_contract(variant))
     elif variant in candidate_cell.VERIFIED_VARIANTS:
         assert result["threshold"] == 0.5
@@ -53,11 +53,35 @@ def test_candidate_cell_is_explicit_ratio8_and_isolated(tmp_path, variant):
         assert result["schema"] == "c2kv-generality-candidate-cell-v1"
     if variant not in candidate_cell.STATIC_VARIANTS:
         assert "initial_view" not in result and "recovery_backbone" not in result
+    elif variant not in candidate_cell.VERIFIED_STATIC_VARIANTS:
+        assert "proof_registry_version" not in result
     assert result["candidate_source_cell_id"] == source["cell_id"]
     assert result["candidate_budget_source"] == "working_point.common_cap_bytes"
     assert result["cell_dir"].endswith(f"candidate_algorithms/{variant}") or result["cell_dir"].endswith(f"candidate_algorithms\\{variant}")
     assert result["cell_dir"] != source["cell_dir"]
     assert source["ratio"] == 4 and source["sglang_backend_url"] is None
+
+
+def test_existing_static_contracts_keep_their_exact_fields():
+    expected_view = {"policy": "static_gist",
+                     "version": candidate_cell.STATIC_INITIAL_VIEW_VERSION}
+    assert candidate_cell.static_contract("goal_static") == {
+        "recovery_backbone": "goal_rescue", "initial_view": expected_view}
+    assert candidate_cell.static_contract("pending_static") == {
+        "recovery_backbone": "goal_pending", "initial_view": expected_view}
+
+
+@pytest.mark.parametrize("variant, backbone", [
+    ("goal_verified_static", "goal_verified"),
+    ("pending_verified_static", "pending_verified"),
+])
+def test_verified_static_contract_keeps_both_components(variant, backbone):
+    assert candidate_cell.static_contract(variant) == {
+        "recovery_backbone": backbone,
+        "initial_view": {"policy": "static_gist",
+                         "version": candidate_cell.STATIC_INITIAL_VIEW_VERSION},
+        "proof_registry_version": candidate_cell.PROOF_REGISTRY_VERSION,
+    }
 
 
 def _checkpoint_with_geometry(path, *, declared_bytes=147456):
@@ -75,7 +99,10 @@ def _checkpoint_with_geometry(path, *, declared_bytes=147456):
     (path / "config.json").write_text(json.dumps(config), encoding="utf-8")
 
 
-def test_explicit_native_budget_has_independent_cell_policy_and_profile(tmp_path, monkeypatch):
+@pytest.mark.parametrize("variant", ("goal_pending",) +
+                         candidate_cell.VERIFIED_STATIC_VARIANTS)
+def test_explicit_native_budget_has_independent_cell_policy_and_profile(
+        tmp_path, monkeypatch, variant):
     monkeypatch.setitem(sys.modules, "current", types.SimpleNamespace())
     monkeypatch.setitem(sys.modules, "evidence_sets", types.SimpleNamespace())
     monkeypatch.setitem(sys.modules, "c1_artifact_binding", types.SimpleNamespace(
@@ -88,17 +115,17 @@ def test_explicit_native_budget_has_independent_cell_policy_and_profile(tmp_path
         "checkpoint": str(checkpoint), "model_name": "gen_c2kv_K0_compression_full_budget",
     }
     legacy = candidate_cell.candidate_cell_from_source(
-        source, "goal_pending", "http://127.0.0.1:36200")
+        source, variant, "http://127.0.0.1:36200")
     explicit = candidate_cell.candidate_cell_from_source(
-        source, "goal_pending", "http://127.0.0.1:36200", 768)
+        source, variant, "http://127.0.0.1:36200", 768)
     another = candidate_cell.candidate_cell_from_source(
-        source, "goal_pending", "http://127.0.0.1:36200", 1024)
-    assert legacy["cell_id"] == source["cell_id"] + "__candidate_goal_pending"
+        source, variant, "http://127.0.0.1:36200", 1024)
+    assert legacy["cell_id"] == source["cell_id"] + "__candidate_" + variant
     assert "history_budget_tokens" not in legacy
     assert explicit["cell_id"] == legacy["cell_id"] + "__b768"
     assert another["cell_id"] == legacy["cell_id"] + "__b1024"
     assert len({legacy["cell_dir"], explicit["cell_dir"], another["cell_dir"]}) == 3
-    assert explicit["model_name"].endswith("__candidate_goal_pending__b768")
+    assert explicit["model_name"].endswith("__candidate_" + variant + "__b768")
     assert explicit["candidate_budget_source"] == "explicit.native_history_budget_tokens"
 
     monkeypatch.setattr(c2kv_cell, "_controller_with_binding", lambda cell: ({}, None))
@@ -120,6 +147,8 @@ def test_explicit_native_budget_has_independent_cell_policy_and_profile(tmp_path
     assert policy["policy"]["workspace_budget_bytes"] == 768 * 147456
     assert profile["eval_policy"] == policy
     assert frozen_cell["native_history_budget"] == profile
+    if variant in candidate_cell.VERIFIED_STATIC_VARIANTS:
+        assert frozen_cell["proof_registry_version"] == candidate_cell.PROOF_REGISTRY_VERSION
     assert profile["override_eval_policy_sha256"] == hashlib.sha256(
         policy_path.read_bytes()).hexdigest()
     assert profile["override_policy_sha256"] == c2kv_cell._json_sha256(policy)
@@ -404,6 +433,22 @@ def test_static_cell_rejects_view_backbone_and_protocol_mismatch(tmp_path, varia
             risk_artifact_path=tmp_path / "unused.json", bind_risk_artifact=None)
 
 
+@pytest.mark.parametrize("variant", candidate_cell.VERIFIED_STATIC_VARIANTS)
+@pytest.mark.parametrize("proof", [None, "stale-proof-rules"])
+def test_verified_static_cell_rejects_missing_or_wrong_proof_before_checkpoint(
+        tmp_path, variant, proof):
+    cell = candidate_cell.candidate_cell_from_source(
+        source_cell(tmp_path), variant, "http://127.0.0.1:36200")
+    if proof is None:
+        cell.pop("proof_registry_version")
+    else:
+        cell["proof_registry_version"] = proof
+    with pytest.raises(ValueError, match="proof registry"):
+        candidate_cell.controller_with_binding(
+            cell, base_controller={}, selected={},
+            risk_artifact_path=tmp_path / "unused.json", bind_risk_artifact=None)
+
+
 @pytest.mark.parametrize("variant", candidate_cell.STATIC_VARIANTS)
 def test_static_ready_manifest_binds_loaded_controller_and_route(tmp_path, monkeypatch, variant):
     monkeypatch.setitem(sys.modules, "current", types.SimpleNamespace())
@@ -419,6 +464,8 @@ def test_static_ready_manifest_binds_loaded_controller_and_route(tmp_path, monke
     controller_path = tmp_path / "controller.json"
     controller_path.write_text(json.dumps(controller), encoding="utf-8")
     cell = {"candidate_algorithm": variant, "controller_path": str(controller_path)}
+    if variant in candidate_cell.VERIFIED_STATIC_VARIANTS:
+        cell["proof_registry_version"] = contract["proof_registry_version"]
     loaded = {"source": str(controller_path.resolve()), "config": controller,
               "sha256": hashlib.sha256(controller_path.read_bytes()).hexdigest()}
     ready = {"status": "ready", "s0_controller_contract": loaded,
@@ -435,6 +482,38 @@ def test_static_ready_manifest_binds_loaded_controller_and_route(tmp_path, monke
         c2kv_cell.validate_static_ready_manifest(cell, ready_path)
 
     check(ready)
+    if variant in candidate_cell.VERIFIED_STATIC_VARIANTS:
+        for proof in (None, "stale-proof-rules"):
+            changed_cell = dict(cell)
+            if proof is None:
+                changed_cell.pop("proof_registry_version")
+            else:
+                changed_cell["proof_registry_version"] = proof
+            ready_path.write_text(json.dumps(ready), encoding="utf-8")
+            with pytest.raises(RuntimeError, match="differs from frozen controller"):
+                c2kv_cell.validate_static_ready_manifest(changed_cell, ready_path)
+            changed_ready = json.loads(json.dumps(ready))
+            if proof is None:
+                changed_ready["candidate_algorithm"].pop("proof_registry_version")
+            else:
+                changed_ready["candidate_algorithm"]["proof_registry_version"] = proof
+            ready_path.write_text(json.dumps(changed_ready), encoding="utf-8")
+            with pytest.raises(RuntimeError, match="differs from frozen controller"):
+                c2kv_cell.validate_static_ready_manifest(cell, ready_path)
+            changed_controller = json.loads(json.dumps(controller))
+            if proof is None:
+                changed_controller["candidate_algorithm"].pop("proof_registry_version")
+            else:
+                changed_controller["candidate_algorithm"]["proof_registry_version"] = proof
+            controller_path.write_text(json.dumps(changed_controller), encoding="utf-8")
+            changed_ready = json.loads(json.dumps(ready))
+            changed_ready["s0_controller_contract"]["config"] = changed_controller
+            changed_ready["s0_controller_contract"]["sha256"] = hashlib.sha256(
+                controller_path.read_bytes()).hexdigest()
+            ready_path.write_text(json.dumps(changed_ready), encoding="utf-8")
+            with pytest.raises(RuntimeError, match="differs from frozen controller"):
+                c2kv_cell.validate_static_ready_manifest(cell, ready_path)
+            controller_path.write_text(json.dumps(controller), encoding="utf-8")
     for section, field, wrong in (
             ("candidate_algorithm", "recovery_backbone", "goal_joint"),
             ("candidate_algorithm", "initial_view", {"policy": "none"}),

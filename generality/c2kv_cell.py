@@ -74,6 +74,7 @@ try:
         GOAL_VARIANTS,
         STATIC_VARIANTS,
         STATIC_VERSION,
+        VERIFIED_STATIC_VARIANTS,
         VERIFIED_VARIANTS,
         candidate_cell_from_source,
         controller_with_binding as candidate_controller_with_binding,
@@ -85,6 +86,7 @@ except ImportError:  # Direct file launch on ascend03.
         GOAL_VARIANTS,
         STATIC_VARIANTS,
         STATIC_VERSION,
+        VERIFIED_STATIC_VARIANTS,
         VERIFIED_VARIANTS,
         candidate_cell_from_source,
         controller_with_binding as candidate_controller_with_binding,
@@ -129,6 +131,12 @@ def validate_static_ready_manifest(cell: dict, ready_path: Path) -> None:
     candidate = ready.get("candidate_algorithm")
     route = ready.get("route_contract")
     contract = static_contract(variant)
+    if variant in VERIFIED_STATIC_VARIANTS:
+        if (cell.get("proof_registry_version") != contract["proof_registry_version"]
+                or not isinstance(controller.get("candidate_algorithm"), dict)
+                or controller["candidate_algorithm"].get("proof_registry_version")
+                != contract["proof_registry_version"]):
+            raise RuntimeError("static candidate ready manifest differs from frozen controller")
     if (not isinstance(loaded, dict) or not isinstance(candidate, dict)
             or not isinstance(route, dict)
             or ready.get("status") != "ready"

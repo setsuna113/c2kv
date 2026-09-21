@@ -13,7 +13,8 @@ ROOT = Path(__file__).resolve().parents[3]
 sys.path[:0] = [str(ROOT), str(ROOT / "python")]
 
 from benchmarks.memory_runtime.candidate_algorithms import (
-    GOAL_VERSION, INITIAL_VIEW_VERSION, VERSION,
+    GOAL_VERSION, INITIAL_VIEW_BACKBONES, INITIAL_VIEW_VARIANTS, INITIAL_VIEW_VERSION,
+    VERIFIED_VARIANTS, VERIFIED_VERSION, VERSION,
 )
 from benchmarks.memory_runtime.candidate_algorithms.allocation import CandidateAllocator
 from benchmarks.memory_runtime.candidate_algorithms.initial_view import (
@@ -36,9 +37,9 @@ def candidate(variant):
         "variant": variant,
         "risk_artifact": {"fixture": True},
         "risk_threshold": 0.5,
-        "recovery_backbone": {
-            "goal_static": "goal_rescue", "pending_static": "goal_pending",
-        }[variant],
+        "recovery_backbone": INITIAL_VIEW_BACKBONES[variant],
+        **({"proof_registry_version": "verified-binding-rules-v1"}
+           if INITIAL_VIEW_BACKBONES[variant] in VERIFIED_VARIANTS else {}),
         "initial_view": copy.deepcopy(STATIC_INITIAL_VIEW),
     }
 
@@ -65,7 +66,7 @@ def request(session="static-view", key="d1", rows=None):
     }
 
 
-@pytest.mark.parametrize("variant", ["goal_static", "pending_static"])
+@pytest.mark.parametrize("variant", INITIAL_VIEW_VARIANTS)
 def test_first_view_matches_unchanged_static_allocator_on_each_prefix(monkeypatch, variant):
     composed = controller(monkeypatch, variant)
     geometry = packing()
@@ -98,7 +99,7 @@ def test_first_view_matches_unchanged_static_allocator_on_each_prefix(monkeypatc
         )["status"] == "passed"
 
 
-@pytest.mark.parametrize("variant", ["goal_static", "pending_static"])
+@pytest.mark.parametrize("variant", INITIAL_VIEW_VARIANTS)
 def test_goal_review_and_budgeted_recovery_keep_public_identity(monkeypatch, variant):
     composed = controller(monkeypatch, variant)
     rows = [
@@ -113,7 +114,8 @@ def test_goal_review_and_budgeted_recovery_keep_public_identity(monkeypatch, var
     assert result["decision"]["variant"] == variant
     assert result["decision"]["recovery_backbone"] == candidate(variant)["recovery_backbone"]
     assert result["decision"]["backbone_decision_version"] == (
-        GOAL_VERSION if variant == "pending_static" else VERSION
+        VERIFIED_VERSION if INITIAL_VIEW_BACKBONES[variant] in VERIFIED_VARIANTS
+        else GOAL_VERSION if variant == "pending_static" else VERSION
     )
     assert result["metadata"]["exact_recovery"] == result["decision"]
     assert result["metadata"]["candidate_algorithm"]["variant"] == variant
@@ -127,23 +129,25 @@ def test_goal_review_and_budgeted_recovery_keep_public_identity(monkeypatch, var
         ratio=8, phase="regeneration",
     )["status"] == "passed"
     assert composed.reconsider(prepared, [], draft_text="The price is 12.") == result
-    if variant == "pending_static":
+    if INITIAL_VIEW_BACKBONES[variant] in {"goal_pending", "pending_verified"}:
         assert result["decision"]["goal_review"]["composition"] == "pending_receipts"
         assert composed.validate_commit(
             prepared, [], draft_text="The price is 12."
         )["accepted"]
         calls, receipt = composed.finalize_commit(prepared, [])
         assert calls == ()
-        assert receipt["variant"] == "goal_pending"
+        assert receipt["variant"] == INITIAL_VIEW_BACKBONES[variant]
 
 
-@pytest.mark.parametrize("variant", ["goal_static", "pending_static"])
+@pytest.mark.parametrize("variant", INITIAL_VIEW_VARIANTS)
 def test_ready_contract_records_both_modules(variant):
     identity, baseline = _candidate_ready_contract(candidate(variant))
     assert identity["variant"] == variant
     assert identity["initial_view"] == STATIC_INITIAL_VIEW
     assert identity["recovery_backbone"] == candidate(variant)["recovery_backbone"]
     assert baseline == f"{INITIAL_VIEW_VERSION}:{variant}"
+    if INITIAL_VIEW_BACKBONES[variant] in VERIFIED_VARIANTS:
+        assert identity["proof_registry_version"] == "verified-binding-rules-v1"
 
 
 def test_legacy_ready_identity_is_unchanged():
@@ -157,7 +161,7 @@ def test_legacy_ready_identity_is_unchanged():
     )
 
 
-@pytest.mark.parametrize("variant", ["goal_static", "pending_static"])
+@pytest.mark.parametrize("variant", INITIAL_VIEW_VARIANTS)
 def test_frozen_controller_config_constructs_static_composition(monkeypatch, variant):
     monkeypatch.setattr(
         "benchmarks.memory_runtime.candidate_algorithms.controller.C1RiskArtifact",
@@ -192,7 +196,7 @@ def test_frozen_controller_config_constructs_static_composition(monkeypatch, var
 
 
 def test_missing_or_mismatched_composition_is_rejected(monkeypatch):
-    for variant in ("goal_static", "pending_static"):
+    for variant in INITIAL_VIEW_VARIANTS:
         good = candidate(variant)
         for field, bad in (
             ("recovery_backbone", "goal_pending" if variant == "goal_static" else "goal_rescue"),
@@ -234,3 +238,39 @@ def test_missing_or_mismatched_composition_is_rejected(monkeypatch):
     assert prepared.metadata["route"]["baseline_identity"] == (
         f"{VERSION}:goal_rescue"
     )
+
+
+@pytest.mark.parametrize("variant", ["goal_verified_static", "pending_verified_static"])
+def test_static_verified_delegates_real_proof_to_selected_commit(monkeypatch, variant):
+    from benchmarks.memory_runtime.tests.test_verified_binding import _call, _tools
+    composed = controller(monkeypatch, variant)
+    payload = request(rows=[{"role": "user", "content":
+        "Set a budget limit of $1500 using my secure token ABCDE12345."}])
+    payload["tools"] = _tools(("set_budget_limit", {
+        "access_token": "string", "budget_limit": "number"}))
+    prepared = composed.prepare(payload, ratio=8, max_new_tokens=32)
+    draft = [_call("set_budget_limit", {"access_token": "wrong", "budget_limit": 1500})]
+    result = composed.reconsider(prepared, draft, draft_text="set budget")
+    assert not result["regenerate"]
+    assert result["decision"]["verified_binding"]["status"] == "proposed"
+    assert result["decision"]["backbone_decision_version"] == VERIFIED_VERSION
+    assert composed.validate_commit(prepared, draft, draft_text="set budget")["accepted"]
+    committed, receipt = composed.finalize_commit(prepared, draft)
+    assert receipt["changed"] and receipt["status"] == "verified_binding_committed"
+    assert receipt["additional_generations"] == receipt["additional_model_workspace_tokens"] == 0
+    assert json.loads(committed[0]["function"]["arguments"]) == {
+        "access_token": "ABCDE12345", "budget_limit": 1500}
+    assert committed[0]["id"] == draft[0]["id"]
+    assert json.loads(draft[0]["function"]["arguments"])["access_token"] == "wrong"
+    assert composed.finalize_commit(prepared, draft) == (committed, receipt)
+
+
+@pytest.mark.parametrize("variant", ["goal_verified_static", "pending_verified_static"])
+def test_static_verified_requires_explicit_proof_registry(variant):
+    config = candidate(variant)
+    for bad in (None, "stale-proof-registry"):
+        invalid = {**config, "proof_registry_version": bad}
+        if bad is None:
+            invalid.pop("proof_registry_version")
+        with pytest.raises(ValueError, match="proof registry"):
+            validate_initial_view_config(invalid)
