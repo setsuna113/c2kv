@@ -1,7 +1,7 @@
 {
   "schema": "c2kv-initial-view-composition-validation-v1",
-  "recorded_at": "2026-09-21T00:14:03.931017+00:00",
-  "status": "implementation_and_targeted_CPU_checks_passed_CUDA_pending_resource",
+  "recorded_at": "2026-09-21T00:29:42.475480+00:00",
+  "status": "implementation_targeted_CPU_and_bounded_CUDA_checks_passed",
   "variants": {
     "goal_static": "goal_rescue",
     "pending_static": "goal_pending"
@@ -29,9 +29,9 @@
   },
   "source_revisions": {
     "paper_implementation": "58b4ef1d12bf9afe6affb94cae5f68fc64db5aed",
-    "paper_integrated_source": "783526b9bbbccd6c89b7f07d4c2f24d768d82995",
+    "paper_integrated_source": "3eb5d4733589935d169e5ed9236a981c93e80bdb",
     "npu_implementation": "8e1f2e9786cd364272099399bcfdfaa88c0d0a2a",
-    "npu_integrated_source": "70a1cdf154c5e1db550b5175eb092709473c281a",
+    "npu_integrated_source": "caefa8edeea8202f1f571a6df3d4957a5bbca89d",
     "engine_staged": "ecb9c3970eec7c79f8831def4d6aed3494c4d371",
     "engine_changed_by_this_task": false
   },
@@ -193,9 +193,10 @@
         "benchmarks/paper/test_d3_hybrid_config.py",
         "benchmarks/paper/test_native_bare.py",
         "benchmarks/paper/test_task_subsets.py",
-        "benchmarks/paper/test_runner.py"
+        "benchmarks/paper/test_runner.py",
+        "benchmarks/paper/test_tool_interface_entrypoint.py"
       ],
-      "passed": 193,
+      "passed": 199,
       "subtests_passed": 17,
       "failed": 0
     },
@@ -221,9 +222,11 @@
         "tests/test_c2kv_candidate_cell.py",
         "tests/test_c2kv_calibration_plan.py",
         "tests/test_calibration_controller.py",
-        "tests/test_calibration_bfcl_site.py"
+        "tests/test_calibration_bfcl_site.py",
+        "tests/test_native_bare_launcher.py",
+        "tests/test_tool_context_cell.py"
       ],
-      "passed": 75,
+      "passed": 96,
       "failed": 0
     },
     {
@@ -281,38 +284,207 @@
     ]
   },
   "CUDA": {
-    "status": "not_run_no_free_owned_device",
-    "engine_started": false,
-    "model_generations": 0,
-    "resource_check": "m1: all four cards occupied by production workers; m2: all four cards occupied",
-    "launch_guard": "Refused launch while GPU0 occupied; no owned engine or benchmark process created",
-    "staged_sources": {
-      "paper": {
-        "revision": "783526b9bbbccd6c89b7f07d4c2f24d768d82995",
-        "path": "/workspace/validation/goal-static-view-20260921/paper-783526b9bbbc"
+    "schema": "c2kv-initial-view-CUDA-smoke-v1",
+    "status": "passed",
+    "source": {
+      "pid": 1284037,
+      "start_time": "190033141",
+      "gpu": "GPU-db773cb4-fb9b-59ff-f49e-325501b03b6f",
+      "port": 34863,
+      "sources": {
+        "paper": {
+          "revision": "3eb5d4733589935d169e5ed9236a981c93e80bdb",
+          "path": "/workspace/validation/goal-static-view-20260921/paper-3eb5d4733589"
+        },
+        "engine": {
+          "revision": "ecb9c3970eec7c79f8831def4d6aed3494c4d371",
+          "path": "/workspace/validation/goal-static-view-20260921/engine-ecb9c3970eec"
+        }
       },
-      "engine": {
-        "revision": "ecb9c3970eec7c79f8831def4d6aed3494c4d371",
-        "path": "/workspace/validation/goal-static-view-20260921/engine-ecb9c3970eec"
+      "command": [
+        "/workspace/venv-sglang/bin/python",
+        "-m",
+        "sglang.launch_server",
+        "--model-path",
+        "/workspace/checkpoint-1000",
+        "--served-model-name",
+        "c2kv-agent",
+        "--device",
+        "cuda",
+        "--dtype",
+        "bfloat16",
+        "--model-impl",
+        "sglang",
+        "--attention-backend",
+        "flashinfer",
+        "--tool-call-parser",
+        "qwen25",
+        "--enable-c2kv",
+        "--c2kv-gist-type",
+        "dynamic-interleave",
+        "--c2kv-gist-param",
+        "qkv",
+        "--c2kv-query-proj",
+        "base",
+        "--c2kv-pool-fraction",
+        "0.05",
+        "--mem-fraction-static",
+        "0.65",
+        "--context-length",
+        "32768",
+        "--max-total-tokens",
+        "32768",
+        "--max-running-requests",
+        "1",
+        "--page-size",
+        "1",
+        "--chunked-prefill-size",
+        "512",
+        "--random-seed",
+        "42",
+        "--disable-radix-cache",
+        "--disable-cuda-graph",
+        "--disable-piecewise-cuda-graph",
+        "--disable-overlap-schedule",
+        "--enable-streaming-session",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "34863",
+        "--c2kv-shadow-feature-layer",
+        "-2",
+        "--enable-return-hidden-states"
+      ]
+    },
+    "device": "0, NVIDIA GeForce RTX 4090, GPU-db773cb4-fb9b-59ff-f49e-325501b03b6f",
+    "checkpoint": "/workspace/checkpoint-1000",
+    "official_smokes": [
+      {
+        "arm": "c2kv_goal_static_r8",
+        "status": "passed",
+        "qualification": "functional smoke; preliminary, n=1",
+        "task_id": "multi_turn_base_26",
+        "semantic_score": 0.0,
+        "n_harness_failures": 0,
+        "n_method_failures": 0,
+        "decision_count": 6,
+        "generation_calls": 9,
+        "recovery_count": 3,
+        "max_generations_per_decision": 2,
+        "all_B0_checks_passed": true,
+        "detector": "Frozen T02, threshold 0.5, actual model scores used",
+        "recovery_reasons": {
+          "risk_not_above_threshold": 3,
+          "stop_completion_review": 3
+        },
+        "pending_packets_admitted": 0,
+        "commit_validations": 0,
+        "harness_generation_requested": {
+          "temperature": 0.0,
+          "seed": 0,
+          "max_completion_tokens": 4096,
+          "scope": "explicit overrides; None preserves the existing default"
+        },
+        "profile": "/workspace/validation/goal-static-view-20260921/results/goal_static/native/profile.json",
+        "profile_sha256": "71eab6fb12ecf0dab4311f9014212b515dca5a7a325081686830b508a01fdbd6",
+        "summary": "/workspace/validation/goal-static-view-20260921/results/goal_static/summary_c2kv_goal_static_r8.json",
+        "summary_sha256": "59fac834ceaebc92b680c9ad666a7fc7a54edb35bcccb92a41d67609faa9ee52",
+        "steps": "/workspace/validation/goal-static-view-20260921/results/goal_static/native/task_shards/multi_turn_base_26/server/steps.jsonl",
+        "steps_sha256": "35dbabba725d1868166aa7440b35a089b24bcfd924efd62e5ead2bcbac55c5f7"
+      },
+      {
+        "arm": "c2kv_pending_static_r8",
+        "status": "passed",
+        "qualification": "functional smoke; preliminary, n=1",
+        "task_id": "multi_turn_base_26",
+        "semantic_score": 0.0,
+        "n_harness_failures": 0,
+        "n_method_failures": 0,
+        "decision_count": 6,
+        "generation_calls": 10,
+        "recovery_count": 4,
+        "max_generations_per_decision": 2,
+        "all_B0_checks_passed": true,
+        "detector": "Frozen T02, threshold 0.5, actual model scores used",
+        "recovery_reasons": {
+          "risk_not_above_threshold": 2,
+          "stop_completion_review": 3,
+          "risk_triggered_complete_event_replaced": 1
+        },
+        "pending_packets_admitted": 3,
+        "commit_validations": 6,
+        "harness_generation_requested": {
+          "temperature": 0.0,
+          "seed": 0,
+          "max_completion_tokens": 4096,
+          "scope": "explicit overrides; None preserves the existing default"
+        },
+        "profile": "/workspace/validation/goal-static-view-20260921/results/pending_static/native/profile.json",
+        "profile_sha256": "0aad9e902b291dd4e72c36b4ee03fb14fbde802404e99d4c227cd526e37da15c",
+        "summary": "/workspace/validation/goal-static-view-20260921/results/pending_static/summary_c2kv_pending_static_r8.json",
+        "summary_sha256": "b41338b42f912b9b5baaceb9ae43d32a963365892df2283c336037088180124a",
+        "steps": "/workspace/validation/goal-static-view-20260921/results/pending_static/native/task_shards/multi_turn_base_26/server/steps.jsonl",
+        "steps_sha256": "b875aa647f29348db93c475b1e03efef14c96b7ee87d8faf07f83ce3aa6026c3"
       }
-    },
-    "bounded_plan": {
-      "benchmark": "bfcl_base",
-      "task_ids": [
-        "multi_turn_base_26"
+    ],
+    "qualification": "Functional acceptance only; preliminary, n=1; no new quality claim",
+    "pre_generation_setup_failures": [
+      {
+        "reason": "Git identity missing in archived source before model generation",
+        "retained_records": [
+          "/workspace/validation/goal-static-view-20260921/preflight_failed_goal_static_owner.json",
+          "/workspace/validation/goal-static-view-20260921/preflight_failed_goal_static.exit.json",
+          "/workspace/validation/goal-static-view-20260921/preflight_failed_goal_static_smoke.log"
+        ],
+        "completed_tasks": 0,
+        "benchmark_model_generations": 0
+      },
+      {
+        "reason": "Smoke service omitted the required T02 shadow-feature launch flags",
+        "benchmark_model_generations": 0,
+        "fix": "Use --c2kv-shadow-feature-layer -2 --enable-return-hidden-states from production runner"
+      }
+    ],
+    "prepared_driver_sha256": "dddec037256c9ad0393ad8486b0791d3edf54541408f18ef3c85d1eb1d8e4aa2",
+    "recompute_script_sha256": "cea0957a9e748141c739104e14a24366290fdf9552591496a746257b0bf90193",
+    "cleanup": {
+      "stopped": [
+        {
+          "owner": "preflight_failed_goal_static_owner.json",
+          "status": "already_stopped"
+        },
+        {
+          "owner": "capability_preflight_failed_goal_static_owner.json",
+          "status": "already_stopped"
+        },
+        {
+          "owner": "capability_preflight_failed_server_owner.json",
+          "status": "already_stopped"
+        },
+        {
+          "owner": "goal_static_owner.json",
+          "status": "already_stopped"
+        },
+        {
+          "owner": "pending_static_owner.json",
+          "status": "already_stopped"
+        },
+        {
+          "owner": "server_owner.json",
+          "status": "term_sent"
+        }
       ],
-      "arms": [
-        "c2kv_goal_static_r8",
-        "c2kv_pending_static_r8"
-      ],
-      "full_run": false
+      "gpu": "0, 1, 0\n1, 34902, 24\n2, 35036, 21\n3, 34644, 0\n"
     },
-    "prepared_driver": "scratchpad/initial_view_impl_20260921/cuda_smoke.py",
-    "prepared_driver_sha256": "5a4b408840d4da9d4f8bd517652a64a376c43b18019f70f577afbf21efb21d2f"
+    "local_artifact_bundle": {
+      "path": "C:\\Users\\yl998\\Documents\\programming\\c2kv\\scratchpad\\initial_view_impl_20260921\\cuda_artifacts.tar.gz",
+      "bytes": 3527690,
+      "sha256": "951f3024602fd09f8af3eeec4701176e6581825813a2d9b8657251e3a483bc14"
+    }
   },
   "NPU_hardware": {
     "executed": false
   },
-  "quality_claim": "No new benchmark score or quality improvement claimed",
+  "quality_claim": "Only two single-task functional smokes, preliminary, n=1; no quality improvement claimed",
   "running_experiments": "Preserved; isolated source checkouts, no job restarts or source replacement"
 }
