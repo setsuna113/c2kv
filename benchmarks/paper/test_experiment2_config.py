@@ -7,12 +7,12 @@ from benchmarks.paper import runner
 
 
 CONFIG = Path(__file__).with_name("experiment2_cuda.json")
-BENCHMARKS = {"bfcl_base", "bfcl_long_context", "acebench_agent", "appworld"}
+BENCHMARKS = {"bfcl_base", "bfcl_long_context", "acebench_agent", "appworld", "tau2", "toolsandbox"}
 ARMS = {
     "full", "hiagent_full_b768", "acon_hist_ut_co_b768",
     "history_kv_h2o_r25_persistent", "history_kv_snapkv_r25_persistent",
     "history_kv_pyramidkv_r25_persistent", "commitkv", "agentkv",
-    "c2kv_native_r4", "c2kv_goal_rescue_r8",
+    "c2kv_native_r4", "c2kv_pending_verified_r8",
 }
 HISTORY_KV = {
     "history_kv_h2o_r25_persistent", "history_kv_snapkv_r25_persistent",
@@ -25,7 +25,15 @@ def test_experiment2_config_resolves_only_original_budget_cells(tmp_path):
     plan, _ = runner.prepare(config, tmp_path / "results", tmp_path / "sglang-paper")
     by_id = {cell["cell_id"]: cell for cell in plan}
 
-    assert len(plan) == len(BENCHMARKS) * len(ARMS) == len(by_id)
+    assert len(plan) == len(BENCHMARKS) * len(ARMS) - 1 == len(by_id)
+    assert { (cell["benchmark"], cell["arm"]) for cell in plan } == {
+        (benchmark, arm) for benchmark in BENCHMARKS for arm in ARMS
+        if (benchmark, arm) != ("toolsandbox", "c2kv_pending_verified_r8")
+    }
+    assert config["tau2_task_set"] == "airline"
+    assert config["tau2_task_split"] == "base"
+    assert config["toolsandbox_suite"] == "three_distraction_tools_129"
+    assert json.loads((tmp_path / "results" / "unsupported_cells.json").read_text()) == config["unsupported_cells"]
     assert {cell["benchmark"] for cell in plan} == BENCHMARKS
     assert {cell["arm"] for cell in plan} == ARMS
     assert all(cell["tool_context"] == "raw" for cell in plan)
@@ -47,7 +55,7 @@ def test_experiment2_config_resolves_only_original_budget_cells(tmp_path):
             assert "--history-kv-target-tokens" not in cell["command"]
         elif arm == "c2kv_native_r4":
             assert cell["ratio"] == 4
-        elif arm == "c2kv_goal_rescue_r8":
+        elif arm == "c2kv_pending_verified_r8":
             assert cell["ratio"] == 8
             assert cell["group"] == "candidate"
             assert cell["command"][2] == "benchmarks.paper.c1"

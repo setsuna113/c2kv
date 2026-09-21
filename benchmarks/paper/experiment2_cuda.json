@@ -12,6 +12,15 @@
   "acebench_dir": "/ABSOLUTE/PATH/TO/ACEBench",
   "acebench_python": "/ABSOLUTE/PATH/TO/venv-bench/bin/python",
   "acebench_language": "en",
+  "tau2_dir": "/ABSOLUTE/PATH/TO/tau2",
+  "tau2_python": "/ABSOLUTE/PATH/TO/venv-tau2/bin/python",
+  "tau2_task_set": "airline",
+  "tau2_task_split": "base",
+  "tau2_num_trials": 1,
+  "toolsandbox_dir": "/ABSOLUTE/PATH/TO/ToolSandbox",
+  "toolsandbox_python": "/ABSOLUTE/PATH/TO/venv-toolsandbox/bin/python",
+  "toolsandbox_suite": "three_distraction_tools_129",
+  "toolsandbox_scenarios": [],
   "output_root": "/ABSOLUTE/PATH/TO/experiment2-results",
   "server_port": 34000,
   "proxy_port": 34100,
@@ -36,22 +45,28 @@
   "methods": [
     {"method": "Full", "arm": "full", "group": "main"},
     {"method": "HiAgent-budget", "arm": "hiagent_full_b768", "group": "main", "history_budget_tokens": 768,
-      "benchmarks": ["bfcl_base", "bfcl_long_context", "acebench_agent", "appworld"]},
+      "benchmarks": ["bfcl_base", "bfcl_long_context", "acebench_agent", "appworld", "tau2", "toolsandbox"]},
     {"method": "ACON-budget", "arm": "acon_hist_ut_co_b768", "group": "main", "history_budget_tokens": 768,
-      "benchmarks": ["bfcl_base", "bfcl_long_context", "acebench_agent", "appworld"]},
+      "benchmarks": ["bfcl_base", "bfcl_long_context", "acebench_agent", "appworld", "tau2", "toolsandbox"]},
     {"method": "H2O", "arm": "history_kv_h2o_r25_persistent", "group": "main", "history_budget_tokens": 768},
     {"method": "SnapKV", "arm": "history_kv_snapkv_r25_persistent", "group": "main", "history_budget_tokens": 768},
     {"method": "PyramidKV", "arm": "history_kv_pyramidkv_r25_persistent", "group": "main", "history_budget_tokens": 768},
     {"method": "CommitKV", "arm": "commitkv", "group": "main", "history_budget_tokens": 768},
     {"method": "AgentKV", "arm": "agentkv", "group": "main", "history_budget_tokens": 768},
     {"method": "C2KV", "arm": "c2kv_native_r4", "group": "main", "ratio": 4},
-    {"method": "C2KV+Goal", "arm": "c2kv_goal_rescue_r8", "group": "candidate", "ratio": 8,
-      "benchmarks": ["bfcl_base", "bfcl_long_context", "acebench_agent", "appworld"]}
+    {"method": "C2KV+PendingVerified", "arm": "c2kv_pending_verified_r8", "group": "candidate", "ratio": 8,
+      "benchmarks": ["bfcl_base", "bfcl_long_context", "acebench_agent", "appworld", "tau2"]}
   ],
   "benchmarks": [
     {"name": "bfcl_base", "adapter": "bfcl", "category": "multi_turn_base"},
     {"name": "bfcl_long_context", "adapter": "bfcl", "category": "multi_turn_long_context"},
     {"name": "acebench_agent", "adapter": "acebench", "category": "agent"},
-    {"name": "appworld", "adapter": "acon_appworld"}
+    {"name": "appworld", "adapter": "acon_appworld"},
+    {"name": "tau2", "adapter": "tau2"},
+    {"name": "toolsandbox", "adapter": "toolsandbox"}
+  ],
+  "unsupported_cells": [
+    {"method": "C2KV+PendingVerified", "arm": "c2kv_pending_verified_r8", "benchmark": "toolsandbox",
+      "reason": "The current candidate registry and delivery profile exclude ToolSandbox; pending_verified is not enabled on this benchmark."}
   ]
 }
