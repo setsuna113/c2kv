@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 
+from experiments.history_system.candidate_algorithms import INITIAL_VIEW_VARIANTS
 
 VARIANT_TO_ARM = {
     "static_t02": "c2kv_static_t02_r8",
@@ -13,8 +14,22 @@ VARIANT_TO_ARM = {
     "request_contract": "c2kv_request_contract_r8",
     "argument_binding": "c2kv_argument_binding_r8",
     "no_progress": "c2kv_no_progress_r8",
+    "goal_pending": "c2kv_goal_pending_r8",
+    "goal_source": "c2kv_goal_source_r8",
+    "goal_progress": "c2kv_goal_progress_r8",
+    "goal_joint": "c2kv_goal_joint_r8",
+    "goal_verified": "c2kv_goal_verified_r8",
+    "pending_verified": "c2kv_pending_verified_r8",
+    "goal_static": "c2kv_goal_static_r8",
+    "pending_static": "c2kv_pending_static_r8",
+    "goal_verified_static": "c2kv_goal_verified_static_r8",
+    "pending_verified_static": "c2kv_pending_verified_static_r8",
 }
 REPAIR_VARIANTS = frozenset({"request_contract", "argument_binding", "no_progress"})
+GOAL_VARIANTS = ("goal_pending", "goal_source", "goal_progress", "goal_joint")
+VERIFIED_VARIANTS = ("goal_verified", "pending_verified")
+LEGACY_VARIANTS = tuple(variant for variant in VARIANT_TO_ARM
+                        if variant not in VERIFIED_VARIANTS + INITIAL_VIEW_VARIANTS)
 ARM_TO_VARIANT = {arm: variant for variant, arm in VARIANT_TO_ARM.items()}
 SUPPORTED_BENCHMARKS = frozenset({"bfcl_base", "bfcl_long_context", "appworld", "acebench_agent", "tau2"})
 
@@ -22,7 +37,7 @@ SUPPORTED_BENCHMARKS = frozenset({"bfcl_base", "bfcl_long_context", "appworld", 
 def parse_candidate_arms(value: str) -> tuple[str, ...]:
     if not value:
         return ()
-    requested = tuple(VARIANT_TO_ARM) if value == "all" else tuple(value.split(","))
+    requested = LEGACY_VARIANTS if value == "all" else tuple(value.split(","))
     if not requested or len(requested) != len(set(requested)):
         raise ValueError("candidate arms must be unique")
     unknown = set(requested) - set(VARIANT_TO_ARM)

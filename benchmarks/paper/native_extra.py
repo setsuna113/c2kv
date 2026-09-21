@@ -10,10 +10,16 @@ import re
 import subprocess
 import time
 from collections.abc import Mapping
+from functools import lru_cache
 
 from . import c1_appworld
-from .candidate_matrix import ARM_TO_VARIANT, REPAIR_VARIANTS
+from .candidate_matrix import ARM_TO_VARIANT, GOAL_VARIANTS, REPAIR_VARIANTS, VERIFIED_VARIANTS
+from experiments.history_system.candidate_algorithms import (
+    INITIAL_VIEW_VARIANTS, INITIAL_VIEW_VERSION, initial_view_fields,
+    PROOF_REGISTRY_VERSION, VERIFIED_VERSION,
+)
 from .process_lifecycle import run_owned
+from benchmarks.toolsandbox_suite import selected_scenarios
 
 
 BENCHMARKS = {"acebench_agent": ("acebench", "acebench-text-actions-v1"),
@@ -113,11 +119,23 @@ def validate_ready_manifest(config, benchmark, task, ready_path, controller_path
                             and candidate.get("variant") == variant
                             and candidate.get("risk_threshold") == 0.5
                             and isinstance(artifact, Mapping)
-                            and artifact.get("model_kind") == "c1_risk_logistic")
-            version = "c2kv-paper-candidates-v1"
+                            and artifact.get("model_kind") == "c1_risk_logistic"
+                            and (variant not in VERIFIED_VARIANTS
+                                 or candidate.get("proof_registry_version") == PROOF_REGISTRY_VERSION))
+            view_fields = initial_view_fields(variant)
+            valid_config = valid_config and all(candidate.get(key) == value
+                                                for key, value in view_fields.items())
+            version = (INITIAL_VIEW_VERSION if variant in INITIAL_VIEW_VARIANTS else
+                       VERIFIED_VERSION if variant in VERIFIED_VARIANTS else
+                       "c2kv-goal-composition-v1" if variant in GOAL_VARIANTS
+                       else "c2kv-paper-candidates-v1")
         if (not valid_config or not isinstance(loaded_candidate, Mapping)
                 or loaded_candidate.get("variant") != variant
                 or loaded_candidate.get("stable_call_ids") is not True
+                or any(loaded_candidate.get(key) != value
+                       for key, value in initial_view_fields(variant).items())
+                or (variant in VERIFIED_VARIANTS
+                    and loaded_candidate.get("proof_registry_version") != PROOF_REGISTRY_VERSION)
                 or route.get("baseline_identity") != version + ":" + variant
                 or route.get("recovery_enabled") is not True
                 or route.get("max_generations_per_decision") != 2):
@@ -173,12 +191,9 @@ def _ace_tasks(config):
 def _toolsandbox_tasks(config):
     """Ask the installed official resolver for exactly the configured suite."""
     source = Path(config["toolsandbox_dir"]).resolve()
-    scenarios = config.get("toolsandbox_scenarios") or []
-    if scenarios and (not isinstance(scenarios, list) or
-                      any(not isinstance(item, str) for item in scenarios)):
-        raise ValueError("toolsandbox_scenarios must be a list of names")
-    if not scenarios and config.get("toolsandbox_suite") != "full":
-        raise ValueError("ToolSandbox paper suite requires full or explicit scenarios")
+    scenarios = selected_scenarios(
+        config.get("toolsandbox_suite"), config.get("toolsandbox_scenarios"),
+        require_paper_suite=True)
     script = (
         "import json; from tool_sandbox.cli import resolve_scenarios; "
         "print(json.dumps(sorted(resolve_scenarios(desired_scenario_names=None, "
@@ -197,8 +212,8 @@ def _toolsandbox_tasks(config):
     if not isinstance(available, list):
         raise RuntimeError("Official ToolSandbox resolver returned no scenario list")
     available = [_task_id(item) for item in available]
-    if scenarios:
-        if len(scenarios) != len(set(scenarios)) or not set(scenarios) <= set(available):
+    if scenarios is not None:
+        if not set(scenarios) <= set(available):
             raise ValueError("Configured ToolSandbox scenarios are not unique official IDs")
         return list(scenarios)
     return available
@@ -310,6 +325,25 @@ def server_command(config, benchmark, task, native, delivery, controller_path):
 controller_command = server_command
 
 
+@lru_cache(maxsize=8)
+def _preflight_controller_tokenizer(python: str, checkpoint: str) -> None:
+    """Check the controller interpreter against the served tokenizer before launch."""
+    script = (
+        "import sys; from transformers import AutoTokenizer; "
+        "tok=AutoTokenizer.from_pretrained(sys.argv[1], local_files_only=True); "
+        "tok.encode('tokenizer preflight')"
+    )
+    try:
+        result = run_owned([python, "-c", script, checkpoint],
+                           capture_output=True, text=True)
+    except OSError as error:
+        raise RuntimeError(f"Native controller Python is unavailable: {python}") from error
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"Native controller Python {python} cannot load the served tokenizer "
+            f"from {checkpoint}: {(result.stderr or '').strip()[-1000:]}")
+
+
 def _run_official(config, benchmark, task, task_out, base_url, model):
     user_url = c1_appworld._sglang_upstream(config)
     if benchmark == "tau2":
@@ -398,6 +432,9 @@ def _run_official(config, benchmark, task, task_out, base_url, model):
 def run_task(config, benchmark, task, native, delivery, controller_path):
     """Run one official task against a one-task native event server."""
     task = _task_id(task)
+    _preflight_controller_tokenizer(
+        c1_appworld._controller_python(config),
+        str(Path(config["checkpoint"]).resolve()))
     command = server_command(config, benchmark, task, native, delivery, controller_path)
     delivery_root = c1_appworld._delivery_path(delivery)
     runtime = delivery_root / "runtime"

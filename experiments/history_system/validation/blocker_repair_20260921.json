@@ -1,0 +1,674 @@
+{
+  "schema": "c2kv-blocker-repair-validation-v1",
+  "status": "code_fixes_and_device_probes_complete_agentkv_quality_issue_remains",
+  "implementation_commits": {
+    "paper": "58ae75e50fceaa7afc6849bd5783fb0398669cd6",
+    "npu": "37fe2a8741a6289901651e4e69921a3da9529297",
+    "engine": "ecb9c3970eec7c79f8831def4d6aed3494c4d371"
+  },
+  "source_architecture": {
+    "shared_paper_and_engine_branch": "paper/benchmarks-cuda-20260917",
+    "npu_launcher_and_bundled_runtime_branch": "experiment/generality-npu-20260919",
+    "npu_port": "Source-identity guards and typed decision-cap lifetime ported; existing NPU recovery-budget extensions preserved. Shared paper adapters/evaluator and shared engine apply on both devices."
+  },
+  "cpu_validation": [
+    {
+      "repository": "paper",
+      "tests": [
+        "benchmarks/tool_definition",
+        "benchmarks/test_tau2_adapter_integration.py",
+        "benchmarks/test_toolsandbox_terminal_failures.py",
+        "benchmarks/test_hiagent_budget_proxy.py",
+        "benchmarks/test_textarm_runtime.py",
+        "benchmarks/paper/test_native_extra.py"
+      ],
+      "passed": 97
+    },
+    {
+      "repository": "paper",
+      "tests": [
+        "benchmarks/paper/test_native_history_budget.py",
+        "benchmarks/test_history_budget.py"
+      ],
+      "passed": 47
+    },
+    {
+      "repository": "paper",
+      "tests": [
+        "experiments/history_system/test_history_budget.py",
+        "experiments/history_system/runtime/benchmarks/memory_runtime/tests/test_event_native_server.py"
+      ],
+      "passed": 29,
+      "skipped": 1,
+      "subtests_passed": 10
+    },
+    {
+      "repository": "paper",
+      "tests": [
+        "experiments/history_system/runtime/benchmarks/memory_runtime/tests/test_tool_source_identity.py"
+      ],
+      "passed": 5
+    },
+    {
+      "repository": "paper",
+      "tests": [
+        "benchmarks/paper/test_upstream_liveness.py"
+      ],
+      "passed": 5,
+      "skipped": 1
+    },
+    {
+      "repository": "npu",
+      "tests": [
+        "tests/test_c2kv_candidate_cell.py",
+        "controller_runtime/benchmarks/memory_runtime/tests/test_decision_cap_http_lifetime.py",
+        "controller_runtime/benchmarks/memory_runtime/tests/test_rendered_source_identity.py"
+      ],
+      "passed": 44
+    },
+    {
+      "repository": "engine",
+      "command": "wsl.exe -e /home/lyc/dev/c2kv-cuda-port/venv-sglang/bin/python -m pytest -q --tb=short test/registered/unit/test_reference_history_regressions.py test/registered/unit/test_persistent_history_lifecycle.py test/registered/unit/test_history_kv_selection.py test/registered/unit/test_agentkv_engine_pipeline.py test/registered/unit/test_commitkv_engine_integration.py test/registered/unit/test_commitkv.py test/registered/unit/test_streaming_session_timeout_ownership.py test/registered/unit/test_session_cache_isolation.py",
+      "tests": [
+        "test/registered/unit/test_reference_history_regressions.py",
+        "test/registered/unit/test_persistent_history_lifecycle.py",
+        "test/registered/unit/test_history_kv_selection.py",
+        "test/registered/unit/test_agentkv_engine_pipeline.py",
+        "test/registered/unit/test_commitkv_engine_integration.py",
+        "test/registered/unit/test_commitkv.py",
+        "test/registered/unit/test_streaming_session_timeout_ownership.py",
+        "test/registered/unit/test_session_cache_isolation.py"
+      ],
+      "passed": 174,
+      "skipped": 0,
+      "warnings": 1,
+      "hardware_validation": "not run"
+    },
+    {
+      "repository": "paper",
+      "tested_after_merge_commit": "abf17f0e86a50be28ec74a9dea5d237240a6ecb8",
+      "tests": [
+        "benchmarks/paper/test_hiagent_budget_runner.py",
+        "benchmarks/test_hiagent_budget_proxy.py",
+        "benchmarks/test_toolsandbox_terminal_failures.py",
+        "benchmarks/test_history_budget.py"
+      ],
+      "passed": 52
+    },
+    {
+      "repository": "engine",
+      "tested_commit": "9b6a6fa1c01e4e2807d5d0bb4094f5e1a86504fa",
+      "tests": [
+        "test/registered/unit/test_reference_history_regressions.py",
+        "test/registered/unit/test_history_kv_reference.py"
+      ],
+      "passed": 11,
+      "warnings": 1
+    }
+  ],
+  "validation_count_scope": "Individual test invocations; not benchmark tasks or device measurements.",
+  "device_validation": {
+    "round": "20260921",
+    "authorization": "User explicitly released m2 GPU0 for continued debugging; isolated NPU7 probes used an idle card.",
+    "paper_tested_commit": "d22a9398df20505cb19ef0a360d9fc643816840c",
+    "engine_tested_commit": "9b6a6fa1c01e4e2807d5d0bb4094f5e1a86504fa",
+    "cuda_persistent": {
+      "status": "passed",
+      "evidence": {
+        "local_path": "C:\\Users\\yl998\\Documents\\programming\\c2kv\\scratchpad\\blocker_repair_20260920\\device_20260921\\persistent_cuda_receipt_v2.json",
+        "sha256": "ecf87bf295e3461d43833462f63d3ddc4ff1bec3c161b8e5bd36b2497aade6cf"
+      },
+      "cases": [
+        {
+          "arm": "commitkv",
+          "budget": 768,
+          "turns": 6,
+          "all_one_token": true,
+          "stale_replay_http": 400,
+          "closed_flushed_and_healthy": true
+        },
+        {
+          "arm": "agentkv",
+          "budget": 768,
+          "turns": 6,
+          "all_one_token": true,
+          "stale_replay_http": 400,
+          "closed_flushed_and_healthy": true
+        },
+        {
+          "arm": "history_kv_pyramidkv_r25_persistent",
+          "budget": 768,
+          "turns": 6,
+          "all_one_token": true,
+          "stale_replay_http": 400,
+          "closed_flushed_and_healthy": true
+        }
+      ]
+    },
+    "cuda_native_two_turn": {
+      "status": "passed",
+      "evidence": {
+        "local_path": "C:\\Users\\yl998\\Documents\\programming\\c2kv\\scratchpad\\blocker_repair_20260920\\device_20260921\\native_two_turn_receipt.json",
+        "sha256": "4d25dc103e48a5f35a6c875cda910dbe97696b9b1ce6da4a250fc95f84a025ee"
+      },
+      "turns": 2,
+      "source_rewrite_rejected": true,
+      "selected_native_indices": [
+        [
+          0
+        ],
+        [
+          1
+        ]
+      ]
+    },
+    "cuda_memory_check": {
+      "strict_mem_check_enabled": true,
+      "leak_markers": [],
+      "server_log": "/workspace/validation/blocker-repair-20260921/server.log"
+    },
+    "cuda_headroom": {
+      "receipt_in_paper_branch": "experiments/history_system/validation/a3_engine_headroom_20260921.json",
+      "raw_evidence": {
+        "local_path": "C:\\Users\\yl998\\Documents\\programming\\c2kv\\scratchpad\\blocker_repair_20260920\\device_20260921\\a3_headroom_cuda_v2.json",
+        "sha256": "46be83120e3c3dbee5b987bcfa340e95a1260f75dbdc84192a8ecd81eb70b46b"
+      },
+      "old_score": "610 MiB allocation OOM",
+      "new_score": "passed",
+      "new_prefill": "passed",
+      "headroom_mib": 189.31
+    },
+    "cuda_decode_microbenchmark": {
+      "source": {
+        "kind": "engine",
+        "sha": "258b1ee00a46183f2ac5c5fbd750c4196ffbc2c4",
+        "path": "/workspace/validation/blocker-repair-20260921/engine-258b1ee00a46",
+        "git_snapshot": true
+      },
+      "rows": [
+        {
+          "history": 768,
+          "returncode": 0,
+          "command": [
+            "/workspace/venv-sglang/bin/python",
+            "/workspace/validation/blocker-repair-20260921/engine-258b1ee00a46/benchmark/bench_reference_history.py",
+            "--device",
+            "cuda",
+            "--history",
+            "768",
+            "--iters",
+            "32"
+          ],
+          "elapsed_seconds": 2.8195424319710582,
+          "stdout": "{\"device\": \"cuda\", \"history\": 768, \"iters\": 32, \"max_abs_error\": 0.0009765625, \"ms_per_decode_layer\": {\"decode_causal\": 0.09522787877358496, \"masked\": 0.23775493173161522}, \"torch_version\": \"2.9.1+cu129\"}\n",
+          "stderr": ""
+        },
+        {
+          "history": 4470,
+          "returncode": 0,
+          "command": [
+            "/workspace/venv-sglang/bin/python",
+            "/workspace/validation/blocker-repair-20260921/engine-258b1ee00a46/benchmark/bench_reference_history.py",
+            "--device",
+            "cuda",
+            "--history",
+            "4470",
+            "--iters",
+            "32"
+          ],
+          "elapsed_seconds": 2.679301356896758,
+          "stdout": "{\"device\": \"cuda\", \"history\": 4470, \"iters\": 32, \"max_abs_error\": 0.00048828125, \"ms_per_decode_layer\": {\"decode_causal\": 0.09399862756254151, \"masked\": 0.3549206885509193}, \"torch_version\": \"2.9.1+cu129\"}\n",
+          "stderr": ""
+        },
+        {
+          "history": 32768,
+          "returncode": 0,
+          "command": [
+            "/workspace/venv-sglang/bin/python",
+            "/workspace/validation/blocker-repair-20260921/engine-258b1ee00a46/benchmark/bench_reference_history.py",
+            "--device",
+            "cuda",
+            "--history",
+            "32768",
+            "--iters",
+            "32"
+          ],
+          "elapsed_seconds": 2.727878395933658,
+          "stdout": "{\"device\": \"cuda\", \"history\": 32768, \"iters\": 32, \"max_abs_error\": 0.0001220703125, \"ms_per_decode_layer\": {\"decode_causal\": 0.43321850534994155, \"masked\": 2.6330914042773657}, \"torch_version\": \"2.9.1+cu129\"}\n",
+          "stderr": ""
+        }
+      ]
+    },
+    "a4_prefix_replay": {
+      "archive": "/workspace/validation/blocker-repair-20260921/a4_replay_5a83b05_2_step14.json",
+      "base_url": "http://127.0.0.1:34862",
+      "episode_id": "5a83b05_2",
+      "prefix": [
+        {
+          "completion_tokens": 52,
+          "content_sha256": "30157f770790a7b951fe28241cf5ce2466f9a0498806db2153c693681ee3fa71",
+          "elapsed_seconds": 2.678,
+          "finish_reason": "stop",
+          "matches_original": true,
+          "step": 1
+        },
+        {
+          "completion_tokens": 39,
+          "content_sha256": "5bd663ef3de97ef2148ff8a31bbb7ca8802dc417dc5ad9b7db73ae298e2e6da0",
+          "elapsed_seconds": 3.061,
+          "finish_reason": "stop",
+          "matches_original": true,
+          "step": 2
+        },
+        {
+          "completion_tokens": 68,
+          "content_sha256": "190abff38b336ebf90cc07db1054b6af257eef56c4e0d40d58355ffe06164d1d",
+          "elapsed_seconds": 5.35,
+          "finish_reason": "stop",
+          "matches_original": true,
+          "step": 3
+        },
+        {
+          "completion_tokens": 62,
+          "content_sha256": "3c271e6ac5cb0f61cfee7ff79292799182b50e2ea9187680a40e7c8696b95a7b",
+          "elapsed_seconds": 5.065,
+          "finish_reason": "stop",
+          "matches_original": false,
+          "step": 4
+        }
+      ],
+      "probe_tokens": 32,
+      "stopped_reason": "prefix_diverged_before_target",
+      "target_step": 14
+    },
+    "npu": [
+      "validation/engine_model_free_20260921/validation.json",
+      "validation/engine_prefill_20260921/validation.json"
+    ],
+    "fixture_setup_failures": [
+      "Initial persistent probe completed commitkv but did not parse the plain-text flush-cache reply; corrected helper v2 passed all three arms.",
+      "First allocator-headroom probe used torch.device(cuda) without an index in set_per_process_memory_fraction; corrected v2 passed new source and reproduced old source OOM.",
+      "First C1 debug-service launch lacked production prefill-feature flags; no task ran on that attempt. Retried in a new output root with the production flags.",
+      "First A4 official launch inherited CUDA_HOME=/opt/cuda and failed before generation; a new output root with verified /usr/local/cuda completed normally."
+    ],
+    "tau2_task1": {
+      "receipt_in_paper_branch": "experiments/history_system/validation/b1_closed_loop_validation.json",
+      "status": "both original task1 variants reached user_stop",
+      "native_decisions": 30,
+      "c1_decisions": 8,
+      "quality_label": "preliminary, n=1; reservation-details action check failed in both variants"
+    },
+    "tau2_effective_view_audit": "b1_effective_view_audit.json",
+    "appworld_agentkv": {
+      "receipt_in_paper_branch": "experiments/history_system/validation/a4_closed_loop_validation.json",
+      "runner_returncode": 0,
+      "decisions": 17,
+      "official_goal_score": 0.0,
+      "quality_label": "preliminary, n=1"
+    },
+    "appworld_pyramidkv": {
+      "receipt_in_paper_branch": "experiments/history_system/validation/a3_closed_loop_validation.json",
+      "runner_returncode": 0,
+      "decisions": 6,
+      "official_goal_score": 0.0,
+      "quality_label": "preliminary, n=1"
+    },
+    "cleanup": {
+      "ports_closed": {
+        "34862": true,
+        "34863": true,
+        "34910": true,
+        "35010": true,
+        "35800": true,
+        "35900": true
+      },
+      "gpu0_free": true,
+      "nvidia_smi_gpu0": "GPU-db773cb4-fb9b-59ff-f49e-325501b03b6f, 1",
+      "jobs": {
+        "persistent-9b6-v2": 0,
+        "native-two-turn-9b6": 0,
+        "a4-official-v2": 0,
+        "a3-official": 0
+      }
+    }
+  },
+  "blockers": {
+    "A1": "Reject stale persistent continuation as a request-local error before KV ownership transfer; session is closed and server remains available. Follow-up also removes automatic session-generation resubmission in the proxy and hidden outer harness SDK retries. CUDA: six turns each for CommitKV, AgentKV and PyramidKV; stale replay rejected locally and server stayed healthy.",
+    "A2": "Existing cleanup retained; added regression for the one uncommitted token. CUDA: one-token completions, session close and cache flush passed with strict idle memory checks; no leak markers.",
+    "A3": "Bound score chunks and process prefill one KV head at a time with shared GQA views. At original 189.31 MiB headroom, old score reproduces 610 MiB allocation OOM; new score and prefill pass. H=78080 inferred from old allocation, not logged. This is a controlled tensor-path reproduction, not a full 49-turn AppWorld rerun. The original task d6ac34d_3 subsequently completed under the original 131072-token/50-step profile without OOM, but the new trajectory ended after six decisions and did not reconstruct the old 49th-request state.",
+    "A4": "Decode optimization passed CUDA/NPU tensor parity and latency probes. Official original-task rerun 5a83b05_2 ended naturally after 17 decisions, all requests successful. One 2048-token repetitive response still occurred at decision 14 (216.99 seconds); the next three requests stopped normally. Official goal score is 0.0 (preliminary, n=1). Repetitive generation is not fully fixed, and no selector/mask correctness bug has been established; baseline policy and stopping rules remain unchanged.",
+    "A5": "Existing incomplete CommitKV transition fix retained; no result provenance merge performed.",
+    "A6": "Existing canonical BFCL echo fix 313c170 retained; old 199-task result and subset were not merged.",
+    "B1": "Native/Full tool prologues share schema normalization. Both original failing task1 variants naturally reached official user_stop in isolated CUDA reruns: native r4 used 30 decisions, C1 r8 used 8; the original 96 cap and no task max_steps remained unchanged. No effective generation-view repeat in either new run. Official reward 1.0 each is preliminary, n=1; reservation-details action check failed in both, so this is not a claim of complete task behavior or benchmark quality. Explicit generation caps remain task-local failures.",
+    "B2": "Explicit ACON budget failure becomes a task-local loss; generic infrastructure errors still fail the cell.",
+    "B3": "Invalid HiAgent retrieval gets bounded internal feedback; known actor failures are recorded per scenario, with usage and IDs retained.",
+    "B4_C4": "Excluded by the user; independent tool-name fidelity work is not owned by this repair.",
+    "B5": "Observable transcript identity is separate from dynamic tool rendering; nested GP recovery and monotone-source rejection tested. CUDA actual two-turn native hybrid switches the selected tool and preserves transcript identity; genuine source rewriting remains rejected.",
+    "B6": "Existing upstream-liveness supervisor retained and tested.",
+    "B7": "Preflight the configured controller Python against the served tokenizer; no environment or frozen configuration mutated.",
+    "C1": "Accept measured Full-equivalent no-op only when the allowance and every resident layer cover the Full prompt; cohort unchanged.",
+    "C2": "Preparation validates historical and gold tool-call JSON; exclusions retain IDs, reasons and hashes.",
+    "C3": "Flush per-request outputs and errors; resume identical frozen contracts; stop on unavailable upstream; incomplete cohorts publish no aggregate metrics.",
+    "C5": "Call-conditioned pool is unchanged and cannot estimate false-positive calls.",
+    "C6": "Decision/ratio/method/layout identity is used for resume; group-limit semantics made explicit.",
+    "D6": "Merged original paper commit 1719642251669b737dff3a89de8e840679bb351b and corresponding NPU history-budget implementation.",
+    "D1_D2_D3_D4": "Missing-data recovery is excluded by the user. Paused formal queues and old result merges were not changed.",
+    "D5": "Low benchmark scores are not a demonstrated software defect; no score, model policy or benchmark stopping rule was changed.",
+    "D7": "Existing RapidAPI env file copied from m2 to the same protected path on m1, bytes verified equal and mode 0600. No API request, subscription change or job launch.",
+    "D8": "Explicitly excluded by the user: this is not a problem requiring repair.",
+    "new_toolsandbox_b768": "ToolSandbox now included in both ACON and HiAgent budget-overlay preparation, with runtime budget-server routing and unchanged method policy. CPU tests and new full-count prepared roots passed."
+  },
+  "production_deployment": "Fixed source commits were pushed. Existing production checkouts and paused queues were not modified; isolated debug services were shut down and GPU0 was verified free.",
+  "initial_implementation_commits": {
+    "paper": "6376486fe99d6b486c78935406db727c55fb0183",
+    "npu": "9523f0e671c2746db5296d38fb1cabcbfc17d17d",
+    "engine": "ecb9c3970eec7c79f8831def4d6aed3494c4d371"
+  },
+  "scope_update": {
+    "excluded_by_user": [
+      "B4/C4 exact tool-name fidelity",
+      "missing-data recovery",
+      "D8 session monitor"
+    ],
+    "resource_constraint": "Earlier GPU prohibition was superseded by the user explicitly releasing m2 GPU0. Only isolated debug runs and model-free NPU7 checks were started; existing queues remained untouched.",
+    "quality_scope": "C5 false-positive measurement requires different data; D5 low benchmark scores are not themselves code defects. Neither dataset nor scoring protocol was changed.",
+    "added_by_user": "Prepare missing tau2 KV-b768 pair, enable and prepare ToolSandbox text-b768 pair, and prepare BFCL long KV-b768 pair after engine fixes. Formal cohorts are 50, 129 and 200 tasks per cell; no full cohort was launched."
+  },
+  "remaining_acceptance": [
+    "A4 repetitive generation and official goal failure remain observed output-quality failures; no further engine correctness defect has been established. The single-task rerun is not evidence of a general quality fix.",
+    "A3 original 49-request persistent state was not replayed: the original task completed in a shorter six-decision trajectory. The old 610 MiB allocation failure was independently reproduced and removed in the controlled long-history headroom fixture.",
+    "The six newly prepared b768 cells were not run as full cohorts; no full-cohort score is claimed.",
+    "NPU validation covers model-free attention and CPU lifecycle/runtime contracts, not a full-model benchmark episode."
+  ],
+  "previous_device_validation": {
+    "cuda": "One isolated A1 engine service started. Two-turn probe failed before generation because the smoke selected a static policy with nonzero lease_decisions for S0. No hardware regression is claimed passed.",
+    "cuda_service_source": {
+      "paper": {
+        "kind": "paper",
+        "sha": "d3f0fe545cfa6029c279275160632adc4e10f319",
+        "path": "/workspace/validation/blocker-repair-20260920/paper-d3f0fe545cfa"
+      },
+      "engine": {
+        "kind": "engine",
+        "sha": "5a0f0d91db37b96134f72f5e6a7836c4cec1c395",
+        "path": "/workspace/validation/blocker-repair-20260920/engine-5a0f0d91db37"
+      }
+    },
+    "cuda_cleanup": {
+      "pid": 1247011,
+      "port_closed": true,
+      "gpu_free": true
+    },
+    "cuda_stop_reason": "User requested that m2 GPU0 not be occupied; no further device job was launched.",
+    "npu": "Not run during this repair. Shared tensor paths and bundled runtime were checked on CPU only."
+  },
+  "latest_implementation_commits": {
+    "paper_overlay": "d22a9398df20505cb19ef0a360d9fc643816840c",
+    "shared_engine_prefill": "9b6a6fa1c01e4e2807d5d0bb4094f5e1a86504fa"
+  },
+  "prepared_b768_roots": {
+    "receipt_in_paper_branch": "experiments/history_system/validation/b768_prepared_roots_20260921.json",
+    "remote_root": "/workspace/validation/blocker-repair-20260921/final_b768",
+    "total_cells": 6,
+    "tasks_per_cell": {
+      "tau2": 50,
+      "toolsandbox": 129,
+      "bfcl_long_context": 200
+    },
+    "execution": "prepared only; full cohorts not started",
+    "engine_commit": "9b6a6fa1c01e4e2807d5d0bb4094f5e1a86504fa",
+    "paper_commit": "d22a9398df20505cb19ef0a360d9fc643816840c"
+  },
+  "previous_followup": {
+    "session_retry_repair": {
+      "proxy": "A POST carrying session_params.id has one transport attempt, including timeout/429/5xx; stateless retry behavior is preserved.",
+      "harness": "Disable outer agent SDK retries in BFCL, AppWorld/ACON, ACEBench and ToolSandbox. Existing tau2 zero retries and urllib replay single-attempt behavior retained.",
+      "evidence": {
+        "remote_host": "m2",
+        "proxy_telemetry": "/workspace/results-task-repair-313c170c/bfcl_long_context__commitkv/closed_loop/bfcl_long_context__commitkv/proxy_telemetry.jsonl",
+        "server_log": "/workspace/results-task-repair-313c170c/bfcl_long_context__commitkv/closed_loop/bfcl_long_context__commitkv/server.log",
+        "request_id": "00c86fb3f18345d1bbc11afa4dd4ac9d",
+        "attempt_0_start_utc": "2026-09-20T18:51:09.269681Z",
+        "attempt_0_duration_seconds": 600.04,
+        "attempt_0_error": "TimeoutError: timed out",
+        "attempt_1_start_utc": "2026-09-20T19:01:11.311987Z",
+        "attempt_1_http_status": 400,
+        "server_log_error_lines": [
+          1430,
+          1462
+        ],
+        "server_error": "PERSISTENT_HISTORY_INVALID_RESIDENT_POSITIONS",
+        "interpretation": "The telemetry directly establishes an automatic retry of the timed-out generation. The old-prefix-versus-advanced-session-slot collision is inferred from the slot and exception path, not printed explicitly in the log."
+      },
+      "proxy_validation": {
+        "cwd": "paper",
+        "command": ".venv-b-cpu/Scripts/python.exe -m pytest benchmarks/test_proxy_session_retry.py benchmarks/test_raw_actor_history_proxy_wire.py benchmarks/test_history_method_proxy.py -q",
+        "passed": 9
+      },
+      "sdk_validation": {
+        "scope": "A1/B6 stateful SDK retry boundary, CPU-only validation",
+        "paper_commit": "58ae75e",
+        "cwd": "C:\\Users\\yl998\\Documents\\programming\\c2kv\\scratchpad\\blocker_repair_20260920\\paper",
+        "test_runs": [
+          {
+            "command": "uv run --no-project --with pytest --with openai python -m pytest -q benchmarks/test_sdk_retry_boundaries.py benchmarks/test_acebench_instrumentation.py benchmarks/test_toolsandbox_instrumentation.py benchmarks/test_acon_adapter.py",
+            "result": "44 passed, 5 skipped in 3.41s",
+            "skips": [
+              "benchmarks/test_acon_adapter.py::test_bm25_patch_applies_and_imports_without_dense_stack",
+              "benchmarks/test_acon_adapter.py::test_smolagents_execution_error_reaches_next_agent_turn",
+              "benchmarks/test_acon_adapter.py::test_appworld_generation_failure_aborts_before_scoring",
+              "benchmarks/test_acon_adapter.py::test_appworld_final_budgeted_action_executes_and_errors_are_recorded",
+              "benchmarks/test_acon_adapter.py::test_hiagent_python_subgoal_runs_through_real_appworld_action_parser"
+            ],
+            "skip_reason": "Each test requires ACON_ROOT to point to a pinned microsoft/acon checkout. ACON_ROOT was unset and the default checkout at the isolated paper worktree's sibling tmp/baselines/acon was absent. These five tests call pytest.skip with that reason."
+          },
+          {
+            "command": "uv run --no-project --with pytest --with openai python -m pytest -q experiments/history_system/runtime/benchmarks/test_bfcl_handler_decode.py",
+            "result": "1 passed, 1 skipped in 0.07s",
+            "skips": [
+              "experiments/history_system/runtime/benchmarks/test_bfcl_handler_decode.py::test_registered_fc_handler_normalizes_no_call_for_real_bfcl"
+            ],
+            "skip_reason": "The real BFCL import test calls pytest.importorskip('bfcl_eval'); bfcl_eval was unavailable in this isolated uv environment."
+          },
+          {
+            "command": "uv run --no-project --with pytest --with openai python -m pytest -q benchmarks/test_sdk_retry_boundaries.py",
+            "result": "6 passed in 0.88s",
+            "skips": [],
+            "assertion": "The real OpenAI SDK ran all six harness-by-failure cases: AppWorld, ACEBench, and ToolSandbox each faced a simulated timeout and HTTP 502. An httpx MockTransport recorded exactly one request per case, with client.max_retries equal to 0. No GPU, external server, or network service was used.",
+            "source": "benchmarks/test_sdk_retry_boundaries.py"
+          }
+        ],
+        "npu_shared_paper_basis": {
+          "source": "../npu/README.md",
+          "evidence": [
+            "The NPU README identifies paper/benchmarks-cuda-20260917 as the shared serving and paper-controller source branch; NPU keeps launchers and a bundled controller_runtime subset.",
+            "The NPU tool-definition and BFCL launcher examples pass --paper-root /path/to/paper, and the README states that the algorithm, budget guard, proxy, and BFCL adapter live in that shared paper checkout.",
+            "The NPU setup exports C2KV_PAPER_SOURCE=\"$EXP/paper\" for shared paper consumption.",
+            "The bundled NPU native BFCL entry already passes no_upstream_retries=True (controller_runtime/benchmarks/memory_runtime/event_native_bfcl.py:173)."
+          ],
+          "additional_record": "../npu/validation/blocker_repair_20260921.json states that shared paper adapters/evaluator and the shared engine apply on both devices.",
+          "scope_limit": "These are source and launcher path checks; this validation did not run NPU hardware."
+        }
+      }
+    },
+    "native_tool_prologue_repair": {
+      "change": "Use the existing serving_tools normalizer at the native serving API boundary, including the Full SGLang strict:false default. Preserve source snapshots and tool-memory controller catalog inputs. The bundled NPU API uses the same normalizer.",
+      "cpu_validation": {
+        "schema": "b1-cpu-validation-v1",
+        "modified_files": {
+          "paper": [
+            "experiments/history_system/runtime/benchmarks/memory_runtime/event_native_api.py",
+            "experiments/history_system/runtime/benchmarks/memory_runtime/tests/test_event_native_tool_prologue.py"
+          ],
+          "npu": [
+            "controller_runtime/benchmarks/memory_runtime/event_native_api.py",
+            "controller_runtime/benchmarks/memory_runtime/tests/test_event_native_tool_prologue.py"
+          ]
+        },
+        "tests": [
+          {
+            "cwd": "scratchpad/blocker_repair_20260920/paper/experiments/history_system/runtime",
+            "command": "$env:PYTHONPATH='python'; C:\\Users\\yl998\\Documents\\programming\\c2kv\\.venv\\Scripts\\python.exe -m pytest -q benchmarks/memory_runtime/tests/test_event_native_tool_prologue.py benchmarks/memory_runtime/tests/test_event_native_server.py",
+            "result": "27 passed, 1 skipped"
+          },
+          {
+            "cwd": "scratchpad/blocker_repair_20260920/paper/experiments/history_system/runtime",
+            "command": "$env:PYTHONPATH='python'; C:\\Users\\yl998\\Documents\\programming\\c2kv\\.venv\\Scripts\\python.exe -m pytest -q benchmarks/memory_runtime/tests/test_event_native_tool.py benchmarks/memory_runtime/tests/test_tool_source_identity.py benchmarks/memory_runtime/tests/test_event_native_bfcl.py",
+            "result": "62 passed"
+          },
+          {
+            "cwd": "scratchpad/blocker_repair_20260920/npu",
+            "command": "$env:PYTHONPATH='controller_runtime;controller_runtime/python'; C:\\Users\\yl998\\Documents\\programming\\c2kv\\.venv\\Scripts\\python.exe -m pytest -q controller_runtime/benchmarks/memory_runtime/tests/test_event_native_tool_prologue.py controller_runtime/benchmarks/memory_runtime/tests/test_event_native_server.py",
+            "result": "23 passed, 1 skipped"
+          }
+        ],
+        "real_tokenizer_receipt": "scratchpad/blocker_repair_20260920/b1_prompt_parity_receipt.json",
+        "gpu_or_npu_used": false
+      },
+      "real_tokenizer_parity": {
+        "add_generation_prompt": true,
+        "checkpoint": "/workspace/checkpoint-1000",
+        "enable_thinking": false,
+        "full_prompt_tokens": 4993,
+        "full_raw_assistant_tokens": 14,
+        "full_recorded_prompt_tokens": 4993,
+        "full_suffix_sha256": "984ac31d47767055233711565c49368a92a1b76f96aa082e13b94bcc9d56cff3",
+        "full_system_sha256": "d033422a89204e5e90e7cffa9595b2f73cefe58d4ab930a4c036f9cae7f6129e",
+        "full_system_tokens": 4884,
+        "n_tools": 14,
+        "native_gist_source_event": "tau2/1/attempt-0:m1",
+        "native_run": "/workspace/results-tau2/closed_loop/tau2__c2kv_native_r4",
+        "native_workspace_matches_full_suffix": true,
+        "native_workspace_sha256": "984ac31d47767055233711565c49368a92a1b76f96aa082e13b94bcc9d56cff3",
+        "native_workspace_tokens": 95,
+        "new_native_system_matches_full": true,
+        "new_native_system_sha256": "d033422a89204e5e90e7cffa9595b2f73cefe58d4ab930a4c036f9cae7f6129e",
+        "new_native_system_tokens": 4884,
+        "normalizer_matches_engine_full_dump": true,
+        "old_native_system_matches_raw_template": true,
+        "old_native_system_tokens": 4828,
+        "schema": "b1-tau2-prompt-parity-v1",
+        "source_run": "/workspace/results-tau2/closed_loop/tau2__full",
+        "task_id": "1"
+      },
+      "interpretation": "The system/tool prologue and current user/generation suffix match Full token-for-token. History is intentionally represented by gist, so the complete prompt is not identical. This is not proof that the tau2 loop or reward changed."
+    },
+    "a4_audit": {
+      "cell": "appworld__agentkv_b768.stopped.1",
+      "remote_host": "m1",
+      "remote_root": "/workspace/results-kvb768/closed_loop/appworld__agentkv_b768.stopped.1",
+      "source": {
+        "engine_commit": "a42e7dacc385066c7b7081dcd73feee825b16097",
+        "paper_commit_short": "f7f8ec0",
+        "upstream_agentkv_commit": "254c57bc84e4a7895159ba1062bd46c83626f511",
+        "started_json": "/workspace/results-kvb768/closed_loop/appworld__agentkv_b768.stopped.1/started.json",
+        "engine_source": "/workspace/validation/engine-tool-a42e7dac"
+      },
+      "profile": {
+        "device": "cuda",
+        "model": "/workspace/checkpoint-1000",
+        "appworld_max_iter": 50,
+        "history_budget_tokens": 768,
+        "history_backend": "reference_attention",
+        "temperature": 0.0,
+        "max_tokens": 2048,
+        "enable_thinking": false,
+        "reference_attention_source": "python/sglang/srt/mem_cache/history_kv_reference.py",
+        "response_logprobs_non_null": 0,
+        "response_count_checked_for_logprobs": 597,
+        "response_marker_counts": {
+          "<think>": 0,
+          "</think>": 0,
+          "<tool_call>": 0,
+          "</tool_call>": 0
+        }
+      },
+      "original_evidence": {
+        "harness_events": "/workspace/results-kvb768/closed_loop/appworld__agentkv_b768.stopped.1/measurement/harness_events.jsonl",
+        "proxy_log": "/workspace/results-kvb768/closed_loop/appworld__agentkv_b768.stopped.1/logs/proxy_agentkv_35010.jsonl",
+        "proxy_telemetry": "/workspace/results-kvb768/closed_loop/appworld__agentkv_b768.stopped.1/proxy_telemetry.jsonl",
+        "server_telemetry": "/workspace/results-kvb768/closed_loop/appworld__agentkv_b768.stopped.1/server_telemetry.jsonl",
+        "episode_5a83b05_2": {
+          "decisions": 50,
+          "tool_actions": 50,
+          "first_length_finish_step": 14,
+          "length_finishes": 18,
+          "last_request_id": "42b0f0fe0de545b092cb456dd4a432ab",
+          "last_completion_tokens": 2048,
+          "last_finish_reason": "length",
+          "last_wall_seconds": 463.7987,
+          "last_physical_prompt_tokens": 3757,
+          "last_full_history_equivalent_tokens": 80574,
+          "last_resident_position_max": 84330,
+          "last_resident_stream_position_max": 86377
+        },
+        "other_50_step_episodes": [
+          "325d6ec_2",
+          "21abae1_3",
+          "0d01c76_2",
+          "ff58e36_1"
+        ],
+        "other_50_step_length_finishes": 0,
+        "checkpoint_max_position_embeddings": 262144,
+        "server_context_length": 131072,
+        "reference_history_resident_bytes": 115015680,
+        "budget_bytes_calculation": "768 * 36 layers * 8 KV heads * (2 * 128 head_dim * 2 bf16 bytes + 8 position bytes) = 115015680",
+        "budget_interpretation": "The measured reference store matches 768 retained positions per layer and KV head."
+      },
+      "cpu_validation": {
+        "selector_parity_script": "C:/Users/yl998/Documents/programming/c2kv/scratchpad/blocker_repair_20260920/agentkv_selector_parity.py",
+        "upstream_source": "C:/Users/yl998/Documents/programming/c2kv/scratchpad/blocker_repair_20260920/upstream-agentkv",
+        "command": "wsl.exe -e /home/lyc/dev/c2kv-cuda-port/venv-sglang/bin/python scratchpad/blocker_repair_20260920/agentkv_selector_parity.py",
+        "result": "11 CPU selector parity cases passed",
+        "covered_contracts": [
+          "StageQ-SnapKV q32/stages4/obs8/pool1/sink16/GQA mean selection",
+          "headwise selected indices and 768-token budget boundary",
+          "reference attention headwise causal parity in test/registered/unit/test_reference_history_regressions.py"
+        ]
+      },
+      "conclusion": "No engine correctness defect was established as the cause of the repeated AppWorld actions. The original masked reference decode route is a supported explanation for slow generation; the later decode-causal GQA optimization has CPU parity but no device timing evidence. The response log has no output logprobs, so the first abnormal token's likelihood and the model-versus-compression cause are unresolved. Do not change the AgentKV selection formula or the benchmark's 50-step cap based on this trace.",
+      "hardware_validation": "Not run; GPU and NPU use was paused by the user. CUDA latency, output quality, and the repeated episode after the optimization are unverified.",
+      "minimal_future_device_fixture": "benchmark/bench_reference_history.py --device cuda --history 4470 --iters 32; this model-free attention timing probe does not replace a real AppWorld episode.",
+      "a1_timeout_retry_evidence": {
+        "remote_host": "m2",
+        "proxy_telemetry": "/workspace/results-task-repair-313c170c/bfcl_long_context__commitkv/closed_loop/bfcl_long_context__commitkv/proxy_telemetry.jsonl",
+        "server_log": "/workspace/results-task-repair-313c170c/bfcl_long_context__commitkv/closed_loop/bfcl_long_context__commitkv/server.log",
+        "request_id": "00c86fb3f18345d1bbc11afa4dd4ac9d",
+        "attempt_0_start_utc": "2026-09-20T18:51:09.269681Z",
+        "attempt_0_duration_seconds": 600.04,
+        "attempt_0_error": "TimeoutError: timed out",
+        "attempt_1_start_utc": "2026-09-20T19:01:11.311987Z",
+        "attempt_1_http_status": 400,
+        "server_log_error_lines": [
+          1430,
+          1462
+        ],
+        "server_error": "PERSISTENT_HISTORY_INVALID_RESIDENT_POSITIONS",
+        "interpretation": "The telemetry directly establishes an automatic retry of the timed-out generation. The old-prefix-versus-advanced-session-slot collision is inferred from the slot and exception path, not printed explicitly in the log."
+      }
+    },
+    "corrected_cuda_smoke_preflight": {
+      "status": "passed",
+      "scope": "CPU configuration and tokenizer preflight only",
+      "paper": "/workspace/validation/blocker-repair-20260920/paper-d3f0fe545cfa",
+      "checkpoint": "/workspace/checkpoint-1000",
+      "lease_decisions": 0,
+      "max_retrieved_events": 2,
+      "device_or_http_generation": false
+    },
+    "d7_credential_provisioning": {
+      "status": "credential_provisioned",
+      "created": true,
+      "source_host": "m2",
+      "target_host": "m1",
+      "path": "/root/.config/toolsandbox/rapidapi.env",
+      "mode": "0o600",
+      "bytes_verified_equal": true,
+      "secret_values_logged": false,
+      "api_calls": 0,
+      "subscription_changes": false,
+      "jobs_started": false
+    }
+  },
+  "historical_record_notice": "previous_* fields retain earlier failed or incomplete validation. device_validation and current remaining_acceptance describe the latest state."
+}

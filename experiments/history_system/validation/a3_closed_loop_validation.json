@@ -1,0 +1,154 @@
+{
+  "schema": "c2kv-a3-pyramidkv-single-episode-validation-v1",
+  "date": "2026-09-21",
+  "scope": "One official AppWorld repair-subset task. The new six-decision trajectory did not reach the original long-history failure state.",
+  "task_id": "d6ac34d_3",
+  "new_run": {
+    "host": "m2",
+    "cell_root": "/workspace/validation/blocker-repair-20260921/a3_official_d6ac34d_3/closed_loop/appworld__history_kv_pyramidkv_r25_persistent",
+    "runner_command": [
+      "/workspace/venv-bench/bin/python",
+      "-m",
+      "benchmarks.paper.runner",
+      "run",
+      "--config",
+      "/workspace/validation/blocker-repair-20260921/a3_official_config.json",
+      "--sglang-source",
+      "/workspace/validation/blocker-repair-20260921/engine-9b6a6fa1c01e",
+      "--output",
+      "/workspace/validation/blocker-repair-20260921/a3_official_d6ac34d_3",
+      "--stage",
+      "closed_loop",
+      "--cells",
+      "appworld__history_kv_pyramidkv_r25_persistent"
+    ],
+    "runner_returncode": 0,
+    "engine_commit": "9b6a6fa1c01e4e2807d5d0bb4094f5e1a86504fa",
+    "engine_reference_sha256": "b728f934b1297870750372f47fc600f94037f7489d613016324a7012f8b87743",
+    "engine_qwen3_sha256": "36cad3354aa262e2631ec3f46b5d470073208492138e8ee14fd7144047d40c76",
+    "config_path": "/workspace/validation/blocker-repair-20260921/a3_official_config.json",
+    "config_sha256": "fab7eca32e76cea494f398faf3760c530023bdd0408ff03aaa57cb58571a30a2",
+    "actual_server_profile": {
+      "mem_fraction_static": 0.65,
+      "context_length": 131072,
+      "max_total_tokens": 131072,
+      "c2kv_pool_fraction": 0.1,
+      "chunked_prefill_size": 512,
+      "max_running_requests": 1
+    },
+    "request_count": 6,
+    "request_status": "6 ok",
+    "finish_reasons": {
+      "stop": 6
+    },
+    "harness_event_counts": {
+      "episode_end": 1,
+      "episode_start": 1,
+      "decision": 6,
+      "tool_action": 6
+    },
+    "episode_end_status": "ok",
+    "task_termination_reason": "task_completed",
+    "task_result_success": true,
+    "task_result_final_reward": 1.0,
+    "official_evaluation_aggregate": {
+      "task_goal_completion": 0.0,
+      "scenario_goal_completion": 0.0
+    },
+    "summary_semantic_score": 0.0,
+    "result_scope": "repair_subset",
+    "whole_cell_score": false,
+    "request_rows": [
+      {
+        "decision": 1,
+        "status": "ok",
+        "finish_reason": "stop",
+        "prompt_tokens": 1747,
+        "completion_tokens": 25,
+        "duration_seconds": 1.1131
+      },
+      {
+        "decision": 2,
+        "status": "ok",
+        "finish_reason": "stop",
+        "prompt_tokens": 2082,
+        "completion_tokens": 42,
+        "duration_seconds": 2.4498
+      },
+      {
+        "decision": 3,
+        "status": "ok",
+        "finish_reason": "stop",
+        "prompt_tokens": 2186,
+        "completion_tokens": 122,
+        "duration_seconds": 6.6175
+      },
+      {
+        "decision": 4,
+        "status": "ok",
+        "finish_reason": "stop",
+        "prompt_tokens": 2463,
+        "completion_tokens": 127,
+        "duration_seconds": 7.299
+      },
+      {
+        "decision": 5,
+        "status": "ok",
+        "finish_reason": "stop",
+        "prompt_tokens": 1853,
+        "completion_tokens": 73,
+        "duration_seconds": 4.2147
+      },
+      {
+        "decision": 6,
+        "status": "ok",
+        "finish_reason": "stop",
+        "prompt_tokens": 1900,
+        "completion_tokens": 359,
+        "duration_seconds": 18.8033
+      }
+    ],
+    "maximum_history": {
+      "history_kv_active_tokens": 501,
+      "history_kv_full_equivalent_tokens": 2005,
+      "reference_history_resident_bytes": 74954880
+    },
+    "server_out_of_memory_error_count": 0,
+    "session_close": {
+      "resident_tokens_released": 1900,
+      "resident_tokens_transferred_to_active_req": 0,
+      "remaining_session_slots": 0
+    },
+    "source_files": {
+      "task": "/workspace/validation/blocker-repair-20260921/a3_official_d6ac34d_3/closed_loop/appworld__history_kv_pyramidkv_r25_persistent/appworld_harness/experiments/appworld/outputs/c2kv-agent_appworld__history_kv_pyramidkv_r25_persistent_d22a939/test_normal/task_d6ac34d_3/results.json",
+      "evaluation": "/workspace/validation/blocker-repair-20260921/a3_official_d6ac34d_3/closed_loop/appworld__history_kv_pyramidkv_r25_persistent/appworld_harness/experiments/appworld/experiments/outputs/c2kv-agent_appworld__history_kv_pyramidkv_r25_persistent_d22a939/evaluations/test_normal.json",
+      "summary": "/workspace/validation/blocker-repair-20260921/a3_official_d6ac34d_3/closed_loop/appworld__history_kv_pyramidkv_r25_persistent/summary_history_kv_pyramidkv_r25_persistent.json",
+      "experiment": "/workspace/validation/blocker-repair-20260921/a3_official_d6ac34d_3/closed_loop/appworld__history_kv_pyramidkv_r25_persistent/appworld_harness/experiments/appworld/outputs/c2kv-agent_appworld__history_kv_pyramidkv_r25_persistent_d22a939/test_normal/experiment_summary.json",
+      "complete": "/workspace/validation/blocker-repair-20260921/a3_official_d6ac34d_3/closed_loop/appworld__history_kv_pyramidkv_r25_persistent/complete.json"
+    }
+  },
+  "original_failure": {
+    "host": "m1",
+    "cell_root": "/workspace/results-task-repair-313c170c/appworld__history_kv_pyramidkv_r25_persistent/closed_loop/appworld__history_kv_pyramidkv_r25_persistent",
+    "engine_commit": "210d93ff3",
+    "task_id": "d6ac34d_3",
+    "successful_decisions_before_failure": 48,
+    "failed_decision_inferred": 49,
+    "allocation_attempt_mib": 610.0,
+    "gpu_free_mib_at_failure": 189.31,
+    "failure_site": "qwen3.py:590 _collect_history_kv_eviction_scores torch.matmul",
+    "last_successful_history_active_tokens": 35997,
+    "last_successful_full_history_equivalent_tokens": 147749
+  },
+  "bounded_tensor_validation": {
+    "receipt": "experiments/history_system/validation/a3_engine_headroom_20260921.json in the paper worktree",
+    "result": "At inferred H=78080 and a 189.31 MiB PyTorch allocator cap above baseline, old score reproduced a 610 MiB OOM; new score and prefill returned finite outputs with 101062656 and 85352448 extra allocated bytes."
+  },
+  "interpretation": [
+    "All six new decisions and session close succeeded; no OutOfMemoryError appeared in this server log. One close event released 1900 resident tokens and left zero session slots.",
+    "The new maximum active history was 501 tokens and maximum full-equivalent history was 2005 tokens, far below the original last-successful 35997 active and 147749 full-equivalent tokens. This official task run did not exercise the original OOM peak.",
+    "The task result marks task_completed/success=true, while the official AppWorld evaluation and cell semantic score are 0.0. Report the official goal metric as 0.0.",
+    "No whole-cell score or full original 49-decision trajectory is claimed; the controlled allocator-cap fixture is the direct regression evidence for the old allocation site."
+  ],
+  "quality_label": "preliminary, n=1"
+}

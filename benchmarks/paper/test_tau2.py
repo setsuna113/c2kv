@@ -51,6 +51,27 @@ def test_tau2_native_closed_loop_and_replay_use_shared_controller(tmp_path):
             assert ("--prefixes" in launch) == (stage == "common_prefix")
 
 
+def test_tau2_delivery_args_bind_native_task_and_checkout_without_changing_bfcl(tmp_path):
+    current = config()
+    current["sglang_source"] = str(tmp_path)
+    delivery = c1.load_delivery()
+    tau2_args = c1.delivery_args(current, "tau2", tmp_path, ["0"], delivery)
+    assert tau2_args.benchmark == "tau2"
+    assert tau2_args.benchmark_dir == Path(current["tau2_dir"])
+    assert tau2_args.tau2_dir == Path(current["tau2_dir"])
+    assert tau2_args.tau2_python == current.get("tau2_python", current["bench_python"])
+    assert tau2_args.tau2_task_id == ["0"]
+    assert tau2_args.task_set == current.get("tau2_task_set", "airline")
+    assert tau2_args.user_base_url == f"http://127.0.0.1:{current['server_port']}"
+    assert delivery._identities(tau2_args) == ["0"]
+
+    bfcl_args = c1.delivery_args(current, "bfcl_base", tmp_path, ["multi_turn_base_26"], delivery)
+    assert bfcl_args.benchmark == "bfcl"
+    assert bfcl_args.benchmark_dir == Path(current["bfcl_dir"])
+    assert bfcl_args.task_id == ["multi_turn_base_26"]
+    assert bfcl_args.tau2_dir is None and bfcl_args.tau2_task_id == []
+
+
 def test_tau2_candidates_and_budget_axes_are_not_reimplemented():
     current = with_candidate_methods(config(), ("goal_rescue",), ("tau2",))
     assert any(row["benchmark"] == "tau2" and row["arm"] == "c2kv_goal_rescue_r8"

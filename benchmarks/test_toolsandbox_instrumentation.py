@@ -9,8 +9,51 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from toolsandbox_cli import install_instrumentation
+from toolsandbox_cli import install_instrumentation, install_rapidapi_http_status
 from measurement.telemetry import HarnessTelemetry
+
+
+@pytest.mark.parametrize("status", [200, 403, 429])
+def test_rapidapi_status_wrapper_keeps_official_response_and_redacts_request(
+        tmp_path, status):
+    observed = {}
+    response = SimpleNamespace(status_code=status, json=lambda: {"official": True})
+    def get(*args, **kwargs):
+        observed.update(kwargs)
+        return response
+    shared_requests = SimpleNamespace(get=get, post=object())
+    tools = SimpleNamespace(requests=shared_requests)
+    path = tmp_path / "rapidapi_http_status.jsonl"
+    install_rapidapi_http_status(tools, path)
+    assert tools.requests is not shared_requests
+    assert shared_requests.get is get
+    actual = tools.requests.get(
+        url="https://example.rapidapi.com/private/path?token=url-secret",
+        headers={"X-RapidAPI-Key": "header-secret"}, params={"q": "param-secret"})
+    assert actual is response
+    assert actual.json() == {"official": True}
+    assert observed["timeout"] == 30
+    assert observed["headers"]["X-RapidAPI-Key"] == "header-secret"
+    logged = path.read_text(encoding="utf-8")
+    assert json.loads(logged) == {"event_type": "rapidapi_http",
+                                  "host": "example.rapidapi.com", "status_code": status}
+    assert all(secret not in logged for secret in
+               ("url-secret", "header-secret", "param-secret", "/private/path"))
+
+
+def test_rapidapi_transport_error_records_no_url_or_headers(tmp_path):
+    def get(*args, **kwargs):
+        raise TimeoutError("private URL and key")
+    tools = SimpleNamespace(requests=SimpleNamespace(get=get))
+    path = tmp_path / "rapidapi_http_status.jsonl"
+    install_rapidapi_http_status(tools, path)
+    with pytest.raises(TimeoutError):
+        tools.requests.get(url="https://example.rapidapi.com/private?key=secret",
+                           headers={"X-RapidAPI-Key": "secret"})
+    assert json.loads(path.read_text(encoding="utf-8")) == {
+        "event_type": "rapidapi_http", "host": "example.rapidapi.com",
+        "status_code": None,
+    }
 
 
 def test_runtime_instrumentation_joins_scenario_request_and_action(tmp_path, monkeypatch):

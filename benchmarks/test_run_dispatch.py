@@ -59,6 +59,7 @@ CLI_SURFACE = [
     ("--model", "c2kv-agent", False),
     ("--model-family", "qwen3-4b", False),
     ("--ts-scenarios", "", False),
+    ("--ts-suite", "", False),
     ("--ts-agent", "", False),
     ("--ts-user", "", False),
     ("--ts-parallel", 1, False),

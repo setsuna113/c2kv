@@ -224,6 +224,42 @@ class SglangBackend(Backend):
                 f"{result.get('original_seq_len')} != {len(payload['token_ids'])}")
         return result
 
+    def repair_extract_tool_protocol(
+            self, token_ids, *, span_start: int, span_end: int, method: str,
+            target_tokens: int, selectable_relative_indices,
+            recent_window: int, kernel_size: int, pooling: str,
+            h2o_recent_fraction: float) -> Dict[str, Any]:
+        """Extract a sparse raw tool block in its exact query-bearing frame."""
+        body = {
+            "input_ids": [int(token) for token in token_ids],
+            "span_start": int(span_start), "span_end": int(span_end),
+            "position_offset": 0, "raw_kv_position_mode": "rotated",
+            "repair_mode": "history_kv_" + method,
+            "extract_source": "model_prefill", "history_kv_method": method,
+            "history_kv_target_tokens": int(target_tokens),
+            "history_kv_selectable_relative_indices": list(selectable_relative_indices),
+            "history_kv_recent_window": int(recent_window),
+            "history_kv_kernel_size": int(kernel_size),
+            "history_kv_pooling": pooling,
+            "history_kv_h2o_recent_fraction": float(h2o_recent_fraction),
+        }
+        result = self._post_json("/v1/c2kv/repair_extract", body, 600)
+        if not result.get("success", True) or not result.get("key_hash"):
+            raise BackendError("tool_repair_failed",
+                               f"tool repair_extract failed: {result.get('error') or result}")
+        physical_limit = (span_end - span_start if method == "pyramidkv"
+                          else target_tokens)
+        if (result.get("original_seq_len") != len(token_ids)
+                or (result.get("span_start"), result.get("span_end"))
+                != (span_start, span_end)
+                or result.get("history_kv_method") not in
+                {method, "snapkv_persistent" if method == "snapkv" else method}
+                or type(result.get("token_len")) is not int
+                or not 0 < result["token_len"] <= physical_limit):
+            raise BackendError("tool_repair_failed",
+                               "tool repair_extract returned an inconsistent KV handle")
+        return result
+
     def repair_extract(self, text: str, role: str, span_start: int,
                        span_end: Optional[int], position_offset: int,
                        source_doc_index: int) -> Dict[str, Any]:
@@ -642,10 +678,55 @@ class SglangBackend(Backend):
         return out, hint
 
     # ---- chat shaping ----
+    @staticmethod
+    def _remap_tool_hint_after_carriers(tool_hint: Dict[str, Any],
+                                        staged_messages: List[Dict[str, Any]],
+                                        final_messages: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Index exact schema text in the server's post-carrier message list."""
+        annotated = {index for index, message in enumerate(final_messages) if (
+            message.get("c2kv_key_hash") or message.get("c2kv_repair_key_hashes")
+            or message.get("c2kv_repair_only_key_hashes"))}
+        server_messages = [message for index, message in enumerate(final_messages)
+                           if index not in annotated]
+
+        def remap(span):
+            original_index = int(span["message_index"])
+            if not 0 <= original_index < len(staged_messages):
+                raise BackendError("tool_span_failed", "tool schema message index is invalid")
+            source = staged_messages[original_index]
+            candidates = []
+            for index, message in enumerate(server_messages):
+                content = message.get("content")
+                if (message.get("role") == source.get("role")
+                        and isinstance(content, str)
+                        and content == source.get("content")
+                        and content[int(span["start"]):int(span["end"])] == span["text"]):
+                    candidates.append(index)
+            expected = original_index - sum(index < original_index for index in annotated)
+            if expected in candidates and original_index < len(final_messages) and (
+                    final_messages[original_index].get("content") == source.get("content")):
+                selected = expected
+            elif len(candidates) == 1:
+                selected = candidates[0]
+            else:
+                raise BackendError("tool_span_failed",
+                                   "tool schema message moved ambiguously after carrier removal")
+            return {**span, "message_index": selected}
+
+        remapped = dict(tool_hint)
+        for key in ("schema_spans", "protected_interface_spans"):
+            if key in remapped:
+                remapped[key] = [remap(span) for span in remapped[key]]
+        if remapped.get("tool_protocol_span") is not None:
+            remapped["tool_protocol_span"] = remap(remapped["tool_protocol_span"])
+        return remapped
+
     def prepare_chat(self, payload: Dict[str, Any], arm,
                      repair_plan: Optional[Dict[str, Any]],
                      context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         out = dict(payload)
+        staged_tool_hint = ((payload.get("c2kv_kv_memory_hint") or {})
+                            .get("tool_kv_eviction"))
         out.pop("c2kv_repair", None)  # request-level repair is hf_server-only
         if getattr(arm, "history_kv", None) or getattr(arm, "kv_reuse", None):
             # The raw-KV baselines have a fixed query regime. Override both
@@ -743,6 +824,15 @@ class SglangBackend(Backend):
                 })
             else:
                 raise BackendError("repair_failed", f"unknown placement {placement!r}")
+        if isinstance(staged_tool_hint, dict):
+            # History shaping supplies its own accounting hint. Preserve the
+            # independent tool policy until the schema joint adapter replaces
+            # its raw protocol with a repair-only carrier.
+            hint = dict(out.get("c2kv_kv_memory_hint") or {})
+            hint["tool_kv_eviction"] = (staged_tool_hint if staged_tool_hint.get("joint_history_assembly")
+                else self._remap_tool_hint_after_carriers(
+                    staged_tool_hint, list(payload.get("messages") or []), messages))
+            out["c2kv_kv_memory_hint"] = hint
         out["messages"] = messages
         return out
 
@@ -811,6 +901,15 @@ class SglangBackend(Backend):
         columns["kv_reuse_active_tokens"] = report.get("active_history_kv_tokens")
         columns["kv_reuse_recomputed_tokens"] = report.get("active_recomputed_raw_tokens")
         return {k: v for k, v in columns.items() if v is not None}
+
+    @staticmethod
+    def _joint_tool_cost(data: Dict[str, Any]) -> Dict[str, Any]:
+        report = ((data.get("metadata") or {}).get("kv_memory_report")) or {}
+        joint = report.get("joint_tool_memory") if isinstance(report, dict) else None
+        if not isinstance(joint, dict):
+            return {}
+        return {f"joint_tool_{key}": value for key, value in joint.items()
+                if key != "repair_key_hash"}
 
     @staticmethod
     def _server_measurement(data: Dict[str, Any]) -> Dict[str, Any]:
@@ -956,6 +1055,7 @@ class SglangBackend(Backend):
             cost["finish_message"] = metadata["finish_message"]
         cost.update(self._history_kv_cost(data))
         cost.update(self._kv_reuse_cost(data))
+        cost.update(self._joint_tool_cost(data))
         measurement = self._server_measurement(data)
         if measurement:
             cost["server_measurement"] = measurement

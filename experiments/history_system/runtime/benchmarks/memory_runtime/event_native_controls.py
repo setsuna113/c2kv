@@ -134,7 +134,10 @@ def build_event_native_controller(
     if s0_config is not None and "candidate_algorithm" in s0_config:
         from .candidate_algorithms.allocation import CandidateAllocator
         from .candidate_algorithms.controller import wrap_with_candidate_recovery
-        from .candidate_algorithms import ALL_VARIANTS, REPAIR_VARIANTS
+        from .candidate_algorithms import (
+            ALL_VARIANTS, GOAL_VARIANTS, INITIAL_VIEW_VARIANTS,
+            REPAIR_VARIANTS, VERIFIED_VARIANTS,
+        )
         from .event_native_s0_policy import S0_CONFIG_DEFAULTS
 
         if view_mode != NATIVE_S0_MODE:
@@ -145,7 +148,24 @@ def build_event_native_controller(
             raise ValueError("Invalid candidate_algorithm configuration")
         if {"gp_experiments", "post_draft_recovery", "d3_hybrid_recovery"} & set(config):
             raise ValueError("Candidate algorithms cannot stack legacy recovery wrappers")
-        if candidate["variant"] == "goal_rescue" or candidate["variant"] in REPAIR_VARIANTS:
+        if candidate["variant"] in INITIAL_VIEW_VARIANTS:
+            from .candidate_algorithms.initial_view import build_initial_view_composition
+
+            describe_event_native_route(
+                view_mode, compression_policy=compression_policy,
+                history_view_protocol=history_view_protocol,
+            )
+            return build_initial_view_composition(
+                tokenizer, candidate=candidate, packing=packing, policy=policy,
+                model_context=model_context,
+                s0_config={key: value for key, value in config.items()
+                           if key in S0_CONFIG_DEFAULTS},
+                benchmark=benchmark,
+            )
+        if "initial_view" in candidate or "recovery_backbone" in candidate:
+            raise ValueError("Legacy candidate variants do not accept initial_view composition")
+        if (candidate["variant"] == "goal_rescue"
+                or candidate["variant"] in REPAIR_VARIANTS + GOAL_VARIANTS + VERIFIED_VARIANTS):
             controller = build_event_native_controller(
                 tokenizer, packing=packing, policy=policy, view_mode=view_mode,
                 model_context=model_context, compression_policy=compression_policy,
@@ -423,6 +443,7 @@ class PreparedEventNativeOnePass:
 @dataclass
 class _OnePassSessionState:
     message_json: tuple[str, ...]
+    source_prefix: tuple[str, ...]
     tools_json: str
     decision_index: int
     decisions: dict[str, tuple[tuple[Any, ...], PreparedEventNativeOnePass]]
@@ -468,7 +489,8 @@ class EventNativeOnePassController:
         session_id, decision_key, store, tools, tools_json, message_json = (
             self._validate_request(payload, ratio, max_new_tokens)
         )
-        signature = (message_json, tools_json, ratio, max_new_tokens)
+        source_prefix = store.source_prefix if store.source_prefix is not None else message_json
+        signature = (source_prefix, message_json, tools_json, ratio, max_new_tokens)
         state = self._sessions.get(session_id)
         if state is not None:
             if state.tools_json != tools_json:
@@ -476,7 +498,7 @@ class EventNativeOnePassController:
                     "Tools changed within a session; use a new explicit session_id"
                 )
             EventNativeController._validate_monotone_prefix(
-                state.message_json, message_json
+                state.source_prefix, source_prefix
             )
             cached = state.decisions.get(decision_key)
             if cached is not None:
@@ -542,6 +564,7 @@ class EventNativeOnePassController:
         decisions[decision_key] = (signature, prepared)
         self._sessions[session_id] = _OnePassSessionState(
             message_json=message_json,
+            source_prefix=source_prefix,
             tools_json=tools_json,
             decision_index=decision_index,
             decisions=decisions,

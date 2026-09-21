@@ -14,7 +14,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Mapping
 
-from history_memory.events import EventStore
+from history_memory.events import EventStore, RenderedMessages
 from history_memory.packing import (
     EncoderChunk, PackedMemory, native_ids, raw_workspace_messages, visible_message,
 )
@@ -59,8 +59,8 @@ class _TokenizerView:
     def __init__(self, tokenizer: Any):
         self.tokenizer = tokenizer
 
-    def native_ids(self, messages):
-        return native_ids(self.tokenizer, messages)
+    def native_ids(self, messages, **kwargs):
+        return native_ids(self.tokenizer, messages, **kwargs)
 
 
 @dataclass(frozen=True)
@@ -104,8 +104,14 @@ class ToolRegionController:
         catalog = shared_tool_catalog()
         plan = catalog.plan_visible_tool_memory(
             payload, self.spec,
-            _TokenizerView(self.tokenizer) if self.spec.encoder == "t0" else None,
+            _TokenizerView(self.tokenizer) if (self.spec.encoder == "t0"
+                or self.spec.interface_policy == "schema") else None,
         )
+        if (plan is not None and self.spec.encoder != "t0"
+                and self.spec.interface_policy == "schema"):
+            catalog.prepare_raw_tool_plan(
+                payload, plan, _TokenizerView(self.tokenizer),
+                budget_tokens=self.tool_budget_tokens)
         if plan is not None and self.spec.encoder == "t0":
             catalog.enforce_tool_budget(plan, self.tool_budget_tokens)
         return plan
@@ -113,8 +119,9 @@ class ToolRegionController:
     def _controller_payload(self, payload: Mapping[str, Any], plan: Any):
         catalog = shared_tool_catalog()
         visible = dict(catalog.strip_request_annotations(payload))
-        if plan is not None and self.spec.encoder == "t0":
-            visible["messages"] = plan.messages
+        if plan is not None and (self.spec.encoder == "t0"
+                                 or self.spec.interface_policy == "schema"):
+            visible["messages"] = RenderedMessages(plan.messages, source=payload["messages"])
             if visible.get("tools"):
                 visible["tools"] = []
         return visible
@@ -136,6 +143,9 @@ class ToolRegionController:
         if plan is None:
             return memory
         if self.spec.encoder != "t0":
+            if self.spec.interface_policy == "schema":
+                return self._raw_schema_memory(memory, plan, payload,
+                                               max_new_tokens=max_new_tokens)
             return self._raw_tool_memory(memory, plan, payload)
         converted = tuple(EncoderChunk(
             event_id=chunk.event_id,
@@ -256,6 +266,104 @@ class ToolRegionController:
                           for index, (start, end) in workspace_positions.items()})
         return replace(memory, system_input_ids=system,
                        workspace_input_ids=workspace), locations
+
+    def _raw_schema_memory(self, memory: PackedMemory, plan: Any,
+                           payload: Mapping[str, Any], *, max_new_tokens: int):
+        """Select once over the static catalog, retaining its executable ABI.
+
+        Raw source documents outside the system protocol remain in their
+        history view. They are explicitly reported as source fallbacks: a
+        contiguous repair handle must never replace intervening history.
+        """
+        ids = tuple(memory.system_input_ids)
+        text = self.tokenizer.decode(list(ids), skip_special_tokens=False,
+                                     clean_up_tokenization_spaces=False)
+        protocol_start = text.find(plan.protocol) if plan.protocol else -1
+        if protocol_start < 0 or text.find(plan.protocol, protocol_start + 1) >= 0:
+            raise ValueError("Cannot locate the unique protected tool protocol")
+        encoded = self.tokenizer(text, add_special_tokens=False,
+                                 return_offsets_mapping=True)
+        if tuple(encoded["input_ids"]) != ids:
+            raise ValueError("Cannot align protected tool protocol with native tokens")
+        offsets = tuple(tuple(pair) for pair in encoded["offset_mapping"])
+        protocol_end = protocol_start + len(plan.protocol)
+        protocol_indices = [i for i, (a, b) in enumerate(offsets)
+                            if b > protocol_start and a < protocol_end]
+        if not protocol_indices:
+            raise ValueError("Protected tool protocol has no native tokens")
+        start, end = protocol_indices[0], protocol_indices[-1] + 1
+        message_start = plan.messages[0]["content"].rfind(plan.protocol)
+        native = (set(plan.info["native_indices"])
+                  | set(plan.info.get("raw_noop_schema_indices") or ()))
+        selectable = set()
+        for span in plan.raw_schema_spans:
+            if (span["message_index"] != 0 or span["start"] < message_start
+                    or span["end"] > message_start + len(plan.protocol)):
+                continue
+            if span["schema_index"] in native:
+                continue
+            left = protocol_start + span["start"] - message_start
+            right = protocol_start + span["end"] - message_start
+            # Tokens crossing a schema boundary remain raw.
+            selectable.update(i - start for i, (a, b) in enumerate(offsets)
+                              if a >= left and b <= right and b > a)
+        mandatory = (end - start) - len(selectable)
+        source_tokens = 0
+        retained_sources = set()
+        plan.info.pop("nominal_resident_tool_tokens", None)
+        if plan.source_spans:
+            # Count source text still present outside the protocol. A history
+            # view may already have removed it; interface copies remain raw.
+            for outside_ids in (ids[:start], ids[end:], tuple(memory.workspace_input_ids)):
+                outside = self.tokenizer.decode(list(outside_ids), skip_special_tokens=False,
+                                                clean_up_tokenization_spaces=False)
+                outside_encoding = self.tokenizer(outside, add_special_tokens=False,
+                                                  return_offsets_mapping=True)
+                if tuple(outside_encoding["input_ids"]) != outside_ids:
+                    raise ValueError("Cannot account retained source tool tokens exactly")
+                covered = set()
+                for index, source in enumerate(plan.source_spans):
+                    cursor = 0
+                    while (position := outside.find(source.text, cursor)) >= 0:
+                        retained_sources.add(index)
+                        covered.update(i for i, (a, b) in enumerate(outside_encoding["offset_mapping"])
+                                       if b > position and a < position + len(source.text))
+                        cursor = position + len(source.text)
+                source_tokens += len(covered)
+        reference = int(plan.info["matched_resident_tool_tokens"])
+        target = min(end - start, max(mandatory, reference - source_tokens))
+        resident_tool_tokens = target + source_tokens
+        if self.tool_budget_tokens is not None and resident_tool_tokens > self.tool_budget_tokens:
+            raise ValueError("Protected tool interfaces and retained source exceed the separate tool budget")
+        plan.info.update({"resident_tool_tokens": resident_tool_tokens,
+                          "protected_protocol_tokens": mandatory,
+                          "raw_source_fallback_count": len(retained_sources.intersection(
+                              plan.compressed_source_indices)),
+                          "retained_source_tool_tokens": source_tokens,
+                          "retained_source_span_count": len(retained_sources),
+                          "selection_backend": "raw_full_no_repair"})
+        if selectable and target < end - start:
+            logical_ids = (ids + tuple(token for chunk in memory.chunks for token in chunk.token_ids)
+                           + tuple(memory.workspace_input_ids))
+            receipt = self.generator.repair_tool_span(
+                logical_ids, span_start=start, span_end=end,
+                method=self.spec.encoder, target_tokens=target,
+                selectable_relative_indices=sorted(selectable))
+            actual_tool_tokens = receipt["token_len"] + source_tokens
+            if self.tool_budget_tokens is not None and actual_tool_tokens > self.tool_budget_tokens:
+                raise ValueError("Physical tool KV storage exceeds the separate tool budget")
+            plan.info["nominal_resident_tool_tokens"] = resident_tool_tokens
+            plan.info["resident_tool_tokens"] = actual_tool_tokens
+            plan.info["selection_backend"] = "sglang_global_tool_repair"
+            memory = replace(memory, raw_tool_segments=({
+                "token_start": start, "token_end": end,
+                "repair_key_hashes": [receipt["key_hash"]],
+                "token_len": receipt["token_len"], "repair_placement": "in_place",
+            },))
+        logical_end = memory.workspace_position_start + len(memory.workspace_input_ids)
+        if max(logical_end, memory.costs(self.spec.ratio)["resident_kv_tokens"]) + max_new_tokens > self.model_context:
+            raise ValueError("Tool and history packing exceed the model context")
+        return memory
 
     def _raw_tool_memory(self, memory: PackedMemory, plan: Any,
                          payload: Mapping[str, Any]) -> PackedMemory:
@@ -449,8 +557,15 @@ class ToolRegionController:
         result["metadata"]["history_only_gist_tokens"] = value["memory"].costs(
             prepared.ratio)["gist_tokens"]
         result["metadata"]["tool_memory"] = copy.deepcopy(prepared.metadata["tool_memory"])
+        if self.spec.encoder != "t0" and self.spec.interface_policy == "schema":
+            result["metadata"]["tool_memory"] = copy.deepcopy(prepared.plan.info)
         result["metadata"]["tool_memory"]["anchored_segments"] = len(
             result["memory"].tool_gist_segments)
         result["metadata"]["tool_memory"]["prefix_tool_chunks"] = sum(
             chunk.projection_set == "tool" for chunk in result["memory"].chunks)
+        if result["memory"].raw_tool_segments:
+            result["metadata"]["tool_memory"]["raw_tool_segments"] = [
+                dict(item) for item in result["memory"].raw_tool_segments]
+        else:
+            result["metadata"]["tool_memory"].pop("raw_tool_segments", None)
         return result

@@ -1,0 +1,192 @@
+{
+  "schema": "b1-tau2-task1-closed-loop-validation-v1",
+  "status": "completed_preliminary_n1",
+  "source_binding": {
+    "c1_shadow_engine": "9b6a6fa1c01e4e2807d5d0bb4094f5e1a86504fa",
+    "paper": "d22a9398df20505cb19ef0a360d9fc643816840c",
+    "native_r4_validated_engine": "258b1ee00a46183f2ac5c5fbd750c4196ffbc2c4"
+  },
+  "cells": {
+    "native_r4": {
+      "plan": "/workspace/validation/blocker-repair-20260921/b1_task1/b1_task1_plan.json",
+      "run_receipt": {
+        "schema": "b1-tau2-task1-execution-v1",
+        "arm": "c2kv_native_r4",
+        "plan": "/workspace/validation/blocker-repair-20260921/b1_task1/b1_task1_plan.json",
+        "cwd": "/workspace/validation/blocker-repair-20260921/paper-d22a9398df20",
+        "argv": [
+          "/workspace/venv-bench/bin/python",
+          "-m",
+          "benchmarks.paper.c1",
+          "--config",
+          "/workspace/validation/blocker-repair-20260921/b1_task1/config.task1.json",
+          "--arm",
+          "c2kv_native_r4",
+          "--benchmark",
+          "tau2",
+          "--stage",
+          "closed_loop",
+          "--upstream",
+          "http://127.0.0.1:34862",
+          "--proxy-port",
+          "34863",
+          "--task-ids",
+          "1",
+          "--num-workers",
+          "1",
+          "--out",
+          "/workspace/validation/blocker-repair-20260921/b1_task1/tau2__c2kv_native_r4"
+        ],
+        "log": "/workspace/validation/blocker-repair-20260921/b1_task1/run_c2kv_native_r4.log",
+        "started_unix": 1789951603.590712,
+        "status": "finished",
+        "pid": 1293478,
+        "returncode": 0,
+        "finished_unix": 1789951894.764544,
+        "duration_seconds": 291.1738324165344
+      },
+      "paper_receipt_status": "completed",
+      "protocol": {
+        "task_ids": [
+          "1"
+        ],
+        "num_trials": 1,
+        "max_steps": null,
+        "timeout": null,
+        "agent_max_tokens": 4096
+      },
+      "official_result": "/workspace/validation/blocker-repair-20260921/b1_task1/tau2__c2kv_native_r4/native/task_shards/1/tau2/official/updated_results.json",
+      "official_result_sha256": "7fe1813b564a9f48042859f4e5412acfb49ccad643287ed1ace05afed1dd93f5",
+      "summary_score": 1.0,
+      "termination_reason": "user_stop",
+      "reward": 1.0,
+      "reward_basis": [
+        "DB",
+        "COMMUNICATE"
+      ],
+      "action_checks": [
+        {
+          "name": "get_user_details",
+          "action_match": false
+        },
+        {
+          "name": "get_reservation_details",
+          "action_match": false
+        }
+      ],
+      "audit": "/workspace/validation/blocker-repair-20260921/b1_task1/b1_task1_audit.json"
+    },
+    "c1_r8": {
+      "plan": "/workspace/validation/blocker-repair-20260921/b1_c1_shadow_9b6/b1_task1_plan.json",
+      "run_receipt": {
+        "schema": "b1-tau2-task1-execution-v1",
+        "arm": "c2kv_c1_t02_r8",
+        "plan": "/workspace/validation/blocker-repair-20260921/b1_c1_shadow_9b6/b1_task1_plan.json",
+        "cwd": "/workspace/validation/blocker-repair-20260921/paper-d22a9398df20",
+        "argv": [
+          "/workspace/venv-bench/bin/python",
+          "-m",
+          "benchmarks.paper.c1",
+          "--config",
+          "/workspace/validation/blocker-repair-20260921/b1_c1_shadow_9b6/config.task1.json",
+          "--arm",
+          "c2kv_c1_t02_r8",
+          "--benchmark",
+          "tau2",
+          "--stage",
+          "closed_loop",
+          "--upstream",
+          "http://127.0.0.1:34862",
+          "--proxy-port",
+          "34863",
+          "--task-ids",
+          "1",
+          "--num-workers",
+          "1",
+          "--out",
+          "/workspace/validation/blocker-repair-20260921/b1_c1_shadow_9b6/tau2__c2kv_c1_t02_r8"
+        ],
+        "log": "/workspace/validation/blocker-repair-20260921/b1_c1_shadow_9b6/run_c2kv_c1_t02_r8.log",
+        "started_unix": 1789953040.364917,
+        "status": "finished",
+        "pid": 1298857,
+        "returncode": 0,
+        "finished_unix": 1789953190.0313697,
+        "duration_seconds": 149.66645312309265
+      },
+      "paper_receipt_status": "completed",
+      "protocol": {
+        "task_ids": [
+          "1"
+        ],
+        "num_trials": 1,
+        "max_steps": null,
+        "timeout": null,
+        "agent_max_tokens": 4096
+      },
+      "official_result": "/workspace/validation/blocker-repair-20260921/b1_c1_shadow_9b6/tau2__c2kv_c1_t02_r8/native/task_shards/1/tau2/official/updated_results.json",
+      "official_result_sha256": "534cf2aed1e726dd72617d45c6edca2f222bff49c2d8f642fd0dd427db07ace7",
+      "summary_score": 1.0,
+      "termination_reason": "user_stop",
+      "reward": 1.0,
+      "reward_basis": [
+        "DB",
+        "COMMUNICATE"
+      ],
+      "action_checks": [
+        {
+          "name": "get_user_details",
+          "action_match": true
+        },
+        {
+          "name": "get_reservation_details",
+          "action_match": false
+        }
+      ],
+      "audit": "/workspace/validation/blocker-repair-20260921/b1_c1_shadow_9b6/b1_task1_audit.json"
+    },
+    "c1_first_preflight_attempt": {
+      "run_receipt": {
+        "schema": "b1-tau2-task1-execution-v1",
+        "arm": "c2kv_c1_t02_r8",
+        "plan": "/workspace/validation/blocker-repair-20260921/b1_task1/b1_task1_plan.json",
+        "cwd": "/workspace/validation/blocker-repair-20260921/paper-d22a9398df20",
+        "argv": [
+          "/workspace/venv-bench/bin/python",
+          "-m",
+          "benchmarks.paper.c1",
+          "--config",
+          "/workspace/validation/blocker-repair-20260921/b1_task1/config.task1.json",
+          "--arm",
+          "c2kv_c1_t02_r8",
+          "--benchmark",
+          "tau2",
+          "--stage",
+          "closed_loop",
+          "--upstream",
+          "http://127.0.0.1:34862",
+          "--proxy-port",
+          "34863",
+          "--task-ids",
+          "1",
+          "--num-workers",
+          "1",
+          "--out",
+          "/workspace/validation/blocker-repair-20260921/b1_task1/tau2__c2kv_c1_t02_r8"
+        ],
+        "log": "/workspace/validation/blocker-repair-20260921/b1_task1/run_c2kv_c1_t02_r8.log",
+        "started_unix": 1789952038.3650308,
+        "status": "finished",
+        "pid": 1296254,
+        "returncode": 1,
+        "finished_unix": 1789952075.0964904,
+        "duration_seconds": 36.731460094451904
+      },
+      "log": "/workspace/validation/blocker-repair-20260921/b1_task1/run_c2kv_c1_t02_r8.log"
+    }
+  },
+  "effective_view_audit": "scratchpad/blocker_repair_20260920/b1_effective_view_audit.json",
+  "step0_comparison": "scratchpad/blocker_repair_20260920/b1_step0_comparison.json",
+  "interpretation_limit": "One official tau2 task per arm. Score 1.0 is the official scorer output; action-check matches differ. New views do not repeat within these episodes, but this does not establish population-level quality or isolate the prologue change causally.",
+  "quality_label": "preliminary, n=1"
+}

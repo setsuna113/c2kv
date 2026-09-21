@@ -1,5 +1,33 @@
 # Paper CUDA benchmarks
 
+## Repairing selected tasks
+
+Use a **new output root** to repair only audited infrastructure failures and
+missing IDs. For non-native BFCL and AppWorld cells, `prepare` and `run` accept
+repeatable `--task-subset CELL=id,...` or `--task-subset-file subsets.json`,
+where the JSON is a mapping from exact matrix cell IDs to lists of task IDs.
+The plan contains only those cells; `--cells` may further select among them.
+Run it with `--stage closed_loop`. Native controllers, other adapters and
+common-prefix replay do not support this entry point.
+
+```bash
+python -m benchmarks.paper run --config config.pod.json \
+  --sglang-source /workspace/engine-fix --output /workspace/results-repair \
+  --stage closed_loop --task-subset-file subsets.json
+```
+
+The resolved config and per-cell `task_subset.json`, `started.json`, summary
+and `complete.json` retain the exact cohort. Completion means those selected
+tasks are complete. Their `semantic_score` and AppWorld official aggregates
+describe **only that subset**; table aggregation refuses them as whole cells.
+Preserve valid old terminal outcomes, including real model failures. In a new
+isolated evaluation directory, combine preserved and repaired raw outcomes by
+task ID, verify the complete expected ID set with no duplicates, and rerun the
+official evaluator. BFCL supports offline `mode=evaluate`; AppWorld requires
+the full task artifacts and official `appworld evaluate`, including scenario
+aggregation. Never average partial scenario scores. Retain per-task source
+provenance and keep latency/cost from different code versions separate.
+
 ## tau2 matrix cells
 
 `tau2` is a benchmark axis of the existing paper matrix. It uses the same
@@ -44,6 +72,8 @@ existing paper runner. It contains three anchors (Full/Full, uniform-tool/Full,
 Full/compressed-history) and the four cells of uniform/hybrid tools crossed
 with recovery off/on. The builder fixes the learned `t02_risk` controller,
 threshold 0.5 and ratio8, independently of the historical default D3 matrix.
+`--interface-policy schema` creates separate `uniform_schema` and
+`hybrid_schema` cells and records the policy in the generated configuration.
 
 `c2kv_c1_off_r8` routes to the delivered `c2kv_only` controller: it preserves
 the S0 initial history allocation and ratio of C1, and removes recovery. It is
@@ -56,11 +86,22 @@ The recorded-decision study is separate from closed-loop task success:
 and `evaluate` runs the five tool KV methods and selection ablations. See the
 CLI help for its manifest, checkpoint and `--upstream` arguments. Generation
 uses the same SGLang tool-memory runtime as the joint study; this client only
-freezes inputs, sends requests and scores returned actions. Selection-based
-tool baselines use native prefill followed by headwise pruning and a final
+freezes inputs, sends requests and scores returned actions.
+Use `--interface-policy schema` on both `prepare` and `evaluate` to freeze
+and verify that interface choice in the manifest and every recorded layout.
+Schema manifests and records also pin `interface_render_profile` to
+`tool-schema-split-v3`. Each executable interface is retained once. T0 encodes
+only descriptive annotations for compressed tools; selected native tools keep
+their full definition once. Opaque source definitions stay full and are not
+also compressed. This changes the encoder input representation without
+retraining the checkpoint; benchmark effectiveness must be measured anew.
+The raw-interface cost is counted in resident KV. Earlier additive-schema
+manifests must be prepared again; their results cannot be reused as v3.
+Selection-based tool baselines use native prefill followed by headwise pruning and a final
 prompt-token forward pass. This does not reduce initial prefill work.
-Only schema-interior tokens are eligible for eviction; history, protocol
-scaffolding, selected native schemas and tokens crossing schema boundaries
+With `:schema`, only descriptive annotation value tokens are eligible for
+eviction. History, executable schema fields, protocol scaffolding, selected
+native schemas and tokens crossing annotation boundaries
 remain resident. H2O accumulates attention over all prefill queries before
 the held-out final prompt token; SnapKV observes the last 16 such queries.
 The runtime receipt records that query range and verifies that the first
@@ -135,9 +176,48 @@ and `t0_r8_hybrid3` (lexical top-3 native) on the Full arm, i.e. twelve extra
 cells for the "compressed tools x full history" rows of the paper's
 joint-context table.
 
+The opt-in `:schema` tool interface policy has separate context names and
+provenance in `config.json`: `t0_r8_hybrid3_schema` and
+`h2o_r8_hybrid3_schema`. Select either with `--tool-contexts`; the runner
+adds cells across Full, text-history, history-KV, and native C2KV arms while
+preserving every default cell. The top-3 native schemas stay complete once;
+with T0, each remaining tool keeps a raw executable interface and only its
+descriptive annotations are compressed. The H2O context selects
+raw tool KV and uses the configured checkpoint directory as a tokenizer source;
+it does not load
+tool-gist projection weights. These opt-in
+cells have no measured result in the shipped matrix.
+
+Schema-protected raw-tool selection composes with text, gist, physical-KV and
+reference-attention history through the shared tool adapter. For persistent
+AgentKV/CommitKV sessions, a fixed catalog and system prefix permit a changed
+raw-tool selection to replace its resident KV while preserving the existing
+history state. A changed catalog or source prefix is rejected instead of
+silently refilling history. Query-dependent T0 hybrid selection can change
+that source prefix and is not supported with these persistent reference-history
+sessions; native C2KV history reconstructs each request and supports that case.
+An unchanged T0 uniform catalog keeps its existing carrier identities.
+
+The recorded-decision study's Full control keeps the original uncompressed
+input without duplicate interface copies. Protected copies are charged to the
+compressed layouts. Rebuild schema manifests after a control-contract change;
+do not reuse older Full denominators. NPU page-aligned tool replacement has
+CPU coverage at page size 128; CUDA smoke does not establish NPU hardware
+execution or benchmark quality.
+
 The default matrix contains 47 main cells, 9 sweep cells, 18 opponent cells
 and two ratio-4 C1 ablations. ACEBench uses the official `agent` category;
-ToolSandbox uses its full official suite with one process. ACEBench C1 ratio-8
+ToolSandbox defaults to the frozen `three_distraction_tools_129` suite with one process.
+Its worker defaults to `POLARS_MAX_THREADS=4`; an explicitly set value takes priority.
+For a private RapidAPI key file, set `TOOLSANDBOX_ENV_FILE` before running the paper
+runner; the file contains one `RAPID_API_KEY=...` assignment. An existing
+`RAPID_API_KEY` environment variable takes priority:
+
+```bash
+export TOOLSANDBOX_ENV_FILE="$HOME/.config/toolsandbox/rapidapi.env"
+```
+
+ACEBench C1 ratio-8
 and ratio-4 are configured cells. The native ToolSandbox adapter exists, but
 ToolSandbox C1 is not enabled in the default matrix because its official
 end-to-end path remains unvalidated; the reason is recorded in
@@ -200,6 +280,33 @@ base arm's benchmark scope, and resolved JSON, matrix CSV, run summaries, and
 comparison tables retain the explicit allowance. Multiple budget cells use
 separate result directories. Existing results cannot be resumed as a different
 budget. Do not interpret the allowance as a measured compression ratio.
+
+Native C2KV allocation/recovery uses a separate capacity contract through
+`benchmarks.native_history_budget.NativeHistoryBudget`. The repeatable
+`--native-history-budget ARM=TOKENS` adds BFCL base/long-context cells without
+changing the gist ratio, recovery policy, detector threshold, or generation
+limits. For the selected Pending policy:
+
+```bash
+python -m benchmarks.paper prepare --config CONFIG.json \
+  --sglang-source ENGINE --output NEW_RESULTS \
+  --candidate-arms goal_pending \
+  --native-history-budget c2kv_goal_pending_r8=256 \
+  --native-history-budget c2kv_goal_pending_r8=2048
+```
+
+Use the same options with `run --stage closed_loop` and select
+`--cells bfcl_base__c2kv_goal_pending_r8_b256,bfcl_base__c2kv_goal_pending_r8_b2048`.
+The original `bfcl_base__c2kv_goal_pending_r8` remains the fixed-budget release.
+Even an explicit 768-token setting receives its own `_b768` identity. The native
+delivery converts the allowance to BF16 KV bytes using the checkpoint geometry,
+sets both history and workspace caps in a per-cell policy file, and records the
+base and derived policy provenance in `native/profile.json`. Draft and recovery
+share that policy; recovered raw history remains charged to the same cap.
+An explicit sweep may exceed the old B0 allowance without rewriting its frozen
+policy. No option preserves the original policy and commands. Capacity failure
+remains a method outcome, not an infrastructure retry. Bare `c2kv_native_r4` and
+non-BFCL native sweep paths are not supported by this interface.
 
 For an existing CUDA or NPU upstream, the shared single-cell client reuses
 the same planner and benchmark adapters without launching an engine:
@@ -410,10 +517,36 @@ $PY -m benchmarks.paper run --output /home/lyc/dev/c2kv-paper-results
 $PY -m benchmarks.paper aggregate --output /home/lyc/dev/c2kv-paper-results
 ```
 
+The Static initial-view compositions are selected explicitly with
+`--candidate-arms goal_static,pending_static`. The separate arms
+`c2kv_goal_static_r8` and `c2kv_pending_static_r8` use the unchanged Static-T02
+initial allocator, followed by the existing Goal or Goal Pending recovery
+controller respectively. Their `c2kv-initial-view-composition-v1` protocol and
+v5 profiles record `initial_view` (`static_gist`, `c2kv-static-initial-view-v1`)
+and `recovery_backbone` (`goal_rescue` or `goal_pending`) separately. Goal review,
+event replacement, Pending completion review, and final commit validation are
+delegated to the original controllers; this composition adds no recovery round.
+Ratio8, frozen T02 at 0.5, B0 admission and per-task generation limits still apply.
+The legacy S0 routes, result identities and eleven-arm `all` expansion are
+unchanged. Initial-view compositions require an explicit name, including for
+native history budget sweeps; they do not reuse a historical Goal/Pending cell.
+
+The current compression exploration uses
+`--candidate-arms pending_verified_static,goal_verified_static`. These distinct
+arms (`c2kv_pending_verified_static_r8`, `c2kv_goal_verified_static_r8`) compose
+the same Static initial allocator with `pending_verified` or `goal_verified`.
+The v5 contract also binds `proof_registry_version=verified-binding-rules-v1`
+in the profile, controller and ready manifest. Existing Verified controllers
+own proof discovery, selected-commit validation and final field correction;
+the initial-view wrapper adds no generation or model workspace. The earlier
+`goal_static` and `pending_static` arms retain their original behavior and IDs.
+
 The ratio8 candidate algorithms are an explicit overlay. For example,
 `--candidate-arms all --candidate-benchmarks bfcl_base,acebench_agent` on
-both `prepare` and `run` adds the four legacy candidates plus the three source
-repair candidates for those two benchmarks. The default candidate scope is
+both `prepare` and `run` adds the four legacy candidates, three source-repair
+candidates, and four Goal-composition candidates for those benchmarks. `all`
+retains this original eleven-arm scope; verified-binding candidates require
+their names explicitly. The default candidate scope is
 BFCL base, and the default matrix has no candidate cells. Each candidate uses
 its own native arm identity and ready-manifest validation; this is a runnable
 configuration, not a claim of completed benchmark scores.
@@ -431,6 +564,37 @@ reversions, and source-supported abstentions separately from attempted recovery.
 Natural-language completion and ambiguous dependencies use source-backed model
 review; deterministic guards cover only explicitly supported violations.
 Legacy candidate IDs, profiles, and result schemas keep their original meaning.
+
+Select the Goal-based candidates explicitly with
+`--candidate-arms goal_pending,goal_source,goal_progress,goal_joint`.
+Their `c2kv-goal-composition-v1` protocol and v3 delivery profiles retain
+Goal's C1 initial view, frozen T02 weights, STOP review, and complete-event
+recovery. `GoalCompositionController` owns priority and the shared budget;
+policy modules implement `propose`/`validate`, the Pending review supplement,
+and exact field correction. Source and Progress run only when original Goal
+does not recover. Joint gives Source precedence over Progress and never chains
+regenerations. All variants retain ratio8, B0, one regeneration per decision,
+and the shared 96-generation task limit.
+
+The verified-binding overlay is selected with
+`--candidate-arms goal_verified,pending_verified`. Its distinct
+`c2kv-verified-binding-v1` protocol uses ratio8, the frozen T02 risk artifact,
+Goal's initial allocation and recovery, and the same BFCL base/long-context,
+AppWorld, and ACEBench candidate benchmark axes. `goal_verified` applies a
+source-backed field correction only after original Goal abstains;
+`pending_verified` also retains the original Pending STOP review. The
+deterministic proof guard accepts only fields supported by an observed receipt
+and adds no regeneration. The v4 delivery profile and ready manifest record
+`proof_registry_version`; older profiles, arm IDs, and result schemas retain
+their original meaning. No benchmark result is implied by selecting these arms.
+
+Pending distinguishes lookup receipts from execution completion. Source admits
+whole producer/result groups, preserves deferred consumer chains until actual
+producer observations, and corrects only explicitly grounded fields. Progress
+reviews same-turn repeated reads with no new observed evidence or state change;
+its new STOP outputs revert to the original read. New `commit_transform` receipts
+separate deterministic field changes from generated text and model cost. Old
+profiles and result directories are not reinterpreted or resumed as new variants.
 
 `run` executes the closed-loop matrix, then replays each benchmark's
 Full recorded prefixes through methods that support that protocol. AgentKV and

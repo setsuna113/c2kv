@@ -7,8 +7,15 @@ from unittest import mock
 
 import pytest
 
+from experiments.history_system.candidate_algorithms import (
+    INITIAL_VIEW_VARIANTS, INITIAL_VIEW_VERSION, initial_view_fields,
+)
+
 from benchmarks.paper import native_extra
-from benchmarks.paper.candidate_matrix import REPAIR_VARIANTS, VARIANT_TO_ARM
+from benchmarks.toolsandbox_suite import THREE_DISTRACTION_TOOLS_129, load_named_suite
+from benchmarks.paper.candidate_matrix import (
+    GOAL_VARIANTS, REPAIR_VARIANTS, VERIFIED_VARIANTS, VARIANT_TO_ARM,
+)
 
 
 def _config(tmp_path):
@@ -68,6 +75,20 @@ def test_toolsandbox_uses_official_resolver_and_checks_configured_subset(tmp_pat
     assert native_extra.selected_tasks(config, "toolsandbox") == ["get_wifi"]
     with pytest.raises(ValueError, match="official split"):
         native_extra.selected_tasks(config, "toolsandbox", ["missing"])
+
+
+def test_toolsandbox_named_suite_is_validated_against_official_resolver(tmp_path, monkeypatch):
+    config = _config(tmp_path)
+    config["toolsandbox_suite"] = THREE_DISTRACTION_TOOLS_129
+    Path(config["toolsandbox_dir"]).mkdir()
+    ids = load_named_suite(THREE_DISTRACTION_TOOLS_129)["scenario_ids"]
+    monkeypatch.setattr(native_extra, "run_owned", lambda *args, **kwargs:
+                        SimpleNamespace(stdout=json.dumps(ids + ["outside_cohort"])))
+    assert native_extra.selected_tasks(config, "toolsandbox") == ids
+    monkeypatch.setattr(native_extra, "run_owned", lambda *args, **kwargs:
+                        SimpleNamespace(stdout=json.dumps(ids[:-1])))
+    with pytest.raises(ValueError, match="official IDs"):
+        native_extra.selected_tasks(config, "toolsandbox")
 
 
 @pytest.mark.parametrize("benchmark,namespace,profile", [
@@ -190,6 +211,7 @@ def test_ace_official_task_acceptance_uses_actual_arm_identity(
 
     monkeypatch.setattr(native_extra, "server_command",
                         lambda *args: [sys.executable, "--model-name", "test-model"])
+    monkeypatch.setattr(native_extra, "_preflight_controller_tokenizer", lambda *args: None)
     monkeypatch.setattr(native_extra.c1_appworld, "_delivery_path", lambda _: delivery)
     monkeypatch.setattr(native_extra.c1_appworld, "_delivery_runner", lambda _: FakeRunner())
     monkeypatch.setattr(native_extra.c1_appworld, "_delivery_run_c1", lambda *_: FakeDelivery())
@@ -204,6 +226,26 @@ def test_ace_official_task_acceptance_uses_actual_arm_identity(
                           delivery, tmp_path / "controller.json")
     assert seen == [("c2kv_native" if arm == "c2kv_native_r4" else "proposed",
                      detector, variant, {"decision_count": 1})]
+
+
+def test_native_controller_preflight_uses_controller_python_not_bench_python(
+        tmp_path, monkeypatch):
+    config = _config(tmp_path)
+    config["bench_python"] = "/venv-benchts/bin/python"
+    config["c1_runtime"] = {"controller_python": "/venv-native/bin/python"}
+    called = {}
+
+    def check(command, **kwargs):
+        called.update(command=command, kwargs=kwargs)
+        return SimpleNamespace(returncode=1, stderr="untagged enum ModelWrapper")
+
+    monkeypatch.setattr(native_extra, "run_owned", check)
+    with pytest.raises(RuntimeError, match="untagged enum ModelWrapper"):
+        native_extra._preflight_controller_tokenizer(
+            native_extra.c1_appworld._controller_python(config), config["checkpoint"])
+    assert called["command"][0] == "/venv-native/bin/python"
+    assert called["command"][-1] == config["checkpoint"]
+    assert called["kwargs"]["capture_output"] is True
 
 
 @pytest.mark.parametrize("arm,detector,variant", [
@@ -223,7 +265,10 @@ def test_ready_manifest_binds_loaded_controller_and_candidate_variant(
     controller_config = (
         {"candidate_algorithm": {"variant": variant}} if variant in REPAIR_VARIANTS else
         {"candidate_algorithm": {"variant": variant, "risk_threshold": 0.5,
-                                 "risk_artifact": {"model_kind": "c1_risk_logistic"}}} if variant else
+                                 "risk_artifact": {"model_kind": "c1_risk_logistic"},
+                                 **({"proof_registry_version": "verified-binding-rules-v1"}
+                                    if variant in VERIFIED_VARIANTS else {}),
+                                 **initial_view_fields(variant)}} if variant else
         {"post_draft_recovery": {"gate": "prefill_linear_head"},
          "d3_hybrid_recovery": True} if detector == "d3_hybrid" else
         {"gp_experiments": {"set_selector": "risk", "selector_artifact": {
@@ -232,7 +277,7 @@ def test_ready_manifest_binds_loaded_controller_and_candidate_variant(
     route = ({"recovery_enabled": False, "max_generations_per_decision": 1}
              if arm == "c2kv_native_r4" else
              {"recovery_enabled": True, "max_generations_per_decision": 2,
-              "baseline_identity": f"{'c2kv-source-repair-v1' if variant in REPAIR_VARIANTS else 'c2kv-paper-candidates-v1'}:{variant}"}
+              "baseline_identity": f"{INITIAL_VIEW_VERSION if variant in INITIAL_VIEW_VARIANTS else 'c2kv-source-repair-v1' if variant in REPAIR_VARIANTS else 'c2kv-verified-binding-v1' if variant in VERIFIED_VARIANTS else 'c2kv-goal-composition-v1' if variant in GOAL_VARIANTS else 'c2kv-paper-candidates-v1'}:{variant}"}
              if variant else {})
     manifest = {
         "schema": "a-event-native-server-v1", "status": "ready",
@@ -249,10 +294,28 @@ def test_ready_manifest_binds_loaded_controller_and_candidate_variant(
             "sha256": hashlib.sha256(controller.read_bytes()).hexdigest(),
         }
     if variant:
-        manifest["candidate_algorithm"] = {"variant": variant, "stable_call_ids": True}
+        manifest["candidate_algorithm"] = {
+            "variant": variant, "stable_call_ids": True,
+            **({"proof_registry_version": "verified-binding-rules-v1"}
+               if variant in VERIFIED_VARIANTS else {}),
+            **initial_view_fields(variant),
+        }
     ready = tmp_path / "ready.json"
     ready.write_text(json.dumps(manifest), encoding="utf-8")
     native_extra.validate_ready_manifest(config, "acebench_agent", "task_1", ready, controller)
+    if variant in INITIAL_VIEW_VARIANTS:
+        for field in ("initial_view", "recovery_backbone"):
+            original = manifest["candidate_algorithm"].pop(field)
+            ready.write_text(json.dumps(manifest), encoding="utf-8")
+            with pytest.raises(RuntimeError, match="candidate controller identity"):
+                native_extra.validate_ready_manifest(config, "acebench_agent", "task_1", ready, controller)
+            manifest["candidate_algorithm"][field] = original
+    if variant in VERIFIED_VARIANTS or initial_view_fields(variant).get("proof_registry_version"):
+        manifest["candidate_algorithm"]["proof_registry_version"] = "stale-proof-registry"
+        ready.write_text(json.dumps(manifest), encoding="utf-8")
+        with pytest.raises(RuntimeError, match="candidate controller identity"):
+            native_extra.validate_ready_manifest(config, "acebench_agent", "task_1", ready, controller)
+        manifest["candidate_algorithm"]["proof_registry_version"] = "verified-binding-rules-v1"
     if arm == "c2kv_c1_t02_r4":
         from benchmarks.toolmemory import parse_tool_memory_spec
         config["tool_memory"] = "t0:r8"

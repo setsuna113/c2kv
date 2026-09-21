@@ -1,0 +1,490 @@
+{
+  "schema": "c2kv-initial-view-composition-validation-v1",
+  "recorded_at": "2026-09-21T00:29:42.475480+00:00",
+  "status": "implementation_targeted_CPU_and_bounded_CUDA_checks_passed",
+  "variants": {
+    "goal_static": "goal_rescue",
+    "pending_static": "goal_pending"
+  },
+  "arms": [
+    "c2kv_goal_static_r8",
+    "c2kv_pending_static_r8"
+  ],
+  "protocol": "c2kv-initial-view-composition-v1",
+  "initial_view": {
+    "policy": "static_gist",
+    "version": "c2kv-static-initial-view-v1"
+  },
+  "contracts": {
+    "allocator": "Existing Static-T02 allocator selected through an explicit initial-view factory",
+    "recovery": "Delegate existing Goal/Pending controllers including Pending final commit handling",
+    "ratio": 8,
+    "risk_threshold": 0.5,
+    "risk_artifact": "frozen T02",
+    "budget": "B0 and existing per-task generation cap",
+    "regeneration_limit": "At most one per decision",
+    "identity": "Separate profile/cell/controller hashes and ready-manifest checks",
+    "default_all": "Existing eleven variants; both new variants require explicit opt-in",
+    "behavior_scope": "Same recovery code, but changed initial views can change drafts and later trajectories"
+  },
+  "source_revisions": {
+    "paper_implementation": "58b4ef1d12bf9afe6affb94cae5f68fc64db5aed",
+    "paper_integrated_source": "3eb5d4733589935d169e5ed9236a981c93e80bdb",
+    "npu_implementation": "8e1f2e9786cd364272099399bcfdfaa88c0d0a2a",
+    "npu_integrated_source": "caefa8edeea8202f1f571a6df3d4957a5bbca89d",
+    "engine_staged": "ecb9c3970eec7c79f8831def4d6aed3494c4d371",
+    "engine_changed_by_this_task": false
+  },
+  "legacy_profile_and_controller_parity": {
+    "base": "0ecbb44",
+    "legacy_variants": [
+      {
+        "variant": "static_t02",
+        "controller_and_profile_identical": true
+      },
+      {
+        "variant": "turn_c1",
+        "controller_and_profile_identical": true
+      },
+      {
+        "variant": "goal_rescue",
+        "controller_and_profile_identical": true
+      },
+      {
+        "variant": "dependency_first",
+        "controller_and_profile_identical": true
+      },
+      {
+        "variant": "request_contract",
+        "controller_and_profile_identical": true
+      },
+      {
+        "variant": "argument_binding",
+        "controller_and_profile_identical": true
+      },
+      {
+        "variant": "no_progress",
+        "controller_and_profile_identical": true
+      },
+      {
+        "variant": "goal_pending",
+        "controller_and_profile_identical": true
+      },
+      {
+        "variant": "goal_source",
+        "controller_and_profile_identical": true
+      },
+      {
+        "variant": "goal_progress",
+        "controller_and_profile_identical": true
+      },
+      {
+        "variant": "goal_joint",
+        "controller_and_profile_identical": true
+      },
+      {
+        "variant": "goal_verified",
+        "controller_and_profile_identical": true
+      },
+      {
+        "variant": "pending_verified",
+        "controller_and_profile_identical": true
+      }
+    ],
+    "status": "passed"
+  },
+  "shared_algorithm_parity": {
+    "status": "passed",
+    "modules": [
+      {
+        "file": "__init__.py",
+        "normalized_sha256": "e87f57c26d96589f7822747733ba4f0672c0a486c18a5a10ce293c8b06b02eb2"
+      },
+      {
+        "file": "allocation.py",
+        "normalized_sha256": "ad75a90812111b77459d18d34ea9d2cb248cc95d8bca687277dd514e434c6c8c"
+      },
+      {
+        "file": "argument_binding.py",
+        "normalized_sha256": "597c2923822980f336ce41da3986bffc69b345dda14eb1f1921c7c410ff8b07f"
+      },
+      {
+        "file": "controller.py",
+        "normalized_sha256": "92a0e4fb4ecc8d4d6d83dd8d301b39f2446090cb2ee3150fd5fb2abff6c767a1"
+      },
+      {
+        "file": "dependencies.py",
+        "normalized_sha256": "6ffef4e7f58f9b45a3062777f4235888781b2316e545b4a4c7a19ca5ff9b9520"
+      },
+      {
+        "file": "goal_commit.py",
+        "normalized_sha256": "9f46b4b69d6988e76298049ec607392be4b2180d9959faec80baef0940979edd"
+      },
+      {
+        "file": "goal_controller.py",
+        "normalized_sha256": "06f69ddbb885ae6ea46426b2a1a7c115420e346d2c3d6fe766c0645bfedef143"
+      },
+      {
+        "file": "goal_pending.py",
+        "normalized_sha256": "9af106f50b855b54421050a60927914ae9b15805228c87e115fd5fa84df7d26c"
+      },
+      {
+        "file": "goal_progress.py",
+        "normalized_sha256": "7fa0d94fdd181013c66d9573a9e26ffa01710d9cf8c7c343598fb579d346d06b"
+      },
+      {
+        "file": "goal_protocol.py",
+        "normalized_sha256": "359a58f922c9bef9fc6c68b813bea22ea27bb8db970ecf13f5474f3da336d5ea"
+      },
+      {
+        "file": "goal_source.py",
+        "normalized_sha256": "7665e0402d883fcab09e255943bcee3688aaa1b7c3f0fdfc52517669e15947cb"
+      },
+      {
+        "file": "initial_view.py",
+        "normalized_sha256": "b71bef6aaad393cdd052e35089cf37eb0792ed1a96b72f22823b48e64fa682e9"
+      },
+      {
+        "file": "no_progress.py",
+        "normalized_sha256": "dcd5922934ba5b3d3d9a671ed6f1a88175c7b99636acca504c6a84a8aa9957a7"
+      },
+      {
+        "file": "observations.py",
+        "normalized_sha256": "3b14c80f6e71b477978b620a09a0e5aeb667df466277b3c60de04a671e711eec"
+      },
+      {
+        "file": "progress.py",
+        "normalized_sha256": "4ea19792ba652ea4c2fd3ee74aa416bfee95cdb4f9bc0e0b20734d8734e9dbc1"
+      },
+      {
+        "file": "repacking.py",
+        "normalized_sha256": "7aaea1d98a223fc8474fdd96f28c6e74d7d3cf6f744cf30f2758f7d71e191412"
+      },
+      {
+        "file": "repair_controller.py",
+        "normalized_sha256": "f8eee3dbbe847bdd0d9ca69d67dbb73edc3deca3dcfb2eb05fd506b4f3dd2f17"
+      },
+      {
+        "file": "repair_protocol.py",
+        "normalized_sha256": "a3d4ba5ebf4e0842f92bd198f1d43838115bb42dc3cd29992ba73708e28c9d0b"
+      },
+      {
+        "file": "request_contract.py",
+        "normalized_sha256": "3ca82419d0dcbb57844cb14a48a9a771409200c5ad443876ab5246987219c4f9"
+      },
+      {
+        "file": "verified_binding.py",
+        "normalized_sha256": "1ecda543b91999b425825dfc8c3563b8eef235bb40a86b7299ac72a700f98b9c"
+      },
+      {
+        "file": "verified_controller.py",
+        "normalized_sha256": "53ed495e50c47df1db61e1afaf62d177a31d7f93f23bc160e2db5edf61789301"
+      }
+    ]
+  },
+  "CPU_checks": [
+    {
+      "checkout": "paper",
+      "files": [
+        "benchmarks/paper/test_candidate_arms.py",
+        "benchmarks/paper/test_native_extra.py",
+        "benchmarks/paper/test_native_history_budget.py",
+        "benchmarks/paper/test_c1.py",
+        "benchmarks/paper/test_d3_hybrid_config.py",
+        "benchmarks/paper/test_native_bare.py",
+        "benchmarks/paper/test_task_subsets.py",
+        "benchmarks/paper/test_runner.py",
+        "benchmarks/paper/test_tool_interface_entrypoint.py"
+      ],
+      "passed": 199,
+      "subtests_passed": 17,
+      "failed": 0
+    },
+    {
+      "checkout": "paper",
+      "files": [
+        "experiments/history_system/runtime/benchmarks/memory_runtime/tests/test_initial_view_composition.py",
+        "experiments/history_system/runtime/benchmarks/memory_runtime/tests/test_candidate_allocation.py",
+        "experiments/history_system/runtime/benchmarks/memory_runtime/tests/test_candidate_recovery.py",
+        "experiments/history_system/runtime/benchmarks/memory_runtime/tests/test_goal_composition.py",
+        "experiments/history_system/runtime/benchmarks/memory_runtime/tests/test_verified_controller.py",
+        "experiments/history_system/runtime/benchmarks/memory_runtime/tests/test_event_native_server.py",
+        "experiments/history_system/runtime/benchmarks/memory_runtime/tests/test_event_native_tool_prologue.py"
+      ],
+      "passed": 75,
+      "skipped": 1,
+      "failed": 0,
+      "skip_reason": "requires POSIX process groups"
+    },
+    {
+      "checkout": "npu",
+      "files": [
+        "tests/test_c2kv_candidate_cell.py",
+        "tests/test_c2kv_calibration_plan.py",
+        "tests/test_calibration_controller.py",
+        "tests/test_calibration_bfcl_site.py",
+        "tests/test_native_bare_launcher.py",
+        "tests/test_tool_context_cell.py"
+      ],
+      "passed": 96,
+      "failed": 0
+    },
+    {
+      "checkout": "npu",
+      "files": [
+        "controller_runtime/benchmarks/memory_runtime/tests/test_initial_view_composition.py",
+        "controller_runtime/benchmarks/memory_runtime/tests/test_candidate_allocation.py",
+        "controller_runtime/benchmarks/memory_runtime/tests/test_candidate_recovery.py",
+        "controller_runtime/benchmarks/memory_runtime/tests/test_goal_composition.py",
+        "controller_runtime/benchmarks/memory_runtime/tests/test_verified_controller.py",
+        "controller_runtime/benchmarks/memory_runtime/tests/test_event_native_server.py",
+        "controller_runtime/benchmarks/memory_runtime/tests/test_event_native_tool_prologue.py"
+      ],
+      "passed": 71,
+      "skipped": 1,
+      "failed": 0,
+      "skip_reason": "requires POSIX process groups"
+    }
+  ],
+  "test_execution": "python -m pytest <listed files> -q -rs; overlapping runs are not added together",
+  "additional_known_failure": {
+    "base": "bbe2b13",
+    "test": "tests/test_c2kv_bfcl_resume.py::test_driver_and_bundled_bfcl_completion_contracts_match",
+    "files": [
+      {
+        "path": "generality/bfcl_completion.py",
+        "unchanged_from_base": true,
+        "sha256": "8ac9848987b6ebb09382b99ea6c1637b35b5cc5dd5545f5b5905d4a0e018ab02"
+      },
+      {
+        "path": "controller_runtime/benchmarks/bfcl_completion.py",
+        "unchanged_from_base": true,
+        "sha256": "41ce2410872338b8ddf24542432b3d25a078ccebdb33248e4fd0e104860ca254"
+      }
+    ],
+    "status": "preexisting_unmodified_failure_not_hidden_or_fixed_here",
+    "cause": "Driver and bundled BFCL completion failure classifications already differ",
+    "broader_run": {
+      "passed": 89,
+      "failed": 1
+    }
+  },
+  "review": {
+    "independent_review": "passed after frozen-config regression fix",
+    "fixed": "Filter S0 configuration to accepted defaults before Static allocator construction",
+    "coverage": [
+      "Real frozen controller config",
+      "Static first-view parity",
+      "B0 and raw/gist exclusivity",
+      "Goal STOP recovery",
+      "Pending review and final commit delegation",
+      "cached decision identity",
+      "legacy profile/controller parity",
+      "profile/manifest mismatch rejection"
+    ]
+  },
+  "CUDA": {
+    "schema": "c2kv-initial-view-CUDA-smoke-v1",
+    "status": "passed",
+    "source": {
+      "pid": 1284037,
+      "start_time": "190033141",
+      "gpu": "GPU-db773cb4-fb9b-59ff-f49e-325501b03b6f",
+      "port": 34863,
+      "sources": {
+        "paper": {
+          "revision": "3eb5d4733589935d169e5ed9236a981c93e80bdb",
+          "path": "/workspace/validation/goal-static-view-20260921/paper-3eb5d4733589"
+        },
+        "engine": {
+          "revision": "ecb9c3970eec7c79f8831def4d6aed3494c4d371",
+          "path": "/workspace/validation/goal-static-view-20260921/engine-ecb9c3970eec"
+        }
+      },
+      "command": [
+        "/workspace/venv-sglang/bin/python",
+        "-m",
+        "sglang.launch_server",
+        "--model-path",
+        "/workspace/checkpoint-1000",
+        "--served-model-name",
+        "c2kv-agent",
+        "--device",
+        "cuda",
+        "--dtype",
+        "bfloat16",
+        "--model-impl",
+        "sglang",
+        "--attention-backend",
+        "flashinfer",
+        "--tool-call-parser",
+        "qwen25",
+        "--enable-c2kv",
+        "--c2kv-gist-type",
+        "dynamic-interleave",
+        "--c2kv-gist-param",
+        "qkv",
+        "--c2kv-query-proj",
+        "base",
+        "--c2kv-pool-fraction",
+        "0.05",
+        "--mem-fraction-static",
+        "0.65",
+        "--context-length",
+        "32768",
+        "--max-total-tokens",
+        "32768",
+        "--max-running-requests",
+        "1",
+        "--page-size",
+        "1",
+        "--chunked-prefill-size",
+        "512",
+        "--random-seed",
+        "42",
+        "--disable-radix-cache",
+        "--disable-cuda-graph",
+        "--disable-piecewise-cuda-graph",
+        "--disable-overlap-schedule",
+        "--enable-streaming-session",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "34863",
+        "--c2kv-shadow-feature-layer",
+        "-2",
+        "--enable-return-hidden-states"
+      ]
+    },
+    "device": "0, NVIDIA GeForce RTX 4090, GPU-db773cb4-fb9b-59ff-f49e-325501b03b6f",
+    "checkpoint": "/workspace/checkpoint-1000",
+    "official_smokes": [
+      {
+        "arm": "c2kv_goal_static_r8",
+        "status": "passed",
+        "qualification": "functional smoke; preliminary, n=1",
+        "task_id": "multi_turn_base_26",
+        "semantic_score": 0.0,
+        "n_harness_failures": 0,
+        "n_method_failures": 0,
+        "decision_count": 6,
+        "generation_calls": 9,
+        "recovery_count": 3,
+        "max_generations_per_decision": 2,
+        "all_B0_checks_passed": true,
+        "detector": "Frozen T02, threshold 0.5, actual model scores used",
+        "recovery_reasons": {
+          "risk_not_above_threshold": 3,
+          "stop_completion_review": 3
+        },
+        "pending_packets_admitted": 0,
+        "commit_validations": 0,
+        "harness_generation_requested": {
+          "temperature": 0.0,
+          "seed": 0,
+          "max_completion_tokens": 4096,
+          "scope": "explicit overrides; None preserves the existing default"
+        },
+        "profile": "/workspace/validation/goal-static-view-20260921/results/goal_static/native/profile.json",
+        "profile_sha256": "71eab6fb12ecf0dab4311f9014212b515dca5a7a325081686830b508a01fdbd6",
+        "summary": "/workspace/validation/goal-static-view-20260921/results/goal_static/summary_c2kv_goal_static_r8.json",
+        "summary_sha256": "59fac834ceaebc92b680c9ad666a7fc7a54edb35bcccb92a41d67609faa9ee52",
+        "steps": "/workspace/validation/goal-static-view-20260921/results/goal_static/native/task_shards/multi_turn_base_26/server/steps.jsonl",
+        "steps_sha256": "35dbabba725d1868166aa7440b35a089b24bcfd924efd62e5ead2bcbac55c5f7"
+      },
+      {
+        "arm": "c2kv_pending_static_r8",
+        "status": "passed",
+        "qualification": "functional smoke; preliminary, n=1",
+        "task_id": "multi_turn_base_26",
+        "semantic_score": 0.0,
+        "n_harness_failures": 0,
+        "n_method_failures": 0,
+        "decision_count": 6,
+        "generation_calls": 10,
+        "recovery_count": 4,
+        "max_generations_per_decision": 2,
+        "all_B0_checks_passed": true,
+        "detector": "Frozen T02, threshold 0.5, actual model scores used",
+        "recovery_reasons": {
+          "risk_not_above_threshold": 2,
+          "stop_completion_review": 3,
+          "risk_triggered_complete_event_replaced": 1
+        },
+        "pending_packets_admitted": 3,
+        "commit_validations": 6,
+        "harness_generation_requested": {
+          "temperature": 0.0,
+          "seed": 0,
+          "max_completion_tokens": 4096,
+          "scope": "explicit overrides; None preserves the existing default"
+        },
+        "profile": "/workspace/validation/goal-static-view-20260921/results/pending_static/native/profile.json",
+        "profile_sha256": "0aad9e902b291dd4e72c36b4ee03fb14fbde802404e99d4c227cd526e37da15c",
+        "summary": "/workspace/validation/goal-static-view-20260921/results/pending_static/summary_c2kv_pending_static_r8.json",
+        "summary_sha256": "b41338b42f912b9b5baaceb9ae43d32a963365892df2283c336037088180124a",
+        "steps": "/workspace/validation/goal-static-view-20260921/results/pending_static/native/task_shards/multi_turn_base_26/server/steps.jsonl",
+        "steps_sha256": "b875aa647f29348db93c475b1e03efef14c96b7ee87d8faf07f83ce3aa6026c3"
+      }
+    ],
+    "qualification": "Functional acceptance only; preliminary, n=1; no new quality claim",
+    "pre_generation_setup_failures": [
+      {
+        "reason": "Git identity missing in archived source before model generation",
+        "retained_records": [
+          "/workspace/validation/goal-static-view-20260921/preflight_failed_goal_static_owner.json",
+          "/workspace/validation/goal-static-view-20260921/preflight_failed_goal_static.exit.json",
+          "/workspace/validation/goal-static-view-20260921/preflight_failed_goal_static_smoke.log"
+        ],
+        "completed_tasks": 0,
+        "benchmark_model_generations": 0
+      },
+      {
+        "reason": "Smoke service omitted the required T02 shadow-feature launch flags",
+        "benchmark_model_generations": 0,
+        "fix": "Use --c2kv-shadow-feature-layer -2 --enable-return-hidden-states from production runner"
+      }
+    ],
+    "prepared_driver_sha256": "dddec037256c9ad0393ad8486b0791d3edf54541408f18ef3c85d1eb1d8e4aa2",
+    "recompute_script_sha256": "cea0957a9e748141c739104e14a24366290fdf9552591496a746257b0bf90193",
+    "cleanup": {
+      "stopped": [
+        {
+          "owner": "preflight_failed_goal_static_owner.json",
+          "status": "already_stopped"
+        },
+        {
+          "owner": "capability_preflight_failed_goal_static_owner.json",
+          "status": "already_stopped"
+        },
+        {
+          "owner": "capability_preflight_failed_server_owner.json",
+          "status": "already_stopped"
+        },
+        {
+          "owner": "goal_static_owner.json",
+          "status": "already_stopped"
+        },
+        {
+          "owner": "pending_static_owner.json",
+          "status": "already_stopped"
+        },
+        {
+          "owner": "server_owner.json",
+          "status": "term_sent"
+        }
+      ],
+      "gpu": "0, 1, 0\n1, 34902, 24\n2, 35036, 21\n3, 34644, 0\n"
+    },
+    "local_artifact_bundle": {
+      "path": "C:\\Users\\yl998\\Documents\\programming\\c2kv\\scratchpad\\initial_view_impl_20260921\\cuda_artifacts.tar.gz",
+      "bytes": 3527690,
+      "sha256": "951f3024602fd09f8af3eeec4701176e6581825813a2d9b8657251e3a483bc14"
+    }
+  },
+  "NPU_hardware": {
+    "executed": false
+  },
+  "quality_claim": "Only two single-task functional smokes, preliminary, n=1; no quality improvement claimed",
+  "running_experiments": "Preserved; isolated source checkouts, no job restarts or source replacement"
+}

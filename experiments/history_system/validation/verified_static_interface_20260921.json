@@ -1,0 +1,135 @@
+{
+  "schema": "c2kv-verified-static-interface-validation-v1",
+  "recorded_at": "2026-09-21T00:47:18.783842+00:00",
+  "status": "targeted_CPU_interface_checks_passed",
+  "variants": {
+    "pending_verified_static": "pending_verified",
+    "goal_verified_static": "goal_verified"
+  },
+  "arms": [
+    "c2kv_pending_verified_static_r8",
+    "c2kv_goal_verified_static_r8"
+  ],
+  "initial_view": {
+    "policy": "static_gist",
+    "version": "c2kv-static-initial-view-v1"
+  },
+  "protocol": "c2kv-initial-view-composition-v1",
+  "proof_registry_version": "verified-binding-rules-v1",
+  "profile_and_cell_schema_version": 5,
+  "source_commits": {
+    "paper": "ccab3dad1fce8cb049d47a7f289f20c69e7fa7f8",
+    "npu": "2a573ace09debfd46ac0cf46478b8f192bab9237"
+  },
+  "implementation_scope": "Extend existing composition registry and proof identity checks; delegate unchanged allocation, recovery, validation and finalization implementations",
+  "CPU_checks": [
+    {
+      "scope": "Shared initial-view interface, real proof commit, recovery delegation, registry validation",
+      "file": "experiments/history_system/runtime/benchmarks/memory_runtime/tests/test_initial_view_composition.py",
+      "passed": 22
+    },
+    {
+      "scope": "Paper explicit opt-in, profile binding, durable identity, ready manifest",
+      "tests": [
+        "benchmarks/paper/test_candidate_arms.py::test_candidate_delivery_uses_ratio8_and_bound_artifact",
+        "benchmarks/paper/test_candidate_arms.py::test_new_arms_require_named_opt_in_and_support_bfcl_appworld_ace",
+        "benchmarks/paper/test_candidate_arms.py::test_goal_acceptance_requires_frozen_risk_and_distinct_version",
+        "benchmarks/paper/test_native_extra.py::test_ready_manifest_binds_loaded_controller_and_candidate_variant"
+      ],
+      "passed": 46
+    },
+    {
+      "scope": "NPU candidate cell/controller/ready contracts",
+      "file": "tests/test_c2kv_candidate_cell.py",
+      "passed": 95
+    }
+  ],
+  "legacy_contracts_unchanged": [
+    {
+      "variant": "static_t02",
+      "paper_profile_and_controller_equal": true,
+      "npu_cell_and_controller_equal": true
+    },
+    {
+      "variant": "turn_c1",
+      "paper_profile_and_controller_equal": true,
+      "npu_cell_and_controller_equal": true
+    },
+    {
+      "variant": "goal_rescue",
+      "paper_profile_and_controller_equal": true,
+      "npu_cell_and_controller_equal": true
+    },
+    {
+      "variant": "dependency_first",
+      "paper_profile_and_controller_equal": true,
+      "npu_cell_and_controller_equal": true
+    },
+    {
+      "variant": "request_contract",
+      "paper_profile_and_controller_equal": true,
+      "npu_cell_and_controller_equal": true
+    },
+    {
+      "variant": "argument_binding",
+      "paper_profile_and_controller_equal": true,
+      "npu_cell_and_controller_equal": true
+    },
+    {
+      "variant": "no_progress",
+      "paper_profile_and_controller_equal": true,
+      "npu_cell_and_controller_equal": true
+    },
+    {
+      "variant": "goal_pending",
+      "paper_profile_and_controller_equal": true,
+      "npu_cell_and_controller_equal": true
+    },
+    {
+      "variant": "goal_source",
+      "paper_profile_and_controller_equal": true,
+      "npu_cell_and_controller_equal": true
+    },
+    {
+      "variant": "goal_progress",
+      "paper_profile_and_controller_equal": true,
+      "npu_cell_and_controller_equal": true
+    },
+    {
+      "variant": "goal_joint",
+      "paper_profile_and_controller_equal": true,
+      "npu_cell_and_controller_equal": true
+    },
+    {
+      "variant": "goal_verified",
+      "paper_profile_and_controller_equal": true,
+      "npu_cell_and_controller_equal": true
+    },
+    {
+      "variant": "pending_verified",
+      "paper_profile_and_controller_equal": true,
+      "npu_cell_and_controller_equal": true
+    },
+    {
+      "variant": "goal_static",
+      "paper_profile_and_controller_equal": true,
+      "npu_cell_and_controller_equal": true
+    },
+    {
+      "variant": "pending_static",
+      "paper_profile_and_controller_equal": true,
+      "npu_cell_and_controller_equal": true
+    }
+  ],
+  "shared_algorithm_module_count": 21,
+  "shared_algorithm_parity": "All modules match between paper and NPU after LF normalization",
+  "compatibility_recompute_script_sha256": "7d3239846c929ddefb672a22c70bd6726af125e933c006ad9c01be02505a9ca6",
+  "compatibility_receipt_sha256": "fa922d3f94fc41703351fd76e14051f55a939cfd32f5f569c6833ca3349ea665",
+  "validation_scope_decision": "User requested proportionate interface validation, without repeating broad suites or CUDA whole-task smokes",
+  "CUDA_execution_this_revision": false,
+  "NPU_hardware_execution_this_revision": false,
+  "prior_hardware_evidence": "Previously validated reused components; this is not a claim that either new composed arm has run on a device",
+  "new_benchmark_scores": null,
+  "default_all_expansion": "Existing eleven variants unchanged",
+  "running_experiments_modified": false
+}

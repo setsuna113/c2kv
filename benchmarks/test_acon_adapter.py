@@ -317,9 +317,14 @@ def test_appworld_runtime_hook_records_joined_decision_action_and_episode(
         tmp_path, monkeypatch):
     class FakeCompletions:
         last_extra_body = None
+        last_max_retries = None
+
+        def __init__(self):
+            self._client = types.SimpleNamespace(max_retries=2)
 
         def create(self, *_args, **kwargs):
             FakeCompletions.last_extra_body = kwargs.get("extra_body")
+            FakeCompletions.last_max_retries = self._client.max_retries
             return types.SimpleNamespace(
                 model_extra={"c2kv_proxy": {"request_id": "proxy-request-7"}},
                 choices=[types.SimpleNamespace(
@@ -416,6 +421,7 @@ def test_appworld_runtime_hook_records_joined_decision_action_and_episode(
         task_root / "task_task-7")
     assert FakeCompletions.last_extra_body == {
         "c2kv_measurement_session_id": "task-7"}
+    assert FakeCompletions.last_max_retries == 0
 
 
 def test_qa_command_uses_shipped_split_and_pins():

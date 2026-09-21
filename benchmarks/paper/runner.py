@@ -18,10 +18,14 @@ from .candidate_matrix import (
     parse_candidate_arms, with_candidate_methods,
 )
 from benchmarks.history_budget import HistoryKVBudget, parse_history_kv_budget
+from benchmarks.native_history_budget import NativeHistoryBudget, parse_native_history_budget
+from benchmarks.toolsandbox_suite import THREE_DISTRACTION_TOOLS_129, selected_scenarios
 from .artifact_io import atomic_json, atomic_text, preparation_lock
 from .process_lifecycle import (defer_termination, run_owned, stop_owned_group,
                                 unwind_on_termination)
 from .upstream_liveness import UpstreamLiveness, UpstreamUnavailable
+from .task_subsets import (finish_subset, is_subset, select_subset_cells,
+                           subset_metadata, with_task_subsets)
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG = Path(__file__).with_name("config.json")
@@ -36,7 +40,9 @@ DEFAULT_CONFIG = Path(__file__).with_name("config.json")
 ACEBENCH_MAX_RUNNING_REQUESTS = 2
 REFERENCE_ATTENTION_MEM_FRACTION = 0.65   # static pool cap for reference_attention arms (see server_command)
 C1_ARMS = {"c2kv_c1_t02_r8": 8, "c2kv_c1_t02_r4": 4, "c2kv_c1_off_r8": 8}
-BUDGET_TEXT_BENCHMARKS = {"bfcl_base", "bfcl_long_context", "appworld", "acebench_agent", "tau2"}
+BUDGET_TEXT_BENCHMARKS = {
+    "bfcl_base", "bfcl_long_context", "appworld", "acebench_agent", "tau2", "toolsandbox",
+}
 
 EVENT_NATIVE_CHECKPOINT_MARKERS = {
     "history_memory_training_profile": "history-event-base-query-v1",
@@ -80,12 +86,13 @@ def tool_contexts(config):
         spec = parse_tool_memory_spec(item.get("spec"))
         if spec is None:
             raise ValueError(f"tool context {name!r} needs a non-raw spec (e.g. t0:r8)")
-        if spec.encoder != "t0":
-            raise ValueError("Paper tool contexts currently support T0; global tool-region H2O/SnapKV is not implemented")
+        if spec.encoder != "t0" and spec.interface_policy != "schema":
+            raise ValueError("Raw-KV tool contexts require the explicit schema interface policy")
         if not item.get("checkpoint"):
             raise ValueError(f"tool context {name!r} needs a tokenizer/checkpoint directory")
         contexts[name] = {"name": name, "spec": str(item["spec"]),
-                          "checkpoint": str(item["checkpoint"])}
+                          "checkpoint": str(item["checkpoint"]),
+                          "interface_policy": spec.interface_policy}
         if item.get("budget_tokens") is not None:
             budget = item["budget_tokens"]
             if isinstance(budget, bool) or not isinstance(budget, int) or budget <= 0:
@@ -120,14 +127,22 @@ def cells(config):
                         budget = HistoryKVBudget(method["history_budget_tokens"])
                         budget.apply(arm)
                         row["cell_id"] = bench["name"] + "__" + budget.variant_name(arm.name)
+                    elif arm.native_controller:
+                        budget = NativeHistoryBudget(method["history_budget_tokens"])
+                        budget.validate_arm(arm)
+                        row["cell_id"] = bench["name"] + "__" + budget.variant_name(arm.name)
                 if context_name != RAW_TOOL_CONTEXT:
                     row["cell_id"] += "__tools-" + context_name
                     row["tool_memory"] = context["spec"]
+                    if context["interface_policy"] != "none":
+                        row["tool_interface_policy"] = context["interface_policy"]
                     row["tool_checkpoint"] = context["checkpoint"]
                     if context.get("budget_tokens") is not None:
                         row["tool_budget_tokens"] = context["budget_tokens"]
                 rows.append(row)
     # Run the final system (and its ablations) after every existing comparison/sweep cell.
+    if "task_subsets" in config:
+        rows = select_subset_cells(rows, config["task_subsets"])
     return sorted(rows, key=lambda row: is_c1_arm(row["arm"]) or is_candidate_arm(row["arm"]))
 
 
@@ -147,11 +162,13 @@ def with_tool_contexts(config, names, checkpoint=None):
     methods = []
     for method in config["methods"]:
         arm = get_arm(method["arm"])
-        if (arm.text_policy or "").startswith(("acon", "hiagent")):
+        current = method.get("tool_contexts") or [RAW_TOOL_CONTEXT]
+        text_arm = (arm.text_policy or "").startswith(("acon", "hiagent"))
+        allowed = [name for name in names if not text_arm or contexts[name]["interface_policy"] == "schema"]
+        if not allowed:
             methods.append(method)
             continue
-        current = method.get("tool_contexts") or [RAW_TOOL_CONTEXT]
-        methods.append(dict(method, tool_contexts=list(dict.fromkeys([*current, *names]))))
+        methods.append(dict(method, tool_contexts=list(dict.fromkeys([*current, *allowed]))))
     result = dict(config, methods=methods)
     if checkpoint:
         result["tool_contexts"] = [
@@ -244,7 +261,7 @@ def with_acon_budget(config, budget):
     benchmarks = [row["name"] for row in config["benchmarks"]
                   if row["name"] in BUDGET_TEXT_BENCHMARKS]
     if not benchmarks:
-        raise ValueError("ACON budget overlay requires BFCL, AppWorld or ACEBench Agent")
+        raise ValueError("ACON budget overlay requires BFCL, AppWorld, ACEBench Agent, tau2 or ToolSandbox")
     return dict(config, methods=[*config["methods"], {
         "method": "ACON-budget", "arm": arm.name, "group": "budget",
         "history_budget_tokens": budget, "benchmarks": benchmarks,
@@ -264,7 +281,7 @@ def with_hiagent_budget(config, budget):
     benchmarks = [row["name"] for row in config["benchmarks"]
                   if row["name"] in BUDGET_TEXT_BENCHMARKS]
     if not benchmarks:
-        raise ValueError("HiAgent budget overlay requires BFCL, AppWorld or ACEBench Agent")
+        raise ValueError("HiAgent budget overlay requires BFCL, AppWorld, ACEBench Agent, tau2 or ToolSandbox")
     return dict(config, methods=[*config["methods"], {
         "method": "HiAgent-budget", "arm": arm.name, "group": "budget",
         "history_budget_tokens": budget, "benchmarks": benchmarks,
@@ -290,6 +307,28 @@ def with_history_kv_budget(config, arm_name, target_tokens):
     return dict(config, methods=[*config["methods"], variant])
 
 
+def with_native_history_budget(config, arm_name, target_tokens):
+    """Add a BFCL native capacity variant, preserving the fixed-budget release."""
+    from benchmarks.arms import get_arm
+    budget = NativeHistoryBudget(target_tokens)
+    budget.validate_arm(get_arm(arm_name))
+    templates = [method for method in config["methods"]
+                 if method["arm"] == arm_name and "history_budget_tokens" not in method]
+    if len(templates) != 1:
+        raise ValueError(f"Native history budget requires one configured base arm: {arm_name}")
+    if any(method["arm"] == arm_name and method.get("history_budget_tokens") == target_tokens
+           for method in config["methods"]):
+        raise ValueError(f"Native budget cell already exists: {budget.variant_name(arm_name)}")
+    configured = {b["name"] for b in config["benchmarks"]}
+    scope = set(templates[0].get("benchmarks") or configured)
+    benchmarks = sorted(scope & configured & {"bfcl_base", "bfcl_long_context"})
+    if not benchmarks:
+        raise ValueError("Native history budget sweep currently requires BFCL")
+    variant = dict(templates[0], group="budget", history_budget_tokens=target_tokens,
+                   benchmarks=benchmarks)
+    return dict(config, methods=[*config["methods"], variant])
+
+
 def history_kv_budget_args(cell):
     """Use one resolved capacity on both closed-loop and replay proxy paths."""
     if "history_budget_tokens" not in cell:
@@ -304,6 +343,9 @@ def history_kv_budget_args(cell):
 
 
 def run_command(config, cell, directory, profile, stage="closed_loop"):
+    if is_subset(cell) and (stage != "closed_loop" or is_native_arm(cell["arm"])
+                            or cell["adapter"] not in {"bfcl", "acon_appworld"}):
+        raise ValueError("Task subsets require closed_loop non-native BFCL/AppWorld cells")
     if is_native_arm(cell["arm"]):
         cmd = [config["bench_python"], "-m", "benchmarks.paper.c1",
                "--config", str(profile.parent / "config.resolved.json"),
@@ -312,9 +354,12 @@ def run_command(config, cell, directory, profile, stage="closed_loop"):
                "--upstream", f"http://127.0.0.1:{config['server_port']}",
                "--proxy-port", str(config["proxy_port"]),
                "--out", str(directory), "--num-workers", "1"]
+        if "history_budget_tokens" in cell:
+            cmd += NativeHistoryBudget(cell["history_budget_tokens"]).cli_args()
         if cell.get("tool_memory"):
-            cmd += ["--tool-memory", cell["tool_memory"],
-                    "--tool-checkpoint", cell["tool_checkpoint"]]
+            cmd += ["--tool-memory", cell["tool_memory"]]
+            if cell["tool_memory"].startswith("t0:"):
+                cmd += ["--tool-checkpoint", cell["tool_checkpoint"]]
             if cell.get("tool_budget_tokens") is not None:
                 cmd += ["--tool-budget-tokens", str(cell["tool_budget_tokens"])]
         if stage == "common_prefix":
@@ -342,6 +387,8 @@ def run_command(config, cell, directory, profile, stage="closed_loop"):
             cmd += ["--tool-budget-tokens", str(cell["tool_budget_tokens"])]
     if cell["adapter"] == "bfcl":
         cmd += ["--categories", cell["category"]]
+        if is_subset(cell):
+            cmd += ["--run-ids", ",".join(cell["task_ids"])]
     elif cell["adapter"] == "tau2":
         from .tau2 import adapter_args
         cmd += adapter_args(config)
@@ -355,16 +402,20 @@ def run_command(config, cell, directory, profile, stage="closed_loop"):
         cmd += ["--toolsandbox-dir", config["toolsandbox_dir"],
                 "--bench-python", config.get("toolsandbox_python", config["bench_python"]),
                 "--ts-parallel", "1"]
-        scenarios = config.get("toolsandbox_scenarios") or []
-        if scenarios:
+        explicit = config.get("toolsandbox_scenarios") or []
+        suite = config.get("toolsandbox_suite")
+        scenarios = selected_scenarios(suite, explicit, require_paper_suite=True)
+        if suite == THREE_DISTRACTION_TOOLS_129 and not explicit:
+            cmd += ["--ts-suite", suite]
+        if scenarios is not None:
             cmd += ["--ts-scenarios", ",".join(scenarios)]
-        elif config.get("toolsandbox_suite") == "full":
-            cmd.append("--full")
         else:
-            raise ValueError("ToolSandbox paper cells require suite=full or explicit scenarios")
+            cmd.append("--full")
     else:
         cmd += ["--acon-dir", config["acon_dir"], "--bench-python", config["appworld_python"],
                 "--split", config["appworld_split"], "--max-iter", str(config["appworld_max_iter"])]
+        if is_subset(cell):
+            cmd += ["--task-ids", ",".join(cell["task_ids"])]
     return cmd
 
 
@@ -384,12 +435,26 @@ def extension_problem(existing, config, source, output):
     model-family flags for arms not yet run) is an extension; anything that touches an
     existing cell is a different experiment and needs a new output directory.
     """
+    if existing.get("task_subsets") != config.get("task_subsets"):
+        return "task subset scope changed; use a new output directory"
     old_cells = {row["cell_id"]: row for row in cells(existing)}
     new_cells = {row["cell_id"]: row for row in cells(config)}
     missing = sorted(set(old_cells) - set(new_cells))
     if missing:
         return f"cells removed: {missing[:3]}"
     if not (set(new_cells) - set(old_cells)):
+        # Registering an opt-in context without selecting it changes config
+        # metadata, but cannot change any existing cell or its command.
+        old_contexts = {item["name"]: item for item in existing.get("tool_contexts") or []}
+        new_contexts = {item["name"]: item for item in config.get("tool_contexts") or []}
+        if (old_contexts != new_contexts
+                and all(new_contexts.get(name) == item for name, item in old_contexts.items())
+                and {key: value for key, value in existing.items()
+                     if key not in {"tool_contexts", "sglang_source"}}
+                    == {key: value for key, value in config.items()
+                        if key not in {"tool_contexts", "sglang_source"}}
+                and all(old_cells[cell_id] == new_cells[cell_id] for cell_id in old_cells)):
+            return None
         return "no new cells"
     for key in DEPLOYMENT_KEYS:
         if key == "c1" and existing.get("c1") is None:
@@ -407,7 +472,8 @@ def extension_problem(existing, config, source, output):
         # the cell has no artifacts, after which it is frozen with them.
         has_artifacts = any((output / stage / cell_id).exists() for stage in ("closed_loop", "common_prefix"))
         for key in ("arm", "method", "ratio", "retention", "benchmark", "adapter", "category",
-                    "tool_context", "tool_memory", "tool_checkpoint", "history_budget_tokens"):
+                    "tool_context", "tool_memory", "tool_checkpoint", "tool_interface_policy",
+                    "history_budget_tokens"):
             if key == "method" and not has_artifacts:
                 continue
             if old.get(key) != new.get(key):
@@ -444,7 +510,13 @@ def _prepare_locked(config, output, source):
             continue
         explicit_budget = item.get("history_budget_tokens")
         if "history_budget_tokens" in item:
-            arm = HistoryKVBudget(explicit_budget).apply(arm)
+            if arm.native_controller:
+                NativeHistoryBudget(explicit_budget).validate_arm(arm)
+                if (not item.get("benchmarks") or
+                        not set(item["benchmarks"]) <= {"bfcl_base", "bfcl_long_context"}):
+                    raise ValueError("Native history budget sweep currently requires explicit BFCL scope")
+            else:
+                arm = HistoryKVBudget(explicit_budget).apply(arm)
         if is_candidate_arm(arm.name):
             if (item.get("ratio") != 8 or arm.ratio != 8
                     or arm.native_controller != "candidate_" + ARM_TO_VARIANT[arm.name]
@@ -506,16 +578,18 @@ def _prepare_locked(config, output, source):
         if arm.name in {"agentfold", "commitkv", "agentkv"}:
             if config.get("model_family", "qwen3-4b") != "qwen3-4b":
                 raise ValueError("AgentFold/CommitKV/AgentKV require model_family=qwen3-4b")
-    tool_contexts(config)   # validates names, specs and checkpoint fields
+    resolved_contexts = tool_contexts(config)   # validates names, specs and checkpoint fields
     for item in config["methods"]:
         for context_name in item.get("tool_contexts") or []:
             if context_name == RAW_TOOL_CONTEXT:
                 continue
             text_policy = getattr(get_arm(item["arm"]), "text_policy", "") or ""
-            if text_policy.startswith(("acon", "hiagent")):
+            if (text_policy.startswith(("acon", "hiagent"))
+                    and resolved_contexts[context_name]["interface_policy"] != "schema"):
                 raise ValueError(
                     f"{item['arm']} cannot take tool context {context_name!r}: "
-                    "ACON/HiAgent tool-memory composition is outside the supported matrix")
+                    "ACON/HiAgent require the schema interface policy")
+    matrix = cells(config)   # validate task scope before writing any prepared artifacts
     config = dict(config)
     config["sglang_source"] = str(source.resolve())
     resolved_path = output / "config.resolved.json"
@@ -556,14 +630,17 @@ def _prepare_locked(config, output, source):
                    "serving": "accepted portable benchmark, explicit complete-history document budget"}}}
     profile["serving"]["compatible"] = True
     profile_path = output / "deployment_profile.json"
-    matrix = cells(config)
     ids = [row["cell_id"] for row in matrix]
     if len(ids) != len(set(ids)):
         raise ValueError("The paper matrix contains duplicate cell ids")
     with io.StringIO(newline="") as handle:
         fields = ["cell_id", "benchmark", "method", "arm", "group", "ratio", "retention", "adapter", "category", "tool_context"]
+        if any("tool_interface_policy" in row for row in matrix):
+            fields.append("tool_interface_policy")
         if any("history_budget_tokens" in row for row in matrix):
             fields.append("history_budget_tokens")
+        if any(is_subset(row) for row in matrix):
+            fields.extend(["result_scope", "expected_subset_n", "whole_cell_score"])
         writer = csv.DictWriter(handle, fieldnames=fields, extrasaction="ignore")
         writer.writeheader()
         writer.writerows(matrix)
@@ -710,6 +787,8 @@ def _guard_method_actor(cell):
 
 
 def _unsupported_stage(stage, cell):
+    if stage != "closed_loop" and is_subset(cell):
+        return "repair subsets support closed_loop only; common-prefix replay is a separate cohort"
     if stage == "common_prefix" and cell["arm"] in {"agentkv", "commitkv"}:
         return ("Full teacher-forced assistant actions violate exact_generated_prefix; "
                 "use this arm's closed_loop telemetry, labelled as its own trajectory")
@@ -717,6 +796,12 @@ def _unsupported_stage(stage, cell):
 
 
 def execute(config, plan, output, source, stages, selected, port_offset=0):
+    _, unknown = _selected_plan(plan, selected)
+    if any(is_subset(cell) for cell in plan):
+        if unknown:
+            raise ValueError(f"Unknown task subset cells: {unknown}")
+        if any(stage != "closed_loop" for stage in stages):
+            raise ValueError("Task subsets require --stage closed_loop")
     config = with_port_offset(config, port_offset)
     profile_path = output / "deployment_profile.json"
     env = dict(os.environ)
@@ -746,6 +831,9 @@ def execute(config, plan, output, source, stages, selected, port_offset=0):
             _guard_checkpoint_serving_layout(config, cell)
             _guard_tool_context(cell)
             directory.mkdir(parents=True, exist_ok=True)
+            if is_subset(cell):
+                atomic_json(directory / "task_subset.json",
+                            subset_metadata(cell["cell_id"], cell["task_ids"]))
             atomic_json(directory / "started.json", {
                 "stage": stage, "cell": cell, "config": config,
                 "server_command": server_command(config, source, cell["arm"], cell["benchmark"], tool_checkpoint=cell.get("tool_checkpoint"), tool_memory=cell.get("tool_memory")),
@@ -834,7 +922,8 @@ def execute(config, plan, output, source, stages, selected, port_offset=0):
                 if run_failure is not None:
                     _, error, traceback = run_failure
                     raise error.with_traceback(traceback)
-                atomic_json(directory / "complete.json", {"finished_at": time.time()})
+                scope = finish_subset(cell, directory) if is_subset(cell) else {}
+                atomic_json(directory / "complete.json", {"finished_at": time.time(), **scope})
 
 
 def _selected_plan(plan, selected):
@@ -871,6 +960,11 @@ def _required_aggregate_artifacts(stage, cell, directory):
 def aggregate_results(config, plan, output, stages, selected):
     """Aggregate exactly the requested matrix slice and emit its coverage."""
     requested, unknown = _selected_plan(plan, selected)
+    if any(is_subset(cell, output / stage / cell["cell_id"])
+           for stage in stages for cell in requested):
+        raise RuntimeError("Repair subset scores are not whole-cell scores: merge preserved and "
+                           "repaired raw outcomes in a new directory and officially reevaluate "
+                           "the complete cohort before table aggregation")
     coverage_path = output / "aggregation_coverage.json"
     entries = []
     missing = []
@@ -969,8 +1063,18 @@ def main(argv=None):
     parser.add_argument("--output", type=Path)
     parser.add_argument("--stage", choices=["all", "closed_loop", "common_prefix"], default="all")
     parser.add_argument("--cells", default="", help="comma-separated exact cell ids")
+    parser.add_argument("--task-subset", action="append", default=[], metavar="CELL=id,...",
+                        help="repair only these task IDs; repeat for multiple non-native BFCL/AppWorld cells")
+    parser.add_argument("--task-subset-file", type=Path,
+                        help="JSON mapping exact CELL IDs to task ID lists; requires a separate output root")
     parser.add_argument("--candidate-arms", default="",
-                        help="explicit candidates: all or comma-separated static_t02,turn_c1,goal_rescue,dependency_first")
+                        help="explicit candidates: all or comma-separated "
+                             "static_t02,turn_c1,goal_rescue,dependency_first,"
+                             "request_contract,argument_binding,no_progress,"
+                             "goal_pending,goal_source,goal_progress,goal_joint; "
+                             "goal_verified,pending_verified,goal_static,pending_static,"
+                             "goal_verified_static,pending_verified_static "
+                             "require named opt-in")
     parser.add_argument("--candidate-benchmarks", default="bfcl_base",
                         help="candidate benchmark scope, comma-separated subset of "
                              "bfcl_base (default), bfcl_long_context, appworld, acebench_agent, tau2")
@@ -980,6 +1084,8 @@ def main(argv=None):
                         help="add budget-adapted HiAgent full BFCL/ACEBench cells with this actor history cap")
     parser.add_argument("--history-kv-budget", action="append", default=[], metavar="ARM=TOKENS",
                         help="add a history-KV capacity cell, e.g. commitkv=768; repeat for a sweep")
+    parser.add_argument("--native-history-budget", action="append", default=[], metavar="ARM=TOKENS",
+                        help="add a native C2KV BFCL history-capacity cell; repeat for a sweep")
     parser.add_argument("--tool-contexts", default="",
                         help="add named tool contexts to history/recovery methods, preserving raw cells")
     parser.add_argument("--tool-checkpoint", type=Path,
@@ -988,6 +1094,8 @@ def main(argv=None):
                         help="shift server/proxy ports for concurrent single-GPU runners on one host")
     args = parser.parse_args(argv)
     config = json.loads(args.config.read_text())
+    if args.action == "aggregate" and (args.task_subset or args.task_subset_file):
+        parser.error("aggregate reads the frozen task scope; task-subset options are for prepare/run")
     if args.action != "aggregate":
         config = with_candidate_methods(
             config, parse_candidate_arms(args.candidate_arms),
@@ -996,8 +1104,13 @@ def main(argv=None):
         config = with_hiagent_budget(config, args.hiagent_budget_tokens)
         for value in args.history_kv_budget:
             config = with_history_kv_budget(config, *parse_history_kv_budget(value))
+        for value in args.native_history_budget:
+            config = with_native_history_budget(config, *parse_native_history_budget(value))
         config = with_tool_contexts(config, list(filter(None, args.tool_contexts.split(","))),
                                     args.tool_checkpoint)
+        config = with_task_subsets(config, args.task_subset, args.task_subset_file)
+        if args.action == "run" and "task_subsets" in config and args.stage != "closed_loop":
+            parser.error("Task subsets require --stage closed_loop")
     output = args.output or Path(config["output_root"])
     source = args.sglang_source.resolve()
     if args.action == "aggregate":
@@ -1006,7 +1119,8 @@ def main(argv=None):
     else:
         plan, _ = prepare(config, output, source)
     if args.action == "prepare":
-        print(json.dumps({"matrix": str(output / "matrix.csv"), "closed_loop_cells": len(plan), "replay_cells": len(plan)}, indent=2))
+        print(json.dumps({"matrix": str(output / "matrix.csv"), "closed_loop_cells": len(plan),
+                          "replay_cells": sum(not is_subset(cell) for cell in plan)}, indent=2))
     elif args.action == "run":
         stages = ["closed_loop", "common_prefix"] if args.stage == "all" else [args.stage]
         execute(config, plan, output, source, stages, set(filter(None, args.cells.split(","))),

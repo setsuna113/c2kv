@@ -190,7 +190,7 @@ def preflight_sglang_backend(
     }
 
 
-def build_profile(args: argparse.Namespace) -> tuple[dict, dict]:
+def _build_profile_unbudgeted(args: argparse.Namespace) -> tuple[dict, dict]:
     """Keep D3-hybrid, compatibility Prefill, and trained risk modes distinct."""
     if getattr(args, "candidate_algorithm", None) is not None:
         import candidate_algorithms
@@ -333,6 +333,30 @@ def build_profile(args: argparse.Namespace) -> tuple[dict, dict]:
     }
 
 
+def _history_budget_override(args: argparse.Namespace, design: dict | None = None) -> dict | None:
+    tokens = getattr(args, "history_budget_tokens", None)
+    if tokens is None:
+        return None
+    if args.method == "c2kv_native":
+        raise ValueError("--history-budget-tokens does not support c2kv_native_r4 static packing")
+    if args.benchmark != "bfcl":
+        raise ValueError("--history-budget-tokens currently supports BFCL only")
+    import history_budget
+
+    return history_budget.resolve_override(
+        tokens, args.checkpoint, design or current.load_config(), RUNTIME, args.out,
+    )
+
+
+def build_profile(args: argparse.Namespace) -> tuple[dict, dict]:
+    """Return the selected controller and an optional native budget contract."""
+    override = _history_budget_override(args)
+    controller, profile = _build_profile_unbudgeted(args)
+    if override is not None:
+        profile["native_history_budget"] = override
+    return controller, profile
+
+
 def _identities(args: argparse.Namespace) -> list[str]:
     if args.benchmark == "bfcl":
         values = args.task_id
@@ -413,6 +437,14 @@ def portable_worker_command(args: argparse.Namespace, task: str, task_out: Path)
 
 def commands_for_task(args: argparse.Namespace, task: str, controller_path: Path) -> tuple[list[str], list[str]]:
     design = current.load_config()
+    override = _history_budget_override(args, design)
+    if override is not None:
+        import history_budget
+
+        # A normal run has already created --out. A preview keeps it untouched.
+        if args.out.is_dir() and not getattr(args, "preview", False):
+            history_budget.materialize(override)
+        design["runtime"]["eval_policy"] = override["override_eval_policy_path"]
     design["ratio"] = effective_ratio(args, design)
     design["candidate_id"] = _model_name(args)
     design["run_id_template"] = design["candidate_id"]
@@ -549,7 +581,9 @@ def summarize_task(benchmark: str, task: str, task_out: Path, official: Mapping[
     candidate_decisions = [
         decision for decision in decisions
         if decision.get("version") in {
-            "c2kv-paper-candidates-v1", "c2kv-source-repair-v1"}
+            "c2kv-paper-candidates-v1", "c2kv-source-repair-v1",
+            "c2kv-goal-composition-v1", "c2kv-verified-binding-v1",
+            "c2kv-initial-view-composition-v1"}
     ]
     candidate_traces = [
         trace for trace in traces
@@ -871,7 +905,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--candidate-algorithm",
         choices=("static_t02", "turn_c1", "goal_rescue", "dependency_first",
-                 "request_contract", "argument_binding", "no_progress"),
+                 "request_contract", "argument_binding", "no_progress",
+                 "goal_pending", "goal_source", "goal_progress", "goal_joint",
+                 "goal_verified", "pending_verified", "goal_static", "pending_static",
+                 "goal_verified_static", "pending_verified_static"),
         default=None,
     )
     parser.add_argument("--selector-artifact", type=Path,
@@ -905,11 +942,20 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--tool-memory", default="none")
     parser.add_argument("--tool-checkpoint", type=Path)
     parser.add_argument("--tool-budget-tokens", type=int)
+    parser.add_argument("--history-budget-tokens", type=int,
+                        help="Override both native C2KV history and workspace byte caps using checkpoint KV geometry")
     parser.add_argument("--preview", action="store_true", help="Print commands without model, harness, or network calls")
     return parser
 
 
 def validate_args(args: argparse.Namespace) -> list[str]:
+    budget_tokens = getattr(args, "history_budget_tokens", None)
+    if budget_tokens is not None and (type(budget_tokens) is not int or budget_tokens <= 0):
+        raise ValueError("--history-budget-tokens must be a positive integer")
+    if budget_tokens is not None and args.method == "c2kv_native":
+        raise ValueError("--history-budget-tokens does not support c2kv_native_r4 static packing")
+    if budget_tokens is not None and args.benchmark != "bfcl":
+        raise ValueError("--history-budget-tokens currently supports BFCL only")
     if args.tool_memory == "none":
         if args.tool_checkpoint is not None or args.tool_budget_tokens is not None:
             raise ValueError("Tool options require --tool-memory")
@@ -917,9 +963,15 @@ def validate_args(args: argparse.Namespace) -> list[str]:
         if args.tool_checkpoint is None or not (args.tool_checkpoint / "config.json").is_file():
             raise ValueError("T0 tool memory requires a local --tool-checkpoint")
     else:
-        raise ValueError(
-            "Global H2O/SnapKV selection across disjoint visible tool spans is not implemented"
-        )
+        from benchmarks.memory_runtime.event_native_tool import parse_native_tool_spec
+
+        spec = parse_native_tool_spec(args.tool_memory)
+        if spec is None or spec.encoder == "t0" or spec.interface_policy != "schema":
+            raise ValueError(
+                "Global H2O/SnapKV selection across disjoint visible tool spans is not implemented"
+            )
+        if args.tool_checkpoint is not None:
+            raise ValueError("Raw-KV tool memory does not use --tool-checkpoint")
     if args.tool_budget_tokens is not None and args.tool_budget_tokens <= 0:
         raise ValueError("--tool-budget-tokens must be positive")
     identities = _identities(args)

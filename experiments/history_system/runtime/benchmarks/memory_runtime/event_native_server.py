@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import json
 import math
@@ -27,6 +28,12 @@ from .event_native_costs import read_event_native_steps, summarize_event_native_
 
 
 GENERATION_BACKENDS = ('native', 'sglang')
+
+
+def _stop_for_health(health):
+    # A finite decision cap is a task outcome. Keep serving its typed 429
+    # until the official harness finishes or the owner stops this process.
+    return health['terminal'] and health['terminal_reason'] != 'decision_cap_reached'
 
 
 def _route_kwargs(source_profile, view_mode, compression_policy, history_view_protocol):
@@ -155,6 +162,40 @@ def _controller_requires_sglang(config):
         'post_draft_recovery' in config or 'gp_experiments' in config
         or 'candidate_algorithm' in config
     )
+
+
+def _candidate_ready_contract(candidate):
+    from .candidate_algorithms import (
+        GOAL_VARIANTS, GOAL_VERSION, INITIAL_VIEW_VARIANTS,
+        INITIAL_VIEW_VERSION, REPAIR_VARIANTS, VERIFIED_VARIANTS,
+        VERIFIED_VERSION,
+    )
+
+    variant = candidate['variant']
+    if variant in VERIFIED_VARIANTS:
+        version = VERIFIED_VERSION
+    elif variant in INITIAL_VIEW_VARIANTS:
+        version = INITIAL_VIEW_VERSION
+    elif variant in GOAL_VARIANTS:
+        version = GOAL_VERSION
+    elif variant in REPAIR_VARIANTS:
+        version = 'c2kv-source-repair-v1'
+    else:
+        version = 'c2kv-paper-candidates-v1'
+    identity = {
+        'variant': variant, 'stable_call_ids': True,
+        'recovery_rounds_per_decision': 1,
+    }
+    if variant in INITIAL_VIEW_VARIANTS:
+        identity.update(
+            initial_view=copy.deepcopy(candidate['initial_view']),
+            recovery_backbone=candidate['recovery_backbone'],
+        )
+    if (variant in VERIFIED_VARIANTS
+            or candidate.get('recovery_backbone') in VERIFIED_VARIANTS):
+        from .candidate_algorithms.verified_binding import PROOF_REGISTRY_VERSION
+        identity['proof_registry_version'] = PROOF_REGISTRY_VERSION
+    return identity, version + ':' + variant
 
 
 def _normalize_sglang_url(value):
@@ -339,7 +380,8 @@ def _serve(args):
     generation_backend = _validate_generation_backend(args, s0_config=s0_config)
     from .event_native_tool import parse_native_tool_spec
     tool_spec = parse_native_tool_spec(getattr(args, 'tool_memory', None))
-    if tool_spec is not None and tool_spec.encoder != 't0':
+    if (tool_spec is not None and tool_spec.encoder != 't0'
+            and tool_spec.interface_policy != 'schema'):
         raise ValueError(
             'Global H2O/SnapKV selection across disjoint visible tool spans is not implemented'
         )
@@ -352,7 +394,8 @@ def _serve(args):
         raise ValueError('T0 tool memory requires --tool-checkpoint')
     if tool_spec is not None and tool_spec.encoder != 't0' and getattr(args, 'tool_checkpoint', None) is not None:
         raise ValueError('Raw-KV tool memory does not use --tool-checkpoint')
-    if tool_spec is not None and tool_spec.encoder != 't0' and tool_spec.layout != 'uniform':
+    if (tool_spec is not None and tool_spec.encoder != 't0' and tool_spec.layout != 'uniform'
+            and tool_spec.interface_policy != 'schema'):
         raise ValueError('Raw-KV native tool memory currently requires a uniform catalog')
     if getattr(args, 'benchmark', None) == 'acebench' and args.view_mode in {
         'ac_gist_static', 'ac_native_s0_lexical_raw_reserve_failed_operation',
@@ -491,17 +534,10 @@ def _serve(args):
                             history_view_protocol))
         if isinstance(s0_config, dict) and 'candidate_algorithm' in s0_config:
             candidate = s0_config['candidate_algorithm']
-            from .candidate_algorithms import REPAIR_VARIANTS
-            if candidate['variant'] in REPAIR_VARIANTS:
-                version = 'c2kv-source-repair-v1'
-            else:
-                version = 'c2kv-paper-candidates-v1'
-            manifest['candidate_algorithm'] = {
-                'variant': candidate['variant'], 'stable_call_ids': True,
-                'recovery_rounds_per_decision': 1,
-            }
+            candidate_identity, baseline_identity = _candidate_ready_contract(candidate)
+            manifest['candidate_algorithm'] = candidate_identity
             manifest['route_contract'].update(
-                baseline_identity=version + ':' + candidate['variant'],
+                baseline_identity=baseline_identity,
                 recovery_enabled=True, max_generations_per_decision=2)
         shadow_feature_config, shadow_contract = _shadow_feature_configuration(args, tokenizer)
         generator, profile = _build_generator(
@@ -573,7 +609,7 @@ def _serve(args):
                           'ready_file': str((args.out / 'ready.json').resolve())}), flush=True)
         while not stop_requested and time.monotonic() < deadline:
             health = api.health()
-            if health['terminal'] or health['decisions_reserved'] >= args.max_decisions:
+            if _stop_for_health(health):
                 break
             server.handle_request()
         health = api.health()

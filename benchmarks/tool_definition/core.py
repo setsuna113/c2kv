@@ -15,6 +15,7 @@ from typing import Any, Mapping, Sequence
 
 from benchmarks import toolmemory
 
+FULL_CONTROL_POLICY = "unmodified_full_v1"
 RUNTIME_PYTHON = Path(__file__).resolve().parents[2] / "experiments" / "history_system" / "runtime" / "python"
 
 
@@ -82,9 +83,11 @@ def random_rank(count: int, *, seed: int, decision_id: str) -> tuple[int, ...]:
     return tuple(order)
 
 
-def _render(messages: Sequence[Mapping[str, Any]], native_tools: Sequence[Any], tokenizer: Any):
+def _render(messages: Sequence[Mapping[str, Any]], native_tools: Sequence[Any],
+            tokenizer: Any, *, protocol: str | None = None):
     _, _, _, _, native_ids = runtime_modules()
-    protocol = toolmemory.protocol_block(native_tools)
+    if protocol is None:
+        protocol = toolmemory.protocol_block(native_tools)
     visible = toolmemory.with_protocol_system(messages, protocol)
     full_ids = native_ids(tokenizer, visible, generation=True)
     system = []
@@ -106,6 +109,7 @@ def _render(messages: Sequence[Mapping[str, Any]], native_tools: Sequence[Any], 
 def pack_layout(
     row: Mapping[str, Any], tokenizer: Any, *, layout: str, ratio: int,
     k: int = 3, seed: int = 42, native_override: Sequence[int] | None = None,
+    interface_policy: str = "none",
 ) -> dict[str, Any]:
     """Pack Full, T0, or a selected native subset on the same visible prefix."""
     EventStore, EncoderChunk, MemoryView, PackedMemory, native_ids = runtime_modules()
@@ -121,6 +125,8 @@ def pack_layout(
         raise ValueError("tools must be a nonempty list of objects")
     if ratio not in toolmemory.SUPPORTED_RATIOS:
         raise ValueError("T0 ratio must be 8 or 12")
+    spec = toolmemory.ToolMemorySpec(ratio=ratio, interface_policy=interface_policy)
+    spec.validate()
     if layout not in {"full", "uniform", "hybrid", "random", "retrieval"}:
         raise ValueError("unknown tool layout")
     snapshots = [toolmemory.tool_snapshot(item) for item in tools]
@@ -138,16 +144,28 @@ def pack_layout(
     if len(set(native)) != len(native) or any(not 0 <= index < len(tools) for index in native):
         raise ValueError("native indices are invalid")
     native_set = set(native)
-    compressed = tuple(index for index in range(len(tools)) if index not in native_set)
+    remaining = tuple(index for index in range(len(tools)) if index not in native_set)
+    compressed = remaining
     if layout in {"full", "retrieval"}:
         compressed = ()
-    prefix, workspace = _render(messages, [snapshots[index] for index in native], tokenizer)
+    native_tools = [snapshots[index] for index in native]
+    # Full is the uncompressed control. Interface copies belong only to
+    # compressed/retrieved layouts and must not inflate the Full denominator.
+    if interface_policy == "schema" and layout != "full":
+        interfaces = toolmemory.executable_interfaces(
+            snapshots, (), remaining, native, len(snapshots), spec)
+        protocol, _ = toolmemory.protocol_with_interfaces(
+            native_tools, interfaces, structured=True, label_indices=True)
+        prefix, workspace = _render(messages, native_tools, tokenizer, protocol=protocol)
+    else:
+        prefix, workspace = _render(messages, native_tools, tokenizer)
     chunks = ()
     if compressed:
-        spec = toolmemory.ToolMemorySpec(ratio=ratio)
         source_chunks = toolmemory.document_chunks(
             lambda value: native_ids(tokenizer, value),
-            toolmemory.t0_documents(snapshots, compressed), spec,
+            (toolmemory.description_documents(snapshots, compressed)
+             if interface_policy == "schema" else
+             toolmemory.t0_documents(snapshots, compressed)), spec,
         )
         chunks = tuple(EncoderChunk(chunk.event_id, chunk.part_index, (),
                                     chunk.source_token_start, chunk.source_token_end,
@@ -156,7 +174,7 @@ def pack_layout(
     view = MemoryView((), tuple(event.event_id for event in store.events))
     memory = PackedMemory(view, prefix, workspace, tuple(range(len(messages))), chunks)
     costs = memory.costs(ratio)
-    return {
+    result = {
         "decision_id": decision_id, "session_key": store.session_id,
         "source": row.get("source", "recorded_decision"), "layout": layout,
         "ratio": ratio, "k": k if layout in {"hybrid", "random", "retrieval"} else None,
@@ -170,21 +188,29 @@ def pack_layout(
             allow_nan=False).encode("utf-8")).hexdigest(),
         "tool_names": [toolmemory.tool_name(tool) for tool in snapshots],
     }
+    if interface_policy != "none":
+        result["interface_policy"] = interface_policy
+        result["interface_render_profile"] = toolmemory.INTERFACE_RENDER_PROFILE
+        result["full_control_policy"] = FULL_CONTROL_POLICY
+    return result
 
 
 def retrieval_layout(row: Mapping[str, Any], tokenizer: Any, *, ratio: int,
-                     allowance_tokens: int, k: int = 3) -> dict[str, Any]:
+                     allowance_tokens: int, k: int = 3,
+                     interface_policy: str = "none") -> dict[str, Any]:
     """Admit lexical-ranked schemas while the total resident KV fits hybrid."""
     chosen: list[int] = []
     rank = toolmemory.lexical_rank(row["tools"], toolmemory.query_text(row["messages"]))
     for index in rank:
         candidate = sorted([*chosen, index])
         packed = pack_layout(row, tokenizer, layout="retrieval", ratio=ratio,
-                             k=k, native_override=candidate)
+                             k=k, native_override=candidate,
+                             interface_policy=interface_policy)
         if packed["resident_kv_tokens"] <= allowance_tokens:
             chosen = candidate
     result = pack_layout(row, tokenizer, layout="retrieval", ratio=ratio,
-                         k=k, native_override=chosen)
+                         k=k, native_override=chosen,
+                         interface_policy=interface_policy)
     result["allowance_tokens"] = allowance_tokens
     return result
 

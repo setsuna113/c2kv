@@ -98,6 +98,7 @@ import history_methods
 import agentfold
 import raw_actor_history
 import toolmemory
+import toolmemory_joint
 from model_identity import require_qwen3_4b
 from arms import Arm, get_arm, history_kv_spec, kv_reuse_spec  # type: ignore
 from history_budget import HistoryKVBudget
@@ -234,13 +235,19 @@ class UpstreamError(RuntimeError):
 
 def _post_json(path: str, payload: Dict[str, Any],
                timeout: int, retries: int = 2) -> Any:
-    """POST JSON to UPSTREAM, retrying 5xx/network failures with backoff.
+    """POST JSON with bounded retries except for session generation.
 
     4xx (except 429) are deterministic client errors and are not retried.
+    A session generation can commit KV before its response is lost. Without
+    server-side idempotency, replaying that request would append the old
+    prefix to an advanced session. Surface its first failure to the owner.
     The final failure raises UpstreamError with the upstream body.  Note
     the SGLang stack reports many failures as HTTP 200 with error bodies —
     those are classified by the backend (BackendError), not here.
     """
+    session = payload.get("session_params")
+    if isinstance(session, dict) and session.get("id"):
+        retries = 0
     body = json.dumps(payload).encode("utf-8")
     last: Optional[UpstreamError] = None
     for attempt in range(retries + 1):
@@ -374,7 +381,8 @@ def _assemble_request(messages: List[Dict[str, Any]], arm: Arm, timeout: int = 6
     Without ``--tool-memory`` this is exactly ``_assemble``. Structured tool
     carriers use the system prefix; source-annotated definitions are attached
     to the assembled message (raw or retained history document) that contains
-    their placeholder. A source removed by history selection fails explicitly.
+    their placeholder. With the schema policy, a source removed or rewritten by
+    history selection keeps its already-extracted full document at the prefix.
     """
     plan = getattr(_TRACE, "tool_plan", None)
     if plan is not None and plan.protocol:
@@ -385,27 +393,130 @@ def _assemble_request(messages: List[Dict[str, Any]], arm: Arm, timeout: int = 6
                             track_source_indices=bool(anchors) or raw_schema_plan)
     if isinstance(plan, toolmemory.ToolMemoryPlan):
         source_out_indices = None
+        carriers = plan.carriers()
+        prefix_fallbacks = set(plan.info.get("pre_text_source_prefix_indices") or ())
         if anchors:
             assembled_indices = counts.pop("_tool_source_out_indices")
             source_out_indices = {}
-            for anchor in anchors:
+            for carrier in carriers:
+                metadata = carrier[toolmemory.CARRIER_MARK]
+                anchor = metadata.get("anchor")
+                if anchor is None:
+                    continue
                 rewritten_index = anchor["rewritten_message_index"]
-                if rewritten_index not in assembled_indices:
-                    raise toolmemory.ToolMemoryError(
-                        "tool_anchor_evicted",
-                        f"visible {anchor['source']} definition in message "
-                        f"{anchor['message_index']} has no retained history representation")
-                source_out_indices[anchor["message_index"]] = assembled_indices[rewritten_index]
+                output_index = assembled_indices.get(rewritten_index)
+                content = (out[output_index].get("content")
+                           if output_index is not None else None)
+                if (output_index is None or (plan.spec.interface_policy == "schema"
+                        and (not isinstance(content, str)
+                             or anchor["placeholder"] not in content))):
+                    if plan.spec.interface_policy != "schema":
+                        raise toolmemory.ToolMemoryError(
+                            "tool_anchor_evicted",
+                            f"visible {anchor['source']} definition in message "
+                            f"{anchor['message_index']} has no retained history representation")
+                    metadata["anchor"] = None
+                    prefix_fallbacks.add(anchor["catalog_index"])
+                else:
+                    source_out_indices[anchor["message_index"]] = output_index
         out, counts = toolmemory.insert_carriers(
-            out, counts, plan.carriers(), source_out_indices=source_out_indices)
+            out, counts, carriers, source_out_indices=source_out_indices)
+        if plan.spec.interface_policy == "schema":
+            plan.info["source_prefix_fallback_indices"] = sorted(prefix_fallbacks)
+            plan.info["n_source_prefix_fallbacks"] = len(prefix_fallbacks)
         counts["tool_memory"] = plan.info
     elif plan is not None:
         assembled_indices = counts.pop("_tool_source_out_indices")
-        plan.assembled_schema_spans = tuple(
-            {**span, "message_index": assembled_indices[span["message_index"]]}
-            for span in plan.raw_schema_spans)
+        retained = []
+        omitted = list(plan.info.get("pre_text_source_omitted_schema_indices") or ())
+        for span in plan.raw_schema_spans:
+            output_index = assembled_indices.get(span["message_index"])
+            content = out[output_index].get("content") if output_index is not None else None
+            if (output_index is None or not isinstance(content, str)
+                    or content[span["start"]:span["end"]] != span["text"]):
+                if plan.spec.interface_policy != "schema":
+                    raise toolmemory.ToolMemoryError(
+                        "raw_schema_assembly", "history assembly moved a raw tool schema")
+                omitted.append(span["schema_index"])
+                continue
+            retained.append({**span, "message_index": output_index})
+        plan.assembled_schema_spans = tuple(retained)
+        if plan.spec.interface_policy == "schema":
+            plan.info["omitted_history_schema_indices"] = sorted(omitted)
+            plan.info["n_omitted_history_schemas"] = len(omitted)
+            if arm.history_kv:
+                plan.info["joint_history_assembly"] = True
+                plan.info["joint_tool_target_tokens_per_layer"] = int(
+                    plan.info["matched_resident_tool_tokens"])
         counts["tool_memory"] = plan.info
     return out, counts
+
+
+def _text_source_tool_plan(payload: Dict[str, Any], arm: Arm):
+    """Extract annotated tool docs before a text-history policy rewrites them."""
+    if (TOOL_MEMORY is None or TOOL_MEMORY.spec.interface_policy != "schema"
+            or not arm.text_policy or not payload.get(toolmemory.TOOL_SPANS_FIELD)):
+        return payload, None
+    planning = dict(payload)
+    if arm.text_policy == "hiagent_full":
+        tools = list(payload.get("tools") or [])
+        if any((tool.get("function") or {}).get("name") == textarms.HIAGENT_RETRIEVE_TOOL_NAME
+               for tool in tools):
+            raise ValueError("benchmark tool name collides with HiAgent's internal retrieval tool")
+        planning["tools"] = tools + [textarms.hiagent_retrieval_tool()]
+    plan = TOOL_MEMORY.plan(planning)
+    if plan is None:
+        return payload, None
+    stripped = dict(payload)
+    stripped["messages"] = toolmemory.remove_visible_spans(
+        payload["messages"], plan.source_spans, range(len(plan.source_spans)))
+    stripped.pop(toolmemory.TOOL_SPANS_FIELD, None)
+    return stripped, plan
+
+
+def _finish_text_source_tool_plan(payload: Dict[str, Any], plan):
+    """Put protected interfaces on the actor side of the history transform."""
+    messages = toolmemory.with_protocol_system(payload["messages"], plan.protocol)
+    original_system = plan.messages[0]["content"]
+    updated_system = messages[0]["content"]
+    old_start = original_system.rfind(plan.protocol)
+    new_start = updated_system.rfind(plan.protocol)
+    if old_start < 0 or new_start < 0:
+        raise toolmemory.ToolMemoryError("interface_assembly", "protected tool protocol is missing")
+    delta = new_start - old_start
+    if isinstance(plan, toolmemory.VisibleToolPlan):
+        def in_protocol(span):
+            return (span["message_index"] == 0 and span["start"] >= old_start
+                    and span["end"] <= old_start + len(plan.protocol))
+        plan.info["pre_text_source_omitted_schema_indices"] = sorted(
+            set(plan.info.get("pre_text_source_omitted_schema_indices") or ())
+            | {span["schema_index"] for span in plan.raw_schema_spans
+               if not in_protocol(span)})
+        plan.raw_schema_spans = tuple(
+            {**span, "start": span["start"] + delta, "end": span["end"] + delta}
+            for span in plan.raw_schema_spans if in_protocol(span))
+        if "tool_protocol_span" in plan.info:
+            span = plan.info["tool_protocol_span"]
+            plan.info["tool_protocol_span"] = {
+                **span, "start": span["start"] + delta, "end": span["end"] + delta}
+        plan.info["target_resident_tokens_per_layer"] = (
+            len(TOOL_MEMORY.tokenizer.native_ids(messages, generation=True))
+            + int(plan.info["reference_tool_gist_tokens"]))
+    plan.interface_spans = tuple(
+        {**span, "start": span["start"] + delta, "end": span["end"] + delta}
+        for span in plan.interface_spans)
+    plan.info["protected_interface_spans"] = list(plan.interface_spans)
+    prefixed = sorted(set(plan.info.get("pre_text_source_prefix_indices") or ())
+                      | {anchor["catalog_index"] for anchor in plan.carrier_anchors or []})
+    plan.carrier_anchors = []
+    plan.info["pre_text_source_prefix_indices"] = prefixed
+    plan.info["source_history_order"] = "tool_documents_before_text_history"
+    plan.info["source_history_placement"] = (
+        "compressed_source_chunks_at_prefix"
+        if isinstance(plan, toolmemory.ToolMemoryPlan)
+        else "protected_interfaces_at_prefix")
+    plan.messages = messages
+    return dict(payload, messages=messages)
 
 
 def _history_cutoff(messages: List[Dict[str, Any]]) -> int:
@@ -1189,6 +1300,8 @@ def _apply_text_arm(payload: Dict[str, Any], arm, conv: str,
             retrieve_subgoals=retrieve_subgoals,
             environment_action_format=(
                 "native_tool_call" if payload.get("tools") else "python_content"))
+        if retrieval_feedback:
+            out.append(hiagent_budget._feedback_message(retrieval_feedback))
     else:
         parts = arm.text_policy.split("_", 2)
         if len(parts) < 2 or parts[0] != "acon" or parts[1] not in ("hist", "obs"):
@@ -1260,9 +1373,22 @@ def _hiagent_retrieval_loop(original_payload, arm, conv, data, stats, send):
             staged, updated = _apply_text_arm(
                 original_payload, arm, conv, sorted(retrieved), retrieval_feedback=feedback)
         else:
-            retrieved = requested
-        if updated.get("invalid_retrieval_subgoals"):
-            raise ValueError(f"HiAgent requested nonexistent completed subgoals: {updated['invalid_retrieval_subgoals']}")
+            retrieved = set(updated.get("retrieved_subgoals", sorted(requested)))
+        invalid = updated.get("invalid_retrieval_subgoals") or []
+        if invalid:
+            # Keep the invalid model action visible in request telemetry, but
+            # let the actor repair it within the existing four-round limit.
+            stats.setdefault("invalid_retrieval_attempts", []).append({
+                "requested_subgoals": sorted(set(ids)),
+                "invalid_subgoals": sorted(invalid),
+            })
+            for key, value in (updated.get("compressor_usage") or {}).items():
+                stats.setdefault("compressor_usage", {}).setdefault(key, 0)
+                stats["compressor_usage"][key] += value
+            stats["n_compressor_calls"] += int(updated.get("n_compressor_calls") or 0)
+            staged, updated = _apply_text_arm(
+                original_payload, arm, conv, sorted(retrieved),
+                retrieval_feedback=hiagent_budget.INVALID_SUBGOAL_FEEDBACK)
         for key, value in (updated.get("compressor_usage") or {}).items():
             stats.setdefault("compressor_usage", {}).setdefault(key, 0)
             stats["compressor_usage"][key] += value
@@ -1668,21 +1794,28 @@ class ProxyHandler(BaseHTTPRequestHandler):
                         f"{ARM.name} requires c2kv_measurement_session_id for stable episode state")
                 if ARM.name in {"commitkv", "agentkv"}:
                     messages = raw_actor_history.state_for(conv).prepare(messages)
+                text_source_payload, pre_text_plan = payload, None
                 if getattr(ARM, "text_policy", None):
-                    payload, text_stats = _apply_text_arm(payload, ARM, conv)
+                    with _phase("tool_memory"):
+                        text_source_payload, pre_text_plan = _text_source_tool_plan(payload, ARM)
+                    payload, text_stats = _apply_text_arm(text_source_payload, ARM, conv)
                     messages = payload["messages"]
                 # Tool-definition memory runs after the text arm so the FINAL
                 # tool list (HiAgent adds its retrieval tool) is what gets
                 # compressed; without --tool-memory this block is inert.
-                _TRACE.tool_plan = None
+                _TRACE.tool_plan = pre_text_plan
                 _TRACE.tool_canonical_source = None
                 if TOOL_MEMORY is not None:
                     canonical_source = {
-                        "messages": toolmemory.tool_snapshot(payload.get("messages") or []),
+                        "messages": toolmemory.tool_snapshot(
+                            (original_payload if pre_text_plan is not None else payload).get("messages") or []),
                         "tools": toolmemory.tool_snapshot(payload.get("tools") or []),
                     }
-                    with _phase("tool_memory"):
-                        _TRACE.tool_plan = TOOL_MEMORY.plan(payload)
+                    if pre_text_plan is None:
+                        with _phase("tool_memory"):
+                            _TRACE.tool_plan = TOOL_MEMORY.plan(payload)
+                    else:
+                        payload = _finish_text_source_tool_plan(payload, pre_text_plan)
                     if _TRACE.tool_plan is not None:
                         _TRACE.tool_canonical_source = canonical_source
                         payload = dict(payload, messages=_TRACE.tool_plan.messages)
@@ -1769,6 +1902,21 @@ class ProxyHandler(BaseHTTPRequestHandler):
                                  "kv_reuse": reuse_ctx})
                 else:
                     out_payload = BACKEND.prepare_chat(staged, ARM, plan)
+                joint_tool_hint = ((staged.get("c2kv_kv_memory_hint") or {})
+                                   .get("tool_kv_eviction") or {})
+                raw_tool_plan = getattr(_TRACE, "tool_plan", None)
+                history_carriers = any(
+                    message.get("c2kv_key_hash") or message.get("c2kv_repair_only_key_hashes")
+                    for message in staged.get("messages") or [])
+                if (BACKEND.name == "sglang" and isinstance(raw_tool_plan,
+                        toolmemory.VisibleToolPlan)
+                        and raw_tool_plan.spec.interface_policy == "schema"
+                        and (raw_tool_plan.info.get("joint_history_assembly")
+                             or history_carriers)):
+                    out_payload = toolmemory_joint.prepare_joint_raw_tool_history(
+                        staged, out_payload, raw_tool_plan,
+                        TOOL_MEMORY.tokenizer, BACKEND,
+                        source_messages=(raw_tool_plan.messages if history_carriers else None))
                 if BACKEND.name == "sglang":
                     # Measurement-only message boundaries.  The server owns
                     # chat-template tokenization and resolves the exact token
@@ -1778,8 +1926,22 @@ class ProxyHandler(BaseHTTPRequestHandler):
                         out_messages, counts
                     )
                     hint = dict(out_payload.get("c2kv_kv_memory_hint") or {})
-                    if counts.get("history_kv_event_messages"):
-                        hint["history_kv_event_messages"] = counts["history_kv_event_messages"]
+                    joint_tool_carrier = (isinstance(hint.get("joint_tool_memory"), dict)
+                        and hint["joint_tool_memory"].get("selection_backend")
+                            == "sglang_global_tool_repair"
+                        and len(out_payload.get("messages") or []) > 1
+                        and out_payload["messages"][1].get("c2kv_region") == "tool")
+                    if joint_tool_carrier:
+                        history_start += int(history_start >= 1)
+                        history_end += int(history_end >= 1)
+                    history_backend = ((history_ctx or {}).get("spec") or {}).get("backend")
+                    if counts.get("history_kv_event_messages") and history_backend != "repair_extract":
+                        events = list(counts["history_kv_event_messages"])
+                        if joint_tool_carrier and len(out_payload["messages"]) == len(events) + 1:
+                            events.insert(1, {"role": "user", "phase": "others"})
+                            events = [{**event, "message_index": index}
+                                      for index, event in enumerate(events)]
+                        hint["history_kv_event_messages"] = events
                     hint["paper_measurement"] = {
                         "history_start_message_count": history_start,
                         "history_message_count": history_end,
@@ -1837,8 +1999,9 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 if ARM.text_policy == "hiagent_full":
                     def send_retrieved(staged):
                         nonlocal payload, messages_out, counts
-                        payload = staged
-                        messages_out, counts = _assemble_request(staged["messages"], ARM)
+                        payload = (_finish_text_source_tool_plan(staged, pre_text_plan)
+                                   if pre_text_plan is not None else staged)
+                        messages_out, counts = _assemble_request(payload["messages"], ARM)
                         counts["textarm"] = text_stats
                         if getattr(ARM, "text_history_budget_tokens", None) is not None:
                             counts["text_budget_history_boundary"] = _text_budget_boundary(
@@ -1846,7 +2009,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
                         return send_upstream(
                             messages_out, None, phase="hiagent_retrieval_generation")[0]
                     data = _hiagent_retrieval_loop(
-                        original_payload, ARM, conv, data, text_stats, send_retrieved)
+                        text_source_payload, ARM, conv, data, text_stats, send_retrieved)
                     normalized = BACKEND.normalize_response(data)
             except CacheMiss:
                 # Pool-evicted gists and/or an evicted repair span.  Three
@@ -1875,7 +2038,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
                             and fresh.get("key_hash")):
                         messages_out[idx]["c2kv_key_hash"] = fresh["key_hash"]
                 tool_plan = getattr(_TRACE, "tool_plan", None)
-                if tool_plan is not None:
+                if isinstance(tool_plan, toolmemory.ToolMemoryPlan):
                     # the tool gist entries can be evicted too: re-extract
                     # every chunk (memo bypass) and refresh the carriers'
                     # key hashes in place, in carrier order
@@ -1884,6 +2047,10 @@ class ProxyHandler(BaseHTTPRequestHandler):
                     for idx, message in enumerate(messages_out):
                         if toolmemory.is_carrier(message):
                             messages_out[idx] = next(fresh_carriers)
+                    counts["tool_memory"] = tool_plan.info
+                elif isinstance(tool_plan, toolmemory.VisibleToolPlan):
+                    # Raw schema plans have no T0 carriers to refresh. The
+                    # next send_upstream call creates a fresh repair handle.
                     counts["tool_memory"] = tool_plan.info
                 repair_plan = plan_repair(messages, ARM, counts,
                                           tools=payload.get("tools"),
@@ -2236,13 +2403,14 @@ def main(argv=None):
     global TOOL_MEMORY
     tool_spec = toolmemory.parse_tool_memory_spec(args.tool_memory)
     if tool_spec is not None:
-        if tool_spec.encoder != "t0" and ARM.name != "full":
+        if tool_spec.encoder != "t0" and ARM.name != "full" and tool_spec.interface_policy != "schema":
             raise SystemExit("FATAL: raw tool KV selection currently requires Full history; the joint history study uses T0")
         if not args.tool_checkpoint:
             raise SystemExit("FATAL: --tool-memory needs --tool-checkpoint <T0 dir>")
         if BACKEND.name != "sglang":
             raise SystemExit("FATAL: --tool-memory requires the sglang backend")
-        if (ARM.text_policy or "").startswith(("acon", "hiagent")):
+        if ((ARM.text_policy or "").startswith(("acon", "hiagent"))
+                and tool_spec.interface_policy != "schema"):
             raise SystemExit(
                 f"FATAL: --tool-memory is not supported with ACON/HiAgent arm {ARM.name!r}")
         from pathlib import Path as _Path

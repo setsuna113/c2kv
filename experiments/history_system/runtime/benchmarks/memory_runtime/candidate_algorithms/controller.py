@@ -70,6 +70,14 @@ class CandidateRecoveryController(EventNativeRecoveryController):
         if prepared._checked_result is None:
             prepared._set_draft_logprobs = tuple(token_logprobs)
 
+    def _goal_review_request(self, prepared, draft_tool_calls, *, parse_error):
+        return review_request(prepared, draft_tool_calls, parse_error=parse_error)
+
+    def _goal_review_messages(self, prepared, goal, records, budget):
+        return review_messages(prepared._store, goal, records,
+                               token_counter=lambda rows: self.base._count(rows, ()),
+                               token_budget=budget)
+
     def reconsider(self, prepared, draft_tool_calls, *, draft_text, parse_error=None):
         key = (prepared._store.session_id, prepared.metadata["decision_key"])
         if self._prepared.get(key) is not prepared:
@@ -122,7 +130,7 @@ class CandidateRecoveryController(EventNativeRecoveryController):
                             "reason": "risk_triggered" if triggered else "risk_not_above_threshold"}
         review_reason, review_key, goal, records = (None, None, None, None)
         if self.variant == "goal_rescue":
-            review_reason, review_key, goal, records = review_request(
+            review_reason, review_key, goal, records = self._goal_review_request(
                 prepared, draft_tool_calls, parse_error=parse_error)
             state_key = (key[0], review_key)
             if state_key in self._reviewed_states:
@@ -131,9 +139,7 @@ class CandidateRecoveryController(EventNativeRecoveryController):
         if review_reason:
             budget = min(self.policy_config.history_budget_bytes,
                          self.policy_config.workspace_budget_bytes) // self.kv_bytes_per_token
-            messages, receipt = review_messages(
-                prepared._store, goal, records,
-                token_counter=lambda rows: self.base._count(rows, ()), token_budget=budget)
+            messages, receipt = self._goal_review_messages(prepared, goal, records, budget)
             decision["goal_review"] = {**receipt, "trigger": review_reason,
                                        "state_sha256": review_key, "stop_is_error_label": False}
             if messages:
@@ -170,7 +176,13 @@ class CandidateRecoveryController(EventNativeRecoveryController):
 
 
 def wrap_with_candidate_recovery(base, config):
-    from . import REPAIR_VARIANTS
+    from . import GOAL_VARIANTS, REPAIR_VARIANTS, VERIFIED_VARIANTS
+    if config.get("variant") in VERIFIED_VARIANTS:
+        from .verified_controller import VerifiedBindingController
+        return VerifiedBindingController(base, config)
+    if config.get("variant") in GOAL_VARIANTS:
+        from .goal_controller import GoalCompositionController
+        return GoalCompositionController(base, config)
     if config.get("variant") in REPAIR_VARIANTS:
         from .repair_controller import RepairController
         return RepairController(base, config)
