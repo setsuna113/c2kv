@@ -72,17 +72,23 @@ try:
     from .candidate_cell import (
         VARIANTS as CANDIDATE_VARIANTS,
         GOAL_VARIANTS,
+        STATIC_VARIANTS,
+        STATIC_VERSION,
         VERIFIED_VARIANTS,
         candidate_cell_from_source,
         controller_with_binding as candidate_controller_with_binding,
+        static_contract,
     )
 except ImportError:  # Direct file launch on ascend03.
     from candidate_cell import (
         VARIANTS as CANDIDATE_VARIANTS,
         GOAL_VARIANTS,
+        STATIC_VARIANTS,
+        STATIC_VERSION,
         VERIFIED_VARIANTS,
         candidate_cell_from_source,
         controller_with_binding as candidate_controller_with_binding,
+        static_contract,
     )
 
 GENERATION_ROOT = Path("/home/liuyancheng/c2kv-generality-20260918")
@@ -105,6 +111,37 @@ WORKER_MODULES = {
 def _write(path: Path, value) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(value, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def validate_static_ready_manifest(cell: dict, ready_path: Path) -> None:
+    """Bind a static-view attempt to the frozen controller loaded by the server."""
+    variant = cell.get("candidate_algorithm")
+    if variant not in STATIC_VARIANTS:
+        return
+    controller_path = Path(cell["controller_path"]).resolve()
+    try:
+        controller_bytes = controller_path.read_bytes()
+        controller = json.loads(controller_bytes)
+        ready = json.loads(ready_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise RuntimeError("static candidate ready manifest or controller is unreadable") from error
+    loaded = ready.get("s0_controller_contract")
+    candidate = ready.get("candidate_algorithm")
+    route = ready.get("route_contract")
+    contract = static_contract(variant)
+    if (not isinstance(loaded, dict) or not isinstance(candidate, dict)
+            or not isinstance(route, dict)
+            or ready.get("status") != "ready"
+            or loaded.get("source") != str(controller_path)
+            or loaded.get("sha256") != hashlib.sha256(controller_bytes).hexdigest()
+            or loaded.get("config") != controller
+            or candidate.get("variant") != variant
+            or candidate.get("stable_call_ids") is not True
+            or any(candidate.get(key) != value for key, value in contract.items())
+            or route.get("baseline_identity") != STATIC_VERSION + ":" + variant
+            or route.get("recovery_enabled") is not True
+            or route.get("max_generations_per_decision") != 2):
+        raise RuntimeError("static candidate ready manifest differs from frozen controller")
 
 
 def _controller_with_binding(cell: dict) -> tuple[dict, dict | None]:
@@ -311,7 +348,7 @@ def server_command(cell: dict, task_ids: list[str], out: Path, port: int,
         "--no-raw-snapshot",
     ]
     if (cell["condition"] == "tracer_history"
-            or cell.get("candidate_algorithm") in GOAL_VARIANTS + VERIFIED_VARIANTS):
+            or cell.get("candidate_algorithm") in GOAL_VARIANTS + VERIFIED_VARIANTS + STATIC_VARIANTS):
         # The frozen C1 risk head needs its exact prefill hidden-state contract.
         command.extend(["--shadow-feature-config",
                         str(RUNTIME / "configs" / "shadow_features.json")])
@@ -682,6 +719,7 @@ def run_task(cell: dict, task_ids: list[str], port: int, batch_dirname: str) -> 
             if time.monotonic() > deadline:
                 raise TimeoutError("controller readiness timeout")
             time.sleep(2)
+        validate_static_ready_manifest(server_cell, ready)
         if cell["benchmark"] == "tau2":
             if len(task_ids) != 1:
                 raise ValueError("tau2 requires one frozen task per controller server")

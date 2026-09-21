@@ -29,7 +29,13 @@ def test_candidate_cell_is_explicit_ratio8_and_isolated(tmp_path, variant):
         source, variant, "http://127.0.0.1:36200")
     assert result["ratio"] == 8
     assert result["candidate_algorithm"] == variant
-    if variant in candidate_cell.VERIFIED_VARIANTS:
+    if variant in candidate_cell.STATIC_VARIANTS:
+        assert result["threshold"] == 0.5
+        assert result["candidate_protocol"] == candidate_cell.STATIC_VERSION
+        assert result["schema"] == "c2kv-generality-candidate-cell-v5"
+        assert {key: result[key] for key in ("recovery_backbone", "initial_view")} == (
+            candidate_cell.static_contract(variant))
+    elif variant in candidate_cell.VERIFIED_VARIANTS:
         assert result["threshold"] == 0.5
         assert result["candidate_protocol"] == candidate_cell.VERIFIED_VERSION
         assert result["proof_registry_version"] == candidate_cell.PROOF_REGISTRY_VERSION
@@ -45,6 +51,8 @@ def test_candidate_cell_is_explicit_ratio8_and_isolated(tmp_path, variant):
     else:
         assert result["threshold"] == 0.5
         assert result["schema"] == "c2kv-generality-candidate-cell-v1"
+    if variant not in candidate_cell.STATIC_VARIANTS:
+        assert "initial_view" not in result and "recovery_backbone" not in result
     assert result["candidate_source_cell_id"] == source["cell_id"]
     assert result["candidate_budget_source"] == "working_point.common_cap_bytes"
     assert result["cell_dir"].endswith(f"candidate_algorithms/{variant}") or result["cell_dir"].endswith(f"candidate_algorithms\\{variant}")
@@ -258,7 +266,8 @@ def test_repair_candidate_keeps_c1000_without_loading_t02(tmp_path, variant):
     assert "candidate_algorithm" not in base
 
 
-@pytest.mark.parametrize("variant", candidate_cell.GOAL_VARIANTS + candidate_cell.VERIFIED_VARIANTS)
+@pytest.mark.parametrize("variant", candidate_cell.GOAL_VARIANTS +
+                         candidate_cell.VERIFIED_VARIANTS + candidate_cell.STATIC_VARIANTS)
 def test_goal_candidate_binds_frozen_t02_with_new_resume_identity(tmp_path, monkeypatch, variant):
     checkpoint = tmp_path / "checkpoint"
     checkpoint.mkdir()
@@ -282,15 +291,19 @@ def test_goal_candidate_binds_frozen_t02_with_new_resume_identity(tmp_path, monk
     expected = {"variant": variant, "risk_artifact": bound, "risk_threshold": 0.5}
     if variant in candidate_cell.VERIFIED_VARIANTS:
         expected["proof_registry_version"] = candidate_cell.PROOF_REGISTRY_VERSION
+    elif variant in candidate_cell.STATIC_VARIANTS:
+        expected.update(candidate_cell.static_contract(variant))
     assert controller == {"view_mode": "native_s0", "candidate_algorithm": expected}
     assert receipt == {"checkpoint": str(checkpoint)}
     assert cell["cell_id"].endswith("__candidate_" + variant)
-    assert cell["candidate_protocol"] == (candidate_cell.VERIFIED_VERSION
+    assert cell["candidate_protocol"] == (candidate_cell.STATIC_VERSION
+        if variant in candidate_cell.STATIC_VARIANTS else candidate_cell.VERIFIED_VERSION
         if variant in candidate_cell.VERIFIED_VARIANTS else candidate_cell.GOAL_VERSION)
     assert "candidate_algorithm" not in base
 
 
-@pytest.mark.parametrize("variant", ("goal_pending",) + candidate_cell.VERIFIED_VARIANTS)
+@pytest.mark.parametrize("variant", ("goal_pending",) + candidate_cell.VERIFIED_VARIANTS +
+                         candidate_cell.STATIC_VARIANTS)
 def test_goal_candidate_requires_shadow_feature_launcher_config(tmp_path, monkeypatch, variant):
     monkeypatch.setitem(sys.modules, "current", types.SimpleNamespace())
     monkeypatch.setitem(sys.modules, "evidence_sets", types.SimpleNamespace())
@@ -336,7 +349,8 @@ def test_candidate_policy_uses_same_common_cap_without_recovery_reserve(tmp_path
     assert "recovery_workspace_bytes" not in policy
 
 
-def test_candidate_cli_selects_variant_before_any_inference(tmp_path, monkeypatch, capsys):
+@pytest.mark.parametrize("variant", ("turn_c1",) + candidate_cell.STATIC_VARIANTS)
+def test_candidate_cli_selects_variant_before_any_inference(tmp_path, monkeypatch, capsys, variant):
     monkeypatch.setitem(sys.modules, "current", types.SimpleNamespace())
     monkeypatch.setitem(sys.modules, "evidence_sets", types.SimpleNamespace())
     monkeypatch.setitem(sys.modules, "c1_artifact_binding", types.SimpleNamespace(
@@ -351,12 +365,12 @@ def test_candidate_cli_selects_variant_before_any_inference(tmp_path, monkeypatc
     rc = c2kv_cell.main([
         "--cell", str(tmp_path / "source.json"),
         "--budgets", str(tmp_path / "budgets.json"),
-        "--candidate-algorithm", "turn_c1",
+        "--candidate-algorithm", variant,
         "--sglang-backend-url", "http://127.0.0.1:36200",
         "--audit-results-only",
     ])
     assert rc == 0 and len(seen) == 1
-    assert seen[0][0]["candidate_algorithm"] == "turn_c1"
+    assert seen[0][0]["candidate_algorithm"] == variant
     assert seen[0][0]["ratio"] == 8
     assert seen[0][1] == ["multi_turn_base_0"]
     assert "valid_count" in capsys.readouterr().out
@@ -371,3 +385,89 @@ def test_verified_cell_rejects_stale_registry_before_checkpoint_or_inference(tmp
         candidate_cell.controller_with_binding(
             cell, base_controller={}, selected={},
             risk_artifact_path=tmp_path / "unused.json", bind_risk_artifact=None)
+
+
+@pytest.mark.parametrize("variant", candidate_cell.STATIC_VARIANTS)
+@pytest.mark.parametrize("change", [
+    {"recovery_backbone": "wrong_backbone"},
+    {"initial_view": {"policy": "dynamic", "version": "c2kv-static-initial-view-v1"}},
+    {"initial_view": {"policy": "static_gist", "version": "stale-version"}},
+    {"candidate_protocol": "c2kv-goal-composition-v1"},
+    {"schema": "c2kv-generality-candidate-cell-v4"},
+])
+def test_static_cell_rejects_view_backbone_and_protocol_mismatch(tmp_path, variant, change):
+    cell = candidate_cell.candidate_cell_from_source(
+        source_cell(tmp_path), variant, "http://127.0.0.1:36200") | change
+    with pytest.raises(ValueError, match="initial view and recovery backbone"):
+        candidate_cell.controller_with_binding(
+            cell, base_controller={}, selected={},
+            risk_artifact_path=tmp_path / "unused.json", bind_risk_artifact=None)
+
+
+@pytest.mark.parametrize("variant", candidate_cell.STATIC_VARIANTS)
+def test_static_ready_manifest_binds_loaded_controller_and_route(tmp_path, monkeypatch, variant):
+    monkeypatch.setitem(sys.modules, "current", types.SimpleNamespace())
+    monkeypatch.setitem(sys.modules, "evidence_sets", types.SimpleNamespace())
+    monkeypatch.setitem(sys.modules, "c1_artifact_binding", types.SimpleNamespace(
+        bind_risk_artifact=lambda artifact, checkpoint: (artifact, {})))
+    from generality import c2kv_cell
+
+    contract = candidate_cell.static_contract(variant)
+    controller = {"view_mode": "native_s0", "candidate_algorithm": {
+        "variant": variant, "risk_artifact": {"model_kind": "c1_risk_logistic"},
+        "risk_threshold": 0.5, **contract}}
+    controller_path = tmp_path / "controller.json"
+    controller_path.write_text(json.dumps(controller), encoding="utf-8")
+    cell = {"candidate_algorithm": variant, "controller_path": str(controller_path)}
+    loaded = {"source": str(controller_path.resolve()), "config": controller,
+              "sha256": hashlib.sha256(controller_path.read_bytes()).hexdigest()}
+    ready = {"status": "ready", "s0_controller_contract": loaded,
+             "candidate_algorithm": {"variant": variant, "stable_call_ids": True,
+                                     **contract},
+             "route_contract": {"baseline_identity":
+                                candidate_cell.STATIC_VERSION + ":" + variant,
+                                "recovery_enabled": True,
+                                "max_generations_per_decision": 2}}
+    ready_path = tmp_path / "ready.json"
+
+    def check(value):
+        ready_path.write_text(json.dumps(value), encoding="utf-8")
+        c2kv_cell.validate_static_ready_manifest(cell, ready_path)
+
+    check(ready)
+    for section, field, wrong in (
+            ("candidate_algorithm", "recovery_backbone", "goal_joint"),
+            ("candidate_algorithm", "initial_view", {"policy": "none"}),
+            ("route_contract", "baseline_identity", "c2kv-goal-composition-v1:" + variant),
+            ("s0_controller_contract", "source", str(tmp_path / "other.json")),
+            ("s0_controller_contract", "sha256", "0" * 64),
+            ("s0_controller_contract", "config", {})):
+        changed = json.loads(json.dumps(ready))
+        changed[section][field] = wrong
+        ready_path.write_text(json.dumps(changed), encoding="utf-8")
+        with pytest.raises(RuntimeError, match="differs from frozen controller"):
+            c2kv_cell.validate_static_ready_manifest(cell, ready_path)
+    # Existing candidates retain their original ready-manifest behavior.
+    c2kv_cell.validate_static_ready_manifest(
+        {**cell, "candidate_algorithm": "goal_pending"}, tmp_path / "absent.json")
+
+
+@pytest.mark.parametrize("variant", candidate_cell.STATIC_VARIANTS)
+def test_static_resume_rejects_changed_frozen_view_or_backbone(tmp_path, monkeypatch, variant):
+    monkeypatch.setitem(sys.modules, "current", types.SimpleNamespace())
+    monkeypatch.setitem(sys.modules, "evidence_sets", types.SimpleNamespace())
+    monkeypatch.setitem(sys.modules, "c1_artifact_binding", types.SimpleNamespace(
+        bind_risk_artifact=lambda artifact, checkpoint: (artifact, {})))
+    from generality import c2kv_cell
+
+    cell = candidate_cell.candidate_cell_from_source(
+        source_cell(tmp_path), variant, "http://127.0.0.1:36200")
+    monkeypatch.setattr(c2kv_cell, "_controller_with_binding", lambda _: ({}, None))
+    budgets = {"working_points": {"K0": {
+        "history_allowance_bytes": 100, "common_cap_bytes": 300}}}
+    prepared = c2kv_cell.prepare_cell_files(cell, budgets)
+    (Path(prepared["cell_dir"]) / "batches" / "attempt").mkdir(parents=True)
+    for change in ({"recovery_backbone": "wrong"},
+                   {"initial_view": {"policy": "static_gist", "version": "stale"}}):
+        with pytest.raises(ValueError, match="different frozen cell.json"):
+            c2kv_cell.prepare_cell_files(cell | change, budgets)

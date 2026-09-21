@@ -17,14 +17,25 @@ LEGACY_VARIANTS = ("static_t02", "turn_c1", "goal_rescue", "dependency_first")
 REPAIR_VARIANTS = ("request_contract", "argument_binding", "no_progress")
 GOAL_VARIANTS = ("goal_pending", "goal_source", "goal_progress", "goal_joint")
 VERIFIED_VARIANTS = ("goal_verified", "pending_verified")
-VARIANTS = LEGACY_VARIANTS + REPAIR_VARIANTS + GOAL_VARIANTS + VERIFIED_VARIANTS
+STATIC_BACKBONES = {"goal_static": "goal_rescue", "pending_static": "goal_pending"}
+STATIC_VARIANTS = tuple(STATIC_BACKBONES)
+VARIANTS = LEGACY_VARIANTS + REPAIR_VARIANTS + GOAL_VARIANTS + VERIFIED_VARIANTS + STATIC_VARIANTS
 REPAIR_VERSION = "c2kv-source-repair-v1"
 GOAL_VERSION = "c2kv-goal-composition-v1"
 VERIFIED_VERSION = "c2kv-verified-binding-v1"
 PROOF_REGISTRY_VERSION = "verified-binding-rules-v1"
+STATIC_VERSION = "c2kv-initial-view-composition-v1"
+STATIC_INITIAL_VIEW_VERSION = "c2kv-static-initial-view-v1"
 RATIO = 8
 RISK_THRESHOLD = 0.5
 RISK_ARTIFACT_SHA256 = T02_RISK_ARTIFACT_SHA256
+
+
+def static_contract(variant: str) -> dict:
+    return {
+        "recovery_backbone": STATIC_BACKBONES[variant],
+        "initial_view": {"policy": "static_gist", "version": STATIC_INITIAL_VIEW_VERSION},
+    }
 
 
 def candidate_cell_from_source(
@@ -48,7 +59,9 @@ def candidate_cell_from_source(
         raise ValueError("history_budget_tokens must be a positive integer")
     source_dir = Path(source["cell_dir"])
     cell = copy.deepcopy(source)
-    cell["schema"] = ("c2kv-generality-candidate-cell-v4"
+    cell["schema"] = ("c2kv-generality-candidate-cell-v5"
+                      if variant in STATIC_VARIANTS else
+                      "c2kv-generality-candidate-cell-v4"
                       if variant in VERIFIED_VARIANTS else
                       "c2kv-generality-candidate-cell-v3"
                       if variant in GOAL_VARIANTS else
@@ -81,6 +94,9 @@ def candidate_cell_from_source(
         elif variant in VERIFIED_VARIANTS:
             cell["candidate_protocol"] = VERIFIED_VERSION
             cell["proof_registry_version"] = PROOF_REGISTRY_VERSION
+        elif variant in STATIC_VARIANTS:
+            cell["candidate_protocol"] = STATIC_VERSION
+            cell.update(static_contract(variant))
     cell["sglang_backend_url"] = backend_url.strip()
     cell.pop("controller_path", None)
     cell.pop("eval_policy_path", None)
@@ -109,6 +125,13 @@ def controller_with_binding(
                 or cell.get("proof_registry_version") != PROOF_REGISTRY_VERSION
                 or cell.get("threshold") != RISK_THRESHOLD):
             raise ValueError("Verified candidate requires frozen T02 and proof registry")
+    elif variant in STATIC_VARIANTS:
+        contract = static_contract(variant)
+        if (cell.get("schema") != "c2kv-generality-candidate-cell-v5"
+                or cell.get("candidate_protocol") != STATIC_VERSION
+                or cell.get("threshold") != RISK_THRESHOLD
+                or any(cell.get(key) != value for key, value in contract.items())):
+            raise ValueError("Static candidate requires matching initial view and recovery backbone")
     elif variant in GOAL_VARIANTS:
         if cell.get("candidate_protocol") != GOAL_VERSION or cell.get("threshold") != RISK_THRESHOLD:
             raise ValueError("Goal candidate requires the frozen T02 contract")
@@ -137,4 +160,6 @@ def controller_with_binding(
     }
     if variant in VERIFIED_VARIANTS:
         controller["candidate_algorithm"]["proof_registry_version"] = PROOF_REGISTRY_VERSION
+    elif variant in STATIC_VARIANTS:
+        controller["candidate_algorithm"].update(static_contract(variant))
     return controller, binding
