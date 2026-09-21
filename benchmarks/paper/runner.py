@@ -1073,7 +1073,8 @@ def main(argv=None):
                              "request_contract,argument_binding,no_progress,"
                              "goal_pending,goal_source,goal_progress,goal_joint; "
                              "goal_verified,pending_verified,goal_static,pending_static,"
-                             "goal_verified_static,pending_verified_static "
+                             "goal_verified_static,pending_verified_static,"
+                             "static_verified,static_action_ledger "
                              "require named opt-in")
     parser.add_argument("--candidate-benchmarks", default="bfcl_base",
                         help="candidate benchmark scope, comma-separated subset of "

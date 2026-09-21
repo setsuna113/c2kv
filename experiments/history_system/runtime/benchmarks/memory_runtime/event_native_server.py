@@ -169,10 +169,16 @@ def _candidate_ready_contract(candidate):
     from .candidate_algorithms import (
         GOAL_VARIANTS, GOAL_VERSION, INITIAL_VIEW_VARIANTS,
         INITIAL_VIEW_VERSION, REPAIR_VARIANTS, VERIFIED_VARIANTS,
-        VERIFIED_VERSION,
+        VERIFIED_VERSION, STATIC_EXTENSION_VARIANTS, STATIC_EXTENSION_VERSION,
     )
 
     variant = candidate['variant']
+    if variant in STATIC_EXTENSION_VARIANTS:
+        from .candidate_algorithms.static_extensions import validate_extension_config
+        fields = validate_extension_config(candidate)
+        identity = {'variant': variant, 'stable_call_ids': True,
+                    'recovery_rounds_per_decision': 1, **fields}
+        return identity, STATIC_EXTENSION_VERSION + ':' + variant
     if variant in VERIFIED_VARIANTS:
         version = VERIFIED_VERSION
     elif variant in INITIAL_VIEW_VARIANTS:

@@ -9,6 +9,7 @@ import pytest
 
 from experiments.history_system.candidate_algorithms import (
     INITIAL_VIEW_VARIANTS, INITIAL_VIEW_VERSION, initial_view_fields,
+    STATIC_EXTENSION_VARIANTS, STATIC_EXTENSION_VERSION,
 )
 from benchmarks.arms import get_arm
 from benchmarks.paper import c1, runner
@@ -96,7 +97,7 @@ def test_candidate_matrix_defaults_to_bfcl_base_and_explicitly_adds_acebench(tmp
         with_candidate_methods(original, ("static_t02",), ("unknown_benchmark",))
 
 
-@pytest.mark.parametrize("variants", [VERIFIED_VARIANTS, INITIAL_VIEW_VARIANTS])
+@pytest.mark.parametrize("variants", [VERIFIED_VARIANTS, INITIAL_VIEW_VARIANTS, STATIC_EXTENSION_VARIANTS])
 def test_new_arms_require_named_opt_in_and_support_bfcl_appworld_ace(tmp_path, variants):
     original = json.loads(runner.DEFAULT_CONFIG.read_text())
     assert not set(variants) & set(parse_candidate_arms("all"))
@@ -163,14 +164,18 @@ def test_candidate_delivery_uses_ratio8_and_bound_artifact(tmp_path, monkeypatch
                if variant in VERIFIED_VARIANTS else {}),
             **initial_view_fields(variant)}}
         assert profile["candidate_algorithm"] == variant
-        assert profile["schema"] == ("c2kv-candidate-delivery-profile-v5"
+        assert profile["schema"] == ("c2kv-candidate-delivery-profile-v6"
+                                     if variant in STATIC_EXTENSION_VARIANTS else
+                                     "c2kv-candidate-delivery-profile-v5"
                                      if variant in INITIAL_VIEW_VARIANTS else
                                      "c2kv-candidate-delivery-profile-v4"
                                      if variant in VERIFIED_VARIANTS else
                                      "c2kv-candidate-delivery-profile-v3"
                                      if variant in GOAL_VARIANTS else
                                      "c2kv-candidate-delivery-profile-v1")
-        assert profile["selection_protocol"] == (INITIAL_VIEW_VERSION
+        assert profile["selection_protocol"] == (STATIC_EXTENSION_VERSION
+                                                  if variant in STATIC_EXTENSION_VARIANTS else
+                                                  INITIAL_VIEW_VERSION
                                                   if variant in INITIAL_VIEW_VARIANTS else
                                                   "c2kv-verified-binding-v1"
                                                   if variant in VERIFIED_VARIANTS else
@@ -188,7 +193,7 @@ def test_candidate_delivery_uses_ratio8_and_bound_artifact(tmp_path, monkeypatch
         else:
             assert "proof_registry_version" not in controller["candidate_algorithm"]
             assert "proof_registry_version" not in profile
-        if variant in INITIAL_VIEW_VARIANTS:
+        if variant in INITIAL_VIEW_VARIANTS + STATIC_EXTENSION_VARIANTS:
             for key, value in initial_view_fields(variant).items():
                 assert profile[key] == value
                 changed = copy.deepcopy(controller)
@@ -344,7 +349,7 @@ def test_repair_acceptance_does_not_require_t02_scores(tmp_path):
         "request_contract")["required"].values())
 
 
-@pytest.mark.parametrize("variant", GOAL_VARIANTS + VERIFIED_VARIANTS + INITIAL_VIEW_VARIANTS)
+@pytest.mark.parametrize("variant", GOAL_VARIANTS + VERIFIED_VARIANTS + INITIAL_VIEW_VARIANTS + STATIC_EXTENSION_VARIANTS)
 def test_goal_acceptance_requires_frozen_risk_and_distinct_version(tmp_path, variant):
     delivery = c1.load_delivery()
     shard = tmp_path / "server"
@@ -352,7 +357,8 @@ def test_goal_acceptance_requires_frozen_risk_and_distinct_version(tmp_path, var
     record = {
         "ratio": 8,
         "exact_recovery": {
-            "version": (INITIAL_VIEW_VERSION if variant in INITIAL_VIEW_VARIANTS else
+            "version": (STATIC_EXTENSION_VERSION if variant in STATIC_EXTENSION_VARIANTS else
+                        INITIAL_VIEW_VERSION if variant in INITIAL_VIEW_VARIANTS else
                         "c2kv-verified-binding-v1" if variant in VERIFIED_VARIANTS
                         else "c2kv-goal-composition-v1"), "variant": variant,
             "status": "keep",

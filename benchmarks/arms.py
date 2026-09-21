@@ -487,6 +487,22 @@ ARMS: Dict[str, Arm] = {
             description="Ratio-8 static initial view with Pending review and verified-field commits",
         ),
         Arm(
+            name="c2kv_static_verified_r8",
+            compress_history=True,
+            ratio=8,
+            query_projection="base",
+            native_controller="candidate_static_verified",
+            description="Ratio-8 Static-T02 with verified-field commits on abstention",
+        ),
+        Arm(
+            name="c2kv_static_action_ledger_r8",
+            compress_history=True,
+            ratio=8,
+            query_projection="base",
+            native_controller="candidate_static_action_ledger",
+            description="Ratio-8 Static-T02 with source-backed action receipts and STOP review",
+        ),
+        Arm(
             name="hiagent",
             compress_history=False,
             text_policy="hiagent",

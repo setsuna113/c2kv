@@ -224,8 +224,12 @@ class EventNativeDecisionRunner:
                     calls, receipt = finalize(prepared, draft.tool_calls)
                     record['commit_transform'] = copy.deepcopy(receipt)
                     if receipt.get('changed'):
-                        from .candidate_algorithms.goal_commit import corrected_draft
-                        draft = corrected_draft(draft, calls, benchmark=self.controller.benchmark)
+                        render_commit = getattr(self.controller, 'render_commit', None)
+                        if callable(render_commit):
+                            draft = render_commit(draft, calls, receipt=receipt)
+                        else:
+                            from .candidate_algorithms.goal_commit import corrected_draft
+                            draft = corrected_draft(draft, calls, benchmark=self.controller.benchmark)
                         record['commit_transform']['committed_text'] = draft.text
                         record['commit_transform']['model_generation_unmodified'] = True
                     record['controller_timing']['commit_transform_duration_ns'] = (

@@ -531,7 +531,7 @@ The legacy S0 routes, result identities and eleven-arm `all` expansion are
 unchanged. Initial-view compositions require an explicit name, including for
 native history budget sweeps; they do not reuse a historical Goal/Pending cell.
 
-The current compression exploration uses
+The earlier compression exploration uses
 `--candidate-arms pending_verified_static,goal_verified_static`. These distinct
 arms (`c2kv_pending_verified_static_r8`, `c2kv_goal_verified_static_r8`) compose
 the same Static initial allocator with `pending_verified` or `goal_verified`.
@@ -540,6 +540,33 @@ in the profile, controller and ready manifest. Existing Verified controllers
 own proof discovery, selected-commit validation and final field correction;
 the initial-view wrapper adds no generation or model workspace. The earlier
 `goal_static` and `pending_static` arms retain their original behavior and IDs.
+
+The independent Static-T02 extensions are selected with
+`--candidate-arms static_verified,static_action_ledger`, yielding
+`c2kv_static_verified_r8` and `c2kv_static_action_ledger_r8`.
+Their v6 profiles use `c2kv-static-extension-v1` and bind the unchanged
+`static_t02` recovery backbone separately from the commit policy. Both retain
+the original Static initial raw/gist allocation, frozen T02, ratio8, B0 and
+one regeneration per decision. They do not invoke Goal/Pending review.
+`static_verified` applies the existing `verified-binding-rules-v1` field proofs
+only after Static abstains, without generation or model workspace overhead.
+`static_action_ledger` reviews STOP only when its versioned action rules prove
+a ready, unexecuted request. Evidence must fit B0 without evicting existing
+raw or gist entries, and the final action must match the witness. Its commit
+filter also removes source-proven duplicate side effects already completed
+within the current request. Unsupported or ambiguous obligations and results
+leave the Static decision unchanged. These are opt-in implementations, not
+new benchmark results; historical arm identities and `all` remain unchanged.
+
+ActionLedger v1 deliberately has a finite grammar. Missing-action witnesses
+cover explicit recipient IDs plus quoted message bodies, account funding with
+an ISO currency, and literal two-field flight routes with optional structured
+fare conditions. The real six-field BFCL booking API is supported for
+completed-duplicate filtering through `booking_status`, not for reconstructing
+missing booking arguments. Message receipts use `sent_status`; pending,
+failed, contradicted or invalidated receipts cannot suppress a call. Broader
+natural-language obligations require additional versioned rules. Each decision
+records the ledger classification and source evidence for coverage analysis.
 
 The ratio8 candidate algorithms are an explicit overlay. For example,
 `--candidate-arms all --candidate-benchmarks bfcl_base,acebench_agent` on

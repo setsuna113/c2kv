@@ -17,6 +17,7 @@ from .candidate_matrix import ARM_TO_VARIANT, GOAL_VARIANTS, REPAIR_VARIANTS, VE
 from experiments.history_system.candidate_algorithms import (
     INITIAL_VIEW_VARIANTS, INITIAL_VIEW_VERSION, initial_view_fields,
     PROOF_REGISTRY_VERSION, VERIFIED_VERSION,
+    STATIC_EXTENSION_VARIANTS, STATIC_EXTENSION_VERSION,
 )
 from .process_lifecycle import run_owned
 from benchmarks.toolsandbox_suite import selected_scenarios
@@ -125,7 +126,8 @@ def validate_ready_manifest(config, benchmark, task, ready_path, controller_path
             view_fields = initial_view_fields(variant)
             valid_config = valid_config and all(candidate.get(key) == value
                                                 for key, value in view_fields.items())
-            version = (INITIAL_VIEW_VERSION if variant in INITIAL_VIEW_VARIANTS else
+            version = (STATIC_EXTENSION_VERSION if variant in STATIC_EXTENSION_VARIANTS else
+                       INITIAL_VIEW_VERSION if variant in INITIAL_VIEW_VARIANTS else
                        VERIFIED_VERSION if variant in VERIFIED_VARIANTS else
                        "c2kv-goal-composition-v1" if variant in GOAL_VARIANTS
                        else "c2kv-paper-candidates-v1")

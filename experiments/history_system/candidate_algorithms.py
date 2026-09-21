@@ -25,12 +25,25 @@ INITIAL_VIEW_BACKBONES = {
 INITIAL_VIEW_VARIANTS = tuple(INITIAL_VIEW_BACKBONES)
 INITIAL_VIEW_VERSION = "c2kv-initial-view-composition-v1"
 INITIAL_VIEW_POLICY_VERSION = "c2kv-static-initial-view-v1"
-ALL_VARIANTS = VARIANTS + REPAIR_VARIANTS + GOAL_VARIANTS + VERIFIED_VARIANTS + INITIAL_VIEW_VARIANTS
+STATIC_EXTENSION_VARIANTS = ("static_verified", "static_action_ledger")
+STATIC_EXTENSION_VERSION = "c2kv-static-extension-v1"
+ALL_VARIANTS = (VARIANTS + REPAIR_VARIANTS + GOAL_VARIANTS + VERIFIED_VARIANTS
+                + INITIAL_VIEW_VARIANTS + STATIC_EXTENSION_VARIANTS)
 RATIO = 8
 
 
 def initial_view_fields(variant: str) -> dict[str, Any]:
     """Describe only opt-in compositions; keep historical contracts byte-stable."""
+    if variant in STATIC_EXTENSION_VARIANTS:
+        return {
+            "recovery_backbone": "static_t02",
+            "initial_view": {"policy": "static_gist", "version": INITIAL_VIEW_POLICY_VERSION},
+            "commit_policy": "verified_binding" if variant == "static_verified" else "action_ledger",
+            **({"proof_registry_version": PROOF_REGISTRY_VERSION}
+               if variant == "static_verified" else {
+                   "action_ledger_version": "static-action-ledger-v1",
+                   "action_rules_version": "action-ledger-rules-v1"}),
+        }
     if variant not in INITIAL_VIEW_BACKBONES:
         return {}
     return {
@@ -141,5 +154,9 @@ def build_profile(
     elif variant in INITIAL_VIEW_VARIANTS:
         profile["schema"] = "c2kv-candidate-delivery-profile-v5"
         profile["selection_protocol"] = INITIAL_VIEW_VERSION
+        profile.update(initial_view_fields(variant))
+    elif variant in STATIC_EXTENSION_VARIANTS:
+        profile["schema"] = "c2kv-candidate-delivery-profile-v6"
+        profile["selection_protocol"] = STATIC_EXTENSION_VERSION
         profile.update(initial_view_fields(variant))
     return controller, profile
