@@ -193,6 +193,9 @@ def request_wrapper(fn):
         endpoint = str(resource._client.base_url).rstrip("/")
         agent = os.environ["ACEBENCH_AGENT_BASE_URL"].rstrip("/")
         measured = getattr(_local, "session", None) and endpoint == agent
+        if endpoint == agent:
+            # A lost reply may follow a committed stateful generation.
+            resource._client.max_retries = 0
         if measured:
             extra = dict(kwargs.get("extra_body") or {})
             if native_mode():

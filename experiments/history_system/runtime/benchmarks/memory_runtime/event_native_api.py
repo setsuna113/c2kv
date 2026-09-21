@@ -18,6 +18,7 @@ from urllib.parse import urlsplit
 from .event_native import EventStore
 from .always_compress import CapacityInfeasible
 from .event_native_controls import describe_event_native_route
+from .tokenization import serving_tools
 
 
 _REQUEST_FIELDS = frozenset({
@@ -456,6 +457,14 @@ class EventNativeAPI:
             except (TypeError, ValueError, RuntimeError) as error:
                 raise EventNativeAPIError(400, "invalid_tool_spans", str(error)) from error
             source_tool_spans = copy.deepcopy(payload["c2kv_tool_spans_v1"])
+        model_tools = tool_snapshot
+        if self.tool_memory_contract is None:
+            try:
+                # Match the full SGLang chat-template tool prologue. Tool-memory
+                # routes consume the original catalog as algorithm input.
+                model_tools = serving_tools(tool_snapshot) or []
+            except (KeyError, TypeError, ValueError) as error:
+                raise EventNativeAPIError(400, "invalid_tools", str(error)) from error
 
         # Event IDs are rendered into exact evidence, so their session prefix
         # must be stable across independently hosted arm/run processes.  The
@@ -469,7 +478,7 @@ class EventNativeAPI:
                 task_id=task_id, user_turn=user_turn, step=step
             ),
             "messages": message_snapshot,
-            "tools": tool_snapshot,
+            "tools": model_tools,
             **source_fields,
         }
         if source_tool_spans is not None:

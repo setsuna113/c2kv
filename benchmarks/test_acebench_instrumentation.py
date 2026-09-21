@@ -14,13 +14,17 @@ def test_official_task_request_action_join_and_user_isolation(tmp_path, monkeypa
         return SimpleNamespace(c2kv_proxy={"request_id": "request-1"})
     call = hook.request_wrapper(create)
     execute = hook.execution_wrapper(lambda: "official execution result")
+    user_client = SimpleNamespace(base_url="http://user/v1", max_retries=2)
+    agent_client = SimpleNamespace(base_url="http://agent/v1/", max_retries=2)
     @hook.task_wrapper
     def episode(test_id):
-        call(SimpleNamespace(_client=SimpleNamespace(base_url="http://user/v1")), messages=[])
-        call(SimpleNamespace(_client=SimpleNamespace(base_url="http://agent/v1/")), messages=[])
+        call(SimpleNamespace(_client=user_client), messages=[])
+        call(SimpleNamespace(_client=agent_client), messages=[])
         return execute()
     assert episode("agent_multi_turn_1") == "official execution result"
     assert "extra_body" not in requests[0]
+    assert user_client.max_retries == 2
+    assert agent_client.max_retries == 0
     rows = [json.loads(line) for line in output.read_text().splitlines()]
     assert requests[1]["extra_body"]["c2kv_measurement_session_id"] == rows[0]["session_id"]
     action = next(row for row in rows if row["event_type"] == "tool_action")
