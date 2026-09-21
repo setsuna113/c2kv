@@ -29,7 +29,7 @@ class CandidateRecoveryController(EventNativeRecoveryController):
     stable_call_ids = True
     max_recovery_rounds = 1
 
-    def __init__(self, base, config, *, risk_model=None):
+    def __init__(self, base, config, *, risk_model=None, completion_review_enabled=True):
         variant = config.get("variant")
         if variant not in VARIANTS:
             raise ValueError("Unknown candidate algorithm")
@@ -40,6 +40,7 @@ class CandidateRecoveryController(EventNativeRecoveryController):
         super().__init__(base, {"schema": E1_RECOVERY_VERSION, "gate": "disabled"},
                          benchmark=base.benchmark)
         self.variant = variant
+        self.completion_review_enabled = completion_review_enabled
         # Keep legacy recovery behavior unchanged while carrying the actual
         # C1 bridge into candidate-only replacement views.
         self.base.preserve_candidate_derived_messages = True
@@ -129,7 +130,7 @@ class CandidateRecoveryController(EventNativeRecoveryController):
                             "threshold": self.threshold, "triggered": triggered,
                             "reason": "risk_triggered" if triggered else "risk_not_above_threshold"}
         review_reason, review_key, goal, records = (None, None, None, None)
-        if self.variant == "goal_rescue":
+        if self.variant == "goal_rescue" and self.completion_review_enabled:
             review_reason, review_key, goal, records = self._goal_review_request(
                 prepared, draft_tool_calls, parse_error=parse_error)
             state_key = (key[0], review_key)

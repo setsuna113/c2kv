@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from experiments.history_system.candidate_algorithms import (
+    C1_V2_VARIANTS, C1_V2_VERSION, c1_v2_fields,
     INITIAL_VIEW_VARIANTS, INITIAL_VIEW_VERSION, initial_view_fields,
     STATIC_EXTENSION_VARIANTS, STATIC_EXTENSION_VERSION,
 )
@@ -97,7 +98,48 @@ def test_candidate_matrix_defaults_to_bfcl_base_and_explicitly_adds_acebench(tmp
         with_candidate_methods(original, ("static_t02",), ("unknown_benchmark",))
 
 
-@pytest.mark.parametrize("variants", [VERIFIED_VARIANTS, INITIAL_VIEW_VARIANTS, STATIC_EXTENSION_VARIANTS])
+def test_c1_v2_requires_named_opt_in_and_dispatches_native_budget_sweeps(tmp_path):
+    variant = "c1_v2_verified"
+    arm = "c2kv_c1_v2_verified_r8"
+    original = json.loads(runner.DEFAULT_CONFIG.read_text())
+    assert variant not in parse_candidate_arms("all")
+    assert parse_candidate_arms(variant) == (variant,)
+    assert c1_v2_fields(variant) == {
+        "initial_view": {
+            "policy": "s0_capacity_fallback",
+            "version": "c2kv-s0-capacity-fallback-v1",
+        },
+        "recovery_backbone": "t02_complete_event",
+        "completion_review": False,
+        "proof_registry_version": "verified-binding-rules-v1",
+    }
+    with pytest.raises(ValueError, match="unknown C1 v2"):
+        c1_v2_fields("static_verified_v2")
+
+    config = with_candidate_methods(original, (variant,))
+    assert get_arm(arm).native_controller == "candidate_c1_v2_verified"
+    for budget in (256, 128, 64):
+        config = runner.with_native_history_budget(config, arm, budget)
+    plan, profile = runner.prepare(config, tmp_path / "paper", tmp_path / "sglang")
+    rows = {row["cell_id"]: row for row in plan if row["arm"] == arm}
+    assert set(rows) == {
+        f"bfcl_base__{arm}",
+        f"bfcl_base__{arm}_b256",
+        f"bfcl_base__{arm}_b128",
+        f"bfcl_base__{arm}_b64",
+    }
+    for budget in (256, 128, 64):
+        row = rows[f"bfcl_base__{arm}_b{budget}"]
+        argv = runner.run_command(
+            config, row, tmp_path / row["cell_id"], profile, "closed_loop")
+        assert argv[argv.index("--arm") + 1] == arm
+        assert argv[argv.index("--history-budget-tokens") + 1] == str(budget)
+
+
+@pytest.mark.parametrize("variants", [
+    VERIFIED_VARIANTS, INITIAL_VIEW_VARIANTS, STATIC_EXTENSION_VARIANTS,
+    C1_V2_VARIANTS,
+])
 def test_new_arms_require_named_opt_in_and_support_bfcl_appworld_ace(tmp_path, variants):
     original = json.loads(runner.DEFAULT_CONFIG.read_text())
     assert not set(variants) & set(parse_candidate_arms("all"))
@@ -147,7 +189,10 @@ def test_candidate_delivery_uses_ratio8_and_bound_artifact(tmp_path, monkeypatch
         artifact.write_text('{"artifact": "t02"}', encoding="utf-8")
         selected = {"ratio": 8, "checkpoint_selection": {
             "config_sha256": hashlib.sha256(b"{}").hexdigest()}}
-        base = {"view_mode": "native_s0", "gp_experiments": {},
+        base = {"view_mode": "native_s0",
+                "observed_entity_slot_policy":
+                    "same-complete-event-reference-bridge-only-v1",
+                "gp_experiments": {},
                 "post_draft_recovery": {}, "d3_hybrid_recovery": {}}
         monkeypatch.setattr(delivery.current, "load_config", lambda: selected)
         monkeypatch.setattr(delivery.evidence_sets, "_base_controller", lambda: base)
@@ -157,15 +202,22 @@ def test_candidate_delivery_uses_ratio8_and_bound_artifact(tmp_path, monkeypatch
         monkeypatch.setattr(delivery, "bind_risk_artifact",
                             lambda source, path: (dict(source, bound=True), {"checkpoint": str(path)}))
         controller, profile = delivery.build_profile(args)
-        assert controller == {"view_mode": "native_s0", "candidate_algorithm": {
+        assert controller == {
+            "view_mode": "native_s0",
+            "observed_entity_slot_policy":
+                "same-complete-event-reference-bridge-only-v1",
+            "candidate_algorithm": {
             "variant": variant, "risk_artifact": {"artifact": "t02", "bound": True},
             "risk_threshold": 0.5,
             **({"proof_registry_version": "verified-binding-rules-v1"}
                if variant in VERIFIED_VARIANTS else {}),
-            **initial_view_fields(variant)}}
+            **initial_view_fields(variant),
+            **(c1_v2_fields(variant) if variant in C1_V2_VARIANTS else {})}}
         assert profile["candidate_algorithm"] == variant
         assert profile["schema"] == ("c2kv-candidate-delivery-profile-v6"
                                      if variant in STATIC_EXTENSION_VARIANTS else
+                                     "c2kv-candidate-delivery-profile-v7"
+                                     if variant in C1_V2_VARIANTS else
                                      "c2kv-candidate-delivery-profile-v5"
                                      if variant in INITIAL_VIEW_VARIANTS else
                                      "c2kv-candidate-delivery-profile-v4"
@@ -175,6 +227,8 @@ def test_candidate_delivery_uses_ratio8_and_bound_artifact(tmp_path, monkeypatch
                                      "c2kv-candidate-delivery-profile-v1")
         assert profile["selection_protocol"] == (STATIC_EXTENSION_VERSION
                                                   if variant in STATIC_EXTENSION_VARIANTS else
+                                                  C1_V2_VERSION
+                                                  if variant in C1_V2_VARIANTS else
                                                   INITIAL_VIEW_VERSION
                                                   if variant in INITIAL_VIEW_VARIANTS else
                                                   "c2kv-verified-binding-v1"
@@ -182,8 +236,10 @@ def test_candidate_delivery_uses_ratio8_and_bound_artifact(tmp_path, monkeypatch
                                                   "c2kv-goal-composition-v1"
                                                   if variant in GOAL_VARIANTS else
                                                   "candidate_algorithm_v1")
-        if variant in VERIFIED_VARIANTS or initial_view_fields(variant).get("proof_registry_version"):
-            expected_proof = initial_view_fields(variant).get("proof_registry_version", "verified-binding-rules-v1")
+        candidate_fields = (c1_v2_fields(variant) if variant in C1_V2_VARIANTS
+                            else initial_view_fields(variant))
+        if variant in VERIFIED_VARIANTS or candidate_fields.get("proof_registry_version"):
+            expected_proof = candidate_fields.get("proof_registry_version", "verified-binding-rules-v1")
             assert controller["candidate_algorithm"]["proof_registry_version"] == expected_proof
             assert profile["proof_registry_version"] == expected_proof
             without_proof = copy.deepcopy(controller)
@@ -194,8 +250,8 @@ def test_candidate_delivery_uses_ratio8_and_bound_artifact(tmp_path, monkeypatch
         else:
             assert "proof_registry_version" not in controller["candidate_algorithm"]
             assert "proof_registry_version" not in profile
-        if variant in INITIAL_VIEW_VARIANTS + STATIC_EXTENSION_VARIANTS:
-            for key, value in initial_view_fields(variant).items():
+        if variant in INITIAL_VIEW_VARIANTS + STATIC_EXTENSION_VARIANTS + C1_V2_VARIANTS:
+            for key, value in candidate_fields.items():
                 assert profile[key] == value
                 changed = copy.deepcopy(controller)
                 del changed["candidate_algorithm"][key]
@@ -350,7 +406,8 @@ def test_repair_acceptance_does_not_require_t02_scores(tmp_path):
         "request_contract")["required"].values())
 
 
-@pytest.mark.parametrize("variant", GOAL_VARIANTS + VERIFIED_VARIANTS + INITIAL_VIEW_VARIANTS + STATIC_EXTENSION_VARIANTS)
+@pytest.mark.parametrize("variant", GOAL_VARIANTS + VERIFIED_VARIANTS + INITIAL_VIEW_VARIANTS
+                         + STATIC_EXTENSION_VARIANTS + C1_V2_VARIANTS)
 def test_goal_acceptance_requires_frozen_risk_and_distinct_version(tmp_path, variant):
     delivery = c1.load_delivery()
     shard = tmp_path / "server"
@@ -359,6 +416,7 @@ def test_goal_acceptance_requires_frozen_risk_and_distinct_version(tmp_path, var
         "ratio": 8,
         "exact_recovery": {
             "version": (STATIC_EXTENSION_VERSION if variant in STATIC_EXTENSION_VARIANTS else
+                        C1_V2_VERSION if variant in C1_V2_VARIANTS else
                         INITIAL_VIEW_VERSION if variant in INITIAL_VIEW_VARIANTS else
                         "c2kv-verified-binding-v1" if variant in VERIFIED_VARIANTS
                         else "c2kv-goal-composition-v1"), "variant": variant,

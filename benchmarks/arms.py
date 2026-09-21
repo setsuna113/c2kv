@@ -519,6 +519,14 @@ ARMS: Dict[str, Arm] = {
             description="Ratio-8 Static-T02 with source-backed action receipts and STOP review",
         ),
         Arm(
+            name="c2kv_c1_v2_verified_r8",
+            compress_history=True,
+            ratio=8,
+            query_projection="base",
+            native_controller="candidate_c1_v2_verified",
+            description="Ratio-8 S0 capacity fallback with T02 complete-event recovery and verified commits",
+        ),
+        Arm(
             name="hiagent",
             compress_history=False,
             text_policy="hiagent",

@@ -137,6 +137,7 @@ def build_event_native_controller(
         from .candidate_algorithms import (
             ALL_VARIANTS, GOAL_VARIANTS, INITIAL_VIEW_VARIANTS,
             REPAIR_VARIANTS, VERIFIED_VARIANTS, STATIC_EXTENSION_VARIANTS,
+            C1_V2_VARIANTS,
         )
         from .event_native_s0_policy import S0_CONFIG_DEFAULTS
 
@@ -148,6 +149,14 @@ def build_event_native_controller(
             raise ValueError("Invalid candidate_algorithm configuration")
         if {"gp_experiments", "post_draft_recovery", "d3_hybrid_recovery"} & set(config):
             raise ValueError("Candidate algorithms cannot stack legacy recovery wrappers")
+        if candidate["variant"] in C1_V2_VARIANTS:
+            from .candidate_algorithms.c1_v2 import build_c1_v2
+            describe_event_native_route(
+                view_mode, compression_policy=compression_policy,
+                history_view_protocol=history_view_protocol)
+            return build_c1_v2(
+                tokenizer, candidate=candidate, packing=packing, policy=policy,
+                model_context=model_context, s0_config=config, benchmark=benchmark)
         if candidate["variant"] in STATIC_EXTENSION_VARIANTS:
             from .candidate_algorithms.static_extensions import build_static_extension
             describe_event_native_route(

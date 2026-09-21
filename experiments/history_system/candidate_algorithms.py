@@ -28,9 +28,25 @@ INITIAL_VIEW_VERSION = "c2kv-initial-view-composition-v1"
 INITIAL_VIEW_POLICY_VERSION = "c2kv-static-initial-view-v1"
 STATIC_EXTENSION_VARIANTS = ("static_verified", "static_action_ledger", "static_verified_v2")
 STATIC_EXTENSION_VERSION = "c2kv-static-extension-v1"
+C1_V2_VARIANTS = ("c1_v2_verified",)
+C1_V2_VERSION = "c2kv-c1-v2-verified-v1"
 ALL_VARIANTS = (VARIANTS + REPAIR_VARIANTS + GOAL_VARIANTS + VERIFIED_VARIANTS
-                + INITIAL_VIEW_VARIANTS + STATIC_EXTENSION_VARIANTS)
+                + INITIAL_VIEW_VARIANTS + STATIC_EXTENSION_VARIANTS + C1_V2_VARIANTS)
 RATIO = 8
+
+
+def c1_v2_fields(variant: str) -> dict[str, Any]:
+    if variant not in C1_V2_VARIANTS:
+        raise ValueError("unknown C1 v2 candidate")
+    return {
+        "initial_view": {
+            "policy": "s0_capacity_fallback",
+            "version": "c2kv-s0-capacity-fallback-v1",
+        },
+        "recovery_backbone": "t02_complete_event",
+        "completion_review": False,
+        "proof_registry_version": PROOF_REGISTRY_VERSION,
+    }
 
 
 def initial_view_fields(variant: str) -> dict[str, Any]:
@@ -131,6 +147,7 @@ def build_profile(
         **({"proof_registry_version": PROOF_REGISTRY_VERSION}
            if variant in VERIFIED_VARIANTS else {}),
         **initial_view_fields(variant),
+        **(c1_v2_fields(variant) if variant in C1_V2_VARIANTS else {}),
     }
     profile = {
         "schema": "c2kv-candidate-delivery-profile-v1",
@@ -168,4 +185,8 @@ def build_profile(
         profile["schema"] = "c2kv-candidate-delivery-profile-v6"
         profile["selection_protocol"] = STATIC_EXTENSION_VERSION
         profile.update(initial_view_fields(variant))
+    elif variant in C1_V2_VARIANTS:
+        profile["schema"] = "c2kv-candidate-delivery-profile-v7"
+        profile["selection_protocol"] = C1_V2_VERSION
+        profile.update(c1_v2_fields(variant))
     return controller, profile

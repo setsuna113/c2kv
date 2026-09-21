@@ -584,7 +584,8 @@ def summarize_task(benchmark: str, task: str, task_out: Path, official: Mapping[
         if decision.get("version") in {
             "c2kv-paper-candidates-v1", "c2kv-source-repair-v1",
             "c2kv-goal-composition-v1", "c2kv-verified-binding-v1",
-            "c2kv-initial-view-composition-v1", "c2kv-static-extension-v1"}
+            "c2kv-initial-view-composition-v1", "c2kv-static-extension-v1",
+            "c2kv-c1-v2-verified-v1"}
     ]
     candidate_traces = [
         trace for trace in traces
@@ -913,7 +914,8 @@ def build_parser() -> argparse.ArgumentParser:
                  "goal_pending", "goal_source", "goal_progress", "goal_joint",
                  "goal_verified", "pending_verified", "goal_static", "pending_static",
                  "goal_verified_static", "pending_verified_static",
-                 "static_verified", "static_action_ledger", "static_verified_v2"),
+                 "static_verified", "static_action_ledger", "static_verified_v2",
+                 "c1_v2_verified"),
         default=None,
     )
     parser.add_argument("--selector-artifact", type=Path,

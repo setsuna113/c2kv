@@ -155,7 +155,12 @@ def event_encoder_messages(store: EventStore, event_id: str) -> tuple[dict[str, 
     return ({"role": "user", "content": json.dumps(envelope, ensure_ascii=False, separators=(",", ":"), allow_nan=False)},)
 
 
-def raw_workspace_messages(store: EventStore, view: MemoryView) -> tuple[dict[str, Any], ...]:
+def raw_workspace_messages(
+    store: EventStore,
+    view: MemoryView,
+    *,
+    source_message_overrides: Mapping[int, Mapping[str, Any]] | None = None,
+) -> tuple[dict[str, Any], ...]:
     """Place A's shared evidence packet before the native current workspace.
 
     Evidence-owned messages appear only inside that packet. System messages
@@ -168,7 +173,17 @@ def raw_workspace_messages(store: EventStore, view: MemoryView) -> tuple[dict[st
     view.validate(store)
     native_events = set(view.raw_event_ids) - set(view.evidence_event_ids)
     native_indices = sorted({index for event in store.events if event.event_id in native_events for index in event.source_indices})
-    messages = [visible_message(store.messages[index]) for index in native_indices]
+    overrides = dict(source_message_overrides or {})
+    unknown = set(overrides) - set(native_indices)
+    if unknown:
+        raise ValueError(
+            "Raw message overrides must belong to the selected native raw view: "
+            f"{sorted(unknown)!r}"
+        )
+    messages = [
+        visible_message(overrides.get(index, store.messages[index]))
+        for index in native_indices
+    ]
     evidence = evidence_message(store, view.evidence_event_ids)
     if evidence is not None:
         prefix_length = 0
@@ -699,6 +714,7 @@ def pack_memory(
     encoding_scope: str = "current",
     atomic_unit_token_limit: int | None = None,
     encoding_event_groups: Sequence[Sequence[str]] | None = None,
+    raw_source_message_overrides: Mapping[int, Mapping[str, Any]] | None = None,
 ) -> PackedMemory:
     """Pack all selected content or raise; no first-plus-tail selection occurs.
 
@@ -733,7 +749,14 @@ def pack_memory(
     if max_chunks is not None and len(chunks) > max_chunks:
         raise PackingBudgetError(f"Complete events need {len(chunks)} chunks; budget is {max_chunks}")
     raw_indices = tuple(sorted({index for event in store.events if event.event_id in view.raw_event_ids for index in event.source_indices}))
-    raw_messages = list(raw_workspace_messages(store, view))
+    active_overrides = {
+        index: message
+        for index, message in dict(raw_source_message_overrides or {}).items()
+        if index in raw_indices
+    }
+    raw_messages = list(raw_workspace_messages(
+        store, view, source_message_overrides=active_overrides
+    ))
     if not raw_messages:
         raise ValueError("A decision view requires an observable raw message")
     # Derived observations belong to the charged workspace, never the source

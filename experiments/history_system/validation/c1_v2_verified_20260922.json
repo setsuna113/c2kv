@@ -1,0 +1,579 @@
+{
+  "schema": "c2kv-c1-v2-verified-validation-v1",
+  "created_at": "2026-09-21T23:14:03.774874+00:00",
+  "variant": "c1_v2_verified",
+  "arm": "c2kv_c1_v2_verified_r8",
+  "algorithm_version": "c2kv-c1-v2-verified-v1",
+  "initial_view_version": "c2kv-s0-capacity-fallback-v1",
+  "proof_registry_version": "verified-binding-rules-v1",
+  "recovery_backbone": "t02_complete_event",
+  "completion_review": false,
+  "paper_base": "3a2d0f3dcc73f676bd0c8cc08cd5cf196afe67c6",
+  "npu_base": "94d147cb6e6974775c93ffd840d2994046ea2f8f",
+  "tests": {
+    "paper_runtime": {
+      "cwd": "C:\\Users\\yl998\\Documents\\programming\\c2kv\\scratchpad\\c1_verified_budget_20260921\\paper\\experiments\\history_system\\runtime",
+      "command": [
+        "C:\\Users\\yl998\\Documents\\programming\\c2kv\\.venv\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "-q",
+        "benchmarks/memory_runtime/tests/test_capacity_fallback.py",
+        "benchmarks/memory_runtime/tests/test_c1_v2_verified.py",
+        "benchmarks/memory_runtime/tests/test_candidate_allocation.py",
+        "benchmarks/memory_runtime/tests/test_candidate_recovery.py",
+        "benchmarks/memory_runtime/tests/test_verified_controller.py",
+        "benchmarks/memory_runtime/tests/test_verified_binding.py",
+        "benchmarks/memory_runtime/tests/test_goal_composition.py",
+        "benchmarks/memory_runtime/tests/test_initial_view_composition.py",
+        "benchmarks/memory_runtime/tests/test_static_extensions.py",
+        "benchmarks/memory_runtime/tests/test_event_native_server.py",
+        "benchmarks/memory_runtime/tests/test_budget_guard.py",
+        "benchmarks/memory_runtime/tests/test_generation_cap.py",
+        "benchmarks/memory_runtime/tests/test_event_native_bfcl.py"
+      ],
+      "returncode": 0,
+      "stdout": "........................................................................ [ 35%]\n...............................................................s........ [ 71%]\n.........................................................                [100%]\n200 passed, 1 skipped in 7.31s\n",
+      "stderr": ""
+    },
+    "paper_entry": {
+      "cwd": "C:\\Users\\yl998\\Documents\\programming\\c2kv\\scratchpad\\c1_verified_budget_20260921\\paper",
+      "command": [
+        "C:\\Users\\yl998\\Documents\\programming\\c2kv\\.venv\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "-q",
+        "benchmarks/paper/test_candidate_arms.py",
+        "benchmarks/paper/test_native_history_budget.py",
+        "benchmarks/paper/test_runner.py",
+        "benchmarks/test_matrix.py",
+        "experiments/history_system/test_current.py"
+      ],
+      "returncode": 0,
+      "stdout": "........................................................................ [ 66%]\n.....................................                                [100%]\n109 passed, 4 subtests passed in 3.32s\n",
+      "stderr": ""
+    },
+    "npu_runtime": {
+      "cwd": "C:\\Users\\yl998\\Documents\\programming\\c2kv\\scratchpad\\c1_verified_budget_20260921\\npu\\controller_runtime",
+      "command": [
+        "C:\\Users\\yl998\\Documents\\programming\\c2kv\\.venv\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "-q",
+        "benchmarks/memory_runtime/tests/test_capacity_fallback.py",
+        "benchmarks/memory_runtime/tests/test_c1_v2_verified.py",
+        "benchmarks/memory_runtime/tests/test_budget_guard.py"
+      ],
+      "returncode": 0,
+      "stdout": ".................................                                        [100%]\n33 passed in 1.09s\n",
+      "stderr": ""
+    },
+    "npu_entry": {
+      "cwd": "C:\\Users\\yl998\\Documents\\programming\\c2kv\\scratchpad\\c1_verified_budget_20260921\\npu",
+      "command": [
+        "C:\\Users\\yl998\\Documents\\programming\\c2kv\\.venv\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "-q",
+        "tests/test_c2kv_candidate_cell.py",
+        "tests/test_cellplan_preflight.py",
+        "tests/test_tau2_matrix.py",
+        "tests/test_toolsandbox_tcr.py"
+      ],
+      "returncode": 0,
+      "stdout": "........................................................................ [ 32%]\n........................................................................ [ 64%]\n........................................................................ [ 96%]\n.........                                                                [100%]\n225 passed in 5.76s\n",
+      "stderr": ""
+    }
+  },
+  "skip_reason": "One paper runtime test requires POSIX process groups; host is Windows",
+  "legacy_entrypoint_compatibility": {
+    "status": "passed",
+    "paper_base": "3a2d0f3",
+    "npu_base": "94d147c",
+    "legacy_variants": [
+      {
+        "variant": "static_t02",
+        "paper_profile_controller_identical": true,
+        "npu_cell_controller_identical": true
+      },
+      {
+        "variant": "turn_c1",
+        "paper_profile_controller_identical": true,
+        "npu_cell_controller_identical": true
+      },
+      {
+        "variant": "goal_rescue",
+        "paper_profile_controller_identical": true,
+        "npu_cell_controller_identical": true
+      },
+      {
+        "variant": "dependency_first",
+        "paper_profile_controller_identical": true,
+        "npu_cell_controller_identical": true
+      },
+      {
+        "variant": "request_contract",
+        "paper_profile_controller_identical": true,
+        "npu_cell_controller_identical": true
+      },
+      {
+        "variant": "argument_binding",
+        "paper_profile_controller_identical": true,
+        "npu_cell_controller_identical": true
+      },
+      {
+        "variant": "no_progress",
+        "paper_profile_controller_identical": true,
+        "npu_cell_controller_identical": true
+      },
+      {
+        "variant": "goal_pending",
+        "paper_profile_controller_identical": true,
+        "npu_cell_controller_identical": true
+      },
+      {
+        "variant": "goal_source",
+        "paper_profile_controller_identical": true,
+        "npu_cell_controller_identical": true
+      },
+      {
+        "variant": "goal_progress",
+        "paper_profile_controller_identical": true,
+        "npu_cell_controller_identical": true
+      },
+      {
+        "variant": "goal_joint",
+        "paper_profile_controller_identical": true,
+        "npu_cell_controller_identical": true
+      },
+      {
+        "variant": "goal_verified",
+        "paper_profile_controller_identical": true,
+        "npu_cell_controller_identical": true
+      },
+      {
+        "variant": "pending_verified",
+        "paper_profile_controller_identical": true,
+        "npu_cell_controller_identical": true
+      },
+      {
+        "variant": "goal_static",
+        "paper_profile_controller_identical": true,
+        "npu_cell_controller_identical": true
+      },
+      {
+        "variant": "pending_static",
+        "paper_profile_controller_identical": true,
+        "npu_cell_controller_identical": true
+      },
+      {
+        "variant": "goal_verified_static",
+        "paper_profile_controller_identical": true,
+        "npu_cell_controller_identical": true
+      },
+      {
+        "variant": "pending_verified_static",
+        "paper_profile_controller_identical": true,
+        "npu_cell_controller_identical": true
+      },
+      {
+        "variant": "static_verified",
+        "paper_profile_controller_identical": true,
+        "npu_cell_controller_identical": true
+      },
+      {
+        "variant": "static_action_ledger",
+        "paper_profile_controller_identical": true,
+        "npu_cell_controller_identical": true
+      },
+      {
+        "variant": "static_verified_v2",
+        "paper_profile_controller_identical": true,
+        "npu_cell_controller_identical": true
+      }
+    ],
+    "default_all_identical": true,
+    "default_all_count": 11
+  },
+  "runtime_port": [
+    {
+      "path": "benchmarks/memory_runtime/candidate_algorithms/__init__.py",
+      "mode": "identical_base_delta",
+      "paper_sha256": "effce90fe3fad0ddf4c2ca8cc9ee698cbe541d14e9e503f561c965a97c1f971d",
+      "npu_sha256": "effce90fe3fad0ddf4c2ca8cc9ee698cbe541d14e9e503f561c965a97c1f971d",
+      "byte_identical": true
+    },
+    {
+      "path": "benchmarks/memory_runtime/candidate_algorithms/c1_v2.py",
+      "mode": "new_shared_module",
+      "paper_sha256": "890b7d32607ba4490305f735ba9404773019fa2ee25d67895123c25d3042f176",
+      "npu_sha256": "890b7d32607ba4490305f735ba9404773019fa2ee25d67895123c25d3042f176",
+      "byte_identical": true
+    },
+    {
+      "path": "benchmarks/memory_runtime/candidate_algorithms/capacity_fallback.py",
+      "mode": "new_shared_module",
+      "paper_sha256": "b4bff41a865e258d765e94caf577f88ca65db47c96389ff86562a2074b7ae675",
+      "npu_sha256": "b4bff41a865e258d765e94caf577f88ca65db47c96389ff86562a2074b7ae675",
+      "byte_identical": true
+    },
+    {
+      "path": "benchmarks/memory_runtime/candidate_algorithms/controller.py",
+      "mode": "identical_base_delta",
+      "paper_sha256": "98e4faa3cd85e7a2219c707bf3574eb916ec693739a55323ded4a47ce943c198",
+      "npu_sha256": "98e4faa3cd85e7a2219c707bf3574eb916ec693739a55323ded4a47ce943c198",
+      "byte_identical": true
+    },
+    {
+      "path": "benchmarks/memory_runtime/candidate_algorithms/repacking.py",
+      "mode": "identical_base_delta",
+      "paper_sha256": "b5652dce537d27b6e6247167e0888a7113458fac78b729a94943ff5cc9dd47a0",
+      "npu_sha256": "b5652dce537d27b6e6247167e0888a7113458fac78b729a94943ff5cc9dd47a0",
+      "byte_identical": true
+    },
+    {
+      "path": "benchmarks/memory_runtime/candidate_algorithms/verified_commit.py",
+      "mode": "new_shared_module",
+      "paper_sha256": "f3e6f25266d26ad111e967b0cac86d652572ba5195a404a434701918ab438d4c",
+      "npu_sha256": "f3e6f25266d26ad111e967b0cac86d652572ba5195a404a434701918ab438d4c",
+      "byte_identical": true
+    },
+    {
+      "path": "benchmarks/memory_runtime/event_native_controls.py",
+      "mode": "three_way_preserving_npu_extensions",
+      "paper_sha256": "ae588f83c03f5af6ad8e19a56fca60010edb61b005377268866e0e23a6b85f12",
+      "npu_sha256": "7779848878ad45419e3d88c60506373f3875a703e15f5528ca265f2f72947e21",
+      "byte_identical": false
+    },
+    {
+      "path": "benchmarks/memory_runtime/event_native_s0_policy.py",
+      "mode": "combined_npu_recovery_caps_and_scoped_measurement_ratios",
+      "paper_sha256": "f91a8fbc15790e1fe6f50b397726487f109221975df77dead1b32a20dcab7dad",
+      "npu_sha256": "756c8e8b324e0eb8db08c0adfa149fdb33beb017e79b6e7c9b32c41fc34368ab",
+      "byte_identical": false
+    },
+    {
+      "path": "benchmarks/memory_runtime/event_native_server.py",
+      "mode": "three_way_preserving_npu_extensions",
+      "paper_sha256": "19ca0e81ebd54975e2d308f20e08d43a5a56dfc137689e8d7b6c93c4bb8d903f",
+      "npu_sha256": "a846a21261a7e70fa61730ee1eee67c7a4e85f114e3d290b8e18fcb2f14c2be9",
+      "byte_identical": false
+    },
+    {
+      "path": "benchmarks/memory_runtime/tests/test_c1_v2_verified.py",
+      "mode": "new_shared_module",
+      "paper_sha256": "de8a2fbd5556209d62bae6315bee9aef477c1ad2da5f2037f481c00637ebe7f8",
+      "npu_sha256": "de8a2fbd5556209d62bae6315bee9aef477c1ad2da5f2037f481c00637ebe7f8",
+      "byte_identical": true
+    },
+    {
+      "path": "benchmarks/memory_runtime/tests/test_capacity_fallback.py",
+      "mode": "new_shared_module",
+      "paper_sha256": "3d29a1f6c57df2d0af1edf665680e44855b683cd2db5ec210c5983f56761ba64",
+      "npu_sha256": "3d29a1f6c57df2d0af1edf665680e44855b683cd2db5ec210c5983f56761ba64",
+      "byte_identical": true
+    },
+    {
+      "path": "python/history_memory/packing.py",
+      "mode": "three_way_preserving_npu_extensions",
+      "paper_sha256": "17a3d035b4db734eb31fa5ced7b0466fff4a29f35a6702ae9e54b43ee103e536",
+      "npu_sha256": "7e794f844077be0ee1a71bd300773429ab7d04b3d197b81cee9a0e99be96d483",
+      "byte_identical": false
+    }
+  ],
+  "npu_existing_recovery_caps_and_platform_extensions_preserved": true,
+  "source_sha256_normalized_lf": {
+    "paper": {
+      "benchmarks/arms.py": "b6e957873733af42d15ad28db2ac1c69713e481f958d242b415a728cd7ddabcf",
+      "benchmarks/paper/candidate_matrix.py": "431d3b22b6029760abb78300ce38e54c1797526e9ce60717b6c404cc55ae5bee",
+      "benchmarks/paper/runner.py": "940450862ac2e5ecda143046e33841c318460f03618364b9afd21e071aa39287",
+      "benchmarks/paper/test_candidate_arms.py": "a8d91fb36bf0f6b560dc3d4bea06bbf6d3ffe3c87210e0daf34d4a929f8c676e",
+      "experiments/history_system/candidate_algorithms.py": "be4d699472f9ddd286abec078fa8afb7cc471b35388cfe898ab705f0a26040a8",
+      "experiments/history_system/run_c1.py": "3e54f0e632855e75429cb0c3862aac4164451a9dabf3e9da7fb295c6e2321646",
+      "experiments/history_system/runtime/benchmarks/memory_runtime/candidate_algorithms/__init__.py": "effce90fe3fad0ddf4c2ca8cc9ee698cbe541d14e9e503f561c965a97c1f971d",
+      "experiments/history_system/runtime/benchmarks/memory_runtime/candidate_algorithms/c1_v2.py": "890b7d32607ba4490305f735ba9404773019fa2ee25d67895123c25d3042f176",
+      "experiments/history_system/runtime/benchmarks/memory_runtime/candidate_algorithms/capacity_fallback.py": "b4bff41a865e258d765e94caf577f88ca65db47c96389ff86562a2074b7ae675",
+      "experiments/history_system/runtime/benchmarks/memory_runtime/candidate_algorithms/controller.py": "98e4faa3cd85e7a2219c707bf3574eb916ec693739a55323ded4a47ce943c198",
+      "experiments/history_system/runtime/benchmarks/memory_runtime/candidate_algorithms/repacking.py": "b5652dce537d27b6e6247167e0888a7113458fac78b729a94943ff5cc9dd47a0",
+      "experiments/history_system/runtime/benchmarks/memory_runtime/candidate_algorithms/verified_commit.py": "f3e6f25266d26ad111e967b0cac86d652572ba5195a404a434701918ab438d4c",
+      "experiments/history_system/runtime/benchmarks/memory_runtime/event_native_controls.py": "ae588f83c03f5af6ad8e19a56fca60010edb61b005377268866e0e23a6b85f12",
+      "experiments/history_system/runtime/benchmarks/memory_runtime/event_native_s0_policy.py": "f91a8fbc15790e1fe6f50b397726487f109221975df77dead1b32a20dcab7dad",
+      "experiments/history_system/runtime/benchmarks/memory_runtime/event_native_server.py": "19ca0e81ebd54975e2d308f20e08d43a5a56dfc137689e8d7b6c93c4bb8d903f",
+      "experiments/history_system/runtime/benchmarks/memory_runtime/tests/test_c1_v2_verified.py": "de8a2fbd5556209d62bae6315bee9aef477c1ad2da5f2037f481c00637ebe7f8",
+      "experiments/history_system/runtime/benchmarks/memory_runtime/tests/test_capacity_fallback.py": "3d29a1f6c57df2d0af1edf665680e44855b683cd2db5ec210c5983f56761ba64",
+      "experiments/history_system/runtime/python/history_memory/packing.py": "17a3d035b4db734eb31fa5ced7b0466fff4a29f35a6702ae9e54b43ee103e536"
+    },
+    "npu": {
+      "controller_runtime/benchmarks/memory_runtime/candidate_algorithms/__init__.py": "effce90fe3fad0ddf4c2ca8cc9ee698cbe541d14e9e503f561c965a97c1f971d",
+      "controller_runtime/benchmarks/memory_runtime/candidate_algorithms/c1_v2.py": "890b7d32607ba4490305f735ba9404773019fa2ee25d67895123c25d3042f176",
+      "controller_runtime/benchmarks/memory_runtime/candidate_algorithms/capacity_fallback.py": "b4bff41a865e258d765e94caf577f88ca65db47c96389ff86562a2074b7ae675",
+      "controller_runtime/benchmarks/memory_runtime/candidate_algorithms/controller.py": "98e4faa3cd85e7a2219c707bf3574eb916ec693739a55323ded4a47ce943c198",
+      "controller_runtime/benchmarks/memory_runtime/candidate_algorithms/repacking.py": "b5652dce537d27b6e6247167e0888a7113458fac78b729a94943ff5cc9dd47a0",
+      "controller_runtime/benchmarks/memory_runtime/candidate_algorithms/verified_commit.py": "f3e6f25266d26ad111e967b0cac86d652572ba5195a404a434701918ab438d4c",
+      "controller_runtime/benchmarks/memory_runtime/event_native_controls.py": "7779848878ad45419e3d88c60506373f3875a703e15f5528ca265f2f72947e21",
+      "controller_runtime/benchmarks/memory_runtime/event_native_s0_policy.py": "756c8e8b324e0eb8db08c0adfa149fdb33beb017e79b6e7c9b32c41fc34368ab",
+      "controller_runtime/benchmarks/memory_runtime/event_native_server.py": "a846a21261a7e70fa61730ee1eee67c7a4e85f114e3d290b8e18fcb2f14c2be9",
+      "controller_runtime/benchmarks/memory_runtime/tests/test_c1_v2_verified.py": "de8a2fbd5556209d62bae6315bee9aef477c1ad2da5f2037f481c00637ebe7f8",
+      "controller_runtime/benchmarks/memory_runtime/tests/test_capacity_fallback.py": "3d29a1f6c57df2d0af1edf665680e44855b683cd2db5ec210c5983f56761ba64",
+      "controller_runtime/python/history_memory/packing.py": "7e794f844077be0ee1a71bd300773429ab7d04b3d197b81cee9a0e99be96d483",
+      "generality/c2kv_cell.py": "97d09696ae6df2ffb276d75a898d7b9cf94df0458c115a40c4660fe7b631420d",
+      "generality/candidate_cell.py": "009ea06025fb5f4adb5b355fa5ff648022255cf63d03e65a5244e4f1ad88a828",
+      "tests/test_c2kv_candidate_cell.py": "df8b765dc99700c687306645e65cc30978f1a691e1c168c47874a4278382dd14"
+    }
+  },
+  "real_tokenizer_probe": {
+    "validation": "CPU allocation only; synthetic prefix; no model generation or accuracy result",
+    "tokenizer_sha256": "be75606093db2094d7cd20f3c2f385c212750648bd6ea4fb2bf507a6a4c55506",
+    "chat_template_sha256": "64f85b198065d0fba2a81f37e10ed68161ce2c19a754c7100e67e0ca2ee9c326",
+    "cases": [
+      {
+        "history_budget_tokens": 256,
+        "old": "feasible",
+        "new": "feasible",
+        "actual_history_bytes": 218,
+        "fallback": null,
+        "budget_guard": {
+          "schema": "a-hybrid-pre-generation-budget-v1",
+          "phase": "draft",
+          "status": "passed",
+          "errors": [],
+          "history_budget_bytes": 256,
+          "active_history_bytes": 218,
+          "declared_active_history_bytes": 218,
+          "kv_bytes_per_token": 1,
+          "common_prompt_tokens": 18,
+          "resident_prompt_tokens": 236,
+          "resident_prompt_kv_bytes": 236,
+          "active_gist_bytes": 33,
+          "active_raw_and_derived_history_bytes": 185,
+          "scope": "Assembled BF16 KV representation at loaded-model geometry; excludes weights, allocator overhead and CPU/disk archives.",
+          "all_derived_workspace_content_charged": true
+        },
+        "incumbent_view_and_metadata_identical": true
+      },
+      {
+        "history_budget_tokens": 128,
+        "old": "capacity_infeasible",
+        "new": "feasible",
+        "actual_history_bytes": 63,
+        "fallback": {
+          "version": "c2kv-s0-capacity-fallback-v1",
+          "applied": true,
+          "stage": "omit_complete_tool_event_narrative",
+          "trigger": "initial_capacity_infeasible",
+          "initial_failure_type": "CapacityInfeasible",
+          "requested_ratio": 8,
+          "configured_ratios": [
+            4,
+            8
+          ],
+          "measurement_ratios": [
+            8
+          ],
+          "remove_duplicate_gist": true,
+          "removed_duplicate_gist_event_ids": [
+            "cpu-allocation-probe:m0"
+          ],
+          "narrative_projections": [
+            {
+              "event_id": "cpu-allocation-probe:m1",
+              "source_index": 1,
+              "result_source_indices": [
+                2
+              ],
+              "call_ids": [
+                "call-1"
+              ],
+              "removed_content_sha256": "c973fe0dfbdc2e58d3059767506f8dd638112282ae1d100596864edbf1dd4d1a",
+              "removed_content_utf8_bytes": 900,
+              "standalone_rendered_token_delta": 151,
+              "eligibility": "historical complete native tool-call event with one result bound to every immutable call ID"
+            }
+          ],
+          "projection_candidate_limit": 12,
+          "projection_attempt_limit": 23,
+          "projection_search": "all_singletons_by_ascending_removed_tokens_then_cumulative_largest_savings_prefixes",
+          "projection_search_globally_optimal": false,
+          "attempts": [
+            {
+              "stage": "requested_ratio_only",
+              "status": "infeasible",
+              "projected_source_indices": [],
+              "failure_type": "CapacityInfeasible",
+              "measured_raw_source_intersection": [
+                0,
+                1,
+                2
+              ]
+            },
+            {
+              "stage": "remove_redundant_gist",
+              "status": "infeasible",
+              "projected_source_indices": [],
+              "failure_type": "CapacityInfeasible",
+              "measured_raw_source_intersection": [
+                0,
+                1,
+                2
+              ]
+            },
+            {
+              "stage": "omit_complete_tool_event_narrative",
+              "status": "selected",
+              "projected_source_indices": [
+                1
+              ],
+              "removed_duplicate_gist_event_ids": [
+                "cpu-allocation-probe:m0"
+              ]
+            }
+          ],
+          "source_archive_unchanged": true,
+          "encoder_gist_inputs_unchanged": true,
+          "tool_calls_arguments_results_ids_order_unchanged": true,
+          "current_user_text_unchanged": true,
+          "field_or_token_truncation_used": false,
+          "new_model_calls": 0,
+          "common_raw_prompt_tokens": 18,
+          "rendered_raw_prompt_tokens": 52,
+          "actual_history_bytes": 63
+        },
+        "budget_guard": {
+          "schema": "a-hybrid-pre-generation-budget-v1",
+          "phase": "draft",
+          "status": "passed",
+          "errors": [],
+          "history_budget_bytes": 128,
+          "active_history_bytes": 63,
+          "declared_active_history_bytes": 63,
+          "kv_bytes_per_token": 1,
+          "common_prompt_tokens": 18,
+          "resident_prompt_tokens": 81,
+          "resident_prompt_kv_bytes": 81,
+          "active_gist_bytes": 29,
+          "active_raw_and_derived_history_bytes": 34,
+          "scope": "Assembled BF16 KV representation at loaded-model geometry; excludes weights, allocator overhead and CPU/disk archives.",
+          "all_derived_workspace_content_charged": true
+        }
+      },
+      {
+        "history_budget_tokens": 64,
+        "old": "capacity_infeasible",
+        "new": "feasible",
+        "actual_history_bytes": 63,
+        "fallback": {
+          "version": "c2kv-s0-capacity-fallback-v1",
+          "applied": true,
+          "stage": "omit_complete_tool_event_narrative",
+          "trigger": "initial_capacity_infeasible",
+          "initial_failure_type": "CapacityInfeasible",
+          "requested_ratio": 8,
+          "configured_ratios": [
+            4,
+            8
+          ],
+          "measurement_ratios": [
+            8
+          ],
+          "remove_duplicate_gist": true,
+          "removed_duplicate_gist_event_ids": [
+            "cpu-allocation-probe:m0"
+          ],
+          "narrative_projections": [
+            {
+              "event_id": "cpu-allocation-probe:m1",
+              "source_index": 1,
+              "result_source_indices": [
+                2
+              ],
+              "call_ids": [
+                "call-1"
+              ],
+              "removed_content_sha256": "c973fe0dfbdc2e58d3059767506f8dd638112282ae1d100596864edbf1dd4d1a",
+              "removed_content_utf8_bytes": 900,
+              "standalone_rendered_token_delta": 151,
+              "eligibility": "historical complete native tool-call event with one result bound to every immutable call ID"
+            }
+          ],
+          "projection_candidate_limit": 12,
+          "projection_attempt_limit": 23,
+          "projection_search": "all_singletons_by_ascending_removed_tokens_then_cumulative_largest_savings_prefixes",
+          "projection_search_globally_optimal": false,
+          "attempts": [
+            {
+              "stage": "requested_ratio_only",
+              "status": "infeasible",
+              "projected_source_indices": [],
+              "failure_type": "CapacityInfeasible",
+              "measured_raw_source_intersection": [
+                0,
+                1,
+                2
+              ]
+            },
+            {
+              "stage": "remove_redundant_gist",
+              "status": "infeasible",
+              "projected_source_indices": [],
+              "failure_type": "CapacityInfeasible",
+              "measured_raw_source_intersection": [
+                0,
+                1,
+                2
+              ]
+            },
+            {
+              "stage": "omit_complete_tool_event_narrative",
+              "status": "selected",
+              "projected_source_indices": [
+                1
+              ],
+              "removed_duplicate_gist_event_ids": [
+                "cpu-allocation-probe:m0"
+              ]
+            }
+          ],
+          "source_archive_unchanged": true,
+          "encoder_gist_inputs_unchanged": true,
+          "tool_calls_arguments_results_ids_order_unchanged": true,
+          "current_user_text_unchanged": true,
+          "field_or_token_truncation_used": false,
+          "new_model_calls": 0,
+          "common_raw_prompt_tokens": 18,
+          "rendered_raw_prompt_tokens": 52,
+          "actual_history_bytes": 63
+        },
+        "budget_guard": {
+          "schema": "a-hybrid-pre-generation-budget-v1",
+          "phase": "draft",
+          "status": "passed",
+          "errors": [],
+          "history_budget_bytes": 64,
+          "active_history_bytes": 63,
+          "declared_active_history_bytes": 63,
+          "kv_bytes_per_token": 1,
+          "common_prompt_tokens": 18,
+          "resident_prompt_tokens": 81,
+          "resident_prompt_kv_bytes": 81,
+          "active_gist_bytes": 29,
+          "active_raw_and_derived_history_bytes": 34,
+          "scope": "Assembled BF16 KV representation at loaded-model geometry; excludes weights, allocator overhead and CPU/disk archives.",
+          "all_derived_workspace_content_charged": true
+        }
+      }
+    ]
+  },
+  "cuda_availability": {
+    "checked_at": "2026-09-21T23:12:47.147930+00:00",
+    "returncode": 0,
+    "stdout": "0, GPU-db773cb4-fb9b-59ff-f49e-325501b03b6f, 34800, 0\n1, GPU-5b33d665-26a7-5f38-b15f-f2616530c8bc, 48218, 99\n2, GPU-30e23eb1-16ca-92be-31c6-3af1ca61e4a6, 34742, 0\n3, GPU-2eadf6ad-aae1-9dea-4e91-92593afc8cb9, 34742, 0\n",
+    "stderr": "Welcome to vast.ai. If authentication fails, try again after a few seconds, and double check your ssh key.\nHave fun!\n"
+  },
+  "validation_scope": "CPU policy/commit/entrypoint tests with mock risk and generation; real C1000 tokenizer synthetic-prefix allocation checks",
+  "cuda_model_smoke_run": false,
+  "npu_model_smoke_run": false,
+  "hardware_status": "m2 GPUs occupied; no model process launched or stopped",
+  "full_evaluation_started": false,
+  "algorithm_accuracy_result": null,
+  "optimality_claim": "Bounded conservative feasibility heuristic; no global optimality or accuracy claim"
+}
