@@ -68,6 +68,59 @@ def test_c2kv_worker_uses_single_task_agent_endpoint_and_raw_user_endpoint(
                      tmp_path / "batches" / "one" / "tau2_worker" / "0")]
 
 
+@pytest.mark.parametrize("problem", (None, "missing", "pending", "failed", "server_failed"))
+def test_typed_tau2_live_batch_requires_clean_final_journal(tmp_path, monkeypatch, problem):
+    driver = _c2kv_driver()
+    cell = {"cell_dir": str(tmp_path), "benchmark": "tau2",
+            "caps": {"task_timeout": 2}, "sglang_backend_url": "http://raw:36200"}
+    monkeypatch.setattr(driver, "_runtime_retrieval_cell", lambda cell, out: cell)
+    monkeypatch.setattr(driver, "server_command", lambda *args: ["fake-controller"])
+    monkeypatch.setattr(driver, "stop_owned_group", lambda proc: None)
+    monkeypatch.setattr(driver, "UpstreamLiveness", lambda url: lambda: None)
+    monkeypatch.setattr(driver, "completed_tau2_task", lambda out, task_id: True)
+    monkeypatch.setattr(driver, "run_tau2_task", lambda *args: {
+        "status": "completed", "task_failure_kind": "generation_cap_reached"})
+
+    class Process:
+        returncode = None
+
+        def poll(self):
+            return None
+
+    def start_server(*args, **kwargs):
+        server = tmp_path / "batches" / "one" / "server"
+        server.mkdir(parents=True)
+        (server / "ready.json").write_text("{}", encoding="utf-8")
+        if problem != "missing":
+            (server / "final.json").write_text(json.dumps({
+                "status": "failed" if problem == "server_failed" else "stopped",
+                "cost_summary": {"recorded": True},
+                "journal_summary": {
+                    "schema": "a-runtime-attempt-journal-v1", "started": 2,
+                    "completed": 1 if problem in {"pending", "failed"} else 2,
+                    "pending": int(problem == "pending"),
+                    "failed": int(problem == "failed")},
+                "api_health": {
+                    "allowed_task_ids": ["0"],
+                    "terminal_reason": "generation_cap_reached",
+                    "generation_calls_reserved": 2, "max_generation_calls": 2},
+            }), encoding="utf-8")
+        return Process()
+
+    monkeypatch.setattr(driver.subprocess, "Popen", start_server)
+    result = driver.run_task(cell, ["0"], 45001, "one")
+    batch = tmp_path / "batches" / "one"
+    if problem is None:
+        assert result["status"] == "completed"
+        assert result["cost_finalization"]["status"] == "valid"
+        assert (batch / "done.json").is_file()
+    else:
+        assert result["status"] == "failed"
+        assert result["cost_finalization"]["status"] != "valid"
+        assert (batch / "status.json").is_file()
+        assert not (batch / "done.json").exists()
+
+
 @pytest.mark.parametrize("backend,condition,arm,target", [
     ("h2o", "recovery_off_same_initial", "gen_h2o_k0", 768),
     ("h2o", "compression_full_budget", "gen_h2o_b0", 1792),

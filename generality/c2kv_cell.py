@@ -49,7 +49,7 @@ except ImportError:  # Direct file launch on ascend03.
 
 try:
     from .process_lifecycle import defer_interrupts, interruptible, stop_owned_group, wait_owned_worker
-    from .tau2_harness import completed_tau2_task, run_tau2_task
+    from .tau2_harness import completed_tau2_result, completed_tau2_task, run_tau2_task
     from .toolsandbox_harness import (
         completed_task as completed_toolsandbox_task,
         official_result as toolsandbox_official_result,
@@ -59,7 +59,7 @@ try:
     from .upstream_liveness import UpstreamLiveness, UpstreamUnavailable
 except ImportError:  # Direct file launch on ascend03.
     from process_lifecycle import defer_interrupts, interruptible, stop_owned_group, wait_owned_worker
-    from tau2_harness import completed_tau2_task, run_tau2_task
+    from tau2_harness import completed_tau2_result, completed_tau2_task, run_tau2_task
     from toolsandbox_harness import (
         completed_task as completed_toolsandbox_task,
         official_result as toolsandbox_official_result,
@@ -466,8 +466,19 @@ def appworld_task_completed(cell_dir: Path, task_id: str) -> bool:
 
 
 def tau2_task_completed(cell_dir: Path, task_id: str) -> bool:
-    return any(completed_tau2_task(path, task_id) for path in
+    return any(_qualified_tau2_result(path, task_id) is not None for path in
                (cell_dir / "batches").glob(f"*/tau2_worker/{task_id}"))
+
+
+def _qualified_tau2_result(output_root: Path, task_id: str) -> dict | None:
+    result = completed_tau2_result(output_root, task_id)
+    if result is None:
+        return None
+    code = result.get("task_failure_kind")
+    if code is not None and typed_tau2_budget_cost_finalization(
+            output_root.parent.parent, task_id, code)["status"] != "valid":
+        return None
+    return result
 
 
 def tau2_score_summary(cell: dict) -> dict:
@@ -478,18 +489,27 @@ def tau2_score_summary(cell: dict) -> dict:
         scored = None
         for path in sorted((cell_dir / "batches").glob(
                 f"*/tau2_worker/{task_id}"), reverse=True):
-            if completed_tau2_task(path, task_id):
-                scored = json.loads((path / "done.json").read_text(encoding="utf-8"))
+            scored = _qualified_tau2_result(path, task_id)
+            if scored is not None:
                 break
         if scored is None:
             pending.append(task_id)
         else:
-            rows.append({"task_id": task_id, "semantic_score": scored["semantic_score"],
-                         "termination": scored["termination"],
-                         "score_source": "official_tau2"})
+            row = {"task_id": task_id, "semantic_score": scored["semantic_score"],
+                   "termination": scored["termination"],
+                   "score_source": scored.get("score_source", "official_tau2")}
+            if "task_failure_kind" in scored:
+                row["task_failure_kind"] = scored["task_failure_kind"]
+                row["official_reward"] = scored["official_reward"]
+            rows.append(row)
+    budget_failures = [row["task_id"] for row in rows if "task_failure_kind" in row]
     return {
         "schema": "c2kv-tau2-score-summary-v1", "cell_id": cell["cell_id"],
-        "n_total": len(cell["task_ids"]), "n_official_scored": len(rows),
+        "n_total": len(cell["task_ids"]),
+        "n_official_scored": len(rows) - len(budget_failures),
+        "n_budget_failures": len(budget_failures),
+        "budget_failure_task_ids": budget_failures,
+        "n_completed": len(rows),
         "pending_task_ids": pending,
         "semantic_score": (sum(row["semantic_score"] for row in rows) / len(rows)
                            if not pending else None),
@@ -513,6 +533,38 @@ def cost_finalization(out: Path) -> dict:
                 "error": final["cost_summary_error"]}
     if not isinstance(final.get("cost_summary"), dict) or not final["cost_summary"]:
         return {"status": "unavailable", "reason": "missing_cost_summary"}
+    return {"status": "valid"}
+
+
+def typed_tau2_budget_cost_finalization(out: Path, task_id: str, code: str) -> dict:
+    """Qualify a declared budget loss only with a clean, task-bound final journal."""
+    existing = cost_finalization(out)
+    if existing["status"] != "valid":
+        return existing
+    try:
+        final = json.loads((out / "server" / "final.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {"status": "failed", "reason": "invalid_final_receipt"}
+    journal = final.get("journal_summary")
+    health = final.get("api_health")
+    if (final.get("status") != "stopped"
+            or not isinstance(journal, dict) or not isinstance(health, dict)
+            or journal.get("schema") != "a-runtime-attempt-journal-v1"
+            or type(journal.get("started")) is not int
+            or type(journal.get("completed")) is not int
+            or journal["started"] != journal["completed"]
+            or journal.get("pending") != 0 or journal.get("failed") != 0
+            or health.get("allowed_task_ids") != [task_id]
+            or health.get("terminal_reason") != code):
+        return {"status": "failed", "reason": "unverified_typed_budget_final"}
+    if code == "generation_cap_reached":
+        used, cap = health.get("generation_calls_reserved"), health.get("max_generation_calls")
+    elif code == "decision_cap_reached":
+        used, cap = health.get("decisions_reserved"), health.get("max_decisions")
+    else:
+        return {"status": "failed", "reason": "unknown_typed_budget_code"}
+    if type(used) is not int or type(cap) is not int or cap <= 0 or used != cap:
+        return {"status": "failed", "reason": "unverified_typed_budget_cap"}
     return {"status": "valid"}
 
 
@@ -711,6 +763,7 @@ def run_task(cell: dict, task_ids: list[str], port: int, batch_dirname: str) -> 
               "started_at": started}
     _write(out / "status.json", status)
     healthy, bad = [], task_ids
+    tau2_budget_failure = None
     try:
         server = subprocess.Popen(
             server_command(server_cell, task_ids, out, port), cwd=str(RUNTIME), env=env,
@@ -737,6 +790,7 @@ def run_task(cell: dict, task_ids: list[str], port: int, batch_dirname: str) -> 
                 cell["sglang_backend_url"], out / "tau2_worker" / task_id)
             if receipt["status"] != "completed":
                 raise RuntimeError(f"official tau2 worker did not score {task_id}")
+            tau2_budget_failure = receipt.get("task_failure_kind")
         elif cell["benchmark"] == "toolsandbox":
             if len(task_ids) != 1:
                 raise ValueError("ToolSandbox requires one frozen task per controller server")
@@ -846,6 +900,13 @@ def run_task(cell: dict, task_ids: list[str], port: int, batch_dirname: str) -> 
             server_log.close()
             worker_log.close()
     status["cost_finalization"] = cost_finalization(out)
+    if tau2_budget_failure is not None:
+        status["cost_finalization"] = typed_tau2_budget_cost_finalization(
+            out, task_ids[0], tau2_budget_failure)
+        if status["cost_finalization"]["status"] != "valid":
+            healthy, bad = [], task_ids
+            status.update(status="failed", healthy=healthy, bad=bad,
+                          error="typed tau2 budget failure lacks a clean final journal")
     _write(out / "done.json" if not bad and status["cost_finalization"]["status"] == "valid"
            else out / "status.json", status)
     return status
@@ -1142,7 +1203,8 @@ def main(argv=None) -> int:
                 summary = tau2_score_summary(cell)
                 _write(cell_dir / "tau2_score_summary.json", summary)
                 counts = {
-                    "n_completed": summary["n_official_scored"],
+                    "n_completed": summary["n_completed"],
+                    "n_budget_failures": summary["n_budget_failures"],
                     "n_retryable": len(summary["pending_task_ids"]),
                 }
             elif cell["benchmark"] == "toolsandbox":
@@ -1229,7 +1291,8 @@ def main(argv=None) -> int:
         write_cell_status(cell, {
             "cell_id": cell["cell_id"],
             "status": "complete" if not summary["pending_task_ids"] else "incomplete",
-            "n_completed": summary["n_official_scored"],
+            "n_completed": summary["n_completed"],
+            "n_budget_failures": summary["n_budget_failures"],
             "n_retryable": len(summary["pending_task_ids"]),
             "n_total": len(expected_task_ids),
             "semantic_score": summary["semantic_score"],

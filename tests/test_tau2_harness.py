@@ -1,7 +1,11 @@
 """Single-task tau2 integration at the official artifact seam."""
 import json
+import sys
+import types
 from pathlib import Path
 from unittest.mock import patch
+
+import pytest
 
 from generality import tau2_harness as harness
 
@@ -35,11 +39,36 @@ def _write_official(cell, request, *, task_id="7", termination="agent_stop",
             json.dumps({"simulations": [scored]}), encoding="utf-8")
 
 
-def _write_summary(command, *, task_id="7", termination="agent_stop", reward=0.0):
-    Path(command[5]).write_text(json.dumps({
+def _write_summary(command, *, task_id="7", termination="agent_stop", reward=0.0,
+                   failure_code=None, official_reward=None):
+    summary = {
         "task_ids": [task_id],
         "task_rows": [{"task_id": task_id, "semantic_score": reward,
                        "termination": termination}],
+    }
+    if failure_code is not None:
+        summary["task_failures"] = {task_id: failure_code}
+        summary["task_rows"][0]["task_failure_kind"] = failure_code
+        summary["task_rows"][0]["official_reward"] = official_reward
+    Path(command[5]).write_text(json.dumps(summary), encoding="utf-8")
+
+
+def _write_typed_final(batch: Path, code: str, *, pending=0, failed=0):
+    server = batch / "server"
+    server.mkdir(parents=True, exist_ok=True)
+    (server / "final.json").write_text(json.dumps({
+        "status": "stopped",
+        "cost_summary": {"recorded": True},
+        "journal_summary": {
+            "schema": "a-runtime-attempt-journal-v1",
+            "started": 2, "completed": 2 - pending - failed,
+            "pending": pending, "failed": failed,
+        },
+        "api_health": {
+            "allowed_task_ids": ["7"], "terminal_reason": code,
+            "generation_calls_reserved": 2, "max_generation_calls": 2,
+            "decisions_reserved": 2, "max_decisions": 2,
+        },
     }), encoding="utf-8")
 
 
@@ -184,3 +213,147 @@ def test_adapter_summary_must_match_official_score(tmp_path):
                                         "http://127.0.0.1:2", out)
     assert receipt["status"] == "infra_error"
     assert not harness.completed_tau2_task(out, "7")
+
+
+@pytest.mark.parametrize("code", ("decision_cap_reached", "generation_cap_reached"))
+@pytest.mark.parametrize("official_reward", (None, 0.0, 1.0))
+def test_typed_budget_failure_completes_once_and_keeps_zero_provenance(
+        tmp_path, code, official_reward):
+    cell = _cell(tmp_path)
+    cell_dir = tmp_path / "cell"
+    out = cell_dir / "batches" / "one" / "tau2_worker" / "7"
+    calls = []
+
+    def fake_worker(command, **_kwargs):
+        request = json.loads(Path(command[4]).read_text(encoding="utf-8"))
+        calls.append(request)
+        _write_official(cell, request, termination="infrastructure_error",
+                        reward=official_reward)
+        _write_summary(command, termination="infrastructure_error", reward=0.0,
+                       failure_code=code, official_reward=official_reward)
+        return 0
+
+    with patch.object(harness, "run_owned_worker", side_effect=fake_worker):
+        result = harness.run_tau2_task(
+            cell, "7", "http://127.0.0.1:1", "http://127.0.0.1:2", out)
+        resumed = harness.run_tau2_task(
+            cell, "7", "http://127.0.0.1:1", "http://127.0.0.1:2", out)
+
+    assert len(calls) == 1
+    assert result == resumed
+    assert result["status"] == "completed"
+    assert result["semantic_score"] == 0.0
+    assert result["termination"] == "infrastructure_error"
+    assert result["task_failure_kind"] == code
+    assert result["score_source"] == "typed_harness_budget_failure"
+    assert result["official_reward"] == official_reward
+    assert harness.completed_tau2_task(out, "7")
+
+    _write_typed_final(cell_dir / "batches" / "one", code)
+
+    sys.modules.setdefault("current", types.SimpleNamespace())
+    sys.modules.setdefault("evidence_sets", types.SimpleNamespace())
+    sys.modules.setdefault("c1_artifact_binding", types.SimpleNamespace(
+        bind_risk_artifact=lambda artifact, checkpoint: (artifact, {})))
+    from generality import c2kv_cell
+
+    summary = c2kv_cell.tau2_score_summary({
+        "cell_dir": str(cell_dir), "cell_id": "test", "task_ids": ["7"]})
+    assert summary["n_official_scored"] == 0
+    assert summary["n_budget_failures"] == summary["n_completed"] == 1
+    assert summary["budget_failure_task_ids"] == ["7"]
+    assert summary["pending_task_ids"] == []
+    assert summary["task_rows"] == [{
+        "task_id": "7", "semantic_score": 0.0,
+        "termination": "infrastructure_error",
+        "score_source": "typed_harness_budget_failure",
+        "task_failure_kind": code,
+        "official_reward": official_reward,
+    }]
+
+
+def test_old_untyped_harness_cap_remains_retryable(tmp_path):
+    cell = _cell(tmp_path)
+    out = tmp_path / "tasks" / "7"
+
+    def fake_worker(command, **_kwargs):
+        request = json.loads(Path(command[4]).read_text(encoding="utf-8"))
+        _write_official(cell, request, termination="infrastructure_error", reward=None)
+        _write_summary(command, termination="infrastructure_error", reward=0.0,
+                       failure_code="harnesscap0")
+        return 0
+
+    with patch.object(harness, "run_owned_worker", side_effect=fake_worker):
+        result = harness.run_tau2_task(
+            cell, "7", "http://127.0.0.1:1", "http://127.0.0.1:2", out)
+    assert result["status"] == "infra_error"
+    assert not harness.completed_tau2_task(out, "7")
+
+
+@pytest.mark.parametrize("change", ("wrong_map", "wrong_row_kind", "wrong_reward"))
+def test_typed_budget_failure_requires_matching_adapter_evidence(tmp_path, change):
+    cell = _cell(tmp_path)
+    out = tmp_path / "tasks" / "7"
+
+    def fake_worker(command, **_kwargs):
+        request = json.loads(Path(command[4]).read_text(encoding="utf-8"))
+        _write_official(cell, request, termination="infrastructure_error", reward=1.0)
+        _write_summary(command, termination="infrastructure_error", reward=0.0,
+                       failure_code="generation_cap_reached", official_reward=1.0)
+        summary_path = Path(command[5])
+        summary = json.loads(summary_path.read_text(encoding="utf-8"))
+        if change == "wrong_map":
+            summary["task_failures"] = {"8": "generation_cap_reached"}
+        elif change == "wrong_row_kind":
+            summary["task_rows"][0]["task_failure_kind"] = "decision_cap_reached"
+        else:
+            summary["task_rows"][0]["official_reward"] = 0.0
+        summary_path.write_text(json.dumps(summary), encoding="utf-8")
+        return 0
+
+    with patch.object(harness, "run_owned_worker", side_effect=fake_worker):
+        result = harness.run_tau2_task(
+            cell, "7", "http://127.0.0.1:1", "http://127.0.0.1:2", out)
+    assert result["status"] == "infra_error"
+    assert not harness.completed_tau2_task(out, "7")
+
+
+@pytest.mark.parametrize("problem", ("missing", "pending", "failed", "server_failed"))
+def test_typed_budget_resume_requires_clean_final_journal(tmp_path, problem):
+    cell = _cell(tmp_path)
+    cell_dir = tmp_path / "cell"
+    batch = cell_dir / "batches" / "one"
+    out = batch / "tau2_worker" / "7"
+
+    def fake_worker(command, **_kwargs):
+        request = json.loads(Path(command[4]).read_text(encoding="utf-8"))
+        _write_official(cell, request, termination="infrastructure_error", reward=None)
+        _write_summary(command, termination="infrastructure_error", reward=0.0,
+                       failure_code="generation_cap_reached")
+        return 0
+
+    with patch.object(harness, "run_owned_worker", side_effect=fake_worker):
+        assert harness.run_tau2_task(
+            cell, "7", "http://127.0.0.1:1", "http://127.0.0.1:2", out)["status"] == "completed"
+
+    if problem != "missing":
+        _write_typed_final(batch, "generation_cap_reached",
+                           pending=int(problem == "pending"), failed=int(problem == "failed"))
+        if problem == "server_failed":
+            path = batch / "server" / "final.json"
+            final = json.loads(path.read_text(encoding="utf-8"))
+            final["status"] = "failed"
+            path.write_text(json.dumps(final), encoding="utf-8")
+
+    sys.modules.setdefault("current", types.SimpleNamespace())
+    sys.modules.setdefault("evidence_sets", types.SimpleNamespace())
+    sys.modules.setdefault("c1_artifact_binding", types.SimpleNamespace(
+        bind_risk_artifact=lambda artifact, checkpoint: (artifact, {})))
+    from generality import c2kv_cell
+
+    assert not c2kv_cell.tau2_task_completed(cell_dir, "7")
+    summary = c2kv_cell.tau2_score_summary({
+        "cell_dir": str(cell_dir), "cell_id": "test", "task_ids": ["7"]})
+    assert summary["n_completed"] == 0
+    assert summary["n_budget_failures"] == 0
+    assert summary["pending_task_ids"] == ["7"]

@@ -31,9 +31,10 @@ GENERATION_BACKENDS = ('native', 'sglang')
 
 
 def _stop_for_health(health):
-    # A finite decision cap is a task outcome. Keep serving its typed 429
+    # Finite decision and generation caps are task outcomes. Keep serving typed 429
     # until the official harness finishes or the owner stops this process.
-    return health['terminal'] and health['terminal_reason'] != 'decision_cap_reached'
+    return health['terminal'] and health['terminal_reason'] not in {
+        'decision_cap_reached', 'generation_cap_reached'}
 
 
 def positive_int(value):

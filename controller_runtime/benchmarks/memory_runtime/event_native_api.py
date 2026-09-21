@@ -18,6 +18,7 @@ from urllib.parse import urlsplit
 from .event_native import EventStore
 from .always_compress import CapacityInfeasible
 from .event_native_controls import describe_event_native_route
+from .event_native_step import GenerationCallCapExceeded
 from .tokenization import serving_tools
 
 
@@ -182,6 +183,11 @@ class EventNativeAPI:
 
         runner_payload, identity, signature = self._validate_request(payload)
         if self._terminal_failure is not None:
+            if self._terminal_failure["code"] == "generation_cap_reached":
+                raise EventNativeAPIError(
+                    429, "generation_cap_reached",
+                    "The finite event-native generation-call cap is exhausted",
+                )
             raise EventNativeAPIError(
                 503,
                 "terminal_failure",
@@ -225,11 +231,14 @@ class EventNativeAPI:
             method_failure = isinstance(error, CapacityInfeasible) or isinstance(
                 error.__cause__, CapacityInfeasible
             )
+            generation_cap_failure = isinstance(error, GenerationCallCapExceeded) or isinstance(
+                error.__cause__, GenerationCallCapExceeded
+            )
             if method_failure:
                 self._failed_tasks.add(identity[0])
             else:
                 self._terminal_failure = {
-                    "code": "runner_failed",
+                    "code": "generation_cap_reached" if generation_cap_failure else "runner_failed",
                     "type": type(error).__name__,
                 }
             self._release_runner_cache()
@@ -249,6 +258,11 @@ class EventNativeAPI:
                 raise EventNativeAPIError(
                     422, "c2kv_capacity_infeasible",
                     "Task exceeds the declared memory capacity",
+                ) from error
+            if generation_cap_failure:
+                raise EventNativeAPIError(
+                    429, "generation_cap_reached",
+                    "The finite event-native generation-call cap is exhausted",
                 ) from error
             raise EventNativeAPIError(
                 500,

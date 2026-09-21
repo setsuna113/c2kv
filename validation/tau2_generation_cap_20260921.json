@@ -1,0 +1,65 @@
+{
+  "schema": "c2kv-tau2-generation-cap-validation-v1",
+  "base_commit": "27ed0490de5842a188640f53a1f390f6499a3a9f",
+  "shared_paper_commit": "86f6e8ac5b5c8743f457cecab366e23adc219622",
+  "original": {
+    "source_root": "/workspace/results-p4x/closed_loop/tau2__c2kv_pending_verified_r8",
+    "caps": {
+      "max_decisions": 96,
+      "max_generation_calls": 96,
+      "max_wall_seconds": 10800.0
+    },
+    "completed_decisions": 95,
+    "completed_generations": 96,
+    "last_step": {
+      "schema": "a-event-native-exact-step-v1",
+      "status": "failed",
+      "session_id": "tau2/5/attempt-0",
+      "decision_key": "turn-0/step-95",
+      "error": {
+        "type": "RuntimeError",
+        "message": "Finite generation-call cap exhausted before submission"
+      },
+      "generation_attempts": 0,
+      "generation_completed": 0
+    }
+  },
+  "fix": {
+    "typed_exception": "GenerationCallCapExceeded",
+    "api_code": "generation_cap_reached",
+    "http_status": 429,
+    "budget_unchanged": true,
+    "generation_calls_include_recovery": true,
+    "new_task_outcome": "explicit task-local budget failure, semantic score 0; official reward retained separately",
+    "old_untyped_hold_reclassified": false,
+    "cost_finalization_required": true
+  },
+  "npu_port": "Typed runner/API cap and supervisor lifetime mirrored; tau2 qualification preserves official reward separately from budget zero, requires task-bound clean final costs, and resumes without retrying completed budget failures.",
+  "checks": [
+    {
+      "cwd": "npu",
+      "tests": [
+        "tests/test_tau2_harness.py",
+        "tests/test_tau2_matrix.py",
+        "controller_runtime/benchmarks/memory_runtime/tests/test_generation_cap.py",
+        "controller_runtime/benchmarks/memory_runtime/tests/test_task_failure_isolation.py",
+        "controller_runtime/benchmarks/memory_runtime/tests/test_event_native_server.py"
+      ],
+      "passed": 77,
+      "skipped": 1,
+      "skip_reason": "POSIX process-group test on Windows"
+    }
+  ],
+  "gpu_or_npu_used": false,
+  "full_benchmark_rerun": false,
+  "source_sha256": {
+    "controller_runtime/benchmarks/memory_runtime/event_native_api.py": "011af1b8044d641ea1936caf61e1c88ed944de6e7aa36aba735b728ffb3ca1a5",
+    "controller_runtime/benchmarks/memory_runtime/event_native_server.py": "b6c2874a3cd17c261c8076766d42ca0dc8ec9a9e812029aa2d2a2d110176b752",
+    "controller_runtime/benchmarks/memory_runtime/event_native_step.py": "16d9a7072f841ad39750d2006d045826ec4100da87a31af64ee6cbd21ca57eba",
+    "generality/c2kv_cell.py": "bf0457da7fd8fbf1ad7fe695828959bddafbfce0e86b4b84841fafef2a228159",
+    "generality/tau2_harness.py": "5dd16dcc6134aa42ed304e71349d1bba6cbc13ef35b83806f3767891f958ea43",
+    "tests/test_tau2_harness.py": "f0c138938da2d6a1b31ed610ffcb47caef6786ec90c5d10da5a7e7be70752575",
+    "tests/test_tau2_matrix.py": "c5cfa6cdccf13b6f7c07303c79c3eedfcd9f4e6974413566504c6ae5aa9a0819",
+    "controller_runtime/benchmarks/memory_runtime/tests/test_generation_cap.py": "6fc568ba34fe677ea746744bdf44a711a323b35212e32ed6c0af9d8473572e0e"
+  }
+}
