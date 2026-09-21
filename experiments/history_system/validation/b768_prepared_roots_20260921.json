@@ -1,0 +1,193 @@
+{
+  "engine_commit": "9b6a6fa1c01e4e2807d5d0bb4094f5e1a86504fa",
+  "execution": "prepare only; no benchmark or server launched",
+  "paper_arms_sha256": "5459103b88b5b112fe5b790ef4e4d1dcbd946239def2243a0b743faca9a16928",
+  "paper_commit": "d22a9398df20505cb19ef0a360d9fc643816840c",
+  "paper_runner_sha256": "607e5ab4f8fbd0eafb482e4df5b1d7f0af27f12c557eda9afd963af80aa62219",
+  "plans": [
+    {
+      "artifact_sha256": {
+        "commands.json": "8c921357fe5201739adabcbbb36c8221d583a22c095f322dbad9f3d9757f581b",
+        "config.resolved.json": "4e3c4bde10af1ef5fec637ae65bb9e6e8006f0fab0f2360f4adbecf2c7311df3",
+        "deployment_profile.json": "f8487b18879e573b0e247b90b8a7bb07c1e6d053954b2c9e3523f2dfe785925e",
+        "matrix.csv": "5609d5449088bbb0e78356a0e3c42f579b1eda987a449d044c74c07022ba136d",
+        "unsupported_cells.json": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570"
+      },
+      "benchmark": "tau2",
+      "input_config": "/workspace/validation/blocker-repair-20260921/final_b768/inputs/tau2_kv_b768.json",
+      "input_config_sha256": "9f07eac1992436bc7a8d4929902645d01cbb82af1a89fa2af6d10a47079f3bc1",
+      "name": "tau2_kv_b768",
+      "official_task_count_per_cell": 50,
+      "old_root_config": "/workspace/results-tau2/config.resolved.json",
+      "old_root_config_sha256": "4a46720572948b11e6b0c68358c0b1df1218aaa252f240bac24e5250e7d9f456",
+      "output": "/workspace/validation/blocker-repair-20260921/final_b768/tau2_kv_b768",
+      "prepare_command_argv": [
+        "/workspace/venv-bench/bin/python",
+        "-m",
+        "benchmarks.paper.runner",
+        "prepare",
+        "--config",
+        "/workspace/validation/blocker-repair-20260921/final_b768/inputs/tau2_kv_b768.json",
+        "--sglang-source",
+        "/workspace/validation/blocker-repair-20260921/engine-9b6a6fa1c01e",
+        "--output",
+        "/workspace/validation/blocker-repair-20260921/final_b768/tau2_kv_b768"
+      ],
+      "prepare_stdout": "{\n  \"matrix\": \"/workspace/validation/blocker-repair-20260921/final_b768/tau2_kv_b768/matrix.csv\",\n  \"closed_loop_cells\": 2,\n  \"replay_cells\": 2\n}",
+      "prepared_cells": [
+        "tau2__agentkv_b768",
+        "tau2__commitkv_b768"
+      ],
+      "prior_prepared_config": "/workspace/validation/blocker-repair-20260921/tau2_kv_b768/config.resolved.json",
+      "prior_prepared_config_sha256": "d985062359f86a61d26a92e6c172e56460c466363721eab0768d99ee2935f865",
+      "same_old_nonmatrix_config": true,
+      "selected_cells": [
+        "tau2__commitkv_b768",
+        "tau2__agentkv_b768"
+      ],
+      "selected_run_command_argv": [
+        "/workspace/venv-bench/bin/python",
+        "-m",
+        "benchmarks.paper.runner",
+        "run",
+        "--config",
+        "/workspace/validation/blocker-repair-20260921/final_b768/inputs/tau2_kv_b768.json",
+        "--sglang-source",
+        "/workspace/validation/blocker-repair-20260921/engine-9b6a6fa1c01e",
+        "--output",
+        "/workspace/validation/blocker-repair-20260921/final_b768/tau2_kv_b768",
+        "--stage",
+        "closed_loop",
+        "--cells",
+        "tau2__commitkv_b768,tau2__agentkv_b768"
+      ]
+    },
+    {
+      "artifact_sha256": {
+        "commands.json": "938df8fe9425025e3ce2a12d83806eb01ed596458f80ae9dc46fddbac3080bf4",
+        "config.resolved.json": "f947b24f4ffcab6f390473e93f219f9d79d3552d9b83af5ee5be287b3381ad88",
+        "deployment_profile.json": "f8487b18879e573b0e247b90b8a7bb07c1e6d053954b2c9e3523f2dfe785925e",
+        "matrix.csv": "9f01c23b5d8a7fad3a32a4d64f0937ae4418da59e4c4fee8de7c0939ce8483d2",
+        "unsupported_cells.json": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570"
+      },
+      "benchmark": "toolsandbox",
+      "input_config": "/workspace/validation/blocker-repair-20260921/final_b768/inputs/toolsandbox_text_b768.json",
+      "input_config_sha256": "8e3ff11289d7880a3eccf5261303f2b4479dd430d2ec9f23374a5df0f4b47af3",
+      "name": "toolsandbox_text_b768",
+      "official_task_count_per_cell": 129,
+      "old_root_config": "/workspace/results-toolsandbox/config.resolved.json",
+      "old_root_config_sha256": "485ef78c1e3154be969529fdb5473f6cfde93368c950fc18adc6f640f5f8a7b9",
+      "output": "/workspace/validation/blocker-repair-20260921/final_b768/toolsandbox_text_b768",
+      "prepare_command_argv": [
+        "/workspace/venv-bench/bin/python",
+        "-m",
+        "benchmarks.paper.runner",
+        "prepare",
+        "--config",
+        "/workspace/validation/blocker-repair-20260921/final_b768/inputs/toolsandbox_text_b768.json",
+        "--sglang-source",
+        "/workspace/validation/blocker-repair-20260921/engine-9b6a6fa1c01e",
+        "--output",
+        "/workspace/validation/blocker-repair-20260921/final_b768/toolsandbox_text_b768"
+      ],
+      "prepare_stdout": "{\n  \"matrix\": \"/workspace/validation/blocker-repair-20260921/final_b768/toolsandbox_text_b768/matrix.csv\",\n  \"closed_loop_cells\": 2,\n  \"replay_cells\": 2\n}",
+      "prepared_cells": [
+        "toolsandbox__acon_hist_ut_co_b768",
+        "toolsandbox__hiagent_full_b768"
+      ],
+      "prior_prepared_config": "/workspace/validation/blocker-repair-20260921/plans/toolsandbox_text_b768/config.resolved.json",
+      "prior_prepared_config_sha256": "4060c4f7866b708cf0d5db4d3133c109329873dcc569fbeeb220cf511ac6270a",
+      "same_old_nonmatrix_config": true,
+      "selected_cells": [
+        "toolsandbox__acon_hist_ut_co_b768",
+        "toolsandbox__hiagent_full_b768"
+      ],
+      "selected_run_command_argv": [
+        "/workspace/venv-bench/bin/python",
+        "-m",
+        "benchmarks.paper.runner",
+        "run",
+        "--config",
+        "/workspace/validation/blocker-repair-20260921/final_b768/inputs/toolsandbox_text_b768.json",
+        "--sglang-source",
+        "/workspace/validation/blocker-repair-20260921/engine-9b6a6fa1c01e",
+        "--output",
+        "/workspace/validation/blocker-repair-20260921/final_b768/toolsandbox_text_b768",
+        "--stage",
+        "closed_loop",
+        "--cells",
+        "toolsandbox__acon_hist_ut_co_b768,toolsandbox__hiagent_full_b768"
+      ]
+    },
+    {
+      "artifact_sha256": {
+        "commands.json": "71b5e2a1e3b5f7379b46ff327a3a917b57441818cb6350bf5c01101f80501c07",
+        "config.resolved.json": "f9bb4fddd3e79f6afc59cadd10d4f61ce6bfbab3e7e707ffb170fffa137e6bec",
+        "deployment_profile.json": "f8487b18879e573b0e247b90b8a7bb07c1e6d053954b2c9e3523f2dfe785925e",
+        "matrix.csv": "ca0d7639d21fea0968c0342252b40ec7a43636049b6efc1de82d65538eecf7b3",
+        "unsupported_cells.json": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570"
+      },
+      "benchmark": "bfcl_long_context",
+      "input_config": "/workspace/validation/blocker-repair-20260921/final_b768/inputs/bfcl_long_context_kv_b768.json",
+      "input_config_sha256": "678de88001c0180aded3069edee796f28b2f2e7a4e70444aec8f079719d15595",
+      "name": "bfcl_long_context_kv_b768",
+      "official_task_count_per_cell": 200,
+      "old_root_config": "/workspace/results-kvb768/config.resolved.json",
+      "old_root_config_sha256": "c9102d764abde8cff14db5ed233deb8eef7a0b6810220a2a892b3fe4a278253b",
+      "output": "/workspace/validation/blocker-repair-20260921/final_b768/bfcl_long_context_kv_b768",
+      "prepare_command_argv": [
+        "/workspace/venv-bench/bin/python",
+        "-m",
+        "benchmarks.paper.runner",
+        "prepare",
+        "--config",
+        "/workspace/validation/blocker-repair-20260921/final_b768/inputs/bfcl_long_context_kv_b768.json",
+        "--sglang-source",
+        "/workspace/validation/blocker-repair-20260921/engine-9b6a6fa1c01e",
+        "--output",
+        "/workspace/validation/blocker-repair-20260921/final_b768/bfcl_long_context_kv_b768"
+      ],
+      "prepare_stdout": "{\n  \"matrix\": \"/workspace/validation/blocker-repair-20260921/final_b768/bfcl_long_context_kv_b768/matrix.csv\",\n  \"closed_loop_cells\": 2,\n  \"replay_cells\": 2\n}",
+      "prepared_cells": [
+        "bfcl_long_context__agentkv_b768",
+        "bfcl_long_context__commitkv_b768"
+      ],
+      "prior_prepared_config": "/workspace/validation/blocker-repair-20260921/plans/bfcl_long_context_kv_b768/config.resolved.json",
+      "prior_prepared_config_sha256": "77ee9d04f54e9d66a4e46ef53f093a0ba85c58d4dcfe04cb3edf947958b39d1b",
+      "same_old_nonmatrix_config": true,
+      "selected_cells": [
+        "bfcl_long_context__commitkv_b768",
+        "bfcl_long_context__agentkv_b768"
+      ],
+      "selected_run_command_argv": [
+        "/workspace/venv-bench/bin/python",
+        "-m",
+        "benchmarks.paper.runner",
+        "run",
+        "--config",
+        "/workspace/validation/blocker-repair-20260921/final_b768/inputs/bfcl_long_context_kv_b768.json",
+        "--sglang-source",
+        "/workspace/validation/blocker-repair-20260921/engine-9b6a6fa1c01e",
+        "--output",
+        "/workspace/validation/blocker-repair-20260921/final_b768/bfcl_long_context_kv_b768",
+        "--stage",
+        "closed_loop",
+        "--cells",
+        "bfcl_long_context__commitkv_b768,bfcl_long_context__agentkv_b768"
+      ]
+    }
+  ],
+  "source_receipt": "/workspace/validation/blocker-repair-20260921/source_receipt_d22a9398df20_9b6a6fa1c01e.json",
+  "source_receipt_sha256": "45d0f87e2d2578c3518c91161689b9ba6315f9224eb7d53609057500ecd5bf59",
+  "total_selected_cells": 6,
+  "m2_launch_environment": {
+    "CUDA_HOME": "/usr/local/cuda",
+    "OMP_NUM_THREADS": "4",
+    "NO_PROXY": "127.0.0.1,localhost",
+    "no_proxy": "127.0.0.1,localhost",
+    "HF_HUB_OFFLINE": "1",
+    "TRANSFORMERS_OFFLINE": "1"
+  },
+  "device_assignment": "Set CUDA_VISIBLE_DEVICES only to the GPU explicitly assigned for the formal run; the current m2 GPU0 grant was used for debug.",
+  "environment_evidence": "A4 initial attempt inherited CUDA_HOME=/opt/cuda and failed before generation; /usr/local/cuda/bin/nvcc exists and the corrected A4 launch generated successfully. Frozen configuration and scoring protocol were unchanged."
+}

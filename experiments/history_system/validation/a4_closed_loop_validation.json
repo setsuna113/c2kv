@@ -1,0 +1,230 @@
+{
+  "schema": "c2kv-a4-agentkv-single-episode-validation-v1",
+  "date": "2026-09-21",
+  "scope": "One official AppWorld task subset, not a whole-cell score or strict cross-version causal comparison.",
+  "task_id": "5a83b05_2",
+  "new_run": {
+    "host": "m2",
+    "cell_root": "/workspace/validation/blocker-repair-20260921/a4_official_5a83b05_2_v2/closed_loop/appworld__agentkv_b768",
+    "runner_command": [
+      "/workspace/venv-bench/bin/python",
+      "-m",
+      "benchmarks.paper.runner",
+      "run",
+      "--config",
+      "/workspace/validation/blocker-repair-20260921/a4_official_config.json",
+      "--sglang-source",
+      "/workspace/validation/blocker-repair-20260921/engine-9b6a6fa1c01e",
+      "--output",
+      "/workspace/validation/blocker-repair-20260921/a4_official_5a83b05_2_v2",
+      "--stage",
+      "closed_loop",
+      "--cells",
+      "appworld__agentkv_b768",
+      "--task-subset",
+      "appworld__agentkv_b768=5a83b05_2"
+    ],
+    "runner_returncode": 0,
+    "engine_commit": "9b6a6fa1c01e4e2807d5d0bb4094f5e1a86504fa",
+    "engine_reference_sha256": "b728f934b1297870750372f47fc600f94037f7489d613016324a7012f8b87743",
+    "engine_qwen3_sha256": "36cad3354aa262e2631ec3f46b5d470073208492138e8ee14fd7144047d40c76",
+    "config_path": "/workspace/validation/blocker-repair-20260921/a4_official_config.json",
+    "config_sha256": "ef1f2ea55022566499642a24045b580ba6cf07936fef53a9b86d7a9de9857f36",
+    "appworld_max_iter": 50,
+    "generation_max_tokens": 2048,
+    "history_budget_tokens": 768,
+    "request_count": 17,
+    "request_status": "17 ok",
+    "finish_reasons": {
+      "stop": 16,
+      "length": 1
+    },
+    "harness_decisions": 17,
+    "harness_tool_actions": 17,
+    "harness_episode_end_status": "ok",
+    "task_termination_reason": "task_completed",
+    "task_result_success": true,
+    "task_result_final_reward": 1.0,
+    "official_evaluation_aggregate": {
+      "task_goal_completion": 0.0,
+      "scenario_goal_completion": 0.0
+    },
+    "summary_semantic_score": 0.0,
+    "result_scope": "repair_subset",
+    "whole_cell_score": false,
+    "total_completion_tokens": 3590,
+    "total_request_seconds": 375.5869,
+    "completion_tokens_per_request_second": 9.5584,
+    "median_request_seconds": 7.0538,
+    "response_sha256_max_repeats": 1,
+    "requests": [
+      {
+        "decision": 1,
+        "finish_reason": "stop",
+        "duration_seconds": 2.6472,
+        "completion_tokens": 52,
+        "completion_tokens_per_request_second": 19.6433
+      },
+      {
+        "decision": 2,
+        "finish_reason": "stop",
+        "duration_seconds": 3.1503,
+        "completion_tokens": 39,
+        "completion_tokens_per_request_second": 12.3799
+      },
+      {
+        "decision": 3,
+        "finish_reason": "stop",
+        "duration_seconds": 5.5617,
+        "completion_tokens": 68,
+        "completion_tokens_per_request_second": 12.2264
+      },
+      {
+        "decision": 4,
+        "finish_reason": "stop",
+        "duration_seconds": 5.2205,
+        "completion_tokens": 62,
+        "completion_tokens_per_request_second": 11.8762
+      },
+      {
+        "decision": 5,
+        "finish_reason": "stop",
+        "duration_seconds": 5.5566,
+        "completion_tokens": 61,
+        "completion_tokens_per_request_second": 10.9779
+      },
+      {
+        "decision": 6,
+        "finish_reason": "stop",
+        "duration_seconds": 5.4712,
+        "completion_tokens": 61,
+        "completion_tokens_per_request_second": 11.1493
+      },
+      {
+        "decision": 7,
+        "finish_reason": "stop",
+        "duration_seconds": 7.0538,
+        "completion_tokens": 77,
+        "completion_tokens_per_request_second": 10.9162
+      },
+      {
+        "decision": 8,
+        "finish_reason": "stop",
+        "duration_seconds": 4.9599,
+        "completion_tokens": 50,
+        "completion_tokens_per_request_second": 10.0809
+      },
+      {
+        "decision": 9,
+        "finish_reason": "stop",
+        "duration_seconds": 7.7392,
+        "completion_tokens": 79,
+        "completion_tokens_per_request_second": 10.2078
+      },
+      {
+        "decision": 10,
+        "finish_reason": "stop",
+        "duration_seconds": 17.8269,
+        "completion_tokens": 181,
+        "completion_tokens_per_request_second": 10.1532
+      },
+      {
+        "decision": 11,
+        "finish_reason": "stop",
+        "duration_seconds": 19.3844,
+        "completion_tokens": 192,
+        "completion_tokens_per_request_second": 9.9049
+      },
+      {
+        "decision": 12,
+        "finish_reason": "stop",
+        "duration_seconds": 6.9179,
+        "completion_tokens": 61,
+        "completion_tokens_per_request_second": 8.8177
+      },
+      {
+        "decision": 13,
+        "finish_reason": "stop",
+        "duration_seconds": 11.8545,
+        "completion_tokens": 108,
+        "completion_tokens_per_request_second": 9.1104
+      },
+      {
+        "decision": 14,
+        "finish_reason": "length",
+        "duration_seconds": 216.9946,
+        "completion_tokens": 2048,
+        "completion_tokens_per_request_second": 9.438
+      },
+      {
+        "decision": 15,
+        "finish_reason": "stop",
+        "duration_seconds": 14.0764,
+        "completion_tokens": 106,
+        "completion_tokens_per_request_second": 7.5304
+      },
+      {
+        "decision": 16,
+        "finish_reason": "stop",
+        "duration_seconds": 28.0782,
+        "completion_tokens": 241,
+        "completion_tokens_per_request_second": 8.5832
+      },
+      {
+        "decision": 17,
+        "finish_reason": "stop",
+        "duration_seconds": 13.0936,
+        "completion_tokens": 104,
+        "completion_tokens_per_request_second": 7.9428
+      }
+    ],
+    "longest_response": {
+      "decision": 14,
+      "sha256": "0de990b62129a02b497b5f38a4e013dea8f9e00d215f7c3b772f21eebd02fe65",
+      "chars": 3228
+    },
+    "step_14": {
+      "finish_reason": "length",
+      "completion_tokens": 2048,
+      "prompt_tokens": 1815,
+      "duration_seconds": 216.9946,
+      "response_sha256": "0de990b62129a02b497b5f38a4e013dea8f9e00d215f7c3b772f21eebd02fe65",
+      "response_chars": 3228,
+      "repeated_64_char_window_fraction": 0.6727,
+      "history_kv_active_tokens": 768,
+      "reference_history_resident_bytes": 115015680
+    },
+    "steps_15_to_17": "All three completed normally with finish_reason=stop; task ended at decision 17.",
+    "source_files": {
+      "runner_result": "/workspace/validation/blocker-repair-20260921/a4-official-v2.result.json",
+      "task_result": "/workspace/validation/blocker-repair-20260921/a4_official_5a83b05_2_v2/closed_loop/appworld__agentkv_b768/appworld_harness/experiments/appworld/outputs/c2kv-agent_appworld__agentkv_b768_d22a939/test_normal/task_5a83b05_2/results.json",
+      "official_evaluation": "/workspace/validation/blocker-repair-20260921/a4_official_5a83b05_2_v2/closed_loop/appworld__agentkv_b768/appworld_harness/experiments/appworld/experiments/outputs/c2kv-agent_appworld__agentkv_b768_d22a939/evaluations/test_normal.json",
+      "cell_summary": "/workspace/validation/blocker-repair-20260921/a4_official_5a83b05_2_v2/closed_loop/appworld__agentkv_b768/summary_agentkv.json",
+      "proxy_telemetry": "/workspace/validation/blocker-repair-20260921/a4_official_5a83b05_2_v2/closed_loop/appworld__agentkv_b768/proxy_telemetry.jsonl",
+      "harness_events": "/workspace/validation/blocker-repair-20260921/a4_official_5a83b05_2_v2/closed_loop/appworld__agentkv_b768/measurement/harness_events.jsonl"
+    }
+  },
+  "original_comparison": {
+    "host": "m1",
+    "cell_root": "/workspace/results-kvb768/closed_loop/appworld__agentkv_b768.stopped.1",
+    "engine_commit": "a42e7dacc385066c7b7081dcd73feee825b16097",
+    "decisions": 50,
+    "length_finishes": 18,
+    "step_14": {
+      "finish_reason": "length",
+      "completion_tokens": 2048,
+      "duration_seconds": 233.8981,
+      "response_sha256": "392d57fb061be3072387df953f1ff712bcac5a4a6907ff2ddfd06dbd16ed5fc1",
+      "response_chars": 3060,
+      "repeated_64_char_window_fraction": 0.7274
+    }
+  },
+  "interpretation": [
+    "The same single-turn length-capped, highly repetitive response phenotype appears at decision 14 under the new source; the full response hashes differ.",
+    "The new episode then recovers for three stop-terminated requests and ends before the unchanged 50-iteration cap; the old episode reached 50 decisions.",
+    "The task result marks task_completed/success=true, while the official AppWorld evaluation and cell semantic score are 0.0. Report the official goal metric as 0.0, not the runner success_rate.",
+    "No headwise mapping or causal-mask defect has been established by the source review and CPU/NPU parity probes. This run alone cannot distinguish model decoding from compressed-history quality as the cause of the one repetitive response.",
+    "Per-request tokens/second divides completion tokens by whole proxy request duration and is not a pure decode kernel throughput measurement."
+  ],
+  "quality_label": "preliminary, n=1"
+}

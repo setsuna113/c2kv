@@ -1,0 +1,145 @@
+{
+  "schema": "c2kv-a3-engine-headroom-validation-v1",
+  "date": "2026-09-21",
+  "fixed_engine_commit": "9b6a6fa1c01e4e2807d5d0bb4094f5e1a86504fa",
+  "scope": "Model-free attention allocation and numerical checks; not an AppWorld episode or score.",
+  "original_failure": {
+    "host": "m1",
+    "cell": "appworld__history_kv_pyramidkv_r25_persistent",
+    "task_id": "d6ac34d_3",
+    "successful_decisions_before_failure": 48,
+    "failed_decision_number_inferred": 49,
+    "failed_request_id": "6a8664dae0c34513a173ac501464abd8",
+    "cell_root": "/workspace/results-task-repair-313c170c/appworld__history_kv_pyramidkv_r25_persistent/closed_loop/appworld__history_kv_pyramidkv_r25_persistent",
+    "server_log_line": 6144,
+    "failure_site": "python/sglang/srt/models/qwen3.py:590 _collect_history_kv_eviction_scores torch.matmul",
+    "error": "CUDA out of memory. Tried to allocate 610.00 MiB; 189.31 MiB free on 47.37 GiB GPU.",
+    "pyTorch_allocated_gib": 40.59,
+    "pyTorch_reserved_unallocated_gib": 6.11,
+    "source": {
+      "engine_commit": "210d93ff3",
+      "engine_path": "/workspace/validation/cuda-round2-engine-210d93ff",
+      "paper_path": "/workspace/validation/paper-task-subset-313c170c",
+      "qwen3_py_sha256": "48de09134e99499ccb45b7a3957df24a6ba2d1ad052412dd357948d4ded8494c",
+      "history_kv_reference_py_sha256": "ac1dcb9064491d3559db8b540ea6e974f7ce9f0f780d99c81b9642793f1dafea"
+    },
+    "actual_server_profile": {
+      "mem_fraction_static": 0.65,
+      "context_length": 131072,
+      "max_total_tokens": 131072,
+      "c2kv_pool_fraction": 0.1,
+      "main_kv_pool_tokens": 131072,
+      "c2kv_pool_tokens": 34491,
+      "chunked_prefill_size": 512,
+      "max_running_requests": 1,
+      "note": "started.config has mem_fraction_static=0.8; the reference-attention server_command overrides it to 0.65."
+    },
+    "shape_basis": {
+      "query_heads": 32,
+      "query_chunk": 64,
+      "last_successful_selection_query_tokens_observed": 64,
+      "estimated_key_length": 78080,
+      "key_length_evidence": "Derived from the 610 MiB float32 matmul allocation and old fixed-64-query code; the failed request did not log its actual tensor shape."
+    }
+  },
+  "cuda_headroom_probe": {
+    "host": "m2",
+    "raw_receipt": "/workspace/validation/blocker-repair-20260921/a3_headroom_cuda_v2.json",
+    "raw_receipt_sha256_local_copy": "6cfcd86a660e9baedbe93729d7c5fe36ea66ea42b9fb27f17dfdf6481035eff7",
+    "fixture": "/workspace/validation/blocker-repair-20260921/a3_reference_headroom_probe_v2.py",
+    "fixture_sha256": "b610677a3825ea1204d41a19376435b4eb338b00a5c0249c80daca0adc9175e5",
+    "command_prefix": [
+      "/workspace/venv-sglang/bin/python",
+      "/workspace/validation/blocker-repair-20260921/a3_reference_headroom_probe_v2.py"
+    ],
+    "common_arguments": [
+      "--device",
+      "cuda",
+      "--history",
+      "78080",
+      "--extend",
+      "64",
+      "--headroom-mib",
+      "189.31"
+    ],
+    "shape": {
+      "history": 78080,
+      "extend": 64,
+      "query_heads": 32,
+      "kv_heads": 8,
+      "head_dim": 128,
+      "dtype": "torch.bfloat16"
+    },
+    "baseline_reserved_bytes": 325058560,
+    "allocator_cap_bytes": 523564483,
+    "cases": [
+      {
+        "label": "old-score",
+        "source_root": "/workspace/validation/blocker-repair-20260921/a3_original_source",
+        "mode": "score",
+        "returncode": 1,
+        "result": "OutOfMemoryError: Tried to allocate 610.00 MiB",
+        "peak_extra_allocated_bytes": 1282560
+      },
+      {
+        "label": "new-score",
+        "source_root": "/workspace/validation/blocker-repair-20260921/engine-9b6a6fa1c01e",
+        "mode": "score",
+        "returncode": 0,
+        "result": "finite scores, headwise shape [8, 78144]",
+        "peak_extra_allocated_bytes": 101062656
+      },
+      {
+        "label": "new-prefill",
+        "source_root": "/workspace/validation/blocker-repair-20260921/engine-9b6a6fa1c01e",
+        "mode": "sdpa-prefill",
+        "returncode": 0,
+        "result": "finite output, shape [64, 32, 128]",
+        "peak_extra_allocated_bytes": 85352448
+      }
+    ],
+    "source_manifest": "/workspace/validation/blocker-repair-20260921/a3_original_source/source_manifest.json",
+    "source_manifest_sha256": "06219a8388eb071431dd25e2214f94a007549d578578848e23b68c470ab99dde"
+  },
+  "cpu_validation": {
+    "source_repository_path": "validation/engine_prefill_20260921/validation.json in the NPU validation worktree",
+    "tests": [
+      "test/registered/unit/test_reference_history_regressions.py",
+      "test/registered/unit/test_history_kv_reference.py"
+    ],
+    "command": "source /usr/local/Ascend/cann-8.5.0/set_env.sh && cd /home/liuyancheng/c2kv-generality-20260918/validation/engine-prefill-9b6a6fa1c-npu7 && timeout 120s /home/liuyancheng/envs/c2kv/bin/python cpu_bootstrap.py > cpu_prefill_bootstrap.log 2>&1",
+    "passed": 11,
+    "warnings": 5,
+    "note": "Bootstrap registers only the SGLang mem_cache package paths because the shared environment lacks pybase64; original test files are unchanged."
+  },
+  "npu_validation": {
+    "source_repository_path": "validation/engine_prefill_20260921/validation.json in the NPU validation worktree",
+    "device": "Ascend 910B3, device 7",
+    "command": "source /usr/local/Ascend/cann-8.5.0/set_env.sh && cd /home/liuyancheng/c2kv-generality-20260918/validation/engine-prefill-9b6a6fa1c-npu7 && timeout 180s env ASCEND_RT_VISIBLE_DEVICES=7 /home/liuyancheng/envs/c2kv/bin/python prefill_probe.py > prefill_npu7.log 2>&1",
+    "headwise_q_gt_one_max_abs_error": 0.004255056381225586,
+    "long_prefill_shape": {
+      "history": 32768,
+      "normal": 128,
+      "query": 64,
+      "query_heads": 32,
+      "kv_heads": 8
+    },
+    "long_prefill_peak_extra_allocated_bytes": 110978560,
+    "grouped_key_value_mask_batch_strides": [
+      0,
+      0,
+      0
+    ],
+    "status": "Model-free numerical and allocation probes passed; no checkpoint or AppWorld task was run."
+  },
+  "algorithm_review": {
+    "finding": "No mapping or causality defect found in the 9b6a6fa1c prefill diff.",
+    "basis": "For KV head j, query heads [j*G,(j+1)*G) become batch dimension G. K/V and that KV head's positions are shared through zero-stride views; each query position applies the same <= causal comparison as the old repeated-head tensor. SDPA scale, dropout=0, candidate order, and output head order are unchanged."
+  },
+  "limits": [
+    "The allocator cap simulates 189.31 MiB of PyTorch headroom above the fixture's input-tensor baseline; it does not reproduce the original long-lived server's fragmentation or full-model memory state.",
+    "The failed request's exact key length was not logged. History=78080 is a controlled shape chosen from the old allocation size, not a measured request tensor shape.",
+    "No complete 49-decision AppWorld episode, benchmark score, or real-model quality conclusion is claimed.",
+    "The NPU long-prefill probe used 32768 history tokens, not the CUDA headroom fixture's 78080."
+  ]
+}
