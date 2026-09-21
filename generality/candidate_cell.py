@@ -27,8 +27,9 @@ VERIFIED_STATIC_VARIANTS = ("goal_verified_static", "pending_verified_static")
 STATIC_VARIANTS = tuple(STATIC_BACKBONES)
 STATIC_EXTENSION_VARIANTS = (
     "static_verified", "static_action_ledger", "static_verified_v2")
+C1_V2_VARIANTS = ("c1_v2_verified",)
 VARIANTS = (LEGACY_VARIANTS + REPAIR_VARIANTS + GOAL_VARIANTS + VERIFIED_VARIANTS
-            + STATIC_VARIANTS + STATIC_EXTENSION_VARIANTS)
+            + STATIC_VARIANTS + STATIC_EXTENSION_VARIANTS + C1_V2_VARIANTS)
 REPAIR_VERSION = "c2kv-source-repair-v1"
 GOAL_VERSION = "c2kv-goal-composition-v1"
 VERIFIED_VERSION = "c2kv-verified-binding-v1"
@@ -36,6 +37,7 @@ PROOF_REGISTRY_VERSION = "verified-binding-rules-v1"
 RELATIONAL_PROOF_REGISTRY_VERSION = "verified-binding-relations-v2"
 STATIC_VERSION = "c2kv-initial-view-composition-v1"
 STATIC_EXTENSION_VERSION = "c2kv-static-extension-v1"
+C1_V2_VERSION = "c2kv-c1-v2-verified-v1"
 STATIC_INITIAL_VIEW_VERSION = "c2kv-static-initial-view-v1"
 ACTION_LEDGER_VERSION = "static-action-ledger-v1"
 ACTION_RULES_VERSION = "action-ledger-rules-v1"
@@ -45,6 +47,20 @@ RISK_ARTIFACT_SHA256 = T02_RISK_ARTIFACT_SHA256
 CANDIDATE_SOURCE_PANELS = frozenset({
     ("bfcl", "bfcl_base"), ("toolsandbox", "toolsandbox"),
 })
+
+
+def c1_v2_contract(variant: str) -> dict:
+    if variant not in C1_V2_VARIANTS:
+        raise ValueError("Unknown C1 v2 variant")
+    return {
+        "initial_view": {
+            "policy": "s0_capacity_fallback",
+            "version": "c2kv-s0-capacity-fallback-v1",
+        },
+        "recovery_backbone": "t02_complete_event",
+        "completion_review": False,
+        "proof_registry_version": PROOF_REGISTRY_VERSION,
+    }
 
 
 def static_contract(variant: str) -> dict:
@@ -104,7 +120,9 @@ def candidate_cell_from_source(
                          "explicit history_budget_tokens is unsupported")
     source_dir = Path(source["cell_dir"])
     cell = copy.deepcopy(source)
-    cell["schema"] = ("c2kv-generality-candidate-cell-v6"
+    cell["schema"] = ("c2kv-generality-candidate-cell-v7"
+                      if variant in C1_V2_VARIANTS else
+                      "c2kv-generality-candidate-cell-v6"
                       if variant in STATIC_EXTENSION_VARIANTS else
                       "c2kv-generality-candidate-cell-v5"
                       if variant in STATIC_VARIANTS else
@@ -147,6 +165,9 @@ def candidate_cell_from_source(
         elif variant in STATIC_EXTENSION_VARIANTS:
             cell["candidate_protocol"] = STATIC_EXTENSION_VERSION
             cell.update(static_contract(variant))
+        elif variant in C1_V2_VARIANTS:
+            cell["candidate_protocol"] = C1_V2_VERSION
+            cell.update(c1_v2_contract(variant))
     cell["sglang_backend_url"] = backend_url.strip()
     cell.pop("controller_path", None)
     cell.pop("eval_policy_path", None)
@@ -175,6 +196,13 @@ def controller_with_binding(
                 or cell.get("proof_registry_version") != PROOF_REGISTRY_VERSION
                 or cell.get("threshold") != RISK_THRESHOLD):
             raise ValueError("Verified candidate requires frozen T02 and proof registry")
+    elif variant in C1_V2_VARIANTS:
+        contract = c1_v2_contract(variant)
+        if (cell.get("schema") != "c2kv-generality-candidate-cell-v7"
+                or cell.get("candidate_protocol") != C1_V2_VERSION
+                or cell.get("threshold") != RISK_THRESHOLD
+                or any(cell.get(key) != value for key, value in contract.items())):
+            raise ValueError("C1 v2 candidate requires matching version and contract")
     elif variant in STATIC_EXTENSION_VARIANTS:
         contract = static_contract(variant)
         if (cell.get("schema") != "c2kv-generality-candidate-cell-v6"
@@ -220,6 +248,8 @@ def controller_with_binding(
     }
     if variant in VERIFIED_VARIANTS:
         controller["candidate_algorithm"]["proof_registry_version"] = PROOF_REGISTRY_VERSION
+    elif variant in C1_V2_VARIANTS:
+        controller["candidate_algorithm"].update(c1_v2_contract(variant))
     elif variant in STATIC_VARIANTS + STATIC_EXTENSION_VARIANTS:
         controller["candidate_algorithm"].update(static_contract(variant))
     return controller, binding

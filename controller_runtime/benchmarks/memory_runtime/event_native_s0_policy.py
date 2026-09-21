@@ -1332,9 +1332,40 @@ class EventNativeS0Controller:
         derived_messages=(),
     ) -> _Measurement | None:
         derived_messages = self._merge_protected_derived(derived_messages)
+        fallback_context = None
+        context_getter = getattr(
+            self, "_capacity_fallback_measurement_context", None
+        )
+        if callable(context_getter):
+            fallback_context = context_getter()
         known = {event.event_id for event in store.events}
         raw = set(raw_ids)
         gist = set(gist_ids)
+        removed_duplicate_gist = ()
+        projected_sources = set(
+            (fallback_context or {}).get("raw_message_overrides") or ()
+        )
+        if projected_sources:
+            projected_events = {
+                event.event_id
+                for event in store.events
+                if event.event_id in raw
+                and event.complete
+                and event.event_id in set(eligible_event_ids)
+                and projected_sources.intersection(event.source_indices)
+            }
+            gist.update(projected_events)
+        if fallback_context and fallback_context.get("remove_duplicate_gist"):
+            removable = {
+                event_id
+                for event_id in raw & gist
+                if store.event(event_id).complete
+                and not projected_sources.intersection(
+                    store.event(event_id).source_indices
+                )
+            }
+            gist.difference_update(removable)
+            removed_duplicate_gist = _ordered_ids(store, removable)
         omitted = known - raw - gist
         view = RuntimeMemoryView(
             gist_event_ids=_ordered_ids(store, gist),
@@ -1361,6 +1392,11 @@ class EventNativeS0Controller:
                     eligible_event_ids,
                     validate_encoding_scope(self.encoding_scope),
                 ).event_groups,
+                raw_source_message_overrides=(
+                    fallback_context.get("raw_message_overrides")
+                    if fallback_context
+                    else None
+                ),
             )
         except EncodingScopeCapacityError:
             raise
@@ -1398,7 +1434,18 @@ class EventNativeS0Controller:
             if self.recovery_budget_mode and recovery_workspace_cap is not None
             else self.policy_config.workspace_budget_bytes
         )
-        for candidate_ratio in self.packing.ratios:
+        measurement_ratios = (
+            tuple(fallback_context["budget_ratios"])
+            if fallback_context
+            else self.packing.ratios
+        )
+        if not measurement_ratios or any(
+            ratio not in self.packing.ratios for ratio in measurement_ratios
+        ):
+            raise PolicyInputError(
+                "Capacity fallback measurement ratios must be configured ratios"
+            )
+        for candidate_ratio in measurement_ratios:
             costs = memory.costs(candidate_ratio)
             gist_tokens = costs["gist_tokens"]
             history_tokens = raw_history_tokens + gist_tokens
@@ -1433,7 +1480,7 @@ class EventNativeS0Controller:
                 "workspace_budget_bytes": workspace_cap,
                 "budget_mode": "recovery" if self.recovery_budget_mode else "initial",
             }
-        return _Measurement(
+        result = _Measurement(
             memory=memory,
             raw_prompt_tokens=raw_prompt_tokens,
             common_raw_prompt_tokens=common_tokens,
@@ -1442,6 +1489,14 @@ class EventNativeS0Controller:
             logical_sequence_tokens=logical,
             reasons=tuple(dict.fromkeys(reasons)),
         )
+        if fallback_context is not None:
+            fallback_context["removed_duplicate_gist_by_memory_id"][
+                id(memory)
+            ] = removed_duplicate_gist
+            fallback_context["measured_raw_source_sets"].append(
+                tuple(memory.raw_source_indices)
+            )
+        return result
 
     def _coverage(
         self,

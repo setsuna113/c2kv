@@ -19,5 +19,8 @@ INITIAL_VIEW_VERSION = "c2kv-initial-view-composition-v1"
 INITIAL_VIEW_POLICY_VERSION = "c2kv-static-initial-view-v1"
 STATIC_EXTENSION_VARIANTS = ("static_verified", "static_action_ledger", "static_verified_v2")
 STATIC_EXTENSION_VERSION = "c2kv-static-extension-v1"
+C1_V2_VARIANTS = ("c1_v2_verified",)
+C1_V2_VERSION = "c2kv-c1-v2-verified-v1"
 ALL_VARIANTS = (VARIANTS + REPAIR_VARIANTS + GOAL_VARIANTS
-                + VERIFIED_VARIANTS + INITIAL_VIEW_VARIANTS + STATIC_EXTENSION_VARIANTS)
+                + VERIFIED_VARIANTS + INITIAL_VIEW_VARIANTS + STATIC_EXTENSION_VARIANTS
+                + C1_V2_VARIANTS)

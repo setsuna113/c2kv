@@ -44,7 +44,13 @@ def test_candidate_cell_is_explicit_ratio8_and_isolated(tmp_path, variant):
         source, variant, "http://127.0.0.1:36200")
     assert result["ratio"] == 8
     assert result["candidate_algorithm"] == variant
-    if variant in candidate_cell.STATIC_EXTENSION_VARIANTS:
+    if variant in candidate_cell.C1_V2_VARIANTS:
+        assert result["threshold"] == 0.5
+        assert result["candidate_protocol"] == candidate_cell.C1_V2_VERSION
+        assert result["schema"] == "c2kv-generality-candidate-cell-v7"
+        assert {key: result[key] for key in candidate_cell.c1_v2_contract(variant)} == (
+            candidate_cell.c1_v2_contract(variant))
+    elif variant in candidate_cell.STATIC_EXTENSION_VARIANTS:
         assert result["threshold"] == 0.5
         assert result["candidate_protocol"] == candidate_cell.STATIC_EXTENSION_VERSION
         assert result["schema"] == "c2kv-generality-candidate-cell-v6"
@@ -72,8 +78,13 @@ def test_candidate_cell_is_explicit_ratio8_and_isolated(tmp_path, variant):
     else:
         assert result["threshold"] == 0.5
         assert result["schema"] == "c2kv-generality-candidate-cell-v1"
-    if variant not in candidate_cell.STATIC_VARIANTS + candidate_cell.STATIC_EXTENSION_VARIANTS:
+    if variant not in (candidate_cell.STATIC_VARIANTS
+                       + candidate_cell.STATIC_EXTENSION_VARIANTS
+                       + candidate_cell.C1_V2_VARIANTS):
         assert "initial_view" not in result and "recovery_backbone" not in result
+    elif variant in candidate_cell.C1_V2_VARIANTS:
+        assert (result["proof_registry_version"]
+                == candidate_cell.PROOF_REGISTRY_VERSION)
     elif "proof_registry_version" not in candidate_cell.static_contract(variant):
         assert "proof_registry_version" not in result
     assert result["candidate_source_cell_id"] == source["cell_id"]
@@ -101,6 +112,22 @@ def test_legacy_static_t02_contract_is_unchanged(tmp_path):
     assert "initial_view" not in result
     assert "recovery_backbone" not in result
     assert "commit_policy" not in result
+
+
+def test_c1_v2_contract_is_explicit_and_keeps_frozen_proof_registry():
+    assert candidate_cell.C1_V2_VARIANTS == ("c1_v2_verified",)
+    assert candidate_cell.C1_V2_VERSION == "c2kv-c1-v2-verified-v1"
+    assert candidate_cell.c1_v2_contract("c1_v2_verified") == {
+        "initial_view": {
+            "policy": "s0_capacity_fallback",
+            "version": "c2kv-s0-capacity-fallback-v1",
+        },
+        "recovery_backbone": "t02_complete_event",
+        "completion_review": False,
+        "proof_registry_version": candidate_cell.PROOF_REGISTRY_VERSION,
+    }
+    with pytest.raises(ValueError, match="Unknown C1 v2"):
+        candidate_cell.c1_v2_contract("static_verified_v2")
 
 
 def test_static_extension_contracts_are_explicit_and_versioned():
@@ -508,6 +535,146 @@ def test_candidate_controller_binds_pinned_artifact_and_strips_legacy(tmp_path, 
     assert "candidate_algorithm" not in base
 
 
+def test_c1_v2_controller_preserves_full_s0_and_binds_frozen_contract(
+        tmp_path, monkeypatch):
+    variant = "c1_v2_verified"
+    checkpoint = tmp_path / "checkpoint"
+    checkpoint.mkdir()
+    (checkpoint / "config.json").write_text("{}", encoding="utf-8")
+    artifact_path = tmp_path / "risk.json"
+    artifact_path.write_text('{"model_kind":"c1_risk_logistic"}', encoding="utf-8")
+    monkeypatch.setattr(candidate_cell, "RISK_ARTIFACT_SHA256",
+                        hashlib.sha256(artifact_path.read_bytes()).hexdigest())
+    cell = candidate_cell.candidate_cell_from_source(
+        source_cell(tmp_path) | {"checkpoint": str(checkpoint)},
+        variant, "http://127.0.0.1:36200")
+    base = {
+        "view_mode": "native_s0",
+        "latest_complete_tool_protection": "budgeted",
+        "observed_entity_slot_policy":
+            "same-complete-event-reference-bridge-only-v1",
+        "gp_experiments": {}, "post_draft_recovery": {},
+        "d3_hybrid_recovery": True,
+    }
+    bound = {"model_kind": "c1_risk_logistic", "bound": True}
+    controller, receipt = candidate_cell.controller_with_binding(
+        cell, base_controller=base,
+        selected={"checkpoint_selection": {"config_sha256":
+                  hashlib.sha256((checkpoint / "config.json").read_bytes()).hexdigest()}},
+        risk_artifact_path=artifact_path,
+        bind_risk_artifact=lambda artifact, path: (
+            bound, {"checkpoint": str(path)}))
+    assert controller == {
+        "view_mode": "native_s0",
+        "latest_complete_tool_protection": "budgeted",
+        "observed_entity_slot_policy":
+            "same-complete-event-reference-bridge-only-v1",
+        "candidate_algorithm": {
+            "variant": variant, "risk_artifact": bound, "risk_threshold": 0.5,
+            **candidate_cell.c1_v2_contract(variant),
+        },
+    }
+    assert receipt == {"checkpoint": str(checkpoint)}
+    assert "candidate_algorithm" not in base
+
+
+@pytest.mark.parametrize("field,replacement", [
+    ("candidate_protocol", "c2kv-c1-v2-verified-v0"),
+    ("schema", "c2kv-generality-candidate-cell-v6"),
+    ("initial_view", {"policy": "s0_capacity_fallback", "version": "stale"}),
+    ("recovery_backbone", "goal_rescue"),
+    ("completion_review", True),
+    ("proof_registry_version", "verified-binding-relations-v2"),
+])
+def test_c1_v2_rejects_version_or_contract_mismatch_before_checkpoint(
+        tmp_path, field, replacement):
+    cell = candidate_cell.candidate_cell_from_source(
+        source_cell(tmp_path), "c1_v2_verified", "http://127.0.0.1:36200")
+    cell[field] = replacement
+    with pytest.raises(ValueError, match="matching version and contract"):
+        candidate_cell.controller_with_binding(
+            cell, base_controller={}, selected={},
+            risk_artifact_path=tmp_path / "unused.json", bind_risk_artifact=None)
+
+
+def test_c1_v2_ready_manifest_binds_version_controller_and_route(tmp_path, monkeypatch):
+    monkeypatch.setitem(sys.modules, "current", types.SimpleNamespace())
+    monkeypatch.setitem(sys.modules, "evidence_sets", types.SimpleNamespace())
+    monkeypatch.setitem(sys.modules, "c1_artifact_binding", types.SimpleNamespace(
+        bind_risk_artifact=lambda artifact, checkpoint: (artifact, {})))
+    from generality import c2kv_cell
+
+    variant = "c1_v2_verified"
+    contract = candidate_cell.c1_v2_contract(variant)
+    controller = {"view_mode": "native_s0", "candidate_algorithm": {
+        "variant": variant, "risk_artifact": {"model_kind": "c1_risk_logistic"},
+        "risk_threshold": 0.5, **contract}}
+    controller_path = tmp_path / "controller.json"
+    controller_path.write_text(json.dumps(controller), encoding="utf-8")
+    cell = candidate_cell.candidate_cell_from_source(
+        source_cell(tmp_path), variant, "http://127.0.0.1:36200") | {
+            "controller_path": str(controller_path)}
+    ready = {
+        "status": "ready",
+        "s0_controller_contract": {
+            "source": str(controller_path.resolve()), "config": controller,
+            "sha256": hashlib.sha256(controller_path.read_bytes()).hexdigest(),
+        },
+        "candidate_algorithm": {
+            "variant": variant, "stable_call_ids": True,
+            "recovery_rounds_per_decision": 1, **contract,
+        },
+        "route_contract": {
+            "baseline_identity": candidate_cell.C1_V2_VERSION + ":" + variant,
+            "recovery_enabled": True, "max_generations_per_decision": 2,
+        },
+    }
+    ready_path = tmp_path / "ready.json"
+
+    def validate(cell_value=cell, ready_value=ready):
+        ready_path.write_text(json.dumps(ready_value), encoding="utf-8")
+        c2kv_cell.validate_static_ready_manifest(cell_value, ready_path)
+
+    validate()
+    with pytest.raises(RuntimeError, match="differs from frozen controller"):
+        validate(cell | {"candidate_protocol": "c2kv-c1-v2-verified-v0"})
+    changed_ready = json.loads(json.dumps(ready))
+    changed_ready["route_contract"]["baseline_identity"] = (
+        "c2kv-c1-v2-verified-v0:" + variant)
+    with pytest.raises(RuntimeError, match="differs from frozen controller"):
+        validate(ready_value=changed_ready)
+    changed_ready = json.loads(json.dumps(ready))
+    changed_ready["candidate_algorithm"]["completion_review"] = True
+    with pytest.raises(RuntimeError, match="differs from frozen controller"):
+        validate(ready_value=changed_ready)
+
+
+@pytest.mark.parametrize("budget", [256, 128, 64])
+def test_c1_v2_native_budget_uses_generic_override(tmp_path, monkeypatch, budget):
+    monkeypatch.setitem(sys.modules, "current", types.SimpleNamespace())
+    monkeypatch.setitem(sys.modules, "evidence_sets", types.SimpleNamespace())
+    monkeypatch.setitem(sys.modules, "c1_artifact_binding", types.SimpleNamespace(
+        bind_risk_artifact=lambda artifact, checkpoint: (artifact, {})))
+    from generality import c2kv_cell
+
+    checkpoint = tmp_path / "checkpoint"
+    _checkpoint_with_geometry(checkpoint)
+    cell = candidate_cell.candidate_cell_from_source(
+        source_cell(tmp_path) | {
+            "checkpoint": str(checkpoint),
+            "model_name": "gen_c2kv_K0_compression_full_budget",
+        },
+        "c1_v2_verified", "http://127.0.0.1:36200", budget)
+    monkeypatch.setattr(c2kv_cell, "_controller_with_binding", lambda _: ({}, None))
+    prepared = c2kv_cell.prepare_cell_files(cell, {"working_points": {"K0": {
+        "history_allowance_bytes": 100, "common_cap_bytes": 300}}})
+    profile = prepared["native_history_budget"]
+    assert prepared["cell_id"].endswith(f"__candidate_c1_v2_verified__b{budget}")
+    assert profile["requested_tokens"] == budget
+    assert profile["history_budget_bytes"] == budget * 147456
+    assert profile["workspace_budget_bytes"] == budget * 147456
+
+
 @pytest.mark.parametrize("variant", candidate_cell.REPAIR_VARIANTS)
 def test_repair_candidate_keeps_c1000_without_loading_t02(tmp_path, variant):
     checkpoint = tmp_path / "checkpoint"
@@ -532,7 +699,8 @@ def test_repair_candidate_keeps_c1000_without_loading_t02(tmp_path, variant):
 
 @pytest.mark.parametrize("variant", candidate_cell.GOAL_VARIANTS +
                          candidate_cell.VERIFIED_VARIANTS + candidate_cell.STATIC_VARIANTS +
-                         candidate_cell.STATIC_EXTENSION_VARIANTS)
+                         candidate_cell.STATIC_EXTENSION_VARIANTS +
+                         candidate_cell.C1_V2_VARIANTS)
 def test_goal_candidate_binds_frozen_t02_with_new_resume_identity(tmp_path, monkeypatch, variant):
     checkpoint = tmp_path / "checkpoint"
     checkpoint.mkdir()
@@ -556,6 +724,8 @@ def test_goal_candidate_binds_frozen_t02_with_new_resume_identity(tmp_path, monk
     expected = {"variant": variant, "risk_artifact": bound, "risk_threshold": 0.5}
     if variant in candidate_cell.VERIFIED_VARIANTS:
         expected["proof_registry_version"] = candidate_cell.PROOF_REGISTRY_VERSION
+    elif variant in candidate_cell.C1_V2_VARIANTS:
+        expected.update(candidate_cell.c1_v2_contract(variant))
     elif variant in candidate_cell.STATIC_VARIANTS + candidate_cell.STATIC_EXTENSION_VARIANTS:
         expected.update(candidate_cell.static_contract(variant))
     assert controller == {"view_mode": "native_s0", "candidate_algorithm": expected}
@@ -564,13 +734,15 @@ def test_goal_candidate_binds_frozen_t02_with_new_resume_identity(tmp_path, monk
     assert cell["candidate_protocol"] == (candidate_cell.STATIC_EXTENSION_VERSION
         if variant in candidate_cell.STATIC_EXTENSION_VARIANTS else candidate_cell.STATIC_VERSION
         if variant in candidate_cell.STATIC_VARIANTS else candidate_cell.VERIFIED_VERSION
-        if variant in candidate_cell.VERIFIED_VARIANTS else candidate_cell.GOAL_VERSION)
+        if variant in candidate_cell.VERIFIED_VARIANTS else candidate_cell.C1_V2_VERSION
+        if variant in candidate_cell.C1_V2_VARIANTS else candidate_cell.GOAL_VERSION)
     assert "candidate_algorithm" not in base
 
 
 @pytest.mark.parametrize("variant", ("goal_pending",) + candidate_cell.VERIFIED_VARIANTS +
                          candidate_cell.STATIC_VARIANTS +
-                         candidate_cell.STATIC_EXTENSION_VARIANTS)
+                         candidate_cell.STATIC_EXTENSION_VARIANTS +
+                         candidate_cell.C1_V2_VARIANTS)
 def test_goal_candidate_requires_shadow_feature_launcher_config(tmp_path, monkeypatch, variant):
     monkeypatch.setitem(sys.modules, "current", types.SimpleNamespace())
     monkeypatch.setitem(sys.modules, "evidence_sets", types.SimpleNamespace())
