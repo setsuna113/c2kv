@@ -40,8 +40,9 @@ def main():
     parser.add_argument("--paper-root", type=Path, required=True)
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--python", default=sys.executable)
-    parser.add_argument("--arm", default="c2kv_native_r4")
-    parser.add_argument("--benchmark", choices=("bfcl_base", "bfcl_long_context", "appworld", "acebench_agent", "toolsandbox"), required=True)
+    parser.add_argument("--arm", default="c2kv_native_r4",
+                        help="shared native arm, including c2kv_native_r8")
+    parser.add_argument("--benchmark", choices=("bfcl_base", "bfcl_long_context", "appworld", "acebench_agent", "toolsandbox", "tau2"), required=True)
     parser.add_argument("--upstream", required=True)
     parser.add_argument("--proxy-port", type=int, required=True)
     parser.add_argument("--out", type=Path, required=True)

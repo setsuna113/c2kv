@@ -86,6 +86,24 @@ def _write_typed_final(batch: Path, code: str, *, pending=0, failed=0):
     }), encoding="utf-8")
 
 
+def _write_context_final(batch: Path, *, completed=82, pending=0, failed=0):
+    server = batch / "server"
+    server.mkdir(parents=True, exist_ok=True)
+    (server / "ready.json").write_text(json.dumps({
+        "schema": "a-event-native-server-v1", "status": "ready",
+        "benchmark": "tau2", "allowed_task_ids": ["7"], "run_id": "context-run",
+    }), encoding="utf-8")
+    (server / "final.json").write_text(json.dumps({
+        "status": "stopped", "cost_summary": {"generation_attempts": completed},
+        "journal_summary": {
+            "schema": "a-runtime-attempt-journal-v1", "started": completed,
+            "completed": completed, "pending": pending, "failed": failed,
+        },
+        "api_health": {"allowed_task_ids": ["7"], "terminal": False,
+                       "terminal_reason": None},
+    }), encoding="utf-8")
+
+
 def test_one_task_uses_shared_adapter_with_split_endpoints_and_official_reward(tmp_path):
     cell = _cell(tmp_path)
     out = tmp_path / "tasks" / "7"
@@ -300,6 +318,40 @@ def test_typed_budget_failure_completes_once_and_keeps_zero_provenance(
         "task_failure_kind": code,
         "official_reward": official_reward,
     }]
+
+
+def test_typed_context_overflow_is_a_method_failure_with_clean_cost(tmp_path):
+    cell = _cell(tmp_path)
+    cell_dir = tmp_path / "cell"
+    batch = cell_dir / "batches" / "one"
+    out = batch / "tau2_worker" / "7"
+
+    def fake_worker(command, **_kwargs):
+        request = json.loads(Path(command[4]).read_text(encoding="utf-8"))
+        _write_official(cell, request, termination="infrastructure_error", reward=None)
+        _write_summary(command, termination="infrastructure_error", reward=0.0,
+                       failure_code="context_overflow", official_reward=None)
+        return 0
+
+    with patch.object(harness, "run_owned_worker", side_effect=fake_worker):
+        result = harness.run_tau2_task(
+            cell, "7", "http://127.0.0.1:1", "http://127.0.0.1:2", out)
+    assert result["status"] == "completed"
+    assert result["score_source"] == "typed_harness_method_failure"
+    _write_context_final(batch, completed=82)
+
+    sys.modules.setdefault("current", types.SimpleNamespace())
+    sys.modules.setdefault("evidence_sets", types.SimpleNamespace())
+    sys.modules.setdefault("c1_artifact_binding", types.SimpleNamespace(
+        bind_risk_artifact=lambda artifact, checkpoint: (artifact, {})))
+    from generality import c2kv_cell
+
+    summary = c2kv_cell.tau2_score_summary({
+        "cell_dir": str(cell_dir), "cell_id": "test", "task_ids": ["7"]})
+    assert summary["n_official_scored"] == summary["n_budget_failures"] == 0
+    assert summary["n_method_failures"] == summary["n_completed"] == 1
+    assert summary["method_failure_task_ids"] == ["7"]
+    assert summary["semantic_score"] == 0.0
 
 
 def test_old_untyped_harness_cap_remains_retryable(tmp_path):

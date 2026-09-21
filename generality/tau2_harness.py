@@ -23,6 +23,7 @@ PAPER = Path(os.environ.get(
     str(Path.home() / "c2kv-generality-20260918" / "src" / "paper_harness"),
 )).resolve()
 BUDGET_FAILURE_CODES = frozenset({"decision_cap_reached", "generation_cap_reached"})
+TASK_FAILURE_CODES = BUDGET_FAILURE_CODES | {"context_overflow"}
 
 _WORKER = """
 import json
@@ -46,7 +47,7 @@ summary_path.write_text(json.dumps(summary, ensure_ascii=False, allow_nan=False)
 
 def _official_result(path: Path, task_id: str,
                      declared_failure: str | None = None) -> dict | None:
-    """Require an exact official reward or an adapter-declared budget failure."""
+    """Require an exact official reward or an adapter-declared task failure."""
     raw = path.with_name("results.json")
     if not raw.is_file() or not path.is_file():
         return None
@@ -74,14 +75,16 @@ def _official_result(path: Path, task_id: str,
     reward_info = scored.get("reward_info")
     reward = reward_info.get("reward") if isinstance(reward_info, dict) else None
     if termination == "infrastructure_error":
-        if (declared_failure not in BUDGET_FAILURE_CODES
+        if (declared_failure not in TASK_FAILURE_CODES
                 or (reward is not None and (
                     isinstance(reward, bool) or not isinstance(reward, (int, float))
                     or not math.isfinite(reward)))):
             return None
         return {"task_id": task_id, "semantic_score": 0.0,
                 "termination": termination, "task_failure_kind": declared_failure,
-                "score_source": "typed_harness_budget_failure",
+                "score_source": ("typed_harness_budget_failure"
+                                 if declared_failure in BUDGET_FAILURE_CODES else
+                                 "typed_harness_method_failure"),
                 "official_reward": reward}
     if declared_failure is not None:
         return None
@@ -93,7 +96,7 @@ def _official_result(path: Path, task_id: str,
             "termination": termination}
 
 
-def _declared_budget_failure(attempt: Path, task_id: str) -> str | None:
+def _declared_task_failure(attempt: Path, task_id: str) -> str | None:
     try:
         summary = json.loads((attempt / "summary.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -102,7 +105,7 @@ def _declared_budget_failure(attempt: Path, task_id: str) -> str | None:
     if not isinstance(failure, dict):
         return None
     code = failure.get(task_id)
-    if code in BUDGET_FAILURE_CODES and failure == {task_id: code}:
+    if code in TASK_FAILURE_CODES and failure == {task_id: code}:
         return code
     return None
 
@@ -140,7 +143,7 @@ def _completed_attempt(output_root: Path, task_id: str) -> tuple[Path, dict] | N
     for path in sorted((output_root / "attempts").glob(
             "*/official/updated_results.json"), reverse=True):
         attempt = path.parent.parent
-        result = _official_result(path, task_id, _declared_budget_failure(attempt, task_id))
+        result = _official_result(path, task_id, _declared_task_failure(attempt, task_id))
         if result is not None and _adapter_summary_matches(attempt,
                                                             task_id, result):
             return path, result
@@ -271,7 +274,7 @@ def run_tau2_task(cell: dict, task_id: str, agent_base_url: str,
         if (source / name).is_file():
             shutil.copy2(source / name, official_dir / name)
     official = _official_result(official_dir / "updated_results.json", task_id,
-                                _declared_budget_failure(attempt, task_id))
+                                _declared_task_failure(attempt, task_id))
     if official is not None and not _adapter_summary_matches(attempt, task_id, official):
         official = None
     result = {"task_id": task_id,

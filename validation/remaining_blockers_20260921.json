@@ -1,0 +1,118 @@
+{
+  "schema": "c2kv.remaining-blockers-validation.v1",
+  "date": "2026-09-21",
+  "source_bases": {
+    "paper": "d04ea6e",
+    "npu": "19eb7a1",
+    "shared_engine": "e2b3b7ec0"
+  },
+  "repairs": {
+    "tau2_context_overflow": "Classify only task-bound agent ContextWindowExceededError; require clean native finalization and preserve raw official artifacts.",
+    "toolsandbox_capacity": "Accept only task-bound declared CapacityInfeasible and matching UnprocessableEntityError; preserve unknown infrastructure failures.",
+    "appworld_generation_timeout": "Patch ACON run_all task boundary to continue without retry; retain infrastructure receipts, invalidate canonical whole-cell score, expose partial completed-task statistics.",
+    "native_ratio8": "Explicit c2kv_native_r8 shares static gist implementation with ratio4; profile, model, manifest, closed-loop and replay identities bind ratio. NPU wrapper supports tau2.",
+    "hiagent_duplicate_retrieval": "Return bounded internal already-revealed feedback without another copy of the trajectory; retain four sends and meter all paid responses including the limit response."
+  },
+  "evidence": [
+    {
+      "host": "m2",
+      "path": "/workspace/results-b768awr/closed_loop/appworld__agentkv_b768/HOLD_generation_timeout.txt",
+      "hold_text_sha256": "0a4bc8bff47e1250549cb9a28e13442fbd89037a2d682ed6317d8ffbfd9f6b29"
+    },
+    {
+      "host": "box4",
+      "path": "/workspace/results-t2fix/closed_loop/tau2__c2kv_native_r4/HOLD_context_overflow.txt",
+      "hold_text_sha256": "cac596de9e81cbf6c30c78517500715fcd00462f927a199635f39833f8959287"
+    },
+    {
+      "host": "box4",
+      "path": "/workspace/results-tsxn/closed_loop/toolsandbox__c2kv_native_r4/HOLD_capacity_toolsandbox_native.txt",
+      "hold_text_sha256": "ad9bff508028d7c643806a99167a7813f30bd52bd087e5eb8e8c8b22ee5f2bcc"
+    }
+  ],
+  "hiagent_feedback_token_counts": {
+    "budget_unavailable: continue without trajectory retrieval.": 17,
+    "subgoal_unavailable: continue without trajectory retrieval.": 18,
+    "already_revealed: continue without trajectory retrieval.": 18
+  },
+  "checks": {
+    "suites": [
+      {
+        "scope": "paper affected adapters, native ratio entry points, finalization, HiAgent and dispatch",
+        "artifact": "final_paper_remaining_blockers.xml",
+        "passed": 388,
+        "subtests_passed": 4,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "timestamp": "2026-09-21T21:57:25.202439+01:00"
+      },
+      {
+        "scope": "paper AppWorld final patch packaging and infrastructure score isolation",
+        "artifact": "final_appworld_patch_checks.xml",
+        "passed": 95,
+        "subtests_passed": 0,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "timestamp": "2026-09-21T22:05:40.765947+01:00"
+      },
+      {
+        "scope": "NPU tau2, ToolSandbox, completion/resume and native ratio launcher",
+        "artifact": "final_npu_remaining_blockers.xml",
+        "passed": 73,
+        "subtests_passed": 0,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "timestamp": "2026-09-21T22:01:30.039822+01:00"
+      },
+      {
+        "scope": "NPU BFCL completion contract parity and history-KV attempts",
+        "artifact": "final_npu_bfcl_parity_checks.xml",
+        "passed": 50,
+        "subtests_passed": 0,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "timestamp": "2026-09-21T22:06:10.868835+01:00"
+      },
+      {
+        "scope": "ACON pinned upstream patch deployment",
+        "patch_chain": [
+          "0001",
+          "0002",
+          "0006",
+          "0007",
+          "0008"
+        ],
+        "patch_0008_flags": [
+          "--unidiff-zero",
+          "--ignore-space-change"
+        ],
+        "result": "Fresh checkout: apply --check, apply and patched-source diff --check passed; actual patched two-task runner tested."
+      }
+    ],
+    "counts_overlap": true
+  },
+  "limitations": [
+    "CPU and recorded-error validation only; no original full benchmark task rerun or new CUDA/NPU model execution.",
+    "No new quality or speed claim; preserve 96 generation and decision caps as separate codes.",
+    "Items 8-12 remain method-result caveats or existing held/excluded status.",
+    "ACON deployment must apply patch 0008 after patches 0006 and 0007; preflight rejects stale checkouts.",
+    "The standalone historical test_run_c1_multibench suite requires unavailable original Linux checkpoint and benchmark paths (5 passed, 11 reported failures locally). Edited bare-native paths are covered by paper fixtures."
+  ],
+  "source_sha256_lf": {
+    "README.md": "59d3107e94fb65387a090f1067c08c81efc1042f5f7bc22998b8497e8a216373",
+    "generality/bfcl_completion.py": "41ce2410872338b8ddf24542432b3d25a078ccebdb33248e4fd0e104860ca254",
+    "generality/c2kv_cell.py": "085396d3d69b908b6f2fb14398c3404c7c2f0e6c9e53655faa6bfcebddd39843",
+    "generality/native_bare.py": "b38e02f72cccb914d3218bfbae4b1f2d0c415132f3e689f7d4df5aa7b2890d7f",
+    "generality/tau2_harness.py": "7e349e8861cba6243a06065425fc529c1747983325cf217d07716b9967f2971e",
+    "generality/toolsandbox_harness.py": "0aa475297852f609daa5ecd257a801a9f7fd54003e26ef69ee499290fcdce470",
+    "tests/test_native_bare_launcher.py": "1d97f0b9f90ab7d721b235dfd35e627244096f682dd391e9576cffbd16159088",
+    "tests/test_tau2_harness.py": "64a196ca6d5fa92dbb9c8791ccad6f591ae8f24fcd04bcf87105586c23e90517",
+    "tests/test_tau2_matrix.py": "f331feed8f68b17789bbd9b7e805e349b8f2a1b026d8df37c11f7b601b65c276",
+    "tests/test_toolsandbox_tcr.py": "612a1eaa5894ce06b619da74c12fac91451b858a9752ce5c7877077d5197620b"
+  },
+  "shared_paper_revision": "3a2d0f3dcc73f676bd0c8cc08cd5cf196afe67c6"
+}

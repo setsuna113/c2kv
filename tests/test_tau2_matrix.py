@@ -155,7 +155,8 @@ def test_historykv_tau2_uses_frozen_k_or_b_and_raw_user_endpoint(
     manifest.write_text(json.dumps(cell))
     monkeypatch.setattr(historykv_cell, "resolve_free_port", lambda *args: 45000)
     proxy_args = []
-    monkeypatch.setattr(historykv_cell, "start_proxy", lambda *args: proxy_args.append(args))
+    monkeypatch.setattr(historykv_cell, "start_proxy",
+                        lambda *args, **kwargs: proxy_args.append(args))
     monkeypatch.setattr(historykv_cell, "stop", lambda proc: None)
     seen = []
 

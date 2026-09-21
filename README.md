@@ -23,6 +23,22 @@ boundaries are preserved by the shared engine. NPU consumes those same modules;
 the standalone launcher does not duplicate them. This delivery has CPU and real
 SDK transport validation, without an NPU model run.
 
+Bare-native ratio8 is available through `generality/native_bare.py --arm
+c2kv_native_r8`, including `--benchmark tau2`. It forwards to the shared paper
+implementation and requires the matching updated paper checkout. Ratio4 remains
+the default; ratio8 has a separate arm, profile and output directory. It retains
+static gist packing without S0, detector or recovery and does not change task
+budgets. This entry point has CPU launcher validation, without a new NPU run.
+
+The matching paper checkout also provides task-bound tau2 context-overflow and
+ToolSandbox capacity-failure classification. NPU counts these terminal method
+failures for resume while keeping them separate from official-scored tasks.
+Shared HiAgent retrieval handles already-revealed requests within its existing
+internal-call limit. AppWorld requires ACON patch `0008` from the paper checkout;
+apply it after `0007` using `git apply --unidiff-zero --ignore-space-change`.
+Generation timeouts then remain explicit infrastructure receipts while later
+tasks continue, and any affected full-cell score is withheld.
+
 ## Tool-definition and joint component studies
 
 `generality/tool_definition_study.py` runs the shared paper checkout's

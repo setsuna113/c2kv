@@ -22,14 +22,41 @@ def _c2kv_driver():
     return c2kv_cell
 
 
-def _official(path: Path, task_id: str, score: float):
+def _official(path: Path, task_id: str, score: float, failure: str | None = None):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({
         "schema": toolsandbox_harness.SCHEMA, "task_id": task_id,
         "n": 1, "semantic_score": score,
         "official_scorer": "tool_sandbox official CLI",
         "adapter_summary": {"n": 1, "scenario_ids": [task_id],
-                            "scenario_manifest": {"scenario_ids": [task_id]}},
+                            "scenario_manifest": {"scenario_ids": [task_id]},
+                            "task_failures": ({failure: [task_id]} if failure else {})},
+        "task_failure_kind": failure,
+    }))
+
+
+def _capacity_final(batch: Path, task_id: str, *, pending=0):
+    server = batch / "server"
+    server.mkdir(parents=True, exist_ok=True)
+    (server / "ready.json").write_text(json.dumps({
+        "schema": "a-event-native-server-v1", "status": "ready",
+        "benchmark": "toolsandbox", "allowed_task_ids": [task_id],
+        "run_id": "capacity-run",
+    }))
+    (server / "steps.jsonl").write_text(json.dumps({
+        "schema": "a-event-native-exact-step-v1", "status": "failed",
+        "session_id": f"toolsandbox/{task_id}/attempt-0",
+        "failure_kind": "method_failure", "failure_code": "c2kv_capacity_infeasible",
+        "error": {"type": "CapacityInfeasible", "message": "cannot fit"},
+        "response": None,
+    }) + "\n")
+    (server / "final.json").write_text(json.dumps({
+        "status": "stopped", "cost_summary": {"generation_attempts": 0},
+        "journal_summary": {"schema": "a-runtime-attempt-journal-v1",
+                            "started": 0, "completed": 0,
+                            "failed": 0, "pending": pending},
+        "api_health": {"allowed_task_ids": [task_id], "terminal": False,
+                       "terminal_reason": None},
     }))
 
 
@@ -160,6 +187,28 @@ def test_c2kv_uses_one_task_official_worker_and_raw_user_endpoint(
     assert worker[worker.index("--base-url") + 1] == "http://127.0.0.1:45001/v1"
     assert worker[worker.index("--user-base-url") + 1] == "http://raw:36200/v1"
     assert worker[worker.index("--task-id") + 1] == task_id
+    assert worker[worker.index("--native-server-dir") + 1] == str(
+        tmp_path / "batches" / "one" / "server")
+
+
+def test_c2kv_capacity_zero_generation_is_terminal_only_with_clean_cost(tmp_path):
+    driver = _c2kv_driver()
+    task_id = "capacity_3_distraction_tools"
+    batch = tmp_path / "batches" / "one"
+    path = batch / "toolsandbox_worker" / task_id / "official_summary.json"
+    _official(path, task_id, 0.0, "c2kv_capacity_infeasible")
+    _capacity_final(batch, task_id)
+    cell = {"cell_id": "ts", "cell_dir": str(tmp_path), "task_ids": [task_id]}
+    assert driver.c2kv_toolsandbox_task_completed(tmp_path, task_id)
+    summary = driver.c2kv_toolsandbox_score_summary(cell)
+    assert summary["n_official_scored"] == 0
+    assert summary["n_method_failures"] == 1
+    assert summary["method_failure_task_ids"] == [task_id]
+    assert summary["semantic_score"] == 0.0
+
+    _capacity_final(batch, task_id, pending=1)
+    assert not driver.c2kv_toolsandbox_task_completed(tmp_path, task_id)
+    assert driver.c2kv_toolsandbox_score_summary(cell)["pending_task_ids"] == [task_id]
 
 
 def test_tracer_binds_one_server_owned_scenario_and_rejects_client_identity():

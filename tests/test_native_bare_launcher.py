@@ -1,6 +1,7 @@
 from argparse import Namespace
 from pathlib import Path
 import json
+import pytest
 
 from generality import native_bare
 
@@ -102,3 +103,22 @@ def test_native_schema_launcher_executes_from_shared_paper_root(tmp_path, monkey
     assert "--tool-checkpoint" not in argv
     assert kwargs["cwd"] == paper
     assert kwargs["env"]["PYTHONPATH"].split(native_bare.os.pathsep)[0] == str(paper)
+
+
+def test_native_ratio8_tau2_cli_uses_shared_source(tmp_path, monkeypatch, capsys):
+    marker = tmp_path / "experiments/history_system/native_bare.py"
+    marker.parent.mkdir(parents=True)
+    marker.write_text("")
+    monkeypatch.setattr(native_bare.subprocess, "run",
+                        lambda *args, **kwargs: pytest.fail("dry run started a process"))
+    monkeypatch.setattr("sys.argv", ["native_bare.py", "--paper-root", str(tmp_path),
+                                   "--config", str(tmp_path / "pod.json"),
+                                   "--arm", "c2kv_native_r8", "--benchmark", "tau2",
+                                   "--upstream", "http://127.0.0.1:36203",
+                                   "--proxy-port", "37490", "--out", str(tmp_path / "new-r8"),
+                                   "--task-ids", "0,1", "--dry-run"])
+    native_bare.main()
+    argv = json.loads(capsys.readouterr().out)["command"]
+    assert argv[argv.index("--arm") + 1] == "c2kv_native_r8"
+    assert argv[argv.index("--benchmark") + 1] == "tau2"
+    assert argv[argv.index("--task-ids") + 1] == "0,1"

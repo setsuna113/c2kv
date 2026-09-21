@@ -496,7 +496,7 @@ def _qualified_tau2_result(output_root: Path, task_id: str) -> dict | None:
     if result is None:
         return None
     code = result.get("task_failure_kind")
-    if code is not None and typed_tau2_budget_cost_finalization(
+    if code is not None and typed_tau2_task_failure_cost_finalization(
             output_root.parent.parent, task_id, code)["status"] != "valid":
         return None
     return result
@@ -523,13 +523,19 @@ def tau2_score_summary(cell: dict) -> dict:
                 row["task_failure_kind"] = scored["task_failure_kind"]
                 row["official_reward"] = scored["official_reward"]
             rows.append(row)
-    budget_failures = [row["task_id"] for row in rows if "task_failure_kind" in row]
+    budget_failures = [row["task_id"] for row in rows
+                       if row.get("task_failure_kind") in {
+                           "decision_cap_reached", "generation_cap_reached"}]
+    method_failures = [row["task_id"] for row in rows
+                       if row.get("task_failure_kind") == "context_overflow"]
     return {
         "schema": "c2kv-tau2-score-summary-v1", "cell_id": cell["cell_id"],
         "n_total": len(cell["task_ids"]),
-        "n_official_scored": len(rows) - len(budget_failures),
+        "n_official_scored": len(rows) - len(budget_failures) - len(method_failures),
         "n_budget_failures": len(budget_failures),
         "budget_failure_task_ids": budget_failures,
+        "n_method_failures": len(method_failures),
+        "method_failure_task_ids": method_failures,
         "n_completed": len(rows),
         "pending_task_ids": pending,
         "semantic_score": (sum(row["semantic_score"] for row in rows) / len(rows)
@@ -609,6 +615,90 @@ def typed_tau2_budget_cost_finalization(out: Path, task_id: str, code: str) -> d
             or rejection_used != used or rejection_cap != cap):
         return {"status": "failed", "reason": "unverified_typed_budget_cap"}
     return {"status": "valid"}
+
+
+def _clean_task_failure_finalization(out: Path, task_id: str,
+                                     benchmark: str) -> dict:
+    existing = cost_finalization(out)
+    if existing["status"] != "valid":
+        return existing
+    try:
+        final = json.loads((out / "server" / "final.json").read_text(encoding="utf-8"))
+        ready = json.loads((out / "server" / "ready.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {"status": "failed", "reason": "invalid_final_receipt"}
+    journal = final.get("journal_summary") if isinstance(final, dict) else None
+    health = final.get("api_health") if isinstance(final, dict) else None
+    if (not isinstance(ready, dict) or not isinstance(journal, dict)
+            or not isinstance(health, dict) or final.get("status") != "stopped"
+            or ready.get("schema") != "a-event-native-server-v1"
+            or ready.get("status") != "ready" or ready.get("benchmark") != benchmark
+            or ready.get("allowed_task_ids") != [task_id]
+            or not isinstance(ready.get("run_id"), str) or not ready["run_id"]
+            or journal.get("schema") != "a-runtime-attempt-journal-v1"
+            or type(journal.get("started")) is not int
+            or type(journal.get("completed")) is not int
+            or journal["started"] != journal["completed"]
+            or journal.get("failed") != 0 or journal.get("pending") != 0
+            or health.get("allowed_task_ids") != [task_id]
+            or health.get("terminal") is not False
+            or health.get("terminal_reason") is not None):
+        return {"status": "failed", "reason": "unverified_typed_method_final"}
+    return {"status": "valid"}
+
+
+def typed_tau2_task_failure_cost_finalization(out: Path, task_id: str,
+                                               code: str) -> dict:
+    if code in {"decision_cap_reached", "generation_cap_reached"}:
+        return typed_tau2_budget_cost_finalization(out, task_id, code)
+    if code == "context_overflow":
+        return _clean_task_failure_finalization(out, task_id, "tau2")
+    return {"status": "failed", "reason": "unknown_typed_task_failure"}
+
+
+def typed_toolsandbox_capacity_cost_finalization(out: Path, task_id: str) -> dict:
+    clean = _clean_task_failure_finalization(out, task_id, "toolsandbox")
+    if clean["status"] != "valid":
+        return clean
+    try:
+        rows = [json.loads(line) for line in
+                (out / "server" / "steps.jsonl").read_text(encoding="utf-8").splitlines()
+                if line.strip()]
+    except (OSError, ValueError):
+        return {"status": "failed", "reason": "invalid_capacity_step"}
+    row = rows[-1] if rows and isinstance(rows[-1], dict) else None
+    error = row.get("error") if isinstance(row, dict) else None
+    if (not isinstance(row, dict)
+            or row.get("schema") != "a-event-native-exact-step-v1"
+            or row.get("status") != "failed"
+            or row.get("session_id") != f"toolsandbox/{task_id}/attempt-0"
+            or row.get("failure_kind") != "method_failure"
+            or row.get("failure_code") != "c2kv_capacity_infeasible"
+            or row.get("response") is not None
+            or not isinstance(error, dict) or error.get("type") != "CapacityInfeasible"):
+        return {"status": "failed", "reason": "unverified_capacity_step"}
+    return {"status": "valid"}
+
+
+def _qualified_toolsandbox_result(path: Path, task_id: str) -> dict | None:
+    result = toolsandbox_official_result(path, task_id)
+    if result is None:
+        return None
+    if (result.get("task_failure_kind") == "c2kv_capacity_infeasible"
+            and typed_toolsandbox_capacity_cost_finalization(
+                path.parent.parent.parent, task_id)["status"] != "valid"):
+        return None
+    return result
+
+
+def c2kv_toolsandbox_task_completed(cell_dir: Path, task_id: str) -> bool:
+    return completed_toolsandbox_task(
+        cell_dir, task_id, result_reader=_qualified_toolsandbox_result)
+
+
+def c2kv_toolsandbox_score_summary(cell: dict) -> dict:
+    return toolsandbox_score_summary(
+        cell, result_reader=_qualified_toolsandbox_result)
 
 
 def appworld_method_failure_evidence(out: Path, task_id: str) -> dict | None:
@@ -806,7 +896,8 @@ def run_task(cell: dict, task_ids: list[str], port: int, batch_dirname: str) -> 
               "started_at": started}
     _write(out / "status.json", status)
     healthy, bad = [], task_ids
-    tau2_budget_failure = None
+    tau2_task_failure = None
+    toolsandbox_task_failure = None
     try:
         server = subprocess.Popen(
             server_command(server_cell, task_ids, out, port), cwd=str(RUNTIME), env=env,
@@ -834,7 +925,7 @@ def run_task(cell: dict, task_ids: list[str], port: int, batch_dirname: str) -> 
                 native_server_dir=out / "server")
             if receipt["status"] != "completed":
                 raise RuntimeError(f"official tau2 worker did not score {task_id}")
-            tau2_budget_failure = receipt.get("task_failure_kind")
+            tau2_task_failure = receipt.get("task_failure_kind")
         elif cell["benchmark"] == "toolsandbox":
             if len(task_ids) != 1:
                 raise ValueError("ToolSandbox requires one frozen task per controller server")
@@ -843,17 +934,19 @@ def run_task(cell: dict, task_ids: list[str], port: int, batch_dirname: str) -> 
                 toolsandbox_worker_command(
                     cell, task_id, f"http://127.0.0.1:{port}/v1",
                     cell["sglang_backend_url"].rstrip("/") + "/v1",
-                    out / "toolsandbox_worker" / task_id),
+                    out / "toolsandbox_worker" / task_id,
+                    native_server_dir=out / "server"),
                 cwd=str(Path(__file__).resolve().parents[1]),
                 env=worker_env, stdout=worker_log, stderr=subprocess.STDOUT,
                 stdin=subprocess.DEVNULL, start_new_session=True,
             )
             rc = wait_owned_worker(worker, timeout=max(60, deadline - time.monotonic()),
                                    monitor=upstream_monitor)
-            if rc != 0 or toolsandbox_official_result(
-                    out / "toolsandbox_worker" / task_id / "official_summary.json",
-                    task_id) is None:
+            toolsandbox_result = toolsandbox_official_result(
+                out / "toolsandbox_worker" / task_id / "official_summary.json", task_id)
+            if rc != 0 or toolsandbox_result is None:
                 raise RuntimeError(f"official ToolSandbox worker did not score {task_id}")
+            toolsandbox_task_failure = toolsandbox_result.get("task_failure_kind")
         elif cell["benchmark"] == "acon_appworld":
             # AppWorld: one task per worker invocation (event_native_appworld)
             for task_id in task_ids:
@@ -944,13 +1037,20 @@ def run_task(cell: dict, task_ids: list[str], port: int, batch_dirname: str) -> 
             server_log.close()
             worker_log.close()
     status["cost_finalization"] = cost_finalization(out)
-    if tau2_budget_failure is not None:
-        status["cost_finalization"] = typed_tau2_budget_cost_finalization(
-            out, task_ids[0], tau2_budget_failure)
+    if tau2_task_failure is not None:
+        status["cost_finalization"] = typed_tau2_task_failure_cost_finalization(
+            out, task_ids[0], tau2_task_failure)
         if status["cost_finalization"]["status"] != "valid":
             healthy, bad = [], task_ids
             status.update(status="failed", healthy=healthy, bad=bad,
-                          error="typed tau2 budget failure lacks a clean final journal")
+                          error="typed tau2 task failure lacks a clean final journal")
+    if toolsandbox_task_failure == "c2kv_capacity_infeasible":
+        status["cost_finalization"] = typed_toolsandbox_capacity_cost_finalization(
+            out, task_ids[0])
+        if status["cost_finalization"]["status"] != "valid":
+            healthy, bad = [], task_ids
+            status.update(status="failed", healthy=healthy, bad=bad,
+                          error="typed ToolSandbox capacity failure lacks clean evidence")
     _write(out / "done.json" if not bad and status["cost_finalization"]["status"] == "valid"
            else out / "status.json", status)
     return status
@@ -1191,7 +1291,7 @@ def main(argv=None) -> int:
         elif cell["benchmark"] == "toolsandbox":
             chunk = [
                 task_id for task_id in chunk
-                if not completed_toolsandbox_task(cell_dir, task_id)
+                if not c2kv_toolsandbox_task_completed(cell_dir, task_id)
                 and attempt_counts.get(task_id, 0) < args.max_attempts_per_task
             ]
         else:
@@ -1249,13 +1349,15 @@ def main(argv=None) -> int:
                 counts = {
                     "n_completed": summary["n_completed"],
                     "n_budget_failures": summary["n_budget_failures"],
+                    "n_method_failures": summary["n_method_failures"],
                     "n_retryable": len(summary["pending_task_ids"]),
                 }
             elif cell["benchmark"] == "toolsandbox":
-                summary = toolsandbox_score_summary(cell)
+                summary = c2kv_toolsandbox_score_summary(cell)
                 _write(cell_dir / "toolsandbox_score_summary.json", summary)
                 counts = {
-                    "n_completed": summary["n_official_scored"],
+                    "n_completed": (summary["n_official_scored"]
+                                    + summary["n_method_failures"]),
                     "n_retryable": len(summary["pending_task_ids"]),
                 }
             else:
@@ -1337,6 +1439,8 @@ def main(argv=None) -> int:
             "status": "complete" if not summary["pending_task_ids"] else "incomplete",
             "n_completed": summary["n_completed"],
             "n_budget_failures": summary["n_budget_failures"],
+            "n_method_failures": summary["n_method_failures"],
+            "method_failure_task_ids": summary["method_failure_task_ids"],
             "n_retryable": len(summary["pending_task_ids"]),
             "n_total": len(expected_task_ids),
             "semantic_score": summary["semantic_score"],
@@ -1345,12 +1449,14 @@ def main(argv=None) -> int:
             "finished_at": time.time(),
         })
     elif cell["benchmark"] == "toolsandbox":
-        summary = toolsandbox_score_summary(cell)
+        summary = c2kv_toolsandbox_score_summary(cell)
         _write(cell_dir / "toolsandbox_score_summary.json", summary)
         write_cell_status(cell, {
             "cell_id": cell["cell_id"],
             "status": "complete" if not summary["pending_task_ids"] else "incomplete",
-            "n_completed": summary["n_official_scored"],
+            "n_completed": summary["n_official_scored"] + summary["n_method_failures"],
+            "n_method_failures": summary["n_method_failures"],
+            "method_failure_task_ids": summary["method_failure_task_ids"],
             "n_retryable": len(summary["pending_task_ids"]),
             "n_total": len(expected_task_ids),
             "semantic_score": summary["semantic_score"],
