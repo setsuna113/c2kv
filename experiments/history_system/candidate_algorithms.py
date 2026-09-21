@@ -17,8 +17,22 @@ GOAL_VERSION = "c2kv-goal-composition-v1"
 VERIFIED_VARIANTS = ("goal_verified", "pending_verified")
 VERIFIED_VERSION = "c2kv-verified-binding-v1"
 PROOF_REGISTRY_VERSION = "verified-binding-rules-v1"
-ALL_VARIANTS = VARIANTS + REPAIR_VARIANTS + GOAL_VARIANTS + VERIFIED_VARIANTS
+INITIAL_VIEW_BACKBONES = {"goal_static": "goal_rescue", "pending_static": "goal_pending"}
+INITIAL_VIEW_VARIANTS = tuple(INITIAL_VIEW_BACKBONES)
+INITIAL_VIEW_VERSION = "c2kv-initial-view-composition-v1"
+INITIAL_VIEW_POLICY_VERSION = "c2kv-static-initial-view-v1"
+ALL_VARIANTS = VARIANTS + REPAIR_VARIANTS + GOAL_VARIANTS + VERIFIED_VARIANTS + INITIAL_VIEW_VARIANTS
 RATIO = 8
+
+
+def initial_view_fields(variant: str) -> dict[str, Any]:
+    """Describe only opt-in compositions; keep historical contracts byte-stable."""
+    if variant not in INITIAL_VIEW_BACKBONES:
+        return {}
+    return {
+        "recovery_backbone": INITIAL_VIEW_BACKBONES[variant],
+        "initial_view": {"policy": "static_gist", "version": INITIAL_VIEW_POLICY_VERSION},
+    }
 
 
 def build_profile(
@@ -39,7 +53,7 @@ def build_profile(
     if getattr(args, "benchmark", "bfcl") not in {"bfcl", "acebench", "acon_appworld", "tau2"}:
         raise ValueError("candidate algorithms support BFCL, ACEBench Agent, AppWorld and tau2 only")
     if args.selector_artifact is not None:
-        if variant in VARIANTS or variant in GOAL_VARIANTS or variant in VERIFIED_VARIANTS:
+        if variant not in REPAIR_VARIANTS:
             raise ValueError("candidate algorithms use the bundled T02 risk artifact")
         raise ValueError("repair candidates do not use a selector artifact")
     ratio = int(args.ratio) if args.ratio is not None else int(selected["ratio"])
@@ -88,6 +102,7 @@ def build_profile(
         "risk_threshold": 0.5,
         **({"proof_registry_version": PROOF_REGISTRY_VERSION}
            if variant in VERIFIED_VARIANTS else {}),
+        **initial_view_fields(variant),
     }
     profile = {
         "schema": "c2kv-candidate-delivery-profile-v1",
@@ -117,4 +132,8 @@ def build_profile(
         profile["schema"] = "c2kv-candidate-delivery-profile-v4"
         profile["selection_protocol"] = VERIFIED_VERSION
         profile["proof_registry_version"] = PROOF_REGISTRY_VERSION
+    elif variant in INITIAL_VIEW_VARIANTS:
+        profile["schema"] = "c2kv-candidate-delivery-profile-v5"
+        profile["selection_protocol"] = INITIAL_VIEW_VERSION
+        profile.update(initial_view_fields(variant))
     return controller, profile

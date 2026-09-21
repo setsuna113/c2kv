@@ -15,6 +15,7 @@ from functools import lru_cache
 from . import c1_appworld
 from .candidate_matrix import ARM_TO_VARIANT, GOAL_VARIANTS, REPAIR_VARIANTS, VERIFIED_VARIANTS
 from experiments.history_system.candidate_algorithms import (
+    INITIAL_VIEW_VARIANTS, INITIAL_VIEW_VERSION, initial_view_fields,
     PROOF_REGISTRY_VERSION, VERIFIED_VERSION,
 )
 from .process_lifecycle import run_owned
@@ -121,12 +122,18 @@ def validate_ready_manifest(config, benchmark, task, ready_path, controller_path
                             and artifact.get("model_kind") == "c1_risk_logistic"
                             and (variant not in VERIFIED_VARIANTS
                                  or candidate.get("proof_registry_version") == PROOF_REGISTRY_VERSION))
-            version = (VERIFIED_VERSION if variant in VERIFIED_VARIANTS else
+            view_fields = initial_view_fields(variant)
+            valid_config = valid_config and all(candidate.get(key) == value
+                                                for key, value in view_fields.items())
+            version = (INITIAL_VIEW_VERSION if variant in INITIAL_VIEW_VARIANTS else
+                       VERIFIED_VERSION if variant in VERIFIED_VARIANTS else
                        "c2kv-goal-composition-v1" if variant in GOAL_VARIANTS
                        else "c2kv-paper-candidates-v1")
         if (not valid_config or not isinstance(loaded_candidate, Mapping)
                 or loaded_candidate.get("variant") != variant
                 or loaded_candidate.get("stable_call_ids") is not True
+                or any(loaded_candidate.get(key) != value
+                       for key, value in initial_view_fields(variant).items())
                 or (variant in VERIFIED_VARIANTS
                     and loaded_candidate.get("proof_registry_version") != PROOF_REGISTRY_VERSION)
                 or route.get("baseline_identity") != version + ":" + variant

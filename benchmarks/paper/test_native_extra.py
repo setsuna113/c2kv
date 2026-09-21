@@ -7,6 +7,10 @@ from unittest import mock
 
 import pytest
 
+from experiments.history_system.candidate_algorithms import (
+    INITIAL_VIEW_VARIANTS, INITIAL_VIEW_VERSION, initial_view_fields,
+)
+
 from benchmarks.paper import native_extra
 from benchmarks.toolsandbox_suite import THREE_DISTRACTION_TOOLS_129, load_named_suite
 from benchmarks.paper.candidate_matrix import (
@@ -263,7 +267,8 @@ def test_ready_manifest_binds_loaded_controller_and_candidate_variant(
         {"candidate_algorithm": {"variant": variant, "risk_threshold": 0.5,
                                  "risk_artifact": {"model_kind": "c1_risk_logistic"},
                                  **({"proof_registry_version": "verified-binding-rules-v1"}
-                                    if variant in VERIFIED_VARIANTS else {})}} if variant else
+                                    if variant in VERIFIED_VARIANTS else {}),
+                                 **initial_view_fields(variant)}} if variant else
         {"post_draft_recovery": {"gate": "prefill_linear_head"},
          "d3_hybrid_recovery": True} if detector == "d3_hybrid" else
         {"gp_experiments": {"set_selector": "risk", "selector_artifact": {
@@ -272,7 +277,7 @@ def test_ready_manifest_binds_loaded_controller_and_candidate_variant(
     route = ({"recovery_enabled": False, "max_generations_per_decision": 1}
              if arm == "c2kv_native_r4" else
              {"recovery_enabled": True, "max_generations_per_decision": 2,
-              "baseline_identity": f"{'c2kv-source-repair-v1' if variant in REPAIR_VARIANTS else 'c2kv-verified-binding-v1' if variant in VERIFIED_VARIANTS else 'c2kv-goal-composition-v1' if variant in GOAL_VARIANTS else 'c2kv-paper-candidates-v1'}:{variant}"}
+              "baseline_identity": f"{INITIAL_VIEW_VERSION if variant in INITIAL_VIEW_VARIANTS else 'c2kv-source-repair-v1' if variant in REPAIR_VARIANTS else 'c2kv-verified-binding-v1' if variant in VERIFIED_VARIANTS else 'c2kv-goal-composition-v1' if variant in GOAL_VARIANTS else 'c2kv-paper-candidates-v1'}:{variant}"}
              if variant else {})
     manifest = {
         "schema": "a-event-native-server-v1", "status": "ready",
@@ -293,10 +298,18 @@ def test_ready_manifest_binds_loaded_controller_and_candidate_variant(
             "variant": variant, "stable_call_ids": True,
             **({"proof_registry_version": "verified-binding-rules-v1"}
                if variant in VERIFIED_VARIANTS else {}),
+            **initial_view_fields(variant),
         }
     ready = tmp_path / "ready.json"
     ready.write_text(json.dumps(manifest), encoding="utf-8")
     native_extra.validate_ready_manifest(config, "acebench_agent", "task_1", ready, controller)
+    if variant in INITIAL_VIEW_VARIANTS:
+        for field in ("initial_view", "recovery_backbone"):
+            original = manifest["candidate_algorithm"].pop(field)
+            ready.write_text(json.dumps(manifest), encoding="utf-8")
+            with pytest.raises(RuntimeError, match="candidate controller identity"):
+                native_extra.validate_ready_manifest(config, "acebench_agent", "task_1", ready, controller)
+            manifest["candidate_algorithm"][field] = original
     if variant in VERIFIED_VARIANTS:
         manifest["candidate_algorithm"]["proof_registry_version"] = "stale-proof-registry"
         ready.write_text(json.dumps(manifest), encoding="utf-8")

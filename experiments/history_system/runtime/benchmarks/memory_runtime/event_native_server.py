@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import json
 import math
@@ -161,6 +162,39 @@ def _controller_requires_sglang(config):
         'post_draft_recovery' in config or 'gp_experiments' in config
         or 'candidate_algorithm' in config
     )
+
+
+def _candidate_ready_contract(candidate):
+    from .candidate_algorithms import (
+        GOAL_VARIANTS, GOAL_VERSION, INITIAL_VIEW_VARIANTS,
+        INITIAL_VIEW_VERSION, REPAIR_VARIANTS, VERIFIED_VARIANTS,
+        VERIFIED_VERSION,
+    )
+
+    variant = candidate['variant']
+    if variant in VERIFIED_VARIANTS:
+        version = VERIFIED_VERSION
+    elif variant in INITIAL_VIEW_VARIANTS:
+        version = INITIAL_VIEW_VERSION
+    elif variant in GOAL_VARIANTS:
+        version = GOAL_VERSION
+    elif variant in REPAIR_VARIANTS:
+        version = 'c2kv-source-repair-v1'
+    else:
+        version = 'c2kv-paper-candidates-v1'
+    identity = {
+        'variant': variant, 'stable_call_ids': True,
+        'recovery_rounds_per_decision': 1,
+    }
+    if variant in INITIAL_VIEW_VARIANTS:
+        identity.update(
+            initial_view=copy.deepcopy(candidate['initial_view']),
+            recovery_backbone=candidate['recovery_backbone'],
+        )
+    if variant in VERIFIED_VARIANTS:
+        from .candidate_algorithms.verified_binding import PROOF_REGISTRY_VERSION
+        identity['proof_registry_version'] = PROOF_REGISTRY_VERSION
+    return identity, version + ':' + variant
 
 
 def _normalize_sglang_url(value):
@@ -497,27 +531,10 @@ def _serve(args):
                             history_view_protocol))
         if isinstance(s0_config, dict) and 'candidate_algorithm' in s0_config:
             candidate = s0_config['candidate_algorithm']
-            from .candidate_algorithms import (
-                GOAL_VARIANTS, GOAL_VERSION, REPAIR_VARIANTS,
-                VERIFIED_VARIANTS, VERIFIED_VERSION,
-            )
-            if candidate['variant'] in VERIFIED_VARIANTS:
-                version = VERIFIED_VERSION
-            elif candidate['variant'] in GOAL_VARIANTS:
-                version = GOAL_VERSION
-            elif candidate['variant'] in REPAIR_VARIANTS:
-                version = 'c2kv-source-repair-v1'
-            else:
-                version = 'c2kv-paper-candidates-v1'
-            manifest['candidate_algorithm'] = {
-                'variant': candidate['variant'], 'stable_call_ids': True,
-                'recovery_rounds_per_decision': 1,
-            }
-            if candidate['variant'] in VERIFIED_VARIANTS:
-                from .candidate_algorithms.verified_binding import PROOF_REGISTRY_VERSION
-                manifest['candidate_algorithm']['proof_registry_version'] = PROOF_REGISTRY_VERSION
+            candidate_identity, baseline_identity = _candidate_ready_contract(candidate)
+            manifest['candidate_algorithm'] = candidate_identity
             manifest['route_contract'].update(
-                baseline_identity=version + ':' + candidate['variant'],
+                baseline_identity=baseline_identity,
                 recovery_enabled=True, max_generations_per_decision=2)
         shadow_feature_config, shadow_contract = _shadow_feature_configuration(args, tokenizer)
         generator, profile = _build_generator(

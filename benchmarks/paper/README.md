@@ -475,6 +475,20 @@ $PY -m benchmarks.paper run --output /home/lyc/dev/c2kv-paper-results
 $PY -m benchmarks.paper aggregate --output /home/lyc/dev/c2kv-paper-results
 ```
 
+The Static initial-view compositions are selected explicitly with
+`--candidate-arms goal_static,pending_static`. The separate arms
+`c2kv_goal_static_r8` and `c2kv_pending_static_r8` use the unchanged Static-T02
+initial allocator, followed by the existing Goal or Goal Pending recovery
+controller respectively. Their `c2kv-initial-view-composition-v1` protocol and
+v5 profiles record `initial_view` (`static_gist`, `c2kv-static-initial-view-v1`)
+and `recovery_backbone` (`goal_rescue` or `goal_pending`) separately. Goal review,
+event replacement, Pending completion review, and final commit validation are
+delegated to the original controllers; this composition adds no recovery round.
+Ratio8, frozen T02 at 0.5, B0 admission and per-task generation limits still apply.
+The legacy S0 routes, result identities and eleven-arm `all` expansion are
+unchanged. Initial-view compositions require an explicit name, including for
+native history budget sweeps; they do not reuse a historical Goal/Pending cell.
+
 The ratio8 candidate algorithms are an explicit overlay. For example,
 `--candidate-arms all --candidate-benchmarks bfcl_base,acebench_agent` on
 both `prepare` and `run` adds the four legacy candidates, three source-repair

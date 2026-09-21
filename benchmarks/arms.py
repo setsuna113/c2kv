@@ -455,6 +455,22 @@ ARMS: Dict[str, Arm] = {
             description="Ratio-8 Goal Pending review with verified-field binding repair",
         ),
         Arm(
+            name="c2kv_goal_static_r8",
+            compress_history=True,
+            ratio=8,
+            query_projection="base",
+            native_controller="candidate_goal_static",
+            description="Ratio-8 static initial view with unchanged Goal recovery",
+        ),
+        Arm(
+            name="c2kv_pending_static_r8",
+            compress_history=True,
+            ratio=8,
+            query_projection="base",
+            native_controller="candidate_pending_static",
+            description="Ratio-8 static initial view with unchanged Goal Pending review",
+        ),
+        Arm(
             name="hiagent",
             compress_history=False,
             text_policy="hiagent",
