@@ -2,11 +2,11 @@
   "schema": "c2kv-npu-transport-prompt-repair-validation-v1",
   "created_utc": "2026-09-21T14:35:37.407279+00:00",
   "shared_engine_commit": "e2b3b7ec049a810a7ccea2039dd1b1c7b3d69224",
-  "shared_paper_commit": "b0f4924ec7186a4196fe609030ad18dea1c3fc90",
+  "shared_paper_commit": "30d70b4aca0fa32d14529311bf156f8ee0cfe1c2",
   "shared_source_branch": "paper/benchmarks-cuda-20260917",
   "npu_base_commit": "6f9e840d9457f4fe43dbeea4aa279a8b33e56c22",
   "paper_validation_path": "experiments/history_system/validation/transport_prompt_blockers_20260921.json",
-  "paper_validation_sha256": "1e8173a55379c672374a005257836284dbe587d71cf7bbcb0a4318cb6b308f41",
+  "paper_validation_sha256": "7a8590e54ba4b7c863ffb111340ff7c2e1d79671c7a5f38515c8acd5c87d5761",
   "source_sha256": {
     "generality/historykv_cell.py": "3a469a33f215e1238ef620c0b7f7a06e6aadf7ed889856104d8cd4c5e0b786ff",
     "tests/test_historykv_attempts.py": "fab48672a4d053974688511b0753da80deff66a20a898908fa363257837275cd",
