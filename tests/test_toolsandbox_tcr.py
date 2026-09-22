@@ -35,6 +35,28 @@ def _official(path: Path, task_id: str, score: float, failure: str | None = None
     }))
 
 
+@pytest.mark.parametrize("code", (
+    "acon_history_budget_exceeded", "hiagent_history_budget_exceeded",
+    "hiagent_retrieval_budget_exceeded",
+))
+def test_text_budget_receipt_completes_without_inflating_official_scored(tmp_path, code):
+    task_id = "budget_3_distraction_tools"
+    path = tmp_path / "batches" / "one" / "toolsandbox_worker" / task_id / "official_summary.json"
+    _official(path, task_id, 0.0, code)
+    assert toolsandbox_harness.completed_task(tmp_path, task_id)
+    summary = toolsandbox_harness.score_summary({
+        "cell_dir": str(tmp_path), "cell_id": "budget", "task_ids": [task_id],
+    })
+    assert summary["semantic_score"] == 0.0
+    assert summary["n_method_failures"] == 1
+    assert summary["n_official_scored"] == 0
+    assert summary["pending_task_ids"] == []
+    raw = json.loads(path.read_text())
+    raw["adapter_summary"]["task_failures"] = {code: ["another_scenario"]}
+    path.write_text(json.dumps(raw))
+    assert not toolsandbox_harness.completed_task(tmp_path, task_id)
+
+
 def _capacity_final(batch: Path, task_id: str, *, pending=0):
     server = batch / "server"
     server.mkdir(parents=True, exist_ok=True)

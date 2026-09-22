@@ -320,6 +320,37 @@ def test_typed_budget_failure_completes_once_and_keeps_zero_provenance(
     }]
 
 
+@pytest.mark.parametrize("code", (
+    "acon_history_budget_exceeded", "hiagent_history_budget_exceeded",
+    "hiagent_retrieval_budget_exceeded",
+))
+def test_text_budget_failure_resumes_from_matching_adapter_receipt(tmp_path, code):
+    cell = _cell(tmp_path)
+    out = tmp_path / "task"
+
+    def fake_worker(command, **_kwargs):
+        request = json.loads(Path(command[4]).read_text(encoding="utf-8"))
+        _write_official(cell, request, termination="infrastructure_error", reward=None)
+        _write_summary(command, termination="infrastructure_error", reward=0.0,
+                       failure_code=code, official_reward=None)
+        return 0
+
+    with patch.object(harness, "run_owned_worker", side_effect=fake_worker) as worker:
+        first = harness.run_tau2_task(cell, "7", "http://actor", "http://user", out)
+        second = harness.run_tau2_task(cell, "7", "http://actor", "http://user", out)
+    assert worker.call_count == 1
+    assert first == second
+    assert first["semantic_score"] == 0.0
+    assert first["task_failure_kind"] == code
+    assert first["score_source"] == "typed_harness_method_failure"
+    assert harness.completed_tau2_task(out, "7")
+    summary_path = out / first["summary"]
+    summary = json.loads(summary_path.read_text())
+    summary["task_failures"] = {"8": code}
+    summary_path.write_text(json.dumps(summary))
+    assert not harness.completed_tau2_task(out, "7")
+
+
 def test_typed_context_overflow_is_a_method_failure_with_clean_cost(tmp_path):
     cell = _cell(tmp_path)
     cell_dir = tmp_path / "cell"

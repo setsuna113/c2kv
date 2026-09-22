@@ -13,9 +13,11 @@ from pathlib import Path
 try:
     from .process_lifecycle import run_owned_worker
     from .upstream_liveness import UpstreamLiveness
+    from .text_budget_failures import TEXT_HISTORY_BUDGET_FAILURE_CODES
 except ImportError:  # Direct file launch on ascend03.
     from process_lifecycle import run_owned_worker
     from upstream_liveness import UpstreamLiveness
+    from text_budget_failures import TEXT_HISTORY_BUDGET_FAILURE_CODES
 
 
 PAPER = Path(os.environ.get(
@@ -23,7 +25,7 @@ PAPER = Path(os.environ.get(
     str(Path.home() / "c2kv-generality-20260918" / "src" / "paper_harness"),
 )).resolve()
 BUDGET_FAILURE_CODES = frozenset({"decision_cap_reached", "generation_cap_reached"})
-TASK_FAILURE_CODES = BUDGET_FAILURE_CODES | {"context_overflow"}
+TASK_FAILURE_CODES = BUDGET_FAILURE_CODES | TEXT_HISTORY_BUDGET_FAILURE_CODES | {"context_overflow"}
 
 _WORKER = """
 import json

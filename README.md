@@ -39,6 +39,28 @@ apply it after `0007` using `git apply --unidiff-zero --ignore-space-change`.
 Generation timeouts then remain explicit infrastructure receipts while later
 tasks continue, and any affected full-cell score is withheld.
 
+For the September 22 BFCL long-context reference-attention holds, the next
+scheduled run should explicitly freeze `generation_timeout: 1800` in a new
+cell contract. `generality/historykv_cell.py` already forwards this value to
+both the proxy and BFCL client; the updated shared paper matrix also exposes
+`--generation-timeout 1800` during preparation. This finite allowance has not
+been verified by an NPU model run. Existing cells retain their recorded
+deadline, timeout remains an infrastructure failure, and no automatic refill
+or conversion to a method-failure zero is enabled.
+
+The paired September 22 paper source also fixes ACON/HiAgent text-budget
+failure declarations and ToolSandbox's exact-KV assistant echo. NPU proxy and
+official-adapter launchers consume these shared modules via `C2KV_PAPER_SOURCE`;
+there is no separate `raw_actor_history` implementation to copy. Update the
+paired source before a new run or offline collection. The echo repair keeps
+raw generated history intact and only accounts for ToolSandbox dropping prose
+alongside tool calls; action IDs and arguments remain checked. Interrupted
+ToolSandbox exact-KV scenarios require fresh execution, while completed
+budget-cap runs can be collected again from their original official artifacts.
+The standalone tau2 and ToolSandbox receipt readers accept the same three
+text-budget codes for resume; method zeros remain separate from official-scored
+tasks and from native generation/decision caps.
+
 ## Tool-definition and joint component studies
 
 `generality/tool_definition_study.py` runs the shared paper checkout's

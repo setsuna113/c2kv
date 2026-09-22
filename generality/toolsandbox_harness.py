@@ -10,12 +10,17 @@ from pathlib import Path
 
 try:
     from .process_lifecycle import interruptible
+    from .text_budget_failures import TEXT_HISTORY_BUDGET_FAILURE_CODES
 except ImportError:
     from process_lifecycle import interruptible
+    from text_budget_failures import TEXT_HISTORY_BUDGET_FAILURE_CODES
 
 
 SCHEMA = "generality-toolsandbox-official-task-v1"
 GENERATION_ROOT = Path("/home/liuyancheng/c2kv-generality-20260918")
+TASK_FAILURE_CODES = TEXT_HISTORY_BUDGET_FAILURE_CODES | {
+    "hiagent_invalid_retrieval", "c2kv_capacity_infeasible",
+}
 
 
 def paper_source() -> Path:
@@ -51,7 +56,7 @@ def official_result(path: Path, task_id: str) -> dict | None:
     failures = adapter.get("task_failures") if isinstance(adapter, dict) else None
     declared = []
     if isinstance(failures, dict):
-        for kind in ("hiagent_invalid_retrieval", "c2kv_capacity_infeasible"):
+        for kind in TASK_FAILURE_CODES:
             if failures.get(kind) == [task_id]:
                 declared.append(kind)
             elif failures.get(kind) not in (None, []):
@@ -136,7 +141,7 @@ def run_task(task_id: str, base_url: str, user_base_url: str, out: Path,
             or not math.isfinite(score)):
         raise RuntimeError("Official ToolSandbox did not score the frozen scenario")
     failures = summary.get("task_failures")
-    declared = [kind for kind in ("hiagent_invalid_retrieval", "c2kv_capacity_infeasible")
+    declared = [kind for kind in TASK_FAILURE_CODES
                 if isinstance(failures, dict) and failures.get(kind) == [task_id]]
     if len(declared) > 1:
         raise RuntimeError("ToolSandbox task has conflicting declared failure kinds")
