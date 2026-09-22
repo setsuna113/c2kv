@@ -22,6 +22,9 @@ from paper.process_lifecycle import run_owned  # noqa: E402
 from metrics import aggregate, protocol_columns_for_turn  # noqa: E402
 
 from adapters.base import RunContext, v1  # noqa: E402
+from adapters.text_budget_failures import (  # noqa: E402
+    proxy_text_budget_failure_code,
+)
 
 NAME = "tau2"
 TAU2_DIR = Path(os.environ.get("TAU2_DIR") or Path.home() / "benchmarks" / "tau2")
@@ -331,9 +334,9 @@ def _declared_task_failures(out_dir: Path, rows: List[Dict[str, Any]],
     for path in (out_dir / "logs").glob("proxy_*.jsonl"):
         for row in read_jsonl(path):
             task = session_ids.get(row.get("conv_id"))
-            if (task in failed and task in errors
-                    and row.get("status") == "acon_history_budget_exceeded"):
-                declared[task] = "acon_history_budget_exceeded"
+            code = proxy_text_budget_failure_code(row)
+            if task in failed and task in errors and code is not None:
+                declared[task] = code
     # Native single-task servers return these exact API codes with HTTP 429.
     # Generic 429, message text, HTTP 502 or connection refusal never proves
     # model exhaustion. LiteLLM may omit the response code, in which case only

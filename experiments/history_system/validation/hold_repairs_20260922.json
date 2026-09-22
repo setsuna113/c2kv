@@ -1,0 +1,169 @@
+{
+  "schema": "c2kv-hold-repair-validation-v1",
+  "date": "2026-09-22",
+  "platform_branch": "paper",
+  "base_revision": "776c871a7e0642f0557a3100ca9843a2e72b5cb2",
+  "holds": [
+    {
+      "host": "m2",
+      "path": "/workspace/results-bgts/closed_loop/toolsandbox__acon_hist_ut_co_b128/HOLD_cap_code_undeclared.txt",
+      "sha256": "8ff12f7984a455b695a53fe7661951ab97d56f1354c0f7924ec9f07c78645d44"
+    },
+    {
+      "host": "m2",
+      "path": "/workspace/results-kvts/closed_loop/toolsandbox__commitkv_b256/HOLD_exact_kv_continuation_guard.txt",
+      "sha256": "7a3f8b165644bd409885144e470b01112fe33565d64f56923ec62e72bd76e648"
+    },
+    {
+      "host": "m2",
+      "path": "/workspace/results-kvts/closed_loop/toolsandbox__commitkv_b128/HOLD_exact_kv_continuation_guard.txt",
+      "sha256": "efe4be5c2459c1ef877d3b1341b14b4d0f4b18f84182d8b17d917a79ecddad6c"
+    },
+    {
+      "host": "m2",
+      "path": "/workspace/results-kvts/closed_loop/toolsandbox__agentkv_b256/HOLD_exact_kv_continuation_guard.txt",
+      "sha256": "8ba73ac9aed64349ea1ef99c3f23a3853238da183594d36426da6630d08fd62d"
+    },
+    {
+      "host": "box4",
+      "path": "/workspace/results-b768bl2/closed_loop/bfcl_long_context__commitkv_b768/HOLD_generation_timeout_ledger.txt",
+      "sha256": "d903b960f016ffc9f1de192866865e243c39f5b78fe32a2afdcd22e0d9ee26d9"
+    },
+    {
+      "host": "box4",
+      "path": "/workspace/results-b768bl2/closed_loop/bfcl_long_context__agentkv_b768/HOLD_generation_timeout_ledger.txt",
+      "sha256": "c77f65e453f6cd41a48e528a9cd15479463834930b8856844f5582bd71aea443"
+    },
+    {
+      "host": "box4",
+      "path": "/workspace/results-b4main2/closed_loop/bfcl_long_context__history_kv_pyramidkv_r25_persistent/HOLD_generation_timeout_ledger.txt",
+      "sha256": "6b8a25c6907313f42d0e1c269260aac33800cbe8053355b53e223ba2da94aa65"
+    },
+    {
+      "host": "box4",
+      "path": "/workspace/results-bgt2/closed_loop/tau2__hiagent_full_b384/HOLD_hiagent_cap_undeclared.txt",
+      "sha256": "b8e0aa445e79339b4ddc382285f25907d1f1ec1fd099d30de112fb3a3c56e064"
+    }
+  ],
+  "timeout_decision": {
+    "policy": "explicit_new_root_deadline",
+    "next_generation_timeout_seconds": 1800,
+    "default_seconds_unchanged": 600,
+    "automatic_refill": false,
+    "classification": "infrastructure_failure",
+    "new_deadline_model_validated": false,
+    "observed_proxy_timeout_counts": {
+      "bfcl_long_context__commitkv_b768": 6,
+      "bfcl_long_context__agentkv_b768": 8,
+      "bfcl_long_context__history_kv_pyramidkv_r25_persistent": 37
+    },
+    "pyramid_additional_infrastructure_failure": {
+      "task": "multi_turn_long_context_125",
+      "error": "persistent generation outcome unknown and cleanup failed",
+      "cleanup_status": "cleanup_timeout",
+      "note": "37 plain timeout rows plus one cleanup failure leave 38 ledger gaps, not 37."
+    }
+  },
+  "checks": [
+    {
+      "receipt": "adapter_regression_checks.xml",
+      "tests": 90,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "receipt": "cap_checks.xml",
+      "tests": 21,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "receipt": "exact_kv_checks.xml",
+      "tests": 23,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "receipt": "npu_cap_checks.xml",
+      "tests": 48,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "receipt": "npu_timeout_checks.xml",
+      "tests": 24,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "receipt": "timeout_checks.xml",
+      "tests": 76,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 5
+    }
+  ],
+  "text_budget_reclassification": {
+    "paper_receipt": "experiments/history_system/validation/text_budget_cap_reclassification_20260922.json",
+    "tau2": {
+      "n": 50,
+      "task_failures": {
+        "44": "hiagent_history_budget_exceeded"
+      }
+    },
+    "toolsandbox": {
+      "n": 129,
+      "task_failure_counts": {
+        "acon_history_budget_exceeded": 41,
+        "hiagent_invalid_retrieval": 0
+      }
+    },
+    "appworld": "Same exact typed-code classification covered by CPU fixtures; no new AppWorld run."
+  },
+  "toolsandbox_exact_kv": {
+    "paper_receipt": "experiments/history_system/validation/toolsandbox_exact_kv_guard_20260922.json",
+    "captured_failure_replay": {
+      "implementation": "Current RawActorHistory.commit(response, benchmark='toolsandbox') followed by prepare(captured_failure_messages)",
+      "source": "/workspace/results-kvts/closed_loop/toolsandbox__commitkv_b256/proxy_telemetry.jsonl",
+      "captured_failure_requests": 53,
+      "accepted": 53,
+      "committed_turns": 145,
+      "exact_generated_text_turns_restored": 145,
+      "input_message_lists_unchanged": 53,
+      "request_ids_sha256": "e0978e7cc42d22ef6edebbc54fb6df6dde0c9dabb08f3a668d05fd0e31ca4c22",
+      "request_fingerprints_sha256": "d7a4466262e16169de463eae745c0f1be567280aeed5853ba5506604c62d5578",
+      "result": "passed"
+    },
+    "npu": "Uses shared paper proxy via C2KV_PAPER_SOURCE; no duplicate raw_actor_history implementation."
+  },
+  "npu_resume_parity": "Standalone tau2 and ToolSandbox receipt readers accept the three adapter-declared text-budget codes and preserve task identity/official-score separation.",
+  "normalized_changed_source_sha256": {
+    "benchmarks/README.md": "d085bd189df1bac3c85cc5438982497fe48996f6067f94fc843d3d6e81895f89",
+    "benchmarks/adapters/acon_adapter.py": "5f5d0d9586dc2feb7fe5d895678586a4b8159f2437cf4ae76a0596da48c4df3f",
+    "benchmarks/adapters/tau2_adapter.py": "2786aa97d07a15226b8d65227b91b2405b3860c703843ccb1f838d5b7f5b181e",
+    "benchmarks/adapters/text_budget_failures.py": "b76e176bcfebcdaabcd555e362c8b72f6c9e12d4dbfebefda9117a987ce6170c",
+    "benchmarks/adapters/toolsandbox_adapter.py": "68e8278b2d06924049f6cf6d0e97247de2fc60c536b0d103f94fe32097ee52f8",
+    "benchmarks/paper/runner.py": "52d31169ac61070a392794e92ab611080a9d7094c138016a084852836c223fa7",
+    "benchmarks/paper/test_runner.py": "13f92ed68f80402a5bf04e87cc0a10f1d35ff49d4312d2c7eadf85381438784d",
+    "benchmarks/raw_actor_history.py": "3e1aa76c02739703a71918f2af0db030431f7abdf360838e7c8509c5a0fef8b8",
+    "benchmarks/test_acon_adapter.py": "2115e3e19cc69d4c64633db3c63082119a9842ce515a20969e9b6c755363153c",
+    "benchmarks/test_raw_actor_history.py": "a70bfbcd2afb31edbfc8c4f62105878d0efe6ff074c2b28f3ce6fca9b0b36b87",
+    "benchmarks/test_raw_actor_history_proxy_wire.py": "35168e6d775bd51c782f11e29af1f896b4d6c8e2362e633dcd88a8b07e8964ea",
+    "benchmarks/test_tau2_adapter_integration.py": "a89127199481e71f4cbb57d8c9d6f44df8bbfbb1356e93ab62344d39240df4db",
+    "benchmarks/test_toolsandbox_terminal_failures.py": "4a601f8a284d0cc0b5d227dee5c5bf65ec1649aace2bf904dcfbb0e8e8bd0a98",
+    "experiments/history_system/validation/text_budget_cap_reclassification_20260922.json": "9c1f0ac3d9ba79b37f5c79a42f2b4f77b14a5467a5dd14b156292ac219f2d604",
+    "experiments/history_system/validation/toolsandbox_exact_kv_guard_20260922.json": "aafeb160a0b10ee027b8c2f882420ea7a12b8b0ba047c3cd20b7d66e4243cac1"
+  },
+  "limitations": [
+    "No GPU/NPU model run or full benchmark rerun was started.",
+    "Five BFCL installed-harness tests were skipped because bfcl_eval is unavailable in the local CPU environment.",
+    "Frozen remote result roots, HOLD files and running jobs were not changed.",
+    "Historical BFCL timeout rows remain infrastructure failures, not method-score zeros.",
+    "Budget caps and generation/decision cap identities are unchanged."
+  ]
+}

@@ -909,6 +909,47 @@ def test_appworld_collector_returns_audited_partial_without_method_score(tmp_pat
     assert failed["result_status"] == "infrastructure_failure"
 
 
+@pytest.mark.parametrize("code", [
+    "acon_history_budget_exceeded",
+    "hiagent_history_budget_exceeded",
+    "hiagent_retrieval_budget_exceeded",
+])
+def test_appworld_typed_text_budget_failure_is_method_zero(tmp_path, code):
+    run_dir = tmp_path / "run"
+    task_dir = A.appworld_task_dir(run_dir, "capped")
+    task_dir.mkdir(parents=True)
+    error = f"Model generation failed: Error code: 422 - {{'error': {{'code': '{code}'}}}}"
+    (task_dir / "results.json").write_text(json.dumps({
+        "termination_reason": "generation_error", "error": error,
+    }), encoding="utf-8")
+    (run_dir / "experiment_summary.json").write_text(json.dumps({
+        "total_tasks": 1,
+        "run_status": "completed_with_infrastructure_failures",
+        "infrastructure_failures": [{
+            "task_id": "capped", "failure_type": "generation_error",
+            "error_type": "AppWorldGenerationError", "error": error,
+            "task_attempts": 1, "failed_request_retries": 0,
+        }],
+    }), encoding="utf-8")
+    failures = A.appworld_runner_failures(run_dir, ["capped"])
+    assert failures[0]["task_failure_kind"] == code
+    eval_path = tmp_path / "evaluation.json"
+    eval_path.write_text(json.dumps({
+        "individual": {"capped": {"success": False}},
+    }), encoding="utf-8")
+    summary = A.collect_appworld(
+        eval_path, run_dir, expected=1, expected_ids=["capped"],
+        infrastructure_failures=failures,
+    )
+    assert summary["semantic_score"] == 0.0
+    assert summary["score_valid"] is True
+    assert summary["n_official_scored"] == 0
+    assert summary["n_task_failures"] == 1
+    assert summary["n_infrastructure_failures"] == 0
+    assert summary["task_failures"] == {code: ["capped"]}
+    assert summary["task_rows"][0]["score_source"] == "task_failure_zero"
+
+
 def test_appworld_final_budgeted_action_executes_and_errors_are_recorded(tmp_path, monkeypatch):
     project_root = Path(__file__).resolve().parents[1]
     default_acon_root = project_root.parent / "tmp" / "baselines" / "acon"

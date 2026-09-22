@@ -130,6 +130,26 @@ class PaperMatrixTest(unittest.TestCase):
             persistent_cmd[persistent_cmd.index("--generation-timeout") + 1], "1200")
         self.assertNotIn("--generation-timeout", ordinary_cmd)
 
+    def test_cli_timeout_is_frozen_and_cannot_rewrite_existing_root(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "run"
+            runner.main(["prepare", "--output", str(output),
+                         "--generation-timeout", "1800"])
+            frozen = (output / "config.resolved.json").read_bytes()
+            self.assertEqual(json.loads(frozen)["generation_timeout"], 1800)
+            plan = json.loads((output / "commands.json").read_text())
+            row = next(row for row in plan
+                       if row["cell_id"] == "bfcl_long_context__commitkv")
+            cmd = row["command"]
+            self.assertEqual(cmd[cmd.index("--generation-timeout") + 1], "1800.0")
+            with self.assertRaises((ValueError, RuntimeError)):
+                runner.main(["prepare", "--output", str(output),
+                             "--generation-timeout", "3600"])
+            self.assertEqual((output / "config.resolved.json").read_bytes(), frozen)
+            with self.assertRaises(SystemExit):
+                runner.main(["aggregate", "--output", str(output),
+                             "--generation-timeout", "3600"])
+
     def test_prepare_pins_original_opponent_runtime_contracts(self):
         from dataclasses import replace
         from benchmarks.arms import ARMS

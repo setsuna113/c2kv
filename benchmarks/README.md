@@ -599,6 +599,33 @@ semantics doc section 10; label them on any row):
 5. *First turn:* nothing completed → no extract, no hint, the row carries no
    `cacheblend_*` columns (same as the history-KV arms).
 
+## Long-context reference-attention timeout recovery
+
+The September 22 BFCL long-context holds exhausted the default 600-second
+generation deadline after persistent-session transport recovery was fixed.
+Keep these requests classified as infrastructure failures: an incomplete
+generation is not a method-budget failure and cannot be scored as an ordinary
+zero. The complete rows remain usable as partial diagnostics, not a complete
+200-task score. Do not enable automatic refill or alter the old output root.
+
+For the next explicitly scheduled reference-attention run, prepare a new root
+with `--generation-timeout 1800`. This is a finite operational allowance, not
+evidence that every long task will finish within it. The option freezes
+`generation_timeout` in `config.resolved.json`, reaches both the persistent
+proxy and the BFCL client (with cleanup headroom), and leaves ordinary arms
+unchanged. Use the same allowance across compared reference-attention arms.
+Existing roots reject a changed timeout. For example, preparing is CPU-only:
+
+```bash
+python -m benchmarks.paper.runner prepare \
+  --config /path/to/old-root/config.resolved.json \
+  --sglang-source /path/to/engine \
+  --output /path/to/new-root --generation-timeout 1800
+```
+
+Starting a run is a separate scheduling action. No held results are converted,
+refilled, or overwritten by preparation.
+
 ## Relation to experiment D
 
 The teacher-forced D harness (`agent/d_kv_intervene.py`,

@@ -21,6 +21,8 @@ from benchmarks.bfcl_response import normalize_native_message
 
 
 RAW_ONE = '<tool_call>{"name":"lookup","arguments":{"b":2,"a":1}}</tool_call>'
+MIXED_RAW_ONE = ('I will look it up.\n\n<tool_call>'
+                 '{"name":"lookup","arguments":{"b":2,"a":1}}</tool_call>')
 RAW_TWO = '<tool_call>{"name":"finish","arguments":{"ok":true}}</tool_call>'
 
 
@@ -45,6 +47,7 @@ class _ReferenceUpstream(BaseHTTPRequestHandler):
     sessions = []
     model_info_requests = 0
     native_text_output = False
+    mixed_tool_call_content = False
 
     def log_message(self, *_args):
         return
@@ -103,6 +106,9 @@ class _ReferenceUpstream(BaseHTTPRequestHandler):
             {"role": "assistant", "content": "done"},
         ][turn - 1]
         raw = [RAW_ONE, RAW_TWO, "done"][turn - 1]
+        if self.__class__.mixed_tool_call_content and turn == 1:
+            messages["content"] = "I will look it up."
+            raw = MIXED_RAW_ONE
         if self.__class__.native_text_output:
             messages = {"role": "assistant", "content": raw, "tool_calls": []}
         _reply(self, {
@@ -135,14 +141,19 @@ def _post(opener, url: str, payload: dict, *, expected_status=200) -> dict:
 
 
 @pytest.mark.parametrize("arm_name", ["commitkv", "agentkv"])
-@pytest.mark.parametrize("native_text_output", [False, True])
+@pytest.mark.parametrize(("benchmark", "native_text_output", "mixed_tool_call_content"), [
+    ("acebench", False, False),
+    ("bfcl", True, False),
+    ("toolsandbox", False, True),
+])
 def test_exact_history_three_turn_wire_replays_raw_text_and_rejects_mismatch(
-        tmp_path, arm_name, native_text_output):
+        tmp_path, arm_name, benchmark, native_text_output, mixed_tool_call_content):
     _ReferenceUpstream.paths = []
     _ReferenceUpstream.chats = []
     _ReferenceUpstream.sessions = []
     _ReferenceUpstream.model_info_requests = 0
     _ReferenceUpstream.native_text_output = native_text_output
+    _ReferenceUpstream.mixed_tool_call_content = mixed_tool_call_content
     upstream = ThreadingHTTPServer(("127.0.0.1", _free_port()), _ReferenceUpstream)
     threading.Thread(target=upstream.serve_forever, daemon=True).start()
 
@@ -152,7 +163,7 @@ def test_exact_history_three_turn_wire_replays_raw_text_and_rejects_mismatch(
         str(Path(__file__).with_name("proxy.py")),
         "--upstream", f"http://127.0.0.1:{upstream.server_port}",
         "--backend", "sglang",
-        "--benchmark", "bfcl" if native_text_output else "acebench",
+        "--benchmark", benchmark,
         "--arm", arm_name,
         "--model-family", "qwen3-4b",
         "--port", str(proxy_port),
@@ -185,6 +196,10 @@ def test_exact_history_three_turn_wire_replays_raw_text_and_rejects_mismatch(
         echo_one = copy.deepcopy(first["choices"][0]["message"])
         if native_text_output:
             echo_one = normalize_native_message(echo_one, first["id"])
+        if mixed_tool_call_content:
+            # ToolSandbox stores only the executable calls and reconstructs
+            # mixed assistant tool-call messages with empty content.
+            echo_one["content"] = ""
         echo_one["tool_calls"][0]["function"]["arguments"] = '{ "a": 1, "b": 2 }'
         messages += [echo_one, {
             "role": "tool", "tool_call_id": echo_one["tool_calls"][0]["id"], "content": "lookup-result",
@@ -223,8 +238,9 @@ def test_exact_history_three_turn_wire_replays_raw_text_and_rejects_mismatch(
 
         second_wire = _ReferenceUpstream.chats[1]["messages"]
         third_wire = _ReferenceUpstream.chats[2]["messages"]
-        assert {"role": "assistant", "content": RAW_ONE} in second_wire
-        assert {"role": "assistant", "content": RAW_ONE} in third_wire
+        first_raw = MIXED_RAW_ONE if mixed_tool_call_content else RAW_ONE
+        assert {"role": "assistant", "content": first_raw} in second_wire
+        assert {"role": "assistant", "content": first_raw} in third_wire
         assert {"role": "assistant", "content": RAW_TWO} in third_wire
         assert not any(message.get("tool_calls") for message in second_wire + third_wire)
 

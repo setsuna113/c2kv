@@ -84,3 +84,51 @@ def test_bfcl_malformed_draft_is_not_repaired_and_other_benchmarks_keep_raw_echo
     assert state.prepare([message]) == [message]
     with pytest.raises(ValueError, match="unchanged"):
         state.prepare([normalize_native_message(message, "r")])
+
+
+def test_toolsandbox_mixed_text_tool_call_accepts_only_canonical_action_echo():
+    state = RawActorHistory()
+    source = [{"role": "user", "content": "Turn off low battery mode."}]
+    assistant = {"role": "assistant", "content": "I'll turn it off.", "tool_calls": [{
+        "id": "call-1", "type": "function",
+        "function": {"name": "set_low_battery_mode_status",
+                     "arguments": '{"on":false}'},
+    }]}
+    raw_text = ("I'll turn it off.\n\n<tool_call>\n"
+                '{"name":"set_low_battery_mode_status","arguments":{"on":false}}\n'
+                "</tool_call>")
+    state.commit(source, response(assistant, raw_text), benchmark="toolsandbox")
+
+    # ToolSandbox stores the executable call and reconstructs this canonical
+    # assistant message, so mixed prose from the response is unavailable.
+    echo = copy.deepcopy(assistant)
+    echo["content"] = ""
+    echo["tool_calls"][0]["function"]["arguments"] = '{ "on" : false }'
+    prepared = state.prepare([*source, echo, {
+        "role": "tool", "tool_call_id": "call-1", "content": "None",
+    }])
+    assert prepared[1] == {"role": "assistant", "content": raw_text}
+
+    for field, value in (("content", "changed prose"), ("id", "call-2"),
+                         ("name", "set_wifi_status"),
+                         ("arguments", '{"on":true}')):
+        changed = copy.deepcopy(echo)
+        if field == "content":
+            changed["content"] = value
+        elif field == "id":
+            changed["tool_calls"][0][field] = value
+        else:
+            changed["tool_calls"][0]["function"][field] = value
+        with pytest.raises(ValueError, match="unchanged"):
+            state.prepare([*source, changed])
+
+
+def test_toolsandbox_plain_assistant_text_must_stay_unchanged():
+    state = RawActorHistory()
+    source = [{"role": "user", "content": "What happened?"}]
+    assistant = {"role": "assistant", "content": "Location service is disabled."}
+    state.commit(source, response(assistant, assistant["content"]),
+                 benchmark="toolsandbox")
+    assert state.prepare([*source, copy.deepcopy(assistant)])[1] == assistant
+    with pytest.raises(ValueError, match="unchanged"):
+        state.prepare([*source, {"role": "assistant", "content": "It is enabled."}])

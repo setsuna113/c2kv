@@ -25,6 +25,22 @@ def _signature(message):
     return message.get("role", "assistant"), message.get("content") or "", calls
 
 
+def _harness_echo(message, benchmark):
+    """Return the structured echo that the pinned harness can reproduce.
+
+    ToolSandbox stores an assistant tool call as executable code and rebuilds
+    it for the next OpenAI request.  That round trip preserves the call id,
+    name, and parsed arguments, but drops any prose emitted alongside the
+    calls and uses an empty content string.  Exact KV still replays the raw
+    serving receipt; this normalization is only for validating ToolSandbox's
+    structured action echo.
+    """
+    if benchmark == "toolsandbox" and message.get("tool_calls"):
+        message = copy.deepcopy(message)
+        message["content"] = ""
+    return message
+
+
 @dataclass
 class RawActorHistory:
     turns: dict = field(default_factory=dict)
@@ -50,6 +66,7 @@ class RawActorHistory:
             from benchmarks.bfcl_response import normalize_native_message
 
             message = normalize_native_message(message, response["id"])
+        message = _harness_echo(message, benchmark)
         index = len(source_messages)
         if index in self.turns:
             raise ValueError("Exact KV conversation cannot overwrite a committed actor turn")

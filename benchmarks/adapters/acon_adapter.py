@@ -66,6 +66,7 @@ import reqlog  # noqa: E402
 from metrics import aggregate  # noqa: E402
 
 from adapters.base import RunContext, v1  # noqa: E402
+from adapters.text_budget_failures import typed_text_budget_failure_code  # noqa: E402
 
 NAME = "acon"
 NAMES = ("acon_appworld", "acon_qa")  # one module, two --benchmark values
@@ -470,7 +471,7 @@ def appworld_runner_failures(run_dir: Path,
         if result.get("termination_reason") != "generation_error":
             raise SystemExit(f"FATAL: AppWorld task {task_id} lacks generation_error evidence")
         seen.add(task_id)
-        validated.append({
+        record = {
             "task_id": task_id,
             "failure_type": "generation_error",
             "error_type": failure.get("error_type"),
@@ -478,7 +479,11 @@ def appworld_runner_failures(run_dir: Path,
             "results_path": str(results_path),
             "task_attempts": 1,
             "failed_request_retries": 0,
-        })
+        }
+        task_failure_kind = typed_text_budget_failure_code(record["error"])
+        if task_failure_kind is not None:
+            record["task_failure_kind"] = task_failure_kind
+        validated.append(record)
     wanted_status = (
         "completed_with_infrastructure_failures" if validated else "completed"
     )
@@ -710,9 +715,12 @@ def collect_appworld(eval_path: Path, run_dir: Path,
     if expected is not None and len(scored) != expected:
         raise SystemExit(f"FATAL: AppWorld n_scored={len(scored)} != n_total={expected}")
     for task_id, ok in sorted(scored.items()):
+        failure = failures.get(task_id)
+        task_failure_kind = failure.get("task_failure_kind") if failure else None
         row: Dict[str, Any] = {"task_id": task_id,
                                "semantic_score": (
-                                   None if task_id in failures else 1.0 if ok else 0.0
+                                   0.0 if task_failure_kind else
+                                   None if failure else 1.0 if ok else 0.0
                                ),
                                "protocol_legal": None}  # code-action agent
         agent = appworld_task_dir(run_dir, task_id) / "results.json"
@@ -728,7 +736,14 @@ def collect_appworld(eval_path: Path, run_dir: Path,
                 "termination": rec.get("termination_reason"),
                 "agent_reported_success": rec.get("success"),
             })
-        if task_id in failures:
+        if task_failure_kind:
+            row.update({
+                "result_status": "task_failure",
+                "failure_type": "method_budget_failure",
+                "task_failure_kind": task_failure_kind,
+                "score_source": "task_failure_zero",
+            })
+        elif failure:
             row.update({
                 "result_status": "infrastructure_failure",
                 "failure_type": "generation_error",
@@ -743,7 +758,11 @@ def collect_appworld(eval_path: Path, run_dir: Path,
     summary = aggregate(rows, cluster_key="task_id")
     partial_semantic_score = summary.get("semantic_score")
     partial_ci95 = summary.get("semantic_score_ci95")
-    if failures:
+    infrastructure_failures_by_task = {
+        task_id: failure for task_id, failure in failures.items()
+        if not failure.get("task_failure_kind")
+    }
+    if infrastructure_failures_by_task:
         # The completed-task slice remains useful for debugging, but it is not
         # a full-cell method score and must not populate the canonical field.
         summary["semantic_score"] = None
@@ -756,12 +775,21 @@ def collect_appworld(eval_path: Path, run_dir: Path,
         summary["result_status"] = "completed"
         summary["score_valid"] = True
     summary["n_official_scored"] = len(rows) - len(failures)
-    summary["n_infrastructure_failures"] = len(failures)
-    summary["infrastructure_failure_task_ids"] = sorted(failures)
-    summary["infrastructure_failures"] = [failures[key] for key in sorted(failures)]
+    summary["n_task_failures"] = len(failures) - len(infrastructure_failures_by_task)
+    summary["task_failures"] = {
+        code: sorted(task_id for task_id, failure in failures.items()
+                     if failure.get("task_failure_kind") == code)
+        for code in sorted({failure.get("task_failure_kind") for failure in failures.values()
+                            if failure.get("task_failure_kind")})
+    }
+    summary["n_infrastructure_failures"] = len(infrastructure_failures_by_task)
+    summary["infrastructure_failure_task_ids"] = sorted(infrastructure_failures_by_task)
+    summary["infrastructure_failures"] = [infrastructure_failures_by_task[key]
+                                             for key in sorted(infrastructure_failures_by_task)]
     summary["failure_score_policy"] = (
-        "generation failures are infrastructure receipts, are not retried, and are "
-        "excluded from method scoring; any completed-task score is partial only"
+        "typed text-history budget failures are task-level method zeros; other "
+        "generation failures are infrastructure receipts, are not retried, and "
+        "invalidate the canonical full-cell score"
     )
     summary["task_rows"] = rows
     summary.update(reqlog.cost_summary(rows, report))

@@ -1125,8 +1125,16 @@ def main(argv=None):
                         help="checkpoint for contexts explicitly selected by --tool-contexts")
     parser.add_argument("--port-offset", type=int, default=0,
                         help="shift server/proxy ports for concurrent single-GPU runners on one host")
+    parser.add_argument("--generation-timeout", type=float,
+                        help="freeze an explicit positive deadline in seconds for persistent history-KV cells; use a new output root")
     args = parser.parse_args(argv)
     config = json.loads(args.config.read_text())
+    if args.generation_timeout is not None:
+        if args.action == "aggregate":
+            parser.error("aggregate reads the frozen generation timeout")
+        if not 0 < args.generation_timeout < float("inf"):
+            parser.error("generation-timeout must be finite and positive")
+        config["generation_timeout"] = args.generation_timeout
     if args.action == "aggregate" and (args.task_subset or args.task_subset_file):
         parser.error("aggregate reads the frozen task scope; task-subset options are for prepare/run")
     if args.action != "aggregate":

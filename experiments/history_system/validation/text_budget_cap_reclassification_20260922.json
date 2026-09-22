@@ -1,0 +1,89 @@
+{
+  "schema": "c2kv-text-budget-cap-reclassification-v1",
+  "created_at": "2026-09-22T09:58:14.9742483Z",
+  "paper_base_commit": "776c871",
+  "procedure": "offline adapter parsing of copied official results, harness events, and proxy logs; no model, tool, scorer, or remote mutation",
+  "validation": [
+    {
+      "path": "cap_checks.xml",
+      "tests": 21,
+      "failures": 0,
+      "sha256": "bde769150ac12b782281070c8f37ee8c511d69fd07df3f70d796f5a658f73701"
+    },
+    {
+      "path": "adapter_regression_checks.xml",
+      "tests": 90,
+      "failures": 0,
+      "sha256": "e1f8a41142d267bc4230b19223f43c94d0616713ea40e0399e685ba5e03fb930"
+    }
+  ],
+  "tau2": {
+    "cell": "tau2__hiagent_full_b384",
+    "n": 50,
+    "semantic_score": 0.24,
+    "n_task_failures": 1,
+    "task_failures": {
+      "44": "hiagent_history_budget_exceeded"
+    },
+    "official_rewards_present": 49,
+    "terminal_results_validation": "passed",
+    "harness_events_validation": "passed",
+    "sources": [
+      {
+        "path": "/workspace/results-bgt2/closed_loop/tau2__hiagent_full_b384/official/results.json",
+        "bytes": 96072763,
+        "sha256": "6e66771eb7ea18e06b9a11742a6e292cb373a267e4372b90f71957e5adbd222a"
+      },
+      {
+        "path": "/workspace/results-bgt2/closed_loop/tau2__hiagent_full_b384/measurement/harness_events.jsonl",
+        "bytes": 45671341,
+        "sha256": "4027edd14a876c831160065fe187fa60bebda7d7986735a9ddd0eae2185dd70a"
+      },
+      {
+        "path": "/workspace/results-bgt2/closed_loop/tau2__hiagent_full_b384/logs/proxy_hiagent_full_b384_43910.jsonl",
+        "bytes": 22485986,
+        "sha256": "d5b5b4132820189b316229f1cdf1e64ff7bcc32466621610b66c00ed2aba9198"
+      }
+    ],
+    "host": "box4"
+  },
+  "toolsandbox": {
+    "cell": "toolsandbox__acon_hist_ut_co_b128",
+    "n": 129,
+    "semantic_score": 0.4229161997372136,
+    "scenario_count": 129,
+    "task_failure_counts": {
+      "acon_history_budget_exceeded": 41,
+      "hiagent_invalid_retrieval": 0
+    },
+    "sources": [
+      {
+        "path": "/workspace/results-bgts/closed_loop/toolsandbox__acon_hist_ut_co_b128/agent_c2kv-agent_user_c2kv-agent_09_22_2026_07_29_16/result_summary.json",
+        "bytes": 301296,
+        "sha256": "5b8b03e9450c5c5439c43e3d30036e1692f8836691b95f03a442d12c6427170b"
+      },
+      {
+        "path": "/workspace/results-bgts/closed_loop/toolsandbox__acon_hist_ut_co_b128/measurement/harness_events.jsonl",
+        "bytes": 1155609,
+        "sha256": "7f03fe1c4ad80b9fd03eab78cf96f498c9944ddf1576527bf308463c07373949"
+      },
+      {
+        "path": "/workspace/results-bgts/closed_loop/toolsandbox__acon_hist_ut_co_b128/logs/proxy_acon_hist_ut_co_b128_43720.jsonl",
+        "bytes": 14221391,
+        "sha256": "ed2a2f6d49e0df74d3bae4dd11c6c318ceeba8fd24bc9c14ae9886bec588aa22"
+      },
+      {
+        "path": "/workspace/results-bgts/closed_loop/toolsandbox__acon_hist_ut_co_b128/measurement/rapidapi_http_status.jsonl",
+        "bytes": 4897,
+        "sha256": "b3d92ad8f13c45066a0f8fd4d6c890b3d300df54732f01b4762e810ddf80b37e"
+      },
+      {
+        "path": "/workspace/results-bgts/closed_loop/toolsandbox__acon_hist_ut_co_b128/scenario_manifest.json",
+        "bytes": 9790,
+        "sha256": "0bdee3e632b25e79b70cea5b72ea20c757b2373a369ce32b2f72ab6f036f3246"
+      }
+    ],
+    "host": "m2"
+  },
+  "result_scope": "preliminary, n=1; offline reclassification of existing runs, not new model execution"
+}

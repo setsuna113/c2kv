@@ -106,3 +106,51 @@ def test_generic_502_needs_last_typed_proxy_error_for_that_scenario(tmp_path):
     result = ts.collect(tmp_path)
     assert result["semantic_score"] == 0.0
     assert result["task_failures"] == {"hiagent_invalid_retrieval": ["bad_retrieval"]}
+
+
+def _proxy_budget_evidence(path, scenario, code):
+    from benchmarks.measurement.telemetry import append_jsonl
+
+    instance = f"instance-{scenario}"
+    append_jsonl(path / "measurement" / "harness_events.jsonl", {
+        "event_type": "episode_start", "episode_id": scenario,
+        "episode_instance_id": instance,
+    })
+    conv = hashlib.sha256(json.dumps(
+        ["measurement_session", instance], separators=(",", ":")).encode()).hexdigest()
+    append_jsonl(path / "logs" / "proxy_text_34100.jsonl", {
+        "conv_id": conv, "status": code, "error_kind": code,
+    })
+
+
+@pytest.mark.parametrize("code", [
+    "acon_history_budget_exceeded",
+    "hiagent_history_budget_exceeded",
+    "hiagent_retrieval_budget_exceeded",
+])
+def test_typed_text_budget_failure_is_scenario_local_zero(tmp_path, code):
+    _result(tmp_path, [
+        {"name": "complete", "similarity": 1.0},
+        {"name": "capped", "similarity": None,
+         "exception_type": "UnprocessableEntityError",
+         "traceback": f"Error code: 422 - {{'error': {{'code': '{code}'}}}}"},
+    ])
+    _proxy_budget_evidence(tmp_path, "capped", code)
+    result = ts.collect(tmp_path)
+    assert result["n"] == 2
+    assert result["semantic_score"] == 0.5
+    assert result["task_failures"][code] == ["capped"]
+
+
+@pytest.mark.parametrize("evidence", ["missing", "mismatched"])
+def test_budget_text_without_matching_proxy_declaration_remains_crash(tmp_path, evidence):
+    code = "acon_history_budget_exceeded"
+    _result(tmp_path, [{
+        "name": "capped", "similarity": None,
+        "exception_type": "UnprocessableEntityError",
+        "traceback": f"Error code: 422 - {{'error': {{'code': '{code}'}}}}",
+    }])
+    if evidence == "mismatched":
+        _proxy_budget_evidence(tmp_path, "capped", "hiagent_history_budget_exceeded")
+    with pytest.raises(SystemExit, match="scenario\\(s\\) crashed"):
+        ts.collect(tmp_path)

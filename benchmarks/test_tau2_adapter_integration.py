@@ -186,6 +186,39 @@ def test_typed_method_guard_keeps_completed_tau2_scores_and_failed_task(tmp_path
     assert scores["task_rows"][1]["task_failure_kind"] == "acon_history_budget_exceeded"
 
 
+@pytest.mark.parametrize("code", [
+    "acon_history_budget_exceeded",
+    "hiagent_history_budget_exceeded",
+    "hiagent_retrieval_budget_exceeded",
+])
+def test_text_budget_proxy_codes_are_symmetric_task_failures(tmp_path, code):
+    from benchmarks.measurement.telemetry import append_jsonl
+
+    events = tmp_path / "measurement" / "harness_events.jsonl"
+    append_jsonl(events, {"event_type": "decision", "episode_id": "44",
+                          "error": "APIError: method budget"})
+    append_jsonl(tmp_path / "logs" / "proxy_text_34100.jsonl", {
+        "conv_id": hashlib.sha256(b'["measurement_session","44"]').hexdigest(),
+        "status": code, "error_kind": code,
+    })
+    rows = [_result("44", termination="infrastructure_error")]
+    failures = tau2._declared_task_failures(tmp_path, rows, 1)
+    assert failures == {"44": code}
+
+
+def test_text_budget_proxy_code_with_conflicting_error_kind_is_not_declared(tmp_path):
+    from benchmarks.measurement.telemetry import append_jsonl
+
+    append_jsonl(tmp_path / "measurement" / "harness_events.jsonl", {
+        "event_type": "decision", "episode_id": "44", "error": "HTTP 422"})
+    append_jsonl(tmp_path / "logs" / "proxy_text_34100.jsonl", {
+        "conv_id": hashlib.sha256(b'["measurement_session","44"]').hexdigest(),
+        "status": "hiagent_history_budget_exceeded", "error_kind": "upstream_error",
+    })
+    assert tau2._declared_task_failures(
+        tmp_path, [_result("44", termination="infrastructure_error")], 1) == {}
+
+
 def test_untyped_tau2_502_remains_incomplete(tmp_path):
     from benchmarks.measurement.telemetry import append_jsonl
 

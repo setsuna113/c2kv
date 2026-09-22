@@ -1,0 +1,94 @@
+{
+  "schema": "c2kv-toolsandbox-exact-kv-guard-repair-v1",
+  "date": "2026-09-22",
+  "source_run": {
+    "host": "m2",
+    "cell": "toolsandbox__commitkv_b256",
+    "paper_revision": "3a2d0f3",
+    "engine_revision": "e2b3b7ec0",
+    "scenario_count": 129
+  },
+  "evidence": {
+    "proxy_telemetry": {
+      "path": "/workspace/results-kvts/closed_loop/toolsandbox__commitkv_b256/proxy_telemetry.jsonl",
+      "sha256": "9e96d21ee818ade2facd2a56ac2bc641aba0669ca8f85d410cd718dc493b9ea3",
+      "bytes": 113442113,
+      "request_rows": 741
+    },
+    "hold": {
+      "path": "/workspace/results-kvts/closed_loop/toolsandbox__commitkv_b256/HOLD_exact_kv_continuation_guard.txt",
+      "sha256": "7a3f8b165644bd409885144e470b01112fe33565d64f56923ec62e72bd76e648"
+    },
+    "scenario_manifest": {
+      "path": "/workspace/results-kvts/closed_loop/toolsandbox__commitkv_b256/scenario_manifest.json",
+      "sha256": "0bdee3e632b25e79b70cea5b72ea20c757b2373a369ce32b2f72ab6f036f3246"
+    },
+    "toolsandbox_sources": [
+      {
+        "path": "/workspace/validation/toolsandbox-129-c3c6baf6-e66ad7d6/ToolSandbox/tool_sandbox/roles/openai_api_agent.py",
+        "sha256": "9432dd309bb9ad8b1ec47384c98d58081d5f83461ae0654d41fc33aecbd6224a"
+      },
+      {
+        "path": "/workspace/validation/toolsandbox-129-c3c6baf6-e66ad7d6/ToolSandbox/tool_sandbox/common/message_conversion.py",
+        "sha256": "83ec90371bd8ce54b94729e4ac0412773fb6bd33463b01dbdaae3791dc7bf1f4"
+      }
+    ]
+  },
+  "audit": {
+    "method": "Replay request events in file order per conversation using raw_actor_history._signature; commit each successful exact_generated_prefix response at len(request.messages), then compare every committed assistant turn with the next request echo.",
+    "guard_failures": 53,
+    "distinct_conversations": 53,
+    "one_mismatch_each": 53,
+    "content_nonempty_to_empty_only": 53,
+    "unchanged_role_and_tool_call_id_name_parsed_arguments": 53,
+    "guard_request_fingerprints_sha256": "d7a4466262e16169de463eae745c0f1be567280aeed5853ba5506604c62d5578",
+    "guard_request_ids_sha256": "e0978e7cc42d22ef6edebbc54fb6df6dde0c9dabb08f3a668d05fd0e31ca4c22"
+  },
+  "diagnosis": {
+    "kind": "pinned_harness_round_trip_normalization",
+    "detail": "For assistant responses containing both prose and tool_calls, ToolSandbox stores executable calls as internal Message objects and reconstructs the next OpenAI assistant message with content=''. The prior call id, function name, and parsed arguments remain unchanged.",
+    "not_an_action_mutation": true
+  },
+  "repair": {
+    "base_revision": "776c871a7e0642f0557a3100ca9843a2e72b5cb2",
+    "behavior": "For benchmark='toolsandbox' and a response with tool_calls, normalize only the committed expected harness-echo content to ''. Continue storing and replaying persistent_history_session.generated_text as the exact model history.",
+    "guard_preserved_for": [
+      "assistant role",
+      "canonical empty ToolSandbox tool-call content echo",
+      "tool call count and order",
+      "tool call id",
+      "function name",
+      "parsed arguments",
+      "ordinary assistant text"
+    ],
+    "source_sha256": {
+      "benchmarks/raw_actor_history.py": "5203d102b2c097497f26d319cc8939e59159e51d18df365da8dfff535e3e8deb",
+      "benchmarks/test_raw_actor_history.py": "05f05d334aa6d17b4860a3175b43a68a3cdb1872f796788b1b5f993e369ba5cd",
+      "benchmarks/test_raw_actor_history_proxy_wire.py": "69e9f1f0103c6aa7a65d41bd141c24d2c6b6d84218eaacd86484b5eb6e13cb89"
+    }
+  },
+  "scope": {
+    "paper": "The proxy invokes raw_actor_history only for commitkv and agentkv, so both exact-generated-prefix methods share the repair at every budget.",
+    "other_persistent_history_kv": "H2O, SnapKV-persistent, and PyramidKV do not enter raw_actor_history and remain unchanged.",
+    "npu": "The NPU generality launchers import benchmarks.proxy from the selected paper root; the NPU worktree has no independent raw_actor_history copy to port."
+  },
+  "validation": {
+    "command": ".venv-b-cpu/Scripts/python.exe -m pytest benchmarks/test_proxy_session_retry.py benchmarks/test_history_method_proxy.py benchmarks/test_raw_actor_history.py benchmarks/test_raw_actor_history_proxy_wire.py -q",
+    "result": "23 passed in 6.71s",
+    "captured_failure_replay": {
+      "implementation": "Current RawActorHistory.commit(response, benchmark='toolsandbox') followed by prepare(captured_failure_messages)",
+      "source": "/workspace/results-kvts/closed_loop/toolsandbox__commitkv_b256/proxy_telemetry.jsonl",
+      "captured_failure_requests": 53,
+      "accepted": 53,
+      "committed_turns": 145,
+      "exact_generated_text_turns_restored": 145,
+      "input_message_lists_unchanged": 53,
+      "request_ids_sha256": "e0978e7cc42d22ef6edebbc54fb6df6dde0c9dabb08f3a668d05fd0e31ca4c22",
+      "request_fingerprints_sha256": "d7a4466262e16169de463eae745c0f1be567280aeed5853ba5506604c62d5578",
+      "result": "passed"
+    },
+    "git_diff_check": "passed",
+    "live_benchmark_rerun": false,
+    "held_cells_require_rerun": true
+  }
+}

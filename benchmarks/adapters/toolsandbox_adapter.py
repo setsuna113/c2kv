@@ -16,6 +16,7 @@ Usage (benchts venv on the server):
 from __future__ import annotations
 
 import argparse
+from collections import defaultdict
 import hashlib
 import json
 import math
@@ -33,6 +34,9 @@ from toolsandbox_suite import (  # noqa: E402
 )
 
 from adapters.base import RunContext, v1  # noqa: E402
+from adapters.text_budget_failures import (  # noqa: E402
+    proxy_text_budget_failure_code, typed_text_budget_failure_code,
+)
 
 NAME = "toolsandbox"
 TS_DIR = Path(os.environ.get("TS_DIR") or Path.home() / "benchmarks" / "ToolSandbox")
@@ -200,13 +204,13 @@ COST_JOIN = ("joinable: toolsandbox_cli emits scenario/session/request/action "
              "ids without changing official execution or scoring")
 
 
-def _invalid_retrieval_scenarios(out_dir: Path) -> set[str]:
-    """Join typed proxy failures to official scenario names through the harness."""
+def _proxy_scenario_rows(out_dir: Path) -> Dict[str, Dict[str, Any]]:
+    """Join each scenario to its last attributable proxy row."""
     from measurement.telemetry import read_jsonl
 
     events = out_dir / "measurement" / "harness_events.jsonl"
     if not events.is_file():
-        return set()
+        return {}
     by_conversation = {}
     for row in read_jsonl(events):
         if row.get("event_type") != "episode_start":
@@ -224,15 +228,31 @@ def _invalid_retrieval_scenarios(out_dir: Path) -> set[str]:
         for row in read_jsonl(path):
             scenario = by_conversation.get(row.get("conv_id"))
             if scenario:
-                latest[scenario] = (row.get("status"), str(row.get("error") or ""))
-    return {scenario for scenario, (status, error) in latest.items()
-            if status in {"textarm_error", "upstream_error"} and any(marker in error for marker in (
+                latest[scenario] = row
+    return latest
+
+
+def _invalid_retrieval_scenarios(out_dir: Path) -> set[str]:
+    """Join typed proxy failures to official scenario names through the harness."""
+    return {scenario for scenario, row in _proxy_scenario_rows(out_dir).items()
+            if row.get("status") in {"textarm_error", "upstream_error"}
+            and any(marker in str(row.get("error") or "") for marker in (
                 "HiAgent requested nonexistent completed subgoals",
                 "HiAgent requested an already revealed trajectory without advancing",
                 "HiAgent exceeded four internal trajectory retrieval rounds",
                 "HiAgent mixed internal retrieval and environment actions",
                 "malformed hiagent_retrieve subgoal_ids",
             ))}
+
+
+def _declared_budget_failure_scenarios(out_dir: Path) -> Dict[str, str]:
+    """Return scenario-bound ACON/HiAgent budget declarations from proxy logs."""
+    declared = {}
+    for scenario, row in _proxy_scenario_rows(out_dir).items():
+        code = proxy_text_budget_failure_code(row)
+        if code is not None:
+            declared[scenario] = code
+    return declared
 
 
 def reject_rapidapi_http_failures(out_dir: Path) -> None:
@@ -349,9 +369,11 @@ def collect(out_dir: Path, native_server_dir: "Path | None" = None) -> Dict[str,
 
     rows: List[Dict[str, Any]] = []
     crashed: List[str] = []
-    task_failures: List[str] = []
+    invalid_retrieval_failures: List[str] = []
     capacity_failures: List[str] = []
     proxy_failures = _invalid_retrieval_scenarios(out_dir)
+    proxy_budget_failures = _declared_budget_failure_scenarios(out_dir)
+    budget_failures: Dict[str, List[str]] = defaultdict(list)
     seen_ids: set[str] = set()
     for path in summaries:
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -373,7 +395,17 @@ def collect(out_dir: Path, native_server_dir: "Path | None" = None) -> Dict[str,
                     from native_budget_failure import native_capacity_failure
                     capacity_failure = native_capacity_failure(
                         Path(native_server_dir), scenario_id, "toolsandbox")
-                if (capacity_failure == "c2kv_capacity_infeasible"
+                traceback_budget_failure = typed_text_budget_failure_code(traceback)
+                proxy_budget_failure = proxy_budget_failures.get(scenario_id)
+                if (traceback_budget_failure is not None
+                        and traceback_budget_failure == proxy_budget_failure
+                        and scenario.get("exception_type") == "UnprocessableEntityError"):
+                    budget_failures[traceback_budget_failure].append(scenario_id)
+                    rows.append({"task_id": scenario_id, "semantic_score": 0.0,
+                                 "official_similarity": None,
+                                 "task_failure_kind": traceback_budget_failure,
+                                 "protocol_legal": None})
+                elif (capacity_failure == "c2kv_capacity_infeasible"
                         and scenario.get("exception_type") == "UnprocessableEntityError"):
                     capacity_failures.append(scenario_id)
                     rows.append({"task_id": scenario_id, "semantic_score": 0.0,
@@ -387,7 +419,7 @@ def collect(out_dir: Path, native_server_dir: "Path | None" = None) -> Dict[str,
                     "HiAgent mixed internal retrieval and environment actions",
                     "malformed hiagent_retrieve subgoal_ids",
                 )) or (scenario_id in proxy_failures and "502" in str(traceback)):
-                    task_failures.append(scenario_id)
+                    invalid_retrieval_failures.append(scenario_id)
                     rows.append({"task_id": scenario_id, "semantic_score": 0.0,
                                  "official_similarity": None,
                                  "task_failure_kind": "hiagent_invalid_retrieval",
@@ -415,9 +447,12 @@ def collect(out_dir: Path, native_server_dir: "Path | None" = None) -> Dict[str,
             f"crashed (traceback in result_summary): {', '.join(crashed[:10])}")
     summary = aggregate(rows, cluster_key="task_id")
     summary["scenario_ids"] = sorted(str(row["task_id"]) for row in rows)
-    summary["task_failures"] = {"hiagent_invalid_retrieval": sorted(task_failures)}
+    summary["task_failures"] = {
+        "hiagent_invalid_retrieval": sorted(invalid_retrieval_failures)}
     if capacity_failures:
         summary["task_failures"]["c2kv_capacity_infeasible"] = sorted(capacity_failures)
+    for code, scenario_ids in sorted(budget_failures.items()):
+        summary["task_failures"][code] = sorted(scenario_ids)
     return summary
 
 
