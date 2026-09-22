@@ -39,6 +39,39 @@ the full task artifacts and official `appworld evaluate`, including scenario
 aggregation. Never average partial scenario scores. Retain per-task source
 provenance and keep latency/cost from different code versions separate.
 
+## Offline rescore of held cells
+
+`rescore` scores a held closed-loop cell from its own saved artifacts, after an
+adapter fix changed only how finished outputs are classified. It starts no
+server, proxy, user simulator or tool:
+
+```bash
+python -m benchmarks.paper.runner rescore --output /workspace/results-bgt2 \
+  --cells tau2__hiagent_full_b192,tau2__hiagent_full_b256
+```
+
+It reads the frozen `config.resolved.json` and `commands.json` and accepts only
+explicit `--cells` of run.py adapters with an offline scorer (tau2,
+ToolSandbox, ACEBench raw-tool cells). The adapter's post-run function is the
+one the live run calls (`tau2_adapter.score_simulations`,
+`toolsandbox_adapter.score_cli_run`, `acebench_adapter.score_generated_run`),
+and run.py's summary envelope comes from `finalize_summary` with the cell's
+`checkpoint_profile.resolved.json` and `preflight.json`. tau2's official
+`evaluate-trajs` runs on a private copy of `official/results.json`, which must
+match the run's simulation directory when that still exists; ACEBench's
+official scorer runs in a private copy of the generation workdir.
+
+A cell is refused, before anything is written, when it is complete, audited,
+subset-scoped, native, ended with `infra_failure.json`, already has a summary,
+receipt or `rescore/` workspace, or when `started.json` records a different
+cell than the plan. Every input is hashed before and after scoring; a change
+publishes nothing. Otherwise the cell gains `rescore/` (scratch outputs),
+`summary_<arm>.json` with a `rescore` provenance block (code revision, inputs,
+untouched `HOLD_*` evidence), `rescore.json`, and finally `complete.json`.
+`aggregate` marks such cells with `score_provenance: offline_rescore`, and
+`comparison.csv` gains a `score_provenance` column only when a rescored cell is
+present. A failed rescore leaves its `rescore/` workspace for inspection.
+
 ## tau2 matrix cells
 
 `tau2` is a benchmark axis of the existing paper matrix. It uses the same

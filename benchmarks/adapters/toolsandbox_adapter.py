@@ -202,6 +202,19 @@ def run(ctx: RunContext) -> Dict[str, Any]:
 
 COST_JOIN = ("joinable: toolsandbox_cli emits scenario/session/request/action "
              "ids without changing official execution or scoring")
+RESCORE_INPUTS = ("toolsandbox_protocol.json", "scenario_manifest.json",
+                  "agent_*/result_summary.json", "measurement/harness_events.jsonl",
+                  "measurement/rapidapi_http_status.jsonl", "logs/proxy_*.jsonl")
+RESCORE_PROCEDURE = "toolsandbox_adapter.score_cli_run on the saved official result summaries"
+
+
+def rescore(ctx: RunContext, workspace: Path) -> Dict[str, Any]:
+    """Offline rescore: run()'s post-CLI half on the saved official results."""
+    out_dir = Path(ctx.out_dir).resolve()
+    protocol = json.loads((out_dir / "toolsandbox_protocol.json").read_text(encoding="utf-8"))
+    summary = score_cli_run(out_dir, scenarios=protocol["scenarios"])
+    summary["cost_join"] = COST_JOIN
+    return summary
 
 
 def _proxy_scenario_rows(out_dir: Path) -> Dict[str, Dict[str, Any]]:
@@ -321,6 +334,17 @@ def run_ts(base_url: str, out_dir: Path, test_mode: bool = True,
     completed = run_owned(cmd, cwd=ts_dir, env=env)
     if completed.returncode != 0:
         raise SystemExit(f"FATAL: tool_sandbox CLI exited {completed.returncode}")
+    return score_cli_run(out_dir, scenarios=scenarios, expected=expected,
+                         native_server_dir=native_server_dir)
+
+
+def score_cli_run(out_dir: Path, *, scenarios: "list[str] | None", expected: int = None,
+                  native_server_dir: "Path | None" = None) -> Dict[str, Any]:
+    """Post-CLI half of run_ts: collect official summaries, check terminal state.
+
+    The live run and an offline rescore share this function; it only reads
+    ``out_dir``.
+    """
     reject_rapidapi_http_failures(out_dir)
     summary = (collect(out_dir) if native_server_dir is None else
                collect(out_dir, native_server_dir=Path(native_server_dir)))

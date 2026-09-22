@@ -74,6 +74,7 @@ from paper.process_lifecycle import run_owned  # noqa: E402
 from metrics import aggregate  # noqa: E402
 
 from adapters.base import RunContext, v1  # noqa: E402
+from adapters import acebench_task_failures  # noqa: E402
 
 NAME = "acebench"
 ACEBENCH_DIR = Path(os.environ.get("ACEBENCH_DIR") or Path.home() / "baselines" / "acebench")
@@ -355,8 +356,14 @@ def score_path(work: Path, language: str, model: str, test: str) -> Path:
     return Path(work) / "score_all" / f"score_{language}" / model / f"data_{test}_score.json"
 
 
-def check_terminal(work: Path, language: str, model: str, tests: List[str]) -> None:
-    """Result ids are an exact one-to-one match for the requested data ids."""
+def check_terminal(work: Path, language: str, model: str, tests: List[str],
+                   declared: Optional[Set[str]] = None) -> None:
+    """Result ids are an exact one-to-one match for the requested data ids.
+
+    ``declared`` task failures (verified receipts) are the only ids that may
+    lack a result row.
+    """
+    declared = set(declared or ())
     for test in tests:
         want_ids = [str(r["id"]) for r in _jsonl(data_path(work, language, test))]
         results = result_path(work, language, model, test)
@@ -366,7 +373,7 @@ def check_terminal(work: Path, language: str, model: str, tests: List[str]) -> N
         duplicate_data = sorted(key for key, count in want_counts.items() if count != 1)
         duplicate_results = sorted(key for key, count in got_counts.items() if count != 1)
         want, got = set(want_counts), set(got_counts)
-        missing = sorted(want - got)
+        missing = sorted(want - got - declared)
         extra = sorted(got - want)
         print(f"TERMINAL-STATE acebench/{test}: n_scored={len(want & got)} n_total={len(want)}")
         problems = []
@@ -375,6 +382,7 @@ def check_terminal(work: Path, language: str, model: str, tests: List[str]) -> N
             ("duplicate result ids", duplicate_results),
             ("missing result ids", missing),
             ("unexpected result ids", extra),
+            ("declared task failures with results", sorted(declared & got)),
         ):
             if values:
                 shown = ",".join(values[:20])
@@ -409,7 +417,10 @@ def failed_task_ids(results: List[Dict[str, Any]], failures: List[Dict[str, Any]
     return failed
 
 
-def collect(work: Path, language: str, model: str, tests: List[str]) -> Dict[str, Any]:
+def collect(work: Path, language: str, model: str, tests: List[str],
+            task_failures: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
+    """Unified rows from the official scorer; declared failures score 0."""
+    task_failures = dict(task_failures or {})
     rows: List[Dict[str, Any]] = []
     per_category: Dict[str, Dict[str, Any]] = {}
     for test in tests:
@@ -422,21 +433,155 @@ def collect(work: Path, language: str, model: str, tests: List[str]) -> Dict[str
             raise SystemExit(f"FATAL: empty score file {score_file}")
         header, failures = score[0], score[1:]
         failed = failed_task_ids(results, failures)
+        test_rows = []
         for rec in results:
             task_id = str(rec["id"])
-            rows.append({
+            test_rows.append({
                 "task_id": task_id,
                 "cluster": cluster_id(test, task_id),
                 "category": test,
                 "semantic_score": 0.0 if task_id in failed else 1.0,
                 "protocol_legal": None,  # tools are prompt text, not a schema
             })
+        declared = [task_id for task_id in task_failures
+                    if task_id.rsplit("_", 1)[0] == test]
+        if declared:
+            test_rows += [{"task_id": task_id, "cluster": cluster_id(test, task_id),
+                           "category": test, "semantic_score": 0.0,
+                           "protocol_legal": None,
+                           "task_failure_kind": task_failures[task_id]}
+                          for task_id in declared]
+            # generate.py's result order (sort_json), now including the failures
+            test_rows.sort(key=lambda row: int(row["task_id"].split("_")[-1]))
+        rows += test_rows
         per_category[test] = {k: header[k] for k in HEADER_KEYS if k in header}
+    if task_failures and (len({row["task_id"] for row in rows}) != len(rows)
+                          or not set(task_failures) <= {row["task_id"] for row in rows}):
+        raise SystemExit("FATAL: ACEBench declared task failures do not match the scored tests")
     summary = aggregate(rows, cluster_key="cluster")
     summary["per_category"] = per_category
     summary["categories"] = list(tests)
     summary["workdir"] = str(work)
+    if task_failures:
+        summary["n_official_scored"] = len(rows) - len(task_failures)
+        summary["n_task_failures"] = len(task_failures)
+        summary["task_failures"] = {
+            code: sorted(task_id for task_id, kind in task_failures.items() if kind == code)
+            for code in sorted(set(task_failures.values()))}
+        summary["per_category_scope"] = (
+            "official eval_main.py over the tasks without a declared task failure")
+        summary["failure_score_policy"] = (
+            "typed text-history budget failures are task-level method zeros; "
+            "every other generator error still fails the run")
     return summary
+
+
+def prepare_scoring_workdir(target: Path, work: Path, language: str, model: str,
+                            tests: List[str], exclude: Set[str]) -> Path:
+    """Private official-scorer cwd holding every requested row except ``exclude``.
+
+    ``eval_main.py`` aligns data, possible answers and results by index, so a
+    task without a result row must leave all three. Rows keep the data order.
+    """
+    target = Path(target)
+    target.mkdir(parents=True, exist_ok=False)
+    answers = target / "data_all" / f"data_{language}" / "possible_answer"
+    answers.mkdir(parents=True)
+    sources = []
+    for test in tests:
+        rows = _jsonl(data_path(work, language, test))
+        answer_rows = _jsonl(data_path(work, language, test).parent / "possible_answer"
+                             / f"data_{test}.json")
+        if [str(row.get("id")) for row in answer_rows] != [str(row["id"]) for row in rows]:
+            raise SystemExit(f"FATAL: ACEBench {test} possible answers are not aligned with data")
+        results = {str(row["id"]): row for row in _jsonl(result_path(work, language, model, test))}
+        kept = [index for index, row in enumerate(rows) if str(row["id"]) not in exclude]
+        if not kept:
+            raise SystemExit(f"FATAL: every ACEBench {test} task is a declared failure")
+        for path, values in ((data_path(target, language, test), [rows[i] for i in kept]),
+                             (answers / f"data_{test}.json", [answer_rows[i] for i in kept]),
+                             (result_path(target, language, model, test),
+                              [results[str(rows[i]["id"])] for i in kept])):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("".join(json.dumps(row, ensure_ascii=False) + "\n"
+                                    for row in values), encoding="utf-8")
+        sources.append({"test": test, "source_rows": len(rows), "scored_rows": len(kept),
+                        "excluded_ids": sorted(str(row["id"]) for row in rows
+                                               if str(row["id"]) in exclude)})
+    (target / "score_selection.json").write_text(json.dumps({
+        "schema_version": 1, "generation_workdir": str(Path(work)), "sources": sources,
+    }, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    return target
+
+
+def _declared_task_failures(out_dir: Path, work: Path, language: str, model: str,
+                            tests: List[str]) -> Dict[str, str]:
+    """Verified receipts, read only when the instrumented generator wrote any."""
+    if not (Path(out_dir) / acebench_task_failures.RECEIPTS).is_file():
+        return {}
+    expected = {str(row["id"]) for test in tests for row in _jsonl(data_path(work, language, test))}
+    produced = {str(row["id"]) for test in tests
+                if result_path(work, language, model, test).exists()
+                for row in _jsonl(result_path(work, language, model, test))}
+    return acebench_task_failures.verified_task_failures(out_dir, expected, produced)
+
+
+def score_generated_run(out_dir: Path, work: Path, harness: Path, *, python: str,
+                        model: str, category: str, language: str, tests: List[str],
+                        env: Dict[str, str], user_model: str,
+                        score_work: Optional[Path] = None) -> Dict[str, Any]:
+    """Post-generation half of run_acebench: terminal check, official scorer, rows.
+
+    The live run and an offline rescore share this function. Verified declared
+    task failures (see ``acebench_task_failures``), or an explicit
+    ``score_work``, move the official scorer to a private cwd; otherwise it runs
+    in the generation workdir exactly as before.
+    """
+    failures = _declared_task_failures(out_dir, work, language, model, tests)
+    if failures:
+        check_terminal(work, language, model, tests, declared=set(failures))
+    else:
+        check_terminal(work, language, model, tests)
+    scoring = work
+    if failures or score_work is not None:
+        scoring = prepare_scoring_workdir(
+            score_work if score_work is not None else Path(out_dir) / "acebench_score",
+            work, language, model, tests, set(failures))
+    prepare_score_dir(scoring, language, model)
+    run_owned(eval_command(python, harness, model, category, language),
+                   cwd=scoring, env=env, check=True)
+    if failures:
+        summary = collect(scoring, language, model, tests, task_failures=failures)
+    else:
+        summary = collect(scoring, language, model, tests)
+    if scoring != work:
+        summary["workdir"] = str(work)
+        summary["score_workdir"] = str(scoring)
+    summary["user_model"] = user_model
+    summary["language"] = language
+    selection = work / "selected_tasks.json"
+    if selection.exists():
+        summary["selection"] = json.loads(selection.read_text(encoding="utf-8"))
+    summary["capability_features"] = list(CAPABILITY_FEATURES)
+    summary["agent_history_protocol"] = "acebench_role_history_v1"
+    summary["harness_telemetry"] = str(
+        Path(out_dir).resolve() / "measurement" / "harness_events.jsonl")
+    return summary
+
+
+def _with_cost_join(summary: Dict[str, Any]) -> Dict[str, Any]:
+    summary["cost_join"] = (COST_JOIN if all(c.startswith("agent_") for c in summary["categories"])
+                            else "not joinable: non-agent split")
+    return summary
+
+
+def _declares_text_budget_failures(arm_name: Optional[str]) -> bool:
+    """Only text-history budget arms can return the exact typed budget codes."""
+    if arm_name is None:
+        return False
+    from arms import get_arm
+
+    return get_arm(arm_name).text_history_budget_tokens is not None
 
 
 def run(ctx: RunContext) -> Dict[str, Any]:
@@ -457,10 +602,46 @@ def run(ctx: RunContext) -> Dict[str, Any]:
         task_ids=ctx.opt("acebench_task_ids", ""), max_tasks=ctx.opt("max_tasks"),
         record_prefixes=ctx.opt("record_prefixes", ""),
         python=ctx.opt("bench_python"),
+        declare_text_budget_failures=_declares_text_budget_failures(getattr(ctx, "arm", None)),
     )
-    summary["cost_join"] = (COST_JOIN if all(c.startswith("agent_") for c in summary["categories"])
-                            else "not joinable: non-agent split")
-    return summary
+    return _with_cost_join(summary)
+
+
+RESCORE_INPUTS = ("acebench_work/selected_tasks.json", "acebench_work/data_all/**/*.json",
+                  "acebench_work/result_all/**/*.json", "measurement/harness_events.jsonl",
+                  acebench_task_failures.RECEIPTS.as_posix(), "logs/proxy_*.jsonl")
+RESCORE_PROCEDURE = ("acebench_adapter.score_generated_run on the saved generation workdir; "
+                     "official eval_main.py in a private scoring workdir")
+
+
+def rescore(ctx: RunContext, workspace: Path) -> Dict[str, Any]:
+    """Offline rescore: run()'s post-generation half on the saved workdir.
+
+    The official scorer runs in ``workspace``; the cell's own generation
+    workdir is only read. Tool-context and Full-recording cells used a
+    private patched harness and are not supported.
+    """
+    if ctx.opt("tool_memory") or ctx.opt("record_prefixes"):
+        raise ValueError("ACEBench rescore supports raw-tool, non-recording cells only")
+    acebench_dir = Path(ctx.opt("acebench_dir") or ACEBENCH_DIR)
+    category = ctx.opt("acebench_category", DEFAULT_CATEGORY)
+    language = ctx.opt("acebench_language", DEFAULT_LANGUAGE)
+    python = ctx.opt("bench_python") or sys.executable
+    work = Path(ctx.out_dir) / "acebench_work"
+    tests, harness = expand_categories(category, load_category_map(acebench_dir)), acebench_dir
+    if (work / "selected_tasks.json").exists():
+        selection = json.loads((work / "selected_tasks.json").read_text(encoding="utf-8"))
+        tests = [str(source["test"]) for source in selection["sources"]]
+        harness = work / "acebench_harness"
+    if not (Path(harness) / "eval_main.py").is_file():
+        raise FileNotFoundError(f"ACEBench scorer is missing: {Path(harness) / 'eval_main.py'}")
+    env = harness_env(ctx.base_url, ctx.user_base_url, ctx.model)
+    summary = score_generated_run(
+        Path(ctx.out_dir), work, harness, python=python, model=ctx.model, category=category,
+        language=language, tests=tests, env=env,
+        user_model=ctx.opt("user_model") or ctx.model,
+        score_work=Path(workspace) / "acebench_score")
+    return _with_cost_join(summary)
 
 
 def run_acebench(base_url: str, user_base_url: str, out_dir: Path,
@@ -472,7 +653,8 @@ def run_acebench(base_url: str, user_base_url: str, out_dir: Path,
                  max_tokens: int = 1200, task_ids: str = "",
                  max_tasks: Optional[int] = None,
                  record_prefixes: str = "",
-                 python: Optional[str] = None) -> Dict[str, Any]:
+                 python: Optional[str] = None,
+                 declare_text_budget_failures: bool = False) -> Dict[str, Any]:
     acebench_dir = Path(acebench_dir) if acebench_dir else ACEBENCH_DIR
     python = python or sys.executable
     tests = expand_categories(category, load_category_map(acebench_dir))
@@ -491,6 +673,9 @@ def run_acebench(base_url: str, user_base_url: str, out_dir: Path,
                       record_source=bool(record_prefixes))
     telemetry_path = Path(out_dir).resolve() / "measurement" / "harness_events.jsonl"
     env["C2KV_ACEBENCH_TELEMETRY"] = str(telemetry_path)
+    if declare_text_budget_failures:
+        env[acebench_task_failures.ENV] = str(
+            Path(out_dir).resolve() / acebench_task_failures.RECEIPTS)
     command = generate_command(python, harness, model, category, language, num_threads,
                                max_dialog_turns, user_model or model, temperature, top_p,
                                max_tokens)
@@ -500,20 +685,9 @@ def run_acebench(base_url: str, user_base_url: str, out_dir: Path,
     run_owned(
         command,
         cwd=work, env=env, check=True)
-    check_terminal(work, language, model, effective_tests)
-    prepare_score_dir(work, language, model)
-    run_owned(eval_command(python, harness, model, category, language),
-                   cwd=work, env=env, check=True)
-    summary = collect(work, language, model, effective_tests)
-    summary["user_model"] = user_model or model
-    summary["language"] = language
-    selection = work / "selected_tasks.json"
-    if selection.exists():
-        summary["selection"] = json.loads(selection.read_text(encoding="utf-8"))
-    summary["capability_features"] = list(CAPABILITY_FEATURES)
-    summary["agent_history_protocol"] = "acebench_role_history_v1"
-    summary["harness_telemetry"] = str(telemetry_path)
-    return summary
+    return score_generated_run(
+        Path(out_dir), work, harness, python=python, model=model, category=category,
+        language=language, tests=effective_tests, env=env, user_model=user_model or model)
 
 
 if __name__ == "__main__":

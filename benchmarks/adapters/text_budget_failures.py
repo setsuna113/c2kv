@@ -51,3 +51,16 @@ def typed_text_budget_failure_code(value: Any) -> str | None:
         return None
     match = _TYPED_CODE.search(value)
     return match.group(1) if match else None
+
+
+def client_text_budget_failure_code(error: Any) -> str | None:
+    """Return the exact code of an OpenAI-client HTTP 422 budget error.
+
+    Only ``UnprocessableEntityError`` with status 422 and a structured body is
+    accepted; the exception message alone never establishes the code.
+    """
+    if (type(error).__name__ != "UnprocessableEntityError"
+            or getattr(error, "status_code", None) != 422):
+        return None
+    body = getattr(error, "body", None)
+    return typed_text_budget_failure_code(body) if isinstance(body, Mapping) else None

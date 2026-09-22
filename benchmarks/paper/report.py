@@ -26,6 +26,7 @@ def nested(value, *keys):
 
 def write_comparison(output: Path, plan):
     rows = []
+    rescored = set()
     for stage in ("closed_loop", "common_prefix"):
         for cell in plan:
             directory = output / stage / cell["cell_id"]
@@ -117,6 +118,8 @@ def write_comparison(output: Path, plan):
                     and row["resident_kv_peak_c2kv_cache_accounting_available"] is not True):
                 row["cached_evictable_kv_at_resident_peak_bytes"] = None
                 row["cached_evictable_kv_peak_bytes"] = None
+            if (directory / "rescore.json").is_file():
+                rescored.add((stage, cell["cell_id"]))
             rows.append(row)
     full = {(r["stage"], r["benchmark"]): r for r in rows if r["arm"] == "full"}
     for row in rows:
@@ -131,6 +134,11 @@ def write_comparison(output: Path, plan):
             row[metric + "_saving_vs_full_pct"] = (
                 100 * (1 - actual / reference)
                 if actual is not None and reference is not None and reference > 0 else None)
+    if rescored:
+        # Only a table that contains an offline rescore carries the column.
+        for row in rows:
+            row["score_provenance"] = ("offline_rescore" if (row["stage"], row["cell_id"]) in rescored
+                                       else "live_run")
     (output / "comparison.json").write_text(json.dumps(rows, indent=2) + "\n")
     if not rows:
         # Do not leave a stale CSV after an audit excludes the last row.

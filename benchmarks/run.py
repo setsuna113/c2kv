@@ -388,6 +388,20 @@ def main(argv=None):
         else:
             os.environ["C2KV_TOOL_CONTEXT_ON"] = previous_tool_context
         _stop_process(proxy_proc)
+    finalize_summary(summary, args, profile, preflight.as_dict(), request_log)
+    (args.out / f"summary_{args.arm}.json").write_text(
+        json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
+    print(json.dumps(summary, indent=2, ensure_ascii=False))
+
+
+def finalize_summary(summary: dict, args: argparse.Namespace, profile: dict,
+                     preflight: dict, request_log: Path) -> dict:
+    """run.py's summary envelope around an adapter summary.
+
+    Shared by the live run and an offline rescore (benchmarks/paper/rescore.py),
+    which supplies the cell's resolved profile and preflight receipts.
+    """
     summary["arm"] = args.arm
     summary["benchmark"] = args.benchmark
     summary["backend"] = args.backend
@@ -395,7 +409,7 @@ def main(argv=None):
         summary["history_budget_tokens"] = args.history_kv_target_tokens
     summary["model"] = args.model
     summary["checkpoint_profile"] = profile
-    summary["preflight"] = preflight.as_dict()
+    summary["preflight"] = preflight
     if get_arm(args.arm).text_policy:
         # text-arm consumers: degeneration and compressor cost surfaced at
         # the RUN level (the per-request stats live in the request log)
@@ -471,10 +485,7 @@ def main(argv=None):
         summary["reference"] = args.reference
     if args.record_reference:
         summary["record_reference"] = args.record_reference
-    (args.out / f"summary_{args.arm}.json").write_text(
-        json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8"
-    )
-    print(json.dumps(summary, indent=2, ensure_ascii=False))
+    return summary
 
 
 @unwind_on_termination

@@ -429,7 +429,23 @@ def run_tau2(base_url: str, user_base_url: str, out_dir: Path, *,
         json.dumps(protocol, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     env = harness_env(tau2_dir, out_dir, native=native)
     run_owned(command, cwd=tau2_dir, env=env, check=True)
-    official = out_dir / "official"
+    return score_simulations(out_dir, sims, out_dir / "official", protocol,
+                             native_server_dir=native_server_dir)
+
+
+def score_simulations(out_dir: Path, sims: Path, official: Path,
+                      protocol: Dict[str, Any], *,
+                      native_server_dir: Optional[Path] = None) -> Dict[str, Any]:
+    """Post-simulation half of run_tau2: validate, re-evaluate, collect.
+
+    ``protocol`` is the run's ``tau2_protocol.json``. The live run and an
+    offline rescore share this function; a rescore passes a private copy of
+    the saved official simulations as ``sims`` and a private ``official``.
+    ``out_dir`` supplies the run's harness events and proxy logs (read only).
+    """
+    selected, trials = protocol["task_ids"], protocol["num_trials"]
+    tau2_dir, python = Path(protocol["source"]), protocol["python"]
+    task_set, record_prefixes = protocol["suite"], protocol["record_prefixes"]
     official.mkdir(parents=True, exist_ok=True)
     if (sims / "results.json").is_file():
         shutil.copy2(sims / "results.json", official / "results.json")
@@ -469,6 +485,32 @@ def run_tau2(base_url: str, user_base_url: str, out_dir: Path, *,
 
 COST_JOIN = ("joinable: tau2 instrumentation adds the official task ID to "
              "agent-only proxy requests and emits per-task harness events")
+RESCORE_INPUTS = ("tau2_protocol.json", "official/results.json",
+                  "measurement/harness_events.jsonl", "logs/proxy_*.jsonl")
+RESCORE_PROCEDURE = ("tau2_adapter.score_simulations on a private copy of official/results.json, "
+                     "including the official tau2.cli evaluate-trajs re-evaluation")
+
+
+def rescore(ctx: RunContext, workspace: Path) -> Dict[str, Any]:
+    """Offline rescore: run()'s post-simulation half on the saved trajectories.
+
+    The run's own simulation directory is not reused; when it still exists
+    it must hold byte-identical results.
+    """
+    out_dir = Path(ctx.out_dir).resolve()
+    protocol = json.loads((out_dir / "tau2_protocol.json").read_text(encoding="utf-8"))
+    if protocol.get("native"):
+        raise ValueError("tau2 rescore supports proxy (non-native) cells only")
+    saved = out_dir / "official" / "results.json"
+    command = protocol["command"]
+    original = (Path(protocol["source"]) / "data" / "simulations"
+                / command[command.index("--save-to") + 1] / "results.json")
+    if original.is_file() and original.read_bytes() != saved.read_bytes():
+        raise ValueError(f"official/results.json differs from the run's simulations: {original}")
+    sims = Path(workspace) / "sims"
+    sims.mkdir(parents=True, exist_ok=False)
+    shutil.copy2(saved, sims / "results.json")
+    return score_simulations(out_dir, sims, Path(workspace) / "official", protocol)
 
 
 def collect(results_path: Path, domain: str = "airline",

@@ -1060,6 +1060,9 @@ def aggregate_results(config, plan, output, stages, selected):
                 "missing_artifacts": absent,
                 "measurement_summary": str(directory / "measurement_summary.json"),
             }
+            if (directory / "rescore.json").is_file():
+                entry["score_provenance"] = "offline_rescore"
+                entry["rescore_receipt"] = str(directory / "rescore.json")
             entries.append(entry)
             if absent:
                 missing.append({"stage": stage, "cell_id": cell["cell_id"],
@@ -1124,7 +1127,7 @@ def aggregate_results(config, plan, output, stages, selected):
 @unwind_on_termination
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=["prepare", "run", "aggregate"])
+    parser.add_argument("action", choices=["prepare", "run", "aggregate", "rescore"])
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     parser.add_argument("--sglang-source", type=Path, default=ROOT.parent.parent / "sglang-paper")
     parser.add_argument("--output", type=Path)
@@ -1170,15 +1173,18 @@ def main(argv=None):
                         help="freeze an explicit positive deadline in seconds for persistent history-KV cells; use a new output root")
     args = parser.parse_args(argv)
     config = json.loads(args.config.read_text())
+    if args.action == "rescore" and (not set(filter(None, args.cells.split(",")))
+                                     or args.stage == "common_prefix"):
+        parser.error("rescore scores explicit closed-loop --cells of an existing output root")
     if args.generation_timeout is not None:
-        if args.action == "aggregate":
-            parser.error("aggregate reads the frozen generation timeout")
+        if args.action in {"aggregate", "rescore"}:
+            parser.error(f"{args.action} reads the frozen generation timeout")
         if not 0 < args.generation_timeout < float("inf"):
             parser.error("generation-timeout must be finite and positive")
         config["generation_timeout"] = args.generation_timeout
-    if args.action == "aggregate" and (args.task_subset or args.task_subset_file):
-        parser.error("aggregate reads the frozen task scope; task-subset options are for prepare/run")
-    if args.action != "aggregate":
+    if args.action in {"aggregate", "rescore"} and (args.task_subset or args.task_subset_file):
+        parser.error(f"{args.action} reads the frozen task scope; task-subset options are for prepare/run")
+    if args.action not in {"aggregate", "rescore"}:
         config = with_native_ratios(config, args.native_ratio)
         config = with_candidate_methods(
             config, parse_candidate_arms(args.candidate_arms),
@@ -1198,7 +1204,7 @@ def main(argv=None):
             parser.error("Task subsets require --stage closed_loop")
     output = args.output or Path(config["output_root"])
     source = args.sglang_source.resolve()
-    if args.action == "aggregate":
+    if args.action in {"aggregate", "rescore"}:
         config = json.loads((output / "config.resolved.json").read_text())
         plan = json.loads((output / "commands.json").read_text())
     else:
@@ -1210,6 +1216,12 @@ def main(argv=None):
         stages = ["closed_loop", "common_prefix"] if args.stage == "all" else [args.stage]
         execute(config, plan, output, source, stages, set(filter(None, args.cells.split(","))),
                 port_offset=args.port_offset)
+    elif args.action == "rescore":
+        from .rescore import rescore_cells
+        receipts = rescore_cells(plan, output, set(filter(None, args.cells.split(","))))
+        print(json.dumps([{key: receipt[key] for key in
+                           ("cell_id", "semantic_score", "n", "task_failure_counts", "result_scope")}
+                          for receipt in receipts], indent=2))
     else:
         stages = ["closed_loop", "common_prefix"] if args.stage == "all" else [args.stage]
         selected = set(filter(None, args.cells.split(",")))

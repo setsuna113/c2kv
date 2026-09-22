@@ -11,6 +11,13 @@ import threading
 import time
 import uuid
 
+if __package__:
+    from .adapters import acebench_task_failures as task_failures
+    from .adapters.text_budget_failures import client_text_budget_failure_code
+else:
+    from adapters import acebench_task_failures as task_failures
+    from adapters.text_budget_failures import client_text_budget_failure_code
+
 ACE_SOURCE_VERSION = "acebench-text-actions-v1"
 ACE_RECEIPT_VERSION = "acebench-execution-receipt-v1"
 
@@ -28,6 +35,14 @@ def record_source_mode():
 
 def receipt_mode():
     return native_mode() or record_source_mode()
+
+
+def declared_failure_mode():
+    return bool(os.environ.get(task_failures.ENV))
+
+
+# Returned by the inference of a declared task failure; its result is not written.
+DECLARED_TASK_FAILURE = object()
 
 
 def inference_wrapper(fn):
@@ -83,6 +98,7 @@ def task_wrapper(fn):
         finally:
             emit("episode_end", status=status, start_unix_ns=start_unix,
                  end_unix_ns=time.time_ns(), duration_ns=time.perf_counter_ns()-started)
+            _local.last_episode = {"task": task, "session": _local.session, "status": status}
             _local.task = _local.session = _local.request = None
             _local.source_official_task = None
             _local.receipts = _local.decision_keys = None
@@ -187,6 +203,45 @@ def execution_wrapper(fn):
     return wrapped
 
 
+def declared_failure_wrapper(fn):
+    """End one agent task on an exact typed text-budget 422 without ending the run.
+
+    The task's episode has already ended as failed; its official ID and
+    session go to one receipt, and generate.py writes no result row for it.
+    Every other exception propagates unchanged.
+    """
+    signature = inspect.signature(fn)
+
+    @functools.wraps(fn)
+    def wrapped(*args, **kwargs):
+        _local.last_episode = None
+        try:
+            return fn(*args, **kwargs)
+        except Exception as error:
+            code = client_text_budget_failure_code(error)
+            episode = getattr(_local, "last_episode", None)
+            if code is None or not episode or episode["status"] != "failed":
+                raise
+            row = task_failures.receipt(
+                signature.bind(*args, **kwargs).arguments["id"], code, error, episode)
+            path = Path(os.environ[task_failures.ENV])
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with _lock, path.open("a", encoding="utf-8") as stream:
+                stream.write(json.dumps(row, ensure_ascii=False) + "\n")
+            return DECLARED_TASK_FAILURE, DECLARED_TASK_FAILURE
+    return wrapped
+
+
+def result_writer_wrapper(fn):
+    """Write no official result row for a declared task failure."""
+    @functools.wraps(fn)
+    def wrapped(self, result, *args, **kwargs):
+        if isinstance(result, dict) and result.get("result") is DECLARED_TASK_FAILURE:
+            return None
+        return fn(self, result, *args, **kwargs)
+    return wrapped
+
+
 def request_wrapper(fn):
     @functools.wraps(fn)
     def wrapped(resource, *args, **kwargs):
@@ -260,6 +315,11 @@ def main():
         setattr(module.APIModelInference, name, task_wrapper(getattr(module.APIModelInference, name)))
     for cls in (module.EXECUTION, module.EXECUTION_STEP):
         cls.respond = execution_wrapper(cls.respond)
+    if declared_failure_mode():
+        module.APIModelInference.inference = declared_failure_wrapper(
+            module.APIModelInference.inference)
+        module.APIModelInference.write_result = result_writer_wrapper(
+            module.APIModelInference.write_result)
     Completions.create = request_wrapper(Completions.create)
     sys.argv = [str(harness / "generate.py"), *sys.argv[2:]]
     runpy.run_path(str(harness / "generate.py"), run_name="__main__")

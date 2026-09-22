@@ -1,0 +1,64 @@
+{
+  "schema": "c2kv-offline-rescore-action-v1",
+  "created_at": "2026-09-22T18:20:00Z",
+  "paper_base_commit": "c086197",
+  "interface": {
+    "action": "python -m benchmarks.paper.runner rescore --output ROOT --cells CELL[,CELL...]",
+    "module": "benchmarks/paper/rescore.py",
+    "shared_post_run_functions": {
+      "tau2": "adapters/tau2_adapter.score_simulations (run_tau2 calls it after the official run)",
+      "toolsandbox": "adapters/toolsandbox_adapter.score_cli_run (run_ts calls it after the CLI)",
+      "acebench": "adapters/acebench_adapter.score_generated_run (run_acebench calls it after generate.py)",
+      "envelope": "run.finalize_summary (run.main calls it before writing summary_<arm>.json)"
+    },
+    "outputs": ["<cell>/rescore/ scratch workspace", "summary_<arm>.json with a rescore provenance block",
+                "rescore.json receipt", "complete.json (score_provenance offline_rescore), written last"],
+    "refusals": ["complete, audit-excluded, infra_failure.json, existing summary/receipt/workspace",
+                 "subset, native or non-run.py cells; adapters without an offline scorer",
+                 "started.json cell differs from commands.json",
+                 "more than the run's own request log for the arm",
+                 "tau2 official/results.json differs from the run's retained simulations",
+                 "any hashed input changes while scoring (nothing is published)"],
+    "aggregate": "coverage entries of rescored cells gain score_provenance and rescore_receipt; comparison.csv gains a score_provenance column only when a rescored cell is present"
+  },
+  "validation": [
+    {"path": "rescore_checks.xml", "tests": 529, "failures": 0, "errors": 0, "skipped": 8,
+     "sha256": "f736deca002c08a0da02e7191aec2d85507460656a35b4f5fee6dacfebc2253b",
+     "covers": "new benchmarks/paper/test_rescore.py (13) plus benchmarks/paper, tau2, ToolSandbox and run.py dispatch suites"},
+    {"path": "benchmarks_full_suite.xml", "tests": 1199, "failures": 4, "errors": 0, "skipped": 23,
+     "sha256": "977595fe21bc8d3da82d50613ab1df7424b9c3eb13d30074f5da93bf4d936bb1",
+     "known_failures_also_at_c086197": [
+       "benchmarks/test_acon_budget_proxy.py::test_budget_matrix_uses_renderer_and_original_cache_policy",
+       "benchmarks/test_native_fc_bridge.py::test_chat_lock_covers_forwarding",
+       "benchmarks/test_repair_stack.py::TestTerminalCheck::test_bfcl_counts_result_rows",
+       "benchmarks/test_tool_source_recording.py::test_appworld_recording_observes_executed_docs_and_marks_empty"],
+     "excluded": "untracked benchmarks/test_proxy_request_serialization.py (not part of this change)"},
+    {"path": "live_path_differential", "procedure": "identical stubbed fixtures under a clean c086197 export and this revision; all written files and returned summaries compared after replacing the code and fixture roots",
+     "cases": {"tau2 run_tau2 with a declared budget failure": "identical", "toolsandbox run with a declared budget failure": "identical",
+               "acebench budget arm without refusal": "identical", "run.py main text-arm envelope": "identical",
+               "NPU toolsandbox_harness run_ts call": "identical", "NPU tau2 native run_tau2 call": "identical"}}
+  ],
+  "real_cell_check": {
+    "cell": "toolsandbox__acon_hist_ut_co_b128",
+    "source": "box4 /workspace/rescore/m2-results-bgts/closed_loop/toolsandbox__acon_hist_ut_co_b128 copied read-only without proxy_telemetry.jsonl/server.log; commands.json rebuilt from its started.json cell",
+    "inputs_sha256": {
+      "agent_c2kv-agent_user_c2kv-agent_09_22_2026_07_29_16/result_summary.json": "5b8b03e9450c5c5439c43e3d30036e1692f8836691b95f03a442d12c6427170b",
+      "logs/proxy_acon_hist_ut_co_b128_43720.jsonl": "ed2a2f6d49e0df74d3bae4dd11c6c318ceeba8fd24bc9c14ae9886bec588aa22",
+      "measurement/harness_events.jsonl": "7f03fe1c4ad80b9fd03eab78cf96f498c9944ddf1576527bf308463c07373949",
+      "measurement/rapidapi_http_status.jsonl": "b3d92ad8f13c45066a0f8fd4d6c890b3d300df54732f01b4762e810ddf80b37e",
+      "scenario_manifest.json": "0bdee3e632b25e79b70cea5b72ea20c757b2373a369ce32b2f72ab6f036f3246"
+    },
+    "result": {"semantic_score": 0.4229161997372136, "n": 129,
+               "task_failure_counts": {"acon_history_budget_exceeded": 41, "hiagent_invalid_retrieval": 0}},
+    "comparison": {
+      "text_budget_cap_reclassification_20260922.json": "same score and counts; input hashes equal",
+      "patrol rescore_c0861978": "semantic_score 0.42291619973721345 differs only in the last float digits (other interpreter); its summary has doc_packing/max_doc_length/max_doc_num null, while live summaries and this action record the resolved profile values (turn, 1000, 1000)"
+    },
+    "result_scope": "preliminary, n=1; offline rescore of an existing run"
+  },
+  "promotion_notes": {
+    "tau2": "run the action in /workspace/results-bgt2 on box4 for tau2__hiagent_full_b192,b256,b384; each cell keeps its HOLD file",
+    "toolsandbox": "the box4 copy has no config.resolved.json, commands.json or server_telemetry.jsonl, so aggregate cannot accept it there; rescore it in the complete m2 root /workspace/results-bgts (or a restored copy of that root)",
+    "scratch_summaries": "do not copy rescore_c0861978/summary_*.json into place; their run.py envelope differs from a live summary"
+  }
+}

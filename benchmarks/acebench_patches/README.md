@@ -39,6 +39,10 @@ official `functions` argument to the proxy only when
 the source annotation helper. OFF requests retain their original messages and
 OpenAI call arguments; the official executor and scorer are unchanged.
 
+Declared text-budget task failures (`C2KV_ACEBENCH_TASK_FAILURES`, see
+`benchmarks/README.md`) need no upstream patch: `acebench_cli.py` wraps the
+official `APIModelInference.inference` and `write_result` at run time.
+
 The adapter enables `ACEBENCH_ROLE_HISTORY_V1=1` and advertises capability
 `acebench_role_history_v1`; matrix preflight rejects non-full ACEBench arms
 without that marker. The user simulator remains on its independent raw

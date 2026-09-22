@@ -626,6 +626,25 @@ python -m benchmarks.paper.runner prepare \
 Starting a run is a separate scheduling action. No held results are converted,
 refilled, or overwritten by preparation.
 
+## ACEBench typed text-budget task failures
+
+Upstream `generate.py` re-raises every task exception, so one ACON/HiAgent
+budget refusal (HTTP 422 with an exact `error.code` from
+`adapters/text_budget_failures.py`) used to end the whole ACEBench run. The
+adapter now gives only text-history budget arms the same task-level contract
+as tau2 and ToolSandbox, without an upstream patch: it sets
+`C2KV_ACEBENCH_TASK_FAILURES`, and `acebench_cli.py` lets exactly such an agent
+task end without a result row while the generator continues. The receipt in
+`measurement/acebench_task_failures.jsonl` is accepted only when that task has
+no result, its episode ended as failed, and the proxy's last row for the same
+measurement session carries the same code (`adapters/acebench_task_failures.py`).
+The task then scores 0 in `semantic_score`; the official `eval_main.py` scores
+the remaining tasks in a private `acebench_score/` workdir, so `per_category`
+is over those tasks (`per_category_scope`, `n_official_scored`,
+`task_failures`). Any other exception, and a receipt without matching evidence,
+still fails the run. Other arms keep the generator environment unchanged, and
+budget runs without a refusal keep the scorer workdir, artifacts and summary.
+
 ## Relation to experiment D
 
 The teacher-forced D harness (`agent/d_kv_intervene.py`,

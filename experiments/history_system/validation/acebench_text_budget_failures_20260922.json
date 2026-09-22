@@ -1,0 +1,52 @@
+{
+  "schema": "c2kv-acebench-text-budget-failures-v1",
+  "created_at": "2026-09-22T18:15:00Z",
+  "paper_base_commit": "c086197",
+  "hold": {
+    "host": "m2 (stopped; not mirrored to the bucket)",
+    "cell": "/workspace/results-bgae/closed_loop/acebench_agent__acon_hist_ut_co_b128",
+    "evidence": "HOLD_acon_cap_aborts_generator.txt (not readable from this session)"
+  },
+  "diagnosis": "ACEBench@56dd66c generate.py re-raises any task exception from future.result(); an ACON 422 (error.code acon_history_budget_exceeded) from the arm proxy therefore ends the official generator with a nonzero exit, skips its result sort, and run_owned(check=True) fails the cell.",
+  "repair": {
+    "upstream_patch": "none; 0001/0002 unchanged and no 0003 is needed",
+    "contract_module": "benchmarks/adapters/acebench_task_failures.py",
+    "generator_hook": "benchmarks/acebench_cli.py declared_failure_wrapper/result_writer_wrapper, installed only when C2KV_ACEBENCH_TASK_FAILURES is set",
+    "opt_in": "acebench_adapter.run sets the variable only for arms with text_history_budget_tokens (ACON/HiAgent budget arms)",
+    "accepted_errors": "openai UnprocessableEntityError, status 422, structured body code in TEXT_HISTORY_BUDGET_FAILURE_CODES, raised inside an agent episode that ended as failed",
+    "verification": "the receipt names a requested task without a result row, exactly one failed episode for its session, and the proxy's last row for that measurement session carries the same code; otherwise the run fails",
+    "scoring": "declared tasks score 0 in semantic_score; official eval_main.py scores the remaining tasks in <cell>/acebench_score (per_category_scope, n_official_scored, task_failures)",
+    "unchanged": "every other exception; generator environment of every other arm; scorer cwd, artifacts and summary of any run without a receipt"
+  },
+  "validation": [
+    {"path": "acebench_task_failure_checks.xml", "tests": 104, "failures": 0, "errors": 0, "skipped": 0,
+     "sha256": "c45649e1a44ecb2095f36fde1e63c5704e4a2eb216cedaeffecfbe69317cdc3e",
+     "covers": "new benchmarks/test_acebench_task_failures.py (16) including an upstream-control-flow generator subprocess with and without the opt-in, plus existing ACEBench, tool-source recording, ToolSandbox and tau2 failure tests"},
+    {"path": "live_path_differential", "procedure": "same stubbed fixture run under a clean c086197 export and this revision; outputs compared after replacing the code and fixture roots",
+     "cases": {"acebench budget arm without refusal": "identical", "tau2 run_tau2": "identical", "toolsandbox run": "identical", "run.py main envelope": "identical",
+               "NPU toolsandbox_harness run_ts call": "identical", "NPU tau2 native run_tau2 call": "identical"}}
+  ],
+  "hiagent_budget_binding": {
+    "question": "do the ACEBench HiAgent b192/b256/b384 budgets bind, given identical 0.100 scores?",
+    "sources": [
+      {"path": "m2/results-bgae/closed_loop/acebench_agent__hiagent_full_b192/summary_hiagent_full_b192.json", "sha256": "e3f9093637f5f50d62292faae44bc39fbedd244af054af5f1762509923865721"},
+      {"path": "m2/results-bgae/closed_loop/acebench_agent__hiagent_full_b192/logs/proxy_hiagent_full_b192_44530.jsonl", "sha256": "f1724e4ad5f5249f0411125877ac172a3dba99d1526b1ffae099641dd196f994"},
+      {"path": "m2/results-bgae/closed_loop/acebench_agent__hiagent_full_b256/summary_hiagent_full_b256.json", "sha256": "22988c7cc3faab4838a6c02fecebe72865497e2e93e90dd253a7cd0a1af2ca31"},
+      {"path": "m2/results-bgae/closed_loop/acebench_agent__hiagent_full_b256/logs/proxy_hiagent_full_b256_44530.jsonl", "sha256": "07a5809f6ad353b0d89c613dea41cea006472f9e78972b291e8274072cf90de2"},
+      {"path": "m2/results-bgae/closed_loop/acebench_agent__hiagent_full_b384/summary_hiagent_full_b384.json", "sha256": "a5e21506a99ec54ce3ed789a19701a561673d86208d7b076d64a03e4023a27e0"},
+      {"path": "m2/results-bgae/closed_loop/acebench_agent__hiagent_full_b384/logs/proxy_hiagent_full_b384_44530.jsonl", "sha256": "f1497b28d7964bae6a68232a065df7f2658a69a6f8c0c16b365c8b1eefa63498"}
+    ],
+    "bucket": "hf://buckets/Jasonning/c2kv-paper-202609",
+    "per_budget": {
+      "b192": {"semantic_score": 0.1, "requests": 634, "history_before_above_cap": 486, "requests_with_fifo_eviction": 488, "evicted_records": 6943, "final_history_tokens_max": 172, "subgoal_summaries": 122, "compressor_calls": 211,
+               "agent_multi_step": {"correct": 4, "total": 20, "process_accuracy": 0.266}, "agent_multi_turn": {"correct": 1, "total": 30, "process_accuracy": 0.113}},
+      "b256": {"semantic_score": 0.1, "requests": 603, "history_before_above_cap": 419, "requests_with_fifo_eviction": 411, "evicted_records": 5686, "final_history_tokens_max": 236, "subgoal_summaries": 108, "compressor_calls": 142,
+               "agent_multi_step": {"correct": 4, "total": 20, "process_accuracy": 0.293}, "agent_multi_turn": {"correct": 1, "total": 30, "process_accuracy": 0.145}},
+      "b384": {"semantic_score": 0.1, "requests": 577, "history_before_above_cap": 320, "requests_with_fifo_eviction": 287, "evicted_records": 3596, "final_history_tokens_max": 364, "subgoal_summaries": 131, "compressor_calls": 114,
+               "agent_multi_step": {"correct": 4, "total": 20, "process_accuracy": 0.287}, "agent_multi_turn": {"correct": 1, "total": 30, "process_accuracy": 0.104}}
+    },
+    "correct_task_ids_all_budgets": ["agent_multi_step_0", "agent_multi_step_1", "agent_multi_step_2", "agent_multi_step_3", "agent_multi_turn_7"],
+    "finding": "The budget binds on most requests and the three runs differ in request count, evictions and process accuracy, so they are not one run plus noise. End-to-end correctness is the same five task IDs at every budget; on these 50 tasks the end-to-end metric does not separate b192-b384.",
+    "result_scope": "preliminary, n=1 per budget"
+  }
+}
