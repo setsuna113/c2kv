@@ -24,6 +24,7 @@ from .event_native_always import NATIVE_ALWAYS_ROUTE_MODES
 from .event_native_eval_policy import load_eval_policy, resolve_event_native_eval_policy
 from .event_native_eval_packing import resolve_eval_packing
 from .event_native_step import EventNativeDecisionRunner
+from .tokenization import DEFAULT_TOOL_SCHEMA, TOOL_SCHEMA_MODES
 from .event_native_costs import read_event_native_steps, summarize_event_native_steps
 
 
@@ -100,6 +101,10 @@ def parser():
                         help='Bare SGLang engine base URL, for example http://127.0.0.1:36100.')
     result.add_argument('--sglang-timeout-seconds', type=positive_seconds, default=10800.0,
                         help='Per-request timeout for the external SGLang engine.')
+    result.add_argument('--tool-schema', choices=TOOL_SCHEMA_MODES, default=DEFAULT_TOOL_SCHEMA,
+                        help='Tool prologue rendered for history-only routes: sglang-full '
+                             '(release default, matches the Full SGLang actor) or raw '
+                             '(client tool JSON unchanged, the pre-2026-09-21 native prologue).')
     result.add_argument('--max-wall-seconds', type=positive_seconds, required=True)
     result.add_argument('--device', default='cpu')
     result.add_argument('--no-raw-snapshot', action='store_true',
@@ -412,6 +417,7 @@ def _serve(args):
         'max_decisions': args.max_decisions, 'max_generation_calls': args.max_generation_calls,
         'max_wall_seconds': args.max_wall_seconds, 'device': args.device, 'dtype': args.dtype,
         'generation_backend': generation_backend,
+        'tool_schema': args.tool_schema,
         'sglang_backend_url': (
             args.sglang_backend_url if generation_backend == 'sglang' else None
         ),
@@ -541,6 +547,7 @@ def _serve(args):
             allowed_task_ids=task_ids, max_decisions=args.max_decisions,
             deadline_monotonic=deadline, steps_path=args.out / 'steps.jsonl',
             runtime_policy_contract=runtime_policy,
+            tool_schema=args.tool_schema,
             **({'compression_policy': compression_policy,
                 'history_view_protocol': history_view_protocol}
                if source_profile in ('native-v1', 'openai-single-task-v1')
@@ -648,6 +655,8 @@ def _child_command(args):
         command.extend(['--s0-config', str(args.s0_config.resolve())])
     if getattr(args, 'shadow_feature_config', None) is not None:
         command.extend(['--shadow-feature-config', str(args.shadow_feature_config.resolve())])
+    if getattr(args, 'tool_schema', DEFAULT_TOOL_SCHEMA) != DEFAULT_TOOL_SCHEMA:
+        command.extend(['--tool-schema', args.tool_schema])
     if getattr(args, 'generation_backend', 'native') == 'sglang':
         command.extend([
             '--sglang-backend-url', args.sglang_backend_url,

@@ -394,6 +394,10 @@ def server_command(cell: dict, task_ids: list[str], out: Path, port: int,
         "--sglang-timeout-seconds", str(caps["task_timeout"]),
         "--no-raw-snapshot",
     ]
+    if cell.get("tool_schema"):
+        # Explicit native tool-prologue schema; the server default (sglang-full)
+        # keeps every existing cell command byte-identical.
+        command.extend(["--tool-schema", str(cell["tool_schema"])])
     if (cell["condition"] == "tracer_history"
             or cell.get("candidate_algorithm") in (
                 GOAL_VARIANTS + VERIFIED_VARIANTS + STATIC_VARIANTS

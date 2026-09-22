@@ -19,7 +19,7 @@ from .event_native import EventStore
 from .always_compress import CapacityInfeasible
 from .event_native_controls import describe_event_native_route
 from .event_native_step import GenerationCallCapExceeded
-from .tokenization import serving_tools
+from .tokenization import DEFAULT_TOOL_SCHEMA, TOOL_SCHEMA_MODES, model_tools
 
 
 _REQUEST_FIELDS = frozenset({
@@ -73,6 +73,7 @@ class EventNativeAPI:
         benchmark: str = "bfcl",
         compression_policy: str | None = None,
         history_view_protocol: str = "fixed-budget-main",
+        tool_schema: str = DEFAULT_TOOL_SCHEMA,
     ) -> None:
         if not callable(getattr(runner, "run", None)):
             raise TypeError("runner must expose run(payload)")
@@ -119,6 +120,9 @@ class EventNativeAPI:
         self.runtime_policy_contract = (
             copy.deepcopy(dict(runtime_policy_contract)) if runtime_policy_contract is not None else None
         )
+        if tool_schema not in TOOL_SCHEMA_MODES:
+            raise ValueError(f"tool_schema must be one of {TOOL_SCHEMA_MODES}")
+        self.tool_schema = tool_schema
         self.max_new_tokens = max_new_tokens
         self.allowed_task_ids = allowed
         self.max_decisions = max_decisions
@@ -167,6 +171,7 @@ class EventNativeAPI:
             "view_mode": self.view_mode,
             "route_contract": copy.deepcopy(self.route_contract),
             "runtime_policy_contract": copy.deepcopy(self.runtime_policy_contract),
+            "tool_schema": self.tool_schema,
             "decode_strategy": getattr(getattr(self.runner, "generator", None), "decode_strategy", None),
             "session_cache_policy": getattr(getattr(self.runner, "generator", None), "session_cache_policy", None),
             "max_new_tokens": self.max_new_tokens,
@@ -460,9 +465,10 @@ class EventNativeAPI:
             raise EventNativeAPIError(400, "invalid_tools", "tools must be a list of objects")
         tool_snapshot = [copy.deepcopy(dict(tool)) for tool in tools]
         try:
-            # Match the full SGLang chat-template tool prologue without
-            # changing the source request or its original tool definitions.
-            model_tools = serving_tools(tool_snapshot) or []
+            # Render the actor prologue under the declared tool schema without
+            # changing the source request or its original tool definitions;
+            # the release default matches the full SGLang chat-template prologue.
+            rendered_tools = model_tools(tool_snapshot, self.tool_schema)
         except (KeyError, TypeError, ValueError) as error:
             raise EventNativeAPIError(400, "invalid_tools", str(error)) from error
 
@@ -479,7 +485,7 @@ class EventNativeAPI:
             "outer_request_id": self._outer_request_id(
                 session_id=session_id, user_turn=user_turn, step=step),
             "messages": message_snapshot,
-            "tools": model_tools,
+            "tools": rendered_tools,
             **({"recovery_disabled": True} if recovery_disabled is True else {}),
             **source_fields,
         }
