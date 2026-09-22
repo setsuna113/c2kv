@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Mapping
 
-BACKENDS = ("c2kv", "commitkv", "h2o", "snapkv", "streamingllm")
+BACKENDS = ("c2kv", "commitkv", "h2o", "snapkv", "pyramidkv", "streamingllm")
 
 
 @dataclass(frozen=True)
@@ -63,6 +63,8 @@ class BackendConfig:
             raise ValueError("RACER requires its named persistent backend and an absolute budget")
         if self.backend == "commitkv" and defaults["backend"] != "reference_attention":
             raise ValueError("CommitKV requires reference_attention")
+        if self.backend == "pyramidkv" and defaults["backend"] != "reference_attention":
+            raise ValueError("PyramidKV requires reference_attention")
         defaults["target_tokens"] = self.history_budget_tokens if target_tokens is None else target_tokens
         return defaults
 

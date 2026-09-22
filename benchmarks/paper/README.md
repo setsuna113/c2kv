@@ -943,12 +943,12 @@ identity. The history budget is an absolute token count:
 ```bash
 python -m benchmarks.paper.runner prepare --config CONFIG.json \
   --sglang-source ENGINE --output RESULTS \
-  --racer-backends c2kv,commitkv,h2o,snapkv,streamingllm \
+  --racer-backends c2kv,commitkv,h2o,snapkv,pyramidkv,streamingllm \
   --racer-policies t02,pending_verified --racer-history-budget 768 \
   --tool-contexts t0_r8
 python -m benchmarks.paper.runner run --config CONFIG.json \
   --sglang-source ENGINE --output RESULTS \
-  --racer-backends c2kv,commitkv,h2o,snapkv,streamingllm \
+  --racer-backends c2kv,commitkv,h2o,snapkv,pyramidkv,streamingllm \
   --racer-policies t02,pending_verified --racer-history-budget 768 \
   --tool-contexts t0_r8 --stage closed_loop --cells CELL_ID
 ```

@@ -9,7 +9,7 @@ from typing import Mapping
 from .candidate_matrix import REPAIR_VARIANTS, SUPPORTED_BENCHMARKS, VARIANT_TO_ARM
 
 
-RACER_BACKENDS = ("c2kv", "commitkv", "h2o", "snapkv", "streamingllm")
+RACER_BACKENDS = ("c2kv", "commitkv", "h2o", "snapkv", "pyramidkv", "streamingllm")
 RACER_CANDIDATE_POLICIES = tuple(VARIANT_TO_ARM)
 RACER_POLICIES = ("off", "t02", *RACER_CANDIDATE_POLICIES)
 
@@ -30,6 +30,14 @@ _BACKEND_CONFIG = {
     "snapkv": {
         "method": "snapkv_persistent",
         "backend": "physical_eviction",
+        "recent_window": 64,
+        "kernel_size": 5,
+        "pooling": "avgpool",
+        "persistent_session": True,
+    },
+    "pyramidkv": {
+        "method": "pyramidkv",
+        "backend": "reference_attention",
         "recent_window": 64,
         "kernel_size": 5,
         "pooling": "avgpool",

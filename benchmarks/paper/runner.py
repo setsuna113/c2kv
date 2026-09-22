@@ -1179,7 +1179,7 @@ def main(argv=None):
                              "bfcl_base (default), bfcl_long_context, appworld, acebench_agent, tau2, toolsandbox")
     parser.add_argument("--racer-backends", default="",
                         help="opt-in RACER history backends: all or comma-separated "
-                             "c2kv,commitkv,h2o,snapkv,streamingllm")
+                             "c2kv,commitkv,h2o,snapkv,pyramidkv,streamingllm")
     parser.add_argument("--racer-policies", default="",
                         help="opt-in RACER policies: all or comma-separated off,t02,"
                              "and exact candidate variant names; on policies add their paired off cell")
