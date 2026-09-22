@@ -87,6 +87,17 @@ def test_validate_server_identity_accepts_matching_fresh_endpoint(policy) -> Non
     wrapper.validate_server_identity(ready, health)
 
 
+def test_validate_server_identity_accepts_every_generator_cache_policy() -> None:
+    """Each serving generator's declared policy must pass the official worker."""
+    from benchmarks.memory_runtime.racer.generator import PersistentRacerGenerator
+    from history_memory.sglang_generator import SESSION_CACHE_POLICY
+
+    for policy in (SESSION_CACHE_POLICY, PersistentRacerGenerator.session_cache_policy):
+        ready, health = _ready(), _health()
+        ready['session_cache_policy'] = health['session_cache_policy'] = policy
+        wrapper.validate_server_identity(ready, health)
+
+
 @pytest.mark.parametrize("sampling, accepted", [
     ({"mode": "greedy", "temperature": 0, "seed": 0}, True),           # legacy constant
     ({"temperature": 0.0, "seed": 0}, True),                           # what event_native_server writes for BFCL

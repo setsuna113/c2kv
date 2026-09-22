@@ -24,6 +24,8 @@ SUPPORTED_SESSION_CACHE_POLICIES = frozenset({
     'last-final-view-v1',
     'last-final-view-memo-only-v1',
     'external-sglang-content-addressed-chunks-v1',
+    # PersistentRacerGenerator: engine-owned persistent session with transactional recovery.
+    'racer-persistent-transaction-v1',
 })
 
 
