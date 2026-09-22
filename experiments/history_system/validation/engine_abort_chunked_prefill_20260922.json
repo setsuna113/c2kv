@@ -1,0 +1,77 @@
+{
+  "schema": "c2kv-engine-abort-chunked-prefill-v1",
+  "created_at": "2026-09-22T19:20:00Z",
+  "engine": {
+    "repository": "https://github.com/setsuna113/kvoffload-sglang-c2kv",
+    "branch": "fix/abort-chunked-prefill-20260922",
+    "fixed_revision": "36e9691350b74c4c7faff2f03d7acba0b4f29c39",
+    "base_revision": "e2b3b7ec049a810a7ccea2039dd1b1c7b3d69224",
+    "files": ["python/sglang/srt/managers/scheduler.py", "test/registered/unit/test_abort_chunked_c2kv_prefill.py"]
+  },
+  "defect": "Scheduler.abort_request handled queued and running requests only. A chunked prefill request lives in self.chunked_req between forwards and was re-added every step, so an abort waited for the whole prefill; acknowledged cleanup returned 504 cleanup_timeout and later episodes failed setup (PyramidKV r25 held cell, and the CommitKV CUDA check in blocker_cuda_validation_20260922.json).",
+  "change": [
+    "abort_request also marks the matching chunked multi-round C2KV request",
+    "get_next_batch_to_run finishes an aborted chunked C2KV request right after stashing it, through the existing mid-prefill C2KV failure path (release pins, release_kv_cache(is_insert=False), stream the abort finish)",
+    "a persistent-history turn aborted mid-prefill (at a chunk boundary or requeued between rounds) sets persistent_history_eviction_failed so SessionAwareCache rolls the session back to its previous turn; before, the requeued case would try to save a partial ledger"
+  ],
+  "unchanged": "never-aborted requests, ordinary (non-C2KV) chunked requests, the overlap scheduler, and the /abort_request interface and receipts",
+  "cpu_tests": {
+    "host": "box4 /workspace/venv-sglang (CUDA_VISIBLE_DEVICES empty)",
+    "suite": "24 engine unit files covering acknowledged abort, persistent history lifecycle, C2KV composition/pool/serving, reference history and session cache",
+    "base": {"receipt": "engine-cpu-engine-e2b3b7e.xml", "tests": 281, "failures": 0, "errors": 0,
+             "sha256": "1b43a270e22beec7e184374898ecd320e13c256a2a3cb3bd1573ab25b7b88583"},
+    "fixed": {"receipt": "engine-cpu-engine-36e9691.xml", "tests": 292, "failures": 0, "errors": 0,
+              "sha256": "6e836997286c71dadc92c069111a38dfc120dd99f878e1cdd1a66c63a3a0e374"},
+    "new_tests": "11 in test_abort_chunked_c2kv_prefill.py, including the real release_kv_cache, rollback and release_session code freeing every page of an aborted turn exactly once"
+  },
+  "gpu_validation": {
+    "host": "box4 GPU0 (RTX 4090 48 GB), reserved by the patrol session",
+    "paper_revision": "e2604b8 (runner, proxy and harness unchanged by later commits)",
+    "common": "--port-offset 27000, outputs under /workspace/dev-scratch",
+    "v1_commitkv_b768_abort": {
+      "run": "results-b768bl2 config, --task-subset bfcl_long_context__commitkv_b768=multi_turn_long_context_101,multi_turn_long_context_119 --generation-timeout 120, fixed engine",
+      "observed": [
+        "both long-context generations timed out at 120.0 s and 120.1 s",
+        "abort_request returned 200 request_status=aborted session_status=closed after 6.28 s and 3.18 s (the unfixed engine returned 504 cleanup_timeout after 60 s)",
+        "server.log: 'C2KV chunked prefill aborted at chunk boundary' at kv_committed_len 23536 and 23255; the sessions then released their previous-turn resident KV (3670 and 3872 tokens), with nothing transferred to the finished request",
+        "the second task's episode setup (/flush_cache) returned 200 and its first request started with main_live_kv_tokens 0"
+      ],
+      "evidence_sha256": {
+        "proxy_telemetry.jsonl": "6ffa94f8e44f29a13be0a9134406096a9f06098e387e16ca1dbaa4e497052800",
+        "server.log": "c399e0c49c2cb0935e26ef839b75bb79523c86a572c0e32b92c5f31c9953af90",
+        "server_telemetry.jsonl": "33786ccdd28b4fe913b1d54d6df8075608961602e582219cd62a7d07d73fb4e0"
+      }
+    },
+    "v2_pyramidkv_r25_abort": {
+      "run": "results-b4main2 config, same two tasks and --generation-timeout 120, fixed engine",
+      "observed": [
+        "task 101 completed all 13 turns within the deadline (its long-context turn took 50.7 s); its session closed normally before task 119",
+        "task 119 timed out at 120.03 s; abort_request returned 200 aborted/closed after 2.04 s; server.log reports the chunk-boundary abort at kv_committed_len 23270 and the release of 3814 resident tokens"
+      ],
+      "evidence_sha256": {
+        "proxy_telemetry.jsonl": "6f64e4e30abd586c85c865acd28b3195bf92f6826c7b103df87403f1ed92c0ad",
+        "server.log": "6ac6fc1502c9e4758dc65e508ab68eb503d3aa9a4aef7920109ed7272e93b26c",
+        "server_telemetry.jsonl": "ef7e77a2cafb937c9a65fedc625c7aa8dba21257aa68dcbc8f3cfcfa8f7e1236"
+      }
+    },
+    "v3_no_abort_regression": {
+      "run": "results-p11 config, --task-subset bfcl_base__commitkv=multi_turn_base_0,multi_turn_base_1,multi_turn_base_2, default deadline, base engine e2b3b7e then fixed engine 36e9691",
+      "observed": [
+        "44 generation requests on each engine; content, tool-call names and arguments, finish reasons, prompt/completion tokens and persistent generated_text identical (response and call ids are random)",
+        "BFCL result rows identical for all three tasks; summary semantic_score 0.3333333333333333 (n=3) on both"
+      ],
+      "evidence_sha256": {
+        "old/summary_commitkv.json": "b6a961acaff2973bb4e4dc904aeb9c9da367f73b1183278664af0714bd54abe0",
+        "new/summary_commitkv.json": "160aee69f7e1c6ad2149a9e636693ade555fc236622fd6e7d1d89f4184811d03",
+        "old/proxy_telemetry.jsonl": "bad0c622835caf89d065583caa2dae24783677677c725a66888c32ecdff8e4a0",
+        "new/proxy_telemetry.jsonl": "abd7d70275bd89964e518b496b5ee58faffc0b4654537631cc183aaa00f1779a"
+      },
+      "result_scope": "preliminary, n=1; a 3-task smoke for behavior equality, not a cell result"
+    }
+  },
+  "scope_of_the_fix": [
+    "A deadline that fires during prefill now costs only that task: the engine stops at the next 512-token chunk, releases the turn and accepts the next episode.",
+    "A timed-out task is still an infrastructure failure and the BFCL completion ledger still refuses the cell; the deadline must still exceed every request (3600 s recommended for bfcl_long reference-attention cells).",
+    "The chunk-boundary abort applies with --disable-overlap-schedule, which every paper server command sets."
+  ]
+}
