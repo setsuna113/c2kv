@@ -66,6 +66,25 @@ def test_reference_launcher_requires_schema_policy_for_raw_kv_joint_history(tmp_
         cell.cell_id("bfcl_long_context", "gen_h2o_k0", 768, "none"))
 
 
+@pytest.mark.parametrize("encoder", ["t0", "streamingllm", "h2o", "snapkv", "pyramidkv"])
+@pytest.mark.parametrize("policy", ["latest_event_topk_v1", "last_user_adaptive_v1"])
+def test_selector_policy_forwards_to_shared_paper_without_a_tool_budget(tmp_path, encoder, policy):
+    args = _args(tmp_path)
+    args.arm = "c2kv_pending_verified_r8"
+    args.history_target_tokens = None
+    args.tool_memory = f"{encoder}:r8:hybrid3:schema:selector={policy}"
+    argv = cell.command(args)
+    assert argv[argv.index("--tool-memory") + 1] == args.tool_memory
+    assert "--tool-budget-tokens" not in argv
+    assert argv[argv.index("--out") + 1].endswith(f"_selector-{policy}")
+    assert cell.cell_id(args.benchmark, args.arm, None, args.tool_memory) != (
+        cell.cell_id(args.benchmark, args.arm, None, f"{encoder}:r8:hybrid3:schema"))
+    if encoder != "t0":
+        with pytest.raises(ValueError, match="requires :schema"):
+            cell.cell_id(args.benchmark, args.arm, None,
+                         f"{encoder}:r8:hybrid3:selector={policy}")
+
+
 @pytest.mark.parametrize("arm,spec", [
     ("full", "t0:r8:hybrid3:schema"),
     ("history_kv_h2o_r25_persistent", "h2o:r8:hybrid3:schema"),

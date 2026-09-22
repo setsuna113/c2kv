@@ -20,7 +20,8 @@ from urllib.request import ProxyHandler, Request, build_opener
 CELL_PART = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*\Z")
 TOOL_SPEC = re.compile(
     r"(?:t0|streamingllm|h2o|snapkv|pyramidkv):r(?:8|12)"
-    r"(?::(?:uniform|hybrid[1-9][0-9]*))?(?::schema)?\Z")
+    r"(?::(?:uniform|hybrid[1-9][0-9]*))?(?::schema)?"
+    r"(?::selector=(?:last_user_topk_v1|latest_event_topk_v1|last_user_adaptive_v1))?\Z")
 BENCHMARKS = {
     "bfcl_base": ("bfcl", ("--categories", "multi_turn_base")),
     "bfcl_long_context": ("bfcl", ("--categories", "multi_turn_long_context")),
@@ -57,10 +58,10 @@ def cell_id(benchmark: str, arm: str, target_tokens: int | None,
     if tool_memory not in {"", "none"} and not TOOL_SPEC.fullmatch(tool_memory):
         raise ValueError("Unsupported tool-memory spec")
     if (tool_memory.startswith(("streamingllm:", "h2o:", "snapkv:", "pyramidkv:"))
-            and not tool_memory.endswith(":schema") and arm != "full"):
+            and "schema" not in tool_memory.split(":") and arm != "full"):
         raise ValueError("Raw-KV tool memory with non-Full history requires :schema")
     label = ("raw" if tool_memory in {"", "none"}
-             else "tools-" + tool_memory.replace(":", "_"))
+             else "tools-" + tool_memory.replace(":", "_").replace("=", "-"))
     history = f"__history{target_tokens}" if target_tokens is not None else ""
     return f"{benchmark}__{arm}{history}__{label}"
 
@@ -162,6 +163,8 @@ def main(argv=None) -> None:
         forwarded = forwarded[1:]
     try:
         root = validate_paper_root(args.paper_root)
+        if ":selector=" in args.tool_memory and not (root / "benchmarks/toolselection.py").is_file():
+            raise ValueError("--paper-root lacks shared selector source: benchmarks/toolselection.py")
         cmd = command(args, forwarded)
     except ValueError as error:
         parser.error(str(error))
