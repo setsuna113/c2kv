@@ -87,14 +87,17 @@ def test_validate_server_identity_accepts_matching_fresh_endpoint(policy) -> Non
     wrapper.validate_server_identity(ready, health)
 
 
-def test_validate_server_identity_accepts_every_generator_cache_policy() -> None:
-    """Each serving generator's declared policy must pass the official worker."""
+def test_validate_server_identity_accepts_every_generator_declaration() -> None:
+    """Each serving generator's declared cache policy and decode strategy must pass the official worker."""
     from benchmarks.memory_runtime.racer.generator import PersistentRacerGenerator
     from history_memory.sglang_generator import SESSION_CACHE_POLICY
 
-    for policy in (SESSION_CACHE_POLICY, PersistentRacerGenerator.session_cache_policy):
+    declarations = [(SESSION_CACHE_POLICY, "incremental"),
+                    (PersistentRacerGenerator.session_cache_policy, PersistentRacerGenerator.decode_strategy)]
+    for policy, strategy in declarations:
         ready, health = _ready(), _health()
         ready['session_cache_policy'] = health['session_cache_policy'] = policy
+        ready['decode_strategy'] = health['decode_strategy'] = strategy
         wrapper.validate_server_identity(ready, health)
 
 

@@ -623,6 +623,8 @@ def _serve(args):
                     'scope': 'scheduler resident history, native evidence, checkpoint and canonical delta prefill receipts',
                 }
         manifest['session_cache_policy'] = generator.session_cache_policy
+        # The endpoint health reports the generator's strategy; persistent RACER generators differ from the CLI default.
+        manifest['decode_strategy'] = getattr(generator, 'decode_strategy', args.decode_strategy)
         if generator.kv_bytes_per_token() != expected_bytes:
             raise ValueError('loaded KV geometry differs from the declared budget')
         if time.monotonic() >= deadline:

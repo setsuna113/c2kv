@@ -93,7 +93,7 @@ def validate_server_identity(ready, health):
     # Older v1 manifests had a single, implicitly BFCL namespace.
     if ready.get('benchmark', 'bfcl') != 'bfcl' or health.get('benchmark', 'bfcl') != 'bfcl':
         raise ValueError('the official BFCL worker requires the bfcl benchmark namespace')
-    if ready.get('decode_strategy') not in {'incremental', 'full_recompute'}:
+    if ready.get('decode_strategy') not in {'incremental', 'full_recompute', 'persistent'}:
         raise ValueError('server manifest lacks a supported decode strategy')
     if ready.get('session_cache_policy') not in SUPPORTED_SESSION_CACHE_POLICIES:
         raise ValueError('server manifest lacks the supported session cache policy')
