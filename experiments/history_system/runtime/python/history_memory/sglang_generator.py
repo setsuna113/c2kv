@@ -1023,7 +1023,8 @@ class SGLangEventNativeGenerator:
                     }
                 )
 
-    def _read_json(self, request: Request, *, label: str) -> tuple[Any, int]:
+    def _read_json(self, request: Request, *, label: str,
+                   allow_empty: bool = False) -> tuple[Any, int]:
         try:
             with self._opener.open(request, timeout=self.timeout_seconds) as opened:
                 status_value = getattr(opened, "status", None)
@@ -1039,6 +1040,8 @@ class SGLangEventNativeGenerator:
             raise SGLangTransportError(f"{label} transport failed without retry") from error
         if len(raw) > self.max_response_bytes:
             raise SGLangEventNativeError(f"{label} response exceeds the byte cap")
+        if allow_empty and not raw.strip():
+            return None, status
         try:
             return json.loads(raw.decode("utf-8")), status
         except (UnicodeDecodeError, json.JSONDecodeError) as error:

@@ -127,8 +127,12 @@ class PersistentRacerGenerator:
             raise SGLangEventNativeError("A persistent adapter cannot switch tasks")
         try:
             yield
-        except BaseException:
-            self.close_session()
+        except BaseException as failure:
+            try:
+                self.close_session()
+            except Exception as cleanup:
+                # Keep the decision failure as the reported cause; the cleanup error is secondary.
+                failure.add_note(f"RACER session cleanup also failed: {type(cleanup).__name__}: {cleanup}")
             raise
 
     def _post_json(self, path, payload, timeout, *, retries=0):
@@ -139,7 +143,9 @@ class PersistentRacerGenerator:
         previous_timeout = self.native.timeout_seconds
         try:
             self.native.timeout_seconds = timeout
-            response, status = self.native._read_json(request, label="RACER " + path)
+            # The engine answers a successful /close_session with an empty body.
+            response, status = self.native._read_json(
+                request, label="RACER " + path, allow_empty=path == "/close_session")
         finally:
             self.native.timeout_seconds = previous_timeout
         if status != 200:

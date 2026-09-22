@@ -41,12 +41,14 @@ class Native:
     def close_session(self):
         self.closed = True
 
-    def _read_json(self, request, *, label):
+    def _read_json(self, request, *, label, allow_empty=False):
         body = json.loads(request.data)
         self.requests.append((request.full_url, body))
         if request.full_url.endswith("/open_session"):
             return body["session_id"], 200
         if request.full_url.endswith("/close_session"):
+            # The real engine answers with an empty body; only allow_empty reads it.
+            self.close_allow_empty = allow_empty
             return None, 200
         hint = body["c2kv_kv_memory_hint"]
         session = hint["persistent_history_session"]
@@ -225,7 +227,7 @@ def test_first_turn_binds_backend_even_without_completed_history(backend):
 
 def test_ambiguous_transport_failure_aborts_exact_request_without_retry():
     class LostResponse(Native):
-        def _read_json(self, request, *, label):
+        def _read_json(self, request, *, label, allow_empty=False):
             if request.full_url.endswith("/v1/chat/completions"):
                 self.requests.append((request.full_url, json.loads(request.data)))
                 raise SGLangTransportError("response lost")
@@ -234,7 +236,7 @@ def test_ambiguous_transport_failure_aborts_exact_request_without_retry():
                 self.requests.append((request.full_url, body))
                 return {"rid": body["rid"], "session_id": body["session_id"],
                         "request_status": "aborted", "session_status": "closed"}, 200
-            return super()._read_json(request, label=label)
+            return super()._read_json(request, label=label, allow_empty=allow_empty)
     native = LostResponse()
     generator = PersistentRacerGenerator(native, Decoder(), config())
     with pytest.raises(SGLangTransportError, match="response lost"):
@@ -244,3 +246,31 @@ def test_ambiguous_transport_failure_aborts_exact_request_without_retry():
     aborts = [body for url, body in native.requests if url.endswith("/abort_request")]
     assert len(aborts) == 1 and aborts[0]["rid"] == "d1:draft"
     assert native.closed and generator.session_cache_info()["closed"]
+
+
+def test_close_session_reads_the_engine_empty_body():
+    native = Native()
+    generator = PersistentRacerGenerator(native, Decoder(), config())
+    with generator.decision_scope(session_id="task"):
+        pass
+    generator.close_session()
+    assert native.close_allow_empty is True
+
+
+def test_native_read_json_accepts_an_empty_body_only_when_allowed():
+    from io import BytesIO
+    from history_memory.sglang_generator import SGLangEventNativeError, SGLangEventNativeGenerator
+
+    class Opened(BytesIO):
+        status = 200
+        def __enter__(self):
+            return self
+        def __exit__(self, *exc):
+            return False
+
+    reader = SGLangEventNativeGenerator.__new__(SGLangEventNativeGenerator)
+    reader._opener = type("Opener", (), {"open": lambda self, request, timeout: Opened(b"")})()
+    reader.timeout_seconds, reader.max_response_bytes = 5, 1024
+    assert reader._read_json(object(), label="close", allow_empty=True) == (None, 200)
+    with pytest.raises(SGLangEventNativeError, match="valid UTF-8 JSON"):
+        reader._read_json(object(), label="close")

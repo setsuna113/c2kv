@@ -95,7 +95,7 @@ class ToolNative:
         self.requests = []
         self._http_journal = ToolHTTPJournal()
 
-    def _read_json(self, request, *, label):
+    def _read_json(self, request, *, label, allow_empty=False):
         body = json.loads(request.data)
         self.requests.append((request.full_url, body))
         if self.fail:
