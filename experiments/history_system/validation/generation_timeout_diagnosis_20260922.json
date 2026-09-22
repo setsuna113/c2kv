@@ -1,0 +1,93 @@
+{
+  "schema": "c2kv-generation-timeout-diagnosis-v1",
+  "created_at": "2026-09-22T18:10:00Z",
+  "paper_base_commit": "c086197",
+  "engine_revision": "e2b3b7ec0",
+  "host": "box4",
+  "procedure": "read-only parse of each held cell's logs/proxy_*.jsonl, server_telemetry.jsonl (baseline, generation_start, final monotonic snapshots; history_kv_lifecycle) and server.log decode lines; no model, harness, or remote mutation",
+  "question": "are the 600 s 'upstream 0: timed out' requests slow decode or runaway generation?",
+  "answer": "neither runaway nor steady-state decode: every timed-out generation appended a ~31.7k-token BFCL long-context tool observation, spent 377-596 s in chunked prefill on the reference-attention route, and had decoded only 0-126 tokens at abort (cap 4096)",
+  "sources": [
+    {"path": "/workspace/results-b768bl2/closed_loop/bfcl_long_context__agentkv_b768/logs/proxy_agentkv_40920.jsonl", "bytes": 44452298, "sha256": "9e21376d2a37caaceeac8b1ae99dcefb2b67509f7f4fa539502ae34fdf922ce9"},
+    {"path": "/workspace/results-b768bl2/closed_loop/bfcl_long_context__agentkv_b768/server_telemetry.jsonl", "sha256": "ce5f4111e212304f27908af0e02ffbc5be2b344cc5d815b495de32099f743578"},
+    {"path": "/workspace/results-b768bl2/closed_loop/bfcl_long_context__agentkv_b768/server.log", "sha256": "60692055d98317c657e895cf3c624c20b82ab09b51fd7740527c00464eaaae5c"},
+    {"path": "/workspace/results-b768bl2/closed_loop/bfcl_long_context__commitkv_b768/logs/proxy_commitkv_40930.jsonl", "bytes": 43529035, "sha256": "89760dcf5869c5e1f326841d9bd80d48fc534a1e9d5375da06b47e638ddd2f8f"},
+    {"path": "/workspace/results-b768bl2/closed_loop/bfcl_long_context__commitkv_b768/server_telemetry.jsonl", "sha256": "6bb890dce1ad2c0282bae5ea6418f10c3c23061bedf58634d74e2e93246001eb"},
+    {"path": "/workspace/results-b768bl2/closed_loop/bfcl_long_context__commitkv_b768/server.log", "sha256": "cd0462a4343293561a9868d63c59520ed5e4a0197f4a977ef7dd1df6c102b706"},
+    {"path": "/workspace/results-b4main2/closed_loop/bfcl_long_context__history_kv_pyramidkv_r25_persistent/logs/proxy_history_kv_pyramidkv_r25_persistent_41100.jsonl", "bytes": 40675550, "sha256": "cee3676b3d6b99e44003682a9a51630624f25a7a7b4d27075f887bd0a4f7c799"},
+    {"path": "/workspace/results-b4main2/closed_loop/bfcl_long_context__history_kv_pyramidkv_r25_persistent/server_telemetry.jsonl", "sha256": "c44d9d96de286c29e1d711eb2cba46b618b02126cbc8ee24779ff93fed42391e"},
+    {"path": "/workspace/results-b4main2/closed_loop/bfcl_long_context__history_kv_pyramidkv_r25_persistent/server.log", "sha256": "2a64a74baadf7e75f6c9b496b09ea38cda9defbce4637513c40124cf16078d2d"}
+  ],
+  "cells": {
+    "bfcl_long_context__agentkv_b768": {
+      "root": "results-b768bl2", "paper_revision": "30d70b4", "cell_hours": 11.51,
+      "proxy_rows": {"ok": 2038, "generation_timeout": 8},
+      "timed_out_generations": [
+        {"new_turn_tokens": 31674, "context_tokens": 34337, "prefill_s": 382.9, "decode_s": 217.1, "decoded_tokens": 17},
+        {"new_turn_tokens": 31672, "context_tokens": 35343, "prefill_s": 417.3, "decode_s": 182.7, "decoded_tokens": 14},
+        {"new_turn_tokens": 31672, "context_tokens": 34328, "prefill_s": 385.2, "decode_s": 214.9, "decoded_tokens": 11},
+        {"new_turn_tokens": 31674, "context_tokens": 35547, "prefill_s": 425.8, "decode_s": 174.1, "decoded_tokens": 70},
+        {"new_turn_tokens": 31674, "context_tokens": 35678, "prefill_s": 431.4, "decode_s": 168.7, "decoded_tokens": 1},
+        {"new_turn_tokens": 35661, "context_tokens": 46311, "prefill_s": 558.9, "decode_s": 41.0, "decoded_tokens": 5},
+        {"new_turn_tokens": 31674, "context_tokens": 43655, "prefill_s": 438.4, "decode_s": 161.3, "decoded_tokens": 17},
+        {"new_turn_tokens": 31674, "context_tokens": 36629, "prefill_s": 465.5, "decode_s": 134.5, "decoded_tokens": 21}
+      ],
+      "server_log_decode_tok_per_s_median_in_timeout_windows": [6.4, 7.24],
+      "ok_requests": {"completion_tokens_p50": 59, "completion_tokens_max": 4096, "finish_length": 4, "wall_s_p99": 434.2, "wall_s_max": 528.2,
+                      "slowest_twelve": "11 of 12: new turn ~31.7k tokens, prefill 406-490 s, 46-470 completion tokens at 6.5-7.0 tok/s; 1 of 12: 644-token turn, length-capped 4096-token answer in 509 s at 8.0 tok/s"}
+    },
+    "bfcl_long_context__commitkv_b768": {
+      "root": "results-b768bl2", "paper_revision": "30d70b4", "cell_hours": 9.05,
+      "proxy_rows": {"ok": 1996, "generation_timeout": 6},
+      "timed_out_generations": [
+        {"new_turn_tokens": 31672, "context_tokens": 35343, "prefill_s": 402.9, "decode_s": 197.3, "decoded_tokens": 126},
+        {"new_turn_tokens": 31674, "context_tokens": 46521, "prefill_s": 393.7, "decode_s": 205.1, "decoded_tokens": 65},
+        {"new_turn_tokens": 31674, "context_tokens": 35587, "prefill_s": 413.3, "decode_s": 186.7, "decoded_tokens": 47},
+        {"new_turn_tokens": 31674, "context_tokens": 35678, "prefill_s": 416.5, "decode_s": 183.5, "decoded_tokens": 29},
+        {"new_turn_tokens": 35661, "context_tokens": 46417, "prefill_s": 539.8, "decode_s": 60.1, "decoded_tokens": 103},
+        {"new_turn_tokens": 31674, "context_tokens": 36629, "prefill_s": 448.1, "decode_s": 152.0, "decoded_tokens": 65}
+      ],
+      "server_log_decode_tok_per_s_median_in_timeout_windows": [5.98, 6.56],
+      "ok_requests": {"completion_tokens_p50": 56, "completion_tokens_max": 4096, "finish_length": 8, "wall_s_p99": 421.5, "wall_s_max": 538.8}
+    },
+    "bfcl_long_context__history_kv_pyramidkv_r25_persistent": {
+      "root": "results-b4main2", "paper_revision": "30d70b4", "cell_hours": 7.31,
+      "proxy_rows": {"ok": 1856, "generation_timeout": 4, "cleanup_failed": 1, "episode_setup_timeout": 33},
+      "recorded_as_37_timeouts": "4 generation timeouts plus 33 episode-setup /flush_cache timeouts; the 38th ledger gap is the cleanup failure",
+      "timed_out_generations": [
+        {"new_turn_tokens": 31694, "context_tokens": 34333, "prefill_s": 376.9, "decode_s": 223.2, "decoded_tokens": 0},
+        {"new_turn_tokens": 31724, "context_tokens": 44132, "prefill_s": 595.7, "decode_s": 4.0, "decoded_tokens": 0},
+        {"new_turn_tokens": 31722, "context_tokens": 34337, "prefill_s": 376.0, "decode_s": 224.0, "decoded_tokens": 0},
+        {"new_turn_tokens": 31697, "context_tokens": 66136, "prefill_s": 592.9, "decode_s": 6.7, "decoded_tokens": 0}
+      ],
+      "unabortable_prefill": {
+        "request_id": "c8adbd33f04644349fd2677675450e7a",
+        "resident_history_tokens": 35472, "new_turn_tokens": 31695, "prompt_fill_tokens": 67167,
+        "chunked_prefill": "512-token chunks every 18 s at 35.5k growing to 38 s at 51.9k resident tokens",
+        "proxy": "600 s TimeoutError, then POST /abort_request -> 504 request_status=cleanup_timeout after 60 s",
+        "engine": "session closed but the request kept prefilling; server_telemetry duration 2381.4 s, error PERSISTENT_HISTORY_SESSION_UNAVAILABLE",
+        "consequence": "33 consecutive episodes failed setup (/flush_cache timed out waiting for idle, 55 s each) from 23:54:22 to 00:21:38Z; those tasks never ran"
+      }
+    }
+  },
+  "conclusions": [
+    "Not runaway generation: at abort every timed-out request had decoded 0-126 tokens against a 4096 cap.",
+    "The deadline is consumed by prefill of the appended ~31.7k-token long-context observation (377-596 s), followed by ~6-7.5 tok/s decode at 34-46k context.",
+    "commitkv_b768/agentkv_b768: observed worst prefill 559 s plus a 4096-token answer at 6 tok/s is about 1.24k s, so 1800 s covers every observed request class; this is a projection from observed rates, not a measured run.",
+    "pyramidkv_r25: one request needed at least 2381 s of prefill alone (67k-token fill), so 1800 s is not shown sufficient; later turns of that conversation start from a larger resident history.",
+    "On engine e2b3b7ec0, an abort during reference-attention chunked prefill is not honoured (504 cleanup_timeout, request continues). Any deadline that fires inside such a prefill can wedge the server and void later tasks. This is an engine lifecycle limitation, reported rather than changed here."
+  ],
+  "wiring_validation": {
+    "receipt": "generation_timeout_checks.xml",
+    "tests": 105, "failures": 0, "errors": 0, "skipped": 1,
+    "sha256": "a1e6d2a1d34d8e3c53bbfd528f90c0c07be918088bdc9006f413434e1638041b",
+    "covers": [
+      "runner prepare --generation-timeout 1800 freezes the value and adds '--generation-timeout 1800.0' only to persistent history-KV cells; every other command is byte-identical to the default root",
+      "run.py parses the prepared bfcl_long commitkv/agentkv (2048, b768) and pyramidkv_r25 commands to 1800.0 (default 600.0)",
+      "the BFCL client read deadline is request_timeout + 90 s (1890 s) with an 8 s connect deadline",
+      "run.py start_proxy -> real proxy process -> fake engine: a 1 s deadline returns 502 'upstream 0: timed out' after one abort_request, a 6 s deadline returns 200"
+    ],
+    "cuda_validation": "not run; requires a GPU allocated by the patrol session"
+  },
+  "result_scope": "diagnosis of existing held runs; no new model execution"
+}
