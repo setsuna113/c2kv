@@ -166,7 +166,7 @@ def _read_s0_configuration(args):
 def _controller_requires_sglang(config):
     return isinstance(config, dict) and (
         'post_draft_recovery' in config or 'gp_experiments' in config
-        or 'candidate_algorithm' in config
+        or 'candidate_algorithm' in config or 'racer_backend' in config
     )
 
 
@@ -391,6 +391,12 @@ def _build_generator(
         shadow_feature_config=shadow_feature_config,
         encoding_scope=encoding_scope,
     )
+    if isinstance(s0_config, dict) and 'racer_backend' in s0_config:
+        from .racer.config import BackendConfig
+        backend_config = BackendConfig.parse(s0_config['racer_backend'])
+        if backend_config.backend != 'c2kv':
+            from .racer.generator import PersistentRacerGenerator
+            generator = PersistentRacerGenerator(generator, tokenizer, backend_config)
     return generator, profile
 
 
@@ -560,6 +566,14 @@ def _serve(args):
                 baseline_identity=baseline_identity,
                 recovery_enabled=True, max_generations_per_decision=2)
         shadow_feature_config, shadow_contract = _shadow_feature_configuration(args, tokenizer)
+        if isinstance(s0_config, dict) and 'racer_backend' in s0_config:
+            from .racer.config import BackendConfig
+            backend_config = BackendConfig.parse(s0_config['racer_backend'])
+            manifest['racer_backend'] = backend_config.receipt()
+            manifest['route_contract'].update(
+                baseline_identity=backend_config.receipt()['identity'],
+                history_allocation=backend_config.allocation,
+                recovery_enabled=backend_config.policy != 'off')
         generator, profile = _build_generator(
             args,
             profile=profile,
@@ -573,6 +587,13 @@ def _serve(args):
         )
         if tool_spec is not None:
             generator._ensure_model_info()
+            configure_tool_memory = getattr(generator, 'configure_tool_memory', None)
+            if callable(configure_tool_memory):
+                configure_tool_memory(
+                    tool_spec,
+                    checkpoint=getattr(args, 'tool_checkpoint', None),
+                    budget_tokens=getattr(args, 'tool_budget_tokens', None),
+                )
         if tool_spec is not None:
             from .event_native_tool import ToolRegionController
             controller = ToolRegionController(
@@ -596,6 +617,11 @@ def _serve(args):
                 'source': 'sglang_native_generation_response',
                 'scope': 'exact encoded/reused chunks and logical KV bytes reported by the engine',
             }
+            if (manifest.get('racer_backend') or {}).get('allocation') == 'backend_native_persistent':
+                manifest['backend_accounting'] = {
+                    'source': 'sglang_chat.racer_generation.accounting',
+                    'scope': 'scheduler resident history, native evidence, checkpoint and canonical delta prefill receipts',
+                }
         manifest['session_cache_policy'] = generator.session_cache_policy
         if generator.kv_bytes_per_token() != expected_bytes:
             raise ValueError('loaded KV geometry differs from the declared budget')
@@ -615,7 +641,7 @@ def _serve(args):
             **_route_kwargs(source_profile, args.view_mode, compression_policy,
                             history_view_protocol),
             **source_kwargs)
-        if isinstance(s0_config, dict) and 'candidate_algorithm' in s0_config:
+        if isinstance(s0_config, dict) and ('candidate_algorithm' in s0_config or 'racer_backend' in s0_config):
             api.route_contract = dict(manifest['route_contract'])
         server = make_server(api, host=args.host, port=args.port)
         server.timeout = 0.25

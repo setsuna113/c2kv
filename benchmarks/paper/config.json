@@ -309,6 +309,12 @@
       "spec": "h2o:r8:hybrid3:schema",
       "checkpoint": "/home/lyc/dev/c2kv-t0-selection/hf/T0/checkpoint-500",
       "provenance": "opt-in schema interface policy with H2O raw-KV selection; checkpoint path supplies the tokenizer only; no measured result implied"
+    },
+    {
+      "name": "t0_r8_hybrid3_schema_latest_event",
+      "spec": "t0:r8:hybrid3:schema:selector=latest_event_topk_v1",
+      "checkpoint": "/home/lyc/dev/c2kv-t0-selection/hf/T0/checkpoint-500",
+      "provenance": "opt-in completed-event selector with protected tool interfaces; frozen within each decision and refreshed on the next decision; no measured result implied"
     }
   ],
   "tau2_dir": "/path/to/tau2",

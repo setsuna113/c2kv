@@ -1,0 +1,42 @@
+{
+  "scope": "Actual BFCL source-message format fixture, decoded from history encoder inputs; no new model generation or task score.",
+  "source": {
+    "uri": "hf://buckets/Jasonning/c2kv-paper-202609/m2/results-tj/closed_loop/bfcl_base__c2kv_c1_t02_r8__tools-hybrid_schema.stopped.1/native/task_shards.tar.zst",
+    "archive_sha256": "326d1dc34e92569726d6c240ddb9bdf8bac56a28266c7f792efb936b4c7d2749",
+    "member": "task_shards/multi_turn_base_0/server/steps.jsonl",
+    "member_sha256": "dc0fcf4101c80d458dbc5ff2785d11de9dcb60135df24b4f1b7cb6f6af4150db",
+    "decision_key": "turn-0/step-4",
+    "tokenizer_sha256": "be75606093db2094d7cd20f3c2f385c212750648bd6ea4fb2bf507a6a4c55506",
+    "source_indices": [1, 2, 3, 4, 5, 6, 7, 8, 9]
+  },
+  "messages": [
+    {
+      "role": "user",
+      "content": "Move 'final_report.pdf' within document directory to 'temp' directory in document. Make sure to create the directory"
+    },
+    {
+      "role": "assistant",
+      "content": "I'll help you move the 'final_report.pdf' file from the document directory to the temp directory. First, let me check if the temp directory exists, and if not, I'll create it.",
+      "tool_calls": [{"id": "d1_r0_0", "type": "function", "function": {"name": "mkdir", "arguments": {"dir_name": "temp"}}}]
+    },
+    {"role": "tool", "content": "None", "tool_call_id": "d1_r0_0"},
+    {
+      "role": "assistant",
+      "content": "Now I'll check what files are currently in the document directory to locate the 'final_report.pdf' file:",
+      "tool_calls": [{"id": "d2_r0_0", "type": "function", "function": {"name": "ls", "arguments": {}}}]
+    },
+    {"role": "tool", "content": "{\"current_directory_content\": [\"document\", \"archive\", \"temp\"]}", "tool_call_id": "d2_r0_0"},
+    {
+      "role": "assistant",
+      "content": "Let me check the contents of the document directory to find the 'final_report.pdf' file:",
+      "tool_calls": [{"id": "d3_r0_0", "type": "function", "function": {"name": "cd", "arguments": {"folder": "document"}}}]
+    },
+    {"role": "tool", "content": "{\"current_working_directory\": \"document\"}", "tool_call_id": "d3_r0_0"},
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [{"id": "d4_r0_0", "type": "function", "function": {"name": "ls", "arguments": {}}}]
+    },
+    {"role": "tool", "content": "{\"current_directory_content\": [\"final_report.pdf\", \"previous_report.pdf\"]}", "tool_call_id": "d4_r0_0"}
+  ]
+}

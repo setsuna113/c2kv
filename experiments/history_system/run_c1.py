@@ -27,6 +27,26 @@ import current
 import evidence_sets
 import runner
 from c1_artifact_binding import bind_risk_artifact
+from benchmarks.memory_runtime.candidate_algorithms import ALL_VARIANTS
+from benchmarks.memory_runtime.racer.config import BackendConfig
+
+RACER_CANDIDATE_POLICIES = tuple(ALL_VARIANTS)
+
+
+def racer_arm_name(backend: str, policy: str, history_budget_tokens: int) -> str:
+    return f"racer_{backend}_{policy}_b{history_budget_tokens}"
+
+
+def validate_racer_backend(value: Mapping[str, Any]) -> dict:
+    """Validate the standalone delivery contract without importing paper orchestration."""
+    from dataclasses import asdict
+
+    parsed = BackendConfig.parse(value)
+    parsed.history_spec()
+    normalized = {"schema": "racer-backend-v1", **asdict(parsed)}
+    if dict(value) != normalized:
+        raise ValueError("RACER backend config differs from its resolved arm contract")
+    return normalized
 
 HERE = Path(__file__).resolve().parent
 RUNTIME = HERE / "runtime"
@@ -62,6 +82,12 @@ SUMMARY_FIELDS = (
     "risk_detector_scores", "risk_detector_unavailable",
     "candidate_decisions", "candidate_variants", "candidate_ratio8",
     "candidate_stable_call_ids", "candidate_budget_passed",
+    "racer_backend_identity", "racer_generation_receipts",
+    "racer_actual_generation_count", "racer_accounting_passed",
+    "racer_generation_backend_match",
+    "racer_transaction_receipts", "racer_transactions_complete",
+    "racer_actual_cost_complete", "racer_effective_budget_match",
+    "racer_max_history_and_evidence_tokens", "racer_kv_bytes_per_token",
     "gist_tokens", "raw_workspace_tokens",
     "gist_cache_hits", "native_packing_present",
 )
@@ -339,11 +365,14 @@ def _build_profile_unbudgeted(args: argparse.Namespace) -> tuple[dict, dict]:
 
 def _history_budget_override(args: argparse.Namespace, design: dict | None = None) -> dict | None:
     tokens = getattr(args, "history_budget_tokens", None)
+    racer = getattr(args, "racer_backend_config", None)
+    if tokens is None and racer is not None:
+        tokens = racer["history_budget_tokens"]
     if tokens is None:
         return None
-    if args.method == "c2kv_native":
+    if racer is None and args.method == "c2kv_native":
         raise ValueError("--history-budget-tokens does not support native bare static packing")
-    if args.benchmark != "bfcl":
+    if racer is None and args.benchmark != "bfcl":
         raise ValueError("--history-budget-tokens currently supports BFCL only")
     import history_budget
 
@@ -356,8 +385,21 @@ def build_profile(args: argparse.Namespace) -> tuple[dict, dict]:
     """Return the selected controller and an optional native budget contract."""
     override = _history_budget_override(args)
     controller, profile = _build_profile_unbudgeted(args)
+    racer = getattr(args, "racer_backend_config", None)
+    if racer is not None:
+        racer = validate_racer_backend(racer)
+        controller = dict(controller)
+        controller["racer_backend"] = racer
+        profile["racer_backend"] = racer
+        profile["composition_identity"] = racer_arm_name(
+            racer["backend"], racer["policy"], racer["history_budget_tokens"])
+        profile["history_budget_tokens"] = racer["history_budget_tokens"]
+        profile["calibration_status"] = racer["detector_calibration"]
+        profile.pop("ratio", None)
+        profile["controller_sha256"] = hashlib.sha256(
+            json.dumps(controller, sort_keys=True).encode()).hexdigest()
     if override is not None:
-        profile["native_history_budget"] = override
+        profile["racer_runtime_budget" if racer is not None else "native_history_budget"] = override
     return controller, profile
 
 
@@ -403,6 +445,10 @@ def effective_ratio(args: argparse.Namespace, selected: dict) -> int:
 
 
 def _model_name(args: argparse.Namespace) -> str:
+    racer = getattr(args, "racer_backend_config", None)
+    if racer is not None:
+        return racer_arm_name(
+            racer["backend"], racer["policy"], racer["history_budget_tokens"])
     if getattr(args, "candidate_algorithm", None) is not None:
         return f"c2kv_{args.candidate_algorithm}"
     if args.method == "c2kv_native":
@@ -545,6 +591,9 @@ def summarize_task(benchmark: str, task: str, task_out: Path, official: Mapping[
     """Join official scores with C1-native telemetry without redefining either."""
     official_row = _single_official_row(benchmark, official)
     records = []
+    ready_path = task_out / "server" / "ready.json"
+    ready = (json.loads(ready_path.read_text(encoding="utf-8"))
+             if ready_path.is_file() else {})
     steps_path = task_out / "server" / "steps.jsonl"
     if steps_path.exists():
         for line in steps_path.read_text(encoding="utf-8").splitlines():
@@ -623,6 +672,99 @@ def summarize_task(benchmark: str, task: str, task_out: Path, official: Mapping[
         and trace.get("generation", {}).get("stats", {}).get("backend")
             == "sglang_c2kv_native_packed"
     ]
+    racer_rows = []
+    for record in records:
+        for trace in record.get("generation_trace", []):
+            generation = trace.get("generation")
+            stats = generation.get("stats") if isinstance(generation, Mapping) else None
+            if (trace.get("status") == "completed" and isinstance(stats, Mapping)
+                    and isinstance(stats.get("racer_backend"), Mapping)):
+                racer_rows.append((record, trace, stats))
+    racer_identities = sorted({
+        stats["racer_backend"].get("identity")
+        for _, _, stats in racer_rows
+        if isinstance(stats["racer_backend"].get("identity"), str)
+    })
+    racer_accounting_rows = []
+    racer_transaction_rows = []
+    racer_cost_rows = []
+    racer_actual_generation_count = 0
+    for record, trace, stats in racer_rows:
+        accounting = stats.get("racer_accounting")
+        receipt = stats.get("racer_backend")
+        budget = receipt.get("history_budget_tokens") if isinstance(receipt, Mapping) else None
+        accounting_valid = False
+        if isinstance(accounting, Mapping):
+            history = accounting.get("active_history_tokens")
+            evidence = accounting.get("native_evidence_tokens")
+            combined = accounting.get("history_and_evidence_tokens")
+            accounting_valid = (
+                type(history) is int and history >= 0
+                and type(evidence) is int and evidence >= 0
+                and type(combined) is int and combined == history + evidence
+                and type(budget) is int and combined <= budget
+            )
+        racer_accounting_rows.append((accounting_valid, accounting))
+
+        report = stats.get("kv_memory_report")
+        lifecycle = report.get("history_kv_lifecycle") if isinstance(report, Mapping) else None
+        transaction = (lifecycle.get("transaction") if isinstance(lifecycle, Mapping) else None)
+        if not isinstance(transaction, Mapping) and isinstance(report, Mapping):
+            transaction = report.get("racer_transaction")
+        expected_phase = "regenerate" if trace.get("phase") == "regeneration" else "draft"
+        racer_transaction_rows.append(
+            isinstance(lifecycle, Mapping)
+            and lifecycle.get("persistent_session_enabled") is True
+            and lifecycle.get("full_history_reprefill_performed") is False
+            and isinstance(lifecycle.get("session_id"), str)
+            and bool(lifecycle["session_id"])
+            and isinstance(transaction, Mapping)
+            and transaction.get("decision_id") == record.get("decision_key")
+            and transaction.get("phase") == expected_phase
+        )
+
+        usage = trace.get("usage")
+        token_ids = generation.get("token_ids")
+        resident = accounting.get("resident_prompt_tokens") if isinstance(accounting, Mapping) else None
+        cost_valid = (
+            isinstance(usage, Mapping) and isinstance(token_ids, list)
+            and type(resident) is int and resident >= 0
+            and type(usage.get("prompt_tokens")) is int
+            and type(usage.get("completion_tokens")) is int
+            and type(usage.get("total_tokens")) is int
+            and usage["prompt_tokens"] == resident
+            and usage["completion_tokens"] == len(token_ids)
+            and usage["total_tokens"] == resident + len(token_ids)
+            and usage == stats.get("racer_served_usage")
+        )
+        racer_cost_rows.append(cost_valid)
+        calls = stats.get("generation_calls")
+        if type(calls) is int:
+            racer_actual_generation_count += calls
+
+    ready_racer = ready.get("racer_backend") if isinstance(ready, Mapping) else None
+    runtime_policy = ready.get("runtime_policy_contract") if isinstance(ready, Mapping) else None
+    effective_policy = (runtime_policy.get("effective_policy")
+                        if isinstance(runtime_policy, Mapping) else None)
+    kv_unit = (effective_policy.get("kv_bytes_per_token")
+               if isinstance(effective_policy, Mapping) else None)
+    ready_budget = (ready_racer.get("history_budget_tokens")
+                    if isinstance(ready_racer, Mapping) else None)
+    racer_generation_backend_match = (
+        bool(racer_rows) and isinstance(ready_racer, Mapping)
+        and all(dict(stats["racer_backend"]) == dict(ready_racer)
+                for _, _, stats in racer_rows)
+    )
+    expected_budget_bytes = (
+        ready_budget * kv_unit
+        if type(ready_budget) is int and type(kv_unit) is int else None
+    )
+    racer_effective_budget_match = (
+        expected_budget_bytes is not None
+        and isinstance(effective_policy, Mapping)
+        and effective_policy.get("history_budget_bytes") == expected_budget_bytes
+        and effective_policy.get("workspace_budget_bytes") == expected_budget_bytes
+    )
     full_bytes = active_bytes = 0.0
     kv_bytes_per_token = None
     generation_prefill = recovery_prefill = 0.0
@@ -744,6 +886,25 @@ def summarize_task(benchmark: str, task: str, task_out: Path, official: Mapping[
             and len(budget_checks) == len(traces) and all(
             check.get("status") == "passed" for check in budget_checks
         ),
+        "racer_backend_receipt": ready_racer,
+        "racer_backend_identity": (
+            ready_racer.get("identity") if isinstance(ready_racer, Mapping) else None),
+        "racer_generation_receipts": len(racer_rows),
+        "racer_actual_generation_count": racer_actual_generation_count,
+        "racer_accounting_passed": bool(racer_accounting_rows) and all(
+            valid for valid, _ in racer_accounting_rows),
+        "racer_generation_backend_match": racer_generation_backend_match,
+        "racer_transaction_receipts": sum(racer_transaction_rows),
+        "racer_transactions_complete": bool(racer_transaction_rows) and all(racer_transaction_rows),
+        "racer_actual_cost_complete": bool(racer_cost_rows) and all(racer_cost_rows),
+        "racer_effective_budget_match": racer_effective_budget_match,
+        "racer_max_history_and_evidence_tokens": max((
+            int(accounting["history_and_evidence_tokens"])
+            for valid, accounting in racer_accounting_rows
+            if valid and isinstance(accounting, Mapping)
+        ), default=None),
+        "racer_kv_bytes_per_token": kv_unit,
+        "racer_observed_identities": racer_identities,
         "gist_tokens": sum(int(stats.get("gist_tokens") or 0) for stats in native_stats),
         "raw_workspace_tokens": sum(int(stats.get("workspace_tokens") or 0) for stats in native_stats),
         "gist_cache_hits": sum(
@@ -768,7 +929,8 @@ def write_unified_summary(out: Path, rows: list[dict]) -> None:
 
 
 def functional_checks(method: str, detector: str, telemetry: Mapping[str, Any],
-                      candidate_algorithm: str | None = None) -> dict:
+                      candidate_algorithm: str | None = None,
+                      racer_backend: Mapping[str, Any] | None = None) -> dict:
     """Separate required runtime behavior from descriptive efficiency telemetry."""
 
     repair_candidate = candidate_algorithm in {
@@ -796,15 +958,61 @@ def functional_checks(method: str, detector: str, telemetry: Mapping[str, Any],
            if repair_candidate else {
                "risk_scores": telemetry.get("risk_detector_scores", 0) > 0,
                "risk_available": telemetry.get("risk_detector_unavailable", 0) == 0}),
-        "ratio8": telemetry.get("candidate_ratio8") is True,
+        **({"ratio8": telemetry.get("candidate_ratio8") is True}
+           if racer_backend is None else {}),
         "stable_call_ids": telemetry.get("candidate_stable_call_ids") is True,
         "budget_passed": telemetry.get("candidate_budget_passed") is True,
     } if candidate_algorithm is not None else {})
+    racer_required = {}
+    persistent_racer = False
+    if racer_backend is not None:
+        expected_racer = validate_racer_backend(racer_backend)
+        expected_identity = "racer:{backend}:{policy}:b{budget}".format(
+            backend=expected_racer["backend"], policy=expected_racer["policy"],
+            budget=expected_racer["history_budget_tokens"])
+        expected_receipt = telemetry.get("racer_backend_receipt")
+        receipt_matches = isinstance(expected_receipt, Mapping) and all(
+            expected_receipt.get(key) == value for key, value in expected_racer.items())
+        persistent_racer = expected_racer["backend"] != "c2kv"
+        observed_identity = telemetry.get("racer_observed_identities")
+        racer_required = {
+            "racer_backend_identity": (
+                receipt_matches
+                and telemetry.get("racer_backend_identity") == expected_identity
+                and (observed_identity == [expected_identity] if persistent_racer
+                     else observed_identity in ([], [expected_identity]))
+            ),
+            "racer_effective_budget": telemetry.get("racer_effective_budget_match") is True,
+        }
+        if persistent_racer:
+            racer_required.update({
+                "racer_generation_receipts": (
+                    telemetry.get("racer_generation_receipts", 0) > 0
+                    and telemetry.get("racer_generation_receipts")
+                    == telemetry.get("generation_calls")
+                    == telemetry.get("racer_actual_generation_count")
+                ),
+                "racer_accounting": telemetry.get("racer_accounting_passed") is True,
+                "racer_generation_backend": (
+                    telemetry.get("racer_generation_backend_match") is True),
+                "racer_transactions": (
+                    telemetry.get("racer_transactions_complete") is True
+                    and telemetry.get("racer_transaction_receipts")
+                    == telemetry.get("racer_generation_receipts")
+                ),
+                "racer_actual_cost": telemetry.get("racer_actual_cost_complete") is True,
+            })
+        if expected_racer["policy"] == "t02":
+            racer_required["racer_detector_scores"] = (
+                telemetry.get("risk_detector_scores", 0) > 0
+                and telemetry.get("risk_detector_unavailable", 0) == 0)
     return {
         "required": {
-            "native_generate_requests": telemetry["native_generate_requests"] > 0,
+            **({} if persistent_racer else {
+                "native_generate_requests": telemetry["native_generate_requests"] > 0}),
             "detector_contract": detector_contract,
             **candidate_required,
+            **racer_required,
             **({"no_recovery": telemetry.get("recovery_count", 0) == 0,
                 "one_generation_per_decision": telemetry.get("generation_calls") == telemetry.get("decision_count")}
                if method == "c2kv_native" else {}),
@@ -886,8 +1094,11 @@ def run_task(args: argparse.Namespace, task: str, controller_path: Path,
     if journal.get("failed") or journal.get("pending") or not journal.get("completed"):
         raise RuntimeError(f"Model attempts failed, remain pending, or are missing; see {final_path}")
     telemetry = summarize_task(args.benchmark, task, task_out, summary, time.monotonic() - started)
-    acceptance = functional_checks(args.method, args.detector, telemetry,
-                                   getattr(args, "candidate_algorithm", None))
+    acceptance = functional_checks(
+        args.method, args.detector, telemetry,
+        getattr(args, "candidate_algorithm", None),
+        getattr(args, "racer_backend_config", None),
+    )
     required = acceptance["required"]
     if not all(required.values()):
         raise RuntimeError(f"C1 functional acceptance failed: {required}; see {task_out / 'server'}")
@@ -895,6 +1106,17 @@ def run_task(args: argparse.Namespace, task: str, controller_path: Path,
         "task_id": task, "status": "completed", "official_summary": summary,
         "unified_metrics": telemetry, "qualification": "official single-task harness result",
     }, telemetry
+
+
+def _parse_racer_backend(value: str) -> dict:
+    try:
+        loaded = json.loads(value)
+    except json.JSONDecodeError as error:
+        raise argparse.ArgumentTypeError("RACER backend config must be JSON") from error
+    try:
+        return validate_racer_backend(loaded)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(str(error)) from error
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -961,6 +1183,8 @@ def build_parser() -> argparse.ArgumentParser:
                              "or raw (client tool JSON unchanged)")
     parser.add_argument("--history-budget-tokens", type=int,
                         help="Override both native C2KV history and workspace byte caps using checkpoint KV geometry")
+    parser.add_argument("--racer-backend-config", type=_parse_racer_backend,
+                        help="resolved racer-backend-v1 modular history/policy composition")
     parser.add_argument("--preview", action="store_true", help="Print commands without model, harness, or network calls")
     return parser
 
@@ -973,6 +1197,25 @@ def validate_args(args: argparse.Namespace) -> list[str]:
         raise ValueError("--history-budget-tokens does not support native bare static packing")
     if budget_tokens is not None and args.benchmark != "bfcl":
         raise ValueError("--history-budget-tokens currently supports BFCL only")
+    racer = getattr(args, "racer_backend_config", None)
+    if racer is not None:
+        validate_racer_backend(racer)
+        if budget_tokens is not None:
+            raise ValueError("RACER history budget is frozen in --racer-backend-config")
+        if args.ratio not in (None, 8):
+            raise ValueError("RACER uses the existing ratio-8 policy factory and an explicit token budget")
+        policy = racer["policy"]
+        if policy == "off":
+            valid_policy_route = args.method == "c2kv_only" and args.candidate_algorithm is None
+        elif policy == "t02":
+            valid_policy_route = (args.method == "proposed" and args.detector == "t02_risk"
+                                  and args.candidate_algorithm is None)
+        else:
+            valid_policy_route = (args.method == "proposed"
+                                  and args.candidate_algorithm == policy
+                                  and policy in RACER_CANDIDATE_POLICIES)
+        if not valid_policy_route:
+            raise ValueError("RACER policy must use its unchanged native C1 policy factory")
     if args.tool_memory == "none":
         if args.tool_checkpoint is not None or args.tool_budget_tokens is not None:
             raise ValueError("Tool options require --tool-memory")

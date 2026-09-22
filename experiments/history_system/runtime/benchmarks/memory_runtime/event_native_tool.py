@@ -142,6 +142,12 @@ class ToolRegionController:
                  ratio: int, max_new_tokens: int):
         if plan is None:
             return memory
+        bind = getattr(self.generator, "bind_tool_plan", None)
+        if callable(bind):
+            # Persistent normal-chat backends own their physical tool plan.
+            # Binding receives the already-selected plan and therefore cannot
+            # reselect between draft and regeneration.
+            return bind(memory, plan, payload)
         if self.spec.encoder != "t0":
             if self.spec.interface_policy == "schema":
                 return self._raw_schema_memory(memory, plan, payload,
@@ -528,6 +534,9 @@ class ToolRegionController:
         if memory.raw_tool_segments:
             metadata["tool_memory"]["raw_tool_segments"] = [
                 dict(item) for item in memory.raw_tool_segments]
+        binding = getattr(memory, "tool_plan", None)
+        if isinstance(binding, Mapping):
+            metadata["tool_memory"]["persistent_binding"] = copy.deepcopy(dict(binding))
         eligible = getattr(base, "eligible_chunks", None)
         if eligible is not None:
             tool_prefix = memory.chunks[:len(memory.chunks) - len(base.memory.chunks)]
@@ -568,4 +577,8 @@ class ToolRegionController:
                 dict(item) for item in result["memory"].raw_tool_segments]
         else:
             result["metadata"]["tool_memory"].pop("raw_tool_segments", None)
+        binding = getattr(result["memory"], "tool_plan", None)
+        if isinstance(binding, Mapping):
+            result["metadata"]["tool_memory"]["persistent_binding"] = copy.deepcopy(
+                dict(binding))
         return result

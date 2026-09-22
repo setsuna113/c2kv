@@ -237,10 +237,12 @@ reference-attention history through the shared tool adapter. For persistent
 AgentKV/CommitKV sessions, a fixed catalog and system prefix permit a changed
 raw-tool selection to replace its resident KV while preserving the existing
 history state. A changed catalog or source prefix is rejected instead of
-silently refilling history. Query-dependent T0 hybrid selection can change
-that source prefix and is not supported with these persistent reference-history
-sessions; native C2KV history reconstructs each request and supports that case.
-An unchanged T0 uniform catalog keeps its existing carrier identities.
+silently refilling history. The RACER persistent adapter also supports
+source-stable T0 gist/native segment replacement: one tool plan is frozen
+through draft and regeneration, and the next decision may select a new plan.
+Arbitrary catalog or source-prefix changes remain invalid. Native C2KV keeps
+its existing request reconstruction path. An unchanged T0 uniform catalog
+keeps its existing carrier identities.
 
 The recorded-decision study's Full control keeps the original uncompressed
 input without duplicate interface copies. Protected copies are charged to the
@@ -930,3 +932,37 @@ the two options add distinct cells and leave the default matrix unchanged.
 Select `acebench_agent__hiagent_full_b768` for the ACEBench HiAgent cell.
 Budget cells use `benchmarks.paper.budget_server`, and the runner checks the
 `/v1/c2kv/chat_budget` route after server health before starting a cell.
+
+# RACER backend/policy matrix
+
+RACER cells are opt-in and keep the history backend, recovery policy, and tool
+context as separate axes. A policy selection automatically adds its paired
+`off` control, while candidate policy names retain their exact registry
+identity. The history budget is an absolute token count:
+
+```bash
+python -m benchmarks.paper.runner prepare --config CONFIG.json \
+  --sglang-source ENGINE --output RESULTS \
+  --racer-backends c2kv,commitkv,h2o,snapkv,streamingllm \
+  --racer-policies t02,pending_verified --racer-history-budget 768 \
+  --tool-contexts t0_r8
+python -m benchmarks.paper.runner run --config CONFIG.json \
+  --sglang-source ENGINE --output RESULTS \
+  --racer-backends c2kv,commitkv,h2o,snapkv,streamingllm \
+  --racer-policies t02,pending_verified --racer-history-budget 768 \
+  --tool-contexts t0_r8 --stage closed_loop --cells CELL_ID
+```
+
+`raw` remains present when tool contexts are requested. Non-C2KV detector
+cells record `frozen_c2kv_unvalidated_transfer`; this labels an unvalidated
+calibration transfer and makes no new calibration claim. Source-repair
+policies and `off` use no learned detector. Persistent RACER execution requires
+`--disable-overlap-schedule`, `--disable-radix-cache`, and
+`--enable-streaming-session`; the runner supplies all three. CPU registry,
+composition, and transport tests are covered here. CUDA quality runs remain
+pending and are not implied by those checks.
+
+To select tools from the latest completed semantic event, use
+`--tool-contexts t0_r8_hybrid3_schema_latest_event`. This context resolves to
+`t0:r8:hybrid3:schema:selector=latest_event_topk_v1`; source artifacts and
+selector identities are recorded separately from the history backend.

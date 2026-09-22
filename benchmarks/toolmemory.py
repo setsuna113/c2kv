@@ -61,6 +61,30 @@ except ModuleNotFoundError:
     json_string_value_spans = _interface_module.json_string_value_spans
     tool_prose = _interface_module.tool_prose
 
+try:
+    from toolselection import (ADAPTIVE_RELATIVE_THRESHOLD, DEFAULT_SELECTOR_POLICY,
+                               SELECTOR_POLICIES,
+                               last_user_query, lexical_rank as selection_lexical_rank,
+                               selector_version, tool_selection)
+except ModuleNotFoundError:
+    # Keep path-based imports working for the copied history runtime.
+    _selection_path = Path(__file__).with_name("toolselection.py")
+    _selection_name = "c2kv_toolselection_" + hashlib.sha256(
+        str(_selection_path.resolve()).encode("utf-8")).hexdigest()[:12]
+    _selection_spec = importlib.util.spec_from_file_location(_selection_name, _selection_path)
+    if _selection_spec is None or _selection_spec.loader is None:
+        raise RuntimeError(f"cannot load tool selection helper {_selection_path}")
+    _selection_module = importlib.util.module_from_spec(_selection_spec)
+    sys.modules[_selection_name] = _selection_module
+    _selection_spec.loader.exec_module(_selection_module)
+    ADAPTIVE_RELATIVE_THRESHOLD = _selection_module.ADAPTIVE_RELATIVE_THRESHOLD
+    DEFAULT_SELECTOR_POLICY = _selection_module.DEFAULT_SELECTOR_POLICY
+    SELECTOR_POLICIES = _selection_module.SELECTOR_POLICIES
+    last_user_query = _selection_module.last_user_query
+    selection_lexical_rank = _selection_module.lexical_rank
+    selector_version = _selection_module.selector_version
+    tool_selection = _selection_module.tool_selection
+
 TOOL_MEMORY_SCHEMA = "c2kv.tool_memory.v1"
 RENDER_PROFILE = "next-compression-tool-explicit-protocol-v2"
 RANKER = "lexical-name4-text1-last-user-v1"
@@ -122,12 +146,15 @@ class ToolMemorySpec:
     max_chunks: int = DEFAULT_MAX_CHUNKS
     max_tool_tokens: int = DEFAULT_MAX_TOOL_TOKENS
     interface_policy: str = "none"
+    selector_policy: str = DEFAULT_SELECTOR_POLICY
 
     def validate(self) -> None:
         if self.encoder not in ENCODERS:
             raise ValueError(f"unknown tool-memory encoder {self.encoder!r}")
         if self.interface_policy not in ("none", "schema"):
             raise ValueError(f"unknown tool interface policy {self.interface_policy!r}")
+        if self.selector_policy not in SELECTOR_POLICIES:
+            raise ValueError(f"unknown tool selector policy {self.selector_policy!r}")
         if self.ratio not in SUPPORTED_RATIOS:
             raise ValueError(
                 f"tool-memory ratio must be one of {SUPPORTED_RATIOS}, got {self.ratio}")
@@ -144,7 +171,11 @@ class ToolMemorySpec:
     def name(self) -> str:
         base = f"{self.encoder}_r{self.ratio}"
         layout_name = base if self.layout == "uniform" else f"{base}_{self.layout}{self.top_k}"
-        return layout_name if self.interface_policy == "none" else f"{layout_name}_schema"
+        interface_name = (layout_name if self.interface_policy == "none"
+                          else f"{layout_name}_schema")
+        if self.selector_policy == DEFAULT_SELECTOR_POLICY:
+            return interface_name
+        return f"{interface_name}_selector_{self.selector_policy}"
 
     def as_dict(self) -> Dict[str, Any]:
         result = {
@@ -158,27 +189,35 @@ class ToolMemorySpec:
             result["interface_policy"] = self.interface_policy
             result["interface_render_profile"] = INTERFACE_RENDER_PROFILE
             result["description_document_profile"] = DESCRIPTION_DOCUMENT_PROFILE
+        if self.selector_policy != DEFAULT_SELECTOR_POLICY:
+            result["selector_policy"] = self.selector_policy
+            result["selector_version"] = selector_version(self.selector_policy)
         return result
 
 
-_SPEC_RE = re.compile(r"^(?P<encoder>t0|streamingllm|h2o|snapkv|pyramidkv):r(?P<ratio>\d+)(?::(?P<layout>uniform|hybrid(?P<k>\d+)))?(?::(?P<interface>schema))?$")
+_SPEC_RE = re.compile(
+    r"^(?P<encoder>t0|streamingllm|h2o|snapkv|pyramidkv):r(?P<ratio>\d+)"
+    r"(?::(?P<layout>uniform|hybrid(?P<k>\d+)))?(?::(?P<interface>schema))?"
+    r"(?::selector=(?P<selector>last_user_topk_v1|latest_event_topk_v1|last_user_adaptive_v1))?$")
 
 
 def parse_tool_memory_spec(text: Optional[str]) -> Optional[ToolMemorySpec]:
-    """``none``/empty -> None; optionally append ``:schema`` to protect interfaces."""
+    """Parse the codec/layout and an optional versioned selection policy."""
     value = (text or "").strip().lower()
     if value in ("", "none", "full", "raw"):
         return None
     match = _SPEC_RE.match(value)
     if not match:
         raise ValueError(
-            f"unparseable tool-memory spec {text!r}; expected <encoder>:r<8|12>[:uniform|:hybrid<k>][:schema]")
+            f"unparseable tool-memory spec {text!r}; expected "
+            "<encoder>:r<8|12>[:uniform|:hybrid<k>][:schema][:selector=<policy>]")
     layout = match.group("layout") or "uniform"
     top_k = int(match.group("k")) if match.group("k") else 0
     spec = ToolMemorySpec(
         ratio=int(match.group("ratio")), encoder=match.group("encoder"),
         layout="hybrid" if layout.startswith("hybrid") else "uniform", top_k=top_k,
-        interface_policy=match.group("interface") or "none")
+        interface_policy=match.group("interface") or "none",
+        selector_policy=match.group("selector") or DEFAULT_SELECTOR_POLICY)
     spec.validate()
     return spec
 
@@ -291,10 +330,7 @@ def message_text(message: Mapping[str, Any]) -> str:
 
 def query_text(messages: Sequence[Mapping[str, Any]]) -> str:
     """The ranker reads the latest user message (scope ``last_user``)."""
-    for message in reversed(messages):
-        if message.get("role") == "user":
-            return message_text(message)
-    return message_text(messages[-1]) if messages else ""
+    return last_user_query(messages)
 
 
 TOOL_SPANS_FIELD = "c2kv_tool_spans_v1"
@@ -409,16 +445,7 @@ def _tokens(text: str) -> List[str]:
 
 def lexical_rank(tools: Sequence[Mapping[str, Any]], query: str) -> Tuple[int, ...]:
     """Catalog order by descending score; name overlap weighs four text overlaps."""
-    query_tokens = set(_tokens(query))
-    if not query_tokens:
-        return tuple(range(len(tools)))
-    scored = []
-    for index, tool in enumerate(tools):
-        name_overlap = len(query_tokens & set(_tokens(tool_name(tool))))
-        text_overlap = len(query_tokens & set(_tokens(tool_search_text(tool))))
-        scored.append((-(4.0 * name_overlap + float(text_overlap)), index))
-    scored.sort()
-    return tuple(index for _, index in scored)
+    return selection_lexical_rank(tools, query)
 
 
 # ---------------------------------------------------------------------------
@@ -428,10 +455,7 @@ def lexical_rank(tools: Sequence[Mapping[str, Any]], query: str) -> Tuple[int, .
 
 def native_indices(tools: Sequence[Mapping[str, Any]], spec: ToolMemorySpec,
                    messages: Sequence[Mapping[str, Any]]) -> Tuple[int, ...]:
-    if spec.layout == "uniform":
-        return ()
-    ranked = lexical_rank(tools, query_text(messages))
-    return tuple(sorted(ranked[: spec.top_k]))
+    return tuple(tool_selection(tools, spec, messages)["native_indices"])
 
 
 def t0_documents(snapshots: Sequence[Any], indices: Sequence[int]) -> Tuple[Dict[str, Any], ...]:
@@ -655,8 +679,11 @@ def plan_visible_tool_memory(payload: Mapping[str, Any], spec: ToolMemorySpec,
     snapshots = [tool_snapshot(tool) for tool in tools]
     for span in spans:
         snapshots.append(visible_tool_snapshot(span))
-    native = (native_indices(snapshots, spec, messages) if native_override is None
-              else tuple(sorted(int(index) for index in native_override)))
+    selection = tool_selection(snapshots, spec, messages)
+    score_selected = tuple(selection["native_indices"])
+    requested_native = (score_selected if native_override is None
+                        else tuple(sorted(int(index) for index in native_override)))
+    native = requested_native
     opaque = []
     if spec.interface_policy == "schema":
         # Unknown producer formats have no safe interface/prose split. Keep
@@ -669,6 +696,7 @@ def plan_visible_tool_memory(payload: Mapping[str, Any], spec: ToolMemorySpec,
             if compact_tool(parsed) is None:
                 opaque.append(len(tools) + source_index)
         native = tuple(sorted(set(native) | set(opaque)))
+    interface_forced = tuple(sorted(set(opaque) - set(requested_native)))
     if len(set(native)) != len(native) or any(index < 0 or index >= len(snapshots) for index in native):
         raise ValueError("native tool indices must be unique catalog indices")
     native_set = set(native)
@@ -747,10 +775,27 @@ def plan_visible_tool_memory(payload: Mapping[str, Any], spec: ToolMemorySpec,
         interface_spans = ()
     for anchor in anchors:
         anchor.setdefault("rewritten_message_index", anchor["message_index"])
+    selector_info = ({
+        "selector_policy": selection["policy"],
+        "selector_version": selection["selector_version"],
+        "selector_scores": list(selection["scores"]),
+        "selector_rank": list(selection["rank"]),
+        "selector_query_sha256": selection["query_sha256"],
+        "selector_latest_io_present": selection["latest_io_present"],
+        "score_selected_native_indices": list(score_selected),
+        "interface_forced_native_indices": list(interface_forced),
+        **({"native_override_indices": list(requested_native)}
+           if native_override is not None else {}),
+        **({"relative_threshold": ADAPTIVE_RELATIVE_THRESHOLD,
+            "selection_count": len(score_selected)}
+           if spec.selector_policy == "last_user_adaptive_v1" else {}),
+    } if spec.selector_policy != DEFAULT_SELECTOR_POLICY else {})
     info = {
         "schema": TOOL_MEMORY_SCHEMA, "spec": spec.name, "encoder": spec.encoder,
-        "ratio": spec.ratio, "layout": spec.layout, "top_k": spec.top_k,
+        "ratio": spec.ratio, "layout": spec.layout,
+        "top_k": (None if spec.selector_policy == "last_user_adaptive_v1" else spec.top_k),
         "interface_policy": spec.interface_policy,
+        **selector_info,
         **({"interface_render_profile": INTERFACE_RENDER_PROFILE}
            if spec.interface_policy == "schema" else {}),
         **({"description_document_profile": DESCRIPTION_DOCUMENT_PROFILE}
@@ -1145,6 +1190,28 @@ class ToolMemory:
         if visible is None:
             self.stats["skipped_no_tools"] += 1
             return None
+        return self.materialize_visible_plan(
+            payload, visible, retrieval_only=retrieval_only,
+            target_resident_tokens=target_resident_tokens)
+
+    def materialize_visible_plan(
+        self,
+        payload: Mapping[str, Any],
+        visible: VisibleToolPlan,
+        *,
+        retrieval_only: bool = False,
+        target_resident_tokens: Optional[int] = None,
+    ) -> ToolMemoryPlan | VisibleToolPlan:
+        """Attach server receipts to one already-selected visible plan.
+
+        This seam lets a composed runtime freeze selection once per decision,
+        then materialize the exact same plan without running the selector a
+        second time during draft or regeneration.
+        """
+        if not isinstance(visible, VisibleToolPlan):
+            raise TypeError("visible must be a VisibleToolPlan")
+        if visible.spec != self.spec:
+            raise ValueError("visible tool plan spec differs from this ToolMemory manager")
         if self.spec.encoder != "t0":
             if retrieval_only:
                 raise ValueError("retrieval-only is a native-schema control, not a raw KV method")

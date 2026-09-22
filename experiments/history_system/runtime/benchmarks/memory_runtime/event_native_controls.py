@@ -131,6 +131,16 @@ def build_event_native_controller(
 ) -> Any:
     """Build a finite controller without importing the CLI/server module."""
 
+    if s0_config is not None and "racer_backend" in s0_config:
+        from .racer.config import BackendConfig
+        from .racer.policies import build_controller
+        backend = BackendConfig.parse(s0_config["racer_backend"])
+        if backend.backend != "c2kv":
+            return build_controller(tokenizer, config=s0_config, packing=packing,
+                policy=policy, model_context=model_context, benchmark=benchmark)
+        s0_config = dict(s0_config)
+        s0_config.pop("racer_backend")
+
     if s0_config is not None and "candidate_algorithm" in s0_config:
         from .candidate_algorithms.allocation import CandidateAllocator
         from .candidate_algorithms.controller import wrap_with_candidate_recovery

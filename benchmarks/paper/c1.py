@@ -23,6 +23,10 @@ import urllib.error
 from benchmarks.measurement.telemetry import append_jsonl, canonical_sha256, read_jsonl
 from benchmarks.measurement.replay import _paper_measurement
 from .candidate_matrix import ARM_TO_VARIANT, SUPPORTED_BENCHMARKS as CANDIDATE_BENCHMARKS
+from .racer_matrix import (
+    RACER_CANDIDATE_POLICIES, is_racer_arm, parse_racer_arm_name,
+    racer_config_for_arm,
+)
 from benchmarks.arms import get_arm
 from benchmarks.native_history_budget import NativeHistoryBudget
 from benchmarks.native_tool_schema import NativeToolSchema
@@ -39,6 +43,10 @@ RATIO = ARMS[ARM]
 def select_arm(arm):
     """Bind this process to one native C1 arm (default: the final ratio-8 system)."""
     global ARM, RATIO
+    if is_racer_arm(arm):
+        parse_racer_arm_name(arm)
+        ARM, RATIO = arm, 8
+        return ARM, RATIO
     if arm not in ARMS:
         raise ValueError(f"Unknown native C1 arm {arm!r}; expected one of {sorted(ARMS)}")
     ARM, RATIO = arm, ARMS[arm]
@@ -69,13 +77,18 @@ def load_delivery():
 def delivery_args(config, benchmark, output, task_ids, delivery):
     settings = config.get("c1", {})
     detector = settings.get("detector", "d3_hybrid")
+    racer = racer_config_for_arm(config, ARM) if is_racer_arm(ARM) else None
+    racer_policy = racer["policy"] if racer is not None else None
     benchmark_dir = (config["tau2_dir"] if benchmark == "tau2" else
                      config["toolsandbox_dir"] if benchmark == "toolsandbox" else
                      config["bfcl_dir"])
-    if ARM in ARM_TO_VARIANT and benchmark not in CANDIDATE_BENCHMARKS:
+    if ((ARM in ARM_TO_VARIANT or racer is not None)
+            and benchmark not in CANDIDATE_BENCHMARKS):
         raise ValueError("candidate arms support " + ", ".join(sorted(CANDIDATE_BENCHMARKS)))
     command = [
-        "--method", ("c2kv_native" if ARM in NATIVE_RATIOS else
+        "--method", ("c2kv_only" if racer_policy == "off" else
+                     "proposed" if racer is not None else
+                     "c2kv_native" if ARM in NATIVE_RATIOS else
                      "c2kv_only" if ARM == "c2kv_c1_off_r8" else "proposed"),
         "--checkpoint", config["checkpoint"],
         "--sglang-backend-url", config.get("upstream") or f"http://127.0.0.1:{config['server_port']}",
@@ -91,12 +104,19 @@ def delivery_args(config, benchmark, output, task_ids, delivery):
         "--out", str(output),
         "--ratio", str(RATIO),
     ]
-    if ARM in ARM_TO_VARIANT:
+    if racer_policy in RACER_CANDIDATE_POLICIES:
+        command += ["--candidate-algorithm", racer_policy]
+    elif ARM in ARM_TO_VARIANT:
         command += ["--candidate-algorithm", ARM_TO_VARIANT[ARM]]
     else:
+        if racer_policy == "t02":
+            detector = "t02_risk"
         command += ["--detector", detector]
         if ARM not in NATIVE_RATIOS and detector in {"t02_risk", "legacy_prefill"}:
             command += ["--embedding-batch-size", str(settings.get("embedding_batch_size", 1))]
+    if racer is not None:
+        command += ["--racer-backend-config", json.dumps(
+            racer, sort_keys=True, separators=(",", ":"))]
     if "native_history_budget_tokens" in config:
         budget = NativeHistoryBudget(config["native_history_budget_tokens"])
         budget.validate_arm(get_arm(ARM))
@@ -168,7 +188,35 @@ def save(path, value):
     path.write_text(json.dumps(value, indent=2, ensure_ascii=False, allow_nan=False) + "\n", encoding="utf-8")
 
 
+def racer_source_identity():
+    """Hash new composition sources that an untracked directory would hide from git status."""
+    paths = [
+        *sorted((DELIVERY / "runtime/benchmarks/memory_runtime/racer").glob("*.py")),
+        ROOT / "benchmarks/toolselection.py",
+        *sorted((ROOT / "benchmarks/fixtures").glob("*")),
+    ]
+    files = {}
+    for path in paths:
+        if path.is_file():
+            relative = path.resolve().relative_to(ROOT.resolve()).as_posix()
+            files[relative] = {
+                "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                "bytes": path.stat().st_size,
+            }
+    if not files:
+        raise FileNotFoundError("RACER composition source files are missing")
+    return {
+        "schema": "racer-source-identity-v1",
+        "files": files,
+        "sha256": hashlib.sha256(json.dumps(
+            files, sort_keys=True, separators=(",", ":")).encode()).hexdigest(),
+    }
+
+
 def method_label():
+    if is_racer_arm(ARM):
+        backend, policy, budget = parse_racer_arm_name(ARM)
+        return f"RACER {backend} {policy} b{budget}"
     if ARM == "c2kv_c1_off_r8":
         return "C1 initial allocation (recovery off)"
     if ARM in ARM_TO_VARIANT:
@@ -177,11 +225,14 @@ def method_label():
 
 
 def summarize_scores(benchmark, receipts):
+    racer = parse_racer_arm_name(ARM) if is_racer_arm(ARM) else None
     if benchmark != "appworld":
         scores = [row["unified_metrics"]["official_score"] for row in receipts]
         failures = [row["task_id"] for row in receipts if row.get("status") == "harness_failure"]
         infeasible = [row["task_id"] for row in receipts if row.get("status") == "method_failure"]
-        return {"arm": ARM, "method": method_label(), "ratio": RATIO,
+        return {"arm": ARM, "method": method_label(),
+                "ratio": None if racer else RATIO,
+                **({"history_budget_tokens": racer[2]} if racer else {}),
                 "n_scored": len(scores), "n": len(scores),
                 "semantic_score": sum(scores) / len(scores) if scores else None,
                 "n_harness_failures": len(failures), "harness_failure_task_ids": failures,
@@ -189,7 +240,9 @@ def summarize_scores(benchmark, receipts):
                 "task_rows": receipts, "result_status": "preliminary, n=1"}
     from .c1_appworld import summarize_scores as appworld_scores
     result = appworld_scores(receipts)
-    result.update(arm=ARM, ratio=RATIO, method=method_label())
+    result.update(arm=ARM, ratio=None if racer else RATIO, method=method_label())
+    if racer:
+        result["history_budget_tokens"] = racer[2]
     return result
 
 
@@ -210,6 +263,12 @@ def prepare_native(config, benchmark, directory, tasks, delivery):
         profile["comparison"] = "Same C1 ratio8 initial history allocation, recovery disabled"
     elif ARM in ARM_TO_VARIANT:
         profile["comparison"] = "Explicit ratio-8 candidate; not a legacy C1 or D3 score"
+    elif is_racer_arm(ARM):
+        profile["comparison"] = (
+            "Modular RACER history backend and exact policy composition at an explicit token budget")
+        profile.pop("ratio", None)
+        profile["history_budget_tokens"] = parse_racer_arm_name(ARM)[2]
+        profile["racer_source_identity"] = racer_source_identity()
     previous_profile = native / "profile.json"
     if previous_profile.is_file():
         previous = json.loads(previous_profile.read_text(encoding="utf-8"))
@@ -217,6 +276,10 @@ def prepare_native(config, benchmark, directory, tasks, delivery):
             raise ValueError("Native arm or ratio changed; use a separate cell output directory")
         if previous.get("native_history_budget") != profile.get("native_history_budget"):
             raise ValueError("Native history budget changed; use a separate cell output directory")
+        if previous.get("racer_runtime_budget") != profile.get("racer_runtime_budget"):
+            raise ValueError("RACER runtime budget changed; use a separate cell output directory")
+        if previous.get("racer_backend") != profile.get("racer_backend"):
+            raise ValueError("RACER composition changed; use a separate cell output directory")
     profile["sglang_backend_preflight"] = delivery.preflight_sglang_backend(args)
     controller_path = native / "controller.json"
     save(controller_path, controller)
@@ -627,7 +690,7 @@ def apply_tool_cli(config, tool_memory, tool_checkpoint, tool_budget_tokens):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, required=True)
-    parser.add_argument("--arm", choices=sorted(ARMS), default="c2kv_c1_t02_r8")
+    parser.add_argument("--arm", default="c2kv_c1_t02_r8")
     parser.add_argument("--benchmark", choices=("bfcl_base", "bfcl_long_context", "appworld", "acebench_agent", "toolsandbox", "tau2"), required=True)
     parser.add_argument("--stage", choices=("closed_loop", "common_prefix"), default="closed_loop")
     parser.add_argument("--out", type=Path, required=True)

@@ -17,6 +17,10 @@ from .candidate_matrix import (
     ARM_TO_VARIANT, SUPPORTED_BENCHMARKS as CANDIDATE_BENCHMARKS,
     parse_candidate_arms, with_candidate_methods,
 )
+from .racer_matrix import (
+    is_racer_arm, parse_racer_backends, parse_racer_policies,
+    racer_config_for_arm, with_racer_methods,
+)
 from benchmarks.history_budget import HistoryKVBudget, parse_history_kv_budget
 from benchmarks.native_history_budget import NativeHistoryBudget, parse_native_history_budget
 from benchmarks.native_tool_schema import NativeToolSchema, parse_native_tool_schema
@@ -62,7 +66,8 @@ def is_candidate_arm(arm):
 
 
 def is_native_arm(arm):
-    return is_c1_arm(arm) or is_candidate_arm(arm) or arm in NATIVE_RATIOS
+    return (is_c1_arm(arm) or is_candidate_arm(arm)
+            or is_racer_arm(arm) or arm in NATIVE_RATIOS)
 
 
 def with_native_ratios(config, ratios):
@@ -136,7 +141,15 @@ def cells(config):
                 if "history_budget_tokens" in method:
                     from benchmarks.arms import get_arm
                     arm = get_arm(method["arm"])
-                    if arm.history_kv:
+                    if is_racer_arm(arm.name):
+                        resolved = racer_config_for_arm(config, arm.name)
+                        row.update(
+                            history_backend=resolved["backend"],
+                            racer_policy=resolved["policy"],
+                            calibration_status=resolved["detector_calibration"],
+                            history_allocation=resolved["allocation"],
+                        )
+                    elif arm.history_kv:
                         budget = HistoryKVBudget(method["history_budget_tokens"])
                         budget.apply(arm)
                         row["cell_id"] = bench["name"] + "__" + budget.variant_name(arm.name)
@@ -241,14 +254,14 @@ def server_command(config, source, arm=None, benchmark=None, tool_checkpoint=Non
     radix_arms = set(config.get("radix_cache_arms") or ())
     if budget_text and resolved_arm.text_policy in radix_arms:
         radix_arms.add(arm)
-    if reference_attention or ("*" not in radix_arms and arm not in radix_arms):
+    if reference_attention or is_racer_arm(arm) or ("*" not in radix_arms and arm not in radix_arms):
         cmd.append("--disable-radix-cache")
     if reference_attention or config.get("disable_cuda_graph", True):
         cmd.append("--disable-cuda-graph")
     cmd += ["--disable-piecewise-cuda-graph", "--disable-overlap-schedule",
             "--enable-streaming-session", "--host", "127.0.0.1",
             "--port", str(config["server_port"])]
-    if is_c1_arm(arm) or is_candidate_arm(arm):
+    if is_c1_arm(arm) or is_candidate_arm(arm) or is_racer_arm(arm):
         cmd += ["--c2kv-shadow-feature-layer", "-2", "--enable-return-hidden-states"]
     from benchmarks.toolmemory import parse_tool_memory_spec
     tool_spec = parse_tool_memory_spec(tool_memory) if tool_memory is not None else None
@@ -414,7 +427,7 @@ def run_command(config, cell, directory, profile, stage="closed_loop"):
                "--upstream", f"http://127.0.0.1:{config['server_port']}",
                "--proxy-port", str(config["proxy_port"]),
                "--out", str(directory), "--num-workers", "1"]
-        if "history_budget_tokens" in cell:
+        if "history_budget_tokens" in cell and not is_racer_arm(cell["arm"]):
             cmd += NativeHistoryBudget(cell["history_budget_tokens"]).cli_args()
         if cell.get("tool_memory"):
             cmd += ["--tool-memory", cell["tool_memory"]]
@@ -537,7 +550,9 @@ def extension_problem(existing, config, source, output):
         has_artifacts = any((output / stage / cell_id).exists() for stage in ("closed_loop", "common_prefix"))
         for key in ("arm", "method", "ratio", "retention", "benchmark", "adapter", "category",
                     "tool_context", "tool_memory", "tool_checkpoint", "tool_interface_policy",
-                    "history_budget_tokens", "tool_schema"):
+                    "history_budget_tokens", "tool_schema", "racer_backend",
+                    "history_backend", "racer_policy", "calibration_status",
+                    "history_allocation"):
             if key == "method" and not has_artifacts:
                 continue
             if old.get(key) != new.get(key):
@@ -565,6 +580,15 @@ def _prepare_locked(config, output, source):
         raise ValueError("The paper benchmark uses CUDA")
     for item in config["methods"]:
         arm = get_arm(item["arm"])
+        if is_racer_arm(arm.name):
+            racer_config_for_arm(config, arm.name)
+            if (arm.native_controller != "racer" or item.get("group") != "racer"
+                    or not item.get("benchmarks")
+                    or not set(item["benchmarks"]) <= CANDIDATE_BENCHMARKS
+                    or not set(item["benchmarks"]) <= {b["name"] for b in config["benchmarks"]}):
+                raise ValueError(
+                    "RACER methods require the native controller and explicit portable benchmark scope")
+            continue
         if arm.text_history_budget_tokens is not None:
             if (type(item.get("history_budget_tokens")) is not int
                     or item["history_budget_tokens"] != arm.text_history_budget_tokens
@@ -703,6 +727,9 @@ def _prepare_locked(config, output, source):
             fields.append("tool_interface_policy")
         if any("history_budget_tokens" in row for row in matrix):
             fields.append("history_budget_tokens")
+        if any(is_racer_arm(row["arm"]) for row in matrix):
+            fields.extend(["history_backend", "racer_policy", "calibration_status",
+                           "history_allocation"])
         if any("tool_schema" in row for row in matrix):
             fields.append("tool_schema")
         if any(is_subset(row) for row in matrix):
@@ -1150,6 +1177,14 @@ def main(argv=None):
     parser.add_argument("--candidate-benchmarks", default="bfcl_base",
                         help="candidate benchmark scope, comma-separated subset of "
                              "bfcl_base (default), bfcl_long_context, appworld, acebench_agent, tau2, toolsandbox")
+    parser.add_argument("--racer-backends", default="",
+                        help="opt-in RACER history backends: all or comma-separated "
+                             "c2kv,commitkv,h2o,snapkv,streamingllm")
+    parser.add_argument("--racer-policies", default="",
+                        help="opt-in RACER policies: all or comma-separated off,t02,"
+                             "and exact candidate variant names; on policies add their paired off cell")
+    parser.add_argument("--racer-history-budget", type=int,
+                        help="explicit positive history-token budget shared by selected RACER cells")
     parser.add_argument("--acon-budget-tokens", type=int,
                         help="add budget-adapted ACON BFCL/ACEBench cells with this actor history cap")
     parser.add_argument("--hiagent-budget-tokens", type=int,
@@ -1189,6 +1224,9 @@ def main(argv=None):
         config = with_candidate_methods(
             config, parse_candidate_arms(args.candidate_arms),
             tuple(args.candidate_benchmarks.split(",")))
+        config = with_racer_methods(
+            config, parse_racer_backends(args.racer_backends),
+            parse_racer_policies(args.racer_policies), args.racer_history_budget)
         config = with_acon_budget(config, args.acon_budget_tokens)
         config = with_hiagent_budget(config, args.hiagent_budget_tokens)
         for value in args.history_kv_budget:

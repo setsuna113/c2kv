@@ -242,6 +242,9 @@ class EventNativeDecisionRunner:
                     'finish_reason': ('stop' if record.get('commit_validation', {}).get('synthetic_abstention')
                                       else result.finish_reason),
                 }
+                resolve = getattr(self.generator, 'resolve_decision', None)
+                if callable(resolve):
+                    record['backend_commit'] = resolve(record['response'], result=result, record=record)
             record['session_cache_after'] = self.generator.session_cache_info()
             record['decision_end_unix_ns'] = time.time_ns()
             record['decision_duration_ns'] = time.perf_counter_ns() - started_ns
@@ -343,6 +346,9 @@ class EventNativeDecisionRunner:
             # The active scope finalizes scalar cache commit diagnostics on exit.
             'token_logprobs': list(result.token_logprobs), 'stats': result.stats,
         })
+        served = result.stats.get('racer_served_usage')
+        if isinstance(served, dict):
+            usage.update(served)
         self.journal.finish(handle, 'completed', usage=usage)
         draft = decode_native_generation(
             self.tokenizer, result,
@@ -370,3 +376,24 @@ class EventNativeDecisionRunner:
         record['usage_scope'] = (
             'Prompt counts resident model input per generation; encoder extraction and repeated raw '
             'forward work are separate generation.stats counters. Failed calls have unknown usage.')
+        tool_costs = []
+        for item in trace:
+            generation = item.get('generation') or {}
+            stats = generation.get('stats') or {}
+            cost = stats.get('racer_tool_cost')
+            if isinstance(cost, dict) and cost.get('schema') == 'racer-tool-transport-v1':
+                tool_costs.append(cost)
+        if tool_costs:
+            fields = (
+                'attempted_tool_extraction_calls', 'completed_tool_extraction_calls',
+                'attempted_tool_repair_calls', 'completed_tool_repair_calls',
+                'unknown_usage_calls',
+            )
+            record['tool_transport_total'] = {
+                'schema': 'racer-tool-transport-total-v1',
+                **{field: sum(int(cost.get(field, 0)) for cost in tool_costs)
+                   for field in fields},
+                'usage_scope': (
+                    'Completed calls have actual endpoint receipts; failed or ambiguous calls '
+                    'remain reserved with unknown usage.'),
+            }
