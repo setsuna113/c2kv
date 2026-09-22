@@ -65,16 +65,27 @@ def test_default_policy_is_byte_compatible_and_matches_frozen_rank():
     assert "selector_policy" not in spec.as_dict()
     assert "selector_version" not in spec.as_dict()
     assert toolmemory.lexical_rank(TOOLS, messages[0]["content"]) == expected_rank
+    assert toolselection.tool_selection(TOOLS, spec, messages) == {
+        "native_indices": tuple(sorted(expected_rank[:3])),
+        "scores": toolselection.lexical_scores(TOOLS, messages[0]["content"]),
+        "rank": expected_rank,
+        "policy": "last_user_topk_v1",
+        "selector_version": "tool-selection-v1",
+        "query_sha256": toolselection.tool_selection(TOOLS, spec, messages)["query_sha256"],
+        "latest_io_present": False,
+    }
     assert toolmemory.native_indices(TOOLS, spec, messages) == tuple(sorted(expected_rank[:3]))
 
 
 def test_parser_versions_nondefault_policy_without_changing_codec_layout():
     text = "t0:r8:hybrid3:schema:selector=latest_event_topk_v1"
     spec = toolmemory.parse_tool_memory_spec(text)
+
     assert (spec.encoder, spec.ratio, spec.layout, spec.top_k, spec.interface_policy) == (
         "t0", 8, "hybrid", 3, "schema")
     assert spec.selector_policy == "latest_event_topk_v1"
     assert spec.name == "t0_r8_hybrid3_schema_selector_latest_event_topk_v1"
+    assert spec.as_dict()["selector_policy"] == "latest_event_topk_v1"
     assert spec.as_dict()["selector_version"] == "tool-selection-v1"
 
 
@@ -91,6 +102,8 @@ def test_latest_event_query_changes_selection_with_completed_observation():
     cancel = toolselection.tool_selection(
         TOOLS, spec, [*prefix, {"role": "tool", "tool_call_id": "c1",
                                "content": "cancel_order order"}])
+
+    assert weather["latest_io_present"] and cancel["latest_io_present"]
     assert weather["native_indices"] == (2,)
     assert cancel["native_indices"] == (1,)
     assert weather["query_sha256"] != cancel["query_sha256"]
@@ -108,7 +121,10 @@ def test_latest_event_ignores_old_turn_and_incomplete_new_batch():
         {"role": "tool", "tool_call_id": "a", "content": "get_weather"},
     ]
     selected = toolselection.tool_selection(TOOLS, spec, messages)
+    fallback_rank = toolmemory.lexical_rank(TOOLS, "cancel_order now")
+
     assert selected["latest_io_present"] is False
+    assert selected["rank"] == fallback_rank
     assert selected["native_indices"] == (1,)
 
 
@@ -118,12 +134,16 @@ def test_adaptive_policy_allows_zero_all_and_more_than_three():
     four = [tool(f"tool_{index}", "target" if index < 4 else "other")
             for index in range(5)]
     all_five = [tool(f"tool_{index}", "target") for index in range(5)]
-    assert toolselection.tool_selection(
-        four, spec, [{"role": "user", "content": "absent"}])["native_indices"] == ()
-    assert toolselection.tool_selection(
-        four, spec, [{"role": "user", "content": "target"}])["native_indices"] == (0, 1, 2, 3)
-    assert toolselection.tool_selection(
-        all_five, spec, [{"role": "user", "content": "target"}])["native_indices"] == (0, 1, 2, 3, 4)
+
+    zero = toolselection.tool_selection(four, spec, [{"role": "user", "content": "absent"}])
+    more_than_three = toolselection.tool_selection(
+        four, spec, [{"role": "user", "content": "target"}])
+    all_selected = toolselection.tool_selection(
+        all_five, spec, [{"role": "user", "content": "target"}])
+
+    assert zero["native_indices"] == ()
+    assert more_than_three["native_indices"] == (0, 1, 2, 3)
+    assert all_selected["native_indices"] == (0, 1, 2, 3, 4)
 
 
 def test_nondefault_plan_separates_scored_and_interface_forced_native():
@@ -141,9 +161,13 @@ def test_nondefault_plan_separates_scored_and_interface_forced_native():
     spec = toolmemory.parse_tool_memory_spec(
         "h2o:r8:hybrid3:schema:selector=last_user_adaptive_v1")
     plan = toolmemory.plan_visible_tool_memory(payload, spec)
+
+    assert plan is not None
     assert plan.info["score_selected_native_indices"] == []
     assert plan.info["interface_forced_native_indices"] == [2]
     assert plan.info["native_indices"] == [2]
+    assert plan.info["selector_policy"] == "last_user_adaptive_v1"
+    assert plan.info["selector_latest_io_present"] is False
 
 
 def test_dynamic_selector_reads_recorded_bfcl_source_events():
@@ -156,11 +180,16 @@ def test_dynamic_selector_reads_recorded_bfcl_source_events():
     hashes = []
     for end, expected in ((3, 0), (5, 1), (7, 2), (9, 1)):
         completed = toolselection.tool_selection(catalog, spec, messages[:end])
+        assert completed["latest_io_present"] is True
         assert completed["native_indices"] == (expected,)
         hashes.append(completed["query_sha256"])
+        # The next assistant action alone is not a completed execution.
         if end < len(messages):
-            assert toolselection.tool_selection(catalog, spec, messages[:end + 1]) == completed
+            pending = toolselection.tool_selection(catalog, spec, messages[:end + 1])
+            assert pending == completed
     assert len(set(hashes)) == len(hashes)
+    initial = toolselection.tool_selection(catalog, spec, messages[:2])
+    assert initial["latest_io_present"] is False
 
 
 def test_adaptive_keeps_unbounded_legacy_query_and_hashes_scored_text():
@@ -169,8 +198,10 @@ def test_adaptive_keeps_unbounded_legacy_query_and_hashes_scored_text():
     prefix = " " * (toolselection.MAX_QUERY_COMPONENT_CHARS + 1)
     messages = [{"role": "user", "content": prefix + "send_message"}]
     selected = toolselection.tool_selection(TOOLS, spec, messages)
+    expected_hash = toolselection._query_hash(prefix + "send_message")
     assert selected["native_indices"] == (3,)
-    assert selected["query_sha256"] == toolselection._query_hash(prefix + "send_message")
+    assert selected["query_sha256"] == expected_hash
+    assert selected["scores"] == toolselection.lexical_scores(TOOLS, messages[0]["content"])
 
 
 def test_dynamic_query_hash_uses_bounded_scoring_components_after_execution():
@@ -186,3 +217,6 @@ def test_dynamic_query_hash_uses_bounded_scoring_components_after_execution():
     changed = [dict(message) for message in messages]
     changed[0]["content"] = prefix + "book_flight"
     assert toolselection.tool_selection(TOOLS, spec, changed) == selected
+    event = toolselection._completed_execution_group(messages, 0)
+    assert selected["query_sha256"] == toolselection._query_hash(
+        messages[0]["content"][:toolselection.MAX_QUERY_COMPONENT_CHARS], event)

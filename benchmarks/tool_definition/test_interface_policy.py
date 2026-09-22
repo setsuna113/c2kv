@@ -134,6 +134,8 @@ def test_cli_forwards_interface_policy_to_prepare_and_evaluate(tmp_path, monkeyp
     cli.main(["evaluate", "--manifest", str(tmp_path / "manifest"),
               "--checkpoint", str(tmp_path / "checkpoint"),
               "--out", str(tmp_path / "results"), "--upstream", "http://127.0.0.1:9999",
-              "--max-new-tokens", "16", "--interface-policy", "schema"])
+              "--max-new-tokens", "16", "--interface-policy", "schema",
+              "--full-results", str(tmp_path / "donor")])
     assert calls[0][1]["interface_policy"] == "schema"
     assert calls[1][1]["interface_policy"] == "schema"
+    assert calls[1][1]["full_results"] == tmp_path / "donor"

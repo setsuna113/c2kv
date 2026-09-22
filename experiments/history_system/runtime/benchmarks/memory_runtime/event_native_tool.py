@@ -98,6 +98,10 @@ class ToolRegionController:
         if name == "advance_recovery":
             advance = getattr(self.inner, name)
             return lambda prepared, **kwargs: advance(prepared.inner, **kwargs)
+        if name in ("validate_commit", "finalize_commit"):
+            hook = getattr(self.inner, name)
+            return lambda prepared, *args, **kwargs: hook(
+                prepared.inner if isinstance(prepared, ToolPrepared) else prepared, *args, **kwargs)
         return getattr(self.inner, name)
 
     def _plan(self, payload: Mapping[str, Any]):

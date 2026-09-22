@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
 import pytest
 from types import SimpleNamespace
 
@@ -117,6 +118,7 @@ def test_evaluate_stages_full_history_through_shared_http_adapter(
     frozen_manifest = {
         "checkpoint": {"config_sha256": "frozen-config",
                        "model_files_sha256": {"model.safetensors": "weight-hash"}},
+        "selector": {"ranker": module.toolmemory.RANKER, "k": 1, "seed": 42},
         **({"interface_policy": "schema",
             "interface_render_profile": module.toolmemory.INTERFACE_RENDER_PROFILE,
             "full_control_policy": FULL_CONTROL_POLICY}
@@ -128,6 +130,7 @@ def test_evaluate_stages_full_history_through_shared_http_adapter(
     sent = []
     failures = {}
     reject_malformed_history = [False]
+    bad_full_measurement = [False]
 
     class FakeBackend:
         extract_tokens = staticmethod(lambda *_: {})
@@ -174,6 +177,8 @@ def test_evaluate_stages_full_history_through_shared_http_adapter(
                 "cost": {"server_measurement": {
                     "generation_active_kv_tokens": active,
                     "generation_active_kv_bytes": active * 20}}}}
+            if bad_full_measurement[0] and (method, layout) == ("c2kv", "full"):
+                response["normalized"]["cost"]["server_measurement"] = {}
             if method != "c2kv":
                 response["metadata"]["kv_memory_report"] = {"tool_kv_eviction": {
                     "success": True, "method": method, "history_untouched": True,
@@ -232,7 +237,7 @@ def test_evaluate_stages_full_history_through_shared_http_adapter(
     expected_sources = {
         "benchmarks/tool_definition/evaluate.py", "benchmarks/tool_definition/core.py",
         "benchmarks/tool_definition/prepare.py", "benchmarks/toolmemory.py",
-        "benchmarks/backends/sglang.py"}
+        "benchmarks/backends/sglang.py", "benchmarks/toolselection.py"}
     if interface_policy == "schema":
         expected_sources.update(("benchmarks/toolinterface.py", "benchmarks/toolmemory_joint.py"))
         assert report["interface_render_profile"] == module.toolmemory.INTERFACE_RENDER_PROFILE
@@ -264,6 +269,80 @@ def test_evaluate_stages_full_history_through_shared_http_adapter(
     assert sent[1]["c2kv_kv_memory_hint"]["paper_measurement"]["history_message_count"] == 3
     assert all(request["c2kv_kv_memory_hint"]["paper_measurement"][
         "canonical_source_messages"] == sent[0]["messages"] for request in sent)
+
+    requests_before_reuse = len(sent)
+    chained_donor = tmp_path / "reused-c2kv-full"
+    chained = module.evaluate(
+        manifest_path, tmp_path, chained_donor,
+        upstream="http://localhost:30000", max_new_tokens=32,
+        methods=("c2kv",), layouts=("full", "hybrid"),
+        interface_policy=interface_policy, full_results=tmp_path / "out")
+    assert chained["status"] == "completed" and chained["result_rows"] == 2
+    chained_raw = [json.loads(line) for line in (
+        chained_donor / "raw_responses.jsonl").read_text(encoding="utf-8").splitlines()]
+    chained_full_raw = [row for row in chained_raw
+                        if (row["method"], row["layout"]) == ("c2kv", "full")]
+    assert len(chained_full_raw) == 1
+    assert chained_full_raw[0]["response_origin"] == "reused_full_anchor"
+    assert chained_full_raw[0]["full_anchor_reuse"]["path"] == str((tmp_path / "out").resolve())
+
+    reused_output = tmp_path / "reused-full"
+    reused = module.evaluate(
+        manifest_path, tmp_path, reused_output,
+        upstream="http://localhost:30000", max_new_tokens=32,
+        methods=("h2o",), layouts=("hybrid",),
+        interface_policy=interface_policy, full_results=chained_donor)
+    assert reused["status"] == "completed" and reused["result_rows"] == 1
+    assert len(sent) == requests_before_reuse + 2
+    assert reused["full_anchor_reuse"]["reused_full_rows"] == 1
+    assert reused["full_anchor_reuse"]["path"] == str(chained_donor.resolve())
+    assert reused["full_anchor_reuse"]["results_sha256"] == module.sha256_file(
+        chained_donor / "results.jsonl")
+    requests_before_resume = len(sent)
+    resumed_reuse = module.evaluate(
+        manifest_path, tmp_path, chained_donor,
+        upstream="http://localhost:30000", max_new_tokens=32,
+        methods=("c2kv",), layouts=("full", "hybrid"), resume=True,
+        interface_policy=interface_policy, full_results=tmp_path / "out")
+    assert resumed_reuse["status"] == "completed"
+    assert len(sent) == requests_before_resume
+    assert len([row for row in (chained_donor / "raw_responses.jsonl").read_text(
+        encoding="utf-8").splitlines() if json.loads(row)["layout"] == "full"]) == 1
+
+    donor_copy = tmp_path / "donor-copy"
+    shutil.copytree(chained_donor, donor_copy)
+    with pytest.raises(ValueError, match="resume run contract differs"):
+        module.evaluate(
+            manifest_path, tmp_path, reused_output,
+            upstream="http://localhost:30000", max_new_tokens=32,
+            methods=("h2o",), layouts=("hybrid",), resume=True,
+            interface_policy=interface_policy, full_results=donor_copy)
+    with pytest.raises(ValueError, match="max_new_tokens differs"):
+        module.evaluate(
+            manifest_path, tmp_path, tmp_path / "wrong-mode",
+            upstream="http://localhost:30000", max_new_tokens=64,
+            methods=("h2o",), layouts=("hybrid",),
+            interface_policy=interface_policy, full_results=tmp_path / "out")
+    original_prompt_sha256 = pair["full"]["prompt_sha256"]
+    pair["full"]["prompt_sha256"] = "different-full-prompt"
+    with pytest.raises(ValueError, match="Full prompt or native layout differs"):
+        module.evaluate(
+            manifest_path, tmp_path, tmp_path / "wrong-prompt",
+            upstream="http://localhost:30000", max_new_tokens=32,
+            methods=("h2o",), layouts=("hybrid",),
+            interface_policy=interface_policy, full_results=tmp_path / "out")
+    pair["full"]["prompt_sha256"] = original_prompt_sha256
+    original_sha256_file = module.sha256_file
+    with monkeypatch.context() as patcher:
+        patcher.setattr(module, "sha256_file", lambda path: (
+            "different-current-source" if path.name == "toolselection.py" else
+            original_sha256_file(path)))
+        with pytest.raises(ValueError, match="client_source_sha256 differs"):
+            module.evaluate(
+                manifest_path, tmp_path, tmp_path / "wrong-source",
+                upstream="http://localhost:30000", max_new_tokens=32,
+                methods=("h2o",), layouts=("hybrid",),
+                interface_policy=interface_policy, full_results=tmp_path / "out")
     with pytest.raises(ValueError, match="evaluation interface policy differs"):
         module.evaluate(manifest_path, tmp_path, tmp_path / "out",
                         upstream="http://localhost:30000", max_new_tokens=32,
@@ -280,6 +359,28 @@ def test_evaluate_stages_full_history_through_shared_http_adapter(
                                 upstream="http://localhost:30000", max_new_tokens=32,
                                 methods=("c2kv", "h2o"), resume=True,
                                 interface_policy="schema")
+    original_sha256_file = module.sha256_file
+    with monkeypatch.context() as patcher:
+        patcher.setattr(module, "sha256_file", lambda path: (
+            "changed-toolselection-source" if path.name == "toolselection.py" else
+            original_sha256_file(path)))
+        with pytest.raises(ValueError, match="resume run contract differs"):
+            module.evaluate(manifest_path, tmp_path, tmp_path / "out",
+                            upstream="http://localhost:30000", max_new_tokens=32,
+                            methods=("c2kv", "h2o"), resume=True,
+                            interface_policy=interface_policy)
+    frozen_manifest["selector"] = {
+        "ranker": module.toolmemory.RANKER, "k": 1, "seed": 42,
+        "policy": "latest_event_topk_v1", "selector_version": "tool-selection-v1",
+    }
+    with pytest.raises(ValueError, match="resume run contract differs"):
+        module.evaluate(manifest_path, tmp_path, tmp_path / "out",
+                        upstream="http://localhost:30000", max_new_tokens=32,
+                        methods=("c2kv", "h2o"), resume=True,
+                        interface_policy=interface_policy)
+    frozen_manifest["selector"] = {
+        "ranker": module.toolmemory.RANKER, "k": 1, "seed": 42,
+    }
     with pytest.raises(ValueError, match="run contract differs"):
         module.evaluate(manifest_path, tmp_path, tmp_path / "out",
                         upstream="http://localhost:30000", max_new_tokens=64,
@@ -329,3 +430,28 @@ def test_evaluate_stages_full_history_through_shared_http_adapter(
     assert len(bad_errors) == 1
     assert bad_errors[0]["decision_id"] == "bad-history"
     assert bad_errors[0]["phase"] == "full_anchor"
+
+    monkeypatch.setattr(module, "read_manifest", lambda *_: (
+        frozen_manifest, {("d", 8): pair}))
+    monkeypatch.setattr(module, "_source_rows", lambda *_: {"d": source})
+    retry_output = tmp_path / "retry-bad-full-receipt"
+    bad_full_measurement[0] = True
+    requests_before_bad_full = len(sent)
+    first = module.evaluate(
+        manifest_path, tmp_path, retry_output,
+        upstream="http://localhost:30000", max_new_tokens=32,
+        methods=("c2kv",), layouts=("full",), interface_policy=interface_policy)
+    assert first["status"] == "completed_with_errors" and first["result_rows"] == 0
+    assert len(sent) == requests_before_bad_full + 1
+    bad_full_measurement[0] = False
+    second = module.evaluate(
+        manifest_path, tmp_path, retry_output,
+        upstream="http://localhost:30000", max_new_tokens=32,
+        methods=("c2kv",), layouts=("full",), resume=True,
+        interface_policy=interface_policy)
+    assert second["status"] == "completed" and second["result_rows"] == 1
+    assert len(sent) == requests_before_bad_full + 2
+    retry_raw = [json.loads(line) for line in (retry_output / "raw_responses.jsonl").read_text(
+        encoding="utf-8").splitlines()]
+    assert len(retry_raw) == 2
+    assert all(row.get("response_origin") is None for row in retry_raw)
