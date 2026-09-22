@@ -1,0 +1,53 @@
+{
+  "schema": "c2kv-blocker-cuda-validation-v1",
+  "created_at": "2026-09-22T18:40:00Z",
+  "host": "box4 GPU3 (RTX 4090 48 GB), reserved for this check by the patrol session with the user's approval",
+  "paper_revision": "e2604b861ac26ddb923db2b58018ed7b62ff3dae (shallow clone in /workspace/dev-scratch/paper-e2604b8)",
+  "engine_revision": "e2b3b7ec0 (/workspace/validation/engine-p10-e2b3b7ec, read only)",
+  "environment": "CUDA_VISIBLE_DEVICES=3, CUDA_HOME=/usr/local/cuda, --port-offset 27000 (server 61000, proxy 61100), outputs under /workspace/dev-scratch",
+  "b1_generation_timeout": {
+    "command": "benchmarks.paper.runner run --config /workspace/results-b768bl2/config.resolved.json --output /workspace/dev-scratch/b1-timeout120-r2 --stage closed_loop --task-subset bfcl_long_context__commitkv_b768=multi_turn_long_context_101 --generation-timeout 120 --port-offset 27000",
+    "first_attempt": "/workspace/dev-scratch/b1-timeout120: server exited at JIT kernel build (nvcc not found; the ssh shell lacked the workers' CUDA_HOME); no request was served",
+    "evidence": {
+      "config.resolved.json": "f194c8d82328da7fc88007c1cb38a33fb4ee4d0b6a7cf1b9897c824db0cd20f5",
+      "proxy_telemetry.jsonl": "b6f3f033f77750424bc86cb0d22c030f137c0097f89d03fe14bed8478ed8b794",
+      "logs/proxy_commitkv_61100.jsonl": "65394e8b81c21255a01e9dcda7bc923707615ac0e98a73bc1ca20badf9f9ef03",
+      "server.log": "ab288793e77d2a1b54af80495e424dffd86feada7d81b386984854c14ffc1e02"
+    },
+    "observed": {
+      "frozen_generation_timeout": 120.0,
+      "proxy_argv": "--port 61100 --generation-timeout 120.0",
+      "turn_1": "ok, 1.8 s",
+      "long_context_turn": "request 13aeede00b2246598d33ebae0a118791 entered chunked prefill at 18:30:13 from 3670 resident tokens; the proxy's generation POST timed out after 120.04 s",
+      "abort_request": "504 cleanup_timeout after 60.0 s",
+      "after_abort": "the same request was still prefilling at 18:33:22 (27120 committed tokens); close_session returned 200 after 8.6 s and transferred the 3670 resident tokens to the active request",
+      "cleanup": "run.py exited after the BFCL ledger refusal; the runner stopped its own server group (scheduler exit -15). GPU3 returned to 16 MiB"
+    },
+    "conclusions": [
+      "The frozen --generation-timeout reaches the persistent proxy on the CUDA engine.",
+      "Abort during reference-attention chunked prefill is not honoured on e2b3b7ec0 for CommitKV as well, so this is not specific to PyramidKV. The held b768 runs aborted cleanly at 600 s because their prefill (377-559 s) had already finished; PyramidKV's 67k-token prefill had not, which wedged the server.",
+      "A deadline shorter than a request's prefill therefore turns a task-level timeout into an engine-wide stall; the deadline must exceed the longest prefill, or the engine abort path must stop between prefill chunks."
+    ]
+  },
+  "b4_toolsandbox_exact_kv": {
+    "command": "benchmarks.paper.runner run --config /workspace/dev-scratch/b4-config.json --output /workspace/dev-scratch/b4-ts-exactkv --stage closed_loop --history-kv-budget commitkv=256 --cells toolsandbox__commitkv_b256 --port-offset 27000",
+    "config": "results-ts3 config.resolved.json with toolsandbox_scenarios set to three scenarios that raised the exact-KV continuation guard in m2 results-kvts toolsandbox__commitkv_b256 (paper 3a2d0f3)",
+    "scenarios": ["find_current_city_low_battery_mode_3_distraction_tools",
+                  "add_reminder_content_and_week_delta_and_time_3_distraction_tools",
+                  "add_reminder_content_and_weekday_delta_and_time_3_distraction_tools"],
+    "evidence": {
+      "summary_commitkv.json": "f4cbe69923cc64182144d8275e2e601e34c6f3ddf1d3d49939defa6d12d1c759",
+      "proxy_telemetry.jsonl": "055364e8784cff357c549aad21e13cd7df9b8b9a83b90331955c060e3c894fd3",
+      "logs/proxy_commitkv_61100.jsonl": "e8043690a587ea1a9f9206d901b8ad3e7710086382dbfe7ab86c22f5ef1d94f2"
+    },
+    "observed": {
+      "cell": "complete.json and summary_commitkv.json written (history_budget_tokens 256)",
+      "proxy_requests": 22, "proxy_ok": 22,
+      "exact_kv_guard_errors": 0,
+      "responses_with_prose_and_tool_calls": 12,
+      "official_scenarios_scored": 3
+    },
+    "conclusion": "The a365c960 ToolSandbox echo normalization holds on the CUDA engine for scenarios that previously failed the guard; the refactored live ToolSandbox path and run.py envelope also completed on CUDA. The 3-scenario score is a smoke value, not a cell result.",
+    "result_scope": "preliminary, n=1; 3 of 129 scenarios"
+  }
+}

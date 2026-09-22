@@ -87,7 +87,7 @@
       "the BFCL client read deadline is request_timeout + 90 s (1890 s) with an 8 s connect deadline",
       "run.py start_proxy -> real proxy process -> fake engine: a 1 s deadline returns 502 'upstream 0: timed out' after one abort_request, a 6 s deadline returns 200"
     ],
-    "cuda_validation": "not run; requires a GPU allocated by the patrol session"
+    "cuda_validation": "blocker_cuda_validation_20260922.json: a 120 s frozen deadline cut a CommitKV long-context generation at 120.04 s on the CUDA engine, and the following abort during chunked prefill returned 504 cleanup_timeout while the request kept prefilling"
   },
   "result_scope": "diagnosis of existing held runs; no new model execution"
 }
