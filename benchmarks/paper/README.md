@@ -319,6 +319,18 @@ policy. No option preserves the original policy and commands. Capacity failure
 remains a method outcome, not an infrastructure retry. Bare `c2kv_native_r4` and
 non-BFCL native sweep paths are not supported by this interface.
 
+Native controller arms render their own tool prologue. Since 2026-09-21 the
+native serving API normalizes it like the Full SGLang actor (`sglang-full`:
+`description/name/parameters/strict`, benchmark `response` schemas dropped).
+`--native-tool-schema ARM=raw` adds `__toolschema-raw` variants of every
+configured cell of that arm (base and any explicit history budget) that serve
+the client tool JSON unchanged, i.e. the pre-2026-09-21 prologue, for a
+same-checkout A/B. The variants pass `--tool-schema raw` down to
+`event_native_server`; every other cell keeps its historical command and the
+default `sglang-full`, which the server manifest records as `tool_schema`.
+Engine-served arms (Full, proxy and reference-attention baselines) are not
+eligible: their prologue is the engine's `--c2kv-tools-dump`.
+
 For an existing CUDA or NPU upstream, the shared single-cell client reuses
 the same planner and benchmark adapters without launching an engine:
 

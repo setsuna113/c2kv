@@ -9,7 +9,7 @@ import pytest
 from benchmarks.memory_runtime.event_native_api import EventNativeAPI, EventNativeAPIError
 
 
-def _api(tmp_path, *, tool_memory_contract=None):
+def _api(tmp_path, *, tool_memory_contract=None, tool_schema=None):
     return EventNativeAPI(
         SimpleNamespace(run=lambda payload: None),
         run_id="test", model_name="actor", view_mode="static",
@@ -17,6 +17,7 @@ def _api(tmp_path, *, tool_memory_contract=None):
         deadline_monotonic=time.monotonic() + 60,
         steps_path=tmp_path / "steps.jsonl", benchmark="tau2",
         tool_memory_contract=tool_memory_contract,
+        **({"tool_schema": tool_schema} if tool_schema is not None else {}),
     )
 
 
@@ -71,3 +72,24 @@ def test_tool_memory_keeps_original_catalog_as_algorithm_input(tmp_path):
     request = _request([{"type": "function", "function": {"name": "lookup"}}])
     runner_payload, _, _ = _api(tmp_path, tool_memory_contract={})._validate_request(request)
     assert runner_payload["tools"] == request["tools"]
+
+
+def test_raw_tool_schema_passes_client_tools_through_unchanged(tmp_path):
+    function = {"name": "lookup", "description": "Look up a reservation",
+                "parameters": {"type": "object"}, "response": {"type": "dict"}}
+    request = _request([{"type": "function", "function": function}])
+    source = copy.deepcopy(request)
+
+    runner_payload, _, _ = _api(tmp_path, tool_schema="raw")._validate_request(request)
+
+    assert request == source
+    assert runner_payload["tools"] == source["tools"]
+    assert runner_payload["tools"][0]["function"] is not request["tools"][0]["function"]
+
+
+def test_tool_schema_defaults_to_sglang_full_and_rejects_unknown_modes(tmp_path):
+    api = _api(tmp_path)
+    assert api.tool_schema == "sglang-full"
+    assert api.health()["tool_schema"] == "sglang-full"
+    with pytest.raises(ValueError, match="tool_schema"):
+        _api(tmp_path, tool_schema="strict")

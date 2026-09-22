@@ -50,7 +50,7 @@ def write_comparison(output: Path, plan):
                     scores.get("result_status")
                     or "needs_review_infrastructure_failure"
                 )
-            row = {key: cell.get(key) for key in ("cell_id", "benchmark", "method", "arm", "group", "ratio", "retention", "tool_context", "history_budget_tokens")}
+            row = {key: cell.get(key) for key in ("cell_id", "benchmark", "method", "arm", "group", "ratio", "retention", "tool_context", "history_budget_tokens", "tool_schema")}
             row.update(stage=stage, result_status=result_status,
                        comparison_basis=("own_output_closed_loop" if stage == "closed_loop"
                                          else "Full_teacher_forced_prefix_target_policy"),

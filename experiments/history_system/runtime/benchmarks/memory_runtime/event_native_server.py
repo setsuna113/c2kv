@@ -24,6 +24,7 @@ from .event_native_always import NATIVE_ALWAYS_ROUTE_MODES
 from .event_native_eval_policy import load_eval_policy, resolve_event_native_eval_policy
 from .event_native_eval_packing import resolve_eval_packing
 from .event_native_step import EventNativeDecisionRunner
+from .tokenization import DEFAULT_TOOL_SCHEMA, TOOL_SCHEMA_MODES
 from .event_native_costs import read_event_native_steps, summarize_event_native_steps
 
 
@@ -115,6 +116,10 @@ def parser():
                         help='The separately trained T0 checkpoint, required by T0 tool memory.')
     result.add_argument('--tool-budget-tokens', type=positive_int,
                         help='Optional independent raw-tool retained-token cap.')
+    result.add_argument('--tool-schema', choices=TOOL_SCHEMA_MODES, default=DEFAULT_TOOL_SCHEMA,
+                        help='Tool prologue rendered for history-only routes: sglang-full '
+                             '(release default, matches the Full SGLang actor) or raw '
+                             '(client tool JSON unchanged, the pre-2026-09-21 native prologue).')
     result.add_argument('--max-wall-seconds', type=positive_seconds, required=True)
     result.add_argument('--device', default='cpu')
     result.add_argument('--no-raw-snapshot', action='store_true',
@@ -459,6 +464,7 @@ def _serve(args):
         'max_decisions': args.max_decisions, 'max_generation_calls': args.max_generation_calls,
         'max_wall_seconds': args.max_wall_seconds, 'device': args.device, 'dtype': args.dtype,
         'generation_backend': generation_backend,
+        'tool_schema': args.tool_schema,
         'sglang_backend_url': (
             args.sglang_backend_url if generation_backend == 'sglang' else None
         ),
@@ -605,6 +611,7 @@ def _serve(args):
             deadline_monotonic=deadline, steps_path=args.out / 'steps.jsonl',
             runtime_policy_contract=runtime_policy,
             tool_memory_contract=tool_contract,
+            tool_schema=args.tool_schema,
             **_route_kwargs(source_profile, args.view_mode, compression_policy,
                             history_view_protocol),
             **source_kwargs)
@@ -715,6 +722,8 @@ def _child_command(args):
             command.extend(['--tool-checkpoint', str(args.tool_checkpoint.resolve())])
         if getattr(args, 'tool_budget_tokens', None) is not None:
             command.extend(['--tool-budget-tokens', str(args.tool_budget_tokens)])
+    if getattr(args, 'tool_schema', DEFAULT_TOOL_SCHEMA) != DEFAULT_TOOL_SCHEMA:
+        command.extend(['--tool-schema', args.tool_schema])
     if getattr(args, 'generation_backend', 'native') == 'sglang':
         command.extend([
             '--sglang-backend-url', args.sglang_backend_url,

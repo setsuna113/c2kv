@@ -30,6 +30,10 @@ from c1_artifact_binding import bind_risk_artifact
 
 HERE = Path(__file__).resolve().parent
 RUNTIME = HERE / "runtime"
+# Mirrors benchmarks.memory_runtime.tokenization (TOOL_SCHEMA_MODES, DEFAULT_TOOL_SCHEMA);
+# the runtime package is importable only from the delivery's own PYTHONPATH.
+TOOL_SCHEMA_MODES = ("sglang-full", "raw")
+TOOL_SCHEMA_DEFAULT = "sglang-full"
 DEFAULT_RISK_ARTIFACT = HERE / "artifacts/c1_risk.t02_v1.json"
 DEFAULT_RISK_ARTIFACT_SHA256 = "18a11f73aa1f7d4b0add86eed66ae9e5e129ea4bdfbe0dfad23faf4f7d2fb4ab"
 BENCHMARKS = ("bfcl", "tau2", "toolsandbox")
@@ -486,6 +490,9 @@ def commands_for_task(args: argparse.Namespace, task: str, controller_path: Path
             server.extend(["--tool-checkpoint", str(args.tool_checkpoint.resolve())])
         if args.tool_budget_tokens is not None:
             server.extend(["--tool-budget-tokens", str(args.tool_budget_tokens)])
+    if getattr(args, "tool_schema", TOOL_SCHEMA_DEFAULT) != TOOL_SCHEMA_DEFAULT:
+        # Explicit non-default prologue only; the release server command stays byte-identical.
+        server.extend(["--tool-schema", args.tool_schema])
     task_out = args.out / "task_shards" / task
     if args.benchmark == "bfcl":
         worker = runner.worker_command(
@@ -949,6 +956,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--tool-memory", default="none")
     parser.add_argument("--tool-checkpoint", type=Path)
     parser.add_argument("--tool-budget-tokens", type=int)
+    parser.add_argument("--tool-schema", choices=TOOL_SCHEMA_MODES, default=TOOL_SCHEMA_DEFAULT,
+                        help="Native tool prologue: sglang-full (release default, matches Full) "
+                             "or raw (client tool JSON unchanged)")
     parser.add_argument("--history-budget-tokens", type=int,
                         help="Override both native C2KV history and workspace byte caps using checkpoint KV geometry")
     parser.add_argument("--preview", action="store_true", help="Print commands without model, harness, or network calls")

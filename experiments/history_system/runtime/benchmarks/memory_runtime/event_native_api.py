@@ -19,7 +19,7 @@ from .event_native import EventStore
 from .always_compress import CapacityInfeasible
 from .event_native_controls import describe_event_native_route
 from .event_native_step import GenerationCallCapExceeded
-from .tokenization import serving_tools
+from .tokenization import DEFAULT_TOOL_SCHEMA, TOOL_SCHEMA_MODES, model_tools
 
 
 _REQUEST_FIELDS = frozenset({
@@ -71,6 +71,7 @@ class EventNativeAPI:
         compression_policy: str | None = None,
         history_view_protocol: str = "fixed-budget-main",
         tool_memory_contract: Mapping[str, Any] | None = None,
+        tool_schema: str = DEFAULT_TOOL_SCHEMA,
     ) -> None:
         if not callable(getattr(runner, "run", None)):
             raise TypeError("runner must expose run(payload)")
@@ -123,6 +124,9 @@ class EventNativeAPI:
         )
         if self.tool_memory_contract is not None:
             self.request_fields = self.request_fields | {"c2kv_tool_spans_v1"}
+        if tool_schema not in TOOL_SCHEMA_MODES:
+            raise ValueError(f"tool_schema must be one of {TOOL_SCHEMA_MODES}")
+        self.tool_schema = tool_schema
         self.max_new_tokens = max_new_tokens
         self.allowed_task_ids = allowed
         self.max_decisions = max_decisions
@@ -173,6 +177,7 @@ class EventNativeAPI:
             "runtime_policy_contract": copy.deepcopy(self.runtime_policy_contract),
             **({"tool_memory_contract": copy.deepcopy(self.tool_memory_contract)}
                if self.tool_memory_contract is not None else {}),
+            "tool_schema": self.tool_schema,
             "decode_strategy": getattr(getattr(self.runner, "generator", None), "decode_strategy", None),
             "session_cache_policy": getattr(getattr(self.runner, "generator", None), "session_cache_policy", None),
             "max_new_tokens": self.max_new_tokens,
@@ -461,12 +466,14 @@ class EventNativeAPI:
             except (TypeError, ValueError, RuntimeError) as error:
                 raise EventNativeAPIError(400, "invalid_tool_spans", str(error)) from error
             source_tool_spans = copy.deepcopy(payload["c2kv_tool_spans_v1"])
-        model_tools = tool_snapshot
+        rendered_tools = tool_snapshot
         if self.tool_memory_contract is None:
             try:
-                # Match the full SGLang chat-template tool prologue. Tool-memory
-                # routes consume the original catalog as algorithm input.
-                model_tools = serving_tools(tool_snapshot) or []
+                # History-only routes render the actor prologue under the
+                # declared tool schema; the release default matches the full
+                # SGLang chat-template prologue. Tool-memory routes consume the
+                # original catalog as algorithm input.
+                rendered_tools = model_tools(tool_snapshot, self.tool_schema)
             except (KeyError, TypeError, ValueError) as error:
                 raise EventNativeAPIError(400, "invalid_tools", str(error)) from error
 
@@ -482,7 +489,7 @@ class EventNativeAPI:
                 task_id=task_id, user_turn=user_turn, step=step
             ),
             "messages": message_snapshot,
-            "tools": model_tools,
+            "tools": rendered_tools,
             **source_fields,
         }
         if source_tool_spans is not None:

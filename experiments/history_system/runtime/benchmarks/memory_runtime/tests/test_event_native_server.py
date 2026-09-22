@@ -60,6 +60,21 @@ def test_allocator_flag_is_opt_in_and_reaches_child(tmp_path):
     assert child.device == 'npu:0'
 
 
+def test_tool_schema_is_opt_in_and_reaches_child(tmp_path):
+    argv = ['--checkpoint', str(tmp_path / 'checkpoint'), '--out', str(tmp_path / 'out'),
+            '--run-id', 'schema-test', '--view-mode', 'static', '--ratio', '4',
+            '--max-new-tokens', '2', '--task-ids', 'synthetic-task', '--max-decisions', '1',
+            '--max-generation-calls', '1', '--max-wall-seconds', '30']
+    ordinary = server.parser().parse_args(argv)
+    assert ordinary.tool_schema == 'sglang-full'
+    assert '--tool-schema' not in server._child_command(ordinary)
+    raw = server.parser().parse_args(argv + ['--tool-schema', 'raw'])
+    child = server.parser().parse_args(server._child_command(raw)[3:])
+    assert child.serve_child and child.tool_schema == 'raw'
+    with pytest.raises(SystemExit):
+        server.parser().parse_args(argv + ['--tool-schema', 'strict'])
+
+
 def test_sglang_backend_arguments_reach_supervised_child(tmp_path):
     argv = [
         '--checkpoint', str(tmp_path / 'checkpoint'), '--out', str(tmp_path / 'out'),

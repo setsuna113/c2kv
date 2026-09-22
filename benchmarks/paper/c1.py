@@ -25,6 +25,7 @@ from benchmarks.measurement.replay import _paper_measurement
 from .candidate_matrix import ARM_TO_VARIANT, SUPPORTED_BENCHMARKS as CANDIDATE_BENCHMARKS
 from benchmarks.arms import get_arm
 from benchmarks.native_history_budget import NativeHistoryBudget
+from benchmarks.native_tool_schema import NativeToolSchema
 from experiments.history_system.native_bare import ARM_RATIOS as NATIVE_RATIOS
 from .process_lifecycle import defer_termination, unwind_on_termination
 
@@ -123,6 +124,8 @@ def delivery_args(config, benchmark, output, task_ids, delivery):
             command += ["--tool-checkpoint", config["tool_checkpoint"]]
         if config.get("tool_budget_tokens") is not None:
             command += ["--tool-budget-tokens", str(config["tool_budget_tokens"])]
+    if config.get("tool_schema"):
+        command += NativeToolSchema(config["tool_schema"]).cli_args()
     args = delivery.build_parser().parse_args(command)
     args.benchmark = ("acon_appworld" if benchmark == "appworld"
                       else "acebench" if benchmark == "acebench_agent"
@@ -636,6 +639,8 @@ def main(argv=None):
     parser.add_argument("--tool-memory", default="")
     parser.add_argument("--tool-checkpoint", default="")
     parser.add_argument("--tool-budget-tokens", type=int)
+    parser.add_argument("--tool-schema", default="",
+                        help="explicit native tool prologue schema (sglang-full or raw); empty keeps the release default")
     parser.add_argument("--history-budget-tokens", type=int)
     args = parser.parse_args(argv)
     select_arm(args.arm)
@@ -648,6 +653,8 @@ def main(argv=None):
             parser.error("Native history budget sweep currently supports BFCL only")
         config["native_history_budget_tokens"] = budget.target_tokens
     apply_tool_cli(config, args.tool_memory, args.tool_checkpoint, args.tool_budget_tokens)
+    if args.tool_schema:
+        config["tool_schema"] = NativeToolSchema(args.tool_schema).schema
     if args.upstream:
         config["upstream"] = args.upstream
     if args.proxy_port:

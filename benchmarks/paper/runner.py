@@ -19,6 +19,7 @@ from .candidate_matrix import (
 )
 from benchmarks.history_budget import HistoryKVBudget, parse_history_kv_budget
 from benchmarks.native_history_budget import NativeHistoryBudget, parse_native_history_budget
+from benchmarks.native_tool_schema import NativeToolSchema, parse_native_tool_schema
 from experiments.history_system.native_bare import ARM_RATIOS as NATIVE_RATIOS, arm_for_ratio
 from benchmarks.toolsandbox_suite import THREE_DISTRACTION_TOOLS_129, selected_scenarios
 from .artifact_io import atomic_json, atomic_text, preparation_lock
@@ -151,6 +152,14 @@ def cells(config):
                     row["tool_checkpoint"] = context["checkpoint"]
                     if context.get("budget_tokens") is not None:
                         row["tool_budget_tokens"] = context["budget_tokens"]
+                if "tool_schema" in row:
+                    # Explicit native tool-prologue schema; only native controller
+                    # arms render their own prologue, and only a non-default mode
+                    # receives a distinct cell identity.
+                    from benchmarks.arms import get_arm
+                    schema = NativeToolSchema(row["tool_schema"])
+                    schema.validate_arm(get_arm(method["arm"]))
+                    row["cell_id"] += schema.cell_suffix()
                 rows.append(row)
     # Run the final system (and its ablations) after every existing comparison/sweep cell.
     if "task_subsets" in config:
@@ -341,6 +350,31 @@ def with_native_history_budget(config, arm_name, target_tokens):
     return dict(config, methods=[*config["methods"], variant])
 
 
+def with_native_tool_schema(config, arm_name, schema):
+    """Add native tool-prologue schema variants of every configured cell of one arm.
+
+    The variants keep the arm, ratio, recovery policy, and any explicit history
+    budget; only the actor's tool prologue changes (``raw`` = client tool JSON
+    unchanged, the pre-2026-09-21 native prologue).  The historical cells and
+    their commands are preserved for a same-checkout A/B.
+    """
+    variant = NativeToolSchema(schema)
+    if variant.is_default:
+        raise ValueError(f"{schema!r} is the release default tool schema; nothing to add")
+    from benchmarks.arms import get_arm
+    variant.validate_arm(get_arm(arm_name))
+    templates = [method for method in config["methods"]
+                 if method["arm"] == arm_name and "tool_schema" not in method]
+    if not templates:
+        raise ValueError(f"Native tool schema requires a configured arm: {arm_name}")
+    if any(method["arm"] == arm_name and method.get("tool_schema") == variant.schema
+           for method in config["methods"]):
+        raise ValueError(f"Native tool schema cells already exist: {arm_name}={variant.schema}")
+    variants = [dict(method, group="toolschema", tool_schema=variant.schema)
+                for method in templates]
+    return dict(config, methods=[*config["methods"], *variants])
+
+
 def history_kv_budget_args(cell):
     """Use one resolved capacity on both closed-loop and replay proxy paths."""
     if "history_budget_tokens" not in cell:
@@ -388,6 +422,8 @@ def run_command(config, cell, directory, profile, stage="closed_loop"):
                 cmd += ["--tool-checkpoint", cell["tool_checkpoint"]]
             if cell.get("tool_budget_tokens") is not None:
                 cmd += ["--tool-budget-tokens", str(cell["tool_budget_tokens"])]
+        if "tool_schema" in cell:
+            cmd += NativeToolSchema(cell["tool_schema"]).cli_args()
         if stage == "common_prefix":
             cmd += ["--prefixes", str(profile.parent / "closed_loop" /
                                       (cell["benchmark"] + "__full") / "full_prefixes.jsonl")]
@@ -501,7 +537,7 @@ def extension_problem(existing, config, source, output):
         has_artifacts = any((output / stage / cell_id).exists() for stage in ("closed_loop", "common_prefix"))
         for key in ("arm", "method", "ratio", "retention", "benchmark", "adapter", "category",
                     "tool_context", "tool_memory", "tool_checkpoint", "tool_interface_policy",
-                    "history_budget_tokens"):
+                    "history_budget_tokens", "tool_schema"):
             if key == "method" and not has_artifacts:
                 continue
             if old.get(key) != new.get(key):
@@ -667,6 +703,8 @@ def _prepare_locked(config, output, source):
             fields.append("tool_interface_policy")
         if any("history_budget_tokens" in row for row in matrix):
             fields.append("history_budget_tokens")
+        if any("tool_schema" in row for row in matrix):
+            fields.append("tool_schema")
         if any(is_subset(row) for row in matrix):
             fields.extend(["result_scope", "expected_subset_n", "whole_cell_score"])
         writer = csv.DictWriter(handle, fieldnames=fields, extrasaction="ignore")
@@ -1117,6 +1155,9 @@ def main(argv=None):
                         help="add a history-KV capacity cell, e.g. commitkv=768; repeat for a sweep")
     parser.add_argument("--native-history-budget", action="append", default=[], metavar="ARM=TOKENS",
                         help="add a native C2KV BFCL history-capacity cell; repeat for a sweep")
+    parser.add_argument("--native-tool-schema", action="append", default=[], metavar="ARM=SCHEMA",
+                        help="add tool-prologue variants (raw) of every configured cell of a native arm "
+                             "for a same-checkout A/B; sglang-full stays the release default")
     parser.add_argument("--native-ratio", action="append", type=int, choices=(4, 8), default=[],
                         help="add an explicit bare native C2KV ratio (e.g. 8); defaults stay unchanged")
     parser.add_argument("--tool-contexts", default="",
@@ -1148,6 +1189,8 @@ def main(argv=None):
             config = with_history_kv_budget(config, *parse_history_kv_budget(value))
         for value in args.native_history_budget:
             config = with_native_history_budget(config, *parse_native_history_budget(value))
+        for value in args.native_tool_schema:
+            config = with_native_tool_schema(config, *parse_native_tool_schema(value))
         config = with_tool_contexts(config, list(filter(None, args.tool_contexts.split(","))),
                                     args.tool_checkpoint)
         config = with_task_subsets(config, args.task_subset, args.task_subset_file)
