@@ -14,7 +14,7 @@ class NativeHistoryBudget:
 
     def validate_arm(self, arm: Arm) -> None:
         controller = arm.native_controller or ""
-        if controller not in {"c1_t02", "c1_recovery_off"} and not controller.startswith("candidate_"):
+        if controller not in {"bare_event_native", "c1_t02", "c1_recovery_off"} and not controller.startswith("candidate_"):
             raise ValueError(f"arm {arm.name!r} does not support a native history budget")
 
     def variant_name(self, arm_name: str) -> str:

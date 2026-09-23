@@ -3,7 +3,7 @@
 ## Explicit bare-native ratios
 
 `prepare` and `run --native-ratio 8` add `c2kv_native_r8` to a new output root;
-existing ratio4 cells and default method lists retain their identity. A custom
+existing ratio4 cells retain their identity. The unified default uses ratio8. A custom
 method entry can equivalently use `method: C2KV`, `arm: c2kv_native_r8`, `ratio: 8`.
 Both ratios use `ac_gist_static` with no S0 allocation, detector or recovery.
 The profile, server model name, ready manifest and closed-loop/replay commands
@@ -293,8 +293,8 @@ content remains an executable action and does not receive that exemption.
 Restoring this comparison requires a compatible trained joint folding/action
 actor and explicit accounting for its parse-retry policy, as described in the
 [AgentFold method and training protocol](https://arxiv.org/html/2510.24699).
-The default history-KV matrix uses one configurable absolute history-token
-cap `B` for H2O, SnapKV, PyramidKV, CommitKV, and AgentKV. The checked-in
+The default native matrix uses one configurable absolute history-token
+cap `B` for bare C2KV, H2O, SnapKV, PyramidKV, StreamingLLM, CommitKV, and AgentKV. The checked-in
 config is a template: `history_kv_budget_tokens` is unset and each of these
 methods declares `history_budget_tokens: "shared"`. Supply a positive integer
 through `--history-kv-budget-tokens B` or the config field before preparing or
@@ -303,9 +303,13 @@ The checked-in `matrix.csv` shows symbolic `_bB` identities; a prepared run
 records the actual numeric cap in its resolved config, commands, CSV, summaries,
 and comparison tables. A different cap gets a different result directory.
 
-`benchmarks.history_budget.HistoryKVBudget` applies this absolute allowance
-without changing the selector, backend, or persistent-session protocol.
-It clears a registry arm's old retention ratio. H2O's
+`history_runtime: "racer"` marks the new primary rows. The resolver routes KV
+methods to `racer_<backend>_off_bB` on the same persistent engine transport as
+`+RACER`; these off rows have no S0 selection or recovery. Bare C2KV remains
+`c2kv_native_r8_bB`, with no S0, detector or recovery. The shared native budget
+module binds its token cap to checkpoint KV geometry. A legacy unmarked KV
+row still uses `benchmarks.history_budget.HistoryKVBudget`, which clears its
+registry retention ratio when an absolute budget is supplied. H2O's
 `h2o_recent_fraction=0.5` still divides the retained allowance between recent
 and heavy-hitter tokens; it is an internal selector setting, not the cap.
 Likewise, the C2KV gist ratio is separate from its history capacity.
@@ -319,7 +323,7 @@ python -m benchmarks.paper prepare --config CONFIG.json \
   --sglang-source ENGINE --output RESULTS --history-kv-budget-tokens "$B"
 python -m benchmarks.paper run --config CONFIG.json \
   --sglang-source ENGINE --output RESULTS --history-kv-budget-tokens "$B" \
-  --stage closed_loop --cells "bfcl_base__commitkv_b${B},bfcl_base__history_kv_h2o_persistent_b${B}"
+  --stage closed_loop --cells "bfcl_base__racer_commitkv_off_b${B},bfcl_base__racer_h2o_off_b${B}"
 ```
 
 `--history-kv-budget ARM=TOKENS` still adds explicit per-arm capacity sweep
@@ -330,8 +334,8 @@ implicit 2048-token arms remain readable; they are not the new default matrix.
 Use a new output root for a changed budget contract.
 
 Persistent StreamingLLM (`history_kv_streamingllm_r25_persistent`) is
-registered with the same physical-eviction session protocol as H2O but is not
-in the default matrix. To opt in, add a method entry, for example
+registered with the same physical-eviction session protocol as H2O. An
+unmarked configuration can retain the legacy proxy route with an entry such as
 `{"method": "StreamingLLM", "arm": "history_kv_streamingllm_r25_persistent",
 "group": "budget", "benchmarks": ["bfcl_base"], "history_budget_tokens": 256}`
 (or `"shared"` with `--history-kv-budget-tokens B`, or a base entry plus
@@ -346,7 +350,7 @@ history caps through their respective adapters. Their summarization, gist,
 and recovery settings remain independent from `B`. The history-KV budget
 interface does not reinterpret those algorithms' internal parameters.
 
-Native C2KV allocation/recovery uses a separate capacity contract through
+Native C2KV allocation/recovery resolves its capacity contract through
 `benchmarks.native_history_budget.NativeHistoryBudget`. The repeatable
 `--native-history-budget ARM=TOKENS` adds BFCL base/long-context cells without
 changing the gist ratio, recovery policy, detector threshold, or generation
@@ -905,6 +909,7 @@ Add distinct BFCL base/long-context and ACEBench Agent cells to a **new output
 directory**:
 
 ```bash
+B=768  # Example; choose the absolute token cap for this run.
 python -m benchmarks.paper.runner prepare --config CONFIG.json \
   --sglang-source ENGINE --output RESULTS --acon-budget-tokens 768
 python -m benchmarks.paper.runner run --config CONFIG.json \
@@ -954,23 +959,42 @@ Budget cells use `benchmarks.paper.budget_server`, and the runner checks the
 
 # RACER backend/policy matrix
 
-RACER cells are opt-in and keep the history backend, recovery policy, and tool
-context as separate axes. A policy selection automatically adds its paired
-`off` control, while candidate policy names retain their exact registry
-identity. The history budget is an absolute token count:
+The default KV rows already use the native `off` route. `+RACER` policies are
+opt-in; selecting one reuses the matching primary baseline at the same `B`,
+benchmark scope and tool context. For C2KV the paired baseline is
+`c2kv_native_r8_bB`. C2KV+RACER preserves its original S0 initial allocation
+and subsequent recovery policy; S0 belongs to RACER. The historical
+`racer_c2kv_off_bB` retains S0 and disables post-draft recovery only, so it
+remains an ablation in old unmarked configs and is not generated as the new
+bare baseline. Candidate policy names retain their exact registry identity.
+The history budget is an absolute token count:
 
 ```bash
+B=768  # Example; choose the absolute token cap for this run.
 python -m benchmarks.paper.runner prepare --config CONFIG.json \
   --sglang-source ENGINE --output RESULTS \
-  --racer-backends c2kv,commitkv,h2o,snapkv,pyramidkv,streamingllm \
-  --racer-policies t02,pending_verified --racer-history-budget 768 \
+  --racer-backends c2kv,commitkv,agentkv,h2o,snapkv,pyramidkv,streamingllm \
+  --racer-policies t02,pending_verified --history-kv-budget-tokens "$B" \
   --tool-contexts t0_r8
 python -m benchmarks.paper.runner run --config CONFIG.json \
   --sglang-source ENGINE --output RESULTS \
-  --racer-backends c2kv,commitkv,h2o,snapkv,pyramidkv,streamingllm \
-  --racer-policies t02,pending_verified --racer-history-budget 768 \
+  --racer-backends c2kv,commitkv,agentkv,h2o,snapkv,pyramidkv,streamingllm \
+  --racer-policies t02,pending_verified --history-kv-budget-tokens "$B" \
   --tool-contexts t0_r8 --stage closed_loop --cells CELL_ID
 ```
+
+Every action/tool-feedback step continues from the previously committed
+compressed state. Bare C2KV cannot select an evicted old event again from the
+archive. C2KV+RACER shares the codec and residency representation, records
+explicit old-source admissions by S0 or recovery, and does not extract
+unselected old archive chunks. Rejected regeneration commits the original
+view. Persistent KV backends similarly operate on retained KV plus new input.
+Full source transcripts remain available for audit and explicit recovery.
+
+StreamingLLM uses the registered `history_kv_streamingllm_r25_persistent`
+source arm, resolved to `racer_streamingllm_off_bB` in marked configs. Legacy
+StreamingLLM IDs, including the b128/b192/b256 cells, remain distinct; their
+existing results are not relabeled as unified-runtime results.
 
 `raw` remains present when tool contexts are requested. Non-C2KV detector
 cells record `frozen_c2kv_unvalidated_transfer`; this labels an unvalidated

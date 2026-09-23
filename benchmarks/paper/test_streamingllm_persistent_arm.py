@@ -14,7 +14,8 @@ ARM = "history_kv_streamingllm_r25_persistent"
 def config(budget=256, extra=()):
     cfg = json.loads(runner.DEFAULT_CONFIG.read_text(encoding="utf-8"))
     cfg["history_kv_budget_tokens"] = budget
-    cfg["methods"] = [*cfg["methods"], *extra]
+    # Freeze the pre-unification opt-in configuration for legacy ID checks.
+    cfg["methods"] = [*[row for row in cfg["methods"] if row["arm"] != ARM], *extra]
     return cfg
 
 
@@ -35,10 +36,23 @@ def test_arm_is_a_persistent_physical_eviction_spec_like_h2o():
         assert budget.variant_name(ARM) == f"history_kv_streamingllm_persistent_b{tokens}"
 
 
-def test_default_matrix_has_no_streamingllm_cell(tmp_path):
+def test_frozen_opt_in_matrix_has_no_streamingllm_cell(tmp_path):
     plan, _ = runner.prepare(config(), tmp_path / "results", tmp_path / "engine")
     assert not any("streamingllm" in cell["cell_id"] for cell in plan)
     assert ARM not in {method["arm"] for method in config()["methods"]}
+
+
+@pytest.mark.parametrize("budget", [128, 192, 256])
+def test_default_streamingllm_uses_native_off_with_explicit_b(tmp_path, budget):
+    cfg = json.loads(runner.DEFAULT_CONFIG.read_text(encoding="utf-8"))
+    cfg["history_kv_budget_tokens"] = budget
+    plan, _ = runner.prepare(cfg, tmp_path / "results", tmp_path / "engine")
+    cells = [row for row in plan if row.get("history_backend") == "streamingllm"]
+    assert len(cells) == len(cfg["benchmarks"])
+    for row in cells:
+        assert row["arm"] == f"racer_streamingllm_off_b{budget}"
+        assert row["history_budget_tokens"] == budget
+        assert "benchmarks.paper.c1" in row["command"]
 
 
 def _cells(plan):

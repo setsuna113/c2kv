@@ -140,6 +140,14 @@ def build_event_native_controller(
                 policy=policy, model_context=model_context, benchmark=benchmark)
         s0_config = dict(s0_config)
         s0_config.pop("racer_backend")
+        from .racer.c2kv_state import C2KVResidentPolicy
+
+        inner = build_event_native_controller(
+            tokenizer, packing=packing, policy=policy, view_mode=view_mode,
+            model_context=model_context, compression_policy=compression_policy,
+            history_view_protocol=history_view_protocol, s0_config=s0_config,
+            benchmark=benchmark)
+        return C2KVResidentPolicy(inner, backend)
 
     if s0_config is not None and "candidate_algorithm" in s0_config:
         from .candidate_algorithms.allocation import CandidateAllocator

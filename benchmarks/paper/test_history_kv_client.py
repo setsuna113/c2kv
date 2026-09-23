@@ -9,7 +9,15 @@ from benchmarks.paper import runner
 
 
 def config():
-    return json.loads(runner.DEFAULT_CONFIG.read_text(encoding="utf-8"))
+    # These tests freeze the legacy proxy client protocol. Marked native
+    # defaults and their aliases are covered in test_unified_runtime.py.
+    cfg = json.loads(runner.DEFAULT_CONFIG.read_text(encoding="utf-8"))
+    for row in cfg["methods"]:
+        for key in ("history_runtime", "history_backend", "recovery_policy", "compression_ratio"):
+            row.pop(key, None)
+        if row["method"] == "C2KV":
+            row.pop("history_budget_tokens", None)
+    return cfg
 
 
 @pytest.mark.parametrize("benchmark,adapter,flag,value", [

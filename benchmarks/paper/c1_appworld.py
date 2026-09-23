@@ -11,6 +11,7 @@ from experiments.history_system.native_bare import ARM_RATIOS as NATIVE_RATIOS
 import hashlib
 import importlib.util
 import json
+import math
 import os
 import re
 import subprocess
@@ -23,6 +24,7 @@ from typing import Any, Mapping, Sequence
 
 from benchmarks.adapters import acon_adapter as acon
 from .process_lifecycle import run_owned
+from .racer_matrix import is_racer_arm, parse_racer_arm_name, racer_config_for_arm
 
 
 BENCHMARK = "acon_appworld"
@@ -201,8 +203,46 @@ def _openai_origin(base_url: str) -> str:
     return match.group(1)
 
 
+def apply_native_history_budget(
+    config: Mapping[str, Any], design: dict[str, Any],
+    delivery: Path | ModuleType, output: Path,
+) -> dict[str, Any] | None:
+    """Materialize the same checkpoint-bound B for every native adapter."""
+    arm = config.get("native_arm")
+    racer_tokens = parse_racer_arm_name(arm)[2] if is_racer_arm(arm) else None
+    bare_tokens = config.get("native_history_budget_tokens")
+    if bare_tokens is not None and racer_tokens is not None and bare_tokens != racer_tokens:
+        raise ValueError("Native and RACER history budgets disagree")
+    tokens = racer_tokens if racer_tokens is not None else bare_tokens
+    if tokens is None:
+        return None
+    delivery_root = _delivery_path(delivery)
+    budget = _load_module(delivery_root / "history_budget.py", "history_budget")
+    receipt = budget.resolve_override(
+        tokens, Path(str(config["checkpoint"])), design,
+        delivery_root / "runtime", Path(output),
+    )
+    budget.materialize(receipt)
+    design["runtime"]["eval_policy"] = receipt["override_eval_policy_path"]
+    return receipt
+
+
+def apply_native_generation_timeout(
+    config: Mapping[str, Any], design: dict[str, Any],
+) -> None:
+    """Carry the paper deadline into the native SGLang client."""
+    timeout = config.get("generation_timeout")
+    if timeout is None:
+        return
+    if (isinstance(timeout, bool) or not isinstance(timeout, (int, float))
+            or not math.isfinite(float(timeout)) or timeout <= 0):
+        raise ValueError("generation_timeout must be finite and positive")
+    design["runtime"]["sglang_timeout_seconds"] = float(timeout)
+
+
 def _resolved_design(
     config: Mapping[str, Any], delivery: Path | ModuleType, controller_path: Path,
+    output: Path | None = None,
 ) -> dict[str, Any]:
     delivery = _delivery_path(delivery)
     design = json.loads(
@@ -216,6 +256,29 @@ def _resolved_design(
         design = bare.configure_design(design, NATIVE_RATIOS[config["native_arm"]])
         design["runtime"].update(sglang_backend_url=_sglang_upstream(config),
                                  device="cpu", npu_allocator_metrics=False)
+        apply_native_generation_timeout(config, design)
+        if output is not None:
+            apply_native_history_budget(config, design, delivery, output)
+        return design
+    arm = config.get("native_arm")
+    if is_racer_arm(arm):
+        backend, policy, budget_tokens = parse_racer_arm_name(arm)
+        racer = racer_config_for_arm(config, arm)
+        if racer["history_budget_tokens"] != budget_tokens:
+            raise ValueError("AppWorld RACER history budget differs from arm identity")
+        design["ratio"] = int(config.get("compression_ratio", 8))
+        design["candidate_id"] = arm
+        design["run_id_template"] = f"paper_{arm}_appworld"
+        design["runtime"].update(
+            controller=str(controller_path.resolve()),
+            sglang_backend_url=_sglang_upstream(config),
+            device="cpu", npu_allocator_metrics=False,
+        )
+        if policy in {"off", "request_contract", "argument_binding", "no_progress"}:
+            design["runtime"].pop("shadow_feature_config", None)
+        apply_native_generation_timeout(config, design)
+        if output is not None:
+            apply_native_history_budget(config, design, delivery, output)
         return design
     if (
         design.get("ratio") != 8
@@ -237,6 +300,9 @@ def _resolved_design(
     )
     if no_recovery:
         design["runtime"].pop("shadow_feature_config", None)
+    apply_native_generation_timeout(config, design)
+    if output is not None:
+        apply_native_history_budget(config, design, delivery, output)
     return design
 
 
@@ -248,7 +314,7 @@ def server_command(
     delivery_root = _delivery_path(delivery)
     directory = Path(directory).resolve()
     runner = _delivery_runner(delivery)
-    design = _resolved_design(config, delivery_root, Path(controller_path))
+    design = _resolved_design(config, delivery_root, Path(controller_path), directory)
     command = runner.server_command(
         design,
         task_id=task_id,
@@ -506,6 +572,10 @@ def run_task(
                 from experiments.history_system.native_bare import validate_manifest
                 validate_manifest(task_out / "server" / "ready.json",
                                   NATIVE_RATIOS[config["native_arm"]])
+            elif is_racer_arm(config.get("native_arm")):
+                from .native_extra import validate_ready_manifest
+                validate_ready_manifest(config, "appworld", task_id,
+                                        task_out / "server" / "ready.json", controller_path)
             if config.get("tool_memory"):
                 from .native_extra import validate_tool_ready
                 validate_tool_ready(config, ready)
@@ -539,10 +609,16 @@ def run_task(
     metrics = run_c1.summarize_task(
         BENCHMARK, task_id, task_out, official, time.monotonic() - started,
     )
+    racer = (racer_config_for_arm(config, config["native_arm"])
+             if is_racer_arm(config.get("native_arm")) else None)
+    candidate = (racer["policy"] if racer is not None and racer["policy"] not in {"off", "t02"}
+                 else None)
     acceptance = run_c1.functional_checks(
         ("c2kv_native" if config.get("native_arm") in NATIVE_RATIOS else
-         "c2kv_only" if config.get("native_arm") == "c2kv_c1_off_r8" else "proposed"),
-        config.get("c1", {}).get("detector", "t02_risk"), metrics
+         "c2kv_only" if config.get("native_arm") == "c2kv_c1_off_r8"
+         or racer is not None and racer["policy"] == "off" else "proposed"),
+        "t02_risk" if racer is not None else config.get("c1", {}).get("detector", "t02_risk"), metrics,
+        candidate, **({"racer_backend": racer} if racer is not None else {}),
     )
     if not all(acceptance["required"].values()):
         raise RuntimeError(f"C1 AppWorld functional acceptance failed: {acceptance['required']}")

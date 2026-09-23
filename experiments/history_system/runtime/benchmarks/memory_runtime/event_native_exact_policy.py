@@ -18,6 +18,7 @@ from history_memory.packing import (
     select_view,
     visible_message,
 )
+from history_memory.resident_state import ResidentSourceState
 
 from .always_compress import (
     ALWAYS_COMPRESSION_POLICY,
@@ -88,6 +89,9 @@ class PreparedEventNativeExact:
     _full_history_tokens: int = field(repr=False, compare=False)
     _full_history_bytes: int = field(repr=False, compare=False)
     _selection_budget_bytes: int | None = field(repr=False, compare=False)
+    _resident_eligible_event_ids: tuple[str, ...] | None = field(
+        repr=False, compare=False
+    )
     _checked_signature: str | None = field(default=None, repr=False, compare=False)
     _checked_result: dict[str, Any] | None = field(
         default=None, repr=False, compare=False
@@ -102,6 +106,9 @@ class _SessionState:
     exact_memory: ExactRecoveryMemory
     decisions: dict[str, tuple[tuple[Any, ...], PreparedEventNativeExact]]
     active_decision_key: str
+    resident: ResidentSourceState | None = None
+    committed_decision_key: str | None = None
+    committed_memory: PackedMemory | None = None
 
 
 @dataclass(frozen=True)
@@ -211,6 +218,13 @@ class EventNativeExactController:
                         f"decision_key {decision_key!r} was reused with different input"
                     )
                 return prepared
+            if (
+                self.route_mode == "ac_gist_static"
+                and state.committed_decision_key != state.active_decision_key
+            ):
+                raise PolicyInputError(
+                    "The previous bare decision has no committed final memory"
+                )
 
         static_view = select_view(
             store, recent_tool_events=self.packing.recent_tool_events
@@ -228,12 +242,49 @@ class EventNativeExactController:
                 evidence_event_ids=static_view.evidence_event_ids,
             )
             static_view.validate(store)
+        resident_eligible: tuple[str, ...] | None = None
+        resident_blocked: tuple[str, ...] = ()
+        if self.route_mode == "ac_gist_static":
+            prior = state.resident if state is not None else None
+            if prior is not None:
+                lost_raw = [
+                    event_id
+                    for event_id in static_view.raw_event_ids
+                    if any(
+                        index < prior.source_message_count
+                        and index not in prior.raw_source_indices
+                        for index in store.event(event_id).source_indices
+                    )
+                ]
+                if lost_raw:
+                    raise PolicyInputError(
+                        "Bare mandatory raw view would restore a prior compressed "
+                        f"or dropped source: {lost_raw!r}"
+                    )
+                resident_eligible = prior.admissible_event_ids(
+                    store,
+                    static_view.gist_event_ids,
+                    self.tokenizer,
+                    max_chunk_tokens=self.packing.max_chunk_tokens,
+                    chunk_overlap=self.packing.chunk_overlap,
+                )
+                resident_blocked = tuple(
+                    event_id
+                    for event_id in static_view.gist_event_ids
+                    if event_id not in set(resident_eligible)
+                )
+            else:
+                resident_eligible = tuple(static_view.gist_event_ids)
         full_memory, full_history_tokens, full_history_bytes = self._measure_full(
             store, tools, max_new_tokens
         )
-        eligible_event_ids = tuple(static_view.gist_event_ids)
+        eligible_event_ids = (
+            resident_eligible
+            if resident_eligible is not None
+            else tuple(static_view.gist_event_ids)
+        )
         activated = (
-            bool(eligible_event_ids)
+            bool(eligible_event_ids or resident_blocked)
             if self.always_compress
             else full_history_bytes > self.policy_config.history_budget_bytes
         )
@@ -254,6 +305,7 @@ class EventNativeExactController:
                 ),
                 eligible_event_ids=list(eligible_event_ids),
                 eligible_event_count=len(eligible_event_ids),
+                resident_blocked_event_ids=list(resident_blocked),
                 full_identity_bypass=False,
                 natural_zero_eligible_raw=not activated,
             )
@@ -340,6 +392,7 @@ class EventNativeExactController:
                             ordered,
                             tools,
                             max_new_tokens,
+                            resident_eligible_event_ids=resident_eligible,
                         )
                     except CapacityInfeasible as error:
                         base = plan_cache.get(())
@@ -388,7 +441,7 @@ class EventNativeExactController:
                 raise error_type(
                     "Selected exact evidence has no admissible event-native view"
                 )
-            if self._requires_min_gist:
+            if self._requires_min_gist and eligible_event_ids:
                 reservation_event_id = chosen.metadata[
                     "min_gist_reservation_event_id"
                 ]
@@ -408,6 +461,7 @@ class EventNativeExactController:
                                 tools,
                                 max_new_tokens,
                                 reservation_event_id=reservation_event_id,
+                                resident_eligible_event_ids=resident_eligible,
                             )
                         except CapacityInfeasible as error:
                             plan_cache[ordered] = infeasible_candidate(chosen, error)
@@ -447,6 +501,7 @@ class EventNativeExactController:
             full_history_bytes,
             tools,
             ratio,
+            resident_eligible_event_ids=resident_eligible,
         )
         metadata = self._compose_metadata(
             store,
@@ -508,6 +563,7 @@ class EventNativeExactController:
             _selection_budget_bytes=(
                 selection_budget if activated and self.always_compress else None
             ),
+            _resident_eligible_event_ids=resident_eligible,
         )
         decisions = dict(state.decisions) if state is not None else {}
         decisions[decision_key] = (signature, prepared)
@@ -518,6 +574,7 @@ class EventNativeExactController:
             exact_memory=staged,
             decisions=decisions,
             active_decision_key=decision_key,
+            resident=state.resident if state is not None else None,
         )
         return prepared
 
@@ -649,6 +706,7 @@ class EventNativeExactController:
                     prepared._full_history_bytes,
                     prepared._tools,
                     prepared._ratio,
+                    resident_eligible_event_ids=prepared._resident_eligible_event_ids,
                 )
                 metadata = self._compose_metadata(
                     prepared._store,
@@ -681,6 +739,35 @@ class EventNativeExactController:
         prepared._checked_result = _copy_reconsideration(result)
         return result
 
+    def commit_memory(
+        self, prepared: PreparedEventNativeExact, final_memory: PackedMemory
+    ) -> None:
+        """Advance bare residency only after the selected final output succeeds."""
+        if (
+            not isinstance(prepared, PreparedEventNativeExact)
+            or prepared._owner is not self._owner
+        ):
+            raise PolicyInputError("Prepared decision belongs to another exact controller")
+        state = self._sessions.get(prepared._store.session_id)
+        decision_key = prepared._decision.decision_key
+        if state is None or state.active_decision_key != decision_key:
+            raise PolicyInputError("Prepared decision is stale for the active prefix")
+        allowed = [prepared.memory]
+        if prepared._checked_result is not None:
+            allowed.append(prepared._checked_result["memory"])
+        if not any(final_memory is candidate for candidate in allowed):
+            raise PolicyInputError("Final memory is not a prepared decision view")
+        if state.committed_decision_key is not None:
+            if (
+                state.committed_decision_key == decision_key
+                and state.committed_memory is final_memory
+            ):
+                return
+            raise PolicyInputError("A decision cannot commit a different final memory")
+        state.resident = ResidentSourceState.from_memory(prepared._store, final_memory)
+        state.committed_decision_key = decision_key
+        state.committed_memory = final_memory
+
     def _cached_or_new_plan(
         self,
         prepared: PreparedEventNativeExact,
@@ -696,6 +783,7 @@ class EventNativeExactController:
                 ordered,
                 prepared._tools,
                 prepared._max_new_tokens,
+                resident_eligible_event_ids=prepared._resident_eligible_event_ids,
             )
             prepared._plan_cache[ordered] = plan
         return plan
@@ -750,6 +838,7 @@ class EventNativeExactController:
         max_new_tokens: int,
         *,
         reservation_event_id: str | None = None,
+        resident_eligible_event_ids: tuple[str, ...] | None = None,
     ) -> _GistPlan:
         if self._requires_min_gist:
             return self._plan_always_compress_gist(
@@ -759,6 +848,7 @@ class EventNativeExactController:
                 tools,
                 max_new_tokens,
                 reservation_event_id=reservation_event_id,
+                resident_eligible_event_ids=resident_eligible_event_ids,
             )
         static_raw = set(static_view.raw_event_ids)
         evidence = set(evidence_ids)
@@ -913,16 +1003,19 @@ class EventNativeExactController:
         max_new_tokens: int,
         *,
         reservation_event_id: str | None = None,
+        resident_eligible_event_ids: tuple[str, ...] | None = None,
     ) -> _GistPlan:
         """Reserve one complete native gist event with necessary raw evidence."""
 
         static_raw = set(static_view.raw_event_ids)
-        static_gist = tuple(static_view.gist_event_ids)
+        all_static_gist = tuple(static_view.gist_event_ids)
+        static_gist = (
+            tuple(event_id for event_id in all_static_gist
+                  if event_id in set(resident_eligible_event_ids))
+            if resident_eligible_event_ids is not None
+            else all_static_gist
+        )
         evidence = set(evidence_ids)
-        if not static_gist:
-            raise CapacityInfeasible(
-                "Always-compress gist planning requires eligible completed history"
-            )
         if evidence & static_raw:
             raise PolicyInputError(
                 "Exact evidence must be hidden from the frozen static raw view"
@@ -930,6 +1023,72 @@ class EventNativeExactController:
         if not evidence <= set(static_gist):
             raise PolicyInputError(
                 "Exact evidence must name complete events in the frozen static gist"
+            )
+
+        if not static_gist:
+            if reservation_event_id is not None:
+                raise PolicyInputError("No eligible gist can satisfy a reservation")
+            raw_ids = _ordered_ids(store, static_raw)
+            view = RuntimeMemoryView(
+                gist_event_ids=(),
+                raw_event_ids=raw_ids,
+                omitted_event_ids=all_static_gist,
+                mandatory_raw_event_ids=raw_ids,
+                raw_control_layout=ALWAYS_COMPRESS_GIST_LAYOUT,
+            )
+            measure = self._measure_view(
+                store, static_view, view, tools, max_new_tokens
+            )
+            selection_budget = min(
+                self.policy_config.history_budget_bytes,
+                self.policy_config.workspace_budget_bytes,
+            )
+            history_bytes = max(
+                row["history_bytes"] for row in measure.per_ratio.values()
+            )
+            selection_cost = max(
+                0, history_bytes - self.policy_config.history_budget_bytes
+                + selection_budget,
+            )
+            if measure.reasons:
+                selection_cost = max(selection_cost, selection_budget + 1)
+            return _GistPlan(
+                memory=measure.memory,
+                metadata={
+                    "raw_control_layout": ALWAYS_COMPRESS_GIST_LAYOUT,
+                    "raw_event_ids": list(raw_ids),
+                    "gist_event_ids": [],
+                    "omitted_event_ids": list(all_static_gist),
+                    "mandatory_raw_event_ids": list(raw_ids),
+                    "static_raw_event_ids": list(static_view.raw_event_ids),
+                    "evidence_event_ids": [],
+                    "shared_evidence_event_ids": [],
+                    "raw_source_indices": list(measure.memory.raw_source_indices),
+                    "full_source_indices": list(range(len(store.messages))),
+                    "full_source_coverage": not all_static_gist,
+                    "gist_refill_priority_event_ids": [],
+                    "gist_refilled_event_ids": [],
+                    "skipped_gist_refill_events": [],
+                    "min_gist_reservation_required": False,
+                    "min_gist_reservation_event_id": None,
+                    "min_gist_reservation_met": None,
+                    "event_priority_mapping": "no resident eligible gist",
+                    "legacy_1088_block_parity": False,
+                    "atomic_packing_unit": "whole_event_all_encoder_chunks",
+                    "selection_cost_bytes": selection_cost,
+                    "evidence_tokens": measure.evidence_tokens,
+                    "evidence_bytes": measure.evidence_bytes,
+                    "history_bytes": history_bytes,
+                    "sequence_tokens": max(
+                        row["sequence_tokens"] for row in measure.per_ratio.values()
+                    ),
+                    "logical_sequence_tokens": measure.logical_sequence_tokens,
+                    "per_ratio": copy.deepcopy(measure.per_ratio),
+                    "admission_failures": list(measure.reasons),
+                    "reflow_logical_positions": bool(all_static_gist),
+                },
+                selection_cost_bytes=selection_cost,
+                admissible=not measure.reasons,
             )
 
         priority = self._gist_priority(store, static_gist)
@@ -953,7 +1112,7 @@ class EventNativeExactController:
                 evidence_event_ids=evidence_ids,
                 omitted_event_ids=tuple(
                     item
-                    for item in static_gist
+                    for item in all_static_gist
                     if item != event_id and item not in evidence
                 ),
                 mandatory_raw_event_ids=raw_ids,
@@ -996,7 +1155,7 @@ class EventNativeExactController:
             raw_event_ids=raw_ids,
             evidence_event_ids=evidence_ids,
             omitted_event_ids=tuple(
-                event_id for event_id in static_gist if event_id not in represented
+                event_id for event_id in all_static_gist if event_id not in represented
             ),
             mandatory_raw_event_ids=raw_ids,
             raw_control_layout=ALWAYS_COMPRESS_GIST_LAYOUT,
@@ -1138,12 +1297,23 @@ class EventNativeExactController:
         full_history_bytes: int,
         tools: tuple[dict[str, Any], ...],
         ratio: int,
+        *,
+        resident_eligible_event_ids: tuple[str, ...] | None = None,
     ) -> dict[str, Any]:
         metadata = copy.deepcopy(dict(base))
         if not self.always_compress:
             return metadata
 
         eligible_event_ids = tuple(static_view.gist_event_ids)
+        resident_candidates = (
+            resident_eligible_event_ids
+            if resident_eligible_event_ids is not None
+            else eligible_event_ids
+        )
+        resident_blocked = tuple(
+            event_id for event_id in eligible_event_ids
+            if event_id not in set(resident_candidates)
+        )
         eligible_sources = frozenset(
             index
             for event_id in eligible_event_ids
@@ -1188,6 +1358,7 @@ class EventNativeExactController:
             event_id
             for event_id in eligible_event_ids
             if event_id not in retained_event_ids
+            and event_id not in resident_blocked
         ]
         packing_skip_rows = [
             *metadata.get("min_gist_reservation_skipped_events", ()),
@@ -1222,6 +1393,9 @@ class EventNativeExactController:
         coverage.update(
             {
                 "eligible_event_ids": list(eligible_event_ids),
+                "resident_eligible_event_ids": list(resident_candidates),
+                "resident_evicted_event_ids": list(resident_blocked),
+                "resident_evicted_source_indices": source_indices(resident_blocked),
                 "eligibility_stage": (
                     "observable EventStore plus frozen select_view before "
                     "max_chunks and byte-budget admission"
@@ -1319,7 +1493,7 @@ class EventNativeExactController:
                 "compression_policy": ALWAYS_COMPRESSION_POLICY,
                 "implementation_profile": NATIVE_ALWAYS_IMPLEMENTATION_PROFILE,
                 "history_view_protocol": self.history_view_protocol,
-                "no_eligible_history": not eligible_event_ids,
+                "no_eligible_history": not resident_candidates,
                 "source_coverage": coverage,
                 "compression_ratio": compression_ratio,
                 "same_prefix_full_reference": {
@@ -1337,10 +1511,10 @@ class EventNativeExactController:
                 "actual_history_bytes": active_history_bytes,
                 "full_source_coverage": coverage["complete_history_coverage"],
                 "min_gist_reservation_required": self._requires_min_gist
-                and bool(eligible_event_ids),
+                and bool(resident_candidates),
                 "min_gist_reservation_met": (
                     bool(memory.view.gist_event_ids)
-                    if self._requires_min_gist and eligible_event_ids
+                    if self._requires_min_gist and resident_candidates
                     else None
                 ),
             }

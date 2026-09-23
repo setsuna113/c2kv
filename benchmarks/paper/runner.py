@@ -19,7 +19,8 @@ from .candidate_matrix import (
 )
 from .racer_matrix import (
     is_racer_arm, parse_racer_backends, parse_racer_policies,
-    racer_config_for_arm, with_racer_methods,
+    racer_arm_name, racer_config_for_arm, resolve_racer_backend,
+    resolve_unified_runtime_methods, unified_backend_for_arm, with_racer_methods,
 )
 from benchmarks.history_budget import HistoryKVBudget, parse_history_kv_budget
 from benchmarks.native_history_budget import NativeHistoryBudget, parse_native_history_budget
@@ -147,9 +148,14 @@ def cells(config):
                         row.update(
                             history_backend=resolved["backend"],
                             racer_policy=resolved["policy"],
+                            recovery_policy=resolved["policy"],
                             calibration_status=resolved["detector_calibration"],
                             history_allocation=resolved["allocation"],
                         )
+                    elif arm.name in NATIVE_RATIOS and method.get("history_runtime") == "racer":
+                        budget = NativeHistoryBudget(method["history_budget_tokens"])
+                        budget.validate_arm(arm)
+                        row["cell_id"] = bench["name"] + "__" + budget.variant_name(arm.name)
                     elif arm.history_kv:
                         budget = HistoryKVBudget(method["history_budget_tokens"])
                         budget.apply(arm)
@@ -327,6 +333,8 @@ def resolve_history_kv_budgets(config):
     """Replace opt-in shared history-KV capacities with one absolute token cap."""
     from benchmarks.arms import get_arm
 
+    config = resolve_unified_runtime_methods(config)
+
     if any("history_retention_ratio" in method for method in config["methods"]):
         raise ValueError("history_retention_ratio is no longer supported; use an "
                          "absolute history_budget_tokens value or shared budget B")
@@ -348,7 +356,13 @@ def resolve_history_kv_budgets(config):
                 and method.get("history_budget_source") != "shared"):
             methods.append(method)
             continue
-        HistoryKVBudget(tokens).apply(get_arm(method["arm"]))
+        arm = get_arm(method["arm"])
+        if is_racer_arm(arm.name):
+            racer_config_for_arm(config, arm.name)
+        elif arm.name in NATIVE_RATIOS and method.get("history_runtime") == "racer":
+            NativeHistoryBudget(tokens).validate_arm(arm)
+        else:
+            HistoryKVBudget(tokens).apply(arm)
         resolved = dict(method, history_budget_tokens=tokens,
                         history_budget_source="shared")
         resolved.pop("retention", None)
@@ -362,6 +376,25 @@ def with_history_kv_budget(config, arm_name, target_tokens):
     config = resolve_history_kv_budgets(config)
     budget = HistoryKVBudget(target_tokens)
     budget.apply(get_arm(arm_name))
+    backend = unified_backend_for_arm(arm_name)
+    if backend is not None:
+        primaries = [method for method in config["methods"]
+                     if method.get("history_runtime") == "racer"
+                     and method.get("history_backend") == backend
+                     and method.get("recovery_policy") == "off"
+                     and method.get("history_budget_source") == "shared"]
+        if primaries:
+            if len(primaries) != 1:
+                raise ValueError(f"History-KV budget requires one primary configured base arm: {arm_name}")
+            racer_arm = racer_arm_name(backend, "off", target_tokens)
+            if any(method["arm"] == racer_arm for method in config["methods"]):
+                raise ValueError(f"History-KV budget cell already exists: {racer_arm}")
+            variant = dict(primaries[0], arm=racer_arm, group="racer",
+                           history_budget_tokens=target_tokens,
+                           racer_backend=resolve_racer_backend(backend, "off", target_tokens),
+                           budget_variant=True)
+            variant.pop("history_budget_source", None)
+            return dict(config, methods=[*config["methods"], variant])
     templates = [method for method in config["methods"]
                  if method["arm"] == arm_name
                  and method.get("group") not in {"budget", "sweep"}]
@@ -636,7 +669,9 @@ def _prepare_locked(config, output, source):
             continue
         explicit_budget = item.get("history_budget_tokens")
         if "history_budget_tokens" in item:
-            if arm.native_controller:
+            if arm.name in NATIVE_RATIOS and item.get("history_runtime") == "racer":
+                NativeHistoryBudget(explicit_budget).validate_arm(arm)
+            elif arm.native_controller:
                 NativeHistoryBudget(explicit_budget).validate_arm(arm)
                 if (not item.get("benchmarks") or
                         not set(item["benchmarks"]) <= {"bfcl_base", "bfcl_long_context"}):
@@ -766,6 +801,8 @@ def _prepare_locked(config, output, source):
             fields.append("tool_interface_policy")
         if any("history_budget_tokens" in row for row in matrix):
             fields.append("history_budget_tokens")
+        if any("history_runtime" in row for row in matrix):
+            fields.extend(["history_runtime", "recovery_policy", "compression_ratio"])
         if any(is_racer_arm(row["arm"]) for row in matrix):
             fields.extend(["history_backend", "racer_policy", "calibration_status",
                            "history_allocation"])
@@ -921,7 +958,8 @@ def _guard_method_actor(cell):
 def _unsupported_stage(stage, cell):
     if stage != "closed_loop" and is_subset(cell):
         return "repair subsets support closed_loop only; common-prefix replay is a separate cohort"
-    if stage == "common_prefix" and cell["arm"] in {"agentkv", "commitkv"}:
+    if stage == "common_prefix" and (cell["arm"] in {"agentkv", "commitkv"}
+                                     or cell.get("history_backend") in {"agentkv", "commitkv"}):
         return ("Full teacher-forced assistant actions violate exact_generated_prefix; "
                 "use this arm's closed_loop telemetry, labelled as its own trajectory")
     return None
@@ -1268,9 +1306,14 @@ def main(argv=None):
         config = with_candidate_methods(
             config, parse_candidate_arms(args.candidate_arms),
             tuple(args.candidate_benchmarks.split(",")))
+        racer_backends = parse_racer_backends(args.racer_backends)
+        racer_policies = parse_racer_policies(args.racer_policies)
+        racer_budget = args.racer_history_budget
+        if racer_backends or racer_policies:
+            racer_budget = (racer_budget if racer_budget is not None else
+                            config.get("history_kv_budget_tokens"))
         config = with_racer_methods(
-            config, parse_racer_backends(args.racer_backends),
-            parse_racer_policies(args.racer_policies), args.racer_history_budget)
+            config, racer_backends, racer_policies, racer_budget)
         config = with_acon_budget(config, args.acon_budget_tokens)
         config = with_hiagent_budget(config, args.hiagent_budget_tokens)
         for value in args.history_kv_budget:

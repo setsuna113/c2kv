@@ -64,7 +64,7 @@ def test_invalid_cap_rejected_before_output(tmp_path, budget):
 
 
 def test_no_silent_budget_on_unsupported_arm_or_benchmark(tmp_path):
-    for arm in ("full", "commitkv", "c2kv_native_r4", "hiagent_full"):
+    for arm in ("full", "commitkv", "hiagent_full"):
         with pytest.raises(ValueError, match="does not support"):
             runner.with_native_history_budget(config(), arm, 768)
     cfg = runner.with_native_history_budget(config(), ARM, 768)
@@ -142,3 +142,36 @@ def test_malformed_budget_cli(value):
 def test_native_budget_parser():
     assert parse_native_history_budget(ARM + "=2048") == (ARM, 2048)
     assert NativeHistoryBudget(2048).cli_args() == ["--history-budget-tokens", "2048"]
+
+
+@pytest.mark.parametrize("benchmark", ["bfcl_base", "bfcl_long_context", "appworld",
+                                       "acebench_agent", "toolsandbox", "tau2"])
+def test_bare_budget_reaches_all_native_adapters_without_s0(tmp_path, benchmark):
+    original = c1.ARM
+    try:
+        c1.select_arm("c2kv_native_r8")
+        cfg = config()
+        cfg.update(native_arm=c1.ARM, native_history_budget_tokens=192,
+                   sglang_source=str(tmp_path / "engine"))
+        args = c1.delivery_args(cfg, benchmark, tmp_path, [], c1.load_delivery())
+        assert args.history_budget_tokens == 192
+        assert args.method == "c2kv_native" and args.ratio == 8
+        assert args.racer_backend_config is None
+    finally:
+        c1.select_arm(original)
+
+
+def test_explicit_native_generation_timeout_reaches_engine_command(tmp_path):
+    original = c1.ARM
+    try:
+        c1.select_arm("c2kv_native_r8")
+        cfg = config()
+        cfg.update(native_arm=c1.ARM, generation_timeout=1234.5,
+                   sglang_source=str(tmp_path / "engine"), bfcl_dir=str(tmp_path / "bfcl"))
+        (tmp_path / "bfcl" / "bfcl_eval").mkdir(parents=True)
+        delivery = c1.load_delivery()
+        args = c1.delivery_args(cfg, "bfcl_base", tmp_path, [], delivery)
+        command, _ = delivery.commands_for_task(args, "multi_turn_base_0", tmp_path / "controller.json")
+        assert command[command.index("--sglang-timeout-seconds") + 1] == "1234.5"
+    finally:
+        c1.select_arm(original)

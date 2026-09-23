@@ -15,6 +15,7 @@ from benchmarks.history_budget import parse_history_kv_budget
 from . import runner
 from .artifact_io import atomic_json
 from .process_lifecycle import run_owned, unwind_on_termination
+from .racer_matrix import racer_arm_name, unified_backend_for_arm
 
 
 PAPER_ROOT = Path(__file__).resolve().parents[2]
@@ -31,25 +32,43 @@ def plan(config: dict, benchmark: str, budget_spec: str, output: Path,
         raise ValueError("--upstream must be an HTTP(S) base URL")
     if proxy_port is not None and not 1 <= proxy_port <= 65535:
         raise ValueError("--proxy-port must be in 1..65535")
-    if shared_budget_tokens is not None:
+    marked = [method for method in config["methods"]
+              if method["arm"] == arm and method.get("history_runtime") == "racer"]
+    backend = unified_backend_for_arm(arm)
+    if not marked and backend is not None:
+        marked = [method for method in config["methods"]
+                  if method.get("history_runtime") == "racer"
+                  and method.get("history_backend") == backend
+                  and method.get("recovery_policy") == "off"
+                  and method.get("history_budget_source") == "shared"]
+    if len(marked) > 1:
+        raise ValueError(f"More than one primary unified method uses arm {arm}")
+    if marked:
+        if shared_budget_tokens is not None:
+            config = dict(config, history_kv_budget_tokens=shared_budget_tokens)
+        elif config.get("history_kv_budget_tokens") is None:
+            config = dict(config, history_kv_budget_tokens=tokens)
+    elif shared_budget_tokens is not None:
         config = dict(config, history_kv_budget_tokens=shared_budget_tokens)
     elif config.get("history_kv_budget_tokens") is None and any(
             method.get("history_budget_tokens") == "shared" for method in config["methods"]):
         config = dict(config, history_kv_budget_tokens=tokens)
     config = runner.resolve_history_kv_budgets(config)
+    selected_arm = (racer_arm_name(marked[0]["history_backend"], "off", tokens)
+                    if marked and marked[0]["history_backend"] != "c2kv" else arm)
     existing = [method for method in config["methods"]
-                if method["arm"] == arm and method.get("history_budget_tokens") == tokens]
+                if method["arm"] == selected_arm and method.get("history_budget_tokens") == tokens]
     resolved = config if existing else runner.with_history_kv_budget(config, arm, tokens)
     if bench_python:
         resolved = dict(resolved, bench_python=bench_python)
     if proxy_port is not None:
         resolved = dict(resolved, proxy_port=proxy_port)
     selected = [cell for cell in runner.cells(resolved)
-                if cell["arm"] == arm and cell["benchmark"] == benchmark
+                if cell["arm"] == selected_arm and cell["benchmark"] == benchmark
                 and cell.get("history_budget_tokens") == tokens
                 and cell["tool_context"] == "raw"]
     if len(selected) != 1:
-        raise ValueError(f"Expected one configured raw-tool cell for {benchmark}__{arm}_b{tokens}")
+        raise ValueError(f"Expected one configured raw-tool cell for {benchmark}__{selected_arm}_b{tokens}")
     cell = selected[0]
     if runner._unsupported_stage("closed_loop", cell):
         raise ValueError(f"Unsupported closed_loop cell: {cell['cell_id']}")
@@ -57,8 +76,9 @@ def plan(config: dict, benchmark: str, budget_spec: str, output: Path,
     profile = checkpoint_profile or output / "deployment_profile.json"
     command = runner.run_command(resolved, cell, directory, profile, "closed_loop")
     command[command.index("--upstream") + 1] = upstream.rstrip("/")
-    command.append("--shared-engine")
-    if checkpoint_profile is None:
+    if not runner.is_native_arm(cell["arm"]):
+        command.append("--shared-engine")
+    if checkpoint_profile is None and "--checkpoint-profile" in command:
         index = command.index("--checkpoint-profile")
         del command[index:index + 2]  # Let benchmarks.run discover the checkpoint's profile.
     return resolved, cell, command, directory

@@ -90,9 +90,9 @@
     },
     {
       "method": "C2KV",
-      "arm": "c2kv_native_r4",
+      "arm": "c2kv_native_r8",
       "group": "main",
-      "ratio": 4,
+      "ratio": 8,
       "benchmarks": [
         "bfcl_base",
         "bfcl_long_context",
@@ -100,7 +100,12 @@
         "acebench_agent",
         "toolsandbox",
         "tau2"
-      ]
+      ],
+      "history_runtime": "racer",
+      "history_backend": "c2kv",
+      "recovery_policy": "off",
+      "history_budget_tokens": "shared",
+      "compression_ratio": 8
     },
     {
       "method": "H2O",
@@ -114,7 +119,10 @@
         "toolsandbox",
         "tau2"
       ],
-      "history_budget_tokens": "shared"
+      "history_budget_tokens": "shared",
+      "history_runtime": "racer",
+      "history_backend": "h2o",
+      "recovery_policy": "off"
     },
     {
       "method": "SnapKV",
@@ -128,7 +136,10 @@
         "toolsandbox",
         "tau2"
       ],
-      "history_budget_tokens": "shared"
+      "history_budget_tokens": "shared",
+      "history_runtime": "racer",
+      "history_backend": "snapkv",
+      "recovery_policy": "off"
     },
     {
       "method": "PyramidKV",
@@ -142,7 +153,27 @@
         "toolsandbox",
         "tau2"
       ],
-      "history_budget_tokens": "shared"
+      "history_budget_tokens": "shared",
+      "history_runtime": "racer",
+      "history_backend": "pyramidkv",
+      "recovery_policy": "off"
+    },
+    {
+      "method": "StreamingLLM",
+      "arm": "history_kv_streamingllm_r25_persistent",
+      "group": "main",
+      "benchmarks": [
+        "bfcl_base",
+        "bfcl_long_context",
+        "appworld",
+        "acebench_agent",
+        "toolsandbox",
+        "tau2"
+      ],
+      "history_budget_tokens": "shared",
+      "history_runtime": "racer",
+      "history_backend": "streamingllm",
+      "recovery_policy": "off"
     },
     {
       "method": "AgentFold",
@@ -169,7 +200,10 @@
         "toolsandbox",
         "tau2"
       ],
-      "history_budget_tokens": "shared"
+      "history_budget_tokens": "shared",
+      "history_runtime": "racer",
+      "history_backend": "commitkv",
+      "recovery_policy": "off"
     },
     {
       "method": "AgentKV",
@@ -183,7 +217,10 @@
         "toolsandbox",
         "tau2"
       ],
-      "history_budget_tokens": "shared"
+      "history_budget_tokens": "shared",
+      "history_runtime": "racer",
+      "history_backend": "agentkv",
+      "recovery_policy": "off"
     },
     {
       "method": "C2KV+C1",

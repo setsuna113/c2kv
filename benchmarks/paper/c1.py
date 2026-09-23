@@ -117,10 +117,12 @@ def delivery_args(config, benchmark, output, task_ids, delivery):
     if racer is not None:
         command += ["--racer-backend-config", json.dumps(
             racer, sort_keys=True, separators=(",", ":"))]
+    if config.get("generation_timeout") is not None:
+        command += ["--generation-timeout", str(config["generation_timeout"])]
     if "native_history_budget_tokens" in config:
         budget = NativeHistoryBudget(config["native_history_budget_tokens"])
         budget.validate_arm(get_arm(ARM))
-        if benchmark not in {"bfcl_base", "bfcl_long_context"}:
+        if ARM not in NATIVE_RATIOS and benchmark not in {"bfcl_base", "bfcl_long_context"}:
             raise ValueError("Native history budget sweep currently supports BFCL only")
         command += budget.cli_args()
     if benchmark == "tau2":
@@ -712,7 +714,7 @@ def main(argv=None):
     if args.history_budget_tokens is not None:
         budget = NativeHistoryBudget(args.history_budget_tokens)
         budget.validate_arm(get_arm(ARM))
-        if args.benchmark not in {"bfcl_base", "bfcl_long_context"}:
+        if ARM not in NATIVE_RATIOS and args.benchmark not in {"bfcl_base", "bfcl_long_context"}:
             parser.error("Native history budget sweep currently supports BFCL only")
         config["native_history_budget_tokens"] = budget.target_tokens
     apply_tool_cli(config, args.tool_memory, args.tool_checkpoint, args.tool_budget_tokens)

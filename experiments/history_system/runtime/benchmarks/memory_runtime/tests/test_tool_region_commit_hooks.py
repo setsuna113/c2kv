@@ -13,6 +13,10 @@ from benchmarks.memory_runtime.event_native_tool import ToolPrepared, ToolRegion
 
 
 class RecordingInner:
+    def commit_memory(self, prepared, final_memory):
+        prepared.final_memory = final_memory
+        return {"committed": True}
+
     def validate_commit(self, prepared, candidate_calls, *, draft_text, parse_error=None):
         prepared.commit_accepted = parse_error is None
         prepared.commit_calls = list(candidate_calls)
@@ -53,3 +57,16 @@ def test_commit_hooks_pass_unwrapped_decisions_through():
     region.validate_commit(inner, [], draft_text="", parse_error="bad json")
 
     assert inner.commit_accepted is False
+
+
+def test_tool_region_commits_the_history_view_selected_by_final_generation():
+    inner = SimpleNamespace()
+    region = controller()
+    first_history, second_history = object(), object()
+    first_tool, second_tool = object(), object()
+    prepared = wrapped(inner)
+    prepared.history_views.extend(((first_tool, first_history),
+                                   (second_tool, second_history)))
+
+    assert region.commit_memory(prepared, second_tool) == {"committed": True}
+    assert inner.final_memory is second_history

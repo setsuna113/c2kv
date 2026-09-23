@@ -370,9 +370,7 @@ def _history_budget_override(args: argparse.Namespace, design: dict | None = Non
         tokens = racer["history_budget_tokens"]
     if tokens is None:
         return None
-    if racer is None and args.method == "c2kv_native":
-        raise ValueError("--history-budget-tokens does not support native bare static packing")
-    if racer is None and args.benchmark != "bfcl":
+    if racer is None and args.method != "c2kv_native" and args.benchmark != "bfcl":
         raise ValueError("--history-budget-tokens currently supports BFCL only")
     import history_budget
 
@@ -488,6 +486,11 @@ def portable_worker_command(args: argparse.Namespace, task: str, task_out: Path)
 
 def commands_for_task(args: argparse.Namespace, task: str, controller_path: Path) -> tuple[list[str], list[str]]:
     design = current.load_config()
+    timeout = getattr(args, "generation_timeout", None)
+    if timeout is not None:
+        if not 0 < timeout < float("inf"):
+            raise ValueError("--generation-timeout must be finite and positive")
+        design["runtime"]["sglang_timeout_seconds"] = timeout
     override = _history_budget_override(args, design)
     if override is not None:
         import history_budget
@@ -1173,6 +1176,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--port", type=int, default=38810)
     parser.add_argument("--task-timeout", type=int, default=3600)
+    parser.add_argument("--generation-timeout", type=float,
+                        help="Explicit per-request timeout for the SGLang engine")
     parser.add_argument("--ratio", type=int, choices=sorted(runner.SUPPORTED_RATIOS), default=None,
                         help="Override the delivered compression ratio with the other supported C0 ratio (ablation)")
     parser.add_argument("--tool-memory", default="none")
@@ -1193,9 +1198,7 @@ def validate_args(args: argparse.Namespace) -> list[str]:
     budget_tokens = getattr(args, "history_budget_tokens", None)
     if budget_tokens is not None and (type(budget_tokens) is not int or budget_tokens <= 0):
         raise ValueError("--history-budget-tokens must be a positive integer")
-    if budget_tokens is not None and args.method == "c2kv_native":
-        raise ValueError("--history-budget-tokens does not support native bare static packing")
-    if budget_tokens is not None and args.benchmark != "bfcl":
+    if budget_tokens is not None and args.method != "c2kv_native" and args.benchmark != "bfcl":
         raise ValueError("--history-budget-tokens currently supports BFCL only")
     racer = getattr(args, "racer_backend_config", None)
     if racer is not None:

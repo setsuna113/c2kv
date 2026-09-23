@@ -4,7 +4,20 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Mapping
 
-BACKENDS = ("c2kv", "commitkv", "h2o", "snapkv", "pyramidkv", "streamingllm")
+BACKENDS = ("c2kv", "commitkv", "agentkv", "h2o", "snapkv", "pyramidkv", "streamingllm")
+
+# Match the registered persistent proxy arms. A different serving route changes
+# the KV algorithm even when its method name and token budget stay the same.
+PERSISTENT_METHODS = {
+    "commitkv": ("commitkv", "reference_attention"),
+    "agentkv": ("agentkv", "reference_attention"),
+    "h2o": ("h2o", "physical_eviction"),
+    "snapkv": ("snapkv_persistent", "physical_eviction"),
+    "pyramidkv": ("pyramidkv", "reference_attention"),
+    "streamingllm": ("streamingllm", "physical_eviction"),
+}
+PERSISTENT_SELECTORS = {"recent_window": 64, "kernel_size": 5,
+                        "pooling": "avgpool", "h2o_recent_fraction": 0.5}
 
 
 @dataclass(frozen=True)
@@ -40,31 +53,33 @@ class BackendConfig:
         allocation = "c2kv_s0" if result.backend == "c2kv" else "backend_native_persistent"
         if result.allocation != allocation:
             raise ValueError(f"Backend allocation must be {allocation!r}")
+        if result.backend != "c2kv":
+            result.history_spec()
         return result
 
     @property
     def method(self):
-        return "snapkv_persistent" if self.backend == "snapkv" else self.backend
+        return PERSISTENT_METHODS[self.backend][0] if self.backend != "c2kv" else "c2kv"
 
     def history_spec(self, target_tokens=None):
-        defaults = {"method": self.method, "backend": "reference_attention",
+        if self.backend == "c2kv":
+            raise ValueError("C2KV does not use a persistent history-KV spec")
+        method, backend = PERSISTENT_METHODS[self.backend]
+        defaults = {"method": method, "backend": backend,
                     "persistent_session": True, "retention_ratio": None,
                     "target_tokens": self.history_budget_tokens,
-                    "recent_window": 64, "kernel_size": 5,
-                    "pooling": "avgpool", "h2o_recent_fraction": 0.5}
+                    **PERSISTENT_SELECTORS}
+        if not isinstance(self.backend_config, Mapping):
+            raise ValueError("RACER backend_config must be a mapping")
         supplied = dict(self.backend_config)
         unknown = set(supplied) - set(defaults)
         if unknown:
             raise ValueError(f"Unknown history backend settings: {sorted(unknown)}")
-        defaults.update(supplied)
-        if (defaults["method"] != self.method or not defaults["persistent_session"]
-                or defaults["backend"] not in {"reference_attention", "physical_eviction"}
-                or defaults["retention_ratio"] is not None):
-            raise ValueError("RACER requires its named persistent backend and an absolute budget")
-        if self.backend == "commitkv" and defaults["backend"] != "reference_attention":
-            raise ValueError("CommitKV requires reference_attention")
-        if self.backend == "pyramidkv" and defaults["backend"] != "reference_attention":
-            raise ValueError("PyramidKV requires reference_attention")
+        for key, value in supplied.items():
+            if type(value) is not type(defaults[key]) or value != defaults[key]:
+                raise ValueError(f"RACER {self.backend} {key} differs from the registered proxy arm")
+        if target_tokens is not None and (type(target_tokens) is not int or target_tokens <= 0):
+            raise ValueError("RACER effective history target must be a positive integer")
         defaults["target_tokens"] = self.history_budget_tokens if target_tokens is None else target_tokens
         return defaults
 

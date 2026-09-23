@@ -63,6 +63,17 @@ def test_paper_delivery_uses_configured_detector_and_defaults_to_d3_hybrid(tmp_p
 
 def test_append_final_arm_preserves_old_cells_and_completed_artifacts():
     config = dict(json.loads(DEFAULT_CONFIG.read_text()), history_kv_budget_tokens=768)
+    config["methods"] = [
+        {key: value for key, value in method.items()
+         if key not in {"history_runtime", "history_backend", "recovery_policy",
+                        "compression_ratio"}}
+        for method in config["methods"] if method["method"] != "StreamingLLM"
+    ]
+    for method in config["methods"]:
+        if method["method"] == "C2KV":
+            method["arm"] = "c2kv4"
+            method["ratio"] = 4
+            method.pop("history_budget_tokens", None)
     previous = copy.deepcopy(config)
     previous["methods"] = previous["methods"][:-2]   # drop the C1 system and its ratio-4 ablation
     previous.pop("c1")

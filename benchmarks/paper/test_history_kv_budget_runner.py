@@ -15,6 +15,7 @@ KV_ARMS = (
     "history_kv_h2o_r25_persistent",
     "history_kv_snapkv_r25_persistent",
     "history_kv_pyramidkv_r25_persistent",
+    "history_kv_streamingllm_r25_persistent",
     "commitkv",
     "agentkv",
 )
@@ -22,6 +23,13 @@ KV_ARMS = (
 
 def config(budget=None):
     cfg = json.loads(runner.DEFAULT_CONFIG.read_text(encoding="utf-8"))
+    # Exercise the supported frozen proxy protocol independently of the new
+    # marked native defaults (covered by test_unified_runtime.py).
+    for row in cfg["methods"]:
+        for key in ("history_runtime", "history_backend", "recovery_policy", "compression_ratio"):
+            row.pop(key, None)
+        if row["method"] == "C2KV":
+            row.pop("history_budget_tokens", None)
     cfg["history_kv_budget_tokens"] = budget
     return cfg
 
@@ -77,7 +85,7 @@ def test_ratio_api_metadata_is_rejected_but_historical_retention_config_works(tm
         if method.get("history_budget_tokens") != "shared":
             continue
         method.pop("history_budget_tokens")
-        if method["method"] in {"H2O", "SnapKV", "PyramidKV"}:
+        if method["method"] in {"H2O", "SnapKV", "PyramidKV", "StreamingLLM"}:
             method["retention"] = 0.25
     plan, _ = runner.prepare(legacy, tmp_path / "legacy", tmp_path / "engine")
     assert any(cell["cell_id"] == "bfcl_base__history_kv_h2o_r25_persistent" for cell in plan)
@@ -86,7 +94,9 @@ def test_ratio_api_metadata_is_rejected_but_historical_retention_config_works(tm
 
 def test_cli_shared_budget_precedes_independent_arm_overlay(tmp_path):
     output = tmp_path / "results"
-    args = ["--output", str(output), "--sglang-source", str(tmp_path / "engine"),
+    source = tmp_path / "legacy.json"
+    source.write_text(json.dumps(config()))
+    args = ["--config", str(source), "--output", str(output), "--sglang-source", str(tmp_path / "engine"),
             "--history-kv-budget-tokens", "384", "--history-kv-budget", "commitkv=1024"]
     runner.main(["prepare", *args])
     by_id = {row["cell_id"]: row for row in json.loads((output / "commands.json").read_text())}

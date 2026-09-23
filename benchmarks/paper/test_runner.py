@@ -14,15 +14,27 @@ from benchmarks.paper.runner import (extension_problem,
 from benchmarks.paper.report import write_comparison
 
 
+def legacy_matrix_config():
+    """Keep historical proxy identities explicit when testing frozen runs."""
+    config = json.loads(DEFAULT_CONFIG.read_text())
+    config["history_kv_budget_tokens"] = 768
+    config["methods"] = [
+        {key: value for key, value in method.items()
+         if key not in {"history_runtime", "history_backend", "recovery_policy",
+                        "compression_ratio"}}
+        for method in config["methods"] if method["method"] != "StreamingLLM"
+    ]
+    for method in config["methods"]:
+        if method["method"] == "C2KV":
+            method["arm"] = "c2kv4"
+            method["ratio"] = 4
+            method.pop("history_budget_tokens", None)
+    return config
+
+
 class PaperMatrixTest(unittest.TestCase):
     def setUp(self):
-        self.config = json.loads(DEFAULT_CONFIG.read_text())
-        self.config["history_kv_budget_tokens"] = 768
-        # Preserve coverage of the legacy native guard. The default native
-        # matrix is covered by test_native_bare.py.
-        for method in self.config["methods"]:
-            if method["arm"] == "c2kv_native_r4":
-                method["arm"] = "c2kv4"
+        self.config = legacy_matrix_config()
 
     def test_exact_prefix_replay_is_rejected_before_starting_server(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -133,7 +145,10 @@ class PaperMatrixTest(unittest.TestCase):
     def test_cli_timeout_is_frozen_and_cannot_rewrite_existing_root(self):
         with tempfile.TemporaryDirectory() as temporary:
             output = Path(temporary) / "run"
+            legacy_config = Path(temporary) / "legacy_config.json"
+            legacy_config.write_text(json.dumps(self.config))
             runner.main(["prepare", "--output", str(output),
+                         "--config", str(legacy_config),
                          "--history-kv-budget-tokens", "768",
                          "--generation-timeout", "1800"])
             frozen = (output / "config.resolved.json").read_bytes()
@@ -145,11 +160,13 @@ class PaperMatrixTest(unittest.TestCase):
             self.assertEqual(cmd[cmd.index("--generation-timeout") + 1], "1800.0")
             with self.assertRaises((ValueError, RuntimeError)):
                 runner.main(["prepare", "--output", str(output),
+                             "--config", str(legacy_config),
                              "--history-kv-budget-tokens", "768",
                              "--generation-timeout", "3600"])
             self.assertEqual((output / "config.resolved.json").read_bytes(), frozen)
             with self.assertRaises(SystemExit):
                 runner.main(["aggregate", "--output", str(output),
+                             "--config", str(legacy_config),
                              "--generation-timeout", "3600"])
 
     def test_prepare_pins_original_opponent_runtime_contracts(self):
@@ -652,32 +669,55 @@ class DefaultHistoryBudgetTest(unittest.TestCase):
 
     def test_default_history_kv_cells_share_one_absolute_budget(self):
         expected = {
-            "H2O": ("main", "history_kv_h2o_r25_persistent", "history_kv_h2o_persistent"),
-            "SnapKV": ("main", "history_kv_snapkv_r25_persistent", "history_kv_snapkv_persistent"),
-            "PyramidKV": ("main", "history_kv_pyramidkv_r25_persistent", "history_kv_pyramidkv_persistent"),
-            "CommitKV": ("opponent", "commitkv", "commitkv"),
-            "AgentKV": ("opponent", "agentkv", "agentkv"),
+            "H2O": "h2o",
+            "SnapKV": "snapkv",
+            "StreamingLLM": "streamingllm",
+            "PyramidKV": "pyramidkv",
+            "CommitKV": "commitkv",
+            "AgentKV": "agentkv",
         }
         all_benchmarks = {item["name"] for item in self.config["benchmarks"]}
         rows = cells(self.config)
         self.assertFalse(any(row["group"] == "sweep" for row in rows))
-        for method, (group, arm, identity_base) in expected.items():
+        for method, backend in expected.items():
+            arm = f"racer_{backend}_off_b768"
             selected = [row for row in rows if row["method"] == method]
             self.assertEqual({row["benchmark"] for row in selected}, all_benchmarks)
             self.assertEqual(len(selected), len(all_benchmarks))
             for row in selected:
                 with self.subTest(method=method, benchmark=row["benchmark"]):
-                    self.assertEqual(row["group"], group)
+                    self.assertEqual(row["group"], "racer")
                     self.assertEqual(row["arm"], arm)
+                    self.assertEqual(row["history_runtime"], "racer")
+                    self.assertEqual(row["history_backend"], backend)
+                    self.assertEqual(row["recovery_policy"], "off")
                     self.assertEqual(row["history_budget_tokens"], 768)
-                    self.assertEqual(row["cell_id"], f'{row["benchmark"]}__{identity_base}_b768')
+                    self.assertEqual(row["cell_id"], f'{row["benchmark"]}__{arm}')
+                    self.assertEqual(row["racer_backend"]["history_budget_tokens"], 768)
                     self.assertNotIn("retention", row)
                     self.assertNotIn("history_retention_ratio", row)
                     command = run_command(self.config, row, Path("out/cell"),
                                           Path("out/deployment_profile.json"))
                     self.assertEqual(command[command.index("--arm") + 1], arm)
-                    self.assertEqual(command[command.index("--history-kv-target-tokens") + 1], "768")
+                    self.assertEqual(command[command.index("-m") + 1], "benchmarks.paper.c1")
+                    self.assertNotIn("--history-kv-target-tokens", command)
                     self.assertNotIn("--history-kv-retention-ratio", command)
+        native = [row for row in rows if row["method"] == "C2KV"]
+        self.assertEqual({row["benchmark"] for row in native}, all_benchmarks)
+        self.assertEqual(len(native), len(all_benchmarks))
+        for row in native:
+            with self.subTest(method="C2KV", benchmark=row["benchmark"]):
+                self.assertEqual(row["arm"], "c2kv_native_r8")
+                self.assertEqual(row["cell_id"], f'{row["benchmark"]}__c2kv_native_r8_b768')
+                self.assertEqual(row["history_runtime"], "racer")
+                self.assertEqual(row["history_backend"], "c2kv")
+                self.assertEqual(row["history_allocation"], "c2kv_bare")
+                self.assertEqual(row["recovery_policy"], "off")
+                self.assertEqual(row["history_budget_tokens"], 768)
+                command = run_command(self.config, row, Path("out/cell"),
+                                      Path("out/deployment_profile.json"))
+                self.assertEqual(command[command.index("--arm") + 1], "c2kv_native_r8")
+                self.assertEqual(command[command.index("--history-budget-tokens") + 1], "768")
 
     def test_frozen_matrix_cannot_resume_with_a_different_absolute_budget(self):
         import copy
@@ -689,7 +729,7 @@ class DefaultHistoryBudgetTest(unittest.TestCase):
             old_plan, _ = prepare(old, output, output / "sglang")
             old_resolved = (output / "config.resolved.json").read_bytes()
             old_cell = next(row for row in old_plan
-                            if row["cell_id"] == "bfcl_base__commitkv_b512")
+                            if row["cell_id"] == "bfcl_base__racer_commitkv_off_b512")
             marker = output / "closed_loop" / old_cell["cell_id"] / "complete.json"
             marker.parent.mkdir(parents=True)
             marker.write_text("{}\n")
@@ -704,8 +744,7 @@ class ExtensionRuleTest(unittest.TestCase):
     arms not yet run) but never change a cell it already defined."""
 
     def setUp(self):
-        self.config = json.loads(DEFAULT_CONFIG.read_text())
-        self.config["history_kv_budget_tokens"] = 768
+        self.config = legacy_matrix_config()
 
     def _old(self):
         import copy

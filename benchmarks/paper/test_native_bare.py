@@ -149,7 +149,7 @@ def test_native_ratio_overlay_preserves_defaults_and_does_not_duplicate():
     expanded = runner.with_native_ratios(config, [8, 8, 4])
     assert config == original
     assert expanded["methods"][:-1] == config["methods"]
-    assert expanded["methods"][-1]["arm"] == "c2kv_native_r8"
+    assert expanded["methods"][-1]["arm"] == "c2kv_native_r4"
     with pytest.raises(ValueError, match="ratios 4 and 8"):
         runner.with_native_ratios(config, [16])
 

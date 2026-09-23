@@ -821,7 +821,7 @@ ARMS: Dict[str, Arm] = {
                 "retention for the small-budget sweep"
             ),
         ),
-        # Not in the default paper matrix; a configured method entry opts in.
+        # Legacy source identity; marked defaults resolve to the native runtime.
         Arm(
             name="history_kv_streamingllm_r25_persistent",
             compress_history=False,

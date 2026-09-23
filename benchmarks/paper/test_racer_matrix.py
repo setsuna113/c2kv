@@ -22,7 +22,19 @@ from benchmarks.paper.racer_matrix import (
 
 
 def base_config():
-    return dict(json.loads(runner.DEFAULT_CONFIG.read_text(encoding="utf-8")), history_kv_budget_tokens=768)
+    config = json.loads(runner.DEFAULT_CONFIG.read_text(encoding="utf-8"))
+    methods = []
+    for source in config["methods"]:
+        if source["arm"] == "history_kv_streamingllm_r25_persistent":
+            continue
+        method = {key: value for key, value in source.items()
+                  if key not in {"history_runtime", "history_backend", "recovery_policy",
+                                 "compression_ratio"}}
+        if method["arm"] == "c2kv_native_r8":
+            method.update(arm="c2kv_native_r4", ratio=4)
+            method.pop("history_budget_tokens", None)
+        methods.append(method)
+    return dict(config, methods=methods, history_kv_budget_tokens=768)
 
 
 def test_policy_parser_keeps_exact_candidate_identity_and_adds_off_pair():
@@ -106,8 +118,11 @@ def test_dynamic_arm_and_server_keep_persistent_transaction_flags():
 
 def test_prepare_and_cli_route_racer_through_native_c1_without_ratio_budget_alias(tmp_path):
     output = tmp_path / "results"
+    config_path = tmp_path / "frozen-config.json"
+    config_path.write_text(json.dumps(base_config()), encoding="utf-8")
     runner.main([
-        "prepare", "--history-kv-budget-tokens", "768", "--output", str(output), "--sglang-source", str(tmp_path / "engine"),
+        "prepare", "--config", str(config_path), "--history-kv-budget-tokens", "768",
+        "--output", str(output), "--sglang-source", str(tmp_path / "engine"),
         "--racer-backends", "h2o", "--racer-policies", "pending_verified",
         "--racer-history-budget", "512", "--tool-contexts", "t0_r8",
     ])

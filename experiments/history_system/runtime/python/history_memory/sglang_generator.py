@@ -83,6 +83,8 @@ class _DecisionScope:
     generate_calls: int = 0
     pending_stats: dict[str, Any] | None = None
     reset_reason: str | None = None
+    generation_handles: dict[int, tuple[str, set[str]]] = field(default_factory=dict)
+    generation_results: dict[int, SGLangEventNativeGenerationResult] = field(default_factory=dict)
 
 
 def _positive_int(value: Any, name: str) -> int:
@@ -330,6 +332,11 @@ class SGLangEventNativeGenerator:
                 "generate_calls": scope.generate_calls,
                 "pending_stats": copy.deepcopy(scope.pending_stats),
                 "reset_reason": scope.reset_reason,
+                "generation_handles": [
+                    {"generation_index": index, "generation_id": generation_id,
+                     "handles": sorted(handles)}
+                    for index, (generation_id, handles) in sorted(scope.generation_handles.items())
+                ],
             },
             "requests_submitted": self._requests_submitted,
             "extraction_calls_reserved": self.extraction_calls_reserved,
@@ -404,6 +411,7 @@ class SGLangEventNativeGenerator:
             raise SGLangEventNativeError("Unknown or changed exact adapter snapshot")
         local = copy.deepcopy(saved["local"])
         scope = self._active_decision_scope
+        known_results = {} if scope is None else dict(scope.generation_results)
         if (scope is None) != (local["scope"] is None):
             raise SGLangEventNativeError("Restore must use the captured decision-scope boundary")
         remote = self._exact_request("restore", snapshot_id)
@@ -416,7 +424,18 @@ class SGLangEventNativeGenerator:
         )
         if scope is not None:
             for name, value in local["scope"].items():
-                setattr(scope, name, set(value) if name in {"session_handles", "retained_handles"} else value)
+                if name == "generation_handles":
+                    value = {row["generation_index"]: (row["generation_id"], set(row["handles"]))
+                             for row in value}
+                elif name in {"session_handles", "retained_handles"}:
+                    value = set(value)
+                setattr(scope, name, value)
+            scope.generation_results = {
+                index: known_results[index]
+                for index, (generation_id, _) in scope.generation_handles.items()
+                if index in known_results
+                and known_results[index].stats.get("sglang_transport", {}).get("generation_id") == generation_id
+            }
         self._requests_submitted = local["requests_submitted"]
         self.extraction_calls_reserved = local["extraction_calls_reserved"]
         if "tool_extraction_calls_reserved" in local:
@@ -695,9 +714,42 @@ class SGLangEventNativeGenerator:
             raise
 
         if scope is not None:
-            scope.retained_handles = {item["handle"] for item in selected}
+            handles = {item["handle"] for item in selected}
+            if generation_index in scope.generation_handles:
+                raise SGLangEventNativeError("Decision generation index was reused")
+            scope.generation_handles[generation_index] = (generation_id, handles)
+            scope.generation_results[generation_index] = result
+            scope.retained_handles = set(handles)
             scope.pending_stats = result.stats
         return result
+
+    def resolve_decision(self, response, *, result, record):
+        """Commit the selected generation's logical chunk view for the next turn."""
+        scope = self._active_decision_scope
+        if scope is None:
+            raise SGLangEventNativeError("Native commit requires an active decision scope")
+        if not isinstance(result, SGLangEventNativeGenerationResult):
+            raise TypeError("Native commit requires a generation result")
+        stats = result.stats
+        index = stats.get("decision_scope_generation_index")
+        transport = stats.get("sglang_transport") or {}
+        view = scope.generation_handles.get(index) if type(index) is int else None
+        if (view is None or view[0] != transport.get("generation_id")
+                or scope.generation_results.get(index) is not result):
+            raise SGLangEventNativeError("Selected native generation is not in this decision scope")
+        expected = (record.get("commit_validation") or {}).get("selected_generation_index")
+        if expected is not None and expected != index - 1:
+            raise SGLangEventNativeError("Native commit result differs from selected generation")
+        if scope.pending_stats is not None and scope.pending_stats is not stats:
+            scope.pending_stats["session_cache_commit_status"] = "discarded_by_resolution"
+        scope.retained_handles = set(view[1])
+        scope.pending_stats = stats
+        if scope.session_id is not None:
+            stats["session_cache_commit_status"] = "pending"
+        return {"schema": "event-native-sglang-commit-v1",
+                "selected_generation_index": index - 1,
+                "selected_generation_id": view[0],
+                "retained_chunk_handles": sorted(view[1])}
 
     def _ensure_model_info(self) -> None:
         if self._model_binding is not None:

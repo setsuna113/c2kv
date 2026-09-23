@@ -15,6 +15,7 @@ from functools import lru_cache
 from experiments.history_system.native_bare import ARM_RATIOS as NATIVE_RATIOS
 from . import c1_appworld
 from .candidate_matrix import ARM_TO_VARIANT, GOAL_VARIANTS, REPAIR_VARIANTS, VERIFIED_VARIANTS
+from .racer_matrix import is_racer_arm, parse_racer_arm_name, racer_config_for_arm
 from experiments.history_system.candidate_algorithms import (
     INITIAL_VIEW_VARIANTS, INITIAL_VIEW_VERSION, initial_view_fields,
     PROOF_REGISTRY_VERSION, VERIFIED_VERSION,
@@ -26,7 +27,8 @@ from benchmarks.toolsandbox_suite import selected_scenarios
 
 BENCHMARKS = {"acebench_agent": ("acebench", "acebench-text-actions-v1"),
               "toolsandbox": ("toolsandbox", "openai-single-task-v1"),
-              "tau2": ("tau2", "openai-single-task-v1")}
+              "tau2": ("tau2", "openai-single-task-v1"),
+              "appworld": ("acon_appworld", "openai-single-task-v1")}
 TASK_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*\Z")
 C1_RATIOS = {"c2kv_c1_t02_r8": 8, "c2kv_c1_t02_r4": 4}
 
@@ -44,6 +46,17 @@ def validate_tool_ready(config, manifest):
 def arm_identity(config):
     """Resolve the actual native controller without relying on a benchmark label."""
     arm = config.get("native_arm", "c2kv_native_r4")
+    if is_racer_arm(arm):
+        backend, policy, budget = parse_racer_arm_name(arm)
+        racer = racer_config_for_arm(config, arm)
+        if racer["history_budget_tokens"] != budget:
+            raise ValueError("RACER arm history budget differs from its backend config")
+        return {"arm": arm, "ratio": 8, "method": (
+                    "c2kv_only" if policy == "off" else "proposed"),
+                "detector": "disabled" if policy == "off" or policy in REPAIR_VARIANTS
+                            else "t02_risk",
+                "candidate_algorithm": policy if policy in ARM_TO_VARIANT.values() else None,
+                "model_name": arm, "racer_backend": racer}
     if arm in NATIVE_RATIOS:
         return {"arm": arm, "ratio": NATIVE_RATIOS[arm], "method": "c2kv_native",
                 "detector": "disabled", "candidate_algorithm": None,
@@ -106,6 +119,32 @@ def validate_ready_manifest(config, benchmark, task, ready_path, controller_path
             or loaded.get("sha256") != hashlib.sha256(controller_bytes).hexdigest()
             or loaded.get("config") != controller):
         raise RuntimeError(f"Native {identity['arm']} loaded a different S0 controller")
+    racer = identity.get("racer_backend")
+    if racer is not None:
+        expected_receipt = dict(
+            racer, identity=f"racer:{racer['backend']}:{racer['policy']}:b{racer['history_budget_tokens']}",
+            quality_validated=False,
+        )
+        route = manifest.get("route_contract") or {}
+        if (controller.get("racer_backend") != racer
+                or manifest.get("racer_backend") != expected_receipt
+                or route.get("baseline_identity") != expected_receipt["identity"]
+                or route.get("history_allocation") != racer["allocation"]
+                or route.get("recovery_enabled") is not (racer["policy"] != "off")):
+            raise RuntimeError(f"Native {identity['arm']} RACER backend identity differs")
+        variant = identity["candidate_algorithm"]
+        candidate = controller.get("candidate_algorithm")
+        if variant is not None:
+            loaded_candidate = manifest.get("candidate_algorithm")
+            if (not isinstance(candidate, Mapping) or candidate.get("variant") != variant
+                    or not isinstance(loaded_candidate, Mapping)
+                    or loaded_candidate.get("variant") != variant):
+                raise RuntimeError(f"Native {identity['arm']} RACER candidate identity differs")
+        elif racer["policy"] == "off" and any(
+                key in controller for key in ("candidate_algorithm", "post_draft_recovery",
+                                           "gp_experiments", "d3_hybrid_recovery")):
+            raise RuntimeError(f"Native {identity['arm']} unexpectedly enables recovery")
+        return manifest
     variant = identity["candidate_algorithm"]
     candidate = controller.get("candidate_algorithm")
     loaded_candidate = manifest.get("candidate_algorithm")
@@ -296,8 +335,11 @@ def server_command(config, benchmark, task, native, delivery, controller_path):
         design["candidate_id"] = identity["model_name"]
         design["run_id_template"] = f"paper_{identity['arm']}_{identity['detector']}"
         design["runtime"]["controller"] = str(Path(controller_path).resolve())
-        if identity["method"] == "c2kv_only":
+        if (identity["method"] == "c2kv_only"
+                or identity["candidate_algorithm"] in REPAIR_VARIANTS):
             design["runtime"].pop("shadow_feature_config", None)
+    c1_appworld.apply_native_generation_timeout(config, design)
+    c1_appworld.apply_native_history_budget(config, design, delivery_root, Path(native))
     design["runtime"].update(
         sglang_backend_url=c1_appworld._sglang_upstream(config),
         device="cpu", npu_allocator_metrics=False,
@@ -542,7 +584,9 @@ def run_task(config, benchmark, task, native, delivery, controller_path):
     identity = arm_identity(config)
     acceptance = run_c1.functional_checks(
         identity["method"], identity["detector"], metrics,
-        identity["candidate_algorithm"])
+        identity["candidate_algorithm"],
+        **({"racer_backend": identity["racer_backend"]}
+           if "racer_backend" in identity else {}))
     if not all(acceptance["required"].values()):
         raise RuntimeError(f"Native {identity['arm']} functional acceptance failed: {acceptance['required']}")
     return ({"task_id": task, "status": "completed", "official_summary": official,

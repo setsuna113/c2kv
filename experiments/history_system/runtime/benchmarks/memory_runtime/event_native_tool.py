@@ -10,7 +10,7 @@ import copy
 import importlib.util
 import json
 import sys
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -73,6 +73,7 @@ class ToolPrepared:
     ratio: int
     max_new_tokens: int
     source_payload: dict[str, Any]
+    history_views: list = field(default_factory=list, repr=False, compare=False)
 
     def __getattr__(self, name: str):
         return getattr(self.inner, name)
@@ -551,7 +552,8 @@ class ToolRegionController:
                                     for chunk in segment["chunks"])
             eligible = tuple(tool_prefix) + anchored_chunks + tuple(eligible)
         return ToolPrepared(base, memory, metadata, plan, eligible, ratio,
-                            max_new_tokens, copy.deepcopy(dict(payload)))
+                            max_new_tokens, copy.deepcopy(dict(payload)),
+                            [(memory, base.memory)])
 
     def reconsider(self, prepared: ToolPrepared, draft_tool_calls, *,
                    draft_text: str, parse_error: str | None = None):
@@ -565,6 +567,7 @@ class ToolRegionController:
                                           prepared.source_payload,
                                           ratio=prepared.ratio,
                                           max_new_tokens=prepared.max_new_tokens)
+        prepared.history_views.append((result["memory"], value["memory"]))
         result["metadata"] = copy.deepcopy(value["metadata"])
         result["metadata"]["paper_whole_full_kv_tokens"] = prepared.metadata[
             "paper_whole_full_kv_tokens"]
@@ -589,3 +592,13 @@ class ToolRegionController:
             result["metadata"]["tool_memory"]["persistent_binding"] = copy.deepcopy(
                 dict(binding))
         return result
+
+    def commit_memory(self, prepared: ToolPrepared, final_memory):
+        """Commit the selected history view without admitting tool-only chunks."""
+        commit = getattr(self.inner, "commit_memory", None)
+        if not callable(commit):
+            return None
+        for augmented, history in prepared.history_views:
+            if augmented is final_memory:
+                return commit(prepared.inner, history)
+        raise ValueError("Final tool memory is not a generated history view")

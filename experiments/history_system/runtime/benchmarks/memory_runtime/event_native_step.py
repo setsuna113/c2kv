@@ -108,6 +108,7 @@ class EventNativeDecisionRunner:
                 record['controller_timing']['prepare_duration_ns'] = duration_ns
                 record['controller_timing']['prepare_seconds'] = duration_ns / 1e9
             with self.generator.decision_scope(session_id=key[0]):
+                final_memory = prepared.memory
                 result, draft = self._generate(prepared.memory, prepared.metadata, record, 'draft',
                     compression_chunks=getattr(prepared, 'eligible_chunks', None))
                 observer = getattr(self.controller, 'observe_draft_features', None)
@@ -160,6 +161,7 @@ class EventNativeDecisionRunner:
                 while reconsidered['regenerate']:
                     rounds.append(copy.deepcopy(reconsidered['decision']))
                     record['generation_trace'][-1]['discarded'] = True
+                    final_memory = reconsidered['memory']
                     result, draft = self._generate(
                         reconsidered['memory'], reconsidered['metadata'], record, 'regeneration')
                     if len(rounds) >= max_rounds or self.generation_calls >= self.max_generation_calls:
@@ -202,9 +204,14 @@ class EventNativeDecisionRunner:
                         record['generation_trace'][-1]['discarded'] = True
                         if verdict['fallback'] == 'original':
                             result, draft = original_result, original_draft
+                            final_memory = prepared.memory
                             record['generation_trace'][0]['discarded'] = False
                             record['commit_validation']['selected_generation_index'] = 0
                         elif verdict['fallback'] == 'stop':
+                            # No regenerated action was accepted. Retain the
+                            # original view as the next decision's memory.
+                            result = original_result
+                            final_memory = prepared.memory
                             from .event_native_draft import NativeDraft
                             text = ('I could not resolve the observed tool failure with a '
                                     'supported action. Please clarify how to proceed.')
@@ -251,6 +258,9 @@ class EventNativeDecisionRunner:
             record['decision_runtime_seconds'] = record['decision_duration_ns'] / 1e9
             record['status'] = 'ok'
             self._totals(record)
+            commit_memory = getattr(self.controller, 'commit_memory', None)
+            if callable(commit_memory):
+                record['history_state_commit'] = commit_memory(prepared, final_memory)
             self._completed[key] = (signature, copy.deepcopy(record))
             keep_session = True
             return record
