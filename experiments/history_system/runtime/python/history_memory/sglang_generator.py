@@ -16,6 +16,7 @@ import math
 import os
 import threading
 import time
+import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -40,6 +41,8 @@ SESSION_CACHE_POLICY = "external-sglang-content-addressed-chunks-v1"
 SHADOW_FEATURE_SCHEMA = "event-native-shadow-features-v1"
 EXTRACTION_FAILURE_SCHEMA = "c2kv-native-extraction-failure-v1"
 EXTRACTION_BUDGET_ERROR_CODE = "C2KV_EXTRACTION_BUDGET_EXHAUSTED"
+PREWARM_RESPONSE_SCHEMA = "c2kv-native-prewarm-response-v1"
+PREWARM_HTTP_JOURNAL_SCHEMA = "event-native-sglang-prewarm-http-v1"
 
 
 @dataclass(frozen=True)
@@ -83,6 +86,7 @@ class _DecisionScope:
     generate_calls: int = 0
     pending_stats: dict[str, Any] | None = None
     reset_reason: str | None = None
+    extracted_handles: set[str] = field(default_factory=set)
 
 
 def _positive_int(value: Any, name: str) -> int:
@@ -314,6 +318,12 @@ class SGLangEventNativeGenerator:
         self.last_generation_trace: dict[str, Any] | None = None
         self.last_cache_lifecycle_trace: dict[str, Any] | None = None
         self._exact_snapshots: dict[str, dict[str, Any]] = {}
+        self.cross_turn_prewarm_enabled = os.environ.get("C2KV_NATIVE_CROSS_TURN_PREWARM") == "1"
+        self._prewarm_owner_id = str(uuid.uuid4()) if self.cross_turn_prewarm_enabled else None
+        self._prewarm_job: dict[str, Any] | None = None
+        self._prewarm_last_receipt: dict[str, Any] | None = None
+        self._prewarm_budget_unknown = False
+        self._last_decision_extracted_handles: set[str] = set()
 
     def _exact_local_state(self) -> dict[str, Any]:
         session = self._session_cache
@@ -482,6 +492,8 @@ class SGLangEventNativeGenerator:
             not isinstance(session_id, str) or not session_id
         ):
             raise ValueError("session_id must be None or a nonempty string")
+        self.reconcile_cross_turn_prewarm()
+        self._last_decision_extracted_handles = set()
 
         reset_reason = None
         if session_id is None:
@@ -511,6 +523,7 @@ class SGLangEventNativeGenerator:
                 self._session_cache = None
             raise
         else:
+            self._last_decision_extracted_handles = set(scope.extracted_handles)
             if session_id is not None and scope.pending_stats is not None:
                 generation = (
                     self._session_cache.generation + 1
@@ -532,6 +545,7 @@ class SGLangEventNativeGenerator:
             and self._active_decision_scope.session_id is not None
         ):
             raise RuntimeError("cannot close a session inside its active decision_scope")
+        self.reconcile_cross_turn_prewarm(operation="cancel")
         self._session_cache = None
 
     def session_cache_info(self) -> dict[str, Any]:
@@ -555,6 +569,12 @@ class SGLangEventNativeGenerator:
             "external_cache_state": "content_addressed_lru_unowned",
             "remote_pins_held": False,
             "last_lifecycle_trace": self.last_cache_lifecycle_trace,
+            **({"cross_turn_prewarm": {
+                "enabled": True,
+                "outstanding_job_id": self._prewarm_job["job_id"] if self._prewarm_job else None,
+                "last_receipt": copy.deepcopy(self._prewarm_last_receipt),
+                "budget_known": not self._prewarm_budget_unknown,
+            }} if self.cross_turn_prewarm_enabled else {}),
         }
 
     def generate(
@@ -583,6 +603,7 @@ class SGLangEventNativeGenerator:
             _positive_int(paper_whole_full_kv_tokens, "paper_whole_full_kv_tokens")
         if self._requests_submitted >= self.max_generation_calls:
             raise RuntimeError("SGLang generation cap exhausted; automatic retry is disabled")
+        self.reconcile_cross_turn_prewarm()
 
         scope = self._active_decision_scope
         if self._session_cache is not None and scope is None:
@@ -696,8 +717,160 @@ class SGLangEventNativeGenerator:
 
         if scope is not None:
             scope.retained_handles = {item["handle"] for item in selected}
+            scope.extracted_handles.update(item["handle"] for item in (*selected, *extras))
             scope.pending_stats = result.stats
         return result
+
+    @property
+    def last_decision_extracted_handles(self) -> frozenset[str]:
+        return frozenset(self._last_decision_extracted_handles)
+
+    def _prewarm_request(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+        operation = payload["operation"]
+        request = Request(
+            self.upstream + "/c2kv_native_prewarm",
+            data=_canonical_bytes(payload),
+            headers={"Content-Type": "application/json", "Accept": "application/json"},
+            method="POST",
+        )
+        if self._http_journal is not None:
+            self._http_journal.append({
+                "schema": PREWARM_HTTP_JOURNAL_SCHEMA,
+                "event": "request", "operation": operation,
+                "timestamp_unix_ns": time.time_ns(), "request": payload,
+            })
+        response, status = self._read_json(request, label=f"SGLang prewarm {operation}")
+        if self._http_journal is not None:
+            self._http_journal.append({
+                "schema": PREWARM_HTTP_JOURNAL_SCHEMA,
+                "event": "response", "operation": operation,
+                "timestamp_unix_ns": time.time_ns(), "http_status": status,
+                "response": response,
+            })
+        if status != 200 or not isinstance(response, Mapping):
+            raise SGLangEventNativeError(f"SGLang prewarm {operation} returned HTTP {status}")
+        if response.get("schema") != PREWARM_RESPONSE_SCHEMA:
+            raise SGLangEventNativeError("SGLang prewarm response schema mismatch")
+        if (response.get("owner_id"), response.get("job_id"), response.get("session_id")) != (
+            payload["owner_id"], payload["job_id"], payload["session_id"]
+        ):
+            raise SGLangEventNativeError("SGLang prewarm job identity mismatch")
+        return dict(response)
+
+    def submit_cross_turn_prewarm(
+        self, chunks: Sequence[EncoderChunk], *, ratio: int,
+        session_id: str, outer_request_id: str,
+    ) -> dict[str, Any] | None:
+        """Queue bounded, already observed history chunks after a committed decision."""
+        if not self.cross_turn_prewarm_enabled:
+            return None
+        if self._active_decision_scope is not None:
+            raise RuntimeError("cross-turn prewarm must be submitted outside decision_scope")
+        if self._prewarm_job is not None:
+            raise RuntimeError("an earlier cross-turn prewarm job is still outstanding")
+        if self._prewarm_budget_unknown:
+            raise SGLangEventNativeError("cross-turn prewarm extraction budget is unknown")
+        remaining = self.max_extraction_calls - self.extraction_calls_reserved
+        if remaining <= 0 or not chunks:
+            return None
+        self._ensure_model_info()
+        rows = []
+        seen = set(self._last_decision_extracted_handles)
+        tokens = 0
+        for chunk in chunks:
+            row = self._chunk_payload(chunk, ratio)
+            if row["handle"] in seen:
+                continue
+            length = len(row["token_ids"])
+            if length > 8192 or tokens + length > 65536:
+                break
+            rows.append({
+                "handle": row["handle"], "token_ids": row["token_ids"],
+                "compression_ratio": chunk.compression_ratio or ratio,
+            })
+            seen.add(row["handle"])
+            tokens += length
+            if len(rows) >= min(32, remaining):
+                break
+        if not rows:
+            return None
+        job = {"owner_id": self._prewarm_owner_id, "job_id": str(uuid.uuid4()),
+               "session_id": session_id, "outer_request_id": outer_request_id,
+               "submitted_handles": [row["handle"] for row in rows]}
+        payload = {
+            "operation": "submit", "owner_id": job["owner_id"],
+            "job_id": job["job_id"], "session_id": session_id,
+            "chunks": rows, "max_extraction_calls": remaining,
+            "outer_request_id": outer_request_id,
+        }
+        # Keep the identity before the network call: a lost ACK can still be
+        # cancelled/drained on session cleanup without submitting another job.
+        self._prewarm_job = job
+        try:
+            ack = self._prewarm_request(payload)
+            if ack.get("status") not in {"queued", "completed", "cancelled"}:
+                raise SGLangEventNativeError("SGLang prewarm submit was not acknowledged")
+            if ack.get("submitted_chunks") != len(rows):
+                raise SGLangEventNativeError("SGLang prewarm submit chunk count mismatch")
+        except BaseException:
+            self._prewarm_budget_unknown = True
+            raise
+        return {"status": ack["status"], "job_id": job["job_id"],
+                "submitted_chunks": len(rows), "submitted_handles": job["submitted_handles"]}
+
+    def reconcile_cross_turn_prewarm(self, *, operation: str = "drain") -> dict[str, Any] | None:
+        """Stop the queued tail and account for at most one in-flight extraction."""
+        if self._prewarm_budget_unknown and operation == "drain":
+            raise SGLangEventNativeError("cross-turn prewarm extraction budget is unknown")
+        if not self.cross_turn_prewarm_enabled or self._prewarm_job is None:
+            return None
+        if operation not in {"drain", "cancel"}:
+            raise ValueError("prewarm reconciliation must drain or cancel")
+        job = self._prewarm_job
+        try:
+            receipt = self._prewarm_request({
+                "operation": operation, "owner_id": job["owner_id"],
+                "job_id": job["job_id"], "session_id": job["session_id"],
+                "outer_request_id": job["outer_request_id"],
+            })
+            self._prewarm_last_receipt = copy.deepcopy(receipt)
+            if receipt.get("status") not in {"completed", "cancelled", "failed"}:
+                raise SGLangEventNativeError("SGLang prewarm drain did not finish the job")
+            if receipt.get("budget_known") is not True:
+                self._prewarm_job = None
+                raise SGLangEventNativeError("SGLang prewarm final extraction budget is unknown")
+            submitted = _nonnegative_int(receipt.get("submitted_chunks"), "prewarm.submitted_chunks")
+            completed = _nonnegative_int(receipt.get("completed_chunks"), "prewarm.completed_chunks")
+            hits = _nonnegative_int(receipt.get("cache_hits"), "prewarm.cache_hits")
+            calls = _nonnegative_int(receipt.get("model_calls"), "prewarm.model_calls")
+            cancelled = _nonnegative_int(receipt.get("cancelled_chunks"), "prewarm.cancelled_chunks")
+            extraction = receipt.get("extraction")
+            if not isinstance(extraction, Mapping):
+                raise SGLangEventNativeError("SGLang prewarm extraction receipt is missing")
+            if (submitted != len(job["submitted_handles"]) or
+                    completed != hits + calls or completed + cancelled != submitted or
+                    extraction.get("model_calls") != calls or
+                    extraction.get("history_model_calls") != calls or
+                    extraction.get("tool_model_calls") != 0):
+                raise SGLangEventNativeError("SGLang prewarm extraction accounting mismatch")
+            if calls > self.max_extraction_calls - self.extraction_calls_reserved:
+                raise SGLangEventNativeError("SGLang prewarm exceeded the finite extraction budget")
+            results = receipt.get("results")
+            if not isinstance(results, list) or len(results) != completed:
+                raise SGLangEventNativeError("SGLang prewarm result count mismatch")
+            if (len({row.get("handle") for row in results if isinstance(row, Mapping)}) != completed
+                    or any(not isinstance(row, Mapping) or
+                           row.get("handle") not in job["submitted_handles"] or
+                           type(row.get("cache_hit")) is not bool for row in results)):
+                raise SGLangEventNativeError("SGLang prewarm result handles are invalid")
+        except BaseException:
+            self._prewarm_budget_unknown = True
+            raise
+        self.extraction_calls_reserved += calls
+        self._prewarm_budget_unknown = False
+        self._prewarm_last_receipt = copy.deepcopy(receipt)
+        self._prewarm_job = None
+        return copy.deepcopy(receipt)
 
     def _ensure_model_info(self) -> None:
         if self._model_binding is not None:
@@ -717,6 +890,11 @@ class SGLangEventNativeGenerator:
             raise SGLangEventNativeError(
                 "SGLang /model_info lacks c2kv_native_packed admission data"
             )
+        if self.cross_turn_prewarm_enabled:
+            features = native.get("serving_features")
+            if (not isinstance(features, Mapping)
+                    or features.get("cross_turn_prewarm") != "cross-turn-prewarm-v1"):
+                raise SGLangEventNativeError("Engine lacks cross-turn-prewarm-v1 admission")
         if self.sampling_profile != "greedy-v1" and self.sampling_profile not in native.get("sampling_profiles", []):
             raise SGLangEventNativeError("Engine does not support the requested native sampling profile")
         binding = _json_object(native.get("model_binding"), "model_binding")
@@ -1404,6 +1582,13 @@ class SGLangEventNativeGenerator:
         }
         if shadow is not None:
             stats["shadow_features"] = shadow
+        execution = response.get("serving_execution")
+        if execution is not None:
+            stats["native_serving_execution"] = _json_object(execution, "response.serving_execution")
+        runtime = response.get("sglang_runtime")
+        if isinstance(runtime, Mapping) and runtime.get("c2kv_raw_prefix_cache") is not None:
+            stats["native_raw_prefix_cache"] = _json_object(
+                runtime["c2kv_raw_prefix_cache"], "response.sglang_runtime.c2kv_raw_prefix_cache")
         return SGLangEventNativeGenerationResult(
             token_ids=output_ids,
             finish_reason=finish_reason,

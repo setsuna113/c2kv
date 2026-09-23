@@ -90,6 +90,12 @@ class EventNativeDecisionRunner:
             'scope': 'One unsubmitted decision; only response is executable, no tools or scorer were invoked.',
         }
         try:
+            if getattr(self.generator, 'cross_turn_prewarm_enabled', False):
+                receipt = self.generator.reconcile_cross_turn_prewarm()
+                record['cross_turn_prewarm'] = {
+                    'prior_receipt': receipt, 'submission': None,
+                    'source': 'observable_current_input',
+                }
             prepare_started = time.perf_counter_ns()
             try:
                 # outer_request_id is transport telemetry, not visible policy
@@ -245,6 +251,9 @@ class EventNativeDecisionRunner:
                 resolve = getattr(self.generator, 'resolve_decision', None)
                 if callable(resolve):
                     record['backend_commit'] = resolve(record['response'], result=result, record=record)
+            if getattr(self.generator, 'cross_turn_prewarm_enabled', False):
+                record['cross_turn_prewarm']['submission'] = self._submit_cross_turn_prewarm(
+                    payload, prepared, record)
             record['session_cache_after'] = self.generator.session_cache_info()
             record['decision_end_unix_ns'] = time.time_ns()
             record['decision_duration_ns'] = time.perf_counter_ns() - started_ns
@@ -257,6 +266,9 @@ class EventNativeDecisionRunner:
         except Exception as error:
             record['status'] = 'failed'
             record['response'] = None
+            if getattr(self.generator, 'cross_turn_prewarm_enabled', False):
+                record.setdefault('cross_turn_prewarm', {})['diagnostic'] = (
+                    self.generator.session_cache_info().get('cross_turn_prewarm'))
             record['error'] = {'type': type(error).__name__, 'message': str(error)}
             record['decision_end_unix_ns'] = time.time_ns()
             record['decision_duration_ns'] = time.perf_counter_ns() - started_ns
@@ -275,12 +287,72 @@ class EventNativeDecisionRunner:
             raise EventNativeStepError(str(error), record) from error
         finally:
             if not keep_session:
-                self.close()
+                try:
+                    self.close()
+                except Exception as close_error:
+                    record['session_close_error'] = {
+                        'type': type(close_error).__name__, 'message': str(close_error)}
+                    if record['status'] != 'failed':
+                        raise
                 record['session_cache_after_close'] = self.generator.session_cache_info()
 
     def close(self):
         """Release the generator's committed device and host session cache."""
         self.generator.close_session()
+
+    def _submit_cross_turn_prewarm(self, payload, prepared, record):
+        from history_memory.cross_turn_prewarm import plan_cross_turn_chunks
+        from history_memory.events import EventStore
+        from .adapter import raw_source_cutoff
+
+        controller = self.controller
+        seen = set()
+        while id(controller) not in seen and not hasattr(controller, 'packing'):
+            seen.add(id(controller))
+            controller = getattr(controller, 'inner', getattr(controller, 'recovery', None))
+            if controller is None:
+                return {'status': 'skipped', 'reason': 'packing_geometry_unavailable'}
+        packing = getattr(controller, 'packing', None)
+        geometry = (getattr(packing, 'max_chunk_tokens', None),
+                    getattr(packing, 'chunk_overlap', None))
+        if any(type(value) is not int for value in geometry):
+            return {'status': 'skipped', 'reason': 'packing_geometry_unavailable'}
+        messages = payload['messages']
+        cutoff = raw_source_cutoff(messages)
+        plan = getattr(prepared, 'plan', None)
+        rendered = getattr(plan, 'messages', None)
+        if rendered is not None:
+            from history_memory.packing import visible_message
+            if (len(rendered) != len(messages) or any(
+                    visible_message(rendered[index]) != visible_message(messages[index])
+                    for index, message in enumerate(messages)
+                    if message.get('role') not in {'system', 'developer'})):
+                return {'status': 'skipped', 'reason': 'current_source_rendering_changed'}
+        store = EventStore.from_messages(
+            payload['session_id'], messages,
+            benchmark=getattr(controller, 'benchmark', None))
+        try:
+            chunks = plan_cross_turn_chunks(
+                store, self.tokenizer,
+                encoding_scope=self.generator.encoding_scope,
+                max_chunk_tokens=geometry[0], chunk_overlap=geometry[1],
+                atomic_unit_token_limit=min(
+                    8192, self.generator.model_context,
+                    getattr(packing, 'max_encoder_tokens', 8192),
+                    getattr(packing, 'max_sequence_tokens', 8192)),
+                source_cutoff=cutoff,
+                benchmark=getattr(controller, 'benchmark', None),
+            )
+        except (TypeError, ValueError) as error:
+            return {'status': 'skipped', 'reason': 'source_encoding_unavailable',
+                    'error': f'{type(error).__name__}: {error}'}
+        if not chunks:
+            return {'status': 'skipped', 'reason': 'no_complete_current_chunks_or_scope_unsupported'}
+        submitted = self.generator.submit_cross_turn_prewarm(
+            chunks, ratio=self.ratio,
+            session_id=payload['session_id'],
+            outer_request_id=record['outer_request_id'])
+        return submitted or {'status': 'skipped', 'reason': 'no_unextracted_chunks_or_budget'}
 
     def _generate(self, memory, metadata, record, phase, *, compression_chunks=None):
         from .budget_guard import history_budget_receipt

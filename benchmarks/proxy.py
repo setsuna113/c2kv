@@ -2482,8 +2482,12 @@ def main(argv=None):
         ARM = HistoryKVBudget(args.history_kv_target_tokens).apply(ARM)
     if args.shared_engine:
         history_spec = history_kv_spec(ARM) if ARM.history_kv else None
-        if args.backend != "sglang" or not history_spec or not history_spec["persistent_session"]:
-            raise ValueError("--shared-engine requires a persistent SGLang history-KV arm")
+        persistent_history = bool(history_spec and history_spec["persistent_session"])
+        local_episode_arm = ARM.name == "full" or bool(ARM.text_policy)
+        if args.backend != "sglang" or not (persistent_history or local_episode_arm):
+            raise ValueError(
+                "--shared-engine requires SGLang with Full, a text-policy arm, "
+                "or a persistent history-KV arm")
     SHARED_ENGINE = args.shared_engine
     if not 0 < args.generation_timeout < float("inf"):
         raise ValueError("--generation-timeout must be finite and positive")

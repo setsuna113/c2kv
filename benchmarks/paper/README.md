@@ -1,5 +1,105 @@
 # Paper CUDA benchmarks
 
+## Concurrent closed-loop serving
+
+`serve` runs one prepared BFCL cell against one engine with an explicit number
+of concurrent task children. Each child owns its harness, proxy port and output
+directory; Full resets local state without flushing other tasks' engine cache.
+The regular `run` command remains single-flight. By default the serving engine
+retains the cell's flags and scales only its request-slot cap. Use the companion
+engine with `C2KV_PAPER_CONCURRENT` telemetry support;
+`serve` requires an explicit `--sglang-source` and sets that environment flag
+even for its one-worker control.
+
+For a bounded pilot, use the same explicit task IDs and checkpoint for Full,
+RACER recovery-off and recovery-on. For example, the C2KV pair can be prepared
+without starting a model:
+
+```bash
+python -m benchmarks.paper prepare --config config.pod.json \
+  --sglang-source /workspace/engine-serving --output /workspace/serving-pilot \
+  --racer-backends c2kv --racer-policies pending_verified --racer-history-budget 768
+```
+
+After GPU resources are released, run one cell/worker setting at a time:
+
+```bash
+python -m benchmarks.paper serve --config config.pod.json \
+  --sglang-source /workspace/engine-serving --output /workspace/serving-pilot \
+  --racer-backends c2kv --racer-policies pending_verified --racer-history-budget 768 \
+  --cells bfcl_long_context__full --workers 2 \
+  --serve-tasks multi_turn_long_context_0,multi_turn_long_context_1,multi_turn_long_context_2,multi_turn_long_context_3
+```
+
+The other cells are `bfcl_long_context__racer_c2kv_off_b768` and
+`bfcl_long_context__racer_c2kv_pending_verified_b768`. Repeat each at workers
+1, 2 and 4. These values specify a pilot, not measured capacity or quality.
+An occupied engine/lane port is refused. Existing cell/worker outputs are not
+overwritten; use a new output root for a new attempt. Persistent raw-KV backends
+can use the same entry point once their accuracy-line integration is ready.
+
+`serving/<cell>/workers_<N>/serving.json` contains the task cohort, completion
+and scoring counts, successful tasks per hour, and the shared engine ledger
+aggregate. Runtime uses a monotonic clock from first task-process launch to
+last observed exit: it includes per-task proxy/harness startup, tools and
+official scoring, and excludes engine startup. It is not warm server request
+latency. Missing scores remain missing; an aborted run publishes no throughput.
+Every child retains its command, log, process receipt and original score.
+Compare successful-task throughput together with completion counts and quality;
+four-task pilots only validate execution and are not quality estimates.
+
+Engine records include extraction/cache counts, overlapping request intervals,
+and sampled shared-pool occupancy. Duration sums can overlap, and gist time is
+nested inside extraction time. Sampled occupancy is not continuous GPU peak
+memory; missing or truncated ledgers are marked unavailable/incomplete. Native
+per-task conversion does not currently ingest the parent shared ledger, so use
+the parent's `engine_telemetry` for serving cost measurements.
+
+Native optimizations are opt-in on `prepare` and `serve`: add
+`--native-raw-prefix-cache`, `--background-extras`, `--bulk-cache-lookup`, and/or
+`--cross-turn-prewarm` to both commands in a
+new output root. The frozen config records them, and the runner checks engine
+capabilities before starting children. Ordinary `run` rejects enabled features;
+the Full control keeps its existing cache policy and has all native features off.
+Persistent raw-KV backends cannot use these native options.
+
+Raw-prefix caching writes and reuses only the first real-token prefix before
+any gist injection, with supported page-size-1 RadixCache configurations. It
+leaves one real token to drive the next prefill and does not cache an assembled
+gist-containing prompt. Request receipts report hits, insertions and skip
+reasons; aggregate counters show their record coverage.
+
+Background extras extracts currently selected chunks first, pins them, starts
+generation, and then prepares unused recovery chunks after the first engine
+output. The response waits for both jobs and retains complete recovery handles
+and costs. Unsupported configurations fall back to serial extraction with a
+recorded reason. This is request-level overlap within the existing scheduler;
+it does not add cross-turn jobs or promise simultaneous CUDA kernels. Actual
+throughput and memory behavior require a GPU run, and Full tuning remains a
+separate comparison axis.
+
+Bulk cache lookup resolves consecutive cache hits with one bounded RPC, stops
+before the first miss, then uses ordinary extraction for that miss. It retains
+per-chunk keys, LRU touch order, extraction budgets and telemetry. It does not
+batch encoder forwards. Native response counters report lookup calls and hit
+chunks so a pilot can verify that this path was actually exercised.
+
+Cross-turn prewarming queues exact chunks from already complete observable
+history events after a successful decision. It includes currently raw events
+that may become eligible next turn, excludes chunks already extracted by the
+decision, and supports the existing `current` and `event` encoding scopes.
+It does not invent future tool results or change RACER's selected memory. The
+submit response acknowledges the queue without waiting for compression. At the
+next decision or session close, the client cancels unstarted chunks and drains
+the single in-flight extraction; actual misses count against the same finite
+extraction budget. The engine runs background chunks only between native
+foreground requests, using ordinary evictable C2KV cache entries with no
+retained pins. An arriving foreground request can still wait for one in-flight
+chunk: GPU kernels are not preempted. The feature requires one tokenizer worker
+and DP=1. Per-job receipts are journaled separately; tagged background extraction
+cost is included in the shared engine totals. This CPU-tested scheduling path
+still requires GPU measurement to establish latency or throughput benefit.
+
 ## Explicit bare-native ratios
 
 `prepare` and `run --native-ratio 8` add `c2kv_native_r8` to a new output root;
