@@ -1,0 +1,30 @@
+{
+  "schema": "c2kv-toolsandbox-agent-timeout-v1",
+  "created_at": "2026-09-23T01:30:00Z",
+  "trigger": "box4 /workspace/results-kvts15/closed_loop/toolsandbox__agentkv_b256/HOLD_generation_timeout.txt: 1 of 129 scenarios hit the 600 s deadline at turn 26 (proxy 'upstream 0: timed out', client openai.APITimeoutError), so the terminal-state check refused the cell",
+  "defect": "A frozen generation_timeout reached the persistent proxy and the BFCL client only. The ToolSandbox agent SDK timeout stayed hard-coded at 600 s (benchmarks/toolsandbox_cli.py role_client_kwargs), so a rerun with a longer proxy deadline would still time out on the client at 600 s.",
+  "change": [
+    "toolsandbox_adapter.agent_client_timeout: None at the 600 s default deadline, otherwise the deadline plus the BFCL client's 90 s cleanup headroom",
+    "toolsandbox_adapter.run: passes agent_timeout to run_ts only when it is not None; run_ts hands it to the CLI in C2KV_TOOLSANDBOX_AGENT_TIMEOUT (a stale outer value is removed) and records agent_timeout in toolsandbox_protocol.json only when set",
+    "toolsandbox_cli.role_client_kwargs: the agent role uses agent_timeout when given; the user simulator always keeps 600 s"
+  ],
+  "unchanged": [
+    "without a configured deadline (and at exactly 600 s) the run_ts call, CLI environment, protocol file and both role clients are identical to before: timeout 600.0, agent max_retries 0",
+    "the paper runner still passes --generation-timeout only to persistent history-KV cells with a frozen generation_timeout",
+    "RapidAPI requests keep their setdefault timeout of 30 s (install_rapidapi_http_status is independent of the new variable)",
+    "native and NPU callers of run_ts pass no agent_timeout and are unchanged; rescore uses score_cli_run and is unaffected"
+  ],
+  "example": "--generation-timeout 3600 on toolsandbox__agentkv_b256: proxy deadline 3600 s, agent client timeout 3690 s",
+  "cpu_tests": {
+    "new": "8 in benchmarks/test_generation_timeout_wiring.py: prepared persistent ToolSandbox commands (agentkv, agentkv_b768, pyramidkv_r25) hand run_ts agent_timeout 1890.0 for a 1800 s deadline and otherwise the identical call; ordinary cells get no agent_timeout; run_ts environment and protocol; the timeout rule; CLI role clients through the real OpenAI SDK; RapidAPI 30 s",
+    "targeted": "benchmarks/test_generation_timeout_wiring.py, test_sdk_retry_boundaries.py, test_toolsandbox_instrumentation.py: 31 passed",
+    "full_suite": {
+      "command": "python -m pytest benchmarks -q (clean git-archive exports, Windows, uv with pytest numpy httpx openai)",
+      "base_30deba8": "7 failed, 1191 passed, 23 skipped",
+      "fixed": "7 failed, 1199 passed, 23 skipped",
+      "failure_set": "identical and pre-existing: test_native_bare x2, test_acon_budget_proxy, test_native_fc_bridge, test_repair_stack::test_bfcl_counts_result_rows, test_tool_source_recording::appworld, test_toolmemory_assembly"
+    }
+  },
+  "gpu_validation": "none; the rerun of toolsandbox__agentkv_b256 in a new root is the live check",
+  "npu": "not changed. NPU generality/toolsandbox_harness.run_task calls run_ts without agent_timeout, so its behavior is identical. An NPU ToolSandbox cell that freezes a non-default generation_timeout would still keep the 600 s agent client; no such cell is known."
+}

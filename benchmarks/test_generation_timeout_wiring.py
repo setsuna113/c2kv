@@ -1,8 +1,9 @@
-"""A frozen --generation-timeout reaches the persistent proxy and the BFCL client.
+"""A frozen --generation-timeout reaches the persistent proxy, BFCL and ToolSandbox clients.
 
 CPU only: the runner's prepared command is parsed by run.py, run.py starts the
 real proxy process, and a fake engine proves which deadline the proxy applies
-to one persistent generation. The BFCL leg checks the client read deadline.
+to one persistent generation. The BFCL and ToolSandbox legs check the client
+deadlines; without a configured deadline the ToolSandbox agent keeps 600 s.
 """
 from __future__ import annotations
 
@@ -75,6 +76,108 @@ def test_bfcl_client_read_deadline_keeps_cleanup_headroom(plans, monkeypatch, tm
     assert seen["request_timeout"] == 1800.0
     timeout = bfcl_adapter.client_kwargs("http://proxy/v1", seen["request_timeout"])["timeout"]
     assert timeout.read == 1890.0 and timeout.connect == 8.0
+
+
+def _toolsandbox_run_ts_kwargs(plans, plan, cell_id, monkeypatch, tmp_path):
+    adapter = bench_run.ADAPTERS["toolsandbox"]
+    args = bench_run.build_parser().parse_args(plans[plan][cell_id]["command"][2:])
+    seen = {}
+    monkeypatch.setattr(adapter, "run_ts", lambda *_args, **kwargs: seen.update(kwargs) or {"n": 0})
+    args.out = tmp_path / "cell"
+    adapter.run(bench_run.build_context(args, tmp_path / "proxy.jsonl"))
+    return seen
+
+
+@pytest.mark.parametrize("cell_id", ["toolsandbox__agentkv", "toolsandbox__agentkv_b768",
+                                     "toolsandbox__history_kv_pyramidkv_r25_persistent"])
+def test_toolsandbox_agent_client_outlives_the_frozen_deadline(plans, monkeypatch, tmp_path, cell_id):
+    explicit = _toolsandbox_run_ts_kwargs(plans, "explicit", cell_id, monkeypatch, tmp_path)
+    default = _toolsandbox_run_ts_kwargs(plans, "default", cell_id, monkeypatch, tmp_path)
+    assert explicit.pop("agent_timeout") == 1890.0
+    # without a frozen deadline run_ts receives exactly the historical call
+    assert "agent_timeout" not in default and explicit == default
+
+
+def test_toolsandbox_ordinary_cells_keep_the_historical_agent_call(plans, monkeypatch, tmp_path):
+    for cell_id in ("toolsandbox__full", "toolsandbox__hiagent_full", "toolsandbox__agentfold"):
+        assert "--generation-timeout" not in plans["explicit"][cell_id]["command"]
+        assert "agent_timeout" not in _toolsandbox_run_ts_kwargs(
+            plans, "explicit", cell_id, monkeypatch, tmp_path)
+
+
+def _toolsandbox_cli_env(monkeypatch, tmp_path, **run_ts_kwargs):
+    from types import SimpleNamespace
+
+    adapter = bench_run.ADAPTERS["toolsandbox"]
+    source, out, seen = tmp_path / "ToolSandbox", tmp_path / "out", {}
+    source.mkdir(parents=True)
+
+    def fake_run(cmd, **kwargs):
+        (out / "scenario_manifest.json").write_text(
+            json.dumps({"scenario_ids": ["one"], "expected": 1}), encoding="utf-8")
+        seen.update(kwargs["env"])
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(adapter, "run_owned", fake_run)
+    monkeypatch.setattr(adapter, "collect", lambda output: {"n": 1, "scenario_ids": ["one"]})
+    adapter.run_ts("http://agent", out, scenarios=["one"], benchmark_dir=source, **run_ts_kwargs)
+    return seen, json.loads((out / "toolsandbox_protocol.json").read_text(encoding="utf-8"))
+
+
+def test_toolsandbox_run_ts_hands_the_agent_timeout_to_the_cli_only_when_set(monkeypatch, tmp_path):
+    adapter = bench_run.ADAPTERS["toolsandbox"]
+    # a stale outer value never reaches the default CLI
+    monkeypatch.setenv(adapter.AGENT_TIMEOUT_ENV, "5.0")
+    env, protocol = _toolsandbox_cli_env(monkeypatch, tmp_path / "default")
+    assert adapter.AGENT_TIMEOUT_ENV not in env and "agent_timeout" not in protocol
+    env, protocol = _toolsandbox_cli_env(monkeypatch, tmp_path / "set", agent_timeout=3690.0)
+    assert env[adapter.AGENT_TIMEOUT_ENV] == "3690.0" and protocol["agent_timeout"] == 3690.0
+
+
+def test_toolsandbox_agent_client_timeout_rule():
+    adapter = bench_run.ADAPTERS["toolsandbox"]
+    assert bench_run.build_parser().get_default("generation_timeout") == adapter.DEFAULT_GENERATION_TIMEOUT
+    assert adapter.agent_client_timeout(600.0) is None
+    assert adapter.agent_client_timeout(3600) == 3690.0
+    assert adapter.agent_client_timeout(120.0) == 210.0
+    for invalid in (0.0, -1.0, float("inf"), float("nan")):
+        with pytest.raises(ValueError):
+            adapter.agent_client_timeout(invalid)
+
+
+def test_toolsandbox_cli_roles_keep_600_s_unless_the_agent_timeout_is_set(monkeypatch):
+    openai = pytest.importorskip("openai")
+    bench_run.ADAPTERS["toolsandbox"]  # puts benchmarks/ on sys.path
+    import toolsandbox_cli as cli
+
+    url = "http://127.0.0.1:19876/v1"
+    assert cli.agent_timeout_from_env({}) is None
+    assert cli.role_client_kwargs(url, agent=True) == {
+        "api_key": "EMPTY", "base_url": url, "timeout": 600.0, "max_retries": 0}
+    assert cli.role_client_kwargs(url, agent=False) == {
+        "api_key": "EMPTY", "base_url": url, "timeout": 600.0}
+    timeout = cli.agent_timeout_from_env({cli.AGENT_TIMEOUT_ENV: "3690.0"})
+    assert cli.role_client_kwargs(url, agent=False, agent_timeout=timeout)["timeout"] == 600.0
+    agent = openai.OpenAI(**cli.role_client_kwargs(url, agent=True, agent_timeout=timeout))
+    assert agent.timeout == 3690.0 and agent.max_retries == 0
+    for invalid in ("0", "-5", "inf", "nan"):
+        with pytest.raises(ValueError):
+            cli.agent_timeout_from_env({cli.AGENT_TIMEOUT_ENV: invalid})
+
+
+def test_toolsandbox_rapidapi_requests_keep_their_30_s_default(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+
+    bench_run.ADAPTERS["toolsandbox"]
+    import toolsandbox_cli as cli
+
+    monkeypatch.setenv(cli.AGENT_TIMEOUT_ENV, "3690.0")
+    observed = {}
+    tools = SimpleNamespace(requests=SimpleNamespace(
+        get=lambda *args, **kwargs: observed.update(kwargs) or SimpleNamespace(status_code=200)))
+    cli.install_rapidapi_http_status(tools, tmp_path / "rapidapi_http_status.jsonl")
+    tools.requests.get(url="https://example.rapidapi.com/x")
+    assert observed["timeout"] == 30
 
 
 def _free_port():
