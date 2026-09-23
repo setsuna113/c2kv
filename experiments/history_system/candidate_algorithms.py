@@ -42,6 +42,7 @@ def c1_v2_fields(variant: str) -> dict[str, Any]:
         "initial_view": {
             "policy": "s0_capacity_fallback",
             "version": "c2kv-s0-capacity-fallback-v1",
+            "terminal_rescue": "c2kv-terminal-tool-arguments-gist-v1",
         },
         "recovery_backbone": "t02_complete_event",
         "completion_review": False,

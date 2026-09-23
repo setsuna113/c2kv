@@ -151,8 +151,17 @@ class CapacityFallbackAllocator:
                     projections=active,
                 )
 
-        # Preserve the incumbent typed failure and message when none of the
-        # explicitly bounded alternatives is feasible.
+        return self._terminal_failure(
+            payload, ratio=ratio, max_new_tokens=max_new_tokens,
+            initial_error=initial_error, attempts=attempts,
+            measured_raw=measured_raw, narrative_candidates=candidates,
+        )
+
+    def _terminal_failure(self, payload, *, ratio, max_new_tokens,
+                          initial_error, attempts, measured_raw,
+                          narrative_candidates):
+        # The incumbent has no further fallback. Optional terminal policies
+        # override this hook without changing any successful preparation.
         raise initial_error
 
     def reconsider(self, *args: Any, **kwargs: Any):
@@ -435,6 +444,7 @@ def build_capacity_fallback_allocator(
     model_context,
     s0_config,
     benchmark,
+    terminal_tool_rescue=False,
 ):
     """Build the actual configured S0 controller, then add the fallback."""
 
@@ -450,6 +460,10 @@ def build_capacity_fallback_allocator(
         s0_config=s0_config,
         benchmark=benchmark,
     )
+    if terminal_tool_rescue:
+        from .tool_event_rescue import ToolEventRescueAllocator
+
+        return ToolEventRescueAllocator(base)
     return CapacityFallbackAllocator(base)
 
 

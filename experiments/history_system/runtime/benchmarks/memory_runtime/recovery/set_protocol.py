@@ -37,7 +37,13 @@ def context_from_prepared(prepared, draft_tool_calls, draft_text, parse_error=No
     else:
         completed = [event for event in store.events if event.kind == "tool_event" and event.complete]
     latest = [visible_message(message) for message in store.event_messages(completed[-1].event_id)] if completed else []
-    raw = [visible_message(store.messages[index]) for index in prepared.memory.raw_source_indices]
+    overrides = {}
+    if prepared.metadata.get("capacity_fallback", {}).get("argument_projections"):
+        from ..candidate_algorithms.tool_event_rescue import rescue_raw_overrides
+
+        overrides = rescue_raw_overrides(store, prepared.metadata)
+    raw = [visible_message(overrides.get(index, store.messages[index]))
+           for index in prepared.memory.raw_source_indices]
     # Previously appended spans are exact visible evidence, unlike gist.
     visible_units = list(getattr(prepared, "_gp_visible", ()))
     raw.extend({"role": "user", "content": unit.text, "source_id": unit.unit_id} for unit in visible_units)
@@ -50,7 +56,9 @@ def context_from_prepared(prepared, draft_tool_calls, draft_text, parse_error=No
         "schema": "recovery-selection-context-v1", "session_id": store.session_id,
         "decision_key": prepared.metadata["decision_key"], "goal": goal,
         "last_action_observation": latest, "raw_visible": raw,
-        "raw_source_ids": list(prepared.memory.view.raw_event_ids) + [unit.unit_id for unit in visible_units],
+        "raw_source_ids": [event_id for event_id in prepared.memory.view.raw_event_ids
+                           if event_id not in prepared.metadata.get("partial_raw_event_ids", ())]
+                          + [unit.unit_id for unit in visible_units],
         "prefill_hidden": copy.deepcopy(prefill.get("hidden")) if captured else None,
         "prefill_contract": {"layer": prefill.get("layer"), "readout": prefill.get("readout"),
             "position_kind": (prefill.get("position") or {}).get("kind"),

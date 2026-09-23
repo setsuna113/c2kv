@@ -29,9 +29,8 @@ def repack(base, prepared, *, candidate=None, derived_messages=None,
     # derived packets are deliberately not treated as full source coverage.
     projected = {
         row["event_id"]
-        for row in prepared.metadata.get("capacity_fallback", {}).get(
-            "narrative_projections", ()
-        )
+        for key in ("narrative_projections", "argument_projections")
+        for row in prepared.metadata.get("capacity_fallback", {}).get(key, ())
     }
     gist = [
         event_id
@@ -123,4 +122,8 @@ def repack(base, prepared, *, candidate=None, derived_messages=None,
             "status": "replaced_by_exact_source_coverage",
         }
         metadata["min_gist_reservation_met"] = None
+    if metadata.get("capacity_fallback", {}).get("argument_projections"):
+        from .tool_event_rescue import refresh_rescue_metadata
+
+        refresh_rescue_metadata(metadata, result.memory)
     return result, metadata, receipt

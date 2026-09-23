@@ -15,7 +15,8 @@ def c1_v2_fields(variant):
     if variant not in C1_V2_VARIANTS:
         raise ValueError("Unknown C1 v2 variant")
     return {
-        "initial_view": {"policy": "s0_capacity_fallback", "version": "c2kv-s0-capacity-fallback-v1"},
+        "initial_view": {"policy": "s0_capacity_fallback", "version": "c2kv-s0-capacity-fallback-v1",
+                         "terminal_rescue": "c2kv-terminal-tool-arguments-gist-v1"},
         "recovery_backbone": "t02_complete_event", "completion_review": False,
         "proof_registry_version": PROOF_REGISTRY_VERSION,
     }
@@ -39,7 +40,7 @@ def build_c1_v2(tokenizer, *, candidate, packing, policy, model_context, s0_conf
     validate_c1_v2_config(candidate)
     base = build_capacity_fallback_allocator(
         tokenizer, packing=packing, policy=policy, model_context=model_context,
-        s0_config=s0_config, benchmark=benchmark)
+        s0_config=s0_config, benchmark=benchmark, terminal_tool_rescue=True)
     return C1V2VerifiedController(base, candidate)
 
 

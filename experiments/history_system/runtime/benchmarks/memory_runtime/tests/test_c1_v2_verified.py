@@ -143,6 +143,8 @@ def test_task_cap_precedes_detector_and_verified_and_foreign_commit_is_rejected(
 
 
 def test_factory_preserves_actual_s0_bridge_and_validates_new_ready_contract(monkeypatch):
+    from benchmarks.memory_runtime.candidate_algorithms.tool_event_rescue import ToolEventRescueAllocator
+
     monkeypatch.setattr("benchmarks.memory_runtime.candidate_algorithms.controller.C1RiskArtifact",
                         lambda artifact: Risk(0.1))
     runtime = Path(__file__).resolve().parents[3]
@@ -152,6 +154,7 @@ def test_factory_preserves_actual_s0_bridge_and_validates_new_ready_contract(mon
                 view_mode=NATIVE_S0_MODE, compression_policy=ALWAYS_COMPRESSION_POLICY)
     new = build_event_native_controller(Tokenizer(), **args,
                                        s0_config={**frozen, "candidate_algorithm": config()})
+    assert isinstance(new.base, ToolEventRescueAllocator)
     old = build_event_native_controller(Tokenizer(), **args, s0_config=frozen)
     prepared = new.prepare(payload(), ratio=8, max_new_tokens=32)
     prior = old.prepare(payload(), ratio=8, max_new_tokens=32)
