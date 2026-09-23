@@ -28,6 +28,7 @@ import evidence_sets
 import runner
 from c1_artifact_binding import bind_risk_artifact
 from benchmarks.memory_runtime.candidate_algorithms import ALL_VARIANTS
+from benchmarks.memory_runtime.capacity_finalization import validate_handled_capacity_failures
 from benchmarks.memory_runtime.racer.config import BackendConfig
 
 RACER_CANDIDATE_POLICIES = tuple(ALL_VARIANTS)
@@ -1169,7 +1170,9 @@ def run_task(args: argparse.Namespace, task: str, controller_path: Path,
             or final.get("stop_reason") == "runner_failed" or process.returncode != 0):
         raise RuntimeError(f"Controller finalization failed; see {final_path}")
     journal = final.get("journal_summary") or {}
-    if journal.get("failed") or journal.get("pending") or not journal.get("completed"):
+    if (journal.get("pending") or not journal.get("completed")
+            or (journal.get("failed") and not validate_handled_capacity_failures(
+                final, task_out / "server"))):
         raise RuntimeError(f"Model attempts failed, remain pending, or are missing; see {final_path}")
     telemetry = summarize_task(args.benchmark, task, task_out, summary, time.monotonic() - started)
     acceptance = functional_checks(

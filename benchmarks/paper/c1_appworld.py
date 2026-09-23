@@ -596,10 +596,14 @@ def run_task(
     final_path = task_out / "server" / "final.json"
     final = json.loads(final_path.read_text(encoding="utf-8"))
     journal = final.get("journal_summary") or {}
+    run_c1 = _delivery_run_c1(delivery, runner)
+    safe_failed = (run_c1.validate_handled_capacity_failures(final, task_out / "server")
+                   if journal.get("failed") else 0)
     if (
         official is None or telemetry_path is None or run_dir is None
         or final.get("status") == "failed" or final.get("cost_summary_error")
-        or journal.get("failed") or journal.get("pending") or not journal.get("completed")
+        or (journal.get("failed") and not safe_failed)
+        or journal.get("pending") or not journal.get("completed")
         or process is None or process.returncode != 0
     ):
         raise RuntimeError(f"C1 AppWorld controller finalization failed; see {final_path}")
@@ -611,7 +615,6 @@ def run_task(
         telemetry_path=telemetry_path,
         history_path=task_dir / acon.HISTORY_FILE,
     )
-    run_c1 = _delivery_run_c1(delivery, runner)
     metrics = run_c1.summarize_task(
         BENCHMARK, task_id, task_out, official, time.monotonic() - started,
     )

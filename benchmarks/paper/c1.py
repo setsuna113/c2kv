@@ -330,7 +330,11 @@ def run_closed_loop(config, benchmark, directory, requested=None):
                     raise
                 if failure[1] in {"decision_cap_reached", "generation_cap_reached"}:
                     journal = final.get("journal_summary") or {}
-                    if (not final or final.get("status") == "failed" or journal.get("failed")
+                    safe_failures = (getattr(delivery, "validate_handled_capacity_failures", None)
+                                     if journal.get("failed") else None)
+                    if (not final or final.get("status") == "failed"
+                            or (journal.get("failed") and (safe_failures is None
+                                or not safe_failures(final, task_root / "server")))
                             or journal.get("pending") or not journal.get("completed")
                             or (final.get("api_health") or {}).get("terminal_reason") != failure[1]):
                         raise
@@ -492,7 +496,7 @@ def replay_sampling_receipt(source, target):
     }
 
 
-def validate_replay_finalization(task_root, *, declared_failure=False):
+def validate_replay_finalization(task_root, *, declared_failure=False, delivery=None):
     """Do not accept successful HTTP responses with invalid persisted costs."""
     final_path = task_root / "server" / "final.json"
     # A declared OOM can terminate the controller before it writes final.json.
@@ -505,8 +509,10 @@ def validate_replay_finalization(task_root, *, declared_failure=False):
     if declared_failure:
         return
     journal = final.get("journal_summary") or {}
+    safe_failed = ((delivery or load_delivery()).validate_handled_capacity_failures(
+        final, task_root / "server") if journal.get("failed") else 0)
     if (final.get("status") != "stopped" or final.get("error")
-            or journal.get("failed") or journal.get("pending")
+            or (journal.get("failed") and not safe_failed) or journal.get("pending")
             or not journal.get("completed") or not final.get("cost_summary")):
         raise RuntimeError(f"Native replay controller finalization failed; see {final_path}")
 
@@ -658,7 +664,8 @@ def run_common_prefix(config, benchmark, directory, prefix_path):
             delivery.runner._stop_server(process, task_root / "server.supervisor.json")
             log.close()
         validate_replay_finalization(
-            task_root, declared_failure=any(item[0] == task for item in declared_failure_tasks))
+            task_root, declared_failure=any(item[0] == task for item in declared_failure_tasks),
+            delivery=delivery)
     kinds = {}
     for _, _, status, kind in tolerated_failures:
         kinds[f"{status}/{kind}"] = kinds.get(f"{status}/{kind}", 0) + 1

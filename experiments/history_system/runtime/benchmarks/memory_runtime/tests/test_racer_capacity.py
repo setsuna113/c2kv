@@ -10,7 +10,8 @@ import pytest
 ROOT = Path(__file__).resolve().parents[3]
 sys.path[:0] = [str(ROOT), str(ROOT / "python")]
 
-from benchmarks.memory_runtime.attempt_journal import AttemptJournal
+from benchmarks.memory_runtime.attempt_journal import AttemptJournal, summarize_attempt_journal
+from benchmarks.memory_runtime.capacity_finalization import validate_handled_capacity_failures
 from benchmarks.memory_runtime.candidate_algorithms.controller import CandidateRecoveryController
 from benchmarks.memory_runtime.event_native_step import EventNativeDecisionRunner, EventNativeStepError
 from benchmarks.memory_runtime.racer.capacity import HistoryCapacityInfeasible
@@ -74,6 +75,10 @@ def test_rejected_recovery_keeps_draft_state_and_next_step(monkeypatch, tmp_path
     assert generator._messages == list(committed[0].source_messages)
     assert record["backend_commit"]["resolution_on_next_decision"] == "commit"
     assert not native.closed
+    (tmp_path / "steps.jsonl").write_text(json.dumps(record) + "\n", encoding="utf-8")
+    final = {"journal_summary": summarize_attempt_journal(tmp_path / "attempts.jsonl")}
+    assert validate_handled_capacity_failures(final, tmp_path) == 1
+    assert final["journal_summary"]["failed"] == 1
     next_payload = {**payload, "decision_key": "d2", "recovery_disabled": True,
         "messages": messages() + [{"role": "assistant", "content": "Done"},
                                    {"role": "user", "content": "Continue"}]}

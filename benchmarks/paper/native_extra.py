@@ -545,21 +545,26 @@ def run_task(config, benchmark, task, native, delivery, controller_path):
     final_path = task_out / "server" / "final.json"
     final = json.loads(final_path.read_text(encoding="utf-8"))
     journal = final.get("journal_summary") or {}
+    run_c1 = c1_appworld._delivery_run_c1(delivery, runner)
+    safe_failed = (run_c1.validate_handled_capacity_failures(final, task_out / "server")
+                   if journal.get("failed") else 0)
     adapter_failure = _official_task_failure(official, task)
     started_count = journal.get("started")
     completed = journal.get("completed")
+    failed = journal.get("failed")
     zero_generation_failure = adapter_failure in {
         "context_overflow", "c2kv_capacity_infeasible"}
     if (final.get("status") != "stopped" or final.get("cost_summary_error")
             or journal.get("schema") != "a-runtime-attempt-journal-v1"
             or type(started_count) is not int or type(completed) is not int
-            or started_count != completed or completed < 0
-            or journal.get("failed") != 0 or journal.get("pending") != 0
+            or type(failed) is not int or failed < 0
+            or failed != safe_failed
+            or started_count != completed + safe_failed or completed < 0
+            or journal.get("pending") != 0
             or (not zero_generation_failure and completed == 0)
             or not isinstance(final.get("cost_summary"), Mapping)
             or not final["cost_summary"] or process.returncode != 0):
         raise RuntimeError(f"Native bare controller finalization failed; see {final_path}")
-    run_c1 = c1_appworld._delivery_run_c1(delivery, runner)
     namespace = BENCHMARKS[benchmark][0]
     metrics = run_c1.summarize_task(namespace, task, task_out, official,
                                     time.monotonic() - started)
