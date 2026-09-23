@@ -57,6 +57,7 @@ class PersistentRacerGenerator:
         self._tool_decision_attempts = {}
         self._tool_binding_transport = {}
         self._pending_commit = None
+        self._held_retention = None
         self.last_generation_trace = None
 
     def __getattr__(self, name):
@@ -428,8 +429,54 @@ class PersistentRacerGenerator:
                                 "response": locals().get("response"), "retries": 0})
         self._decision_key = decision_key
         self._resolution = None
+        self._held_retention = self._retention_receipt(response, index_map)
         self.last_generation_trace.update(status="completed", response=response)
         return result
+
+    def _retention_receipt(self, response, index_map):
+        """Keep the engine's mandatory history for a regeneration of this generation."""
+        report = (response.get("metadata") or {}).get("kv_memory_report") or {}
+        held = (report.get("racer_transaction") or {}).get("regeneration_mandatory_history")
+        if held is None:
+            return None  # An engine without the receipt keeps the submit-and-see behaviour.
+        tokens, indices = held.get("tokens"), held.get("source_message_indices")
+        if (type(tokens) is not int or tokens < 0 or not isinstance(indices, list)
+                or any(type(index) is not int for index in indices)
+                or held.get("release") != "replaced_source_message"):
+            raise SGLangEventNativeError("RACER held retention receipt is invalid")
+        return {"tokens": tokens, "source_message_indices": sorted(indices),
+                "index_map": dict(index_map)}
+
+    def regeneration_capacity(self, memory):
+        """Receipt when a regeneration of the held generation cannot fit, else None.
+
+        The engine restores the held checkpoint and must keep its mandatory
+        history (CommitKV pending pages) inside this request's history target,
+        max(1, B - evidence), which also bounds the engine's effective target.
+        When it cannot, the engine would reject the regeneration, so it is not
+        submitted and the held generation stays committable.  Recovering the
+        source of a protected page's message releases the protection.
+        """
+        held = self._held_retention
+        if held is None or not isinstance(memory, PersistentMemory):
+            return None
+        target = max(1, self.config.history_budget_tokens - memory.recovery_tokens)
+        recovered = sorted({held["index_map"][self._source_positions[index]]
+                            for index in memory.recovered_source_indices})
+        released = bool(set(recovered) & set(held["source_message_indices"]))
+        mandatory = 0 if released else held["tokens"]
+        if mandatory <= target:
+            return None
+        return {"schema": "racer-regeneration-capacity-v1",
+                "status": "capacity_exhausted",
+                "history_budget_tokens": self.config.history_budget_tokens,
+                "native_evidence_tokens": memory.recovery_tokens,
+                "history_target_tokens": target,
+                "mandatory_history_tokens": held["tokens"],
+                "mandatory_source_message_indices": held["source_message_indices"],
+                "recovered_source_message_indices": recovered,
+                "engine_request_submitted": False,
+                "source": "engine_held_checkpoint_receipt"}
 
     def _result(self, response, memory, context):
         metadata = response.get("metadata") or {}
