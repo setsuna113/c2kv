@@ -106,7 +106,7 @@
       "method": "H2O",
       "arm": "history_kv_h2o_r25_persistent",
       "group": "main",
-      "retention": 0.25,
+      "history_retention_ratio": 0.25,
       "benchmarks": [
         "bfcl_base",
         "bfcl_long_context",
@@ -120,7 +120,7 @@
       "method": "SnapKV",
       "arm": "history_kv_snapkv_r25_persistent",
       "group": "main",
-      "retention": 0.25,
+      "history_retention_ratio": 0.25,
       "benchmarks": [
         "bfcl_base",
         "bfcl_long_context",
@@ -134,7 +134,7 @@
       "method": "H2O",
       "arm": "history_kv_h2o_r125_persistent",
       "group": "sweep",
-      "retention": 0.125,
+      "history_retention_ratio": 0.125,
       "benchmarks": [
         "bfcl_base",
         "bfcl_long_context",
@@ -145,7 +145,7 @@
       "method": "SnapKV",
       "arm": "history_kv_snapkv_r125_persistent",
       "group": "sweep",
-      "retention": 0.125,
+      "history_retention_ratio": 0.125,
       "benchmarks": [
         "bfcl_base",
         "bfcl_long_context",
@@ -156,7 +156,7 @@
       "method": "PyramidKV",
       "arm": "history_kv_pyramidkv_r25_persistent",
       "group": "main",
-      "retention": 0.25,
+      "history_retention_ratio": 0.25,
       "benchmarks": [
         "bfcl_base",
         "bfcl_long_context",
@@ -170,7 +170,7 @@
       "method": "PyramidKV",
       "arm": "history_kv_pyramidkv_r125_persistent",
       "group": "sweep",
-      "retention": 0.125,
+      "history_retention_ratio": 0.125,
       "benchmarks": [
         "bfcl_base",
         "bfcl_long_context",
@@ -194,6 +194,7 @@
       "method": "CommitKV",
       "arm": "commitkv",
       "group": "opponent",
+      "history_retention_ratio": 0.25,
       "benchmarks": [
         "bfcl_base",
         "bfcl_long_context",
@@ -201,6 +202,17 @@
         "acebench_agent",
         "toolsandbox",
         "tau2"
+      ]
+    },
+    {
+      "method": "CommitKV",
+      "arm": "commitkv",
+      "group": "sweep",
+      "history_retention_ratio": 0.125,
+      "benchmarks": [
+        "bfcl_base",
+        "bfcl_long_context",
+        "appworld"
       ]
     },
     {

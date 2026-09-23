@@ -7,6 +7,7 @@ the server and the proxy side, including native recovery controllers.
 from __future__ import annotations
 
 import copy
+import csv
 import json
 from pathlib import Path
 
@@ -139,12 +140,12 @@ def test_tool_overlay_preserves_old_cells_and_history_budgets():
         if row["tool_context"] == "raw":
             continue
         assert not row["arm"].startswith(("hiagent", "acon"))
-        raw = old[row["benchmark"] + "__" + row["arm"]]
-        for field in ("history_budget_tokens", "ratio", "retention"):
+        raw = old[row["cell_id"].split("__tools-", 1)[0]]
+        for field in ("history_budget_tokens", "history_retention_ratio", "ratio", "retention"):
             assert row.get(field) == raw.get(field)
         assert row["tool_checkpoint"] == "/restored/T0/checkpoint-1034"
     assert "bfcl_base__c2kv_c1_t02_r8__tools-t0_r8" in new
-    assert "bfcl_base__history_kv_h2o_r25_persistent__tools-t0_r8" in new
+    assert "bfcl_base__history_kv_h2o_persistent_r0p25__tools-t0_r8" in new
 
 
 def test_tool_budget_reaches_native_and_proxy_commands():
@@ -160,9 +161,14 @@ def test_tool_budget_reaches_native_and_proxy_commands():
 def test_prepare_writes_tool_context_column_and_commands(tmp_path):
     config = _with_tool_context(_config(), arms=("full",))
     plan, _ = runner.prepare(config, tmp_path / "out", SOURCE)
-    rows = (tmp_path / "out" / "matrix.csv").read_text(encoding="utf-8").splitlines()
-    assert rows[0].endswith(",tool_context")
-    assert any(line.startswith("bfcl_base__full__tools-t0_r8,") and line.endswith(",t0_r8") for line in rows)
+    with (tmp_path / "out" / "matrix.csv").open(encoding="utf-8", newline="") as handle:
+        reader = csv.DictReader(handle)
+        assert {"tool_context", "history_retention_ratio"} <= set(reader.fieldnames or ())
+        rows = list(reader)
+    assert any(row["cell_id"] == "bfcl_base__full__tools-t0_r8"
+               and row["tool_context"] == "t0_r8" for row in rows)
+    assert any(row["cell_id"] == "bfcl_base__history_kv_h2o_persistent_r0p25"
+               and row["history_retention_ratio"] == "0.25" for row in rows)
     commands = json.loads((tmp_path / "out" / "commands.json").read_text())
     tool_cells = [c for c in commands if c["cell_id"].endswith("__tools-t0_r8")]
     assert len(tool_cells) == len(config["benchmarks"]) and all("--tool-memory" in c["command"] for c in tool_cells)

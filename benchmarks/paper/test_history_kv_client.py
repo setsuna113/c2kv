@@ -54,6 +54,38 @@ def test_profile_override_and_budget_validation(tmp_path):
         client.plan(config(), "unknown", "agentkv=768", tmp_path, "http://localhost:36200")
 
 
+def test_ratio_client_uses_same_runner_identity_and_command(tmp_path, capsys):
+    cfg = config()
+    resolved, cell, command, directory = client.plan(
+        cfg, "bfcl_base", None, tmp_path / "results", "http://localhost:36200",
+        retention_spec="commitkv=0.5")
+    assert cell["cell_id"] == "bfcl_base__commitkv_r0p5"
+    assert cell["history_retention_ratio"] == 0.5
+    assert "history_budget_tokens" not in cell
+    assert directory.name == cell["cell_id"]
+    assert command[command.index("--history-kv-retention-ratio") + 1] == "0.5"
+    assert "--history-kv-target-tokens" not in command
+    assert resolved["methods"][-1]["history_retention_ratio"] == 0.5
+    source = tmp_path / "config.json"
+    source.write_text(json.dumps(cfg), encoding="utf-8")
+    client.main(["--config", str(source), "--benchmark", "bfcl_base",
+                 "--history-kv-retention", "commitkv=0.5",
+                 "--upstream", "http://localhost:36200", "--out",
+                 str(tmp_path / "dry"), "--dry-run"])
+    assert json.loads(capsys.readouterr().out)["cell_id"] == cell["cell_id"]
+    assert not (tmp_path / "dry").exists()
+
+
+def test_ratio_client_selects_existing_configured_cell(tmp_path):
+    cfg = config()
+    resolved, cell, command, _ = client.plan(
+        cfg, "bfcl_base", None, tmp_path / "results", "http://localhost:36200",
+        retention_spec="commitkv=0.25")
+    assert resolved == cfg
+    assert cell["cell_id"] == "bfcl_base__commitkv_r0p25"
+    assert command[command.index("--history-kv-retention-ratio") + 1] == "0.25"
+
+
 def test_dry_run_does_not_launch_or_write(monkeypatch, tmp_path, capsys):
     source = tmp_path / "input.json"
     source.write_text(json.dumps(config()), encoding="utf-8")

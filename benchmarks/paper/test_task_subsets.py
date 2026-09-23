@@ -14,7 +14,7 @@ class TaskSubsetsTest(unittest.TestCase):
         self.config = json.loads(runner.DEFAULT_CONFIG.read_text())
         self.subsets = {
             "bfcl_long_context__agentkv": ["multi_turn_long_context_0", "multi_turn_long_context_3"],
-            "appworld__history_kv_pyramidkv_r25_persistent": ["3d9a636_1"],
+            "appworld__history_kv_pyramidkv_persistent_r0p25": ["3d9a636_1"],
         }
 
     def test_prepare_filters_cells_and_forwards_exact_ids(self):

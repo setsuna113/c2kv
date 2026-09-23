@@ -17,8 +17,8 @@ from benchmarks.paper.report import write_comparison
 class PaperMatrixTest(unittest.TestCase):
     def setUp(self):
         self.config = json.loads(DEFAULT_CONFIG.read_text())
-        # Preserve coverage of historical plan extension and the legacy guard.
-        # The new default native matrix is covered by test_native_bare.py.
+        # Preserve coverage of the legacy native guard. The default native
+        # matrix is covered by test_native_bare.py.
         for method in self.config["methods"]:
             if method["arm"] == "c2kv_native_r4":
                 method["arm"] = "c2kv4"
@@ -45,7 +45,7 @@ class PaperMatrixTest(unittest.TestCase):
             plan, _ = prepare(self.config, root, root / "engine")
             with mock.patch.object(runner.subprocess, "run") as run:
                 _, path = aggregate_results(self.config, plan, root, ["common_prefix"],
-                                            {"bfcl_base__agentkv", "bfcl_base__commitkv"})
+                                            {"bfcl_base__agentkv", "bfcl_base__commitkv_r0p25"})
                 run.assert_not_called()
             receipt = json.loads(path.read_text())
             self.assertEqual(receipt["counts"]["unsupported"], 2)
@@ -74,10 +74,9 @@ class PaperMatrixTest(unittest.TestCase):
 
     def test_only_requested_methods_and_ratio(self):
         rows = [row for row in cells(self.config) if row["benchmark"] != "tau2"]
-        # Preserve the historical matrix while tau2 extends it independently.
-        # The tool-context axis adds compressed-tool cells on top of the 65 raw-tool cells.
+        # The tool-context axis adds compressed-tool cells to the raw-tool matrix.
         raw = [row for row in rows if row["tool_context"] == "raw"]
-        self.assertEqual(len(raw), 65)
+        self.assertEqual(len(raw), 68)
         self.assertEqual(len(rows) - len(raw), 10)
         self.assertEqual(sum(row["group"] == "main" for row in raw), 39)
         self.assertEqual({row["ratio"] for row in rows if row["method"] == "C2KV"}, {4})
@@ -99,7 +98,7 @@ class PaperMatrixTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             output = Path(temporary)
             plan, profile = prepare(self.config, output, output / "sglang")
-            self.assertEqual(len([row for row in plan if row["benchmark"] != "tau2"]), 75)
+            self.assertEqual(len([row for row in plan if row["benchmark"] != "tau2"]), 78)
             self.assertTrue(profile.is_file())
             for row in plan:
                 cmd = row["command"]
@@ -116,7 +115,7 @@ class PaperMatrixTest(unittest.TestCase):
         config = dict(self.config, generation_timeout=1200)
         rows = cells(config)
         profile = Path("out/deployment_profile.json")
-        persistent = next(row for row in rows if row["cell_id"] == "bfcl_base__commitkv")
+        persistent = next(row for row in rows if row["cell_id"] == "bfcl_base__commitkv_r0p25")
         ordinary = next(row for row in rows if row["cell_id"] == "bfcl_base__full")
 
         default_cmd = run_command(
@@ -139,7 +138,7 @@ class PaperMatrixTest(unittest.TestCase):
             self.assertEqual(json.loads(frozen)["generation_timeout"], 1800)
             plan = json.loads((output / "commands.json").read_text())
             row = next(row for row in plan
-                       if row["cell_id"] == "bfcl_long_context__commitkv")
+                       if row["cell_id"] == "bfcl_long_context__commitkv_r0p25")
             cmd = row["command"]
             self.assertEqual(cmd[cmd.index("--generation-timeout") + 1], "1800.0")
             with self.assertRaises((ValueError, RuntimeError)):
@@ -160,8 +159,8 @@ class PaperMatrixTest(unittest.TestCase):
              "actor folding policy"),
             ("commitkv", replace(
                 ARMS["commitkv"],
-                history_kv={**ARMS["commitkv"].history_kv, "target_tokens": 1024}),
-             "2048-token"),
+                history_kv={**ARMS["commitkv"].history_kv, "backend": "physical_eviction"}),
+             "reference-attention"),
             ("agentkv", replace(
                 ARMS["agentkv"],
                 history_kv={**ARMS["agentkv"].history_kv, "backend": "physical_eviction"}),
@@ -383,7 +382,7 @@ class PaperMatrixTest(unittest.TestCase):
                           if row["cell_id"] == "bfcl_base__c2kv4")
             safe_ids = {
                 "bfcl_base__full",
-                "bfcl_base__history_kv_h2o_r25_persistent",
+                "bfcl_base__history_kv_h2o_persistent_r0p25",
                 "bfcl_base__c2kv_c1_t02_r8",
             }
 
@@ -641,6 +640,77 @@ class PaperMatrixTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DefaultHistoryBudgetTest(unittest.TestCase):
+    def setUp(self):
+        self.config = json.loads(DEFAULT_CONFIG.read_text())
+
+    def test_default_ratio_cells_share_budget_ids_commands_and_sweep_scope(self):
+        expected = {
+            "H2O": ("history_kv_h2o_r25_persistent", "history_kv_h2o_r125_persistent",
+                    "history_kv_h2o_persistent"),
+            "SnapKV": ("history_kv_snapkv_r25_persistent", "history_kv_snapkv_r125_persistent",
+                       "history_kv_snapkv_persistent"),
+            "PyramidKV": ("history_kv_pyramidkv_r25_persistent", "history_kv_pyramidkv_r125_persistent",
+                          "history_kv_pyramidkv_persistent"),
+            "CommitKV": ("commitkv", "commitkv", "commitkv"),
+        }
+        all_benchmarks = {item["name"] for item in self.config["benchmarks"]}
+        sweep_benchmarks = {"bfcl_base", "bfcl_long_context", "appworld"}
+        rows = cells(self.config)
+        for method, (main_arm, sweep_arm, identity_base) in expected.items():
+            for group, ratio, arm, benchmarks in (
+                    ("main" if method != "CommitKV" else "opponent", 0.25,
+                     main_arm, all_benchmarks),
+                    ("sweep", 0.125, sweep_arm, sweep_benchmarks)):
+                selected = [row for row in rows
+                            if row["method"] == method and row["group"] == group]
+                self.assertEqual({row["benchmark"] for row in selected}, benchmarks)
+                self.assertEqual(len(selected), len(benchmarks))
+                for row in selected:
+                    with self.subTest(method=method, group=group, benchmark=row["benchmark"]):
+                        self.assertEqual(row["arm"], arm)
+                        self.assertEqual(row["history_retention_ratio"], ratio)
+                        self.assertEqual(row["cell_id"],
+                                         f'{row["benchmark"]}__{identity_base}_r{str(ratio).replace(".", "p")}')
+                        self.assertNotIn("retention", row)
+                        self.assertNotIn("history_budget_tokens", row)
+                        command = run_command(self.config, row, Path("out/cell"),
+                                              Path("out/deployment_profile.json"))
+                        self.assertEqual(command[command.index("--arm") + 1], arm)
+                        self.assertEqual(command[command.index("--history-kv-retention-ratio") + 1],
+                                         str(ratio))
+                        self.assertNotIn("--history-kv-target-tokens", command)
+        agentkv = next(row for row in rows if row["cell_id"] == "bfcl_base__agentkv")
+        self.assertNotIn("history_retention_ratio", agentkv)
+        self.assertNotIn("--history-kv-retention-ratio", run_command(
+            self.config, agentkv, Path("out/agentkv"), Path("out/deployment_profile.json")))
+
+    def test_old_frozen_matrix_cannot_resume_with_new_default_budget(self):
+        import copy
+
+        old = copy.deepcopy(self.config)
+        old["methods"] = [method for method in old["methods"]
+                          if not (method["arm"] == "commitkv"
+                                  and method["group"] == "sweep")]
+        for method in old["methods"]:
+            ratio = method.pop("history_retention_ratio", None)
+            if ratio is not None and method["arm"] != "commitkv":
+                method["retention"] = ratio
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary)
+            old_plan, _ = prepare(old, output, output / "sglang")
+            old_resolved = (output / "config.resolved.json").read_bytes()
+            old_cell = next(row for row in old_plan
+                            if row["cell_id"] == "bfcl_base__commitkv")
+            marker = output / "closed_loop" / old_cell["cell_id"] / "complete.json"
+            marker.parent.mkdir(parents=True)
+            marker.write_text("{}\n")
+            with self.assertRaisesRegex(RuntimeError, "different config"):
+                prepare(self.config, output, output / "sglang")
+            self.assertEqual((output / "config.resolved.json").read_bytes(), old_resolved)
+            self.assertEqual(marker.read_text(), "{}\n")
 
 
 class ExtensionRuleTest(unittest.TestCase):

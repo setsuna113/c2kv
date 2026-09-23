@@ -71,6 +71,7 @@ CLI_SURFACE = [
     ("--tool-checkpoint", "", False),
     ("--tool-budget-tokens", None, False),
     ("--history-kv-target-tokens", None, False),
+    ("--history-kv-retention-ratio", None, False),
     ("--shared-engine", False, False),
     ("--generation-timeout", 600.0, False),
     ("--checkpoint", None, False),
@@ -147,6 +148,35 @@ def test_start_proxy_rejects_an_occupied_port_before_spawn(monkeypatch, tmp_path
         )
         with pytest.raises(SystemExit, match="already occupied"):
             run.start_proxy("http://up", "full", port, tmp_path)
+
+
+@pytest.mark.parametrize("arm", [
+    "history_kv_h2o_r25_persistent", "history_kv_snapkv_r25_persistent",
+    "history_kv_pyramidkv_r25_persistent", "commitkv",
+])
+def test_ratio_budget_reaches_proxy_without_an_absolute_override(monkeypatch, tmp_path, arm):
+    monkeypatch.setattr(run, "_assert_proxy_port_available", lambda port: None)
+    captured = []
+
+    def capture(command, **kwargs):
+        captured.extend(command)
+        raise RuntimeError("captured launch")
+
+    monkeypatch.setattr(run.subprocess, "Popen", capture)
+    with pytest.raises(RuntimeError, match="captured launch"):
+        run.start_proxy("http://up", arm, 34100, tmp_path,
+                        history_kv_retention_ratio=0.5)
+    assert captured[captured.index("--history-kv-retention-ratio") + 1] == "0.5"
+    assert "--history-kv-target-tokens" not in captured
+
+
+def test_history_budget_cli_rejects_conflicting_modes():
+    with pytest.raises(SystemExit):
+        run.build_parser().parse_args([
+            "--benchmark", "bfcl", "--arm", "commitkv", "--upstream", "http://up",
+            "--out", "out", "--history-kv-retention-ratio", "0.5",
+            "--history-kv-target-tokens", "768",
+        ])
 
 
 def test_start_proxy_rejects_its_own_exited_child(monkeypatch, tmp_path):

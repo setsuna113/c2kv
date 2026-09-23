@@ -91,7 +91,13 @@ def start_proxy(upstream: str, arm: str, port: int, log_dir: Path,
                 tool_budget_tokens: int | None = None,
                 history_kv_target_tokens: int | None = None,
                 shared_engine: bool = False,
-                generation_timeout: float = 600.0):
+                generation_timeout: float = 600.0,
+                history_kv_retention_ratio: float | None = None):
+    history_budget = None
+    if history_kv_target_tokens is not None or history_kv_retention_ratio is not None:
+        history_budget = HistoryKVBudget(
+            history_kv_target_tokens, retention_ratio=history_kv_retention_ratio)
+        history_budget.apply(get_arm(arm))
     _assert_proxy_port_available(port)
     log_path = log_dir / f"proxy_{arm}_{port}.jsonl"
     out_handle = open(log_dir / f"proxy_{arm}_{port}.out", "w")
@@ -110,8 +116,8 @@ def start_proxy(upstream: str, arm: str, port: int, log_dir: Path,
         command += ["--tool-memory", tool_memory, "--tool-checkpoint", tool_checkpoint]
         if tool_budget_tokens is not None:
             command += ["--tool-budget-tokens", str(tool_budget_tokens)]
-    if history_kv_target_tokens is not None:
-        command += ["--history-kv-target-tokens", str(history_kv_target_tokens)]
+    if history_budget is not None:
+        command += history_budget.cli_args()
     if shared_engine:
         command.append("--shared-engine")
     if record_reference:
@@ -250,8 +256,11 @@ def add_core_arguments(parser: argparse.ArgumentParser) -> None:
                              "tools; t0:r8 | t0:r12 | t0:r8:hybrid3 (benchmarks/toolmemory.py)")
     parser.add_argument("--tool-budget-tokens", type=int,
                         help="optional cap on resident tool-context tokens")
-    parser.add_argument("--history-kv-target-tokens", type=int,
+    history_budget = parser.add_mutually_exclusive_group()
+    history_budget.add_argument("--history-kv-target-tokens", type=int,
                         help="absolute history-KV capacity; preserves the registered method and backend")
+    history_budget.add_argument("--history-kv-retention-ratio", type=float,
+                        help="history-KV retention in (0, 1], resolved from full server-tokenized history")
     parser.add_argument("--shared-engine", action="store_true",
                         help="keep persistent-session resets local to this proxy")
     parser.add_argument(
@@ -334,9 +343,10 @@ def resolve_run_profile(args: argparse.Namespace) -> dict:
 def main(argv=None):
     parser = build_parser()
     args = parser.parse_args(argv)
-    if args.history_kv_target_tokens is not None:
+    if args.history_kv_target_tokens is not None or args.history_kv_retention_ratio is not None:
         try:
-            HistoryKVBudget(args.history_kv_target_tokens).apply(get_arm(args.arm))
+            HistoryKVBudget(args.history_kv_target_tokens,
+                           retention_ratio=args.history_kv_retention_ratio).apply(get_arm(args.arm))
         except ValueError as exc:
             parser.error(str(exc))
     try:
@@ -371,6 +381,7 @@ def main(argv=None):
         tool_memory=args.tool_memory, tool_checkpoint=args.tool_checkpoint,
         tool_budget_tokens=args.tool_budget_tokens,
         history_kv_target_tokens=args.history_kv_target_tokens,
+        history_kv_retention_ratio=args.history_kv_retention_ratio,
         shared_engine=args.shared_engine,
         generation_timeout=args.generation_timeout)
     from toolmemory import parse_tool_memory_spec
@@ -407,6 +418,8 @@ def finalize_summary(summary: dict, args: argparse.Namespace, profile: dict,
     summary["backend"] = args.backend
     if args.history_kv_target_tokens is not None:
         summary["history_budget_tokens"] = args.history_kv_target_tokens
+    if getattr(args, "history_kv_retention_ratio", None) is not None:
+        summary["history_retention_ratio"] = args.history_kv_retention_ratio
     summary["model"] = args.model
     summary["checkpoint_profile"] = profile
     summary["preflight"] = preflight
