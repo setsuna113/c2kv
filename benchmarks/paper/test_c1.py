@@ -459,6 +459,19 @@ def test_replay_requires_complete_controller_journal(tmp_path):
     paper_c1.validate_replay_finalization(tmp_path)
 
 
+def test_replay_accepts_only_validated_capacity_fallback(tmp_path):
+    server = tmp_path / "server"
+    server.mkdir()
+    (server / "final.json").write_text(json.dumps({
+        "status": "stopped", "journal_summary": {"completed": 1, "failed": 1, "pending": 0},
+        "cost_summary": {"generation_calls": 2}}))
+    seen = []
+    delivery = SimpleNamespace(validate_handled_capacity_failures=lambda final, path: (
+        seen.append((final["journal_summary"]["failed"], path)) or 1))
+    paper_c1.validate_replay_finalization(tmp_path, delivery=delivery)
+    assert seen == [(1, server)]
+
+
 def test_closed_loop_does_not_mask_cost_failure_as_capacity_failure(tmp_path, monkeypatch):
     task = "multi_turn_base_164"
     native = tmp_path / "native"
