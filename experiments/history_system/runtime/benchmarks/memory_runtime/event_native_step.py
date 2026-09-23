@@ -12,6 +12,7 @@ from .attempt_journal import AttemptJournal
 from .always_compress import CapacityInfeasible
 from .event_native import memory_to_dict
 from .event_native_draft import NATIVE_DRAFT_VERSION, decode_native_generation
+from .racer.capacity import HistoryCapacityInfeasible
 
 
 class EventNativeStepError(RuntimeError):
@@ -152,6 +153,7 @@ class EventNativeDecisionRunner:
                         record['controller_timing']['reconsider_seconds'] = duration_ns / 1e9
                 record['exact_recovery'] = copy.deepcopy(reconsidered['decision'])
                 rounds = []
+                capacity_rejected = False
                 original_result, original_draft = result, draft
                 max_rounds = getattr(self.controller, 'max_recovery_rounds', 1)
                 checks = [copy.deepcopy(reconsidered['decision'])]
@@ -162,8 +164,28 @@ class EventNativeDecisionRunner:
                     rounds.append(copy.deepcopy(reconsidered['decision']))
                     record['generation_trace'][-1]['discarded'] = True
                     final_memory = reconsidered['memory']
-                    result, draft = self._generate(
-                        reconsidered['memory'], reconsidered['metadata'], record, 'regeneration')
+                    try:
+                        result, draft = self._generate(
+                            reconsidered['memory'], reconsidered['metadata'], record, 'regeneration')
+                    except HistoryCapacityInfeasible as error:
+                        # The engine preflight preserves the currently held
+                        # generation. It does not reconstruct an earlier prompt
+                        # after a successful intervening recovery round.
+                        original_still_held = not any(
+                            item['phase'] == 'regeneration' and item['status'] == 'completed'
+                            for item in record['generation_trace'])
+                        if not error.can_retain_draft(key[1]) or not original_still_held:
+                            raise
+                        capacity_rejected = True
+                        result, draft = original_result, original_draft
+                        final_memory = prepared.memory
+                        for index, trace in enumerate(record['generation_trace']):
+                            trace['discarded'] = index != 0
+                        record['recovery_skipped'] = {
+                            'reason': 'capacity', 'selected_generation_index': 0,
+                            'capacity': copy.deepcopy(error.receipt),
+                        }
+                        break
                     if len(rounds) >= max_rounds or self.generation_calls >= self.max_generation_calls:
                         break
                     advance = getattr(self.controller, 'advance_recovery', None)
@@ -186,8 +208,13 @@ class EventNativeDecisionRunner:
                     record['exact_recovery']['termination'] = (
                         reconsidered['decision']['reason'] if not reconsidered['regenerate']
                         else 'recovery_or_generation_limit')
+                if capacity_rejected:
+                    record['exact_recovery'].update(
+                        regenerate=False, post_draft_exact_recovery_applied=False,
+                        termination='recovery_skipped:capacity',
+                        capacity_rejection=copy.deepcopy(record['recovery_skipped']['capacity']))
                 commit_validator = getattr(self.controller, 'validate_commit', None)
-                if callable(commit_validator) and not recovery_disabled:
+                if callable(commit_validator) and not recovery_disabled and not capacity_rejected:
                     commit_started = time.perf_counter_ns()
                     verdict = commit_validator(
                         prepared, list(draft.tool_calls), draft_text=draft.text,
@@ -226,7 +253,8 @@ class EventNativeDecisionRunner:
                     else:
                         record['commit_validation']['selected_generation_index'] = len(record['generation_trace']) - 1
                 finalize = getattr(self.controller, 'finalize_commit', None)
-                if callable(finalize) and not recovery_disabled and draft.status != 'malformed':
+                if (callable(finalize) and not recovery_disabled and not capacity_rejected
+                        and draft.status != 'malformed'):
                     finalize_started = time.perf_counter_ns()
                     calls, receipt = finalize(prepared, draft.tool_calls)
                     record['commit_transform'] = copy.deepcopy(receipt)
@@ -268,6 +296,8 @@ class EventNativeDecisionRunner:
             record['status'] = 'failed'
             record['response'] = None
             record['error'] = {'type': type(error).__name__, 'message': str(error)}
+            if isinstance(error, HistoryCapacityInfeasible):
+                record['error']['capacity'] = copy.deepcopy(error.receipt)
             record['decision_end_unix_ns'] = time.time_ns()
             record['decision_duration_ns'] = time.perf_counter_ns() - started_ns
             record['decision_runtime_seconds'] = record['decision_duration_ns'] / 1e9

@@ -28,11 +28,14 @@ class BackendConfig:
     backend_config: dict = field(default_factory=dict)
     detector_calibration: str = "not_used"
     allocation: str = "backend_native_persistent"
+    mode: str | None = None
+    schema: str = "racer-backend-v1"
 
     @classmethod
     def parse(cls, value: Mapping):
-        if not isinstance(value, Mapping) or value.get("schema") != "racer-backend-v1":
-            raise ValueError("RACER requires schema racer-backend-v1")
+        if not isinstance(value, Mapping) or value.get("schema") not in {
+                "racer-backend-v1", "racer-backend-v2"}:
+            raise ValueError("RACER requires schema racer-backend-v1 or racer-backend-v2")
         unknown = set(value) - {"schema", *cls.__dataclass_fields__}
         if unknown:
             raise ValueError(f"Unknown RACER backend fields: {sorted(unknown)}")
@@ -45,12 +48,29 @@ class BackendConfig:
         if type(budget) is not int or budget <= 0:
             raise ValueError("history_budget_tokens must be a positive integer")
         result = cls(**{key: value[key] for key in cls.__dataclass_fields__ if key in value})
-        expected = ("not_used" if result.policy in ("off", *REPAIR_VARIANTS) else
+        if result.schema == "racer-backend-v1":
+            if result.mode is not None:
+                raise ValueError("Legacy RACER backend cannot declare a mode")
+        elif result.mode not in {"bare", "protected_off", "on"}:
+            raise ValueError("RACER v2 requires bare, protected_off, or on mode")
+        if result.mode == "on" and result.policy == "off":
+            raise ValueError("RACER on mode requires a recovery policy")
+        if result.mode == "bare" and result.policy != "off":
+            raise ValueError("RACER bare mode requires policy=off")
+        if result.backend == "c2kv" and result.mode == "bare":
+            raise ValueError("C2KV bare mode uses c2kv_native_r8 without a RACER backend config")
+        expected = ("not_used" if result.mode in {"bare", "protected_off"}
+                    or result.policy in ("off", *REPAIR_VARIANTS) else
                     "reference" if result.backend == "c2kv" else
                     "frozen_c2kv_unvalidated_transfer")
         if result.detector_calibration != expected:
             raise ValueError(f"Detector calibration must be {expected!r}")
-        allocation = "c2kv_s0" if result.backend == "c2kv" else "backend_native_persistent"
+        if result.schema == "racer-backend-v1":
+            allocation = "c2kv_s0" if result.backend == "c2kv" else "backend_native_persistent"
+        elif result.mode == "bare":
+            allocation = "c2kv_bare" if result.backend == "c2kv" else "backend_native_persistent"
+        else:
+            allocation = "racer_s0"
         if result.allocation != allocation:
             raise ValueError(f"Backend allocation must be {allocation!r}")
         if result.backend != "c2kv":
@@ -85,6 +105,14 @@ class BackendConfig:
 
     def receipt(self):
         from dataclasses import asdict
-        return {"schema": "racer-backend-v1", **asdict(self),
-                "identity": f"racer:{self.backend}:{self.policy}:b{self.history_budget_tokens}",
+        fields = asdict(self)
+        fields.pop("schema")
+        if self.schema == "racer-backend-v1":
+            fields.pop("mode")
+            identity = f"racer:{self.backend}:{self.policy}:b{self.history_budget_tokens}"
+        else:
+            identity = (f"racer:v2:{self.backend}:{self.mode}:{self.policy}:"
+                        f"b{self.history_budget_tokens}")
+        return {"schema": self.schema, **fields,
+                "identity": identity,
                 "quality_validated": False}

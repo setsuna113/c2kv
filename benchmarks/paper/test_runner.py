@@ -680,7 +680,7 @@ class DefaultHistoryBudgetTest(unittest.TestCase):
         rows = cells(self.config)
         self.assertFalse(any(row["group"] == "sweep" for row in rows))
         for method, backend in expected.items():
-            arm = f"racer_{backend}_off_b768"
+            arm = f"racer_v2_{backend}_bare_b768"
             selected = [row for row in rows if row["method"] == method]
             self.assertEqual({row["benchmark"] for row in selected}, all_benchmarks)
             self.assertEqual(len(selected), len(all_benchmarks))
@@ -729,7 +729,7 @@ class DefaultHistoryBudgetTest(unittest.TestCase):
             old_plan, _ = prepare(old, output, output / "sglang")
             old_resolved = (output / "config.resolved.json").read_bytes()
             old_cell = next(row for row in old_plan
-                            if row["cell_id"] == "bfcl_base__racer_commitkv_off_b512")
+                            if row["cell_id"] == "bfcl_base__racer_v2_commitkv_bare_b512")
             marker = output / "closed_loop" / old_cell["cell_id"] / "complete.json"
             marker.parent.mkdir(parents=True)
             marker.write_text("{}\n")

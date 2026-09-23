@@ -954,11 +954,12 @@ for _method in ("h2o", "snapkv_persistent", "pyramidkv"):
 
 
 def get_arm(name: str) -> Arm:
-    from benchmarks.paper.racer_matrix import is_racer_arm, parse_racer_arm_name, resolve_racer_backend
+    from benchmarks.paper.racer_matrix import (
+        is_racer_arm, parse_racer_arm_identity, resolve_racer_backend)
 
     if is_racer_arm(name):
-        backend, policy, budget = parse_racer_arm_name(name)
-        resolved = resolve_racer_backend(backend, policy, budget)
+        backend, policy, budget, mode = parse_racer_arm_identity(name)
+        resolved = resolve_racer_backend(backend, policy, budget, mode=mode)
         arm = Arm(
             name=name,
             compress_history=backend == "c2kv",
@@ -966,7 +967,7 @@ def get_arm(name: str) -> Arm:
             history_kv=(None if backend == "c2kv" else resolved["backend_config"]),
             native_controller="racer",
             description=(
-                f"RACER modular composition: history={backend}, policy={policy}, "
+                f"RACER modular composition: history={backend}, policy={policy}, mode={mode}, "
                 f"absolute history budget={budget} tokens"
             ),
         )

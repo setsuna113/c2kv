@@ -76,6 +76,12 @@ _ARM_PATTERN = re.compile(
     r"(?P<policy>" + "|".join(map(re.escape, RACER_POLICIES)) + ")_"
     r"b(?P<budget>[1-9][0-9]*)$"
 )
+_V2_ARM_PATTERN = re.compile(
+    r"^racer_v2_(?P<backend>" + "|".join(map(re.escape, RACER_BACKENDS)) + ")_"
+    r"(?P<mode>bare|protected_off|(?:(?:" + "|".join(map(re.escape, RACER_POLICIES[1:]))
+    + r")_protected_off)|(?:" + "|".join(map(re.escape, RACER_POLICIES[1:]))
+    + r"))_b(?P<budget>[1-9][0-9]*)$"
+)
 
 
 def _unique_csv(value: str, *, label: str) -> tuple[str, ...]:
@@ -113,6 +119,7 @@ def parse_racer_policies(value: str) -> tuple[str, ...]:
 
 
 def racer_arm_name(backend: str, policy: str, history_budget_tokens: int) -> str:
+    """Frozen v1 arm identity; new cells use racer_v2_arm_name."""
     if backend not in RACER_BACKENDS or policy not in RACER_POLICIES:
         raise ValueError("unknown RACER backend or policy")
     if type(history_budget_tokens) is not int or history_budget_tokens < 1:
@@ -120,37 +127,73 @@ def racer_arm_name(backend: str, policy: str, history_budget_tokens: int) -> str
     return f"racer_{backend}_{policy}_b{history_budget_tokens}"
 
 
-def parse_racer_arm_name(name: str) -> tuple[str, str, int]:
+def racer_v2_arm_name(backend: str, policy: str, history_budget_tokens: int,
+                      mode: str) -> str:
+    racer_arm_name(backend, policy, history_budget_tokens)
+    if mode not in {"bare", "protected_off", "on"}:
+        raise ValueError("unknown RACER v2 mode")
+    if mode == "bare" and policy != "off":
+        raise ValueError("RACER bare mode requires policy=off")
+    if backend == "c2kv" and mode == "bare":
+        raise ValueError("C2KV bare mode uses c2kv_native_r8")
+    if mode == "on" and policy == "off":
+        raise ValueError("RACER on mode requires a recovery policy")
+    suffix = ("bare" if mode == "bare" else
+              "protected_off" if policy == "off" else
+              f"{policy}_protected_off" if mode == "protected_off" else policy)
+    return f"racer_v2_{backend}_{suffix}_b{history_budget_tokens}"
+
+
+def parse_racer_arm_identity(name: str) -> tuple[str, str, int, str | None]:
     match = _ARM_PATTERN.fullmatch(name)
+    if match is not None:
+        return match["backend"], match["policy"], int(match["budget"]), None
+    match = _V2_ARM_PATTERN.fullmatch(name)
     if match is None:
         raise ValueError(f"invalid RACER arm name: {name!r}")
-    return match["backend"], match["policy"], int(match["budget"])
+    token = match["mode"]
+    mode = "bare" if token == "bare" else "protected_off" if token.endswith(
+        "protected_off") else "on"
+    policy = ("off" if token in {"bare", "protected_off"} else
+              token.removesuffix("_protected_off") if mode == "protected_off" else token)
+    return match["backend"], policy, int(match["budget"]), mode
+
+
+def parse_racer_arm_name(name: str) -> tuple[str, str, int]:
+    backend, policy, budget, _ = parse_racer_arm_identity(name)
+    return backend, policy, budget
 
 
 def is_racer_arm(name: str | None) -> bool:
     if not isinstance(name, str):
         return False
-    return _ARM_PATTERN.fullmatch(name) is not None
+    return _ARM_PATTERN.fullmatch(name) is not None or _V2_ARM_PATTERN.fullmatch(name) is not None
 
 
 def resolve_racer_backend(backend: str, policy: str,
-                          history_budget_tokens: int) -> dict:
+                          history_budget_tokens: int, *, mode: str | None = None) -> dict:
     racer_arm_name(backend, policy, history_budget_tokens)
+    if mode is not None:
+        racer_v2_arm_name(backend, policy, history_budget_tokens, mode)
     backend_config = copy.deepcopy(_BACKEND_CONFIG[backend])
     if backend != "c2kv":
         backend_config["target_tokens"] = history_budget_tokens
     return {
-        "schema": "racer-backend-v1",
+        "schema": "racer-backend-v2" if mode is not None else "racer-backend-v1",
         "backend": backend,
         "policy": policy,
+        **({"mode": mode} if mode is not None else {}),
         "history_budget_tokens": history_budget_tokens,
         "backend_config": backend_config,
         "detector_calibration": (
-            "not_used" if policy == "off" or policy in REPAIR_VARIANTS else
+            "not_used" if mode in {"bare", "protected_off"} or policy == "off"
+            or policy in REPAIR_VARIANTS else
             "reference" if backend == "c2kv" else
             "frozen_c2kv_unvalidated_transfer"
         ),
-        "allocation": "c2kv_s0" if backend == "c2kv" else "backend_native_persistent",
+        "allocation": ("c2kv_s0" if backend == "c2kv" else "backend_native_persistent")
+        if mode is None else ("c2kv_bare" if backend == "c2kv" else
+                              "backend_native_persistent") if mode == "bare" else "racer_s0",
     }
 
 
@@ -160,7 +203,8 @@ def validate_racer_backend(value: Mapping) -> dict:
     backend = value.get("backend")
     policy = value.get("policy")
     budget = value.get("history_budget_tokens")
-    expected = resolve_racer_backend(backend, policy, budget)
+    expected = resolve_racer_backend(backend, policy, budget,
+                                     mode=value.get("mode") if value.get("schema") == "racer-backend-v2" else None)
     if dict(value) != expected:
         raise ValueError("RACER backend config differs from its resolved arm contract")
     return expected
@@ -172,8 +216,8 @@ def racer_config_for_arm(config: Mapping, arm_name: str) -> dict:
         raise ValueError(f"RACER arm requires one configured method: {arm_name}")
     method = matches[0]
     resolved = validate_racer_backend(method.get("racer_backend"))
-    backend, policy, budget = parse_racer_arm_name(arm_name)
-    if resolved != resolve_racer_backend(backend, policy, budget):
+    backend, policy, budget, mode = parse_racer_arm_identity(arm_name)
+    if resolved != resolve_racer_backend(backend, policy, budget, mode=mode):
         raise ValueError("RACER arm identity differs from its resolved backend config")
     if method.get("history_budget_tokens") != budget:
         raise ValueError("RACER matrix history budget differs from its backend config")
@@ -191,14 +235,17 @@ def resolve_unified_runtime_methods(config: dict) -> dict:
     """Route explicitly marked primary methods through the native runtime.
 
     Historical, unmarked methods keep their original arms and result identities.
-    The C2KV recovery-off primary is the bare native arm, never the historical
-    S0-allocated racer_c2kv_off arm.
+    The C2KV primary stays the native bare arm. Other marked primaries get an
+    explicit v2 bare identity, distinct from historical v1 recovery-off cells.
     """
     marked = [row for row in config["methods"] if row.get("history_runtime") == "racer"]
     if not marked:
         return config
     budget = config.get("history_kv_budget_tokens")
-    if type(budget) is not int or budget < 1:
+    shared_marked = any(row.get("history_runtime") == "racer" and (
+        row.get("history_budget_tokens") == "shared" or
+        row.get("history_budget_source") == "shared") for row in marked)
+    if shared_marked and (type(budget) is not int or budget < 1):
         raise ValueError("Unified history runtime requires a positive history_kv_budget_tokens B")
     configured_benchmarks = {row["name"] for row in config["benchmarks"]}
     methods = []
@@ -211,40 +258,48 @@ def resolve_unified_runtime_methods(config: dict) -> dict:
                             ("c2kv" if arm in _UNIFIED_C2KV_ARMS else None))
         if expected_backend is None:
             if is_racer_arm(arm):
-                backend, policy, arm_budget = parse_racer_arm_name(arm)
+                backend, policy, arm_budget, mode = parse_racer_arm_identity(arm)
+                expected_recovery = "off" if mode in {"bare", "protected_off"} else policy
                 if (source.get("history_backend") != backend
-                        or source.get("recovery_policy", policy) != policy):
+                        or source.get("recovery_policy", expected_recovery) != expected_recovery):
                     raise ValueError(f"Unified RACER arm differs from its declared identity: {arm}")
                 if (source.get("history_budget_tokens") != arm_budget
                         or source.get("racer_backend") != resolve_racer_backend(
-                            backend, policy, arm_budget)):
+                            backend, policy, arm_budget, mode=mode)):
                     raise ValueError(f"Unified RACER arm differs from its resolved backend: {arm}")
-                if source.get("budget_variant"):
+                if source.get("budget_variant") or source.get("history_budget_source") != "shared":
                     methods.append(source)
                     continue
-                if arm_budget != budget and source.get("history_budget_source") != "shared":
-                    raise ValueError(f"Unified RACER arm has a fixed budget different from B: {arm}")
                 row = copy.deepcopy(source)
-                row.update(arm=racer_arm_name(backend, policy, budget),
+                row.update(arm=(racer_arm_name(backend, policy, budget) if mode is None
+                                else racer_v2_arm_name(backend, policy, budget, mode)),
                            history_budget_tokens=budget,
-                           racer_backend=resolve_racer_backend(backend, policy, budget))
+                           racer_backend=resolve_racer_backend(backend, policy, budget, mode=mode))
                 methods.append(row)
                 continue
             raise ValueError(f"Unsupported unified history arm: {arm}")
         if source.get("history_backend") != expected_backend:
             raise ValueError(f"Unified history backend differs from source arm: {arm}")
+        if source.get("budget_variant"):
+            methods.append(source)
+            continue
         if source.get("recovery_policy", "off") != "off":
             raise ValueError("Primary unified history rows must have recovery_policy=off")
         source_budget = source.get("history_budget_tokens")
         shared = (source_budget == "shared"
                   or source.get("history_budget_source") == "shared")
+        fixed = type(source_budget) is int and source_budget > 0 and not shared
         if (source_budget not in (None, "shared", budget) and not shared):
-            raise ValueError(f"Unified history budget differs from global B: {arm}")
+            if not fixed:
+                raise ValueError(f"Unified history budget differs from global B: {arm}")
         benchmarks, _ = _scope(source)
         if (not benchmarks or len(benchmarks) != len(set(benchmarks))
                 or not set(benchmarks) <= configured_benchmarks
                 or not set(benchmarks) <= SUPPORTED_BENCHMARKS):
             raise ValueError(f"Unified history method needs an explicit portable benchmark scope: {arm}")
+        if fixed:
+            methods.append(source)
+            continue
         row = copy.deepcopy(source)
         row.pop("retention", None)
         if shared:
@@ -262,9 +317,11 @@ def resolve_unified_runtime_methods(config: dict) -> dict:
             row["history_allocation"] = "c2kv_bare"
         else:
             row.pop("ratio", None)
-            row["arm"] = racer_arm_name(expected_backend, "off", budget)
+            row["arm"] = racer_v2_arm_name(expected_backend, "off", budget, "bare")
             row["group"] = "racer"
-            row["racer_backend"] = resolve_racer_backend(expected_backend, "off", budget)
+            row["history_allocation"] = "backend_native_persistent"
+            row["racer_backend"] = resolve_racer_backend(expected_backend, "off", budget,
+                                                            mode="bare")
         methods.append(row)
     identities = [(row["arm"], row.get("history_budget_tokens"), _scope(row))
                   for row in methods]
@@ -275,7 +332,7 @@ def resolve_unified_runtime_methods(config: dict) -> dict:
 
 def with_racer_methods(config: dict, backends: tuple[str, ...],
                        policies: tuple[str, ...], history_budget_tokens: int | None) -> dict:
-    """Add exact off/on pairs, reusing marked native primaries when present."""
+    """Add v2 bare, protected-off, and recovery-on cells at one absolute budget."""
     if not backends and not policies and history_budget_tokens is None:
         return config
     if not backends or not policies or history_budget_tokens is None:
@@ -303,70 +360,82 @@ def with_racer_methods(config: dict, backends: tuple[str, ...],
             raise ValueError(f"RACER arm appears more than once in methods: {arm}")
         return rows[0] if rows else None
 
-    def validate_existing(row: dict, backend: str, policy: str,
+    def validate_existing(row: dict, backend: str, policy: str, mode: str,
                           expected_scope: tuple[tuple[str, ...], tuple[str, ...]]) -> None:
-        arm = racer_arm_name(backend, policy, history_budget_tokens)
+        arm = racer_v2_arm_name(backend, policy, history_budget_tokens, mode)
         if (row.get("arm") != arm or row.get("group") != "racer"
                 or row.get("history_budget_tokens") != history_budget_tokens
                 or row.get("racer_backend") != resolve_racer_backend(
-                    backend, policy, history_budget_tokens)
+                    backend, policy, history_budget_tokens, mode=mode)
                 or _scope(row) != expected_scope
                 or row.get("ratio") is not None or row.get("retention") is not None):
             raise ValueError(f"Existing RACER arm differs from its paired contract: {arm}")
 
     for backend in backends:
-        off_arm = racer_arm_name(backend, "off", history_budget_tokens)
-        off = unique(off_arm)
-        bare = None
+        bare_arm = ("c2kv_native_r8" if backend == "c2kv" else
+                    racer_v2_arm_name(backend, "off", history_budget_tokens, "bare"))
+        bare = None if backend == "c2kv" else unique(bare_arm)
         if backend == "c2kv":
             bare_rows = [row for row in resolved["methods"]
                          if row.get("history_runtime") == "racer"
                          and row.get("history_backend") == "c2kv"
                          and row.get("recovery_policy") == "off"
+                         and not row.get("budget_variant")
                          and row.get("arm") in _UNIFIED_C2KV_ARMS]
             if len(bare_rows) > 1:
                 raise ValueError("Unified C2KV has more than one bare primary")
-            bare = bare_rows[0] if bare_rows else None
-            if bare and off:
-                raise ValueError("Historical S0-off RACER arm cannot replace bare C2KV primary")
+            if bare_rows and bare:
+                raise ValueError("C2KV has two bare primary identities")
+            bare = bare_rows[0] if bare_rows else bare
             if bare and bare.get("history_budget_tokens") != history_budget_tokens:
                 raise ValueError("Bare C2KV primary differs from RACER history budget")
-        if off:
-            validate_existing(off, backend, "off", _scope(off))
-        if bare:
-            off = bare
-        if off is None:
-            off = {
-                "method": f"RACER {backend} off",
-                "arm": off_arm,
-                "group": "racer",
+        elif bare:
+            validate_existing(bare, backend, "off", "bare", _scope(bare))
+        if bare is None:
+            bare = {
+                "method": "C2KV" if backend == "c2kv" else f"RACER {backend} bare",
+                "arm": "c2kv_native_r8" if backend == "c2kv" else bare_arm,
+                "group": "main" if backend == "c2kv" else "racer",
+                "history_runtime": "racer",
+                "history_backend": backend,
+                "recovery_policy": "off",
                 "history_budget_tokens": history_budget_tokens,
-                "racer_backend": resolve_racer_backend(
-                    backend, "off", history_budget_tokens),
                 "benchmarks": list(configured_benchmarks),
             }
-            resolved["methods"].append(off)
-            existing[off_arm] = [off]
-        paired_scope = _scope(off)
-        for policy in policies:
-            if policy == "off":
-                continue
-            arm = racer_arm_name(backend, policy, history_budget_tokens)
-            current = unique(arm)
-            if current:
-                validate_existing(current, backend, policy, paired_scope)
-                continue
-            method = copy.deepcopy(off)
-            method.update(method=(f"{off['method']}+RACER {policy}"
-                                  if off.get("history_runtime") == "racer" else
-                                  f"RACER {backend} {policy}"),
-                          arm=arm, group="racer", recovery_policy=policy,
-                          racer_backend=resolve_racer_backend(
-                              backend, policy, history_budget_tokens))
-            method.pop("history_allocation", None)
             if backend == "c2kv":
-                method["compression_ratio"] = _UNIFIED_C2KV_ARMS.get(off["arm"], 8)
+                if unique("c2kv_native_r8"):
+                    raise ValueError("C2KV bare primary must be explicitly marked for RACER")
+                bare["compression_ratio"] = 8
+                bare["ratio"] = 8
+                bare["history_allocation"] = "c2kv_bare"
+            else:
+                bare["racer_backend"] = resolve_racer_backend(
+                    backend, "off", history_budget_tokens, mode="bare")
+            resolved["methods"].append(bare)
+            existing[bare["arm"]] = [bare]
+        paired_scope = _scope(bare)
+        for policy in policies:
+            for mode in (("protected_off",) if policy == "off" else
+                         ("protected_off", "on")):
+                arm = racer_v2_arm_name(backend, policy, history_budget_tokens, mode)
+                current = unique(arm)
+                if current:
+                    validate_existing(current, backend, policy, mode, paired_scope)
+                    continue
+                method = copy.deepcopy(bare)
+                method.update(method=f"RACER {backend} {policy} {mode}",
+                              arm=arm, group="racer", history_runtime="racer",
+                              history_backend=backend,
+                              recovery_policy=policy if mode == "on" else "off",
+                              history_budget_tokens=history_budget_tokens,
+                              history_allocation="racer_s0",
+                              racer_backend=resolve_racer_backend(
+                                  backend, policy, history_budget_tokens, mode=mode))
                 method.pop("ratio", None)
-            resolved["methods"].append(method)
-            existing[arm] = [method]
+                method.pop("history_budget_source", None)
+                method.pop("budget_variant", None)
+                if backend == "c2kv":
+                    method["compression_ratio"] = _UNIFIED_C2KV_ARMS.get(bare["arm"], 8)
+                resolved["methods"].append(method)
+                existing[arm] = [method]
     return resolved

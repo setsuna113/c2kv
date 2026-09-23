@@ -15,7 +15,8 @@ from benchmarks.arms import get_arm, history_kv_spec
 from benchmarks.paper import c1, runner
 from benchmarks.paper.candidate_matrix import VARIANT_TO_ARM
 from benchmarks.paper.racer_matrix import (
-    RACER_BACKENDS, RACER_POLICIES, parse_racer_arm_name,
+    RACER_BACKENDS, RACER_POLICIES, parse_racer_arm_name, parse_racer_arm_identity,
+    racer_v2_arm_name, racer_config_for_arm,
     parse_racer_backends, parse_racer_policies, resolve_racer_backend,
     with_racer_methods,
 )
@@ -56,24 +57,28 @@ def test_overlay_is_paired_budgeted_and_independent_from_tool_contexts():
     assert original == saved
 
     racer_methods = [method for method in config["methods"] if method["group"] == "racer"]
-    assert len(racer_methods) == 4
+    assert len(racer_methods) == 7
     assert {method["racer_backend"]["policy"] for method in racer_methods} == {"off", "t02"}
+    assert {method["racer_backend"]["mode"] for method in racer_methods} == {
+        "bare", "protected_off", "on"}
     assert all(method["history_budget_tokens"] == 256 for method in racer_methods)
     assert all("ratio" not in method and "retention" not in method for method in racer_methods)
 
     raw_rows = [row for row in runner.cells(config) if row["group"] == "racer"]
-    assert len(raw_rows) == 4 * len(config["benchmarks"])
+    assert len(raw_rows) == 7 * len(config["benchmarks"])
+    assert any(row["arm"] == "c2kv_native_r8" and row["history_budget_tokens"] == 256
+               for row in runner.cells(config))
     assert len({row["cell_id"] for row in raw_rows}) == len(raw_rows)
     h2o_t02 = next(row for row in raw_rows
-                    if row["arm"] == "racer_h2o_t02_b256"
+                    if row["arm"] == "racer_v2_h2o_t02_b256"
                     and row["benchmark"] == "bfcl_base")
     assert h2o_t02["tool_context"] == "raw"
     assert h2o_t02["calibration_status"] == "frozen_c2kv_unvalidated_transfer"
-    assert h2o_t02["history_allocation"] == "backend_native_persistent"
+    assert h2o_t02["history_allocation"] == "racer_s0"
 
     with_tools = runner.with_tool_contexts(config, ["t0_r8"])
     tool_rows = [row for row in runner.cells(with_tools)
-                 if row["arm"] == "racer_h2o_t02_b256"
+                 if row["arm"] == "racer_v2_h2o_t02_b256"
                  and row["benchmark"] == "bfcl_base"]
     assert [row["tool_context"] for row in tool_rows] == ["raw", "t0_r8"]
     compressed = tool_rows[1]
@@ -82,7 +87,7 @@ def test_overlay_is_paired_budgeted_and_independent_from_tool_contexts():
     assert compressed["tool_checkpoint"] == catalog["checkpoint"]
     selected = runner.with_tool_contexts(config, ["t0_r8_hybrid3_schema_latest_event"])
     selected_rows = [row for row in runner.cells(selected)
-                     if row["arm"] == "racer_h2o_t02_b256"
+                     if row["arm"] == "racer_v2_h2o_t02_b256"
                      and row["benchmark"] == "bfcl_base"]
     assert [row["tool_context"] for row in selected_rows] == [
         "raw", "t0_r8_hybrid3_schema_latest_event"]
@@ -128,10 +133,10 @@ def test_prepare_and_cli_route_racer_through_native_c1_without_ratio_budget_alia
     ])
     resolved = json.loads((output / "config.resolved.json").read_text(encoding="utf-8"))
     methods = [method for method in resolved["methods"] if method.get("group") == "racer"]
-    assert [method["racer_backend"]["policy"] for method in methods] == [
-        "off", "pending_verified"]
+    assert [method["racer_backend"]["mode"] for method in methods] == [
+        "bare", "protected_off", "protected_off", "on"]
     plan = json.loads((output / "commands.json").read_text(encoding="utf-8"))
-    cells = [row for row in plan if row["arm"] == "racer_h2o_pending_verified_b512"]
+    cells = [row for row in plan if row["arm"] == "racer_v2_h2o_pending_verified_b512"]
     assert {row["tool_context"] for row in cells} == {"raw", "t0_r8"}
     raw = next(row for row in cells
                if row["benchmark"] == "bfcl_base" and row["tool_context"] == "raw")
@@ -150,7 +155,8 @@ def test_paper_delivery_preserves_policy_factory_and_controller_schema(
         tmp_path, monkeypatch, policy, method, candidate, detector):
     config = with_racer_methods(base_config(), ("h2o",), (policy,), 256)
     config["sglang_source"] = str(tmp_path / "engine")
-    arm = f"racer_h2o_{policy}_b256"
+    mode = "protected_off" if policy == "off" else "on"
+    arm = racer_v2_arm_name("h2o", policy, 256, mode)
     previous = c1.ARM
     try:
         c1.select_arm(arm)
@@ -160,7 +166,8 @@ def test_paper_delivery_preserves_policy_factory_and_controller_schema(
         assert args.candidate_algorithm == candidate
         if detector is not None:
             assert args.detector == detector
-        assert args.racer_backend_config == resolve_racer_backend("h2o", policy, 256)
+        assert args.racer_backend_config == resolve_racer_backend("h2o", policy, 256,
+                                                                   mode=mode)
 
         monkeypatch.setattr(delivery, "_build_profile_unbudgeted",
                             lambda _args: ({"policy_config": policy}, {"ratio": 8}))
@@ -200,6 +207,37 @@ def test_arm_parser_rejects_nominal_ratio_or_aliased_policy_identity():
         parse_racer_arm_name("racer_h2o_pending-verified_b256")
 
 
+def test_v2_identity_and_legacy_v1_cell_remain_distinct():
+    protected = racer_v2_arm_name("h2o", "c1_v2_verified", 256, "protected_off")
+    assert parse_racer_arm_identity(protected) == (
+        "h2o", "c1_v2_verified", 256, "protected_off")
+    assert parse_racer_arm_identity("racer_h2o_off_b256") == (
+        "h2o", "off", 256, None)
+    with pytest.raises(ValueError, match="C2KV bare"):
+        racer_v2_arm_name("c2kv", "off", 256, "bare")
+    c1.load_delivery()
+    from benchmarks.memory_runtime.racer.config import BackendConfig
+
+    invalid_c2kv_bare = resolve_racer_backend("c2kv", "off", 256,
+                                               mode="protected_off")
+    invalid_c2kv_bare.update(mode="bare", allocation="c2kv_bare")
+    with pytest.raises(ValueError, match="C2KV bare"):
+        BackendConfig.parse(invalid_c2kv_bare)
+    config = base_config()
+    legacy = {
+        "method": "RACER H2O legacy off", "arm": "racer_h2o_off_b256",
+        "group": "racer", "history_budget_tokens": 256,
+        "racer_backend": resolve_racer_backend("h2o", "off", 256),
+        "benchmarks": ["bfcl_base"],
+    }
+    config["methods"].append(legacy)
+    resolved = with_racer_methods(config, ("h2o",), ("off", "c1_v2_verified"), 256)
+    assert racer_config_for_arm(resolved, legacy["arm"])["schema"] == "racer-backend-v1"
+    assert next(row for row in resolved["methods"] if row["arm"] == legacy["arm"]) == legacy
+    assert racer_config_for_arm(resolved, protected) == resolve_racer_backend(
+        "h2o", "c1_v2_verified", 256, mode="protected_off")
+
+
 def test_racer_budget_override_applies_to_every_portable_benchmark(tmp_path, monkeypatch):
     delivery = c1.load_delivery()
     racer = resolve_racer_backend("h2o", "off", 384)
@@ -235,7 +273,7 @@ def test_t02_profile_builds_real_backend_policy_and_c2kv_keeps_original_factory(
                         embedding_model=str(embedding), embedding_device="cpu")
     previous = c1.ARM
     try:
-        c1.select_arm("racer_h2o_t02_b256")
+        c1.select_arm("racer_v2_h2o_t02_b256")
         delivery = c1.load_delivery()
         args = c1.delivery_args(config, "bfcl_base", tmp_path / "out", [], delivery)
         selected = copy.deepcopy(delivery.current.load_config())
@@ -251,13 +289,15 @@ def test_t02_profile_builds_real_backend_policy_and_c2kv_keeps_original_factory(
         })
         controller, profile = delivery.build_profile(args)
         assert controller["gp_experiments"]["set_selector"] == "risk"
-        assert controller["racer_backend"] == resolve_racer_backend("h2o", "t02", 256)
+        assert controller["racer_backend"] == resolve_racer_backend("h2o", "t02", 256,
+                                                                     mode="on")
         assert profile["racer_runtime_budget"]["history_budget_bytes"] == 256
 
         from benchmarks.memory_runtime.always_compress import ALWAYS_COMPRESSION_POLICY
         from benchmarks.memory_runtime.event_native_always import NATIVE_S0_MODE
         from benchmarks.memory_runtime.event_native_controls import build_event_native_controller
         from benchmarks.memory_runtime.racer.allocator import PersistentHistoryAllocator
+        from benchmarks.memory_runtime.racer.native_initial import NativeInitialRepresentation
         from benchmarks.memory_runtime.racer.policies import BackendPolicy
         from benchmarks.memory_runtime.tests.test_candidate_allocation import (
             Tokenizer, packing, policy,
@@ -272,7 +312,8 @@ def test_t02_profile_builds_real_backend_policy_and_c2kv_keeps_original_factory(
         assert isinstance(composed, BackendPolicy)
         assert composed.backend.policy == "t02"
         assert composed.inner.gp["set_selector"] == "risk"
-        assert isinstance(composed.inner.base, PersistentHistoryAllocator)
+        assert isinstance(composed.inner.base, NativeInitialRepresentation)
+        assert composed.inner.base._native_policy_class == "SameEventBridgeOnlyS0Controller"
         assert composed.inner.base.policy_config.history_budget_bytes == 256
 
         c2kv_controller = copy.deepcopy(controller)
@@ -352,3 +393,47 @@ def test_persistent_racer_summary_accepts_actual_receipts_and_exact_budget(tmp_p
     failed = dict(telemetry, racer_accounting_passed=False)
     assert not all(delivery.functional_checks(
         "c2kv_only", "disabled", failed, racer_backend=racer)["required"].values())
+
+
+def test_candidate_protected_off_checks_initial_policy_instead_of_recovery_decision(tmp_path):
+    delivery = c1.load_delivery()
+    from benchmarks.memory_runtime.racer.policies import InitialOnlyPolicy
+
+    class Initial:
+        def prepare(self):
+            return SimpleNamespace(memory={}, metadata={
+                "session_id": "s", "decision_key": "d1", "route": {},
+                "requested_ratio": 8,
+                "candidate_algorithm": {
+                    "variant": "c1_v2_verified", "stable_call_ids": True},
+            })
+
+    controller = InitialOnlyPolicy(Initial(), {"variant": "c1_v2_verified"})
+    prepared = controller.prepare()
+    checked = controller.reconsider(prepared, [], draft_text="Done")
+    assert checked["decision"]["version"] == "racer-recovery-off-v2"
+    server = tmp_path / "server"
+    server.mkdir()
+    (server / "steps.jsonl").write_text(json.dumps({
+        "status": "completed", "decision_key": "d1", "ratio": 8,
+        "exact_recovery": checked["decision"],
+        "pre_generation_budget_checks": [{"status": "passed"}],
+        "generation_trace": [{"phase": "draft", "status": "completed",
+                              "controller": prepared.metadata,
+                              "generation": {"stats": {}}}],
+    }) + "\n", encoding="utf-8")
+    telemetry = delivery.summarize_task(
+        "tau2", "0", tmp_path,
+        {"n": 1, "task_rows": [{"semantic_score": 0.0,
+                                  "normal_termination": True, "protocol_legal": True}]}, 1.0)
+    assert telemetry["candidate_decisions"] == 0
+    assert telemetry["candidate_initial_ablation_decisions"] == 1
+    racer = resolve_racer_backend("h2o", "c1_v2_verified", 256,
+                                  mode="protected_off")
+    required = delivery.functional_checks(
+        "proposed", "disabled", telemetry,
+        candidate_algorithm="c1_v2_verified", racer_backend=racer)["required"]
+    assert required["candidate_initial_policy"] is True
+    assert required["candidate_variant"] is True
+    assert required["no_recovery"] is True
+    assert "candidate_decisions" not in required

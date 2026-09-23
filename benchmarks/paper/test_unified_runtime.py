@@ -59,7 +59,7 @@ def test_marked_primaries_use_one_explicit_b_and_keep_bare_c2kv_identity():
     assert "racer_c2kv_off_b384" not in {row["arm"] for row in resolved["methods"]}
     for backend in KV_SOURCES:
         row = next(row for row in resolved["methods"]
-                   if row["arm"] == f"racer_{backend}_off_b384")
+                   if row["arm"] == f"racer_v2_{backend}_bare_b384")
         assert row["history_budget_tokens"] == 384
         assert row["racer_backend"]["backend_config"]["target_tokens"] == 384
         assert row["recovery_policy"] == "off"
@@ -77,14 +77,20 @@ def test_selected_recovery_reuses_native_off_and_preserves_scope():
     assert "c2kv_native_r8" in arms
     for backend in ("h2o", "agentkv", "streamingllm"):
         off = next(row for row in paired["methods"]
-                   if row["arm"] == f"racer_{backend}_off_b384")
+                   if row["arm"] == f"racer_v2_{backend}_bare_b384")
+        protected = next(row for row in paired["methods"]
+                         if row["arm"] == f"racer_v2_{backend}_pending_verified_protected_off_b384")
         on = next(row for row in paired["methods"]
-                  if row["arm"] == f"racer_{backend}_pending_verified_b384")
+                  if row["arm"] == f"racer_v2_{backend}_pending_verified_b384")
         assert off["benchmarks"] == on["benchmarks"]
+        assert protected["benchmarks"] == on["benchmarks"]
+        assert protected["recovery_policy"] == "off"
+        assert protected["racer_backend"]["allocation"] == "racer_s0"
+        assert on["racer_backend"]["allocation"] == "racer_s0"
         assert off["tool_contexts"] == on["tool_contexts"]
         assert off["racer_backend"]["backend_config"] == on["racer_backend"]["backend_config"]
     c2kv_on = next(row for row in paired["methods"]
-                   if row["arm"] == "racer_c2kv_pending_verified_b384")
+                   if row["arm"] == "racer_v2_c2kv_pending_verified_b384")
     assert c2kv_on["compression_ratio"] == 8
     assert c2kv_on["benchmarks"] == ["bfcl_base", "tau2"]
     assert with_racer_methods(paired, ("c2kv", "h2o", "agentkv", "streamingllm"),
@@ -96,14 +102,14 @@ def test_mismatched_existing_off_or_missing_global_budget_fails():
         resolve_unified_runtime_methods(unified_config(None))
     resolved = resolve_unified_runtime_methods(unified_config())
     existing = next(row for row in resolved["methods"]
-                    if row["arm"] == "racer_h2o_off_b384")
+                    if row["arm"] == "racer_v2_h2o_bare_b384")
     existing["benchmarks"] = ["bfcl_base"]
     paired = with_racer_methods(resolved, ("h2o",), ("pending_verified",), 384)
     assert next(row for row in paired["methods"]
-                if row["arm"] == "racer_h2o_pending_verified_b384")["benchmarks"] == ["bfcl_base"]
+                if row["arm"] == "racer_v2_h2o_pending_verified_b384")["benchmarks"] == ["bfcl_base"]
     bad = copy.deepcopy(paired)
     on = next(row for row in bad["methods"]
-              if row["arm"] == "racer_h2o_pending_verified_b384")
+              if row["arm"] == "racer_v2_h2o_pending_verified_b384")
     on["benchmarks"] = ["tau2"]
     with pytest.raises(ValueError, match="paired contract"):
         with_racer_methods(bad, ("h2o",), ("pending_verified",), 384)
@@ -126,11 +132,11 @@ def test_marked_primary_rebinds_shared_b_and_keeps_independent_sweep():
     config = runner.resolve_history_kv_budgets(unified_config(384))
     swept = runner.with_history_kv_budget(config, "commitkv", 1024)
     assert {row["arm"] for row in swept["methods"] if row.get("history_backend") == "commitkv"} == {
-        "racer_commitkv_off_b384", "racer_commitkv_off_b1024"}
+        "racer_v2_commitkv_bare_b384", "racer_v2_commitkv_bare_b1024"}
     swept["history_kv_budget_tokens"] = 768
     rebound = runner.resolve_history_kv_budgets(swept)
     assert {row["arm"] for row in rebound["methods"] if row.get("history_backend") == "commitkv"} == {
-        "racer_commitkv_off_b768", "racer_commitkv_off_b1024"}
+        "racer_v2_commitkv_bare_b768", "racer_v2_commitkv_bare_b1024"}
     assert next(row for row in rebound["methods"]
                 if row["arm"] == "c2kv_native_r8")["history_budget_tokens"] == 768
 
@@ -146,13 +152,35 @@ def test_explicit_ratio4_overlay_stays_unmarked_legacy_bare():
                 if row["arm"] == "c2kv_native_r4") == ratio4
 
 
+@pytest.mark.parametrize("overlay", [runner.with_history_kv_budget,
+                                    runner.with_native_history_budget])
+def test_marked_native_r8_supports_independent_absolute_b_cells(overlay, tmp_path):
+    config = json.loads(runner.DEFAULT_CONFIG.read_text(encoding="utf-8"))
+    config["history_kv_budget_tokens"] = 128
+    config = runner.resolve_history_kv_budgets(config)
+    swept = overlay(config, "c2kv_native_r8", 256)
+    cells = [row for row in runner.cells(swept)
+             if row["arm"] == "c2kv_native_r8" and row["benchmark"] == "bfcl_base"]
+    assert {row["cell_id"] for row in cells} == {
+        "bfcl_base__c2kv_native_r8_b128", "bfcl_base__c2kv_native_r8_b256"}
+    assert next(row for row in cells if row["history_budget_tokens"] == 256)["group"] == "budget"
+    with pytest.raises(ValueError, match="already exists"):
+        overlay(swept, "c2kv_native_r8", 256)
+    resolved, cell, command, _ = history_kv_client.plan(
+        config, "bfcl_base", "c2kv_native_r8=256", tmp_path,
+        "http://localhost:36200")
+    assert resolved["history_kv_budget_tokens"] == 128
+    assert cell["cell_id"] == "bfcl_base__c2kv_native_r8_b256"
+    assert command[command.index("--history-budget-tokens") + 1] == "256"
+
+
 def test_single_cell_client_routes_marked_legacy_name_to_native_off(tmp_path):
     resolved, cell, command, _ = history_kv_client.plan(
         unified_config(None), "bfcl_base", "history_kv_h2o_r25_persistent=384", tmp_path,
         "http://localhost:36200")
     assert resolved["history_kv_budget_tokens"] == 384
-    assert cell["arm"] == "racer_h2o_off_b384"
-    assert cell["cell_id"] == "bfcl_base__racer_h2o_off_b384"
+    assert cell["arm"] == "racer_v2_h2o_bare_b384"
+    assert cell["cell_id"] == "bfcl_base__racer_v2_h2o_bare_b384"
     assert command[command.index("--arm") + 1] == cell["arm"]
     assert "--shared-engine" not in command
     assert "--history-kv-target-tokens" not in command
@@ -166,7 +194,7 @@ def test_single_cell_client_preserves_global_b_for_native_sweep_and_frozen_alias
             config, "bfcl_base", f"{source_arm}=1024", tmp_path,
             "http://localhost:36200")
         assert resolved["history_kv_budget_tokens"] == 384
-        assert cell["arm"] == "racer_streamingllm_off_b1024"
+        assert cell["arm"] == "racer_v2_streamingllm_bare_b1024"
         assert cell["history_budget_tokens"] == 1024
         assert "--shared-engine" not in command
         assert "--history-kv-target-tokens" not in command
@@ -185,10 +213,12 @@ def test_default_prepare_uses_one_global_b_without_duplicate_off(tmp_path):
     assert sum(row["arm"] == "c2kv_native_r8" for row in methods) == 1
     assert not any(row["arm"] == "racer_c2kv_off_b384" for row in methods)
     for backend in ("h2o", "streamingllm"):
-        assert sum(row["arm"] == f"racer_{backend}_off_b384" for row in methods) == 1
-        assert sum(row["arm"] == f"racer_{backend}_pending_verified_b384"
+        assert sum(row["arm"] == f"racer_v2_{backend}_bare_b384" for row in methods) == 1
+        assert sum(row["arm"] == f"racer_v2_{backend}_pending_verified_protected_off_b384"
                    for row in methods) == 1
-    assert sum(row["arm"] == "racer_c2kv_pending_verified_b384"
+        assert sum(row["arm"] == f"racer_v2_{backend}_pending_verified_b384"
+                   for row in methods) == 1
+    assert sum(row["arm"] == "racer_v2_c2kv_pending_verified_b384"
                for row in methods) == 1
     plan = json.loads((output / "commands.json").read_text(encoding="utf-8"))
     assert any(row["cell_id"] == "bfcl_base__c2kv_native_r8_b384" for row in plan)
@@ -205,15 +235,15 @@ def test_explicit_budget_overlay_uses_native_off_cell(tmp_path):
     ])
     rows = json.loads((output / "commands.json").read_text(encoding="utf-8"))
     ids = {row["cell_id"] for row in rows}
-    assert "bfcl_base__racer_commitkv_off_b384" in ids
-    assert "bfcl_base__racer_commitkv_off_b1024" in ids
+    assert "bfcl_base__racer_v2_commitkv_bare_b384" in ids
+    assert "bfcl_base__racer_v2_commitkv_bare_b1024" in ids
     assert "bfcl_base__commitkv_b1024" not in ids
 
 
 @pytest.mark.parametrize("benchmark", ["acebench_agent", "toolsandbox", "tau2", "appworld"])
 def test_native_extra_ready_binds_exact_racer_backend_and_controller(tmp_path, benchmark):
     config = resolve_unified_runtime_methods(unified_config())
-    config["native_arm"] = "racer_agentkv_off_b384"
+    config["native_arm"] = "racer_v2_agentkv_bare_b384"
     identity = native_extra.arm_identity(config)
     racer = identity["racer_backend"]
     controller = tmp_path / "controller.json"
@@ -230,10 +260,10 @@ def test_native_extra_ready_binds_exact_racer_backend_and_controller(tmp_path, b
             "sha256": hashlib.sha256(controller.read_bytes()).hexdigest(),
             "config": {"racer_backend": racer},
         },
-        "racer_backend": dict(racer, identity="racer:agentkv:off:b384",
+        "racer_backend": dict(racer, identity="racer:v2:agentkv:bare:off:b384",
                               quality_validated=False),
         "route_contract": {
-            "baseline_identity": "racer:agentkv:off:b384",
+            "baseline_identity": "racer:v2:agentkv:bare:off:b384",
             "history_allocation": "backend_native_persistent",
             "recovery_enabled": False,
         },
@@ -256,7 +286,7 @@ def test_native_budget_helper_uses_racer_arm_b_and_materializes_once(tmp_path, m
         materialize=lambda resolved: calls.append(resolved),
     )
     monkeypatch.setattr(c1_appworld, "_load_module", lambda path, stem: fake)
-    config = {"native_arm": "racer_h2o_off_b384", "checkpoint": str(tmp_path / "checkpoint")}
+    config = {"native_arm": "racer_v2_h2o_bare_b384", "checkpoint": str(tmp_path / "checkpoint")}
     design = {"runtime": {"eval_policy": "configs/eval_policy.json"}}
     actual = c1_appworld.apply_native_history_budget(
         config, design, tmp_path / "delivery", tmp_path)
@@ -276,7 +306,7 @@ def test_appworld_racer_design_matches_off_on_shadow_policy(tmp_path, monkeypatc
         resolve_unified_runtime_methods(unified_config()),
         ("h2o",), ("pending_verified",), 384)
     config["generation_timeout"] = 7.5
-    config["native_arm"] = "racer_h2o_off_b384"
+    config["native_arm"] = "racer_v2_h2o_bare_b384"
     budget_calls = []
     monkeypatch.setattr(c1_appworld, "apply_native_history_budget",
                         lambda *args: budget_calls.append(args))
@@ -284,15 +314,15 @@ def test_appworld_racer_design_matches_off_on_shadow_policy(tmp_path, monkeypatc
     design = c1_appworld._resolved_design(
         config, Path(__file__).resolve().parents[2] / "experiments" / "history_system",
         controller, tmp_path)
-    assert design["candidate_id"] == "racer_h2o_off_b384"
+    assert design["candidate_id"] == "racer_v2_h2o_bare_b384"
     assert design["runtime"]["controller"] == str(controller.resolve())
     assert "shadow_feature_config" not in design["runtime"]
     assert design["runtime"]["sglang_timeout_seconds"] == 7.5
-    config["native_arm"] = "racer_h2o_pending_verified_b384"
+    config["native_arm"] = "racer_v2_h2o_pending_verified_b384"
     on = c1_appworld._resolved_design(
         config, Path(__file__).resolve().parents[2] / "experiments" / "history_system",
         controller, tmp_path)
-    assert on["candidate_id"] == "racer_h2o_pending_verified_b384"
+    assert on["candidate_id"] == "racer_v2_h2o_pending_verified_b384"
     assert "shadow_feature_config" in on["runtime"]
     assert on["runtime"]["sglang_timeout_seconds"] == 7.5
     assert len(budget_calls) == 2
@@ -314,8 +344,8 @@ def test_portable_racer_design_matches_off_on_shadow_policy(tmp_path, monkeypatc
     monkeypatch.setattr(c1_appworld, "apply_native_history_budget", lambda *args: None)
     delivery = Path(__file__).resolve().parents[2] / "experiments" / "history_system"
     controller = tmp_path / "controller.json"
-    for policy in ("off", "pending_verified"):
-        config["native_arm"] = f"racer_h2o_{policy}_b384"
+    for arm in ("racer_v2_h2o_bare_b384", "racer_v2_h2o_pending_verified_b384"):
+        config["native_arm"] = arm
         native_extra.server_command(config, "tau2", "task_1", tmp_path,
                                     delivery, controller)
     assert "shadow_feature_config" not in designs[0]["runtime"]

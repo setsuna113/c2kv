@@ -577,7 +577,8 @@ def _serve(args):
             manifest['route_contract'].update(
                 baseline_identity=backend_config.receipt()['identity'],
                 history_allocation=backend_config.allocation,
-                recovery_enabled=backend_config.policy != 'off')
+                recovery_enabled=(backend_config.mode == 'on' if backend_config.mode
+                                  is not None else backend_config.policy != 'off'))
         generator, profile = _build_generator(
             args,
             profile=profile,

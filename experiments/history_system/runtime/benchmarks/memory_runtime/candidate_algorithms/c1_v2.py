@@ -34,11 +34,14 @@ def validate_c1_v2_config(candidate):
     return fields
 
 
-def build_c1_v2(tokenizer, *, candidate, packing, policy, model_context, s0_config, benchmark):
+def build_c1_v2(tokenizer, *, candidate, packing, policy, model_context, s0_config, benchmark,
+                initial_allocator_factory=None):
+    from ..initial_factory import instantiate_initial
     validate_c1_v2_config(candidate)
-    base = SourceAllocatedS0Controller(
+    base = instantiate_initial(SourceAllocatedS0Controller,
         tokenizer, packing=packing, policy=policy, model_context=model_context,
-        s0_config=s0_config, benchmark=benchmark)
+        s0_config=s0_config, benchmark=benchmark,
+        initial_allocator_factory=initial_allocator_factory)
     return C1V2VerifiedController(base, candidate)
 
 

@@ -304,8 +304,10 @@ records the actual numeric cap in its resolved config, commands, CSV, summaries,
 and comparison tables. A different cap gets a different result directory.
 
 `history_runtime: "racer"` marks the new primary rows. The resolver routes KV
-methods to `racer_<backend>_off_bB` on the same persistent engine transport as
-`+RACER`; these off rows have no S0 selection or recovery. Bare C2KV remains
+methods to `racer_v2_<backend>_bare_bB` on the same persistent engine transport as
+`+RACER`; these bare rows have no RACER selection, protection or recovery.
+The backend's own retention rules, including CommitKV pending protection, remain active.
+Bare C2KV remains
 `c2kv_native_r8_bB`, with no S0, detector or recovery. The shared native budget
 module binds its token cap to checkpoint KV geometry. A legacy unmarked KV
 row still uses `benchmarks.history_budget.HistoryKVBudget`, which clears its
@@ -323,12 +325,13 @@ python -m benchmarks.paper prepare --config CONFIG.json \
   --sglang-source ENGINE --output RESULTS --history-kv-budget-tokens "$B"
 python -m benchmarks.paper run --config CONFIG.json \
   --sglang-source ENGINE --output RESULTS --history-kv-budget-tokens "$B" \
-  --stage closed_loop --cells "bfcl_base__racer_commitkv_off_b${B},bfcl_base__racer_h2o_off_b${B}"
+  --stage closed_loop --cells "bfcl_base__racer_v2_commitkv_bare_b${B},bfcl_base__racer_v2_h2o_bare_b${B}"
 ```
 
 `--history-kv-budget ARM=TOKENS` still adds explicit per-arm capacity sweep
 cells, for example `--history-kv-budget commitkv=1024` when the shared cap is
-768. These cells use the same budget interface and keep the registered arm's
+768. Bare `c2kv_native_r8=256` is accepted by the same interface, including
+when the primary row already has a different shared budget. These cells keep the registered arm's
 backend and benchmark scope. Old frozen configs using legacy `retention` or
 implicit 2048-token arms remain readable; they are not the new default matrix.
 Use a new output root for a changed budget contract.
@@ -969,14 +972,33 @@ Budget cells use `benchmarks.paper.budget_server`, and the runner checks the
 
 # RACER backend/policy matrix
 
-The default KV rows already use the native `off` route. `+RACER` policies are
-opt-in; selecting one reuses the matching primary baseline at the same `B`,
-benchmark scope and tool context. For C2KV the paired baseline is
-`c2kv_native_r8_bB`. C2KV+RACER preserves its original S0 initial allocation
-and subsequent recovery policy; S0 belongs to RACER. The historical
-`racer_c2kv_off_bB` retains S0 and disables post-draft recovery only, so it
-remains an ablation in old unmarked configs and is not generated as the new
-bare baseline. Candidate policy names retain their exact registry identity.
+The v2 matrix separates three modes at the same absolute budget, benchmark
+scope and tool context:
+
+| Mode | Initial RACER selection/protection | Post-draft recovery |
+| --- | --- | --- |
+| `racer_v2_<backend>_bare_bB` | Disabled | Disabled |
+| `racer_v2_<backend>_<policy>_protected_off_bB` | Same configured initial policy as the on row | Disabled |
+| `racer_v2_<backend>_<policy>_bB` | Enabled | Enabled |
+
+Bare C2KV retains `c2kv_native_r8_bB` and its existing implementation. Generic
+S0 without a candidate policy uses `racer_v2_<backend>_protected_off_bB`.
+Selecting a recovery policy adds its protected-off ablation without relabeling
+the bare primary. Candidate names preserve their registry identity.
+
+All v2 protected/on backends construct the same configured initial policy.
+C2KV uses its existing gist representation; other backends represent admitted
+sources as exact native evidence and compress the residual history pool using
+their own selector. Native KV does not promise a complete gist for each source:
+required sources therefore require exact native admission, while optional
+compact-source labels describe pool candidates, not complete source coverage.
+The evidence and residual pool share B; no gist ratio is used to estimate native
+evidence cost. The engine returns an actual initial-protection receipt.
+
+Frozen `racer-backend-v1` configs retain their old semantics and identities.
+In those configs `racer_c2kv_off_bB` includes S0, while non-C2KV `off` does not;
+non-C2KV on rows did not include the full initial S0 policy. Those results are
+not relabeled as full v2 RACER results.
 The history budget is an absolute token count:
 
 ```bash
@@ -1002,9 +1024,16 @@ view. Persistent KV backends similarly operate on retained KV plus new input.
 Full source transcripts remain available for audit and explicit recovery.
 
 StreamingLLM uses the registered `history_kv_streamingllm_r25_persistent`
-source arm, resolved to `racer_streamingllm_off_bB` in marked configs. Legacy
+source arm, resolved to `racer_v2_streamingllm_bare_bB` in new marked configs. Legacy
 StreamingLLM IDs, including the b128/b192/b256 cells, remain distinct; their
-existing results are not relabeled as unified-runtime results.
+existing results are not relabeled as v2 results.
+
+A typed pre-admission capacity rejection during the first regeneration retains
+the original draft and its held state (`recovery_skipped:capacity`), and charges
+the observed attempt costs. Initial capacity failure remains a task-level method
+failure. A rejection without a verified rollback receipt, or after an earlier
+successful regeneration has replaced the original held state, is not silently
+converted into an original-draft fallback.
 
 `raw` remains present when tool contexts are requested. Non-C2KV detector
 cells record `frozen_c2kv_unvalidated_transfer`; this labels an unvalidated

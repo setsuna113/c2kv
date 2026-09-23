@@ -33,8 +33,14 @@ from benchmarks.memory_runtime.racer.config import BackendConfig
 RACER_CANDIDATE_POLICIES = tuple(ALL_VARIANTS)
 
 
-def racer_arm_name(backend: str, policy: str, history_budget_tokens: int) -> str:
-    return f"racer_{backend}_{policy}_b{history_budget_tokens}"
+def racer_arm_name(backend: str, policy: str, history_budget_tokens: int,
+                   mode: str | None = None) -> str:
+    if mode is None:
+        return f"racer_{backend}_{policy}_b{history_budget_tokens}"
+    suffix = ("bare" if mode == "bare" else
+              "protected_off" if policy == "off" else
+              f"{policy}_protected_off" if mode == "protected_off" else policy)
+    return f"racer_v2_{backend}_{suffix}_b{history_budget_tokens}"
 
 
 def validate_racer_backend(value: Mapping[str, Any]) -> dict:
@@ -42,8 +48,11 @@ def validate_racer_backend(value: Mapping[str, Any]) -> dict:
     from dataclasses import asdict
 
     parsed = BackendConfig.parse(value)
-    parsed.history_spec()
-    normalized = {"schema": "racer-backend-v1", **asdict(parsed)}
+    if parsed.backend != "c2kv":
+        parsed.history_spec()
+    normalized = asdict(parsed)
+    if parsed.schema == "racer-backend-v1":
+        normalized.pop("mode")
     if dict(value) != normalized:
         raise ValueError("RACER backend config differs from its resolved arm contract")
     return normalized
@@ -417,7 +426,8 @@ def build_profile(args: argparse.Namespace) -> tuple[dict, dict]:
         controller["racer_backend"] = racer
         profile["racer_backend"] = racer
         profile["composition_identity"] = racer_arm_name(
-            racer["backend"], racer["policy"], racer["history_budget_tokens"])
+            racer["backend"], racer["policy"], racer["history_budget_tokens"],
+            racer.get("mode"))
         profile["history_budget_tokens"] = racer["history_budget_tokens"]
         profile["calibration_status"] = racer["detector_calibration"]
         profile.pop("ratio", None)
@@ -473,7 +483,8 @@ def _model_name(args: argparse.Namespace) -> str:
     racer = getattr(args, "racer_backend_config", None)
     if racer is not None:
         return racer_arm_name(
-            racer["backend"], racer["policy"], racer["history_budget_tokens"])
+            racer["backend"], racer["policy"], racer["history_budget_tokens"],
+            racer.get("mode"))
     if getattr(args, "candidate_algorithm", None) is not None:
         return f"c2kv_{args.candidate_algorithm}"
     if args.method == "c2kv_native":
@@ -677,6 +688,13 @@ def summarize_task(benchmark: str, task: str, task_out: Path, official: Mapping[
         trace for trace in traces
         if isinstance(trace.get("controller"), Mapping)
         and isinstance(trace["controller"].get("candidate_algorithm"), Mapping)
+    ]
+    initial_ablation = [
+        trace["controller"]["recovery_disabled_ablation"]
+        for trace in traces
+        if trace.get("phase") == "draft"
+        and isinstance(trace.get("controller"), Mapping)
+        and isinstance(trace["controller"].get("recovery_disabled_ablation"), Mapping)
     ]
     budget_checks = [
         check for record in records
@@ -903,6 +921,16 @@ def summarize_task(benchmark: str, task: str, task_out: Path, official: Mapping[
             decision.get("variant") for decision in candidate_decisions
             if isinstance(decision.get("variant"), str)
         }),
+        "candidate_initial_ablation_decisions": sum(
+            row.get("initial_policy_preserved") is True
+            and row.get("post_draft_recovery_enabled") is False
+            and row.get("commit_recovery_enabled") is False
+            and isinstance(row.get("candidate_variant"), str)
+            for row in initial_ablation),
+        "candidate_initial_ablation_variants": sorted({
+            row["candidate_variant"] for row in initial_ablation
+            if isinstance(row.get("candidate_variant"), str)
+        }),
         "candidate_ratio8": bool(records) and all(record.get("ratio") == 8 for record in records)
             and len(candidate_traces) == len(traces) and all(
                 trace["controller"].get("requested_ratio") == 8 for trace in candidate_traces
@@ -965,7 +993,13 @@ def functional_checks(method: str, detector: str, telemetry: Mapping[str, Any],
 
     repair_candidate = candidate_algorithm in {
         "request_contract", "argument_binding", "no_progress"}
-    if repair_candidate:
+    racer_recovery_off = (isinstance(racer_backend, Mapping)
+                          and racer_backend.get("schema") == "racer-backend-v2"
+                          and racer_backend.get("mode") in {"bare", "protected_off"})
+    candidate_initial_ablation = (racer_recovery_off and
+                                  racer_backend.get("mode") == "protected_off" and
+                                  candidate_algorithm is not None)
+    if racer_recovery_off or repair_candidate:
         detector_contract = (telemetry.get("risk_detector_scores", 0) == 0
                              and telemetry.get("risk_detector_unavailable", 0) == 0)
     elif candidate_algorithm is not None:
@@ -980,12 +1014,19 @@ def functional_checks(method: str, detector: str, telemetry: Mapping[str, Any],
     else:
         detector_contract = telemetry["prefill_detector_scores"] > 0
     candidate_required = ({
-        "candidate_decisions": telemetry.get("candidate_decisions") == telemetry.get("decision_count")
-            and telemetry.get("candidate_decisions", 0) > 0,
-        "candidate_variant": telemetry.get("candidate_variants") == [candidate_algorithm],
+        **({
+            "candidate_initial_policy": (
+                telemetry.get("candidate_initial_ablation_decisions") == telemetry.get("decision_count")
+                and telemetry.get("candidate_initial_ablation_decisions", 0) > 0),
+            "candidate_variant": telemetry.get("candidate_initial_ablation_variants") == [candidate_algorithm],
+        } if candidate_initial_ablation else {
+            "candidate_decisions": telemetry.get("candidate_decisions") == telemetry.get("decision_count")
+                and telemetry.get("candidate_decisions", 0) > 0,
+            "candidate_variant": telemetry.get("candidate_variants") == [candidate_algorithm],
+        }),
         **({"no_risk_scores": telemetry.get("risk_detector_scores", 0) == 0,
             "no_risk_unavailable": telemetry.get("risk_detector_unavailable", 0) == 0}
-           if repair_candidate else {
+           if racer_recovery_off or repair_candidate else {
                "risk_scores": telemetry.get("risk_detector_scores", 0) > 0,
                "risk_available": telemetry.get("risk_detector_unavailable", 0) == 0}),
         **({"ratio8": telemetry.get("candidate_ratio8") is True}
@@ -997,9 +1038,13 @@ def functional_checks(method: str, detector: str, telemetry: Mapping[str, Any],
     persistent_racer = False
     if racer_backend is not None:
         expected_racer = validate_racer_backend(racer_backend)
-        expected_identity = "racer:{backend}:{policy}:b{budget}".format(
-            backend=expected_racer["backend"], policy=expected_racer["policy"],
-            budget=expected_racer["history_budget_tokens"])
+        expected_identity = (
+            f"racer:v2:{expected_racer['backend']}:{expected_racer['mode']}:"
+            f"{expected_racer['policy']}:b{expected_racer['history_budget_tokens']}"
+            if expected_racer["schema"] == "racer-backend-v2" else
+            "racer:{backend}:{policy}:b{budget}".format(
+                backend=expected_racer["backend"], policy=expected_racer["policy"],
+                budget=expected_racer["history_budget_tokens"]))
         expected_receipt = telemetry.get("racer_backend_receipt")
         receipt_matches = isinstance(expected_receipt, Mapping) and all(
             expected_receipt.get(key) == value for key, value in expected_racer.items())
@@ -1032,7 +1077,7 @@ def functional_checks(method: str, detector: str, telemetry: Mapping[str, Any],
                 ),
                 "racer_actual_cost": telemetry.get("racer_actual_cost_complete") is True,
             })
-        if expected_racer["policy"] == "t02":
+        if expected_racer["policy"] == "t02" and not racer_recovery_off:
             racer_required["racer_detector_scores"] = (
                 telemetry.get("risk_detector_scores", 0) > 0
                 and telemetry.get("risk_detector_unavailable", 0) == 0)
@@ -1045,7 +1090,7 @@ def functional_checks(method: str, detector: str, telemetry: Mapping[str, Any],
             **racer_required,
             **({"no_recovery": telemetry.get("recovery_count", 0) == 0,
                 "one_generation_per_decision": telemetry.get("generation_calls") == telemetry.get("decision_count")}
-               if method == "c2kv_native" else {}),
+               if method == "c2kv_native" or racer_recovery_off else {}),
         },
         "observed": {
             "native_packing_present": telemetry["native_packing_present"] is True,

@@ -26,7 +26,7 @@ from .candidate_matrix import (
     ARM_TO_VARIANT, SUPPORTED_BENCHMARKS as CANDIDATE_BENCHMARKS, native_budget_benchmarks,
 )
 from .racer_matrix import (
-    RACER_CANDIDATE_POLICIES, is_racer_arm, parse_racer_arm_name,
+    RACER_CANDIDATE_POLICIES, is_racer_arm, parse_racer_arm_name, parse_racer_arm_identity,
     racer_config_for_arm,
 )
 from benchmarks.arms import get_arm
@@ -219,7 +219,10 @@ def racer_source_identity():
 
 def method_label():
     if is_racer_arm(ARM):
-        backend, policy, budget = parse_racer_arm_name(ARM)
+        backend, policy, budget, mode = parse_racer_arm_identity(ARM)
+        if mode is not None:
+            label = "bare" if mode == "bare" else f"{policy} {mode}"
+            return f"RACER v2 {backend} {label} b{budget}"
         return f"RACER {backend} {policy} b{budget}"
     if ARM == "c2kv_c1_off_r8":
         return "C1 initial allocation (recovery off)"
@@ -420,7 +423,7 @@ def controller_step_failure(task_root):
                 and row.get("failure_kind") == "method_failure"
                 and row.get("failure_code") == "c2kv_capacity_infeasible"
                 and isinstance(error, dict)
-                and error.get("type") == "CapacityInfeasible"):
+                and error.get("type") in {"CapacityInfeasible", "HistoryCapacityInfeasible"}):
             return "method_failure", "capacity_infeasible", text[:2000]
         for marker, (status, kind) in TOLERATED_STEP_ERRORS.items():
             if marker in text:

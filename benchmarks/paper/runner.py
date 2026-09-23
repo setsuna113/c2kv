@@ -19,7 +19,7 @@ from .candidate_matrix import (
 )
 from .racer_matrix import (
     is_racer_arm, parse_racer_backends, parse_racer_policies,
-    racer_arm_name, racer_config_for_arm, resolve_racer_backend,
+    racer_v2_arm_name, racer_config_for_arm, resolve_racer_backend,
     resolve_unified_runtime_methods, unified_backend_for_arm, with_racer_methods,
 )
 from benchmarks.history_budget import HistoryKVBudget, parse_history_kv_budget
@@ -148,7 +148,9 @@ def cells(config):
                         row.update(
                             history_backend=resolved["backend"],
                             racer_policy=resolved["policy"],
-                            recovery_policy=resolved["policy"],
+                            recovery_policy=("off" if resolved.get("mode") in
+                                             {"bare", "protected_off"} else resolved["policy"]),
+                            **({"racer_mode": resolved["mode"]} if "mode" in resolved else {}),
                             calibration_status=resolved["detector_calibration"],
                             history_allocation=resolved["allocation"],
                         )
@@ -375,6 +377,11 @@ def with_history_kv_budget(config, arm_name, target_tokens):
     from benchmarks.arms import get_arm
     config = resolve_history_kv_budgets(config)
     budget = HistoryKVBudget(target_tokens)
+    marked_native = arm_name in NATIVE_RATIOS and any(
+        method.get("arm") == arm_name and method.get("history_runtime") == "racer"
+        for method in config["methods"])
+    if marked_native:
+        return _with_marked_native_budget(config, arm_name, target_tokens)
     budget.apply(get_arm(arm_name))
     backend = unified_backend_for_arm(arm_name)
     if backend is not None:
@@ -386,12 +393,13 @@ def with_history_kv_budget(config, arm_name, target_tokens):
         if primaries:
             if len(primaries) != 1:
                 raise ValueError(f"History-KV budget requires one primary configured base arm: {arm_name}")
-            racer_arm = racer_arm_name(backend, "off", target_tokens)
+            racer_arm = racer_v2_arm_name(backend, "off", target_tokens, "bare")
             if any(method["arm"] == racer_arm for method in config["methods"]):
                 raise ValueError(f"History-KV budget cell already exists: {racer_arm}")
             variant = dict(primaries[0], arm=racer_arm, group="racer",
                            history_budget_tokens=target_tokens,
-                           racer_backend=resolve_racer_backend(backend, "off", target_tokens),
+                           racer_backend=resolve_racer_backend(backend, "off", target_tokens,
+                                                                mode="bare"),
                            budget_variant=True)
             variant.pop("history_budget_source", None)
             return dict(config, methods=[*config["methods"], variant])
@@ -419,6 +427,11 @@ def with_native_history_budget(config, arm_name, target_tokens):
     from benchmarks.arms import get_arm
     budget = NativeHistoryBudget(target_tokens)
     budget.validate_arm(get_arm(arm_name))
+    if arm_name in NATIVE_RATIOS and any(
+            method.get("arm") == arm_name and method.get("history_runtime") == "racer"
+            for method in config["methods"]):
+        config = resolve_history_kv_budgets(config)
+        return _with_marked_native_budget(config, arm_name, target_tokens)
     templates = [method for method in config["methods"]
                  if method["arm"] == arm_name and "history_budget_tokens" not in method]
     if len(templates) != 1:
@@ -433,6 +446,26 @@ def with_native_history_budget(config, arm_name, target_tokens):
         raise ValueError("Native history budget sweep currently requires BFCL")
     variant = dict(templates[0], group="budget", history_budget_tokens=target_tokens,
                    benchmarks=benchmarks)
+    return dict(config, methods=[*config["methods"], variant])
+
+
+def _with_marked_native_budget(config, arm_name, target_tokens):
+    """Add an absolute B cell to the existing marked bare C2KV arm."""
+    from benchmarks.arms import get_arm
+    NativeHistoryBudget(target_tokens).validate_arm(get_arm(arm_name))
+    templates = [method for method in config["methods"]
+                 if method["arm"] == arm_name
+                 and method.get("history_runtime") == "racer"
+                 and method.get("history_budget_source") == "shared"
+                 and not method.get("budget_variant")]
+    if len(templates) != 1:
+        raise ValueError(f"Native history budget requires one marked primary: {arm_name}")
+    if any(method["arm"] == arm_name and method.get("history_budget_tokens") == target_tokens
+           for method in config["methods"]):
+        raise ValueError(f"Native budget cell already exists: {arm_name}_b{target_tokens}")
+    variant = dict(templates[0], group="budget", history_budget_tokens=target_tokens,
+                   budget_variant=True)
+    variant.pop("history_budget_source", None)
     return dict(config, methods=[*config["methods"], variant])
 
 
@@ -807,7 +840,7 @@ def _prepare_locked(config, output, source):
         if any("history_runtime" in row for row in matrix):
             fields.extend(["history_runtime", "recovery_policy", "compression_ratio"])
         if any(is_racer_arm(row["arm"]) for row in matrix):
-            fields.extend(["history_backend", "racer_policy", "calibration_status",
+            fields.extend(["history_backend", "racer_mode", "racer_policy", "calibration_status",
                            "history_allocation"])
         if any("tool_schema" in row for row in matrix):
             fields.append("tool_schema")

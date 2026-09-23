@@ -274,7 +274,8 @@ def _resolved_design(
             sglang_backend_url=_sglang_upstream(config),
             device="cpu", npu_allocator_metrics=False,
         )
-        if policy in {"off", "request_contract", "argument_binding", "no_progress"}:
+        if racer.get("mode") in {"bare", "protected_off"} or policy in {
+                "off", "request_contract", "argument_binding", "no_progress"}:
             design["runtime"].pop("shadow_feature_config", None)
         apply_native_generation_timeout(config, design)
         if output is not None:

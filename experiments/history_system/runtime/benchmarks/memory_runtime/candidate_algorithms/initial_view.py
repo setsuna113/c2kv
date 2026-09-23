@@ -56,12 +56,15 @@ def build_initial_view_allocator(
     model_context: int | None,
     s0_config: Mapping[str, Any],
     benchmark: str,
+    initial_allocator_factory=None,
 ) -> CandidateAllocator:
     """Select the first-view policy independently of post-draft recovery."""
     if initial_view != STATIC_INITIAL_VIEW:
         raise ValueError("Unsupported initial_view policy")
-    return CandidateAllocator(
+    from ..initial_factory import instantiate_initial
+    return instantiate_initial(CandidateAllocator,
         tokenizer,
+        initial_allocator_factory=initial_allocator_factory,
         packing=packing,
         policy=policy,
         variant="static_t02",
@@ -131,10 +134,12 @@ def build_initial_view_composition(
     model_context: int | None,
     s0_config: Mapping[str, Any],
     benchmark: str,
+    initial_allocator_factory=None,
 ) -> InitialViewCompositionController:
     backbone = validate_initial_view_config(candidate)
     base = build_initial_view_allocator(
         tokenizer,
+        initial_allocator_factory=initial_allocator_factory,
         initial_view=candidate["initial_view"],
         packing=packing,
         policy=policy,

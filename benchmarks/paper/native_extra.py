@@ -135,16 +135,18 @@ def validate_ready_manifest(config, benchmark, task, ready_path, controller_path
         raise RuntimeError(f"Native {identity['arm']} loaded a different S0 controller")
     racer = identity.get("racer_backend")
     if racer is not None:
-        expected_receipt = dict(
-            racer, identity=f"racer:{racer['backend']}:{racer['policy']}:b{racer['history_budget_tokens']}",
-            quality_validated=False,
-        )
+        identity_name = (f"racer:v2:{racer['backend']}:{racer['mode']}:{racer['policy']}:"
+                         f"b{racer['history_budget_tokens']}"
+                         if racer["schema"] == "racer-backend-v2" else
+                         f"racer:{racer['backend']}:{racer['policy']}:b{racer['history_budget_tokens']}")
+        expected_receipt = dict(racer, identity=identity_name, quality_validated=False)
         route = manifest.get("route_contract") or {}
         if (controller.get("racer_backend") != racer
                 or manifest.get("racer_backend") != expected_receipt
                 or route.get("baseline_identity") != expected_receipt["identity"]
                 or route.get("history_allocation") != racer["allocation"]
-                or route.get("recovery_enabled") is not (racer["policy"] != "off")):
+                or route.get("recovery_enabled") is not (
+                    racer.get("mode") == "on" if "mode" in racer else racer["policy"] != "off")):
             raise RuntimeError(f"Native {identity['arm']} RACER backend identity differs")
         variant = identity["candidate_algorithm"]
         candidate = controller.get("candidate_algorithm")

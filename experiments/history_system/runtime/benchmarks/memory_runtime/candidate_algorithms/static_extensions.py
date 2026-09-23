@@ -47,11 +47,12 @@ def validate_extension_config(candidate):
 
 
 def build_static_extension(tokenizer, *, candidate, packing, policy,
-                           model_context, s0_config, benchmark):
+                           model_context, s0_config, benchmark, initial_allocator_factory=None):
     validate_extension_config(candidate)
     base = build_initial_view_allocator(
         tokenizer, initial_view=STATIC_INITIAL_VIEW, packing=packing, policy=policy,
-        model_context=model_context, s0_config=s0_config, benchmark=benchmark)
+        model_context=model_context, s0_config=s0_config, benchmark=benchmark,
+        initial_allocator_factory=initial_allocator_factory)
     cls = {
         "static_verified": StaticVerifiedController,
         "static_action_ledger": StaticActionLedgerController,

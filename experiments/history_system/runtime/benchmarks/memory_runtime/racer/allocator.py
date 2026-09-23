@@ -32,6 +32,13 @@ class PersistentMemory(PackedMemory):
     source_event_phases: tuple = ()
     recovered_source_indices: tuple = ()
     tool_plan: object = None
+    initial_s0_messages: tuple = ()
+    initial_s0_source_indices: tuple = ()
+    initial_s0_event_ids: tuple = ()
+    native_evidence_source_indices: tuple = ()
+    native_evidence_event_ids: tuple = ()
+    native_evidence_tokens: int = 0
+    retained_history_min_tokens: int = 0
 
     def costs(self, ratio):
         result = super().costs(ratio)

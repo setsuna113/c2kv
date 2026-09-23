@@ -50,7 +50,7 @@ def test_default_streamingllm_uses_native_off_with_explicit_b(tmp_path, budget):
     cells = [row for row in plan if row.get("history_backend") == "streamingllm"]
     assert len(cells) == len(cfg["benchmarks"])
     for row in cells:
-        assert row["arm"] == f"racer_streamingllm_off_b{budget}"
+        assert row["arm"] == f"racer_v2_streamingllm_bare_b{budget}"
         assert row["history_budget_tokens"] == budget
         assert "benchmarks.paper.c1" in row["command"]
 

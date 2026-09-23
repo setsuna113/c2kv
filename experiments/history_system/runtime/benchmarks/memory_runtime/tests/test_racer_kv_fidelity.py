@@ -112,13 +112,14 @@ def test_off_allocator_does_not_enter_s0_selection(monkeypatch):
 def _engine_budget_function():
     """Exercise the engine's real budget function without importing its GPU stack."""
     tree = ast.parse(ENGINE_TRANSACTION.read_text(encoding="utf-8"))
-    function = next(node for node in tree.body
-                    if isinstance(node, ast.FunctionDef)
-                    and node.name == "enforce_request_budget")
+    definitions = [node for node in tree.body
+                   if isinstance(node, (ast.FunctionDef, ast.ClassDef))
+                   and node.name in {"enforce_request_budget", "transaction_config",
+                                     "RacerCapacityInfeasible"}]
     namespace = {}
-    exec(compile(ast.Module(body=[function], type_ignores=[]),
+    exec(compile(ast.Module(body=definitions, type_ignores=[]),
                  str(ENGINE_TRANSACTION), "exec"), namespace)
-    return namespace[function.name]
+    return namespace["enforce_request_budget"]
 
 
 def test_commitkv_recovery_keeps_total_budget_and_clamps_effective_target():

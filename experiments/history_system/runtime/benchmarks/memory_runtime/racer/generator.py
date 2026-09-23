@@ -14,6 +14,7 @@ from urllib.request import Request
 from history_memory.sglang_generator import (
     SGLangEventNativeGenerationResult, SGLangEventNativeError, SGLangTransportError)
 from .allocator import PersistentMemory
+from .capacity import HistoryCapacityInfeasible
 
 
 def _json(value):
@@ -160,6 +161,14 @@ class PersistentRacerGenerator:
         finally:
             self.native.timeout_seconds = previous_timeout
         if status != 200:
+            transaction = ((payload.get("c2kv_kv_memory_hint") or {}).get(
+                "persistent_history_session") or {}).get("transaction") or {}
+            phase = {"regenerate": "regeneration", "draft": "draft"}.get(transaction.get("phase"))
+            if phase is not None:
+                capacity = HistoryCapacityInfeasible.from_response(
+                    response, decision_id=transaction.get("decision_id"), phase=phase)
+                if capacity is not None:
+                    raise capacity
             raise SGLangEventNativeError(f"RACER {path} returned HTTP {status}: {response}")
         return response
 
@@ -319,6 +328,9 @@ class PersistentRacerGenerator:
                 raise SGLangEventNativeError("RACER next decision lacks its committed source action")
             self._pending_commit = None
             self._source = source
+            if memory.initial_s0_messages:
+                self._messages.extend([{"role": "assistant", "content": ""},
+                                       *copy.deepcopy(memory.initial_s0_messages)])
         elif phase == "regeneration":
             if source != self._source or not memory.recovery_messages:
                 raise SGLangEventNativeError("RACER regeneration requires source-bound evidence")
@@ -353,7 +365,12 @@ class PersistentRacerGenerator:
         if phase == "regeneration" and decision_key != self._decision_key:
             raise SGLangEventNativeError("RACER recovery belongs to another decision")
         self.native._ensure_model_info()
+        # Regeneration appends only internal evidence. A rejected admission can
+        # undo that append without copying the complete archived transcript.
+        ledger_length = len(self._messages)
         messages, count, start, events = self._ledger(memory, phase)
+        evidence = memory.initial_s0_messages if phase == "draft" else memory.recovery_messages
+        evidence_indices = list(range(len(messages) - len(evidence) - 1, len(messages))) if evidence else []
         index_map = {index: index for index in range(len(messages))}
         payload = {"model": self.native.expected_model_path, "messages": messages,
                    "tools": list(memory.source_tools), "stream": False, "logprobs": True,
@@ -393,9 +410,25 @@ class PersistentRacerGenerator:
             transaction["resolution"] = "discard"
             persistent["recovery_append"] = {"enabled": True, "replace_previous_evidence": True,
                 "source_message_indices": [index_map[self._source_positions[index]]
-                    for index in memory.recovered_source_indices]}
+                    for index in (memory.native_evidence_source_indices or memory.recovered_source_indices)],
+                "evidence_message_indices": [index_map[index] for index in evidence_indices]}
         elif self._resolution is not None:
             transaction["resolution"] = self._resolution
+        if phase == "draft" and evidence:
+            persistent["initial_s0_append"] = {
+                "enabled": True, "replace_previous_evidence": True,
+                "source_message_indices": [index_map[self._source_positions[index]]
+                                           for index in memory.initial_s0_source_indices],
+                "evidence_message_indices": [index_map[index] for index in evidence_indices],
+            }
+        if self.config.allocation == "racer_s0" and phase == "draft":
+            persistent["racer_initial_allocation"] = {
+                "schema": "racer-initial-allocation-v1",
+                "event_ids": list(memory.initial_s0_event_ids),
+                "source_message_indices": [index_map[self._source_positions[index]]
+                                           for index in memory.initial_s0_source_indices],
+                "protected_evidence": bool(evidence),
+            }
         persistent["transaction"] = transaction
         persistent["history_budget_tokens"] = self.config.history_budget_tokens
         persistent["native_evidence_tokens"] = memory.recovery_tokens
@@ -415,6 +448,10 @@ class PersistentRacerGenerator:
         except Exception as failure:
             self.last_generation_trace.update(status="failed", error={
                 "type": type(failure).__name__, "message": str(failure)})
+            if isinstance(failure, HistoryCapacityInfeasible):
+                self.last_generation_trace["capacity_rejection"] = copy.deepcopy(failure.receipt)
+                if failure.can_retain_draft(decision_key):
+                    del self._messages[ledger_length:]
             if self._tool_binder is not None:
                 # Binding work has already reached the engine even when chat
                 # fails. Drain only this decision's unreported tool attempts.
@@ -439,6 +476,15 @@ class PersistentRacerGenerator:
                 or lifecycle.get("full_history_reprefill_performed") is not False
                 or lifecycle.get("persistent_session_enabled") is not True):
             raise SGLangEventNativeError("Missing verified persistent lifecycle receipt")
+        if self.config.allocation == "racer_s0" and context.get("phase") == "draft":
+            initial = report.get("racer_initial_allocation") or {}
+            if (initial.get("schema") != "racer-initial-allocation-v1"
+                    or initial.get("applied") is not True
+                    or initial.get("backend_native_selection_preserved") is not True
+                    or initial.get("event_ids") != list(memory.initial_s0_event_ids)
+                    or type(initial.get("evidence_tokens")) is not int
+                    or initial["evidence_tokens"] < 0):
+                raise SGLangEventNativeError("Missing verified RACER initial protection receipt")
         generation = metadata.get("racer_generation") or {}
         ids = generation.get("output_token_ids")
         logprobs = generation.get("output_token_logprobs")
@@ -491,9 +537,11 @@ class PersistentRacerGenerator:
 
     def resolve_decision(self, response, *, result, record):
         selected = next((i for i, row in enumerate(record["generation_trace"]) if not row["discarded"]), None)
+        last_completed = next((i for i in reversed(range(len(record["generation_trace"])))
+                               if record["generation_trace"][i].get("status", "completed") == "completed"), None)
         changed = bool(record.get("commit_transform", {}).get("changed")
                        or record.get("commit_validation", {}).get("synthetic_abstention"))
-        self._resolution = "discard" if changed or selected != len(record["generation_trace"]) - 1 else "commit"
+        self._resolution = "discard" if changed or selected != last_completed else "commit"
         ids = result.token_ids
         if ids and result.finish_reason == "stop" and ids[-1] in self.native.eos_token_ids:
             ids = ids[:-1]

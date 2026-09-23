@@ -128,8 +128,11 @@ def build_event_native_controller(
     history_view_protocol: str = "fixed-budget-main",
     s0_config: Mapping[str, Any] | None = None,
     benchmark: str = "bfcl",
+    initial_allocator_factory=None,
 ) -> Any:
     """Build a finite controller without importing the CLI/server module."""
+
+    from .initial_factory import instantiate_initial
 
     if s0_config is not None and "racer_backend" in s0_config:
         from .racer.config import BackendConfig
@@ -146,7 +149,10 @@ def build_event_native_controller(
             tokenizer, packing=packing, policy=policy, view_mode=view_mode,
             model_context=model_context, compression_policy=compression_policy,
             history_view_protocol=history_view_protocol, s0_config=s0_config,
-            benchmark=benchmark)
+            benchmark=benchmark, initial_allocator_factory=initial_allocator_factory)
+        if backend.mode == "protected_off":
+            from .racer.policies import InitialOnlyPolicy
+            inner = InitialOnlyPolicy(inner, s0_config.get("candidate_algorithm"))
         return C2KVResidentPolicy(inner, backend)
 
     if s0_config is not None and "candidate_algorithm" in s0_config:
@@ -174,7 +180,8 @@ def build_event_native_controller(
                 history_view_protocol=history_view_protocol)
             return build_c1_v2(
                 tokenizer, candidate=candidate, packing=packing, policy=policy,
-                model_context=model_context, s0_config=config, benchmark=benchmark)
+                model_context=model_context, s0_config=config, benchmark=benchmark,
+                initial_allocator_factory=initial_allocator_factory)
         if candidate["variant"] in STATIC_EXTENSION_VARIANTS:
             from .candidate_algorithms.static_extensions import build_static_extension
             describe_event_native_route(
@@ -184,7 +191,8 @@ def build_event_native_controller(
                 tokenizer, candidate=candidate, packing=packing, policy=policy,
                 model_context=model_context,
                 s0_config={key: value for key, value in config.items()
-                           if key in S0_CONFIG_DEFAULTS}, benchmark=benchmark)
+                           if key in S0_CONFIG_DEFAULTS}, benchmark=benchmark,
+                initial_allocator_factory=initial_allocator_factory)
         if candidate["variant"] in INITIAL_VIEW_VARIANTS:
             from .candidate_algorithms.initial_view import build_initial_view_composition
 
@@ -193,7 +201,8 @@ def build_event_native_controller(
                 history_view_protocol=history_view_protocol,
             )
             return build_initial_view_composition(
-                tokenizer, candidate=candidate, packing=packing, policy=policy,
+                initial_allocator_factory=initial_allocator_factory,
+                tokenizer=tokenizer, candidate=candidate, packing=packing, policy=policy,
                 model_context=model_context,
                 s0_config={key: value for key, value in config.items()
                            if key in S0_CONFIG_DEFAULTS},
@@ -204,13 +213,15 @@ def build_event_native_controller(
         if (candidate["variant"] == "goal_rescue"
                 or candidate["variant"] in REPAIR_VARIANTS + GOAL_VARIANTS + VERIFIED_VARIANTS):
             controller = build_event_native_controller(
-                tokenizer, packing=packing, policy=policy, view_mode=view_mode,
+                initial_allocator_factory=initial_allocator_factory,
+                tokenizer=tokenizer, packing=packing, policy=policy, view_mode=view_mode,
                 model_context=model_context, compression_policy=compression_policy,
                 history_view_protocol=history_view_protocol, s0_config=config,
                 benchmark=benchmark)
         else:
-            controller = CandidateAllocator(
-                tokenizer, packing=packing, policy=policy, model_context=model_context,
+            controller = instantiate_initial(CandidateAllocator,
+                tokenizer, initial_allocator_factory=initial_allocator_factory,
+                packing=packing, policy=policy, model_context=model_context,
                 s0_config={key: value for key, value in config.items() if key in S0_CONFIG_DEFAULTS},
                 benchmark=benchmark, variant=candidate["variant"])
         return wrap_with_candidate_recovery(controller, candidate)
@@ -236,7 +247,8 @@ def build_event_native_controller(
                 "D3 hybrid recovery requires post_draft_recovery detector config"
             )
         controller = build_event_native_controller(
-            tokenizer,
+            initial_allocator_factory=initial_allocator_factory,
+            tokenizer=tokenizer,
             view_mode=view_mode,
             packing=packing,
             policy=policy,
@@ -261,7 +273,8 @@ def build_event_native_controller(
         if detector is None:
             raise ValueError("G--P requires the current post_draft_recovery config")
         controller = build_event_native_controller(
-            tokenizer, view_mode=view_mode, packing=packing, policy=policy,
+            initial_allocator_factory=initial_allocator_factory,
+            tokenizer=tokenizer, view_mode=view_mode, packing=packing, policy=policy,
             model_context=model_context, compression_policy=compression_policy,
             history_view_protocol=history_view_protocol, s0_config=config,
             benchmark=benchmark)
@@ -276,7 +289,8 @@ def build_event_native_controller(
         config = dict(s0_config)
         del config["post_draft_recovery"]
         controller = build_event_native_controller(
-            tokenizer,
+            initial_allocator_factory=initial_allocator_factory,
+            tokenizer=tokenizer,
             view_mode=view_mode,
             packing=packing,
             policy=policy,
@@ -297,7 +311,8 @@ def build_event_native_controller(
         config = dict(s0_config)
         del config["raw_warmup_policy"]
         controller = build_event_native_controller(
-            tokenizer, view_mode=view_mode, packing=packing, policy=policy,
+            initial_allocator_factory=initial_allocator_factory,
+            tokenizer=tokenizer, view_mode=view_mode, packing=packing, policy=policy,
             model_context=model_context, compression_policy=compression_policy,
             history_view_protocol=history_view_protocol, s0_config=config,
             benchmark=benchmark)
@@ -313,7 +328,8 @@ def build_event_native_controller(
         config = dict(s0_config)
         del config["stalled_operation_policy"]
         controller = build_event_native_controller(
-            tokenizer,
+            initial_allocator_factory=initial_allocator_factory,
+            tokenizer=tokenizer,
             view_mode=view_mode,
             packing=packing,
             policy=policy,
@@ -338,7 +354,8 @@ def build_event_native_controller(
         config = dict(s0_config)
         del config["compact_first_failure_policy"]
         controller = build_event_native_controller(
-            tokenizer,
+            initial_allocator_factory=initial_allocator_factory,
+            tokenizer=tokenizer,
             view_mode=view_mode,
             packing=packing,
             policy=policy,
@@ -389,8 +406,9 @@ def build_event_native_controller(
             base_s0_config = dict(s0_config)
             del base_s0_config[observed_slot_key]
             if candidate_policy == OBSERVED_ENTITY_SLOT_POLICY:
-                return ObservedEntitySlotS0Controller(
+                return instantiate_initial(ObservedEntitySlotS0Controller,
                     tokenizer,
+                    initial_allocator_factory=initial_allocator_factory,
                     packing=packing,
                     policy=policy,
                     model_context=model_context,
@@ -399,8 +417,9 @@ def build_event_native_controller(
                     benchmark=benchmark,
                 )
             if candidate_policy == MISSING_REQUIRED_REFERENCE_POLICY:
-                return RevisionObservedEntitySlotS0Controller(
+                return instantiate_initial(RevisionObservedEntitySlotS0Controller,
                     tokenizer,
+                    initial_allocator_factory=initial_allocator_factory,
                     packing=packing,
                     policy=policy,
                     model_context=model_context,
@@ -409,8 +428,9 @@ def build_event_native_controller(
                     benchmark=benchmark,
                 )
             if candidate_policy == SAME_EVENT_REFERENCE_POLICY:
-                return SameEventReferenceS0Controller(
+                return instantiate_initial(SameEventReferenceS0Controller,
                     tokenizer,
+                    initial_allocator_factory=initial_allocator_factory,
                     packing=packing,
                     policy=policy,
                     model_context=model_context,
@@ -419,8 +439,9 @@ def build_event_native_controller(
                     benchmark=benchmark,
                 )
             if candidate_policy == SAME_EVENT_BRIDGE_ONLY_POLICY:
-                return SameEventBridgeOnlyS0Controller(
+                return instantiate_initial(SameEventBridgeOnlyS0Controller,
                     tokenizer,
+                    initial_allocator_factory=initial_allocator_factory,
                     packing=packing,
                     policy=policy,
                     model_context=model_context,
@@ -429,8 +450,9 @@ def build_event_native_controller(
                     benchmark=benchmark,
                 )
             if candidate_policy == RESULT_KEY_BRIDGE_POLICY:
-                return ResultKeyBridgeS0Controller(
+                return instantiate_initial(ResultKeyBridgeS0Controller,
                     tokenizer,
+                    initial_allocator_factory=initial_allocator_factory,
                     packing=packing,
                     policy=policy,
                     model_context=model_context,
@@ -439,7 +461,8 @@ def build_event_native_controller(
                     benchmark=benchmark,
                 )
             raise ValueError("Unknown observed entity slot policy")
-        return EventNativeS0Controller(tokenizer, packing=packing, policy=policy,
+        return instantiate_initial(EventNativeS0Controller, tokenizer,
+            initial_allocator_factory=initial_allocator_factory, packing=packing, policy=policy,
             model_context=model_context, s0_config=s0_config,
             benchmark=benchmark)
     if view_mode in _EXACT_VIEW_MODES:
