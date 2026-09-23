@@ -16,6 +16,7 @@ from experiments.history_system.native_bare import ARM_RATIOS as NATIVE_RATIOS
 from . import c1_appworld
 from .candidate_matrix import ARM_TO_VARIANT, GOAL_VARIANTS, REPAIR_VARIANTS, VERIFIED_VARIANTS
 from experiments.history_system.candidate_algorithms import (
+    C1_V2_VARIANTS, C1_V2_VERSION, c1_v2_fields,
     INITIAL_VIEW_VARIANTS, INITIAL_VIEW_VERSION, initial_view_fields,
     PROOF_REGISTRY_VERSION, VERIFIED_VERSION,
     STATIC_EXTENSION_VARIANTS, STATIC_EXTENSION_VERSION,
@@ -86,6 +87,69 @@ def validate_native_budget_policy(config, manifest, arm):
         raise RuntimeError(f"Native {arm} server does not serve its {tokens}-token history budget")
 
 
+def validate_loaded_controller(arm, manifest, controller_path):
+    """Return the prepared S0 controller after checking the server loaded exactly it."""
+    controller_path = Path(controller_path).resolve()
+    controller_bytes = controller_path.read_bytes()
+    controller = json.loads(controller_bytes)
+    loaded = manifest.get("s0_controller_contract")
+    if (not isinstance(controller, dict) or not isinstance(loaded, Mapping)
+            or loaded.get("source") != str(controller_path)
+            or loaded.get("sha256") != hashlib.sha256(controller_bytes).hexdigest()
+            or loaded.get("config") != controller):
+        raise RuntimeError(f"Native {arm} loaded a different S0 controller")
+    return controller
+
+
+def _candidate_fields(variant):
+    return c1_v2_fields(variant) if variant in C1_V2_VARIANTS else initial_view_fields(variant)
+
+
+def validate_candidate_identity(arm, variant, controller, manifest):
+    """Reject a candidate server whose controller or loaded contract differs from ``variant``."""
+    candidate = controller.get("candidate_algorithm")
+    loaded_candidate = manifest.get("candidate_algorithm")
+    route = manifest.get("route_contract") or {}
+    artifact = candidate.get("risk_artifact") if isinstance(candidate, Mapping) else None
+    if variant in REPAIR_VARIANTS:
+        valid_config = (isinstance(candidate, Mapping)
+                        and dict(candidate) == {"variant": variant})
+        version = "c2kv-source-repair-v1"
+    else:
+        valid_config = (isinstance(candidate, Mapping)
+                        and candidate.get("variant") == variant
+                        and candidate.get("risk_threshold") == 0.5
+                        and isinstance(artifact, Mapping)
+                        and artifact.get("model_kind") == "c1_risk_logistic"
+                        and (variant not in VERIFIED_VARIANTS
+                             or candidate.get("proof_registry_version") == PROOF_REGISTRY_VERSION))
+        view_fields = _candidate_fields(variant)
+        valid_config = valid_config and all(candidate.get(key) == value
+                                            for key, value in view_fields.items())
+        version = (C1_V2_VERSION if variant in C1_V2_VARIANTS else
+                   STATIC_EXTENSION_VERSION if variant in STATIC_EXTENSION_VARIANTS else
+                   INITIAL_VIEW_VERSION if variant in INITIAL_VIEW_VARIANTS else
+                   VERIFIED_VERSION if variant in VERIFIED_VARIANTS else
+                   "c2kv-goal-composition-v1" if variant in GOAL_VARIANTS
+                   else "c2kv-paper-candidates-v1")
+    if variant in C1_V2_VARIANTS:
+        # The server publishes exactly this contract (event_native_server._candidate_ready_contract).
+        valid_config = valid_config and loaded_candidate == {
+            "variant": variant, "stable_call_ids": True,
+            "recovery_rounds_per_decision": 1, **c1_v2_fields(variant)}
+    if (not valid_config or not isinstance(loaded_candidate, Mapping)
+            or loaded_candidate.get("variant") != variant
+            or loaded_candidate.get("stable_call_ids") is not True
+            or any(loaded_candidate.get(key) != value
+                   for key, value in _candidate_fields(variant).items())
+            or (variant in VERIFIED_VARIANTS
+                and loaded_candidate.get("proof_registry_version") != PROOF_REGISTRY_VERSION)
+            or route.get("baseline_identity") != version + ":" + variant
+            or route.get("recovery_enabled") is not True
+            or route.get("max_generations_per_decision") != 2):
+        raise RuntimeError(f"Native {arm} candidate controller identity differs")
+
+
 def validate_ready_manifest(config, benchmark, task, ready_path, controller_path):
     """Reject a server whose loaded controller differs from the selected arm."""
     identity = arm_identity(config)
@@ -111,52 +175,12 @@ def validate_ready_manifest(config, benchmark, task, ready_path, controller_path
 
         validate_manifest(ready_path, identity["ratio"])
         return manifest
-    controller_path = Path(controller_path).resolve()
-    controller_bytes = controller_path.read_bytes()
-    controller = json.loads(controller_bytes)
-    loaded = manifest.get("s0_controller_contract")
-    if (not isinstance(controller, dict) or not isinstance(loaded, Mapping)
-            or loaded.get("source") != str(controller_path)
-            or loaded.get("sha256") != hashlib.sha256(controller_bytes).hexdigest()
-            or loaded.get("config") != controller):
-        raise RuntimeError(f"Native {identity['arm']} loaded a different S0 controller")
+    controller = validate_loaded_controller(identity["arm"], manifest, controller_path)
     variant = identity["candidate_algorithm"]
     candidate = controller.get("candidate_algorithm")
     loaded_candidate = manifest.get("candidate_algorithm")
     if variant is not None:
-        route = manifest.get("route_contract") or {}
-        artifact = candidate.get("risk_artifact") if isinstance(candidate, Mapping) else None
-        if variant in REPAIR_VARIANTS:
-            valid_config = (isinstance(candidate, Mapping)
-                            and dict(candidate) == {"variant": variant})
-            version = "c2kv-source-repair-v1"
-        else:
-            valid_config = (isinstance(candidate, Mapping)
-                            and candidate.get("variant") == variant
-                            and candidate.get("risk_threshold") == 0.5
-                            and isinstance(artifact, Mapping)
-                            and artifact.get("model_kind") == "c1_risk_logistic"
-                            and (variant not in VERIFIED_VARIANTS
-                                 or candidate.get("proof_registry_version") == PROOF_REGISTRY_VERSION))
-            view_fields = initial_view_fields(variant)
-            valid_config = valid_config and all(candidate.get(key) == value
-                                                for key, value in view_fields.items())
-            version = (STATIC_EXTENSION_VERSION if variant in STATIC_EXTENSION_VARIANTS else
-                       INITIAL_VIEW_VERSION if variant in INITIAL_VIEW_VARIANTS else
-                       VERIFIED_VERSION if variant in VERIFIED_VARIANTS else
-                       "c2kv-goal-composition-v1" if variant in GOAL_VARIANTS
-                       else "c2kv-paper-candidates-v1")
-        if (not valid_config or not isinstance(loaded_candidate, Mapping)
-                or loaded_candidate.get("variant") != variant
-                or loaded_candidate.get("stable_call_ids") is not True
-                or any(loaded_candidate.get(key) != value
-                       for key, value in initial_view_fields(variant).items())
-                or (variant in VERIFIED_VARIANTS
-                    and loaded_candidate.get("proof_registry_version") != PROOF_REGISTRY_VERSION)
-                or route.get("baseline_identity") != version + ":" + variant
-                or route.get("recovery_enabled") is not True
-                or route.get("max_generations_per_decision") != 2):
-            raise RuntimeError(f"Native {identity['arm']} candidate controller identity differs")
+        validate_candidate_identity(identity["arm"], variant, controller, manifest)
         validate_native_budget_policy(config, manifest, identity["arm"])
     elif candidate is not None or loaded_candidate is not None:
         raise RuntimeError(f"Native {identity['arm']} detector controller identity differs")

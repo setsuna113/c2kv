@@ -534,9 +534,15 @@ def run_task(
                                   NATIVE_RATIOS[config["native_arm"]])
             else:
                 from .candidate_matrix import ARM_TO_VARIANT
-                if config.get("native_arm") in ARM_TO_VARIANT:
-                    from .native_extra import validate_native_budget_policy
-                    validate_native_budget_policy(config, ready, config["native_arm"])
+                arm = config.get("native_arm")
+                if arm in ARM_TO_VARIANT:
+                    from .native_extra import (
+                        validate_candidate_identity, validate_loaded_controller,
+                        validate_native_budget_policy,
+                    )
+                    controller = validate_loaded_controller(arm, ready, controller_path)
+                    validate_candidate_identity(arm, ARM_TO_VARIANT[arm], controller, ready)
+                    validate_native_budget_policy(config, ready, arm)
             if config.get("tool_memory"):
                 from .native_extra import validate_tool_ready
                 validate_tool_ready(config, ready)
@@ -570,10 +576,13 @@ def run_task(
     metrics = run_c1.summarize_task(
         BENCHMARK, task_id, task_out, official, time.monotonic() - started,
     )
+    from .candidate_matrix import ARM_TO_VARIANT
+    candidate = ARM_TO_VARIANT.get(config.get("native_arm"))
     acceptance = run_c1.functional_checks(
         ("c2kv_native" if config.get("native_arm") in NATIVE_RATIOS else
          "c2kv_only" if config.get("native_arm") == "c2kv_c1_off_r8" else "proposed"),
-        config.get("c1", {}).get("detector", "t02_risk"), metrics
+        config.get("c1", {}).get("detector", "t02_risk"), metrics,
+        *((candidate,) if candidate is not None else ()),
     )
     if not all(acceptance["required"].values()):
         raise RuntimeError(f"C1 AppWorld functional acceptance failed: {acceptance['required']}")

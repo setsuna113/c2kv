@@ -1,0 +1,22 @@
+{
+  "schema": "c2kv-c1v2-native-identity-v1",
+  "created_at": "2026-09-23T08:00:00Z",
+  "branch": "paper/c1v2rv-native-budget-20260923 (on 4dfab51)",
+  "live_failure": "box4 results-c22t2 tau2__c2kv_c1_v2_verified_r8_b512 task 0: native_extra.validate_ready_manifest raised 'Native c2kv_c1_v2_verified_r8 candidate controller identity differs'; the budget itself was served (effective history_budget_bytes 75497472 = 512 x 147456)",
+  "cause": "the paper-side candidate identity check had no C1 v2 branch: the expected version fell through to c2kv-paper-candidates-v1 while the server publishes c2kv-c1-v2-verified-v1:c1_v2_verified (event_native_server._candidate_ready_contract), and the policy fields came from initial_view_fields, which is empty for c1_v2 (the fields live in c1_v2_fields). The existing parametrized test encoded the same wrong expectation. AppWorld ran candidate servers without any candidate identity check and scored functional acceptance without the candidate variant",
+  "change": [
+    "native_extra.validate_loaded_controller and validate_candidate_identity are the extracted S0-controller and candidate checks; for C1_V2_VARIANTS the expected version is C1_V2_VERSION, the controller must carry c1_v2_fields with risk_threshold 0.5 and a c1_risk_logistic artifact, and the loaded candidate must equal the server's exact contract {variant, stable_call_ids: true, recovery_rounds_per_decision: 1, **c1_v2_fields}; other variants keep their previous rules",
+    "c1_appworld.run_task checks the loaded controller, the candidate identity and the budget policy for candidate arms, and passes the candidate variant to functional_checks (C1 and bare arms unchanged)"
+  ],
+  "runtime": "git diff 11fa0ab -- experiments/history_system/runtime is empty",
+  "tests": {
+    "fixture": "benchmarks/fixtures/c1v2_tau2_ready_b512_20260923.json, reduced from the box4 ready.json (sha256 63fe187f...) and controller.json (sha256 61bb1e57...); see its provenance block",
+    "regression": "test_c1v2_native_identity.py: the recorded manifest passes; changing any leaf of the loaded candidate contract, the three route identity fields, the two budget fields or the header fields is rejected; a missing or extra loaded-contract key is rejected; changing any checked controller field is rejected; toolsandbox and acebench_agent identities pass and reject a wrong version; AppWorld run_task reaches the harness only with a valid identity. On 4dfab51 the recorded manifest reproduces the live error",
+    "updated": "test_native_extra.py builds the C1 v2 case from the server's actual contract",
+    "full_suite": "benchmarks: 4dfab51 7 failed / 1217 passed, fixed 7 failed / 1255 passed (identical failure set); delivery test_history_budget.py 1 failed / 7 passed on both"
+  },
+  "open_items": [
+    "AppWorld candidate designs are still labelled c1_<detector> (model name and run id); only the identity check and acceptance changed",
+    "No GPU run"
+  ]
+}

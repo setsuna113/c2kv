@@ -1,0 +1,84 @@
+{
+  "controller": {
+    "candidate_algorithm": {
+      "completion_review": false,
+      "initial_view": {
+        "policy": "s0_capacity_fallback",
+        "terminal_rescue": "c2kv-terminal-tool-arguments-gist-v1",
+        "version": "c2kv-s0-capacity-fallback-v1"
+      },
+      "proof_registry_version": "verified-binding-rules-v1",
+      "recovery_backbone": "t02_complete_event",
+      "risk_artifact": {
+        "artifact_sha256": "3fcbadae566d41c5086ccf64f5627bcd4d52cb6bdb7589b46d88619851e285bf",
+        "model_kind": "c1_risk_logistic",
+        "schema": "c2kv-recovery-set-model-v1"
+      },
+      "risk_threshold": 0.5,
+      "variant": "c1_v2_verified"
+    },
+    "latest_complete_tool_protection": "budgeted",
+    "observed_entity_slot_policy": "same-complete-event-reference-bridge-only-v1",
+    "predictor_completion_token_cap": 256,
+    "predictor_prompt_token_cap": 2048,
+    "source_index_max_events": 12
+  },
+  "manifest": {
+    "allowed_task_ids": [
+      "0"
+    ],
+    "benchmark": "tau2",
+    "candidate_algorithm": {
+      "completion_review": false,
+      "initial_view": {
+        "policy": "s0_capacity_fallback",
+        "terminal_rescue": "c2kv-terminal-tool-arguments-gist-v1",
+        "version": "c2kv-s0-capacity-fallback-v1"
+      },
+      "proof_registry_version": "verified-binding-rules-v1",
+      "recovery_backbone": "t02_complete_event",
+      "recovery_rounds_per_decision": 1,
+      "stable_call_ids": true,
+      "variant": "c1_v2_verified"
+    },
+    "generation_backend": "sglang",
+    "model_name": "c2kv_c1_v2_verified",
+    "ratio": 8,
+    "route_contract": {
+      "baseline_identity": "c2kv-c1-v2-verified-v1:c1_v2_verified",
+      "canonical_mode": "ac_native_s0_lexical_raw_reserve_failed_operation",
+      "compression_policy": "always-compress-v1",
+      "history_view_protocol": "fixed-budget-main",
+      "implementation_profile": "event-native-always-compress-v1",
+      "legacy_1088_equivalent": false,
+      "max_generations_per_decision": 2,
+      "recovery_enabled": true,
+      "training_static": false,
+      "view_mode": "ac_native_s0_lexical_raw_reserve_failed_operation"
+    },
+    "runtime_policy_contract": {
+      "effective_policy": {
+        "history_budget_bytes": 75497472,
+        "kv_bytes_per_token": 147456,
+        "workspace_budget_bytes": 75497472
+      }
+    },
+    "s0_controller_contract": {
+      "source": "/workspace/results-c22t2/closed_loop/tau2__c2kv_c1_v2_verified_r8_b512/native/controller.json"
+    },
+    "schema": "a-event-native-server-v1",
+    "source_profile": "openai-single-task-v1",
+    "status": "ready",
+    "tool_schema": "sglang-full",
+    "view_mode": "ac_native_s0_lexical_raw_reserve_failed_operation"
+  },
+  "provenance": {
+    "controller_json": "/workspace/results-c22t2/closed_loop/tau2__c2kv_c1_v2_verified_r8_b512/native/controller.json",
+    "controller_json_sha256": "61bb1e571cc216bbb4179e6ddb63c30621f0f1785bc772398c70e4dd060dc29e",
+    "host": "box4",
+    "paper_revision": "4dfab51 (rejected by native_extra.validate_ready_manifest: candidate controller identity differs)",
+    "ready_json": "/workspace/results-c22t2/closed_loop/tau2__c2kv_c1_v2_verified_r8_b512/native/task_shards/0/server/ready.json",
+    "ready_json_sha256": "63fe187f79187206d906ef5627f29c903a0a6926a1f80599345fb646da52e46b",
+    "reduction": "manifest keeps the fields the paper identity and budget checks read (runtime_policy_contract keeps the three effective byte fields; s0_controller_contract keeps its source, and the test rebinds sha256 and config to a local controller file); controller keeps every key, but candidate_algorithm.risk_artifact is reduced to schema, model_kind and artifact_sha256 (the 515 KB fitted weights are omitted)"
+  }
+}

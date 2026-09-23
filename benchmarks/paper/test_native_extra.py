@@ -8,9 +8,14 @@ from unittest import mock
 import pytest
 
 from experiments.history_system.candidate_algorithms import (
+    C1_V2_VARIANTS, C1_V2_VERSION, c1_v2_fields,
     INITIAL_VIEW_VARIANTS, INITIAL_VIEW_VERSION, initial_view_fields,
     STATIC_EXTENSION_VARIANTS, STATIC_EXTENSION_VERSION,
 )
+
+
+def _candidate_fields(variant):
+    return c1_v2_fields(variant) if variant in C1_V2_VARIANTS else initial_view_fields(variant)
 
 from benchmarks.paper import native_extra
 from benchmarks.toolsandbox_suite import THREE_DISTRACTION_TOOLS_129, load_named_suite
@@ -448,7 +453,7 @@ def test_ready_manifest_binds_loaded_controller_and_candidate_variant(
                                  "risk_artifact": {"model_kind": "c1_risk_logistic"},
                                  **({"proof_registry_version": "verified-binding-rules-v1"}
                                     if variant in VERIFIED_VARIANTS else {}),
-                                 **initial_view_fields(variant)}} if variant else
+                                 **_candidate_fields(variant)}} if variant else
         {"post_draft_recovery": {"gate": "prefill_linear_head"},
          "d3_hybrid_recovery": True} if detector == "d3_hybrid" else
         {"gp_experiments": {"set_selector": "risk", "selector_artifact": {
@@ -457,7 +462,7 @@ def test_ready_manifest_binds_loaded_controller_and_candidate_variant(
     route = ({"recovery_enabled": False, "max_generations_per_decision": 1}
              if arm == "c2kv_native_r4" else
              {"recovery_enabled": True, "max_generations_per_decision": 2,
-              "baseline_identity": f"{STATIC_EXTENSION_VERSION if variant in STATIC_EXTENSION_VARIANTS else INITIAL_VIEW_VERSION if variant in INITIAL_VIEW_VARIANTS else 'c2kv-source-repair-v1' if variant in REPAIR_VARIANTS else 'c2kv-verified-binding-v1' if variant in VERIFIED_VARIANTS else 'c2kv-goal-composition-v1' if variant in GOAL_VARIANTS else 'c2kv-paper-candidates-v1'}:{variant}"}
+              "baseline_identity": f"{C1_V2_VERSION if variant in C1_V2_VARIANTS else STATIC_EXTENSION_VERSION if variant in STATIC_EXTENSION_VARIANTS else INITIAL_VIEW_VERSION if variant in INITIAL_VIEW_VARIANTS else 'c2kv-source-repair-v1' if variant in REPAIR_VARIANTS else 'c2kv-verified-binding-v1' if variant in VERIFIED_VARIANTS else 'c2kv-goal-composition-v1' if variant in GOAL_VARIANTS else 'c2kv-paper-candidates-v1'}:{variant}"}
              if variant else {})
     manifest = {
         "schema": "a-event-native-server-v1", "status": "ready",
@@ -477,26 +482,27 @@ def test_ready_manifest_binds_loaded_controller_and_candidate_variant(
     if variant:
         manifest["candidate_algorithm"] = {
             "variant": variant, "stable_call_ids": True,
+            **({"recovery_rounds_per_decision": 1} if variant in C1_V2_VARIANTS else {}),
             **({"proof_registry_version": "verified-binding-rules-v1"}
                if variant in VERIFIED_VARIANTS else {}),
-            **initial_view_fields(variant),
+            **_candidate_fields(variant),
         }
     ready = tmp_path / "ready.json"
     ready.write_text(json.dumps(manifest), encoding="utf-8")
     native_extra.validate_ready_manifest(config, benchmark, "task_1", ready, controller)
-    if variant in INITIAL_VIEW_VARIANTS + STATIC_EXTENSION_VARIANTS:
-        for field in initial_view_fields(variant):
+    if variant in INITIAL_VIEW_VARIANTS + STATIC_EXTENSION_VARIANTS + C1_V2_VARIANTS:
+        for field in _candidate_fields(variant):
             original = manifest["candidate_algorithm"].pop(field)
             ready.write_text(json.dumps(manifest), encoding="utf-8")
             with pytest.raises(RuntimeError, match="candidate controller identity"):
                 native_extra.validate_ready_manifest(config, benchmark, "task_1", ready, controller)
             manifest["candidate_algorithm"][field] = original
-    if variant in VERIFIED_VARIANTS or initial_view_fields(variant).get("proof_registry_version"):
+    if variant in VERIFIED_VARIANTS or _candidate_fields(variant).get("proof_registry_version"):
         manifest["candidate_algorithm"]["proof_registry_version"] = "stale-proof-registry"
         ready.write_text(json.dumps(manifest), encoding="utf-8")
         with pytest.raises(RuntimeError, match="candidate controller identity"):
             native_extra.validate_ready_manifest(config, benchmark, "task_1", ready, controller)
-        manifest["candidate_algorithm"]["proof_registry_version"] = initial_view_fields(variant).get("proof_registry_version", "verified-binding-rules-v1")
+        manifest["candidate_algorithm"]["proof_registry_version"] = _candidate_fields(variant).get("proof_registry_version", "verified-binding-rules-v1")
     if arm == "c2kv_c1_t02_r4":
         from benchmarks.toolmemory import parse_tool_memory_spec
         config["tool_memory"] = "t0:r8"
