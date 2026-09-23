@@ -1,0 +1,33 @@
+{
+  "schema": "c2kv-tau2-agent-timeout-v1",
+  "created_at": "2026-09-23T02:40:00Z",
+  "trigger": "box4 /workspace/results-kvt2/closed_loop/tau2__agentkv_b128/HOLD_generation_timeout.txt: task 23 raised litellm.Timeout APITimeoutError while the proxy logged 'upstream 0: timed out' (600 s); the task ended with infrastructure_error and _terminal_results refused the cell",
+  "defect": "A frozen generation_timeout reached the persistent proxy but not the tau2 agent. tau2's generate() passes --agent-llm-args straight to litellm.completion, whose timeout defaults to 600 s (litellm 1.82.6 main.py: 'timeout = timeout or kwargs.get(\"request_timeout\", 600) or 600'), so a longer proxy deadline would still fail on the client at 600 s.",
+  "change": [
+    "benchmarks/adapters/generation_deadline.py: agent_client_timeout, the rule shared with ToolSandbox (None at the 600 s default, otherwise deadline + 90 s, as the BFCL client)",
+    "tau2_adapter.run passes agent_timeout to run_tau2 only when it is not None; run_command adds it as \"timeout\" to --agent-llm-args; tau2_protocol.json records agent_timeout only when set",
+    "toolsandbox_adapter imports the same rule (behavior of 8436cae unchanged)"
+  ],
+  "unchanged": [
+    "without a configured deadline (and at exactly 600 s) run_tau2 receives the identical call, and the argv, --agent-llm-args bytes and tau2_protocol.json are as before",
+    "--user-llm-args (user simulator) never changes; tau2's per-task --timeout (--tau2-timeout) is a separate wallclock cap and is untouched",
+    "native (benchmarks.paper.c1 / native_extra) and NPU tau2_harness callers pass no agent_timeout; rescore reuses the saved protocol and command"
+  ],
+  "example": "--generation-timeout 3600 on tau2__agentkv_b128: proxy deadline 3600 s, agent LiteLLM timeout 3690 s",
+  "litellm_check": {
+    "script": "LiteLLM completion with the tau2 venv's versions (litellm 1.82.6, openai 3.16.2, httpx 0.28.1 on box4 /workspace/venv-tau2) against a local endpoint that answers after 2 s, with the agent args tau2 would parse",
+    "observed": "timeout 0.5 -> litellm.exceptions.Timeout after 0.86 s; timeout 5.0 -> completed after 2.02 s"
+  },
+  "cpu_tests": {
+    "new": "5 in benchmarks/test_generation_timeout_wiring.py: prepared persistent tau2 commands (agentkv, agentkv_b768, pyramidkv_r25) hand run_tau2 agent_timeout 1890.0 for an 1800 s deadline and otherwise the identical call; ordinary cells get none; the default --agent-llm-args is byte-identical to the historical string and a set timeout changes only that argument and the protocol key; plus the shared rule test replacing the ToolSandbox-only one",
+    "targeted": "test_generation_timeout_wiring, test_sdk_retry_boundaries, test_toolsandbox_instrumentation, test_tau2_adapter_integration, test_adapter_contract, test_run_dispatch: all pass",
+    "full_suite": {
+      "command": "python -m pytest benchmarks -q (clean git-archive exports, Windows, uv with pytest numpy httpx openai)",
+      "base_8436cae": "7 failed, 1199 passed, 23 skipped",
+      "fixed": "7 failed, 1204 passed, 23 skipped",
+      "failure_set": "identical and pre-existing: test_native_bare x2, test_acon_budget_proxy, test_native_fc_bridge, test_repair_stack::test_bfcl_counts_result_rows, test_tool_source_recording::appworld, test_toolmemory_assembly"
+    }
+  },
+  "gpu_validation": "none; a rerun of tau2__agentkv_b128 in a new root (user decision, about 8-9 h) would be the live check",
+  "npu": "not changed. NPU generality/tau2_harness calls run_tau2 without agent_timeout, so its behavior is identical; an NPU tau2 cell that freezes a non-default generation_timeout would still keep LiteLLM's 600 s agent timeout."
+}

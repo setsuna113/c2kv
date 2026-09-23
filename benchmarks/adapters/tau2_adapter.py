@@ -22,6 +22,9 @@ from paper.process_lifecycle import run_owned  # noqa: E402
 from metrics import aggregate, protocol_columns_for_turn  # noqa: E402
 
 from adapters.base import RunContext, v1  # noqa: E402
+from adapters.generation_deadline import (  # noqa: E402
+    DEFAULT_GENERATION_TIMEOUT, agent_client_timeout,
+)
 from adapters.text_budget_failures import (  # noqa: E402
     proxy_text_budget_failure_code,
 )
@@ -61,15 +64,22 @@ def run_command(base_url: str, user_base_url: str, task_set: str, model: str,
                 user_model: Optional[str] = None,
                 agent_max_tokens: Optional[int] = None,
                 task_retries: Optional[int] = None,
-                llm_retries: Optional[int] = None) -> List[str]:
+                llm_retries: Optional[int] = None,
+                agent_timeout: Optional[float] = None) -> List[str]:
     """``tau2.cli run`` argv — PINNED: the server scripts quote these
     numbers, so any edit here changes what every historical tau2 row means.
+
+    ``agent_timeout`` (see ``generation_deadline.agent_client_timeout``)
+    replaces LiteLLM's 600 s default for agent requests only; ``None`` leaves
+    the argv unchanged.
     """
     agent_config = {"api_base": v1(base_url), "api_key": "EMPTY", "temperature": 0.0}
     if agent_max_tokens is not None:
         agent_config["max_tokens"] = agent_max_tokens
     if llm_retries is not None:
         agent_config["num_retries"] = llm_retries
+    if agent_timeout is not None:
+        agent_config["timeout"] = float(agent_timeout)
     agent_args = json.dumps(agent_config)
     user_config = {"api_base": v1(user_base_url), "api_key": "EMPTY", "temperature": 0.0}
     if llm_retries is not None:
@@ -186,6 +196,8 @@ def evaluate_command(sims: Path, python: Optional[str] = None) -> List[str]:
 
 
 def run(ctx: RunContext) -> Dict[str, Any]:
+    agent_timeout = agent_client_timeout(
+        ctx.opt("generation_timeout", DEFAULT_GENERATION_TIMEOUT))
     return run_tau2(
         ctx.base_url, ctx.user_base_url, ctx.out_dir,
         tau2_dir=ctx.opt("benchmark_dir") or TAU2_DIR,
@@ -199,6 +211,7 @@ def run(ctx: RunContext) -> Dict[str, Any]:
         max_steps=ctx.opt("tau2_max_steps"), timeout=ctx.opt("tau2_timeout"),
         record_prefixes=ctx.opt("record_prefixes", ""),
         agent_max_tokens=ctx.opt("tau2_agent_max_tokens", 4096),
+        **({} if agent_timeout is None else {"agent_timeout": agent_timeout}),
     )
 
 
@@ -377,11 +390,14 @@ def run_tau2(base_url: str, user_base_url: str, out_dir: Path, *,
              num_workers: int = 1, num_trials: Optional[int] = 1,
              max_steps: Optional[int] = None, timeout: Optional[int] = None,
              record_prefixes: str = "", agent_max_tokens: int = 4096,
-             native_server_dir: Optional[Path] = None) -> Dict[str, Any]:
+             native_server_dir: Optional[Path] = None,
+             agent_timeout: Optional[float] = None) -> Dict[str, Any]:
     """Run and score an official tau2 selection through separate agent/user endpoints.
 
     ``native`` disables proxy-only session metadata for the single-task native
     controller; the official task identity remains bound by its ready manifest.
+    ``agent_timeout`` sets the agent's LiteLLM request timeout; ``None`` keeps
+    the historical command and protocol.
     """
     tau2_dir = Path(tau2_dir).resolve()
     out_dir = Path(out_dir).resolve()
@@ -415,7 +431,7 @@ def run_tau2(base_url: str, user_base_url: str, out_dir: Path, *,
         timeout=timeout, python=python, task_split=task_split,
         task_ids=selected, user_model=user_model,
         agent_max_tokens=agent_max_tokens,
-        task_retries=0, llm_retries=0)
+        task_retries=0, llm_retries=0, agent_timeout=agent_timeout)
     protocol = {"suite": task_set, "split": task_split, "task_ids": selected,
                 "num_trials": trials, "num_workers": num_workers,
                 "max_steps": max_steps, "timeout": timeout,
@@ -425,6 +441,8 @@ def run_tau2(base_url: str, user_base_url: str, out_dir: Path, *,
                 "user_simulator_transport_retries": 1,
                 "source": str(tau2_dir), "python": python, "command": command,
                 "native": native, "record_prefixes": str(record_prefixes) if record_prefixes else None}
+    if agent_timeout is not None:
+        protocol["agent_timeout"] = float(agent_timeout)
     (out_dir / "tau2_protocol.json").write_text(
         json.dumps(protocol, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     env = harness_env(tau2_dir, out_dir, native=native)
