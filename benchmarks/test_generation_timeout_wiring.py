@@ -159,7 +159,7 @@ def _tau2_run_tau2_kwargs(plans, plan, cell_id, monkeypatch, tmp_path):
 
 
 @pytest.mark.parametrize("cell_id", ["tau2__agentkv", "tau2__agentkv_b768",
-                                     "tau2__history_kv_pyramidkv_r25_persistent"])
+                                     "tau2__history_kv_pyramidkv_persistent_r0p25"])
 def test_tau2_agent_litellm_timeout_outlives_the_frozen_deadline(plans, monkeypatch, tmp_path, cell_id):
     explicit = _tau2_run_tau2_kwargs(plans, "explicit", cell_id, monkeypatch, tmp_path)
     default = _tau2_run_tau2_kwargs(plans, "default", cell_id, monkeypatch, tmp_path)
