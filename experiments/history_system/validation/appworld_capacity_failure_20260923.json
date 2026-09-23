@@ -1,0 +1,15 @@
+{
+  "schema": "c2kv-appworld-capacity-failure-v1",
+  "created_at": "2026-09-23T09:30:00Z",
+  "branch": "paper/c1v2rv-native-budget-20260923 (on 6432ae7)",
+  "live_failure": "box8 results-c23aw appworld__c2kv_c1_v2_verified_r8_b{512,256,128}: the cells stopped at fd1f8fa_2 / 29a7b7e_1 / fd1f8fa_2 with 'FATAL: AppWorld task fd1f8fa_2 has a generation error, not an official score' and benchmarks.paper.c1 exited",
+  "cause": "the native server rejected the task with its typed 422 c2kv_capacity_infeasible and a typed method_failure step; the patched ACON runner recorded that as termination_reason generation_error, and acon_adapter.collect_appworld raised SystemExit for a generation error. paper c1.run_closed_loop converts a task-bound typed capacity step into a scored-zero method failure only for RuntimeError or CalledProcessError, so the SystemExit ended the process first",
+  "change": "c1_appworld.capacity_rejection accepts a task only when the ACON results.json ends with generation_error carrying the 422 c2kv_capacity_infeasible code and paper c1.controller_step_failure finds this task's typed capacity step; _run_official_harness then raises RuntimeError right after the runner, before telemetry validation and appworld evaluate, and run_closed_loop records the scored-zero capacity_infeasible method failure and runs the next task. Any other generation error follows the unchanged path to the FATAL",
+  "runtime": "git diff 11fa0ab -- experiments/history_system/runtime is empty",
+  "tests": {
+    "fixture": "benchmarks/fixtures/appworld_c1v2_capacity_b512_20260923.json, reduced from the box8 fd1f8fa_2 ready.json, steps.jsonl (last of 45 rows), results.json and final.json; hashes are in its provenance block",
+    "cases": "test_appworld_capacity_failure.py: the recorded evidence is recognised; a different generation error, a non-generation termination, another task's step, an untyped or runner-failure step, a completed last step, a ready manifest for another task and missing results are not; the harness stops before scoring only for the recorded rejection; run_closed_loop scores that task 0 as capacity_infeasible and completes the next task. On 6432ae7 the recognition and harness cases fail",
+    "full_suite": "benchmarks: 6432ae7 7 failed / 1255 passed, fixed 7 failed / 1267 passed (identical failure set); delivery test_history_budget.py 1 failed / 7 passed on both"
+  },
+  "gpu_validation": "none"
+}

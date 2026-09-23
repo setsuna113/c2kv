@@ -424,6 +424,35 @@ def validate_task_execution(
     }
 
 
+# The native server's typed 422 as the ACON runner records it in results.json.
+CAPACITY_REJECTION = re.compile(
+    r"Error code: 422\b.*[\"']code[\"']\s*:\s*[\"']c2kv_capacity_infeasible[\"']")
+
+
+def capacity_rejection(task_out: Path, run_dir: Path, task_id: str) -> str | None:
+    """The method's capacity failure that ended this task, else None.
+
+    The ACON runner turns the server's 422 into an ordinary generation_error.
+    Only that exact rejection, bound by the server's typed step for this task,
+    is a method failure; every other generation error remains fatal.
+    """
+    results_path = acon.appworld_task_dir(run_dir, task_id) / "results.json"
+    try:
+        results = json.loads(results_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if (not isinstance(results, Mapping)
+            or results.get("termination_reason") != "generation_error"
+            or not CAPACITY_REJECTION.search(str(results.get("error") or ""))):
+        return None
+    from .c1 import controller_step_failure
+
+    failure = controller_step_failure(Path(task_out))
+    if failure is None or failure[:2] != ("method_failure", "capacity_infeasible"):
+        return None
+    return failure[2]
+
+
 def _run_official_harness(
     config: Mapping[str, Any], task_id: str, task_out: Path, base_url: str,
     model: str,
@@ -451,6 +480,10 @@ def _run_official_harness(
         acon.appworld_command(python, model, tag, split, max_iter, [task_id]),
         cwd=cwd, env=env, check=True, timeout=timeout,
     )
+    if capacity_rejection(task_out, run_dir, task_id) is not None:
+        # No official score exists; paper c1.run_closed_loop records the typed
+        # step as this task's scored-zero capacity_infeasible method failure.
+        raise RuntimeError(f"AppWorld task {task_id} ended by the native capacity rejection")
     acon.validate_appworld_telemetry(telemetry_path, [task_id])
     scorer_env = {**acon.runner_env(origin), "APPWORLD_ROOT": str(cwd)}
     run_owned(

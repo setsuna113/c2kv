@@ -1,0 +1,53 @@
+{
+  "final": {
+    "journal_summary": {
+      "completed": 44,
+      "failed": 0,
+      "pending": 0,
+      "schema": "a-runtime-attempt-journal-v1",
+      "started": 44
+    },
+    "status": "stopped"
+  },
+  "last_step": {
+    "decision_key": "turn-44/step-44",
+    "error": {
+      "message": "Native S0 mandatory raw input and minimum whole-event gist cannot fit the declared limits: {'history_budget_bytes': 75497472, 'workspace_budget_bytes': 75497472, 'model_context': 262144, 'candidates': [{'event_id': 'acon_appworld/fd1f8fa_2/",
+      "type": "CapacityInfeasible"
+    },
+    "failure_code": "c2kv_capacity_infeasible",
+    "failure_kind": "method_failure",
+    "outer_request_id": "c1-33dc56515781d9a7ba3f5e8a8a68b453c65e2bda2feffb05ea3d2154c5725186",
+    "response": null,
+    "schema": "a-event-native-exact-step-v1",
+    "session_id": "acon_appworld/fd1f8fa_2/attempt-0",
+    "status": "failed"
+  },
+  "provenance": {
+    "final_json_sha256": "d9c331d9001c033fa6c37bdb874eb65c876a97be01d432688347aecc750d39c3",
+    "host": "box8",
+    "paper_revision": "6432ae7 (the AppWorld cell stopped with 'FATAL: AppWorld task fd1f8fa_2 has a generation error, not an official score')",
+    "ready_json_sha256": "7c70a49ad3a889b05261916f09b219efe5145c1888550e5f59ed74b3edf94f79",
+    "reduction": "ready keeps its identity fields; last_step is the last of the 45 steps.jsonl rows with every checked field and the first 240 characters of the error message (the full message lists every capacity candidate); results keeps termination_reason and error; final keeps status and the journal counts",
+    "results_json": "task_shards/fd1f8fa_2/acon_appworld/appworld_harness/experiments/appworld/outputs/c1_t02_risk_c1_t02_r8/test_normal/task_fd1f8fa_2/results.json",
+    "results_json_sha256": "4d58e8be23b734151353ae0af20adfe6893835b83db6a9257f6aed04ed9fcf6a",
+    "steps_jsonl_sha256": "6b11eac26a1f6bc32ecd6da308b25ebc2bb39517e7779149d0126f29625c6ab1",
+    "steps_rows": 45,
+    "task_root": "/workspace/results-c23aw/closed_loop/appworld__c2kv_c1_v2_verified_r8_b512/native/task_shards/fd1f8fa_2"
+  },
+  "ready": {
+    "allowed_task_ids": [
+      "fd1f8fa_2"
+    ],
+    "benchmark": "acon_appworld",
+    "model_name": "c1_t02_risk",
+    "run_id": "paper_c1_t02_risk_r8_appworld__fd1f8fa_2",
+    "schema": "a-event-native-server-v1",
+    "source_profile": "openai-single-task-v1",
+    "status": "ready"
+  },
+  "results": {
+    "error": "Model generation failed: Error code: 422 - {'error': {'message': 'Task exceeds the declared memory capacity', 'type': 'invalid_request_error', 'code': 'c2kv_capacity_infeasible'}}",
+    "termination_reason": "generation_error"
+  }
+}
