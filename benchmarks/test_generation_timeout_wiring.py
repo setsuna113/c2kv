@@ -24,9 +24,9 @@ from benchmarks.model_identity import QWEN3_4B
 from benchmarks.paper import runner
 
 REFERENCE_ATTENTION_BFCL_LONG = (
-    "bfcl_long_context__commitkv", "bfcl_long_context__agentkv",
+    "bfcl_long_context__commitkv_r0p25", "bfcl_long_context__agentkv",
     "bfcl_long_context__commitkv_b768", "bfcl_long_context__agentkv_b768",
-    "bfcl_long_context__history_kv_pyramidkv_r25_persistent",
+    "bfcl_long_context__history_kv_pyramidkv_persistent_r0p25",
 )
 
 
@@ -89,7 +89,7 @@ def _toolsandbox_run_ts_kwargs(plans, plan, cell_id, monkeypatch, tmp_path):
 
 
 @pytest.mark.parametrize("cell_id", ["toolsandbox__agentkv", "toolsandbox__agentkv_b768",
-                                     "toolsandbox__history_kv_pyramidkv_r25_persistent"])
+                                     "toolsandbox__history_kv_pyramidkv_persistent_r0p25"])
 def test_toolsandbox_agent_client_outlives_the_frozen_deadline(plans, monkeypatch, tmp_path, cell_id):
     explicit = _toolsandbox_run_ts_kwargs(plans, "explicit", cell_id, monkeypatch, tmp_path)
     default = _toolsandbox_run_ts_kwargs(plans, "default", cell_id, monkeypatch, tmp_path)
