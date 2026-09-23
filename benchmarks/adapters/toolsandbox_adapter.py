@@ -29,6 +29,7 @@ from typing import Any, Dict, List
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from paper.process_lifecycle import run_owned  # noqa: E402
+from toolsandbox_cli import AGENT_TIMEOUT_ENV  # noqa: E402
 from toolsandbox_suite import (  # noqa: E402
     THREE_DISTRACTION_TOOLS_129, load_named_suite, selected_scenarios,
 )
@@ -42,6 +43,25 @@ NAME = "toolsandbox"
 TS_DIR = Path(os.environ.get("TS_DIR") or Path.home() / "benchmarks" / "ToolSandbox")
 AGENT = "GPT_4_o_2024_05_13"  # openai_api_agent/openai_api_user role keys
 _SERVER_INFO_OPENER = build_opener(ProxyHandler({}))
+DEFAULT_GENERATION_TIMEOUT = 600.0  # run.py and proxy.py default deadline
+CLEANUP_HEADROOM = 90.0  # as adapters.bfcl_adapter.client_kwargs
+
+
+def agent_client_timeout(generation_timeout: float) -> "float | None":
+    """Agent SDK timeout for a run whose proxy deadline is ``generation_timeout``.
+
+    At the default deadline this is ``None``: toolsandbox_cli keeps its
+    historical 600 s client timeout. A configured deadline (the paper runner
+    passes one only to persistent history-KV cells) gets the BFCL client's
+    headroom, so the proxy can return the engine's cleanup acknowledgement
+    before the SDK gives up on the request.
+    """
+    timeout = float(generation_timeout)
+    if not 0 < timeout < float("inf"):
+        raise ValueError("generation_timeout must be finite and positive")
+    if timeout == DEFAULT_GENERATION_TIMEOUT:
+        return None
+    return timeout + CLEANUP_HEADROOM
 
 
 def _server_info(base_url: str) -> dict[str, Any] | None:
@@ -185,6 +205,8 @@ def run(ctx: RunContext) -> Dict[str, Any]:
         if explicit != selected_scenarios(suite):
             raise ValueError("ToolSandbox explicit scenarios differ from named suite")
     scenarios = selected_scenarios(suite, explicit)
+    agent_timeout = agent_client_timeout(
+        ctx.opt("generation_timeout", DEFAULT_GENERATION_TIMEOUT))
     summary = run_ts(
         ctx.base_url, ctx.out_dir,
         test_mode=not (ctx.options.get("full", False) or suite == "full"),
@@ -195,6 +217,7 @@ def run(ctx: RunContext) -> Dict[str, Any]:
         scenarios=scenarios, suite=suite,
         benchmark_dir=ctx.opt("toolsandbox_dir"), python=ctx.opt("bench_python"),
         parallel=ctx.opt("ts_parallel", 1), model=ctx.model,
+        **({} if agent_timeout is None else {"agent_timeout": agent_timeout}),
     )
     summary["cost_join"] = COST_JOIN
     return summary
@@ -296,8 +319,13 @@ def run_ts(base_url: str, out_dir: Path, test_mode: bool = True,
            suite: str = "",
            python: "str | None" = None, parallel: int = 1,
            model: str = "c2kv-agent", user_model: "str | None" = None,
-           native_server_dir: "Path | None" = None) -> Dict[str, Any]:
-    """Run the CLI and collect ``result_summary.json``."""
+           native_server_dir: "Path | None" = None,
+           agent_timeout: "float | None" = None) -> Dict[str, Any]:
+    """Run the CLI and collect ``result_summary.json``.
+
+    ``agent_timeout`` (see ``agent_client_timeout``) replaces the agent SDK's
+    600 s timeout; ``None`` keeps the historical CLI unchanged.
+    """
     if parallel != 1:
         raise ValueError("instrumented ToolSandbox runs require parallel=1")
     if suite == THREE_DISTRACTION_TOOLS_129 and scenarios != selected_scenarios(suite):
@@ -314,6 +342,9 @@ def run_ts(base_url: str, out_dir: Path, test_mode: bool = True,
     # editable installation may silently import a different checkout.
     env["PYTHONPATH"] = os.pathsep.join(filter(None, (
         str(ts_dir.resolve()), env.get("PYTHONPATH"))))
+    env.pop(AGENT_TIMEOUT_ENV, None)
+    if agent_timeout is not None:
+        env[AGENT_TIMEOUT_ENV] = repr(float(agent_timeout))
     cmd = cli_command(out_dir, agent=agent, user=user, test_mode=test_mode,
                       scenarios=scenarios,
                       parallel=parallel)
@@ -330,6 +361,7 @@ def run_ts(base_url: str, out_dir: Path, test_mode: bool = True,
         "user_model": user_model or model,
         "agent_role": agent, "user_role": user, "source": str(ts_dir),
         "command": cmd, "measurement": "runtime_scenario_request_action_v1",
+        **({} if agent_timeout is None else {"agent_timeout": float(agent_timeout)}),
     }, indent=2) + "\n", encoding="utf-8")
     completed = run_owned(cmd, cwd=ts_dir, env=env)
     if completed.returncode != 0:

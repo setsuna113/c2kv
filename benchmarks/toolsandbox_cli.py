@@ -136,11 +136,30 @@ def install_instrumentation(telemetry, scenario_class, completions_class,
     execution_module.respond_to_messages_set_all_order_permutations = measured_execute
 
 
-def role_client_kwargs(url: str, *, agent: bool) -> dict:
+# Set by toolsandbox_adapter.run_ts only when the run configures a generation
+# deadline; the agent client then outlives the proxy deadline by the cleanup
+# headroom. Absent, both roles keep the historical 600 s client timeout.
+AGENT_TIMEOUT_ENV = "C2KV_TOOLSANDBOX_AGENT_TIMEOUT"
+
+
+def role_client_kwargs(url: str, *, agent: bool,
+                       agent_timeout: "float | None" = None) -> dict:
     kwargs = {"api_key": "EMPTY", "base_url": url, "timeout": 600.0}
     if agent:
         kwargs["max_retries"] = 0
+        if agent_timeout is not None:
+            kwargs["timeout"] = agent_timeout
     return kwargs
+
+
+def agent_timeout_from_env(environ=os.environ) -> "float | None":
+    value = environ.get(AGENT_TIMEOUT_ENV)
+    if not value:
+        return None
+    timeout = float(value)
+    if not 0 < timeout < float("inf"):
+        raise ValueError(f"{AGENT_TIMEOUT_ENV} must be finite and positive")
+    return timeout
 
 
 def main() -> None:
@@ -153,13 +172,16 @@ def main() -> None:
     from tool_sandbox.roles import execution_environment
     from tool_sandbox.tools import rapid_api_search_tools
 
+    agent_timeout = agent_timeout_from_env()
+
     def route_role(role, url, model, *, agent=False):
         original = role.__init__
 
         def routed(self):
             original(self)
             self.model_name = model
-            self.openai_client = OpenAI(**role_client_kwargs(url, agent=agent))
+            self.openai_client = OpenAI(**role_client_kwargs(
+                url, agent=agent, agent_timeout=agent_timeout))
 
         role.__init__ = routed
 
