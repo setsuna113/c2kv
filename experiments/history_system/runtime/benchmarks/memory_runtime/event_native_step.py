@@ -160,7 +160,25 @@ class EventNativeDecisionRunner:
                 if hasattr(self.controller, 'max_recovery_rounds'):
                     record['recovery_checks'] = checks
                     record['recovery_rounds'] = rounds
+                capacity = None
                 while reconsidered['regenerate']:
+                    capacity = self._regeneration_capacity(reconsidered['memory'])
+                    if capacity is not None:
+                        if rounds:
+                            raise CapacityInfeasible(
+                                'RACER recovery capacity exhausted after a completed '
+                                'regeneration; the original draft state is no longer held')
+                        # A declined first recovery leaves the original draft
+                        # and its resident state intact, without a new attempt.
+                        capacity_rejected = True
+                        capacity['resolution'] = 'kept_draft'
+                        capacity['kept_generation_index'] = 0
+                        record['recovery_capacity'] = capacity
+                        record['recovery_skipped'] = {
+                            'reason': 'capacity', 'selected_generation_index': 0,
+                            'capacity': copy.deepcopy(capacity),
+                        }
+                        break
                     rounds.append(copy.deepcopy(reconsidered['decision']))
                     record['generation_trace'][-1]['discarded'] = True
                     final_memory = reconsidered['memory']
@@ -206,13 +224,19 @@ class EventNativeDecisionRunner:
                     record['exact_recovery'] = copy.deepcopy(rounds[-1] if rounds else reconsidered['decision'])
                     record['exact_recovery']['recovery_round_count'] = len(rounds)
                     record['exact_recovery']['termination'] = (
-                        reconsidered['decision']['reason'] if not reconsidered['regenerate']
+                        'recovery_capacity_exhausted' if capacity is not None
+                        else reconsidered['decision']['reason'] if not reconsidered['regenerate']
                         else 'recovery_or_generation_limit')
                 if capacity_rejected:
                     record['exact_recovery'].update(
+                        status='recovery_capacity_exhausted',
+                        decided_status=record['exact_recovery'].get('status'),
                         regenerate=False, post_draft_exact_recovery_applied=False,
-                        termination='recovery_skipped:capacity',
+                        termination='recovery_capacity_exhausted',
                         capacity_rejection=copy.deepcopy(record['recovery_skipped']['capacity']))
+                if capacity is not None and not rounds:
+                    record['exact_recovery'].update(
+                        recovery_capacity=copy.deepcopy(capacity))
                 commit_validator = getattr(self.controller, 'validate_commit', None)
                 if callable(commit_validator) and not recovery_disabled and not capacity_rejected:
                     commit_started = time.perf_counter_ns()
@@ -321,6 +345,10 @@ class EventNativeDecisionRunner:
     def close(self):
         """Release the generator's committed device and host session cache."""
         self.generator.close_session()
+
+    def _regeneration_capacity(self, memory):
+        check = getattr(self.generator, 'regeneration_capacity', None)
+        return check(memory) if callable(check) else None
 
     def _generate(self, memory, metadata, record, phase, *, compression_chunks=None):
         from .budget_guard import history_budget_receipt

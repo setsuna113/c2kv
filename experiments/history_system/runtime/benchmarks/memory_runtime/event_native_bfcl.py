@@ -27,6 +27,23 @@ SUPPORTED_SESSION_CACHE_POLICIES = frozenset({
     # PersistentRacerGenerator: engine-owned persistent session with transactional recovery.
     'racer-persistent-transaction-v1',
 })
+# Grace after the server's own deadlines, as the paper BFCL client (bfcl_adapter.client_kwargs).
+CLEANUP_HEADROOM_SECONDS = 90.0
+
+
+def decision_request_timeout(ready, generation_timeout):
+    """Client read bound for one decision under a configured generation deadline.
+
+    One official request is one server decision, which may run up to the route's
+    max_generations_per_decision generations, each bounded by the deadline.
+    """
+    deadline = float(generation_timeout)
+    if not math.isfinite(deadline) or deadline <= 0:
+        raise ValueError('generation timeout must be positive and finite')
+    generations = (ready.get('route_contract') or {}).get('max_generations_per_decision', 1)
+    if type(generations) is not int or generations < 1:
+        raise ValueError('server manifest max_generations_per_decision must be a positive integer')
+    return generations * deadline + CLEANUP_HEADROOM_SECONDS
 
 
 def save(path, value):
@@ -170,7 +187,9 @@ def worker(contract_path):
         handler_name=contract['handler_name'], project_root=root,
         gold_recovery=None, task_audit_path=root / 'task_audit' / 'tasks.jsonl',
         num_threads=1, no_upstream_retries=True, generation_temperature=0,
-        generation_seed=0, generation_max_tokens=ready['max_new_tokens'])
+        generation_seed=0, generation_max_tokens=ready['max_new_tokens'],
+        **({'request_timeout': contract['request_timeout_seconds']}
+           if 'request_timeout_seconds' in contract else {}))
     save(Path(contract['summary_path']), summary)
 
 
@@ -200,6 +219,9 @@ def main(argv=None):
     parser.add_argument('--max-wall-seconds', type=float)
     parser.add_argument('--overlap-audit', type=Path,
                         help='Checkpoint-bound BFCL exact-overlap audit; checked before generation')
+    parser.add_argument('--generation-timeout', type=float,
+                        help='Configured per-generation server deadline; without it the '
+                             'official client keeps its 600 s read bound')
     parser.add_argument('--worker-contract', type=Path, help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
     if args.worker_contract is not None:
@@ -235,6 +257,10 @@ def main(argv=None):
         'overlap_admission': overlap_admission,
         'scope': 'Official task loop and official scoring; model provenance and fixture status come from the server manifest.',
     }
+    if args.generation_timeout is not None:
+        contract.update(
+            generation_timeout_seconds=args.generation_timeout,
+            request_timeout_seconds=decision_request_timeout(ready, args.generation_timeout))
     contract_path = args.out / 'contract.json'
     save(contract_path, contract)
     environment = os.environ.copy()

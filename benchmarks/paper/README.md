@@ -1029,7 +1029,7 @@ StreamingLLM IDs, including the b128/b192/b256 cells, remain distinct; their
 existing results are not relabeled as v2 results.
 
 A typed pre-admission capacity rejection during the first regeneration retains
-the original draft and its held state (`recovery_skipped:capacity`), and charges
+the original draft and its held state (`recovery_skipped.reason=capacity`), and charges
 the observed attempt costs. Initial capacity failure remains a task-level method
 failure. A rejection without a verified rollback receipt, or after an earlier
 successful regeneration has replaced the original held state, is not silently

@@ -401,22 +401,28 @@ class SglangBackend(Backend):
                 "request as a history-KV baseline")
         return result
 
-    def open_history_session(self, session_id: str, timeout: int = 600) -> str:
+    def open_history_session(self, session_id: str, timeout: int = 600,
+                             *, expire_idle: bool = True) -> str:
         """Open the streaming session the physical-eviction arms need.
 
         Same call the upstream client makes
         (``_open_persistent_history_session``); the server hands the id back as
-        a bare JSON string and refuses a duplicate id."""
-        result = self._post_json(
-            "/open_session",
-            {
-                "capacity_of_str_len": 0,
-                "session_id": session_id,
-                "streaming": True,
-                "timeout": float(timeout),
-            },
-            timeout,
-        )
+        a bare JSON string and refuses a duplicate id.
+
+        ``timeout`` bounds this request and, with ``expire_idle``, is also the
+        engine's session timeout: the scheduler closes a session once that many
+        seconds have passed since its last request started and no request is
+        running on it.  ``expire_idle=False`` omits the timeout, so the session
+        lives until it is closed (``close_history_session`` or an abort that
+        closes it)."""
+        payload = {
+            "capacity_of_str_len": 0,
+            "session_id": session_id,
+            "streaming": True,
+        }
+        if expire_idle:
+            payload["timeout"] = float(timeout)
+        result = self._post_json("/open_session", payload, timeout)
         if result != session_id:
             raise BackendError(
                 "history_kv_session_failed",

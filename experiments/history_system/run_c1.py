@@ -587,6 +587,9 @@ def commands_for_task(args: argparse.Namespace, task: str, controller_path: Path
             benchmark_dir=str(_benchmark_dir(args).resolve()), port=args.port,
             python=args.bfcl_python, max_wall_seconds=args.task_timeout,
         )
+        if timeout is not None:
+            # The official client waits for a whole decision under this deadline.
+            worker.extend(["--generation-timeout", str(timeout)])
     else:
         worker = portable_worker_command(args, task, task_out)
     return server, worker

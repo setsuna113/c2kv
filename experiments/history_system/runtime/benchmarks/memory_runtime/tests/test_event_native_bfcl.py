@@ -487,3 +487,101 @@ def test_excluded_task_is_rejected_by_parent_before_spawn_or_output(tmp_path, mo
     with pytest.raises(ValueError, match='excluded or unaudited task'):
         wrapper.main(argv)
     assert not out.exists()
+
+
+@pytest.mark.parametrize(('deadline_args', 'expected'), [
+    ([], None),  # historical contract: the official client keeps 600 s
+    (['--generation-timeout', '3600'], {'generation_timeout_seconds': 3600.0,
+                                        'request_timeout_seconds': 2 * 3600.0 + 90.0}),
+])
+def test_configured_deadline_bounds_the_client_by_whole_decisions(
+        tmp_path, monkeypatch, deadline_args, expected) -> None:
+    ready_path = _write_manifest(tmp_path / 'ready.json')
+    benchmark_dir = _benchmark_dir(tmp_path / 'official-bfcl')
+    monkeypatch.setattr(wrapper, 'read_health', lambda base_url: _health())
+
+    class Process:
+        pid = 4321
+
+        def __init__(self, command, **kwargs):
+            self.returncode = 0
+
+        def poll(self):
+            return self.returncode
+
+        def wait(self, timeout):
+            return self.returncode
+
+    monkeypatch.setattr(wrapper.subprocess, 'Popen', Process)
+    out = tmp_path / 'run-output'
+    wrapper.main(['--server-manifest', str(ready_path), '--base-url', 'http://127.0.0.1:31000/v1',
+                  '--benchmark-dir', str(benchmark_dir), '--out', str(out),
+                  '--max-wall-seconds', '10', *deadline_args])
+    contract = json.loads((out / 'contract.json').read_text(encoding='utf-8'))
+    fields = {key: contract[key] for key in ('generation_timeout_seconds', 'request_timeout_seconds')
+              if key in contract}
+    assert fields == (expected or {})
+
+
+def test_worker_forwards_the_decision_bound_to_the_official_client(tmp_path, monkeypatch) -> None:
+    contract = {
+        'server_manifest': _ready(), 'bfcl_project_root': str(tmp_path / 'root'),
+        'benchmark_dir': str(tmp_path), 'base_url': 'http://127.0.0.1:31000/v1',
+        'handler_name': 'c2kv-event-native-capacity-exact-once',
+        'summary_path': str(tmp_path / 'summary.json'), 'request_timeout_seconds': 7290.0,
+    }
+    contract_path = tmp_path / 'contract.json'
+    contract_path.write_text(json.dumps(contract), encoding='utf-8')
+    seen = {}
+    monkeypatch.setattr(bfcl_adapter, 'run_bfcl', lambda *args, **kwargs: seen.update(kwargs) or {})
+    monkeypatch.setattr(wrapper, 'bind_benchmark', lambda path: {})
+    monkeypatch.setenv('BFCL_PROJECT_ROOT', str(tmp_path / 'previous-root'))
+    monkeypatch.setattr(wrapper.os, 'chdir', lambda path: None)
+    wrapper.worker(contract_path)
+    assert seen['request_timeout'] == 7290.0
+
+
+def test_decision_bound_rejects_invalid_deadlines_and_route_counts() -> None:
+    ready = _ready()
+    assert wrapper.decision_request_timeout({}, 600) == 690.0
+    for deadline in (0, -1, float('inf'), float('nan')):
+        with pytest.raises(ValueError, match='generation timeout'):
+            wrapper.decision_request_timeout(ready, deadline)
+    ready['route_contract']['max_generations_per_decision'] = 0
+    with pytest.raises(ValueError, match='max_generations_per_decision'):
+        wrapper.decision_request_timeout(ready, 600)
+
+
+@pytest.mark.parametrize(('request_timeout', 'read'), [(None, 600.0), (7290.0, 7290.0)])
+def test_registered_handler_reads_for_the_configured_bound(
+        tmp_path, monkeypatch, request_timeout, read) -> None:
+    import sys
+    import types
+
+    # Minimal stand-ins for the two official modules the handler subclasses;
+    # the client kwargs under test are built by this adapter, not by BFCL.
+    registry = {}
+    config = types.ModuleType('bfcl_eval.constants.model_config')
+    config.MODEL_CONFIG_MAPPING = registry
+    config.ModelConfig = lambda **kwargs: types.SimpleNamespace(**kwargs)
+    completion = types.ModuleType('bfcl_eval.model_handler.api_inference.openai_completion')
+    completion.OpenAICompletionsHandler = type('OpenAICompletionsHandler', (), {})
+    for name, module in {
+            'bfcl_eval': types.ModuleType('bfcl_eval'),
+            'bfcl_eval.constants': types.ModuleType('bfcl_eval.constants'),
+            'bfcl_eval.constants.model_config': config,
+            'bfcl_eval.model_handler': types.ModuleType('bfcl_eval.model_handler'),
+            'bfcl_eval.model_handler.api_inference': types.ModuleType(
+                'bfcl_eval.model_handler.api_inference'),
+            'bfcl_eval.model_handler.api_inference.openai_completion': completion}.items():
+        monkeypatch.setitem(sys.modules, name, module)
+    monkeypatch.setattr(bfcl_adapter, '_install_timed_executor', lambda telemetry: None)
+    kwargs = {} if request_timeout is None else {'request_timeout': request_timeout}
+    bfcl_adapter.install_handler('http://127.0.0.1:1/v1', handler_name='timeout-fixture',
+                                 no_upstream_retries=True,
+                                 harness_telemetry_path=tmp_path / 'events.jsonl', **kwargs)
+    handler_type = registry['timeout-fixture'].model_handler
+    client = handler_type.__new__(handler_type)._build_client_kwargs()
+    assert client['timeout'].read == read
+    assert client['timeout'].connect == 8.0
+    assert client['max_retries'] == 0

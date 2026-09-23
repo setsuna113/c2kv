@@ -1,0 +1,35 @@
+{
+  "schema": "c2kv-validation-receipt-v1",
+  "date": "2026-09-23",
+  "subject": "RACER regeneration that cannot keep the backend's mandatory history keeps the held generation",
+  "base_revision": "ffeaf2c (paper), 3b884f6bf (engine, b6aaca177 + pyramid_flat_fallback)",
+  "engine_revision": "c08d93f71 (fix/racer-regeneration-retention-20260923 on 3b884f6bf)",
+  "user_decision": "If a recovery does not fit, treat the step as not recovered: do not run that regeneration, commit the draft action as usual, do not score a method failure and do not abort the shard.",
+  "incident": {
+    "host": "SZ-p6k",
+    "task_root": "$SZ_RESULTS_ROOT/bfcllong-b256-sz/pk3/prep/closed_loop/bfcl_long_context__racer_commitkv_c1_v2_verified_b256.failed.1/native/task_shards/multi_turn_long_context_155",
+    "checked_here": "server/steps.jsonl decision turn-1/step-1: the draft completed with racer_budget available_history_tokens 256 and CommitKV reference selection pending_tokens 28 (2 protected pages); the regeneration returned HTTP 400 RACER_GENERATION_ABORTED: PHYSICAL_HISTORY_KV_EVICTION_EXCEPTION: ValueError: pending tokens exceed the total cache budget",
+    "scheduler_report": "the regeneration hint carried native_evidence_tokens 232, so its CommitKV target was 256 - 232 = 24 < 28"
+  },
+  "engine_semantics": {
+    "sources": "3b884f6bf: serving_chat enforce_request_budget, session_aware_cache._resolve_racer_transaction/_replace_racer_sources/_rollback_failed_persistent_request, scheduler._build_commitkv_reference_state, commitkv.CommitKVRuntimeState.checkpoint/compose_retained_indices, racer_transaction.checkpoint_generation",
+    "why_not_after_submission": "the regenerate request resolves the held draft as discard in match_prefix before its eviction fails (draft decode KV freed, held checkpoint cleared, recovered source spans removed, CommitKV runtime object shared with the slot), and the failed turn only rolls back its own suffix; continuing after a rejected regeneration would not restore the post-draft session",
+    "exact_condition": "checkpoint_generation runs after the draft prefill, and its runtime copy is what the regeneration restores; the first regeneration selection protects its pending pages and raises exactly when their tokens exceed min(client target, B - server evidence), unless a recovered source span covers a protected page, which interrupts the transition first"
+  },
+  "change": {
+    "engine racer_transaction.py": "checkpoint_generation adds racer_transaction.regeneration_mandatory_history {tokens, source_message_indices, release: replaced_source_message} from the held runtime copy (CommitKV protected pending pages; 0 for other methods). Report-only; serving behaviour unchanged",
+    "paper racer/generator.py": "PersistentRacerGenerator keeps the receipt of its latest completed generation and regeneration_capacity(memory) returns a racer-regeneration-capacity-v1 receipt when the mandatory tokens (0 if a recovered source is a protected message) exceed the request's own history target max(1, B - recovery_tokens); that target also bounds the engine's effective target, so a declined recovery would certainly have been rejected. An engine without the receipt keeps the historical submit behaviour; a malformed receipt fails the generation",
+    "paper event_native_step.py": "before each regeneration the runner asks the generator; on a receipt it submits nothing, records record.recovery_capacity (resolution kept_draft or kept_last_regeneration, kept_generation_index), sets exact_recovery.termination recovery_capacity_exhausted and, when no round ran, exact_recovery.status recovery_capacity_exhausted with decided_status recover. The held generation stays selected, so resolve_decision commits it at the next decision"
+  },
+  "accounting": [
+    "No attempt is journaled for a declined recovery, so journal failed/pending stay 0 and the harness finalization checks are unchanged.",
+    "Recovery counters (run_c1 recovery_rows/successful, measurement recovery_committed) read exact_recovery.status == recover and completed regeneration traces, so a declined recovery counts as not recovered.",
+    "Count declined recoveries from steps.jsonl records with recovery_capacity.",
+    "The candidate controller has already counted the recovery in its per-task generation-limit ledger (_recovery_counts), so a later decision may reach shared_task_generation_limit one recovery earlier; this is conservative."
+  ],
+  "residual_risk": "If the engine resolves more native evidence than the client's recovery_tokens, a recovery the client judged to fit can still be rejected by the engine; that case keeps today's behaviour (the step fails).",
+  "tests": {
+    "engine": "test/registered/unit/test_racer_transaction.py::test_held_receipt_reports_the_exact_regeneration_retention_boundary (receipt = 5 protected tokens of two messages; the held copy passes at capacity 5 and raises at 4; replacing a protected message releases it; non-CommitKV reports 0). test_racer_transaction.py 17 passed, test_commitkv.py + test_racer_features_failure.py 19 passed",
+    "paper": "experiments/history_system/runtime/benchmarks/memory_runtime/tests/test_racer_regeneration_capacity.py drives the real PersistentRacerGenerator and EventNativeDecisionRunner against a scripted engine: the 28 > 24 case submits only the draft, records the receipt, journals 1 completed attempt and commits the draft at the next decision; a released page, the exact boundary and an engine without the receipt still submit the regeneration; a malformed receipt fails. On ffeaf2c the unfit and malformed cases fail and the three submit-as-before cases pass"
+  }
+}

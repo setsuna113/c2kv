@@ -236,7 +236,8 @@ def install_handler(base_url: str, model: str = SERVED_MODEL,
                     no_upstream_retries: bool = False,
                     generation_seed: Optional[int] = None,
                     generation_max_tokens: int = 4096,
-                    harness_telemetry_path: "Path | str | None" = None) -> None:
+                    harness_telemetry_path: "Path | str | None" = None,
+                    request_timeout: Optional[float] = None) -> None:
     # NOTE: default resolved at CALL time — binding the default to
     # MODEL_NAME at def time made monkeypatched names register the
     # wrong key (val20 evaluate failure)
@@ -278,7 +279,10 @@ def install_handler(base_url: str, model: str = SERVED_MODEL,
             kwargs = {
                 "api_key": "EMPTY",
                 "base_url": base_url,
-                "timeout": httpx.Timeout(timeout=600.0, connect=8.0),
+                # None keeps the historical 600 s read bound.
+                "timeout": httpx.Timeout(
+                    timeout=600.0 if request_timeout is None else request_timeout,
+                    connect=8.0),
             }
             if no_upstream_retries:
                 kwargs["max_retries"] = 0
@@ -744,7 +748,8 @@ def run_bfcl(base_url: str, categories: str = "multi_turn_base",
              no_upstream_retries: bool = False,
              generation_temperature: Optional[float] = None,
              generation_seed: Optional[int] = None,
-             generation_max_tokens: int = 4096) -> Dict[str, Any]:
+             generation_max_tokens: int = 4096,
+             request_timeout: Optional[float] = None) -> Dict[str, Any]:
     """Register the handler and drive the official generate/evaluate CLI
     in-process.
 
@@ -800,6 +805,7 @@ def run_bfcl(base_url: str, categories: str = "multi_turn_base",
             generation_seed=generation_seed,
             generation_max_tokens=generation_max_tokens,
             harness_telemetry_path=harness_telemetry_path,
+            request_timeout=request_timeout,
         )
         category_ids = official_category_ids(categories)
         ids: Optional[List[str]] = None
