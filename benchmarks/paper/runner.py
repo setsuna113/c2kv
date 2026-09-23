@@ -888,15 +888,8 @@ def _unsupported_stage(stage, cell):
     return None
 
 
-def execute(config, plan, output, source, stages, selected, port_offset=0):
-    _, unknown = _selected_plan(plan, selected)
-    if any(is_subset(cell) for cell in plan):
-        if unknown:
-            raise ValueError(f"Unknown task subset cells: {unknown}")
-        if any(stage != "closed_loop" for stage in stages):
-            raise ValueError("Task subsets require --stage closed_loop")
-    config = with_port_offset(config, port_offset)
-    profile_path = output / "deployment_profile.json"
+def paper_env(config, source):
+    """Environment shared by a cell's engine and its benchmark children."""
     env = dict(os.environ)
     env["PYTHONPATH"] = os.pathsep.join([str(source / "python"), str(ROOT.parent), env.get("PYTHONPATH", "")])
     env["BENCH_BFCL_DIR"] = config["bfcl_dir"]
@@ -906,6 +899,19 @@ def execute(config, plan, output, source, stages, selected, port_offset=0):
     env.setdefault("CUDA_HOME", "/opt/cuda")
     env["PATH"] = (str(Path(config["server_python"]).parent) + os.pathsep
                    + env.get("PATH", ""))
+    return env
+
+
+def execute(config, plan, output, source, stages, selected, port_offset=0):
+    _, unknown = _selected_plan(plan, selected)
+    if any(is_subset(cell) for cell in plan):
+        if unknown:
+            raise ValueError(f"Unknown task subset cells: {unknown}")
+        if any(stage != "closed_loop" for stage in stages):
+            raise ValueError("Task subsets require --stage closed_loop")
+    config = with_port_offset(config, port_offset)
+    profile_path = output / "deployment_profile.json"
+    env = paper_env(config, source)
     for stage in stages:
         for cell in plan:
             if selected and cell["cell_id"] not in selected:
@@ -1154,7 +1160,7 @@ def aggregate_results(config, plan, output, stages, selected):
 @unwind_on_termination
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=["prepare", "run", "aggregate", "rescore"])
+    parser.add_argument("action", choices=["prepare", "run", "aggregate", "rescore", "serve"])
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     parser.add_argument("--sglang-source", type=Path, default=ROOT.parent.parent / "sglang-paper")
     parser.add_argument("--output", type=Path)
@@ -1206,7 +1212,20 @@ def main(argv=None):
                         help="shift server/proxy ports for concurrent single-GPU runners on one host")
     parser.add_argument("--generation-timeout", type=float,
                         help="freeze an explicit positive deadline in seconds for persistent history-KV cells; use a new output root")
+    parser.add_argument("--workers", type=int,
+                        help="serve only: concurrent single-task children sharing one engine")
+    parser.add_argument("--serve-tasks", default="",
+                        help="serve only: comma-separated official task IDs (default: the whole split)")
     args = parser.parse_args(argv)
+    if args.action == "serve":
+        if args.workers is None or args.workers < 1:
+            parser.error("serve requires --workers >= 1")
+        if args.stage == "common_prefix":
+            parser.error("serve runs closed-loop tasks")
+        if len(set(filter(None, args.cells.split(",")))) != 1:
+            parser.error("serve takes exactly one --cells id")
+    elif args.workers is not None or args.serve_tasks:
+        parser.error("--workers and --serve-tasks apply only to serve")
     config = json.loads(args.config.read_text())
     if args.action == "rescore" and (not set(filter(None, args.cells.split(",")))
                                      or args.stage == "common_prefix"):
@@ -1254,6 +1273,20 @@ def main(argv=None):
         stages = ["closed_loop", "common_prefix"] if args.stage == "all" else [args.stage]
         execute(config, plan, output, source, stages, set(filter(None, args.cells.split(","))),
                 port_offset=args.port_offset)
+    elif args.action == "serve":
+        from .c1 import selected_tasks
+        from .serving import serve_cell
+        (cell_id,) = set(filter(None, args.cells.split(",")))
+        cell = next((row for row in plan if row["cell_id"] == cell_id), None)
+        if cell is None:
+            parser.error(f"Unknown cell {cell_id!r}")
+        tasks = selected_tasks(config, cell["benchmark"],
+                               args.serve_tasks.split(",") if args.serve_tasks else None)
+        manifest = serve_cell(config, cell, output, source, output / "deployment_profile.json",
+                              workers=args.workers, tasks=tasks, port_offset=args.port_offset)
+        print(json.dumps({key: manifest[key] for key in
+                          ("cell_id", "workers", "n_tasks", "n_scored", "total_runtime_seconds",
+                           "tasks_per_hour", "successful_tasks_per_hour", "status")}, indent=2))
     elif args.action == "rescore":
         from .rescore import rescore_cells
         receipts = rescore_cells(plan, output, set(filter(None, args.cells.split(","))))
