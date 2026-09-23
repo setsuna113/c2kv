@@ -5,9 +5,10 @@ benchmarks; other native arms keep the BFCL-only sweep; a task-bound capacity
 failure stays a scored task-local method failure on the non-BFCL adapters.
 """
 import json
+import os
 import subprocess
 import sys
-import types
+from pathlib import Path
 
 import pytest
 
@@ -16,6 +17,7 @@ from benchmarks.paper.candidate_matrix import (
     BFCL_BENCHMARKS, SUPPORTED_BENCHMARKS, native_budget_benchmarks, with_candidate_methods,
 )
 
+ROOT = Path(__file__).resolve().parents[2]
 ARM = "c2kv_c1_v2_verified_r8"
 EXTRA = ("tau2", "toolsandbox", "acebench_agent", "appworld")
 BUDGETS = (128, 256, 512)
@@ -90,8 +92,8 @@ def test_delivery_forwards_candidate_budget_on_every_benchmark(tmp_path, monkeyp
         assert args.history_budget_tokens == 256
         assert args.candidate_algorithm == "c1_v2_verified"
         seen = []
-        fake = types.SimpleNamespace(resolve_override=lambda tokens, *rest: seen.append(tokens) or {})
-        monkeypatch.setitem(sys.modules, "history_budget", fake)
+        monkeypatch.setattr(delivery._history_budget_module(), "resolve_override",
+                            lambda tokens, *rest: seen.append(tokens) or {})
         assert delivery._history_budget_override(args, {}) == {} and seen == [256]
         args.candidate_algorithm = None   # the C1 detector route keeps BFCL only
         if args.benchmark != "bfcl" and args.method != "c2kv_native":
@@ -172,3 +174,54 @@ def test_capacity_failure_is_task_local_on_native_adapters(tmp_path, monkeypatch
     summary = json.loads((cell / f"summary_{paper_c1.ARM}.json").read_text())
     assert summary["n"] == 2 and summary["semantic_score"] == 0.5
     assert summary["method_failure_task_ids"] == ["5"]
+
+
+def test_delivery_budget_module_ignores_the_benchmark_history_budget(monkeypatch):
+    """The paper package's own history_budget comes first on the adapters' sys.path."""
+    from benchmarks import history_budget as benchmark_budget
+
+    delivery = paper_c1.load_delivery()
+    monkeypatch.syspath_prepend(str(ROOT / "benchmarks"))
+    monkeypatch.setitem(sys.modules, "history_budget", benchmark_budget)
+    module = delivery._history_budget_module()
+    assert Path(module.__file__).resolve() == (Path(paper_c1.DELIVERY) / "history_budget.py").resolve()
+    assert callable(module.resolve_override) and not hasattr(module, "HistoryKVBudget")
+
+
+@pytest.mark.parametrize("cell_id", ["toolsandbox__c2kv_c1_v2_verified_r8_b256",
+                                     "toolsandbox__c2kv_native_r8_b256"])
+def test_runner_command_reaches_the_delivery_budget_in_a_real_c1_process(tmp_path, cell_id):
+    """Run a prepared toolsandbox native budget command on CPU up to build_profile.
+
+    A fixture checkpoint config cannot match the frozen C1000 checkpoint, so the
+    delivery's resolve_override stops the process right after resolving the module.
+    """
+    from benchmarks.toolsandbox_suite import THREE_DISTRACTION_TOOLS_129, load_named_suite
+
+    source = tmp_path / "ToolSandbox"
+    (source / "tool_sandbox").mkdir(parents=True)
+    (source / "tool_sandbox" / "__init__.py").write_text("")
+    ids = list(load_named_suite(THREE_DISTRACTION_TOOLS_129)["scenario_ids"])
+    (source / "tool_sandbox" / "cli.py").write_text(
+        "def resolve_scenarios(desired_scenario_names=None, preferred_tool_backend=None):\n"
+        f"    return {{name: None for name in {ids!r}}}\n")
+    checkpoint = tmp_path / "checkpoint-1000"
+    checkpoint.mkdir()
+    (checkpoint / "config.json").write_text(json.dumps({
+        "num_hidden_layers": 36, "num_key_value_heads": 8, "head_dim": 128,
+        "history_memory_policy": {"kv_bytes_per_token": 147456}}))
+    cfg = runner.with_native_history_budget(config(("toolsandbox",)), ARM, 256)
+    cfg.update(toolsandbox_dir=str(source), toolsandbox_python=sys.executable,
+               bench_python=sys.executable, checkpoint=str(checkpoint),
+               toolsandbox_suite=THREE_DISTRACTION_TOOLS_129)
+    plan, _ = runner.prepare(cfg, tmp_path / "results", tmp_path / "engine")
+    cell = {row["cell_id"]: row for row in plan}[cell_id]
+    assert cell["command"][1:3] == ["-m", "benchmarks.paper.c1"]
+    completed = subprocess.run(
+        [sys.executable, *cell["command"][1:]], cwd=ROOT, capture_output=True, text=True,
+        env=dict(os.environ, PYTHONPATH=str(ROOT)), timeout=600)
+    output = completed.stdout + completed.stderr
+    assert completed.returncode != 0
+    assert "build_profile" in output and "resolve_override" in output, output[-3000:]
+    assert "AttributeError" not in output, output[-3000:]
+    assert "native history budget requires the selected C1000 checkpoint config" in output
