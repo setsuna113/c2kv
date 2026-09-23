@@ -144,7 +144,8 @@ TOOL_MEMORY: Optional["toolmemory.ToolMemory"] = None
 UPSTREAM = ""
 BENCHMARK = ""
 SHARED_ENGINE = False
-GENERATION_TIMEOUT = 600.0
+DEFAULT_GENERATION_TIMEOUT = 600.0
+GENERATION_TIMEOUT = DEFAULT_GENERATION_TIMEOUT
 SESSION_CLEANUP_TIMEOUT = 60.0
 REQUEST_LOG_PATH = ""
 TELEMETRY_LOG_PATH = ""
@@ -1719,17 +1720,38 @@ def _history_session_id(conv: str) -> str:
       sessions before the next episode (engine-wide flush only in exclusive
       mode);
     * callers without an episode id have no boundary signal, so their sessions
-      live until the server restarts.
+      live until proxy shutdown or, at the default deadline, the engine's idle
+      timeout (see ``_open_history_session``).
     """
     with STATE.lock:
         session_id = STATE.history_sessions.get(conv)
         if session_id:
             return session_id
     session_id = f"c2kv-bench-history-{conv[:16]}-{uuid.uuid4().hex}"
-    BACKEND.open_history_session(session_id)
+    _open_history_session(session_id)
     with STATE.lock:
         STATE.history_sessions.setdefault(conv, session_id)
         return STATE.history_sessions[conv]
+
+
+def _open_history_session(session_id: str) -> None:
+    """Open one owned persistent session under this run's generation deadline.
+
+    The engine reaps a session once its timeout has passed since the session's
+    last request *started*, unless a request is still running on it.  The gap
+    before a conversation's next turn therefore spans its own generation plus
+    every other role's turn in between (e.g. a user simulator on the same
+    engine, with its own client timeout and retries), which no bound derived
+    from the deadline covers.  A configured ``--generation-timeout`` opens the
+    session without an idle timeout; this proxy closes every session it owns at
+    the next episode boundary, on /close_measurement_session, after a lost
+    response and at proxy shutdown.  The default deadline keeps the historical
+    600 s session timeout and call.
+    """
+    if GENERATION_TIMEOUT == DEFAULT_GENERATION_TIMEOUT:
+        BACKEND.open_history_session(session_id)
+    else:
+        BACKEND.open_history_session(session_id, expire_idle=False)
 
 
 def _canonical_full_source(arm: Arm) -> bool:

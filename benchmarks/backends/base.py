@@ -117,10 +117,13 @@ class Backend:
         selected_token_count, selected_relative_indices, history_kv_method."""
         raise NotImplementedError
 
-    def open_history_session(self, session_id: str, timeout: int = 600) -> str:
+    def open_history_session(self, session_id: str, timeout: int = 600,
+                             *, expire_idle: bool = True) -> str:
         """Open a streaming session that the physical-eviction history-KV
         arms need (the compacted KV must survive across turns).  Returns the
-        session id the server acknowledged."""
+        session id the server acknowledged.  ``timeout`` bounds the open call
+        and, with ``expire_idle``, is also the server's session idle timeout;
+        ``expire_idle=False`` keeps the session until the caller closes it."""
         raise NotImplementedError
 
     def close_history_session(self, session_id: str, timeout: int = 60) -> None:
