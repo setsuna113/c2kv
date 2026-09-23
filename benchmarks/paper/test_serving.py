@@ -239,6 +239,7 @@ def test_runner_serve_prepares_the_matrix_and_serves_the_one_selected_cell(tmp_p
     monkeypatch.setattr(serving, "serve_cell", fake_serve)
     output = tmp_path / "paper"
     runner.main(["serve", "--output", str(output), "--sglang-source", str(tmp_path / "sglang"),
+                 "--history-kv-budget-tokens", "768",
                  "--cells", "bfcl_long_context__full", "--workers", "3",
                  "--serve-tasks", ",".join(TASKS[:2]), "--port-offset", "7"])
     assert calls["tasks"] == ("bfcl_long_context", TASKS[:2])
@@ -463,8 +464,9 @@ def test_feature_capability_check_rejects_older_engine(monkeypatch):
 def test_prepare_freezes_serving_features_and_regular_run_rejects_them(tmp_path):
     output = tmp_path / "prepared"
     runner.main(["prepare", "--output", str(output), "--native-raw-prefix-cache", "--background-extras",
-                 "--bulk-cache-lookup", "--cross-turn-prewarm"])
+                 "--bulk-cache-lookup", "--cross-turn-prewarm", "--history-kv-budget-tokens", "768"])
     resolved = json.loads((output / "config.resolved.json").read_text())
+    assert resolved["history_kv_budget_tokens"] == 768
     assert resolved["serving_native_raw_prefix_cache"] is True
     assert resolved["serving_background_extras"] is True
     assert resolved["serving_bulk_cache_lookup"] is True
