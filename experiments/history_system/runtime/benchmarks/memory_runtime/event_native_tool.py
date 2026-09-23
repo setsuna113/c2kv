@@ -18,8 +18,8 @@ from history_memory.events import EventStore, RenderedMessages
 from history_memory.packing import (
     EncoderChunk, PackedMemory, native_ids, raw_workspace_messages, visible_message,
 )
+from history_memory.source_packing import SourceMemoryView
 from .event_native_raw import RuntimeMemoryView, render_raw_control_messages
-
 
 _CATALOG_NAME = "c2kv_shared_toolmemory"
 
@@ -147,7 +147,7 @@ class ToolRegionController:
                               tools=payload.get("tools"), generation=True))
 
     def _augment(self, memory: PackedMemory, plan: Any, payload: Mapping[str, Any], *,
-                 ratio: int, max_new_tokens: int):
+                 ratio: int, max_new_tokens: int, derived_messages=()):
         if plan is None:
             return memory
         bind = getattr(self.generator, "bind_tool_plan", None)
@@ -160,7 +160,8 @@ class ToolRegionController:
             if self.spec.interface_policy == "schema":
                 return self._raw_schema_memory(memory, plan, payload,
                                                max_new_tokens=max_new_tokens)
-            return self._raw_tool_memory(memory, plan, payload)
+            return self._raw_tool_memory(
+                memory, plan, payload, derived_messages=derived_messages)
         converted = tuple(EncoderChunk(
             event_id=chunk.event_id,
             part_index=chunk.part_index,
@@ -380,7 +381,7 @@ class ToolRegionController:
         return memory
 
     def _raw_tool_memory(self, memory: PackedMemory, plan: Any,
-                         payload: Mapping[str, Any]) -> PackedMemory:
+                         payload: Mapping[str, Any], *, derived_messages=()) -> PackedMemory:
         logical_ids = (tuple(memory.system_input_ids)
                        + tuple(token for chunk in memory.chunks for token in chunk.token_ids)
                        + tuple(memory.workspace_input_ids))
@@ -415,7 +416,8 @@ class ToolRegionController:
                 raise ValueError("Visible structured tools have no native token span")
             spans.append((left, end, "structured_tools"))
         if plan.source_spans:
-            spans.extend(self._source_token_spans(memory, payload, plan))
+            spans.extend(self._source_token_spans(
+                memory, payload, plan, derived_messages=derived_messages))
         spans.sort()
         if any(first[1] > second[0] for first, second in zip(spans, spans[1:])):
             raise ValueError("Visible tool regions overlap after tokenization")
@@ -453,21 +455,36 @@ class ToolRegionController:
         } for segment in segments))
 
     def _source_token_spans(self, memory: PackedMemory, payload: Mapping[str, Any],
-                            plan: Any) -> list[tuple[int, int, str]]:
+                            plan: Any, *, derived_messages=()) -> list[tuple[int, int, str]]:
         store = EventStore.from_messages(payload["session_id"], payload["messages"])
+        source_to_rendered = {}
         if isinstance(memory.view, RuntimeMemoryView):
             rendered_messages = list(render_raw_control_messages(store, memory.view))
+        elif isinstance(memory.view, SourceMemoryView):
+            rendered_messages = [
+                visible_message(store.messages[index]) for index in memory.raw_source_indices
+            ]
+            prefix_length = 0
+            while (prefix_length < len(rendered_messages)
+                   and rendered_messages[prefix_length]["role"] == "system"):
+                prefix_length += 1
+            derived = [dict(message) for message in derived_messages]
+            source_to_rendered = {
+                index: position + (len(derived) if position >= prefix_length else 0)
+                for position, index in enumerate(memory.raw_source_indices)
+            }
+            rendered_messages[prefix_length:prefix_length] = derived
         else:
             rendered_messages = list(raw_workspace_messages(store, memory.view))
-        source_to_rendered = {}
-        cursor = 0
-        for source_index in memory.raw_source_indices:
-            source = visible_message(store.messages[source_index])
-            for index in range(cursor, len(rendered_messages)):
-                if rendered_messages[index] == source:
-                    source_to_rendered[source_index] = index
-                    cursor = index + 1
-                    break
+        if not isinstance(memory.view, SourceMemoryView):
+            cursor = 0
+            for source_index in memory.raw_source_indices:
+                source = visible_message(store.messages[source_index])
+                for index in range(cursor, len(rendered_messages)):
+                    if rendered_messages[index] == source:
+                        source_to_rendered[source_index] = index
+                        cursor = index + 1
+                        break
         tools = payload.get("tools") or None
         template = self.tokenizer.apply_chat_template
         full_text = template(rendered_messages, tools=tools, tokenize=False,
@@ -524,8 +541,11 @@ class ToolRegionController:
             self._controller_payload(payload, plan), ratio=ratio,
             max_new_tokens=max_new_tokens)
         self._original_tools.setdefault(session_id, tools_json)
-        memory = self._augment(base.memory, plan, payload, ratio=ratio,
-                               max_new_tokens=max_new_tokens)
+        memory = self._augment(
+            base.memory, plan, payload, ratio=ratio,
+            max_new_tokens=max_new_tokens,
+            derived_messages=base.metadata.get("derived_workspace_prefix_messages") or (),
+        )
         metadata = copy.deepcopy(base.metadata)
         metadata["paper_whole_full_kv_tokens"] = whole_full_tokens
         metadata["history_only_resident_kv_tokens"] = base.memory.costs(ratio)["resident_kv_tokens"]
@@ -563,10 +583,11 @@ class ToolRegionController:
             prepared.inner, draft_tool_calls, draft_text=draft_text,
             parse_error=parse_error)
         result = dict(value)
-        result["memory"] = self._augment(value["memory"], prepared.plan,
-                                          prepared.source_payload,
-                                          ratio=prepared.ratio,
-                                          max_new_tokens=prepared.max_new_tokens)
+        result["memory"] = self._augment(
+            value["memory"], prepared.plan, prepared.source_payload,
+            ratio=prepared.ratio, max_new_tokens=prepared.max_new_tokens,
+            derived_messages=value["metadata"].get("derived_workspace_prefix_messages") or (),
+        )
         prepared.history_views.append((result["memory"], value["memory"]))
         result["metadata"] = copy.deepcopy(value["metadata"])
         result["metadata"]["paper_whole_full_kv_tokens"] = prepared.metadata[

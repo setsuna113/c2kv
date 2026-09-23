@@ -181,17 +181,25 @@ class SameEventBridgeOnlyS0Controller(EventNativeS0Controller):
         base_derived = tuple(
             prepared.metadata.get("derived_workspace_prefix_messages") or ()
         )
-        measure = self._try_measure(
-            store,
-            tools,
-            prepared.memory.view.raw_event_ids,
-            prepared.memory.view.mandatory_raw_event_ids,
-            prepared.memory.view.gist_event_ids,
-            prepared.metadata["eligible_extraction"]["eligible_event_ids"],
-            prepared.metadata["common_raw_prompt_tokens"],
-            max_new_tokens,
-            derived_messages=(message, *base_derived),
-        )
+        measure_source_view = getattr(self, "measure_source_view", None)
+        if callable(measure_source_view):
+            measure = measure_source_view(
+                prepared, store, tools, ratio=ratio,
+                max_new_tokens=max_new_tokens,
+                derived_messages=(message, *base_derived),
+            )
+        else:
+            measure = self._try_measure(
+                store,
+                tools,
+                prepared.memory.view.raw_event_ids,
+                prepared.memory.view.mandatory_raw_event_ids,
+                prepared.memory.view.gist_event_ids,
+                prepared.metadata["eligible_extraction"]["eligible_event_ids"],
+                prepared.metadata["common_raw_prompt_tokens"],
+                max_new_tokens,
+                derived_messages=(message, *base_derived),
+            )
         if measure is None or measure.reasons:
             receipt.update(
                 status="whole_field_over_budget",

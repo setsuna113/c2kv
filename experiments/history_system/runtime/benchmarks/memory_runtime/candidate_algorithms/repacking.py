@@ -7,6 +7,11 @@ from ..recovery.admission import metadata_after_admission
 
 def repack(base, prepared, *, candidate=None, derived_messages=None,
            goal_view=False):
+    repack_sources = getattr(base, "repack_sources", None)
+    if callable(repack_sources):
+        return repack_sources(
+            prepared, candidate=candidate, derived_messages=derived_messages,
+            goal_view=goal_view)
     store = prepared._store
     view = prepared.memory.view
     mandatory = set(view.mandatory_raw_event_ids)

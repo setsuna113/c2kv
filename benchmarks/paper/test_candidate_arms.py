@@ -106,9 +106,8 @@ def test_c1_v2_requires_named_opt_in_and_dispatches_native_budget_sweeps(tmp_pat
     assert parse_candidate_arms(variant) == (variant,)
     assert c1_v2_fields(variant) == {
         "initial_view": {
-            "policy": "s0_capacity_fallback",
-            "version": "c2kv-s0-capacity-fallback-v1",
-            "terminal_rescue": "c2kv-terminal-tool-arguments-gist-v1",
+            "policy": "source_budget_allocation",
+            "version": "c2kv-source-budget-allocation-v1",
         },
         "recovery_backbone": "t02_complete_event",
         "completion_review": False,

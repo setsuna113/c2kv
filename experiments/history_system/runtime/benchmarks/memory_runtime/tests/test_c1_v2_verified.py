@@ -1,4 +1,4 @@
-"""C1 v2 composes S0, T02, and Verified without budget-dependent Goal review."""
+"""C1 v2 composes source allocation, T02, and Verified without Goal review."""
 import copy
 import json
 from pathlib import Path
@@ -8,6 +8,9 @@ import pytest
 from benchmarks.memory_runtime.candidate_algorithms.c1_v2 import (
     C1V2VerifiedController, c1_v2_fields, validate_c1_v2_config,
 )
+from benchmarks.memory_runtime.candidate_algorithms.capacity_fallback import CapacityFallbackAllocator
+from benchmarks.memory_runtime.candidate_algorithms.repacking import repack
+from benchmarks.memory_runtime.candidate_algorithms.tool_event_rescue import ToolEventRescueAllocator
 from benchmarks.memory_runtime.candidate_algorithms.verified_controller import VerifiedBindingController
 from benchmarks.memory_runtime.event_native_controls import build_event_native_controller
 from benchmarks.memory_runtime.event_native_server import _candidate_ready_contract
@@ -15,6 +18,9 @@ from benchmarks.memory_runtime.event_native_s0_policy import EventNativeS0Contro
 from benchmarks.memory_runtime.event_native_always import NATIVE_S0_MODE
 from benchmarks.memory_runtime.always_compress import ALWAYS_COMPRESSION_POLICY
 from benchmarks.memory_runtime.policy import PolicyInputError
+from benchmarks.memory_runtime.source_allocation import (
+    SOURCE_ALLOCATION_VERSION, SourceAllocatedS0Controller,
+)
 from benchmarks.memory_runtime.tests.test_candidate_allocation import Tokenizer, packing, policy, tool_pair
 from benchmarks.memory_runtime.tests.test_candidate_recovery import Risk
 from benchmarks.memory_runtime.tests.test_goal_composition import call, payload
@@ -32,6 +38,20 @@ def controller(*, score=0.1, binding=None, budget=4096, tokenizer=None):
     base = EventNativeS0Controller(tokenizer or Tokenizer(), packing={**packing(), "ratios": [8]},
                                    policy=policy(budget))
     return C1V2VerifiedController(base, config(), risk_model=Risk(score), binding_policy=binding)
+
+
+def factory_controller(monkeypatch, *, score=0.1, tokenizer=None, budget=4096):
+    monkeypatch.setattr("benchmarks.memory_runtime.candidate_algorithms.controller.C1RiskArtifact",
+                        lambda artifact: Risk(score))
+    runtime = Path(__file__).resolve().parents[3]
+    frozen = json.loads((runtime / "configs/controller.json").read_text(encoding="utf-8"))
+    frozen.pop("post_draft_recovery")
+    return build_event_native_controller(
+        tokenizer or Tokenizer(), packing={**packing(), "ratios": [8]},
+        policy=policy(budget), view_mode=NATIVE_S0_MODE,
+        compression_policy=ALWAYS_COMPRESSION_POLICY,
+        s0_config={**frozen, "candidate_algorithm": config()},
+    )
 
 
 def test_completion_review_is_disabled_even_when_large_packet_would_fit():
@@ -72,8 +92,9 @@ def test_tool_draft_memory_recovery_and_verified_output_match_frozen_pending(sco
     assert actual == expected and receipt["changed"] == prior["changed"]
 
 
-def test_real_frozen_proof_commits_without_goal_context_or_model_call():
-    c = controller()
+def test_real_frozen_proof_commits_without_goal_context_or_model_call(monkeypatch):
+    c = factory_controller(monkeypatch)
+    assert isinstance(c.base, SourceAllocatedS0Controller)
     p = c.prepare(proof_payload(), ratio=8, max_new_tokens=32)
     calls = [_call("set_budget_limit", {"access_token": "wrong", "budget_limit": 1500})]
     result = c.reconsider(p, calls, draft_text="call")
@@ -90,7 +111,7 @@ def test_real_frozen_proof_commits_without_goal_context_or_model_call():
         c.finalize_commit(p, [])
 
 
-def test_real_proof_reaches_served_response_through_existing_runner(tmp_path):
+def test_real_proof_reaches_served_response_through_existing_runner(tmp_path, monkeypatch):
     from benchmarks.memory_runtime.attempt_journal import AttemptJournal
     from benchmarks.memory_runtime.event_native_step import EventNativeDecisionRunner
     from benchmarks.memory_runtime.tests.test_static_extensions import DraftTokenizer, Generator
@@ -98,7 +119,8 @@ def test_real_proof_reaches_served_response_through_existing_runner(tmp_path):
     text = '<tool_call>' + json.dumps({"name": "set_budget_limit", "arguments": {
         "access_token": "wrong", "budget_limit": 1500}}) + '</tool_call>'
     tokenizer = DraftTokenizer([text])
-    c = controller(tokenizer=tokenizer)
+    c = factory_controller(monkeypatch, tokenizer=tokenizer)
+    assert isinstance(c.base, SourceAllocatedS0Controller)
     runner = EventNativeDecisionRunner(c, Generator(), tokenizer, ratio=8,
         max_new_tokens=32, max_generation_calls=2,
         journal=AttemptJournal(tmp_path / "attempts.jsonl"))
@@ -142,9 +164,25 @@ def test_task_cap_precedes_detector_and_verified_and_foreign_commit_is_rejected(
         controller().validate_commit(p, [call()], draft_text="lookup")
 
 
-def test_factory_preserves_actual_s0_bridge_and_validates_new_ready_contract(monkeypatch):
-    from benchmarks.memory_runtime.candidate_algorithms.tool_event_rescue import ToolEventRescueAllocator
+def test_factory_t02_uses_source_repack_for_triggered_tool_draft(monkeypatch):
+    c = factory_controller(monkeypatch, score=0.9)
+    prepared = c.prepare(payload(), ratio=8, max_new_tokens=32)
+    calls = []
+    original = c.base.repack_sources
 
+    def record_repack(prepared_view, *, candidate, derived_messages, goal_view):
+        calls.append(candidate)
+        return original(prepared_view, candidate=candidate,
+                        derived_messages=derived_messages, goal_view=goal_view)
+
+    monkeypatch.setattr(c.base, "repack_sources", record_repack)
+    result = c.reconsider(prepared, [call()], draft_text="lookup")
+    assert result["decision"]["gate"]["triggered"]
+    assert calls
+    assert result["decision"]["completion_review"] is False
+
+
+def test_factory_uses_initial_source_allocation_and_validates_ready_contract(monkeypatch):
     monkeypatch.setattr("benchmarks.memory_runtime.candidate_algorithms.controller.C1RiskArtifact",
                         lambda artifact: Risk(0.1))
     runtime = Path(__file__).resolve().parents[3]
@@ -154,12 +192,27 @@ def test_factory_preserves_actual_s0_bridge_and_validates_new_ready_contract(mon
                 view_mode=NATIVE_S0_MODE, compression_policy=ALWAYS_COMPRESSION_POLICY)
     new = build_event_native_controller(Tokenizer(), **args,
                                        s0_config={**frozen, "candidate_algorithm": config()})
-    assert isinstance(new.base, ToolEventRescueAllocator)
+    assert isinstance(new.base, SourceAllocatedS0Controller)
+    assert not isinstance(new.base, (CapacityFallbackAllocator, ToolEventRescueAllocator))
+    assert new.base.same_event_bridge_only_policy == frozen["observed_entity_slot_policy"]
     old = build_event_native_controller(Tokenizer(), **args, s0_config=frozen)
-    prepared = new.prepare(payload(), ratio=8, max_new_tokens=32)
     prior = old.prepare(payload(), ratio=8, max_new_tokens=32)
-    assert prepared.memory == prior.memory
-    assert prepared.metadata["same_event_reference"] == prior.metadata["same_event_reference"]
+
+    def forbidden_s0_view(*args, **kwargs):
+        pytest.fail("C1 v2 must allocate its first view without the old S0 pack")
+
+    monkeypatch.setattr(EventNativeS0Controller, "_prepare_view", forbidden_s0_view)
+    prepared = new.prepare(payload(), ratio=8, max_new_tokens=32)
+    assert prepared.metadata["source_allocation"]["version"] == SOURCE_ALLOCATION_VERSION
+    assert prepared.metadata["source_allocation"]["phase"] == "initial_budget_allocation"
+    assert prepared.metadata["source_allocation"]["legacy_fallback_invoked"] is False
+    assert "capacity_fallback" not in prepared.metadata
+    assert prepared.metadata["same_event_reference"]["policy"] == prior.metadata["same_event_reference"]["policy"]
+    assert prepared.metadata["same_event_reference"]["single_complete_event_only"]
+    assert prepared.metadata["same_event_reference"]["same_type_scalar_equality_required"]
+    assert prepared.metadata["candidate_algorithm"]["initial_view"] == {
+        "policy": "source_budget_allocation", "version": SOURCE_ALLOCATION_VERSION,
+    }
     identity, baseline = _candidate_ready_contract(config())
     assert baseline == "c2kv-c1-v2-verified-v1:c1_v2_verified"
     for key, value in c1_v2_fields("c1_v2_verified").items():
@@ -172,3 +225,18 @@ def test_factory_preserves_actual_s0_bridge_and_validates_new_ready_contract(mon
     bad["completion_review"] = 0
     with pytest.raises(ValueError, match="completion_review=False"):
         validate_c1_v2_config(bad)
+
+
+def test_repack_dispatches_source_allocator_capability_without_legacy_pack():
+    class SourceBase:
+        def repack_sources(self, prepared, *, candidate, derived_messages, goal_view):
+            assert prepared is marker
+            assert candidate == "source-event"
+            assert derived_messages == ("derived",)
+            assert goal_view is True
+            return "measure", "metadata", "receipt"
+
+    marker = object()
+    assert repack(SourceBase(), marker, candidate="source-event",
+                  derived_messages=("derived",), goal_view=True) == (
+        "measure", "metadata", "receipt")

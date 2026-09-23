@@ -40,9 +40,8 @@ def c1_v2_fields(variant: str) -> dict[str, Any]:
         raise ValueError("unknown C1 v2 candidate")
     return {
         "initial_view": {
-            "policy": "s0_capacity_fallback",
-            "version": "c2kv-s0-capacity-fallback-v1",
-            "terminal_rescue": "c2kv-terminal-tool-arguments-gist-v1",
+            "policy": "source_budget_allocation",
+            "version": "c2kv-source-budget-allocation-v1",
         },
         "recovery_backbone": "t02_complete_event",
         "completion_review": False,
