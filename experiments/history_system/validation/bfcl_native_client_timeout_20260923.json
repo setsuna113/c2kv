@@ -1,0 +1,32 @@
+{
+  "schema": "c2kv-validation-receipt-v1",
+  "date": "2026-09-23",
+  "subject": "native BFCL official client read timeout under a configured generation deadline",
+  "base_revision": "733eee5",
+  "incident": {
+    "host": "SZ-p6k",
+    "cells": "bfcl_long_context__racer_{commitkv,pyramidkv}_{c1_v2_verified,off}_b256, shard s2 (tasks 100-149), first task multi_turn_long_context_100 (scheduler report)",
+    "checked_here": "/home/sata/zhuyuhan-lyc/bfcllong-b256-sz/pk2/prep/closed_loop/bfcl_long_context__racer_commitkv_c1_v2_verified_b256.held.1/native/task_shards/multi_turn_long_context_100: bfcl/worker.log ends in openai.APITimeoutError: Request timed out; bfcl/bfcl/measurement/harness_events.jsonl records decisions of 600102402870 ns and 602165610021 ns; server/ready.json route_contract.max_generations_per_decision is 2",
+    "cause": "event_native_bfcl.worker calls the runtime bfcl_adapter.run_bfcl, whose handler hard-codes httpx.Timeout(timeout=600.0) for every official request. One request is one server decision, while the server bounds each SGLang generation by runtime.sglang_timeout_seconds (10800 by default), so a long-context decision outlived the client and the worker exit aborted the shard"
+  },
+  "change": {
+    "experiments/history_system/runtime/benchmarks/adapters/bfcl_adapter.py": "install_handler and run_bfcl take request_timeout=None; None keeps the 600 s read bound",
+    "experiments/history_system/runtime/benchmarks/memory_runtime/event_native_bfcl.py": "optional --generation-timeout; when given, the contract records generation_timeout_seconds and request_timeout_seconds = max_generations_per_decision x deadline + 90 s (decision_request_timeout, route count from the server manifest) and the worker forwards it to run_bfcl",
+    "experiments/history_system/run_c1.py": "commands_for_task appends --generation-timeout to the BFCL worker only when --generation-timeout was given",
+    "unchanged": "without a configured deadline the worker command, contract and client timeout are byte-identical; the server command is unchanged in every case"
+  },
+  "operator_note": "Prepare the root with --generation-timeout 10800: the server's per-generation deadline stays the design default (runtime.sglang_timeout_seconds 10800), and the official client then waits 2 x 10800 + 90 s per decision, beyond the task wall cap",
+  "tests": {
+    "files": [
+      "benchmarks/paper/test_bfcl_native_client_timeout.py",
+      "experiments/history_system/runtime/benchmarks/memory_runtime/tests/test_event_native_bfcl.py"
+    ],
+    "cases": [
+      "c1.delivery_args -> run_c1 argparse -> commands_for_task: the worker command gains exactly --generation-timeout 10800.0 and is otherwise identical",
+      "event_native_bfcl.main: no flag leaves the contract without timeout fields; --generation-timeout 3600 records 3600 and 7290",
+      "worker forwards request_timeout_seconds to run_bfcl; decision_request_timeout rejects non-finite or non-positive deadlines and invalid route counts",
+      "install_handler builds httpx read timeout 600 by default and the configured bound otherwise (bfcl_eval base classes stubbed; the kwargs are the adapter's own)"
+    ],
+    "against_733eee5": "the paper test and 4 of the new runtime cases fail; the default-path cases pass unchanged"
+  }
+}
