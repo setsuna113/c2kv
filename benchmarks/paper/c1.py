@@ -22,7 +22,9 @@ import urllib.error
 
 from benchmarks.measurement.telemetry import append_jsonl, canonical_sha256, read_jsonl
 from benchmarks.measurement.replay import _paper_measurement
-from .candidate_matrix import ARM_TO_VARIANT, SUPPORTED_BENCHMARKS as CANDIDATE_BENCHMARKS
+from .candidate_matrix import (
+    ARM_TO_VARIANT, SUPPORTED_BENCHMARKS as CANDIDATE_BENCHMARKS, native_budget_benchmarks,
+)
 from .racer_matrix import (
     RACER_CANDIDATE_POLICIES, is_racer_arm, parse_racer_arm_name,
     racer_config_for_arm,
@@ -120,7 +122,7 @@ def delivery_args(config, benchmark, output, task_ids, delivery):
     if "native_history_budget_tokens" in config:
         budget = NativeHistoryBudget(config["native_history_budget_tokens"])
         budget.validate_arm(get_arm(ARM))
-        if benchmark not in {"bfcl_base", "bfcl_long_context"}:
+        if benchmark not in native_budget_benchmarks(ARM):
             raise ValueError("Native history budget sweep currently supports BFCL only")
         command += budget.cli_args()
     if benchmark == "tau2":
@@ -712,7 +714,7 @@ def main(argv=None):
     if args.history_budget_tokens is not None:
         budget = NativeHistoryBudget(args.history_budget_tokens)
         budget.validate_arm(get_arm(ARM))
-        if args.benchmark not in {"bfcl_base", "bfcl_long_context"}:
+        if args.benchmark not in native_budget_benchmarks(ARM):
             parser.error("Native history budget sweep currently supports BFCL only")
         config["native_history_budget_tokens"] = budget.target_tokens
     apply_tool_cli(config, args.tool_memory, args.tool_checkpoint, args.tool_budget_tokens)

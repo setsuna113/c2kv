@@ -351,8 +351,18 @@ base and derived policy provenance in `native/profile.json`. Draft and recovery
 share that policy; recovered raw history remains charged to the same cap.
 An explicit sweep may exceed the old B0 allowance without rewriting its frozen
 policy. No option preserves the original policy and commands. Capacity failure
-remains a method outcome, not an infrastructure retry. Bare `c2kv_native_r4` and
-non-BFCL native sweep paths are not supported by this interface.
+remains a method outcome, not an infrastructure retry. Bare `c2kv_native_r4` is
+not supported by this interface.
+
+A candidate arm's budget variants cover every benchmark its configured method
+entry runs, for example `--candidate-arms c1_v2_verified --candidate-benchmarks
+bfcl_base,tau2,toolsandbox,acebench_agent,appworld --native-history-budget
+c2kv_c1_v2_verified_r8=256` adds `tau2__c2kv_c1_v2_verified_r8_b256` and its
+siblings; BFCL cells are unchanged. C1 detector arms keep the BFCL-only sweep.
+The tau2, ToolSandbox, ACEBench and AppWorld native servers load the same
+per-cell policy file and must report history and workspace caps equal to `B`
+times their KV bytes per token. A typed, task-bound `c2kv_capacity_infeasible`
+scores that task 0 as a method failure and the cell continues.
 
 Native controller arms render their own tool prologue. Since 2026-09-21 the
 native serving API normalizes it like the Full SGLang actor (`sglang-full`:

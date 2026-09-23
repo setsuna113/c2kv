@@ -1,0 +1,30 @@
+{
+  "schema": "c2kv-candidate-native-budget-v1",
+  "created_at": "2026-09-23T06:00:00Z",
+  "branch": "paper/c1v2rv-native-budget-20260923",
+  "base_revision": "11fa0ab (the paper revision of the running BFCL c1v2rv cells, rv17)",
+  "why_this_branch": "2cbc35a sits on 99d3be7, whose native runtime changes (event_native_exact_policy/step/tool/controls) include conditions that are not limited to ac_gist_static or RACER; this branch adds only the non-BFCL candidate budget wiring to 11fa0ab so every C2KV cell runs the same algorithm code",
+  "algorithm_code": "git diff 11fa0ab -- experiments/history_system/runtime is empty; the only experiments/history_system change is the delivery CLI guard in run_c1.py (and its test)",
+  "change": [
+    "candidate_matrix.native_budget_benchmarks(arm): supported candidate benchmarks for candidate arms, BFCL only for other native arms; runner.with_native_history_budget, runner prepare, paper c1.delivery_args/main and run_c1._history_budget_override/validate_args use it (run_c1 exempts an explicit candidate algorithm)",
+    "c1_appworld.apply_native_history_budget: materializes the explicit budget with the delivery's history_budget.resolve_override/materialize and points the design's eval_policy at the per-cell policy; called from native_extra.server_command (tau2/ToolSandbox/ACEBench) and the AppWorld C1/candidate design. At 11fa0ab neither native_extra.server_command nor the AppWorld C1/candidate design applied an explicit native history budget. This is the paper-layer part of the 99d3be7 helper without its RACER and generation-timeout branches",
+    "native_extra.validate_native_budget_policy: a budgeted candidate server must report effective history and workspace caps equal to B times kv_bytes_per_token (tau2/ToolSandbox/ACEBench ready manifest, AppWorld ready receipt)"
+  ],
+  "capacity_failure": "unchanged from 11fa0ab: ToolSandbox declares it in score_cli_run; tau2 (RuntimeError from _terminal_results) and ACEBench (CalledProcessError from generate) are turned into scored-0 method failures by c1.run_closed_loop from the typed task-bound step; AppWorld records it in c1_appworld.run_task",
+  "unchanged": "prepared default matrix, BFCL-only candidate budget cells (--candidate-arms c1_v2_verified --native-history-budget ...=512/128) and C1 budget cells (c2kv_c1_t02_r8=256) are byte-identical to 11fa0ab in commands.json, matrix.csv and config.resolved.json; unbudgeted native servers keep the frozen eval policy",
+  "cpu_tests": {
+    "new": "benchmarks/paper/test_candidate_native_budget.py (includes the per-cell policy reaching the tau2/ToolSandbox/ACEBench/AppWorld server design with a fixture checkpoint, and the frozen policy without a budget); experiments/history_system/test_history_budget.py test_candidate_budget_is_accepted_outside_bfcl",
+    "updated": "the BFCL-only assertions in test_native_history_budget.py and the delivery test now use the C1 detector route",
+    "full_suite": {
+      "command": "python -m pytest benchmarks -q, and experiments/history_system/test_history_budget.py from its directory (clean git-archive exports, Windows)",
+      "base_11fa0ab": "benchmarks 7 failed, 1191 passed, 23 skipped; delivery 1 failed, 6 passed",
+      "branch": "benchmarks 7 failed, 1215 passed, 23 skipped; delivery 1 failed, 7 passed",
+      "failure_set": "identical and pre-existing: test_native_bare x2, test_acon_budget_proxy, test_native_fc_bridge, test_repair_stack::test_bfcl_counts_result_rows, test_tool_source_recording::appworld, test_toolmemory_assembly; delivery test_invalid_values_and_bare_semantics_are_rejected"
+    }
+  },
+  "semantic_notes": [
+    "AppWorld candidate design is labelled c1_<detector> and functional_checks receives no candidate variant at 11fa0ab (as before budgets); smoke one unbudgeted appworld__c2kv_c1_v2_verified_r8 task before the budget cells",
+    "Capacity failures score 0 as method failures; read each cell with its method_failure_task_ids"
+  ],
+  "gpu_validation": "none"
+}

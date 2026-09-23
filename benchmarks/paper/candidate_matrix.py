@@ -41,6 +41,17 @@ ARM_TO_VARIANT = {arm: variant for variant, arm in VARIANT_TO_ARM.items()}
 SUPPORTED_BENCHMARKS = frozenset({
     "bfcl_base", "bfcl_long_context", "appworld", "acebench_agent", "tau2", "toolsandbox",
 })
+BFCL_BENCHMARKS = frozenset({"bfcl_base", "bfcl_long_context"})
+
+
+def native_budget_benchmarks(arm: str) -> frozenset:
+    """Benchmarks where an explicit native history-budget variant of ``arm`` may run.
+
+    Candidate controllers use the shared native adapters on every supported
+    benchmark, where a task-bound capacity failure is a scored method failure;
+    other native controllers keep the original BFCL-only sweep.
+    """
+    return SUPPORTED_BENCHMARKS if arm in ARM_TO_VARIANT else BFCL_BENCHMARKS
 
 
 def parse_candidate_arms(value: str) -> tuple[str, ...]:

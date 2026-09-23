@@ -201,8 +201,32 @@ def _openai_origin(base_url: str) -> str:
     return match.group(1)
 
 
+def apply_native_history_budget(
+    config: Mapping[str, Any], design: dict[str, Any],
+    delivery: Path | ModuleType, output: Path,
+) -> dict[str, Any] | None:
+    """Materialize an explicit native history budget as this cell's eval policy.
+
+    Absent a budget the design keeps the frozen policy. The BFCL delivery path
+    applies the same override through run_c1.commands_for_task.
+    """
+    tokens = config.get("native_history_budget_tokens")
+    if tokens is None:
+        return None
+    delivery_root = _delivery_path(delivery)
+    budget = _load_module(delivery_root / "history_budget.py", "history_budget")
+    receipt = budget.resolve_override(
+        tokens, Path(str(config["checkpoint"])), design,
+        delivery_root / "runtime", Path(output),
+    )
+    budget.materialize(receipt)
+    design["runtime"]["eval_policy"] = receipt["override_eval_policy_path"]
+    return receipt
+
+
 def _resolved_design(
     config: Mapping[str, Any], delivery: Path | ModuleType, controller_path: Path,
+    output: Path | None = None,
 ) -> dict[str, Any]:
     delivery = _delivery_path(delivery)
     design = json.loads(
@@ -237,6 +261,8 @@ def _resolved_design(
     )
     if no_recovery:
         design["runtime"].pop("shadow_feature_config", None)
+    if output is not None:
+        apply_native_history_budget(config, design, delivery, output)
     return design
 
 
@@ -248,7 +274,7 @@ def server_command(
     delivery_root = _delivery_path(delivery)
     directory = Path(directory).resolve()
     runner = _delivery_runner(delivery)
-    design = _resolved_design(config, delivery_root, Path(controller_path))
+    design = _resolved_design(config, delivery_root, Path(controller_path), directory)
     command = runner.server_command(
         design,
         task_id=task_id,
@@ -506,6 +532,11 @@ def run_task(
                 from experiments.history_system.native_bare import validate_manifest
                 validate_manifest(task_out / "server" / "ready.json",
                                   NATIVE_RATIOS[config["native_arm"]])
+            else:
+                from .candidate_matrix import ARM_TO_VARIANT
+                if config.get("native_arm") in ARM_TO_VARIANT:
+                    from .native_extra import validate_native_budget_policy
+                    validate_native_budget_policy(config, ready, config["native_arm"])
             if config.get("tool_memory"):
                 from .native_extra import validate_tool_ready
                 validate_tool_ready(config, ready)
