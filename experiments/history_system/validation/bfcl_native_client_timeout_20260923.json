@@ -6,7 +6,7 @@
   "incident": {
     "host": "SZ-p6k",
     "cells": "bfcl_long_context__racer_{commitkv,pyramidkv}_{c1_v2_verified,off}_b256, shard s2 (tasks 100-149), first task multi_turn_long_context_100 (scheduler report)",
-    "checked_here": "/home/sata/zhuyuhan-lyc/bfcllong-b256-sz/pk2/prep/closed_loop/bfcl_long_context__racer_commitkv_c1_v2_verified_b256.held.1/native/task_shards/multi_turn_long_context_100: bfcl/worker.log ends in openai.APITimeoutError: Request timed out; bfcl/bfcl/measurement/harness_events.jsonl records decisions of 600102402870 ns and 602165610021 ns; server/ready.json route_contract.max_generations_per_decision is 2",
+    "checked_here": "$SZ_RESULTS_ROOT/bfcllong-b256-sz/pk2/prep/closed_loop/bfcl_long_context__racer_commitkv_c1_v2_verified_b256.held.1/native/task_shards/multi_turn_long_context_100: bfcl/worker.log ends in openai.APITimeoutError: Request timed out; bfcl/bfcl/measurement/harness_events.jsonl records decisions of 600102402870 ns and 602165610021 ns; server/ready.json route_contract.max_generations_per_decision is 2",
     "cause": "event_native_bfcl.worker calls the runtime bfcl_adapter.run_bfcl, whose handler hard-codes httpx.Timeout(timeout=600.0) for every official request. One request is one server decision, while the server bounds each SGLang generation by runtime.sglang_timeout_seconds (10800 by default), so a long-context decision outlived the client and the worker exit aborted the shard"
   },
   "change": {

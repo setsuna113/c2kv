@@ -7,7 +7,7 @@
   "user_decision": "If a recovery does not fit, treat the step as not recovered: do not run that regeneration, commit the draft action as usual, do not score a method failure and do not abort the shard.",
   "incident": {
     "host": "SZ-p6k",
-    "task_root": "/home/sata/zhuyuhan-lyc/bfcllong-b256-sz/pk3/prep/closed_loop/bfcl_long_context__racer_commitkv_c1_v2_verified_b256.failed.1/native/task_shards/multi_turn_long_context_155",
+    "task_root": "$SZ_RESULTS_ROOT/bfcllong-b256-sz/pk3/prep/closed_loop/bfcl_long_context__racer_commitkv_c1_v2_verified_b256.failed.1/native/task_shards/multi_turn_long_context_155",
     "checked_here": "server/steps.jsonl decision turn-1/step-1: the draft completed with racer_budget available_history_tokens 256 and CommitKV reference selection pending_tokens 28 (2 protected pages); the regeneration returned HTTP 400 RACER_GENERATION_ABORTED: PHYSICAL_HISTORY_KV_EVICTION_EXCEPTION: ValueError: pending tokens exceed the total cache budget",
     "scheduler_report": "the regeneration hint carried native_evidence_tokens 232, so its CommitKV target was 256 - 232 = 24 < 28"
   },

@@ -1,0 +1,30 @@
+{
+  "schema": "c2kv-validation-receipt-v1",
+  "date": "2026-09-23",
+  "subject": "RACER recovery after an exact generated-BPE reconciliation (engine-only fix)",
+  "paper_revision": "9036c7b (unchanged by this fix)",
+  "engine_revision": "2223b597d (fix/racer-regeneration-retention-20260923, on c08d93f71)",
+  "incident": {
+    "host": "SZ-p6k",
+    "task_root": "$SZ_RESULTS_ROOT/bfcllong-b256-sz/f1/prep/closed_loop/bfcl_long_context__racer_commitkv_c1_v2_verified_b256.failed.1/native/task_shards/multi_turn_long_context_57",
+    "checked_here": [
+      "server/steps.jsonl: turn-0/step-0..3 ok; turn-0/step-4 draft completed, then the c1v2 regeneration (recovery_append source_message_indices [1, 2], native_evidence_tokens 158) returned HTTP 400 PERSISTENT_HISTORY_RECOVERY_GENERATION_PREFIX_UNAVAILABLE",
+      "the committed step-3 action is raw generated text ending in ']}\\n</function>\\n<tool_call>...</tool_call>'",
+      "server/sglang_http.jsonl: one request carries persistent_session_retokenization_reconciled true with persistent_session_retokenization_token_shift 1"
+    ]
+  },
+  "cause": {
+    "summary": "CommitKV/AgentKV keep earlier generated actions in their generated token IDs (serving_chat._reconcile_exact_generated_prefix). After a reconciled continuation the canonical prompt no longer starts with the freshly rendered chat body, so _convert_to_internal_request recorded an empty generation prompt and the next recovery_append failed its generation-prefix check",
+    "second_blocker": "with the prompt found, the freshly rendered recovery body still differs from the generation base in the same BPE, so the PERSISTENT_HISTORY_RECOVERY_BODY_PREFIX_MISMATCH check would have failed next",
+    "session_state": "both checks run in serving_chat before scheduler admission; the rejected request left the held draft intact, but the paper runner treated the 400 as a terminal failure"
+  },
+  "change": {
+    "serving_chat._persistent_generation_prefix": "the generation prompt is the freshly rendered suffix after the freshly rendered body and must end canonical_prompt_ids; identical to the old result whenever no reconciliation happened",
+    "serving_chat._prepare_persistent_history_delta": "for an exact-output session, a recovery whose freshly rendered body differs from the generation base is moved into the generated-token frame with _reconcile_exact_generated_prefix (hint coordinates remapped before replacement/evidence spans are derived); changed text and non-exact sessions still raise RECOVERY_BODY_PREFIX_MISMATCH"
+  },
+  "tests": {
+    "engine": "test/registered/unit/test_racer_transaction.py: generation prompt found in the fresh frame (historical frame unchanged), exact recovery rebinds the generated BPE (canonical [1,100,101,2,3,5,6,1], delta [5,6,1], drop 1, logical prefix 5, shift 1, event spans and history_end remapped), changed text and non-exact sessions fail closed. All 4 fail on c08d93f71",
+    "engine_suites": "test_racer_transaction, test_exact_generated_prefix_retokenization, test_commitkv, test_racer_features_failure, test_persistent_history_lifecycle, test_c2kv_composition: 182 passed; test_reference_decode_persistent_stream's 2 cases need the full sglang package (tqdm, pybase64) and fail identically on the unmodified 3b884f6bf checkout",
+    "gpu": "not run; the SZ rerun of multi_turn_long_context_57 is the live check"
+  }
+}
