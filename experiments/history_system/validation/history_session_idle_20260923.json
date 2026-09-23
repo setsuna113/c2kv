@@ -1,0 +1,60 @@
+{
+  "schema": "c2kv-validation-receipt-v1",
+  "date": "2026-09-23",
+  "subject": "persistent history session idle timeout under a configured generation deadline",
+  "base_revision": "98fd2eb",
+  "engine_revision": "36e969135 (fix/abort-chunked-prefill-20260922, deployed as box4 engine-p11-36e96913)",
+  "incident": {
+    "host": "box4",
+    "cell": "/workspace/results-s19kv/closed_loop/toolsandbox__commitkv_b512",
+    "overlay": "--generation-timeout 3600",
+    "outcome": "(patrol report, not re-counted here) 128 of 129 scenarios finished; remove_contact_by_phone_ambiguous_alt_3_distraction_tools failed with 502 / upstream 400 and the terminal-state check marked the cell FATAL",
+    "server_log": {
+      "16020": "09:25:33 last agent request on session c2kv-bench-history-427da205e66a131d-3fdc8adac15d45f8ad35737e27c1b583 starts (history eviction)",
+      "16030": "09:25:35 that request saves its prompt (resident_stream_tokens_after_decode 1043)",
+      "16031-16756": "09:25:35 a request with no history session prefills 1183 tokens (512+512+159), decodes to about 30100 tokens and ends at 09:35:36 through serving_chat create_error_response; an equal-size prefill is sent at 09:35:36 and returns 200 at 09:35:37. This matches a 600 s client timeout followed by a retry, but which role sent it was not verified",
+      "16757": "09:35:33 Session c2kv-bench-history-427da205e66a131d-3fdc8adac15d45f8ad35737e27c1b583 timed out, closing. (600 s after 09:25:33)",
+      "16772": "09:35:37 Invalid request: session id ... does not exist (the agent's next turn)",
+      "16775": "09:35:37 session id ... does not exist, cannot delete. (episode-boundary close)"
+    }
+  },
+  "engine_semantics": {
+    "source": "python/sglang/srt/managers/session_controller.py at 36e969135",
+    "rule": "Session.is_timed_out is time.monotonic() - last_active_time > timeout and is False when timeout is None; last_active_time is set when a session request is created (create_req), not when it finishes; maybe_reap closes a timed-out session unless it is streaming with an unfinished request",
+    "consequence": "the idle window is measured from the start of the session's last request, so the gap before a conversation's next turn (its own generation plus every other role's turn in between, including client retries) must fit inside it; no bound derived from the deadline covers that gap",
+    "open_session_without_timeout": "io_struct.OpenSessionReqInput.timeout defaults to None, so an /open_session body without timeout opens a session the scheduler never reaps"
+  },
+  "change": {
+    "benchmarks/backends/sglang.py": "open_history_session(session_id, timeout=600, *, expire_idle=True): expire_idle=False omits the engine timeout from the /open_session body; timeout still bounds the HTTP request; the default body is unchanged (same keys in the same order)",
+    "benchmarks/backends/base.py": "the same keyword in the backend interface",
+    "benchmarks/proxy.py": "_history_session_id opens through _open_history_session: at DEFAULT_GENERATION_TIMEOUT (600 s, also when passed explicitly) it makes the historical call BACKEND.open_history_session(session_id); a configured --generation-timeout opens with expire_idle=False. The proxy already closes every session it owns at the next episode boundary, on /close_measurement_session, after a lost response and at shutdown",
+    "unchanged": "runner, adapters, RACER/runtime code and NPU harness calls; runner.persistent_generation_timeout_args still passes --generation-timeout only to persistent history-KV proxies"
+  },
+  "tests": {
+    "file": "benchmarks/test_history_session_idle.py",
+    "cases": [
+      "real proxy subprocess (arm commitkv, --history-kv-target-tokens 512, --benchmark toolsandbox) against a local fake engine: without --generation-timeout and with 600 the raw /open_session body is byte-identical to the 98fd2eb body with timeout 600.0; with 3600 it carries no timeout; in every case the chat uses that session and /close_measurement_session closes it",
+      "SglangBackend default calls keep their bytes and HTTP bound (600 and an explicit 300)",
+      "expire_idle=False omits the timeout and keeps the 600 s HTTP bound"
+    ],
+    "against_98fd2eb": "2 failed, 3 passed: the 3600 case receives timeout 600.0 (the incident) and expire_idle is rejected; the two default-deadline cases pass unchanged",
+    "full_suite": {
+      "command": "uv run --no-project --with pytest --with numpy --with httpx --with openai python -m pytest -q -p no:cacheprovider benchmarks",
+      "fixed": "4 failed, 1212 passed, 23 skipped",
+      "base_98fd2eb_worktree": "5 failed, 1206 passed, 23 skipped",
+      "difference": "the fixed run adds the 5 new tests; test_toolmemory_assembly.py::test_history_kv_carrier_events_align_with_engine_remap fails only in the base worktree because it reads the sibling checkout ../sglang-paper-tool-integration, which the scratchpad worktree lacks, and passes in the fix worktree and in an isolated rerun there",
+      "shared_failures": [
+        "benchmarks/test_acon_budget_proxy.py::test_budget_matrix_uses_renderer_and_original_cache_policy",
+        "benchmarks/test_native_fc_bridge.py::test_chat_lock_covers_forwarding",
+        "benchmarks/test_repair_stack.py::TestTerminalCheck::test_bfcl_counts_result_rows",
+        "benchmarks/test_tool_source_recording.py::test_appworld_recording_observes_executed_docs_and_marks_empty"
+      ]
+    },
+    "gpu": "not run; the patrol's rerun of toolsandbox__commitkv_b512 from a new root is the live check"
+  },
+  "residual_risks": [
+    "At the default 600 s deadline the historical 600 s session timeout remains, with the same latent gap: a turn gap above 600 s after a session request starts still reaps the session.",
+    "Without an idle timeout, a session outlives a proxy that is killed without its shutdown cleanup until the engine restarts or the next owner closes it; paper cells restart the engine per cell.",
+    "The persistent RACER adapter (experiments/history_system/runtime/benchmarks/memory_runtime/racer/generator.py) opens its session with the native request timeout as the idle timeout (10800 s by default, the paper deadline when one is configured) and is not changed here."
+  ]
+}
