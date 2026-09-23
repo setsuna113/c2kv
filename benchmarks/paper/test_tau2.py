@@ -10,7 +10,7 @@ from benchmarks.paper.candidate_matrix import with_candidate_methods
 
 
 def config():
-    return json.loads(runner.DEFAULT_CONFIG.read_text())
+    return dict(json.loads(runner.DEFAULT_CONFIG.read_text()), history_kv_budget_tokens=768)
 
 
 def test_tau2_extends_matrix_without_changing_existing_cells(tmp_path):

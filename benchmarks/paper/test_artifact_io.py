@@ -9,7 +9,7 @@ from unittest import mock
 import pytest
 
 from benchmarks.paper.artifact_io import atomic_json
-from benchmarks.paper.runner import DEFAULT_CONFIG, prepare
+from benchmarks.paper.runner import DEFAULT_CONFIG, prepare, resolve_history_kv_budgets
 
 
 def test_failed_publication_keeps_previous_complete_artifact(tmp_path):
@@ -40,7 +40,7 @@ def test_cell_start_claim_has_exactly_one_owner(tmp_path):
 
 @pytest.mark.skipif(os.name != "posix", reason="Production readers use POSIX rename semantics")
 def test_concurrent_prepare_never_exposes_partial_json(tmp_path):
-    config = json.loads(DEFAULT_CONFIG.read_text())
+    config = dict(json.loads(DEFAULT_CONFIG.read_text()), history_kv_budget_tokens=768)
     output = tmp_path / "results"
     source = tmp_path / "engine"
     prepare(config, output, source)
@@ -73,11 +73,11 @@ for _ in range(8):
                 process.kill()
             process.communicate(timeout=20)
     assert json.loads((output / "config.resolved.json").read_text()) == dict(
-        config, sglang_source=str(source.resolve()))
+        resolve_history_kv_budgets(config), sglang_source=str(source.resolve()))
 
 
 def test_rapid_checkout_updates_preserve_every_previous_config(tmp_path):
-    config = json.loads(DEFAULT_CONFIG.read_text())
+    config = dict(json.loads(DEFAULT_CONFIG.read_text()), history_kv_budget_tokens=768)
     output = tmp_path / "results"
     for index in range(3):
         prepare(config, output, tmp_path / f"engine-{index}")

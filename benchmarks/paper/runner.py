@@ -21,8 +21,7 @@ from .racer_matrix import (
     is_racer_arm, parse_racer_backends, parse_racer_policies,
     racer_config_for_arm, with_racer_methods,
 )
-from benchmarks.history_budget import (HistoryKVBudget, parse_history_kv_budget,
-                                       parse_history_kv_retention)
+from benchmarks.history_budget import HistoryKVBudget, parse_history_kv_budget
 from benchmarks.native_history_budget import NativeHistoryBudget, parse_native_history_budget
 from benchmarks.native_tool_schema import NativeToolSchema, parse_native_tool_schema
 from experiments.history_system.native_bare import ARM_RATIOS as NATIVE_RATIOS, arm_for_ratio
@@ -121,6 +120,7 @@ def tool_contexts(config):
 
 
 def cells(config):
+    config = resolve_history_kv_budgets(config)
     contexts = tool_contexts(config)
     rows = []
     for bench in config["benchmarks"]:
@@ -139,12 +139,9 @@ def cells(config):
                            category=bench.get("category", ""),
                            cell_id=bench["name"] + "__" + method["arm"],
                            tool_context=context_name)
-                if ("history_budget_tokens" in method
-                        or "history_retention_ratio" in method):
+                if "history_budget_tokens" in method:
                     from benchmarks.arms import get_arm
                     arm = get_arm(method["arm"])
-                    if "history_retention_ratio" in method and not arm.history_kv:
-                        raise ValueError(f"arm {arm.name!r} does not support a history-KV budget")
                     if is_racer_arm(arm.name):
                         resolved = racer_config_for_arm(config, arm.name)
                         row.update(
@@ -154,9 +151,7 @@ def cells(config):
                             history_allocation=resolved["allocation"],
                         )
                     elif arm.history_kv:
-                        budget = HistoryKVBudget(
-                            target_tokens=method.get("history_budget_tokens"),
-                            retention_ratio=method.get("history_retention_ratio"))
+                        budget = HistoryKVBudget(method["history_budget_tokens"])
                         budget.apply(arm)
                         row["cell_id"] = bench["name"] + "__" + budget.variant_name(arm.name)
                     elif arm.native_controller:
@@ -328,42 +323,58 @@ def with_hiagent_budget(config, budget):
     }])
 
 
+def resolve_history_kv_budgets(config):
+    """Replace opt-in shared history-KV capacities with one absolute token cap."""
+    from benchmarks.arms import get_arm
+
+    if any("history_retention_ratio" in method for method in config["methods"]):
+        raise ValueError("history_retention_ratio is no longer supported; use an "
+                         "absolute history_budget_tokens value or shared budget B")
+    shared = [method for method in config["methods"]
+              if (method.get("history_budget_tokens") == "shared"
+                  or method.get("history_budget_source") == "shared")]
+    tokens = config.get("history_kv_budget_tokens")
+    if shared and (type(tokens) is not int or tokens < 1):
+        raise ValueError("Shared history-KV budget requires a positive integer "
+                         "history_kv_budget_tokens; provide --history-kv-budget-tokens B "
+                         "or set it in the config")
+    if tokens is not None and (type(tokens) is not int or tokens < 1):
+        raise ValueError("history_kv_budget_tokens must be a positive integer")
+    if not shared:
+        return config
+    methods = []
+    for method in config["methods"]:
+        if (method.get("history_budget_tokens") != "shared"
+                and method.get("history_budget_source") != "shared"):
+            methods.append(method)
+            continue
+        HistoryKVBudget(tokens).apply(get_arm(method["arm"]))
+        resolved = dict(method, history_budget_tokens=tokens,
+                        history_budget_source="shared")
+        resolved.pop("retention", None)
+        methods.append(resolved)
+    return dict(config, methods=methods)
+
+
 def with_history_kv_budget(config, arm_name, target_tokens):
     """Add a capacity variant through the shared history-KV budget interface."""
-    return _with_history_kv_budget(config, arm_name, HistoryKVBudget(target_tokens))
-
-
-def with_history_kv_retention(config, arm_name, retention_ratio):
-    """Add a retained-fraction variant through the shared history-KV interface."""
-    return _with_history_kv_budget(
-        config, arm_name, HistoryKVBudget(retention_ratio=retention_ratio))
-
-
-def _with_history_kv_budget(config, arm_name, budget):
     from benchmarks.arms import get_arm
+    config = resolve_history_kv_budgets(config)
+    budget = HistoryKVBudget(target_tokens)
     budget.apply(get_arm(arm_name))
     templates = [method for method in config["methods"]
-                 if method["arm"] == arm_name and method.get("group") != "budget"]
-    primary = [method for method in templates if method.get("group") != "sweep"]
-    templates = primary or templates
+                 if method["arm"] == arm_name
+                 and method.get("group") not in {"budget", "sweep"}]
     if len(templates) != 1:
-        raise ValueError(f"History-KV budget requires one configured base arm: {arm_name}")
-    identity = budget.variant_name(arm_name)
-    if any(method["arm"] == arm_name
-           and ("history_budget_tokens" in method or "history_retention_ratio" in method)
-           and HistoryKVBudget(
-               target_tokens=method.get("history_budget_tokens"),
-               retention_ratio=method.get("history_retention_ratio")
-           ).variant_name(arm_name) == identity for method in config["methods"]):
+        raise ValueError(f"History-KV budget requires one primary configured base arm: {arm_name}")
+    if any(method["arm"] == arm_name and method.get("history_budget_tokens") == target_tokens
+           for method in config["methods"]):
         raise ValueError(f"History-KV budget cell already exists: {budget.variant_name(arm_name)}")
-    variant = dict(templates[0], group="budget")
-    variant.pop("history_budget_tokens", None)
-    variant.pop("history_retention_ratio", None)
+    variant = dict(templates[0], group="budget", history_budget_tokens=target_tokens)
+    variant.pop("history_budget_source", None)
+    # Absolute capacity overrides fractional retention; never label it with
+    # the base arm's old retention ratio in a matrix or comparison table.
     variant.pop("retention", None)
-    if budget.target_tokens is not None:
-        variant["history_budget_tokens"] = budget.target_tokens
-    else:
-        variant["history_retention_ratio"] = budget.retention_ratio
     return dict(config, methods=[*config["methods"], variant])
 
 
@@ -416,16 +427,13 @@ def with_native_tool_schema(config, arm_name, schema):
 
 def history_kv_budget_args(cell):
     """Use one resolved capacity on both closed-loop and replay proxy paths."""
-    if ("history_budget_tokens" not in cell
-            and "history_retention_ratio" not in cell):
+    if "history_budget_tokens" not in cell:
         return []
     from benchmarks.arms import get_arm
     arm = get_arm(cell["arm"])
-    if arm.text_history_budget_tokens is not None and "history_retention_ratio" not in cell:
+    if arm.text_history_budget_tokens is not None:
         return []  # Text budgets are encoded by their separate arm interface.
-    budget = HistoryKVBudget(
-        target_tokens=cell.get("history_budget_tokens"),
-        retention_ratio=cell.get("history_retention_ratio"))
+    budget = HistoryKVBudget(cell["history_budget_tokens"])
     budget.apply(arm)
     return budget.cli_args()
 
@@ -579,7 +587,7 @@ def extension_problem(existing, config, source, output):
         has_artifacts = any((output / stage / cell_id).exists() for stage in ("closed_loop", "common_prefix"))
         for key in ("arm", "method", "ratio", "retention", "benchmark", "adapter", "category",
                     "tool_context", "tool_memory", "tool_checkpoint", "tool_interface_policy",
-                    "history_budget_tokens", "history_retention_ratio", "tool_schema", "racer_backend",
+                    "history_budget_tokens", "tool_schema", "racer_backend",
                     "history_backend", "racer_policy", "calibration_status",
                     "history_allocation"):
             if key == "method" and not has_artifacts:
@@ -599,6 +607,7 @@ def extension_problem(existing, config, source, output):
 
 
 def prepare(config, output, source):
+    config = resolve_history_kv_budgets(config)
     with preparation_lock(output):
         return _prepare_locked(config, output, source)
 
@@ -609,8 +618,6 @@ def _prepare_locked(config, output, source):
         raise ValueError("The paper benchmark uses CUDA")
     for item in config["methods"]:
         arm = get_arm(item["arm"])
-        if "history_retention_ratio" in item and not arm.history_kv:
-            raise ValueError(f"arm {arm.name!r} does not support a history-KV budget")
         if is_racer_arm(arm.name):
             racer_config_for_arm(config, arm.name)
             if (arm.native_controller != "racer" or item.get("group") != "racer"
@@ -628,9 +635,6 @@ def _prepare_locked(config, output, source):
                 raise ValueError("Text budget cells require a matching token cap and explicit supported benchmarks")
             continue
         explicit_budget = item.get("history_budget_tokens")
-        explicit_ratio = item.get("history_retention_ratio")
-        if "history_budget_tokens" in item and "history_retention_ratio" in item:
-            raise ValueError("History-KV budget requires exactly one of target_tokens or retention_ratio")
         if "history_budget_tokens" in item:
             if arm.native_controller:
                 NativeHistoryBudget(explicit_budget).validate_arm(arm)
@@ -639,8 +643,6 @@ def _prepare_locked(config, output, source):
                     raise ValueError("Native history budget sweep currently requires explicit BFCL scope")
             else:
                 arm = HistoryKVBudget(explicit_budget).apply(arm)
-        elif "history_retention_ratio" in item:
-            arm = HistoryKVBudget(retention_ratio=explicit_ratio).apply(arm)
         if is_candidate_arm(arm.name):
             if (item.get("ratio") != 8 or arm.ratio != 8
                     or arm.native_controller != "candidate_" + ARM_TO_VARIANT[arm.name]
@@ -679,8 +681,7 @@ def _prepare_locked(config, output, source):
             if (spec is None or spec["method"] != expected[0]
                     or spec["backend"] != expected[1]
                     or not spec["persistent_session"]
-                    or spec["retention_ratio"] != (
-                        explicit_ratio if explicit_ratio is not None else item.get("retention"))
+                    or spec["retention_ratio"] != item.get("retention")
                     or spec["target_tokens"] != explicit_budget):
                 raise ValueError("Persistent history-KV budget differs from matrix")
         if arm.name == "agentfold":
@@ -692,10 +693,8 @@ def _prepare_locked(config, output, source):
             if (item["method"] != expected_label or spec is None
                     or spec["method"] != arm.name
                     or spec["backend"] != "reference_attention"
-                    or spec["target_tokens"] != (
-                        explicit_budget if explicit_budget is not None else
-                        None if explicit_ratio is not None else 2048)
-                    or spec["retention_ratio"] != explicit_ratio
+                    or spec["target_tokens"] != (explicit_budget if explicit_budget is not None else 2048)
+                    or spec["retention_ratio"] is not None
                     or not spec["persistent_session"]
                     or arm.text_policy):
                 raise ValueError(
@@ -766,8 +765,6 @@ def _prepare_locked(config, output, source):
             fields.append("tool_interface_policy")
         if any("history_budget_tokens" in row for row in matrix):
             fields.append("history_budget_tokens")
-        if any("history_retention_ratio" in row for row in matrix):
-            fields.append("history_retention_ratio")
         if any(is_racer_arm(row["arm"]) for row in matrix):
             fields.extend(["history_backend", "racer_policy", "calibration_status",
                            "history_allocation"])
@@ -1232,8 +1229,8 @@ def main(argv=None):
                         help="add budget-adapted HiAgent full BFCL/ACEBench cells with this actor history cap")
     parser.add_argument("--history-kv-budget", action="append", default=[], metavar="ARM=TOKENS",
                         help="add a history-KV capacity cell, e.g. commitkv=768; repeat for a sweep")
-    parser.add_argument("--history-kv-retention", action="append", default=[], metavar="ARM=RATIO",
-                        help="add a history-KV retained-fraction cell, e.g. commitkv=0.5; repeat for a sweep")
+    parser.add_argument("--history-kv-budget-tokens", type=int, metavar="B",
+                        help="absolute token cap for methods with history_budget_tokens=shared")
     parser.add_argument("--native-history-budget", action="append", default=[], metavar="ARM=TOKENS",
                         help="add a native C2KV BFCL history-capacity cell; repeat for a sweep")
     parser.add_argument("--native-tool-schema", action="append", default=[], metavar="ARM=SCHEMA",
@@ -1251,6 +1248,8 @@ def main(argv=None):
                         help="freeze an explicit positive deadline in seconds for persistent history-KV cells; use a new output root")
     args = parser.parse_args(argv)
     config = json.loads(args.config.read_text())
+    if args.history_kv_budget_tokens is not None:
+        config["history_kv_budget_tokens"] = args.history_kv_budget_tokens
     if args.action == "rescore" and (not set(filter(None, args.cells.split(",")))
                                      or args.stage == "common_prefix"):
         parser.error("rescore scores explicit closed-loop --cells of an existing output root")
@@ -1263,6 +1262,7 @@ def main(argv=None):
     if args.action in {"aggregate", "rescore"} and (args.task_subset or args.task_subset_file):
         parser.error(f"{args.action} reads the frozen task scope; task-subset options are for prepare/run")
     if args.action not in {"aggregate", "rescore"}:
+        config = resolve_history_kv_budgets(config)
         config = with_native_ratios(config, args.native_ratio)
         config = with_candidate_methods(
             config, parse_candidate_arms(args.candidate_arms),
@@ -1274,8 +1274,6 @@ def main(argv=None):
         config = with_hiagent_budget(config, args.hiagent_budget_tokens)
         for value in args.history_kv_budget:
             config = with_history_kv_budget(config, *parse_history_kv_budget(value))
-        for value in args.history_kv_retention:
-            config = with_history_kv_retention(config, *parse_history_kv_retention(value))
         for value in args.native_history_budget:
             config = with_native_history_budget(config, *parse_native_history_budget(value))
         for value in args.native_tool_schema:

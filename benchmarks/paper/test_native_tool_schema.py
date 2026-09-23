@@ -15,7 +15,7 @@ ARM = "c2kv_goal_pending_r8"
 
 
 def config():
-    base = json.loads(runner.DEFAULT_CONFIG.read_text(encoding="utf-8"))
+    base = dict(json.loads(runner.DEFAULT_CONFIG.read_text(encoding="utf-8")), history_kv_budget_tokens=768)
     return with_candidate_methods(base, ("goal_pending",))
 
 
@@ -79,10 +79,10 @@ def test_cli_repeat_and_selected_cell(tmp_path):
     args = ["--output", str(tmp_path / "results"), "--sglang-source", str(tmp_path / "engine"),
             "--candidate-arms", "goal_pending", "--native-history-budget", ARM + "=256",
             "--native-tool-schema", ARM + "=raw"]
-    runner.main(["prepare", *args])
+    runner.main(["prepare", "--history-kv-budget-tokens", "768", *args])
     selected = f"bfcl_base__{ARM}_b256__toolschema-raw"
     with mock.patch.object(runner, "execute") as execute:
-        runner.main(["run", *args, "--stage", "closed_loop", "--cells", selected])
+        runner.main(["run", "--history-kv-budget-tokens", "768", *args, "--stage", "closed_loop", "--cells", selected])
     assert execute.call_args.args[4:6] == (["closed_loop"], {selected})
 
 

@@ -12,9 +12,10 @@ from benchmarks.paper.task_subsets import with_task_subsets
 class TaskSubsetsTest(unittest.TestCase):
     def setUp(self):
         self.config = json.loads(runner.DEFAULT_CONFIG.read_text())
+        self.config["history_kv_budget_tokens"] = 768
         self.subsets = {
-            "bfcl_long_context__agentkv": ["multi_turn_long_context_0", "multi_turn_long_context_3"],
-            "appworld__history_kv_pyramidkv_persistent_r0p25": ["3d9a636_1"],
+            "bfcl_long_context__agentkv_b768": ["multi_turn_long_context_0", "multi_turn_long_context_3"],
+            "appworld__history_kv_pyramidkv_persistent_b768": ["3d9a636_1"],
         }
 
     def test_prepare_filters_cells_and_forwards_exact_ids(self):
@@ -45,11 +46,12 @@ class TaskSubsetsTest(unittest.TestCase):
             from_cli = with_task_subsets(self.config, [f"{cell}={','.join(ids)}" for cell, ids in self.subsets.items()])
             self.assertEqual(from_file, from_cli)
             with mock.patch("builtins.print") as printed:
-                runner.main(["prepare", "--output", str(root / "prepared"), "--task-subset-file", str(path)])
+                runner.main(["prepare", "--output", str(root / "prepared"),
+                             "--history-kv-budget-tokens", "768", "--task-subset-file", str(path)])
             self.assertEqual(json.loads(printed.call_args.args[0])["replay_cells"], 0)
 
     def test_invalid_selections(self):
-        cell = "bfcl_long_context__agentkv"
+        cell = "bfcl_long_context__agentkv_b768"
         for subsets in ({}, {cell: []}, {cell: [""]}, {cell: ["x", "x"]},
                         {cell: [" x"]}, {cell: "x"}, {cell: [1]},
                         {cell: ["x,y"]}, {"unknown": ["x"]},
@@ -73,7 +75,7 @@ class TaskSubsetsTest(unittest.TestCase):
             root = Path(tmp)
             config = dict(self.config, task_subsets=self.subsets)
             runner.prepare(config, root, root / "engine")
-            altered = dict(self.subsets, bfcl_long_context__agentkv=["multi_turn_long_context_1"])
+            altered = dict(self.subsets, bfcl_long_context__agentkv_b768=["multi_turn_long_context_1"])
             with self.assertRaisesRegex(RuntimeError, "task subset scope changed"):
                 runner.prepare(dict(config, task_subsets=altered), root, root / "engine")
 
@@ -88,7 +90,8 @@ class TaskSubsetsTest(unittest.TestCase):
                     with self.assertRaises(ValueError):
                         runner.execute(config, plan, root, root / "engine", stages, selected)
                 with self.assertRaises(SystemExit):
-                    runner.main(["run", "--task-subset", "bfcl_long_context__agentkv=x"])
+                    runner.main(["run", "--history-kv-budget-tokens", "768",
+                                 "--task-subset", "bfcl_long_context__agentkv_b768=x"])
                 start.assert_not_called()
             with self.assertRaises(ValueError):
                 runner.run_command(config, plan[0], root, profile, "common_prefix")
@@ -97,7 +100,7 @@ class TaskSubsetsTest(unittest.TestCase):
         for n_scored in (2, 1):
             with self.subTest(n_scored=n_scored), tempfile.TemporaryDirectory() as tmp:
                 root = Path(tmp)
-                config = dict(self.config, task_subsets={"bfcl_long_context__agentkv": self.subsets["bfcl_long_context__agentkv"]})
+                config = dict(self.config, task_subsets={"bfcl_long_context__agentkv_b768": self.subsets["bfcl_long_context__agentkv_b768"]})
                 plan, _ = runner.prepare(config, root, root / "engine")
                 cell = plan[0]
                 directory = root / "closed_loop" / cell["cell_id"]

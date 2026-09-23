@@ -11,8 +11,7 @@ import os
 from pathlib import Path
 import time
 
-from benchmarks.history_budget import (HistoryKVBudget, parse_history_kv_budget,
-                                       parse_history_kv_retention)
+from benchmarks.history_budget import parse_history_kv_budget
 from . import runner
 from .artifact_io import atomic_json
 from .process_lifecycle import run_owned, unwind_on_termination
@@ -21,49 +20,36 @@ from .process_lifecycle import run_owned, unwind_on_termination
 PAPER_ROOT = Path(__file__).resolve().parents[2]
 
 
-def plan(config: dict, benchmark: str, budget_spec: str | None, output: Path,
+def plan(config: dict, benchmark: str, budget_spec: str, output: Path,
          upstream: str, proxy_port: int | None = None,
          checkpoint_profile: Path | None = None,
          bench_python: str | None = None,
-         retention_spec: str | None = None) -> tuple[dict, dict, list[str], Path]:
+         shared_budget_tokens: int | None = None) -> tuple[dict, dict, list[str], Path]:
     """Select one raw-tool closed-loop cell using the shared paper matrix."""
-    if (budget_spec is None) == (retention_spec is None):
-        raise ValueError("Select exactly one history-KV token budget or retention ratio")
-    if budget_spec is not None:
-        arm, tokens = parse_history_kv_budget(budget_spec)
-        budget = HistoryKVBudget(tokens)
-    else:
-        arm, ratio = parse_history_kv_retention(retention_spec)
-        budget = HistoryKVBudget(retention_ratio=ratio)
+    arm, tokens = parse_history_kv_budget(budget_spec)
     if not upstream.startswith(("http://", "https://")):
         raise ValueError("--upstream must be an HTTP(S) base URL")
     if proxy_port is not None and not 1 <= proxy_port <= 65535:
         raise ValueError("--proxy-port must be in 1..65535")
-    existing = [
-        method for method in config["methods"]
-        if method["arm"] == arm
-        and method.get("history_budget_tokens") == budget.target_tokens
-        and method.get("history_retention_ratio") == budget.retention_ratio
-        and ("history_budget_tokens" in method or "history_retention_ratio" in method)
-    ]
-    if existing:
-        resolved = config
-    else:
-        resolved = (runner.with_history_kv_budget(config, arm, budget.target_tokens)
-                    if budget.target_tokens is not None else
-                    runner.with_history_kv_retention(config, arm, budget.retention_ratio))
+    if shared_budget_tokens is not None:
+        config = dict(config, history_kv_budget_tokens=shared_budget_tokens)
+    elif config.get("history_kv_budget_tokens") is None and any(
+            method.get("history_budget_tokens") == "shared" for method in config["methods"]):
+        config = dict(config, history_kv_budget_tokens=tokens)
+    config = runner.resolve_history_kv_budgets(config)
+    existing = [method for method in config["methods"]
+                if method["arm"] == arm and method.get("history_budget_tokens") == tokens]
+    resolved = config if existing else runner.with_history_kv_budget(config, arm, tokens)
     if bench_python:
         resolved = dict(resolved, bench_python=bench_python)
     if proxy_port is not None:
         resolved = dict(resolved, proxy_port=proxy_port)
     selected = [cell for cell in runner.cells(resolved)
                 if cell["arm"] == arm and cell["benchmark"] == benchmark
-                and cell.get("history_budget_tokens") == budget.target_tokens
-                and cell.get("history_retention_ratio") == budget.retention_ratio
+                and cell.get("history_budget_tokens") == tokens
                 and cell["tool_context"] == "raw"]
     if len(selected) != 1:
-        raise ValueError(f"Expected one configured raw-tool cell for "
-                         f"{benchmark}__{budget.variant_name(arm)}")
+        raise ValueError(f"Expected one configured raw-tool cell for {benchmark}__{arm}_b{tokens}")
     cell = selected[0]
     if runner._unsupported_stage("closed_loop", cell):
         raise ValueError(f"Unsupported closed_loop cell: {cell['cell_id']}")
@@ -84,9 +70,9 @@ def main(argv=None) -> None:
     parser.add_argument("--config", type=Path, required=True,
                         help="paper config with paths for the existing deployment")
     parser.add_argument("--benchmark", required=True)
-    budget_group = parser.add_mutually_exclusive_group(required=True)
-    budget_group.add_argument("--history-kv-budget", metavar="ARM=TOKENS")
-    budget_group.add_argument("--history-kv-retention", metavar="ARM=RATIO")
+    parser.add_argument("--history-kv-budget", required=True, metavar="ARM=TOKENS")
+    parser.add_argument("--history-kv-budget-tokens", type=int, metavar="B",
+                        help="optional shared absolute cap; defaults to ARM=TOKENS when config B is null")
     parser.add_argument("--upstream", required=True,
                         help="already owned engine base URL; this client never starts it")
     parser.add_argument("--proxy-port", type=int)
@@ -101,7 +87,7 @@ def main(argv=None) -> None:
         resolved, cell, command, directory = plan(
             config, args.benchmark, args.history_kv_budget, output, args.upstream,
             args.proxy_port, args.checkpoint_profile.resolve() if args.checkpoint_profile else None,
-            args.bench_python, args.history_kv_retention)
+            args.bench_python, args.history_kv_budget_tokens)
     except (OSError, ValueError, KeyError) as error:
         parser.error(str(error))
     record = {"cell": cell, "command": command, "config": resolved,

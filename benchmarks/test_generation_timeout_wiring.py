@@ -24,9 +24,8 @@ from benchmarks.model_identity import QWEN3_4B
 from benchmarks.paper import runner
 
 REFERENCE_ATTENTION_BFCL_LONG = (
-    "bfcl_long_context__commitkv_r0p25", "bfcl_long_context__agentkv",
     "bfcl_long_context__commitkv_b768", "bfcl_long_context__agentkv_b768",
-    "bfcl_long_context__history_kv_pyramidkv_persistent_r0p25",
+    "bfcl_long_context__history_kv_pyramidkv_persistent_b768",
 )
 
 
@@ -37,7 +36,7 @@ def plans(tmp_path_factory):
     for name, extra in (("default", []), ("explicit", ["--generation-timeout", "1800"])):
         output = tmp_path_factory.mktemp(name) / "root"
         runner.main(["prepare", "--output", str(output), *extra,
-                     "--history-kv-budget", "commitkv=768", "--history-kv-budget", "agentkv=768"])
+                     "--history-kv-budget-tokens", "768"])
         # Compare commands independently of where each root was prepared.
         text = (output / "commands.json").read_text(encoding="utf-8")
         text = text.replace(json.dumps(str(output))[1:-1], "ROOT")
@@ -88,8 +87,8 @@ def _toolsandbox_run_ts_kwargs(plans, plan, cell_id, monkeypatch, tmp_path):
     return seen
 
 
-@pytest.mark.parametrize("cell_id", ["toolsandbox__agentkv", "toolsandbox__agentkv_b768",
-                                     "toolsandbox__history_kv_pyramidkv_persistent_r0p25"])
+@pytest.mark.parametrize("cell_id", ["toolsandbox__agentkv_b768",
+                                     "toolsandbox__history_kv_pyramidkv_persistent_b768"])
 def test_toolsandbox_agent_client_outlives_the_frozen_deadline(plans, monkeypatch, tmp_path, cell_id):
     explicit = _toolsandbox_run_ts_kwargs(plans, "explicit", cell_id, monkeypatch, tmp_path)
     default = _toolsandbox_run_ts_kwargs(plans, "default", cell_id, monkeypatch, tmp_path)
@@ -158,8 +157,8 @@ def _tau2_run_tau2_kwargs(plans, plan, cell_id, monkeypatch, tmp_path):
     return seen
 
 
-@pytest.mark.parametrize("cell_id", ["tau2__agentkv", "tau2__agentkv_b768",
-                                     "tau2__history_kv_pyramidkv_persistent_r0p25"])
+@pytest.mark.parametrize("cell_id", ["tau2__agentkv_b768",
+                                     "tau2__history_kv_pyramidkv_persistent_b768"])
 def test_tau2_agent_litellm_timeout_outlives_the_frozen_deadline(plans, monkeypatch, tmp_path, cell_id):
     explicit = _tau2_run_tau2_kwargs(plans, "explicit", cell_id, monkeypatch, tmp_path)
     default = _tau2_run_tau2_kwargs(plans, "default", cell_id, monkeypatch, tmp_path)

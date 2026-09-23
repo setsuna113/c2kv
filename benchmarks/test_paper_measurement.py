@@ -446,11 +446,7 @@ def test_proxy_close_endpoint_resolves_measurement_id_to_owned_engine_id(monkeyp
     assert state.history_sessions == {}
 
 
-@pytest.mark.parametrize("budget_args, expected", [
-    (["--history-kv-target-tokens", "8"], (8, None)),
-    (["--history-kv-retention-ratio", "0.5"], (None, 0.5)),
-])
-def test_proxy_sigterm_closes_last_owned_session(monkeypatch, budget_args, expected):
+def test_proxy_sigterm_closes_last_owned_session_with_absolute_budget(monkeypatch):
     import signal
 
     class Backend:
@@ -468,7 +464,7 @@ def test_proxy_sigterm_closes_last_owned_session(monkeypatch, budget_args, expec
         def __init__(self, address, handler): self.closed = False
         def serve_forever(self):
             spec = proxy_mod.history_kv_spec(proxy_mod.ARM)
-            assert (spec["target_tokens"], spec["retention_ratio"]) == expected
+            assert (spec["target_tokens"], spec["retention_ratio"]) == (8, None)
             state.history_sessions["conversation"] = "engine-session-last"
             handler = signal.getsignal(signal.SIGTERM)
             assert callable(handler)
@@ -480,7 +476,7 @@ def test_proxy_sigterm_closes_last_owned_session(monkeypatch, budget_args, expec
         proxy_mod.main([
             "--upstream", "http://127.0.0.1:1", "--backend", "sglang",
             "--arm", "gen_h2o_k0", "--port", "1",
-            *budget_args, "--shared-engine"])
+            "--history-kv-target-tokens", "8", "--shared-engine"])
     assert backend.closed == ["engine-session-last"]
 
 

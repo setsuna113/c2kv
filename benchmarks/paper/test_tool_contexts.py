@@ -22,6 +22,7 @@ SOURCE = ROOT.parent / "sglang-paper"
 def _config(**overrides):
     """The shipped config without its tool contexts (the tests add their own)."""
     config = json.loads((Path(runner.__file__).with_name("config.json")).read_text())
+    config["history_kv_budget_tokens"] = 768
     config.pop("tool_contexts", None)
     for method in config["methods"]:
         method.pop("tool_contexts", None)
@@ -31,6 +32,7 @@ def _config(**overrides):
 
 def test_shipped_config_tool_contexts_are_valid():
     shipped = json.loads((Path(runner.__file__).with_name("config.json")).read_text())
+    shipped["history_kv_budget_tokens"] = 768
     contexts = runner.tool_contexts(shipped)
     assert set(contexts) >= {"raw", "t0_r8", "t0_r8_hybrid3"}
     assert contexts["t0_r8"]["checkpoint"].endswith("/T0/checkpoint-500")
@@ -141,11 +143,11 @@ def test_tool_overlay_preserves_old_cells_and_history_budgets():
             continue
         assert not row["arm"].startswith(("hiagent", "acon"))
         raw = old[row["cell_id"].split("__tools-", 1)[0]]
-        for field in ("history_budget_tokens", "history_retention_ratio", "ratio", "retention"):
+        for field in ("history_budget_tokens", "ratio", "retention"):
             assert row.get(field) == raw.get(field)
         assert row["tool_checkpoint"] == "/restored/T0/checkpoint-1034"
     assert "bfcl_base__c2kv_c1_t02_r8__tools-t0_r8" in new
-    assert "bfcl_base__history_kv_h2o_persistent_r0p25__tools-t0_r8" in new
+    assert "bfcl_base__history_kv_h2o_persistent_b768__tools-t0_r8" in new
 
 
 def test_tool_budget_reaches_native_and_proxy_commands():
@@ -163,12 +165,12 @@ def test_prepare_writes_tool_context_column_and_commands(tmp_path):
     plan, _ = runner.prepare(config, tmp_path / "out", SOURCE)
     with (tmp_path / "out" / "matrix.csv").open(encoding="utf-8", newline="") as handle:
         reader = csv.DictReader(handle)
-        assert {"tool_context", "history_retention_ratio"} <= set(reader.fieldnames or ())
+        assert {"tool_context", "history_budget_tokens"} <= set(reader.fieldnames or ())
         rows = list(reader)
     assert any(row["cell_id"] == "bfcl_base__full__tools-t0_r8"
                and row["tool_context"] == "t0_r8" for row in rows)
-    assert any(row["cell_id"] == "bfcl_base__history_kv_h2o_persistent_r0p25"
-               and row["history_retention_ratio"] == "0.25" for row in rows)
+    assert any(row["cell_id"] == "bfcl_base__history_kv_h2o_persistent_b768"
+               and row["history_budget_tokens"] == "768" for row in rows)
     commands = json.loads((tmp_path / "out" / "commands.json").read_text())
     tool_cells = [c for c in commands if c["cell_id"].endswith("__tools-t0_r8")]
     assert len(tool_cells) == len(config["benchmarks"]) and all("--tool-memory" in c["command"] for c in tool_cells)

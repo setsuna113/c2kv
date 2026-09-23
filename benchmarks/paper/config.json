@@ -106,7 +106,6 @@
       "method": "H2O",
       "arm": "history_kv_h2o_r25_persistent",
       "group": "main",
-      "history_retention_ratio": 0.25,
       "benchmarks": [
         "bfcl_base",
         "bfcl_long_context",
@@ -114,13 +113,13 @@
         "acebench_agent",
         "toolsandbox",
         "tau2"
-      ]
+      ],
+      "history_budget_tokens": "shared"
     },
     {
       "method": "SnapKV",
       "arm": "history_kv_snapkv_r25_persistent",
       "group": "main",
-      "history_retention_ratio": 0.25,
       "benchmarks": [
         "bfcl_base",
         "bfcl_long_context",
@@ -128,35 +127,13 @@
         "acebench_agent",
         "toolsandbox",
         "tau2"
-      ]
-    },
-    {
-      "method": "H2O",
-      "arm": "history_kv_h2o_r125_persistent",
-      "group": "sweep",
-      "history_retention_ratio": 0.125,
-      "benchmarks": [
-        "bfcl_base",
-        "bfcl_long_context",
-        "appworld"
-      ]
-    },
-    {
-      "method": "SnapKV",
-      "arm": "history_kv_snapkv_r125_persistent",
-      "group": "sweep",
-      "history_retention_ratio": 0.125,
-      "benchmarks": [
-        "bfcl_base",
-        "bfcl_long_context",
-        "appworld"
-      ]
+      ],
+      "history_budget_tokens": "shared"
     },
     {
       "method": "PyramidKV",
       "arm": "history_kv_pyramidkv_r25_persistent",
       "group": "main",
-      "history_retention_ratio": 0.25,
       "benchmarks": [
         "bfcl_base",
         "bfcl_long_context",
@@ -164,18 +141,8 @@
         "acebench_agent",
         "toolsandbox",
         "tau2"
-      ]
-    },
-    {
-      "method": "PyramidKV",
-      "arm": "history_kv_pyramidkv_r125_persistent",
-      "group": "sweep",
-      "history_retention_ratio": 0.125,
-      "benchmarks": [
-        "bfcl_base",
-        "bfcl_long_context",
-        "appworld"
-      ]
+      ],
+      "history_budget_tokens": "shared"
     },
     {
       "method": "AgentFold",
@@ -194,7 +161,6 @@
       "method": "CommitKV",
       "arm": "commitkv",
       "group": "opponent",
-      "history_retention_ratio": 0.25,
       "benchmarks": [
         "bfcl_base",
         "bfcl_long_context",
@@ -202,18 +168,8 @@
         "acebench_agent",
         "toolsandbox",
         "tau2"
-      ]
-    },
-    {
-      "method": "CommitKV",
-      "arm": "commitkv",
-      "group": "sweep",
-      "history_retention_ratio": 0.125,
-      "benchmarks": [
-        "bfcl_base",
-        "bfcl_long_context",
-        "appworld"
-      ]
+      ],
+      "history_budget_tokens": "shared"
     },
     {
       "method": "AgentKV",
@@ -226,7 +182,8 @@
         "acebench_agent",
         "toolsandbox",
         "tau2"
-      ]
+      ],
+      "history_budget_tokens": "shared"
     },
     {
       "method": "C2KV+C1",
@@ -333,5 +290,6 @@
   "tau2_python": "/path/to/tau2-venv/bin/python",
   "tau2_task_set": "airline",
   "tau2_task_split": "base",
-  "tau2_num_trials": 1
+  "tau2_num_trials": 1,
+  "history_kv_budget_tokens": null
 }

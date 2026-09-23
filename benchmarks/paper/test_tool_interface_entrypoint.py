@@ -11,7 +11,7 @@ from benchmarks.paper import runner
 
 
 def _config():
-    return json.loads(runner.DEFAULT_CONFIG.read_text(encoding="utf-8"))
+    return dict(json.loads(runner.DEFAULT_CONFIG.read_text(encoding="utf-8")), history_kv_budget_tokens=768)
 
 
 def test_default_matrix_and_legacy_tool_contexts_remain_unchanged():

@@ -2446,14 +2446,9 @@ def main(argv=None):
         help="model family contract for AgentFold/CommitKV/AgentKV; these arms "
              "only run with Qwen3-4B",
     )
-    history_budget = parser.add_mutually_exclusive_group()
-    history_budget.add_argument(
+    parser.add_argument(
         "--history-kv-target-tokens", type=int, default=None,
         help="absolute history-KV allowance, resolved through the shared budget interface",
-    )
-    history_budget.add_argument(
-        "--history-kv-retention-ratio", type=float, default=None,
-        help="history-KV retention in (0, 1], resolved from full server-tokenized history",
     )
     parser.add_argument("--doc-packing", default=DOC_PACKING, choices=DOC_PACKINGS,
                         help="how compressed history is cut into docs: 'turn' = "
@@ -2483,9 +2478,8 @@ def main(argv=None):
     QUERY_PROJECTION = args.query_projection
     MODEL_FAMILY = args.model_family
     ARM = get_arm(args.arm)
-    if args.history_kv_target_tokens is not None or args.history_kv_retention_ratio is not None:
-        ARM = HistoryKVBudget(args.history_kv_target_tokens,
-                             retention_ratio=args.history_kv_retention_ratio).apply(ARM)
+    if args.history_kv_target_tokens is not None:
+        ARM = HistoryKVBudget(args.history_kv_target_tokens).apply(ARM)
     if args.shared_engine:
         history_spec = history_kv_spec(ARM) if ARM.history_kv else None
         if args.backend != "sglang" or not history_spec or not history_spec["persistent_session"]:
@@ -2534,9 +2528,8 @@ def main(argv=None):
     if ARM.name in {"agentfold", "commitkv", "agentkv"}:
         with _OPENER.open(UPSTREAM + "/model_info", timeout=10) as response:
             require_qwen3_4b(json.load(response))
-    if (ARM.name.startswith("gen_") and args.history_kv_target_tokens is None
-            and args.history_kv_retention_ratio is None):
-        raise ValueError("generation budget arms require an explicit history-KV budget; placeholder is not runnable")
+    if ARM.name.startswith("gen_") and args.history_kv_target_tokens is None:
+        raise ValueError("generation budget arms require --history-kv-target-tokens; placeholder is not runnable")
     STATE.reference_log_path = args.record_reference
     if args.reference:
         if not ARM.recover:

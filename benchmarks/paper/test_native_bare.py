@@ -15,7 +15,7 @@ def native_config(tmp_path, request):
     original = c1.ARM
     arm = f"c2kv_native_r{request.param}"
     c1.select_arm(arm)
-    config = json.loads(runner.DEFAULT_CONFIG.read_text())
+    config = dict(json.loads(runner.DEFAULT_CONFIG.read_text()), history_kv_budget_tokens=768)
     config = runner.with_native_ratios(config, [request.param])
     config["methods"] = [method for method in config["methods"] if method["method"] != "C2KV" or method["arm"] == arm]
     config.update(native_arm=arm, sglang_source=str(tmp_path / "sglang"))
@@ -144,7 +144,7 @@ def test_extra_native_ratio_reaches_server_and_ready_validation(native_config, t
 
 
 def test_native_ratio_overlay_preserves_defaults_and_does_not_duplicate():
-    config = json.loads(runner.DEFAULT_CONFIG.read_text())
+    config = dict(json.loads(runner.DEFAULT_CONFIG.read_text()), history_kv_budget_tokens=768)
     original = copy.deepcopy(config)
     expanded = runner.with_native_ratios(config, [8, 8, 4])
     assert config == original

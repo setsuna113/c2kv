@@ -12,7 +12,7 @@ from benchmarks.arms import get_arm
 from benchmarks.paper import c1 as paper_c1, native_extra
 from benchmarks.paper.c1 import (ARM, controller_oom_message, controller_step_failure, replay_task_id,
                                  selected_tasks, select_arm, summarize_scores)
-from benchmarks.paper.runner import DEFAULT_CONFIG, prepare, server_command
+from benchmarks.paper.runner import DEFAULT_CONFIG, prepare, resolve_history_kv_budgets, server_command
 from benchmarks.measurement.telemetry import canonical_sha256, read_jsonl
 
 
@@ -20,7 +20,7 @@ def test_native_arm_requires_real_controller_and_keeps_bare_c2kv():
     assert get_arm(ARM).native_controller == "c1_t02"
     assert get_arm(ARM).ratio == 8
     assert get_arm("c2kv4").ratio == 4
-    config = json.loads(DEFAULT_CONFIG.read_text())
+    config = dict(json.loads(DEFAULT_CONFIG.read_text()), history_kv_budget_tokens=768)
     command = server_command(config, Path("sglang"), ARM)
     assert "--enable-return-hidden-states" in command
     assert "--c2kv-shadow-feature-layer" in command
@@ -29,7 +29,7 @@ def test_native_arm_requires_real_controller_and_keeps_bare_c2kv():
 
 
 def test_paper_delivery_uses_configured_detector_and_defaults_to_d3_hybrid(tmp_path):
-    config = json.loads(DEFAULT_CONFIG.read_text())
+    config = dict(json.loads(DEFAULT_CONFIG.read_text()), history_kv_budget_tokens=768)
     config["sglang_source"] = str(tmp_path / "sglang")
     delivery = paper_c1.load_delivery()
 
@@ -62,7 +62,7 @@ def test_paper_delivery_uses_configured_detector_and_defaults_to_d3_hybrid(tmp_p
 
 
 def test_append_final_arm_preserves_old_cells_and_completed_artifacts():
-    config = json.loads(DEFAULT_CONFIG.read_text())
+    config = dict(json.loads(DEFAULT_CONFIG.read_text()), history_kv_budget_tokens=768)
     previous = copy.deepcopy(config)
     previous["methods"] = previous["methods"][:-2]   # drop the C1 system and its ratio-4 ablation
     previous.pop("c1")
@@ -76,7 +76,8 @@ def test_append_final_arm_preserves_old_cells_and_completed_artifacts():
         assert [row["cell_id"] for row in new_plan[:len(old_plan)]] == [row["cell_id"] for row in old_plan]
         assert completed.read_text() == '{"old_result": true}\n'
         archived = sorted(output.glob("config.before_extension.*.json"))
-        assert archived and json.loads(archived[-1].read_text())["methods"] == previous["methods"]
+        assert archived and json.loads(archived[-1].read_text())["methods"] == (
+            resolve_history_kv_budgets(previous)["methods"])
         assert all("benchmarks.paper.c1" in row["command"] for row in new_plan[-4:])
         r4 = next(row for row in new_plan if row["arm"] == "c2kv_c1_t02_r4")
         command = list(r4["command"])

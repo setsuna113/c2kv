@@ -7,7 +7,7 @@ from benchmarks.paper.runner import DEFAULT_CONFIG, prepare
 
 
 def test_algorithm_switch_requires_fresh_output(tmp_path):
-    config = json.loads(DEFAULT_CONFIG.read_text())
+    config = dict(json.loads(DEFAULT_CONFIG.read_text()), history_kv_budget_tokens=768)
     assert config["c1"]["detector"] == "d3_hybrid"
     previous = copy.deepcopy(config)
     previous["c1"]["detector"] = "t02_risk"

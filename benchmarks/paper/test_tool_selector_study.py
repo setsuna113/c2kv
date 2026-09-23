@@ -7,7 +7,7 @@ from benchmarks.paper.tool_selector_study import joint_selector_config
 
 
 def test_two_selectors_keep_one_history_and_no_tool_budget(tmp_path):
-    base = json.loads(runner.DEFAULT_CONFIG.read_text())
+    base = dict(json.loads(runner.DEFAULT_CONFIG.read_text()), history_kv_budget_tokens=768)
     base["tool_history_study"] = {"history_factor": ["c2kv_c1_off_r8"]}
     original = copy.deepcopy(base)
     config = joint_selector_config(base, tool_checkpoint="/checkpoints/T0",

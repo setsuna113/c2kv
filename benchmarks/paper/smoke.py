@@ -11,13 +11,16 @@ import time
 import urllib.error
 import urllib.request
 
-from .runner import DEFAULT_CONFIG, ROOT, server_command, wait_server
+from .runner import (DEFAULT_CONFIG, ROOT, history_kv_budget_args,
+                     resolve_history_kv_budgets, server_command, wait_server)
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
+    parser.add_argument("--history-kv-budget-tokens", type=int, metavar="B",
+                        help="shared absolute history-token cap for the configured KV arms")
     parser.add_argument("--sglang-source", type=Path, default=ROOT.parent.parent / "sglang-paper")
     parser.add_argument("--cpu-offload-gb", type=float, default=0,
                         help="optional laptop-only weight offload for integration checks")
@@ -30,6 +33,9 @@ def main(argv=None):
     if "c2kv_c1_t02_r8" in args.arms.split(","):
         parser.error("Use benchmarks.paper.c1 --task-ids for the native C1 controller smoke")
     config = json.loads(args.config.read_text())
+    if args.history_kv_budget_tokens is not None:
+        config["history_kv_budget_tokens"] = args.history_kv_budget_tokens
+    config = resolve_history_kv_budgets(config)
     config.update(max_total_tokens=8192, context_length=8192,
                   mem_fraction_static=0.85, c2kv_pool_fraction=0.01,
                   chunked_prefill_size=256, server_port=34300, proxy_port=34301)
@@ -77,6 +83,7 @@ def main(argv=None):
                        "--max-doc-length", "1000", "--max-doc-num", "1000", "--query-projection", "base",
                        "--request-log", str(directory / "requests.jsonl"),
                        "--telemetry-log", str(directory / "proxy_telemetry.jsonl")]
+                cmd += history_kv_budget_args(method)
                 if arm == "full":
                     cmd += ["--record-prefixes", str(directory / "full_prefixes.jsonl")]
                 with (directory / "proxy.log").open("w") as proxy_log:

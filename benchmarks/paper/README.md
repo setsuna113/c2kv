@@ -196,12 +196,12 @@ are not classified as engine death. Strict allocator checks stay enabled.
 | HiAgent | Full subgoal summary and trajectory retrieval | Same | Same | Same | Same | Same | None |
 | ACON | History UT to CO guideline | Same | Same | Same | Same | Same | None |
 | Bare C2KV (`c2kv_native_r4`) | Native event packing, ratio **4**, no S0/detector/recovery | Native | Native | Native | Receipt-backed native | Native | None |
-| H2O | Persistent history KV, retain 25% of full server-tokenized history | Same | Same | Same | Same | Same | Retain 12.5% on BFCL base/long context and AppWorld |
-| SnapKV | Persistent history KV, retain 25% of full server-tokenized history | Same | Same | Same | Same | Same | Retain 12.5% on BFCL base/long context and AppWorld |
-| PyramidKV | Persistent history KV, retain 25% of full server-tokenized history | Same | Same | Same | Same | Same | Retain 12.5% on BFCL base/long context and AppWorld |
+| H2O | Persistent history KV, shared absolute token cap `B` | Same | Same | Same | Same | Same | Explicit absolute-token sweeps |
+| SnapKV | Persistent history KV, shared absolute token cap `B` | Same | Same | Same | Same | Same | Explicit absolute-token sweeps |
+| PyramidKV | Persistent history KV, shared absolute token cap `B` | Same | Same | Same | Same | Same | Explicit absolute-token sweeps |
 | AgentFold (held) | Untrained-actor protocol diagnostic; excluded from method quality comparison | Held | Held | Held | Held | Held | None |
-| CommitKV | Persistent history KV, retain 25% of full server-tokenized history | Same | Same | Same | Same | Same | Retain 12.5% on BFCL base/long context and AppWorld |
-| AgentKV | Resident KV selection, historical project 2048-token default | Same | Same | Same | Same | Same | Explicit history-KV budget cells |
+| CommitKV | Persistent history KV, shared absolute token cap `B` | Same | Same | Same | Same | Same | Explicit absolute-token sweeps |
+| AgentKV | Resident KV selection, shared absolute token cap `B` | Same | Same | Same | Same | Same | Explicit history-KV budget cells |
 | C2KV+C1 | H0 / C1000 / ratio8 / D3 hybrid / R1 | Same | Same | Same | Native C1 | Not enabled by default | Ratio-4 BFCL base and ACEBench |
 
 Tool contexts are a second, orthogonal axis (`config.json` `tool_contexts`
@@ -253,7 +253,7 @@ CPU coverage at page size 128; CUDA smoke does not establish NPU hardware
 execution or benchmark quality.
 
 The default matrix contains 47 raw-tool main cells, 12 additional tool-context
-main cells, 12 sweep cells, 18 opponent cells and two ratio-4 C1 ablations.
+main cells, 18 opponent cells and two ratio-4 C1 ablations.
 ACEBench uses the official `agent` category;
 ToolSandbox defaults to the frozen `three_distraction_tools_129` suite with one process.
 Its worker defaults to `POLARS_MAX_THREADS=4`; an explicitly set value takes priority.
@@ -293,58 +293,46 @@ content remains an executable action and does not receive that exemption.
 Restoring this comparison requires a compatible trained joint folding/action
 actor and explicit accounting for its parse-retry policy, as described in the
 [AgentFold method and training protocol](https://arxiv.org/html/2510.24699).
-The four H2O, SnapKV, PyramidKV, and CommitKV default PAPER cells use the
-same `history_retention_ratio=0.25`; their three-benchmark sweeps use 0.125.
-The denominator is the full history tokenized by the serving model, excluding
-the protected system/tool prefix and current query. It is not the whole prompt
-or the previous turn's resident KV. H2O's `h2o_recent_fraction=0.5` still
-splits its retained history allowance between recent and heavy-hitter tokens;
-it does not change the 0.25 total allowance. Registry arm names remain stable,
-while explicit ratio cells use budget-bearing IDs such as
-`bfcl_base__history_kv_h2o_persistent_r0p25` and
-`bfcl_base__commitkv_r0p25`. Old frozen configs with `retention` or implicit
-CommitKV 2048 remain readable as their historical cells; use a new output root
-for this changed default matrix. AgentKV retains its historical project
-2048-token setting. `--history-kv-target-tokens` remains the absolute-token
-override at launch.
+The default history-KV matrix uses one configurable absolute history-token
+cap `B` for H2O, SnapKV, PyramidKV, CommitKV, and AgentKV. The checked-in
+config is a template: `history_kv_budget_tokens` is unset and each of these
+methods declares `history_budget_tokens: "shared"`. Supply a positive integer
+through `--history-kv-budget-tokens B` or the config field before preparing or
+running it. There is no fixed 768/2048 default and no implicit ratio sweep.
+The checked-in `matrix.csv` shows symbolic `_bB` identities; a prepared run
+records the actual numeric cap in its resolved config, commands, CSV, summaries,
+and comparison tables. A different cap gets a different result directory.
 
-History-KV capacity sweeps use the device-neutral
-`benchmarks.history_budget.HistoryKVBudget` interface. It resolves the
-registered `Arm.history_kv` to a token allowance from either an absolute cap
-or the full-history retained fraction at each decision, without changing
-the method, selector settings, backend, or persistent-session protocol.
-The paper planner and proxy use this same interface; CUDA and NPU do not
-implement separate budget policies. Text-summary allowances and learned gist
-ratios are separate contracts and are rejected by this history-KV interface.
+`benchmarks.history_budget.HistoryKVBudget` applies this absolute allowance
+without changing the selector, backend, or persistent-session protocol.
+It clears a registry arm's old retention ratio. H2O's
+`h2o_recent_fraction=0.5` still divides the retained allowance between recent
+and heavy-hitter tokens; it is an internal selector setting, not the cap.
+Likewise, the C2KV gist ratio is separate from its history capacity.
+The cap remains fixed within a persistent session and can change between runs.
 
-Add independent cells with the repeatable `--history-kv-budget ARM=TOKENS`
-option on both `prepare` and `run`. The matching
-`--history-kv-retention ARM=RATIO` option adds retained-fraction cells through
-the same `HistoryKVBudget` interface. For example:
+For example, choose `B` for this run and pass the same value to prepare and run:
 
 ```bash
+B=768  # Example only; use the absolute history-token cap for this run.
 python -m benchmarks.paper prepare --config CONFIG.json \
-  --sglang-source ENGINE --output RESULTS \
-  --history-kv-budget commitkv=768 --history-kv-budget commitkv=1024 \
-  --history-kv-budget agentkv=768 \
-  --history-kv-retention agentkv=0.25
+  --sglang-source ENGINE --output RESULTS --history-kv-budget-tokens "$B"
 python -m benchmarks.paper run --config CONFIG.json \
-  --sglang-source ENGINE --output RESULTS \
-  --history-kv-budget commitkv=768 --history-kv-budget commitkv=1024 \
-  --history-kv-budget agentkv=768 \
-  --history-kv-retention agentkv=0.25 --stage closed_loop \
-  --cells bfcl_base__commitkv_b768,bfcl_base__commitkv_b1024,bfcl_base__agentkv_b768,bfcl_base__agentkv_r0p25
+  --sglang-source ENGINE --output RESULTS --history-kv-budget-tokens "$B" \
+  --stage closed_loop --cells "bfcl_base__commitkv_b${B},bfcl_base__history_kv_h2o_persistent_b${B}"
 ```
 
-The default CommitKV cell now has ID `bfcl_base__commitkv_r0p25`; AgentKV keeps
-`bfcl_base__agentkv` and its 2048-token setting. A capacity variant keeps its
-registry arm, carries `history_budget_tokens` and an `_bN` ID suffix, or carries
-`history_retention_ratio` and an `_r0p25`-style suffix. Optional tool-context
-suffixes follow. The planner inherits the configured base arm's benchmark
-scope, and resolved JSON, matrix CSV, run summaries, and comparison tables
-retain the explicit allowance. Multiple budget cells use separate result
-directories. Existing results cannot be resumed as a different budget; an
-absolute token allowance should not be read as a measured compression ratio.
+`--history-kv-budget ARM=TOKENS` still adds explicit per-arm capacity sweep
+cells, for example `--history-kv-budget commitkv=1024` when the shared cap is
+768. These cells use the same budget interface and keep the registered arm's
+backend and benchmark scope. Old frozen configs using legacy `retention` or
+implicit 2048-token arms remain readable; they are not the new default matrix.
+Use a new output root for a changed budget contract.
+
+HiAgent/ACON budget variants and native C2KV/RACER already consume absolute
+history caps through their respective adapters. Their summarization, gist,
+and recovery settings remain independent from `B`. The history-KV budget
+interface does not reinterpret those algorithms' internal parameters.
 
 Native C2KV allocation/recovery uses a separate capacity contract through
 `benchmarks.native_history_budget.NativeHistoryBudget`. The repeatable
@@ -402,9 +390,9 @@ telemetry. Full paper aggregation additionally needs the upstream's per-cell
 `server_telemetry.jsonl`; enabling telemetry in the client environment does not
 reconfigure an already running server.
 
-The same API accepts other configured history-KV arms. An absolute allowance
-replaces their retention fraction in the new cell while leaving the original
-fractional cell unchanged. The reference backend and exact-generated-prefix
+The same API accepts every configured history-KV arm. An absolute allowance
+replaces any registry retention fraction in the resolved cell. The single-cell
+client can use its supplied token cap to resolve an unset shared template. The reference backend and exact-generated-prefix
 requirements for CommitKV/AgentKV still apply at every capacity: use
 `closed_loop`; their Full teacher-prefix replay remains unsupported.
 

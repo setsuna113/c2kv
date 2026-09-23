@@ -9,7 +9,7 @@ from benchmarks.paper.tool_study import joint_config
 
 
 def test_joint_matrix_has_four_paired_cells_and_three_anchors(tmp_path):
-    base = json.loads(runner.DEFAULT_CONFIG.read_text())
+    base = dict(json.loads(runner.DEFAULT_CONFIG.read_text()), history_kv_budget_tokens=768)
     original = copy.deepcopy(base)
     config = joint_config(base, tool_checkpoint="/checkpoints/T0", tool_budget_tokens=1024)
     assert base == original
@@ -30,7 +30,7 @@ def test_joint_matrix_has_four_paired_cells_and_three_anchors(tmp_path):
 
 
 def test_recovery_off_routes_to_existing_initial_allocation_ablation(tmp_path):
-    base = json.loads(runner.DEFAULT_CONFIG.read_text())
+    base = dict(json.loads(runner.DEFAULT_CONFIG.read_text()), history_kv_budget_tokens=768)
     config = joint_config(base, tool_checkpoint="/checkpoints/T0")
     config["sglang_source"] = str(tmp_path)
     delivery = c1.load_delivery()
@@ -51,7 +51,7 @@ def test_recovery_off_routes_to_existing_initial_allocation_ablation(tmp_path):
 
 
 def test_joint_study_schema_policy_is_separate_and_bound_to_every_tool_cell(tmp_path):
-    base = json.loads(runner.DEFAULT_CONFIG.read_text())
+    base = dict(json.loads(runner.DEFAULT_CONFIG.read_text()), history_kv_budget_tokens=768)
     legacy = joint_config(base, tool_checkpoint="/checkpoints/T0")
     assert "interface_policy" not in legacy["tool_history_study"]
     config = joint_config(base, tool_checkpoint="/checkpoints/T0",

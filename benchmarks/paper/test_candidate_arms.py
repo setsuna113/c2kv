@@ -22,7 +22,7 @@ from benchmarks.paper.candidate_matrix import (
 
 
 def test_toolsandbox_candidate_prepare_preserves_named_method_and_scenarios(tmp_path):
-    original = json.loads(runner.DEFAULT_CONFIG.read_text())
+    original = dict(json.loads(runner.DEFAULT_CONFIG.read_text()), history_kv_budget_tokens=768)
     original["benchmarks"] = [row for row in original["benchmarks"]
                               if row["name"] == "toolsandbox"]
     original["methods"] = []
@@ -54,7 +54,7 @@ def test_toolsandbox_candidate_prepare_preserves_named_method_and_scenarios(tmp_
 
 
 def test_candidate_matrix_defaults_to_bfcl_base_and_explicitly_adds_acebench(tmp_path):
-    original = json.loads(runner.DEFAULT_CONFIG.read_text())
+    original = dict(json.loads(runner.DEFAULT_CONFIG.read_text()), history_kv_budget_tokens=768)
     assert parse_candidate_arms("") == ()
     assert with_candidate_methods(original, ()) is original
     assert not any(row["arm"] in VARIANT_TO_ARM.values() for row in runner.cells(original))
@@ -101,7 +101,7 @@ def test_candidate_matrix_defaults_to_bfcl_base_and_explicitly_adds_acebench(tmp
 def test_c1_v2_requires_named_opt_in_and_dispatches_native_budget_sweeps(tmp_path):
     variant = "c1_v2_verified"
     arm = "c2kv_c1_v2_verified_r8"
-    original = json.loads(runner.DEFAULT_CONFIG.read_text())
+    original = dict(json.loads(runner.DEFAULT_CONFIG.read_text()), history_kv_budget_tokens=768)
     assert variant not in parse_candidate_arms("all")
     assert parse_candidate_arms(variant) == (variant,)
     assert c1_v2_fields(variant) == {
@@ -142,7 +142,7 @@ def test_c1_v2_requires_named_opt_in_and_dispatches_native_budget_sweeps(tmp_pat
     C1_V2_VARIANTS,
 ])
 def test_new_arms_require_named_opt_in_and_support_bfcl_appworld_ace(tmp_path, variants):
-    original = json.loads(runner.DEFAULT_CONFIG.read_text())
+    original = dict(json.loads(runner.DEFAULT_CONFIG.read_text()), history_kv_budget_tokens=768)
     assert not set(variants) & set(parse_candidate_arms("all"))
     assert len(parse_candidate_arms("all")) == 11
     selected = parse_candidate_arms(",".join(variants))
@@ -176,7 +176,7 @@ def test_candidate_delivery_uses_ratio8_and_bound_artifact(tmp_path, monkeypatch
     try:
         c1.select_arm(arm)
         delivery = c1.load_delivery()
-        config = json.loads(runner.DEFAULT_CONFIG.read_text())
+        config = dict(json.loads(runner.DEFAULT_CONFIG.read_text()), history_kv_budget_tokens=768)
         checkpoint = tmp_path / "checkpoint"
         checkpoint.mkdir()
         (checkpoint / "config.json").write_text("{}", encoding="utf-8")
@@ -310,7 +310,7 @@ def test_repair_delivery_has_no_t02_dependency(tmp_path, monkeypatch, variant):
     try:
         c1.select_arm(arm)
         delivery = c1.load_delivery()
-        config = json.loads(runner.DEFAULT_CONFIG.read_text())
+        config = dict(json.loads(runner.DEFAULT_CONFIG.read_text()), history_kv_budget_tokens=768)
         checkpoint = tmp_path / "checkpoint"
         checkpoint.mkdir()
         (checkpoint / "config.json").write_text("{}", encoding="utf-8")
@@ -451,7 +451,7 @@ def test_repair_server_command_omits_shadow_feature_setup(tmp_path, monkeypatch)
     try:
         c1.select_arm(VARIANT_TO_ARM["request_contract"])
         delivery = c1.load_delivery()
-        config = json.loads(runner.DEFAULT_CONFIG.read_text())
+        config = dict(json.loads(runner.DEFAULT_CONFIG.read_text()), history_kv_budget_tokens=768)
         config["checkpoint"] = str(tmp_path / "checkpoint")
         config["sglang_source"] = str(tmp_path / "sglang")
         args = c1.delivery_args(config, "bfcl_base", tmp_path / "out", [], delivery)
@@ -476,7 +476,7 @@ def test_goal_server_command_keeps_shadow_feature_setup(tmp_path, monkeypatch):
     try:
         c1.select_arm(VARIANT_TO_ARM["goal_joint"])
         delivery = c1.load_delivery()
-        config = json.loads(runner.DEFAULT_CONFIG.read_text())
+        config = dict(json.loads(runner.DEFAULT_CONFIG.read_text()), history_kv_budget_tokens=768)
         config.update(checkpoint=str(tmp_path / "checkpoint"),
                       sglang_source=str(tmp_path / "sglang"))
         args = c1.delivery_args(config, "bfcl_base", tmp_path / "out", [], delivery)

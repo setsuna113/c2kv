@@ -12,7 +12,7 @@ from benchmarks.paper import runner
 
 
 def _config():
-    return json.loads(runner.DEFAULT_CONFIG.read_text(encoding="utf-8"))
+    return dict(json.loads(runner.DEFAULT_CONFIG.read_text(encoding="utf-8")), history_kv_budget_tokens=768)
 
 
 def test_budget_selector_preserves_full_mode_and_original_identity():
@@ -127,13 +127,13 @@ def test_cli_options_roundtrip_and_run_selected_identity(tmp_path):
     arguments = ["--config", str(config_path), "--sglang-source", str(tmp_path / "engine"),
                  "--output", str(output), "--acon-budget-tokens", "768",
                  "--hiagent-budget-tokens", "512"]
-    runner.main(["prepare", *arguments])
+    runner.main(["prepare", "--history-kv-budget-tokens", "768", *arguments])
     resolved = json.loads((output / "config.resolved.json").read_text())
     assert {row["arm"] for row in resolved["methods"][-2:]} == {
         "acon_hist_ut_co_b768", "hiagent_full_b512"}
     selected = "bfcl_base__hiagent_full_b512"
     with mock.patch.object(runner, "execute") as execute:
-        runner.main(["run", *arguments, "--stage", "closed_loop", "--cells", selected])
+        runner.main(["run", "--history-kv-budget-tokens", "768", *arguments, "--stage", "closed_loop", "--cells", selected])
     config, plan, run_output, _, stages, cell_ids = execute.call_args.args[:6]
     assert config == {key: value for key, value in resolved.items() if key != "sglang_source"}
     assert run_output == output
