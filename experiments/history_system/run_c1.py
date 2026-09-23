@@ -363,6 +363,30 @@ def _build_profile_unbudgeted(args: argparse.Namespace) -> tuple[dict, dict]:
     }
 
 
+def _history_budget_module():
+    """This delivery's native budget module, whatever ``history_budget`` names.
+
+    The paper benchmark package has its own top-level ``history_budget`` (the
+    history-KV budget interface) that its adapters import first; neither
+    sys.path order nor sys.modules may decide which one resolves native caps.
+    """
+    import importlib.util
+
+    path = Path(__file__).resolve().with_name("history_budget.py")
+    name = "_c2kv_delivery_history_budget_" + hashlib.sha256(str(path).encode("utf-8")).hexdigest()[:12]
+    module = sys.modules.get(name)
+    if module is None:
+        spec = importlib.util.spec_from_file_location(name, path)
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[name] = module
+        try:
+            spec.loader.exec_module(module)
+        except BaseException:
+            sys.modules.pop(name, None)
+            raise
+    return module
+
+
 def _history_budget_override(args: argparse.Namespace, design: dict | None = None) -> dict | None:
     tokens = getattr(args, "history_budget_tokens", None)
     racer = getattr(args, "racer_backend_config", None)
@@ -377,7 +401,7 @@ def _history_budget_override(args: argparse.Namespace, design: dict | None = Non
     if (racer is None and getattr(args, "candidate_algorithm", None) is None
             and args.benchmark != "bfcl"):
         raise ValueError("--history-budget-tokens currently supports BFCL only")
-    import history_budget
+    history_budget = _history_budget_module()
 
     return history_budget.resolve_override(
         tokens, args.checkpoint, design or current.load_config(), RUNTIME, args.out,
@@ -493,7 +517,7 @@ def commands_for_task(args: argparse.Namespace, task: str, controller_path: Path
     design = current.load_config()
     override = _history_budget_override(args, design)
     if override is not None:
-        import history_budget
+        history_budget = _history_budget_module()
 
         # A normal run has already created --out. A preview keeps it untouched.
         if args.out.is_dir() and not getattr(args, "preview", False):

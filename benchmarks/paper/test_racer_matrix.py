@@ -195,7 +195,7 @@ def test_racer_budget_override_applies_to_every_portable_benchmark(tmp_path, mon
         return {"requested_tokens": tokens, "history_budget_bytes": tokens * 2,
                 "workspace_budget_bytes": tokens * 2}
 
-    monkeypatch.setitem(sys.modules, "history_budget", SimpleNamespace(resolve_override=resolve))
+    monkeypatch.setattr(delivery._history_budget_module(), "resolve_override", resolve)
     args = SimpleNamespace(
         history_budget_tokens=None, racer_backend_config=racer,
         method="c2kv_only", benchmark="tau2", checkpoint=tmp_path / "checkpoint",

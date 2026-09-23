@@ -26,5 +26,16 @@
     "AppWorld candidate design is labelled c1_<detector> and functional_checks receives no candidate variant at 11fa0ab (as before budgets); smoke one unbudgeted appworld__c2kv_c1_v2_verified_r8 task before the budget cells",
     "Capacity failures score 0 as method failures; read each cell with its method_failure_task_ids"
   ],
-  "gpu_validation": "none"
+  "gpu_validation": "none",
+  "live_failure_and_fix": {
+    "failure": "box4 25c4b1e: all 7 non-BFCL budget cells (toolsandbox x3, tau2 b512, acebench_agent x3; roots results-c21{ts,t2,ace}) exited in benchmarks.paper.c1 prepare_native -> delivery.build_profile -> _history_budget_override with AttributeError: module 'history_budget' has no attribute 'resolve_override'; no task ran",
+    "cause": "run_c1 used a bare 'import history_budget'. In a non-BFCL c1 process the paper adapters have already put benchmarks/ first on sys.path or imported the paper package's own top-level history_budget (benchmarks/run.py and proxy.py do), so the name resolved to the history-KV budget interface. BFCL processes do not import those adapters first, which is why the rv17 BFCL budget cells run. The earlier CPU tests replaced sys.modules['history_budget'] and so hid the bug",
+    "fix": "run_c1._history_budget_module loads the delivery's own history_budget.py by file path under a path-derived private module name (as c1_appworld._load_module already does); _history_budget_override and commands_for_task use it. Tests that patched sys.modules or the test's own import now patch the module the delivery actually uses",
+    "tests": {
+      "real_process": "test_runner_command_reaches_the_delivery_budget_in_a_real_c1_process runs the runner-prepared toolsandbox__c2kv_c1_v2_verified_r8_b256 command (-m benchmarks.paper.c1) on CPU with a fixture ToolSandbox resolver and checkpoint; it must reach build_profile and the delivery's resolve_override (stopped by the fixture checkpoint's config hash) without AttributeError. On 25c4b1e it reproduces the live AttributeError; after the fix it passes",
+      "in_process": "test_delivery_budget_module_ignores_the_benchmark_history_budget puts the paper history_budget first in sys.path and sys.modules and still gets the delivery module",
+      "full_suite": "benchmarks 7 failed / 1217 passed / 23 skipped and delivery file 1 failed / 7 passed; failure set identical to 11fa0ab",
+      "runtime": "git diff 11fa0ab -- experiments/history_system/runtime is still empty"
+    }
+  }
 }

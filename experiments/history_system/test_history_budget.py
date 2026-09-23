@@ -94,7 +94,7 @@ class NativeHistoryBudgetTest(unittest.TestCase):
     def test_candidate_budget_is_accepted_outside_bfcl(self):
         args = self.args(tokens=768, method="proposed", candidate="goal_pending")
         args.benchmark = "tau2"
-        with mock.patch.object(history_budget, "resolve_override",
+        with mock.patch.object(run_c1._history_budget_module(), "resolve_override",
                                return_value={"fixture": True}) as resolve:
             self.assertEqual(run_c1._history_budget_override(args, self.design), {"fixture": True})
         self.assertEqual(resolve.call_args.args[0], 768)
@@ -174,7 +174,7 @@ class NativeHistoryBudgetTest(unittest.TestCase):
         args = self.args(tokens=256, preview=True)
         controller, profile = self.profile(args)
         target = args.out / history_budget.POLICY_FILENAME
-        with mock.patch.object(history_budget, "materialize",
+        with mock.patch.object(run_c1._history_budget_module(), "materialize",
                                side_effect=AssertionError("preview wrote policy")):
             with mock.patch.object(run_c1.current, "load_config",
                                    side_effect=lambda: copy.deepcopy(self.design)):
