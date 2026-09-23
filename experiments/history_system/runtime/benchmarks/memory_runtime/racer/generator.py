@@ -13,6 +13,7 @@ from urllib.request import Request
 
 from history_memory.sglang_generator import (
     SGLangEventNativeGenerationResult, SGLangEventNativeError, SGLangTransportError)
+from ..backend_capacity import BackendCapacityConstraints
 from .allocator import PersistentMemory
 from .capacity import HistoryCapacityInfeasible
 
@@ -59,6 +60,7 @@ class PersistentRacerGenerator:
         self._tool_binding_transport = {}
         self._pending_commit = None
         self._held_retention = None
+        self._current_retention = None
         self.last_generation_trace = None
 
     def __getattr__(self, name):
@@ -135,6 +137,8 @@ class PersistentRacerGenerator:
         if self._session_id is None:
             self._logical_session_id = session_id
             self._session_id = native_session_id
+            self._held_retention = None
+            self._current_retention = None
             self.backend.open_history_session(self._session_id, self.native.timeout_seconds)
         elif self._logical_session_id != session_id or self._session_id != native_session_id:
             raise SGLangEventNativeError("A persistent adapter cannot switch tasks")
@@ -466,12 +470,13 @@ class PersistentRacerGenerator:
                                 "response": locals().get("response"), "retries": 0})
         self._decision_key = decision_key
         self._resolution = None
-        self._held_retention = self._retention_receipt(response, index_map)
+        self._held_retention = self._retention_receipt(response)
+        self._current_retention = self._current_retention_receipt(response)
         self.last_generation_trace.update(status="completed", response=response)
         return result
 
-    def _retention_receipt(self, response, index_map):
-        """Keep the engine's mandatory history for a regeneration of this generation."""
+    def _retention_receipt(self, response):
+        """Keep held history; engine indices use the carrier-removed ledger frame."""
         report = (response.get("metadata") or {}).get("kv_memory_report") or {}
         held = (report.get("racer_transaction") or {}).get("regeneration_mandatory_history")
         if held is None:
@@ -481,8 +486,75 @@ class PersistentRacerGenerator:
                 or any(type(index) is not int for index in indices)
                 or held.get("release") != "replaced_source_message"):
             raise SGLangEventNativeError("RACER held retention receipt is invalid")
+        # The engine emits these indices after removing tool carriers. They
+        # already address our internal ledger, before the binder's index_map.
+        return {"tokens": tokens, "source_message_indices": sorted(indices)}
+
+    def _current_retention_receipt(self, response):
+        """Keep current history in the same carrier-removed ledger frame."""
+        report = (response.get("metadata") or {}).get("kv_memory_report") or {}
+        current = report.get("racer_current_mandatory_history")
+        if current is None:
+            return None
+        if not isinstance(current, dict):
+            raise SGLangEventNativeError("RACER current retention receipt is invalid")
+        tokens, indices = current.get("tokens"), current.get("source_message_indices")
+        if (type(tokens) is not int or tokens < 0 or not isinstance(indices, list)
+                or any(type(index) is not int or index < 0 for index in indices)
+                or len(set(indices)) != len(indices)
+                or current.get("release") not in {"replaced_source_message", "never"}):
+            raise SGLangEventNativeError("RACER current retention receipt is invalid")
         return {"tokens": tokens, "source_message_indices": sorted(indices),
-                "index_map": dict(index_map)}
+                "release": current["release"]}
+
+    def backend_capacity_constraints(self, *, session_id, decision_key, stage):
+        """Expose one engine receipt in canonical source-message coordinates."""
+        if not isinstance(session_id, str) or not session_id:
+            raise ValueError("RACER capacity requires a nonempty session_id")
+        if not isinstance(decision_key, str) or not decision_key:
+            raise ValueError("RACER capacity requires a nonempty decision_key")
+        if stage not in {"draft", "regeneration"}:
+            raise ValueError("RACER capacity stage must be draft or regeneration")
+        if self._closed:
+            raise SGLangEventNativeError("RACER session is closed")
+        if self._logical_session_id is None:
+            if stage == "regeneration":
+                raise SGLangEventNativeError("RACER regeneration has no held decision")
+            return None
+        if session_id != self._logical_session_id:
+            raise SGLangEventNativeError("RACER capacity belongs to another session")
+        if stage == "regeneration":
+            if decision_key != self._decision_key:
+                raise SGLangEventNativeError("RACER regeneration belongs to another decision")
+            receipt = self._held_retention
+            provenance = "engine_held_checkpoint_receipt"
+        else:
+            if self._decision_key is not None and self._resolution not in {"commit", "discard"}:
+                raise SGLangEventNativeError("RACER previous decision is unresolved")
+            if decision_key == self._decision_key:
+                raise SGLangEventNativeError("RACER draft reuses the previous decision")
+            receipt = self._current_retention if self._resolution == "commit" else self._held_retention
+            provenance = ("engine_current_resident_receipt" if self._resolution == "commit"
+                          else "engine_held_checkpoint_receipt")
+        if receipt is None or receipt["tokens"] == 0:
+            return None
+        ledger_to_source = {ledger: source for source, ledger in enumerate(self._source_positions)}
+        mapped = set()
+        for ledger_index in receipt["source_message_indices"]:
+            source = ledger_to_source.get(ledger_index)
+            if source is not None:
+                mapped.add(source)
+        # A draft carries its prior pending pages forward. Only a regeneration
+        # with recovery_append replaces source messages and can interrupt them.
+        release = receipt.get("release", "replaced_source_message")
+        if stage == "draft" or not mapped:
+            release = "never"
+        return BackendCapacityConstraints(
+            session_id=session_id, decision_key=decision_key, stage=stage,
+            history_budget_tokens=self.config.history_budget_tokens,
+            mandatory_history_tokens=receipt["tokens"],
+            mandatory_source_indices=tuple(sorted(mapped)), release=release,
+            provenance=provenance)
 
     def regeneration_capacity(self, memory):
         """Receipt when a regeneration of the held generation cannot fit, else None.
@@ -498,9 +570,9 @@ class PersistentRacerGenerator:
         if held is None or not isinstance(memory, PersistentMemory):
             return None
         target = max(1, self.config.history_budget_tokens - memory.recovery_tokens)
-        recovered = sorted({held["index_map"][self._source_positions[index]]
-                            for index in (memory.native_evidence_source_indices
-                                          or memory.recovered_source_indices)})
+        recovered = sorted({self._source_positions[index]
+                             for index in (memory.native_evidence_source_indices
+                                           or memory.recovered_source_indices)})
         released = bool(set(recovered) & set(held["source_message_indices"]))
         mandatory = 0 if released else held["tokens"]
         if mandatory <= target:

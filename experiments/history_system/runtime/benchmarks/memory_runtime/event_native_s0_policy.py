@@ -163,6 +163,8 @@ class EventNativeS0Controller:
         session_id, decision_key, store, tools, tools_json, message_json = (
             self._validate_request(payload, ratio, max_new_tokens)
         )
+        from .backend_capacity import current_constraints
+        capacity = current_constraints(session_id, decision_key, "draft")
         encoding_scope = validate_encoding_scope(self.encoding_scope)
         protected_signature = _canonical_json(
             tuple(self.protected_recovery_messages)
@@ -178,6 +180,8 @@ class EventNativeS0Controller:
             protected_signature,
         )
         state = self._sessions.get(session_id)
+        if capacity is not None:
+            signature += (capacity,)
         if state is not None:
             if state.tools_json != tools_json:
                 _validate_append_only_tools(state.tools_json, tools)

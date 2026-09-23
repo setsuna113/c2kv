@@ -12,6 +12,8 @@ def repack(base, prepared, *, candidate=None, derived_messages=None,
         return repack_sources(
             prepared, candidate=candidate, derived_messages=derived_messages,
             goal_view=goal_view)
+    from ..backend_capacity import current_constraints
+    current_constraints(prepared._store.session_id, prepared.metadata["decision_key"], "regeneration")
     store = prepared._store
     view = prepared.memory.view
     mandatory = set(view.mandatory_raw_event_ids)
