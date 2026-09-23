@@ -1,9 +1,9 @@
-"""A frozen --generation-timeout reaches the persistent proxy, BFCL and ToolSandbox clients.
+"""A frozen --generation-timeout reaches the persistent proxy and the BFCL, ToolSandbox and tau2 agent clients.
 
 CPU only: the runner's prepared command is parsed by run.py, run.py starts the
 real proxy process, and a fake engine proves which deadline the proxy applies
-to one persistent generation. The BFCL and ToolSandbox legs check the client
-deadlines; without a configured deadline the ToolSandbox agent keeps 600 s.
+to one persistent generation. The client legs check each agent deadline;
+without a configured deadline ToolSandbox and tau2 keep their historical 600 s.
 """
 from __future__ import annotations
 
@@ -134,15 +134,73 @@ def test_toolsandbox_run_ts_hands_the_agent_timeout_to_the_cli_only_when_set(mon
     assert env[adapter.AGENT_TIMEOUT_ENV] == "3690.0" and protocol["agent_timeout"] == 3690.0
 
 
-def test_toolsandbox_agent_client_timeout_rule():
-    adapter = bench_run.ADAPTERS["toolsandbox"]
-    assert bench_run.build_parser().get_default("generation_timeout") == adapter.DEFAULT_GENERATION_TIMEOUT
-    assert adapter.agent_client_timeout(600.0) is None
-    assert adapter.agent_client_timeout(3600) == 3690.0
-    assert adapter.agent_client_timeout(120.0) == 210.0
+def test_agent_client_timeout_rule():
+    from adapters import generation_deadline as deadline
+
+    assert bench_run.build_parser().get_default("generation_timeout") == deadline.DEFAULT_GENERATION_TIMEOUT
+    for name in ("toolsandbox", "tau2"):
+        assert bench_run.ADAPTERS[name].agent_client_timeout is deadline.agent_client_timeout
+    assert deadline.agent_client_timeout(600.0) is None
+    assert deadline.agent_client_timeout(3600) == 3690.0
+    assert deadline.agent_client_timeout(120.0) == 210.0
     for invalid in (0.0, -1.0, float("inf"), float("nan")):
         with pytest.raises(ValueError):
-            adapter.agent_client_timeout(invalid)
+            deadline.agent_client_timeout(invalid)
+
+
+def _tau2_run_tau2_kwargs(plans, plan, cell_id, monkeypatch, tmp_path):
+    adapter = bench_run.ADAPTERS["tau2"]
+    args = bench_run.build_parser().parse_args(plans[plan][cell_id]["command"][2:])
+    seen = {}
+    monkeypatch.setattr(adapter, "run_tau2", lambda *_args, **kwargs: seen.update(kwargs) or {"n": 0})
+    args.out = tmp_path / "cell"
+    adapter.run(bench_run.build_context(args, tmp_path / "proxy.jsonl"))
+    return seen
+
+
+@pytest.mark.parametrize("cell_id", ["tau2__agentkv", "tau2__agentkv_b768",
+                                     "tau2__history_kv_pyramidkv_r25_persistent"])
+def test_tau2_agent_litellm_timeout_outlives_the_frozen_deadline(plans, monkeypatch, tmp_path, cell_id):
+    explicit = _tau2_run_tau2_kwargs(plans, "explicit", cell_id, monkeypatch, tmp_path)
+    default = _tau2_run_tau2_kwargs(plans, "default", cell_id, monkeypatch, tmp_path)
+    assert explicit.pop("agent_timeout") == 1890.0
+    assert "agent_timeout" not in default and explicit == default
+
+
+def test_tau2_ordinary_cells_keep_the_historical_agent_call(plans, monkeypatch, tmp_path):
+    for cell_id in ("tau2__full", "tau2__hiagent_full", "tau2__agentfold"):
+        assert "--generation-timeout" not in plans["explicit"][cell_id]["command"]
+        assert "agent_timeout" not in _tau2_run_tau2_kwargs(
+            plans, "explicit", cell_id, monkeypatch, tmp_path)
+
+
+def _tau2_command_and_protocol(monkeypatch, tmp_path, **run_tau2_kwargs):
+    tau2 = bench_run.ADAPTERS["tau2"]
+    source, seen = tmp_path / "tau2", {}
+    (source / "src" / "tau2").mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(tau2, "selected_task_ids", lambda *_args, **_kwargs: ["11"])
+    monkeypatch.setattr(tau2, "run_owned", lambda command, **_kwargs: seen.setdefault("run", command))
+    monkeypatch.setattr(tau2, "score_simulations", lambda *_args, **_kwargs: {"n": 1})
+    tau2.run_tau2("http://agent", "http://raw", tmp_path / "out", tau2_dir=source,
+                  python="/venv/python", run_name="run_11", task_ids=["11"], **run_tau2_kwargs)
+    protocol = json.loads((tmp_path / "out" / "tau2_protocol.json").read_text(encoding="utf-8"))
+    return seen["run"], protocol
+
+
+def test_tau2_agent_timeout_changes_only_the_agent_llm_args(monkeypatch, tmp_path):
+    default, default_protocol = _tau2_command_and_protocol(monkeypatch, tmp_path)
+    agent = default.index("--agent-llm-args") + 1
+    # the historical agent arguments, byte for byte
+    assert default[agent] == ('{"api_base": "http://agent/v1", "api_key": "EMPTY", '
+                              '"temperature": 0.0, "max_tokens": 4096, "num_retries": 0}')
+    assert "agent_timeout" not in default_protocol
+    configured, protocol = _tau2_command_and_protocol(
+        monkeypatch, tmp_path, agent_timeout=3690.0)
+    assert json.loads(configured[agent]) == {**json.loads(default[agent]), "timeout": 3690.0}
+    # the user simulator's LiteLLM arguments and every other token are unchanged
+    assert configured[:agent] + configured[agent + 1:] == default[:agent] + default[agent + 1:]
+    assert protocol.pop("agent_timeout") == 3690.0
+    assert protocol == {**default_protocol, "command": configured}
 
 
 def test_toolsandbox_cli_roles_keep_600_s_unless_the_agent_timeout_is_set(monkeypatch):

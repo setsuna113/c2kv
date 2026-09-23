@@ -35,6 +35,9 @@ from toolsandbox_suite import (  # noqa: E402
 )
 
 from adapters.base import RunContext, v1  # noqa: E402
+from adapters.generation_deadline import (  # noqa: E402
+    DEFAULT_GENERATION_TIMEOUT, agent_client_timeout,
+)
 from adapters.text_budget_failures import (  # noqa: E402
     proxy_text_budget_failure_code, typed_text_budget_failure_code,
 )
@@ -43,25 +46,6 @@ NAME = "toolsandbox"
 TS_DIR = Path(os.environ.get("TS_DIR") or Path.home() / "benchmarks" / "ToolSandbox")
 AGENT = "GPT_4_o_2024_05_13"  # openai_api_agent/openai_api_user role keys
 _SERVER_INFO_OPENER = build_opener(ProxyHandler({}))
-DEFAULT_GENERATION_TIMEOUT = 600.0  # run.py and proxy.py default deadline
-CLEANUP_HEADROOM = 90.0  # as adapters.bfcl_adapter.client_kwargs
-
-
-def agent_client_timeout(generation_timeout: float) -> "float | None":
-    """Agent SDK timeout for a run whose proxy deadline is ``generation_timeout``.
-
-    At the default deadline this is ``None``: toolsandbox_cli keeps its
-    historical 600 s client timeout. A configured deadline (the paper runner
-    passes one only to persistent history-KV cells) gets the BFCL client's
-    headroom, so the proxy can return the engine's cleanup acknowledgement
-    before the SDK gives up on the request.
-    """
-    timeout = float(generation_timeout)
-    if not 0 < timeout < float("inf"):
-        raise ValueError("generation_timeout must be finite and positive")
-    if timeout == DEFAULT_GENERATION_TIMEOUT:
-        return None
-    return timeout + CLEANUP_HEADROOM
 
 
 def _server_info(base_url: str) -> dict[str, Any] | None:

@@ -612,11 +612,12 @@ For the next explicitly scheduled reference-attention run, prepare a new root
 with `--generation-timeout 1800`. This is a finite operational allowance, not
 evidence that every long task will finish within it. The option freezes
 `generation_timeout` in `config.resolved.json`, reaches the persistent proxy,
-the BFCL client and the ToolSandbox agent client (both with 90 s of cleanup
-headroom), and leaves ordinary arms unchanged. Without a configured deadline
-(or at the 600 s default) the ToolSandbox agent keeps its historical 600 s
-client timeout; its user simulator and the 30 s RapidAPI requests never change.
-Use the same allowance across compared reference-attention arms.
+the BFCL client, the ToolSandbox agent client and the tau2 agent's LiteLLM
+requests (each with 90 s of cleanup headroom), and leaves ordinary arms
+unchanged. Without a configured deadline (or at the 600 s default) the
+ToolSandbox and tau2 agents keep their historical 600 s client timeouts; user
+simulators and ToolSandbox's 30 s RapidAPI requests never change. Use the same
+allowance across compared reference-attention arms.
 Existing roots reject a changed timeout. For example, preparing is CPU-only:
 
 ```bash
