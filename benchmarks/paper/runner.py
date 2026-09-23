@@ -671,12 +671,13 @@ def _prepare_locked(config, output, source):
             raise ValueError("The paper matrix excludes recovery and hybrid algorithms")
         if item["method"] == "C2KV" and (arm.ratio != 4 or item.get("ratio") != 4 or not arm.compress_history):
             raise ValueError("The selected bare C2KV arm must use ratio 4")
-        if item["method"] in ("H2O", "SnapKV", "PyramidKV"):
+        if item["method"] in ("H2O", "SnapKV", "PyramidKV", "StreamingLLM"):
             spec = history_kv_spec(arm)
             expected = {
                 "H2O": ("h2o", "physical_eviction"),
                 "SnapKV": ("snapkv_persistent", "physical_eviction"),
                 "PyramidKV": ("pyramidkv", "reference_attention"),
+                "StreamingLLM": ("streamingllm", "physical_eviction"),
             }[item["method"]]
             if (spec is None or spec["method"] != expected[0]
                     or spec["backend"] != expected[1]

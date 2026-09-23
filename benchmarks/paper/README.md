@@ -329,6 +329,18 @@ backend and benchmark scope. Old frozen configs using legacy `retention` or
 implicit 2048-token arms remain readable; they are not the new default matrix.
 Use a new output root for a changed budget contract.
 
+Persistent StreamingLLM (`history_kv_streamingllm_r25_persistent`) is
+registered with the same physical-eviction session protocol as H2O but is not
+in the default matrix. To opt in, add a method entry, for example
+`{"method": "StreamingLLM", "arm": "history_kv_streamingllm_r25_persistent",
+"group": "budget", "benchmarks": ["bfcl_base"], "history_budget_tokens": 256}`
+(or `"shared"` with `--history-kv-budget-tokens B`, or a base entry plus
+`--history-kv-budget ARM=TOKENS`); its cells are
+`bfcl_base__history_kv_streamingllm_persistent_bB`. On this path the server
+keeps the most recent `B` completed-history tokens; the system/tool prefix
+before the history is never evicted and serves as the attention sink, so no
+in-history sink tokens are reserved.
+
 HiAgent/ACON budget variants and native C2KV/RACER already consume absolute
 history caps through their respective adapters. Their summarization, gist,
 and recovery settings remain independent from `B`. The history-KV budget

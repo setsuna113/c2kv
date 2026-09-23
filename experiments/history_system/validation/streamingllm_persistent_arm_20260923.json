@@ -1,0 +1,30 @@
+{
+  "schema": "c2kv-streamingllm-persistent-arm-v1",
+  "created_at": "2026-09-23T03:30:00Z",
+  "request": "BFCL Base StreamingLLM at absolute history budgets 256 and 128, comparable to the persistent H2O/SnapKV/PyramidKV cells of the unified-budget matrix (base 4b5460f); the only StreamingLLM arm was history_kv_streamingllm_r312 (repair_extract, not persistent, not in config.json)",
+  "arm": "history_kv_streamingllm_r25_persistent",
+  "change": [
+    "benchmarks/arms.py: history_kv_streamingllm_r25_persistent, the history_kv_h2o_r25_persistent spec with method streamingllm (physical_eviction, persistent_session, retention 0.25 when no absolute budget)",
+    "benchmarks/paper/runner.py: prepare validates a StreamingLLM method label against method streamingllm on physical_eviction, as it does for H2O/SnapKV/PyramidKV"
+  ],
+  "cells": "HistoryKVBudget names the budget variants bfcl_base__history_kv_streamingllm_persistent_b256 and _b128; the cell command carries --arm history_kv_streamingllm_r25_persistent --history-kv-target-tokens N and the proxy sends history_kv_eviction {method: streamingllm, target_tokens: N, retention_ratio: null, persistent_session: true} (there is no --history-kv-method CLI flag; the method comes from the arm)",
+  "opt_in": "config.json is unchanged, so the default matrix has no StreamingLLM cell. Add a method entry {method: StreamingLLM, arm: history_kv_streamingllm_r25_persistent, benchmarks: [bfcl_base]} with history_budget_tokens 256/128 (group budget), or 'shared' with --history-kv-budget-tokens B, or a base entry plus --history-kv-budget ARM=TOKENS",
+  "engine_semantics": {
+    "revisions_read": "e2b3b7ec0 and 36e969135 (the abort fix does not touch this path)",
+    "persistent_physical_path": "scheduler passes no selection for streamingllm, so PhysicalHistoryKVEvictor._select_streaming keeps the most recent target_tokens of the completed-history span; the system/tool prefix before history_start and the current turn are never evicted",
+    "sink_tokens": "no in-history sink tokens on this path; select_streamingllm_indices with DEFAULT_STREAMINGLLM_SINK_TOKENS = 4 is used only by the tool-KV and repair_extract paths. The always-resident prefix at the start of the sequence plays the attention-sink role",
+    "recent_window": "sent (64, as for H2O) but not used by the streamingllm selector"
+  },
+  "unchanged": "existing arms and cell ids; prepared default matrices at B=256 and B=128 (commands.json, matrix.csv, config.resolved.json) are byte-identical to 4b5460f",
+  "cpu_tests": {
+    "new": "6 in benchmarks/paper/test_streamingllm_persistent_arm.py: spec equals the H2O persistent spec except method; budget variants and names; default matrix has no StreamingLLM cell; explicit budget entries and CLI shared/arm budgets both prepare _b256 and _b128 with --arm and --history-kv-target-tokens; server command keeps radix off and streaming sessions on; mislabelled arm rejected; persistent eviction wire fields",
+    "full_suite": {
+      "command": "python -m pytest benchmarks -q (clean git-archive exports, Windows, uv with pytest numpy httpx openai)",
+      "base_4b5460f": "7 failed, 1214 passed, 23 skipped",
+      "fixed": "7 failed, 1220 passed, 23 skipped",
+      "failure_set": "identical and pre-existing: test_native_bare x2, test_acon_budget_proxy, test_native_fc_bridge, test_repair_stack::test_bfcl_counts_result_rows, test_tool_source_recording::appworld, test_toolmemory_assembly"
+    }
+  },
+  "gpu_validation": "none",
+  "npu": "no change needed: the arm registry is shared through the paper checkout and the NPU experiment-2 drivers select their own gen_* arms"
+}

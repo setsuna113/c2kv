@@ -821,6 +821,23 @@ ARMS: Dict[str, Arm] = {
                 "retention for the small-budget sweep"
             ),
         ),
+        # Not in the default paper matrix; a configured method entry opts in.
+        Arm(
+            name="history_kv_streamingllm_r25_persistent",
+            compress_history=False,
+            history_kv={
+                "method": "streamingllm",
+                "retention_ratio": 0.25,
+                "backend": "physical_eviction",
+                "persistent_session": True,
+            },
+            description=(
+                "StreamingLLM history-only persistent physical KV eviction at 25% "
+                "retention; the server keeps the most recent completed-history "
+                "tokens, the system/tool prefix before the history stays resident "
+                "as the attention sink, and the compacted cache is reused across turns"
+            ),
+        ),
         Arm(
             name="history_kv_pyramidkv_r25_persistent",
             compress_history=False,
