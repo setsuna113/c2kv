@@ -314,7 +314,16 @@ def test_persistent_racer_summary_accepts_actual_receipts_and_exact_budget(tmp_p
             }},
         }],
     }
-    (server / "steps.jsonl").write_text(json.dumps(record) + "\n", encoding="utf-8")
+    second = json.loads(json.dumps(record))
+    second["decision_key"] = "d2"
+    second_trace = second["generation_trace"][0]
+    second_trace["generation"]["token_ids"].append(3)
+    second_trace["usage"].update(completion_tokens=3, total_tokens=244)
+    second_stats = second_trace["generation"]["stats"]
+    second_stats["racer_served_usage"].update(completion_tokens=3, total_tokens=244)
+    second_stats["kv_memory_report"]["history_kv_lifecycle"]["transaction"]["decision_id"] = "d2"
+    (server / "steps.jsonl").write_text(
+        json.dumps(record) + "\n" + json.dumps(second) + "\n", encoding="utf-8")
     official = {"n": 1, "task_rows": [{
         "semantic_score": 0.0, "normal_termination": True, "protocol_legal": True,
     }]}

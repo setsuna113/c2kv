@@ -230,6 +230,46 @@ def test_sglang_generator_wiring_never_calls_native_loader(tmp_path, monkeypatch
     }
 
 
+@pytest.mark.parametrize('backend,spec_text,needs_native_tool_cap', [
+    ('h2o', 't0:r8:hybrid1:schema:selector=latest_event_topk_v1', True),
+    ('commitkv', 't0:r8:hybrid1:schema:selector=last_user_topk_v1', True),
+    ('h2o', 't0:r8:hybrid1', False),
+    ('c2kv', 't0:r8:hybrid1:schema', False),
+    (None, 't0:r8:hybrid1:schema', False),
+    ('h2o', 'h2o:r8:hybrid1:schema', True),
+])
+def test_persistent_schema_tool_generator_has_finite_native_repair_budget(
+    tmp_path, monkeypatch, backend, spec_text, needs_native_tool_cap,
+):
+    import history_memory.sglang_generator as native_module
+    from benchmarks.memory_runtime.event_native_tool import parse_native_tool_spec
+    from benchmarks.memory_runtime.racer.generator import PersistentRacerGenerator
+    class FakeGenerator(SimpleNamespace):
+        def __init__(self, upstream, **kwargs):
+            super().__init__(upstream=upstream, **kwargs)
+    monkeypatch.setattr(native_module, 'SGLangEventNativeGenerator', FakeGenerator)
+    args = SimpleNamespace(
+        generation_backend='sglang', sglang_backend_url='http://127.0.0.1:36100',
+        sglang_timeout_seconds=17, max_new_tokens=9, max_generation_calls=3,
+        max_extraction_calls=7, checkpoint=tmp_path / 'checkpoint-1000')
+    spec = parse_native_tool_spec(spec_text)
+    config = {} if backend is None else {'racer_backend': {
+        'schema': 'racer-backend-v1', 'backend': backend, 'policy': 'off',
+        'history_budget_tokens': 768,
+        'allocation': 'c2kv_s0' if backend == 'c2kv' else 'backend_native_persistent'}}
+    generator, _ = server._build_generator(
+        args, profile={}, model_context=40960, tokenizer=SimpleNamespace(eos_token_id=42),
+        journal_path=tmp_path / 'attempts.jsonl', s0_config=config,
+        shadow_feature_config=None, tool_spec=spec)
+    persistent = backend is not None and backend != 'c2kv'
+    assert isinstance(generator, PersistentRacerGenerator) is persistent
+    native = generator.native if persistent else generator
+    assert getattr(native, 'max_tool_repair_calls', None) == (
+        spec.max_chunks * args.max_generation_calls if needs_native_tool_cap else None)
+    assert getattr(native, 'max_tool_extraction_calls', None) == (
+        spec.max_chunks * args.max_generation_calls if spec.encoder == 't0' else None)
+
+
 def test_checkpoint_generation_config_preserves_all_eos_ids(tmp_path):
     checkpoint = tmp_path / 'checkpoint-1000'
     checkpoint.mkdir()

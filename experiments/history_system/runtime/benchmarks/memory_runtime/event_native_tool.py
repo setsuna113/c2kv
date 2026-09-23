@@ -111,6 +111,9 @@ class ToolRegionController:
             _TokenizerView(self.tokenizer) if (self.spec.encoder == "t0"
                 or self.spec.interface_policy == "schema") else None,
         )
+        prepare = getattr(self.generator, "prepare_tool_plan", None)
+        if plan is not None and callable(prepare):
+            plan = prepare(plan, payload)
         if (plan is not None and self.spec.encoder != "t0"
                 and self.spec.interface_policy == "schema"):
             catalog.prepare_raw_tool_plan(

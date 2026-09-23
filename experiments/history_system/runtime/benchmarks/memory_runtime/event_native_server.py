@@ -358,6 +358,10 @@ def _build_generator(
         return generator, loaded_profile
 
     from history_memory.sglang_generator import SGLangEventNativeGenerator
+    racer_backend_config = None
+    if isinstance(s0_config, dict) and 'racer_backend' in s0_config:
+        from .racer.config import BackendConfig
+        racer_backend_config = BackendConfig.parse(s0_config['racer_backend'])
     gp = s0_config.get('gp_experiments') if isinstance(s0_config, dict) else None
     encoding_scope = gp.get('G', 'current') if isinstance(gp, dict) else 'current'
     eos_token_ids, eos_source = _checkpoint_eos_token_ids(args.checkpoint, tokenizer)
@@ -375,7 +379,10 @@ def _build_generator(
         **({'max_tool_extraction_calls': tool_spec.max_chunks * args.max_generation_calls}
            if tool_spec is not None and tool_spec.encoder == 't0' else {}),
         **({'max_tool_repair_calls': tool_spec.max_chunks * args.max_generation_calls}
-           if tool_spec is not None and tool_spec.encoder != 't0' else {}),
+           if tool_spec is not None and (tool_spec.encoder != 't0' or (
+               tool_spec.interface_policy == 'schema'
+               and racer_backend_config is not None
+               and racer_backend_config.backend != 'c2kv')) else {}),
         **({'expected_tool_checkpoint_contract': tool_contract['checkpoint']}
            if tool_contract is not None and 'checkpoint' in tool_contract else {}),
         timeout_seconds=args.sglang_timeout_seconds,
@@ -391,12 +398,9 @@ def _build_generator(
         shadow_feature_config=shadow_feature_config,
         encoding_scope=encoding_scope,
     )
-    if isinstance(s0_config, dict) and 'racer_backend' in s0_config:
-        from .racer.config import BackendConfig
-        backend_config = BackendConfig.parse(s0_config['racer_backend'])
-        if backend_config.backend != 'c2kv':
-            from .racer.generator import PersistentRacerGenerator
-            generator = PersistentRacerGenerator(generator, tokenizer, backend_config)
+    if racer_backend_config is not None and racer_backend_config.backend != 'c2kv':
+        from .racer.generator import PersistentRacerGenerator
+        generator = PersistentRacerGenerator(generator, tokenizer, racer_backend_config)
     return generator, profile
 
 

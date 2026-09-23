@@ -724,7 +724,7 @@ def summarize_task(benchmark: str, task: str, task_out: Path, official: Mapping[
         )
 
         usage = trace.get("usage")
-        token_ids = generation.get("token_ids")
+        token_ids = trace["generation"].get("token_ids")
         resident = accounting.get("resident_prompt_tokens") if isinstance(accounting, Mapping) else None
         cost_valid = (
             isinstance(usage, Mapping) and isinstance(token_ids, list)

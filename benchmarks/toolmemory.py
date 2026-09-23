@@ -97,6 +97,7 @@ CARRIER_MARK = "c2kv_tool_memory"
 INTERFACE_BLOCK_HEAD = "\n# Executable tool interfaces\n"
 INTERFACE_RENDER_PROFILE = "tool-schema-split-v3"
 DESCRIPTION_DOCUMENT_PROFILE = "tool-description-only-v1"
+PERSISTENT_RENDER_PROFILE = "persistent-tool-schema-document-slots-v1"
 
 # next_compression/tools.py TOOL_PROTOCOL_HEAD / TOOL_PROTOCOL_TAIL, verbatim.
 TOOL_PROTOCOL_HEAD = (
@@ -832,6 +833,82 @@ def plan_visible_tool_memory(payload: Mapping[str, Any], spec: ToolMemorySpec,
                            interface_spans=interface_spans)
 
 
+def persistent_schema_tool_plan(payload: Mapping[str, Any], plan: VisibleToolPlan,
+                                tokenizer: Any) -> VisibleToolPlan:
+    """Place a frozen selection in a source-stable persistent document frame.
+
+    Every executable interface stays in the same system protocol. Each prose
+    document keeps its original T0 envelope and chunk IDs, whether its current
+    view is full base KV or a tool-projection gist. Selection is never rerun.
+    """
+    if plan.spec.encoder != "t0" or plan.spec.interface_policy != "schema":
+        return plan
+    if plan.info.get("persistent_render_profile") == PERSISTENT_RENDER_PROFILE:
+        return plan
+    tools = list(payload.get("tools") or [])
+    messages = list(payload.get("messages") or [])
+    snapshots = [tool_snapshot(tool) for tool in tools] + [
+        visible_tool_snapshot(span) for span in plan.source_spans]
+    indices = tuple(range(len(snapshots)))
+    copies = executable_interfaces(
+        snapshots, plan.source_spans, indices, (), len(tools), plan.spec)
+    protocol, intervals = protocol_with_interfaces(
+        (), copies, structured=bool(tools), label_indices=True)
+    rewritten = with_protocol_system(remove_visible_spans(
+        messages, plan.source_spans, range(len(plan.source_spans)),
+        placeholder_indices=()), protocol)
+    documents = description_documents(snapshots, indices)
+    chunks = document_chunks(tokenizer.native_ids, documents, plan.spec) if documents else []
+    native = set(plan.info["native_indices"])
+    native_tokens = sum(len(chunk.token_ids) for chunk in chunks if chunk.catalog_index in native)
+    compressed = [chunk for chunk in chunks if chunk.catalog_index not in native]
+    gist_tokens = sum(expected_gist_len(len(chunk.token_ids), plan.spec.ratio)
+                      for chunk in compressed)
+    source_system = [m for m in messages if m.get("role") == "system"][:1] or [
+        {"role": "system", "content": ""}]
+    protocol_system = [m for m in rewritten if m.get("role") == "system"][:1]
+    protocol_tokens = (len(tokenizer.native_ids(protocol_system))
+                       - len(tokenizer.native_ids(source_system))) if protocol else 0
+    baseline = with_protocol_system(remove_visible_spans(
+        messages, plan.source_spans, range(len(plan.source_spans)),
+        placeholder_indices=()), protocol_block(()) if tools else "")
+    baseline_system = [m for m in baseline if m.get("role") == "system"][:1] or [
+        {"role": "system", "content": ""}]
+    interface_tokens = (len(tokenizer.native_ids(protocol_system))
+                        - len(tokenizer.native_ids(baseline_system))) if copies else 0
+    prefix_count = 0
+    while prefix_count < len(rewritten) and rewritten[prefix_count].get("role") == "system":
+        prefix_count += 1
+    prefix_ids = list(tokenizer.native_ids(rewritten[:prefix_count]))
+    source_digest = hashlib.sha256(json.dumps({
+        "profile": PERSISTENT_RENDER_PROFILE, "prefix_token_ids": prefix_ids,
+        "documents": [list(chunk.token_ids) for chunk in chunks],
+        "catalog": snapshots,
+    }, sort_keys=True, ensure_ascii=False, separators=(",", ":"),
+        allow_nan=False).encode("utf-8")).hexdigest()
+    info = {**plan.info,
+        "render_profile": PERSISTENT_RENDER_PROFILE,
+        "persistent_render_profile": PERSISTENT_RENDER_PROFILE,
+        "representation": "source_stable_native_or_t0_document",
+        "source_protocol_token_sha256": source_digest,
+        "persistent_tool_slot_start": len(prefix_ids),
+        "protocol_prefix_tokens": protocol_tokens,
+        "interface_copy_tokens": interface_tokens,
+        "native_source_tokens": native_tokens,
+        "native_document_tokens": native_tokens,
+        "expected_gist_tokens": gist_tokens,
+        "presented_encoder_tokens": sum(len(chunk.token_ids) for chunk in compressed),
+        "resident_tool_tokens": protocol_tokens + native_tokens + gist_tokens,
+        "n_documents": len(documents), "n_chunks": len(chunks),
+        "n_protected_interfaces": len(copies), "carrier_anchors": [],
+        "n_native_source_interface_copies": 0,
+        "native_source_interface_copy_indices": [],
+    }
+    return replace(plan, messages=rewritten, protocol=protocol, chunks=chunks,
+                   carrier_anchors=[], info=info,
+                   interface_spans=locate_interface_spans(rewritten, protocol, intervals))
+
+
 # ---------------------------------------------------------------------------
 # Tokenizer (transformers, local checkpoint files only)
 # ---------------------------------------------------------------------------
@@ -889,6 +966,20 @@ class ToolMemoryPlan:
 
     def carriers(self) -> List[Dict[str, Any]]:
         anchors = {anchor["catalog_index"]: anchor for anchor in (self.carrier_anchors or [])}
+        if self.info.get("persistent_render_profile") == PERSISTENT_RENDER_PROFILE:
+            return [{
+                "role": "user", "content": "", "c2kv_region": "tool",
+                "c2kv_source_token_count": len(chunk.token_ids),
+                "c2kv_use_gist_projection": False,
+                **({"c2kv_repair_only_key_hashes": [record["key_hash"]],
+                    "c2kv_repair_placement": "in_place",
+                    "c2kv_source_token_end": record["source_start"] + len(chunk.token_ids)}
+                   if record.get("native_document") else
+                   {"c2kv_key_hash": record["key_hash"], "c2kv_ratio": self.spec.ratio}),
+                CARRIER_MARK: {"event_id": chunk.event_id, "part_index": chunk.part_index,
+                               "source_tokens": len(chunk.token_ids),
+                               "gist_len": int(record.get("gist_len") or 0)},
+            } for chunk, record in zip(self.chunks, self.records, strict=True)]
         return [{
             "role": "user", "content": "",
             "c2kv_key_hash": record["key_hash"],

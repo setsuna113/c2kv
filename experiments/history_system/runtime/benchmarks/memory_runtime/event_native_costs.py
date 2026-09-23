@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import os
@@ -53,6 +54,7 @@ _SESSION_TRANSFER_FIELDS = (
 _CACHE_TRACE_SCHEMA = "event-native-cache-trace-v1"
 _CACHE_LIFECYCLE_TRACE_SCHEMA = "event-native-cache-lifecycle-v1"
 _CACHE_OPERATION_STATUSES = ("started", "completed", "failed")
+_RACER_SESSION_CACHE_POLICY = "racer-persistent-transaction-v1"
 _MISSING = object()
 
 
@@ -102,6 +104,53 @@ def _stats(trace: Mapping[str, Any], *, label: str) -> Mapping[str, Any] | None:
     return stats
 
 
+def _racer_served_usage(
+    trace: Mapping[str, Any],
+    *,
+    label: str,
+) -> dict[str, int] | None:
+    """Return the physical RACER receipt, if present, after binding its sources."""
+    stats = _stats(trace, label=label)
+    if stats is None or "racer_served_usage" not in stats:
+        return None
+    backend = stats.get("racer_backend")
+    if not isinstance(backend, Mapping) or backend.get("schema") != "racer-backend-v1":
+        raise ValueError(f"{label}.generation.stats.racer_backend is invalid")
+    raw = stats["racer_served_usage"]
+    if not isinstance(raw, Mapping):
+        raise ValueError(f"{label}.generation.stats.racer_served_usage must be an object")
+    parsed = {
+        name: _nonnegative_int(
+            raw.get(name),
+            label=f"{label}.generation.stats.racer_served_usage.{name}",
+        )
+        for name in _USAGE_FIELDS
+    }
+    if any(value is None for value in parsed.values()):
+        raise ValueError(f"{label}.generation.stats.racer_served_usage must be complete")
+    served = {name: int(parsed[name]) for name in _USAGE_FIELDS}
+    if served["total_tokens"] != served["prompt_tokens"] + served["completion_tokens"]:
+        raise ValueError(f"{label}.generation.stats.racer_served_usage total is invalid")
+
+    accounting = stats.get("racer_accounting")
+    if not isinstance(accounting, Mapping):
+        raise ValueError(f"{label}.generation.stats.racer_accounting must be an object")
+    resident = _nonnegative_int(
+        accounting.get("resident_prompt_tokens"),
+        label=f"{label}.generation.stats.racer_accounting.resident_prompt_tokens",
+    )
+    if resident is None or served["prompt_tokens"] != resident:
+        raise ValueError(f"{label} RACER served usage disagrees with engine accounting")
+
+    generation = trace.get("generation")
+    token_ids = generation.get("token_ids") if isinstance(generation, Mapping) else None
+    if (not isinstance(token_ids, list)
+            or any(type(token_id) is not int or token_id < 0 for token_id in token_ids)
+            or served["completion_tokens"] != len(token_ids)):
+        raise ValueError(f"{label} RACER served usage disagrees with generated tokens")
+    return served
+
+
 def _usage(trace: Mapping[str, Any], *, label: str) -> dict[str, int | None]:
     value = trace.get("usage")
     if value is None:
@@ -115,12 +164,17 @@ def _usage(trace: Mapping[str, Any], *, label: str) -> dict[str, int | None]:
     if all(result[name] is not None for name in _USAGE_FIELDS):
         if result["total_tokens"] != result["prompt_tokens"] + result["completion_tokens"]:
             raise ValueError(f"{label}.usage total does not equal prompt plus completion")
+    served = _racer_served_usage(trace, label=label)
+    if served is not None and result != served:
+        raise ValueError(f"{label}.usage differs from its RACER engine receipt")
     planned = _nonnegative_int(
         trace.get("planned_resident_prompt_tokens"),
         label=f"{label}.planned_resident_prompt_tokens",
     )
     if planned is not None and result["prompt_tokens"] is not None:
-        if planned != result["prompt_tokens"]:
+        # A persistent physical-eviction backend measures the served resident
+        # prompt after planning. Keep both values and aggregate the engine receipt.
+        if planned != result["prompt_tokens"] and served is None:
             raise ValueError(f"{label} planned and recorded prompt tokens differ")
     return result
 
@@ -835,7 +889,30 @@ def _successful_session_cache(
             raise ValueError(f"{label}.session_cache_after must be an object or null")
         if isinstance(cache, Mapping):
             cache_session = cache.get("session_id")
-            if cache_session is not None and cache_session != item["session_id"]:
+            if cache_session is not None and not isinstance(cache_session, str):
+                raise ValueError(f"{label}.session_cache_after.session_id must be a string or null")
+            native_session = cache.get("native_session_id", _MISSING)
+            if native_session is not _MISSING and native_session is not None:
+                if not isinstance(native_session, str) or not native_session:
+                    raise ValueError(
+                        f"{label}.session_cache_after.native_session_id must be a nonempty string or null"
+                    )
+            if cache.get("policy") == _RACER_SESSION_CACHE_POLICY:
+                expected_native = "racer-" + hashlib.sha256(
+                    item["session_id"].encode()
+                ).hexdigest()
+                legacy_identity = (
+                    cache_session == expected_native and native_session is _MISSING
+                )
+                current_identity = (
+                    cache_session == item["session_id"]
+                    and native_session == expected_native
+                )
+                if not (legacy_identity or current_identity):
+                    raise ValueError(
+                        f"{label}.session_cache_after has an invalid RACER session identity"
+                    )
+            elif cache_session is not None and cache_session != item["session_id"]:
                 raise ValueError(f"{label}.session_cache_after has a different session_id")
         for name in peak_values:
             raw = cache.get(name) if isinstance(cache, Mapping) else None

@@ -61,6 +61,7 @@ def _frozen_plan_identity(plan: Any, payload: Mapping[str, Any]) -> dict[str, An
     }
     material = {
         "spec": plan.spec.as_dict(),
+        "persistent_render_profile": plan.info.get("persistent_render_profile"),
         "messages_sha256": _sha256(messages),
         "tools_sha256": _sha256(tools),
         "protocol_sha256": hashlib.sha256(str(plan.protocol).encode("utf-8")).hexdigest(),
@@ -115,6 +116,54 @@ class PersistentToolBinder:
         self.budget_tokens = budget_tokens
         self._managers: dict[str, Any] = {}
         self._plans: dict[str, tuple[Any, Any]] = {}
+        self._source_frames: dict[str, str] = {}
+        self._native_records: dict[tuple[str, int], dict[str, Any]] = {}
+
+    def prepare_plan(self, plan: Any, payload: Mapping[str, Any]) -> Any:
+        """Build and validate the fixed layout before the history controller runs."""
+        catalog = shared_tool_catalog()
+        stable = catalog.persistent_schema_tool_plan(payload, plan, _TokenizerView(self.tokenizer))
+        digest = stable.info.get("source_protocol_token_sha256")
+        if digest:
+            session_id = payload.get("session_id")
+            if not isinstance(session_id, str) or not session_id:
+                raise ValueError("Persistent tool source frame requires a session_id")
+            previous = self._source_frames.get(session_id)
+            if previous is not None and previous != digest:
+                raise ValueError("Persistent tool source catalog or protected prefix changed within a session")
+            self._source_frames[session_id] = digest
+        return stable
+
+    def _materialize_stable(self, manager: Any, plan: Any, *, force: bool = False) -> Any:
+        catalog = shared_tool_catalog()
+        catalog.enforce_tool_budget(plan, self.budget_tokens)
+        native = set(plan.info["native_indices"])
+        records = []
+        source_start = int(plan.info["persistent_tool_slot_start"])
+        for chunk in plan.chunks:
+            if chunk.catalog_index in native:
+                key = (_sha256(list(chunk.token_ids)), source_start)
+                record = None if force else self._native_records.get(key)
+                if record is None:
+                    extract = getattr(self.backend, "extract_native_tool_tokens", None)
+                    if not callable(extract):
+                        raise TypeError("persistent native tool slots require extract_native_tool_tokens")
+                    record = {**extract(list(chunk.token_ids), source_start=source_start),
+                              "native_document": True, "source_start": source_start}
+                    self._native_records[key] = record
+            else:
+                record = manager._extract(chunk, force=force)
+            records.append(record)
+            source_start += len(chunk.token_ids)
+        info = {**plan.info,
+                "gist_tokens": sum(int(record.get("gist_len") or 0)
+                                   for record in records if not record.get("native_document")),
+                "checkpoint": manager.contract["checkpoint"],
+                "checkpoint_config_sha256": manager.contract["config_sha256"],
+                "budget_tokens": self.budget_tokens}
+        return catalog.ToolMemoryPlan(plan.spec, copy.deepcopy(plan.messages), plan.protocol,
+                                      plan.chunks, records, info, [], plan.source_spans,
+                                      plan.interface_spans)
 
     def _manager(self, spec: Any):
         key = spec.name
@@ -142,12 +191,15 @@ class PersistentToolBinder:
         for field in ("source_messages", "source_tools", "tool_plan"):
             if not hasattr(memory, field):
                 raise TypeError(f"Persistent tool binding needs memory.{field}")
+        plan = self.prepare_plan(plan, payload)
         identity = _frozen_plan_identity(plan, payload)
         binding_id = identity["binding_id"]
         bound = self._plans.get(binding_id)
         if bound is None:
             manager = self._manager(plan.spec)
-            actual = manager.materialize_visible_plan(payload, copy.deepcopy(plan))
+            actual = (self._materialize_stable(manager, plan)
+                      if plan.info.get("persistent_render_profile") else
+                      manager.materialize_visible_plan(payload, copy.deepcopy(plan)))
             self._plans[binding_id] = (manager, actual)
         else:
             manager, actual = bound
@@ -167,6 +219,7 @@ class PersistentToolBinder:
             for key in (
                 "resident_tool_tokens", "expected_gist_tokens", "gist_tokens",
                 "protocol_prefix_tokens", "native_source_tokens",
+                "native_document_tokens",
                 "presented_encoder_tokens", "budget_tokens",
                 "checkpoint", "checkpoint_config_sha256",
             )
@@ -179,6 +232,8 @@ class PersistentToolBinder:
             "source_messages_sha256": identity["messages_sha256"],
             "source_tools_sha256": identity["tools_sha256"],
             "protocol_sha256": identity["protocol_sha256"],
+            "persistent_render_profile": actual.info.get("persistent_render_profile"),
+            "source_protocol_token_sha256": actual.info.get("source_protocol_token_sha256"),
             "selector": selector,
             "costs": costs,
         }
@@ -204,7 +259,10 @@ class PersistentToolBinder:
         plan = self.resolve_plan(memory)
         manager, _ = self._plans[receipt["binding_id"]]
         catalog = shared_tool_catalog()
-        if isinstance(plan, catalog.ToolMemoryPlan):
+        if plan.info.get("persistent_render_profile"):
+            plan = self._materialize_stable(manager, plan, force=True)
+            self._plans[receipt["binding_id"]] = (manager, plan)
+        elif isinstance(plan, catalog.ToolMemoryPlan):
             manager.refresh(plan)
         return plan
 
@@ -289,6 +347,15 @@ class PersistentToolBinder:
         staged["messages"] = messages
         staged["tools"] = tools
         staged = manager.stage_request(staged, staged_plan)
+        if plan.info.get("persistent_render_profile"):
+            hint = dict(staged.get("c2kv_kv_memory_hint") or {})
+            hint["joint_tool_memory"] = {
+                "method": "t0", "persistent_render_profile": plan.info["persistent_render_profile"],
+                "source_protocol_token_sha256": plan.info["source_protocol_token_sha256"],
+                "resident_tool_tokens": plan.info["resident_tool_tokens"],
+                "source_protocol_tokens": sum(len(chunk.token_ids) for chunk in plan.chunks),
+            }
+            staged["c2kv_kv_memory_hint"] = hint
         index_map = _shifted_index_map(len(payload.get("messages") or ()), insertions)
         return (
             staged,

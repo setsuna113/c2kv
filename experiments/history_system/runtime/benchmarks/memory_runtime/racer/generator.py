@@ -43,6 +43,7 @@ class PersistentRacerGenerator:
             backend = SglangBackend(self._post_backend_json)
         self.backend = backend
         self._session_id = None
+        self._logical_session_id = None
         self._source = []
         self._messages = []
         self._source_positions = []
@@ -116,14 +117,24 @@ class PersistentRacerGenerator:
         from dataclasses import replace
         return replace(bound, tool_plan=receipt)
 
+    def prepare_tool_plan(self, plan, payload):
+        """Freeze the tool source layout before history accounting and packing."""
+        if self._tool_binder is None:
+            raise RuntimeError("Persistent RACER tool memory is not configured")
+        return self._tool_binder.prepare_plan(plan, payload)
+
     @contextmanager
     def decision_scope(self, *, session_id=None):
         if self._closed:
             raise SGLangEventNativeError("RACER session is closed after cleanup or failure")
+        if not isinstance(session_id, str) or not session_id:
+            raise ValueError("RACER decision scope requires a nonempty logical session_id")
+        native_session_id = "racer-" + hashlib.sha256(session_id.encode()).hexdigest()
         if self._session_id is None:
-            self._session_id = "racer-" + hashlib.sha256(str(session_id).encode()).hexdigest()
+            self._logical_session_id = session_id
+            self._session_id = native_session_id
             self.backend.open_history_session(self._session_id, self.native.timeout_seconds)
-        elif self._session_id != "racer-" + hashlib.sha256(str(session_id).encode()).hexdigest():
+        elif self._logical_session_id != session_id or self._session_id != native_session_id:
             raise SGLangEventNativeError("A persistent adapter cannot switch tasks")
         try:
             yield
@@ -158,7 +169,9 @@ class PersistentRacerGenerator:
         if path == "/v1/c2kv/extract" and payload.get("projection_set") == "tool":
             kind = "tool_extraction"
         elif (path == "/v1/c2kv/repair_extract"
-              and str(payload.get("repair_mode") or "").startswith("history_kv_")):
+              and (str(payload.get("repair_mode") or "").startswith("history_kv_")
+                   or (self._active_tool_binding_context is not None
+                       and payload.get("repair_mode") == "d_corr"))):
             kind = "tool_repair"
         if kind is None:
             return self._post_json(path, payload, timeout, retries=retries)
@@ -390,21 +403,29 @@ class PersistentRacerGenerator:
         if features is not None and features.enabled:
             hint["shadow_features"] = {"enabled": True, "prefill_layer": features.prefill_layer}
         self._calls += 1
-        self.last_generation_trace = {"attempt_uid": context["attempt_uid"], "request": request,
+        self.last_generation_trace = {"schema": "racer-generation-trace-v1",
+                                      "attempt_uid": context["attempt_uid"], "request": request,
                                       "racer_backend": self.config.receipt(), "status": "submitted"}
         journal = self.native._http_journal
         if journal is not None:
             journal.append({"schema": "racer-chat-http-v1", "event": "request", "request": request, "retries": 0})
         try:
             response = self._post_json("/v1/chat/completions", request, self.native.timeout_seconds)
-        except SGLangTransportError:
-            self.backend.abort_history_request(context["attempt_uid"], self._session_id)
+            result = self._result(response, memory, context)
+        except Exception as failure:
+            self.last_generation_trace.update(status="failed", error={
+                "type": type(failure).__name__, "message": str(failure)})
+            if self._tool_binder is not None:
+                # Binding work has already reached the engine even when chat
+                # fails. Drain only this decision's unreported tool attempts.
+                self.last_generation_trace["racer_tool_cost"] = self._consume_tool_cost(decision_key)
+            if isinstance(failure, SGLangTransportError):
+                self.backend.abort_history_request(context["attempt_uid"], self._session_id)
             raise
         finally:
             if journal is not None:
                 journal.append({"schema": "racer-chat-http-v1", "event": "response",
                                 "response": locals().get("response"), "retries": 0})
-        result = self._result(response, memory, context)
         self._decision_key = decision_key
         self._resolution = None
         self.last_generation_trace.update(status="completed", response=response)
@@ -490,7 +511,9 @@ class PersistentRacerGenerator:
                 "committed_action_prefilled_from_next_source": self._resolution == "discard"}
 
     def session_cache_info(self):
-        result = {"policy": self.session_cache_policy, "session_id": self._session_id,
+        result = {"policy": self.session_cache_policy,
+                "session_id": self._logical_session_id,
+                "native_session_id": self._session_id,
                 "generation_calls": self._calls, "canonical_internal_messages": len(self._messages),
                 "source_messages": len(self._source), "closed": self._closed}
         if self._tool_binder is not None:

@@ -224,6 +224,30 @@ class SglangBackend(Backend):
                 f"{result.get('original_seq_len')} != {len(payload['token_ids'])}")
         return result
 
+    def extract_native_tool_tokens(self, token_ids, *, source_start: int) -> Dict[str, Any]:
+        """Store the full base-KV view of an unchanged T0 document chunk."""
+        ids = [int(token) for token in token_ids]
+        if not ids or type(source_start) is not int or source_start < 0:
+            raise BackendError("tool_repair_failed", "native tool source frame is invalid")
+        body = {
+            "input_ids": ids, "span_start": 0, "span_end": len(ids),
+            "position_offset": 0,
+            "repair_position_ids": list(range(source_start, source_start + len(ids))),
+            "raw_kv_position_mode": "pre_rope", "repair_mode": "d_corr",
+            "extract_source": "model_prefill",
+        }
+        result = self._post_json("/v1/c2kv/repair_extract", body, 600)
+        if not result.get("success", True) or not result.get("key_hash"):
+            raise BackendError("tool_repair_failed",
+                               f"native tool repair_extract failed: {result.get('error') or result}")
+        if (result.get("original_seq_len") != len(ids)
+                or result.get("token_len") != len(ids)
+                or result.get("position_start") != source_start
+                or result.get("position_end") != source_start + len(ids)
+                or result.get("already_rotated") is not False):
+            raise BackendError("tool_repair_failed", "native tool repair returned an inconsistent source frame")
+        return result
+
     def repair_extract_tool_protocol(
             self, token_ids, *, span_start: int, span_end: int, method: str,
             target_tokens: int, selectable_relative_indices,
@@ -764,6 +788,8 @@ class SglangBackend(Backend):
         out = dict(payload)
         staged_tool_hint = ((payload.get("c2kv_kv_memory_hint") or {})
                             .get("tool_kv_eviction"))
+        staged_joint_tool_hint = ((payload.get("c2kv_kv_memory_hint") or {})
+                                  .get("joint_tool_memory"))
         out.pop("c2kv_repair", None)  # request-level repair is hf_server-only
         if getattr(arm, "history_kv", None) or getattr(arm, "kv_reuse", None):
             # The raw-KV baselines have a fixed query regime. Override both
@@ -869,6 +895,12 @@ class SglangBackend(Backend):
             hint["tool_kv_eviction"] = (staged_tool_hint if staged_tool_hint.get("joint_history_assembly")
                 else self._remap_tool_hint_after_carriers(
                     staged_tool_hint, list(payload.get("messages") or []), messages))
+            out["c2kv_kv_memory_hint"] = hint
+        if isinstance(staged_joint_tool_hint, dict):
+            # History shaping replaces the hint; the persistent tool source
+            # digest must still reach the server for native/gist refresh.
+            hint = dict(out.get("c2kv_kv_memory_hint") or {})
+            hint["joint_tool_memory"] = dict(staged_joint_tool_hint)
             out["c2kv_kv_memory_hint"] = hint
         out["messages"] = messages
         return out

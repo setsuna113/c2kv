@@ -13,6 +13,7 @@ ROOT = Path(__file__).resolve().parents[3]
 sys.path[:0] = [str(ROOT), str(ROOT / "python")]
 from benchmarks.memory_runtime.tests.test_racer_composition import allocator, prepare, config
 from benchmarks.memory_runtime.racer.generator import PersistentRacerGenerator
+from benchmarks.memory_runtime.event_native_costs import summarize_event_native_steps
 from benchmarks.memory_runtime.candidate_algorithms.repacking import repack
 from benchmarks.memory_runtime.candidate_algorithms.controller import CandidateRecoveryController
 from benchmarks.memory_runtime.tests.test_candidate_recovery import Risk
@@ -135,6 +136,87 @@ def test_missing_actual_kv_receipt_is_terminal_not_an_estimate():
     assert generator.session_cache_info()["closed"]
 
 
+def test_cost_summary_charges_actual_racer_receipt_when_plan_differs():
+    logical_session_id = "bfcl/multi_turn_base_0/attempt-0"
+    native_session_id = "racer-7a0ec015a15589790bdb3ad7859318b05da96391e4dd98321de0da239ac9bc4c"
+    trace = {
+        "phase": "draft",
+        "status": "completed",
+        "discarded": False,
+        "attempt_uid": "racer-cost-1",
+        "attempt_index": 1,
+        "planned_resident_prompt_tokens": 781,
+        "usage": {"prompt_tokens": 4896, "completion_tokens": 27, "total_tokens": 4923},
+        "generation": {
+            "token_ids": list(range(27)),
+            "stats": {
+                "racer_backend": config("h2o").receipt(),
+                "racer_served_usage": {
+                    "prompt_tokens": 4896,
+                    "completion_tokens": 27,
+                    "total_tokens": 4923,
+                },
+                "racer_accounting": {
+                    "resident_prompt_tokens": 4896,
+                    "active_history_tokens": 52,
+                    "native_evidence_tokens": 0,
+                    "history_and_evidence_tokens": 52,
+                },
+            },
+        },
+    }
+    record = {
+        "session_id": logical_session_id,
+        "decision_key": "d1",
+        "status": "ok",
+        "generation_trace": [trace],
+        # Legacy receipts exposed the deterministic physical identity here.
+        "session_cache_after": {
+            "policy": "racer-persistent-transaction-v1",
+            "session_id": native_session_id,
+        },
+    }
+    summary = summarize_event_native_steps(record)
+    usage = summary["costs"]["openai_resident_usage"]
+    assert usage["prompt_tokens"]["strict_total"] == 4896
+    assert usage["total_tokens"]["strict_total"] == 4923
+
+    current_identity = copy.deepcopy(record)
+    current_identity["session_cache_after"].update(
+        session_id=logical_session_id,
+        native_session_id=native_session_id,
+    )
+    assert summarize_event_native_steps(current_identity)["recorded_decisions"] == 1
+
+    forged = copy.deepcopy(trace)
+    forged["usage"]["prompt_tokens"] = 4895
+    forged["usage"]["total_tokens"] = 4922
+    with pytest.raises(ValueError, match="differs from its RACER engine receipt"):
+        summarize_event_native_steps({
+            "session_id": logical_session_id,
+            "decision_key": "d1",
+            "status": "ok",
+            "generation_trace": [forged],
+        })
+
+    wrong_identity = copy.deepcopy(record)
+    wrong_identity["session_cache_after"]["session_id"] = "racer-" + "0" * 64
+    with pytest.raises(ValueError, match="invalid RACER session identity"):
+        summarize_event_native_steps(wrong_identity)
+
+
+def test_session_cache_reports_logical_and_native_racer_identities():
+    logical_session_id = "bfcl/multi_turn_base_0/attempt-0"
+    native_session_id = "racer-7a0ec015a15589790bdb3ad7859318b05da96391e4dd98321de0da239ac9bc4c"
+    native = Native()
+    generator = PersistentRacerGenerator(native, Decoder(), config())
+    with generator.decision_scope(session_id=logical_session_id):
+        receipt = generator.session_cache_info()
+    assert receipt["session_id"] == logical_session_id
+    assert receipt["native_session_id"] == native_session_id
+    generator.close_session()
+
+
 def test_shared_runner_keeps_draft_private_and_charges_both_real_calls(monkeypatch, tmp_path):
     from benchmarks.memory_runtime.event_native_step import EventNativeDecisionRunner
     from benchmarks.memory_runtime.attempt_journal import AttemptJournal
@@ -170,6 +252,53 @@ def test_served_budget_is_checked_from_actual_evidence_not_planner_estimate():
     with pytest.raises(SGLangEventNativeError, match="exceeds the declared budget"):
         with generator.decision_scope(session_id="s"):
             generator.generate(prepare(allocator()).memory, ratio=8, max_new_tokens=32, trace_context=context())
+
+
+def test_failed_racer_request_keeps_error_and_unknown_cost_without_a_fake_cache_trace(tmp_path):
+    from benchmarks.memory_runtime.event_native_step import EventNativeDecisionRunner, EventNativeStepError
+    from benchmarks.memory_runtime.attempt_journal import AttemptJournal
+
+    native = Native()
+    native.mutate = lambda response: ({"message": "PERSISTENT_HISTORY_TOOL_PREFIX_CHANGED"})
+    original_read = native._read_json
+
+    def read(request, **kwargs):
+        response, status = original_read(request, **kwargs)
+        return response, 400 if request.full_url.endswith("/v1/chat/completions") else status
+
+    native._read_json = read
+    generator = PersistentRacerGenerator(native, Decoder(), config())
+    generator._tool_binder = object()
+    completed_tool_calls = [
+        {"kind": kind, "attempt_index": index, "status": "completed",
+         "session_id": "s", "decision_key": "d1", "source_tokens": 12,
+         "usage_known": True, "elapsed_ns": 1}
+        for index, kind in enumerate(("tool_extraction", "tool_repair"), start=1)
+    ]
+    generator._tool_attempts.extend(copy.deepcopy(completed_tool_calls))
+    generator._tool_decision_attempts["d1"] = copy.deepcopy(completed_tool_calls)
+    runner = EventNativeDecisionRunner(allocator(), generator, Decoder(), ratio=8, max_new_tokens=32,
+        max_generation_calls=96, journal=AttemptJournal(tmp_path / "attempts.jsonl"))
+    with pytest.raises(EventNativeStepError, match="PERSISTENT_HISTORY_TOOL_PREFIX_CHANGED") as failure:
+        runner.run({"session_id": "s", "decision_key": "d1", "messages": messages(), "tools": []})
+    record = failure.value.record
+    trace = record["generation_trace"][0]
+    assert "cache_trace" not in trace
+    assert trace["racer_generation_trace"]["status"] == "failed"
+    assert "PERSISTENT_HISTORY_TOOL_PREFIX_CHANGED" in trace["racer_generation_trace"]["error"]["message"]
+    assert trace["usage"] is None
+    tool_cost = trace["racer_generation_trace"]["racer_tool_cost"]
+    assert tool_cost["completed_tool_extraction_calls"] == 1
+    assert tool_cost["completed_tool_repair_calls"] == 1
+    assert record["tool_transport_total"]["attempted_tool_extraction_calls"] == 1
+    assert record["tool_transport_total"]["attempted_tool_repair_calls"] == 1
+    EventNativeDecisionRunner._totals(record)
+    assert record["tool_transport_total"]["attempted_tool_repair_calls"] == 1
+    summary = summarize_event_native_steps(record)
+    prompt_cost = summary["costs"]["openai_resident_usage"]["prompt_tokens"]
+    assert prompt_cost["strict_total"] is None
+    assert prompt_cost["unknown_calls"] == 1
+    assert generator.session_cache_info()["closed"]
 
 
 def test_appworld_sampling_reaches_the_actual_chat_request():

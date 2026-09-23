@@ -331,7 +331,10 @@ class EventNativeDecisionRunner:
             partial = getattr(self.generator, 'last_generation_trace', None)
             if isinstance(partial, dict) and partial.get('attempt_uid') == handle.attempt_uid:
                 # Scope cleanup may still append completed release operations.
-                trace['cache_trace'] = partial
+                field = ('racer_generation_trace'
+                         if partial.get('schema') == 'racer-generation-trace-v1'
+                         else 'cache_trace')
+                trace[field] = partial
             self.journal.finish(handle, 'failed')
             raise
         trace['end_unix_ns'] = time.time_ns()
@@ -381,6 +384,10 @@ class EventNativeDecisionRunner:
             generation = item.get('generation') or {}
             stats = generation.get('stats') or {}
             cost = stats.get('racer_tool_cost')
+            if cost is None:
+                # A failed chat has no generation.stats, but tool extraction
+                # may have completed before that request was submitted.
+                cost = (item.get('racer_generation_trace') or {}).get('racer_tool_cost')
             if isinstance(cost, dict) and cost.get('schema') == 'racer-tool-transport-v1':
                 tool_costs.append(cost)
         if tool_costs:
