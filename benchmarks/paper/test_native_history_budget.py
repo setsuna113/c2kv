@@ -70,6 +70,9 @@ def test_no_silent_budget_on_unsupported_arm_or_benchmark(tmp_path):
     cfg = runner.with_native_history_budget(config(), ARM, 768)
     with pytest.raises(ValueError, match="already exists"):
         runner.with_native_history_budget(cfg, ARM, 768)
+    # Candidate arms now cover their supported benchmarks; C1 keeps BFCL only.
+    c1_arm = "c2kv_c1_t02_r8"
+    cfg = runner.with_native_history_budget(config(), c1_arm, 768)
     cfg["methods"][-1]["benchmarks"] = ["acebench_agent"]
     with pytest.raises(ValueError, match="explicit BFCL scope"):
         runner.prepare(cfg, tmp_path / "results", tmp_path / "engine")
@@ -90,6 +93,8 @@ def test_delivery_forwards_budget_without_changing_algorithm(tmp_path):
         assert args.ratio == legacy.ratio == 8
         assert args.candidate_algorithm == legacy.candidate_algorithm == "goal_pending"
         assert args.selector_threshold == legacy.selector_threshold
+        assert c1.delivery_args(cfg, "acebench_agent", tmp_path, [], delivery).history_budget_tokens == 2048
+        c1.select_arm("c2kv_c1_t02_r8")
         with pytest.raises(ValueError, match="BFCL only"):
             c1.delivery_args(cfg, "acebench_agent", tmp_path, [], delivery)
     finally:

@@ -85,6 +85,20 @@ def arm_identity(config):
     raise ValueError(f"Unsupported native ACEBench/ToolSandbox arm: {arm!r}")
 
 
+def validate_native_budget_policy(config, manifest, arm):
+    """A budgeted candidate server must serve the derived per-cell capacity policy."""
+    tokens = config.get("native_history_budget_tokens")
+    if tokens is None:
+        return
+    contract = manifest.get("runtime_policy_contract")
+    policy = contract.get("effective_policy") if isinstance(contract, Mapping) else None
+    unit = policy.get("kv_bytes_per_token") if isinstance(policy, Mapping) else None
+    if (type(unit) is not int or unit <= 0
+            or policy.get("history_budget_bytes") != tokens * unit
+            or policy.get("workspace_budget_bytes") != tokens * unit):
+        raise RuntimeError(f"Native {arm} server does not serve its {tokens}-token history budget")
+
+
 def validate_ready_manifest(config, benchmark, task, ready_path, controller_path):
     """Reject a server whose loaded controller differs from the selected arm."""
     identity = arm_identity(config)
@@ -182,6 +196,7 @@ def validate_ready_manifest(config, benchmark, task, ready_path, controller_path
                 or route.get("recovery_enabled") is not True
                 or route.get("max_generations_per_decision") != 2):
             raise RuntimeError(f"Native {identity['arm']} candidate controller identity differs")
+        validate_native_budget_policy(config, manifest, identity["arm"])
     elif candidate is not None or loaded_candidate is not None:
         raise RuntimeError(f"Native {identity['arm']} detector controller identity differs")
     elif identity["method"] == "c2kv_only":

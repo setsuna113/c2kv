@@ -83,12 +83,25 @@ class NativeHistoryBudgetTest(unittest.TestCase):
         self.assertFalse((args.out / history_budget.POLICY_FILENAME).exists())
 
     def test_non_bfcl_budget_rejected_at_cli_and_direct_profile(self):
-        args = self.args(tokens=768, method="proposed", candidate="goal_pending")
+        # The C1 detector route keeps the BFCL-only sweep.
+        args = self.args(tokens=768, method="proposed")
         args.benchmark = "tau2"
         with self.assertRaisesRegex(ValueError, "BFCL only"):
             run_c1.validate_args(args)
         with self.assertRaisesRegex(ValueError, "BFCL only"):
             run_c1.build_profile(args)
+
+    def test_candidate_budget_is_accepted_outside_bfcl(self):
+        args = self.args(tokens=768, method="proposed", candidate="goal_pending")
+        args.benchmark = "tau2"
+        with mock.patch.object(history_budget, "resolve_override",
+                               return_value={"fixture": True}) as resolve:
+            self.assertEqual(run_c1._history_budget_override(args, self.design), {"fixture": True})
+        self.assertEqual(resolve.call_args.args[0], 768)
+        try:
+            run_c1.validate_args(args)
+        except ValueError as error:   # later identity checks may still refuse this fixture
+            self.assertNotIn("BFCL only", str(error))
 
     def test_768_tokens_are_byte_equivalent_to_frozen_policy(self):
         args = self.args(tokens=768)

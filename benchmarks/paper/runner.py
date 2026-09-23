@@ -15,7 +15,7 @@ import urllib.request
 
 from .candidate_matrix import (
     ARM_TO_VARIANT, SUPPORTED_BENCHMARKS as CANDIDATE_BENCHMARKS,
-    parse_candidate_arms, with_candidate_methods,
+    native_budget_benchmarks, parse_candidate_arms, with_candidate_methods,
 )
 from .racer_matrix import (
     is_racer_arm, parse_racer_backends, parse_racer_policies,
@@ -412,7 +412,10 @@ def with_history_kv_budget(config, arm_name, target_tokens):
 
 
 def with_native_history_budget(config, arm_name, target_tokens):
-    """Add a BFCL native capacity variant, preserving the fixed-budget release."""
+    """Add a native capacity variant, preserving the fixed-budget release.
+
+    Candidate arms cover their configured benchmarks; other native arms BFCL only.
+    """
     from benchmarks.arms import get_arm
     budget = NativeHistoryBudget(target_tokens)
     budget.validate_arm(get_arm(arm_name))
@@ -425,7 +428,7 @@ def with_native_history_budget(config, arm_name, target_tokens):
         raise ValueError(f"Native budget cell already exists: {budget.variant_name(arm_name)}")
     configured = {b["name"] for b in config["benchmarks"]}
     scope = set(templates[0].get("benchmarks") or configured)
-    benchmarks = sorted(scope & configured & {"bfcl_base", "bfcl_long_context"})
+    benchmarks = sorted(scope & configured & native_budget_benchmarks(arm_name))
     if not benchmarks:
         raise ValueError("Native history budget sweep currently requires BFCL")
     variant = dict(templates[0], group="budget", history_budget_tokens=target_tokens,
@@ -674,7 +677,7 @@ def _prepare_locked(config, output, source):
             elif arm.native_controller:
                 NativeHistoryBudget(explicit_budget).validate_arm(arm)
                 if (not item.get("benchmarks") or
-                        not set(item["benchmarks"]) <= {"bfcl_base", "bfcl_long_context"}):
+                        not set(item["benchmarks"]) <= native_budget_benchmarks(arm.name)):
                     raise ValueError("Native history budget sweep currently requires explicit BFCL scope")
             else:
                 arm = HistoryKVBudget(explicit_budget).apply(arm)

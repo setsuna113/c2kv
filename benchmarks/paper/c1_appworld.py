@@ -576,6 +576,11 @@ def run_task(
                 from .native_extra import validate_ready_manifest
                 validate_ready_manifest(config, "appworld", task_id,
                                         task_out / "server" / "ready.json", controller_path)
+            else:
+                from .candidate_matrix import ARM_TO_VARIANT
+                if config.get("native_arm") in ARM_TO_VARIANT:
+                    from .native_extra import validate_native_budget_policy
+                    validate_native_budget_policy(config, ready, config["native_arm"])
             if config.get("tool_memory"):
                 from .native_extra import validate_tool_ready
                 validate_tool_ready(config, ready)

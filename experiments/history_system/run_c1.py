@@ -370,7 +370,10 @@ def _history_budget_override(args: argparse.Namespace, design: dict | None = Non
         tokens = racer["history_budget_tokens"]
     if tokens is None:
         return None
-    if racer is None and args.method != "c2kv_native" and args.benchmark != "bfcl":
+    # Candidate controllers share the native adapters' task-bound capacity
+    # failures on every benchmark; the C1 detector keeps the BFCL-only sweep.
+    if (racer is None and args.method != "c2kv_native"
+            and getattr(args, "candidate_algorithm", None) is None and args.benchmark != "bfcl"):
         raise ValueError("--history-budget-tokens currently supports BFCL only")
     import history_budget
 
@@ -1198,7 +1201,8 @@ def validate_args(args: argparse.Namespace) -> list[str]:
     budget_tokens = getattr(args, "history_budget_tokens", None)
     if budget_tokens is not None and (type(budget_tokens) is not int or budget_tokens <= 0):
         raise ValueError("--history-budget-tokens must be a positive integer")
-    if budget_tokens is not None and args.method != "c2kv_native" and args.benchmark != "bfcl":
+    if (budget_tokens is not None and args.method != "c2kv_native"
+            and getattr(args, "candidate_algorithm", None) is None and args.benchmark != "bfcl"):
         raise ValueError("--history-budget-tokens currently supports BFCL only")
     racer = getattr(args, "racer_backend_config", None)
     if racer is not None:

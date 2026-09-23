@@ -1,0 +1,46 @@
+{
+  "schema": "c2kv-candidate-native-budget-v1",
+  "created_at": "2026-09-23T05:00:00Z",
+  "request": "128/256/512 coverage of C2KV (c1v2rv = c2kv_c1_v2_verified_r8 with terminal tool-argument rescue) on tau2, ToolSandbox, ACEBench agent and AppWorld; base 99d3be7 rejected them with 'Native history budget sweep currently requires BFCL'",
+  "blockers_found": [
+    "benchmarks/paper/runner.py with_native_history_budget: variant benchmarks intersected with BFCL",
+    "benchmarks/paper/runner.py prepare: budgeted native entries required explicit BFCL scope",
+    "benchmarks/paper/c1.py delivery_args and main: non-bare arms rejected outside BFCL",
+    "experiments/history_system/run_c1.py _history_budget_override: non-RACER, non-bare methods rejected outside BFCL"
+  ],
+  "change": [
+    "candidate_matrix.native_budget_benchmarks(arm): every supported candidate benchmark for candidate arms (ARM_TO_VARIANT), BFCL only for other native arms; the four guards use it (run_c1 exempts an explicit candidate algorithm)",
+    "native_extra.validate_native_budget_policy: a budgeted candidate server on tau2/ToolSandbox/ACEBench (validate_ready_manifest) or AppWorld (c1_appworld.run_task) must report effective history and workspace caps equal to B times kv_bytes_per_token; unbudgeted cells skip it"
+  ],
+  "already_in_place": {
+    "budget_application": "native_extra.server_command and c1_appworld._resolved_design already materialize the per-cell policy through c1_appworld.apply_native_history_budget for every native arm; bare and RACER budgets already run on all six benchmarks",
+    "capacity_failure": {
+      "event_native_api": "a task that raises CapacityInfeasible gets HTTP 422 c2kv_capacity_infeasible and a typed method_failure step (failure_code c2kv_capacity_infeasible, error type CapacityInfeasible, session <benchmark>/<task>/attempt-0)",
+      "toolsandbox": "score_cli_run declares task_failures.c2kv_capacity_infeasible; native_extra.run_task returns a scored-0 method_failure receipt",
+      "tau2": "the 422 ends the simulation as infrastructure_error, _terminal_results raises RuntimeError, and paper c1.run_closed_loop turns the typed task-bound step into a scored-0 method_failure and continues (new test)",
+      "acebench_agent": "generate.py re-raises, run_owned(check=True) raises CalledProcessError, and the same c1 path accepts the a-acebench-event-step-v1 capacity step (new test; controller_step_failure already tested)",
+      "appworld": "c1_appworld.run_task records capacity_infeasible as a scored-0 method failure (existing test)"
+    }
+  },
+  "unchanged": "prepared default matrix, BFCL-only candidate budget variants (--candidate-arms c1_v2_verified --native-history-budget ...=512/128) and C1 budget variants (c2kv_c1_t02_r8=256) are byte-identical to 99d3be7 in commands.json, matrix.csv and config.resolved.json; C1/bare/RACER guards and unbudgeted cells are unchanged",
+  "semantic_notes": [
+    "AppWorld: the candidate path labels its design c1_<detector> and calls functional_checks without the candidate variant (the loaded controller carries the variant); this predates budgets and is not verified live here. Small B may add capacity method failures on top of the existing per-cell AppWorld method failures",
+    "ACEBench: the 2026-09-05 single-message limitation is superseded by acebench_role_history_v1 (compressible role history) per the adapter; not re-verified live here",
+    "Capacity failures score 0 as method failures; a cell whose tasks all fail capacity still completes and must be read with its method_failure_task_ids"
+  ],
+  "cpu_tests": {
+    "new": "16 in benchmarks/paper/test_candidate_native_budget.py; experiments/history_system/test_history_budget.py test_candidate_budget_is_accepted_outside_bfcl",
+    "updated": "benchmarks/paper/test_native_history_budget.py and experiments/history_system/test_history_budget.py: the BFCL-only assertions now use the C1 detector route (still BFCL-only); candidate arms are asserted accepted",
+    "affected_paper_files": "test_native_history_budget, test_candidate_native_budget, test_c1, test_native_extra, test_c1_appworld, test_candidate_arms, test_runner, test_toolsandbox_terminal_failures: base 99d3be7 294 passed, fixed 310 passed, 0 failed on both",
+    "delivery_file_standalone": "experiments/history_system/test_history_budget.py run from its directory: base 1 failed / 6 passed, fixed 1 failed / 7 passed; the failure is the same pre-existing test_invalid_values_and_bare_semantics_are_rejected",
+    "full_suite": {
+      "command": "python -m pytest benchmarks experiments/history_system/test_history_budget.py -q (clean git-archive exports, Windows)",
+      "base_99d3be7": "41 failed, 1233 passed, 23 skipped",
+      "fixed": "42 failed, 1249 passed, 23 skipped",
+      "difference": "the only extra failure is the new delivery test under the combined-run module-name collision (benchmarks/history_budget.py shadows the delivery history_budget, which already breaks 10 base tests of that file); it passes standalone",
+      "base_regressions_not_from_this_change": "99d3be7 fails tests whose fixtures still expect pre-unified cells or no shared B (e.g. test_generation_timeout_wiring *_b768 cells, test_task_subsets, test_tool_contexts, 'Unified history runtime produced duplicate cell identities'); 4b5460f had 7 failures in the same environment"
+    }
+  },
+  "gpu_validation": "none",
+  "npu": "no change: NPU experiment-2 drivers use their own gen_* arms; this is the CUDA paper matrix"
+}
