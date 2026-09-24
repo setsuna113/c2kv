@@ -1,0 +1,300 @@
+{
+ "common_tasks": 200,
+ "correction_M0_vs_M1": {
+  "core_only_correct": [],
+  "core_only_with_changed_correction_in_full": [],
+  "decisions_changed_by_correction": 24,
+  "full_only_correct": [
+   "multi_turn_long_context_138",
+   "multi_turn_long_context_175"
+  ],
+  "full_only_with_changed_correction": [
+   "multi_turn_long_context_138",
+   "multi_turn_long_context_175"
+  ],
+  "tasks_with_changed_correction": 5
+ },
+ "heldout_tasks": 174,
+ "paired_vs_M1": {
+  "M0": {
+   "ci95": [
+    0.0,
+    0.025
+   ],
+   "difference": 0.01,
+   "mcnemar_exact_p": 0.5,
+   "n": 200,
+   "other_only": 2,
+   "reference_only": 0
+  },
+  "M2": {
+   "ci95": [
+    -0.035,
+    0.025
+   ],
+   "difference": -0.005,
+   "mcnemar_exact_p": 1.0,
+   "n": 200,
+   "other_only": 4,
+   "reference_only": 5
+  },
+  "M3": {
+   "ci95": [
+    -0.025,
+    0.035
+   ],
+   "difference": 0.005,
+   "mcnemar_exact_p": 1.0,
+   "n": 200,
+   "other_only": 5,
+   "reference_only": 4
+  },
+  "M4": {
+   "ci95": [
+    0.0,
+    0.015
+   ],
+   "difference": 0.005,
+   "mcnemar_exact_p": 1.0,
+   "n": 200,
+   "other_only": 1,
+   "reference_only": 0
+  }
+ },
+ "paired_vs_M1_heldout_subset": {
+  "M0": {
+   "ci95": [
+    0.0,
+    0.028735632183908046
+   ],
+   "difference": 0.011494252873563218,
+   "mcnemar_exact_p": 0.5,
+   "n": 174,
+   "other_only": 2,
+   "reference_only": 0
+  },
+  "M2": {
+   "ci95": [
+    -0.04597701149425287,
+    0.017241379310344827
+   ],
+   "difference": -0.011494252873563218,
+   "mcnemar_exact_p": 0.7265625,
+   "n": 174,
+   "other_only": 3,
+   "reference_only": 5
+  },
+  "M3": {
+   "ci95": [
+    -0.022988505747126436,
+    0.04597701149425287
+   ],
+   "difference": 0.011494252873563218,
+   "mcnemar_exact_p": 0.7265625,
+   "n": 174,
+   "other_only": 5,
+   "reference_only": 3
+  },
+  "M4": {
+   "ci95": [
+    0.0,
+    0.017241379310344827
+   ],
+   "difference": 0.005747126436781609,
+   "mcnemar_exact_p": 1.0,
+   "n": 174,
+   "other_only": 1,
+   "reference_only": 0
+  }
+ },
+ "result_status": "preliminary, n=1",
+ "rows": {
+  "M0": {
+   "actor_generations_per_task": 15.86,
+   "cell": "racer_v2_c2kv_c1_v2_verified_b256",
+   "completion_tokens_per_task": 1291.215,
+   "correct": 29,
+   "funnel": {
+    "correction_changed": 24,
+    "correction_proposed": 24,
+    "correction_verified": 24,
+    "decisions": 2623,
+    "failed_decisions": 4,
+    "generation_limit": 0,
+    "no_feasible_candidate": 121,
+    "parse_fallback": 0,
+    "regenerated_action_committed": 553,
+    "regeneration_attempted": 553,
+    "regeneration_completed": 553,
+    "repack_feasible": 553,
+    "self_revision_context_limit": 0,
+    "triggered": 674
+   },
+   "harness_failures": [],
+   "history_kv_generations": 3172,
+   "mean_history_kv_tokens": 169.906368221942,
+   "method_failures": [
+    "multi_turn_long_context_105",
+    "multi_turn_long_context_134",
+    "multi_turn_long_context_54",
+    "multi_turn_long_context_77"
+   ],
+   "prompt_tokens_per_task": 90074.69,
+   "regenerations_per_decision": 0.21082729698818148,
+   "self_revision_added_tokens": 0,
+   "success_rate_full_denominator": 0.145,
+   "tasks_missing": [],
+   "tasks_present": 200,
+   "unified_history_kv_check": 7848.0
+  },
+  "M1": {
+   "actor_generations_per_task": 15.955,
+   "cell": "racer_v2_c2kv_c1_v2_core_b256",
+   "completion_tokens_per_task": 1294.32,
+   "correct": 27,
+   "funnel": {
+    "correction_changed": 0,
+    "correction_proposed": 0,
+    "correction_verified": 0,
+    "decisions": 2631,
+    "failed_decisions": 4,
+    "generation_limit": 0,
+    "no_feasible_candidate": 122,
+    "parse_fallback": 0,
+    "regenerated_action_committed": 564,
+    "regeneration_attempted": 564,
+    "regeneration_completed": 564,
+    "repack_feasible": 564,
+    "self_revision_context_limit": 0,
+    "triggered": 686
+   },
+   "harness_failures": [],
+   "history_kv_generations": 3191,
+   "mean_history_kv_tokens": 170.44312127859604,
+   "method_failures": [
+    "multi_turn_long_context_105",
+    "multi_turn_long_context_134",
+    "multi_turn_long_context_54",
+    "multi_turn_long_context_77"
+   ],
+   "prompt_tokens_per_task": 90560.65,
+   "regenerations_per_decision": 0.21436716077537057,
+   "self_revision_added_tokens": 0,
+   "success_rate_full_denominator": 0.135,
+   "tasks_missing": [],
+   "tasks_present": 200,
+   "unified_history_kv_check": 7848.0
+  },
+  "M2": {
+   "actor_generations_per_task": 13.13,
+   "cell": "racer_v2_c2kv_c1_v2_verified_protected_off_b256",
+   "completion_tokens_per_task": 1098.145,
+   "correct": 26,
+   "funnel": {
+    "correction_changed": 0,
+    "correction_proposed": 0,
+    "correction_verified": 0,
+    "decisions": 2628,
+    "failed_decisions": 2,
+    "generation_limit": 0,
+    "no_feasible_candidate": 0,
+    "parse_fallback": 0,
+    "regenerated_action_committed": 0,
+    "regeneration_attempted": 0,
+    "regeneration_completed": 0,
+    "repack_feasible": 0,
+    "self_revision_context_limit": 0,
+    "triggered": 0
+   },
+   "harness_failures": [],
+   "history_kv_generations": 2626,
+   "mean_history_kv_tokens": 160.71896420411272,
+   "method_failures": [
+    "multi_turn_long_context_134",
+    "multi_turn_long_context_54"
+   ],
+   "prompt_tokens_per_task": 80422.445,
+   "regenerations_per_decision": 0.0,
+   "self_revision_added_tokens": 0,
+   "success_rate_full_denominator": 0.13,
+   "tasks_missing": [],
+   "tasks_present": 200,
+   "unified_history_kv_check": 2011.0
+  },
+  "M3": {
+   "actor_generations_per_task": 19.9,
+   "cell": "racer_v2_c2kv_c1_v2_selfrev_b256",
+   "completion_tokens_per_task": 1308.72,
+   "correct": 28,
+   "funnel": {
+    "correction_changed": 0,
+    "correction_proposed": 0,
+    "correction_verified": 0,
+    "decisions": 3105,
+    "failed_decisions": 2,
+    "generation_limit": 0,
+    "no_feasible_candidate": 126,
+    "parse_fallback": 7,
+    "regenerated_action_committed": 870,
+    "regeneration_attempted": 877,
+    "regeneration_completed": 877,
+    "repack_feasible": 877,
+    "self_revision_context_limit": 0,
+    "triggered": 1003
+   },
+   "harness_failures": [],
+   "history_kv_generations": 3980,
+   "mean_history_kv_tokens": 170.81482412060302,
+   "method_failures": [
+    "multi_turn_long_context_134",
+    "multi_turn_long_context_54"
+   ],
+   "prompt_tokens_per_task": 121422.945,
+   "regenerations_per_decision": 0.2824476650563607,
+   "self_revision_added_tokens": 70636,
+   "success_rate_full_denominator": 0.14,
+   "tasks_missing": [],
+   "tasks_present": 200,
+   "unified_history_kv_check": 2011.0
+  },
+  "M4": {
+   "actor_generations_per_task": 16.12,
+   "cell": "racer_v2_c2kv_c1_v2_nodraftq_b256",
+   "completion_tokens_per_task": 1298.075,
+   "correct": 28,
+   "funnel": {
+    "correction_changed": 0,
+    "correction_proposed": 0,
+    "correction_verified": 0,
+    "decisions": 2671,
+    "failed_decisions": 4,
+    "generation_limit": 0,
+    "no_feasible_candidate": 129,
+    "parse_fallback": 0,
+    "regenerated_action_committed": 557,
+    "regeneration_attempted": 557,
+    "regeneration_completed": 557,
+    "repack_feasible": 557,
+    "self_revision_context_limit": 0,
+    "triggered": 686
+   },
+   "harness_failures": [],
+   "history_kv_generations": 3224,
+   "mean_history_kv_tokens": 171.31792803970222,
+   "method_failures": [
+    "multi_turn_long_context_105",
+    "multi_turn_long_context_134",
+    "multi_turn_long_context_54",
+    "multi_turn_long_context_77"
+   ],
+   "prompt_tokens_per_task": 91245.91,
+   "regenerations_per_decision": 0.2085361287907151,
+   "self_revision_added_tokens": 0,
+   "success_rate_full_denominator": 0.14,
+   "tasks_missing": [],
+   "tasks_present": 200,
+   "unified_history_kv_check": 7848.0
+  }
+ },
+ "schema": "racer-ablation-closed-loop-v1"
+}

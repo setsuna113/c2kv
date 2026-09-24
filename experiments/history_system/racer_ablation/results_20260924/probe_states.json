@@ -1,0 +1,2335 @@
+{
+ "heldout_tasks_available": 174,
+ "m2_harness_failures": [],
+ "m2_method_failures": [
+  "multi_turn_long_context_134",
+  "multi_turn_long_context_54"
+ ],
+ "m2_roots": [
+  "/workspace/results-abl-s0",
+  "/workspace/results-abl-s1",
+  "/workspace/results-abl-s2",
+  "/workspace/results-abl-s3",
+  "/workspace/results-abl-s4",
+  "/workspace/results-abl-s5",
+  "/workspace/results-abl-s6",
+  "/workspace/results-abl-s7"
+ ],
+ "schema": "racer-ablation-probe-states-v1",
+ "seed": "racer-abl-20260924",
+ "states": {
+  "multi_turn_long_context_0": {
+   "decision_key": "turn-0/step-1",
+   "decisions": 21,
+   "frame_index": 1,
+   "frame_size": 21,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    false
+   ]
+  },
+  "multi_turn_long_context_1": {
+   "decision_key": "turn-1/step-12",
+   "decisions": 25,
+   "frame_index": 16,
+   "frame_size": 25,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    false
+   ]
+  },
+  "multi_turn_long_context_10": {
+   "decision_key": "turn-0/step-0",
+   "decisions": 32,
+   "frame_index": 0,
+   "frame_size": 2,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    false,
+    null,
+    null,
+    null,
+    null
+   ]
+  },
+  "multi_turn_long_context_100": {
+   "decision_key": "turn-0/step-0",
+   "decisions": 4,
+   "frame_index": 0,
+   "frame_size": 4,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    false
+   ]
+  },
+  "multi_turn_long_context_102": {
+   "decision_key": "turn-4/step-1",
+   "decisions": 11,
+   "frame_index": 9,
+   "frame_size": 11,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    true,
+    true,
+    true,
+    false
+   ]
+  },
+  "multi_turn_long_context_103": {
+   "decision_key": "turn-0/step-2",
+   "decisions": 11,
+   "frame_index": 2,
+   "frame_size": 4,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    false,
+    null,
+    null,
+    null
+   ]
+  },
+  "multi_turn_long_context_104": {
+   "decision_key": "turn-0/step-0",
+   "decisions": 4,
+   "frame_index": 0,
+   "frame_size": 2,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    false,
+    null
+   ]
+  },
+  "multi_turn_long_context_105": {
+   "decision_key": "turn-0/step-4",
+   "decisions": 9,
+   "frame_index": 4,
+   "frame_size": 5,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    false,
+    null
+   ]
+  },
+  "multi_turn_long_context_106": {
+   "decision_key": "turn-0/step-1",
+   "decisions": 9,
+   "frame_index": 1,
+   "frame_size": 7,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    true,
+    false,
+    null
+   ]
+  },
+  "multi_turn_long_context_107": {
+   "decision_key": "turn-1/step-1",
+   "decisions": 12,
+   "frame_index": 4,
+   "frame_size": 12,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    true,
+    true,
+    true,
+    true
+   ]
+  },
+  "multi_turn_long_context_108": {
+   "decision_key": "turn-1/step-7",
+   "decisions": 23,
+   "frame_index": 9,
+   "frame_size": 23,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    false
+   ]
+  },
+  "multi_turn_long_context_109": {
+   "decision_key": "turn-2/step-0",
+   "decisions": 9,
+   "frame_index": 4,
+   "frame_size": 5,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    true,
+    false,
+    null,
+    null,
+    null,
+    null
+   ]
+  },
+  "multi_turn_long_context_11": {
+   "decision_key": "turn-0/step-0",
+   "decisions": 4,
+   "frame_index": 0,
+   "frame_size": 2,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    false,
+    null
+   ]
+  },
+  "multi_turn_long_context_110": {
+   "decision_key": "turn-1/step-2",
+   "decisions": 15,
+   "frame_index": 4,
+   "frame_size": 6,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    true,
+    false,
+    null,
+    null,
+    null
+   ]
+  },
+  "multi_turn_long_context_111": {
+   "decision_key": "turn-0/step-1",
+   "decisions": 11,
+   "frame_index": 1,
+   "frame_size": 11,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    true,
+    true,
+    true
+   ]
+  },
+  "multi_turn_long_context_112": {
+   "decision_key": "turn-2/step-0",
+   "decisions": 9,
+   "frame_index": 4,
+   "frame_size": 9,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    true,
+    true,
+    true
+   ]
+  },
+  "multi_turn_long_context_113": {
+   "decision_key": "turn-0/step-0",
+   "decisions": 4,
+   "frame_index": 0,
+   "frame_size": 2,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    false,
+    null
+   ]
+  },
+  "multi_turn_long_context_114": {
+   "decision_key": "turn-0/step-1",
+   "decisions": 9,
+   "frame_index": 1,
+   "frame_size": 2,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    false,
+    null,
+    null,
+    null,
+    null
+   ]
+  },
+  "multi_turn_long_context_115": {
+   "decision_key": "turn-0/step-3",
+   "decisions": 21,
+   "frame_index": 3,
+   "frame_size": 21,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true
+   ]
+  },
+  "multi_turn_long_context_116": {
+   "decision_key": "turn-2/step-2",
+   "decisions": 25,
+   "frame_index": 6,
+   "frame_size": 25,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    true,
+    true
+   ]
+  },
+  "multi_turn_long_context_117": {
+   "decision_key": "turn-3/step-14",
+   "decisions": 28,
+   "frame_index": 21,
+   "frame_size": 28,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    true,
+    true,
+    true
+   ]
+  },
+  "multi_turn_long_context_119": {
+   "decision_key": "turn-3/step-0",
+   "decisions": 8,
+   "frame_index": 6,
+   "frame_size": 8,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    true,
+    true,
+    true
+   ]
+  },
+  "multi_turn_long_context_12": {
+   "decision_key": "turn-2/step-0",
+   "decisions": 7,
+   "frame_index": 5,
+   "frame_size": 7,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    true,
+    true
+   ]
+  },
+  "multi_turn_long_context_120": {
+   "decision_key": "turn-0/step-0",
+   "decisions": 8,
+   "frame_index": 0,
+   "frame_size": 8,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    true,
+    true
+   ]
+  },
+  "multi_turn_long_context_121": {
+   "decision_key": "turn-1/step-2",
+   "decisions": 9,
+   "frame_index": 4,
+   "frame_size": 9,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    true,
+    true,
+    false
+   ]
+  },
+  "multi_turn_long_context_122": {
+   "decision_key": "turn-0/step-1",
+   "decisions": 8,
+   "frame_index": 1,
+   "frame_size": 8,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    true,
+    true,
+    true
+   ]
+  },
+  "multi_turn_long_context_123": {
+   "decision_key": "turn-0/step-1",
+   "decisions": 8,
+   "frame_index": 1,
+   "frame_size": 7,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    true,
+    false,
+    null
+   ]
+  },
+  "multi_turn_long_context_124": {
+   "decision_key": "turn-2/step-1",
+   "decisions": 7,
+   "frame_index": 6,
+   "frame_size": 7,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    true,
+    true
+   ]
+  },
+  "multi_turn_long_context_125": {
+   "decision_key": "turn-1/step-2",
+   "decisions": 13,
+   "frame_index": 5,
+   "frame_size": 11,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    true,
+    true,
+    false,
+    null
+   ]
+  },
+  "multi_turn_long_context_127": {
+   "decision_key": "turn-2/step-0",
+   "decisions": 7,
+   "frame_index": 4,
+   "frame_size": 6,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    true,
+    false,
+    null
+   ]
+  },
+  "multi_turn_long_context_128": {
+   "decision_key": "turn-2/step-1",
+   "decisions": 10,
+   "frame_index": 7,
+   "frame_size": 10,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    true,
+    true,
+    true
+   ]
+  },
+  "multi_turn_long_context_130": {
+   "decision_key": "turn-2/step-0",
+   "decisions": 10,
+   "frame_index": 4,
+   "frame_size": 10,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    true,
+    true,
+    true,
+    true
+   ]
+  },
+  "multi_turn_long_context_131": {
+   "decision_key": "turn-0/step-1",
+   "decisions": 16,
+   "frame_index": 1,
+   "frame_size": 6,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    true,
+    false,
+    null,
+    null,
+    null,
+    null
+   ]
+  },
+  "multi_turn_long_context_132": {
+   "decision_key": "turn-0/step-5",
+   "decisions": 21,
+   "frame_index": 5,
+   "frame_size": 21,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true
+   ]
+  },
+  "multi_turn_long_context_133": {
+   "decision_key": "turn-0/step-1",
+   "decisions": 23,
+   "frame_index": 1,
+   "frame_size": 2,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    false,
+    null
+   ]
+  },
+  "multi_turn_long_context_135": {
+   "decision_key": "turn-0/step-0",
+   "decisions": 23,
+   "frame_index": 0,
+   "frame_size": 2,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    false,
+    null
+   ]
+  },
+  "multi_turn_long_context_136": {
+   "decision_key": "turn-2/step-1",
+   "decisions": 10,
+   "frame_index": 7,
+   "frame_size": 10,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    true,
+    true,
+    true
+   ]
+  },
+  "multi_turn_long_context_137": {
+   "decision_key": "turn-0/step-0",
+   "decisions": 16,
+   "frame_index": 0,
+   "frame_size": 16,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    true,
+    true,
+    false
+   ]
+  },
+  "multi_turn_long_context_138": {
+   "decision_key": "turn-1/step-0",
+   "decisions": 13,
+   "frame_index": 3,
+   "frame_size": 11,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    true,
+    true,
+    false,
+    null
+   ]
+  },
+  "multi_turn_long_context_139": {
+   "decision_key": "turn-1/step-0",
+   "decisions": 4,
+   "frame_index": 2,
+   "frame_size": 4,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    true
+   ]
+  },
+  "multi_turn_long_context_14": {
+   "decision_key": "turn-0/step-0",
+   "decisions": 10,
+   "frame_index": 0,
+   "frame_size": 5,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    false,
+    null,
+    null
+   ]
+  },
+  "multi_turn_long_context_140": {
+   "decision_key": "turn-2/step-1",
+   "decisions": 9,
+   "frame_index": 6,
+   "frame_size": 7,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    true,
+    false,
+    null
+   ]
+  },
+  "multi_turn_long_context_141": {
+   "decision_key": "turn-3/step-1",
+   "decisions": 12,
+   "frame_index": 8,
+   "frame_size": 12,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    true,
+    true,
+    true,
+    true
+   ]
+  },
+  "multi_turn_long_context_143": {
+   "decision_key": "turn-3/step-10",
+   "decisions": 24,
+   "frame_index": 19,
+   "frame_size": 24,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    true,
+    true,
+    false
+   ]
+  },
+  "multi_turn_long_context_144": {
+   "decision_key": "turn-1/step-0",
+   "decisions": 4,
+   "frame_index": 2,
+   "frame_size": 4,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    false
+   ]
+  },
+  "multi_turn_long_context_145": {
+   "decision_key": "turn-0/step-1",
+   "decisions": 12,
+   "frame_index": 1,
+   "frame_size": 5,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    false,
+    null,
+    null,
+    null
+   ]
+  },
+  "multi_turn_long_context_146": {
+   "decision_key": "turn-0/step-0",
+   "decisions": 8,
+   "frame_index": 0,
+   "frame_size": 3,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    false,
+    null,
+    null
+   ]
+  },
+  "multi_turn_long_context_147": {
+   "decision_key": "turn-0/step-1",
+   "decisions": 6,
+   "frame_index": 1,
+   "frame_size": 4,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    false,
+    null
+   ]
+  },
+  "multi_turn_long_context_148": {
+   "decision_key": "turn-2/step-0",
+   "decisions": 11,
+   "frame_index": 5,
+   "frame_size": 11,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    true,
+    true,
+    true,
+    false
+   ]
+  },
+  "multi_turn_long_context_149": {
+   "decision_key": "turn-0/step-3",
+   "decisions": 14,
+   "frame_index": 3,
+   "frame_size": 10,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    true,
+    false,
+    null,
+    null
+   ]
+  },
+  "multi_turn_long_context_15": {
+   "decision_key": "turn-0/step-1",
+   "decisions": 21,
+   "frame_index": 1,
+   "frame_size": 5,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    false,
+    null,
+    null,
+    null
+   ]
+  },
+  "multi_turn_long_context_150": {
+   "decision_key": "turn-0/step-0",
+   "decisions": 4,
+   "frame_index": 0,
+   "frame_size": 2,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    false,
+    null
+   ]
+  },
+  "multi_turn_long_context_151": {
+   "decision_key": "turn-0/step-0",
+   "decisions": 9,
+   "frame_index": 0,
+   "frame_size": 6,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    false,
+    null
+   ]
+  },
+  "multi_turn_long_context_152": {
+   "decision_key": "turn-1/step-3",
+   "decisions": 14,
+   "frame_index": 8,
+   "frame_size": 10,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    false,
+    null
+   ]
+  },
+  "multi_turn_long_context_153": {
+   "decision_key": "turn-3/step-0",
+   "decisions": 30,
+   "frame_index": 9,
+   "frame_size": 30,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    true,
+    true,
+    false
+   ]
+  },
+  "multi_turn_long_context_154": {
+   "decision_key": "turn-0/step-1",
+   "decisions": 9,
+   "frame_index": 1,
+   "frame_size": 4,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    false,
+    null,
+    null,
+    null
+   ]
+  },
+  "multi_turn_long_context_155": {
+   "decision_key": "turn-1/step-2",
+   "decisions": 6,
+   "frame_index": 5,
+   "frame_size": 6,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    false
+   ]
+  },
+  "multi_turn_long_context_156": {
+   "decision_key": "turn-0/step-0",
+   "decisions": 9,
+   "frame_index": 0,
+   "frame_size": 4,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    false,
+    null,
+    null,
+    null
+   ]
+  },
+  "multi_turn_long_context_157": {
+   "decision_key": "turn-0/step-1",
+   "decisions": 6,
+   "frame_index": 1,
+   "frame_size": 6,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    true,
+    false
+   ]
+  },
+  "multi_turn_long_context_158": {
+   "decision_key": "turn-1/step-0",
+   "decisions": 6,
+   "frame_index": 2,
+   "frame_size": 4,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    false,
+    null
+   ]
+  },
+  "multi_turn_long_context_159": {
+   "decision_key": "turn-0/step-1",
+   "decisions": 7,
+   "frame_index": 1,
+   "frame_size": 5,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    false,
+    null
+   ]
+  },
+  "multi_turn_long_context_160": {
+   "decision_key": "turn-0/step-0",
+   "decisions": 6,
+   "frame_index": 0,
+   "frame_size": 1,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    false,
+    null,
+    null
+   ]
+  },
+  "multi_turn_long_context_161": {
+   "decision_key": "turn-2/step-1",
+   "decisions": 6,
+   "frame_index": 5,
+   "frame_size": 6,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    true,
+    true
+   ]
+  },
+  "multi_turn_long_context_162": {
+   "decision_key": "turn-1/step-0",
+   "decisions": 14,
+   "frame_index": 2,
+   "frame_size": 10,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    true,
+    true,
+    false,
+    null,
+    null
+   ]
+  },
+  "multi_turn_long_context_163": {
+   "decision_key": "turn-0/step-1",
+   "decisions": 3,
+   "frame_index": 1,
+   "frame_size": 2,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    false,
+    null
+   ]
+  },
+  "multi_turn_long_context_164": {
+   "decision_key": "turn-0/step-0",
+   "decisions": 8,
+   "frame_index": 0,
+   "frame_size": 5,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    false,
+    null,
+    null
+   ]
+  },
+  "multi_turn_long_context_165": {
+   "decision_key": "turn-2/step-2",
+   "decisions": 25,
+   "frame_index": 6,
+   "frame_size": 25,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    true,
+    false
+   ]
+  },
+  "multi_turn_long_context_166": {
+   "decision_key": "turn-1/step-0",
+   "decisions": 10,
+   "frame_index": 2,
+   "frame_size": 6,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    true,
+    false,
+    null,
+    null
+   ]
+  },
+  "multi_turn_long_context_167": {
+   "decision_key": "turn-0/step-2",
+   "decisions": 12,
+   "frame_index": 2,
+   "frame_size": 8,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    true,
+    false,
+    null,
+    null
+   ]
+  },
+  "multi_turn_long_context_168": {
+   "decision_key": "turn-1/step-0",
+   "decisions": 10,
+   "frame_index": 2,
+   "frame_size": 6,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    true,
+    false,
+    null,
+    null
+   ]
+  },
+  "multi_turn_long_context_169": {
+   "decision_key": "turn-0/step-4",
+   "decisions": 7,
+   "frame_index": 4,
+   "frame_size": 7,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    true
+   ]
+  },
+  "multi_turn_long_context_17": {
+   "decision_key": "turn-2/step-1",
+   "decisions": 10,
+   "frame_index": 8,
+   "frame_size": 10,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    true,
+    false
+   ]
+  },
+  "multi_turn_long_context_170": {
+   "decision_key": "turn-0/step-0",
+   "decisions": 7,
+   "frame_index": 0,
+   "frame_size": 2,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    false,
+    null,
+    null,
+    null,
+    null,
+    null
+   ]
+  },
+  "multi_turn_long_context_171": {
+   "decision_key": "turn-0/step-12",
+   "decisions": 21,
+   "frame_index": 12,
+   "frame_size": 21,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    false
+   ]
+  },
+  "multi_turn_long_context_172": {
+   "decision_key": "turn-0/step-1",
+   "decisions": 7,
+   "frame_index": 1,
+   "frame_size": 5,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    false,
+    null,
+    null
+   ]
+  },
+  "multi_turn_long_context_173": {
+   "decision_key": "turn-0/step-0",
+   "decisions": 8,
+   "frame_index": 0,
+   "frame_size": 4,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    false,
+    null,
+    null
+   ]
+  },
+  "multi_turn_long_context_174": {
+   "decision_key": "turn-0/step-4",
+   "decisions": 15,
+   "frame_index": 4,
+   "frame_size": 5,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    false,
+    null,
+    null,
+    null,
+    null
+   ]
+  },
+  "multi_turn_long_context_175": {
+   "decision_key": "turn-0/step-14",
+   "decisions": 21,
+   "frame_index": 14,
+   "frame_size": 21,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    false
+   ]
+  },
+  "multi_turn_long_context_176": {
+   "decision_key": "turn-0/step-1",
+   "decisions": 5,
+   "frame_index": 1,
+   "frame_size": 5,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    false
+   ]
+  },
+  "multi_turn_long_context_177": {
+   "decision_key": "turn-1/step-1",
+   "decisions": 4,
+   "frame_index": 3,
+   "frame_size": 4,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    false
+   ]
+  },
+  "multi_turn_long_context_178": {
+   "decision_key": "turn-0/step-0",
+   "decisions": 11,
+   "frame_index": 0,
+   "frame_size": 2,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    false,
+    null,
+    null,
+    null,
+    null
+   ]
+  },
+  "multi_turn_long_context_179": {
+   "decision_key": "turn-0/step-9",
+   "decisions": 21,
+   "frame_index": 9,
+   "frame_size": 17,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    false,
+    null,
+    null
+   ]
+  },
+  "multi_turn_long_context_18": {
+   "decision_key": "turn-1/step-0",
+   "decisions": 41,
+   "frame_index": 17,
+   "frame_size": 41,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    true,
+    false
+   ]
+  },
+  "multi_turn_long_context_180": {
+   "decision_key": "turn-0/step-2",
+   "decisions": 15,
+   "frame_index": 2,
+   "frame_size": 5,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    false,
+    null,
+    null,
+    null,
+    null
+   ]
+  },
+  "multi_turn_long_context_183": {
+   "decision_key": "turn-0/step-10",
+   "decisions": 21,
+   "frame_index": 10,
+   "frame_size": 21,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    false
+   ]
+  },
+  "multi_turn_long_context_184": {
+   "decision_key": "turn-0/step-1",
+   "decisions": 13,
+   "frame_index": 1,
+   "frame_size": 5,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    false,
+    null,
+    null,
+    null,
+    null
+   ]
+  },
+  "multi_turn_long_context_185": {
+   "decision_key": "turn-0/step-1",
+   "decisions": 7,
+   "frame_index": 1,
+   "frame_size": 3,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    false,
+    null,
+    null
+   ]
+  },
+  "multi_turn_long_context_187": {
+   "decision_key": "turn-0/step-0",
+   "decisions": 8,
+   "frame_index": 0,
+   "frame_size": 4,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    false,
+    null,
+    null
+   ]
+  },
+  "multi_turn_long_context_189": {
+   "decision_key": "turn-2/step-1",
+   "decisions": 7,
+   "frame_index": 6,
+   "frame_size": 7,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    true,
+    true
+   ]
+  },
+  "multi_turn_long_context_19": {
+   "decision_key": "turn-1/step-3",
+   "decisions": 27,
+   "frame_index": 5,
+   "frame_size": 6,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    false,
+    null
+   ]
+  },
+  "multi_turn_long_context_190": {
+   "decision_key": "turn-0/step-11",
+   "decisions": 22,
+   "frame_index": 11,
+   "frame_size": 16,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    false,
+    null,
+    null,
+    null
+   ]
+  },
+  "multi_turn_long_context_191": {
+   "decision_key": "turn-0/step-1",
+   "decisions": 10,
+   "frame_index": 1,
+   "frame_size": 8,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    true,
+    true,
+    false,
+    null
+   ]
+  },
+  "multi_turn_long_context_192": {
+   "decision_key": "turn-2/step-0",
+   "decisions": 10,
+   "frame_index": 4,
+   "frame_size": 6,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    true,
+    false,
+    null,
+    null
+   ]
+  },
+  "multi_turn_long_context_193": {
+   "decision_key": "turn-1/step-1",
+   "decisions": 9,
+   "frame_index": 3,
+   "frame_size": 5,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    false,
+    null,
+    null
+   ]
+  },
+  "multi_turn_long_context_194": {
+   "decision_key": "turn-0/step-0",
+   "decisions": 15,
+   "frame_index": 0,
+   "frame_size": 4,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    false,
+    null,
+    null,
+    null,
+    null
+   ]
+  },
+  "multi_turn_long_context_195": {
+   "decision_key": "turn-0/step-1",
+   "decisions": 9,
+   "frame_index": 1,
+   "frame_size": 2,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    false,
+    null,
+    null,
+    null
+   ]
+  },
+  "multi_turn_long_context_196": {
+   "decision_key": "turn-0/step-1",
+   "decisions": 11,
+   "frame_index": 1,
+   "frame_size": 2,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    false,
+    null,
+    null,
+    null,
+    null
+   ]
+  },
+  "multi_turn_long_context_197": {
+   "decision_key": "turn-0/step-0",
+   "decisions": 7,
+   "frame_index": 0,
+   "frame_size": 2,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    false,
+    null,
+    null
+   ]
+  },
+  "multi_turn_long_context_198": {
+   "decision_key": "turn-0/step-1",
+   "decisions": 4,
+   "frame_index": 1,
+   "frame_size": 4,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    false
+   ]
+  },
+  "multi_turn_long_context_199": {
+   "decision_key": "turn-1/step-1",
+   "decisions": 12,
+   "frame_index": 4,
+   "frame_size": 5,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    false,
+    null,
+    null,
+    null
+   ]
+  },
+  "multi_turn_long_context_2": {
+   "decision_key": "turn-2/step-10",
+   "decisions": 46,
+   "frame_index": 21,
+   "frame_size": 25,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    true,
+    false,
+    null
+   ]
+  },
+  "multi_turn_long_context_20": {
+   "decision_key": "turn-0/step-1",
+   "decisions": 12,
+   "frame_index": 1,
+   "frame_size": 6,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    false,
+    null
+   ]
+  },
+  "multi_turn_long_context_21": {
+   "decision_key": "turn-1/step-1",
+   "decisions": 10,
+   "frame_index": 6,
+   "frame_size": 10,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    true,
+    false
+   ]
+  },
+  "multi_turn_long_context_22": {
+   "decision_key": "turn-1/step-6",
+   "decisions": 27,
+   "frame_index": 12,
+   "frame_size": 27,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    false
+   ]
+  },
+  "multi_turn_long_context_23": {
+   "decision_key": "turn-1/step-1",
+   "decisions": 13,
+   "frame_index": 4,
+   "frame_size": 13,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    true,
+    false
+   ]
+  },
+  "multi_turn_long_context_24": {
+   "decision_key": "turn-0/step-0",
+   "decisions": 24,
+   "frame_index": 0,
+   "frame_size": 3,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    false,
+    null
+   ]
+  },
+  "multi_turn_long_context_26": {
+   "decision_key": "turn-1/step-15",
+   "decisions": 26,
+   "frame_index": 20,
+   "frame_size": 26,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    false
+   ]
+  },
+  "multi_turn_long_context_27": {
+   "decision_key": "turn-1/step-1",
+   "decisions": 16,
+   "frame_index": 7,
+   "frame_size": 14,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    false,
+    null
+   ]
+  },
+  "multi_turn_long_context_28": {
+   "decision_key": "turn-1/step-6",
+   "decisions": 30,
+   "frame_index": 8,
+   "frame_size": 9,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    false,
+    null
+   ]
+  },
+  "multi_turn_long_context_29": {
+   "decision_key": "turn-0/step-2",
+   "decisions": 7,
+   "frame_index": 2,
+   "frame_size": 5,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    false,
+    null
+   ]
+  },
+  "multi_turn_long_context_30": {
+   "decision_key": "turn-1/step-3",
+   "decisions": 27,
+   "frame_index": 9,
+   "frame_size": 27,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    false
+   ]
+  },
+  "multi_turn_long_context_31": {
+   "decision_key": "turn-0/step-0",
+   "decisions": 21,
+   "frame_index": 0,
+   "frame_size": 21,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    false
+   ]
+  },
+  "multi_turn_long_context_32": {
+   "decision_key": "turn-1/step-1",
+   "decisions": 5,
+   "frame_index": 3,
+   "frame_size": 5,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    false
+   ]
+  },
+  "multi_turn_long_context_33": {
+   "decision_key": "turn-4/step-0",
+   "decisions": 11,
+   "frame_index": 9,
+   "frame_size": 11,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    true,
+    true,
+    true,
+    true
+   ]
+  },
+  "multi_turn_long_context_34": {
+   "decision_key": "turn-1/step-1",
+   "decisions": 10,
+   "frame_index": 3,
+   "frame_size": 10,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    false
+   ]
+  },
+  "multi_turn_long_context_35": {
+   "decision_key": "turn-0/step-3",
+   "decisions": 16,
+   "frame_index": 3,
+   "frame_size": 4,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    false,
+    null,
+    null
+   ]
+  },
+  "multi_turn_long_context_36": {
+   "decision_key": "turn-0/step-4",
+   "decisions": 21,
+   "frame_index": 4,
+   "frame_size": 21,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    false
+   ]
+  },
+  "multi_turn_long_context_38": {
+   "decision_key": "turn-0/step-1",
+   "decisions": 9,
+   "frame_index": 1,
+   "frame_size": 7,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    false,
+    null
+   ]
+  },
+  "multi_turn_long_context_4": {
+   "decision_key": "turn-0/step-0",
+   "decisions": 24,
+   "frame_index": 0,
+   "frame_size": 24,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    false
+   ]
+  },
+  "multi_turn_long_context_40": {
+   "decision_key": "turn-1/step-8",
+   "decisions": 23,
+   "frame_index": 10,
+   "frame_size": 23,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    false
+   ]
+  },
+  "multi_turn_long_context_41": {
+   "decision_key": "turn-0/step-12",
+   "decisions": 21,
+   "frame_index": 12,
+   "frame_size": 21,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    false
+   ]
+  },
+  "multi_turn_long_context_42": {
+   "decision_key": "turn-2/step-1",
+   "decisions": 8,
+   "frame_index": 7,
+   "frame_size": 8,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    true,
+    true
+   ]
+  },
+  "multi_turn_long_context_44": {
+   "decision_key": "turn-0/step-0",
+   "decisions": 6,
+   "frame_index": 0,
+   "frame_size": 2,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    false,
+    null,
+    null
+   ]
+  },
+  "multi_turn_long_context_45": {
+   "decision_key": "turn-1/step-11",
+   "decisions": 23,
+   "frame_index": 13,
+   "frame_size": 23,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    false
+   ]
+  },
+  "multi_turn_long_context_46": {
+   "decision_key": "turn-0/step-1",
+   "decisions": 3,
+   "frame_index": 1,
+   "frame_size": 3,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    false
+   ]
+  },
+  "multi_turn_long_context_47": {
+   "decision_key": "turn-0/step-0",
+   "decisions": 4,
+   "frame_index": 0,
+   "frame_size": 1,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    false,
+    null,
+    null
+   ]
+  },
+  "multi_turn_long_context_48": {
+   "decision_key": "turn-0/step-3",
+   "decisions": 21,
+   "frame_index": 3,
+   "frame_size": 21,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true
+   ]
+  },
+  "multi_turn_long_context_49": {
+   "decision_key": "turn-1/step-3",
+   "decisions": 10,
+   "frame_index": 5,
+   "frame_size": 10,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    true,
+    true,
+    false
+   ]
+  },
+  "multi_turn_long_context_5": {
+   "decision_key": "turn-0/step-11",
+   "decisions": 20,
+   "frame_index": 11,
+   "frame_size": 12,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    false,
+    null,
+    null,
+    null
+   ]
+  },
+  "multi_turn_long_context_50": {
+   "decision_key": "turn-0/step-1",
+   "decisions": 2,
+   "frame_index": 1,
+   "frame_size": 2,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true
+   ]
+  },
+  "multi_turn_long_context_52": {
+   "decision_key": "turn-0/step-4",
+   "decisions": 15,
+   "frame_index": 4,
+   "frame_size": 10,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    false,
+    null,
+    null
+   ]
+  },
+  "multi_turn_long_context_53": {
+   "decision_key": "turn-0/step-0",
+   "decisions": 9,
+   "frame_index": 0,
+   "frame_size": 4,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    false,
+    null,
+    null
+   ]
+  },
+  "multi_turn_long_context_54": {
+   "decision_key": "turn-0/step-0",
+   "decisions": 5,
+   "frame_index": 0,
+   "frame_size": 2,
+   "status": "sampled",
+   "terminated_turn": 1,
+   "turn_labels": [
+    false,
+    null,
+    null
+   ]
+  },
+  "multi_turn_long_context_57": {
+   "decision_key": "turn-0/step-2",
+   "decisions": 6,
+   "frame_index": 2,
+   "frame_size": 6,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    false
+   ]
+  },
+  "multi_turn_long_context_58": {
+   "decision_key": "turn-1/step-3",
+   "decisions": 19,
+   "frame_index": 7,
+   "frame_size": 8,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    false,
+    null,
+    null
+   ]
+  },
+  "multi_turn_long_context_6": {
+   "decision_key": "turn-0/step-0",
+   "decisions": 10,
+   "frame_index": 0,
+   "frame_size": 2,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    false,
+    null,
+    null,
+    null,
+    null
+   ]
+  },
+  "multi_turn_long_context_60": {
+   "decision_key": "turn-0/step-10",
+   "decisions": 20,
+   "frame_index": 10,
+   "frame_size": 12,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    false,
+    null,
+    null,
+    null,
+    null
+   ]
+  },
+  "multi_turn_long_context_61": {
+   "decision_key": "turn-0/step-5",
+   "decisions": 21,
+   "frame_index": 5,
+   "frame_size": 21,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true
+   ]
+  },
+  "multi_turn_long_context_62": {
+   "decision_key": "turn-0/step-2",
+   "decisions": 9,
+   "frame_index": 2,
+   "frame_size": 3,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    false,
+    null,
+    null,
+    null
+   ]
+  },
+  "multi_turn_long_context_63": {
+   "decision_key": "turn-1/step-0",
+   "decisions": 8,
+   "frame_index": 2,
+   "frame_size": 4,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    false,
+    null
+   ]
+  },
+  "multi_turn_long_context_64": {
+   "decision_key": "turn-0/step-0",
+   "decisions": 5,
+   "frame_index": 0,
+   "frame_size": 3,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    false,
+    null
+   ]
+  },
+  "multi_turn_long_context_65": {
+   "decision_key": "turn-0/step-1",
+   "decisions": 6,
+   "frame_index": 1,
+   "frame_size": 3,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    false,
+    null
+   ]
+  },
+  "multi_turn_long_context_67": {
+   "decision_key": "turn-0/step-1",
+   "decisions": 6,
+   "frame_index": 1,
+   "frame_size": 2,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    false,
+    null,
+    null,
+    null
+   ]
+  },
+  "multi_turn_long_context_69": {
+   "decision_key": "turn-0/step-0",
+   "decisions": 4,
+   "frame_index": 0,
+   "frame_size": 2,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    false,
+    null
+   ]
+  },
+  "multi_turn_long_context_7": {
+   "decision_key": "turn-0/step-1",
+   "decisions": 7,
+   "frame_index": 1,
+   "frame_size": 7,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    true,
+    true
+   ]
+  },
+  "multi_turn_long_context_70": {
+   "decision_key": "turn-0/step-6",
+   "decisions": 17,
+   "frame_index": 6,
+   "frame_size": 15,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    false,
+    null
+   ]
+  },
+  "multi_turn_long_context_71": {
+   "decision_key": "turn-0/step-0",
+   "decisions": 9,
+   "frame_index": 0,
+   "frame_size": 2,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    false,
+    null,
+    null,
+    null,
+    null
+   ]
+  },
+  "multi_turn_long_context_72": {
+   "decision_key": "turn-1/step-19",
+   "decisions": 24,
+   "frame_index": 22,
+   "frame_size": 24,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    false
+   ]
+  },
+  "multi_turn_long_context_73": {
+   "decision_key": "turn-0/step-2",
+   "decisions": 25,
+   "frame_index": 2,
+   "frame_size": 4,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    false,
+    null
+   ]
+  },
+  "multi_turn_long_context_74": {
+   "decision_key": "turn-0/step-1",
+   "decisions": 24,
+   "frame_index": 1,
+   "frame_size": 3,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    false,
+    null
+   ]
+  },
+  "multi_turn_long_context_76": {
+   "decision_key": "turn-0/step-1",
+   "decisions": 5,
+   "frame_index": 1,
+   "frame_size": 2,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    false,
+    null
+   ]
+  },
+  "multi_turn_long_context_77": {
+   "decision_key": "turn-0/step-12",
+   "decisions": 21,
+   "frame_index": 12,
+   "frame_size": 21,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    false
+   ]
+  },
+  "multi_turn_long_context_78": {
+   "decision_key": "turn-0/step-0",
+   "decisions": 4,
+   "frame_index": 0,
+   "frame_size": 2,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    false,
+    null
+   ]
+  },
+  "multi_turn_long_context_79": {
+   "decision_key": "turn-1/step-3",
+   "decisions": 12,
+   "frame_index": 5,
+   "frame_size": 12,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    true,
+    true
+   ]
+  },
+  "multi_turn_long_context_8": {
+   "decision_key": "turn-0/step-1",
+   "decisions": 6,
+   "frame_index": 1,
+   "frame_size": 2,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    false,
+    null,
+    null,
+    null
+   ]
+  },
+  "multi_turn_long_context_80": {
+   "decision_key": "turn-0/step-2",
+   "decisions": 17,
+   "frame_index": 2,
+   "frame_size": 8,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    true,
+    false,
+    null,
+    null
+   ]
+  },
+  "multi_turn_long_context_82": {
+   "decision_key": "turn-0/step-0",
+   "decisions": 17,
+   "frame_index": 0,
+   "frame_size": 4,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    false,
+    null,
+    null
+   ]
+  },
+  "multi_turn_long_context_83": {
+   "decision_key": "turn-0/step-0",
+   "decisions": 6,
+   "frame_index": 0,
+   "frame_size": 2,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    false,
+    null,
+    null
+   ]
+  },
+  "multi_turn_long_context_84": {
+   "decision_key": "turn-0/step-1",
+   "decisions": 4,
+   "frame_index": 1,
+   "frame_size": 2,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    false,
+    null
+   ]
+  },
+  "multi_turn_long_context_85": {
+   "decision_key": "turn-0/step-0",
+   "decisions": 7,
+   "frame_index": 0,
+   "frame_size": 5,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    false,
+    null
+   ]
+  },
+  "multi_turn_long_context_86": {
+   "decision_key": "turn-0/step-0",
+   "decisions": 7,
+   "frame_index": 0,
+   "frame_size": 2,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    false,
+    null,
+    null
+   ]
+  },
+  "multi_turn_long_context_87": {
+   "decision_key": "turn-2/step-0",
+   "decisions": 25,
+   "frame_index": 4,
+   "frame_size": 25,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    true,
+    true
+   ]
+  },
+  "multi_turn_long_context_88": {
+   "decision_key": "turn-1/step-11",
+   "decisions": 23,
+   "frame_index": 13,
+   "frame_size": 23,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    true
+   ]
+  },
+  "multi_turn_long_context_89": {
+   "decision_key": "turn-1/step-0",
+   "decisions": 14,
+   "frame_index": 4,
+   "frame_size": 7,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    false,
+    null,
+    null
+   ]
+  },
+  "multi_turn_long_context_9": {
+   "decision_key": "turn-0/step-1",
+   "decisions": 23,
+   "frame_index": 1,
+   "frame_size": 2,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    false,
+    null
+   ]
+  },
+  "multi_turn_long_context_91": {
+   "decision_key": "turn-0/step-3",
+   "decisions": 8,
+   "frame_index": 3,
+   "frame_size": 4,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    false,
+    null
+   ]
+  },
+  "multi_turn_long_context_92": {
+   "decision_key": "turn-1/step-0",
+   "decisions": 16,
+   "frame_index": 2,
+   "frame_size": 4,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    false,
+    null,
+    null,
+    null
+   ]
+  },
+  "multi_turn_long_context_93": {
+   "decision_key": "turn-0/step-1",
+   "decisions": 5,
+   "frame_index": 1,
+   "frame_size": 4,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    false,
+    null
+   ]
+  },
+  "multi_turn_long_context_94": {
+   "decision_key": "turn-0/step-1",
+   "decisions": 6,
+   "frame_index": 1,
+   "frame_size": 2,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    false,
+    null,
+    null
+   ]
+  },
+  "multi_turn_long_context_95": {
+   "decision_key": "turn-0/step-1",
+   "decisions": 10,
+   "frame_index": 1,
+   "frame_size": 2,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    false,
+    null,
+    null,
+    null,
+    null
+   ]
+  },
+  "multi_turn_long_context_96": {
+   "decision_key": "turn-0/step-1",
+   "decisions": 6,
+   "frame_index": 1,
+   "frame_size": 2,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    false,
+    null
+   ]
+  },
+  "multi_turn_long_context_97": {
+   "decision_key": "turn-0/step-0",
+   "decisions": 21,
+   "frame_index": 0,
+   "frame_size": 6,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    true,
+    false,
+    null,
+    null,
+    null,
+    null
+   ]
+  },
+  "multi_turn_long_context_98": {
+   "decision_key": "turn-0/step-0",
+   "decisions": 4,
+   "frame_index": 0,
+   "frame_size": 2,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    false,
+    null,
+    null
+   ]
+  },
+  "multi_turn_long_context_99": {
+   "decision_key": "turn-0/step-1",
+   "decisions": 24,
+   "frame_index": 1,
+   "frame_size": 3,
+   "status": "sampled",
+   "terminated_turn": null,
+   "turn_labels": [
+    false,
+    null
+   ]
+  }
+ }
+}

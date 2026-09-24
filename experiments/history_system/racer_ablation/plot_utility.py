@@ -23,6 +23,8 @@ def main(argv):
     x = curves["x"]
     fig, ax = plt.subplots(figsize=(3.4, 2.5))
     for name, (color, style, label) in STYLE.items():
+        if name not in curves:
+            continue
         ax.fill_between(bands["grid"], [100 * v for v in bands[name]["lo"]],
                         [100 * v for v in bands[name]["hi"]], color=color, alpha=0.12, linewidth=0)
         ax.plot(x, [100 * value for value in curves[name]], color=color, linestyle=style,

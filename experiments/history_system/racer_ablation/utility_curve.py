@@ -107,7 +107,8 @@ def main(argv=None):
     args = parser.parse_args(argv)
     scorer = TurnScorer(args.bfcl_dir)
     states = json.load(open(args.states, encoding="utf-8"))["states"]
-    light = json.load(open(args.light, encoding="utf-8"))
+    # "-" defers the light detector (its refit needs the T02 labels file).
+    light = None if args.light == "-" else json.load(open(args.light, encoding="utf-8"))
     m2_rows, _ = task_rows(args.m2, CELLS["M2"])
     probe_rows, probe_failures = task_rows(args.probe, CELLS["P"])
     artifact = None
@@ -151,7 +152,8 @@ def main(argv=None):
         entry = {"task_id": task, "decision_key": target, "turn": turn,
                  "y0": label0, "yr": label_r, "full_score": decision["risk_score"],
                  "full_score_offline": offline.score if offline.available else None,
-                 "light_score": light_score(light, light_vector(context)),
+                 "light_score": (light_score(light, light_vector(context))
+                                 if light is not None else None),
                  "risk_triggered_online": decision["risk_triggered"],
                  "repack_feasible": decision["repack_feasible"],
                  "extra_generation": decision["regeneration_completed"],
@@ -179,18 +181,19 @@ def main(argv=None):
                        and row.get("full_score_offline") is not None), default=None)}}
     if n:
         delta = [row["delta"] for row in pool]
-        orders = {"full": [row["full_score"] for row in pool],
-                  "light": [row["light_score"] for row in pool]}
+        orders = {"full": [row["full_score"] for row in pool]}
+        if light is not None:
+            orders["light"] = [row["light_score"] for row in pool]
         curves = {name: (curve(delta, scores) / n).tolist() for name, scores in orders.items()}
         curves["random_expected"] = [k * sum(delta) / (len(pool) * n) if pool else 0.0
                                      for k in range(len(pool) + 1)]
         rng = np.random.default_rng(BOOTSTRAP_SEED)
-        bands = {name: [] for name in ("full", "light", "random_expected")}
+        bands = {name: [] for name in (*orders, "random_expected")}
         for _ in range(BOOTSTRAP):
             sample = [scored[i] for i in rng.integers(0, n, n)]
             sub = [row for row in sample if row["extra_generation"]]
             d = [row["delta"] for row in sub]
-            for name in ("full", "light"):
+            for name in orders:
                 key = "full_score" if name == "full" else "light_score"
                 bands[name].append(at_grid(curve(d, [row[key] for row in sub]), n))
             bands["random_expected"].append(at_grid(
@@ -207,7 +210,7 @@ def main(argv=None):
         risk_labels = [int(not row["y0"]) for row in scored]
         result["supplement_auroc_ap_on_y0_failure"] = {
             name: dict(zip(("auroc", "ap"), auc_ap([row[key] for row in scored], risk_labels)))
-            for name, key in (("full", "full_score"), ("light", "light_score"))}
+            for name, key in (("full", "full_score"), ("light", "light_score")) if name in orders}
         result["n"], result["pool"] = n, len(pool)
         result["always_endpoint"] = sum(delta) / n
     write_json(args.out, result)
