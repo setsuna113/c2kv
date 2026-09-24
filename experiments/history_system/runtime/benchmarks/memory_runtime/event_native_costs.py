@@ -114,7 +114,8 @@ def _racer_served_usage(
     if stats is None or "racer_served_usage" not in stats:
         return None
     backend = stats.get("racer_backend")
-    if not isinstance(backend, Mapping) or backend.get("schema") != "racer-backend-v1":
+    if not isinstance(backend, Mapping) or backend.get("schema") not in {
+            "racer-backend-v1", "racer-backend-v2"}:
         raise ValueError(f"{label}.generation.stats.racer_backend is invalid")
     raw = stats["racer_served_usage"]
     if not isinstance(raw, Mapping):

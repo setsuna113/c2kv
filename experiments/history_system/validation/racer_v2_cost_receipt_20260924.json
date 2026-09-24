@@ -1,0 +1,26 @@
+{
+  "schema": "c2kv-validation-receipt-v1",
+  "date": "2026-09-24",
+  "subject": "RACER v2 generation receipts in the saved cost summary",
+  "base_revision": "846bd22 (engine b886b41 unchanged)",
+  "incident": {
+    "scheduler_report": "every non-C2KV racer_v2 cell (bare and c1_v2_verified) on SZ and box8 ended its first task with final.json status failed and cost_summary_error ValueError generation_trace[0].generation.stats.racer_backend is invalid, so run_c1 raised Controller finalization failed",
+    "checked_here": [
+      "box8 /workspace/results-v2-eqprobe/closed_loop/bfcl_base__racer_v2_commitkv_bare_b256/native/task_shards/multi_turn_base_0 (copied read-only): the cost error reproduces locally on 846bd22",
+      "box8 /workspace/results-v2-b256-s0/closed_loop/bfcl_long_context__racer_v2_snapkv_c1_v2_verified_b256/native/task_shards/multi_turn_long_context_0 (copied read-only): same error"
+    ],
+    "cause": "event_native_costs._racer_served_usage accepted only schema racer-backend-v1; the generator now reports the racer-backend-v2 receipt (mode, identity, quality_validated)"
+  },
+  "change": "event_native_costs._racer_served_usage accepts racer-backend-v1 and racer-backend-v2 and still rejects any other receipt; the usage, accounting and token-count bindings are unchanged",
+  "replay_on_real_records": {
+    "method": "recompute summarize_event_native_steps from the copied steps.jsonl and attempts.jsonl, write final.json as the server would (status stopped), then run run_c1's journal check, _single_official_row, summarize_task and functional_checks as run_c1.run_task does",
+    "bare_commitkv_bfcl_base": "cost summary 20 decisions; journal 20 started / 20 completed / 0 failed; all required checks true (detector_contract, no_recovery, one_generation_per_decision, racer_accounting, racer_actual_cost, racer_backend_identity, racer_effective_budget, racer_generation_backend, racer_generation_receipts, racer_transactions)",
+    "c1v2_snapkv_bfcl_long": "journal 20/20/0; all required checks true (budget_passed, candidate_decisions, candidate_variant, detector_contract, racer_accounting, racer_actual_cost, racer_backend_identity, racer_effective_budget, racer_generation_backend, racer_generation_receipts, racer_transactions, risk_available, risk_scores, stable_call_ids)",
+    "scope": "the post-server finalization only; paper_task_result writing and cell aggregation were not replayed"
+  },
+  "tests": {
+    "file": "experiments/history_system/runtime/benchmarks/memory_runtime/tests/test_racer_cost_receipt_schema.py",
+    "fixture": "the v2 receipt, usage and accounting of the box8 bare record's turn-0/step-0",
+    "against_846bd22": "the v2 case fails; v1 and the rejection cases pass"
+  }
+}
