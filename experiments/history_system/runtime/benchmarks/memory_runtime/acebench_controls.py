@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from inspect import getattr_static
 from types import MethodType
 from typing import Any
 
@@ -114,6 +115,29 @@ def _validate_ace_request(
     return session_id, decision_key, store, tools, tools_json, message_json
 
 
+def _request_validating_s0_controllers(controller: Any) -> tuple[Any, ...]:
+    """Return every S0 controller that validates requests under ``controller``.
+
+    Wrappers expose their single inner policy through ``base``.  A composition
+    that prepares one request with several S0 branches, such as the C1 v2
+    capacity gate, declares them in ``policy_branches``; each branch receives
+    the same ACE request and must parse ``c2kv_ace_source``.  The static
+    lookup keeps ``__getattr__`` delegation from hiding such a composition.
+    """
+
+    found: list[Any] = []
+    pending = [controller]
+    while pending:
+        node = pending.pop()
+        if getattr_static(node, "policy_branches", None) is not None:
+            pending.extend(reversed(tuple(node.policy_branches)))
+        elif hasattr(node, "base"):
+            pending.append(node.base)
+        elif all(node is not seen for seen in found):
+            found.append(node)
+    return tuple(found)
+
+
 def _add_ace_metadata(prepared: Any) -> Any:
     prepared.metadata["source_profile"] = ACE_SOURCE_VERSION
     prepared.metadata["acebench_events"] = [
@@ -219,12 +243,13 @@ def build_acebench_controller(
             history_view_protocol=history_view_protocol, s0_config=s0_config,
             benchmark="acebench",
         )
-        base = controller
-        while hasattr(base, "base"):
-            base = base.base
-        if not isinstance(base, EventNativeS0Controller):
+        bases = _request_validating_s0_controllers(controller)
+        if not bases or any(
+            not isinstance(base, EventNativeS0Controller) for base in bases
+        ):
             raise TypeError("ACE C1 requires the delivered native S0 controller")
-        base._validate_request = MethodType(_validate_ace_request, base)
+        for base in bases:
+            base._validate_request = MethodType(_validate_ace_request, base)
         return controller
     if view_mode in _ACEBENCH_EXACT_VIEW_MODES:
         return AceEventNativeExactController(

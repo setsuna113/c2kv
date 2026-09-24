@@ -39,6 +39,16 @@ class CapacityGatedSourceAllocator:
             branch._sessions = self._sessions
             branch._owner = self._owner
 
+    @property
+    def policy_branches(self):
+        """Both strategies prepare the same request under this one owner.
+
+        A benchmark adapter that binds its request contract to the configured
+        S0 controller must bind it on every branch, not only the incumbent
+        reached through ``base`` delegation.
+        """
+        return (self.incumbent, self.source_allocator)
+
     def __getattr__(self, name):
         return getattr(self.incumbent, name)
 

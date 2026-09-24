@@ -1,0 +1,34 @@
+{
+  "schema": "c2kv-validation-receipt-v1",
+  "date": "2026-09-24",
+  "subject": "ACEBench c1_v2_verified: the ACE request validator on both branches of the C1 v2 capacity gate",
+  "base_revision": "paper 54749ff (engine unchanged)",
+  "incidents": [
+    {
+      "cells": [
+        "acebench_agent__racer_v2_pyramidkv_c1_v2_verified_b256",
+        "acebench_agent__racer_v2_c2kv_c1_v2_verified_b256",
+        "acebench_agent__racer_v2_h2o_c1_v2_verified_b256"
+      ],
+      "host": "box9 4090 (paper 077559f, engine b886b41)",
+      "error": "PolicyInputError: Targets and privileged request fields are forbidden: ['c2kv_ace_source'], then api_health terminal runner_failed and the whole cell exits",
+      "evidence": "box9 /workspace/results-p2v3b9 and /workspace/results-box9bench-p28 task_shards steps.jsonl (copied read-only)"
+    }
+  ],
+  "cause": "build_acebench_controller binds _validate_ace_request (which parses the receipt-backed c2kv_ace_source) to the single S0 controller reached through base delegation. Since 1b32ffc, build_c1_v2 wraps two S0 branches in CapacityGatedSourceAllocator; base delegation reaches only the incumbent, so the source-allocation branch kept the stock validator, which only allows session_id, decision_key, messages and tools. The first decision where the incumbent raised CapacityInfeasible failed validation in the source branch, and a PolicyInputError is terminal instead of task-local.",
+  "change": "CapacityGatedSourceAllocator.policy_branches declares (incumbent, source_allocator); build_acebench_controller binds the ACE validator on every S0 leaf found through base and declared branches (static lookup, so __getattr__ delegation cannot hide the gate)",
+  "unchanged": [
+    "Controller graphs without the gate resolve to the same single leaf as before.",
+    "The ACE validator still rejects every field other than session_id, decision_key, messages, tools and c2kv_ace_source (targets, gold answers and official task ids are rejected on both branches).",
+    "tau2, AppWorld and ToolSandbox use the openai-single-task-v1 source profile, whose runner payload carries only the standard fields; box9 racer_v2_c2kv_c1_v2_verified_b256 steps for them (97, 100, 7) have no such error.",
+    "v1, off and bare arms do not build the gate."
+  ],
+  "after_fix": "an ACE decision whose incumbent cannot fit now runs the same source-allocation rescue as BFCL; when neither branch fits it is a task-local CapacityInfeasible",
+  "tests": {
+    "file": "experiments/history_system/runtime/benchmarks/memory_runtime/tests/test_acebench_capacity_source_gate.py (18 new; 12 fail on 077559f, the 6 guard tests pass on both)",
+    "real_record": "the failed box9 c2kv decision's ACE source and committed actions copied verbatim (prompts and observations are stand-ins because the step log does not store them)",
+    "suites": "benchmarks, runtime memory_runtime and delivery suites have the same failure sets as 54749ff"
+  },
+  "rerun": "every ACEBench c1_v2_verified cell run on 1b32ffc..54749ff (their decisions that reached the source branch failed)",
+  "not_covered": "ACE regeneration and recovery repack on the source branch are not exercised by the tests"
+}
