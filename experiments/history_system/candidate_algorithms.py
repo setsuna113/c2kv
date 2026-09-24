@@ -28,11 +28,38 @@ INITIAL_VIEW_VERSION = "c2kv-initial-view-composition-v1"
 INITIAL_VIEW_POLICY_VERSION = "c2kv-static-initial-view-v1"
 STATIC_EXTENSION_VARIANTS = ("static_verified", "static_action_ledger", "static_verified_v2")
 STATIC_EXTENSION_VERSION = "c2kv-static-extension-v1"
-C1_V2_VARIANTS = ("c1_v2_verified",)
+# RACER mechanism ablations share the C1 v2 initial allocation and detector.
+C1_V2_ABLATION_VARIANTS = ("c1_v2_core", "c1_v2_selfrev", "c1_v2_nodraftq", "c1_v2_probe")
+C1_V2_VARIANTS = ("c1_v2_verified",) + C1_V2_ABLATION_VARIANTS
 C1_V2_VERSION = "c2kv-c1-v2-verified-v1"
 ALL_VARIANTS = (VARIANTS + REPAIR_VARIANTS + GOAL_VARIANTS + VERIFIED_VARIANTS
                 + INITIAL_VIEW_VARIANTS + STATIC_EXTENSION_VARIANTS + C1_V2_VARIANTS)
 RATIO = 8
+
+
+SELF_REVISION_PROMPT = (
+    "Review the draft below using only the context already provided. Revise it if needed, "
+    "then return the final response or tool calls in the required format.")
+PROBE_TARGETS_ENV = "C2KV_RACER_PROBE_TARGETS"
+
+
+def c1_v2_ablation_fields(variant: str) -> dict[str, Any]:
+    """Frozen identity of each RACER mechanism ablation (empty for the full system)."""
+    if variant == "c1_v2_verified":
+        return {}
+    fields = {
+        "c1_v2_core": {"argument_correction": False},
+        "c1_v2_selfrev": {"argument_correction": False,
+                          "post_draft_action": "evidence_free_self_revision",
+                          "self_revision_prompt": SELF_REVISION_PROMPT},
+        "c1_v2_nodraftq": {"argument_correction": False,
+                           "retrieval_query": "current_request_plus_latest_complete_observation"},
+        "c1_v2_probe": {"argument_correction": False,
+                        "probe_gate": "forced_at_target_closed_elsewhere"},
+    }
+    if variant not in fields:
+        raise ValueError("unknown C1 v2 candidate")
+    return {"ablation": {"variant": variant, **fields[variant]}}
 
 
 def c1_v2_fields(variant: str) -> dict[str, Any]:
@@ -49,7 +76,29 @@ def c1_v2_fields(variant: str) -> dict[str, Any]:
         "recovery_backbone": "t02_complete_event",
         "completion_review": False,
         "proof_registry_version": PROOF_REGISTRY_VERSION,
+        **c1_v2_ablation_fields(variant),
     }
+
+
+def probe_target_fields(variant: str) -> dict[str, Any]:
+    """Frozen task -> decision targets for the frozen-state probe, read from one file."""
+    if variant != "c1_v2_probe":
+        return {}
+    import os
+    path = os.environ.get(PROBE_TARGETS_ENV)
+    if not path:
+        raise ValueError(f"c1_v2_probe requires {PROBE_TARGETS_ENV}")
+    raw = Path(path).read_bytes()
+    document = json.loads(raw)
+    targets = document.get("targets") if isinstance(document, Mapping) else None
+    if (not isinstance(targets, Mapping) or not targets or not all(
+            isinstance(key, str) and isinstance(value, str) for key, value in targets.items())):
+        raise ValueError("probe targets must map task ids to decision keys")
+    targets = dict(sorted(targets.items()))
+    return {"probe_targets": targets,
+            "probe_targets_sha256": hashlib.sha256(json.dumps(
+                targets, sort_keys=True, separators=(",", ":")).encode()).hexdigest(),
+            "probe_targets_file_sha256": hashlib.sha256(raw).hexdigest()}
 
 
 def initial_view_fields(variant: str) -> dict[str, Any]:
@@ -151,6 +200,7 @@ def build_profile(
            if variant in VERIFIED_VARIANTS else {}),
         **initial_view_fields(variant),
         **(c1_v2_fields(variant) if variant in C1_V2_VARIANTS else {}),
+        **probe_target_fields(variant),
     }
     profile = {
         "schema": "c2kv-candidate-delivery-profile-v1",
@@ -192,4 +242,7 @@ def build_profile(
         profile["schema"] = "c2kv-candidate-delivery-profile-v7"
         profile["selection_protocol"] = C1_V2_VERSION
         profile.update(c1_v2_fields(variant))
+        for key in ("probe_targets_sha256", "probe_targets_file_sha256"):
+            if key in controller["candidate_algorithm"]:
+                profile[key] = controller["candidate_algorithm"][key]
     return controller, profile

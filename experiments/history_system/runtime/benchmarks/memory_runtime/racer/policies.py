@@ -32,8 +32,8 @@ def build_controller(tokenizer, *, config, packing, policy, model_context, bench
         if candidate.get("variant") != backend.policy:
             raise ValueError("RACER backend policy differs from the configured policy identity")
         if backend.policy in C1_V2_VARIANTS:
-            from ..candidate_algorithms.c1_v2 import C1V2VerifiedController
-            controller = C1V2VerifiedController(base, candidate)
+            from ..candidate_algorithms.c1_v2 import c1_v2_controller_class
+            controller = c1_v2_controller_class(backend.policy)(base, candidate)
         elif backend.policy in STATIC_EXTENSION_VARIANTS:
             from ..candidate_algorithms.static_extensions import (
                 StaticVerifiedController, StaticVerifiedV2Controller, StaticActionLedgerController)

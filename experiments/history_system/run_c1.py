@@ -1006,6 +1006,9 @@ def functional_checks(method: str, detector: str, telemetry: Mapping[str, Any],
     if racer_recovery_off or repair_candidate:
         detector_contract = (telemetry.get("risk_detector_scores", 0) == 0
                              and telemetry.get("risk_detector_unavailable", 0) == 0)
+    elif candidate_algorithm == "c1_v2_probe":
+        # The probe scores only its frozen target decision, which a task may never reach.
+        detector_contract = telemetry.get("risk_detector_unavailable", 0) == 0
     elif candidate_algorithm is not None:
         detector_contract = (telemetry.get("risk_detector_scores", 0) > 0
                              and telemetry.get("risk_detector_unavailable", 0) == 0)
@@ -1241,7 +1244,8 @@ def build_parser() -> argparse.ArgumentParser:
                  "goal_verified", "pending_verified", "goal_static", "pending_static",
                  "goal_verified_static", "pending_verified_static",
                  "static_verified", "static_action_ledger", "static_verified_v2",
-                 "c1_v2_verified"),
+                 "c1_v2_verified", "c1_v2_core", "c1_v2_selfrev", "c1_v2_nodraftq",
+                 "c1_v2_probe"),
         default=None,
     )
     parser.add_argument("--selector-artifact", type=Path,

@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from experiments.history_system.candidate_algorithms import (
-    C1_V2_VARIANTS, C1_V2_VERSION, c1_v2_fields,
+    C1_V2_VARIANTS, C1_V2_VERSION, c1_v2_fields, PROBE_TARGETS_ENV, probe_target_fields,
     INITIAL_VIEW_VARIANTS, INITIAL_VIEW_VERSION, initial_view_fields,
     STATIC_EXTENSION_VARIANTS, STATIC_EXTENSION_VERSION,
 )
@@ -204,6 +204,11 @@ def test_candidate_delivery_uses_ratio8_and_bound_artifact(tmp_path, monkeypatch
                             hashlib.sha256(artifact.read_bytes()).hexdigest())
         monkeypatch.setattr(delivery, "bind_risk_artifact",
                             lambda source, path: (dict(source, bound=True), {"checkpoint": str(path)}))
+        if variant == "c1_v2_probe":
+            targets = tmp_path / "probe_targets.json"
+            targets.write_text(json.dumps({"targets": {"multi_turn_long_context_7": "turn-1/step-2"}}),
+                               encoding="utf-8")
+            monkeypatch.setenv(PROBE_TARGETS_ENV, str(targets))
         controller, profile = delivery.build_profile(args)
         assert controller == {
             "view_mode": "native_s0",
@@ -215,7 +220,8 @@ def test_candidate_delivery_uses_ratio8_and_bound_artifact(tmp_path, monkeypatch
             **({"proof_registry_version": "verified-binding-rules-v1"}
                if variant in VERIFIED_VARIANTS else {}),
             **initial_view_fields(variant),
-            **(c1_v2_fields(variant) if variant in C1_V2_VARIANTS else {})}}
+            **(c1_v2_fields(variant) if variant in C1_V2_VARIANTS else {}),
+            **probe_target_fields(variant)}}
         assert profile["candidate_algorithm"] == variant
         assert profile["schema"] == ("c2kv-candidate-delivery-profile-v6"
                                      if variant in STATIC_EXTENSION_VARIANTS else

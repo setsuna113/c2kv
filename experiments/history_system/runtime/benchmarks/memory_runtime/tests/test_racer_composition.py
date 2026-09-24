@@ -103,6 +103,9 @@ def test_every_existing_policy_constructs_and_keeps_its_identity(monkeypatch, va
         candidate.update(extension_fields(variant))
     elif variant in C1_V2_VARIANTS:
         candidate.update(c1_v2_fields(variant))
+        if variant == "c1_v2_probe":
+            from benchmarks.memory_runtime.tests.test_racer_ablation_variants import targets_fields
+            candidate.update(targets_fields({"task": "turn-0/step-0"}))
     cfg = {"schema": "racer-backend-v1", **asdict(config(backend, variant))}
     geometry = packing()
     geometry["ratios"] = [8]

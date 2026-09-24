@@ -86,3 +86,12 @@ class VerifiedCommitPolicy:
         finalized = (output, receipt)
         state.finalized = (signature, copy.deepcopy(finalized))
         return finalized
+
+
+class CoreCommitPolicy(VerifiedCommitPolicy):
+    """Keep selected-generation validation; never propose an argument correction."""
+
+    def inspect(self, context, recovery):
+        receipt = {"version": PROOF_REGISTRY_VERSION, "status": "argument_correction_disabled_core",
+                   "additional_generations": 0, "additional_model_workspace_tokens": 0}
+        return VerifiedCommitState(context, False, None, receipt)

@@ -79,6 +79,27 @@ class CandidateRecoveryController(EventNativeRecoveryController):
                                token_counter=lambda rows: self.base._count(rows, ()),
                                token_budget=budget)
 
+    def _risk_gate(self, prepared, draft_tool_calls, draft_text, parse_error, decision):
+        context = context_from_prepared(prepared, draft_tool_calls, draft_text, parse_error)
+        prediction = self.risk_model.predict_risk(context)
+        decision["selection"] = {
+            "selector": "risk", "score_semantics": "current_turn_failure_risk",
+            "available": prediction.available, "score": prediction.score,
+            "reason": prediction.reason, "selected_ids": [],
+        }
+        if not prediction.available or prediction.score is None:
+            raise PolicyInputError("Candidate T02 risk unavailable: " + str(prediction.reason))
+        triggered = prediction.score > self.threshold
+        decision["gate"] = {"type": "risk", "score": prediction.score,
+                            "threshold": self.threshold, "triggered": triggered,
+                            "reason": "risk_triggered" if triggered else "risk_not_above_threshold"}
+        return decision["gate"]
+
+    def _select_source(self, prepared, draft_tool_calls, draft_text):
+        return select_source_event(prepared, draft_tool_calls, draft_text=draft_text,
+            include_latest_complete_observation=True, explicit_revision_abstain=False,
+            allow_empty_draft_query=True)
+
     def reconsider(self, prepared, draft_tool_calls, *, draft_text, parse_error=None):
         key = (prepared._store.session_id, prepared.metadata["decision_key"])
         if self._prepared.get(key) is not prepared:
@@ -116,19 +137,8 @@ class CandidateRecoveryController(EventNativeRecoveryController):
 
         if decision["decision_index"] + self._recovery_counts.get(key[0], 0) + 1 > self.required_task_generation_limit:
             return finish("shared_task_generation_limit")
-        context = context_from_prepared(prepared, draft_tool_calls, draft_text, parse_error)
-        prediction = self.risk_model.predict_risk(context)
-        decision["selection"] = {
-            "selector": "risk", "score_semantics": "current_turn_failure_risk",
-            "available": prediction.available, "score": prediction.score,
-            "reason": prediction.reason, "selected_ids": [],
-        }
-        if not prediction.available or prediction.score is None:
-            raise PolicyInputError("Candidate T02 risk unavailable: " + str(prediction.reason))
-        triggered = prediction.score > self.threshold
-        decision["gate"] = {"type": "risk", "score": prediction.score,
-                            "threshold": self.threshold, "triggered": triggered,
-                            "reason": "risk_triggered" if triggered else "risk_not_above_threshold"}
+        gate = self._risk_gate(prepared, draft_tool_calls, draft_text, parse_error, decision)
+        triggered = gate["triggered"]
         review_reason, review_key, goal, records = (None, None, None, None)
         if self.variant == "goal_rescue" and self.completion_review_enabled:
             review_reason, review_key, goal, records = self._goal_review_request(
@@ -152,10 +162,8 @@ class CandidateRecoveryController(EventNativeRecoveryController):
                     decision["goal_review"]["status"] = "admitted"
                     return finish(review_reason, measure, metadata)
         if not triggered:
-            return finish("risk_not_above_threshold")
-        _, source = select_source_event(prepared, draft_tool_calls, draft_text=draft_text,
-            include_latest_complete_observation=True, explicit_revision_abstain=False,
-            allow_empty_draft_query=True)
+            return finish(gate["reason"])
+        _, source = self._select_source(prepared, draft_tool_calls, draft_text)
         decision["source"] = source
         trials = []
         for candidate in source["ranked_candidate_event_ids"]:

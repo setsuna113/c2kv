@@ -153,6 +153,9 @@ def test_public_factory_keeps_each_configured_initial_policy_when_recovery_is_of
         candidate.update(extension_fields(variant))
     elif variant in C1_V2_VARIANTS:
         candidate.update(c1_v2_fields(variant))
+        if variant == "c1_v2_probe":
+            from benchmarks.memory_runtime.tests.test_racer_ablation_variants import targets_fields
+            candidate.update(targets_fields({"task": "turn-0/step-0"}))
     results = []
     for mode in ("on", "protected_off"):
         backend = {"schema": "racer-backend-v2", "backend": backend_name, "policy": variant,
