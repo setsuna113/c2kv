@@ -95,6 +95,9 @@ def memory_to_dict(memory: PackedMemory) -> dict[str, Any]:
     schema = ('a-event-native-packed-input-v2' if isinstance(memory.view, RuntimeMemoryView)
               else 'a-event-native-packed-input-v1')
     value = {'schema': schema, **asdict(memory)}
+    if not getattr(memory, 'protection_scope_id', ''):
+        for field in ('protection_units', 'protection_scope_id', 'protection_source_events'):
+            value.pop(field, None)
     if not memory.raw_tool_segments:
         value.pop('raw_tool_segments')
     if not memory.tool_gist_segments:

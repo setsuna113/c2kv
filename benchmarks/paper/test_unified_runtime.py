@@ -278,18 +278,19 @@ def test_native_extra_ready_binds_exact_racer_backend_and_controller(tmp_path, b
         native_extra.validate_ready_manifest(config, benchmark, "task_1", path, controller)
 
 
-def test_native_extra_ready_binds_v3_protection_identity(tmp_path):
+@pytest.mark.parametrize("version", ["v3", "v4"])
+def test_native_extra_ready_binds_protection_identity(tmp_path, version):
     config = with_racer_methods(resolve_unified_runtime_methods(unified_config()),
                                 ("agentkv",), ("c1_v2_verified",), 384,
-                                protections=("off", "on"))
-    config["native_arm"] = "racer_v3_agentkv_c1_v2_verified_protection_off_b384"
+                                protections=("off", "on"), schema_version=version)
+    config["native_arm"] = f"racer_{version}_agentkv_c1_v2_verified_protection_off_b384"
     identity = native_extra.arm_identity(config)
     racer = identity["racer_backend"]
     controller = tmp_path / "controller.json"
     controller_data = {"racer_backend": racer,
                        "candidate_algorithm": {"variant": "c1_v2_verified"}}
     controller.write_text(json.dumps(controller_data), encoding="utf-8")
-    receipt_identity = "racer:v3:agentkv:c1_v2_verified:protection_off:b384"
+    receipt_identity = f"racer:{version}:agentkv:c1_v2_verified:protection_off:b384"
     ready = {
         "schema": "a-event-native-server-v1", "status": "ready",
         "benchmark": "tau2", "source_profile": native_extra.BENCHMARKS["tau2"][1],

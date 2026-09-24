@@ -955,15 +955,11 @@ for _method in ("h2o", "snapkv_persistent", "pyramidkv"):
 
 def get_arm(name: str) -> Arm:
     from benchmarks.paper.racer_matrix import (
-        is_racer_arm, parse_racer_arm_identity, resolve_racer_backend)
+        is_racer_arm, parse_racer_arm_identity, resolve_racer_arm_backend)
 
     if is_racer_arm(name):
         backend, policy, budget, mode = parse_racer_arm_identity(name)
-        resolved = (resolve_racer_backend(
-            backend, policy, budget,
-            extra_protection=mode.removeprefix("protection_"))
-            if mode is not None and mode.startswith("protection_") else
-            resolve_racer_backend(backend, policy, budget, mode=mode))
+        resolved = resolve_racer_arm_backend(name)
         arm = Arm(
             name=name,
             compress_history=backend == "c2kv",

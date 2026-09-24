@@ -244,6 +244,7 @@ class GPRecoveryController(EventNativeRecoveryController):
         catalog = build_catalog(prepared._store, self.tokenizer, self.gp["U"])
         eligible = set(prepared.metadata["eligible_extraction"]["eligible_event_ids"])
         cancelled = set(prepared.metadata.get("revision_cancelled_event_ids") or ())
+        cancelled.update(prepared.metadata.get("native_protection_full_event_ids") or ())
         candidates = self._not_raw_visible(
             [unit for unit in catalog if unit.event_id in eligible and unit.event_id not in cancelled], prepared)
         candidates = [unit for unit in candidates if not unit_is_covered(unit, prepared._gp_visible)]

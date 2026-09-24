@@ -41,6 +41,9 @@ class PersistentMemory(PackedMemory):
     retained_history_min_tokens: int = 0
     protection_source_indices: tuple = ()
     protection_event_ids: tuple = ()
+    protection_units: tuple = ()
+    protection_scope_id: str = ""
+    protection_source_events: tuple = ()
 
     def costs(self, ratio):
         result = super().costs(ratio)

@@ -972,17 +972,54 @@ Budget cells use `benchmarks.paper.budget_server`, and the runner checks the
 
 # RACER backend/policy matrix
 
-New paper overlays use `racer-backend-v3`. The `policy` and `extra_protection`
+New paper overlays use `racer-backend-v4`. The `policy` and `extra_protection`
 fields are independent: `--racer-policies c1_v2_verified --racer-protection off,on`
-creates `racer_v3_<backend>_c1_v2_verified_protection_off_bB` and
-`racer_v3_<backend>_c1_v2_verified_protection_on_bB` at the same absolute B.
+creates `racer_v4_<backend>_c1_v2_verified_protection_off_bB` and
+`racer_v4_<backend>_c1_v2_verified_protection_on_bB` at the same absolute B.
 Both cells run the unchanged C1 v2 recovery policy. `policy=off` with
 `extra_protection=off` is the native persistent backend without extra RACER
 protection; C2KV retains its intrinsic S0. The `c2kv_native_r8_bB` bare arm is
-separate. For C2KV, both v3 protection flags preserve that same intrinsic S0,
+separate. For C2KV, both v4 protection flags preserve that same intrinsic S0,
 so this flag pair does not compare distinct initial protection algorithms.
-StreamingLLM already retains the latest B tokens; its extra protection adapter
-has no additional effect when the requested source is older than that window.
+For native KV backends, v4 off follows the original native allocator; v4 on
+protects selected resident units within each backend's existing budget and
+mandatory retention rules. StreamingLLM may exchange recent optional history
+for task pins under v4. No accuracy gain is implied by the CPU checks.
+
+V4 proposes complete source records or contextual sentences and falls back to
+the complete event when a safe fragment cannot be identified. Candidates are
+admitted independently per actual selection row before eviction: an absent or
+oversized unit cannot reject another unit or another head. Original source and
+already rendered recovery copies are alternative KV instances. The draft adds
+no evidence text or prefill pass. An admitted unit takes slots from the native
+optional selection, with overlap charged once and every row's capacity unchanged.
+
+| Backend | V4 rule under the same history budget |
+| --- | --- |
+| H2O | Preserve the recent quota and cumulative scores; replace the lowest-ranked optional positions. |
+| SnapKV | Preserve the recent window and pooled scores; replace the lowest-ranked optional positions. |
+| PyramidKV | Admit each unit independently at each layer/head's realized capacity, retaining that row's recent window and optional ranking. |
+| AgentKV | Preserve sink/recent positions and Stage-Q ranking; reapply the scoped request at subsequent selection checkpoints. |
+| CommitKV | Charge full intersected pages, preserve pending, and veto admitted pages before retirement; retired pages cannot be revived. Recovery copy pages do not create new tool lifecycle events. |
+| StreamingLLM | Exchange the oldest selected recent positions for admitted task units; fill the remainder with recent history. |
+| C2KV | Preserve intrinsic S0; this switch does not define a new C2KV variant. |
+
+Only the selected generation commits a task-scoped lease. New user scope,
+explicit revision/cancellation, and session close release old leases. Recovery
+regeneration runs the same policy without optional selection pins and reports
+coverage of its resulting KV. A still-resident recovery unit requested by a
+subsequent draft can enter ordinary budgeted history when its evidence lease
+expires; other copied evidence expires normally. The receipt distinguishes
+unit admission from full/partial/absent event coverage. Only a complete event
+visible in every row is excluded from RACER source recovery. A fragment or
+one-head success never suppresses that recovery.
+
+Use `--racer-schema v3` for the frozen source-request protection algorithm and
+its original `racer_v3_...` identities. In v3, StreamingLLM retains the latest B
+tokens and reports `native_recent_only` for an older requested source. V3 on
+cells must not be relabeled as v4 resident-unit results.
+
+The historical v3 behavior is recorded below:
 
 With protection off, native backends use the v1 allocator and the same recovery
 policy. With protection on, the allocator names historical source messages

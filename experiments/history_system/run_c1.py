@@ -36,9 +36,11 @@ RACER_CANDIDATE_POLICIES = tuple(ALL_VARIANTS)
 
 def racer_arm_name(backend: str, policy: str, history_budget_tokens: int,
                    mode: str | None = None,
-                   extra_protection: str | None = None) -> str:
+                   extra_protection: str | None = None,
+                   schema: str = "racer-backend-v3") -> str:
     if extra_protection is not None:
-        return (f"racer_v3_{backend}_{policy}_protection_{extra_protection}_"
+        version = "v4" if schema == "racer-backend-v4" else "v3"
+        return (f"racer_{version}_{backend}_{policy}_protection_{extra_protection}_"
                 f"b{history_budget_tokens}")
     if mode is None:
         return f"racer_{backend}_{policy}_b{history_budget_tokens}"
@@ -58,7 +60,7 @@ def validate_racer_backend(value: Mapping[str, Any]) -> dict:
     normalized = asdict(parsed)
     if parsed.schema != "racer-backend-v2":
         normalized.pop("mode")
-    if parsed.schema != "racer-backend-v3":
+    if parsed.schema not in {"racer-backend-v3", "racer-backend-v4"}:
         normalized.pop("extra_protection")
     if dict(value) != normalized:
         raise ValueError("RACER backend config differs from its resolved arm contract")
@@ -434,7 +436,7 @@ def build_profile(args: argparse.Namespace) -> tuple[dict, dict]:
         profile["racer_backend"] = racer
         profile["composition_identity"] = racer_arm_name(
             racer["backend"], racer["policy"], racer["history_budget_tokens"],
-            racer.get("mode"), racer.get("extra_protection"))
+            racer.get("mode"), racer.get("extra_protection"), racer["schema"])
         profile["history_budget_tokens"] = racer["history_budget_tokens"]
         profile["calibration_status"] = racer["detector_calibration"]
         profile.pop("ratio", None)
@@ -491,7 +493,7 @@ def _model_name(args: argparse.Namespace) -> str:
     if racer is not None:
         return racer_arm_name(
             racer["backend"], racer["policy"], racer["history_budget_tokens"],
-            racer.get("mode"), racer.get("extra_protection"))
+            racer.get("mode"), racer.get("extra_protection"), racer["schema"])
     if getattr(args, "candidate_algorithm", None) is not None:
         return f"c2kv_{args.candidate_algorithm}"
     if args.method == "c2kv_native":
@@ -1006,7 +1008,7 @@ def functional_checks(method: str, detector: str, telemetry: Mapping[str, Any],
     racer_recovery_off = (isinstance(racer_backend, Mapping) and (
         (racer_backend.get("schema") == "racer-backend-v2"
          and racer_backend.get("mode") in {"bare", "protected_off"})
-        or (racer_backend.get("schema") == "racer-backend-v3"
+        or (racer_backend.get("schema") in {"racer-backend-v3", "racer-backend-v4"}
             and racer_backend.get("policy") == "off")))
     candidate_initial_ablation = (racer_recovery_off and
                                   racer_backend.get("mode") == "protected_off" and
@@ -1051,10 +1053,11 @@ def functional_checks(method: str, detector: str, telemetry: Mapping[str, Any],
     if racer_backend is not None:
         expected_racer = validate_racer_backend(racer_backend)
         expected_identity = (
-            f"racer:v3:{expected_racer['backend']}:{expected_racer['policy']}:"
+            f"racer:{expected_racer['schema'].rsplit('-', 1)[-1]}:"
+            f"{expected_racer['backend']}:{expected_racer['policy']}:"
             f"protection_{expected_racer['extra_protection']}:"
             f"b{expected_racer['history_budget_tokens']}"
-            if expected_racer["schema"] == "racer-backend-v3" else
+            if expected_racer["schema"] in {"racer-backend-v3", "racer-backend-v4"} else
             f"racer:v2:{expected_racer['backend']}:{expected_racer['mode']}:"
             f"{expected_racer['policy']}:b{expected_racer['history_budget_tokens']}"
             if expected_racer["schema"] == "racer-backend-v2" else
@@ -1383,7 +1386,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--history-budget-tokens", type=int,
                         help="Override both native C2KV history and workspace byte caps using checkpoint KV geometry")
     parser.add_argument("--racer-backend-config", type=_parse_racer_backend,
-                        help="resolved racer-backend-v1/v2/v3 modular composition")
+                        help="resolved racer-backend-v1/v2/v3/v4 modular composition")
     parser.add_argument("--preview", action="store_true", help="Print commands without model, harness, or network calls")
     return parser
 

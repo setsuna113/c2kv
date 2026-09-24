@@ -135,9 +135,10 @@ def validate_ready_manifest(config, benchmark, task, ready_path, controller_path
         raise RuntimeError(f"Native {identity['arm']} loaded a different S0 controller")
     racer = identity.get("racer_backend")
     if racer is not None:
-        identity_name = (f"racer:v3:{racer['backend']}:{racer['policy']}:"
+        identity_name = (f"racer:{racer['schema'].rsplit('-', 1)[-1]}:"
+                         f"{racer['backend']}:{racer['policy']}:"
                          f"protection_{racer['extra_protection']}:b{racer['history_budget_tokens']}"
-                         if racer["schema"] == "racer-backend-v3" else
+                         if racer["schema"] in {"racer-backend-v3", "racer-backend-v4"} else
                          f"racer:v2:{racer['backend']}:{racer['mode']}:{racer['policy']}:"
                          f"b{racer['history_budget_tokens']}"
                          if racer["schema"] == "racer-backend-v2" else

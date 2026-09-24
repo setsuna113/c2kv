@@ -87,6 +87,11 @@ _V3_ARM_PATTERN = re.compile(
     r"(?P<policy>" + "|".join(map(re.escape, RACER_POLICIES)) + ")_"
     r"protection_(?P<protection>off|on)_b(?P<budget>[1-9][0-9]*)$"
 )
+_V4_ARM_PATTERN = re.compile(
+    r"^racer_v4_(?P<backend>" + "|".join(map(re.escape, RACER_BACKENDS)) + ")_"
+    r"(?P<policy>" + "|".join(map(re.escape, RACER_POLICIES)) + ")_"
+    r"protection_(?P<protection>off|on)_b(?P<budget>[1-9][0-9]*)$"
+)
 
 
 def _unique_csv(value: str, *, label: str) -> tuple[str, ...]:
@@ -131,7 +136,7 @@ def parse_racer_protections(value: str) -> tuple[str, ...]:
 
 
 def racer_arm_name(backend: str, policy: str, history_budget_tokens: int) -> str:
-    """Frozen v1 arm identity; v2/v3 cells have separate names."""
+    """Frozen v1 arm identity; later schemas have separate names."""
     if backend not in RACER_BACKENDS or policy not in RACER_POLICIES:
         raise ValueError("unknown RACER backend or policy")
     if type(history_budget_tokens) is not int or history_budget_tokens < 1:
@@ -165,11 +170,21 @@ def racer_v3_arm_name(backend: str, policy: str, history_budget_tokens: int,
             f"b{history_budget_tokens}")
 
 
+def racer_v4_arm_name(backend: str, policy: str, history_budget_tokens: int,
+                      extra_protection: str) -> str:
+    racer_arm_name(backend, policy, history_budget_tokens)
+    if extra_protection not in {"off", "on"}:
+        raise ValueError("unknown RACER extra protection")
+    return (f"racer_v4_{backend}_{policy}_protection_{extra_protection}_"
+            f"b{history_budget_tokens}")
+
+
 def parse_racer_arm_identity(name: str) -> tuple[str, str, int, str | None]:
-    match = _V3_ARM_PATTERN.fullmatch(name)
-    if match is not None:
-        return (match["backend"], match["policy"], int(match["budget"]),
-                f"protection_{match['protection']}")
+    for pattern in (_V3_ARM_PATTERN, _V4_ARM_PATTERN):
+        match = pattern.fullmatch(name)
+        if match is not None:
+            return (match["backend"], match["policy"], int(match["budget"]),
+                    f"protection_{match['protection']}")
     match = _ARM_PATTERN.fullmatch(name)
     if match is not None:
         return match["backend"], match["policy"], int(match["budget"]), None
@@ -193,24 +208,30 @@ def is_racer_arm(name: str | None) -> bool:
     if not isinstance(name, str):
         return False
     return any(pattern.fullmatch(name) is not None for pattern in
-               (_ARM_PATTERN, _V2_ARM_PATTERN, _V3_ARM_PATTERN))
+               (_ARM_PATTERN, _V2_ARM_PATTERN, _V3_ARM_PATTERN, _V4_ARM_PATTERN))
 
 
 def resolve_racer_backend(backend: str, policy: str,
                           history_budget_tokens: int, *, mode: str | None = None,
-                          extra_protection: str | None = None) -> dict:
+                          extra_protection: str | None = None,
+                          schema_version: str = "v3") -> dict:
     racer_arm_name(backend, policy, history_budget_tokens)
+    if schema_version not in {"v3", "v4"}:
+        raise ValueError("unknown RACER protection schema version")
     if mode is not None and extra_protection is not None:
-        raise ValueError("RACER v2 mode and v3 extra protection cannot be combined")
+        raise ValueError("RACER v2 mode and extra protection cannot be combined")
+    if schema_version == "v4" and extra_protection is None:
+        raise ValueError("RACER v4 requires extra protection off/on")
     if mode is not None:
         racer_v2_arm_name(backend, policy, history_budget_tokens, mode)
     if extra_protection is not None:
-        racer_v3_arm_name(backend, policy, history_budget_tokens, extra_protection)
+        name = racer_v4_arm_name if schema_version == "v4" else racer_v3_arm_name
+        name(backend, policy, history_budget_tokens, extra_protection)
     backend_config = copy.deepcopy(_BACKEND_CONFIG[backend])
     if backend != "c2kv":
         backend_config["target_tokens"] = history_budget_tokens
     return {
-        "schema": ("racer-backend-v3" if extra_protection is not None else
+        "schema": (f"racer-backend-{schema_version}" if extra_protection is not None else
                    "racer-backend-v2" if mode is not None else "racer-backend-v1"),
         "backend": backend,
         "policy": policy,
@@ -230,6 +251,16 @@ def resolve_racer_backend(backend: str, policy: str,
     }
 
 
+def resolve_racer_arm_backend(name: str) -> dict:
+    backend, policy, budget, marker = parse_racer_arm_identity(name)
+    if marker is not None and marker.startswith("protection_"):
+        return resolve_racer_backend(
+            backend, policy, budget,
+            extra_protection=marker.removeprefix("protection_"),
+            schema_version="v4" if name.startswith("racer_v4_") else "v3")
+    return resolve_racer_backend(backend, policy, budget, mode=marker)
+
+
 def validate_racer_backend(value: Mapping) -> dict:
     if not isinstance(value, Mapping):
         raise ValueError("RACER backend config must be an object")
@@ -237,12 +268,15 @@ def validate_racer_backend(value: Mapping) -> dict:
     policy = value.get("policy")
     budget = value.get("history_budget_tokens")
     schema = value.get("schema")
-    if schema not in {"racer-backend-v1", "racer-backend-v2", "racer-backend-v3"}:
+    if schema not in {"racer-backend-v1", "racer-backend-v2", "racer-backend-v3",
+                      "racer-backend-v4"}:
         raise ValueError("unknown RACER backend schema")
     expected = resolve_racer_backend(
         backend, policy, budget,
         mode=value.get("mode") if schema == "racer-backend-v2" else None,
-        extra_protection=value.get("extra_protection") if schema == "racer-backend-v3" else None)
+        extra_protection=value.get("extra_protection")
+        if schema in {"racer-backend-v3", "racer-backend-v4"} else None,
+        schema_version="v4" if schema == "racer-backend-v4" else "v3")
     if dict(value) != expected:
         raise ValueError("RACER backend config differs from its resolved arm contract")
     return expected
@@ -254,18 +288,15 @@ def racer_config_for_arm(config: Mapping, arm_name: str) -> dict:
         raise ValueError(f"RACER arm requires one configured method: {arm_name}")
     method = matches[0]
     resolved = validate_racer_backend(method.get("racer_backend"))
-    backend, policy, budget, mode = parse_racer_arm_identity(arm_name)
-    expected = (resolve_racer_backend(backend, policy, budget,
-                                      extra_protection=mode.removeprefix("protection_"))
-                if mode is not None and mode.startswith("protection_") else
-                resolve_racer_backend(backend, policy, budget, mode=mode))
+    backend, policy, budget, _ = parse_racer_arm_identity(arm_name)
+    expected = resolve_racer_arm_backend(arm_name)
     if resolved != expected:
         raise ValueError("RACER arm identity differs from its resolved backend config")
     if method.get("history_budget_tokens") != budget:
         raise ValueError("RACER matrix history budget differs from its backend config")
-    if (resolved["schema"] == "racer-backend-v3"
+    if (resolved["schema"] in {"racer-backend-v3", "racer-backend-v4"}
             and method.get("recovery_policy") != policy):
-        raise ValueError("RACER v3 recovery policy differs from its arm identity")
+        raise ValueError("RACER recovery policy differs from its arm identity")
     if method.get("ratio") is not None or method.get("retention") is not None:
         raise ValueError("RACER uses an explicit history token budget, not a nominal ratio")
     return resolved
@@ -309,25 +340,23 @@ def resolve_unified_runtime_methods(config: dict) -> dict:
                         or source.get("recovery_policy", expected_recovery) != expected_recovery):
                     raise ValueError(f"Unified RACER arm differs from its declared identity: {arm}")
                 if (source.get("history_budget_tokens") != arm_budget
-                        or source.get("racer_backend") != (
-                            resolve_racer_backend(backend, policy, arm_budget,
-                                                  extra_protection=mode.removeprefix("protection_"))
-                            if mode is not None and mode.startswith("protection_") else
-                            resolve_racer_backend(backend, policy, arm_budget, mode=mode))):
+                        or source.get("racer_backend") != resolve_racer_arm_backend(arm)):
                     raise ValueError(f"Unified RACER arm differs from its resolved backend: {arm}")
                 if source.get("budget_variant") or source.get("history_budget_source") != "shared":
                     methods.append(source)
                     continue
                 row = copy.deepcopy(source)
                 row.update(arm=(racer_arm_name(backend, policy, budget) if mode is None else
-                                racer_v3_arm_name(backend, policy, budget,
-                                                  mode.removeprefix("protection_"))
+                                (racer_v4_arm_name if arm.startswith("racer_v4_")
+                                 else racer_v3_arm_name)(backend, policy, budget,
+                                                         mode.removeprefix("protection_"))
                                 if mode.startswith("protection_") else
                                 racer_v2_arm_name(backend, policy, budget, mode)),
                            history_budget_tokens=budget,
                            racer_backend=(resolve_racer_backend(
                                backend, policy, budget,
-                               extra_protection=mode.removeprefix("protection_"))
+                               extra_protection=mode.removeprefix("protection_"),
+                               schema_version="v4" if arm.startswith("racer_v4_") else "v3")
                                if mode is not None and mode.startswith("protection_") else
                                resolve_racer_backend(backend, policy, budget, mode=mode)))
                 methods.append(row)
@@ -387,11 +416,17 @@ def resolve_unified_runtime_methods(config: dict) -> dict:
 
 def with_racer_methods(config: dict, backends: tuple[str, ...],
                        policies: tuple[str, ...], history_budget_tokens: int | None,
-                       *, protections: tuple[str, ...] | None = None) -> dict:
-    """Add v3 independent axes, or explicitly retain the frozen v2 overlay."""
+                       *, protections: tuple[str, ...] | None = None,
+                       schema_version: str = "v3") -> dict:
+    """Add versioned independent axes, or retain the frozen v2 overlay."""
+    if schema_version not in {"v3", "v4"}:
+        raise ValueError("unknown RACER protection schema version")
     if protections is not None:
-        return _with_racer_v3_methods(config, backends, policies,
-                                      history_budget_tokens, protections)
+        return _with_racer_protection_methods(
+            config, backends, policies, history_budget_tokens, protections,
+            schema_version)
+    if schema_version == "v4":
+        raise ValueError("RACER v4 requires protection selections")
     if not backends and not policies and history_budget_tokens is None:
         return config
     if not backends or not policies or history_budget_tokens is None:
@@ -500,9 +535,9 @@ def with_racer_methods(config: dict, backends: tuple[str, ...],
     return resolved
 
 
-def _with_racer_v3_methods(config: dict, backends: tuple[str, ...],
-                           policies: tuple[str, ...], history_budget_tokens: int | None,
-                           protections: tuple[str, ...]) -> dict:
+def _with_racer_protection_methods(config: dict, backends: tuple[str, ...],
+                                   policies: tuple[str, ...], history_budget_tokens: int | None,
+                                   protections: tuple[str, ...], schema_version: str) -> dict:
     if not backends and not policies and history_budget_tokens is None:
         return config
     if not backends or not policies or history_budget_tokens is None:
@@ -534,11 +569,13 @@ def _with_racer_v3_methods(config: dict, backends: tuple[str, ...],
                             or (backend != "c2kv" and row.get("arm") == racer_v2_arm_name(
                                 backend, "off", history_budget_tokens, "bare")))), None)
         scope = _scope(native) if native else (configured_benchmarks, ("raw",))
+        arm_name = racer_v4_arm_name if schema_version == "v4" else racer_v3_arm_name
         for policy in policies:
             for protection in protections:
-                arm = racer_v3_arm_name(backend, policy, history_budget_tokens, protection)
+                arm = arm_name(backend, policy, history_budget_tokens, protection)
                 racer = resolve_racer_backend(backend, policy, history_budget_tokens,
-                                              extra_protection=protection)
+                                              extra_protection=protection,
+                                              schema_version=schema_version)
                 rows = existing.get(arm, ())
                 if len(rows) > 1:
                     raise ValueError(f"RACER arm appears more than once in methods: {arm}")

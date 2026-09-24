@@ -23,6 +23,21 @@ def backend():
         "detector_calibration": "not_used", "allocation": "c2kv_s0"})
 
 
+def test_v4_flags_report_intrinsic_s0_without_another_c2kv_policy():
+    for protection in ("off", "on"):
+        selected = BackendConfig.parse({
+            "schema": "racer-backend-v4", "backend": "c2kv", "policy": "off",
+            "history_budget_tokens": 1024, "backend_config": {"method": "c2kv"},
+            "detector_calibration": "not_used", "allocation": "c2kv_s0",
+            "extra_protection": protection,
+        })
+        receipt = C2KVResidentPolicy(SimpleNamespace(), selected)._receipt(
+            "s", None, "prepare", "configured_c2kv_policy")
+        assert receipt["extra_protection"] == protection
+        assert receipt["extra_protection_status"] == "intrinsic_c2kv_s0_preserved"
+        assert receipt["initial_allocation"] == "configured_c2kv_policy"
+
+
 def test_factory_preserves_s0_initial_memory():
     geometry = packing()
     geometry["ratios"] = [8]

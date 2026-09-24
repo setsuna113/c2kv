@@ -1300,9 +1300,9 @@ def main(argv=None):
     parser.add_argument("--racer-policies", default="",
                         help="opt-in RACER policies: all or comma-separated exact policy names")
     parser.add_argument("--racer-protection", default="off,on",
-                        help="v3 extra protection values: off,on (default) or one value")
-    parser.add_argument("--racer-schema", choices=("v3", "v2"), default="v3",
-                        help="v3 independent policy/protection axes (default); v2 frozen historical overlay")
+                        help="extra protection values: off,on (default) or one value")
+    parser.add_argument("--racer-schema", choices=("v4", "v3", "v2"), default="v4",
+                        help="v4 resident-unit protection (default); v3 and v2 remain frozen")
     parser.add_argument("--racer-history-budget", type=int,
                         help="explicit positive history-token budget shared by selected RACER cells")
     parser.add_argument("--acon-budget-tokens", type=int,
@@ -1354,14 +1354,15 @@ def main(argv=None):
             args.racer_policies, paired_off=args.racer_schema == "v2")
         racer_protections = parse_racer_protections(args.racer_protection)
         if args.racer_schema == "v2" and args.racer_protection != "off,on":
-            parser.error("--racer-protection applies only to --racer-schema v3")
+            parser.error("--racer-protection applies only to --racer-schema v3 or v4")
         racer_budget = args.racer_history_budget
         if racer_backends or racer_policies:
             racer_budget = (racer_budget if racer_budget is not None else
                             config.get("history_kv_budget_tokens"))
         config = with_racer_methods(
             config, racer_backends, racer_policies, racer_budget,
-            protections=racer_protections if args.racer_schema == "v3" else None)
+            protections=racer_protections if args.racer_schema != "v2" else None,
+            schema_version=args.racer_schema if args.racer_schema != "v2" else "v3")
         config = with_acon_budget(config, args.acon_budget_tokens)
         config = with_hiagent_budget(config, args.hiagent_budget_tokens)
         for value in args.history_kv_budget:

@@ -115,6 +115,10 @@ class EventNativeDecisionRunner:
                 final_memory = prepared.memory
                 result, draft = self._generate(prepared.memory, prepared.metadata, record, 'draft',
                     compression_chunks=getattr(prepared, 'eligible_chunks', None))
+                protection = getattr(self.controller, 'native_allocator', None)
+                if callable(getattr(protection, 'observe_native_protection', None)):
+                    protection.observe_native_protection(
+                        prepared, memory=prepared.memory, stats=result.stats)
                 observer = getattr(self.controller, 'observe_draft_features', None)
                 if callable(observer):
                     stats = getattr(result, 'stats', None)
@@ -189,6 +193,10 @@ class EventNativeDecisionRunner:
                     try:
                         result, draft = self._generate(
                             reconsidered['memory'], reconsidered['metadata'], record, 'regeneration')
+                        if (callable(getattr(protection, 'observe_native_protection', None))
+                                and getattr(reconsidered['memory'], 'protection_scope_id', '')):
+                            protection.observe_native_protection(
+                                prepared, memory=reconsidered['memory'], stats=result.stats)
                     except HistoryCapacityInfeasible as error:
                         # The engine preflight preserves the currently held
                         # generation. It does not reconstruct an earlier prompt
@@ -318,6 +326,10 @@ class EventNativeDecisionRunner:
             commit_memory = getattr(self.controller, 'commit_memory', None)
             if callable(commit_memory):
                 record['history_state_commit'] = commit_memory(prepared, final_memory)
+            protection = getattr(self.controller, 'native_allocator', None)
+            if callable(getattr(protection, 'commit_native_protection', None)):
+                protection.commit_native_protection(
+                    prepared, memory=final_memory, stats=result.stats)
             self._completed[key] = (signature, copy.deepcopy(record))
             keep_session = True
             return record
@@ -350,6 +362,9 @@ class EventNativeDecisionRunner:
     def close(self):
         """Release the generator's committed device and host session cache."""
         self.generator.close_session()
+        protection = getattr(self.controller, 'native_allocator', None)
+        if callable(getattr(protection, 'clear_native_protection', None)):
+            protection.clear_native_protection()
 
     @contextmanager
     def _capacity_scope(self, key, stage):

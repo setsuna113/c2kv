@@ -42,7 +42,8 @@ def _trace(receipt):
                 "racer_accounting": dict(ACCOUNTING)}}}
 
 
-@pytest.mark.parametrize("schema", ["racer-backend-v1", "racer-backend-v2", "racer-backend-v3"])
+@pytest.mark.parametrize("schema", ["racer-backend-v1", "racer-backend-v2",
+                                    "racer-backend-v3", "racer-backend-v4"])
 def test_served_usage_binds_supported_receipts(schema):
     assert _racer_served_usage(_trace(dict(V2_RECEIPT, schema=schema)), label="trace") == USAGE
 

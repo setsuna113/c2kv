@@ -92,6 +92,7 @@ def supply_candidates(prepared, tokenizer, config, context, admissible, models=N
     if not eligible:
         retrieval["skipped_reason"] = "no_eligible_event_ids"
     cancelled = set(prepared.metadata.get("revision_cancelled_event_ids") or ())
+    cancelled.update(prepared.metadata.get("native_protection_full_event_ids") or ())
     raw = prepared.memory.raw_source_indices
     visible = list(prepared._gp_visible)
     fallback = build_catalog(store, tokenizer, config["fallback_unit"]) if config.get("fallback_unit") else []

@@ -91,6 +91,7 @@ def select_source_event(
     excluded = set(prepared.memory.view.raw_event_ids)
     excluded.update(prepared.memory.view.mandatory_raw_event_ids)
     excluded.update(prepared.metadata.get("revision_cancelled_event_ids") or ())
+    excluded.update(prepared.metadata.get("native_protection_full_event_ids") or ())
     eligible = set(
         prepared.metadata["eligible_extraction"]["eligible_event_ids"]
     )

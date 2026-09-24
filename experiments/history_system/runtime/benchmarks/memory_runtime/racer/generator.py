@@ -435,7 +435,12 @@ class PersistentRacerGenerator:
                                            for index in memory.initial_s0_source_indices],
                 "protected_evidence": bool(evidence),
             }
-        if getattr(self.config, "extra_protection", None) == "on" and phase == "draft":
+        if (getattr(self.config, "schema", None) == "racer-backend-v4"
+                and getattr(self.config, "extra_protection", None) == "on"):
+            from .protection_transport import protection_request
+            persistent["extra_protection"] = protection_request(
+                memory, self._messages, self._source_positions, index_map)
+        elif getattr(self.config, "extra_protection", None) == "on" and phase == "draft":
             persistent["extra_protection"] = {
                 "schema": "racer-native-protection-v1", "enabled": True,
                 "event_ids": list(memory.protection_event_ids),
@@ -631,7 +636,15 @@ class PersistentRacerGenerator:
                     or type(initial.get("evidence_tokens")) is not int
                     or initial["evidence_tokens"] < 0):
                 raise SGLangEventNativeError("Missing verified RACER initial protection receipt")
-        if getattr(self.config, "extra_protection", None) == "on" and context.get("phase") == "draft":
+        if (getattr(self.config, "schema", None) == "racer-backend-v4"
+                and getattr(self.config, "extra_protection", None) == "on"):
+            from .protection_transport import validate_protection_receipt
+            try:
+                validate_protection_receipt(report.get("racer_native_protection"),
+                                            memory, context["decision_key"])
+            except ValueError as error:
+                raise SGLangEventNativeError(str(error)) from error
+        elif getattr(self.config, "extra_protection", None) == "on" and context.get("phase") == "draft":
             protection = report.get("racer_native_protection") or {}
             if (protection.get("schema") != "racer-native-protection-v1"
                     or protection.get("decision_id") != context["decision_key"]

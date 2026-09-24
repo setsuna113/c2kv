@@ -20,7 +20,10 @@ def build_controller(tokenizer, *, config, packing, policy, model_context, bench
         return _build_shared_initial_controller(tokenizer, config=config, backend=backend,
             packing=packing, policy=policy, model_context=model_context, benchmark=benchmark)
     allocator_type = PersistentHistoryAllocator
-    if backend.extra_protection == "on":
+    if backend.extra_protection == "on" and backend.schema == "racer-backend-v4":
+        from .native_protection_v2 import NativeProtectionV2Allocator
+        allocator_type = NativeProtectionV2Allocator
+    elif backend.extra_protection == "on":
         from .native_protection import NativeProtectionAllocator
         allocator_type = NativeProtectionAllocator
     base = allocator_type(tokenizer, backend_config=backend,
@@ -66,7 +69,9 @@ def build_controller(tokenizer, *, config, packing, policy, model_context, bench
             controller = EventNativeRecoveryController(base, config["post_draft_recovery"], benchmark=benchmark)
     else:
         raise ValueError("RACER policy configuration is missing")
-    return BackendPolicy(controller, backend)
+    return BackendPolicy(controller, backend,
+                         native_allocator=base if backend.schema == "racer-backend-v4"
+                         and backend.extra_protection == "on" else None)
 
 
 def _build_shared_initial_controller(tokenizer, *, config, backend, packing,
