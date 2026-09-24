@@ -126,6 +126,11 @@ class NativeInitialRepresentation:
                 "admitted_minimum_history_tokens": memory.retained_history_min_tokens,
                 "release": constraints.release,
             }
+            if constraints.new_source_start is not None:
+                metadata["backend_capacity_constraints"].update(
+                    new_source_start=constraints.new_source_start,
+                    tool_event_mandatory_history_tokens=constraints.tool_event_mandatory_history_tokens,
+                    tool_event_mandatory_source_indices=list(constraints.tool_event_mandatory_source_indices))
         metadata["common_raw_prompt_tokens"] = memory.common_tokens
         metadata["actual_raw_history_tokens"] = memory.native_evidence_tokens
         metadata["actual_gist_tokens"] = 0
@@ -195,11 +200,18 @@ class NativeInitialRepresentation:
         extra = len(ids) - len(original)
         budget = self.backend_config.history_budget_tokens
         minimum = 1 if full_history else 0
+        phases = ["others"] * len(source)
+        for event in store.events:
+            if event.kind == "tool_event":
+                for index in event.source_indices:
+                    phases[index] = "act" if source[index]["role"] == "assistant" else "tool"
         constraints = current_constraints(store.session_id)
         if constraints is not None:
             if constraints.history_budget_tokens != budget:
                 raise ValueError("Backend constraint budget differs from the configured history budget")
-            minimum = max(minimum, constraints.minimum_history_tokens(admitted))
+            # The engine opens a lifecycle window on a tool role or tool phase.
+            event_phases = ["tool" if row["role"] == "tool" else phase for row, phase in zip(source, phases)]
+            minimum = max(minimum, constraints.minimum_history_tokens(admitted, source_phases=event_phases))
         remaining = budget - extra
         retained = min(full_history, max(0, remaining))
         reasons = []
@@ -214,11 +226,6 @@ class NativeInitialRepresentation:
         if not getattr(self, "_planning_initial_native", False) and state is not None:
             initial = state.decisions[state.active_decision_key][1].memory
         initial_sources = tuple(getattr(initial, "initial_s0_source_indices", ()))
-        phases = ["others"] * len(source)
-        for event in store.events:
-            if event.kind == "tool_event":
-                for index in event.source_indices:
-                    phases[index] = "act" if source[index]["role"] == "assistant" else "tool"
         memory = PersistentMemory(view, (), ids, tuple(sorted(raw_sources)), (),
             source_messages=source, source_tools=tuple(tools), recovery_messages=evidence,
             history_message_count=cutoff, history_start_message_count=start,

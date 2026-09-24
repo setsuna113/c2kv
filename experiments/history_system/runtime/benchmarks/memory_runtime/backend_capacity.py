@@ -25,6 +25,13 @@ class BackendCapacityConstraints:
     mandatory_source_indices: tuple[int, ...]
     release: str
     provenance: str
+    # A draft whose backend reconfigures its lifecycle from new source
+    # messages (CommitKV): any new message closes the resumed window and a new
+    # tool message opens a window of ``tool_event_mandatory_history_tokens``.
+    # ``None`` keeps the resumed window for every draft.
+    new_source_start: int | None = None
+    tool_event_mandatory_history_tokens: int = 0
+    tool_event_mandatory_source_indices: tuple[int, ...] = ()
 
     def __post_init__(self) -> None:
         _nonempty_id(self.session_id, "session_id")
@@ -45,9 +52,24 @@ class BackendCapacityConstraints:
         }:
             raise ValueError("unsupported release condition")
         _nonempty_id(self.provenance, "provenance")
+        if self.new_source_start is not None and (
+            type(self.new_source_start) is not int or self.new_source_start < 0
+        ):
+            raise ValueError("new_source_start must be a nonnegative integer")
+        if type(self.tool_event_mandatory_history_tokens) is not int or self.tool_event_mandatory_history_tokens < 0:
+            raise ValueError("tool_event_mandatory_history_tokens must be a nonnegative integer")
+        if not isinstance(self.tool_event_mandatory_source_indices, tuple) or any(
+            type(index) is not int or index < 0 for index in self.tool_event_mandatory_source_indices
+        ) or len(set(self.tool_event_mandatory_source_indices)) != len(self.tool_event_mandatory_source_indices):
+            raise ValueError("tool_event_mandatory_source_indices must be unique nonnegative indices")
 
-    def minimum_history_tokens(self, exact_sources: Iterable[int]) -> int:
-        """Only regeneration may release a window by replacing a protected source."""
+    def minimum_history_tokens(self, exact_sources: Iterable[int], *, source_phases=None) -> int:
+        """Only regeneration may release a window by replacing a protected source.
+
+        ``source_phases`` gives the planned draft's per-source event phase
+        ("tool" for a tool message).  With it, a lifecycle draft keeps what its
+        new source messages leave mandatory rather than the resumed window.
+        """
         sources = tuple(exact_sources)
         if any(type(index) is not int or index < 0 for index in sources):
             raise ValueError("exact_sources must contain nonnegative integer indices")
@@ -55,6 +77,12 @@ class BackendCapacityConstraints:
             self.mandatory_source_indices
         ):
             return 0
+        if self.stage == "draft" and self.new_source_start is not None and source_phases is not None:
+            new = tuple(source_phases)[self.new_source_start:]
+            if "tool" in new:
+                return self.tool_event_mandatory_history_tokens
+            if new:
+                return 0
         return self.mandatory_history_tokens
 
 

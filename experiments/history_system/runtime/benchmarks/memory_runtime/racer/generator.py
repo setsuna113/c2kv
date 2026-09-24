@@ -489,7 +489,12 @@ class PersistentRacerGenerator:
             raise SGLangEventNativeError("RACER held retention receipt is invalid")
         # The engine emits these indices after removing tool carriers. They
         # already address our internal ledger, before the binder's index_map.
-        return {"tokens": tokens, "source_message_indices": sorted(indices)}
+        receipt = {"tokens": tokens, "source_message_indices": sorted(indices)}
+        transition = _next_transition_receipt(
+            (report.get("racer_transaction") or {}).get("commitkv_next_transition"), "held")
+        if transition is not None:
+            receipt["next_transition"] = transition
+        return receipt
 
     def _current_retention_receipt(self, response):
         """Keep current history in the same carrier-removed ledger frame."""
@@ -505,8 +510,13 @@ class PersistentRacerGenerator:
                 or len(set(indices)) != len(indices)
                 or current.get("release") not in {"replaced_source_message", "never"}):
             raise SGLangEventNativeError("RACER current retention receipt is invalid")
-        return {"tokens": tokens, "source_message_indices": sorted(indices),
-                "release": current["release"]}
+        receipt = {"tokens": tokens, "source_message_indices": sorted(indices),
+                   "release": current["release"]}
+        transition = _next_transition_receipt(
+            report.get("racer_current_commitkv_next_transition"), "current")
+        if transition is not None:
+            receipt["next_transition"] = transition
+        return receipt
 
     def backend_capacity_constraints(self, *, session_id, decision_key, stage):
         """Expose one engine receipt in canonical source-message coordinates."""
@@ -537,25 +547,33 @@ class PersistentRacerGenerator:
             receipt = self._current_retention if self._resolution == "commit" else self._held_retention
             provenance = ("engine_current_resident_receipt" if self._resolution == "commit"
                           else "engine_held_checkpoint_receipt")
-        if receipt is None or receipt["tokens"] == 0:
+        # A lifecycle draft (CommitKV) closes the resumed window on its new
+        # events and opens the reported one on a new tool message.
+        transition = receipt.get("next_transition") if stage == "draft" and receipt else None
+        if receipt is None or (receipt["tokens"] == 0 and not (transition and transition["tokens"])):
             return None
         ledger_to_source = {ledger: source for source, ledger in enumerate(self._source_positions)}
-        mapped = set()
-        for ledger_index in receipt["source_message_indices"]:
-            source = ledger_to_source.get(ledger_index)
-            if source is not None:
-                mapped.add(source)
+
+        def mapped(indices):
+            return tuple(sorted({ledger_to_source[index] for index in indices if index in ledger_to_source}))
+
+        sources = mapped(receipt["source_message_indices"])
         # A draft carries its prior pending pages forward. Only a regeneration
         # with recovery_append replaces source messages and can interrupt them.
         release = receipt.get("release", "replaced_source_message")
-        if stage == "draft" or not mapped:
+        if stage == "draft" or not sources:
             release = "never"
+        lifecycle = {}
+        if transition is not None:
+            lifecycle = {"new_source_start": len(self._source),
+                         "tool_event_mandatory_history_tokens": transition["tokens"],
+                         "tool_event_mandatory_source_indices": mapped(transition["source_message_indices"])}
         return BackendCapacityConstraints(
             session_id=session_id, decision_key=decision_key, stage=stage,
             history_budget_tokens=self.config.history_budget_tokens,
             mandatory_history_tokens=receipt["tokens"],
-            mandatory_source_indices=tuple(sorted(mapped)), release=release,
-            provenance=provenance)
+            mandatory_source_indices=sources, release=release,
+            provenance=provenance, **lifecycle)
 
     def regeneration_capacity(self, memory):
         """Receipt when a regeneration of the held generation cannot fit, else None.
@@ -700,6 +718,22 @@ class PersistentRacerGenerator:
             self.backend.close_history_session(self._session_id)
         self._closed = True
         self.native.close_session()
+
+
+def _next_transition_receipt(value, label):
+    """What a new tool event in the next draft protects; None without the receipt."""
+    if value is None:
+        return None
+    tool = value.get("tool_event") if isinstance(value, dict) else None
+    events = value.get("event_message_indices") if isinstance(value, dict) else None
+    if (not isinstance(tool, dict) or not isinstance(events, list)
+            or any(type(index) is not int for index in events)
+            or type(tool.get("tokens")) is not int or tool["tokens"] < 0
+            or not isinstance(tool.get("positions"), list) or len(tool["positions"]) != tool["tokens"]
+            or not isinstance(tool.get("source_message_indices"), list)
+            or any(type(index) is not int or index < 0 for index in tool["source_message_indices"])):
+        raise SGLangEventNativeError(f"RACER {label} lifecycle transition receipt is invalid")
+    return {"tokens": tool["tokens"], "source_message_indices": sorted(set(tool["source_message_indices"]))}
 
 
 def _action_signature(message):

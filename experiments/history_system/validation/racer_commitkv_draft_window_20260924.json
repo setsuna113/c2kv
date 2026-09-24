@@ -1,0 +1,54 @@
+{
+  "schema": "c2kv-validation-receipt-v1",
+  "date": "2026-09-24",
+  "subject": "RACER CommitKV on-mode drafts: the pending window a draft opens, S0 sources already in the reference state, and decode checkpoints after an initial S0",
+  "base_revision": "paper 077559f, engine b886b41",
+  "engine_revision": "f1d212738 (fork branch fix/racer-commitkv-draft-transition-20260924, child of b886b41)",
+  "incidents": [
+    {
+      "cell": "bfcl_long_context__racer_v2_commitkv_c1_v2_verified_b256 (SZ PRO 6000)",
+      "error": "RACER_GENERATION_ABORTED: PHYSICAL_HISTORY_KV_EVICTION_EXCEPTION: ValueError: pending tokens exceed the total cache budget",
+      "where": "s0 multi_turn_long_context_2 turn-3/step-3 (231 native evidence tokens leave 25 of B=256); s1 multi_turn_long_context_54 turn-1/step-10",
+      "evidence": "$SZ_RESULTS_ROOT/v3-sz/b256/s{0,1}/prep/closed_loop/bfcl_long_context__racer_v2_commitkv_c1_v2_verified_b256.failed.1 (copied read-only)"
+    },
+    {
+      "cell": "toolsandbox__racer_v2_commitkv_c1_v2_verified_b256 (box4 4090)",
+      "error": "RACER_GENERATION_ABORTED: PHYSICAL_HISTORY_KV_EVICTION_EXCEPTION: RuntimeError: RACER_INITIAL_S0_REFERENCE_SOURCE_RETAINED",
+      "where": "add_reminder_content_and_date_and_time_multiple_user_turn_3_distraction_tools turn-1/step-3",
+      "evidence": "box4 /workspace/results-p2v3/closed_loop/toolsandbox__racer_v2_commitkv_c1_v2_verified_b256.failed.1 (copied read-only)"
+    }
+  ],
+  "causes": {
+    "draft_pending_window": "configure_events closes the resumed CommitKV window on any new event and runs record_pre over the saved pre-commit scan on a new tool event, before selection. Serving admission, the S0 source exclusion, the retained-source check and the paper planner all used the window left open by the previous request. In the copied logs that value was 0 for every draft, while drafts that brought a tool result protected 10 (s0) and 27-32 (s1) tokens (racer_transaction.protected_pending_tokens and the pre_commit capture receipt of the same request).",
+    "reference_resident_source": "The ToolSandbox S0 source at step 3 was the committed step-2 generation (159 tokens). Its exact generated prefix is resident but its closing tokens are not, so _admit_initial_s0_evidence skipped it for resident replacement; the step-2 decode checkpoint had moved its decoded prefix into the CommitKV reference state, where it was still a selection candidate.",
+    "decode_checkpoint_exclusions": "_apply_reference_decode_checkpoint copied racer_excluded_history_indices from the prefill config. They index the prefill history range, but the checkpoint range is the decoded tail, so CommitKV and AgentKV dropped decoded tokens at each checkpoint after an initial S0 (ToolSandbox step 2: prefill excluded indices 54-132, so decoded tokens 54-127 of the first 128 were not candidates). This also affected tasks that did not crash."
+  },
+  "change": {
+    "engine": "CommitKVRuntimeState.preview_pre (record_pre without mutation); CommitKVServingState.tool_transition_protection; racer_transaction.commitkv_next_transition reported at every save (racer_current_commitkv_next_transition) and held checkpoint (racer_transaction.commitkv_next_transition); serving admission uses resumed_draft_pending_positions, which classifies the draft's events with the same rule as configure_events (shared helper), for S0 exclusion, reference-source protection and enforce_request_budget (typed RACER_CAPACITY_INFEASIBLE before admission); CommitKV does not offer reference-resident copies of initial S0 sources as candidates; the decode checkpoint passes no S0 exclusions",
+    "paper": "BackendCapacityConstraints gains optional new_source_start and tool_event_mandatory_history_tokens; the generator fills them from the engine receipt; the native planner passes per-source event phases, so a draft whose new source messages include a tool message keeps room for that window and any other new message releases the resumed one"
+  },
+  "unchanged": [
+    "Methods other than CommitKV report no transition: admission, S0 exclusion, planner constraints and selections are byte-for-byte the previous values (PyramidKV, SnapKV, H2O, StreamingLLM, C2KV, AgentKV admission).",
+    "The decode-checkpoint change only applies to CommitKV and AgentKV, and only after an initial S0 set exclusions.",
+    "The CommitKV candidate filter is a no-op unless a reference-resident S0 source copy would have been selected, which raised RACER_INITIAL_S0_REFERENCE_SOURCE_RETAINED.",
+    "Regeneration capacity (held receipt and replaced-source release) is unchanged.",
+    "Engines without the new receipt keep the previous paper constraints."
+  ],
+  "changes_non_crashing_commitkv_on_mode": [
+    "The decode checkpoint now keeps the most recent decoded tokens instead of dropping the ones at stale excluded indices (CommitKV/AgentKV on-mode generations of at least 128 tokens after an initial S0).",
+    "The planner minimum for a draft becomes the window that draft opens. In the copied logs the resumed window was always 0, so only candidates that would have crashed become infeasible, as long as the planner's choice is monotone in its minimum."
+  ],
+  "real_record_check": {
+    "method": "for every request in the three copied shards, classify its engine-resolved event spans against the previous request's with history_kv_reference.commitkv_event_transition and compare with the pending tokens the engine recorded for that request",
+    "result": "every draft with recorded pending > 0 (s0 turn-3/step-2: 10; s1 turn-1/step-2..9: 27, 32, 32, 32, 27, 31, 32, 32) classifies as tool_event; drafts classified new_events recorded 0; regenerations classify none and keep the held window (s1 turn-1/step-5: 32)",
+    "not_checked": "the projected token count itself needs the live attention window, so it is checked by CPU tests that compare it with record_pre on the same state; the live check is the rerun"
+  },
+  "tests": {
+    "engine": "test/registered/unit/test_racer_commitkv_draft_transition.py (9 new); 219 existing RACER/CommitKV/AgentKV/PyramidKV/reference/persistent-history unit tests pass before and after",
+    "engine_regressions_on_b886b41": "the reference-resident-source test keeps positions 12-13 of the source span and the decode-checkpoint test keeps [2, 5] instead of [3, 4, 5]",
+    "paper": "experiments/history_system/runtime/benchmarks/memory_runtime/tests/test_racer_draft_lifecycle_capacity.py (7 new); benchmarks, runtime memory_runtime and delivery suites have the same failure sets as 077559f"
+  },
+  "open": [
+    "AgentKV on-mode with an S0 source that a decode checkpoint moved into its headwise reference state would still raise RACER_INITIAL_S0_REFERENCE_SOURCE_RETAINED: removing per-head copies needs a choice between collateral column removal (as recovery does) and per-head masking of the StageQ selection. No AgentKV RACER cell is scheduled."
+  ]
+}
